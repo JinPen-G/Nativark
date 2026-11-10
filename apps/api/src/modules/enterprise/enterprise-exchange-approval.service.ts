@@ -12,6 +12,7 @@ import { PrismaService } from "../database/prisma.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { RentalExchangePreviewService } from "../rental-core/rental-exchange-preview.service";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
+import { hasOriginalRentalCurrency } from "../rental-core/rental-money";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
 
@@ -100,6 +101,7 @@ export class EnterpriseExchangeApprovalService {
     const catalog = await this.clientApi.catalog(context);
     if (!catalog.items.some(item => item.id === intent.replacementItemGroupId)) throw new ForbiddenException("替换商品未向当前客户空间开放");
     const { preview } = await this.prices.preview(context.tenantId, orderId, intent, tx);
+    if (!hasOriginalRentalCurrency(order.currency, preview.currency)) throw new ConflictException("换货币种与原订单不一致或缺失，须核对原币种后重新试算与审批");
     if (!(preview.additionalAmount > 0) || !Number.isFinite(preview.additionalAmount) || !preview.exchange?.executionBasis) throw new ConflictException("此接点仅申请真实新增换货支出，缺原试算依据不放行");
     const snapshot = order.membershipSnapshot!;
     await this.policies.assertQuoteAmount(context.tenantId, snapshot.corporateCustomerId!, snapshot.corporateMembershipId!, { payableAmount: preview.additionalAmount, currency: preview.currency }, tx);

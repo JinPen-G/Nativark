@@ -82,7 +82,8 @@ export function EnterpriseOrdersPage() {
     { label: english ? "Status" : "订单状态", value: row => row.status },
     { label: english ? "Rental start · UTC" : "租赁开始 · UTC", value: row => row.startAt },
     { label: english ? "Current return · UTC" : "当前约定归还 · UTC", value: row => row.currentReturnAt },
-    { label: english ? "Rental payable" : "租赁应付", value: row => row.finalPayableAmount },
+    { label: english ? "Original payable" : "原应付", value: row => row.payableAmount },
+    { label: english ? "Adjusted payable" : "调整后应付", value: row => row.finalPayableAmount },
     { label: english ? "Currency" : "币种", value: row => row.currency }
   ] };
   const loadExportRows = async () => {
@@ -123,7 +124,8 @@ export function EnterpriseOrdersPage() {
             { title: english ? "Category" : "品类", dataIndex: "categoryCode" },
             { title: english ? "Rental period · UTC" : "租期 · UTC", render: (_, row) => <>{timestamp(row.startAt)}<br />{timestamp(row.currentReturnAt)}</> },
             { title: english ? "Status" : "订单状态", dataIndex: "status" },
-            { title: english ? "Rental payable" : "租赁应付", render: (_, row) => money(row.finalPayableAmount, row.currency) },
+            { title: english ? "Original payable" : "原应付", render: (_, row) => money(row.payableAmount, row.currency) },
+            { title: english ? "Adjusted payable" : "调整后应付", render: (_, row) => money(row.finalPayableAmount, row.currency) },
             { title: english ? "Actions" : "操作", key: "actions", render: (_, row) => <Link to={`${context.basePath}/orders?${new URLSearchParams({ orderId: row.orderId })}`}
               onClick={event => { if (!mounted.current || context.signal.aborted || list.isFetching || currentIdentity.current !== identity) event.preventDefault(); }}>{english ? "View order" : "查看详情"}</Link> }
           ]} />
@@ -141,7 +143,8 @@ function EnterpriseOrderDetails({ order, english, refresh, loading, back }: {
     [english ? "Rental" : "租金", order.rentalAmount], [english ? "Add-ons" : "增值服务", order.serviceAmount],
     [english ? "Fulfillment" : "履约费用", order.fulfillmentAmount], [english ? "Order discount" : "订单优惠", order.discountAmount],
     [english ? "Coupon" : "优惠券", order.couponAmount], [english ? "Adjustment" : "费用调整", order.adjustmentAmount],
-    [english ? "Tax included" : "价内税", order.taxAmount], [english ? "Rental payable" : "租赁应付", order.finalPayableAmount]
+    [english ? "Tax included" : "价内税", order.taxAmount], [english ? "Original payable" : "原应付", order.payableAmount],
+    [english ? "Adjusted payable" : "调整后应付", order.finalPayableAmount]
   ];
   if (order.group === "enterprise_paid") financialFacts.push([english ? "Deposit target" : "应付押金", order.depositAmount], [english ? "Preauthorization target" : "应冻结额度", order.preAuthAmount]);
   return <>

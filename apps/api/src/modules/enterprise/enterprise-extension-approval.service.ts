@@ -11,6 +11,7 @@ import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { requestFingerprint, RentalIdempotencyRepository } from "../rental-core/rental-idempotency.repository";
+import { hasOriginalRentalCurrency } from "../rental-core/rental-money";
 import type { EnterpriseExtensionPrice } from "../rental-core/approved-extension.ports";
 import { EnterpriseCommandService, enterpriseHash, enterpriseJson } from "./enterprise-command.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
@@ -53,14 +54,16 @@ export class EnterpriseExtensionApprovalService {
   private async current(row: Approval, tenantId: string, tx: Prisma.TransactionClient): Promise<RentalOrder> {
     if (row.expiresAt <= new Date()) throw new ConflictException("续租批准已到期，须重新试算与审批");
     const order = await this.core.lockOrderForUpdate(tenantId, row.orderId, tx);
+    const preview = enterpriseJson(row.preview);
     if (row.requestFingerprint !== requestFingerprint({ orderId: row.orderId, extension: enterpriseJson(row.request), expectedOrderUpdatedAt: row.expectedOrderUpdatedAt })
-      || row.previewFingerprint !== requestFingerprint(enterpriseJson(row.preview))) throw new ConflictException("原续租请求或试算指纹不一致");
+      || row.previewFingerprint !== requestFingerprint(preview)) throw new ConflictException("原续租请求或试算指纹不一致");
     if (order.updatedAt !== row.expectedOrderUpdatedAt || order.membershipSnapshot?.personalCustomerId !== row.applicantCustomerId
       || order.membershipSnapshot.corporateCustomerId !== row.corporateCustomerId) throw new ConflictException("原订单修订或主体已变化，须重新试算与审批");
+    if (!hasOriginalRentalCurrency(order.currency, preview.currency)) throw new ConflictException("续租币种与原订单不一致或缺失，须核对原币种后重新试算与审批");
     const basis = await this.policies.revalidateOrderExpense(tenantId, row.workspaceId, order, tx);
     this.policies.assertSameBasis(enterpriseJson(row.basis), basis);
-    await this.policies.assertQuoteAmount(tenantId, row.corporateCustomerId, order.membershipSnapshot.corporateMembershipId!, enterpriseJson(row.preview), tx);
-    await this.clientApi.assertEnterpriseExtensionPrice(tenantId, order, enterpriseJson(row.request), enterpriseJson(row.preview), tx);
+    await this.policies.assertQuoteAmount(tenantId, row.corporateCustomerId, order.membershipSnapshot.corporateMembershipId!, preview, tx);
+    await this.clientApi.assertEnterpriseExtensionPrice(tenantId, order, enterpriseJson(row.request), preview, tx);
     if (row.approvedBy) await this.policies.assertReviewer(tenantId, row.corporateCustomerId, row.applicantCustomerId, row.approvedBy, row.reviewerMembershipId, row.reviewerMembershipUpdatedAt, tx);
     return order;
   }
@@ -84,6 +87,9 @@ export class EnterpriseExtensionApprovalService {
       const order = prepared.order;
       if (order.updatedAt !== input.expectedOrderUpdatedAt || order.membershipSnapshot?.personalCustomerId !== context.customerId
         || !order.membershipSnapshot.enterpriseContractAndPayer) throw new ConflictException("本人原企业订单或修订已变化，须重新核对");
+      // The same Core currency boundary must hold before an approval is stored.
+      // A preview cannot repair missing history using today's pricing currency.
+      if (!hasOriginalRentalCurrency(order.currency, prepared.priced.currency)) throw new ConflictException("续租币种与原订单不一致或缺失，须核对原币种后重新试算与审批");
       const basis = await this.policies.revalidateOrderExpense(context.tenantId, context.workspaceId, order, tx);
       if (!basis || basis.approvalMode !== "per_order") throw new ForbiddenException("仅已配置逐单企业付费的本人订单可申请变更批准");
       await this.policies.assertQuoteAmount(context.tenantId, order.membershipSnapshot.corporateCustomerId!, order.membershipSnapshot.corporateMembershipId!, prepared.priced, tx);
