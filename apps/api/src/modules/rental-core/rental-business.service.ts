@@ -7996,9 +7996,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
 
-  /** Transaction-scoped original pricing, used only to verify an approved expense.
-   * Reads persisted configuration into an isolated async scope; never mutates the
-   * process cache or recomputes a second price outside the original algorithm. */
+  /** Original enterprise extension preparation and approved-price revalidation.
+   * Caller owns ReadCommitted, current authority and original order locks.
+   * Reads persisted configuration into an isolated async scope, retains original
+   * quote facts, and delegates money only to the original extension algorithm. */
   async quoteEnterpriseExtension(tenantId: string, order: RentalOrder, previousExtensions: RentalOrderExtension[],
     input: RentalOrderExtensionRequest, settlementMode: "immediate" | "monthly", tx: Prisma.TransactionClient): Promise<EnterpriseExtensionPrice> {
     const workspaceId = this.workspaceOf(tenantId);
@@ -8008,13 +8009,23 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await tx.$queryRaw`SELECT id FROM business_workspaces WHERE tenantId=${tenantId} AND id=${workspaceId} AND status='ACTIVE' LOCK IN SHARE MODE`;
     const workspace = await tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { categoryCode: true, categoryVersionId: true, categoryAdoptionRevision: true, status: true } });
     if (!workspace || workspace.status !== "ACTIVE") throw new ConflictException("原订单经营空间不可用");
-    const [config, core, category, quote] = await Promise.all([
+    const [config, core, category, quote, originalOrder] = await Promise.all([
       this.configStore.loadWorkspace(tenantId, workspaceId, tx), this.coreConfigStore.loadWorkspace(tenantId, workspaceId, tx),
       this.categoryResolver.forWorkspace(tenantId, workspaceId, tx), this.factStore.findQuote(tenantId, order.quoteId, tx),
+      tx.rentalOrder.findFirst({ where: { id: order.id, tenantId, workspaceId }, select: { id: true, quoteId: true, categoryCode: true } }),
     ]);
-    if (!quote || !core.profile || !core.businessSettings || !config.hasPersistedConfig || category.categoryVersionId !== workspace.categoryVersionId
+    if (!quote || !originalOrder || !core.profile || !core.businessSettings || !config.hasPersistedConfig || category.categoryVersionId !== workspace.categoryVersionId
       || category.adoptionRevision !== workspace.categoryAdoptionRevision) throw new ConflictException("原报价或续租配置/品类依据缺失或已变化");
-    const context: BusinessContext = { profile: { ...core.profile, categoryCode: core.workspaceCategoryCode }, category: category.definition, settings: core.businessSettings,
+    if (core.tenantId !== tenantId || core.workspaceId !== workspaceId || config.tenantId !== tenantId || config.workspaceId !== workspaceId
+      || order.tenantId !== tenantId || order.categoryCode !== category.definition.code
+      || originalOrder.id !== order.id || originalOrder.quoteId !== order.quoteId || String(originalOrder.categoryCode).toLowerCase() !== category.definition.code
+      || quote.id !== order.quoteId || quote.tenantId !== tenantId || quote.categoryCode !== category.definition.code
+      || core.workspaceCategoryCode !== category.definition.code || config.categoryCode !== category.definition.code
+      || core.profile.tenantId !== tenantId || core.profile.categoryCode !== category.definition.code
+      || core.businessSettings.tenantId !== tenantId || core.businessSettings.categoryCode !== category.definition.code)
+      throw new ConflictException("原订单、报价及续租配置的租户/空间/品类来源不一致");
+    const context: BusinessContext = { profile: { ...core.profile, categoryVersionId: category.categoryVersionId, categoryAdoptionRevision: category.adoptionRevision },
+      category: category.definition, settings: core.businessSettings, categoryVersionId: category.categoryVersionId, categoryAdoptionRevision: category.adoptionRevision,
       groups: core.itemGroups, pricingGroups: core.pricingGroups, couponTemplates: core.couponTemplates, locations: core.locations, operators: core.operators };
     const state: RentalBusinessState = { categoryCode: core.workspaceCategoryCode, pricingPlans: config.pricingPlans, discountPlans: config.discountPlans, services: config.services,
       calendars: config.calendars, ruleVersions: config.ruleVersions, quotes: [quote], customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates: [], notificationLogs: [], configPersisted: true };

@@ -834,19 +834,42 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     });
   }
 
-  /** Scoped transaction read for new expense validation, with no seed/cache fallback. */
+  /** Original enterprise extension configuration in the caller's ReadCommitted
+   * transaction and parent fence. Shares the workspace reader fence, uses this workspace's
+   * profile and model IDs, and never joins another workspace to fill a member. */
   async loadWorkspace(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantConfigSnapshot> {
-    const workspace = await tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { categoryCode: true, status: true } });
+    if (await resolveScopeWorkspaceId(tx, tenantId) !== workspaceId) throw new ForbiddenException("续租配置读取经营空间不一致");
+    const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM business_workspaces
+      WHERE tenantId = ${tenantId} AND id = ${workspaceId} AND status = 'ACTIVE' LOCK IN SHARE MODE`);
+    if (locked.length !== 1) throw new ConflictException("当前经营空间不可用");
+    const workspace = await tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId },
+      select: { categoryCode: true, categoryVersionId: true, defaultMarker: true, status: true } });
     if (!workspace || workspace.status !== "ACTIVE") throw new ConflictException("当前经营空间不可用");
+    if (!workspace.categoryVersionId) throw new ConflictException("续租经营空间缺少品类绑定");
+    const categoryCode = lower<RentalCategoryCode>(workspace.categoryCode);
+    const definition = resolveRentalCategoryVersionBody(await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }), categoryCode);
     const where = { tenantId, workspaceId };
     const [profile, settings, groups, pricingGroups, locations, coupons] = await Promise.all([
-      tx.tenantRentalProfile.findFirst({ where: { tenantId } }), tx.rentalTenantBusinessSettings.findFirst({ where }),
-      tx.rentalItemGroup.findMany({ where, include: { bundleComponents: { include: { componentItemGroup: { select: { code: true, name: true } } } } } }),
-      tx.rentalPricingGroup.findMany({ where, include: { members: { orderBy: { sortOrder: "asc" }, include: { itemGroup: true } } } }),
+      workspace.defaultMarker === "default"
+        ? tx.tenantRentalProfile.findUnique({ where: { tenantId } }).then(row => this.readDefaultWorkspaceProfile(row, tenantId, definition))
+        : this.readSavedWorkspaceProfile(tx, tenantId, workspaceId, categoryCode),
+      tx.rentalTenantBusinessSettings.findFirst({ where }),
+      tx.rentalItemGroup.findMany({ where, include: { bundleComponents: true } }),
+      tx.rentalPricingGroup.findMany({ where, include: { members: { orderBy: { sortOrder: "asc" } } } }),
       tx.rentalFulfillmentLocation.findMany({ where }), tx.rentalCouponTemplate.findMany({ where }),
     ]);
-    return { tenantId, workspaceId, workspaceCategoryCode: lower<RentalCategoryCode>(workspace.categoryCode), profile: this.toProfile(profile ?? undefined),
-      businessSettings: this.toBusinessSettings(settings ?? undefined), itemGroups: groups.map(row => this.toItemGroup(row)), pricingGroups: pricingGroups.map(row => this.toPricingGroup(row)),
+    const byId = new Map(groups.map(group => [group.id, group]));
+    if (groups.some(group => group.tenantId !== tenantId || group.workspaceId !== workspaceId || lower(group.categoryCode) !== categoryCode)
+      || pricingGroups.some(group => group.tenantId !== tenantId || group.workspaceId !== workspaceId || lower(group.categoryCode) !== categoryCode))
+      throw new ConflictException("续租型号或定价分组来源与经营空间不一致");
+    if (groups.some(group => group.bundleComponents.some(component => !byId.has(component.componentItemGroupId)))
+      || pricingGroups.some(group => group.members.some(member => !byId.has(member.itemGroupId))))
+      throw new ConflictException("续租配置包含空间外的组成或定价成员，不能补入其他空间资料");
+    return { tenantId, workspaceId, workspaceCategoryCode: categoryCode, profile,
+      businessSettings: this.toBusinessSettings(settings ?? undefined),
+      itemGroups: groups.map(row => this.toItemGroup({ ...row, bundleComponents: row.bundleComponents.map(component => ({ ...component,
+        componentItemGroup: { code: byId.get(component.componentItemGroupId)!.code, name: byId.get(component.componentItemGroupId)!.name } })) })),
+      pricingGroups: pricingGroups.map(row => this.toPricingGroup({ ...row, members: row.members.map(member => ({ ...member, itemGroup: byId.get(member.itemGroupId)! })) })),
       locations: locations.map(row => this.toLocation(row)), couponTemplates: coupons.map(row => this.toCouponTemplate(row)), operators: [], inspectionTemplates: [], hasPersistedConfig: Boolean(settings) };
   }
 
