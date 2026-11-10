@@ -936,8 +936,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ForbiddenException('经营报表配置缺少当前租户及经营空间');
     if (typeof this.configStore.readReportConfigurationFacts !== 'function') throw new ServiceUnavailableException('经营报表持久配置端口不可用');
     const binding = requestFingerprint(identity);
+    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
     const facts = await this.configStore.readReportConfigurationFacts(tenantId, workspaceId);
     if (facts.tenantId !== tenantId || facts.workspaceId !== workspaceId) throw new ConflictException('经营报表配置来源变化');
+    const definition = published?.definition ?? await this.effectiveCategory(tenantId, facts.categoryCode);
+    if (definition.code !== facts.categoryCode) throw new ConflictException('经营报表品类来源变化');
+    if (published) {
+      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      if (latest.categoryVersionId !== published.categoryVersionId || latest.adoptionRevision !== published.adoptionRevision)
+        throw new ConflictException('经营报表读取期间采用版本已变化，请重新读取');
+    }
     if (requestFingerprint(getRequestIdentity()) !== binding) throw new ForbiddenException('经营报表配置读取期间授权范围变化');
     return facts;
   }
@@ -949,12 +957,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!workspaceId || identity?.tenantId !== tenantId) throw new ForbiddenException('开业配置缺少当前租户或经营空间');
     if (typeof this.configStore.readOpeningConfigurationFacts !== 'function') throw new ServiceUnavailableException('开业配置持久投影不可用');
     const binding = requestFingerprint(identity);
+    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
     const facts = await this.configStore.readOpeningConfigurationFacts(tenantId, workspaceId);
     if (facts.tenantId !== tenantId || facts.workspaceId !== workspaceId) throw new ConflictException('开业配置来源变化');
-    const definition = await this.effectiveCategory(tenantId, facts.categoryCode);
+    const definition = published?.definition ?? await this.effectiveCategory(tenantId, facts.categoryCode);
+    if (definition.code !== facts.categoryCode) throw new ConflictException('开业配置品类来源变化');
     const options = normalizeBusinessOptionsForCategory(facts.settings, definition);
     const profile = facts.profile ? { ...facts.profile, terminology: Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field =>
       [field, facts.profile!.terminology[field] ?? definition.terminology[field]])) } : null;
+    if (published) {
+      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      if (latest.categoryVersionId !== published.categoryVersionId || latest.adoptionRevision !== published.adoptionRevision)
+        throw new ConflictException('开业配置读取期间采用版本已变化，请重新读取');
+    }
     if (getRequestWorkspaceId() !== workspaceId || requestFingerprint(getRequestIdentity()) !== binding)
       throw new ForbiddenException('开业配置读取期间授权范围变化');
     return { ...facts, profile, categoryVersion: definition.version,

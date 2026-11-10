@@ -20,7 +20,7 @@ import type {
   TenantRentalProfile
 } from "@rental-os/shared";
 import type { RentalCategoryDefinition } from "@rental-os/shared";
-import { RentalInventoryMode, RENTAL_CATEGORY_WORKSPACE_NAMES, RENTAL_CURRENCY_CODES, RENTAL_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, RENTAL_PAYMENT_METHOD_CODES } from "@rental-os/shared";
+import { RentalInventoryMode, isRentalCategoryCode, RENTAL_CURRENCY_CODES, RENTAL_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, RENTAL_PAYMENT_METHOD_CODES } from "@rental-os/shared";
 import type { BusinessContext } from './rental-business.service';
 import { PrismaService } from "../database/prisma.service";
 import { getRequestTenantId, getRequestWorkspaceId, getRequestStaffLocationIds, staffLocationWhere } from "../../common/request-identity";
@@ -29,6 +29,10 @@ import type { RentalUniqueAttributeClaim } from "./rental-core-fact.repository";
 import type { VersionedBusinessSettings } from './approved-settings-change.ports';
 import { readRentalFulfillmentAdmission, type RentalFulfillmentRequirement } from './rental-fulfillment-admission';
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
+
+// Stored terminology can originate from a published definition, whose accepted
+// limit is 100. A narrower action-input limit cannot make that source unreadable.
+const PROFILE_TERMINOLOGY_MAX_LENGTH = 100;
 
 /**
  * 单个**经营空间**的全部配置，用于启动预热写穿缓存。
@@ -283,7 +287,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   }
 
   private parseWorkspaceProfile(value: unknown, tenantId: string, categoryCode: RentalCategoryCode): TenantRentalProfile {
-    const atom = z.string().min(1).max(100);
+    const atom = z.string().min(1).max(PROFILE_TERMINOLOGY_MAX_LENGTH);
     const labels = z.object({ itemLabel: atom, itemGroupLabel: atom, assetLabel: atom, fulfillmentLabel: atom,
       pickupLabel: atom, returnLabel: atom, identifierLabel: atom, deliveryLabel: atom.optional(), serialLabel: atom.optional(),
       usageMetricLabel: atom.optional(), assetCollectionLabel: atom.optional(), navigationLabels: z.object({ inventoryGroup: atom.optional(),
@@ -399,7 +403,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (metadata.length !== 1) throw new ServiceUnavailableException('报价持久配置/独立空间档案不可用');
       const meta = metadata[0];
       if (!owned(meta) || meta.settingsCategoryCode !== meta.categoryCode || meta.profileCategoryCode !== meta.categoryCode
-        || !Object.prototype.hasOwnProperty.call(RENTAL_CATEGORY_WORKSPACE_NAMES, lower(meta.categoryCode))) throw new ConflictException('报价配置品类来源变化');
+        || !isRentalCategoryCode(lower(meta.categoryCode))) throw new ConflictException('报价配置品类来源变化');
       const settings = z.object({ tenantId: atom, categoryCode: atom, configVersion: atom,
         pricing: z.object({ enabledUnits: array(z.enum(RENTAL_PRICING_UNIT_CODES)), defaultUnit: z.enum(RENTAL_PRICING_UNIT_CODES),
           currency: atom.refine(value => (RENTAL_CURRENCY_CODES as readonly string[]).includes(value)), taxIncluded: flag, holidayPricingEnabled: flag }),
@@ -426,7 +430,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       const terms = parseJson(meta.terminology);
       if (!terms || typeof terms !== 'object' || Array.isArray(terms) || 'readLimitExceeded' in terms) throw new ConflictException('报价术语投影无效或超限');
       const terminology = z.object(Object.fromEntries(['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel',
-        'deliveryLabel', 'identifierLabel', 'serialLabel', 'usageMetricLabel', 'assetCollectionLabel'].map(key => [key, z.string().min(1).max(80).optional()]))
+        'deliveryLabel', 'identifierLabel', 'serialLabel', 'usageMetricLabel', 'assetCollectionLabel'].map(key => [key, z.string().min(1).max(PROFILE_TERMINOLOGY_MAX_LENGTH).optional()]))
       ).extend({ navigationLabels: z.object({ inventoryGroup: atom.optional(), itemGroups: atom.optional(), pricingGroups: atom.optional(), assets: atom.optional(), locations: atom.optional() }).optional() }).parse(parseJson(meta.terminology));
       const profile = this.toProfile({ tenantId, categoryCode: meta.profileCategoryCode,
         capabilities: array(z.enum(RENTAL_CAPABILITY_CODES)).parse(parseJson(meta.capabilities)), terminology,
@@ -480,7 +484,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     const row = rows[0];
     if (row.tenantId !== tenantId || row.workspaceId !== workspaceId
       || row.settingsCategoryCode !== row.categoryCode || typeof row.categoryCode !== 'string'
-      || !Object.prototype.hasOwnProperty.call(RENTAL_CATEGORY_WORKSPACE_NAMES, lower(row.categoryCode))
+      || !isRentalCategoryCode(lower(row.categoryCode))
       || !(RENTAL_CURRENCY_CODES as readonly unknown[]).includes(row.currency))
       throw new ConflictException('经营报表配置来源或币种无效');
     await assertScope();
@@ -521,7 +525,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         || typeof row.id !== 'string' || !row.id || row.id.length > 191
         || typeof row.name !== 'string' || !row.name || row.name.length > 191)
       || new Set(groups.map(row => row.id)).size !== groups.length
-      || !Object.prototype.hasOwnProperty.call(RENTAL_CATEGORY_WORKSPACE_NAMES, lower(workspace.categoryCode)))
+      || !isRentalCategoryCode(lower(workspace.categoryCode)))
       throw new ConflictException('开业配置来源变化');
     if (groups.length > RENTAL_READINESS_FACT_LIMIT) throw new ServiceUnavailableException('开业定价分组超出读取上限');
     if (![enabledItemGroupCount, serviceableLocationCount].every(value => Number.isSafeInteger(value) && value >= 0))
@@ -556,8 +560,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     const profileSql = workspaceProfileReadSql();
     const term = (field: typeof RENTAL_OPENING_TERMINOLOGY_FIELDS[number]) => {
       const value = Prisma.sql`JSON_EXTRACT(${profileSql.terminology}, ${`$.${field}`})`;
-      return Prisma.sql`CASE WHEN JSON_TYPE(${value}) = 'STRING' THEN LEFT(JSON_UNQUOTE(${value}), 81)
-        WHEN JSON_TYPE(${value}) IS NULL OR JSON_TYPE(${value}) = 'NULL' THEN NULL ELSE REPEAT('!', 81) END`;
+      // max + 1 is an invalid sentinel, never a truncated successful value.
+      return Prisma.sql`CASE WHEN JSON_TYPE(${value}) = 'STRING' THEN LEFT(JSON_UNQUOTE(${value}), 101)
+        WHEN JSON_TYPE(${value}) IS NULL OR JSON_TYPE(${value}) = 'NULL' THEN NULL ELSE REPEAT('!', 101) END`;
     };
     const locationIds = getRequestStaffLocationIds();
     const selectedLocations = locationIds === undefined ? Prisma.empty : locationIds.length
@@ -613,7 +618,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (!workspace || workspace.id !== workspaceId || workspace.tenantId !== tenantId || metadata.length !== 1)
         throw new ServiceUnavailableException('开业持久配置尚不可用');
       const meta = metadata[0];
-      if (!owns(meta) || lower(meta.categoryCode) !== lower(workspace.categoryCode) || !Object.prototype.hasOwnProperty.call(RENTAL_CATEGORY_WORKSPACE_NAMES, lower(workspace.categoryCode)))
+      if (!owns(meta) || lower(meta.categoryCode) !== lower(workspace.categoryCode) || !isRentalCategoryCode(lower(workspace.categoryCode)))
         throw new ConflictException('开业配置元数据来源变化');
       const options = z.object({ configVersion: atom, currency: atom.refine(value => (RENTAL_CURRENCY_CODES as string[]).includes(value)),
         defaultUnit: atom, enabledUnits: z.array(atom).max(100), enabledModes: z.array(atom).max(100) }).strict().parse(parseJson(meta.options));
@@ -621,7 +626,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       let profile: RentalOpeningConfigurationFacts['profile'] = null;
       if (meta.profileVersion !== null) {
         if (meta.profileCategoryCode === null || lower(meta.profileCategoryCode) !== lower(workspace.categoryCode)) throw new ConflictException('开业术语品类来源变化');
-        const terms = z.object(Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field => [field, z.string().min(1).max(80).nullable().optional()]))).strict().parse(parseJson(meta.terminology));
+        const terms = z.object(Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field => [field, z.string().min(1).max(PROFILE_TERMINOLOGY_MAX_LENGTH).nullable().optional()]))).strict().parse(parseJson(meta.terminology));
         profile = { configVersion: atom.parse(meta.profileVersion), terminology: Object.fromEntries(Object.entries(terms).filter(([, value]) => value != null)) };
       }
       const itemPage = page(groups, row => groupSchema.parse({ ...row, inventoryMode: lower(row.inventoryMode) }));

@@ -831,8 +831,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!workspaceId || getRequestTenantId() !== tenantId) throw new HttpException('开业读取缺少当前租户或经营空间', HttpStatus.FORBIDDEN);
     if (typeof this.coreConfigStore.readReadinessCoreFacts !== 'function'
       || typeof this.configStore.readReadinessBusinessFacts !== 'function') throw new ServiceUnavailableException('开业持久事实源不可用');
+    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
     const core = await this.coreConfigStore.readReadinessCoreFacts(tenantId, workspaceId);
     if (core.tenantId !== tenantId || core.workspaceId !== workspaceId) throw new ConflictException('开业配置来源变化');
+    // The format-checked scalar row cannot authorize an unknown implementation.
+    // Versioned hosts use their actual binding; explicit legacy hosts know four.
+    if (published ? published.definition.code !== core.categoryCode : !Object.values(RentalCategoryCode).some(code => code === core.categoryCode))
+      throw new ServiceUnavailableException('开业品类定义不可用或与经营空间不一致');
     // Preserve calendarsForDateRange's business-time-zone conversion, including
     // the last-instant end boundary; no default annual days are materialized.
     const timeZone = core.timeZone;
@@ -845,8 +850,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     ]);
     if (business.tenantId !== tenantId || business.workspaceId !== workspaceId
       || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId) throw new ConflictException('开业事实来源变化');
+    if (published) {
+      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      if (latest.categoryVersionId !== published.categoryVersionId || latest.adoptionRevision !== published.adoptionRevision)
+        throw new ConflictException('开业检查期间采用版本已变化，请重新读取');
+    }
+    if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId) throw new ConflictException('开业事实来源变化');
     return this.renderTenantReadiness({ ...business, ...membership, nowAt: now.getTime(), priceVersionAvailable: true,
-      profileCategoryCode: core.categoryCode, enabledGroups: core.pricingGroups,
+      profileCategoryCode: core.categoryCode, categoryName: published?.definition.name, enabledGroups: core.pricingGroups,
       enabledItemGroupCount: core.enabledItemGroupCount, serviceableLocationCount: core.serviceableLocationCount });
   }
 
