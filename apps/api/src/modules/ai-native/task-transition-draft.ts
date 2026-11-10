@@ -89,6 +89,20 @@ export function evaluateAiTaskTransitionDraft(state: AiTaskTransitionStateDraft,
   return { allowed: true, nextRevision: state.revision + 1 };
 }
 
+/** Persisted admission uncertainty is not a Step effect. The repository must
+ * bind this witness under its original Task lock; it only permits observation,
+ * never changes the pending Step or grants resume, dispatch or settlement. */
+export function evaluateAiTaskAdmissionTransitionDraft(state: AiTaskTransitionStateDraft, request: AiTaskTransitionRequestDraft,
+  admission: { stepId: string; runId: string; stepRevision: number; actionId: string }): AiTaskTransitionDecisionDraft {
+  const ordinary = evaluateAiTaskTransitionDraft(state, request);
+  if (ordinary.allowed || ordinary.reason !== 'outcome_conflict') return ordinary;
+  if (state.status !== 'running' || request.to !== 'waiting_external' || request.reason !== 'external_pending') return ordinary;
+  const step = state.steps.find(row => row.stepId === admission.stepId);
+  if (!step || step.runId !== admission.runId || step.revision !== admission.stepRevision || step.actionId !== admission.actionId
+    || step.outcome.status !== 'pending' || step.outcome.effect !== 'none') return deny('invalid_state');
+  return { allowed: true, nextRevision: state.revision + 1 };
+}
+
 export function evaluateAiTaskConfirmationTransitionDraft(state: AiTaskTransitionStateDraft, request: AiTaskTransitionRequestDraft,
   checkpoint: { stepId: string; runId: string; stepRevision: number; actionId: string }): AiTaskTransitionDecisionDraft {
   if (!((state.status === 'running' && request.to === 'waiting_confirmation')

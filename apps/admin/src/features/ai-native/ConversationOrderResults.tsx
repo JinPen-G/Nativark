@@ -1,3 +1,4 @@
+import { ConversationOrderHandoff } from './ConversationOrderHandoff';
 /** Explicit original answer and Core fact reads. Render text inertly, keep money
  * copied from the original facts, and retract both on scope/source failure. */
 import { useEffect, useRef, useState } from 'react';
@@ -5,6 +6,8 @@ import type { AiConversationTurnObservationDraft } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { ActionButton, Alert } from '@/components/ui';
 import { readConversationOrderResults } from './conversation-order-results-reader';
+import { VisibleObservationBoundary } from './VisibleObservationBoundary';
+import { useVisibleObservationHost } from './VisibleObservationHost';
 import { ModelText } from './ModelText';
 import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
@@ -15,6 +18,7 @@ const labels = { rental: '租金', service: '服务', discount: '折扣', coupon
 export function ConversationOrderResults({ conversationId, turn, current }: {
   conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean;
 }) {
+  const visible = useVisibleObservationHost();
   const { t } = useAiManagementLocale();
   const [result, setResult] = useState<Results | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const request = useRef<AbortController | null>(null), generation = useRef(0), mounted = useRef(false);
@@ -33,13 +37,17 @@ export function ConversationOrderResults({ conversationId, turn, current }: {
     try {
       const value = await readConversationOrderResults(aiConversationsApi, conversationId, turn, controller.signal, active);
       if (!active()) throw Error('AI_SCOPE_CHANGED'); setResult(value);
-    } catch (failure) { if (active()) setError(true); throw failure; }
+    } catch (failure) { if (turn.task) visible?.cancelTask(turn.task.taskId); if (active()) setError(true); throw failure; }
     finally { if (request.current === controller) { request.current = null; setBusy(false); } }
   };
+  const retract = () => { generation.current++; request.current?.abort(); request.current = null; setResult(null); setBusy(false); setError(true); };
   const facts = result?.facts.result.status === 'available' ? result.facts.result.facts : null;
   return <section aria-label={t('原订单事实与回答')} aria-busy={busy}>
     <ActionButton label={t('读取原订单事实与回答')} disabled={busy} onAction={read} />
     {error && <Alert type="warning" title={t('原订单结果不可读取或已变化，旧事实和回答已撤回；不自动重试。')} />}
+    <ConversationOrderHandoff identity={binding} conversationId={conversationId} turn={turn} current={current}
+      onUnavailable={retract} onObserved={value => { if (facts && (facts.order.id !== value.order.id || facts.order.updatedAt !== value.order.version
+        || facts.scope.tenantId !== value.scope.tenantId || facts.scope.workspaceId !== value.scope.workspaceId)) retract(); }} />
     {result && <>
       <p>{t('事实与回答经过独立复验，不是原子快照；模型文字不证明付款、退款或业务完成。')}</p>
       {facts ? <section aria-label={t('权威订单事实')}>
@@ -51,7 +59,9 @@ export function ConversationOrderResults({ conversationId, turn, current }: {
         <p>{t('支付凭证与历史费用依据未加载，不代表支付已完成。')}</p>
       </section> : <p>{t(result.facts.result.status === 'stale' ? '事实已变化，旧正文不显示，请回原业务页核对。'
         : result.facts.result.status === 'unknown' ? '结果待核对，不自动重试。' : '原事实步骤未提供可展示结果。')}</p>}
-      {result.answer.result.status === 'available' ? <ModelText text={result.answer.result.text} />
+      {result.answer.result.status === 'available' ? <VisibleObservationBoundary kind="text"
+        reference={{ taskId: turn.task!.taskId, runId: turn.task!.runId, source: { kind: 'model_result', resultId: result.answer.result.resultId } }}
+        ready={result.answer.result.text.trim().length > 0 && scope.current.current()}><ModelText text={result.answer.result.text} /></VisibleObservationBoundary>
         : <p>{t(result.answer.result.status === 'stale' ? '事实已变化，旧正文不显示，请回原业务页核对。'
           : result.answer.result.status === 'unknown' ? '结果待核对，不自动重试。' : '原回答未提供可展示结果。')}</p>}
     </>}

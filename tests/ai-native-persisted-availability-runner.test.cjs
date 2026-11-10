@@ -18,7 +18,7 @@ async function setup() {
   const calls = [];
   const root = composePersistedAvailabilityTaskRunner({ db: h.db, authorization: h.authorization,
     guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}), wall: () => new Date(h.control.now), monotonic: () => ++h.control.tick,
-    core: { availability: async (tenantId, input) => {
+    core: { readAvailability: async (tenantId, input) => {
       calls.push({ tenantId, input: structuredClone(input), identity: getRequestIdentity() });
       if (h.control.onRead) await h.control.onRead();
       const result = { available: true, locationId: input.locationId, startAt: input.startAt, endAt: input.endAt,

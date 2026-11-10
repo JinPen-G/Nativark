@@ -96,7 +96,10 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
         return result;
       });
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
+      // Repository errors already contain only a closed public code. Preserve
+      // their internal origin; rebuilding them hides the failed preparation
+      // dependency. Arbitrary dependency exceptions remain sanitized below.
+      if (error instanceof AiTaskRepositoryError) throw error;
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
   }

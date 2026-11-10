@@ -178,7 +178,10 @@ export interface AiTaskRunnerOutcomePort {
     taskRevision: number;
     lease: AiTaskRunnerLease;
     outcome: AiTaskRunnerTaskOutcome;
-  }): Promise<{ taskRevision: number; lease: AiTaskRunnerLease; outcomeStatus?: 'succeeded' | 'partially_succeeded' | 'cancelled' }>;
+  }): Promise<{ taskRevision: number; lease: AiTaskRunnerLease; outcomeStatus?: 'succeeded' | 'partially_succeeded' | 'cancelled';
+    /** Original waiting-external -> running acknowledgement, when recovery's
+     * aggregate completion required two CAS transitions. Never a skipped revision. */
+    resumed?: AiTaskRunnerStepCommit }>;
 }
 
 export interface AiTaskRunnerClock {
@@ -206,7 +209,42 @@ export interface AiTaskRunnerDependencies {
 }
 
 export interface AiTaskRunnerResourceTicket { chargeIds: readonly string[]; modelPending?: true }
+/** A server-owned orchestration interval; never a tool result or execution grant. */
+export interface AiTaskRunnerOverheadTicket {
+  key: string;
+  remainingMs: number;
+  /** Only original pending-step registration is admitted; no step reserve/start. */
+  stepAllowanceUnavailable?: true;
+  /** Original Run time remains unresolved. An admitted PENDING action or
+   * receipt-only recovery cannot report a fully accounted terminal task. */
+  originalTimeDebt?: true;
+}
+export interface AiTaskRunnerOverheadPort {
+  /** Only the persistent composition supplies exact tool/reservation clock spans.
+   * Other hosts must keep separate intervals rather than guess an exclusion. */
+  includesEffectInterval?: true;
+  /** Original budget initialization belongs to the first measured admission. */
+  opensBudget?: true;
+  /** Only before another new step: original measurement + next reservation share
+   * one transaction. A missing/lost handoff cannot restart either interval. */
+  rotate?(ticket: AiTaskRunnerOverheadTicket, lease: AiTaskRunnerLease, segment: string,
+    maximumMs: number | undefined, retainStepAllowance: boolean): Promise<AiTaskRunnerOverheadTicket>;
+  remaining?(ticket: AiTaskRunnerOverheadTicket, lease: AiTaskRunnerLease): number;
+  /** Undefined selects the original authorized plan's step window, not an unbounded limit. */
+  begin(lease: AiTaskRunnerLease, segment: string, maximumMs: number | undefined, retainStepAllowance: boolean,
+    recovery: boolean, pendingStart?: boolean): Promise<AiTaskRunnerOverheadTicket>;
+  complete(ticket: AiTaskRunnerOverheadTicket, lease: AiTaskRunnerLease): Promise<void>;
+  /** Close only this process's original measured interval after the exact
+   * release CAS receipt. Never reserve again or adopt an absent holder. */
+  completeAfterRelease?(ticket: AiTaskRunnerOverheadTicket, lease: AiTaskRunnerLease,
+    receipt: { released: true; revision: number }): Promise<void>;
+  abandon(ticket: AiTaskRunnerOverheadTicket, lease: AiTaskRunnerLease): Promise<void>;
+}
 export interface AiTaskRunnerResourcePort {
+  /** Persistent composition bridges result COMMIT while excluding only exact original tool time. */
+  overhead?: AiTaskRunnerOverheadPort;
+  /** Original Run preparation quotas only, not a plan/dispatch authority. */
+  preparation?: import('./task-run-preparation.ports').AiTaskPreparationResources;
   open(lease: AiTaskRunnerLease, recovery: boolean): Promise<void>;
   reserve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
   /** Bind/reserve generation and optional count after durable step start.

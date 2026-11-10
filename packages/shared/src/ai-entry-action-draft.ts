@@ -43,5 +43,5 @@ export interface AiEntryFailureDraft {
   code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_PROPOSAL_STALE' | 'AI_REVISION_CONFLICT' | 'AI_RESULT_UNKNOWN';
   reason: string;
   retryable: false;
-  nextAction: 'manual_booking' | 'clarify' | 'reprepare' | 'read_booking_operation';
+  nextAction: 'manual_booking' | 'clarify' | 'reprepare' | 'read_booking_operation' | 'read_original_submission';
 }

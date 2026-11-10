@@ -57,6 +57,10 @@ export interface AiTaskExecutionBudgetPort {
   initialize(taskId: string, lease: AiTaskExecutionLease): Promise<AiTaskExecutionBudgetSnapshot>;
   load(taskId: string, lease: AiTaskExecutionLease): Promise<AiTaskExecutionBudgetSnapshot>;
   reserve(input: AiTaskExecutionChargeRequest): Promise<AiTaskExecutionMutation>;
+  /** Optional atomic admission of one step's steps/time/output charges only.
+   * Replay never grants dispatch; failure does not identify newly created rows.
+   * No invocation, settlement, refund or new allowance is implied by this batch. */
+  reserveStep?(inputs: readonly AiTaskExecutionChargeRequest[]): Promise<readonly AiTaskExecutionMutation[]>;
   record(input: AiTaskExecutionSettlementRequest): Promise<AiTaskExecutionMutation>;
   reconcile(input: AiTaskExecutionSettlementRequest): Promise<AiTaskExecutionMutation>;
   markUnknown(input: { taskId: string; lease: AiTaskExecutionLease; chargeId: string; reason: string }): Promise<AiTaskExecutionMutation>;
@@ -88,4 +92,10 @@ export class AiTaskExecutionBudgetError extends Error {
   constructor(readonly code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_RUN_LIMIT' | 'AI_RESULT_UNKNOWN' | 'AI_STORAGE_UNAVAILABLE' | 'AI_REVISION_CONFLICT') {
     super(code);
   }
+}
+
+/** Only an acknowledged read-only admission denial may emit this proof.
+ * A transaction exception or lost reply, even with AI_RUN_LIMIT, is not proof. */
+export class AiTaskExecutionPreReservationLimitError extends AiTaskExecutionBudgetError {
+  constructor() { super('AI_RUN_LIMIT'); }
 }

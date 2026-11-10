@@ -2,12 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft } from '@rental-os/shared';
-import { gatewayTextIntentBindingSchema, prepareGatewayIntent, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
+import { gatewayTextIntentBindingSchema, prepareGatewayIntent, prepareGatewayTextIntent, prepareGatewayEmbeddingProbeIntent,
+  prepareGatewayNativeToolResultIntent, type GatewayTextIntentBinding } from './gateway-intent';
+import { nativeOrderToolCallSchema, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 import type { GatewayAccountingCall } from './gateway-accounting.ports';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
-import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, modelUsageSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, modelUsageSchema, modelReasoningEvidenceSchema, modelEmbeddingEvidenceSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest, type ModelUsage } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -46,6 +48,31 @@ export class UnifiedAiGatewayService {
     const life = this.deadline(signal);
     try {
       const prepared = await life.wait(() => prepareGatewayTextIntent(intent, this.policy(binding), 'invoke'));
+      return await this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash }, life);
+    } finally { life.close(); }
+  }
+
+  async invokeNativeToolResultIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    const binding = this.intentBinding, resolver = this.ports.nativeToolResults;
+    if (!binding?.nativeToolResults || binding.routeScene !== 'chat' || !resolver
+      || typeof this.ports.transport.invokeNativeToolResult !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    const life = this.deadline(signal);
+    try {
+      const prepared = await life.wait(() => prepareGatewayNativeToolResultIntent(
+        intent, this.policy(binding), context, resolver, life.controller.signal));
+      return await this.invokeRequest(context, prepared.request, signal,
+        { ...binding, intentHash: prepared.intentHash }, life, prepared.nativeResult);
+    } finally { life.close(); }
+  }
+
+  async invokeEmbeddingProbeIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    context = structuredClone(context); intent = structuredClone(intent);
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    const binding = this.intentBinding;
+    if (!binding || binding.embeddingProbe !== true || binding.routeScene !== 'embedding') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    const life = this.deadline(signal);
+    try {
+      const prepared = await life.wait(() => prepareGatewayEmbeddingProbeIntent(intent, this.policy(binding)));
       return await this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash }, life);
     } finally { life.close(); }
   }
@@ -164,11 +191,26 @@ export class UnifiedAiGatewayService {
     return parsed.data;
   }
 
-  private textResult(value: unknown, structured = false, tools = false): GatewayInvocationResult {
-    const parsed = (structured ? textResultSchema.extend({ structuredOutput: z.record(z.unknown()) })
+  private textResult(value: unknown, structured = false, tools = false, reasoning = false, embedding = false): GatewayInvocationResult {
+    // Task composition captures these validated IDs before this projection.
+    // Format-only consumers still receive the original C03 toolRequests, not
+    // private IDs or an INVALID_RESPONSE caused solely by the new private field.
+    if (tools && value && typeof value === 'object' && !Array.isArray(value) && 'nativeToolCalls' in value) {
+      const { nativeToolCalls, ...visible } = value as Record<string, unknown>;
+      if (!z.array(nativeOrderToolCallSchema).max(8).safeParse(nativeToolCalls).success)
+        throw new ModelGatewayError('INVALID_RESPONSE');
+      value = visible;
+    }
+    const parsed = (embedding ? textResultSchema.extend({ text: z.literal(''), usage: modelUsageSchema,
+      embeddingEvidence: modelEmbeddingEvidenceSchema }) : reasoning ? textResultSchema.extend({ reasoningEvidence: modelReasoningEvidenceSchema }) : structured ? textResultSchema.extend({ structuredOutput: z.record(z.unknown()) })
       : tools ? textResultSchema.extend({ toolRequests: z.array(z.unknown()).max(8).optional() }) : textResultSchema).safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_RESPONSE');
-    if ((structured || tools) && Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 131072) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (embedding && (!parsed.data.usage || parsed.data.usage.inputTokens <= 0 || parsed.data.usage.outputTokens !== 0)) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (reasoning) {
+      const evidence = modelReasoningEvidenceSchema.safeParse('reasoningEvidence' in parsed.data ? parsed.data.reasoningEvidence : undefined);
+      if (!evidence.success || !parsed.data.usage || evidence.data.reasoningTokens > parsed.data.usage.outputTokens) throw new ModelGatewayError('INVALID_RESPONSE');
+    }
+    if ((structured || tools || reasoning || embedding) && Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 131072) throw new ModelGatewayError('INVALID_RESPONSE');
     if (tools && parsed.data.toolRequests?.some(value => !isGatewayOrderExplainRequest(value))) throw new ModelGatewayError('INVALID_RESPONSE');
     if (structured) {
       let decoded: unknown;
@@ -181,6 +223,10 @@ export class UnifiedAiGatewayService {
   }
 
   private required(request: UnresolvedRequest | UnresolvedProtocolRequest, stream = false): AiProfileCapability[] {
+    if (request.features?.includes('embedding')) {
+      if (stream || request.features.length !== 1) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      return ['embedding'];
+    }
     const capabilities: AiProfileCapability[] = ['text'];
     if (stream) capabilities.push('streaming');
     for (const feature of request.features ?? []) {
@@ -189,6 +235,7 @@ export class UnifiedAiGatewayService {
       else if (feature === 'streaming') capabilities.push('streaming');
       else if (feature === 'image') capabilities.push('vision');
       else if (feature === 'audio') capabilities.push('audio');
+      else if (feature === 'reasoning') capabilities.push('reasoning');
       else throw new ModelGatewayError('INVALID_REQUEST');
     }
     return [...new Set(capabilities)];
@@ -199,10 +246,17 @@ export class UnifiedAiGatewayService {
     return this.invokeRequest(context, this.input(request), signal);
   }
 
-  private async invokeRequest(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding, intentLife?: GatewayDeadline): Promise<GatewayInvocationResult> {
+  private async invokeRequest(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal?: AbortSignal,
+    intentBinding?: IntentExecutionBinding, intentLife?: GatewayDeadline, nativeResult?: ResolvedNativeToolResult): Promise<GatewayInvocationResult> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     this.assertBudget();
-    request = structuredClone(request); context = structuredClone(context);
+    request = structuredClone(request); context = structuredClone(context); nativeResult = nativeResult && structuredClone(nativeResult);
+    const assertNativeCurrent = async () => {
+      if (!nativeResult) return;
+      if (!this.ports.nativeToolResults || typeof this.ports.transport.invokeNativeToolResult !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      await this.ports.nativeToolResults.assertCurrent(structuredClone(context), structuredClone(nativeResult), life.controller.signal);
+      if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
+    };
     // Attachment reads, routing, admission and the provider share one caller
     // deadline/cleanup budget. Resolving media must not buy a second timeout.
     const life = intentLife ?? this.deadline(signal);
@@ -218,9 +272,12 @@ export class UnifiedAiGatewayService {
       if (!parsedTransportRequest.success) throw new ModelGatewayError('INVALID_REQUEST');
       const transportRequest = parsedTransportRequest.data;
       request = transportRequest;
-      const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
+      await life.wait(assertNativeCurrent);
+      const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}),
+        ...(nativeResult ? { nativeResult } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
-      // Persist readiness before admission/claim/reserve. No presence-only gate.
+      // Persist readiness before admission/claim/reserve. Native request identity
+      // binds the actual resolved original call/result, not just its selector.
       const preparation = { context: structuredClone(context), callId: request.callId,
         intentHash: intentBinding?.intentHash ?? hash, requestHash: hash,
         configurationHash: requestFingerprint(route.profile), profile: structuredClone(route.profile), mode: 'invoke' as const };
@@ -238,8 +295,12 @@ export class UnifiedAiGatewayService {
       }));
       budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
         request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash,
-          countRequestHash: this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), false) } };
+          countRequestHash: nativeResult
+            ? this.ports.transport.nativeInputBoundHash?.(structuredClone(transportRequest), structuredClone(route), structuredClone(nativeResult))
+            : this.ports.transport.inputBoundHash?.(structuredClone(transportRequest), structuredClone(route), false) } };
       const call = structuredClone(budgetCall);
+      if (nativeResult && call.request.countRequestHash !== undefined
+        && !/^[a-f0-9]{64}$/u.test(call.request.countRequestHash)) throw new ModelGatewayError('CONFIG_INVALID');
       const usage = await life.wait(() => this.reserveBudget(call, life.controller.signal).then(record => {
         if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
         else reservationId = record.id;
@@ -248,13 +309,18 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.ports.audit.append({ callId: request.callId, ...this.attribution(context), event: 'ai.invoke.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
+      await life.wait(assertNativeCurrent);
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
+      await life.wait(assertNativeCurrent);
       dispatched = true;
       const recordUsage = this.usageRecorder(call, usage.id);
       const transportStarted = performance.now();
-      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash)
+      const invoke = () => nativeResult ? this.ports.transport.invokeNativeToolResult!(structuredClone(context),
+        structuredClone(transportRequest), structuredClone(route), life.controller.signal, structuredClone(nativeResult), recordUsage, call.request.countRequestHash)
+        : this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal, recordUsage, call.request.countRequestHash);
+      const rawResult = structuredClone(await life.wait(() => invoke()
         .then(async value => {
           // Pin the returned payload before receipt persistence yields to its owner.
           const result = structuredClone(value);
@@ -262,9 +328,12 @@ export class UnifiedAiGatewayService {
           return result;
         })));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(assertNativeCurrent);
       const result = intentBinding ? this.textResult(rawResult,
         intentBinding.structuredOutput === true && transportRequest.features?.includes('structuredOutput') === true,
-        intentBinding.orderExplainTool === true && transportRequest.features?.includes('tools') === true) : rawResult;
+        intentBinding.orderExplainTool === true && transportRequest.features?.includes('tools') === true,
+        intentBinding.reasoningChannel === true && transportRequest.features?.includes('reasoning') === true,
+        intentBinding.embeddingProbe === true && transportRequest.features?.includes('embedding') === true) : rawResult;
       if (this.ports.observation) {
         await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
           timing: this.deliveryTiming(transportStarted),

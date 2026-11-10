@@ -74,9 +74,21 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
           || current.payloadHash !== original.payloadHash || current.previewHash !== original.previewHash
           || (current.operation === 'execute' && current.inputBindingHash !== original.inputBindingHash)) throw deniedOrder();
       };
+      let enclosedReceiptId: string | null = null;
       const authority: AiApprovedOrderAuthority = {
         resolve: async (_input, binding, action, tx) => {
           if (requestFingerprint(binding) !== requestFingerprint(original.binding)) throw deniedOrder();
+          if (action === 'replay' && enclosedReceiptId !== null) {
+            // resultFact encloses this exact receipt with full source/snapshot
+            // checks. Still reauthorize current task and order reads on both
+            // sides of consumption's transaction; never reuse a read grant for
+            // execution or for Core's earlier uncommitted recovery lookup.
+            const receiptId = enclosedReceiptId;
+            const { lease: _lease, ...reference } = command;
+            const context = structuredClone(await d.policy.resolve(reference, 'read', tx));
+            if (orderContextHash(context) !== orderContextHash(original.input.context)) throw deniedOrder();
+            return withRead(receiptId, context, async () => structuredClone(context));
+          }
           const current = await source.read(command, tx && action === 'execute' ? 'execute' : 'inspect', tx);
           same(current);
           if (current.operation === 'replay' && current.committedId) {
@@ -90,11 +102,18 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
         const current = await source.read(command, 'replay');
         same(current);
         if (current.committedId !== orderId) throw deniedOrder();
-        await participant.replay(original.binding, orderId);
+        enclosedReceiptId = orderId;
+        try { await participant.replay(original.binding, orderId); }
+        finally { enclosedReceiptId = null; }
         const order = await d.core.getOrder(original.binding.tenantId, orderId);
         if (!order) throw new AiApprovedOrderResultUnknownError();
         if (order.id !== orderId || order.tenantId !== original.binding.tenantId
           || d.core.resolveWorkspaceId(original.binding.tenantId) !== original.binding.workspaceId) throw deniedOrder();
+        // A readable same-space order is not necessarily this approved action's
+        // result. Bind the immutable creation quote, not mutable amounts, dates
+        // or lines; later fulfillment/changes and expired idempotency receipts
+        // must remain readable without recreating the original action.
+        if (order.quoteId !== original.binding.request.quoteId) throw new AiApprovedOrderResultUnknownError();
         const latest = await source.read(command, 'replay');
         same(latest);
         if (latest.committedId !== orderId) throw deniedOrder();

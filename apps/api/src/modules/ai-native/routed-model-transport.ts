@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { modelResponseContainsSecret } from './model-response-secret';
+import { ModelResponseSecretGuard } from './model-response-secret';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
@@ -7,6 +7,7 @@ import type { ProviderRouteDecision } from './provider-router.ports';
 import type { GatewayUsageRecorder, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
 import { normalizeTenantModelBaseUrl, type TenantModelConfigService } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 
 export interface GatewayConnection {
   profileFingerprint: string;
@@ -77,7 +78,13 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     }
   }
   private cancelled(signal: AbortSignal) { if (signal.aborted) throw new ModelGatewayError('CANCELLED'); }
-  private async prepare(value: GatewayContext, requestValue: ModelProtocolRequest, routeValue: ProviderRouteDecision, signal: AbortSignal, streaming: boolean) {
+  nativeInputBoundHash(request: ModelProtocolRequest, route: ProviderRouteDecision, value: ResolvedNativeToolResult) {
+    const adapter = this.adapters.get(route.profile.protocol);
+    if (adapter?.supportsNativeToolResults !== true || typeof adapter.generateNativeToolResult !== 'function'
+      || typeof adapter.nativeInputBoundHash !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    return adapter.nativeInputBoundHash(structuredClone(request), structuredClone(value));
+  }
+  private async prepare(value: GatewayContext, requestValue: ModelProtocolRequest, routeValue: ProviderRouteDecision, signal: AbortSignal, streaming: boolean, native = false) {
     const parsedContext = routedContextSchema.safeParse(value), parsedRequest = modelProtocolRequestSchema.safeParse(requestValue);
     if (!parsedContext.success || !parsedRequest.success) throw new ModelGatewayError('INVALID_REQUEST');
     const context = parsedContext.data, request = parsedRequest.data, route = structuredClone(routeValue), profile = route.profile;
@@ -93,6 +100,8 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
         || route.scope.kind !== 'TENANT' || route.scope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
     const adapter = this.adapters.get(profile.protocol);
     if (!adapter) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    if (native && (adapter.supportsNativeToolResults !== true || typeof adapter.generateNativeToolResult !== 'function'
+      || typeof adapter.nativeInputBoundHash !== 'function')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const assertSchema = () => {
       if (request.structuredSchemaHash && (!request.features?.includes('structuredOutput')
         || request.structuredSchemaHash !== adapter.structuredSchemaHash)) throw new ModelGatewayError('CONFIG_INVALID');
@@ -120,15 +129,15 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       if (route.probe) await this.probe!.authorizeDispatch(context, request, route, streaming ? 'stream' : 'invoke', signal);
     };
     await recheck();
-    return { request, adapter, connection, recheck };
+    return { request, adapter, connection, recheck, secrets: new ModelResponseSecretGuard(connection.credential) };
   }
   private safeError(error: unknown): ModelGatewayError {
     if (error instanceof ModelGatewayError) return new ModelGatewayError(error.code);
     if (error instanceof ModelAdapterError) return new ModelGatewayError(error.code);
     return new ModelGatewayError('PROVIDER_FAILED');
   }
-  private rejectSecret(value: unknown, credential: string) {
-    if (modelResponseContainsSecret(value, credential)) throw new ModelGatewayError('INVALID_RESPONSE');
+  private rejectSecret(value: unknown, secrets: ModelResponseSecretGuard) {
+    if (secrets.contains(value)) throw new ModelGatewayError('INVALID_RESPONSE');
   }
   async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
     try {
@@ -136,7 +145,25 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       // Adapter-owned objects must not change while accounting or authorization awaits.
       const result = structuredClone(await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl }));
       if (result.usage) await recordUsage?.(structuredClone(result.usage));
-      this.cancelled(signal); this.rejectSecret(result, prepared.connection.credential);
+      this.cancelled(signal); this.rejectSecret(result, prepared.secrets);
+      await prepared.recheck();
+      return { ...structuredClone(result) };
+    } catch (error) { throw this.safeError(error); }
+  }
+  /** One admitted native request, using the same vault/current-config/usage and
+   * delivery checks as ordinary invoke. The caller Gateway owns the second call. */
+  async invokeNativeToolResult(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision,
+    signal: AbortSignal, value: ResolvedNativeToolResult, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
+    try {
+      const parsed = resolvedNativeToolResultSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+      const native = parsed.data;
+      const prepared = await this.prepare(context, request, route, signal, false, true);
+      this.cancelled(signal); this.rejectSecret(native, prepared.secrets);
+      const result = structuredClone(await prepared.adapter.generateNativeToolResult!({ ...structuredClone(prepared.request),
+        signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, native, { baseUrl: prepared.connection.baseUrl }));
+      if (result.usage) await recordUsage?.(structuredClone(result.usage));
+      this.cancelled(signal); this.rejectSecret(result, prepared.secrets);
       await prepared.recheck();
       return { ...structuredClone(result) };
     } catch (error) { throw this.safeError(error); }
@@ -150,13 +177,14 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
         if (event.kind === 'result' && !terminal && event.result.usage) await recordUsage?.(structuredClone(event.result.usage));
         this.cancelled(signal);
         if (terminal) throw new ModelGatewayError('INVALID_RESPONSE');
-        this.rejectSecret(event, prepared.connection.credential);
+        this.rejectSecret(event, prepared.secrets);
         await prepared.recheck();
         if (event.kind === 'text_delta') {
           pending += event.delta;
-          if (pending.includes(prepared.connection.credential)) throw new ModelGatewayError('INVALID_RESPONSE');
-          // Hold a credential-length suffix so split secrets are detected before any of their prefix is published.
-          const safeLength = Math.max(0, pending.length - prepared.connection.credential.length + 1);
+          // Raw and encoded credentials have different lengths. Hold only a
+          // possible prefix, but never publish it before the next fragment proves safe.
+          const safeLength = prepared.secrets.releaseLength(pending);
+          if (safeLength === null) throw new ModelGatewayError('INVALID_RESPONSE');
           if (safeLength) { const delta = pending.slice(0, safeLength); pending = pending.slice(safeLength); yield { kind: 'text_delta' as const, delta }; }
         } else {
           terminal = true;

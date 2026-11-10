@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ModelResponseSecretGuard } from './model-response-secret';
 import { ModelGatewayError, type AdapterResult, type ModelResponsePolicy, type ModelUsage, type ProtocolToolCall } from "./model-gateway.ports";
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 /** Protocol-owned counters, never an estimate or a price. Do not synthesize
@@ -26,13 +27,17 @@ export class ChatCompletionsStream {
   private done = false;
   private stopped = false;
   private failed = false;
+  private terminalFailure = false;
   private usage: AdapterResult["usage"];
   private readonly calls = new Map<number, { id?: string; type?: 'function'; name: string; arguments: string }>();
   private readonly callIds = new Set<string>();
-  /** Only validated terminal protocol counters, never interim estimates or text. */
-  accountingUsage(): AdapterResult['usage'] { return this.failed || !this.usage ? undefined : structuredClone(this.usage); }
-  constructor(private readonly credential: string, private readonly maxBytes = 1_048_576, private readonly policy?: ModelResponsePolicy) {
+  /** Delivery failure does not void already validated terminal counters. Missing
+   * or rejected interim/invalid counter payloads never populate this field. */
+  accountingUsage(): AdapterResult['usage'] { return this.usage && structuredClone(this.usage); }
+  private readonly secrets: ModelResponseSecretGuard;
+  constructor(credential: string, private readonly maxBytes = 1_048_576, private readonly policy?: ModelResponsePolicy) {
     if (!credential || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 1_048_576) throw new ModelGatewayError("CONFIG_INVALID");
+    this.secrets = new ModelResponseSecretGuard(credential);
   }
   push(chunk: Uint8Array): string[] {
     if (this.failed) throw new ModelGatewayError("INVALID_RESPONSE");
@@ -49,7 +54,7 @@ export class ChatCompletionsStream {
         const delta = this.consume(data); if (delta) deltas.push(delta);
       }
       if (Buffer.byteLength(this.pending, "utf8") > 65536) throw new Error();
-      return deltas;
+      return this.terminalFailure ? [] : deltas;
     } catch (error) { this.failed = true; throw error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE"); }
   }
   private consume(block: string): string {
@@ -66,15 +71,21 @@ export class ChatCompletionsStream {
     if (!parsed.success) throw new ModelGatewayError("INVALID_RESPONSE");
     const value = parsed.data, choice = value.choices[0];
     if (value.usage) {
-      // Only a terminal usage frame (or a valid finishing choice) attests the
-      // completed response. An interim count must never settle later output.
-      if (this.usage || (!this.stopped && choice?.finish_reason !== 'stop' && choice?.finish_reason !== 'tool_calls')) {
+      // Known unsuccessful terminals also attest consumption. Keep their
+      // counters independently of delivery; interim/unknown reasons do not.
+      if (this.usage || (!this.stopped && !['stop', 'tool_calls', 'length', 'content_filter'].includes(choice?.finish_reason ?? ''))) {
         throw new ModelGatewayError("INVALID_RESPONSE");
       }
       this.usage = chatCompletionsUsage(value.usage);
     }
     if (!choice) return "";
     if (this.stopped) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (choice.finish_reason === 'length' || choice.finish_reason === 'content_filter') {
+      // include_usage may arrive in the next usage-only frame. Continue this
+      // same bounded response to retain it, but never deliver a failed result.
+      this.stopped = true; this.terminalFailure = true;
+      return '';
+    }
     if (choice.delta.tool_calls?.length) {
       if (!this.policy?.tools) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       for (const raw of choice.delta.tool_calls) {
@@ -86,36 +97,34 @@ export class ChatCompletionsStream {
         }
         if (delta.type) { if (call.type) throw new ModelGatewayError('INVALID_RESPONSE'); call.type = delta.type; }
         call.name += delta.function?.name ?? ''; call.arguments += delta.function?.arguments ?? '';
-        if (call.name.length > 64 || call.arguments.length > 16000 || call.arguments.includes(this.credential)) throw new ModelGatewayError('INVALID_RESPONSE');
+        if (call.name.length > 64 || call.arguments.length > 16000 || this.secrets.contains(call)) throw new ModelGatewayError('INVALID_RESPONSE');
         this.calls.set(delta.index, call);
       }
     }
     if (choice.delta.refusal || (choice.finish_reason != null && choice.finish_reason !== (this.calls.size ? 'tool_calls' : 'stop'))) throw new ModelGatewayError("INVALID_RESPONSE");
     const delta = choice.delta.content ?? "";
     this.text += delta;
-    if (this.text.length > 128000 || this.text.includes(this.credential)) throw new ModelGatewayError("INVALID_RESPONSE");
+    if (this.text.length > 128000 || this.secrets.contains(this.text)) throw new ModelGatewayError("INVALID_RESPONSE");
     if (choice.finish_reason === 'stop' || choice.finish_reason === 'tool_calls') this.stopped = true;
     // Structured JSON and tool arguments are withheld until complete schema validation.
     if (this.policy?.structured) return '';
     // Do not expose a possible credential prefix before the next fragmented delta
     // proves it is ordinary text. A complete echo is rejected before emission.
-    let end = this.text.length;
-    if (!this.stopped) for (let size = Math.min(this.credential.length - 1, this.text.length); size > 0; size--) {
-      if (this.text.endsWith(this.credential.slice(0, size))) { end -= size; break; }
-    }
+    const end = this.stopped ? this.text.length : this.secrets.releaseLength(this.text);
+    if (end === null) throw new ModelGatewayError('INVALID_RESPONSE');
     const safe = this.text.slice(this.emitted, end); this.emitted = end;
     return safe;
   }
   finish(): AdapterResult {
     try {
       this.pending += this.decoder.decode();
-      if (this.failed || !this.done || !this.stopped || this.pending.trim()) throw new Error();
+      if (this.failed || this.terminalFailure || !this.done || !this.stopped || this.pending.trim()) throw new Error();
       const calls: ProtocolToolCall[] = [...this.calls.entries()].sort(([a], [b]) => a - b).map(([index, call], expected) => {
         if (index !== expected || !call.id || call.type !== 'function' || !call.name) throw new Error();
         return { id: call.id, type: call.type, function: { name: call.name, arguments: call.arguments } };
       });
       const extras = this.policy?.parse(this.text, calls) ?? {};
-      if (JSON.stringify(extras).includes(this.credential)) throw new Error();
+      if (this.secrets.contains(extras)) throw new Error();
       return { text: this.text, usage: this.usage, ...extras };
     } catch { this.failed = true; throw new ModelGatewayError("INVALID_RESPONSE"); }
   }

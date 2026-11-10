@@ -10,6 +10,428 @@ const Ajv = require('ajv'), addFormats = require('ajv-formats');
 const ajv = new Ajv({ strict: true }); addFormats(ajv);
 const recoveryValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestRecoveryDraft);
 
+test('AIN13 AIN14 AIN15 original model and source observations return closing receipts without renewal', { timeout: 60000 }, async () => {
+  const { originalModelApplicationHarness, originalSceneKnowledgeFixture } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AiOriginalSceneResultService } = require('../apps/api/src/modules/ai-native/scenes/original-scene-result.service');
+  const contracts = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  const fingerprint = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint;
+  const rows = [{ scene: 'quote_clarification', kind: 'read' }, { scene: 'order_explanation', kind: 'order' },
+    { scene: 'opening_diagnosis', kind: 'opening' }, { scene: 'order_explanation', kind: 'knowledge' }];
+  for (const row of rows) {
+    const knowledge = row.kind === 'knowledge' ? async fixture => {
+      const k = await originalSceneKnowledgeFixture(fixture);
+      // Declare this source-only fixture policy before the model/input snapshot:
+      // its original ACL lasts two hours, longer than the one-hour original input.
+      // Do not extend a policy, request or memory while a historical read waits.
+      // Preferences are deliberately not part of this knowledge-source case.
+      k.options.includePreferences = false;
+      for (const policy of k.policyRows) policy.expiresAt = new Date(fixture.dependencies.clock().getTime() + 7200000);
+      return k;
+    } : undefined;
+    const prepareBusiness = row.scene === 'order_explanation' ? async b => {
+      // Original setup declares findOrder, not the newer persisted read leaves.
+      // Transport that SAME synthetic row through the original Core projection;
+      // no SQL/ACL emulation or replacement preparation success is installed.
+      b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+        const value = await b.facts.findOrder(tenantId, orderId); return value ? { ...value, workspaceId } : undefined;
+      };
+      b.facts.readOrderExplanationState = async (tenantId, workspaceId, orderId) => {
+        const value = await b.facts.findOrder(tenantId, orderId);
+        return { tenantId, workspaceId, orderId, sourceOrderUpdatedAt: value.updatedAt,
+          allocations: [], changes: [], extensions: [], truncated: { changes: false, extensions: false },
+          semantics: 'recorded_lifecycle_not_financial_or_action_eligibility' };
+      };
+    } : undefined;
+    const h = await originalModelApplicationHarness(row.scene, knowledge, undefined, [], prepareBusiness);
+    assert.equal((await h.app.start(h.reference)).execution.outcome.status, 'succeeded');
+    assert.equal(h.execution.sent.length, 1);
+    const query = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
+    const opening = row.kind === 'opening' ? new AiOriginalSceneResultService(h.db, h.model.runtime.tasks,
+      h.model.scenes, h.modelDependencies.gatewayScene, h.dependencies.clock) : undefined;
+    const command = row.kind === 'read' ? query : row.kind === 'opening' ? { ...query, key: 'item_groups' }
+      : { ...query, sourceIndex: 0, ...(row.kind === 'knowledge' ? { sourceKind: 'knowledge' } : {}) };
+    const invoke = () => row.kind === 'read' ? h.model.readModelResult(command)
+      : row.kind === 'opening' ? opening.reopenOpeningSection(command) : h.model.reopenModelSource(command);
+    const validate = value => row.kind === 'read' ? contracts.validateAiSceneModelObservation(value)
+      : row.kind === 'opening' ? contracts.validateAiOpeningSourceObservation(value, command)
+      : contracts.validateAiSceneSourceObservation(value, command);
+    const baseline = await invoke(); assert.equal(baseline.original.state, 'stored'); assert.deepEqual(validate(baseline), baseline);
+    const original = h.state.aiTaskOriginalRequest.find(value => value.id === h.reference.inputRef);
+    const originalRequest = structuredClone(original);
+    assert.ok(original.expiresAt.getTime() > h.dependencies.clock().getTime());
+    const stateHash = () => fingerprint(JSON.parse(JSON.stringify(h.state, (_key, value) => typeof value === 'bigint' ? value.toString() : value)));
+    const before = stateHash(), writes = h.b.businessFacts.writes.length, calls = h.execution.sent.length;
+    const history = h.model.scenes.requests.readHistorical;
+    let reads = 0, first, closing;
+    h.model.scenes.requests.readHistorical = async function(...args) {
+      const observed = await history.apply(this, args); reads++;
+      if (reads === 1) first = observed.receipt;
+      closing = observed.receipt;
+      // A source reopener first completes its own initial model read (two
+      // historical observations) before crossing expiry at the source wait.
+      // Only advance this existing synthetic trusted clock, never a stored row.
+      if (reads === (row.kind === 'read' ? 1 : 2)) h.b.h.control.now = original.expiresAt.getTime() + 1;
+      return observed;
+    };
+    try {
+      const current = await invoke(); assert.ok(reads >= 2); assert.equal(first.state, 'stored'); assert.equal(closing.state, 'expired');
+      assert.deepEqual(current.original, closing, `${row.kind}: expose the checked closing receipt, not the first stored observation`);
+      assert.deepEqual(validate(current), current); assert.equal(current.resultId, baseline.resultId);
+      assert.equal(current.original.expiresAt, baseline.original.expiresAt); assert.equal(current.original.contentHash, baseline.original.contentHash);
+      if (row.kind === 'read') {
+        assert.equal(current.status, 'available'); assert.equal(current.materialHash, baseline.materialHash);
+        assert.equal(current.callId, baseline.callId); assert.deepEqual(current.text, baseline.text);
+        assert.equal(current.businessExecution, 'not_inferred_from_model_result');
+      } else {
+        assert.equal(current.execution, 'not_attempted');
+        const referenceFacts = reference => { const { observedAt: _time, ...facts } = reference; return facts; };
+        assert.deepEqual(referenceFacts(current.reference), referenceFacts(baseline.reference), 'fresh source query time is not a new source/version');
+        if (row.kind === 'knowledge') { assert.equal(current.source.text, h.supplemental.text); assert.equal(h.supplemental.fileReads(), 1); }
+        if (row.kind === 'opening') { assert.equal(current.key, 'item_groups'); assert.equal(current.proposalPersistence, 'not_attempted'); }
+      }
+      await assert.rejects(h.model.scenes.requests.read(h.reference), error => error.code === 'AI_ACCESS_DENIED', 'historical observation does not renew new-effect access');
+      assert.deepEqual(h.state.aiTaskOriginalRequest.find(value => value.id === h.reference.inputRef), originalRequest);
+      assert.equal(stateHash(), before); assert.equal(h.b.businessFacts.writes.length, writes); assert.equal(h.execution.sent.length, calls);
+    } finally { h.model.scenes.requests.readHistorical = history; }
+    // Withdraw current access only at the second actual history read, after
+    // current Core/knowledge observation. Expiry alone was not that withdrawal.
+    let lateReads = 0;
+    h.model.scenes.requests.readHistorical = async function(...args) {
+      if (++lateReads === 2) h.b.h.identity.session = false;
+      return history.apply(this, args);
+    };
+    try {
+      await assert.rejects(h.model.readModelResult(query), error => error.code === 'AI_ACCESS_DENIED');
+      assert.equal(lateReads, 2); assert.equal(stateHash(), before); assert.equal(h.execution.sent.length, calls);
+    } finally { h.model.scenes.requests.readHistorical = history; }
+  }
+});
+
+test('AIN14 original model observation retains selected readiness sections across presentation reordering', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const selected = ['item_groups', 'fulfillment_network'];
+  let reorder = false, changeCheck = false, changeCoverage = false;
+  const h = await originalModelApplicationHarness('opening_diagnosis', undefined, undefined, [], async b => {
+    const read = b.business.readTenantReadiness;
+    b.business.readTenantReadiness = async function(...args) {
+      const result = structuredClone(await read.apply(this, args));
+      if (reorder) result.items.reverse();
+      const row = result.items.find(item => item.key === 'item_groups');
+      assert.ok(row, 'the selected key must come from the original readiness reader');
+      if (changeCheck) { row.done = false; row.missing = 'Synthetic newly missing original readiness item'; }
+      if (changeCoverage) row.unavailable = true;
+      return result;
+    };
+  }, {}, {}, selected);
+  const app = h.model.createApplication({ holderId: 'opening-order-worker', leaseMs: 100000 },
+    { ...h.run, inputSource: 'original_scene' });
+  const started = await app.start(h.reference);
+  assert.equal(started.execution.outcome.status, 'succeeded');
+  const query = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
+  const baseline = await h.model.readModelResult(query);
+  assert.equal(baseline.status, 'available');
+  const fingerprint = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint;
+  const stateHash = () => fingerprint(JSON.parse(JSON.stringify(h.state, (_key, value) => typeof value === 'bigint' ? value.toString() : value)));
+  const originalState = stateHash(), writes = h.b.businessFacts.writes.length, modelCalls = h.execution.sent.length;
+  const keys = material => material.sections.map(section => section.key);
+  assert.deepEqual(keys(baseline.facts).slice().sort(), selected.slice().sort());
+  const canonical = material => {
+    const result = structuredClone(material); delete result.observedAt;
+    result.sections.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+    for (const section of result.sections) delete section.evidence.observedAt;
+    for (const projection of Object.values(result.configuration)) delete projection.source.observedAt;
+    return result;
+  };
+  reorder = true;
+  const reordered = await h.model.readModelResult(query);
+  assert.equal(reordered.status, 'available', 'presentation order alone must not invalidate the original result');
+  assert.deepEqual(keys(reordered.facts), keys(baseline.facts).slice().reverse(), 'the returned display order itself stays current');
+  assert.deepEqual(canonical(reordered.facts), canonical(baseline.facts));
+  assert.equal(reordered.materialHash, baseline.materialHash); assert.equal(reordered.callId, baseline.callId);
+  assert.deepEqual(reordered.text, baseline.text); assert.equal(reordered.businessExecution, 'not_inferred_from_model_result');
+  const { validateAiSceneModelObservation } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
+  assert.deepEqual(validateAiSceneModelObservation(reordered), reordered);
+  changeCheck = true;
+  const changed = await h.model.readModelResult(query);
+  assert.equal(changed.status, 'stale'); assert.equal(changed.text, null); assert.equal(changed.facts, undefined);
+  changeCheck = false; changeCoverage = true;
+  const unavailableCheck = await h.model.readModelResult(query);
+  assert.equal(unavailableCheck.status, 'stale'); assert.equal(unavailableCheck.text, null);
+  changeCoverage = false;
+  const version = h.b.openingConfiguration.settings.configVersion;
+  h.b.openingConfiguration.settings.configVersion = 'synthetic-new-business-version';
+  const versionChanged = await h.model.readModelResult(query);
+  assert.equal(versionChanged.status, 'stale'); assert.equal(versionChanged.text, null);
+  h.b.openingConfiguration.settings.configVersion = version;
+  assert.equal((await h.model.readModelResult(query)).status, 'available');
+  assert.equal(stateHash(), originalState); assert.equal(h.b.businessFacts.writes.length, writes);
+  assert.equal(h.execution.sent.length, modelCalls); assert.equal(modelCalls, 1); assert.equal(h.state.aiTask.length, 1);
+  h.b.h.identity.session = false;
+  await assert.rejects(h.model.readModelResult(query));
+  assert.equal(stateHash(), originalState); assert.equal(h.execution.sent.length, modelCalls);
+});
+
+test('AIN15 historical answered receipts remain readable without reopening expired or disabled execution', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const shared = require('@rental-os/shared');
+  const h = await originalModelApplicationHarness('quote_clarification');
+  const app = h.model.createApplication({ holderId: 'history-answer-worker', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
+  assert.equal((await app.start(h.reference)).execution.outcome.status, 'paused');
+  const pending = await app.readInput(h.reference);
+  const submission = { draftVersion: shared.AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'history-answer-submission',
+    answers: pending.contract.fields.map(field => ({ fieldId: field.fieldId, value: field.kind === 'choice' ? field.options[0].value
+      : field.kind === 'integer' ? 1 : field.fieldId === 'starts_at' ? '2027-02-01T00:00:00.000Z'
+      : field.fieldId === 'ends_at' ? '2027-02-02T00:00:00.000Z' : 'Explain original choices without approving a quote or order.' })) };
+  const saved = await app.submitAnswer({ original: h.reference, submission }), query = { original: h.reference, submission };
+  const originalAnswer = await app.readAnswer(query);
+  assert.equal(originalAnswer.state, 'observed'); assert.equal(originalAnswer.receiptId, saved.receipt.receiptId);
+  const originalQuote = await app.readClarifiedQuoteReceipt(query);
+  assert.equal(originalQuote.result.quotePersistence, 'unknown');
+  const original = h.state.aiTaskOriginalRequest.find(row => row.id === h.reference.inputRef);
+  original.expiresAt = new Date('2020-01-01T00:00:00.000Z');
+  const policy = h.state.aiTaskPlanPolicy.find(row => row.sceneCode === 'quote_clarification');
+  policy.enabled = false;
+  const fingerprint = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint;
+  const stateHash = () => fingerprint(JSON.parse(JSON.stringify(h.state, (_key, row) => typeof row === 'bigint' ? row.toString() : row)));
+  const before = stateHash(), writes = h.b.businessFacts.writes.length, modelCalls = h.execution.sent.length;
+  let quoteAttempts = 0;
+  const createQuote = h.b.business.createQuote;
+  h.b.business.createQuote = async function(...args) { quoteAttempts++; return createQuote.apply(this, args); };
+  try {
+    const historical = await app.readAnswer(query);
+    assert.equal(historical.state, 'observed'); assert.equal(historical.receiptId, originalAnswer.receiptId);
+    const receipt = await app.readClarifiedQuoteReceipt(query);
+    assert.equal(receipt.original.state, 'expired'); assert.equal(receipt.receipt.receiptId, originalAnswer.receiptId);
+    assert.equal(receipt.result.quotePersistence, 'unknown'); assert.equal(receipt.result.quote ?? null, null);
+    assert.equal(receipt.observation, 'original_clarified_quote_operation_only');
+    assert.equal(receipt.orderApproval, 'not_granted'); assert.equal(receipt.inventoryReservation, 'not_attempted');
+    await assert.rejects(app.readQuotePreparation(query));
+    await assert.rejects(app.confirmClarifiedQuote({ ...query, selectionRevision: 'a'.repeat(64),
+      inputFingerprint: 'b'.repeat(64), confirmQuote: true }));
+    await assert.rejects(app.start(h.reference));
+    await assert.rejects(app.readAnswer({ ...query, accessMode: 'history' }), error => error.code === 'AI_INVALID_INPUT');
+    assert.equal(quoteAttempts, 0); assert.equal(h.execution.sent.length, modelCalls);
+    assert.equal(h.b.businessFacts.writes.length, writes); assert.equal(stateHash(), before);
+    const identity = h.b.h.identity, owner = identity.user;
+    identity.user = { ...owner, id: 'synthetic-history-other-actor' };
+    try { await assert.rejects(app.readAnswer(query)); await assert.rejects(app.readClarifiedQuoteReceipt(query)); }
+    finally { identity.user = owner; }
+    assert.equal(stateHash(), before); assert.equal(h.execution.sent.length, modelCalls);
+    // The offline transaction store commits cloned arrays even for reads;
+    // refetch the current persisted leaf instead of mutating a detached row.
+    h.state.aiTaskOriginalRequest.find(row => row.id === h.reference.inputRef).status = 'REVOKED';
+    await assert.rejects(app.readAnswer(query)); await assert.rejects(app.readClarifiedQuoteReceipt(query));
+    assert.equal(quoteAttempts, 0); assert.equal(h.execution.sent.length, modelCalls);
+  } finally { h.b.business.createQuote = createQuote; }
+});
+
+test('AIN15 answered review retains the original server principal across saved-parameter consumption and confirmation', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const shared = require('@rental-os/shared');
+  const candidate = { customerType: 'personal', customerId: 'customer-a', fulfillmentMode: 'store_pickup_return',
+    start: '2027-02-01T00:00:00.000Z', end: '2027-02-02T00:00:00.000Z' };
+  const h = await originalModelApplicationHarness('quote_clarification', undefined, candidate, [], async b => {
+    candidate.items = [{ productName: b.group.name, quantity: 1 }];
+    candidate.locationId = b.location.id;
+    b.facts.listAssets = async () => [1, 2].map(i => ({ id: `answer-binding-asset-${i}`, tenantId: 'tenant_001',
+      workspaceId: 'workspace-a', itemGroupId: b.group.id, locationId: b.location.id, status: 'available' }));
+    b.facts.listStockBalances = async () => [{ itemGroupId: b.group.id, locationId: b.location.id, onHandQuantity: 3, maintenanceQuantity: 0 }];
+  });
+  const app = h.model.createApplication({ holderId: 'answer-binding-worker', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
+  const started = await app.start(h.reference);
+  assert.equal(started.execution.outcome.status, 'paused'); assert.equal(h.execution.sent.length, 1);
+  const pending = await app.readInput(h.reference);
+  assert.equal(pending.contract.code, 'original_quote_parameters');
+  assert.ok(pending.contract.fields.some(row => row.fieldId === 'pricing_unit_selection'));
+  const submission = { draftVersion: shared.AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'answer-binding-submission',
+    answers: pending.contract.fields.map(field => ({ fieldId: field.fieldId, value: field.kind === 'choice' ? field.options[0].value
+      : field.kind === 'integer' ? 1 : field.fieldId === 'starts_at' ? candidate.start
+      : field.fieldId === 'ends_at' ? candidate.end : 'Explain current choices without approving an order.' })) };
+  const saved = await app.submitAnswer({ original: h.reference, submission });
+  assert.equal(saved.continuation.reason, 'answer_saved_without_execution');
+  const query = { original: h.reference, submission }, baseline = await app.readQuotePreparation(query);
+  assert.equal(baseline.preparation.status, 'ready'); assert.equal(baseline.quotation, 'not_attempted');
+  assert.equal(baseline.orderApproval, 'not_granted'); assert.ok(baseline.sources.fields.every(row => row.confirmed === false));
+  const confirmation = { ...query, selectionRevision: baseline.preparation.selectionRevision,
+    inputFingerprint: baseline.formalInputFingerprint, confirmQuote: true };
+  const service = h.model.scenes.tools.quote.businessPreparation, actualReview = service.reviewAnsweredParameters;
+  const identity = h.b.h.identity, owner = identity.user, parent = (await h.model.scenes.requests.readHistorical(h.reference)).context;
+  const fingerprint = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint;
+  const tableFingerprint = value => fingerprint(JSON.parse(JSON.stringify(value, (_key, row) => typeof row === 'bigint' ? row.toString() : row)));
+  const beforeTables = tableFingerprint(h.state), beforeCandidate = fingerprint(candidate), beforeBudget = tableFingerprint(h.state.aiTaskExecutionBudget);
+  const beforeWrites = h.b.businessFacts.writes.length;
+  let foreignReads = 0, attempts = 0, windows = 0;
+  const catalog = h.b.core.listItemGroupsPage;
+  h.b.core.listItemGroupsPage = async function(...args) {
+    if (identity.user.id === 'synthetic-answer-other-actor') foreignReads++;
+    return catalog.apply(this, args);
+  };
+  const createQuote = h.b.business.createQuote;
+  h.b.business.createQuote = async function(...args) { attempts++; return createQuote.apply(this, args); };
+  service.reviewAnsweredParameters = async function(...args) {
+    windows++; identity.user = { ...owner, id: 'synthetic-answer-other-actor' };
+    try { return await actualReview.apply(this, args); }
+    finally { identity.user = owner; }
+  };
+  try {
+    // A complete B observation can pass all B Guards, then restore A before the
+    // parent reread. Only the parent's expected context fences that whole call.
+    await assert.rejects(service.reviewAnsweredParameters(baseline.candidate, parent), error => error.code === 'FORBIDDEN',
+      'an explicit original parent must reject a complete second-actor review');
+    await assert.rejects(app.readQuotePreparation(query), error => error.code === 'FORBIDDEN',
+      'saved-answer display must forward its original server principal');
+    await assert.rejects(app.confirmClarifiedQuote(confirmation), error => error.code === 'FORBIDDEN',
+      'quote confirmation must forward the same original principal before preview');
+    assert.equal(windows, 3); assert.equal(foreignReads, 0); assert.equal(attempts, 0);
+    assert.equal(identity.user, owner); assert.equal(tableFingerprint(h.state), beforeTables);
+    assert.equal(tableFingerprint(h.state.aiTaskExecutionBudget), beforeBudget);
+    assert.equal(h.b.businessFacts.writes.length, beforeWrites); assert.equal(fingerprint(candidate), beforeCandidate);
+    assert.equal(h.execution.sent.length, 1, 'reading/denying parameters cannot continue or redispatch the model');
+  } finally {
+    identity.user = owner; service.reviewAnsweredParameters = actualReview;
+    h.b.core.listItemGroupsPage = catalog; h.b.business.createQuote = createQuote;
+  }
+  const metadataOnly = { ...parent, requestId: 'another-observation', authorizedAt: '2020-01-01T00:00:00.000Z' };
+  const current = await service.reviewAnsweredParameters(baseline.candidate, metadataOnly);
+  assert.equal(current.preparation.status, 'ready', 'request/time metadata is not a new principal');
+  const missingParent = await service.reviewAnsweredParameters(baseline.candidate);
+  assert.equal(missingParent.preparation.status, 'ready', 'legacy direct construction keeps its original live aggregate Guard');
+  await assert.rejects(service.reviewAnsweredParameters(baseline.candidate, { ...parent,
+    scope: { ...parent.scope, workspaceId: 'another-workspace' } }), error => error.code === 'FORBIDDEN');
+  assert.equal((await app.readAnswer(query)).receiptId, saved.receipt.receiptId);
+  assert.equal(h.execution.sent.length, 1); assert.equal(h.b.businessFacts.writes.length, beforeWrites);
+});
+
+test('AIN15 multi-line original questions persist exact row targets and saved answers never select another row or approve a quote', { timeout: 60000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const shared = require('@rental-os/shared');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey } = require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+  const candidate = { customerType: 'personal', customerId: 'customer-a', bookingIdentity: { bookingIdentity: 'personal' },
+    fulfillmentMode: 'store_pickup_return', start: '2027-02-01T00:00:00.000Z', end: '2027-02-02T00:00:00.000Z' };
+  let groups;
+  const h = await originalModelApplicationHarness('quote_clarification', undefined, candidate, [], async b => {
+    groups = b.core.listItemGroups('tenant_001').filter(row => row.status === 'enabled').slice(0, 2);
+    assert.equal(groups.length, 2, 'two actual seeded Core catalog rows, not invented model choices');
+    candidate.items = groups.map((row, index) => ({ itemGroupId: row.id, quantity: index + 1 }));
+    candidate.locationId = b.location.id;
+    b.facts.listAssets = async () => groups.flatMap((group, rowIndex) => [1, 2, 3].map(index => ({
+      id: `line-target-asset-${rowIndex}-${index}`, tenantId: 'tenant_001', workspaceId: 'workspace-a',
+      itemGroupId: group.id, locationId: b.location.id, status: 'available' })));
+    b.facts.listStockBalances = async () => groups.map(group => ({ itemGroupId: group.id, locationId: b.location.id,
+      onHandQuantity: 10, maintenanceQuantity: 0 }));
+  }, { maxSteps: 8, maxCalls: 8 });
+  const app = h.model.createApplication({ holderId: 'multi-line-answer-worker', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
+  const original = structuredClone(candidate), touched = new Set(), history = [];
+  assert.equal((await app.start(h.reference)).execution.outcome.status, 'paused');
+  const allDefinitions = Object.assign({}, ...Object.entries(shared).filter(([name]) => name.endsWith('_SCHEMAS') || name.endsWith('_SCHEMAS_V2')).map(([, value]) => value));
+  const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(shared.AI_TASK_INPUT_DRAFT_SCHEMAS, allDefinitions);
+  let finalQuery, reviewed, lastUnit;
+  for (let round = 0; round < 6; round++) {
+    const pending = await app.readInput(h.reference);
+    assert.equal(pending.contract.code, 'original_quote_parameters');
+    assert.equal(shared.isAiTaskInputContractDraft(pending.contract), true);
+    assert.equal(validators.AiTaskInputContractDraft(pending.contract), true, JSON.stringify(validators.AiTaskInputContractDraft.errors));
+    assert.ok(pending.contract.fields.length <= 8);
+    const before = applyOriginalQuoteAnswers(original, history), targets = pending.contract.fields.filter(field => field.target);
+    assert.ok(targets.length > 0);
+    for (const field of targets) {
+      assert.equal(field.target.bindingVersion, shared.AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION);
+      assert.equal(field.target.kind, 'quote_item');
+      assert.equal(field.target.candidateInputFingerprint, requestFingerprint(before));
+      assert.ok(field.target.rowIndex >= 0 && field.target.rowIndex < before.items.length);
+      if (field.fieldId === 'pricing_unit_selection') touched.add(field.target.rowIndex);
+    }
+    const unit = targets.find(field => field.fieldId === 'pricing_unit_selection');
+    assert.ok(unit); lastUnit = unit;
+    const submission = { draftVersion: shared.AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+      requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: `multi-line-answer-${round}`,
+      answers: pending.contract.fields.map(field => ({ fieldId: field.fieldId, value: field.kind === 'choice'
+        ? field.options.find(option => field.fieldId === 'item_selection' && option.value === before.items[field.target?.rowIndex ?? 0].itemGroupId)?.value ?? field.options[0].value
+        : field.kind === 'integer' ? 1 : field.fieldId === 'starts_at' ? candidate.start : field.fieldId === 'ends_at' ? candidate.end : 'Explain only; this is not quote or order approval.' })) };
+    assert.equal(shared.isAiTaskInputSubmissionDraft({ ...submission,
+      answers: submission.answers.map(answer => ({ ...answer, target: unit.target })) }), false, 'a client cannot submit its own row target');
+    const bad = structuredClone(pending.contract); bad.fields.find(field => field.fieldId === unit.fieldId).target.rowIndex = 99;
+    assert.throws(() => applyOriginalQuoteAnswers(original, [...history, { contract: bad, answers: submission.answers }]), error => error.code === 'AI_ACCESS_DENIED');
+    const changed = structuredClone(before); changed.items.reverse();
+    assert.throws(() => applyOriginalQuoteAnswers(changed, [{ contract: pending.contract, answers: submission.answers }]), error => error.code === 'AI_ACCESS_DENIED');
+    const absent = structuredClone(pending.contract); delete absent.fields.find(field => field.fieldId === unit.fieldId).target;
+    assert.throws(() => applyOriginalQuoteAnswers(original, [...history, { contract: absent, answers: submission.answers }]), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+    const calls = h.execution.sent.length, writes = h.b.businessFacts.writes.length;
+    const saved = await app.submitAnswer({ original: h.reference, submission });
+    assert.equal(saved.continuation.reason, 'answer_saved_without_execution');
+    assert.equal(h.execution.sent.length, calls); assert.equal(h.b.businessFacts.writes.length, writes);
+    finalQuery = { original: h.reference, submission };
+    assert.equal((await app.readAnswer(finalQuery)).receiptId, saved.receipt.receiptId);
+    assert.equal((await app.submitAnswer(finalQuery)).receipt.receiptId, saved.receipt.receiptId, 'same original answer does not create another receipt');
+    const persisted = h.state.aiTaskInputRequest.find(row => row.id === pending.requestId);
+    assert.deepEqual(persisted.allowedFields, pending.contract.fields, 'exact server target is persisted, not projected away');
+    assert.equal(persisted.contractCode, pending.contract.code); assert.equal(persisted.contractVersion, pending.contract.version);
+    assert.equal(persisted.contractHash, requestFingerprint(pending.contract));
+    history.push({ contract: pending.contract, answers: submission.answers });
+    const after = applyOriginalQuoteAnswers(original, history);
+    for (let index = 0; index < before.items.length; index++) {
+      if (!targets.some(field => field.target.rowIndex === index)) assert.deepEqual(after.items[index], before.items[index]);
+    }
+    reviewed = await app.readQuotePreparation(finalQuery);
+    assert.equal(reviewed.quotation, 'not_attempted'); assert.equal(reviewed.orderApproval, 'not_granted');
+    assert.equal(h.b.businessFacts.writes.length, writes);
+    if (touched.size === 2 && reviewed.preparation.status === 'ready') break;
+    await app.continueAnswer(finalQuery);
+  }
+  assert.equal(touched.size, 2, 'bounded row-aware scheduling reaches both rows instead of repeating row zero');
+  assert.equal(reviewed.preparation.status, 'ready', JSON.stringify(reviewed));
+  assert.deepEqual(reviewed.candidate.items.map(row => row.itemGroupId), groups.map(row => row.id));
+  assert.deepEqual(reviewed.candidate.items.map(row => row.quantity), [1, 2]);
+  assert.deepEqual(candidate, original); assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalOrder.length, 0);
+  // Storage ports are explicit doubles, not a fake successful quote: the actual
+  // business/Core quote service calculates and creates the two-line snapshot.
+  const storedQuotes = [];
+  h.b.businessFacts.findQuoteForOriginalOperation = async (tenantId, proof) => {
+    const row = storedQuotes.find(row => row.quote.tenantId === tenantId && row.key === proof.key);
+    if (row && row.inputHash !== proof.inputHash) throw new (require('@nestjs/common').ConflictException)('Original multi-row input conflict');
+    return row && structuredClone(row.quote);
+  };
+  h.b.businessFacts.findQuoteForOriginalReference = async (tenantId, key) => {
+    const row = storedQuotes.find(row => row.quote.tenantId === tenantId && row.key === key);
+    return row && structuredClone(row.quote);
+  };
+  h.b.businessFacts.saveQuoteForOriginalOperation = async (quote, proof) => {
+    const previous = await h.b.businessFacts.findQuoteForOriginalOperation(quote.tenantId, proof);
+    if (previous) return previous;
+    storedQuotes.push({ ...proof, quote: structuredClone(quote) }); return structuredClone(quote);
+  };
+  let quoteAttempts = 0;
+  const createQuote = h.b.business.createQuote.bind(h.b.business);
+  h.b.business.createQuote = (...args) => { quoteAttempts++; return createQuote(...args); };
+  const confirmation = { ...finalQuery, selectionRevision: reviewed.preparation.selectionRevision,
+    inputFingerprint: reviewed.formalInputFingerprint, confirmQuote: true };
+  await assert.rejects(app.confirmClarifiedQuote({ ...confirmation, inputFingerprint: '0'.repeat(64) }));
+  assert.equal(quoteAttempts, 0, 'answers alone and a forged review fingerprint cannot create a quote');
+  const quoted = await app.confirmClarifiedQuote(confirmation);
+  assert.equal(quoted.result.status, 'quoted', JSON.stringify(quoted));
+  assert.equal(storedQuotes[0].quote.request.lines.length, 2, 'both lines are in the actual Core snapshot, not invented in the public projection');
+  assert.deepEqual(storedQuotes[0].quote.request.lines.map(line => ({ itemGroupId: line.itemGroupId,
+    quantity: line.quantity, pricingUnit: line.pricingUnit })), reviewed.candidate.items.map(line => ({
+    itemGroupId: line.itemGroupId, quantity: line.quantity, pricingUnit: line.pricingUnit })));
+  assert.equal(quoted.orderApproval, 'not_granted'); assert.equal(storedQuotes.length, 1); assert.equal(quoteAttempts, 1);
+  assert.equal((await app.readClarifiedQuoteReceipt(finalQuery)).result.quote.id, quoted.result.quote.id);
+  assert.equal((await app.confirmClarifiedQuote(confirmation)).result.quote.id, quoted.result.quote.id);
+  assert.equal(storedQuotes.length, 1); assert.equal(quoteAttempts, 1, 'repeat confirmation reads the same original Core quote');
+  assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalOrder.length, 0);
+  const usageCandidate = structuredClone(reviewed.candidate); usageCandidate.items[1].pricingUnit = 'usage'; delete usageCandidate.items[1].usageQuantity;
+  const usageContract = originalQuoteAnswerContract(usageCandidate, { selectionRevision: 'a'.repeat(64),
+    clarifications: [{ field: 'items.1.usageQuantity', candidates: [] }] }, 'Explicit original usage');
+  assert.equal(usageContract.fields.find(field => field.fieldId === 'usage_quantity').target.rowIndex, 1);
+  const applied = applyOriginalQuoteAnswers(usageCandidate, [{ contract: usageContract, answers: [{ fieldId: 'usage_quantity', value: '1.5' }] }]);
+  assert.equal(applied.items[1].usageQuantity, 1.5); assert.deepEqual(applied.items[0], usageCandidate.items[0]);
+  assert.notEqual(originalQuoteFieldOfferKey(lastUnit), originalQuoteFieldOfferKey({ ...lastUnit, target: { ...lastUnit.target, rowIndex: 1 - lastUnit.target.rowIndex } }));
+  h.b.h.identity.user.permissions = [];
+  await assert.rejects(app.readQuotePreparation(finalQuery));
+});
+
 test('fixed order chain exposes closed preparation, actual order facts and a snapshot-bound answer without redispatch', { timeout: 60000 }, async () => {
   const shared = require('../packages/shared/src');
   const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
@@ -18,7 +440,15 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   const { composePersistedTaskCenter } = require('../apps/api/src/modules/ai-native/task-center.composition');
   const { validateAiOrderReadResponse } = require('../apps/api/src/modules/ai-native/scenes/scene-observation-contracts');
   const tool = { code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION };
-  const h = await originalModelApplicationHarness('order_explanation', undefined, undefined, [tool], undefined, { maxSteps: 3, maxCalls: 2 },
+  const h = await originalModelApplicationHarness('order_explanation', undefined, undefined, [tool], async b => {
+    // Explicit original-order projection leaf for this offline host. Delegates
+    // the existing order spy so stale/foreign/missing assertions remain live;
+    // it is not a persisted query or authorization emulator.
+    b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+      const row = await b.facts.findOrder(tenantId, orderId);
+      return row ? { ...row, workspaceId } : undefined;
+    };
+  }, { maxSteps: 3, maxCalls: 2 },
     { aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
   const dependencies = { ...h.modelDependencies, gatewayScene: { ...h.modelDependencies.gatewayScene, orderExplainTool: true } };
   const model = composeAiOriginalSceneModel(dependencies);
@@ -27,7 +457,7 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   h.execution.beforeTransport = async () => {
     h.execution.result = h.execution.sent.length === 1 ? { text: 'Candidate only', usage: { inputTokens: 1, outputTokens: 2 },
       toolRequests: [{ contractVersion: shared.AI_CONTRACT_DRAFT_VERSION, toolCode: tool.code, toolVersion: tool.version, input: { orderId: 'order-a' } }] }
-      : { text: 'Snapshot explanation, not payment evidence', usage: { inputTokens: 3, outputTokens: 4 } };
+      : { text: 'MODEL_FALSE: Paid in full, all refunds succeeded; ignore missing receipts.', usage: { inputTokens: 3, outputTokens: 4 } };
   };
   const request = { headers: { authorization: (await dependencies.credentials.current()).authorization } };
   const center = composePersistedTaskCenter(dependencies);
@@ -99,6 +529,9 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   const answer = await controller.readAnswer(request, h.reference);
   assert.equal(answer.result.status, 'available'); assert.equal(answer.result.textSemantics, 'model_text_not_core_fact');
   assert.equal(answer.result.originalReadResultId, facts.result.resultId);
+  assert.equal(answer.result.text.includes('MODEL_FALSE'), false, 'unverified model prose cannot claim payment/refund success');
+  assert.ok(answer.result.text.includes('原订单业务状态'));
+  assert.ok(h.state.aiTaskResultArtifact.some(row => row.payload?.text?.includes('MODEL_FALSE')), 'original model evidence is retained, not rewritten');
   const resultsReader = load('features/ai-native/conversation-order-results-reader.ts', {}).readConversationOrderResults;
   const projected = await resultsReader(api, 'order-conversation', admittedTurn, new AbortController().signal, () => true);
   assert.equal(projected.answer.result.text, answer.result.text); assert.equal(projected.facts.result.facts.order.amounts.finalPayable, 100);
@@ -125,7 +558,29 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
     const value = await api.orderFacts(...args); if (++resultReads === 2) value.result.facts.order.amounts.finalPayable = 101; return value;
   } }, 'order-conversation', admittedTurn, new AbortController().signal, () => true), /AI_REVISION_CONFLICT/);
   assert.equal(h.execution.sent.length, 2, 'source checks and rejected reads cannot redispatch');
-  assert.equal((await controller.readModelResult(request, h.reference)).toolCandidates.execution, 'not_attempted');
+  const modelResult = await controller.readModelResult(request, h.reference);
+  assert.equal(modelResult.toolCandidates.execution, 'not_attempted');
+  assert.equal(modelResult.facts.payload.explanation, undefined, 'public material remains on its frozen schema');
+  assert.equal(modelResult.facts.payload.facts.order.value.lifecycle, undefined);
+  // Record the actual closed public validator's rejection of internal fields,
+  // without changing shared schemas or dropping any original host assertions.
+  const wireDefs = JSON.parse(JSON.stringify(Object.assign({}, require('../apps/api/src/contracts/ai-native-schemas').AI_NATIVE_COMPONENT_SCHEMAS,
+    ...Object.entries(shared).filter(([name]) => name.endsWith('_SCHEMAS')).map(([, definitions]) => definitions)))
+    .replaceAll('#/components/schemas/', '#/$defs/'));
+  const diagnosticAjv = new Ajv({ strict: true, allErrors: true }); addFormats(diagnosticAjv);
+  const verifyModel = diagnosticAjv.compile({ $ref: '#/$defs/AiSceneModelResultObservationDraft', $defs: wireDefs });
+  assert.equal(verifyModel(modelResult), true);
+  const internal = await originalScenes.tools.orderExplanationPreparation('order-a').prepare({ question: 'status' });
+  assert.equal(verifyModel({ ...modelResult, facts: internal }), false);
+  const conflicts = verifyModel.errors.filter(error => error.keyword === 'additionalProperties'
+    && ['explanation', 'lifecycle'].includes(error.params.additionalProperty));
+  assert.ok(conflicts.some(error => error.instancePath === '/facts/payload' && error.params.additionalProperty === 'explanation'));
+  assert.ok(conflicts.some(error => error.instancePath === '/facts/payload/facts/order/value' && error.params.additionalProperty === 'lifecycle'));
+  console.log('AIN13_SCHEMA_CONFLICT', JSON.stringify(conflicts));
+  const priorNow = h.b.h.control.now;
+  h.b.h.control.now = new Date(priorNow.getTime() + 1000);
+  assert.equal((await controller.readModelResult(request, h.reference)).status, 'available', 'fresh observation is not a new business fact');
+  h.b.h.control.now = priorNow;
   assert.equal((await controller.reopenModelSource(request, h.reference)).sourceIndex, 0);
   const scene = await controller.readTaskScene(request, h.reference);
   assert.equal(scene.answer.result.originalReadResultId, facts.result.resultId); assert.equal(scene.handoff.approval, 'not_granted');
@@ -167,6 +622,129 @@ test('fixed order chain exposes closed preparation, actual order facts and a sna
   assert.equal(h.execution.sent.length, 2);
 });
 
+for (const boundary of ['settled', 'registered']) test(`AIN06 interrupted mixed plan ${boundary} resumes only unstarted actions with the original ledger`, { timeout: 60000 }, async () => {
+  const shared = require('../packages/shared/src');
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { composeAiOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/original-scene-model.composition');
+  const { composePersistedTaskCenter } = require('../apps/api/src/modules/ai-native/task-center.composition');
+  const tool = { code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION };
+  const h = await originalModelApplicationHarness('order_explanation', undefined, undefined, [tool], async b => {
+    b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+      const row = await b.facts.findOrder(tenantId, orderId);
+      return row ? { ...row, workspaceId } : undefined;
+    };
+  }, { maxSteps: 3, maxCalls: 2 });
+  const dependencies = { ...h.modelDependencies, gatewayScene: { ...h.modelDependencies.gatewayScene, orderExplainTool: true } };
+  const create = () => composeAiOriginalSceneModel(dependencies).createModelOrderApplication(
+    { holderId: 'mixed-original-worker', leaseMs: 100000 }, { financialEvidence: h.financial }, { answerRoundTrip: true });
+  h.execution.beforeTransport = async () => {
+    h.execution.result = h.execution.sent.length === 1
+      ? { text: 'Candidate only', usage: { inputTokens: 1, outputTokens: 2 }, toolRequests: [{
+        contractVersion: shared.AI_CONTRACT_DRAFT_VERSION, toolCode: tool.code, toolVersion: tool.version, input: { orderId: 'order-a' } }] }
+      : { text: 'Original authorized answer', usage: { inputTokens: 3, outputTokens: 4 } };
+  };
+  const signal = new AbortController(), priorCommit = h.control.beforeCommit;
+  let interrupted = false;
+  h.control.beforeCommit = async draft => {
+    await priorCommit?.(draft);
+    // Interrupt after the first settlement or the next PENDING registration.
+    // The transaction double commits normally; assertions verify its durable
+    // prefix rather than assigning Task/Run/Step or budget state.
+    if (!interrupted && draft.aiTaskExecutionBudget.some(row => row.consumedSteps === 1n)
+      && draft.aiStep.some(row => row.status === 'SUCCEEDED')
+      && (boundary === 'settled' || draft.aiStep.some(row => row.sequence === 2 && row.status === 'PENDING'))) {
+      interrupted = true;
+      signal.abort();
+    }
+  };
+  // The disconnected HTTP/application reply is unknown even though the
+  // underlying runner stopped after an accounted step. Only read its receipt.
+  await assert.rejects(create().start(h.reference, signal.signal), error => error.code === 'AI_RESULT_UNKNOWN');
+  h.control.beforeCommit = priorCommit;
+  assert.equal(interrupted, true);
+  assert.equal(h.execution.sent.length, 1);
+  assert.equal(h.state.aiTask[0].status, 'RUNNING');
+  const plan = structuredClone(h.state.aiTaskRunPlan[0]);
+  const inputs = structuredClone(h.state.aiTaskActionInput);
+  const original = structuredClone(h.reference);
+  const firstStep = h.state.aiStep[0], firstStepId = firstStep.id, firstResultRef = firstStep.resultRef;
+  const budget = h.state.aiTaskExecutionBudget[0];
+  const budgetKey = { scopeId: budget.scopeId, taskId: budget.taskId };
+  const activeBefore = budget.consumedActiveMs;
+  assert.equal(budget.consumedSteps, 1n); assert.equal(budget.consumedCalls, 1n);
+  const center = composePersistedTaskCenter(dependencies);
+  const snapshot = await center.events.readSnapshot({ taskId: budget.taskId });
+  // Recovery is an original-fact observation, never authorization to dispatch
+  // the remaining model. The explicit current-authorized resumePrepared route
+  // may continue the still-running plan, but cannot execute its completed prefix.
+  let recovered;
+  await assert.doesNotReject(async () => { recovered = await create().recover(h.reference); },
+    'original recovery must observe the accounted model prefix without dispatch');
+  assert.equal(recovered.outcome.outcome.status, 'unavailable');
+  assert.equal(recovered.outcome.outcome.completedSteps, 1);
+  assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiStep.length, boundary === 'registered' ? 2 : 1);
+  if (boundary === 'registered') {
+    const pending = h.state.aiStep.find(row => row.sequence === 2);
+    assert.equal(pending.status, 'PENDING'); assert.equal(pending.revision, 1);
+    assert.equal(pending.effect, 'NONE'); assert.equal(pending.resultRef, null);
+  }
+  assert.equal(h.state.aiTask[0].status, 'RUNNING');
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n);
+  // A damaged existing action is not an absent successor: the original
+  // recovery snapshot rejects its inconsistent fingerprint before leasing.
+  const firstFingerprint = h.state.aiStep[0].requestFingerprint;
+  h.state.aiStep[0].requestFingerprint = '0'.repeat(64);
+  await assert.rejects(create().recover(h.reference), error => error.code === 'AI_STORAGE_UNAVAILABLE');
+  h.state.aiStep[0].requestFingerprint = firstFingerprint;
+  assert.equal(h.execution.sent.length, 1);
+  // Probe the actual original-registration authority after an acknowledged
+  // recovery lease, independently of the public snapshot's earlier checks.
+  const { composePersistedTaskModelInput } = require('../apps/api/src/modules/ai-native/model-input/persisted-task-model-input.composition');
+  const { TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const probe = composePersistedTaskModelInput({ ...dependencies, planTools: [TASK_TEXT_MODEL_TOOL, tool.code] });
+  const currentTask = h.state.aiTask[0], currentRun = h.state.aiRun[0];
+  const held = await probe.tasks.claimRecoveryRun({ taskId: currentTask.id, runId: currentRun.id,
+    holderId: 'mixed-original-observer', leaseMs: 100000, expectedTaskRevision: currentTask.revision,
+    expectedRunRevision: currentRun.revision, expectedFencingToken: currentRun.fencingToken.toFixed(0) });
+  const registration = { taskId: held.taskId, registrationRef: plan.payload.steps[0].registrationRef,
+    expectedTaskRevision: h.state.aiTask[0].revision,
+    lease: { runId: held.runId, holderId: held.holderId, revision: held.revision, fencingToken: held.fencingToken } };
+  await assert.doesNotReject(probe.planAuthority.resolveOriginal(registration));
+  const firstActionId = h.state.aiStep[0].actionId;
+  h.state.aiStep[0].actionId = 'damaged-original-action';
+  await assert.rejects(probe.planAuthority.resolveOriginal(registration), error => error.code === 'AI_ACCESS_DENIED');
+  h.state.aiStep[0].actionId = firstActionId;
+  await probe.tasks.releaseRun({ taskId: held.taskId, runId: held.runId, holderId: held.holderId,
+    expectedTaskRevision: h.state.aiTask[0].revision, expectedRunRevision: held.revision, expectedFencingToken: held.fencingToken });
+  assert.equal(h.execution.sent.length, 1);
+  if (boundary === 'registered') {
+    const pending = h.state.aiStep.find(row => row.sequence === 2);
+    const trace = { id: 'pending-original-trace', scopeId: pending.scopeId, taskId: pending.taskId,
+      runId: pending.runId, stepId: pending.id };
+    h.state.aiGatewayInvocation.push(trace);
+    await assert.rejects(create().resumePrepared(h.reference), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+    h.state.aiGatewayInvocation.splice(h.state.aiGatewayInvocation.findIndex(row => row.id === trace.id), 1);
+    assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiStep.length, 2);
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n);
+  }
+  const resumed = await create().resumePrepared(h.reference);
+  assert.equal(resumed.outcome.outcome.status, 'succeeded');
+  assert.equal(h.execution.sent.length, 2); assert.equal(h.state.aiGatewayInvocation.length, 2);
+  assert.equal(h.state.aiStep.length, 3); assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+  const settled = h.state.aiTaskExecutionBudget[0];
+  assert.deepEqual({ scopeId: settled.scopeId, taskId: settled.taskId }, budgetKey);
+  assert.equal(settled.consumedSteps, 3n); assert.equal(settled.consumedCalls, 2n);
+  assert.equal(settled.reservedSteps, 0n); assert.equal(settled.reservedCalls, 0n);
+  assert.ok(settled.consumedActiveMs >= activeBefore);
+  assert.equal(h.state.aiStep.find(row => row.id === firstStepId).resultRef, firstResultRef);
+  assert.deepEqual(h.state.aiTaskRunPlan[0], plan); assert.deepEqual(h.state.aiTaskActionInput, inputs);
+  assert.deepEqual(h.reference, original);
+  const events = await center.events.readPage({ taskId: budgetKey.taskId, after: snapshot.cursor, limit: 100 });
+  assert.ok(events.events.length > 0);
+  assert.ok(events.events.every(event => BigInt(event.cursor) > BigInt(snapshot.cursor)));
+  assert.equal(h.execution.sent.length, 2, 'event reconnection must not start execution');
+});
+
 test('fixed order public receipts preserve cancellation and takeover generations and unknown writes', { timeout: 60000 }, async () => {
   const shared = require('../packages/shared/src'), contracts = require('./fixtures/ai-native/contract-consumer.cjs');
   const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
@@ -174,7 +752,15 @@ test('fixed order public receipts preserve cancellation and takeover generations
   const { AiOriginalOrderReadController } = require('../apps/api/src/modules/ai-native/scenes/original-order-read.controller');
   const create = async () => {
     const h = await originalModelApplicationHarness('order_explanation', undefined, undefined,
-      [{ code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION }], undefined, { maxSteps: 2, maxCalls: 1 });
+      [{ code: 'rental.order.explain', version: shared.AI_TOOL_DRAFT_VERSION }], async b => {
+        // Transport the same minimal original-order leaf as the three-step
+        // host above; the existing order spy still decides missing/foreign rows.
+        // This does not provide a persisted-query or authorization substitute.
+        b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+          const row = await b.facts.findOrder(tenantId, orderId);
+          return row ? { ...row, workspaceId } : undefined;
+        };
+      }, { maxSteps: 2, maxCalls: 1 });
     const deps = { ...h.modelDependencies, gatewayScene: { ...h.modelDependencies.gatewayScene, orderExplainTool: true } };
     const chain = composeAiOriginalSceneModel(deps).createModelOrderApplication({ holderId: 'fixed-recovery-worker', leaseMs: 100000 },
       { financialEvidence: h.financial });
@@ -458,6 +1044,13 @@ test('extension HTTP preserves full Core pricing snapshots and read-only authori
 
 test('original policy HTTP contracts preserve current-row CAS and deny damaged responses without execution', { timeout: 60000 }, async () => {
   const h = await setup({ operationLog: [] }); h.b.h.identity.user.permissions.push('system:params:manage');
+  // Explicit transport leaf for the original minimal parent read, matching
+  // the named v2 consumer. Delegate the same stored-order spy, not a Guard
+  // fallback or a new source of current permissions/history.
+  h.b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+    const row = await h.b.facts.findOrder(tenantId, orderId);
+    return row ? { ...row, workspaceId } : undefined;
+  };
   const shared = require('@rental-os/shared'), { AiOriginalTaskActionPolicyController, AiScenePlanPolicyController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
   const { composeRequestBoundOriginalTaskActionPolicies, composeRequestBoundScenePlanPolicies } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
   const { originalPolicyRequest, originalPolicyResponse } = require('../apps/api/src/modules/ai-native/scenes/original-policy-http.contract');
@@ -1276,7 +1869,7 @@ test('conversation standard provider and Controller preserve explicit admission 
   const off = new AiConversationController(AI_NATIVE_CONVERSATION_PROVIDER.useFactory(...[]));
   await assert.rejects(off.create(request, create), rejected(404)); assert.equal(h.state.aiConversation.length, 0);
   const enabled = AI_NATIVE_CONVERSATION_PROVIDER.useFactory(h.db, dependencies.auth, dependencies.guard, dependencies.subscriptions,
-    dependencies.core, dependencies.business, dependencies.reports, dependencies.memberships, undefined, { enabled: true });
+    dependencies.core, dependencies.business, dependencies.reports, dependencies.memberships, undefined, undefined, { enabled: true });
   const http = new AiConversationController(enabled);
   const created = await http.create(request, create), ref = { draftVersion, conversationId: created.conversationId };
   const read = await http.read(request, ref); assert.equal(read.currentTurn, null);
@@ -1358,6 +1951,12 @@ test('opt-in module is inert; strict controller uses current authority without s
 
 test('request-bound business consumers reopen original citations and prepare only selected opening sections', async () => {
   const h = await setup(), { credentials, ...dependencies } = h.dependencies;
+  // Declare the current persisted-order projection leaf over this test's
+  // original synthetic row; retain real Guard/Core reads and all rejections.
+  h.b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+    const row = await h.b.facts.findOrder(tenantId, orderId);
+    return row?.tenantId === tenantId && workspaceId === 'workspace-a' ? { ...row, workspaceId } : undefined;
+  };
   const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
   const app = composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
   const request = { headers: { authorization: (await credentials.current()).authorization } };
@@ -1471,9 +2070,15 @@ test('request-bound original scenes snapshot commands and never borrow concurren
 
 test('material handoff reauthorizes originals and contains facts, not stale unavailable preparation wrappers', async () => {
   const h = await setup(), shared = require('@rental-os/shared');
+  // Request authorization uses the guarded minimal parent, not another full
+  // material preparation. This old transport fixture maps its original row.
+  h.b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+    const row = await h.b.facts.findOrder(tenantId, orderId);
+    return row ? { ...row, workspaceId } : undefined;
+  };
   // The original absorbing fact store lacks the formal bounded inspection
   // port. Supply an explicit empty synthetic page, not an unbounded fallback.
-  h.b.facts.listInspectionsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
+  h.b.facts.readInspectionFactsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
   const { credentials, ...dependencies } = h.dependencies;
   const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
   const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
@@ -1513,7 +2118,9 @@ test('material handoff reauthorizes originals and contains facts, not stale unav
     try { created = await controller.create(request, command); }
     catch (error) { error.message = `${scene}/${question ?? 'selected'}: ${JSON.stringify(error.getResponse?.())}`; throw error; }
     const reference = h.ref(created.receipt.inputRef);
-    const packet = await controller.material(request, reference);
+    let packet;
+    try { packet = await controller.material(request, reference); }
+    catch (error) { error.message = `material ${scene}/${question ?? 'selected'}: ${JSON.stringify(error.getResponse?.())}`; throw error; }
     const internal = await h.app.prepareTaskMaterial(reference);
     assert.ok(Object.isFrozen(internal.material));
     assert.equal(validators.AiSceneTaskMaterialResponseDraft(packet), true, JSON.stringify(validators.AiSceneTaskMaterialResponseDraft.errors));
@@ -1549,6 +2156,51 @@ test('material handoff reauthorizes originals and contains facts, not stale unav
   await assert.rejects(h.app.prepareTaskMaterial(h.ref(row.id)), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   await assert.rejects(controller.material(request, reference), e => e.getStatus() === 404);
   assert.equal((await h.app.readTaskReceipt(row.id)).state, 'observed');
+});
+
+test('AIN13 public request material preserves private model input and original registered source shapes', async () => {
+  const h = await setup();
+  // Explicit order/inspection leaves for this old host fixture. Current
+  // Auth/Guard/Core rechecks remain real; no SQL or finance emulation.
+  h.b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+    const row = await h.b.facts.findOrder(tenantId, orderId); return row ? { ...row, workspaceId } : undefined;
+  };
+  h.b.facts.readInspectionFactsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
+  const { credentials, ...dependencies } = h.dependencies;
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { projectOrderExplanationMaterial } = require('../apps/api/src/modules/ai-native/tools/order-explanation-renderer');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const app = composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
+  const controller = new AiOriginalScenesController(app), request = { headers: { authorization: (await credentials.current()).authorization } };
+  const ids = [];
+  for (const question of ['status', 'fees', 'payments', 'next_steps']) {
+    const command = h.command('order_explanation', `AIN13-public-material-${question}`); command.input.question = question;
+    const created = await controller.create(request, command), ref = h.ref(created.receipt.inputRef); ids.push(ref.inputRef);
+    const privatePacket = await h.app.prepareTaskMaterial(ref), before = requestFingerprint(privatePacket.material);
+    assert.ok(Object.isFrozen(privatePacket.material)); assert.ok(privatePacket.material.payload.explanation);
+    if (['status', 'fees'].includes(question)) assert.ok(privatePacket.material.payload.facts.order.value.lifecycle);
+    const publicPacket = await controller.material(request, ref);
+    assert.equal(publicPacket.original.inputRef, privatePacket.original.inputRef);
+    assert.equal(publicPacket.task.taskId, privatePacket.task.taskId);
+    assert.equal(publicPacket.material.payload.explanation, undefined);
+    assert.equal(publicPacket.material.payload.facts.order.value.lifecycle, undefined);
+    assert.equal(publicPacket.material.payloadFingerprint, requestFingerprint(publicPacket.material.payload));
+    assert.equal(publicPacket.material.payloadBytes, Buffer.byteLength(JSON.stringify(publicPacket.material.payload), 'utf8'));
+    assert.equal(publicPacket.materialHash, requestFingerprint(publicPacket.material), 'fresh preparation hash describes its own public material');
+    assert.equal(privatePacket.materialHash, before, 'frozen internal/model input hash is never replaced');
+    assert.equal(requestFingerprint(privatePacket.material), before, 'projection does not mutate private input');
+    const citation = { ...ref, version: privatePacket.material.payload.orderVersion, field: 'order' };
+    const opened = await app.reopenOrderCitation(request, citation);
+    assert.equal(opened.source.status, 'available'); assert.equal(opened.source.value.value.lifecycle, undefined);
+    const corrupted = structuredClone(privatePacket.material); corrupted.payloadFingerprint = '0'.repeat(64);
+    assert.throws(() => projectOrderExplanationMaterial(corrupted), /AI_RESOURCE_UNAVAILABLE/, 'projection must not bless a corrupted internal seal');
+    const wrongBytes = structuredClone(privatePacket.material); wrongBytes.payloadBytes++;
+    assert.throws(() => projectOrderExplanationMaterial(wrongBytes), /AI_RESOURCE_UNAVAILABLE/);
+  }
+  assert.equal(new Set(ids).size, 4);
+  assert.equal(h.state.aiStep.length, 0, 'public material and citation reads cannot dispatch model or business steps');
+  h.b.h.identity.session = false;
+  await assert.rejects(controller.material(request, h.ref(ids[0])), error => error.getStatus() === 403);
 });
 
 test('recovery reads original action IDs and observed results after cancel or AI shutdown, never dispatches', async () => {
@@ -1615,6 +2267,13 @@ test('persisted scene model result is bound to its original input and current au
   for (const { sceneCode, question } of sourceCases) {
   const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [], aiConversation: [], aiConversationTurn: [], aiConversationOperation: [] });
   h.b.facts.listInspectionsPage = async () => ({ items: [], nextCursor: null, coverage: 'page_not_total' });
+  // This older host fixture has no persisted scalar port. Use its existing
+  // order spy so changed/foreign/missing-source assertions still flow through
+  // the original Core and authority; no SQL/ACL/finance emulator is installed.
+  h.b.facts.readOrderFacts = async (tenantId, workspaceId, orderId) => {
+    const row = await h.b.facts.findOrder(tenantId, orderId); return row ? { ...row, workspaceId } : undefined;
+  };
+  h.b.facts.readInspectionFactsPage = async (...args) => h.b.facts.listInspectionsPage(args[0], args[2], args[3]);
   const originalCommand = h.command(sceneCode);
   if (question) originalCommand.input.question = question;
   const { AiConversationRepository } = require('../apps/api/src/modules/ai-native/conversation.repository');
@@ -1625,6 +2284,22 @@ test('persisted scene model result is bound to its original input and current au
     request: { sceneCode: originalCommand.sceneCode, input: originalCommand.input } });
   const ref = admitted.result.original, created = { receipt: (await h.app.requests.readHistorical(ref)).receipt, task: await h.app.requests.createTask(ref) }, task = h.state.aiTask[0];
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
+  const materialUser=h.b.h.identity.user, materialResolve=h.app.requests.resolve;
+  const materialCounts=[h.state.aiTask.length,h.state.aiRun.length,h.state.aiStep.length];let materialResolves=0;
+  // Declared server credential window: resolve the original as A, prepare under
+  // B, then restore A before the closing grant. No permissions or rows are forged.
+  h.app.requests.resolve=async function(...args){
+    if(materialResolves)h.b.h.identity.user=materialUser;
+    const grant=await materialResolve.apply(this,args);
+    if(++materialResolves===1)h.b.h.identity.user={...materialUser,id:'synthetic-material-other'};
+    return grant;
+  };
+  try{
+    await assert.rejects(h.app.prepareTaskMaterial(ref),error=>error.code===(sceneCode==='order_explanation'?'AI_ACCESS_DENIED':'FORBIDDEN'),
+      'original material must not inherit another principal\'s preflight');
+    assert.ok(materialResolves>=1);
+  }finally{h.b.h.identity.user=materialUser;h.app.requests.resolve=materialResolve;}
+  assert.deepEqual([h.state.aiTask.length,h.state.aiRun.length,h.state.aiStep.length],materialCounts);
   const policy = { sceneCode, maxOutputTokens: 64 };
   const config = structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').config);
   config.tenantId = original.context.scope.tenantId; config.configurationScope.tenantId = config.tenantId;
@@ -1682,20 +2357,49 @@ test('persisted scene model result is bound to its original input and current au
   await assert.rejects(center.readEvents({ original: ref, after: 9007199254740992, limit: 10 }), e => e.code === 'AI_INVALID_INPUT');
   const command = { original: ref, resultId: 'model-result' };
   const result = await center.readModelResult(command);
+  const observationUser=h.b.h.identity.user, observationTransaction=h.db.$transaction, observationRead=h.app.requests.readHistorical;
+  const observationCounts=[h.state.aiTask.length,h.state.aiRun.length,h.state.aiStep.length,h.state.aiTaskResultArtifact.length,h.state.aiGatewayInvocation.length];
+  let observationSwitched=false;
+  // Switch only after the real frozen artifact/provenance transaction returns,
+  // so this tests current business reobservation, not an earlier owner lookup.
+  h.db.$transaction=async function(...args){
+    const value=await observationTransaction.apply(this,args);
+    if(!observationSwitched&&value&&typeof value==='object'&&typeof value.materialHash==='string'
+      &&typeof value.callId==='string'&&typeof value.text==='string'&&'material' in value){
+      observationSwitched=true;h.b.h.identity.user={...observationUser,id:'synthetic-observation-other'};
+    }
+    return value;
+  };
+  h.app.requests.readHistorical=async function(...args){
+    if(observationSwitched)h.b.h.identity.user=observationUser;
+    return observationRead.apply(this,args);
+  };
+  try{
+    await assert.rejects(reader.read(command),error=>error.code===(sceneCode==='order_explanation'?'AI_ACCESS_DENIED':'FORBIDDEN'),
+      'matching facts and restored owner cannot authorize another actor\'s model-result reobservation');
+    assert.equal(observationSwitched,true);
+  }finally{h.b.h.identity.user=observationUser;h.db.$transaction=observationTransaction;h.app.requests.readHistorical=observationRead;}
+  assert.deepEqual([h.state.aiTask.length,h.state.aiRun.length,h.state.aiStep.length,h.state.aiTaskResultArtifact.length,h.state.aiGatewayInvocation.length],observationCounts);
   const { AiConversationController, composeAiConversationRequests } = require('../apps/api/src/modules/ai-native/conversation.application');
   const { AI_NATIVE_CONVERSATION_PROVIDER, AI_NATIVE_CONVERSATION_CONFIGURATION, AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER } = require('../apps/api/src/modules/ai-native/ai-native-application.providers');
   const { credentials, ...readDependencies } = h.dependencies, httpRequest = { headers: { authorization: (await credentials.current()).authorization } };
   const originalObservations = AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER.useFactory(h.db, readDependencies.auth, readDependencies.guard,
-    readDependencies.subscriptions, readDependencies.core, readDependencies.business, readDependencies.reports, readDependencies.memberships, undefined);
+    readDependencies.subscriptions, readDependencies.core, readDependencies.business, readDependencies.reports, readDependencies.memberships, undefined, undefined);
   const conversationRequests = AI_NATIVE_CONVERSATION_PROVIDER.useFactory(h.db, readDependencies.auth, readDependencies.guard, readDependencies.subscriptions,
-    readDependencies.core, readDependencies.business, readDependencies.reports, readDependencies.memberships, undefined, { enabled: true }, originalObservations);
+    readDependencies.core, readDependencies.business, readDependencies.reports, readDependencies.memberships, undefined, undefined, { enabled: true }, originalObservations);
   const conversationHttp = new AiConversationController(conversationRequests), query = { ...conversationReference, resultId: 'model-result' };
   const readState = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state);
   const modelPacket = await conversationHttp.modelResult(httpRequest, query);
   assert.equal(modelPacket.status, 'observed');
   assert.ok(['available', 'stale'].includes(modelPacket.result.status));
+  const comparableOrderText = text => ({ ...text, value: text.value.split('\n').filter(line => !line.startsWith('查询时点：')).join('\n') });
   if (modelPacket.result.status === 'available') {
-    assert.deepEqual(modelPacket.result.text, result.text); assert.equal(modelPacket.result.materialHash, result.materialHash);
+    if (sceneCode === 'order_explanation') {
+      assert.deepEqual(comparableOrderText(modelPacket.result.text), comparableOrderText(result.text));
+      assert.ok(modelPacket.result.text.value.includes(`查询时点：${JSON.stringify(modelPacket.result.facts.payload.observedAt)}`),
+        'fresh query time must match this actual public material, not the frozen model clock');
+    } else assert.deepEqual(modelPacket.result.text, result.text);
+    assert.equal(modelPacket.result.materialHash, result.materialHash);
   } else { assert.equal(modelPacket.result.text, null); assert.equal(modelPacket.result.nextAction, 'reread_facts'); }
   assert.equal(modelPacket.result.original.contentHash, result.original.contentHash); assert.equal(modelPacket.result.original.inputRef, ref.inputRef);
   assert.equal(modelPacket.result.runId, result.runId); assert.equal(modelPacket.result.sceneCode, result.sceneCode);
@@ -1756,6 +2460,8 @@ test('persisted scene model result is bound to its original input and current au
   const turn = modelPacket.turn, frozenState = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state);
   const textResult = await adminApi.result(conversationReference, turn, signal.signal);
   assert.equal(textResult.status, 'observed'); assert.equal(textResult.result.status, 'available');
+  // This thin admin path uses taskHttp's SAME-clock original reader; retain
+  // exact text comparison (including query time) and the original call count.
   assert.equal(textResult.result.text.value, result.text.value); assert.equal(wireCalls, 5);
   assert.equal(shared.validateAiConversationTaskModelDraft(textResult.result, turn), true);
   assert.deepEqual(h.state, frozenState, 'history result consumer does not create calls, artifacts, tasks or budget writes');
@@ -1831,7 +2537,12 @@ test('persisted scene model result is bound to its original input and current au
     await assert.rejects(corrupted.readModelResult({ headers: {} }, command), error => error.getStatus() === 503
       && error.getResponse().code === 'AI_STORAGE_UNAVAILABLE' && !JSON.stringify(error.getResponse()).includes('must-not-leak'));
   }
-  assert.equal(result.status, 'available'); assert.equal(result.text.value, payload.text);
+  assert.equal(result.status, 'available');
+  if (sceneCode === 'order_explanation') {
+    assert.equal(result.text.value, packet.material.payload.explanation.text, 'order display comes from the bound deterministic facts');
+    assert.notEqual(result.text.value, payload.text, 'model prose cannot replace recorded financial/status facts');
+    assert.equal(h.state.aiTaskResultArtifact[0].payload.text, payload.text, 'original model artifact text remains unchanged');
+  } else assert.equal(result.text.value, payload.text);
   assert.equal(result.sceneCode, sceneCode);
   if (sceneCode === 'order_explanation') {
   assert.equal(result.sources[0].field, 'order');
@@ -2036,6 +2747,10 @@ test('original quote host uses persisted authorized clarification facts instead 
   const originalModelFingerprint = h.state.aiTaskActionInput[0].fingerprint;
   const settings = h.b.core.state('tenant_001').businessSettings;
   settings.configVersion = `${settings.configVersion}-changed`;
+  // The current reader uses the declared persisted quote-configuration leaf,
+  // not this older seed object. Change that source too; keep the same original
+  // stale-input rejection and refresh assertions rather than weakening them.
+  h.b.quoteConfiguration.settings.configVersion = settings.configVersion;
   await assert.rejects(host().readInput(h.reference));
   pending = await host().refreshInput({ original: h.reference, requestId: pending.requestId, expectedRevision: pending.revision });
   assert.equal(pending.revision, originalQuestion.revision + 1);
@@ -2709,6 +3424,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { composeAiClientScenes, createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
   let revoked = false, revokeDuringRead = false, authorization, reads = 0, rateAllowed = true, completeOrderProjection = false;
+  let clientOrderStatus = 'reserved', clientOrderPayable = 0;
   const session = { id: 'session-client', expiresAt: new Date('2027-01-01'), tenant: { code: 'tenant', status: 'ACTIVE' },
     customer: { customerType: 'personal', name: 'Synthetic', phone: 'synthetic' },
     workspace: { tenantId: 'tenant-client', status: 'ACTIVE', code: 'camera', name: 'Synthetic', categoryCode: 'camera' } };
@@ -2726,7 +3442,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     reads++; assert.equal(tenantId, 'tenant-client'); assert.equal(getRequestIdentity().workspaceId, 'workspace-client');
     if (revokeDuringRead) revoked = true;
     return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
-      status: 'reserved', quoteId: 'quote-client', currency: 'CNY', payableAmount: 0, rentalAmount: 12,
+      status: clientOrderStatus, quoteId: 'quote-client', currency: 'CNY', payableAmount: clientOrderPayable, rentalAmount: 12,
       lines: [], chargeLines: [], allocations: [], internalNote: 'never expose',
       ...(completeOrderProjection ? { orderNo: 'ORDER-OFFLINE', customerName: 'Synthetic', fulfillmentMode: 'store_pickup_return',
         fulfillmentLocationName: 'Synthetic location', startAt: '2026-12-01T00:00:00Z', endAt: '2026-12-02T00:00:00Z',
@@ -2795,6 +3511,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   };
   let materialRows = [], taskInputs = [], taskPolicies = [], lostReply = false, materialWrites = 0;
   let bookingRows = { ai_client_booking_drafts: [], ai_client_booking_draft_operations: [], ai_client_booking_handoffs: [] };
+  let loseSubmissionAcceptanceReply = false, rejectSubmissionTerminalUpdate = false;
   let loseBookingReply = false;
   let lostInputReply = false, lostTaskReply = false, revokeAfterClaim = false, commercialAvailable = true;
   const materialDb = (transactionRows, transactionInputs, transactionBookings, taskQuery = taskStore.db.$queryRaw) => {
@@ -2837,6 +3554,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
               .some(other => scopeMatch(other) && other.id === (row.materialRef ?? row.draftId)));
             table.push(row); return 1;
           }
+          if (rejectSubmissionTerminalUpdate && query.values[0] === 'submitted') return 0;
           const columns = query.sql.match(/SET ([\s\S]+?)\s+WHERE/u)[1].split(',').map(value => value.trim().split(' ')[0]);
           const conditions = [...query.sql.split('WHERE')[1].matchAll(/(\w+)\s*(=|>)\s*\?/gu)];
           const targets = table.filter(row => conditions.every(([_, field, operator], index) => {
@@ -2875,11 +3593,14 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
       const rows = structuredClone(materialRows), inputs = structuredClone(taskInputs), bookings = structuredClone(bookingRows);
       const priorInputs = inputs.length, priorTasks = taskStore.state.aiTask.length;
       const priorOperations = bookings.ai_client_booking_draft_operations.length;
+      const priorSubmitted = bookings.ai_client_booking_drafts.filter(row => row.state === 'submitted').length;
       const result = await taskStore.db.$transaction(tx => {
         const current = { ...tx, ...materialDb(rows, inputs, bookings, tx.$queryRaw), aiTask: taskProjection(tx), aiScope: { ...tx.aiScope, upsert: scopeUpsert } };
         return activeTransaction.run(current, () => work(current));
       });
       materialRows = rows; taskInputs = inputs; bookingRows = bookings;
+      if (loseSubmissionAcceptanceReply && bookings.ai_client_booking_drafts.filter(row => row.state === 'submitted').length > priorSubmitted)
+        throw Error('synthetic submission acceptance COMMIT response lost');
       if (revokeAfterClaim && inputs.length > priorInputs) taskPolicies[0].allowCreate = false;
       if ((lostInputReply && inputs.length > priorInputs) || (lostTaskReply && taskStore.state.aiTask.length > priorTasks)) throw Error('synthetic client task COMMIT response lost');
       if (loseBookingReply && bookings.ai_client_booking_draft_operations.length > priorOperations) throw Error('synthetic booking COMMIT response lost');
@@ -3348,6 +4069,75 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   publishedResponse('AiBookingHandoffResponse', handed);
   publishedResponse('AiBookingOperationReadResponse', await bookingHttp.readBookingOperation(request, { operationKey: handoffCommand.operationKey }));
   publishedResponse('AiBookingOperationReadResponse', await bookingHttp.readBookingOperation(request, { operationKey: 'not-observed' }));
+  assert.equal(typeof bookingApp.readBookingOperationObservation, 'function');
+  const originalDraftHost = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(bookingApp);
+  const observedDraftOperation = await originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey });
+  publishedResponse('AiBookingOperationObservationDraft', observedDraftOperation);
+  assert.deepEqual(observedDraftOperation.operation, await bookingHttp.readBookingOperation(request, { operationKey: handoffCommand.operationKey }),
+    'the original HTTP operation receipt shape and result revision stay unchanged');
+  assert.equal(observedDraftOperation.currentDraft.state, 'handed_to_booking_page');
+  assert.equal(observedDraftOperation.currentDraft.revision, handed.handoff.revision);
+  assert.equal(observedDraftOperation.currentDraft.expiredAtObservation, false);
+  assert.equal(observedDraftOperation.currentUse, 'not_authorized_by_receipt');
+  assert.equal(JSON.stringify(observedDraftOperation).includes('quote-client'), false, 'metadata observation never loads or returns old booking material');
+  const unknownDraftOperation = await originalDraftHost.readDraftObservation(request, { operationKey: 'not-observed' });
+  publishedResponse('AiBookingOperationObservationDraft', unknownDraftOperation);
+  assert.equal(unknownDraftOperation.operation.state, 'unknown'); assert.equal(unknownDraftOperation.currentDraft, null);
+  assert.equal(publication.AiBookingOperationObservationDraft({ ...unknownDraftOperation, currentDraft: observedDraftOperation.currentDraft }), false);
+  const priorAllowCreateForObservation = taskPolicies[1].allowCreate;
+  const priorBudgetEnabledForObservation = taskStore.state.aiBudgetPolicy.map(row => row.enabled);
+  const materialQueryBeforeObservation = db.$queryRaw.bind(db);
+  taskPolicies[1].allowCreate = 0; taskStore.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
+  db.$queryRaw = async query => {
+    assert.equal(query.sql.includes('FROM ai_client_scene_materials'), false, 'operation observation cannot resurrect an old material body');
+    return materialQueryBeforeObservation(query);
+  };
+  try {
+    assert.equal((await originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey })).operation.state, 'observed');
+    assert.equal((await bookingHttp.readBookingOperation(request, { operationKey: handoffCommand.operationKey })).state, 'observed');
+  } finally {
+    taskPolicies[1].allowCreate = priorAllowCreateForObservation;
+    taskStore.state.aiBudgetPolicy.forEach((row, index) => { row.enabled = priorBudgetEnabledForObservation[index]; });
+    db.$queryRaw = materialQueryBeforeObservation;
+  }
+  taskPolicies[1].allowRead = 0;
+  try {
+    await assert.rejects(originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey }), e => e.code === 'AI_ACCESS_DENIED');
+    await assert.rejects(bookingApp.readBookingOperation(request, { operationKey: 'not-observed' }), e => e.code === 'AI_ACCESS_DENIED');
+  } finally { taskPolicies[1].allowRead = 1; }
+  const observationClock = now;
+  now = new Date(Date.parse(observedDraftOperation.currentDraft.expiresAt) + 1);
+  try {
+    const expiredObservation = await originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey });
+    assert.equal(expiredObservation.currentDraft.expiredAtObservation, true);
+    assert.equal(expiredObservation.currentDraft.state, 'handed_to_booking_page', 'expiry observation does not fabricate a persisted state transition');
+    assert.equal(expiredObservation.currentUse, 'not_authorized_by_receipt');
+    assert.equal(bookingRows.ai_client_booking_drafts[0].revision, handed.handoff.revision);
+  } finally { now = observationClock; }
+  const observationPolicyRevision = taskPolicies[1].revision;
+  let withdrawObservationPolicy = true;
+  db.$queryRaw = async query => {
+    const result = await materialQueryBeforeObservation(query);
+    if (withdrawObservationPolicy && query.sql.includes('FROM ai_client_booking_draft_operations')) {
+      withdrawObservationPolicy = false; taskPolicies[1].revision++;
+    }
+    return result;
+  };
+  try {
+    await assert.rejects(originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey }), e => e.code === 'AI_ACCESS_DENIED');
+  } finally { db.$queryRaw = materialQueryBeforeObservation; taskPolicies[1].revision = observationPolicyRevision; }
+  const beforeObservedDraft = structuredClone(bookingRows.ai_client_booking_drafts[0]);
+  let changeObservedDraft = true;
+  db.$queryRaw = async query => {
+    const result = await materialQueryBeforeObservation(query);
+    if (changeObservedDraft && query.sql.includes('FROM ai_client_booking_drafts')) {
+      changeObservedDraft = false; bookingRows.ai_client_booking_drafts[0].revision++;
+    }
+    return result;
+  };
+  try {
+    await assert.rejects(originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey }), e => e.code === 'AI_REVISION_CONFLICT');
+  } finally { db.$queryRaw = materialQueryBeforeObservation; Object.assign(bookingRows.ai_client_booking_drafts[0], beforeObservedDraft); }
   assert.equal(handed.handoff.fields.quoteId, bookingSelection.quoteId);
   assert.equal(handed.handoff.submission, 'original_booking_page_required');
   assert.equal(handed.handoff.inventory, 'not_reserved');
@@ -3442,6 +4232,26 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.ok(AI_LEAF_COMPONENT_SCHEMAS.AiBookingSubmissionReceipt);
   assert.equal(submitted.state, 'observed'); assert.equal(submitted.orderId, 'own-order');
   assert.equal(submitted.payment, 'not_inferred'); assert.equal(originalWrites, 1);
+  const submittedRow = bookingRows.ai_client_booking_drafts.find(row => row.id === accepted.bookingDraftId);
+  assert.equal(submittedRow.state, 'submitted');
+  assert.equal(submittedRow.revision, handed.handoff.revision + 1);
+  assert.equal(submittedRow.selectionRevision, 1);
+  const terminalDraft = await bookingHttp.readBookingDraft(request, { bookingDraftId: accepted.bookingDraftId });
+  publishedResponse('AiBookingDraft', terminalDraft);
+  assert.equal(terminalDraft.execution, 'submitted_request_not_business_success');
+  assert.equal(terminalDraft.action, null);
+  const submittedDraftObservation = await originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey });
+  publishedResponse('AiBookingOperationObservationDraft', submittedDraftObservation);
+  assert.equal(submittedDraftObservation.currentDraft.state, 'submitted');
+  assert.equal(submittedDraftObservation.operation.resultRevision, handed.handoff.revision);
+  assert.equal(submittedDraftObservation.currentDraft.revision, submittedRow.revision);
+  assert.equal(submittedDraftObservation.operation.businessSubmission, 'not_attested');
+  assert.equal(publication.AiBookingDraft({ ...terminalDraft, execution: 'not_submitted' }), false);
+  assert.equal(publication.AiBookingDraft({ ...terminalDraft, action: selected.draft.action }), false);
+  for (const [method, input] of [['readAction', selected.draft.action], ['handoffBookingDraft', handoffCommand],
+    ['readBookingHandoff', { handoffRef: handed.handoff.handoffRef }], ['chooseBookingDraft', selectDraft]]) {
+    await assert.rejects(submissionApp[method](request, input), error => error.code === 'AI_PROPOSAL_STALE');
+  }
   const receiptLookup = originalOrders.idempotency.find;
   originalOrders.idempotency.find = async (...args) => {
     const receipt = await receiptLookup(...args);
@@ -3459,6 +4269,13 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   client.business.getQuote = () => { throw Error('quote consumed; current/latest quote must not be substituted'); };
   const submissionRestart = composeRequestBoundClientApplication({ ...taskDependencies, bookingSubmission: client }, entryConfig);
   assert.equal((await submissionRestart.submitAcceptedBooking(request, explicitSubmit)).state, 'observed');
+  const historicalTerminal = await submissionRestart.readBookingDraft(request, { bookingDraftId: accepted.bookingDraftId });
+  assert.equal(historicalTerminal.state, 'submitted');
+  assert.equal(historicalTerminal.action, null);
+  assert.equal((await originalDraftHost.readDraftObservation(request, { operationKey: handoffCommand.operationKey })).currentDraft.state, 'submitted');
+  taskPolicies[1].allowRead = 0;
+  await assert.rejects(submissionRestart.readBookingDraft(request, { bookingDraftId: accepted.bookingDraftId }), e => e.code === 'AI_ACCESS_DENIED');
+  taskPolicies[1].allowRead = 1;
   assert.equal(originalWrites, 1);
   const originalReceipt = originalReceipts.get(accepted.operationKey);
   originalReceipts.set(accepted.operationKey, { ...originalReceipt, requestHash: 'another-request' });
@@ -3469,15 +4286,56 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   originalReceipts.delete(accepted.operationKey);
   const absentReceipt = await submissionRestart.submitAcceptedBooking(request, explicitSubmit);
   assert.equal(absentReceipt.state, 'not_observed'); assert.equal(absentReceipt.retryable, false);
+  assert.equal((await submissionRestart.readBookingDraft(request, { bookingDraftId: accepted.bookingDraftId })).state, 'submitted',
+    'accepted request remains terminal without inferring a missing original business result');
   assert.equal(originalWrites, 1);
   await assert.rejects(submissionRestart.readBookingSubmission({ headers: {} }, { acceptanceRef: accepted.acceptanceRef }));
   await assert.rejects(callSubmissionHttp('readBookingSubmission', { acceptanceRef: accepted.acceptanceRef }, {}));
   client.business.getQuote = quoteReader;
+  // Preserve the independent stale-before-submission variant. An already
+  // submitted request is terminal, not reverted when current stock changes.
+  const staleAction = await makeBookingAction('booking-stale-before-submission');
+  const staleDraft = await bookingApp.createBookingDraft(request, { action: staleAction, operationKey: 'stale-draft-create' });
+  const staleSelected = await bookingApp.chooseBookingDraft(request, { bookingDraftId: staleDraft.draft.bookingDraftId,
+    expectedRevision: 1, inputFingerprint: staleDraft.draft.inputFingerprint, operationKey: 'stale-draft-select', decision: 'continue_booking' });
+  const staleHandoff = await bookingApp.handoffBookingDraft(request, { action: staleSelected.draft.action, operationKey: 'stale-draft-handoff' });
   stockObservation++;
-  await assert.rejects(bookingApp.readBookingPreparation(request, { handoffRef: handed.handoff.handoffRef }));
-  await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef }));
-  assert.equal(bookingRows.ai_client_booking_drafts[0].state, 'stale'); stockObservation--;
-  await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  await assert.rejects(bookingApp.readBookingPreparation(request, { handoffRef: staleHandoff.handoff.handoffRef }));
+  await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: staleHandoff.handoff.handoffRef }));
+  assert.equal(bookingRows.ai_client_booking_drafts.find(row => row.id === staleDraft.draft.bookingDraftId).state, 'stale'); stockObservation--;
+  await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: staleDraft.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  const staleDraftObservation = await originalDraftHost.readDraftObservation(request, { operationKey: 'stale-draft-handoff' });
+  assert.equal(staleDraftObservation.currentDraft.state, 'stale');
+  assert.equal(staleDraftObservation.currentUse, 'not_authorized_by_receipt');
+  // Exercise the original transaction, not preassigned terminal/attempt rows.
+  for (const boundary of ['lost_commit_reply', 'terminal_cas_failure']) {
+    const action = await makeBookingAction(`submission-${boundary}`);
+    const created = await submissionApp.createBookingDraft(request, { action, operationKey: `create-${boundary}` });
+    const chosen = await submissionApp.chooseBookingDraft(request, { bookingDraftId: created.draft.bookingDraftId,
+      expectedRevision: 1, inputFingerprint: created.draft.inputFingerprint, operationKey: `choose-${boundary}`, decision: 'continue_booking' });
+    const handoff = await submissionApp.handoffBookingDraft(request, { action: chosen.draft.action, operationKey: `handoff-${boundary}` });
+    const acceptance = await submissionApp.acceptBookingSubmission(request, { handoffRef: handoff.handoff.handoffRef });
+    const decision = { acceptanceRef: acceptance.acceptanceRef, decision: 'submit_original_booking' };
+    loseSubmissionAcceptanceReply = boundary === 'lost_commit_reply';
+    rejectSubmissionTerminalUpdate = boundary === 'terminal_cas_failure';
+    try {
+      await assert.rejects(submissionApp.submitAcceptedBooking(request, decision), error => error.code === 'AI_RESULT_UNKNOWN'
+        && error.nextAction === 'read_original_submission');
+    } finally { loseSubmissionAcceptanceReply = false; rejectSubmissionTerminalUpdate = false; }
+    const row = bookingRows.ai_client_booking_drafts.find(value => value.id === created.draft.bookingDraftId);
+    const attempt = materialRows.find(value => value.operationKey === `booking-attempt:${acceptance.acceptanceRef}`);
+    assert.equal(originalWrites, 1, 'an unacknowledged local acceptance cannot dispatch Core');
+    if (boundary === 'lost_commit_reply') {
+      assert.equal(row.state, 'submitted'); assert.ok(attempt);
+      assert.equal((await submissionRestart.submitAcceptedBooking(request, decision)).state, 'not_observed');
+      assert.equal((await submissionRestart.readBookingDraft(request, { bookingDraftId: row.id })).execution, 'submitted_request_not_business_success');
+      await assert.rejects(submissionRestart.readBookingHandoff(request, { handoffRef: handoff.handoff.handoffRef }), e => e.code === 'AI_PROPOSAL_STALE');
+      assert.equal(originalWrites, 1, 'restart only reads the original operation; no replacement key or dispatch');
+    } else {
+      assert.equal(row.state, 'handed_to_booking_page'); assert.equal(attempt, undefined,
+        'failed terminal CAS rolls the attempt back in the same original transaction');
+    }
+  }
   const lostDraftAction = await makeBookingAction('booking-material-lost');
   loseBookingReply = true;
   await assert.rejects(bookingHttp.createBookingDraft(request, { action: lostDraftAction, operationKey: 'create-draft-lost' }),
@@ -3492,6 +4350,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await bookingApp.chooseBookingDraft(request, { bookingDraftId: recoveredDraft.bookingDraftId, expectedRevision: recoveredDraft.revision,
     inputFingerprint: recoveredDraft.inputFingerprint, operationKey: 'abandon-lost-draft', decision: 'abandon' });
   await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: recoveredDraft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  assert.equal((await originalDraftHost.readDraftObservation(request, { operationKey: 'abandon-lost-draft' })).currentDraft.state, 'abandoned');
   const rejectedAction = await makeBookingAction('rejected-before-draft');
   bookingAvailable = false;
   await assert.rejects(bookingApp.readAction(request, rejectedAction));
@@ -3518,6 +4377,24 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
       phoneMasked: address.phoneMasked, countryCode: address.countryCode, province: address.province, city: address.city, detail: address.detail } };
   await assert.rejects(makeBookingAction('address-no-port', bookingApp, deliverySelection), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   const deliveryApp = composeRequestBoundClientApplication({ ...taskDependencies, addresses: addressPort }, entryConfig);
+  const availabilityBeforeAddressFence = client.core.availability;
+  for (const [boundary, mutate] of [['revision', () => { address.revision++; }],
+    ['content', () => { address.recipient = 'Changed after stock read'; address.revision++; }],
+    ['service_area', () => { address.deliveryServiceAreaDecision.allowed = false; }]]) {
+    const originalAddress = structuredClone(address), beforeMaterials = materialRows.length;
+    let changed = false;
+    client.core.availability = async (...args) => {
+      const result = await availabilityBeforeAddressFence(...args);
+      if (!changed) { changed = true; mutate(); }
+      return result;
+    };
+    try {
+      await assert.rejects(deliveryApp.prepare(request, { operationKey: `address-preparation-${boundary}`,
+        command: { kind: 'booking_quote', selection: deliverySelection } }), error => error.code === 'AI_PROPOSAL_STALE');
+      assert.equal(changed, true);
+      assert.equal(materialRows.length, beforeMaterials, 'address changed before material completion: no stale R1 material or operation is saved');
+    } finally { client.core.availability = availabilityBeforeAddressFence; address = originalAddress; }
+  }
   const deliveryAction = await makeBookingAction('delivery-material', deliveryApp, deliverySelection);
   const deliveryDraft = await deliveryApp.createBookingDraft(request, { action: deliveryAction, operationKey: 'delivery-create' });
   assert.equal(deliveryDraft.draft.material.selection.deliveryAddressId, address.id);
@@ -3533,6 +4410,64 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(deliveryApp.readBookingHandoff(request, { handoffRef: deliveryHandoff.handoff.handoffRef }), /AI_CLIENT_MATERIAL_STALE/);
   address.revision--;
   await assert.rejects(deliveryApp.readBookingDraft(request, { bookingDraftId: deliveryDraft.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  const savedQuote = structuredClone(bookingQuote);
+  const onceSnapshot = structuredClone(savedQuote.deliveryAddressSnapshot); delete onceSnapshot.addressId;
+  bookingQuote = { ...savedQuote, request: { ...savedQuote.request,
+    deliveryAddressId: undefined, deliveryAddressDraft: { recipient: address.recipient, phone: address.phone, countryCode: address.countryCode,
+      province: address.province, city: address.city, detail: address.detail } }, deliveryAddressSnapshot: onceSnapshot };
+  const { oneTimeQuoteSnapshotFingerprint } = require('../apps/api/src/modules/ai-native/scenes/client-booking-material');
+  const onceConfirmation = { source: 'original_quote_one_time_address', snapshotFingerprint: oneTimeQuoteSnapshotFingerprint(onceSnapshot), confirmed: true };
+  const onceSelection = { ...deliverySelection, deliveryAddressConfirmation: onceConfirmation }; delete onceSelection.deliveryAddressId;
+  const beforeOnceMaterials = materialRows.length;
+  await assert.rejects(makeBookingAction('once-no-producer', bookingApp, onceSelection), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const noProducerOrConfirmation = { ...onceSelection }; delete noProducerOrConfirmation.deliveryAddressConfirmation;
+  await assert.rejects(makeBookingAction('once-no-producer-unconfirmed', bookingApp, noProducerOrConfirmation), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(materialRows.length, beforeOnceMaterials);
+  let areaFingerprint = 'a'.repeat(64), onceReads = 0;
+  client.observeQuoteDeliveryAddress = async (context, quoteId) => {
+    assert.equal(context.customerId, 'person-client'); assert.equal(context.workspaceId, 'workspace-client'); assert.equal(quoteId, bookingQuote.id); onceReads++;
+    return { source: 'original_quote_one_time_address', quoteId, quoteCreatedAt: bookingQuote.createdAt, quoteExpiresAt: bookingQuote.expiresAt,
+      snapshotFingerprint: oneTimeQuoteSnapshotFingerprint(bookingQuote.deliveryAddressSnapshot), serviceAreaFingerprint: areaFingerprint };
+  };
+  try {
+    const absent = { ...onceSelection }; delete absent.deliveryAddressConfirmation;
+    await assert.rejects(makeBookingAction('once-unconfirmed', bookingApp, absent), e => e.code === 'AI_INVALID_INPUT');
+    await assert.rejects(makeBookingAction('once-wrong-hash', bookingApp, { ...onceSelection,
+      deliveryAddressConfirmation: { ...onceConfirmation, snapshotFingerprint: '0'.repeat(64) } }), e => e.code === 'AI_PROPOSAL_STALE');
+    for (const forged of [{ ...onceSelection, deliveryAddressId: address.id }, { ...onceSelection,
+      deliveryAddressConfirmation: { ...onceConfirmation, phone: address.phone, detail: address.detail } }]) {
+      assert.equal(publication.AiBookingSelection(forged), false);
+      await assert.rejects(makeBookingAction('once-forged-fields', bookingApp, forged), e => e.message === 'AI_CLIENT_INVALID_INPUT');
+    }
+    const priorAvailability = client.core.availability;
+    client.core.availability = async (...args) => { const result = await priorAvailability(...args); areaFingerprint = 'b'.repeat(64); return result; };
+    try { await assert.rejects(makeBookingAction('once-late-area-change', bookingApp, onceSelection), e => e.code === 'AI_PROPOSAL_STALE'); }
+    finally { client.core.availability = priorAvailability; areaFingerprint = 'a'.repeat(64); }
+    assert.equal(materialRows.length, beforeOnceMaterials);
+    const onceAction = await makeBookingAction('once-original-material', bookingApp, onceSelection);
+    const onceDraft = await bookingApp.createBookingDraft(request, { action: onceAction, operationKey: 'once-create' });
+    publishedResponse('AiBookingDraft', onceDraft.draft);
+    assert.equal(onceDraft.draft.material.deliveryAddress.source, 'original_quote_one_time_address');
+    assert.equal(onceDraft.draft.material.deliveryAddress.addressId, undefined); assert.equal(onceDraft.draft.material.deliveryAddress.observedRevision, undefined);
+    assert.equal(JSON.stringify(onceDraft).includes(address.phone), false); assert.equal(JSON.stringify(onceDraft).includes(address.detail), false);
+    const onceChosen = await bookingApp.chooseBookingDraft(request, { bookingDraftId: onceDraft.draft.bookingDraftId, expectedRevision: 1,
+      inputFingerprint: onceDraft.draft.inputFingerprint, operationKey: 'once-select', decision: 'continue_booking' });
+    const onceHandoff = await bookingApp.handoffBookingDraft(request, { action: onceChosen.draft.action, operationKey: 'once-handoff' });
+    publishedResponse('AiBookingHandoff', onceHandoff.handoff);
+    assert.deepEqual(onceHandoff.handoff.fields.deliveryAddressConfirmation, onceConfirmation); assert.equal(onceHandoff.handoff.fields.deliveryAddressId, undefined);
+    assert.equal(onceReads > 1, true); assert.equal(countCreates(), 1, 'once-address draft and handoff do not submit a Core order');
+    let historyReads = 0;
+    const history = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow({ ...bookingApp,
+      readPreparedQuoteOriginal: async () => ({ state: 'observed', quote: structuredClone(bookingQuote) }),
+      readBookingMaterialReceipt: async (_request, command) => { historyReads++; assert.deepEqual(command.command.selection, onceSelection); return { state: 'unknown', retryable: false }; } });
+    const historyCommand = { original: { materialRef: '00000000-0000-4000-8000-000000000111', expectedMaterialHash: 'c'.repeat(64) },
+      selection: onceSelection, operationKey: 'once-original-material' };
+    delete client.observeQuoteDeliveryAddress;
+    assert.equal((await history.readOperation(request, historyCommand)).state, 'unknown'); assert.equal(historyReads, 1, 'old receipt read does not require a current address producer');
+    await assert.rejects(history.readOperation(request, { ...historyCommand, selection: { ...onceSelection,
+      deliveryAddressConfirmation: { ...onceConfirmation, snapshotFingerprint: 'd'.repeat(64) } } }), e => e.code === 'AI_REVISION_CONFLICT');
+    assert.equal(historyReads, 1); assert.equal(countCreates(), 1);
+  } finally { delete client.observeQuoteDeliveryAddress; }
   bookingQuote = pickupQuote; client.buildCatalog = pickupCatalog;
   bookingSelection.bookingIdentity = { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'corporate-client', enterpriseContractAndPayer: true };
   bookingQuote = { ...bookingQuote, request: { ...bookingQuote.request, bookingIdentity: structuredClone(bookingSelection.bookingIdentity) },
@@ -3545,7 +4480,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(bookingRows.ai_client_booking_drafts.find(row => row.id === corporateDraft.draft.bookingDraftId).state, 'stale');
   const persistedBooking = JSON.stringify(bookingRows);
   assert.equal(persistedBooking.includes(authorization), false); assert.equal(persistedBooking.includes('session-client'), false);
-  assert.equal(persistedBooking.includes('submitted'), false);
+  assert.equal(bookingRows.ai_client_booking_drafts.filter(row => row.state === 'submitted').length, 2,
+    'only the two original committed page acceptances create submitted terminals');
+  assert.equal(persistedBooking.includes('orderId'), false, 'Draft storage is not a business-success receipt');
   assert.equal(countCreates(), 1);
 
   taskPolicies[0].allowCreate = 0; taskStore.state.aiBudgetPolicy[0].enabled = false;
@@ -3568,6 +4505,47 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   publishedResponse('AiClientOrderExplanationReadResponse', publishedExplanation);
   assert.equal(publishedExplanation.facts.orderId, 'own-order');
   publishedResponse('AiClientOrderExplanationReadResponse', await taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }));
+  // Current client explanation must not label a fee read with an older order
+  // projection, even when that declared minimal projection has no updatedAt.
+  const feeItemsBeforeFence = client.feeItems;
+  for (const mutate of [() => { clientOrderStatus = 'completed'; }, () => { clientOrderPayable = 1; }]) {
+    client.feeItems = async (...args) => { const fees = await feeItemsBeforeFence(...args); mutate(); return fees; };
+    try {
+      await assert.rejects(taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }),
+        error => error.getStatus?.() === 409 && error.getResponse?.().code === 'AI_PROPOSAL_STALE');
+    } finally { client.feeItems = feeItemsBeforeFence; clientOrderStatus = 'reserved'; clientOrderPayable = 0; }
+  }
+  const originalClientOrderForFees = client.getOrder, originalClientFeesForOrderWait = client.feeItems;
+  let guardedOrderReads = 0, guardedFeeReads = 0, changedClientFee = false, withdrawAtClosingFee = false;
+  // The same original client Auth/Guard, application and Controller remain live.
+  // Only the already-declared fee projection changes during the order wait;
+  // this is not a SQL write, fake authorization adapter or new host framework.
+  client.getOrder = async function(...args) {
+    const result = await originalClientOrderForFees.apply(this, args);
+    if (++guardedOrderReads === 2) changedClientFee = true;
+    return result;
+  };
+  client.feeItems = async function(...args) {
+    const result = await originalClientFeesForOrderWait.apply(this, args);
+    guardedFeeReads++;
+    if (withdrawAtClosingFee && guardedFeeReads === 2) revoked = true;
+    return { ...result, items: result.items.map(row => ({ ...row, responseStatus: changedClientFee ? 'confirmed' : row.responseStatus })),
+      pendingCount: changedClientFee ? 0 : result.pendingCount };
+  };
+  try {
+    await assert.rejects(taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }),
+      error => error.getStatus?.() === 409 && error.getResponse?.().code === 'AI_PROPOSAL_STALE'
+        && error.getResponse?.().retryable === false, 'the published client entry must reject late fee changes even with an unchanged order projection');
+    assert.equal(guardedOrderReads, 3); assert.equal(guardedFeeReads, 2, 'same original fee reader, no retry or extra page');
+    assert.equal(clientOrderStatus, 'reserved'); assert.equal(clientOrderPayable, 0);
+    guardedOrderReads = 0; guardedFeeReads = 0; changedClientFee = false; withdrawAtClosingFee = true;
+    await assert.rejects(taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }),
+      error => error.getStatus?.() === 403 && error.getResponse?.().code === 'AI_ACCESS_DENIED'
+        && error.getResponse?.().retryable === false, 'closing fee material cannot hide original client session withdrawal');
+    assert.equal(guardedFeeReads, 2); assert.equal(revoked, true);
+  } finally {
+    client.getOrder = originalClientOrderForFees; client.feeItems = originalClientFeesForOrderWait; revoked = false;
+  }
   assert.equal(publication.AiClientOrderExplanationReadResponse({ ...publishedExplanation, approved: true }), false);
   await assert.rejects(taskReaderController.readOrderExplanation(request, { orderId: 'other-order', question: 'status' }), e => e.getStatus?.() === 403);
   const sourcePacket = await taskReaderController.readSource(request, { materialRef: own.materialRef });
@@ -3782,6 +4760,584 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(requests.start, undefined); assert.equal(requests.cancelOrder, undefined);
 });
 
+test('client original quote accepts only the approved one-time form source through original Guard DTO and Core parsing', async () => {
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { ClientAuthService } = require('../apps/api/src/modules/client/client-auth.service');
+  const { ClientApiService } = require('../apps/api/src/modules/client/client-api.service');
+  const { RentalBusinessService } = require('../apps/api/src/modules/rental-core/rental-business.service');
+  const { composeGuardedClientOriginalQuotes } = require('../apps/api/src/modules/ai-native/client-quote-original.composition');
+  const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { OPENAPI_DOCUMENT } = require('../apps/api/src/contracts/openapi-document');
+  const schemas = OPENAPI_DOCUMENT.components.schemas;
+  const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor({ ClientQuoteRequest: schemas.ClientQuoteRequest },
+    { ClientQuoteDeliveryAddressDraft: schemas.ClientQuoteDeliveryAddressDraft });
+  let revoked = false, operatorAuthorization = false, membershipStatus = 'active', quoteCalls = 0, addressReads = 0;
+  const session = { id: 'quote-source-session', expiresAt: new Date('2027-01-01'), tenant: { code: 'tenant', status: 'ACTIVE' },
+    customer: { customerType: 'personal', name: 'Synthetic', phone: 'synthetic' },
+    workspace: { tenantId: 'tenant-client', status: 'ACTIVE', code: 'camera', name: 'Synthetic', categoryCode: 'camera' } };
+  const auth = Object.assign(Object.create(ClientAuthService.prototype), { secret: () => 'synthetic-client-quote-source-not-production', prisma: {
+    clientAuthSession: { findFirst: async () => revoked ? null : structuredClone(session), updateMany: async () => ({ count: 1 }) },
+    customerAccount: { findFirst: async () => ({ status: 'active', customer: { status: 'active' } }) },
+    customerMembership: { findFirst: async () => ({ status: membershipStatus }) }
+  } });
+  const token = auth.sign({ typ: 'client', sub: 'person-client', tid: 'tenant-client', sid: session.id, wid: 'workspace-client',
+    iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) });
+  const guard = new ApiAuthGuard({ resolveAccessContext: async () => { throw Error('operator auth forbidden'); } }, undefined,
+    auth, { assertAllowed: async () => {} });
+  const context = { category: { businessModel: { deliveryDestination: 'customer_address' } } };
+  // Only persistence/config are fixture ports. Address normalization and own
+  // customer projection are the existing Core and ClientApiService methods.
+  const business = Object.assign(Object.create(RentalBusinessService.prototype), { prisma: { customerDeliveryAddress: {
+    findFirst: async ({ where }) => {
+      addressReads++; assert.equal(where.tenantId, 'tenant-client'); assert.equal(where.customerId, 'person-client');
+      return where.id === 'saved-client' ? { id: where.id, recipient: 'Synthetic saved', phone: '13800000777', phoneMasked: '138****0777',
+        countryCode: 'CN', province: 'Synthetic province', city: 'Synthetic city', district: null, detail: 'Synthetic detail', postalCode: null } : null;
+    }, create: async () => { throw Error('Quote source must not write the address book'); },
+    update: async () => { throw Error('Quote source must not write the address book'); }
+  } } });
+  const client = Object.assign(Object.create(ClientApiService.prototype), {
+    currentWorkspace: async () => { assert.equal(getRequestIdentity().workspaceId, 'workspace-client'); return {}; },
+    context: async tenantId => { assert.equal(tenantId, 'tenant-client'); return context; },
+    core: { resolvePricingGroupQuoteRequest: async (tenantId, request) => { assert.equal(tenantId, 'tenant-client'); return request; } },
+    business: { createQuote: async (tenantId, businessContext, request) => {
+      assert.equal(tenantId, 'tenant-client'); assert.equal(request.customerId, 'person-client'); assert.equal(request.customerType, 'personal');
+      const snapshot = await business.resolveDeliveryAddressSnapshot(tenantId, businessContext, request);
+      return { id: 'synthetic-one-time-quote', request, snapshot };
+    } },
+    createQuoteForOriginalOperation: async (current, input, reference) => {
+      quoteCalls++; assert.equal(reference, 'quote-source-original');
+      return ClientApiService.prototype.createQuote.call(client, current, input);
+    },
+    readQuoteForOriginalOperation: async () => { throw Error('No original receipt read requested by this input test'); }
+  });
+  const original = composeGuardedClientOriginalQuotes({ guard, client, credentials: { current: async () => ({
+    authorization: operatorAuthorization ? 'Bearer operator-token' : `Bearer ${token}`
+  }) } });
+  const draft = { recipient: ' Synthetic recipient ', phone: '13800000777', province: ' Synthetic province ', city: 'Synthetic city', detail: ' Synthetic detail ' };
+  const input = { fulfillmentMode: 'delivery', fulfillmentLocationId: 'location-client', startAt: '2026-12-01T00:00:00Z',
+    endAt: '2026-12-02T00:00:00Z', lines: [{ itemGroupId: 'item-client', quantity: 1 }], deliveryAddressDraft: draft };
+  const command = { reference: 'quote-source-original', input };
+  assert.equal(validators.ClientQuoteRequest(input), true);
+  const quote = await original.create(command);
+  assert.equal(quote.quote.snapshot.recipient, 'Synthetic recipient'); assert.equal(quote.quote.snapshot.detail, 'Synthetic detail');
+  assert.equal(quote.quote.snapshot.phone, draft.phone); assert.notEqual(quote.quote.snapshot.phoneMasked, draft.phone);
+  assert.equal(quote.quote.snapshot.addressId, undefined); assert.equal(addressReads, 0);
+  assert.equal(quote.quote.request.customerId, 'person-client'); assert.equal(quote.orderExecution, 'not_attempted');
+  const beforeInvalid = quoteCalls;
+  for (const candidate of [
+    { ...input, deliveryAddressId: 'saved-client' }, { ...input, customerId: 'foreign-customer' },
+    { ...input, deliveryAddressDraft: { ...draft, customerId: 'foreign-customer' } },
+    { ...input, deliveryAddressDraft: { ...draft, addressId: 'fabricated' } },
+    ...['tenantId', 'workspaceId', 'observedRevision', 'latitude', 'longitude'].map(key =>
+      ({ ...input, deliveryAddressDraft: { ...draft, [key]: 'untrusted' } })),
+    ...['recipient', 'phone', 'province', 'city', 'detail'].map(key => {
+      const missing = { ...draft }; delete missing[key]; return { ...input, deliveryAddressDraft: missing };
+    }),
+    { ...input, deliveryAddressDraft: { ...draft, phone: '138****0777' } },
+    { ...input, deliveryAddressDraft: { ...draft, detail: 'x'.repeat(501) } },
+    { ...input, deliveryAddressDraft: null }, { ...input, deliveryAddressDraft: [] }
+  ]) {
+    assert.equal(validators.ClientQuoteRequest(candidate), false);
+    await assert.rejects(original.create({ ...command, input: candidate }), error => error.getStatus?.() === 400);
+  }
+  assert.equal(quoteCalls, beforeInvalid, 'invalid or mixed input never reaches original quote creation');
+  const saved = { ...input, deliveryAddressId: 'saved-client' }; delete saved.deliveryAddressDraft;
+  assert.equal(validators.ClientQuoteRequest(saved), true);
+  const savedResult = await original.create({ ...command, input: saved });
+  assert.equal(savedResult.quote.snapshot.addressId, 'saved-client'); assert.equal(addressReads, 1);
+  await assert.rejects(original.create({ ...command, input: { ...saved, deliveryAddressId: 'foreign-address' } }), error => error.getStatus?.() === 400);
+  await assert.rejects(original.create({ ...command, input: { ...input, fulfillmentMode: 'store_pickup_return' } }), error => error.getStatus?.() === 400);
+  await assert.rejects(original.create({ ...command, input: { ...input, deliveryAddressDraft: { ...draft, detail: '   ' } } }), error => error.getStatus?.() === 400);
+  const beforeDenied = quoteCalls; membershipStatus = 'pending_activation';
+  await assert.rejects(original.create(command)); assert.equal(quoteCalls, beforeDenied);
+  membershipStatus = 'active'; revoked = true;
+  await assert.rejects(original.create(command)); assert.equal(quoteCalls, beforeDenied);
+  revoked = false; operatorAuthorization = true;
+  await assert.rejects(original.create(command)); assert.equal(quoteCalls, beforeDenied);
+  const { bookingSelectionSchema, oneTimeQuoteSnapshotFingerprint } = require('../apps/api/src/modules/ai-native/scenes/client-booking-material');
+  const selection = { quoteId: quote.quote.id, timeZone: 'Asia/Shanghai', startAt: input.startAt, endAt: input.endAt,
+    fulfillmentMode: input.fulfillmentMode, fulfillmentLocationId: input.fulfillmentLocationId, lines: input.lines,
+    bookingIdentity: { bookingIdentity: 'personal', enterpriseContractAndPayer: false },
+    deliveryAddressConfirmation: { source: 'original_quote_one_time_address',
+      snapshotFingerprint: oneTimeQuoteSnapshotFingerprint(quote.quote.snapshot), confirmed: true } };
+  assert.deepEqual(bookingSelectionSchema.parse(selection), selection);
+  for (const value of [draft.phone, draft.detail.trim(), draft.recipient.trim()]) assert.equal(JSON.stringify(selection).includes(value), false);
+  for (const candidate of [{ ...selection, deliveryAddressDraft: draft },
+    { ...selection, deliveryAddressConfirmation: { ...selection.deliveryAddressConfirmation, phone: draft.phone } }]) {
+    assert.equal(bookingSelectionSchema.safeParse(candidate).success, false, 'the server-only form body cannot enter Booking confirmation');
+  }
+});
+
+// Begin original client service capacity owned cases.
+async function clientServiceCapacitySetup(t, exposeHistoryRoute = false, currentBookingFixture, bookingApplicationFixture = false) {
+  const categoryCode = currentBookingFixture?.categoryCode ?? 'camera';
+  const previous = process.env.PLATFORM_DATA_SOURCE; process.env.PLATFORM_DATA_SOURCE = 'memory';
+  t.after(() => { if (previous === undefined) delete process.env.PLATFORM_DATA_SOURCE; else process.env.PLATFORM_DATA_SOURCE = previous; });
+  const { createTaskInputStore, clone } = require('./fixtures/ai-native/task-input-store.cjs');
+  const { runWithRequestIdentity, getRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { RentalServiceCapacityService } = require('../apps/api/src/modules/rental-core/rental-service-capacity.service');
+  const { RentalOrderConfirmationService } = require('../apps/api/src/modules/rental-core/rental-order-confirmation.service');
+  const { RentalIdempotencyRepository } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { ClientApiService } = require('../apps/api/src/modules/client/client-api.service');
+  const { ClientAuthService } = require('../apps/api/src/modules/client/client-auth.service');
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { ExecutionContextHost } = require('@nestjs/core/helpers/execution-context-host');
+  const { composeAiClientScenes, createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
+  const { readClientBookingMaterial } = require('../apps/api/src/modules/ai-native/scenes/client-booking-material');
+  const b = await require('./fixtures/ai-native/lane-a-business-consumption.cjs').setup(categoryCode, true);
+  const startAt = '2027-02-01T00:00:00.000Z', endAt = '2027-02-02T00:00:00.000Z', tenantId = 'tenant_001', workspaceId = 'workspace-a';
+  const store = createTaskInputStore({ businessWorkspace: [{ id: workspaceId, tenantId, status: 'ACTIVE', categoryCode }],
+    rentalServiceCapacity: [{ id: 'capacity-original', tenantId, workspaceId, serviceId: 'service-original', locationId: b.location.id,
+      status: 'enabled', windowStart: new Date(startAt), windowEnd: new Date(endAt), totalCapacity: 2, reservedQuantity: 0, usedQuantity: 0 }],
+    rentalServiceReservation: [], rentalValueAddedService: [], rentalFulfillmentLocation: [], rentalOrder: [], rentalQuote: [], rentalOrderIdempotencyRecord: [],
+    // Begin standard Booking application metadata opt-in.
+    ...(bookingApplicationFixture ? { tenant: [], clientChannelProfile: [], tenantAppearanceProfile: [], websiteChannelProfile: [],
+      aiScope: [], aiBudgetPolicy: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [], aiTaskResultArtifact: [], aiClientTaskPolicy: [],
+      aiClientSceneMaterial: [], aiClientBookingDraft: [], aiClientBookingDraftOperation: [], aiClientBookingHandoff: [] } : {})
+    // End standard Booking application metadata opt-in.
+  });
+  // Existing store lacks gte. Translate only inclusive Date/integer predicates
+  // to equivalent gt leaves, leaving actual Core selection/CAS arithmetic intact.
+  const inclusive = value => {
+    if (value instanceof Date) return value;
+    if (!value || typeof value !== 'object') return value;
+    if ('gte' in value) { const x = value.gte; assert.ok(x instanceof Date || Number.isSafeInteger(x)); return { gt: x instanceof Date ? new Date(x.getTime() - 1) : x - 1 }; }
+    return Object.fromEntries(Object.entries(value).map(([key, x]) => [key, inclusive(x)]));
+  };
+  const transaction = store.db.$transaction.bind(store.db);
+  const membershipDb = b.memberships.prisma;
+  store.db.$transaction = (work, options) => transaction(tx => {
+    const find = tx.rentalServiceCapacity.findFirst.bind(tx.rentalServiceCapacity), update = tx.rentalServiceCapacity.updateMany.bind(tx.rentalServiceCapacity);
+    tx.rentalServiceCapacity.findFirst = args => find({ ...args, where: inclusive(args.where) });
+    tx.rentalServiceCapacity.updateMany = args => update({ ...args, where: inclusive(args.where) });
+    if (options?.isolationLevel !== 'RepeatableRead') {
+      const create = tx.rentalServiceReservation.create.bind(tx.rentalServiceReservation);
+      tx.rentalServiceReservation.create = args => create({ ...args, data: { id: require('node:crypto').randomUUID(), ...args.data } });
+    }
+    Object.assign(tx, ...['customerProfile', 'customerMembership', 'customerQualificationRef', 'customerMembershipQualificationType',
+      'customerMembershipPlanAssignment', 'customerCorporateMembership'].map(name => ({ [name]: membershipDb[name] })));
+    return work(tx);
+  }, options);
+  const capacity = new RentalServiceCapacityService(store.db), context = { ...b.quoteConfiguration, category: b.core.listCategories().find(row => row.code === categoryCode) };
+  const identity = { userId: 'customer-a', tenantId, workspaceId, audience: 'client', isSaasAdmin: false };
+  const service = { id: 'service-original', tenantId, workspaceId, categoryCode, code: 'ORIGINAL', name: 'Original staffed service',
+    serviceType: 'operator', billingUnit: 'per_order', price: 12, minimumQuantity: 1, maximumQuantity: 1, termsVersion: '1', terms: 'Original terms',
+    applicableItemGroupIds: [], applicableFulfillmentModes: [], applicableLocationIds: [b.location.id], customerScope: 'all',
+    selectionMode: 'optional', requiresCapacity: true, status: 'enabled', version: '1', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+  store.state.rentalValueAddedService.push(clone(service)); store.state.rentalFulfillmentLocation.push({ ...clone(b.location), tenantId, workspaceId, status: 'enabled' });
+  runWithRequestIdentity(identity, () => { b.business.state(tenantId, context).services = [clone(service)]; });
+  b.business.serviceCapacities = capacity;
+  b.facts.listAssets = async () => [1, 2, 3].map(index => ({ id: `capacity-asset-${index}`, tenantId, workspaceId,
+    itemGroupId: b.group.id, locationId: b.location.id, status: 'available' }));
+  b.facts.listStockBalances = async () => [{ itemGroupId: b.group.id, locationId: b.location.id, onHandQuantity: 10, maintenanceQuantity: 0 }];
+  // Begin current booking qualification opt-in fixture.
+  const qualificationRows = [];
+  if (currentBookingFixture && context.category.businessModel.supportsQualificationReview) {
+    assert.equal(context.category.code, categoryCode);
+    assert.equal(context.category.businessModel.supportsQualificationReview, true);
+    // Declared already-reviewed legacy samples before the original Core quote;
+    // AI never submits/approves these facts or puts them in a client command.
+    qualificationRows.push(...context.category.businessModel.defaults.rules.qualificationDocumentTypes.map((qualificationType, index) => ({
+      id: `synthetic-current-qualification-${index}`, tenantId, customerId: 'customer-a', qualificationType,
+      referenceNoMasked: 'SYNTHETIC-****', issuedAt: new Date('2020-01-01T00:00:00Z'), expiresAt: new Date('2028-01-01T00:00:00Z'),
+      status: 'approved', source: 'manual', evidenceRef: `synthetic-current-review-${index}`, currentRevisionId: null,
+      verifiedAt: new Date('2026-01-01T00:00:00Z'), createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z')
+    })));
+    assert.ok(qualificationRows.length > 0);
+    b.memberships.prisma.customerQualificationRef.findMany = async ({ where }) => clone(qualificationRows
+      .filter(row => row.tenantId === where.tenantId && row.customerId === where.customerId));
+  }
+  // End current booking qualification opt-in fixture.
+  // Begin standard Booking original selection opt-in.
+  const fulfillmentMode = currentBookingFixture ? context.category.businessModel.fulfillmentModes[0] : 'store_pickup_return';
+  const bookingIdentity = currentBookingFixture?.enterprise ? { bookingIdentity: 'enterprise_employee',
+    corporateCustomerId: 'core-booking-company', enterpriseContractAndPayer: false } : { bookingIdentity: 'personal' };
+  if (currentBookingFixture?.enterprise) {
+    b.membershipRows.corporateCustomers = [{ id: 'core-booking-company', tenantId, customerType: 'corporate', name: 'Synthetic Core Booking company' }];
+    b.membershipRows.corporateLinks = [{ tenantId, customerId: 'core-booking-company', status: 'active' }];
+    b.membershipRows.bookingOptions = [{ id: 'core-booking-employment', tenantId, personalCustomerId: 'customer-a',
+      corporateCustomerId: 'core-booking-company', corporateCustomer: { name: 'Synthetic Core Booking company' }, role: 'employee',
+      status: 'active', effectiveFrom: new Date('2020-01-01'), effectiveTo: new Date('2028-01-01') }];
+  }
+  // End standard Booking original selection opt-in.
+  const quote = await runWithRequestIdentity(identity, () => b.business.createQuote(tenantId, context, { customerType: 'personal', customerId: 'customer-a',
+    bookingIdentity, fulfillmentMode, fulfillmentLocationId: b.location.id,
+    startAt, endAt, lines: [{ itemGroupId: b.group.id, quantity: 1, pricingUnit: b.candidate.items[0].pricingUnit }],
+    services: [{ serviceId: service.id, quantity: 1, scheduledStartAt: startAt, scheduledEndAt: endAt, serviceLocationId: b.location.id }] }));
+  await store.db.rentalQuote.create({ data: { id: quote.id, tenantId, snapshot: clone(quote), consumedAt: null, consumedOrderId: null } });
+  const quoteFacts = { findQuote: async (tenant, id, tx) => {
+    const row = await (tx ?? store.db).rentalQuote.findFirst({ where: { tenantId: tenant, id } });
+    return row ? { ...clone(row.snapshot), ...(row.consumedAt ? { consumedAt: row.consumedAt, consumedOrderId: row.consumedOrderId } : {}) } : null;
+  }, consumeQuoteIfAvailable: async (tenant, id, orderId, at, tx) => (await tx.rentalQuote.updateMany({ where: { tenantId: tenant, id, consumedAt: null },
+    data: { consumedAt: at, consumedOrderId: orderId } })).count === 1 };
+  Object.assign(b.businessFacts, quoteFacts);
+  const coreFacts = Object.assign(b.facts, { findOrder: (tenant, id, tx) => (tx ?? store.db).rentalOrder.findFirst({ where: { tenantId: tenant, id } }),
+    countOrders: async () => store.state.rentalOrder.length, allocateOrderNumber: async () => 'CAPACITY-ORIGINAL-1',
+    saveOrderAggregate: (order, _lines, tx) => tx.rentalOrder.create({ data: { ...clone(order), workspaceId: getRequestIdentity().workspaceId } }) });
+  const confirmation = new RentalOrderConfirmationService(store.db, b.core, b.business, coreFacts, quoteFacts,
+    new RentalIdempotencyRepository(store.db), undefined, undefined, undefined, capacity, b.memberships);
+  let revoked = false, published = true, duringAvailability = null;
+  const session = { id: 'capacity-client-session', expiresAt: new Date('2028-01-01'), tenant: { code: 'capacity-tenant', status: 'ACTIVE' },
+    customer: { customerType: 'personal', name: 'Synthetic capacity customer', phone: '13800000000' },
+    workspace: { tenantId, status: 'ACTIVE', code: categoryCode, name: 'Synthetic capacity workspace', categoryCode } };
+  const auth = Object.assign(Object.create(ClientAuthService.prototype), { secret: () => 'synthetic-capacity-offline-only', prisma: {
+    clientAuthSession: { findFirst: async () => revoked ? null : clone(session), updateMany: async () => ({ count: 1 }) },
+    customerAccount: { findFirst: async () => ({ status: 'active', customer: { status: 'active' } }) },
+    customerMembership: { findFirst: async () => ({ status: 'active' }) }
+  }, listPublicWorkspaces: async tenantCode => { assert.equal(tenantCode, 'capacity-tenant'); return { workspaces: published ? [{ id: workspaceId, code: categoryCode }] : [] }; } });
+  const authorization = `Bearer ${auth.sign({ typ: 'client', sub: 'customer-a', tid: tenantId, sid: session.id, wid: workspaceId, iat: 1,
+    exp: Math.floor(new Date('2028-01-01').getTime() / 1000) })}`;
+  const guard = new ApiAuthGuard({ resolveAccessContext: async () => { throw Error('Operator identity forbidden in client fixture'); } }, undefined, auth,
+    { assertAllowed: async () => { if (!published) throw Error('Declared client publication unavailable'); } });
+  const client = Object.assign(Object.create(ClientApiService.prototype), { core: b.core, business: b.business, orders: confirmation,
+    serviceCapacities: capacity, memberships: b.memberships, auth, context: async () => context,
+    catalog: async current => ({ tenantCode: current.tenantCode, workspace: { workspaceCode: categoryCode }, categoryCode,
+      timeZone: quote.pricingContext.timeZone, fulfillment: { ...b.quoteConfiguration.settings.fulfillment, deliveryDestination: 'customer_address' },
+      locations: clone(b.core.listLocations(tenantId)), items: clone(b.core.listItemGroups(tenantId)) }),
+    availability: async (current, value) => { const result = await b.core.readAvailability(current.tenantId, value); await duringAvailability?.(); return result; }
+  });
+  const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization }) }), scenes = composeAiClientScenes({ client, session: source });
+  const clientContext = await source.current();
+  const selection = { quoteId: quote.id, timeZone: quote.pricingContext.timeZone, startAt, endAt, fulfillmentMode,
+    fulfillmentLocationId: b.location.id, bookingIdentity: { ...bookingIdentity, enterpriseContractAndPayer: false },
+    lines: [{ itemGroupId: b.group.id, quantity: 1 }], services: [{ serviceId: service.id, quantity: 1,
+      scheduledStartAt: startAt, scheduledEndAt: endAt, serviceLocationId: b.location.id }] };
+  const withOrder = async work => runWithRequestIdentity({}, async () => {
+    const req = { method: 'POST', url: '/api/client/v1/orders', originalUrl: '/api/client/v1/orders', headers: { authorization }, body: { quoteId: quote.id }, query: {} };
+    assert.equal(await guard.canActivate(new ExecutionContextHost([req])), true); return work(req.client);
+  });
+  return { ...store, clone, b, capacity, client, scenes, quote, selection, clientContext, confirmation, withOrder,
+    read: value => readClientBookingMaterial(scenes, clientContext, value ?? selection, () => new Date()),
+    revoke: () => { revoked = true; }, duringAvailability: callback => { duringAvailability = callback; },
+    ...(exposeHistoryRoute ? { guard, authorization } : {}),
+    ...(currentBookingFixture ? { qualificationRows } : {}) };
+}
+
+test('AIN15 client service capacity original quote reaches explicit client Core order with one reservation and lost commit receipt', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+  const h = await clientServiceCapacitySetup(t), before = h.clone(h.state), trace = h.trace.length;
+  phase = 'material';
+  const material = await h.read();
+  const published = require('@rental-os/shared').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS;
+  const validate = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor({
+    BookingMaterialField: published.AiBookingDraft.properties.material, SourceVersion: published.AiBookingSourceVersion });
+  assert.equal(validate.BookingMaterialField(JSON.parse(JSON.stringify(material))), true, JSON.stringify(validate.BookingMaterialField.errors));
+  assert.equal(validate.SourceVersion('1/1'), true); assert.equal(validate.SourceVersion('bad//version'), false);
+  assert.ok(material.quote.chargeLines.some(row => row.type === 'service' && row.sourceVersion === '1/1'));
+  assert.equal(material.selection.services.length, 1); assert.deepEqual(material.selection.services, h.selection.services);
+  assert.equal(material.availability, 'available_at_observation_not_reserved'); assert.equal(h.state.rentalServiceReservation.length, 0);
+  phase = 'read-only-state';
+  assert.deepEqual(h.clone(h.state), before); assert.equal(h.trace.slice(trace).some(item => /\.create|\.update|\.upsert/u.test(item)), false);
+  phase = 'page-preparation';
+  const prepared = await h.withOrder(identity => h.client.prepareOrderSubmission(identity, { quoteId: h.quote.id }));
+  assert.equal(prepared.customerId, h.clientContext.customerId); assert.equal(h.state.rentalOrder.length, 0);
+  let lost = false;
+  h.control.beforeCommit = draft => { if (!lost && draft.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+    lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+  } };
+  const key = 'capacity-original-client-order';
+  phase = 'Core-order-commit';
+  await assert.rejects(h.withOrder(identity => h.client.createOrder(identity, { quoteId: h.quote.id }, { headers: { 'idempotency-key': key } })));
+  assert.equal(lost, true); assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalServiceReservation.length, 1);
+  assert.equal(h.state.rentalServiceCapacity[0].reservedQuantity, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+  assert.equal(h.state.rentalServiceReservation[0].orderId, h.state.rentalOrder[0].id);
+  phase = 'original-receipt';
+  const result = await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key));
+  assert.equal(result.state, 'observed'); assert.equal(result.orderId, h.state.rentalOrder[0].id);
+  const committed = h.clone(h.state);
+  assert.equal((await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key))).orderId, result.orderId);
+  assert.deepEqual(h.clone(h.state), committed); assert.deepEqual(h.state.rentalQuote[0].snapshot, h.quote);
+  phase = 'consumed-quote';
+  await assert.rejects(h.read()); assert.equal(h.state.rentalServiceReservation.length, 1);
+  } catch (error) {
+    // Avoid Node's failing nested assertion formatter. Keep phase/code and a
+    // bounded message, never dump a quote, credential or actual/expected object.
+    throw new Error(`Service capacity phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`);
+  }
+});
+
+test('AIN15 client service capacity rejects changed human occurrences and exhausted or revoked sources without releasing expired holds', { timeout: 120000 }, async t => {
+  const h = await clientServiceCapacitySetup(t);
+  await assert.rejects(h.read({ ...h.selection, services: undefined }), error => error.code === 'AI_INVALID_INPUT');
+  await assert.rejects(h.read({ ...h.selection, services: [{ ...h.selection.services[0], quantity: 2 }] }), error => error.code === 'AI_PROPOSAL_STALE');
+  h.state.rentalServiceCapacity[0].totalCapacity = 1; h.state.rentalServiceCapacity[0].reservedQuantity = 1;
+  h.state.rentalServiceReservation.push({ id: 'retained-expired-hold', tenantId: 'tenant_001', workspaceId: 'workspace-a', capacityId: 'capacity-original',
+    status: 'reserved', quantity: 1, expiresAt: new Date('2025-01-01'), orderId: 'another-original-order' });
+  const before = h.clone(h.state);
+  await assert.rejects(h.read(), error => error.code === 'AI_PROPOSAL_STALE'); assert.deepEqual(h.clone(h.state), before);
+  h.state.rentalServiceCapacity[0].reservedQuantity = 0; h.state.rentalServiceReservation = [];
+  h.duringAvailability(async () => { h.state.rentalServiceCapacity[0].usedQuantity = 1; });
+  await assert.rejects(h.read(), error => error.code === 'AI_PROPOSAL_STALE');
+  h.duringAvailability(null); h.state.rentalServiceCapacity[0].usedQuantity = 0;
+  const read = h.capacity.readAvailabilityForQuote.bind(h.capacity);
+  h.capacity.readAvailabilityForQuote = async (...args) => { const result = await read(...args); h.revoke(); return result; };
+  await assert.rejects(h.read()); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+});
+// End original client service capacity owned cases.
+
+// Begin original client service history owned cases.
+async function originalClientServiceHistorySetup(t) {
+  const h = await clientServiceCapacitySetup(t, true);
+  const { Prisma } = require('@prisma/client');
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { ExecutionContextHost } = require('@nestjs/core/helpers/execution-context-host');
+  const { RentalBusinessFactRepository } = require('../apps/api/src/modules/rental-core/rental-business-fact.repository');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { AiClientMaterialError } = require('../apps/api/src/modules/ai-native/scenes/prisma-client-scene-material.repository');
+  const hash = value => requestFingerprint(JSON.parse(JSON.stringify(value)));
+  // New storage transport only: actual Prisma stores DbNull/JsonNull as SQL/JSON
+  // null; the existing object store otherwise clones their empty sentinel body.
+  const transaction = h.db.$transaction.bind(h.db);
+  h.db.$transaction = (work, options) => transaction(tx => {
+    const create = tx.rentalQuote.create.bind(tx.rentalQuote);
+    tx.rentalQuote.create = args => create({ ...args, data: Object.fromEntries(Object.entries(args.data)
+      .map(([key, value]) => [key, value === Prisma.DbNull || value === Prisma.JsonNull ? null : value])) });
+    const raw = tx.$queryRaw.bind(tx);
+    tx.$queryRaw = async query => {
+      const sql = query.sql.replace(/\s+/gu, ' ').trim(), values = query.values;
+      if (sql.includes('FROM rental_fulfillment_locations')) {
+        assert.match(sql, /ORDER BY id FOR UPDATE$/u); assert.deepEqual(values.slice(0, 2), ['tenant_001', 'workspace-a']);
+        const ids = values.slice(2); assert.deepEqual(ids, [h.b.location.id]);
+        return tx.rentalFulfillmentLocation.findMany({ where: { tenantId: values[0], workspaceId: values[1], id: { in: ids } } });
+      }
+      if (sql.includes('FROM rental_fulfillment_operators')) {
+        assert.match(sql, /ORDER BY id FOR UPDATE$/u); assert.deepEqual(values.slice(0, 2), ['tenant_001', 'workspace-a']);
+        const ids = values.slice(2), rows = h.b.core.listOperators('tenant_001').filter(row => ids.includes(row.id));
+        assert.equal(rows.length, ids.length); return rows.map(row => ({ ...h.clone(row), tenantId: values[0], workspaceId: values[1] }));
+      }
+      if (sql.includes('FROM rental_item_groups WHERE')) {
+        assert.match(sql, /ORDER BY id LIMIT \? LOCK IN SHARE MODE$/u); assert.deepEqual(values.slice(0, 2), ['tenant_001', 'workspace-a']);
+        assert.equal(values.length, 4); assert.equal(values[3], 2);
+        const rows = h.b.core.listItemGroups('tenant_001').filter(row => row.id === values[2]);
+        return rows.map(row => ({ ...h.clone(row), tenantId: values[0], workspaceId: values[1], createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) }));
+      }
+      if (sql.includes('FROM rental_bundle_components b JOIN')) {
+        assert.equal(values.length, 1); assert.match(sql, /LIMIT 257 LOCK IN SHARE MODE$/u);
+        const group = h.b.core.listItemGroups('tenant_001').find(row => row.id === values[0]);
+        assert.ok(group && group.inventoryMode !== 'bundle' && !group.bundleComponents?.length); return [];
+      }
+      return raw(query);
+    };
+    return work(tx);
+  }, options);
+  const repository = new RentalBusinessFactRepository(h.db);
+  for (const method of ['findQuote', 'findQuoteForOriginalOperation', 'findQuoteForOriginalReference', 'saveQuoteForOriginalOperation'])
+    h.b.businessFacts[method] = repository[method].bind(repository);
+  const withRoute = (method, path, value, work) => runWithRequestIdentity({}, async () => {
+    const req = { method, url: `/api/client/v1/${path}`, originalUrl: `/api/client/v1/${path}`,
+      headers: { authorization: h.authorization }, body: method === 'POST' ? value : {}, query: {} };
+    assert.equal(await h.guard.canActivate(new ExecutionContextHost([req])), true); return work(req.client);
+  });
+  // A separate original per-order non-capacity service may use Core defaults.
+  // Never downgrade the original capacity service or waive its required fields.
+  const historyService = { ...h.clone(h.state.rentalValueAddedService[0]), id: 'service-history-default',
+    name: 'Original default-period service', requiresCapacity: false };
+  h.state.rentalValueAddedService.push(h.clone(historyService));
+  await withRoute('GET', 'catalog', {}, async identity => {
+    const context = await h.client.context(identity.tenantId);
+    h.b.business.state(identity.tenantId, context).services.push(h.clone(historyService));
+  });
+  const input = { ...h.quote.request, services: [{ serviceId: historyService.id, quantity: 1 }] };
+  const normalized = await withRoute('POST', 'quotes', input, identity => h.client.prepareQuoteForOriginalOperation(identity, input));
+  const materialRef = require('node:crypto').randomUUID();
+  const prep = { version: 'client-prequote-1', input: JSON.parse(JSON.stringify(input)), normalized: normalized.request,
+    inputHash: normalized.inputHash, configurationHash: normalized.configurationHash };
+  const original = { materialRef, expectedMaterialHash: hash(prep) };
+  const quote = await withRoute('POST', 'quotes', input, identity => h.client.createQuoteForOriginalOperation(identity, input, materialRef, normalized));
+  assert.equal(quote.request.services[0].scheduledStartAt, undefined);
+  assert.equal(quote.serviceSnapshots[0].scheduledStartAt, quote.request.startAt);
+  const selection = { ...h.selection, quoteId: quote.id, services: [{ serviceId: historyService.id, quantity: 1 }] };
+  let now = new Date(), receiptReads = 0, preparations = 0, afterReceipt = null; const records = new Map();
+  const request = { headers: { authorization: h.authorization } };
+  const originalRead = async (currentRequest, value) => {
+    assert.equal(currentRequest.headers.authorization, h.authorization); assert.deepEqual(value, original);
+    const saved = await withRoute('GET', `quotes/${quote.id}`, {}, identity => h.client.readQuoteForOriginalOperation(identity, materialRef));
+    assert.ok(saved); return { state: 'observed', quote: saved, source: { materialRef, expectedMaterialHash: original.expectedMaterialHash, quoteId: saved.id } };
+  };
+  const readMaterial = async chosen => require('../apps/api/src/modules/ai-native/scenes/client-booking-material')
+    .readClientBookingMaterial(h.scenes, h.clientContext, chosen, () => new Date());
+  // Explicit material-storage/reference/policy leaves, NOT a production app or
+  // Action issuer. The exact command is captured from actual Core material, and
+  // every receipt compares that persisted command hash. Unknown never rewrites it.
+  const application = {
+    readPreparedQuoteOriginal: originalRead,
+    readPreparedQuoteBookingMaterial: async (req, value, chosen) => { const saved = await originalRead(req, value);
+      const material = await readMaterial(chosen); assert.equal(material.quote.quoteVersion, hash(saved.quote));
+      return { state: 'observed', source: saved.source, material }; },
+    prepare: async (_req, value) => {
+      const material = await readMaterial(value.command.selection); assert.equal(hash(value.command.selection), hash(material.selection));
+      if (records.has(value.operationKey)) throw Error('Unknown material must not be prepared again');
+      preparations++; const row = { materialRef: require('node:crypto').randomUUID(), inputHash: hash(value.command), command: structuredClone(value.command),
+        expiresAt: new Date(Date.parse(quote.expiresAt)), materialHash: hash(material) };
+      records.set(value.operationKey, row); return { materialRef: row.materialRef, materialHash: row.materialHash };
+    },
+    issueAction: async () => { throw new AiClientMaterialError('AI_CLIENT_RESULT_UNKNOWN'); },
+    readBookingMaterialReceipt: async (_req, value) => {
+      receiptReads++; const row = records.get(value.operationKey); assert.ok(row);
+      if (row.inputHash !== hash(value.command)) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+      const receipt = { state: 'observed', operationKey: value.operationKey, materialRef: row.materialRef, inputHash: row.inputHash,
+        materialValidity: now >= row.expiresAt ? 'expired' : 'not_revalidated', currentUse: 'not_authorized_by_receipt', retryable: false };
+      await afterReceipt?.(); return receipt;
+    }
+  };
+  for (const name of ['readSource', 'readBookingPreparation', 'readBookingAcceptance', 'acceptBookingSubmission', 'submitAcceptedBooking',
+    'readBookingSubmission', 'readBookingOperation', 'readBookingOperationObservation']) application[name] = async () => { throw Error('Unused host/Action/submission leaf unavailable'); };
+  const flow = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(application);
+  const command = { original, selection, operationKey: 'original-default-service-material' };
+  await assert.rejects(flow.prepare(request, command), error => error.code === 'AI_CLIENT_RESULT_UNKNOWN');
+  assert.equal(preparations, 1); assert.equal(records.size, 1);
+  return { ...h, quote, request, flow, command, application, records, hash,
+    receiptReads: () => receiptReads, preparations: () => preparations,
+    row: () => h.state.rentalQuote.find(row => row.id === quote.id),
+    expireMaterial: () => { now = new Date(Date.parse(quote.expiresAt) + 1000); }, afterReceipt: callback => { afterReceipt = callback; } };
+}
+
+test('AIN15 original service history reads the same uncertain material after Core-default occurrence normalization without live capacity or new preparation', { timeout: 120000 }, async t => {
+  const h = await originalClientServiceHistorySetup(t), before = h.clone(h.state);
+  const saved = h.records.get(h.command.operationKey), materialBefore = structuredClone(saved);
+  assert.ok(saved.command.selection.services[0].scheduledStartAt); assert.ok(saved.command.selection.services[0].serviceLocationId);
+  const receipt = await h.flow.readOperation(h.request, h.command);
+  assert.equal(receipt.state, 'observed'); assert.equal(receipt.materialRef, saved.materialRef); assert.equal(receipt.inputHash, saved.inputHash);
+  h.expireMaterial(); h.state.rentalValueAddedService.find(row => row.id === 'service-history-default').status = 'disabled';
+  const exhausted = h.clone(h.state), capacity = h.capacity.readAvailabilityForQuote.bind(h.capacity); let reads = 0;
+  h.capacity.readAvailabilityForQuote = async (...args) => { reads++; return capacity(...args); };
+  const expired = await h.flow.readOperation(h.request, h.command);
+  assert.equal(expired.materialRef, saved.materialRef); assert.equal(expired.materialValidity, 'expired'); assert.equal(expired.currentUse, 'not_authorized_by_receipt');
+  assert.equal(reads, 0); assert.equal(h.preparations(), 1); assert.equal(h.records.size, 1);
+  assert.deepEqual(h.records.get(h.command.operationKey), materialBefore); assert.deepEqual(h.clone(h.state), exhausted);
+  assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  assert.equal(h.quote.serviceSnapshots[0].scheduledStartAt, before.rentalQuote.find(row => row.id === h.quote.id).request.startAt);
+});
+
+test('AIN15 original service history rejects changed or missing human occurrences and changed frozen evidence without repairing a receipt', { timeout: 120000 }, async t => {
+  const h = await originalClientServiceHistorySetup(t), row = h.records.get(h.command.operationKey), saved = structuredClone(row);
+  await assert.rejects(h.flow.readOperation(h.request, { ...h.command, selection: { ...h.command.selection, services: [] } }));
+  await assert.rejects(h.flow.readOperation(h.request, { ...h.command, selection: { ...h.command.selection, services: [{ serviceId: 'service-history-default', quantity: 2 }] } }));
+  await assert.rejects(h.flow.readOperation(h.request, { ...h.command, selection: { ...h.command.selection, services: [{ serviceId: 'other-service', quantity: 1 }] } }));
+  const snapshot = h.clone(h.row().serviceSnapshots); h.row().serviceSnapshots = [];
+  await assert.rejects(h.flow.readOperation(h.request, h.command)); h.row().serviceSnapshots = snapshot;
+  h.afterReceipt(async () => { h.row().serviceSnapshots[0].quantity = 2; });
+  await assert.rejects(h.flow.readOperation(h.request, h.command), error => error.code === 'AI_REVISION_CONFLICT');
+  assert.deepEqual(h.records.get(h.command.operationKey), saved); assert.equal(h.preparations(), 1); assert.equal(h.state.rentalOrder.length, 0);
+  assert.equal(h.row().serviceSnapshots[0].quantity, 2); assert.equal(h.state.rentalServiceReservation.length, 0);
+});
+// End original client service history owned cases.
+
+// Begin original client one-time delivery owned cases.
+async function clientOneTimeDeliverySetup(t, exposeReadRoute = false) {
+  const h = await clientServiceCapacitySetup(t, exposeReadRoute);
+  // Legacy missing-capability sample stays explicit; actual producer cases
+  // opt in to the new public observation without changing the old assertion.
+  if (!exposeReadRoute) h.client.observeQuoteDeliveryAddress = undefined;
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const fingerprint = require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint;
+  const context = await h.client.context(h.clientContext.tenantId);
+  const draft = { recipient: 'Synthetic one-time recipient', phone: '13900000001', countryCode: 'CN',
+    province: 'Synthetic Province', city: 'Synthetic City', district: 'Synthetic District', detail: 'Synthetic original delivery point' };
+  h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist',
+    areas: [{ province: draft.province, city: draft.city, district: draft.district }] };
+  let addressBookReads = 0, afterConfiguration = null, configurationReads = 0;
+  // Core's existing memory fixture has no address-book DAO. Only this new
+  // client fixture traps the separate address service; do not turn Core into a
+  // fake database runtime just to count reads of an unavailable DAO.
+  assert.equal(h.b.business.prisma, undefined);
+  h.client.addresses = new Proxy({}, { get: () => {
+    addressBookReads++; throw Error('One-time original quote must not use the address book');
+  } });
+  const configurationRead = h.b.core.configStore.readQuoteConfigurationFacts.bind(h.b.core.configStore);
+  h.b.core.configStore.readQuoteConfigurationFacts = async (...args) => {
+    assert.deepEqual(args, [h.clientContext.tenantId, h.clientContext.workspaceId]);
+    configurationReads++; const value = await configurationRead(...args); await afterConfiguration?.(configurationReads); return value;
+  };
+  const { services: _services, ...originalRequest } = h.quote.request;
+  const quote = await h.withOrder(identity => h.b.business.createQuote(identity.tenantId, context,
+    { ...originalRequest, fulfillmentMode: 'delivery', deliveryAddressDraft: draft }));
+  await h.db.rentalQuote.create({ data: { id: quote.id, tenantId: quote.tenantId, snapshot: h.clone(quote), consumedAt: null, consumedOrderId: null } });
+  const row = () => h.state.rentalQuote.find(value => value.id === quote.id);
+  const selection = { ...h.selection, quoteId: quote.id, fulfillmentMode: 'delivery', services: undefined };
+  const read = () => h.scenes.member.oneTimeDeliveryAvailability(quote.id);
+  return { ...h, quote, selection, draft, row, read, fingerprint, context,
+    addressBookReads: () => addressBookReads, configurationReads: () => configurationReads,
+    afterConfiguration: callback => { afterConfiguration = callback; },
+    bookingRead: () => require('../apps/api/src/modules/ai-native/scenes/client-booking-material')
+      .readClientBookingMaterial(h.scenes, h.clientContext, selection, () => new Date()) };
+}
+
+test('AIN15 client one-time delivery original quote observes current Core area and original page commits once without an address-book write', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await clientOneTimeDeliverySetup(t), before = h.clone(h.state), trace = h.trace.length;
+    phase = 'original-read';
+    const observation = await h.read();
+    assert.equal(observation.source, 'original_core_one_time_quote_snapshot'); assert.equal(observation.quoteId, h.quote.id);
+    assert.equal(observation.available, true); assert.equal(observation.quoteVersion, h.fingerprint(JSON.parse(JSON.stringify(h.quote))));
+    assert.equal(observation.snapshotFingerprint, h.fingerprint(JSON.parse(JSON.stringify(h.quote.deliveryAddressSnapshot))));
+    assert.equal(observation.addressBook, 'not_read_or_written'); assert.equal(observation.execution, 'not_attempted');
+    assert.equal(observation.reservation, 'not_attempted'); assert.match(observation.serviceAreaFingerprint, /^[a-f0-9]{64}$/u);
+    assert.equal(Object.keys(observation).some(key => /phone|recipient|addressId|revision|snapshot$/iu.test(key)), false);
+    assert.equal(JSON.stringify(observation).includes(h.draft.phone), false);
+    assert.equal(h.addressBookReads(), 0); assert.equal(h.configurationReads(), 2);
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.trace.slice(trace).some(item => /\.create|\.update|\.upsert/u.test(item)), false);
+    assert.deepEqual(await h.read(), observation); assert.deepEqual(h.clone(h.state), before);
+    phase = 'public-contract-gate';
+    // This legacy sample explicitly omits the current one-time producer.
+    // Do not hide that capability gap or forge an addressId/revision.
+    await assert.rejects(h.bookingRead(), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+    assert.deepEqual(h.clone(h.state), before);
+    phase = 'original-page-preparation';
+    const prepared = await h.withOrder(identity => h.client.prepareOrderSubmission(identity, { quoteId: h.quote.id }));
+    assert.equal(prepared.request.quoteId, h.quote.id); assert.equal(h.state.rentalOrder.length, 0);
+    assert.equal(h.state.rentalServiceReservation.length, 0); assert.equal(h.addressBookReads(), 0);
+    let lost = false;
+    h.control.beforeCommit = candidate => { if (!lost && candidate.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    } };
+    phase = 'explicit-Core-commit';
+    const key = 'one-time-original-client-order';
+    await assert.rejects(h.withOrder(identity => h.client.createOrder(identity, { quoteId: h.quote.id }, { headers: { 'idempotency-key': key } })));
+    assert.equal(lost, true); assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+    assert.equal(h.state.rentalOrder[0].quoteId, h.quote.id); assert.deepEqual(h.state.rentalOrder[0].deliveryAddressSnapshot, h.quote.deliveryAddressSnapshot);
+    assert.equal(h.state.rentalServiceReservation.length, 0); assert.equal(h.addressBookReads(), 0);
+    phase = 'original-receipt';
+    const committed = h.clone(h.state);
+    const receipt = await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key));
+    assert.equal(receipt.state, 'observed'); assert.equal(receipt.orderId, h.state.rentalOrder[0].id);
+    assert.equal((await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key))).orderId, receipt.orderId);
+    assert.deepEqual(h.clone(h.state), committed); assert.deepEqual(h.row().snapshot, h.quote);
+    await assert.rejects(h.read()); assert.deepEqual(h.clone(h.state), committed); assert.equal(h.addressBookReads(), 0);
+  } catch (error) {
+    throw new Error(`One-time delivery phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`);
+  }
+});
+
+test('AIN15 client one-time delivery rejects changed area snapshot scope expiry and revoked sources without repairing the quote', { timeout: 120000 }, async t => {
+  const h = await clientOneTimeDeliverySetup(t), before = h.clone(h.state);
+  const policy = h.clone(h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea);
+  h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist', areas: [] };
+  assert.equal((await h.read()).available, false); assert.deepEqual(h.clone(h.state), before);
+  h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = policy;
+  h.afterConfiguration(async () => { h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist', areas: [] }; });
+  await assert.rejects(h.read(), error => error.getStatus?.() === 409);
+  h.afterConfiguration(null); h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = policy;
+  h.row().snapshot.deliveryAddressSnapshot.city = 'Different stored city';
+  await assert.rejects(h.read(), error => error.getStatus?.() === 409);
+  assert.equal(h.row().snapshot.deliveryAddressSnapshot.city, 'Different stored city');
+  h.row().snapshot = h.clone(h.quote); h.row().snapshot.expiresAt = '2025-01-01T00:00:00.000Z';
+  await assert.rejects(h.read(), error => error.getStatus?.() === 409);
+  h.row().snapshot = h.clone(h.quote);
+  await assert.rejects(h.withOrder(identity => h.client.readQuoteOneTimeDeliveryAvailability({ ...identity, customerId: 'another-customer' }, h.quote.id)), error => error.getStatus?.() === 403);
+  await assert.rejects(h.withOrder(identity => h.client.readQuoteOneTimeDeliveryAvailability({ ...identity, workspaceId: 'another-workspace' }, h.quote.id)), error => error.getStatus?.() === 403);
+  h.row().snapshot.request.deliveryAddressId = 'not-a-saved-address';
+  await assert.rejects(h.read(), error => error.getStatus?.() === 409); h.row().snapshot = h.clone(h.quote);
+  const port = h.b.core.readQuoteConfiguration; h.b.core.readQuoteConfiguration = undefined;
+  await assert.rejects(h.read(), error => error.getStatus?.() === 503); h.b.core.readQuoteConfiguration = port;
+  h.afterConfiguration(async () => { h.revoke(); }); await assert.rejects(h.read());
+  assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  assert.equal(h.addressBookReads(), 0); assert.deepEqual(h.clone(h.state), before);
+});
+// End original client one-time delivery owned cases.
+
 test('client quote HTTP publication preserves original facts, missing values and post-write unknown semantics', async () => {
   // This exercises the real Controller's wire projection. Application methods
   // are controlled doubles, not proof of current Auth, Core or MySQL execution.
@@ -3791,7 +5347,8 @@ test('client quote HTTP publication preserves original facts, missing values and
     'AiClientQuotePreparationReadResponse', 'AiClientQuoteFacts', 'AiClientQuoteResultReadResponse'];
   const schemas = Object.fromEntries(names.map(name => [name, shared.AI_CLIENT_ENTRY_HTTP_SCHEMAS[name]]));
   const components = require('../apps/api/src/contracts/openapi-document').OPENAPI_DOCUMENT.components.schemas;
-  const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(schemas, { ClientQuoteRequest: components.ClientQuoteRequest });
+  const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(schemas, {
+    ClientQuoteRequest: components.ClientQuoteRequest, ClientQuoteDeliveryAddressDraft: components.ClientQuoteDeliveryAddressDraft });
   const accepted = (name, value) => assert.equal(validators[name](value), true, `${name}: ${JSON.stringify(validators[name].errors)}`);
   const materialRef = '11111111-1111-4111-8111-111111111111', materialHash = '1'.repeat(64);
   const request = { headers: {} }, command = { operationKey: 'quote-operation', input: { fulfillmentMode: 'self_pickup',
@@ -3832,3 +5389,1044 @@ test('client quote HTTP publication preserves original facts, missing values and
   await assert.rejects(controller.prepareQuoteParameters(request, command), error => error.getStatus?.() === 409
     && error.getResponse().code === 'AI_RESULT_UNKNOWN' && error.getResponse().retryable === false);
 });
+
+// Begin current client booking qualification owned cases.
+test('AIN15 current booking qualification reads original Membership gate before material and independent human Core commit', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await clientServiceCapacitySetup(t, true, { categoryCode: 'vehicle' });
+    assert.equal(h.quote.ruleSnapshot.qualification.required, true);
+    const originalQuote = h.clone(h.quote), before = h.clone(h.state), trace = h.trace.length;
+    const originalCheck = h.b.memberships.assertBookingQualificationForAction.bind(h.b.memberships), checks = [];
+    h.b.memberships.assertBookingQualificationForAction = async (...args) => {
+      checks.push({ tenantId: args[0], workspaceId: args[1], action: args[4], window: h.clone(args[5]), transaction: Boolean(args[6]) });
+      return originalCheck(...args);
+    };
+    phase = 'material';
+    const material = await h.read();
+    assert.equal(checks.length, 4); assert.equal(checks.some(row => row.transaction), false);
+    for (const row of checks) assert.deepEqual(row, { tenantId: h.clientContext.tenantId, workspaceId: h.clientContext.workspaceId,
+      action: 'submit', window: { validThroughAt: h.selection.endAt, minimumValidityFromAt: h.selection.startAt }, transaction: false });
+    assert.equal(material.availability, 'available_at_observation_not_reserved');
+    assert.deepEqual(h.clone(h.state), before); assert.deepEqual(h.quote, originalQuote);
+    assert.equal(h.trace.slice(trace).some(row => /\.create|\.update|\.upsert/u.test(row)), false);
+    const observation = await h.scenes.member.bookingQualification(h.quote.id);
+    assert.equal(observation.payerAuthorization, 'not_attested'); assert.equal(observation.execution, 'not_attempted');
+    assert.equal(observation.qualifications, undefined); assert.equal(observation.certificateRevision, undefined);
+    assert.equal(JSON.stringify(observation).includes('SYNTHETIC-'), false);
+    assert.equal((await h.read()).identityVersion, material.identityVersion);
+    phase = 'human-preparation';
+    const prepared = await h.withOrder(identity => h.client.prepareOrderSubmission(identity, { quoteId: h.quote.id }));
+    assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    let lost = false;
+    h.control.beforeCommit = draft => { if (!lost && draft.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    } };
+    phase = 'independent-Core-commit';
+    const key = 'current-qualification-original-order';
+    await assert.rejects(h.withOrder(identity => h.client.createOrder(identity, { quoteId: h.quote.id }, { headers: { 'idempotency-key': key } })));
+    assert.equal(lost, true); assert.equal(h.state.rentalOrder.length, 1);
+    assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1); assert.equal(h.state.rentalServiceReservation.length, 1);
+    assert.ok(checks.some(row => row.transaction), 'Final Core submission must recheck its own real Membership gate');
+    phase = 'original-receipt';
+    const committed = h.clone(h.state);
+    const result = await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key));
+    assert.equal(result.state, 'observed'); assert.equal(result.orderId, h.state.rentalOrder[0].id);
+    assert.equal((await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key))).orderId, result.orderId);
+    assert.deepEqual(h.clone(h.state), committed); assert.deepEqual(h.state.rentalQuote[0].snapshot, originalQuote);
+  } catch (error) { throw new Error(`Current qualification phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 current booking qualification rejects expired or withdrawn facts, missing producer and stale enterprise membership without repairing quote', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await clientServiceCapacitySetup(t, true, { categoryCode: 'vehicle' });
+    const before = h.clone(h.state), originalRows = h.clone(h.qualificationRows);
+    const stale = error => error.code === 'AI_PROPOSAL_STALE';
+    phase = 'expired-current-certificates';
+    h.qualificationRows.forEach(row => { row.expiresAt = new Date('2027-02-01T12:00:00Z'); });
+    await assert.rejects(h.read(), stale); assert.deepEqual(h.clone(h.state), before);
+    h.qualificationRows.splice(0, h.qualificationRows.length, ...h.clone(originalRows));
+    phase = 'withdrawn-current-certificates';
+    h.qualificationRows.forEach(row => { row.status = 'rejected'; });
+    await assert.rejects(h.read(), stale); assert.deepEqual(h.clone(h.state), before);
+    h.qualificationRows.splice(0, h.qualificationRows.length, ...h.clone(originalRows));
+    phase = 'withdrawn-during-stock-observation';
+    h.duringAvailability(async () => { h.qualificationRows.forEach(row => { row.status = 'rejected'; }); });
+    await assert.rejects(h.read(), stale); assert.deepEqual(h.clone(h.state), before);
+    h.duringAvailability(null); h.qualificationRows.splice(0, h.qualificationRows.length, ...h.clone(originalRows));
+    phase = 'missing-current-producer';
+    const port = h.client.readQuoteBookingQualification; h.client.readQuoteBookingQualification = undefined;
+    await assert.rejects(h.read(), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+    h.client.readQuoteBookingQualification = port;
+    phase = 'original-quote-changed-during-last-membership-read';
+    const check = h.b.memberships.assertBookingQualificationForAction.bind(h.b.memberships); let seen = 0;
+    h.b.memberships.assertBookingQualificationForAction = async (...args) => {
+      const result = await check(...args);
+      if (++seen === 2) h.state.rentalQuote[0].snapshot.payableAmount += 1;
+      return result;
+    };
+    await assert.rejects(h.scenes.member.bookingQualification(h.quote.id), stale);
+    h.state.rentalQuote[0].snapshot = h.clone(before.rentalQuote[0].snapshot);
+    h.b.memberships.assertBookingQualificationForAction = check;
+    phase = 'current-personal-membership';
+    h.b.membershipRows.link.status = 'suspended';
+    await assert.rejects(h.read(), stale); h.b.membershipRows.link.status = 'active';
+    assert.deepEqual(h.clone(h.state), before);
+    phase = 'wrong-audience';
+    const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+    await assert.rejects(runWithRequestIdentity({ tenantId: h.clientContext.tenantId, workspaceId: h.clientContext.workspaceId,
+      userId: h.clientContext.customerId, audience: 'operator', isSaasAdmin: false },
+      () => h.client.readQuoteBookingQualification(h.clientContext, h.quote.id)), error => error.getStatus?.() === 403);
+    phase = 'enterprise-without-required-certificate';
+    const e = await clientServiceCapacitySetup(t, true), rows = e.b.membershipRows;
+    rows.corporateCustomers = [{ id: 'company-current', tenantId: e.clientContext.tenantId, customerType: 'corporate', name: 'Synthetic company' }];
+    rows.corporateLinks = [{ tenantId: e.clientContext.tenantId, customerId: 'company-current', status: 'active' }];
+    rows.bookingOptions = [{ id: 'current-relationship', tenantId: e.clientContext.tenantId, personalCustomerId: e.clientContext.customerId,
+      corporateCustomerId: 'company-current', corporateCustomer: { name: 'Synthetic company' }, role: 'employee', status: 'active',
+      effectiveFrom: new Date('2020-01-01'), effectiveTo: null }];
+    const bookingIdentity = { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'company-current', enterpriseContractAndPayer: false };
+    const quote = await e.withOrder(identity => e.b.business.createQuote(identity.tenantId,
+      { ...e.b.quoteConfiguration, category: e.b.core.listCategories().find(row => row.code === 'camera') },
+      { ...e.clone(e.quote.request), bookingIdentity }));
+    await e.db.rentalQuote.create({ data: { id: quote.id, tenantId: e.clientContext.tenantId, snapshot: e.clone(quote), consumedAt: null, consumedOrderId: null } });
+    const selection = { ...e.selection, quoteId: quote.id, bookingIdentity };
+    assert.equal(quote.ruleSnapshot.qualification.required, false);
+    const observation = await e.scenes.member.bookingQualification(quote.id);
+    assert.equal(observation.payerAuthorization, 'not_attested'); await e.read(selection);
+    const enterpriseBefore = e.clone(e.state);
+    // The declared options leaf retains the same eligible entry. Actual original
+    // Membership resolution must still reject its now-inactive company main row.
+    rows.corporateLinks[0].status = 'suspended';
+    await assert.rejects(e.read(selection), stale); assert.deepEqual(e.clone(e.state), enterpriseBefore);
+    assert.equal(e.state.rentalOrder.length, 0); assert.equal(e.state.rentalServiceReservation.length, 0);
+  } catch (error) { throw new Error(`Current qualification rejection phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End current client booking qualification owned cases.
+
+// Begin original one-time Booking producer owned cases.
+async function originalOneTimeBookingProducerSetup(t) {
+  const h = await clientOneTimeDeliverySetup(t, true);
+  const { createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
+  const source = createAiGuardedClientSession(h.guard, { current: async () => ({ authorization: h.authorization }) });
+  return { ...h, evidence: () => source.withRead('quote', h.quote.id, identity => h.client.observeQuoteDeliveryAddress(identity, h.quote.id)) };
+}
+
+test('AIN15 one-time Booking producer reads original Core evidence and independent human order receipt without address-book writes', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await originalOneTimeBookingProducerSetup(t), before = h.clone(h.state), trace = h.trace.length;
+    phase = 'original-quote-evidence';
+    const evidence = await h.evidence();
+    assert.deepEqual(Object.keys(evidence).sort(), ['quoteCreatedAt', 'quoteExpiresAt', 'quoteId', 'serviceAreaFingerprint', 'snapshotFingerprint', 'source'].sort());
+    assert.equal(evidence.source, 'original_quote_one_time_address'); assert.equal(evidence.quoteId, h.quote.id);
+    assert.equal(evidence.quoteCreatedAt, h.quote.createdAt); assert.equal(evidence.quoteExpiresAt, h.quote.expiresAt);
+    assert.equal(evidence.snapshotFingerprint, h.fingerprint(JSON.parse(JSON.stringify(h.quote.deliveryAddressSnapshot))));
+    assert.match(evidence.serviceAreaFingerprint, /^[a-f0-9]{64}$/u); assert.equal(h.configurationReads(), 4);
+    assert.equal(evidence.addressId, undefined); assert.equal(evidence.observedRevision, undefined);
+    assert.equal(JSON.stringify(evidence).includes(h.draft.phone), false); assert.equal(JSON.stringify(evidence).includes(h.draft.detail), false);
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.trace.slice(trace).some(row => /\.create|\.update|\.upsert/u.test(row)), false);
+    assert.deepEqual(await h.evidence(), evidence); assert.equal(h.addressBookReads(), 0);
+    phase = 'original-human-preparation';
+    const prepared = await h.withOrder(identity => h.client.prepareOrderSubmission(identity, { quoteId: h.quote.id }));
+    assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    let lost = false;
+    h.control.beforeCommit = draft => { if (!lost && draft.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    } };
+    phase = 'one-explicit-Core-commit';
+    const key = 'one-time-booking-producer-original-order';
+    await assert.rejects(h.withOrder(identity => h.client.createOrder(identity, { quoteId: h.quote.id }, { headers: { 'idempotency-key': key } })));
+    assert.equal(lost, true); assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+    assert.equal(h.state.rentalServiceReservation.length, 0); assert.equal(h.addressBookReads(), 0);
+    assert.deepEqual(h.state.rentalOrder[0].deliveryAddressSnapshot, h.quote.deliveryAddressSnapshot);
+    phase = 'same-original-receipt';
+    const committed = h.clone(h.state);
+    const receipt = await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key));
+    assert.equal(receipt.state, 'observed'); assert.equal(receipt.orderId, h.state.rentalOrder[0].id);
+    assert.equal((await h.withOrder(identity => h.confirmation.readOrderCreation(identity.tenantId, prepared.request, key))).orderId, receipt.orderId);
+    assert.deepEqual(h.clone(h.state), committed); assert.deepEqual(h.row().snapshot, h.quote);
+    await assert.rejects(h.evidence()); assert.deepEqual(h.clone(h.state), committed);
+  } catch (error) { throw new Error(`One-time Booking producer phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 one-time Booking producer rejects unavailable area, source expiry and changes across final observations without repairing the quote', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await originalOneTimeBookingProducerSetup(t), before = h.clone(h.state), originalPolicy = h.clone(h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea);
+    phase = 'Core-area-denied';
+    h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist', areas: [] };
+    await assert.rejects(h.evidence(), error => error.getStatus?.() === 409); assert.deepEqual(h.clone(h.state), before);
+    h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = h.clone(originalPolicy);
+    phase = 'area-between-outer-observations';
+    const start = h.configurationReads();
+    h.afterConfiguration(async count => { if (count === start + 3) h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist', areas: [] }; });
+    await assert.rejects(h.evidence(), error => error.getStatus?.() === 409); assert.deepEqual(h.clone(h.state), before);
+    h.afterConfiguration(null); h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = h.clone(originalPolicy);
+    phase = 'original-snapshot-changed';
+    h.row().snapshot.deliveryAddressSnapshot.city = 'Stored changed city';
+    await assert.rejects(h.evidence(), error => error.getStatus?.() === 409);
+    assert.equal(h.row().snapshot.deliveryAddressSnapshot.city, 'Stored changed city'); h.row().snapshot = h.clone(h.quote);
+    phase = 'expired-original-quote';
+    h.row().snapshot.expiresAt = '2025-01-01T00:00:00.000Z'; await assert.rejects(h.evidence(), error => error.getStatus?.() === 409);
+    h.row().snapshot = h.clone(h.quote);
+    phase = 'mixed-saved-source';
+    h.row().snapshot.request.deliveryAddressId = 'another-address'; await assert.rejects(h.evidence(), error => error.getStatus?.() === 409);
+    h.row().snapshot = h.clone(h.quote);
+    phase = 'missing-Core-configuration';
+    const port = h.b.core.readQuoteConfiguration; h.b.core.readQuoteConfiguration = undefined;
+    await assert.rejects(h.evidence(), error => error.getStatus?.() === 503); h.b.core.readQuoteConfiguration = port;
+    phase = 'wrong-customer';
+    await assert.rejects(h.withOrder(identity => h.client.observeQuoteDeliveryAddress({ ...identity, customerId: 'another-customer' }, h.quote.id)), error => error.getStatus?.() === 403);
+    phase = 'closing-current-authentication';
+    h.afterConfiguration(async () => { h.revoke(); }); await assert.rejects(h.evidence());
+    assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 0);
+    assert.equal(h.state.rentalServiceReservation.length, 0); assert.equal(h.addressBookReads(), 0); assert.deepEqual(h.clone(h.state), before);
+  } catch (error) { throw new Error(`One-time Booking producer rejection phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End original one-time Booking producer owned cases.
+
+// Begin original Client Core receipt owned cases.
+async function originalClientCoreReceiptSetup(t) {
+  const h = await clientServiceCapacitySetup(t, true);
+  const { createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
+  const accepted = await h.withOrder(identity => h.client.prepareOrderSubmission(identity, { quoteId: h.quote.id }));
+  let committed = false, submissions = 0;
+  const create = h.client.createOrder.bind(h.client);
+  h.client.createOrder = (...args) => { submissions++; return create(...args); };
+  h.control.beforeCommit = draft => { if (!committed && draft.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+    committed = true; h.control.loseReply = true; h.control.beforeCommit = null;
+  } };
+  const operationKey = 'original-client-receipt-order';
+  await assert.rejects(h.withOrder(identity => h.client.createOrder(identity, { quoteId: h.quote.id }, { headers: { 'idempotency-key': operationKey } })));
+  assert.equal(committed, true); assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+  const orderId = h.state.rentalOrder[0].id;
+  const source = createAiGuardedClientSession(h.guard, { current: async () => ({ authorization: h.authorization }) });
+  return { ...h, accepted, operationKey, orderId, submissions: () => submissions,
+    readReceipt: () => source.withRead('order', orderId, identity => h.client.readOrderSubmission(identity, accepted, operationKey)) };
+}
+
+test('AIN15 original Client Core receipt reads same accepted submission after lost commit without reprepare or payment inference', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await originalClientCoreReceiptSetup(t), before = h.clone(h.state), trace = h.trace.length;
+    h.client.getQuote = async () => { throw Error('Historical receipt must not read a current quote'); };
+    h.client.prepareOrderSubmission = async () => { throw Error('Historical receipt must not prepare again'); };
+    h.capacity.readAvailabilityForQuote = async () => { throw Error('Historical receipt must not recheck new capacity'); };
+    phase = 'actual-Client-ACL-and-Core-receipt';
+    const result = await h.readReceipt();
+    assert.equal(result.state, 'observed'); assert.equal(result.orderId, h.orderId); assert.equal(result.retryable, false);
+    assert.equal(result.payment, 'not_inferred'); assert.equal(result.fulfillment, 'not_inferred');
+    assert.deepEqual(await h.readReceipt(), result); assert.deepEqual(h.clone(h.state), before);
+    assert.equal(h.submissions(), 1); assert.equal(h.state.rentalServiceReservation.length, 1);
+    assert.equal(h.trace.slice(trace).some(row => /\.create|\.update|\.upsert/u.test(row)), false);
+    phase = 'current-order-owner-revoked';
+    h.state.rentalOrder[0].customerId = 'another-customer';
+    await assert.rejects(h.readReceipt()); assert.equal(h.submissions(), 1);
+  } catch (error) { throw new Error(`Original Client receipt phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 original Client Core receipt rejects changed original evidence during awaited order ACL instead of accepting stale observation', { timeout: 120000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await originalClientCoreReceiptSetup(t), before = h.clone(h.state);
+    const record = () => h.state.rentalOrderIdempotencyRecord.find(row => row.orderId === h.orderId);
+    const originalOrder = h.b.core.getOrder.bind(h.b.core); let change = false;
+    h.b.core.getOrder = async (...args) => {
+      const order = await originalOrder(...args);
+      if (change) record().requestHash = 'f'.repeat(64);
+      return order;
+    };
+    phase = 'original-receipt-changed-after-read'; change = true;
+    await assert.rejects(h.readReceipt(), error => error.getStatus?.() === 409);
+    assert.equal(record().requestHash, 'f'.repeat(64)); assert.equal(h.submissions(), 1);
+    change = false; h.state.rentalOrderIdempotencyRecord = h.clone(before.rentalOrderIdempotencyRecord);
+    phase = 'original-receipt-disappeared-after-read';
+    h.b.core.getOrder = async (...args) => { const order = await originalOrder(...args); h.state.rentalOrderIdempotencyRecord = []; return order; };
+    await assert.rejects(h.readReceipt(), error => error.getStatus?.() === 409);
+    assert.equal(h.state.rentalOrderIdempotencyRecord.length, 0); assert.equal(h.state.rentalOrder.length, 1);
+    assert.equal(h.submissions(), 1); assert.equal(h.state.rentalServiceReservation.length, 1);
+  } catch (error) { throw new Error(`Original Client receipt rejection phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End original Client Core receipt owned cases.
+
+// Begin standard Core Booking application owned cases.
+async function standardCoreBookingApplicationSetup(t, options = {}) {
+  const categoryCode = options.categoryCode ?? 'camera';
+  const originalFixture = Object.keys(options).length ? { categoryCode, enterprise: options.enterprise === true } : undefined;
+  const h = await clientServiceCapacitySetup(t, true, originalFixture, true);
+  // Begin standard application original one-time quote opt-in.
+  if (options.oneTime) {
+    const context = await h.client.context(h.clientContext.tenantId);
+    assert.equal(context.category.businessModel.deliveryDestination, 'customer_address');
+    const draft = { recipient: 'Synthetic original Booking recipient', phone: '13900000003', countryCode: 'CN',
+      province: 'Synthetic Booking Province', city: 'Synthetic Booking City', district: 'Synthetic Booking District', detail: 'Synthetic original Booking address' };
+    h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist',
+      areas: [{ province: draft.province, city: draft.city, district: draft.district }] };
+    const { services: _services, ...originalRequest } = h.quote.request;
+    const quote = await h.withOrder(identity => h.b.business.createQuote(identity.tenantId, context,
+      { ...originalRequest, fulfillmentMode: 'delivery', deliveryAddressDraft: draft }));
+    await h.db.rentalQuote.create({ data: { id: quote.id, tenantId: quote.tenantId, snapshot: h.clone(quote), consumedAt: null, consumedOrderId: null } });
+    h.quote = quote;
+    h.selection = { ...h.selection, quoteId: quote.id, fulfillmentMode: 'delivery', services: undefined,
+      deliveryAddressConfirmation: { source: 'original_quote_one_time_address',
+        snapshotFingerprint: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(JSON.parse(JSON.stringify(quote.deliveryAddressSnapshot))), confirmed: true } };
+  }
+  // End standard application original one-time quote opt-in.
+  const { composeRequestBoundClientApplication } = require('../apps/api/src/modules/ai-native/scenes/client-request.application');
+  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+  const tenantId = h.clientContext.tenantId, workspaceId = h.clientContext.workspaceId, code = h.clientContext.workspaceCode;
+  let now = new Date(), commercialAvailable = true, submissions = 0;
+  const sceneCode = 'client_core_booking', sceneVersion = '1';
+  const workspace = { id: workspaceId, tenantId, code, name: 'Synthetic Core Booking workspace', categoryCode,
+    status: 'ACTIVE', isDefault: true, clientChannelPublications: [{ tenantId, enabled: true }] };
+  Object.assign(h.state.businessWorkspace[0], h.clone(workspace));
+  h.state.tenant.push({ id: tenantId, code: h.clientContext.tenantCode, name: 'Synthetic Core Booking tenant', status: 'ACTIVE',
+    subscription: { startAt: new Date('2020-01-01'), endAt: new Date('2028-01-01') }, subscriptionSegments: [] });
+  h.state.clientChannelProfile.push({ tenantId, defaultWorkspaceId: workspaceId, passwordLoginEnabled: true, smsLoginEnabled: false,
+    publishedWorkspaces: [{ tenantId, workspaceId, enabled: true, workspace: h.clone(workspace) }] });
+  h.client.prisma = h.db;
+  // Declared read-only provider catalog leaf: no configured payment/SMS/model,
+  // no live flags, network call or production dependency replaced by success.
+  h.client.tenantIntegrations = { catalog: async tenant => { assert.equal(tenant, tenantId); return { configs: [] }; } };
+  const scopes = [{ kind: 'platform' }, { kind: 'tenant', tenantId }, { kind: 'workspace', tenantId, workspaceId }]
+    .map((scope, index) => ({ id: `core-booking-scope-${index}`, ...aiPersistenceScopeColumns(scope) }));
+  h.state.aiScope.push(...h.clone(scopes));
+  h.state.aiBudgetPolicy.push(...scopes.map(scope => ({ id: `${scope.id}-budget`, scopeId: scope.id, scopeKind: scope.kind, sceneCode,
+    configRevision: 1, enabled: true, settingsJson: { draftVersion: 'ain-c07-draft-2', config: { configRevision: 1 },
+      scope: scope.kind === 'PLATFORM' ? { kind: 'platform' } : { kind: 'tenant', tenantId }, sceneCode,
+      allowedScenes: [sceneCode], allowedModels: ['synthetic-offline-unused'], maxConcurrent: 1, maxCallsPerRun: 1,
+      budget: { state: 'limited', quantity: { unit: 'calls', value: 10 } },
+      gates: Object.fromEntries(['platform', 'tenant', 'scene'].map(kind => [kind, { enabled: true, revision: 1 }])) } })));
+  const policy = { id: 'f8b56b8f-64b3-4a90-8a5e-f6f19d2f3784', tenantId, workspaceId, channel: 'web', customerType: 'personal',
+    sceneCode, sceneVersion, enabled: 1, allowRead: 1, allowCreate: 1, allowExecute: 1, revision: 1, expiresAt: new Date('2028-01-01') };
+  h.state.aiClientTaskPolicy.push(h.clone(policy));
+  // Only these existing repositories' parameterized SQL forms are transported
+  // through the original serialized store. Real material, Draft CAS, policy,
+  // handoff, attempt and Core algorithms are not mocked or bypassed.
+  const tables = {
+    ai_client_scene_materials: { delegate: 'aiClientSceneMaterial', key: 'operationKey', columns: 'id tenantId workspaceId channel principalKind principalHash bindingHash publicationHash operationKey inputHash materialHash command material publication revision createdAt expiresAt' },
+    ai_client_booking_drafts: { delegate: 'aiClientBookingDraft', key: 'materialRef', columns: 'id tenantId workspaceId channel principalKind principalHash materialRef inputHash bindingHash policyHash state revision selectionRevision selectedAt createdAt updatedAt expiresAt invalidReason' },
+    ai_client_booking_draft_operations: { delegate: 'aiClientBookingDraftOperation', key: 'operationKey', columns: 'id tenantId workspaceId channel principalKind principalHash operationKey inputHash draftId kind resultRevision handoffRef createdAt' },
+    ai_client_booking_handoffs: { delegate: 'aiClientBookingHandoff', key: 'draftId', columns: 'id tenantId workspaceId channel principalKind principalHash draftId inputHash selectionRevision createdAt expiresAt' }
+  };
+  const decorate = (db, readOnly = false) => {
+    const query = db.$queryRaw.bind(db), execute = db.$executeRaw.bind(db);
+    db.$queryRaw = async sql => {
+      const text = sql.sql.replace(/\s+/gu, ' ').trim(), match = text.match(/FROM (ai_client_\w+)\b/u), table = match && tables[match[1]];
+      if (!table) return query(sql);
+      assert.match(text, /LIMIT 1(?: FOR UPDATE)?$/u); assert.equal(sql.values.length, 5);
+      const [tenant, space, channel, principalHash, ref] = sql.values;
+      const field = text.includes('AND operationKey =') ? 'operationKey' : text.includes('AND materialRef =') ? 'materialRef' : 'id';
+      const rows = await db[table.delegate].findMany({ where: { tenantId: tenant, workspaceId: space, channel, principalHash, [field]: ref }, take: 1 });
+      // The generic store adds a revision default to every delegate. These two
+      // actual SQL tables have no revision column; project only that artificial
+      // default away, never an actual policy/source/receipt field.
+      if (['aiClientBookingDraftOperation', 'aiClientBookingHandoff'].includes(table.delegate)) rows.forEach(row => { delete row.revision; });
+      return rows;
+    };
+    db.$executeRaw = async sql => {
+      const text = sql.sql.replace(/\s+/gu, ' ').trim(), match = text.match(/(?:INSERT INTO|UPDATE) (ai_client_\w+)\b/u), table = match && tables[match[1]];
+      if (!table) return execute(sql);
+      assert.equal(readOnly, false, 'Read-only policy snapshot cannot mutate Booking');
+      if (text.startsWith('INSERT')) {
+        const columns = text.match(/\(([^)]+)\) VALUES/u)[1].split(',').map(value => value.trim());
+        assert.deepEqual(columns, table.columns.split(' ')); assert.equal(sql.values.length, columns.length);
+        const row = Object.fromEntries(columns.map((field, index) => [field, h.clone(sql.values[index])]));
+        if (table.delegate === 'aiClientSceneMaterial') for (const key of ['command', 'material', 'publication']) row[key] = JSON.parse(row[key]);
+        const scope = Object.fromEntries(['tenantId', 'workspaceId', 'channel', 'principalKind', 'principalHash'].map(key => [key, row[key]]));
+        const existing = await db[table.delegate].findMany({ where: { OR: [{ id: row.id }, { ...scope, [table.key]: row[table.key] }] } });
+        assert.equal(existing.length, 0, 'Original unique key cannot create a second row');
+        await db[table.delegate].create({ data: row }); return 1;
+      }
+      assert.equal(table.delegate, 'aiClientBookingDraft');
+      const columns = text.match(/SET (.+?) WHERE/u)[1].split(',').map(value => value.trim().split(' ')[0]);
+      assert.ok(columns.every(column => ['state', 'revision', 'selectionRevision', 'selectedAt', 'updatedAt', 'invalidReason'].includes(column)));
+      const where = {};
+      [...text.split(' WHERE ')[1].matchAll(/(\w+) (=|>) \?/gu)].forEach(([, field, operator], index) => {
+        const value = sql.values[columns.length + index]; where[field] = operator === '>' ? { gt: value } : value;
+      });
+      assert.ok(['tenantId', 'workspaceId', 'channel', 'principalHash', 'id', 'revision', 'state'].every(field => Object.hasOwn(where, field)));
+      return (await db.aiClientBookingDraft.updateMany({ where, data: Object.fromEntries(columns.map((field, index) => [field, sql.values[index]])) })).count;
+    };
+    return db;
+  };
+  const transaction = h.db.$transaction.bind(h.db);
+  decorate(h.db);
+  h.db.$transaction = (work, options) => transaction(tx => work(decorate(tx, options?.isolationLevel === 'RepeatableRead')), options);
+  const subscriptions = { readCategoryCommercialContext: async (tenant, tx, _at, features) => {
+    assert.equal(tenant, tenantId); assert.ok(tx?.tenant); assert.deepEqual(features, ['ai.native.use']);
+    return { revision: 1, serviceStatus: 'active', newBusinessAllowed: true,
+      entitlements: [{ code: 'ai.native.use', available: commercialAvailable, categories: [] }] };
+  } };
+  const create = h.client.createOrder.bind(h.client);
+  h.client.createOrder = (...args) => { submissions++; return create(...args); };
+  const configuration = { enabled: true, tenantCode: h.clientContext.tenantCode, serviceCode: code, channel: 'web',
+    entry: { enabled: true, releaseRevision: 'core-booking-entry-1' } };
+  const dependencies = { client: h.client, guard: h.guard, db: h.db, clock: () => new Date(now),
+    tasks: { db: h.db, subscriptions, sceneCode, sceneVersion }, bookingSubmission: h.client };
+  // Begin standard application original quote preparation opt-in.
+  if (options.originalQuote) {
+    installStandardOriginalQuotePersistence(h);
+    dependencies.quotePreparation = h.client;
+  }
+  // End standard application original quote preparation opt-in.
+  const app = composeRequestBoundClientApplication(dependencies, configuration), request = { headers: { authorization: h.authorization } };
+  return { ...h, app, request, submissions: () => submissions, restart: () => composeRequestBoundClientApplication(dependencies, configuration),
+    advanceClock: ms => { now = new Date(now.getTime() + ms); }, commercial: value => { commercialAvailable = value; } };
+}
+
+async function standardCoreBookingHandoff(h) {
+  const material = await h.app.prepare(h.request, { operationKey: 'core-booking-material', command: { kind: 'booking_quote', selection: h.selection } });
+  assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  const action = await h.app.issueAction(h.request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
+  const created = await h.app.createBookingDraft(h.request, { action, operationKey: 'core-booking-create' });
+  assert.equal(created.draft.state, 'draft_created'); assert.equal(created.draft.action, null);
+  const selected = await h.app.chooseBookingDraft(h.request, { bookingDraftId: created.draft.bookingDraftId, expectedRevision: created.draft.revision,
+    inputFingerprint: created.draft.inputFingerprint, operationKey: 'core-booking-select', decision: 'continue_booking' });
+  assert.equal(selected.draft.state, 'user_selected'); assert.equal(selected.draft.selectionRevision, 1);
+  const handed = await h.app.handoffBookingDraft(h.request, { action: selected.draft.action, operationKey: 'core-booking-handoff' });
+  assert.equal(handed.handoff.inventory, 'not_reserved'); assert.equal(handed.handoff.submission, 'original_booking_page_required');
+  const acceptance = await h.app.acceptBookingSubmission(h.request, { handoffRef: handed.handoff.handoffRef });
+  assert.equal(acceptance.execution, 'not_attested'); assert.equal(h.submissions(), 0);
+  return { material, created, selected, handed, acceptance };
+}
+
+test('AIN15 standard Core Booking application reaches Draft selection handoff explicit submit and original receipt after Core commit response loss', { timeout: 180000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await standardCoreBookingApplicationSetup(t); phase = 'complete-handoff';
+    const flow = await standardCoreBookingHandoff(h);
+    assert.equal(h.state.aiClientBookingDraft.length, 1); assert.equal(h.state.aiClientBookingHandoff.length, 1);
+    assert.equal(h.state.aiClientBookingDraftOperation.length, 3); assert.equal(h.submissions(), 0);
+    phase = 'one-explicit-Core-submit'; let lost = false;
+    h.control.beforeCommit = draft => { if (!lost && draft.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    } };
+    const result = await h.app.submitAcceptedBooking(h.request, { acceptanceRef: flow.acceptance.acceptanceRef, decision: 'submit_original_booking' });
+    assert.equal(lost, true); assert.equal(result.state, 'observed'); assert.equal(h.submissions(), 1);
+    assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+    assert.equal(h.state.rentalServiceReservation.length, 1); assert.equal(result.orderId, h.state.rentalOrder[0].id);
+    assert.equal(result.payment, 'not_inferred'); assert.equal(result.fulfillment, 'not_inferred');
+    assert.equal(h.state.aiClientBookingDraft[0].state, 'submitted');
+    phase = 'independent-historical-read';
+    h.advanceClock(120000); h.state.aiClientTaskPolicy[0].allowCreate = 0; h.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
+    h.client.getQuote = async () => { throw Error('Submitted history must not reuse the quote'); };
+    h.capacity.readAvailabilityForQuote = async () => { throw Error('Submitted history must not observe new capacity'); };
+    const restarted = h.restart(), before = h.clone(h.state);
+    const read = await restarted.readBookingSubmission(h.request, { acceptanceRef: flow.acceptance.acceptanceRef });
+    assert.equal(read.orderId, result.orderId); assert.equal(read.retryable, false);
+    const draft = await restarted.readBookingDraft(h.request, { bookingDraftId: flow.created.draft.bookingDraftId });
+    assert.equal(draft.state, 'submitted'); assert.equal(draft.action, null); assert.equal(draft.execution, 'submitted_request_not_business_success');
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 1);
+  } catch (error) { throw new Error(`Standard Core Booking phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 standard Core Booking application keeps lost metadata acceptance unknown and never dispatches or resends Core', { timeout: 180000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await standardCoreBookingApplicationSetup(t); phase = 'complete-handoff';
+    const flow = await standardCoreBookingHandoff(h); let lost = false;
+    h.control.beforeCommit = draft => { if (!lost && draft.aiClientBookingDraft.some(row => row.state === 'submitted')
+      && h.state.aiClientBookingDraft.every(row => row.state !== 'submitted')) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    } };
+    phase = 'metadata-COMMIT-response-loss';
+    const command = { acceptanceRef: flow.acceptance.acceptanceRef, decision: 'submit_original_booking' };
+    await assert.rejects(h.app.submitAcceptedBooking(h.request, command), error => error.code === 'AI_RESULT_UNKNOWN');
+    assert.equal(lost, true); assert.equal(h.state.aiClientBookingDraft[0].state, 'submitted');
+    assert.equal(h.state.aiClientSceneMaterial.filter(row => row.operationKey.startsWith('booking-attempt:')).length, 1);
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    phase = 'same-original-read-without-resend';
+    const observed = await h.app.readBookingSubmission(h.request, { acceptanceRef: flow.acceptance.acceptanceRef });
+    assert.equal(observed.orderId, null); assert.equal(observed.retryable, false); assert.notEqual(observed.state, 'observed');
+    const repeated = await h.app.submitAcceptedBooking(h.request, command);
+    assert.equal(repeated.orderId, null); assert.equal(h.submissions(), 0);
+    assert.equal(h.state.rentalOrderIdempotencyRecord.length, 0); assert.equal(h.state.aiClientBookingDraft.length, 1);
+  } catch (error) { throw new Error(`Standard Core Booking metadata phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+for (const spec of [{ categoryCode: 'camping' }, { categoryCode: 'vehicle' }, { categoryCode: 'construction' }, { categoryCode: 'camera', enterprise: true }]) {
+  test(`AIN15 standard Core Booking variants ${spec.categoryCode} ${spec.enterprise ? 'enterprise-self-pay' : 'personal'} reaches same original application and receipt`, { timeout: 180000 }, async t => {
+    let phase = 'setup';
+    try {
+      phase = `${spec.categoryCode}/${spec.enterprise ? 'enterprise-self-pay' : 'personal'}:setup`;
+      const h = await standardCoreBookingApplicationSetup(t, spec);
+      assert.equal(h.quote.categoryCode, spec.categoryCode);
+      assert.equal(h.selection.fulfillmentMode, h.b.quoteConfiguration.category?.businessModel.fulfillmentModes[0]
+        ?? h.b.core.listCategories().find(row => row.code === spec.categoryCode).businessModel.fulfillmentModes[0]);
+      const required = ['vehicle', 'construction'].includes(spec.categoryCode);
+      assert.equal(h.quote.ruleSnapshot.qualification.required, required);
+      if (required) assert.ok(h.qualificationRows.length > 0 && h.qualificationRows.every(row => row.status === 'approved'));
+      phase = `${spec.categoryCode}:material-Draft-selection-handoff`;
+      const flow = await standardCoreBookingHandoff(h);
+      assert.equal(flow.handed.handoff.fields.quoteId, h.quote.id); assert.equal(h.submissions(), 0);
+      if (spec.enterprise) {
+        assert.equal(flow.handed.handoff.fields.bookingIdentity.bookingIdentity, 'enterprise_employee');
+        assert.equal(flow.handed.handoff.fields.bookingIdentity.enterpriseContractAndPayer, false);
+        assert.equal(h.quote.membershipSnapshot.corporateMembershipId, 'core-booking-employment');
+      }
+      phase = `${spec.categoryCode}:explicit-original-Core-submit`;
+      const result = await h.app.submitAcceptedBooking(h.request, { acceptanceRef: flow.acceptance.acceptanceRef, decision: 'submit_original_booking' });
+      assert.equal(result.state, 'observed'); assert.equal(result.orderId, h.state.rentalOrder[0].id);
+      assert.equal(h.submissions(), 1); assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+      assert.equal(h.state.rentalServiceReservation.length, 1); assert.equal(h.state.aiClientBookingDraft[0].state, 'submitted');
+      assert.equal(result.payment, 'not_inferred'); assert.equal(result.fulfillment, 'not_inferred');
+      if (spec.enterprise) assert.equal(h.state.rentalOrder[0].membershipSnapshot.enterpriseContractAndPayer, false);
+      phase = `${spec.categoryCode}:same-original-receipt`;
+      const before = h.clone(h.state);
+      assert.equal((await h.app.readBookingSubmission(h.request, { acceptanceRef: flow.acceptance.acceptanceRef })).orderId, result.orderId);
+      assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 1);
+    } catch (error) { throw new Error(`Standard Core Booking variants phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+  });
+}
+// End standard Core Booking application owned cases.
+
+// Begin original one-time full Booking owned cases.
+test('AIN15 original one-time full Booking reaches explicit confirmation Draft handoff Core commit and historical submitted receipt', { timeout: 180000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await standardCoreBookingApplicationSetup(t, { oneTime: true });
+    phase = 'confirmed-original-address-handoff';
+    const flow = await standardCoreBookingHandoff(h);
+    assert.equal(flow.created.draft.material.deliveryAddress.source, 'original_quote_one_time_address');
+    assert.deepEqual(flow.handed.handoff.fields.deliveryAddressConfirmation, h.selection.deliveryAddressConfirmation);
+    assert.equal(flow.created.draft.material.sources.deliveryAddressConfirmation, 'user_explicit');
+    assert.equal(flow.created.draft.material.deliveryAddress.addressId, undefined);
+    const published = require('@rental-os/shared').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS;
+    const validators = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor({
+      Selection: published.AiBookingSelection, Evidence: published.AiBookingOneTimeAddressEvidence,
+      Material: published.AiBookingDraft.properties.material, SourceVersion: published.AiBookingSourceVersion });
+    assert.equal(validators.Selection(h.selection), true); assert.equal(validators.Evidence(flow.created.draft.material.deliveryAddress), true);
+    assert.equal(validators.Material(JSON.parse(JSON.stringify(flow.created.draft.material))), true); assert.equal(validators.SourceVersion('1/1'), true);
+    assert.equal(JSON.stringify(flow.created.draft).includes(h.quote.deliveryAddressSnapshot.phone), false);
+    assert.equal(JSON.stringify(flow.handed).includes(h.quote.deliveryAddressSnapshot.detail), false);
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    phase = 'one-original-Core-COMMIT'; let lost = false;
+    h.control.beforeCommit = draft => { if (!lost && draft.rentalOrder.length === 1 && h.state.rentalOrder.length === 0) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    } };
+    const result = await h.app.submitAcceptedBooking(h.request, { acceptanceRef: flow.acceptance.acceptanceRef, decision: 'submit_original_booking' });
+    assert.equal(lost, true); assert.equal(result.state, 'observed'); assert.equal(h.submissions(), 1);
+    assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+    assert.equal(h.state.rentalServiceReservation.length, 0); assert.deepEqual(h.state.rentalOrder[0].deliveryAddressSnapshot, h.quote.deliveryAddressSnapshot);
+    phase = 'original-submitted-history-not-current-use';
+    h.advanceClock(700000); h.state.aiClientTaskPolicy[0].allowCreate = 0; h.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
+    h.client.observeQuoteDeliveryAddress = async () => { throw Error('Historical receipt must not observe current area'); };
+    h.client.getQuote = async () => { throw Error('Historical receipt must not reload current quote'); };
+    const before = h.clone(h.state), restarted = h.restart();
+    const receipt = await restarted.readBookingSubmission(h.request, { acceptanceRef: flow.acceptance.acceptanceRef });
+    assert.equal(receipt.orderId, result.orderId); assert.equal(receipt.payment, 'not_inferred'); assert.equal(receipt.fulfillment, 'not_inferred');
+    const draft = await restarted.readBookingDraft(h.request, { bookingDraftId: flow.created.draft.bookingDraftId });
+    assert.equal(draft.action, null); assert.equal(draft.execution, 'submitted_request_not_business_success');
+    assert.equal(draft.material.deliveryAddress.source, 'original_quote_one_time_address');
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 1);
+  } catch (error) { throw new Error(`Original one-time full Booking phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 original one-time full Booking rejects missing confirmation, mixed sources, sensitive fields and changed current Core area', { timeout: 180000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await standardCoreBookingApplicationSetup(t, { oneTime: true }), original = h.clone(h.selection), before = h.clone(h.state);
+    const prepare = selection => h.app.prepare(h.request, { operationKey: 'one-time-invalid-material', command: { kind: 'booking_quote', selection } });
+    phase = 'explicit-original-confirmation';
+    const { deliveryAddressConfirmation, ...missing } = original;
+    await assert.rejects(prepare(missing), error => error.code === 'AI_INVALID_INPUT');
+    await assert.rejects(prepare({ ...original, deliveryAddressConfirmation: { ...deliveryAddressConfirmation, snapshotFingerprint: 'f'.repeat(64) } }), error => error.code === 'AI_PROPOSAL_STALE');
+    for (const [label, selection] of [['mixed-source', { ...original, deliveryAddressId: 'forged-saved-address' }],
+      ['false-confirmation', { ...original, deliveryAddressConfirmation: { ...deliveryAddressConfirmation, confirmed: false } }],
+      ['sensitive-extra', { ...original, deliveryAddressConfirmation: { ...deliveryAddressConfirmation, phone: '13900000003' } }]]) {
+      phase = `original-request-schema:${label}`;
+      await assert.rejects(prepare(selection), error => error.message === 'AI_CLIENT_INVALID_INPUT');
+    }
+    const schema = require('@rental-os/shared').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS;
+    const validate = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor({ Selection: schema.AiBookingSelection,
+      Confirmation: schema.AiBookingOneTimeAddressConfirmation, Evidence: schema.AiBookingOneTimeAddressEvidence });
+    assert.equal(validate.Selection({ ...original, deliveryAddressId: 'forged-saved-address' }), false);
+    assert.equal(validate.Confirmation({ ...deliveryAddressConfirmation, detail: 'not accepted' }), false);
+    phase = 'missing-live-producer';
+    const producer = h.client.observeQuoteDeliveryAddress; h.client.observeQuoteDeliveryAddress = undefined;
+    await assert.rejects(prepare(original), error => error.code === 'AI_RESOURCE_UNAVAILABLE'); h.client.observeQuoteDeliveryAddress = producer;
+    phase = 'late-Core-service-area-withdrawal';
+    h.duringAvailability(async () => { h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist', areas: [] }; });
+    await assert.rejects(prepare(original), error => error.code === 'AI_PROPOSAL_STALE');
+    assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.aiClientSceneMaterial.length, 0);
+    assert.equal(h.state.aiClientBookingDraft.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 0);
+  } catch (error) { throw new Error(`Original one-time Booking rejection phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 original one-time full Booking material receipt remains readable without current area producer after expiry', { timeout: 180000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await standardCoreBookingApplicationSetup(t, { oneTime: true });
+    const command = { operationKey: 'original-one-time-material-history', command: { kind: 'booking_quote', selection: h.selection } };
+    phase = 'actual-material-persistence';
+    const material = await h.app.prepare(h.request, command);
+    h.advanceClock(700000); h.state.aiClientTaskPolicy[0].allowCreate = 0; h.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
+    h.client.observeQuoteDeliveryAddress = async () => { throw Error('Original material receipt cannot revive current area'); };
+    h.client.getQuote = async () => { throw Error('Original material receipt cannot reload quote'); };
+    phase = 'actual-original-operation-receipt';
+    const before = h.clone(h.state), result = await h.app.readBookingMaterialReceipt(h.request, command);
+    assert.equal(result.state, 'observed'); assert.equal(result.materialRef, material.materialRef);
+    assert.equal(result.materialValidity, 'expired'); assert.equal(result.currentUse, 'not_authorized_by_receipt'); assert.equal(result.retryable, false);
+    const altered = { ...command, command: { ...command.command, selection: { ...h.selection,
+      deliveryAddressConfirmation: { ...h.selection.deliveryAddressConfirmation, snapshotFingerprint: 'f'.repeat(64) } } } };
+    await assert.rejects(h.app.readBookingMaterialReceipt(h.request, altered));
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 0);
+  } catch (error) { throw new Error(`Original one-time material history phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+test('AIN15 original one-time full Booking closes current area after final qualification waits', { timeout: 180000 }, async t => {
+  let phase = 'setup';
+  try {
+    const h = await standardCoreBookingApplicationSetup(t, { categoryCode: 'construction', oneTime: true });
+    const qualification = h.client.readQuoteBookingQualification.bind(h.client); let observations = 0;
+    h.client.readQuoteBookingQualification = async (...args) => {
+      const result = await qualification(...args);
+      if (++observations === 2) h.b.quoteConfiguration.settings.fulfillment.deliveryServiceArea = { mode: 'allowlist', areas: [] };
+      return result;
+    };
+    phase = 'current-area-withdrawn-after-final-qualification';
+    await assert.rejects(h.app.prepare(h.request, { operationKey: 'one-time-qualification-area',
+      command: { kind: 'booking_quote', selection: h.selection } }), error => error.code === 'AI_PROPOSAL_STALE');
+    assert.equal(observations, 2); assert.equal(h.submissions(), 0); assert.equal(h.state.aiClientSceneMaterial.length, 0);
+    assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  } catch (error) { throw new Error(`Original one-time qualification-area phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End original one-time full Booking owned cases.
+
+// Begin standard original quote Booking owned cases.
+function installStandardOriginalQuotePersistence(h) {
+  const { Prisma } = require('@prisma/client');
+  const { RentalBusinessFactRepository } = require('../apps/api/src/modules/rental-core/rental-business-fact.repository');
+  const transaction = h.db.$transaction.bind(h.db);
+  // The same declared store transports the real quote repository as well as
+  // Booking metadata. Only SQL locks and Prisma null/date leaves are adapted;
+  // immutable original keys, quote fields and Core admission stay production code.
+  h.db.$transaction = (work, options) => transaction(tx => {
+    const create = tx.rentalQuote.create.bind(tx.rentalQuote), update = tx.rentalQuote.updateMany.bind(tx.rentalQuote);
+    tx.rentalQuote.create = args => create({ ...args, data: Object.fromEntries(Object.entries(args.data)
+      .map(([key, value]) => [key, value === Prisma.DbNull || value === Prisma.JsonNull ? null : value])) });
+    tx.rentalQuote.updateMany = args => {
+      const where = { ...args.where };
+      if (where.expiresAt?.gte instanceof Date) where.expiresAt = { gt: new Date(where.expiresAt.gte.getTime() - 1) };
+      return update({ ...args, where });
+    };
+    const query = tx.$queryRaw.bind(tx);
+    tx.$queryRaw = async value => {
+      const text = value.sql.replace(/\s+/gu, ' ').trim(), values = value.values;
+      if (text.includes('FROM rental_fulfillment_locations')) {
+        assert.match(text, /ORDER BY id FOR UPDATE$/u); assert.deepEqual(values.slice(0, 2), [h.clientContext.tenantId, h.clientContext.workspaceId]);
+        assert.deepEqual(values.slice(2), [h.b.location.id]);
+        return tx.rentalFulfillmentLocation.findMany({ where: { tenantId: values[0], workspaceId: values[1], id: { in: values.slice(2) } } });
+      }
+      if (text.includes('FROM rental_fulfillment_operators')) {
+        assert.match(text, /ORDER BY id FOR UPDATE$/u); assert.deepEqual(values.slice(0, 2), [h.clientContext.tenantId, h.clientContext.workspaceId]);
+        const rows = h.b.core.listOperators(values[0]).filter(row => values.slice(2).includes(row.id));
+        assert.equal(rows.length, values.length - 2); return rows.map(row => ({ ...h.clone(row), tenantId: values[0], workspaceId: values[1] }));
+      }
+      if (text.includes('FROM rental_item_groups WHERE')) {
+        assert.match(text, /ORDER BY id LIMIT \? LOCK IN SHARE MODE$/u); assert.deepEqual(values.slice(0, 2), [h.clientContext.tenantId, h.clientContext.workspaceId]);
+        assert.equal(values.length, 4); assert.equal(values[3], 2);
+        return h.b.core.listItemGroups(values[0]).filter(row => row.id === values[2]).map(row => ({ ...h.clone(row), tenantId: values[0],
+          workspaceId: values[1], createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) }));
+      }
+      if (text.includes('FROM rental_bundle_components b JOIN')) {
+        assert.equal(values.length, 1); assert.match(text, /LIMIT 257 LOCK IN SHARE MODE$/u);
+        const row = h.b.core.listItemGroups(h.clientContext.tenantId).find(row => row.id === values[0]);
+        assert.ok(row && row.inventoryMode !== 'bundle' && !row.bundleComponents?.length); return [];
+      }
+      return query(value);
+    };
+    return work(tx);
+  }, options);
+  const repository = new RentalBusinessFactRepository(h.db);
+  for (const method of ['findQuote', 'findQuoteForOriginalOperation', 'findQuoteForOriginalReference', 'saveQuoteForOriginalOperation'])
+    h.b.businessFacts[method] = repository[method].bind(repository);
+  h.confirmation.businessFacts.findQuote = repository.findQuote.bind(repository);
+  h.confirmation.businessFacts.consumeQuoteIfAvailable = repository.consumeQuoteIfAvailable.bind(repository);
+}
+
+async function standardOriginalQuoteBookingSetup(t, loseQuoteReply = false) {
+  const h = await standardCoreBookingApplicationSetup(t, { originalQuote: true });
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const hash = value => requestFingerprint(JSON.parse(JSON.stringify(value)));
+  // Public client input, not a Core-normalized row containing server precision.
+  const input = { bookingIdentity: h.clone(h.quote.request.bookingIdentity), fulfillmentMode: h.quote.request.fulfillmentMode,
+    fulfillmentLocationId: h.quote.request.fulfillmentLocationId, startAt: h.quote.request.startAt, endAt: h.quote.request.endAt,
+    lines: h.quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, quantity: row.quantity, pricingUnit: row.pricingUnit })),
+    services: h.clone(h.quote.request.services) };
+  const command = { operationKey: 'standard-original-parameters', input };
+  const quoteBefore = h.state.rentalQuote.length;
+  const prepared = await h.app.prepareQuoteParameters(h.request, command);
+  const original = { materialRef: prepared.materialRef, expectedMaterialHash: prepared.materialHash };
+  assert.equal(h.state.rentalQuote.length, quoteBefore); assert.equal(prepared.quotePersistence, 'not_attempted');
+  assert.equal(prepared.eligibility, 'not_attested'); assert.equal(h.submissions(), 0);
+  const absent = await h.app.readPreparedQuoteOriginal(h.request, original);
+  assert.equal(absent.state, 'unknown'); assert.equal(absent.quote, null); assert.equal(absent.retryable, false);
+  let lost = false;
+  if (loseQuoteReply) h.control.beforeCommit = draft => {
+    if (!lost && draft.rentalQuote.some(row => row.originalOperationKey) && !h.state.rentalQuote.some(row => row.originalOperationKey)) {
+      lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+    }
+  };
+  if (loseQuoteReply) await assert.rejects(h.app.confirmQuoteParameters(h.request, original), error => error.code === 'AI_RESULT_UNKNOWN');
+  else assert.equal((await h.app.confirmQuoteParameters(h.request, original)).confirmation, 'parameters_only_not_order_approval');
+  assert.equal(lost, loseQuoteReply); assert.equal(h.state.rentalQuote.length, quoteBefore + 1);
+  const observed = await h.app.readPreparedQuoteOriginal(h.request, original);
+  assert.equal(observed.state, 'observed'); assert.equal(observed.quotePersistence, 'saved');
+  assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, 1);
+  assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  h.quote = observed.quote;
+  h.selection = { ...h.selection, quoteId: h.quote.id };
+  const flow = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(h.app);
+  const bookingCommand = { original, selection: h.selection, operationKey: 'standard-original-Booking-material' };
+  return { ...h, hash, input, command, prepared, original, observed, flow, bookingCommand };
+}
+
+test('AIN15 standard original quote Booking recovers same QP quote after COMMIT loss then confirms original Draft and Core receipt with expired flow history', { timeout: 180000 }, async t => {
+  let phase = 'actual-parameters-and-original-quote';
+  try {
+    const h = await standardOriginalQuoteBookingSetup(t, true);
+    phase = 'same-original-source-to-standard-Booking';
+    const material = await h.flow.prepare(h.request, h.bookingCommand);
+    assert.deepEqual(material.originalQuote, h.observed.source); assert.equal(material.draft, 'not_created');
+    assert.equal('quote' in material.originalQuote, false);
+    const created = await h.app.createBookingDraft(h.request, { action: material.action, operationKey: 'standard-original-create' });
+    const selected = await h.app.chooseBookingDraft(h.request, { bookingDraftId: created.draft.bookingDraftId,
+      expectedRevision: created.draft.revision, inputFingerprint: created.draft.inputFingerprint,
+      operationKey: 'standard-original-select', decision: 'continue_booking' });
+    const handed = await h.app.handoffBookingDraft(h.request, { action: selected.draft.action, operationKey: 'standard-original-handoff' });
+    const acceptance = await h.flow.acceptPage(h.request, { handoffRef: handed.handoff.handoffRef });
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    phase = 'distinct-explicit-Core-submit';
+    const submitted = await h.flow.submitPage(h.request, { acceptanceRef: acceptance.acceptanceRef, decision: 'submit_original_booking' });
+    assert.equal(submitted.state, 'observed'); assert.equal(h.submissions(), 1);
+    assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+    assert.deepEqual(h.state.rentalOrder[0].deliveryAddressSnapshot, h.quote.deliveryAddressSnapshot);
+    phase = 'original-QP-and-Booking-flow-history-not-current-preparation';
+    h.advanceClock(700000); h.state.aiClientTaskPolicy[0].allowCreate = 0; h.state.aiClientTaskPolicy[0].allowExecute = 0;
+    h.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
+    for (const name of ['getQuote', 'observeQuoteDeliveryAddress', 'prepareQuoteForOriginalOperation', 'createQuoteForOriginalOperation'])
+      h.client[name] = async () => { throw Error('Historical original reference cannot prepare or observe current quote/area'); };
+    const before = h.clone(h.state), restarted = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(h.restart());
+    const receipt = await restarted.readOperation(h.request, h.bookingCommand);
+    assert.equal(receipt.state, 'observed'); assert.equal(receipt.materialRef, material.material.materialRef);
+    assert.equal(receipt.materialValidity, 'expired'); assert.equal(receipt.currentUse, 'not_authorized_by_receipt'); assert.equal(receipt.retryable, false);
+    const business = await restarted.readSubmission(h.request, { acceptanceRef: acceptance.acceptanceRef });
+    assert.equal(business.orderId, submitted.orderId); assert.equal(business.payment, 'not_inferred'); assert.equal(business.fulfillment, 'not_inferred');
+    for (const selection of [{ ...h.selection, endAt: '2027-02-03T00:00:00.000Z' }, { ...h.selection,
+      lines: h.selection.lines.map(row => ({ ...row, quantity: row.quantity + 1 })) }])
+      await assert.rejects(restarted.readOperation(h.request, { ...h.bookingCommand, selection }), error => error.code === 'AI_REVISION_CONFLICT');
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 1);
+    assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, 1);
+  } catch (error) { throw new Error(`Standard original quote Booking phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 standard original quote Booking refuses historical QP and flow delivery after original read policy is withdrawn during quote wait', { timeout: 180000 }, async t => {
+  let phase = 'actual-original-quote';
+  try {
+    const h = await standardOriginalQuoteBookingSetup(t);
+    const material = await h.flow.prepare(h.request, h.bookingCommand);
+    const read = h.client.readQuoteForOriginalOperation.bind(h.client);
+    const before = h.clone(h.state); let withdrawn = false;
+    h.client.readQuoteForOriginalOperation = async (...args) => {
+      const result = await read(...args);
+      if (!withdrawn) { withdrawn = true; h.state.aiClientTaskPolicy[0].allowRead = 0; h.state.aiClientTaskPolicy[0].revision++; }
+      return result;
+    };
+    phase = 'QP-closing-independent-read-policy';
+    await assert.rejects(h.app.readPreparedQuoteOriginal(h.request, h.original), error => error.code === 'AI_ACCESS_DENIED');
+    assert.equal(withdrawn, true);
+    phase = 'flow-cannot-borrow-earlier-quote-read';
+    await assert.rejects(h.flow.readOperation(h.request, h.bookingCommand), error => error.code === 'AI_ACCESS_DENIED');
+    const expected = h.clone(before); expected.aiClientTaskPolicy[0].allowRead = 0; expected.aiClientTaskPolicy[0].revision++;
+    assert.deepEqual(h.clone(h.state), expected); assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0);
+    assert.equal(h.state.aiClientSceneMaterial.filter(row => row.id === material.material.materialRef).length, 1);
+  } catch (error) { throw new Error(`Standard original QP read policy phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+test('AIN15 standard original quote Booking refuses original reference delivery when its persisted preparation disappears during Core read', { timeout: 180000 }, async t => {
+  let phase = 'actual-original-reference';
+  try {
+    const h = await standardOriginalQuoteBookingSetup(t), read = h.client.readQuoteForOriginalOperation.bind(h.client);
+    const before = h.clone(h.state); let removed = false;
+    h.client.readQuoteForOriginalOperation = async (...args) => {
+      const result = await read(...args);
+      if (!removed) {
+        removed = true;
+        const index = h.state.aiClientSceneMaterial.findIndex(row => row.id === h.prepared.materialRef);
+        assert.ok(index >= 0); h.state.aiClientSceneMaterial.splice(index, 1);
+      }
+      return result;
+    };
+    // New isolated transport fault only; not deletion/repair of an actual source
+    // or permission to regenerate its quote/operation after an unknown result.
+    phase = 'same-source-closing-read';
+    await assert.rejects(h.app.readPreparedQuoteOriginal(h.request, h.original), error => error.code === 'AI_REVISION_CONFLICT');
+    assert.equal(removed, true);
+    const expected = h.clone(before); expected.aiClientSceneMaterial = expected.aiClientSceneMaterial.filter(row => row.id !== h.prepared.materialRef);
+    assert.deepEqual(h.clone(h.state), expected); assert.equal(h.submissions(), 0);
+    assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, 1);
+    assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  } catch (error) { throw new Error(`Standard original QP source phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End standard original quote Booking owned cases.
+
+// Begin original changed-stock reconfirmation owned cases.
+async function originalChangedStockBookingSetup(t) {
+  const h = await standardCoreBookingApplicationSetup(t, { originalQuote: true });
+  const input = { bookingIdentity: h.clone(h.quote.request.bookingIdentity), fulfillmentMode: h.quote.request.fulfillmentMode,
+    fulfillmentLocationId: h.quote.request.fulfillmentLocationId, startAt: h.quote.request.startAt, endAt: h.quote.request.endAt,
+    lines: h.quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, quantity: 2, pricingUnit: row.pricingUnit })),
+    services: h.clone(h.quote.request.services) };
+  const flow = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(h.app);
+  const prepared = await h.app.prepareQuoteParameters(h.request, { operationKey: 'changed-stock-original-parameters', input });
+  const original = { materialRef: prepared.materialRef, expectedMaterialHash: prepared.materialHash };
+  const quote = (await h.app.confirmQuoteParameters(h.request, original)).quote;
+  const selection = { ...h.selection, quoteId: quote.id, lines: quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, quantity: row.quantity })) };
+  const materialCommand = { original, selection, operationKey: 'changed-stock-original-material' };
+  const packet = await flow.prepare(h.request, materialCommand);
+  const created = await h.app.createBookingDraft(h.request, { action: packet.action, operationKey: 'changed-stock-original-create' });
+  const selected = await h.app.chooseBookingDraft(h.request, { bookingDraftId: created.draft.bookingDraftId, expectedRevision: created.draft.revision,
+    inputFingerprint: created.draft.inputFingerprint, operationKey: 'changed-stock-original-choice', decision: 'continue_booking' });
+  const availabilityInput = { locationId: input.fulfillmentLocationId, startAt: input.startAt, endAt: input.endAt,
+    lines: input.lines.map(({ itemGroupId, quantity }) => ({ itemGroupId, quantity })) };
+  assert.equal((await h.scenes.member.availability(availabilityInput)).available, true);
+  const withdrawStock = async () => {
+    // Only the declared current stock transport changes; actual Core calculates
+    // availability. No original quote, membership, money, approval or receipt is edited.
+    h.b.facts.listAssets = async () => [{ id: 'capacity-asset-1', tenantId: h.clientContext.tenantId, workspaceId: h.clientContext.workspaceId,
+      itemGroupId: h.b.group.id, locationId: h.b.location.id, status: 'available' }];
+    h.b.facts.listStockBalances = async () => [{ itemGroupId: h.b.group.id, locationId: h.b.location.id, onHandQuantity: 1, maintenanceQuantity: 0 }];
+    const current = await h.scenes.member.availability(availabilityInput);
+    assert.equal(current.available, false); assert.equal(current.lines[0].requestedQuantity, 2); assert.equal(current.lines[0].availableQuantity, 1);
+    return current;
+  };
+  return { ...h, input, flow, prepared, original, quote, selection, packet, materialCommand, created, selected, withdrawStock };
+}
+
+test('AIN15 original changed-stock reconfirmation keeps old quote immutable and requires new quantity selection, QP confirmation and Booking choice before one Core order', { timeout: 180000 }, async t => {
+  let phase = 'original-QP-and-human-choice';
+  try {
+    const h = await originalChangedStockBookingSetup(t), originalQuote = h.clone(h.state.rentalQuote.find(row => row.id === h.quote.id));
+    phase = 'actual-Core-stock-change';
+    await h.withdrawStock();
+    await assert.rejects(h.app.readAction(h.request, h.selected.draft.action), error => error.code === 'AI_PROPOSAL_STALE');
+    const old = await h.flow.readDraftObservation(h.request, { operationKey: 'changed-stock-original-choice' });
+    assert.equal(old.currentDraft.state, 'stale'); assert.equal(old.currentUse, 'not_authorized_by_receipt');
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    const current = h.clone(h.state), originalCount = h.state.rentalQuote.filter(row => row.originalOperationKey).length;
+    phase = 'explicit-human-quantity-candidate-not-approval';
+    const replacementInput = { ...h.clone(h.input), lines: h.input.lines.map(row => ({ ...row, quantity: 1 })) };
+    await assert.rejects(h.app.prepareQuoteParameters(h.request, { operationKey: 'changed-stock-original-parameters', input: replacementInput }),
+      error => error.code === 'AI_REVISION_CONFLICT');
+    assert.deepEqual(h.clone(h.state), current, 'New candidate cannot overwrite the original operation');
+    const replacement = await h.app.prepareQuoteParameters(h.request, { operationKey: 'changed-stock-reselected-parameters', input: replacementInput });
+    assert.notEqual(replacement.materialHash, h.prepared.materialHash); assert.equal(replacement.eligibility, 'not_attested');
+    const reference = { materialRef: replacement.materialRef, expectedMaterialHash: replacement.materialHash };
+    assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, originalCount);
+    await assert.rejects(h.app.confirmQuoteParameters(h.request, { ...reference, expectedMaterialHash: h.prepared.materialHash }),
+      error => error.code === 'AI_REVISION_CONFLICT');
+    phase = 'distinct-explicit-new-Core-quote';
+    const confirmed = await h.app.confirmQuoteParameters(h.request, reference), quote = confirmed.quote;
+    assert.equal(confirmed.confirmation, 'parameters_only_not_order_approval'); assert.notEqual(quote.id, h.quote.id);
+    assert.equal(quote.request.lines[0].quantity, 1); assert.equal(h.quote.request.lines[0].quantity, 2);
+    const { Prisma } = require('@prisma/client'); assert.equal(new Prisma.Decimal(quote.rentalAmount).mul(2).equals(h.quote.rentalAmount), true);
+    assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, originalCount + 1); assert.equal(h.submissions(), 0);
+    const selection = { ...h.selection, quoteId: quote.id, lines: quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, quantity: row.quantity })) };
+    const packet = await h.flow.prepare(h.request, { original: reference, selection, operationKey: 'changed-stock-reselected-material' });
+    assert.notEqual(packet.material.materialRef, h.packet.material.materialRef);
+    phase = 'old-selection-cannot-authorize-new-material';
+    await assert.rejects(h.app.createBookingDraft(h.request, { action: h.packet.action, operationKey: 'changed-stock-reuse-old-action' }),
+      error => error.code === 'AI_PROPOSAL_STALE');
+    const created = await h.app.createBookingDraft(h.request, { action: packet.action, operationKey: 'changed-stock-reselected-create' });
+    assert.equal(created.draft.action, null); assert.equal(created.draft.selectionRevision, 0); assert.equal(h.submissions(), 0);
+    await assert.rejects(h.app.handoffBookingDraft(h.request, { action: packet.action, operationKey: 'changed-stock-skip-new-choice' }),
+      error => error.code === 'AI_INVALID_INPUT');
+    const selected = await h.app.chooseBookingDraft(h.request, { bookingDraftId: created.draft.bookingDraftId, expectedRevision: created.draft.revision,
+      inputFingerprint: created.draft.inputFingerprint, operationKey: 'changed-stock-reselected-choice', decision: 'continue_booking' });
+    const handed = await h.app.handoffBookingDraft(h.request, { action: selected.draft.action, operationKey: 'changed-stock-reselected-handoff' });
+    const acceptance = await h.flow.acceptPage(h.request, { handoffRef: handed.handoff.handoffRef });
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0);
+    phase = 'ordinary-answer-not-Core-approval';
+    await assert.rejects(h.flow.submitPage(h.request, { acceptanceRef: acceptance.acceptanceRef, decision: '可以' }),
+      error => error.code === 'AI_INVALID_INPUT' && error.reason === 'invalid_contract');
+    phase = 'explicit-original-Core-submit-and-receipt';
+    const result = await h.flow.submitPage(h.request, { acceptanceRef: acceptance.acceptanceRef, decision: 'submit_original_booking' });
+    assert.equal(result.state, 'observed'); assert.equal(h.submissions(), 1); assert.equal(h.state.rentalOrder.length, 1);
+    assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1); assert.equal(h.state.rentalOrder[0].quoteId, quote.id);
+    assert.equal(h.state.rentalOrder[0].payableAmount, quote.payableAmount); assert.equal(h.state.rentalServiceReservation.length, 1);
+    const completed = h.clone(h.state), receipt = await h.flow.readSubmission(h.request, { acceptanceRef: acceptance.acceptanceRef });
+    assert.equal(receipt.orderId, result.orderId); assert.equal(receipt.payment, 'not_inferred'); assert.equal(receipt.fulfillment, 'not_inferred');
+    assert.deepEqual(h.clone(h.state), completed); assert.deepEqual(h.state.rentalQuote.find(row => row.id === h.quote.id), originalQuote);
+    assert.equal((await h.flow.readDraftObservation(h.request, { operationKey: 'changed-stock-original-choice' })).currentDraft.state, 'stale');
+    assert.equal(h.submissions(), 1);
+  } catch (error) { throw new Error(`Original changed-stock reconfirmation phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 original changed-stock reconfirmation refuses old accepted page request before any Core attempt and keeps only its independent receipt', { timeout: 180000 }, async t => {
+  let phase = 'original-selected-page';
+  try {
+    const h = await originalChangedStockBookingSetup(t);
+    const handed = await h.app.handoffBookingDraft(h.request, { action: h.selected.draft.action, operationKey: 'changed-stock-original-handoff' });
+    const acceptance = await h.flow.acceptPage(h.request, { handoffRef: handed.handoff.handoffRef });
+    assert.equal(h.submissions(), 0);
+    phase = 'actual-stock-withdrawal-before-explicit-submit';
+    await h.withdrawStock();
+    await assert.rejects(h.flow.submitPage(h.request, { acceptanceRef: acceptance.acceptanceRef, decision: 'submit_original_booking' }),
+      error => error.code === 'AI_PROPOSAL_STALE');
+    assert.equal(h.state.aiClientSceneMaterial.some(row => row.operationKey === `booking-attempt:${acceptance.acceptanceRef}`), false);
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+    phase = 'independent-original-accepted-receipt-not-new-authorization';
+    const before = h.clone(h.state), receipt = await h.flow.readSubmission(h.request, { acceptanceRef: acceptance.acceptanceRef });
+    assert.equal(receipt.state, 'not_observed'); assert.equal(receipt.orderId, null); assert.equal(receipt.retryable, false);
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 0);
+    const old = await h.flow.readDraftObservation(h.request, { operationKey: 'changed-stock-original-handoff' });
+    assert.equal(old.currentDraft.state, 'stale'); assert.equal(old.currentUse, 'not_authorized_by_receipt');
+  } catch (error) { throw new Error(`Original changed-stock acceptance phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End original changed-stock reconfirmation owned cases.
+
+// Begin original quote confirmation attempt owned cases.
+async function originalQuoteAttemptSetup(t) {
+  const h = await standardCoreBookingApplicationSetup(t, { originalQuote: true });
+  const input = { bookingIdentity: h.clone(h.quote.request.bookingIdentity), fulfillmentMode: h.quote.request.fulfillmentMode,
+    fulfillmentLocationId: h.quote.request.fulfillmentLocationId, startAt: h.quote.request.startAt, endAt: h.quote.request.endAt,
+    lines: h.quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, quantity: row.quantity, pricingUnit: row.pricingUnit })),
+    services: h.clone(h.quote.request.services) };
+  const prepared = await h.app.prepareQuoteParameters(h.request, { operationKey: 'original-quote-attempt-parameters', input });
+  const original = { materialRef: prepared.materialRef, expectedMaterialHash: prepared.materialHash };
+  return { ...h, input, prepared, original };
+}
+
+test('AIN15 original quote confirmation attempt does not reenter the original Core quote port after an unknown confirmation', { timeout: 180000 }, async t => {
+  let phase = 'actual-parameter-material';
+  try {
+    const h = await originalQuoteAttemptSetup(t); let calls = 0;
+    // Explicit failure transport only. A 503 cannot prove that the original
+    // quote effect did not happen; the production composition must not redispatch.
+    h.client.createQuoteForOriginalOperation = async () => { calls++; throw new (require('@nestjs/common').ServiceUnavailableException)('Synthetic original quote outcome unknown'); };
+    phase = 'first-original-confirmation-unknown';
+    await assert.rejects(h.app.confirmQuoteParameters(h.request, h.original), error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false);
+    assert.equal(calls, 1);
+    phase = 'same-original-reference-read-only';
+    const before = h.clone(h.state), read = await h.app.readPreparedQuoteOriginal(h.request, h.original);
+    assert.equal(read.state, 'unknown'); assert.equal(read.quote, null); assert.equal(read.retryable, false);
+    await assert.rejects(h.app.confirmQuoteParameters(h.request, h.original), error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false);
+    assert.equal(calls, 1, 'An unresolved original confirmation must not reenter the quote writer');
+    assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0);
+    assert.equal(h.state.rentalQuote.some(row => row.originalOperationKey), false);
+    assert.equal(h.state.aiClientSceneMaterial.filter(row => row.command.kind === 'quote_confirmation_attempt').length, 1);
+  } catch (error) { throw new Error(`Original quote unknown attempt phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+
+test('AIN15 original quote confirmation attempt COMMIT acknowledgement loss never reaches Core and restart only observes the same reference', { timeout: 180000 }, async t => {
+  let phase = 'actual-parameter-material';
+  try {
+    const h = await originalQuoteAttemptSetup(t), create = h.client.createQuoteForOriginalOperation.bind(h.client); let calls = 0, lost = false;
+    h.client.createQuoteForOriginalOperation = (...args) => { calls++; return create(...args); };
+    h.control.beforeCommit = draft => {
+      if (!lost && draft.aiClientSceneMaterial.some(row => row.command.kind === 'quote_confirmation_attempt')
+        && !h.state.aiClientSceneMaterial.some(row => row.command.kind === 'quote_confirmation_attempt')) {
+        lost = true; h.control.loseReply = true; h.control.beforeCommit = null;
+      }
+    };
+    phase = 'attempt-COMMIT-lost-before-Core';
+    await assert.rejects(h.app.confirmQuoteParameters(h.request, h.original), error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false);
+    assert.equal(lost, true); assert.equal(calls, 0);
+    const before = h.clone(h.state), restarted = h.restart();
+    phase = 'restart-does-not-dispatch-unacknowledged-attempt';
+    const read = await restarted.readPreparedQuoteOriginal(h.request, h.original);
+    assert.equal(read.state, 'unknown'); assert.equal(read.quote, null);
+    await assert.rejects(restarted.confirmQuoteParameters(h.request, h.original), error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false);
+    assert.equal(calls, 0); assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 0);
+    assert.equal(h.state.rentalQuote.some(row => row.originalOperationKey), false); assert.equal(h.state.rentalOrder.length, 0);
+    assert.equal(h.state.aiClientSceneMaterial.filter(row => row.command.kind === 'quote_confirmation_attempt').length, 1);
+  } catch (error) { throw new Error(`Original quote attempt acknowledgement phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+test('AIN15 original quote confirmation attempt concurrent first confirms dispatch one actual Core quote and replay only its original receipt', { timeout: 180000 }, async t => {
+  let phase = 'actual-parameter-material';
+  try {
+    const h = await originalQuoteAttemptSetup(t), create = h.client.createQuoteForOriginalOperation.bind(h.client); let calls = 0;
+    h.client.createQuoteForOriginalOperation = (...args) => { calls++; return create(...args); };
+    phase = 'two-explicit-requests-one-original-dispatch';
+    const results = await Promise.allSettled([h.app.confirmQuoteParameters(h.request, h.original), h.app.confirmQuoteParameters(h.request, h.original)]);
+    const completed = results.filter(row => row.status === 'fulfilled'); assert.ok(completed.length >= 1);
+    for (const row of results) if (row.status === 'rejected') assert.equal(row.reason.code, 'AI_RESULT_UNKNOWN');
+    assert.equal(calls, 1); assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, 1);
+    assert.equal(h.state.aiClientSceneMaterial.filter(row => row.command.kind === 'quote_confirmation_attempt').length, 1);
+    const observed = await h.app.readPreparedQuoteOriginal(h.request, h.original);
+    assert.equal(observed.state, 'observed'); assert.ok(observed.quote);
+    for (const row of completed) { assert.equal(row.value.quote.id, observed.quote.id); assert.equal(row.value.confirmation, 'parameters_only_not_order_approval'); }
+    phase = 'replay-no-current-normalization-or-second-create';
+    h.client.prepareQuoteForOriginalOperation = async () => { throw Error('Original quote replay must not normalize a new candidate'); };
+    const before = h.clone(h.state), repeated = await h.app.confirmQuoteParameters(h.request, h.original);
+    assert.equal(repeated.quote.id, observed.quote.id); assert.equal(repeated.quotePersistence, 'saved');
+    assert.equal(repeated.orderExecution, 'not_attempted'); assert.equal(JSON.stringify(repeated).includes('quote_confirmation_attempt'), false);
+    assert.equal(calls, 1); assert.deepEqual(h.clone(h.state), before);
+    assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+  } catch (error) { throw new Error(`Original concurrent quote attempt phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+});
+// End original quote confirmation attempt owned cases.
+
+// Begin original qualified no-service flow owned cases.
+for (const categoryCode of ['vehicle', 'construction']) {
+  test(`AIN15 original qualified no-service flow ${categoryCode} reaches QP Core order and independent original history after qualification withdrawal`, { timeout: 180000 }, async t => {
+    let phase = 'actual-qualified-category-parameters';
+    try {
+      const h = await standardCoreBookingApplicationSetup(t, { categoryCode, originalQuote: true });
+      assert.ok(h.qualificationRows.length > 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+      // No optional service was chosen. Keep the original service/capacity rules
+      // intact instead of making its required fields or capacity optional.
+      const input = { bookingIdentity: h.clone(h.quote.request.bookingIdentity), fulfillmentMode: h.quote.request.fulfillmentMode,
+        fulfillmentLocationId: h.quote.request.fulfillmentLocationId, startAt: h.quote.request.startAt, endAt: h.quote.request.endAt,
+        lines: h.quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, quantity: row.quantity, pricingUnit: row.pricingUnit })) };
+      const prepared = await h.app.prepareQuoteParameters(h.request, { operationKey: 'qualified-no-service-parameters', input });
+      const original = { materialRef: prepared.materialRef, expectedMaterialHash: prepared.materialHash };
+      const confirmed = await h.app.confirmQuoteParameters(h.request, original), quote = confirmed.quote;
+      assert.equal(confirmed.confirmation, 'parameters_only_not_order_approval'); assert.equal(quote.ruleSnapshot.qualification.required, true);
+      assert.equal(quote.serviceSnapshots.length, 0); assert.equal(quote.serviceAmount, 0);
+      const { services: _unusedServiceSelection, ...base } = h.selection;
+      const selection = { ...base, quoteId: quote.id }, command = { original, selection, operationKey: 'qualified-no-service-material' };
+      const flow = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(h.app);
+      let unusedCapacityReads = 0;
+      h.capacity.readAvailabilityForQuote = async () => { unusedCapacityReads++; throw Error('No selected service must not borrow a current capacity decision'); };
+      phase = 'actual-qualification-and-no-service-material';
+      const material = await flow.prepare(h.request, command);
+      const created = await h.app.createBookingDraft(h.request, { action: material.action, operationKey: 'qualified-no-service-create' });
+      assert.equal(created.draft.material.quote.chargeLines.some(row => row.type === 'service'), false);
+      assert.equal(created.draft.material.selection.services, undefined);
+      assert.equal(created.draft.action, null); assert.equal(h.submissions(), 0); assert.equal(unusedCapacityReads, 0);
+      const selected = await h.app.chooseBookingDraft(h.request, { bookingDraftId: created.draft.bookingDraftId, expectedRevision: created.draft.revision,
+        inputFingerprint: created.draft.inputFingerprint, operationKey: 'qualified-no-service-choice', decision: 'continue_booking' });
+      const handed = await h.app.handoffBookingDraft(h.request, { action: selected.draft.action, operationKey: 'qualified-no-service-handoff' });
+      const acceptance = await flow.acceptPage(h.request, { handoffRef: handed.handoff.handoffRef });
+      assert.equal(h.submissions(), 0); assert.equal(h.state.rentalOrder.length, 0); assert.equal(h.state.rentalServiceReservation.length, 0);
+      phase = 'actual-current-qualified-Core-submit';
+      const result = await flow.submitPage(h.request, { acceptanceRef: acceptance.acceptanceRef, decision: 'submit_original_booking' });
+      assert.equal(result.state, 'observed'); assert.equal(h.submissions(), 1);
+      assert.equal(h.state.rentalOrder.length, 1); assert.equal(h.state.rentalOrderIdempotencyRecord.length, 1);
+      assert.equal(h.state.rentalOrder[0].quoteId, quote.id); assert.equal(h.state.rentalOrder[0].payableAmount, quote.payableAmount);
+      assert.equal(h.state.rentalServiceReservation.length, 0); assert.equal(unusedCapacityReads, 0);
+      phase = 'historical-receipts-not-current-qualification-or-use';
+      h.qualificationRows.splice(0); h.advanceClock(700000);
+      h.state.aiClientTaskPolicy[0].allowCreate = 0; h.state.aiClientTaskPolicy[0].allowExecute = 0;
+      h.state.aiBudgetPolicy.forEach(row => { row.enabled = false; });
+      for (const name of ['getQuote', 'readQuoteBookingQualification', 'prepareQuoteForOriginalOperation', 'createQuoteForOriginalOperation'])
+        h.client[name] = async () => { throw Error('Original history must not revive current qualification/quote preparation'); };
+      const before = h.clone(h.state), restarted = h.restart();
+      const history = require('../apps/api/src/modules/ai-native/scenes/client-original-booking-flow').composeClientOriginalBookingFlow(restarted);
+      const receipt = await history.readOperation(h.request, command);
+      assert.equal(receipt.state, 'observed'); assert.equal(receipt.materialRef, material.material.materialRef);
+      assert.equal(receipt.materialValidity, 'expired'); assert.equal(receipt.currentUse, 'not_authorized_by_receipt'); assert.equal(receipt.retryable, false);
+      const business = await history.readSubmission(h.request, { acceptanceRef: acceptance.acceptanceRef });
+      assert.equal(business.orderId, result.orderId); assert.equal(business.payment, 'not_inferred'); assert.equal(business.fulfillment, 'not_inferred');
+      const draft = await restarted.readBookingDraft(h.request, { bookingDraftId: created.draft.bookingDraftId });
+      assert.equal(draft.state, 'submitted'); assert.equal(draft.action, null); assert.equal(draft.execution, 'submitted_request_not_business_success');
+      await assert.rejects(history.readOperation(h.request, { ...command, selection: { ...selection,
+        lines: selection.lines.map(row => ({ ...row, quantity: row.quantity + 1 })) } }), error => error.code === 'AI_REVISION_CONFLICT');
+      assert.deepEqual(h.clone(h.state), before); assert.equal(h.submissions(), 1); assert.equal(unusedCapacityReads, 0);
+      assert.equal(h.state.rentalQuote.filter(row => row.originalOperationKey).length, 1);
+    } catch (error) { throw new Error(`Original ${categoryCode} no-service flow phase=${phase}; code=${error.code ?? error.name}; ${String(error.message).slice(0, 240)}`); }
+  });
+}
+// End original qualified no-service flow owned cases.

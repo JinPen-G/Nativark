@@ -33,6 +33,20 @@ for (const [name, mutate] of Object.entries({
   await assert.rejects(composeAiApprovedOrder(h.dependencies).submit(h.command), denied);
   assert.equal(h.state.prepares, 0);
 });
+test('foreign current workspace is access-denied while an own task with absent policy stays unavailable', async () => {
+  const own = await persistedApprovedOrderHarness(); own.state.records.aiTaskActionPolicy = [];
+  await assert.rejects(own.policy().authorizeRead('task-a'), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+  const h = await persistedApprovedOrderHarness();
+  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+  h.state.records.aiScope.push({ id: 'scope-other', ...aiPersistenceScopeColumns({ kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-b' }) });
+  h.state.workspace = 'workspace-b';
+  const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
+  const current = await composePersistedTaskAuthorization(h.policyDependencies).scopes.resolveCurrent();
+  assert.equal(current.context.scope.workspaceId, 'workspace-b'); assert.equal(current.scope.id, 'scope-other');
+  await assert.rejects(h.policy().authorizeRead('task-a'), error => error.code === 'AI_ACCESS_DENIED');
+  assert.equal(h.state.prepares, 0); assert.equal(h.state.records.rentalOrder.length, 0);
+});
+
 test('history remains readable with current read policy after cancellation, AI expiry and lost create permission', async () => {
   const h = await persistedApprovedOrderHarness(); h.dependencies.policy = h.policy(); const root = composeAiApprovedOrder(h.dependencies);
   await root.submit(h.command);

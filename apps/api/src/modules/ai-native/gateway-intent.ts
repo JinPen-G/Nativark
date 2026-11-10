@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft, AiGatewayFeatureDraft } from '@rental-os/shared';
-import { ModelGatewayError, isBoundedGatewayInput, modelProtocolRequestBaseSchema, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolContent } from './model-gateway.ports';
+import { ModelGatewayError, GATEWAY_MAX_INPUT_BYTES, isBoundedGatewayInput, modelProtocolRequestBaseSchema, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolContent } from './model-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { nativeToolResultIntentFingerprint, resolvedNativeToolResultSchema,
+  type NativeToolResultResolver, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
 
 const feature = z.enum(['text', 'tools', 'structured_output', 'image', 'audio', 'streaming', 'embedding', 'reasoning']);
 const features = z.array(feature).max(8).refine(values => new Set(values).size === values.length);
@@ -21,15 +23,19 @@ const intentSchema = z.object({
 }).strict().refine(value => !value.requiredFeatures.some(item => value.optionalFeatures.includes(item)));
 export const gatewayTextIntentPolicySchema = z.object({ sceneCode: id, maxOutputTokens: z.number().int().min(1).max(32768),
   structuredOutput: z.boolean().optional(), structuredSchemaHash: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
-  orderExplainTool: z.boolean().optional() }).strict();
-export const gatewayTextIntentBindingSchema = gatewayTextIntentPolicySchema.extend({ routeScene: z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning']) }).strict();
+  orderExplainTool: z.boolean().optional(), reasoningChannel: z.boolean().optional(), embeddingProbe: z.boolean().optional(),
+  nativeToolResults: z.boolean().optional() }).strict();
+export const gatewayTextIntentBindingSchema = gatewayTextIntentPolicySchema.extend({ routeScene: z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning', 'embedding']) }).strict();
 export type GatewayTextIntentBinding = z.infer<typeof gatewayTextIntentBindingSchema>;
-export interface GatewayTextIntentPolicy { sceneCode: string; maxOutputTokens: number; structuredOutput?: boolean; structuredSchemaHash?: string; orderExplainTool?: boolean; }
+// The old loose ModelRequest ingress stays unchanged. Extended protocol flags
+// are emitted only after an explicit registered C03 scene policy accepts them.
+const textProtocolRequestSchema = modelRequestSchema.extend({ features: modelProtocolRequestBaseSchema.shape.features });
+export interface GatewayTextIntentPolicy { sceneCode: string; maxOutputTokens: number; structuredOutput?: boolean; structuredSchemaHash?: string; orderExplainTool?: boolean; reasoningChannel?: boolean; embeddingProbe?: boolean; nativeToolResults?: boolean; }
 export interface PreparedGatewayTextIntent {
   sceneCode: string;
   intentHash: string;
-  request: Omit<z.infer<typeof modelRequestSchema>, 'model'>;
-  requiredCapabilities: Array<'text' | 'streaming' | 'structured_output' | 'tools'>;
+  request: Omit<z.infer<typeof textProtocolRequestSchema>, 'model'>;
+  requiredCapabilities: Array<'text' | 'streaming' | 'structured_output' | 'tools' | 'reasoning' | 'embedding'>;
   omittedOptionalFeatures: AiGatewayFeatureDraft[];
 }
 
@@ -52,7 +58,7 @@ export interface PreparedGatewayIntent {
   sceneCode: string;
   intentHash: string;
   request: Omit<z.infer<typeof modelProtocolRequestSchema>, 'model'>;
-  requiredCapabilities: Array<'text' | 'streaming' | 'image' | 'audio' | 'structured_output' | 'tools'>;
+  requiredCapabilities: Array<'text' | 'streaming' | 'image' | 'audio' | 'structured_output' | 'tools' | 'reasoning' | 'embedding'>;
   omittedOptionalFeatures: AiGatewayFeatureDraft[];
 }
 
@@ -139,6 +145,61 @@ export async function prepareGatewayIntent(
     omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };
 }
 
+/** Native successor preparation resolves one frozen selector through the
+ * original Task/Core port. It does not fabricate a user message containing the
+ * result or replay the original model: the separate native transport must encode
+ * the original call identity and result on this new, single admitted invocation. */
+export async function prepareGatewayNativeToolResultIntent(value: AiGatewayIntentDraft,
+  serverPolicy: GatewayTextIntentPolicy, context: GatewayContext, resolver: NativeToolResultResolver,
+  signal: AbortSignal): Promise<PreparedGatewayIntent & { nativeResult: ResolvedNativeToolResult }> {
+  const intent = structuredClone(value), policy = gatewayTextIntentPolicySchema.parse(serverPolicy);
+  if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+  if (!resolver || typeof resolver.resolve !== 'function' || typeof resolver.assertCurrent !== 'function'
+    || policy.structuredOutput || policy.structuredSchemaHash || policy.reasoningChannel || policy.embeddingProbe) {
+    throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  }
+  const intentHash = nativeToolResultIntentFingerprint(intent, policy);
+  // This registered three-step host supplies only the frozen reference. Do not
+  // silently discard extra caller text or pretend arbitrary history was bound.
+  const message = intent.messages[0], part = message?.content[0];
+  if (intent.messages.length !== 1 || message.role !== 'user' || message.content.length !== 1
+    || part.kind !== 'tool_result_reference') throw new ModelGatewayError('INVALID_REQUEST');
+  const result = resolvedNativeToolResultSchema.parse(structuredClone(await resolver.resolve(
+    structuredClone(context), structuredClone(part.reference), signal)));
+  if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+  if (requestFingerprint(result.reference) !== requestFingerprint(part.reference)
+    || result.originalIntent.sceneCode !== intent.sceneCode
+    || result.originalIntent.messages.some(item => item.content.some(content => content.kind !== 'text'))) {
+    throw new ModelGatewayError('INVALID_REQUEST');
+  }
+  const { nativeToolResults: _native, ...textPolicy } = policy;
+  const original = prepareGatewayTextIntent(result.originalIntent, textPolicy, 'invoke');
+  const request = { ...original.request, callId: intent.requestId, maxOutputTokens: intent.maxOutputTokens };
+  if (!request.features?.includes('tools') || Buffer.byteLength(JSON.stringify({ request, nativeResult: result }), 'utf8') > GATEWAY_MAX_INPUT_BYTES) {
+    throw new ModelGatewayError('INVALID_REQUEST');
+  }
+  return { sceneCode: intent.sceneCode, intentHash, request, requiredCapabilities: ['text', 'tools'],
+    omittedOptionalFeatures: [], nativeResult: result };
+}
+/** Non-text capability probe preparation. No public vector result or generic
+ * embedding execution is granted; the registered scene owns this narrow method. */
+export function prepareGatewayEmbeddingProbeIntent(value: AiGatewayIntentDraft, serverPolicy: GatewayTextIntentPolicy): PreparedGatewayIntent {
+  const parsed = intentSchema.safeParse(value), policy = gatewayTextIntentPolicySchema.safeParse(serverPolicy);
+  if (!policy.success || policy.data.embeddingProbe !== true) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+  const input = parsed.data;
+  if (input.sceneCode !== policy.data.sceneCode) throw new ModelGatewayError('FORBIDDEN');
+  if (input.maxOutputTokens > policy.data.maxOutputTokens || input.messages.length !== 2
+    || input.messages.some(message => message.role !== 'user' || message.content.length !== 1 || message.content[0].kind !== 'text')
+    || input.requiredFeatures.length !== 1 || input.requiredFeatures[0] !== 'embedding' || input.optionalFeatures.length) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  const messages = input.messages.map(message => ({ role: message.role, content: (message.content[0] as { kind: 'text'; text: string }).text }));
+  if (!messages[0].content || !messages[1].content || messages[0].content === messages[1].content) throw new ModelGatewayError('INVALID_REQUEST');
+  const request = modelProtocolRequestBaseSchema.omit({ model: true }).parse({ callId: input.requestId, messages,
+    maxOutputTokens: input.maxOutputTokens, features: ['embedding'] });
+  return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode: 'invoke' }), request,
+    requiredCapabilities: ['embedding'], omittedOptionalFeatures: [] };
+}
+
 /** Text-only C03 ingress preparation, not authorization, evidence, routing, or a complete AiGatewayPortDraft.
  * No placeholder model is inserted: only the downstream server-selected route may add it.
  */
@@ -151,19 +212,21 @@ export function prepareGatewayTextIntent(value: AiGatewayIntentDraft, serverPoli
   if (input.maxOutputTokens > policy.data.maxOutputTokens) throw new ModelGatewayError('INVALID_REQUEST');
   const structured = mode === 'invoke' && policy.data.structuredOutput === true && input.requiredFeatures.includes('structured_output');
   const tools = mode === 'invoke' && policy.data.orderExplainTool === true && input.requiredFeatures.includes('tools');
+  const reasoning = mode === 'invoke' && policy.data.reasoningChannel === true && input.requiredFeatures.includes('reasoning');
+  if (reasoning && (structured || tools)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   if (policy.data.structuredSchemaHash && !structured) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-  const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'];
+  const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming'] : reasoning ? ['text', 'reasoning'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'];
   if (input.requiredFeatures.some(item => !supported.includes(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   const messages = input.messages.map(message => {
     // Attachments need their own fresh authorization and revision resolution. Never drop them as optional.
     if (message.content.some(part => part.kind !== 'text')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     return { role: message.role, content: message.content.map(part => part.kind === 'text' ? part.text : '').join('') };
   });
-  const request = modelRequestSchema.omit({ model: true }).safeParse({ callId: input.requestId, messages,
+  const request = textProtocolRequestSchema.omit({ model: true }).safeParse({ callId: input.requestId, messages,
     maxOutputTokens: input.maxOutputTokens, ...(structured && policy.data.structuredSchemaHash ? { structuredSchemaHash: policy.data.structuredSchemaHash } : {}),
-    ...(mode === 'stream' ? { features: ['streaming'] } : structured ? { features: ['structuredOutput'] } : tools ? { features: ['tools'] } : {}) });
+    ...(mode === 'stream' ? { features: ['streaming'] } : reasoning ? { features: ['reasoning'] } : structured ? { features: ['structuredOutput'] } : tools ? { features: ['tools'] } : {}) });
   if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
   return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode,
-    ...(structured && policy.data.structuredSchemaHash ? { structuredSchemaHash: policy.data.structuredSchemaHash } : {}) }), request: request.data, requiredCapabilities: mode === 'stream' ? ['text', 'streaming'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'],
+    ...(structured && policy.data.structuredSchemaHash ? { structuredSchemaHash: policy.data.structuredSchemaHash } : {}) }), request: request.data, requiredCapabilities: mode === 'stream' ? ['text', 'streaming'] : reasoning ? ['text', 'reasoning'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'],
     omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };
 }

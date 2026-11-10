@@ -3,7 +3,9 @@
  * Canonical HTTP retains tenant/session handling and abort lifetimes. */
 import { AI_TASK_CENTER_HTTP_DRAFT, type AiTaskMetadataPageDraft, type AiTaskMetadataQueryDraft,
   type AiTaskSnapshotDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft, type ApiResult,
-  type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskConfirmationHistoryDraft,
+  type AiTaskModelObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageSummaryDraft,
+  type AiTaskOutcomeSampleDraft, type AiTaskPerformanceObservationDraft, type AiTaskClientVisibleReportDraft,
+  type AiTaskClientVisibleReceiptDraft, type AiTaskConfirmationHistoryDraft,
   type AiTaskReviewQueryDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft, type AiTaskHumanDecisionReceiptDraft,
   type AiTaskBusinessObservationDraft, type AiTaskHumanContinueDraft, type AiTaskHumanContinuationDraft,
   type AiTaskModelSourceQueryDraft, type AiTaskModelSourceObservationDraft,
@@ -14,6 +16,7 @@ import { http } from "./http";
 import { AI_EXECUTION_RESPONSE_TIMEOUT_MS } from "./aiRequestTiming";
 
 async function read<T>(action: Exclude<keyof typeof AI_TASK_CENTER_HTTP_DRAFT, 'basePath'>, data: unknown, signal: AbortSignal): Promise<T> {
+  if (typeof AI_TASK_CENTER_HTTP_DRAFT[action] !== 'string' || signal.aborted) throw Error('AI_RESOURCE_UNAVAILABLE');
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]),
       ...(['continue', 'continueInput'].includes(action) ? { timeout: AI_EXECUTION_RESPONSE_TIMEOUT_MS } : {}) });
@@ -32,6 +35,10 @@ export const aiTaskCenterApi = Object.freeze({
   stop: (input: AiTaskStopQueryDraft, signal: AbortSignal) => read<AiTaskStopObservationDraft>('stop', input, signal),
   stopReceipt: (input: AiTaskStopQueryDraft, signal: AbortSignal) => read<AiTaskStopObservationDraft>('stopReceipt', input, signal),
   usage: (taskId: string, signal: AbortSignal, after?: string) => read<AiTaskBudgetUsagePageDraft>("usage", { taskId, limit: 20, ...(after ? { after } : {}) }, signal),
+  usageSummary: (taskId: string, signal: AbortSignal) => read<AiTaskBudgetUsageSummaryDraft>('usageSummary', { taskId }, signal),
+  outcomes: (taskIds: readonly string[], signal: AbortSignal) => read<AiTaskOutcomeSampleDraft>('outcomes', { taskIds: [...taskIds] }, signal),
+  performance: (taskId: string, signal: AbortSignal) => read<AiTaskPerformanceObservationDraft>('performance', { taskId, usageLimit: 20 }, signal),
+  reportVisible: (input: AiTaskClientVisibleReportDraft, signal: AbortSignal) => read<AiTaskClientVisibleReceiptDraft>('visibleReport', structuredClone(input), signal),
   confirmation: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskConfirmationHistoryDraft>("confirmation", input, signal),
   review: (input: AiTaskReviewQueryDraft, signal: AbortSignal) => read<AiTaskHumanReviewDraft>("review", input, signal),
   decision: (input: AiTaskDecisionQueryDraft, signal: AbortSignal) => read<AiTaskHumanDecisionReceiptDraft>("decision", input, signal),

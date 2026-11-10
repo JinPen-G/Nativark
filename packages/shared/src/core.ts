@@ -2390,7 +2390,7 @@ export interface RentalDeliveryAddressSnapshot {
   longitude?: number;
 }
 
-/** 后台代客建单用的本单收货地址输入。服务端校验并固化为快照，不会替客户修改地址簿。 */
+/** 本单收货地址输入。客户本人报价与后台代客沿各自受控入口交给Core校验、固化快照，不修改地址簿。 */
 export interface RentalDeliveryAddressDraft {
   recipient: string;
   phone: string;
@@ -4597,8 +4597,20 @@ export interface RentalQuoteSourceSnapshot {
   audience: 'operator' | 'staff' | 'client';
 }
 
+/** Core 冻结的库存对象依据，不代表预占或当前执行授权；不以时间戳伪造组成版本。 */
+export interface RentalQuoteInventoryBasis {
+  version: 'rental-quote-inventory-1';
+  tenantId: string;
+  workspaceId: string;
+  /** 所选型号与全部直接组成（包括替代候选），按 ID 规范排序；无嵌套套装。 */
+  groups: Array<Pick<RentalItemGroup, 'id' | 'tenantId' | 'categoryCode' | 'code' | 'name'
+    | 'inventoryMode' | 'unit' | 'status' | 'bundleComponents'>>;
+}
+
 export interface RentalQuoteSnapshotV1 {
   sourceSnapshot?: RentalQuoteSourceSnapshot;
+  /** 存量缺失不回填；新提交必须重新准备，原已提交收据读取不受影响。 */
+  inventoryBasis?: RentalQuoteInventoryBasis;
   /** 报价时完整取还检查模板；空数组表示无启用模板，缺省仅表示存量无证据。 */
   inspectionTemplateSnapshots?: RentalInspectionTemplate[];
   /** 本次报价实际采用的不可变品类版本；存量无证据时不伪造回填。 */
@@ -6717,6 +6729,28 @@ export interface RentalInspectionTemplate {
   sourceTemplateId?: string;
   /** Read-only projection identifying the replacement-goods change. */
   exchangeId?: string;
+}
+
+/** Narrow frozen evidence from the original Core, not a current template or
+ * inspection result. Returned applicability never grants a business action. */
+export type RentalInspectionTemplateRef = Pick<RentalInspectionTemplate,
+  "id" | "tenantId" | "code" | "stage" | "version" | "enabled">;
+
+export interface RentalOrderInspectionBasisFacts {
+  contractVersion: "rental-order-inspection-basis-1";
+  orderId: string;
+  tenantId: string;
+  workspaceId: string;
+  sourceOrderUpdatedAt: string;
+  originalTemplateRefs: RentalInspectionTemplateRef[];
+  allocations: Array<Pick<RentalAllocation, "id" | "orderLineId" | "itemGroupId" | "status" | "quantity"> & { exchangeId?: string }>;
+  exchanges: Array<{ id: string; type: "post_pickup_exchange"; status: "applied";
+    /** Absence remains missing historical evidence, unlike a saved empty list. */
+    templateRefs?: RentalInspectionTemplateRef[] }>;
+  applicableTemplateRefs: Array<RentalInspectionTemplateRef & {
+    sourceTemplateId: string; allocationIds?: string[]; exchangeId?: string }>;
+  recordResourceCoverage: "not_projected";
+  semantics: "frozen_template_applicability_not_inspection_or_execution_authority";
 }
 
 export interface CreateRentalInspectionRequest {

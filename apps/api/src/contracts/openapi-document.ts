@@ -1,3 +1,8 @@
+import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_SCHEMAS, AI_MEMBER_NAME_CONTRACTS } from '@rental-os/shared';
+import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_CONTRACTS, AI_TASK_RULE_DRAFT_SCHEMAS, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
@@ -6,7 +11,8 @@ import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
-import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS,
+  AI_ORDER_EXPLANATION_HTTP_V2, AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2 } from '@rental-os/shared';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_DRAFT, AI_PLATFORM_CAPABILITY_HTTP_OPERATIONS } from "@rental-os/shared";
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
@@ -214,6 +220,11 @@ function buildPaths(operations: ContractOperation[]) {
 }
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...AI_MEMBER_NAME_SCHEMAS,
+  ...AI_TASK_RULE_DRAFT_SCHEMAS,
+  ...AI_TASK_CALENDAR_DRAFT_SCHEMAS,
+  ...AI_TASK_ORDER_HANDOFF_SCHEMAS,
+  ...AI_TASK_READ_POLICY_SCHEMAS,
   // AIN-02/S01：只公开草案结构，无对应运行路由；不得据此认为工具已可执行。
   ...AI_NATIVE_COMPONENT_SCHEMAS,
   ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
@@ -1807,31 +1818,64 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["locationId", "startAt", "endAt", "lines"]
   ),
-  ClientQuoteRequest: objectOf(
+  ClientQuoteDeliveryAddressDraft: objectOf(
     {
-      bookingIdentity: objectSchema,
-      fulfillmentMode: stringSchema,
-      fulfillmentLocationId: stringSchema,
-      returnLocationId: stringSchema,
-      startAt: { type: "string", format: "date-time" },
-      endAt: { type: "string", format: "date-time" },
-      pricingPlanId: stringSchema,
-      discountPlanId: stringSchema,
-      customerCouponId: stringSchema,
-      lines: arrayOf(objectSchema),
-      services: arrayOf(objectSchema),
-      deliveryAddressId: stringSchema
+      recipient: { type: "string", minLength: 1, maxLength: 120 },
+      phone: { type: "string", minLength: 1, maxLength: 40, pattern: "^\\+?[0-9][0-9\\s()-]{5,38}$" },
+      countryCode: { type: "string", maxLength: 8 },
+      province: { type: "string", minLength: 1, maxLength: 100 },
+      city: { type: "string", minLength: 1, maxLength: 100 },
+      district: { type: "string", maxLength: 100 },
+      detail: { type: "string", minLength: 1, maxLength: 500 },
+      postalCode: { type: "string", maxLength: 20 }
     },
-    ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"]
+    ["recipient", "phone", "province", "city", "detail"], false
   ),
+  ClientQuoteRequest: {
+    ...objectOf(
+      {
+        bookingIdentity: objectSchema,
+        fulfillmentMode: stringSchema,
+        fulfillmentLocationId: stringSchema,
+        returnLocationId: stringSchema,
+        startAt: { type: "string", format: "date-time" },
+        endAt: { type: "string", format: "date-time" },
+        pricingPlanId: stringSchema,
+        discountPlanId: stringSchema,
+        customerCouponId: stringSchema,
+        lines: arrayOf(objectSchema),
+        services: arrayOf(objectSchema),
+        deliveryAddressId: stringSchema,
+        deliveryAddressDraft: ref("ClientQuoteDeliveryAddressDraft")
+      },
+      ["fulfillmentMode", "fulfillmentLocationId", "startAt", "endAt", "lines"], false
+    ),
+    not: { type: "object", properties: { deliveryAddressId: stringSchema,
+      deliveryAddressDraft: ref("ClientQuoteDeliveryAddressDraft") },
+      required: ["deliveryAddressId", "deliveryAddressDraft"] }
+  },
   RentalQuoteSourceSnapshot: objectOf({
     version: { type: 'string', enum: ['rental-quote-source-1'], readOnly: true },
     tenantId: stringSchema, workspaceId: stringSchema,
     actor: objectOf({ kind: { type: 'string', enum: ['user', 'customer'] }, id: stringSchema }, ['kind', 'id'], false),
     audience: { type: 'string', enum: ['operator', 'staff', 'client'] }
   }, ['version', 'tenantId', 'workspaceId', 'actor', 'audience'], false),
+  RentalQuoteInventoryBasis: objectOf({
+    version: { type: 'string', enum: ['rental-quote-inventory-1'], readOnly: true },
+    tenantId: stringSchema, workspaceId: stringSchema,
+    groups: { ...arrayOf(objectOf({
+      id: stringSchema, tenantId: stringSchema, categoryCode: stringSchema, code: stringSchema, name: stringSchema,
+      inventoryMode: { type: 'string', enum: ['serialized', 'quantity', 'consumable', 'bundle'] },
+      unit: stringSchema, status: { type: 'string', enum: ['enabled', 'disabled'] },
+      bundleComponents: { ...arrayOf(objectOf({ itemGroupId: stringSchema, itemGroupCode: stringSchema,
+        itemGroupName: stringSchema, quantity: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        optional: { type: 'boolean' }, substitutionGroup: stringSchema
+      }, ['itemGroupId', 'itemGroupCode', 'itemGroupName', 'quantity', 'optional'], false)), maxItems: 256 }
+    }, ['id', 'tenantId', 'categoryCode', 'code', 'name', 'inventoryMode', 'unit', 'status', 'bundleComponents'], false)), minItems: 1, maxItems: 100 }
+  }, ['version', 'tenantId', 'workspaceId', 'groups'], false),
   RentalQuoteSnapshot: objectOf({
     id: stringSchema, tenantId: stringSchema, quoteNo: stringSchema, request: objectSchema,
+    inventoryBasis: { ...ref('RentalQuoteInventoryBasis'), readOnly: true, description: 'Core-owned inventory composition; not a reservation or authorization. Legacy records omit it.' },
     sourceSnapshot: { ...ref('RentalQuoteSourceSnapshot'), readOnly: true,
       description: 'Server-derived provenance, never authorization. Legacy records may omit it; own-scope access then fails closed.' },
     deliveryAddressSnapshot: objectSchema, rentalLineAmounts: { type: 'object', additionalProperties: numberSchema },
@@ -2253,6 +2297,32 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,
+    permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
+    authRequired: true, summary: 'Explicit original member-name human workflow; current original manager and Core remain authoritative. Unknown is read only.',
+    requestSchema: AI_MEMBER_NAME_CONTRACTS[action], responseSchema: 'AiMemberNameResponse' })),
+  ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`, tag: 'AI Native', operationId: `aiTaskRuleDraft_${action}`,
+    permissions: action === 'save' || action === 'review' ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS],
+    summary: action === 'save' ? 'Explicit human save of a reviewed original rule draft. No publication. Unknown: read the same original operation.'
+      : action === 'operation' ? 'Read original rule draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned rule proposal or full Core candidate review.',
+    requestSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].response })),
+  ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`, tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`,
+    permissions: action === 'save' || action === 'review' ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS],
+    summary: action === 'save' ? 'Explicit human save of a reviewed original calendar draft. No publication. Unknown: read the same original operation.'
+      : action === 'operation' ? 'Read original calendar draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned calendar proposal or full Core candidate review.',
+    requestSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].response })),
+  { method: 'post', path: `/api/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`, tag: 'AI Native', authRequired: true,
+    operationId: 'aiTaskOrderHandoff_read', permissions: ['rental-os:order:view'],
+    summary: 'Locate the owned original order Task and reread current order facts and manual reference. No model, business execution or approval.',
+    requestSchema: 'AiTaskOrderHandoffQuery', responseSchema: 'AiTaskOrderHandoffResponse' },
+  ...(['inspect', 'enable', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`, tag: 'AI Native', authRequired: true,
+    operationId: `aiTaskReadPolicy_${action}`, permissions: ['system:params:manage'],
+    summary: 'Explicit same-owner original manager read-policy CAS and original receipts. Never model/Core execution authorization.',
+    requestSchema: action === 'inspect' ? 'AiTaskReadPolicyQuery' : action === 'enable' ? 'AiTaskReadPolicyEnable' : 'AiTaskReadPolicyReference', responseSchema: 'AiTaskReadPolicyResponse' })),
   ...AI_CREDIT_OPERATIONS,
   ...DESKTOP_BUSINESS_OPERATIONS,
   { method: 'post', path: '/api/ai-native/privacy/cleanup', tag: 'AI Native', operationId: 'cleanupAiRetention',
@@ -2381,6 +2451,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `staffInspection_${operation.replace(/-/gu, '_')}`, permissions: ['rental-os:order:view'],
     summary: 'Original staff/order/location and stage action authorization is rechecked. Manual work and recognition require separate server opt-ins. Input preparation, saved candidate evidence, human adoption, Core submission and draft linkage are separate facts. An unknown write is observed by its original key, never automatically resent; read-only receipt observation does not repair linkage.',
     requestSchema: contract.request, responseSchema: contract.response
+  })),
+  ...Object.entries(AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2).map(([name, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_ORDER_EXPLANATION_HTTP_V2.basePath}/${AI_ORDER_EXPLANATION_HTTP_V2[name as keyof typeof AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2]}`,
+    tag: 'AI Native', operationId: `originalOrderExplanationV2_${name}`, permissions: ['rental-os:order:view'],
+    requestSchema: contract.request, responseSchema: contract.response, successStatus: contract.successStatus,
+    summary: 'Opt-in read-only v2 original-order publication. Current owner, resource Guard and independent finance scope are rechecked. Original v1 requests/model hashes remain unchanged. Sources are current observations, not execution authority or reconstructed historical/provider results.'
   })),
   ...Object.entries(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(([name, contract]) => ({
     method: 'post' as const, path: `/api/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${AI_SCENE_REQUEST_HTTP_DRAFT[name as keyof typeof AI_SCENE_REQUEST_HTTP_CONTRACTS]
@@ -2517,6 +2593,19 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       runId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
       stepId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId', 'runId', 'stepId'], false),
     responseSchema: 'AiTaskConfirmationHistoryDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.usageSummary}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalUsageSummary', summary: 'Read the current owner original task ledger summary with bounded coverage, separate units/currencies and unknown amounts. No provider bill, new dispatch, release or settlement.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' } }, ['taskId'], false),
+    responseSchema: 'AiTaskBudgetUsageSummaryDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.visibleReport}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterClientVisibleReport', summary: 'Record original owner/browser timing diagnostics after current source checks. Client reports are not business facts or authorization, execution, accounting, release or SLO evidence.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskClientVisibleReportDraft', responseSchema: 'AiTaskClientVisibleReceiptDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.performance}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOriginalPerformance', summary: 'Read original task/run clocks, bounded recorded model/tool observations and budget refusals. Missing first visible text/card remains unrecorded; no SLO verdict, dispatch or settlement.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskPerformanceReadDraft', responseSchema: 'AiTaskPerformanceObservationDraft' },
+  { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.outcomes}`,
+    tag: 'AI Native', operationId: 'aiTaskCenterOutcomeSample', summary: 'Read an explicit authorized scene/version task sample and original human takeover receipts. Pending tasks do not become failures; no SLO verdict, model call, lease or business execution.',
+    permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: 'AiTaskOutcomeSampleReadDraft', responseSchema: 'AiTaskOutcomeSampleDraft' },
   { method: 'post', path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT.usage}`,
     tag: 'AI Native', operationId: 'aiTaskCenterOriginalUsage', summary: 'Current owner original ledger page, not provider invoice or proof of business success. No new-execution gate, dispatch or settlement.',
     permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS], requestSchema: objectOf({ taskId: { type: 'string', minLength: 1, maxLength: 36, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' },
@@ -2588,7 +2677,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: `/api/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.basePath}/${AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT[name as keyof typeof AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS]}`,
     tag: 'AI Native', operationId: `originalClarifiedQuoteSelection_${name}`, authRequired: true,
     permissions: name === 'select' ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
-    summary: 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Named closed response; malformed post-selection delivery remains unknown. Lost replies read the same original selection key/payload only.',
+    summary: name === 'prepareSelection' ? 'Read the exact original clarified Core quote, full human selection material and current Core stock. Original answer payload or exact receipt key only; no answer resubmission, quote rebuild, selection save, runner, approval or order. Current Guard and original ownership remain required.'
+      : name === 'readOriginalOperation' ? 'Read the exact original scoped selection by its original key and original human answer reference. The server verifies its own frozen order payload and full quote/selection fingerprint; clients retain no customer/order body. Missing records never grant replay. No new selection, model, approval, lease, settlement or Core write.'
+      : 'Explicit human selection of the exact original clarified Core quote and answer successor before any frozen plan/input. Uses the existing configured model receipt and selection hosts; does not quote again, start a runner, approve or create an order. Named closed response; malformed post-selection delivery remains unknown. Lost replies read the same original selection key/payload only.',
     requestSchema: contract.request, responseSchema: contract.response })),
   ...Object.entries(AI_QUOTE_SELECTION_HTTP_CONTRACTS).map(([name, contract]) => ({
     method: 'post' as const,

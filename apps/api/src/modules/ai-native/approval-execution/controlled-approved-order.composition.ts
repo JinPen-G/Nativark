@@ -14,12 +14,16 @@ import { composeApprovedOrderReprepare } from './approved-order-reprepare.compos
 import type { ApprovedOrderReprepareServicesFactory } from './approved-order-reprepare.ports';
 import type { PersistedTaskInputTool } from '../runner/prisma-task-plan-input.source';
 import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import type { composeAiGuardedQuoteTools } from '../tools/quote-route.composition';
 
 export type ControlledApprovedOrderDependencies = Omit<PersistedApprovedOrderDependencies, 'inputSource' | 'executionInput' | 'toolVersion'> & {
   confirmation: PersistedApprovedOrderDependencies['confirmation'] & Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
   scene: { code: string; version: string };
   planTools?: readonly PersistedTaskInputTool[];
   reprepareServices?: ApprovedOrderReprepareServicesFactory;
+  /** Server-only original quote readers for complete reprepare candidates.
+   * Missing rates remain unavailable; this never accepts client-supplied facts. */
+  business?: Parameters<typeof composeAiGuardedQuoteTools>[0]['business'];
   /** Server-owned deadline clock, never an approval/request field. */
   runnerClock?: AiTaskRunnerClock;
 };

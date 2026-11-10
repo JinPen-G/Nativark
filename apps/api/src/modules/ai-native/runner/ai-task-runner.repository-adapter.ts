@@ -1,6 +1,6 @@
 import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort, AiTaskRunnerStepCommit, AiTaskRunnerStepPlan, AiTaskRunnerStepPort, AiTaskRunnerStepRef, AiTaskRunnerConfirmationContinuation } from "./ai-task-runner.ports";
 import type { AiTaskRepository } from "../ai-task.repository";
-import type { AiStepRegistrationCommand, AiStepRegistrationRepository } from "../ai-step-registration.repository";
+import { AiStepOriginalRegistrationUnavailableError, type AiStepRegistrationCommand, type AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
 import { AI_STEP_STATUSES_DRAFT, AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
 import { AiTaskRunnerError } from './ai-task-runner.service';
@@ -87,7 +87,14 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       if (command.taskId !== lease.taskId || command.registrationRef !== plan.registrationRef
         || command.lease.runId !== lease.runId || command.lease.holderId !== lease.holderId
         || command.lease.revision !== lease.revision || command.lease.fencingToken !== lease.fencingToken) throw new Error('AI_INVALID_INPUT');
-      const observed = await adapters.registrations.register(structuredClone(command), existingOnly);
+      const observed = await adapters.registrations.register(structuredClone(command), existingOnly).catch(error => {
+        // Stop original-only recovery at the unregistered suffix. The runner
+        // keeps its observed prefix and must not finish the task or dispatch.
+        if (existingOnly && error instanceof AiStepOriginalRegistrationUnavailableError) {
+          throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+        }
+        throw error;
+      });
       let result: typeof observed;
       const unknown = () => new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'step registration acknowledgement requires original receipt');
       try { result = structuredClone(observed); } catch { throw unknown(); }
@@ -129,7 +136,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
     async pause(step, lease, pause, resultRef) {
       if (pause !== 'confirmation') return transition('pause', step, lease, resultRef, undefined, pause);
       const ref = structuredClone(step), held = structuredClone(lease);
-      if (!resultRef || ref.plan.operation !== 'idempotent' || !['rental.order.commit', 'tenant.notifications.commit'].includes(ref.plan.toolCode)
+      if (!resultRef || ref.plan.operation !== 'idempotent' || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(ref.plan.toolCode)
         || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION || typeof adapters.confirmation?.pause !== 'function') throw new Error('AI_RESOURCE_UNAVAILABLE');
       const value = snapshotCommit(await adapters.confirmation.pause({ taskId: held.taskId, stepId: ref.registered.stepId,
         expectedTaskRevision: ref.registered.taskRevision, expectedStepRevision: ref.registered.stepRevision,

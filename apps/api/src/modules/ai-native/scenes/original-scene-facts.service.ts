@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';
+import { AiQuotePreparedSourcesChanged } from '../tools/quote-business-preparation.service';
 import type { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
@@ -7,6 +8,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiOrderExtensionPreviewInputSchema } from '../tools/order-extension-preview.service';
+import { AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION, AI_ORDER_EXPLANATION_SOURCE_FIELDS_V2 } from '@rental-os/shared';
 
 const fields = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
 const citationSchema = originalRequestReferenceSchema.extend({ version: z.string().min(1).max(191),
@@ -20,6 +22,9 @@ const quoteConfirmation = originalRequestReferenceSchema.extend({
   confirmQuote: z.literal(true)
 }).strict();
 
+/** Original-request business reads and R1 quote preparation. Sources retain the
+ * freshly resolved server principal; independent final reads cannot bind earlier
+ * material from another actor. No order approval or alternate Core path is added. */
 export class AiOriginalSceneFactsService {
   constructor(private readonly requests: PrismaOriginalRequestRepository, private readonly tools: ReturnType<typeof composeAiAuthorizedBusinessTools>) {}
   /** Explicit human-requested preview for the original next-step question.
@@ -88,7 +93,9 @@ export class AiOriginalSceneFactsService {
     const orderId = original.request.input.orderId, reader = this.tools.order(orderId);
     const before = await reader.read(grant.context);
     if (before.order.updatedAt !== command.expectedOrderVersion) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    const handoff = await this.tools.orderManualHandoff(orderId, { code: command.code });
+    // The current Guard must retain this original request's server binding
+    // through the nested read, not merely match again after it has returned.
+    const handoff = await this.tools.orderManualHandoff(orderId, { code: command.code }, grant.context);
     const latest = await reader.read(grant.context);
     if (requestFingerprint(before.order) !== requestFingerprint(latest.order)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     const after = await this.requests.read(ref), current = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
@@ -110,11 +117,13 @@ export class AiOriginalSceneFactsService {
     const original = await this.requests.readHistorical(ref);
     if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (original.receipt.state === 'revoked' || !original.request.input.sections.includes(command.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const section = freezeOriginalInput(structuredClone(await this.tools.openingSection({ key: command.key })));
+    const section = freezeOriginalInput(structuredClone(await this.tools.openingSection({ key: command.key }, original.context)));
     const after = await this.requests.readHistorical(ref);
     if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    return freezeOriginalInput({ original: original.receipt, section, execution: 'not_attempted' as const,
+    // A read may cross the original deadline. Publish the closing receipt,
+    // without extending expiry or replacing historical read rights with execution.
+    return freezeOriginalInput({ original: after.receipt, section, execution: 'not_attempted' as const,
       proposalPersistence: 'unavailable_no_formal_section_proposal_port' as const });
   }
   async reopenOrderCitation(value: unknown) {
@@ -123,14 +132,37 @@ export class AiOriginalSceneFactsService {
     const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
     const original = await this.requests.readHistorical(ref);
     if (original.request.sceneCode !== 'order_explanation' || original.context.scope.kind !== 'workspace') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (original.receipt.state === 'revoked') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const result = await this.tools.orderExplanationPreparation(original.request.input.orderId).reopenCitation({
       question: original.request.input.question, resourceType: 'order', resourceId: original.request.input.orderId,
       scope: original.context.scope, version: command.version, field: command.field
-    });
+    }, original.context);
     const after = await this.requests.readHistorical(ref);
-    if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+    if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    return freezeOriginalInput({ original: original.receipt, source: result, execution: 'not_attempted' as const });
+    return freezeOriginalInput({ original: after.receipt, source: result, execution: 'not_attempted' as const });
+  }
+  /** New source version remains tied to the original owner/request. Parent
+   * order, scope and question are reconstructed here, never client authority. */
+  async reopenOrderCitationV2(value: unknown) {
+    const parsed = originalRequestReferenceSchema.extend({
+      materialVersion: z.literal(AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION),
+      version: z.string().min(1).max(191), field: z.enum(AI_ORDER_EXPLANATION_SOURCE_FIELDS_V2)
+    }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
+    const original = await this.requests.readHistorical(ref);
+    if (original.request.sceneCode !== 'order_explanation' || original.context.scope.kind !== 'workspace') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (original.receipt.state === 'revoked') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const result = await this.tools.orderExplanationPreparation(original.request.input.orderId).reopenCitationV2({
+      materialVersion: command.materialVersion, question: original.request.input.question,
+      resourceType: 'order', resourceId: original.request.input.orderId, scope: original.context.scope,
+      version: command.version, field: command.field
+    }, original.context);
+    const after = await this.requests.readHistorical(ref);
+    if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: after.receipt, source: result, execution: 'not_attempted' as const });
   }
   async prepareOpeningSections(value: unknown) {
     const parsed = sectionsSchema.safeParse(value);
@@ -141,7 +173,7 @@ export class AiOriginalSceneFactsService {
     const selected = new Set(original.request.input.sections);
     if (command.sections.some(section => !selected.has(section.key))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
-    const result = await this.tools.openingSectionDifferences({ sections: command.sections });
+    const result = await this.tools.openingSectionDifferences({ sections: command.sections }, before.context);
     const snapshot = freezeOriginalInput(result);
     const after = await this.requests.read(ref);
     const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
@@ -156,20 +188,14 @@ export class AiOriginalSceneFactsService {
     const ref = freezeOriginalInput(parsed.data), original = await this.requests.read(ref);
     if (original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const beforeGrant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
-    const facts = await this.tools.quote.businessPreparation.prepareUnified(original.request.input.candidate);
-    const sources = await this.tools.quote.businessPreparation.inputSources(original.request.input.candidate);
-    // Preparation and provenance are sequential authorized reads. Never join
-    // ready facts with a now-missing selection, or silently replace the request
-    // with different parameters/configuration discovered by the second read.
-    const factBasis = facts as unknown as Record<string, unknown>, sourceBasis = sources as unknown as Record<string, unknown>;
-    if (factBasis.request !== undefined) {
-      if (sourceBasis.status !== 'prepared_input_sources' || factBasis.selectionRevision !== sourceBasis.selectionRevision
-        || requestFingerprint(factBasis.request) !== requestFingerprint(sourceBasis.request)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    } else {
-      const basis = (row: Record<string, unknown>) => ({ status: row.status, selectionRevision: row.selectionRevision,
-        missingFields: row.missingFields, ambiguousFields: row.ambiguousFields });
-      if (requestFingerprint(basis(factBasis)) !== requestFingerprint(basis(sourceBasis))) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    }
+    const { preparation: facts, sources } = await this.tools.quote.businessPreparation.reviewParameters(
+      original.request.input.candidate, beforeGrant.context).catch(error => {
+      // Preserve this original endpoint's observation-conflict response only.
+      // Generic configuration/dependency and permission failures remain fatal;
+      // elapsed-only blocked material is handled by the shared original pair.
+      if (error instanceof AiQuotePreparedSourcesChanged) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      throw error;
+    });
     const after = await this.requests.read(ref);
     const afterGrant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
     if (originalIdentityHash(beforeGrant.context) !== originalIdentityHash(afterGrant.context)
@@ -195,20 +221,38 @@ export class AiOriginalSceneFactsService {
     const currentOwner = await this.requests.readHistorical(command.current);
     const identity = originalIdentityHash(previousOwner.context);
     if (identity !== originalIdentityHash(currentOwner.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const previous = await this.readQuoteReceipt(command.previous), current = await this.readQuoteReceipt(command.current);
-    const stable = (value: typeof previous) => requestFingerprint({ original: value.original,
-      scope: value.result.scope, status: value.result.status, quote: value.result.quote,
-      quotePersistence: value.result.quotePersistence });
-    if (stable(previous) !== stable(await this.readQuoteReceipt(command.previous))
-      || stable(current) !== stable(await this.readQuoteReceipt(command.current))) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const previousBefore = await this.readQuoteReceipt(command.previous), currentBefore = await this.readQuoteReceipt(command.current);
+    const stable = (value: typeof previousBefore) => requestFingerprint({
+      // Stored/expired are derived from the trusted read clock, not revisions.
+      // Keep the actual expiry fields, revocation and every saved quote field
+      // binding; an unknown/failed operation must never become a saved quote.
+      original: { ...value.original, state: value.original.state === 'stored' || value.original.state === 'expired'
+        ? 'stored_or_expired' : value.original.state },
+      scope: value.result.scope, status: value.result.quote && value.result.quotePersistence === 'saved'
+        && (value.result.status === 'quoted' || value.result.status === 'expired') ? 'saved_quote' : value.result.status,
+      quote: value.result.quote, quotePersistence: value.result.quotePersistence });
+    let previous = await this.readQuoteReceipt(command.previous), current = await this.readQuoteReceipt(command.current);
+    if (stable(previousBefore) !== stable(previous) || stable(currentBefore) !== stable(current))
+      throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    // Return closing observations so expiry during the source waits is visible;
+    // historical comparison does not renew the input/quote or old confirmation.
     for (const [reference, original] of [[command.previous, previousOwner], [command.current, currentOwner]] as const) {
       const latest = await this.requests.readHistorical(reference);
       if (originalIdentityHash(latest.context) !== identity || latest.receipt.contentHash !== original.receipt.contentHash) {
         throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       }
+      // The final owner checks may also cross expiry. Refresh only the checked
+      // original receipt, not the earlier Core quote observation or its validity.
+      // Same-reference comparisons use the last observation for both sides.
+      if (reference.inputRef === command.previous.inputRef) previous = { ...previous, original: latest.receipt };
+      if (reference.inputRef === command.current.inputRef) current = { ...current, original: latest.receipt };
     }
+    // An older valid display may omit currency. Preserve its exact receipt,
+    // but the closed comparison cannot label absent monetary evidence unchanged
+    // or borrow today's settings. Use the existing unavailable response instead.
     const available = (result: typeof previous.result) => Boolean(result.quote)
-      && (result.status === 'quoted' || result.status === 'expired') && result.quotePersistence === 'saved';
+      && (result.status === 'quoted' || result.status === 'expired') && result.quotePersistence === 'saved'
+      && /^[A-Z]{3}$/u.test(result.quote?.currency ?? '');
     if (!available(previous.result) || !available(current.result)) return freezeOriginalInput({
       status: 'unavailable_original_quote' as const, previous, current, comparison: null,
       retryable: false as const, nextAction: 'read_original_quote_receipt' as const,
@@ -235,7 +279,9 @@ export class AiOriginalSceneFactsService {
     const after = await this.requests.readHistorical(ref);
     if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
       || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    return freezeOriginalInput({ original: original.receipt, result, observation: 'original_operation_only' as const,
+    // History may cross expiry during Core recovery; report the closing
+    // receipt without renewing this input or its old quote confirmation.
+    return freezeOriginalInput({ original: after.receipt, result, observation: 'original_operation_only' as const,
       selection: 'historical_not_current_confirmation' as const,
       orderApproval: 'not_granted' as const, inventoryReservation: 'not_attempted' as const });
   }
@@ -247,7 +293,7 @@ export class AiOriginalSceneFactsService {
     const original = await this.requests.read(ref);
     if (original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
-    const selected = await this.tools.quote.candidates.prepare(original.request.input.candidate);
+    const selected = await this.tools.quote.candidates.prepare(original.request.input.candidate, before.context);
     if (selected.status !== 'needs_confirmation') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     if (selected.selectionRevision !== command.selectionRevision
       || requestFingerprint(selected.request) !== command.inputFingerprint) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');

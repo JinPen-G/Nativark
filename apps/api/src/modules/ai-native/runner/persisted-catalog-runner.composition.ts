@@ -12,7 +12,6 @@ import { AiOrderReadFactsService } from '../order-read-facts.service';
 import { AiMembershipCandidateReadFactsService, aiMembershipCandidateReadInputSchema, type AiMembershipCandidateReadPort } from '../membership-candidate-read-facts.service';
 import { AiOpeningReadFactsService, AiRiskReadFactsService, aiOpeningReadInputSchema, aiRiskReadInputSchema } from '../tools/diagnostic-read-facts.service';
 import { AiDiagnosticRouteAuthority } from '../tools/diagnostic-route.authority';
-import { AiGuardedQuoteCoreContextSource } from '../tools/quote-route.composition';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -25,7 +24,7 @@ import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRegisteredExecutor } from './prisma-task-measured-effects';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
 import type { AiTaskApplicationHost } from './prisma-task-application';
-import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import { PrismaTaskPlanPolicyRepository } from './prisma-task-plan-policy.repository';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -40,12 +39,12 @@ type ReadonlyRunnerDependencies = {
   db: PrismaClient;
   authorization: Omit<PersistedTaskAuthorizationDependencies, 'db' | 'clock'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
-  core: Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
+  core: Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'readAvailability' | 'readOrderFacts'>>;
   memberships?: AiMembershipCandidateReadPort;
-  /** Same current Core configuration producer as the original diagnostic
-   * composition, supplied by the server host rather than a task payload. */
-  diagnosticCore?: ConstructorParameters<typeof AiGuardedQuoteCoreContextSource>[0];
-  business?: Pick<RentalBusinessService, 'tenantReadiness'>;
+  /** Minimal report metadata producer, not a cached quote context. The actual
+   * read still runs inside the current task identity and original report Guard. */
+  diagnosticCore?: Pick<RentalCoreService, 'readReportConfiguration'>;
+  business?: Pick<RentalBusinessService, 'readTenantReadiness'>;
   reports?: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   /** Optional server-owned original request check. It is an additional
    * constraint, never a replacement for Task or business authorization. */
@@ -57,13 +56,13 @@ type ReadonlyRunnerDependencies = {
 export function composePersistedCatalogTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'listItemGroupsPage'> }) {
   return composeReadonly(input, 'rental.catalog.search');
 }
-export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'availability'> }) {
+export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'readAvailability'> }) {
   return composeReadonly(input, 'rental.availability.check');
 }
 /** Explicit server-selected read step. A model candidate alone neither calls
  * this composition nor publishes its input. Existing scene policy, lease and
  * original order Guard remain mandatory; no finance or write tools are added. */
-export function composePersistedOrderFactsTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'getOrder'> }) {
+export function composePersistedOrderFactsTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'readOrderFacts'> }) {
   return composeReadonly(input, 'rental.order.explain');
 }
 /** Current guarded, bounded member candidates only. Publishing an input or
@@ -72,7 +71,7 @@ export function composePersistedMembershipCandidateTaskRunner(input: ReadonlyRun
   return composeReadonly(input, 'membership.customer.resolve');
 }
 export function composePersistedOpeningTaskRunner(input: ReadonlyRunnerDependencies & {
-  diagnosticCore: NonNullable<ReadonlyRunnerDependencies['diagnosticCore']>; business: NonNullable<ReadonlyRunnerDependencies['business']>
+  business: NonNullable<ReadonlyRunnerDependencies['business']>
 }) {
   return composeReadonly(input, 'tenant.opening.diagnose');
 }
@@ -156,6 +155,9 @@ export function composePersistedReadonlyBusinessTaskHost(input: ReadonlyRunnerDe
     await root.evidence.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision, steps,
       limits: structuredClone(task.limits) }, lease);
   };
+  withAiTaskHeldPreparationDefinition(prepare, { taskId: task.taskId, runId: task.runId,
+    steps: task.steps.map(step => ({ registrationRef: step.registrationRef, toolCode: step.toolCode,
+      toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'readonly' as const })), limits: task.limits, bindingHash: requestFingerprint(task) });
   const application = root.createApplication({ ...input.host }, prepare);
   const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input.authorization,
     guard: input.guard, scene, tool: tools[0], tools }, input.wall);
@@ -222,19 +224,14 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
   if (typeof input?.guard?.canActivate !== 'function'
     || (tool === 'membership.customer.resolve'
       ? typeof input?.memberships?.listPersonalOptions !== 'function' || typeof input?.memberships?.listPersonalOptionsPage !== 'function'
-      : tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
-        ? !input?.diagnosticCore || (tool === 'tenant.opening.diagnose'
-          ? typeof input?.business?.tenantReadiness : typeof input?.reports?.getBoundedOperationReport) !== 'function'
+      : tool === 'tenant.opening.diagnose' ? typeof input?.business?.readTenantReadiness !== 'function'
+      : tool === 'operations.risks.list'
+        ? typeof input?.diagnosticCore?.readReportConfiguration !== 'function' || typeof input?.reports?.getBoundedOperationReport !== 'function'
         : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroupsPage
-        : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
+        : tool === 'rental.availability.check' ? typeof input?.core?.readAvailability : typeof input?.core?.readOrderFacts) !== 'function')) throw unavailable();
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, input.wall, tool);
   const route = new AiBusinessReadRouteAuthority(input.guard, input.authorization.credentials, input.wall);
-  // Validate the real configuration producer without reading configuration or
-  // granting a policy during inert construction.
-  if (tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list') {
-    new AiGuardedQuoteCoreContextSource(input.diagnosticCore!, route);
-  }
   const commands: AiTaskRunnerRepositoryCommandFactory = {
     async register(plan, lease) {
       const task = await authorization.tasks.readMetadata(lease.taskId);
@@ -260,15 +257,12 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             if (signal.aborted || identity(context) !== identity(stored.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             return read(context);
           }) };
-        const diagnosticContext = tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
-          ? new AiGuardedQuoteCoreContextSource(input.diagnosticCore!, boundAuthority) : undefined;
         const result = tool === 'tenant.opening.diagnose'
-          ? await new AiOpeningReadFactsService(input.business!, diagnosticContext!,
+          ? await new AiOpeningReadFactsService(input.business!,
             new AiDiagnosticRouteAuthority(boundAuthority), input.wall).read(aiOpeningReadInputSchema.parse(stored.input), stored.context)
           : tool === 'operations.risks.list'
             ? await new AiRiskReadFactsService(input.reports!, {
-              category: async scope => (await diagnosticContext!.current(scope)).category.code,
-              currency: async scope => (await diagnosticContext!.current(scope)).settings.pricing.currency
+              current: scope => input.diagnosticCore!.readReportConfiguration(scope.tenantId)
             }, new AiDiagnosticRouteAuthority(boundAuthority), input.wall).read(aiRiskReadInputSchema.parse(stored.input), stored.context)
           : tool === 'membership.customer.resolve'
           ? await new AiMembershipCandidateReadFactsService(input.memberships!, boundAuthority, input.wall)
@@ -277,8 +271,8 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
           ? await new AiCatalogReadFactsService({ listItemGroupsPage: input.core.listItemGroupsPage!.bind(input.core) }, boundAuthority, input.wall)
             .read(aiCatalogReadInputSchema.parse(stored.input))
           : tool === 'rental.availability.check'
-            ? await new AiAvailabilityReadFactsService({ availability: input.core.availability!.bind(input.core) }, boundAuthority, input.wall).read(aiAvailabilityReadInputSchema.parse(stored.input))
-            : await new AiOrderReadFactsService({ getOrder: input.core.getOrder!.bind(input.core) },
+            ? await new AiAvailabilityReadFactsService({ readAvailability: input.core.readAvailability!.bind(input.core) }, boundAuthority, input.wall).read(aiAvailabilityReadInputSchema.parse(stored.input))
+            : await new AiOrderReadFactsService({ readOrderFacts: input.core.readOrderFacts!.bind(input.core) },
               new AiOrderRouteContextAuthority(input.guard, input.authorization.credentials,
                 aiPersistedOrderExplainInputSchema.parse(stored.input).input.orderId, input.wall), input.wall).read(stored.context);
         await input.revalidateOriginal?.();
@@ -292,7 +286,12 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
         if (signal.aborted || binding.clarifications?.length) throw unavailable();
         const stored = await source.readForExecution(binding);
         const result = await readFacts(stored, signal);
-        const current = await authorization.execution.authorize(binding.taskId);
+        // The read has already happened under execution admission and the Core
+        // Guard. Recheck current result-read authority, not a fresh dispatch
+        // grant: cancellation stops successors but cannot erase this receipt.
+        // Revoked identity/read permissions and the original lease still fail
+        // closed at this check and the unchanged evidence persistence boundary.
+        const current = await authorization.authority.resolve(binding.taskId, 'read_step_terminal');
         if (signal.aborted || identity(current) !== identity(stored.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const payload: Prisma.InputJsonObject = JSON.parse(JSON.stringify(result));
         return { kind: 'succeeded', payload };

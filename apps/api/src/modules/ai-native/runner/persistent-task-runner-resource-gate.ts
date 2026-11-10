@@ -1,5 +1,6 @@
-import type { AiTaskExecutionBudgetPort, AiTaskExecutionChargeRequest, AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
-import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
+import type { AiTaskExecutionBudgetPort, AiTaskExecutionChargeRequest, AiTaskExecutionMutation, AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
+import { AiTaskExecutionBudgetError, AiTaskExecutionPreReservationLimitError } from '../task-execution-budget.ports';
+import { AiTaskRunnerPreReservationLimitError } from './ai-task-runner.service';
 import type { AiTaskRunnerLease, AiTaskRunnerResourcePort, AiTaskRunnerResourceTicket, AiTaskRunnerStepRef } from './ai-task-runner.ports';
 
 /** Only a server composition may implement this source. It reads persisted
@@ -14,8 +15,48 @@ export interface AiTaskRunnerResourceEvidenceSource {
   recoverTicket?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, budget?: AiTaskExecutionBudgetPort): Promise<AiTaskRunnerResourceTicket>;
 }
 
+function freshReservation(receipt: AiTaskExecutionMutation | null | undefined, request: AiTaskExecutionChargeRequest) {
+  return receipt?.replayed === false && receipt.charge?.chargeId === request.chargeId
+    && receipt.charge.resource === request.resource && receipt.charge.amount === request.amount
+    && receipt.charge.status === 'reserved' && receipt.charge.actualAmount === null;
+}
+
 export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePort {
-  constructor(private readonly budget: AiTaskExecutionBudgetPort, private readonly source: AiTaskRunnerResourceEvidenceSource) {
+  readonly preparation?: import('./task-run-preparation.ports').AiTaskPreparationResources;
+  readonly overhead?: import('./ai-task-runner.ports').AiTaskRunnerOverheadPort;
+  constructor(private readonly budget: AiTaskExecutionBudgetPort, private readonly source: AiTaskRunnerResourceEvidenceSource,
+    preparation?: import('./prisma-task-run-preparation').PrismaTaskRunPreparation,
+    overhead?: import('./prisma-task-run-overhead').PrismaTaskRunOverhead) {
+    if (overhead) this.overhead = {
+      includesEffectInterval: true,
+      opensBudget: true,
+      rotate: async (ticket, lease, segment, maximumMs, retainStepAllowance) => {
+        try { return await overhead.rotate(ticket, lease, segment, maximumMs, retainStepAllowance, budget); }
+        catch (error) {
+          if (error instanceof AiTaskExecutionBudgetError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerPreReservationLimitError();
+          throw error;
+        }
+      },
+      remaining: (ticket, lease) => overhead.remaining(ticket, lease),
+      begin: async (lease, segment, maximumMs, retainStepAllowance, recovery, pendingStart) => {
+        try { return await overhead.begin(lease, segment, maximumMs, retainStepAllowance, recovery, budget, pendingStart); }
+        catch (error) {
+          if (error instanceof AiTaskExecutionBudgetError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerPreReservationLimitError();
+          throw error;
+        }
+      },
+      complete: (ticket, lease) => overhead.complete(ticket, lease, budget),
+      completeAfterRelease: (ticket, lease, receipt) => overhead.completeAfterRelease(ticket, lease, receipt, budget),
+      abandon: (ticket, lease) => overhead.abandon(ticket, lease, budget)
+    };
+    if (preparation) this.preparation = {
+      begin: (lease, definition, maximumMs, signal) => preparation.begin(lease, definition, maximumMs, budget, signal),
+      complete: (ticket, lease) => preparation.complete(ticket, lease, budget),
+      ...(overhead ? { handoff: (ticket: import('./task-run-preparation.ports').AiTaskPreparationTicket,
+        lease: AiTaskRunnerLease, recovery: boolean, retainStepAllowance: boolean) =>
+        preparation.handoff(ticket, lease, overhead, budget, recovery, retainStepAllowance) } : {}),
+      abandon: (ticket, lease) => preparation.abandon(ticket, lease, budget)
+    };
     for (const name of ['initialize', 'load', 'reserve', 'record', 'reconcile', 'markUnknown'] as const) {
       if (typeof budget?.[name] !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     }
@@ -30,7 +71,15 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
 
   async reserve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     step = structuredClone(step); lease = structuredClone(lease);
-    const plan = structuredClone(await this.source.charges(step, lease));
+    let plan: Awaited<ReturnType<AiTaskRunnerResourceEvidenceSource['charges']>>;
+    try { plan = structuredClone(await this.source.charges(step, lease)); }
+    catch (error) {
+      // This is read-only preparation, before any charge or effect was attempted.
+      // Use the runner's existing terminal path for a known cumulative limit;
+      // never apply this mapping to reserve/dispatch/settlement uncertainty.
+      if (error instanceof AiTaskExecutionBudgetError && error.code === 'AI_RUN_LIMIT') throw new AiTaskRunnerPreReservationLimitError();
+      throw error;
+    }
     if (plan.deferredModelCall && (plan.modelCall !== true || typeof this.source.modelCharge !== 'function')) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     const required = plan?.modelCall === true && !plan.deferredModelCall ? ['steps', 'active_ms', 'output_bytes', 'calls'] : ['steps', 'active_ms', 'output_bytes'];
     if (typeof plan?.modelCall !== 'boolean' || !Array.isArray(plan.requests) || plan.requests.length !== required.length
@@ -44,17 +93,28 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
         || (request.resource === 'calls' && !request.target.gatewayInvocationId)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     }
     const chargeIds: string[] = [];
+    const reserveStep = required.length === 3 ? this.budget.reserveStep?.bind(this.budget) : undefined;
     try {
-      for (const request of plan.requests) {
-        // Include the attempted ID even when its commit acknowledgement is lost.
-        chargeIds.push(request.chargeId);
-        const receipt = await this.budget.reserve(request);
-        if (receipt.replayed) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      if (reserveStep) {
+        // Same original amounts and IDs, one fenced transaction. Until the whole
+        // acknowledgement is valid, these IDs are not an issued resource ticket.
+        chargeIds.push(...plan.requests.map(request => request.chargeId));
+        const receipts = await reserveStep(plan.requests);
+        if (!Array.isArray(receipts) || receipts.length !== chargeIds.length
+          || receipts.some((receipt, index) => !freshReservation(receipt, plan.requests[index]))) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      } else {
+        for (const request of plan.requests) {
+          const receipt = await this.budget.reserve(request);
+          if (!freshReservation(receipt, request)) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+          chargeIds.push(request.chargeId);
+        }
       }
     } catch (error) {
-      // No refund and no dispatch following a partial/uncertain reservation.
-      await this.markUnknown({ chargeIds }, lease).catch(() => {});
-      throw error;
+      if (reserveStep && error instanceof AiTaskExecutionPreReservationLimitError) throw new AiTaskRunnerPreReservationLimitError();
+      // No complete ticket was issued, even on the sequential compatibility path.
+      // Attempted IDs may name older rows; never mutate them or infer rollback.
+      // Preserve all occupancy and keep the Runner from releasing an uncertain Run.
+      throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
     }
     return { chargeIds, ...(plan.deferredModelCall ? { modelPending: true as const } : {}) };
   }
@@ -70,10 +130,16 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
       || request.lease.revision !== lease.revision || request.lease.fencingToken !== lease.fencingToken
       || request.target.kind !== 'step' || request.target.stepId !== step.registered.stepId || !request.target.gatewayInvocationId
       || ticket.chargeIds.includes(request.chargeId)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    const complete = { chargeIds: [...ticket.chargeIds, request.chargeId] };
+    // The base ticket is already issued. Only a fresh valid call acknowledgement
+    // may extend it; a attempted/replayed call ID is not cleanup authority.
+    const complete = { chargeIds: [...ticket.chargeIds] };
     try {
       if (signal?.aborted) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
-      if ((await this.budget.reserve(request)).replayed) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      let receipt: AiTaskExecutionMutation;
+      try { receipt = await this.budget.reserve(request); }
+      catch { throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN'); }
+      if (!freshReservation(receipt, request)) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      complete.chargeIds.push(request.chargeId);
       // Generation and count each reserve before any count POST. This stage
       // owns the original working deadline, not a fresh decorator allowance.
       const additional = await this.source.prepareModelDispatch?.(request, this.budget, signal) ?? [];
@@ -114,6 +180,9 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
       try { await this.budget.markUnknown({ taskId: lease.taskId, lease, chargeId, reason: 'runner_outcome_uncertain' }); }
       catch { failed = true; }
     }
-    if (failed) throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
+    // Some original charges may already be marked; loss of cleanup authority
+    // proves neither rollback nor a safe retry. Keep the caller on original
+    // reconciliation, rather than masking an uncertain outcome as storage failure.
+    if (failed) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
   }
 }

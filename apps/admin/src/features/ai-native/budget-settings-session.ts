@@ -140,6 +140,7 @@ export class BudgetSettingsSession {
     this.check(); if (this.request) throw Error('AI_BUSY');
     const controller = new AbortController(); this.request = controller;
     const old = structuredClone(this.state.policy); let attempted = false;
+    let originalMarker: string | null = null;
     this.publish({ busy: true, feedback: this.state.locked ? 'unknown' : 'idle', ...(change ? {} : { policy: null }) });
     try {
       if (!change) {
@@ -161,6 +162,7 @@ export class BudgetSettingsSession {
       if (this.storage.getItem(this.key) !== null) { this.publish({ locked: true }); throw Error('AI_RESULT_UNKNOWN'); }
       const marker = JSON.stringify({ ...this.selector, expectedRevision, operationKey, commandHash: fingerprint,
         operation: change === 'refresh' ? 'refreshConfiguration' : old.state === 'configured' ? 'change' : 'initialize' });
+      originalMarker = marker;
       this.storage.setItem(this.key, marker); if (this.storage.getItem(this.key) !== marker) throw Error('AI_RESOURCE_UNAVAILABLE');
       this.publish({ locked: true }); this.check(controller.signal); attempted = true;
       const raw = structuredClone(await (change === 'refresh'
@@ -182,10 +184,18 @@ export class BudgetSettingsSession {
         const denied = !this.current() || [401, 403].includes(e.response?.status ?? 0);
         const known = attempted && ['AI_INVALID_INPUT', 'AI_REVISION_CONFLICT'].includes(e.response?.data?.code ?? '');
         let cleared = false;
-        if (known) { try { this.storage?.removeItem(this.key); cleared = this.storage?.getItem(this.key) === null; } catch { /* remain locked */ } }
+        // A rejection proves only this submitted command did not commit. It
+        // cannot erase a different editor's unknown reference or a failed read.
+        if (known && originalMarker !== null) {
+          try {
+            if (this.storage?.getItem(this.key) === originalMarker) {
+              this.storage.removeItem(this.key); cleared = this.storage.getItem(this.key) === null;
+            }
+          } catch { /* retain the original/current reference and remain locked */ }
+        }
         const locked = known ? !cleared : attempted || this.state.locked;
         this.publish({ locked, policy: denied || attempted ? null : this.state.policy,
-          feedback: denied ? 'denied' : attempted && !known ? 'unknown' : e.response?.data?.code === 'AI_REVISION_CONFLICT' ? 'conflict'
+          feedback: denied ? 'denied' : attempted && (!known || !cleared) ? 'unknown' : e.response?.data?.code === 'AI_REVISION_CONFLICT' ? 'conflict'
             : e.message === 'AI_INVALID_INPUT' || e.response?.data?.code === 'AI_INVALID_INPUT' ? 'invalid' : 'unavailable' });
       }
       throw error;

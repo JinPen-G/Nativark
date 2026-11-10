@@ -13,7 +13,7 @@ const { AI_SCENE_REQUEST_DRAFT_VERSION } = require('../../../packages/shared/src
 const { AI_QUOTE_SELECTION_DRAFT_VERSION } = require('../../../packages/shared/src/ai-quote-selection-draft');
 const { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
+exports.selectedOrderHarness = async ({ initializeOnly = false, runPreparationEvidence = false } = {}) => {
   const h = await persistedApprovedOrderHarness(), { state } = h;
   state.user.permissions.push('system:params:manage');
   for (const table of ['aiTask', 'aiRun', 'aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
@@ -22,6 +22,9 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
     'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
     'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiDataErasure', 'aiGatewayInvocation', 'aiUsageReservation',
     'aiBudgetReservation', 'aiInvocationAdmission']) state.records[table] = [];
+  // Only new runner ACK cases opt into the real preparation table; absence
+  // stays unavailable in older fixtures instead of being silently successful.
+  if (runPreparationEvidence) state.records.aiTaskRunPreparation = [];
   for (const row of state.records.aiBudgetPolicy) {
     row.sceneCode = 'quote_clarification'; row.settingsJson.sceneCode = 'quote_clarification'; row.settingsJson.allowedScenes = ['quote_clarification'];
   }
@@ -66,6 +69,8 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
         const row = { ...(model.startsWith('aiTaskExecutionPhase') ? {} : { revision: 1, createdAt: h.dependencies.clock(), updatedAt: h.dependencies.clock() }), ...clone(args.data) };
         if (model === 'aiTask') Object.assign(row, { scope: clone(rows('aiScope').find(s => s.id === row.scopeId)), archivedAt: null, cancelRequestedAt: null, resultRef: null });
         if (model === 'aiRun') Object.assign(row, { leaseOwnerId: null, leaseExpiresAt: null });
+        if (model === 'aiTaskRunPreparation') Object.assign(row, { chargeId: null, requestFingerprint: null,
+          completedAt: null, activeMs: null, prepared: false, planHash: null, measurementHash: null, ...clone(args.data) });
         if (model === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const resource of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${resource}`] ??= 0n;
         if (model === 'aiTaskExecutionCharge') Object.assign(row, { gatewayInvocationId: null, actualAmount: null, evidenceRef: null, outcomeFingerprint: null, ...row });
         if (model === 'rentalOrderIdempotencyRecord') Object.assign(row, { id: 'idempotency-a', status: 'succeeded' });
@@ -152,7 +157,7 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
         source: 'persisted_workspace_configuration', configurationVersion: '0'.repeat(64) };
     },
     listLocations: () => [], listOperators: () => [], resolveWorkspaceId: () => 'workspace-a',
-    availability: async (_tenantId, request) => ({ available: false, locationId: request.locationId,
+    readAvailability: async (_tenantId, request) => ({ available: false, locationId: request.locationId,
       startAt: request.startAt, endAt: request.endAt,
       lines: request.lines.map(line => ({ itemGroupId: line.itemGroupId, itemGroupCode: line.itemGroupId,
         itemGroupName: line.itemGroupId, inventoryMode: 'quantity', requestedQuantity: line.quantity,
@@ -208,7 +213,7 @@ exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
     sceneDependencies: { ...dependencies, originals }, limits };
 };
 
-exports.selectedReprepareHarness = async () => {
+exports.selectedReprepareHarness = async ({ exposeAcknowledgedLease = false } = {}) => {
   const h = await exports.selectedOrderHarness(), { state } = h;
   const { composeFormalApprovedOrderReprepareServices } = require('../../../apps/api/src/modules/ai-native/approval-execution/formal-approved-order-reprepare.composition');
   Object.assign(h.sceneDependencies.core, {
@@ -256,5 +261,8 @@ exports.selectedReprepareHarness = async () => {
     original: h.proposal, reason: 'rejected', replacement: { taskId, runId: task.runId, stepId: step.id, actionId: step.actionId,
       inputRef: published.inputRef, fingerprint: selected.receipt.inputHash, originalInputRef: original.inputRef,
       quoteSelectionRef: selection.selectionId, planHash: plan.planHash } };
-  return { ...h, app, dependencies, configuration, replacementSelection: selection, command };
+  return { ...h, app, dependencies, configuration, replacementSelection: selection, command,
+    // Only the new full reprepare consumer exposes its already acknowledged
+    // claim + registration CAS. A later database lease read grants nothing.
+    ...(exposeAcknowledgedLease ? { replacementLease: { ...held, revision: registered.runRevision } } : {}) };
 };

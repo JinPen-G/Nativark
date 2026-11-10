@@ -24,6 +24,7 @@ import { InputCountTokensService, type CountTokensFrozenInputSource } from './in
 import { PrismaCountTokensReceipts, countTokensReceiptDocumentHash, type CountTokensReceiptDb } from './input-count-tokens.receipt';
 import { countTokensSupport } from './count-tokens.protocol';
 import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
+import type { NativeToolResultResolver } from '../model-input/native-tool-result.ports';
 
 /** Trusted source behind publishInputBound: reads the persisted provider count
  * receipt and binds it to the exact invocation/price the caller presents. The
@@ -81,6 +82,8 @@ export interface InputCountTokensCompositionDependencies extends PersistedTaskAu
   /** Must match the original task gateway adapter registration so a counted
    * tool schema is the schema the dispatch will send. */
   policyOptions?: ChatProtocolOptions;
+  /** Same server-composed original Task/Core reader used for native generation. */
+  nativeToolResults?: NativeToolResultResolver;
   /** Management entries only. Omitted for task-only compositions: the
    * in-task counting entry derives the scene from the persisted invocation. */
   sceneCode?: string;
@@ -106,6 +109,7 @@ export function composeInputCountTokensService(input: InputCountTokensCompositio
     transport: input.transport ?? (input.resolvers ? createNativeModelEgressTransport() : undefined),
     policyOptions: input.policyOptions ?? (input.frozen ? { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } } : undefined),
     sceneCode: input.sceneCode, countingPriceVersion: input.countingPriceVersion,
+    ...(input.nativeToolResults ? { nativeToolResults: input.nativeToolResults } : {}),
     ...(input.taskExecution ? { taskExecution: input.taskExecution } : {}),
     ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}), clock });
   const pricingEvidence = new CountTokensGatewayPricingEvidenceSource(input.db, input.priceDelegate);

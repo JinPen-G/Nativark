@@ -8,6 +8,7 @@ import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authorit
 import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
 import { composeAuthorizedPersistedTextProbeWorkflow, type AuthorizedTextProbeWorkflowDependencies } from './text-capability-probe.composition';
 import { textProbeCommandSchema, type TextProbeCapability } from './text-capability-probe';
+import { AI_CAPABILITY_PROBE_KINDS_DRAFT } from '@rental-os/shared';
 import { TextProbeOriginalRequestUnknownError } from './prisma-text-probe-original-request.repository';
 import { textProbeTaskCreationKey } from './text-capability-probe-task.composition';
 import { waitForTaskApplicationDependency, type AiTaskApplicationStartResult } from './runner/prisma-task-application';
@@ -57,7 +58,7 @@ export class TextCapabilityProbeRequestFactory {
       || [dependencies.auth?.resolveAccessContext, dependencies.guard?.canActivate, dependencies.db?.$transaction]
         .some(method => typeof method !== 'function')) throw unavailable();
     const capabilities = [...(dependencies.probeCapabilities ?? [dependencies.probeCapability ?? 'text'])];
-    if (!capabilities.length || capabilities.length > 6 || new Set(capabilities).size !== capabilities.length
+    if (!capabilities.length || capabilities.length > AI_CAPABILITY_PROBE_KINDS_DRAFT.length || new Set(capabilities).size !== capabilities.length
       || capabilities.some(value => !textProbeCommandSchema.shape.capability.unwrap().safeParse(value).success)
       || !capabilities.includes(dependencies.probeCapability ?? 'text')) throw unavailable();
     const policies = structuredClone(dependencies.taskActionPolicies ?? []);
@@ -254,15 +255,17 @@ export class TextCapabilityProbeRequestFactory {
           observation: history.observation ? { receiptId: history.observation.receiptId, methodVersion: history.observation.methodVersion,
             mode: history.observation.mode, checkedAt: history.observation.checkedAt, expiresAt: history.observation.expiresAt,
             validity: history.observation.validity, matched: history.observation.matched,
-            reportedUsage: history.observation.reportedUsage ? { ...history.observation.reportedUsage } : null } : null };
+            // Public history retains the frozen counter-only shape; cache
+            // categories remain in the original server accounting evidence.
+            reportedUsage: history.observation.reportedUsage ? { inputTokens: history.observation.reportedUsage.inputTokens,
+              outputTokens: history.observation.reportedUsage.outputTokens } : null } : null };
       }),
       preflight: value => run(requestSchema, value, async ({ requestKey }) => {
+        const capability = selected(await root.workflow.readOriginalCapability(requestKey));
         const result = await root.workflow.preflightOriginal(await originalKey(requestKey));
-        return { requestKey, capability: result.required.includes('tools') ? 'tools' as const
-          : result.required.includes('structured_output') ? 'structured_output' as const
-          : result.required.includes('vision') ? 'vision' as const
-          : result.required.includes('audio') ? 'audio' as const
-          : result.required.includes('streaming') ? 'streaming' as const : 'text' as const, allowed: result.allowed,
+        // Report the same frozen original selection, not a text fallback inferred
+        // from a list of currently implemented protocol requirements.
+        return { requestKey, capability, allowed: result.allowed,
           missing: result.missing.length > 0, stale: result.stale.length > 0,
           semantics: 'current_preflight_not_dispatch_permission' as const };
       }),

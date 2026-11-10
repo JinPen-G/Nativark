@@ -2,6 +2,7 @@
  * only the original turn key/hash before sending; the body stays in memory.
  * Reload/absence/abort can only reconcile that key, never reconstruct or resend. */
 import { AI_CONVERSATION_DRAFT_VERSION, validateAiConversationAdmissionDraft, validateAiConversationObservationDraft, validateAiConversationOperationDraft,
+  validateAiSceneQuoteCandidateDraft, type AiSceneQuoteCandidate,
   type AiConversationReferenceDraft,
   type AiConversationObservationDraft, type AiConversationTurnAdmissionDraft, type AiConversationTurnReferenceDraft,
   type AiConversationAdmissionResponseDraft } from '@rental-os/shared';
@@ -9,13 +10,14 @@ import { commandHash } from './budget-settings-session';
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
 type Rotation = { operationKey: string; turnId: string; originalInputRef: string; expectedRevision: number };
-type Capability = 'order_explanation' | 'opening_diagnosis';
+type Capability = 'order_explanation' | 'opening_diagnosis' | 'quote_clarification';
 type Marker = AiConversationTurnReferenceDraft & { expectedRevision: number; requestHash: string; capabilityCode: Capability; rotation?: Rotation };
 type Ports = { admit(command: AiConversationTurnAdmissionDraft, signal: AbortSignal): Promise<unknown>;
   admission(command: AiConversationTurnReferenceDraft, signal: AbortSignal): Promise<unknown> };
 export type ConversationAdmissionState = Readonly<{ busy: boolean; locked: boolean; prepared: boolean;
   reviewedInput: { orderId: string; question: 'status' | 'fees' | 'payments' | 'next_steps' } | null;
   reviewedSections: readonly string[] | null;
+  reviewedQuote: AiSceneQuoteCandidate | null;
   rotationPending: boolean;
   observation: AiConversationAdmissionResponseDraft | null; feedback: 'idle' | 'prepared' | 'admitted' | 'unknown' | 'unavailable' }>;
 const JOURNAL_MAX_LENGTH = 2048;
@@ -35,7 +37,7 @@ function marker(value: unknown, conversationId: string): value is Marker {
   return row.draftVersion === AI_CONVERSATION_DRAFT_VERSION && row.conversationId === conversationId
     && id(row.admissionKey) && row.admissionKey.length <= 128 && Number.isSafeInteger(row.expectedRevision)
     && (row.expectedRevision as number) >= 1 && (row.expectedRevision as number) < 4294967294
-    && typeof row.requestHash === 'string' && /^[a-f0-9]{64}$/u.test(row.requestHash) && ['order_explanation', 'opening_diagnosis'].includes(row.capabilityCode as string);
+    && typeof row.requestHash === 'string' && /^[a-f0-9]{64}$/u.test(row.requestHash) && ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(row.capabilityCode as string);
 }
 export class ConversationAdmissionSession {
   private active = true; private request: AbortController | null = null; private listeners = new Set<() => void>();
@@ -46,12 +48,12 @@ export class ConversationAdmissionSession {
     try { const raw = storage?.getItem(key); locked = !storage || raw !== null;
       if (raw && raw.length <= JOURNAL_MAX_LENGTH) { const parsed: unknown = JSON.parse(raw); rotationPending = marker(parsed, conversationId) && !!parsed.rotation; }
     } catch { /* unreadable journal cannot authorize sends */ }
-    this.state = Object.freeze({ busy: false, locked, prepared: false, reviewedInput: null, reviewedSections: null, rotationPending, observation: null, feedback: locked ? 'unknown' : 'idle' });
+    this.state = Object.freeze({ busy: false, locked, prepared: false, reviewedInput: null, reviewedSections: null, reviewedQuote: null, rotationPending, observation: null, feedback: locked ? 'unknown' : 'idle' });
   }
   snapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   activate() { this.active = true; }
-  retract() { this.command = null; this.request?.abort(); this.publish({ prepared: false, reviewedInput: null, reviewedSections: null, observation: null, feedback: this.state.locked ? 'unknown' : 'idle' }); }
+  retract() { this.command = null; this.request?.abort(); this.publish({ prepared: false, reviewedInput: null, reviewedSections: null, reviewedQuote: null, observation: null, feedback: this.state.locked ? 'unknown' : 'idle' }); }
   dispose() { this.active = false; this.command = null; this.request?.abort(); }
   private check(signal?: AbortSignal) { if (!this.active || !this.current() || signal?.aborted) throw Error('AI_SCOPE_CHANGED'); }
   private publish(patch: Partial<ConversationAdmissionState>) { this.state = Object.freeze({ ...this.state, ...patch }); for (const listener of this.listeners) listener(); }
@@ -59,14 +61,30 @@ export class ConversationAdmissionSession {
     this.prepareRequest(observation, { sceneCode: 'order_explanation', input: { orderId, question } });
   prepareOpening = (observation: AiConversationObservationDraft, sections: string[]) =>
     this.prepareRequest(observation, { sceneCode: 'opening_diagnosis', input: { sections: [...sections].sort() } });
+  prepareQuote = async (observation: AiConversationObservationDraft, candidate: AiSceneQuoteCandidate) => {
+    this.check();
+    let conditions: AiSceneQuoteCandidate;
+    // Preserve editing whitespace until explicit review, then use the same
+    // ordinary text normalization as the original candidate parser.
+    try {
+      conditions = structuredClone(candidate);
+      for (const key of ['customerName', 'start', 'end', 'locationName', 'returnLocationName'] as const) {
+        if (typeof conditions[key] === 'string') conditions[key] = conditions[key]!.trim() || undefined;
+      }
+      if (conditions.items) conditions.items = conditions.items.map(item => ({ ...item,
+        ...(item.productName === undefined ? {} : { productName: item.productName.trim() || undefined }) }));
+    } catch { throw Error('AI_INVALID_INPUT'); }
+    return this.prepareRequest(observation, { sceneCode: 'quote_clarification', input: { candidate: conditions } });
+  };
   private async prepareRequest(observation: AiConversationObservationDraft, request: AiConversationTurnAdmissionDraft['request']) {
     this.check(); if (this.request) throw Error('AI_BUSY');
     if (this.state.locked || !this.storage) throw Error('AI_RESULT_UNKNOWN');
     if (!validateAiConversationObservationDraft(observation, { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId: this.conversationId })
       || observation.capabilityCode !== request.sceneCode || observation.status !== 'active' || observation.currentTurn !== null
       || (request.sceneCode === 'order_explanation' ? !id(request.input.orderId) || !['status', 'fees', 'payments', 'next_steps'].includes(request.input.question)
-        : request.sceneCode !== 'opening_diagnosis' || !request.input.sections.length || request.input.sections.length > 9
-          || request.input.sections.some(section => !id(section)) || new Set(request.input.sections).size !== request.input.sections.length)) throw Error('AI_INVALID_INPUT');
+        : request.sceneCode === 'opening_diagnosis' ? !request.input.sections.length || request.input.sections.length > 9
+          || request.input.sections.some(section => !id(section)) || new Set(request.input.sections).size !== request.input.sections.length
+          : !validateAiSceneQuoteCandidateDraft(request.input.candidate))) throw Error('AI_INVALID_INPUT');
     const controller = new AbortController(); this.request = controller; this.publish({ busy: true, observation: null });
     try {
       if (this.storage.getItem(this.key) !== null) { this.publish({ locked: true }); throw Error('AI_RESULT_UNKNOWN'); }
@@ -81,7 +99,8 @@ export class ConversationAdmissionSession {
       this.storage.setItem(this.key, saved); if (this.storage.getItem(this.key) !== saved) throw Error('AI_RESOURCE_UNAVAILABLE');
       this.command = structuredClone(command); this.publish({ prepared: true,
         reviewedInput: request.sceneCode === 'order_explanation' ? structuredClone(request.input) : null,
-        reviewedSections: request.sceneCode === 'opening_diagnosis' ? [...request.input.sections] : null, feedback: 'prepared' });
+        reviewedSections: request.sceneCode === 'opening_diagnosis' ? [...request.input.sections] : null,
+        reviewedQuote: request.sceneCode === 'quote_clarification' ? structuredClone(request.input.candidate) : null, feedback: 'prepared' });
     } catch (failure) { if (this.active) this.publish({ prepared: false, feedback: this.state.locked ? 'unknown' : 'unavailable' }); throw failure; }
     finally { if (this.request === controller) this.request = null; if (this.active) this.publish({ busy: false }); }
   };
@@ -141,12 +160,12 @@ export class ConversationAdmissionSession {
       // journal is cleared. An interruption at either write resumes read-only.
       this.storage.setItem(this.key, serialized);
       if (this.storage.getItem(this.key) !== serialized) throw Error('AI_RESULT_UNKNOWN');
-      this.publish({ locked: true, rotationPending: true, prepared: false, reviewedInput: null, reviewedSections: null });
+      this.publish({ locked: true, rotationPending: true, prepared: false, reviewedInput: null, reviewedSections: null, reviewedQuote: null });
       this.check(controller.signal); acknowledge(); this.check(controller.signal);
       if (this.storage.getItem(this.key) !== serialized) throw Error('AI_RESULT_UNKNOWN');
       this.storage.removeItem(this.key); if (this.storage.getItem(this.key) !== null) throw Error('AI_RESULT_UNKNOWN');
-      this.command = null; this.publish({ locked: false, rotationPending: false, prepared: false, reviewedInput: null, reviewedSections: null, observation: null, feedback: 'idle' });
-    } catch (failure) { if (this.active) this.publish({ locked: true, prepared: false, reviewedInput: null, reviewedSections: null, observation: null, feedback: 'unknown' }); throw failure; }
+      this.command = null; this.publish({ locked: false, rotationPending: false, prepared: false, reviewedInput: null, reviewedSections: null, reviewedQuote: null, observation: null, feedback: 'idle' });
+    } catch (failure) { if (this.active) this.publish({ locked: true, prepared: false, reviewedInput: null, reviewedSections: null, reviewedQuote: null, observation: null, feedback: 'unknown' }); throw failure; }
     finally { if (this.request === controller) this.request = null; if (this.active) this.publish({ busy: false }); }
   };
   resumeRotation = async (reads: Parameters<ConversationAdmissionSession['rotate']>[0], closureJournalCleared: () => boolean) => {
@@ -163,7 +182,7 @@ export class ConversationAdmissionSession {
     if (send && (original.rotation || !command || !this.state.prepared || command.admissionKey !== original.admissionKey)) throw Error('AI_RESULT_UNKNOWN');
     const controller = new AbortController(); this.request = controller;
     // Once a send is attempted, even an invalid/unknown reply cannot resend it.
-    this.command = null; this.publish({ busy: true, locked: true, prepared: false, reviewedInput: null, reviewedSections: null, observation: null });
+    this.command = null; this.publish({ busy: true, locked: true, prepared: false, reviewedInput: null, reviewedSections: null, reviewedQuote: null, observation: null });
     try {
       if (send && (command!.conversationId !== original.conversationId || command!.expectedRevision !== original.expectedRevision
         || command!.request.sceneCode !== original.capabilityCode || await commandHash(command!.request) !== original.requestHash)) throw Error('AI_RESULT_UNKNOWN');

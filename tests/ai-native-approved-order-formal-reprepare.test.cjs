@@ -7,6 +7,31 @@ const { composeRequestBoundFormalApprovedOrderApplication } = require('../apps/a
 const { PrismaQuoteSelectionRepository } = require('../apps/api/src/modules/ai-native/task-request/prisma-quote-selection.repository');
 const { PrismaOriginalRequestRepository } = require('../apps/api/src/modules/ai-native/task-request/prisma-original-request.repository');
 const { clone } = require('./fixtures/ai-native/task-input-store.cjs');
+test('formal reprepare complete dates use the original guarded rate/configuration ports without creating a quote', async () => {
+  const h = await formalReprepareHarness();
+  const category = require('../packages/shared/src/index.ts').RENTAL_CATEGORY_DEFINITIONS.find(row => row.code === 'camera');
+  const facts = { tenantId: 'tenant-a', workspaceId: 'workspace-a', profile: { tenantId: 'tenant-a', categoryCode: 'camera' },
+    category, settings: { tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, configVersion: 1,
+      pricing: { enabledUnits: ['day_24h'], defaultUnit: 'day_24h' }, fulfillment: { enabledModes: ['store_pickup_return'] } },
+    groups: [], pricingGroups: [], couponTemplates: [], locations: [], operators: [] };
+  // Declared transport rows only, not a database or pricing simulation.
+  h.dependencies.core.readQuoteConfiguration = async () => clone(facts);
+  h.dependencies.core.resolvePricingGroupQuoteRequest = async (_tenant, value) => value;
+  let ratesRead = 0, quotesCreated = 0;
+  const business = { createQuote: async () => { quotesCreated++; throw Error('resource read must not create a quote'); },
+    readQuoteRateTargets: async (tenant, context, at) => {
+      assert.equal(tenant, 'tenant-a'); assert.deepEqual(context.category, category);
+      assert.equal(at, '2026-10-10T00:00:00.000Z'); ratesRead++; return [];
+    } };
+  const sources = composeFormalApprovedOrderReprepareServices({ ...h.dependencies, business }, h.configuration);
+  const body = { sceneCode: 'quote_clarification', input: { candidate: { customerType: 'personal',
+    start: '2026-10-10T00:00:00Z', end: '2026-10-11T00:00:00Z' } } };
+  assert.equal((await sources.originals.authority.read(body, '1')).context.scope.workspaceId, 'workspace-a');
+  assert.ok(ratesRead > 0); assert.equal(quotesCreated, 0);
+  const missing = composeFormalApprovedOrderReprepareServices({ ...h.dependencies, business: undefined }, h.configuration);
+  await assert.rejects(missing.originals.authority.read(body, '1'), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
+});
+
 async function requestApp(h) {
   const { credentials, reprepareServices, ...dependencies } = h.dependencies;
   return { api: composeRequestBoundFormalApprovedOrderApplication(dependencies, { enabled: true, audience: 'operator' }, h.configuration),
@@ -36,6 +61,25 @@ test('formal original/selection repositories and claimed lease reach reprepare, 
   assert.equal(h.state.records.rentalOrder.length, 1);
   assert.equal(h.state.records.aiApprovalConsumption[0].taskId, h.second.reference.taskId);
   assert.deepEqual(await api.readReprepareReceipt(request, h.command.originalTaskId, h.command), pending);
+});
+
+test('native UInt reprepare revisions read as bounded numbers without widening writes', async () => {
+  const h = await formalReprepareHarness(), { api, request } = await requestApp(h);
+  assert.equal((await api.reprepare(request, h.command.originalTaskId, h.command)).ok, true);
+  const stored = h.state.records.aiApprovalReprepare[0]; assert.ok(stored);
+  const { PrismaApprovedOrderReprepareRepository, reprepareRowSchema } = require('../apps/api/src/modules/ai-native/approval-execution/prisma-approved-order-reprepare.repository');
+  let raw = { ...clone(stored), originalRevision: BigInt(stored.originalRevision), replacementRevision: BigInt(stored.replacementRevision) };
+  const repository = new PrismaApprovedOrderReprepareRepository({ $queryRaw: async () => [raw] });
+  const observed = await repository.find(stored.scopeId, stored.operationKey);
+  assert.deepEqual(observed, stored);
+  assert.equal(typeof observed.originalRevision, 'number'); assert.equal(typeof observed.replacementRevision, 'number');
+  assert.equal(reprepareRowSchema.safeParse(raw).success, false, 'write contract must remain numeric');
+  for (const value of [0n, -1n, 4294967295n, 2n ** 100n, '1', 1.5]) {
+    raw = { ...clone(stored), originalRevision: value, replacementRevision: BigInt(stored.replacementRevision) };
+    await assert.rejects(repository.find(stored.scopeId, stored.operationKey));
+    raw = { ...clone(stored), originalRevision: BigInt(stored.originalRevision), replacementRevision: value };
+    await assert.rejects(repository.find(stored.scopeId, stored.operationKey));
+  }
 });
 
 test('held lease source only reads current ownership and cannot claim a missing or changed lease', async () => {

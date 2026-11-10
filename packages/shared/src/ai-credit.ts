@@ -9,6 +9,9 @@ export interface AiTenantCallRecord {
   state: 'registered' | 'reserved' | 'dispatched' | 'settled' | 'cancelled' | 'unknown';
   inputTokens: string | null; outputTokens: string | null; cachedInputTokens: string | null;
   amount: string | null; currency: string | null;
+  /** Absent on older responses means a model invocation. Counting input is
+   * not supplier Token consumption; its original known request count is separate. */
+  operationKind?: 'model' | 'input_counting'; calls?: string | null;
 }
 export interface AiTenantCallRecords { records: AiTenantCallRecord[]; nextCursor: string | null; observedAt: string; }
 export interface AiCreditRequest {

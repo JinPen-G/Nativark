@@ -13,6 +13,7 @@ import type { composeAiOriginalScenes } from './original-scenes.composition';
 import { continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledge, type AiOriginalSceneKnowledgeSnapshot } from './original-scene-knowledge';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
+import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools/order-explanation-renderer';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -52,6 +53,9 @@ function orderFactsFingerprint(material: unknown) {
   const packet = z.object({ payload: z.record(z.unknown()) }).passthrough().parse(structuredClone(material));
   const payload = packet.payload;
   delete payload.observedAt;
+  // This display is derived solely from facts below and carries query times.
+  // Frozen materialHash still proves the complete original display payload.
+  delete payload.explanation;
   if (!payload.facts || typeof payload.facts !== 'object' || Array.isArray(payload.facts)) throw unavailable();
   for (const fact of Object.values(payload.facts)) {
     if (!fact || typeof fact !== 'object' || Array.isArray(fact)) continue;
@@ -81,14 +85,25 @@ function orderFactsFingerprint(material: unknown) {
     && inspections.value && typeof inspections.value === 'object' && !Array.isArray(inspections.value)) {
     delete (inspections.value as Record<string, unknown>).observedAt;
   }
+  const funding = (payload.facts as Record<string, unknown>).fundingLedger;
+  if (funding && typeof funding === 'object' && !Array.isArray(funding) && 'value' in funding
+    && funding.value && typeof funding.value === 'object' && !Array.isArray(funding.value)) {
+    // Keep every recorded event time, ID, amount, provenance and legacy marker.
+    // Only the fresh observation timestamp is not a business fact.
+    delete (funding.value as Record<string, unknown>).observedAt;
+  }
   return requestFingerprint(payload);
 }
 
 function openingFactsFingerprint(material: unknown) {
   const current = z.object({ scope: z.unknown(), audience: z.string(), configVersion: z.string(),
-    observedAt: z.string(), sections: z.array(z.unknown()).max(9), configuration: z.unknown() })
+    observedAt: z.string(), sections: z.array(z.object({ key: z.string().min(1).max(191) }).passthrough()).max(9), configuration: z.unknown() })
     .passthrough().parse(structuredClone(material));
   const { observedAt: _observation, ...facts } = current;
+  // Original readiness keys are unique; their display order is not a business
+  // revision. Canonicalize this comparison copy only, keeping every section's
+  // content and the immutable materialHash/returned current order unchanged.
+  facts.sections.sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
   // Strip only the observation metadata of the actual opening projections,
   // not their configuration versions, coverage or readiness decisions.
   for (const section of facts.sections) {
@@ -229,16 +244,18 @@ export class AiOriginalSceneResultService {
       // old diagnosis after configuration/coverage or current permissions change.
       // Observation must not require an unexpired request or new execution
       // grant. Historical ownership and current business read access are
-      // independently rechecked before and after this read.
+      // independently rechecked before and after this read. Matching fact
+      // fingerprints and a restored final owner cannot bind another principal's
+      // observation; use this original's current read context, not dispatch rights.
       const isOrder = original.request.sceneCode === 'order_explanation';
       const current = original.request.sceneCode === 'order_explanation'
         ? await this.scenes.tools.orderExplanationPreparation(original.request.input.orderId)
-          .prepare({ question: original.request.input.question })
+          .prepare({ question: original.request.input.question }, original.context)
         : original.request.sceneCode === 'opening_diagnosis'
           ? (await this.scenes.tools.scenes.prepareOpeningDiagnosis({ requestKey: original.receipt.requestKey,
-            ...original.request.input })).payload.materials
+            ...original.request.input }, original.context)).payload.materials
           : (await this.scenes.tools.scenes.prepareQuoteClarification({ requestKey: original.receipt.requestKey,
-            ...original.request.input })).payload.materials;
+            ...original.request.input }, original.context)).payload.materials;
       const fingerprint = isOrder ? orderFactsFingerprint
         : original.request.sceneCode === 'opening_diagnosis' ? openingFactsFingerprint : quoteFactsFingerprint;
       if (frozen.knowledge) {
@@ -246,8 +263,10 @@ export class AiOriginalSceneResultService {
         await this.knowledge.revalidate(frozen.knowledge, command.original.inputRef);
       }
       output = fingerprint(current) === fingerprint(frozen.material)
-        ? { ...base, status: 'available', text: { value: frozen.text, trust: 'unverified_model_text_not_execution_evidence' },
-          materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: isOrder ? orderSources(frozen.material) : [],
+        ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text : frozen.text,
+            trust: 'unverified_model_text_not_execution_evidence' },
+          materialHash: frozen.materialHash, callId: frozen.callId,
+          facts: isOrder ? projectOrderExplanationMaterial(current) : current, sources: isOrder ? orderSources(frozen.material) : [],
           ...(frozen.knowledge ? { knowledge: frozen.knowledge } : {}),
           ...(frozen.toolRequests.length ? { toolCandidates: { requests: frozen.toolRequests,
             execution: 'not_attempted' as const, authorization: 'not_granted' as const } } : {}),
@@ -271,7 +290,9 @@ export class AiOriginalSceneResultService {
     });
     if (requestFingerprint(provenance) !== requestFingerprint(finalProvenance)) throw denied();
     if ((await this.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== finalAccess.bindingKey) throw denied();
-    return freezeOriginalInput(output);
+    // A historical read may cross natural expiry while validating its sources.
+    // Publish the checked closing receipt, without renewing execution authority.
+    return freezeOriginalInput({ ...output, original: after.receipt });
   }
 
   /** Opening evidence uses the original readiness partition reader, not an
@@ -296,7 +317,7 @@ export class AiOriginalSceneResultService {
     const after = await this.read(command);
     if (after.status !== 'available' || after.materialHash !== before.materialHash
       || receiptFingerprint(after.original) !== receiptFingerprint(before.original)) throw unavailable();
-    return freezeOriginalInput({ original: before.original, resultId: before.resultId, key,
+    return freezeOriginalInput({ original: after.original, resultId: before.resultId, key,
       reference: source.section.evidence, source: source.section,
       frozenBasis: { materialHash: before.materialHash, reference: expected },
       observation: 'current_authorized_reobservation' as const, historicalConfiguration: 'not_loaded' as const,
@@ -315,7 +336,7 @@ export class AiOriginalSceneResultService {
       const after = await this.read(command);
       if (after.status !== 'available' || after.materialHash !== result.materialHash
         || after.knowledge?.contentHash !== result.knowledge.contentHash) throw unavailable();
-      return freezeOriginalInput({ original: result.original, resultId: result.resultId, sourceKind,
+      return freezeOriginalInput({ original: after.original, resultId: result.resultId, sourceKind,
         sourceIndex, reference: opened.reference, source: opened.content, execution: 'not_attempted' as const });
     }
     if (result.sceneCode !== 'order_explanation' || !result.sources?.[sourceIndex]) throw unavailable();
@@ -325,7 +346,7 @@ export class AiOriginalSceneResultService {
     // A stale/unknown result must not reopen previously visible information.
     const after = await this.read(command);
     if (after.status !== 'available' || after.materialHash !== result.materialHash) throw unavailable();
-    return freezeOriginalInput({ original: result.original, resultId: result.resultId,
+    return freezeOriginalInput({ original: after.original, resultId: result.resultId,
       sourceIndex, reference: source, source: opened.source, execution: 'not_attempted' as const });
   }
 }

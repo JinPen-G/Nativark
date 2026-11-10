@@ -1,11 +1,15 @@
-import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { RentalRuleConfigInputDto } from './rental-config-request.dto';
 import { requestFingerprint } from './rental-idempotency.repository';
 import { currentQuoteSource } from './rental-quote-access';
 import type { RentalQuoteOriginalOperation } from './rental-business-fact.repository';
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
+import { readRentalInventoryBasis, assertInventoryBasisContext } from "./rental-quote-inventory-basis";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
@@ -113,11 +117,12 @@ import {
   type TenantRentalBusinessSettings,
   type TenantRentalProfile
 } from "@rental-os/shared";
-import { getRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId } from "../../common/request-identity";
 import { SecretBox } from "../../common/secret-box";
 import { RentalStateRepository } from "./rental-state.repository";
 import {
   RentalBusinessConfigRepository,
+  readRentalReadinessAccountFacts,
   type RentalBusinessConfigStore
 } from "./rental-business-config.repository";
 import {
@@ -207,6 +212,26 @@ interface RentalBusinessState {
   quotes: RentalQuoteSnapshotV1[];
   /** 该租户的业务配置是否已确认落库。懒加载 seedState 只灌内存，需要一次补落。 */
   configPersisted?: boolean;
+}
+
+interface TenantReadinessFacts {
+  tenantId: string;
+  workspaceId: string;
+  nowAt: number;
+  profileCategoryCode?: RentalCategoryCode;
+  categoryName?: string;
+  ruleVersions: Array<Pick<RentalRuleVersion, 'id' | 'version' | 'status' | 'effectiveFrom'>>;
+  publishedCalendarYears: number[];
+  enabledGroups: Array<Pick<RentalPricingGroup, 'id' | 'name'>>;
+  pricedGroupIds: string[];
+  enabledItemGroupCount: number;
+  serviceableLocationCount: number;
+  operationsAccounts: number;
+  hasActiveRole: boolean;
+  membershipPlanCount: number;
+  membershipUnavailable: boolean;
+  priceVersion: { sequence: number; effectiveFrom: string } | null;
+  priceVersionAvailable: boolean;
 }
 
 interface BusinessContext {
@@ -773,81 +798,84 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 无已发布规则、无已发布日历、无覆盖租期开始时点的空间价格版本都会 409。
    */
   async tenantReadiness(tenantId: string, context: BusinessContext) {
-    const state = this.state(tenantId, context);
-    const workspaceId = this.workspaceOf(tenantId);
-    // 这里是“配置状态”查询，不能复用报价用的 currentRule：后者在没有规则或
-    // 版本冲突时会抛 409，而空白租户正需要靠本页看到“缺少规则”并继续配置。
-    // 只在本方法内做非抛错的当前版本判定，报价仍继续使用 fail-closed 的 currentRule。
-    const nowAt = Date.now();
-    const effectiveRules = state.ruleVersions
+    const state = this.state(tenantId, context), workspaceId = this.workspaceOf(tenantId), now = new Date();
+    const calendars = this.calendarsForDateRange(tenantId, context, `${now.getFullYear()}-01-01T00:00:00.000Z`, `${now.getFullYear() + 1}-12-31T23:59:59.000Z`);
+    const accounts = this.prisma ? await readRentalReadinessAccountFacts(this.prisma, tenantId, workspaceId)
+      : { operationsAccounts: 0, hasActiveRole: false };
+    const versionRow = await this.findSpaceVersionAt(tenantId, workspaceId, now, undefined);
+    return this.renderTenantReadiness({ tenantId, workspaceId, nowAt: now.getTime(),
+      profileCategoryCode: context.profile?.categoryCode, categoryName: context.category?.name,
+      ruleVersions: state.ruleVersions, publishedCalendarYears: calendars.filter(row => row.status === 'published').map(row => row.year),
+      enabledGroups: (context.pricingGroups ?? []).filter(row => row.status === 'enabled'),
+      pricedGroupIds: state.pricingPlans.filter(plan => plan.status === 'enabled').flatMap(plan => plan.rates.map(pricingTargetId)),
+      enabledItemGroupCount: context.groups.filter(row => row.status === 'enabled').length,
+      // Same admission population as the existing quote gate, not all locations.
+      serviceableLocationCount: (context.locations ?? []).filter(location => location.status === 'enabled'
+        && context.operators.find(row => row.id === location.operatorId)?.status === 'enabled'
+        && location.capabilities.includes('pickup') && location.capabilities.includes('return')).length,
+      ...accounts, ...await this.readReadinessMembershipFacts(tenantId), priceVersionAvailable: Boolean(this.prisma),
+      priceVersion: versionRow ? { sequence: versionRow.sequence, effectiveFrom: versionRow.effectiveFrom.toISOString() } : null });
+  }
+
+  /** R0 persisted opening facts only. Does not enter state()/seedState(), load
+   * quote context, initialize configuration, or recalculate pricing/inventory.
+   * The original Guard/ALS establishes authority; missing producers fail closed. */
+  async readTenantReadiness(tenantId: string) {
+    const workspaceId = getRequestWorkspaceId(), now = new Date();
+    if (!workspaceId || getRequestTenantId() !== tenantId) throw new HttpException('开业读取缺少当前租户或经营空间', HttpStatus.FORBIDDEN);
+    if (typeof this.coreConfigStore.readReadinessCoreFacts !== 'function'
+      || typeof this.configStore.readReadinessBusinessFacts !== 'function') throw new ServiceUnavailableException('开业持久事实源不可用');
+    const core = await this.coreConfigStore.readReadinessCoreFacts(tenantId, workspaceId);
+    if (core.tenantId !== tenantId || core.workspaceId !== workspaceId) throw new ConflictException('开业配置来源变化');
+    // Preserve calendarsForDateRange's business-time-zone conversion, including
+    // the last-instant end boundary; no default annual days are materialized.
+    const timeZone = core.timeZone;
+    const startAt = `${now.getFullYear()}-01-01T00:00:00.000Z`, endAt = `${now.getFullYear() + 1}-12-31T23:59:59.000Z`;
+    const startYear = businessYearFromDateKey(businessDateKey(startAt, timeZone));
+    const endYear = businessYearFromDateKey(businessDateKey(new Date(Date.parse(endAt) - 1).toISOString(), timeZone));
+    const years = Array.from({ length: endYear - startYear + 1 }, (_unused, index) => startYear + index);
+    const [business, membership] = await Promise.all([
+      this.configStore.readReadinessBusinessFacts(tenantId, workspaceId, now, years), this.readReadinessMembershipFacts(tenantId)
+    ]);
+    if (business.tenantId !== tenantId || business.workspaceId !== workspaceId
+      || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId) throw new ConflictException('开业事实来源变化');
+    return this.renderTenantReadiness({ ...business, ...membership, nowAt: now.getTime(), priceVersionAvailable: true,
+      profileCategoryCode: core.categoryCode, enabledGroups: core.pricingGroups,
+      enabledItemGroupCount: core.enabledItemGroupCount, serviceableLocationCount: core.serviceableLocationCount });
+  }
+
+  private async readReadinessMembershipFacts(tenantId: string) {
+    let membershipPlanCount = 0, membershipUnavailable = typeof this.memberships?.countPlans !== 'function';
+    if (!membershipUnavailable) {
+      try {
+        membershipPlanCount = await this.memberships!.countPlans(tenantId);
+        if (!Number.isSafeInteger(membershipPlanCount) || membershipPlanCount < 0) throw new ConflictException('开业会员计数无效');
+      } catch (error) {
+        if (error instanceof HttpException && [401, 403].includes(error.getStatus())) throw error;
+        membershipUnavailable = true;
+      }
+    }
+    return { membershipPlanCount, membershipUnavailable };
+  }
+
+  /** One nine-item business decision for manual and bounded readers. Facts are
+   * not an authorization grant, a quote reservation or an external live probe. */
+  private renderTenantReadiness(facts: TenantReadinessFacts) {
+    const { tenantId, workspaceId, nowAt, enabledGroups, membershipPlanCount, membershipUnavailable,
+      operationsAccounts, serviceableLocationCount, enabledItemGroupCount, priceVersion } = facts;
+    // Configuration status must describe missing/conflicting rules rather than
+    // throwing the quote currentRule gate's 409 for a blank workspace.
+    const effectiveRules = facts.ruleVersions
       .filter((row) => isIssuedRuleVersion(row.status) && row.effectiveFrom)
       .filter((row) => new Date(row.effectiveFrom!).getTime() <= nowAt)
       .sort((left, right) => new Date(right.effectiveFrom!).getTime() - new Date(left.effectiveFrom!).getTime());
     const latestRuleAt = effectiveRules[0] ? new Date(effectiveRules[0].effectiveFrom!).getTime() : undefined;
-    const rulesAtCurrentTime = latestRuleAt === undefined
-      ? []
-      : effectiveRules.filter((row) => new Date(row.effectiveFrom!).getTime() === latestRuleAt);
-    const rule = rulesAtCurrentTime.length === 1 ? rulesAtCurrentTime[0] : undefined;
-    const ruleConflict = rulesAtCurrentTime.length > 1;
-    const calendars = this.calendarsForDateRange(tenantId, context, `${new Date().getFullYear()}-01-01T00:00:00.000Z`, `${new Date().getFullYear() + 1}-12-31T23:59:59.000Z`);
-    const publishedCalendarYears = new Set(
-      calendars.filter((calendar) => calendar.status === "published").map((calendar) => calendar.year)
-    );
-    const enabledGroups = (context.pricingGroups ?? []).filter((row) => row.status === "enabled");
-    const pricedGroupIds = new Set(
-      state.pricingPlans
-        .filter((plan) => plan.status === "enabled")
-        .flatMap((plan) => plan.rates.map((rate) => pricingTargetId(rate)))
-    );
-    const unpricedGroups = enabledGroups.filter((group) => !pricedGroupIds.has(group.id));
-    const pricedGroupCount = enabledGroups.length - unpricedGroups.length;
-    let membershipPlanCount = 0;
-    let membershipUnavailable = !this.memberships;
-    if (this.memberships) {
-      try {
-        membershipPlanCount = (await this.memberships.listPlans(tenantId)).length;
-      } catch {
-        // 会员域读取异常时如实标注不可判定，而不是把「查不到」伪装成「没配置」。
-        membershipUnavailable = true;
-      }
-    }
-    const operationsAccounts = this.prisma
-      ? await this.prisma.workspaceMember.count({ where: { tenantId, workspaceId, isActive: true, user: { isActive: true } } })
-      : 0;
-    const activeMembers = this.prisma
-      ? await this.prisma.workspaceMember.findMany({
-          where: { tenantId, workspaceId, isActive: true, user: { isActive: true } },
-          select: {
-            roleId: true,
-            role: { select: { isActive: true } },
-            user: {
-              select: {
-                role: { select: { isActive: true } },
-                roleAssignments: { select: { role: { select: { isActive: true } } } }
-              }
-            }
-          }
-        })
-      : [];
-    // roleId 非空时覆盖租户级角色；为空时才沿用用户默认角色或角色分配。
-    // 不能只统计租户内的角色，否则其他空间的角色会把当前空间误判为可开业。
-    const roles = activeMembers.some((member) =>
-      member.roleId
-        ? member.role?.isActive === true
-        : member.user.role?.isActive === true || member.user.roleAssignments.some((assignment) => assignment.role.isActive)
-    ) ? 1 : 0;
-    // 报价对履约地点的硬闸门（requireLocation）：取货/配送与归还时点都会校验
-    //「地点启用 + 所属经营主体启用 + 具备对应能力」，开业判定必须使用同一口径。
-    const serviceableLocations = (context.locations ?? []).filter(
-      (location) => {
-        const operator = location.operatorId ? context.operators.find((row) => row.id === location.operatorId) : undefined;
-        return location.status === "enabled" &&
-          operator?.status === "enabled" &&
-          location.capabilities.includes("pickup") &&
-          location.capabilities.includes("return");
-      }
-    );
-
+    const rulesAtCurrentTime = latestRuleAt === undefined ? []
+      : effectiveRules.filter(row => new Date(row.effectiveFrom!).getTime() === latestRuleAt);
+    const rule = rulesAtCurrentTime.length === 1 ? rulesAtCurrentTime[0] : undefined, ruleConflict = rulesAtCurrentTime.length > 1;
+    const publishedCalendarYears = new Set(facts.publishedCalendarYears), pricedGroupIds = new Set(facts.pricedGroupIds);
+    const unpricedGroups = enabledGroups.filter(group => !pricedGroupIds.has(group.id)), pricedGroupCount = enabledGroups.length - unpricedGroups.length;
+    const roles = facts.hasActiveRole ? 1 : 0;
     const items: Array<{
       key: string;
       title: string;
@@ -861,10 +889,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       {
         key: "workspace_profile",
         title: "经营空间与品类档案",
-        done: Boolean(context.profile?.categoryCode),
+        done: Boolean(facts.profileCategoryCode),
         missing: "经营空间未绑定经营品类",
         nextHref: "/workbench",
-        summary: context.profile?.categoryCode ? `品类：${context.category?.name ?? context.profile.categoryCode}` : undefined
+        summary: facts.profileCategoryCode ? `品类：${facts.categoryName ?? facts.profileCategoryCode}` : undefined
       },
       {
         key: "accounts_roles",
@@ -877,10 +905,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       {
         key: "fulfillment_network",
         title: "履约地点（支持取还）",
-        done: serviceableLocations.length > 0,
+        done: serviceableLocationCount > 0,
         missing: "还没有支持取货和归还的启用履约地点；报价与订单确认必须指定可用履约地点",
         nextHref: "/rental/locations",
-        summary: serviceableLocations.length ? `可用履约地点 ${serviceableLocations.length} 个` : undefined
+        summary: serviceableLocationCount ? `可用履约地点 ${serviceableLocationCount} 个` : undefined
       },
       {
         key: "business_rule",
@@ -901,10 +929,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       {
         key: "item_groups",
         title: "商品 / 产品型号",
-        done: context.groups.some((row) => row.status === "enabled"),
+        done: enabledItemGroupCount > 0,
         missing: "还没有启用的产品型号，无法建立定价分组",
         nextHref: "/rental/item-groups",
-        summary: `启用型号 ${context.groups.filter((row) => row.status === "enabled").length} 个`
+        summary: `启用型号 ${enabledItemGroupCount} 个`
       },
       {
         key: "pricing_groups_rates",
@@ -938,13 +966,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         optional: true
       }
     ];
-    // 价格版本需要查库：无 MySQL 事实时（内存模式）也如实标未完成，不伪造。
-    if (this.prisma) {
-      const versionRow = await this.findSpaceVersionAt(tenantId, workspaceId, new Date(), undefined);
-      const versionItem = items.find((item) => item.key === "price_version")!;
-      versionItem.done = Boolean(versionRow);
-      versionItem.missing = versionRow ? "" : "还没有空间整体价格版本；由定价分组基本价或调价计划生成";
-      versionItem.summary = versionRow ? `当前版本 v${versionRow.sequence}（${versionRow.effectiveFrom.toISOString().slice(0, 10)} 起）` : undefined;
+    // Both readers use the original persisted version metadata. No database
+    // fact in legacy memory mode stays incomplete, never a synthetic version.
+    if (facts.priceVersionAvailable) {
+      const versionItem = items.find(item => item.key === 'price_version')!;
+      versionItem.done = Boolean(priceVersion);
+      versionItem.missing = priceVersion ? '' : '还没有空间整体价格版本；由定价分组基本价或调价计划生成';
+      versionItem.summary = priceVersion ? `当前版本 v${priceVersion.sequence}（${priceVersion.effectiveFrom.slice(0, 10)} 起）` : undefined;
     }
 
     const missingKeys = items.filter((item) => !item.done).map((item) => item.key);
@@ -1350,6 +1378,34 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 客户端目录“参考起价”用：返回覆盖 `at` 时点的空间价格版本费率；没有生效版本时返回空数组
    * 而不是抛错——目录页缺价只是“选租期查看报价”，报价与下单仍由 resolveSpaceRates 严格拒绝。
    */
+  /** R0 selection reads only published-version target/unit identity. No state,
+   * in-memory pricing fallback, initial price publication or amount calculation. */
+  /** Historical read only. An original visible order, not current business
+   * context or a global quote ID, is the authority for this saved projection. */
+  async readOrderLinkedQuoteFacts(tenantId: string, orderId: string, quoteId: string) {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!identity?.userId || identity.isSaasAdmin || identity.tenantId !== tenantId || !workspaceId)
+      throw new HttpException('历史报价缺少当前租户及空间', HttpStatus.FORBIDDEN);
+    if (typeof this.factStore.readOrderLinkedQuoteFacts !== 'function') throw new ServiceUnavailableException('历史报价持久事实端口不可用');
+    const binding = requestFingerprint(identity);
+    const facts = await this.factStore.readOrderLinkedQuoteFacts(tenantId, workspaceId, orderId, quoteId);
+    if (requestFingerprint(getRequestIdentity()) !== binding) throw new HttpException('历史报价读取期间授权变化', HttpStatus.FORBIDDEN);
+    return facts;
+  }
+
+  async readQuoteRateTargets(tenantId: string, context: BusinessContext, at: string) {
+    const current = getRequestIdentity(), workspaceId = getRequestWorkspaceId(), observed = new Date(at);
+    if (!current?.userId || !workspaceId || current.tenantId !== tenantId || current.isSaasAdmin)
+      throw new HttpException('报价价格目标缺少当前租户及经营空间', HttpStatus.FORBIDDEN);
+    if (context.profile.tenantId !== tenantId || context.settings.tenantId !== tenantId || !Number.isFinite(observed.getTime()))
+      throw new ConflictException('报价价格目标绑定无效');
+    if (typeof this.configStore.readQuoteRateTargets !== 'function') throw new ServiceUnavailableException('报价价格目标持久只读端口不可用');
+    const binding = requestFingerprint(current);
+    const result = await this.configStore.readQuoteRateTargets(tenantId, workspaceId, observed);
+    if (requestFingerprint(getRequestIdentity()) !== binding) throw new HttpException('报价价格目标读取期间授权变化', HttpStatus.FORBIDDEN);
+    return result;
+  }
+
   async listSpaceRatesAt(tenantId: string, context: BusinessContext, at: string): Promise<RentalPricingRate[]> {
     try {
       return (await this.resolveSpaceRates(tenantId, context, at)).rates;
@@ -2406,6 +2462,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return calendar;
   }
 
+  /** Server-only bound draft calculation. The caller's transaction supplies the
+   * persisted year/version set; never redirect an original operation to a newer
+   * editable row or synthesize missing days. Persistence/receipts stay separate. */
+  prepareBoundCalendarDraftDay(context: BusinessContext,
+    base: { id: string } & Pick<RentalCalendarYear, "tenantId" | "year" | "version" | "status" | "revision" | "days">,
+    versions: Array<{ id: string } & Pick<RentalCalendarYear, "version" | "status">>,
+    date: string, fields: RentalCalendarRangeFields, reason: string, operator: string, at: string, batchId: string) {
+    const latest = versions.filter(row => row.status === "draft").sort((a, b) => compareVersions(b.version, a.version))[0];
+    if (base.status !== "draft" || !latest || latest.id !== base.id || latest.version !== base.version)
+      throw new ConflictException("原日历草稿不再是当前可编辑版本");
+    expandCalendarRange(base.year, date, date);
+    this.assertRangeFields(fields);
+    const current = base.days.find(day => day.date === date);
+    if (!current || base.days.filter(day => day.date === date).length !== 1) throw new ConflictException("原日历日期依据缺失或重复");
+    const next = applyRangeFieldsToDay(current, current, fields,
+      { kind: "single", batchId, rangeStart: date, rangeEnd: date }, { reason, operator, at });
+    this.assertRangeLimitedHasHours(context, next, date);
+    return { day: next, before: RentalBusinessService.daySnapshot(current), after: RentalBusinessService.daySnapshot(next) };
+  }
+
+  /** A confirmed bound draft write or receipt read refreshes the existing year
+   * cache from persistence. Publication and pricing still use published rows. */
+  async refreshBoundCalendarDraftYear(tenantId: string, context: BusinessContext, year: number) {
+    const identity = getRequestIdentity();
+    if (!identity?.userId || identity.tenantId !== tenantId || !identity.workspaceId || identity.isSaasAdmin)
+      throw new ForbiddenException("日历缓存刷新缺少原业务范围");
+    await this.refreshCalendarYear(this.state(tenantId, context), tenantId, year);
+  }
+
   /**
    * 落库一次年度日历写入，带乐观锁。
    *
@@ -3318,18 +3403,119 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
   }
 
+  /** Share the original save-path qualification normalization with preview.
+   * It does not default a missing original rule or bypass validateRule. */
+  private normalizeRuleDraftConfig(context: BusinessContext, config: RentalRuleConfig): RentalRuleConfig {
+    return context.category.businessModel.supportsQualificationReview ? config : {
+      ...config, qualification: { required: config.qualification.required, documentTypes: [], minimumValidityDays: 0 }
+    };
+  }
+
+  /** Exact persisted row + original R1 boolean changes, for server-only preview.
+   * Full rule validation remains Core's own save validator. No cache selection,
+   * new rule/version, restore, audit, approval or publication is performed. */
+  private buildBoundRuleDraftCandidate(tenantId: string, context: BusinessContext, source: {
+    id: string; tenantId: string; workspaceId: string; version: string; categoryCode: string; status: string; config: unknown;
+  }, changes: Array<{ field: string; before: boolean; after: boolean }>) {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!identity?.userId || !workspaceId || identity.tenantId !== tenantId || identity.isSaasAdmin || identity.staffApi
+      || identity.audience === 'client' || source.tenantId !== tenantId || source.workspaceId !== workspaceId
+      || context.profile.tenantId !== tenantId || context.settings.tenantId !== tenantId
+      || source.categoryCode.toLowerCase() !== context.category.code)
+      throw new ForbiddenException('规则预览缺少原经营空间授权');
+    const allowed = ['fulfillment.pickupInspectionRequired', 'fulfillment.returnInspectionRequired', 'fulfillment.evidenceRequired',
+      'fulfillment.allowDifferentReturnLocation', 'damage.manualReviewRequired', 'cancellation.weatherExceptionEnabled'];
+    const plain = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+    if (!source.id || !source.version || !['draft', 'pending', 'published', 'superseded', 'void'].includes(source.status)
+      || !plain(source.config) || Buffer.byteLength(JSON.stringify(source.config), 'utf8') > 131072
+      || ['fulfillment', 'damage', 'cancellation', 'qualification', 'payment', 'overdue'].some(key => !plain((source.config as Record<string, unknown>)[key]))
+      || changes.length < 1 || changes.length > 6 || new Set(changes.map(row => row.field)).size !== changes.length)
+      throw new ServiceUnavailableException('原规则完整校验依据不可用');
+    const original = structuredClone(source.config), candidate = structuredClone(original);
+    for (const change of changes) {
+      const [group, property] = change.field.split('.');
+      const block = candidate[group];
+      if (!allowed.includes(change.field) || typeof change.before !== 'boolean' || typeof change.after !== 'boolean' || !plain(block)
+        || typeof block[property] !== 'boolean' || block[property] !== change.before)
+        throw new ConflictException('原规则字段与提案依据不一致');
+      block[property] = change.after;
+    }
+    // The same original DTO shape precedes Core save validation. Validate a
+    // separate instance: never strip unknown historical fields from the source.
+    if (validateSync(plainToInstance(RentalRuleConfigInputDto, candidate), { forbidUnknownValues: true }).length)
+      throw new BadRequestException('原规则候选不满足正式完整字段约束');
+    const config = this.normalizeRuleDraftConfig(context, candidate as unknown as RentalRuleConfig);
+    this.validateRule(context, config);
+    const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    return { config, preview: { targetId: source.id, version: source.version, storedStatus: source.status, changes: structuredClone(changes),
+      sourceConfigFingerprint: hash(original), candidateConfigFingerprint: hash(config),
+      validation: 'original_core_rule_save_validation_only' as const,
+      draftTarget: source.status === 'draft' ? 'original_draft_requires_bound_save' as const : 'original_restore_to_new_draft_required' as const,
+      persistence: 'not_attempted' as const, publication: 'not_attempted' as const } };
+  }
+
+  previewBoundRuleDraft(tenantId: string, context: BusinessContext, source: {
+    id: string; tenantId: string; workspaceId: string; version: string; categoryCode: string; status: string; config: unknown;
+  }, changes: Array<{ field: string; before: boolean; after: boolean }>) {
+    return this.buildBoundRuleDraftCandidate(tenantId, context, source, changes).preview;
+  }
+
+  /** The bound writer supplies the original locked row/version set. Reuse the
+   * same Core save validator and version chain for editing a draft or restoring
+   * history to a new draft; never mutate issued rules or grant publication. */
+  prepareBoundRuleDraft(tenantId: string, context: BusinessContext,
+    source: Parameters<RentalBusinessService['previewBoundRuleDraft']>[2],
+    changes: Parameters<RentalBusinessService['previewBoundRuleDraft']>[3],
+    versions: readonly { version: string }[], reason: string) {
+    const prepared = this.buildBoundRuleDraftCandidate(tenantId, context, source, changes), trimmed = reason?.trim();
+    if (!trimmed || trimmed.length > 500) throw new BadRequestException('规则变更原因须为1～500字');
+    if (!versions.some(row => row.version === source.version) || versions.length > 1000)
+      throw new ConflictException('原规则版本集合不可用');
+    // Core's existing neutral qualification normalization is part of the FULL
+    // candidate review, not an extra AI-editable field or a verified fact.
+    const explicit = structuredClone(source.config) as RentalRuleConfig;
+    for (const change of changes) {
+      const [group, property] = change.field.split('.');
+      (explicit[group as keyof RentalRuleConfig] as unknown as Record<string, unknown>)[property] = change.after;
+    }
+    const normalizations = [];
+    for (const property of ['documentTypes', 'minimumValidityDays'] as const) {
+      if (requestFingerprint(explicit.qualification[property]) !== requestFingerprint(prepared.config.qualification[property])) {
+        normalizations.push({ field: `qualification.${property}` as 'qualification.documentTypes' | 'qualification.minimumValidityDays',
+          before: structuredClone(explicit.qualification[property]), after: structuredClone(prepared.config.qualification[property]),
+          source: 'original_core_normalization' as const });
+        Object.assign(explicit.qualification, { [property]: prepared.config.qualification[property] });
+      }
+    }
+    if (requestFingerprint(JSON.parse(JSON.stringify(explicit))) !== prepared.preview.candidateConfigFingerprint)
+      throw new ConflictException('Core候选包含尚未展示的额外变更，请使用原完整规则流程');
+    const restoring = source.status !== 'draft';
+    return { ...prepared, normalizations, restoring, resultVersion: restoring ? nextRuleVersionNumber(versions) : source.version,
+      changeReason: restoring ? `恢复自版本 ${source.version}：${trimmed}` : trimmed,
+      restoreReason: restoring ? trimmed : null };
+  }
+
+  /** Refresh only the committed rule target, from the original repository.
+   * A saved draft remains outside active pricing and published-rule selection. */
+  async refreshBoundRuleDraftVersion(tenantId: string, context: BusinessContext, id: string) {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!identity?.userId || identity.tenantId !== tenantId || !workspaceId || identity.isSaasAdmin || identity.staffApi)
+      throw new ForbiddenException('规则缓存刷新缺少原业务范围');
+    if (typeof this.configStore.loadRuleVersionById !== 'function') throw new ServiceUnavailableException('原规则读取端口未装配');
+    const row = await this.configStore.loadRuleVersionById(tenantId, workspaceId, id);
+    if (!row || row.tenantId !== tenantId || row.categoryCode !== context.category.code)
+      throw new ConflictException('原规则缓存来源不可用');
+    const state = this.state(tenantId, context), existing = state.ruleVersions.find(version => version.id === row.id);
+    if (existing) Object.assign(existing, row); else state.ruleVersions.unshift(row);
+  }
+
   /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
     const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     // 不支持订单资质审核的品类即使收到旧客户端/直接 API 写入的隐藏字段，也只保留中性的关闭状态。
     // required=true 仍交给 validateRule 拒绝，避免把误配置静默“修好”后让管理员以为已生效。
-    const config = context.category.businessModel.supportsQualificationReview
-      ? input.config
-      : {
-          ...input.config,
-          qualification: { required: input.config.qualification.required, documentTypes: [], minimumValidityDays: 0 }
-        };
+    const config = this.normalizeRuleDraftConfig(context, input.config);
     this.validateRule(context, config);
     if (!input.changeReason?.trim()) throw new BadRequestException("规则变更原因不能为空");
     const existing = input.versionId ? state.ruleVersions.find((row) => row.id === input.versionId) : undefined;
@@ -5588,7 +5774,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (inspectionTemplates?.some((template) => template.tenantId !== tenantId || template.categoryCode !== context.category.code)) {
       throw new ConflictException("检查模板与报价租户或品类不一致");
     }
+    const inventoryBasis = await readRentalInventoryBasis(this.coreConfigStore, tenantId, this.workspaceOf(tenantId), input.lines);
+    assertInventoryBasisContext(inventoryBasis, input.lines, context.groups);
     const quote: RentalQuoteSnapshotV1 = {
+      inventoryBasis,
       inspectionTemplateSnapshots: inspectionTemplates?.map((template) => snapshotInspectionTemplate(context.category, template)),
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
       categoryCode: context.profile.categoryCode, categoryVersionId, sourceSnapshot,
@@ -5836,6 +6025,34 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       latitude: row.latitude === null ? undefined : Number(row.latitude),
       longitude: row.longitude === null ? undefined : Number(row.longitude)
     };
+  }
+
+  /** Original one-time quote address, normalized by the SAME Core producer.
+   * Server-only: no caller address, saved-address read/write, quote creation or
+   * reservation. A stored snapshot disagreement never becomes a new address. */
+  async readOneTimeDeliveryAddressForQuote(tenantId: string, context: BusinessContext, quoteId: string) {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!identity?.userId || !workspaceId || identity.tenantId !== tenantId || identity.audience !== 'client'
+      || identity.isSaasAdmin || identity.staffApi || context.profile.tenantId !== tenantId || context.settings.tenantId !== tenantId)
+      throw new ForbiddenException('本单地址读取缺少当前客户经营空间');
+    const binding = requestFingerprint(identity);
+    const quote = structuredClone(await this.loadQuote(tenantId, context, quoteId));
+    if (quote.id !== quoteId || quote.tenantId !== tenantId || quote.categoryCode !== context.category.code
+      || quote.request.customerType !== 'personal' || quote.request.customerId !== identity.userId)
+      throw new NotFoundException('原本单地址报价不存在');
+    if (!quote.request.deliveryAddressDraft || quote.request.deliveryAddressId || !quote.deliveryAddressSnapshot
+      || quote.deliveryAddressSnapshot.addressId || quote.consumedAt || quote.consumedOrderId
+      || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now())
+      throw new ConflictException('原报价不是可继续准备的本单地址');
+    // The original producer has an early one-time branch. Never substitute an
+    // address-book row or duplicate its normalization/phone-masking algorithm.
+    const canonical = await this.resolveDeliveryAddressSnapshot(tenantId, context, quote.request);
+    const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    if (!canonical || hash(canonical) !== hash(quote.deliveryAddressSnapshot))
+      throw new ConflictException('原本单地址输入与Core快照不一致');
+    if (requestFingerprint(getRequestIdentity()) !== binding || getRequestWorkspaceId() !== workspaceId)
+      throw new ForbiddenException('原本单地址读取期间客户范围变化');
+    return { quote, snapshot: structuredClone(canonical) };
   }
 
   /**

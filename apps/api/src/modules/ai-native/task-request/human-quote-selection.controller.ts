@@ -19,6 +19,13 @@ export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS = Symbol('AI_CLARIFIED_Q
 export class AiClarifiedQuoteSelectionController {
   constructor(@Inject(AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS)
     private readonly selections: ReturnType<typeof composeClarifiedQuoteSelectionRequests>) {}
+  @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.prepareSelection) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareSelection(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(async () => {
+      const command = validateQuoteSelectionHttpRequest('AiClarifiedQuoteSelectionPreparationInputDraft', body);
+      return validateQuoteSelectionResponse('AiClarifiedQuoteSelectionPreparationDraft', await this.selections.prepareSelection(request, command));
+    });
+  }
   @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.select) @HttpCode(200) @Header('Cache-Control', 'no-store')
   select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondHumanQuote(async () => {
@@ -33,6 +40,13 @@ export class AiClarifiedQuoteSelectionController {
       const command = parseClarifiedQuoteSelection(body);
       return validateQuoteSelectionResponse('AiQuoteSelectionReconcileResponseDraft',
         await this.selections.readOperation(request, command.selection, command.clarification));
+    });
+  }
+  @Post(AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT.readOriginalOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOriginalOperation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(async () => {
+      const command = validateQuoteSelectionHttpRequest('AiClarifiedQuoteSelectionOriginalOperationReadDraft', body);
+      return validateQuoteSelectionResponse('AiQuoteSelectionReconcileResponseDraft', await this.selections.readOriginalOperation(request, command));
     });
   }
 }
@@ -165,6 +179,11 @@ export class AiHumanQuoteOrderController {
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedReprepareEligibility) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSelectedReprepareEligibility(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedReprepareEligibility, body, command => this.orders.readSelectedReprepareEligibility(request, command)));
+  }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readSelectedRepreparePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readSelectedRepreparePreparation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedRepreparePreparation, body,
+      command => this.orders.readSelectedRepreparePreparation(request, command)));
   }
   @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.reprepareSelectedProposal) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reprepareSelectedProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {

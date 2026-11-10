@@ -15,7 +15,7 @@ import type { AiOrderRouteContextAuthority } from './order-route-context.authori
  * dispatch handler.
  */
 export interface AiBusinessReadFactsCompositionInput {
-  core: Pick<RentalCoreService, 'availability' | 'getOrder'> & AiCatalogReadPort;
+  core: Pick<RentalCoreService, 'readAvailability' | 'readOrderFacts'> & AiCatalogReadPort;
   memberships: AiMembershipCandidateReadPort;
   businessAuthority: AiBusinessReadAuthority;
   orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>;
@@ -60,8 +60,8 @@ export function composeAiBusinessReadFacts(
   input: AiBusinessReadFactsCompositionInput
 ): AiBusinessReadFactsComposition {
   requireMethod(input?.core, 'listItemGroupsPage');
-  requireMethod(input?.core, 'availability');
-  requireMethod(input?.core, 'getOrder');
+  requireMethod(input?.core, 'readAvailability');
+  requireMethod(input?.core, 'readOrderFacts');
   requireMethod(input?.memberships, 'listPersonalOptions');
   requireMethod(input?.businessAuthority, 'withRead');
   requireMethod(input?.orderAuthority, 'withOrderRead');

@@ -58,6 +58,7 @@ export { AI_ORDER_FACTS_DRAFT_SCHEMAS } from "./ai-order-facts-draft-schemas";
 export { AI_SCOPE_DRAFT_SCHEMAS } from './ai-scope-draft-schemas';
 export * from './ai-business-material-draft';
 export { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS } from './ai-business-material-draft-schemas';
+export * from './ai-order-explanation-http-v2';
 export * from './ai-scene-model-observation-draft';
 export { AI_SCENE_MODEL_OBSERVATION_SCHEMAS } from './ai-scene-model-observation-draft-schemas';
 export * from './ai-task-scene-observation-draft';
@@ -71,6 +72,7 @@ export * from "./ai-entry-http-draft";
 export * from "./ai-task-recovery-draft";
 export * from "./ai-task-observation-draft-schemas";
 export * from "./ai-scene-quote-http-draft";
+export * from "./ai-scene-quote-validation";
 export * from "./ai-client-policy-http-draft";
 export * from "./ai-original-policy-http-draft";
 export * from "./ai-retention-http-draft";
@@ -91,3 +93,12 @@ export * from "./ai-task-confirmation-history-draft";
 export * from "./ai-counting-http-draft";
 export * from "./ai-credit";
 export * from "./ai-client-entry-http-draft-schemas";
+export * from './ai-member-name';
+
+export * from './ai-task-rule-draft';
+
+export * from './ai-task-calendar-draft';
+
+export * from './ai-task-order-handoff';
+
+export * from './ai-task-read-policy';

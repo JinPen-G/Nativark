@@ -52,7 +52,8 @@ import {
   type CustomerMembershipPlanAssignment,
   type RentalOrder,
   type RentalPaymentMethod,
-  type RentalQuoteRequest
+  type RentalQuoteRequest,
+  type AiBookingOneTimeAddressEvidence
 } from "@rental-os/shared";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
@@ -75,6 +76,7 @@ import { ClientWechatAuthService } from "./client-wechat-auth.service";
 import { validateInspectionCustomerResponse } from "../rental-core/rental-inspection-customer-response";
 import { getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { evaluateDeliveryServiceArea } from './client-delivery-service-area';
 
 const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
 
@@ -1086,6 +1088,169 @@ export class ClientApiService {
     return quote;
   }
 
+  /** Current membership/qualification observation for the SAME original quote.
+   * The original Membership action gate owns relationship and certificate rules;
+   * this read creates no certificate revision, payer grant, reservation or order.
+   * Original snapshot inputs explain the check, not current permanent authority. */
+  async readQuoteBookingQualification(context: ClientRequestContext, quoteId: string) {
+    const scope = structuredClone(context), initial = getRequestIdentity();
+    this.requireActiveMembership(scope);
+    const assertCurrent = () => {
+      const current = getRequestIdentity();
+      if (scope.customerType !== 'personal' || !initial?.userId || current?.tenantId !== scope.tenantId
+        || current.workspaceId !== scope.workspaceId || current.userId !== scope.customerId || current.audience !== 'client'
+        || current.isSaasAdmin || current.staffApi || requestFingerprint(current) !== requestFingerprint(initial))
+        throw new ForbiddenException('预约资格读取缺少当前客户身份');
+    };
+    assertCurrent();
+    if (typeof quoteId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(quoteId))
+      throw new BadRequestException('原报价引用无效');
+    if (typeof this.memberships?.assertBookingQualificationForAction !== 'function')
+      throw new ServiceUnavailableException('原会员资格只读端口未就绪');
+    await this.currentWorkspace(scope);
+    const quote = structuredClone(await this.getQuote(scope, quoteId)), rule = quote.ruleSnapshot?.qualification;
+    if (quote.id !== quoteId || quote.tenantId !== scope.tenantId || quote.categoryCode !== scope.categoryCode
+      || quote.request.customerType !== 'personal' || quote.request.customerId !== scope.customerId
+      || quote.membershipSnapshot?.personalCustomerId !== scope.customerId)
+      throw new ForbiddenException('原报价会员或空间范围不匹配');
+    if (!rule || typeof rule.required !== 'boolean' || !Number.isFinite(Date.parse(quote.expiresAt))
+      || Date.parse(quote.expiresAt) <= Date.now() || quote.consumedAt || quote.consumedOrderId)
+      throw new ConflictException('原预约报价依据缺失、过期或已消费');
+    const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    const window = { validThroughAt: quote.request.endAt, minimumValidityFromAt: quote.request.startAt };
+    const check = async () => {
+      // Same action/window as original order confirmation; no transaction or
+      // lock is claimed here. Core repeats its own check inside final submission.
+      const result = await this.memberships.assertBookingQualificationForAction(scope.tenantId, scope.workspaceId,
+        structuredClone(quote.membershipSnapshot), structuredClone(rule), 'submit', structuredClone(window));
+      if (result?.ok !== true || rule.required && typeof result.qualificationType !== 'string')
+        throw new ServiceUnavailableException('原会员资格判定缺失');
+      return hash(result);
+    };
+    const resultFingerprint = await check();
+    const latest = structuredClone(await this.getQuote(scope, quoteId));
+    if (hash(latest) !== hash(quote)) throw new ConflictException('资格观察期间原报价已变化');
+    await this.currentWorkspace(scope);
+    if (await check() !== resultFingerprint) throw new ConflictException('资格观察期间原会员判定已变化');
+    // The last membership read may wait; do not accept a quote changed during it.
+    const closingQuote = structuredClone(await this.getQuote(scope, quoteId));
+    if (hash(closingQuote) !== hash(quote)) throw new ConflictException('资格关闭读取期间原报价已变化');
+    assertCurrent();
+    if (Date.parse(quote.expiresAt) <= Date.now()) throw new ConflictException('资格观察期间原报价已过期');
+    return { quoteId, tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      basisFingerprint: hash({ membership: quote.membershipSnapshot, rule, action: 'submit', window }), resultFingerprint,
+      qualified: true as const, source: 'original_membership_action_check' as const,
+      observation: 'current_membership_qualification_not_reserved' as const,
+      payerAuthorization: 'not_attested' as const, execution: 'not_attempted' as const, reservation: 'not_attempted' as const };
+  }
+
+  /** Server-only current service observation for an original owned quote. The
+   * existing quote-read Guard supplies identity; no caller service/window/amount
+   * is accepted, and Core's read port never releases or reserves capacity. */
+  async readQuoteServiceAvailability(context: ClientRequestContext, quoteId: string) {
+    const scope = structuredClone(context), identity = getRequestIdentity();
+    this.requireActiveMembership(scope);
+    if (scope.customerType !== 'personal' || identity?.tenantId !== scope.tenantId || identity.workspaceId !== scope.workspaceId
+      || identity.userId !== scope.customerId || identity.audience !== 'client' || identity.isSaasAdmin || identity.staffApi)
+      throw new ForbiddenException('服务报价读取缺少当前客户身份');
+    if (typeof this.serviceCapacities?.readAvailabilityForQuote !== 'function') throw new ServiceUnavailableException('服务容量只读端口未就绪');
+    await this.currentWorkspace(scope);
+    const first = structuredClone(await this.getQuote(scope, quoteId));
+    if (first.id !== quoteId || first.tenantId !== scope.tenantId || first.request.customerId !== scope.customerId
+      || first.consumedAt || first.consumedOrderId || !Array.isArray(first.serviceSnapshots) || first.serviceSnapshots.length > 20)
+      throw new ConflictException('原服务报价不可继续准备');
+    const observation = await this.serviceCapacities.readAvailabilityForQuote(scope.tenantId, structuredClone(first.serviceSnapshots));
+    const latest = structuredClone(await this.getQuote(scope, quoteId));
+    if (requestFingerprint(JSON.parse(JSON.stringify(first))) !== requestFingerprint(JSON.parse(JSON.stringify(latest))))
+      throw new ConflictException('服务容量读取中原报价已变化');
+    await this.currentWorkspace(scope);
+    const current = getRequestIdentity();
+    if (current?.tenantId !== scope.tenantId || current.workspaceId !== scope.workspaceId || current.userId !== scope.customerId
+      || current.audience !== 'client' || current.isSaasAdmin || current.staffApi) throw new ForbiddenException('服务报价客户范围已变化');
+    return { quoteId: first.id, tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      serviceSnapshotFingerprint: requestFingerprint(JSON.parse(JSON.stringify(first.serviceSnapshots))),
+      available: observation.available, capacityFingerprint: observation.fingerprint,
+      reservation: observation.reservation, maintenance: observation.maintenance };
+  }
+
+  /** Original quote-id delivery observation under the existing client read
+   * Guard. Persisted Core configuration and Core's original address producer
+   * supply separate current/historical facts. No raw contact/address content is
+   * emitted, and this does not confirm a Booking, submit an order or reserve. */
+  async readQuoteOneTimeDeliveryAvailability(context: ClientRequestContext, quoteId: string) {
+    const scope = structuredClone(context), initial = getRequestIdentity();
+    this.requireActiveMembership(scope);
+    const assertCurrent = () => {
+      const current = getRequestIdentity();
+      if (scope.customerType !== 'personal' || !initial?.userId || current?.tenantId !== scope.tenantId
+        || current.workspaceId !== scope.workspaceId || current.userId !== scope.customerId || current.audience !== 'client'
+        || current.isSaasAdmin || current.staffApi || requestFingerprint(current) !== requestFingerprint(initial))
+        throw new ForbiddenException('本单地址报价读取缺少当前客户身份');
+    };
+    assertCurrent();
+    if (typeof quoteId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(quoteId))
+      throw new BadRequestException('原报价引用无效');
+    if (typeof this.core?.readQuoteConfiguration !== 'function' || typeof this.business?.readOneTimeDeliveryAddressForQuote !== 'function')
+      throw new ServiceUnavailableException('本单地址原Core只读端口未就绪');
+    await this.currentWorkspace(scope);
+    const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    const readConfiguration = async () => {
+      const configuration = structuredClone(await this.core.readQuoteConfiguration(scope.tenantId));
+      if (configuration.tenantId !== scope.tenantId || configuration.workspaceId !== scope.workspaceId
+        || configuration.category.code !== scope.categoryCode || configuration.category.businessModel.deliveryDestination !== 'customer_address')
+        throw new ConflictException('本单地址配送配置范围已变化');
+      return configuration;
+    };
+    const configuration = await readConfiguration();
+    const original = await this.business.readOneTimeDeliveryAddressForQuote(scope.tenantId, configuration, quoteId);
+    if (!DELIVERY_MODES.has(original.quote.request.fulfillmentMode)
+      || !configuration.settings.fulfillment.enabledModes.includes(original.quote.request.fulfillmentMode)
+      || !configuration.locations.some(row => row.id === original.quote.request.fulfillmentLocationId
+        && row.status === 'enabled' && row.capabilities?.includes('delivery')))
+      throw new ConflictException('原本单地址配送方式或地点不可用');
+    const policy = configuration.settings.fulfillment.deliveryServiceArea;
+    const decision = evaluateDeliveryServiceArea(policy, original.snapshot);
+    const basis = (value: typeof configuration) => ({ tenantId: value.tenantId, workspaceId: value.workspaceId,
+      category: value.category, profileVersion: value.profile.configVersion, settingsVersion: value.settings.configVersion,
+      settingsUpdatedAt: value.settings.updatedAt, fulfillment: value.settings.fulfillment,
+      location: value.locations.filter(row => row.id === original.quote.request.fulfillmentLocationId) });
+    const latestConfiguration = await readConfiguration();
+    const latest = await this.business.readOneTimeDeliveryAddressForQuote(scope.tenantId, latestConfiguration, quoteId);
+    if (hash(original) !== hash(latest) || hash(basis(configuration)) !== hash(basis(latestConfiguration)))
+      throw new ConflictException('本单地址观察期间原报价或当前配送依据已变化');
+    await this.currentWorkspace(scope);
+    assertCurrent();
+    return { quoteId: original.quote.id, tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      quoteVersion: hash(original.quote), snapshotFingerprint: hash(original.snapshot), configurationFingerprint: hash(basis(configuration)),
+      serviceAreaFingerprint: hash({ policy, decision }), available: decision.allowed,
+      source: 'original_core_one_time_quote_snapshot' as const, observation: 'current_delivery_area_not_reserved' as const,
+      addressBook: 'not_read_or_written' as const, execution: 'not_attempted' as const, reservation: 'not_attempted' as const };
+  }
+
+  /** Minimal one-time Booking evidence from the original Core producer above.
+   * This server-only projection never returns contact/address content or saved
+   * IDs/revisions. Both observations bind current service area and original
+   * quote; neither the hash nor the observation authorizes order execution. */
+  async observeQuoteDeliveryAddress(context: ClientRequestContext, quoteId: string): Promise<AiBookingOneTimeAddressEvidence> {
+    const scope = structuredClone(context);
+    const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    const before = await this.readQuoteOneTimeDeliveryAvailability(scope, quoteId);
+    if (before.available !== true) throw new ConflictException('原本单地址当前不在获准配送服务区');
+    const quote = structuredClone(await this.getQuote(scope, quoteId));
+    const after = await this.readQuoteOneTimeDeliveryAvailability(scope, quoteId);
+    if (after.available !== true || hash(before) !== hash(after) || hash(quote) !== before.quoteVersion
+      || !quote.deliveryAddressSnapshot || hash(quote.deliveryAddressSnapshot) !== before.snapshotFingerprint
+      || !Number.isFinite(Date.parse(quote.createdAt)) || !Number.isFinite(Date.parse(quote.expiresAt))
+      || Date.parse(quote.expiresAt) <= Date.now())
+      throw new ConflictException('本单地址Booking观察期间原报价或当前服务区已变化');
+    return { source: 'original_quote_one_time_address' as const, quoteId: quote.id,
+      quoteCreatedAt: quote.createdAt, quoteExpiresAt: quote.expiresAt, snapshotFingerprint: before.snapshotFingerprint,
+      // Bind both the current configuration basis AND Core's area decision;
+      // no current configuration is ever written into the historical quote.
+      serviceAreaFingerprint: hash({ configurationFingerprint: before.configurationFingerprint,
+        serviceAreaFingerprint: before.serviceAreaFingerprint }) };
+  }
+
   async coupons(context: ClientRequestContext) {
     return this.business.listCurrentCustomerCoupons(context.tenantId, (await this.context(context.tenantId)), context.customerId);
   }
@@ -1147,8 +1312,18 @@ export class ClientApiService {
       || original.request.customerType !== 'personal') throw new NotFoundException("原下单操作不存在");
     const result = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey);
     if (result.state !== 'observed' || !result.orderId) return result;
-    await this.assertClientOrder(context, result.orderId);
-    return { ...result, payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const };
+    // Begin original accepted receipt closing observation.
+    // Order ACL and published workspace reads may wait after Core returned.
+    // Reopen the SAME original key/body; absence or a changed original witness
+    // cannot deliver an earlier observed result or authorize another submit.
+    const receipt = structuredClone(result);
+    await this.assertClientOrder(context, receipt.orderId);
+    await this.currentWorkspace(context);
+    const closing = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey);
+    const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
+    if (hash(closing) !== hash(receipt)) throw new ConflictException('原下单收据在当前授权读取期间已变化');
+    // End original accepted receipt closing observation.
+    return { ...receipt, payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const };
   }
 
   async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {

@@ -6,6 +6,7 @@ import { fingerprintAiProposalDraft } from '../proposal-binding-draft';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import type { ApprovedOrderPolicyAuthority, ApprovedOrderPolicyRequest } from './approved-order-composition.ports';
 import { approvedOrderCommandSchema, deniedOrder, orderContextHash } from './prisma-approved-order.source';
+import { AiScopeResolutionError } from '../ai-scope.repository';
 
 export interface PersistedApprovedOrderPolicyDependencies extends PersistedTaskAuthorizationDependencies {
   toolVersion: string;
@@ -34,6 +35,31 @@ export class PersistedApprovedOrderPolicyAuthority implements ApprovedOrderPolic
       || row.scopeKind !== access.scope.kind || row.audience !== access.audience || row.archivedAt !== null
       || Object.entries(access.scope).some(([key, value]) => row.scope[key as keyof typeof row.scope] !== value)) throw deniedOrder();
     return row;
+  }
+
+  /** A foreign workspace has no task-policy row in the current scope. That
+   * must not masquerade as an own task whose policy is unconfigured. Inspect
+   * ownership only on this failed path; it grants no read/execute permission,
+   * and successful policy/Guard/entitlement rechecks are unchanged. */
+  private async failure(error: unknown, taskId: string, tx?: Prisma.TransactionClient): Promise<AiTaskRepositoryError> {
+    const deniedScope = (value: unknown) => value instanceof AiScopeResolutionError
+      && ['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(value.code);
+    if (deniedScope(error)) return deniedOrder();
+    if (error instanceof AiTaskRepositoryError) {
+      if (error.code === 'AI_RESOURCE_UNAVAILABLE' && typeof taskId === 'string'
+        && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(taskId)) {
+        try {
+          const current = await this.authorization.scopes.resolveCurrent();
+          await this.task(current.context, taskId, tx);
+        } catch (visibility) {
+          if (deniedScope(visibility) || visibility instanceof AiTaskRepositoryError && visibility.code === 'AI_ACCESS_DENIED') return deniedOrder();
+          // Missing/corrupt scope or storage is still unavailable, not a proven
+          // authorization rejection and never evidence permitting a retry.
+        }
+      }
+      return error;
+    }
+    return unavailable();
   }
 
   private async action(context: AiExecutionContext, reference: ApprovedOrderPolicyRequest,
@@ -81,8 +107,7 @@ export class PersistedApprovedOrderPolicyAuthority implements ApprovedOrderPolic
         || requestFingerprint(initial) !== requestFingerprint(latest)) throw deniedOrder();
       return structuredClone(final);
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
-      throw unavailable();
+      throw await this.failure(error, request.taskId, tx);
     }
   }
 
@@ -96,8 +121,7 @@ export class PersistedApprovedOrderPolicyAuthority implements ApprovedOrderPolic
       if (orderContextHash(first) !== orderContextHash(current) || requestFingerprint(task) !== requestFingerprint(latest)) throw deniedOrder();
       return { context: structuredClone(current), scopeId: latest.scopeId };
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
-      throw unavailable();
+      throw await this.failure(error, taskId, tx);
     }
   }
 
@@ -112,8 +136,7 @@ export class PersistedApprovedOrderPolicyAuthority implements ApprovedOrderPolic
         || latest.status !== 'RUNNING' || latest.cancelRequestedAt !== null) throw deniedOrder();
       return { context: structuredClone(current), scopeId: latest.scopeId };
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
-      throw unavailable();
+      throw await this.failure(error, taskId, tx);
     }
   }
 }

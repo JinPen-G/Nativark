@@ -68,9 +68,14 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     const subject = parse(subjectSchema, await db.aiAutomationSubject.findFirst({ where: { id: policy.subjectId, ...scope } }));
     if (subject.id !== policy.subjectId || subject.tenantId !== scope.tenantId || subject.workspaceId !== scope.workspaceId
       || subject.expiresAt <= now) throw unavailable();
-    const workspace = await db.businessWorkspace.findFirst({ where: { tenantId: scope.tenantId, id: scope.workspaceId, status: 'ACTIVE' },
-      select: { id: true, tenantId: true, status: true } });
-    if (!workspace || workspace.tenantId !== scope.tenantId || workspace.id !== scope.workspaceId || workspace.status !== 'ACTIVE') throw unavailable();
+    // Independent subjects have no user session for tenant freezing to revoke.
+    // Read the current tenant with its workspace; a live policy/space alone must
+    // never authorize new automated work for a frozen or disabled tenant.
+    const workspace = await db.businessWorkspace.findFirst({ where: { tenantId: scope.tenantId, id: scope.workspaceId,
+      status: 'ACTIVE', tenant: { status: 'ACTIVE' } },
+      select: { id: true, tenantId: true, status: true, tenant: { select: { id: true, status: true } } } });
+    if (!workspace || workspace.tenantId !== scope.tenantId || workspace.id !== scope.workspaceId || workspace.status !== 'ACTIVE'
+      || workspace.tenant?.id !== scope.tenantId || workspace.tenant.status !== 'ACTIVE') throw unavailable();
     const eventRow = await db.aiBusinessFailureOutbox.findFirst({ where: { id: eventId, ...scope } });
     const event = parse(eventSchema, eventRow);
     if (event.id !== eventId || event.tenantId !== scope.tenantId || event.workspaceId !== scope.workspaceId

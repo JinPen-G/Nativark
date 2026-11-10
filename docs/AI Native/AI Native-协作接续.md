@@ -1,69 +1,39 @@
 # AI Native：当前协作接续
 
-> 更新日期：2026-11-04。负责人要求的顺序是先修原63项，再逐编号二次确认并修复Codex28项及独立押金缺口，随后在本主树连续推进原AI Native任务。两份问题清单现已按原触发收口；正式任务仍须逐项满足原门槛，不以局部绿色或无需真人签字直接改100%。
+> 更新日期：2026-11-10。当前现场为负责人要求的两树成果紧急归集，唯一主树为`claude-ai-native-foundation`。覆盖前接续全文见[主树原稿](../../output/ain-emergency-consolidation-20261110/source-before/docs/AI%20Native/AI%20Native-协作接续.md)；原未解决事项全文仍见[既有开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。旧派工、心跳和完成声明不构成恢复施工或外部访问许可。
 
-## 当前目标与权威入口
+## 当前目标与结果
 
-新fork“AI Native主线-服务端 (A)”已完成原AIN-02合同冻结职责：固定基线`1bca2603b3f84c2c52f3dcccc0d2cea3085ddcf2`经源“AI Native主线-服务端”全文独立核对，原G1～G4已满足，Completed/100%。正式版本、生产者/消费者、各端成功/拒绝/失效/断线/旧协议、兼容回退及证据边界统一见[冻结确认](<AI Native-开发记录.md#ain02-contract-freeze-confirmed-20261104>)；旧候选/暂停/失败记录保留历史，不再作为当前未完队列。此100%仅为当前版本合同冻结，不代表AIN-12完整聊天/沙箱、真实业务/宿主/供应商或生产发布通过。不恢复旧loop、不接管源会话AIN-08；本次三册归档提交按[清单](../../output/takeover-20261102-ed5rs4ug/freeze-closeout-A-i8w0bwhc/delivery.json)核对。
+负责人要求因硬盘异常把现有服务端1、2全部成果合入本主树，并明确不再新增C盘备份。两侧保持停写，当前只完成主树成果归集、源码核接、必要修复及有界验证，不恢复分树施工或扩展新功能。
 
-源“AI Native主线-服务端”继续独立AIN-08只读可用性片；新A独占AIN-02客户出版、原两份验证及记录/接续，任务表仅跨原门槛后更新百分比，需求正文不改。源会话AIN-08成果仍须按其固定交付核验，不能夹入A的提交。其他客户端文件归属仍按具体文件核验，不凭idle/无diff/未送达消息接管。原63/Codex28与独立押金触发已收口，不恢复旧队列。对话历史/生命周期/原受理日志、关闭及轮换、订单首次模型执行与原结果均保留；局部开业只到Task元数据，未接开业执行/事实/采用；订单仍缺其他能力/旧历史接手/完整恢复消费。unknown始终按原键读取，日志不授权限；清理、隐藏、取消请求和TTL均不证明未消耗。需求v1.14/任务v1.18及G1～G4不变，本轮未启浏览器/真实服务、迁移、外联、推送/合main或生产启用。
+原订单人工交接、显式三项只读政策以及首字/首卡宿主共57个阶段条目已经叠合为42个实际源码文件。主树原报价再准备、optional runId、订单材料、会员和日历消费者保留。两侧全部源码差异逐项核定，没有未分类的独有源码；全部成果原稿归入本主树[两份档案与核接回执](../../output/ain-emergency-consolidation-20261110/peer-results/main-intake-receipt.json)。旧阶段文档、本机配置及私有产物只作原稿，不替代现行四册、当前授权或运行依赖。
 
-- 正式范围、依赖和唯一百分比表：[需求](<AI Native-需求.md>)、[开发任务](<AI Native-开发任务.md>)。本次仅据全文冻结证据更新AIN-02状态/百分比及原汇总；任务正文/依赖和其他任务进度不变。
-- 已做/剩余及证据：[原28项实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)、[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)及同页完整阶段；AIN-02最近入口为[集中收口阶段](<AI Native-开发记录.md#ain02-consumer-contract-closeout-20261104>)。
-- 原63项与Codex28项/押金修复的完整阶段、实际命令和未验边界统一在[原业务记录](../管理后台/管理后台-开发记录.md#local-integration-20261101)，[后台现行接续](../管理后台/管理后台-协作接续.md)定位业务余项。原63及后继29项已在对话原生Code Review UI标fixed，不新增MD问题表；这不是全库修后独立审查或正式专项验收。
-- 项目组成与阅读路线：[README](../../README.md)、[开发指南](../公共技术资料/开发指南/项目-开发指南.md#25-跨模块阅读路线)、[AGENTS](../../AGENTS.md)。
-- 原文追溯：[2026-10-28整理前接续](<AI Native-开发记录.md#接续原文保全2026-10-28>)、[本次精简前原文及哈希](../../output/repair-current-20261101-uotDQk/handoff-before-codex-ej7q0775/manifest.json)。历史“58+5开放/Codex后置”只定位当时阶段，不能恢复为当前队列。
+完整阶段证据、原失败、两处政策类型修正及最终SHA见[开发记录](<AI Native-开发记录.md#ain-emergency-consolidation-20261110>)和[整合回执](../../output/ain-emergency-consolidation-20261110/final-receipt.json)。主树实际源码B10首字/首卡一组冒烟1/1通过；12个API、25个后台入口及其依赖图strict/noEmit诊断0。源码整合和归集完成不代表原任务G4，唯一进度只见[开发任务](<AI Native-开发任务.md>)，本阶段没有新增100%。
 
-## 工作树与写入归属
+## 主树与写入归属
 
-| 项目 | 当前定位与限制 |
+三树共同HEAD仍为`a064c473279fa58973ffc5f52fd2d6479e496512`，成果为未提交WIP；此SHA不是reset目标。当前不暂存、提交、合main、推送、迁移、部署或生产启用。实际分支/index及无合并中间态见[现场回执](../../output/ain-emergency-consolidation-20261110/git-state.json)。
+
+| 位置 | 当前职责 |
 | --- | --- |
-| 唯一施工树 | `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`，分支`ai/ai-native-contracts-s01-20261002`，已固定合同批次`fae3d20a`/`8375ebf9`/`cb7971eb`/`6614b4eb`；当前HEAD及未提交归属以Git核验为准 |
-| 服务端本片 | 新fork“AI Native主线-服务端 (A)”接替已删除旧会话，独占AIN-02：客户HTTP schema、entry-management取消边界、shared/index、API leaf/OpenAPI、原publication/scene-host测试及记录/接续。源“AI Native主线-服务端”独占AIN-08 Core/availability/read composition/tools/catalog-runner及相关测试WIP；固定范围见[库存切片](<AI Native-开发记录.md#ain08-bounded-availability-20261104>)。共享index/提交互斥，不夹带对方源码；当前HEAD/提交状态按Git及本片清单核对 |
-| 并行客户端 | 原前端/MCP/Harness后继归原会话，本次整合的固定保全已接入；只协调具体文件冲突，不凭idle或共享文件接管其工作 |
-| 固定整合 | 根目录修复`fd870b3d`、本树独有`69c6c89e`及MCP/Harness保全`08d41945`经本地main同步至`a1013774`。负责人两树停写后又按固定清单同步未提交文档/源码20,676路径；其后本树新业务WIP未再固定同步 |
-| 保全 | 根WIP stash `50553f58`、本树WIP stash `85f8377e`与逐文件原像保留；`output/ain02-20261030/review-origin-20261101`保存原63项/根阶段，当前私有证据在`output/repair-current-20261101-uotDQk`，不清理未知WIP/output/锁 |
-| 操作限制 | 已授权本地修复提交及此前固定整合，不追辅助树活动HEAD、不推送/合main/迁移/启服务/外联或生产启用；新片核实际HEAD、status、暂存、MERGE_HEAD/CHERRY_PICK_HEAD及归属 |
+| `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation` | 本对话负责主树代码、公共契约/装配及唯一四册；后续获授权施工从这里接手 |
+| `claude-ain08-facts-20261105`／ag-服务端1 `01a1bf34-f061-74c2-b588-3e21385c4b49` | 停写；成果已归主树，原树和未提交现场保留，不追活动HEAD或自行同步公共文件 |
+| `claude-ai-native-gateway-closeout-20261106-src`／ag-服务端2 `01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 停写；成果已归主树，原树和未提交现场保留，不自行恢复开发或验证 |
 
-本轮不续派旧A/B任务，不读取或同步辅助树，不新建心跳。原[Agent接入](../Agent接入改造/Agent接入改造-协作接续.md)、[MCP服务](../MCP服务/MCP服务-协作接续.md)、[Harness插件](../Harness插件/Harness插件-协作接续.md)各自独立维护，不替换原AI Native服务端或继承本专项进度。
+两侧发现尚未交出的源码、归属冲突或真实阻塞应立即向主对话`01a1be68-da55-7f13-9536-79be07cb2093`报告原任务号、固定路径、错误证据及需要主树处理的事项。主树负责核接，外部资源和旧Goal状态不由派工自动恢复。
 
-## 服务端未完成事项
+## 后续核心入口及未完项
 
-当前优先将可闭合全文的原任务实现、验证并按门槛更新百分比；只有具体前置阻塞才切其他可做任务。通知设置、计数标准装配、超八字段连续澄清及已有公共合同不重写。
+1. **原AIN-15报价再准备：** 后端只读定位和[会话WIP](../../apps/admin/src/features/ai-native/quote-reprepare-session.ts)已保留、类型核查通过，仍缺新材料发起、完整前端选择/对比消费、再准备后独立新批准及原Core收据闭环。不要让用户手填Step/ActionInput/planHash；unknown只核原操作，不换键重发。入口和前像在`output/ain-human-reprepare-locator-core-20261110/`，前置正向链见[原报价选单阶段](<AI Native-开发记录.md#ain-conversation-quote-selection-core-20261109>)。
+2. **原AIN-13/ENTRY-05人工交接及只读政策：** 新代码已合回，完整消费者行为尚未独立收口。仅显式管理员配置原read_metadata/read_events/read_step_terminal政策，不自动种政策、不授模型或Core执行；保留原CAS、TTL、当前权限及三项独立原收据，部分/unknown不得重发。侧树原验证结果与候选均在主树成果档案内，不能借作者的绿色替代主树验收。
+3. **原AIN-25：** 真实首字/首卡组件及关闭、重开、React效果重放代码已回收，一组离线宿主冒烟通过；真实浏览器可见性、完整场景、容量/SLO、队列/背压/公平性/告警仍需原门槛。客户端报告不成为经营或计费事实；原11同账与累计资源要求保持。
+4. **其余原任务：** 05→06→07完整供应商/能力/往返及故障前置、12/13～16完整Agent和多角色资料隔离、17～28可靠事件/知识隐私/员工与平台治理/组合灰度及交付缺口均保留，详见[原28项摘要](<AI Native-开发记录.md#原28项当前实施摘要>)和[完整未完原文](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。不重开已有100%条目，不新增Reserved或边缘能力。
+5. **客户与ENTRY：** 当前两端三Action以原证据为准；六不可用Action、其他audience、匿名/企业、跨surface重绑定、媒体弱网及真实设备仍需完成。详见[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)，不以档案/报告数量或本次局部绿色加分。
 
-| 原任务 / 域 | 尚需处理或核实 | 入口 / 证据 |
-| --- | --- | --- |
-| AIN-08业务只读 | 源会话库存片一次独立反例已修并复验，当前16文件固定WIP尚未提交。开业源membership plans/activeMembers/roleAssignments仍缺底层有界读取，原历史/四品类真实对照和适用实测未齐，不升全文100% | [固定库存切片](<AI Native-开发记录.md#ain08-bounded-availability-20261104>)及该阶段清单/原日志；A不接管源码 |
-| AIN-05/11/25 | 管理计数、持久CALLS、recorded生成及AppModule已接；三场景HTTP/多轮变体、真实计数/能力/费率、平台专用audit生产者、平台旧任务善后及SLO仍有缺口 | [模型组合](../../apps/api/src/modules/ai-native/task-model-gateway.composition.ts)，记录“标准计数与原任务计数执行链”“平台探测标准入口与停用后历史” |
-| AIN-06/09/13/15/21/22 | 混合模型/业务完整恢复、多行组合与原范围核对、企业身份和完整报价/预约链；客户上下文澄清不等于业务参数选择，unknown不重派 | [请求场景](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)、原28项/ENTRY摘要及“超限澄清有界连续轮” |
-| AIN-12/14/16 | 后台完整消息/事件及实际场景消费；通知设置以外的获准分区、普通资料写入、变化后重确认、原Core提交与失败恢复 | [正式providers](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)、原28项摘要；只读任务中心不等于完整可执行助手 |
-| AIN-10/17/18/24 | 正式知识管理authority、真实对象ACL、撤回/删除跨实例传播、外部副本/备份；限定事件完整生产/处理、死信乱序；影子待办不等于业务异常解决 | 原知识合同阶段、原28项及[隐私模块](../../apps/api/src/modules/ai-native/privacy/README.md) |
-| AIN-19/20/23及ENTRY-06 | 员工政策精确mutation receipt、首次released-input标准取消收尾、失效草稿历史载荷及真实媒体/宿主全链；品类高风险发布/资格/采用和模型消费仍缺 | 记录“员工原任务取消与收据合同”及原28项摘要；不恢复暂停的品类治理专项 |
-| AIN-03/24～28及适用ENTRY | 旧B02兼容、真库跨进程竞争/宕机、全端/四品类组合、供应商/文件/宿主、安全隐私、性能与独立交付证据 | 记录“待补的验收证据”“近期完整功能节点”及AIN-01原门槛；真实环境需另核授权 |
+以上保留原任务范围、编号、依赖和验收；恢复功能施工须沿负责人当次授权。每个完整核心切片只做必要定向冒烟和类型检查，跨原G1～G4门槛后维护唯一任务表；未跨档的缺口留记录，不能把合并或档案数量当100%。
 
-旧业务有界分页、事件ready、知识assertBound按原日志保留为历史失败、同入口待复核。公共契约消费者原3项旧前提/依赖失败已修，17/17通过；最近protocol-output再次保留原编译断言、用本树源码/私有client解析通过，不外推全仓回归。
+## 验证与资源边界
 
-## 业务修复保留与边界
+本阶段只用主树原离线preload、固定不可达数据库地址和本树output内audit/TEMP/cache。TypeScript5.9.3、shared正式源码出口和同一个主树既有隔离Prisma Client；未重建共享dist、安装依赖、启服务或访问真实HTTP/DB/DNS/模型/支付/对象存储。档案内私有生成物没有接入当前依赖。
 
-- 稳定行计价、冻结历史日历/币种/费用及原核减来源、逐段多营销/券/会员和原价后继、分批实际时点净额、换货新物资格/独立检查/交付/服务容量、资产处置同源恢复均保留。多行共享预算、现价再次换货跨新增期权益、全租期后换货、旧缺历史及复杂套装分摊仍有未开放组合；原缺陷收口不等于这些组合交付。
-- 企业全账分页、原父回款/核销/冲销完整来源、现金/企业核销分账及原键恢复已接；存量核账、正式终态重开/复杂超收仍缺。线下实收押金已补原来源/凭证/权限/原键/收据及资金审计同事务，模拟门不放宽；真实预授权、线上押金供应商及实际用量完整结算仍不能称闭环。
-- 当前成员/ALS/own-location、主体共同锁和文件冻结/原内容/回收门保持。后台订单命令生命周期、归还原批次跨入口互斥、续租乱序与配货版本、型号照片恢复及服务端归档凭证已修；实际上传、DOM/打印和已登录宿主未验。
-- AI显式设置准入保留旧政策/当前权益、原Gateway单账及累计资源。任务中心拒绝已接原runner收尾；重新准备须完整FAILED/NONE拒绝结果，POSSIBLE/UNKNOWN/消费事实仍只核原请求。模型特殊字符凭据泄漏检查已补；真实计数冷启动/供应商及完整场景未外推。
-
-## main侧能力与后续装配
-
-main已有AI配置安全、平台额度申请/SaaS批准/空间分配、BYOK只记调用与Token、租户调用记录、设置简化与客户端授权入口。供应商模型列表/多模型/默认模型配置保留，协议识别候选不等于推理验证。
-
-AI工作中心/Copilot现有前端效果不能代替真实聊天选择→冻结模型引用→原Gateway、正式任务事件及确认消费者接通；需求双入口增量原样保留。main原input_wait冒烟的`input_wait acknowledgement is uncertain`仍按原键/账务定位，真实费率/能力/安全部署未据本修复开放。
-
-## 验证与下一入口
-
-原五项141项、Codex业务166项及末次相关定向、AI39项/完整报价选择9项通过，API六入口/后台九入口noEmit零诊断；不同集合不相加，末次改动只引用其定向复验。实际命令、失败和修法见[业务阶段](../管理后台/管理后台-开发记录.md#local-integration-20261101)。这不是全库修后独立审查或真实DB/HTTP/供应商/浏览器证据，任务百分比保持原表。
-
-AIN-02本次合同冻结已完成，不再等待旧核查或恢复旧修复队列；任何后继接口变更仍须核正式版本、生产者/消费者及兼容回退，当前冻结不是永久执行许可或后继任务自动验收。A完成本次三册归档后不自动扩大到其他专项。AIN-08库存片独立反例与修后复验已登记，源会话保留未提交源码；底层开业源有界读取及原全文实测仍按其归属处理，不将本片当整项完成。
-
-本轮所有Node仍预加载`tests/fixtures/ai-native/prisma-offline-preload.cjs`，固定`mysql://offline:offline@127.0.0.1:1/rental_os_offline`；当前`output/takeover-20261102-ed5rs4ug/runtime.cjs`设置本树绝对审计、writeRoot、TEMP/TMP/cache并禁compile cache，解析本树shared源码及已保全`output/repair-current-20261101-uotDQk/generated`私有client。未覆盖installed/shared client或dist，不为索引复制或重生成client；旧`ain02-20261030/prisma-current`保留但不能证明新增字段。
-
-文档检查仅验证白名单链接/入口和任务表算术，不证明业务完成；原导航三份缺失历史附件仍保留追溯，不伪造或删引用变绿。本轮不读`.env`、安装、启服务/浏览器、访问真实HTTP/DB/DNS/模型/支付/对象存储、迁移、推送/合main或生产启用。旧隔离容器/服务/专用库不自动复用或清理，资源定位仍在原AIN-01记录。
-
-未来[Runtime/Provider SDK替换](<未来规划/AI Native-Runtime替换方案.md>)与[通用SaaS底座](<../平台底座/未来规划/平台底座-通用化与开源方案.md>)仅设计和回退条件，不授权当前替换、抽离或开源。
+42文件语法、37入口类型及一组离线冒烟不等于全仓、真实宿主、数据库、供应商或正式G4通过。旧环境/数据库/备份现场和验证失败仍保留原证据，不继承访问许可；文档导航三条既有历史缺链保持实际状态，不伪造历史文件补绿。

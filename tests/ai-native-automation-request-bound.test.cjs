@@ -23,6 +23,7 @@ function fixture(audience = 'operator', mode = 'shadow') {
   const now = new Date(), scope = { tenantId: 'tenant-a', workspaceId: 'workspace-a' };
   const actor = user(), eventId = randomUUID(), expiry = new Date(now.getTime() + 3600000);
   const state = Object.fromEntries(['events', 'inspections', 'subjects', 'policies', 'inputs', 'scopes', 'budgets', 'plans', 'tasks', 'runs', 'grants', 'operations'].map(key => [key, new Map()]));
+  state.tenantStatus = 'ACTIVE';
   let active = true, writes = 0, taskCreates = 0, loseTaskReply = false, loseReviewReply = false, afterEventRead;
   const match = (row, where) => !!row && Object.entries(where).every(([key, value]) => {
     if (key === 'OR') return value.some(part => match(row, part));
@@ -75,7 +76,8 @@ function fixture(audience = 'operator', mode = 'shadow') {
     aiScope: delegate('scopes'), aiBudgetPolicy: delegate('budgets'), aiTaskPlanPolicy: delegate('plans'), aiTask: delegate('tasks'), aiRun: delegate('runs'),
     aiAutomationReviewGrant: delegate('grants'), aiAutomationReviewOperation: delegate('operations'),
     rentalOrder: { findFirst: async () => ({ id: 'order-a', ...scope, fulfillmentLocationId: 'location-a', returnLocationId: null }) },
-    businessWorkspace: { findFirst: async () => ({ id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE' }) },
+    businessWorkspace: { findFirst: async () => ({ id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE',
+      tenant: { id: scope.tenantId, status: state.tenantStatus } }) },
     tenant: { findUnique: async () => ({ subscription: { startAt: new Date(now.getTime() - 1000), endAt: expiry }, subscriptionSegments: [] }) },
     $queryRaw: async () => [],
     $transaction: async work => {
@@ -95,7 +97,8 @@ function fixture(audience = 'operator', mode = 'shadow') {
     assert.equal(identity.userId, actor.id); assert.equal(identity.workspaceId, scope.workspaceId); assert.equal(identity.staffApi, audience === 'staff');
     return { id, ...scope };
   } };
-  const request = { headers: { authorization: `Bearer ${auth.signAccessToken({ sub: actor.id, tid: scope.tenantId, sid: 'session-a', aud: audience, exp: Math.floor(Date.now() / 1000) + 600 })}` } };
+  const request = { headers: { authorization: `Bearer ${auth.signAccessToken({ sub: actor.id, tid: scope.tenantId, sid: 'session-a',
+    wid: scope.workspaceId, aud: audience, exp: Math.floor(Date.now() / 1000) + 600 })}` } };
   const subscriptions = { readCategoryCommercialContext: async () => ({ revision: 1, serviceStatus: 'active', newBusinessAllowed: true,
     entitlements: [{ code: 'ai.native.use', available: true, categories: [] }] }) };
   const dependencies = { db, auth, guard, core, clock: () => now, automation: { policyId: 'policy-a', subscriptions } };
@@ -133,6 +136,24 @@ function fixture(audience = 'operator', mode = 'shadow') {
     } };
 }
 const code = expected => error => error.getResponse?.().code === expected;
+
+test('current automation source rejects a frozen or disabled tenant even while its workspace, subject and policy stay enabled', async () => {
+  const { PrismaAutomationAuthority } = require('../apps/api/src/modules/ai-native/automation/prisma-automation.authority');
+  const f = fixture();
+  const source = new PrismaAutomationAuthority(f.db, 'policy-a', { check: async () => assert.fail('inspect does not grant a budget') }, f.dependencies.clock);
+  const initial = await source.inspect(f.eventId);
+  assert.equal(initial.context.actor.kind, 'automation');
+  assert.equal(initial.context.scope.workspaceId, f.scope.workspaceId);
+  f.state.tenantStatus = 'FROZEN';
+  await assert.rejects(source.inspect(f.eventId), error => error.code === 'unavailable');
+  f.state.tenantStatus = 'DISABLED';
+  await assert.rejects(source.inspect(f.eventId), error => error.code === 'unavailable');
+  f.state.tenantStatus = 'ACTIVE';
+  assert.equal((await source.inspect(f.eventId)).creationKey, initial.creationKey);
+  assert.equal(f.state.subjects.get('subject-a').enabled, true);
+  assert.equal(f.state.policies.get('policy-a').mode, 'shadow');
+  assert.deepEqual(f.stats(), { writes: 0, taskCreates: 0 });
+});
 
 test('CCB12 default-off routes require original read ports and bind current Bearer, body and ALS independently', async () => {
   assert.deepEqual(HumanAutomationRequestModule.register().controllers, []);

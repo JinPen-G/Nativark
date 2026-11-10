@@ -22,6 +22,8 @@ export async function aiTaskHasUnresolvedEffects(tx: Prisma.TransactionClient, s
     ] }, select: { id: true } })
     || calls.length && (await tx.aiInvocationAdmission.findFirst({ where: { ...workspace, callId: { in: calls },
       status: { notIn: ['completed', 'cancelled', 'revoked'] } }, select: { id: true } })
+    // The original workspace usage contract persists `unknown`, unlike the
+    // budget ledger's `pending_reconciliation`. Neither spelling proves settled.
     || await tx.aiUsageReservation.findFirst({ where: { ...workspace, callId: { in: calls },
-      status: { in: ['reserved', 'pending_reconciliation'] } }, select: { id: true } })));
+      status: { in: ['reserved', 'unknown', 'pending_reconciliation'] } }, select: { id: true } })));
 }

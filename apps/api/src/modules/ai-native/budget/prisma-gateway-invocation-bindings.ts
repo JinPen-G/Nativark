@@ -146,7 +146,11 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
         } else if (step.toolCode === TASK_TEXT_MODEL_TOOL && this.modelPolicy) {
           // Explicit server scene policy, not a flag inferred from Agent input.
           // Original publication/plan permission remains the execution gate.
-          if (hasMedia || !step.inputRef || input.mode !== 'invoke' || !tx.aiTaskActionInput) throw new BudgetError('FORBIDDEN');
+          // A server-registered native result selector is not media. The closed
+          // parser below validates its frozen selector contract and features;
+          // even a native policy cannot admit images/audio on this text step.
+          if (hasMedia && this.modelPolicy.nativeToolResults !== true
+            || !step.inputRef || input.mode !== 'invoke' || !tx.aiTaskActionInput) throw new BudgetError('FORBIDDEN');
           const saved = await tx.aiTaskActionInput.findFirst({ where: { id: step.inputRef, scopeId: step.scopeId,
             taskId: step.taskId, runId: step.runId, toolCode: step.toolCode, toolVersion: step.toolVersion,
             fingerprint: step.requestFingerprint } });
@@ -154,6 +158,12 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
             || saved.runId !== step.runId || saved.toolCode !== step.toolCode || saved.toolVersion !== step.toolVersion
             || saved.fingerprint !== step.requestFingerprint || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
           const frozen = parseTaskModelInput(saved.payload, this.modelPolicy);
+          // A matching frozen hash certifies contents, not another task/run's
+          // authority. Reject foreign selectors before CAS locks or INSERT.
+          for (const message of frozen.intent.messages) for (const part of message.content) {
+            if (part.kind === 'tool_result_reference' && (part.reference.taskId !== step.taskId
+              || part.reference.runId !== step.runId)) throw new BudgetError('FORBIDDEN');
+          }
           if (frozen.identityHash !== taskModelIdentity(principal.context)
             || requestFingerprint(frozen.intent) !== requestFingerprint(input.intent)
             || requestFingerprint(frozen.configuration) !== requestFingerprint(input.configuration)

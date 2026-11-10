@@ -29,6 +29,15 @@ function createFakePrisma({ registrationMode = "manual" } = {}) {
   const now = () => new Date();
   const tables = { profiles: [], memberships: [], accounts: [], reviews: [] };
   const calls = [];
+  // Prisma atomic numeric updates, including the real ordinary-profile column.
+  // Defaults represent the new schema field in declared fixtures, not a production fallback.
+  const applyData = (row, data, defaults) => {
+    for (const [field, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && typeof value.increment === 'number') {
+        row[field] = (row[field] ?? defaults()[field]) + value.increment;
+      } else row[field] = value;
+    }
+  };
   const table = (rows, model, defaults) => ({
     async findFirst({ where, orderBy }) {
       calls.push(`${model}.findFirst`);
@@ -54,13 +63,14 @@ function createFakePrisma({ registrationMode = "manual" } = {}) {
         error.code = "P2025";
         throw error;
       }
-      Object.assign(row, data, { updatedAt: now() });
+      applyData(row, data, defaults);
+      row.updatedAt = now();
       return row;
     },
     async updateMany({ where, data }) {
       calls.push(`${model}.updateMany`);
       const hits = rows.filter((row) => matches(row, where));
-      hits.forEach((row) => Object.assign(row, data));
+      hits.forEach((row) => applyData(row, data, defaults));
       return { count: hits.length };
     },
     async upsert({ where, create, update }) {
@@ -78,7 +88,7 @@ function createFakePrisma({ registrationMode = "manual" } = {}) {
   const prisma = {
     calls,
     tables,
-    customerProfile: table(tables.profiles, "customerProfile", () => ({ status: "active", mergedIntoCustomerId: null, email: null, identityNoMasked: null })),
+    customerProfile: table(tables.profiles, "customerProfile", () => ({ status: "active", mergedIntoCustomerId: null, email: null, identityNoMasked: null, ordinaryRevision: 1 })),
     customerMembership: table(tables.memberships, "customerMembership", () => ({ levelName: "普通会员", status: "active" })),
     customerAccount: table(tables.accounts, "customerAccount", () => ({ status: "active", passwordHash: null, mustChangePassword: false })),
     customerMembershipReview: table(tables.reviews, "customerMembershipReview", () => ({ status: "pending", reason: null, reviewedBy: null, reviewedAt: null, sourceWorkspaceId: null, qualificationType: null, requestKey: null })),
@@ -311,6 +321,36 @@ void (async () => {
     assert.equal(created.skipped, undefined);
     assert.ok(created.customerId);
     console.log("  PASS create-only import: duplicates skipped without writes; new membership keeps original policy");
+  }
+
+  // Ordinary-profile revision is maintained by the same real repository used
+  // by both original callers. These predicates do not prove MySQL locking or
+  // an AI approval; approval consumption is validated by the separate task chain.
+  {
+    const { prisma, memberships } = build();
+    const customers = new SharedCustomerRepository(prisma);
+    const created = await memberships.registerPersonal("tenant-a", { name: "Original name", phone: "13800000031", channel: "admin" }, "op");
+    const customerId = created.customerId, profile = prisma.tables.profiles.find(row => row.id === customerId);
+    assert.equal(profile.ordinaryRevision, 1);
+    assert.equal(await memberships.updateOwnProfile("tenant-a", customerId, { name: "Self-service name", email: "synthetic@example.test" }), true);
+    assert.equal(profile.ordinaryRevision, 2, "original Boolean update participates in the shared revision");
+    await customers.updateProfile("tenant-a", customerId, { name: "Operator name", ordinaryRevision: 0 });
+    assert.equal(profile.ordinaryRevision, 3, "caller-supplied revision cannot reset the server-owned counter");
+    const before = JSON.stringify(profile);
+    assert.equal(await customers.updateOrdinaryNameAtRevision("tenant-a", customerId, 1, "Original name", "Stale name", prisma), undefined);
+    assert.equal(await customers.updateOrdinaryNameAtRevision("other-tenant", customerId, 3, "Operator name", "Foreign name", prisma), undefined);
+    assert.equal(await customers.updateOrdinaryNameAtRevision("tenant-a", customerId, 3, "Self-service name", "Wrong basis", prisma), undefined);
+    assert.equal(JSON.stringify(profile), before);
+    const result = await customers.updateOrdinaryNameAtRevision("tenant-a", customerId, 3, "Operator name", "CAS name", prisma);
+    assert.equal(result.name, "CAS name"); assert.equal(result.ordinaryRevision, 4);
+    assert.equal(result.email, "synthetic@example.test", "name-only CAS cannot clear full-profile email");
+    assert.equal(result.phone, "13800000031"); assert.equal(result.identityVerified, false);
+    assert.equal(await customers.updateOrdinaryNameAtRevision("tenant-a", customerId, 3, "Operator name", "Duplicate name", prisma), undefined);
+    profile.mergedIntoCustomerId = "synthetic-merged-target";
+    assert.equal(await customers.updateOrdinaryNameAtRevision("tenant-a", customerId, 4, "CAS name", "Merged name", prisma), undefined);
+    assert.equal(profile.ordinaryRevision, 4);
+    await assert.rejects(() => customers.updateOrdinaryNameAtRevision("tenant-a", customerId, 0, "CAS name", "Invalid", prisma), /INVALID_ORDINARY_PROFILE_CAS/u);
+    console.log("  PASS 普通资料真实版本：原本人写入/运营写入单调递增，原姓名 CAS 拒绝陈旧/外租户/错依据/重复/合并对象且不改 email/phone/实名事实");
   }
 
   console.log("统一注册流程专项全部通过");

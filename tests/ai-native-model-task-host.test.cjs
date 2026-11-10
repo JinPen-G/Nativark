@@ -137,8 +137,8 @@ async function clarificationHost(turns, kind) {
   return { ...h, root, answer };
 }
 
-test('image clarification resumes through current media authority and the original cumulative budget', { timeout: 20000 }, async () => {
-  const h = await clarificationHost(2, 'image');
+for (const kind of ['image', 'audio']) test(`${kind} clarification resumes through current media authority and the original cumulative budget`, { timeout: 20000 }, async () => {
+  const h = await clarificationHost(2, kind);
   assert.equal((await h.root.application.start(h.query)).outcome.status, 'paused');
   const original = h.clone(h.state.aiTaskActionInput[0]);
   const fingerprint = h.state.aiTaskExecutionBudget[0].policyFingerprint;
@@ -164,8 +164,10 @@ test('image clarification resumes through current media authority and the origin
     assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, fingerprint);
     assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, BigInt(turn + 1));
     assert.equal(h.state.aiRun[turn].resourceOriginRunId, h.query.runId);
+    assert.ok(h.state.aiRun[turn].startedAt instanceof Date);
+    assert.equal(h.state.aiRun[turn].startedAt.toISOString(), h.config.clock().toISOString());
     const stored = h.state.aiTaskActionInput.at(-1).payload;
-    assert.equal(stored.intent.requiredFeatures.includes('image'), true);
+    assert.equal(stored.intent.requiredFeatures.includes(kind), true);
     assert.deepEqual(stored.media, original.payload.media);
     assert.equal(stored.intent.messages.at(-1).content[0].text.includes(submission.answers[0].value), true);
   }
@@ -174,7 +176,7 @@ test('image clarification resumes through current media authority and the origin
   assert.equal(new Set(h.state.aiGatewayInvocation.map(row => row.callId)).size, 3);
   assert.equal(h.state.aiGatewayAccountingReceipt.length, 3);
 
-  const revoked = await clarificationHost(1, 'image');
+  const revoked = await clarificationHost(1, kind);
   assert.equal((await revoked.root.application.start(revoked.query)).outcome.status, 'paused');
   const pending = await revoked.root.application.readInput({ taskId: revoked.query.taskId });
   revoked.modelControl.mediaActive = false;
@@ -205,7 +207,22 @@ test('model clarification creates successive frozen runs without resetting the o
     assert.equal(h.state.aiTaskExecutionBudget[0].consumedActiveMs, BigInt((turn + 1) * 10));
     assert.equal(h.state.aiRun[turn].resourceOriginRunId, h.query.runId);
     assert.equal(h.state.aiRun[turn].inputReceiptId, result.receipt.receiptId);
+    const successor = h.state.aiRun[turn], parent = h.state.aiRun[turn - 1];
+    assert.ok(successor.startedAt instanceof Date, 'an activated successor run needs its own start timestamp');
+    assert.equal(successor.startedAt.toISOString(), h.config.clock().toISOString());
+    assert.ok(parent.endedAt instanceof Date); assert.equal(parent.status, 'SUCCEEDED');
+    assert.ok(successor.startedAt >= parent.endedAt);
+    const originalStartedAt = successor.startedAt.toISOString();
+    const originalEndedAt = successor.endedAt?.toISOString() ?? null;
+    const sentBeforeReplay = h.modelControl.sent.length;
+    assert.equal((await composeTaskModelHost(h.config).application.resume(submission)).continuation.reason, 'receipt_replayed');
+    assert.equal(h.state.aiRun[turn].startedAt.toISOString(), originalStartedAt);
+    assert.equal(h.state.aiRun[turn].endedAt?.toISOString() ?? null, originalEndedAt);
+    assert.equal(h.modelControl.sent.length, sentBeforeReplay);
   }
+  assert.equal(h.state.aiRun[2].status, 'SUCCEEDED');
+  assert.ok(h.state.aiRun[2].endedAt instanceof Date);
+  assert.ok(h.state.aiRun[2].endedAt >= h.state.aiRun[2].startedAt);
   assert.deepEqual(h.state.aiTaskActionInput[0], originalInput);
   assert.deepEqual(h.state.aiTaskRunPlan[0], originalPlan);
   assert.equal(h.state.aiTask[0].status, 'SUCCEEDED');
@@ -216,7 +233,12 @@ test('model clarification creates successive frozen runs without resetting the o
   assert.equal(h.modelControl.sent.length, 3);
   assert.equal(new Set(h.modelControl.sent.map(r => r.callId)).size, 3);
   assert.equal(h.state.aiGatewayInvocation.length, 3);
-  assert.equal(h.state.aiTaskExecutionCharge.length, 12);
+  // Each original run now also records preparation and startup/final overhead;
+  // these charges cannot disappear merely because the synthetic clock is idle.
+  assert.equal(h.state.aiTaskExecutionCharge.length, 21);
+  assert.equal(h.state.aiTaskExecutionCharge.filter(c => c.stepId != null).length, 12);
+  assert.equal(h.state.aiTaskRunPreparation.length, 3);
+  assert.equal(h.state.aiTaskRunOverhead.length, 6);
   assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
   assert.ok(h.state.aiRun.every(r => r.leaseOwnerId === null));
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedOutputBytes, h.state.aiTaskResultArtifact.reduce((n, r) => n + r.outputBytes, 0n));
@@ -224,7 +246,7 @@ test('model clarification creates successive frozen runs without resetting the o
   assert.ok(h.modelControl.sent[2].messages.at(-1).content.includes(h.state.aiTaskInputReceipt[1].answers[0].value));
 });
 
-test('model clarification lost answer acknowledgement reads the same successor without redispatch', { timeout: 20000 }, async () => {
+for (const pendingRegistration of [false, true]) test(`model clarification lost answer acknowledgement reads the same successor without redispatch${pendingRegistration ? ' with an untouched pending registration' : ''}`, { timeout: 20000 }, async () => {
   const h = await clarificationHost(1);
   assert.equal((await h.root.application.start(h.query)).outcome.status, 'paused');
   const pending = await h.root.application.readInput({ taskId: h.query.taskId }), submission = h.answer(pending);
@@ -241,8 +263,135 @@ test('model clarification lost answer acknowledgement reads the same successor w
   assert.equal(h.modelControl.sent.length, 1);
   const successor = h.state.aiRun[1];
   assert.equal(successor.inputReceiptId, replay.receipt.receiptId);
-  const finished = await composeTaskModelHost(h.config).application.start({ taskId: h.query.taskId, runId: successor.id });
+  assert.ok(successor.startedAt instanceof Date);
+  const originalStartedAt = successor.startedAt.toISOString();
+  assert.equal(successor.endedAt ?? null, null, 'input receipt does not attest model completion');
+  // A successor's plan may commit before the preparation reply is lost. The
+  // explicit continuation must reuse that frozen plan under a new valid lease,
+  // not regenerate its model input or treat it as already dispatched work.
+  let planReplyLost = false;
+  h.storeControl.beforeCommit = async draft => {
+    if (!planReplyLost && draft.aiTaskRunPlan.some(row => row.runId === successor.id)
+      && !h.state.aiTaskRunPlan.some(row => row.runId === successor.id)) {
+      planReplyLost = true; h.storeControl.loseReply = true;
+    }
+  };
+  await assert.rejects(composeTaskModelHost(h.config).application.start({ taskId: h.query.taskId, runId: successor.id }),
+    error => ['AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'].includes(error.code));
+  h.storeControl.beforeCommit = null;
+  assert.equal(planReplyLost, true);
+  assert.equal(h.modelControl.sent.length, 1);
+  assert.equal(h.state.aiStep.filter(row => row.runId === successor.id).length, 0);
+  const originalPreparationCharges = h.clone(h.state.aiTaskExecutionCharge.filter(row => row.runId === successor.id));
+  const originalPreparation = h.clone(h.state.aiTaskRunPreparation.find(row => row.runId === successor.id));
+  assert.equal(originalPreparationCharges.length, 1);
+  assert.equal(originalPreparationCharges.filter(row => row.stepId !== null).length, 0);
+  const preparationCharge = originalPreparationCharges[0];
+  assert.equal(preparationCharge.resource, 'ACTIVE_MS');
+  assert.equal(preparationCharge.status, 'RECORDED');
+  assert.equal(preparationCharge.actionId, null);
+  assert.equal(preparationCharge.gatewayInvocationId, null);
+  assert.ok(originalPreparation.completedAt && originalPreparation.measurementHash);
+  assert.equal(originalPreparation.prepared, true, 'the original committed plan is observed, not new execution authority');
+  assert.equal(originalPreparation.chargeId, preparationCharge.chargeId);
+  assert.equal(preparationCharge.actualAmount, originalPreparation.activeMs);
+  assert.equal(preparationCharge.outcomeFingerprint, originalPreparation.measurementHash);
+  assert.equal(preparationCharge.evidenceRef, `preparation:${originalPreparation.id}`);
+  assert.equal(h.state.aiGatewayInvocation.filter(row => row.runId === successor.id).length, 0);
+  assert.equal(h.state.aiTaskExecutionPhaseStart.filter(row => row.runId === successor.id).length, 0);
+  assert.equal(h.state.aiTaskResultArtifact.filter(row => row.runId === successor.id).length, 0);
+  const originalSuccessorInput = h.clone(h.state.aiTaskActionInput.filter(row => row.runId === successor.id));
+  const originalSuccessorPlan = h.clone(h.state.aiTaskRunPlan.find(row => row.runId === successor.id));
+  assert.equal(originalPreparation.planHash, originalSuccessorPlan.planHash);
+  const { parseTaskModelInput, continueTaskModelMaterial } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const policy = { sceneCode: h.config.gatewayScene.sceneCode, maxOutputTokens: h.config.gatewayScene.maxOutputTokens };
+  const previous = parseTaskModelInput(h.state.aiTaskActionInput.find(row => row.runId === h.query.runId).payload, policy);
+  const expectedMaterial = continueTaskModelMaterial(previous,
+    h.state.aiTaskResultArtifact.find(row => row.runId === h.query.runId).payload, h.state.aiTaskInputReceipt[0].answers, policy);
+  assert.deepEqual(originalSuccessorInput[0].payload.intent.messages, expectedMaterial.messages);
+  const released = h.state.aiRun.find(row => row.id === successor.id);
+  assert.equal(released.leaseOwnerId, null);
+  assert.equal(released.leaseExpiresAt, null);
+  if (pendingRegistration) {
+    const metadata = await h.root.authorization.tasks.readMetadata(h.query.taskId);
+    const lease = await h.root.authorization.tasks.claimRun({ taskId: h.query.taskId, runId: successor.id,
+      holderId: 'registration-only-host', leaseMs: 100000, expectedTaskRevision: metadata.revision,
+      expectedRunRevision: released.revision, expectedFencingToken: released.fencingToken.toFixed(0) });
+    await h.root.model.registrations.register({ taskId: h.query.taskId,
+      registrationRef: originalSuccessorPlan.payload.steps[0].registrationRef, expectedTaskRevision: metadata.revision,
+      lease: { runId: successor.id, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } });
+    const currentTask = await h.root.authorization.tasks.readMetadata(h.query.taskId), currentRun = h.state.aiRun.find(row => row.id === successor.id);
+    await h.root.authorization.tasks.releaseRun({ taskId: h.query.taskId, runId: successor.id, holderId: lease.holderId,
+      expectedTaskRevision: currentTask.revision, expectedRunRevision: currentRun.revision,
+      expectedFencingToken: currentRun.fencingToken.toFixed(0) });
+    assert.equal(h.state.aiStep.find(row => row.runId === successor.id).status, 'PENDING');
+    assert.deepEqual(h.state.aiTaskExecutionCharge.filter(row => row.runId === successor.id), originalPreparationCharges);
+    assert.deepEqual(h.state.aiTaskRunPreparation.find(row => row.id === originalPreparation.id), originalPreparation);
+  }
+  const rebuilt = composeTaskModelHost({ ...h.config, host: { holderId: 'continued-model-host', leaseMs: 100000 } });
+  const { taskId: _task, ...answer } = submission;
+  // Returned contradictory traces cannot turn PENDING into a no-consumption
+  // proof. These are read-only fixture responses, never fabricated DB effects.
+  if (pendingRegistration) {
+    assert.deepEqual(h.state.aiTaskRunPlan.find(row => row.runId === successor.id), originalSuccessorPlan);
+    assert.equal(require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(originalSuccessorPlan.payload), originalPreparation.planHash);
+  }
+  for (const table of ['aiTaskExecutionCharge', 'aiGatewayInvocation', 'aiTaskExecutionPhaseStart', 'aiTaskResultArtifact']) {
+    let observed = false;
+    h.storeControl.beforeRead = async (name, query, view) => {
+      if (name === table && query?.where?.runId === successor.id && view !== h.state
+        && h.trace.at(-1) === `${table}.read`) {
+        observed = true;
+        view[table].push({ scopeId: 'scope-a', taskId: h.query.taskId, runId: successor.id });
+      }
+    };
+    await assert.rejects(rebuilt.continueOriginalInput(answer), error => {
+      assert.equal(error.code, 'AI_RESOURCE_UNAVAILABLE', `contradictory original trace: ${table}`);
+      return true;
+    });
+    h.storeControl.beforeRead = null;
+    assert.equal(observed, true);
+    assert.deepEqual(h.state.aiTaskRunPlan.find(row => row.runId === successor.id), originalSuccessorPlan);
+    assert.equal(h.modelControl.sent.length, 1);
+    assert.equal(h.state.aiGatewayInvocation.length, 1);
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 1n);
+    assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 0n);
+  }
+  const parentArtifact = h.state.aiTaskResultArtifact.find(row => row.runId === h.query.runId);
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  let parentChanged = false;
+  const transaction = h.db.$transaction.bind(h.db), parentBefore = h.clone(parentArtifact);
+  h.db.$transaction = (work, options) => transaction(async tx => {
+    if (options?.isolationLevel === 'RepeatableRead') {
+      const read = tx.aiTaskResultArtifact.findUnique.bind(tx.aiTaskResultArtifact);
+      tx.aiTaskResultArtifact.findUnique = async query => {
+        const row = await read(query);
+        if (row?.id !== parentArtifact.id) return row;
+        parentChanged = true;
+        const changed = h.clone(row);
+        changed.payload.text += ' changed original result';
+        changed.contentHash = requestFingerprint(changed.payload);
+        changed.outputBytes = BigInt(Buffer.byteLength(JSON.stringify(changed.payload), 'utf8'));
+        return changed;
+      };
+    }
+    return work(tx);
+  }, options);
+  await assert.rejects(rebuilt.continueOriginalInput(answer), error => error.code === 'AI_ACCESS_DENIED');
+  h.db.$transaction = transaction;
+  assert.equal(parentChanged, true);
+  assert.deepEqual(h.state.aiTaskResultArtifact.find(row => row.id === parentArtifact.id), parentBefore);
+  assert.equal(h.modelControl.sent.length, 1);
+  const continued = await rebuilt.continueOriginalInput(answer);
+  const finished = continued.execution;
+  assert.equal(finished.kind, 'run_outcome', JSON.stringify(finished));
   assert.equal(finished.outcome.status, 'succeeded');
+  assert.deepEqual(h.state.aiTaskActionInput.filter(row => row.runId === successor.id), originalSuccessorInput);
+  assert.deepEqual(h.state.aiTaskRunPlan.find(row => row.runId === successor.id), originalSuccessorPlan);
+  assert.deepEqual(h.state.aiTaskRunPreparation.find(row => row.id === originalPreparation.id), originalPreparation);
+  for (const charge of originalPreparationCharges) assert.deepEqual(h.state.aiTaskExecutionCharge.find(row => row.chargeId === charge.chargeId), charge);
+  assert.equal(h.state.aiRun[1].startedAt.toISOString(), originalStartedAt);
+  assert.ok(h.state.aiRun[1].endedAt instanceof Date);
   assert.equal(h.modelControl.sent.length, 2);
   assert.equal(h.state.aiTaskExecutionBudget.length, 1);
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
@@ -256,8 +405,18 @@ test('model clarification cannot obtain new quota by creating another run', { ti
     const pending = await h.root.application.readInput({ taskId: h.query.taskId });
     const result = await h.root.application.resume(h.answer(pending));
     if (turn < 4) assert.equal(result.continuation.outcome.status, 'paused');
-    else assert.deepEqual(result.continuation, { kind: 'unavailable', errorCode: 'AI_RUN_LIMIT' });
+    // The persistent runner now closes a known pre-reservation limit. Earlier
+    // completed runs remain partial task success; the untouched successor fails.
+    else assert.deepEqual(result.continuation, { kind: 'run_outcome',
+      outcome: { status: 'partially_succeeded', completedSteps: 0, cleanupFailed: 0 } });
   }
+  assert.equal(h.state.aiTask[0].status, 'PARTIALLY_SUCCEEDED');
+  assert.equal(h.state.aiRun.at(-1).status, 'FAILED');
+  assert.ok(h.state.aiRun.slice(0, -1).every(run => run.status === 'SUCCEEDED'));
+  assert.equal(h.state.aiStep.at(-1).effect, 'NONE');
+  assert.equal(h.state.aiStep.at(-1).resultRef, null);
+  assert.equal(h.state.aiGatewayInvocation.filter(row => row.runId === h.state.aiRun.at(-1).id).length, 0);
+  assert.equal(h.state.aiTaskExecutionCharge.filter(row => row.stepId === h.state.aiStep.at(-1).id).length, 0);
   assert.equal(h.modelControl.sent.length, 4);
   assert.equal(h.state.aiGatewayInvocation.length, 4);
   assert.equal(h.state.aiTaskExecutionBudget.length, 1);
@@ -368,4 +527,24 @@ test('model host cancellation during dispatch preserves original unknown occupan
   assert.equal(result.outcome.status, 'unknown'); assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
   assert.equal(h.state.aiGatewayInvocation.length, 1); assert.equal(h.modelControl.sent.length, 1);
   assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 1n); assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 0n);
+  const invocation = h.clone(h.state.aiGatewayInvocation), accounting = h.clone(h.state.aiGatewayAccountingReceipt);
+  assert.equal(accounting.length, 1); assert.equal(accounting[0].inputTokens, 1n); assert.equal(accounting[0].outputTokens, 2n);
+  assert.match(accounting[0].usageHash, /^[a-f0-9]{64}$/);
+  const originalCharges = h.clone(h.state.aiTaskExecutionCharge), budget = h.clone(h.state.aiTaskExecutionBudget[0]);
+  const cancelled = h.clone(h.state);
+  h.identity.session = false;
+  await assert.rejects(composeTaskModelHost(h.config).readOriginalRecovery(), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(composeTaskModelHost(h.config).recoverOriginal(), e => e.code === 'AI_ACCESS_DENIED');
+  assert.deepEqual(h.state, cancelled);
+  h.identity.session = true;
+  const recovered = await composeTaskModelHost({ ...h.config, host: { holderId: 'cancel-recovery-host', leaseMs: 100000 } }).recoverOriginal();
+  assert.equal(recovered.outcome.status, 'unknown');
+  assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.deepEqual(h.state.aiGatewayInvocation, invocation); assert.deepEqual(h.state.aiGatewayAccountingReceipt, accounting);
+  for (const row of originalCharges) assert.deepEqual(h.state.aiTaskExecutionCharge.find(current => current.chargeId === row.chargeId), row);
+  assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, budget.policyFingerprint);
+  assert.equal(h.state.aiTaskExecutionBudget[0].maxActiveMs, budget.maxActiveMs);
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 1n); assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 0n);
+  assert.equal(h.state.aiGatewayInvocation.length, 1); assert.equal(h.modelControl.sent.length, 1);
 });

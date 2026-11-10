@@ -10,6 +10,7 @@ import { aiQuoteCandidateInputSchema } from '../tools/quote-candidate-preparatio
 import { sealBusinessScenario } from '../tools/business-scenario-input';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { assertAiReadContextBinding } from '../tools/read-context-binding';
 
 const key = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const resourceId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -25,7 +26,9 @@ const quoteRequest = z.object({ requestKey: key, candidate: aiQuoteCandidateInpu
  * service's placeholders are preflight limitations, not an existing task's state.
  * It therefore never manufactures inputRef/revision/creationAllowed,
  * creates a task, registers a step, or invokes a model. All business reads use
- * the existing current Guard and are revalidated before returning the packet. */
+ * the existing current Guard and are revalidated before returning the packet.
+ * Snapshot the expected original parent before any Guard await. Compare it
+ * only after current authorization; the snapshot itself grants nothing. */
 export class AiBusinessScenePreparationService {
   constructor(private readonly dependencies: {
     orderAuthority(orderId: string): Pick<AiOrderRouteContextAuthority, 'withOrderRead'>;
@@ -46,12 +49,13 @@ export class AiBusinessScenePreparationService {
       creationAuthority: 'not_granted' as const };
   }
 
-  async prepareQuoteClarification(value: unknown) {
+  async prepareQuoteClarification(value: unknown, expectedContext?: AiExecutionContext) {
     const parsed = quoteRequest.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
-    const input = parsed.data;
+    const input = parsed.data, expected = expectedContext && structuredClone(expectedContext);
     return this.dependencies.quoteAuthority.withRead('quote_context', {}, async context => {
-      const materials = await this.dependencies.quote.prepareInput(input.candidate);
+      assertAiReadContextBinding(context, expected);
+      const materials = await this.dependencies.quote.prepareInput(input.candidate, 'not_requested', context);
       if (materials.payload.audience !== context.audience || requestFingerprint(materials.payload.scope) !== requestFingerprint(context.scope)) throw new ModelGatewayError('FORBIDDEN');
       return sealBusinessScenario('quote_clarification', {
         status: 'prepared_not_persisted' as const,
@@ -64,13 +68,14 @@ export class AiBusinessScenePreparationService {
     });
   }
 
-  async prepareOrderExplanation(value: unknown) {
+  async prepareOrderExplanation(value: unknown, expectedContext?: AiExecutionContext) {
     const parsed = orderRequest.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
-    const input = parsed.data;
+    const input = parsed.data, expected = expectedContext && structuredClone(expectedContext);
     return this.dependencies.orderAuthority(input.orderId).withOrderRead(async (context, orderId) => {
+      assertAiReadContextBinding(context, expected);
       if (orderId !== input.orderId) throw new ModelGatewayError('FORBIDDEN');
-      const materials = await this.dependencies.orderMaterial(orderId).prepare({ question: input.question });
+      const materials = await this.dependencies.orderMaterial(orderId).prepare({ question: input.question }, context);
       if (materials.payload.orderId !== orderId || materials.payload.audience !== context.audience
         || requestFingerprint(materials.payload.scope) !== requestFingerprint(context.scope)) throw new ModelGatewayError('FORBIDDEN');
       return sealBusinessScenario('order_explanation', {
@@ -82,12 +87,13 @@ export class AiBusinessScenePreparationService {
     });
   }
 
-  async prepareOpeningDiagnosis(value: unknown) {
+  async prepareOpeningDiagnosis(value: unknown, expectedContext?: AiExecutionContext) {
     const parsed = openingRequest.safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
-    const input = parsed.data;
+    const input = parsed.data, expected = expectedContext && structuredClone(expectedContext);
     return this.dependencies.openingAuthority.withRead('opening', { limit: 50 }, async context => {
-      const current = await this.dependencies.opening.read();
+      assertAiReadContextBinding(context, expected);
+      const current = await this.dependencies.opening.read({}, context);
       if (current.audience !== context.audience || requestFingerprint(current.scope) !== requestFingerprint(context.scope)) throw new ModelGatewayError('FORBIDDEN');
       if (input.sections.some(key => !current.sections.some(row => row.key === key))) throw new ModelGatewayError('INVALID_REQUEST');
       const selected = new Set(input.sections);

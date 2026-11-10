@@ -99,6 +99,8 @@ test("event page uses current scope/owner and a fixed task-local high-water curs
 test("all declared event variants decode only their permitted wire fields", async () => {
   const variants = [
     ["task.transition", { from: "running", to: "cancel_requested", reason: "cancel_requested" }],
+    ["step.registered", { stepId: "step-1", runId: "run-1", sequence: 1, stepRevision: 1 }],
+    ["task.input_refreshed", { requestId: "input-1", previousRevision: 1, revision: 2 }],
     ["step.changed", { stepId: "step-1", runId: "run-1", stepRevision: 2, status: "unknown", reason: "result_unknown" }],
     ["task.output_ready", { resultId: "result-1" }],
     ["access.revoked", { code: "AI_SCOPE_CHANGED" }]
@@ -109,6 +111,21 @@ test("all declared event variants decode only their permitted wire fields", asyn
     assert.equal(page.events[0].type, type); assert.deepEqual(page.events[0].data, data);
     assert.equal("payload" in page.events[0], false); assert.equal("initiator" in page.events[0], false);
   }
+});
+
+test('event CHECK migration preserves exactly the frozen public event kinds', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const root = path.resolve(__dirname, '..');
+  const contract = fs.readFileSync(path.join(root, 'packages/shared/src/ai-task-draft.ts'), 'utf8')
+    .split('export type AiTaskEventDraft =')[1].split('/** SSE')[0];
+  const expected = [...contract.matchAll(/type: "([a-z._]+)"/gu)].map(match => match[1]).sort();
+  assert.equal(expected.length, 6);
+  const sql = fs.readFileSync(path.join(root, 'apps/api/prisma/migrations/20261105230000_ai_task_event_contract_alignment/migration.sql'), 'utf8');
+  const actual = [...sql.matchAll(/'([a-z._]+)'/gu)].map(match => match[1]).sort();
+  assert.deepEqual(actual, expected);
+  assert.match(sql, /ALTER TABLE `ai_task_events`\s+DROP CHECK `ai_task_events_type`,\s+ADD CONSTRAINT `ai_task_events_type` CHECK/u);
+  assert.equal((sql.match(/ALTER TABLE/gu) ?? []).length, 1);
+  assert.doesNotMatch(sql, /DROP TABLE|DELETE FROM|UPDATE |TRUNCATE|NOT ENFORCED/iu);
 });
 
 test("empty caught-up page preserves cursor and is also reauthorized", async () => {

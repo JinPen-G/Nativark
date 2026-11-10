@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AI_BOOKING_DRAFT_CONTRACT_VERSION, type AiBookingDraft, type AiBookingHandoff, type AiBookingMaterial } from '@rental-os/shared';
+import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_OPERATION_OBSERVATION_VERSION,
+  type AiBookingDraft, type AiBookingHandoff, type AiBookingMaterial, type AiBookingOperationObservationDraft } from '@rental-os/shared';
 import type { AiCustomerEntrySurface, AiEntryActionDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
@@ -18,7 +19,9 @@ const hashJson = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringif
 
 export function composeClientBooking(input: {
   repository: PrismaClientBookingRepository; scope: AiClientMaterialScope; bindingHash: string; surface: AiCustomerEntrySurface;
-  loadMaterial(ref: string): Promise<Material>; assertCurrent(): Promise<void>; clock(): Date;
+  loadMaterial(ref: string): Promise<Material>; loadHistoricalMaterial?(ref: string): Promise<Material>;
+  assertCurrent(): Promise<void>; clock(): Date;
+  withReceiptRead<T>(read: () => Promise<T>): Promise<T>;
 }) {
   const repo = input.repository;
   const load = async (id: string) => {
@@ -89,6 +92,33 @@ export function composeClientBooking(input: {
   };
   const readHandoff = async (ref: string): Promise<AiBookingHandoff> =>
     freezeOriginalInput((await readHandoffMaterial(ref)).handoff);
+  const observeOperation = async (value: unknown): Promise<AiBookingOperationObservationDraft> => {
+    const { operationKey } = parseEntry(z.object({ operationKey: entryId }).strict(), value);
+    if (typeof input.withReceiptRead !== 'function') throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'receipt_read_policy_unavailable');
+    return input.withReceiptRead(async () => {
+      // Observe exact original metadata, never quote/material, lease or budget.
+      // A receipt's historical result revision is distinct from the live Draft.
+      const operation = structuredClone(await repo.operation(input.scope, operationKey));
+      const row = operation ? structuredClone(await load(operation.draftId)) : null;
+      if (row && operation && operation.resultRevision > row.revision)
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'receipt_draft_revision_invalid');
+      if (hashJson(await repo.operation(input.scope, operationKey)) !== hashJson(operation)
+        || row && hashJson(await load(row.id)) !== hashJson(row))
+        throw new AiClientEntryError('AI_REVISION_CONFLICT', 'receipt_or_draft_changed');
+      await input.assertCurrent();
+      const observed = input.clock();
+      if (!(observed instanceof Date) || !Number.isFinite(observed.getTime()))
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'clock_unavailable');
+      return freezeOriginalInput({ contractVersion: AI_BOOKING_OPERATION_OBSERVATION_VERSION,
+        operation: operation && row ? { state: 'observed' as const, operationKey, bookingDraftId: row.id, kind: operation.kind,
+          resultRevision: operation.resultRevision, handoffRef: operation.handoffRef,
+          businessSubmission: 'not_attested' as const, retryable: false as const }
+          : { state: 'unknown' as const, operationKey, retryable: false as const, nextAction: 'read_booking_operation' as const },
+        currentDraft: row ? { state: row.state, revision: row.revision, selectionRevision: row.selectionRevision,
+          expiresAt: row.expiresAt.toISOString(), expiredAtObservation: row.expiresAt <= observed } : null,
+        observedAt: observed.toISOString(), currentUse: 'not_authorized_by_receipt' as const });
+    });
+  };
   return Object.freeze({
     async create(value: unknown) {
       const { action, operationKey } = parseEntry(actionCommandSchema, value);
@@ -103,8 +133,24 @@ export function composeClientBooking(input: {
       catch { throw unknown(); }
     },
     async read(value: unknown) {
-      const ref = parseEntry(z.object({ bookingDraftId: z.string().uuid() }).strict(), value);
-      return freezeOriginalInput(view(await verified(await load(ref.bookingDraftId))));
+      const ref = parseEntry(z.object({ bookingDraftId: z.string().uuid() }).strict(), value), row = await load(ref.bookingDraftId);
+      if (row.state !== 'submitted') return freezeOriginalInput(view(await verified(row)));
+      // A consumed page request has no current quote/Action. Reauthorize the
+      // exact historical projection, never substitute a newly prepared quote.
+      if (!input.loadHistoricalMaterial || row.selectionRevision !== 1 || !row.selectedAt)
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'submitted_draft_history_unavailable');
+      const material = await input.loadHistoricalMaterial(row.materialRef);
+      if (material.row.inputHash !== row.inputHash || material.row.bindingHash !== row.bindingHash)
+        throw new AiClientEntryError('AI_ACCESS_DENIED', 'submitted_draft_basis_changed');
+      if (hashJson(await load(row.id)) !== hashJson(row)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'draft_changed');
+      await input.assertCurrent();
+      return freezeOriginalInput({ contractVersion: AI_BOOKING_DRAFT_CONTRACT_VERSION, bookingDraftId: row.id,
+        audience: 'customer' as const, surface: input.surface,
+        scope: { kind: 'workspace' as const, tenantId: input.scope.tenantId, workspaceId: input.scope.workspaceId },
+        state: 'submitted' as const, revision: row.revision, selectionRevision: row.selectionRevision,
+        inputFingerprint: row.inputHash, materialRef: row.materialRef, material: material.material,
+        createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString(),
+        execution: 'submitted_request_not_business_success' as const, action: null });
     },
     async choose(value: unknown) {
       const command = parseEntry(choiceSchema, value), row = await load(command.bookingDraftId);
@@ -163,14 +209,10 @@ export function composeClientBooking(input: {
       });
     },
     async readOperation(value: unknown) {
-      const { operationKey } = parseEntry(z.object({ operationKey: entryId }).strict(), value);
-      const operation = await repo.operation(input.scope, operationKey);
-      if (!operation) return { state: 'unknown' as const, operationKey, retryable: false as const, nextAction: 'read_booking_operation' as const };
-      const row = await load(operation.draftId);
-      await input.assertCurrent();
-      return { state: 'observed' as const, operationKey, bookingDraftId: row.id, kind: operation.kind,
-        resultRevision: operation.resultRevision, handoffRef: operation.handoffRef,
-        businessSubmission: 'not_attested' as const, retryable: false as const };
-    }
+      // Keep the frozen HTTP receipt shape; the server host opts into the new
+      // versioned wrapper explicitly. Both paths use the same read-only policy.
+      return freezeOriginalInput((await observeOperation(value)).operation);
+    },
+    observeOperation
   });
 }

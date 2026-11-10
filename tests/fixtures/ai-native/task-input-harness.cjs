@@ -23,7 +23,7 @@ async function taskInputHarness(extraTables = {}, constraints = {}) {
     aiTask: [{ id: 'task-a', scopeId: 'scope-a', scopeKind: 'WORKSPACE', scope: aiPersistenceScopeColumns(scope), ownerKind: 'USER', ownerId: 'user-a', audience: 'OPERATOR',
       status: 'RUNNING', revision: 1, eventCursor: 0n, cancelRequestedAt: null, archivedAt: null, contractVersion: AI_TASK_DRAFT_VERSION,
       sceneCode: 'synthetic-clarification', sceneVersion: '1', createdAt: new Date(control.now), updatedAt: new Date(control.now) }],
-    aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', revision: 1, fencingToken: new Prisma.Decimal(1), leaseOwnerId: 'bootstrap',
+    aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', sequence: 1, revision: 1, fencingToken: new Prisma.Decimal(1), leaseOwnerId: 'bootstrap',
       leaseExpiresAt: new Date(control.now.getTime() + 100000), status: 'RUNNING', actorKind: 'USER', actorId: 'user-a' }],
     aiStep: [], aiTaskRunPlan: [], aiTaskResultArtifact: [], aiTaskExecutionBudget: [], aiTaskExecutionCharge: [], aiTaskEvent: [],
     aiGatewayInvocation: [], aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], operationLog: [], ...extraTables

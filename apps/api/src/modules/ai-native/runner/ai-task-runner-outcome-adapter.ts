@@ -63,6 +63,7 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
     async commit(input) {
       input = structuredClone(input);
       if (input.taskId !== input.lease.taskId) throw new AiTaskRunnerError('AI_INVALID_INPUT');
+      let resumeReceipt: import('./ai-task-runner.ports').AiTaskRunnerStepCommit | undefined;
       if (adapters.tasks && (input.outcome.status === 'succeeded' || input.outcome.status === 'failed')) {
         const metadata = await adapters.tasks.readMetadata(input.taskId);
         if (metadata.taskId !== input.taskId || metadata.revision !== input.taskRevision) throw new Error('AI_STORAGE_UNAVAILABLE');
@@ -72,6 +73,9 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
               holderId: input.lease.holderId, revision: input.lease.revision, fencingToken: input.lease.fencingToken } })));
           if (!matchesAcknowledgement(resumed, input.taskId, input.taskRevision, input.lease.revision, ['running'], 'resume')
             || resumed.runRevision === null || resumed.event.type !== 'task.transition' || resumed.event.data.from !== 'waiting_external') throw unknown();
+          // Preserve both original acknowledgements. Returning only the final
+          // revision would hide this CAS from the runner's exact receipt checks.
+          resumeReceipt = { taskRevision: resumed.event.taskRevision, lease: { ...input.lease, revision: resumed.runRevision } };
           input.taskRevision = resumed.event.taskRevision;
           input.lease.revision = resumed.runRevision;
         }
@@ -93,7 +97,8 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
         || nextRunRevision === null) throw unknown();
       const status = result.event.type === 'task.transition' ? result.event.data.to : undefined;
       const outcomeStatus = status === 'succeeded' || status === 'partially_succeeded' || status === 'cancelled' ? status : undefined;
-      return { taskRevision: result.event.taskRevision, lease: { ...input.lease, revision: nextRunRevision }, ...(outcomeStatus ? { outcomeStatus } : {}) };
+      return { taskRevision: result.event.taskRevision, lease: { ...input.lease, revision: nextRunRevision },
+        ...(resumeReceipt ? { resumed: resumeReceipt } : {}), ...(outcomeStatus ? { outcomeStatus } : {}) };
     }
   };
 }

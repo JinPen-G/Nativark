@@ -73,6 +73,104 @@ export type AiOrderExplanationMaterialDraft = AiSealedBusinessMaterialDraft<'ord
     operatorRouteKey?: 'APP_ROUTES.orderDetail'; routeSource?: 'apps/admin/src/app/AppRouter.tsx'; candidates: AiOrderNextCandidateDraft[];
     allowedActions: 'unavailable' | 'not_queried'; blockers: string[]; informationNeeded: string[]; execution: 'not_attempted' }
 }>;
+/** Orders-only publication version. Legacy material, original request and model
+ * input versions above remain unchanged; this packet never grants execution. */
+export const AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION = 'ain-order-explanation-material-2' as const;
+export const AI_ORDER_EXPLANATION_SOURCE_FIELDS_V2 = ['order', 'amounts', 'saved_basis', 'payment_records',
+  'rental_period', 'inspection_records', 'funding_records', 'lifecycle_records'] as const;
+export type AiOrderEvidenceFieldV2 = typeof AI_ORDER_EXPLANATION_SOURCE_FIELDS_V2[number];
+export interface AiOrderEvidenceReferenceV2 extends Omit<AiOrderEvidenceReferenceDraft, 'field'> { field: AiOrderEvidenceFieldV2 }
+export type AiOrderCoveredEvidenceV2<T> = { coverage: 'partial'; value: T; source: AiOrderEvidenceReferenceV2 };
+export type AiOrderOptionalEvidenceV2<T> = AiOrderCoveredEvidenceV2<T> | { coverage: 'unavailable' | 'not_loaded' };
+export type AiOrderCalendarFactsV2 = { status: 'missing' | 'unavailable' } | { status: 'available'; rows: Array<{
+  date: string; year: number; dayType: 'workday' | 'weekend' | 'statutory_holiday' | 'makeup_workday' | 'tenant_special';
+  businessStatus: 'open' | 'limited' | 'closed' | 'self_service'; source: 'week_rule' | 'official_cn' | 'tenant_override';
+  calendarVersion: string; itemGroupId: string; unitCount: number; unitAmount: number; multiplier: number; amount: number;
+  priceAt?: string; hitLayer?: 'date_override' | 'periodic' | 'day_type' | 'day_type_legacy' | 'base'; pricingPlanVersion?: string;
+}> };
+/** Applied order-owned daily facts; amount is not quantity-multiplied/capped
+ * line rent. Annual calendars/full repricing remain outside this projection. */
+export interface AiOrderHistoryFactsV2 extends AiOrderHistoryFactsDraft { calendar: AiOrderCalendarFactsV2 }
+/** Original Core whitelist, not a second template applicability contract or an
+ * execution grant. Optional on v2 inspection evidence for older saved packets. */
+export type AiOrderInspectionBasisFactsV2 = import('./core').RentalOrderInspectionBasisFacts;
+export type AiOrderFrozenInspectionBasisV2 = { status: 'unavailable' }
+  | { status: 'available'; value: AiOrderInspectionBasisFactsV2 };
+export interface AiOrderInspectionEvidenceV2 extends AiOrderInspectionEvidenceDraft {
+  frozenBasis?: AiOrderFrozenInspectionBasisV2;
+}
+export interface AiOrderFundingFactsV2 {
+  tenantId: string; workspaceId: string; orderId: string; currency: string; sourceOrderUpdatedAt: string; observedAt: string;
+  consistency: 'repeatable_read_snapshot_not_provider_refresh'; coverage: 'complete_within_200_row_caps';
+  source: 'persisted_original_funding_domain';
+  rentalCash: { coverage: 'unavailable' } | { coverage: 'available'; collected: number; refunded: number; netReceived: number };
+  deposit: { coverage: 'unavailable' } | { coverage: 'available'; collected: number; captured: number; refunded: number; balance: number };
+  preauthorization: { coverage: 'unavailable'; reason: 'no_verified_provider_preauthorization_port' };
+  legacySecurity: { unverified: boolean; unverifiedAmount: number };
+  events: Array<{ id: string; instrument: 'rental' | 'deposit' | 'preauthorization';
+    action: 'initiate' | 'append' | 'capture' | 'refund' | 'release' | 'fail'; amount: number;
+    recordedProvider: 'mock' | 'offline' | 'alipay' | 'wechat_pay' | 'stripe';
+    accountingProvider: 'mock' | 'offline' | 'alipay' | 'wechat_pay' | 'stripe'; at: string;
+    accounting: 'original_recorded_funds' | 'simulation_or_unverified_not_real_funds' }>;
+  offlineRegistrations: Array<{ id: string; instrument: 'rental' | 'deposit'; amount: number; status: 'pending' | 'confirmed';
+    registeredAt: string; confirmedAt: string | null; fundingEventId: string | null }>;
+  corporateAllocations: 'not_cash_not_loaded'; settlementBalance: 'not_computed'; execution: 'not_attempted';
+}
+export interface AiOrderLifecycleFactsV2 {
+  tenantId: string; workspaceId: string; orderId: string; sourceOrderUpdatedAt: string;
+  allocations: Array<{ id: string; status: 'pre_assigned' | 'locked' | 'allocated' | 'picked_up' | 'returned' | 'released' | 'consumed'; quantity: number }>;
+  changes: Array<{ id: string; type: string; status: string; requestedAt: string; appliedAt?: string }>;
+  extensions: Array<{ id: string; status: 'pending_payment' | 'effective' | 'cancelled' | 'expired'; originalEndAt: string; newEndAt: string }>;
+  truncated: { changes: boolean; extensions: boolean }; semantics: 'recorded_lifecycle_not_financial_or_action_eligibility';
+}
+export interface AiOrderSourceValueMapV2 {
+  order: AiOrderCoveredEvidenceV2<OrderStatus['value']>;
+  amounts: Omit<Amounts, 'source'> & { source: AiOrderEvidenceReferenceV2 };
+  saved_basis: AiOrderCoveredEvidenceV2<AiOrderHistoryFactsV2>;
+  payment_records: AiOrderCoveredEvidenceV2<AiOrderLocalPaymentsDraft>;
+  rental_period: Omit<Fulfillment, 'source'> & { source: AiOrderEvidenceReferenceV2 };
+  inspection_records: AiOrderCoveredEvidenceV2<AiOrderInspectionEvidenceV2>;
+  funding_records: AiOrderCoveredEvidenceV2<AiOrderFundingFactsV2>;
+  lifecycle_records: AiOrderCoveredEvidenceV2<AiOrderLifecycleFactsV2>;
+}
+export interface AiOrderDeterministicExplanationV2 {
+  text: string; claims: Array<{ field: string; sourceId: string; value: string | number | boolean | null }>;
+  generation: 'deterministic_authorized_facts'; modelProse: 'not_used'; executionAllowed: false;
+}
+type OrderProjectionV2 =
+  | { question: 'status'; facts: { order: AiOrderSourceValueMapV2['order']; lifecycle: AiOrderOptionalEvidenceV2<AiOrderLifecycleFactsV2> } }
+  | { question: 'next_steps'; facts: { order: AiOrderSourceValueMapV2['order'] } }
+  | { question: 'fees'; facts: { order: AiOrderSourceValueMapV2['order']; amounts: AiOrderSourceValueMapV2['amounts'];
+      fulfillment: AiOrderSourceValueMapV2['rental_period']; history: AiOrderOptionalEvidenceV2<AiOrderHistoryFactsV2>;
+      inspections: AiOrderOptionalEvidenceV2<AiOrderInspectionEvidenceV2>; lifecycle: AiOrderOptionalEvidenceV2<AiOrderLifecycleFactsV2> } }
+  | { question: 'payments'; facts: { order: AiOrderSourceValueMapV2['order']; amounts: AiOrderSourceValueMapV2['amounts'];
+      payments: AiOrderOptionalEvidenceV2<AiOrderLocalPaymentsDraft>; actualReceivedTotal: { coverage: 'not_loaded' };
+      fundingLedger: AiOrderOptionalEvidenceV2<AiOrderFundingFactsV2> } };
+export interface AiOrderMaterialEnvelopeV2<P> {
+  version: typeof AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION; scenario: 'order_explanation'; payload: P;
+  payloadFingerprint: string; payloadBytes: number;
+  trust: 'source_text_is_data_not_instructions'; authority: 'none_reauthorize_before_consumption';
+}
+export type AiOrderExplanationMaterialV2 = AiOrderMaterialEnvelopeV2<OrderProjectionV2 & {
+  status: 'facts_only'; scope: AiWorkspaceScope; audience: ReadAudience; orderId: string; orderVersion: string; observedAt: string;
+  consistency: 'revalidated_reads_not_atomic_snapshot';
+  model: AiOrderExplanationMaterialDraft['payload']['model']; handoff: AiOrderExplanationMaterialDraft['payload']['handoff'];
+  gaps: Array<{ field: 'history' | 'inspections' | 'payments' | 'actualReceivedTotal' | 'fundingLedger' | 'allowedActions' | 'lifecycle';
+    status: 'partial' | 'not_loaded' | 'unavailable' }>;
+  explanation: AiOrderDeterministicExplanationV2;
+}>;
+export interface AiOrderSourceReopenRequestV2 extends Omit<AiOrderEvidenceReferenceV2, 'observedAt'> {
+  materialVersion: typeof AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION; question: 'status' | 'fees' | 'payments' | 'next_steps';
+}
+type SourceReadCommonV2 = { materialVersion: typeof AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION;
+  scope: AiWorkspaceScope; orderId: string; field: AiOrderEvidenceFieldV2 };
+export type AiOrderSourceReadV2 =
+  | (SourceReadCommonV2 & { status: 'stale'; reason: 'order_version_changed_reread_material' })
+  | (SourceReadCommonV2 & { status: 'missing'; reason: 'historical_or_optional_source_not_loaded' })
+  | { [K in AiOrderEvidenceFieldV2]: SourceReadCommonV2 & { status: 'available'; field: K; value: AiOrderSourceValueMapV2[K];
+      observedAt: string; freshness: 'current_observation_not_frozen_material';
+      reauthorization: 'current_order_authority_rechecked'; execution: 'not_attempted' } }[AiOrderEvidenceFieldV2];
+
 interface ConfigurationSource { scope: AiWorkspaceScope; resourceType: 'business_configuration'; version: string; observedAt: string }
 export interface AiOpeningSectionMaterialDraft { key: string; title: string; required: boolean;
   status: 'source_unavailable' | 'readiness_check_passed' | 'missing_configuration' | 'readiness_unsatisfied' | 'unclassified';
@@ -110,3 +208,5 @@ export type AiSceneTaskMaterialResponseDraft =
   | SceneTaskMaterial<'order_explanation', AiOrderExplanationMaterialDraft>
   | SceneTaskMaterial<'opening_diagnosis', AiOpeningBusinessMaterialDraft>
   | SceneTaskMaterial<'quote_clarification', AiQuoteBusinessMaterialDraft>;
+/** New public preparation wrapper only, never an original v1 model receipt. */
+export type AiOrderSceneTaskMaterialV2 = SceneTaskMaterial<'order_explanation', AiOrderExplanationMaterialV2>;

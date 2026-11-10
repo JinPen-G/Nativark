@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient, type AiActorKind, type AiAudience } from "@p
 import { z } from "zod";
 import { AI_CONTRACT_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, type AiExecutionContext } from "@rental-os/shared";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
+import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -65,9 +66,18 @@ export function aiTaskAccessFromContext(context: AiExecutionContext, taskId: str
     audience: audience.toUpperCase() as AiAudience, ownerKind, ownerId,
     ...(actor.kind === "automation" ? { policyId: actor.policyId, policyRevision: actor.policyRevision, policyExpiresAt: { gt: now } } : {})
   };
-  const bindingKey = JSON.stringify([scope, audience, ownerKind, ownerId,
+  // The original tuple is persisted in creation fingerprints; changing it would
+  // orphan valid old receipts. It is NOT a current authorization revision.
+  const ownershipBindingKey = JSON.stringify([scope, audience, ownerKind, ownerId,
     actor.kind === "automation" ? [actor.policyId, actor.policyRevision, actor.expiresAt] : null]);
-  return { where, now, actorKind: ownerKind, actorId: ownerId, authorizedAt: new Date(parsed.data.authorizedAt), bindingKey, scope, audience: audience.toUpperCase() as AiAudience, actor, requestId: parsed.data.requestId };
+  // All existing before/after delivery and recovery checks also bind the current
+  // permission/data/location/organization projection. Correlation time is not
+  // authority, and this hash never grants access or replaces the required source.
+  const bindingKey = requestFingerprint({ ownershipBindingKey,
+    ...("access" in context ? { access: context.access }
+      : "permissions" in context ? { permissions: context.permissions } : {}) });
+  return { where, now, actorKind: ownerKind, actorId: ownerId, authorizedAt: new Date(parsed.data.authorizedAt),
+    bindingKey, ownershipBindingKey, scope, audience: audience.toUpperCase() as AiAudience, actor, requestId: parsed.data.requestId };
 }
 
 /**
@@ -99,8 +109,15 @@ export class AiTaskRepository {
   }
 
   async readMetadata(taskId: string) {
-    const { where } = await this.resolveAccess(taskId, "read_metadata");
-    const row = await this.stored(() => this.db.aiTask.findFirst({ where, select: taskSelect }));
+    const initial = await this.resolveAccess(taskId, "read_metadata");
+    const read = await this.stored(() => this.db.aiTask.findFirst({ where: initial.where, select: taskSelect }))
+      .then(row => ({ row }), failure => ({ failure }));
+    // Even an empty or failed query must not hide revocation during its await.
+    // Metadata cannot establish permission for the next event/result/effect.
+    const current = await this.resolveAccess(taskId, "read_metadata");
+    if (current.bindingKey !== initial.bindingKey) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+    if ("failure" in read) throw read.failure;
+    const row = read.row;
     // Missing and invisible are indistinguishable. No input/result reference or stored identity is returned.
     if (!row) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
     return {
@@ -124,6 +141,24 @@ export class AiTaskRepository {
     return { ...lease, purpose: "recovery_only" as const };
   }
 
+  private recoveryTrace(taskId: string, runId: string): Prisma.AiRunWhereInput {
+    return { id: runId, executionPlan: { is: { taskId, runId } }, OR: [
+      { steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } } },
+      // A base-admission COMMIT can outlive its reply while the original Step
+      // stays PENDING. Admit only observation of this occupied planned Run;
+      // neither a partial group nor an existing charge grants start/cleanup.
+      { steps: { some: { status: 'PENDING', effect: 'NONE' } },
+        executionCharges: { some: { taskId, runId, stepId: { not: null }, resource: 'STEPS', amount: 1n,
+          status: { in: ['RESERVED', 'UNKNOWN'] } } } },
+      // A lost pre-step acknowledgement may leave only original Run time debt.
+      // Its pure ACTIVE_MS occupancy admits observation of that same planned
+      // Run, not a Step start, a synthesized result, a refund or a new action.
+      { executionCharges: { some: { resource: 'ACTIVE_MS', stepId: null, actionId: null,
+        stepFingerprint: null, gatewayInvocationId: null, amount: { gt: 0n },
+        status: { in: ['RESERVED', 'UNKNOWN'] } } } }
+    ] };
+  }
+
   async assertRecoveryRun(value: unknown) {
     const parsed = recoveryLeaseInput.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -132,8 +167,7 @@ export class AiTaskRepository {
       id: lease.runId, taskId: lease.taskId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken),
       leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: access.now }, actorKind: access.actorKind, actorId: access.actorId,
       status: { in: [...runnable] }, task: { is: { ...access.where, contractVersion: AI_TASK_DRAFT_VERSION,
-        runs: { some: { id: lease.runId, executionPlan: { is: { taskId: lease.taskId, runId: lease.runId } },
-          steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } } } },
+        runs: { some: this.recoveryTrace(lease.taskId, lease.runId) },
         OR: [{ status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL'] }, cancelRequestedAt: null },
           { status: 'CANCEL_REQUESTED', cancelRequestedAt: { not: null } }] } }
     }, select: { id: true, taskId: true, revision: true, fencingToken: true, leaseOwnerId: true, leaseExpiresAt: true, actorId: true } }));
@@ -154,13 +188,11 @@ export class AiTaskRepository {
     const taskState: Prisma.AiTaskWhereInput = operation === "claim_run"
       ? { status: { in: [...runnable] }, cancelRequestedAt: null }
       : { OR: [
-        // Crash before aggregate waiting-state publication: recovery may fence
-        // only the original planned run with durable started/terminal work.
-        // This grants no new execution and does not resume or mutate the task.
-        { status: 'RUNNING', cancelRequestedAt: null, runs: { some: { id: input.runId,
-          executionPlan: { is: { taskId: input.taskId, runId: input.runId } },
-          steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } }
-        } } },
+        // Crash before aggregate publication may leave started work or only
+        // original pure Run time occupancy. Fence that original planned Run
+        // for current observation; do not resume/mutate the task or dispatch.
+        { status: 'RUNNING', cancelRequestedAt: null,
+          runs: { some: this.recoveryTrace(input.taskId, input.runId) } },
         { status: { in: ["WAITING_INPUT", "WAITING_CONFIRMATION", "WAITING_EXTERNAL"] }, cancelRequestedAt: null },
         { status: "CANCEL_REQUESTED", cancelRequestedAt: { not: null } }
       ] };

@@ -88,7 +88,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
-  let now = new Date(), failOutbox = false, active = true, loseTaskCommitReply = false, loseReviewCommitReply = false, loseManagementCommitReply = false, writes = 0, taskCreates = 0;
+  let now = new Date(), failOutbox = false, active = true, tenantActive = true, loseTaskCommitReply = false, loseReviewCommitReply = false, loseManagementCommitReply = false, writes = 0, taskCreates = 0;
   const scope = { tenantId: 'tenant-a', workspaceId: 'workspace-a' };
   const actor = user({ permissions: ['system:integration:manage', 'rental-os:finance:view', 'rental-os:order:view'] });
   const state = Object.fromEntries(['inspections', 'notifications', 'refunds', 'events', 'subjects', 'policies', 'inputs', 'scopes', 'budgets', 'plans', 'tasks', 'runs', 'reviewGrants', 'reviewOperations', 'managementGrants', 'policyPreparations', 'managementOperations'].map(name => [name, new Map()]));
@@ -141,7 +141,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
     rentalFulfillmentLocation: { findMany: async () => [{ id: 'location-a', ...scope }] },
     aiScope: delegate('scopes'), aiBudgetPolicy: delegate('budgets'), aiTaskPlanPolicy: delegate('plans'), aiTask: delegate('tasks'), aiRun: delegate('runs'),
     rentalOrder: { findFirst: async () => ({ id: 'order-a', ...scope, fulfillmentLocationId: 'location-a', returnLocationId: null }) },
-    businessWorkspace: { findFirst: async () => ({ id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE' }) },
+    businessWorkspace: { findFirst: async () => ({ id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE', tenant: { id: scope.tenantId, status: tenantActive ? 'ACTIVE' : 'INACTIVE' } }) },
     tenant: { findUnique: async () => ({ subscription: { startAt: new Date(now.getTime() - 1000), endAt: new Date(now.getTime() + 86400000) }, subscriptionSegments: [] }) },
     $queryRaw: async () => [],
     $transaction: callback => {
@@ -157,7 +157,10 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
     } };
   const auth = new AuthService({ getAuthSession: async () => active ? { id: 'event-session', userId: actor.id, audience: 'operator', currentWorkspaceId: scope.workspaceId } : undefined,
     findUserById: async () => actor, findWorkspaceScopedUser: async () => actor, listUserWorkspaces: async () => [] }, { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-test-secret' : undefined });
-  const credentials = { current: async () => ({ audience: 'operator', requestId: 'event-request', authorization: `Bearer ${auth.signAccessToken({ sub: actor.id, tid: scope.tenantId, sid: 'event-session', aud: 'operator', exp: Math.floor(Date.now() / 1000) + 600 })}` }) };
+  const credentials = { current: async () => ({ audience: 'operator', requestId: 'event-request', authorization: `Bearer ${auth.signAccessToken({ sub: actor.id, tid: scope.tenantId, sid: 'event-session', wid: scope.workspaceId, aud: 'operator', exp: Math.floor(Date.now() / 1000) + 600 })}` }) };
+  // Current Auth requires the signed workspace to match the same stored session;
+  // keep the old missing-workspace credential as a rejection, not an auth bypass.
+  await assert.rejects(auth.resolveAccessContext(`Bearer ${auth.signAccessToken({ sub: actor.id, tid: scope.tenantId, sid: 'event-session', aud: 'operator', exp: Math.floor(Date.now() / 1000) + 600 })}`, { audience: 'operator', businessScope: true }), /会话经营空间已变化/);
   const guard = new ApiAuthGuard(auth, undefined, undefined, undefined, { rentalOrder: { findFirst: async () => ({ id: 'order-a' }) } });
   const core = { getOrder: async (tenantId, id) => { assert.equal(tenantId, scope.tenantId); assert.equal(id, 'order-a'); return { id, ...scope }; } };
   const app = composeBusinessFailureEvents({ db, auth, credentials, guard, core, funding: { recordEvent: async () => {} }, integrations: {}, clock: () => now });
@@ -215,6 +218,10 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   state.subjects.get('automation-a').enabled = true;
   await assert.rejects(automation.prepare({ eventId: refundEvent.id }), /unavailable/);
   state.policies.get('policy-a').mode = 'shadow';
+  tenantActive = false;
+  await assert.rejects(automation.prepare({ eventId: refundEvent.id }), /unavailable/);
+  assert.equal(state.inputs.size, 0); assert.equal(state.policies.get('policy-a').preparedCount, 0);
+  tenantActive = true;
   const prepared = await automation.prepare({ eventId: refundEvent.id }); assert.equal(prepared.state, 'prepared');
   assert.equal((await automation.prepare({ eventId: refundEvent.id })).inputRef, prepared.inputRef);
   assert.equal(state.policies.get('policy-a').preparedCount, 1); assert.equal(state.inputs.size, 1);
@@ -242,6 +249,8 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   now = new Date(now.getTime() + 2000);
   await run(() => app.notifications.updateNotificationDelivery(scope.tenantId, 'notice-a', { status: 'failed', nextAttemptAt: null }));
   const secondEvent = [...state.events.values()].find(row => row.notificationId === 'notice-a' && row.resourceRevision === state.notifications.get('notice-a').revision);
+  await assert.rejects(automation.prepare({ eventId: secondEvent.id }), /unavailable/);
+  assert.equal((await app.candidates.prepare({ eventId: secondEvent.id })).status, 'ready');
   const second = await automation.prepare({ eventId: secondEvent.id }); assert.equal(second.state, 'prepared');
   state.inputs.get(second.inputRef).status = 'creation_unknown';
   const crashed = await automation.create({ inputRef: second.inputRef }); assert.equal(crashed.state, 'not_observed');
@@ -358,6 +367,8 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const managedEvent = [...state.events.values()].find(row => row.notificationId === 'notice-a' && row.resourceRevision === state.notifications.get('notice-a').revision);
   const managedAutomation = composeBusinessFailureAutomation({ db, auth, credentials, guard, core, funding: { recordEvent: async () => {} }, integrations: {},
     subscriptions, policyId: managedPolicyId, clock: () => now }).automation;
+  await assert.rejects(managedAutomation.prepare({ eventId: managedEvent.id }), /unavailable/);
+  assert.equal((await app.candidates.prepare({ eventId: managedEvent.id })).status, 'ready');
   const managedInput = await managedAutomation.prepare({ eventId: managedEvent.id }); assert.equal(managedInput.state, 'prepared');
   const managedView=await app.reviews.forEvent({eventId:managedEvent.id,limit:1});
   assert.equal(managedView.inputs.items[0].inputRef,managedInput.inputRef);assert.equal(managedView.inputs.items[0].task.state,'not_observed');
@@ -393,7 +404,8 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   active = false; await assert.rejects(management.operation({ operationKey: enablePolicy.operationKey })); active = true;
 
   const { RentalCoreFactRepository } = require('../apps/api/src/modules/rental-core/rental-core-fact.repository');
-  const facts = new RentalCoreFactRepository(db), uuid = () => require('node:crypto').randomUUID();
+  // This event fixture opts into the same transaction participant as standard DI.
+  const facts = new RentalCoreFactRepository(db, app.outbox), uuid = () => require('node:crypto').randomUUID();
   const inspection = () => ({ id: uuid(), tenantId: scope.tenantId, orderId: 'order-a', stage: 'return',
     templateId: 'template-a', templateCode: 'return', templateVersion: 'template-v9', results: { meter: 10 },
     usageReadings: [{ fieldCode: 'meter', current: 10, baseline: 0, delta: 10 }],
@@ -452,6 +464,8 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   now = new Date(now.getTime() + 2000); returnPolicy.mode = 'manual_confirmation';
   const manualReturn = inspection(); await run(() => facts.insertInspection(manualReturn));
   const manualReturnEvent = [...state.events.values()].find(row => row.inspectionId === manualReturn.id);
+  await assert.rejects(returns.prepare({ eventId: manualReturnEvent.id }), /unavailable/);
+  assert.equal((await app.candidates.prepare({ eventId: manualReturnEvent.id })).status, 'ready');
   const manualReturnInput = await returns.prepare({ eventId: manualReturnEvent.id });
   assert.equal(state.inputs.get(manualReturnInput.inputRef).payload.mode, 'manual_confirmation');
   const manualReceipt = await returns.create({ inputRef: manualReturnInput.inputRef });

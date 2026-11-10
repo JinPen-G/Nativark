@@ -3,6 +3,7 @@ import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberOption, type CustomerMembershipBookingOption } from '@rental-os/shared';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
+import { getRequestIdentity } from '../../common/request-identity';
 
 export const aiMembershipCandidateReadInputSchema = z.object({
   limit: z.number().int().min(1).max(50),
@@ -36,6 +37,19 @@ export interface AiMembershipCandidateReadProjection {
   candidates: Array<Pick<BookingMemberOption, 'customerId' | 'name' | 'phoneMasked' | 'membershipStatus'>>;
 }
 
+/** Preserve the original Guard's wildcard/admin semantics, not a second grant.
+ * Admin authority comes only from its live ALS tuple, never a copied context or
+ * caller flag. The surrounding route still revalidates session and permissions. */
+function hasOriginalCreatePermission(context: AiExecutionContext): boolean {
+  if (!('access' in context)) return false;
+  if (context.access.permissions.includes('rental-os:order:create') || context.access.permissions.includes('*')) return true;
+  const identity = getRequestIdentity();
+  return context.actor.kind === 'user' && context.scope.kind === 'workspace'
+    && identity?.isPlatformAdmin === true && identity.isSaasAdmin === false
+    && identity.userId === context.actor.userId && identity.tenantId === context.scope.tenantId
+    && identity.workspaceId === context.scope.workspaceId;
+}
+
 /**
  * Bounded candidate projection only. It never chooses a customer, resolves booking
  * eligibility, creates a quote/order, or exposes unmasked contact data.
@@ -58,7 +72,7 @@ export class AiMembershipCandidateReadFactsService {
     return this.authority.withRead('booking_identity_options', { customerId: input.customerId }, async context => {
       assertAiReadContextBinding(context, expectedContext);
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
-        || !('access' in context) || !context.access.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
+        || !hasOriginalCreatePermission(context)) throw new ModelGatewayError('FORBIDDEN');
       if (typeof this.memberships.listBookingOptionsPage !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       const page = await this.memberships.listBookingOptionsPage(context.scope.tenantId, context.scope.workspaceId,
         input.customerId, { limit: input.limit, ...(input.cursor ? { cursor: input.cursor } : {}) });
@@ -83,9 +97,8 @@ export class AiMembershipCandidateReadFactsService {
     const input = aiMembershipCandidateReadInputSchema.safeParse(value); if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('membership_candidates', input.data, async context => {
     assertAiReadContextBinding(context, expectedContext);
-    const access = 'access' in context ? context.access : undefined;
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')
-      || !access?.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
+      || !hasOriginalCreatePermission(context)) throw new ModelGatewayError('FORBIDDEN');
     const workspace = context.scope;
     // A limit on the returned projection is not a bound on a legacy query.
     // Even an unfiltered first page must use the original database-bounded port.

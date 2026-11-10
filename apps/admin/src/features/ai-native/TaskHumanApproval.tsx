@@ -1,36 +1,39 @@
 /** Explicit human review/decision and original approved-host continuation.
+ * Displays frozen proposal boundaries and independently read step receipts;
+ * registration/state is not a complete plan, rollback or execution grant.
  * No arbitrary action/Core callback; persist references only, never contents. */
 import { useEffect, useId, useRef, useState } from "react";
-import { AI_PROPOSAL_DRAFT_VERSION, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES,
-  type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
+import { AI_PROPOSAL_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, AI_STEP_STATUSES_DRAFT, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES,
+  type AiTaskSnapshotDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
   type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft, type AiTaskBusinessObservationDraft,
-  type AiTaskHumanContinueDraft } from "@rental-os/shared";
+  type AiTaskHumanContinueDraft, type AiApprovalOrderMaterialDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction, Select } from "@/components/ui";
 import { safeDisplayText } from "./safe-display";
+import { VisibleObservationBoundary } from './VisibleObservationBoundary';
 import { formatAmount, formatTimestamp } from "./formatters";
 
 const amountLabels = { rentalAmount: "租金", discountAmount: "折扣", couponAmount: "优惠券", serviceAmount: "服务费",
   fulfillmentAmount: "履约费", depositAmount: "押金", preAuthAmount: "预授权", payableAmount: "应付", receivableAmount: "应收" } as const;
 const id = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(value);
-function pendingDecision(key: string, taskId: string): AiTaskDecisionQueryDraft | "invalid" | null {
+function pendingDecision(key: string, taskId: string, runId?: string): AiTaskDecisionQueryDraft | "invalid" | null {
   try {
     const saved = sessionStorage.getItem(key); if (!saved) return null;
     if (saved.length > 1024) return "invalid";
     const value = JSON.parse(saved) as AiTaskDecisionQueryDraft;
-    return value?.taskId === taskId && id(value.runId) && id(value.stepId) && id(value.proposal?.proposalId)
+    return value?.taskId === taskId && id(value.runId) && (runId === undefined || value.runId === runId) && id(value.stepId) && id(value.proposal?.proposalId)
       && value.proposal.contractVersion === AI_PROPOSAL_DRAFT_VERSION && Number.isInteger(value.proposal.proposalRevision)
       && value.proposal.proposalRevision > 0 && /^[a-f0-9]{64}$/u.test(value.proposal.reviewedPayloadHash)
       && ["approve", "reject"].includes(value.proposal.decision) ? value : "invalid";
   } catch { return "invalid"; }
 }
-function pendingContinuation(key: string, taskId: string): AiTaskHumanContinueDraft | "invalid" | null {
+function pendingContinuation(key: string, taskId: string, runId?: string): AiTaskHumanContinueDraft | "invalid" | null {
   try {
     const saved = sessionStorage.getItem(key); if (!saved) return null;
     if (saved.length > 1024) return "invalid";
     const value = JSON.parse(saved) as AiTaskHumanContinueDraft;
-    return value?.taskId === taskId && id(value.runId) && id(value.stepId) && id(value.checkpointRef)
+    return value?.taskId === taskId && id(value.runId) && (runId === undefined || value.runId === runId) && id(value.stepId) && id(value.checkpointRef)
       && Number.isInteger(value.expectedTaskRevision) && value.expectedTaskRevision > 0
       && id(value.proposal?.proposalId) && value.proposal.contractVersion === AI_PROPOSAL_DRAFT_VERSION
       && Number.isInteger(value.proposal.proposalRevision) && value.proposal.proposalRevision > 0
@@ -41,10 +44,51 @@ const materialId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9
 const materialText = (value: unknown, max = 191) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 const validPeriod = (value: { startAt: string; endAt: string }) => formatTimestamp(value.startAt).available
   && formatTimestamp(value.endAt).available && Date.parse(value.startAt) < Date.parse(value.endAt);
+/** Only the server's closed proposal contract supplies an execution boundary. */
+export function hasProposalExecutionBoundary(value: AiTaskHumanReviewDraft): boolean {
+  try {
+    const payload = value.review.proposal.payload;
+    return payload.contractVersion === AI_PROPOSAL_DRAFT_VERSION && payload.failurePolicy === 'stop_and_reconcile'
+      && Array.isArray(payload.actions) && payload.actions.length > 0
+      && (payload.atomicity === 'single_action' ? payload.actions.length === 1
+        : payload.atomicity === 'ordered_partial' && payload.actions.length <= 20);
+  } catch { return false; }
+}
+export type TaskHumanStep = AiTaskReviewQueryDraft & Pick<AiTaskSnapshotDraft['steps'][number], 'sequence' | 'revision' | 'status'>;
+export const taskHumanStepKey = (step: { runId: string; stepId: string }) => `${step.runId}:${step.stepId}`;
+/** Registered steps are a bounded observation, not the complete unstarted plan. */
+export function taskHumanSteps(snapshot: AiTaskSnapshotDraft, taskId: string): TaskHumanStep[] {
+  if (snapshot.contractVersion !== AI_TASK_DRAFT_VERSION || snapshot.taskId !== taskId
+    || !Array.isArray(snapshot.steps) || snapshot.steps.length > 1000) throw Error('AI_RESOURCE_UNAVAILABLE');
+  const rows = snapshot.steps.filter(row => row.kind === 'confirmation');
+  if (rows.length > 20 || rows.some(row => !id(row.stepId) || !id(row.runId)
+    || !Number.isSafeInteger(row.sequence) || row.sequence < 1 || !Number.isSafeInteger(row.revision) || row.revision < 1
+    || !AI_STEP_STATUSES_DRAFT.includes(row.status)) || new Set(rows.map(taskHumanStepKey)).size !== rows.length)
+    throw Error('AI_RESOURCE_UNAVAILABLE');
+  return rows.map(row => ({ taskId, runId: row.runId, stepId: row.stepId,
+    sequence: row.sequence, revision: row.revision, status: row.status }));
+}
+/** The read DTO deliberately excludes registration metadata and cached content. */
+export const taskHumanStepQuery = (taskId: string, step: { runId: string; stepId: string }): AiTaskReviewQueryDraft =>
+  ({ taskId, runId: step.runId, stepId: step.stepId });
+const stepStatusLabels = { pending: '尚未开始', running: '步骤进行中', succeeded: '步骤已成功，业务仍须原收据',
+  failed: '步骤失败', unknown: '原动作结果待核对', cancelled: '步骤已取消，不推断业务回滚' } as const;
+export function originalBusinessObservation(value: AiTaskBusinessObservationDraft, query: AiTaskReviewQueryDraft): boolean {
+  if (value.taskId !== query.taskId || value.runId !== query.runId || value.stepId !== query.stepId
+    || value.execution !== 'read_only_no_start_no_reconnect_side_effect' || value.payment !== 'not_inferred'
+    || value.fulfillment !== 'not_inferred' || !['committed', 'unknown', 'not_observed'].includes(value.status)
+    || !['order', 'settings'].includes(value.kind) || !formatTimestamp(value.observedAt).available) return false;
+  if (value.status !== 'committed') return true;
+  return value.kind === 'order' ? !!value.order && [value.order.id, value.order.status, value.order.quoteId]
+    .every(item => typeof item === 'string' && item.length > 0 && item.length <= 191)
+    : !!value.receipt && Number.isSafeInteger(value.receipt.resultRevision) && value.receipt.resultRevision > 0
+      && formatTimestamp(value.receipt.committedAt).available;
+}
 /** Old/missing materials may not enable approval or continuation on this host. */
 export function hasOrderReviewMaterial(value: AiTaskHumanReviewDraft): boolean {
-  if (value.kind !== 'order') return true;
   try {
+    if (!hasProposalExecutionBoundary(value)) return false;
+    if (value.kind !== 'order') return true;
     const review = value.review, order = review.deterministic.order;
     const optionalName = (name: unknown) => name === undefined || materialText(name);
     if (review.draftVersion !== AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION || !order || !materialId(order.customer.id)
@@ -72,15 +116,53 @@ export function hasOrderReviewMaterial(value: AiTaskHumanReviewDraft): boolean {
 const fulfillmentLabels = { store_pickup_return: '门店自取还', partner_pickup_return: '合作点取还',
   warehouse_pickup_return: '仓库取还', locker_pickup_return: '自助柜取还', delivery: '配送',
   onsite_delivery: '上门交付', carrier_shipping: '承运寄送' } as const;
-/** Deterministic domain values, deliberately separate from generated model text. */
-export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraft }) {
-  const { t } = useLocale(), payload = value.review.proposal.payload;
-  if (!hasOrderReviewMaterial(value)) return <Alert type="warning" title={t('原审批材料缺失或版本不兼容，不能批准或继续，请回原业务页核对。')} />;
-  const order = value.kind === 'order' ? value.review.deterministic.order : null;
-  return <div style={{ overflowWrap: "anywhere" }}>
-    <p>{t("提案版本")}: {payload.revision} · {t("有效期")}: {formatTimestamp(payload.expiresAt).value}</p>
-    <p>{t("提案引用")}: {safeDisplayText(payload.proposalId, 36)} · {t("原任务修订")}: {value.taskRevision}</p>
-    {order && <>
+/** Policy labels describe the frozen proposal, never a model's rollback claim. */
+export function TaskProposalExecutionBoundary({ value }: { value: AiTaskHumanReviewDraft }) {
+  const { t } = useLocale();
+  if (!hasProposalExecutionBoundary(value)) return <Alert type="warning" title={t('原执行边界缺失或不兼容，不能批准或继续。')} />;
+  const payload = value.review.proposal.payload;
+  return <section aria-label={t('原计划执行边界')}>
+    <h4>{t('原计划执行边界')}</h4>
+    <dl><dt>{t('当前提案原子边界')}</dt><dd>{t(payload.atomicity === 'single_action'
+      ? '只覆盖当前一个动作，不代表整个任务原子提交。'
+      : '顺序动作分别提交，允许部分完成，不存在整个计划的原子回滚。')}</dd>
+      <dt>{t('当前审批动作数量')}</dt><dd>{payload.actions.length}</dd>
+      <dt>{t('失败处理')}</dt><dd>{t('停止后续动作并核对原操作结果；unknown不能换键重发。')}</dd>
+      <dt>{t('补偿与外部副作用')}</dt><dd>{t('已完成动作不会自动撤销或退款；补偿须走原业务入口与审批，外部副作用不承诺回滚。')}</dd>
+      <dt>{t('确认范围')}</dt><dd>{t('只批准这份冻结提案；后继动作另行确认，原高风险审核链不变。')}</dd></dl>
+  </section>;
+}
+/** Per-step receipt observations survive choosing a successor, not scope refresh. */
+export function TaskActionResults({ steps, observations }: { steps: readonly TaskHumanStep[];
+  observations: Readonly<Record<string, AiTaskBusinessObservationDraft>> }) {
+  const { t } = useLocale();
+  if (!steps.length) return null;
+  return <section aria-label={t('已登记动作与原结果')} style={{ overflowWrap: 'anywhere' }}>
+    <h4>{t('已登记动作与原结果')}</h4>
+    <p className="muted">{t('仅列已登记原步骤，不代表完整未执行计划；步骤状态不代替Core业务收据。')}</p>
+    <ol>{steps.map(step => {
+      const value = observations[taskHumanStepKey(step)];
+      const observed = value && originalBusinessObservation(value, taskHumanStepQuery(step.taskId, step)) ? value : null;
+      return <li key={taskHumanStepKey(step)}>
+        <p>{t('原运行')}: {safeDisplayText(step.runId, 36)} · {t('动作顺序')}: {step.sequence}
+          {' · '}{t('原步骤')}: {safeDisplayText(step.stepId, 36)} · {t('步骤修订')}: {step.revision}</p>
+        <p>{t(stepStatusLabels[step.status])}</p>
+        {observed ? <>
+          <p>{t('业务观察时间')}: {formatTimestamp(observed.observedAt).value}</p>
+          <p>{observed.status === 'committed' ? observed.kind === 'order'
+            ? <>{t('原Core订单已确认提交')}: {safeDisplayText(observed.order.id, 191)}</>
+            : <>{t('原设置修改已确认提交')}: {t('结果修订')} {observed.receipt.resultRevision}</>
+            : t(observed.status === 'unknown' ? '原业务结果待核对，不能自动重试。' : '尚未观察到原业务收据，不证明未提交。')}</p>
+        </> : <p>{t('尚未读取该动作的原业务收据，不推断未执行或已回滚。')}</p>}
+      </li>;
+    })}</ol>
+    <p>{t('后继失败或待核对不会自动回滚此前已提交动作；需要补偿时另走原业务入口与审批。')}</p>
+  </section>;
+}
+/** Original Core material shared by selection and final human approval. */
+export function TaskOrderMaterialDetails({ order }: { order: AiApprovalOrderMaterialDraft }) {
+  const { t } = useLocale();
+  return <div style={{ overflowWrap: 'anywhere' }}>
       <dl><dt>{t('客户')}</dt><dd>{order.customer.name && <>{safeDisplayText(order.customer.name, 191)} · </>}{safeDisplayText(order.customer.id, 191)} ({t(order.customer.type === 'personal' ? '个人' : '企业')})</dd>
         <dt>{t('预约身份')}</dt><dd>{t(order.booking.identity === 'personal' ? '个人' : '企业员工')}
           {order.booking.corporateCustomerId && <> · {safeDisplayText(order.booking.corporateCustomerName ?? order.booking.corporateCustomerId, 191)}</>}
@@ -101,7 +183,19 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
       {!!order.services.length && <><h4>{t('增值服务')}</h4><ul>{order.services.map((row, index) => <li key={index}>{safeDisplayText(row.name, 191)} · {safeDisplayText(row.serviceId, 191)}
         {' · '}{t('数量')}: {formatAmount(row.quantity).value} · {formatTimestamp(row.startAt).value} — {formatTimestamp(row.endAt).value}
         {' · '}{t('服务地点')}: {safeDisplayText(row.locationId, 191)}{row.requiredByRule && <> · {t('业务规则要求')}</>}</li>)}</ul></>}
-    </>}
+    
+  </div>;
+}
+/** Deterministic domain values, deliberately separate from generated model text. */
+export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraft }) {
+  const { t } = useLocale(), payload = value.review.proposal.payload;
+  if (!hasOrderReviewMaterial(value)) return <Alert type="warning" title={t('原审批材料缺失或版本不兼容，不能批准或继续，请回原业务页核对。')} />;
+  const order = value.kind === 'order' ? value.review.deterministic.order : null;
+  return <div style={{ overflowWrap: "anywhere" }}>
+    <p>{t("提案版本")}: {payload.revision} · {t("有效期")}: {formatTimestamp(payload.expiresAt).value}</p>
+    <p>{t("提案引用")}: {safeDisplayText(payload.proposalId, 36)} · {t("原任务修订")}: {value.taskRevision}</p>
+    <TaskProposalExecutionBoundary value={value} />
+    {order && <TaskOrderMaterialDetails order={order} />}
     {value.kind === "order" ? <dl>{Object.entries(amountLabels).map(([key, label]) => <div key={key}>
       <dt>{t(label)}</dt><dd>{formatAmount(value.review.deterministic.quoteAmounts[key as keyof typeof amountLabels]).value}
         {" "}{safeDisplayText(value.review.deterministic.currency, 16)}</dd>
@@ -116,15 +210,16 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
     <p>{t("仅审阅这份不可变提案。批准不是订单创建、支付成功或设置已生效；继续执行需要另行明确确认。")}</p>
   </div>;
 }
-export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }: {
-  taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void;
+export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, runId }: {
+  taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void; runId?: string;
 }) {
   const { t } = useLocale(), labelId = useId();
-  const storageKey = `ai-task-decision:${identity}:${taskId}`;
-  const [original, setOriginal] = useState(() => pendingDecision(storageKey, taskId));
+  const storageKey = `ai-task-decision:${identity}:${taskId}${runId ? `:${runId}` : ''}`;
+  const [original, setOriginal] = useState(() => pendingDecision(storageKey, taskId, runId));
   const continueKey = `${storageKey}:continue`;
-  const [continuation, setContinuation] = useState(() => pendingContinuation(continueKey, taskId));
-  const [steps, setSteps] = useState<AiTaskReviewQueryDraft[]>([]), [selected, setSelected] = useState<string | null>(null);
+  const [continuation, setContinuation] = useState(() => pendingContinuation(continueKey, taskId, runId));
+  const [steps, setSteps] = useState<TaskHumanStep[]>([]), [selected, setSelected] = useState<string | null>(null);
+  const [stepObservations, setStepObservations] = useState<Record<string, AiTaskBusinessObservationDraft>>({});
   const [review, setReview] = useState<AiTaskHumanReviewDraft | null>(null);
   const [receipt, setReceipt] = useState<AiTaskHumanDecisionReceiptDraft | null>(null);
   const [business, setBusiness] = useState<AiTaskBusinessObservationDraft | null>(null);
@@ -139,7 +234,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     try { await work(controller.signal); if (!same()) throw Error("AI_SCOPE_CHANGED"); }
     catch (error) {
       if (same()) {
-        setReview(null); setReceipt(null); setBusiness(null);
+        setReview(null); setReceipt(null); setBusiness(null); setStepObservations({});
         setMessage(write ? t("本次写入应答未确认。保留原引用，只核对原决定或业务收据，不再次提交。") : t("当前不可读取，请核对权限、原版本或人工业务页。"));
         if ([401, 403].includes((error as { response?: { status?: number } }).response?.status ?? 0)) active.current.onAccessDenied();
       }
@@ -148,20 +243,19 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
   };
   const same = (signal: AbortSignal) => active.current.current() && !signal.aborted;
   const readSteps = () => run(async signal => {
-    setReview(null); setReceipt(null); setBusiness(null); setSteps([]); setSelected(null);
+    setReview(null); setReceipt(null); setBusiness(null); setStepObservations({}); setSteps([]); setSelected(null);
     const snapshot = await aiTaskCenterApi.snapshot(taskId, signal);
     if (!same(signal)) return;
-    if (snapshot.taskId !== taskId || !Array.isArray(snapshot.steps) || snapshot.steps.length > 1000) throw Error("AI_RESOURCE_UNAVAILABLE");
-    const candidates = snapshot.steps.filter(row => row.kind === "confirmation");
-    if (candidates.length > 20) throw Error("AI_RESOURCE_UNAVAILABLE");
-    setSteps(candidates.map(row => ({ taskId, runId: row.runId, stepId: row.stepId })));
+    if (runId !== undefined && !id(runId)) throw Error('AI_INVALID_INPUT');
+    const candidates = taskHumanSteps(snapshot, taskId).filter(step => runId === undefined || step.runId === runId);
+    setSteps(candidates);
     if (!candidates.length) setMessage(t("本次没有可观察的原业务步骤。没有记录不代表业务未执行。"));
   });
   const readReview = () => run(async signal => {
     setReview(null); setReceipt(null); setBusiness(null);
     const target = steps.find(step => `${step.runId}:${step.stepId}` === selected);
     if (!target) throw Error("AI_INVALID_INPUT");
-    const value = await aiTaskCenterApi.review(target, signal);
+    const value = await aiTaskCenterApi.review(taskHumanStepQuery(taskId, target), signal);
     if (!same(signal)) return;
     if (value.taskId !== taskId || value.runId !== target.runId || value.stepId !== target.stepId
       || !["order", "settings"].includes(value.kind) || value.businessExecution !== "not_attested"
@@ -254,22 +348,19 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
             ?? (original && original !== "invalid" ? { taskId, runId: original.runId, stepId: original.stepId }
               : continuation && continuation !== "invalid" ? { taskId, runId: continuation.runId, stepId: continuation.stepId } : null);
           if (!target) throw Error("AI_RESOURCE_UNAVAILABLE");
-          const result = await aiTaskCenterApi.business(target, signal);
+          const query = taskHumanStepQuery(taskId, target);
+          const result = await aiTaskCenterApi.business(query, signal);
           if (!same(signal)) return;
-          if (result.taskId !== taskId || result.runId !== target.runId || result.stepId !== target.stepId
-            || result.execution !== "read_only_no_start_no_reconnect_side_effect" || result.payment !== "not_inferred"
-            || result.fulfillment !== "not_inferred" || !["committed", "unknown", "not_observed"].includes(result.status)
-            || !["order", "settings"].includes(result.kind)) throw Error("AI_RESOURCE_UNAVAILABLE");
-          if (result.status === "committed") {
-            if (result.kind === "order" ? !result.order || [result.order.id, result.order.status, result.order.quoteId]
-              .some(value => typeof value !== "string" || !value || value.length > 191)
-              : !result.receipt || !Number.isSafeInteger(result.receipt.resultRevision) || result.receipt.resultRevision < 1
-                || !formatTimestamp(result.receipt.committedAt).available) throw Error("AI_RESOURCE_UNAVAILABLE");
-          }
+          if (!originalBusinessObservation(result, query)) throw Error("AI_RESOURCE_UNAVAILABLE");
           setBusiness(result);
+          // Preserve each independently authorized original observation while
+          // selecting its successor. Refresh/access failure clears the group;
+          // neither step success nor absence is promoted to a business fact.
+          setStepObservations(previous => ({ ...previous, [taskHumanStepKey(query)]: structuredClone(result) }));
           if (result.status === "committed") { sessionStorage.removeItem(continueKey); setContinuation(null); }
         })} />
     </div>
+    <TaskActionResults steps={steps} observations={stepObservations} />
     {message && <Alert type="warning" title={message} />}
     {original === "invalid" && <Alert type="warning" title={t("原决定引用不可读取。请通过原业务页核对，不再提交新决定。")}/>}
     {continuation && <Alert type="warning" title={t(continuation === "invalid" ? "原继续引用不可读取，请通过原业务页核对。"
@@ -277,7 +368,10 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied }:
     {original && original !== "invalid" && <ActionButton label={t("核对原决定收据")} disabled={busy} onAction={() => run(async signal => {
       setReceipt(null); observe(await aiTaskCenterApi.decisionReceipt(structuredClone(original), signal), original, signal);
     })} />}
-    {review && <><TaskHumanReviewDetails value={review} /><div className="panel-toolbar">
+    {review && <><VisibleObservationBoundary kind="card" ready={hasOrderReviewMaterial(review) && active.current.current() && Number.isFinite(expires) && expires > Date.now()}
+      reference={{ taskId, runId: review.runId, source: { kind: 'approval_card', stepId: review.stepId,
+        proposalId: review.review.proposal.payload.proposalId, proposalRevision: review.review.proposal.payload.revision } }}>
+      <TaskHumanReviewDetails value={review} /></VisibleObservationBoundary><div className="panel-toolbar">
       <ConfirmAction key={`approve:${review.review.proposal.payloadHash}`} label={t("批准这份提案")}
         prompt={t("已核对原对象、金额或差异、版本及有效期？仅记录批准，不执行业务。")}
         doneLabel={t("决定已记录，业务未执行")} disabled={!canDecide} onConfirm={() => decide("approve")} />

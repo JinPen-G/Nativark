@@ -45,6 +45,83 @@ function setup(mode = 'platform_managed', timeout = 10000) {
   const runtime = { ports, evidence: 'mock', verifyEvidence: async () => state.verified };
   return { state, ports, runtime, events, context, service: new PublicAiGatewayService(runtime, scenes, timeout) };
 }
+test('core native successor consumes the original Task result through one guarded Gateway invocation', async () => {
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { nativeToolResultIntentFingerprint } = require('../apps/api/src/modules/ai-native/model-input/native-tool-result.ports');
+  // Protocol/evidence dependencies are explicit fixtures. The real public and
+  // unified Gateway must own routing/admission/dispatch/recording throughout.
+  for (const mode of ['normal', 'missing_transport', 'missing_resolver', 'changed_before_dispatch', 'changed_after_dispatch', 'configuration_changed', 'extra_text', 'native_unknown']) {
+    const f = setup('tenant_managed'), calls = { ordinary: 0, native: 0, resolved: 0 }, receipts = [], reservations = [];
+    const scene = { ...scenes[0], orderExplainTool: true, nativeToolResults: true };
+    const firstIntent = intent(); firstIntent.requiredFeatures = ['text', 'tools'];
+    const ordinary = f.ports.transport.invoke;
+    f.ports.transport.invoke = async (...args) => { calls.ordinary++; return ordinary(...args); };
+    f.ports.budget.recordUsage = async (call, _id, usage) => { receipts.push({ callId: call.request.callId, usage }); };
+    const reserve = f.ports.budget.reserve;
+    let changed = false;
+    f.ports.budget.reserve = async call => { reservations.push(structuredClone(call)); const result = await reserve(call);
+      if (call.request.callId === 'native-answer' && mode === 'changed_before_dispatch') changed = true;
+      return result;
+    };
+    const reference = { referenceVersion: 'ain-tool-result-reference-1', taskId: 'original-task', runId: 'original-run',
+      modelRegistrationRef: 'original-model', toolRegistrationRef: 'original-read', callIndex: 0 };
+    let source;
+    f.ports.nativeToolResults = { resolve: async (_context, requested) => {
+      calls.resolved++; assert.deepEqual(requested, reference); return structuredClone(source);
+    }, assertCurrent: async (_context, value) => {
+      assert.deepEqual(value.reference, reference);
+      if (changed) throw new ModelGatewayError('FORBIDDEN');
+    } };
+    f.ports.transport.nativeInputBoundHash = () => 'b'.repeat(64);
+    f.ports.transport.inputBoundHash = request => { assert.notEqual(request.callId, 'native-answer', 'Native counting must not use a text-only fallback'); return undefined; };
+    f.ports.transport.invokeNativeToolResult = async (_context, request, _route, signal, value, recordUsage, inputHash) => {
+      calls.native++; assert.equal(signal.aborted, false); assert.equal(request.callId, 'native-answer');
+      assert.equal(inputHash, 'b'.repeat(64)); assert.deepEqual(value, source); assert.equal(value.call.id, 'original_native_call');
+      assert.equal(request.messages[0].content, 'explain');
+      await recordUsage({ inputTokens: 2, outputTokens: 3 });
+      if (mode === 'changed_after_dispatch') changed = true;
+      if (mode === 'native_unknown') throw new ModelGatewayError('ACCOUNTING_PENDING');
+      return { text: 'native answer', usage: { inputTokens: 2, outputTokens: 3 }, toolRequests: [] };
+    };
+    const service = new PublicAiGatewayService(f.runtime, [scene]);
+    const first = await service.invoke(f.context, firstIntent); assert.equal(first.status, 'completed');
+    source = { version: 'native-tool-result-1', reference, originalIntent: firstIntent, sourceInvocationId: 'original-invocation',
+      sourceConfigurationHash: mode === 'configuration_changed' ? 'f'.repeat(64) : requestFingerprint(first.actual),
+      modelResultId: 'original-model-result', modelResultHash: '1'.repeat(64), toolResultId: 'original-core-result', toolResultHash: '2'.repeat(64),
+      bindingHash: '3'.repeat(64), call: { id: 'original_native_call', type: 'function', function: {
+        name: 'rental_order_explain', arguments: '{"orderId":"original-order"}' } },
+      resultJson: '{"orderId":"original-order","status":"original-Core-fact"}', evidenceHash: '4'.repeat(64) };
+    if (mode === 'missing_transport') delete f.ports.transport.invokeNativeToolResult;
+    if (mode === 'missing_resolver') delete f.ports.nativeToolResults;
+    const currentService = new PublicAiGatewayService(f.runtime, [scene]);
+    const successor = { ...intent(), requestId: 'native-answer', requiredFeatures: ['text', 'tools'],
+      messages: [{ role: 'user', content: [{ kind: 'tool_result_reference', reference }] }] };
+    if (mode === 'extra_text') successor.messages.push({ role: 'user', content: [{ kind: 'text', text: 'unbound extra history' }] });
+    if (['missing_transport', 'missing_resolver', 'extra_text'].includes(mode)) {
+      await assert.rejects(currentService.invoke(f.context, successor), e => ['CAPABILITY_UNSUPPORTED', 'INVALID_REQUEST'].includes(e.code));
+      assert.equal(reservations.length, 1); assert.equal(calls.native, 0);
+    } else {
+      const result = await currentService.invoke(f.context, successor); assert.equal(isGatewayResult(result), true);
+      assert.equal(result.status, mode === 'normal' ? 'completed' : ['changed_after_dispatch', 'native_unknown'].includes(mode) ? 'unknown' : 'failed');
+      if (mode === 'normal') {
+        assert.equal(result.text, 'native answer'); assert.equal(calls.native, 1);
+        assert.equal(reservations[1].request.intentHash, nativeToolResultIntentFingerprint(successor, scene));
+        assert.equal(reservations[1].request.countRequestHash, 'b'.repeat(64));
+        assert.equal(receipts.filter(x => x.callId === 'native-answer').length, 1, 'The same original usage callback stays single-ledger deduplicated');
+      }
+      if (mode === 'configuration_changed') assert.equal(reservations.length, 1);
+      if (mode === 'changed_before_dispatch') assert.equal(calls.native, 0);
+      if (['changed_after_dispatch', 'native_unknown'].includes(mode)) {
+        assert.equal(result.error.retryable, false); assert.equal(calls.native, 1);
+        assert.equal(receipts.filter(x => x.callId === 'native-answer').length, 1);
+      }
+      assert.equal(JSON.stringify(result).includes('original_native_call'), false);
+      assert.equal(JSON.stringify(result).includes('original-Core-fact'), false);
+    }
+    assert.equal(calls.ordinary, 1, 'Only the original model uses ordinary invoke; native successor must never fall back to replaying it');
+  }
+});
+
 for (const mode of ['platform_managed', 'tenant_managed']) test(`${mode}: public invoke returns schema-valid actual routing, not model-selected metadata`, async () => {
   const f = setup(mode), result = await f.service.invoke(f.context, intent());
   assert.equal(isGatewayResult(result), true); assert.equal(result.status, 'completed'); assert.equal(result.evidence, 'mock');

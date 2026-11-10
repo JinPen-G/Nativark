@@ -13,6 +13,7 @@ import { approvedOrderCommandSchema, deniedOrder, orderContextHash } from './pri
 import { AiApprovedOrderResultUnknownError } from './approved-order.errors';
 import type { ApprovedOrderReprepareApplication, ApprovedOrderReprepareServices } from './approved-order-reprepare.ports';
 import { callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
+import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -36,6 +37,10 @@ function transactionDependencies(d: ControlledApprovedOrderDependencies, tx: Pri
 export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependencies): ApprovedOrderReprepareApplication {
   const human = new ApprovedOrderHumanAuthority(d), ledger = new PrismaApprovedOrderReprepareRepository(d.db);
   const clock = d.clock ?? (() => new Date());
+  // A native four-pass history read alone exceeded 5s. Full provenance and
+  // confirmation-witness rechecks need one bounded preparation window, not
+  // repeated 5s/10s windows; this never resets resources or permits a retry.
+  const preparationWindowMs = 60000;
   const parse = (value: unknown) => {
     const command = approvalApplicationContract('AiApprovalReprepareCommandDraft', value);
     if (command.originalTaskId === command.replacement.taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -103,16 +108,51 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
     const plan = await tx.aiTaskRunPlan.findFirst({ where: { scopeId: current.scopeId, taskId: r.taskId, runId: r.runId } });
     if (!task || task.inputRef !== r.originalInputRef || task.inputHash !== proof.originalInputHash || task.inputRef === originalTask?.inputRef
       || !step || step.actionId !== r.actionId || step.inputRef !== r.inputRef || step.requestFingerprint !== r.fingerprint
-      || step.status !== 'RUNNING' || step.effect !== 'NONE' || step.resultRef || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || task.cancelRequestedAt !== null || step.status !== 'RUNNING' || step.resultRef
+      || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION
       || !input || input.fingerprint !== r.fingerprint || requestFingerprint(input.payload) !== r.fingerprint
       || !plan || plan.planHash !== r.planHash || requestFingerprint(plan.payload) !== r.planHash
       || !(input.expiresAt instanceof Date) || input.expiresAt <= clock()) throw unavailable();
-    const held = approvedOrderCommandSchema.shape.lease.safeParse(await services.lease.current(r, tx));
-    if (!held.success || held.data.runId !== r.runId) throw unavailable();
+    let lease: z.infer<typeof approvedOrderCommandSchema.shape.lease> | null = null;
+    let prepared: { proposalId: string; proposalRevision: number; reviewedPayloadHash: string } | null = null;
+    let confirmationHash: string | null = null;
+    if (task.status === 'WAITING_CONFIRMATION' && step.effect === 'POSSIBLE') {
+      // The normal runner has already frozen the new proposal and released its
+      // lease. Reuse that exact confirmation, not a fabricated RUNNING/NONE
+      // state or a second proposal. This grants metadata supersession only.
+      const phaseKey = { scopeId: current.scopeId, taskId: r.taskId, runId: r.runId, stepId: r.stepId };
+      const phases = await taskExecutionPhaseStore(tx).readReceipts(phaseKey);
+      if (phases.length !== 1) throw unavailable();
+      const phase = phases[0];
+      if (phase.kind !== 'confirmation' || !phase.proposalId || !phase.proposalRevision || !phase.reviewedPayloadHash
+        || requestFingerprint(phase.payload) !== phase.contentHash) throw unavailable();
+      const original = { contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: phase.proposalId,
+        proposalRevision: phase.proposalRevision, reviewedPayloadHash: phase.reviewedPayloadHash };
+      const app = composeControlledApprovedOrder(deps);
+      const eligibility = await app.application.readReprepareEligibility(r.taskId, {
+        draftVersion: AI_APPROVAL_APPLICATION_DRAFT_VERSION, original, intent: 'inspect'
+      });
+      // Eligibility verifies the unique start/receipt/artifact and original
+      // input/plan/lease hashes plus absence of approval/Core submission. A
+      // later phase, unknown decision or an approved replacement cannot reuse it.
+      if (eligibility.state !== 'pending') throw unavailable();
+      const view = await app.approvals.readOriginal(r.taskId, original);
+      if (view.proposal.payload.actions[0].actionId !== r.actionId
+        || view.proposal.payload.actions[0].input.contentHash !== r.fingerprint) throw conflict();
+      prepared = { proposalId: original.proposalId, proposalRevision: original.proposalRevision,
+        reviewedPayloadHash: original.reviewedPayloadHash };
+      confirmationHash = requestFingerprint({ phaseId: phase.phaseId, contentHash: phase.contentHash, prepared,
+        taskRevision: task.revision, stepRevision: step.revision });
+    } else {
+      if (task.status !== 'RUNNING' || step.effect !== 'NONE') throw unavailable();
+      const held = approvedOrderCommandSchema.shape.lease.safeParse(await services.lease.current(r, tx));
+      if (!held.success || held.data.runId !== r.runId) throw unavailable();
+      lease = held.data;
+    }
     const expiresAt = new Date(Math.min(input.expiresAt.getTime(), Date.parse(proof.expiresAt))).toISOString();
     const proofHash = requestFingerprint({ selection: proof.bindingHash, originalInputHash: proof.originalInputHash,
-      quoteHash: proof.quoteHash, inputHash: r.fingerprint, planHash: r.planHash, inputRef: r.inputRef });
-    return { current, proof, proofHash, expiresAt, lease: held.data };
+      quoteHash: proof.quoteHash, inputHash: r.fingerprint, planHash: r.planHash, inputRef: r.inputRef, confirmationHash });
+    return { current, proof, proofHash, expiresAt, lease, prepared };
   };
   const reprepare = async (value: unknown): Promise<AiApprovalReprepareReceiptDraft> => {
     const command = parse(value);
@@ -151,16 +191,20 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
         const head = await tx.aiProposal.findFirst({ where: { scopeId: current.scopeId, taskId: command.originalTaskId, id: command.original.proposalId } });
         if (!head) throw conflict();
         const first = await materials(command, services, deps, tx), r = command.replacement;
-        if (await tx.aiProposal.findFirst({ where: { scopeId: current.scopeId, taskId: r.taskId } })
+        if (!first.prepared && await tx.aiProposal.findFirst({ where: { scopeId: current.scopeId, taskId: r.taskId } })
           || await tx.aiApprovalConsumption.findFirst({ where: { scopeId: current.scopeId, taskId: r.taskId, actionId: r.actionId } })) throw conflict();
         if (original.facts.input.payload.quoteId === first.proof.quoteId || action.input.contentHash === r.fingerprint) throw conflict();
         assertActive();
-        const saved = await app.prepare({ taskId: r.taskId, proposalId: `rp-${requestFingerprint([current.scopeId, command.operationKey]).slice(0, 32)}`,
-          proposalRevision: 1, actionId: r.actionId, expiresAt: first.expiresAt, lease: first.lease }).catch(error => {
-          if (error instanceof AiApprovedOrderResultUnknownError || error instanceof AiTaskRepositoryError
-            && ['AI_RESOURCE_UNAVAILABLE', 'AI_STORAGE_UNAVAILABLE'].includes(error.code)) throw new AiApprovalReprepareResultUnknownError();
-          throw error;
-        });
+        let saved = first.prepared;
+        if (!saved) {
+          if (!first.lease) throw unavailable();
+          saved = await app.prepare({ taskId: r.taskId, proposalId: `rp-${requestFingerprint([current.scopeId, command.operationKey]).slice(0, 32)}`,
+            proposalRevision: 1, actionId: r.actionId, expiresAt: first.expiresAt, lease: first.lease }).catch(error => {
+            if (error instanceof AiApprovedOrderResultUnknownError || error instanceof AiTaskRepositoryError
+              && ['AI_RESOURCE_UNAVAILABLE', 'AI_STORAGE_UNAVAILABLE'].includes(error.code)) throw new AiApprovalReprepareResultUnknownError();
+            throw error;
+          });
+        }
         const prepared = await app.approvals.readProposal(r.taskId, { contractVersion: AI_PROPOSAL_DRAFT_VERSION,
           proposalId: saved.proposalId, proposalRevision: saved.proposalRevision, reviewedPayloadHash: saved.reviewedPayloadHash });
         const { consumedAt: _at, consumedOrderId: _order, ...quote } = prepared.facts.preview.payload;
@@ -190,12 +234,12 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
         // one transaction. A stopped callback must not commit any subset;
         // uncertainty after COMMIT is resolved only by the original receipt.
         assertActive();
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 10000 });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: preparationWindowMs });
       committed = true;
       return await readReceipt(command);
     };
     try {
-      return await callAiTaskRunnerDependency(attempt, 10000, 'approval_reprepare', undefined, d.runnerClock);
+      return await callAiTaskRunnerDependency(attempt, preparationWindowMs, 'approval_reprepare', undefined, d.runnerClock);
     } catch (error) {
       if (committed && !(error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED')) {
         throw new AiApprovalReprepareResultUnknownError();
@@ -207,7 +251,7 @@ export function composeApprovedOrderReprepare(d: ControlledApprovedOrderDependen
   };
   return Object.freeze({ reprepare, readReceipt: async (value: unknown) => {
     const command = parse(value);
-    try { return await callAiTaskRunnerDependency(() => readReceipt(command), 5000, 'approval_reprepare_receipt', undefined, d.runnerClock); }
+    try { return await callAiTaskRunnerDependency(() => readReceipt(command), 15000, 'approval_reprepare_receipt', undefined, d.runnerClock); }
     catch (error) {
       if (error instanceof AiTaskRepositoryError || error instanceof AiApprovalReprepareResultUnknownError) throw error;
       throw new AiApprovalReprepareResultUnknownError();

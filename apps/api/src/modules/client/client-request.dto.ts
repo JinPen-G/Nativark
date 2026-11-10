@@ -15,7 +15,10 @@ import {
   MaxLength,
   Min,
   MinLength,
-  ValidateNested
+  ValidateNested,
+  ValidateBy,
+  ValidateIf,
+  Matches
 } from "class-validator";
 import { Type } from "class-transformer";
 import {
@@ -29,6 +32,7 @@ import {
   type ClientContactRequest,
   type ClientCreateOrderRequest,
   type ClientCreateQuoteRequest,
+  type ClientQuoteDeliveryAddressDraft,
   type ClientMembershipLoginRequest,
   type ClientMiniProgramPaymentIntentRequest,
   type ClientMyOrdersQuery,
@@ -246,6 +250,19 @@ export class ClientQuoteServiceInputDto {
   serviceLocationId?: string;
 }
 
+/** Original client form payload only. Core owns service-area checks and the
+ * quote snapshot; this DTO grants no address-book mutation or order execution. */
+export class ClientQuoteDeliveryAddressDraftDto implements ClientQuoteDeliveryAddressDraft {
+  @IsString() @IsNotEmpty() @MaxLength(120) recipient!: string;
+  @IsString() @IsNotEmpty() @MaxLength(40) @Matches(/^\+?[0-9][0-9\s()-]{5,38}$/u) phone!: string;
+  @IsOptional() @IsString() @MaxLength(8) countryCode?: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) province!: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) city!: string;
+  @IsOptional() @IsString() @MaxLength(100) district?: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) detail!: string;
+  @IsOptional() @IsString() @MaxLength(20) postalCode?: string;
+}
+
 export class ClientCreateQuoteRequestDto implements ClientCreateQuoteRequest {
   @IsOptional() @ValidateNested() @Type(() => ClientBookingIdentityInputDto)
   bookingIdentity?: ClientBookingIdentityInputDto;
@@ -282,6 +299,16 @@ export class ClientCreateQuoteRequestDto implements ClientCreateQuoteRequest {
 
   @IsOptional() @IsString() @MaxLength(191)
   deliveryAddressId?: string;
+
+  // A supplied draft must be a closed original form object, never null or a
+  // shortcut for also selecting a saved address/version from another source.
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsObject() @ValidateNested() @Type(() => ClientQuoteDeliveryAddressDraftDto)
+  @ValidateBy({ name: "clientQuoteAddressSourcesExclusive", validator: {
+    validate: (_value, args) => !!args && (args.object as ClientCreateQuoteRequestDto).deliveryAddressId === undefined,
+    defaultMessage: () => "请选择地址簿地址或填写本单地址，不能同时提交"
+  } })
+  deliveryAddressDraft?: ClientQuoteDeliveryAddressDraftDto;
 }
 
 export class ClientAvailabilityLineInputDto {

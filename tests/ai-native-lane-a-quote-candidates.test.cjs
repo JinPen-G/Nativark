@@ -41,9 +41,68 @@ async function setup(categoryCode='camera'){
  const contexts={current:async()=>bc},clock=()=>new Date('2026-10-07T16:30:00Z');
  const service=new AiQuoteCandidatePreparationService(readers,contexts,clock);
  const candidate={customerType:'personal',customerId:'customer-a',items:[{productName:bc.groups[0].name,quantity:1,pricingUnit:bc.settings.pricing.enabledUnits[0]}],start:'明天 09:00',end:'后天 09:00',fulfillmentMode:bc.settings.fulfillment.enabledModes[0],locationName:bc.locations[0].name};
- return {...h,bc,readers,contexts,clock,service,candidate,customers};
+ return {...h,bc,readers,contexts,clock,service,candidate,customers,authority};
 }
-test('server resolves finite extracted candidates through real Guard/catalog/member readers without quoting',async()=>{const h=await setup(),out=await h.service.prepare(h.candidate);assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);assert.equal(out.request.startAt,'2026-10-09T01:00:00.000Z');assert.equal(out.request.endAt,'2026-10-10T01:00:00.000Z');assert.equal(out.request.customerId,'customer-a');assert.equal(out.timeZone,'Asia/Shanghai');assert.equal(out.reservation,'not_reserved');});
+test('server resolves finite extracted candidates through real Guard/catalog/member readers without quoting',async()=>{
+ const h=await setup(),out=await h.service.prepare(h.candidate);
+ assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);
+ assert.equal(out.request.startAt,'2026-10-09T01:00:00.000Z');assert.equal(out.request.endAt,'2026-10-10T01:00:00.000Z');
+ assert.equal(out.request.customerId,'customer-a');assert.equal(out.timeZone,'Asia/Shanghai');assert.equal(out.reservation,'not_reserved');
+ const {AiQuoteBusinessPreparationService}=require('../apps/api/src/modules/ai-native/tools/quote-business-preparation.service');
+ for(const [boundary,completedAt,missing] of [
+  ['already_started','2026-10-07T16:30:00Z',['start']],
+  ['start_reached_during_read','2026-10-09T01:00:00Z',['start']],
+  ['end_reached_during_read','2026-10-10T01:00:00Z',['start','end']]
+ ]){
+  const current=await setup();let observedAt='2026-10-07T16:30:00Z',reads=0,availabilityReads=0;
+  const originalRates=current.readers.rates.read;
+  current.readers.rates.read=async(...args)=>{const rows=await originalRates(...args);if(++reads===2)observedAt=completedAt;return rows;};
+  const candidate={...current.candidate,start:boundary==='already_started'?'2026-10-07T16:30:00Z':out.request.startAt,end:out.request.endAt};
+  const unchanged=structuredClone(candidate);
+  const service=new AiQuoteCandidatePreparationService(current.readers,current.contexts,()=>new Date(observedAt));
+  const result=await service.prepare(candidate);
+  assert.equal(result.status,'missing_input',boundary);assert.equal(result.request,undefined);
+  for(const field of missing){
+   assert.ok(result.missingFields.includes(field),`${boundary}: ${field}`);
+   assert.ok(result.clarifications.some(row=>row.field===field&&row.action==='supply_absolute_time'&&row.reason==='rental_time_elapsed'));
+  }
+  assert.deepEqual(candidate,unchanged,'do not shift dates or rewrite the original candidate to obtain confirmation');
+  const {originalQuoteAnswerContract}=require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+  const contract=originalQuoteAnswerContract(candidate,result,'Choose a new explicit period');
+  for(const field of missing)assert.ok(contract.fields.some(row=>row.fieldId===(field==='start'?'starts_at':'ends_at')&&row.kind==='text'&&row.required));
+  const business=new AiQuoteBusinessPreparationService(service,{read:async()=>{availabilityReads++;throw Error('elapsed candidate must not reach stock');}},
+   current.authority,{contexts:current.contexts,catalog:current.readers.catalog});
+  const unified=await business.prepareUnified(candidate);
+  assert.equal(unified.status,'missing_input');assert.equal(unified.next,'clarify_input');assert.equal(unified.request,undefined);
+  assert.deepEqual(unified.sideEffects,{quoteSaved:false,inventoryReserved:false,orderCreated:false,approvalGranted:false});
+  assert.equal(availabilityReads,0);
+ }
+ const invalid=await setup();let observedAt='2026-10-07T16:30:00Z',reads=0;
+ const originalRates=invalid.readers.rates.read;
+ invalid.readers.rates.read=async(...args)=>{const rows=await originalRates(...args);if(++reads===2)observedAt='invalid-clock';return rows;};
+ const service=new AiQuoteCandidatePreparationService(invalid.readers,invalid.contexts,()=>new Date(observedAt));
+ await assert.rejects(service.prepare({...invalid.candidate,start:out.request.startAt,end:out.request.endAt}),error=>error.code==='CONFIG_INVALID');
+ const delayed=await setup();let at='2026-10-07T16:30:00Z',stockReads=0,configurationDrift=false;
+ const period={...delayed.candidate,start:out.request.startAt,end:out.request.endAt};
+ const delayedService=new AiQuoteCandidatePreparationService(delayed.readers,delayed.contexts,()=>new Date(at));
+ // Declared availability leaf only: the original business service and enclosing
+ // Guard run normally; a completed stock observation is not a quote or lock.
+ const delayedBusiness=new AiQuoteBusinessPreparationService(delayedService,{read:async(query,context)=>{
+  stockReads++;assert.equal(query.startAt,period.start);assert.equal(context.scope.kind,'workspace');
+  at=period.start;if(configurationDrift)delayed.bc.settings.configVersion='changed-during-stock';
+  return {scope:context.scope,audience:context.audience,observedAt:at,
+   result:{...query,available:true,lines:query.lines.map(row=>({...row,requestedQuantity:row.quantity,available:true}))}};
+ }},delayed.authority,{contexts:delayed.contexts,catalog:delayed.readers.catalog});
+ const reopened=await delayedBusiness.prepareUnified(period);
+ assert.equal(reopened.status,'missing_input');assert.equal(reopened.next,'clarify_input');assert.equal(reopened.request,undefined);
+ assert.ok(reopened.missingFields.includes('start'));assert.equal(reopened.availability,undefined,'old stock observation is not a current ready material');
+ assert.equal(stockReads,1,'no stock retry or automatic new quotation after the time elapsed');
+ assert.deepEqual(period,{...delayed.candidate,start:out.request.startAt,end:out.request.endAt});
+ at='2026-10-07T16:30:00Z';configurationDrift=true;
+ await assert.rejects(delayedBusiness.prepareUnified(period),error=>error.code==='CONFIG_INVALID',
+  'elapsed time cannot downgrade a simultaneous configuration/selection change');
+ assert.equal(stockReads,2);
+});
 test('explicit personal booking identity survives authorized candidate preparation without a default',async()=>{
  const h=await setup();
  const ordinary=await h.service.prepare(h.candidate);
@@ -60,7 +119,7 @@ test('same-name customers stay ambiguous without an explicit selection',async()=
 test('unknown products and locations remain missing, never auto-selected',async()=>{const h=await setup();h.candidate.items[0].productName='not a product';h.candidate.locationName='unknown location';const out=await h.service.prepare(h.candidate);assert.equal(out.status,'missing_input');assert.ok(out.missingFields.includes('items.0'));assert.ok(out.missingFields.includes('location'));});
 test('candidate cannot override prices, identity, or server time zone',async()=>{const h=await setup();for(const patch of [{amount:0},{tenantId:'tenant-b'},{timeZone:'Pacific/Honolulu'},{actor:{kind:'saas_admin'}}])assert.equal((await h.service.prepare({...h.candidate,...patch})).status,'missing_input');});
 test('quantity, unsupported free dates and no-offset timestamps require clarification',async()=>{const h=await setup();for(const patch of [{items:[{productName:h.bc.groups[0].name,quantity:0}]},{items:[{productName:h.bc.groups[0].name,quantity:10001}]},{start:'下周找一天'},{start:'2026-10-09T09:00:00'}])assert.equal((await h.service.prepare({...h.candidate,...patch})).status,'missing_input');});
-test('enterprise candidate remains unavailable without an enterprise identity reader',async()=>{const h=await setup();assert.equal((await h.service.prepare({...h.candidate,customerType:'corporate'})).status,'qualification_required');});
+test('direct corporate user is unsupported, never silently converted to personal booking',async()=>{const h=await setup();const out=await h.service.prepare({...h.candidate,customerType:'corporate'});assert.equal(out.status,'unavailable');assert.equal(out.reason,'direct_corporate_booking_not_supported');assert.equal(out.request,undefined);});
 test('original member permission withdrawal prevents candidate preparation',async()=>{const h=await setup();h.identity.user.permissions=['rental-core:catalog:view'];await assert.rejects(h.service.prepare(h.candidate));});
 test('current server zone, not machine zone, resolves relative dates deterministically',async()=>{const h=await setup();h.bc.settings.calendar.timeZone='UTC';const out=await h.service.prepare(h.candidate);assert.equal(out.request.startAt,'2026-10-08T09:00:00.000Z');});
 test('DST ambiguous and skipped local times are not silently chosen',async()=>{const h=await setup();h.bc.settings.calendar.timeZone='America/New_York';for(const [now,start,end]of [['2026-11-01T02:00:00Z','明天 01:30','明天 03:30'],['2026-03-08T01:00:00Z','明天 02:30','明天 04:00']]){const svc=new AiQuoteCandidatePreparationService(h.readers,h.contexts,()=>new Date(now));assert.equal((await svc.prepare({...h.candidate,start,end})).status,'missing_input');}});
@@ -161,6 +220,24 @@ test('forged selected ID cannot be rescued by a valid returned name',async()=>{
  const out=await h.service.prepare({...h.candidate,selectionRevision:before.selectionRevision,items:[{itemGroupId:'foreign-product',productName:h.bc.groups[0].name,quantity:1}]});
  assert.equal(out.status,'missing_input');assert.equal(out.request,undefined);assert.ok(out.missingFields.includes('items.0'));
 });
+
+// Begin pickup address reconfirm owned cases.
+test('AIN15 pickup address reconfirm clears an inapplicable old address only after explicit same-mode choice',async()=>{
+ const h=await setup(),candidate={...h.candidate,fulfillmentMode:'store_pickup_return',deliveryAddressId:'old-address'};
+ const before=structuredClone(candidate),prepared=await h.service.prepare(candidate);
+ assert.ok(prepared.clarifications.some(row=>row.field==='fulfillmentMode'&&row.reason==='reselect_fulfillment_to_clear_inapplicable_address'));
+ const {originalQuoteAnswerContract,applyOriginalQuoteAnswers}=require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+ const contract=originalQuoteAnswerContract(candidate,prepared,'Reconfirm the original pickup');
+ const mode=contract.fields.find(row=>row.fieldId==='fulfillment_selection');
+ assert.ok(mode.options.some(row=>row.value==='store_pickup_return'));
+ const answers=contract.fields.filter(row=>row.required).map(row=>({fieldId:row.fieldId,
+  value:row.fieldId==='fulfillment_selection'?'store_pickup_return':row.options?.[0]?.value}));
+ const selected=applyOriginalQuoteAnswers(candidate,[{contract,answers}]);
+ assert.deepEqual(candidate,before);assert.equal(selected.fulfillmentMode,'store_pickup_return');assert.equal(selected.deliveryAddressId,undefined);
+ const next=await h.service.prepare(selected);
+ assert.ok(!next.clarifications?.some(row=>row.reason==='reselect_fulfillment_to_clear_inapplicable_address'));
+});
+// End pickup address reconfirm owned cases.
 
 test('delivery address selection flows through original answers and must be reselected after address or customer changes',async()=>{
  const h=await setup();

@@ -1,6 +1,7 @@
-/** Explicit reauthorized turn locators and separately requested model text.
- * Reads never create/continue a Task. Closing, switching or hiding retracts the
- * detail, and erased input remains erased even when its original Task survives. */
+import { TaskReadPolicy } from './TaskReadPolicy';
+/** Reauthorized turn locators, original execution preparation and model text.
+ * Reading or reopening never starts a Task/model. An explicit start reuses the
+ * admitted Task/Run; erased input cannot restore execution or displayed text. */
 import { useEffect, useRef, useState } from 'react';
 import { AI_CONVERSATION_DRAFT_VERSION, type AiSceneCode } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
@@ -8,8 +9,12 @@ import { ActionButton, Alert } from '@/components/ui';
 import { useAiManagementLocale } from './management-locale';
 import { formatTimestamp } from './formatters';
 import { safeDisplayText } from './safe-display';
+import { VisibleObservationHost } from './VisibleObservationHost';
 import { ConversationResult } from './ConversationResult';
 import { ConversationAdmission } from './ConversationAdmission';
+import { ConversationOrderExecution } from './ConversationOrderExecution';
+import { ConversationOpeningExecution } from './ConversationOpeningExecution';
+import { ConversationQuoteExecution } from './ConversationQuoteExecution';
 import styles from './AiManagement.module.css';
 
 type Detail = Awaited<ReturnType<typeof aiConversationsApi.detail>>;
@@ -40,14 +45,14 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
     } catch (failure) { if (active()) setError(true); throw failure; }
     finally { if (request.current === controller) { request.current = null; setBusy(false); } }
   };
-  return <section className={styles.section} aria-label={t('对话原轮次')} aria-busy={busy}>
+  return <VisibleObservationHost surface="server_conversation" conversationId={conversationId} scopeKey={generation.current} current={current}><section className={styles.section} aria-label={t('对话原轮次')} aria-busy={busy}>
     <h3>{t('对话原轮次')}</h3>
     <p className={styles.help}>{safeDisplayText(conversationId, 191)}</p>
     <div className={styles.toolbar}>
       <ActionButton label={t(detail ? '重读轮次首页' : '读取原轮次')} disabled={busy} onAction={() => read()} />
       {detail?.turns.nextBeforeId && <ActionButton label={t('更早轮次')} disabled={busy} onAction={() => read(detail.turns.nextBeforeId!)} />}
     </div>
-    {['order_explanation', 'opening_diagnosis'].includes(capabilityCode) && <ConversationAdmission conversationId={conversationId} identity={identity} capabilityCode={capabilityCode}
+    {['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(capabilityCode) && <ConversationAdmission conversationId={conversationId} identity={identity} capabilityCode={capabilityCode}
       observation={detail?.conversation ?? null} current={() => !document.hidden && scope.current.conversationId === conversationId
         && scope.current.capabilityCode === capabilityCode && scope.current.current()} onChanged={() => {
           generation.current++; request.current?.abort(); request.current = null; setDetail(null); setBusy(false); setError(false);
@@ -71,6 +76,25 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
       {detail.turns.items.map(turn => <ConversationResult key={turn.turnId} conversationId={conversationId} turn={turn}
         current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
           && scope.current.current()} />)}
+      {detail.turns.items.filter(turn => turn.capabilityCode === 'order_explanation' && turn.material === 'retained' && turn.task && !('creation' in turn))
+        .map(turn => <TaskReadPolicy key={`read-policy:${identity}:${turn.turnId}`} query={{ taskId: turn.task!.taskId, runId: turn.task!.runId }} identity={identity}
+          current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.current()} />)}
+      {detail.turns.items.filter(turn => capabilityCode === 'order_explanation' && turn.capabilityCode === capabilityCode && turn.material === 'retained'
+        && turn.task && !('creation' in turn)).map(turn => <ConversationOrderExecution key={`execution:${turn.turnId}`}
+        identity={identity} conversationId={conversationId} turn={turn}
+        current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
+          && scope.current.current()} />)}
+      {detail.turns.items.filter(turn => capabilityCode === 'opening_diagnosis' && turn.capabilityCode === capabilityCode && turn.material === 'retained'
+        && turn.task && !('creation' in turn)).map(turn => <ConversationOpeningExecution key={`opening:${turn.turnId}`}
+        identity={identity} conversationId={conversationId} turn={turn} showResult={false}
+        current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
+          && scope.current.current()} />)}
+      {detail.turns.items.filter(turn => capabilityCode === 'quote_clarification' && turn.capabilityCode === capabilityCode && turn.material === 'retained'
+        && turn.task && !('creation' in turn)).map(turn => <ConversationQuoteExecution key={`quote:${turn.turnId}`}
+        identity={identity} conversationId={conversationId} turn={turn} showResult={false}
+        onAccessDenied={() => { generation.current++; request.current?.abort(); request.current = null; setDetail(null); setBusy(false); setError(true); }}
+        current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
+          && scope.current.current()} />)}
     </>}
-  </section>;
+  </section></VisibleObservationHost>;
 }

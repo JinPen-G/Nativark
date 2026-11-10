@@ -32,6 +32,20 @@ async function harness() {
   return { ...h, deps, prepareCommand: command, compose, approve };
 }
 
+test('preparation preserves the already-sanitized repository error origin without publishing private dependency failures', async () => {
+  const h = await harness(), { AiTaskRepositoryError } = require('../apps/api/src/modules/ai-native/ai-task.repository');
+  const failure = new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  h.deps.quoteFacts.findQuote = async () => { throw failure; };
+  await assert.rejects(h.compose().prepare(h.prepareCommand), error => error === failure);
+  assert.equal(h.state.records.aiProposal.length, 0); assert.equal(h.state.records.aiApprovedOrderSnapshot.length, 0);
+  assert.equal(h.state.records.aiApproval.length, 0); assert.equal(h.state.records.rentalOrder.length, 0);
+  const privateCase = await harness();
+  privateCase.deps.quoteFacts.findQuote = async () => { throw Error('private quote dependency payload'); };
+  await assert.rejects(privateCase.compose().prepare(privateCase.prepareCommand), error =>
+    ['AI_RESOURCE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'].includes(error.code)
+      && !String(error.stack).includes('private quote dependency payload'));
+});
+
 test('prepare persists full Core quote and DTO input with refs only in a pending proposal, never auto-approves', async () => {
   const h = await harness(), root = h.compose(); const pending = await root.prepare(h.prepareCommand);
   assert.equal(h.state.records.aiApproval.length, 0); assert.equal(h.state.records.rentalOrder.length, 0);

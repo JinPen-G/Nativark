@@ -26,7 +26,7 @@ import { AiTaskExecutionBudgetError } from '../task-execution-budget.ports';
 type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'db' | 'clock'> & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   scene: { code: string; version: string };
-  gatewayScene: GatewayTextIntentBinding;
+  gatewayScene: GatewayTextIntentBinding & { nativeToolResults?: boolean };
   priceVersion: string;
   runtime: PublicGatewayRuntime;
   /** Server-selected tool policy; never an Agent-controlled feature switch. */
@@ -36,9 +36,12 @@ type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'd
   /** Recorded hosts only: the in-task counting chain (count the registered
    * frozen input, publish its trusted bound) wrapped around the invocation
    * preparation. A calls host omits it and never counts. */
+  /** Same original result resolver as generation; no new source or authority. */
+  nativeCounting?: import('./native-tool-result.ports').NativeToolResultResolver;
   inputCounting?: { preparation(inner: import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation,
     frozen: import('../input-counting/input-count-tokens.service').CountTokensFrozenInputSource,
-    policy: import('./task-model-input').TaskModelPolicy):
+    policy: import('./task-model-input').TaskModelPolicy,
+    nativeCounting?: import('./native-tool-result.ports').NativeToolResultResolver):
     import('../runner/prisma-task-runner-resource.source').AiTaskModelInvocationPreparation };
 };
 export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & TaskModelCompositionInput) {
@@ -59,6 +62,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
     ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
     ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
     ...(input.gatewayScene.structuredSchemaHash ? { structuredSchemaHash: input.gatewayScene.structuredSchemaHash } : {}),
+    ...(input.gatewayScene.nativeToolResults !== undefined ? { nativeToolResults: input.gatewayScene.nativeToolResults } : {}),
     ...(input.kind ? { kind: input.kind } : {}) });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     tool, undefined, modelPolicy);
@@ -69,7 +73,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
     input.gatewayScene, input.priceVersion, clock, input.kind);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock, modelPolicy);
   const plainInvocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
-  const countedInvocations = input.inputCounting?.preparation(plainInvocations, inputs, modelPolicy);
+  const countedInvocations = input.inputCounting?.preparation(plainInvocations, inputs, modelPolicy, input.nativeCounting);
   const invocations: AiTaskModelInvocationPreparation = countedInvocations ? {
     prepare: countedInvocations.prepare.bind(countedInvocations),
     async beforeDispatch(request, budget, signal) {

@@ -61,7 +61,7 @@ const incomplete = (extra: Record<string, AiLeafSchemaDraft>, required: string[]
     clarifications, selectionRevision: hash }, [...required, 'status', 'missingFields']),
   object({ ...extra, status: choice('qualification_required'), reason: choice('enterprise_identity_reader_unavailable'),
     clarifications }, [...required, 'status', 'reason', 'clarifications']),
-  object({ ...extra, status: choice('unavailable'), reason: choice('category_unavailable', 'enterprise_payer_authority_unavailable',
+  object({ ...extra, status: choice('unavailable'), reason: choice('category_unavailable', 'enterprise_payer_authority_unavailable', 'direct_corporate_booking_not_supported',
     'current_product_rates_unavailable', 'category_configuration_unavailable', 'current_customer_addresses_unavailable'),
     missingFields: fields, clarifications, selectionRevision: hash }, [...required, 'status', 'reason']),
   object({ ...extra, status: choice('ambiguous'), ambiguousFields: fields, missingFields: fields, selectionRevision: hash,
@@ -194,7 +194,7 @@ type Clarifications = Array<{ field: string; reason: string; action: string;
 type Incomplete =
   | { status: 'missing_input'; missingFields: string[]; ambiguousFields?: string[]; selectionRevision?: string; clarifications?: Clarifications }
   | { status: 'qualification_required'; reason: 'enterprise_identity_reader_unavailable'; clarifications: Clarifications }
-  | { status: 'unavailable'; reason: 'category_unavailable' | 'enterprise_payer_authority_unavailable' |
+  | { status: 'unavailable'; reason: 'category_unavailable' | 'enterprise_payer_authority_unavailable' | 'direct_corporate_booking_not_supported' |
       'current_product_rates_unavailable' | 'category_configuration_unavailable' | 'current_customer_addresses_unavailable';
       missingFields?: string[]; selectionRevision?: string; clarifications?: Clarifications }
   | { status: 'ambiguous'; ambiguousFields: string[]; missingFields: string[]; selectionRevision: string; clarifications: Clarifications;

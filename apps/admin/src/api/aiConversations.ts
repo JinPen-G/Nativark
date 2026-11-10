@@ -1,9 +1,10 @@
-/** Original conversation transport and explicit Task creation/order-model start.
- * Only orderStart dispatches through the original host; reads never recover a run. */
-import { AI_CONVERSATION_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT, type AiSceneRequestReadDraft, type AiConversationListDraft, type AiConversationTurnListDraft,
+/** Original conversation transport and explicit Task creation/scene-model starts.
+ * Starts use the original hosts; reads never recover a run or dispatch a model. */
+import { AI_CONVERSATION_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, type AiSceneRequestReadDraft, type AiConversationListDraft, type AiConversationTurnListDraft,
   type AiConversationTurnReferenceDraft, type AiConversationTurnObservationDraft, type AiConversationCreateDraft,
   type AiConversationMutationDraft, type AiConversationOperationRequestDraft, type AiConversationTurnAdmissionDraft,
-  type AiSceneCode, type AiConversationUnstartedCloseDraft, type ApiResult } from '@rental-os/shared';
+  type AiSceneCode, type AiConversationUnstartedCloseDraft, type ApiResult,
+  type AiSceneModelAnswerQueryDraft, type AiSceneModelQuoteConfirmDraft } from '@rental-os/shared';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { readConversationHistory, readConversationDetail, readConversationTaskResult } from '@/features/ai-native/conversation-history-reader';
 import { aiTaskCenterApi } from './aiTaskCenter';
@@ -16,10 +17,35 @@ async function lifecycle(action: 'create' | 'archive' | 'delete' | 'operation' |
   if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
   return result.data.data;
 }
-async function originalTask(action: 'createTask' | 'recovery', input: AiSceneRequestReadDraft, signal: AbortSignal) {
+async function originalTask(action: 'createTask' | 'recovery' | 'reconcile', input: AiSceneRequestReadDraft, signal: AbortSignal) {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
   if (active.aborted) throw Error('AI_SCOPE_CHANGED');
   const response = await http.post<ApiResult<unknown>>(`/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT[action]}`,
+    structuredClone(input), { signal: active });
+  if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
+  return response.data.data;
+}
+async function openingStart(input: AiSceneRequestReadDraft, signal: AbortSignal) {
+  const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
+  if (active.aborted) throw Error('AI_SCOPE_CHANGED');
+  const response = await http.post<ApiResult<unknown>>(`/${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.basePath}/${AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT.start}`,
+    structuredClone(input), { signal: active, timeout: 120000 });
+  if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
+  return response.data.data;
+}
+async function quoteStart(input: AiSceneRequestReadDraft, signal: AbortSignal) {
+  const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
+  if (active.aborted) throw Error('AI_SCOPE_CHANGED');
+  const response = await http.post<ApiResult<unknown>>(`/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT.start}`,
+    structuredClone(input), { signal: active, timeout: 120000 });
+  if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
+  return response.data.data;
+}
+async function quoteOperation(action: 'readQuotePreparation' | 'confirmClarifiedQuote' | 'readClarifiedQuoteReceipt',
+  input: AiSceneModelAnswerQueryDraft | AiSceneModelQuoteConfirmDraft, signal: AbortSignal) {
+  const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
+  if (active.aborted) throw Error('AI_SCOPE_CHANGED');
+  const response = await http.post<ApiResult<unknown>>(`/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT[action]}`,
     structuredClone(input), { signal: active });
   if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
   return response.data.data;
@@ -33,6 +59,12 @@ async function orderModel(action: 'readPreparation' | 'start' | 'readOrderResult
   return response.data.data;
 }
 export const aiConversationsApi = Object.freeze({
+  openingStart,
+  quoteStart,
+  quotePreparation: (input: AiSceneModelAnswerQueryDraft, signal: AbortSignal) => quoteOperation('readQuotePreparation', input, signal),
+  quoteConfirm: (input: AiSceneModelQuoteConfirmDraft, signal: AbortSignal) => quoteOperation('confirmClarifiedQuote', input, signal),
+  quoteReceipt: (input: AiSceneModelAnswerQueryDraft, signal: AbortSignal) => quoteOperation('readClarifiedQuoteReceipt', input, signal),
+  originalReceipt: (input: AiSceneRequestReadDraft, signal: AbortSignal) => originalTask('reconcile', input, signal),
   orderFacts: (input: AiSceneRequestReadDraft, signal: AbortSignal) => orderModel('readOrderResult', input, signal),
   orderAnswer: (input: AiSceneRequestReadDraft, signal: AbortSignal) => orderModel('readAnswer', input, signal),
   orderPreparation: (input: AiSceneRequestReadDraft, signal: AbortSignal) => orderModel('readPreparation', input, signal),

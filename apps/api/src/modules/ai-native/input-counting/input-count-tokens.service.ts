@@ -22,12 +22,14 @@ import type { AiProviderProfileRecord } from '../provider-profile.ports';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { BudgetError, type BudgetAuthorizationSource, type BudgetServiceLike } from './input-count-tokens.ports';
 import { PrismaGatewayPricingRecords, GatewayInputBoundNotFoundError, type GatewayPricingRecordDb } from '../budget/prisma-gateway-pricing-records';
-import { countTokensSupport, prepareCountTokensMaterial, countTokensMaterialHash, anthropicCountTokensRequest,
+import { countTokensSupport, prepareCountTokensMaterial, prepareNativeCountTokensMaterial, countTokensMaterialHash, anthropicCountTokensRequest,
   parseCountTokensResponse, postCountTokens, type CountTokensMaterial } from './count-tokens.protocol';
 import { countTokensCallId, countTokensSceneCode } from './input-count-tokens.admission';
 import { PrismaCountTokensReceipts, countTokensOperationId, countTokensReference,
   CountTokensReceiptNotFoundError,
   type CountTokensReceipt, type CountTokensReceiptDb } from './input-count-tokens.receipt';
+
+import { nativeToolResultIntentFingerprint, resolvedNativeToolResultSchema, type NativeToolResultResolver } from '../model-input/native-tool-result.ports';
 
 const callIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const countReservationSelect = { id: true, scopeId: true, scopeKind: true, tenantId: true, workspaceId: true,
@@ -68,6 +70,9 @@ export interface InputCountTokensDependencies {
   resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport?: ModelJsonTransport;
   policyOptions?: ChatProtocolOptions;
+  /** Server-only original Task/Core resolver; never accepted in a count command.
+   * Absent keeps native counting unavailable without affecting old receipt reads. */
+  nativeToolResults?: NativeToolResultResolver;
   /** Management entries only. Undefined keeps them unavailable while the
    * task-internal entry stays usable for hosts composed without a fixed
    * management scene. */
@@ -101,6 +106,9 @@ export type CountTokensLifecycle = 'not_started' | 'reserved' | 'claimed_dispatc
  * publication, and the already-published bound from the original store. */
 export type CountTokensDiagnostics = { applicable: boolean;
   bound: { published: boolean; id?: string; maxInputTokens?: number } };
+type CountTokensOutcome = { state: 'observed'; inputTokens: number; requestHash: string }
+  | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string }
+  | { state: 'unknown'; requestHash: string };
 
 const identity = (context: AiExecutionContext) => {
   const { requestId: _, authorizedAt: __, ...value } = context;
@@ -126,6 +134,8 @@ export class InputCountTokensService {
         || typeof input.resolvers.tenant?.resolve !== 'function')
       || input.transport !== undefined && typeof input.transport.post !== 'function'
       || input.policyOptions !== undefined && (typeof input.policyOptions !== 'object' || Array.isArray(input.policyOptions))
+      || input.nativeToolResults !== undefined && (typeof input.nativeToolResults.resolve !== 'function'
+        || typeof input.nativeToolResults.assertCurrent !== 'function')
       || input.sceneCode !== undefined && !callIdSchema.max(64).safeParse(input.sceneCode).success
       || input.countingPriceVersion !== undefined && !callIdSchema.max(64).safeParse(input.countingPriceVersion).success
       || input.taskExecution !== undefined && typeof input.taskExecution.authorize !== 'function'
@@ -341,7 +351,9 @@ export class InputCountTokensService {
       // Serialize the count material BEFORE reserving/dispatching admission:
       // a locally unsupported combination (media part, unregistered structured
       // schema) must never mark the ledger dispatched for an unsent request.
-      const material = this.countMaterial(frozen);
+      const prepared = await life.wait(() => this.countMaterial(frozen, life.controller.signal));
+      const material = prepared.material;
+      if (prepared.assertCurrent) await life.wait(prepared.assertCurrent);
       const reservation = await life.wait(() => {
         // The write may commit before its reply is lost. Mark uncertainty at
         // invocation, never only after an acknowledgement has arrived.
@@ -361,12 +373,11 @@ export class InputCountTokensService {
         actorId: frozen.actorId, callId: frozen.invocation.callId, reservationId: reservation.id,
         registrationHash: frozen.invocation.registrationHash, intentHash: frozen.invocation.intentHash,
         configurationHash: frozen.invocation.configurationHash, countRequestHash: countTokensMaterialHash(material) }));
+      const recordReceipt = this.receiptRecorder(frozen, association, reservation.id);
       const outcome = await this.performCount(frozen, opened, life, material,
         () => this.dependencies.budget.dispatch(reservation.id, association,
-          requestFingerprint({ association, phase: 'dispatch' })));
-      const receipt = await life.wait(() => this.persistReceipt(frozen, association, reservation.id, outcome.state,
-        outcome.state === 'observed' ? { inputTokens: outcome.inputTokens }
-          : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash));
+          requestFingerprint({ association, phase: 'dispatch' })), recordReceipt, prepared.assertCurrent);
+      const receipt = await life.wait(() => recordReceipt(outcome));
       const admission = await this.accountAdmission(receipt, association, life);
       await life.wait(() => opened.recheck());
       return this.summary(receipt, admission);
@@ -597,23 +608,55 @@ export class InputCountTokensService {
   /** Connection-independent serialization of the frozen input: the exact
    * body the provider will receive. Rejects unsupported combinations before
    * any admission is reserved. */
-  private countMaterial(frozen: CountTokensFrozenInvocation): CountTokensMaterial {
+  private async countMaterial(frozen: CountTokensFrozenInvocation, signal: AbortSignal): Promise<{
+    material: CountTokensMaterial; assertCurrent?: () => Promise<void>;
+  }> {
     if (!this.policy) throw new BudgetError('UNAVAILABLE');
+    const native = frozen.intent.messages.some(message => message.content.some(part => part.kind === 'tool_result_reference'));
+    if (native) {
+      const resolver = this.dependencies.nativeToolResults;
+      if (!resolver || !this.policy.nativeToolResults || frozen.configuration.protocol !== 'anthropic_messages')
+        throw new BudgetError('UNAVAILABLE');
+      const intentHash = nativeToolResultIntentFingerprint(frozen.intent, { sceneCode: frozen.invocation.sceneCode,
+        maxOutputTokens: frozen.invocation.maxOutputTokens, orderExplainTool: true, nativeToolResults: true });
+      const part = frozen.intent.messages[0]?.content[0];
+      if (intentHash !== frozen.invocation.intentHash || frozen.intent.messages.length !== 1
+        || frozen.intent.messages[0].role !== 'user' || frozen.intent.messages[0].content.length !== 1
+        || part?.kind !== 'tool_result_reference' || part.reference.taskId !== frozen.invocation.taskId
+        || part.reference.runId !== frozen.invocation.runId || frozen.context.scope.kind !== 'workspace')
+        throw new ModelGatewayError('INVALID_REQUEST');
+      const context = { tenantId: frozen.context.scope.tenantId, workspaceId: frozen.context.scope.workspaceId, actorId: frozen.actorId };
+      const parsed = resolvedNativeToolResultSchema.safeParse(structuredClone(await resolver.resolve(context, structuredClone(part.reference), signal)));
+      if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+      const value = parsed.data;
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (requestFingerprint(value.reference) !== requestFingerprint(part.reference)
+        || value.originalIntent.sceneCode !== frozen.intent.sceneCode
+        || value.sourceConfigurationHash !== frozen.invocation.configurationHash
+        || value.sourceInvocationId === frozen.invocation.id) throw new ModelGatewayError('INVALID_REQUEST');
+      const messages = value.originalIntent.messages.map(message => ({ role: message.role, content: message.content.map(content => {
+        if (content.kind !== 'text') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+        return content.text;
+      }).join('') }));
+      const material = prepareNativeCountTokensMaterial({ callId: frozen.invocation.callId, model: frozen.configuration.model,
+        messages, maxOutputTokens: frozen.invocation.maxOutputTokens, features: ['tools'] }, this.policy, value);
+      return { material, assertCurrent: () => resolver.assertCurrent(structuredClone(context), structuredClone(value), signal) };
+    }
     const features = [...new Set(frozen.intent.requiredFeatures.flatMap(feature =>
       feature === 'tools' ? ['tools' as const] : feature === 'structured_output' ? ['structuredOutput' as const] : []))];
-    return prepareCountTokensMaterial({ callId: frozen.invocation.callId, model: frozen.configuration.model,
-      // Identical text-only conversion to prepareGatewayTextIntent: join a
-      // message's text parts into one string; non-text parts refuse outright.
+    return { material: prepareCountTokensMaterial({ callId: frozen.invocation.callId, model: frozen.configuration.model,
+      // Normal text counting stays byte-for-byte compatible; media still refuses.
       messages: frozen.intent.messages.map(message => ({ role: message.role,
         content: message.content.map(part => {
           if (part.kind !== 'text') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
           return part.text;
         }).join('') })),
-      maxOutputTokens: frozen.invocation.maxOutputTokens, features }, this.policy);
+      maxOutputTokens: frozen.invocation.maxOutputTokens, features }, this.policy) };
   }
 
   private async performCount(frozen: CountTokensFrozenInvocation, gate: CountingGate,
-    life: GatewayDeadline, material: Readonly<CountTokensMaterial>, dispatch: () => PromiseLike<unknown>): Promise<{ state: 'observed'; inputTokens: number; requestHash: string } | { state: 'failed'; failureCode: 'AUTHENTICATION_FAILED' | 'PROVIDER_REJECTED'; requestHash: string } | { state: 'unknown'; requestHash: string }> {
+    life: GatewayDeadline, material: Readonly<CountTokensMaterial>, dispatch: () => PromiseLike<unknown>,
+    recordReceipt: (outcome: CountTokensOutcome) => Promise<CountTokensReceipt>, nativeCurrent?: () => Promise<void>): Promise<CountTokensOutcome> {
     const configuration = frozen.configuration, { resolvers, transport } = this.dependencies;
     if (!resolvers || !transport) throw new BudgetError('UNAVAILABLE');
     const profile = await life.wait(() => this.profile(configuration, gate.tenantId));
@@ -628,15 +671,26 @@ export class InputCountTokensService {
     // step and lease through the existing dispatch boundary immediately before
     // POST. A cancellation while credentials resolve cannot inherit an old grant.
     await life.wait(() => gate.recheck());
+    if (nativeCurrent) await life.wait(nativeCurrent);
     await life.wait(dispatch);
+    // Accounting may itself await storage. A changed original Core result after
+    // that wait cannot be sent, nor does it prove the claimed count was harmless.
+    if (nativeCurrent) await life.wait(nativeCurrent);
     try {
-      const response = await life.wait(() => postCountTokens(transport, request,
-        connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES));
-      if (response.status === 401 || response.status === 403) return { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash };
-      if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)
-        return { state: 'failed', failureCode: 'PROVIDER_REJECTED', requestHash: request.requestHash };
-      if (response.status !== 200) return { state: 'unknown', requestHash: request.requestHash };
-      return { state: 'observed', inputTokens: parseCountTokensResponse(response.body, connection.credential), requestHash: request.requestHash };
+      return await life.wait(() => postCountTokens(transport, request,
+        connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES).then(async response => {
+        const outcome: CountTokensOutcome = response.status === 401 || response.status === 403
+          ? { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash }
+          : response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429
+            ? { state: 'failed', failureCode: 'PROVIDER_REJECTED', requestHash: request.requestHash }
+            : response.status !== 200 ? { state: 'unknown', requestHash: request.requestHash }
+              : { state: 'observed', inputTokens: parseCountTokensResponse(response.body, connection.credential), requestHash: request.requestHash };
+        // This original response can arrive after caller cancellation. Retain
+        // only its count/association before current delivery checks; this does
+        // not settle admission, publish a bound or authorize new generation.
+        await recordReceipt(outcome);
+        return outcome;
+      }));
     } catch (error) {
       if (error instanceof ModelGatewayError && ['TIMEOUT', 'CANCELLED', 'PROVIDER_FAILED', 'INVALID_RESPONSE'].includes(error.code))
         return { state: 'unknown', requestHash: request.requestHash };
@@ -646,8 +700,28 @@ export class InputCountTokensService {
       throw error;
     } finally {
       if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
+      if (nativeCurrent) await life.wait(nativeCurrent);
       await life.wait(() => gate.recheck());
     }
+  }
+  private receiptRecorder(value: CountTokensFrozenInvocation, valueAssociation: AiUsageAssociationDraft, reservationId: string) {
+    const frozen = structuredClone(value), association = structuredClone(valueAssociation);
+    let recording: Promise<CountTokensReceipt> | undefined, recordedHash: string | undefined;
+    return (valueOutcome: CountTokensOutcome): Promise<CountTokensReceipt> => {
+      const outcome = structuredClone(valueOutcome), hash = requestFingerprint(outcome);
+      if (recording) return hash === recordedHash ? recording : Promise.reject(new BudgetError('IDEMPOTENCY_CONFLICT'));
+      recordedHash = hash;
+      // Receipt persistence has one bounded wait independent of the caller's
+      // delivery deadline. An unreadable write reply stays pending; reuse the
+      // same promise and original key, never retry or overwrite its payload.
+      const receiptLife = new GatewayDeadline(5000);
+      recording = receiptLife.wait(() => this.persistReceipt(frozen, association, reservationId, outcome.state,
+        outcome.state === 'observed' ? { inputTokens: outcome.inputTokens }
+          : outcome.state === 'failed' ? { failureCode: outcome.failureCode } : {}, outcome.requestHash))
+        .catch(error => { throw error instanceof BudgetError ? error : new BudgetError('PENDING_RECONCILIATION'); })
+        .finally(() => receiptLife.close());
+      return recording;
+    };
   }
   private async persistReceipt(frozen: CountTokensFrozenInvocation, association: AiUsageAssociationDraft,
     reservationId: string, state: CountTokensReceipt['state'],

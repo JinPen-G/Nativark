@@ -21,6 +21,16 @@ test('cache miss/hit still checks authorization; TTL is absolute and boundary ex
   f.now += 999; await f.sources.readChunk(ctx, f.ref); assert.equal(f.bodyReads, 1); assert.ok(f.authCalls.length > calls);
   f.now += 1; await f.sources.readChunk(ctx, f.ref); assert.equal(f.bodyReads, 2);
 });
+test('idle cache releases expired plaintext even when the business clock moves backwards', async () => {
+  const f = await fixture(), chunk = [...f.repo.chunks.values()][0][0];
+  const cache = new KnowledgeCache(f.clock, { maxEntries: 2, maxBytes: 2000, ttlMs: 10 });
+  cache.put('idle', chunk);
+  assert.equal(cache.stats().entries, 1); assert.ok(cache.stats().bytes > 0);
+  f.now -= 86400000;
+  await new Promise(resolve => setTimeout(resolve, 40));
+  // Observe storage without get/put/invalidate triggering lazy eviction.
+  assert.deepEqual(cache.stats(), { entries: 0, bytes: 0 });
+});
 test('cached result cannot bypass a newly revoked read_body or snippet permission', async () => {
   for (const deniedAction of ['read_body', 'snippet']) {
     const f = await fixture(); await f.sources.readChunk(h.context(), f.ref); assert.equal(f.cache.stats().entries, 1);

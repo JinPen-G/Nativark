@@ -8,7 +8,7 @@ import { AI_CONVERSATION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, validate
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>;
 type Marker = AiConversationTurnReferenceDraft & { turnId: string; requestHash: string; original: AiSceneRequestReadDraft;
-  capabilityCode?: 'order_explanation' | 'opening_diagnosis'; capabilityVersion?: string };
+  capabilityCode?: 'order_explanation' | 'opening_diagnosis' | 'quote_clarification'; capabilityVersion?: string };
 type Ports = {
   admission(query: AiConversationTurnReferenceDraft, signal: AbortSignal): Promise<unknown>;
   createTask(query: AiSceneRequestReadDraft, signal: AbortSignal): Promise<unknown>;
@@ -23,7 +23,7 @@ function marker(value: unknown, conversationId: string): value is Marker {
   // and version so a reload cannot cross into another scene's Task creation.
   return closed(value, ['draftVersion', 'conversationId', 'admissionKey', 'turnId', 'requestHash', 'original',
     ...(scoped ? ['capabilityCode', 'capabilityVersion'] : [])])
-    && (!scoped || ['order_explanation', 'opening_diagnosis'].includes(value.capabilityCode as string) && id(value.capabilityVersion))
+    && (!scoped || ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(value.capabilityCode as string) && id(value.capabilityVersion))
     && value.draftVersion === AI_CONVERSATION_DRAFT_VERSION && value.conversationId === conversationId
     && id(value.admissionKey) && (value.admissionKey as string).length <= 128 && id(value.turnId)
     && typeof value.requestHash === 'string' && /^[a-f0-9]{64}$/u.test(value.requestHash)
@@ -73,7 +73,7 @@ export class ConversationTaskCreationSession {
   }
   create = async (selected: AiConversationTurnObservationDraft) => {
     this.check(); if (this.request) throw Error('AI_BUSY');
-    if (this.state.locked || !this.storage || !validateAiConversationTurnDraft(selected) || !['order_explanation', 'opening_diagnosis'].includes(selected.capabilityCode)
+    if (this.state.locked || !this.storage || !validateAiConversationTurnDraft(selected) || !['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(selected.capabilityCode)
       || selected.material !== 'retained' || selected.task || 'creation' in selected) throw Error('AI_RESULT_UNKNOWN');
     const original: Marker = { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId: this.conversationId,
       admissionKey: selected.admissionKey, turnId: selected.turnId, requestHash: selected.requestHash, original: structuredClone(selected.original),

@@ -11,25 +11,33 @@ import { safeDisplayText } from './safe-display';
 import styles from './AiManagement.module.css';
 import { ConversationDetail } from './ConversationDetail';
 import { ConversationLifecycle } from './ConversationLifecycle';
+import type { ConversationSelection } from './conversation-navigation';
 
 const scenes: Record<AiSceneCode, string> = {
   order_explanation: '订单解读', opening_diagnosis: '开业诊断', quote_clarification: '报价说明',
 };
-export function ConversationHistory({ current, enabled, identity }: { current: () => boolean; enabled: boolean; identity: string }) {
+export function ConversationHistory({ current, enabled, identity, initialConversation, onOpenConversation }: {
+  current: () => boolean; enabled: boolean; identity: string; initialConversation?: ConversationSelection;
+  onOpenConversation?: (selection: ConversationSelection) => void;
+}) {
   const { t } = useAiManagementLocale();
-  const [capability, setCapability] = useState<AiSceneCode | 'all'>('all');
+  const [capability, setCapability] = useState<AiSceneCode | 'all'>(initialConversation?.capabilityCode ?? 'all');
   const [status, setStatus] = useState<'active' | 'archived'>('active');
   const [page, setPage] = useState<AiConversationListResponseDraft | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialConversation?.conversationId ?? null);
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
   const [index, setIndex] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const [visible, setVisible] = useState(() => !document.hidden);
   const request = useRef<AbortController | null>(null), generation = useRef(0);
-  const scope = useRef({ current, enabled }); scope.current = { current, enabled };
+  const scope = useRef({ current, enabled, selected }); scope.current = { current, enabled, selected };
   const reset = () => {
     generation.current++; request.current?.abort(); request.current = null;
     setPage(null); setSelected(null); setCursors([undefined]); setIndex(0); setBusy(false); setError(false);
   };
+  const selectedRow = page?.items.find(row => row.conversationId === selected);
+  const selectedConversation: ConversationSelection | null = selectedRow
+    ? { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId: selectedRow.conversationId, capabilityCode: selectedRow.capabilityCode }
+    : selected === initialConversation?.conversationId ? initialConversation ?? null : null;
   useEffect(() => {
     const change = () => { reset(); setVisible(!document.hidden); };
     document.addEventListener('visibilitychange', change);
@@ -90,9 +98,15 @@ export function ConversationHistory({ current, enabled, identity }: { current: (
         <span>{t('第')} {index + 1} {t('页')}</span>
         <ActionButton label={t('下一页')} disabled={busy || !page.nextBeforeId || !visible} onAction={() => read(index + 1)} />
       </nav>
-      {selected && page.items.some(row => row.conversationId === selected) && <ConversationDetail key={selected}
-        conversationId={selected} identity={identity} capabilityCode={page.items.find(row => row.conversationId === selected)!.capabilityCode}
-        current={() => scope.current.enabled && scope.current.current() && !document.hidden} />}
+    </>}
+    {selectedConversation && <>
+      {onOpenConversation && <Button disabled={busy || !visible} onClick={() => {
+        if (!document.hidden && scope.current.enabled && scope.current.current()
+          && scope.current.selected === selectedConversation.conversationId) onOpenConversation(selectedConversation);
+      }}>{t('在 AI 工作中心继续')}</Button>}
+      <ConversationDetail key={selectedConversation.conversationId} conversationId={selectedConversation.conversationId} identity={identity}
+        capabilityCode={selectedConversation.capabilityCode} current={() => scope.current.enabled && scope.current.current() && !document.hidden
+          && scope.current.selected === selectedConversation.conversationId} />
     </>}
   </section>;
 }

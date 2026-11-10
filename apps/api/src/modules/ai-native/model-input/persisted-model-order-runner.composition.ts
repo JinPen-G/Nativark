@@ -16,14 +16,19 @@ import { composeCurrentAuthorizedPersistentTaskInputRunner } from '../runner/aut
 import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evidence.authority';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
-import type { AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { withAiTaskHeldPreparationWindow, withAiTaskHeldPreparationDefinition, inheritAiTaskHeldPreparation, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { taskPreparationNonEffectChargeIds } from '../runner/prisma-task-run-preparation';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import type { AiStepTransitionAuthority } from '../ai-step-transition.repository';
-import type { AiStepRegistrationCommand } from '../ai-step-registration.repository';
+import { aiStepActionId, type AiStepRegistrationCommand } from '../ai-step-registration.repository';
 import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
+import { renderOrderReadAnswer } from '../tools/order-explanation-renderer';
+import { AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION } from '@rental-os/shared';
+import { OriginalNativeToolResultSource } from './original-native-tool-result.source';
+import { PrismaNativeToolCallBindings } from './prisma-native-tool-call-bindings';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), modelRegistrationRef: id,
@@ -41,8 +46,11 @@ const answerFacts = (facts: z.infer<typeof answerSnapshotSchema>['facts']) => ({
 type Dependencies = Omit<TaskModelHostDependencies, 'task' | 'kind' | 'planTools' | 'inputSource'> & {
   /** Optional explicit host policy; otherwise use this fixed chain's persisted evidence. */
   inputSource?: AiTaskInputSource;
-  core: Pick<RentalCoreService, 'getOrder'>;
+  core: Pick<RentalCoreService, 'getOrder' | 'readOrderFacts'>;
   originalRequests: PrismaOriginalRequestRepository;
+  /** Explicit original Gateway binding store. Absence retains the old snapshot
+   * chain; a native successor never guesses IDs from a model candidate. */
+  nativeToolBindings?: PrismaNativeToolCallBindings;
   /** Frozen server task input, never a public model prompt/permission switch. */
   task: z.infer<typeof taskSchema>;
 };
@@ -64,8 +72,22 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     || !(input.originalRequests instanceof PrismaOriginalRequestRepository)
     || input.inputSource !== undefined && (typeof input.inputSource?.resolve !== 'function'
       || typeof input.inputSource?.validateAnswers !== 'function')) throw unavailable();
+  const native = input.nativeToolBindings !== undefined;
+  if (native && (!(input.nativeToolBindings instanceof PrismaNativeToolCallBindings) || !task.answerRegistrationRef)) throw unavailable();
+  const nativeReference = Object.freeze({ referenceVersion: AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION,
+    taskId: task.taskId, runId: task.runId, modelRegistrationRef: task.modelRegistrationRef,
+    toolRegistrationRef: task.orderRegistrationRef, callIndex: 0 });
   const { routeScene: _route, ...serverPolicy } = structuredClone(input.gatewayScene);
-  const policy = taskModelPolicy(serverPolicy);
+  const policy = taskModelPolicy({ ...serverPolicy, ...(native ? { nativeToolResults: true } : {}) });
+  let nativeSource: OriginalNativeToolResultSource | undefined;
+  const nativeResultPort = {
+    resolve: (...args: Parameters<OriginalNativeToolResultSource['resolve']>) => {
+      if (!nativeSource) throw unavailable(); return nativeSource.resolve(...args);
+    },
+    assertCurrent: (...args: Parameters<OriginalNativeToolResultSource['assertCurrent']>) => {
+      if (!nativeSource) throw unavailable(); return nativeSource.assertCurrent(...args);
+    }
+  };
   const assertOriginal = async (forExecution = false) => {
     const access = await model.tasks.resolveAccess(task.taskId, 'read_metadata');
     const row = await input.db.aiTask.findFirst({ where: access.where });
@@ -82,7 +104,11 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   };
   const runtime = input.runtime;
   const answerDispatch = new AsyncLocalStorage<() => Promise<unknown>>();
-  const model = composePersistedTaskModelInput({ ...input, runtime: { ...runtime, ports: { ...runtime.ports,
+  const model = composePersistedTaskModelInput({ ...input,
+    ...(native ? { nativeCounting: nativeResultPort } : {}),
+    gatewayScene: { ...input.gatewayScene, ...(native ? { nativeToolResults: true } : {}) },
+    runtime: { ...runtime, ports: { ...runtime.ports,
+    ...(native ? { nativeToolResults: nativeResultPort } : {}),
     routing: { resolve: async (...args) => {
       await assertOriginal(true);
       const route = await runtime.ports.routing.resolve(...args);
@@ -126,13 +152,22 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     if ((await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
     return grant;
   };
-  const planAuthority: AiTaskPlanEvidenceAuthority = { resolveOriginal: originalRegistration, authorize: async (value, lease) => {
+  const planAuthority: AiTaskPlanEvidenceAuthority = { resolveOriginal: originalRegistration,
+    authorizePreparation: async (definition, lease, db) => {
+      if (definition.taskId !== task.taskId || definition.runId !== task.runId
+        || requestFingerprint(definition.steps) !== requestFingerprint(expectedSteps)) throw denied();
+      return model.planAuthority.authorizePreparation(definition, lease, db);
+    }, authorize: async (value, lease) => {
     const plan = aiTaskRunPlanSchema.parse(structuredClone(value));
     if (plan.taskId !== task.taskId || plan.runId !== task.runId
       || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
     return model.planAuthority.authorize(plan, lease);
   } };
   const modelEvidence = model.createTransitionAuthority(input.financialEvidence);
+  if (native) nativeSource = new OriginalNativeToolResultSource({ db: input.db, tasks: model.tasks,
+    execution: model.authorization.execution, modelEvidence, toolInputs: order.source,
+    toolResults: order.results, reopenBusinessSource: order.reopenBusinessSource,
+    bindings: input.nativeToolBindings!, routing: runtime.ports.routing, task, policy });
   const readEvidence = new PrismaTaskStepEvidenceAuthority(input.db, model.authorization.authority, planAuthority, input.clock);
   const candidate = async (binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }, forExecution = true) => {
     binding = structuredClone(binding);
@@ -295,6 +330,14 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const publishAnswer: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (task.answerRegistrationRef) {
       const original = await assertOriginal(true);
+      if (native) {
+        // The immutable plan freezes selectors before the first dispatch. Actual
+        // call identity/result bytes are resolved only from completed receipts.
+        await model.publish({ taskId: task.taskId, registrationRef: task.answerRegistrationRef,
+          expectedTaskRevision: taskRevision, lease, material: { maxOutputTokens: task.material.maxOutputTokens,
+            messages: [{ role: 'user', content: [{ kind: 'tool_result_reference', reference: nativeReference }] }] } });
+        return;
+      }
       const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, task.orderId, input.clock);
       const context = await model.authorization.execution.authorize(task.taskId);
       const facts = await new AiOrderReadFactsService(input.core, authority, input.clock).read(context);
@@ -312,7 +355,11 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     }
     if (signal?.aborted) throw unavailable();
   };
-  const prepare: AiTaskHeldPreparation = async held => {
+  // Each input publication and the plan save retains its own bounded storage
+  // checks. Their fixed sequence is not one 5s dependency; preparation still
+  // counts from the held run's start against the original total work window.
+  const preparationMs = Math.min(task.limits.maxTotalMs, (expectedSteps.length + 1) * 5000);
+  const prepare = withAiTaskHeldPreparationWindow(async held => {
     const { lease, taskRevision, signal } = held;
     if (signal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
     await assertOriginal(true);
@@ -323,7 +370,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
         toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } } });
     await publishAnswer(held);
     await root.evidence.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision, steps: expectedSteps, limits: task.limits }, lease);
-  };
+  }, preparationMs);
   const readOrderResult = async (value: unknown) => {
     const command = z.object({ resultId: id }).strict().safeParse(structuredClone(value));
     if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -387,12 +434,20 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     const published = parseTaskModelInput(frozen.payload, policy);
     if (taskModelFingerprint(published, policy) !== frozen.fingerprint) throw denied();
     const messages = published.intent.messages.filter(message => message.role === 'user');
-    if (messages.length !== 1 || messages[0].content.some(part => part.kind !== 'text')) throw denied();
-    const text = messages[0].content.map(part => part.kind === 'text' ? part.text : '').join('');
-    if (Buffer.byteLength(text, 'utf8') > 131072) throw unavailable();
-    const snapshot = answerSnapshotSchema.parse(JSON.parse(text));
-    if (snapshot.originalHash !== original.receipt.contentHash || snapshot.orderId !== task.orderId
-      || snapshot.modelRegistrationRef !== task.modelRegistrationRef || snapshot.readRegistrationRef !== task.orderRegistrationRef) throw denied();
+    if (messages.length !== 1) throw denied();
+    let snapshot: z.infer<typeof answerSnapshotSchema> | null = null;
+    if (native) {
+      const parts = messages[0].content;
+      if (parts.length !== 1 || parts[0].kind !== 'tool_result_reference'
+        || requestFingerprint(parts[0].reference) !== requestFingerprint(nativeReference)) throw denied();
+    } else {
+      if (messages[0].content.some(part => part.kind !== 'text')) throw denied();
+      const text = messages[0].content.map(part => part.kind === 'text' ? part.text : '').join('');
+      if (Buffer.byteLength(text, 'utf8') > 131072) throw unavailable();
+      snapshot = answerSnapshotSchema.parse(JSON.parse(text));
+      if (snapshot.originalHash !== original.receipt.contentHash || snapshot.orderId !== task.orderId
+        || snapshot.modelRegistrationRef !== task.modelRegistrationRef || snapshot.readRegistrationRef !== task.orderRegistrationRef) throw denied();
+    }
     const readInput = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: task.orderRegistrationRef } });
     if (!readInput) throw unavailable();
     await candidate({ taskId: task.taskId, runId: task.runId, inputRef: readInput.id, fingerprint: readInput.fingerprint }, forExecution);
@@ -429,7 +484,15 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     const result = await readOrderResult({ resultId: step.resultRef });
     if (result.status === 'stale') throw new OrderAnswerSnapshotChangedError();
     if (result.status !== 'available' || !result.facts) throw unavailable();
-    if (requestFingerprint(answerFacts(result.facts)) !== requestFingerprint(snapshot.facts)) throw new OrderAnswerSnapshotChangedError();
+    if (snapshot && requestFingerprint(answerFacts(result.facts)) !== requestFingerprint(snapshot.facts)) throw new OrderAnswerSnapshotChangedError();
+    if (native && forExecution) {
+      if (!nativeSource) throw unavailable();
+      const current = await model.authorization.execution.authorize(task.taskId);
+      if (current.scope.kind !== 'workspace' || current.actor.kind !== 'user') throw denied();
+      const resolved = await nativeSource.resolve({ tenantId: current.scope.tenantId,
+        workspaceId: current.scope.workspaceId, actorId: current.actor.userId }, nativeReference, new AbortController().signal);
+      if (resolved.toolResultId !== step.resultRef || resolved.toolResultHash !== artifact.contentHash) throw denied();
+    }
     const latestArtifact = await input.db.aiTaskResultArtifact.findFirst({ where: { ...key, id: artifact.id, stepId: step.id } });
     const latestCharges = await input.db.aiTaskExecutionCharge.findMany({ where: { ...key, stepId: step.id }, take: 4 });
     const latestStep = await input.db.aiStep.findFirst({ where: { ...key, id: step.id } });
@@ -439,7 +502,9 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
         inputRef: latestStep.inputRef, resultRef: latestStep.resultRef, actionId: latestStep.actionId,
         fingerprint: latestStep.requestFingerprint }) !== stepHash) throw denied();
     if ((await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
-    return { snapshot, resultId: step.resultRef, sourceInputRef: readInput.id, answerInputRef: inputRef };
+    return { snapshot, facts: snapshot?.facts ?? answerFacts(result.facts),
+      observedAt: snapshot?.observedAt ?? result.facts.observedAt,
+      resultId: step.resultRef, sourceInputRef: readInput.id, answerInputRef: inputRef };
   };
   const readAnswerResult = async (value: unknown) => {
     const command = z.object({ resultId: id }).strict().safeParse(structuredClone(value));
@@ -482,11 +547,19 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     const latest = await root.results.read({ taskId: task.taskId, resultId: result.resultId });
     if (latest.status !== 'succeeded' || latest.contentHash !== result.contentHash
       || (await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
-    return { resultId: result.resultId, status: 'available' as const, text: payload.text,
-      originalReadResultId: source.resultId, facts: source.snapshot.facts, snapshotObservedAt: source.snapshot.observedAt,
+    const originalQuestion = await assertOriginal();
+    // Keep original model/provenance/usage evidence unchanged. The public
+    // explanation cannot use unconstrained prose to overwrite failed/unknown
+    // states, nor add finance/history absent from this frozen read snapshot.
+    return { resultId: result.resultId, status: 'available' as const,
+      text: renderOrderReadAnswer(source.facts, source.observedAt,
+        originalQuestion.request.sceneCode === 'order_explanation' ? originalQuestion.request.input.question : 'status'),
+      originalReadResultId: source.resultId, facts: source.facts, snapshotObservedAt: source.observedAt,
       automaticRetry: false as const, textSemantics: 'model_text_not_core_fact' as const,
       businessExecution: 'readonly_not_business_commit' as const };
   };
+  withAiTaskHeldPreparationDefinition(prepare, { taskId: task.taskId, runId: task.runId,
+    steps: expectedSteps, limits: task.limits, bindingHash: requestFingerprint(task) });
   const application = root.createApplication(input.host, prepare);
   const resumePreparedOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
@@ -494,7 +567,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     // The ordinary application obtains a fresh current-authority/CAS lease.
     // Its preparation hook preserves the original published prefix and only
     // completes never-published fixed inputs before the plan exists.
-    const frozenPreparation: AiTaskHeldPreparation = async ({ lease, taskRevision, signal: heldSignal }) => {
+    const frozenPreparation = withAiTaskHeldPreparationWindow(async ({ lease, taskRevision, signal: heldSignal }) => {
       if (heldSignal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
       await assertOriginal(true);
       const access = await model.tasks.resolveAccess(task.taskId, 'read_metadata');
@@ -503,18 +576,78 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
       const runs = await input.db.aiRun.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 2 });
       if (runs.length !== 1 || runs[0].id !== task.runId) throw unavailable();
+      const preparationIds = await taskPreparationNonEffectChargeIds(input.db, key, lease);
+      const preparationCharges = await input.db.aiTaskExecutionCharge.findMany({ where: { ...key, chargeId: { in: preparationIds } }, take: 1001 });
+      const reservedPreparation = preparationCharges.filter(charge => charge.status === 'RESERVED').reduce((sum, charge) => sum + charge.amount, 0n);
+      const consumedPreparation = preparationCharges.filter(charge => charge.status === 'RECORDED').reduce((sum, charge) => {
+        if (charge.actualAmount === null) throw unavailable();
+        return sum + charge.actualAmount;
+      }, 0n);
       const evidence = await Promise.all([
         input.db.aiTaskResultArtifact.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiGatewayInvocation.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
-        input.db.aiTaskExecutionCharge.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
+        input.db.aiTaskExecutionCharge.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, chargeId: { notIn: preparationIds } } }),
         input.db.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: key.runId } })
       ]);
-      if (evidence.some(Boolean)) throw unavailable();
       const resource = await input.db.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: {
         scopeId: key.scopeId, taskId: key.taskId } } });
       const rows = await input.db.aiTaskActionInput.findMany({ where: key, take: expectedSteps.length + 1 });
       const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
-      const registered = await input.db.aiStep.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 2 });
+      const registered = await input.db.aiStep.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: expectedSteps.length + 1 });
+      if (saved && registered.some(step => step.status === 'SUCCEEDED')
+        && registered.every(step => ['SUCCEEDED', 'PENDING'].includes(step.status))) {
+        // Explicit execution may continue a settled original prefix and at
+        // most its untouched PENDING successor, never an unknown/running action.
+        // Revalidate the same frozen plan under the current held lease; the
+        // runner recovers prefix charges before starting the untouched step.
+        const plan = aiTaskRunPlanSchema.parse(structuredClone(saved.payload));
+        if (!resource || resource.scopeId !== key.scopeId || resource.taskId !== key.taskId
+          || resource.reservedActiveMs !== reservedPreparation
+          || ['reservedSteps', 'reservedCalls', 'reservedOutputBytes']
+            .some(field => resource[field as keyof typeof resource] !== 0n)
+          || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
+          || plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
+          || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)
+          || requestFingerprint(plan.limits) !== requestFingerprint(task.limits)
+          || rows.length !== expectedSteps.length || new Set(rows.map(value => value.registrationRef)).size !== rows.length
+          || registered.length > expectedSteps.length) throw unavailable();
+        const prefix = [...registered].sort((a, b) => a.sequence - b.sequence);
+        for (const [index, step] of prefix.entries()) {
+          const expected = expectedSteps[index], frozen = rows.find(value => value.registrationRef === expected.registrationRef);
+          const pending = step.status === 'PENDING';
+          if (!frozen || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
+            || step.sequence !== index + 1
+            || (pending ? index !== prefix.length - 1 || step.revision !== 1 || step.effect !== 'NONE'
+              || step.resultRef !== null || step.errorCode !== null : !step.resultRef || !['NONE', 'COMMITTED'].includes(step.effect))
+            || step.actionId !== aiStepActionId(access.scope, task.taskId, expected.registrationRef)
+            || step.inputRef !== frozen.id || step.requestFingerprint !== frozen.fingerprint
+            || step.toolCode !== expected.toolCode || step.toolVersion !== expected.toolVersion) throw denied();
+          if (pending) {
+            const pendingKey = { scopeId: key.scopeId, taskId: key.taskId, stepId: step.id };
+            // PENDING alone does not prove that nothing was reserved or sent.
+            // Any original charge, phase, invocation or result requires recovery,
+            // never a fresh reserve/dispatch through this continuation.
+            const traces = await Promise.all([
+              input.db.aiTaskExecutionCharge.findFirst({ where: pendingKey }),
+              input.db.aiTaskExecutionPhaseStart.findFirst({ where: { ...pendingKey, runId: key.runId } }),
+              input.db.aiGatewayInvocation.findFirst({ where: { ...pendingKey, runId: key.runId } }),
+              input.db.aiTaskResultArtifact.findFirst({ where: { ...pendingKey, runId: key.runId } })
+            ]);
+            if (traces.some(Boolean)) throw unavailable();
+          }
+        }
+        for (const step of expectedSteps.filter(value => value.toolCode === TASK_TEXT_MODEL_TOOL)) {
+          await model.revalidatePublished({ taskId: task.taskId, runId: task.runId, registrationRef: step.registrationRef });
+        }
+        const read = await order.source.readReadonlyInputReceipt({ taskId: task.taskId, runId: task.runId,
+          registrationRef: task.orderRegistrationRef });
+        if (read.state !== 'published' || read.fingerprint !== requestFingerprint({ contractVersion: AI_CONTRACT_DRAFT_VERSION,
+          toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } })) throw denied();
+        await root.evidence.savePlan(plan, lease);
+        await assertOriginal(true);
+        return;
+      }
+      if (evidence.some(Boolean)) throw unavailable();
       const firstInput = rows.find(value => value.registrationRef === task.modelRegistrationRef);
       // Registration and its event can commit before any resource reservation.
       // Only the first original, untouched PENDING/NONE step is resumable;
@@ -526,13 +659,12 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
           || step.resultRef !== null || step.errorCode !== null || step.inputRef !== firstInput.id
           || step.requestFingerprint !== firstInput.fingerprint || step.toolCode !== TASK_TEXT_MODEL_TOOL
           || step.toolVersion !== AI_TOOL_DRAFT_VERSION))) throw unavailable();
-      // Resource initialization can commit before the first step is registered.
-      // Only the original saved plan and an untouched, zero-occupancy ledger
-      // permit continuation. initialize/open below must reuse and validate it;
-      // no deletes, refunds, policy replacement or counter reset are allowed.
-      if (resource && (!saved || resource.scopeId !== key.scopeId || resource.taskId !== key.taskId
-        || ['reservedSteps', 'reservedCalls', 'reservedActiveMs', 'reservedOutputBytes',
-          'consumedSteps', 'consumedCalls', 'consumedActiveMs', 'consumedOutputBytes']
+      // Only the dedicated, verified Run-preparation time is not a dispatch
+      // trace. Every other reservation/consumption retains the original barrier;
+      // no counters are reset or unknown occupancy silently discounted.
+      if (resource && ((!saved && preparationIds.length === 0) || resource.scopeId !== key.scopeId || resource.taskId !== key.taskId
+        || resource.reservedActiveMs !== reservedPreparation || resource.consumedActiveMs !== consumedPreparation
+        || ['reservedSteps', 'reservedCalls', 'reservedOutputBytes', 'consumedSteps', 'consumedCalls', 'consumedOutputBytes']
           .some(field => resource[field as keyof typeof resource] !== 0n))) throw unavailable();
       if (rows.length < 1 || rows.length > expectedSteps.length || (saved && rows.length !== expectedSteps.length)
         || !rows.some(value => value.registrationRef === task.modelRegistrationRef)
@@ -568,7 +700,8 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       // existing task/run locks. No published input is regenerated/overwritten.
       await root.evidence.savePlan(plan, lease);
       await assertOriginal(true);
-    };
+    }, preparationMs);
+    inheritAiTaskHeldPreparation(frozenPreparation, prepare);
     const resumed = root.createApplication(input.host, frozenPreparation);
     return resumed.start({ taskId: task.taskId, runId: task.runId }, signal);
   };

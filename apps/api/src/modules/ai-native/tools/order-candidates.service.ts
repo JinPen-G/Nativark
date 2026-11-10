@@ -18,8 +18,11 @@ export class AiOrderCandidatesService {
   async read(value: unknown, expectedContext?: AiExecutionContext): Promise<AiOrderCandidatesPageDraft> {
     const parsed = aiOrderCandidatesQuerySchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    // Retain the original server parent before the Guard yields. Neither this
+    // assertion nor the discovered order IDs grant access to their later reads.
+    const parent = expectedContext && structuredClone(expectedContext);
     return this.authority.withRead('order_candidates', parsed.data, async context => {
-      assertAiReadContextBinding(context, expectedContext);
+      assertAiReadContextBinding(context, parent);
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
         || !['operator', 'staff'].includes(context.audience)) throw new ModelGatewayError('FORBIDDEN');
       const scope = context.scope;

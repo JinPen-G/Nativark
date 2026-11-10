@@ -6,11 +6,13 @@ import { aiConversationsApi } from '@/api/aiConversations';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
 import { ConversationOrderExecutionSession } from './conversation-order-execution-session';
 import { ConversationOrderResults } from './ConversationOrderResults';
+import { useVisibleObservationHost } from './VisibleObservationHost';
 import { useAiManagementLocale } from './management-locale';
 
 export function ConversationOrderExecution({ identity, conversationId, turn, current }: {
   identity: string; conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean;
 }) {
+  const visible = useVisibleObservationHost();
   const { t } = useAiManagementLocale();
   const scope = useRef({ identity, conversationId, turn, current }); scope.current = { identity, conversationId, turn, current };
   const session = useMemo(() => {
@@ -34,7 +36,10 @@ export function ConversationOrderExecution({ identity, conversationId, turn, cur
     }} />
     {state.ready && <ConfirmAction label={t('明确启动订单解读')} disabled={state.busy}
       prompt={t('启动此原轮次的订单解读模型？可能产生费用，不执行订单或资金写入。')}
-      onConfirm={() => { check(); return session.start(); }} />}
+      onConfirm={async () => { check(); const key = turn.task ? visible?.begin({ taskId: turn.task.taskId, runId: turn.task.runId,
+        trigger: 'original_model_start', originKey: turn.original.inputRef, conversationId, turnId: turn.turnId }) ?? null : null;
+        try { await session.start(); if (!session.snapshot().acknowledgement || session.snapshot().feedback === 'unknown') visible?.cancel(key); }
+        catch (error) { visible?.cancel(key); throw error; } }} />}
     {state.observation && <p>{t(state.ready ? '已读取待执行的原准备，启动时仍会重新核验。' : '当前原准备不能用于首次启动，不自动恢复或重做。')}</p>}
     {state.acknowledgement && <p role="status">{t('原启动应答已返回；任务、模型与业务结果须独立核对。')}</p>}
     <ConversationOrderResults conversationId={conversationId} turn={turn} current={current} />

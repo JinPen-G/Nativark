@@ -125,6 +125,54 @@ test('a later verifier cannot leave an earlier capability expired but allowed', 
     { liveEvidenceVerifier: { verify: async value => { if (value.capability === 'text') time = first.expiresAt.getTime(); return true; } } }, () => new Date(time));
   assert.deepEqual(await service.preflight(profile, ['tools','text']), { allowed: false, required: ['tools','text'], missing: ['tools'], stale: ['tools'] });
 });
+test('superseded evidence cannot authorize while its original receipt is being verified', async () => {
+  for (const replace of [
+    rows => [{ ...rows[0], status: 'unsupported', checkedAt: new Date(now.getTime() - 500) }],
+    () => [],
+    rows => [{ ...rows[0], checkedAt: new Date(now.getTime() - 500) }],
+    rows => [{ ...rows[0], expiresAt: new Date(now.getTime() + 30000) }],
+    rows => [{ ...rows[0], evidenceHash: 'replacement' }],
+    rows => [{ ...rows[0], details: { ...rows[0].details, receiptId: 'replacement' } }]
+  ]) {
+    let verifications = 0;
+    const f = setup(false, { verify: async () => {
+      verifications++; f.state.rows = replace(f.state.rows); return true;
+    } });
+    f.state.rows[0].details.verification.evidence = 'live';
+    await assert.rejects(f.service.preflight(profile, ['tools']), invalid);
+    assert.equal(verifications, 1); assert.equal(f.state.calls, 2); assert.equal(f.state.writes.length, 0);
+  }
+  const f = setup(false, { verify: async value => {
+    if (value.capability === 'text') f.state.rows[0].status = 'unsupported';
+    return true;
+  } });
+  const second = { ...row(), id: 'text-e', capability: 'text' };
+  second.details = { verification: { ...second.details.verification, capability: 'text', evidence: 'live' } };
+  f.state.rows[0].details.verification.evidence = 'live'; f.state.rows.push(second);
+  await assert.rejects(f.service.preflight(profile, ['tools','text']), invalid);
+});
+test('evidence reread is bounded, ignores unrelated history and checks final expiry', async () => {
+  let reads = 0, time = now.getTime(); const r = row();
+  const service = new ProviderCapabilityService({
+    list: async () => { reads++; if (reads === 2) time = r.expiresAt.getTime(); return [r]; },
+    upsert: async () => assert.fail('preflight must not write')
+  }, { allowMock: true }, () => new Date(time));
+  assert.deepEqual(await service.preflight(profile, ['tools']), { allowed: false, required: ['tools'], missing: ['tools'], stale: ['tools'] });
+  assert.equal(reads, 2);
+  const f = setup(false, { verify: async () => {
+    f.state.rows.push({ ...row(), id: 'old', observedRevision: 1 });
+    return true;
+  } });
+  f.state.rows[0].details.verification.evidence = 'live';
+  assert.equal((await f.service.preflight(profile, ['tools'])).allowed, true);
+  assert.equal(f.state.calls, 2);
+  let failedReads = 0;
+  const failing = new ProviderCapabilityService({
+    list: async () => { if (++failedReads === 2) throw Error('private-persistence-detail'); return [row()]; },
+    upsert: async () => assert.fail('preflight must not write')
+  }, { allowMock: true }, () => new Date(now));
+  await assert.rejects(failing.preflight(profile, ['tools']), invalid); assert.equal(failedReads, 2);
+});
 test('policy dependencies cannot be replaced after service construction', async () => {
   const f = setup(); f.options.liveEvidenceVerifier = { verify: async () => true }; f.state.rows[0].details.verification.evidence = 'live';
   assert.equal((await f.service.preflight(profile, ['tools'])).allowed, false);

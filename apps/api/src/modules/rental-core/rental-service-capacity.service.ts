@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type {
@@ -12,6 +12,8 @@ import { PrismaService } from "../database/prisma.service";
 import { serviceReservationKey } from "./rental-service-occurrence";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding } from "./category-active-write";
+import { getRequestIdentity } from '../../common/request-identity';
+import { requestFingerprint } from './rental-idempotency.repository';
 
 type Tx = Prisma.TransactionClient;
 
@@ -130,6 +132,60 @@ export class RentalServiceCapacityService {
       });
       return this.toCapacity(row);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  /** Read-only observation of the SAME quoted service occurrences. Unlike the
+   * original quote/write gate below, this cannot release another order's expired
+   * hold under a read grant. Stored reservations remain counted until the formal
+   * maintenance/write path settles them; a timestamp never proves a release.
+   * No price/quantity is derived here, and observation never reserves capacity. */
+  async readAvailabilityForQuote(tenantId: string, snapshots: RentalQuoteServiceSnapshot[]) {
+    const identity = getRequestIdentity();
+    if (!identity?.userId || identity.tenantId !== tenantId || !identity.workspaceId || identity.isSaasAdmin
+      || identity.staffApi || !['client', 'operator'].includes(identity.audience ?? '')) throw new ForbiddenException('服务容量读取缺少原业务身份');
+    if (!Array.isArray(snapshots) || snapshots.length > 20 || snapshots.some(row => !row.serviceId || !row.serviceLocationId
+      || typeof row.requiresCapacity !== 'boolean' || !Number.isSafeInteger(row.capacityQuantity) || row.capacityQuantity < 1
+      || !Number.isFinite(Date.parse(row.scheduledStartAt)) || !Number.isFinite(Date.parse(row.scheduledEndAt))
+      || Date.parse(row.scheduledStartAt) >= Date.parse(row.scheduledEndAt))) throw new BadRequestException('原服务发生项不可用');
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    if (workspaceId !== identity.workspaceId) throw new ForbiddenException('服务容量读取空间已变化');
+    return this.prisma.$transaction(async tx => {
+      const observations = [], required = new Map<string, { capacity: NonNullable<Awaited<ReturnType<RentalServiceCapacityService['findCapacity']>>>; quantity: number }>();
+      let available = true;
+      for (const snapshot of snapshots) {
+        const [service, location] = await Promise.all([
+          tx.rentalValueAddedService.findFirst({ where: { id: snapshot.serviceId, tenantId, workspaceId },
+            select: { id: true, tenantId: true, workspaceId: true, status: true, requiresCapacity: true, version: true } }),
+          tx.rentalFulfillmentLocation.findFirst({ where: { id: snapshot.serviceLocationId, tenantId, workspaceId },
+            select: { id: true, tenantId: true, workspaceId: true, status: true } })
+        ]);
+        if (!service || service.tenantId !== tenantId || service.workspaceId !== workspaceId || service.status !== 'enabled'
+          || service.requiresCapacity !== snapshot.requiresCapacity || !location || location.tenantId !== tenantId
+          || location.workspaceId !== workspaceId || location.status !== 'enabled') available = false;
+        const capacity = snapshot.requiresCapacity ? await this.findCapacity(tenantId, workspaceId, snapshot, tx) : null;
+        if (snapshot.requiresCapacity && !capacity) available = false;
+        if (capacity) {
+          if (capacity.tenantId !== tenantId || capacity.workspaceId !== workspaceId || capacity.serviceId !== snapshot.serviceId
+            || capacity.locationId !== snapshot.serviceLocationId || capacity.status !== 'enabled'
+            || !(capacity.windowStart instanceof Date) || !(capacity.windowEnd instanceof Date)
+            || !Number.isFinite(capacity.windowStart.getTime()) || !Number.isFinite(capacity.windowEnd.getTime())
+            || capacity.windowStart.getTime() > Date.parse(snapshot.scheduledStartAt) || capacity.windowEnd.getTime() < Date.parse(snapshot.scheduledEndAt)
+            || ![capacity.totalCapacity, capacity.reservedQuantity, capacity.usedQuantity].every(value => Number.isSafeInteger(value) && value >= 0)
+            || capacity.totalCapacity < capacity.reservedQuantity + capacity.usedQuantity) throw new ConflictException('服务容量原账不可用');
+          const prior = required.get(capacity.id);
+          required.set(capacity.id, { capacity, quantity: (prior?.quantity ?? 0) + snapshot.capacityQuantity });
+        }
+        observations.push({ service, location, capacity, occurrence: { serviceId: snapshot.serviceId,
+          serviceLocationId: snapshot.serviceLocationId, scheduledStartAt: snapshot.scheduledStartAt,
+          scheduledEndAt: snapshot.scheduledEndAt, requiresCapacity: snapshot.requiresCapacity, capacityQuantity: snapshot.capacityQuantity } });
+      }
+      for (const { capacity, quantity } of required.values()) {
+        if (!Number.isSafeInteger(quantity) || capacity.totalCapacity - capacity.reservedQuantity - capacity.usedQuantity < quantity) available = false;
+      }
+      if (await resolveScopeWorkspaceId(tx, tenantId) !== workspaceId) throw new ForbiddenException('服务容量读取空间已变化');
+      return { available, fingerprint: requestFingerprint(JSON.parse(JSON.stringify(observations))),
+        reservation: 'not_attempted' as const, maintenance: 'not_attempted' as const };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   /** 报价只校验，不增量写容量。过期软预留先惰性释放，避免假性不足。 */

@@ -75,15 +75,29 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
       // Only an explicitly saved mode + service switch selects the new path.
       // An old BYOK row without that binding keeps its original three policies.
       const modern = record !== null && record.mode !== undefined && typeof record.serviceEnabled === 'boolean';
+      // All six original leaves belong to this same consistent read snapshot.
+      // Batch only transport, never cache across the two admission snapshots or
+      // remove a policy/owner check. The fourth row detects invalid duplicates.
+      const foundScopes = await tx.aiScope.findMany({ where: { OR: columns }, take: 4,
+        select: { id: true, kind: true, scopeKey: true, tenantId: true, workspaceId: true } });
+      if (foundScopes.length !== columns.length) throw denied();
+      const currentScopes = columns.map(expected => {
+        const matches = foundScopes.filter(scope => Object.entries(expected).every(([key, value]) => scope[key as keyof typeof scope] === value));
+        if (matches.length !== 1 || (matches[0].kind === 'WORKSPACE' && matches[0].id !== taskScopeId)) throw denied();
+        return matches[0];
+      });
+      const policyKeys = currentScopes.map(scope => ({ scopeId: scope.id, scopeKind: scope.kind, sceneCode }));
+      const foundPolicies = await tx.aiBudgetPolicy.findMany({ where: { OR: policyKeys }, take: 4, select: {
+        id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, enabled: true, settingsJson: true
+      } });
+      if (foundPolicies.length > policyKeys.length || foundPolicies.some(row => !policyKeys.some(key =>
+        Object.entries(key).every(([name, value]) => row[name as keyof typeof row] === value)))) throw unavailable();
       const results = [];
-      for (const expected of columns) {
-        const scope = await tx.aiScope.findFirst({ where: expected, select: { id: true, kind: true, scopeKey: true, tenantId: true, workspaceId: true } });
-        if (!scope || Object.entries(expected).some(([key, value]) => scope[key as keyof typeof scope] !== value)
-          || (scope.kind === 'WORKSPACE' && scope.id !== taskScopeId)) throw denied();
-        const key = { scopeId: scope.id, scopeKind: scope.kind, sceneCode };
-        const row = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: key }, select: {
-          id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, enabled: true, settingsJson: true
-        } });
+      for (const [index, scope] of currentScopes.entries()) {
+        const key = policyKeys[index];
+        const matches = foundPolicies.filter(row => Object.entries(key).every(([name, value]) => row[name as keyof typeof row] === value));
+        if (matches.length > 1) throw unavailable();
+        const row = matches[0] ?? null;
         // New settings need only the SaaS scene policy; the tenant/workspace
         // money intersections are created later by the original locked ledger.
         // Existing legacy policies still restrict admission, never get replaced.
@@ -129,8 +143,10 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
     }, { isolationLevel: 'RepeatableRead', maxWait: 2500, timeout: 5000 });
   };
 
-  const snapshot = async (taskId: string, operation: 'claim_run' | 'transition_task') => {
-    const context = await actions.resolve(taskId, operation);
+  const snapshot = async (taskId: string, operation: 'claim_run' | 'transition_task' | 'decide_approval') => {
+    // Approval has its own existing persisted policy. It is not a new verb on
+    // the task read/worker authority and cannot turn metadata access into write.
+    const context = await actions.resolve(taskId, operation === 'decide_approval' ? 'read_metadata' : operation);
     const access = aiTaskAccessFromContext(context, taskId, clock());
     const task = await db.aiTask.findFirst({ where: access.where, select: taskSelect });
     if (!task || task.id !== taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
@@ -138,20 +154,40 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
       || Object.entries(access.scope).some(([key, value]) => task.scope[key as keyof typeof task.scope] !== value)) {
       throw denied();
     }
-    if (task.contractVersion !== AI_TASK_DRAFT_VERSION || !validRevision(task.revision) || task.cancelRequestedAt !== null || !['QUEUED', 'RUNNING'].includes(task.status)
+    const states = operation === 'decide_approval' ? ['RUNNING', 'WAITING_CONFIRMATION'] : ['QUEUED', 'RUNNING'];
+    if (task.contractVersion !== AI_TASK_DRAFT_VERSION || !validRevision(task.revision) || task.cancelRequestedAt !== null || !states.includes(task.status)
       || (operation === 'transition_task' && task.status !== 'RUNNING')) {
       throw denied();
     }
-    const enabled = await gates(context, task.scopeId, task.sceneCode, task.sceneVersion);
-    // This is the existing budget feature code, not a declaration that the catalog has released it.
-    const entitlement = await entitlements.check(structuredClone(context), 'ai.native.use');
+    let approvalPolicy: unknown;
+    if (operation === 'decide_approval') {
+      const key = { scopeId: task.scopeId, taskId, operation: 'decide_approval' };
+      const row = await db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: key } });
+      if (!row || Object.entries(key).some(([name, value]) => row[name as keyof typeof row] !== value)
+        || !validRevision(row.revision) || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= clock()
+        || !Array.isArray(row.requiredPermissions) || !row.requiredPermissions.length
+        || row.requiredPermissions.some(p => typeof p !== 'string' || !p || p.length > 191)) throw unavailable();
+      if (!('access' in context) || row.requiredPermissions.some(p => !context.access.permissions.includes(String(p)))) throw denied();
+      approvalPolicy = row;
+    }
+    // Independent, bounded read-only snapshots may overlap after the original
+    // task/owner check. Drain BOTH on refusal so unawaited reads cannot outlive
+    // measured authorization; preserve the original policy-first error boundary.
+    const [enabledRead, entitlementRead] = await Promise.allSettled([
+      gates(context, task.scopeId, task.sceneCode, task.sceneVersion),
+      entitlements.check(structuredClone(context), 'ai.native.use')
+    ]);
+    if (enabledRead.status === 'rejected') throw enabledRead.reason;
+    if (entitlementRead.status === 'rejected') throw entitlementRead.reason;
+    const enabled = enabledRead.value, entitlement = entitlementRead.value;
     if (entitlement.available !== true) throw unavailable();
-    return { context, binding: requestFingerprint({ identity: identityHash(context), task, enabled, entitlement }) };
+    return { context, binding: requestFingerprint({ identity: identityHash(context), task, enabled, entitlement,
+      ...(approvalPolicy ? { approvalPolicy } : {}) }) };
   };
-  const authorize = async (taskId: string, operation: 'claim_run' | 'transition_task') => {
+  const authorize = async (taskId: string, operation: 'claim_run' | 'transition_task' | 'decide_approval') => {
     try {
       const initial = await snapshot(taskId, operation), current = await snapshot(taskId, operation);
-      const final = await actions.resolve(taskId, operation);
+      const final = await actions.resolve(taskId, operation === 'decide_approval' ? 'read_metadata' : operation);
       if (initial.binding !== current.binding || identityHash(final) !== identityHash(current.context)) {
         throw denied();
       }
@@ -165,5 +201,8 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
     resolve: (taskId, operation) => operation === 'claim_run' ? authorize(taskId, 'claim_run') : actions.resolve(taskId, operation)
   };
   return Object.freeze({ scopes, authority, tasks: new AiTaskRepository(db, authority, clock),
-    execution: Object.freeze({ authorize: (taskId: string) => authorize(taskId, 'transition_task') }) });
+    execution: Object.freeze({ authorize: (taskId: string) => authorize(taskId, 'transition_task') }),
+    // Admission only: the original proposal/approval service still owns the
+    // concrete decision, payload/version binding and single consumption.
+    approval: Object.freeze({ authorize: (taskId: string) => authorize(taskId, 'decide_approval') }) });
 }

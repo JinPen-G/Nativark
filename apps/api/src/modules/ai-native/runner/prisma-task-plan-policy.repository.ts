@@ -50,7 +50,7 @@ export class PrismaTaskPlanPolicyRepository {
     this.selected = scene.parse(structuredClone(input.scene));
     this.audit = input.audit === true;
     this.tool = input.tool ?? 'rental.catalog.search';
-    if (![...PERSISTED_READONLY_TOOLS, 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(this.tool)) throw unavailable();
+    if (![...PERSISTED_READONLY_TOOLS, 'rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(this.tool)) throw unavailable();
     const configured = aiPersistedPlanToolsSchema.safeParse((input.tools ?? [this.tool]).map(code => ({ code, version: AI_TOOL_DRAFT_VERSION })));
     if (!configured.success || !configured.data.some(tool => tool.code === this.tool)) throw unavailable();
     this.configuredTools = structuredClone(configured.data);

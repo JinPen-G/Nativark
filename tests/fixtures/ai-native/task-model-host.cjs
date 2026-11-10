@@ -13,7 +13,8 @@ async function modelHostHarness(kind) {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1,
     credentialRef: 'vault-a', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model',
     serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
-  const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderProfile: [profile], aiBudgetReservation: [] });
+  const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderProfile: [profile],
+    aiBudgetReservation: [], aiTaskExecutionPhaseStart: [] });
   h.state.aiTaskRunPlan = []; h.state.aiTask[0].status = 'QUEUED'; h.state.aiRun[0].status = 'QUEUED';
   h.state.aiRun[0].sequence = 1;
   h.identity.user.permissions.push('system:params:manage');

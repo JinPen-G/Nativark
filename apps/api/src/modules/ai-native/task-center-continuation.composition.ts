@@ -15,6 +15,8 @@ type Request = { headers: { authorization?: unknown } };
 export interface TaskCenterContinuationDependencies {
   db: PrismaClient;
   order?: { continueConfirmation(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown> };
+  /** Already-published action-input plan, never a selected-quote fallback. */
+  originalOrder?: { continueConfirmation(credentials: AiTaskCredentialSource, value: unknown, signal?: AbortSignal): Promise<unknown> };
   settings?: { continueSettingsConfirmation(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown> };
 }
 export const taskCenterContinueSchema = taskCenterReviewSchema.extend({
@@ -35,6 +37,7 @@ export async function continueTaskCenterOriginal(d: TaskCenterContinuationDepend
   const command = taskCenterContinueSchema.parse(structuredClone(value));
   const { checkpointRef, expectedTaskRevision, proposal, ...query } = command;
   const order = d.order?.continueConfirmation.bind(d.order), settings = d.settings?.continueSettingsConfirmation.bind(d.settings);
+  const originalOrder = d.originalOrder?.continueConfirmation.bind(d.originalOrder);
   if (approval.order.db !== d.db || approval.settings.db !== d.db) throw unavailable();
   // Bound only preflight reads, not the original runner's legitimate duration.
   // A late preflight never enters the continuation below.
@@ -50,17 +53,19 @@ export async function continueTaskCenterOriginal(d: TaskCenterContinuationDepend
     const receipt = await human.decisionReceipt({ ...query, proposal: { ...proposal, decision } });
     if (receipt.receipt.kind !== 'recorded' || receipt.receipt.record.decision !== (decision === 'reject' ? 'rejected' : 'approved')) throw unavailable();
     if (!approval.decisions[review.kind]) throw unavailable();
-    const selected = review.kind === 'order' ? await readTaskCenterOrderSelection(d.db, target) : null;
+    const originalPlan = review.kind === 'order' && target.task.inputRef === null;
+    const selected = review.kind === 'order' && !originalPlan ? await readTaskCenterOrderSelection(d.db, target) : null;
     if (selected) await selected.verify(); else await target.verify();
     if (requestFingerprint(review.review.proposal.payload) !== proposal.reviewedPayloadHash) throw unavailable();
-    return { target, selected, kind: review.kind };
+    return { target, selected, originalPlan, kind: review.kind };
   }, false, signal);
   if (signal?.aborted) throw unknown();
   await credentials.current();
-  if (prepared.kind === 'order' ? !order || !prepared.selected : !settings) throw unavailable();
+  if (prepared.kind === 'order' ? prepared.originalPlan ? !originalOrder : !order || !prepared.selected : !settings) throw unavailable();
   try {
     const raw = prepared.kind === 'order'
-      ? await order!(request, { selection: prepared.selected!.selection, checkpointRef }, signal)
+      ? prepared.originalPlan ? await originalOrder!(credentials, command, signal)
+        : await order!(request, { selection: prepared.selected!.selection, checkpointRef }, signal)
       : await settings!(request, { taskId: query.taskId, runId: query.runId, checkpointRef }, signal);
     const result = response.safeParse(structuredClone(raw));
     // A malformed reply or failed post-read may follow an already committed

@@ -68,7 +68,7 @@ export function BookingHandoffBridge({ children }: { children: ReactNode }) {
           onChange={event => setInput({ session, key, tenantCode, value: event.target.value.trim() })} />
       </label>}
       <button type="button" disabled={!ref || current?.pending} onClick={() => void open()}>{current?.pending ? (english ? 'Checking…' : '正在核对…') : (english ? 'Check original draft' : '核对AI预约草稿')}</button>
-      {current?.error && <p role="status">{english ? 'Draft or service unavailable. No order was submitted; use the ordinary form.' : '当前材料或入口不可用，请继续人工预约；未提交订单。'}</p>}
+      {current?.error && <p role="status">{english ? 'Draft or service unavailable. Check the original booking result on the Orders page.' : '当前材料或入口不可用，请到订单页核对原预约结果。'}</p>}
     </section>}
     {children}
   </BookingHandoffHostProvider>;

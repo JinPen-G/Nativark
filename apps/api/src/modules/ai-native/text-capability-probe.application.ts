@@ -20,7 +20,7 @@ import { ModelGatewayError, modelAdapterSupportsCapabilities, type GatewayContex
 import { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
 import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
-  textProbeEvidenceHash, textProbeIntent, textProbeCapability, textProbeMethod, textProbeMode, textProbeRequirements,
+  textProbeEvidenceHash, textProbeIntent, textProbePreparation, hasObjectiveProbeMethod, textProbeCapability, textProbeMethod, textProbeMode, textProbeRequirements, textProbeRouteScene, textProbeProfileIdSchema, textProbeExecutionProtocol, canExecuteTextProbe,
   isPlatformProbeContext, TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeCapability, type TextProbeContext } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { capabilityProfileFingerprint } from './capability-verification';
@@ -35,6 +35,9 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
   management: Pick<TenantModelConfigurationAuthority, 'authorize'>;
   configuration: Pick<TenantModelConfigService, 'selectionForInvocation' | 'profile' | 'credential'>;
   audit?: UnifiedGatewayAudit;
+  /** Server-only assembly after the original task charge is resolved. The
+   * producer shares this application's accounting facts, never another ledger. */
+  auditForTask?: (taskId: string, facts: ReturnType<typeof createPersistedGatewayBudget>['facts']) => UnifiedGatewayAudit;
   protocol?: ModelJsonTransport;
   /** Existing authorized platform Vault connection, never a tenant fallback.
    * E.g. createAuthorizedPlatformModelConfiguration(...).invocation. */
@@ -79,7 +82,8 @@ export class TextCapabilityProbeApplication {
       input.authorization?.resolveContext, input.authorization?.authorize, input.subscriptions?.readCategoryCommercialContext,
       input.pricing?.quote, input.pricing?.quantity].some(method => typeof method !== 'function')
       || input.audit !== undefined && typeof input.audit?.append !== 'function'
-      || input.audit === undefined && (typeof input.db.operationLog?.create !== 'function'
+      || input.auditForTask !== undefined && typeof input.auditForTask !== 'function'
+      || input.audit === undefined && input.auditForTask === undefined && (typeof input.db.operationLog?.create !== 'function'
         || typeof input.db.operationLog.findUnique !== 'function')) {
       throw new ModelGatewayError('CONFIG_INVALID');
     }
@@ -98,7 +102,7 @@ export class TextCapabilityProbeApplication {
   private adapter(protocol: string, command: TextProbeCommand, scopeId: string) {
     const prepared = textProbeIntent(command.operationId, scopeId, textProbeCapability(command));
     const adapter = createNativeModelAdapter(protocol,
-      textProbeCapability(command) === 'structured_output' ? { structuredOutput: {
+      textProbeCapability(command) === 'embedding' ? { embeddingProbe: true } : textProbeCapability(command) === 'structured_output' ? { structuredOutput: {
         name: 'rental_capability_token', schema: { type: 'object', properties: { token: { type: 'string', maxLength: 22,
           const: (JSON.parse(prepared.expected) as { token: string }).token } }, required: ['token'], additionalProperties: false } } }
         : textProbeCapability(command) === 'tools' ? { orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } }
@@ -149,7 +153,7 @@ export class TextCapabilityProbeApplication {
   prepareRequestCurrent(requestKey: string, platformProfileId: string, capability: TextProbeCapability = 'text') {
     if (!textProbeCommandSchema.shape.capability.unwrap().safeParse(capability).success) throw new ModelGatewayError('INVALID_REQUEST');
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
-    const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
+    const platformId = textProbeProfileIdSchema.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
       // Workspace-only preparation flow: it selects the tenant configuration.
       // The platform principal prepares through its own composition instead.
@@ -158,7 +162,7 @@ export class TextCapabilityProbeApplication {
       const selection = await this.input.configuration.selectionForInvocation(context);
       const resolved = await this.input.scopes.resolveRoutingScopes(selection.mode);
       const candidates = (await this.profiles.list(resolved.configurationScope)).filter(profile =>
-        profile.enabled && !profile.disabledAt && profile.allowedCapabilities.includes('text')
+        profile.enabled && !profile.disabledAt && (capability === 'embedding' || profile.allowedCapabilities.includes('text'))
         && profile.serviceMode === selection.mode && profile.configRevision === selection.revision
         && (selection.mode === 'platform_managed' ? profile.id === platformId : profile.role === 'DEFAULT'));
       if (candidates.length !== 1) throw new ModelGatewayError('CONFIG_INVALID');
@@ -169,7 +173,7 @@ export class TextCapabilityProbeApplication {
       // The existing authority rechecks selection, scope, config revision and
       // enabled/text policy. No configuration credential() or Vault read here.
       const prepared = await this.prepare(context, command);
-      return { command, capability, configurationRevision: prepared.configuration.configRevision, methodVersion: textProbeMethod(command) };
+      return { command, capability, configurationRevision: prepared.configuration.configRevision, methodVersion: textProbeMethod(command, prepared.intent ? prepared.configuration.protocol : undefined) };
     });
   }
   prepareCurrent(command: TextProbeCommand) {
@@ -201,6 +205,9 @@ export class TextCapabilityProbeApplication {
     const command = textProbeCommandSchema.parse(structuredClone(commandValue)), execution = structuredClone(executionValue);
     const owner = await this.currentRequest();
     const prepared = await this.prepare(owner.context, command);
+    // Metadata-only unavailable selections cannot acquire an invocation or task
+    // charge, even through this server-only held-step entry.
+    if (!prepared.intent) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const registered = structuredClone(await this.accounting.bindings.register({ ...execution,
       intent: prepared.intent, configuration: prepared.configuration, mode: textProbeMode(command) }));
     if (registered.replayed) throw new ModelGatewayError('ACCOUNTING_PENDING');
@@ -220,15 +227,22 @@ export class TextCapabilityProbeApplication {
   async prepare(value: TextProbeContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
-    this.adapter(resolution.route.profile.protocol, command, resolution.consumerScope.id);
-    this.requirePlatformConnection(resolution.route.profile.serviceMode);
-    const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command));
+    if (canExecuteTextProbe(command, resolution.route.profile)) {
+      this.adapter(resolution.route.profile.protocol, command, resolution.consumerScope.id);
+      this.requirePlatformConnection(resolution.route.profile.serviceMode);
+    } else await authority.assertCurrent(context, resolution);
+    const prepared = textProbePreparation(command.operationId, resolution.consumerScope.id, textProbeCapability(command), textProbeExecutionProtocol(command, resolution.route.profile));
     return { ...prepared, configuration: textProbeConfiguration(resolution.route.profile,
       isPlatformProbeContext(context) ? { kind: 'platform' } : { kind: 'workspace', tenantId: context.tenantId }) };
   }
   private async collect(context: TextProbeContext, command: TextProbeCommand) {
     const capability = textProbeCapability(command);
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
+    if (!canExecuteTextProbe(command, resolution.route.profile)) {
+      await authority.assertCurrent(context, resolution);
+      return { capability, status: 'unverified' as const, reason: hasObjectiveProbeMethod(capability, resolution.route.profile.protocol)
+        ? 'capability_not_enabled' : 'objective_method_unavailable', observation: null };
+    }
     const row = await this.receipts.find(resolution.consumerScope.id, command.operationId);
     if (!row) return { capability, status: 'unverified' as const, reason: 'receipt_unavailable' };
     const descriptor = row.descriptor, profile = resolution.route.profile;
@@ -245,7 +259,7 @@ export class TextCapabilityProbeApplication {
       status: observation.transport === 'node_https' && observation.matched ? 'supported' as const : 'unverified' as const,
       source: 'connection_test' as const, evidenceHash: textProbeEvidenceHash(row), checkedAt: new Date(observation.checkedAt),
       expiresAt: new Date(observation.expiresAt), details: { receiptId: row.id, verification: {
-        evidence: observation.transport === 'node_https' ? 'live' : 'mock', methodVersion: textProbeMethod(command),
+        evidence: observation.transport === 'node_https' ? 'live' : 'mock', methodVersion: textProbeMethod(command, profile.protocol),
         capability, profileFingerprint: descriptor.profileFingerprint
       } } };
     if (candidate.status === 'supported' && !await this.receipts.verify(candidate)) {
@@ -274,13 +288,14 @@ export class TextCapabilityProbeApplication {
     execution = structuredClone(execution);
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
+    if (!canExecuteTextProbe(command, resolution.route.profile)) return this.collect(context, command);
     const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command)), profile = resolution.route.profile;
     // Refuse an absent local protocol capability before registration, receipt
     // creation or a budget/dispatch attempt; remote proof cannot add audio.
     const adapter = this.adapter(profile.protocol, command, resolution.consumerScope.id);
     const configuration = textProbeConfiguration(profile, isPlatformProbeContext(context) ? { kind: 'platform' } : { kind: 'workspace', tenantId: context.tenantId });
     const descriptor = textProbeDescriptorSchema.parse({ command, context, scopeId: resolution.consumerScope.id, profileId: profile.id,
-      profileFingerprint: command.profileFingerprint, methodVersion: textProbeMethod(command), callId: prepared.intent.requestId,
+      profileFingerprint: command.profileFingerprint, methodVersion: textProbeMethod(command, profile.protocol), callId: prepared.intent.requestId,
       intentHash: prepared.intentHash, challengeHash: prepared.challengeHash, configuration,
       configurationHash: requestFingerprint(configuration), stepId: execution.stepId, runId: execution.lease.runId });
     // An original receipt is observational only, never permission to dispatch
@@ -306,11 +321,12 @@ export class TextCapabilityProbeApplication {
     const started = await this.receipts.begin(descriptor);
     if (!started.created) return this.collect(context, command);
     await authority.assertCurrent(context, resolution);
-    // Platform principals require a host-provided platform audit: the
-    // workspace OperationLog journal cannot carry null attribution and would
-    // only reject after admission+reserve. Fail closed before any budget work.
-    const platformAuditRequired = isPlatformProbeContext(context) && this.input.audit === undefined;
-    if (platformAuditRequired) throw new ModelGatewayError('CONFIG_INVALID');
+    // Platform hosts assemble their own producer against the SAME accounting
+    // facts and persisted task charge. Direct callers without it still fail
+    // closed before admission/reserve; a workspace journal is never a fallback.
+    const audit = this.input.audit ?? this.input.auditForTask?.(charges[0].taskId, this.accounting.facts);
+    if (audit !== undefined && typeof audit?.append !== 'function'
+      || isPlatformProbeContext(context) && audit === undefined) throw new ModelGatewayError('CONFIG_INVALID');
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
     // The transport consumes authorizeDispatch/media only; the injected
@@ -318,7 +334,7 @@ export class TextCapabilityProbeApplication {
     const transport = new RoutedModelTransport({ tenant, platform }, [adapter],
       authority as unknown as TextCapabilityProbeAuthority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
-      budget: this.accounting.budget, transport, audit: this.input.audit
+      budget: this.accounting.budget, transport, audit: audit
         // Task ownership comes from the persisted charge, not a caller's lease.
         // The audit independently checks its invocation/task/ledger association.
         ?? new PrismaTaskGatewayAudit(this.input.db, this.input.scopes, this.accounting.facts, charges[0].taskId, this.input.clock),
@@ -331,7 +347,9 @@ export class TextCapabilityProbeApplication {
       return mode === adapter.evidenceMode && proof?.purpose === 'capability_text_probe'
         && proof.operationId === command.operationId && proof.profileFingerprint === command.profileFingerprint
         && proof.intentHash === prepared.intentHash;
-    } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32,
+    } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: textProbeRouteScene(command), maxOutputTokens: 32,
+      ...(textProbeCapability(command) === 'embedding' ? { embeddingProbe: true } : {}),
+      ...(textProbeCapability(command) === 'reasoning' ? { reasoningChannel: true } : {}),
       ...(textProbeCapability(command) === 'structured_output' ? { structuredOutput: true } : {}),
       ...(textProbeCapability(command) === 'tools' ? { orderExplainTool: true } : {}) }], 30000);
     try {
@@ -358,6 +376,10 @@ export class TextCapabilityProbeApplication {
     context = probeContextSchema.parse(structuredClone(context));
     command = textProbeCommandSchema.parse(structuredClone(command));
     const authority = this.authority(context, command), current = await authority.resolve(context, textProbeRequirements(command));
+    if (!canExecuteTextProbe(command, current.route.profile)) {
+      await authority.assertCurrent(context, current);
+      return { allowed: false, required: textProbeRequirements(command), missing: textProbeRequirements(command), stale: [] };
+    }
     this.adapter(current.route.profile.protocol, command, current.consumerScope.id);
     const result = await this.capabilities.preflight(current.route.profile, textProbeRequirements(command));
     await authority.assertCurrent(context, current);

@@ -28,10 +28,23 @@ export type AiGatewayConfigReferenceDraft = AiGatewayConfigReferenceBaseDraft & 
   /** Explicit SaaS/platform work, not an absent tenantId silently interpreted as platform. */
   | { consumerScope: AiPlatformScope; serviceMode: "platform_managed"; configurationScope: AiPlatformScope }
 );
+export const AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION = "ain-tool-result-reference-1" as const;
+/** Server-frozen selectors into the original plan, not a tool grant or result.
+ * Native IDs, arguments and result text are resolved only after the original
+ * model/read steps complete and current business authorization is rechecked. */
+export interface AiGatewayToolResultReferenceDraft {
+  referenceVersion: typeof AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION;
+  taskId: string;
+  runId: string;
+  modelRegistrationRef: string;
+  toolRegistrationRef: string;
+  callIndex: number;
+}
 export type AiGatewayContentDraft =
   | { kind: "text"; text: string }
   | { kind: "image"; attachmentId: string; attachmentRevision: number }
-  | { kind: "audio"; attachmentId: string; attachmentRevision: number };
+  | { kind: "audio"; attachmentId: string; attachmentRevision: number }
+  | { kind: "tool_result_reference"; reference: AiGatewayToolResultReferenceDraft };
 export type AiGatewayUsageDraft =
   | { kind: "reported"; inputTokens: number; outputTokens: number }
   | { kind: "estimated"; inputTokens: number; outputTokens: number; methodVersion: string }

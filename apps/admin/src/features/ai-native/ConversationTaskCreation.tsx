@@ -6,6 +6,8 @@ import { aiConversationsApi } from '@/api/aiConversations';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
 import { ConversationTaskCreationSession } from './conversation-task-creation-session';
 import { ConversationOrderExecution } from './ConversationOrderExecution';
+import { ConversationOpeningExecution } from './ConversationOpeningExecution';
+import { ConversationQuoteExecution } from './ConversationQuoteExecution';
 import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
 
@@ -36,7 +38,7 @@ export function ConversationTaskCreation({ identity, conversationId, turn, curre
       && scope.current.turn.capabilityVersion === turn.capabilityVersion && !document.hidden && scope.current.current()) scope.current.onChanged();
     return value;
   };
-  const canCreate = ['order_explanation', 'opening_diagnosis'].includes(turn.capabilityCode) && turn.material === 'retained' && !turn.task && !('creation' in turn);
+  const canCreate = ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(turn.capabilityCode) && turn.material === 'retained' && !turn.task && !('creation' in turn);
   return <section aria-label={t('原轮次任务创建')} aria-busy={state.busy}>
     <p>{t('只创建原请求的任务元数据，不启动计划、模型或业务；后续执行须另行明确操作。')}</p>
     {!state.locked && <ConfirmAction label={t('明确创建原任务')} disabled={state.busy || !canCreate}
@@ -44,6 +46,10 @@ export function ConversationTaskCreation({ identity, conversationId, turn, curre
     {state.locked && <ActionButton label={t('核对原任务创建')} disabled={state.busy} onAction={() => run(false)} />}
     {state.feedback === 'unknown' && <Alert type="warning" title={t('原任务创建待核对；未观察到任务不证明未创建，不重发创建请求。')} />}
     {turn.capabilityCode === 'order_explanation' && state.recovery?.task.state === 'observed' && <ConversationOrderExecution identity={identity} conversationId={conversationId}
+      turn={{ ...turn, task: { taskId: state.recovery.task.taskId, runId: state.recovery.task.runId } }} current={current} />}
+    {turn.capabilityCode === 'opening_diagnosis' && state.recovery?.task.state === 'observed' && <ConversationOpeningExecution identity={identity} conversationId={conversationId}
+      turn={{ ...turn, task: { taskId: state.recovery.task.taskId, runId: state.recovery.task.runId } }} current={current} />}
+    {turn.capabilityCode === 'quote_clarification' && state.recovery?.task.state === 'observed' && <ConversationQuoteExecution identity={identity} conversationId={conversationId}
       turn={{ ...turn, task: { taskId: state.recovery.task.taskId, runId: state.recovery.task.runId } }} current={current} />}
     {state.recovery?.task.state === 'observed' && <p role="status">{t('已观察原任务元数据，不代表模型或业务已执行。')}
       {' '}{safeDisplayText(state.recovery.task.taskId, 191)}</p>}

@@ -9,7 +9,7 @@ export class PrismaTaskOrderStartAuthority extends PrismaTaskStepEvidenceAuthori
   constructor(db: PrismaClient, authorization: AiTaskRepositoryAuthority, plans: AiTaskPlanEvidenceAuthority,
     clock: () => Date = () => new Date(), private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit') {
     super(db, authorization, plans, clock);
-    if (!['rental.order.commit', 'tenant.notifications.commit'].includes(confirmationTool)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (!['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(confirmationTool)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   }
   protected override get startEffect(): 'possible' { return 'possible'; }
   protected override accepts(step: AiStep, operation: string) {

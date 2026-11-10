@@ -4,10 +4,13 @@ import { AI_APPROVED_SETTINGS_DRAFT_VERSION, type AiApprovedSettingsReferenceDra
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ApprovedSettingsResultUnknownError, type ApprovedSettingsParticipant, type ApprovedSettingsBinding, type ApprovedSettingsOperationReceipt } from '../../rental-core/approved-settings-change.ports';
 import { settingsContract } from './approved-settings-contracts';
-import { ApprovedSettingsTaskAuthority, settingsConflict, settingsDenied } from './approved-settings-task.authority';
+import { ApprovedSettingsTaskAuthority, settingsConflict, settingsDenied, type ApprovedSettingsExecutionLease } from './approved-settings-task.authority';
 
 export class PrismaApprovedSettingsParticipant implements ApprovedSettingsParticipant {
-  constructor(readonly authority: ApprovedSettingsTaskAuthority) {}
+  private readonly executionLease?: ApprovedSettingsExecutionLease;
+  constructor(readonly authority: ApprovedSettingsTaskAuthority, executionLease?: ApprovedSettingsExecutionLease) {
+    this.executionLease = executionLease && Object.freeze(structuredClone(executionLease));
+  }
 
   async load(reference: AiApprovedSettingsReferenceDraft, mode: 'read' | 'decide' | 'execute', tx?: Prisma.TransactionClient) {
     const d = this.authority.d, db = tx ?? d.db, grant = await this.authority.resolve(reference.taskId, mode, tx);
@@ -57,8 +60,9 @@ export class PrismaApprovedSettingsParticipant implements ApprovedSettingsPartic
     if (Object.entries(grant.actor).some(([key, value]) => binding[key as keyof ApprovedSettingsBinding] !== value) ||
         change.id !== binding.changeId || change.changeHash !== binding.changeHash || change.baseRevision !== binding.baseRevision) throw settingsDenied();
     if (mode === 'execute') {
-      if (!tx) throw settingsDenied();
-      await this.authority.heldStep(grant, loaded.step.id, { changeId: change.id, changeHash: change.changeHash }, tx);
+      if (!tx || !this.executionLease) throw settingsDenied();
+      await this.authority.heldStep(grant, loaded.step.id, { changeId: change.id, changeHash: change.changeHash }, tx,
+        this.executionLease.runId, this.executionLease);
       if ((await tx.aiProposal.updateMany({ where: { scopeId: grant.scopeId, taskId: proposal.taskId, id: proposal.id,
         stateRevision: loaded.head.stateRevision, status: 'CONFIRMED', currentRevision: binding.approval.proposalRevision },
       data: { stateRevision: loaded.head.stateRevision } })).count !== 1) throw settingsConflict();

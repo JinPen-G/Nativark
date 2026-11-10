@@ -132,14 +132,19 @@ export class ApprovedOrderPreparationService {
             || (await this.lock(tx, command, latest.context, latest.scopeId)).binding !== step.binding) throw deniedOrder();
           return { result, body: structuredClone(body) };
         });
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      // The real input/quote/current-entitlement rechecks can cross Prisma's
+      // five-second default. Keep this preparation bounded; the original
+      // runner deadline, lease/fence and unknown acknowledgement rules remain.
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 10000 });
       return await this.route.withOrderPreparation(original.context, saved.body, async context => {
         const current = await this.policy.authorizePreparation(command.taskId);
         if (current.scopeId !== original.scopeId || orderContextHash(current.context) !== orderContextHash(context)) throw deniedOrder();
         return saved.result;
       });
     } catch (error) {
-      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
+      // Keep the already-sanitized authority/repository origin for bounded
+      // reconciliation diagnostics; do not retain arbitrary raw exceptions.
+      if (error instanceof AiTaskRepositoryError) throw error;
       if (error instanceof AiProposalRepositoryError && error.code === 'CONFLICT') throw conflict();
       if (transactionSubmitted) throw new AiApprovedOrderResultUnknownError();
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');

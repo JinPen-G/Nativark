@@ -1,4 +1,7 @@
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiProposalDecisionRequestDraft } from '@rental-os/shared';
+import { ValidationPipe } from '@nestjs/common';
+import { CreateRentalOrderDto } from '../../rental-core/rental-order-request.dto';
+import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -30,6 +33,8 @@ const unknown = (payload: Prisma.InputJsonValue): TerminalResult => ({ kind: 'un
 
 export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependencies, app: Applications) {
   const policy = new PersistedApprovedOrderPolicyAuthority({ ...d, toolVersion: AI_TOOL_DRAFT_VERSION });
+  const quoteRoute = new AiApprovedOrderRouteAuthority(d.guard, d.credentials, d.clock);
+  const orderValidation = new ValidationPipe({ transform: true, whitelist: true });
   const parse = (input: ApprovedOrderExecutorInput) => {
     const parsed = inputSchema.safeParse(input);
     if (!parsed.success || parsed.data.taskId !== parsed.data.lease.taskId || parsed.data.runId !== parsed.data.lease.runId) {
@@ -38,21 +43,21 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
     const { clarifications: _, ...binding } = parsed.data;
     return binding;
   };
-  const locate = async (input: ReturnType<typeof parse>) => {
-    const first = await policy.authorizeRead(input.taskId);
+  const locate = async (input: ReturnType<typeof parse>, tx?: Prisma.TransactionClient) => {
+    const first = await policy.authorizeRead(input.taskId, tx), db = tx ?? d.db;
     const key = { scopeId: first.scopeId, taskId: input.taskId, runId: input.runId, id: input.stepId, actionId: input.actionId };
-    const step = await d.db.aiStep.findFirst({ where: key });
+    const step = await db.aiStep.findFirst({ where: key });
     if (!step || Object.entries(key).some(([k, v]) => step[k as keyof typeof step] !== v) || step.inputRef !== input.inputRef
       || step.requestFingerprint !== input.fingerprint || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw deniedOrder();
-    const actions = await d.db.aiProposalAction.findMany({ where: { scopeId: first.scopeId, taskId: input.taskId, actionId: input.actionId }, take: 2 });
+    const actions = await db.aiProposalAction.findMany({ where: { scopeId: first.scopeId, taskId: input.taskId, actionId: input.actionId }, take: 2 });
     if (actions.length > 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     const action = actions[0];
     if (action && (action.scopeId !== first.scopeId || action.taskId !== input.taskId || action.actionId !== input.actionId
       || action.requestFingerprint !== input.fingerprint)) throw deniedOrder();
-    const version = action ? await d.db.aiProposalVersion.findFirst({ where: { scopeId: first.scopeId, taskId: input.taskId,
+    const version = action ? await db.aiProposalVersion.findFirst({ where: { scopeId: first.scopeId, taskId: input.taskId,
       proposalId: action.proposalId, revision: action.proposalRevision } }) : null;
     if (action && !version) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const latest = await policy.authorizeRead(input.taskId);
+    const latest = await policy.authorizeRead(input.taskId, tx);
     if (first.scopeId !== latest.scopeId || orderContextHash(first.context) !== orderContextHash(latest.context)) throw deniedOrder();
     const binding = { scopeId: first.scopeId, taskId: input.taskId, runId: input.runId, stepId: input.stepId,
       actionId: input.actionId, inputRef: input.inputRef, fingerprint: input.fingerprint };
@@ -60,14 +65,14 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
       proposalRevision: version.revision, reviewedPayloadHash: version.payloadHash } : null;
     return { binding, reference, context: latest.context };
   };
-  const readWaiting = async (raw: ApprovedOrderExecutorInput) => {
-    const input = parse(raw), first = await locate(input);
+  const readWaiting = async (raw: ApprovedOrderExecutorInput, tx?: Prisma.TransactionClient) => {
+    const input = parse(raw), first = await locate(input, tx);
     if (!first.reference) return { kind: 'missing' as const, binding: first.binding, lease: input.lease };
-    const view = await app.approvals.readOriginal(input.taskId, first.reference);
+    const view = await app.approvals.readOriginal(input.taskId, first.reference, tx);
     if (view.proposal.payload.actions[0].actionId !== input.actionId || view.proposal.payload.actions[0].input.contentHash !== input.fingerprint) throw deniedOrder();
     const decision: AiProposalDecisionRequestDraft['decision'] = view.proposal.status === 'cancelled' ? 'reject' : 'approve';
-    const receipt = await app.approvals.readReceipt(input.taskId, { ...first.reference, decision });
-    const latest = await locate(input);
+    const receipt = await app.approvals.readReceipt(input.taskId, { ...first.reference, decision }, tx);
+    const latest = await locate(input, tx);
     if (requestFingerprint(latest.binding) !== requestFingerprint(first.binding)
       || requestFingerprint(latest.reference) !== requestFingerprint(first.reference)
       || orderContextHash(latest.context) !== orderContextHash(first.context)) throw deniedOrder();
@@ -86,13 +91,17 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
       lease: { runId: input.runId, holderId: input.lease.holderId, revision: input.lease.revision, fencingToken: input.lease.fencingToken } };
   };
   const reconcile = async (raw: ApprovedOrderExecutorInput, transaction?: Prisma.TransactionClient): Promise<ApprovedOrderWaitingResult> => {
-    const input = parse(raw), waiting = await readWaiting(input);
-    if (waiting.kind === 'waiting_reference' && waiting.receipt.kind === 'absent') {
-      const access = await policy.authorizeRead(input.taskId), key = { scopeId: access.scopeId, taskId: input.taskId, runId: input.runId, stepId: input.stepId };
+    const input = parse(raw), waiting = await readWaiting(input, transaction);
+    if (waiting.kind === 'waiting_reference' && (waiting.receipt.kind === 'absent'
+      || waiting.receipt.kind === 'recorded' && waiting.receipt.record.decision === 'rejected')) {
+      const decision = waiting.receipt;
+      const access = await policy.authorizeRead(input.taskId, transaction), key = { scopeId: access.scopeId, taskId: input.taskId, runId: input.runId, stepId: input.stepId };
       const readWitness = async (tx: Prisma.TransactionClient) => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${key.scopeId} AND id = ${key.taskId} FOR UPDATE`);
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${key.scopeId} AND taskId = ${key.taskId} AND id = ${key.runId} FOR UPDATE`);
-        const task = await tx.aiTask.findFirst({ where: { id: key.taskId, scopeId: key.scopeId, status: { in: ['CANCEL_REQUESTED', 'CANCELLED'] }, cancelRequestedAt: { not: null } } });
+        const task = await tx.aiTask.findFirst({ where: { id: key.taskId, scopeId: key.scopeId,
+          ...(decision.kind === 'absent' ? { status: { in: ['CANCEL_REQUESTED', 'CANCELLED'] }, cancelRequestedAt: { not: null } }
+            : { status: { in: ['RUNNING', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED', 'CANCELLED'] } }) } });
         const run = await tx.aiRun.findFirst({ where: { id: key.runId, scopeId: key.scopeId, taskId: key.taskId,
           leaseOwnerId: input.lease.holderId, revision: input.lease.revision, fencingToken: new Prisma.Decimal(input.lease.fencingToken),
           leaseExpiresAt: { gt: (d.clock ?? (() => new Date()))() } } });
@@ -101,8 +110,10 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
           status: { in: ['RUNNING', 'UNKNOWN', 'FAILED'] }, effect: { in: ['NONE', 'POSSIBLE'] } } });
         if (!task || !run || !step) return false;
         if (step.status === 'FAILED' && (step.errorCode !== 'AI_BUSINESS_REJECTED' || step.effect !== 'NONE')) return false;
-        // Absence alone is insufficient: prove the only durable phase stopped
-        // at human confirmation, with no execution phase or approval consumption.
+        // Cancellation or rejection alone is insufficient: prove the only
+        // durable phase stopped at confirmation, with no later execution phase
+        // or approval consumption. The original receipt need not be rewritten
+        // by a new invocation merely to settle an already recorded rejection.
         const phases = taskExecutionPhaseStore(tx), starts = await phases.readStarts(key), receipts = await phases.readReceipts(key);
         if (starts.length !== 1 || receipts.length !== 1) return false;
         const start = starts[0], receipt = receipts[0];
@@ -118,15 +129,25 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
         const approval = await tx.aiApproval.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId,
           proposalId: waiting.proposal.proposalId, proposalRevision: waiting.proposal.proposalRevision } });
         const consumption = await tx.aiApprovalConsumption.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, actionId: input.actionId } });
-        return !approval && !consumption;
+        if (consumption) return false;
+        if (decision.kind === 'absent') return !approval;
+        const record = decision.record;
+        return !!approval && approval.id === record.approvalId && approval.decision === 'REJECTED'
+          && approval.payloadHash === record.payloadHash && approval.payloadHash === waiting.proposal.reviewedPayloadHash
+          && approval.audience.toLowerCase() === record.audience && record.actor.kind === 'user' && approval.actorKind === 'USER'
+          && approval.actorId === record.actor.userId && approval.issuedAt.toISOString() === record.issuedAt
+          && approval.expiresAt.toISOString() === record.expiresAt;
       };
       const notSubmitted = transaction ? await readWitness(transaction) : await d.db.$transaction(readWitness,
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       if (notSubmitted) {
-        const latest = await readWaiting(input);
-        if (latest.kind !== 'waiting_reference' || latest.receipt.kind !== 'absent'
-          || requestFingerprint(latest.binding) !== requestFingerprint(waiting.binding)) throw deniedOrder();
-        return { kind: 'failed', errorCode: 'AI_CANCELLED', payload: material(waiting, 'cancelled_before_business_submission') };
+        const latest = await readWaiting(input, transaction);
+        if (latest.kind !== 'waiting_reference' || requestFingerprint(latest.receipt) !== requestFingerprint(decision)
+          || requestFingerprint(latest.binding) !== requestFingerprint(waiting.binding)
+          || requestFingerprint(latest.proposal) !== requestFingerprint(waiting.proposal)) throw deniedOrder();
+        return decision.kind === 'absent'
+          ? { kind: 'failed', errorCode: 'AI_CANCELLED', payload: material(waiting, 'cancelled_before_business_submission') }
+          : { kind: 'failed', errorCode: 'AI_APPROVAL_REJECTED', payload: material(waiting, 'rejected') };
       }
     }
     if (waiting.kind !== 'waiting_reference' || waiting.receipt.kind !== 'recorded' || waiting.receipt.record.decision !== 'approved') {
@@ -137,7 +158,7 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
       return { kind: 'succeeded', payload: { ...material(waiting, 'committed') as Prisma.InputJsonObject,
         businessResultRef: result.order.id, replayed: true } };
     } catch {
-      await readWaiting(input);
+      await readWaiting(input, transaction);
       return unknown(material(waiting, 'unresolved'));
     }
   };
@@ -151,7 +172,13 @@ export function composeApprovedOrderWaiting(d: ControlledApprovedOrderDependenci
       const source = await app.source.readForExecution(input);
       if (source.context.scope.kind !== 'workspace' || !('quoteId' in source.input) || typeof source.input.quoteId !== 'string') throw deniedOrder();
       const row = await d.db.aiTaskActionInput.findFirst({ where: { scopeId: waiting.binding.scopeId, taskId: input.taskId, runId: input.runId, id: input.inputRef } });
-      const quote = await d.quoteFacts.findQuote(source.context.scope.tenantId, source.input.quoteId);
+      const body: CreateRentalOrderDto = await orderValidation.transform(structuredClone(source.input), { type: 'body', metatype: CreateRentalOrderDto });
+      if (requestFingerprint(body) !== requestFingerprint(source.input)) throw deniedOrder();
+      // The task authority returns a context, not ambient ALS. Read the quote
+      // inside its original Guard-owned workspace, never a default workspace.
+      const tenantId = source.context.scope.tenantId;
+      const quote = await quoteRoute.withOrderReview(source.context, body,
+        () => d.quoteFacts.findQuote(tenantId, body.quoteId));
       if (!row || !(row.expiresAt instanceof Date) || !quote || !Number.isFinite(Date.parse(quote.expiresAt))) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const expiresAt = new Date(Math.min(row.expiresAt.getTime(), Date.parse(quote.expiresAt))).toISOString();
       const proposalId = `ao-${requestFingerprint(waiting.binding).slice(0, 32)}`;

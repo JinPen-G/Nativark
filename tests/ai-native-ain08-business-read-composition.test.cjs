@@ -26,8 +26,9 @@ function authorities() {
 
 function core() {
   return {
-    listItemGroups: async () => [{ id: 'item-a', tenantId: 'tenant-a', categoryCode: 'camera', code: 'CAM-A', name: 'Camera', status: 'enabled', unit: 'day' }],
-    availability: async (tenantId, input) => ({ available: true, locationId: input.locationId, startAt: input.startAt, endAt: input.endAt, lines: input.lines.map(line => ({ itemGroupId: line.itemGroupId, itemGroupCode: 'CAM-A', itemGroupName: 'Camera', inventoryMode: 'serialized', requestedQuantity: line.quantity, availableQuantity: line.quantity, available: true, reasons: [] })) }),
+    listItemGroupsPage: async () => ({ rows: [{ id: 'item-a', tenantId: 'tenant-a', categoryCode: 'camera', code: 'CAM-A', name: 'Camera', status: 'enabled', unit: 'day' }],
+      truncated: false, nextCursor: null, source: 'persisted_workspace_configuration', configurationVersion: '1'.repeat(64) }),
+    readAvailability: async (tenantId, input) => ({ available: true, locationId: input.locationId, startAt: input.startAt, endAt: input.endAt, lines: input.lines.map(line => ({ itemGroupId: line.itemGroupId, itemGroupCode: 'CAM-A', itemGroupName: 'Camera', inventoryMode: 'serialized', requestedQuantity: line.quantity, availableQuantity: line.quantity, available: true, reasons: [] })) }),
     getOrder: async () => ({ id: 'order-a', tenantId: 'tenant-a', orderNo: 'R-1', status: 'reserved', startAt: '2026-01-01T00:00:00Z', endAt: '2026-01-02T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', currency: 'CNY', rentalAmount: 100, serviceAmount: 0, discountAmount: 0, couponAmount: 0, depositAmount: 20, preAuthAmount: 20, finalPayableAmount: 100 })
   };
 }
@@ -56,7 +57,9 @@ test('composition delegates to the real projections, not a fixture-owned result'
 
 test('the composed availability and membership readers preserve their bounded contracts', async () => {
   const auth = authorities();
-  const composed = composeAiBusinessReadFacts({ core: core(), memberships: { listPersonalOptions: async () => [{ customerId: 'customer-a', name: 'Customer A', phoneMasked: '138****0000', membershipStatus: 'active' }] }, businessAuthority: auth.business, orderAuthority: auth.order });
+  const composed = composeAiBusinessReadFacts({ core: core(), memberships: { listPersonalOptions: async () => { throw Error('unbounded member lookup must not run'); },
+    listPersonalOptionsPage: async (_tenantId, query) => { assert.equal(query.limit, 10); return {
+      rows: [{ customerId: 'customer-a', name: 'Customer A', phoneMasked: '138****0000', membershipStatus: 'active' }], truncated: false }; } }, businessAuthority: auth.business, orderAuthority: auth.order });
   const availability = await composed.availability.read({ locationId: 'location-a', startAt: '2026-01-01T00:00:00Z', endAt: '2026-01-02T00:00:00Z', lines: [{ itemGroupId: 'item-a', quantity: 1 }] });
   assert.equal(availability.result.available, true);
   assert.equal(availability.result.lines[0].requestedQuantity, 1);

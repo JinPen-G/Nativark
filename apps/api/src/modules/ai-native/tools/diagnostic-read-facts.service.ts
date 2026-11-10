@@ -1,9 +1,35 @@
 import { z } from 'zod';
-import type { AiExecutionContext, RentalCategoryCode, RentalCurrency } from '@rental-os/shared';
-import type { RentalBusinessService, BusinessContext } from '../../rental-core/rental-business.service';
+import { HttpException } from '@nestjs/common';
+import { RENTAL_CATEGORY_WORKSPACE_NAMES, RENTAL_CURRENCY_CODES, type AiExecutionContext } from '@rental-os/shared';
+import type { RentalCoreService } from '../../rental-core/rental-core.service';
+import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { RentalReportReadLimitError, type RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+
+/** In-process provenance only. The original route normalizes unknown faults to
+ * PROVIDER_UNAVAILABLE too; that generic code must not authorize partial results. */
+export class AiDiagnosticSourceUnavailable extends ModelGatewayError {
+  constructor(code: 'CAPABILITY_UNSUPPORTED' | 'PROVIDER_UNAVAILABLE' | 'TIMEOUT') { super(code); }
+}
+export async function readAiDiagnosticSource<T>(read: () => Promise<T>): Promise<T> {
+  try { return await read(); }
+  catch (error) {
+    if (error instanceof ModelGatewayError) {
+      switch (error.code) {
+        case 'CAPABILITY_UNSUPPORTED': case 'PROVIDER_UNAVAILABLE': case 'TIMEOUT':
+          throw new AiDiagnosticSourceUnavailable(error.code);
+      }
+    }
+    // These are explicit source declarations, not inferred transport failures.
+    if (error instanceof HttpException) {
+      if (error.getStatus() === 503) throw new AiDiagnosticSourceUnavailable('PROVIDER_UNAVAILABLE');
+      if (error.getStatus() === 504) throw new AiDiagnosticSourceUnavailable('TIMEOUT');
+    }
+    throw error;
+  }
+}
 
 /** Mainline must implement this closed bridge through the ORIGINAL route Guard
  * and ALS, including current-identity revalidation after the awaited read.
@@ -46,18 +72,19 @@ function observed(clock: () => Date) {
 
 /** Internal bounded projection; neither an enabled handler nor an HTTP DTO. */
 export class AiOpeningReadFactsService {
-  constructor(private readonly business: Pick<RentalBusinessService, 'tenantReadiness'>,
-    private readonly context: { current(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<BusinessContext> },
+  constructor(private readonly business: Pick<RentalBusinessService, 'readTenantReadiness'>,
     private readonly authority: AiDiagnosticReadAuthority, private readonly clock: () => Date = () => new Date()) {
-    requireMethod(business, 'tenantReadiness'); requireMethod(context, 'current'); requireMethod(authority, 'withRead');
+    requireMethod(business, 'readTenantReadiness'); requireMethod(authority, 'withRead');
   }
   async read(value: unknown, expectedContext?: AiExecutionContext) {
     const input = aiOpeningReadInputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('opening', input.data, async context => {
       assertAiReadContextBinding(context, expectedContext);
-      const scope = workspace(context), businessContext = await this.context.current(scope);
-      const parsed = readiness.safeParse(await this.business.tenantReadiness(scope.tenantId, businessContext));
+      const scope = workspace(context);
+      // Opening does not need a quote context: the business reader obtains
+      // bounded persisted metadata and applies the original nine-item decision.
+      const parsed = readiness.safeParse(await readAiDiagnosticSource(() => this.business.readTenantReadiness(scope.tenantId)));
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId
         || parsed.data.items.length > input.data.limit || new Set(parsed.data.items.map(x => x.key)).size !== parsed.data.items.length)
         throw new ModelGatewayError('INVALID_RESPONSE');
@@ -77,25 +104,39 @@ export class AiOpeningReadFactsService {
 export class AiRiskReadFactsService {
   constructor(private readonly reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>,
     private readonly settings: {
-      category(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<RentalCategoryCode>;
-      currency(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<RentalCurrency>;
+      current(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): ReturnType<RentalCoreService['readReportConfiguration']>;
     }, private readonly authority: AiDiagnosticReadAuthority, private readonly clock: () => Date = () => new Date()) {
-    requireMethod(reports, 'getBoundedOperationReport'); requireMethod(settings, 'category'); requireMethod(settings, 'currency'); requireMethod(authority, 'withRead');
+    requireMethod(reports, 'getBoundedOperationReport'); requireMethod(settings, 'current'); requireMethod(authority, 'withRead');
   }
   async read(value: unknown, expectedContext?: AiExecutionContext) {
     const input = aiRiskReadInputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('risk', input.data, async context => {
       assertAiReadContextBinding(context, expectedContext);
-      const scope = workspace(context), category = await this.settings.category(scope), currency = await this.settings.currency(scope);
-      const facts = await this.reports.getBoundedOperationReport(scope.tenantId, scope.workspaceId, category, input.data, currency)
+      const scope = workspace(context);
+      const loadMetadata = async () => {
+        // Snapshot the same minimal report configuration under the original
+        // report Guard/ALS. No quote/config-write permission or broader catalog.
+        const metadata = structuredClone(await readAiDiagnosticSource(() => this.settings.current(structuredClone(scope))));
+        if (metadata.tenantId !== scope.tenantId || metadata.workspaceId !== scope.workspaceId
+          || !Object.prototype.hasOwnProperty.call(RENTAL_CATEGORY_WORKSPACE_NAMES, metadata.categoryCode)
+          || !(RENTAL_CURRENCY_CODES as readonly unknown[]).includes(metadata.currency)) throw new ModelGatewayError('INVALID_RESPONSE');
+        return metadata;
+      };
+      const metadata = await loadMetadata(), { categoryCode: category, currency } = metadata;
+      const facts = await readAiDiagnosticSource(() => this.reports
+        .getBoundedOperationReport(scope.tenantId, scope.workspaceId, category, input.data, currency)
         .catch(error => {
           if (error instanceof RentalReportReadLimitError) throw new ModelGatewayError('RATE_LIMITED');
           throw error;
-        });
+        }));
       const parsed = report.safeParse(facts);
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId || parsed.data.currency !== currency)
         throw new ModelGatewayError('INVALID_RESPONSE');
+      // A current report cannot retain an older currency/category label after
+      // awaiting its source. This is a consistency check, not an atomic snapshot
+      // or a synthetic revision, and never re-runs the report on a new basis.
+      if (requestFingerprint(await loadMetadata()) !== requestFingerprint(metadata)) throw new ModelGatewayError('CONFIG_INVALID');
       const r = parsed.data;
       return { requestId: context.requestId, scope: { ...scope }, observedAt: observed(this.clock), sourceGeneratedAt: r.generatedAt,
         range: { from: input.data.from, to: input.data.to }, currency: r.currency, orderCount: r.orderCount,

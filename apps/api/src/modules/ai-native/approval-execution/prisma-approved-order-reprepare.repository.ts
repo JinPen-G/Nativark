@@ -13,6 +13,11 @@ export const reprepareRowSchema = z.object({
   replacementRevision: revision, replacementPayloadHash: hash, createdAt: z.date()
 }).strict();
 export type ApprovedOrderReprepareRow = z.infer<typeof reprepareRowSchema>;
+// MySQL raw unsigned INT revisions are bigint, unlike ORM Int fields. Convert
+// only these exact bounded revisions on read; writes/contracts stay numeric,
+// and strings, negative/overflow values or lossy coercion remain invalid.
+const rawRevision = z.union([revision, z.bigint().min(1n).max(4294967294n)]).transform(value => Number(value));
+const readRowSchema = reprepareRowSchema.extend({ originalRevision: rawRevision, replacementRevision: rawRevision });
 const columns = Object.keys(reprepareRowSchema.shape) as (keyof ApprovedOrderReprepareRow)[];
 type Reader = Pick<PrismaClient, '$queryRaw'>;
 
@@ -23,7 +28,7 @@ export class PrismaApprovedOrderReprepareRepository {
     if (!shortId.safeParse(scopeId).success || !id.safeParse(operationKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const rows = await db.$queryRaw<unknown[]>(Prisma.sql`SELECT * FROM ai_approval_reprepares WHERE scopeId = ${scopeId} AND operationKey = ${operationKey} LIMIT 1`);
     if (!rows.length) return null;
-    const row = reprepareRowSchema.parse(rows[0]);
+    const row = readRowSchema.parse(rows[0]);
     if (row.scopeId !== scopeId || row.operationKey !== operationKey) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     return row;
   }

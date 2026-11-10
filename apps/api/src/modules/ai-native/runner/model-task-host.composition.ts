@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
+import { aiStepActionId } from '../ai-step-registration.repository';
 import { AI_TOOL_DRAFT_VERSION, isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
@@ -7,11 +9,12 @@ import { composePersistedTaskModelInput, composeCurrentAuthorizedTaskModelInput 
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, parseTaskModelInput, taskModelFingerprint, continueTaskModelMaterial } from '../model-input/task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
+import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { composeCurrentAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './prisma-task-application';
-import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, inheritAiTaskHeldPreparation, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { taskPreparationNonEffectChargeIds } from './prisma-task-run-preparation';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
@@ -37,17 +40,17 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
   const task = (input.kind === 'image' ? taskSchema.extend({ material: taskImageMaterialSchema })
     : input.kind === 'audio' ? taskSchema.extend({ material: taskAudioMaterialSchema }) : taskSchema).parse(structuredClone(input.task));
   const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : input.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
+  const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
+    ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
+    ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
+    ...(input.gatewayScene.structuredSchemaHash ? { structuredSchemaHash: input.gatewayScene.structuredSchemaHash } : {}),
+    ...(input.kind ? { kind: input.kind } : {}) };
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (lease.taskId !== task.taskId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     let { registrationRef, material, limits } = task;
     let expectedMedia: ReturnType<typeof parseTaskModelInput>['media'];
     if (lease.runId !== task.runId) {
       const continuation = await root.inputs.readContinuation(lease);
-      const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
-      ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
-      ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
-      ...(input.gatewayScene.structuredSchemaHash ? { structuredSchemaHash: input.gatewayScene.structuredSchemaHash } : {}),
-      ...(input.kind ? { kind: input.kind } : {}) };
       const previous = parseTaskModelInput(continuation.input, policy), result = continuation.result;
       if (continuation.resourceOriginRunId !== task.runId || taskModelFingerprint(previous, policy) !== continuation.inputHash
         || !isGatewayResult(result) || result.status !== 'completed' || result.usage.kind !== 'reported'
@@ -74,6 +77,9 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     planAuthority: model.planAuthority, commands: model.commands, executors: model.executors,
     invocations: model.invocations, toolCatalog: model.toolCatalog, financialEvidence: input.financialEvidence,
     inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic }, model.authorization);
+  withAiTaskHeldPreparationDefinition(prepare, { taskId: task.taskId, runId: task.runId,
+    steps: [{ registrationRef: task.registrationRef, toolCode: tool, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }],
+    limits: task.limits, bindingHash: requestFingerprint(task) });
   const application = root.createApplication(input.host, prepare);
   const originalRun = async () => {
     const access = await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
@@ -113,8 +119,88 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     if (receipt.runId !== request.runId) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     if (signal?.aborted || snapshot.task.status !== 'running') return { receipt,
       execution: { kind: 'not_started' as const, reason: signal?.aborted ? 'host_aborted' as const : 'task_not_runnable' as const } };
-    // Only a proved, still-unprepared successor can consume the original held
-    // preparation. Existing steps/plans are original work, never a new publish.
+    if (snapshot.plan && snapshot.steps.every(step => step.status === 'pending')) {
+      // A lost preparation reply can leave the original plan but no dispatched
+      // work. Explicit continuation takes a fresh CAS lease and revalidates that
+      // plan under it, rather than publishing another input or replaying effects.
+      const frozenPreparation: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
+        if (lease.taskId !== request.taskId || lease.runId !== request.runId || signal?.aborted)
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const access = await root.authorization.tasks.resolveAccess(task.taskId, 'transition_task');
+        const original = await input.db.$transaction(async tx => {
+          const owner = await tx.aiTask.findFirst({ where: access.where });
+          if (!owner || owner.id !== task.taskId || owner.status !== 'RUNNING'
+            || owner.revision !== taskRevision || owner.cancelRequestedAt !== null)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const key = { scopeId: owner.scopeId, taskId: task.taskId, runId: request.runId };
+          const run = await tx.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
+          if (!run || run.id !== key.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
+            || run.revision !== lease.revision || run.leaseOwnerId !== lease.holderId
+            || run.fencingToken.toFixed(0) !== lease.fencingToken || run.status !== 'RUNNING'
+            || !run.leaseExpiresAt || run.leaseExpiresAt <= (input.clock?.() ?? new Date()))
+            throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          const origin = await readTaskModelRunOrigin(tx, access, { ...key,
+            originRunId: task.runId, registrationRef: task.registrationRef });
+          const stored = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+          if (!stored) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload)), planned = plan.steps[0];
+          if (stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== key.runId
+            || stored.planHash !== snapshot.plan!.planHash || requestFingerprint(plan) !== stored.planHash
+            || plan.taskId !== key.taskId || plan.runId !== key.runId || plan.steps.length !== 1
+            || planned.toolCode !== tool || planned.toolVersion !== AI_TOOL_DRAFT_VERSION
+            || planned.operation !== 'external_unknown' || planned.registrationRef !== origin.registrationRef)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const inputs = await tx.aiTaskActionInput.findMany({ where: key, take: 2 });
+          if (inputs.length !== 1 || inputs[0].registrationRef !== planned.registrationRef
+            || inputs[0].toolCode !== tool || inputs[0].toolVersion !== AI_TOOL_DRAFT_VERSION)
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const continuation = origin.continuation;
+          if (!continuation) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const previous = parseTaskModelInput(continuation.input, policy), result = continuation.result;
+          if (taskModelFingerprint(previous, policy) !== continuation.inputHash || !isGatewayResult(result)
+            || result.status !== 'completed' || result.usage.kind !== 'reported'
+            || result.requestId !== previous.intent.requestId
+            || requestFingerprint(result.actual) !== requestFingerprint(previous.configuration) || result.toolRequests.length)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const expected = continueTaskModelMaterial(previous, result, continuation.answers, policy);
+          const frozen = parseTaskModelInput(inputs[0].payload, policy);
+          // Validate the saved continuation against its original model result
+          // and bound answer; inspecting material is not publishing it again.
+          if (requestFingerprint(frozen.intent.messages) !== requestFingerprint(expected.messages)
+            || frozen.intent.maxOutputTokens !== expected.maxOutputTokens
+            || requestFingerprint(frozen.media ?? null) !== requestFingerprint(previous.media ?? null))
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const preparationCharges = await taskPreparationNonEffectChargeIds(tx, key, lease);
+          const [steps, charge, invocation, phase, artifact] = await Promise.all([
+            tx.aiStep.findMany({ where: key, take: 2 }),
+            tx.aiTaskExecutionCharge.findFirst({ where: { ...key, chargeId: { notIn: preparationCharges } } }),
+            tx.aiGatewayInvocation.findFirst({ where: key }),
+            tx.aiTaskExecutionPhaseStart.findFirst({ where: key }),
+            tx.aiTaskResultArtifact.findFirst({ where: key })
+          ]);
+          // PENDING or an absent result alone never proves no consumption. All
+          // original execution traces must be absent before starting this step.
+          if (steps.length > 1 || charge || invocation || phase || artifact || steps.some(step =>
+            step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
+            || step.status !== 'PENDING' || step.effect !== 'NONE' || step.sequence !== 1 || step.revision !== 1
+            || step.resultRef !== null || step.errorCode !== null || step.inputRef !== inputs[0].id
+            || step.requestFingerprint !== inputs[0].fingerprint || step.toolCode !== tool
+            || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+            || step.actionId !== aiStepActionId(access.scope, task.taskId, planned.registrationRef)))
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return plan;
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+        if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await model.revalidatePublished({ ...request, registrationRef: original.steps[0].registrationRef });
+        // Existing input/plan authority and resource origin stay in charge. The
+        // exact saved plan is replay-validated, never regenerated or overwritten.
+        await model.plans.savePlan(original, lease);
+      };
+      inheritAiTaskHeldPreparation(frozenPreparation, prepare);
+      return { receipt, execution: await root.createApplication(recoveryHost, frozenPreparation).start(request, signal) };
+    }
+    // Dispatched/occupied work remains recovery-only; an unprepared successor
+    // still uses the original held preparation after the bound answer receipt.
     const execution = snapshot.plan || snapshot.steps.length
       ? await application.reconcile(request, signal) : await application.start(request, signal);
     return { receipt, execution };

@@ -3,24 +3,28 @@ import type { AiOrderRouteContextAuthority } from '../order-route-context.author
 import type { AiOrderExplanationFactsService } from './order-explanation-facts.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { assertAiReadContextBinding } from './read-context-binding';
+import { AiOrderNextStepsCurrentSource } from './order-next-steps-current.source';
 
 /** Inventory-backed candidates, NOT Core's allowed-actions query. No inferred
  * transition eligibility or executable callback is returned. */
 export class AiOrderNextStepsService {
-  constructor(private readonly authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
-    private readonly facts: Pick<AiOrderExplanationFactsService, 'read'>) {}
+  private readonly current: AiOrderNextStepsCurrentSource;
+  constructor(authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
+    facts: Pick<AiOrderExplanationFactsService, 'read'>) {
+    this.current = new AiOrderNextStepsCurrentSource(authority, facts);
+  }
   async read(expectedContext?: AiExecutionContext) {
-    return this.authority.withOrderRead(async (context, orderId) => {
-      assertAiReadContextBinding(context, expectedContext);
-      const evidence = await this.facts.read(context, { history: false, payments: false });
-      if (context.scope.kind !== 'workspace' || evidence.orderId !== orderId
-        || evidence.scope.workspaceId !== context.scope.workspaceId || evidence.scope.tenantId !== context.scope.tenantId) throw new ModelGatewayError('FORBIDDEN');
-      const permissions = 'access' in context ? context.access.permissions : [];
-      const verifiedCodes = ['rental.order.explain', 'rental.quote.preview', 'rental.change.preview', 'rental.order.commit'];
+    return this.current.withCurrent(expectedContext, (context, evidence) => {
+      const orderId = evidence.orderId;
+      // This explanation instance proves only its actual R0 reader. A directory
+      // entry cannot prove this order's change/quote/commit capability or grant.
+      const verifiedCodes = ['rental.order.explain'];
+      // The exact reader has just succeeded under the original Guard. Its
+      // documented permission list must not replace a real tenant-admin grant.
       const candidates = AI_TOOL_BASELINE.filter(tool => verifiedCodes.includes(tool.code)
-        && tool.businessMaturity === 'implemented' && tool.entry
-        && tool.entry.permissionAnyOf.some(permission => permissions.includes(permission) || permissions.includes('*')))
+        && tool.businessMaturity === 'implemented' && tool.risk === 'R0'
+        && tool.entry?.method === 'GET' && tool.entry.path === '/rental/v1/orders/:id'
+        && tool.entry.controllerMethod === 'order')
         .map(tool => ({ code: tool.code, version: tool.version, risk: tool.risk, maturity: tool.aiMaturity,
           kind: tool.risk === 'R0' ? 'readonly' as const : tool.code.endsWith('.preview') ? 'preview' as const : 'confirmation_required_write' as const,
           executable: false as const, permission: 'original_route_must_revalidate' as const,
@@ -35,11 +39,14 @@ export class AiOrderNextStepsService {
   }
 
   async manualHandoff(value: unknown, expectedContext?: AiExecutionContext) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof (value as Record<string, unknown>).code !== 'string') {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof (value as Record<string, unknown>).code !== 'string'
+      || Object.keys(value).some(key => key !== 'code') || (value as { code: string }).code.length > 191) {
       throw new ModelGatewayError('INVALID_REQUEST');
     }
-    const result = await this.read(expectedContext);
+    // The original guarded read may yield. Retain the requested scalar before
+    // it waits; a changed caller object is not a new handoff request or grant.
     const code = (value as Record<string, unknown>).code as string;
+    const result = await this.read(expectedContext);
     const candidate = result.candidates.find(row => row.code === code);
     if (!candidate) return { status: 'unavailable' as const, reason: 'candidate_not_currently_verified' as const,
       execution: 'not_attempted' as const };

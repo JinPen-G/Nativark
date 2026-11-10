@@ -8,6 +8,7 @@ import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
 import { safeDisplayText } from './safe-display';
+import { useVisibleObservationHost } from './VisibleObservationHost';
 import { formatTimestamp } from './formatters';
 
 type Question = NonNullable<AiTaskClarificationObservationDraft['input']>;
@@ -57,9 +58,11 @@ export function validateTaskClarificationProgress(value: AiTaskClarificationProg
     throw Error('AI_RESULT_UNKNOWN');
   return structuredClone(value);
 }
-export function TaskClarification({ taskId, identity, current, onAccessDenied }: {
+export function TaskClarification({ taskId, identity, current, onAccessDenied, onReceiptChange }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void;
+  onReceiptChange?: (value: { reference: ReceiptReference; receiptId: string } | null) => void;
 }) {
+  const visible = useVisibleObservationHost();
   const { t } = useLocale(), label = useId(), key = `ai-task-input:${identity}:${taskId}`;
   const [input, setInput] = useState<Question | null>(null), [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -69,14 +72,15 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
   const [receipt, setReceipt] = useState<AiTaskClarificationProgressDraft | null>(null);
   const [error, setError] = useState(false), [busy, setBusy] = useState(false);
   const flight = useRef<AbortController | null>(null), mounted = useRef(true);
-  const active = useRef({ taskId, identity, current, onAccessDenied }); active.current = { taskId, identity, current, onAccessDenied };
+  const active = useRef({ taskId, identity, current, onAccessDenied, onReceiptChange }); active.current = { taskId, identity, current, onAccessDenied, onReceiptChange };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; flight.current?.abort(); }; }, []);
   const same = (signal?: AbortSignal) => mounted.current && active.current.taskId === taskId && active.current.identity === identity
     && active.current.current() && !signal?.aborted;
   const run = async (operation: 'read' | 'submit' | 'receipt' | 'continue') => {
     if (flight.current || !same()) throw Error('AI_SCOPE_CHANGED');
     const controller = new AbortController(); flight.current = controller; setBusy(true); setError(false);
-    let dispatched = false;
+    active.current.onReceiptChange?.(null);
+    let dispatched = false, visibleKey: string | null = null;
     try {
       if (operation === 'read') {
         setInput(null); setDraft({}); setLoaded(false);
@@ -104,14 +108,26 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied }:
       }
       const reference = submission ?? (saved !== 'invalid' ? saved : null);
       if (!reference || operation === 'submit' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
+      if (operation === 'submit' && submission) visibleKey = visible?.begin({ taskId, trigger: 'original_input_resume', originKey: submission.requestId }) ?? null;
       dispatched = true;
       const result = validateTaskClarificationProgress(await (operation === 'receipt'
         ? aiTaskCenterApi.inputReceipt(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)
         : operation === 'submit' ? aiTaskCenterApi.resumeInput({ submission: structuredClone(submission!) }, controller.signal)
           : aiTaskCenterApi.continueInput(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)), reference);
-      if (same(controller.signal)) setReceipt(result);
+      if (same(controller.signal) && result.receipt.state === 'observed' && result.receipt.runId
+        && result.continuation.kind === 'run_outcome' && ['succeeded', 'partially_succeeded', 'paused'].includes(result.continuation.status))
+        visible?.bindRun(visibleKey, result.receipt.runId);
+      else visible?.cancel(visibleKey);
+      if (same(controller.signal)) {
+        setReceipt(result);
+        if (result.receipt.state === 'observed' && result.receipt.runId) active.current.onReceiptChange?.({
+          reference: { taskId, requestId: reference.requestId, expectedRevision: reference.expectedRevision, submissionKey: reference.submissionKey },
+          receiptId: result.receipt.receiptId,
+        });
+      }
       if (operation === 'submit' && result.receipt.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
     } catch (failure) {
+      visible?.cancel(visibleKey);
       if (same(controller.signal)) {
         setError(true); setReceipt(null);
         if (dispatched || operation !== 'submit') { setInput(null); setDraft({}); }

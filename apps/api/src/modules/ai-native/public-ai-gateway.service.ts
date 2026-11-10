@@ -13,6 +13,8 @@ import { UnifiedAiGatewayService } from './unified-ai-gateway.service';
 import type { GatewayInvocationResult, UnifiedGatewayPorts } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
+import type { NativeToolResultResolver } from './model-input/native-tool-result.ports';
+
 const VERSION = 'ain-c03-draft-2' as const;
 const referenceSchema = z.object({ configId: z.string().min(1).max(191), configRevision: z.number().int().positive().max(4294967295),
   credentialRef: z.string().min(1).max(191), protocol: z.string().min(1).max(191), provider: z.string().min(1).max(191), model: z.string().min(1).max(256) }).strict();
@@ -54,7 +56,9 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     this.runtime = { ports: { ...runtime.ports }, evidence: runtime.evidence, verifyEvidence: runtime.verifyEvidence.bind(runtime) };
     for (const item of scenes) {
       const parsed = gatewayTextIntentBindingSchema.safeParse(item);
-      if (!parsed.success || this.scenes.has(parsed.data.sceneCode)) throw new ModelGatewayError('CONFIG_INVALID');
+      if (!parsed.success || this.scenes.has(parsed.data.sceneCode)
+        || parsed.data.nativeToolResults && (parsed.data.routeScene !== 'chat' || parsed.data.orderExplainTool !== true
+          || parsed.data.structuredOutput || parsed.data.reasoningChannel || parsed.data.embeddingProbe)) throw new ModelGatewayError('CONFIG_INVALID');
       this.scenes.set(parsed.data.sceneCode, Object.freeze(parsed.data));
     }
   }
@@ -88,7 +92,15 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
       await ports.routing.assertCurrent(structuredClone(narrow), structuredClone(resolution));
       await verify(resolution);
     };
-    const gateway = new UnifiedAiGatewayService({ ...ports, routing: {
+    const gateway = new UnifiedAiGatewayService({ ...ports,
+      ...(ports.nativeToolResults ? { nativeToolResults: {
+        resolve: ports.nativeToolResults.resolve.bind(ports.nativeToolResults),
+        assertCurrent: async (...args: Parameters<NativeToolResultResolver['assertCurrent']>) => {
+          await current();
+          if (!actual || requestFingerprint(actual) !== args[1].sourceConfigurationHash) throw new ModelGatewayError('CONFIG_INVALID');
+          await ports.nativeToolResults!.assertCurrent(...args);
+        }
+      } } : {}), routing: {
       resolve: async (caller, required) => {
         const route = structuredClone(await ports.routing.resolve(caller, required));
         await verify(route);
@@ -121,6 +133,10 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
       assertCurrent: async () => current()
     }, transport: {
       ...(ports.transport.inputBoundHash ? { inputBoundHash: ports.transport.inputBoundHash.bind(ports.transport) } : {}),
+      ...(ports.transport.nativeInputBoundHash ? { nativeInputBoundHash: ports.transport.nativeInputBoundHash.bind(ports.transport) } : {}),
+      ...(ports.transport.invokeNativeToolResult ? { invokeNativeToolResult: (...args: Parameters<NonNullable<UnifiedGatewayPorts['transport']['invokeNativeToolResult']>>) => {
+        dispatched = true; return ports.transport.invokeNativeToolResult!(...args);
+      } } : {}),
       invoke: (...args) => { dispatched = true; return ports.transport.invoke(...args); },
       stream: (...args) => { dispatched = true; return ports.transport.stream(...args); }
     } }, this.timeoutMs, binding);
@@ -155,8 +171,11 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
   async invoke(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): Promise<AiGatewayResultDraft> {
     const intent = structuredClone(value), call = this.call(context, intent, signal);
     try {
+      const native = intent.messages.some(message => message.content.some(part => part.kind === 'tool_result_reference'));
       const hasMedia = intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
-      const result = await (hasMedia
+      const result = await (native ? call.gateway.invokeNativeToolResultIntent(call.narrow, intent, call.life.controller.signal)
+        : intent.requiredFeatures.includes('embedding')
+        ? call.gateway.invokeEmbeddingProbeIntent(call.narrow, intent, call.life.controller.signal) : hasMedia
         ? call.gateway.invokeIntent(call.narrow, intent, call.life.controller.signal)
         : call.gateway.invokeTextIntent(call.narrow, intent, call.life.controller.signal));
       await call.life.wait(call.current);

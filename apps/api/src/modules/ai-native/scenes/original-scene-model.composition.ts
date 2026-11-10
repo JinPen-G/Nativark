@@ -8,7 +8,9 @@ import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, tas
 import { composeOriginalSceneKnowledge, continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
 import { readTaskModelRunOrigin, taskInputReceiptReferenceSchema, type PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
-import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import type { AiTaskPreparationDefinition } from '../runner/task-run-preparation.ports';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
@@ -21,7 +23,7 @@ import { composeAuthorizedPersistentTaskInputRunner,
   type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
 import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
-import { applyOriginalQuoteAnswers, originalQuoteAnswerContract } from './original-quote-input';
+import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey } from './original-quote-input';
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 
@@ -240,12 +242,40 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
           throw error;
         }
       };
-      const application = (reference: z.infer<typeof originalRequestReferenceSchema>) => root.createApplication(serverHost,
-        async ({ lease, taskRevision, signal: preparationSignal }) => {
+      const preparationDefinition = async (before: Awaited<ReturnType<typeof bound>>): Promise<AiTaskPreparationDefinition> => {
+        const access = await model.tasks.resolveAccess(before.task.taskId, 'read_metadata');
+        const task = await dependencies.db.aiTask.findFirst({ where: access.where });
+        if (!task || task.id !== before.task.taskId || task.inputRef !== before.reference.inputRef
+          || task.sceneCode !== scene.code || task.sceneVersion !== scene.version) throw denied();
+        const key = { scopeId: task.scopeId, taskId: task.id, runId: before.task.runId };
+        const stored = await dependencies.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+        const origin = stored ? aiTaskRunPlanSchema.parse(structuredClone(stored.payload)) : undefined;
+        const steps = [{ registrationRef: registration(before.reference.inputRef), operation: 'external_unknown' as const,
+          toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }];
+        if (stored && (!origin || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== key.runId
+          || origin.taskId !== key.taskId || origin.runId !== key.runId || requestFingerprint(origin) !== stored.planHash
+          || requestFingerprint(origin.steps) !== requestFingerprint(steps))) throw denied();
+        const policy = origin ? undefined : await dependencies.db.aiTaskPlanPolicy.findFirst({ where: {
+          scopeId: task.scopeId, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion } });
+        if (!origin && !policy) throw unavailable();
+        const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(origin?.limits ?? policy?.limits));
+        await verify(before);
+        // This is quota-only preparation evidence, never a saved/executable plan.
+        // A successor retains the ORIGINAL plan ceilings; current ScenePolicy,
+        // held Run and cumulative resource checks still happen in the runner.
+        return { taskId: task.id, runId: key.runId, steps, limits,
+          bindingHash: requestFingerprint({ version: 'original-scene-preparation-1', original: before.reference,
+            contentHash: before.original.receipt.contentHash, scene, steps, limits }) };
+      };
+      const application = (reference: z.infer<typeof originalRequestReferenceSchema>, definition?: AiTaskPreparationDefinition) => {
+        const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal: preparationSignal }) => {
           if (preparationSignal?.aborted) throw unavailable();
           await prepareHeldRun({ original: reference, lease, expectedTaskRevision: taskRevision }, root.inputs.readContinuation.bind(root.inputs));
           if (preparationSignal?.aborted) throw unavailable();
-        });
+        };
+        if (definition) withAiTaskHeldPreparationDefinition(prepare, definition);
+        return root.createApplication(serverHost, prepare);
+      };
       const originalRun = async (before: Awaited<ReturnType<typeof bound>>) => {
         const access = await model.tasks.resolveAccess(before.task.taskId, 'read_metadata');
         const runId = await dependencies.db.$transaction(async tx => {
@@ -263,7 +293,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         await verify(before);
         return runId;
       };
-      const answer = async (value: unknown) => {
+      const answer = async (value: unknown, accessMode: 'execute' | 'history' = 'execute') => {
         const parsed = answerQuery.safeParse(structuredClone(value));
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const before = await bound(parsed.data.original);
@@ -274,7 +304,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         // and only this read result (not the stored answer payload) escapes.
         const receipt = 'submission' in parsed.data ? await root.inputs.readSubmission(parsed.data.submission)
           : await root.inputs.readSubmissionReference(parsed.data.reference);
-        if (receipt.state === 'observed') await current(before.reference, before.task.taskId, receipt.runId);
+        if (receipt.state === 'observed') await current(before.reference, before.task.taskId, receipt.runId, accessMode);
         await verify(before);
         return { before, receipt };
       };
@@ -289,7 +319,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
             businessExecution: 'not_inferred_from_model_result' as const });
         }
         await observe(() => current(reference, task.taskId, task.runId), signal);
-        const execution = await application(reference).start({ taskId: task.taskId, runId: task.runId }, signal);
+        const definition = await observe(() => preparationDefinition(before), signal);
+        const execution = await application(reference, definition).start({ taskId: task.taskId, runId: task.runId }, signal);
         const after = await observe(() => verify(before), undefined, true);
         return freezeOriginalInput({ original: after.original.receipt, taskId: task.taskId, runId: task.runId,
           execution, businessExecution: 'not_inferred_from_model_result' as const });
@@ -331,7 +362,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         return freezeOriginalInput({ receipt, continuation: { kind: 'not_started' as const,
           reason: 'answer_saved_without_execution' as const }, orderApproval: 'not_granted' as const });
       }, async readAnswer(value: unknown) {
-        const { receipt } = await answer(value);
+        const { receipt } = await answer(value, 'history');
         return freezeOriginalInput(receipt);
       }, async readQuotePreparation(value: unknown) {
         const { before, receipt } = await answer(value);
@@ -339,7 +370,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, preparation: 'unavailable' as const });
         const basis = await current(before.reference, before.task.taskId, receipt.runId);
         const candidate = applyOriginalQuoteAnswers(before.original.request.input.candidate, basis.provenance.history);
-        const { preparation, sources } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate);
+        const { preparation, sources } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate, basis.original.context);
         const first = preparation as unknown as Record<string, unknown>;
         same(basis, await current(before.reference, before.task.taskId, receipt.runId));
         await verify(before);
@@ -358,7 +389,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (before.original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const basis = await current(before.reference, before.task.taskId, receipt.runId);
         const candidate = applyOriginalQuoteAnswers(before.original.request.input.candidate, basis.provenance.history);
-        const { preparation } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate);
+        const { preparation } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate, basis.original.context);
         if (preparation.status !== 'ready') return freezeOriginalInput({ receipt, preparation, quotation: 'not_attempted' as const });
         // The command confirms the final, freshly reviewed request, not the old
         // candidates offered before these human answers changed its fingerprint.
@@ -375,7 +406,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
           observation: 'explicit_clarified_quote_request' as const, inventoryReservation: 'not_attempted' as const,
           orderApproval: 'not_granted' as const, taskOutcome: 'not_changed_by_quote' as const });
       }, async readClarifiedQuoteReceipt(value: unknown) {
-        const { before, receipt } = await answer(value);
+        const { before, receipt } = await answer(value, 'history');
         if (before.original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, quotation: 'unavailable' as const });
         // Recover only the exact original operation; no current-price rebuild,
@@ -391,7 +422,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, continuation: 'unavailable' as const });
         // Exact original successor only: start retains current claim/lease,
         // plan, unknown and original cumulative-resource checks. No resubmit.
-        const execution = await application(before.reference).start({ taskId: before.task.taskId, runId: receipt.runId }, signal);
+        const definition = await observe(() => preparationDefinition(before), signal);
+        const execution = await application(before.reference, definition).start({ taskId: before.task.taskId, runId: receipt.runId }, signal);
         await verify(before);
         return freezeOriginalInput({ receipt, execution, businessExecution: 'not_inferred_from_model_result' as const });
       }, async reconcile(value: unknown, signal?: AbortSignal) {
@@ -491,10 +523,17 @@ export function composeOriginalSceneClarificationSource(input: {
   const { routeScene: _routeScene, ...serverPolicy } = gatewayTextIntentBindingSchema.parse(structuredClone(input.gatewayScene));
   const modelPolicy = taskModelPolicy(serverPolicy);
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
-  const current = async (ref: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string) => {
+  const current = async (ref: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string,
+    accessMode: 'execute' | 'history' = 'execute') => {
     const original = await scenes.requests.readHistorical(ref);
-    if (original.request.sceneCode !== scene.code || original.receipt.sceneVersion !== scene.version) throw denied();
-    await scenes.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (original.request.sceneCode !== scene.code || original.receipt.sceneVersion !== scene.version
+      || original.receipt.state === 'revoked') throw denied();
+    // History-only answer/receipt endpoints still require current owner and
+    // Task/Run/answer provenance below, but cannot depend on new creation policy
+    // or an unexpired original input. All preparation/dispatch/confirmation
+    // callers retain execution admission; no client mode is accepted or grant
+    // returned by this observation, and unknown modes fail toward execution.
+    if (accessMode !== 'history') await scenes.requests.resolve(original.request.sceneCode, ref.inputRef);
     const task = await scenes.requests.readTaskReceipt(ref.inputRef);
     if (task.state !== 'observed' || task.taskId !== taskId) throw denied();
     const access = await tasks.resolveAccess(taskId, 'read_metadata');
@@ -572,10 +611,10 @@ export function composeOriginalSceneClarificationSource(input: {
         selectionRevision: '当前候选重新确认', request: '正式报价参数' };
       const missing = [...new Set([...(facts.missingFields ?? []), ...(facts.ambiguousFields ?? [])]
         .map(field => fieldLabels[field.startsWith('items.') ? 'items' : field] ?? '业务参数'))].join('、').slice(0, 70);
-      // Bounded consecutive rounds: field ids the previous rounds already
-      // offered are asked last, so mapped clarifications beyond the eight-field
-      // contract bound rotate in instead of being dropped forever.
-      const offered = new Set(basis.history.flatMap(round => round.contract.fields.map(field => field.fieldId)));
+      // Scheduling remembers the explicit row as well as the unchanged public
+      // field ID. It grants no authority: the new question and saved consumer
+      // still bind their normalized pre-round candidate fingerprint separately.
+      const offered = new Set(basis.history.flatMap(round => round.contract.fields.map(originalQuoteFieldOfferKey)));
       const contract = originalQuoteAnswerContract(candidate, prepared,
         `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`, offered);
       if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) throw new AiTaskInputLimitError();

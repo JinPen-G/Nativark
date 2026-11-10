@@ -30,7 +30,7 @@ export const aiOrderExtensionPreviewInputSchema = z.object({
 }).strict();
 
 export class AiOrderExtensionPreviewService {
-  constructor(private readonly orderId: string, private readonly core: Pick<RentalCoreService, 'getOrder'>,
+  constructor(private readonly orderId: string, private readonly core: Pick<RentalCoreService, 'readOrderFacts'>,
     private readonly orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
     private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withExtensionPreview'>,
     private readonly preview?: Pick<RentalCoreController, 'previewExtension'>,
@@ -56,7 +56,7 @@ export class AiOrderExtensionPreviewService {
         const order = await this.orderAuthority.withOrderRead(async (current, orderId) => {
           assertAiReadContextBinding(current, context);
           if (orderId !== this.orderId || current.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
-          const order = structuredClone(await this.core.getOrder(current.scope.tenantId, orderId));
+          const order = structuredClone(await this.core.readOrderFacts(current.scope.tenantId, orderId));
           if (order.id !== orderId || order.tenantId !== current.scope.tenantId) throw new ModelGatewayError('FORBIDDEN');
           return order;
         });

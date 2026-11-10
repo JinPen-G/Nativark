@@ -1,7 +1,7 @@
 import type { ClientApiService } from '../client/client-api.service';
 import type { ClientDeliveryAddressService } from '../client/client-delivery-address.service';
 import type { RentalDeliveryAddressSnapshot } from '@rental-os/shared';
-import type { AiBookingAddressEvidence } from '@rental-os/shared';
+import type { AiBookingSavedAddressEvidence, AiBookingOneTimeAddressEvidence } from '@rental-os/shared';
 import { AiClientEntryError } from './scenes/client-entry-action';
 import type { ClientRequestContext } from '../client/client-auth.service';
 import type { ClientMyOrdersQuery } from '@rental-os/shared';
@@ -35,9 +35,11 @@ type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'fe
 
 /** Request-bound production adapter: credentials are supplied by the server
  * request host, never by model/tool parameters. The existing Guard resolves
- * ClientAuthService and its rate/tenant policies; this creates no client token.
+ * ClientAuthService and tenant policies; the public HTTP host owns request-rate
+ * accounting. Internal read revalidation never spends another HTTP request or
+ * skips current authentication. This creates no client token or execution grant.
  */
-export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActivate'>,
+export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActivate'> & Partial<Pick<ApiAuthGuard, 'revalidateClientRead'>>,
   credentials: { current(): Promise<{ authorization: string; ip?: string }> }): AiClientSessionSource {
   if (typeof guard?.canActivate !== 'function' || typeof credentials?.current !== 'function') throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
   const authorize = async <T>(method: string, path: string, value: unknown, consume: (context: ClientRequestContext) => Promise<T>) => {
@@ -50,7 +52,10 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
         headers: { authorization: credential.authorization }, ip: credential.ip,
         query: method === 'GET' ? structuredClone(value) : {}, body: method === 'POST' ? structuredClone(value) : {}
       };
-      if (await guard.canActivate(new ExecutionContextHost([request])) !== true || !request.client) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+      const execution = new ExecutionContextHost([request]);
+      const allowed = typeof guard.revalidateClientRead === 'function'
+        ? await guard.revalidateClientRead(execution) : await guard.canActivate(execution);
+      if (allowed !== true || !request.client) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
       const context = assertClientContext(request.client), identity = getRequestIdentity();
       if (!identity || identity.tenantId !== context.tenantId || identity.workspaceId !== context.workspaceId
         || identity.userId !== context.customerId || identity.isSaasAdmin !== false || identity.staffApi === true) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
@@ -86,7 +91,7 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
 
 type ClientReadPort = Pick<ClientApiService,
   'channelBootstrap' | 'publicCatalog' | 'catalog' | 'availability' | 'myOrders' | 'getOrder' | 'corporateIdentities'>
-  & Partial<Pick<ClientApiService, 'profile' | 'previewCancellation' | 'publicDocument' | 'feeItems' | 'getQuote' | 'bookingOptions'>>;
+  & Partial<Pick<ClientApiService, 'profile' | 'previewCancellation' | 'publicDocument' | 'feeItems' | 'getQuote' | 'bookingOptions' | 'readQuoteServiceAvailability' | 'readQuoteOneTimeDeliveryAvailability' | 'readQuoteBookingQualification' | 'observeQuoteDeliveryAddress'>>;
 
 function assertContextSource(source: AiClientSessionSource) {
   if (!source || typeof source.current !== 'function') throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
@@ -148,7 +153,33 @@ export function composeAiClientScenes(input: {
       }
     }),
     member: Object.freeze({
-      savedDeliveryAddress: async (addressId: string, quoteSnapshot: RentalDeliveryAddressSnapshot): Promise<AiBookingAddressEvidence> => {
+      oneTimeQuoteDeliveryAddress: async (quoteId: string): Promise<AiBookingOneTimeAddressEvidence> => {
+        if (typeof input.client.observeQuoteDeliveryAddress !== 'function') {
+          throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'one_time_delivery_address_recheck_missing');
+        }
+        // Reuse the registered original GET quote Guard/ALS, not address-book
+        // authority. Only a minimal server observation may cross this boundary.
+        return memberRead('quote', quoteId, async context => {
+          if (context.customerType !== 'personal') throw new AiClientEntryError('AI_ACCESS_DENIED', 'personal_quote_required');
+          const schema: z.ZodType<AiBookingOneTimeAddressEvidence> = z.object({ source: z.literal('original_quote_one_time_address'),
+            quoteId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+            quoteCreatedAt: z.string().datetime({ offset: true }), quoteExpiresAt: z.string().datetime({ offset: true }),
+            snapshotFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), serviceAreaFingerprint: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+          try {
+            const result = schema.safeParse(structuredClone(await input.client.observeQuoteDeliveryAddress!(context, quoteId)));
+            if (!result.success || result.data.quoteId !== quoteId)
+              throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'one_time_quote_address_evidence_invalid');
+            return result.data;
+          } catch (error) {
+            if (error instanceof AiClientEntryError) throw error;
+            const status = error instanceof Error && 'getStatus' in error && typeof error.getStatus === 'function' ? error.getStatus() : null;
+            if (status === 409) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'one_time_quote_address_changed', 'reprepare');
+            if (status === 403) throw new AiClientEntryError('AI_ACCESS_DENIED', 'one_time_quote_address_scope');
+            throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'one_time_quote_address_read_unavailable');
+          }
+        });
+      },
+      savedDeliveryAddress: async (addressId: string, quoteSnapshot: RentalDeliveryAddressSnapshot): Promise<AiBookingSavedAddressEvidence> => {
         const addresses = input.addresses;
         if (typeof addresses?.list !== 'function' || typeof addresses.requireOwnAddress !== 'function') {
           throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'current_delivery_address_recheck_missing');
@@ -203,6 +234,37 @@ export function composeAiClientScenes(input: {
       quote: async (quoteId: string) => {
         if (typeof input.client.getQuote !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
         return memberRead('quote', quoteId, context => input.client.getQuote!(context, quoteId));
+      },
+      // Original quote route/Guard and Membership business gate. No payer grant
+      // or certificate details are exposed; missing current producer fails closed.
+      bookingQualification: async (quoteId: string) => {
+        if (typeof input.client.readQuoteBookingQualification !== 'function')
+          throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'current_booking_qualification_recheck_missing');
+        return memberRead('quote', quoteId, async context => {
+          try { return await input.client.readQuoteBookingQualification!(context, quoteId); }
+          catch (error) {
+            const status = error instanceof Error && 'getStatus' in error && typeof error.getStatus === 'function' ? error.getStatus() : null;
+            if (status === 409) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'current_booking_qualification_changed', 'reprepare');
+            if (status === 403) throw new AiClientEntryError('AI_ACCESS_DENIED', 'current_booking_qualification_scope');
+            throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'current_booking_qualification_read_unavailable');
+          }
+        });
+      },
+      // Same original owned-quote read route, never a new capability/write
+      // route or client-selected service IDs. Missing real Core port fails closed.
+      serviceAvailability: async (quoteId: string) => {
+        if (typeof input.client.readQuoteServiceAvailability !== 'function') {
+          throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'current_service_capacity_recheck_missing');
+        }
+        return memberRead('quote', quoteId, context => input.client.readQuoteServiceAvailability!(context, quoteId));
+      },
+      // An original one-time quote snapshot is NOT a saved-address revision or
+      // a Booking confirmation. This leaf only observes current delivery policy.
+      oneTimeDeliveryAvailability: async (quoteId: string) => {
+        if (typeof input.client.readQuoteOneTimeDeliveryAvailability !== 'function') {
+          throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'one_time_delivery_address_recheck_missing');
+        }
+        return memberRead('quote', quoteId, context => input.client.readQuoteOneTimeDeliveryAvailability!(context, quoteId));
       },
       profile: async () => {
         if (typeof input.client.profile !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');

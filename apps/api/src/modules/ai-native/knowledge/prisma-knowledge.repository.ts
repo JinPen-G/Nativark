@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, readKnowledgeChunkEvidence, persistedKnowledgeChunkSchema } from './knowledge-validation';
+import { id as knowledgeId, knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, readKnowledgeChunkEvidence, persistedKnowledgeChunkSchema } from './knowledge-validation';
 import { fingerprint } from './knowledge-validation';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
@@ -19,6 +19,10 @@ const columns = (scope: AiExecutionScope, documentId: string) => {
   return { tenantId: value.tenantId, workspaceId: value.workspaceId, id: documentId };
 };
 const json = (value: KnowledgeRecord | AiKnowledgeChunkDraft): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+// This adapter's document PK/FKs are VARCHAR(36). Generic knowledge references
+// keep their wider contract; reject unsupported writes before a transaction,
+// never truncate/remap an ID or turn a known capacity limit into commit UNKNOWN.
+const persistedDocumentId = knowledgeId.max(36);
 
 export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
   constructor(private readonly db: KnowledgePrismaClient, private readonly clock: () => Date = () => new Date()) {
@@ -139,6 +143,7 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     operation: KnowledgeOperation; next: KnowledgeRecord; chunks?: AiKnowledgeChunkDraft[]; newVersion: boolean;
   }): Promise<'committed' | 'conflict'> {
     input = structuredClone(input);
+    parse(persistedDocumentId, input.documentId);
     input.next = parse(knowledgeRecordSchema, input.next);
     const value = workspace(input.scope);
     // The colon namespace is not accepted by public operation IDs. Only the

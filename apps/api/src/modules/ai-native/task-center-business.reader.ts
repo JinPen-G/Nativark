@@ -10,11 +10,15 @@ import type { TaskCenterApprovalDependencies } from './task-center-approval.comp
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import { composeApprovedSettingsWaiting } from './approval-execution/approved-settings-waiting.executor';
 import { ApprovedSettingsResultUnknownError } from '../rental-core/approved-settings-change.ports';
+import { readTaskCenterOriginalOrder, type TaskCenterOriginalOrderDependencies } from './task-center-original-order.reader';
 
 type Request = { headers: { authorization?: unknown } };
 export interface TaskCenterBusinessDependencies {
   db: PrismaClient;
   selectedOrderResult?: { readResult(request: Request, value: unknown): Promise<unknown> };
+  /** Original published order plans have action inputs, not quote selections.
+   * This observer is deliberately independent of all new-execution gates. */
+  originalOrder?: TaskCenterOriginalOrderDependencies;
 }
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const identifier = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -32,7 +36,7 @@ export async function resolveTaskCenterBusinessTarget(d: Pick<TaskCenterBusiness
   const taskHash = (row: typeof task | null) => row ? requestFingerprint({ ...row, eventCursor: String(row.eventCursor) }) : null;
   const key = { id: query.stepId, scopeId: task.scopeId, taskId: query.taskId, runId: query.runId };
   const stepRead = () => d.db.aiStep.findFirst({ where: key, select: {
-    id: true, scopeId: true, taskId: true, runId: true, toolCode: true, toolVersion: true,
+    id: true, scopeId: true, taskId: true, runId: true, actionId: true, toolCode: true, toolVersion: true,
     inputRef: true, requestFingerprint: true, revision: true, status: true, effect: true } });
   const step = structuredClone(await stepRead());
   const run = await d.db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: query.taskId, id: query.runId },
@@ -75,7 +79,15 @@ export async function readTaskCenterBusiness(d: TaskCenterBusinessDependencies,
     payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const };
   let output: AiTaskBusinessObservationDraft;
   let verifySelection = target.verify;
-  if (step.toolCode === 'rental.order.commit') {
+  if (step.toolCode === 'rental.order.commit' && target.task.inputRef === null) {
+    // Only the original action-input plan selects this route. A selected-quote
+    // failure must never fall back to another provenance or execution path.
+    if (!d.originalOrder || d.originalOrder.db !== d.db) throw unavailable();
+    const result = orderResult.safeParse(await readTaskCenterOriginalOrder(d.originalOrder, credentials, target));
+    if (!result.success) throw unavailable();
+    output = result.data.status === 'committed' ? { ...base, status: 'committed', kind: 'order', order: result.data.order }
+      : { ...base, status: result.data.status, kind: 'order', retryable: false };
+  } else if (step.toolCode === 'rental.order.commit') {
     if (!readOrder) throw unavailable();
     const original = await readTaskCenterOrderSelection(d.db, target);
     const result = orderResult.safeParse(structuredClone(await readOrder(request, { selection: original.selection })));

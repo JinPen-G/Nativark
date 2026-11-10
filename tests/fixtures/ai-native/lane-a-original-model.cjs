@@ -10,7 +10,7 @@ const { PrismaGatewayInvocationBindings } = require('../../../apps/api/src/modul
 const { PrismaGatewayAccountingFacts } = require('../../../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { AI_TOOL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness, planLimits = {}, extraTables = {}) => {
+exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness, planLimits = {}, extraTables = {}, openingSections, categoryCode = 'camera') => {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1, credentialRef: 'vault-a',
     protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
   const tables = Object.fromEntries(['aiApprovedOrderSnapshot', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
@@ -19,7 +19,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     'aiTaskQuoteSelection', 'aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
     'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission', 'aiBudgetReservation',
     'aiDataErasure', 'aiUsageReservation'].map(key => [key, []]));
-  const h = await setup({ ...tables, ...extraTables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001', status: 'ACTIVE' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
+  const h = await setup({ ...tables, ...extraTables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001', status: 'ACTIVE', categoryCode }], aiProviderProfile: [profile] }, Boolean(prepareBusiness), categoryCode), beforeWrite = h.control.beforeWrite;
   if (prepareBusiness) await prepareBusiness(h.b);
   h.control.beforeRead = async (table, args) => {
     if (table === 'aiGatewayInvocation' && typeof args.where?.fencingToken === 'string') {
@@ -41,6 +41,11 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
   policy.allowedTools = [{ code: TASK_TEXT_MODEL_TOOL, version: AI_TOOL_DRAFT_VERSION }, ...clone(extraTools)];
   policy.limits = { ...h.b.h.plan.limits, maxTotalMs: 30000, maxStepMs: 5000, ...planLimits };
   const command=h.command(sceneCode);
+  // Select real opening input before original admission and envelope sealing;
+  // never rewrite a persisted request/hash merely to widen a test's sections.
+  if (openingSections !== undefined) {
+    assert.equal(sceneCode, 'opening_diagnosis'); command.input = { sections: clone(openingSections) };
+  }
   if (quoteCandidate !== undefined) {
     assert.equal(sceneCode,'quote_clarification'); command.input={candidate:clone(quoteCandidate)};
   }

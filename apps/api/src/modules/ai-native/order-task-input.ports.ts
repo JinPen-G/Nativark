@@ -23,4 +23,12 @@ export interface ApprovedOrderInputAuthority {
     bindingHash: string;
     expiresAt: string;
   }>;
+  /** Server-only original body read, enclosed by the same complete current
+   * authority checks. No HTTP/model callback or execution/lease grant. */
+  withAuthorizedOrderInput?<T>(reference: Readonly<ApprovedOrderInputReference>, tx: Prisma.TransactionClient,
+    read: (original: ApprovedOrderInputProof) => Promise<T>): Promise<{
+      original: ApprovedOrderInputProof; current: ApprovedOrderInputProof; value: T;
+    }>;
 }
+
+export type ApprovedOrderInputProof = Awaited<ReturnType<ApprovedOrderInputAuthority['authorizeOrderInput']>>;

@@ -68,10 +68,14 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
     // A shared registry object's later mutation must not swap the executable.
     const execute = tool.execute.bind(tool), phase = tool.phase;
     if (phase !== undefined && (phase !== 'confirmation' || binding.plan.operation !== 'idempotent'
-      || !['rental.order.commit', 'tenant.notifications.commit'].includes(binding.plan.toolCode))) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+      || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(binding.plan.toolCode))) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     if (continuation && (phase !== 'confirmation' || continuation.stepId !== binding.step.id
       || continuation.stepRevision !== binding.step.revision)) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     if (prepare && (phase || binding.plan.operation !== 'external_unknown')) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    // A persisted human rejection authorizes observation/settlement, not a new
+    // execution phase. RecoverResult rechecks the exact original decision and
+    // no-submission witness; a missing or later uncertain phase stays unknown.
+    if (continuation?.decision === 'rejected') return this.evidence.recoverResult(binding.lease, binding.step.id);
     return this.evidence.capture(binding.lease, binding.step.id, signal, async () => {
       const clarifications = this.inputs ? structuredClone(await this.inputs.readForStep(binding.lease, binding.plan.registrationRef)) : undefined;
       if (signal.aborted) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');

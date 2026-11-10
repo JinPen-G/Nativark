@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_BOOKING_DRAFT_STATES } from '@rental-os/shared';
-import type { AiClientMaterialDb, AiClientMaterialScope, AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import { AiClientMaterialError, type AiClientMaterialDb, type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { AiClientEntryError, entryHash, entryId } from './client-entry-action';
 
 const scopeFields = { tenantId: entryId, workspaceId: entryId, channel: z.enum(['web', 'wechat_miniprogram']),
@@ -52,8 +52,8 @@ export class PrismaClientBookingRepository {
     if (row && row.operationKey !== operationKey) throw unavailable();
     return row;
   }
-  async handoff(scope: AiClientMaterialScope, id: string) {
-    const row = await this.one(this.db, Prisma.sql`SELECT * FROM ai_client_booking_handoffs WHERE tenantId = ${scope.tenantId}
+  async handoff(scope: AiClientMaterialScope, id: string, reader: Reader = this.db) {
+    const row = await this.one(reader, Prisma.sql`SELECT * FROM ai_client_booking_handoffs WHERE tenantId = ${scope.tenantId}
       AND workspaceId = ${scope.workspaceId} AND channel = ${scope.channel} AND principalHash = ${scope.principalHash}
       AND id = ${id} LIMIT 1`, handoffSchema, scope);
     if (row && row.id !== id) throw unavailable();
@@ -146,6 +146,44 @@ export class PrismaClientBookingRepository {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (attempted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_commit_unacknowledged', 'read_booking_operation');
+      if (error instanceof AiClientEntryError) throw error;
+      throw unavailable();
+    }
+  }
+  /** Original page acceptance only: its exact attempt and terminal are committed
+   * together. A lost commit reply never permits Core dispatch or a new key. */
+  async acceptSubmission(expected: ClientBookingRow, handoffRef: string,
+    persistAttempt: (tx: Prisma.TransactionClient, replayOnly: boolean) => Promise<{ row: AiClientSceneMaterial; replayed: boolean }>) {
+    let attempted = false;
+    try {
+      return await this.db.$transaction(async tx => {
+        const row = await this.find(expected, expected.id, tx, true);
+        if (!row || row.inputHash !== expected.inputHash || row.bindingHash !== expected.bindingHash
+          || row.policyHash !== expected.policyHash || row.selectionRevision !== 1 || !row.selectedAt) throw conflict();
+        if (row.state === 'submitted') {
+          const attempt = await persistAttempt(tx, true);
+          if (!attempt.replayed) throw conflict();
+          return { row, attempt, replayed: true };
+        }
+        const now = this.clock(), handoff = await this.handoff(expected, handoffRef, tx);
+        if (row.revision !== expected.revision || row.state !== 'handed_to_booking_page' || row.expiresAt <= now
+          || !handoff || handoff.draftId !== row.id || handoff.inputHash !== row.inputHash
+          || handoff.selectionRevision !== row.selectionRevision || handoff.expiresAt <= now) throw conflict();
+        const attempt = await persistAttempt(tx, false);
+        if (attempt.replayed) throw conflict();
+        attempted = true;
+        const count = await tx.$executeRaw(Prisma.sql`UPDATE ai_client_booking_drafts
+          SET state = ${'submitted'}, revision = ${row.revision + 1}, updatedAt = ${now}
+          WHERE tenantId = ${row.tenantId} AND workspaceId = ${row.workspaceId} AND channel = ${row.channel}
+          AND principalKind = ${row.principalKind} AND principalHash = ${row.principalHash}
+          AND id = ${row.id} AND revision = ${row.revision} AND state = ${row.state} AND expiresAt > ${now}`);
+        if (count !== 1) throw conflict();
+        return { row: draftSchema.parse({ ...row, state: 'submitted', revision: row.revision + 1, updatedAt: now }),
+          attempt, replayed: false };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (attempted || error instanceof AiClientMaterialError && error.code === 'AI_CLIENT_RESULT_UNKNOWN')
+        throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_submission_acceptance_unacknowledged', 'read_original_submission');
       if (error instanceof AiClientEntryError) throw error;
       throw unavailable();
     }

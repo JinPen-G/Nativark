@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import {
-  AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionBudgetSnapshot,
+  AiTaskExecutionBudgetError, AiTaskExecutionPreReservationLimitError, type AiTaskExecutionBudgetPort, type AiTaskExecutionBudgetSnapshot,
   type AiTaskExecutionChargeEvidence, type AiTaskExecutionChargeReceipt, type AiTaskExecutionChargeRequest,
   type AiTaskExecutionCounters, type AiTaskExecutionLease,
   type AiTaskExecutionPolicy, type AiTaskExecutionResource, type AiTaskExecutionSettlementRequest, type AiTaskExecutionEvidenceSource, type AiTaskExecutionPolicySource,
@@ -14,7 +14,7 @@ export interface AiTaskExecutionScopeSource {
   resolve(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write'): Promise<{ scopeId: string; bindingKey: string; taskWhere: Prisma.AiTaskWhereInput }>;
 }
 
-const resources: Record<AiTaskExecutionResource, { max: string; reserved: string; consumed: string; enum: string }> = {
+const resources: Record<AiTaskExecutionResource, { max: string; reserved: string; consumed: string; enum: import('@prisma/client').AiTaskExecutionResource }> = {
   steps: { max: 'maxSteps', reserved: 'reservedSteps', consumed: 'consumedSteps', enum: 'STEPS' },
   calls: { max: 'maxCalls', reserved: 'reservedCalls', consumed: 'consumedCalls', enum: 'CALLS' },
   active_ms: { max: 'maxActiveMs', reserved: 'reservedActiveMs', consumed: 'consumedActiveMs', enum: 'ACTIVE_MS' },
@@ -85,11 +85,24 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
     return policy;
   }
 
-  private async activeLease(tx: Tx, scopeId: string, lease: AiTaskExecutionLease) {
+  private async activeLease(tx: Tx, scopeId: string, lease: AiTaskExecutionLease, settlingRunTime = false) {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${lease.taskId} AND id = ${lease.runId} FOR UPDATE`);
-    const row = await tx.aiRun.findFirst({ where: { scopeId, taskId: lease.taskId, id: lease.runId, leaseOwnerId: lease.holderId,
-      fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision, status: 'RUNNING', leaseExpiresAt: { gt: this.clock() } } });
-    if (!row) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    // Only original pure Run time can close after the aggregate or release.
+    // An absent holder never admits a reservation, step or Gateway invocation.
+    const statuses: import('@prisma/client').AiTaskStatus[] = settlingRunTime
+      ? ['RUNNING', 'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] : ['RUNNING'];
+    const row = await tx.aiRun.findFirst({ where: { scopeId, taskId: lease.taskId, id: lease.runId,
+      fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision, status: { in: statuses },
+      ...(settlingRunTime ? { OR: [{ status: { in: ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] } },
+        { leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.clock() } },
+        { leaseOwnerId: null, leaseExpiresAt: null }] }
+        : { leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: this.clock() } }) } });
+    const terminalAccounting = settlingRunTime && row && (row.status !== 'RUNNING'
+      || row.leaseOwnerId === null && row.leaseExpiresAt === null);
+    if (!row || row.id !== lease.runId || row.scopeId !== scopeId || row.taskId !== lease.taskId
+      || row.fencingToken.toFixed(0) !== lease.fencingToken || row.revision !== lease.revision || !statuses.includes(row.status)
+      || !terminalAccounting && (row.leaseOwnerId !== lease.holderId || !row.leaseExpiresAt || row.leaseExpiresAt <= this.clock()))
+      throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     return row;
   }
 
@@ -171,7 +184,7 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
       || evidence.requestFingerprint !== expected || evidence.resource !== input.resource || !counter(evidence.actualAmount) || !id(evidence.evidenceRef) || !/^[a-f0-9]{64}$/u.test(evidence.evidenceHash))) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const result = await this.db.$transaction(async tx => {
       await this.currentTask(tx, input.taskId, input.lease, access);
-      await this.activeLease(tx, scopeId, input.lease);
+      await this.activeLease(tx, scopeId, input.lease, action !== 'reserve' && input.target.kind === 'run' && input.resource === 'active_ms');
       const budget = await this.lockBudget(tx, scopeId, input.taskId);
       this.snapshot(budget as unknown as Record<string, unknown>, policy);
       await this.target(tx, input, scopeId);
@@ -235,7 +248,205 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
     return { replayed: result.replayed, budget: this.snapshot(fresh as unknown as Record<string, unknown>, policy), charge: this.chargeReceipt(result.charge as unknown as Record<string, unknown>) };
   }
 
+  /** Infrastructure participant, not a Runtime/model callback. Close one
+   * original RESERVED Run-time charge and reserve its successor atomically.
+   * The successor covers this transaction/COMMIT/reply; lost delivery is not a
+   * retry token. Financial, step and invocation accounting remain untouched. */
+  async rotateRunTime<T>(input: { taskId: string; lease: AiTaskExecutionLease; expiresAt: string;
+    previousChargeId: string; nextChargeId: string; maximumMs: number; retainMs: bigint }, participant: {
+    close(tx: Prisma.TransactionClient, scopeId: string, charge: import('@prisma/client').AiTaskExecutionCharge,
+      policyFingerprint: string): Promise<AiTaskExecutionChargeEvidence>;
+    open(tx: Prisma.TransactionClient, scopeId: string, charge: { amount: bigint; requestFingerprint: string }): Promise<T>;
+  }) {
+    input = structuredClone(input); validateLease(input.taskId, input.lease);
+    if (!id(input.previousChargeId, 36) || !id(input.nextChargeId, 36) || input.previousChargeId === input.nextChargeId
+      || !Number.isSafeInteger(input.maximumMs) || input.maximumMs < 1 || !counter(input.retainMs)
+      || !Number.isFinite(Date.parse(input.expiresAt)) || typeof participant?.close !== 'function'
+      || typeof participant?.open !== 'function') throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+    const access = await this.access(input.taskId, input.lease), policy = await this.policy(input.taskId, input.lease);
+    return this.db.$transaction(async tx => {
+      await this.currentTask(tx, input.taskId, input.lease, access);
+      const held = await this.activeLease(tx, access.scopeId, input.lease);
+      if (held.leaseExpiresAt?.getTime() !== Date.parse(input.expiresAt)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      const budget = await this.lockBudget(tx, access.scopeId, input.taskId);
+      this.snapshot(budget as unknown as Record<string, unknown>, policy);
+      const key = { scopeId: access.scopeId, taskId: input.taskId };
+      const original = await tx.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { ...key, chargeId: input.previousChargeId } } });
+      if (!original || original.scopeId !== key.scopeId || original.taskId !== key.taskId || original.runId !== input.lease.runId
+        || original.resource !== 'ACTIVE_MS' || original.status !== 'RESERVED' || original.amount <= 0n
+        || original.stepId !== null || original.actionId !== null || original.stepFingerprint !== null || original.gatewayInvocationId !== null
+        || original.leaseOwnerId !== input.lease.holderId || original.fencingToken.toFixed(0) !== input.lease.fencingToken
+        || original.actualAmount !== null || original.outcomeFingerprint !== null || original.evidenceRef !== null)
+        throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      if (await tx.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { ...key, chargeId: input.nextChargeId } } }))
+        throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      const evidence = await participant.close(tx, access.scopeId, original, policy.fingerprint);
+      if (evidence.scopeId !== key.scopeId || evidence.taskId !== key.taskId || evidence.runId !== original.runId
+        || evidence.chargeId !== original.chargeId || evidence.requestFingerprint !== original.requestFingerprint
+        || evidence.resource !== 'active_ms' || !counter(evidence.actualAmount) || evidence.actualAmount > original.amount
+        || !/^[a-f0-9]{64}$/u.test(evidence.evidenceHash) || !id(evidence.evidenceRef)
+        || evidence.dispatchToken !== null || evidence.gatewayInvocationId !== null) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      if (budget.reservedActiveMs < original.amount) throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
+      const available = policy.limits.active_ms - budget.consumedActiveMs - budget.reservedActiveMs + original.amount - evidence.actualAmount;
+      const stepAllowanceUnavailable = input.retainMs > 0n && available <= input.retainMs;
+      const free = available - (stepAllowanceUnavailable ? 0n : input.retainMs);
+      const maximum = Math.min(input.maximumMs, Date.parse(input.expiresAt) - this.clock().getTime());
+      const amount = free < BigInt(Math.max(0, Math.floor(maximum))) ? free : BigInt(Math.max(0, Math.floor(maximum)));
+      if (amount < 1n) throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
+      const request: AiTaskExecutionChargeRequest = { taskId: input.taskId, lease: input.lease, chargeId: input.nextChargeId,
+        resource: 'active_ms', amount, target: { kind: 'run' } };
+      const fingerprint = this.fingerprint(request);
+      if ((await tx.aiTaskExecutionCharge.updateMany({ where: { ...key, chargeId: original.chargeId, revision: original.revision,
+        status: 'RESERVED', requestFingerprint: original.requestFingerprint }, data: { status: 'RECORDED', actualAmount: evidence.actualAmount,
+        outcomeFingerprint: evidence.evidenceHash, evidenceRef: evidence.evidenceRef, unknownReason: null, revision: { increment: 1 } } })).count !== 1)
+        throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
+      await tx.aiTaskExecutionCharge.create({ data: { ...key, chargeId: input.nextChargeId, runId: input.lease.runId,
+        stepId: null, actionId: null, stepFingerprint: null, gatewayInvocationId: null, leaseOwnerId: input.lease.holderId,
+        fencingToken: new Prisma.Decimal(input.lease.fencingToken), requestFingerprint: fingerprint, resource: 'ACTIVE_MS', amount,
+        status: 'RESERVED', actualAmount: null, outcomeFingerprint: null, evidenceRef: null, unknownReason: null } });
+      if ((await tx.aiTaskExecutionBudget.updateMany({ where: { ...key, revision: budget.revision }, data: {
+        reservedActiveMs: budget.reservedActiveMs - original.amount + amount,
+        consumedActiveMs: { increment: evidence.actualAmount }, revision: { increment: 1 } } })).count !== 1)
+        throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
+      const value = await participant.open(tx, access.scopeId, { amount, requestFingerprint: fingerprint });
+      await this.verifyCurrentAccess(tx, input.taskId, input.lease, access);
+      const current = await this.activeLease(tx, access.scopeId, input.lease);
+      if (current.leaseExpiresAt?.getTime() !== Date.parse(input.expiresAt)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      return { value, amount, stepAllowanceUnavailable };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+  }
+
+  /** Final original-time receipt and settlement share one transaction after an
+   * exact release acknowledgement. This admits no new reservation, step, Run
+   * mutation or dispatch, and never reconstructs a lost clock from a receipt. */
+  async finalizeReleasedRunTime(input: { taskId: string; lease: AiTaskExecutionLease; expiresAt: string;
+    chargeId: string; release: { released: true; revision: number } },
+    participant: {
+      measure(tx: Prisma.TransactionClient, scopeId: string): Promise<AiTaskExecutionChargeEvidence>;
+      verify(tx: Prisma.TransactionClient, scopeId: string): Promise<void>;
+    }) {
+    input = structuredClone(input); validateLease(input.taskId, input.lease);
+    if (!id(input.chargeId, 36) || !Number.isFinite(Date.parse(input.expiresAt))
+      || typeof participant?.measure !== 'function' || typeof participant?.verify !== 'function'
+      || input.release?.released !== true || input.release.revision !== input.lease.revision + 1
+      || input.release.revision >= 0xffffffff) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+    const lease = { ...input.lease, revision: input.release.revision };
+    const access = await this.access(input.taskId, lease), policy = await this.policy(input.taskId, lease, true);
+    await this.db.$transaction(async tx => {
+      await this.currentTask(tx, input.taskId, lease, access);
+      const released = await this.activeLease(tx, access.scopeId, lease, true);
+      if (released.leaseOwnerId !== null || released.leaseExpiresAt !== null) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      const budget = await this.lockBudget(tx, access.scopeId, input.taskId);
+      this.snapshot(budget as unknown as Record<string, unknown>, policy);
+      const key = { scopeId: access.scopeId, taskId: input.taskId };
+      const charge = await tx.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { ...key, chargeId: input.chargeId } } });
+      if (!charge || charge.scopeId !== key.scopeId || charge.taskId !== key.taskId || charge.runId !== lease.runId
+        || charge.leaseOwnerId !== lease.holderId || charge.fencingToken.toFixed(0) !== lease.fencingToken
+        || charge.resource !== 'ACTIVE_MS' || charge.status !== 'RESERVED' || charge.amount <= 0n
+        || charge.stepId !== null || charge.actionId !== null || charge.stepFingerprint !== null || charge.gatewayInvocationId !== null
+        || charge.actualAmount !== null || charge.outcomeFingerprint !== null || charge.evidenceRef !== null)
+        throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      const evidence = await participant.measure(tx, access.scopeId);
+      if (evidence.scopeId !== key.scopeId || evidence.taskId !== key.taskId || evidence.runId !== lease.runId
+        || evidence.chargeId !== charge.chargeId || evidence.requestFingerprint !== charge.requestFingerprint
+        || evidence.resource !== 'active_ms' || !counter(evidence.actualAmount) || evidence.actualAmount > charge.amount
+        || evidence.evidenceRef !== `overhead:${charge.chargeId}` || !/^[a-f0-9]{64}$/u.test(evidence.evidenceHash)
+        || evidence.dispatchToken !== null || evidence.gatewayInvocationId !== null)
+        throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      if (budget.reservedActiveMs < charge.amount || !counter(budget.consumedActiveMs + evidence.actualAmount))
+        throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
+      if ((await tx.aiTaskExecutionCharge.updateMany({ where: { ...key, chargeId: charge.chargeId, revision: charge.revision,
+        status: 'RESERVED', requestFingerprint: charge.requestFingerprint }, data: { status: 'RECORDED',
+        actualAmount: evidence.actualAmount, outcomeFingerprint: evidence.evidenceHash, evidenceRef: evidence.evidenceRef,
+        unknownReason: null, revision: { increment: 1 } } })).count !== 1) throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
+      if ((await tx.aiTaskExecutionBudget.updateMany({ where: { ...key, revision: budget.revision }, data: {
+        reservedActiveMs: { decrement: charge.amount }, consumedActiveMs: { increment: evidence.actualAmount },
+        revision: { increment: 1 } } })).count !== 1) throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
+      await participant.verify(tx, access.scopeId);
+      await this.verifyCurrentAccess(tx, input.taskId, lease, access);
+      const current = await this.activeLease(tx, access.scopeId, lease, true);
+      if (current.leaseOwnerId !== null || current.leaseExpiresAt !== null) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+  }
+
   async reserve(input: AiTaskExecutionChargeRequest) { return this.mutate(structuredClone(input), 'reserve'); }
+
+  /** One original step's base resources share admission, not a new allowance.
+   * Keep Task -> Run -> budget lock order and recheck authority/lease before
+   * COMMIT. A partial historical group or replay never authorizes dispatch. */
+  async reserveStep(requests: readonly AiTaskExecutionChargeRequest[]) {
+    if (!Array.isArray(requests) || requests.length !== 3) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+    const inputs: readonly AiTaskExecutionChargeRequest[] = structuredClone(requests);
+    for (const input of inputs) {
+      if (!input) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+      validateLease(input.taskId, input.lease); validateResource(input.resource, input.amount);
+      if (!['steps', 'active_ms', 'output_bytes'].includes(input.resource) || !id(input.chargeId, 36)
+        || input.target?.kind !== 'step' || !id(input.target.stepId, 36) || !id(input.target.actionId)
+        || !/^[a-f0-9]{64}$/u.test(input.target.stepFingerprint) || input.target.gatewayInvocationId !== undefined
+        || input.resource === 'steps' && input.amount !== 1n) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+    }
+    const first = inputs[0];
+    if (new Set(inputs.map(input => input.resource)).size !== 3 || new Set(inputs.map(input => input.chargeId)).size !== 3
+      || inputs.some(input => input.taskId !== first.taskId || input.lease.runId !== first.lease.runId
+        || input.lease.holderId !== first.lease.holderId || input.lease.revision !== first.lease.revision
+        || input.lease.fencingToken !== first.lease.fencingToken || input.target.kind !== 'step' || first.target.kind !== 'step'
+        || input.target.stepId !== first.target.stepId || input.target.actionId !== first.target.actionId
+        || input.target.stepFingerprint !== first.target.stepFingerprint)) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+    const access = await this.access(first.taskId, first.lease), scopeId = access.scopeId,
+      policy = await this.policy(first.taskId, first.lease), fingerprints = inputs.map(input => this.fingerprint(input));
+    const result = await this.db.$transaction(async tx => {
+      await this.currentTask(tx, first.taskId, first.lease, access);
+      await this.activeLease(tx, scopeId, first.lease);
+      const budget = await this.lockBudget(tx, scopeId, first.taskId);
+      this.snapshot(budget as unknown as Record<string, unknown>, policy);
+      await this.target(tx, first, scopeId);
+      const existing: import('@prisma/client').AiTaskExecutionCharge[] = [];
+      for (const [index, input] of inputs.entries()) {
+        const row = await tx.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { scopeId, taskId: input.taskId, chargeId: input.chargeId } } });
+        if (!row) continue;
+        if (input.target.kind !== 'step' || row.requestFingerprint !== fingerprints[index] || row.resource !== resources[input.resource].enum
+          || row.amount !== input.amount || row.scopeId !== scopeId || row.taskId !== input.taskId || row.runId !== input.lease.runId
+          || row.stepId !== input.target.stepId || row.actionId !== input.target.actionId || row.stepFingerprint !== input.target.stepFingerprint
+          || row.gatewayInvocationId !== null || row.leaseOwnerId !== input.lease.holderId || row.fencingToken.toFixed(0) !== input.lease.fencingToken)
+          throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
+        existing.push(row);
+      }
+      if (existing.length !== 0 && existing.length !== inputs.length) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+      const replayed = existing.length === inputs.length;
+      const charges = [...existing];
+      const limited = !replayed && inputs.some(input => {
+        const spec = resources[input.resource], row = budget as unknown as Record<string, unknown>;
+        return BigInt(row[spec.reserved] as bigint) + BigInt(row[spec.consumed] as bigint) + input.amount > BigInt(row[spec.max] as bigint);
+      });
+      if (!replayed && !limited) {
+        const update: Record<string, unknown> = { revision: { increment: 1 } };
+        for (const input of inputs) update[resources[input.resource].reserved] = { increment: input.amount };
+        for (const [index, input] of inputs.entries()) {
+          if (input.target.kind !== 'step') throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
+          charges.push(await tx.aiTaskExecutionCharge.create({ data: { scopeId, taskId: input.taskId, chargeId: input.chargeId,
+            runId: input.lease.runId, stepId: input.target.stepId, actionId: input.target.actionId, stepFingerprint: input.target.stepFingerprint,
+            gatewayInvocationId: null, leaseOwnerId: input.lease.holderId, fencingToken: new Prisma.Decimal(input.lease.fencingToken),
+            requestFingerprint: fingerprints[index], resource: resources[input.resource].enum,
+            amount: input.amount, status: 'RESERVED', actualAmount: null, outcomeFingerprint: null, evidenceRef: null, unknownReason: null } }));
+        }
+        if ((await tx.aiTaskExecutionBudget.updateMany({ where: { scopeId, taskId: first.taskId, revision: budget.revision }, data: update })).count !== 1)
+          throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
+      }
+      // Do not turn authorization or lease expiry during the writes into a
+      // committed allowance. The transaction, including all three IDs, rolls back.
+      await this.verifyCurrentAccess(tx, first.taskId, first.lease, access);
+      await this.activeLease(tx, scopeId, first.lease);
+      return { replayed, charges, limited };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    // Only this successfully acknowledged, write-free transaction proves a known
+    // limit. An exception (including a lost denial reply) remains uncertain.
+    if (result.limited) throw new AiTaskExecutionPreReservationLimitError();
+    const fresh = await this.db.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: { scopeId, taskId: first.taskId } } });
+    if (!fresh) throw new AiTaskExecutionBudgetError('AI_STORAGE_UNAVAILABLE');
+    const snapshot = this.snapshot(fresh as unknown as Record<string, unknown>, policy);
+    return result.charges.map(charge => ({ replayed: result.replayed, budget: structuredClone(snapshot),
+      charge: this.chargeReceipt(charge as unknown as Record<string, unknown>) }));
+  }
 
   private async evidence(input: AiTaskExecutionSettlementRequest, reconcile: boolean) {
     if (!id(input.evidenceRef)) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');

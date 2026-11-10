@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AI_CONVERSATION_DRAFT_VERSION, type AiConversationTurnObservationDraft } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { ActionButton, Alert } from '@/components/ui';
+import { VisibleObservationBoundary } from './VisibleObservationBoundary';
+import { useVisibleObservationHost } from './VisibleObservationHost';
 import { ModelText } from './ModelText';
 import { safeDisplayText } from './safe-display';
 import { useAiManagementLocale } from './management-locale';
@@ -14,6 +16,7 @@ type Result = Awaited<ReturnType<typeof aiConversationsApi.result>>;
 export function ConversationResult({ conversationId, turn, current }: {
   conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean;
 }) {
+  const visible = useVisibleObservationHost();
   const { t } = useAiManagementLocale();
   const [result, setResult] = useState<Result | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const request = useRef<AbortController | null>(null), generation = useRef(0), mounted = useRef(false);
@@ -35,7 +38,7 @@ export function ConversationResult({ conversationId, turn, current }: {
         admissionKey: turn.admissionKey }, turn, controller.signal);
       if (!active()) throw Error('AI_SCOPE_CHANGED');
       setResult(value);
-    } catch (failure) { if (active()) setError(true); throw failure; }
+    } catch (failure) { if (turn.task) visible?.cancelTask(turn.task.taskId); if (active()) setError(true); throw failure; }
     finally { if (request.current === controller) { request.current = null; setBusy(false); } }
   };
   return <section aria-label={t('原轮次模型结果')} aria-busy={busy}>
@@ -47,7 +50,9 @@ export function ConversationResult({ conversationId, turn, current }: {
       {result.status === 'material_erased' ? <p>{t('原输入已清理，不恢复正文或执行权限。')}</p>
         : result.status === 'no_task_observed' ? <p>{t('未观察到任务关联，不推断模型未调用。')}</p>
           : result.status === 'no_unique_result' ? <p>{t('该原轮次没有唯一可定位结果，不猜测其他轮次或补造答案。')}</p>
-            : result.result.status === 'available' ? <ModelText text={result.result.text!.value} />
+            : result.result.status === 'available' ? <VisibleObservationBoundary kind="text"
+                reference={{ taskId: result.result.taskId, runId: result.result.runId, source: { kind: 'model_result', resultId: result.result.resultId } }}
+                ready={result.result.text!.value.trim().length > 0 && scope.current.current()}><ModelText text={result.result.text!.value} /></VisibleObservationBoundary>
               : <p>{t(result.result.status === 'stale' ? '事实已变化，旧正文不显示，请回原业务页核对。'
                 : result.result.status === 'unknown' ? '结果待核对，不自动重试。' : '原步骤失败，未产生可展示答案。')}</p>}
     </>}

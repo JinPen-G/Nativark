@@ -206,7 +206,7 @@ export class AiStepTransitionRepository {
         }, select: { cursor: true } });
         callbackCompleted = true;
         return { event, runRevision: lease.revision + 1 };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 10000 });
     } catch (error) {
       // Once the callback returned, an error-shaped acknowledgement cannot
       // prove rollback, even if it resembles a known CAS/access refusal.

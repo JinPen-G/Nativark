@@ -4,6 +4,7 @@ import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft'
 import type { AiWorkspaceScope } from './ai-native';
 import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 import type { AiTaskInputSubmissionDraft, AiTaskInputReceiptReferenceDraft } from './ai-task-input-draft';
+import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES as pricingUnits } from './core';
 
 /** Reopen an existing answer by payload or exact receipt key, never both.
  * Reference recovery reads the stored binding; it cannot submit a new answer. */
@@ -35,6 +36,44 @@ export interface AiSceneQuoteCandidate {
   locationId?: string;
   returnLocationId?: string;
   selectionRevision?: string;
+}
+/** Candidate structure only. Names, identity, time, stock, qualification and
+ * prices are resolved by the original authorized scene/Core, never this check. */
+export function validateAiSceneQuoteCandidateDraft(value: unknown): value is AiSceneQuoteCandidate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  const keys = ['customerType', 'customerId', 'customerName', 'bookingIdentity', 'deliveryAddressId', 'items', 'start', 'end',
+    'fulfillmentMode', 'locationName', 'returnLocationName', 'locationId', 'returnLocationId', 'selectionRevision'];
+  const text = (v: unknown, max = 191) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+  const id = (v: unknown) => text(v) && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v as string);
+  if (Object.keys(row).some(key => !keys.includes(key)) || !['personal', 'corporate'].includes(row.customerType as string)) return false;
+  for (const key of ['customerId', 'deliveryAddressId', 'locationId', 'returnLocationId']) if (row[key] !== undefined && !id(row[key])) return false;
+  for (const key of ['customerName', 'locationName', 'returnLocationName']) if (row[key] !== undefined && !text(row[key])) return false;
+  if (['start', 'end'].some(key => row[key] !== undefined && !text(row[key], 80))
+    || row.fulfillmentMode !== undefined && !RENTAL_FULFILLMENT_MODES.includes(row.fulfillmentMode as RentalFulfillmentMode)
+    || row.selectionRevision !== undefined && (typeof row.selectionRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(row.selectionRevision))) return false;
+  if (row.bookingIdentity !== undefined) {
+    const identity = row.bookingIdentity;
+    if (!identity || typeof identity !== 'object' || Array.isArray(identity)) return false;
+    const b = identity as Record<string, unknown>;
+    if (b.bookingIdentity === 'personal') { if (Object.keys(b).length !== 1) return false; }
+    else if (b.bookingIdentity !== 'enterprise_employee' || Object.keys(b).some(key => !['bookingIdentity', 'corporateCustomerId', 'enterpriseContractAndPayer'].includes(key))
+      || b.corporateCustomerId !== undefined && !id(b.corporateCustomerId)
+      || b.enterpriseContractAndPayer !== undefined && typeof b.enterpriseContractAndPayer !== 'boolean') return false;
+  }
+  if (row.items !== undefined) {
+    if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 50) return false;
+    for (const item of row.items) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+      const i = item as Record<string, unknown>;
+      if (Object.keys(i).some(key => !['productName', 'itemGroupId', 'quantity', 'pricingUnit', 'usageQuantity'].includes(key))
+        || typeof i.quantity !== 'number' || !Number.isSafeInteger(i.quantity) || i.quantity < 1 || i.quantity > 10000
+        || i.productName !== undefined && !text(i.productName) || i.itemGroupId !== undefined && !id(i.itemGroupId)
+        || i.pricingUnit !== undefined && !pricingUnits.includes(i.pricingUnit as typeof pricingUnits[number])
+        || i.usageQuantity !== undefined && (typeof i.usageQuantity !== 'number' || !Number.isFinite(i.usageQuantity) || i.usageQuantity < 0 || i.usageQuantity > 1000000)) return false;
+    }
+  }
+  return true;
 }
 export type AiSceneRequestBody =
   | { sceneCode: 'order_explanation'; input: { orderId: string; question: 'status' | 'fees' | 'payments' | 'next_steps' } }
@@ -246,6 +285,44 @@ const sceneMetadataUuid = (value: unknown): value is string => typeof value === 
 const sceneMetadataId = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
 const sceneMetadataRevision = (value: unknown, maximum = 4294967294) => typeof value === 'number'
   && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
+const sceneReceiptTime = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 40 || !Number.isFinite(Date.parse(value))) return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/iu.exec(value);
+  if (!match || Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 59) return false;
+  const date = new Date(0); date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getUTCFullYear() === Number(match[1]) && date.getUTCMonth() === Number(match[2]) - 1 && date.getUTCDate() === Number(match[3]);
+};
+/** Closed receipt binding for existing scene consumers. Expired/revoked is a
+ * historical observation; only the original service can grant new execution. */
+export function validateAiSceneRequestReceiptDraft(value: unknown, query: AiSceneRequestReadDraft,
+  binding: { capabilityCode: AiSceneCode; capabilityVersion: string; originalRequestKey: string }): value is AiSceneRequestReceiptDraft {
+  if (!sceneMetadataClosed(value, ['draftVersion', 'inputRef', 'revision', 'contentHash', 'sceneCode', 'sceneVersion',
+    'requestKey', 'previousInputRef', 'expiresAt', 'createdAt', 'state'])) return false;
+  return value.draftVersion === AI_SCENE_REQUEST_DRAFT_VERSION && query.draftVersion === value.draftVersion
+    && value.inputRef === query.inputRef && sceneMetadataUuid(value.inputRef) && sceneMetadataRevision(value.revision)
+    && typeof value.contentHash === 'string' && /^[a-f0-9]{64}$/u.test(value.contentHash)
+    && value.sceneCode === binding.capabilityCode && AI_SCENE_CODES.includes(binding.capabilityCode)
+    && value.sceneVersion === binding.capabilityVersion && sceneMetadataId(value.sceneVersion)
+    && value.requestKey === binding.originalRequestKey && sceneMetadataId(value.requestKey) && (value.requestKey as string).length <= 128
+    && (value.previousInputRef === null || sceneMetadataUuid(value.previousInputRef))
+    && sceneReceiptTime(value.createdAt) && sceneReceiptTime(value.expiresAt)
+    && ['stored', 'expired', 'revoked'].includes(value.state as string);
+}
+/** Observes the original creation key without creating metadata or dispatching.
+ * A missing record is never proof that an earlier operation did not commit. */
+export function validateAiSceneRequestReconcileDraft(value: unknown, query: AiSceneRequestReadDraft,
+  binding: { capabilityCode: AiSceneCode; capabilityVersion: string; originalRequestKey: string }): value is AiSceneRequestReconcileResponseDraft {
+  if (sceneMetadataClosed(value, ['state', 'retryable'])) return value.state === 'not_observed' && value.retryable === false;
+  if (!sceneMetadataClosed(value, ['state', 'receipt', 'task']) || value.state !== 'observed'
+    || !validateAiSceneRequestReceiptDraft(value.receipt, query, binding)) return false;
+  const task = value.task;
+  if (sceneMetadataClosed(task, ['state', 'retryable'])) return task.state === 'not_observed' && task.retryable === false;
+  return sceneMetadataClosed(task, ['state', 'taskId', 'runId', 'status', 'revision', 'plan', 'resultAvailable', 'execution'])
+    && task.state === 'observed' && sceneMetadataUuid(task.taskId) && sceneMetadataUuid(task.runId)
+    && AI_TASK_STATUSES_DRAFT.includes(task.status as AiTaskStatusDraft) && sceneMetadataRevision(task.revision)
+    && ['stored', 'not_observed'].includes(task.plan as string) && typeof task.resultAvailable === 'boolean'
+    && task.execution === 'not_inferred_from_metadata';
+}
 /** Browser-safe closed metadata checks. They authorize no creation, dispatch or
  * business action; an original-request reader must still revalidate association. */
 export function validateAiSceneCreatedTaskDraft(value: unknown): value is AiSceneCreatedTaskDraft {

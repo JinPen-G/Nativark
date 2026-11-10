@@ -1,5 +1,6 @@
 /** Persisted observations, not an SLO verdict, provider bill or execution grant. */
 import type { AiTaskBudgetUsagePageDraft, AiTaskBudgetUsageSummaryDraft } from './ai-scene-request-draft';
+import { AI_TASK_STATUSES_DRAFT, type AiTaskStatusDraft } from './ai-task-draft';
 import { leafClosed as object, leafEnum as choice, leafInt as integer, leafList as list,
   leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -25,16 +26,80 @@ export type AiTaskPerformanceObservationDraft = {
   budgetAdmission?: { denials: Array<{ invocationId: string; runId: string; stepId: string; callId: string;
     observedAt: string; code: 'budget_unavailable'; observation: 'gate_rejected_not_release_evidence' }>;
     truncated: boolean; coverage: 'recorded_rejections_only' };
-  measurements: { firstToken: 'not_recorded'; firstCard: 'not_recorded'; toolLatency: 'not_recorded' | 'resource_active_time_only';
+  clientVisible?: AiTaskClientVisibleObservationDraft;
+  measurements: { firstToken: 'not_recorded' | 'client_reported'; firstCard: 'not_recorded' | 'client_reported'; toolLatency: 'not_recorded' | 'resource_active_time_only';
     modelLatency: 'not_recorded' | 'gateway_transport_wall_time_only';
     rates: 'not_computed'; slo: 'not_evaluated' };
   consistency: 'revalidated_reads_not_atomic_snapshot'; execution: 'read_only_no_dispatch_or_release';
 };
 
+/** One explicitly selected, authorized scene/version sample. Unfinished tasks
+ * keep the final success rate pending. Takeovers mean original recorded human
+ * recovery receipts, not suggestions, worker expiry or business completion. */
+export interface AiTaskOutcomeSampleDraft {
+  version: 'task-outcome-sample-1'; observedAt: string; sceneCode: string; sceneVersion: string;
+  taskIds: string[]; sampleSize: number; statusCounts: Record<AiTaskStatusDraft, number>;
+  successRate: { state: 'recorded' | 'pending'; succeeded: number; terminal: number; total: number; percent: string | null };
+  takeoverRate: { tasksWithReceipt: number; total: number; percent: string; basis: 'original_same_owner_takeover_receipts' };
+  coverage: 'requested_authorized_one_owner_workspace_scene_version';
+  consistency: 'revalidated_reads_not_atomic_snapshot'; slo: 'not_evaluated'; execution: 'read_only_no_lease_or_model';
+}
+
+/** Browser-reported original host observations only. They grant no business,
+ * model, accounting or SLO authority and never contain rendered content. */
+export type AiTaskClientVisibleSourceDraft = { kind: 'model_result'; resultId: string }
+  | { kind: 'approval_card'; stepId: string; proposalId: string; proposalRevision: number };
+export interface AiTaskClientVisibleReportDraft {
+  version: 'client-visible-1'; observationId: string; documentId: string;
+  taskId: string; runId: string; surface: 'task_center' | 'server_conversation';
+  kind: 'text' | 'card'; source: AiTaskClientVisibleSourceDraft;
+  trigger: 'original_model_start' | 'original_input_resume'; originKey: string;
+  conversationId?: string; turnId?: string;
+  clientEpoch: number; elapsedMs: number; viewport: 'compact_viewport' | 'wide_viewport';
+  sampleSize: 1; basis: 'viewport_intersection_after_two_frames'; provenance: 'client_reported_not_business_fact';
+}
+export interface AiTaskClientVisibleReceiptDraft {
+  version: 'client-visible-1'; observationId: string; taskId: string; runId: string; kind: 'text' | 'card';
+  status: 'recorded'; recordedAt: string; provenance: 'client_reported_not_business_fact';
+  effects: 'no_authorization_execution_accounting_or_slo';
+}
+export type AiTaskClientVisibleObservationDraft = { state: 'not_recorded' } | {
+  state: 'client_reported'; observations: Array<AiTaskClientVisibleReportDraft & { recordedAt: string }>;
+  truncated: boolean; coverage: 'original_host_reports_not_task_or_tenant_rate';
+  evaluation: 'not_slo_evidence'; currentDisplay: 'not_asserted';
+};
+
 const id = text(36), revision = integer(1, 4294967295), flag: AiLeafSchemaDraft = { type: 'boolean' };
 const count: AiLeafSchemaDraft = { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' };
 const nullable = (schema: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [schema, { type: 'null' }] });
+const visibleSource = { oneOf: [object({ kind: choice('model_result'), resultId: id }),
+  object({ kind: choice('approval_card'), stepId: id, proposalId: id, proposalRevision: revision })] };
+const visibleFields = { version: choice('client-visible-1'), observationId: { type: 'string', format: 'uuid' },
+  documentId: { type: 'string', format: 'uuid' }, taskId: id, runId: id, surface: choice('task_center', 'server_conversation'),
+  kind: choice('text', 'card'), source: visibleSource, trigger: choice('original_model_start', 'original_input_resume'),
+  originKey: { type: 'string', format: 'uuid' }, conversationId: text(191), turnId: text(191), clientEpoch: integer(0, Number.MAX_SAFE_INTEGER),
+  elapsedMs: integer(0, 600000), viewport: choice('compact_viewport', 'wide_viewport'), sampleSize: integer(1, 1),
+  basis: choice('viewport_intersection_after_two_frames'), provenance: choice('client_reported_not_business_fact') };
+const visibleRequired = Object.keys(visibleFields).filter(key => !['conversationId', 'turnId'].includes(key));
 export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiTaskClientVisibleReportDraft: object(visibleFields, visibleRequired),
+  AiTaskClientVisibleReceiptDraft: object({ version: choice('client-visible-1'), observationId: { type: 'string', format: 'uuid' },
+    taskId: id, runId: id, kind: choice('text', 'card'), status: choice('recorded'), recordedAt: time,
+    provenance: choice('client_reported_not_business_fact'), effects: choice('no_authorization_execution_accounting_or_slo') }),
+  AiTaskClientVisibleObservationDraft: { oneOf: [object({ state: choice('not_recorded') }), object({ state: choice('client_reported'),
+    observations: list(object({ ...visibleFields, recordedAt: time }, [...visibleRequired, 'recordedAt']), 20, 1), truncated: flag,
+    coverage: choice('original_host_reports_not_task_or_tenant_rate'), evaluation: choice('not_slo_evidence'), currentDisplay: choice('not_asserted') })] },
+  AiTaskPerformanceReadDraft: object({ taskId: id, usageLimit: integer(1, 20), usageAfter: id, includeTaskFinancial: flag }, ['taskId', 'usageLimit']),
+  AiTaskOutcomeSampleReadDraft: object({ taskIds: { ...list(id, 50, 1), uniqueItems: true } }),
+  AiTaskOutcomeSampleDraft: object({ version: choice('task-outcome-sample-1'), observedAt: time,
+    sceneCode: text(128), sceneVersion: text(64), taskIds: { ...list(id, 50, 1), uniqueItems: true }, sampleSize: integer(1, 50),
+    statusCounts: object(Object.fromEntries(AI_TASK_STATUSES_DRAFT.map(status => [status, integer(0, 50)]))),
+    successRate: object({ state: choice('recorded', 'pending'), succeeded: integer(0, 50), terminal: integer(0, 50),
+      total: integer(1, 50), percent: nullable({ type: 'string', pattern: '^(100|[0-9]{1,2})\\.[0-9]{2}$' }) }),
+    takeoverRate: object({ tasksWithReceipt: integer(0, 50), total: integer(1, 50),
+      percent: { type: 'string', pattern: '^(100|[0-9]{1,2})\\.[0-9]{2}$' }, basis: choice('original_same_owner_takeover_receipts') }),
+    coverage: choice('requested_authorized_one_owner_workspace_scene_version'), consistency: choice('revalidated_reads_not_atomic_snapshot'),
+    slo: choice('not_evaluated'), execution: choice('read_only_no_lease_or_model') }),
   AiSceneTaskPerformanceReadDraft: object({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
     taskId: id, usageLimit: integer(1, 20), usageAfter: id, includeTaskFinancial: flag }, ['original', 'usageLimit']),
   AiTaskPerformanceObservationDraft: object({ version: choice('task-performance-1'), observedAt: time,
@@ -60,7 +125,8 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
     budgetAdmission: object({ denials: list(object({ invocationId: id, runId: id, stepId: id, callId: text(128),
       observedAt: time, code: choice('budget_unavailable'), observation: choice('gate_rejected_not_release_evidence') }), 50),
       truncated: flag, coverage: choice('recorded_rejections_only') }),
-    measurements: object({ firstToken: choice('not_recorded'), firstCard: choice('not_recorded'), toolLatency: choice('not_recorded', 'resource_active_time_only'),
+    clientVisible: { $ref: '#/components/schemas/AiTaskClientVisibleObservationDraft' },
+    measurements: object({ firstToken: choice('not_recorded', 'client_reported'), firstCard: choice('not_recorded', 'client_reported'), toolLatency: choice('not_recorded', 'resource_active_time_only'),
       modelLatency: choice('not_recorded', 'gateway_transport_wall_time_only'),
       rates: choice('not_computed'), slo: choice('not_evaluated') }),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release') },

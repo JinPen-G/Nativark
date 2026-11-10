@@ -1,3 +1,7 @@
+import { AI_TASK_READ_POLICY_HTTP } from '@rental-os/shared';
+import { AI_TASK_ORDER_HANDOFF_HTTP } from '@rental-os/shared';
+import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
+import { AI_MEMBER_NAME_HTTP } from '@rental-os/shared';
 import {
   CanActivate,
   ExecutionContext,
@@ -11,6 +15,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
   AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
@@ -24,7 +29,7 @@ import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
-import { enabledOrganizationSubtreeIds, organizationLocationScope } from "./organization-location-scope";
+import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
 
 const countingRouteAccess = new Map<string, typeof AI_COUNTING_HTTP_OPERATIONS[number][3]>(AI_COUNTING_HTTP_OPERATIONS.map(([action, _request, _response, access]) =>
@@ -256,6 +261,10 @@ const originalOrderExecutionRoutes = new Set(([
 
 export function requiredPermissions(method: string, path: string) {
   const creditRoute = `${method.toUpperCase()} ${path}`;
+  if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const).some(action => path === `/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`)) return ['system:params:manage'];
+  if (method.toUpperCase() === 'POST' && path === `/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`) return ['rental-os:order:view'];
+  if (method.toUpperCase() === 'POST' && Object.entries(AI_MEMBER_NAME_HTTP).some(([key, value]) => key !== 'basePath' && path === `/${AI_MEMBER_NAME_HTTP.basePath}/${value}`))
+    return path.endsWith('/prepare') || path.endsWith('/execute') ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'];
   if (creditTenantRoutes.has(creditRoute)) return ['system:params:manage'];
   if (creditPlatformRoutes.has(creditRoute)) return [path.endsWith('/platform-decide') ? 'system:ai-provider:manage' : 'system:ai-provider:view'];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_CONVERSATION_HTTP_DRAFT.operations)
@@ -268,7 +277,13 @@ export function requiredPermissions(method: string, path: string) {
     return ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/desktop-business\/policy(?:\/(?:change|operation))?$/u.test(path))
     return ['system:params:manage'];
-  if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'source', 'usage', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business', 'continue', 'stop', 'stopReceipt', 'input', 'resumeInput', 'inputReceipt', 'continueInput'] as const)
+  if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`))
+    return path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.review}`)
+      ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS];
+  if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`))
+    return path.endsWith(`/${AI_TASK_RULE_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_RULE_DRAFT_HTTP.review}`)
+      ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS];
+  if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'source', 'usage', 'usageSummary', 'outcomes', 'performance', 'visibleReport', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business', 'continue', 'stop', 'stopReceipt', 'input', 'resumeInput', 'inputReceipt', 'continueInput'] as const)
     .some(action => path === `/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`))
     return [...AI_TASK_CENTER_ENTRY_PERMISSIONS]; // entry alternatives only; original per-task owner/action checks still apply
   if (method.toUpperCase() === 'POST' && (['read', 'change', 'operation', 'readModelPlan', 'changeModelPlan'] as const)
@@ -864,6 +879,8 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
 
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
+  private readonly clientReadRevalidations = new WeakSet<object>();
+
   constructor(
     private readonly authService: AuthService,
     // CORE-EXT-02C：能力门禁的判定依据。可选是为了让既有单测继续用一个假 AuthService
@@ -874,6 +891,23 @@ export class ApiAuthGuard implements CanActivate {
     @Optional() private readonly prisma?: PrismaService,
     @Optional() private readonly subscription?: SubscriptionService
   ) {}
+
+  /** Server-only revalidation of the registered client read operations. Public
+   * canActivate still accounts every HTTP request. Reuse its current Auth/ALS and
+   * tenant gates here without charging transport quotas for nested read checks;
+   * request fields or tokens cannot select this path, and writes are rejected. */
+  async revalidateClientRead(context: ExecutionContext) {
+    const request = context.switchToHttp().getRequest<RequestLike>();
+    const path = matchableRequestPath(request.url), method = request.method.toUpperCase();
+    const get = /^\/client\/v1\/(?:auth\/me|catalog|my\/orders|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}(?:\/fee-items)?|quotes\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}|membership\/(?:corporates|booking-options)|profile(?:\/addresses)?)$/u;
+    const post = /^\/client\/v1\/(?:availability|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}\/cancel\/preview)$/u;
+    if (!(method === 'GET' && get.test(path) || method === 'POST' && post.test(path))) {
+      throw new ForbiddenException('该接口不是已注册的客户端只读复验入口');
+    }
+    this.clientReadRevalidations.add(request);
+    try { return await this.canActivate(context); }
+    finally { this.clientReadRevalidations.delete(request); }
+  }
 
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestLike>();
@@ -913,7 +947,8 @@ export class ApiAuthGuard implements CanActivate {
 
     if (isClientRoute(path)) {
       if (!this.clientRateLimit) throw new UnauthorizedException("客户端安全策略未就绪");
-      await this.clientRateLimit.assertAllowed({ method: request.method, path, ip: request.ip });
+      const revalidatingRead = this.clientReadRevalidations.has(request);
+      if (!revalidatingRead) await this.clientRateLimit.assertAllowed({ method: request.method, path, ip: request.ip });
       if (isClientPublicRoute(request.method, path)) return true;
       const authorization = request.headers.authorization;
       const raw = Array.isArray(authorization) ? authorization[0] : authorization;
@@ -921,7 +956,7 @@ export class ApiAuthGuard implements CanActivate {
       if (!token) throw new UnauthorizedException("请先登录客户端账号");
       if (!this.clientAuth) throw new UnauthorizedException("客户端认证服务未就绪");
       const client = await this.clientAuth.authenticate(token, { method: request.method.toUpperCase(), path });
-      await this.clientRateLimit.assertAllowed({
+      if (!revalidatingRead) await this.clientRateLimit.assertAllowed({
         method: request.method,
         path,
         ip: request.ip,
@@ -1239,29 +1274,7 @@ export class ApiAuthGuard implements CanActivate {
     workspaceId: string | undefined,
     configuredScope: { mode: "all" | "selected"; locationIds: string[] }
   ) {
-    if (user.dataScope !== "organization") return configuredScope;
-    if (!this.prisma || !workspaceId || !user.organizationId) {
-      throw new ForbiddenException("组织数据范围缺少有效组织、经营空间或数据库上下文，已拒绝访问");
-    }
-
-    const organizations = await this.prisma.organizationUnit.findMany({
-      where: { tenantId: user.tenantId },
-      select: { id: true, parentId: true, status: true }
-    });
-    const organizationIds = enabledOrganizationSubtreeIds(organizations, user.organizationId);
-    if (!organizationIds.length) {
-      throw new ForbiddenException("当前账号所属组织不存在或已停用，已拒绝访问");
-    }
-
-    const locations = await this.prisma.rentalFulfillmentLocation.findMany({
-      where: {
-        tenantId: user.tenantId,
-        workspaceId,
-        organizationId: { in: organizationIds }
-      },
-      select: { id: true }
-    });
-    return organizationLocationScope(locations.map((location) => location.id), configuredScope);
+    return resolveUserBusinessLocationScope(user, workspaceId, configuredScope, this.prisma);
   }
 
   private async assertStaffLocationAccess(

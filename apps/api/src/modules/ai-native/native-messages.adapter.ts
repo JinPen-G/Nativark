@@ -4,14 +4,17 @@
  * platform.claude.com/docs/en/build-with-claude/streaming. Native event shapes
  * stop here; Rental OS owns response policy, dispatch and original accounting. */
 import { z } from 'zod';
-import { modelResponseContainsSecret } from './model-response-secret';
+import { modelResponseContainsSecret, ModelResponseSecretGuard } from './model-response-secret';
 import { ChatProtocolPolicy, type ChatProtocolOptions, type ModelJsonTransport } from './chat-completions.adapter';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { modelEgressEvidence } from './model-egress.transport';
 import { messagesGenerationInputHash } from './input-counting/count-tokens.protocol';
 import { MODEL_REQUEST_BYTES, MODEL_RESPONSE_BYTES } from './model-response-limits';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
-import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema,
+import { encodeNativeToolResultBody, nativeToolResultInputHash } from './native-tool-result.encoding';
+import type { ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
+import type { NativeAdapterResult } from './model-gateway.ports';
+import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, modelReasoningEvidenceSchema,
   type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature,
   type ModelProtocolInvocation, type ModelProtocolRequest, type ModelUsage, type ProtocolToolCall } from './model-gateway.ports';
 
@@ -95,12 +98,28 @@ function responseContent(protocol: Protocol, raw: unknown): { text: string; call
   if (result.length > 128000 || calls.length > 8 || !result && !calls.length) invalid();
   return { text: result, calls };
 }
-function completed(protocol: Protocol, raw: unknown, policy: ChatProtocolPolicy, credential: string): AdapterResult {
+function completed(protocol: Protocol, raw: unknown, policy: ChatProtocolPolicy, credential: string, captureCalls = false): NativeAdapterResult {
   const value = responseContent(protocol, raw);
   if (modelResponseContainsSecret(value, credential)) invalid();
   const extras = policy.parse(value.text, value.calls);
   if (modelResponseContainsSecret(extras, credential)) invalid();
-  return { text: value.text, ...extras, usage: protocolUsage(protocol, object(raw).usage) };
+  return { text: value.text, ...extras, usage: protocolUsage(protocol, object(raw).usage),
+    ...(captureCalls && policy.nativeToolResults && value.calls.length ? { nativeToolCalls: structuredClone(value.calls) } : {}) };
+}
+
+/** Only the existing native output item and reported usage attest a Responses
+ * reasoning channel. Never inspect/export thinking text or infer from a model
+ * name, summary, final answer, request flag or a zero/missing usage category. */
+function responsesReasoningEvidence(raw: unknown, usage: ModelUsage | undefined, credential: string) {
+  const response = object(raw), reported = object(response.usage);
+  const reasoningTokens = count(object(reported.output_tokens_details).reasoning_tokens);
+  const ids = list(response.output).filter(value => object(value).type === 'reasoning')
+    .map(value => text(object(value).id, 128));
+  if (!usage || reasoningTokens <= 0 || reasoningTokens > usage.outputTokens || !ids.length
+    || ids.some(id => !id) || new Set(ids).size !== ids.length || modelResponseContainsSecret(ids, credential)) invalid();
+  return modelReasoningEvidenceSchema.parse({ methodVersion: 'reasoning-channel-1',
+    itemCount: ids.length, reasoningTokens, channelHash: requestFingerprint({
+      methodVersion: 'reasoning-channel-1', itemIds: ids, reasoningTokens }) });
 }
 
 /** Bounded typed-SSE accumulator. It checks item/block identity and final
@@ -115,7 +134,11 @@ class NativeMessageStream {
     name?: string; callId?: string; arguments: string; argumentsDone: boolean; parts: Map<number, { text: string; done: boolean; closed: boolean }> }>();
   private readonly blocks: ObjectValue[] = []; private readonly closed = new Set<number>();
   private startUsage?: ObjectValue; private outputTokens = 0; private stopReason?: unknown; private messageDelta = false;
-  constructor(private readonly protocol: Protocol, private readonly policy: ChatProtocolPolicy, private readonly credential: string) {}
+  private stopSequence?: string;
+  private readonly secrets: ModelResponseSecretGuard;
+  constructor(private readonly protocol: Protocol, private readonly policy: ChatProtocolPolicy, private readonly credential: string) {
+    this.secrets = new ModelResponseSecretGuard(credential);
+  }
   accountingUsage() { return this.usage && structuredClone(this.usage); }
   push(chunk: Uint8Array): string {
     if (this.failed) return invalid();
@@ -132,12 +155,10 @@ class NativeMessageStream {
     } catch (error) { this.failed = true; throw error instanceof ModelGatewayError ? error : new ModelGatewayError('INVALID_RESPONSE'); }
   }
   private safeDelta() {
-    if (this.accumulated.length > 128000 || this.accumulated.includes(this.credential)) invalid();
+    if (this.accumulated.length > 128000 || this.secrets.contains(this.accumulated)) invalid();
     if (this.policy.structured) return '';
-    let end = this.accumulated.length;
-    if (!this.stopped) for (let size = Math.min(this.credential.length - 1, end); size > 0; size--) {
-      if (this.accumulated.endsWith(this.credential.slice(0, size))) { end -= size; break; }
-    }
+    const end = this.stopped ? this.accumulated.length : this.secrets.releaseLength(this.accumulated);
+    if (end === null) return invalid();
     const delta = this.accumulated.slice(this.emitted, end); this.emitted = end; return delta;
   }
   private consume(frame: string) {
@@ -149,7 +170,7 @@ class NativeMessageStream {
     const event = object(JSON.parse(data));
     if (names.length > 1 || names.length === 1 && names[0] !== event.type) invalid();
     if (this.protocol === 'openai_responses') this.responses(event); else this.messages(event);
-    if (this.accumulated.length > 128000 || this.accumulated.includes(this.credential)) invalid();
+    if (this.accumulated.length > 128000 || this.secrets.contains(this.accumulated)) invalid();
   }
   private responses(event: ObjectValue) {
     const seq = count(event.sequence_number); if (seq <= this.sequence) invalid(); this.sequence = seq;
@@ -161,6 +182,11 @@ class NativeMessageStream {
     if (!this.started) invalid();
     if (['response.completed', 'response.incomplete', 'response.failed'].includes(String(event.type))) {
       const response = object(event.response); if (response.id !== this.id) invalid();
+      // A terminal event with a contradictory response state cannot establish
+      // final counters for the original dispatch's accounting receipt.
+      const expectedStatus = String(event.type).slice('response.'.length);
+      if (response.status !== expectedStatus || (event.type === 'response.completed'
+        && (response.error != null || response.incomplete_details != null))) invalid();
       this.usage = protocolUsage(this.protocol, response.usage);
       if (event.type !== 'response.completed' || [...this.items.values()].some(item => !item.done)) invalid();
       const output = list(response.output);
@@ -241,7 +267,12 @@ class NativeMessageStream {
         if (usage[key] !== undefined && count(usage[key]) !== (this.startUsage![key] ?? 0)) invalid();
       }
       this.outputTokens = output;
-      if (delta.stop_sequence != null) invalid();
+      if (delta.stop_sequence != null) {
+        if (delta.stop_reason !== 'stop_sequence') invalid();
+        // This known terminal is still rejected by the output policy,
+        // but its final message_stop can attest the original consumed tokens.
+        this.stopSequence = text(delta.stop_sequence);
+      }
       if (delta.stop_reason != null) {
         if (this.stopReason !== undefined) invalid();
         this.stopReason = delta.stop_reason;
@@ -249,10 +280,12 @@ class NativeMessageStream {
       return;
     }
     if (event.type === 'message_stop') {
-      if (this.stopReason === undefined || this.closed.size !== this.blocks.length) invalid();
+      if (typeof this.stopReason !== 'string' || !['end_turn', 'tool_use', 'max_tokens', 'stop_sequence'].includes(this.stopReason)
+        || this.closed.size !== this.blocks.length) invalid();
       this.usage = protocolUsage(this.protocol, { ...this.startUsage, output_tokens: this.outputTokens });
       const message = { id: this.id, type: 'message', role: 'assistant', content: this.blocks,
-        stop_reason: this.stopReason, usage: { ...this.startUsage, output_tokens: this.outputTokens } };
+        stop_reason: this.stopReason, stop_sequence: this.stopSequence ?? null,
+        usage: { ...this.startUsage, output_tokens: this.outputTokens } };
       responseContent(this.protocol, message); this.final = message; this.stopped = true; return;
     }
     if (this.stopReason !== undefined || this.messageDelta) invalid();
@@ -299,8 +332,19 @@ abstract class NativeMessagesAdapter implements ModelAdapter {
   private readonly policy: ChatProtocolPolicy; private readonly images: boolean;
   get evidenceMode(): 'live' | 'mock' { return modelEgressEvidence(this.transport); }
   get structuredSchemaHash() { return this.policy.structuredSchemaHash; }
+  get supportsNativeToolResults(): boolean { return this.policy.nativeToolResults; }
+  private nativeBody(input: Readonly<ModelProtocolRequest>, value: ResolvedNativeToolResult) {
+    if (!this.supportsNativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    const policy = this.policy.selected(input.features ?? []);
+    policy.parse('', [value.call]);
+    return encodeNativeToolResultBody(this.provider, input, this.body(input, policy, false), value);
+  }
+  nativeInputBoundHash(input: Readonly<ModelProtocolRequest>, value: ResolvedNativeToolResult) {
+    return nativeToolResultInputHash(this.provider, this.nativeBody(modelProtocolRequestSchema.parse(structuredClone(input)), structuredClone(value)));
+  }
   get features(): readonly ModelFeature[] {
-    return [...(this.images ? ['image' as const] : []), ...(this.transport.postStream ? ['streaming' as const] : []),
+    return [...(this.provider === 'openai_responses' ? ['reasoning' as const] : []),
+      ...(this.images ? ['image' as const] : []), ...(this.transport.postStream ? ['streaming' as const] : []),
       ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])];
   }
   constructor(private readonly transport: ModelJsonTransport, options: NativeMessagesOptions = {}) {
@@ -317,7 +361,7 @@ abstract class NativeMessagesAdapter implements ModelAdapter {
     const parsed = modelProtocolRequestSchema.parse(structuredClone(input));
     return messagesGenerationInputHash(this.body(parsed, this.policy.selected(parsed.features ?? []), stream));
   }
-  private prepare(value: ModelProtocolInvocation, credential: string, connection: Readonly<{ baseUrl: string }> | undefined, stream: boolean) {
+  private prepare(value: ModelProtocolInvocation, credential: string, connection: Readonly<{ baseUrl: string }> | undefined, stream: boolean, native?: ResolvedNativeToolResult) {
     if (!value?.signal || typeof value.signal.addEventListener !== 'function' || typeof value.signal.removeEventListener !== 'function'
       || typeof value.signal.aborted !== 'boolean' || value.recordUsage !== undefined && typeof value.recordUsage !== 'function'
       || !connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/u.test(credential)) throw new ModelGatewayError('CONFIG_INVALID');
@@ -326,11 +370,16 @@ abstract class NativeMessagesAdapter implements ModelAdapter {
       ...(value.structuredSchemaHash !== undefined ? { structuredSchemaHash: value.structuredSchemaHash } : {}) });
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     const input = parsed.data, features = input.features ?? [];
-    if (features.some(feature => !this.features.includes(feature)) || !stream && features.includes('streaming')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    if (features.some(feature => !this.features.includes(feature)) || !stream && features.includes('streaming')
+      || features.includes('reasoning') && (stream || features.some(feature => feature !== 'reasoning'))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     if (input.structuredSchemaHash && (!features.includes('structuredOutput') || input.structuredSchemaHash !== this.structuredSchemaHash)) throw new ModelGatewayError('CONFIG_INVALID');
-    const policy = this.policy.selected(features), body = this.body(input, policy, stream);
-    if (value.expectedInputBoundHash !== undefined && (this.provider !== 'anthropic_messages'
-      || messagesGenerationInputHash(body) !== value.expectedInputBoundHash)) throw new ModelGatewayError('CONFIG_INVALID');
+    const policy = this.policy.selected(features), body = native ? this.nativeBody(input, native) : this.body(input, policy, stream);
+    // Bind the final native body BEFORE any dispatch; a plain-text count hash
+    // must never certify a different request containing tool call/result blocks.
+    if (value.expectedInputBoundHash !== undefined && (native
+      ? nativeToolResultInputHash(this.provider, body) !== value.expectedInputBoundHash
+      : this.provider !== 'anthropic_messages' || messagesGenerationInputHash(body) !== value.expectedInputBoundHash))
+      throw new ModelGatewayError('CONFIG_INVALID');
     if (Buffer.byteLength(body) > MODEL_REQUEST_BYTES) throw new ModelGatewayError('INVALID_REQUEST');
     const base = normalizeTenantModelBaseUrl(connection.baseUrl);
     // Both accept a versioned base; Messages also accepts the API root. Never
@@ -379,16 +428,39 @@ abstract class NativeMessagesAdapter implements ModelAdapter {
     if (status === 429) throw new ModelAdapterError('RATE_LIMITED');
     if (status !== 200) throw new ModelAdapterError('PROVIDER_FAILED');
   }
-  async generate(value: ModelProtocolInvocation, credential: string, connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
-    const prepared = this.prepare(value, credential, connection, false);
+  async generate(value: ModelProtocolInvocation, credential: string, connection?: Readonly<{ baseUrl: string }>): Promise<NativeAdapterResult> {
+    return this.generateRequest(value, credential, connection);
+  }
+  async generateNativeToolResult(input: ModelProtocolInvocation, credential: string, value: ResolvedNativeToolResult,
+    connection?: Readonly<{ baseUrl: string }>): Promise<NativeAdapterResult> {
+    if (!this.supportsNativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    return this.generateRequest(input, credential, connection, structuredClone(value));
+  }
+  private async generateRequest(value: ModelProtocolInvocation, credential: string, connection?: Readonly<{ baseUrl: string }>,
+    native?: ResolvedNativeToolResult): Promise<NativeAdapterResult> {
+    const prepared = this.prepare(value, credential, connection, false, native);
     if (prepared.signal.aborted) throw new ModelGatewayError('CANCELLED');
     const result = await this.transport.post(prepared.request); this.status(result.status);
     if (typeof result.body !== 'string' || Buffer.byteLength(result.body) > MODEL_RESPONSE_BYTES) invalid();
     let raw: unknown; try { raw = JSON.parse(result.body); } catch { return invalid(); }
-    const usage = protocolUsage(this.provider, object(raw).usage);
-    if (usage) await prepared.recordUsage?.(usage);
+    const response = object(raw), usage = protocolUsage(this.provider, response.usage);
+    // A receipt may later settle an unknown dispatch, so an interim response's
+    // counters cannot be recorded as final usage even when they are well formed.
+    // Output policy is checked separately: rejected terminal output can still
+    // have a trustworthy original usage receipt.
+    if (usage) {
+      const terminal = this.provider === 'openai_responses'
+        ? response.status === 'incomplete' || response.status === 'failed'
+          || response.status === 'completed' && response.error == null && response.incomplete_details == null
+        : response.type === 'message' && response.role === 'assistant'
+          && ['end_turn', 'tool_use', 'max_tokens', 'stop_sequence'].includes(response.stop_reason as string);
+      if (!terminal) invalid();
+      await prepared.recordUsage?.(usage);
+    }
     if (prepared.signal.aborted) throw new ModelGatewayError('CANCELLED');
-    return completed(this.provider, raw, prepared.policy, credential);
+    const decoded = completed(this.provider, raw, prepared.policy, credential, true);
+    return prepared.input.features?.includes('reasoning') ? { ...decoded,
+      reasoningEvidence: responsesReasoningEvidence(raw, usage, credential) } : decoded;
   }
   async *stream(value: ModelProtocolInvocation, credential: string, connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent> {
     if (!this.transport.postStream) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');

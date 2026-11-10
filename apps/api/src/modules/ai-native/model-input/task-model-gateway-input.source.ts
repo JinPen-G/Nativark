@@ -25,15 +25,15 @@ const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
 export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
-  private readonly scene: GatewayTextIntentBinding;
+  private readonly scene: GatewayTextIntentBinding & { nativeToolResults?: boolean };
   private readonly runtime: PublicGatewayRuntime;
   private readonly priceVersion: string;
   constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'
     | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'> & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>,
     private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
-    runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding, priceVersion: string,
+    runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding & { nativeToolResults?: boolean }, priceVersion: string,
   private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
-    this.scene = gatewayTextIntentBindingSchema.parse(structuredClone(scene));
+    this.scene = gatewayTextIntentBindingSchema.extend({ nativeToolResults: z.boolean().optional() }).parse(structuredClone(scene));
     taskModelPolicy(this.policy);
     this.priceVersion = id.max(64).parse(priceVersion);
     if (typeof inputs?.publishModelInput !== 'function' || typeof inputs?.readModelForExecution !== 'function'

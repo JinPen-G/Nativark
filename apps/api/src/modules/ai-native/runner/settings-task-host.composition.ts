@@ -18,8 +18,8 @@ import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease, type AiTaskHeldPreparation } from './ai-task-runner.service';
-import type { AiTaskRunnerClock } from './ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import type { AiTaskRunnerClock, AiTaskRunnerLease } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
@@ -66,6 +66,9 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
       steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: tool, toolVersion: AI_TOOL_DRAFT_VERSION }],
       limits: structuredClone(task.limits) }, lease);
   };
+  withAiTaskHeldPreparationDefinition(prepare, { taskId: task.taskId, runId: task.runId,
+    steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: tool, toolVersion: AI_TOOL_DRAFT_VERSION }],
+    limits: task.limits, bindingHash: requestFingerprint(task) });
   const registrations = new AiStepRegistrationRepository(input.db, inputs.source, input.clock, undefined,
     { resolve: command => authorization.authority.resolve(command.taskId, 'read_step_terminal') });
   const transitions = new AiStepTransitionRepository(input.db,
@@ -167,8 +170,22 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     const claim = Object.freeze({ taskId: task.taskId, runId: task.runId,
       holderId: host.holderId, leaseMs: host.leaseMs, expectedTaskRevision: stored.revision,
       expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken });
-    const lease = snapshotAiTaskRunnerClaimLease(claim,
-      await wait(() => authorization.tasks.claimRecoveryRun({ ...claim }), true));
+    const received = await wait(() => authorization.tasks.claimRecoveryRun({ ...claim }), true).catch(error => {
+      // The repository may have committed the claim before losing its reply.
+      // Storage failure cannot authorize rereading the held lease or releasing it.
+      if (error instanceof AiTaskRepositoryError && error.code === 'AI_STORAGE_UNAVAILABLE') {
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      }
+      throw error;
+    });
+    let lease: AiTaskRunnerLease & { purpose: 'recovery_only' };
+    try {
+      const acknowledged = structuredClone(received);
+      if (acknowledged?.purpose !== 'recovery_only') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      lease = { ...snapshotAiTaskRunnerClaimLease(claim, acknowledged), purpose: acknowledged.purpose };
+    } catch {
+      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    }
     let cleanupSafe = true, failed = false;
     try {
       if ((await read(() => authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run'))).bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');

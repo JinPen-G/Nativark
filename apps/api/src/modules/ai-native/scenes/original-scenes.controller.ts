@@ -11,7 +11,8 @@ import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalScen
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
   AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
   AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS,
-  AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS,
+  AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS, AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2,
+  AI_ORDER_EXPLANATION_HTTP_SCHEMAS_V2, type AiOrderSceneTaskMaterialV2,
   type AiOriginalOpeningReadSourceDraft, type AiSceneModelQuotePreparationResponseDraft,
   type AiSceneModelQuoteConfirmResponseDraft, type AiSceneModelQuoteReceiptResponseDraft,
   type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft,
@@ -87,11 +88,20 @@ type QuoteResponses = { AiSceneModelQuotePreparationResponseDraft: AiSceneModelQ
   AiOriginalQuoteReceiptResponseDraft: AiOriginalQuoteReceiptResponseDraft; AiOriginalQuotesCompareResponseDraft: AiOriginalQuotesCompareResponseDraft };
 const quoteValidators = Object.fromEntries(Object.keys(AI_SCENE_QUOTE_HTTP_SCHEMAS).map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: quoteDefinitions })]));
-const requestResponseNames = [...new Set(Object.values(AI_SCENE_REQUEST_HTTP_CONTRACTS).map(contract => contract.response))];
+const requestResponseNames = [...new Set([...Object.values(AI_SCENE_REQUEST_HTTP_CONTRACTS),
+  ...Object.values(AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2)].map(contract => contract.response))];
 const requestResponseDefinitions = JSON.parse(JSON.stringify({ ...AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, ...AI_SCOPE_DRAFT_SCHEMAS,
+  ...AI_ORDER_EXPLANATION_HTTP_SCHEMAS_V2,
   ...Object.fromEntries([...requestResponseNames,
-  'AiSceneRequestReceiptDraft', 'AiSceneTaskReceiptDraft', 'AiSceneRequestBodyDraft'].map(name => [name,
-  AI_SCENE_REQUEST_DRAFT_SCHEMAS[name] ?? AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS[name]])) }).replaceAll('#/components/schemas/', '#/$defs/'));
+  'AiSceneRequestReadDraft', 'AiSceneRequestReceiptDraft', 'AiSceneTaskReceiptDraft', 'AiSceneRequestBodyDraft'].map(name => [name,
+  AI_SCENE_REQUEST_DRAFT_SCHEMAS[name] ?? AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS[name] ?? AI_ORDER_EXPLANATION_HTTP_SCHEMAS_V2[name]])) }).replaceAll('#/components/schemas/', '#/$defs/'));
+const orderV2RequestValidators = Object.fromEntries(Object.values(AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2).map(contract => [contract.request,
+  openingSourceAjv.compile({ $ref: `#/$defs/${contract.request}`, $defs: requestResponseDefinitions })]));
+function parseOrderV2HttpRequest(name: keyof typeof orderV2RequestValidators, value: unknown): unknown {
+  try { const copy = structuredClone(value); if (orderV2RequestValidators[name](copy)) return copy; }
+  catch { /* Neither malformed commands nor caller scope can grant access. */ }
+  throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+}
 const requestResponseValidators = Object.fromEntries(requestResponseNames.map(name => [name,
   openingSourceAjv.compile({ $ref: `#/$defs/${name}`, $defs: requestResponseDefinitions })]));
 function validateSceneRequestResponse<T>(name: typeof requestResponseNames[number], value: T, writing = false): T {
@@ -303,6 +313,27 @@ export class AiOriginalScenesController {
     }
     return result;
   }); }
+  /** Separate read publication; the legacy material/model endpoint is unchanged. */
+  @Post('order-explanation-v2/material') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  materialV2(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.call(request, body, async (current, raw, signal) => {
+      const command = parseOrderV2HttpRequest('AiSceneRequestReadDraft', raw);
+      const result = validateSceneRequestResponse('AiOrderSceneTaskMaterialV2',
+        await this.scenes.prepareOrderTaskMaterialV2(current, command, signal)) as AiOrderSceneTaskMaterialV2;
+      if (requestFingerprint(result.material) !== result.materialHash
+        || requestFingerprint(result.material.payload) !== result.material.payloadFingerprint
+        || Buffer.byteLength(JSON.stringify(result.material.payload), 'utf8') !== result.material.payloadBytes)
+        throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      return result;
+    });
+  }
+  @Post('order-explanation-v2/source') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  sourceV2(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return this.call(request, body, async (current, raw, signal) => {
+      const command = parseOrderV2HttpRequest('AiOriginalOrderSourceReopenV2', raw);
+      return validateSceneRequestResponse('AiOriginalOrderSourceReadV2', await this.scenes.reopenOrderCitationV2(current, command, signal));
+    });
+  }
   @Post('recovery') @Header('Cache-Control', 'no-store')
   recovery(@Req() request: SceneRunHttpRequest, @Body() body: unknown) { return this.call(request, body, async (current, command, signal) =>
     validateSceneRequestResponse('AiSceneRequestRecoveryDraft', await this.scenes.readRecovery(current, command, signal))); }

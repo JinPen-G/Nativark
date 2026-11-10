@@ -235,8 +235,8 @@ test('pickup and return actual pages stay default-off and bind private hosts onl
     const source = fs.readFileSync(`apps/staff-miniprogram/src/pages/${stage}/index.ts`, 'utf8').replace(/^import[^\n]*\n/gm, '');
     vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText,
       { Page: value => { page = value; }, themeBehavior: {}, loadingState: () => ({}), isSignedIn: () => true, ...exports });
-    const child = { attachHost: host => { attached++; bound = host; }, detachHost: () => { detached++; bound = undefined; },
-      hostShow: async () => { shown++; }, hostHide: () => { shown--; } };
+    const child = { attachHost: host => { attached++; bound = host; }, attachReceiptHost: host => { attached++; bound = host; },
+      detachHost: () => { detached++; bound = undefined; }, hostShow: async () => { shown++; }, hostHide: () => { shown--; } };
     const instance = { ...page, data: { ...page.data, id: 'order-1' }, order: {}, template: { id: 'template-1' },
       setData(patch) { Object.assign(this.data, patch); }, selectComponent: () => child };
     instance.onShow(); assert.equal(attached, 0); assert.notEqual(instance.data.aiInspectionVisible, true);
@@ -245,10 +245,20 @@ test('pickup and return actual pages stay default-off and bind private hosts onl
       serverEnabled: false, draftId: 'draft-1', current: () => true };
     instance.attachInspectionHost(host); assert.equal(attached, 0);
     host.serverEnabled = true; instance.attachInspectionHost(host); assert.equal(attached, 1); assert.equal(bound.current(), true);
+    const previousBinding = bound; instance.attachInspectionHost(host);
+    assert.equal(previousBinding.current(), false, 'same-page rebinding permanently retracts the old host reference');
+    assert.equal(bound.current(), true);
     const old = bound; instance.data.id = 'order-2'; assert.equal(old.current(), false); instance.data.id = 'order-1';
     instance.template = { id: 'template-1', version: 'new-version' }; assert.equal(old.current(), false);
     instance.template = { id: 'template-1' };
     instance.onHide(); instance.onShow(); assert.ok(shown >= 1);
+    const receiptHost = { ...host, serverEnabled: true, mode: 'receipt_only' };
+    assert.equal(exports.attachReceiptInspectionPage(instance, receiptHost, stage), true);
+    assert.equal(old.current(), false, 'switching to receipt mode invalidates the editable host');
+    const previousReceipt = bound;
+    assert.equal(exports.attachReceiptInspectionPage(instance, receiptHost, stage), true);
+    assert.equal(previousReceipt.current(), false, 'receipt rebinding does not reactivate an old receipt reader');
+    const currentReceipt = bound; exports.clearInspectionPage(instance); assert.equal(currentReceipt.current(), false);
     version++; session = { ...session, currentWorkspaceId: 'space-2' };
     for (const listener of [...listeners]) listener();
     assert.equal(old.current(), false); assert.equal(instance.data.aiInspectionVisible, false);

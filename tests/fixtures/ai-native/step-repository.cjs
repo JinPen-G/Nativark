@@ -3,7 +3,17 @@ const assert = require('node:assert/strict');
 const path = require('node:path'), fs = require('node:fs'), { createRequire } = require('node:module');
 const root = path.resolve(__dirname, '../../..');
 const apiRequire = createRequire(path.join(root, 'apps/api/package.json'));
-assert.ok(fs.realpathSync(apiRequire.resolve('@prisma/client')).startsWith(fs.realpathSync(path.join(root, 'apps/api/node_modules/@prisma/client')) + path.sep));
+const offlinePreload = require.resolve(path.join(root, 'tests/fixtures/ai-native/prisma-offline-preload.cjs'));
+const protectedOffline = process.env.DATABASE_URL === 'mysql://offline:offline@127.0.0.1:1/rental_os_offline'
+  && Boolean(require.cache[offlinePreload]);
+// The approved preload maps the API import to this tree's private client.
+// Retain the normal API-package guard, and reject shared/foreign clients when
+// running under that preload instead of weakening the ownership assertion.
+const clientRoot = fs.realpathSync(path.resolve(root, protectedOffline
+  ? process.env.AI_OFFLINE_PRISMA_CLIENT_ROOT ?? 'output/repair-current-20261101-uotDQk/generated'
+  : 'apps/api/node_modules/@prisma/client'));
+if (protectedOffline) assert.ok(clientRoot.startsWith(path.join(fs.realpathSync(root), 'output') + path.sep));
+assert.ok(fs.realpathSync(apiRequire.resolve('@prisma/client')).startsWith(clientRoot + path.sep));
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022' } });
 const { AiStepTransitionRepository } = require(path.join(root, 'apps/api/src/modules/ai-native/ai-step-transition.repository'));
 const { AiTaskEventRepository } = require(path.join(root, 'apps/api/src/modules/ai-native/ai-task-event.repository'));

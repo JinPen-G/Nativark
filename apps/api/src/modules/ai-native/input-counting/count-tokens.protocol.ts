@@ -2,8 +2,9 @@
  * This codec currently implements only the registered Messages counting
  * endpoint; other configured protocols lack an implemented counting source
  * here. That is a local support boundary, not a claim about every supplier.
- * The request encoding mirrors AnthropicMessagesAdapter's input-determining
- * fields (model, system, messages, tools, tool_choice). Structured-output
+ * Text and server-resolved native call/result encoding mirror the Messages
+ * adapter's input-determining fields (model, system, messages, tools, tool_choice).
+ * Native counting does not execute tools or reconstruct caller history. Structured-output
  * serialization is not certified here and is refused rather than silently
  * omitting the schema sent by the generation adapter. */
 import { z } from 'zod';
@@ -12,6 +13,8 @@ import { normalizeTenantModelBaseUrl } from '../tenant-model-config.service';
 import { ModelGatewayError, modelProtocolRequestSchema, type ModelProtocolRequest } from '../model-gateway.ports';
 import { MODEL_REQUEST_BYTES } from '../model-response-limits';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { encodeNativeToolResultBody, nativeMessagesCountBody } from '../native-tool-result.encoding';
+import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from '../model-input/native-tool-result.ports';
 
 export type CountTokensProtocol = 'anthropic_messages';
 export interface CountTokensSupport {
@@ -90,6 +93,22 @@ export function prepareCountTokensMaterial(input: Readonly<ModelProtocolRequest>
       tool_choice: { type: 'auto', disable_parallel_tool_use: true } } : {}) });
   if (Buffer.byteLength(body) > MODEL_REQUEST_BYTES) throw new ModelGatewayError('INVALID_REQUEST');
   return { body, pathname: '/messages/count_tokens' };
+}
+
+/** Count the same private original call/result blocks sent by Messages native
+ * generation. Only the original resolver supplies value; no caller native IDs,
+ * task authorization, dispatch or additional request is created by this codec. */
+export function prepareNativeCountTokensMaterial(input: Readonly<ModelProtocolRequest>, policy: ChatProtocolPolicy,
+  value: ResolvedNativeToolResult): CountTokensMaterial {
+  if (!policy.nativeToolResults) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  const parsed = resolvedNativeToolResultSchema.safeParse(structuredClone(value));
+  if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+  const selected = policy.selected(input.features ?? []);
+  selected.parse('', [parsed.data.call]);
+  const original = prepareCountTokensMaterial(input, selected);
+  const body = encodeNativeToolResultBody('anthropic_messages', input,
+    JSON.stringify({ ...JSON.parse(original.body), stream: false }), parsed.data);
+  return { pathname: original.pathname, body: nativeMessagesCountBody(body) };
 }
 
 /** The provider endpoint path is invariant regardless of whether the base URL

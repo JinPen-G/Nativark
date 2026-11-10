@@ -101,10 +101,10 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       || row.authorizationBindingHash !== originalIdentityHash(current.context))) throw denied();
     return { row, body, context: current.context, receipt: this.receipt(row) };
   }
-  private async load(inputRef: string, creation = false, history = false) {
+  private async load(inputRef: string, creation = false, history = false, tx?: Prisma.TransactionClient) {
     if (!originalRequestReferenceSchema.safeParse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef }).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const current = await this.authority.current();
-    const row = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } }));
+    const row = await this.stored(() => (tx ?? this.db).aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } }));
     if (!row || row.id !== inputRef) throw unavailable();
     return this.checked(row, current, creation, history);
   }
@@ -114,31 +114,34 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     const result = await this.load(parsed.data.inputRef);
     return freezeOriginalInput({ receipt: result.receipt, request: result.body });
   }
-  async readHistorical(value: unknown) {
+  /** A server-owned transaction may bind provenance to its task/selection locks.
+   * Identity and resource authorities still resolve now, never from this client. */
+  async readHistorical(value: unknown, tx?: Prisma.TransactionClient) {
     const parsed = originalRequestReferenceSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const result = await this.load(parsed.data.inputRef, false, true);
+    const result = await this.load(parsed.data.inputRef, false, true, tx);
     return freezeOriginalInput({ receipt: result.receipt, request: result.body, context: result.context });
   }
   /** Retained business locator only. An erasure receipt attests deletion, not
    * the missing plaintext. Current task policy and downstream Core/quote guards
    * still authorize each read; this never returns scene input or a create grant. */
-  async readTaskLocator(value: unknown) {
+  async readTaskLocator(value: unknown, tx?: Prisma.TransactionClient) {
     const parsed = originalRequestReferenceSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const db = tx ?? this.db;
     const inputRef = parsed.data.inputRef, initial = await this.authority.current();
-    const row = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(initial), id: inputRef } }));
+    const row = await this.stored(() => db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(initial), id: inputRef } }));
     if (!row || row.id !== inputRef) throw unavailable();
     if (!row.erasedAt) {
       const original = await this.checked(row, initial, false, true);
       return freezeOriginalInput({ receipt: original.receipt, context: original.context, material: 'retained' as const,
-        task: await this.readTaskReceipt(inputRef) });
+        task: await this.readTaskReceipt(inputRef, tx) });
     }
-    if (!this.authority.observeTask || !this.db.aiDataErasure || row.contractVersion !== AI_SCENE_REQUEST_DRAFT_VERSION
+    if (!this.authority.observeTask || !db.aiDataErasure || row.contractVersion !== AI_SCENE_REQUEST_DRAFT_VERSION
       || !(AI_SCENE_CODES as readonly string[]).includes(row.sceneCode) || !Number.isSafeInteger(row.revision) || row.revision < 1
       || !/^[a-f0-9]{64}$/u.test(row.contentHash) || !/^[a-f0-9]{64}$/u.test(row.authorizationBindingHash)) throw unavailable();
     const read = async () => {
-      const task = await this.db.aiTask.findFirst({ where: { ...this.owned(initial), creationKey: keyForTask(inputRef) }, select: {
+      const task = await db.aiTask.findFirst({ where: { ...this.owned(initial), creationKey: keyForTask(inputRef) }, select: {
         id: true, scopeId: true, scopeKind: true, ownerKind: true, ownerId: true, audience: true, creationKey: true,
         inputRef: true, inputRevision: true, inputHash: true, sceneCode: true, sceneVersion: true,
         archivedAt: true, status: true, revision: true, resultRef: true, createdAt: true,
@@ -154,7 +157,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       const marker = row.payload;
       if (!marker || typeof marker !== 'object' || Array.isArray(marker) || marker.retention !== 'erased'
         || marker.policyVersion !== AI_RETENTION_POLICY.version || typeof marker.receiptId !== 'string') throw unavailable();
-      const erasure = await this.db.aiDataErasure!.findUnique({ where: { id: marker.receiptId } });
+      const erasure = await db.aiDataErasure!.findUnique({ where: { id: marker.receiptId } });
       const scope = initial.context.scope;
       if (scope.kind !== 'workspace' || !erasure || erasure.state !== 'erased' || erasure.tenantId !== scope.tenantId
         || erasure.workspaceId !== scope.workspaceId || erasure.policyVersion !== AI_RETENTION_POLICY.version
@@ -172,7 +175,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       expiresAt: value.expiresAt.toISOString(), erasedAt: value.erasedAt?.toISOString() });
     const before = await read(), current = await this.authority.observeTask(before.taskId);
     this.sameIdentity(initial, current);
-    const after = await read(), latest = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } });
+    const after = await read(), latest = await db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } });
     if (!latest || requestFingerprint(before) !== requestFingerprint(after)
       || rowBinding(latest) !== rowBinding(row)) throw denied();
     this.sameIdentity(current, await this.authority.observeTask(before.taskId));
@@ -312,8 +315,8 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       || row.expiresAt <= this.clock()) throw denied();
     this.exact(row, { context: grant.context, scopeId: owner.scopeId });
   }
-  async resolve(sceneCode: string, inputRef: string) {
-    const result = await this.load(inputRef, true);
+  async resolve(sceneCode: string, inputRef: string, tx?: Prisma.TransactionClient) {
+    const result = await this.load(inputRef, true, false, tx);
     if (result.row.sceneCode !== sceneCode) throw denied();
     return { context: result.context, creationAllowed: true as const, sceneCode, sceneVersion: result.row.sceneVersion,
       inputRef: result.row.id, inputRevision: result.row.revision, inputHash: result.row.contentHash };
@@ -343,14 +346,15 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     this.sameIdentity(initial, await this.authority.current());
     return { receipt: this.receipt(row), ...material, operationKey: row.creationCloseKey, closedAt: row.creationClosedAt };
   }
-  async readTaskReceipt(inputRef: string): Promise<AiSceneTaskReceiptDraft> {
+  async readTaskReceipt(inputRef: string, tx?: Prisma.TransactionClient): Promise<AiSceneTaskReceiptDraft> {
     if (!originalRequestReferenceSchema.safeParse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef }).success)
       throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const db = tx ?? this.db;
     const current = await this.authority.current();
-    const head = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } }));
-    if (head?.erasedAt) return (await this.readTaskLocator({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef })).task;
-    const original = await this.load(inputRef, false, true), access = aiTaskAccessFromContext(original.context, 'original-request', this.clock());
-    const row = await this.stored(() => this.db.aiTask.findFirst({ where: { scopeId: original.row.scopeId, scope: { is: access.scope },
+    const head = await this.stored(() => db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } }));
+    if (head?.erasedAt) return (await this.readTaskLocator({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef }, tx)).task;
+    const original = await this.load(inputRef, false, true, tx), access = aiTaskAccessFromContext(original.context, 'original-request', this.clock());
+    const row = await this.stored(() => db.aiTask.findFirst({ where: { scopeId: original.row.scopeId, scope: { is: access.scope },
       audience: access.audience, ownerKind: access.actorKind, ownerId: access.actorId, creationKey: keyForTask(inputRef) },
       select: { id: true, scopeId: true, audience: true, ownerKind: true, ownerId: true, creationKey: true, inputRef: true, inputRevision: true,
         inputHash: true, sceneCode: true, sceneVersion: true, status: true, revision: true, archivedAt: true, resultRef: true,

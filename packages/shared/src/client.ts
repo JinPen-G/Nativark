@@ -9,6 +9,7 @@
 import type {
   CustomerMembershipBenefit,
   RentalBookingIdentityInput,
+  RentalDeliveryAddressDraft,
   RentalFulfillmentMode,
   RentalOfflinePaymentMethod,
   RentalPaymentMethod,
@@ -520,6 +521,9 @@ export interface ClientQuoteServiceRequest {
   serviceLocationId?: string;
 }
 
+/** 原受控客户表单的本单地址；只交Core固化快照，不写地址簿，不进入模型或Booking确认载荷。 */
+export type ClientQuoteDeliveryAddressDraft = RentalDeliveryAddressDraft;
+
 export interface ClientCreateQuoteRequest {
   bookingIdentity?: RentalBookingIdentityInput;
   fulfillmentMode: RentalFulfillmentMode;
@@ -532,8 +536,10 @@ export interface ClientCreateQuoteRequest {
   customerCouponId?: string;
   lines: ClientQuoteLineRequest[];
   services?: ClientQuoteServiceRequest[];
-  /** 配送类履约方式必须选择本人地址簿中的地址；服务端在报价时固化快照。 */
+  /** 配送类履约方式选择本人地址簿地址或本单地址，二者互斥；服务端在报价时固化快照。 */
   deliveryAddressId?: string;
+  /** 仅原受控表单输入，不写地址簿；不提供客户/租户/空间或地址版本自授权字段。 */
+  deliveryAddressDraft?: ClientQuoteDeliveryAddressDraft;
 }
 
 export interface ClientCreateOrderRequest {

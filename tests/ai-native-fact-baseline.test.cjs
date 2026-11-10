@@ -59,7 +59,7 @@ for (const categoryCode of ["camera", "camping", "vehicle", "construction"]) {
     assert.throws(() => h.business.currentRule(input.TENANT_ID, h.context), /没有生效的租赁规则版本/u);
     await assert.rejects(() => h.business.createQuote(input.TENANT_ID, h.context, input.quoteInput(h.context)), /没有覆盖.*定价计划/u);
     // Install only the readiness dependency after testing the legacy no-membership quote path.
-    h.business.memberships = { listPlans: async () => [] };
+    h.business.memberships = { countPlans: async () => 0 };
     const missingContext = { ...h.context, locations: [], groups: [], pricingGroups: [] };
     const readiness = await h.business.tenantReadiness(input.TENANT_ID, missingContext);
     assert.equal(readiness.ready, false);
@@ -84,7 +84,7 @@ for (const categoryCode of ["camera", "camping", "vehicle", "construction"]) {
     assert.equal(h.businessFacts.writes.filter(row => row.kind === "quote").length, 0);
   });
   test(`${categoryCode}: membership outage is unavailable, not absence or readiness`, async () => {
-    const h = await harness(categoryCode, { listPlans: async () => { throw new Error("synthetic dependency outage"); } });
+    const h = await harness(categoryCode, { countPlans: async () => { throw new Error("synthetic dependency outage"); } });
     const readiness = await h.business.tenantReadiness(input.TENANT_ID, h.context);
     const member = readiness.items.find(row => row.key === "membership_base");
     assert.equal(member.unavailable, true);

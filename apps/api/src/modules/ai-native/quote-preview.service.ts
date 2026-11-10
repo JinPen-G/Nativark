@@ -242,7 +242,10 @@ export class AiQuotePreviewService {
     if (quote?.tenantId !== context.scope.tenantId || !Array.isArray(quote?.request?.lines) || quote.request.lines.length !== expectedLines
       || requestFingerprint(quote.request) !== expectedRequest
       || !this.hasSafeAmounts(quote)
-      || !chargeLines.success || !savedBasis.success) throw new ModelGatewayError("INVALID_RESPONSE");
+      || !chargeLines.success || !savedBasis.success
+      // New quotes must carry their own currency and pricing zone. Historical
+      // missing evidence remains missing; never fill it from current settings.
+      || (!historical && (!savedBasis.data.currency || !savedBasis.data.pricingContext?.timeZone))) throw new ModelGatewayError("INVALID_RESPONSE");
     const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
     if (!historical && expiresAt.getTime() <= observed.getTime()) return { ...this.failure(context, "expired", "报价生成后已失效"), quotePersistence: 'saved' };
     return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: expiresAt.getTime() <= observed.getTime() ? "expired" : "quoted", quotePersistence: 'saved', quote: {

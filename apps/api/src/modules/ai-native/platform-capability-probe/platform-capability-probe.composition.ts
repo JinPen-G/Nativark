@@ -20,6 +20,7 @@ import { PrismaTextProbeOriginalRequestRepository, type TextProbeOriginalAccessP
 import { composeTextCapabilityProbeTaskProducer } from '../text-capability-probe-task-producer.composition';
 import { TEXT_PROBE_SCENE, TEXT_CAPABILITY_PROBE_TOOL, type TextProbeCommand, type TextProbeContext } from '../text-capability-probe';
 import type { UnifiedGatewayAudit } from '../unified-ai-gateway.ports';
+import { PrismaPlatformGatewayAudit } from '../prisma-platform-gateway-audit';
 import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
 import { PlatformTaskIdentityAuthority, composePlatformTaskAuthorization, PlatformTaskPlanPolicyReader } from './platform-probe.authorization';
 import { PlatformBudgetAuthorizationSource, PlatformPolicyEntitlementSource, PlatformGatewayCallPricing } from './platform-budget.authorization';
@@ -101,7 +102,9 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
     entitlements: new PlatformPolicyEntitlementSource(input.db, TEXT_PROBE_SCENE, clock),
     entitlementFeatureCode: 'ai.native.platform.probe',
     pricing: new PlatformGatewayCallPricing(input.db, scopes, input.priceVersion, clock),
-    ...(input.audit !== undefined ? { audit: input.audit } : {}),
+    ...(input.audit !== undefined ? { audit: input.audit } : {
+      auditForTask: (taskId, facts) => new PrismaPlatformGatewayAudit(input.db, scopes, facts, taskId, clock),
+    }),
     ...(input.protocol !== undefined ? { protocol: input.protocol } : {}),
     clock,
     platformConnection: createAuthorizedPlatformModelConfiguration({ db: input.db, guard: input.guard,

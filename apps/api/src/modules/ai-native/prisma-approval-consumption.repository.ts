@@ -71,7 +71,10 @@ export class PrismaAiApprovalConsumptionRepository implements AiApprovalConsumpt
       if (row && (row.status !== 'COMMITTED' || !row.resultRef)) throw new AiApprovalConsumptionRepositoryError('UNKNOWN');
       await current(binding, 'replay', tx);
       return row?.resultRef ?? null;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    // This is a non-writing observation, not consumption or execution admission.
+    // Keep both current-binding checks, but avoid shared SELECT locks behind a
+    // caller's business writes and allow their bounded original-input readers.
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 15000 });
     const verify = async (tx: Tx, binding: Readonly<ApprovedOrderBinding>) => {
       const access = await current(binding, 'execute', tx);
       const taskWhere = { ...access.where, scopeId: input.scopeId, status: 'RUNNING' as const, cancelRequestedAt: null };

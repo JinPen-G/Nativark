@@ -1,3 +1,11 @@
+import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
+import { AI_NATIVE_TASK_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiTaskOrderHandoffController } from './modules/ai-native/task-order-handoff.application';
+import { AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiTaskCalendarDraftController } from './modules/ai-native/task-calendar-draft.application';
+import { AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AiMemberNameController } from './modules/ai-native/member-name.application';
+import { AI_NATIVE_MEMBER_NAME_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { Module } from "@nestjs/common";
 import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
@@ -117,6 +125,8 @@ import { AiInputCountingController } from './modules/ai-native/input-counting/in
 import { AI_NATIVE_INPUT_COUNTING_PROVIDER, AI_NATIVE_PLATFORM_PROBE_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { PlatformCapabilityProbeController } from './modules/ai-native/platform-capability-probe/platform-capability-probe.controller';
 import { AiModelSettingsController } from './modules/ai-native/model-settings.application';
+import { AiTaskRuleDraftController } from './modules/ai-native/task-rule-draft.application';
+import { AI_NATIVE_TASK_RULE_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskCenterController } from './modules/ai-native/task-center.application';
 import { AiConversationController } from './modules/ai-native/conversation.application';
 import { AI_NATIVE_CONVERSATION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -176,6 +186,11 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AiGatewayPricingHistoryController,
     AiModelSettingsController,
     AiTaskCenterController,
+    AiMemberNameController,
+    AiTaskRuleDraftController,
+    AiTaskCalendarDraftController,
+    AiTaskOrderHandoffController,
+    AiTaskReadPolicyController,
     AiPlatformModelSettingsController,
     HumanMemoryManagementController,
     KnowledgePolicyManagementController,
@@ -243,6 +258,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
     AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
     AI_NATIVE_CONVERSATION_PROVIDER,
+    AI_NATIVE_MEMBER_NAME_PROVIDER,
     ApiAuthGuard,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER,
@@ -250,6 +266,10 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
     AI_NATIVE_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_TASK_CENTER_PROVIDER,
+    AI_NATIVE_TASK_RULE_DRAFT_PROVIDER,
+    AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER,
+    AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER,
+    AI_NATIVE_TASK_READ_POLICY_PROVIDER,
     AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
     AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,
