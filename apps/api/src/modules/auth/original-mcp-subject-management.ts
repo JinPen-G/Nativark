@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import type { AuthService } from './auth.service';
 import type { PlatformService } from '../platform/platform.service';
 import type { OperationLogService } from '../../common/operation-log.service';
-import type { OriginalOAuthSubjectManagement, captureOAuthSubjectReceipt } from '@rental-os/mcp-server/prisma-oauth-subject-store';
+import type { OriginalOAuthSubjectManagement, captureOAuthSubjectReceipt } from '@rental-os/mcp-server/prisma-oauth-subject-store' with { 'resolution-mode': 'import' };
 
 const unavailable = () => new Error('Original MCP subject management unavailable');
 const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(v);

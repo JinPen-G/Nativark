@@ -2,7 +2,7 @@
  * The caller's binding callback re-reads the persisted grant/admission in the same
  * native Prisma transaction. No OAuth verification, role copy, Web token or default. */
 import type { Prisma } from '@prisma/client';
-import type { OriginalOAuthGrantIdentity } from '@rental-os/mcp-server/prisma-oauth-grant-authority';
+import type { OriginalOAuthGrantIdentity } from '@rental-os/mcp-server/prisma-oauth-grant-authority' with { 'resolution-mode': 'import' };
 import type { AuthService } from './auth.service';
 
 export function createOriginalMcpGrantIdentity(auth: Pick<AuthService, 'withTrustedWorkspacePrincipal' | 'consumeTrustedWorkspaceAccess'>): OriginalOAuthGrantIdentity<Prisma.TransactionClient> {

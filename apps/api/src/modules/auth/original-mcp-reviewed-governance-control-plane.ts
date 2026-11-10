@@ -8,12 +8,12 @@ import type { PlatformService } from '../platform/platform.service';
 import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpPublicClientManagement } from './original-mcp-public-client-management';
 import { createOriginalMcpConsentPolicyManagement } from './original-mcp-consent-policy-management';
-import type { createMcpReviewedGovernanceControlPlane, McpReviewedGovernanceConfig } from '@rental-os/mcp-server/reviewed-governance-control-plane';
-import type { createPrismaPublicClientRegistry, PrismaPublicClientRegistry, captureRegisteredPublicClient, capturePublicClientRegistrationReceipt } from '@rental-os/mcp-server/prisma-public-client-registry';
-import type { PublicClientRegistrationReviewSource } from '@rental-os/mcp-server/prisma-public-client-review';
-import type { createPrismaOAuthConsentPolicyStore, PrismaOAuthConsentPolicyStore, OriginalOAuthConsentPolicyReviewSource, captureOAuthConsentPolicyTarget, captureOAuthConsentPolicyReceipt } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store';
-import type { captureOAuthConsentPolicy } from '@rental-os/mcp-server/prisma-oauth-consent-review';
-import type { OAuthSqlDatabase } from '@rental-os/mcp-server/prisma-oauth-store';
+import type { createMcpReviewedGovernanceControlPlane, McpReviewedGovernanceConfig } from '@rental-os/mcp-server/reviewed-governance-control-plane' with { 'resolution-mode': 'import' };
+import type { createPrismaPublicClientRegistry, PrismaPublicClientRegistry, captureRegisteredPublicClient, capturePublicClientRegistrationReceipt } from '@rental-os/mcp-server/prisma-public-client-registry' with { 'resolution-mode': 'import' };
+import type { PublicClientRegistrationReviewSource } from '@rental-os/mcp-server/prisma-public-client-review' with { 'resolution-mode': 'import' };
+import type { createPrismaOAuthConsentPolicyStore, PrismaOAuthConsentPolicyStore, OriginalOAuthConsentPolicyReviewSource, captureOAuthConsentPolicyTarget, captureOAuthConsentPolicyReceipt } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store' with { 'resolution-mode': 'import' };
+import type { captureOAuthConsentPolicy } from '@rental-os/mcp-server/prisma-oauth-consent-review' with { 'resolution-mode': 'import' };
+import type { OAuthSqlDatabase } from '@rental-os/mcp-server/prisma-oauth-store' with { 'resolution-mode': 'import' };
 export interface OriginalReviewedGovernancePackageExports {
   createMcpReviewedGovernanceControlPlane: typeof createMcpReviewedGovernanceControlPlane;
   createPrismaPublicClientRegistry: typeof createPrismaPublicClientRegistry;

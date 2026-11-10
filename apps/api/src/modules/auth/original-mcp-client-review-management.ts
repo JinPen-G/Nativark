@@ -3,8 +3,8 @@
  * Review producer owns nonce/CAS/publication/commit; no body identity is trusted. */
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
-import type { RegisteredPublicClient } from '@rental-os/mcp-server/public-client-authorization';
-import type { OriginalPublicClientReviewManagement, publicClientReviewRegistrationHash } from '@rental-os/mcp-server/prisma-public-client-review';
+import type { RegisteredPublicClient } from '@rental-os/mcp-server/public-client-authorization' with { 'resolution-mode': 'import' };
+import type { OriginalPublicClientReviewManagement, publicClientReviewRegistrationHash } from '@rental-os/mcp-server/prisma-public-client-review' with { 'resolution-mode': 'import' };
 import type { AuthService } from './auth.service';
 import type { TrustedPlatformBrowserPrincipal } from './trusted-platform-browser-principal';
 import type { OperationLogService } from '../../common/operation-log.service';
