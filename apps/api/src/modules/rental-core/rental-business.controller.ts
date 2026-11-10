@@ -40,6 +40,7 @@ import { OfficialCalendarSourceService } from "./official-calendar-source.servic
 import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 import { RentalFundingService } from "./rental-funding.service";
+import { parseRentalOfflinePaymentMethod } from "./rental-offline-payment-method";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import {
   canManageWorkspaceWideNotifications,
@@ -340,8 +341,8 @@ export class RentalBusinessController {
 
   // 资金事实入口：模拟仍受演练门约束；线下退押/抵扣须显式原实收与凭证。
   @Get("orders/:orderId/funding-events") fundingEvents(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string) { return this.funding.listEvents(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId); }
-  @Post("orders/:orderId/funding-events/initiate") @HttpCode(201) async initiateFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: InitiateRentalFundingDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "initiate", idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
-  @Post("orders/:orderId/funding-events/append") @HttpCode(201) async appendFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "append", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/initiate") @HttpCode(201) async initiateFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: InitiateRentalFundingDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "initiate", idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: parseRentalOfflinePaymentMethod(body.paymentMethod) }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/append") @HttpCode(201) async appendFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "append", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason, paymentMethod: parseRentalOfflinePaymentMethod(body.paymentMethod) }, req.user.displayName)); }
   @Post("orders/:orderId/funding-events/capture") @HttpCode(201) async captureFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingAmountDto) {
     return this.depositDisposition(req, orderId, body, "capture");
   }
@@ -355,17 +356,17 @@ export class RentalBusinessController {
       await this.core.getOrder(tenantId, orderId);
       const result = await this.funding.recordOfflineDepositDisposition(tenantId, workspaceId, orderId, {
         ...body, ...body.offlineDeposit, action,
-        paymentMethod: action === "refund" ? this.core.resolveOfflinePaymentMethod(tenantId, body.paymentMethod) : undefined
+        paymentMethod: action === "refund" ? parseRentalOfflinePaymentMethod(body.paymentMethod) : undefined
       }, { id: req.user.id, name: req.user.displayName });
       return this.committed(tenantId, result);
     }
     return this.committed(tenantId, await this.funding.recordEvent(tenantId, workspaceId, orderId, {
       instrument: body.instrument, action, amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason,
-      paymentMethod: action === "refund" ? this.core.resolveOfflinePaymentMethod(tenantId, body.paymentMethod) : undefined
+      paymentMethod: action === "refund" ? parseRentalOfflinePaymentMethod(body.paymentMethod) : undefined
     }, req.user.displayName));
   }
   @Post("orders/:orderId/funding-events/release") @HttpCode(201) async releaseFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingReleaseDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: "preauthorization", action: "release", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
-  @Post("orders/:orderId/funding-events/fail") @HttpCode(201) async failFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingFailureDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "fail", amount: 0, idempotencyKey: body.idempotencyKey, reason: body.reason, failureCode: body.failureCode, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
+  @Post("orders/:orderId/funding-events/fail") @HttpCode(201) async failFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingFailureDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "fail", amount: 0, idempotencyKey: body.idempotencyKey, reason: body.reason, failureCode: body.failureCode, paymentMethod: parseRentalOfflinePaymentMethod(body.paymentMethod) }, req.user.displayName)); }
 
   @Get("customer-coupons") async customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCurrentCustomerCoupons(req.user.tenantId, (await this.context(req.user.tenantId)), customerId); }
   @Post("customer-coupons/:id/void") async voidCustomerCoupon(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) {

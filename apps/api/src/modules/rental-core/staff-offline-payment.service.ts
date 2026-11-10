@@ -5,6 +5,8 @@ import { PrismaService } from "../database/prisma.service";
 import { RentalCoreService } from "./rental-core.service";
 import { RentalFundingService } from "./rental-funding.service";
 import type { CreateStaffOfflinePaymentDto } from "./staff-offline-payment.dto";
+import { parseRentalOfflinePaymentMethod } from "./rental-offline-payment-method";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
 
 type LocationScope = { mode: "all" | "selected"; locationIds: string[] };
 const roundMoney = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
@@ -35,8 +37,9 @@ export class StaffOfflinePaymentService {
     if (!orderId || !key || !reason || key.length > 191 || !Number.isFinite(amount) || amount <= 0) {
       throw new BadRequestException("订单、金额、用途、方式和幂等键均须有效");
     }
-    const paymentMethod = this.rentalCore.resolveOfflinePaymentMethod(tenantId, input.paymentMethod);
+    const paymentMethod = parseRentalOfflinePaymentMethod(input.paymentMethod);
     return this.prisma.$transaction(async (tx) => {
+      await lockRentalBusinessTenant(tx, tenantId);
       await this.lockOrder(tx, tenantId, workspaceId, orderId);
       const order = await this.assertOrder(tenantId, workspaceId, orderId, scope, tx);
       if (["completed", "cancelled"].includes(String(order.status).toLowerCase())) throw new ConflictException("已完成或已取消订单不能登记收款");
@@ -53,6 +56,9 @@ export class StaffOfflinePaymentService {
       const outstanding = input.instrument === "rental" ? balance.rental.due : balance.deposit.due;
       const reserved = roundMoney(pending.reduce((sum, row) => sum + Number(row.amount), 0));
       if (amount > roundMoney(outstanding - reserved) + 0.005) throw new ConflictException("登记金额超过当前可收金额（含其他待确认登记）");
+      // Current admission is inside this registration transaction, after the
+      // original-key read. A later configuration change cannot erase a receipt.
+      await this.rentalCore.resolveOfflinePaymentMethod(tenantId, paymentMethod, tx);
       return this.toResponse(await tx.rentalOfflinePaymentRegistration.create({
         data: {
           id: randomUUID(), tenantId, workspaceId, orderId,
@@ -70,6 +76,9 @@ export class StaffOfflinePaymentService {
 
   async confirm(tenantId: string, workspaceId: string, userId: string, userName: string, registrationId: string, scope: LocationScope) {
     return this.prisma.$transaction(async (tx) => {
+      // The funding participant takes this same parent fence. Acquire it before
+      // registration/order locks so the outer transaction does not invert it.
+      await lockRentalBusinessTenant(tx, tenantId);
       await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM rental_offline_payment_registrations WHERE id = ${registrationId} AND tenantId = ${tenantId} AND workspaceId = ${workspaceId} FOR UPDATE`;
       const registration = await tx.rentalOfflinePaymentRegistration.findFirst({ where: { id: registrationId, tenantId, workspaceId } });
       if (!registration) throw new NotFoundException("待确认收款登记不存在");

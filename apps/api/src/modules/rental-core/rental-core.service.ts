@@ -37,7 +37,6 @@ import {
 import {
   DEFAULT_RENTAL_PAYMENT_METHODS,
   RENTAL_CATEGORY_DEFINITIONS,
-  RENTAL_OFFLINE_PAYMENT_METHOD_CODES,
   RENTAL_PAYMENT_METHOD_CODES,
   RentalAssetStatus,
   type RentalAttributeDefinition,
@@ -145,6 +144,7 @@ import { RentalCoreConfigRepository, parseRentalItemGroupPageQuery, type RentalC
   type RentalItemGroupPageQuery, type RentalItemGroupPage, RENTAL_OPENING_TERMINOLOGY_FIELDS,
   type RentalOpeningConfigurationFacts } from "./rental-core-config.repository";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
+import { assertCurrentOfflinePaymentMethod, assertRentalOfflinePaymentMethodEnabled, parseRentalOfflinePaymentMethod } from "./rental-offline-payment-method";
 import type { RentalFulfillmentRequirement } from "./rental-fulfillment-admission";
 import { requestFingerprint } from "./rental-idempotency.repository";
 import type { ApprovedSettingsNotifications, NotificationSettingsPreview, VersionedBusinessSettings } from "./approved-settings-change.ports";
@@ -991,14 +991,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { ...settings, payment: { ...settings.payment, enabledMethods: [...DEFAULT_RENTAL_PAYMENT_METHODS] } };
   }
 
-  /** 运营后台登记资金事实前，统一校验实际采用的线下收款方式。 */
-  resolveOfflinePaymentMethod(tenantId: string, requested?: RentalOfflinePaymentMethod): RentalOfflinePaymentMethod {
-    const method = requested ?? "offline_cash";
-    if (!RENTAL_OFFLINE_PAYMENT_METHOD_CODES.includes(method)) throw new BadRequestException("不支持的线下收款方式");
-    // 支付方式只取空间的经营配置，不依赖品类的计价/履约缺省投影。
-    const configured = this.state(tenantId).businessSettings.payment.enabledMethods;
-    const enabled = configured?.length ? configured : DEFAULT_RENTAL_PAYMENT_METHODS;
-    if (!enabled.includes(method)) throw new ConflictException("该线下收款方式尚未在经营空间设置中启用");
+  /** Current configuration admission only; funding still checks in its original
+   * transaction after reading any existing receipt. Never use the process cache
+   * as a current payment selection or as evidence of a money result. */
+  async resolveOfflinePaymentMethod(tenantId: string, requested?: RentalOfflinePaymentMethod, tx?: RentalConfigTx): Promise<RentalOfflinePaymentMethod> {
+    const method = parseRentalOfflinePaymentMethod(requested);
+    if (tx) await assertCurrentOfflinePaymentMethod(tx, tenantId, this.workspaceOf(tenantId), method);
+    else assertRentalOfflinePaymentMethodEnabled(method, (await this.getBusinessSettings(tenantId)).payment.enabledMethods);
     return method;
   }
 

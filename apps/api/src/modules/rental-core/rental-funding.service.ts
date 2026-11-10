@@ -18,6 +18,7 @@ import { requestFingerprint } from "./rental-idempotency.repository";
 import { z } from "zod";
 import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";
 import { RentalOrderReceivableRepository } from "./rental-order-receivable.repository";
+import { assertCurrentOfflinePaymentMethod, parseRentalOfflinePaymentMethod } from "./rental-offline-payment-method";
 
 type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string;
   membershipSnapshot?: unknown; payerSubjectCustomerId?: string | null; contractSubjectCustomerId?: string | null; currency?: string;
@@ -535,8 +536,9 @@ export class RentalFundingService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  /** Append funding facts under the order lock; replay never changes their
-   * provider or amount. Offline collection and disposition keep separate proofs. */
+  /** Append funding facts under the order lock and current payment-selection
+   * lock. Replay precedes current admission and never changes provider/amount.
+   * Offline collection and disposition keep separate original proofs. */
   async recordEvent(
     tenantId: string,
     workspaceId: string,
@@ -685,6 +687,9 @@ export class RentalFundingService {
         }
         balanceAfter = roundMoney(payment.collected - payment.refunded + (input.action === "refund" ? -effectiveAmount : input.action === "fail" ? 0 : effectiveAmount));
       } else balanceAfter = nextBalanceAfter(input.instrument, input.action, effectiveAmount, ledgers);
+      if (input.paymentMethod !== undefined) {
+        await assertCurrentOfflinePaymentMethod(tx, tenantId, workspaceId, parseRentalOfflinePaymentMethod(input.paymentMethod));
+      }
       const created = await tx.rentalFundingEvent.create({
         data: {
           id: randomUUID(),

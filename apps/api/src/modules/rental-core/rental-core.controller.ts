@@ -97,6 +97,7 @@ import { RentalServiceCapacityService } from "./rental-service-capacity.service"
 import { extensionRequestKey } from "./rental-service-occurrence";
 import { exchangeServiceConfirmationHash } from "./rental-service-catalog";
 import { RentalFundingService } from "./rental-funding.service";
+import { parseRentalOfflinePaymentMethod } from "./rental-offline-payment-method";
 import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 import { inspectionClosureError, validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
@@ -2675,7 +2676,7 @@ export class RentalCoreController {
           tenantId,
           this.service.resolveWorkspaceId(tenantId),
           id,
-          { instrument: "rental", action: "refund", amount: body.amount, idempotencyKey: fundingIdempotencyKey, reason: body.reason, paymentMethod: this.service.resolveOfflinePaymentMethod(tenantId, body.paymentMethod) },
+          { instrument: "rental", action: "refund", amount: body.amount, idempotencyKey: fundingIdempotencyKey, reason: body.reason, paymentMethod: parseRentalOfflinePaymentMethod(body.paymentMethod) },
           req.user.displayName,
           tx
         );
