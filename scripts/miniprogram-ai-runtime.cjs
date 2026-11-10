@@ -14,7 +14,14 @@ const exportsAllowed = Object.freeze([
   'aiClientQuotePreparationReadResponseSchema', 'aiClientQuoteResultReadResponseSchema', 'aiClientQuoteBookingRequestSchema',
   'aiClientQuoteBookingPreparationResponseSchema', 'aiClientQuoteBookingOperationResponseSchema',
   'aiBookingSelectionSchema', 'aiEntryActionSchema', 'aiBookingDraftSchema', 'aiBookingHandoffSchema',
-  'aiBookingCreateResponseSchema', 'aiBookingChoiceResponseSchema', 'aiBookingHandoffResponseSchema', 'aiBookingOperationReadResponseSchema'
+  'aiBookingCreateResponseSchema', 'aiBookingChoiceResponseSchema', 'aiBookingHandoffResponseSchema', 'aiBookingOperationReadResponseSchema',
+  'AI_TASK_DRAFT_VERSION', 'AI_TASK_INPUT_DRAFT_VERSION', 'AI_TASK_INPUT_FIELD_IDS_DRAFT',
+  'isAiTaskInputContractDraft', 'isAiTaskInputSubmissionDraft',
+  'aiClientOrderMaterialRequestSchema', 'aiClientOrderMaterialReceiptSchema',
+  'aiClientTaskReadRequestSchema', 'aiClientTaskCreationReceiptSchema',
+  'aiClientTaskModelControlResponseSchema', 'aiClientTaskModelResultReadResponseSchema',
+  'aiClientTaskInputReadResponseSchema', 'aiClientTaskInputSubmissionRequestSchema',
+  'aiClientTaskInputSubmissionReceiptSchema', 'aiClientTaskInputReceiptReadResponseSchema'
 ]);
 const inside = (root, file) => {
   const relative = path.relative(root, file);

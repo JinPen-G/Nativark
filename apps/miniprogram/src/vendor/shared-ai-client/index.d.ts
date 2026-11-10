@@ -2,11 +2,26 @@
 // No Node/shared package runtime is loaded by the mini-program.
 import type * as Runtime from '@rental-os/shared/miniprogram-client';
 export declare const AI_CLIENT_ENTRY_HTTP_DRAFT: typeof Runtime.AI_CLIENT_ENTRY_HTTP_DRAFT;
+export declare const AI_TASK_DRAFT_VERSION: typeof Runtime.AI_TASK_DRAFT_VERSION;
+export declare const AI_TASK_INPUT_DRAFT_VERSION: typeof Runtime.AI_TASK_INPUT_DRAFT_VERSION;
+export declare const AI_TASK_INPUT_FIELD_IDS_DRAFT: typeof Runtime.AI_TASK_INPUT_FIELD_IDS_DRAFT;
+export declare const isAiTaskInputContractDraft: typeof Runtime.isAiTaskInputContractDraft;
+export declare const isAiTaskInputSubmissionDraft: typeof Runtime.isAiTaskInputSubmissionDraft;
 export declare const AI_CLIENT_HOST_CAPABILITIES_VERSION: typeof Runtime.AI_CLIENT_HOST_CAPABILITIES_VERSION;
 export declare const AI_CLIENT_QUOTE_PREPARATION_VERSION: typeof Runtime.AI_CLIENT_QUOTE_PREPARATION_VERSION;
 export declare const AI_CLIENT_QUOTE_BOOKING_VERSION: typeof Runtime.AI_CLIENT_QUOTE_BOOKING_VERSION;
 export declare const aiClientHostCapabilitiesRequestSchema: typeof Runtime.aiClientHostCapabilitiesRequestSchema;
 export declare const aiClientHostCapabilitiesSchema: typeof Runtime.aiClientHostCapabilitiesSchema;
+export declare const aiClientOrderMaterialRequestSchema: typeof Runtime.aiClientOrderMaterialRequestSchema;
+export declare const aiClientOrderMaterialReceiptSchema: typeof Runtime.aiClientOrderMaterialReceiptSchema;
+export declare const aiClientTaskReadRequestSchema: typeof Runtime.aiClientTaskReadRequestSchema;
+export declare const aiClientTaskCreationReceiptSchema: typeof Runtime.aiClientTaskCreationReceiptSchema;
+export declare const aiClientTaskModelControlResponseSchema: typeof Runtime.aiClientTaskModelControlResponseSchema;
+export declare const aiClientTaskModelResultReadResponseSchema: typeof Runtime.aiClientTaskModelResultReadResponseSchema;
+export declare const aiClientTaskInputReadResponseSchema: typeof Runtime.aiClientTaskInputReadResponseSchema;
+export declare const aiClientTaskInputSubmissionRequestSchema: typeof Runtime.aiClientTaskInputSubmissionRequestSchema;
+export declare const aiClientTaskInputSubmissionReceiptSchema: typeof Runtime.aiClientTaskInputSubmissionReceiptSchema;
+export declare const aiClientTaskInputReceiptReadResponseSchema: typeof Runtime.aiClientTaskInputReceiptReadResponseSchema;
 export declare const aiClientQuotePreparationRequestSchema: typeof Runtime.aiClientQuotePreparationRequestSchema;
 export declare const aiClientQuoteConfirmationRequestSchema: typeof Runtime.aiClientQuoteConfirmationRequestSchema;
 export declare const aiClientQuotePreparationResponseSchema: typeof Runtime.aiClientQuotePreparationResponseSchema;

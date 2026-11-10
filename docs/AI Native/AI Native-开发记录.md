@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-task-native-contracts-20261111"></a>
+## 原订单解释与澄清的小程序合同出口（2026-11-11）
+
+客户报价/预约两端15文件阶段已提交并推送 `8bac2430797d6c465e09c08a143b09a398148502`，远端已核。AI-dev2继续原订单解释workbench，负责人在[正式窄出口](../../packages/shared/src/miniprogram-client.ts)、本端vendor声明和[受控builder](../../scripts/miniprogram-ai-runtime.cjs)补齐其所需原订单材料、Task创建/读取、模型结果及澄清输入的15个既有值，总计37出口。只复用现有shared版本/schema，不增加服务、模型驱动、DTO、bare require或依赖。
+
+一组纯内存SDK冒烟与必要类型均exit0：bundle为88,768字节，SHA256 `c9d16390865d26dad846d767b18bd2e327313d06978ba78a0ddafc7dee596088`；无URL、TextEncoder、Buffer、process、window、document、structuredClone仍可加载并校验原材料/创建引用和澄清合同。订单材料多传question、请求多传runId、答案注入taskId均拒绝；waiting_input的clarification结果不能改称answer。原target配置的TypeScript5.9.3及传递依赖0诊断；审计0、临时目录从未创建，没有运行完整物理小程序构建或真实模型。
+
+源码核对[原客户模型宿主](../../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition.ts)：模型用户消息是原materialRef/hash/观察时刻/材料JSON，系统指令来自原服务端配置及固定澄清指令；当前材料准备请求没有status/fees目标字段。因此本片消费者先保持固定“解释这笔订单”，不得让一个无后端绑定的选择器冒充模型目标切换。两端API/session/workbench仍由dev2施工；这里仅交付必要运行时合同，不将其记为模型往返或AIN-21/22整项完成。
+
 <a id="ain-client-quote-consumers-20261111"></a>
 ## 客户报价与预约草稿的两端实际消费者（2026-11-11）
 
