@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
@@ -165,7 +166,7 @@ export class PrismaTaskTakeoverRepository {
     if (after.bindingKey !== before.bindingKey || !await this.db.aiTask.findFirst({ where: after.where, select: { id: true } })) {
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     }
-    if (requestFingerprint(latest ?? null) !== requestFingerprint(row ?? null)) {
+    if (!isDeepStrictEqual(latest ?? null, row ?? null)) {
       throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     }
     const currentRun = await this.db.aiRun.findFirst({ where: { id: input.runId, taskId: input.taskId,

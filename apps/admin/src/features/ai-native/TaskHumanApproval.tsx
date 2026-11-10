@@ -6,7 +6,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, AI_STEP_STATUSES_DRAFT, AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES,
   type AiTaskSnapshotDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
   type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft, type AiTaskBusinessObservationDraft,
-  type AiTaskHumanContinueDraft, type AiApprovalOrderMaterialDraft } from "@rental-os/shared";
+  type AiTaskHumanContinueDraft, type AiApprovalOrderMaterialDraft, type AiApprovalApplicationReferenceDraft,
+  type AiApprovalApplicationReviewDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction, Select } from "@/components/ui";
@@ -186,6 +187,16 @@ export function TaskOrderMaterialDetails({ order }: { order: AiApprovalOrderMate
     
   </div>;
 }
+/** The same frozen amounts are used in approval and old/new quotation review. */
+export function TaskOrderQuoteAmounts({ review }: { review: AiApprovalApplicationReviewDraft }) {
+  const { t } = useLocale();
+  return <dl>{Object.entries(amountLabels).map(([key, label]) => <div key={key}>
+    <dt>{t(label)}</dt><dd>{formatAmount(review.deterministic.quoteAmounts[key as keyof typeof amountLabels]).value}
+      {" "}{safeDisplayText(review.deterministic.currency, 16)}</dd>
+  </div>)}<dt>{t("原报价")}</dt><dd>{safeDisplayText(review.deterministic.target.resourceId, 191)}</dd>
+    <dt>{t("原报价版本")}</dt><dd>{safeDisplayText(review.deterministic.target.version, 191)}</dd>
+    <dt>{t("报价有效期")}</dt><dd>{formatTimestamp(review.deterministic.quoteExpiresAt).value}</dd></dl>;
+}
 /** Deterministic domain values, deliberately separate from generated model text. */
 export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraft }) {
   const { t } = useLocale(), payload = value.review.proposal.payload;
@@ -196,12 +207,7 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
     <p>{t("提案引用")}: {safeDisplayText(payload.proposalId, 36)} · {t("原任务修订")}: {value.taskRevision}</p>
     <TaskProposalExecutionBoundary value={value} />
     {order && <TaskOrderMaterialDetails order={order} />}
-    {value.kind === "order" ? <dl>{Object.entries(amountLabels).map(([key, label]) => <div key={key}>
-      <dt>{t(label)}</dt><dd>{formatAmount(value.review.deterministic.quoteAmounts[key as keyof typeof amountLabels]).value}
-        {" "}{safeDisplayText(value.review.deterministic.currency, 16)}</dd>
-    </div>)}<dt>{t("原报价")}</dt><dd>{safeDisplayText(value.review.deterministic.target.resourceId, 191)}</dd>
-      <dt>{t("原报价版本")}</dt><dd>{safeDisplayText(value.review.deterministic.target.version, 191)}</dd>
-      <dt>{t("报价有效期")}</dt><dd>{formatTimestamp(value.review.deterministic.quoteExpiresAt).value}</dd></dl>
+    {value.kind === "order" ? <TaskOrderQuoteAmounts review={value.review} />
       : <dl>{Object.entries(value.review.change.diff).map(([field, change]) => <div key={field}>
         <dt>{t(field === "notifications.enabledEvents" ? "通知事件" : "通知渠道")}</dt>
         <dd>{t("当前值")}: {change.before.map(item => safeDisplayText(item, 128)).join(", ") || t("空列表")}</dd>
@@ -210,8 +216,9 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
     <p>{t("仅审阅这份不可变提案。批准不是订单创建、支付成功或设置已生效；继续执行需要另行明确确认。")}</p>
   </div>;
 }
-export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, runId }: {
+export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, runId, onOrderReviewed }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void; runId?: string;
+  onOrderReviewed?: (value: AiTaskReviewQueryDraft & { original: AiApprovalApplicationReferenceDraft }) => void;
 }) {
   const { t } = useLocale(), labelId = useId();
   const storageKey = `ai-task-decision:${identity}:${taskId}${runId ? `:${runId}` : ''}`;
@@ -224,7 +231,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
   const [receipt, setReceipt] = useState<AiTaskHumanDecisionReceiptDraft | null>(null);
   const [business, setBusiness] = useState<AiTaskBusinessObservationDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null), [busy, setBusy] = useState(false);
-  const active = useRef({ current, onAccessDenied }); active.current = { current, onAccessDenied };
+  const active = useRef({ current, onAccessDenied, onOrderReviewed }); active.current = { current, onAccessDenied, onOrderReviewed };
   const flight = useRef<AbortController | null>(null);
   useEffect(() => () => { flight.current?.abort(); }, []);
   const run = async (work: (signal: AbortSignal) => Promise<void>, write = false) => {
@@ -275,6 +282,13 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
         return !change || [change.before, change.after].some(list => !Array.isArray(list) || list.length > 64
           || list.some(item => typeof item !== "string" || item.length > 191));
       })) throw Error("AI_RESOURCE_UNAVAILABLE");
+    }
+    if (value.kind === 'order') {
+      const proposal = value.review.proposal;
+      active.current.onOrderReviewed?.({ taskId, runId: value.runId, stepId: value.stepId, original: {
+        contractVersion: proposal.payload.contractVersion, proposalId: proposal.payload.proposalId,
+        proposalRevision: proposal.payload.revision, reviewedPayloadHash: proposal.payloadHash
+      } });
     }
     setReview(structuredClone(value));
   });
@@ -339,7 +353,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
       <ActionButton label={t("读取原业务步骤")} disabled={busy || !!original || !!continuation} onAction={readSteps} />
       {!!steps.length && <><label id={labelId}>{t("原业务步骤")}</label><Select aria-labelledby={labelId} value={selected}
         disabled={busy || !!original || !!continuation} options={steps.map(step => ({ value: `${step.runId}:${step.stepId}`, label: safeDisplayText(step.stepId, 36) }))}
-        onChange={value => { setSelected(String(value)); setReview(null); setReceipt(null); setBusiness(null); }} />
+        onChange={(value: unknown) => { setSelected(typeof value === 'string' ? value : null); setReview(null); setReceipt(null); setBusiness(null); }} />
         <ActionButton label={t("审阅当前等待提案")} disabled={!selected || busy || !!original || !!continuation} onAction={readReview} /></>}
       <ActionButton label={t("读取原业务结果")} disabled={busy || !selected && (!original || original === "invalid") && (!continuation || continuation === "invalid")}
         onAction={() => run(async signal => {

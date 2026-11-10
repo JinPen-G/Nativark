@@ -824,11 +824,18 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
         enabled: true, audience: 'operator', ttlMs: 120000,
         templates: [...operations.map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'],
           ...((originalReadOperations as readonly string[]).includes(operation) ? {} : { sceneCode: 'order_explanation' }) })),
+          // Reading an owned historical task is independent of enabling its
+          // model or execution host. These templates still require human CAS
+          // configuration and the original current scene permissions.
+          ...originalReadOperations.map(operation => ({ operation, sceneCode: 'quote_clarification',
+            requiredPermissions: ['rental-os:order:create'] })),
+          ...originalReadOperations.map(operation => ({ operation, sceneCode: 'opening_diagnosis',
+            requiredPermissions: ['rental-os:price:manage'] })),
           ...(quote.enabled || quoteModel.enabled ? [...originalOrderExecutionOperations,
             ...(quoteModel.enabled ? ['request_input', 'submit_input', 'resume_input'] as const : []),
             ...(quote.enabled ? ['decide_approval'] as const : [])].map(operation => ({
             operation, sceneCode: 'quote_clarification', requiredPermissions: ['rental-os:order:create'] })) : []),
-          ...(openingModel.enabled ? [...originalReadOperations, ...originalOrderExecutionOperations].map(operation => ({
+          ...(openingModel.enabled ? originalOrderExecutionOperations.map(operation => ({
             operation, sceneCode: 'opening_diagnosis', requiredPermissions: ['rental-os:price:manage'] })) : [])]
       });
   }

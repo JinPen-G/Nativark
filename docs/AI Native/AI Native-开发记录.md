@@ -6,6 +6,17 @@
 > 最近门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-core-checkpoint-20261111"></a>
+## 核心消费者与恢复宿主检查点（2026-11-11，未完成）
+
+在 `codex/ai-native` 从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 继续。AI-dev1 的11个固定文件接入原订单v2事实、资金/历史来源和开业材料消费者，完善只读政策原CAS收据；AI-dev2 的9个固定文件明确已确认租约在宿主与运行器之间的清理归属，恢复不重派。负责人补齐报价再准备选择/对比/新批准消费者、历史材料专用读取及正式运行时parser；修复 `aiOpeningTaskMaterialResponse` 推导出未导出类型导致的 TS4023。此为可追溯的未完成检查点，不是场景验收或整项100%。
+
+本次用 Node 标准输入运行现有 TypeScript 5.9.3 `createProgram/noEmit`，不新增脚本、构建产物或临时目录。公共parser、14个API归属入口及后台归属消费者（含环境声明共26根）和其导入依赖诊断0，最终命令exit0。API类型只读使用主仓库 `apps/api/node_modules/@prisma/client/index.d.ts`；两树schema归一换行后的SHA-256均为 `878bbe3dacfa5755469a8dfaf1b9b46fecdbc3fe46acbb6e7becdc1eb415cbf4`。最初误解析根目录未生成Client壳导致的TS2305及派生错误保留为环境失败事实，未放宽类型。
+
+同一离线进程直接加载现有 `tests/ai-native-c04-task-runner.test.cjs` 与 `tests/ai-native-b16-readiness.test.cjs`：9项、8通过、1失败，exit1，skip/todo均0。失败为c04原外部超时用例期望unknown却得到unavailable，交AI-dev2核对原实现与时钟夹具；断言和测试源码均未改。运行前加载本树原 `prisma-offline-preload.cjs`，固定不可达DATABASE_URL，审计仅在内存收集且事件0，临时目录始终不存在。带递归清理的最初验证命令被自动审批整条拒绝，返回 `blocked by policy`，没有执行或遗留目录；后续改为纯内存验证，没有绕过删除限制。
+
+剩余核心实现包括真实发布配置的生产提供者、普通运营角色的任务读取/执行准入、开业诊断到新规则准备的正式HTTP消费者，以及报价新材料的关联请求入口。既有原计划不可覆盖、未知操作不可换键重发、原业务批准与Core单次执行边界保留。助手活动中的新准入与规则准备文件不混入本检查点。原AIN/ENTRY门槛未跨档，任务表不加分；原仓储冒烟所需本树私有Client、真实浏览器/真库/供应商及整项G4仍未由这批证据证明。main由PM并行处理环境修复和治理，暂不占用其集成窗口。
+
 <a id="ain-main-consolidation-20261110"></a>
 ## 三树及指定工作树合入 main、合后修复与工作树收口（2026-11-10）
 

@@ -1,7 +1,7 @@
 /** Human reprepare uses an already-selected original task, not editable internal
  * step/plan references. Retain only the original operation before dispatch;
  * an uncertain reply permits receipt reads and never a second reprepare. */
-import { validateAiQuoteSelectionHttpValue, type AiQuoteSelectionProofDraft,
+import { AI_PROPOSAL_DRAFT_VERSION, validateAiQuoteSelectionHttpValue, type AiQuoteSelectionProofDraft,
   type AiApprovalApplicationReferenceDraft, type AiHumanQuoteOrderRepreparePreparationInputDraft,
   type AiHumanQuoteOrderRepreparePreparationDraft, type AiHumanQuoteOrderReprepareRequestDraft,
   type AiHumanQuoteOrderReprepareResponseDraft, type AiTaskMetadataPageDraft } from '@rental-os/shared';
@@ -20,6 +20,36 @@ export type QuoteReprepareState = Readonly<{ busy: boolean; locked: boolean; rea
 const normalized = (value: unknown): unknown => Array.isArray(value) ? value.map(normalized) : value && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalized((value as Record<string, unknown>)[key])])) : value;
 const same = (a: unknown, b: unknown) => JSON.stringify(normalized(a)) === JSON.stringify(normalized(b));
+
+/** The live wait may disappear after rejection. Retain only its reviewed
+ * reference so the server can independently authorize the later historical read. */
+export function readQuoteReprepareOriginal(storage: Pick<Storage, 'getItem'> | undefined, key: string,
+  selection: AiQuoteSelectionProofDraft): AiApprovalApplicationReferenceDraft | null {
+  if (!storage) return null;
+  const raw = storage.getItem(key); if (raw === null) return null;
+  if (raw.length > 2048) throw Error('AI_RESULT_UNKNOWN');
+  const value = JSON.parse(raw), ref = value?.original;
+  if (!value || Object.keys(value).length !== 2 || !same(value.selection, selection) || !ref
+    || Object.keys(ref).sort().join(',') !== 'contractVersion,proposalId,proposalRevision,reviewedPayloadHash'
+    || ref.contractVersion !== AI_PROPOSAL_DRAFT_VERSION || typeof ref.proposalId !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(ref.proposalId)
+    || !Number.isSafeInteger(ref.proposalRevision) || ref.proposalRevision < 1 || ref.proposalRevision > 4294967295
+    || typeof ref.reviewedPayloadHash !== 'string' || !/^[a-f0-9]{64}$/u.test(ref.reviewedPayloadHash)) throw Error('AI_RESULT_UNKNOWN');
+  return structuredClone(ref);
+}
+export function retainQuoteReprepareOriginal(storage: Pick<Storage, 'getItem' | 'setItem'> | undefined, key: string,
+  selection: AiQuoteSelectionProofDraft, original: AiApprovalApplicationReferenceDraft) {
+  if (!storage) throw Error('AI_RESULT_UNKNOWN');
+  const previous = readQuoteReprepareOriginal(storage, key, selection);
+  if (previous && !same(previous, original)) throw Error('AI_REVISION_CONFLICT');
+  const raw = JSON.stringify({ selection, original });
+  // Validate the exact journal shape before writing, and never overwrite an
+  // unreadable or different original with a newly observed proposal.
+  readQuoteReprepareOriginal({ getItem: () => raw }, key, selection);
+  storage.setItem(key, raw);
+  if (storage.getItem(key) !== raw) throw Error('AI_RESULT_UNKNOWN');
+  return structuredClone(original);
+}
 
 export class QuoteReprepareSession {
   private active = false; private flight: AbortController | null = null;

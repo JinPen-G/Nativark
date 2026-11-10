@@ -46,6 +46,16 @@ export function snapshotAiTaskRunnerClaimLease(input: AiTaskRunnerClaimInput, va
   return lease;
 }
 
+/** An acknowledged recovery claim or takeover keeps its original generation.
+ * A readback cannot replace a damaged reply or grant new execution authority. */
+export function snapshotAiTaskRunnerRecoveryLease(input: AiTaskRunnerClaimInput, value: unknown): AiTaskRunnerRecoveryLease {
+  const lease = snapshotAiTaskRunnerClaimLease(input, value) as AiTaskRunnerRecoveryLease;
+  if (lease.purpose !== 'recovery_only') {
+    throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'recovery claim acknowledgement requires its original purpose');
+  }
+  return lease;
+}
+
 const defaultClock: AiTaskRunnerClock = {
   now: () => Date.now(),
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -221,7 +231,8 @@ export class AiTaskRunner {
       const observed = await this.callBounded(() => recovery
         ? this.deps.leases.claimRecoveryRun(structuredClone(claimInput))
         : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal);
-      lease = snapshotAiTaskRunnerClaimLease(claimInput, observed);
+      lease = recovery ? snapshotAiTaskRunnerRecoveryLease(claimInput, observed)
+        : snapshotAiTaskRunnerClaimLease(claimInput, observed);
     } catch (error) {
       // A transaction may have committed. A late acknowledgement is observed
       // by callBounded but NEVER re-enters runHeld or grants execution rights.
@@ -234,59 +245,81 @@ export class AiTaskRunner {
     return this.runHeld(input, recovery, initial, lease, signal, false, prepare, undefined, pendingStart);
   }
 
-  async recover(lease: AiTaskRunnerRecoveryLease, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
+  async recover(lease: AiTaskRunnerRecoveryLease, signal?: AbortSignal, acceptLease?: () => void): Promise<AiTaskRunnerOutcome> {
     if (!this.deps.resources || typeof this.deps.leases.assertRecoveryRun !== 'function' || lease?.purpose !== 'recovery_only') {
       throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     }
+    if (acceptLease !== undefined && typeof acceptLease !== 'function') throw new AiTaskRunnerError('AI_INVALID_INPUT');
     lease = structuredClone(lease);
     const initial = structuredClone(await this.callReadBounded(() => this.deps.leases.readMetadata(lease.taskId), 5000, 'recovery_metadata', signal));
     if (initial.taskId !== lease.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
-    return this.runHeld({ taskId: lease.taskId, runId: lease.runId }, true, initial, lease, signal, true);
+    // The originating server host retains cleanup during these pure reads.
+    // runHeld accepts the acknowledged lease inside its own try/finally.
+    return this.runHeld({ taskId: lease.taskId, runId: lease.runId }, true, initial, lease, signal, true,
+      undefined, undefined, false, acceptLease);
   }
 
-  async continueConfirmation(value: AiTaskRunnerConfirmationRequest, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
+  async continueConfirmation(value: AiTaskRunnerConfirmationRequest, signal?: AbortSignal, acceptLease?: () => void): Promise<AiTaskRunnerOutcome> {
     const input = structuredClone(value);
+    if (acceptLease !== undefined && typeof acceptLease !== 'function') throw new AiTaskRunnerError('AI_INVALID_INPUT');
     if (!this.deps.confirmation || !this.deps.effects.continueConfirmation || signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     const initial = structuredClone(await this.callReadBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_metadata', signal));
     if (initial.taskId !== input.taskId || initial.taskId !== input.lease.taskId || initial.revision !== input.expectedTaskRevision || initial.status !== 'waiting_confirmation'
       || initial.cancelRequestedAt !== null) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
-    let committed: Awaited<ReturnType<NonNullable<AiTaskRunnerDependencies['confirmation']>['resume']>>;
-    // Both commands and acknowledgements cross asynchronous ports. Preserve
-    // the original basis and holder even if their producer reuses an object.
-    // Confirmation rechecks the persisted human material and current rights;
-    // its finite wait must include the enclosing transaction and readbacks.
-    // A timeout still leaves the original resume unknown, never a new lease.
-    const observed = await this.callWriteBounded(() => this.deps.confirmation!.resume(structuredClone(input)), 15000, 'confirmation_resume', signal);
-    try { committed = structuredClone(observed); }
-    catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement is not snapshot-safe'); }
-    if (!committed || !committed.lease || !committed.continuation
-      || committed.taskRevision !== initial.revision + 1 || committed.lease.taskId !== input.taskId || committed.lease.runId !== input.lease.runId
-      || committed.lease.holderId !== input.lease.holderId || committed.lease.fencingToken !== input.lease.fencingToken
-      || committed.lease.expiresAt !== input.lease.expiresAt
-      || committed.lease.revision !== input.lease.revision + 1 || committed.continuation.stepId !== input.stepId
-      || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef
-      || !['approved', 'rejected'].includes(committed.continuation.decision)
-      || typeof committed.continuation.decisionRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(committed.continuation.decisionRef)
-      || !finiteInteger(committed.continuation.remainingActiveMs, 1, 86400000)
-      || !finiteInteger(committed.continuation.remainingOutputBytes, 1, 16 * 1024 * 1024)
-      || typeof committed.lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(committed.lease.expiresAt))) {
-      // Resume advances the original CAS; it does not renew its lease. It may
-      // already be durable, so a rewritten deadline cannot authorize execution,
-      // another approval consumption, a guessed outcome or releasing its holder.
-      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement requires original receipt');
+    let resumeAttempted = false;
+    try {
+      // Synchronous server-only ownership handoff, inside this cleanup boundary.
+      // The original host must not release again after accepting this callback.
+      acceptLease?.();
+      let committed: Awaited<ReturnType<NonNullable<AiTaskRunnerDependencies['confirmation']>['resume']>>;
+      // Preserve the original basis/holder across the transactional resume.
+      // A timed-out write stays unknown, never a new lease or guessed release.
+      const observed = await this.callWriteBounded(() => {
+        resumeAttempted = true;
+        return this.deps.confirmation!.resume(structuredClone(input));
+      }, 15000, 'confirmation_resume', signal);
+      try { committed = structuredClone(observed); }
+      catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement is not snapshot-safe'); }
+      if (!committed || !committed.lease || !committed.continuation
+        || committed.taskRevision !== initial.revision + 1 || committed.lease.taskId !== input.taskId || committed.lease.runId !== input.lease.runId
+        || committed.lease.holderId !== input.lease.holderId || committed.lease.fencingToken !== input.lease.fencingToken
+        || committed.lease.expiresAt !== input.lease.expiresAt
+        || committed.lease.revision !== input.lease.revision + 1 || committed.continuation.stepId !== input.stepId
+        || committed.continuation.stepRevision !== input.expectedStepRevision || committed.continuation.checkpointRef !== input.checkpointRef
+        || !['approved', 'rejected'].includes(committed.continuation.decision)
+        || typeof committed.continuation.decisionRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(committed.continuation.decisionRef)
+        || !finiteInteger(committed.continuation.remainingActiveMs, 1, 86400000)
+        || !finiteInteger(committed.continuation.remainingOutputBytes, 1, 16 * 1024 * 1024)
+        || typeof committed.lease.expiresAt !== 'string' || !Number.isFinite(Date.parse(committed.lease.expiresAt))) {
+        // Resume advances its CAS once, without renewing the lease. A damaged
+        // reply may already be durable and grants no cleanup or repeat action.
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation resume acknowledgement requires original receipt');
+      }
+      const current = structuredClone(await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal));
+      if (current.taskId !== input.taskId || current.revision !== committed.taskRevision
+        || current.status !== 'running' || current.cancelRequestedAt !== null) {
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation state changed before continuation');
+      }
+      return await this.runHeld({ taskId: input.taskId, runId: input.lease.runId }, false, current, committed.lease,
+        signal, false, undefined, committed.continuation);
+    } finally {
+      // An abort before calling resume left the acknowledged lease unchanged.
+      // After any resume attempt, only runHeld or original receipt recovery may
+      // handle it; a current-row read is not proof that the write rolled back.
+      if (!resumeAttempted) {
+        const release = { taskId: input.lease.taskId, runId: input.lease.runId, holderId: input.lease.holderId,
+          expectedTaskRevision: initial.revision, expectedRunRevision: input.lease.revision, expectedFencingToken: input.lease.fencingToken };
+        try {
+          const receipt = structuredClone(await this.callBounded(() => this.deps.leases.releaseRun(structuredClone(release)), 5000, 'confirmation_preflight_release'));
+          if (!receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation preflight cleanup requires original receipt'); }
+      }
     }
-    const current = structuredClone(await this.callWriteBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'confirmation_readback', signal));
-    if (current.taskId !== input.taskId || current.revision !== committed.taskRevision
-      || current.status !== 'running' || current.cancelRequestedAt !== null) {
-      throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'confirmation state changed before continuation');
-    }
-    return this.runHeld({ taskId: input.taskId, runId: input.lease.runId }, false, current, committed.lease,
-      signal, false, undefined, committed.continuation);
   }
 
   private async runHeld(input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'> & Partial<Pick<AiTaskRunnerInput, 'leaseMs'>>, recovery: boolean,
     initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false, prepare?: AiTaskHeldPreparation,
-    continuation?: AiTaskRunnerConfirmationContinuation, pendingStart = false): Promise<AiTaskRunnerOutcome> {
+    continuation?: AiTaskRunnerConfirmationContinuation, pendingStart = false, acceptLease?: () => void): Promise<AiTaskRunnerOutcome> {
     const heldStartedAt = this.clock.now();
     let taskRevision = initial.revision;
     let completedSteps = 0, cleanupFailed = 0, legacyCalls = 0, outputBytes = 0;
@@ -412,6 +445,7 @@ export class AiTaskRunner {
       return committed.outcome;
     };
     try {
+      acceptLease?.();
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       if (adoptedRecovery) await this.callReadBounded(() => this.deps.leases.assertRecoveryRun!({ ...structuredClone(lease), purpose: 'recovery_only' }), 5000, 'recovery_authority', signal);
       if (initial.status === 'waiting_input' || initial.status === 'waiting_confirmation') return { status: 'paused', completedSteps, cleanupFailed };

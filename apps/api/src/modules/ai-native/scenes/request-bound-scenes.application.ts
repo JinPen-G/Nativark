@@ -1583,7 +1583,7 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     reconcileReissue: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command, true), { write: false, signal }),
     createTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.createTask(command), { write: true, signal }),
     prepareTaskMaterial: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (app, command) => {
-      const packet = await app.prepareTaskMaterial(command);
+      const packet = await app.prepareTaskMaterial(command, 'read_only');
       if (packet.original.sceneCode !== 'order_explanation') return packet;
       if (requestFingerprint(packet.material) !== packet.materialHash) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       const material = projectOrderExplanationMaterial(packet.material);
@@ -1596,7 +1596,7 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
      * preparation seal, never relabel a stored model result or its input hash. */
     prepareOrderTaskMaterialV2: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (app, command) => {
       assertOrderPublicationV2Available();
-      const packet = await app.prepareTaskMaterial(command);
+      const packet = await app.prepareTaskMaterial(command, 'order_history_read');
       if (packet.original.sceneCode !== 'order_explanation') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (requestFingerprint(packet.material) !== packet.materialHash) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       const material = projectOrderExplanationMaterialV2(packet.material);

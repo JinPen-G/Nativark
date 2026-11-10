@@ -205,7 +205,8 @@ export class PrismaTaskApplication {
     return { receipt, continuation };
   }
 
-  async reconcile(value: unknown, signal?: AbortSignal): Promise<AiTaskApplicationStartResult> {
+  async reconcile(value: unknown, signal?: AbortSignal, acceptLease?: () => void): Promise<AiTaskApplicationStartResult> {
+    if (acceptLease !== undefined && typeof acceptLease !== 'function') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const parsed = requestSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
@@ -232,10 +233,13 @@ export class PrismaTaskApplication {
     if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (!lease) return { kind: 'not_started', reason: 'recovery_lease_unavailable' };
-    return { kind: 'run_outcome', outcome: await this.deps.runner.recover(lease, signal) };
+    // An originating host may have just claimed this lease. Transfer cleanup
+    // only inside the runner's protected interval, after these pure reads.
+    return { kind: 'run_outcome', outcome: await this.deps.runner.recover(lease, signal, acceptLease) };
   }
 
-  async continueConfirmation(value: unknown, signal?: AbortSignal): Promise<AiTaskApplicationStartResult | { kind: 'not_started'; reason: 'confirmation_lease_unavailable' }> {
+  async continueConfirmation(value: unknown, signal?: AbortSignal, acceptLease?: () => void): Promise<AiTaskApplicationStartResult | { kind: 'not_started'; reason: 'confirmation_lease_unavailable' }> {
+    if (acceptLease !== undefined && typeof acceptLease !== 'function') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const parsed = requestSchema.extend({ checkpointRef: id.max(36) }).safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
@@ -265,7 +269,10 @@ export class PrismaTaskApplication {
     if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (!candidate) return { kind: 'not_started', reason: 'confirmation_lease_unavailable' };
-    return { kind: 'run_outcome', outcome: await this.deps.runner.continueConfirmation(candidate, signal) };
+    // Pure application/runner preflight does not consume the originating host's
+    // cleanup ownership. The runner signals before its first persistent write;
+    // no callback can be supplied through the task request DTO.
+    return { kind: 'run_outcome', outcome: await this.deps.runner.continueConfirmation(candidate, signal, acceptLease) };
   }
 
   async start(value: unknown, signal?: AbortSignal): Promise<AiTaskApplicationStartResult> {

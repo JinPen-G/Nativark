@@ -7,7 +7,8 @@ import { aiQuoteSelectionsApi } from '@/api/aiQuoteSelections';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
 import { ConversationQuoteSelectionSession } from './conversation-quote-selection-session';
 import type { ConfirmedQuoteSource } from './conversation-quote-confirmation-session';
-import { TaskHumanApproval, TaskOrderMaterialDetails } from './TaskHumanApproval';
+import { TaskOrderMaterialDetails } from './TaskHumanApproval';
+import { QuoteReprepare } from './QuoteReprepare';
 import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
 import { formatTimestamp } from './formatters';
@@ -55,7 +56,9 @@ export function ConversationQuoteSelection({ identity, conversationId, turn, sou
         prompt={t('启动这份已保存选单的原审核任务？仍需核对原提案、明确批准并继续 Core 执行。')}
         disabled={state.busy} onConfirm={() => run(session.start)} />}
       <ActionButton label={t('核对原订单结果')} disabled={state.busy} onAction={() => run(session.readResult)} />
-      {state.startRequested && <TaskHumanApproval key={`${owner}:${receipt.runId}`} taskId={receipt.taskId} runId={receipt.runId}
+      {state.startRequested && <QuoteReprepare key={`${owner}:${receipt.runId}`} selection={{ draftVersion: receipt.draftVersion,
+        originalInputRef: receipt.originalInputRef, selectionId: receipt.selectionId, taskId: receipt.taskId,
+        runId: receipt.runId, inputHash: receipt.inputHash }}
         identity={identity} current={active} onAccessDenied={onAccessDenied} />}
     </>}
     {state.run?.kind === 'not_started' && <Alert type="warning" title={t('原宿主未启动本次选单审核，请核对原任务；不自动再次启动。')} />}

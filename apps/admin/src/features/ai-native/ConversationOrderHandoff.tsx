@@ -21,6 +21,7 @@ export function ConversationOrderHandoff({ identity, conversationId, turn, curre
   return <OrderHumanHandoff query={{ taskId: turn.task.taskId, runId: turn.task.runId }} identity={identity}
     current={() => owner.current.signature === signature && owner.current.current()} verify={verify}
     validate={value => { if (value.origin.inputRef !== turn.original.inputRef || value.origin.draftVersion !== turn.original.draftVersion
-      || value.origin.requestKey !== turn.originalRequestKey || value.origin.sceneVersion !== turn.capabilityVersion) throw Error('AI_REVISION_CONFLICT'); }}
+      || value.origin.contentHash !== turn.requestHash || value.origin.requestKey !== turn.originalRequestKey
+      || value.origin.sceneVersion !== turn.capabilityVersion) throw Error('AI_REVISION_CONFLICT'); }}
     onUnavailable={onUnavailable} onObserved={onObserved} />;
 }

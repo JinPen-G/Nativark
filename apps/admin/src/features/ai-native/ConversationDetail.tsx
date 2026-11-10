@@ -15,6 +15,7 @@ import { ConversationAdmission } from './ConversationAdmission';
 import { ConversationOrderExecution } from './ConversationOrderExecution';
 import { ConversationOpeningExecution } from './ConversationOpeningExecution';
 import { ConversationQuoteExecution } from './ConversationQuoteExecution';
+import { ReadinessDiagnosticsCard } from './ReadinessDiagnosticsCard';
 import styles from './AiManagement.module.css';
 
 type Detail = Awaited<ReturnType<typeof aiConversationsApi.detail>>;
@@ -23,10 +24,11 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
 }) {
   const { t } = useAiManagementLocale();
   const [detail, setDetail] = useState<Detail | null>(null), [error, setError] = useState(false), [busy, setBusy] = useState(false);
+  const [resultEpochs, setResultEpochs] = useState<Record<string, number>>({});
   const request = useRef<AbortController | null>(null), generation = useRef(0);
   const scope = useRef({ conversationId, capabilityCode, current }); scope.current = { conversationId, capabilityCode, current };
   useEffect(() => {
-    const clear = () => { generation.current++; request.current?.abort(); request.current = null; setDetail(null); setBusy(false); setError(false); };
+    const clear = () => { generation.current++; request.current?.abort(); request.current = null; setDetail(null); setBusy(false); setError(false); setResultEpochs({}); };
     clear(); document.addEventListener('visibilitychange', clear);
     return () => { generation.current++; request.current?.abort(); request.current = null; document.removeEventListener('visibilitychange', clear); };
   }, [conversationId, capabilityCode]);
@@ -73,12 +75,21 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
         </span>
         <time dateTime={turn.createdAt}>{formatTimestamp(turn.createdAt).value}</time>
       </li>)}</ol>
-      {detail.turns.items.map(turn => <ConversationResult key={turn.turnId} conversationId={conversationId} turn={turn}
+      {detail.turns.items.map(turn => <ConversationResult key={`${turn.turnId}:${resultEpochs[turn.turnId] ?? 0}`} conversationId={conversationId} turn={turn}
         current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
           && scope.current.current()} />)}
-      {detail.turns.items.filter(turn => turn.capabilityCode === 'order_explanation' && turn.material === 'retained' && turn.task && !('creation' in turn))
+      {detail.turns.items.filter(turn => turn.capabilityCode === capabilityCode
+        && ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(turn.capabilityCode)
+        && turn.material === 'retained' && turn.task && !('creation' in turn))
         .map(turn => <TaskReadPolicy key={`read-policy:${identity}:${turn.turnId}`} query={{ taskId: turn.task!.taskId, runId: turn.task!.runId }} identity={identity}
-          current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.current()} />)}
+          current={() => !document.hidden && scope.current.conversationId === conversationId
+            && scope.current.capabilityCode === capabilityCode && scope.current.current()} />)}
+      {detail.turns.items.filter(turn => capabilityCode === 'opening_diagnosis' && turn.capabilityCode === capabilityCode
+        && turn.material === 'retained' && turn.task && !('creation' in turn)).map(turn =>
+        <ReadinessDiagnosticsCard key={`diagnostics:${identity}:${turn.turnId}`} conversationId={conversationId} turn={turn}
+          current={() => !document.hidden && scope.current.conversationId === conversationId
+            && scope.current.capabilityCode === capabilityCode && scope.current.current()}
+          onUnavailable={() => setResultEpochs(previous => ({ ...previous, [turn.turnId]: (previous[turn.turnId] ?? 0) + 1 }))} />)}
       {detail.turns.items.filter(turn => capabilityCode === 'order_explanation' && turn.capabilityCode === capabilityCode && turn.material === 'retained'
         && turn.task && !('creation' in turn)).map(turn => <ConversationOrderExecution key={`execution:${turn.turnId}`}
         identity={identity} conversationId={conversationId} turn={turn}

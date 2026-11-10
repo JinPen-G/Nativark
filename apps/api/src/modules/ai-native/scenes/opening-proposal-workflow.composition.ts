@@ -18,7 +18,7 @@ import { AiGuardedOpeningConfigurationSource } from '../tools/opening-configurat
 import { AiOpeningSectionDifferenceService, openingSectionChangeSchema, verifyOpeningSectionMaterial } from '../tools/opening-section-difference.service';
 import { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 import { AiOpeningVersionFieldSource } from '../tools/opening-version-fields.source';
-import { AiTaskRunnerError, snapshotAiTaskRunnerClaimLease } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, snapshotAiTaskRunnerRecoveryLease, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
 import type { AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
@@ -183,22 +183,38 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
       let lease: AiTaskRunnerRecoveryLease;
       try {
-        const received = structuredClone(await waitForTaskApplicationDependency(() => root.authorization.tasks.claimRecoveryRun(claim), true, signal));
-        if (received.purpose !== 'recovery_only') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-        lease = { ...snapshotAiTaskRunnerClaimLease(claim, received), purpose: received.purpose };
+        const received = await waitForTaskApplicationDependency(() => root.authorization.tasks.claimRecoveryRun(structuredClone(claim)), true, signal);
+        lease = snapshotAiTaskRunnerRecoveryLease(claim, received);
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'AI_STORAGE_UNAVAILABLE') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
         throw error;
       }
-      if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-      // Never turn a queried held lease into permission after a missing ACK.
-      // RecoverResult can retain unknown if original measurement is incomplete;
-      // an AiProposal row alone does not settle a Step or its resource charge.
-      const outcome = await root.runner.recover(lease, signal);
-      try { await waitForTaskApplicationDependency(verify, false, signal); } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
-      return freezeOriginalInput({ original: command.original, kind: 'run_outcome' as const, outcome,
-        execution: 'recovery_only_no_redispatch' as const, atomicity: 'independent_partitions' as const,
-        businessDraft: 'not_created' as const, publication: 'not_attempted' as const, retryable: false as const });
+      let runnerOwnsLease = false;
+      try {
+        if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        // The original engine accepts cleanup inside its try/finally, after
+        // pure reads. Missing ACK never authorizes a holder readback or dispatch.
+        const outcome = await root.runner.recover(lease, signal, () => { runnerOwnsLease = true; });
+        try { await waitForTaskApplicationDependency(verify, false, signal); } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+        return freezeOriginalInput({ original: command.original, kind: 'run_outcome' as const, outcome,
+          execution: 'recovery_only_no_redispatch' as const, atomicity: 'independent_partitions' as const,
+          businessDraft: 'not_created' as const, publication: 'not_attempted' as const, retryable: false as const });
+      } finally {
+        if (!runnerOwnsLease) {
+          // Cleanup is this acknowledged generation's CAS, independently of
+          // host cancellation. It does not cancel remote work or clear old debt.
+          try {
+            await callAiTaskRunnerDependency(async child => {
+              const current = structuredClone(await root.authorization.tasks.readMetadata(lease.taskId));
+              if (child.aborted || current.taskId !== lease.taskId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+              const release = { taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+                expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+              const receipt = structuredClone(await root.authorization.tasks.releaseRun(structuredClone(release)));
+              if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            }, 5000, 'opening_proposal_recovery_cleanup');
+          } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'opening recovery cleanup requires original receipt'); }
+        }
+      }
     },
     async previewSections(value: unknown) {
       const command = batchSchema.parse(structuredClone(value)), { materials } = await prepareBatch(command);

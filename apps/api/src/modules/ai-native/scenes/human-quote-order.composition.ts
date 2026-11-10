@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT,
   AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, AI_APPROVAL_APPLICATION_DRAFT_VERSION,
   type AiHumanQuoteOrderRepreparePreparationInputDraft, type AiHumanQuoteOrderRepreparePreparationDraft } from '@rental-os/shared';
@@ -163,7 +164,9 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
           || requestFingerprint(plan.payload) !== plan.planHash) throw denied();
         return { task, step, input, plan };
       };
-      const rows = await readRows();
+      // ORM rows contain bigint cursors and Date values. Request JSON hashing
+      // cannot represent those values or detect timestamp changes faithfully.
+      const rows = structuredClone(await readRows());
       const wait = await PrismaTaskApplication.readConfirmation({ db: dependencies.db, tasks: controlled.tasks, clock: dependencies.runnerClock },
         { taskId: next.taskId, runId: next.runId, stepId: rows.step.id });
       const newEligibility = await controlled.application.readReprepareEligibility(next.taskId,
@@ -176,7 +179,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         { draftVersion: AI_APPROVAL_APPLICATION_DRAFT_VERSION, original: wait.proposal, intent: 'inspect' });
       const latest = await selections.readAuthorized(next);
       if (closingNewEligibility.state !== 'pending' || latest.bindingHash !== selection.bindingHash
-        || requestFingerprint(await readRows()) !== requestFingerprint(rows) || requestFingerprint(await eligible()) !== requestFingerprint(eligibility)
+        || !isDeepStrictEqual(await readRows(), rows) || requestFingerprint(await eligible()) !== requestFingerprint(eligibility)
         || requestFingerprint(await identities()) !== requestFingerprint(identity)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       const reason = eligibility.state === 'rejected' ? 'rejected' : eligibility.state === 'expired' ? 'expired' : 'change_plan';
       return freezeOriginalInput({ selection: old.ref, replacement: next,
@@ -419,13 +422,12 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     try {
       await observe(resolved.verify, signal);
       if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
-      // After delegation, an unchanged lease is not proof that the runner's
-      // in-flight confirmation/Core write cannot commit. Only it owns cleanup.
-      cleanupSafe = false;
+      // Pure application reads still belong to this acknowledged lease owner.
+      // Only entry into the runner's protected interval transfers cleanup.
+      const acceptRecovery = () => { cleanupSafe = false; };
       const result = 'checkpointRef' in command
-        ? await root.application.continueConfirmation({ taskId: proof.taskId, runId: proof.runId, checkpointRef: command.checkpointRef }, signal)
-        : { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
-      cleanupSafe = result.kind === 'not_started';
+        ? await root.application.continueConfirmation({ taskId: proof.taskId, runId: proof.runId, checkpointRef: command.checkpointRef }, signal, acceptRecovery)
+        : { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal, acceptRecovery) };
       await observe(resolved.verify, undefined, true);
       return result;
     } catch (error) {
@@ -441,8 +443,11 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
             if (held) {
               const current = await root.authorization.tasks.readMetadata(proof.taskId);
               if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-              await root.authorization.tasks.releaseRun({ taskId: proof.taskId, runId: proof.runId, holderId: host.holderId,
-                expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+              const release = { taskId: proof.taskId, runId: proof.runId, holderId: host.holderId,
+                expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+              const receipt = structuredClone(await root.authorization.tasks.releaseRun(structuredClone(release)));
+              if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1)
+                throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
             }
           }, 5000, 'selected_order_cleanup', undefined, configuration.runnerClock);
         } catch {
