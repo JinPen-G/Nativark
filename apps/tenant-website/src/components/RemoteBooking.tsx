@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LoadingOutlined } from '@ant-design/icons';
+import { Loader as LoadingOutlined } from './SiteIcon';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { useToast } from './Toast';

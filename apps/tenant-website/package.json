@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "check:render": "node scripts/check-storefront-render.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.2",
     "@rental-os/web-client": "0.1.0",
+    "@animate-ui/react": "2.3.0",
+    "lucide-react": "1.49.0",
+    "motion": "14.6.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router-dom": "7.18.2"

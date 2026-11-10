@@ -27,38 +27,43 @@ export const categories: Category[] = [
     ],
   },
   { id: 'vehicle', name: '出行用车', shortName: '用车', description: '汽车 / 电动车 / 自驾', icon: 'car', image: asset('product-car'), heroImage: asset('scene-vehicle'), heroTitle: '自驾出行\n说走就走', heroDescription: '多车型可选，灵活租期', sceneTitle: '自驾出行，说走就走', sceneImage: asset('scene-vehicle'), children: [{ id: 'car', name: '汽车', description: '轿车 / SUV', image: asset('product-car') }] },
-  { id: 'digital', name: '数码硬件', shortName: '数码', description: '电脑 / 平板 / 游戏', icon: 'laptop', image: asset('product-laptop'), heroImage: asset('multi-lifestyle-hero'), heroTitle: '好设备，让灵感随行', heroDescription: '灵活租用数码好物', sceneTitle: '好设备，让灵感随行', sceneImage: asset('multi-lifestyle-hero'), children: [{ id: 'computer', name: '电脑', description: '笔记本 / 平板', image: asset('product-laptop') }] },
+  { id: 'digital', name: '数码硬件', shortName: '数码', description: '电脑 / 平板 / 游戏', icon: 'laptop', image: asset('product-laptop'), heroImage: asset('multi-lifestyle-hero'), heroTitle: '好设备，让灵感随行', heroDescription: '电脑、平板和游戏设备，按需要租用', sceneTitle: '好设备，让灵感随行', sceneImage: asset('multi-lifestyle-hero'), children: [{ id: 'computer', name: '电脑', description: '笔记本 / 平板', image: asset('product-laptop') }] },
   { id: 'construction', name: '工程工具', shortName: '工具', description: '电动工具 / 测量设备', icon: 'tool', image: asset('product-drill'), heroImage: asset('scene-camera'), heroTitle: '趁手工具，事半功倍', heroDescription: '按需租用专业工具', sceneTitle: '趁手工具，事半功倍', sceneImage: asset('scene-camera'), children: [{ id: 'power-tools', name: '电动工具', description: '钻孔 / 切割', image: asset('product-drill') }] },
   { id: 'home', name: '家居用品', shortName: '家居', description: '家电 / 生活用品', icon: 'home', image: asset('product-appliance'), heroImage: asset('multi-lifestyle-hero'), heroTitle: '家的需要，按需拥有', heroDescription: '让生活更自在', sceneTitle: '家的需要，按需拥有', sceneImage: asset('multi-lifestyle-hero'), children: [{ id: 'home-appliance', name: '家用电器', description: '家电 / 清洁', image: asset('product-appliance') }] },
-  { id: 'baby', name: '母婴用品', shortName: '母婴', description: '婴儿车 / 安全座椅', icon: 'baby', image: asset('product-stroller'), heroImage: asset('multi-lifestyle-hero'), heroTitle: '陪伴成长，轻松一点', heroDescription: '按需选用母婴好物', sceneTitle: '陪伴成长，轻松一点', sceneImage: asset('multi-lifestyle-hero'), children: [{ id: 'stroller', name: '婴儿车', description: '轻便 / 安全', image: asset('product-stroller') }] },
+  { id: 'baby', name: '母婴用品', shortName: '母婴', description: '婴儿车 / 安全座椅', icon: 'baby', image: asset('product-stroller'), heroImage: asset('multi-lifestyle-hero'), heroTitle: '陪伴成长，轻松一点', heroDescription: '婴儿车、安全座椅，按出行需要选择', sceneTitle: '陪伴成长，轻松一点', sceneImage: asset('multi-lifestyle-hero'), children: [{ id: 'stroller', name: '婴儿车', description: '轻便 / 安全', image: asset('product-stroller') }] },
   { id: 'sports', name: '运动户外', shortName: '运动', description: '骑行 / 球类 / 户外', icon: 'sports', image: asset('product-sports'), heroImage: asset('scene-camping'), heroTitle: '随时出发，尽情运动', heroDescription: '更多体验，轻松开始', sceneTitle: '随时出发，尽情运动', sceneImage: asset('scene-camping'), children: [{ id: 'outdoor', name: '户外运动', description: '骑行 / 球类', image: asset('product-sports') }] },
 ];
 
 /** 演示门店：真实模式下门店来自后端公开目录的 locations（见 remoteSite）。 */
 export const demoStores: Store[] = [
-  { id: 'store-city', name: '城西旗舰门店', nameEn: 'West City Flagship', address: '市中心 · 创意园 A 座 1 层', addressEn: 'Downtown · Creative Park, Block A, F1', businessHours: '09:00–21:00', contactPhone: '400-000-0001', capabilities: ['pickup', 'return', 'storage'] },
-  { id: 'store-lake', name: '东湖社区店', nameEn: 'East Lake Community', address: '东湖新区 · 湖畔广场 B2', addressEn: 'East Lake District · Lakeside Plaza B2', businessHours: '10:00–20:00', contactPhone: '400-000-0002', capabilities: ['pickup', 'return'] },
-  { id: 'store-station', name: '高铁南站取还点', nameEn: 'South Railway Point', address: '高铁南站 · 到达层便民服务区', addressEn: 'South Railway Station · Arrival Level', businessHours: '08:00–22:00', contactPhone: '400-000-0003', capabilities: ['pickup', 'return'] },
-  { id: 'store-airport', name: '机场配送仓', nameEn: 'Airport Delivery Hub', address: 'T2 航站楼 · 物流配送中心', addressEn: 'Terminal 2 · Logistics Hub', businessHours: '全天配送', contactPhone: '400-000-0004', capabilities: ['delivery', 'storage'] },
+  { id: 'store-city', city: '杭州', cityEn: 'Hangzhou', name: '城西旗舰门店', nameEn: 'West City Flagship', address: '市中心 · 创意园 A 座 1 层', addressEn: 'Downtown · Creative Park, Block A, F1', businessHours: '09:00–21:00', contactPhone: '400-000-0001', capabilities: ['pickup', 'return', 'storage'] },
+  { id: 'store-lake', city: '杭州', cityEn: 'Hangzhou', name: '东湖社区店', nameEn: 'East Lake Community', address: '东湖新区 · 湖畔广场 B2', addressEn: 'East Lake District · Lakeside Plaza B2', businessHours: '10:00–20:00', contactPhone: '400-000-0002', capabilities: ['pickup', 'return'] },
+  { id: 'store-station', city: '上海', cityEn: 'Shanghai', name: '高铁南站取还点', nameEn: 'South Railway Point', address: '高铁南站 · 到达层便民服务区', addressEn: 'South Railway Station · Arrival Level', businessHours: '08:00–22:00', contactPhone: '400-000-0003', capabilities: ['pickup', 'return'] },
+  { id: 'store-airport', city: '上海', cityEn: 'Shanghai', name: '机场配送仓', nameEn: 'Airport Delivery Hub', address: 'T2 航站楼 · 物流配送中心', addressEn: 'Terminal 2 · Logistics Hub', businessHours: '全天配送', contactPhone: '400-000-0004', capabilities: ['delivery', 'storage'] },
 ];
 
 const sharedTenant = {
-  name: 'Rental OS', logo: '/brand/logo-horizontal.png', logoCompact: '/brand/logo-mark.png',
-  slogan: '好物相伴，更好生活', primaryColor: PLATFORM_THEME.primaryColor, secondaryColor: PLATFORM_THEME.secondaryColor,
+  name: 'Rental OS', logo: '/brand/logo-black.svg', logoDark: '/brand/logo-white.svg', logoCompact: '/brand/mark-black.svg',
+  announcement: '新计划，不用等装备买齐。', announcementEn: 'A new plan. No need to buy all the gear.',
+  campaigns: [
+    { id: 'first-rental', title: '第一次租？从你想试的开始。', titleEn: 'First time renting? Start with a little curiosity.', description: '看看设备、租期和取还方式，再决定这次怎么安排。', descriptionEn: 'Explore the equipment, dates and pickup options. Make a plan that fits.', image: asset('product-camera'), demo: true },
+    { id: 'weekend', title: '把周末，安排到户外。', titleEn: 'Leave a little room for the outdoors.', description: '带上相机，走一段没走过的路。这次，不赶时间。', descriptionEn: 'Take a camera. Find a new route. Leave the rush behind.', image: '/assets/brand-journey.webp', demo: true },
+  ],
+  slogan: '为下一件想做的事', primaryColor: PLATFORM_THEME.primaryColor, secondaryColor: PLATFORM_THEME.secondaryColor,
   phone: '400-000-0000', customerService: '在线客服', address: '欢迎联系门店了解取还方式',
-  footerText: '好物相伴，更好生活。按需租用，让每一次体验都恰到好处。',
-  heroImage: asset('multi-lifestyle-hero'), heroTitle: '需要的时候\n租一件就好',
-  heroDescription: '数码、户外、家电、工具、母婴，\n按需租用，用完归还。',
+  footerText: '拍一段旅行，认真做一次创作，或把搁置的计划重新开始。需要用的，在这里租。',
+  heroImage: asset('multi-lifestyle-hero'), heroTitle: '想做的事，\n现在就去做。',
+  heroDescription: '去拍摄、去露营，或做点新尝试。\n需要的时候租，用完再还。',
   stores: demoStores,
 };
 
 export const demoTenants: Record<DemoTenantKey, Tenant> = {
-  single: { ...sharedTenant, id: 'tenant-single', categories: categories.slice(0, 1), heroImage: categories[0].heroImage, heroTitle: categories[0].heroTitle, heroDescription: categories[0].heroDescription, testimonials: [
+  single: { ...sharedTenant, id: 'tenant-single', categories: categories.slice(0, 1), heroImage: categories[0].heroImage, heroTitle: '想拍的画面，\n别只留在想象里。', heroDescription: '一段旅行，一支想试的镜头。\n为这次拍摄，租合适的设备。', testimonials: [
     { name: '陈女士', context: '周末摄影创作', text: '器材状态很好，取还方便。周末出门拍照再也不用纠结要不要买新镜头。' },
     { name: '赵先生', context: '短片拍摄', text: '需要的机身和镜头都能找到，租期选择也很灵活，拍摄准备轻松不少。' },
     { name: '林女士', context: '旅行记录', text: '第一次租相机也能很快看懂流程，设备拿到手就可以出发拍摄。' },
   ] },
-  double: { ...sharedTenant, id: 'tenant-double', categories: categories.slice(0, 2), heroImage: categories[1].heroImage, heroTitle: '带上好装备\n去发现更大的世界', heroDescription: '摄影器材 × 露营装备\n让每一次出发，都更简单', testimonials: [
+  double: { ...sharedTenant, id: 'tenant-double', categories: categories.slice(0, 2), heroImage: categories[1].heroImage, heroTitle: '这次出发，\n多一点想做的事。', heroDescription: '把相机带上，把帐篷搭起。\n按你的行程，租好这次的装备。', testimonials: [
     { name: '陈女士', context: '周末摄影创作', text: '器材状态很好，取还方便。周末出门拍照再也不用纠结要不要买新镜头。' },
     { name: '王先生', context: '家庭露营出行', text: '第一次带家人露营，装备准备得很齐全，按需租比囤在家里省心多了。' },
     { name: '林先生', context: '户外拍摄', text: '相机和露营装备一次挑齐，出发前准备更从容，周末过得很尽兴。' },

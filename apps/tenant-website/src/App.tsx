@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { SiteProvider } from './SiteContext';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { SiteProvider, useSite } from './SiteContext';
 import { AuthProvider } from './AuthContext';
 import { SiteLayout } from './components/SiteLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -21,10 +21,12 @@ const OrdersPage = lazy(() => import('./pages/OrderPages').then(m => ({ default:
 const OrderDetailPage = lazy(() => import('./pages/OrderPages').then(m => ({ default: m.OrderDetailPage })));
 const AboutPage = lazy(() => import('./pages/InfoPages').then(m => ({ default: m.AboutPage })));
 const GuidePage = lazy(() => import('./pages/InfoPages').then(m => ({ default: m.GuidePage })));
+const NotFoundPage = lazy(() => import('./pages/InfoPages').then(m => ({ default: m.NotFoundPage })));
 
 function RouteFallback() {
+  const { t } = useSite();
   // 轻骨架代替「正在加载…」大字：chunk 加载时不打断连续感（配合顶部进度条）。
-  return <div className="shell route-fallback" role="status" aria-label="加载中">
+  return <div className="shell route-fallback" role="status" aria-label={t('loading')}>
     <div className="sk-page" aria-hidden="true">
       <div className="sk-line sk-line-lg" />
       <div className="sk-line sk-line-md" />
@@ -55,7 +57,7 @@ export function App() {
               <Route path="/help" element={<DocumentPage kind="help" />} />
               <Route path="/agreement" element={<DocumentPage kind="user_agreement" />} />
               <Route path="/privacy" element={<DocumentPage kind="privacy_policy" />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </Suspense>}
         </RouteTransition>

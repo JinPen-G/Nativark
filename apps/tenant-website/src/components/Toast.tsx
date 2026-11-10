@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { CheckCircleFilled, CloseCircleFilled, InfoCircleFilled } from '@ant-design/icons';
+import { CheckCircle as CheckCircleFilled, CloseCircle as CloseCircleFilled, InfoCircle as InfoCircleFilled } from './SiteIcon';
 
 // 轻量操作反馈：成功/失败/提示 Toast，自动消失，非大 Modal、不阻断操作。
 type ToastKind = 'success' | 'error' | 'info';

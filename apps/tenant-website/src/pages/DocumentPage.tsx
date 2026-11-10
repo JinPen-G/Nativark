@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
+import { ChevronDown, Document, ExternalLink, Guide, Headphones, Search, ShieldCheck } from '../components/SiteIcon';
+import { LoadingState, PageState } from '../components/PageState';
 import { useSite } from '../SiteContext';
 import { clientApi, type PublicDocumentResponse } from '../data/apiClient';
 import { createElement, type ReactNode } from 'react';
+import { PageHeading } from '../components/PageHeader';
 import { parseClientRichText, type ClientRichTextNode } from '@rental-os/shared';
 
 function DocumentBody({ body }: { body: string }) {
@@ -18,10 +20,12 @@ const TITLE_KEY: Record<Kind, string> = { user_agreement: 'docUserAgreement', pr
 
 /** 用户协议 / 隐私政策 / 帮助：真实租户读后台配置的正文；演示或未配置时回落通用文案。 */
 export function DocumentPage({ kind }: { kind: Kind }) {
-  const { tenantCode, isRemote, href, t } = useSite();
+  const { tenantCode, isRemote, href, t, tenant, language } = useSite();
   const [doc, setDoc] = useState<PublicDocumentResponse | null>(null);
   const [loading, setLoading] = useState(isRemote);
   const [missing, setMissing] = useState(false);
+  const [search, setSearch] = useState('');
+  const en = language === 'en';
 
   useEffect(() => {
     if (!isRemote || !tenantCode) { setLoading(false); return; }
@@ -39,22 +43,33 @@ export function DocumentPage({ kind }: { kind: Kind }) {
   // 帮助页：真实租户无配置时回落到通用 FAQ；协议/隐私无配置时提示商户未提供。
   const fallbackHelp = kind === 'help';
 
+  const defaultFaq = [
+    { question: t('faqTerm'), answer: t('faqTermText') },
+    { question: t('faqDeposit'), answer: t('faqDepositText') },
+    { question: t('faqDelivery'), answer: t('faqDeliveryText') },
+  ];
+  const faq = doc?.faq?.length ? doc.faq : !doc && fallbackHelp ? defaultFaq : [];
+  const visibleFaq = faq.filter(item => (item.question + ' ' + item.answer).toLocaleLowerCase().includes(search.toLocaleLowerCase().trim()));
   return <div className="shell simple-page doc-page">
-    <div className="page-intro"><h1>{title}</h1>{doc?.version ? <p>{t('docVersion', { version: doc.version })}</p> : null}</div>
-    {loading ? <p className="mock-note"><LoadingOutlined /> {t('loading')}</p> : null}
-    {!loading && doc ? <div className="doc-body">
-      {doc.intro ? <p className="doc-intro">{doc.intro}</p> : null}
-      {doc.body ? <DocumentBody body={doc.body} /> : null}
-      {doc.url ? <p><a href={doc.url} target="_blank" rel="noreferrer">{t('docExternalLink')} <ArrowRightOutlined /></a></p> : null}
-      {doc.faq?.length ? <div className="faq-list">{doc.faq.map((item, i) => <details key={i}><summary>{item.question}</summary><p>{item.answer}</p></details>)}</div> : null}
-      {!doc.body && !doc.url && !doc.intro && !doc.faq?.length ? <p className="mock-note">{t('docNotProvided')}</p> : null}
-    </div> : null}
-    {!loading && !doc && fallbackHelp ? <div className="faq-list">
-      <details><summary>{t('faqTerm')}</summary><p>{t('faqTermText')}</p></details>
-      <details><summary>{t('faqDeposit')}</summary><p>{t('faqDepositText')}</p></details>
-      <details><summary>{t('faqDelivery')}</summary><p>{t('faqDeliveryText')}</p></details>
-    </div> : null}
-    {!loading && !doc && !fallbackHelp ? <p className="mock-note">{isRemote && missing ? t('docNotProvided') : t('docDemoNotice')}</p> : null}
-    <Link className="button button-dark" to={href('/')} style={{ marginTop: 24 }}>{t('backHome')}</Link>
+    <PageHeading title={title} description={doc?.version ? t('docVersion', { version: doc.version }) : kind === 'help' ? t('helpDescription') : undefined} />
+    <div className="doc-layout">
+      <nav className="doc-navigation" aria-label={t('footerLegal')}>
+        <Link to={href('/help')} aria-current={kind === 'help' ? 'page' : undefined}><Headphones />{t('footerHelp')}</Link>
+        <Link to={href('/guide')}><Guide />{t('guide')}</Link>
+        <Link to={href('/agreement')} aria-current={kind === 'user_agreement' ? 'page' : undefined}><Document />{t('docUserAgreement')}</Link>
+        <Link to={href('/privacy')} aria-current={kind === 'privacy_policy' ? 'page' : undefined}><ShieldCheck />{t('docPrivacyPolicy')}</Link>
+      </nav>
+      <div className="doc-reading">
+        {loading ? <LoadingState label={t('loading')} /> : <>
+          {doc && <div className="doc-body">{doc.intro && <p className="doc-intro">{doc.intro}</p>}{doc.body && <DocumentBody body={doc.body} />}{doc.url && <p><a className="external-document-link" href={doc.url} target="_blank" rel="noreferrer">{t('docExternalLink')}<ExternalLink /></a></p>}{!doc.body && !doc.url && !doc.intro && !doc.faq?.length && <PageState icon={<Document />} title={t('docNotProvided')} />}</div>}
+          {faq.length > 0 && <><label className="help-search"><Search /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={en ? 'Search rental questions' : '搜索租赁问题'} aria-label={en ? 'Search rental questions' : '搜索租赁问题'} /></label>
+            <p className="help-result-count" role="status">{visibleFaq.length} {en ? 'question(s)' : '个问题'}</p>
+            {visibleFaq.length ? <div className="faq-list">{visibleFaq.map(item => <details key={item.question}><summary><span>{item.question}</span><ChevronDown /></summary><p>{item.answer}</p></details>)}</div> : <PageState title={en ? 'No matching questions' : '未找到相关问题'}><button type="button" className="button button-outline" onClick={() => setSearch('')}>{en ? 'Clear search' : '清空搜索'}</button></PageState>}
+          </>}
+          {!doc && !fallbackHelp && <PageState icon={kind === 'privacy_policy' ? <ShieldCheck /> : <Document />} title={en ? 'Document not available yet' : '暂未提供文件正文'} description={isRemote && missing ? t('docNotProvided') : t('docDemoNotice')} />}
+          {fallbackHelp && <section className="help-contact"><Headphones /><div><h2>{en ? 'Need a little more help?' : '还有其他问题？'}</h2><p>{tenant.customerService}</p>{isRemote && tenant.phone ? <a href={'tel:' + tenant.phone}>{tenant.phone}</a> : <p className="field-note">{en ? 'Demo preview · Contact details are not connected.' : '演示预览 · 尚未连接真实门店客服。'}</p>}</div><Link className="button button-outline" to={href('/guide')}>{t('guide')}</Link></section>}
+        </>}
+      </div>
+    </div>
   </div>;
 }
