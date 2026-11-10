@@ -1,5 +1,6 @@
 import { Injectable, ConflictException, ForbiddenException, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
 import { randomUUID } from "node:crypto";
 import type {
   RentalFundingAction,
@@ -325,6 +326,7 @@ export class RentalFundingService {
     workspaceId: string,
     orderId: string
   ): Promise<FundingOrder> {
+    await lockRentalBusinessTenant(tx, tenantId);
     const rows = await tx.$queryRaw<Array<{ depositAmount: Prisma.Decimal; preAuthAmount: Prisma.Decimal; finalPayableAmount: Prisma.Decimal; status: string;
       membershipSnapshot: unknown; payerSubjectCustomerId: string | null; contractSubjectCustomerId: string | null; currency: string; ruleSnapshot: FundingOrder["ruleSnapshot"] }>>(Prisma.sql`
       SELECT depositAmount, preAuthAmount, finalPayableAmount, status, ruleSnapshot, membershipSnapshot, payerSubjectCustomerId, contractSubjectCustomerId, currency

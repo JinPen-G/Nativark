@@ -6,7 +6,7 @@ import { BottomSheet } from "@/registry/components/bottom-sheet/bottom-sheet";
 import { Button } from "@/registry/components/button/button";
 import { Checkbox } from "@/registry/components/checkbox/checkbox";
 import { useLocale } from "@/app/locale";
-import { useAuthStore } from "@/features/auth/authStore";
+import { useBusinessUiScope } from "../BusinessUiScope";
 import styles from "./RecordCard.module.css";
 import { motion } from "motion/react";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
@@ -28,13 +28,13 @@ export interface RecordCardConfig<T> {
 const query = "(max-width: 639px)";
 const subscribe = (notify: () => void) => { const media = matchMedia(query); media.addEventListener("change", notify); return () => media.removeEventListener("change", notify); };
 const narrowSnapshot = () => matchMedia(query).matches;
-function identity() { const state = useAuthStore.getState(); return JSON.stringify([state.tenant?.tenantId, state.currentWorkspaceId, state.user?.id]); }
 
 export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disabled }: {
   row: T; config: RecordCardConfig<T>; rowKey: string; selected?: boolean; onSelect?: (checked: boolean) => void; disabled?: boolean;
 }) {
   const { t } = useLocale();
   const reduced = usePrefersReducedMotion();
+  const { currentIdentity: identity } = useBusinessUiScope();
   const narrow = useSyncExternalStore(subscribe, narrowSnapshot, () => false);
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);

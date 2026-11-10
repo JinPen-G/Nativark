@@ -1,2 +1,5 @@
 # Archived originals are byte-preservation snapshots; do not normalize line endings.
 docs/历史归档/整理前快照-20261016/** -text
+docs/企业客户后台/历史归档/** -text whitespace=cr-at-eol
+# The committed lock uses CRLF bytes; treat that EOL as content, not trailing whitespace.
+package-lock.json -text whitespace=cr-at-eol

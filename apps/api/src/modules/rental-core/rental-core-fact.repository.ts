@@ -1,6 +1,7 @@
 import { rentalCategoryStorageCode } from "./category-identity";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
 import { usageDelta } from "./rental-usage-reading";
 import { isDeepStrictEqual } from "node:util";
 import { Prisma, type $Enums } from "@prisma/client";
@@ -889,7 +890,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    */
   async lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void> {
     /**
-     * 必须让这条 FOR UPDATE 成为事务内的第一条读。
+     * 共享租户锁和这条 FOR UPDATE 必须先于任何普通读；共享锁不建立旧快照。
      *
      * MySQL 默认是 REPEATABLE READ；如果先调用 resolveScopeWorkspaceId，
      * 它的普通 SELECT 会建立旧快照。之后即使 FOR UPDATE 等到了续租事务并
@@ -898,6 +899,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
      * 锁定结果取得空间；没有会话的 seed/恢复路径则先锁订单，再确认它属于
      * 目标租户的默认空间，不提前做任何普通查询。
      */
+    await lockRentalBusinessTenant(tx, tenantId);
     const sessionWorkspaceId = getRequestWorkspaceId();
     const rows = sessionWorkspaceId
       ? await tx.$queryRaw<Array<{ id: string; workspaceId: string }>>(Prisma.sql`
@@ -1383,6 +1385,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 可确保同一资源的并发下单串行重算，而不同地点仍可并行。
    */
   async lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void> {
+    await lockRentalBusinessTenant(tx, tenantId);
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const ordered = [...targets].sort((left, right) =>
       `${left.itemGroupId}:${left.inventoryMode}`.localeCompare(`${right.itemGroupId}:${right.inventoryMode}`)

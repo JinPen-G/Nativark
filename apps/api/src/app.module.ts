@@ -50,6 +50,18 @@ import { CustomerCorporateService } from "./modules/platform/customer-corporate.
 import { CustomerCorporateSettlementService } from "./modules/platform/customer-corporate-settlement.service";
 import { MembershipController } from "./modules/platform/membership.controller";
 import { MembershipService } from "./modules/platform/membership.service";
+import { EnterprisePortalService } from "./modules/platform/enterprise-portal.service";
+import { EnterpriseAccessService } from "./modules/client/enterprise-access.service";
+import { EnterpriseCommandService } from "./modules/enterprise/enterprise-command.service";
+import { EnterpriseApplicationService } from "./modules/enterprise/enterprise-application.service";
+import { EnterpriseMembersService } from "./modules/enterprise/enterprise-members.service";
+import { EnterprisePolicyService } from "./modules/enterprise/enterprise-policy.service";
+import { EnterpriseApprovalService } from "./modules/enterprise/enterprise-approval.service";
+import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterprise-extension-approval.service";
+import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
+import { EnterpriseManagementRequestService } from "./modules/enterprise/enterprise-management-request.service";
+import { EnterpriseWorkflowsController } from "./modules/enterprise/enterprise-workflows.controller";
+import { EnterpriseMerchantController } from "./modules/enterprise/enterprise-merchant.controller";
 import { CustomerAvatarController } from "./modules/platform/customer-avatar.controller";
 import { CustomerAvatarService } from "./modules/platform/customer-avatar.service";
 import { PlatformService } from "./modules/platform/platform.service";
@@ -226,6 +238,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     CategoryGovernanceController,
     CategoryAdoptionPreparationController,
     MembershipController,
+    EnterpriseWorkflowsController,
+    EnterpriseMerchantController,
     CustomerAvatarController,
     RentalCoreController,
     RentalBusinessController,
@@ -303,6 +317,16 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     CustomerCorporateService,
     CustomerCorporateSettlementService,
     MembershipService,
+    EnterprisePortalService,
+    EnterpriseAccessService,
+    EnterpriseCommandService,
+    EnterpriseApplicationService,
+    EnterpriseMembersService,
+    EnterprisePolicyService,
+    EnterpriseApprovalService,
+    EnterpriseExtensionApprovalService,
+    EnterpriseTaskCenterService,
+    EnterpriseManagementRequestService,
     CustomerAvatarService,
     OperationLogService,
     RentalCoreService,

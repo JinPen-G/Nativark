@@ -162,6 +162,8 @@ export class SetCustomerMembershipTemporaryPasswordDto implements SetCustomerMem
 }
 
 export class SaveCustomerCorporateMembershipDto implements SaveCustomerCorporateMembershipRequest {
+  @IsOptional() @IsDateString()
+  expectedUpdatedAt?: string;
   @IsString() @IsNotEmpty()
   personalCustomerId!: string;
   @IsIn(["admin", "employee"])

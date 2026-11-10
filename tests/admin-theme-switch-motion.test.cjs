@@ -17,6 +17,8 @@ assert.match(theme, /rental-theme-rise 360ms cubic-bezier\(\.22,1,\.36,1\)/);
 assert.match(theme, /旧圆形揭示保留为 legacy-reveal/);
 assert.match(theme, /prefers-reduced-motion: reduce/);
 assert.match(theme, /document\.startViewTransition/);
+assert.match(theme, /transition\.ready\.catch\(\(\) => undefined\)/);
+assert.match(theme, /transition\.finished\.then\(finish, finish\)/);
 assert.match(switcher, /transition === "legacy-reveal" \? "reveal" : transition/);
 assert.match(switcher, /\{ element, transition \}/);
 

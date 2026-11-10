@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import type { RentalInventoryMode } from "@rental-os/shared";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
 
 export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevision: number }
 
@@ -11,6 +12,7 @@ export async function lockActiveCategoryBinding(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
   expected?: CategoryWriteBinding, categoryCode?: string
 ) {
+  await lockRentalBusinessTenant(tx, tenantId);
   const rows = await tx.$queryRaw<Array<{ categoryCode: string; categoryVersionId: string | null; categoryAdoptionRevision: number; status: string }>>(
     Prisma.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`
   );

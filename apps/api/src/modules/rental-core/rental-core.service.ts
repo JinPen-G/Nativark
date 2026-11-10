@@ -22,6 +22,8 @@ import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental
 import { frozenFileContentHash } from "../integrations/file-content-binding";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { MembershipService } from "../platform/membership.service";
+import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service";
+import { RentalBusinessService } from "./rental-business.service";
 import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
 import type { CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
@@ -397,7 +399,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     @Optional() private readonly funding?: RentalFundingService,
     private readonly categoryResolver?: RentalCategoryResolver,
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
-    @Optional() @Inject(RentalBusinessConfigRepository) private readonly businessConfigStore?: RentalBusinessConfigStore
+    @Optional() @Inject(RentalBusinessConfigRepository) private readonly businessConfigStore?: RentalBusinessConfigStore,
+    @Optional() private readonly enterprisePolicies?: EnterprisePolicyService,
+    @Optional() private readonly extensionPrices?: RentalBusinessService
   ) {}
 
   /**
@@ -2674,10 +2678,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return snapshots.length ? snapshots : undefined;
   }
 
+  private async assertEnterpriseNewExpense(tenantId: string, order: RentalOrder, tx?: RentalFactTx, additionalAmount?: number) {
+    if (order.membershipSnapshot?.bookingIdentity !== "enterprise_employee") return;
+    if (!this.enterprisePolicies) throw new ConflictException("企业政策事务服务未就绪");
+    await this.enterprisePolicies.assertOrderAction(tenantId, this.resolveWorkspaceId(tenantId), order, tx, additionalAmount);
+  }
+
   async confirmOrder(tenantId: string, orderId: string, tx?: RentalFactTx, operator?: string) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Draft) throw new ConflictException("只有草稿订单可以确认");
+    await this.assertEnterpriseNewExpense(tenantId, order, tx);
     if (order.reservations.some((row) => row.expiresAt && new Date(row.expiresAt).getTime() < Date.now())) throw new ConflictException("软预占已过期，请重新下单");
     await this.assertOrderFulfillmentAdmission(tenantId, order, tx, true);
     // Hook 位置：状态与预占校验之后、改写之前。放在这里才能让阻止真正拦下本次确认；
@@ -3892,6 +3903,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理取货后换货");
+    if (priced.additionalAmount > 0) await this.assertEnterpriseNewExpense(tenantId, order, tx, priced.additionalAmount);
     if (order.updatedAt !== input.expectedUpdatedAt) throw new ConflictException("订单已发生变化，请重新试算换货费用");
     if (!hasOriginalRentalCurrency(order.currency, priced.currency)) throw new ConflictException("换货币种与原订单不一致或缺失，不能追加其他币种金额");
     if (!priced.exchange || priced.exchange.orderLineId !== input.orderLineId || priced.exchange.allocationId !== input.allocationId) {
@@ -4439,10 +4451,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tenantId: string,
     orderId: string,
     priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig },
-    input: { idempotencyKey: string; memo?: string; operator: string },
+    input: { idempotencyKey: string; memo?: string; operator: string; approval?: import("./approved-extension.ports").ApprovedExtensionBinding },
     tx: RentalFactTx
   ): Promise<{ order: RentalOrder; extension: RentalOrderExtension }> {
     const state = this.state(tenantId);
+    if (input.approval && input.approval.idempotencyKey !== input.idempotencyKey) throw new ForbiddenException("续租原执行键与批准绑定不一致");
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Renting && order.status !== RentalCoreOrderStatus.ReadyForPickup) {
       throw new ConflictException(`只有待${state.profile.terminology.pickupLabel}或租用中的订单可以续租`);
@@ -4463,6 +4476,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       assertIncrementalPricingSnapshot(priced.executionBasis.incrementalPricing, priced.rentalAmount, priced.billableUnits,
         { tenantId, startAt: from, endAt: priced.newEndAt, lines: order.lines, rates: priced.rateSnapshot,
           exchangeIds });
+    }
+    if (order.membershipSnapshot?.bookingIdentity === "enterprise_employee") {
+      if (!this.enterprisePolicies) throw new ConflictException("企业续租政策服务未装配");
+      const approved = await this.enterprisePolicies.assertExtensionAction(tenantId, this.resolveWorkspaceId(tenantId), order, priced, tx, input.approval);
+      if (approved) {
+        if (priced.settlementMode === "monthly" && (priced.depositDelta > 0 || priced.preAuthDelta > 0)) throw new ConflictException("账期新增保证金须原真实补足合同，企业批准不能代收或冻结");
+        if (!this.extensionPrices) throw new ConflictException("续租原价格校验未装配");
+        const current = await this.extensionPrices.quoteEnterpriseExtension(tenantId, order, await this.factStore.listExtensions(tenantId, orderId, tx), approved.request, priced.settlementMode, tx);
+        if (requestFingerprint(current) !== requestFingerprint(approved.preview)) throw new ConflictException("续租原价格、规则或品类已变化，须重新试算与批准");
+      }
     }
     const rule = effectiveExtensionRule(priced.ruleSnapshot);
     if (!rule.enabled) throw new ConflictException("当前经营空间的规则不允许续租");
@@ -4558,6 +4581,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!extension) throw new NotFoundException("续租记录不存在");
     if (extension.status === "effective") return { order, extension };
     if (extension.status !== "pending_payment") throw new ConflictException("该续租记录已不可补款");
+    if (order.membershipSnapshot?.bookingIdentity === "enterprise_employee") {
+      if (!this.enterprisePolicies) throw new ConflictException("企业续租政策服务未装配");
+      const approved = await this.enterprisePolicies.assertExtensionAction(tenantId, this.resolveWorkspaceId(tenantId), order, extension, tx);
+      if (approved) {
+        if (!this.extensionPrices) throw new ConflictException("续租原价格校验未装配");
+        const current = await this.extensionPrices.quoteEnterpriseExtension(tenantId, order, rows, approved.request, extension.settlementMode, tx);
+        if (requestFingerprint(current) !== requestFingerprint(approved.preview)) throw new ConflictException("续租价格、规则或品类在补款前已变化，不能据旧批准生效；须商户核对原款项");
+      }
+    }
     if (order.status !== RentalCoreOrderStatus.Renting && order.status !== RentalCoreOrderStatus.ReadyForPickup) {
       throw new ConflictException("订单当前状态不允许续租生效，请先确认订单未取消或已结算");
     }

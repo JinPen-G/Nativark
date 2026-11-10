@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable, type OnApplicationBootstrap } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
 import {
   RentalIdempotencyRepository,
   assertSameRequest,
@@ -111,6 +112,24 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
     return result;
   }
 
+  /** Participate in an existing authorized business transaction. No nested COMMIT,
+   * retries or external side effects; the caller owns rollback and authorization. */
+  async executeInTransaction<T>(input: IdempotentActionInput<T>, tx: RentalIdempotencyTx): Promise<{ result: T; replayed: boolean }> {
+    await lockRentalBusinessTenant(tx, input.tenantId);
+    const key = input.key?.trim() || input.fallbackKey, fingerprint = requestFingerprint(input.request);
+    const hit = await this.idempotency.find(input.tenantId, input.action, key, tx);
+    if (hit) {
+      assertSameRequest(hit, fingerprint);
+      const result = await input.replay(hit.response);
+      if (result === undefined) throw new ConflictException("原业务结果不可回放，请核对原请求");
+      return { result, replayed: true };
+    }
+    const result = await input.run(tx);
+    await this.idempotency.record({ tenantId: input.tenantId, action: input.action, key, requestHash: fingerprint,
+      orderId: input.orderId ?? null, response: result }, tx);
+    return { result, replayed: false };
+  }
+
   async execute<T>(input: IdempotentActionInput<T>, attempt = 0): Promise<T> {
     const key = input.key?.trim() || input.fallbackKey;
     const fingerprint = requestFingerprint(input.request);
@@ -127,6 +146,7 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
+          await lockRentalBusinessTenant(tx, input.tenantId);
           const result = await input.run(tx);
 
           // 事务内必须再查一次：与事务外那次之间存在窗口，

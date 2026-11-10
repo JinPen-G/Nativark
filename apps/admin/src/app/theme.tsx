@@ -198,7 +198,9 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       delete root.dataset.themeSwitching;
       revealing.current = false;
     };
-    // finished 在过渡被跳过时会 reject，因此两个分支都要收尾，不能只挂 then。
+    // Resize/hidden documents can abort snapshot creation: ready rejects separately
+    // from finished, so handle both without changing the selected theme or motion.
+    void transition.ready.catch(() => undefined);
     void transition.finished.then(finish, finish);
   }, []);
 

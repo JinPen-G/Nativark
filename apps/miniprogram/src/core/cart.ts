@@ -1,3 +1,4 @@
+import type { RentalBookingIdentityInput } from "@rental-os/shared";
 import { serverNow } from "./clock";
 import { newKey } from "./keys";
 import { sessionEvents } from "./session";
@@ -58,6 +59,7 @@ export interface CartState {
   services: CartServiceSelection[];
   /** 备注（写入每个商品行的 note）。 */
   memo?: string;
+  bookingIdentity?: RentalBookingIdentityInput;
   quote?: { id: string; revision: number; expiresAt: string };
   submission?: CartSubmission;
   updatedAt: number;

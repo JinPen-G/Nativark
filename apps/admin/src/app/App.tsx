@@ -7,6 +7,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from "react";
 import { AppRouter } from "./AppRouter";
 import { RouteErrorPage } from "./RouteErrorPage";
+import { AdminBusinessUiScope } from "@/components/AdminBusinessUiScope";
 import { LocaleProvider, useLocale } from "./locale";
 import { queryClient } from "./queryClient";
 import { AppearanceProvider, createThemeConfig, useAppearance } from "./theme";
@@ -68,7 +69,7 @@ function ThemedApp() {
           <AntdApp>
             <FeedbackProvider>
               <GlobalInteractionSounds />
-              <BrandIconProvider><RouterProvider router={router} /></BrandIconProvider>
+              <AdminBusinessUiScope><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></AdminBusinessUiScope>
             </FeedbackProvider>
           </AntdApp>
         </QueryClientProvider>

@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { RentalRuleConfigInputDto } from './rental-config-request.dto';
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { EnterpriseExtensionPrice } from "./approved-extension.ports";
 import { requestFingerprint } from './rental-idempotency.repository';
 import { currentQuoteSource } from './rental-quote-access';
 import type { RentalQuoteOriginalOperation } from './rental-business-fact.repository';
@@ -234,6 +236,7 @@ interface TenantReadinessFacts {
   priceVersion: { sequence: number; effectiveFrom: string } | null;
   priceVersionAvailable: boolean;
 }
+const extensionPricingContext = new AsyncLocalStorage<{ tenantId: string; workspaceId: string; tx: Prisma.TransactionClient; state: RentalBusinessState }>();
 
 interface BusinessContext {
   categoryVersionId?: string;
@@ -1247,7 +1250,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     at: Date,
     client?: Prisma.TransactionClient
   ) {
-    const prisma = client ?? this.prisma;
+    const scoped = extensionPricingContext.getStore();
+    const prisma = client ?? (scoped?.tenantId === tenantId && scoped.workspaceId === workspaceId ? scoped.tx : undefined) ?? this.prisma;
     if (!prisma) return null;
     return prisma.rentalPriceVersion.findFirst({
       where: { tenantId, workspaceId, effectiveFrom: { lte: at } },
@@ -6182,6 +6186,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   private state(tenantId: string, context: BusinessContext) {
     const workspaceId = this.workspaceOf(tenantId);
+    const scoped = extensionPricingContext.getStore();
+    if (scoped?.tenantId === tenantId && scoped.workspaceId === workspaceId) return scoped.state;
     let state = this.states.get(workspaceId);
     if (!state || state.categoryCode !== context.profile.categoryCode) {
       state = this.seedState(tenantId, context, this.seedPrefix(tenantId, workspaceId));
@@ -7633,13 +7639,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   /** Record the policy and executable strategy references actually used by this action. */
   private async extensionExecutionBasis(tenantId: string, context: BusinessContext, originalQuote: RentalQuoteSnapshotV1, rates: RentalPricingRate[], pricingMode: "incremental" | "original_total", pricingRule: RentalRuleConfig,
     actualLines: Parameters<typeof capabilityRequirementRoots>[0] = originalQuote.request.lines) {
+    const tx = extensionPricingContext.getStore()?.tx;
     const current = pricingMode === "incremental" && this.categoryResolver
-      ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
+      ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId), tx) : undefined;
     if (current && !isDeepStrictEqual(context.category, current.definition)) {
       throw new ConflictException("品类版本在续租准备期间已变化，请刷新后重新试算");
     }
     const historical = originalQuote.categoryVersionId && this.categoryResolver
-      ? await this.categoryResolver.forVersion(originalQuote.categoryCode, originalQuote.categoryVersionId) : undefined;
+      ? await this.categoryResolver.forVersion(originalQuote.categoryCode, originalQuote.categoryVersionId, tx) : undefined;
     const categoryPolicySnapshot = current?.definition ?? (pricingMode === "original_total" ? historical : undefined);
     const units = new Set(rates.map((rate) => rate.unit));
     if (units.has("hour") && pricingRule.pricing?.hourToDayEnabled) units.add("day_24h");
@@ -7873,7 +7880,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       });
       // 与下单报价同一道闸门：续租此前从不校验容量，于是可以给容量已满的服务加单，
       // 到履约那天没人能做。快照也必须带出去，否则生效时无从占用容量。
-      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots);
+      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots, extensionPricingContext.getStore()?.tx);
       serviceAmount = resolved.totalAmount;
       serviceSnapshots = resolved.snapshots;
       // 增量式续租按新增时段单独计费，不复算原订单的优惠链，因此这段服务费确实没有减免。
@@ -7937,6 +7944,34 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     };
   }
 
+
+  /** Transaction-scoped original pricing, used only to verify an approved expense.
+   * Reads persisted configuration into an isolated async scope; never mutates the
+   * process cache or recomputes a second price outside the original algorithm. */
+  async quoteEnterpriseExtension(tenantId: string, order: RentalOrder, previousExtensions: RentalOrderExtension[],
+    input: RentalOrderExtensionRequest, settlementMode: "immediate" | "monthly", tx: Prisma.TransactionClient): Promise<EnterpriseExtensionPrice> {
+    const workspaceId = this.workspaceOf(tenantId);
+    if (!this.categoryResolver || !this.configStore.loadWorkspace || !this.coreConfigStore.loadWorkspace) throw new ServiceUnavailableException("事务内续租价格来源未装配");
+    // Config writers share the workspace parent; a plain read cannot freeze
+    // a version while its authoritative pricing context is being assembled.
+    await tx.$queryRaw`SELECT id FROM business_workspaces WHERE tenantId=${tenantId} AND id=${workspaceId} AND status='ACTIVE' LOCK IN SHARE MODE`;
+    const workspace = await tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { categoryCode: true, categoryVersionId: true, categoryAdoptionRevision: true, status: true } });
+    if (!workspace || workspace.status !== "ACTIVE") throw new ConflictException("原订单经营空间不可用");
+    const [config, core, category, quote] = await Promise.all([
+      this.configStore.loadWorkspace(tenantId, workspaceId, tx), this.coreConfigStore.loadWorkspace(tenantId, workspaceId, tx),
+      this.categoryResolver.forWorkspace(tenantId, workspaceId, tx), this.factStore.findQuote(tenantId, order.quoteId, tx),
+    ]);
+    if (!quote || !core.profile || !core.businessSettings || !config.hasPersistedConfig || category.categoryVersionId !== workspace.categoryVersionId
+      || category.adoptionRevision !== workspace.categoryAdoptionRevision) throw new ConflictException("原报价或续租配置/品类依据缺失或已变化");
+    const context: BusinessContext = { profile: { ...core.profile, categoryCode: core.workspaceCategoryCode }, category: category.definition, settings: core.businessSettings,
+      groups: core.itemGroups, pricingGroups: core.pricingGroups, couponTemplates: core.couponTemplates, locations: core.locations, operators: core.operators };
+    const state: RentalBusinessState = { categoryCode: core.workspaceCategoryCode, pricingPlans: config.pricingPlans, discountPlans: config.discountPlans, services: config.services,
+      calendars: config.calendars, ruleVersions: config.ruleVersions, quotes: [quote], customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates: [], notificationLogs: [], configPersisted: true };
+    return extensionPricingContext.run({ tenantId, workspaceId, tx, state }, () => this.quoteOrderExtension(tenantId, context, {
+      order, previousExtensions, lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode,
+      fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType,
+    }));
+  }
 
   async quoteOrderExtension(
     tenantId: string,
@@ -8133,7 +8168,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         workspaceId: this.workspaceOf(tenantId)
       });
       // 与下单报价同一道闸门；快照带出去供生效时占用容量。理由同增量式续租那一处。
-      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots);
+      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots, extensionPricingContext.getStore()?.tx);
       serviceAmount = resolved.totalAmount;
       serviceSnapshots = resolved.snapshots;
       for (const snapshot of resolved.snapshots) {

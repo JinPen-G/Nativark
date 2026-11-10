@@ -42,6 +42,10 @@ import { SharedCustomerRepository, type CustomerProfileUpdateData } from "./shar
 import { evaluateRentalQualification, type RentalQualificationAction, type RentalQualificationCheckWindow } from "../rental-core/rental-qualification";
 import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
 import { lockActiveCategoryBinding } from "../rental-core/category-active-write";
+import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service";
+import { EnterpriseCommandService } from "../enterprise/enterprise-command.service";
+import { EnterpriseAccessService } from "../client/enterprise-access.service";
+import { assertOtherEnterpriseAdministrator } from "../enterprise/enterprise-administrator-continuity";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -78,6 +82,7 @@ const evidenceRefOrUndefined = (value?: string) => {
 export class MembershipService {
   private readonly customers: SharedCustomerRepository;
   private readonly registration: CustomerRegistrationService;
+  private readonly enterprisePolicy: EnterprisePolicyService;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -85,10 +90,13 @@ export class MembershipService {
     // 既有测试用位置参数 `new MembershipService(prisma, operations)` 构造，
     // 后两个依赖追加在最后且可选，缺失时按同一个 prisma 自建。
     @Optional() customers?: SharedCustomerRepository,
-    @Optional() registration?: CustomerRegistrationService
+    @Optional() registration?: CustomerRegistrationService,
+    @Optional() enterprisePolicy?: EnterprisePolicyService
   ) {
     this.customers = customers ?? new SharedCustomerRepository(prisma);
     this.registration = registration ?? new CustomerRegistrationService(prisma, this.customers, operations);
+    // Direct constructors retain the same fail-closed policy reader as the container.
+    this.enterprisePolicy = enterprisePolicy ?? new EnterprisePolicyService(prisma, new EnterpriseCommandService(prisma), new EnterpriseAccessService(prisma));
   }
 
   private async lockCustomer(tenantId: string, customerId: string, tx: Prisma.TransactionClient) {
@@ -893,28 +901,26 @@ export class MembershipService {
     }
     if (effectiveTo && effectiveTo < effectiveFrom) throw new BadRequestException("员工关系失效时间不能早于生效时间");
     const row = await this.prisma.$transaction(async tx => {
+      // Same tenant lock as portal commands: another entry cannot remove the last admin.
+      await tx.$queryRaw`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
       await this.lockBookingCustomers(tenantId, input.personalCustomerId, corporateCustomerId, tx);
-      await this.requireCustomer(tenantId, corporateCustomerId, "corporate", tx);
-      await this.requireCustomer(tenantId, input.personalCustomerId, "personal", tx);
-      const [corporate, personal] = await Promise.all([
-        this.requireMembership(tenantId, corporateCustomerId, tx), this.requireMembership(tenantId, input.personalCustomerId, tx)
-      ]);
-      if (corporate.status !== "active" || personal.status !== "active") throw new ConflictException("会员状态已变化，不能维护企业员工关系");
-      return tx.customerCorporateMembership.upsert({
-        where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId } },
-        create: {
-          tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId,
-          role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
-          status: input.status ?? "active", effectiveFrom,
-          effectiveTo, reason: input.reason?.trim() || null, createdBy: operator
-        },
-        update: {
-          role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null,
-          status: input.status ?? "active", effectiveFrom,
-          effectiveTo, reason: input.reason?.trim() || null
-        },
-        include: { personalCustomer: { select: { name: true } } }
-      });
+      const existing = await tx.customerCorporateMembership.findUnique({ where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId: input.personalCustomerId } } });
+      const portals = await tx.$queryRaw<Array<{ enabled: boolean }>>`SELECT enabled FROM enterprise_corporate_portals WHERE tenantId=${tenantId} AND corporateCustomerId=${corporateCustomerId}`;
+      if (portals.length) {
+        if (!input.reason?.trim()) throw new BadRequestException("门户成员变更必须记录原因");
+        if (existing && input.expectedUpdatedAt !== existing.updatedAt.toISOString()) throw new ConflictException({ message: "成员关系已变化，请重新读取", code: "enterprise_revision_conflict" });
+        // Keeping role=admin does not preserve authority: saveEnterpriseRelation advances
+        // updatedAt and this merchant entry does not rebind grants to that revision.
+        if (existing?.role === "admin" && existing.status === "active") {
+          await assertOtherEnterpriseAdministrator(tx, tenantId, corporateCustomerId, existing.id);
+        }
+      }
+      const corporate = await tx.customerProfile.findFirst({ where: { tenantId, id: corporateCustomerId, customerType: "corporate", status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } }, select: { id: true } });
+      if (!corporate) throw new ConflictException("企业会员状态已变化");
+      const personal = await tx.customerProfile.findFirst({ where: { tenantId, id: input.personalCustomerId, customerType: "personal", status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } }, select: { name: true } });
+      if (!personal) throw new ConflictException("个人会员状态已变化");
+      const saved = await this.customers.saveEnterpriseRelation(tenantId, corporateCustomerId, input.personalCustomerId, { role: input.role, department: input.department?.trim() || null, employeeNo: input.employeeNo?.trim() || null, status: input.status ?? "active", effectiveFrom, effectiveTo: effectiveTo ?? null, reason: input.reason?.trim() || "商户维护成员关系", createdBy: operator ?? getRequestUserId() ?? "operator" }, tx);
+      return { ...saved, personalCustomer: personal };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return this.toCorporateMembership(row, row.personalCustomer.name);
   }
@@ -1130,7 +1136,8 @@ export class MembershipService {
     workspaceId: string,
     personalCustomerId: string,
     input?: RentalBookingIdentityInput,
-    tx?: Prisma.TransactionClient
+    tx?: Prisma.TransactionClient,
+    purpose: "new_business" | "fulfillment" = "new_business"
   ): Promise<RentalMembershipSnapshot> {
     const db = tx ?? this.prisma;
     if (tx) {
@@ -1200,8 +1207,10 @@ export class MembershipService {
       }
     });
     if (!relationship) throw new ConflictException("该个人会员不是当前企业的有效员工，不能使用企业身份或权益");
+    const enterpriseBasis = purpose === "new_business" ? await this.enterprisePolicy.authorize(tenantId, workspaceId, personalCustomerId, input!, tx) : undefined;
     const benefits = await this.resolveBenefits(tenantId, workspaceId, personalCustomerId, corporateCustomerId, tx);
     return {
+      enterpriseBasis,
       bookingIdentity,
       personalCustomerId,
       personalCustomerName: personal.name,
@@ -1241,8 +1250,9 @@ export class MembershipService {
     const current = await this.resolveBookingIdentity(tenantId, workspaceId, snapshot.personalCustomerId, {
       bookingIdentity: snapshot.bookingIdentity,
       corporateCustomerId: snapshot.corporateCustomerId,
-      enterpriseContractAndPayer: snapshot.enterpriseContractAndPayer
-    }, tx);
+      enterpriseContractAndPayer: snapshot.enterpriseContractAndPayer,
+      enterpriseDisclosure: snapshot.enterpriseBasis ? { noticeVersion: snapshot.enterpriseBasis.noticeVersion, acknowledged: true } : undefined
+    }, tx, action === "pickup" ? "fulfillment" : "new_business");
     if (current.corporateMembershipId !== snapshot.corporateMembershipId || current.bookingIdentity !== snapshot.bookingIdentity
       || current.corporateCustomerId !== snapshot.corporateCustomerId || current.enterpriseContractAndPayer !== snapshot.enterpriseContractAndPayer) {
       throw new ConflictException("原企业预约关系已变化，不能将后继新关系当作原订单授权");

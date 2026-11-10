@@ -18,6 +18,7 @@ import {
 } from "@nestjs/common";
 import { CLIENT_PUBLIC_DOCUMENT_KINDS, type ClientChannelKind, type ClientPublicDocumentKind } from "@rental-os/shared";
 import { ClientApiService } from "./client-api.service";
+import { EnterpriseAccessService } from "./enterprise-access.service";
 import { ClientAuthService } from "./client-auth.service";
 import { WebsiteAssetService } from "./website-asset.service";
 import { ClientAccountClosureService } from "./client-account-closure.service";
@@ -79,7 +80,8 @@ export class ClientApiController {
     private readonly websiteAssets: WebsiteAssetService,
     @Optional() private readonly wechat?: ClientWechatAuthService,
     @Optional() private readonly addresses?: ClientDeliveryAddressService,
-    @Optional() private readonly closure?: ClientAccountClosureService
+    @Optional() private readonly closure?: ClientAccountClosureService,
+    @Optional() private readonly enterprise?: EnterpriseAccessService
   ) {}
 
   private requireWechat() {
@@ -95,6 +97,19 @@ export class ClientApiController {
   private requireClosure() {
     if (!this.closure) throw new ServiceUnavailableException("注销服务未就绪");
     return this.closure;
+  }
+
+  @Get("enterprise/entry")
+  enterpriseEntry(@Query("tenantCode") tenantCode: string, @Req() req: ClientRequest) {
+    if (!this.enterprise) throw new ServiceUnavailableException("企业服务未就绪");
+    return this.enterprise.entry(currentClient(req), tenantCode);
+  }
+
+  @Get("enterprise/corporates/:corporateCustomerId/members")
+  enterpriseMembers(@Param("corporateCustomerId") id: string, @Query("tenantCode") tenantCode: string,
+    @Query("page") page: string, @Query("pageSize") pageSize: string, @Req() req: ClientRequest) {
+    if (!this.enterprise) throw new ServiceUnavailableException("企业服务未就绪");
+    return this.enterprise.members(currentClient(req), tenantCode, id, Number(page || 1), Number(pageSize || 20));
   }
 
   @Get("tenants/:tenantCode/workspaces")

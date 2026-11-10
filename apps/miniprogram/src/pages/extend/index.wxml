@@ -55,7 +55,30 @@
       </view>
     </view>
 
-    <view wx:if="{{preview && !pending && !blockedReason}}" class="bottom-bar">
+    <view wx:if="{{enterpriseRequired || enterpriseApproval || enterprisePending || enterpriseError}}" class="section section--tight">
+      <view class="card">
+        <view class="subtitle">企业续租批准</view>
+        <view class="notice notice--neutral mt-8">企业批准不下单、不预占库存或授信，也不确认到账。须本人核对原费用后明确提交；待补款不等于已延期。</view>
+        <textarea class="field__input mt-12" placeholder="用途及本次处理原因" maxlength="500" value="{{enterpriseReason}}" bindinput="onEnterpriseReason" disabled="{{submitting || (enterprisePending && !enterpriseCanClose)}}"></textarea>
+        <button wx:if="{{enterpriseRequired && preview && (!enterpriseApproval || (enterpriseApproval.state !== 'pending' && enterpriseApproval.state !== 'approved')) && !pending}}" class="btn btn--secondary btn--block mt-12" bindtap="onRequestEnterpriseExtension" disabled="{{submitting || enterprisePending || !enterpriseReason}}">申请续租批准</button>
+        <block wx:if="{{enterpriseApproval}}">
+          <view class="kv"><view class="kv__label">原申请</view><view class="kv__value">{{enterpriseApproval.id}}</view></view>
+          <view class="kv"><view class="kv__label">状态</view><view class="kv__value">{{enterpriseApproval.state}}</view></view>
+          <view class="kv"><view class="kv__label">申请归还时间</view><view class="kv__value">{{enterpriseApproval.preview.newEndAt}}</view></view>
+          <view class="kv"><view class="kv__label">租赁应付</view><money-text amount="{{enterpriseApproval.preview.payableAmount}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
+          <view class="kv"><view class="kv__label">押金差额</view><money-text amount="{{enterpriseApproval.preview.depositDelta}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
+          <view class="kv"><view class="kv__label">预授权差额</view><money-text amount="{{enterpriseApproval.preview.preAuthDelta}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
+          <view wx:for="{{enterpriseApproval.preview.chargeLines}}" wx:key="code" class="kv"><view class="kv__label">{{item.name}}</view><money-text amount="{{item.amount}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
+          <button wx:if="{{enterpriseApproval.state === 'approved'}}" class="btn btn--primary btn--block mt-12" bindtap="onSubmitEnterpriseExtension" disabled="{{submitting || enterprisePending || !enterpriseReason}}">核对后提交本条续租</button>
+        </block>
+        <button wx:if="{{enterpriseCanClose && enterpriseApproval}}" class="btn btn--secondary btn--block mt-12" bindtap="onCloseEnterpriseExtension" disabled="{{submitting || !enterpriseReason}}">请求受控结束原提交</button>
+        <button class="btn btn--secondary btn--block mt-12" bindtap="onReadEnterpriseExtension" disabled="{{submitting}}">核对原续租申请与结果</button>
+        <view wx:if="{{enterpriseResult}}" class="notice notice--neutral mt-8">{{enterpriseResult}}</view>
+        <view wx:if="{{enterpriseError}}" class="notice notice--danger mt-8">{{enterpriseError}}</view>
+      </view>
+    </view>
+
+    <view wx:if="{{preview && !pending && !blockedReason && enterpriseRequired === false && !enterprisePending}}" class="bottom-bar">
       <view class="bottom-bar__summary">
         <view class="muted small">本次续租差额</view>
         <view class="subtitle {{preview.payableAmount > 0 ? 'warning-text' : ''}}">{{deltaText}}</view>

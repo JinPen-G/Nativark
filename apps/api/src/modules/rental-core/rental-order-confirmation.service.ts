@@ -28,7 +28,9 @@ import { CustomerOperationsService } from "../platform/customer-operations.servi
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { stampOccurrences } from "./rental-service-occurrence";
 import { MembershipService } from "../platform/membership.service";
+import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service";
 import type { ApprovedOrderBinding, ApprovedOrderTransaction } from "./approved-order-transaction.ports";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -130,7 +132,8 @@ export class RentalOrderConfirmationService {
      */
     @Optional() private readonly customerOperations?: CustomerOperationsService,
     @Optional() private readonly serviceCapacities?: RentalServiceCapacityService,
-    @Optional() private readonly memberships?: MembershipService
+    @Optional() private readonly memberships?: MembershipService,
+    @Optional() private readonly enterprisePolicies?: EnterprisePolicyService
   ) {}
 
   /**
@@ -153,25 +156,45 @@ export class RentalOrderConfirmationService {
 
   /** Read the SAME original business key, never consume a quote or retry a write.
    * Caller must bind current identity/scope and supply the persisted accepted
-   * request, not a caller-provided hash or a guessed/latest order. */
-  async readOrderCreation(tenantId: string, input: CreateRentalOrderRequest, idempotencyKey: string) {
+   * request, not a caller-provided hash or a guessed/latest order. A committedOrderId
+   * is accepted only from the server's same-transaction approval consumption link. */
+  async readOrderCreation(tenantId: string, input: CreateRentalOrderRequest, idempotencyKey: string, committedOrderId?: string) {
     if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 191) {
       throw new BadRequestException("缺少原下单操作键");
     }
     const request = this.normalizeOrderInput(structuredClone(input));
     const fingerprint = orderRequestFingerprint(request);
     const hit = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, idempotencyKey.trim());
-    if (!hit) return { state: 'not_observed' as const, retryable: false as const, orderId: null };
-    if (hit.requestHash !== fingerprint) throw new ConflictException("原下单操作载荷不一致");
-    const order = hit.orderId ? await this.coreFacts.findOrder(tenantId, hit.orderId) : undefined;
+    if (!hit && !committedOrderId) return { state: 'not_observed' as const, retryable: false as const, orderId: null };
+    if (hit && hit.requestHash !== fingerprint) throw new ConflictException("原下单操作载荷不一致");
+    // Only the server's atomic approval-consumption link may survive receipt TTL.
+    // Never select a latest order, infer a commit from absence, or retry creation.
+    if (hit && committedOrderId && hit.orderId !== committedOrderId) throw new ConflictException("原收据与批准消费订单不一致");
+    const orderId = hit?.orderId ?? committedOrderId;
+    const order = orderId ? await this.coreFacts.findOrder(tenantId, orderId) : undefined;
     if (!order) return { state: 'unknown' as const, retryable: false as const, orderId: null };
     // Both original repositories resolve current ALS workspace in their queries.
     // RentalOrder's domain projection deliberately has no workspaceId field.
-    if (order.id !== hit.orderId || order.tenantId !== tenantId
+    if (order.id !== orderId || order.tenantId !== tenantId
       || order.quoteId !== request.quoteId || order.customerId !== request.customerId) {
       throw new ConflictException("原下单结果绑定不一致");
     }
     return { state: 'observed' as const, retryable: false as const, orderId: order.id };
+  }
+
+  /** Used only while the caller holds the same tenant/approval commit fence as
+   * createApprovedOrder. Absence alone is not a rollback or retry authorization:
+   * the caller must seal that execution in this transaction before releasing it. */
+  async assertApprovedExecutionCanClose(tenantId: string, input: CreateRentalOrderRequest, idempotencyKey: string, tx: Prisma.TransactionClient) {
+    if (!idempotencyKey?.trim() || idempotencyKey.length > 128) throw new BadRequestException("原批准执行键无效");
+    const request = this.normalizeOrderInput(structuredClone(input)), workspaceId = this.core.resolveWorkspaceId(tenantId);
+    const receipt = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, idempotencyKey, tx);
+    const orders = await tx.rentalOrder.findMany({ where: { tenantId, workspaceId, quoteId: request.quoteId }, select: { id: true }, take: 1 });
+    const quote = await this.businessFacts.findQuote(tenantId, request.quoteId, tx);
+    if (!quote || quote.tenantId !== tenantId || quote.request.customerId !== request.customerId || receipt || orders.length || quote.consumedAt || quote.consumedOrderId) {
+      throw new ConflictException("原执行存在消费证据或关联待核对，不能结束或重新报价");
+    }
+    this.assertOrderMatchesQuote(request, quote);
   }
 
   createApprovedOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext,
@@ -304,6 +327,14 @@ export class RentalOrderConfirmationService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        if (quote.membershipSnapshot?.bookingIdentity === "enterprise_employee") {
+          if (!this.enterprisePolicies) throw new ConflictException("企业政策事务服务未就绪");
+          await this.enterprisePolicies.assertOrderCreation(tenantId, workspaceId, quote, tx, approvalBinding);
+        } else {
+          // Both creation paths acquire the parent before customer/stock locks.
+          // Enterprise takes X above; taking S first there would create an upgrade.
+          await lockRentalBusinessTenant(tx, tenantId);
+        }
         if (approval && approvalBinding) {
           await approval.authorize(structuredClone(approvalBinding));
           await approval.prepare(tx, structuredClone(approvalBinding));

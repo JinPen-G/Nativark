@@ -55,6 +55,7 @@ import {
   type RentalOrderListQuery
 } from "@rental-os/shared";
 import { Transform, Type } from "class-transformer";
+import { EnterpriseDisclosureDto } from "../enterprise/enterprise-request.dto";
 import {
   ArrayNotEmpty,
   ArrayMaxSize,
@@ -414,6 +415,8 @@ export class CreateRentalOrderSubjectsInputDto {
 }
 
 export class RentalBookingIdentityInputDto implements RentalBookingIdentityInput {
+  @IsOptional() @ValidateNested() @Type(() => EnterpriseDisclosureDto)
+  enterpriseDisclosure?: EnterpriseDisclosureDto;
   @IsOptional()
   @IsIn(["personal", "enterprise_employee"])
   bookingIdentity?: "personal" | "enterprise_employee";

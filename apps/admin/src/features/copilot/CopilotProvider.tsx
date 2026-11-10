@@ -1,6 +1,10 @@
 /** Global business Copilot preview, separate from capability-bound AI Workspace chats.
  * Memory only, scoped by auth generation; no model/API calls or business mutations. */
 import { createContext, useContext, useRef, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { BusinessUiScopeProvider, useBusinessUiScope } from '@/components/ui/BusinessUiScope';
+import { App } from '@/components/ui/App';
+import { useLocale } from '@/app/locale';
+import { readSelection } from './context';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/authStore';
 import { currentSessionEpoch } from '@/app/queryClient';
@@ -151,7 +155,14 @@ type CopilotState = ReturnType<typeof useCopilotState>;
 const Context = createContext<CopilotState | null>(null);
 function ScopedProvider({ children }: { children: ReactNode }) {
   const value = useCopilotState();
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  const scope = useBusinessUiScope(), { pathname } = useLocation(), { t } = useLocale();
+  const { message } = App.useApp();
+  const selectionCommand = value.available ? { label: t('添加到 Copilot'), run: (host: HTMLElement, count: number) => {
+    const records = readSelection(host, pathname);
+    if (records.length !== count) { message.warning(t('部分所选记录不在当前视图，请重新选择后添加。')); return; }
+    value.add(records, true);
+  } } : undefined;
+  return <Context.Provider value={value}><BusinessUiScopeProvider value={{ ...scope, selectionCommand }}>{children}</BusinessUiScopeProvider></Context.Provider>;
 }
 export function CopilotProvider({ children }: { children: ReactNode }) {
   const auth = useAuthStore();

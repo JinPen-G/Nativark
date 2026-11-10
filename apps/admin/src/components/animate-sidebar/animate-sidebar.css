@@ -5,6 +5,7 @@
 @source "./runtime";
 @source "./*.tsx";
 @source "../AppShell.tsx";
+@source "../../../../enterprise-portal/src/EnterpriseShell.tsx";
 @custom-variant dark (&:is(.dark *));
 
 .rental-sidebar-colors {

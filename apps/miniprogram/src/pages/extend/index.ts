@@ -1,5 +1,8 @@
 import { themeBehavior } from "../../core/theme-behavior";
-import type { ClientOrderView, RentalOrderExtension, RentalOrderExtensionPreview } from "@rental-os/shared";
+import type { ClientOrderView, RentalOrderExtension, RentalOrderExtensionPreview, EnterpriseExtensionApprovalView } from "@rental-os/shared";
+import { fetchEnterpriseExtensionEligibility } from "../../api/enterprise";
+import { enterpriseExtensionOperation } from "../../core/enterprise-extension-operation";
+import { contextVersion, currentSession, sessionEvents } from "../../core/session";
 import { activatePaidExtension, applyExtension, fetchFunding, fetchOrder, listExtensions, previewExtension } from "../../api/orders";
 import { describeError } from "../../core/errors";
 import { ensureServiceForOrder } from "../../core/flow";
@@ -39,6 +42,13 @@ interface ExtendData {
   currency: string;
   blockedReason: string;
   unknownResult: boolean;
+  enterpriseRequired?: boolean;
+  enterpriseError: string;
+  enterpriseApproval?: EnterpriseExtensionApprovalView;
+  enterpriseReason: string;
+  enterprisePending: boolean;
+  enterpriseCanClose: boolean;
+  enterpriseResult: string;
 }
 
 Page({
@@ -60,11 +70,38 @@ Page({
     pendingText: "",
     currency: "",
     blockedReason: "",
-    unknownResult: false
+    unknownResult: false,
+    enterpriseError: "",
+    enterpriseReason: "",
+    enterprisePending: false,
+    enterpriseCanClose: false,
+    enterpriseResult: ""
   } as ExtendData,
 
   orderId: "" as string,
   serviceCode: "" as string,
+  enterpriseOperation: undefined as ReturnType<typeof enterpriseExtensionOperation> | undefined,
+  viewEpoch: 0,
+  visible: false,
+  viewIdentity: "",
+  unsubscribeSession: undefined as (() => void) | undefined,
+
+  sessionIdentity() { return JSON.stringify([contextVersion(), currentSession()?.customer.customerId, currentServiceCode()]); },
+  viewCurrent(epoch: number, identity: string) { return this.visible && epoch === this.viewEpoch && identity === this.sessionIdentity(); },
+  invalidateView() {
+    this.viewEpoch++; this.enterpriseOperation = undefined; this.viewIdentity = "";
+    this.setData({ view: loadingState(), order: undefined, preview: undefined, pending: undefined, endDate: "", endTime: "10:00",
+      currentEndText: "", pendingText: "", previewError: "", previewLoading: false, submitting: false, unknownResult: false,
+      enterpriseRequired: undefined, enterpriseApproval: undefined, enterpriseReason: "", enterprisePending: false, enterpriseCanClose: false, enterpriseResult: "", enterpriseError: "" });
+  },
+  finishEnterprise(operation: ReturnType<typeof enterpriseExtensionOperation>, epoch: number, identity: string) {
+    if (!this.viewCurrent(epoch, identity)) return;
+    try { const pending = operation.pending(); this.setData({ submitting: false, enterprisePending: Boolean(pending), enterpriseCanClose: pending?.kind === "submit" && !pending.closureKey && Boolean(pending.approvalId) }); }
+    catch (error) { this.setData({ submitting: false, enterprisePending: true, enterpriseError: describeError(error).message }); }
+  },
+  preferredApproval(rows: EnterpriseExtensionApprovalView[]) { return rows.find(row => ["pending", "approved"].includes(row.state)) ?? rows[0]; },
+  onHide() { this.visible = false; this.viewEpoch++; this.unsubscribeSession?.(); this.unsubscribeSession = undefined; },
+  onUnload() { this.onHide(); this.enterpriseOperation = undefined; },
 
   onLoad(options: Record<string, string | undefined>) {
     this.orderId = options.id ?? "";
@@ -73,6 +110,8 @@ Page({
   },
 
   onShow() {
+    this.visible = true; this.unsubscribeSession?.();
+    this.unsubscribeSession = sessionEvents.on(event => { if (event.type !== "refreshed") this.invalidateView(); });
     void this.load();
   },
 
@@ -85,16 +124,43 @@ Page({
   },
 
   async load() {
-    if (!this.orderId || !isSignedIn()) return;
+    if (!this.visible) return;
+    if (!this.orderId || !isSignedIn()) { this.invalidateView(); return; }
+    if (this.viewIdentity !== this.sessionIdentity()) this.invalidateView();
+    const customerId = currentSession()?.customer.customerId;
+    let epoch = ++this.viewEpoch, identity = this.sessionIdentity();
+    this.setData({ submitting: false, previewLoading: false, enterpriseRequired: undefined, enterpriseError: "" });
     try {
       if (this.serviceCode && currentServiceCode() !== this.serviceCode) {
-        const ok = await ensureServiceForOrder(this.serviceCode);
+        let switchedIdentity: string | undefined, changedOwner = false;
+        const unsubscribe = sessionEvents.on(event => {
+          if (event.type === "refreshed") return;
+          if (event.type === "service-changed" && event.serviceCode === this.serviceCode && !switchedIdentity) switchedIdentity = this.sessionIdentity();
+          else changedOwner = true;
+        });
+        let ok: boolean;
+        try { ok = await ensureServiceForOrder(this.serviceCode); } finally { unsubscribe(); }
+        // Only this explicit service-switch event may refresh the captured owner.
+        // Re-login, hide/show or a second switch must not restart the old load.
+        if (!this.visible || changedOwner || customerId !== currentSession()?.customer.customerId
+          || epoch !== this.viewEpoch && !(epoch + 1 === this.viewEpoch && switchedIdentity === this.sessionIdentity())) return;
         if (!ok) {
           this.setData({ view: blockedState("已保留当前租赁", "续租需要切换到该订单所属的服务。", "返回订单", "none") });
           return;
         }
       }
-      const [order, extensions] = await Promise.all([fetchOrder(this.orderId), listExtensions(this.orderId), ensureCurrentZone()]);
+      epoch = ++this.viewEpoch; identity = this.sessionIdentity(); this.viewIdentity = identity;
+      const [order, extensions, eligibility] = await Promise.all([fetchOrder(this.orderId), listExtensions(this.orderId),
+        fetchEnterpriseExtensionEligibility(this.orderId).catch(error => { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); return undefined; }), ensureCurrentZone()]);
+      if (!this.viewCurrent(epoch, identity)) return;
+      const operation = enterpriseExtensionOperation(this.orderId, () => { if (!this.viewCurrent(epoch, identity)) throw new Error("原续租页面已变化，只能在当前页面核对"); });
+      this.enterpriseOperation = operation;
+      const originalOperation = operation.pending(), enterprisePending = Boolean(originalOperation);
+      let approvals: EnterpriseExtensionApprovalView[] = [];
+      try { approvals = await operation.list(); }
+      catch (error) { if (!this.viewCurrent(epoch, identity)) return; this.setData({ enterpriseError: describeError(error).message }); }
+      operation.current();
+      const enterpriseApproval = originalOperation?.approvalId ? approvals.find(row => row.id === originalOperation.approvalId) : this.preferredApproval(approvals);
       const knownZone = zoneOf(currentServiceCode());
       const timeZone = knownZone ?? "Asia/Shanghai";
       const currentEnd = order.effectiveEndAt ?? order.endAt;
@@ -115,10 +181,16 @@ Page({
         pending,
         pendingText: pending ? `你有一笔待补款的续租申请（延长至 ${formatBusinessDateTime(pending.newEndAt, timeZone)}，${describeDelta(pending.payableAmount, order.currency)}）。请先完成补款并生效，不要重复申请。` : "",
         blockedReason,
-        unknownResult: false
+        unknownResult: false,
+        enterpriseRequired: eligibility?.approvalRequired,
+        enterpriseError: this.data.enterpriseError,
+        enterpriseApproval,
+        enterprisePending,
+        enterpriseCanClose: originalOperation?.kind === "submit" && !originalOperation.closureKey && Boolean(originalOperation.approvalId),
+        enterpriseResult: ""
       });
     } catch (error) {
-      if (isApiError(error, "STALE_CONTEXT")) return;
+      if (!this.viewCurrent(epoch, identity) || isApiError(error, "STALE_CONTEXT")) return;
       // 二次加载失败保留当前续租信息，只在首屏无数据时整屏报错。
       if (this.data.order) toast("刷新失败，已保留当前续租信息");
       else this.setData({ view: errorState(error) });
@@ -126,6 +198,7 @@ Page({
   },
 
   onDateChange(event: WechatMiniprogram.PickerChange) {
+    if (this.data.enterprisePending || this.data.submitting) return;
     const field = String(event.currentTarget.dataset.field) as "endDate" | "endTime";
     this.setData({ [field]: String(event.detail.value), preview: undefined, deltaText: "", previewError: "" });
   },
@@ -140,8 +213,8 @@ Page({
   },
 
   async onPreview() {
-    const order = this.data.order;
-    if (!order || this.data.previewLoading) return;
+    const order = this.data.order, epoch = this.viewEpoch, identity = this.sessionIdentity();
+    if (!order || this.data.previewLoading || this.viewIdentity !== identity) return;
     const newEndAt = this.newEndAt();
     if (!newEndAt) return;
     const currentEnd = Date.parse(order.effectiveEndAt ?? order.endAt);
@@ -152,6 +225,7 @@ Page({
     this.setData({ previewLoading: true, previewError: "", preview: undefined });
     try {
       const preview = await previewExtension(this.orderId, { newEndAt });
+      if (!this.viewCurrent(epoch, identity)) return;
       this.setData({
         preview,
         deltaText: describeDelta(preview.payableAmount, preview.currency),
@@ -159,13 +233,16 @@ Page({
         preAuthDeltaText: preview.preAuthDelta ? describeDelta(preview.preAuthDelta, preview.currency) : "无变化"
       });
     } catch (error) {
-      this.setData({ previewError: describeError(error).message });
+      if (this.viewCurrent(epoch, identity)) this.setData({ previewError: describeError(error).message });
     } finally {
-      this.setData({ previewLoading: false });
+      if (this.viewCurrent(epoch, identity)) this.setData({ previewLoading: false });
     }
   },
 
   async onApply() {
+    const epoch = this.viewEpoch, identity = this.sessionIdentity();
+    if (!this.visible || this.viewIdentity !== identity) return;
+    if (this.data.enterpriseRequired !== false || this.data.enterprisePending) { toast("请先核对企业续租准入与原批准；不能使用普通提交绕过审批"); return; }
     const preview = this.data.preview;
     if (!preview || this.data.submitting) return;
     if (this.data.pending) {
@@ -176,6 +253,7 @@ Page({
     const key = actionKey("order.extend", this.orderId, preview.newEndAt);
     try {
       const result = await applyExtension(this.orderId, { newEndAt: preview.newEndAt }, key);
+      if (!this.viewCurrent(epoch, identity)) return;
       releaseActionKey("order.extend", this.orderId);
       const extension = result.extension;
       if (extension.status === "effective") {
@@ -196,6 +274,7 @@ Page({
       toast(`续租申请状态：${extension.status}`, { duration: 3000 });
       await this.load();
     } catch (error) {
+      if (!this.viewCurrent(epoch, identity)) return;
       if (isApiError(error, "TIMEOUT") || isApiError(error, "NETWORK") || isApiError(error, "SERVER")) {
         this.setData({ previewError: "申请结果未知：请点击下方“刷新本页”；若申请已存在会显示在上方，再次提交会使用同一凭证，不会重复申请。", unknownResult: true });
       } else {
@@ -203,17 +282,75 @@ Page({
         this.setData({ previewError: describeError(error).message });
       }
     } finally {
-      this.setData({ submitting: false });
+      if (this.viewCurrent(epoch, identity)) this.setData({ submitting: false });
     }
+  },
+
+  onEnterpriseReason(event: WechatMiniprogram.Input) { if (!this.data.submitting && (!this.data.enterprisePending || this.data.enterpriseCanClose)) this.setData({ enterpriseReason: event.detail.value }); },
+  async refreshOriginalExtension(operation: ReturnType<typeof enterpriseExtensionOperation>) {
+    const [order, extensions] = await Promise.all([fetchOrder(this.orderId), listExtensions(this.orderId)]); operation.current();
+    const pending = extensions.find(row => row.status === "pending_payment");
+    this.setData({ order, pending, currentEndText: formatBusinessDateTime(order.effectiveEndAt ?? order.endAt, this.data.timeZone), preview: undefined,
+      pendingText: pending ? `原续租待补款（延长至 ${formatBusinessDateTime(pending.newEndAt, this.data.timeZone)}，${describeDelta(pending.payableAmount, order.currency)}）；原租期尚未延长。` : "" });
+  },
+  async onRequestEnterpriseExtension() {
+    const operation = this.enterpriseOperation, order = this.data.order, preview = this.data.preview, reason = this.data.enterpriseReason.trim(), epoch = this.viewEpoch, identity = this.sessionIdentity();
+    if (!operation || !order || !preview || !reason || this.data.submitting || this.data.enterprisePending || !this.data.enterpriseRequired || this.data.pending || this.data.blockedReason
+      || this.data.enterpriseApproval && ["pending", "approved"].includes(this.data.enterpriseApproval.state)) return;
+    this.setData({ submitting: true, enterpriseError: "" });
+    try { const result = await operation.request(order.updatedAt, preview.newEndAt, reason); operation.current(); if (result) this.setData({ enterpriseApproval: result.approval, enterpriseResult: "批准仅为企业费用授权，不代表续租已生效" }); }
+    catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }
+    finally { this.finishEnterprise(operation, epoch, identity); }
+  },
+  async onReadEnterpriseExtension() {
+    const operation = this.enterpriseOperation, epoch = this.viewEpoch, identity = this.sessionIdentity();
+    if (!operation || this.data.submitting) return;
+    this.setData({ submitting: true, enterpriseError: "" });
+    try {
+      const result = operation.pending() ? await operation.recover() : this.data.enterpriseApproval ? await operation.result(this.data.enterpriseApproval.id) : undefined;
+      operation.current();
+      if (result) {
+        this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "observed" ? result.original.extensionState === "pending_payment" ? "待补款；当前归还时间不变，请勿重复申请" : `原续租状态：${result.original.extensionState}` : result.original.state === "closed" ? "原提交已封闭，新申请须重新试算与批准" : "原申请尚未提交至Core" });
+        if (result.original.state === "observed") await this.refreshOriginalExtension(operation);
+      } else { const rows = await operation.list(); this.setData({ enterpriseApproval: this.preferredApproval(rows) }); }
+    } catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }
+    finally { this.finishEnterprise(operation, epoch, identity); }
+  },
+  async onCloseEnterpriseExtension() {
+    const operation = this.enterpriseOperation, approval = this.data.enterpriseApproval, epoch = this.viewEpoch, identity = this.sessionIdentity(), reason = this.data.enterpriseReason.trim();
+    if (!operation || !approval || !this.data.enterpriseCanClose || !reason || this.data.submitting) return;
+    this.setData({ submitting: true, enterpriseError: "" });
+    try {
+      operation.current(); const answer = await wx.showModal({ title: "受控结束原提交", content: "永久封闭本条原续租批准与提交键；若已消费只核对原续租，不取消、不退款、不重试。新申请须重新试算与批准。" });
+      operation.current(); if (!answer.confirm) return;
+      const result = await operation.close(approval, reason); operation.current();
+      if (result) { this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "closed" ? "原提交已封闭，新申请须重新试算与批准" : "原续租已消费，未取消或重试" }); if (result.original.state === "observed") await this.refreshOriginalExtension(operation); }
+    } catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }
+    finally { this.finishEnterprise(operation, epoch, identity); }
+  },
+  async onSubmitEnterpriseExtension() {
+    const operation = this.enterpriseOperation, approval = this.data.enterpriseApproval, reason = this.data.enterpriseReason.trim(), epoch = this.viewEpoch, identity = this.sessionIdentity();
+    if (!operation || approval?.state !== "approved" || !reason || this.data.submitting || this.data.enterprisePending) return;
+    this.setData({ submitting: true, enterpriseError: "" });
+    try {
+      operation.current();
+      const answer = await wx.showModal({ title: "核对原续租费用", content: `延长至 ${formatBusinessDateTime(approval.preview.newEndAt, this.data.timeZone)}；租赁应付 ${describeDelta(approval.preview.payableAmount, approval.preview.currency)}，押金差额 ${describeDelta(approval.preview.depositDelta, approval.preview.currency)}，预授权差额 ${describeDelta(approval.preview.preAuthDelta, approval.preview.currency)}。明确提交本条批准；待补款不代表已延期。` });
+      operation.current(); if (!answer.confirm || approval !== this.data.enterpriseApproval) return;
+      const result = await operation.submit(approval, reason); operation.current(); if (!result) return;
+      this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "observed" && result.original.extensionState === "pending_payment" ? "待补款，原租期不变；请按原续租记录完成补款" : "原续租已提交，请读取原订单及续租状态" });
+      if (result.original.state === "observed") await this.refreshOriginalExtension(operation);
+    } catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }
+    finally { this.finishEnterprise(operation, epoch, identity); }
   },
 
   /** 补款已到账后，执行服务端资金校验的生效动作（不是付款入口）。 */
   async onActivate() {
-    const pending = this.data.pending;
-    if (!pending || this.data.submitting) return;
+    const pending = this.data.pending, epoch = this.viewEpoch, identity = this.sessionIdentity();
+    if (!pending || this.data.submitting || !this.visible || this.viewIdentity !== identity) return;
     this.setData({ submitting: true, previewError: "" });
     try {
       const funding = await fetchFunding(this.orderId);
+      if (!this.viewCurrent(epoch, identity)) return;
       // 待付 = 未付余额 + 待生效续租补款；服务端 assertExtensionPaid 按同一口径校验。
       if (rentalDue(funding) > 0) {
         toast("续租补款尚未到账，请先完成付款", { duration: 3000 });
@@ -222,6 +359,7 @@ Page({
       }
       const key = actionKey("order.extend.pay", pending.id);
       const result = await activatePaidExtension(this.orderId, pending.id, key);
+      if (!this.viewCurrent(epoch, identity)) return;
       releaseActionKey("order.extend.pay", pending.id);
       if (result.extension.status === "effective") {
         toast("续租已生效", { icon: "success" });
@@ -230,10 +368,11 @@ Page({
         this.setData({ previewError: "款项已收到，但续租尚未生效，正在核对；请勿重复付款。" });
       }
     } catch (error) {
+      if (!this.viewCurrent(epoch, identity)) return;
       if (isApiError(error, "CONFLICT")) this.setData({ previewError: `${describeError(error).message} 款项已收的情况下不会重复收费，请联系商户核对。` });
       else this.setData({ previewError: describeError(error).message });
     } finally {
-      this.setData({ submitting: false });
+      if (this.viewCurrent(epoch, identity)) this.setData({ submitting: false });
     }
   },
 

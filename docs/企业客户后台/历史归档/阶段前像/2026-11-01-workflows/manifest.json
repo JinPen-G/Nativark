@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-01",
+  "purpose": "申请、成员、政策、审批/Core及消费者阶段收口前像；非新执行授权",
+  "files": [
+    {
+      "source": "docs/企业客户后台/企业客户后台-需求.md",
+      "snapshot": "企业客户后台-需求.md",
+      "bytes": 37135,
+      "sha256": "874b550090a67225b84bfbcbae40959b905afaa6898609a3b679617abfc6ba7f"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+      "snapshot": "企业客户后台-开发任务.md",
+      "bytes": 14768,
+      "sha256": "fd75cd002d21f66adb6c340c2b4eb6b233832f46512d261e6523083003ca48bf"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+      "snapshot": "企业客户后台-开发记录.md",
+      "bytes": 19553,
+      "sha256": "03e832d45c094d93c408d9b805a422bea75153339242ad71f7befe5a829b9204"
+    },
+    {
+      "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+      "snapshot": "企业客户后台-协作接续.md",
+      "bytes": 4159,
+      "sha256": "ba77bad66db89a10e88fbaf82bd53305d7aef87eae55e054949b573296f3c6e9"
+    },
+    {
+      "source": "apps/enterprise-portal/README.md",
+      "snapshot": "enterprise-portal-README.md",
+      "bytes": 2857,
+      "sha256": "64eea93af501f960033ce0c516bca053034aaf32883882e511acabd60dae85e9"
+    }
+  ]
+}

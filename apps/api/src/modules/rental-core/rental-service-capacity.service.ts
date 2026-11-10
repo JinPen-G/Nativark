@@ -189,11 +189,11 @@ export class RentalServiceCapacityService {
   }
 
   /** 报价只校验，不增量写容量。过期软预留先惰性释放，避免假性不足。 */
-  async assertAvailableForQuote(tenantId: string, snapshots: RentalQuoteServiceSnapshot[]): Promise<void> {
+  async assertAvailableForQuote(tenantId: string, snapshots: RentalQuoteServiceSnapshot[], transaction?: Tx): Promise<void> {
     const required = snapshots.filter((row) => row.requiresCapacity);
     if (!required.length) return;
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
-    await this.prisma.$transaction(async (tx) => {
+    const workspaceId = await resolveScopeWorkspaceId(transaction ?? this.prisma, tenantId);
+    const check = async (tx: Tx) => {
       await this.releaseExpired(tenantId, tx);
       for (const snapshot of required) {
         const capacity = await this.findCapacity(tenantId, workspaceId, snapshot, tx);
@@ -201,7 +201,9 @@ export class RentalServiceCapacityService {
           throw new ConflictException(`服务「${snapshot.serviceName}」在所选地点和时段容量不足`);
         }
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    };
+    if (transaction) await check(transaction);
+    else await this.prisma.$transaction(check, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** A replacement may retain an original promise, never an expired or released
