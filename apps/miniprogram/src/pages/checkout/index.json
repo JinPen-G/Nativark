@@ -1,5 +1,6 @@
 {
   "usingComponents": {
+    "ai-quote-preparation": "/components/ai-native/ai-quote-preparation/index",
     "nav-bar": "/components/nav-bar/index",
     "ui-icon": "/components/ui-icon/index",
     "state-view": "/components/state-view/index",

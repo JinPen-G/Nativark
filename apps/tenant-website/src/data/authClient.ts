@@ -6,6 +6,12 @@ import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissi
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
   from '@rental-os/shared';
 import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult } from '@rental-os/shared';
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
+  aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema,
+  type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest } from '@rental-os/shared';
+import { aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema, aiClientQuoteBookingOperationResponseSchema,
+  type AiClientQuoteBookingRequest, type AiEntryActionDraft, aiEntryActionSchema, aiBookingDraftSchema, aiBookingCreateResponseSchema,
+  aiBookingChoiceResponseSchema, aiBookingHandoffResponseSchema, aiBookingOperationReadResponseSchema } from '@rental-os/shared';
 
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
@@ -129,6 +135,53 @@ async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** 需要登录的接口。金额、库存、可用性均以服务端为准；前端不自行拼算最终价。 */
 export const sessionApi = {
+  async prepareClientQuote(input: AiClientQuotePreparationRequest) {
+    const command = aiClientQuotePreparationRequestSchema.parse(input);
+    const value = await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters}`, { method: 'POST', body: JSON.stringify(command) });
+    return aiClientQuotePreparationResponseSchema.parse(value);
+  },
+  async readClientQuotePreparation(input: AiClientQuotePreparationRequest) {
+    const command = aiClientQuotePreparationRequestSchema.parse(input);
+    const value = await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation}`, { method: 'POST', body: JSON.stringify(command) });
+    return aiClientQuotePreparationReadResponseSchema.parse(value);
+  },
+  async confirmClientQuote(input: AiClientQuoteConfirmationRequest) {
+    const command = aiClientQuoteConfirmationRequestSchema.parse(input);
+    const value = await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters}`, { method: 'POST', body: JSON.stringify(command) });
+    return aiClientQuoteResultReadResponseSchema.parse(value);
+  },
+  async readClientQuoteOriginal(input: AiClientQuoteConfirmationRequest) {
+    const command = aiClientQuoteConfirmationRequestSchema.parse(input);
+    const value = await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal}`, { method: 'POST', body: JSON.stringify(command) });
+    return aiClientQuoteResultReadResponseSchema.parse(value);
+  },
+  async prepareOriginalQuoteBooking(input: AiClientQuoteBookingRequest) {
+    return aiClientQuoteBookingPreparationResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking}`,
+      { method: 'POST', body: JSON.stringify(aiClientQuoteBookingRequestSchema.parse(input)) }));
+  },
+  async readOriginalQuoteBookingOperation(input: AiClientQuoteBookingRequest) {
+    return aiClientQuoteBookingOperationResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation}`,
+      { method: 'POST', body: JSON.stringify(aiClientQuoteBookingRequestSchema.parse(input)) }));
+  },
+  async issueBookingAction(input: { materialRef: string; actionCode: 'CREATE_BOOKING_DRAFT' }) {
+    return aiEntryActionSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction}`, { method: 'POST', body: JSON.stringify(input) }));
+  },
+  async createBookingDraft(input: { action: AiEntryActionDraft; operationKey: string }) {
+    return aiBookingCreateResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.createBookingDraft}`, { method: 'POST', body: JSON.stringify(input) }));
+  },
+  async readBookingDraft(input: { bookingDraftId: string }) {
+    return aiBookingDraftSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingDraft}`, { method: 'POST', body: JSON.stringify(input) }));
+  },
+  async chooseBookingDraft(input: { bookingDraftId: string; expectedRevision: number; inputFingerprint: string; operationKey: string; decision: 'continue_booking' }) {
+    const value = aiBookingChoiceResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.chooseBookingDraft}`, { method: 'POST', body: JSON.stringify(input) }));
+    if (!('draft' in value)) throw Error('booking_choice_changed'); return value;
+  },
+  async handoffBookingDraft(input: { action: AiEntryActionDraft; operationKey: string }) {
+    return aiBookingHandoffResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.handoffBookingDraft}`, { method: 'POST', body: JSON.stringify(input) }));
+  },
+  async readBookingOperation(input: { operationKey: string }) {
+    return aiBookingOperationReadResponseSchema.parse(await authedJson<unknown>(`/ai-native/entry/${AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation}`, { method: 'POST', body: JSON.stringify(input) }));
+  },
   async readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
     return parse(await authedFetch('/ai-native/entry/host-capabilities/read', { method: 'POST', body: '{}' }, false));
   },

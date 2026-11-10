@@ -1,0 +1,4 @@
+{
+  "component": true,
+  "usingComponents": { "money-text": "/components/money-text/index" }
+}

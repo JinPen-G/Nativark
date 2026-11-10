@@ -9,9 +9,11 @@ import { useEnterpriseOrderSubmission } from './useEnterpriseOrderSubmission';
 import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
-import type { AiBookingHandoff, EnterpriseOwnRentalPolicy, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import type { AiBookingHandoff, AiBookingSelection, AiClientQuoteFacts, ClientCreateQuoteRequest, EnterpriseOwnRentalPolicy, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import { readOriginalBookingQuote, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
+import { ClientQuotePreparation } from '../features/ai-native/ClientQuotePreparation';
+import { clientQuoteStorageKey } from '../features/ai-native/client-quote-session';
 
 /** 真实租户 + 已登录：走后端 可用性 → 报价 → 下单。金额与库存全部以服务端为准。 */
 interface RemoteBookingProps {
@@ -73,11 +75,21 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   const policy = policies.find(row => row.corporateCustomerId === enterprise);
   const quoteVersion = useRef(0), host = captureEnterpriseHostSession();
   const hostIdentity = host?.identity;
+  const quoteModeRef = useRef(false), [quoteMode, setQuoteMode] = useState(false);
+  const personalScope = host && { tenantCode: host.tenantCode, serviceCode: host.workspaceCode, customerId: host.customerId,
+    surface: 'tenant_website' as const };
   const identity = JSON.stringify([hostIdentity, enterprise, paymentMode]);
   const enterpriseOrder = useEnterpriseOrderSubmission(id => navigate(href(`/orders/${encodeURIComponent(id)}`)));
   useEffect(() => { let cancelled = false; setPolicies([]); setPolicyError(''); setEnterprise(''); setPaymentMode('personal'); setNoticeAccepted(false); setQuote(null); quoteVersion.current++;
     void sessionApi.enterpriseRentalPolicies().then(rows => { if (!cancelled) setPolicies(rows); }).catch(e => { if (!cancelled) setPolicyError(e instanceof Error ? e.message : '企业身份不可用'); });
     return () => { cancelled = true; quoteVersion.current++; };
+  }, [hostIdentity]);
+  useEffect(() => {
+    let retained = false;
+    try { retained = Boolean(personalScope && localStorage.getItem(clientQuoteStorageKey(personalScope)) !== null); }
+    catch { retained = quoteModeRef.current; }
+    quoteModeRef.current = retained; setQuoteMode(retained);
+    return () => { quoteVersion.current++; };
   }, [hostIdentity]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -120,8 +132,34 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     return enabledModes.find(m => m.endsWith('pickup_return')) || enabledModes[0] || 'store_pickup_return';
   }, [fulfillment, enabledModes]);
   const isDelivery = fulfillmentMode === 'delivery';
+  const personalSelection = useMemo<ClientCreateQuoteRequest | null>(() => {
+    if (!ready || enterprise || !locationId || days < 1 || currentWorkspace?.workspaceCode !== product.categoryId || (isDelivery && !addressId)) return null;
+    try { return { bookingIdentity: { bookingIdentity: 'personal' }, fulfillmentMode: fulfillmentMode as RentalFulfillmentMode,
+      fulfillmentLocationId: locationId, startAt: toIsoDateTime(startDate), endAt: toIsoDateTime(endDate),
+      lines: [{ itemGroupId: product.id, quantity }], ...(isDelivery ? { deliveryAddressId: addressId } : {}),
+      ...(couponId ? { customerCouponId: couponId } : {}) }; } catch { return null; }
+  }, [ready, enterprise, locationId, days, currentWorkspace?.workspaceCode, product.categoryId, product.id,
+    isDelivery, addressId, fulfillmentMode, startDate, endDate, quantity, couponId]);
+  const onQuoteMode = useCallback((active: boolean, hasLocator: boolean) => {
+    quoteVersion.current++; quoteModeRef.current = active || hasLocator;
+    setQuoteMode(quoteModeRef.current); setQuote(null); setBusy(false); setError('');
+  }, []);
+  const bookingSelection = useCallback(async (original: AiClientQuoteFacts, selected: ClientCreateQuoteRequest): Promise<AiBookingSelection> => {
+    const current = captureEnterpriseHostSession();
+    if (!current || enterprise || !personalSelection || JSON.stringify(selected) !== JSON.stringify(personalSelection)) throw Error('booking_selection_changed');
+    const catalog = await sessionApi.catalog();
+    if (!current.current() || typeof catalog.timeZone !== 'string' || !catalog.timeZone || catalog.timeZone.length > 100) throw Error('booking_catalog_unavailable');
+    return { quoteId: original.quoteId, timeZone: catalog.timeZone, startAt: selected.startAt, endAt: selected.endAt,
+      fulfillmentMode: selected.fulfillmentMode, fulfillmentLocationId: selected.fulfillmentLocationId,
+      ...(selected.returnLocationId ? { returnLocationId: selected.returnLocationId } : {}),
+      ...(selected.deliveryAddressId ? { deliveryAddressId: selected.deliveryAddressId } : {}),
+      bookingIdentity: { bookingIdentity: 'personal', enterpriseContractAndPayer: false },
+      lines: selected.lines.map(line => { if (!line.itemGroupId) throw Error('booking_item_unavailable'); return { itemGroupId: line.itemGroupId, quantity: line.quantity }; }),
+      ...(selected.services ? { services: selected.services } : {}) };
+  }, [enterprise, personalSelection]);
 
   const getQuote = useCallback(async () => {
+    if (!enterprise && quoteModeRef.current) return;
     if (!locationId || days < 1) { setError(t('invalidDate')); return; }
     if (isDelivery && !addressId) { setError(t('deliveryNeedsAddress')); return; }
     if (enterprise && (!noticeAccepted || !policy?.available || (paymentMode === 'enterprise' ? !policy.enterprisePaymentAllowed : !policy.personalPaymentAllowed))) { setError(language === 'en' ? 'Review current enterprise authority and explicitly accept the notice.' : '请核对当前企业授权并明确同意企业订单告知。'); return; }
@@ -142,14 +180,14 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
 
   // 自动报价：就绪且参数有效时，输入变化后自动重新计价（防抖），无需手动点按钮。
   useEffect(() => {
-    if (!ready || !locationId || days < 1 || enterpriseOrder.blocked) return;
+    if (!ready || !locationId || days < 1 || enterpriseOrder.blocked || (!enterprise && quoteMode)) return;
     if (isDelivery && !addressId) return;
     const timer = window.setTimeout(() => { getQuote(); }, 450);
     return () => window.clearTimeout(timer);
-  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote, enterpriseOrder.blocked]);
+  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote, enterpriseOrder.blocked, quoteMode, enterprise]);
 
   const submitOrder = useCallback(async () => {
-    if (!quote?.id || enterpriseOrder.blocked) return;
+    if (!quote?.id || enterpriseOrder.blocked || (!enterprise && quoteModeRef.current)) return;
     if (quote.membershipSnapshot?.bookingIdentity === 'enterprise_employee') {
       await enterpriseOrder.submit(quote.id).catch(() => undefined); return;
     }
@@ -179,8 +217,11 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       ? <label className="booking-field">{t('selectAddress')}<select value={addressId} onChange={e => { setAddressId(e.target.value); setQuote(null); }}>{addresses.map(a => <option key={a.id} value={a.id}>{addrLabel(a)}</option>)}</select></label>
       : <p className="mock-note">{t('noAddress')} <Link to={href('/account')}>{t('addAddress')}</Link></p>)}
     {coupons.length > 0 && <label className="booking-field">{t('useCoupon')}<select value={couponId} onChange={e => { setCouponId(e.target.value); setQuote(null); }}><option value="">{t('couponNone')}</option>{coupons.map((c, i) => <option key={c.id ?? i} value={c.id}>{c.name || c.templateName || c.title || t('coupon')}</option>)}</select></label>}
+    {!enterprise && <ClientQuotePreparation selection={personalSelection} scopeKey={JSON.stringify([hostIdentity, personalSelection])}
+      english={language === 'en'} onMode={onQuoteMode} bookingSelection={bookingSelection}
+      onHandoff={handoff => navigate(href(`/booking/${encodeURIComponent(product.id)}`), { state: { aiBookingHandoffRef: handoff.handoffRef } })} />}
     {busy && !quote ? <p className="mock-note"><LoadingOutlined /> {t('quoting')}</p> : null}
-    {quote && <>
+    {quote && (!quoteMode || enterprise) && <>
       <div><span>{t('rentAmount')}</span><strong>¥{quote.rentalAmount ?? 0}</strong></div>
       {quote.discountAmount ? <div><span>{t('discount')}</span><strong>-¥{quote.discountAmount}</strong></div> : null}
       {quote.couponAmount ? <div><span>{t('couponDeducted')}</span><strong>-¥{quote.couponAmount}</strong></div> : null}
@@ -192,7 +233,7 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     {error && <p className="form-error" role="alert">{error}</p>}
     {enterpriseOrder.error && <p className="form-error" role="alert">{enterpriseOrder.error}</p>}
     {enterpriseOrder.pending && <button type="button" className="button button-outline" disabled={enterpriseOrder.busy} onClick={() => void enterpriseOrder.recover()}>{language === 'en' ? 'Read original enterprise order' : '核对原企业订单结果'}</button>}
-    {quote?.membershipSnapshot?.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis?.approvalMode === 'per_order' ? <EnterpriseBookingApproval key={JSON.stringify([identity, quote.id])} quoteId={quote.id} identity={identity} english={language === 'en'} onOrder={id => navigate(href(`/orders/${encodeURIComponent(id)}`))} onNewQuote={() => { setQuote(null); void getQuote(); }} /> : <button type="button" className="button button-dark button-block" disabled={busy || !quote || enterpriseOrder.blocked || Boolean(enterprise && !enterpriseOrder.ready)} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>}
+    {(!quoteMode || enterprise) && (quote?.membershipSnapshot?.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis?.approvalMode === 'per_order' ? <EnterpriseBookingApproval key={JSON.stringify([identity, quote.id])} quoteId={quote.id} identity={identity} english={language === 'en'} onOrder={id => navigate(href(`/orders/${encodeURIComponent(id)}`))} onNewQuote={() => { setQuote(null); void getQuote(); }} /> : <button type="button" className="button button-dark button-block" disabled={busy || !quote || enterpriseOrder.blocked || Boolean(enterprise && !enterpriseOrder.ready)} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>)}
     <p className="mock-note">{language === 'en' ? 'Rental term' : '租期'}: {days} {language === 'en' ? 'day(s)' : '天'}</p>
   </div>;
 }

@@ -24,6 +24,7 @@ import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zone
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../../core/ui";
 import { rememberZone, zoneOf } from "../../core/zones";
+import { clientQuoteStorageKey } from "../../components/ai-native/client-quote-session";
 
 /**
  * P05 确认订单（V2 设计稿）：商品 → 租赁时间 → 取还方式 → 自提门店 → 优惠券 → 押金说明 → 备注 → 费用明细 → 确认预约。
@@ -55,6 +56,11 @@ interface CouponRow {
 }
 
 interface CheckoutData {
+  aiQuoteActive: boolean;
+  aiQuotePendingCore: boolean;
+  aiQuoteSelection: ClientCreateQuoteRequest | null;
+  aiQuoteScopeKey: string;
+  aiQuoteTimeZone: string;
   enterprisePolicies: EnterpriseOwnRentalPolicy[];
   enterpriseIndex: number;
   enterpriseLabel: string;
@@ -158,6 +164,7 @@ const DEFAULT_ZONE = "Asia/Shanghai";
 Page({
   behaviors: [themeBehavior],
   data: {
+    aiQuoteActive: false, aiQuotePendingCore: false, aiQuoteSelection: null, aiQuoteScopeKey: '', aiQuoteTimeZone: '',
     enterprisePolicies: [], enterpriseIndex: -1, enterpriseLabel: "个人签约付款", enterprisePayer: false,
     enterpriseNotice: "", enterpriseAccepted: false, enterpriseError: "", enterprisePurpose: "", enterprisePending: false, enterpriseBusy: false,
     aiHandoffInput: "",
@@ -270,6 +277,40 @@ Page({
   aiPendingHandoffRef: undefined as string | undefined,
   aiOffHandoff: undefined as (() => void) | undefined,
   aiOpeningGeneration: 0,
+  aiQuoteMode: false,
+  hasOriginalQuotePreparation() {
+    const session = currentSession();
+    if (!session || session.customer.customerType !== 'personal') return false;
+    const key = clientQuoteStorageKey({ tenantCode: PUBLIC_CONFIG.tenantCode, serviceCode: session.serviceCode,
+      customerId: session.customer.customerId, surface: 'client_miniprogram' });
+    try { const value: unknown = wx.getStorageSync(key); return value !== '' && value !== null && value !== undefined; }
+    catch { return this.aiQuoteMode; }
+  },
+  syncQuotePreparation(cart: CartState | undefined) {
+    const personal = cart?.bookingIdentity?.bookingIdentity !== 'enterprise_employee' && currentSession()?.customer.customerType === 'personal';
+    if (!personal) this.aiQuoteMode = false;
+    else if (this.hasOriginalQuotePreparation()) this.aiQuoteMode = true;
+    const selection = personal && cart && cartMissing(cart).length === 0 && !cart.submission ? this.buildRequest(cart) : null;
+    this.setData({ aiQuoteActive: personal && this.aiQuoteMode, aiQuoteSelection: selection,
+      aiQuoteTimeZone: this.catalog?.timeZone ?? '',
+      aiQuoteScopeKey: JSON.stringify([contextVersion(), currentServiceCode(), cart?.revision, personal]) });
+  },
+  async onQuoteBookingHandoff(event: WechatMiniprogram.CustomEvent<{ handoffRef: string }>) {
+    const reference = event.detail.handoffRef, version = contextVersion(), attempt = ++this.aiOpeningGeneration;
+    if (this.aiDisposed || !this.aiVisible || this.aiMode || !/^[a-f0-9-]{36}$/iu.test(reference)) return;
+    try {
+      const publication = await readBookingHostCapabilities();
+      if (this.aiDisposed || !this.aiVisible || version !== contextVersion() || attempt !== this.aiOpeningGeneration) return;
+      if (!await this.attachPublishedBooking(publication, reference)) toast('原预约入口暂不可用，请保留原交接引用');
+    } catch { if (!this.aiDisposed && this.aiVisible && version === contextVersion()) toast('原预约交接待核对，不重建报价'); }
+  },
+  onQuotePreparationMode(event: WechatMiniprogram.CustomEvent<{ active: boolean; hasLocator: boolean; pendingCore: boolean }>) {
+    if (this.aiMode || this.aiDisposed || !this.aiVisible) return;
+    this.aiQuoteMode = event.detail.active || event.detail.hasLocator;
+    this.requestVersion++;
+    this.setData({ aiQuoteActive: this.aiQuoteMode, aiQuotePendingCore: event.detail.pendingCore, quote: undefined, quoteLoading: false });
+    if (!this.aiQuoteMode) void this.requestQuote();
+  },
 
   onHandoffReferenceInput(event: WechatMiniprogram.Input) {
     if (this.aiDisposed || this.data.aiHandoffOpening || this.aiMode) return;
@@ -452,6 +493,8 @@ Page({
     this.aiUnsubscribe?.();
     this.aiUnsubscribe = sessionEvents.on(event => {
       if (event.type === "refreshed" && !this.aiMode) return;
+      this.selectComponent('#client-quote-preparation')?.invalidateQuote?.();
+      this.aiQuoteMode = false;
       this.aiOpeningGeneration++; this.aiPendingHandoffRef = undefined;
       this.setData({ aiHandoffOpening: false, aiHandoffInput: '', aiHandoffOffered: false });
       if (!this.aiMode) {
@@ -473,6 +516,7 @@ Page({
   onShow() {
     this.enterpriseViewEpoch++;
     this.aiVisible = true;
+    this.syncQuotePreparation(getCart());
     if (this.aiMode) { this.clearBookingHandoff(); this.bindBookingHandoff(); return; }
     const original = readStorage<typeof this.enterpriseOperation>(this.enterpriseStorageKey()) ?? readStorage<typeof this.enterpriseOperation>(STORAGE_KEYS.enterpriseOperations);
     this.enterpriseOperation = original && original.customerId === currentSession()?.customer.customerId && original.serviceCode === currentServiceCode() ? { ...original, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch } : undefined;
@@ -483,6 +527,7 @@ Page({
   },
 
   onHide() {
+    this.selectComponent('#client-quote-preparation')?.invalidateQuote?.();
     this.enterpriseViewEpoch++;
     this.aiOpeningGeneration++; this.setData({ aiHandoffOpening: false });
     this.aiBindingEpoch++; this.aiFactory?.hide(); this.aiFactory = undefined;
@@ -494,6 +539,7 @@ Page({
   },
 
   onUnload() {
+    this.selectComponent('#client-quote-preparation')?.invalidateQuote?.();
     this.enterpriseViewEpoch++;
     this.aiOpeningGeneration++;
     this.aiOffHandoff?.(); this.aiOffHandoff = undefined; this.aiPendingHandoffRef = undefined;
@@ -678,6 +724,7 @@ Page({
       services: this.data.services.map((row) => ({ ...row, selected: cart.services.some((item) => item.serviceId === row.id) })),
       couponText: cart.couponId ? this.data.coupons.find((row) => row.id === cart.couponId)?.name ?? "已选优惠券" : this.data.coupons.some((row) => row.usable) ? "有可用优惠券，点击选择" : "暂无可用优惠券"
     });
+    this.syncQuotePreparation(cart);
   },
 
   mutate(mutator: (draft: CartState) => void) {
@@ -1121,6 +1168,8 @@ Page({
   async requestQuote() {
     if (this.aiMode) return;
     const cart = getCart();
+    this.syncQuotePreparation(cart);
+    if (this.aiQuoteMode) return;
     if (!cart || cart.submission || this.data.enterprisePending) return;
     if (cart.bookingIdentity?.bookingIdentity === "enterprise_employee" && !cart.bookingIdentity.enterpriseDisclosure?.acknowledged) { this.setData({ quote: undefined, formError: "请先明确确认企业身份订单告知" }); return; }
     const missing = cartMissing(cart);
@@ -1211,7 +1260,7 @@ Page({
 
   /* ---------- 提交 ---------- */
   async onSubmit() {
-    if (this.aiMode) return;
+    if (this.aiMode || this.aiQuoteMode) return;
     if (this.data.submitting || this.data.enterpriseBusy || this.enterpriseReading || this.enterpriseOperation) return;
     if (this.data.paymentBlocked) {
       this.setData({ formError: this.data.paymentNote });
@@ -1237,7 +1286,7 @@ Page({
 
   /** replay=true 表示恢复一次结果未知的提交：同键同报价重放。 */
   async submit(replay: boolean) {
-    if (this.aiMode) return;
+    if (this.aiMode || this.aiQuoteMode) return;
     const cart = getCart();
     if (!cart) return;
     let submission;
