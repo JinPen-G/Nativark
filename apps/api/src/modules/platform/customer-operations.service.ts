@@ -362,10 +362,20 @@ export class CustomerOperationsService {
     }
   }
 
+  /** Status writes share the enterprise authorization fence before the original
+   * customer gate. Do not put this exclusive lock in Core's shared gate or upgrade S→X. */
+  private async lockCustomerStatusGate(tenantId: string, customerId: string, tx: CustomerTx) {
+    const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} FOR UPDATE`;
+    if (!tenants.length || !(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+      throw new NotFoundException("客户不存在");
+    }
+  }
+
   /**
    * 改**账号**状态。影响该客户在全部空间的登录，因此不接受 workspaceId。
    *
-   * 状态变更与历史同事务；乐观并发以读到的状态为条件，落败方拿 409 而不是静默覆盖。
+   * 状态、历史和企业授权失效同事务；安全停用不受最后管理员交接阻断，恢复不重授旧权限。
+   * 乐观并发以读到的状态为条件，落败方拿 409 而不是静默覆盖。
    */
   async changeAccountStatus(
     tenantId: string,
@@ -380,9 +390,7 @@ export class CustomerOperationsService {
     }
     const at = stamp();
     const changed = await this.prisma.$transaction(async (tx) => {
-      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
-        throw new NotFoundException("客户不存在");
-      }
+      await this.lockCustomerStatusGate(tenantId, customerId, tx);
       const account = await this.operations.findAccountByCustomer(tenantId, customerId, tx);
       if (!account) throw new NotFoundException("该客户尚未开通登录账号");
       if (account.status === input.status) {
@@ -403,7 +411,7 @@ export class CustomerOperationsService {
           tx
         );
       }
-      return this.operations.updateAccountStatus(
+      const count = await this.operations.updateAccountStatus(
         tenantId,
         account.id,
         {
@@ -427,6 +435,10 @@ export class CustomerOperationsService {
         },
         tx
       );
+      if (count && input.status !== "active") {
+        await this.customers.invalidatePersonalEnterpriseAuthority(tenantId, customerId, tx);
+      }
+      return count;
     });
     if (changed === 0) {
       throw new ConflictException("客户账号状态已被其他人修改，请刷新后重试");
@@ -450,9 +462,7 @@ export class CustomerOperationsService {
     }
     const at = stamp();
     const changed = await this.prisma.$transaction(async (tx) => {
-      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
-        throw new NotFoundException("客户不存在");
-      }
+      await this.lockCustomerStatusGate(tenantId, customerId, tx);
       const membership = await this.customers.findMembership(tenantId, customerId, tx);
       if (!membership) throw new NotFoundException("该客户尚未开通租户会员");
       if (membership.status === input.status) {
@@ -473,7 +483,9 @@ export class CustomerOperationsService {
           tx
         );
       }
-      return this.operations.updateMembershipStatus(
+      const customer = await tx.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { customerType: true } });
+      if (!customer) throw new NotFoundException("客户不存在");
+      const count = await this.operations.updateMembershipStatus(
         tenantId,
         membership.id,
         {
@@ -490,6 +502,7 @@ export class CustomerOperationsService {
           customerId,
           scope: "membership",
           action: membershipAction(membership.status, input.status),
+          captureEnterpriseRecipients: customer.customerType === "corporate",
           fromStatus: membership.status,
           toStatus: input.status,
           reason,
@@ -498,6 +511,17 @@ export class CustomerOperationsService {
         },
         tx
       );
+      if (count && input.status !== "active") {
+        // The locked server-side master selects the authority owner. Corporate
+        // membership changes revoke this enterprise's relations, not its employees'
+        // personal accounts or their relationships with another enterprise.
+        if (customer.customerType === "corporate") {
+          await this.customers.invalidateCorporateEnterpriseAuthority(tenantId, customerId, tx);
+        } else {
+          await this.customers.invalidatePersonalEnterpriseAuthority(tenantId, customerId, tx);
+        }
+      }
+      return count;
     });
     if (changed === 0) {
       throw new ConflictException("租户会员状态已被其他人修改，请刷新后重试");
@@ -794,7 +818,11 @@ export class CustomerOperationsService {
     await this.assertRiskCustomerVisible(tenantId, workspaceId, customerId, user);
 
     return this.prisma.$transaction(async (tx) => {
-      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+      // The risk INSERT checks a Tenant FK. Take its shared fence before the customer
+      // gate so a concurrent Tenant→customer merge/status write cannot reverse the order.
+      // This path never upgrades the shared fence to an exclusive authorization lock.
+      const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${tenantId} LOCK IN SHARE MODE`;
+      if (!tenants.length || !(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
         throw new NotFoundException("客户不存在或不属于当前租户");
       }
       return this.operations.createRiskRecord({

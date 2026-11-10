@@ -1,0 +1,284 @@
+/** Exchange-spending applications share original order locks and preview sources.
+ * Approval never applies an exchange or bypasses merchant inspection/funding. */
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import type { EnterpriseExchangeConfirmationResult, ConfirmEnterpriseExchangeExpense, CloseEnterpriseExchangeRequest, EnterpriseExchangeRequestOriginalResult, EnterpriseExchangeRequestClosureReceipt, EnterpriseExchangeApprovalView, EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeIntent, RequestEnterpriseExchangeApproval, DecideEnterpriseExchangeApproval, RentalOrderChangePreview, EnterpriseBookingBasis } from "@rental-os/shared";
+import { requireRequestWorkspaceId } from "../../common/request-identity";
+import type { ClientRequestContext } from "../client/client-auth.service";
+import { ClientApiService } from "../client/client-api.service";
+import { EnterpriseAccessService } from "../client/enterprise-access.service";
+import { PrismaService } from "../database/prisma.service";
+import { RentalCoreService } from "../rental-core/rental-core.service";
+import { RentalExchangePreviewService } from "../rental-core/rental-exchange-preview.service";
+import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
+import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
+import { EnterprisePolicyService } from "./enterprise-policy.service";
+
+type Approval = {
+  id: string; corporateCustomerId: string; applicantCustomerId: string; workspaceId: string; orderId: string; expectedOrderUpdatedAt: string;
+  revision: number; state: "pending" | "approved" | "rejected" | "withdrawn"; reason: string; expiresAt: Date;
+  request: EnterpriseExchangeIntent | string; preview: RentalOrderChangePreview | string; basis: EnterpriseBookingBasis | string;
+  requestFingerprint: string; previewFingerprint: string;
+  approvedBy?: string | null; reviewerMembershipId?: string | null; reviewerMembershipUpdatedAt?: Date | null;
+  employeeConfirmationOperationKey?: string | null; employeeConfirmedAt?: Date | null; employeeConfirmationFingerprint?: string | null;
+};
+@Injectable()
+export class EnterpriseExchangeApprovalService {
+  constructor(private readonly prisma: PrismaService, private readonly commands: EnterpriseCommandService, private readonly policies: EnterprisePolicyService,
+    private readonly access: EnterpriseAccessService, private readonly core: RentalCoreService, private readonly prices: RentalExchangePreviewService, private readonly clientApi: ClientApiService) {}
+
+  private rows(context: ClientRequestContext, id: string, tx?: Prisma.TransactionClient) {
+    return (tx ?? this.prisma).$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id} ${tx ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
+  }
+  private owns(context: ClientRequestContext, row?: Approval) {
+    if (!row || row.applicantCustomerId !== context.customerId || row.workspaceId !== context.workspaceId || requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("本人当前空间换货申请不存在");
+  }
+  private confirmationFingerprint(row: Approval) {
+    return requestFingerprint({ approvalId: row.id, orderId: row.orderId, workspaceId: row.workspaceId, applicantCustomerId: row.applicantCustomerId,
+      requestFingerprint: row.requestFingerprint, previewFingerprint: row.previewFingerprint, basis: enterpriseJson(row.basis),
+      approvedBy: row.approvedBy, reviewerMembershipId: row.reviewerMembershipId, reviewerMembershipUpdatedAt: row.reviewerMembershipUpdatedAt?.toISOString() });
+  }
+  private view(row: Approval): EnterpriseExchangeApprovalView {
+    const preview = enterpriseJson(row.preview), exchange = preview.exchange;
+    if (!exchange) throw new ConflictException("原换货试算关联缺失");
+    if ((row.employeeConfirmationOperationKey || row.employeeConfirmedAt || row.employeeConfirmationFingerprint)
+      && (!row.employeeConfirmationOperationKey || !row.employeeConfirmedAt || row.employeeConfirmationFingerprint !== this.confirmationFingerprint(row))) throw new ConflictException("原员工费用确认依据不一致");
+    if (row.employeeConfirmationOperationKey && (row.requestFingerprint !== requestFingerprint({ orderId: row.orderId, expected: row.expectedOrderUpdatedAt, exchange: enterpriseJson(row.request) })
+      || row.previewFingerprint !== requestFingerprint(preview))) throw new ConflictException("原员工费用确认快照指纹不一致");
+    return { id: row.id, orderId: row.orderId, workspaceId: row.workspaceId, corporateCustomerId: row.corporateCustomerId, applicantCustomerId: row.applicantCustomerId,
+      expectedOrderUpdatedAt: row.expectedOrderUpdatedAt, revision: row.revision, state: ["pending", "approved"].includes(row.state) && row.expiresAt <= new Date() ? "expired" : row.state,
+      reason: row.reason, expiresAt: row.expiresAt.toISOString(), exchange: enterpriseJson(row.request),
+      preview: { originalItemGroupName: exchange.originalItemGroupName, replacementItemGroupName: exchange.replacementItemGroupName,
+        originalAmount: exchange.originalAmount, replacementAmount: exchange.replacementAmount, additionalAmount: preview.additionalAmount, refundAmount: preview.refundAmount,
+        depositDelta: preview.depositDelta, preAuthDelta: preview.preAuthDelta, currency: preview.currency,
+        originalPriceVersion: exchange.originalPriceVersion, replacementPriceVersion: exchange.replacementPriceVersion },
+      ...(row.employeeConfirmationOperationKey && row.employeeConfirmedAt ? { employeeConfirmation: { operationKey: row.employeeConfirmationOperationKey,
+        confirmedAt: row.employeeConfirmedAt.toISOString(), scope: "expense_only_not_inspection_or_execution" as const } } : {}), execution: "original_merchant_execution_not_connected" };
+  }
+  private canonical(input: EnterpriseExchangeIntent): EnterpriseExchangeIntent {
+    if (!input || [input.orderLineId, input.allocationId, input.replacementItemGroupId].some(id => typeof id !== "string" || !id.trim() || id.length > 191)
+      || !["original_order_price", "replacement_current_price"].includes(input.priceBasis)
+      || [input.replacementAssetId, input.replacementPricingGroupId].some(id => id !== undefined && (typeof id !== "string" || !id.trim() || id.length > 191))) throw new BadRequestException("须选择原订单行、分配项、新商品及价格依据");
+    return { orderLineId: input.orderLineId.trim(), allocationId: input.allocationId.trim(), replacementItemGroupId: input.replacementItemGroupId.trim(), priceBasis: input.priceBasis,
+      ...(input.replacementAssetId ? { replacementAssetId: input.replacementAssetId.trim() } : {}), ...(input.replacementPricingGroupId ? { replacementPricingGroupId: input.replacementPricingGroupId.trim() } : {}) };
+  }
+  // Effective-from identifies the preview instant, not a price guarantee. Compare
+  // immutable price/config evidence and public charges, never renew the old approval.
+  private priceBasis(preview: RentalOrderChangePreview) {
+    const basis = preview.exchange?.executionBasis;
+    return { ...preview, exchange: preview.exchange && {
+      ...preview.exchange, executionBasis: basis && { ...basis, effectiveFrom: undefined }
+    } };
+  }
+  private async ownOrder(context: ClientRequestContext, orderId: string, tx: Prisma.TransactionClient) {
+    const order = await this.core.lockOrderForUpdate(context.tenantId, orderId, tx);
+    if (requireRequestWorkspaceId() !== context.workspaceId || order.tenantId !== context.tenantId || order.id !== orderId
+      || order.membershipSnapshot?.personalCustomerId !== context.customerId || !order.membershipSnapshot.enterpriseContractAndPayer) throw new NotFoundException("本人当前空间企业订单不存在");
+    const basis = await this.policies.revalidateOrderExpense(context.tenantId, context.workspaceId, order, tx);
+    if (!basis || basis.approvalMode !== "per_order") throw new ForbiddenException("仅本人逐单企业付费订单可申请换货批准");
+    return { order, basis };
+  }
+  async choices(context: ClientRequestContext, orderId: string, query: EnterpriseExchangeChoicesQuery): Promise<EnterpriseExchangeChoices> {
+    if ([query.allocationId, query.replacementItemGroupId].some(id => id !== undefined && (typeof id !== "string" || !id.trim() || id.length > 191))) throw new BadRequestException("换货候选引用无效");
+    return this.prisma.$transaction(async tx => {
+      const tenants = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${context.tenantId} AND status='ACTIVE' LOCK IN SHARE MODE`;
+      if (!tenants.length) throw new ForbiddenException("商户不可用");
+      await this.commands.customer(context, tx);
+      const { order } = await this.ownOrder(context, orderId, tx);
+      await this.commands.customer(context, tx);
+      const catalog = await this.clientApi.catalog(context);
+      const result = await this.prices.choices(context.tenantId, order, query, new Set(catalog.items.map(item => item.id)), tx);
+      await this.commands.customer(context, tx);
+      return { orderId: order.id, orderNo: order.orderNo, expectedOrderUpdatedAt: order.updatedAt, workspaceId: context.workspaceId, applicantCustomerId: context.customerId,
+        ...result, selectedAllocationId: query.allocationId, selectedReplacementItemGroupId: query.replacementItemGroupId, reservation: "not_reserved" };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+  private async prepared(context: ClientRequestContext, orderId: string, expected: string, intent: EnterpriseExchangeIntent, tx: Prisma.TransactionClient) {
+    const { order, basis } = await this.ownOrder(context, orderId, tx);
+    if (order.updatedAt !== expected) throw new ConflictException("原订单已变化，须重新试算并申请换货批准");
+    const catalog = await this.clientApi.catalog(context);
+    if (!catalog.items.some(item => item.id === intent.replacementItemGroupId)) throw new ForbiddenException("替换商品未向当前客户空间开放");
+    const { preview } = await this.prices.preview(context.tenantId, orderId, intent, tx);
+    if (!(preview.additionalAmount > 0) || !Number.isFinite(preview.additionalAmount) || !preview.exchange?.executionBasis) throw new ConflictException("此接点仅申请真实新增换货支出，缺原试算依据不放行");
+    const snapshot = order.membershipSnapshot!;
+    await this.policies.assertQuoteAmount(context.tenantId, snapshot.corporateCustomerId!, snapshot.corporateMembershipId!, { payableAmount: preview.additionalAmount, currency: preview.currency }, tx);
+    return { order, basis, preview };
+  }
+  async request(context: ClientRequestContext, input: RequestEnterpriseExchangeApproval) {
+    if (input.expectedRevision !== 0 || !Number.isFinite(Date.parse(input.expectedOrderUpdatedAt))) throw new BadRequestException("原订单修订或初始修订无效");
+    input = { ...input, exchange: this.canonical(input.exchange) };
+    return this.commands.execute(context.tenantId, `customer:${context.customerId}`, "exchange.request", input.orderId, input, async tx => {
+      const prepared = await this.prepared(context, input.orderId, input.expectedOrderUpdatedAt, input.exchange, tx), snapshot = prepared.order.membershipSnapshot!;
+      const active = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND orderId=${input.orderId} AND state IN ('pending','approved') AND expiresAt>NOW(3) FOR UPDATE`;
+      if (active.length) throw new ConflictException("原订单已有待处理换货申请，请核对原申请");
+      const minutes = await this.policies.approvalLifetime(context.tenantId, snapshot.corporateCustomerId!, snapshot.corporateMembershipId!, tx);
+      const id = randomUUID(), expiresAt = new Date(Date.now() + minutes * 60000);
+      await tx.$executeRaw`INSERT INTO enterprise_exchange_approvals (tenantId,id,corporateCustomerId,applicantCustomerId,workspaceId,orderId,expectedOrderUpdatedAt,requestFingerprint,previewFingerprint,request,preview,basis,reason,expiresAt) VALUES (${context.tenantId},${id},${snapshot.corporateCustomerId},${context.customerId},${context.workspaceId},${input.orderId},${input.expectedOrderUpdatedAt},${requestFingerprint({ orderId: input.orderId, expected: input.expectedOrderUpdatedAt, exchange: input.exchange })},${requestFingerprint(prepared.preview)},${JSON.stringify(input.exchange)},${JSON.stringify(prepared.preview)},${JSON.stringify(prepared.basis)},${input.reason.trim()},${expiresAt})`;
+      return { id, state: "pending", revision: 1, expiresAt: expiresAt.toISOString() };
+    }, tx => this.commands.customer(context, tx), "shared", async tx => {
+      await this.core.lockOrderForUpdate(context.tenantId, input.orderId, tx);
+      await this.commands.customer(context, tx);
+    });
+  }
+  private requestSeal(context: ClientRequestContext, orderId: string, key: string) {
+    return { state: "closed" as const, orderId, workspaceId: context.workspaceId, workspaceCode: context.workspaceCode, applicantCustomerId: context.customerId, closedOperationKey: key, retryable: false as const };
+  }
+  private async readRequestOriginal(context: ClientRequestContext, orderId: string, key: string, tx?: Prisma.TransactionClient): Promise<EnterpriseExchangeRequestOriginalResult> {
+    if (requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("本人当前空间原申请不存在");
+    const receipt = (await (tx ?? this.prisma).$queryRaw<Array<{ actorUserId: string; target: string; requestHash: string; result: object | string }>>`SELECT actorUserId,target,requestHash,result FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key}`)[0];
+    if (!receipt) return { state: "not_recorded", retryable: false };
+    if (receipt.actorUserId !== `customer:${context.customerId}`) throw new NotFoundException("本人原换货申请不存在");
+    if (receipt.target === `exchange.request.sealed:${orderId}`) {
+      const sealed = this.requestSeal(context, orderId, key), payload = enterpriseJson(receipt.result) as Partial<typeof sealed>;
+      if (!payload || requestFingerprint(payload) !== requestFingerprint(sealed) || receipt.requestHash !== requestFingerprint({ action: "exchange.request.sealed", ...sealed })) throw new ConflictException("原换货申请封闭证据不一致");
+      return sealed;
+    }
+    if (receipt.target !== `exchange.request:${orderId}`) throw new NotFoundException("本人原换货申请不存在");
+    const payload = enterpriseJson(receipt.result) as { id?: unknown };
+    if (typeof payload.id !== "string" || !payload.id) throw new ConflictException("原申请收据关联缺失");
+    const row = (await this.rows(context, payload.id, tx))[0]; this.owns(context, row);
+    if (row.orderId !== orderId) throw new ConflictException("原换货申请订单关联不一致");
+    return { state: "observed", approval: this.view(row), retryable: false };
+  }
+  async requestOriginal(context: ClientRequestContext, orderId: string, key: string): Promise<EnterpriseExchangeRequestOriginalResult> {
+    if (!/^[a-zA-Z0-9_-]{1,128}$/u.test(key)) throw new BadRequestException("原申请键无效");
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    const result = await this.readRequestOriginal(context, orderId, key);
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    return result;
+  }
+  async closeRequest(context: ClientRequestContext, orderId: string, key: string, input: CloseEnterpriseExchangeRequest): Promise<EnterpriseExchangeRequestOriginalResult> {
+    if (input.confirm !== true || input.expectedRevision !== 0 || !/^[a-zA-Z0-9_-]{1,128}$/u.test(key) || key === input.operationKey) throw new BadRequestException("须本人明确原申请键与独立结束请求");
+    await this.commands.execute(context.tenantId, `customer:${context.customerId}`, "exchange.request.close", requestFingerprint({ orderId, workspaceId: context.workspaceId, originalOperationKey: key }), input, async tx => {
+      const original = await this.readRequestOriginal(context, orderId, key, tx);
+      if (original.state === "not_recorded") {
+        // The original request takes this same order fence before its receipt read.
+        // The permanent incompatible key and closure receipt commit or roll back together.
+        const seal = this.requestSeal(context, orderId, key);
+        await tx.$executeRaw`INSERT INTO enterprise_portal_operations (tenantId,operationKey,actorUserId,requestHash,target,reason,result) VALUES (${context.tenantId},${key},${`customer:${context.customerId}`},${requestFingerprint({ action: "exchange.request.sealed", ...seal })},${`exchange.request.sealed:${orderId}`},${input.reason.trim()},${JSON.stringify(seal)})`;
+      }
+      const receipt: EnterpriseExchangeRequestClosureReceipt = { orderId, workspaceId: context.workspaceId, workspaceCode: context.workspaceCode, applicantCustomerId: context.customerId,
+        originalOperationKey: key, closureOperationKey: input.operationKey, retryable: false,
+        ...(original.state === "observed" ? { state: "observed", approvalId: original.approval.id } : { state: "closed" }) };
+      return receipt;
+    }, tx => this.commands.customer(context, tx, false), "shared", async tx => {
+      const order = await this.core.lockOrderForUpdate(context.tenantId, orderId, tx);
+      // Historical ownership only: closure cannot require a new quote or today's
+      // corporate spending grant. Core's own workspace/operation locks still apply.
+      if (requireRequestWorkspaceId() !== context.workspaceId || order.tenantId !== context.tenantId || order.id !== orderId || order.membershipSnapshot?.personalCustomerId !== context.customerId) throw new NotFoundException("本人当前空间原订单不存在");
+      await this.commands.customer(context, tx, false);
+    });
+    return this.requestOriginal(context, orderId, key);
+  }
+  async original(context: ClientRequestContext, id: string) {
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    const row = (await this.rows(context, id))[0]; this.owns(context, row);
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    return this.view(row);
+  }
+  /** Original-order history is independent of today's new-spending eligibility.
+   * The ordinary client reader proves ownership; SQL also binds every row to it. */
+  async orderApprovals(context: ClientRequestContext, orderId: string): Promise<EnterpriseExchangeApprovalView[]> {
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    if (requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("本人当前空间原订单不存在");
+    const order = await this.clientApi.getOrder(context, orderId);
+    if (order.id !== orderId) throw new ConflictException("原订单读取关联不一致");
+    const rows = await this.prisma.$queryRaw<Approval[]>`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND orderId=${orderId} AND applicantCustomerId=${context.customerId} ORDER BY expiresAt DESC LIMIT 201`;
+    if (rows.length > 200) throw new ConflictException("本单换货申请超过当前有界读取范围");
+    if (rows.some(row => row.orderId !== orderId || row.workspaceId !== context.workspaceId || row.applicantCustomerId !== context.customerId)) throw new ConflictException("本单换货申请关联不一致");
+    const result = rows.map(row => this.view(row));
+    await this.clientApi.getOrder(context, orderId);
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    return result;
+  }
+  async list(context: ClientRequestContext, corporateId?: string) {
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, Boolean(corporateId));
+    const before = corporateId ? await this.access.requireAction(context, corporateId, "approvals:review") : undefined;
+    const rows = corporateId ? await this.prisma.$queryRaw<Approval[]>`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND corporateCustomerId=${corporateId} ORDER BY expiresAt DESC LIMIT 201`
+      : await this.prisma.$queryRaw<Approval[]>`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND applicantCustomerId=${context.customerId} ORDER BY expiresAt DESC LIMIT 201`;
+    if (rows.length > 200) throw new ConflictException("换货申请超过当前有界读取范围");
+    if (corporateId) { const after = await this.access.requireAction(context, corporateId, "approvals:review"); if (before!.permissionRevision !== after.permissionRevision) throw new ForbiddenException("企业审批权限已变化"); }
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, Boolean(corporateId));
+    return rows.map(row => this.view(row));
+  }
+  private async lockedRow(context: ClientRequestContext, id: string, tx: Prisma.TransactionClient) {
+    const original = (await this.rows(context, id))[0];
+    if (!original) throw new NotFoundException("当前空间换货申请不存在");
+    await this.core.lockOrderForUpdate(context.tenantId, original.orderId, tx);
+    const latest = (await this.rows(context, id, tx))[0];
+    if (!latest || latest.orderId !== original.orderId) throw new ConflictException("原换货关联已变化");
+    await this.commands.customer(context, tx);
+    return latest;
+  }
+  private async current(row: Approval, context: ClientRequestContext, tx: Prisma.TransactionClient) {
+    if (row.expiresAt <= new Date()) throw new ConflictException("换货申请已失效，须重新试算与申请");
+    const intent = enterpriseJson(row.request), preview = enterpriseJson(row.preview);
+    if (row.requestFingerprint !== requestFingerprint({ orderId: row.orderId, expected: row.expectedOrderUpdatedAt, exchange: intent }) || row.previewFingerprint !== requestFingerprint(preview)) throw new ConflictException("原换货申请或试算指纹不一致");
+    // Internal revalidation reads the persisted applicant, never reviewer input.
+    const prepared = await this.prepared({ ...context, customerId: row.applicantCustomerId }, row.orderId, row.expectedOrderUpdatedAt, intent, tx);
+    if (prepared.order.membershipSnapshot?.corporateCustomerId !== row.corporateCustomerId) throw new ConflictException("原换货付款企业关联已变化");
+    const before = enterpriseJson(row.basis);
+    if (requestFingerprint({ ...before, acknowledgedAt: undefined }) !== requestFingerprint({ ...prepared.basis, acknowledgedAt: undefined })) throw new ConflictException("企业关系、政策或告知已变化，须重新申请");
+    if (requestFingerprint(this.priceBasis(preview)) !== requestFingerprint(this.priceBasis(prepared.preview))) throw new ConflictException("换货价格、资源或执行依据变化，须重新申请");
+  }
+  async confirmExpense(context: ClientRequestContext, id: string, input: ConfirmEnterpriseExchangeExpense) {
+    if (input.confirm !== true) throw new ForbiddenException("须本人核对本次费用后独立确认，不是确认商户检查");
+    return this.commands.execute(context.tenantId, `customer:${context.customerId}`, "exchange.expense.confirm", id, input, async tx => {
+      const row = await this.lockedRow(context, id, tx); this.owns(context, row);
+      if (row.revision !== input.expectedRevision) throw this.commands.conflict();
+      if (row.state !== "approved" || row.employeeConfirmationOperationKey) throw new ConflictException("原费用批准不可重复确认，请读取原结果");
+      await this.current(row, context, tx);
+      await this.policies.assertReviewer(context.tenantId, row.corporateCustomerId, row.applicantCustomerId, row.approvedBy ?? null, row.reviewerMembershipId ?? null, row.reviewerMembershipUpdatedAt ?? null, tx);
+      const confirmedAt = new Date();
+      const changed = await tx.$executeRaw`UPDATE enterprise_exchange_approvals SET employeeConfirmationOperationKey=${input.operationKey},employeeConfirmedAt=${confirmedAt},employeeConfirmationFingerprint=${this.confirmationFingerprint(row)},revision=revision+1 WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id} AND state='approved' AND employeeConfirmationOperationKey IS NULL`;
+      if (changed !== 1) throw this.commands.conflict();
+      return { id, orderId: row.orderId, workspaceId: row.workspaceId, applicantCustomerId: row.applicantCustomerId, operationKey: input.operationKey,
+        confirmedAt: confirmedAt.toISOString(), revision: row.revision + 1, scope: "expense_only_not_inspection_or_execution" as const };
+    }, tx => this.commands.customer(context, tx), "shared", tx => this.lockedRow(context, id, tx));
+  }
+  async confirmationOriginal(context: ClientRequestContext, id: string): Promise<EnterpriseExchangeConfirmationResult> {
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    const row = (await this.rows(context, id))[0]; this.owns(context, row);
+    const approval = this.view(row);
+    if (!approval.employeeConfirmation) {
+      await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+      return { approval, original: { state: "not_confirmed", retryable: false } };
+    }
+    const reference = approval.employeeConfirmation;
+    const receipt = (await this.prisma.$queryRaw<Array<{ actorUserId: string; target: string; result: object | string }>>`SELECT actorUserId,target,result FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${reference.operationKey}`)[0];
+    const value = receipt && enterpriseJson(receipt.result) as Record<string, unknown> | undefined;
+    if (!receipt || receipt.actorUserId !== `customer:${context.customerId}` || receipt.target !== `exchange.expense.confirm:${id}`
+      || value?.id !== id || value.orderId !== row.orderId || value.workspaceId !== row.workspaceId || value.applicantCustomerId !== context.customerId
+      || value.operationKey !== reference.operationKey || value.confirmedAt !== reference.confirmedAt || value.scope !== reference.scope) throw new ConflictException("原员工费用确认收据不一致，不能重新确认");
+    const latest = (await this.rows(context, id))[0]; this.owns(context, latest);
+    if (latest.revision !== row.revision || latest.employeeConfirmationOperationKey !== row.employeeConfirmationOperationKey
+      || latest.employeeConfirmationFingerprint !== row.employeeConfirmationFingerprint) throw new ConflictException("原员工费用确认关联已变化，请重新核对");
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    return { approval: this.view(latest), original: { state: "observed" as const, operationKey: reference.operationKey, retryable: false as const } };
+  }
+  async decide(context: ClientRequestContext, id: string, input: DecideEnterpriseExchangeApproval) {
+    if (!["approve", "reject", "withdraw"].includes(input.decision)) throw new BadRequestException("换货决定无效");
+    const lock = (tx: Prisma.TransactionClient) => this.lockedRow(context, id, tx);
+    return this.commands.execute(context.tenantId, `customer:${context.customerId}`, "exchange.decision", id, input, async tx => {
+      const row = await lock(tx);
+      if (row.revision !== input.expectedRevision) throw this.commands.conflict();
+      if (!["pending", "approved"].includes(row.state)) throw new ConflictException("原换货申请已处理");
+      if (input.decision === "withdraw") this.owns(context, row);
+      else {
+        if (row.applicantCustomerId === context.customerId) throw new ForbiddenException("申请人和使用人不得自审");
+        const reviewer = await this.access.requireAction(context, row.corporateCustomerId, "approvals:review", tx);
+        if (row.state !== "pending") throw new ConflictException("原换货批准已作出");
+        if (input.decision === "approve") {
+          await this.current(row, context, tx);
+          const membership = await tx.customerCorporateMembership.findFirst({ where: { tenantId: context.tenantId, id: reviewer.membershipId }, select: { updatedAt: true } });
+          if (!membership) throw new ForbiddenException("当前审批人关系不可用");
+          await tx.$executeRaw`UPDATE enterprise_exchange_approvals SET approvedBy=${context.customerId},reviewerMembershipId=${reviewer.membershipId},reviewerMembershipUpdatedAt=${membership.updatedAt} WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id}`;
+        }
+      }
+      const state = input.decision === "approve" ? "approved" : input.decision === "reject" ? "rejected" : "withdrawn";
+      await tx.$executeRaw`UPDATE enterprise_exchange_approvals SET state=${state},decisionReason=${input.reason.trim()},revision=revision+1 WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id}`;
+      return { id, state, revision: row.revision + 1 };
+    }, tx => this.commands.customer(context, tx), "shared", lock);
+  }
+}

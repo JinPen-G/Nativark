@@ -312,6 +312,52 @@ void (async () => {
   assert.equal(scheduled.deletedObjects, 1, "跨租户调度应处理其他租户的过期对象");
   assert.equal(sessions.get(secondExpiredSessionId).status, "failed");
   assert.equal(assets.get(secondExpiredAssetId).status, "failed");
+  const { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE: scene } = require('../packages/shared/dist');
+  const declaration = { ...input, fileName:'condition.png', mimeType:'image/png', sizeBytes:68, uploadScene:scene, idempotencyKey:'exchange-image-original' };
+  await assert.rejects(runtime.createUploadSession(tenantId, declaration), /专用/u);
+  const owner = { businessType:'rental_order', businessId:orderId, uploadScene:scene, workspaceId, actorUserId:'operator', exchangeInspectionSourceId:'source-original' };
+  const config = { id:'storage-config', provider:'s3_compatible', capability:'file', settings:{ bucket:'images', region:'us-east-1', endpoint:'https://storage.example.invalid', forcePathStyle:true }, credentials:{ accessKeyId:'offline-placeholder', secretAccessKey:'offline-placeholder' } };
+  const configRow = { ...config, tenantId, enabled:true, isDefault:true, lastTestStatus:'passed', lastTestMode:'live', updatedAt:new Date(0) }; delete configRow.credentials;
+  const dedicatedDb = { ...prisma, tenantIntegrationConfig:{ findFirst:async () => structuredClone(configRow) }, fileAsset:{ ...prisma.fileAsset,
+    findFirst:async args => { const row=await prisma.fileAsset.findFirst(args); return row && (!args.where.uploadedBy || row.uploadedBy===args.where.uploadedBy) ? structuredClone({ ...row, ...(args.include?.uploadSession ? { uploadSession:[...sessions.values()].find(session=>session.fileAssetId===row.id) } : {}) }) : null; } } };
+  dedicatedDb.$transaction = async fn => fn(dedicatedDb);
+  const dedicated = new FileStorageRuntimeService(dedicatedDb, { runtimeConfig:async () => structuredClone(config), assertEnabledInTransaction:async () => undefined });
+  const plan = await dedicated.planExchangeInspectionUpload(tenantId,declaration,owner);
+  assert.ok(plan.uploadUrl); await dedicated.persistExchangeInspectionUpload(dedicatedDb,tenantId,plan);
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const originalFetch=globalThis.fetch, originalEgress=require('../apps/api/src/common/outbound-url').assertOutboundUrl;
+  const egress=require('../apps/api/src/common/outbound-url'); egress.assertOutboundUrl=async url=>new URL(url);
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7x8AAAAASUVORK5CYII=','base64');
+  assert.equal(png.length,68); let byteRequests=0;
+  globalThis.fetch=async () => { byteRequests++; return new Response(png,{ headers:{'content-length':'68','content-type':'image/png'} }); };
+  try {
+    await assert.rejects(dedicated.inspectExchangeInspectionUpload(tenantId,plan.assetId,{...owner,workspaceId:otherWorkspaceId},plan.configRowHash,plan.storageLocationHash),/归属/u);
+    const proof=await dedicated.inspectExchangeInspectionUpload(tenantId,plan.assetId,owner,plan.configRowHash,plan.storageLocationHash);
+    assert.equal(proof.contentHash,require('node:crypto').createHash('sha256').update(png).digest('hex')); assert.equal(proof.width,1); assert.equal(byteRequests,1);
+    await assert.rejects(dedicated.completeUpload(tenantId,plan.sessionId,{},owner),/专用/u);
+    await assert.rejects(dedicated.deleteFileAsset(tenantId,plan.assetId,owner),/专用/u);
+    sessions.get(plan.sessionId).expiresAt=new Date(0);
+    const retained=await dedicated.cleanupExpiredUploadSessions(tenantId); assert.ok(!retained.sessionIds.includes(plan.sessionId));
+    assert.equal(sessions.get(plan.sessionId).status,'pending_upload'); assert.equal(assets.get(plan.assetId).status,'pending_upload');
+    sessions.get(plan.sessionId).expiresAt=plan.expiresAt;
+    const completion=await dedicated.completeExchangeInspectionUpload(dedicatedDb,tenantId,plan.assetId,owner,proof);
+    assert.equal(completion.contentHash,proof.contentHash); assert.equal(assets.get(plan.assetId).status,'active');
+    await assert.rejects(dedicated.downloadUrl(tenantId,plan.assetId),/专用/u);
+    const second=await dedicated.planExchangeInspectionUpload(tenantId,{...declaration,idempotencyKey:'image-second'}, {...owner,exchangeInspectionSourceId:'source-second'});
+    await dedicated.persistExchangeInspectionUpload(dedicatedDb,tenantId,second);
+    globalThis.fetch=async () => new Response(Buffer.alloc(68),{ headers:{'content-length':'68','content-type':'image/png'} });
+    await assert.rejects(dedicated.inspectExchangeInspectionUpload(tenantId,second.assetId,{...owner,exchangeInspectionSourceId:'source-second'},second.configRowHash,second.storageLocationHash));
+    assert.equal(assets.get(second.assetId).status,'pending_upload');
+    configRow.updatedAt=new Date(1); await assert.rejects(dedicated.persistExchangeInspectionUpload(dedicatedDb,tenantId,second),/配置/u);
+    const { IntegrationsRepository }=require('../apps/api/src/modules/integrations/integrations.repository'); let listWhere;
+    const repository=new IntegrationsRepository({ fileAsset:{findMany:async ({where})=>{listWhere=where;return [];} } });
+    await repository.listFiles(tenantId,{uploadScene:scene}); assert.equal(listWhere.NOT.uploadScene,scene);
+    await assert.rejects(repository.createFile(declaration,tenantId),/专用/u);
+    const { IntegrationsService }=require('../apps/api/src/modules/integrations/integrations.service');
+    const service=new IntegrationsService({get:()=> 'memory'},repository); await assert.rejects(service.createFile(declaration),/专用/u);
+    assert.ok(requestFingerprint(proof));
+  } finally { globalThis.fetch=originalFetch; egress.assertOutboundUrl=originalEgress; }
+  console.log("dedicated exchange image bytes, generic isolation and unknown TTL retention passed");
   console.log("file storage lifecycle tests passed");
 })().catch((error) => {
   console.error(error);

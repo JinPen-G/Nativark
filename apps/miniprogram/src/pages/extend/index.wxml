@@ -55,7 +55,7 @@
       </view>
     </view>
 
-    <view wx:if="{{enterpriseRequired || enterpriseApproval || enterprisePending || enterpriseError}}" class="section section--tight">
+    <view wx:if="{{enterpriseRequired || enterpriseApproval || enterprisePending || enterpriseError || enterpriseResult}}" class="section section--tight">
       <view class="card">
         <view class="subtitle">企业续租批准</view>
         <view class="notice notice--neutral mt-8">企业批准不下单、不预占库存或授信，也不确认到账。须本人核对原费用后明确提交；待补款不等于已延期。</view>
@@ -71,7 +71,7 @@
           <view wx:for="{{enterpriseApproval.preview.chargeLines}}" wx:key="code" class="kv"><view class="kv__label">{{item.name}}</view><money-text amount="{{item.amount}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
           <button wx:if="{{enterpriseApproval.state === 'approved'}}" class="btn btn--primary btn--block mt-12" bindtap="onSubmitEnterpriseExtension" disabled="{{submitting || enterprisePending || !enterpriseReason}}">核对后提交本条续租</button>
         </block>
-        <button wx:if="{{enterpriseCanClose && enterpriseApproval}}" class="btn btn--secondary btn--block mt-12" bindtap="onCloseEnterpriseExtension" disabled="{{submitting || !enterpriseReason}}">请求受控结束原提交</button>
+        <button wx:if="{{enterpriseCanClose}}" class="btn btn--secondary btn--block mt-12" bindtap="onCloseEnterpriseExtension" disabled="{{submitting || !enterpriseReason}}">请求受控结束原提交</button>
         <button class="btn btn--secondary btn--block mt-12" bindtap="onReadEnterpriseExtension" disabled="{{submitting}}">核对原续租申请与结果</button>
         <view wx:if="{{enterpriseResult}}" class="notice notice--neutral mt-8">{{enterpriseResult}}</view>
         <view wx:if="{{enterpriseError}}" class="notice notice--danger mt-8">{{enterpriseError}}</view>

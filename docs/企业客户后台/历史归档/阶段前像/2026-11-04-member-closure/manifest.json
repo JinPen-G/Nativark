@@ -1,0 +1,38 @@
+[
+  {
+    "source": "docs/企业客户后台/企业客户后台-开发记录.md",
+    "file": "企业客户后台-开发记录.md",
+    "bytes": 125892,
+    "sha256": "0c6eecf176784b65b30f166bb39691bad1212b40d0d4550614eb78cd9fe3cd21"
+  },
+  {
+    "source": "docs/企业客户后台/企业客户后台-协作接续.md",
+    "file": "企业客户后台-协作接续.md",
+    "bytes": 15713,
+    "sha256": "19bae4a700b8a156332cfc5bfae798488b95978e7c1868eb4de9f3dbe996eea6"
+  },
+  {
+    "source": "apps/enterprise-portal/README.md",
+    "file": "enterprise-portal-README.md",
+    "bytes": 17170,
+    "sha256": "9594658d1b4c243ba4994517981882cf43629a68b6d3539216e797c655a2de96"
+  },
+  {
+    "source": "tests/enterprise-workflows.test.cjs",
+    "file": "enterprise-workflows.test.cjs",
+    "bytes": 62517,
+    "sha256": "83e04c940758a200a025236105e7c954bdae360d41bac47ea802b82a3a365772"
+  },
+  {
+    "source": "docs/企业客户后台/企业客户后台-需求.md",
+    "file": "企业客户后台-需求.md",
+    "bytes": 37135,
+    "sha256": "874b550090a67225b84bfbcbae40959b905afaa6898609a3b679617abfc6ba7f"
+  },
+  {
+    "source": "docs/企业客户后台/企业客户后台-开发任务.md",
+    "file": "企业客户后台-开发任务.md",
+    "bytes": 14798,
+    "sha256": "75f9d1a426dfa2b89165a9881f5462c6e8375369763fa357ff4503fdef8c70d2"
+  }
+]

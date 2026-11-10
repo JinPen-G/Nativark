@@ -1,7 +1,7 @@
 /** Registered same-origin enterprise entry paths; URL data locates a tenant,
  * never authorizes one. Domain binding must be confirmed by the server. */
 const codePattern = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
-export const ENTERPRISE_PAGE_PATHS = ["", "tasks", "members", "applications", "join", "invites", "join-requests", "policy", "approvals", "extension-approvals", "orders", "finance", "records", "profile"] as const;
+export const ENTERPRISE_PAGE_PATHS = ["", "tasks", "members", "applications", "join", "invites", "join-requests", "policy", "approvals", "extension-approvals", "exchange-approvals", "orders", "finance", "records", "profile"] as const;
 export interface EnterpriseRoute { tenantCode?: string; basePath: string; boundDomain: boolean }
 export function parseEnterpriseRoute(pathname: string): EnterpriseRoute | null {
   const parts = pathname.split("/");

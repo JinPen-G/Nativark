@@ -45,9 +45,13 @@ import { EnterprisePortalService } from "./modules/platform/enterprise-portal.se
 import { EnterpriseAccessService } from "./modules/client/enterprise-access.service";
 import { EnterpriseCommandService } from "./modules/enterprise/enterprise-command.service";
 import { EnterpriseApplicationService } from "./modules/enterprise/enterprise-application.service";
+import { EnterpriseRentalHandoffService } from "./modules/enterprise/enterprise-rental-handoff.service";
+import { EnterpriseMembershipAuditService } from "./modules/enterprise/enterprise-membership-audit.service";
+import { EnterpriseRentalHandoffMerchantController } from "./modules/enterprise/enterprise-rental-handoff-merchant.controller";
 import { EnterpriseMembersService } from "./modules/enterprise/enterprise-members.service";
 import { EnterprisePolicyService } from "./modules/enterprise/enterprise-policy.service";
 import { EnterpriseApprovalService } from "./modules/enterprise/enterprise-approval.service";
+import { EnterpriseExchangeApprovalService } from "./modules/enterprise/enterprise-exchange-approval.service";
 import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterprise-extension-approval.service";
 import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
 import { EnterpriseManagementRequestService } from "./modules/enterprise/enterprise-management-request.service";
@@ -57,6 +61,9 @@ import { CustomerAvatarController } from "./modules/platform/customer-avatar.con
 import { CustomerAvatarService } from "./modules/platform/customer-avatar.service";
 import { PlatformService } from "./modules/platform/platform.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
+import { RentalExchangePreviewService } from "./modules/rental-core/rental-exchange-preview.service";
+import { RentalExchangeInspectionPreparationService } from "./modules/rental-core/rental-exchange-inspection-preparation.service";
+import { RentalExchangeInspectionMediaService } from "./modules/rental-core/rental-exchange-inspection-media.service";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalCategoryResolver } from "./modules/rental-core/rental-category-resolver.service";
 import { CategoryGovernanceController } from "./modules/rental-core/category-governance.controller";
@@ -222,6 +229,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     MembershipController,
     EnterpriseWorkflowsController,
     EnterpriseMerchantController,
+    EnterpriseRentalHandoffMerchantController,
     CustomerAvatarController,
     RentalCoreController,
     RentalBusinessController,
@@ -298,15 +306,21 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     EnterpriseAccessService,
     EnterpriseCommandService,
     EnterpriseApplicationService,
+    EnterpriseRentalHandoffService,
+    EnterpriseMembershipAuditService,
     EnterpriseMembersService,
     EnterprisePolicyService,
     EnterpriseApprovalService,
     EnterpriseExtensionApprovalService,
+    EnterpriseExchangeApprovalService,
     EnterpriseTaskCenterService,
     EnterpriseManagementRequestService,
     CustomerAvatarService,
     OperationLogService,
     RentalCoreService,
+    RentalExchangePreviewService,
+    RentalExchangeInspectionPreparationService,
+    RentalExchangeInspectionMediaService,
     RentalCategoryResolver,
     CategoryGovernanceService,
     CategoryAdoptionPreparationService,

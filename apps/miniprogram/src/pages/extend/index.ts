@@ -96,7 +96,7 @@ Page({
   },
   finishEnterprise(operation: ReturnType<typeof enterpriseExtensionOperation>, epoch: number, identity: string) {
     if (!this.viewCurrent(epoch, identity)) return;
-    try { const pending = operation.pending(); this.setData({ submitting: false, enterprisePending: Boolean(pending), enterpriseCanClose: pending?.kind === "submit" && !pending.closureKey && Boolean(pending.approvalId) }); }
+    try { const pending = operation.pending(); this.setData({ submitting: false, enterprisePending: Boolean(pending), enterpriseCanClose: Boolean(pending && !pending.closureKey && (pending.kind === "request" || pending.approvalId)) }); }
     catch (error) { this.setData({ submitting: false, enterprisePending: true, enterpriseError: describeError(error).message }); }
   },
   preferredApproval(rows: EnterpriseExtensionApprovalView[]) { return rows.find(row => ["pending", "approved"].includes(row.state)) ?? rows[0]; },
@@ -186,7 +186,7 @@ Page({
         enterpriseError: this.data.enterpriseError,
         enterpriseApproval,
         enterprisePending,
-        enterpriseCanClose: originalOperation?.kind === "submit" && !originalOperation.closureKey && Boolean(originalOperation.approvalId),
+        enterpriseCanClose: Boolean(originalOperation && !originalOperation.closureKey && (originalOperation.kind === "request" || originalOperation.approvalId)),
         enterpriseResult: ""
       });
     } catch (error) {
@@ -298,7 +298,10 @@ Page({
     if (!operation || !order || !preview || !reason || this.data.submitting || this.data.enterprisePending || !this.data.enterpriseRequired || this.data.pending || this.data.blockedReason
       || this.data.enterpriseApproval && ["pending", "approved"].includes(this.data.enterpriseApproval.state)) return;
     this.setData({ submitting: true, enterpriseError: "" });
-    try { const result = await operation.request(order.updatedAt, preview.newEndAt, reason); operation.current(); if (result) this.setData({ enterpriseApproval: result.approval, enterpriseResult: "批准仅为企业费用授权，不代表续租已生效" }); }
+    try { const result = await operation.request(order.updatedAt, preview.newEndAt, reason); operation.current(); if (result) {
+      if ("state" in result) this.setData({ enterpriseApproval: undefined, preview: undefined, enterpriseResult: "原申请键已封闭；新申请须重新试算并明确发起" });
+      else this.setData({ enterpriseApproval: result.approval, enterpriseResult: "批准仅为企业费用授权，不代表续租已生效" });
+    } }
     catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }
     finally { this.finishEnterprise(operation, epoch, identity); }
   },
@@ -309,7 +312,9 @@ Page({
     try {
       const result = operation.pending() ? await operation.recover() : this.data.enterpriseApproval ? await operation.result(this.data.enterpriseApproval.id) : undefined;
       operation.current();
-      if (result) {
+      if (result && "state" in result) {
+        this.setData({ enterpriseApproval: undefined, preview: undefined, enterpriseReason: "", enterpriseResult: "原申请键已封闭；未撤回已成立申请或取消续租，新申请须重新试算并明确发起" });
+      } else if (result) {
         this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "observed" ? result.original.extensionState === "pending_payment" ? "待补款；当前归还时间不变，请勿重复申请" : `原续租状态：${result.original.extensionState}` : result.original.state === "closed" ? "原提交已封闭，新申请须重新试算与批准" : "原申请尚未提交至Core" });
         if (result.original.state === "observed") await this.refreshOriginalExtension(operation);
       } else { const rows = await operation.list(); this.setData({ enterpriseApproval: this.preferredApproval(rows) }); }
@@ -318,13 +323,15 @@ Page({
   },
   async onCloseEnterpriseExtension() {
     const operation = this.enterpriseOperation, approval = this.data.enterpriseApproval, epoch = this.viewEpoch, identity = this.sessionIdentity(), reason = this.data.enterpriseReason.trim();
-    if (!operation || !approval || !this.data.enterpriseCanClose || !reason || this.data.submitting) return;
+    if (!operation || !this.data.enterpriseCanClose || !reason || this.data.submitting) return;
     this.setData({ submitting: true, enterpriseError: "" });
     try {
-      operation.current(); const answer = await wx.showModal({ title: "受控结束原提交", content: "永久封闭本条原续租批准与提交键；若已消费只核对原续租，不取消、不退款、不重试。新申请须重新试算与批准。" });
+      const pending = operation.pending(); if (!pending || pending.kind === "submit" && !approval) return;
+      operation.current(); const answer = await wx.showModal({ title: "受控结束原操作", content: pending.kind === "request" ? "永久封闭本条原申请键；若申请已成立只恢复原申请，不撤回、不取消续租、不退款。新申请须重新试算并明确发起。" : "永久封闭本条原续租批准与提交键；若已消费只核对原续租，不取消、不退款、不重试。新申请须重新试算与批准。" });
       operation.current(); if (!answer.confirm) return;
-      const result = await operation.close(approval, reason); operation.current();
-      if (result) { this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "closed" ? "原提交已封闭，新申请须重新试算与批准" : "原续租已消费，未取消或重试" }); if (result.original.state === "observed") await this.refreshOriginalExtension(operation); }
+      const result = pending.kind === "request" ? await operation.closeRequest(reason) : await operation.close(approval!, reason); operation.current();
+      if (result && "state" in result) this.setData({ enterpriseApproval: undefined, preview: undefined, enterpriseReason: "", enterpriseResult: "原申请键已封闭；新申请须重新试算并明确发起" });
+      else if (result) { this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "closed" ? "原提交已封闭，新申请须重新试算与批准" : "原申请或续租已成立，未撤回、取消或重试" }); if (result.original.state === "observed") await this.refreshOriginalExtension(operation); }
     } catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }
     finally { this.finishEnterprise(operation, epoch, identity); }
   },
@@ -337,6 +344,7 @@ Page({
       const answer = await wx.showModal({ title: "核对原续租费用", content: `延长至 ${formatBusinessDateTime(approval.preview.newEndAt, this.data.timeZone)}；租赁应付 ${describeDelta(approval.preview.payableAmount, approval.preview.currency)}，押金差额 ${describeDelta(approval.preview.depositDelta, approval.preview.currency)}，预授权差额 ${describeDelta(approval.preview.preAuthDelta, approval.preview.currency)}。明确提交本条批准；待补款不代表已延期。` });
       operation.current(); if (!answer.confirm || approval !== this.data.enterpriseApproval) return;
       const result = await operation.submit(approval, reason); operation.current(); if (!result) return;
+      if ("state" in result) { this.setData({ enterpriseApproval: undefined, preview: undefined, enterpriseResult: "原申请键已封闭" }); return; }
       this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "observed" && result.original.extensionState === "pending_payment" ? "待补款，原租期不变；请按原续租记录完成补款" : "原续租已提交，请读取原订单及续租状态" });
       if (result.original.state === "observed") await this.refreshOriginalExtension(operation);
     } catch (error) { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); }

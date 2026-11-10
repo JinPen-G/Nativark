@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { getRequestUserId } from "../../common/request-identity";
+import { assertInspectionRequiredResults } from "./rental-inspection-result-validation";
 import { optionalUsageReading, usageDelta } from "./rental-usage-reading";
 import { selectDamageWaiver } from "./rental-damage-waiver";
 import { inspectionClosureError } from "./rental-inspection-customer-response";
@@ -2843,10 +2844,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       : await this.getWorkspaceCategory(tenantId);
     const template = storedTemplate ? (frozenTemplates !== undefined ? structuredClone(storedTemplate) : this.inspectionTemplateForRead(inspectionCategory, storedTemplate)) : undefined;
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
-    const missing = template.fields.filter((field) => field.required && (input.results[field.code] === undefined || input.results[field.code] === null
-      || (typeof input.results[field.code] === "string" && !String(input.results[field.code]).trim())));
-    if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
-    template.fields.filter((field) => field.usageMetric).forEach((field) => optionalUsageReading(input.results[field.code], field.label));
+    assertInspectionRequiredResults(template, input.results);
     if (template.stage === "pickup" && order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货，不能办理取件检查");
     if (template.stage === "return" && order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理归还检查");
     if (input.returnItems?.length && template.stage !== "return") throw new BadRequestException("只有归还检查可以指定部分归还项");

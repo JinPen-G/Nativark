@@ -14,6 +14,7 @@ export const ROUTES = {
   pay: "/pages/pay/index",
   order: "/pages/order/index",
   extend: "/pages/extend/index",
+  exchange: "/pages/exchange/index",
   login: "/pages/login/index",
   register: "/pages/register/index",
   closure: "/pages/closure/index",

@@ -56,8 +56,9 @@ export function clearPrivateStorage(): void {
     if (!KEEP_ON_SIGN_OUT.has(key)) removeStorage(key);
   }
   try {
-    // Opaque extension keys contain no body/credentials and remain account-scoped
+    // Opaque expense keys contain no body/credentials and remain account-scoped
     // for original-result recovery after re-login; signing out is not a rollback.
-    for (const key of wx.getStorageInfoSync().keys) if (key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:`) && !key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:extension:`)) removeStorage(key);
+    for (const key of wx.getStorageInfoSync().keys) if (key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:`)
+      && !key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:extension:`) && !key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:exchange-confirmation:`) && !key.startsWith(`${STORAGE_KEYS.enterpriseOperations}:exchange-request:`)) removeStorage(key);
   } catch { /* A storage failure does not restore the cleared in-memory identity. */ }
 }

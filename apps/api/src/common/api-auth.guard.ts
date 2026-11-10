@@ -757,6 +757,9 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes$/)) {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
   }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/exchange-inspection\/(?:requirements|preparations(?:\/[^/]+)?|operations\/[^/]+|media\/(?:requirements|uploads|operations\/[^/]+(?:\/complete)?))$/u)) {
+    return ["rental-os:order:operate"];
+  }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes\/post-pickup-exchange(?:\/preview)?$/)) {
     return ["rental-os:order:operate"];
   }

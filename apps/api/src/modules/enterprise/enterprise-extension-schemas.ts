@@ -14,6 +14,7 @@ export const ENTERPRISE_EXTENSION_SCHEMAS: Record<string, SchemaObject> = {
   DecideEnterpriseExtensionApproval: object({ ...change, decision: { type: "string", enum: ["approve", "reject", "withdraw"] } }),
   SubmitEnterpriseExtensionApproval: object({ ...change, approvalId: string, confirm: { type: "boolean", enum: [true] } }),
   CloseEnterpriseExtensionExecution: object({ ...change, originalOperationKey: { type: "string", minLength: 1, maxLength: 128 }, confirm: { type: "boolean", enum: [true] } }),
+  CloseEnterpriseExtensionRequest: object({ ...change, expectedRevision: { type: "integer", enum: [0] }, confirm: { type: "boolean", enum: [true] } }),
   EnterpriseExtensionReview: object({ originalEndAt: date, newEndAt: date,
     rentalAmount: { type: "number" }, serviceAmount: { type: "number" }, depositDelta: { type: "number" }, preAuthDelta: { type: "number" }, payableAmount: { type: "number" }, currency: string,
     settlementMode: { type: "string", enum: ["immediate", "monthly"] }, paymentRequired: { type: "boolean" },
@@ -23,7 +24,7 @@ export const ENTERPRISE_EXTENSION_SCHEMAS: Record<string, SchemaObject> = {
     preview: ref("EnterpriseExtensionReview"), extensionId: string, closedOperationKey: string }, ["id", "corporateCustomerId", "applicantCustomerId", "workspaceId", "orderId", "expectedOrderUpdatedAt", "state", "revision", "expiresAt", "reason", "preview"]),
   EnterpriseExtensionApprovalList: { type: "array", items: ref("EnterpriseExtensionApprovalView") },
   EnterpriseExtensionCommandResult: object({ id: string, state: { type: "string", enum: ["pending", "approved", "rejected", "withdrawn"] }, revision: integer, expiresAt: date }, ["id", "state", "revision"]),
-  EnterpriseExtensionRequestOriginalResult: { oneOf: [object({ state: { type: "string", enum: ["not_recorded"] }, retryable: noRetry }), object({ state: { type: "string", enum: ["observed"] }, approval: ref("EnterpriseExtensionApprovalView"), retryable: noRetry })] },
+  EnterpriseExtensionRequestOriginalResult: { oneOf: [object({ state: { type: "string", enum: ["not_recorded"] }, retryable: noRetry }), object({ state: { type: "string", enum: ["observed"] }, approval: ref("EnterpriseExtensionApprovalView"), retryable: noRetry }), object({ state: { type: "string", enum: ["closed"] }, orderId: string, workspaceId: string, workspaceCode: string, applicantCustomerId: string, closedOperationKey: string, retryable: noRetry })] },
   EnterpriseExtensionOriginalResult: object({ approval: ref("EnterpriseExtensionApprovalView"), original: { oneOf: [
     object({ state: { type: "string", enum: ["not_submitted", "closed"] }, retryable: noRetry }),
     object({ state: { type: "string", enum: ["observed"] }, extensionId: string, extensionState: { type: "string", enum: ["pending_payment", "effective", "cancelled", "expired"] }, retryable: noRetry }),

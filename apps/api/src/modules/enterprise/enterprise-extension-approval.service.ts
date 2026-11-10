@@ -3,7 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { CloseEnterpriseExtensionExecution, ClientOrderExtensionRequest, DecideEnterpriseExtensionApproval, EnterpriseBookingBasis, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, EnterpriseExtensionRequestOriginalResult, RentalOrder, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
+import type { CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestClosureReceipt, CloseEnterpriseExtensionExecution, ClientOrderExtensionRequest, DecideEnterpriseExtensionApproval, EnterpriseBookingBasis, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, EnterpriseExtensionRequestOriginalResult, RentalOrder, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
 import { ClientApiService } from "../client/client-api.service";
 import type { ClientRequestContext } from "../client/client-auth.service";
@@ -96,23 +96,62 @@ export class EnterpriseExtensionApprovalService {
       return { id, state: "pending", revision: 1, expiresAt: expiresAt.toISOString() };
     }, tx => this.commands.customer(context, tx), "shared", tx => this.core.lockOrderForUpdate(context.tenantId, input.orderId, tx));
   }
+  private requestSeal(context: ClientRequestContext, orderId: string, key: string) {
+    return { state: "closed" as const, orderId, workspaceId: context.workspaceId, workspaceCode: context.workspaceCode, applicantCustomerId: context.customerId, closedOperationKey: key, retryable: false as const };
+  }
+  private async readRequestOriginal(context: ClientRequestContext, orderId: string, key: string, tx?: Prisma.TransactionClient): Promise<EnterpriseExtensionRequestOriginalResult> {
+    const receipts = await (tx ?? this.prisma).$queryRaw<Array<{ actorUserId: string; requestHash: string; target: string; result: object | string }>>`SELECT actorUserId,requestHash,target,result FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key}`;
+    const receipt = receipts[0];
+    if (!receipt) return { state: "not_recorded", retryable: false };
+    if (receipt.actorUserId !== `customer:${context.customerId}` || requireRequestWorkspaceId() !== context.workspaceId) throw new NotFoundException("本人原续租申请不存在");
+    if (receipt.target === `extension.request.sealed:${orderId}`) {
+      const sealed = this.requestSeal(context, orderId, key), payload = enterpriseJson(receipt.result) as Partial<typeof sealed>;
+      // MySQL JSON normalizes object-key order; compare named bindings, not its
+      // serialization order, while the seal hash uses our canonical input only.
+      if (receipt.requestHash !== enterpriseHash({ action: "extension.request.sealed", ...sealed }) || !payload || payload.state !== "closed" || payload.retryable !== false
+        || payload.orderId !== sealed.orderId || payload.workspaceId !== sealed.workspaceId || payload.workspaceCode !== sealed.workspaceCode
+        || payload.applicantCustomerId !== sealed.applicantCustomerId || payload.closedOperationKey !== sealed.closedOperationKey) throw new ConflictException("原续租申请封闭证据不一致");
+      return sealed;
+    }
+    if (receipt.target !== `extension.request:${orderId}`) throw new NotFoundException("本人原续租申请不存在");
+    const payload = enterpriseJson(receipt.result) as { id?: unknown };
+    if (typeof payload.id !== "string" || !payload.id) throw new ConflictException("原续租申请收据关联缺失");
+    const row = (await this.row(context.tenantId, payload.id, tx))[0];
+    this.owns(context, row);
+    if (row.orderId !== orderId) throw new ConflictException("原续租申请订单关联不一致");
+    return { state: "observed", approval: this.view(row), retryable: false };
+  }
   async requestOriginal(context: ClientRequestContext, orderId: string, key: string): Promise<EnterpriseExtensionRequestOriginalResult> {
     if (!key?.trim() || key.length > 128) throw new BadRequestException("原申请键无效");
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
-    const receipts = await this.prisma.$queryRaw<Array<{ actorUserId: string; target: string; result: object | string }>>`SELECT actorUserId,target,result FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key}`;
-    const receipt = receipts[0];
-    if (!receipt) {
-      await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
-      return { state: "not_recorded", retryable: false };
-    }
-    if (receipt.actorUserId !== `customer:${context.customerId}` || receipt.target !== `extension.request:${orderId}`) throw new NotFoundException("本人原续租申请不存在");
-    const payload = enterpriseJson(receipt.result) as { id?: unknown };
-    if (typeof payload.id !== "string" || !payload.id) throw new ConflictException("原续租申请收据关联缺失");
-    const row = (await this.row(context.tenantId, payload.id))[0];
-    this.owns(context, row);
-    if (row.orderId !== orderId) throw new ConflictException("原续租申请订单关联不一致");
+    const result = await this.readRequestOriginal(context, orderId, key);
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
-    return { state: "observed", approval: this.view(row), retryable: false };
+    return result;
+  }
+  async closeRequest(context: ClientRequestContext, orderId: string, key: string, input: CloseEnterpriseExtensionRequest): Promise<EnterpriseExtensionRequestOriginalResult> {
+    if (input.confirm !== true || input.expectedRevision !== 0 || !key?.trim() || key.length > 128 || key === input.operationKey) throw new BadRequestException("须本人明确原申请键与独立结束请求");
+    const target = enterpriseHash({ orderId, workspaceId: context.workspaceId, originalOperationKey: key });
+    await this.commands.execute(context.tenantId, `customer:${context.customerId}`, "extension.request.close", target, input, async tx => {
+      const original = await this.readRequestOriginal(context, orderId, key, tx);
+      if (original.state === "not_recorded") {
+        // Request and closure hold the same original order row until both receipts
+        // commit. A late request sees this incompatible permanent key before apply.
+        const sealed = this.requestSeal(context, orderId, key);
+        await tx.$executeRaw`INSERT INTO enterprise_portal_operations (tenantId,operationKey,actorUserId,requestHash,target,reason,result) VALUES (${context.tenantId},${key},${`customer:${context.customerId}`},${enterpriseHash({ action: "extension.request.sealed", ...sealed })},${`extension.request.sealed:${orderId}`},${input.reason.trim()},${JSON.stringify(sealed)})`;
+      }
+      const receipt: EnterpriseExtensionRequestClosureReceipt = { orderId, workspaceId: context.workspaceId, workspaceCode: context.workspaceCode, applicantCustomerId: context.customerId,
+        originalOperationKey: key, closureOperationKey: input.operationKey, retryable: false,
+        ...(original.state === "observed" ? { state: "observed", approvalId: original.approval.id } : { state: "closed" }) };
+      return receipt;
+    }, tx => this.commands.customer(context, tx, false), "shared", async tx => {
+      const order = await this.core.lockOrderForUpdate(context.tenantId, orderId, tx);
+      // Core locks and reads through the ALS workspace; its public order does not
+      // expose a workspace field. Do not invent one or trust a client-supplied scope.
+      if (requireRequestWorkspaceId() !== context.workspaceId || order.id !== orderId || order.tenantId !== context.tenantId
+        || order.membershipSnapshot?.personalCustomerId !== context.customerId) throw new NotFoundException("本人当前空间原企业订单不存在");
+      await this.commands.customer(context, tx, false);
+    });
+    return this.requestOriginal(context, orderId, key);
   }
   async list(context: ClientRequestContext, corporateId?: string) {
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, Boolean(corporateId));

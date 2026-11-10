@@ -14,7 +14,19 @@ export interface EnterpriseScopePolicy {
   currency?: string;
   approvalLifetimeMinutes?: number;
 }
-export interface SaveEnterpriseScopePolicyRequest extends EnterpriseChangeRequest { policy: EnterpriseScopePolicy }
+export interface SaveEnterpriseScopePolicyRequest extends EnterpriseChangeRequest {
+  policy: EnterpriseScopePolicy;
+  /** Required for an employee policy: the reviewed active relationship's UTC revision.
+   * Omitted for company/merchant scopes; never current permission or a new grant. */
+  expectedMembershipUpdatedAt?: string;
+}
+export interface EnterpriseScopePolicySaved {
+  scopeKey: string;
+  revision: number;
+  policy: EnterpriseScopePolicy;
+  /** Original employee binding committed with the receipt, not today's authority. */
+  membershipUpdatedAt?: string;
+}
 export interface EnterpriseScopePolicyView {
   revision: number;
   merchantRevision: number;

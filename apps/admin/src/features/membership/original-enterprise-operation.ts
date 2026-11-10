@@ -15,11 +15,74 @@ const unresolved = new Map<string, Slot>();
 // Decode one path segment so encoded slashes/traversal never widen this list.
 function isCommandPath(path: string) {
   if (path.length > 600) return false;
+  if (/^\/rental\/v1\/enterprise-handoff-requests\/[a-zA-Z0-9_-]{1,191}\/review$/u.test(path)) return true;
   const segment = "[a-zA-Z0-9_%-]+";
   const registered = new RegExp(`^/membership/(?:enterprise-portal/settings|corporate/${segment}/enterprise-portal|enterprise-workflows/(?:invite-policy|applications/${segment}/decision|management-requests/${segment}/decision|corporates/${segment}/policy))$`, "u");
   if (!registered.test(path)) return false;
   try { return path.split("/").every(part => !/[/.\\\\?#]/u.test(decodeURIComponent(part))); }
   catch { return false; }
+}
+function merchantPolicyTarget(path: string) {
+  const match = /^\/membership\/enterprise-workflows\/corporates\/([a-zA-Z0-9_%-]+)\/policy$/u.exec(path);
+  if (!match) return undefined;
+  const id = decodeURIComponent(match[1]);
+  if (!/^[a-zA-Z0-9_-]{1,191}$/u.test(id)) throw new Error("原商户政策对象不可读取，保留原引用");
+  return id;
+}
+function merchantPolicyResultMatches(value: unknown, corporateId: string, originalRead = false) {
+  const row = value as { corporateCustomerId?: unknown; scopeKey?: unknown; revision?: unknown } | null;
+  return row && !Array.isArray(row) && row.scopeKey === "merchant"
+    && (originalRead ? row.corporateCustomerId === corporateId : row.corporateCustomerId === undefined || row.corporateCustomerId === corporateId)
+    && typeof row.revision === "number" && Number.isSafeInteger(row.revision) && row.revision >= 1;
+}
+function merchantManagementTarget(path: string) {
+  const match = /^\/membership\/enterprise-workflows\/management-requests\/([a-zA-Z0-9_%-]+)\/decision$/u.exec(path);
+  if (!match) return undefined;
+  const id = decodeURIComponent(match[1]);
+  if (!/^[a-zA-Z0-9_-]{1,191}$/u.test(id)) throw new Error("原商户审核申请无法精确核对，保留原引用");
+  return id;
+}
+function merchantManagementResultMatches(value: unknown, id: string, originalRead = false) {
+  const row = value as { id?: unknown; state?: unknown; revision?: unknown; effect?: unknown; corporateCustomerId?: unknown; requestType?: unknown } | null;
+  return row && !Array.isArray(row) && row.id === id && (row.state === "approved" || row.state === "rejected" || row.state === "supplement_required")
+    && typeof row.revision === "number" && Number.isSafeInteger(row.revision) && row.revision >= 2 && row.effect === "review_only_no_business_change"
+    && (!originalRead || typeof row.corporateCustomerId === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(row.corporateCustomerId)
+      && (row.requestType === "profile_change" || row.requestType === "credit_change" || row.requestType === "scope_change"));
+}
+function merchantApplicationTarget(path: string) {
+  const match = /^\/membership\/enterprise-workflows\/applications\/([a-zA-Z0-9_%-]+)\/decision$/u.exec(path);
+  if (!match) return undefined;
+  const id = decodeURIComponent(match[1]);
+  if (!/^[a-zA-Z0-9_-]{1,191}$/u.test(id)) throw new Error("原企业审核申请无法精确核对，保留原引用");
+  return id;
+}
+function merchantApplicationResultMatches(value: unknown, id: string) {
+  const row = value as { id?: unknown; state?: unknown; revision?: unknown; corporateCustomerId?: unknown } | null;
+  return row && !Array.isArray(row) && Object.keys(row).length === 4 && row.id === id
+    && (row.state === "approved" || row.state === "rejected" || row.state === "supplement_required")
+    && typeof row.revision === "number" && Number.isSafeInteger(row.revision) && row.revision >= 2
+    && (row.corporateCustomerId === null || typeof row.corporateCustomerId === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(row.corporateCustomerId))
+    && (row.state !== "approved" || row.corporateCustomerId !== null);
+}
+function merchantDecisionInputMatches(value: unknown, body: string) {
+  const row = value as { state?: unknown; revision?: unknown } | null;
+  let input: { expectedRevision?: unknown; decision?: unknown };
+  try { input = JSON.parse(body); } catch { return false; }
+  return row && input && !Array.isArray(input) && typeof input.expectedRevision === "number" && Number.isSafeInteger(input.expectedRevision) && input.expectedRevision >= 1
+    && row.revision === input.expectedRevision + 1 && row.state === (input.decision === "approve" ? "approved" : input.decision === "reject" ? "rejected" : input.decision === "supplement" ? "supplement_required" : undefined);
+}
+function merchantHandoffTarget(path: string) {
+  const match = /^\/rental\/v1\/enterprise-handoff-requests\/([a-zA-Z0-9_-]{1,191})\/review$/u.exec(path);
+  if (!match) return undefined;
+  const id = decodeURIComponent(match[1]);
+  if (!/^[a-zA-Z0-9_-]{1,191}$/u.test(id)) throw new Error("原交接处理引用不可核对，保留原键");
+  return id;
+}
+function merchantHandoffResultMatches(value: unknown, id: string, body?: string) {
+  const row = value as { id?: unknown; orderId?: unknown; state?: unknown; revision?: unknown; effect?: unknown } | null;
+  if (!row || Array.isArray(row) || Object.keys(row).length !== 5 || row.id !== id || typeof row.orderId !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(row.orderId) || row.state !== "reviewed" || row.revision !== 2 || row.effect !== "request_only_no_business_change") return false;
+  if (!body) return true;
+  try { const input = JSON.parse(body); return input.expectedRevision === 1 && input.confirm === true; } catch { return false; }
 }
 function readReference(key: string): Pending | undefined {
   const raw = localStorage.getItem(key);
@@ -78,6 +141,15 @@ export function useOriginalEnterpriseOperation(scope = "enterprise-applications"
     if (!mounted.current || baseIdentity !== enterpriseOperatorIdentity() || latest.current !== identity
       || !useAuthStore.getState().sessionVerified || !useAuthStore.getState().token) throw new Error("身份或权限已变化，原请求已隔离，不能在新身份继续操作");
   };
+  const assertApplicationReviewPermission = () => {
+    assertCurrent(); const current = useAuthStore.getState();
+    if (!current.hasTenantMembershipPermission("rental-os:corporate:manage") || !current.hasTenantMembershipPermission("rental-os:corporate:employee-manage")) throw new Error("原企业审核读取须当前商户和员工管理权");
+  };
+  const assertHandoffPermission = (write = false) => {
+    assertCurrent(); const current = useAuthStore.getState();
+    if (!current.currentWorkspaceId || !current.hasPermission("rental-os:corporate:manage") || !current.hasPermission("rental-os:order:view")
+      || write && !current.hasPermission("rental-os:order:operate") || !current.user?.isPlatformAdmin && current.user?.dataScope !== "all") throw new Error("交接核对须当前空间订单范围与对应商户权限");
+  };
   const publish = () => { if (mounted.current && baseIdentity === enterpriseOperatorIdentity() && latest.current === identity) render(n => n + 1); };
   const report = (error?: unknown) => {
     if (mounted.current && baseIdentity === enterpriseOperatorIdentity() && latest.current === identity) setFailure(error === undefined ? undefined : { identity, message: errorMessage(error) });
@@ -101,7 +173,8 @@ export function useOriginalEnterpriseOperation(scope = "enterprise-applications"
   const finish = () => { forgetReference(storageKey); slot.pending = undefined; };
   const run = async <T,>(prepare: () => Command | Promise<Command>, afterCommit: (value: T) => Promise<void>, onRevisionConflict?: () => Promise<void>) => {
     assertCurrent();
-    if (!auth.hasTenantMembershipPermission("rental-os:corporate:manage")) throw new Error("需要当前商户授权");
+    if (scope === "enterprise-rental-handoff") assertHandoffPermission(true);
+    else if (!auth.hasTenantMembershipPermission("rental-os:corporate:manage")) throw new Error("需要当前商户授权");
     const saved = readReference(storageKey);
     if (saved && !slot.pending) { slot.pending = saved; unresolved.set(identity, slot); }
     if (storageError) throw new Error(storageError);
@@ -116,9 +189,16 @@ export function useOriginalEnterpriseOperation(scope = "enterprise-applications"
       if (latestReference) { slot.pending = latestReference; publish(); throw new Error("请先核对原操作；不能重新发送业务写入"); }
       const command = await prepare(); assertCurrent();
       if (!isCommandPath(command.path)) throw new Error("商户命令路径未登记，未发送新命令");
+      const policyCorporateId = merchantPolicyTarget(command.path), managementRequestId = merchantManagementTarget(command.path), applicationRequestId = merchantApplicationTarget(command.path), handoffId = merchantHandoffTarget(command.path);
+      if (Boolean(handoffId) !== (scope === "enterprise-rental-handoff")) throw new Error("交接命令路径与原scope不匹配，未创建原键");
+      if (handoffId) assertHandoffPermission(true);
+      if ((managementRequestId || applicationRequestId || handoffId) && command.method !== "post") throw new Error("原商户审核只支持登记 POST，未发送新命令");
+      if (applicationRequestId) assertApplicationReviewPermission();
+      if (policyCorporateId && command.method !== "put") throw new Error("商户政策只支持登记 PUT，未发送新命令");
       const pending: Pending = { key: crypto.randomUUID(), path: command.path, body: JSON.stringify(command.input), state: "unknown" };
       rememberReference(storageKey, pending);
       slot.pending = pending; publish();
+      const sameOriginalReference = () => { const current = readReference(storageKey); return current && current.key === pending.key && current.path === pending.path; };
       let value: T;
       try {
         assertCurrent();
@@ -126,23 +206,36 @@ export function useOriginalEnterpriseOperation(scope = "enterprise-applications"
           data: { ...JSON.parse(pending.body), operationKey: pending.key }, _authRetry: true,
           signal: AbortSignal.any([currentSessionSignal(), controller.current.signal]) };
         const response = await http.request<ApiResult<T>>(config);
-        pending.state = "committed"; value = response.data.data;
+        value = response.data.data;
+        if (applicationRequestId) {
+          assertApplicationReviewPermission();
+          if (!merchantApplicationResultMatches(value, applicationRequestId) || !merchantDecisionInputMatches(value, pending.body)) throw new Error("原企业审核结果缺少精确申请、决策或修订，保留原引用");
+        }
+        if (policyCorporateId && !merchantPolicyResultMatches(value, policyCorporateId)) throw new Error("原商户政策结果缺少 scope 或修订，保留原引用");
+        if (managementRequestId && (!merchantManagementResultMatches(value, managementRequestId) || !merchantDecisionInputMatches(value, pending.body))) throw new Error("原商户审核结果缺少精确申请、决策或修订，保留原引用");
+        if (handoffId && !merchantHandoffResultMatches(value, handoffId, pending.body)) throw new Error("原交接处理结果不可核对，保留原键");
+        pending.state = "committed";
       } catch (error) {
         if (isWorkflowRevisionConflict(error)) {
-          assertCurrent(); finish();
+          assertCurrent();
+          if ((policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原商户政策引用已变化，不因冲突清除其他请求");
+          finish();
           if (onRevisionConflict) { await onRevisionConflict(); assertCurrent(); }
         }
         throw error;
       }
-      assertCurrent(); rememberReference(storageKey, pending); publish();
-      try { await afterCommit(value); assertCurrent(); }
+      assertCurrent();
+      if ((policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原商户政策引用已变化，不能覆盖其他请求");
+      rememberReference(storageKey, pending); publish();
+      try { await afterCommit(value); assertCurrent(); if (applicationRequestId) assertApplicationReviewPermission(); }
       catch (error) { assertCurrent(); throw new Error(`已提交，后续读取失败；只可刷新已提交结果：${errorMessage(error)}`); }
+      if ((policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原商户政策引用已变化，不能清除其他请求");
       finish(); report(); return value;
       });
     } catch (error) { report(error); throw error; }
     finally { slot.busy = false; if (!slot.pending) unresolved.delete(identity); publish(); }
   };
-  const recover = async (afterCommit: (path: string) => Promise<void>) => {
+  const recover = async (afterCommit: (path: string, original?: EnterpriseOperationResult) => Promise<void>) => {
     assertCurrent();
     const active = unresolved.get(identity);
     if (!active?.pending) return;
@@ -154,16 +247,37 @@ export function useOriginalEnterpriseOperation(scope = "enterprise-applications"
       assertCurrent();
       const pending = active.pending;
       if (!pending) return;
+      const policyCorporateId = merchantPolicyTarget(pending.path), managementRequestId = merchantManagementTarget(pending.path), applicationRequestId = merchantApplicationTarget(pending.path), handoffId = merchantHandoffTarget(pending.path);
+      if (Boolean(handoffId) !== (scope === "enterprise-rental-handoff")) throw new Error("原交接路径与scope不匹配，保留原键");
+      if (handoffId) assertHandoffPermission();
+      if (applicationRequestId) assertApplicationReviewPermission();
+      if (managementRequestId && !useAuthStore.getState().hasTenantMembershipPermission("rental-os:corporate:manage")) throw new Error("原审核读取须当前商户管理权");
+      const sameOriginalReference = () => { const current = readReference(storageKey); return current && current.key === pending.key && current.path === pending.path; };
       const saved = readReference(storageKey);
-      if (saved && saved.key !== pending.key) throw new Error("原操作引用已变化，不能覆盖当前请求");
-      if (pending.state !== "committed" || !pending.body) {
-        const receipt = await read<EnterpriseOperationResult>(`${receiptPath}/${encodeURIComponent(pending.key)}`);
+      if (saved && saved.key !== pending.key || (policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原操作引用已变化，不能覆盖当前请求");
+      let receipt: EnterpriseOperationResult | undefined;
+      if (pending.state !== "committed" || !pending.body || policyCorporateId || managementRequestId || applicationRequestId || handoffId) {
+        // Local committed and an in-memory input are not proof of this original application decision.
+        const originalPath = handoffId ? `/rental/v1/enterprise-handoff-requests/${encodeURIComponent(handoffId)}/review-operations/${encodeURIComponent(pending.key)}` : applicationRequestId ? `/membership/enterprise-workflows/applications/${encodeURIComponent(applicationRequestId)}/decision-operations/${encodeURIComponent(pending.key)}` : managementRequestId ? `/membership/enterprise-workflows/management-requests/${encodeURIComponent(managementRequestId)}/decision-operations/${encodeURIComponent(pending.key)}` : policyCorporateId ? `/membership/enterprise-workflows/corporates/${encodeURIComponent(policyCorporateId)}/policy/save-operations/${encodeURIComponent(pending.key)}` : `${receiptPath}/${encodeURIComponent(pending.key)}`;
+        receipt = await read<EnterpriseOperationResult>(originalPath);
+        if (applicationRequestId) {
+          assertApplicationReviewPermission();
+          if (!receipt || !merchantApplicationResultMatches(receipt.result, applicationRequestId) || pending.body && !merchantDecisionInputMatches(receipt.result, pending.body)) throw new Error("原企业审核收据缺少精确绑定，保留原引用");
+        }
+        if (handoffId) { assertHandoffPermission(); if (!merchantHandoffResultMatches(receipt?.result, handoffId, pending.body)) throw new Error("原交接处理收据不可核对，保留原键"); }
         if (receipt.state !== "committed") throw new Error("尚未读到原收据，不代表未写入；请保留原请求，不能重发");
+        if (policyCorporateId && !merchantPolicyResultMatches(receipt.result, policyCorporateId, true)) throw new Error("原商户政策收据缺少精确企业、scope 或修订，保留原引用");
+        if (managementRequestId && (!merchantManagementResultMatches(receipt.result, managementRequestId, true) || pending.body && !merchantDecisionInputMatches(receipt.result, pending.body))) throw new Error("原商户审核收据缺少精确绑定，保留原引用");
+        if (managementRequestId && receipt.result?.requestType === "credit_change" && !useAuthStore.getState().hasTenantMembershipPermission("rental-os:finance:manage")) throw new Error("原授信审核读取须当前财务管理权");
+        if ((policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原商户政策引用已变化，不能覆盖其他请求");
         pending.state = "committed"; publish();
       }
       rememberReference(storageKey, pending);
-      await afterCommit(pending.path); assertCurrent();
+      await afterCommit(pending.path, receipt); assertCurrent();
+      if (applicationRequestId) assertApplicationReviewPermission();
+      if ((policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原商户政策引用已变化，不能清除其他请求");
       forgetReference(storageKey); active.pending = undefined; unresolved.delete(identity); report();
+      return receipt;
       });
     } catch (error) {
       const failure = active.pending?.state === "committed" ? new Error(`已提交，后续读取失败；只可刷新已提交结果：${errorMessage(error)}`) : error;

@@ -1,7 +1,7 @@
 /** Minimal original-order expense consumer. No payment/stock execution is inferred
  * from approval. Durable opaque references coordinate dispatch across bundles. */
 import { useEffect, useRef, useState } from 'react';
-import { formatRentalMoney, type EnterpriseExtensionApprovalView, type EnterpriseExtensionEligibility, type EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import { enterpriseExtensionRequestMatches, enterpriseExtensionRequestClosureMatches, formatRentalMoney, type EnterpriseExtensionApprovalView, type EnterpriseExtensionEligibility, type EnterpriseExtensionOriginalResult } from '@rental-os/shared';
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../data/authClient';
 type Pending = { key: string; orderId: string; approvalId?: string; closureKey?: string; kind: 'request' | 'submit' };
 export function EnterpriseExtensionApproval({ orderId, identity, english }: { orderId: string; identity: string; english: boolean }) {
@@ -11,6 +11,7 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
   const [selected, setSelected] = useState(''), [newEndAt, setNewEndAt] = useState(''), [reason, setReason] = useState(''), [confirmed, setConfirmed] = useState(false);
   const [closureReason, setClosureReason] = useState(''), [closureConfirmed, setClosureConfirmed] = useState(false);
   const [pending, setPending] = useState<Pending>(), [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [original, setOriginal] = useState<EnterpriseExtensionOriginalResult>();
+  const [requestClosed, setRequestClosed] = useState(false);
   const key = `rental-os:enterprise-extension:${JSON.stringify([host?.operationScope, orderId])}`;
   const current = () => { if (!mounted.current || owner.current !== viewOwner || !host?.current()) throw new Error('原客户或空间已变化，不能继续原续租 / Identity changed'); };
   const readPending = (): Pending | undefined => {
@@ -18,20 +19,20 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
     const value = JSON.parse(raw);
     if (!value || typeof value !== 'object' || Object.keys(value).some(key => !['key', 'orderId', 'approvalId', 'closureKey', 'kind'].includes(key))
       || typeof value.key !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.key) || value.orderId !== orderId || !['request', 'submit'].includes(value.kind)
-      || value.closureKey !== undefined && (value.kind !== 'submit' || typeof value.closureKey !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.closureKey))
+      || value.closureKey !== undefined && (value.closureKey === value.key || typeof value.closureKey !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.closureKey))
       || value.kind === 'submit' && typeof value.approvalId !== 'string'
       || value.approvalId !== undefined && (typeof value.approvalId !== 'string' || !value.approvalId || value.approvalId.length > 191)) throw new Error('原续租引用不可核对，不能重发');
     return value;
   };
   const remember = (value: Pending) => { current(); const raw = JSON.stringify(value); localStorage.setItem(key, raw); if (localStorage.getItem(key) !== raw) throw new Error('原续租引用未可靠保存，未发送'); setPending(value); };
-  const clear = (value: Pending) => { current(); if (readPending()?.key !== value.key) throw new Error('原续租引用已变化，不能覆盖另一请求'); localStorage.removeItem(key); if (localStorage.getItem(key) !== null) throw new Error('原结果已提交，引用尚未清除；只能回读'); setPending(undefined); };
+  const clear = (value: Pending) => { current(); if (JSON.stringify(readPending()) !== JSON.stringify(value)) throw new Error('原续租引用已变化，不能覆盖另一请求'); localStorage.removeItem(key); if (localStorage.getItem(key) !== null) throw new Error('原结果已提交，引用尚未清除；只能回读'); setPending(undefined); };
   const refresh = async () => {
     const [policy, approvals] = await Promise.all([sessionApi.enterpriseExtensionEligibility(orderId), sessionApi.enterpriseExtensionApprovals()]); current();
     if (policy.orderId !== orderId) throw new Error('原订单准入引用不匹配');
     setEligibility(policy); setRows(approvals.filter(row => row.orderId === orderId));
   };
   useEffect(() => {
-    mounted.current = true; setReady(false); setRows([]); setEligibility(undefined); setConfirmed(false); setOriginal(undefined); setSelected(''); setReason(''); setNewEndAt(''); setError(''); setPending(undefined); setBusy(false); setClosureConfirmed(false); setClosureReason('');
+    mounted.current = true; setRequestClosed(false); setReady(false); setRows([]); setEligibility(undefined); setConfirmed(false); setOriginal(undefined); setSelected(''); setReason(''); setNewEndAt(''); setError(''); setPending(undefined); setBusy(false); setClosureConfirmed(false); setClosureReason('');
     try { current(); setPending(readPending()); setReady(true); void refresh().catch(e => { if (host?.current() && mounted.current && owner.current === viewOwner) setError(e.message); }); }
     catch (e) { setError(e instanceof Error ? e.message : '原续租引用不可用'); }
     const unsubscribe = host ? subscribeCustomerSession(host.tenantCode, () => { if (!host.current() && mounted.current) { setReady(false); setRows([]); setOriginal(undefined); setEligibility(undefined); setConfirmed(false); setReason(''); setNewEndAt(''); setSelected(''); setClosureConfirmed(false); setClosureReason(''); } }) : () => {};
@@ -51,7 +52,15 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
     current();
     if (value.kind === 'request') {
       const recovered = await sessionApi.enterpriseExtensionRequestOriginal(orderId, value.key); current();
-      if (recovered.state !== 'observed' || recovered.retryable !== false || !recovered.approval.id || recovered.approval.orderId !== orderId || recovered.approval.applicantCustomerId !== host?.customerId) throw new Error('原续租申请尚待精确核对，不能重发');
+      if (!host || !enterpriseExtensionRequestMatches(recovered, orderId, value.key, host.customerId, host.workspaceCode)) throw new Error('原续租申请尚待精确核对，不能重发');
+      if (value.closureKey) {
+        const closed = await sessionApi.enterpriseOperation(value.closureKey); current();
+        if (closed.state !== 'committed' || !enterpriseExtensionRequestClosureMatches(recovered, closed.result, value.key, value.closureKey)) throw new Error('原申请结束收据尚待核对，不能重发');
+      }
+      if (recovered.state === 'closed') {
+        clear(value); setRequestClosed(true); setOriginal(undefined); setSelected(''); setNewEndAt(''); setReason(''); setConfirmed(false); setClosureConfirmed(false); setClosureReason(''); await refresh(); return;
+      }
+      if (recovered.state !== 'observed') throw new Error('原申请仍待核对');
       await readResult(recovered.approval.id); clear(value); await refresh(); setSelected(recovered.approval.id); setConfirmed(false); return;
     }
     const receipt = await sessionApi.enterpriseOperation(value.key); current();
@@ -98,11 +107,14 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
   });
   const closeOriginal = () => act(async () => {
     const value = readPending();
-    if (!value || value.kind !== 'submit' || value.closureKey || !value.approvalId || !closureConfirmed || !closureReason.trim() || row?.id !== value.approvalId) throw new Error('须本人选择原批准并明确确认受控结束');
+    if (!value || value.closureKey || !closureConfirmed || !closureReason.trim() || value.kind === 'submit' && (!value.approvalId || row?.id !== value.approvalId)) throw new Error('须本人核对原引用并明确确认受控结束');
     const reference: Pending = { ...value, closureKey: crypto.randomUUID() }; remember(reference);
-    try { await sessionApi.enterpriseCommand(`extension-approvals/${encodeURIComponent(value.approvalId)}/close-execution`, { operationKey: reference.closureKey, originalOperationKey: value.key, expectedRevision: row.revision, reason: closureReason, confirm: true }); }
+    try {
+      if (value.kind === 'request') await sessionApi.closeEnterpriseExtensionRequest(orderId, value.key, { operationKey: reference.closureKey!, expectedRevision: 0, reason: closureReason, confirm: true });
+      else await sessionApi.enterpriseCommand(`extension-approvals/${encodeURIComponent(value.approvalId!)}/close-execution`, { operationKey: reference.closureKey, originalOperationKey: value.key, expectedRevision: row!.revision, reason: closureReason, confirm: true });
+    }
     catch (error) {
-      if ((error as { status?: number; code?: string }).status === 409 && (error as { code?: string }).code === 'enterprise_revision_conflict') { remember(value); await refresh(); }
+      if (value.kind === 'submit' && (error as { status?: number; code?: string }).status === 409 && (error as { code?: string }).code === 'enterprise_revision_conflict') { remember(value); await refresh(); }
       throw error;
     }
     current(); await recoverOriginal(reference);
@@ -110,7 +122,7 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
   const read = () => act(async () => { const value = readPending(); if (value) await recoverOriginal(value); else { await refresh(); if (row) await readResult(row.id); } });
   const money = (value: number, currency: string) => Number.isFinite(value) && currency ? `${formatRentalMoney(value, currency)} ${currency}` : english ? 'Not recorded' : '原依据缺失';
   const blocked = !ready || busy || Boolean(pending);
-  if (eligibility && !eligibility.approvalRequired && !rows.length && !pending) return null;
+  if (eligibility && !eligibility.approvalRequired && !rows.length && !pending && !requestClosed) return null;
   return <section className="booking-card">
     <h2>{english ? 'Enterprise extension approval' : '企业续租批准'}</h2>
     <p className="mock-note">{english ? 'Approval does not extend the rental or collect payment. Submit only after reviewing the original expense. Pending payment is not an effective extension.' : '批准不延长租期或收款。核对原费用后由本人提交；待补款不等于已延期。'}</p>
@@ -126,11 +138,12 @@ export function EnterpriseExtensionApproval({ orderId, identity, english }: { or
       {row.state === 'approved' && <><label className="login-agree"><input type="checkbox" checked={confirmed} disabled={blocked} onChange={event => setConfirmed(event.target.checked)} /><span>{english ? 'I reviewed this original extension and expense, and explicitly submit' : '我已核对本条原续租与费用，明确提交'}</span></label><button type="button" className="button button-dark" disabled={blocked || !confirmed || !reason.trim()} onClick={() => void command(true).catch(() => {})}>{english ? 'Explicitly submit this extension' : '核对后提交本条续租'}</button></>}
     </>}
     <button type="button" className="button button-outline" disabled={busy || !ready} onClick={() => void read().catch(() => {})}>{english ? 'Read original request and result' : '核对原续租申请与结果'}</button>
-    {pending?.kind === 'submit' && !pending.closureKey && row?.id === pending.approvalId && <>
+    {pending && !pending.closureKey && (pending.kind === 'request' || row?.id === pending.approvalId) && <>
       <label className="booking-field">{english ? 'Reason for controlled closure' : '受控结束原因'}<textarea value={closureReason} maxLength={500} disabled={busy} onChange={event => setClosureReason(event.target.value)} /></label>
-      <label className="login-agree"><input type="checkbox" checked={closureConfirmed} disabled={busy} onChange={event => setClosureConfirmed(event.target.checked)} /><span>{english ? 'Seal this original submission; do not cancel or retry an existing extension' : '封闭本条原提交，不取消已成立续租，也不重试执行'}</span></label>
+      <label className="login-agree"><input type="checkbox" checked={closureConfirmed} disabled={busy} onChange={event => setClosureConfirmed(event.target.checked)} /><span>{pending.kind === 'request' ? english ? 'Seal this original request key; if a request exists, recover it without withdrawing or retrying' : '封闭本条原申请键；若申请已成立只恢复，不撤回或重发' : english ? 'Seal this original submission; do not cancel or retry an existing extension' : '封闭本条原提交，不取消已成立续租，也不重试执行'}</span></label>
       <button type="button" className="button button-outline" disabled={busy || !closureConfirmed || !closureReason.trim()} onClick={() => void closeOriginal().catch(() => {})}>{english ? 'Request controlled closure' : '请求受控结束原提交'}</button>
     </>}
+    {requestClosed && <p className="mock-note">{english ? 'Original request key sealed. No existing request or extension was cancelled; any new request needs a new preview and explicit action.' : '原申请键已封闭，未取消任何已成立申请或续租；新申请须重新试算并明确发起。'}</p>}
     {original && <p className="mock-note">{original.original.state === 'observed' ? original.original.extensionState === 'pending_payment' ? english ? 'Awaiting payment; original return time unchanged' : '待补款，原归还时间不变' : `${original.original.extensionState}: ${original.original.extensionId}` : original.original.state === 'closed' ? english ? 'Original submission sealed; any new request needs a new preview and approval' : '原提交已封闭；新申请须重新试算与批准' : english ? 'Not submitted to Core' : '尚未提交至Core'}</p>}
     {error && <p role="alert" className="form-error">{error}</p>}
   </section>;

@@ -10,6 +10,7 @@
     "pages/pay/index",
     "pages/order/index",
     "pages/extend/index",
+    "pages/exchange/index",
     "pages/login/index",
     "pages/register/index",
     "pages/closure/index",

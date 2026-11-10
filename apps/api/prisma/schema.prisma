@@ -235,6 +235,7 @@ model Tenant {
   customerContacts                  CustomerContact[]
   customerAuthorizedAgents          CustomerAuthorizedAgent[]
   customerStatusHistory             CustomerStatusHistoryEntry[]
+  enterpriseCorporateStatusRecipients EnterpriseCorporateStatusRecipient[]
   customerRiskRecords               CustomerRiskRecord[]
   customerQualificationRefs         CustomerQualificationRef[]
   customerQualificationRevisions    CustomerQualificationRevision[]
@@ -251,6 +252,7 @@ model Tenant {
   enterpriseCorporatePortals         EnterpriseCorporatePortal[]
   enterprisePortalOperations         EnterprisePortalOperation[]
   enterpriseWorkflowRequests         EnterpriseWorkflowRequest[]
+  enterpriseRentalHandoffs           EnterpriseRentalHandoffRequest[]
   enterpriseInvitePolicy             EnterpriseInvitePolicy?
   enterpriseInvites                  EnterpriseInvite[]
   enterpriseScopePolicies            EnterpriseScopePolicy[]
@@ -331,6 +333,7 @@ model BusinessWorkspace {
   clientAuthSessions                ClientAuthSession[]
   enterpriseBookingApprovals         EnterpriseBookingApproval[]
   enterpriseExtensionApprovals       EnterpriseExtensionApproval[]
+  enterpriseRentalHandoffs           EnterpriseRentalHandoffRequest[]
   clientChannelPublications         ClientChannelWorkspace[]
   clientOrderDeliverySnapshots      ClientOrderDeliverySnapshot[]
   coreStateSnapshot                 RentalCoreStateSnapshot?
@@ -2293,6 +2296,8 @@ model CustomerProfile {
   enterpriseExtensionCompanies   EnterpriseExtensionApproval[] @relation("EnterpriseExtensionCompany")
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
+  corporateStatusRecipientsAsCompany EnterpriseCorporateStatusRecipient[] @relation("CorporateStatusRecipientCompany")
+  corporateStatusMessagesReceived EnterpriseCorporateStatusRecipient[] @relation("CorporateStatusRecipientPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
   identityVerifications          CustomerIdentityVerification[]
 
@@ -2957,6 +2962,9 @@ model CustomerStatusHistoryEntry {
   at          DateTime
   createdAt   DateTime        @default(now())
 
+  enterpriseRecipients EnterpriseCorporateStatusRecipient[]
+
+  @@unique([tenantId, id, customerId], map: "customer_status_history_recipient_scope_key")
   @@index([tenantId, customerId, at], map: "customer_status_history_customer_at_idx")
   @@index([tenantId, workspaceId, at], map: "customer_status_history_ws_at_idx")
   @@map("customer_status_history")
@@ -3162,11 +3170,34 @@ model CustomerCorporateMembership {
   updatedAt           DateTime          @updatedAt
 
   portalGrants        EnterprisePortalGrant[]
+  statusMessageRecipients EnterpriseCorporateStatusRecipient[]
 
+  @@unique([tenantId, corporateCustomerId, id, personalCustomerId], map: "corporate_memberships_status_recipient_key")
   @@unique([tenantId, corporateCustomerId, id], map: "corporate_memberships_portal_scope_key")
   @@unique([tenantId, corporateCustomerId, personalCustomerId], map: "customer_corporate_memberships_tenant_company_person_key")
   @@index([tenantId, personalCustomerId, status], map: "customer_corporate_memberships_person_scope_status_idx")
   @@map("customer_corporate_memberships")
+}
+
+/// New original corporate membership-state recipients only; no old-history backfill,
+/// current authority grant, notification sending or read-state persistence.
+model EnterpriseCorporateStatusRecipient {
+  tenantId String
+  historyId String
+  corporateCustomerId String
+  recipientCustomerId String
+  membershipId String
+  membershipUpdatedAt DateTime @db.DateTime(3)
+  capturedAt DateTime @default(now()) @db.DateTime(3)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "corporate_status_recipient_tenant_fk")
+  corporateCustomer CustomerProfile @relation("CorporateStatusRecipientCompany", fields: [tenantId, corporateCustomerId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "corporate_status_recipient_company_fk")
+  recipient CustomerProfile @relation("CorporateStatusRecipientPersonal", fields: [tenantId, recipientCustomerId], references: [tenantId, id], onDelete: Cascade, onUpdate: Restrict, map: "corporate_status_recipient_person_fk")
+  history CustomerStatusHistoryEntry @relation(fields: [tenantId, historyId, corporateCustomerId], references: [tenantId, id, customerId], onDelete: Cascade, onUpdate: Restrict, map: "corporate_status_recipient_history_fk")
+  membership CustomerCorporateMembership @relation(fields: [tenantId, corporateCustomerId, membershipId, recipientCustomerId], references: [tenantId, corporateCustomerId, id, personalCustomerId], onDelete: Cascade, onUpdate: Restrict, map: "corporate_status_recipient_relation_fk")
+
+  @@id([tenantId, historyId, recipientCustomerId])
+  @@index([tenantId, recipientCustomerId, capturedAt], map: "corporate_status_recipient_person_at_idx")
+  @@map("enterprise_corporate_status_recipients")
 }
 
 /// Enterprise portal activation is independent of website publishing and rental authority.
@@ -3348,6 +3379,36 @@ model EnterpriseExtensionApproval {
   @@index([tenantId, corporateCustomerId, workspaceId, state], map: "enterprise_extension_company")
   @@unique([tenantId, workspaceId, extensionId], map: "enterprise_extension_consumed")
   @@map("enterprise_extension_approvals")
+}
+
+/// Dedicated employee rental handoff request; stores original order material only.
+/// Merchant handling is separate from Core fulfillment, subjects or funding changes.
+model EnterpriseRentalHandoffRequest {
+  tenantId              String
+  workspaceId           String
+  id                    String
+  tenant                Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict)
+  order                 RentalOrder @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Restrict)
+  orderId               String
+  applicantCustomerId   String
+  corporateCustomerId   String
+  corporateMembershipId String
+  state                 String @default("pending") @db.VarChar(40)
+  revision              Int @default(1)
+  material              Json
+  reason                String @db.VarChar(500)
+  pendingMarker         String? @db.Char(64)
+  merchantReviewReason  String? @db.VarChar(500)
+  reviewedBy            String? @db.VarChar(191)
+  reviewedAt            DateTime? @db.DateTime(3)
+  createdAt             DateTime @default(now()) @db.DateTime(3)
+  updatedAt             DateTime @default(now()) @updatedAt @db.DateTime(3)
+
+  @@id([tenantId, workspaceId, id])
+  @@unique([tenantId, workspaceId, pendingMarker], map: "enterprise_handoff_pending_key")
+  @@index([tenantId, workspaceId, applicantCustomerId, createdAt], map: "enterprise_handoff_own_idx")
+  @@map("enterprise_rental_handoff_requests")
 }
 
 /// Durable original result and audit: replay never restores permissions revoked later.
@@ -4599,6 +4660,7 @@ model RentalOrder {
   paymentRefunds                RentalPaymentRefund[]
   extensions                    RentalOrderExtension[]
   enterpriseExtensionApprovals   EnterpriseExtensionApproval[]
+  enterpriseRentalHandoffs       EnterpriseRentalHandoffRequest[]
   changes                       RentalOrderChange[]
   documentSnapshots             RentalOrderDocumentSnapshot[]
   auditLogs                     OperationLog[]

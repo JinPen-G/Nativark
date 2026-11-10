@@ -101,6 +101,32 @@
       </view>
     </view>
 
+    <view wx:if="{{exchangeLoading || exchangeLoadError || exchangeRequests.length || exchangePending}}" class="section section--tight">
+      <view class="card">
+        <view class="subtitle">本单企业换货费用申请</view>
+        <view class="muted small mt-8">批准和本人费用确认不预占库存、不确认商户检查、不收款，也不执行换货。</view>
+        <view wx:if="{{exchangeLoading}}" class="muted mt-8">正在读取原申请…</view>
+        <view wx:if="{{exchangeLoadError}}" class="notice notice--warning mt-8">进度暂不可读：{{exchangeLoadError}}</view>
+        <view class="cell" wx:for="{{exchangeRequests}}" wx:key="id">
+          <view class="cell__body">
+            <view class="cell__title">{{item.items}}</view>
+            <view class="mt-8"><status-tag label="{{item.stateLabel}}" tone="{{item.tone}}"></status-tag></view>
+            <view class="cell__desc">新增支出 {{item.amount}}</view>
+            <view class="cell__desc">押金差额 {{item.deposit}} · 预授权差额 {{item.preAuth}}</view>
+            <view class="cell__desc">批准有效期 {{item.expires}}</view>
+            <view class="cell__desc">用途：{{item.reason}}</view>
+            <view wx:if="{{item.confirmedAt}}" class="cell__desc">本人费用确认 {{item.confirmedAt}}</view>
+            <button wx:if="{{item.canConfirm}}" class="btn btn--small btn--secondary mt-12" disabled="{{exchangeBlocked || exchangeLoading || exchangeConfirming}}" data-id="{{item.id}}" bindtap="onOpenExchangeConsent">核对本次费用</button>
+          </view>
+        </view>
+        <button class="btn btn--outline btn--block mt-16" disabled="{{exchangeLoading || exchangeConfirming}}" hover-class="btn-hover" bindtap="onReadExchangeProgress">读取原换货进度</button>
+        <view wx:if="{{exchangePending}}" class="notice notice--warning mt-8">原费用确认结果待核对，不能重新确认或执行换货。</view>
+        <button wx:if="{{exchangePending}}" class="btn btn--outline btn--block mt-12" disabled="{{exchangeConfirming}}" bindtap="onRecoverExchangeExpense">核对原费用确认结果</button>
+        <button class="btn btn--secondary btn--block mt-12" disabled="{{exchangeConfirming}}" hover-class="btn-hover" bindtap="onExchangeRequest">申请换货费用或核对原申请</button>
+        <view class="muted small mt-8">小程序内可申请企业费用批准；小程序不传登录凭据。实物检查与换货仍由商户另行办理。</view>
+      </view>
+    </view>
+
     <view wx:if="{{feeAvailable && feeItems.length}}" class="section section--tight">
       <view class="card">
         <view class="row row--between">
@@ -140,6 +166,16 @@
         <button wx:if="{{item.code !== 'contact' && item.code !== 'guide'}}" class="btn {{item.code === 'pay' ? 'btn--primary' : item.code === 'cancel' ? 'btn--danger' : 'btn--secondary'}} ml-12" hover-class="btn-hover" data-code="{{item.code}}" bindtap="onAction">{{item.label}}</button>
       </block>
     </view>
+
+    <sheet visible="{{showExchangeConsent}}" title="核对本次换货费用" closable="{{!exchangeConfirming}}" footer="{{true}}" bind:close="onCloseExchangeConsent">
+      <view class="kv"><view class="kv__label">原商品／替换商品</view><view class="kv__value">{{exchangeConsentTarget.items}}</view></view>
+      <view class="kv"><view class="kv__label">新增支出</view><view class="kv__value">{{exchangeConsentTarget.amount}}</view></view>
+      <view class="kv"><view class="kv__label">押金／预授权差额</view><view class="kv__value">{{exchangeConsentTarget.deposit}} / {{exchangeConsentTarget.preAuth}}</view></view>
+      <view class="kv"><view class="kv__label">有效期</view><view class="kv__value">{{exchangeConsentTarget.expires}}</view></view>
+      <view class="notice notice--neutral mt-16">仅同意本次已批准费用，不确认商户检查、不收付款、不执行换货；未知结果只能按原键核对。</view>
+      <view class="input-box mt-16"><textarea value="{{exchangeConsentReason}}" maxlength="500" disabled="{{exchangeConfirming || exchangeBlocked}}" placeholder="本次费用确认原因" bindinput="onExchangeConsentReason" /></view>
+      <view slot="footer"><button class="btn btn--primary btn--block" disabled="{{exchangeConfirming || exchangeBlocked || !exchangeConsentReason}}" bindtap="onConfirmExchangeExpense">{{exchangeConfirming ? '核对中…' : '核对后确认费用'}}</button></view>
+    </sheet>
 
     <sheet visible="{{showCancel}}" title="取消订单" closable="{{!cancelSubmitting}}" footer="{{true}}" bind:close="onCloseCancel">
       <view wx:if="{{cancelLoading}}" class="muted">正在计算取消费用…</view>

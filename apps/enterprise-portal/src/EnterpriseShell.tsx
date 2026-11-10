@@ -23,13 +23,14 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
   const corporate = context.entry?.corporates.find(c => c.corporateCustomerId === context.selectedCorporateId);
   const location = useLocation(), activePage = location.pathname.slice(context.basePath.length).replace(/^\//, "") || "members";
   const menus: Array<{ path: string; zh: string; en: string; icon: ReactNode; action?: EnterprisePortalAction }> = [
-    { path: "tasks", zh: "企业待办", en: "Tasks", icon: <InboxOutlined /> }, { path: "records", zh: "本人操作", en: "My operations", icon: <HistoryOutlined /> },
+    { path: "tasks", zh: "企业待办", en: "Tasks", icon: <InboxOutlined /> }, { path: "records", zh: "操作记录", en: "Records", icon: <HistoryOutlined /> },
     { path: "profile", zh: "资料与申请", en: "Profile and requests", icon: <FileTextOutlined /> },
     { path: "members", zh: "企业成员", en: "Members", icon: <TeamOutlined />, action: "members:read" },
     { path: "applications", zh: "企业申请", en: "Applications", icon: <FormOutlined /> }, { path: "join", zh: "加入与交接", en: "Join and transfer", icon: <IdcardOutlined /> },
     { path: "invites", zh: "邀请管理", en: "Invitations", icon: <GiftOutlined />, action: "invites:manage" }, { path: "join-requests", zh: "加入审核", en: "Join requests", icon: <SafetyCertificateOutlined />, action: "members:manage" },
     { path: "policy", zh: "使用政策", en: "Rental policy", icon: <ControlOutlined />, action: "policy:manage" },
     { path: "approvals", zh: "预约审批", en: "Approvals", icon: <FileSearchOutlined /> },
+    { path: "exchange-approvals", zh: "换货审批", en: "Exchange approvals", icon: <FileSearchOutlined /> },
     { path: "extension-approvals", zh: "续租审批", en: "Extension approvals", icon: <FileSearchOutlined /> }
   ];
   const visible = menus.filter(menu => !menu.action || corporate?.actions.includes(menu.action));
