@@ -44,6 +44,7 @@ import { lockActiveCategoryBinding } from "../rental-core/category-active-write"
 import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service";
 import { EnterpriseCommandService } from "../enterprise/enterprise-command.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
+import { assertOtherEnterpriseAdministrator } from "../enterprise/enterprise-administrator-continuity";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -855,10 +856,10 @@ export class MembershipService {
       if (portals.length) {
         if (!input.reason?.trim()) throw new BadRequestException("门户成员变更必须记录原因");
         if (existing && input.expectedUpdatedAt !== existing.updatedAt.toISOString()) throw new ConflictException({ message: "成员关系已变化，请重新读取", code: "enterprise_revision_conflict" });
-        const now = new Date(), remainsAdmin = input.role === "admin" && (input.status ?? "active") === "active" && effectiveFrom <= now && !effectiveTo;
-        if (existing?.role === "admin" && existing.status === "active" && !remainsAdmin) {
-          const other = await tx.customerCorporateMembership.count({ where: { tenantId, corporateCustomerId, id: { not: existing.id }, role: "admin", status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }], personalCustomer: { is: { status: "active", account: { is: { status: "active" } }, membership: { is: { status: "active" } } } } } });
-          if (!other) throw new ConflictException("最后一名有效管理员须先完成已接受的交接");
+        // Keeping role=admin does not preserve authority: saveEnterpriseRelation advances
+        // updatedAt and this merchant entry does not rebind grants to that revision.
+        if (existing?.role === "admin" && existing.status === "active") {
+          await assertOtherEnterpriseAdministrator(tx, tenantId, corporateCustomerId, existing.id);
         }
       }
       const corporate = await tx.customerProfile.findFirst({ where: { tenantId, id: corporateCustomerId, customerType: "corporate", status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } }, select: { id: true } });

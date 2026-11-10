@@ -100,11 +100,29 @@ export class SharedCustomerRepository {
   async saveEnterpriseRelation(tenantId: string, corporateCustomerId: string, personalCustomerId: string,
     data: { role: string; status: string; department?: string | null; employeeNo?: string | null; effectiveFrom: Date; effectiveTo?: Date | null; reason: string; createdBy: string }, tx: SharedCustomerTx) {
     const { createdBy: _createdBy, ...changes } = data;
+    const where = { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId } };
+    const previous = await tx.customerCorporateMembership.findUnique({ where, select: { updatedAt: true } });
+    // The timestamp is an authority revision, not just a clock reading. A same-ms
+    // edit or clock rollback must never match an earlier grant/policy/approval again.
+    const updatedAt = new Date(Math.max(Date.now(), previous ? previous.updatedAt.getTime() + 1 : Date.now()));
     return tx.customerCorporateMembership.upsert({
-      where: { tenantId_corporateCustomerId_personalCustomerId: { tenantId, corporateCustomerId, personalCustomerId } },
+      where,
       create: { tenantId, corporateCustomerId, personalCustomerId, ...data },
-      update: { ...changes, updatedAt: new Date() }
+      update: { ...changes, updatedAt }
     });
+  }
+
+  /** Under Tenant → customer locks, invalidate migrated enterprise authority with the
+   * original status/history transaction. Restoration never rebinds grants or policies;
+   * relation identity/status and historical orders/receipts are left untouched. */
+  async invalidatePersonalEnterpriseAuthority(tenantId: string, customerId: string, tx: SharedCustomerTx): Promise<number> {
+    return tx.$executeRaw`
+      UPDATE customer_corporate_memberships m
+      JOIN customer_profiles p ON p.tenantId=m.tenantId AND p.id=m.personalCustomerId AND p.customerType='personal'
+      SET m.updatedAt=GREATEST(NOW(3),TIMESTAMPADD(MICROSECOND,1000,m.updatedAt))
+      WHERE m.tenantId=${tenantId} AND m.personalCustomerId=${customerId}
+        AND (EXISTS (SELECT 1 FROM enterprise_corporate_portals portal WHERE portal.tenantId=m.tenantId AND portal.corporateCustomerId=m.corporateCustomerId)
+          OR EXISTS (SELECT 1 FROM enterprise_scope_policies policy WHERE policy.tenantId=m.tenantId AND policy.corporateCustomerId=m.corporateCustomerId))`;
   }
 
   /** 4 位及以下不再原样返回：原样返回等于把整段值存进“脱敏”列。 */

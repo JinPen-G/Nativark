@@ -10,6 +10,7 @@ import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
 import { SharedCustomerRepository } from "../platform/shared-customer.repository";
 import { EnterpriseCommandService, enterpriseHash, enterpriseJson } from "./enterprise-command.service";
+import { assertOtherEnterpriseAdministrator } from "./enterprise-administrator-continuity";
 type Invite = { id: string; corporateCustomerId: string; status: "active" | "revoked"; revision: number; expiresAt: Date; maxUses: number; used: number; createdAt: Date };
 type Workflow = { id: string; applicantCustomerId: string; corporateCustomerId: string; kind: string; state: string; revision: number; payload: string | Record<string, unknown>; createdAt: Date; updatedAt: Date; decisionReason?: string };
 @Injectable()
@@ -233,10 +234,9 @@ export class EnterpriseMembersService {
       if (self && input.status !== "exited") throw new ForbiddenException("本人只能申请退出自己的关系");
       const effectiveTo = input.status === "exited" ? new Date() : input.effectiveTo ? new Date(input.effectiveTo) : null;
       if (effectiveTo && !Number.isFinite(effectiveTo.getTime())) throw new BadRequestException("关系有效期无效");
-      if (row.role === "admin" && (input.status !== "active" || effectiveTo !== null)) {
-        const other = await tx.customerCorporateMembership.count({ where: { tenantId: context.tenantId, corporateCustomerId: corporateId, id: { not: membershipId }, role: "admin", status: "active", effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: new Date() } }], personalCustomer: { is: { status: "active", account: { is: { status: "active" } }, membership: { is: { status: "active" } } } } } });
-        if (!other) throw new ConflictException("最后管理员须先完成已接受交接");
-      }
+      // Every relationship update invalidates its old grants, even a department edit.
+      // This entry never regrants authority, so another currently authorized admin must remain.
+      if (row.role === "admin") await assertOtherEnterpriseAdministrator(tx, context.tenantId, corporateId, membershipId);
       if (input.status === "active") {
         const personal = await tx.customerProfile.findFirst({ where: { tenantId: context.tenantId, id: row.personalCustomerId, status: "active", membership: { is: { status: "active" } }, account: { is: { status: "active" } } }, select: { id: true } });
         if (!personal) throw new ConflictException("个人会员不可恢复");
@@ -273,16 +273,7 @@ export class EnterpriseMembersService {
           account: { is: { status: "active" } }, membership: { is: { status: "active" } } } } } });
       if (!row || row.updatedAt.toISOString() !== input.expectedUpdatedAt) throw this.commands.conflict();
       if (row.role === "admin" && (input.role !== "admin" || !input.actions.includes("administrators:manage"))) {
-        const others = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT m.id FROM customer_corporate_memberships m
-          JOIN customer_profiles p ON p.tenantId=m.tenantId AND p.id=m.personalCustomerId AND p.status='active' AND p.mergedIntoCustomerId IS NULL
-          JOIN customer_accounts a ON a.tenantId=m.tenantId AND a.customerId=p.id AND a.status='active'
-          JOIN customer_memberships pm ON pm.tenantId=m.tenantId AND pm.customerId=p.id AND pm.status='active'
-          JOIN enterprise_portal_grants entry ON entry.tenantId=m.tenantId AND entry.corporateCustomerId=m.corporateCustomerId AND entry.membershipId=m.id AND entry.membershipUpdatedAt=m.updatedAt AND entry.action='portal:enter'
-          JOIN enterprise_portal_grants manage ON manage.tenantId=m.tenantId AND manage.corporateCustomerId=m.corporateCustomerId AND manage.membershipId=m.id AND manage.membershipUpdatedAt=m.updatedAt AND manage.action='administrators:manage'
-          WHERE m.tenantId=${context.tenantId} AND m.corporateCustomerId=${corporateId} AND m.id<>${membershipId} AND m.role='admin' AND m.status='active'
-            AND m.effectiveFrom<=NOW(3) AND (m.effectiveTo IS NULL OR m.effectiveTo>NOW(3)) LIMIT 1`;
-        if (!others.length) throw new ConflictException("最后受权管理员须先完成已接受交接，不能降级或撤销管理入口");
+        await assertOtherEnterpriseAdministrator(tx, context.tenantId, corporateId, membershipId);
       }
       // Relationship revision invalidates older rental policies and grants; only
       // these explicitly reviewed management actions are rebound to the new revision.
