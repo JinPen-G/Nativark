@@ -45,7 +45,7 @@ export class RentalDocumentService {
       templates,
       funding,
       terminology: options.terminology,
-      timeZone: this.core.getBusinessSettings(tenantId).calendar.timeZone,
+      timeZone: (await this.core.getBusinessSettings(tenantId)).calendar.timeZone,
       snapshotAt: new Date().toISOString()
     });
 

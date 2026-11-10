@@ -4,7 +4,6 @@ import {
   PermissionKind,
   Prisma,
   PrismaClient,
-  RentalCategoryCode,
   RoleScope,
   SystemDataScope,
   TenantStatus,
@@ -13,7 +12,7 @@ import {
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_CATEGORY_WORKSPACE_NAMES,
-  RentalCategoryCode as SharedRentalCategoryCode
+  RentalCategoryCode
 } from "@rental-os/shared";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -344,17 +343,10 @@ async function upsertTenants() {
   }
 }
 
-const categoryCodeMap: Record<SharedRentalCategoryCode, RentalCategoryCode> = {
-  [SharedRentalCategoryCode.Vehicle]: RentalCategoryCode.VEHICLE,
-  [SharedRentalCategoryCode.Camera]: RentalCategoryCode.CAMERA,
-  [SharedRentalCategoryCode.Camping]: RentalCategoryCode.CAMPING,
-  [SharedRentalCategoryCode.Construction]: RentalCategoryCode.CONSTRUCTION
-};
-
 const asJson = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
 const rentalCategories = RENTAL_CATEGORY_DEFINITIONS.map((category) => ({
-  code: categoryCodeMap[category.code],
+  code: category.code,
   name: category.name,
   description: category.description,
   supportedInventoryModes: asJson(category.supportedInventoryModes),
@@ -366,10 +358,10 @@ const rentalCategories = RENTAL_CATEGORY_DEFINITIONS.map((category) => ({
 }));
 
 const demoWorkspaces = [
-  { id: "ws_tenant_001", code: "default", name: "摄影设备租赁", categoryCode: RentalCategoryCode.CAMERA, isDefault: true },
-  { id: "ws_tenant_001_camping", code: "camping", name: "露营装备租赁", categoryCode: RentalCategoryCode.CAMPING, isDefault: false },
-  { id: "ws_tenant_001_vehicle", code: "vehicle", name: "车辆载具租赁", categoryCode: RentalCategoryCode.VEHICLE, isDefault: false },
-  { id: "ws_tenant_001_construction", code: "construction", name: "工程设备租赁", categoryCode: RentalCategoryCode.CONSTRUCTION, isDefault: false }
+  { id: "ws_tenant_001", code: "default", name: "摄影设备租赁", categoryCode: RentalCategoryCode.Camera, isDefault: true },
+  { id: "ws_tenant_001_camping", code: "camping", name: "露营装备租赁", categoryCode: RentalCategoryCode.Camping, isDefault: false },
+  { id: "ws_tenant_001_vehicle", code: "vehicle", name: "车辆载具租赁", categoryCode: RentalCategoryCode.Vehicle, isDefault: false },
+  { id: "ws_tenant_001_construction", code: "construction", name: "工程设备租赁", categoryCode: RentalCategoryCode.Construction, isDefault: false }
 ] as const;
 
 async function upsertRentalCategoriesAndProfiles() {
@@ -429,8 +421,8 @@ async function upsertRentalCategoriesAndProfiles() {
     });
   }
   for (const profile of [
-    { tenantId: "tenant_001", categoryCode: RentalCategoryCode.CAMERA },
-    { tenantId: "tenant_002", categoryCode: RentalCategoryCode.CAMPING }
+    { tenantId: "tenant_001", categoryCode: RentalCategoryCode.Camera },
+    { tenantId: "tenant_002", categoryCode: RentalCategoryCode.Camping }
   ]) {
     const category = rentalCategories.find((item) => item.code === profile.categoryCode)!;
     await prisma.tenantRentalProfile.upsert({
@@ -605,7 +597,7 @@ async function upsertRolesAndUsers() {
     if (rentalProfile) {
       const workspaceSeeds = tenant.id === "tenant_001"
         ? demoWorkspaces
-        : [{ id: `ws_${tenant.id}`, code: "default", name: RENTAL_CATEGORY_WORKSPACE_NAMES[String(rentalProfile.categoryCode).toLowerCase() as SharedRentalCategoryCode], categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
+        : [{ id: `ws_${tenant.id}`, code: "default", name: RENTAL_CATEGORY_WORKSPACE_NAMES[rentalProfile.categoryCode] ?? "租赁空间", categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
       for (const workspace of workspaceSeeds) {
         const category = await prisma.rentalCategoryDefinition.findUniqueOrThrow({
           where: { code: workspace.categoryCode }

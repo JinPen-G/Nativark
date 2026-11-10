@@ -54,6 +54,9 @@ export class PlatformSubscriptionController {
   @Get("standard-prices") standardPrices() {
     return this.subscription.getStandardPrices();
   }
+  @Get("category-labels") categoryLabels() {
+    return this.subscription.rentalCategoryLabels();
+  }
   @Patch("requests/:id") handle(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: HandleSubscriptionRequestDto) {
     return this.subscription.handleRequest(id, body, req.user.displayName);
   }

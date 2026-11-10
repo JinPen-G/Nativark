@@ -1,3 +1,4 @@
+import { rentalCategoryStorageCode } from "./category-identity";
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { usageDelta } from "./rental-usage-reading";
@@ -793,7 +794,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       tenantId: order.tenantId,
       orderNo: order.orderNo,
       assignment: order.assignment ? order.assignment as unknown as Prisma.InputJsonValue : Prisma.JsonNull,
-      categoryCode: upper<$Enums.RentalCategoryCode>(order.categoryCode),
+      categoryCode: rentalCategoryStorageCode(order.categoryCode),
       categoryVersionId: order.categoryVersionId ?? null,
       inspectionTemplateSnapshots: order.inspectionTemplateSnapshots === undefined ? Prisma.DbNull : order.inspectionTemplateSnapshots as unknown as Prisma.InputJsonValue,
       status: upper<$Enums.RentalOrderV1Status>(order.status),
@@ -828,6 +829,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       calendarSnapshot: (order.calendarSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       // CORE-EXT-02D：能力版本快照随订单固化，在途环节的 Hook 判定都用它。
       capabilitySnapshot: (order.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      capabilityRequirementsSnapshot: (order.capabilityRequirementsSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       capabilityDecisions: (order.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
       capabilityExceptions: (order.capabilityExceptions ?? null) as unknown as Prisma.InputJsonValue,
       serviceSnapshots: (order.serviceSnapshots ?? null) as unknown as Prisma.InputJsonValue,
@@ -869,7 +871,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
       const existingOrder = await client.rentalOrder.findUnique({
         where: { id: order.id },
-        select: { tenantId: true, workspaceId: true, categoryVersionId: true, inspectionTemplateSnapshots: true }
+        select: { tenantId: true, workspaceId: true, categoryVersionId: true, inspectionTemplateSnapshots: true,
+          capabilityRequirementsSnapshot: true, capabilitySnapshot: true }
       });
       if (existingOrder && (existingOrder.tenantId !== order.tenantId || existingOrder.workspaceId !== workspaceId)) {
         throw new ConflictException("订单事实已属于其他租户或经营空间，拒绝覆盖");
@@ -879,6 +882,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       }
       if (existingOrder && !isDeepStrictEqual(existingOrder.inspectionTemplateSnapshots ?? null, order.inspectionTemplateSnapshots ?? null)) {
         throw new ConflictException("已有订单的检查模板快照不可改写");
+      }
+      if (existingOrder && ["capabilityRequirementsSnapshot", "capabilitySnapshot"].some(field =>
+        !isDeepStrictEqual(existingOrder[field as keyof typeof existingOrder] ?? null, order[field as keyof typeof order] ?? null))) {
+        throw new ConflictException("已有订单的能力适用及执行快照不可改写");
       }
       if (existingOrder) await this.lockOrder(order.tenantId, order.id, client);
       const currentAssetStatus = await this.lockAssetRows(client, order.tenantId, workspaceId,
@@ -2901,6 +2908,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       calendarVersion: row.calendarVersion ?? undefined,
       calendarSnapshot: (row.calendarSnapshot ?? undefined) as unknown as RentalOrder["calendarSnapshot"],
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalOrder["capabilitySnapshot"],
+      capabilityRequirementsSnapshot: (row.capabilityRequirementsSnapshot ?? undefined) as unknown as RentalOrder["capabilityRequirementsSnapshot"],
       capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalOrder["capabilityDecisions"],
       capabilityExceptions: (row.capabilityExceptions ?? undefined) as unknown as RentalOrder["capabilityExceptions"],
       serviceSnapshots: (row.serviceSnapshots ?? undefined) as unknown as RentalOrder["serviceSnapshots"],

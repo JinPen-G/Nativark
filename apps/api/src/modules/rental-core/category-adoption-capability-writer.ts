@@ -1,20 +1,24 @@
 import { ConflictException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
-import type { CategoryCapabilityPreparationPatch, RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus, RentalCategoryDefinition } from "@rental-os/shared";
+import type { CategoryCapabilityPreparationPatch, RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus, RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
 import type { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import { categoryAdoptionCapabilityReferences } from "./category-adoption-references";
+import { workspaceCapabilityRequirements } from "./category-capability-conditions";
+import type { CapabilityHookRuntime } from "./capability-hook.runtime";
 
 export interface CategoryAdoptionCapabilityRuntime {
   capabilities: Pick<WorkspaceCapabilityService, "prepareAdoptionConfigs" | "adoptionCompatibility">;
   registeredVersions: string[];
+  /** Actual registered runtime required for conditional inspection contracts. */
+  hooks?: Pick<CapabilityHookRuntime, "registeredVersions" | "assertCategoryComposition" | "assertInspectionComposition">;
 }
 
 /** Internal phase: caller has authorized and checked eligibility and ALL business /
  * commercial dependencies, in this same RC transaction. Entity patches must have
  * been applied first; binding and adoption audit follow in the same transaction.
- * Only explicit absent target-required candidates can be enabled; never resumes
+ * Only explicit absent required/condition-declared candidates can be enabled; never resumes
  * existing instances, switches implementations, or touches old snapshots. */
 export async function writePreparedCategoryCapabilities(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
@@ -26,12 +30,18 @@ export async function writePreparedCategoryCapabilities(
   const where = { tenantId, workspaceId };
   const [rows, groups, assets] = await Promise.all([
     tx.workspaceCapabilityInstance.findMany({ where, orderBy: { code: "asc" } }),
-    tx.rentalItemGroup.findMany({ where, select: { id: true, attributes: true } }),
+    tx.rentalItemGroup.findMany({ where, select: { id: true, inventoryMode: true, attributes: true } }),
     tx.rentalAsset.findMany({ where, select: { id: true } })
   ]);
   const instances = rows.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
   const projected = runtime.capabilities.prepareAdoptionConfigs(target, instances, patches, runtime.registeredVersions);
-  const compatibility = runtime.capabilities.adoptionCompatibility(target, projected, runtime.registeredVersions);
+  let requiredCodes = target.requiredCapabilities;
+  if (target.conditionalCapabilities?.length) {
+    const settings = await tx.rentalTenantBusinessSettings.findFirst({ where });
+    requiredCodes = workspaceCapabilityRequirements(target, groups,
+      (settings?.settings as unknown as TenantRentalBusinessSettings | undefined)?.fulfillment?.enabledModes).required;
+  }
+  const compatibility = runtime.capabilities.adoptionCompatibility(target, projected, runtime.registeredVersions, undefined, requiredCodes);
   const references = categoryAdoptionCapabilityReferences(target, projected, { groups, assets });
   if (!compatibility.valid || !references.valid) {
     throw new ConflictException([...compatibility.blockers, ...references.blockers].map((row) => row.message).join("；"));

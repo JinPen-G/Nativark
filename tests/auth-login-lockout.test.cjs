@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 
 require("ts-node").register({
+  project: require("node:path").resolve(__dirname, "../apps/api/tsconfig.json"),
   transpileOnly: false,
   compilerOptions: {
     module: "commonjs",
@@ -73,7 +74,7 @@ function createStore({ alwaysConflict = false, alwaysLoseCas = false } = {}) {
 
 function makeService(prisma, dataSource = "mysql") {
   const config = { get: (key) => key === "AUTH_TOKEN_SECRET" ? "lockout-unit-test-secret" : key === "PLATFORM_DATA_SOURCE" ? dataSource : undefined };
-  return new AuthService({}, config, undefined, undefined, prisma);
+  return new AuthService({}, config, undefined, undefined, undefined, prisma);
 }
 
 (async () => {
@@ -122,7 +123,7 @@ function makeService(prisma, dataSource = "mysql") {
     async setLocalDemoAccountPassword() {}
   };
   const resetConfig = { get: (key) => key === "NODE_ENV" ? "development" : key === "AUTH_TOKEN_SECRET" ? "lockout-unit-test-secret" : key === "PLATFORM_DATA_SOURCE" ? "mysql" : undefined };
-  const resetService = new AuthService(resetPlatform, resetConfig, undefined, undefined, resetStore);
+  const resetService = new AuthService(resetPlatform, resetConfig, undefined, undefined, undefined, resetStore);
   resetService.loginFailureKeyHash = (value) => value;
   for (const key of ["demo:admin", "demo2:admin", "platform:admin", "tenant-one:admin"]) {
     resetStore.rows.set(key, { id: key, loginKeyHash: key, failureCount: 1, firstFailedAt: new Date(), lockedUntil: null, expiresAt: new Date(Date.now() + 600_000), revision: 1 });

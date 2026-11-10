@@ -17,12 +17,19 @@ const { writePreparedCategoryCapabilities } = require("../apps/api/dist/modules/
 const { RentalServiceCapacityService } = require("../apps/api/dist/modules/rental-core/rental-service-capacity.service.js");
 const { MembershipService } = require("../apps/api/dist/modules/platform/membership.service.js");
 const { SubscriptionService } = require("../apps/api/dist/modules/subscription/subscription.service.js");
+const { AuthService } = require("../apps/api/dist/modules/auth/auth.service.js");
+const { PlatformService } = require("../apps/api/dist/modules/platform/platform.service.js");
+const { PlatformRepository } = require("../apps/api/dist/modules/platform/platform.repository.js");
+const { RentalCoreService } = require("../apps/api/dist/modules/rental-core/rental-core.service.js");
+const { CapabilityHookRuntime } = require("../apps/api/dist/modules/rental-core/capability-hook.runtime.js");
+const { CapabilityHookRegistrar } = require("../apps/api/dist/modules/rental-core/capability-hook.registrar.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
 const db = new PrismaClient();
 const fixture = `catwrite_${randomUUID()}`;
 const workspaceId = fixture;
 const versionId = `${fixture}_v2`;
 const writerTargetId = `${fixture}_entity_v3`;
+const phaseActorId = `${fixture}_actor`, phaseRoleId = `${fixture}_role`, phaseSessionId = `${fixture}_session`;
 const repo = new RentalCoreConfigRepository(db);
 const capabilities = new WorkspaceCapabilityRepository(db);
 const business = new RentalBusinessConfigRepository(db);
@@ -48,7 +55,9 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const oldBinding = { categoryVersionId: baseline.recommendedVersionId, adoptionRevision: 0 };
     const input = { id: `${fixture}_g1`, tenantId: "tenant_001", categoryCode: "camera", code: "G1", name: "专项型号", inventoryMode: "serialized", unit: "件", attributes: { identity: " abc " }, status: "enabled", bundleComponents: [], createdAt: new Date().toISOString() };
     // Deliberately minimal repository fixtures, not a claim of usable business settings.
-    const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { weekendDays: [0, 6], officialCalendarRegion: "CN", holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
+    const defaults = Object.create(RentalCoreService.prototype).seedState("tenant_001", "camera", fixture, "CNY", definition).businessSettings;
+    const settings = { ...defaults, configVersion: "fixture", pricing: { ...defaults.pricing, enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false },
+      fulfillment: { ...defaults.fulfillment, enabledModes: ["store_pickup_return"] } };
     const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", operatorId: `${fixture}_operator`, status: "enabled", capabilities: ["pickup", "return"] };
     const capability = { tenantId: "tenant_001", workspaceId, code: "camera_compatibility", status: "enabled", implementationVersion: "cam-1.0", configVersion: "v1", config: { relations: [] }, revision: 1 };
     const capabilityAudit = { code: "camera_compatibility", action: "enable", toStatus: "enabled", reason: "仓储锁专项夹具", at: new Date().toISOString() };
@@ -69,7 +78,8 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const rule = { id: `${fixture}_rule`, tenantId: "tenant_001", categoryCode: "camera", version: "1.0", status: "draft", config: { fixture: true }, changeReason: "fixture", createdBy: "fixture", createdAt: new Date().toISOString() };
     const ruleAudit = { id: `${fixture}_ruleaudit`, tenantId: "tenant_001", workspaceId, ruleVersionId: rule.id, version: rule.version, action: "publish", fromStatus: "draft", toStatus: "pending", reason: "fixture", at: rule.createdAt };
     const nextRule = { ...rule, status: "pending", effectiveFrom: "2030-01-01T00:00:00Z" };
-    const price = { id: `${fixture}_price`, tenantId: "tenant_001", categoryCode: "camera", code: "P", name: "专项价格", currency: "CNY", status: "draft", version: "1.0", effectiveFrom: rule.createdAt, createdAt: rule.createdAt, rates: [{ itemGroupId: input.id, unit: "hour", amount: 10 }] };
+    const baseRate = { itemGroupId: input.id, unit: "hour", baseAmount: 10, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 };
+    const price = { id: `${fixture}_price`, tenantId: "tenant_001", categoryCode: "camera", code: "P", name: "专项价格", currency: "CNY", status: "draft", version: "1.0", effectiveFrom: rule.createdAt, createdAt: rule.createdAt, rates: [baseRate] };
     const discount = { id: `${fixture}_discount`, tenantId: "tenant_001", categoryCode: "camera", code: "D", name: "专项优惠", status: "enabled", discountType: "percentage", discountValue: 10, minimumSpend: 0, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: rule.createdAt, version: "1.0", createdAt: rule.createdAt, updatedAt: rule.createdAt };
     const service = { id: `${fixture}_service`, tenantId: "tenant_001", categoryCode: "camera", code: "S", name: "专项服务", serviceType: "other", billingUnit: "per_order", price: 10, minimumQuantity: 1, maximumQuantity: 5, termsVersion: "1.0", terms: "专项条款", applicableItemGroupIds: [], applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", requiresCapacity: false, status: "enabled", version: "1.0", createdAt: rule.createdAt, updatedAt: rule.createdAt };
     const staleDiscount = assert.rejects(context(() => business.upsertDiscountPlan(discount, oldBinding)), /版本已变化/);
@@ -130,7 +140,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal((await db.rentalValueAddedService.findUnique({ where: { id: service.id } })).version, "2.0", "旧服务重放不得退回主档");
     assert.equal(await db.rentalValueAddedServiceVersion.count({ where: { workspaceId } }), 2, "旧快照保留且拒绝请求不新增快照");
     await context(() => business.upsertPricingPlan(price, undefined, currentBinding));
-    await assert.rejects(context(() => business.upsertPricingPlan({ ...price, rates: [{ itemGroupId: input.id, unit: "shift", amount: 10 }] })), /不支持/);
+    await assert.rejects(context(() => business.upsertPricingPlan({ ...price, rates: [{ ...baseRate, unit: "shift" }] })), /不支持/);
     await assert.rejects(context(() => business.upsertPricingPlan({ ...price, fulfillmentFees: [{ mode: "onsite_delivery", amount: 1 }] })), /不支持/);
     assert.equal((await db.rentalPricingPlan.findUnique({ where: { id: price.id } })).rates[0].unit, "hour", "拒绝不适用价格不能覆盖已提交费率");
     await context(() => business.upsertRuleVersion(rule, currentBinding));
@@ -357,7 +367,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal((await db.rentalServiceCapacity.findUniqueOrThrow({ where: { id: savedCapacity.id } })).reservedQuantity, 0, "窗口改期后陈旧预留不能扣容量");
     assert.equal(await db.rentalServiceReservation.count({ where: { workspaceId } }), 0, "陈旧预留不可登记流水");
     assert.equal(movedCapacity.windowStart, "2099-01-01T00:00:00.000Z");
-    // Internal entity phase: no public adopt endpoint or complete compatibility claim.
+    // Internal entity phase remains separate from original-key receipt/HTTP acceptance.
     const targetDefinition = structuredClone(definition);
     targetDefinition.requiredCapabilities = [...new Set([...targetDefinition.requiredCapabilities, "camera_kit_handover"])];
     targetDefinition.businessModel.assetFields = [
@@ -412,11 +422,33 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
         capabilityPatches: [{ code: "camera_compatibility", expectedRevision: 1, expectedImplementationVersion: "cam-1.0", config: { relations: [], powerMarginPercent: 25 } },
           { code: "camera_kit_handover", intent: "enable_new", expectedRevision: 0, expectedImplementationVersion: "cam-kit-1.0", config: {} }] }
     } });
+    // Use a real operator/session/member and the original Auth/Platform mapping.
+    // A freely supplied actor string cannot authorize this transaction phase.
+    const adoptionPermission = await db.permission.findUniqueOrThrow({ where: { code: "rental-os:category:adopt" } });
+    await db.role.create({ data: { id: phaseRoleId, tenantId: "tenant_001", code: phaseRoleId, name: phaseRoleId,
+      scope: "OPERATOR", dataScope: "ALL", enabledBusinessScopes: [],
+      permissions: { create: { permissionId: adoptionPermission.id } } } });
+    await db.user.create({ data: { id: phaseActorId, tenantId: "tenant_001", account: phaseActorId,
+      displayName: "内部采用事务验收人员", passwordHash: "non-login-test-fixture", mustChangePassword: false, roleId: phaseRoleId } });
+    await db.workspaceMember.create({ data: { tenantId: "tenant_001", userId: phaseActorId, workspaceId, roleId: phaseRoleId } });
+    await db.authSession.create({ data: { id: phaseSessionId, userId: phaseActorId, currentWorkspaceId: workspaceId,
+      refreshTokenHash: `${fixture}_non-login`, audience: "operator", expiresAt: new Date(Date.now() + 3600000) } });
+    const auth = new AuthService(new PlatformService({ get: key => key === "PLATFORM_DATA_SOURCE" ? "mysql" : undefined }, new PlatformRepository(db)),
+      { get: key => key === "AUTH_TOKEN_SECRET" ? "dedicated-category-phase-test-secret" : undefined });
+    const phaseToken = auth.signAccessToken({ sub: phaseActorId, tid: "tenant_001", sid: phaseSessionId, wid: workspaceId,
+      aud: "operator", exp: Math.floor(Date.now() / 1000) + 3600 });
+    const phaseAccess = await auth.resolveAccessContext(`Bearer ${phaseToken}`);
+    assert.ok(phaseAccess?.workspaceValid);
+    const phaseIdentity = { tenantId: "tenant_001", userId: phaseActorId, workspaceId, audience: "operator", isSaasAdmin: false,
+      dataScope: phaseAccess.user.dataScope, locationScope: phaseAccess.user.locationScope, accessSession: phaseAccess.accessSession };
     const phaseInput = { tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, expected: currentBinding,
-      expectedPreparationRevision: 1, operation: "upgrade", actorId: "entity-phase-fixture" };
-    const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0", "camera_kit_handover@cam-kit-1.0"] };
+      expectedPreparationRevision: 1, operation: "upgrade", actorId: phaseActorId };
+    const phaseCapabilities = new WorkspaceCapabilityService({}), phaseHooks = new CapabilityHookRuntime(phaseCapabilities);
+    new CapabilityHookRegistrar(phaseHooks).onApplicationBootstrap();
+    const capabilityRuntime = { capabilities: phaseCapabilities, registeredVersions: phaseHooks.registeredVersions(), hooks: phaseHooks };
     const subscriptions = new SubscriptionService(db);
-    const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime, commercial = subscriptions) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime, commercial), { ...rc, timeout: 20000 });
+    const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime, commercial = subscriptions) => runWithRequestIdentity(phaseIdentity,
+      () => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime, commercial, auth), { ...rc, timeout: 20000 }));
     // Earlier repository probes intentionally used unreadable rule JSON. The
     // write phase now checks scoped business facts too; provide a compatible
     // executable projection rather than bypassing that check in the writer.
@@ -580,7 +612,8 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.match(phaseCompetition.find((row) => row.status === "rejected").reason.message, /版本已变化/);
     const phaseResult = phaseCompetition.find((row) => row.status === "fulfilled").value;
     assert.equal(phaseResult.businessCompatibility.valid, true);
-    assert.equal(phaseResult.businessCompatibility.complete, false, "内部检查通过仍不表示全部经营闸门已实现");
+    assert.equal(phaseResult.businessCompatibility.complete, true, "最终配置检查完成；本脚本仍不代替HTTP/宿主/部署验收");
+    assert.equal(phaseResult.businessCompatibility.coverage.entityCount, entityGroups.length + entityAssets.length);
     const result = phaseResult.entities;
     assert.equal(result.itemGroupClaimCount, entityGroups.length);
     assert.equal(result.assetClaimCount, entityAssets.length);
@@ -590,7 +623,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const finalGroup = await db.rentalItemGroup.findUniqueOrThrow({ where: { id: entityGroups[0].id } });
     for (const [key, value] of Object.entries(entityGroups[0].attributes)) assert.deepEqual(finalGroup.attributes[key], value, "媒体及历史资料保留");
     assert.equal((await db.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } })).categoryVersionId, writerTargetId);
-    assert.equal(await db.rentalCategoryAdoptionAudit.count({ where: { workspaceId, actorId: "entity-phase-fixture" } }), 1);
+    assert.equal(await db.rentalCategoryAdoptionAudit.count({ where: { workspaceId, actorId: phaseActorId } }), 1);
     const phaseAudit = await db.rentalCategoryAdoptionAudit.findUniqueOrThrow({ where: { id: phaseResult.auditId } });
     assert.equal(phaseAudit.reason, preparation.patches.reason);
     assert.equal(phaseAudit.fromVersionId, currentBinding.categoryVersionId);
@@ -624,9 +657,13 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "成功不删除准备资料或重复初始化");
     console.log("category-active-write-db: 写入绑定、锁竞争、内部采用事务的资格/修订复核、实体/绑定/审计回滚及历史保留通过");
   } finally {
+    await db.authSession.deleteMany({ where: { id: phaseSessionId } });
     await db.rentalCustomerCoupon.deleteMany({ where: { workspaceId } });
     await db.rentalServiceCapacity.deleteMany({ where: { workspaceId } });
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
+    await db.user.deleteMany({ where: { id: phaseActorId } });
+    await db.rolePermission.deleteMany({ where: { roleId: phaseRoleId } });
+    await db.role.deleteMany({ where: { id: phaseRoleId } });
     await db.rentalCategoryVersionPolicy.deleteMany({ where: { versionId: writerTargetId } });
     await db.rentalCategoryVersion.deleteMany({ where: { id: { in: [versionId, writerTargetId] } } });
     await db.$disconnect();

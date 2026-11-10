@@ -6,15 +6,10 @@
  */
 
 import type { SystemDataScope } from "./platform";
+import { RentalCategoryCode } from "./rental-category-code";
+export { RentalCategoryCode, RENTAL_CATEGORY_CODE_PATTERN, isRentalCategoryCode, type BuiltinRentalCategoryCode } from "./rental-category-code";
 
 // Rental Core v0.1 ---------------------------------------------------------
-
-export enum RentalCategoryCode {
-  Vehicle = "vehicle",
-  Camera = "camera",
-  Camping = "camping",
-  Construction = "construction"
-}
 
 export enum RentalInventoryMode {
   Serialized = "serialized",
@@ -70,6 +65,7 @@ export const RENTAL_CAPABILITY_CODES = [
   // CAM-01A：首个真实产品能力——摄影器材兼容性。仅摄影品类适用（applicableCategories 收口），
   // 只做兼容性判定，不代替 CAM-01 的附件清点、使用量、检查与养护。
   "camera_compatibility",
+  "kit_handover",
   // 各品类首期经营闭环的独立 capability。尚未接入真实模块的能力不声明
   // implementationVersion；已接入的能力必须由对应任务补齐版本化实现。
   "camera_kit_handover",
@@ -488,6 +484,21 @@ export interface RentalCapabilityHookModule {
   implementationVersion: string;
   order: number;
   hooks: Partial<Record<RentalCapabilityHookPoint, RentalCapabilityHookHandler>>;
+  /** Supplied by this executable version, not by a platform administrator or a shared label. */
+  composition?: RentalCapabilityCompositionContract;
+}
+
+export interface RentalCapabilityCompositionContract {
+  version: 1;
+  /** The module still sees the complete authorized subject so interaction checks remain meaningful. */
+  subjectScope: "equipment" | "order";
+  applicableInventoryModes?: RentalInventoryMode[];
+  requiredInspectionFields?: Array<{
+    code: string;
+    label: string;
+    type: RentalInspectionFieldDefinition["type"];
+    stages: Array<"pickup" | "return">;
+  }>;
 }
 
 export type RentalCapabilityHookHandler = (
@@ -524,6 +535,9 @@ export interface RentalCapabilityHookOutcome {
  * Rental Core 只识别 capability code，不在订单主流程里判断具体品类。
  */
 export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
+  { code: "kit_handover", label: "套装交接清点", kind: "category_required", extensionPoints: ["order_validation", "fulfillment"],
+    applicableCategories: "all", dependsOn: ["bundle_inventory"], conflictsWith: ["camera_kit_handover", "camping_kit_integrity"],
+    configSchema: [], implementationVersion: "kit-1.0" },
   // 四种库存与取还是 Rental Core 自身实现的能力，因此带 `core-1.0` 实现版本：
   // 它们确实有可执行模块（库存与履约主流程），不属于"只有 code"。
   { code: "serialized_inventory", label: "序列化库存", kind: "category_required", extensionPoints: ["order_validation", "fulfillment"], applicableCategories: "all", dependsOn: [], conflictsWith: [], configSchema: [], implementationVersion: "core-1.0" },
@@ -589,13 +603,13 @@ export const RENTAL_CAPABILITY_MODULES: RentalCapabilityModuleDefinition[] = [
   {
     code: "camera_kit_handover", label: "摄影套装交接与附件清点", kind: "category_required",
     extensionPoints: ["order_validation", "fulfillment"],
-    applicableCategories: [RentalCategoryCode.Camera], dependsOn: ["bundle_inventory"], conflictsWith: [],
+    applicableCategories: [RentalCategoryCode.Camera], dependsOn: ["bundle_inventory"], conflictsWith: ["kit_handover"],
     configSchema: [], implementationVersion: "cam-kit-1.0"
   },
   {
     code: "camping_kit_integrity", label: "露营套装完整性", kind: "category_required",
     extensionPoints: ["order_validation", "fulfillment"],
-    applicableCategories: [RentalCategoryCode.Camping], dependsOn: ["bundle_inventory"], conflictsWith: [],
+    applicableCategories: [RentalCategoryCode.Camping], dependsOn: ["bundle_inventory"], conflictsWith: ["kit_handover"],
     configSchema: [], implementationVersion: "camp-kit-1.0"
   },
   {
@@ -775,6 +789,8 @@ export interface RentalAttributeDefinition {
   required?: boolean;
   /** 当前经营空间内唯一；由服务端按字段类型归一化后校验。 */
   unique?: boolean;
+  /** Read-only customer catalog visibility; omission on a new category keeps the field internal. */
+  clientVisible?: boolean;
   unit?: string;
   options?: string[];
 }
@@ -788,6 +804,8 @@ export interface RentalInspectionFieldDefinition {
   options?: string[];
   /** 该数值是需在领取/归还之间计算差值的累计读数。 */
   usageMetric?: boolean;
+  /** Core projects this field only when the frozen conditional capability applies to the inspected products. */
+  appliesToCapability?: RentalCapability;
 }
 
 /**
@@ -862,6 +880,38 @@ export interface RentalCategoryDisplayMetadata {
   terminologyEn?: Partial<RentalCategoryTerminology>;
 }
 
+/** Controlled conjunction only: each selected set is OR, the populated predicates are AND. */
+export interface RentalCapabilityCondition {
+  inventoryModes?: RentalInventoryMode[];
+  fulfillmentModes?: RentalFulfillmentMode[];
+  /** A declared model-level enum/boolean, read from Core catalog facts rather than a request flag. */
+  itemAttribute?: { code: string; values: Array<string | boolean> };
+}
+
+export interface RentalConditionalCapabilityRequirement {
+  code: RentalCapability;
+  when: RentalCapabilityCondition;
+}
+
+/** Minimal historical inputs for capability applicability; no prices, customer data or arbitrary expressions. */
+export interface RentalCapabilityRequirementSnapshot {
+  structureVersion: 1;
+  categoryCode: RentalCategoryCode;
+  definitionVersion: string;
+  policyHash: string;
+  fulfillmentMode: RentalFulfillmentMode;
+  rootItemGroupIds: string[];
+  items: Array<{
+    itemGroupId: string;
+    inventoryMode: RentalInventoryMode;
+    /** Only the classifier attributes named by the frozen conditions. */
+    attributes: Record<string, string | boolean>;
+    /** Required components use the same inclusion rule as Core's bundle occupancy. */
+    componentItemGroupIds: string[];
+  }>;
+  matches: Array<{ code: RentalCapability; itemGroupIds: string[] }>;
+}
+
 export interface RentalCategoryDefinition {
   code: RentalCategoryCode;
   name: string;
@@ -876,6 +926,8 @@ export interface RentalCategoryDefinition {
    * 不在这里重复建实例；当前四个首发品类暂无强制扩展模块。
    */
   requiredCapabilities: RentalCapability[];
+  /** Definition structure v2: these do not become unconditional workspace readiness requirements. */
+  conditionalCapabilities?: RentalConditionalCapabilityRequirement[];
   terminology: RentalCategoryTerminology;
   attributeSchema: Record<string, unknown>;
   businessModel: RentalCategoryBusinessModel;
@@ -2325,6 +2377,9 @@ export interface CustomerMembershipPlanAssignmentActionRequest {
 export interface TenantRentalProfile {
   tenantId: string;
   categoryCode: RentalCategoryCode;
+  /** Current authoritative workspace binding, separate from legacy profile config. */
+  categoryVersionId?: string;
+  categoryAdoptionRevision?: number;
   capabilities: RentalCapability[];
   terminology: RentalCategoryTerminology;
   configVersion: string;
@@ -4717,6 +4772,7 @@ export interface RentalQuoteSnapshotV1 {
    * 快照足以解释「这张单当时为什么这么放行/阻止/收费」，即使能力已被暂停或升级。
    */
   capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
+  capabilityRequirementsSnapshot?: RentalCapabilityRequirementSnapshot;
   /**
    * Review P1-5：报价阶段的 capability 判断记录。API 必须把它连同 warning 一起返回，
    * 否则「需转接环」这类风险虽被发现，用户却不知道要确认什么。
@@ -5898,6 +5954,7 @@ export interface RentalOrder {
    * 因此即便能力随后被升级或暂停，这张订单仍按下单当时的实现版本与配置履约。
    */
   capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
+  capabilityRequirementsSnapshot?: RentalCapabilityRequirementSnapshot;
   /** Review P1-5：下单时从报价拷贝的判断记录（不可变）。 */
   capabilityDecisions?: RentalCapabilityDecisionSnapshot[];
   /** Review P1-6：带风险继续的完整例外快照（不可变），配货与后续履约据此还原裁决。 */
@@ -6397,6 +6454,8 @@ export interface RentalOrderActionExecutionBasis {
   adoptionRevision?: number;
   /** 只有来源版本有历史证据时保存正文，不用静态模板伪造旧政策。 */
   categoryPolicySnapshot?: RentalCategoryDefinition;
+  capabilityRequirementsSnapshot?: RentalCapabilityRequirementSnapshot;
+  capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
   pricingStrategies: Array<{ unit: RentalPricingUnit; implementationVersion: string }>;
 }
 export type RentalOrderExchangeDisposition = "return_to_warehouse" | "off_shelf";
@@ -6441,6 +6500,7 @@ export interface RentalOrderExchangeExecutionBasis {
   categoryVersionId?: string;
   adoptionRevision?: number;
   categoryPolicySnapshot?: RentalCategoryDefinition;
+  capabilityRequirementsSnapshot?: RentalCapabilityRequirementSnapshot;
   effectiveFrom: string;
   priceBasis: RentalOrderExchangePriceBasis;
   pricingStrategies: Array<{ unit: RentalPricingUnit; implementationVersion: string }>;

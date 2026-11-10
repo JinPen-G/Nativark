@@ -16,6 +16,7 @@ import { FeatureCatalogModal } from "./FeatureCatalogModal";
 import { StandardPriceModal } from "./StandardPriceModal";
 import { PlanComparison } from "./plan-comparison/PlanComparison";
 import { QueryState } from "@/components/QueryState";
+import { useSubscriptionCategoryLabels } from "./useSubscriptionCategoryLabels";
 
 function ownershipLabel(value: FeatureOwnership, t: (v: string) => string) {
   return t(value === FeatureOwnership.Standard ? "基础版" : "PRO");
@@ -30,12 +31,12 @@ export function SubscriptionCatalogPage() {
   const [catalogModal, setCatalogModal] = useState<{ open: boolean; entry: SubscriptionFeatureCatalogEntry | null }>({ open: false, entry: null });
 
   const priceOf = (plan: SubscriptionPlan) => prices.data?.find((row) => row.plan === plan) ?? null;
-  const categoryLabels: Record<string, string> = { camera: "摄影设备", camping: "露营装备", vehicle: "车辆载具", construction: "工程设备" };
+  const categoryLabels = useSubscriptionCategoryLabels();
 
   const columns: ColumnsType<SubscriptionFeatureCatalogEntry> = [
     { title: t("功能"), key: "name", render: (_, row) => <DataTableText primary={row.name} secondary={row.code} /> },
     { title: t("模块"), dataIndex: "module", key: "module" },
-    { title: t("适用品类"), key: "categories", render: (_, row) => row.categories.map(code => t(categoryLabels[code] ?? code)).join("、") || t("—") },
+    { title: t("适用品类"), key: "categories", render: (_, row) => row.categories.map(code => categoryLabels.label(code)).join("、") || t("—") },
     { title: t("默认归属"), dataIndex: "defaultOwnership", key: "default", render: (value: FeatureOwnership) => ownershipLabel(value, t) },
     { title: t("当前归属"), dataIndex: "currentOwnership", key: "current", render: (value: FeatureOwnership, row) => <Tag color={value === FeatureOwnership.Standard ? "green" : "gold"}>{ownershipLabel(value, t)}{value === FeatureOwnership.Standard && row.defaultOwnership !== FeatureOwnership.Standard ? t("（已下放）") : ""}</Tag> },
     { title: t("上线状态"), dataIndex: "releaseStatus", key: "release", render: (value: keyof typeof RELEASE_STATUS_LABEL) => t(RELEASE_STATUS_LABEL[value]) },

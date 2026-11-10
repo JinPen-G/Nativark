@@ -68,8 +68,8 @@ export function ProductSection({ mode }: { mode: CategoryMode }) {
   const all = siteRepository.getProducts(tenant);
   const tabs = mode === 'single' ? [{ id: 'all', name: t('recommendedSort') }, { id: 'popular', name: t('featuredProductsTitle') }, { id: 'new', name: t('ratingSort') }] : [{ id: 'all', name: t('categoryAll') }, ...tenant.categories.slice(0, mode === 'multiple' ? 7 : 2).map(category => ({ id: category.id, name: category.name }))];
   const visible = useMemo(() => {
-    if (active === 'popular') return [...all].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, mode === 'single' ? 5 : 6);
-    if (active === 'new') return [...all].sort((a, b) => b.rating - a.rating).slice(0, mode === 'single' ? 5 : 6);
+    if (active === 'popular') return [...all].sort((a, b) => (b.reviewCount ?? -1) - (a.reviewCount ?? -1)).slice(0, mode === 'single' ? 5 : 6);
+    if (active === 'new') return [...all].sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1)).slice(0, mode === 'single' ? 5 : 6);
     if (active !== 'all') return all.filter(product => product.categoryId === active).slice(0, 6);
     if (mode === 'single') return all.slice(0, 5);
     const groups = tenant.categories.map(category => all.filter(product => product.categoryId === category.id));

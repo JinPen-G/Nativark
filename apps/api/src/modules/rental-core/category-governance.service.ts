@@ -1,7 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, RentalCategoryCode } from "@prisma/client";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
-import { CATEGORY_DRAFT_SECTIONS, CATEGORY_GOVERNANCE_PERMISSIONS as P, RENTAL_CAPABILITY_MODULES, RENTAL_PRICING_UNIT_CODES,
+import { CATEGORY_DRAFT_SECTIONS, CATEGORY_GOVERNANCE_PERMISSIONS as P, RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, isRentalCategoryCode,
+  type RentalCategoryCode,
+  type PreviewRentalCategoryCreationRequest, type CreateRentalCategoryRequest, type RentalCategoryCreationReceipt, type CategoryVersionView,
   type ArchiveCategoryDraftRequest, type CategoryDraftSection, type CreateCategoryDraftRequest, type PatchCategoryDraftRequest,
   type PublishCategoryDraftRequest, type SaveCategoryOpeningRequest, type SaveCategoryVersionPolicyRequest, type SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
@@ -10,6 +12,8 @@ import { parsePublishedRentalCategory } from "./rental-category-resolver.service
 import { rentalPricingStrategyReference } from "./rental-pricing-strategy";
 import { categoryScopeAllows } from "./category-governance-policy";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
+import { categoryCreationTemplates, composeCategoryCreation } from "./category-creation-templates";
+import { requestFingerprint } from "./rental-idempotency.repository";
 
 export function assertCategoryGovernancePermission(user: SystemUserRow | undefined, permission: string) {
   if (!user?.isSaasAdmin || !(user.permissions.includes(permission) || user.permissions.includes("*"))) {
@@ -22,7 +26,7 @@ const sections: Record<CategoryDraftSection, Record<string, string[]>> = {
   inventory: { root: ["supportedInventoryModes"], business: ["fulfillmentModes", "locationTypes", "deliveryDestination"] },
   pricing: { business: ["pricingUnits", "defaultPricingUnit", "settingModules", "supportsHolidayPricing", "supportsUsagePricing", "supportsPreauthorization"], defaults: ["payment", "overdue", "fulfillment"] },
   inspection: { business: ["supportsQualificationReview"], defaults: ["rules", "inspectionFields"] },
-  capabilities: { root: ["defaultCapabilities", "requiredCapabilities"], business: ["valueAddedServicePresets"] }
+  capabilities: { root: ["defaultCapabilities", "requiredCapabilities", "conditionalCapabilities"], business: ["valueAddedServicePresets"] }
 };
 export function patchCategorySection(body: unknown, section: CategoryDraftSection, values: Record<string, unknown>) {
   const ownership = sections[section];
@@ -49,16 +53,96 @@ export function patchCategorySection(body: unknown, section: CategoryDraftSectio
   if (Buffer.byteLength(JSON.stringify(candidate)) > 256 * 1024) throw new BadRequestException("品类正文超过 256 KiB");
   return candidate;
 }
-const enumCode = (code: string) => {
-  const found = Object.values(RentalCategoryCode).find((entry) => entry.toLowerCase() === code);
-  if (!found) throw new BadRequestException("动态编码尚未开放；当前仅维护已有品类版本");
-  return found;
+const categoryIdentity = (code: string): RentalCategoryCode => {
+  if (!isRentalCategoryCode(code)) throw new BadRequestException("品类编码必须为 2～64 位小写字母、数字或下划线，并以字母开头");
+  return code;
 };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 @Injectable()
 export class CategoryGovernanceService {
   constructor(private readonly prisma: PrismaService, private readonly hooks: CapabilityHookRuntime) {}
+  private dynamicCreationEnabled() {
+    return process.env.NODE_ENV !== "production" && process.env.RENTAL_CATEGORY_DYNAMIC_CREATION === "true";
+  }
+  private creationKey(user: SystemUserRow, key: string) {
+    if (!/^[A-Za-z0-9._:-]{8,128}(?![\s\S])/u.test(key)) throw new BadRequestException("新品类原操作键格式无效");
+    return `category-create:${requestFingerprint({ actorId: user.id, key })}`;
+  }
+  private async creationSource(db: Prisma.TransactionClient | PrismaService, input: PreviewRentalCategoryCreationRequest) {
+    if (Boolean(input.templateId) === Boolean(input.sourceVersionId)) throw new BadRequestException("请选择一个模板或一个来源发布版本");
+    if (input.templateId) {
+      const template = categoryCreationTemplates().find(template => template.id === input.templateId);
+      if (!template) throw new BadRequestException("模板不存在");
+      return { definition: template.definition, sourceKind: `template:${template.id}@1` };
+    }
+    const source = await db.rentalCategoryVersion.findUnique({ where: { id: input.sourceVersionId! } });
+    if (!source || !["published", "legacy_baseline"].includes(source.status)) throw new BadRequestException("复制来源必须是已有发布版本");
+    return { definition: parsePublishedRentalCategory(source.definition, source.categoryCode), sourceKind: "category_copy" };
+  }
+  async previewCreation(input: PreviewRentalCategoryCreationRequest, user: SystemUserRow) {
+    assertCategoryGovernancePermission(user, P.edit);
+    const source = await this.creationSource(this.prisma, input);
+    const preview = composeCategoryCreation(source.definition, input);
+    const validation = this.validation(preview.definition, input.code);
+    const exists = await this.prisma.rentalCategoryDefinition.findUnique({ where: { code: input.code }, select: { code: true } });
+    return { ...preview, valid: validation.valid && !exists, errors: [...validation.errors, ...(exists ? ["品类编码已被占用，不能重用"] : [])], previewOnly: true as const };
+  }
+  private async creationReceipt(db: Prisma.TransactionClient | PrismaService, user: SystemUserRow, key: string, expectedHash?: string) {
+    const audit = await db.rentalCategoryGovernanceAudit.findUnique({ where: { id: this.creationKey(user, key) } });
+    if (!audit) return undefined;
+    const after = audit.after as unknown as { requestHash?: string; version?: CategoryVersionView } | null;
+    if (audit.action !== "category_create" || audit.actorId !== user.id || !after?.requestHash || !after.version || after.version.categoryCode !== audit.categoryCode) {
+      throw new ConflictException("新品类原收据缺少可核对的创建依据");
+    }
+    if (expectedHash && expectedHash !== after.requestHash) throw new ConflictException("原操作键已用于不同新品类输入，请先核对原收据");
+    return after.version;
+  }
+  async readCreationReceipt(key: string, user: SystemUserRow): Promise<RentalCategoryCreationReceipt> {
+    assertCategoryGovernancePermission(user, P.edit);
+    const version = await this.creationReceipt(this.prisma, user, key);
+    return version ? { outcome: "created", version } : { outcome: "unknown" };
+  }
+  async createCategory(input: CreateRentalCategoryRequest, user: SystemUserRow) {
+    assertCategoryGovernancePermission(user, P.edit);
+    categoryIdentity(input.code);
+    if (!input.reason?.trim() || input.reason.length > 512) throw new BadRequestException("请填写创建原因");
+    const requestHash = requestFingerprint(input);
+    const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
+    if (replay) return replay;
+    if (!this.dynamicCreationEnabled()) throw new ServiceUnavailableException("动态品类创建尚未开放");
+    try {
+      return await this.prisma.$transaction(async tx => {
+        const replay = await this.creationReceipt(tx, user, input.idempotencyKey, requestHash);
+        if (replay) return replay;
+        const source = await this.creationSource(tx, input);
+        const composed = composeCategoryCreation(source.definition, input);
+        if (composed.definitionHash !== input.expectedDefinitionHash) throw new ConflictException("创建内容与已核对预览不同，请重新预览");
+        const validation = this.validation(composed.definition, input.code);
+        if (!validation.valid) throw new ConflictException(validation.errors.join("；"));
+        if (await tx.rentalCategoryDefinition.findUnique({ where: { code: input.code }, select: { code: true } })) throw new ConflictException("品类编码已被占用，不能重用");
+        const definition = composed.definition;
+        await tx.rentalCategoryDefinition.create({ data: { code: input.code, name: definition.name, description: definition.description,
+          supportedInventoryModes: definition.supportedInventoryModes, defaultCapabilities: definition.defaultCapabilities,
+          terminology: JSON.parse(JSON.stringify(definition.terminology)), attributeSchema: JSON.parse(JSON.stringify(definition.attributeSchema)),
+          businessModel: JSON.parse(JSON.stringify(definition.businessModel)), version: definition.version,
+          openingScope: "unopened", openingTenantIds: [], openingRevision: 0 } });
+        const row = await tx.rentalCategoryVersion.create({ data: { id: randomUUID(), categoryCode: input.code, versionLabel: input.versionLabel,
+          sourceVersionId: input.sourceVersionId, sourceKind: source.sourceKind, status: "draft", revision: 0, structureVersion: 1,
+          definition: JSON.parse(JSON.stringify(composed.definition)) } });
+        const version = JSON.parse(JSON.stringify(row)) as CategoryVersionView;
+        await this.audit(tx, input.code, row.id, "category_create", user, input.reason, undefined, { requestHash, version }, this.creationKey(user, input.idempotencyKey));
+        return version;
+      });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+        const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
+        if (replay) return replay;
+        throw new ConflictException("品类编码或原操作键已被并发占用，请核对原收据");
+      }
+      throw error;
+    }
+  }
   private audit(tx: Prisma.TransactionClient, code: RentalCategoryCode, versionId: string | undefined, action: string, user: SystemUserRow, reason: string, before: unknown, after: unknown, id: string = randomUUID()) {
     if (!reason?.trim() || reason.length > 512) throw new BadRequestException("必须填写变更原因（最多 512 字）");
     return tx.rentalCategoryGovernanceAudit.create({ data: { id, categoryCode: code, versionId, action, actorId: user.id, reason: reason.trim(),
@@ -103,7 +187,7 @@ export class CategoryGovernanceService {
   }
   async detail(code: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
-    const row = await this.prisma.rentalCategoryDefinition.findUnique({ where: { code: enumCode(code) }, select: { code: true, name: true, openingScope: true, openingTenantIds: true, openingRevision: true, recommendedVersionId: true } });
+    const row = await this.prisma.rentalCategoryDefinition.findUnique({ where: { code: categoryIdentity(code) }, select: { code: true, name: true, openingScope: true, openingTenantIds: true, openingRevision: true, recommendedVersionId: true } });
     if (!row) throw new NotFoundException("租赁品类不存在");
     const versions = await this.prisma.rentalCategoryVersion.findMany({ where: { categoryCode: row.code }, include: { policy: true }, orderBy: { createdAt: "desc" }, take: 100 });
     return { ...row, code, versions: versions.map((v) => ({ ...v, categoryCode: code })) };
@@ -111,7 +195,7 @@ export class CategoryGovernanceService {
   async candidates(code: string, tenantId: string, operation: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
     if (!["create", "upgrade", "restore"].includes(operation)) throw new BadRequestException("未知采用动作");
-    const categoryCode = enumCode(code);
+    const categoryCode = categoryIdentity(code);
     const category = await this.prisma.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
     if (!category) throw new NotFoundException("租赁品类不存在");
     if (operation === "create" && !categoryScopeAllows(category.openingScope, category.openingTenantIds, tenantId)) return [];
@@ -122,7 +206,7 @@ export class CategoryGovernanceService {
   }
   async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
-    const categoryCode = enumCode(code);
+    const categoryCode = categoryIdentity(code);
     try { return await this.prisma.$transaction(async (tx) => {
       await this.lockedCategory(tx, categoryCode);
       const source = await this.version(tx, categoryCode, input.sourceVersionId);
@@ -141,7 +225,7 @@ export class CategoryGovernanceService {
   async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
     if (!CATEGORY_DRAFT_SECTIONS.includes(section)) throw new BadRequestException("未知草稿页签");
-    const categoryCode = enumCode(code);
+    const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       const row = await this.version(tx, categoryCode, id);
       if (row.status !== "draft" || row.revision !== input.expectedRevision) throw new ConflictException("草稿已变更或不是可编辑状态，请刷新后核对");
@@ -154,12 +238,13 @@ export class CategoryGovernanceService {
   }
   async validate(code: string, id: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
-    const row = await this.version(this.prisma, enumCode(code), id);
+    const row = await this.version(this.prisma, categoryIdentity(code), id);
     return this.validation(row.definition, code);
   }
   private validation(body: unknown, code: string) {
     try {
       const definition = parsePublishedRentalCategory(body, code);
+      this.hooks.assertCategoryComposition(definition);
       const versions = new Set(this.hooks.registeredVersions());
       const hookCodes = new Set(this.hooks.registeredCodes());
       const capabilities = definition.defaultCapabilities.map((name) => {
@@ -172,8 +257,9 @@ export class CategoryGovernanceService {
   }
   async preview(code: string, id: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
-    const row = await this.version(this.prisma, enumCode(code), id);
-    const source = row.sourceVersionId ? await this.version(this.prisma, row.categoryCode, row.sourceVersionId) : undefined;
+    const row = await this.version(this.prisma, categoryIdentity(code), id);
+    const source = row.sourceVersionId ? await this.prisma.rentalCategoryVersion.findUnique({ where: { id: row.sourceVersionId } }) : undefined;
+    if (row.sourceVersionId && (!source || !["published", "legacy_baseline"].includes(source.status))) throw new ConflictException("草稿来源发布版本缺失，不能伪造差异依据");
     const before = source?.definition as any;
     const body = row.definition as any;
     return { ...this.validation(body, code), previewOnly: true, revision: row.revision, sourceVersionId: row.sourceVersionId,
@@ -186,7 +272,7 @@ export class CategoryGovernanceService {
   }
   async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.publish);
-    const categoryCode = enumCode(code);
+    const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       await this.lockedCategory(tx, categoryCode);
       await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${categoryCode.toLowerCase()} FOR UPDATE`);
@@ -211,7 +297,7 @@ export class CategoryGovernanceService {
   async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
     return this.prisma.$transaction(async (tx) => {
-      const categoryCode = enumCode(code);
+      const categoryCode = categoryIdentity(code);
       const changed = await tx.rentalCategoryVersion.updateMany({ where: { id, categoryCode, revision: input.expectedRevision, status: "draft" }, data: { status: "archived", revision: { increment: 1 } } });
       if (changed.count !== 1) throw new ConflictException("只能归档当前修订的未发布草稿");
       await this.audit(tx, categoryCode, id, "draft_archive", user, input.reason, { revision: input.expectedRevision }, { revision: input.expectedRevision + 1 });
@@ -220,7 +306,7 @@ export class CategoryGovernanceService {
   }
   async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.opening);
-    const categoryCode = enumCode(code);
+    const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       const category = await this.lockedCategory(tx, categoryCode);
       if (category.openingRevision !== input.expectedRevision) throw new ConflictException("品类开通政策已变更");
@@ -242,7 +328,7 @@ export class CategoryGovernanceService {
   }
   async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.publish);
-    const categoryCode = enumCode(code);
+    const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       await this.lockedCategory(tx, categoryCode);
       const row = await this.version(tx, categoryCode, id);
@@ -258,11 +344,17 @@ export class CategoryGovernanceService {
   }
   async audits(code: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.audit);
-    return this.prisma.rentalCategoryGovernanceAudit.findMany({ where: { categoryCode: enumCode(code) }, orderBy: { createdAt: "desc" }, take: 100 });
+    return this.prisma.rentalCategoryGovernanceAudit.findMany({ where: { categoryCode: categoryIdentity(code) }, orderBy: { createdAt: "desc" }, take: 100 });
   }
   catalog(user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
-    return { structureVersion: 1, dynamicCreationEnabled: false, capabilities: structuredClone(RENTAL_CAPABILITY_MODULES).map((entry) => ({ ...entry, implemented: Boolean(entry.implementationVersion) })),
+    const provided = new Set<string>(RENTAL_CORE_CAPABILITY_CODES);
+    const versions = new Set(this.hooks.registeredVersions());
+    return { structureVersion: 1, dynamicCreationEnabled: this.dynamicCreationEnabled(), templates: categoryCreationTemplates(), capabilities: structuredClone(RENTAL_CAPABILITY_MODULES).map((entry) => {
+      const expectsHook = !provided.has(entry.code) && entry.extensionPoints.some(point => point === "order_validation" || point === "fulfillment");
+      return { ...entry, implemented: Boolean(entry.implementationVersion && (!expectsHook || versions.has(`${entry.code}@${entry.implementationVersion}`))),
+        composition: entry.implementationVersion ? this.hooks.compositionFor(entry.code, entry.implementationVersion) : undefined };
+    }),
       pricingStrategies: RENTAL_PRICING_UNIT_CODES.map(rentalPricingStrategyReference) };
   }
 }

@@ -1,8 +1,12 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
+import { CATEGORY_PREPARATION_PREVIEW_SCHEMA, CATEGORY_PREPARATION_BATCH_READ_SCHEMA, CATEGORY_PREPARATION_BATCH_REQUEST_SCHEMA, CATEGORY_PREPARATION_ENTITY_PAGE_SCHEMA, CATEGORY_PREPARATION_REQUEST_SCHEMA, CATEGORY_PREPARATION_SAVE_RESULT_SCHEMA,
+  CATEGORY_CREATION_REQUEST_SCHEMA, CATEGORY_CREATION_PREVIEW_REQUEST_SCHEMA, CATEGORY_CREATED_VERSION_SCHEMA, CATEGORY_CREATION_PREVIEW_SCHEMA, CATEGORY_CREATION_RECEIPT_SCHEMA,
+  CATEGORY_ADOPTION_REQUEST_SCHEMA, CATEGORY_ADOPTION_RESULT_SCHEMA, CATEGORY_ADOPTION_RECEIPT_SCHEMA } from "./category-governance-schemas";
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES, FeatureOwnership, FeatureReleaseStatus, SubscriptionRequestType, SubscriptionPlan } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
@@ -84,6 +88,7 @@ export interface ContractOperation {
 }
 
 const stringSchema: SchemaObject = { type: "string" };
+const rentalCategoryCodeSchema: SchemaObject = { type: "string", pattern: RENTAL_CATEGORY_CODE_PATTERN.source, minLength: 2, maxLength: 64 };
 const numberSchema: SchemaObject = { type: "number" };
 const booleanSchema: SchemaObject = { type: "boolean" };
 const objectSchema: SchemaObject = { type: "object", additionalProperties: true };
@@ -357,7 +362,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     oneOf: [
       { ...objectOf({ type: { type: "string", enum: ["tenant"] } }, ["type"]), additionalProperties: false },
       { ...objectOf({ type: { type: "string", enum: ["workspaces"] }, workspaceIds: { type: "array", items: stringSchema, minItems: 1 } }, ["type", "workspaceIds"]), additionalProperties: false },
-      { ...objectOf({ type: { type: "string", enum: ["categories"] }, categoryCodes: { type: "array", items: { type: "string", enum: ["camera", "camping", "vehicle", "construction"] }, minItems: 1 } }, ["type", "categoryCodes"]), additionalProperties: false }
+      { ...objectOf({ type: { type: "string", enum: ["categories"] }, categoryCodes: { type: "array", items: { type: "string", pattern: RENTAL_CATEGORY_CODE_PATTERN.source, minLength: 2, maxLength: 64 }, minItems: 1 } }, ["type", "categoryCodes"]), additionalProperties: false }
     ]
   },
   CustomerMembershipBenefit: objectOf({
@@ -1203,7 +1208,8 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     {
       tenantCode: stringSchema,
       tenantName: stringSchema,
-      categoryCode: stringSchema,
+      categoryCode: rentalCategoryCodeSchema,
+      categoryVersionId: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S" },
       operator: stringSchema,
       adminAccount: stringSchema,
       adminDisplayName: stringSchema,
@@ -1211,7 +1217,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       storeName: stringSchema,
       storeCode: stringSchema
     },
-    ["tenantCode", "tenantName", "categoryCode", "operator", "adminAccount", "adminDisplayName"]
+    ["tenantCode", "tenantName", "categoryCode", "adminAccount", "adminDisplayName"]
   ),
   UpdateTenantRequest: objectOf(
     { tenantName: stringSchema },
@@ -1687,6 +1693,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       tenantCode: stringSchema,
       workspace: ref("ClientWorkspaceSummary"),
       categoryCode: stringSchema,
+      categoryMetadata: objectOf({
+        structureVersion: { type: "integer", enum: [1] }, categoryVersionId: stringSchema,
+        definitionVersion: stringSchema, name: stringSchema,
+        icon: { type: "string", enum: [...RENTAL_CATEGORY_ICON_CODES] },
+        fields: arrayOf(objectOf({ code: stringSchema, label: stringSchema,
+          type: { type: "string", enum: ["string", "number", "boolean", "date", "select"] }, unit: stringSchema, options: arrayOf(stringSchema)
+        }, ["code", "label", "type"], false))
+      }, ["structureVersion", "definitionVersion", "name", "fields"], false),
       timeZone: stringSchema,
       terminology: objectOf({
         itemLabel: stringSchema,
@@ -1699,7 +1713,12 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
         usageMetricLabel: stringSchema
       }, ["itemLabel", "itemGroupLabel", "assetLabel", "fulfillmentLabel", "pickupLabel", "returnLabel"], false),
       pricingUnits: arrayOf(objectOf({ code: stringSchema, label: stringSchema }, ["code", "label"], false)),
-      items: arrayOf(objectSchema),
+      items: arrayOf(objectOf({ id: stringSchema, code: stringSchema, name: stringSchema, description: stringSchema,
+        inventoryMode: stringSchema, images: arrayOf(objectOf({ url: stringSchema, alt: stringSchema }, ["url"], false)),
+        attributes: objectOf({}, [], { oneOf: [stringSchema, numberSchema, booleanSchema] }),
+        attributeLabels: objectOf({}, [], stringSchema),
+        startingPrice: objectOf({ amount: numberSchema, unit: stringSchema, currency: stringSchema }, ["amount", "unit", "currency"], false)
+      }, ["id", "code", "name", "inventoryMode"], false)),
       pricingGroups: arrayOf(objectSchema),
       services: arrayOf(objectSchema),
       locations: arrayOf(objectSchema),
@@ -2713,12 +2732,20 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       ? ['rental-os:order:view', 'rental-os:order:create', 'rental-os:price:manage'] : ['rental-os:order:view'], authRequired: true, requestSchema,
     summary: 'Current owner, scope, original resource and action policy are rechecked. Financial observations include exact integer-atom amounts for the visible page only: reserved, pending, settled, released reservation and settled excess, separated by unit and currency. Missing records are not zero consumption, and page amounts are neither whole-task totals nor supplier invoices. Performance observations include original recorded budget-gate rejections in a bounded invocation window: absence is not admission success and rejection is not release evidence. Fixed scene aggregation can consume original selected-quote approval/Core receipts or notification-settings preparation and waiting/receipt readers even while new execution is closed. Read-only observation without a model, runner start, execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),
   { method: "get", path: "/api/rental/v1/category-adoption/candidates", tag: "Rental Core", operationId: "listCategoryAdoptionCandidates", summary: "List same-category published target IDs and labels allowed for the session tenant/space; operation=upgrade|restore; no bodies, pilot lists or platform drafts", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
-  { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "previewCategoryAdoptionPreparation", summary: "Read current-session-space candidate fields, differences and staged inputs; operation=upgrade|restore, no active facts changed", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
-  { method: "put", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparation", summary: "Stage target-version model/asset attribute patches with source and entity revision checks; does not adopt or publish prices/rules", permissions: ["rental-os:category:adopt"], requestSchema: objectOf({
-    expectedSourceVersionId: stringSchema, expectedSourceRevision: { type: "integer", minimum: 0 }, expectedPreparationRevision: { type: "integer", minimum: 0 },
-    operation: { type: "string", enum: ["upgrade", "restore"] }, reason: stringSchema,
-    patches: arrayOf(objectOf({ entityType: { type: "string", enum: ["item_group", "asset"] }, entityId: stringSchema, expectedUpdatedAt: { type: "string", format: "date-time" }, values: objectSchema }, ["entityType", "entityId", "expectedUpdatedAt", "values"], false))
-  }, ["expectedSourceVersionId", "expectedSourceRevision", "expectedPreparationRevision", "operation", "reason", "patches"], false), responseSchema: "GenericObject" },
+  { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "previewCategoryAdoptionPreparation", summary: "Read current-session-space candidate fields, differences and staged inputs; metadataOnly omits entity rows and patches (not a statement that the space is empty). Conditional readiness uses current scoped model and fulfillment facts. No active facts changed", permissions: ["rental-os:category:adopt"], parameters: [{ name: "operation", in: "query", schema: { type: "string", enum: ["upgrade", "restore"] } }, { name: "metadataOnly", in: "query", schema: booleanSchema }], responseSchema: CATEGORY_PREPARATION_PREVIEW_SCHEMA },
+  { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation/entities", tag: "Rental Core", operationId: "listCategoryAdoptionPreparationEntities", summary: "Read one bounded cursor page of authorized current entities and their staged fields; current policy/scope and entity revision remain separate from adoption readiness", permissions: ["rental-os:category:adopt"], parameters: [
+    { name: "entityType", in: "query", required: true, schema: { type: "string", enum: ["item_group", "asset"] } },
+    { name: "entityId", in: "query", schema: { type: "string", minLength: 1, maxLength: 191 } },
+    { name: "operation", in: "query", schema: { type: "string", enum: ["upgrade", "restore"] } },
+    { name: "after", in: "query", schema: { type: "string", minLength: 1, maxLength: 191 } },
+    { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } },
+    { name: "search", in: "query", schema: { type: "string", maxLength: 100 } }
+  ], responseSchema: CATEGORY_PREPARATION_ENTITY_PAGE_SCHEMA },
+  { method: "put", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparation", summary: "Legacy full preparation save with source/entity revisions; refuses to overwrite a batched collection and never adopts or publishes prices/rules", permissions: ["rental-os:category:adopt"], requestSchema: CATEGORY_PREPARATION_REQUEST_SCHEMA, responseSchema: CATEGORY_PREPARATION_SAVE_RESULT_SCHEMA },
+  { method: "patch", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparationBatch", summary: "Accumulate or explicitly withdraw staged fields under the current session space; original batch receipt, collection revision and staged inputs commit together. Partial preparation is not adoption readiness; current permissions and target policy are rechecked on replay", permissions: ["rental-os:category:adopt"], requestSchema: CATEGORY_PREPARATION_BATCH_REQUEST_SCHEMA, responseSchema: CATEGORY_PREPARATION_SAVE_RESULT_SCHEMA },
+  { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation/batches/{batchId}", tag: "Rental Core", operationId: "readCategoryAdoptionPreparationBatch", summary: "Read only the current actor's original preparation receipt in the current authorized space. Missing evidence is unknown, not proof that the original request rolled back", permissions: ["rental-os:category:adopt"], responseSchema: CATEGORY_PREPARATION_BATCH_READ_SCHEMA },
+  { method: "post", path: "/api/rental/v1/category-adoption/{targetId}/adopt", tag: "Rental Core", operationId: "adoptRentalCategoryVersion", summary: "Explicit upgrade or restore: current whole-space access, source/preparation/policy revisions and bounded final checks; staged data, claims, binding, adoption audit and original-key receipt commit together. Non-production test entry stays disabled by default", permissions: ["rental-os:category:adopt"], requestSchema: CATEGORY_ADOPTION_REQUEST_SCHEMA, responseSchema: CATEGORY_ADOPTION_RESULT_SCHEMA },
+  { method: "get", path: "/api/rental/v1/category-adoption/operations/{operationKey}", tag: "Rental Core", operationId: "readRentalCategoryAdoptionReceipt", summary: "Read the original actor's adopted receipt under current workspace authorization and its original audit; later policy or binding changes do not invalidate it. Missing evidence remains unknown, never permission to rerun", permissions: ["rental-os:category:adopt"], responseSchema: CATEGORY_ADOPTION_RECEIPT_SCHEMA },
   ...([
     ["get", "", "listPlatformRentalCategoryGovernance", "List category governance summaries", "view"],
     ["get", "/capability-catalog", "rentalCategoryCapabilityCatalog", "Read executable capability and pricing catalog", "view"],
@@ -2738,6 +2765,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     method, path: `/api/platform/rental-categories${suffix}`, tag: "Platform Rental Core",
     operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema, responseSchema: "GenericObject"
   })),
+  { method: "post", path: "/api/platform/rental-categories", tag: "Platform Rental Core", operationId: "createRentalCategory",
+    summary: "Create an independent unopened identity and draft from a verified template or immutable source; original request and audit commit together. Dynamic creation is closed by default.",
+    permissions: ["system:rental-category:edit"], requestSchema: CATEGORY_CREATION_REQUEST_SCHEMA, responseSchema: CATEGORY_CREATED_VERSION_SCHEMA },
+  { method: "post", path: "/api/platform/rental-categories/creation-preview", tag: "Platform Rental Core", operationId: "previewRentalCategoryCreation",
+    summary: "Preview controlled selections and the resulting definition fingerprint without writing merchant facts or opening the category",
+    permissions: ["system:rental-category:edit"], requestSchema: CATEGORY_CREATION_PREVIEW_REQUEST_SCHEMA, responseSchema: CATEGORY_CREATION_PREVIEW_SCHEMA },
+  { method: "get", path: "/api/platform/rental-categories/creation-requests/{key}", tag: "Platform Rental Core", operationId: "readRentalCategoryCreationReceipt",
+    summary: "Read this platform actor's original creation receipt; unknown does not prove non-commit",
+    permissions: ["system:rental-category:edit"], responseSchema: CATEGORY_CREATION_RECEIPT_SCHEMA },
   {
     method: "post",
     path: "/api/public/demo-requests",
@@ -3143,6 +3179,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: ["system:tenant:bootstrap", "system:tenant:manage"],
     responseSchema: "TenantBootstrapPreview"
   },
+  { method: "get", path: "/api/platform/tenant-bootstrap/category-options", tag: "Platform Rental Core", operationId: "getRentalCategoryOpeningOptions",
+    summary: "Read bounded Core-owned options eligible for a new tenant or the specified existing tenant. Published and explicit builtin-demo sources are distinct; metadata does not authorize creation.",
+    permissions: ["system:tenant:bootstrap", "system:tenant:manage"],
+    parameters: [{ name: "tenantId", in: "query", schema: { type: "string", minLength: 1, maxLength: 191 } }, { name: "search", in: "query", schema: { type: "string", maxLength: 100 } }],
+    responseSchema: objectOf({ structureVersion: { type: "integer", enum: [1] }, source: { type: "string", enum: ["published", "builtin_demo"] }, truncated: booleanSchema,
+      options: { type: "array", maxItems: 100, items: objectOf({ categoryCode: rentalCategoryCodeSchema, name: { type: "string", maxLength: 100 }, nameEn: { type: "string", maxLength: 100 },
+        versionId: { type: "string", maxLength: 191 }, versionLabel: { type: "string", maxLength: 64 }, recommended: booleanSchema, defaultWorkspaceName: { type: "string", maxLength: 100 } },
+      ["categoryCode", "name", "recommended", "defaultWorkspaceName"], false) } }, ["structureVersion", "source", "truncated", "options"], false) },
   {
     method: "post",
     path: "/api/platform/tenant-bootstrap",
@@ -3765,14 +3809,28 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("post", "/api/platform/official-calendars/{id}/versions", "OfficialCalendarSource", "registerOfficialCalendarSourceVersion", "Register a new annual version of a public official calendar source", ["system:calendar-source:manage"]),
   // SUB-01 SaaS 版本订阅（§5.2/§7/§8）。租户端 platform/subscription（单数）自读/申请；平台端 platform/subscriptions（复数）跨租户管理，守卫另有 fail-closed。
   backlogOperation("get", "/api/platform/subscription/view", "Subscription", "getTenantSubscriptionView", "Get the calling tenant's subscription aggregate view", ["rental-os:subscription:view"]),
+  { method: "get", path: "/api/platform/subscription/category-labels", tag: "Subscription", operationId: "getTenantSubscriptionCategoryLabels",
+    summary: "Read Core-owned published category labels visible to this tenant; existing spaces remain labelled after new opening stops",
+    permissions: ["rental-os:subscription:view"], responseSchema: arrayOf(objectOf({ code: rentalCategoryCodeSchema, name: { type: "string", maxLength: 100 } }, ["code", "name"], false)) },
   backlogOperation("get", "/api/platform/subscription/reminder", "Subscription", "getTenantSubscriptionReminder", "Get the authenticated tenant's expiry summary without commercial details", []),
-  backlogOperation("post", "/api/platform/subscription/requests", "Subscription", "submitTenantSubscriptionRequest", "Submit an upgrade/renew/consult request for the calling tenant", ["rental-os:subscription:manage"]),
+  { ...backlogOperation("post", "/api/platform/subscription/requests", "Subscription", "submitTenantSubscriptionRequest", "Submit an upgrade/renew/consult request for the calling tenant", ["rental-os:subscription:manage"]),
+    requestSchema: objectOf({ type: { type: "string", enum: Object.values(SubscriptionRequestType) }, targetPlan: { type: "string", enum: Object.values(SubscriptionPlan) },
+      moduleIntent: { type: "array", maxItems: 100, uniqueItems: true, items: rentalCategoryCodeSchema }, contactName: { type: "string", maxLength: 120 }, contactPhone: { type: "string", maxLength: 32 },
+      note: { type: "string", maxLength: 2000 }, dedupeKey: { type: "string", minLength: 1, maxLength: 191, pattern: "\\S" } }, ["type", "dedupeKey"], false) },
   backlogOperation("post", "/api/platform/subscription/requests/{id}/cancel", "Subscription", "cancelTenantSubscriptionRequest", "Cancel the calling tenant's own pending request", ["rental-os:subscription:manage"]),
   backlogOperation("get", "/api/platform/subscriptions", "Subscription", "listTenantSubscriptions", "List tenant subscriptions (plan/serviceStatus/dueWithin/keyword filters)", ["system:tenant:subscription:manage"]),
   backlogOperation("get", "/api/platform/subscriptions/feature-catalog", "Subscription", "listSubscriptionFeatureCatalog", "List the platform feature catalog", ["system:tenant:subscription:manage"]),
+  { method: "get", path: "/api/platform/subscriptions/category-labels", tag: "Subscription", operationId: "getPlatformSubscriptionCategoryLabels",
+    summary: "Read minimal Core-owned published category identities for subscription catalog maintenance; no tenant facts or draft definitions",
+    permissions: ["system:tenant:subscription:manage"], responseSchema: arrayOf(objectOf({ code: rentalCategoryCodeSchema, name: { type: "string", maxLength: 100 } }, ["code", "name"], false)) },
   backlogOperation("get", "/api/platform/subscriptions/standard-prices", "Subscription", "listSubscriptionStandardPrices", "List standard plan prices", ["system:tenant:subscription:manage"]),
   backlogOperation("patch", "/api/platform/subscriptions/requests/{id}", "Subscription", "handleSubscriptionRequest", "Handle (process/reject) a subscription request", ["system:tenant:subscription:manage"]),
-  backlogOperation("put", "/api/platform/subscriptions/feature-catalog/{code}", "Subscription", "upsertSubscriptionFeatureCatalog", "Upsert a feature catalog entry (full PUT)", ["system:tenant:subscription:manage"]),
+  { ...backlogOperation("put", "/api/platform/subscriptions/feature-catalog/{code}", "Subscription", "upsertSubscriptionFeatureCatalog", "Upsert a feature catalog entry (full PUT)", ["system:tenant:subscription:manage"]),
+    requestSchema: objectOf({ code: { type: "string", minLength: 1, maxLength: 191 }, name: { type: "string", minLength: 1, maxLength: 191 }, module: { type: "string", minLength: 1, maxLength: 191 },
+      categories: { type: "array", maxItems: 100, uniqueItems: true, items: rentalCategoryCodeSchema }, defaultOwnership: { type: "string", enum: Object.values(FeatureOwnership) },
+      currentOwnership: { type: "string", enum: Object.values(FeatureOwnership) }, releaseStatus: { type: "string", enum: Object.values(FeatureReleaseStatus) },
+      valueText: stringSchema, prerequisiteText: stringSchema, externalFeeNote: stringSchema, contentVersion: { type: "string", maxLength: 64 }, reason: { type: "string", maxLength: 512 } },
+    ["code", "name", "module", "categories", "defaultOwnership", "currentOwnership", "releaseStatus"], false) },
   backlogOperation("put", "/api/platform/subscriptions/standard-prices/{plan}", "Subscription", "setSubscriptionStandardPrice", "Set a standard plan price", ["system:tenant:subscription:manage"]),
   backlogOperation("get", "/api/platform/subscriptions/{tenantId}", "Subscription", "getTenantSubscriptionDetail", "Get one tenant's subscription detail", ["system:tenant:subscription:manage"]),
   backlogOperation("post", "/api/platform/subscriptions/{tenantId}/provision", "Subscription", "provisionTenantSubscription", "Provision a tenant subscription", ["system:tenant:subscription:manage"]),

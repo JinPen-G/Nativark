@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { getRequestDataScope, getRequestLocationIds, getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
+  isRentalCategoryCode,
   CreateBusinessWorkspaceRequest,
   SaveWorkspaceMemberRequest,
   ChangeCustomerAccountStatusRequest,
@@ -51,6 +52,7 @@ import {
   TenantBootstrapPreview,
   TenantBootstrapRequest,
   TenantBootstrapResult,
+  type RentalCategoryOpeningOptionsQuery,
   TenantStatus,
   TenantSummary,
   UpdateTenantRequest,
@@ -64,7 +66,7 @@ import {
   resolveTenantIdForQuery
 } from "../../common/data-permission";
 import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
-import { PlatformRepository } from "./platform.repository";
+import { PlatformRepository, type WorkspaceSessionIdentity } from "./platform.repository";
 import { MembershipService } from "./membership.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerOperationsService } from "./customer-operations.service";
@@ -1313,9 +1315,17 @@ export class PlatformService {
     if (!tenantCode || !tenantName || !adminAccount || !adminDisplayName || !input.categoryCode) {
       throw new BadRequestException("租户编码、名称、经营品类和管理员信息不能为空");
     }
-    if (!Object.values(RentalCategoryCode).includes(input.categoryCode)) {
+    if (!isRentalCategoryCode(input.categoryCode)) {
       throw new BadRequestException("经营品类不存在");
     }
+    if (!this.useMysqlDataSource() && !RENTAL_CATEGORY_DEFINITIONS.some((category) => category.code === input.categoryCode)) {
+      throw new ConflictException("动态品类需要持久化品类目录与发布版本");
+    }
+    if (input.categoryVersionId !== undefined && (typeof input.categoryVersionId !== "string" || !input.categoryVersionId.trim() || input.categoryVersionId.length > 191)) {
+      throw new BadRequestException("请选择合法的品类发布版本");
+    }
+    if (input.categoryVersionId && !this.useMysqlDataSource()) throw new ConflictException("明确选版需要持久化品类目录与发布版本");
+    if (this.useMysqlDataSource() && !this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁租户");
     if (!/^[a-z][a-z0-9_-]{1,31}$/.test(tenantCode)) {
       throw new BadRequestException("租户编码必须以小写字母开头，只能包含小写字母、数字、下划线和短横线");
     }
@@ -1332,7 +1342,10 @@ export class PlatformService {
         // 需求 4.1：品类配置必须与租户档案同事务创建，任一步失败整体回滚，
         // 不留"租户和管理员已建、品类配置没建"的半成品租户。
         async (tx, tenantId) => {
-          await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, tx, input.currency);
+          await this.rentalCoreService!.initializeTenant(tenantId, input.categoryCode, tx, input.currency,
+            { categoryVersionId: input.categoryVersionId, actorId: currentUser!.id });
+          const category = await this.rentalCoreService!.getWorkspaceCategoryInTransaction(tenantId, `ws_${tenantId}`, input.categoryCode, tx);
+          return { categoryName: category.name };
         }
       );
       // bootstrapTenant 的配置写入刚刚随仓储事务提交；现在才可发布/持久化缓存。
@@ -1436,6 +1449,12 @@ export class PlatformService {
     };
   }
 
+  async getRentalCategoryOpeningOptions(query: RentalCategoryOpeningOptionsQuery, currentUser?: SystemUserRow) {
+    this.assertSaasAdmin(currentUser);
+    if (!this.rentalCoreService) throw new ConflictException("Rental品类目录未装配");
+    return this.rentalCoreService.getCategoryOpeningOptions(query, this.useMysqlDataSource() ? "published" : "builtin_demo");
+  }
+
   listTenants(currentUser?: SystemUserRow) {
     this.assertSaasAdmin(currentUser);
     if (this.useMysqlDataSource()) {
@@ -1504,12 +1523,13 @@ export class PlatformService {
   ) {
     this.assertSaasAdmin(currentUser);
     this.requireWorkspaceDataSource();
+    if (!this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁空间");
     await this.platformRepository.getTenant(tenantId);
     const result = await this.platformRepository.createBusinessWorkspaceForTenant(
       tenantId,
       input,
       async (tx, workspaceId) => {
-        await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+        await this.rentalCoreService!.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
         // 与 createBusinessWorkspace 同一口径：必选能力与空间档案原子创建。
         await this.initializeWorkspaceCapabilities(
           tenantId,
@@ -1928,9 +1948,10 @@ export class PlatformService {
 
   async createBusinessWorkspace(input: CreateBusinessWorkspaceRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
+    if (!this.rentalCoreService) throw new ConflictException("Rental初始化服务未装配，不能创建租赁空间");
     // 需求 4.1：空间档案与其品类配置同事务创建，任一步失败整体回滚。
     const result = await this.platformRepository.createBusinessWorkspace(input, currentUser, async (tx, workspaceId, tenantId) => {
-      await this.rentalCoreService?.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
+      await this.rentalCoreService!.registerWorkspace(workspaceId, tenantId, input.categoryCode, tx);
       // Review P1-3：品类必选能力必须与空间档案原子创建。放在同一 tx 里，
       // 任一步失败则空间与能力实例一起回滚，不会留下「空间已建、能力没开」的半成品
       // ——那种空间在正式经营模式下连报价都做不了。
@@ -2696,6 +2717,16 @@ export class PlatformService {
   async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow) {
     if (!this.useMysqlDataSource()) return tenantUser ?? this.findUserById(userId);
     return this.platformRepository.findWorkspaceScopedUser(userId, workspaceId, tenantUser);
+  }
+
+  lockWorkspaceSessionUser(tx: Prisma.TransactionClient, expected: WorkspaceSessionIdentity) {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException("空间事务授权需要持久化身份来源，演示身份不能替代");
+    return this.platformRepository.lockWorkspaceSessionUser(tx, expected);
+  }
+
+  readWorkspaceSessionUser(tx: Prisma.TransactionClient, expected: WorkspaceSessionIdentity) {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException("空间事务授权需要持久化身份来源");
+    return this.platformRepository.readWorkspaceSessionUser(tx, expected);
   }
 
   /**

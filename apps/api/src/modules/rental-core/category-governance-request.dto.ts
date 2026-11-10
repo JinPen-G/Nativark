@@ -1,5 +1,35 @@
-import type { ArchiveCategoryDraftRequest, CreateCategoryDraftRequest, PatchCategoryDraftRequest, PublishCategoryDraftRequest, SaveCategoryOpeningRequest, SaveCategoryVersionPolicyRequest } from "@rental-os/shared";
+import { RENTAL_CATEGORY_TEMPLATE_IDS, RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, RentalInventoryMode,
+  type PreviewRentalCategoryCreationRequest, type CreateRentalCategoryRequest,
+  type ArchiveCategoryDraftRequest, type CreateCategoryDraftRequest, type PatchCategoryDraftRequest, type PublishCategoryDraftRequest, type SaveCategoryOpeningRequest, type SaveCategoryVersionPolicyRequest } from "@rental-os/shared";
 import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsInt, IsObject, IsOptional, IsString, Matches, MaxLength, Min } from "class-validator";
+
+export class PreviewRentalCategoryCreationDto implements PreviewRentalCategoryCreationRequest {
+  @IsString() @Matches(new RegExp(RENTAL_CATEGORY_CODE_PATTERN, "u")) code!: string;
+  @IsString() @Matches(/\S/u) @MaxLength(100) name!: string;
+  @IsOptional() @IsIn(RENTAL_CATEGORY_TEMPLATE_IDS) templateId?: PreviewRentalCategoryCreationRequest["templateId"];
+  @IsOptional() @IsString() @Matches(/\S/u) @MaxLength(191) sourceVersionId?: string;
+  @IsString() @Matches(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\s\S])/u) versionLabel!: string;
+  @IsArray() @ArrayMaxSize(4) @ArrayUnique() @IsIn(Object.values(RentalInventoryMode), { each: true }) inventoryModes!: PreviewRentalCategoryCreationRequest["inventoryModes"];
+  @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsIn(RENTAL_PRICING_UNIT_CODES, { each: true }) pricingUnits!: PreviewRentalCategoryCreationRequest["pricingUnits"];
+  @IsIn(RENTAL_PRICING_UNIT_CODES) defaultPricingUnit!: PreviewRentalCategoryCreationRequest["defaultPricingUnit"];
+  @IsArray() @ArrayMaxSize(16) @ArrayUnique() @IsIn(RENTAL_FULFILLMENT_MODES, { each: true }) fulfillmentModes!: PreviewRentalCategoryCreationRequest["fulfillmentModes"];
+  @IsArray() @ArrayMaxSize(100) @ArrayUnique() @IsIn(RENTAL_CAPABILITY_CODES, { each: true }) capabilityCodes!: PreviewRentalCategoryCreationRequest["capabilityCodes"];
+}
+export class CreateRentalCategoryDto implements CreateRentalCategoryRequest {
+  @IsString() @Matches(new RegExp(RENTAL_CATEGORY_CODE_PATTERN, "u")) code!: string;
+  @IsString() @Matches(/\S/u) @MaxLength(100) name!: string;
+  @IsOptional() @IsIn(RENTAL_CATEGORY_TEMPLATE_IDS) templateId?: PreviewRentalCategoryCreationRequest["templateId"];
+  @IsOptional() @IsString() @Matches(/\S/u) @MaxLength(191) sourceVersionId?: string;
+  @IsString() @Matches(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\s\S])/u) versionLabel!: string;
+  @IsArray() @ArrayMaxSize(4) @ArrayUnique() @IsIn(Object.values(RentalInventoryMode), { each: true }) inventoryModes!: PreviewRentalCategoryCreationRequest["inventoryModes"];
+  @IsArray() @ArrayMaxSize(20) @ArrayUnique() @IsIn(RENTAL_PRICING_UNIT_CODES, { each: true }) pricingUnits!: PreviewRentalCategoryCreationRequest["pricingUnits"];
+  @IsIn(RENTAL_PRICING_UNIT_CODES) defaultPricingUnit!: PreviewRentalCategoryCreationRequest["defaultPricingUnit"];
+  @IsArray() @ArrayMaxSize(16) @ArrayUnique() @IsIn(RENTAL_FULFILLMENT_MODES, { each: true }) fulfillmentModes!: PreviewRentalCategoryCreationRequest["fulfillmentModes"];
+  @IsArray() @ArrayMaxSize(100) @ArrayUnique() @IsIn(RENTAL_CAPABILITY_CODES, { each: true }) capabilityCodes!: PreviewRentalCategoryCreationRequest["capabilityCodes"];
+  @IsString() @Matches(/^[a-f0-9]{64}(?![\s\S])/u) expectedDefinitionHash!: string;
+  @IsString() @Matches(/^[A-Za-z0-9._:-]{8,128}(?![\s\S])/u) idempotencyKey!: string;
+  @IsString() @Matches(/\S/u) @MaxLength(512) reason!: string;
+}
 
 export class CreateCategoryDraftDto implements CreateCategoryDraftRequest {
   @IsString() @Matches(/\S/u) @MaxLength(191) sourceVersionId!: string;

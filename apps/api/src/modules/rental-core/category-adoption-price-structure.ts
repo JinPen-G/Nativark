@@ -1,7 +1,7 @@
 import { plainToInstance } from "class-transformer";
 import { validateSync } from "class-validator";
 import type { RentalDayType, RentalPricingRate } from "@rental-os/shared";
-import { RentalPricingRateInputDto } from "./rental-config-request.dto";
+import { RentalFulfillmentFeeInputDto, RentalPricingRateInputDto } from "./rental-config-request.dto";
 import { assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowSpanMinutes } from "./rental-price-adjustments";
 import { categoryCurrentAndFuture, type CategoryTimedConfiguration } from "./category-adoption-business-compatibility";
 
@@ -53,7 +53,7 @@ export function categoryAdoptionRateErrors(raw: unknown): string[] {
 export function categoryAdoptionPriceStructure(input: {
   prices: CategoryTimedConfiguration<unknown>[];
   adjustments: Array<{ id: string; status: string; finalRates: unknown }>;
-  plans: Array<{ id: string; status: string; effectiveTo: Date | null; rates: unknown }>;
+  plans: Array<{ id: string; status: string; effectiveTo: Date | null; rates: unknown; fulfillmentFees?: unknown }>;
 }, now: Date) {
   const blockers: Array<{ domain: "price_structure"; id: string; message: string }> = [];
   const check = (id: string, value: unknown, allowEmpty = false) => {
@@ -66,6 +66,19 @@ export function categoryAdoptionPriceStructure(input: {
   };
   for (const row of categoryCurrentAndFuture(input.prices, now)) check(row.id, row.value, true);
   for (const row of input.adjustments) if (row.status === "pending") check(row.id, row.finalRates);
-  for (const row of input.plans) if (row.status === "enabled" && (!row.effectiveTo || row.effectiveTo > now)) check(row.id, row.rates);
+  for (const row of input.plans) if (row.status === "enabled" && (!row.effectiveTo || row.effectiveTo > now)) {
+    check(row.id, row.rates);
+    if (row.fulfillmentFees === null || row.fulfillmentFees === undefined) continue;
+    const fees = row.fulfillmentFees;
+    const seen = new Set<string>();
+    const invalid = !Array.isArray(fees) || fees.some(fee => {
+      if (!fee || typeof fee !== "object" || Array.isArray(fee) || Object.keys(fee).some(key => ["__proto__", "constructor", "prototype"].includes(key))) return true;
+      const projection = plainToInstance(RentalFulfillmentFeeInputDto, fee, { enableImplicitConversion: false });
+      const errors = validateSync(projection, { whitelist: true, forbidNonWhitelisted: true, forbidUnknownValues: true, validationError: { target: false, value: false } });
+      if (errors.length || seen.has(projection.mode)) return true;
+      seen.add(projection.mode); return false;
+    });
+    if (invalid) blockers.push({ domain: "price_structure", id: `${row.id}:fulfillmentFees`, message: "履约费缺少合法金额、方式重复或包含未知字段，请通过定价配置处理" });
+  }
   return { valid: blockers.length === 0, blockers, complete: false as const, scope: "executable_price_contract_and_parameter_combinations" };
 }

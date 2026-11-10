@@ -20,7 +20,7 @@ const browserWindow = {
   addEventListener() {}
 };
 const iconNames = [
-  "ApartmentOutlined", "ApiOutlined", "AppstoreOutlined", "BoxPlotOutlined",
+  "ApartmentOutlined", "ApiOutlined", "AppstoreOutlined", "BgColorsOutlined", "BoxPlotOutlined", "CrownOutlined", "GiftOutlined", "MobileOutlined",
   "CalendarOutlined", "ControlOutlined", "DashboardOutlined", "FileSearchOutlined",
   "FileTextOutlined", "FormOutlined", "FundOutlined", "IdcardOutlined",
   "SafetyCertificateOutlined", "SettingOutlined", "ShopOutlined", "TagsOutlined",
@@ -28,11 +28,12 @@ const iconNames = [
 ];
 const iconStubs = Object.fromEntries(iconNames.map((name) => [name, () => null]));
 const externalModules = new Set([
-  "@nestjs/common", "zustand", "react/jsx-runtime", "node:crypto", "node:async_hooks"
+  "@nestjs/common", "zustand", "react/jsx-runtime", "node:crypto", "node:async_hooks", "zod"
 ]);
 const sourceModules = new Set([
   "apps/admin/src/app/navigation.tsx",
   "apps/admin/src/app/navigation-terminology.ts",
+  "apps/admin/src/app/categoryGovernancePreview.ts",
   "apps/admin/src/features/auth/authStore.ts",
   "apps/api/src/common/api-auth.guard.ts",
   "apps/api/src/common/staff-api-policy.ts",
@@ -41,7 +42,14 @@ const sourceModules = new Set([
   "apps/api/src/common/request-identity.ts",
   "apps/api/src/common/password.ts",
   "apps/api/src/common/data-permission.ts",
+  "apps/api/src/common/platform-ai-access-policy.ts",
   "apps/api/src/modules/platform/platform.repository.ts",
+  "apps/api/src/modules/rental-core/category-governance-policy.ts",
+  "apps/api/src/modules/rental-core/category-identity.ts",
+  "apps/api/src/modules/rental-core/rental-idempotency.repository.ts",
+  "apps/api/src/modules/rental-core/workspace-scope.ts",
+  "apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts",
+  "apps/api/src/modules/ai-native/business-events/return-exception-source.ts",
   "apps/api/src/modules/client/client-api.service.ts",
   "apps/api/src/modules/rental-core/rental-inspection-customer-response.ts"
 ]);
@@ -62,6 +70,13 @@ function loadSource(relativePath) {
   const compiled = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
     fileName: filename,
     reportDiagnostics: true,
+    // Supply the Vite host object to CommonJS tests; preserve all application branches.
+    transformers: { before: [context => node => ts.visitNode(node, function visit(child) {
+      if (ts.isMetaProperty(child) && child.keywordToken === ts.SyntaxKind.ImportKeyword) {
+        return ts.factory.createIdentifier("__fixtureImportMeta");
+      }
+      return ts.visitEachChild(child, visit, context);
+    })] },
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.CommonJS,
@@ -80,9 +95,10 @@ function loadSource(relativePath) {
   const nativeRequire = createRequire(filename);
   const localRequire = (request) => {
     if (request === "@rental-os/shared") return loadSource("packages/shared/src/index.ts");
-    if (request === "@ant-design/icons") return iconStubs; // Presentation only, not permission policy.
+    if (request === "@ant-design/icons" || request === "@/components/ui/icons") return iconStubs; // Presentation only, not permission policy.
     if (request === "@/api/platform") return { api: noAccess("auth HTTP") };
-    if (request === "@/app/queryClient") return { clearSessionQueryCache() { assert.fail("Unexpected query cache access"); } };
+    if (request === "@/api/http") return { onSessionRefreshed() { return () => {}; } }; // Listener registration only; HTTP remains unavailable.
+    if (request === "@/app/queryClient") return { currentSessionEpoch: () => 0, clearSessionQueryCache() { assert.fail("Unexpected query cache access"); } };
     if (request === "@prisma/client") {
       // Only the enum used by the real toUserRow -> resolveUserDataScope path.
       // No PrismaClient and no repository query implementation are supplied.
@@ -91,14 +107,14 @@ function loadSource(relativePath) {
     if (externalModules.has(request)) return nativeRequire(request);
     if (request.startsWith(".")) {
       const dependency = path.resolve(path.dirname(filename), request);
-      const fullPath = path.extname(dependency) ? dependency : `${dependency}.ts`;
+      const fullPath = /\.[cm]?[jt]sx?$/u.test(dependency) ? dependency : `${dependency}.ts`;
       return loadSource(path.relative(root, fullPath));
     }
     throw new Error(`Unexpected dependency ${request} from ${normalized}`);
   };
-  new Function("exports", "require", "module", "__filename", "__dirname", "window",
+  new Function("exports", "require", "module", "__filename", "__dirname", "window", "__fixtureImportMeta",
     `${compiled.outputText}\n//# sourceURL=${filename.replace(/\\/gu, "/")}`
-  )(module.exports, localRequire, module, filename, path.dirname(filename), browserWindow);
+  )(module.exports, localRequire, module, filename, path.dirname(filename), browserWindow, { hot: undefined, env: { DEV: false } });
   return module.exports;
 }
 
@@ -442,6 +458,7 @@ function clientHarness(action, orderOwner) {
     },
     getProfile: () => ({ categoryCode: camera }),
     listCategories: () => [{ code: camera }],
+    getWorkspaceCategory: async (actualTenant) => { assert.equal(actualTenant, tenantId); return { code: camera }; },
     getBusinessSettings: () => ({}),
     listItemGroups: () => [], listPricingGroups: () => [], listCouponTemplates: () => [],
     listLocations: () => [], listOperators: () => [],

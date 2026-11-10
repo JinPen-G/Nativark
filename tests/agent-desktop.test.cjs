@@ -14,6 +14,8 @@ function load(relative, bindings = {}, replacements = []) {
   let source = fs.readFileSync(path.join(root, relative), "utf8");
   source = source.replace(/^export \* from ['"]([^'"]+)['"];?$/gm, (_, name) =>
     `Object.assign(module.exports, loadDependency(${JSON.stringify(name)}));`);
+  source = source.replace(/^import \{ (\w+(?:,\s*\w+)*) \} from ['"](\.[^'"]+)['"];?$/gm, (_, names, name) =>
+    `const { ${names} } = loadDependency(${JSON.stringify(name)});`);
   for (const [pattern, replacement] of replacements) source = source.replace(pattern, replacement);
   const exported = [];
   source = source.replace(/export (const|function|class) (\w+)/g, (_, kind, name) => {

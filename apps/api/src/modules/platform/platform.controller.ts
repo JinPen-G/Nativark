@@ -41,6 +41,7 @@ import {
   SecondConfirmationInputDto,
   SetUserStatusInputDto,
   TenantBootstrapDto,
+  RentalCategoryOpeningOptionsQueryDto,
   UpdateTenantDto,
   UpdateTenantStatusDto
 } from "./platform-request.dto";
@@ -574,6 +575,10 @@ export class PlatformController {
   @Get("tenant-bootstrap/preview")
   tenantBootstrapPreview() {
     return this.platformService.getTenantBootstrapPreview();
+  }
+  @Get("tenant-bootstrap/category-options")
+  rentalCategoryOpeningOptions(@Query() query: RentalCategoryOpeningOptionsQueryDto, @Req() req: RequestWithUser) {
+    return this.platformService.getRentalCategoryOpeningOptions(query, req.user);
   }
 
   @Post("tenant-bootstrap")

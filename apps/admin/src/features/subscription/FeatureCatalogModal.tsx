@@ -16,6 +16,7 @@ import {
 import { useLocale } from "@/app/locale";
 import { subscriptionApi } from "@/api/subscription";
 import { RELEASE_STATUS_LABEL } from "./subscriptionLabels";
+import { useSubscriptionCategoryLabels } from "./useSubscriptionCategoryLabels";
 
 /**
  * SUB-03 §3.3/§8 功能目录维护弹层：新增/编辑目录项并设当前归属。
@@ -30,6 +31,7 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
   const [form] = Form.useForm<UpsertFeatureCatalogRequest>();
   const queryClient = useQueryClient();
   const editing = Boolean(entry);
+  const categories = useSubscriptionCategoryLabels();
 
   const mutation = useMutation({
     mutationFn: (values: UpsertFeatureCatalogRequest) => subscriptionApi.upsertFeatureCatalog(values.code, values),
@@ -49,7 +51,9 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
   return (
     <Modal presentation="side" open={dismissal.visible} afterClose={dismissal.afterClose} title={editing ? t("编辑功能目录项") : t("新增功能目录项")} okText={t("保存")} confirmLoading={mutation.isPending}
       onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={() => { if (!mutation.isPending) dismissal.dismiss(); }} destroyOnHidden width={720}
-      closable={!mutation.isPending} keyboard={!mutation.isPending} maskClosable={!mutation.isPending} cancelButtonProps={{ disabled: mutation.isPending }}>
+      closable={!mutation.isPending} keyboard={!mutation.isPending} maskClosable={!mutation.isPending} cancelButtonProps={{ disabled: mutation.isPending }}
+      okButtonProps={{ disabled: categories.isLoading || Boolean(categories.error) }}>
+      {categories.error && <Alert type="error" title={t("品类目录读取失败，请重试")} />}
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
         message={t("当前归属选「基础版」即把该 PRO 功能公共下放给基础版；修改归属不会把未交付功能改成已上线，也不得静默停用基础版既有承诺。")} />
       <Form<UpsertFeatureCatalogRequest> form={form} layout="vertical" initialValues={initialValues} disabled={mutation.isPending} onFinish={(values) => mutation.mutate(values)}>
@@ -59,10 +63,7 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
         <Form.Item name="code" label={t("功能标识")} rules={[{ required: true }]}><Input disabled={editing} placeholder="camera.high_value_handover" /></Form.Item>
         <Form.Item name="module" label={t("模块")} rules={[{ required: true }]}><Input maxLength={64} /></Form.Item>
         <Form.Item name="categories" label={t("适用品类")}>
-          <Select mode="multiple" allowClear options={[
-            { value: "camera", label: t("摄影设备") }, { value: "camping", label: t("露营装备") },
-            { value: "vehicle", label: t("车辆载具") }, { value: "construction", label: t("工程设备") }
-          ]} />
+          <Select mode="multiple" allowClear loading={categories.isLoading} disabled={categories.isLoading || Boolean(categories.error)} options={categories.options} />
         </Form.Item>
           </FormSection> },
           { key: "availability", label: t("版本归属"), content: <FormSection title={t("版本归属")}>

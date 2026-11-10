@@ -42,9 +42,9 @@ export function ProductsPage() {
       const matchesSearch = !q || `${product.name} ${product.subtitle} ${product.tags.join(' ')}`.toLocaleLowerCase().includes(q);
       return matchesCategory && matchesSub && matchesSearch;
     });
-    if (sort === 'price-low') result.sort((a, b) => a.price - b.price);
-    if (sort === 'price-high') result.sort((a, b) => b.price - a.price);
-    if (sort === 'rating') result.sort((a, b) => b.rating - a.rating);
+    if (sort === 'price-low') result.sort((a, b) => a.price === undefined ? (b.price === undefined ? 0 : 1) : b.price === undefined ? -1 : a.currency === b.currency ? a.price - b.price : 0);
+    if (sort === 'price-high') result.sort((a, b) => a.price === undefined ? (b.price === undefined ? 0 : 1) : b.price === undefined ? -1 : a.currency === b.currency ? b.price - a.price : 0);
+    if (sort === 'rating') result.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1));
     return result;
   }, [tenant, localizeProduct, selectedCategory, selectedSub, search, sort]);
   // 真实按时段/门店过滤：仅真实模式 + 选定单一品类 + 有时段时，调公开可用性检索过滤到真正可租的型号。

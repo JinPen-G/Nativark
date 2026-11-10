@@ -30,18 +30,14 @@ export class AiQuoteRouteAuthority implements AiQuotePreviewAuthority {
   }
 }
 
-type ContextCore = Pick<RentalCoreService, 'getProfile' | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listItemGroups'
-  | 'listPricingGroups' | 'listCouponTemplates' | 'listLocations' | 'listOperators'>;
+type ContextCore = Pick<RentalCoreService, 'readBusinessContext'>;
 
 /** Same public Core sources as the manual controller, resolved under the
  * existing settings-read Guard and ALS. Expected scope is only a binding to
  * compare with the authenticated session, never a source of authority. */
 export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource {
   constructor(private readonly core: ContextCore, private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withRead'>) {
-    for (const method of ['getProfile', 'getWorkspaceCategory', 'getBusinessSettings', 'listItemGroups', 'listPricingGroups',
-      'listCouponTemplates', 'listLocations', 'listOperators'] as const) {
-      if (typeof core?.[method] !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
-    }
+    if (typeof core?.readBusinessContext !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     if (typeof routes?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<BusinessContext> {
@@ -51,13 +47,11 @@ export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource
       if (context.scope.kind !== 'workspace' || context.scope.tenantId !== scope.tenantId
         || context.scope.workspaceId !== scope.workspaceId) throw new ModelGatewayError('FORBIDDEN');
       const tenantId = context.scope.tenantId;
-      const category = await this.core.getWorkspaceCategory(tenantId);
-      const result = structuredClone({ profile: this.core.getProfile(tenantId), category,
-        settings: this.core.getBusinessSettings(tenantId), groups: this.core.listItemGroups(tenantId),
-        pricingGroups: this.core.listPricingGroups(tenantId), couponTemplates: this.core.listCouponTemplates(tenantId),
-        locations: this.core.listLocations(tenantId), operators: this.core.listOperators(tenantId) });
+      // Core owns the binding and detached configuration snapshot. Separate
+      // getters could combine values from before and after category adoption.
+      const result = structuredClone(await this.core.readBusinessContext(tenantId));
       if (result.profile.tenantId !== tenantId || result.settings.tenantId !== tenantId
-        || result.profile.categoryCode !== category.code) throw new ModelGatewayError('INVALID_RESPONSE');
+        || result.profile.categoryCode !== result.category.code) throw new ModelGatewayError('INVALID_RESPONSE');
       return result;
     });
   }

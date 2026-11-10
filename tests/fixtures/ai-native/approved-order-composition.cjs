@@ -164,6 +164,14 @@ async function approvedOrderHarness() {
     } };
   const core = {
     resolveWorkspaceId: () => { assert.equal(getRequestIdentity().workspaceId, 'workspace-a'); return 'workspace-a'; },
+    // This harness supplies synthetic configuration only. The real Core owns
+    // the committed snapshot/lock; no getter sequence here proves DB atomicity.
+    readBusinessContext: async function (tenantId) {
+      this.resolveWorkspaceId(tenantId);
+      return structuredClone({ profile: await this.getProfile(tenantId), category: await this.getWorkspaceCategory(tenantId),
+        settings: await this.getBusinessSettings(tenantId), groups: this.listItemGroups(tenantId), pricingGroups: this.listPricingGroups(tenantId),
+        couponTemplates: this.listCouponTemplates(tenantId), locations: this.listLocations(tenantId), operators: this.listOperators(tenantId) });
+    },
     getProfile: () => ({ categoryCode: 'camera' }), getWorkspaceCategory: async () => ({ code: 'camera' }), getBusinessSettings: () => ({}),
     listItemGroups: () => [], listPricingGroups: () => [], listCouponTemplates: () => [], listLocations: () => [], listOperators: () => [],
     prepareOrder: async (_tenant, request, name, storedQuote) => {

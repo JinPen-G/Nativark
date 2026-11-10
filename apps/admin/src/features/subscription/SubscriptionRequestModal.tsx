@@ -11,6 +11,7 @@ import { useLocale } from "@/app/locale";
 import { subscriptionApi } from "@/api/subscription";
 import { REQUEST_TYPE_LABEL } from "./subscriptionLabels";
 import { subscriptionError } from "./subscriptionOperations";
+import { useSubscriptionCategoryLabels } from "./useSubscriptionCategoryLabels";
 
 /**
  * SUB-02 §7.2 租户申请提交弹层。type 由入口按钮预置；targetPlan 由类型推导，不让用户改版本。
@@ -32,6 +33,7 @@ export function SubscriptionRequestModal({ open, type, onClose }: { open: boolea
   const queryClient = useQueryClient();
   useEffect(() => { if (open) form.resetFields(); }, [open, type, form]);
   const showModuleIntent = type === SubscriptionRequestType.UpgradeConsult || type === SubscriptionRequestType.UpgradePro;
+  const categories = useSubscriptionCategoryLabels();
 
   const mutation = useMutation({
     mutationFn: (values: FormValues) => {
@@ -81,10 +83,7 @@ export function SubscriptionRequestModal({ open, type, onClose }: { open: boolea
           </Row>
         <Form.Item name="moduleIntent" label={t("希望使用的模块（按品类，可多选）")} hidden={!showModuleIntent}>
           <Select mode="multiple" allowClear placeholder={t("仅表达意向，不保证规划项交付")}
-            options={[
-              { value: "camera", label: t("摄影设备") }, { value: "camping", label: t("露营装备") },
-              { value: "vehicle", label: t("车辆载具") }, { value: "construction", label: t("工程设备") }
-            ]} />
+            loading={categories.isLoading} disabled={categories.isLoading || Boolean(categories.error)} options={categories.options} />
         </Form.Item>
         <Form.Item name="note" label={t("需求说明（可选）")}><Input.TextArea rows={3} maxLength={500} showCount /></Form.Item>
         </FormSection>

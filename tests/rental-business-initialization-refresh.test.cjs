@@ -10,9 +10,9 @@ const stores = require("./helpers/absorbing-config-store.cjs");
   const coreStore = stores.createAbsorbingConfigStore();
   const core = new RentalCoreService(coreStore, stores.createAbsorbingFactStore());
   await core.onApplicationBootstrap();
-  const tenantId = "tenant_001", profile = core.getProfile(tenantId);
+  const tenantId = "tenant_001", profile = await core.getProfile(tenantId);
   const context = { profile, category: core.listCategories().find(row => row.code === profile.categoryCode),
-    settings: core.getBusinessSettings(tenantId), groups: core.listItemGroups(tenantId),
+    settings: await core.getBusinessSettings(tenantId), groups: core.listItemGroups(tenantId),
     pricingGroups: core.listPricingGroups(tenantId), locations: core.listLocations(tenantId) };
   const config = stores.createAbsorbingBusinessConfigStore();
   const service = new RentalBusinessService(config, stores.createAbsorbingBusinessFactStore(), coreStore);
@@ -50,9 +50,9 @@ const stores = require("./helpers/absorbing-config-store.cjs");
   const writes = [];
   scopedConfig.upsertPricingPlan = async plan => { writes.push({ tenantId: plan.tenantId, workspaceId: getRequestWorkspaceId() }); };
   await Promise.all(["tenant_001", "tenant_002"].map(id => runWithRequestIdentity({ tenantId: id, workspaceId: `ws_${id}` }, async () => {
-    const scopedProfile = core.getProfile(id);
+    const scopedProfile = await core.getProfile(id);
     scopedService.currentRule(id, { ...context, profile: scopedProfile,
-      category: core.listCategories().find(row => row.code === scopedProfile.categoryCode), settings: core.getBusinessSettings(id),
+      category: core.listCategories().find(row => row.code === scopedProfile.categoryCode), settings: await core.getBusinessSettings(id),
       groups: core.listItemGroups(id), pricingGroups: core.listPricingGroups(id) });
     await scopedService.persist(id);
   })));

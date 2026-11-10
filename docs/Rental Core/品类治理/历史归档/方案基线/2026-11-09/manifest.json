@@ -1,0 +1,31 @@
+{
+  "baseline": "44129cd009e5e5389cfc66a9a730eb0a398c080a",
+  "date": "2026-11-09",
+  "scope": "负责人确认品类治理需求优化、路径调整及Rental Core归属前的四册原文",
+  "files": [
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-需求.md",
+      "snapshot": "品类治理-需求.md",
+      "bytes": 45004,
+      "sha256": "d16bda3fa2786f7d2f7fa333e9829fe925b3aea95a0b393e03f9f0a64e08cd09"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-开发任务.md",
+      "snapshot": "品类治理-开发任务.md",
+      "bytes": 40272,
+      "sha256": "85505b7d309de68f81eceed56d9f83445a1059db6b3f5828e751d554dfcfab9b"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-开发记录.md",
+      "snapshot": "品类治理-开发记录.md",
+      "bytes": 16065,
+      "sha256": "dc9b3c4fd6d370268ad76010147fdfa03648e8c5bfc5d9661fe5dced82048844"
+    },
+    {
+      "source": "docs/Rental Core/品类治理/品类治理-协作接续.md",
+      "snapshot": "品类治理-协作接续.md",
+      "bytes": 8595,
+      "sha256": "0d8e5bd11bed70501325bab0473cd648ebb1a9f4f366d94242217a353d0e753d"
+    }
+  ]
+}

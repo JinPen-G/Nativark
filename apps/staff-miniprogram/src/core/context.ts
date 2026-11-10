@@ -9,8 +9,8 @@ import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
  * 工作上下文：当前经营空间的品类术语、资产字段、检查字段、能力、履约地点与当前地点。
  *
  * 多品类兼容的落点在这里：页面**不写死**“设备/相机/SN/出库”这类词，而是读 `terms()`；
- * 术语来自服务端品类定义（GET /rental/v1/categories，与 Web 后台同一事实源），未知品类用通用兜底。
- * 新增品类只需服务端补一条品类定义，小程序不改页面。
+ * 术语来自当前空间的服务端品类定义（GET /rental/v1/categories）。未加载时用通用术语；
+ * 实际刷新缺定义就拒绝，不以其他空间缓存或空字段替代。业务执行和新品类准入仍由 Core 决定。
  */
 export interface Terminology extends RentalCategoryTerminology {
   /** 资产集合的行业称呼（车队/库存）。 */
@@ -55,7 +55,6 @@ export const contextEvents = new Emitter<WorkspaceContext>();
 
 let cached: WorkspaceContext | undefined;
 let inflight: Promise<WorkspaceContext> | undefined;
-let categoryCache: RentalCategoryDefinition[] | undefined;
 let generation = 0;
 let cachedVersion = 0;
 
@@ -105,26 +104,27 @@ export function loadContext(force = false): Promise<WorkspaceContext> {
         applySessionContext(context);
         return context;
       }),
-      categoryCache ? Promise.resolve(categoryCache) : listCategories().then((rows) => (categoryCache = rows)),
+      listCategories(),
       listLocations().catch(() => [] as RentalFulfillmentLocation[])
     ]);
     assertOwner();
     const workspaceId = currentWorkspaceId();
     const workspace = currentWorkspace();
-    const categoryCode = session.tenant.categoryCode ?? workspace?.categoryCode ?? "";
+    const categoryCode = workspace?.categoryCode ?? session.tenant.categoryCode ?? "";
     const definition = categories.find((row) => row.code === categoryCode);
+    if (!definition) throw new Error("当前空间的品类定义缺失，请重新读取上下文或联系管理员");
     const enabledLocations = locations.filter((row) => row.status === "enabled");
     const saved = readLocationChoice(workspaceId);
     const context: WorkspaceContext = {
       workspaceId,
       categoryCode,
-      categoryName: session.tenant.categoryName ?? definition?.name ?? "",
+      categoryName: definition.name,
       terminology: toTerminology(definition),
-      assetFields: definition?.businessModel.assetFields ?? [],
-      inspectionFields: definition?.businessModel.defaults.inspectionFields ?? [],
+      assetFields: definition.businessModel.assetFields,
+      inspectionFields: definition.businessModel.defaults.inspectionFields,
       capabilities: (session.tenant.capabilities ?? []) as string[],
-      fulfillmentModes: definition?.businessModel.fulfillmentModes ?? [],
-      deliveryDestination: definition?.businessModel.deliveryDestination,
+      fulfillmentModes: definition.businessModel.fulfillmentModes,
+      deliveryDestination: definition.businessModel.deliveryDestination,
       locations: enabledLocations,
       currentLocationId: enabledLocations.some((row) => row.id === saved) ? saved : "",
       loadedAt: Date.now()
@@ -209,5 +209,4 @@ export function resetContextForTest(): void {
   cachedVersion = 0;
   cached = undefined;
   inflight = undefined;
-  categoryCache = undefined;
 }

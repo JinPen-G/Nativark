@@ -136,15 +136,27 @@ http.interceptors.response.use(
   }
 );
 
-export async function request<T>(path: string, options: { method?: "get" | "post" | "put" | "patch" | "delete"; data?: unknown; params?: unknown; headers?: Record<string, string> } = {}) {
-  const response = await http.request<ApiResult<T>>({
-    url: path,
-    method: options.method ?? "get",
-    data: options.data,
-    params: options.params,
-    headers: options.headers
-  });
-  return response.data.data;
+export async function request<T>(path: string, options: { method?: "get" | "post" | "put" | "patch" | "delete"; data?: unknown; params?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {}) {
+  // Query cancellation is additional to session cancellation. Capturing the
+  // session signal now also covers a switch before Axios runs its interceptor.
+  const signals = options.signal ? [options.signal, currentSessionSignal()] : [];
+  const controller = options.signal ? new AbortController() : undefined;
+  const abort = () => controller?.abort();
+  for (const signal of signals) signal.addEventListener("abort", abort, { once: true });
+  if (signals.some((signal) => signal.aborted)) abort();
+  try {
+    const response = await http.request<ApiResult<T>>({
+      url: path,
+      method: options.method ?? "get",
+      data: options.data,
+      params: options.params,
+      headers: options.headers,
+      signal: controller?.signal
+    });
+    return response.data.data;
+  } finally {
+    for (const signal of signals) signal.removeEventListener("abort", abort);
+  }
 }
 
 /**

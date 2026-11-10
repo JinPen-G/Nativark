@@ -15,6 +15,7 @@ import { QueryState } from "@/components/QueryState";
 import { CategoryDraftEditor } from "./CategoryDraftEditor";
 import { CategoryPolicyDialog } from "./CategoryPolicyDialog";
 import { CategoryTemplateIcon } from "./CategoryTemplateIcon";
+import { CategoryCreationDialog } from "./CategoryCreationDialog";
 
 export function CategoryGovernancePage() {
   const { t, locale } = useLocale();
@@ -26,8 +27,11 @@ export function CategoryGovernancePage() {
   const [auditCode, setAuditCode] = useState<string>();
   const [editor, setEditor] = useState<{ code: string; version: CategoryVersionView }>();
   const [policyTarget, setPolicyTarget] = useState<{ code: string; version?: CategoryVersionView }>();
+  const [creator, setCreator] = useState<{ sourceCode?: string }>();
+  const [createdEditor, setCreatedEditor] = useState<{ code: string; version: CategoryVersionView }>();
   const [form] = Form.useForm<{ sourceVersionId: string; versionLabel: string; reason: string }>();
   const list = useQuery({ queryKey: ["platform-category-governance"], queryFn: categoryGovernanceApi.list });
+  const catalog = useQuery({ queryKey: ["platform-category-capability-catalog"], queryFn: categoryGovernanceApi.catalog, enabled: hasPermission(P.edit) });
   const categoryFilter = useListFilter(list.data, { fields: row => [row.name, row.code] });
   const detail = useQuery({ queryKey: ["platform-category-governance", target], queryFn: () => categoryGovernanceApi.detail(target!), enabled: Boolean(target) });
   const viewed = useQuery({ queryKey: ["platform-category-governance", viewer], queryFn: () => categoryGovernanceApi.detail(viewer!), enabled: Boolean(viewer) });
@@ -40,7 +44,8 @@ export function CategoryGovernancePage() {
   });
   const scope = (value: string) => t(({ all: "全部租户", pilot: "试点租户", unopened: "尚未开放", stopped: "停止新开通", none: "不允许采用" } as Record<string, string>)[value] ?? value);
   return <>
-    <PageHeader title="租赁品类" description={t("发布品类版本不会自动升级经营空间。")} />
+    <PageHeader title="租赁品类" description={t("发布品类版本不会自动升级经营空间。")}
+      extra={hasPermission(P.edit) && catalog.data?.dynamicCreationEnabled ? <Button type="primary" onClick={() => setCreator({})}>{t("新建租赁品类")}</Button> : undefined}/>
 
     <QueryState loading={list.isLoading} error={list.error}>
       <ListSection controls={<ListFilters filter={categoryFilter} placeholder="品类名称或编码" />}>
@@ -78,6 +83,12 @@ export function CategoryGovernancePage() {
         ]} />
       </QueryState>
     </Modal>
+    {creator && <CategoryCreationDialog sourceCode={creator.sourceCode} close={() => { setCreator(undefined); if (createdEditor) setEditor(createdEditor); setCreatedEditor(undefined); }} created={async version => {
+      await queryClient.invalidateQueries({ queryKey: ["platform-category-governance"] });
+      message.success(t("草稿已创建"));
+      const current = await categoryGovernanceApi.detail(version.categoryCode);
+      setCreatedEditor({ code: version.categoryCode, version: current.versions.find(row => row.id === version.id) ?? version });
+    }}/>}
     {editor && <CategoryDraftEditor key={editor.version.id} code={editor.code} initial={editor.version} editable={hasPermission(P.edit)} canPublish={hasPermission(P.publish)} saved={() => { void queryClient.invalidateQueries({ queryKey: ["platform-category-governance"] }); }} close={() => setEditor(undefined)} />}
     {policyTarget && <QueryState loading={policyDetail.isLoading} error={policyDetail.error}>{policyDetail.data && <CategoryPolicyDialog key={`${policyTarget.code}:${policyTarget.version?.id ?? "opening"}`} detail={policyDetail.data} version={policyTarget.version} saved={() => { void queryClient.invalidateQueries({ queryKey: ["platform-category-governance"] }); }} close={() => setPolicyTarget(undefined)} />}</QueryState>}
     <Modal presentation="side" title={t("治理记录")} open={Boolean(auditCode) && hasPermission(P.audit)} footer={null} width={960} onCancel={() => setAuditCode(undefined)}>

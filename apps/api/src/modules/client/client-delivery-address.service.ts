@@ -144,7 +144,7 @@ export class ClientDeliveryAddressService {
   ): Promise<AddressRow & { deliveryServiceAreaDecision: DeliveryServiceAreaDecision }> {
     const row = await this.prisma.customerDeliveryAddress.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId, id: addressId, status: "active" } });
     if (!row) throw new NotFoundException("配送地址不存在，请重新选择");
-    const policy = this.rentalCore.getBusinessSettings(context.tenantId).fulfillment.deliveryServiceArea;
+    const policy = (await this.rentalCore.getBusinessSettings(context.tenantId)).fulfillment.deliveryServiceArea;
     const decision = evaluateDeliveryServiceArea(policy, row);
     if (!decision.allowed) {
       throw new BadRequestException("该地址不在当前经营空间的配送范围内，请更换地址或选择自取");

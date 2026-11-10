@@ -62,9 +62,14 @@ function runtime(handler) {
     setNavigationBarTitle() {},
     stopPullDownRefresh() {}
   };
+  const intervals = new Set();
+  // A failed assertion may bypass Page.onUnload. Host timers must still be
+  // released so the runner can report the original failure and exit.
+  test.after(() => { for (const timer of intervals) clearInterval(timer); });
   const context = vm.createContext({
     wx, Promise, Date, Math, Map, Set, Number, String, Object, Array, Error, JSON, Intl, Symbol, Reflect, Boolean, RegExp,
-    Uint8Array, ArrayBuffer, encodeURIComponent, decodeURIComponent, setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
+    Uint8Array, ArrayBuffer, encodeURIComponent, decodeURIComponent, setTimeout, clearTimeout,
+    setInterval: (...args) => { const timer = setInterval(...args); intervals.add(timer); return timer; }, clearInterval, queueMicrotask,
     getCurrentPages: () => [], Page: value => { page = value; }, Behavior: value => value, Component: () => {}, App: () => {}, console
   });
   function load(relative) {

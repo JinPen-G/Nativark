@@ -19,6 +19,7 @@ import type {
   UpgradeSubscriptionProRequest,
   UpsertFeatureCatalogRequest
 } from "@rental-os/shared";
+import type { RentalCategoryIdentityLabel } from "@rental-os/shared";
 import { request } from "./http";
 
 export interface PlatformSubscriptionListQuery {
@@ -50,6 +51,7 @@ export const subscriptionApi = {
     request<TenantSubscriptionView>(`/platform/subscriptions/${encodeURIComponent(tenantId)}`),
   /** SaaS 平台功能目录（§3.3/§8，介绍/对比/维护用）。后端 GET /platform/subscriptions/feature-catalog（f631452）。 */
   featureCatalog: () => request<SubscriptionFeatureCatalogEntry[]>("/platform/subscriptions/feature-catalog"),
+  categoryLabels: (platform: boolean) => request<RentalCategoryIdentityLabel[]>(platform ? "/platform/subscriptions/category-labels" : "/platform/subscription/category-labels"),
   /** 标准套餐年费列表（§5.2/§8）。后端 GET /platform/subscriptions/standard-prices（f631452）。 */
   standardPrices: () => request<StandardPlanPricing[]>("/platform/subscriptions/standard-prices"),
 

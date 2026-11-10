@@ -6,6 +6,7 @@ import { currentQuoteSource } from './rental-quote-access';
 import type { RentalQuoteOriginalOperation } from './rental-business-fact.repository';
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
+import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./category-capability-conditions";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
@@ -205,6 +206,8 @@ interface RentalBusinessState {
 }
 
 interface BusinessContext {
+  categoryVersionId?: string;
+  categoryAdoptionRevision?: number;
   profile: TenantRentalProfile;
   category: RentalCategoryDefinition;
   settings: TenantRentalBusinessSettings;
@@ -3966,6 +3969,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await next;
   }
 
+  /** Refresh current configuration for an authoritative Core context. Historical
+   * quotes/order changes stay in their original stores and are never re-seeded. */
+  async refreshWorkspaceContext(tenantId: string, context: BusinessContext) {
+    if (!context.categoryVersionId || context.categoryAdoptionRevision === undefined) return context;
+    if (!this.configStore.loadWorkspaceSnapshot) throw new ServiceUnavailableException("缺少已版本化空间的业务配置权威读取器");
+    const workspaceId = this.workspaceOf(tenantId);
+    const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId,
+      { categoryVersionId: context.categoryVersionId, adoptionRevision: context.categoryAdoptionRevision });
+    if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.categoryCode !== context.category.code) {
+      throw new ConflictException("业务配置快照的作用域或品类不一致");
+    }
+    const state = this.state(tenantId, context);
+    Object.assign(state, { pricingPlans: structuredClone(snapshot.pricingPlans), discountPlans: structuredClone(snapshot.discountPlans),
+      services: structuredClone(snapshot.services), calendars: structuredClone(snapshot.calendars), ruleVersions: structuredClone(snapshot.ruleVersions),
+      notificationTemplates: structuredClone(snapshot.notificationTemplates), configPersisted: true });
+    return context;
+  }
+
   async reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
     const state = this.state(tenantId, context);
     const row = state.rewardLedger.find((item) => item.id === id);
@@ -4853,6 +4874,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
     original?: RentalQuoteOriginalOperation) {
+    await this.refreshWorkspaceContext(tenantId, context);
     const sourceSnapshot = currentQuoteSource(tenantId);
     if (original) {
       input = structuredClone(input);
@@ -4864,6 +4886,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     let categoryAdoptionRevision: number | undefined;
     if (this.categoryResolver) {
       const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+      if (context.categoryVersionId && (context.categoryVersionId !== resolved.categoryVersionId || context.categoryAdoptionRevision !== resolved.adoptionRevision)) {
+        throw new ConflictException("品类绑定在业务配置读取后已变化，请重新读取并报价");
+      }
       if (resolved.definition.code !== context.profile.categoryCode) {
         throw new ConflictException("报价经营空间与品类版本不一致");
       }
@@ -5559,8 +5584,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (inspectionTemplates?.some((template) => template.tenantId !== tenantId || template.categoryCode !== context.category.code)) {
       throw new ConflictException("检查模板与报价租户或品类不一致");
     }
+    if (context.category.conditionalCapabilities?.length && (!categoryVersionId || !this.hooks || !this.capabilities)) {
+      throw new ServiceUnavailableException("条件品类需要发布版本、能力实例及真实执行模块");
+    }
+    if (context.category.conditionalCapabilities?.length) this.hooks!.assertCategoryComposition(context.category);
+    const capabilityRequirementsSnapshot = context.category.conditionalCapabilities?.length
+      ? captureCapabilityRequirements(context.category, context.groups, capabilityRequirementRoots(input.lines), input.fulfillmentMode) : undefined;
     const quote: RentalQuoteSnapshotV1 = {
-      inspectionTemplateSnapshots: inspectionTemplates?.map((template) => snapshotInspectionTemplate(context.category, template)),
+      inspectionTemplateSnapshots: inspectionTemplates?.map((template) => snapshotInspectionTemplate(context.category, template, capabilityRequirementsSnapshot)),
+      capabilityRequirementsSnapshot,
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
       categoryCode: context.profile.categoryCode, categoryVersionId, sourceSnapshot,
       request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
@@ -5647,7 +5679,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     quote: RentalQuoteSnapshotV1
   ): Promise<RentalCapabilityDecisionSnapshot[] | undefined> {
-    if (!this.hooks) return undefined;
+    if (!this.hooks) {
+      if (context.category.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
+      return undefined;
+    }
+    const requirements = resolveCapabilityRequirements(context.category, quote.capabilityRequirementsSnapshot);
     const workspaceId = this.workspaceOf(tenantId);
     // 富化走与订单、配货**同一份**公共实现（P2-1）：早前这里另写一遍，
     // 找不到商品时用 id 冒充名称、`inventoryMode as never`，与订单侧对同一条脏数据
@@ -5665,6 +5701,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const instances = quote.capabilitySnapshot
       ? WorkspaceCapabilityService.instancesFromSnapshot(tenantId, workspaceId, quote.capabilitySnapshot)
       : undefined;
+    this.hooks.assertInspectionComposition(quote.inspectionTemplateSnapshots ?? [], requirements.required, instances ?? []);
     const at = quote.createdAt;
     try {
       const outcome = await this.hooks.evaluate({
@@ -5672,7 +5709,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         tenantId,
         workspaceId,
         categoryCode: context.category.code,
-        requiredCapabilities: context.category.requiredCapabilities,
+        requiredCapabilities: requirements.required,
+        inactiveConditionalCapabilities: requirements.inactive,
         subjectRef: { type: "quote", id: quote.id },
         subject: { ...quote, equipment, capabilityExceptions: [] },
         at,
@@ -6547,7 +6585,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   /** Record the policy and executable strategy references actually used by this action. */
-  private async extensionExecutionBasis(tenantId: string, context: BusinessContext, originalQuote: RentalQuoteSnapshotV1, rates: RentalPricingRate[], pricingMode: "incremental" | "original_total", pricingRule: RentalRuleConfig) {
+  private async extensionExecutionBasis(tenantId: string, context: BusinessContext, originalQuote: RentalQuoteSnapshotV1, rates: RentalPricingRate[], pricingMode: "incremental" | "original_total", pricingRule: RentalRuleConfig,
+    actualLines: Parameters<typeof capabilityRequirementRoots>[0] = originalQuote.request.lines) {
     const current = pricingMode === "incremental" && this.categoryResolver
       ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
     if (current && !isDeepStrictEqual(context.category, current.definition)) {
@@ -6563,6 +6602,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         throw new ConflictException(`缺少 ${unit} 计价单位的历史兼容政策，不能自动续租`);
       }
     }
+    const capabilityBasis = pricingMode === "incremental" && current
+      ? await this.captureActionCapabilityBasis(tenantId, context, actualLines.map(line => {
+        const original = originalQuote.request.lines.find(original => original.itemGroupId === line.itemGroupId && original.pricingGroupId === line.pricingGroupId);
+        return original ?? { itemGroupId: line.itemGroupId, reservationPrecision: "exact_model" as const };
+      }), originalQuote.request.fulfillmentMode, current.categoryVersionId)
+      : { capabilityRequirementsSnapshot: structuredClone(originalQuote.capabilityRequirementsSnapshot),
+        capabilitySnapshot: structuredClone(originalQuote.capabilitySnapshot) };
     return {
       pricingMode,
       policySource: pricingMode === "incremental" ? "current_workspace" as const : "original_quote" as const,
@@ -6571,8 +6617,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       categoryVersionId: current?.categoryVersionId ?? (pricingMode === "original_total" ? originalQuote.categoryVersionId : undefined),
       adoptionRevision: current?.adoptionRevision,
       categoryPolicySnapshot: structuredClone(categoryPolicySnapshot),
+      ...capabilityBasis,
       pricingStrategies: [...units].map(rentalPricingStrategyReference)
     };
+  }
+
+  private async captureActionCapabilityBasis(tenantId: string, context: BusinessContext,
+    lines: Parameters<typeof capabilityRequirementRoots>[0], fulfillmentMode: RentalFulfillmentMode, categoryVersionId?: string) {
+    const conditional = Boolean(context.category.conditionalCapabilities?.length);
+    if (conditional && (!categoryVersionId || !this.hooks || !this.capabilities)) throw new ServiceUnavailableException("条件业务需要发布版本、能力实例及真实执行模块");
+    if (conditional) this.hooks!.assertCategoryComposition(context.category);
+    const capabilityRequirementsSnapshot = conditional
+      ? captureCapabilityRequirements(context.category, context.groups, capabilityRequirementRoots(lines), fulfillmentMode) : undefined;
+    const capabilitySnapshot = this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (conditional) {
+      const requirements = resolveCapabilityRequirements(context.category, capabilityRequirementsSnapshot);
+      const equipment = buildCapabilityEquipment(new Map(context.groups.map(group => [group.id, group])),
+        capabilityRequirementRoots(lines).map(itemGroupId => ({ itemGroupId, quantity: 1 })), context.category.businessModel.assetFields);
+      const outcome = await this.hooks!.run({ point: "quote_validation", tenantId, workspaceId: this.workspaceOf(tenantId),
+        categoryCode: context.category.code, requiredCapabilities: requirements.required, inactiveConditionalCapabilities: requirements.inactive,
+        instances: WorkspaceCapabilityService.instancesFromSnapshot(tenantId, this.workspaceOf(tenantId), capabilitySnapshot!),
+        subject: { equipment, capabilityExceptions: [] } });
+      if (outcome.blocked) throw new CapabilityBlockedException(outcome);
+    }
+    return { capabilityRequirementsSnapshot, capabilitySnapshot };
   }
 
   /**
@@ -6816,7 +6884,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersionId: versionedSpaceVersion.versionId,
       priceVersion: versionedSpaceVersion.version,
       ruleVersion: rule.version,
-      executionBasis: { ...await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "incremental", rule.config),
+      executionBasis: { ...await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "incremental", rule.config, args.lines),
         incrementalPricing },
       rateSnapshot,
       ruleSnapshot: structuredClone({ ...rule.config, extension: extensionRule })
@@ -7263,7 +7331,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   async captureExchangeExecutionBasis(
     tenantId: string, context: BusinessContext, priceBasis: RentalOrderExchangePriceBasis, effectiveFrom: string,
     priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig;
-      linePricing?: RentalOrderExchangeExecutionBasis["linePricing"] }
+      linePricing?: RentalOrderExchangeExecutionBasis["linePricing"] },
+    actual?: { itemGroupId: string; fulfillmentMode: RentalFulfillmentMode }
   ): Promise<RentalOrderExchangeExecutionBasis> {
     const current = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
     if (current && !isDeepStrictEqual(current.definition, context.category)) throw new ConflictException("品类版本在换货准备期间已变化，请重新试算");
@@ -7272,14 +7341,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (templates.some((row) => row.tenantId !== tenantId || row.categoryCode !== context.category.code)) throw new ConflictException("换货检查模板与租户或品类不一致");
     const units = new Set(priced.rateSnapshot.map((row) => row.unit));
     if (units.has("hour") && priced.ruleSnapshot.pricing?.hourToDayEnabled) units.add("day_24h");
+    if (context.category.conditionalCapabilities?.length && !actual) throw new ConflictException("换货缺少实际商品及履约条件，不能套用原商品依据");
+    const capabilityBasis = actual ? await this.captureActionCapabilityBasis(tenantId, context, [{ itemGroupId: actual.itemGroupId }], actual.fulfillmentMode, current?.categoryVersionId)
+      : { capabilityRequirementsSnapshot: undefined, capabilitySnapshot: this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined };
+    if (context.category.conditionalCapabilities?.length) this.hooks!.assertInspectionComposition(templates, resolveCapabilityRequirements(context.category, capabilityBasis.capabilityRequirementsSnapshot).required,
+      WorkspaceCapabilityService.instancesFromSnapshot(tenantId, this.workspaceOf(tenantId), capabilityBasis.capabilitySnapshot!));
     return structuredClone({
       categoryCode: context.category.code, categoryVersionId: current?.categoryVersionId, adoptionRevision: current?.adoptionRevision,
       categoryPolicySnapshot: current?.definition, effectiveFrom, priceBasis,
       pricingStrategies: [...units].map(rentalPricingStrategyReference),
       rateSnapshot: priced.rateSnapshot, ruleSnapshot: priced.ruleSnapshot, calendarSnapshot: priced.calendarSnapshot,
       pricingSnapshot: priced.pricingSnapshot, linePricing: priced.linePricing,
-      inspectionTemplateSnapshots: templates.filter((row) => row.enabled).map((row) => snapshotInspectionTemplate(context.category, row)),
-      capabilitySnapshot: this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined
+      inspectionTemplateSnapshots: templates.filter((row) => row.enabled).map((row) => snapshotInspectionTemplate(context.category, row, capabilityBasis.capabilityRequirementsSnapshot)),
+      ...capabilityBasis
     });
   }
 

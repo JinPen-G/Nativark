@@ -235,9 +235,10 @@ export class RentalCoreController {
   ) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
-    const profile = this.service.getProfile(tenantId);
+    if (typeof this.service.readBusinessContext === "function") return this.business.refreshWorkspaceContext(tenantId, await this.service.readBusinessContext(tenantId));
+    const profile = await this.service.getProfile(tenantId);
     const category = await this.service.getWorkspaceCategory(tenantId);
-    return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), pricingGroups: this.service.listPricingGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
+    return { profile, category, settings: await this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), pricingGroups: this.service.listPricingGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
   }
 
   private assertHandoverPermission(user: AuthenticatedRequest["user"], stage: "pickup" | "return") {
@@ -487,10 +488,10 @@ export class RentalCoreController {
     return this.workspaceReports.getOperationReport(
       tenantId,
       workspaceId,
-      this.service.getProfile(tenantId).categoryCode,
+      (await this.service.getProfile(tenantId)).categoryCode,
       this.reportFilter({ from, to, locationId, customerId, customerType }),
       // 币种从经营空间的业务设置取：报表仓储不读配置，避免同一事实两个来源。
-      this.service.getBusinessSettings(tenantId).pricing.currency
+      (await this.service.getBusinessSettings(tenantId)).pricing.currency
     );
   }
 
@@ -518,10 +519,10 @@ export class RentalCoreController {
     const report = await this.workspaceReports.getOperationReport(
       tenantId,
       workspaceId,
-      this.service.getProfile(tenantId).categoryCode,
+      (await this.service.getProfile(tenantId)).categoryCode,
       this.reportFilter({ from, to, locationId, customerId, customerType }),
       // 币种从经营空间的业务设置取：报表仓储不读配置，避免同一事实两个来源。
-      this.service.getBusinessSettings(tenantId).pricing.currency
+      (await this.service.getBusinessSettings(tenantId)).pricing.currency
     );
     const stamp = report.generatedAt.replace(/[-:T]/g, "").slice(0, 14);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -551,13 +552,13 @@ export class RentalCoreController {
   @Get("coupon-templates") couponTemplates(@Req() req: AuthenticatedRequest) { return this.service.readCouponTemplates(req.user.tenantId); }
   @Post("coupon-templates") saveCouponTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, body)); }
   @Put("coupon-templates/:id") updateCouponTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, { ...body, id })); }
-  @Get("locations") locations(@Req() req: AuthenticatedRequest) { return this.service.listLocations(req.user.tenantId); }
-  @Get("fulfillment-operators") operators(@Req() req: AuthenticatedRequest) { return this.service.listOperators(req.user.tenantId); }
+  @Get("locations") async locations(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listLocations(req.user.tenantId); }
+  @Get("fulfillment-operators") async operators(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listOperators(req.user.tenantId); }
   @Post("fulfillment-operators") saveOperator(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentOperatorDto) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, body)); }
   @Put("fulfillment-operators/:id") updateOperator(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentOperatorDto) { return this.committed(req.user.tenantId, this.service.saveOperator(req.user.tenantId, { ...body, id })); }
   @Post("locations") saveLocation(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalFulfillmentLocationDto) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, body)); }
   @Put("locations/:id") updateLocation(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalFulfillmentLocationDto) { return this.committed(req.user.tenantId, this.service.saveLocation(req.user.tenantId, { ...body, id })); }
-  @Get("item-groups") groups(@Req() req: AuthenticatedRequest) { return this.service.listItemGroups(req.user.tenantId); }
+  @Get("item-groups") async groups(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listItemGroups(req.user.tenantId); }
   @Post("item-groups") saveGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, body)); }
   @Put("item-groups/:id") updateGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalItemGroupDto) { return this.committed(req.user.tenantId, this.service.saveItemGroup(req.user.tenantId, { ...body, id })); }
   @Post("item-groups/:id/images")
@@ -582,7 +583,7 @@ export class RentalCoreController {
     res.setHeader("Cache-Control", "private, max-age=300");
     res.send(image.content);
   }
-  @Get("pricing-groups") pricingGroups(@Req() req: AuthenticatedRequest) { return this.service.listPricingGroups(req.user.tenantId); }
+  @Get("pricing-groups") async pricingGroups(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listPricingGroups(req.user.tenantId); }
   @Post("pricing-groups") async savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) {
     const tenantId = req.user.tenantId;
     if (!body.initialRates?.length) throw new BadRequestException("新建定价分组时至少填写一条基本价");
@@ -771,7 +772,8 @@ export class RentalCoreController {
         replacementAssetNo: selectedCandidate?.assetNo,
         cancelledServiceOccurrenceIds,
         inspectionSnapshot,
-        executionBasis: await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced)
+        executionBasis: await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced,
+          { itemGroupId: replacementGroup.id, fulfillmentMode: order.fulfillmentMode })
       },
       warnings: [
         "换货差额不在确认时立即收款，统一在归还结算时处理",

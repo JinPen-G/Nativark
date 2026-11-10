@@ -322,6 +322,7 @@ export function requiredPermissions(method: string, path: string) {
   const aiProviderPermission = platformAiProviderPermission(method, path);
   if (aiProviderPermission) return [aiProviderPermission];
   if (path === "/platform/rental-categories" || path.startsWith("/platform/rental-categories/")) {
+    if (path.startsWith("/platform/rental-categories/creation-requests/")) return ["system:rental-category:edit"];
     if (path.endsWith("/audits")) return ["system:rental-category:audit"];
     if (path.endsWith("/opening-policy")) return ["system:rental-category:opening"];
     if (path.endsWith("/publish") || path.endsWith("/adoption-policy")) return ["system:rental-category:publish"];
@@ -1207,6 +1208,7 @@ export class ApiAuthGuard implements CanActivate {
       await this.assertStaffLocationAccess(request, path, user, workspaceId, locationScope);
     }
     enterRequestIdentity({
+      accessSession: accessContext?.accessSession,
       tenantId: user.tenantId,
       userId: user.id,
       audience: staffApiRequest ? 'staff' : 'operator',

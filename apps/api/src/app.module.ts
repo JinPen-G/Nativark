@@ -52,6 +52,7 @@ import { CategoryGovernanceController } from "./modules/rental-core/category-gov
 import { CategoryGovernanceService } from "./modules/rental-core/category-governance.service";
 import { CategoryAdoptionPreparationController } from "./modules/rental-core/category-adoption-preparation.controller";
 import { CategoryAdoptionPreparationService } from "./modules/rental-core/category-adoption-preparation.service";
+import { CategoryAdoptionApplication } from "./modules/rental-core/category-adoption.application";
 import { RentalAllocationService } from "./modules/rental-core/rental-allocation.service";
 import { RentalDueJobScheduler } from "./modules/rental-core/rental-due-job.scheduler";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
@@ -288,6 +289,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     RentalCategoryResolver,
     CategoryGovernanceService,
     CategoryAdoptionPreparationService,
+    CategoryAdoptionApplication,
     RentalAllocationService,
     RentalDueJobScheduler,
     RentalBusinessService,

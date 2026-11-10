@@ -1,12 +1,12 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "../rental-core/category-governance-policy";
+import { rentalCategoryStorageCode } from "../rental-core/category-identity";
 import {
   ConfigStatus,
   OrganizationType as PrismaOrganizationType,
   PermissionKind,
   Prisma,
-  RentalCategoryCode as PrismaRentalCategoryCode,
   RoleScope as PrismaRoleScope,
   SystemDataScope as PrismaSystemDataScope,
   TenantStatus as PrismaTenantStatus,
@@ -48,7 +48,7 @@ import type {
   UpdateTenantRequest,
   UpdateTenantStatusRequest
 } from "@rental-os/shared";
-import { RoleScope, TenantStatus } from "@rental-os/shared";
+import { RentalCategoryCode, RoleScope, TenantStatus } from "@rental-os/shared";
 import { generateTemporaryPassword, hashPassword, verifyPassword } from "../../common/password";
 import {
   buildOrganizationWhere,
@@ -63,6 +63,12 @@ import { getRequestWorkspaceId, requireRequestTenantId } from "../../common/requ
 type RoleWithPermissions = Awaited<
   ReturnType<PlatformRepository["findRoleWithPermissions"]>
 >;
+
+/** Internal authenticated identity, supplied by Auth rather than an HTTP DTO. */
+export interface WorkspaceSessionIdentity {
+  tenantId: string; userId: string; workspaceId: string; sessionId: string;
+  audience: "operator" | "staff";
+}
 
 const DEPRECATED_RENTAL_PERMISSION_CODES = new Set([
   "rental-os:vehicle-group:manage",
@@ -234,12 +240,53 @@ export class PlatformRepository {
     };
   }
 
-  async findUserById(id: string): Promise<SystemUserRow | undefined> {
-    const user = await this.prisma.user.findFirst({
+  async findUserById(id: string, tx?: Prisma.TransactionClient): Promise<SystemUserRow | undefined> {
+    const user = await (tx ?? this.prisma).user.findFirst({
       where: { id, isActive: true, tenant: { status: PrismaTenantStatus.ACTIVE } },
       include: this.userInclude()
     });
     return user ? this.toUserRow(user) : undefined;
+  }
+
+  /** Principal locks precede commercial/category/workspace business locks.
+   * Existing revocation writers update these same rows. Lock assignments and
+   * permission rows too, so removal cannot slip between mapping and commit.
+   * No business table is written or authorized by this platform adapter. */
+  async lockWorkspaceSessionUser(tx: Prisma.TransactionClient, expected: WorkspaceSessionIdentity): Promise<SystemUserRow> {
+    const tenant = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM Tenant WHERE id = ${expected.tenantId} FOR UPDATE`);
+    const users = await tx.$queryRaw<Array<{ id: string; roleId: string | null }>>(Prisma.sql`SELECT id, roleId FROM \`User\` WHERE id = ${expected.userId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
+    if (tenant.length !== 1 || users.length !== 1) throw new UnauthorizedException("账号或租户已失效");
+    const sessions = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM auth_sessions WHERE id = ${expected.sessionId} AND userId = ${expected.userId} FOR UPDATE`);
+    if (sessions.length !== 1) throw new UnauthorizedException("原会话已失效");
+    const members = await tx.$queryRaw<Array<{ roleId: string | null }>>(Prisma.sql`SELECT roleId FROM workspace_members WHERE tenantId = ${expected.tenantId} AND workspaceId = ${expected.workspaceId} AND userId = ${expected.userId} FOR UPDATE`);
+    if (members.length !== 1) throw new ForbiddenException("当前经营空间访问权已撤销");
+    const assignments = await tx.$queryRaw<Array<{ roleId: string }>>(Prisma.sql`SELECT roleId FROM \`UserRole\` WHERE userId = ${expected.userId} ORDER BY roleId FOR UPDATE`);
+    const roleIds = [...new Set([users[0].roleId, members[0].roleId, ...assignments.map(row => row.roleId)].filter((id): id is string => Boolean(id)))].sort();
+    const permissionIds = new Set<string>();
+    for (const roleId of roleIds) {
+      const roles = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT id FROM \`Role\` WHERE id = ${roleId} AND tenantId = ${expected.tenantId} FOR UPDATE`);
+      if (roles.length !== 1) throw new ForbiddenException("账号角色不属于当前租户或已失效");
+      const permissions = await tx.$queryRaw<Array<{ permissionId: string }>>(Prisma.sql`SELECT permissionId FROM \`RolePermission\` WHERE roleId = ${roleId} ORDER BY permissionId FOR UPDATE`);
+      for (const row of permissions) permissionIds.add(row.permissionId);
+    }
+    for (const permissionId of [...permissionIds].sort()) {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
+    }
+    return this.readWorkspaceSessionUser(tx, expected);
+  }
+
+  /** Read under the principal locks held by lockWorkspaceSessionUser. */
+  async readWorkspaceSessionUser(tx: Prisma.TransactionClient, expected: WorkspaceSessionIdentity): Promise<SystemUserRow> {
+    const session = await tx.authSession.findFirst({ where: {
+      id: expected.sessionId, userId: expected.userId, revokedAt: null, expiresAt: { gt: new Date() }
+    }, select: { audience: true, currentWorkspaceId: true } });
+    if (!session || session.audience !== expected.audience) throw new UnauthorizedException("原会话已撤销、到期或受众不一致");
+    if (session.currentWorkspaceId !== expected.workspaceId) throw new ConflictException("原会话经营空间已变化，操作未执行");
+    const base = await this.findUserById(expected.userId, tx);
+    if (!base || base.tenantId !== expected.tenantId) throw new UnauthorizedException("账号或租户已停用");
+    const scoped = await this.findWorkspaceScopedUser(expected.userId, expected.workspaceId, base, tx);
+    if (!scoped) throw new ForbiddenException("当前经营空间访问权已撤销或空间已停用");
+    return scoped;
   }
 
   async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }) {
@@ -569,7 +616,7 @@ export class PlatformRepository {
     tenantId: string;
     code: string;
     name: string;
-    categoryCode: PrismaRentalCategoryCode;
+    categoryCode: RentalCategoryCode;
     status: PrismaWorkspaceStatus;
     isDefault: boolean;
     runMode?: string;
@@ -674,10 +721,10 @@ export class PlatformRepository {
    * roleId 一旦存在，就**取代**租户级角色参与权限计算；dataScope 同理。
    * 成员关系没配时沿用租户级默认值（升级兼容层的行为）。
    */
-  async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow): Promise<SystemUserRow | undefined> {
-    const base = tenantUser ?? await this.findUserById(userId);
+  async findWorkspaceScopedUser(userId: string, workspaceId?: string, tenantUser?: SystemUserRow, tx?: Prisma.TransactionClient): Promise<SystemUserRow | undefined> {
+    const base = tenantUser ?? await this.findUserById(userId, tx);
     if (!base || !workspaceId) return base;
-    const member = await this.prisma.workspaceMember.findFirst({
+    const member = await (tx ?? this.prisma).workspaceMember.findFirst({
       where: {
         userId,
         workspaceId,
@@ -748,11 +795,11 @@ export class PlatformRepository {
   async isLegacyVehicleDomainWorkspaceAllowed(tenantId: string, workspaceId: string): Promise<boolean> {
     const [current, defaultWorkspace] = await Promise.all([
       this.prisma.businessWorkspace.findFirst({
-        where: { id: workspaceId, tenantId, categoryCode: PrismaRentalCategoryCode.VEHICLE },
+        where: { id: workspaceId, tenantId, categoryCode: RentalCategoryCode.Vehicle },
         select: { id: true }
       }),
       this.prisma.businessWorkspace.findFirst({
-        where: { tenantId, isDefault: true, categoryCode: PrismaRentalCategoryCode.VEHICLE },
+        where: { tenantId, isDefault: true, categoryCode: RentalCategoryCode.Vehicle },
         select: { id: true }
       })
     ]);
@@ -1794,8 +1841,9 @@ export class PlatformRepository {
      * 在初始化事务内、提交之前执行。用于把 Rental Core 品类配置并入同一事务，
      * 满足需求 4.1「初始化失败必须整体回滚」；抛错会连带回滚租户、组织、角色和管理员。
      */
-    onBeforeCommit?: (tx: Prisma.TransactionClient, tenantId: string) => Promise<void>
+    onBeforeCommit?: (tx: Prisma.TransactionClient, tenantId: string) => Promise<void | { categoryName: string }>
   ): Promise<TenantBootstrapResult> {
+    if (!onBeforeCommit) throw new ConflictException("Rental初始化回调未装配，不能创建租赁租户");
     const tenantCode = input.tenantCode.trim().toLowerCase();
     const tenantName = input.tenantName.trim();
     const adminAccount = input.adminAccount.trim();
@@ -1827,19 +1875,12 @@ export class PlatformRepository {
         throw new BadRequestException("租户编码已存在");
       }
       const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
+      // 与新空间和治理操作保持同一锁顺序；初始化全过程固定推荐引用，避免档案外键共享锁升级死锁及混版缺省。
+      await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode} FOR UPDATE`);
       const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
       if (!category) throw new BadRequestException("经营品类不存在");
       const tenant = await tx.tenant.create({
         data: { code: tenantCode, name: tenantName, status: PrismaTenantStatus.ACTIVE }
-      });
-      await tx.tenantRentalProfile.create({
-        data: {
-          tenantId: tenant.id,
-          categoryCode,
-          capabilities: category.defaultCapabilities as Prisma.InputJsonValue,
-          terminology: category.terminology as Prisma.InputJsonValue,
-          configVersion: category.version
-        }
       });
       const operatorOrg = await tx.organizationUnit.create({
         data: {
@@ -1968,8 +2009,8 @@ export class PlatformRepository {
           }
         }
       });
-      await onBeforeCommit?.(tx, tenant.id);
-      return { tenant, user, templateExecution, categoryName: category.name };
+      const initialized = await onBeforeCommit(tx, tenant.id);
+      return { tenant, user, templateExecution, categoryName: initialized && typeof initialized === "object" ? initialized.categoryName : category.name };
     });
 
     return {
@@ -2361,22 +2402,13 @@ export class PlatformRepository {
     return TenantStatus.Active;
   }
 
-  // Prisma 枚举带 @map：客户端读写都使用枚举名（如 CAMERA），领域契约统一为小写（camera）。
-  // 登录上下文、路由守卫和前端菜单都按小写比较，必须在仓储边界归一化。
+  // 读取兼容旧枚举对象；持久化编码及领域契约统一使用稳定的小写标识。
   private toDomainCategoryCode(value: string | null | undefined): TenantSummary["categoryCode"] | undefined {
     return value ? (value.toLowerCase() as TenantSummary["categoryCode"]) : undefined;
   }
 
-  private toPrismaCategoryCode(value: string): PrismaRentalCategoryCode {
-    const map: Record<string, PrismaRentalCategoryCode> = {
-      vehicle: PrismaRentalCategoryCode.VEHICLE,
-      camera: PrismaRentalCategoryCode.CAMERA,
-      camping: PrismaRentalCategoryCode.CAMPING,
-      construction: PrismaRentalCategoryCode.CONSTRUCTION
-    };
-    const mapped = map[value];
-    if (!mapped) throw new BadRequestException("经营品类不存在");
-    return mapped;
+  private toPrismaCategoryCode(value: string): RentalCategoryCode {
+    return rentalCategoryStorageCode(value);
   }
 
   private toTenantSummary(tenant: {

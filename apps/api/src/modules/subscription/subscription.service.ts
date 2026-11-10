@@ -19,6 +19,7 @@ import { Prisma, type TenantSubscription, type TenantSubscriptionSegment, type S
   type FeatureOwnership as DbOwnership, type FeatureReleaseStatus as DbRelease } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { anniversaryFromAnchor, calendarYear, endFromServiceYears, exclusiveEndFromDate, isValidTimeZone } from "./subscription-term";
+import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions } from "../rental-core/category-identity";
 
 const DAY_MS = 86400000;
 const DEFAULT_ZONE = "Asia/Shanghai";
@@ -560,6 +561,7 @@ export class SubscriptionService {
       }
       const pending = await tx.subscriptionRequest.findFirst({ where: { tenantId, type: toDb(input.type) as DbReqType, status: "PENDING" } });
       if (pending) return pending;
+      await assertPublishedRentalCategoryIdentities(tx, input.moduleIntent ?? []);
       if (sameKey) await tx.subscriptionRequest.update({ where: { id: sameKey.id }, data: { dedupeKey: `released:${sameKey.id}:${randomUUID()}` } });
       return tx.subscriptionRequest.create({ data: { tenantId, type: toDb(input.type) as DbReqType, targetPlan: targetPlan ? toDb(targetPlan) as DbPlan : null, status: "PENDING", contactName: input.contactName, contactPhone: input.contactPhone, moduleIntent: input.moduleIntent, note: input.note, dedupeKey: key, timeline: [{ at: new Date().toISOString(), status: SubscriptionRequestStatus.Pending, note: "租户提交申请" }] } });
     });
@@ -624,6 +626,9 @@ export class SubscriptionService {
   async listFeatureCatalog(): Promise<SubscriptionFeatureCatalogEntry[]> {
     return (await this.prisma.subscriptionFeatureCatalog.findMany({ orderBy: [{ module: "asc" }, { name: "asc" }] })).map((r) => this.toCatalogEntry(r));
   }
+  async rentalCategoryLabels(tenantId?: string): Promise<import("@rental-os/shared").RentalCategoryIdentityLabel[]> {
+    return rentalCategoryIdentityOptions(this.prisma, tenantId);
+  }
 
   async getStandardPrices(): Promise<StandardPlanPricing[]> { return this.buildPricing(await this.prisma.subscriptionStandardPrice.findMany()); }
 
@@ -634,6 +639,7 @@ export class SubscriptionService {
       await tx.$queryRaw`SELECT code FROM subscription_feature_catalog WHERE code=${key} FOR UPDATE`;
       const existing = await tx.subscriptionFeatureCatalog.findUnique({ where: { code: key } });
       if (existing?.currentOwnership === "STANDARD" && input.currentOwnership === FeatureOwnership.Pro) throw new BadRequestException("公共下放权益不可直接收回，须另行确认租户告知与在途保护范围");
+      await assertPublishedRentalCategoryIdentities(tx, input.categories);
       const data = { name: input.name, module: input.module, categories: input.categories, defaultOwnership: toDb(input.defaultOwnership) as DbOwnership, currentOwnership: toDb(input.currentOwnership) as DbOwnership, releaseStatus: toDb(input.releaseStatus) as DbRelease, valueText: input.valueText ?? null, prerequisiteText: input.prerequisiteText ?? null, externalFeeNote: input.externalFeeNote ?? null, contentVersion: input.contentVersion ?? null, effectiveAt: new Date() };
       const row = await tx.subscriptionFeatureCatalog.upsert({ where: { code: key }, create: { code: key, ...data }, update: data });
       await this.appendEvent(tx, null, "CATALOG_UPDATE", existing ? { code: key, currentOwnership: toShared<FeatureOwnership>(existing.currentOwnership), releaseStatus: toShared<FeatureReleaseStatus>(existing.releaseStatus) } : undefined, { code: key, currentOwnership: input.currentOwnership, releaseStatus: input.releaseStatus }, { reason: input.reason, operator });

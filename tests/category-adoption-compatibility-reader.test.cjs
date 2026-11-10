@@ -17,7 +17,10 @@ const data = {
   rentalDiscountPlan: [], rentalCouponTemplate: [], rentalServiceCapacity: []
 };
 const calls = [];
-const tx = new Proxy({}, { get(_, model) {
+const tx = new Proxy({}, { get(target, model) {
+  // Explicit transaction auth rows supplied later by the production-mapping
+  // fixture; all compatibility models retain the read-only/scoped assertions.
+  if (Object.hasOwn(target, model)) return Reflect.get(target, model);
   assert.ok(model in data, `不得使用事务外读取/写入: ${String(model)}`);
   return new Proxy({}, { get(_, method) {
     assert.ok(["findFirst", "findMany"].includes(method), `不允许写方法 ${method}`);
@@ -79,10 +82,12 @@ const capabilities = { adoptionCompatibility(definition, instances, versions) {
     if (commercialFails) throw new Error("订阅读取失败");
     return { serviceStatus: "expired", revision: 1, newBusinessAllowed: false, entitlements: [], complete: false };
   } };
-  const service = new CategoryAdoptionPreparationService({ $transaction: (fn) => fn(tx) }, capabilities, { registeredVersions: () => ["test"] }, subscriptions);
+  const { categoryWorkspaceAuth } = require("./fixtures/category-workspace-auth.cjs");
+  const access = categoryWorkspaceAuth(tx, { tenantId: "t", userId: "operator", workspaceId: "w" });
+  const service = new CategoryAdoptionPreparationService({ $transaction: (fn) => fn(tx) }, capabilities, { registeredVersions: () => ["test"] }, subscriptions, access.auth);
   service.context = async () => ({ workspace: { categoryVersionId: "old", categoryAdoptionRevision: 0 }, workspaceId: "w", target: { versionLabel: "new" }, definition: target, sourceDefinition: target, preparation: null, records: { groups: [], assets: [] } });
-  const user = { tenantId: "t", isSaasAdmin: false, permissions: ["rental-os:category:adopt"] };
-  const preview = (candidate = user) => runWithRequestIdentity({ tenantId: "t", workspaceId: "w", dataScope: "all", locationScope: { mode: "all" } }, () => service.preview(candidate, "new", "upgrade"));
+  const user = { id: "operator", tenantId: "t", isSaasAdmin: false, permissions: ["rental-os:category:adopt"] };
+  const preview = (candidate = user) => runWithRequestIdentity(access.identity, () => service.preview(candidate, "new", "upgrade"));
   const expired = await preview();
   assert.equal(expired.businessCompatibility.valid, false);
   assert.ok(expired.businessCompatibility.blockers.some((row) => row.domain === "commercial"));

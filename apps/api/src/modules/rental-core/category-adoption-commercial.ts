@@ -8,15 +8,16 @@ export const CATEGORY_COMMERCIAL_REQUIREMENTS: Readonly<Record<string, readonly 
   "serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery",
   "locker", "dispatch", "usage_reading", "qualification", "iot", "camera_kit_handover",
   "camping_kit_integrity", "camping_cleaning_turnaround", "inspection_care", "vehicle_relocation",
-  "construction_transport", "camera_compatibility"
+  "construction_transport", "camera_compatibility", "kit_handover"
 ].map((code) => [code, Object.freeze([] as string[])])));
 
 export function categoryCommercialRequirements(target: RentalCategoryDefinition,
   instances: Array<{ code: string; status: string }>,
-  registry: Readonly<Record<string, readonly string[]>> = CATEGORY_COMMERCIAL_REQUIREMENTS
+  registry: Readonly<Record<string, readonly string[]>> = CATEGORY_COMMERCIAL_REQUIREMENTS,
+  requiredCodes: readonly string[] = target.requiredCapabilities
 ) {
   const builtins = new Set<string>(RENTAL_CORE_CAPABILITY_CODES);
-  const capabilityCodes = [...new Set([...target.requiredCapabilities, ...target.defaultCapabilities.filter((code) => builtins.has(code)),
+  const capabilityCodes = [...new Set([...requiredCodes, ...target.defaultCapabilities.filter((code) => builtins.has(code)),
     ...instances.filter((row) => row.status === "enabled").map((row) => row.code)])].sort();
   const blockers: Array<{ domain: "commercial"; id: string; message: string }> = [];
   const featureCodes = new Set<string>();

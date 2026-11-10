@@ -9,7 +9,7 @@
  */
 const { createHash } = require("node:crypto");
 const { isDeepStrictEqual } = require("node:util");
-const { PrismaClient, RentalCategoryCode } = require("@prisma/client");
+const { PrismaClient } = require("@prisma/client");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { resolveDedicatedTarget, redact } = require("./dedicated-env.cjs");
 
@@ -21,8 +21,7 @@ void (async () => {
   const result = [];
   try {
     for (const fixed of RENTAL_CATEGORY_DEFINITIONS) {
-      const prismaCode = RentalCategoryCode[fixed.code.toUpperCase()];
-      if (!prismaCode) throw new Error(`无法映射内置品类 ${fixed.code}`);
+      const prismaCode = fixed.code;
       const digest = createHash("sha256").update(JSON.stringify(fixed)).digest("hex").slice(0, 24);
       const versionId = `builtin:${fixed.code}:${digest}`;
       const legacyId = `legacy:${fixed.code}`;

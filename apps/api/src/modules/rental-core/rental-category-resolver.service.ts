@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_FULFILLMENT_MODES,
@@ -6,13 +6,16 @@ import {
   RENTAL_CAPABILITY_MODULES,
   RENTAL_PRICING_UNIT_CODES,
   RENTAL_CATEGORY_ICON_CODES,
+  isRentalCategoryCode,
   RentalInventoryMode,
-  type RentalCategoryDefinition
+  type RentalCategoryDefinition, type RentalCategoryOpeningOptionsQuery, type RentalCategoryOpeningOptions
 } from "@rental-os/shared";
 import { isDeepStrictEqual } from "node:util";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
+import { validateConditionalCapabilities } from "./category-capability-conditions";
+import { rentalDefaultWorkspaceName } from "./category-identity";
 
 export interface ResolvedRentalCategory {
   workspaceId: string;
@@ -28,7 +31,7 @@ const strings = (value: unknown): value is string[] =>
 const unique = (items: string[]) => new Set(items).size === items.length;
 const DEFINITION_KEYS = new Set([
   "code", "name", "description", "supportedInventoryModes", "defaultCapabilities",
-  "requiredCapabilities", "terminology", "attributeSchema", "businessModel", "version", "display"
+  "requiredCapabilities", "conditionalCapabilities", "terminology", "attributeSchema", "businessModel", "version", "display"
 ]);
 const BUSINESS_KEYS = new Set([
   "pricingUnits", "defaultPricingUnit", "fulfillmentModes", "locationTypes",
@@ -42,7 +45,7 @@ const SETTING_MODULES = new Set([
 ]);
 const ATTRIBUTE_TYPES = new Set(["string", "number", "boolean", "date", "select"]);
 const ATTRIBUTE_SCOPES = new Set(["item_group", "asset", "transaction"]);
-const ATTRIBUTE_KEYS = new Set(["code", "label", "scope", "type", "required", "unique", "unit", "options"]);
+const ATTRIBUTE_KEYS = new Set(["code", "label", "scope", "type", "required", "unique", "clientVisible", "unit", "options"]);
 const text = (value: unknown, max = 100): value is string =>
   typeof value === "string" && Boolean(value.trim()) && value.length <= max;
 const nonnegative = (value: unknown): value is number =>
@@ -50,7 +53,7 @@ const nonnegative = (value: unknown): value is number =>
 const onlyKeys = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).every((key) => keys.includes(key));
 const safeFieldCode = (value: unknown): value is string =>
-  typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(value) &&
+  typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}(?![\s\S])/u.test(value) &&
   !["constructor", "prototype", "__proto__"].includes(value);
 
 /**
@@ -62,7 +65,7 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
   if (!object(value)) return fail("正文为空");
   if (JSON.stringify(value).length > 256 * 1024) return fail("正文超过 256 KiB");
   if (Object.keys(value).some((key) => !DEFINITION_KEYS.has(key))) return fail("存在未知的顶层字段");
-  if (value.code !== expectedCode || !/^[a-z][a-z0-9_]{1,63}$/u.test(expectedCode)) fail("编码不匹配");
+  if (value.code !== expectedCode || !isRentalCategoryCode(expectedCode)) fail("编码不匹配");
   if (typeof value.name !== "string" || !value.name.trim() || value.name.length > 100 ||
       typeof value.description !== "string" || value.description.length > 2000 ||
       typeof value.version !== "string" || !value.version.trim() || value.version.length > 64) fail("基础信息不合法");
@@ -169,12 +172,13 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
   const inspections = defaults.inspectionFields as unknown[];
   if (inspections.length > 100) fail("交接检查字段过多");
   for (const field of inspections) {
-    if (!object(field) || !onlyKeys(field, ["code", "label", "type", "required", "unit", "options", "usageMetric"]) ||
+    if (!object(field) || !onlyKeys(field, ["code", "label", "type", "required", "unit", "options", "usageMetric", "appliesToCapability"]) ||
         !safeFieldCode(field.code) ||
         !text(field.label) || !["boolean", "number", "text", "select", "photo"].includes(String(field.type)) ||
         typeof field.required !== "boolean" || (field.unit !== undefined && !text(field.unit, 32)) ||
         (field.usageMetric !== undefined && typeof field.usageMetric !== "boolean") ||
-        (field.usageMetric === true && field.type !== "number")) return fail("交接检查字段不合法");
+        (field.usageMetric === true && field.type !== "number") ||
+        (field.appliesToCapability !== undefined && !(value.defaultCapabilities as string[]).includes(String(field.appliesToCapability)))) return fail("交接检查字段不合法");
     if (inspectionCodes.has(field.code)) fail("交接检查字段编码重复");
     inspectionCodes.add(field.code);
     if (field.type === "select" && (!strings(field.options) || !field.options.length || !unique(field.options) || field.options.some((option) => !text(option)))) fail("交接检查选项不合法");
@@ -204,6 +208,7 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
         typeof entry.type !== "string" || !ATTRIBUTE_TYPES.has(entry.type) ||
         (entry.required !== undefined && typeof entry.required !== "boolean") ||
         (entry.unique !== undefined && typeof entry.unique !== "boolean") ||
+        (entry.clientVisible !== undefined && (typeof entry.clientVisible !== "boolean" || entry.scope !== "item_group")) ||
         (entry.unit !== undefined && !text(entry.unit, 32)) ||
         (entry.scope === "transaction" && entry.unique === true)) return fail("资产属性字段不合法");
     const identity = `${entry.scope}:${entry.code}`;
@@ -213,7 +218,7 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
     if (entry.type !== "select" && entry.options !== undefined) fail(`非枚举资产属性 ${identity} 不能配置选项`);
   }
   const candidate = value as unknown as RentalCategoryDefinition;
-  try { assertRentalCategoryExtensions([candidate]); }
+  try { assertRentalCategoryExtensions([candidate]); validateConditionalCapabilities(candidate); }
   catch (error) { fail(error instanceof Error ? error.message : "扩展能力不合法"); }
   const declared = new Set(candidate.defaultCapabilities);
   for (const code of declared) {
@@ -249,11 +254,34 @@ export class RentalCategoryResolver {
 
   /** Creation reads the recommended immutable body inside the caller's transaction. */
   async forNewWorkspace(categoryCode: string, tx?: Prisma.TransactionClient): Promise<RentalCategoryDefinition> {
+    if (!isRentalCategoryCode(categoryCode)) throw new ConflictException("品类编码格式无效");
     const category = await (tx ?? this.prisma).rentalCategoryDefinition.findFirst({
-      where: { code: categoryCode.toUpperCase() as Prisma.EnumRentalCategoryCodeFilter["equals"] }
+      where: { code: categoryCode }
     });
     if (!category?.recommendedVersionId) throw new ConflictException("品类尚未设置可采用的推荐版本");
     return this.forVersion(categoryCode, category.recommendedVersionId, tx);
+  }
+
+  /** Opening options are a bounded read projection. The create transaction independently rechecks policy and implementation. */
+  async openingOptions(query: RentalCategoryOpeningOptionsQuery): Promise<RentalCategoryOpeningOptions> {
+    const tenantId = query.tenantId, search = query.search?.trim();
+    if (tenantId !== undefined && (typeof tenantId !== "string" || !tenantId.trim() || tenantId.length > 191)) throw new BadRequestException("目标租户格式无效");
+    if (search !== undefined && search.length > 100) throw new BadRequestException("品类搜索内容过长");
+    if (tenantId && !await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } })) throw new NotFoundException("目标租户不存在");
+    const rows = await this.prisma.rentalCategoryVersion.findMany({
+      where: { status: { in: ["published", "legacy_baseline"] },
+        category: { is: { OR: [{ openingScope: "all" }, ...(tenantId ? [{ openingScope: "pilot", openingTenantIds: { array_contains: tenantId } }] : [])] } },
+        policy: { is: { OR: [{ createScope: "all" }, ...(tenantId ? [{ createScope: "pilot", createTenantIds: { array_contains: tenantId } }] : [])] } },
+        ...(search ? { OR: [{ categoryCode: { contains: search } }, { versionLabel: { contains: search } }, { definition: { path: "$.name", string_contains: search } }] } : {}) },
+      include: { category: { select: { recommendedVersionId: true } } },
+      orderBy: [{ categoryCode: "asc" }, { publishedAt: "desc" }, { id: "asc" }], take: 101
+    });
+    return { structureVersion: 1, source: "published", truncated: rows.length > 100, options: rows.slice(0, 100).map(row => {
+      const definition = resolveRentalCategoryVersionBody(row, String(row.categoryCode).toLowerCase());
+      return { categoryCode: definition.code, name: definition.name, nameEn: definition.display?.nameEn,
+        versionId: row.id, versionLabel: row.versionLabel, recommended: row.category.recommendedVersionId === row.id,
+        defaultWorkspaceName: rentalDefaultWorkspaceName(definition) };
+    }) };
   }
 
   async forWorkspace(tenantId: string, workspaceId: string, tx?: Prisma.TransactionClient): Promise<ResolvedRentalCategory> {

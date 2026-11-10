@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Put, Req, UseGuards } from "
 import { CategoryGovernancePreviewGuard } from "./category-governance-preview.guard";
 import type { CategoryDraftSection, SystemUserRow } from "@rental-os/shared";
 import { CategoryGovernanceService } from "./category-governance.service";
-import { ArchiveCategoryDraftDto, CreateCategoryDraftDto, PatchCategoryDraftDto, PublishCategoryDraftDto, SaveCategoryOpeningDto, SaveCategoryVersionPolicyDto } from "./category-governance-request.dto";
+import { ArchiveCategoryDraftDto, CreateCategoryDraftDto, CreateRentalCategoryDto, PreviewRentalCategoryCreationDto, PatchCategoryDraftDto, PublishCategoryDraftDto, SaveCategoryOpeningDto, SaveCategoryVersionPolicyDto } from "./category-governance-request.dto";
 interface PlatformRequest { user: SystemUserRow }
 
 @Controller("platform/rental-categories")
@@ -12,6 +12,9 @@ export class CategoryGovernanceController {
   @Get() list(@Req() req: PlatformRequest) { return this.governance.list(req.user); }
   @Get("capability-catalog") catalog(@Req() req: PlatformRequest) { return this.governance.catalog(req.user); }
   @Get("tenant-directory") tenants(@Req() req: PlatformRequest) { return this.governance.tenantDirectory(req.user); }
+  @Post() createCategory(@Body() body: CreateRentalCategoryDto, @Req() req: PlatformRequest) { return this.governance.createCategory(body, req.user); }
+  @Post("creation-preview") previewCreation(@Body() body: PreviewRentalCategoryCreationDto, @Req() req: PlatformRequest) { return this.governance.previewCreation(body, req.user); }
+  @Get("creation-requests/:key") creationReceipt(@Param("key") key: string, @Req() req: PlatformRequest) { return this.governance.readCreationReceipt(key, req.user); }
   @Get(":code") detail(@Param("code") code: string, @Req() req: PlatformRequest) { return this.governance.detail(code, req.user); }
   @Get(":code/candidates/:tenantId/:operation") candidates(@Param("code") code: string, @Param("tenantId") tenantId: string, @Param("operation") operation: string, @Req() req: PlatformRequest) { return this.governance.candidates(code, tenantId, operation, req.user); }
   @Post(":code/drafts") create(@Param("code") code: string, @Body() body: CreateCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.createDraft(code, body, req.user); }

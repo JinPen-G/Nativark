@@ -3,7 +3,7 @@
  * neither calculate prices nor grant extension, payment or inventory authority. */
 import type { AiWorkspaceScope } from './ai-native';
 import type { AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
-import { RentalCategoryCode, RentalInventoryMode, RENTAL_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES,
+import { RENTAL_CATEGORY_CODE_PATTERN, RentalInventoryMode, RENTAL_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES,
   RENTAL_FULFILLMENT_MODES, RENTAL_LOCATION_TYPES, RENTAL_CATEGORY_ICON_CODES,
   RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, RENTAL_INSURANCE_PROVIDER_STATUSES,
   RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_DISCOUNT_SKIP_REASONS,
@@ -41,7 +41,7 @@ const dayType = choice('workday', 'weekend', 'statutory_holiday', 'makeup_workda
 const businessStatus = choice('open', 'limited', 'closed', 'self_service');
 const calendarSource = choice('week_rule', 'official_cn', 'tenant_override');
 const unit = choice(...RENTAL_PRICING_UNIT_CODES), inventory = choice(...Object.values(RentalInventoryMode));
-const category = choice(...Object.values(RentalCategoryCode));
+const category: AiLeafSchemaDraft = { type: 'string', pattern: RENTAL_CATEGORY_CODE_PATTERN.source, minLength: 2, maxLength: 64 };
 const eligibility = list(object({ rule: string, passed: boolean, detail: string }, ['rule', 'passed']), 131072);
 const allocations = numbers, target = choice(...RENTAL_DISCOUNT_TARGETS), discountType = choice(...RENTAL_DISCOUNT_TYPES);
 const windows = list(object({ start: string, end: string }), 131072);
@@ -55,9 +55,9 @@ const terminology = { itemLabel: string, itemGroupLabel: string, assetLabel: str
     itemGroups: string, pricingGroups: string, assets: string, locations: string }, []) };
 const terminologyRequired = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel', 'identifierLabel'];
 const attribute = object({ code: string, label: string, scope: choice('item_group', 'asset', 'transaction'),
-  type: choice('string', 'number', 'boolean', 'date', 'select'), required: boolean, unique: boolean, unit: string, options: strings }, ['code', 'label', 'scope', 'type']);
+  type: choice('string', 'number', 'boolean', 'date', 'select'), required: boolean, unique: boolean, clientVisible: boolean, unit: string, options: strings }, ['code', 'label', 'scope', 'type']);
 const inspectionField = object({ code: string, label: string, type: choice('boolean', 'number', 'text', 'select', 'photo'),
-  required: boolean, unit: string, options: strings, usageMetric: boolean }, ['code', 'label', 'type', 'required']);
+  required: boolean, unit: string, options: strings, usageMetric: boolean, appliesToCapability: choice(...RENTAL_CAPABILITY_CODES) }, ['code', 'label', 'type', 'required']);
 const chargeLines = list(ref('AiExtensionChargeLineDraft'), 1000);
 const common = { orderId: string, scope: ref('AiWorkspaceScope'), observedAt: time,
   source: object({ kind: choice('core_extension_preview'), orderVersion: time,
@@ -66,6 +66,13 @@ const common = { orderId: string, scope: ref('AiWorkspaceScope'), observedAt: ti
   execution: choice('not_attempted'), validity: choice('observation_only_recheck_in_original_business_flow') };
 
 export const AI_EXTENSION_PREVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiCapabilityRequirementSnapshot: object({ structureVersion: { type: 'integer', enum: [1] }, categoryCode: category,
+    definitionVersion: string, policyHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    fulfillmentMode: choice(...RENTAL_FULFILLMENT_MODES), rootItemGroupIds: list(string, 1000),
+    items: list(object({ itemGroupId: string, inventoryMode: inventory,
+      attributes: { type: 'object', additionalProperties: { oneOf: [string, boolean] }, maxProperties: 32 },
+      componentItemGroupIds: list(string, 1000) }), 1000),
+    matches: list(object({ code: choice(...RENTAL_CAPABILITY_CODES), itemGroupIds: list(string, 1000) }), 32) }),
   // Only Core's explicit attributeSchema extension bag is dynamic JSON; fixed
   // snapshot records below are closed. Consumers must treat schema text as data.
   AiExtensionSnapshotJson: { oneOf: [{ type: 'null' }, boolean, number, string, list(json, 131072),
@@ -75,6 +82,10 @@ export const AI_EXTENSION_PREVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
       defaultWorkspaceNameEn: string, terminologyEn: object(terminology, []) }, []),
     supportedInventoryModes: list(inventory, 131072), defaultCapabilities: list(choice(...RENTAL_CAPABILITY_CODES), 131072),
     requiredCapabilities: list(choice(...RENTAL_CAPABILITY_CODES), 131072), terminology: object(terminology, terminologyRequired),
+    conditionalCapabilities: list(object({ code: choice(...RENTAL_CAPABILITY_CODES), when: object({
+      inventoryModes: list(inventory, 4), fulfillmentModes: list(choice(...RENTAL_FULFILLMENT_MODES), 16),
+      itemAttribute: object({ code: string, values: list({ oneOf: [string, boolean] }, 100) })
+    }, []) }), 32),
     attributeSchema: { type: 'object', additionalProperties: json, maxProperties: 131072 },
     businessModel: ref('AiExtensionCategoryBusinessDraft'), version: string },
   ['code', 'name', 'description', 'supportedInventoryModes', 'defaultCapabilities', 'requiredCapabilities', 'terminology', 'attributeSchema', 'businessModel', 'version']),
@@ -98,6 +109,8 @@ export const AI_EXTENSION_PREVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiExtensionExecutionBasisDraft: shape<RentalOrderActionExecutionBasis>({ pricingMode: choice('incremental', 'original_total'),
     policySource: choice('current_workspace', 'original_quote'), categoryCode: category, originalCategoryVersionId: string,
     categoryVersionId: string, adoptionRevision: number, categoryPolicySnapshot: ref('AiExtensionCategoryPolicyDraft'),
+    capabilityRequirementsSnapshot: ref('AiCapabilityRequirementSnapshot'),
+    capabilitySnapshot: list(object({ code: choice(...RENTAL_CAPABILITY_CODES), implementationVersion: string, configVersion: string, config: json }), 100),
     incrementalPricing: object({ version: { type: 'integer', enum: [1] }, startAt: time, endAt: time,
       context: object({ dayRates: list(ref('AiExtensionPricingRateDraft'), 131072), timeZone: string,
         legacyDayTypeMultipliers: boolean, calendars: list(ref('AiExtensionCalendarYearDraft'), 131072) },

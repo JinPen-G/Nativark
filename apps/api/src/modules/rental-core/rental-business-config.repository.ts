@@ -1,3 +1,4 @@
+import { rentalCategoryStorageCode } from "./category-identity";
 import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import { RENTAL_CURRENCY_CODES } from "@rental-os/shared";
@@ -59,6 +60,7 @@ export interface TenantBusinessConfigSnapshot {
  */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
+  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
@@ -143,6 +145,25 @@ function money(value: number | undefined) {
 export class RentalBusinessConfigRepository implements RentalBusinessConfigStore {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Current business configuration only. The expected Core binding prevents a
+   * second read from joining a different adoption; empty sets remain empty. */
+  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot> {
+    return this.prisma.$transaction(async tx => {
+      const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected);
+      const where = { tenantId, workspaceId };
+      const [pricing, discounts, services, calendars, rules, templates] = await Promise.all([
+        tx.rentalPricingPlan.findMany({ where, orderBy: { createdAt: "desc" } }), tx.rentalDiscountPlan.findMany({ where, orderBy: { createdAt: "desc" } }),
+        tx.rentalValueAddedService.findMany({ where, orderBy: { createdAt: "desc" } }), tx.rentalBusinessCalendar.findMany({ where, orderBy: { year: "desc" } }),
+        tx.rentalRuleVersion.findMany({ where, orderBy: { createdAt: "desc" } }), tx.rentalNotificationTemplate.findMany({ where, orderBy: { createdAt: "desc" } })
+      ]);
+      return { tenantId, workspaceId, categoryCode: definition.code,
+        pricingPlans: pricing.map(row => this.toPricingPlan(row)), discountPlans: discounts.map(row => this.toDiscountPlan(row)),
+        services: services.map(row => this.toService(row)), calendars: calendars.map(row => this.toCalendar(row)),
+        ruleVersions: rules.map(row => this.toRuleVersion(row)), notificationTemplates: templates.map(row => this.toNotificationTemplate(row)),
+        hasPersistedConfig: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
   async loadAll(): Promise<TenantBusinessConfigSnapshot[]> {
     const [workspaces, pricing, discounts, services, calendars, rules, templates] = await Promise.all([
       this.prisma.businessWorkspace.findMany({ select: { id: true, tenantId: true, categoryCode: true } }),
@@ -185,7 +206,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
-      categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
+      categoryCode: rentalCategoryStorageCode(plan.categoryCode),
       code: plan.code,
       name: plan.name,
       currency: plan.currency,
@@ -220,7 +241,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
-      categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
+      categoryCode: rentalCategoryStorageCode(plan.categoryCode),
       code: plan.code,
       name: plan.name,
       status: plan.status,
@@ -258,7 +279,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: service.tenantId,
-      categoryCode: upper<$Enums.RentalCategoryCode>(service.categoryCode),
+      categoryCode: rentalCategoryStorageCode(service.categoryCode),
       code: service.code,
       name: service.name,
       serviceType: service.serviceType,
@@ -556,7 +577,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   private ruleVersionData(version: RentalRuleVersion) {
     return {
       tenantId: version.tenantId,
-      categoryCode: upper<$Enums.RentalCategoryCode>(version.categoryCode),
+      categoryCode: rentalCategoryStorageCode(version.categoryCode),
       version: version.version,
       status: version.status,
       config: version.config as unknown as Prisma.InputJsonValue,

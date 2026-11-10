@@ -72,7 +72,7 @@ export interface ApprovedOrderCompositionDependencies {
   // persisted entry point always injects the formal input/closed-plan proof.
   executionInput?: ApprovedOrderExecutionInputSource;
   confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder'>;
-  core: Pick<RentalCoreService, 'resolveWorkspaceId' | 'getProfile' | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listItemGroups' | 'listPricingGroups' | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'getOrder'>
+  core: Pick<RentalCoreService, 'resolveWorkspaceId' | 'readBusinessContext' | 'getProfile' | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listItemGroups' | 'listPricingGroups' | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'getOrder'>
     & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>;
   quoteFacts: Pick<RentalBusinessFactStore, 'findQuote'>;
   toolVersion: string;

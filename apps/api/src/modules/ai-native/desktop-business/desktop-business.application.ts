@@ -1,7 +1,7 @@
 /** Current Auth/Guard/ALS -> exact workspace policy -> bounded existing catalog for human preview. No model dispatch. */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { RentalCategoryCode, RENTAL_DESKTOP_BUSINESS_VERSION, parseRentalDesktopBusinessPolicy,
+import { isRentalCategoryCode, RENTAL_DESKTOP_BUSINESS_VERSION, parseRentalDesktopBusinessPolicy,
   parseRentalDesktopCatalogRequest, parseRentalDesktopCatalogResult, parseRentalDesktopBusinessReadRequest,
   parseRentalDesktopCatalogSourcesResult, parseRentalDesktopCatalogCheckResult, type RentalDesktopBusinessBinding } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
@@ -174,7 +174,7 @@ export function composeDesktopBusinessApplication(dependencies: DesktopBusinessD
         // The enclosing authority also rechecks that scope after the audit before disclosing this result.
         const reader = new AiCatalogReadFactsService(dependencies.core, authority, clock);
         const facts = await reader.read({ limit: input.query.limit }, authorized); assertActive();
-        if (facts.items.some(item => !Object.values(RentalCategoryCode).includes(item.categoryCode as RentalCategoryCode))) throw fail('AI_RESOURCE_UNAVAILABLE');
+        if (facts.items.some(item => !isRentalCategoryCode(item.categoryCode))) throw fail('AI_RESOURCE_UNAVAILABLE');
         await revalidate();
         const verifyPolicy = async () => {
           const current = await dependencies.policies.read(binding); assertActive();

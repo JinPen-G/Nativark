@@ -5,6 +5,8 @@ const path = require("node:path");
 require("ts-node").register({
   transpileOnly: false,
   compilerOptions: {
+    target: "es2022",
+    lib: ["es2022", "dom"],
     module: "commonjs",
     moduleResolution: "node",
     experimentalDecorators: true,
@@ -186,7 +188,7 @@ function requestContext(method, url, accessToken) {
     saas.user
   );
   assert.equal(bootstrapped.tenant.categoryCode, "camera");
-  assert.equal(rentalCore.getProfile(bootstrapped.tenant.tenantId).categoryCode, "camera", "bootstrapped tenant must initialize Rental Core with its selected category");
+  assert.equal((await rentalCore.getProfile(bootstrapped.tenant.tenantId)).categoryCode, "camera", "bootstrapped tenant must initialize Rental Core with its selected category");
   assert.equal(rentalCore.listItemGroups(bootstrapped.tenant.tenantId).length, 0, "new tenant must not inherit demo camera products");
   assert.equal(bootstrapped.adminUser.isSaasAdmin, false);
   assert.equal(bootstrapped.adminUser.isPlatformAdmin, true);
@@ -211,7 +213,7 @@ function requestContext(method, url, accessToken) {
       },
       saas.user
     ),
-    /经营品类不存在/
+    /动态品类需要持久化品类目录与发布版本/
   );
 
   const tenantAdminResetRoute = requestContext(
@@ -314,7 +316,10 @@ function requestContext(method, url, accessToken) {
     "utf8"
   );
   assert.match(repositorySource, /prisma\.\$transaction/);
-  assert.match(repositorySource, /tenantRentalProfile\.create/);
+  assert.doesNotMatch(repositorySource, /tenantRentalProfile\.(create|upsert|update)\(/);
+  const rentalConfigSource = fs.readFileSync(path.join(__dirname, "../apps/api/src/modules/rental-core/rental-core-config.repository.ts"), "utf8");
+  assert.match(rentalConfigSource, /tenantRentalProfile\.upsert/);
+  assert.match(repositorySource, /await onBeforeCommit\(tx, tenant\.id\)/);
   assert.match(repositorySource, /authSession\.updateMany/);
   assert.doesNotMatch(repositorySource, /mock-token/);
 

@@ -1,11 +1,11 @@
 import {
-  FeatureOwnership, FeatureReleaseStatus, SubscriptionPlan, SubscriptionRequestStatus,
+  FeatureOwnership, FeatureReleaseStatus, SubscriptionPlan, SubscriptionRequestStatus, RENTAL_CATEGORY_CODE_PATTERN,
   SubscriptionRequestType, SubscriptionSource, type ExtendSubscriptionRequest, type GrantTenantFeatureRequest,
   type HandleSubscriptionRequestRequest, type ProvisionSubscriptionRequest, type RenewSubscriptionRequest,
   type RevokeTenantFeatureRequest, type ScheduleNextSubscriptionRequest, type SetStandardPriceRequest,
   type SubmitSubscriptionRequestRequest, type UpgradeSubscriptionProRequest, type UpsertFeatureCatalogRequest
 } from "@rental-os/shared";
-import { IsArray, IsBoolean, IsEnum, IsISO8601, IsInt, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Matches, Max, MaxLength, Min } from "class-validator";
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEnum, IsISO8601, IsInt, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Matches, Max, MaxLength, Min } from "class-validator";
 
 const NON_BLANK = /\S/;
 
@@ -79,7 +79,7 @@ export class ScheduleNextSubscriptionDto implements ScheduleNextSubscriptionRequ
 export class SubmitSubscriptionRequestDto implements SubmitSubscriptionRequestRequest {
   @IsEnum(SubscriptionRequestType) type!: SubscriptionRequestType;
   @IsOptional() @IsEnum(SubscriptionPlan) targetPlan?: SubscriptionPlan;
-  @IsOptional() @IsArray() @IsString({ each: true }) moduleIntent?: string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @ArrayUnique() @IsString({ each: true }) @Matches(RENTAL_CATEGORY_CODE_PATTERN, { each: true }) moduleIntent?: string[];
   @IsOptional() @IsString() @MaxLength(120) contactName?: string;
   @IsOptional() @IsString() @MaxLength(32) contactPhone?: string;
   @IsOptional() @IsString() @MaxLength(2000) note?: string;
@@ -109,7 +109,7 @@ export class UpsertFeatureCatalogDto implements UpsertFeatureCatalogRequest {
   @IsString() @IsNotEmpty() @MaxLength(191) code!: string;
   @IsString() @IsNotEmpty() @MaxLength(191) name!: string;
   @IsString() @IsNotEmpty() @MaxLength(191) module!: string;
-  @IsArray() @IsString({ each: true }) categories!: string[];
+  @IsArray() @ArrayMaxSize(100) @ArrayUnique() @IsString({ each: true }) @Matches(RENTAL_CATEGORY_CODE_PATTERN, { each: true }) categories!: string[];
   @IsEnum(FeatureOwnership) defaultOwnership!: FeatureOwnership;
   @IsEnum(FeatureOwnership) currentOwnership!: FeatureOwnership;
   @IsEnum(FeatureReleaseStatus) releaseStatus!: FeatureReleaseStatus;

@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger, Optional } from "@nestjs/common"
 import { Prisma } from "@prisma/client";
 import {
   RENTAL_CAPABILITY_MODULES,
+  RENTAL_CORE_CAPABILITY_CODES,
   RENTAL_CATEGORY_DEFINITIONS,
   type RentalCapability,
   type RentalCapabilityDefinition,
@@ -12,10 +13,13 @@ import {
   type RentalCapabilityDecisionSnapshot,
   type RentalCapabilityEquipmentLine,
   type RentalCategoryCode,
+  type RentalCategoryDefinition,
+  type RentalInspectionTemplate,
   type WorkspaceCapabilityInstance
 } from "@rental-os/shared";
 import { CapabilityHookRepository, type CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import { validateConditionalCapabilities } from "./category-capability-conditions";
 
 /**
  * 传给 Hook 的业务对象必须是**克隆后冻结**的，不能冻结活对象。
@@ -44,6 +48,8 @@ export interface CapabilityHookRunInput<TSubject> {
   categoryCode: RentalCategoryCode;
   /** 服务端从本次采用/历史明确版本解析；空数组是明确政策，不是缺省。 */
   requiredCapabilities?: RentalCapability[];
+  /** Server-evaluated conditions only. Omitted keeps the historical unconditional execution policy. */
+  inactiveConditionalCapabilities?: RentalCapability[];
   subject: TSubject;
   operator?: string;
   at?: string;
@@ -183,6 +189,52 @@ export class CapabilityHookRuntime {
     return [...this.modules.keys()].sort();
   }
 
+  /** Metadata comes from the registered executable version; labels in the declaration cannot supply this evidence. */
+  compositionFor(code: RentalCapability, implementationVersion: string) {
+    const module = this.modules.get(CapabilityHookRuntime.key(code, implementationVersion));
+    return module?.composition ? { ...structuredClone(module.composition),
+      points: Object.keys(module.hooks) as RentalCapabilityHookPoint[], order: module.order } : undefined;
+  }
+
+  assertCategoryComposition(category: RentalCategoryDefinition) {
+    const conditional = new Map(validateConditionalCapabilities(category).map(row => [row.code, row]));
+    const core = new Set<RentalCapability>(RENTAL_CORE_CAPABILITY_CODES);
+    for (const code of category.defaultCapabilities) {
+      const definition = this.definitions.get(code);
+      if (!definition?.implementationVersion) throw new ConflictException(`能力 ${definition?.label ?? code} 尚无可执行实现`);
+      const hook = this.modules.get(CapabilityHookRuntime.key(code, definition.implementationVersion));
+      const expectsHook = !core.has(code) && definition.extensionPoints.some(point => point === "order_validation" || point === "fulfillment");
+      if (expectsHook && !hook) throw new ConflictException(`能力 ${definition.label} 的声明版本未登记执行模块`);
+      const composition = hook?.composition;
+      const requirement = conditional.get(code);
+      if (requirement && !composition) throw new ConflictException(`能力 ${definition.label} 尚不支持条件组合`);
+      if (!composition) continue;
+      if (composition.applicableInventoryModes) {
+        if (!composition.applicableInventoryModes.some(mode => category.supportedInventoryModes.includes(mode))) throw new ConflictException(`能力 ${definition.label} 缺少支持的库存形态`);
+        if (requirement && (requirement.when.inventoryModes ?? category.supportedInventoryModes).some(mode => !composition.applicableInventoryModes!.includes(mode))) {
+          throw new ConflictException(`能力 ${definition.label} 的条件须限定为其支持的库存形态`);
+        }
+      }
+      for (const required of composition.requiredInspectionFields ?? []) {
+        const field = category.businessModel.defaults.inspectionFields.find(field => field.code === required.code);
+        if (!field || field.type !== required.type || !field.required) throw new ConflictException(`能力 ${definition.label} 需要必填检查字段“${required.label}”`);
+        if (requirement && field.appliesToCapability !== code) throw new ConflictException(`检查字段“${required.label}”须沿用该能力的条件，避免影响其他商品`);
+      }
+    }
+  }
+
+  assertInspectionComposition(templates: RentalInspectionTemplate[], required: RentalCapability[], instances: WorkspaceCapabilityInstance[]) {
+    for (const code of required) {
+      const instance = instances.find(instance => instance.code === code && instance.status === "enabled");
+      if (!instance) continue; // The availability gate returns the more specific missing-instance reason.
+      const composition = this.compositionFor(code, instance.implementationVersion);
+      for (const field of composition?.requiredInspectionFields ?? []) for (const stage of field.stages) {
+        const available = templates.some(template => template.enabled && template.stage === stage && template.fields.some(candidate => candidate.code === field.code && candidate.type === field.type && candidate.required));
+        if (!available) throw new ConflictException(`本次业务缺少${stage === "pickup" ? "领取" : "归还"}检查字段“${field.label}”，请先完成检查配置`);
+      }
+    }
+  }
+
   /**
    * 启动自检：凡是**已经有 Hook 实现**的能力，注册表当前声明的实现版本必须也有实现。
    *
@@ -224,9 +276,24 @@ export class CapabilityHookRuntime {
       executed: []
     };
 
+    const inactive = new Set(input.inactiveConditionalCapabilities ?? []);
+    const providedByCore = new Set<RentalCapability>(RENTAL_CORE_CAPABILITY_CODES);
+    for (const code of input.requiredCapabilities ?? []) {
+      if (providedByCore.has(code)) continue;
+      const definition = this.definitions.get(code);
+      const instance = instances.find(instance => instance.code === code && instance.status === "enabled");
+      const expectsHook = definition?.extensionPoints.some(point => point === "order_validation" || point === "fulfillment");
+      const missingExecutable = !definition?.implementationVersion || (expectsHook && !this.versionsByCode.get(code)?.size);
+      if (inactive.has(code) || missingExecutable || !instance) {
+        outcome.blocked = true;
+        outcome.blockReasons.push({ capability: code, code: "required_capability_unavailable", message: `本次业务需要能力 ${definition?.label ?? code}，但缺少可用的启用依据` });
+      }
+    }
+
     // 执行名单的三道解析，顺序与理由见各分支注释。
     const runnable: Array<{ instance: WorkspaceCapabilityInstance; module: RentalCapabilityHookModule }> = [];
     for (const instance of instances) {
+      if (instance.status !== "enabled" || inactive.has(instance.code)) continue;
       const definition = this.definitions.get(instance.code);
       const required = input.requiredCapabilities?.includes(instance.code) ?? this.requiredForCategory(input.categoryCode, instance.code);
 

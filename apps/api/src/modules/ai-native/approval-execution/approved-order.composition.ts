@@ -21,13 +21,13 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
     || typeof dependencies.confirmation?.createApprovedOrder !== 'function' || typeof dependencies.quoteFacts?.findQuote !== 'function'
     || typeof dependencies.toolVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(dependencies.toolVersion)
     || (dependencies.executionInput && typeof dependencies.executionInput.readAuthorized !== 'function')) throw unavailable();
-  const coreMethods = ['resolveWorkspaceId', 'getProfile', 'getWorkspaceCategory', 'getBusinessSettings', 'listItemGroups',
+  const coreMethods = ['resolveWorkspaceId', 'readBusinessContext', 'getProfile', 'getWorkspaceCategory', 'getBusinessSettings', 'listItemGroups',
     'listPricingGroups', 'listCouponTemplates', 'listLocations', 'listOperators', 'getOrder'] as const;
   if (coreMethods.some(method => typeof dependencies.core?.[method] !== 'function')
     || ['aiTask', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval', 'aiApprovalConsumption']
       .some(name => typeof (dependencies.db[name as keyof typeof dependencies.db] as { findFirst?: unknown })?.findFirst !== 'function')) throw unavailable();
   const core = dependencies.core;
-  const methods = { resolveWorkspaceId: core.resolveWorkspaceId.bind(core), getProfile: core.getProfile.bind(core),
+  const methods = { resolveWorkspaceId: core.resolveWorkspaceId.bind(core), readBusinessContext: core.readBusinessContext.bind(core), getProfile: core.getProfile.bind(core),
     getWorkspaceCategory: core.getWorkspaceCategory.bind(core), getBusinessSettings: core.getBusinessSettings.bind(core),
     listItemGroups: core.listItemGroups.bind(core), listPricingGroups: core.listPricingGroups.bind(core),
     listCouponTemplates: core.listCouponTemplates.bind(core), listLocations: core.listLocations.bind(core),
@@ -104,9 +104,7 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
       const result = await route.withOrderWrite(original.input, original.binding, async (context, body, userName) => {
         if (context.scope.kind !== 'workspace' || d.core.resolveWorkspaceId(context.scope.tenantId) !== context.scope.workspaceId) throw deniedOrder();
         const tenantId = context.scope.tenantId;
-        const business: BusinessContext = { profile: d.core.getProfile(tenantId), category: await d.core.getWorkspaceCategory(tenantId),
-          settings: d.core.getBusinessSettings(tenantId), groups: d.core.listItemGroups(tenantId), pricingGroups: d.core.listPricingGroups(tenantId),
-          couponTemplates: d.core.listCouponTemplates(tenantId), locations: d.core.listLocations(tenantId), operators: d.core.listOperators(tenantId) };
+        const business: BusinessContext = await d.core.readBusinessContext(tenantId);
         await authority.resolve(original.input, original.binding, 'execute');
         effectPossible = true;
         try { return await create(tenantId, body, userName, business, original.input.businessIdempotencyKey, participant); }

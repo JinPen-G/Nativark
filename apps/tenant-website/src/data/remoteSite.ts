@@ -7,20 +7,8 @@
 import { clientApi, type BootstrapResponse, type CatalogItem, type PublicCatalogResponse } from './apiClient';
 import type { Category, Product, Store, SubCategory, Tenant } from '../types';
 
-/** 后端一级品类编码 → 官网图标键（HomeSections 的 icons 映射）。 */
-const CATEGORY_ICON: Record<string, string> = {
-  CAMERA: 'camera', CAMPING: 'camping', VEHICLE: 'car', DIGITAL: 'laptop',
-  CONSTRUCTION: 'tool', HOME: 'home', BABY: 'baby', SPORTS: 'sports',
-};
-
-/** 后端一级品类编码 → 中文短名（服务名已是完整中文名，短名用于导航/筛选）。 */
-const CATEGORY_SHORT: Record<string, string> = {
-  CAMERA: '摄影', CAMPING: '露营', VEHICLE: '用车', DIGITAL: '数码',
-  CONSTRUCTION: '工具', HOME: '家居', BABY: '母婴', SPORTS: '运动',
-};
-
-/** 计价单位编码 → 展示单位。 */
-const PRICE_UNIT: Record<string, string> = { day_24h: '天', day: '天', hour: '小时', week: '周', month: '月' };
+/** Core icon codes adapt to the website's existing icon set. */
+const CATEGORY_ICON: Record<string, string> = { camera: 'camera', camping: 'camping', vehicle: 'car', construction: 'tool', tool: 'tool' };
 
 const FALLBACK_HERO = '/assets/multi-lifestyle-hero.webp';
 const FALLBACK_SCENE = '/assets/scene-camera.webp';
@@ -30,16 +18,23 @@ function firstImage(item: CatalogItem): string {
   return item.images?.[0]?.url || PLACEHOLDER_IMAGE;
 }
 
+function attributeText(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return value ? '是' : '否';
+}
+
 function subtitleOf(item: CatalogItem): string {
   if (item.description?.trim()) return item.description.trim();
-  const attrs = item.attributes ? Object.values(item.attributes).filter(Boolean) : [];
+  const attrs = Object.values(item.attributes ?? {}).map(attributeText).filter((value): value is string => value !== undefined);
   return attrs.slice(0, 3).join(' · ');
 }
 
-/** 一个 catalog item → 官网商品卡。后端未提供的字段用诚实占位（0/available），由页面文案兜底。 */
-function toProduct(item: CatalogItem, categoryId: string, groupId: string): Product {
-  const price = item.startingPrice?.amount ?? 0;
-  const priceUnit = PRICE_UNIT[item.startingPrice?.unit ?? ''] ?? '天';
+/** Catalog prices are references; absent deposit and availability stay unknown until Core supplies a quote. */
+function toProduct(item: CatalogItem, categoryId: string, groupId: string, catalog: PublicCatalogResponse): Product {
+  const price = item.startingPrice?.amount;
+  const priceUnit = catalog.pricingUnits.find(unit => unit.code === item.startingPrice?.unit)?.label ?? '';
+  const brand = attributeText(item.attributes?.brand);
   return {
     id: item.id,
     name: item.name,
@@ -47,23 +42,22 @@ function toProduct(item: CatalogItem, categoryId: string, groupId: string): Prod
     cover: firstImage(item),
     categoryId,
     subCategoryId: groupId,
-    tags: item.attributes?.brand ? [item.attributes.brand] : [],
+    tags: brand ? [brand] : [],
     price,
+    currency: item.startingPrice?.currency,
     priceUnit,
-    deposit: 0,
-    rating: 0,
-    reviewCount: 0,
-    stockStatus: 'available',
-    availableQuantity: 1,
+    stockStatus: 'unknown',
     badges: [],
     description: item.description?.trim() || item.name,
-    specs: item.attributes ?? {},
+    specs: Object.fromEntries(Object.entries(item.attributes ?? {}).flatMap(([code, value]) => {
+      const text = attributeText(value);
+      return text === undefined ? [] : [[item.attributeLabels?.[code] ?? code, text]];
+    })),
   };
 }
 
 /** 一个已发布服务（+它的 catalog）→ 官网一级品类。二级分类由定价分组近似（后端暂无二级结构）。 */
 function toCategory(service: BootstrapResponse['services'][number], catalog: PublicCatalogResponse | null, configuredImage?: string): Category {
-  const code = service.categoryCode;
   const items = catalog?.items ?? [];
   // 品类入口图优先用租户在后台配置的图，缺省再回落到该品类首个商品图。
   const coverImage = configuredImage || (items[0] ? firstImage(items[0]) : PLACEHOLDER_IMAGE);
@@ -77,9 +71,9 @@ function toCategory(service: BootstrapResponse['services'][number], catalog: Pub
   return {
     id: service.code,
     name: service.name,
-    shortName: CATEGORY_SHORT[code] ?? service.name,
+    shortName: catalog?.categoryMetadata?.name ?? service.name,
     description: children.slice(0, 3).map(child => child.name).join(' / ') || service.name,
-    icon: CATEGORY_ICON[code] ?? 'gift',
+    icon: CATEGORY_ICON[catalog?.categoryMetadata?.icon ?? 'rental'] ?? 'gift',
     image: coverImage,
     heroImage: coverImage,
     heroTitle: service.name,
@@ -165,7 +159,14 @@ export async function loadRemoteBootstrap(tenantCode: string): Promise<{ tenant:
  */
 export async function loadRemoteCatalogs(tenantCode: string, bootstrap: BootstrapResponse): Promise<{ tenant: Tenant; products: Product[] }> {
   const openServices = openServicesOf(bootstrap);
-  const catalogs = await Promise.all(openServices.map(service => clientApi.publicCatalog(tenantCode, service.code).catch(() => null)));
+  const catalogs = await Promise.all(openServices.map(async service => {
+    try {
+      const catalog = await clientApi.publicCatalog(tenantCode, service.code);
+      if (catalog.tenantCode !== tenantCode || catalog.workspace.workspaceCode !== service.code || catalog.categoryCode !== service.categoryCode ||
+        catalog.categoryMetadata && catalog.categoryMetadata.structureVersion !== 1) return null;
+      return catalog;
+    } catch { return null; }
+  }));
   const imageByCode = new Map((bootstrap.website?.categoryImages ?? []).map(item => [item.code, item.imageUrl]));
   const categories = openServices.map((service, index) => toCategory(service, catalogs[index], imageByCode.get(service.code)));
   const products: Product[] = [];
@@ -173,7 +174,7 @@ export async function loadRemoteCatalogs(tenantCode: string, bootstrap: Bootstra
     const catalog = catalogs[index];
     catalog?.items.forEach(item => {
       const group = catalog.pricingGroups?.find(g => g.memberItemGroupIds?.includes(item.id));
-      products.push(toProduct(item, service.code, group?.id ?? item.id));
+      products.push(toProduct(item, service.code, group?.id ?? item.id, catalog));
     });
   });
   // 各服务的履约地点去重汇总为租户门店（供首页预约搜索选取货/归还门店）。
