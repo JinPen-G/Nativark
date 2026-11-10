@@ -4,7 +4,7 @@ import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_CODES, type AiSceneCode, type 
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-task-creation.repository';
-import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestAccess } from './original-request.authority';
+import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestNativeAuthority, type AiOriginalRequestAccess } from './original-request.authority';
 import { freezeOriginalInput, originalBody, originalRequestReferenceSchema, parseOriginalRequest } from './original-request.validation';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
@@ -86,27 +86,78 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       previousInputRef: row.previousRequestId, expiresAt: row.expiresAt.toISOString(), createdAt: row.createdAt.toISOString(),
       state: row.status === 'REVOKED' ? 'revoked' : row.expiresAt.getTime() <= this.clock().getTime() ? 'expired' : 'stored' });
   }
-  private async checked(row: Row, initial: AiOriginalRequestAccess, creation: boolean, history = false) {
+  private async checked(row: Row, initial: AiOriginalRequestAccess, creation: boolean, history = false,
+    authority: AiOriginalRequestAuthority = this.authority) {
     this.exact(row, initial);
     const body = this.body(row);
     let current: AiOriginalRequestAccess;
     if (creation) {
-      const grant = await this.authority.create(body);
+      const grant = await authority.create(body);
       if (row.policyHash !== grant.policyHash || row.policyRevision !== grant.policyRevision || row.sceneVersion !== grant.sceneVersion) throw conflict();
       current = grant;
-    } else current = await this.authority.read(body, row.sceneVersion);
+    } else current = await authority.read(body, row.sceneVersion);
     this.sameIdentity(initial, current);
     if (creation && (row.creationClosedAt || row.creationCloseKey)) throw denied();
     if (!history && (row.status !== 'STORED' || row.expiresAt.getTime() <= this.clock().getTime()
       || row.authorizationBindingHash !== originalIdentityHash(current.context))) throw denied();
     return { row, body, context: current.context, receipt: this.receipt(row) };
   }
-  private async load(inputRef: string, creation = false, history = false, tx?: Prisma.TransactionClient) {
+  private async load(inputRef: string, creation = false, history = false,
+    db: Pick<PrismaClient, 'aiTaskOriginalRequest'> = this.db, authority: AiOriginalRequestAuthority = this.authority,
+    live?: () => void) {
+    live?.();
     if (!originalRequestReferenceSchema.safeParse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef }).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const current = await this.authority.current();
-    const row = await this.stored(() => (tx ?? this.db).aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } }));
+    const current = await authority.current(); live?.();
+    const row = await this.stored(() => db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), id: inputRef } })); live?.();
     if (!row || row.id !== inputRef) throw unavailable();
-    return this.checked(row, current, creation, history);
+    const checked = await this.checked(row, current, creation, history, authority); live?.();
+    return checked;
+  }
+  /** Observe an existing original input under the caller's native row fence.
+   * Uses the same current creation-policy/resource/owner checks as resolve,
+   * without creating a request/Task or returning an execution grant. The caller
+   * owns Serializable, enclosing identity locks, commit/rollback and unknown;
+   * it must await its metadata participant and not nest a budget read here.
+   * Explicit nativeAuthority binds all original current/resource/plan/entitlement
+   * checks to this Native; omission retains the original Web authority path and
+   * does NOT attest its other reads are in this transaction. Failure never falls
+   * back to Web. Neither path is a business-execution or commit grant.
+   * @param native - caller-owned active transaction, never the global client.
+   * @param value - exact original reference; locator data is not authorization.
+   * @param consume - same-transaction metadata participant, not business execution.
+   * @param signal - the original request cancellation, never a new allowance.
+   * @returns participant result after original row and current authority recheck;
+   * callback return is not a commit receipt or reusable authorization. */
+  async withCurrentInputIn<T>(native: Prisma.TransactionClient,
+    value: unknown, consume: (original: { scopeId: string; receipt: AiSceneRequestReceiptDraft;
+      request: AiSceneRequestBody; context: import('@rental-os/shared').AiExecutionContext;
+      policyRevision: number; policyHash: string }) => Promise<T>, signal: AbortSignal,
+    nativeAuthority?: AiOriginalRequestNativeAuthority): Promise<T> {
+    let bound: ReturnType<AiOriginalRequestNativeAuthority['bindIn']> | undefined;
+    const live = () => { if (signal.aborted) throw denied(); bound?.assertCurrent(); };
+    live();
+    const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (nativeAuthority !== undefined) {
+      bound = nativeAuthority.bindIn(native, signal);
+      if (!bound || typeof bound.assertCurrent !== 'function' || typeof bound.current !== 'function'
+        || typeof bound.create !== 'function') throw unavailable();
+    }
+    const authority = bound ?? this.authority;
+    const initial = await authority.current(); live();
+    const owner = this.owned(initial), inputRef = parsed.data.inputRef, where = { ...owner, id: inputRef };
+    await this.stored(() => native.$queryRaw(Prisma.sql`SELECT id FROM ai_task_original_requests WHERE scopeId = ${owner.scopeId} AND id = ${inputRef} FOR UPDATE`));
+    live();
+    const row = await this.stored(() => native.aiTaskOriginalRequest.findFirst({ where })); live();
+    if (!row || row.id !== inputRef) throw unavailable();
+    const binding = this.closureBinding(row), current = await this.checked(row, initial, true, false, authority); live();
+    const original = freezeOriginalInput(structuredClone({ scopeId: owner.scopeId, receipt: current.receipt,
+      request: current.body, context: current.context, policyRevision: row.policyRevision, policyHash: row.policyHash }));
+    const result = await consume(original); live();
+    const after = await this.stored(() => native.aiTaskOriginalRequest.findFirst({ where })); live();
+    if (!after || this.closureBinding(after) !== binding) throw conflict();
+    await this.checked(after, initial, true, false, authority); live();
+    return result;
   }
   async read(value: unknown) {
     const parsed = originalRequestReferenceSchema.safeParse(value);
@@ -182,16 +233,17 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     return freezeOriginalInput({ receipt: this.receipt(row), context: current.context, material: 'erased' as const,
       task: { state: 'observed' as const, ...before, execution: 'not_inferred_from_metadata' as const } });
   }
-  /** A trusted association participant may atomically attach metadata to the
-   * original request. It cannot create a task or dispatch inside this transaction.
-   * Association conflicts roll back the request as well; normal callers omit it. */
-  async save(value: unknown, isReissue = false,
-    associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>) {
+  /** Original save algorithm shared by the legacy Web owner and Native participant.
+   * Native callers explicitly provide every source; no Web/global fallback. */
+  private async prepareSave(value: unknown, isReissue: boolean, authority: AiOriginalRequestAuthority,
+    db: Pick<PrismaClient, 'aiTaskOriginalRequest'>, live?: () => void) {
+    live?.();
     const command = parseOriginalRequest(value, isReissue), body = originalBody(command);
     const previousRef = command.previousInputRef ?? null;
-    const initial = await this.authority.create(body);
+    const initial = await authority.create(body); live?.();
     const owner = this.owned(initial);
-    const previous = previousRef ? await this.load(previousRef, false, true) : null;
+    const previous = previousRef ? await this.load(previousRef, false, true, db, authority, live) : null;
+    live?.();
     if (previous) {
       this.sameIdentity(initial, { scopeId: previous.row.scopeId, context: previous.context });
       if (previous.row.requestKey === command.requestKey || previous.row.sceneCode !== body.sceneCode || previous.row.revision >= 4294967294) throw conflict();
@@ -200,33 +252,90 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       revision: previous ? previous.row.revision + 1 : 1, previousRequestId: previousRef, payload: body.input };
     const contentHash = this.hash(identity), where = { ...owner, requestKey: command.requestKey };
     const verify = async (row: Row) => {
+      live?.();
       if (row.requestKey !== command.requestKey || row.contentHash !== contentHash) throw conflict();
-      return this.checked(row, initial, true);
+      const checked = await this.checked(row, initial, true, false, authority); live?.();
+      return checked;
     };
+    return { command, body, initial, identity, contentHash, where, verify, authority };
+  }
+
+  private async savePreparedIn(tx: Prisma.TransactionClient, prepared: Awaited<ReturnType<PrismaOriginalRequestRepository['prepareSave']>>,
+    associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>, live?: () => void,
+    completed?: (value: boolean) => void) {
+    const { command, body, initial, identity, contentHash, where, verify, authority } = prepared;
+    live?.();
+    const existing = await tx.aiTaskOriginalRequest.findFirst({ where }); live?.();
+    if (existing) {
+      const receipt = (await verify(existing)).receipt; live?.();
+      await associate?.(tx, receipt); live?.();
+      completed?.(Boolean(associate));
+      return { ...receipt, replayed: true };
+    }
+    const current = await authority.create(body); live?.();
+    this.sameIdentity(initial, current);
+    if (initial.policyHash !== current.policyHash || initial.policyRevision !== current.policyRevision) throw conflict();
+    const now = this.clock(), expiresAt = new Date(initial.expiresAt);
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= now) throw denied();
+    live?.();
+    const row = await tx.aiTaskOriginalRequest.create({ data: { ...identity, id: randomUUID(), requestKey: command.requestKey,
+      contractVersion: AI_SCENE_REQUEST_DRAFT_VERSION, payload: identity.payload as Prisma.InputJsonObject,
+      contentHash, authorizationBindingHash: originalIdentityHash(initial.context), policyRevision: initial.policyRevision,
+      policyHash: initial.policyHash, expiresAt, createdAt: now, status: 'STORED' } }); live?.();
+    const checked = await verify(row); live?.();
+    await associate?.(tx, checked.receipt); live?.();
+    completed?.(true);
+    return { ...checked.receipt, replayed: false };
+  }
+
+  /** Prepare an original request in the caller-owned Native, with the same
+   * policy, predecessor, key/hash and association algorithm as Web save. This
+   * never commits, creates a Task or supplies a first-catalog locator. The owner
+   * must hold coherent fences, await all metadata, roll back failures, and only
+   * then adopt after confirmed commit; unknown uses its original key, no replay. */
+  async saveIn(native: Prisma.TransactionClient, value: unknown, nativeAuthority: AiOriginalRequestNativeAuthority,
+    signal: AbortSignal, isReissue = false,
+    associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>) {
+    if (!native || '$transaction' in native || typeof native.aiTaskOriginalRequest?.findFirst !== 'function'
+      || typeof native.aiTaskOriginalRequest?.create !== 'function' || typeof nativeAuthority?.bindIn !== 'function') throw unavailable();
+    const bound = nativeAuthority.bindIn(native, signal);
+    if (!bound || typeof bound.assertCurrent !== 'function' || typeof bound.current !== 'function'
+      || typeof bound.read !== 'function' || typeof bound.create !== 'function') throw unavailable();
+    const live = () => { if (signal.aborted) throw denied(); bound.assertCurrent(); };
+    live();
+    try {
+      const prepared = await this.prepareSave(value, isReissue, bound, native, live); live();
+      const receipt = await this.savePreparedIn(native, prepared, associate, live); live();
+      // Metadata cannot alter the original input, policy or lifetime. Re-read and
+      // reauthorize after its awaits before the owner can adopt this preparation.
+      const after = await this.stored(() => native.aiTaskOriginalRequest.findFirst({ where: { ...prepared.where, id: receipt.inputRef } })); live();
+      if (!after || after.id !== receipt.inputRef || after.policyHash !== prepared.initial.policyHash
+        || after.policyRevision !== prepared.initial.policyRevision) throw conflict();
+      const latest = await prepared.verify(after); live();
+      const { replayed: _replayed, ...expectedReceipt } = receipt;
+      if (requestFingerprint(latest.receipt) !== requestFingerprint(expectedReceipt)) throw conflict();
+      // This wrapper deliberately cannot masquerade as Web's committed receipt.
+      return freezeOriginalInput({ state: 'prepared' as const, commit: 'not_observed' as const, receipt });
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError || error instanceof AiOriginalRequestResultUnknownError) throw error;
+      // A uniqueness race can involve another committed association. Never read
+      // globally or replay in this borrowed Native to manufacture a success.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AiOriginalRequestResultUnknownError();
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
+  }
+
+  /** A trusted association participant may atomically attach metadata to the
+   * original request. It cannot create a task or dispatch inside this transaction.
+   * Association conflicts roll back the request as well; normal callers omit it. */
+  async save(value: unknown, isReissue = false,
+    associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>) {
+    const prepared = await this.prepareSave(value, isReissue, this.authority, this.db);
+    const { where, verify } = prepared;
     let completed = false;
     try {
-      const result = await this.db.$transaction(async tx => {
-        const existing = await tx.aiTaskOriginalRequest.findFirst({ where });
-        if (existing) {
-          const receipt = (await verify(existing)).receipt;
-          await associate?.(tx, receipt);
-          completed = Boolean(associate);
-          return { ...receipt, replayed: true };
-        }
-        const current = await this.authority.create(body);
-        this.sameIdentity(initial, current);
-        if (initial.policyHash !== current.policyHash || initial.policyRevision !== current.policyRevision) throw conflict();
-        const now = this.clock(), expiresAt = new Date(initial.expiresAt);
-        if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= now) throw denied();
-        const row = await tx.aiTaskOriginalRequest.create({ data: { ...identity, id: randomUUID(), requestKey: command.requestKey,
-          contractVersion: AI_SCENE_REQUEST_DRAFT_VERSION, payload: identity.payload as Prisma.InputJsonObject,
-          contentHash, authorizationBindingHash: originalIdentityHash(initial.context), policyRevision: initial.policyRevision,
-          policyHash: initial.policyHash, expiresAt, createdAt: now, status: 'STORED' } });
-        const checked = await verify(row);
-        await associate?.(tx, checked.receipt);
-        completed = true;
-        return { ...checked.receipt, replayed: false };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      const result = await this.db.$transaction(tx => this.savePreparedIn(tx, prepared, associate, undefined,
+        value => { completed = value; }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
       return freezeOriginalInput(result);
     } catch (error) {
       // Once the participant completed, a lost COMMIT reply is an unknown
@@ -245,15 +354,50 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
-  async reconcile(value: unknown, isReissue = false) {
-    const command = parseOriginalRequest(value, isReissue), current = await this.authority.current();
-    const row = await this.stored(() => this.db.aiTaskOriginalRequest.findFirst({ where: { ...this.owned(current), requestKey: command.requestKey } }));
-    if (!row) { this.sameIdentity(current, await this.authority.current()); return { state: 'not_observed' as const, retryable: false as const }; }
+  /** Exact original-key/body matching shared with legacy Web reconciliation.
+   * Historical read rights remain independent of creation closure and TTL. */
+  private async reconcileOriginal(value: unknown, isReissue: boolean,
+    db: Pick<PrismaClient, 'aiTaskOriginalRequest'>, authority: AiOriginalRequestAuthority, live?: () => void) {
+    live?.();
+    const command = parseOriginalRequest(value, isReissue), current = await authority.current(); live?.();
+    const where = { ...this.owned(current), requestKey: command.requestKey };
+    const row = await this.stored(() => db.aiTaskOriginalRequest.findFirst({ where })); live?.();
+    if (!row) { this.sameIdentity(current, await authority.current()); live?.(); return null; }
     const previousRef = command.previousInputRef ?? null;
     if (row.requestKey !== command.requestKey || row.previousRequestId !== previousRef
       || requestFingerprint(this.body(row)) !== requestFingerprint(originalBody(command))) throw conflict();
-    const result = await this.checked(row, current, false, true);
-    return { state: 'observed' as const, receipt: result.receipt, task: await this.readTaskReceipt(row.id) };
+    const result = await this.checked(row, current, false, true, authority); live?.();
+    return { row, current, where, result };
+  }
+
+  /** Native original-key observation only. Never saves/replays, reads a global
+   * Task, reopens creation, rewrites audit, or treats missing rows as no commit.
+   * Owner supplies a fresh read Native/current rights and confirms its own read
+   * transaction. Do not nest this resource observer under a budget/grant lock. */
+  async reconcileIn(native: Prisma.TransactionClient, value: unknown, nativeAuthority: AiOriginalRequestNativeAuthority,
+    signal: AbortSignal, isReissue = false) {
+    if (!native || '$transaction' in native || typeof native.aiTaskOriginalRequest?.findFirst !== 'function'
+      || typeof nativeAuthority?.bindIn !== 'function') throw unavailable();
+    const bound = nativeAuthority.bindIn(native, signal);
+    if (!bound || typeof bound.assertCurrent !== 'function' || typeof bound.current !== 'function' || typeof bound.read !== 'function') throw unavailable();
+    const live = () => { if (signal.aborted) throw denied(); bound.assertCurrent(); };
+    live();
+    const original = await this.reconcileOriginal(value, isReissue, native, bound, live); live();
+    const observation = 'native_row_not_commit_or_execution_evidence' as const;
+    if (!original) return freezeOriginalInput({ state: 'not_observed' as const, retryable: false as const, observation, task: 'not_loaded' as const });
+    const binding = this.closureBinding(original.row);
+    const after = await this.stored(() => native.aiTaskOriginalRequest.findFirst({ where: original.where })); live();
+    if (!after || after.id !== original.row.id || this.closureBinding(after) !== binding) throw conflict();
+    const latest = await this.checked(after, original.current, false, true, bound); live();
+    this.sameIdentity(original.current, await bound.current()); live();
+    if (requestFingerprint(latest.receipt) !== requestFingerprint(original.result.receipt)) throw conflict();
+    return freezeOriginalInput({ state: 'observed' as const, retryable: false as const, observation, receipt: latest.receipt, task: 'not_loaded' as const });
+  }
+
+  async reconcile(value: unknown, isReissue = false) {
+    const original = await this.reconcileOriginal(value, isReissue, this.db, this.authority);
+    if (!original) return { state: 'not_observed' as const, retryable: false as const };
+    return { state: 'observed' as const, receipt: original.result.receipt, task: await this.readTaskReceipt(original.row.id) };
   }
   /** Owner-authorized retained material or the original erasure receipt. With no
    * Task, a receipt attests erased input only; it cannot invent task execution. */

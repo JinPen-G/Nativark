@@ -45,6 +45,8 @@ import { rentalPaymentBalance } from "../rental-core/rental-funding-events";
 import { roundMoney, toCents } from "./payment-money";
 import { assertPaymentReconciliationAccess } from "./payment-reconciliation-access";
 import { fromStripeMinorUnits, hasStripeLiveReceipt, isStripeLiveKey, mapStripeCheckoutStatus, toStripeMinorUnits, verifyStripeSignature } from "./stripe-payment";
+import { getRequestIdentity } from '../../common/request-identity';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -631,9 +633,14 @@ export class PaymentRuntimeService {
   /** Bounded order-level read for AI facts. Legacy listPaymentIntents remains
    * unchanged for existing callers; this port never returns a total count. */
   async listPaymentIntentsPage(tenantId: string, workspaceId: string, orderId: string, input: { limit: number; cursor?: string }) {
+    return this.listPaymentIntentsPageWith(tenantId, workspaceId, orderId, input);
+  }
+
+  private async listPaymentIntentsPageWith(tenantId: string, workspaceId: string, orderId: string,
+    input: { limit: number; cursor?: string }, client: Prisma.TransactionClient = this.prisma) {
     const limit = Number.isInteger(input?.limit) ? Math.min(20, Math.max(1, input.limit)) : 0;
     if (!limit || (input.cursor && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.cursor))) throw new BadRequestException("支付记录分页参数无效");
-    const rows = await this.prisma.rentalPaymentIntent.findMany({ where: { tenantId, workspaceId, orderId },
+    const rows = await client.rentalPaymentIntent.findMany({ where: { tenantId, workspaceId, orderId },
       ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}), take: limit + 1,
       orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
     const page = rows.slice(0, limit);
@@ -719,15 +726,92 @@ export class PaymentRuntimeService {
   }
 
   async listPaymentRefundsPage(tenantId: string, workspaceId: string, orderId: string, intentId: string, input: { limit: number; cursor?: string }) {
+    return this.listPaymentRefundsPageWith(tenantId, workspaceId, orderId, intentId, input);
+  }
+
+  private async listPaymentRefundsPageWith(tenantId: string, workspaceId: string, orderId: string, intentId: string,
+    input: { limit: number; cursor?: string }, client: Prisma.TransactionClient = this.prisma) {
     const limit = Number.isInteger(input?.limit) ? Math.min(50, Math.max(1, input.limit)) : 0;
     if (!limit || (input.cursor && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.cursor))) throw new BadRequestException("退款记录分页参数无效");
-    await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
-    const rows = await this.prisma.rentalPaymentRefund.findMany({ where: { tenantId, workspaceId, orderId, paymentIntentId: intentId },
+    await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId, client);
+    const rows = await client.rentalPaymentRefund.findMany({ where: { tenantId, workspaceId, orderId, paymentIntentId: intentId },
       ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}), take: limit + 1,
       orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
     const page = rows.slice(0, limit);
     return { rows: page.map((row) => this.toRefundResponse(row)), nextCursor: rows.length > limit ? page[page.length - 1]?.id : undefined,
       truncated: rows.length > limit };
+  }
+
+  /** Native local observations only. The owner supplies both original order and
+   * finance Guards/current fences; no provider refresh, payment/refund execution,
+   * transaction ownership, amount aggregation or commit receipt is added here. */
+  async listPaymentIntentsPageInTransaction(tenantId: string, workspaceId: string, orderId: string,
+    value: { limit: number; cursor?: string }, native: Prisma.TransactionClient, signal: AbortSignal, assertCurrent: () => void) {
+    const { client, query, live } = this.nativePaymentRead(tenantId, workspaceId, orderId, undefined, value, 20, native, signal, assertCurrent);
+    if (query.cursor) {
+      const cursor = await client.rentalPaymentIntent.findFirst({ where: { id: query.cursor, tenantId, workspaceId, orderId } });
+      live(); if (!cursor) throw new BadRequestException('支付记录分页游标不属于当前订单');
+    }
+    const page = await this.listPaymentIntentsPageWith(tenantId, workspaceId, orderId, query, client);
+    live(); return page;
+  }
+
+  async listPaymentRefundsPageInTransaction(tenantId: string, workspaceId: string, orderId: string, intentId: string,
+    value: { limit: number; cursor?: string }, native: Prisma.TransactionClient, signal: AbortSignal, assertCurrent: () => void) {
+    const { client, query, live } = this.nativePaymentRead(tenantId, workspaceId, orderId, intentId, value, 50, native, signal, assertCurrent);
+    if (query.cursor) {
+      const cursor = await client.rentalPaymentRefund.findFirst({ where: { id: query.cursor, tenantId, workspaceId, orderId, paymentIntentId: intentId } });
+      live(); if (!cursor) throw new BadRequestException('退款记录分页游标不属于当前支付单');
+    }
+    const page = await this.listPaymentRefundsPageWith(tenantId, workspaceId, orderId, intentId, query, client);
+    live(); return page;
+  }
+
+  private nativePaymentRead(tenantId: string, workspaceId: string, orderId: string, intentId: string | undefined,
+    value: { limit: number; cursor?: string }, max: number, native: Prisma.TransactionClient, signal: AbortSignal, assertCurrent: () => void) {
+    const identity = getRequestIdentity(), validId = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(id);
+    if (!identity?.userId || identity.tenantId !== tenantId || identity.workspaceId !== workspaceId || identity.isSaasAdmin
+      || identity.audience !== 'operator' || !validId(orderId) || (intentId !== undefined && !validId(intentId))
+      || !native || '$transaction' in native || typeof assertCurrent !== 'function'
+      || typeof native.rentalPaymentIntent?.findFirst !== 'function' || typeof native.rentalPaymentIntent?.findMany !== 'function'
+      || typeof native.rentalPaymentRefund?.findFirst !== 'function' || typeof native.rentalPaymentRefund?.findMany !== 'function') {
+      throw new ServiceUnavailableException('原支付事务读取范围不可用');
+    }
+    const binding = requestFingerprint(structuredClone(identity));
+    const live = () => {
+      if (signal.aborted || requestFingerprint(getRequestIdentity() ?? null) !== binding) throw new ServiceUnavailableException('原支付事务读取已停止或范围变化');
+      assertCurrent();
+    };
+    live();
+    const query = structuredClone(value);
+    if (!query || typeof query !== 'object' || Array.isArray(query) || Object.keys(query).some(key => !['limit', 'cursor'].includes(key))
+      || !Number.isInteger(query.limit) || query.limit < 1 || query.limit > max || (query.cursor !== undefined && !validId(query.cursor))) {
+      throw new BadRequestException('原支付事务分页参数无效');
+    }
+    // Revalidate before actual dispatch and after each await, including the
+    // original intent check before refunds. Scoped cursor checks cannot become
+    // a lookup in another tenant/order; no next query starts after cancellation.
+    const guarded = <T extends object>(delegate: T, refund: boolean) => new Proxy(delegate, { get(target, property, receiver) {
+      const method = Reflect.get(target, property, receiver);
+      return (property === 'findFirst' || property === 'findMany') && typeof method === 'function' ? new Proxy(method, {
+        async apply(fn, _owner, args) {
+          live();
+          const result: unknown = await Reflect.apply(fn, target, args); live();
+          const rows = property === 'findMany' ? result : result === null ? [] : [result];
+          if (!Array.isArray(rows) || (property === 'findMany' && (!Number.isInteger(args[0]?.take) || args[0].take > max + 1 || rows.length > args[0].take))
+            || rows.some(row => !row || row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.orderId !== orderId
+              || (refund && row.paymentIntentId !== intentId) || (property === 'findFirst' && row.id !== args[0]?.where?.id))) {
+            throw new ServiceUnavailableException('原支付分页来源不一致');
+          }
+          return result;
+        }
+      }) : method;
+    } });
+    const intents = guarded(native.rentalPaymentIntent, false), refunds = guarded(native.rentalPaymentRefund, true);
+    const client = new Proxy(native, { get(target, property, receiver) {
+      return property === 'rentalPaymentIntent' ? intents : property === 'rentalPaymentRefund' ? refunds : Reflect.get(target, property, receiver);
+    } });
+    return { client, query, live };
   }
 
   /**
@@ -1422,8 +1506,8 @@ export class PaymentRuntimeService {
     throw new NotFoundException("支付宝退款回调对应的退款单不存在");
   }
 
-  private async requirePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
-    const row = await this.prisma.rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
+  private async requirePaymentIntent(tenantId: string, workspaceId: string, orderId: string, intentId: string, native?: Prisma.TransactionClient) {
+    const row = await (native ?? this.prisma).rentalPaymentIntent.findFirst({ where: { id: intentId, tenantId, workspaceId, orderId } });
     if (!row) throw new NotFoundException("支付单不存在");
     return row;
   }

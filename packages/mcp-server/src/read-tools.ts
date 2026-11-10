@@ -39,8 +39,16 @@ export interface McpReadAuthority {
 
 /** Original server-persisted goal/call accounting. A local counter is not this provider. */
 export interface McpReadAccounting {
+  /** Optional original server invocation lifecycle. Wraps authorization preparation,
+   * the ONE withCall below, owner commit and final checks. No client time/goal flags.
+   * A provider must await all original work and preserve uncertain reservations.
+   * Omission retains the older callback-only boundary, NOT full activity coverage. */
+  withInvocation?<T>(authorization: McpReadAuthorization, name: string, input: unknown,
+    consume: (signal: AbortSignal) => Promise<T>, signal: AbortSignal): Promise<T>;
+  /** An original budget may narrow the callback signal to its remaining allowance.
+   * Older providers may omit it; omission keeps the endpoint signal, not a new quota. */
   withCall<T>(authorization: McpReadAuthorization, name: string, input: unknown,
-    consume: () => Promise<T>, signal: AbortSignal): Promise<T>;
+    consume: (signal?: AbortSignal) => Promise<T>, signal: AbortSignal): Promise<T>;
 }
 
 /** Return the approved complete external projection; never pass through the original service object. */
@@ -48,7 +56,15 @@ export interface McpReadRelease {
   project(authorization: McpReadAuthorization, name: string, value: unknown, signal: AbortSignal): Promise<Record<string, unknown>>;
 }
 
+/** Server-owned completed-read observation. Not accounting or response-delivery
+ * proof. Called only AFTER original authority/accounting return and output checks. */
+export interface McpReadUsage {
+  completed(authorization: McpReadAuthorization, signal: AbortSignal): Promise<void>;
+}
+
 export interface McpReadTools {
+  /** Optional for older registrations; missing usage cannot create a timestamp. */
+  usage?: McpReadUsage;
   tools: readonly McpReadTool[];
   publication: McpReadPublication;
   authority: McpReadAuthority;
@@ -62,7 +78,9 @@ export function validateReadTools(bindings: McpReadTools): void {
     throw new TypeError("MCP read registrations must have at most 50 unique names");
   }
   if (typeof bindings.publication.allows !== "function" || typeof bindings.authority.withRead !== "function"
-    || typeof bindings.accounting.withCall !== "function" || typeof bindings.release.project !== "function") {
+    || typeof bindings.accounting.withCall !== "function" || typeof bindings.release.project !== "function"
+    || bindings.accounting.withInvocation !== undefined && typeof bindings.accounting.withInvocation !== "function"
+    || bindings.usage !== undefined && typeof bindings.usage?.completed !== "function") {
     throw new TypeError("MCP read registrations require original publication, authority, accounting and release providers");
   }
   for (const tool of bindings.tools) {
@@ -96,8 +114,10 @@ export function captureReadTools(bindings: McpReadTools): McpReadTools {
   const fixed: McpReadTools = Object.freeze({ tools: Object.freeze(tools),
     publication: Object.freeze({ allows: bindings.publication.allows.bind(bindings.publication) }),
     authority: Object.freeze({ withRead: bindings.authority.withRead.bind(bindings.authority) }),
-    accounting: Object.freeze({ withCall: bindings.accounting.withCall.bind(bindings.accounting) }),
+    accounting: Object.freeze({ withCall: bindings.accounting.withCall.bind(bindings.accounting),
+      ...(bindings.accounting.withInvocation === undefined ? {} : { withInvocation: bindings.accounting.withInvocation.bind(bindings.accounting) }) }),
     release: Object.freeze({ project: bindings.release.project.bind(bindings.release) }),
+    ...(bindings.usage === undefined ? {} : { usage: Object.freeze({ completed: bindings.usage.completed.bind(bindings.usage) }) }),
   });
   validateReadTools(fixed);
   return fixed;
@@ -146,33 +166,55 @@ export async function registerReadTools(server: McpServer, bindings: McpReadTool
     server.registerTool(tool.name, {
       description: tool.description, inputSchema, outputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false },
-    }, async input => {
+    }, async (input, context) => {
+      // Protocol cancellation can occur without aborting the enclosing connection.
+      // Pass it through original work; it proves neither rollback nor completion.
+      const requestSignal = AbortSignal.any([signal, context.mcpReq.signal]);
       try {
-        live(signal);
+        const run = async (requestSignal: AbortSignal) => {
+        live(requestSignal);
         await revalidate();
-        if (!await bindings.publication.allows(authorization, tool, signal)) throw new Error("Read unavailable");
-        live(signal);
+        live(requestSignal);
+        if (!await bindings.publication.allows(authorization, tool, requestSignal)) throw new Error("Read unavailable");
+        live(requestSignal);
         const projected = await bindings.authority.withRead(authorization, tool.name, input, () =>
-          bindings.accounting.withCall(authorization, tool.name, input, async () => {
-            live(signal);
-            const value = await tool.read(input, signal);
-            live(signal);
-            const output = await bindings.release.project(authorization, tool.name, value, signal);
-            live(signal);
+          bindings.accounting.withCall(authorization, tool.name, input, async allowanceSignal => {
+            // A budget can shorten but never replace request/protocol cancellation.
+            const readSignal = allowanceSignal === undefined ? requestSignal : AbortSignal.any([requestSignal, allowanceSignal]);
+            live(readSignal);
+            const value = await tool.read(input, readSignal);
+            live(readSignal);
+            const output = await bindings.release.project(authorization, tool.name, value, readSignal);
+            live(readSignal);
             // Snapshot before leaving release/accounting; later mutations cannot
             // produce a different text/structured value after the return checks.
             return releasedResult(output);
-          }, signal), signal);
-        live(signal);
+          }, requestSignal), requestSignal);
+        live(requestSignal);
         await revalidate();
-        if (!await bindings.publication.allows(authorization, tool, signal)) throw new Error("Read unavailable");
-        live(signal);
+        live(requestSignal);
+        if (!await bindings.publication.allows(authorization, tool, requestSignal)) throw new Error("Read unavailable");
+        live(requestSignal);
         // Use the same advertised validator here to contain schema errors before
         // the SDK could echo validation details from an invalid private result.
         const validation = await outputSchema["~standard"].validate(projected.structuredContent);
         if (validation.issues) throw new Error("Read unavailable");
-        live(signal);
-        return { content: [{ type: "text", text: projected.text }], structuredContent: projected.structuredContent };
+        live(requestSignal);
+        // Original authority/accounting have returned: do not open a second grant
+        // transaction while their native locks are still held. This records server
+        // completion, not delivery; a later failure/cancel cannot erase that fact.
+        if (bindings.usage) {
+          await bindings.usage.completed(authorization, requestSignal);
+          live(requestSignal); await revalidate(); live(requestSignal);
+          if (!await bindings.publication.allows(authorization, tool, requestSignal)) throw new Error("Read unavailable");
+          live(requestSignal);
+        }
+        return { content: [{ type: "text" as const, text: projected.text }], structuredContent: projected.structuredContent };
+        };
+        // Only the fixed server producer opens this lifecycle. Its persisted call
+        // is still reserved inside original Auth/Guard, never before authorization.
+        return bindings.accounting.withInvocation === undefined ? await run(requestSignal)
+          : await bindings.accounting.withInvocation(authorization, tool.name, input, run, requestSignal);
       } catch {
         // Internal provider failures may contain personal data, URLs or SQL.
         return { isError: true, content: [{ type: "text", text: "Read unavailable. Check current authorization in Rental OS." }] };

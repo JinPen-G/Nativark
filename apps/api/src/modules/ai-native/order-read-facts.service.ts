@@ -82,7 +82,7 @@ const historicalQuoteProjection = z.object({
  */
 export class AiOrderReadFactsService {
   constructor(private readonly core: Pick<RentalCoreService, 'readOrderFacts'>,
-    private readonly authority: AiOrderRouteContextAuthority, private readonly clock: () => Date = () => new Date(),
+    private readonly authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>, private readonly clock: () => Date = () => new Date(),
     private readonly historicalQuotes?: AiOrderHistoricalQuoteSource) {}
 
   /** Saved references, inspection requirements and applied daily facts only.

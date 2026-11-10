@@ -297,60 +297,77 @@ export function createPersistentOAuthTokenService(config: PersistentOAuthTokenCo
   return Object.freeze({ exchangeCode, refresh, revoke });
 }
 
-/** Read opaque resource tokens against original current grant and family state.
- * @param config - explicit resource and scope ceiling; credential TTL is not authority.
- * @param store - original serializable token/grant read transaction.
- * @param authority - original current grant/identity/registration observation.
- * @returns an uncached resource verifier; no model, write, issuance or refresh runs.
- * Unknown credentials are invalid, missing/corrupt evidence or lost read commitment
- * is unavailable. Every verification rechecks family/current grant before returning;
- * it still does not establish original business Guard/ALS or field permission.
- */
-export function createPersistentOAuthResourceVerifier(config: Pick<PersistentOAuthTokenConfig, "enabled" | "resourceUrl" | "allowedScopes">,
-  store: PersistentOAuthTokenStore, authority: OriginalOAuthAccessAuthority): ResourceTokenVerifier {
+/** Uncached opaque access/family/current-grant observation inside the supplied
+ * original transaction. Unknown credentials are invalid; missing/corrupt evidence
+ * is unavailable. No write, issuance, refresh, business Guard or field permission. */
+/** Internal credential-derived binding for server-owned observations in the SAME
+ * original transaction. Not a protocol result, caller-selected grant or use event. */
+export interface VerifiedPersistentOAuthAccess { grantId: string; grantRevision: number; authorization: VerifiedResourceToken }
+export function createPersistentOAuthAccessReader(config: Pick<PersistentOAuthTokenConfig, "enabled" | "resourceUrl" | "allowedScopes">,
+  authority: OriginalOAuthAccessAuthority): {
+    readIn(transaction: PersistentOAuthTokenTransaction, token: string, signal: AbortSignal): Promise<VerifiedPersistentOAuthAccess>;
+  } {
   const url = new URL(config.resourceUrl), resource = url.href, enabled = config.enabled, allowed = new Set(config.allowedScopes);
   if (typeof enabled !== "boolean" || url.protocol !== "https:" || url.username || url.password || url.search || url.hash
     || resource !== config.resourceUrl || allowed.size < 1 || allowed.size > 32 || allowed.size !== config.allowedScopes.length
-    || [...allowed].some(scope => !scopeToken.test(scope)) || typeof store?.transaction !== "function" || typeof authority?.current !== "function") {
+    || [...allowed].some(scope => !scopeToken.test(scope)) || typeof authority?.current !== "function") {
     throw new TypeError("Resource token verification requires original current persistence and explicit pins");
   }
-  const transaction = store.transaction.bind(store), currentGrant = authority.current.bind(authority);
+  const currentGrant = authority.current.bind(authority);
+  return Object.freeze({ async readIn(tx: PersistentOAuthTokenTransaction, token: string, signal: AbortSignal): Promise<VerifiedPersistentOAuthAccess> {
+    if (!enabled || signal.aborted) throw new ResourceAuthorizationError("unavailable");
+    if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token) || Buffer.from(token, "base64url").toString("base64url") !== token) throw new ResourceAuthorizationError("invalid");
+    try {
+      const digest = oauthCredentialDigest(token), original = recordSnapshot(await tx.readAccess(digest));
+      if (!original) throw new ResourceAuthorizationError("invalid");
+      if (original.digest !== digest || !identifier(original.grantId) || !identifier(original.familyId) || !expiry(original.expiresAt)) {
+        throw new ResourceAuthorizationError("unavailable");
+      }
+      const current = async (): Promise<VerifiedPersistentOAuthAccess> => {
+        live(signal);
+        const family = recordSnapshot(await tx.readFamily(original.familyId));
+        const grant = recordSnapshot(await currentGrant(original.grantId, tx, signal));
+        live(signal);
+        if (!family) throw new ResourceAuthorizationError("unavailable");
+        if (!grant) throw new ResourceAuthorizationError("invalid");
+        if (family.id !== original.familyId || family.grantId !== original.grantId || grant.id !== original.grantId
+          || !identifier(family.subject) || !identifier(family.clientId) || typeof family.resource !== "string"
+          || !identifier(grant.subject) || !identifier(grant.clientId)
+          || !expiry(family.expiresAt) || !expiry(grant.expiresAt) || typeof family.revoked !== "boolean"
+          || !Number.isSafeInteger(grant.revision) || grant.revision < 1 || !Number.isSafeInteger(family.grantRevision)
+          || !Array.isArray(family.scopes) || !Array.isArray(grant.scopes)) throw new ResourceAuthorizationError("unavailable");
+        const expiresAt = Math.min(original.expiresAt, family.expiresAt, grant.expiresAt);
+        if (family.revoked || expiresAt <= Date.now() / 1000 || grant.resource !== resource
+          || family.subject !== grant.subject || family.clientId !== grant.clientId || family.resource !== resource || family.grantRevision !== grant.revision
+          || JSON.stringify(family.scopes) !== JSON.stringify(grant.scopes)
+          || grant.scopes.length < 1 || grant.scopes.length > 32 || new Set(grant.scopes).size !== grant.scopes.length
+          || grant.scopes.some(scope => !allowed.has(scope))) throw new ResourceAuthorizationError("invalid");
+        return { grantId: grant.id, grantRevision: grant.revision,
+          authorization: { subject: grant.subject, clientId: grant.clientId, resource, scopes: [...grant.scopes], expiresAt } };
+      };
+      const first = await current(), second = await current();
+      if (JSON.stringify(first) !== JSON.stringify(second)) throw new ResourceAuthorizationError("invalid");
+      return second;
+    } catch (error) {
+      if (error instanceof ResourceAuthorizationError) throw error;
+      throw new ResourceAuthorizationError("unavailable");
+    }
+  } });
+}
+
+/** Public resource verification never exposes the internal grant locator or records
+ * use. The same uncached family/grant reader is reused by original native writers. */
+export function createPersistentOAuthResourceVerifier(config: Pick<PersistentOAuthTokenConfig, "enabled" | "resourceUrl" | "allowedScopes">,
+  store: PersistentOAuthTokenStore, authority: OriginalOAuthAccessAuthority): ResourceTokenVerifier {
+  const reader = createPersistentOAuthAccessReader(config, authority);
+  if (typeof store?.transaction !== "function") throw new TypeError("Resource token verification requires original persistence");
+  const transaction = store.transaction.bind(store), enabled = config.enabled;
   return Object.freeze({ async verifyAccessToken(token: string, options?: { signal: AbortSignal }): Promise<VerifiedResourceToken> {
     const signal = options?.signal ?? new AbortController().signal;
     if (!enabled || signal.aborted) throw new ResourceAuthorizationError("unavailable");
-    if (!/^[A-Za-z0-9_-]{43}$/.test(token) || Buffer.from(token, "base64url").toString("base64url") !== token) throw new ResourceAuthorizationError("invalid");
+    if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token) || Buffer.from(token, "base64url").toString("base64url") !== token) throw new ResourceAuthorizationError("invalid");
     try {
-      const value = await transaction(async tx => {
-        const digest = oauthCredentialDigest(token), original = recordSnapshot(await tx.readAccess(digest));
-        if (!original) throw new ResourceAuthorizationError("invalid");
-        if (original.digest !== digest || !identifier(original.grantId) || !identifier(original.familyId) || !expiry(original.expiresAt)) {
-          throw new ResourceAuthorizationError("unavailable");
-        }
-        const current = async (): Promise<VerifiedResourceToken> => {
-          live(signal);
-          const family = recordSnapshot(await tx.readFamily(original.familyId));
-          const grant = recordSnapshot(await currentGrant(original.grantId, tx, signal));
-          live(signal);
-          if (!family) throw new ResourceAuthorizationError("unavailable");
-          if (!grant) throw new ResourceAuthorizationError("invalid");
-          if (family.id !== original.familyId || family.grantId !== original.grantId || grant.id !== original.grantId
-            || !identifier(family.subject) || !identifier(family.clientId) || typeof family.resource !== "string"
-            || !identifier(grant.subject) || !identifier(grant.clientId)
-            || !expiry(family.expiresAt) || !expiry(grant.expiresAt) || typeof family.revoked !== "boolean"
-            || !Number.isSafeInteger(grant.revision) || grant.revision < 1 || !Number.isSafeInteger(family.grantRevision)
-            || !Array.isArray(family.scopes) || !Array.isArray(grant.scopes)) throw new ResourceAuthorizationError("unavailable");
-          const expiresAt = Math.min(original.expiresAt, family.expiresAt, grant.expiresAt);
-          if (family.revoked || expiresAt <= Date.now() / 1000 || grant.resource !== resource
-            || family.subject !== grant.subject || family.clientId !== grant.clientId || family.resource !== resource || family.grantRevision !== grant.revision
-            || JSON.stringify(family.scopes) !== JSON.stringify(grant.scopes)
-            || grant.scopes.length < 1 || grant.scopes.length > 32 || new Set(grant.scopes).size !== grant.scopes.length
-            || grant.scopes.some(scope => !allowed.has(scope))) throw new ResourceAuthorizationError("invalid");
-          return { subject: grant.subject, clientId: grant.clientId, resource, scopes: [...grant.scopes], expiresAt };
-        };
-        const first = await current(), second = await current();
-        if (JSON.stringify(first) !== JSON.stringify(second)) throw new ResourceAuthorizationError("invalid");
-        return second;
-      }, signal);
+      const value = await transaction(async tx => (await reader.readIn(tx, token, signal)).authorization, signal);
       live(signal);
       if (value.expiresAt <= Date.now() / 1000) throw new ResourceAuthorizationError("invalid");
       return value;

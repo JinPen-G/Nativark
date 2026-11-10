@@ -79,6 +79,8 @@ function createAbsorbingFactStore() {
     lockOrder: () => Promise.resolve(),
     lockInventoryTargets: () => Promise.resolve(),
     activeReservations: () => Promise.resolve([]),
+    // Empty bounded facts only; does not simulate filtering, SQL or persistence.
+    readAvailabilitySnapshot: () => Promise.resolve({ reservations: [], assets: [], stocks: [] }),
     listExtensions: () => Promise.resolve([]),
     insertExtension: record("extension"),
     updateExtensionPricingSnapshot: () => Promise.resolve(),

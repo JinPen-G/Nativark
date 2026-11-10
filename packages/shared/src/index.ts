@@ -27,6 +27,7 @@ export * from "./demo-request";
 export * from "./client-rich-text";
 export * from "./category-governance";
 export * from "./ai-native";
+export * from "./ai-catalog-read";
 export * from "./ai-order-candidates-draft";
 export * from "./ai-extension-preview-http-draft";
 export * from "./ai-workbench-display-draft";

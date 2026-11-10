@@ -5965,14 +5965,49 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * Always observe current consumption markers; a warm cache cannot override a
    * missing/changed database row. Callers retain their quote/order authorization. */
   async loadQuote(tenantId: string, context: BusinessContext, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1> {
-    if (!this.factStore.findQuote) throw new ServiceUnavailableException('报价持久读取不可用');
-    const quote = await this.factStore.findQuote(tenantId, quoteId, tx);
-    if (!quote) throw new NotFoundException('报价不存在');
-    if (quote.id !== quoteId || quote.tenantId !== tenantId) throw new ConflictException('报价事实绑定不一致');
+    const quote = await this.loadQuoteFact(tenantId, quoteId, tx);
     if (!tx) {
       const state = this.state(tenantId, context);
       state.quotes = [structuredClone(quote), ...state.quotes.filter(row => row.id !== quoteId)];
     }
+    return structuredClone(quote);
+  }
+
+  private async loadQuoteFact(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1> {
+    if (!this.factStore.findQuote) throw new ServiceUnavailableException('报价持久读取不可用');
+    const quote = await this.factStore.findQuote(tenantId, quoteId, tx);
+    if (!quote) throw new NotFoundException('报价不存在');
+    if (quote.id !== quoteId || quote.tenantId !== tenantId) throw new ConflictException('报价事实绑定不一致');
+    return quote;
+  }
+
+  /** Exact stored quote observation, never current pricing/preparation/cache.
+   * Caller owns original order/quote authorization, Native fences and lifecycle.
+   * Expiry/consumption remain historical facts, not permission to quote again. */
+  async readQuoteInTransaction(tenantId: string, quoteId: string, native: RentalBusinessFactTx,
+    signal: AbortSignal, assertCurrent?: () => void): Promise<RentalQuoteSnapshotV1> {
+    const identity = getRequestIdentity();
+    if (!identity?.userId || !identity.workspaceId || identity.tenantId !== tenantId || identity.isSaasAdmin
+      || identity.audience !== 'operator' || !native || '$transaction' in native
+      || typeof native.businessWorkspace?.findFirst !== 'function' || typeof native.rentalQuote?.findFirst !== 'function') {
+      throw new ServiceUnavailableException('原报价事务读取范围不可用');
+    }
+    const binding = requestFingerprint(structuredClone(identity));
+    const live = () => {
+      if (signal.aborted || requestFingerprint(getRequestIdentity() ?? null) !== binding) throw new ServiceUnavailableException('原报价事务读取已停止或范围变化');
+      assertCurrent?.();
+    };
+    live();
+    const guarded = <T extends object>(delegate: T) => new Proxy(delegate, { get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      return property === 'findFirst' && typeof value === 'function'
+        ? new Proxy(value, { apply(method, _owner, args) { live(); return Reflect.apply(method, target, args); } }) : value;
+    } });
+    const workspace = guarded(native.businessWorkspace), quotes = guarded(native.rentalQuote);
+    const transaction = new Proxy(native, { get(target, property, receiver) {
+      return property === 'businessWorkspace' ? workspace : property === 'rentalQuote' ? quotes : Reflect.get(target, property, receiver);
+    } });
+    const quote = await this.loadQuoteFact(tenantId, quoteId, transaction); live();
     return structuredClone(quote);
   }
 

@@ -26,9 +26,11 @@ export interface McpResources {
       consume: () => Promise<T>, signal: AbortSignal): Promise<T>;
   };
   accounting: {
-    /** Original durable goal or independent receipt-read limits, selected by the server. */
+    /** Original durable goal or independent receipt-read limits, selected by the
+     * server. An optional callback signal narrows the original remaining allowance;
+     * older providers may omit it, keeping the endpoint/request cancellation. */
     withRead<T>(authorization: McpReadAuthorization, descriptor: Readonly<McpResourceDescriptor>,
-      consume: () => Promise<T>, signal: AbortSignal): Promise<T>;
+      consume: (signal?: AbortSignal) => Promise<T>, signal: AbortSignal): Promise<T>;
   };
   release: {
     /** Only approved plain text or a textual original reference, never private service objects or HTML. */
@@ -126,12 +128,15 @@ export function registerResources(server: McpServer, provider: McpResources, aut
     try {
       const selected = descriptor;
       const projected = await provider.authority.withRead(authorization, selected, () =>
-        provider.accounting.withRead(authorization, selected, async () => {
-          live(requestSignal);
-          const value = await provider.read(authorization, selected, requestSignal);
-          live(requestSignal);
-          const released = await provider.release.project(authorization, selected, value, requestSignal);
-          live(requestSignal);
+        provider.accounting.withRead(authorization, selected, async allowanceSignal => {
+          // Resource reads may narrow the same original allowance, never replace
+          // endpoint or protocol cancellation with a fresh provider-only signal.
+          const readSignal = allowanceSignal === undefined ? requestSignal : AbortSignal.any([requestSignal, allowanceSignal]);
+          live(readSignal);
+          const value = await provider.read(authorization, selected, readSignal);
+          live(readSignal);
+          const released = await provider.release.project(authorization, selected, value, readSignal);
+          live(readSignal);
           const snapshot = snapshotJsonFields(released, ["version", "text"], { stringCharacters: 2000, arrayItems: 50 });
           if (snapshot.version !== selected.version || typeof snapshot.text !== "string") throw unavailable();
           return textWithVersion(selected.version, snapshot.text);

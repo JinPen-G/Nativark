@@ -2,6 +2,9 @@ import { AI_TASK_READ_POLICY_HTTP } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
 import { AI_MEMBER_NAME_HTTP } from '@rental-os/shared';
+/** Original route/data authorization for Web sessions and scoped current principals.
+ * Trusted catalog/order reads enter the same checks and ALS, never a client-supplied
+ * identity or a second permission policy. This Guard does not approve or release data. */
 import {
   CanActivate,
   ExecutionContext,
@@ -25,7 +28,8 @@ import { ClientAuthService } from "../modules/client/client-auth.service";
 import { ClientApiRateLimitService } from "../modules/client/client-api-rate-limit.service";
 import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
 import { SubscriptionService } from "../modules/subscription/subscription.service";
-import { enterRequestIdentity } from "./request-identity";
+import { enterRequestIdentity, getRequestIdentity, runWithRequestIdentity, type RequestIdentity } from "./request-identity";
+import type { TrustedWorkspaceAccess } from '../modules/auth/trusted-workspace-principal';
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
@@ -893,6 +897,9 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
 @Injectable()
 export class ApiAuthGuard implements CanActivate {
   private readonly clientReadRevalidations = new WeakSet<object>();
+  // Only this Guard's internally created request can use a current original
+  // principal ticket. HTTP headers/body/request.user cannot populate this map.
+  readonly #trustedWorkspaceRequests = new WeakMap<RequestLike, () => Promise<TrustedWorkspaceAccess | undefined>>();
 
   constructor(
     private readonly authService: AuthService,
@@ -922,8 +929,92 @@ export class ApiAuthGuard implements CanActivate {
     finally { this.clientReadRevalidations.delete(request); }
   }
 
+  /** First trusted-principal bridge is fixed catalog GET only. No caller URL,
+   * headers, actor, approval or write path; all original route/data checks run.
+   * Original authority supplies fresh tickets in its transaction before/after
+   * even failed reads. This method does not release fields or count a goal. */
+  async withTrustedCatalogRead<T>(limit: number, resolve: () => Promise<TrustedWorkspaceAccess | undefined>,
+    consume: (identity: RequestIdentity) => Promise<T>, signal: AbortSignal): Promise<T> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50 || typeof resolve !== 'function' || typeof consume !== 'function') {
+      throw new ForbiddenException('可信目录读取参数无效');
+    }
+    return this.withTrustedRead('/api/rental/v1/item-groups', { limit }, resolve, consume, signal);
+  }
+
+  /** Fixed ORIGINAL availability POST authorization only; no reservation/write
+   * implementation or caller URL. Uses original order-create/operate permission
+   * and selected-location checks, NOT catalog/order-view permission. */
+  async withTrustedAvailabilityRead<T>(locationId: string, lineCount: number, resolve: () => Promise<TrustedWorkspaceAccess | undefined>,
+    consume: (identity: RequestIdentity) => Promise<T>, signal: AbortSignal): Promise<T> {
+    if (typeof locationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(locationId)
+      || !Number.isSafeInteger(lineCount) || lineCount < 1 || lineCount > 50 || typeof resolve !== 'function'
+      || typeof consume !== 'function') throw new ForbiddenException('可信可用性读取参数无效');
+    return this.withTrustedRead('/api/rental/v1/availability', { locationId }, resolve, consume, signal, 'POST');
+  }
+
+  /** Fixed original order GET only. Fresh original tickets/data/location checks
+   * run in their Native; no caller URL, Web credential, finance/write or approval
+   * route is exposed. Core must still read/project the exact original resource. */
+  async withTrustedOrderRead<T>(orderId: string, resolve: () => Promise<TrustedWorkspaceAccess | undefined>,
+    consume: (identity: RequestIdentity) => Promise<T>, signal: AbortSignal): Promise<T> {
+    if (typeof orderId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(orderId)
+      || ['expire-pending', 'reconcile-pickup-overdue'].includes(orderId.toLowerCase())
+      || typeof resolve !== 'function' || typeof consume !== 'function') throw new ForbiddenException('可信订单读取参数无效');
+    return this.withTrustedRead(`/api/rental/v1/orders/${orderId}`, {}, resolve, consume, signal);
+  }
+
+  /** Original finance GETs only, separately authorized from order reads. Reuses
+   * the same private tickets, current permissions/data scope and failed-read
+   * recheck; no caller URL, refresh, payment creation or refund action. */
+  async withTrustedOrderPaymentRead<T>(kind: 'payment_intents' | 'payment_refunds', value: unknown,
+    resolve: () => Promise<TrustedWorkspaceAccess | undefined>, consume: (identity: RequestIdentity) => Promise<T>, signal: AbortSignal): Promise<T> {
+    const input = structuredClone(value);
+    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof resolve !== 'function' || typeof consume !== 'function') {
+      throw new ForbiddenException('可信支付读取参数无效');
+    }
+    const fields = input as Record<string, unknown>, validId = (id: unknown) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(id);
+    const allowed = kind === 'payment_intents' ? ['orderId'] : kind === 'payment_refunds' ? ['orderId', 'intentId'] : [];
+    if (!allowed.length || Object.keys(fields).length !== allowed.length || Object.keys(fields).some(key => !allowed.includes(key))
+      || !validId(fields.orderId) || ['expire-pending', 'reconcile-pickup-overdue'].includes(String(fields.orderId).toLowerCase())
+      || (kind === 'payment_refunds' && !validId(fields.intentId))) throw new ForbiddenException('可信支付读取参数无效');
+    const path = `/api/rental/v1/orders/${fields.orderId}/payment-intents${kind === 'payment_refunds' ? `/${fields.intentId}/refunds` : ''}`;
+    return this.withTrustedRead(path, fields, resolve, consume, signal);
+  }
+
+  private async withTrustedRead<T>(url: string, query: object, resolve: () => Promise<TrustedWorkspaceAccess | undefined>,
+    consume: (identity: RequestIdentity) => Promise<T>, signal: AbortSignal, method: 'GET' | 'POST' = 'GET'): Promise<T> {
+    if (method !== 'GET' && (method !== 'POST' || url !== '/api/rental/v1/availability')) throw new ForbiddenException('可信读取路径不可用');
+    const live = () => { if (signal.aborted) throw new ForbiddenException('可信只读调用已停止'); };
+    const authorize = async <R>(read: (identity: RequestIdentity) => Promise<R>): Promise<R> => runWithRequestIdentity({}, async () => {
+      live();
+      const request: RequestLike = { method, url, headers: {}, query: structuredClone(query), body: structuredClone(query) };
+      this.#trustedWorkspaceRequests.set(request, resolve);
+      try {
+        if (await this.authorizeRequest(request) !== true) throw new ForbiddenException('目录读权不可用');
+        live();
+        const identity = getRequestIdentity();
+        if (!identity?.tenantId || !identity.userId || !identity.workspaceId || identity.audience !== 'operator'
+          || identity.isSaasAdmin !== false || identity.staffApi !== false) throw new ForbiddenException('目录主体范围不可用');
+        return await read(structuredClone(identity) as RequestIdentity);
+      } finally { this.#trustedWorkspaceRequests.delete(request); }
+    });
+    return authorize(async before => {
+      const binding = JSON.stringify(before);
+      let result!: T, failure: unknown, failed = false;
+      try { result = await consume(structuredClone(before)); } catch (error) { failed = true; failure = error; }
+      live();
+      await authorize(async after => { if (JSON.stringify(after) !== binding) throw new ForbiddenException('目录主体或权限已变化'); });
+      live();
+      if (failed) throw failure;
+      return result;
+    });
+  }
+
   async canActivate(context: ExecutionContext) {
-    const request = context.switchToHttp().getRequest<RequestLike>();
+    return this.authorizeRequest(context.switchToHttp().getRequest<RequestLike>());
+  }
+
+  private async authorizeRequest(request: RequestLike) {
     // 判定一律用归一化 + 小写化后的路径：Express 的路由匹配对大小写与尾斜杠都不敏感，
     // 而本文件全是字符串前缀与正则判定。两者语义不一致时，变体路径会落到
     // requiredPermissions 末尾的 `return []` 并被当作"无需权限"放行。详见 request-path.ts。
@@ -992,11 +1083,14 @@ export class ApiAuthGuard implements CanActivate {
     const authorization = request.headers.authorization;
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
     const tenantMembershipRoute = isTenantMembershipRoute(path);
-    const accessContext = await this.authService.resolveAccessContext(token, {
+    const trusted = this.#trustedWorkspaceRequests.get(request);
+    const original = trusted ? this.authService.consumeTrustedWorkspaceAccess(await trusted()) : undefined;
+    const accessContext = original ? original.context : await this.authService.resolveAccessContext(token, {
       allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/")
         || platformCapabilityProbePermission(request.method, path) !== undefined,
       audience: staffApiRequest ? "staff" : "operator"
     });
+    const scopedDatabase = original?.transaction ?? this.prisma;
     const user = tenantMembershipRoute ? accessContext?.tenantUser : accessContext?.user;
     const workspaceId = accessContext?.workspaceId;
     if (tenantMembershipRoute && user && !user.isSaasAdmin && !user.isPlatformAdmin && user.dataScope !== "all") {
@@ -1234,7 +1328,7 @@ export class ApiAuthGuard implements CanActivate {
     const locationScope = canManageOrganizationMapping
       ? { mode: "all" as const, locationIds: [] }
       : needsLocationScope
-        ? await this.resolveLocationScope(user, workspaceId, configuredLocationScope)
+        ? await this.resolveLocationScope(user, workspaceId, configuredLocationScope, scopedDatabase)
         : configuredLocationScope;
     const operationalRentalPath = path.startsWith("/rental/v1/") || path.startsWith("/staff/v1/");
     const scopedRentalPath = operationalRentalPath && path !== "/rental/v1/categories" && path !== "/rental/v1/subscription/context";
@@ -1253,7 +1347,7 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (staffApiRequest) request.staffLocationScope = locationScope;
     if (restrictedRentalRequest && !isStaffAuthPath(path)) {
-      await this.assertStaffLocationAccess(request, path, user, workspaceId, locationScope);
+      await this.assertStaffLocationAccess(request, path, user, workspaceId, locationScope, scopedDatabase);
     }
     enterRequestIdentity({
       accessSession: accessContext?.accessSession,
@@ -1264,7 +1358,7 @@ export class ApiAuthGuard implements CanActivate {
       isPlatformAdmin: user.isPlatformAdmin,
       operationToken: typeof request.headers["x-operation-token"] === "string" ? request.headers["x-operation-token"] : undefined,
       isSaasAdmin: Boolean(user.isSaasAdmin),
-      // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
+      // 只从原会话或当前可信主体绑定写入，绝不读取请求体 / 查询参数的 workspaceId。
       workspaceId,
       dataScope: user.dataScope,
       organizationId: user.organizationId,
@@ -1286,9 +1380,10 @@ export class ApiAuthGuard implements CanActivate {
   private async resolveLocationScope(
     user: SystemUserRow,
     workspaceId: string | undefined,
-    configuredScope: { mode: "all" | "selected"; locationIds: string[] }
+    configuredScope: { mode: "all" | "selected"; locationIds: string[] },
+    database: Prisma.TransactionClient | PrismaService | undefined = this.prisma
   ) {
-    return resolveUserBusinessLocationScope(user, workspaceId, configuredScope, this.prisma);
+    return resolveUserBusinessLocationScope(user, workspaceId, configuredScope, database);
   }
 
   private async assertStaffLocationAccess(
@@ -1296,11 +1391,12 @@ export class ApiAuthGuard implements CanActivate {
     path: string,
     user: SystemUserRow,
     workspaceId: string | undefined,
-    scope: { mode: "all" | "selected"; locationIds: string[] }
+    scope: { mode: "all" | "selected"; locationIds: string[] },
+    database: Prisma.TransactionClient | PrismaService | undefined = this.prisma
   ) {
     const locationRestricted = scope.mode === "selected";
     const ownScope = user.dataScope === "own";
-    const prisma = this.prisma;
+    const prisma = database;
     if (locationRestricted && (!prisma || !workspaceId || !Array.isArray(scope.locationIds) || !scope.locationIds.length)) {
       throw new ForbiddenException("当前账号的履约地点范围未就绪，已拒绝访问");
     }

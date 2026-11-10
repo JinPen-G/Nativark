@@ -2742,6 +2742,53 @@ export class PlatformService {
     return this.platformRepository.readWorkspaceSessionUser(tx, expected);
   }
 
+  /** External current grants must use original persistent identity, never the
+   * memory mode's synthetic workspace or a mutable Web session selection. */
+  async resolveTrustedWorkspacePrincipal(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException('可信主体解析需要原持久身份系统');
+    return this.platformRepository.resolveTrustedWorkspacePrincipal(binding, transaction);
+  }
+
+  async assertTrustedWorkspaceIntegrationManagement(binding: { userId: string; tenantId: string; workspaceId: string }, transaction: Prisma.TransactionClient) {
+    if (!this.useMysqlDataSource()) throw new ForbiddenException('可信空间集成管理需要原持久身份系统');
+    return this.platformRepository.assertTrustedWorkspaceIntegrationManagement(binding, transaction);
+  }
+
+  /** Original tenant metadata governance, not target workspace/business access.
+   * Reuses full-tenant integration rights and the original persistent account;
+   * SaaS identity never becomes a tenant actor or a tenant subject target. */
+  async assertTrustedWorkspaceSubjectManagement(binding: { userId: string; tenantId: string; workspaceId: string }, targetUserId: string, transaction: Prisma.TransactionClient) {
+    if (!this.useMysqlDataSource() || !transaction?.user || typeof targetUserId !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(targetUserId)) throw new ForbiddenException('可信主体管理需要原持久身份系统');
+    const actor = await this.assertTrustedWorkspaceIntegrationManagement(binding, transaction);
+    const user = await this.platformRepository.findUserById(targetUserId, transaction);
+    if (!user || typeof user !== 'object') throw new ForbiddenException('缺少当前租户主体');
+    const descriptors = Object.getOwnPropertyDescriptors(user);
+    const value = (name: string) => { const field = descriptors[name]; if (!field?.enumerable || !Object.hasOwn(field, 'value')) throw new ForbiddenException('缺少当前租户主体'); return field.value; };
+    if (value('id') !== targetUserId || value('tenantId') !== binding.tenantId || value('isActive') !== true
+      || value('isSaasAdmin') !== false || actor.id !== binding.userId || actor.tenantId !== binding.tenantId) throw new ForbiddenException('缺少当前租户主体');
+    return Object.freeze({ actorId: actor.id, tenantId: binding.tenantId, userId: targetUserId, workspaceId: binding.workspaceId });
+  }
+
+  /** Internal PLATFORM management only. Re-read the original persistent account
+   * in the caller's Serializable transaction and reuse original SaaS authority;
+   * tenant/space wildcard roles never substitute. No business or policy approval. */
+  async assertTrustedSaasManagement(binding: { userId: string; tenantId: string }, transaction: Prisma.TransactionClient) {
+    if (!this.useMysqlDataSource() || !transaction?.user || !binding || typeof binding !== 'object'
+      || Array.isArray(binding) || ![Object.prototype, null].includes(Object.getPrototypeOf(binding))) {
+      throw new ForbiddenException('可信平台管理需要原持久身份系统');
+    }
+    const fields = Object.getOwnPropertyDescriptors(binding), userId = fields.userId, tenantId = fields.tenantId;
+    const valid = (field: PropertyDescriptor | undefined): field is PropertyDescriptor & { value: string } => Boolean(field?.enumerable && Object.hasOwn(field, 'value')
+      && typeof field.value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(field.value));
+    if (Reflect.ownKeys(fields).length !== 2 || !valid(userId) || !valid(tenantId)) throw new ForbiddenException('缺少当前平台管理主体');
+    const user = await this.platformRepository.findUserById(userId.value, transaction);
+    if (!user || user.id !== userId.value || user.tenantId !== tenantId.value || user.isActive !== true
+      || user.isSaasAdmin !== true || user.mustChangePassword !== false) throw new ForbiddenException('缺少当前平台管理身份');
+    this.assertSaasAdmin(user);
+    return Object.freeze({ userId: user.id, tenantId: user.tenantId });
+  }
+
   /**
    * 取某个经营空间的品类与能力。
    *
@@ -2778,8 +2825,9 @@ export class PlatformService {
     return this.platformRepository.setSessionWorkspace(sessionId, workspaceId, expectedWorkspaceId);
   }
 
-  getAuthSession(id: string) {
-    if (this.useMysqlDataSource()) return this.platformRepository.getAuthSession(id);
+  getAuthSession(id: string, transaction?: Prisma.TransactionClient) {
+    if (this.useMysqlDataSource()) return this.platformRepository.getAuthSession(id, transaction);
+    if (transaction) throw new ForbiddenException('可信浏览器身份需要原持久会话');
     const session = this.authSessions.get(id);
     return session && !session.revokedAt && session.expiresAt > new Date() ? session : undefined;
   }

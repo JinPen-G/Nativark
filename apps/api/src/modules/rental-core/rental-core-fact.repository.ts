@@ -287,7 +287,7 @@ export interface RentalCoreFactStore {
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[], stockTransfers?: StockReturnTransfer[]): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
-  readAvailabilitySnapshot?(tenantId: string, workspaceId: string, query: RentalAvailabilitySnapshotQuery): Promise<RentalAvailabilitySnapshot>;
+  readAvailabilitySnapshot?(tenantId: string, workspaceId: string, query: RentalAvailabilitySnapshotQuery, tx?: RentalFactTx): Promise<RentalAvailabilitySnapshot>;
   /**
    * 对该地点下某商品组的资产行加排他锁，供配货使用。
    *
@@ -1451,7 +1451,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   /** Availability needs complete facts, not a silently truncated inventory.
    * Read one requested location/dependency set, include a sentinel and refuse
    * overflow. The original expiry/buffer/overdue rules remain unchanged. */
-  async readAvailabilitySnapshot(tenantId: string, workspaceId: string, value: RentalAvailabilitySnapshotQuery): Promise<RentalAvailabilitySnapshot> {
+  async readAvailabilitySnapshot(tenantId: string, workspaceId: string, value: RentalAvailabilitySnapshotQuery, tx?: RentalFactTx): Promise<RentalAvailabilitySnapshot> {
+    if (tx !== undefined && (!tx || '$transaction' in tx)) throw new ServiceUnavailableException('库存事务读取不可用');
+    const client = tx ?? this.prisma;
     const query = structuredClone(value), id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
     if (!query || typeof query !== 'object' || Array.isArray(query)
       || Object.keys(query).length !== 2 || typeof query.locationId !== 'string' || !id.test(query.locationId)
@@ -1462,22 +1464,22 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     // Original Guard uses isPlatformAdmin for a tenant administrator. It is not
     // SaaS and supplies no scope on its own; all current scope checks still apply.
     if (!identity?.userId || identity.tenantId !== tenantId || identity.isSaasAdmin
-      || identity.workspaceId !== workspaceId || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+      || identity.workspaceId !== workspaceId || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
       throw new ForbiddenException('库存读取缺少当前经营空间');
     const locations = getRequestLocationIds();
     if (locations !== undefined && !locations.includes(query.locationId)) throw new ForbiddenException('库存地点不可访问');
     const where = { tenantId, workspaceId, locationId: query.locationId, itemGroupId: { in: query.itemGroupIds } };
     const at = new Date();
     const [reservations, currentAssets, stocks] = await Promise.all([
-      this.prisma.rentalReservation.findMany({ where: { ...where, status: { in: ACTIVE_RESERVATION_STATES },
+      client.rentalReservation.findMany({ where: { ...where, status: { in: ACTIVE_RESERVATION_STATES },
         OR: [{ expiresAt: null }, { expiresAt: { gte: at } }] },
         select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, quantity: true, releasedQuantity: true,
           startAt: true, endAt: true, status: true, order: { select: { tenantId: true, workspaceId: true, ruleSnapshot: true } } },
         orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 }),
-      this.prisma.rentalAsset.findMany({ where,
+      client.rentalAsset.findMany({ where,
         select: { id: true, tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, status: true },
         orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 }),
-      this.prisma.rentalStockBalance.findMany({ where,
+      client.rentalStockBalance.findMany({ where,
         select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, onHandQuantity: true, maintenanceQuantity: true },
         orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 })
     ]);
@@ -1495,7 +1497,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       if (candidateIds.some(value => typeof value !== 'string' || !id.test(value)) || candidateSet.size !== candidateIds.length)
         throw new ConflictException('库存资产来源无效');
       if (!isDeepStrictEqual(identity, getRequestIdentity())) throw new ForbiddenException('库存读取身份或范围变化');
-      const rows = await this.prisma.rentalWorkOrder.findMany({
+      const rows = await client.rentalWorkOrder.findMany({
         where: { tenantId, workspaceId, assetId: { in: candidateIds },
           OR: [{ createdBy: identity.userId }, { assigneeId: identity.userId }] },
         select: { tenantId: true, workspaceId: true, assetId: true },
@@ -1507,7 +1509,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       const ownedIds = new Set(rows.map(row => row.assetId));
       assets = currentAssets.filter(row => ownedIds.has(row.id));
     }
-    if (!isDeepStrictEqual(identity, getRequestIdentity()) || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+    if (!isDeepStrictEqual(identity, getRequestIdentity()) || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
       throw new ForbiddenException('库存读取身份或范围变化');
     return { reservations: reservations.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId,
       quantity: Math.max(0, row.quantity - row.releasedQuantity),

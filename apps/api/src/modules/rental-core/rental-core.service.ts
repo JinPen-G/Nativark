@@ -1329,6 +1329,41 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return result;
   }
 
+  /** Original bounded catalog page in the caller's active transaction/Guard ALS.
+   * No state initialization, default workspace, pricing, stock hold or commit.
+   * Owner supplies coherent isolation and current authorization through return. */
+  async listItemGroupsPageInTransaction(tenantId: string, value: RentalItemGroupPageQuery,
+    native: RentalConfigTx, signal: AbortSignal, assertCurrent?: () => void): Promise<RentalItemGroupPage> {
+    const identity = getRequestIdentity();
+    if (!identity?.workspaceId || identity.tenantId !== tenantId || !identity.userId || identity.isSaasAdmin
+      || identity.audience !== 'operator' || !native || '$transaction' in native
+      || typeof native.businessWorkspace?.findFirst !== 'function' || typeof native.rentalItemGroup?.findMany !== 'function'
+      || typeof this.configStore.listItemGroupsPage !== 'function') throw new ServiceUnavailableException('商品事务分页读取范围不可用');
+    const binding = requestFingerprint(structuredClone(identity));
+    const live = () => {
+      if (signal.aborted || requestFingerprint(getRequestIdentity() ?? null) !== binding) throw new ForbiddenException('商品事务读取已停止或范围变化');
+      assertCurrent?.();
+    };
+    live();
+    const query = parseRentalItemGroupPageQuery(value);
+    // Scope resolution awaits before/after the page. Fence each actual delegate
+    // dispatch so a cancelled scope lookup cannot start a late configuration read.
+    const guarded = <T extends object>(delegate: T) => new Proxy(delegate, { get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      return (property === 'findFirst' || property === 'findMany') && typeof value === 'function'
+        ? new Proxy(value, { apply(method, _owner, args) { live(); return Reflect.apply(method, target, args); } }) : value;
+    } });
+    const workspace = guarded(native.businessWorkspace), groups = guarded(native.rentalItemGroup);
+    const transaction = new Proxy(native, { get(target, property, receiver) {
+      return property === 'businessWorkspace' ? workspace : property === 'rentalItemGroup' ? groups : Reflect.get(target, property, receiver);
+    } });
+    const page = structuredClone(await this.configStore.listItemGroupsPage(tenantId, identity.workspaceId, query, transaction));
+    live();
+    if (!Array.isArray(page.rows) || page.rows.length > query.limit || page.rows.some(row => row.tenantId !== tenantId)
+      || page.source !== 'persisted_workspace_configuration') throw new ConflictException('商品分页读取来源变化');
+    return { ...page, rows: page.rows.map(row => this.publicItemGroup(row)) };
+  }
+
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
 
   async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: RentalConfigTx, deferCache = false) {
@@ -1810,12 +1845,56 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * facts only. It never initializes a tenant or writes sample inventory. The
    * original arithmetic is shared; final order admission still locks/rechecks. */
   async readAvailability(tenantId: string, value: RentalAvailabilityRequest): Promise<RentalAvailabilityResult> {
+    return this.readAvailabilityFrom(tenantId, value);
+  }
+
+  /** ORIGINAL owner-Native read, not inventory reservation or commit evidence.
+   * Shares the legacy bounded read/arithmetic and keeps original admission locks.
+   * Every actual SQL/delegate dispatch is fenced; no global/state fallback. */
+  async readAvailabilityInTransaction(tenantId: string, value: RentalAvailabilityRequest, native: RentalFactTx,
+    signal: AbortSignal, assertCurrent?: () => void): Promise<RentalAvailabilityResult> {
+    const identity = getRequestIdentity();
+    if (!identity?.workspaceId || identity.tenantId !== tenantId || !identity.userId || identity.isSaasAdmin
+      || identity.audience !== 'operator' || !native || '$transaction' in native || typeof native.$queryRaw !== 'function'
+      || typeof native.businessWorkspace?.findFirst !== 'function' || typeof native.rentalItemGroup?.findMany !== 'function'
+      || typeof native.rentalReservation?.findMany !== 'function' || typeof native.rentalAsset?.findMany !== 'function'
+      || typeof native.rentalStockBalance?.findMany !== 'function'
+      || identity.dataScope === 'own' && typeof native.rentalWorkOrder?.findMany !== 'function') throw new ServiceUnavailableException('库存事务读取范围不可用');
+    const binding = requestFingerprint(structuredClone(identity)); let active = true;
+    const live = () => {
+      if (!active || signal.aborted || requestFingerprint(getRequestIdentity() ?? null) !== binding) throw new ForbiddenException('库存事务读取已停止或范围变化');
+      assertCurrent?.();
+    };
+    const delegates = new Set(['businessWorkspace','rentalItemGroup','rentalReservation','rentalAsset','rentalStockBalance','rentalWorkOrder']);
+    const fenced = new Map<PropertyKey, unknown>();
+    const transaction = new Proxy(native, { get(target, property, receiver) {
+      if (fenced.has(property)) return fenced.get(property);
+      const value = Reflect.get(target, property, receiver);
+      if (property === '$queryRaw' && typeof value === 'function') {
+        const method = new Proxy(value, { apply(fn, _owner, args) { live(); return Reflect.apply(fn, target, args); } }); fenced.set(property, method); return method;
+      }
+      if (typeof property === 'string' && delegates.has(property) && value && typeof value === 'object') {
+        const delegate = new Proxy(value, { get(object, key, owner) {
+          const method = Reflect.get(object, key, owner);
+          return (key === 'findFirst' || key === 'findMany') && typeof method === 'function'
+            ? new Proxy(method, { apply(fn, _owner, args) { live(); return Reflect.apply(fn, object, args); } }) : method;
+        } }); fenced.set(property, delegate); return delegate;
+      }
+      return value;
+    } });
+    try { live(); const result = await this.readAvailabilityFrom(tenantId, value, transaction, live); live(); return result; }
+    finally { active = false; fenced.clear(); }
+  }
+
+  private async readAvailabilityFrom(tenantId: string, value: RentalAvailabilityRequest, tx?: RentalFactTx, assertCurrent?: () => void): Promise<RentalAvailabilityResult> {
     const input = structuredClone(value), identity = getRequestIdentity();
     if (!identity?.workspaceId || !identity.userId || identity.tenantId !== tenantId || identity.isSaasAdmin)
       throw new ForbiddenException('库存只读查询缺少当前租户及经营空间');
     const workspaceId = identity.workspaceId, binding = requestFingerprint(identity);
     const current = () => {
       if (requestFingerprint(getRequestIdentity()) !== binding) throw new ForbiddenException('库存读取身份或范围变化');
+
+      assertCurrent?.();
     };
     const resourceId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 4
@@ -1830,7 +1909,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ServiceUnavailableException('库存持久只读端口不可用');
     const locationIds = getRequestStaffLocationIds();
     if (locationIds !== undefined && !locationIds.includes(input.locationId)) throw new ForbiddenException('库存地点不可访问');
-    await this.fulfillmentAdmission(tenantId, [{ locationId: input.locationId }]); current();
+    current(); await this.fulfillmentAdmission(tenantId, [{ locationId: input.locationId }], tx); current();
     const pending = [...new Set(input.lines.map(line => line.itemGroupId))], groups = new Map<string, RentalItemGroupPage['rows'][number]>();
     // Resolve only requested groups and their required bundle dependencies. A
     // missing/oversized persisted configuration is not a seeded substitute.
@@ -1838,7 +1917,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (pending.length > 100) throw new ServiceUnavailableException('套装库存依赖超出只读上限');
       const groupId = pending[index], query = parseRentalItemGroupPageQuery({ itemGroupId: groupId, limit: 1 });
       current();
-      const page = structuredClone(await this.configStore.listItemGroupsPage(tenantId, workspaceId, query)); current();
+      const page = structuredClone(await this.configStore.listItemGroupsPage(tenantId, workspaceId, query, tx)); current();
       if (page.source !== 'persisted_workspace_configuration' || page.truncated || page.rows.length !== 1
         || page.rows[0].id !== groupId || page.rows[0].tenantId !== tenantId) throw new NotFoundException('商品库存配置缺失或来源无效');
       const group = page.rows[0]; groups.set(groupId, group);
@@ -1848,7 +1927,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
     }
     current();
-    const snapshot = await this.factStore.readAvailabilitySnapshot(tenantId, workspaceId, { locationId: input.locationId, itemGroupIds: pending });
+    const snapshot = await this.factStore.readAvailabilitySnapshot(tenantId, workspaceId, { locationId: input.locationId, itemGroupIds: pending }, tx);
     current();
     return this.computeAvailability({ itemGroups: [...groups.values()] }, snapshot, input);
   }
@@ -2248,6 +2327,39 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async getOrder(tenantId: string, orderId: string) {
     this.state(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
+  }
+
+  /** Original persisted read under an existing caller transaction/Guard ALS.
+   * No state initialization/config writes, default workspace, lock/lease, billing
+   * or execution. Owner holds coherent fences; this is not a commit receipt. */
+  async getOrderInTransaction(tenantId: string, orderId: string, native: RentalFactTx, signal: AbortSignal, assertCurrent?: () => void) {
+    const before = getRequestIdentity();
+    if (!before?.workspaceId || before.tenantId !== tenantId || !before.userId || before.isSaasAdmin
+      || before.audience !== 'operator' || !native || '$transaction' in native
+      || typeof native.businessWorkspace?.findFirst !== 'function' || typeof native.rentalOrder?.findFirst !== 'function') {
+      throw new ForbiddenException('订单事务读取范围不可用');
+    }
+    const binding = requestFingerprint(structuredClone(before));
+    const live = () => {
+      if (signal.aborted || requestFingerprint(getRequestIdentity() ?? null) !== binding) throw new ForbiddenException('订单事务读取已停止或范围变化');
+      assertCurrent?.();
+    };
+    live();
+    // The original scope resolver awaits before order dispatch. Check at each
+    // actual delegate invocation too; cancellation cannot start the next query.
+    const guarded = <T extends object>(delegate: T) => new Proxy(delegate, { get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      return property === 'findFirst' && typeof value === 'function'
+        ? new Proxy(value, { apply(method, _owner, args) { live(); return Reflect.apply(method, target, args); } }) : value;
+    } });
+    const workspace = guarded(native.businessWorkspace), orders = guarded(native.rentalOrder);
+    const transaction = new Proxy(native, { get(target, property, receiver) {
+      return property === 'businessWorkspace' ? workspace : property === 'rentalOrder' ? orders : Reflect.get(target, property, receiver);
+    } });
+    const order = await this.factStore.findOrder(tenantId, orderId, transaction);
+    live();
+    if (!order || order.id !== orderId || order.tenantId !== tenantId) throw new NotFoundException('租赁订单不存在');
+    return this.publicOrder(order);
   }
 
   /**
@@ -3294,6 +3406,51 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       || (page.nextCursor !== null && (!page.items.length || page.nextCursor !== page.items[page.items.length - 1].id))) {
       throw new ServiceUnavailableException('检查记录分页来源不一致');
     }
+    return page;
+  }
+
+  /** Bounded original inspection evidence in the caller-owned transaction.
+   * Reuses the guarded order and persisted page; no template/config initialization,
+   * inspection execution, liability or settlement. Owner supplies current fences. */
+  async listInspectionsPageInTransaction(tenantId: string, orderId: string, value: RentalInspectionPageQuery,
+    native: RentalFactTx, signal: AbortSignal, assertCurrent?: () => void): Promise<RentalInspectionPage> {
+    const identity = getRequestIdentity();
+    if (!identity?.workspaceId || identity.tenantId !== tenantId || !identity.userId || identity.isSaasAdmin
+      || identity.audience !== 'operator' || !native || '$transaction' in native
+      || typeof native.businessWorkspace?.findFirst !== 'function' || typeof native.rentalOrder?.findFirst !== 'function'
+      || typeof native.rentalInspectionRecord?.findFirst !== 'function' || typeof native.rentalInspectionRecord?.findMany !== 'function'
+      || typeof this.factStore.listInspectionsPage !== 'function') throw new ServiceUnavailableException('检查记录事务读取范围不可用');
+    const binding = requestFingerprint(structuredClone(identity));
+    const live = () => {
+      if (signal.aborted || requestFingerprint(getRequestIdentity() ?? null) !== binding) throw new ForbiddenException('检查记录事务读取已停止或范围变化');
+      assertCurrent?.();
+    };
+    live();
+    const query = parseRentalInspectionPageQuery(value);
+    const before = await this.getOrderInTransaction(tenantId, orderId, native, signal, live);
+    live();
+    // The scope resolver/cursor check await before the actual page. Revalidate at
+    // delegate dispatch, so cancellation or callback closure cannot start it late.
+    const guarded = <T extends object>(delegate: T) => new Proxy(delegate, { get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      return (property === 'findFirst' || property === 'findMany') && typeof value === 'function'
+        ? new Proxy(value, { apply(method, _owner, args) { live(); return Reflect.apply(method, target, args); } }) : value;
+    } });
+    const workspace = guarded(native.businessWorkspace), inspections = guarded(native.rentalInspectionRecord);
+    const transaction = new Proxy(native, { get(target, property, receiver) {
+      return property === 'businessWorkspace' ? workspace : property === 'rentalInspectionRecord' ? inspections : Reflect.get(target, property, receiver);
+    } });
+    const page = structuredClone(await this.factStore.listInspectionsPage(tenantId, orderId, query, transaction));
+    live();
+    if (page.coverage !== 'page_not_total' || !Array.isArray(page.items) || page.items.length > query.limit
+      || new Set(page.items.map(item => item.id)).size !== page.items.length
+      || page.items.some(item => item.tenantId !== tenantId || item.orderId !== orderId)
+      || (page.nextCursor !== null && (page.items.length !== query.limit || page.nextCursor !== page.items.at(-1)?.id))) {
+      throw new ServiceUnavailableException('检查记录分页来源不一致');
+    }
+    const after = await this.getOrderInTransaction(tenantId, orderId, native, signal, live);
+    live();
+    if (requestFingerprint(before) !== requestFingerprint(after)) throw new ServiceUnavailableException('检查记录关联订单已变化');
     return page;
   }
 

@@ -1,3 +1,6 @@
+/** Original Web authentication and scoped current-principal resolution.
+ * External issuer/grant verification belongs to its original authority; roles and
+ * workspace access come from original Platform storage, never model/request fields. */
 import {
   BadRequestException,
   ConflictException,
@@ -37,6 +40,11 @@ export interface WorkspaceAccessLease {
   revalidate: () => Promise<SystemUserRow>;
 }
 
+import { snapshotTrustedWorkspacePrincipal } from './trusted-workspace-principal';
+import type { AuthAccessContext, TrustedWorkspaceAccess, TrustedWorkspacePrincipal } from './trusted-workspace-principal';
+import type { TrustedBrowserPrincipal } from './trusted-browser-principal';
+import type { TrustedPlatformBrowserPrincipal } from './trusted-platform-browser-principal';
+
 interface LoginFailureState {
   count: number;
   firstFailedAt: number;
@@ -69,6 +77,11 @@ export class AuthService {
   private failedLoginPruneCounter = 0;
   private readonly accessTtlSeconds = 15 * 60;
   private readonly refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
+  // Opaque, single-consumption tickets scoped to an original authority callback;
+  // no token cache, durable grant, or permission supplied by a request/model.
+  readonly #trustedWorkspaceContexts = new WeakMap<object, {
+    context: AuthAccessContext; transaction: Prisma.TransactionClient; live: () => boolean; release: () => void;
+  }>();
 
   constructor(
     private readonly platformService: PlatformService,
@@ -340,6 +353,151 @@ export class AuthService {
 
   async resolveAccessToken(authorization?: string, audience: AuthAudience = "operator"): Promise<SystemUserRow | undefined> {
     return (await this.resolveAccessContext(authorization, { audience }))?.user;
+  }
+
+  /** Original current grant owner supplies the binding in its SAME Serializable
+   * transaction. This is not OAuth verification, consent or a public identity DTO.
+   * Callback lifetime bounds both the resolver and its opaque, one-use tickets. */
+  async withTrustedWorkspacePrincipal<T>(
+    transaction: Prisma.TransactionClient,
+    current: (transaction: Prisma.TransactionClient, signal: AbortSignal) => Promise<TrustedWorkspacePrincipal | undefined>,
+    signal: AbortSignal,
+    consume: (resolve: () => Promise<TrustedWorkspaceAccess | undefined>) => Promise<T>
+  ): Promise<T> {
+    if (!transaction || typeof current !== 'function' || typeof consume !== 'function' || signal.aborted) {
+      throw new ForbiddenException('可信主体授权未就绪');
+    }
+    let active = true, captured: TrustedWorkspacePrincipal | undefined;
+    const tickets = new Set<object>();
+    const live = () => { if (!active || signal.aborted) throw new ForbiddenException('可信主体授权已停止'); };
+    const readBinding = async () => {
+      live(); const original = await current(transaction, signal); live();
+      return original === undefined ? undefined : snapshotTrustedWorkspacePrincipal(original);
+    };
+    const resolve = async (): Promise<TrustedWorkspaceAccess | undefined> => {
+      const before = await readBinding();
+      if (!before) return undefined;
+      if (captured && JSON.stringify(captured) !== JSON.stringify(before)) throw new ForbiddenException('可信主体范围已变化');
+      const context = await this.platformService.resolveTrustedWorkspacePrincipal(before, transaction); live();
+      const after = await readBinding();
+      if (!after || JSON.stringify(after) !== JSON.stringify(before)) throw new ForbiddenException('可信主体范围已变化');
+      if (!context || context.user.isSaasAdmin || !context.user.isActive || context.user.id !== before.userId
+        || context.user.tenantId !== before.tenantId || context.workspaceId !== before.workspaceId || !context.workspaceValid) return undefined;
+      captured ??= before;
+      const ticket = Object.freeze({}) as TrustedWorkspaceAccess;
+      tickets.add(ticket);
+      this.#trustedWorkspaceContexts.set(ticket, { context: structuredClone(context), transaction,
+        live: () => active && !signal.aborted, release: () => tickets.delete(ticket) });
+      return ticket;
+    };
+    try { const result = await consume(resolve); live(); return result; }
+    finally { active = false; for (const ticket of tickets) this.#trustedWorkspaceContexts.delete(ticket); }
+  }
+
+  /** Guard-only consumption: JSON/lookalikes, other AuthService instances, used
+   * tickets and tickets whose original callback ended cannot authenticate. */
+  consumeTrustedWorkspaceAccess(ticket: TrustedWorkspaceAccess | undefined) {
+    const entry = ticket && this.#trustedWorkspaceContexts.get(ticket);
+    if (!entry || !entry.live()) throw new UnauthorizedException('缺少当前可信主体授权');
+    this.#trustedWorkspaceContexts.delete(ticket!); entry.release();
+    return { context: structuredClone(entry.context), transaction: entry.transaction };
+  }
+
+  /** Original Web-only identity for a trusted consent transaction. Reuses this
+   * service's signature verifier and original Platform account/space mapping;
+   * caller fields cannot select a session, user or workspace. No consent/MFA/CSRF
+   * is inferred. The original owner must use Serializable and recheck at commit. */
+  async resolveTrustedBrowserPrincipal(
+    authorization: string | undefined,
+    transaction: Prisma.TransactionClient,
+    signal: AbortSignal
+  ): Promise<TrustedBrowserPrincipal | undefined> {
+    if (signal.aborted) throw new UnauthorizedException('浏览器身份核对已停止');
+    if (!transaction || typeof authorization !== 'string' || authorization.length > 8192) return undefined;
+    const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i.exec(authorization);
+    if (!match) return undefined;
+    // OAuth control-plane identity must not depend on Web's development-secret
+    // fallback. Original login behavior remains unchanged outside this method.
+    const configured = this.configService.get<string>('AUTH_TOKEN_SECRET');
+    if (typeof configured !== 'string' || !configured.trim()) return undefined;
+    const token = match[1], live = () => { if (signal.aborted) throw new UnauthorizedException('浏览器身份核对已停止'); };
+    const read = async (): Promise<TrustedBrowserPrincipal | undefined> => {
+      live(); const payload = this.verifyAccessToken(token);
+      if (!payload || (payload.aud ?? 'operator') !== 'operator' || !Number.isSafeInteger(payload.exp)
+        || !Number.isSafeInteger(payload.iat) || payload.iat <= 0 || payload.iat > Date.now() / 1000 || payload.exp <= payload.iat
+        || typeof payload.sid !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(payload.sid)) return undefined;
+      const binding = snapshotTrustedWorkspacePrincipal({ userId: payload.sub, tenantId: payload.tid, workspaceId: payload.wid, audience: 'operator' });
+      const session = await this.platformService.getAuthSession(payload.sid, transaction); live();
+      if (!session) return undefined;
+      if (typeof session !== 'object' || Array.isArray(session) || ![Object.prototype, null].includes(Object.getPrototypeOf(session))) {
+        throw new UnauthorizedException('浏览器会话证据不可用');
+      }
+      const descriptors = Object.getOwnPropertyDescriptors(session);
+      const value = (key: string) => { const field = descriptors[key];
+        if (!field?.enumerable || !Object.hasOwn(field, 'value')) throw new UnauthorizedException('浏览器会话证据不可用'); return field.value; };
+      const expires = value('expiresAt');
+      if (!(expires instanceof Date) || Object.getPrototypeOf(expires) !== Date.prototype) throw new UnauthorizedException('浏览器会话期限不可用');
+      const expiresAt = Math.min(payload.exp, Math.floor(Date.prototype.getTime.call(expires) / 1000));
+      if (value('id') !== payload.sid || value('userId') !== binding.userId || value('audience') !== 'operator'
+        || value('revokedAt') !== null || value('currentWorkspaceId') !== binding.workspaceId || !Number.isSafeInteger(expiresAt)
+        || expiresAt <= Date.now() / 1000) return undefined;
+      const context = await this.platformService.resolveTrustedWorkspacePrincipal(binding, transaction); live();
+      if (!context || context.user.isSaasAdmin || !context.user.isActive || context.user.mustChangePassword !== false
+        || context.user.id !== binding.userId || context.user.tenantId !== binding.tenantId
+        || context.workspaceId !== binding.workspaceId || !context.workspaceValid) return undefined;
+      return Object.freeze({ ...binding, sessionId: payload.sid, expiresAt });
+    };
+    try {
+      const before = await read(); if (!before) return undefined;
+      const after = await read(); live();
+      if (!after || JSON.stringify(after) !== JSON.stringify(before)) throw new UnauthorizedException('浏览器会话范围已变化');
+      return after;
+    } catch { throw new UnauthorizedException('当前可信浏览器身份不可用'); }
+  }
+
+  /** Original Web-only PLATFORM identity. Uses this service's original signature
+   * verifier/session fence and current SaaS account gate, not workspace authority.
+   * Caller owns Serializable and commit rechecks; no consent/MFA/CSRF is inferred. */
+  async resolveTrustedPlatformBrowserPrincipal(
+    authorization: string | undefined,
+    transaction: Prisma.TransactionClient,
+    signal: AbortSignal
+  ): Promise<TrustedPlatformBrowserPrincipal | undefined> {
+    if (signal.aborted) throw new UnauthorizedException('平台身份核对已停止');
+    if (!transaction || typeof authorization !== 'string' || authorization.length > 8192) return undefined;
+    const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i.exec(authorization);
+    if (!match) return undefined;
+    const configured = this.configService.get<string>('AUTH_TOKEN_SECRET');
+    if (typeof configured !== 'string' || !configured.trim()) return undefined;
+    const token = match[1], id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(value);
+    const live = () => { if (signal.aborted) throw new UnauthorizedException('平台身份核对已停止'); };
+    const read = async (): Promise<TrustedPlatformBrowserPrincipal | undefined> => {
+      live(); const payload = this.verifyAccessToken(token);
+      if (!payload || (payload.aud ?? 'operator') !== 'operator' || !id(payload.sub) || !id(payload.tid) || !id(payload.sid)
+        || !Number.isSafeInteger(payload.exp) || !Number.isSafeInteger(payload.iat) || payload.iat <= 0
+        || payload.iat > Date.now() / 1000 || payload.exp <= payload.iat || payload.wid !== undefined && !id(payload.wid)) return undefined;
+      const session = await this.platformService.getAuthSession(payload.sid, transaction); live();
+      if (!session) return undefined;
+      if (typeof session !== 'object' || Array.isArray(session) || ![Object.prototype, null].includes(Object.getPrototypeOf(session))) throw new UnauthorizedException('平台会话证据不可用');
+      const descriptors = Object.getOwnPropertyDescriptors(session);
+      const value = (key: string) => { const field = descriptors[key];
+        if (!field?.enumerable || !Object.hasOwn(field, 'value')) throw new UnauthorizedException('平台会话证据不可用'); return field.value; };
+      const expires = value('expiresAt');
+      if (!(expires instanceof Date) || Object.getPrototypeOf(expires) !== Date.prototype) throw new UnauthorizedException('平台会话期限不可用');
+      const expiresAt = Math.min(payload.exp, Math.floor(Date.prototype.getTime.call(expires) / 1000));
+      if (value('id') !== payload.sid || value('userId') !== payload.sub || value('audience') !== 'operator' || value('revokedAt') !== null
+        || value('currentWorkspaceId') !== (payload.wid ?? null) || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() / 1000) return undefined;
+      const binding = Object.freeze({ userId: payload.sub, tenantId: payload.tid });
+      const current = await this.platformService.assertTrustedSaasManagement(binding, transaction); live();
+      if (!current || current.userId !== binding.userId || current.tenantId !== binding.tenantId) return undefined;
+      return Object.freeze({ ...binding, audience: 'operator' as const, sessionId: payload.sid, expiresAt });
+    };
+    try {
+      const before = await read(); if (!before) return undefined;
+      const after = await read(); live();
+      if (!after || JSON.stringify(after) !== JSON.stringify(before)) throw new UnauthorizedException('平台会话主体已变化');
+      return after;
+    } catch { throw new UnauthorizedException('当前可信平台身份不可用'); }
   }
 
   /**

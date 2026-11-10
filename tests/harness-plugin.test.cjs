@@ -16,9 +16,11 @@ const pluginRoot = path.join(root, "clients/harness-plugin");
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, "package.json"), "utf8"));
 const commandPackage = createRequire(path.join(harness, "packages/interaction/commands/package.json"));
 const loopPackage = createRequire(path.join(harness, "packages/core/agent-loop/package.json"));
+const basePackage = createRequire(path.join(harness, "packages/bundle/base/package.json"));
 const publicResolve = name => (name.startsWith("@modelcontextprotocol/") ? mcp
   : name === "@deepseek-ai/dsh-commands" ? commandPackage
-    : ["@deepseek-ai/dsh-mcp-client", "@deepseek-ai/dsh-scope", "@deepseek-ai/dsh-tools"].includes(name) ? mcp : cli).resolve(name);
+    : ["@deepseek-ai/dsh-storage", "@deepseek-ai/dsh-storage-domain", "@deepseek-ai/dsh-storage-json"].includes(name) ? basePackage
+      : ["@deepseek-ai/dsh-mcp-client", "@deepseek-ai/dsh-scope", "@deepseek-ai/dsh-tools"].includes(name) ? mcp : cli).resolve(name);
 
 const { buildBundle } = require("../clients/harness-plugin/scripts/build-bundle.cjs");
 const { createHash } = require("node:crypto");
@@ -186,9 +188,46 @@ export function createServer(options) {
   assert.deepEqual(layer.layers.map(x => x.packageName), [manifest.name]);
   const patches = layer.layers.flatMap(x => x.patches);
 
-  async function open(overrides = []) {
-    const ctx = await boot.boot("offline-rental", configFile, structuredClone([...patches, ...overrides]));
+  // Timing barriers wrap the actual JSON backend, not domain semantics or durability.
+  const storageFixture = path.join(output, "storage-fixture.mjs");
+  fs.writeFileSync(storageFixture, `import { apply as applyJson, Config } from ${JSON.stringify(pathToFileURL(publicResolve("@deepseek-ai/dsh-storage-json")).href)};
+export { Config };
+export const name = 'storage-json-barrier', inject = ['storage'];
+const boundaries = new Map();
+export function setBoundary(root, boundary) { boundaries.set(root, boundary); return () => boundaries.delete(root); }
+export function apply(ctx, config) {
+  applyJson(ctx, config);
+  const backend = ctx.storage.backend.get('json'), open = backend.kv.open.bind(backend.kv);
+  backend.kv.open = async descriptor => {
+    const unit = await open(descriptor), load = unit.loadAll.bind(unit), set = unit.setGlobal.bind(unit);
+    unit.loadAll = async () => {
+      await boundaries.get(config.root)?.beforeLoad?.();
+      const result = await load(); boundaries.get(config.root)?.afterLoad?.(); return result;
+    };
+    unit.setGlobal = async value => {
+      await boundaries.get(config.root)?.beforeSet?.(value);
+      await set(value); await boundaries.get(config.root)?.afterSet?.(value);
+    };
+    return unit;
+  };
+}
+`);
+  const storageBoundary = await import(pathToFileURL(storageFixture).href);
+  const storageRoots = new Map();
+  async function open(overrides = [], storageRoot) {
+    const loginEnabled = overrides.some(row => row.id === "rental-os" && row.config?.login?.enabled);
+    const storage = [];
+    if (loginEnabled && storageRoot !== false) {
+      storageRoot ??= fs.mkdtempSync(path.join(output, "oauth-recovery-"));
+      storage.push({ insert: [
+        { id: "storage", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-storage")).href },
+        { id: "storage-json", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-storage-json")).href, config: { root: storageRoot } },
+        { id: "storage-domain", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-storage-domain")).href, config: { backend: "json" } },
+      ] });
+    }
+    const ctx = await boot.boot("offline-rental", configFile, structuredClone([...patches, ...storage, ...overrides]));
     running.add(ctx);
+    if (storage.length) storageRoots.set(ctx, storageRoot);
     assert.ok(ctx.get("sessions"), "real SessionStore activated");
     assert.ok(ctx.get("commands"), "real CommandRuntime activated");
     return ctx;
@@ -201,8 +240,18 @@ export function createServer(options) {
   const ctx = await open();
   const agent = { id: SessionId("offline-rental-session"), session: ctx.sessions.create(SessionId("offline-rental-session")) };
   const invoke = (line, signal = new AbortController().signal) => ctx.commands.execute(agent, line, [], signal);
+  const assertPrivacyNotice = (text, language) => {
+    const clauses = language === "zh-CN"
+      ? [/Rental 使用提醒：/, /普通聊天可能在 Rental 工具执行前发送给模型/, /姓名、电话、证件、详细地址、银行账户、密码、令牌、模型 Key 或敏感附件/, /选择和批准请在可信 Rental 页面完成/, /断开或卸载不会删除 Harness 普通历史、生成文件或外部副本/, /不是全局敏感信息过滤器/, /自配模型费用由用户承担/, /服务端模型任务另走原 Gateway/]
+      : [/Rental privacy notice:/, /Ordinary chat may reach your model before any Rental tool runs/, /names, phone numbers, identity documents, detailed addresses, bank accounts, passwords, tokens, model keys or sensitive attachments/, /Make choices and approvals in trusted Rental pages/, /Disconnecting or uninstalling does not delete ordinary Harness history, generated files or external copies/, /not a global sensitive-input filter/, /You pay for your configured model/, /Server model tasks use the original Gateway separately/];
+    for (const clause of clauses) assert.match(text, clause);
+  };
   assert.deepEqual(ctx.commands.list(agent).map(x => x.name), ["rental"]);
-  assert.match((await invoke("/rental status")).result.text, /尚未配置/);
+  const initialStatus = await invoke("/rental status");
+  assert.match(initialStatus.result.text, /尚未配置/);
+  assertPrivacyNotice(initialStatus.result.text, "zh-CN");
+  assert.equal(agent.session.snapshotEvents().at(-1).data.text, initialStatus.result.text, "human notice is retained by the original command outcome");
+  assert.deepEqual(agent.session.deriveMessages(), [], "human connection notice is not model material or a consent message");
   assert.match((await invoke("/rental check")).result.text, /尚未配置/);
   assert.match((await invoke("/rental oauth-check")).result.text, /尚未配置/);
   await invoke("/rental secret-synthetic-token");
@@ -226,6 +275,7 @@ export function createServer(options) {
   const checked = await active.commands.execute(other, "/rental check", [], new AbortController().signal);
   assert.equal(checked.result.kind, "success");
   assert.match(checked.result.text, /仍需完成授权/);
+  assertPrivacyNotice(checked.result.text, "zh-CN");
   assert.equal(calls, 2);
   assert.equal(active.get("tools"), undefined);
   assert.equal(active.get("authorization"), undefined);
@@ -243,7 +293,11 @@ export function createServer(options) {
   assert.notEqual(active.commands.find(other, "rental").handler, previousHandler);
   assert.equal(active.commands.list(other).filter(x => x.name === "rental").length, 1);
   assert.equal(calls, 2, "configuration reload does not fetch automatically");
-  assert.match((await active.commands.execute(other, "/rental status", [], new AbortController().signal)).result.text, /settings are present/);
+  const englishStatus = await active.commands.execute(other, "/rental status", [], new AbortController().signal);
+  assert.match(englishStatus.result.text, /settings are present/);
+  assertPrivacyNotice(englishStatus.result.text, "en");
+  assert.equal(other.session.snapshotEvents().at(-1).data.text, englishStatus.result.text);
+  assert.deepEqual(other.session.deriveMessages(), []);
 
   let release;
   let started;
@@ -380,15 +434,165 @@ export default class extends Service {
       scopes: oauthSettings.scopes, expiresAt: Date.now() / 1000 + 60 };
   }, { instructions: { read: async () => guidance } });
   t.after(() => authenticatedEndpoint.close());
-  const login = await open([
+  const loginRows = [
     { insert: [
       { id: "oauth-listener-fixture", name: pathToFileURL(listenerFixture).href },
       { id: "system-prompt", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-system-prompt")).href },
     ] },
     { id: "rental-os", config: { ...configured[0].config, oauth: oauthSettings,
       login: { enabled: true, attemptTimeoutMs: 2000, sessionLifetimeMs: 120000, maxAccessTtlSeconds: 300, callbackMode: "host" } } },
-  ]);
-  const loginAgent = { id: SessionId("login-owner"), session: login.sessions.create(SessionId("login-owner")) };
+  ];
+  const withoutStorage = await open(loginRows, false);
+  const storageLessAgent = { id: SessionId("storage-unavailable"), session: withoutStorage.sessions.create(SessionId("storage-unavailable")) };
+  const beforeStorageDenial = calls;
+  assert.match((await withoutStorage.commands.execute(storageLessAgent, "/rental status", [], new AbortController().signal)).result.text, /持久恢复存储/);
+  assert.equal((await withoutStorage.commands.execute(storageLessAgent, "/rental login", [], new AbortController().signal)).result.kind, "error");
+  assert.equal(calls, beforeStorageDenial, "missing recovery storage cannot start discovery or OAuth");
+  await withoutStorage.fiber.dispose(); running.delete(withoutStorage);
+
+  const malformedRoot = fs.mkdtempSync(path.join(output, "oauth-recovery-malformed-"));
+  const malformedFile = path.join(malformedRoot, "rental_oauth_recovery.json");
+  const malformedBytes = JSON.stringify({ unit: { name: "rental_oauth_recovery", version: 1 }, global: { state: "unknown-private-value" }, tables: {} });
+  fs.writeFileSync(malformedFile, malformedBytes);
+  const malformedHost = await open(loginRows, malformedRoot);
+  const malformedAgent = { id: SessionId("malformed-recovery"), session: malformedHost.sessions.create(SessionId("malformed-recovery")) };
+  assert.match((await malformedHost.commands.execute(malformedAgent, "/rental status", [], new AbortController().signal)).result.text, /可能已经签发授权/);
+  assert.equal((await malformedHost.commands.execute(malformedAgent, "/rental login", [], new AbortController().signal)).result.kind, "error");
+  assert.equal(calls, beforeStorageDenial);
+  assert.equal(fs.readFileSync(malformedFile, "utf8"), malformedBytes, "a malformed journal remains intact, not reset to clear");
+  await malformedHost.fiber.dispose(); running.delete(malformedHost);
+
+  const failedWriteHost = await open(loginRows);
+  const failedWriteAgent = { id: SessionId("recovery-write-failure"), session: failedWriteHost.sessions.create(SessionId("recovery-write-failure")) };
+  await failedWriteHost.commands.execute(failedWriteAgent, "/rental status", [], new AbortController().signal);
+  const failedWriteFile = path.join(storageRoots.get(failedWriteHost), "rental_oauth_recovery.json");
+  fs.mkdirSync(failedWriteFile);
+  assert.match((await failedWriteHost.commands.execute(failedWriteAgent, "/rental login", [], new AbortController().signal)).result.text, /可能已经签发授权/);
+  assert.equal((await failedWriteHost.commands.execute(failedWriteAgent, "/rental login", [], new AbortController().signal)).result.kind, "error");
+  assert.equal(calls, beforeStorageDenial, "failed durable reservation cannot reach discovery or the browser");
+  assert.equal(fs.statSync(failedWriteFile).isDirectory(), true);
+  await failedWriteHost.fiber.dispose(); running.delete(failedWriteHost);
+
+  const { RentalOAuthRecovery } = await import(stagedUrl + "dist/oauth-recovery.js");
+  async function recoveryHost() {
+    const storageRoot = fs.mkdtempSync(path.join(output, "recovery-drain-"));
+    const host = await open([{ insert: [
+      { id: "storage", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-storage")).href },
+      { id: "storage-json", name: pathToFileURL(storageFixture).href, config: { root: storageRoot } },
+      { id: "storage-domain", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-storage-domain")).href, config: { backend: "json" } },
+    ] }], false);
+    return { host, storageRoot, file: path.join(storageRoot, "rental_oauth_recovery.json") };
+  }
+  await t.test("recovery close drains an opening read and shares one disposal", async () => {
+    const { host, storageRoot } = await recoveryHost();
+    const reading = Promise.withResolvers(), releaseRead = Promise.withResolvers();
+    const events = [];
+    const remove = storageBoundary.setBoundary(storageRoot, {
+      async beforeLoad() { reading.resolve(); await releaseRead.promise; },
+      afterLoad() { events.push("read"); },
+    });
+    const recovery = new RentalOAuthRecovery();
+    const opening = recovery.open(host.get("storageDomain"));
+    let closing;
+    try {
+      await reading.promise;
+      closing = recovery.close().then(() => events.push("closed"));
+      assert.equal(recovery.available, false);
+      releaseRead.resolve();
+      await Promise.all([opening, closing]);
+      assert.deepEqual(events, ["read", "closed"], "close cannot finish while the backend read still owns the unit");
+      const next = new RentalOAuthRecovery();
+      await next.open(host.get("storageDomain"));
+      await next.close();
+    } finally {
+      releaseRead.resolve();
+      await opening.catch(() => {});
+      await closing;
+      await recovery.close();
+      remove(); await host.fiber.dispose(); running.delete(host);
+    }
+  });
+  for (const cancel of [true, false]) await t.test(`${cancel ? "cancelled" : "closed"} clear stays unresolved after late durability`, async () => {
+    const { host, storageRoot, file } = await recoveryHost();
+    const writing = Promise.withResolvers(), releaseClear = Promise.withResolvers();
+    const states = [];
+    const remove = storageBoundary.setBoundary(storageRoot, {
+      async beforeSet(value) {
+        states.push(value.state);
+        if (value.state === "clear") { writing.resolve(); await releaseClear.promise; }
+      },
+    });
+    const recovery = new RentalOAuthRecovery(), cancelled = new AbortController();
+    await recovery.open(host.get("storageDomain"));
+    await recovery.begin(new AbortController().signal);
+    const settling = recovery.settle(cancelled.signal);
+    const rejected = assert.rejects(settling, { code: "unknown" });
+    let closing;
+    try {
+      await writing.promise;
+      await assert.rejects(recovery.settle(new AbortController().signal), { code: "busy" });
+      if (cancel) {
+        cancelled.abort();
+        await rejected;
+        assert.equal(recovery.blocked, true);
+      }
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).global.state, "unresolved");
+      closing = recovery.close();
+      assert.equal(recovery.close(), closing, "all disposers share the in-flight drain");
+      releaseClear.resolve();
+      await rejected;
+      await closing;
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).global.state, "unresolved");
+      assert.deepEqual(states, ["unresolved", "clear", "unresolved"]);
+      assert.equal(recovery.close(), closing, "all disposers wait for the same owned drain");
+      const next = new RentalOAuthRecovery();
+      try {
+        await next.open(host.get("storageDomain"));
+        await assert.rejects(next.waitReady(new AbortController().signal), { code: "unknown" });
+      } finally { await next.close(); }
+    } finally {
+      cancelled.abort(); releaseClear.resolve();
+      await rejected; await closing; await recovery.close();
+      remove(); await host.fiber.dispose(); running.delete(host);
+    }
+  });
+
+  for (const failRepair of [false, true]) await t.test(`failed clear acknowledgement ${failRepair ? "reports failed compensation" : "restores unresolved"}`, async () => {
+    const { host, storageRoot, file } = await recoveryHost();
+    let unresolvedWrites = 0;
+    const remove = storageBoundary.setBoundary(storageRoot, {
+      beforeSet(value) {
+        if (value.state === "unresolved" && ++unresolvedWrites === 2 && failRepair) throw new Error("synthetic-repair-failure");
+      },
+      afterSet(value) { if (value.state === "clear") throw new Error("synthetic-lost-write-acknowledgement"); },
+    });
+    const recovery = new RentalOAuthRecovery();
+    try {
+      await recovery.open(host.get("storageDomain"));
+      await recovery.begin(new AbortController().signal);
+      await assert.rejects(recovery.settle(new AbortController().signal), { code: "unknown" });
+      assert.equal(recovery.blocked, true);
+      const closing = recovery.close();
+      if (failRepair) await assert.rejects(closing, { code: "unknown" });
+      else await closing;
+      assert.equal(unresolvedWrites, 2, "one compensation only, not a retry loop");
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).global.state, failRepair ? "clear" : "unresolved");
+      await assert.rejects(recovery.waitReady(new AbortController().signal), { code: "unavailable" });
+      remove();
+      const next = new RentalOAuthRecovery();
+      try { await next.open(host.get("storageDomain")); }
+      finally { await next.close(); }
+    } finally {
+      if (failRepair) await assert.rejects(recovery.close(), { code: "unknown" });
+      else await recovery.close();
+      remove(); await host.fiber.dispose(); running.delete(host);
+    }
+  });
+
+  let login = await open(loginRows);
+  let loginAgent = { id: SessionId("login-owner"), session: login.sessions.create(SessionId("login-owner")) };
+  const recoveryFile = host => path.join(storageRoots.get(host), "rental_oauth_recovery.json");
+  const recoveryState = host => JSON.parse(fs.readFileSync(recoveryFile(host), "utf8")).global.state;
   const wrongAgent = { id: SessionId("not-login-owner"), session: login.sessions.create(SessionId("not-login-owner")) };
   const loginInvoke = action => login.commands.execute(loginAgent, `/rental ${action}`, [], new AbortController().signal);
   const rentalGuidance = async scope => (await login.systemPrompt.assemble({ scope })).sections.filter(section => section.name === "mcp:rental-os" && section.text);
@@ -406,6 +610,7 @@ export default class extends Service {
     return status;
   }
   browserModule.setOpen(async target => {
+    assert.equal(recoveryState(login), "unresolved", "the real Host backend commits the marker before the browser is invoked");
     authorizationUrl = new URL(target);
     assert.equal(authorizationUrl.origin + authorizationUrl.pathname, oauthSettings.authorizationEndpoint);
     assert.equal(authorizationUrl.searchParams.get("code_challenge_method"), "S256");
@@ -462,9 +667,14 @@ export default class extends Service {
     issuer: asMetadata.issuer, authorizationEndpoint: oauthSettings.authorizationEndpoint,
     tokenEndpoint: oauthSettings.tokenEndpoint, revocationEndpoint: oauthSettings.revocationEndpoint,
     allowedScopes: oauthSettings.scopes, allowedOrigins: [], timeoutMs: 1000, maxMetadataBytes: 4096 }, { read: async () => asMetadata });
+  const protocolRequests = [];
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     wire.push(request);
+    if (request.url === configured[0].config.connection.resourceUrl && request.method === "POST") {
+      const body = await request.clone().json();
+      protocolRequests.push({ body, protocol: request.headers.get("mcp-protocol-version"), session: request.headers.get("mcp-session-id") });
+    }
     if (request.url === "https://auth.example.invalid/.well-known/oauth-authorization-server") return asMetadataHandle(request);
     if (request.url === oauthSettings.tokenEndpoint || request.url === oauthSettings.revocationEndpoint) return tokenHandle(request);
     return authenticatedEndpoint.fetch(request);
@@ -472,6 +682,19 @@ export default class extends Service {
   const loggedIn = await loginInvoke("login");
   assert.equal(loggedIn.result.kind, "success", loggedIn.result.text);
   assert.match(loggedIn.result.text, /当前会话完成 MCP 握手/);
+  const discoveryRequest = protocolRequests.find(request => request.body.method === "server/discover");
+  assert.ok(discoveryRequest, "the real SDK connects through the pinned modern discovery path");
+  const clientInfo = Object.values(discoveryRequest.body.params._meta).find(value => value && typeof value === "object" && value.name === "rental-os-harness");
+  assert.deepEqual(clientInfo, { name: "rental-os-harness", version: manifest.version }, "MCP client metadata follows the actual published Bundle version");
+  assert.equal(protocolRequests.some(request => request.body.method === "initialize"), false, "modern connect does not fall back to the legacy handshake");
+  assert.ok(protocolRequests.every(request => request.session === null), "modern requests do not create legacy protocol session credentials");
+  await t.test("missing Bundle version fails without reporting local metadata contents", async () => {
+    const file = path.join(staged, "package.json"), original = fs.readFileSync(file);
+    try {
+      fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(original.toString("utf8")), version: "", privateFixture: "private-package-marker" }));
+      await assert.rejects(import(stagedUrl + "dist/oauth-session.js?invalid-version"), error => error.message === "Rental Bundle metadata is unavailable");
+    } finally { fs.writeFileSync(file, original); }
+  });
   assert.equal(listener.routes.size, 0);
   const sections = await rentalGuidance(loginAgent);
   assert.equal(sections.length, 1);
@@ -501,10 +724,298 @@ export default class extends Service {
   assert.deepEqual(await rentalGuidance(loginAgent), []);
   assert.equal(wire.filter(request => request.url === oauthSettings.revocationEndpoint).length, 1);
   assert.match((await loginInvoke("status")).result.text, /已配置/);
+  assert.equal(recoveryState(login), "clear", "normal original revocation acceptance settles this live reservation");
+  for (const language of ["zh-CN", "en"]) for (const failCleanup of [false, true]) await t.test(`explicit AS denial remains human-only: ${language}, cleanup=${failCleanup}`, async () => {
+    const previousFetch = globalThis.fetch, previousBrowser = browserModule.opened;
+    const previousCallback = callbackHandler, previousBinding = originalCodeBinding;
+    const requests = [];
+    let host, acceptedDenial = false;
+    const denyAuthorization = transportSource("public-client-authorization-endpoint").createPublicClientAuthorizationEndpoint({ enabled: true,
+      issuer: asMetadata.issuer, authorizationEndpoint: oauthSettings.authorizationEndpoint,
+      resourceUrl: configured[0].config.connection.resourceUrl, allowedScopes: oauthSettings.scopes,
+      allowedOrigins: [], timeoutMs: 1000 }, { read: async () => tokenRegistration }, {
+      authorize: async () => ({ kind: "denied", error: "access_denied" }),
+    });
+    try {
+      host = await open(loginRows.map(row => row.id === "rental-os" ? { ...row, config: { ...row.config, language } } : row));
+      const id = SessionId(`explicit-denial-${language}-${failCleanup}`);
+      const agent = { id, session: host.sessions.create(id) };
+      const invokeDenied = action => host.commands.execute(agent, `/rental ${action}`, [], new AbortController().signal);
+      globalThis.fetch = async (input, init) => { requests.push(new Request(input, init)); return previousFetch(input, init); };
+      browserModule.setOpen(async target => {
+        assert.equal(recoveryState(host), "unresolved");
+        callbackHandler = listener.routes.get("/rental/callback").handler;
+        const response = await denyAuthorization(new Request(target, { headers: { Cookie: "original-web-fixture" } }));
+        assert.equal(response.status, 303);
+        const callback = new URL(response.headers.get("location"));
+        assert.equal(callback.searchParams.get("error"), "access_denied");
+        assert.equal(callback.searchParams.has("code"), false);
+        const wrongState = new URL(callback); wrongState.searchParams.set("state", "incorrect");
+        assert.equal(deliverCallback(wrongState), 400);
+        const wrongIssuer = new URL(callback); wrongIssuer.searchParams.set("iss", "https://different.invalid/");
+        assert.equal(deliverCallback(wrongIssuer), 400);
+        const mixed = new URL(callback); mixed.searchParams.set("code", "synthetic-private-code");
+        assert.equal(deliverCallback(mixed), 400);
+        callback.searchParams.set("error_description", "synthetic-private-denial-detail");
+        callback.searchParams.set("error_uri", "https://different.invalid/private-denial");
+        assert.equal(deliverCallback(callback), 204);
+        assert.equal(deliverCallback(callback), 410);
+        acceptedDenial = true;
+      });
+      listener.setFailClose(failCleanup);
+      const denied = await invokeDenied("login");
+      assert.equal(acceptedDenial, true, "the denial callback completed; swallowed browser assertions cannot satisfy this test");
+      assert.equal(denied.result.kind, "error");
+      assertPrivacyNotice(denied.result.text, language);
+      assert.equal(requests.some(request => request.url === oauthSettings.tokenEndpoint || request.url === oauthSettings.revocationEndpoint), false,
+        "validated denial does not exchange a code or invent a token to revoke");
+      assert.equal(listener.routes.size, 0);
+      assert.deepEqual(agent.session.deriveMessages(), []);
+      assert.doesNotMatch(JSON.stringify(agent.session.snapshotEvents()), /synthetic-private|private-denial|code_verifier|code_challenge|state=/);
+      if (failCleanup) {
+        assert.match(denied.result.text, language === "zh-CN" ? /可能已经签发授权/ : /authorization may have been issued/);
+        assert.doesNotMatch(denied.result.text, /明确拒绝本次授权请求|explicitly denied this request/);
+        assert.equal(recoveryState(host), "unresolved");
+        const beforeRetry = requests.length;
+        assert.equal((await invokeDenied("login")).result.kind, "error");
+        assert.equal(requests.length, beforeRetry, "cleanup uncertainty cannot become a safe reauthorization");
+      } else {
+        assert.match(denied.result.text, language === "zh-CN" ? /授权服务器明确拒绝本次授权请求/ : /authorization server explicitly denied this request/);
+        assert.equal(recoveryState(host), "clear");
+        assert.match((await invokeDenied("status")).result.text, language === "zh-CN" ? /已配置/ : /settings are present/);
+        assert.equal(requests.some(request => request.url === oauthSettings.tokenEndpoint), false, "status cannot restart the denied login");
+        browserModule.setOpen(async target => {
+          callbackHandler = listener.routes.get("/rental/callback").handler;
+          const response = await authorizationHandle(new Request(target, { headers: { Cookie: "original-web-fixture" } }));
+          assert.equal(response.status, 303);
+          assert.equal(deliverCallback(new URL(response.headers.get("location"))), 204);
+        });
+        assert.equal((await invokeDenied("login")).result.kind, "success", "only a new explicit human command starts another authorization");
+        assert.equal(requests.filter(request => request.url === oauthSettings.tokenEndpoint).length, 1);
+        assert.equal((await invokeDenied("disconnect")).result.kind, "success");
+      }
+    } finally {
+      listener.setFailClose(false);
+      try { if (host) { await host.fiber.dispose(); running.delete(host); } }
+      finally {
+        globalThis.fetch = previousFetch; browserModule.setOpen(previousBrowser);
+        callbackHandler = previousCallback; originalCodeBinding = previousBinding;
+      }
+    }
+  });
+  await t.test("pinned modern MCP refusal never falls back or publishes an uncertain connection", async () => {
+    for (const language of ["zh-CN", "en"]) {
+      const assertProtocolFeedback = text => {
+        assert.match(text, language === "zh-CN" ? /不支持本插件固定协议（2026-07-28）/ : /does not support this plugin's fixed protocol \(2026-07-28\)/);
+        assert.match(text, language === "zh-CN" ? /服务管理员核对服务端与插件支持版本/ : /service administrator to verify the supported server and plugin versions/);
+        assert.match(text, language === "zh-CN" ? /不要启用旧协议回退/ : /do not enable a legacy fallback/);
+        assertPrivacyNotice(text, language);
+      };
+      const previousFetch = globalThis.fetch, previousBrowser = browserModule.opened;
+      const previousCallback = callbackHandler, previousBinding = originalCodeBinding;
+      const requests = [];
+      let refusedHost, refusalReplies = 0;
+      try {
+        globalThis.fetch = async (input, init) => {
+          const request = new Request(input, init);
+          const body = request.url === configured[0].config.connection.resourceUrl && request.method === "POST"
+            ? await request.clone().json() : undefined;
+          requests.push({ url: request.url, method: request.method, body, session: request.headers.get("mcp-session-id"),
+            expectedBearer: request.headers.get("authorization") === "Bearer synthetic-access" });
+          if (body?.method === "server/discover" && request.headers.has("authorization")) {
+            refusalReplies++;
+            return Response.json({ jsonrpc: "2.0", id: body.id, error: { code: -32022,
+              message: "synthetic-private-protocol-detail", data: { supported: ["2025-11-25"], requested: "2026-07-28" } } }, { status: 400 });
+          }
+          if (request.url === "https://auth.example.invalid/.well-known/oauth-authorization-server") return asMetadataHandle(request);
+          if (request.url === oauthSettings.tokenEndpoint || request.url === oauthSettings.revocationEndpoint) return tokenHandle(request);
+          return authenticatedEndpoint.fetch(request);
+        };
+        refusedHost = await open(loginRows.map(row => row.id === "rental-os" ? { ...row, config: { ...row.config, language } } : row));
+        const refusalRoot = storageRoots.get(refusedHost);
+        assert.notEqual(refusalRoot, storageRoots.get(login), "this refusal owns a separate recovery root");
+        const refusedId = SessionId(`pin-refusal-owner-${language}`);
+        const refusedAgent = { id: refusedId, session: refusedHost.sessions.create(refusedId) };
+        const invokeRefused = action => refusedHost.commands.execute(refusedAgent, `/rental ${action}`, [], new AbortController().signal);
+        browserModule.setOpen(async target => {
+          assert.equal(recoveryState(refusedHost), "unresolved");
+          callbackHandler = listener.routes.get("/rental/callback").handler;
+          const authorized = await authorizationHandle(new Request(target, { headers: { Cookie: "original-web-fixture" } }));
+          assert.equal(authorized.status, 303);
+          assert.equal(deliverCallback(authorized.headers.get("location")), 204);
+        });
+        const rejected = await invokeRefused("login");
+        assert.equal(rejected.result.kind, "error");
+        assertProtocolFeedback(rejected.result.text);
+        assert.match(rejected.result.text, language === "zh-CN" ? /可能已经签发授权/ : /authorization may have been issued/);
+        const refusalStatus = await invokeRefused("status");
+        assertProtocolFeedback(refusalStatus.result.text);
+        assert.match(refusalStatus.result.text, language === "zh-CN" ? /可能已经签发授权/ : /authorization may have been issued/);
+        const strangerId = SessionId(`pin-refusal-stranger-${language}`);
+        const stranger = { id: strangerId, session: refusedHost.sessions.create(strangerId) };
+        const strangerStatus = await refusedHost.commands.execute(stranger, "/rental status", [], new AbortController().signal);
+        assert.match(strangerStatus.result.text, language === "zh-CN" ? /另一个会话/ : /another session/);
+        assert.doesNotMatch(strangerStatus.result.text, /固定协议|fixed protocol/);
+        assert.equal(recoveryState(refusedHost), "unresolved");
+        const unresolvedBytes = fs.readFileSync(recoveryFile(refusedHost));
+        const refusedGuidance = () => refusedHost.systemPrompt.assemble({ scope: refusedAgent });
+        assert.deepEqual((await refusedGuidance()).sections.filter(section => section.name === "mcp:rental-os" && section.text), []);
+        assert.equal(refusedHost.get("tools"), undefined);
+        const probes = requests.filter(request => request.body?.method === "server/discover");
+        assert.equal(probes.length, 1, "the real SDK rejects the old-only offer without a second probe");
+        assert.equal(refusalReplies, 1, "the refusal fixture actually returned the protocol error, not a network failure");
+        assert.equal(probes[0].expectedBearer, true);
+        assert.equal(probes[0].body.params._meta["io.modelcontextprotocol/protocolVersion"], "2026-07-28");
+        assert.equal(requests.filter(request => request.url === oauthSettings.tokenEndpoint).length, 1);
+        assert.ok(requests.every(request => request.session === null));
+        assert.equal(requests.some(request => ["initialize", "notifications/initialized", "tools/list", "tools/call"].includes(request.body?.method)), false);
+        assert.equal(listener.routes.size, 0, "failed negotiation still releases its one-shot callback");
+        const beforeRetry = requests.length;
+        for (const action of ["check", "login"]) {
+          const blocked = await invokeRefused(action);
+          assert.equal(blocked.result.kind, "error");
+          assertProtocolFeedback(blocked.result.text);
+        }
+        assert.equal(requests.length, beforeRetry, "unknown cannot renegotiate or exchange another code");
+        assert.deepEqual(fs.readFileSync(recoveryFile(refusedHost)), unresolvedBytes);
+        // The code exchange already issued credentials. Revocation acceptance
+        // cannot erase the original uncertainty established by failed connect.
+        const refusalDisconnect = await invokeRefused("disconnect");
+        assert.equal(refusalDisconnect.result.kind, "error");
+        assertProtocolFeedback(refusalDisconnect.result.text);
+        assert.match(refusalDisconnect.result.text, language === "zh-CN" ? /远端 grant 撤销尚未确认/ : /Remote grant revocation is not confirmed/);
+        assert.equal(requests.filter(request => request.url === oauthSettings.revocationEndpoint).length, 1);
+        const afterDisconnect = await invokeRefused("status");
+        assertProtocolFeedback(afterDisconnect.result.text);
+        assert.match(afterDisconnect.result.text, language === "zh-CN" ? /可能已经签发授权/ : /authorization may have been issued/);
+        assert.deepEqual(refusedAgent.session.deriveMessages(), [], "compatibility feedback is human/log-only");
+        assert.deepEqual(fs.readFileSync(recoveryFile(refusedHost)), unresolvedBytes);
+        assert.doesNotMatch(JSON.stringify(refusedAgent.session.snapshotEvents()),
+          /synthetic-private-protocol-detail|synthetic-(?:code|access|refresh)|code_verifier|code_challenge|state=/);
+        await refusedHost.fiber.dispose();
+        running.delete(refusedHost);
+        assert.deepEqual(fs.readFileSync(recoveryFile(refusedHost)), unresolvedBytes);
+        assert.equal(requests.length, beforeRetry + 1, "disposal does not reissue the grant or repeat an accepted revoke");
+        refusedHost = undefined;
+        refusedHost = await open(loginRows.map(row => row.id === "rental-os" ? { ...row, config: { ...row.config, language } } : row), refusalRoot);
+        const restoredId = SessionId(`pin-refusal-restored-${language}`);
+        const restoredAgent = { id: restoredId, session: refusedHost.sessions.create(restoredId) };
+        for (const action of ["status", "check", "login"]) {
+          const restored = await refusedHost.commands.execute(restoredAgent, `/rental ${action}`, [], new AbortController().signal);
+          assert.match(restored.result.text, language === "zh-CN" ? /可能已经签发授权/ : /authorization may have been issued/);
+          assert.doesNotMatch(restored.result.text, /固定协议|fixed protocol/, "the recovery marker cannot reconstruct an in-memory protocol diagnosis");
+        }
+        assert.equal(requests.length, beforeRetry + 1, "a fresh Loader keeps unresolved without a new probe or login");
+        await refusedHost.fiber.dispose();
+        running.delete(refusedHost);
+        refusedHost = undefined;
+      } finally {
+        try {
+          if (refusedHost) { await refusedHost.fiber.dispose(); running.delete(refusedHost); }
+        } finally {
+          globalThis.fetch = previousFetch;
+          browserModule.setOpen(previousBrowser);
+          callbackHandler = previousCallback;
+          originalCodeBinding = previousBinding;
+        }
+      }
+    }
+  });
+  for (const scenario of ["accepted", "revoke-failed", "pending-exchange"]) await t.test(`plain OAuth follows real Agent disposal: ${scenario}`, async () => {
+    const previousFetch = globalThis.fetch, previousBrowser = browserModule.opened;
+    const previousCallback = callbackHandler, previousBinding = originalCodeBinding;
+    const requests = [], exchangeStarted = Promise.withResolvers(), releaseExchange = Promise.withResolvers();
+    const revocationStarted = Promise.withResolvers();
+    let host, handle, otherHandle, tokenSignal;
+    try {
+      host = await open([...loginRows, { insert: [
+        { id: "tools", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-tools")).href, config: { mode: "native" } },
+        { id: "agents", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-agent")).href },
+        { id: "llm", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-llm")).href },
+        { id: "session-projection", name: pathToFileURL(loopPackage.resolve("@deepseek-ai/dsh-session-projection")).href },
+        { id: "agent-loop", name: pathToFileURL(loopPackage.resolve("@deepseek-ai/dsh-agent-loop")).href, config: { agents: [] } },
+      ] }]);
+      handle = await host.agents.create({ sessionId: SessionId(`plain-owner-${scenario}`), agentOptions: {} });
+      otherHandle = await host.agents.create({ sessionId: SessionId(`plain-other-${scenario}`), agentOptions: {} });
+      const invokePlain = (action, agent = handle.agent) => host.commands.execute(agent, `/rental ${action}`, [], new AbortController().signal);
+      browserModule.setOpen(async target => {
+        assert.equal(recoveryState(host), "unresolved");
+        callbackHandler = listener.routes.get("/rental/callback").handler;
+        const authorized = await authorizationHandle(new Request(target, { headers: { Cookie: "original-web-fixture" } }));
+        assert.equal(authorized.status, 303);
+        assert.equal(deliverCallback(new URL(authorized.headers.get("location"))), 204);
+      });
+      globalThis.fetch = async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (request.url === oauthSettings.tokenEndpoint && scenario === "pending-exchange") {
+          tokenSignal = request.signal;
+          exchangeStarted.resolve();
+          return releaseExchange.promise;
+        }
+        if (request.url === oauthSettings.revocationEndpoint) {
+          revocationStarted.resolve();
+          if (scenario === "revoke-failed") return new Response(null, { status: 503 });
+        }
+        return previousFetch(input, init);
+      };
+      const loggingIn = invokePlain("login");
+      if (scenario === "pending-exchange") {
+        await Promise.race([exchangeStarted.promise, loggingIn.then(result => assert.fail(`login ended before the exchange barrier: ${result.result.kind}`))]);
+        await handle.dispose();
+        assert.equal(tokenSignal.aborted, true, "destroying the real owner cancels its pending exchange, not merely the model loop");
+        assert.equal((await loggingIn).result.kind, "error");
+        releaseExchange.resolve(Response.json({ access_token: "synthetic-late-owner-access", token_type: "Bearer", expires_in: 60 }));
+        await releaseExchange.promise;
+        assert.equal(requests.filter(request => request.url === oauthSettings.revocationEndpoint).length, 0, "an unreceived token cannot be invented for revocation");
+      } else {
+        const result = await loggingIn;
+        assert.equal(result.result.kind, "success", result.result.text);
+        assert.equal(host.tools.schemas(handle.agent).some(tool => tool.name.startsWith("mcp__rental_os__")), false,
+          "the original AgentLoop's Tools dependency does not register a Rental consumer");
+        const beforeOtherDisposal = requests.length;
+        await otherHandle.dispose();
+        assert.equal(requests.length, beforeOtherDisposal, "another Agent's disposal cannot close the exact owner's connection");
+        assert.match((await invokePlain("status")).result.text, /当前会话完成 MCP 握手/);
+        await handle.dispose();
+        const sections = await host.systemPrompt.assemble({ scope: handle.agent });
+        assert.equal(sections.sections.some(section => section.name === "mcp:rental-os" && section.text), false,
+          "actual Agent disposal withdraws local guidance before async revocation settles");
+        // Original AgentHandle disposal emits, but does not await, async listeners.
+        // Observe its automatic revoke before joining that same owned drain.
+        await revocationStarted.promise;
+        assert.equal((await invokePlain("disconnect")).result.kind, scenario === "accepted" ? "success" : "error");
+        assert.equal(requests.filter(request => request.url === oauthSettings.revocationEndpoint).length, 1, "one owner sends one original revocation after actual Agent disposal");
+      }
+      assert.equal(host.agents.get(handle.agent.id), undefined);
+      assert.equal(listener.routes.size, 0);
+      assert.equal(recoveryState(host), scenario === "accepted" ? "clear" : "unresolved");
+      const status = await invokePlain("status");
+      assert.match(status.result.text, scenario === "accepted" ? /已配置/ : /可能已经签发授权/);
+      const beforeReuse = requests.length;
+      assert.equal((await invokePlain("login")).result.kind, "error", "a disposed Agent cannot obtain a new connection");
+      assert.equal(requests.length, beforeReuse);
+      await handle.dispose();
+      assert.equal(requests.length, beforeReuse, "repeated Agent disposal does not repeat OAuth");
+      assert.deepEqual(handle.agent.session.deriveMessages(), []);
+      assert.doesNotMatch(JSON.stringify(handle.agent.session.snapshotEvents()), /synthetic-(?:code|access|refresh|late-owner-access)|code_verifier/);
+    } finally {
+      releaseExchange.resolve(Response.json({ access_token: "synthetic-late-owner-access", token_type: "Bearer", expires_in: 60 }));
+      try {
+        await handle?.dispose(); await otherHandle?.dispose();
+        if (host) { await host.fiber.dispose(); running.delete(host); }
+      } finally {
+        globalThis.fetch = previousFetch;
+        browserModule.setOpen(previousBrowser);
+        callbackHandler = previousCallback; originalCodeBinding = previousBinding;
+      }
+    }
+  });
   t.after(() => listener.setFailClose(false));
   listener.setFailClose(true);
   const failedCallbackClose = await loginInvoke("login");
   assert.equal(failedCallbackClose.result.kind, "error");
+  assert.doesNotMatch(failedCallbackClose.result.text, /固定协议|fixed protocol/, "callback cleanup failure is not a protocol diagnosis");
   assert.match((await loginInvoke("status")).result.text, /可能已经签发授权/,
     "failed callback cleanup cannot leave a usable connected identity after a failed login");
   assert.deepEqual(await rentalGuidance(loginAgent), []);
@@ -516,12 +1027,31 @@ export default class extends Service {
   assert.equal((await loginInvoke("disconnect")).result.kind, "error", "revocation acceptance does not erase cleanup uncertainty");
   assert.equal(wire.at(-1).url, oauthSettings.revocationEndpoint, "known credentials remain available only for original revocation");
   assert.doesNotMatch(JSON.stringify(loginAgent.session.snapshotEvents()), /synthetic-private-callback-close|synthetic-refresh/);
-  // Reload explicitly creates a new instance; it does not reconcile the previous
-  // unknown grant. No new login is issued here until this test continues below.
+  const unresolvedRoot = storageRoots.get(login), unresolvedBytes = fs.readFileSync(recoveryFile(login));
+  assert.equal(recoveryState(login), "unresolved");
   const loginEntry = [...login.loader.entries()].find(entry => entry.options?.id === "rental-os");
   await loginEntry.update({ config: { ...loginEntry.options.config,
     login: { ...loginEntry.options.config.login, sessionLifetimeMs: 119000 } } });
   await login.loader.await(); await loginEntry.fiber.await();
+  const beforeReloadLogin = wire.length;
+  assert.match((await loginInvoke("status")).result.text, /可能已经签发授权/);
+  assert.equal((await loginInvoke("login")).result.kind, "error");
+  assert.equal((await loginInvoke("disconnect")).result.kind, "error");
+  assert.equal(wire.length, beforeReloadLogin, "reload cannot clear uncertainty or send another authorization request");
+  assert.deepEqual(fs.readFileSync(recoveryFile(login)), unresolvedBytes);
+  await login.fiber.dispose(); running.delete(login);
+  const restoredHost = await open(loginRows, unresolvedRoot);
+  const restoredAgent = { id: SessionId("restored-oauth-owner"), session: restoredHost.sessions.create(SessionId("restored-oauth-owner")) };
+  assert.match((await restoredHost.commands.execute(restoredAgent, "/rental status", [], new AbortController().signal)).result.text, /可能已经签发授权/);
+  assert.equal((await restoredHost.commands.execute(restoredAgent, "/rental login", [], new AbortController().signal)).result.kind, "error");
+  assert.equal(wire.length, beforeReloadLogin, "a fresh Loader and Session reading the same durable store remain blocked");
+  assert.deepEqual(fs.readFileSync(recoveryFile(restoredHost)), unresolvedBytes);
+  assert.doesNotMatch(unresolvedBytes.toString("utf8"), /synthetic-|token|client|subject|code|verifier|https/);
+  await restoredHost.fiber.dispose(); running.delete(restoredHost);
+  // Refresh uses a separate external authorization scenario and private profile,
+  // not a new attempt to reconcile the unresolved grant above.
+  login = await open(loginRows);
+  loginAgent = { id: SessionId("refresh-owner"), session: login.sessions.create(SessionId("refresh-owner")) };
   // Use the original clock only to advance token expiry deterministically; no sleep.
   const realNow = Date.now;
   let clock = realNow();
@@ -583,6 +1113,52 @@ export default class extends Service {
   };
   assert.equal((await loginInvoke("disconnect")).result.kind, "success");
   Date.now = realNow;
+
+  await t.test("request cancellation reaches the shared refresh without a late MCP dispatch", async () => {
+    const previousLogin = login, previousAgent = loginAgent, previousFetch = globalThis.fetch;
+    const started = Promise.withResolvers(), late = Promise.withResolvers(), drained = Promise.withResolvers();
+    let refreshSignal, refreshCount = 0, mcpCount = 0, lateBodyCancelled = false;
+    try {
+      login = await open(loginRows);
+      loginAgent = { id: SessionId("cancelled-refresh-owner"), session: login.sessions.create(SessionId("cancelled-refresh-owner")) };
+      globalThis.fetch = normalFetch;
+      assert.equal((await loginInvoke("login")).result.kind, "success");
+      clock = realNow() + 61_000; Date.now = () => clock;
+      globalThis.fetch = async (input, init) => {
+        if (String(input) === oauthSettings.tokenEndpoint) {
+          refreshCount++; refreshSignal = init.signal; started.resolve();
+          const response = await late.promise; drained.resolve(); return response;
+        }
+        if (String(input) === configured[0].config.connection.resourceUrl) mcpCount++;
+        return normalFetch(input, init);
+      };
+      const cancel = new AbortController();
+      const check = login.commands.execute(loginAgent, "/rental check", [], cancel.signal);
+      const outcome = check.then(value => value, error => error);
+      await Promise.race([started.promise, outcome.then(() => assert.fail("check ended before refresh"))]);
+      const other = loginInvoke("check");
+      cancel.abort();
+      const result = await outcome;
+      assert.ok(result.name === "AbortError" || result.result?.kind === "error");
+      assert.equal((await other).result.kind, "error");
+      assert.equal(refreshSignal.aborted, true, "refresh inherits the initiating request cancellation, not only connection lifetime");
+      assert.equal(refreshCount, 1); assert.equal(mcpCount, 0);
+      late.resolve(new Response(new ReadableStream({ cancel() { lateBodyCancelled = true; } })));
+      await drained.promise;
+      // Yield only to the owned late-response cleanup, without a clock sleep.
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(lateBodyCancelled, true);
+      assert.match((await loginInvoke("status")).result.text, /可能已经签发授权/);
+      assert.equal((await loginInvoke("check")).result.kind, "error");
+      assert.equal(refreshCount, 1); assert.equal(mcpCount, 0, "late refresh cannot send the cancelled or concurrent request");
+      assert.equal(recoveryState(login), "unresolved");
+      assert.doesNotMatch(JSON.stringify(loginAgent.session.snapshotEvents()), /synthetic-(?:access|refresh)|rotated-refresh/);
+    } finally {
+      late.resolve(new Response(null)); Date.now = realNow;
+      await login.fiber.dispose(); running.delete(login);
+      login = previousLogin; loginAgent = previousAgent; globalThis.fetch = previousFetch;
+    }
+  });
 
   // Token exchange may commit remotely while the Host cancels. Do not retry it,
   // accept its late token, or announce remote revocation without a known token.
@@ -665,7 +1241,7 @@ export default class extends Service {
   let promptText = "Optional template, not an instruction loaded by the Host.";
   let promptFailure = false;
   let changePromptReply;
-  let changeToolsReply;
+  let changeToolsReply, holdToolsList;
   let holdPrompt;
   let resourcePublished = true, resourceVersion = "resource-v1", resourceText = "Released original reference, not approval or execution.";
   let resourceReads = 0, resourceLists = 0, holdResource, changeResourceReply;
@@ -722,7 +1298,7 @@ export default class extends Service {
     accounting: { withRead: async (_auth, _descriptor, consume) => consume() },
     release: { project: async (_auth, _descriptor, value) => ({ version: resourceVersion, text: value.text }) },
   } });
-  t.after(async () => { holdPrompt?.release.resolve(); holdResource?.release.resolve(); await readsEndpoint.close(); });
+  t.after(async () => { holdToolsList?.release.resolve(); holdPrompt?.release.resolve(); holdResource?.release.resolve(); await readsEndpoint.close(); });
   const bridge = await open([
     { insert: [
       { id: "system-prompt", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-system-prompt")).href },
@@ -780,6 +1356,9 @@ export default class extends Service {
       changeResourceReply(reply.result, JSON.parse(init.body).method);
       return Response.json(reply);
     }
+    if (holdToolsList && request.method === "POST" && JSON.parse(init.body).method === "tools/list") {
+      const held = holdToolsList; held.started.resolve(); await held.release.promise;
+    }
     if (changeToolsReply && request.method === "POST" && JSON.parse(init.body).method === "tools/list") {
       const reply = await response.json();
       changeToolsReply(reply.result);
@@ -787,13 +1366,20 @@ export default class extends Service {
     }
     return response;
   };
-  assert.equal((await human("login")).result.kind, "success");
+  const publicationCopy = {
+    zh: "Rental OAuth 和 MCP 握手已完成，但最近一次完整同步没有找到配置内可注册的只读工具；本插件未启用任何 Rental 业务工具。请在可信 Rental 页面核对已发布能力与授权，变更后用 /rental check 同步，不要通过重复登录判断业务就绪",
+    en: "Rental OAuth and the MCP handshake succeeded, but the last complete synchronization found no configured read tool to register. No Rental business tool is enabled by this plugin. Check published capabilities and authorization in trusted Rental pages; after they change, use /rental check to synchronize, not repeated login to establish business readiness.",
+  };
+  const bridgeLogin = await human("login");
+  assert.equal(bridgeLogin.result.kind, "success");
+  assert.match(bridgeLogin.result.text, /最近一次完整同步已在本地注册配置内/);
+  assert.match(bridgeLogin.result.text, /这不证明当前业务访问权/);
   assert.deepEqual(bridge.tools.schemas(owner).map(tool => tool.name), [publicName]);
   assert.deepEqual(bridge.tools.schemas(stranger), []);
   const { LlmAdapter, createUserMessage, createSystemMessage, markAgentLoopRequest } = await import(pathToFileURL(cli.resolve("@deepseek-ai/dsh-llm")).href);
-  let modelDispatches = 0;
+  let modelDispatches = 0, lastModelOptions;
   bridge.llm.registerAdapter(["synthetic-model-provider"], new class extends LlmAdapter {
-    async *stream() { modelDispatches++; yield { type: "finish", reason: { kind: "stop" } }; }
+    async *stream(options) { lastModelOptions = options; modelDispatches++; yield { type: "finish", reason: { kind: "stop" } }; }
   }());
   const message = createUserMessage({ source: { kind: "user" }, content: [{ type: "text", text: "界".repeat(90000) }] });
   const materialRequest = { provider: "synthetic-model-provider", model: "synthetic-model", messages: [message], tools: bridge.tools.schemas(owner) };
@@ -816,6 +1402,49 @@ export default class extends Service {
   assert.equal(modelDispatches, 3, "exact serialized neutral byte limit remains valid");
   await assert.rejects(() => bridge.agents.withInitiator(owner, () => collectModel({ ...exactRequest, system: exactRequest.system + "x" })), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE");
   assert.equal(modelDispatches, 3);
+  await t.test("Rental file occurrences are bounded after original Host handle projection", async () => {
+    const { projectFilesToText } = await import(pathToFileURL(cli.resolve("@deepseek-ai/dsh-llm")).href);
+    const { admitModelMaterial } = await import(stagedUrl + "dist/model-material.js");
+    const attachment = { attachmentId: `sha256:${"ab".repeat(32)}`, name: '账目\n".txt', bytes: 3 };
+    const fileBlock = { type: "file", attachment };
+    const handle = bridge.llm.fileRequestText(attachment);
+    assert.match(handle, /current execution environment cannot access a readable path/);
+    const fileRequest = { ...boundedRequest, messages: [createUserMessage({ source: { kind: "user" }, content: [fileBlock] })] };
+    // This real profile has no attachment path provider. The public Host projection
+    // is the oracle; even inaccessible handles contribute text for each occurrence.
+    const project = options => ({ ...options, messages: projectFilesToText(options.messages, () => undefined) });
+    const extraBytes = neutralBytes({ type: "text", text: handle }) + 1;
+    const count = Math.floor((262144 - neutralBytes(project(fileRequest))) / extraBytes) + 2;
+    const repeated = { ...fileRequest, messages: [{ ...fileRequest.messages[0], content: Array.from({ length: count }, () => fileBlock) }] };
+    const before = modelDispatches, inputBefore = structuredClone(repeated), logBefore = JSON.stringify(owner.session.snapshotEvents());
+    assert.ok(neutralBytes(repeated) < 262144);
+    assert.ok(neutralBytes(project(repeated)) > 262144);
+    await assert.rejects(() => bridge.agents.withInitiator(owner, () => collectModel(repeated)), { code: "RENTAL_MATERIAL_UNAVAILABLE" });
+    assert.equal(modelDispatches, before, "raw small references cannot reach the adapter with oversized handles");
+    assert.deepEqual(repeated, inputBefore);
+    assert.equal(JSON.stringify(owner.session.snapshotEvents()), logBefore, "accounting does not inject projected text into the log");
+
+    const exact = { ...fileRequest, messages: [{ ...fileRequest.messages[0], content: [fileBlock, fileBlock] }], system: "界" };
+    exact.system += "x".repeat(262144 - neutralBytes(project(exact)));
+    assert.equal(neutralBytes(project(exact)), 262144);
+    assert.ok(neutralBytes(exact) < 262144);
+    const exactBefore = structuredClone(exact);
+    await bridge.agents.withInitiator(owner, () => collectModel(exact));
+    assert.equal(modelDispatches, before + 1);
+    assert.deepEqual(lastModelOptions.messages[0].content, [{ type: "text", text: handle }, { type: "text", text: handle }]);
+    assert.deepEqual(exact, exactBefore);
+    await assert.rejects(() => collectModel({ ...exact, system: exact.system + "x" }), { code: "RENTAL_MATERIAL_UNAVAILABLE" });
+    await assert.rejects(() => collectModel({ ...exact, system: exact.system + "界" }), { code: "RENTAL_MATERIAL_UNAVAILABLE" });
+    assert.equal(modelDispatches, before + 1);
+
+    let resolutions = 0;
+    const oversizedOriginal = { ...fileRequest, messages: [{ ...fileRequest.messages[0], content: [{ type: "file", attachment: { ...attachment, name: "x".repeat(262144) } }] }] };
+    assert.throws(() => admitModelMaterial(oversizedOriginal, "bounded rejection", () => { resolutions++; return "small"; }), { code: "RENTAL_MATERIAL_UNAVAILABLE" });
+    assert.equal(resolutions, 0, "a smaller projection cannot bypass the original full request bound");
+    assert.throws(() => admitModelMaterial(fileRequest, "bounded rejection", () => { throw new Error("private-resolver-detail"); }), error => error.code === "RENTAL_MATERIAL_UNAVAILABLE" && !error.message.includes("private-resolver-detail"));
+    await bridge.agents.withInitiator(stranger, () => collectModel({ ...repeated, tools: [] }));
+    assert.equal(modelDispatches, before + 2, "unrelated personal requests retain the Host's file projection behavior");
+  });
   const delivered = await execute(owner);
   assert.equal(delivered.isError, false);
   assert.deepEqual(delivered.value.structuredContent, { answer: "bounded facts" });
@@ -840,21 +1469,46 @@ export default class extends Service {
   publishedRead = false;
   assert.equal((await execute(owner)).isError, true, "cached registration is still refused at the server");
   assert.equal(actualReads, 1);
-  assert.equal((await human("check")).result.kind, "success");
+  const emptyCheck = await human("check");
+  assert.equal(emptyCheck.result.kind, "success");
+  assert.equal(emptyCheck.result.text.split("\n\n")[0], publicationCopy.zh);
   assert.equal(bridge.tools.get(publicName, owner), undefined);
+  const beforeEmptyStatus = { requests: resourceRequests, reads: actualReads, models: modelDispatches };
+  const emptyStatus = await human("status");
+  assert.equal(emptyStatus.result.text, emptyCheck.result.text);
+  assert.ok(owner.session.snapshotEvents().some(event => event.type === "command/done" && event.data.text === emptyStatus.result.text));
+  assert.deepEqual({ requests: resourceRequests, reads: actualReads, models: modelDispatches }, beforeEmptyStatus, "local status does not discover, read or dispatch a model");
   publishedRead = true;
   // The endpoint captures fixed definitions. Change only this owned wire reply
   // to exercise a Host-incompatible future publication, not the old source object.
   changeToolsReply = result => { result.tools[0].inputSchema.properties.query.minLength = 1; };
   assert.equal((await human("check")).result.kind, "error", "unsupported Host schema constraints fail closed rather than being stripped");
   assert.equal(bridge.tools.get(publicName, owner), undefined);
+  const afterFailedSync = resourceRequests;
+  assert.match((await human("status")).result.text, /Rental 只读能力暂不可用/);
+  assert.equal(resourceRequests, afterFailedSync, "failed synchronization is not a verified empty or published generation");
   changeToolsReply = undefined;
   assert.equal((await human("check")).result.kind, "success");
+  await t.test("human status distinguishes pending discovery from a complete local tool generation", async () => {
+    const held = { started: Promise.withResolvers(), release: Promise.withResolvers() }; holdToolsList = held;
+    const checking = human("check");
+    try {
+      await held.started.promise;
+      assert.equal(bridge.tools.get(publicName, owner), undefined);
+      const beforeStatus = resourceRequests;
+      assert.match((await human("status")).result.text, /Rental 只读能力暂不可用/);
+      assert.equal(resourceRequests, beforeStatus);
+    } finally { holdToolsList = undefined; held.release.resolve(); }
+    assert.equal((await checking).result.kind, "success");
+    const beforeStatus = resourceRequests;
+    assert.match((await human("status")).result.text, /最近一次完整同步已在本地注册配置内/);
+    assert.equal(resourceRequests, beforeStatus);
+  });
   const stale = bridge.tools.get(publicName, owner);
   holdRead = true;
   const reading = new Promise(resolve => { readStarted = resolve; });
   const inFlight = execute(owner);
-  await reading;
+  await Promise.race([reading, inFlight.then(result => assert.fail(`read ended before fixture barrier: ${JSON.stringify(result)}`))]);
   assert.equal((await human("disconnect")).result.kind, "success");
   assert.equal(bridge.tools.get(publicName, owner), undefined);
   readRelease();
@@ -901,7 +1555,9 @@ export default class extends Service {
   }());
   const loopHandle = await bridge.agents.create({ sessionId: SessionId("real-loop-rental"), agentOptions: { provider: "synthetic-loop-model", model: "synthetic-model" } });
   const loopAgent = loopHandle.agent;
-  assert.equal((await bridge.commands.execute(loopAgent, "/rental login", [], new AbortController().signal)).result.kind, "success");
+  const loopLogin = await bridge.commands.execute(loopAgent, "/rental login", [], new AbortController().signal);
+  assert.equal(loopLogin.result.kind, "success");
+  assertPrivacyNotice(loopLogin.result.text, "zh-CN");
   loopAgent.followup(createUserMessage({ source: { kind: "user" }, content: [{ type: "text", text: "Read the released test facts." }] }));
   await loopAgent.whenIdle();
   assert.equal(loopRequests.length, 2, "real loop calls the MCP tool then sends its released result to the next model request");
@@ -910,7 +1566,9 @@ export default class extends Service {
   assert.match(JSON.stringify(loopRequests[1].messages), /released loop fact/);
   assert.equal(promptReads, 0, "optional MCP Prompts do not become required or automatically adopted by the Rental tool bridge");
   assert.doesNotMatch(JSON.stringify(loopRequests), /Optional template, not an instruction/);
+  assert.doesNotMatch(JSON.stringify(loopRequests), /Rental 使用提醒：|Rental privacy notice:|最近一次完整同步|last complete synchronization/, "human connection and publication status never become system instructions or model input");
   const recorded = loopAgent.session.snapshotEvents();
+  assert.ok(recorded.some(event => event.type === "command/done" && event.data.text === loopLogin.result.text));
   assert.ok(recorded.some(event => event.type === "tool/result"));
   assert.ok(recorded.some(event => event.type === "request/header"));
   assert.ok(recorded.some(event => event.type === "system/message" && JSON.stringify(event.data).includes("reviewed-loop-v1")));
@@ -1109,6 +1767,9 @@ export default class extends Service {
   }
   async function releaseResourceRead(held) {
     await held.stopped.promise; held.release.resolve(); await held.settled.promise; holdResource = undefined;
+    // Command cancellation can return before its original maintenance operation
+    // drains. A new selection must not race that still-owned busy claim.
+    await loopAgent.whenIdle();
   }
   holdResourceRead();
   const resourceAbort = new AbortController(), resourceSelection = promptCommand("resource original_reference", resourceAbort.signal);
@@ -1209,7 +1870,19 @@ export default class extends Service {
   // Restoring the factory does not revive Agents disposed with its model dependency.
   const restartedHandle = await bridge.agents.create({ sessionId: SessionId("resource-model-restored"), agentOptions: { provider: "synthetic-loop-model", model: "synthetic-model" } });
   t.after(() => restartedHandle.dispose());
-  assert.equal((await promptCommand("login", undefined, restartedHandle.agent)).result.kind, "success");
+  const restartedLogin = await promptCommand("login", undefined, restartedHandle.agent);
+  assert.equal(restartedLogin.result.kind, "success");
+  assert.match(restartedLogin.result.text, /last complete synchronization registered configured MCP reads locally/);
+  publishedRead = false;
+  const englishEmpty = await promptCommand("check", undefined, restartedHandle.agent);
+  assert.equal(englishEmpty.result.kind, "success");
+  assert.equal(englishEmpty.result.text.split("\n\n")[0], publicationCopy.en);
+  const beforeEnglishStatus = { requests: resourceRequests, reads: actualReads, models: loopRequests.length };
+  const englishPublicationStatus = await promptCommand("status", undefined, restartedHandle.agent);
+  assert.equal(englishPublicationStatus.result.text, englishEmpty.result.text);
+  assert.deepEqual({ requests: resourceRequests, reads: actualReads, models: loopRequests.length }, beforeEnglishStatus);
+  publishedRead = true;
+  assert.equal((await promptCommand("check", undefined, restartedHandle.agent)).result.kind, "success");
   const removalTemplate = holdTemplate();
   const removalSelection = promptCommand("prompt synthetic_optional_prompt", undefined, restartedHandle.agent);
   await removalTemplate.started.promise;
@@ -1351,4 +2024,147 @@ export default class extends Service {
     await invalid.fiber.dispose();
     running.delete(invalid);
   }
+
+  await t.test("startup-only Bundle selection takes effect on the next profile boot without deleting personal data", async () => {
+    // The archive is fixture-seeded, not installed. Manager operations below
+    // only save Bundle selection; every boot reads that selection from disk.
+    // Cordis 4.0.5 exports FiberState as a const enum in its public declarations;
+    // its artifact has no runtime enum object. Keep the declared ACTIVE value exact.
+    const activeFiberState = 2;
+    const home = fs.mkdtempSync(path.join(output, "startup-only-home-"));
+    const installAnchor = path.join(home, "package.json");
+    writeJson(installAnchor, { name: "offline-installation", private: true, dependencies: {} });
+    const personalFile = path.join(home, "personal-notes.txt");
+    fs.writeFileSync(personalFile, "Personal file retained across Rental Bundle selection.\n", { flag: "wx" });
+    const personalBytes = fs.readFileSync(personalFile);
+    const personalPlugin = path.join(home, "personal-command.mjs");
+    fs.writeFileSync(personalPlugin, `export const name = 'personal-command', inject = ['commands'];
+export function apply(ctx) {
+  ctx.effect(() => ctx.commands.register({ name: 'personal', description: 'Offline personal command',
+    handler: ({ rawInput }) => ({ kind: 'success', text: rawInput.trim() }) }));
+}
+`, { flag: "wx" });
+    const profileManifestPath = path.join(profile, "package.json");
+    const originalManifest = fs.readFileSync(profileManifestPath);
+    const originalConfig = fs.readFileSync(configFile);
+    const previousFetch = globalThis.fetch;
+    let automaticHttp = 0, browserOpens = 0;
+    const listenerCount = httpModule.listeners.length;
+    const savedDependency = `file:${bundle.tarball}`;
+    const lifecycleConfig = [
+      { id: "session", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-session")).href },
+      { id: "commands", name: pathToFileURL(publicResolve("@deepseek-ai/dsh-commands")).href },
+      { id: "manager", name: pathToFileURL(cli.resolve("@deepseek-ai/dsh-plugin-manager")).href },
+      { id: "personal", name: pathToFileURL(personalPlugin).href },
+    ];
+    let configBytes;
+    const packageBytes = new Map(expectedFiles.map(name => [name, fs.readFileSync(path.join(staged, name))]));
+    const hosts = new Set();
+    async function startProfile() {
+      const loaded = boot.loadProfileDirectory("offline-rental", profile, installAnchor);
+      assert.deepEqual(loaded.skippedBundles, []);
+      const profileContext = { name: "offline-rental", dir: profile,
+        patchPath: path.join(profile, "cordis.patch.yml"), installAnchor, cwd: home, home,
+        startedBundles: loaded.layers.map(row => row.packageName), overlays: [], telemetryDisabledEnv: undefined };
+      const host = await boot.boot("offline-rental", configFile,
+        boot.readProfilePatches("offline-rental", profileContext, loaded), context => {
+          hosts.add(context); running.add(context);
+          context.provide("profileContext", profileContext);
+        });
+      assert.ok(host.get("pluginManager"), "original Manager activated through the Loader");
+      assert.equal(host.get("hmr"), undefined);
+      return host;
+    }
+    async function stopProfile(host) {
+      const commands = host.commands;
+      await host.fiber.dispose();
+      hosts.delete(host); running.delete(host);
+      assert.deepEqual(commands.list({ id: SessionId("startup-personal") }), [], "disposed registries retain no commands");
+    }
+    function assertFilesRetained(historyFile, historyBytes) {
+      assert.deepEqual(fs.readFileSync(personalFile), personalBytes);
+      assert.deepEqual(fs.readFileSync(historyFile), historyBytes);
+      assert.deepEqual(fs.readFileSync(configFile), configBytes);
+      assert.deepEqual(fs.readFileSync(bundle.tarball), archive);
+      for (const [name, bytes] of packageBytes) assert.deepEqual(fs.readFileSync(path.join(staged, name)), bytes);
+      assert.equal(JSON.parse(fs.readFileSync(profileManifestPath, "utf8")).dependencies[manifest.name], savedDependency);
+    }
+    try {
+      globalThis.fetch = async () => { automaticHttp++; throw new Error("unexpected lifecycle HTTP"); };
+      browserModule.setOpen(() => { browserOpens++; throw new Error("unexpected lifecycle browser launch"); });
+      writeJson(profileManifestPath, { name: "rental-loader-fixture", private: true,
+        dependencies: { [manifest.name]: savedDependency }, dsh: { profile: { bundles: [manifest.name] } } });
+      writeJson(configFile, lifecycleConfig);
+      configBytes = fs.readFileSync(configFile);
+      const first = await startProfile();
+      const personalId = SessionId("startup-personal");
+      const personalSession = first.sessions.create(personalId);
+      personalSession.append("user/message", createUserMessage({ source: { kind: "user" },
+        content: [{ type: "text", text: "Keep my personal conversation." }] }), { surfaceOp: "append" });
+      const personalAgent = { id: personalId, session: personalSession };
+      const personalCommand = host => host.commands.execute(personalAgent, "/personal still available", [], new AbortController().signal);
+      assert.equal((await personalCommand(first)).result.text, "still available");
+      assert.equal(first.commands.list(personalAgent).filter(row => row.name === "rental").length, 1);
+      const rentalEntry = [...first.loader.entries()].find(row => row.options?.id === "rental-os");
+      const rentalHandler = first.commands.find(personalAgent, "rental").handler;
+      assert.ok(rentalEntry?.fiber);
+      assert.equal(rentalEntry.fiber.state, activeFiberState);
+      // This snapshot is a test-owned disk copy of the original Session log,
+      // not evidence that the user's persistence plugin has been installed.
+      const historyFile = path.join(home, "personal-history.json");
+      writeJson(historyFile, { id: personalSession.id, header: personalSession.header, events: personalSession.snapshotEvents() });
+      const historyBytes = fs.readFileSync(historyFile);
+      const messages = personalSession.deriveMessages();
+      const off = await first.pluginManager.setBundleEnabled(manifest.name, false);
+      assert.equal(off.application, "restart-required");
+      assert.equal(off.restartReason, "no-hmr");
+      assert.equal(off.changed, true);
+      assert.deepEqual(JSON.parse(fs.readFileSync(profileManifestPath, "utf8")).dsh.profile.bundles, []);
+      assert.equal((await first.pluginManager.listBundles()).find(row => row.name === manifest.name).enabled, false);
+      assert.equal(first.commands.find(personalAgent, "rental").handler, rentalHandler, "saved Off is not live disposal");
+      assert.equal([...first.loader.entries()].find(row => row.options?.id === "rental-os"), rentalEntry);
+      await rentalEntry.fiber.await();
+      assert.equal(rentalEntry.fiber.state, activeFiberState, "startup-only Off leaves the old instance active");
+      assertFilesRetained(historyFile, historyBytes);
+      await stopProfile(first);
+
+      const second = await startProfile();
+      assert.equal(second.commands.find(personalAgent, "rental"), undefined);
+      assert.equal([...second.loader.entries()].some(row => row.options?.id === "rental-os"), false);
+      const stored = JSON.parse(fs.readFileSync(historyFile, "utf8"));
+      personalAgent.session = Session.create(SessionId(stored.id), stored.events, stored.header);
+      assert.deepEqual(personalAgent.session.deriveMessages(), messages);
+      assert.equal((await personalCommand(second)).result.text, "still available");
+      const on = await second.pluginManager.setBundleEnabled(manifest.name, true);
+      assert.equal(on.application, "restart-required");
+      assert.equal(on.restartReason, "no-hmr");
+      assert.equal(on.changed, true);
+      assert.deepEqual(JSON.parse(fs.readFileSync(profileManifestPath, "utf8")).dsh.profile.bundles, [manifest.name]);
+      assert.equal(second.commands.find(personalAgent, "rental"), undefined, "saved On waits for a fresh boot too");
+      assertFilesRetained(historyFile, historyBytes);
+      await stopProfile(second);
+
+      const third = await startProfile();
+      assert.equal(third.commands.list(personalAgent).filter(row => row.name === "rental").length, 1);
+      assert.equal([...third.loader.entries()].filter(row => row.options?.id === "rental-os").length, 1);
+      const unchanged = await third.pluginManager.setBundleEnabled(manifest.name, true);
+      assert.equal(unchanged.changed, false, "repeated enablement does not duplicate the persisted layer");
+      assert.equal(third.commands.list(personalAgent).filter(row => row.name === "rental").length, 1);
+      assert.deepEqual(personalAgent.session.deriveMessages(), messages);
+      assert.equal((await personalCommand(third)).result.text, "still available");
+      assertFilesRetained(historyFile, historyBytes);
+      await stopProfile(third);
+      assert.equal(automaticHttp, 0, "Bundle selection and startup do not replay HTTP or OAuth");
+      assert.equal(browserOpens, 0);
+      assert.equal(httpModule.listeners.length, listenerCount);
+    } finally {
+      try { for (const host of hosts) await stopProfile(host); }
+      finally {
+        fs.writeFileSync(profileManifestPath, originalManifest);
+        fs.writeFileSync(configFile, originalConfig);
+        globalThis.fetch = previousFetch;
+        browserModule.setOpen(() => { throw new Error("unexpected browser launch"); });
+      }
+    }
+  });
 });

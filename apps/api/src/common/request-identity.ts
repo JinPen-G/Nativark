@@ -15,14 +15,14 @@ export interface RequestIdentity {
   operationToken?: string;
   isSaasAdmin: boolean;
   /**
-   * SPACE-02：当前经营空间。只由认证守卫从**会话**写入，
+   * SPACE-02：当前经营空间。只由认证守卫从原会话或当前可信主体绑定写入，
    * 绝不接受客户端请求体或查询参数里的 workspaceId。
    *
    * 可选：平台管理租户的账号没有经营空间成员关系，其请求合法地没有当前空间；
    * 经营接口对此 fail-closed（见 requireRequestWorkspaceId）。
    */
   workspaceId?: string;
-  /** 当前空间成员的有效业务数据范围；仅由认证守卫从会话解析后写入。 */
+  /** 当前空间成员的有效业务数据范围；仅由认证守卫按原主体 / 空间解析后写入。 */
   dataScope?: "all" | "organization" | "store" | "own";
   organizationId?: string;
   /** 履约地点范围应用于所有运营端经营 API，不因客户端是后台还是员工端而变化。 */

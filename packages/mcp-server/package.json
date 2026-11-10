@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./host-router": {
+      "types": "./dist/host-router.d.ts",
+      "import": "./dist/host-router.js"
+    },
     "./service": {
       "types": "./dist/service.d.ts",
       "import": "./dist/service.js"
@@ -19,6 +23,134 @@
     "./persistent-oauth-tokens": {
       "types": "./dist/persistent-oauth-tokens.d.ts",
       "import": "./dist/persistent-oauth-tokens.js"
+    },
+    "./prisma-oauth-store": {
+      "types": "./dist/prisma-oauth-store.d.ts",
+      "import": "./dist/prisma-oauth-store.js"
+    },
+    "./prisma-public-client-registry": {
+      "types": "./dist/prisma-public-client-registry.d.ts",
+      "import": "./dist/prisma-public-client-registry.js"
+    },
+    "./protocol-traffic": {
+      "types": "./dist/protocol-traffic.d.ts",
+      "import": "./dist/protocol-traffic.js"
+    },
+    "./original-traffic-meter": {
+      "types": "./dist/original-traffic-meter.d.ts",
+      "import": "./dist/original-traffic-meter.js"
+    },
+    "./persistent-read-accounting": {
+      "types": "./dist/persistent-read-accounting.d.ts",
+      "import": "./dist/persistent-read-accounting.js"
+    },
+    "./prisma-mcp-read-budget": {
+      "types": "./dist/prisma-mcp-read-budget.d.ts",
+      "import": "./dist/prisma-mcp-read-budget.js"
+    },
+    "./prisma-mcp-read-accounting": {
+      "types": "./dist/prisma-mcp-read-accounting.d.ts",
+      "import": "./dist/prisma-mcp-read-accounting.js"
+    },
+    "./prisma-mcp-catalog-goals": {
+      "types": "./dist/prisma-mcp-catalog-goals.d.ts",
+      "import": "./dist/prisma-mcp-catalog-goals.js"
+    },
+    "./prisma-mcp-read-bindings": {
+      "types": "./dist/prisma-mcp-read-bindings.d.ts",
+      "import": "./dist/prisma-mcp-read-bindings.js"
+    },
+    "./prisma-mcp-catalog-goal-adoptions": {
+      "types": "./dist/prisma-mcp-catalog-goal-adoptions.d.ts",
+      "import": "./dist/prisma-mcp-catalog-goal-adoptions.js"
+    },
+    "./prisma-mcp-catalog-goal-intents": {
+      "types": "./dist/prisma-mcp-catalog-goal-intents.d.ts",
+      "import": "./dist/prisma-mcp-catalog-goal-intents.js"
+    },
+    "./prisma-mcp-read-goal-settlement": {
+      "types": "./dist/prisma-mcp-read-goal-settlement.d.ts",
+      "import": "./dist/prisma-mcp-read-goal-settlement.js"
+    },
+    "./prisma-mcp-read-receipt": {
+      "types": "./dist/prisma-mcp-read-receipt.d.ts",
+      "import": "./dist/prisma-mcp-read-receipt.js"
+    },
+    "./prisma-oauth-grant-admission": {
+      "types": "./dist/prisma-oauth-grant-admission.d.ts",
+      "import": "./dist/prisma-oauth-grant-admission.js"
+    },
+    "./prisma-oauth-grant-use": {
+      "types": "./dist/prisma-oauth-grant-use.d.ts",
+      "import": "./dist/prisma-oauth-grant-use.js"
+    },
+    "./prisma-oauth-grant-management": {
+      "types": "./dist/prisma-oauth-grant-management.d.ts",
+      "import": "./dist/prisma-oauth-grant-management.js"
+    },
+    "./prisma-oauth-grant-authority": {
+      "types": "./dist/prisma-oauth-grant-authority.d.ts",
+      "import": "./dist/prisma-oauth-grant-authority.js"
+    },
+    "./prisma-oauth-admission-store": {
+      "types": "./dist/prisma-oauth-admission-store.d.ts",
+      "import": "./dist/prisma-oauth-admission-store.js"
+    },
+    "./prisma-oauth-consent-authority": {
+      "types": "./dist/prisma-oauth-consent-authority.d.ts",
+      "import": "./dist/prisma-oauth-consent-authority.js"
+    },
+    "./prisma-oauth-web-consent": {
+      "types": "./dist/prisma-oauth-web-consent.d.ts",
+      "import": "./dist/prisma-oauth-web-consent.js"
+    },
+    "./prisma-oauth-consent-review": {
+      "types": "./dist/prisma-oauth-consent-review.d.ts",
+      "import": "./dist/prisma-oauth-consent-review.js"
+    },
+    "./consent-control-plane": {
+      "types": "./dist/consent-control-plane.d.ts",
+      "import": "./dist/consent-control-plane.js"
+    },
+    "./catalog-goal-control-plane": {
+      "types": "./dist/catalog-goal-control-plane.d.ts",
+      "import": "./dist/catalog-goal-control-plane.js"
+    },
+    "./subject-control-plane": {
+      "types": "./dist/subject-control-plane.d.ts",
+      "import": "./dist/subject-control-plane.js"
+    },
+    "./reviewed-governance-control-plane": {
+      "types": "./dist/reviewed-governance-control-plane.d.ts",
+      "import": "./dist/reviewed-governance-control-plane.js"
+    },
+    "./admission-control-plane": {
+      "types": "./dist/admission-control-plane.d.ts",
+      "import": "./dist/admission-control-plane.js"
+    },
+    "./grant-control-plane": {
+      "types": "./dist/grant-control-plane.d.ts",
+      "import": "./dist/grant-control-plane.js"
+    },
+    "./review-control-plane": {
+      "types": "./dist/review-control-plane.d.ts",
+      "import": "./dist/review-control-plane.js"
+    },
+    "./prisma-oauth-notice-review": {
+      "types": "./dist/prisma-oauth-notice-review.d.ts",
+      "import": "./dist/prisma-oauth-notice-review.js"
+    },
+    "./prisma-oauth-consent-policy-store": {
+      "types": "./dist/prisma-oauth-consent-policy-store.d.ts",
+      "import": "./dist/prisma-oauth-consent-policy-store.js"
+    },
+    "./prisma-oauth-subject-store": {
+      "types": "./dist/prisma-oauth-subject-store.d.ts",
+      "import": "./dist/prisma-oauth-subject-store.js"
+    },
+    "./prisma-public-client-review": {
+      "types": "./dist/prisma-public-client-review.d.ts",
+      "import": "./dist/prisma-public-client-review.js"
     },
     "./authorization-code-binding": {
       "types": "./dist/authorization-code-binding.d.ts",
@@ -73,7 +205,7 @@
       "import": "./dist/conversation-list-read.js"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "mysql-oauth-schema.sql", "mysql-read-budget-schema.sql", "mysql-catalog-goal-schema.sql", "mysql-catalog-goal-intent-schema.sql", "mysql-catalog-goal-adoption-schema.sql"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
