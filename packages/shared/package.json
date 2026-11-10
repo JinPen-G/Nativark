@@ -5,6 +5,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./miniprogram-client": {
+      "types": "./dist/miniprogram-client.d.ts",
+      "import": "./dist/miniprogram-client.js",
+      "require": "./dist/miniprogram-client.js"
+    },
     "./agent-desktop": {
       "types": "./dist-agent-desktop/agent-desktop.d.ts",
       "import": "./dist-agent-desktop/agent-desktop.js",
@@ -20,6 +25,9 @@
     "build": "tsc -p tsconfig.json && npm run build:agent-desktop",
     "build:agent-desktop": "tsc -p tsconfig.agent-desktop.json",
     "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
   },
   "devDependencies": {}
 }

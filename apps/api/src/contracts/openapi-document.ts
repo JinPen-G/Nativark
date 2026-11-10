@@ -2388,6 +2388,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation, 'AiClientQuotePreparationRequest', 'AiClientQuotePreparationReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking, 'AiClientQuoteBookingRequest', 'AiClientQuoteBookingPreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation, 'AiClientQuoteBookingRequest', 'AiClientQuoteBookingOperationResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskCancelReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskInputCancellationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot, 'AiClientTaskReadRequest', 'AiTaskSnapshotDraft'],

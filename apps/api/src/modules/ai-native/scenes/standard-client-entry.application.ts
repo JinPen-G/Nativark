@@ -12,6 +12,7 @@ import type { ModelAdapter } from '../model-gateway.ports';
 import { createNativeModelAdapters } from '../native-model-adapters';
 import { gatewayPricingSelectionSchema } from '../budget/gateway-pricing-evidence';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import { composeClientOriginalBookingHttp } from './client-original-booking-http.composition';
 
 export const AI_WEBSITE_ENTRY = Symbol('AI_WEBSITE_ENTRY');
 export const AI_WECHAT_ENTRY = Symbol('AI_WECHAT_ENTRY');
@@ -119,7 +120,8 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
         // original persistent Gateway/ledger checks. Never accept them in HTTP.
       }, { enabled: true, tenantCode: before.identity.tenantCode, serviceCode: before.identity.workspaceCode, channel,
         entry: { enabled: true, releaseRevision: before.releaseRevision } });
-      const result = await Reflect.apply(application[name], application, [boundRequest, ...args]);
+      const consumer = { ...application, ...composeClientOriginalBookingHttp(application) };
+      const result = await Reflect.apply(consumer[name], consumer, [boundRequest, ...args]);
       let after;
       try { after = await select(); } catch { throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_operation_requires_recheck'); }
       if (after.releaseRevision !== before.releaseRevision || requestFingerprint(after.identity) !== requestFingerprint(before.identity)) {
@@ -142,6 +144,7 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
     submitAcceptedBooking: bind('submitAcceptedBooking'), readBookingSubmission: bind('readBookingSubmission'),
     prepareQuoteParameters: bind('prepareQuoteParameters'), confirmQuoteParameters: bind('confirmQuoteParameters'),
     readQuotePreparationOperation: bind('readQuotePreparationOperation'), readPreparedQuoteOriginal: bind('readPreparedQuoteOriginal'),
+    prepareOriginalQuoteBooking: bind('prepareOriginalQuoteBooking'), readOriginalQuoteBookingOperation: bind('readOriginalQuoteBookingOperation'),
     readTaskSnapshot: bind('readTaskSnapshot'), readTaskEvents: bind('readTaskEvents'), readOrderExplanation: bind('readOrderExplanation'), readSource: bind('readSource'),
     requestOriginalTaskCancellation: bind('requestOriginalTaskCancellation'), reconcileOriginalTaskInputCancellation: bind('reconcileOriginalTaskInputCancellation'),
     readOriginalTaskCancellationReceipt: bind('readOriginalTaskCancellationReceipt'),

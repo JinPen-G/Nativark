@@ -1,0 +1,25 @@
+// Build-owned runtime from the canonical public customer-contract entry.
+// No Node/shared package runtime is loaded by the mini-program.
+import type * as Runtime from '@rental-os/shared/miniprogram-client';
+export declare const AI_CLIENT_ENTRY_HTTP_DRAFT: typeof Runtime.AI_CLIENT_ENTRY_HTTP_DRAFT;
+export declare const AI_CLIENT_HOST_CAPABILITIES_VERSION: typeof Runtime.AI_CLIENT_HOST_CAPABILITIES_VERSION;
+export declare const AI_CLIENT_QUOTE_PREPARATION_VERSION: typeof Runtime.AI_CLIENT_QUOTE_PREPARATION_VERSION;
+export declare const AI_CLIENT_QUOTE_BOOKING_VERSION: typeof Runtime.AI_CLIENT_QUOTE_BOOKING_VERSION;
+export declare const aiClientHostCapabilitiesRequestSchema: typeof Runtime.aiClientHostCapabilitiesRequestSchema;
+export declare const aiClientHostCapabilitiesSchema: typeof Runtime.aiClientHostCapabilitiesSchema;
+export declare const aiClientQuotePreparationRequestSchema: typeof Runtime.aiClientQuotePreparationRequestSchema;
+export declare const aiClientQuoteConfirmationRequestSchema: typeof Runtime.aiClientQuoteConfirmationRequestSchema;
+export declare const aiClientQuotePreparationResponseSchema: typeof Runtime.aiClientQuotePreparationResponseSchema;
+export declare const aiClientQuotePreparationReadResponseSchema: typeof Runtime.aiClientQuotePreparationReadResponseSchema;
+export declare const aiClientQuoteResultReadResponseSchema: typeof Runtime.aiClientQuoteResultReadResponseSchema;
+export declare const aiClientQuoteBookingRequestSchema: typeof Runtime.aiClientQuoteBookingRequestSchema;
+export declare const aiClientQuoteBookingPreparationResponseSchema: typeof Runtime.aiClientQuoteBookingPreparationResponseSchema;
+export declare const aiClientQuoteBookingOperationResponseSchema: typeof Runtime.aiClientQuoteBookingOperationResponseSchema;
+export declare const aiBookingSelectionSchema: typeof Runtime.aiBookingSelectionSchema;
+export declare const aiEntryActionSchema: typeof Runtime.aiEntryActionSchema;
+export declare const aiBookingDraftSchema: typeof Runtime.aiBookingDraftSchema;
+export declare const aiBookingHandoffSchema: typeof Runtime.aiBookingHandoffSchema;
+export declare const aiBookingCreateResponseSchema: typeof Runtime.aiBookingCreateResponseSchema;
+export declare const aiBookingChoiceResponseSchema: typeof Runtime.aiBookingChoiceResponseSchema;
+export declare const aiBookingHandoffResponseSchema: typeof Runtime.aiBookingHandoffResponseSchema;
+export declare const aiBookingOperationReadResponseSchema: typeof Runtime.aiBookingOperationReadResponseSchema;

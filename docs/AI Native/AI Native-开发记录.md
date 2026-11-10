@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-original-quote-booking-http-20261111"></a>
+## 客户原报价预约接续与小程序公共合同运行时（2026-11-11）
+
+原通知设置确认等待阶段已提交并推送 `a10993dcddc0c63488027b26ec89fd13d648613a`，远端已核。本片补原AIN-21/22、ENTRY-02/03的真实接点：已有[原报价预约流程](../../apps/api/src/modules/ai-native/scenes/client-original-booking-flow.ts)原先只有服务端宿主消费，现经[闭合HTTP投影](../../apps/api/src/modules/ai-native/scenes/client-original-booking-http.composition.ts)、标准双端factory和原Client Guard提供准备及原操作读取。原quote_preparation引用不能直接当booking_quote材料使用；接续读取真实原报价、创建原预约材料并取得服务端Action，不重报价格、不创建草稿、不选择或接受草稿。操作读取只回原材料定位、有效性和观察时间，不返回Action或授当前执行权；继续沿原issueAction复验。
+
+[公共合同](../../packages/shared/src/ai-client-quote-booking-draft.ts)及原OpenAPI同时登记两端路由，旧EntryAction与BookingSelection校验移到shared正式出口复用，新增Booking返回校验沿原JSON合同保持闭合。请求只投影原authorization/ip给既有流程，不克隆完整Express Request。准备提交后的投影失败保持unknown；原键读取不重派材料、报价或业务动作。
+
+客户小程序继续禁止整包shared、子路径及Zod裸require。[受控构建](../../scripts/miniprogram-ai-runtime.cjs)只打包[正式窄出口](../../packages/shared/src/miniprogram-client.ts)及已有Zod必要校验代码，保留MIT许可，生成单个88,143字节bundle、23个来源模块；SHA256为 `40e999f0fb58e682276c67d56b760f9a361c13a053061dcf6e3f70adf14acb27`。没有复制依赖目录、私造DTO或添加浏览器global。shared与小程序manifest/锁文件只补已锁定且已有的Zod3.25.76、webpack5.106.2、memfs3.5.3及terser-webpack-plugin5.5.0声明，未安装或下载。原私有声明工具改在本树output下创建唯一所属目录，失败、finally、正常退出及可捕获取消时清理；删除前核真实父目录、所属项目、固定前缀和非链接，不能清除共享client/dist。
+
+负责人独立标准输入冒烟session `81126`/exit0，使用原真实Core/client fixture、标准factory、实际Controller及Guard：原报价1张，经新桥、Action、Draft、明确选择及handoff回原页面后，显式submit1次、订单1张；原quote引用直接issueAction拒绝。重建consumer后原键恢复只读，超过材料期限并关闭create/execute后原材料和业务收据仍可读、状态不变。实际bridge/Action/Draft/Choice/Handoff全部通过同一个native bundle校验，VM不提供URL、TextEncoder、Buffer、process、window、document或structuredClone。该组验证的是原键重开恢复，不将其称为已注入网络丢包。首个加载器组exit1因遗漏原fixture的addFormats初始化；补回原初始化、保留断言后复验通过。原命令SHA256为 `f753c915df2a320d349d501fa63abb9d16d1f34a86d3b426b9d3f3603dc6166e`，执行与修正见本对话工具记录，不落新的测试脚本。
+
+API三根及传递依赖、shared窄出口和新桥类型0诊断；新HTTP三份JSON schema编译及实际闭合Zod校验通过，未知字段和跨材料绑定拒绝。构建相关脚本语法检查通过，声明版本与既有完整锁条目一致。验证审计0，任务临时目录从未创建；本片没有运行会写dist的完整小程序构建或物理目录取消/删除演练。两端真实消费者由AI-dev2独占接线，待固定后独立核接；真实浏览器/微信、真库、其他角色与原G4门槛仍未代验。当前阶段未新增整项100%，唯一任务表不加分，main合并批次仍空。
+
 <a id="ain-settings-approval-policy-consumer-20261111"></a>
 ## 原通知设置确认等待的显式准入与实际消费（2026-11-11）
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { RENTAL_FULFILLMENT_MODES, AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from '@rental-os/shared';
-import type { AiBookingMaterial, AiBookingSelection, AiBookingOneTimeAddressConfirmation, RentalDeliveryAddressSnapshot } from '@rental-os/shared';
+import { aiBookingSelectionSchema, AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from '@rental-os/shared';
+import type { AiBookingMaterial, AiBookingSelection, RentalDeliveryAddressSnapshot } from '@rental-os/shared';
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import type { composeAiClientScenes } from '../client-scene.composition';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -9,25 +9,7 @@ import { freezeOriginalInput } from '../task-request/original-request.validation
 
 const serviceSchema = z.object({ serviceId: entryId, quantity: z.number().int().min(1).max(999),
   scheduledStartAt: entryDate.optional(), scheduledEndAt: entryDate.optional(), serviceLocationId: entryId.optional() }).strict();
-const oneTimeConfirmationSchema: z.ZodType<AiBookingOneTimeAddressConfirmation> = z.object({
-  source: z.literal('original_quote_one_time_address'), snapshotFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), confirmed: z.literal(true)
-}).strict();
-export const bookingSelectionSchema: z.ZodType<AiBookingSelection> = z.object({
-  quoteId: entryId, timeZone: z.string().min(1).max(100), startAt: entryDate, endAt: entryDate,
-  fulfillmentMode: z.enum(RENTAL_FULFILLMENT_MODES), fulfillmentLocationId: entryId, returnLocationId: entryId.optional(),
-  deliveryAddressId: entryId.optional(), deliveryAddressConfirmation: oneTimeConfirmationSchema.optional(),
-  bookingIdentity: z.object({ bookingIdentity: z.enum(['personal', 'enterprise_employee']), corporateCustomerId: entryId.optional(),
-    enterpriseContractAndPayer: z.boolean() }).strict(),
-  lines: z.array(z.object({ itemGroupId: entryId, quantity: z.number().int().min(1).max(999) }).strict()).min(1).max(20),
-  services: z.array(serviceSchema).max(20).optional()
-}).strict().superRefine((value, context) => {
-  if (Date.parse(value.endAt) <= Date.parse(value.startAt) || new Set(value.lines.map(line => line.itemGroupId)).size !== value.lines.length
-    || (value.bookingIdentity.bookingIdentity === 'enterprise_employee') !== Boolean(value.bookingIdentity.corporateCustomerId)
-    || (value.bookingIdentity.bookingIdentity === 'personal' && value.bookingIdentity.enterpriseContractAndPayer)
-    || Boolean(value.deliveryAddressId && value.deliveryAddressConfirmation)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Explicit booking conditions required' });
-  }
-});
+export const bookingSelectionSchema = aiBookingSelectionSchema;
 const hashJson = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
 /** Server-only fingerprint of the original Core snapshot, including its contact
  * basis. Neither raw address content nor this hash is an execution grant. */

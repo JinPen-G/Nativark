@@ -9,7 +9,7 @@
  *      - 默认（本机联调）模式：允许回环 http 地址，并在产物里写 allowLocalApi=true，打印“不可上传”提示；
  *      - `--release` 发布模式：API 地址必须是 HTTPS，任何 http 地址（含回环）一律拒绝，联调开关恒为 false；
  *      - 非回环的 http 地址在任何模式下都拒绝；带路径的地址拒绝；AppID 若填写必须是 wx + 16 位十六进制；
- *   5. 校验产物：不含 @rental-os/shared 的运行时依赖（只允许 import type）、不含密钥形态字符串。
+ *   5. 按白名单打包公共富文本及客户AI合同运行时，校验产物不含共享包运行时require或密钥。
  *
  * 用法：
  *   node scripts/build.cjs              # 本机联调构建
@@ -29,8 +29,7 @@ const checkOnly = process.argv.includes("--check");
 const releaseMode = process.argv.includes("--release");
 
 function fail(message) {
-  process.stderr.write(`[miniprogram build] ${message}\n`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function walk(dir) {
@@ -84,12 +83,15 @@ function publicConfig(defaults) {
   return { apiOrigin, tenantCode, appId, allowLocalApi, builtAt: new Date().toISOString() };
 }
 
-function main() {
+async function main() {
   if (checkOnly) {
     runTsc(["-p", "tsconfig.json", "--noEmit"]);
     process.stdout.write("[miniprogram build] 类型检查通过\n");
     return;
   }
+  if (path.dirname(path.resolve(dist)) !== path.resolve(root)
+    || fs.existsSync(dist) && (fs.lstatSync(dist).isSymbolicLink()
+      || path.dirname(fs.realpathSync(dist)) !== fs.realpathSync(root))) fail('dist 不是本应用独占的构建目录');
   fs.rmSync(dist, { recursive: true, force: true });
   runTsc(["-p", "tsconfig.json"]);
 
@@ -142,6 +144,14 @@ function main() {
     runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
   }
 
+  // Only the canonical named customer validators and their necessary existing
+  // validation code enter this single native bundle. No package runtime import,
+  // private copied DTO or synthetic browser global is introduced.
+  const nativeRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildMiniprogramAiRuntime(root);
+  const nativeDirectory = path.join(dist, 'vendor', 'shared-ai-client');
+  fs.mkdirSync(nativeDirectory, { recursive: true });
+  fs.writeFileSync(path.join(nativeDirectory, 'index.js'), nativeRuntime.code);
+
   // 默认值来自编译后的 config/public.js（即 src/config/public.ts 里的常量）。
   const configFile = path.join(dist, "config", "public.js");
   if (!fs.existsSync(configFile)) fail("缺少编译产物 config/public.js");
@@ -160,8 +170,11 @@ function main() {
   const compiled = walk(dist).filter((file) => /\.(js|json|wxml|wxss)$/.test(file));
   for (const file of compiled) {
     const text = fs.readFileSync(file, "utf8");
-    if (file.endsWith(".js") && /require\(["']@rental-os\/shared["']\)/.test(text)) {
+    if (file.endsWith(".js") && /require\(["']@rental-os\/shared(?:\/[^"']+)?["']\)/.test(text)) {
       fail(`${path.relative(root, file)} 在运行时依赖 @rental-os/shared；小程序只能使用 import type`);
+    }
+    if (file.endsWith(".js") && /require\(["']zod(?:\/[^"']+)?["']\)/.test(text)) {
+      fail(`${path.relative(root, file)} 直接依赖 zod；客户合同须使用受控 vendor/shared-ai-client 运行时`);
     }
     if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) fail(`${path.relative(root, file)} 含私钥`);
     if (/(appSecret|session_key|apiV3Key|mchKey|merchantSecret)\s*[:=]\s*["'][^"']+["']/i.test(text)) fail(`${path.relative(root, file)} 含密钥形态字符串`);
@@ -187,4 +200,13 @@ function main() {
   process.stdout.write(`[miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → dist/（商户：${config.tenantCode}，API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
 }
 
-main();
+(async () => {
+  try { await main(); }
+  catch (error) { process.stderr.write(`[miniprogram build] ${error.message}\n`); process.exitCode = 1; }
+  finally {
+    if (privateTypeConfig) {
+      try { require('../../../scripts/miniprogram-shared-types.cjs').disposeMiniprogramSharedTypes(privateTypeConfig); }
+      catch (error) { process.stderr.write(`[miniprogram build] 临时声明清理失败：${error.message}\n`); process.exitCode = 1; }
+    }
+  }
+})();
