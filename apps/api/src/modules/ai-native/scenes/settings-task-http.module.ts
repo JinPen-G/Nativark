@@ -1,5 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import type { OriginalSettingsApprovalAdmissionConfiguration } from '../approval-execution/settings-approval-admission.composition';
 import { AI_SETTINGS_TASK_HTTP_REQUESTS, AiSettingsTaskController, settingsTaskHttpMethods,
   type SettingsTaskHttpRequests } from './settings-task.controller';
 import { AiOriginalSceneModelController } from './original-scenes.controller';
@@ -21,7 +22,8 @@ export class AiSettingsTaskHttpModule {
    * same server scene/holder configuration and the same persisted machinery.
    * Do not mount this alongside legacy settings or the individual modules. */
   static registerOriginalLifecycle(dependencies: Parameters<typeof composeRequestBoundSettingsTaskControls>[0],
-    options: Parameters<typeof composeRequestBoundSettingsTaskControls>[1]): DynamicModule {
+    options: Parameters<typeof composeRequestBoundSettingsTaskControls>[1],
+    approvalAdmission?: OriginalSettingsApprovalAdmissionConfiguration): DynamicModule {
     if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     return { module: AiSettingsTaskHttpModule,
@@ -36,7 +38,7 @@ export class AiSettingsTaskHttpModule {
         { provide: AI_SETTINGS_TASK_CONTROL_REQUESTS,
           useFactory: () => composeRequestBoundSettingsTaskControls(server, selected) },
         { provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
-          useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected) }
+          useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected, approvalAdmission) }
       ], exports: [AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS, AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS] };
   }
   /** Read-only original-task supply does not require a running model/plan. */
@@ -77,12 +79,13 @@ export class AiSettingsTaskHttpModule {
   /** Original published-plan consumer. An unpublished task remains unavailable;
    * the initial explicit producer is not replaced with guessed inputs/limits. */
   static registerPersistedApplication(dependencies: Parameters<typeof composeRequestBoundPersistedSettingsTask>[0],
-    options: Parameters<typeof composeRequestBoundPersistedSettingsTask>[1]): DynamicModule {
+    options: Parameters<typeof composeRequestBoundPersistedSettingsTask>[1],
+    approvalAdmission?: OriginalSettingsApprovalAdmissionConfiguration): DynamicModule {
     if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskController],
       providers: [{ provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
-        useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected) }], exports: [AI_SETTINGS_TASK_HTTP_REQUESTS] };
+        useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected, approvalAdmission) }], exports: [AI_SETTINGS_TASK_HTTP_REQUESTS] };
   }
   /** Actual Gateway-free server producer, not an injected success callback.
    * Select this instead of legacy model settings routes; never mount both. */

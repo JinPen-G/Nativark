@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-settings-approval-policy-consumer-20261111"></a>
+## 原通知设置确认等待的显式准入与实际消费（2026-11-11）
+
+原报价审批片已提交并推送 `6bedbdebe6901d78ea982b1beb16c56e238b18c4`，远端已核。继续原AIN-14/16的已发布通知设置等待：AI-dev1交付[准入应用](../../apps/api/src/modules/ai-native/approval-execution/settings-approval-admission.application.ts)和[原CAS权威](../../apps/api/src/modules/ai-native/approval-execution/settings-approval-admission.authority.ts)，固定blob分别为 `a5601e35e1ba1208dab25b551dd5e771a54e7dd7`、`ccfd785e7eddbc302625ee273ffadc73cb746352`，文件SHA256已独立匹配。范围仍限notifications.enabledEvents/editableChannels，不扩大配置或替代原批准、Core提交与版本机制。
+
+原settings participant的完整change/proposal投影通过当前本人资源读权复用，不伪造过期政策；其专用读取权威拒绝所有写模式。当前Auth/Guard、scope/角色、原Task/Run/Step、唯一确认phase、原输入/计划/提案、Core当前base settings及category绑定逐次核对。政策CAS先取原Core/category锁，再取AI Task/Run等锁，保持原设置事务锁顺序。明确批准3项、明确继续5项，保留已有更严格权限及原change/proposal期限；原操作已消费、期限失效、基准改变或未知均不借旧收据重签。
+
+负责人新增[原命令适配](../../apps/api/src/modules/ai-native/approval-execution/settings-approval-admission.composition.ts)，复用正式settings决定/继续合同和原TaskCenter schema。原persisted settings宿主在构造时就读取read_metadata，现明确写先由同一请求凭据完成专用准入，再装配及调用原宿主；真实部署开关作为module独立参数传入，未把函数/DB放入structuredClone配置。TaskCenter在普通读取前分别调用对应域的原准入，设置用户不因此需要订单权限；纯review、原收据及其他域不会签发。原manager配置、首次政策模板、settings公开动作及Core服务规则保持，未新加HTTP动作。
+
+负责人独立一组 `node --no-compilation-cache` 标准输入冒烟（session `76952`/exit0）使用当前真实Controller、Guard/ALS、module、当前后台API及既有settings fixture。无system:params:manage；先真实推进Date并核3项政策全部到期，TaskCenter签3个CAS并保存原批准，再真实推进120001ms、核5项到期，签5个CAS继续，设置仅写1次、revision由1到2；原change和批准期限不变，决定及业务收据读取不改状态。纯审阅、伪造hash和当前执行关闭均未写政策；其他域选择器未授订单权。另一个原fixture验证直接persisted module在旧读取政策过期后先准入再构造，仍3+5 CAS、1次设置写和1次原批准消费。启动等待沿原fixture已声明的初始政策，不把它当普通用户初次启动已接通。
+
+来源组另验证CAS提交后丢应答只读原reference、部分收据不补写、真实变更期限失效与baseRevision变化在签发前拒绝。Root三根及传递依赖strict/noEmit为0诊断（session `8788`/exit0）；未新增/扩写测试脚本、安装或生成产物，所有命令审计0，任务临时目录从未创建。Core提交沿原fixture带baseRevision/baseHash检查的存储leaf，不能代替真实MySQL/Core宿主或浏览器验收。
+
+本片不代表整个settings普通用户生命周期收口。源码核到初次start仍先要求read_metadata，而configurePolicy仍要求原管理权限；普通用户从原change/创建收据首次启动的专用准入尚缺，已交AI-dev1优先补齐，不假造AiOriginalSceneRequest或在create/read时种政策。AIN-14/16完整其他获准分区、普通资料、失败窗及真库门槛仍需原依据；本片未新增整项G4，唯一任务表不加分，待合main批次仍空。客户本人报价两端由AI-dev2继续。
+
 <a id="ain-quote-approval-policy-consumer-20261111"></a>
 ## 原报价审批与再准备的显式准入及任务中心消费（2026-11-11）
 

@@ -34,6 +34,21 @@ export interface TaskCenterApprovalDependencies {
     prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
       intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void>;
   };
+  settingsAdmission?: {
+    prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
+      intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void>;
+  };
+}
+/** Only explicit decisions/continuations enter domain admission. Each original
+ * host selects its own currently owned step before its full policy authority. */
+export async function prepareTaskCenterApprovalPolicies(d: TaskCenterApprovalDependencies, credentials: AiTaskCredentialSource,
+  value: unknown, intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> {
+  const order = d.decisions.order ? d.selectedOrderDecision?.prepareTaskCenterApproval?.bind(d.selectedOrderDecision) : undefined;
+  const settings = d.decisions.settings ? d.settingsAdmission?.prepareTaskCenterApproval?.bind(d.settingsAdmission) : undefined;
+  if (!order && !settings) return;
+  const current = await credentials.current(), request = { headers: { authorization: current.authorization } };
+  if (order) await order(request, value, intent, signal);
+  if (settings) await settings(request, value, intent, signal);
 }
 export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, credentials: AiTaskCredentialSource,
   tasks: Pick<AiTaskRepository, 'resolveAccess'>) {
@@ -112,11 +127,7 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
     const command = taskCenterDecisionSchema.parse(structuredClone(value)), { proposal, ...query } = command;
     // The explicit decision owns admission. Pure review/receipt reads never
     // enter this bridge, and the normal policy checks remain after it.
-    if (write && d.decisions.order && d.selectedOrderDecision?.prepareTaskCenterApproval) {
-      const current = await credentials.current();
-      await d.selectedOrderDecision.prepareTaskCenterApproval({ headers: { authorization: current.authorization } },
-        command, 'explicit_decide', signal);
-    }
+    if (write) await prepareTaskCenterApprovalPolicies(d, credentials, command, 'explicit_decide', signal);
     const before = await ownedStep(query);
     const { decision, reviewVersion, ...reference } = proposal;
     if (write) {

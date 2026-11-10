@@ -13,6 +13,7 @@ import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsCurrentReadDraft
   AiApprovedSettingsChangePreparationResultDraft, AiApprovedSettingsTaskCreatedDraft, AiApprovedSettingsTaskCreationReadDraft,
   AiApprovedSettingsTaskCancellationResultDraft, AiApprovedSettingsTaskCancellationReadDraft,
   AiApprovedSettingsTaskRunDraft, AiApprovedSettingsTaskCheckpointDraft, AiApprovedSettingsTaskRecoveryDraft,
+  AiApprovedSettingsTaskContinueDraft,
   AiApprovedSettingsTaskCancelResponseDraft, AiApprovedSettingsTaskPolicyMutationDraft,
   AiApprovedSettingsTaskPolicyOperationDraft, AiApprovedSettingsTaskPolicyReadResultDraft } from '@rental-os/shared';
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_CONFIRMATION_HISTORY_SCHEMAS } from '@rental-os/shared';
@@ -31,6 +32,7 @@ type Contracts = {
   AiApprovedSettingsTaskPolicyReadResultDraft: AiApprovedSettingsTaskPolicyReadResultDraft;
   AiApprovedSettingsTaskPolicyOperationDraft: AiApprovedSettingsTaskPolicyOperationDraft;
   AiApprovedSettingsTaskRunDraft: AiApprovedSettingsTaskRunDraft;
+  AiApprovedSettingsTaskContinueDraft: AiApprovedSettingsTaskContinueDraft;
   AiApprovedSettingsTaskCheckpointDraft: AiApprovedSettingsTaskCheckpointDraft;
   AiApprovedSettingsTaskRecoveryDraft: AiApprovedSettingsTaskRecoveryDraft;
   AiApprovedSettingsTaskCancelResponseDraft: AiApprovedSettingsTaskCancelResponseDraft;

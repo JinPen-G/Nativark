@@ -146,7 +146,7 @@ const settingsEntries = [
   [AI_SETTINGS_CHANGE_REQUESTS, ['prepare']],
   [AI_SETTINGS_TASK_CREATION_REQUESTS, ['create']],
   [AI_SETTINGS_TASK_CONTROL_REQUESTS, ['configurePolicy', 'start']],
-  [AI_SETTINGS_TASK_HTTP_REQUESTS, ['startSettingsTask', 'decideSettingsProposal', 'continueSettingsConfirmation', 'reconcileSettingsTask']],
+  [AI_SETTINGS_TASK_HTTP_REQUESTS, ['startSettingsTask', 'decideSettingsProposal', 'continueSettingsConfirmation', 'reconcileSettingsTask', 'prepareTaskCenterApproval']],
   [AI_SETTINGS_TASK_READ_REQUESTS, []]
 ] as const;
 export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = settingsEntries.map(([provide, executionMethods]) => ({
@@ -161,7 +161,8 @@ export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = setting
       templates: (['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'decide_approval'] as const)
         .map(operation => ({ operation,
           requiredPermissions: ['rental-os:price:manage'] }))
-    });
+    }, configuration.enabled ? { db, currentRuntimeEnabled: async (sceneCode, sceneVersion) =>
+      configuration.enabled && sceneCode === 'opening_diagnosis' && sceneVersion === '1' } : undefined);
     const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
     if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const requests = entry.useFactory() as Record<string, unknown>;
@@ -215,7 +216,9 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     quoteFacts: RentalBusinessFactRepository, settingsValue?: unknown, orderValue?: unknown,
     selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
-    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
+    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown>;
+      prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
+        intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> },
     moduleRef?: Pick<ModuleRef, 'get'>,
     selectedOrderDecision?: { decideSelectedProposal(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
@@ -244,7 +247,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       humanApprovals: {
         order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
         settings: { db, auth, guard, subscriptions, core, holderId: 'ai-native-human-review', scene: { code: 'opening_diagnosis', version: '1' } },
-        decisions: { order: order.enabled, settings: settings.enabled }, selectedOrderDecision
+        decisions: { order: order.enabled, settings: settings.enabled }, selectedOrderDecision, settingsAdmission: settingsTask
       } });
   }
 };

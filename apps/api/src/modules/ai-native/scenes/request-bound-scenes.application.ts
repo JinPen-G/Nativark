@@ -13,6 +13,8 @@ import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, c
 import { prepareOriginalInputContinuation, type OriginalInputContinuationConfiguration } from '../task-input-admission.composition';
 import { prepareOriginalQuoteApprovalAdmission, prepareTaskCenterQuoteApprovalAdmission,
   type OriginalQuoteApprovalAdmissionConfiguration, type TaskCenterQuoteApprovalIntent } from '../task-approval-admission.composition';
+import { prepareOriginalSettingsApprovalAdmission, prepareTaskCenterSettingsApprovalAdmission,
+  type OriginalSettingsApprovalAdmissionConfiguration } from '../approval-execution/settings-approval-admission.composition';
 import type { TaskInputAdmissionIntent } from '../task-input-admission.application';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
@@ -608,11 +610,13 @@ export function composeRequestBoundSettingsTask(dependencies: Omit<ApprovedSetti
  * task/plan; an unpublished task still needs the original explicit producer. */
 export function composeRequestBoundPersistedSettingsTask(
   dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
-  options: AiSceneRequestOptions & { host: AiTaskApplicationHost }) {
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost },
+  approvalAdmission?: OriginalSettingsApprovalAdmissionConfiguration) {
   const host = Object.freeze(structuredClone(options.host)), scene = freezeOriginalInput(structuredClone(dependencies.scene));
   const selector = z.object({ taskId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     runId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).passthrough();
-  const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, async (input, value) => {
+  const server = { ...dependencies, scene }, requestOptions = { enabled: options.enabled, audience: options.audience };
+  const assemble = async (input: typeof server & { credentials: AiTaskCredentialSource }, value: unknown) => {
     const command = selector.safeParse(value);
     if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const authorization = composePersistedTaskAuthorization(input);
@@ -666,7 +670,9 @@ export function composeRequestBoundPersistedSettingsTask(
     return { settingsHost, input, verify: async () => {
       if ((await read()).binding !== before.binding) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     } };
-  }, { write: false });
+  };
+  const call = bindRequests(server, requestOptions, assemble, { write: false });
+  const admissionCall = bindRequests(server, requestOptions, input => input);
   const use = <R>(request: AiSceneHttpRequest, value: unknown,
     consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown) => Promise<R>,
     lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true }) =>
@@ -679,7 +685,27 @@ export function composeRequestBoundPersistedSettingsTask(
       }
       return result;
     }, lifetime);
+  const admitted = <R>(request: AiSceneHttpRequest, value: unknown, intent: 'explicit_decide' | 'explicit_continue',
+    consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown, signal?: AbortSignal) => Promise<R>, signal?: AbortSignal) => {
+    if (!approvalAdmission) return use(request, value, (root, command) => consume(root, command, signal),
+      intent === 'explicit_decide' ? { write: true, signal } : { write: true, signal, preflightOnly: true });
+    return admissionCall(request, value, (input, command) => callAiTaskRunnerDependency(async child => {
+      await prepareOriginalSettingsApprovalAdmission(input, command, intent, approvalAdmission, child);
+      const root = await waitForTaskApplicationDependency(() => assemble(input, command), false, child);
+      const result = await consume(root.settingsHost, command, child);
+      try { await waitForTaskApplicationDependency(root.verify, false, child); }
+      catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+      return result;
+    }, intent === 'explicit_decide' ? 20000 : 120000, 'original_settings_admitted_action', signal),
+    { write: true, signal, preflightOnly: true });
+  };
   return Object.freeze({
+    // Internal task-center preflight; no additional HTTP action is registered.
+    prepareTaskCenterApproval: (request: AiSceneHttpRequest, value: unknown, intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal) =>
+      admissionCall(request, value, (input, command) => callAiTaskRunnerDependency(async child => {
+        if (!approvalAdmission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await prepareTaskCenterSettingsApprovalAdmission(input, command, intent, approvalAdmission, child);
+      }, 15000, 'task_center_settings_admission', signal), { write: true, signal, preflightOnly: true }),
     readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (root, command) => {
       const settings = composeAiSettingsBusinessConsumer({ ...root.input, settingsHost: root.settingsHost });
       const persisted = composePersistedTaskCenter(root.input);
@@ -692,11 +718,11 @@ export function composeRequestBoundPersistedSettingsTask(
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
       use(request, value, (root, command) => root.application.readConfirmation(command), { write: false }),
     decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.settings.application.decide(command), { write: true, signal }),
+      admitted(request, value, 'explicit_decide', (root, command) => root.settings.application.decide(command), signal),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
       use(request, value, (root, command) => root.settings.application.readDecisionReceipt(command), { write: false }),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+      admitted(request, value, 'explicit_continue', (root, command, child) => root.application.continueOriginalConfirmation(command, child), signal),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       use(request, value, (root, command) => root.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
     cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
