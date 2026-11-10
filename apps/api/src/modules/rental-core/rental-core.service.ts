@@ -364,6 +364,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private readonly businessSettingsRevisions = new Map<string, number>();
   /** 同空间的读取与发布按调用顺序完成，避免旧响应覆盖已采用的新配置。 */
   private readonly configurationReadsByWorkspace = new Map<string, Promise<void>>();
+  /** A missing committed profile must not become a current profile through a
+   * recovery snapshot. Cleared by an authoritative read or explicit profile save. */
+  private readonly missingCommittedProfiles = new Set<string>();
   /**
    * 「租户 → 默认经营空间」与「经营空间 → 品类」。
    *
@@ -579,6 +582,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    */
   private async factContext(tenantId: string) {
     const committed = await this.refreshCommittedWorkspace(tenantId);
+    if (committed && !committed.effectiveProfile) throw new ConflictException("经营空间档案尚未持久化，不能通过业务访问重新初始化");
     if (committed && !committed.businessSettings) throw new ConflictException("经营设置尚未持久化，不能通过业务访问重新初始化空间");
     const workspaceId = this.workspaceOf(tenantId);
     const state = this.state(tenantId);
@@ -684,6 +688,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async persist(tenantId: string) {
     // 快照已按经营空间存档，因此直接存**当前**空间的状态，不必再固定挑默认空间。
     const workspaceId = this.workspaceOf(tenantId);
+    if (this.missingCommittedProfiles.has(workspaceId)) throw new ConflictException("经营空间档案缺失，不能把模板占位写成恢复资料");
     const state = this.states.get(workspaceId);
     if (state) await this.stateRepository?.saveCoreState(tenantId, workspaceId, state);
   }
@@ -711,14 +716,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.definition.code !== snapshot.workspaceCategoryCode) {
         throw new ConflictException("空间配置快照的作用域或品类不一致");
       }
+      if (snapshot.profile && (snapshot.profile.tenantId !== tenantId || snapshot.profile.categoryCode !== snapshot.definition.code)) {
+        throw new ConflictException("经营空间档案与当前租户或品类不一致，不能用模板覆盖");
+      }
       const seeded = this.seedState(tenantId, snapshot.definition.code, this.seedPrefix(tenantId, workspaceId), snapshot.businessSettings?.pricing.currency ?? "CNY", snapshot.definition);
       const state = this.states.get(workspaceId) ?? seeded;
-      const profile = snapshot.profile?.categoryCode === snapshot.definition.code ? snapshot.profile : seeded.profile;
-      const effectiveProfile = { ...structuredClone(profile), terminology: {
+      const profile = snapshot.profile;
+      const effectiveProfile = profile ? { ...structuredClone(profile), terminology: {
         ...snapshot.definition.terminology, ...profile.terminology,
         navigationLabels: { ...snapshot.definition.terminology.navigationLabels, ...profile.terminology.navigationLabels }
-      }, categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision };
-      Object.assign(state, { profile: effectiveProfile,
+      }, categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision } : undefined;
+      if (effectiveProfile) this.missingCommittedProfiles.delete(workspaceId); else this.missingCommittedProfiles.add(workspaceId);
+      // Keep the internal editor's template placeholder only for an explicit
+      // profile save. Business readers and recovery writes reject its absence.
+      Object.assign(state, { profile: effectiveProfile ?? seeded.profile,
         businessSettings: snapshot.businessSettings ? structuredClone(snapshot.businessSettings) : seeded.businessSettings,
         operators: structuredClone(snapshot.operators), locations: structuredClone(snapshot.locations), itemGroups: structuredClone(snapshot.itemGroups),
         pricingGroups: structuredClone(snapshot.pricingGroups ?? []), couponTemplates: structuredClone(snapshot.couponTemplates), inspectionTemplates: structuredClone(snapshot.inspectionTemplates),
@@ -737,6 +748,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async readBusinessContext(tenantId: string): Promise<BusinessContext> {
     const snapshot = await this.refreshCommittedWorkspace(tenantId);
     if (snapshot) {
+      if (!snapshot.effectiveProfile) throw new ConflictException("经营空间档案尚未持久化，不能以模板值创建业务");
       if (!snapshot.businessSettings) throw new ConflictException("经营设置尚未持久化，不能以当前默认值创建业务");
       return structuredClone({ profile: snapshot.effectiveProfile, category: snapshot.definition, settings: snapshot.businessSettings,
         groups: snapshot.itemGroups.map(group => this.publicItemGroup(group)), pricingGroups: snapshot.pricingGroups ?? [], couponTemplates: snapshot.couponTemplates,
@@ -878,6 +890,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
   async getProfile(tenantId: string) {
     const current = await this.refreshCommittedWorkspace(tenantId);
+    if (current && !current.effectiveProfile) throw new ConflictException("经营空间档案尚未持久化，不能以模板值冒充当前配置");
     const profile = current?.effectiveProfile ?? this.state(tenantId).profile;
     const defaults = (current?.definition ?? await this.effectiveCategory(tenantId, profile.categoryCode)).terminology;
     return {
@@ -1235,7 +1248,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async saveProfile(tenantId: string, input: SaveTenantRentalProfileRequest) {
-    const { definition, binding } = await this.categoryWriteContext(tenantId, input.categoryCode);
+    const { definition, binding } = await this.categoryWriteContext(tenantId, input.categoryCode, true);
     const state = this.state(tenantId);
     const categoryChanged = state.profile.categoryCode !== input.categoryCode;
     if (categoryChanged) throw new ConflictException("SaaS 租户创建后经营品类固定，不能切换");
@@ -1256,12 +1269,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         }
       },
       configVersion: definition.version,
+      ...(binding ? { categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision } : {}),
       updatedAt: now()
     };
     // 先写库，成功后再落缓存：库写失败时缓存保持原状，
     // 不留只存在于当前进程的幽灵配置。
     await this.configStore.upsertProfile(nextProfile, undefined, undefined, binding);
     state.profile = nextProfile;
+    this.missingCommittedProfiles.delete(this.workspaceOf(tenantId));
     return state.profile;
   }
 
@@ -5889,10 +5904,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
     return resolved.definition;
   }
-  private async categoryWriteContext(tenantId: string, code: RentalCategoryCode) {
+  private async categoryWriteContext(tenantId: string, code: RentalCategoryCode, allowProfileInitialization = false) {
     const current = await this.refreshCommittedWorkspace(tenantId);
     if (current) {
       if (current.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
+      if (!current.effectiveProfile && !allowProfileInitialization) throw new ConflictException("经营空间档案尚未持久化，请先明确保存档案");
       return { definition: current.definition, binding: current.binding };
     }
     if (!this.categoryResolver) return { definition: this.category(code), binding: undefined };

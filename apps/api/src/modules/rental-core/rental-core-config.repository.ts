@@ -258,7 +258,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         throw new ConflictException("空间配置包含空间外的组成或定价成员，不能读取其他空间资料补齐");
       }
       const isDefault = workspace?.defaultMarker === "default";
-      const profile = isDefault ? this.toProfile(tenantProfile ?? undefined) : await this.readSavedWorkspaceProfile(tx, tenantId, workspaceId, definition.code);
+      const profile = isDefault ? this.readDefaultWorkspaceProfile(tenantProfile, tenantId, definition)
+        : await this.readSavedWorkspaceProfile(tx, tenantId, workspaceId, definition.code);
       return { tenantId, workspaceId, workspaceCategoryCode: definition.code, definition, binding, isDefault,
         profile, businessSettings: this.toBusinessSettings(settings ?? undefined),
         operators: operators.map(row => this.toOperator(row)), locations: locations.map(row => this.toLocation(row)),
@@ -268,6 +269,20 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         couponTemplates: coupons.map(row => this.toCouponTemplate(row)), inspectionTemplates: inspections.map(row => this.toInspectionTemplate(row)),
         hasPersistedConfig: Boolean(settings || operators.length || locations.length || groups.length || pricing.length || coupons.length || inspections.length) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  private readDefaultWorkspaceProfile(
+    row: Parameters<RentalCoreConfigRepository["toProfile"]>[0] | null, tenantId: string, definition: RentalCategoryDefinition
+  ): TenantRentalProfile | undefined {
+    if (!row) return undefined;
+    if (row.tenantId !== tenantId || lower(row.categoryCode) !== definition.code || !Array.isArray(row.capabilities)
+      || !row.terminology || typeof row.terminology !== "object" || Array.isArray(row.terminology))
+      throw new ConflictException("默认空间档案来源或结构无效，不能用模板覆盖");
+    const profile = this.toProfile(row)!;
+    // Existing records may omit later display labels. Merge those labels only
+    // after establishing a real profile; never invent module choices or dates.
+    return this.parseWorkspaceProfile({ ...profile, terminology: { ...definition.terminology, ...profile.terminology,
+      navigationLabels: { ...definition.terminology.navigationLabels, ...profile.terminology.navigationLabels } } }, tenantId, definition.code);
   }
 
   /** Only the persisted profile paths are current configuration here. The
