@@ -56,7 +56,7 @@ export function ConversationOrderResults({ conversationId, turn, current }: {
         <p>{t('订单来源')}: {safeDisplayText(facts.sources[0].resourceId, 191)} · {t('来源空间')}: {safeDisplayText(facts.scope.workspaceId, 191)}</p>
         <dl>{amounts.map(key => <div key={key}><dt>{t(labels[key])}</dt><dd>{facts.order.amounts[key] === null
           ? t('未加载') : `${String(facts.order.amounts[key])} ${facts.order.currency}`}</dd></div>)}</dl>
-        <p>{t('支付凭证与历史费用依据未加载，不代表支付已完成。')}</p>
+        <p>{t('原回答关联快照未加载支付与历史依据；当前原业务事实另行核对。')}</p>
       </section> : <p>{t(result.facts.result.status === 'stale' ? '事实已变化，旧正文不显示，请回原业务页核对。'
         : result.facts.result.status === 'unknown' ? '结果待核对，不自动重试。' : '原事实步骤未提供可展示结果。')}</p>}
       {result.answer.result.status === 'available' ? <VisibleObservationBoundary kind="text"

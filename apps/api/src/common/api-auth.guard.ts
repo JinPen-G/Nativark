@@ -285,8 +285,10 @@ export function requiredPermissions(method: string, path: string) {
   if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`))
     return path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.review}`)
       ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS];
-  if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`))
-    return path.endsWith(`/${AI_TASK_RULE_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_RULE_DRAFT_HTTP.review}`)
+  if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation', 'preparation', 'previewPreparation', 'prepare', 'preparationOperation'] as const)
+    .some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`))
+    return (['save', 'review', 'previewPreparation', 'prepare'] as const)
+      .some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`)
       ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS];
   if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'source', 'usage', 'usageSummary', 'outcomes', 'performance', 'visibleReport', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business', 'continue', 'stop', 'stopReceipt', 'input', 'resumeInput', 'inputReceipt', 'continueInput'] as const)
     .some(action => path === `/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`))

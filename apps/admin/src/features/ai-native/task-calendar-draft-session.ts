@@ -39,25 +39,28 @@ export function createTaskCalendarDraftSession(input: { taskId: string; current(
   let view: TaskCalendarDraftView = { items: [], loaded: false, saveEnabled: false, review: null, operation: null,
     pending: saved?.taskId === input.taskId ? saved : null, locatorInvalid, busy: null, error: null };
   const publish = (update: Partial<TaskCalendarDraftView>) => { if (!active || !input.current()) return; view = { ...view, ...update }; input.changed(); };
-  const assert = () => { if (!active || !input.current()) throw Error('AI_SCOPE_CHANGED'); };
+  // Effect replay can reactivate this session; an old request still retains its aborted signal.
+  const assert = (signal?: AbortSignal) => { if (!active || !input.current() || signal?.aborted) throw Error('AI_SCOPE_CHANGED'); };
+  const reset = () => { request?.abort(); request = null; view = { ...view, items: [], loaded: false, saveEnabled: false,
+    review: null, operation: null, busy: null, error: null }; };
   const assertReference = (value: AiTaskCalendarDraftReference) => { assert(); aiTaskCalendarDraftReference.parse(value);
     if (value.taskId !== input.taskId) throw Error('AI_SCOPE_CHANGED'); };
   const run = async <T>(kind: NonNullable<TaskCalendarDraftView['busy']>, action: (signal: AbortSignal) => Promise<T>): Promise<T> => {
     assert(); if (view.busy) throw Error('AI_OPERATION_BUSY'); const owner = new AbortController(); request = owner;
     publish({ busy: kind, error: null });
-    try { const result = await action(owner.signal); assert(); if (owner.signal.aborted) throw Error('AI_SCOPE_CHANGED'); return result; }
-    catch (error) { publish({ error }); throw error; }
+    try { const result = await action(owner.signal); assert(owner.signal); return result; }
+    catch (error) { if (request === owner && !owner.signal.aborted) publish({ error }); throw error; }
     finally { if (request === owner) { request = null; publish({ busy: null }); } }
   };
   return Object.freeze({ get view() { return view; },
     async list() { return run('list', async signal => { const value = await input.api.list(input.taskId, signal);
-      assert(); if (value.taskId !== input.taskId || value.items.some(item => item.reference.taskId !== input.taskId)) throw Error('AI_SCOPE_CHANGED');
+      assert(signal); if (value.taskId !== input.taskId || value.items.some(item => item.reference.taskId !== input.taskId)) throw Error('AI_SCOPE_CHANGED');
       publish({ items: value.items, loaded: true, saveEnabled: value.saveEnabled && !view.locatorInvalid, review: null }); }); },
     async review(reference: AiTaskCalendarDraftReference, overrideReason: string, overrideConfirmed: boolean) {
       assertReference(reference);
       if (view.pending) throw Error('AI_RESULT_UNKNOWN');
       return run('review', async signal => { const value = await input.api.review({ ...reference, overrideReason, overrideConfirmed }, signal);
-        assert(); if (!same(value.reference, reference)) throw Error('AI_SCOPE_CHANGED'); publish({ review: value, operation: null }); });
+        assert(signal); if (!same(value.reference, reference)) throw Error('AI_SCOPE_CHANGED'); publish({ review: value, operation: null }); });
     },
     async save() {
       assert(); const reviewed = view.review;
@@ -70,25 +73,27 @@ export function createTaskCalendarDraftSession(input: { taskId: string; current(
         if (!persisted || !same(persisted, reviewed.reference)) {
           publish({ locatorInvalid: true, saveEnabled: false }); throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
         }
-        assert(); if (signal.aborted) throw Error('AI_SCOPE_CHANGED');
+        assert(signal);
         publish({ pending: reviewed.reference, review: null });
         try { const value = await input.api.save({ ...reviewed.reference, overrideReason: reviewed.overrideReason, overrideConfirmed: reviewed.overrideConfirmed,
           reviewHash: reviewed.reviewHash, decision: 'save_original_business_draft' }, signal);
-          assert(); if (!same(value.reference, reviewed.reference) || value.operation.state !== 'committed') throw Error('AI_RESULT_UNKNOWN');
+          assert(signal); if (!same(value.reference, reviewed.reference) || value.operation.state !== 'committed') throw Error('AI_RESULT_UNKNOWN');
           input.store.clear(reviewed.reference); publish({ operation: value, pending: null });
-        } catch (error) { publish({ review: null }); throw error; }
+        } catch (error) { if (!signal.aborted) publish({ review: null }); throw error; }
       });
     },
     async operation(reference: AiTaskCalendarDraftReference) {
       assertReference(reference);
       return run('operation', async signal => { const value = await input.api.operation(reference, signal);
-        assert(); if (!same(value.reference, reference)) throw Error('AI_SCOPE_CHANGED');
+        assert(signal); if (!same(value.reference, reference)) throw Error('AI_SCOPE_CHANGED');
         if (value.operation.state === 'committed' && view.pending && same(view.pending, reference)) { input.store.clear(reference); publish({ pending: null }); }
         // not_observed does not clear unknown or permit another save.
         publish({ operation: value, review: null });
       });
     },
     clearReview() { publish({ review: null }); },
-    dispose() { active = false; request?.abort(); request = null; view = { ...view, items: [], review: null, operation: null, busy: null, error: null }; }
+    activate() { reset(); active = true; publish({}); },
+    clear() { reset(); publish({}); },
+    dispose() { active = false; reset(); }
   });
 }

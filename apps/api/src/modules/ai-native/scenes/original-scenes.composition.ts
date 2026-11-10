@@ -73,7 +73,7 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     compareOriginalQuotes: facts.compareOriginalQuotes.bind(facts),
     async readRecovery(value: unknown) {
       const authorization = composePersistedTaskAuthorization(input);
-      return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks).read(value);
+      return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks, clock).read(value);
     },
     async prepareTaskMaterial(value: unknown, purpose: 'execution_preparation' | 'read_only' | 'order_history_read' = 'execution_preparation') {
       const parsed = originalRequestReferenceSchema.safeParse(value);

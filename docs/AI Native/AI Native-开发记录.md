@@ -1,10 +1,33 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-11-10。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。治理整理不改变需求v1.14/任务v1.18的范围或验收，也不新增功能进度。
+> 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。治理整理不改变需求v1.14/任务v1.18的范围或验收，也不新增功能进度。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
 > 最近门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain-runtime-publication-20261111"></a>
+## 核心发布配置生产提供者与原规则准备接点（2026-11-11）
+
+前置未完成成果已按固定33文件提交 `dac1c9d651d2537cb1d3f30f917b154171048efb` 并推送；随后从固定main `6b2dd0ad891a6acc53284928e1ea4717fb587f64` 同步环境/治理修复，形成 `d7929c4394e6ffce9f4afad568a8ab8f9b3cbe46` 并核对远端。15份MCP type-import修复前后转译JavaScript相同；两位助手活动文件均未夹带，main未混入未完成AI成果。
+
+原应用虽有会话、模型和受控动作工厂，却未提供其配置token。现由[运行发布配置](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)通过既有ConfigService读取 `AI_NATIVE_RUNTIME_PUBLICATION`，在原[provider集合](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)与[AppModule](../../apps/api/src/app.module.ts)注册真实来源。输入为最多64KiB的JSON，版本固定 `ain-runtime-publication-1`，包含发布标识 `revision` 和闭合的 `configurations` 名称集合；各值仍经所属原工厂的严格schema校验，错误不输出原配置正文。未提供配置时保持原关闭行为。
+
+已接入的独立名称为 `conversations`、`orderModel`、`quoteModel`、`openingModel`、`quoteOrderExecution`、`settingsExecution`、`businessRuleDraft`、`calendarDraft`、`memberName`、`capabilityProbe`、`platformCapabilityProbe`、`inputCounting`、`budgetManagement`。模型启用不派生付费能力挑战、计数、正式开单或配置写入；预算管理保留原有同账兼容规则，显式关闭优先。来源只提供已发布的服务器配置，不写场景/任务政策、不创建额度、不提供凭据或执行动作。实际模型、费率、能力证据、当前权限和原账仍须原生产服务认可。本轮没有设置实际部署值或启用真实调用。
+
+同时补原 `rule_versions` 封闭GET桥（空输入、原Guard/ALS），开业R1宿主的可选 `reviewedMaterialHash` 在重新准备材料之后、发布计划之前拒绝差异；原场景政策目录补回已实现的 `tenant.config.propose`，由原管理员显式发布，不自动种政策。订单v2消费者补齐英文，原回答快照文案明确与当前业务事实分别核对。
+
+原 `TaskRuleDraft` 现可选择真实规则版本、编辑六个已批准布尔字段、预览后明确发起关联的新请求，保存AI提案，再核对并保存Core草稿；21条探测只显示最新20个候选及有更多版本的说明，不自动选第一条。旧诊断Task/Run/计划不改写。8个原Controller action与shared/OpenAPI/Guard一致，预览与准备保持 `rules:manage`。初始[准入参加者](../../apps/api/src/modules/ai-native/task-execution-admission.application.ts)和[原仓储授权适配](../../apps/api/src/modules/ai-native/task-execution-admission.authority.ts)按真实发布政策、当前本人/资源权限签最小原CAS，claim最后，不借manager。其固定blob分别为 `7a582460e9f29692d66f43454dd3fb0da1f6c159`、`4f0c56a8d0511a431ced75d90175e6b6e15a82e6`；原回执不伪造发布证明、不授新执行。
+
+负责人通过[原启动请求接线](../../apps/api/src/modules/ai-native/task-start-admission.composition.ts)把参加者接回订单/报价/开业模型的明确start及规则R1准备。已有运行不补新政策，真正的运行器继续核原权限、租约、模型/预算和Core。首次页面预检可按原当前业务读权读取经真实有界查询确认的空Task元数据；已有步骤、计划、输入或结果仍要求原任务政策。该只读路径不写政策或宣称从元数据证明未执行。签发后的不确定结果只留原定位，不能靠重放旧收据再启动。
+
+实际命令为 PowerShell here-string 管道到 `node`：原TypeScript5.9.3/noEmit检查与纯内存Nest容器冒烟分开执行。后者加载实际14个provider（1个配置源、13个原token），验证源读取一次、缺省/非法发布拒绝、独立开关及不可变快照，exit0。没有加载AppModule启动配置、监听端口、连接数据库或模型。首次源码加载误选受版本控制的旧 `packages/shared/src/core.js`，改用 `ts-node preferTsExts:true` 后通过；Vite原已优先TS，没有删除旧文件。所有离线调用沿原preload和不可达DATABASE_URL，审计0、临时目录不存在，未增加测试脚本。
+
+负责人另独立核验8个规则文件固定blob（排序清单SHA-256 `d15cfa8e01913af054448fbe20cfb799c2e814a5a6b9ead2ed360034654a7b0a`），执行当前Controller/DTO、实际前端API与两个session、实际上述start-admission、原R1及Core草稿的单组闭环，exit0：R1准备接口1次、Core保存接口1次，两次服务器完成后丢HTTP应答均只读原操作，旧Task不变，模型调用0；AI提案总数2含fixture原有1份，新Core草稿1份。使用原serialized内存store及显式合成Auth/资源/HTTP宿主，仅在内存将两份fixture的相对Client导入指向已核主API Client，并声明缺失的空表；没有改原测试或冒称原真库用例通过。此命令手工组合请求应用并注入真实start-admission，不是完整Nest/AppModule运行或真HTTP/浏览器验收。
+
+当前AppModule/OpenAPI及新准入/核心组合5根API和新增初始读/启动3根API的传递类型检查均exit0；shared全出口与后台相关12根检查exit0。空初始任务、已有Step、身份变化、已发布计划四项独立内存冒烟通过：仅真实空视图绕开尚未存在的任务政策，其余仍拒绝或走原政策。日历两文件也修复StrictMode失活和旧signal迟到交付，固定blob为 `7805fdc3eb1e6b5bcb87b83f74e83a6099a13ca7`、`b3f687e121614053a8b9f04e5e7182292c2eaa9a`；作者会话冒烟及两根类型通过，负责人核对固定差异，未替代真实浏览器。
+
+c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务确认：旧夹具触发的是首个 `initial_metadata/5000ms` timer，模型尚未派发，两版均返回unavailable，exit1。保留原失败与断言，不将纯读失败改成外部unknown来换绿色。原AIN/ENTRY尚未跨G4，百分比不变；完整普通用户运行、规则R1到Core草稿、报价新材料及适用真实环境仍待完成。
 
 <a id="ain-core-checkpoint-20261111"></a>
 ## 核心消费者与恢复宿主检查点（2026-11-11，未完成）

@@ -2329,11 +2329,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
     authRequired: true, summary: 'Explicit original member-name human workflow; current original manager and Core remain authoritative. Unknown is read only.',
     requestSchema: AI_MEMBER_NAME_CONTRACTS[action], responseSchema: 'AiMemberNameResponse' })),
-  ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
+  ...(['list', 'review', 'save', 'operation', 'preparation', 'previewPreparation', 'prepare', 'preparationOperation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`, tag: 'AI Native', operationId: `aiTaskRuleDraft_${action}`,
-    permissions: action === 'save' || action === 'review' ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS],
+    permissions: action === 'save' || action === 'review' || action === 'previewPreparation' || action === 'prepare'
+      ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS],
+    authRequired: true,
     summary: action === 'save' ? 'Explicit human save of a reviewed original rule draft. No publication. Unknown: read the same original operation.'
-      : action === 'operation' ? 'Read original rule draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned rule proposal or full Core candidate review.',
+      : action === 'operation' ? 'Read original rule draft operation from server-owned Task/Step/proposal linkage.'
+      : action === 'preparation' ? 'Read current rule candidates for an owned diagnosis. No implicit version selection.'
+      : action === 'previewPreparation' ? 'Review six permitted rule fields under the original rule edit permission. No persistence.'
+      : action === 'prepare' ? 'Explicitly prepare a linked new rule AI proposal. Preserve the original diagnostic plan; no Core draft or publication.'
+      : action === 'preparationOperation' ? 'Read the original linked rule preparation result without restarting it.'
+      : 'Current owned rule proposal or full Core candidate review.',
     requestSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].response })),
   ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`, tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`,

@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { AI_TASK_RULE_DRAFT_VERSION, AI_TASK_RULE_DRAFT_HTTP, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION,
   aiTaskRuleDraftListInput, aiTaskRuleDraftReference, aiTaskRuleDraftReviewInput, aiTaskRuleDraftSaveInput,
   aiTaskRuleDraftListResponse, aiTaskRuleDraftReviewResponse, aiTaskRuleDraftOperationResponse,
-  type AiTaskRuleDraftReference, type AiProposalPayloadDraft } from '@rental-os/shared';
+  type AiTaskRuleDraftReference, type AiProposalPayloadDraft, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import { composePersistedTaskAuthorization } from './task-authorization.composition';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { aiStepActionId } from './ai-step-registration.repository';
@@ -26,10 +26,16 @@ import { withRequestAbort } from './scenes/request-abort';
 import { AiTaskRuleDraftListDto, AiTaskRuleDraftReferenceDto, AiTaskRuleDraftReviewDto, AiTaskRuleDraftSaveDto } from './task-rule-draft.dto';
 import { AiBusinessReadRouteAuthority } from './business-read-route.authority';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
+import { composeTaskRuleDraftPreparation } from './task-rule-draft-preparation.composition';
+import { AiTaskRuleDraftPreparationPreviewDto, AiTaskRuleDraftPrepareDto, AiTaskRuleDraftPreparationReferenceDto } from './task-rule-draft.dto';
 
 export const AI_TASK_RULE_DRAFT_REQUESTS = Symbol('AI_TASK_RULE_DRAFT_REQUESTS');
 export type TaskRuleDraftDependencies = { original: Parameters<typeof composeRequestBoundOpeningRuleDraftSave>[0];
-  host: AiTaskApplicationHost; saveEnabled: boolean };
+  host: AiTaskApplicationHost; saveEnabled: boolean;
+  /** Original current-owner published-policy participant, injected by the host.
+   * The opening runner independently verifies every actual execution policy. */
+  preparationAdmission?(request: { headers: { authorization?: unknown } }, original: AiSceneRequestReadDraft,
+    target: { kind: 'business_rule'; targetId: string }, signal?: AbortSignal): Promise<void> };
 type Request = { headers: { authorization?: unknown } };
 const canonical = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown;
 const parse = <S extends z.ZodTypeAny>(schema: S, value: unknown): z.infer<S> => {
@@ -160,7 +166,9 @@ export function composeRequestBoundTaskRuleDraft(d: TaskRuleDraftDependencies) {
       await bound.verify(); return aiTaskRuleDraftOperationResponse.parse({ ...envelope, reference, operation: projectOperation(result.operation) });
     }, action === 'save', signal);
   };
-  return Object.freeze({ list: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'list', signal),
+  const preparation = composeTaskRuleDraftPreparation({ ...d, resolve: source,
+    saved: async (request, taskId, signal) => aiTaskRuleDraftListResponse.parse(await call(request, { taskId }, 'list', signal)) });
+  return Object.freeze({ ...preparation, list: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'list', signal),
     review: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'review', signal),
     save: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'save', signal),
     operation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'operation', signal) });
@@ -180,4 +188,17 @@ export class AiTaskRuleDraftController {
   save(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftSaveDto) { return this.respond(request, body, 'save'); }
   @Post(AI_TASK_RULE_DRAFT_HTTP.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   operation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftReferenceDto) { return this.respond(request, body, 'operation'); }
+  private prepareResponse(request: IncomingMessage, value: unknown,
+    action: 'preparation' | 'previewPreparation' | 'prepare' | 'preparationOperation') {
+    return respondAiScene(() => withRequestAbort(request, signal => this.requests[action](request,
+      (request as IncomingMessage & { body?: unknown }).body ?? value, signal)), 'read_original_rule_preparation');
+  }
+  @Post(AI_TASK_RULE_DRAFT_HTTP.preparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  preparation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftListDto) { return this.prepareResponse(request, body, 'preparation'); }
+  @Post(AI_TASK_RULE_DRAFT_HTTP.previewPreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  previewPreparation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftPreparationPreviewDto) { return this.prepareResponse(request, body, 'previewPreparation'); }
+  @Post(AI_TASK_RULE_DRAFT_HTTP.prepare) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepare(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftPrepareDto) { return this.prepareResponse(request, body, 'prepare'); }
+  @Post(AI_TASK_RULE_DRAFT_HTTP.preparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  preparationOperation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftPreparationReferenceDto) { return this.prepareResponse(request, body, 'preparationOperation'); }
 }

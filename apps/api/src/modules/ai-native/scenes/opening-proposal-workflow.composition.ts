@@ -314,13 +314,19 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
       await found.verify();
       return freezeOriginalInput({ original: command.original, material, persistence: 'not_attempted' as const });
     },
-    async start(value: unknown, signal?: AbortSignal) {
+    async start(value: unknown, signal?: AbortSignal, reviewedMaterialHash?: string) {
       const command = commandSchema.parse(structuredClone(value));
+      if (reviewedMaterialHash !== undefined && (typeof reviewedMaterialHash !== 'string' || !/^[a-f0-9]{64}$/u.test(reviewedMaterialHash)))
+        throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
       const { found, root } = await waitForTaskApplicationDependency(async () => {
         const found = await target(command.original, false);
         if (!found.sections.includes(command.section.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         let material = verifyOpeningSectionMaterial(await differences.prepare(command.section, found.original.context));
+        // A human consumer may bind its reviewed difference. Refreshing the
+        // source cannot silently approve changed material before plan freezing.
+        if (reviewedMaterialHash !== undefined && material.materialHash !== reviewedMaterialHash)
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         if (material.status === 'no_change') return { found, root: null, material };
         const row = await input.db.aiTaskPlanPolicy.findFirst({ where: { scopeId: found.task.scopeId,
           sceneCode: found.task.sceneCode, sceneVersion: found.task.sceneVersion } });

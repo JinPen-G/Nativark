@@ -2,6 +2,8 @@ import { AI_TASK_READ_POLICY_REQUESTS, composeTaskReadPolicyRequests } from './t
 import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } from './task-order-handoff.application';
 import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft } from './task-calendar-draft.application';
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
+import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider } from './runtime-publication.configuration';
+import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
 /**
  * 职责：将正式业务服务、当前身份和持久仓储接到 AI Native 的 Nest provider 入口。
  * 边界：装配不等于执行开放；各请求仍核验当前政策、权限与实际可用的依赖。
@@ -401,8 +403,10 @@ export const AI_NATIVE_TASK_RULE_DRAFT_PROVIDER: FactoryProvider = {
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, configuration?: unknown) => {
     const parsed = z.object({ saveEnabled: z.boolean() }).strict().safeParse(configuration ?? { saveEnabled: false });
     if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    return composeRequestBoundTaskRuleDraft({ original: { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), business },
-      saveEnabled: parsed.data.saveEnabled, host: { holderId: 'ai-native-rule-draft-human', leaseMs: 100000 } });
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db, business };
+    return composeRequestBoundTaskRuleDraft({ original,
+      saveEnabled: parsed.data.saveEnabled, host: { holderId: 'ai-native-rule-draft-human', leaseMs: 100000 },
+      preparationAdmission: createOriginalTaskStartAdmission(original, 'opening_diagnosis') });
   }
 };
 
@@ -558,8 +562,10 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    return composeRequestBoundPersistedOriginalSceneModel({
-      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const admission = createOriginalTaskStartAdmission(original, 'quote_clarification');
+    const requests = composeRequestBoundPersistedOriginalSceneModel({
+      ...original,
       scene: { code: 'quote_clarification', version: '1' },
       gatewayScene: { sceneCode: 'quote_clarification', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -567,6 +573,11 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
         ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host });
+    const start: typeof requests.start = async (request, value, signal) => {
+      await admission(request, value, undefined, signal);
+      return requests.start(request, value, signal);
+    };
+    return Object.freeze({ ...requests, start });
   }
 };
 
@@ -588,8 +599,10 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const admission = createOriginalTaskStartAdmission(original, 'opening_diagnosis');
     const requests = composeRequestBoundPersistedOriginalSceneModel({
-      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+      ...original,
       scene: { code: 'opening_diagnosis', version: '1' },
       gatewayScene: { sceneCode: 'opening_diagnosis', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -597,14 +610,19 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
         ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host });
-    return Object.freeze({ start: requests.start, recover: requests.recover, reconcile: requests.reconcile,
+    const start: typeof requests.start = async (request, value, signal) => {
+      await admission(request, value, undefined, signal);
+      return requests.start(request, value, signal);
+    };
+    return Object.freeze({ start, recover: requests.recover, reconcile: requests.reconcile,
       takeover: requests.takeover, requestCancel: requests.requestCancel, readExecution: requests.readExecution });
   }
 };
 
 /** Separate server-owned probe configuration: enabling an order workflow must
  * not implicitly permit billable capability challenges (or vice versa). The
- * root installs neither token and never seeds policies or runs a probe. */
+ * publication supplies its independent gate; construction never seeds policies
+ * or runs a probe. */
 export const AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION = Symbol('AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION');
 const probeConfiguration = z.discriminatedUnion('enabled', [
   z.object({ enabled: z.literal(false) }).strict(),
@@ -866,7 +884,7 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
         ...(quote.enabled ? ['rental.order.commit'] as const : []),
         ...(quoteModel.enabled ? ['ai.model.text'] as const : [])] as const },
       { scene: { code: 'opening_diagnosis', version: '1' }, tools: [
-        'tenant.opening.diagnose', ...(settings.enabled ? [AI_APPROVED_SETTINGS_TOOL_CODE] as const : []),
+        'tenant.opening.diagnose', 'tenant.config.propose', ...(settings.enabled ? [AI_APPROVED_SETTINGS_TOOL_CODE] as const : []),
         ...(openingModel.enabled ? ['ai.model.text'] as const : [])] as const },
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
         tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
@@ -894,8 +912,10 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }]))) as unknown as OriginalOrderReadHttpRequests;
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    return selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
-      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const admission = createOriginalTaskStartAdmission(original, 'order_explanation');
+    const requests = selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
+      ...original,
       scene: { code: 'order_explanation', version: '1' },
       gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -904,6 +924,11 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host,
       orderReadChain: { enabled: true, answerRoundTrip: true } }));
+    const start: typeof requests.start = async (request, value, signal) => {
+      await admission(request, value, undefined, signal);
+      return requests.start(request, value, signal);
+    };
+    return Object.freeze({ ...requests, start });
   }
 };
 
@@ -925,3 +950,22 @@ export const AI_NATIVE_MEMBER_NAME_PROVIDER: FactoryProvider = {
       { enabled: configuration.enabled, host: { holderId, leaseMs: 100000 } });
   }
 };
+
+/** Deployment publication supplies existing independent gates. None of these
+ * bindings initializes task policy, approves an action or dispatches a model. */
+export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
+  AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER,
+  runtimeConfigurationProvider(AI_NATIVE_CONVERSATION_CONFIGURATION, 'conversations'),
+  runtimeConfigurationProvider(AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, 'orderModel'),
+  runtimeConfigurationProvider(AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, 'quoteModel'),
+  runtimeConfigurationProvider(AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, 'openingModel'),
+  runtimeConfigurationProvider(AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, 'quoteOrderExecution'),
+  runtimeConfigurationProvider(AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, 'settingsExecution'),
+  runtimeConfigurationProvider(AI_NATIVE_TASK_RULE_DRAFT_CONFIGURATION, 'businessRuleDraft'),
+  runtimeConfigurationProvider(AI_NATIVE_TASK_CALENDAR_DRAFT_CONFIGURATION, 'calendarDraft'),
+  runtimeConfigurationProvider(AI_NATIVE_MEMBER_NAME_CONFIGURATION, 'memberName'),
+  runtimeConfigurationProvider(AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, 'capabilityProbe'),
+  runtimeConfigurationProvider(AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, 'platformCapabilityProbe'),
+  runtimeConfigurationProvider(AI_NATIVE_INPUT_COUNTING_CONFIGURATION, 'inputCounting'),
+  runtimeConfigurationProvider(AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION, 'budgetManagement'),
+];

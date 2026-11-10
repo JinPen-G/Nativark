@@ -1,10 +1,11 @@
 /** Existing Task detail -> original calendar proposal -> reviewed Core draft.
  * Only the original save receipt reports completion; unknown is read only. */
-import { useEffect, useId, useMemo, useReducer, useState } from 'react';
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import type { AiTaskCalendarDraftReviewResponse } from '@rental-os/shared';
 import { ActionButton, Alert, Checkbox, ConfirmAction, Input } from '@/components/ui';
 import { aiTaskCalendarDraftApi } from '@/api/aiTaskCalendarDraft';
 import { useAuthStore } from '@/features/auth/authStore';
+import { currentSessionEpoch } from '@/app/queryClient';
 import { useAiManagementLocale } from './management-locale';
 import { createTaskCalendarDraftSession, taskCalendarDraftStore } from './task-calendar-draft-session';
 import { formatTimestamp } from './formatters';
@@ -34,16 +35,21 @@ export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied }:
   const { t } = useAiManagementLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
   const [reason, setReason] = useState(''), [overrideConfirmed, setOverrideConfirmed] = useState(false);
   const stableOwner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
+  const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, taskId, stableOwner, auth.user, epoch]);
+  const owner = useRef({ binding, current }); owner.current = { binding, current };
+  const active = () => owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { if (typeof window !== 'undefined') storage = window.localStorage; } catch { /* Preserve-before-save refuses unavailable storage. */ }
-    return createTaskCalendarDraftSession({ taskId, current, api: aiTaskCalendarDraftApi,
+    return createTaskCalendarDraftSession({ taskId, current: active, api: aiTaskCalendarDraftApi,
       store: taskCalendarDraftStore(`rental-os-calendar-draft:${stableOwner}`, storage), changed });
-  }, [identity, taskId]);
-  useEffect(() => () => session.dispose(), [session]);
+  }, [binding]);
+  useEffect(() => { session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
+    return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
+  if (!active()) return null;
   const data = session.view, canManage = auth.hasPermission('rental-os:calendar:edit');
   const action = (work: () => Promise<void>) => async () => { try { await work(); } catch (error) {
     const status = (error as { response?: { status?: number } }).response?.status;
-    if (status === 401 || status === 403) onAccessDenied(); throw error;
+    if (active() && (status === 401 || status === 403)) onAccessDenied(); throw error;
   } };
   const committed = data.operation?.operation.state === 'committed' ? data.operation.operation : null;
   return <section className={styles.stack} aria-label={t('日历业务草稿')}>
