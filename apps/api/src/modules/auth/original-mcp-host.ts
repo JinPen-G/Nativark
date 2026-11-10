@@ -26,14 +26,14 @@ import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import type { McpCatalogGoalControlPlaneConfig } from '@rental-os/mcp-server/catalog-goal-control-plane' with { 'resolution-mode':'import' };
 import type { OriginalClientReviewVerificationSource } from './original-mcp-client-review-management';
 import type { OriginalNoticeReviewVerificationSource } from './original-mcp-notice-review-management';
-import type { createMcpHostRouter } from '@rental-os/mcp-server/host-router';
-import type { createPrismaOAuthConsentPolicyReader } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store';
-import type { McpReviewControlPlaneConfig } from '@rental-os/mcp-server/review-control-plane';
-import type { McpGrantControlPlaneConfig } from '@rental-os/mcp-server/grant-control-plane';
-import type { McpAdmissionControlPlaneConfig } from '@rental-os/mcp-server/admission-control-plane';
-import type { McpReviewedGovernanceConfig } from '@rental-os/mcp-server/reviewed-governance-control-plane';
-import type { McpSubjectControlPlaneConfig } from '@rental-os/mcp-server/subject-control-plane';
-import type { createMcpConsentControlPlane, McpConsentControlPlaneConfig } from '@rental-os/mcp-server/consent-control-plane';
+import type { createMcpHostRouter } from '@rental-os/mcp-server/host-router' with { 'resolution-mode': 'import' };
+import type { createPrismaOAuthConsentPolicyReader } from '@rental-os/mcp-server/prisma-oauth-consent-policy-store' with { 'resolution-mode': 'import' };
+import type { McpReviewControlPlaneConfig } from '@rental-os/mcp-server/review-control-plane' with { 'resolution-mode': 'import' };
+import type { McpGrantControlPlaneConfig } from '@rental-os/mcp-server/grant-control-plane' with { 'resolution-mode': 'import' };
+import type { McpAdmissionControlPlaneConfig } from '@rental-os/mcp-server/admission-control-plane' with { 'resolution-mode': 'import' };
+import type { McpReviewedGovernanceConfig } from '@rental-os/mcp-server/reviewed-governance-control-plane' with { 'resolution-mode': 'import' };
+import type { McpSubjectControlPlaneConfig } from '@rental-os/mcp-server/subject-control-plane' with { 'resolution-mode': 'import' };
+import type { createMcpConsentControlPlane, McpConsentControlPlaneConfig } from '@rental-os/mcp-server/consent-control-plane' with { 'resolution-mode': 'import' };
 export type OriginalMcpHostExports = OriginalMcpOAuthCoreExports & OriginalMcpReviewPackageExports & OriginalMcpGrantPackageExports
   & OriginalMcpAdmissionPackageExports & OriginalReviewedGovernancePackageExports & OriginalMcpSubjectPackageExports & Partial<OriginalMcpCatalogGoalPackageExports>
   & { createMcpHostRouter: typeof createMcpHostRouter; createPrismaOAuthConsentPolicyReader: typeof createPrismaOAuthConsentPolicyReader;

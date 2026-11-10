@@ -9,8 +9,8 @@ import type { PlatformService } from '../platform/platform.service';
 import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpBrowserIdentity } from './original-mcp-browser-identity';
 import { createOriginalMcpWorkspaceManagement } from './original-mcp-workspace-management';
-import type { capturePersistedOAuthGrant } from '@rental-os/mcp-server/prisma-oauth-grant-authority';
-import type { OriginalOAuthGrantManagement, PrismaOAuthGrantManagementStore, captureOAuthGrantRevocationReceipt } from '@rental-os/mcp-server/prisma-oauth-grant-management';
+import type { capturePersistedOAuthGrant } from '@rental-os/mcp-server/prisma-oauth-grant-authority' with { 'resolution-mode': 'import' };
+import type { OriginalOAuthGrantManagement, PrismaOAuthGrantManagementStore, captureOAuthGrantRevocationReceipt } from '@rental-os/mcp-server/prisma-oauth-grant-management' with { 'resolution-mode': 'import' };
 const unavailable = () => new Error('Original MCP grant management unavailable');
 function fields(value: unknown, names: readonly string[], closed = true): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw unavailable();

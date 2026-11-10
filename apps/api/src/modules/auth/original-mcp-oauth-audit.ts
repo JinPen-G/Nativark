@@ -4,9 +4,9 @@
  * exact original persisted grant/authorization in the same native transaction. */
 import type { Prisma } from '@prisma/client';
 import type { OperationLogService, OriginalOAuthAuditRecord } from '../../common/operation-log.service';
-import type { OriginalOAuthWebConsentPolicy } from '@rental-os/mcp-server/prisma-oauth-web-consent';
-import type { OriginalCompletedOAuthConsentSource } from '@rental-os/mcp-server/prisma-oauth-consent-authority';
-import type { OriginalOAuthCodeAudit } from '@rental-os/mcp-server/prisma-oauth-store';
+import type { OriginalOAuthWebConsentPolicy } from '@rental-os/mcp-server/prisma-oauth-web-consent' with { 'resolution-mode': 'import' };
+import type { OriginalCompletedOAuthConsentSource } from '@rental-os/mcp-server/prisma-oauth-consent-authority' with { 'resolution-mode': 'import' };
+import type { OriginalOAuthCodeAudit } from '@rental-os/mcp-server/prisma-oauth-store' with { 'resolution-mode': 'import' };
 
 export interface OriginalMcpOAuthAudit {
   consent: OriginalOAuthWebConsentPolicy<Prisma.TransactionClient>['audit'];

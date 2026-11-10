@@ -7,9 +7,9 @@ import type { AuthService } from './auth.service';
 import type { PlatformService } from '../platform/platform.service';
 import type { OperationLogService } from '../../common/operation-log.service';
 import { createOriginalMcpSubjectManagement } from './original-mcp-subject-management';
-import type { createMcpSubjectControlPlane, McpSubjectControlPlaneConfig } from '@rental-os/mcp-server/subject-control-plane';
-import type { createPrismaOAuthSubjectStore, captureOAuthSubjectReceipt } from '@rental-os/mcp-server/prisma-oauth-subject-store';
-import type { OAuthSqlDatabase } from '@rental-os/mcp-server/prisma-oauth-store';
+import type { createMcpSubjectControlPlane, McpSubjectControlPlaneConfig } from '@rental-os/mcp-server/subject-control-plane' with { 'resolution-mode': 'import' };
+import type { createPrismaOAuthSubjectStore, captureOAuthSubjectReceipt } from '@rental-os/mcp-server/prisma-oauth-subject-store' with { 'resolution-mode': 'import' };
+import type { OAuthSqlDatabase } from '@rental-os/mcp-server/prisma-oauth-store' with { 'resolution-mode': 'import' };
 export interface OriginalMcpSubjectPackageExports {
   createMcpSubjectControlPlane: typeof createMcpSubjectControlPlane;
   createPrismaOAuthSubjectStore: typeof createPrismaOAuthSubjectStore;
