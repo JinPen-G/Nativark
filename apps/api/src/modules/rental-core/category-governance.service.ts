@@ -11,7 +11,7 @@ import { CATEGORY_DRAFT_SECTIONS, CATEGORY_GOVERNANCE_PERMISSIONS as P, RENTAL_C
   type PublishCategoryDraftRequest, type SaveCategoryOpeningRequest, type SaveCategoryVersionPolicyRequest, type SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
-import { parsePublishedRentalCategory } from "./rental-category-resolver.service";
+import { parsePublishedRentalCategory, resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { rentalPricingStrategyReference } from "./rental-pricing-strategy";
 import { categoryScopeAllows } from "./category-governance-policy";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
@@ -117,7 +117,7 @@ export class CategoryGovernanceService {
     }
     const source = await db.rentalCategoryVersion.findUnique({ where: { id: input.sourceVersionId! } });
     if (!source || !["published", "legacy_baseline"].includes(source.status)) throw new BadRequestException("复制来源必须是已有发布版本");
-    return { definition: parsePublishedRentalCategory(source.definition, source.categoryCode), sourceKind: "category_copy" };
+    return { definition: resolveRentalCategoryVersionBody(source, source.categoryCode.toLowerCase()), sourceKind: "category_copy" };
   }
   async previewCreation(input: PreviewRentalCategoryCreationRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
@@ -240,7 +240,7 @@ export class CategoryGovernanceService {
     if (operation === "create" && !categoryScopeAllows(category.openingScope, category.openingTenantIds, tenantId)) return [];
     const rows = await this.prisma.rentalCategoryVersion.findMany({ where: { categoryCode, status: { in: ["published", "legacy_baseline"] } }, include: { policy: true } });
     const op = operation as "create" | "upgrade" | "restore";
-    return rows.filter((row) => row.policy && categoryScopeAllows(row.policy[`${op}Scope`], row.policy[`${op}TenantIds`], tenantId))
+    return rows.filter((row) => row.structureVersion === 1 && row.policy && categoryScopeAllows(row.policy[`${op}Scope`], row.policy[`${op}TenantIds`], tenantId))
       .map((row) => ({ id: row.id, versionLabel: row.versionLabel, operation: op }));
   }
   async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
@@ -250,10 +250,10 @@ export class CategoryGovernanceService {
       await this.lockedCategory(tx, categoryCode);
       const source = await this.version(tx, categoryCode, input.sourceVersionId);
       if (!["published", "legacy_baseline"].includes(source.status)) throw new ConflictException("只能从同品类已发布版本复制新草稿");
-      const definition = structuredClone(source.definition) as any;
+      const definition = structuredClone(resolveRentalCategoryVersionBody(source, categoryCode));
       definition.version = input.versionLabel;
       const created = await tx.rentalCategoryVersion.create({ data: { id: `catv_${randomUUID()}`, categoryCode, versionLabel: input.versionLabel,
-        structureVersion: source.structureVersion, sourceVersionId: source.id, sourceKind: "platform_copy", status: "draft", definition } });
+        structureVersion: source.structureVersion, sourceVersionId: source.id, sourceKind: "platform_copy", status: "draft", definition: JSON.parse(JSON.stringify(definition)) } });
       await this.audit(tx, categoryCode, created.id, "draft_create", user, input.reason, undefined, { sourceVersionId: source.id, revision: 0 });
       return created;
     }); } catch (error) {
@@ -278,7 +278,21 @@ export class CategoryGovernanceService {
   async validate(code: string, id: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
     const row = await this.version(this.prisma, categoryIdentity(code), id);
-    return this.validation(row.definition, code);
+    return this.versionValidation(row, code);
+  }
+  /** Body syntax cannot prove its container is readable by this program. Draft
+   * and archived bodies remain inspectable; published/legacy sources use the
+   * same decoder as business reads, including the original legacy comparison. */
+  private versionValidation(row: { categoryCode: string; structureVersion: number; status: string; definition: unknown }, code: string) {
+    try {
+      if (row.structureVersion !== 1) throw new ConflictException("当前程序不支持该品类结构版本，请升级兼容程序");
+      if (row.categoryCode.toLowerCase() !== code) throw new ConflictException("品类版本编码与正文校验对象不一致");
+      const body = ["draft", "archived"].includes(row.status)
+        ? row.definition : resolveRentalCategoryVersionBody(row, code);
+      return this.validation(body, code);
+    } catch (error) {
+      return { valid: false, errors: [error instanceof Error ? error.message : "品类版本结构不合法"], dependencyDigest: null };
+    }
   }
   private validation(body: unknown, code: string) {
     try {
@@ -299,9 +313,9 @@ export class CategoryGovernanceService {
     const row = await this.version(this.prisma, categoryIdentity(code), id);
     const source = row.sourceVersionId ? await this.prisma.rentalCategoryVersion.findUnique({ where: { id: row.sourceVersionId } }) : undefined;
     if (row.sourceVersionId && (!source || !["published", "legacy_baseline"].includes(source.status))) throw new ConflictException("草稿来源发布版本缺失，不能伪造差异依据");
-    const before = source?.definition as any;
+    const before = source ? resolveRentalCategoryVersionBody(source, source.categoryCode.toLowerCase()) : undefined;
     const body = row.definition as any;
-    return { ...this.validation(body, code), previewOnly: true, revision: row.revision, sourceVersionId: row.sourceVersionId,
+    return { ...this.versionValidation(row, code), previewOnly: true, revision: row.revision, sourceVersionId: row.sourceVersionId,
       differences: categoryDefinitionDifferences(before, body),
       changedSections: CATEGORY_DRAFT_SECTIONS.filter((section) => Object.entries(sections[section]).some(([scope, keys]) => keys.some((key) => {
         const read = (value: any) => scope === "root" ? value?.[key] : scope === "business" ? value?.businessModel?.[key] : value?.businessModel?.defaults?.[key];
@@ -323,7 +337,7 @@ export class CategoryGovernanceService {
         throw new ConflictException("该版本已经发布；只有同请求重试可返回原结果");
       }
       if (row.status !== "draft" || row.revision !== input.expectedRevision) throw new ConflictException("草稿已变更或归档，请重新校验");
-      const validation = this.validation(row.definition, code);
+      const validation = this.versionValidation(row, code);
       if (!validation.valid) throw new ConflictException({ message: "发布校验失败", errors: validation.errors });
       const changed = await tx.rentalCategoryVersion.updateMany({ where: { id, status: "draft", revision: input.expectedRevision }, data: { status: "published", revision: { increment: 1 }, publishedAt: new Date(), publishedBy: user.id, publishReason: input.reason.trim(), dependencyDigest: validation.dependencyDigest as Prisma.InputJsonValue } });
       if (changed.count !== 1) throw new ConflictException("草稿在发布期间变化，请重新校验");
@@ -354,7 +368,7 @@ export class CategoryGovernanceService {
       if (["all", "pilot"].includes(input.scope)) {
         if (!versionId) throw new ConflictException("开放前必须明确推荐发布版本");
         const target = await this.version(tx, categoryCode, versionId);
-        if (!["published", "legacy_baseline"].includes(target.status) || !this.validation(target.definition, code).valid || !target.policy || target.policy.createScope === "none") throw new ConflictException("推荐版本尚未满足执行与新建采用条件");
+        if (!["published", "legacy_baseline"].includes(target.status) || !this.versionValidation(target, code).valid || !target.policy || target.policy.createScope === "none") throw new ConflictException("推荐版本尚未满足执行与新建采用条件");
       } else if (input.recommendedVersionId) {
         const target = await this.version(tx, categoryCode, versionId!);
         if (!["published", "legacy_baseline"].includes(target.status)) throw new ConflictException("推荐引用只能指向本品类发布版本");
@@ -373,6 +387,10 @@ export class CategoryGovernanceService {
       const row = await this.version(tx, categoryCode, id);
       if (!["published", "legacy_baseline"].includes(row.status) || !row.policy) throw new ConflictException("只能维护已发布版本的独立采用政策");
       if (row.policy.revision !== input.expectedRevision) throw new ConflictException("版本采用政策已变更");
+      // Closing an unreadable version remains possible; granting new adoption
+      // cannot make this program's unsupported container executable.
+      if (row.structureVersion !== 1 && [input.createScope, input.upgradeScope, input.restoreScope].some(scope => scope !== "none"))
+        throw new ConflictException("当前程序不支持目标品类结构版本，不能开放新的采用资格");
       for (const op of ["create", "upgrade", "restore"] as const) await this.tenants(tx, input[`${op}Scope`], input[`${op}TenantIds`]);
       const { expectedRevision, reason, ...values } = input;
       const changed = await tx.rentalCategoryVersionPolicy.updateMany({ where: { versionId: id, revision: expectedRevision }, data: { ...values, revision: { increment: 1 } } });
