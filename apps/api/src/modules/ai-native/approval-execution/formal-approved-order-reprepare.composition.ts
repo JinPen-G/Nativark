@@ -30,9 +30,7 @@ export function composeFormalApprovedOrderReprepareServices(d: ControlledApprove
     current: async scope => {
       if (scope.kind !== 'workspace' || d.core.resolveWorkspaceId(scope.tenantId) !== scope.workspaceId) throw deniedOrder();
       const tenant = scope.tenantId;
-      const context: BusinessContext = { profile: d.core.getProfile(tenant), category: await d.core.getWorkspaceCategory(tenant),
-        settings: d.core.getBusinessSettings(tenant), groups: d.core.listItemGroups(tenant), pricingGroups: d.core.listPricingGroups(tenant),
-        couponTemplates: d.core.listCouponTemplates(tenant), locations: d.core.listLocations(tenant), operators: d.core.listOperators(tenant) };
+      const context: BusinessContext = await d.core.readBusinessContext(tenant);
       return context;
     }
   }, clock);

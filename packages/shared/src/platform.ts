@@ -723,6 +723,8 @@ export interface TenantBootstrapRequest {
   tenantCode: string;
   tenantName: string;
   categoryCode: RentalCategoryCode;
+  /** Rental's first space may explicitly select any currently eligible published version. */
+  categoryVersionId?: string;
   /**
    * 结算币种（需求 §948）。写进首个经营空间的业务设置，新建空间继承它，之后可按空间单独改。
    * 不填按人民币，与既有行为一致。

@@ -1,0 +1,82 @@
+{
+  "date": "2026-11-09",
+  "sourceRoot": "D:\\工作文件\\rental-OS",
+  "sourceHead": "44129cd009e5e5389cfc66a9a730eb0a398c080a",
+  "basis": "本轮只读固定的PCH v1.1文档WIP；不继承PCH实现授权或源码写入归属",
+  "files": [
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-需求.md",
+      "snapshot": "平台Core接入-需求.md",
+      "sha256": "083335d6a123bae1e08fa37cfc3802c793ca85a051d8d1a78ce3618bab01b300",
+      "bytes": 28422
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发任务.md",
+      "snapshot": "平台Core接入-开发任务.md",
+      "sha256": "1daa2e8d63db1c281d1ef7aac5fca77e15120154a849de34ff16d265b3f27395",
+      "bytes": 40584
+    }
+  ],
+  "importedCategoryDocuments": [
+    {
+      "path": "docs/Rental Core/品类治理/品类治理-需求.md",
+      "sha256": "a904c661b78ae71713d75fe7fbef217066e104f781e3a1a8b9593c21b4ea79ad",
+      "bytes": 54733
+    },
+    {
+      "path": "docs/Rental Core/品类治理/品类治理-开发任务.md",
+      "sha256": "c85d33e7d1bfa559fa4b62dd3b07fe0973e828f97f6e1c090853ec0c2eb31fef",
+      "bytes": 47768
+    },
+    {
+      "path": "docs/Rental Core/品类治理/品类治理-开发记录.md",
+      "sha256": "1ff93d25e6b69587c2cab78a6fc303d9cb3f05fda52ee296eb7f1e09769b64cb",
+      "bytes": 16620
+    },
+    {
+      "path": "docs/Rental Core/品类治理/品类治理-协作接续.md",
+      "sha256": "ffa750ce67599717cfda219810668d18937700ac99b233127a445c813174de04",
+      "bytes": 10310
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/方案基线/2026-11-09/manifest.json",
+      "sha256": "5ea6d14b5080a987d180ae32f3888beef895331e29947e3f1fff536dc8b0460a",
+      "bytes": 1211
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/方案基线/2026-11-09/README.md",
+      "sha256": "1e7d4d4a392063890f4aa3c447dac489dadef7ef3c8a096126cad2e610d0b9af",
+      "bytes": 698
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/方案基线/2026-11-09/品类治理-协作接续.md",
+      "sha256": "0d8e5bd11bed70501325bab0473cd648ebb1a9f4f366d94242217a353d0e753d",
+      "bytes": 8595
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/方案基线/2026-11-09/品类治理-开发任务.md",
+      "sha256": "85505b7d309de68f81eceed56d9f83445a1059db6b3f5828e751d554dfcfab9b",
+      "bytes": 40272
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/方案基线/2026-11-09/品类治理-开发记录.md",
+      "sha256": "dc9b3c4fd6d370268ad76010147fdfa03648e8c5bfc5d9661fe5dced82048844",
+      "bytes": 16065
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/方案基线/2026-11-09/品类治理-需求.md",
+      "sha256": "d16bda3fa2786f7d2f7fa333e9829fe925b3aea95a0b393e03f9f0a64e08cd09",
+      "bytes": 45004
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/开发过程/2026-09.md",
+      "sha256": "ba6cb445af47a2f5614b44c8db68385b2b1d5049396b1de49773a07c296d64f1",
+      "bytes": 5298
+    },
+    {
+      "path": "docs/Rental Core/品类治理/历史归档/开发过程/2026-10.md",
+      "sha256": "338224cb17bb57dd273c71bc7c4e7869bd1ee42686c2b95fe2b040bb2313f982",
+      "bytes": 1234
+    }
+  ]
+}

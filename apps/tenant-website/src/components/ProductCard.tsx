@@ -18,8 +18,8 @@ export function ProductCard({ product, search }: { product: Product; search?: st
     <div className="product-card-body">
       <Link to={detailTo} className="product-name">{displayProduct.name}</Link>
       <p className="product-subtitle">{displayProduct.subtitle}</p>
-      <div className="product-metadata"><span className={unavailable ? 'stock-out' : 'stock-ok'}>{unavailable ? t('unavailable') : displayProduct.stockStatus === 'low' ? (language === 'en' ? 'Limited stock' : '余量较少') : (language === 'en' ? 'Available' : '可预约')}</span>{displayProduct.reviewCount > 0 ? <span><StarFilled aria-hidden="true" /> {displayProduct.rating}</span> : null}</div>
-      <div className="product-price"><strong>¥{displayProduct.price}</strong><span>/{displayProduct.priceUnit === '天' && language === 'en' ? 'day' : displayProduct.priceUnit}</span></div>
+      <div className="product-metadata"><span className={unavailable ? 'stock-out' : 'stock-ok'}>{unavailable ? t('unavailable') : displayProduct.stockStatus === 'low' ? (language === 'en' ? 'Limited stock' : '余量较少') : displayProduct.stockStatus === 'unknown' ? (language === 'en' ? 'Check availability for your dates' : '选择租期确认库存') : (language === 'en' ? 'Available' : '可预约')}</span>{(displayProduct.reviewCount ?? 0) > 0 ? <span><StarFilled aria-hidden="true" /> {displayProduct.rating}</span> : null}</div>
+      <div className="product-price"><strong>{displayProduct.price === undefined ? (language === 'en' ? 'Select dates for a quote' : '选租期查看报价') : `${displayProduct.currency ?? '¥'} ${displayProduct.price}`}</strong>{displayProduct.price !== undefined && <span>/{displayProduct.priceUnit === '天' && language === 'en' ? 'day' : displayProduct.priceUnit}</span>}</div>
       <Link className={`button button-dark product-rent ${unavailable ? 'is-disabled' : ''}`} to={unavailable ? '#' : detailTo} aria-disabled={unavailable}>{t('bookNow')}</Link>
     </div>
   </article>;

@@ -99,13 +99,6 @@ enum ConfigStatus {
   ARCHIVED  @map("archived")
 }
 
-enum RentalCategoryCode {
-  VEHICLE      @map("vehicle")
-  CAMERA       @map("camera")
-  CAMPING      @map("camping")
-  CONSTRUCTION @map("construction")
-}
-
 enum RentalInventoryMode {
   SERIALIZED @map("serialized")
   QUANTITY   @map("quantity")
@@ -291,7 +284,7 @@ model BusinessWorkspace {
   code                              String
   name                              String
   /// 唯一经营品类。外键指向品类定义表，杜绝写入未定义品类。
-  categoryCode                      RentalCategoryCode
+  categoryCode                      String @db.VarChar(64)
   category                          RentalCategoryDefinition                @relation(fields: [categoryCode], references: [code])
   /// 当前采用的不可变品类定义；存量空间由兼容迁移绑定 legacy 基线。
   categoryVersionId                 String?                                 @db.VarChar(191)
@@ -3586,7 +3579,7 @@ model TBoxDevice {
 }
 
 model RentalCategoryDefinition {
-  code                    RentalCategoryCode         @id
+  code                    String         @id @db.VarChar(64)
   name                    String
   description             String
   supportedInventoryModes Json
@@ -3608,6 +3601,13 @@ model RentalCategoryDefinition {
   itemGroups              RentalItemGroup[]
   pricingGroups           RentalPricingGroup[]
   inspectionTemplates     RentalInspectionTemplate[]
+  orders                  RentalOrder[]
+  quotes                  RentalQuote[]
+  businessSettings        RentalTenantBusinessSettings[]
+  pricingPlans            RentalPricingPlan[]
+  discountPlans           RentalDiscountPlan[]
+  valueAddedServices      RentalValueAddedService[]
+  ruleVersions            RentalRuleVersion[]
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
 
@@ -3617,7 +3617,7 @@ model RentalCategoryDefinition {
 /// 品类身份之外的版本层。已发布正文只允许插入，不能更新；应用服务与专项验收执行不可变保护。
 model RentalCategoryVersion {
   id               String                              @id @db.VarChar(191)
-  categoryCode     RentalCategoryCode
+  categoryCode     String @db.VarChar(64)
   category         RentalCategoryDefinition            @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   versionLabel     String                              @db.VarChar(64)
   structureVersion Int                                 @default(1)
@@ -3663,7 +3663,7 @@ model RentalCategoryVersionPolicy {
 
 model RentalCategoryGovernanceAudit {
   id           String                   @id @default(uuid()) @db.VarChar(191)
-  categoryCode RentalCategoryCode
+  categoryCode String @db.VarChar(64)
   category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   versionId    String?                  @db.VarChar(191)
   action       String                   @db.VarChar(48)
@@ -3710,16 +3710,36 @@ model RentalCategoryAdoptionPreparation {
   createdBy      String                @db.VarChar(191)
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
+  batches        RentalCategoryPreparationBatch[]
 
   @@unique([workspaceId, targetVersionId], map: "rental_category_preparations_ws_version_key")
+  @@unique([tenantId, workspaceId, id], map: "rental_category_preparations_tenant_ws_id_key")
   @@index([tenantId, workspaceId], map: "rental_category_preparations_tenant_ws_idx")
   @@map("rental_category_adoption_preparations")
+}
+
+/// 分批准备的原操作收据，与准备集合写入同事务；重建暂存不清除收据。
+model RentalCategoryPreparationBatch {
+  id               String                            @id @default(uuid()) @db.VarChar(191)
+  tenantId         String
+  workspaceId      String
+  preparationId    String                            @db.VarChar(191)
+  preparation      RentalCategoryAdoptionPreparation @relation(fields: [tenantId, workspaceId, preparationId], references: [tenantId, workspaceId, id], onDelete: Cascade)
+  batchId          String                            @db.VarChar(128)
+  actorId          String                            @db.VarChar(191)
+  inputFingerprint String                            @db.Char(64)
+  result           Json
+  createdAt        DateTime                          @default(now())
+
+  @@unique([preparationId, batchId], map: "rental_category_preparation_batches_prep_batch_key")
+  @@index([tenantId, workspaceId, createdAt], map: "rental_category_preparation_batches_tenant_ws_time_idx")
+  @@map("rental_category_preparation_batches")
 }
 
 model TenantRentalProfile {
   tenantId      String                   @id
   tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  categoryCode  RentalCategoryCode
+  categoryCode  String @db.VarChar(64)
   category      RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
   capabilities  Json
   terminology   Json
@@ -3942,7 +3962,7 @@ model RentalItemGroup {
   workspaceId             String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace               BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode            RentalCategoryCode
+  categoryCode            String @db.VarChar(64)
   category                RentalCategoryDefinition   @relation(fields: [categoryCode], references: [code])
   code                    String
   name                    String
@@ -3976,7 +3996,7 @@ model RentalPricingGroup {
   tenant             Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspaceId        String
   workspace          BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode       RentalCategoryCode
+  categoryCode       String @db.VarChar(64)
   category           RentalCategoryDefinition   @relation(fields: [categoryCode], references: [code])
   code               String
   name               String
@@ -4256,7 +4276,8 @@ model RentalOrder {
   workspace                     BusinessWorkspace              @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   orderNo                       String
   assignment                    Json?
-  categoryCode                  RentalCategoryCode
+  categoryCode                  String @db.VarChar(64)
+  category                      RentalCategoryDefinition       @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   status                        RentalOrderV1Status            @default(RESERVED)
   customerType                  String
   customerId                    String?
@@ -4305,6 +4326,8 @@ model RentalOrder {
   /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。下单时固化的已启用能力版本快照，
   /// 在途环节 Hook 判定都用它，升级或暂停能力都不改写这张订单。可空：存量订单没有这份快照。
   capabilitySnapshot            Json?
+  /// 来自报价或明确变更的条件适用依据；缺历史证据时保持NULL，不从当前商品补造。
+  capabilityRequirementsSnapshot Json?
   /// Review P1-5：RentalCapabilityDecisionSnapshot[]。下单时从报价拷贝的判断记录，
   /// 下单侧只能引用、不得凭空重构。
   capabilityDecisions           Json?
@@ -4865,7 +4888,7 @@ model RentalInspectionTemplate {
   workspaceId  String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace    BusinessWorkspace        @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode RentalCategoryCode
+  categoryCode String @db.VarChar(64)
   category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code])
   code         String
   name         String
@@ -4951,7 +4974,8 @@ model RentalTenantBusinessSettings {
   tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace     BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode  RentalCategoryCode
+  categoryCode  String @db.VarChar(64)
+  category      RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   configVersion String
   settingsRevision Int @default(1) @db.UnsignedInt
   /// TenantRentalBusinessSettings 的 pricing/fulfillment/deposit 等嵌套配置块。
@@ -5016,7 +5040,8 @@ model RentalPricingPlan {
   workspaceId     String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace       BusinessWorkspace           @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode    RentalCategoryCode
+  categoryCode    String @db.VarChar(64)
+  category        RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   code            String
   name            String
   currency        String                      @default("CNY")
@@ -5115,7 +5140,8 @@ model RentalDiscountPlan {
   workspaceId               String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace                 BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode              RentalCategoryCode
+  categoryCode              String @db.VarChar(64)
+  category                  RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   code                      String
   name                      String
   status                    String             @default("draft")
@@ -5223,7 +5249,8 @@ model RentalValueAddedService {
   workspaceId                String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace                  BusinessWorkspace                @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode               RentalCategoryCode
+  categoryCode               String @db.VarChar(64)
+  category                   RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   code                       String
   name                       String
   serviceType                String
@@ -5323,7 +5350,8 @@ model RentalRuleVersion {
   workspaceId         String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace           BusinessWorkspace        @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-  categoryCode        RentalCategoryCode
+  categoryCode        String @db.VarChar(64)
+  category            RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   version             String
   status              String                   @default("draft")
   /// RentalRuleConfig：payment/fulfillment/overdue/cancellation/qualification/damage 六个规则块。
@@ -5572,7 +5600,8 @@ model RentalQuote {
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace                     BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   quoteNo                       String
-  categoryCode                  RentalCategoryCode
+  categoryCode                  String @db.VarChar(64)
+  category                      RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
   /// RentalQuoteRequest：报价入参原样留存，用于下单时比对与复算。
   request                       Json
   /// 新会员体系：由服务端解析的预约身份、企业关系和权益快照。
@@ -5632,6 +5661,8 @@ model RentalQuote {
   /// CORE-EXT-02D：RentalWorkspaceCapabilitySnapshotEntry[]。报价生成时已启用能力的版本快照，
   /// 下单时拷进订单。可空：存量报价没有这份快照，留 NULL 是如实记录"当时没有"。
   capabilitySnapshot            Json?
+  /// 当前报价使用的商品/履约条件事实及匹配结果，与版本和报价原子固化。
+  capabilityRequirementsSnapshot Json?
   /// Review P1-5：RentalCapabilityDecisionSnapshot[]。报价阶段的兼容性判断记录，
   /// 含风险代码、提示、证据与费用依据；下单时被引用。
   capabilityDecisions           Json?

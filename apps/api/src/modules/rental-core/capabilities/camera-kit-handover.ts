@@ -41,7 +41,7 @@ function kitLines(subject: CameraKitHandoverSubject) {
     .join("、");
 }
 
-function evaluateKitHandover(
+export function evaluateKitHandover(
   point: "pickup_delivery" | "return_inspection",
   subject: CameraKitHandoverSubject
 ): RentalCapabilityHookResult {

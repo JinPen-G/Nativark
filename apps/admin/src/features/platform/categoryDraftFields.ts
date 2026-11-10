@@ -12,7 +12,9 @@ export function addCategoryAttributeSchemaField(schema: Record<string, unknown>,
 export function updateCategoryField(fields: Record<string, unknown>, key: string, value: unknown, inspection: boolean) {
   const updated = { ...fields, [key]: value };
   if (key === "type" && value !== "select") delete updated.options;
+  if (key === "scope" && value !== "item_group") delete updated.clientVisible;
   if (inspection && key === "type" && value !== "number") delete updated.usageMetric;
+  if (inspection && !updated.appliesToCapability) delete updated.appliesToCapability;
   return updated;
 }
 

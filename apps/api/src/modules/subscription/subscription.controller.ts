@@ -25,6 +25,9 @@ export class TenantSubscriptionController {
   @Get("reminder") reminder(@Req() req: AuthenticatedRequest) {
     return this.subscription.getReminder(req.user.tenantId);
   }
+  @Get("category-labels") categoryLabels(@Req() req: AuthenticatedRequest) {
+    return this.subscription.rentalCategoryLabels(req.user.tenantId);
+  }
 
   @Post("requests") submit(@Req() req: AuthenticatedRequest, @Body() body: SubmitSubscriptionRequestDto) {
     return this.subscription.submitRequest(req.user.tenantId, body);

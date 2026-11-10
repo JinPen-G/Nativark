@@ -1,4 +1,5 @@
 /** Closed local-business messages. Identity is a binding to recheck, never an authorization grant. */
+import { isRentalCategoryCode } from './rental-category-code';
 export const RENTAL_DESKTOP_BUSINESS_VERSION = 1 as const;
 export const RENTAL_DESKTOP_BUSINESS_HTTP = {
   basePath: 'ai-native/desktop-business', catalog: 'catalog', policy: 'policy',
@@ -344,7 +345,7 @@ export function parseRentalDesktopCatalogResult(value: unknown): RentalDesktopCa
     || JSON.stringify(row.omittedFields) !== JSON.stringify(['name', 'code', 'unit', 'availability', 'price'])) throw new Error('Invalid catalog projection');
   const items = row.items.map((value): RentalDesktopCatalogResult['items'][number] => {
     const item = record(value, ['reference', 'categoryCode', 'status']);
-    if (item.status !== 'enabled' && item.status !== 'disabled') throw new Error('Invalid catalog state');
+    if ((item.status !== 'enabled' && item.status !== 'disabled') || !isRentalCategoryCode(item.categoryCode)) throw new Error('Invalid catalog state');
     return { reference: word(item.reference), categoryCode: word(item.categoryCode, 64), status: item.status };
   });
   if (new Set(items.map(item => item.reference)).size !== items.length) throw new Error('Duplicate catalog reference');
@@ -374,7 +375,7 @@ export function projectRentalDesktopCatalogMaterial(value: unknown): string {
   const catalog = parseRentalDesktopCatalogResult(value);
   if (!catalog.modelRoute) throw new Error('Model-bound source required');
   // Closed projection categories, not another category configuration or pricing engine.
-  if (catalog.items.some(item => !['vehicle', 'camera', 'camping', 'construction'].includes(item.categoryCode))) throw new Error('Unprojectable catalog category');
+  if (catalog.items.some(item => !isRentalCategoryCode(item.categoryCode))) throw new Error('Unprojectable catalog category');
   return JSON.stringify({ toolCode: 'rental.catalog.search', source: catalog.source, configurationVersion: catalog.configurationVersion,
     observedAt: catalog.observedAt, expiresAt: catalog.expiresAt,
     items: catalog.items.map((item, index) => ({ reference: `item_${index + 1}`, categoryCode: item.categoryCode, status: item.status })),

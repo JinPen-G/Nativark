@@ -1,9 +1,10 @@
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
-import { Card, InputNumber, Space } from "antd";
-import { Form, ActionButton } from "@/components/ui";
+import { Card, InputNumber, Space, Typography } from "antd";
+import { Form, ActionButton, SaveButton } from "@/components/ui";
 import { Collapse } from "@/components/ui";
 import { App, Modal } from "@/components/ui";
 import { Alert, Button, Input, Select, Switch, Table, Tabs } from "@/components/ui";
@@ -12,13 +13,13 @@ import { useLocale } from "@/app/locale";
 import { categoryGovernanceApi } from "@/api/categoryGovernance";
 import { CATEGORY_ATTRIBUTE_TYPES, CATEGORY_INSPECTION_TYPES, addCategoryAttributeSchemaField, categoryArrayUsesTags, updateCategoryField } from "./categoryDraftFields";
 import { CategoryTemplateIcon } from "./CategoryTemplateIcon";
+import { CategoryConditionalCapabilitiesEditor } from "./CategoryConditionalCapabilitiesEditor";
+import { categoryDefinitionWithLocalSections, categoryInspectionFieldSuggestion, categorySectionHasInput, initialCategorySectionDrafts,
+  reconcileCategorySectionDrafts, resetCategoryDraftSection, sameCategoryDraftValue, type CategorySectionDraft } from "./categoryDraftSections";
+import { currentSessionEpoch } from "@/app/queryClient";
+import { useAuthStore } from "@/features/auth/authStore";
 
-const ownership: Record<CategoryDraftSection, string[]> = {
-  basic: ["name", "description", "terminology", "display"], attributes: ["attributeSchema", "assetFields", "catalogPresentation"],
-  inventory: ["supportedInventoryModes", "fulfillmentModes", "locationTypes", "deliveryDestination"],
-  pricing: ["pricingUnits", "defaultPricingUnit", "settingModules", "supportsHolidayPricing", "supportsUsagePricing", "supportsPreauthorization", "payment", "overdue", "fulfillment"],
-  inspection: ["supportsQualificationReview", "rules", "inspectionFields"], capabilities: ["defaultCapabilities", "requiredCapabilities", "valueAddedServicePresets"]
-};
+type CapabilityCatalog = Awaited<ReturnType<typeof categoryGovernanceApi.catalog>>["capabilities"];
 const titles: Record<CategoryDraftSection, string> = { basic: "基本信息与术语", attributes: "商品与资产资料", inventory: "库存与履约", pricing: "计费与规则", inspection: "资质与交接检查", capabilities: "能力与发布" };
 const labels: Record<string, string> = {
   name: "名称", description: "说明", terminology: "品类术语", attributeSchema: "属性类型", assetFields: "型号与资产字段", catalogPresentation: "目录展示", supportedInventoryModes: "库存模式",
@@ -43,25 +44,8 @@ const choices: Record<string, readonly string[]> = {
 Object.assign(labels, { display: "中英文展示设置", nameEn: "英文名称", descriptionEn: "英文说明", icon: "品类图标", defaultWorkspaceName: "默认空间名称", defaultWorkspaceNameEn: "默认空间英文名称", terminologyEn: "英文业务术语" });
 const iconLabels: Record<string, string> = { rental: "通用租赁", camera: "摄影设备", camping: "露营装备", construction: "工程设备", vehicle: "车辆载具", clothing: "服装", tool: "工具", package: "物品" };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
-function project(version: CategoryVersionView, section: CategoryDraftSection): Record<string, unknown> {
-  const root = version.definition as unknown as Record<string, unknown>;
-  const business = root.businessModel as Record<string, unknown>;
-  const defaults = business.defaults as Record<string, unknown>;
-  const projected = Object.fromEntries(ownership[section].flatMap((key) => {
-    const value = root[key] ?? business[key] ?? defaults[key];
-    return value === undefined ? [] : [[key, structuredClone(value)]];
-  }));
-  if (section === "basic") {
-    const englishTerms = Object.fromEntries(Object.entries(version.definition.terminology).map(([key, value]) => [key,
-      record(value) ? Object.fromEntries(Object.keys(value).map((field) => [field, ""])) : ""]));
-    const display = record(projected.display) ? projected.display : {};
-    projected.display = { nameEn: "", descriptionEn: "", icon: "rental", defaultWorkspaceName: "", defaultWorkspaceNameEn: "", ...display,
-      terminologyEn: { ...englishTerms, ...(record(display.terminologyEn) ? display.terminologyEn : {}) } };
-  }
-  return projected;
-}
 
-function AttributeSchemaEditor({ value, change, disabled }: { value: Record<string, unknown>; change: (value: unknown) => void; disabled: boolean }) {
+function AttributeSchemaEditor({ value, change, disabled, pending }: { value: Record<string, unknown>; change: (value: unknown) => void; disabled: boolean; pending: (value: boolean) => void }) {
   const { t } = useLocale();
   const { message } = App.useApp();
   const [code, setCode] = useState("");
@@ -75,19 +59,19 @@ function AttributeSchemaEditor({ value, change, disabled }: { value: Record<stri
       { title: t("操作"), render: (_, row: { code: string }) => <Button disabled={disabled} onClick={() => change(Object.fromEntries(Object.entries(value).filter(([key]) => key !== row.code)))}>{t("删除")}</Button> }
     ]} />
     {!disabled && <Space wrap>
-      <Input aria-label={t("新字段编码")} placeholder={t("新字段编码")} value={code} maxLength={64} onChange={(event) => setCode(event.target.value)} />
+      <Input aria-label={t("新字段编码")} placeholder={t("新字段编码")} value={code} maxLength={64} onChange={(event) => { setCode(event.target.value); pending(Boolean(event.target.value.trim())); }} />
       <Select aria-label={t("新字段类型")} value={type} options={options} onChange={setType} />
-      <Button onClick={() => { try { change(addCategoryAttributeSchemaField(value, code, type)); setCode(""); } catch (error) { message.warning(t(error instanceof Error ? error.message : "字段类型不合法")); } }}>{t("新增字段")}</Button>
+      <Button onClick={() => { try { change(addCategoryAttributeSchemaField(value, code, type)); setCode(""); pending(false); } catch (error) { message.warning(t(error instanceof Error ? error.message : "字段类型不合法")); } }}>{t("新增字段")}</Button>
     </Space>}
   </Card>;
 }
 
 /** Structured controls only: category administrators never need to write JSON. */
-function ValueEditor({ name, value, change, disabled, inspection = false }: { name: string; value: unknown; change: (value: unknown) => void; disabled: boolean; inspection?: boolean }) {
+function ValueEditor({ name, value, change, disabled, pending, catalog, inspection = false }: { name: string; value: unknown; change: (value: unknown) => void; disabled: boolean; pending: (value: boolean) => void; catalog?: CapabilityCatalog; inspection?: boolean }) {
   const { t, locale } = useLocale();
   const [baseName, suffix] = name.split(" ");
   const label = locale === "en-US" ? name.replace(/([A-Z])/g, " $1") : `${t(labels[baseName] ?? baseName)}${suffix ? ` ${suffix}` : ""}`;
-  if (name === "attributeSchema" && record(value)) return <AttributeSchemaEditor value={value} change={change} disabled={disabled} />;
+  if (name === "attributeSchema" && record(value)) return <AttributeSchemaEditor value={value} change={change} disabled={disabled} pending={pending} />;
   if (typeof value === "boolean") return <Form.Item label={label}><Switch aria-label={label} checked={value} onChange={change} disabled={disabled} /></Form.Item>;
   if (typeof value === "number") return <Form.Item label={label}><InputNumber aria-label={label} value={value} onChange={(next) => { if (next !== null) change(next); }} disabled={disabled} /></Form.Item>;
   if (Array.isArray(value)) {
@@ -95,14 +79,15 @@ function ValueEditor({ name, value, change, disabled, inspection = false }: { na
       const capabilities = name.endsWith("Capabilities");
       // Existing unimplemented selections must remain removable so a legacy copy
       // can be corrected. They cannot be newly selected after removal.
-      const options = capabilities ? RENTAL_CAPABILITY_MODULES.map((entry) => ({ value: entry.code, label: locale === "en-US" ? entry.code : entry.label, disabled: !entry.implementationVersion && !value.includes(entry.code) })) : choices[name]?.map((entry) => ({ value: entry, label: entry }));
-      return <Form.Item label={label}><Select aria-label={label} mode={options ? "multiple" : "tags"} value={value as string[]} options={options} onChange={change} disabled={disabled} /></Form.Item>;
+      const options = capabilities ? RENTAL_CAPABILITY_MODULES.map((entry) => ({ value: entry.code, label: locale === "en-US" ? entry.code : entry.label,
+        disabled: !catalog?.some(capability => capability.code === entry.code && capability.implemented) && !value.includes(entry.code) })) : choices[name]?.map((entry) => ({ value: entry, label: entry }));
+      return <Form.Item label={label}><Select aria-label={label} mode={options ? "multiple" : "tags"} value={value as string[]} options={options} onChange={change} disabled={disabled || capabilities && !catalog} /></Form.Item>;
     }
     const template = name === "assetFields" ? { code: "", label: "", scope: "asset", type: "string", required: false, unique: false } : name === "inspectionFields" ? { code: "", label: "", type: "text", required: false } : value[0];
     return <Card size="small" title={label}>
       <Collapse items={value.map((entry, index) => ({ key: String(index), label: record(entry) ? String(entry.label || entry.code || `${label} ${index + 1}`) : `${label} ${index + 1}`,
         extra: <Button disabled={disabled} onClick={(event) => { event.stopPropagation(); change(value.filter((_, i) => i !== index)); }}>{t("删除")}</Button>,
-        children: <ValueEditor name={`${name} ${index + 1}`} value={entry} change={(next) => change(value.map((item, i) => i === index ? next : item))} disabled={disabled} inspection={inspection || name === "inspectionFields"} />
+        children: <ValueEditor name={`${name} ${index + 1}`} value={entry} change={(next) => change(value.map((item, i) => i === index ? next : item))} disabled={disabled} pending={pending} catalog={catalog} inspection={inspection || name === "inspectionFields"} />
       }))} />
       <Button disabled={disabled || !template} onClick={() => change([...value, structuredClone(template)])}>{t("新增字段")}</Button>
     </Card>;
@@ -110,8 +95,18 @@ function ValueEditor({ name, value, change, disabled, inspection = false }: { na
   if (record(value)) {
     const fields = { ...value };
     if (value.type === "select" && !Array.isArray(value.options)) fields.options = [];
-    return <Card size="small" title={label}>{Object.entries(fields).map(([key, entry]) => <ValueEditor key={key} name={key} value={entry} change={(next) => change(updateCategoryField(fields, key, next, inspection))} disabled={disabled} inspection={inspection} />)}</Card>;
+    if (inspection && fields.appliesToCapability === undefined) fields.appliesToCapability = "";
+    return <Card size="small" title={label}>{Object.entries(fields).filter(([key]) => key !== "clientVisible").map(([key, entry]) => <ValueEditor key={key} name={key} value={entry} change={(next) => change(updateCategoryField(fields, key, next, inspection))} disabled={disabled} pending={pending} catalog={catalog} inspection={inspection} />)}
+      {!inspection && fields.scope === "item_group" && <Form.Item label={t("客户目录公开展示")}><Select aria-label={t("客户目录公开展示")}
+        value={fields.clientVisible === undefined ? "default" : fields.clientVisible ? "public" : "internal"} disabled={disabled}
+        options={[{ value: "default", label: t("沿用品类默认展示策略") }, { value: "public", label: t("公开") }, { value: "internal", label: t("内部") }]}
+        onChange={(next) => { const updated = { ...fields }; if (next === "default") delete updated.clientVisible; else updated.clientVisible = next === "public"; change(updated); }} /></Form.Item>}
+    </Card>;
   }
+  if (inspection && name === "appliesToCapability") return <Form.Item label={t("关联能力条件")}><Select allowClear aria-label={t("关联能力条件")}
+    value={value ? String(value) : undefined} disabled={disabled || !catalog} options={RENTAL_CAPABILITY_MODULES.map(capability => ({ value: capability.code, label: capability.label,
+      disabled: !catalog?.some(entry => entry.code === capability.code && entry.implemented) && value !== capability.code }))}
+    onChange={next => change(next || undefined)}/></Form.Item>;
   const fieldChoices = inspection && name === "type" ? CATEGORY_INSPECTION_TYPES : choices[name];
   return <Form.Item label={label}>{fieldChoices ? <Select aria-label={label} value={String(value ?? "")} options={fieldChoices.map((entry) => ({ value: entry, label: name === "icon" ? <Space><CategoryTemplateIcon code={entry} />{t(iconLabels[entry])}</Space> : entry }))} onChange={change} disabled={disabled} /> : <Input aria-label={label} value={String(value ?? "")} onChange={(event) => change(event.target.value)} disabled={disabled} maxLength={2048} />}</Form.Item>;
 }
@@ -120,34 +115,109 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
   const { t } = useLocale();
   const dismissal = useModalDismissal(true, close);
   const { message, modal } = App.useApp();
+  const [form] = Form.useForm();
   const [version, setVersion] = useState(initial);
+  const versionRef = useRef(initial);
   const [section, setSection] = useState<CategoryDraftSection>("basic");
-  const [values, setValues] = useState(() => project(initial, "basic"));
-  const [dirty, setDirty] = useState(false);
-  const [reason, setReason] = useState("");
+  const [drafts, setDrafts] = useState(() => initialCategorySectionDrafts(initial));
+  const draftsRef = useRef(drafts); draftsRef.current = drafts;
+  const [visited, setVisited] = useState<CategoryDraftSection[]>(["basic"]);
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false), mounted = useRef(true);
+  const owner = useRef({ userId: useAuthStore.getState().user?.id, tenantId: useAuthStore.getState().tenant?.tenantId, epoch: currentSessionEpoch() });
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [errors, setErrors] = useState<string[]>([]);
   const [publishKey, setPublishKey] = useState(() => crypto.randomUUID());
-  const hasUnsavedInput = dirty || Boolean(reason.trim());
+  const currentDraft = drafts[section], dirty = currentDraft.dirty, reason = currentDraft.reason;
+  const hasUnsavedInput = CATEGORY_DRAFT_SECTIONS.some(key => categorySectionHasInput(drafts[key]));
+  const hasUnsavedFields = CATEGORY_DRAFT_SECTIONS.some(key => drafts[key].dirty || drafts[key].pendingField);
+  const otherInputSections = CATEGORY_DRAFT_SECTIONS.filter(key => key !== section && categorySectionHasInput(drafts[key]));
+  const definition = categoryDefinitionWithLocalSections(version, drafts);
+  const catalog = useQuery({ queryKey: ["platform-category-capability-catalog"], queryFn: categoryGovernanceApi.catalog,
+    enabled: visited.includes("capabilities") || visited.includes("inspection"), staleTime: 60_000,
+    refetchOnWindowFocus: false, refetchInterval: false, meta: { liveRefresh: false } });
+  const applicableCatalog = catalog.data?.capabilities.filter(capability => capability.applicableCategories === "all" || capability.applicableCategories.includes(code));
+  const isCurrent = () => mounted.current && currentSessionEpoch() === owner.current.epoch && useAuthStore.getState().sessionVerified &&
+    useAuthStore.getState().user?.id === owner.current.userId && useAuthStore.getState().tenant?.tenantId === owner.current.tenantId;
+  const requireCurrent = () => { if (!isCurrent()) throw new Error(t("当前账号或会话已变化，请重新打开草稿")); };
+  const updateDrafts = (update: (current: typeof drafts) => typeof drafts) => {
+    const next = update(draftsRef.current); draftsRef.current = next; setDrafts(next);
+  };
+  const changeDraft = (key: CategoryDraftSection, patch: Partial<CategorySectionDraft>) => {
+    const reasonOnly = canPublish && key === "capabilities" && Object.keys(patch).every(field => field === "reason");
+    if (!editable && !reasonOnly || inFlight.current || versionRef.current.status !== "draft" || !isCurrent()) return;
+    updateDrafts(current => ({ ...current, [key]: { ...current[key], ...patch } }));
+  };
+  const navigate = (key: CategoryDraftSection) => {
+    if (inFlight.current) return;
+    setVisited(current => current.includes(key) ? current : [...current, key]); setSection(key); setErrors([]);
+  };
   const guarded = (action: () => void) => hasUnsavedInput ? modal.confirm({ title: t("有未保存的改动，确定放弃吗？"), onOk: action }) : action();
   const canEdit = editable && version.status === "draft" && !busy;
-  const save = async () => {
-    if (!reason.trim()) { message.warning(t("请填写变更原因")); throw new Error("Change reason required"); }
-    setBusy(true);
+  const readLatest = async () => {
+    requireCurrent(); if (inFlight.current) return;
+    inFlight.current = true; setBusy(true);
     try {
-      const next = await categoryGovernanceApi.patch(code, version.id, section, { expectedRevision: version.revision, values, reason });
-      setVersion(next); setValues(project(next, section)); setDirty(false); setReason(""); setErrors([]); setPublishKey(crypto.randomUUID()); saved(); message.success(t("当前页签草稿已保存"));
+      const detail = await categoryGovernanceApi.detail(code); requireCurrent();
+      const next = detail.versions.find(value => value.id === versionRef.current.id);
+      if (!next || next.categoryCode !== code) throw new Error(t("未读取到原草稿，当前输入已保留"));
+      updateDrafts(current => reconcileCategorySectionDrafts(current, next)); versionRef.current = next; setVersion(next); setErrors([]);
+    } finally { inFlight.current = false; if (isCurrent()) setBusy(false); }
+  };
+  const prepareInspectionFields = (capabilityCode: string) => {
+    requireCurrent(); if (!canEdit || inFlight.current) return;
+    const capability = applicableCatalog?.find(value => value.code === capabilityCode && value.implemented);
+    const local = categoryDefinitionWithLocalSections(versionRef.current, draftsRef.current);
+    if (!capability || !local.defaultCapabilities.includes(capability.code)) throw new Error(t("能力目录或当前选择已变化，请重新核对"));
+    const suggestion = categoryInspectionFieldSuggestion(draftsRef.current, capability);
+    const selectedCapabilities = structuredClone(draftsRef.current.capabilities.values);
+    if (!suggestion.supported || suggestion.conflicts.length) {
+      message.warning(t("已有字段或阶段要求需人工核对，原输入已保留")); navigate("inspection"); return;
+    }
+    if (!suggestion.additions.length) { navigate("inspection"); return; }
+    modal.confirm({ title: t("准备所需交接字段？"), content: <Space orientation="vertical">
+      <span>{t("将以下字段加入交接页签的本地草稿，需在该页单独保存。已有输入保留。")}</span>
+      <Table size="small" rowKey="code" pagination={false} dataSource={suggestion.additions} columns={[
+        { title: t("字段编码"), dataIndex: "code" }, { title: t("标签"), dataIndex: "label" }, { title: t("类型"), dataIndex: "type" }
+      ]} />
+    </Space>, onOk: async () => {
+      requireCurrent();
+      if (inFlight.current || versionRef.current.status !== "draft" ||
+          !sameCategoryDraftValue(draftsRef.current.capabilities.values, selectedCapabilities) ||
+          !sameCategoryDraftValue(draftsRef.current.inspection.values.inspectionFields, suggestion.source))
+        throw new Error(t("交接草稿已变化，请重新核对联动"));
+      changeDraft("inspection", { values: { ...draftsRef.current.inspection.values, inspectionFields: suggestion.next }, dirty: true });
+      navigate("inspection");
+    } });
+  };
+  const save = async () => {
+    requireCurrent();
+    if (inFlight.current || currentDraft.conflict || currentDraft.baseRevision !== version.revision) throw new Error(t("请先核对当前页签与最新草稿修订"));
+    if (currentDraft.pendingField) throw new Error(t("请先添加或清空待新增的字段"));
+    if (!reason.trim()) { message.warning(t("请填写变更原因")); throw new Error("Change reason required"); }
+    const submitted = { section, values: structuredClone(currentDraft.values), reason };
+    inFlight.current = true; setBusy(true);
+    try {
+      const next = await categoryGovernanceApi.patch(code, version.id, section, { expectedRevision: currentDraft.baseRevision, values: submitted.values, reason });
+      requireCurrent();
+      if (next.id !== version.id || next.categoryCode !== code || next.revision !== currentDraft.baseRevision + 1)
+        throw new Error(t("保存结果与原草稿不一致，请核对原版本"));
+      updateDrafts(current => reconcileCategorySectionDrafts(current, next, submitted)); versionRef.current = next; setVersion(next);
+      setErrors([]); setPublishKey(crypto.randomUUID()); saved(); message.success(t("当前页签草稿已保存"));
     } catch (error) {
       const response = error as { response?: { status?: number; data?: { message?: string } } };
-      message.error(response.response?.status === 409 ? t("草稿修订冲突，输入已保留，请重新核对最新版本") : t("保存失败，输入已保留"));
+      if (isCurrent()) message.error(response.response?.status === 409 ? t("草稿修订冲突，输入已保留，请重新核对最新版本") : t("保存失败，输入已保留"));
       throw error;
-    } finally { setBusy(false); }
+    } finally { inFlight.current = false; if (isCurrent()) setBusy(false); }
   };
   const publish = async () => {
+    requireCurrent();
+    if (inFlight.current || hasUnsavedFields || otherInputSections.length) throw new Error(t("请先分别保存各页签的未保存输入"));
     if (!reason.trim()) { message.warning(t("请填写变更原因")); return; }
-    setBusy(true);
+    inFlight.current = true; setBusy(true);
     try {
       const preview = await categoryGovernanceApi.preview(code, version.id);
+      requireCurrent();
       if (!preview.valid) { setErrors(preview.errors); return; }
       if (preview.revision !== version.revision) { message.error(t("草稿修订冲突，输入已保留，请重新核对最新版本")); return; }
       const differenceKinds: Record<string, string> = { added: "新增", removed: "移除", changed: "修改", required_added: "新增必填要求", unique_enabled: "启用唯一要求", type_changed: "字段类型变化", scope_narrowed: "支持范围收窄" };
@@ -158,32 +228,62 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
           { title: t("变更字段"), dataIndex: "label" }, { title: t("变更类型"), dataIndex: "kind", render: (value: string) => t(differenceKinds[value] ?? value) },
           { title: t("变更前"), dataIndex: "before", render: displayValue }, { title: t("变更后"), dataIndex: "after", render: displayValue },
           ...(editable ? [{ title: t("操作"), render: (_: unknown, row: { section: CategoryDraftSection }) => <Button onClick={() => {
-            confirmation.destroy(); setSection(row.section); setValues(project(version, row.section)); setDirty(false); setErrors([]);
+            confirmation.destroy(); navigate(row.section);
           }}>{t("返回对应页签修改")}</Button> }] : [])
         ]} />
       </Space>, onOk: async () => {
-        setBusy(true);
+        requireCurrent();
+        if (inFlight.current || CATEGORY_DRAFT_SECTIONS.some(key => draftsRef.current[key].dirty || draftsRef.current[key].pendingField || key !== "capabilities" && Boolean(draftsRef.current[key].reason.trim())))
+          throw new Error(t("请先分别保存各页签的未保存输入"));
+        inFlight.current = true; setBusy(true);
         try {
           const next = await categoryGovernanceApi.publish(code, version.id, { expectedRevision: version.revision, idempotencyKey: publishKey, reason });
-          setVersion(next); setReason(""); setErrors([]); saved(); message.success(t("版本已发布，采用资格尚未开放"));
-        } catch (error) { message.error(t("发布失败，请核对校验结果和版本修订")); throw error; }
-        finally { setBusy(false); }
+          requireCurrent();
+          if (next.id !== version.id || next.categoryCode !== code || next.status !== "published") throw new Error(t("发布结果与原草稿不一致，请核对原版本"));
+          updateDrafts(current => resetCategoryDraftSection(reconcileCategorySectionDrafts(current, next), next, "capabilities"));
+          versionRef.current = next; setVersion(next); setErrors([]); saved(); message.success(t("版本已发布，采用资格尚未开放"));
+        } catch (error) { if (isCurrent()) message.error(t("发布失败，请核对校验结果和版本修订")); throw error; }
+        finally { inFlight.current = false; if (isCurrent()) setBusy(false); }
       } });
-    } catch { message.error(t("预览失败，请重试")); }
-    finally { setBusy(false); }
+    } catch (error) { if (isCurrent()) message.error(t("预览失败，请重试")); throw error; }
+    finally { inFlight.current = false; if (isCurrent()) setBusy(false); }
   };
   return <Modal presentation="side" title={`${t("品类版本")} ${version.versionLabel} · ${t("修订")} ${version.revision}`} open={dismissal.visible} afterClose={dismissal.afterClose} footer={null} width="min(1280px, 96vw)" mask={{ closable: false }} onCancel={() => { if (!busy) guarded(dismissal.dismiss); }}>
     <UnsavedChangesGuard dirty={hasUnsavedInput} busy={busy} />
     <Alert type="info" showIcon title={t("每个页签只保存自己的草稿；保存不会发布或改变经营空间。已发布版本只读。")} />
-    <Tabs activeKey={section} onChange={(key) => { if (!busy) guarded(() => { const next = key as CategoryDraftSection; setSection(next); setValues(project(version, next)); setDirty(false); setReason(""); setErrors([]); }); }} items={CATEGORY_DRAFT_SECTIONS.map((key) => ({ key, label: t(titles[key]) }))} />
-    <ContentTransition value={section}><Form layout="vertical">{Object.entries(values).map(([key, value]) => <ValueEditor key={key} name={key} value={value} change={(next) => { setValues((current) => ({ ...current, [key]: next })); setDirty(true); }} disabled={!canEdit} />)}</Form></ContentTransition>
+    <Tabs activeKey={section} onChange={key => navigate(key as CategoryDraftSection)} items={CATEGORY_DRAFT_SECTIONS.map(key => ({ key,
+      label: `${t(titles[key])}${categorySectionHasInput(drafts[key]) ? ` · ${t("未保存")}` : ""}` }))} />
+    <ContentTransition value={section}><Form form={form} layout="vertical">{visited.map(key => <div key={`${key}:${drafts[key].generation}`} hidden={section !== key}
+      role="tabpanel" aria-label={t(titles[key])} data-category-draft-section={key}>
+      {Object.entries(drafts[key].values).map(([field, value]) => field === "conditionalCapabilities"
+        ? <CategoryConditionalCapabilitiesEditor key={field} value={value} definition={definition}
+          navigate={navigate} prepareInspectionFields={prepareInspectionFields}
+          change={next => changeDraft(key, { values: { ...draftsRef.current[key].values, [field]: next }, dirty: true })} disabled={!canEdit}/>
+        : <ValueEditor key={field} name={field} value={value} catalog={applicableCatalog}
+          pending={value => changeDraft(key, { pendingField: value })}
+          change={next => changeDraft(key, { values: { ...draftsRef.current[key].values, [field]: next }, dirty: true })} disabled={!canEdit}/>) }
+    </div>)}</Form></ContentTransition>
+    {(section === "capabilities" || section === "inspection") && catalog.isError && <Alert type="warning" title={t("能力目录读取失败，当前输入已保留")} />}
+    {currentDraft.conflict && <Alert type="warning" title={t("当前页签的已保存内容已变化，本地输入已保留")}
+      description={t("先读取并核对最新版本，再明确选择是否重新填写此页签。")} />}
+    {otherInputSections.length > 0 && <Typography.Text type="secondary">{t("其他页签的未保存输入：{sections}", { sections: otherInputSections.map(key => t(titles[key])).join("、") })}</Typography.Text>}
     {errors.length > 0 && <Alert type="error" title={t("配置校验未通过")} description={errors.join("；")} />}
     <Space wrap>
-      {(editable || canPublish) && version.status === "draft" && <Input aria-label={t("变更原因")} placeholder={t("变更原因")} value={reason} onChange={(event) => setReason(event.target.value)} disabled={busy} maxLength={512} />}
-      {editable && version.status === "draft" && <ActionButton label={t("保存当前页签草稿")} disabled={!dirty} pending={busy} onAction={save} />}
-      {section === "capabilities" && canPublish && version.status === "draft" && <Button type="primary" disabled={dirty || busy} onClick={publish}>{t("校验并整体发布")}</Button>}
-      <Button disabled={dirty || busy} onClick={async () => { setBusy(true); try { const result = await categoryGovernanceApi.validate(code, version.id); setErrors(result.errors); if (result.valid) message.success(t("配置校验通过")); } catch { message.error(t("校验失败，请重试")); } finally { setBusy(false); } }}>{t("校验已保存版本")}</Button>
-      <Button disabled={busy} onClick={() => guarded(close)}>{t("关闭")}</Button>
+      {(editable || section === "capabilities" && canPublish) && version.status === "draft" && <Input aria-label={t("变更原因")} placeholder={t("变更原因")} value={reason} onChange={event => changeDraft(section, { reason: event.target.value })} disabled={busy} maxLength={512} />}
+      {editable && version.status === "draft" && <SaveButton form={form} label={t("保存当前页签草稿")} disabled={!dirty || currentDraft.pendingField || currentDraft.conflict || currentDraft.baseRevision !== version.revision} pending={busy} onSave={save} />}
+      {section === "capabilities" && canPublish && version.status === "draft" && <ActionButton label={t("校验并整体发布")} intent="review" disabled={hasUnsavedFields || otherInputSections.length > 0 || busy} onAction={publish} />}
+      <ActionButton label={t("校验已保存版本")} intent="review" disabled={hasUnsavedFields || busy} onAction={async () => {
+        requireCurrent(); inFlight.current = true; setBusy(true);
+        try { const result = await categoryGovernanceApi.validate(code, version.id); requireCurrent(); setErrors(result.errors); if (result.valid) message.success(t("配置校验通过")); }
+        finally { inFlight.current = false; if (isCurrent()) setBusy(false); }
+      }} />
+      <ActionButton label={t("读取最新草稿")} intent="refresh" variant="secondary" disabled={busy} onAction={readLatest} />
+      {editable && version.status === "draft" && categorySectionHasInput(currentDraft) && <Button disabled={busy} onClick={() => modal.confirm({
+        title: t("放弃此页签的未保存输入，按最新已读取版本重新填写？"), onOk: () => {
+          requireCurrent(); if (inFlight.current) return; updateDrafts(current => resetCategoryDraftSection(current, versionRef.current, section));
+        }
+      })}>{t("重新填写此页签")}</Button>}
+      <Button disabled={busy} onClick={() => guarded(dismissal.dismiss)}>{t("关闭")}</Button>
     </Space>
   </Modal>;
 }

@@ -52,13 +52,15 @@ function nextConfigVersion(current?: string) {
 export class WorkspaceCapabilityService {
   constructor(private readonly repository: WorkspaceCapabilityRepository) {}
 
-  /** Read-only adoption preflight. Reuse the actual configuration validator;
-   * do not initialize defaults, upgrade implementations or overwrite instances. */
+  /** Read-only adoption preflight. requiredCodes comes from Core's current-fact
+   * condition evaluation; omission retains the legacy unconditional check.
+   * Reuse the real config validator without activating or upgrading instances. */
   adoptionCompatibility(
     target: RentalCategoryDefinition,
     instances: Array<Pick<WorkspaceCapabilityInstance, "code" | "status" | "implementationVersion" | "config">>,
     registeredVersions: string[],
-    registry: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES
+    registry: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES,
+    requiredCodes: readonly RentalCapability[] = target.requiredCapabilities
   ) {
     const definitions = new Map(registry.map((definition) => [definition.code, definition]));
     const declared = new Set(target.defaultCapabilities);
@@ -69,7 +71,9 @@ export class WorkspaceCapabilityService {
     const enabled = (code: RentalCapability) => CORE_CAPABILITIES.has(code)
       ? Boolean(declared.has(code) && definitions.get(code) && applicable(definitions.get(code)!))
       : active.has(code);
-    for (const code of target.requiredCapabilities) {
+    const declaredRequirements = new Set([...target.requiredCapabilities, ...(target.conditionalCapabilities ?? []).map(row => row.code)]);
+    if (requiredCodes.some(code => !declaredRequirements.has(code))) throw new BadRequestException("采用必选能力不属于目标品类声明");
+    for (const code of requiredCodes) {
       if (!enabled(code)) add(code, "目标品类必选能力未启用，请在能力管理中明确配置；采用预览不会自动启用");
     }
     const hookCodes = new Set(registeredVersions.map((key) => key.split("@")[0]));
@@ -89,7 +93,8 @@ export class WorkspaceCapabilityService {
   }
 
   /** Read-only candidate projection. Caller supplies fresh same-space rows under
-   * the workspace mutex; never activates an instance or changes its executor. */
+   * the workspace mutex. Explicit new candidates must be required or declared
+   * by a condition; projection never activates or changes an executor. */
   prepareAdoptionConfigs<T extends Pick<WorkspaceCapabilityInstance, "code" | "status" | "revision" | "implementationVersion" | "config">>(
     target: RentalCategoryDefinition, instances: T[], patches: CategoryCapabilityPreparationPatch[], registeredVersions: string[] = []
   ): T[] {
@@ -116,8 +121,9 @@ export class WorkspaceCapabilityService {
           (!target.defaultCapabilities.includes(patch.code) && definition.kind !== "shared")) {
         throw new BadRequestException("该能力不能在目标品类准备配置");
       }
-      if (enableNew && (!target.requiredCapabilities.includes(patch.code) || !target.defaultCapabilities.includes(patch.code) || patch.expectedImplementationVersion !== definition.implementationVersion)) {
-        throw new BadRequestException("仅允许明确准备目标必选的新能力，且必须使用当前登记实现");
+      const preparableRequirements = new Set([...target.requiredCapabilities, ...(target.conditionalCapabilities ?? []).map(row => row.code)]);
+      if (enableNew && (!preparableRequirements.has(patch.code) || !target.defaultCapabilities.includes(patch.code) || patch.expectedImplementationVersion !== definition.implementationVersion)) {
+        throw new BadRequestException("仅允许明确准备目标必选或条件声明的新能力，且必须使用当前登记实现");
       }
       const hookRegistered = registeredVersions.some((key) => key.split("@")[0] === patch.code);
       if (enableNew && !registeredVersions.includes(`${patch.code}@${patch.expectedImplementationVersion}`)) {

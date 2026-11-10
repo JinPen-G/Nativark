@@ -28,7 +28,7 @@ const { CustomerOperationsService } = require("../apps/api/src/modules/platform/
 void (async () => {
   const memberQueries = [];
   const prisma = {
-    businessWorkspace: { async findFirst({ where }) { return where.tenantId === "tenant-a" && where.id === "workspace-a" ? { id: where.id } : null; } },
+    businessWorkspace: { async findFirst({ where }) { return where.tenantId === "tenant-a" && where.id === "workspace-a" ? { id: where.id, categoryCode: "camera" } : null; } },
     rentalOrder: {
       async findMany({ where }) {
         memberQueries.push({ kind: "orders", where });

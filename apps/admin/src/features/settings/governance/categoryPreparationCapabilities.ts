@@ -1,6 +1,6 @@
-import { RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, type CategoryCapabilityPreparationPatch, type RentalCapabilityConfig } from "@rental-os/shared";
+import { RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, type CategoryCapabilityPreparationPatch, type RentalCapabilityConfig, type RentalCompatibilityRelation } from "@rental-os/shared";
 import type { CategoryPreparationOperation, CategoryPreparationPreview } from "@/api/categoryPreparation";
-export type CapabilityPreparationDrafts = Record<string, { intent?: "configure" | "enable_new"; selected?: boolean; expectedRevision: number; expectedImplementationVersion: string; fields: Record<string, string | number | boolean> }>;
+export type CapabilityPreparationDrafts = Record<string, { intent?: "configure" | "enable_new"; selected?: boolean; expectedRevision: number; expectedImplementationVersion: string; fields: Record<string, string | number | boolean | RentalCompatibilityRelation[]> }>;
 export function preparationCapabilityDefinitions(preview: CategoryPreparationPreview) {
   return RENTAL_CAPABILITY_MODULES.filter((definition) => !(RENTAL_CORE_CAPABILITY_CODES as readonly string[]).includes(definition.code)
     && (definition.applicableCategories === "all" || definition.applicableCategories.includes(preview.targetDefinition.code))
@@ -8,7 +8,8 @@ export function preparationCapabilityDefinitions(preview: CategoryPreparationPre
     && (preview.entities.capabilities?.some((row) => row.code === definition.code && row.status === "enabled")
       || !preview.entities.capabilities?.some((row) => row.code === definition.code)
         && preview.targetDefinition.defaultCapabilities.includes(definition.code)
-        && preview.targetDefinition.requiredCapabilities.includes(definition.code)
+        && (preview.targetDefinition.requiredCapabilities.includes(definition.code)
+          || preview.targetDefinition.conditionalCapabilities?.some(row => row.code === definition.code))
         && preview.registeredCapabilityVersions?.includes(`${definition.code}@${definition.implementationVersion}`)));
 }
 export function initialCapabilityDrafts(preview: CategoryPreparationPreview, operation: CategoryPreparationOperation): CapabilityPreparationDrafts {
@@ -19,10 +20,10 @@ export function initialCapabilityDrafts(preview: CategoryPreparationPreview, ope
     const row = preview.entities.capabilities?.find((instance) => instance.code === definition.code);
     const patch = patches.find((item) => item.code === definition.code);
     const config = patch?.config ?? row?.config ?? {};
-    const fields: Record<string, string | number | boolean> = Object.create(null);
+    const fields: CapabilityPreparationDrafts[string]["fields"] = Object.create(null);
     for (const field of definition.configSchema) {
       const value = config[field.key];
-      if (field.type === "compatibility_relations") fields[field.key] = JSON.stringify(value ?? [], null, 2);
+      if (field.type === "compatibility_relations") fields[field.key] = Array.isArray(value) ? structuredClone(value) : value === undefined ? [] : JSON.stringify(value);
       else if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") fields[field.key] = value;
     }
     // Preserve stale preparation revisions: never silently turn an old patch into
@@ -49,10 +50,9 @@ export function capabilityPreparationPatches(preview: CategoryPreparationPreview
       const value = draft.fields[field.key];
       if (value === undefined || value === "") { if (field.required) throw new Error(`${field.label}为必填`); continue; }
       if (field.type === "compatibility_relations") {
-        let relations: unknown;
-        try { relations = JSON.parse(String(value)); } catch { throw new Error(`${field.label}不是有效 JSON`); }
+        const relations: unknown = value;
         if (!Array.isArray(relations)) throw new Error(`${field.label}必须是数组`);
-        config[field.key] = relations;
+        config[field.key] = structuredClone(relations);
       } else config[field.key] = value;
     }
     return [{ ...(draft.intent === "enable_new" ? { intent: "enable_new" as const } : {}), code: definition.code, expectedRevision: draft.expectedRevision, expectedImplementationVersion: draft.expectedImplementationVersion, config }];

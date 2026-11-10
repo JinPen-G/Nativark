@@ -13,6 +13,7 @@ import { subscriptionApi } from "@/api/subscription";
 import { SubscriptionRequestModal } from "./SubscriptionRequestModal";
 import { subscriptionError } from "./subscriptionOperations";
 import { PlanComparison } from "./plan-comparison/PlanComparison";
+import { useSubscriptionCategoryLabels } from "./useSubscriptionCategoryLabels";
 
 /** Published catalog projection only; plan selection never grants access or charges a tenant. */
 export function SubscriptionProPage() {
@@ -23,7 +24,7 @@ export function SubscriptionProPage() {
   const [requestType, setRequestType] = useState<SubscriptionRequestType | null>(null);
   const [category, setCategory] = useState<string>();
   const categories = [...new Set(query.data?.entitlements.flatMap(feature => feature.categories) ?? [])];
-  const categoryLabels: Record<string, string> = { camera: "摄影设备", camping: "露营装备", vehicle: "车辆载具", construction: "工程设备" };
+  const categoryLabels = useSubscriptionCategoryLabels();
   const features = query.data?.entitlements.filter(feature => !category || !feature.categories.length || feature.categories.includes(category)) ?? [];
   const actionType = (plan: SubscriptionPlan) => plan === query.data?.overview.plan
     ? plan === SubscriptionPlan.Pro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard
@@ -33,7 +34,7 @@ export function SubscriptionProPage() {
     view={<QueryState loading={query.isLoading}>
       {query.error ? <Alert type="error" message={subscriptionError(query.error, t("订阅介绍加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} /> : query.data && <div style={{ display: "grid", gap: "var(--rental-layout-section-gap)", minWidth: 0 }}>
         <Alert type="info" showIcon message={t("PRO 暂仅接受咨询或受控试点，正式销售尚未开放。")} />
-        {categories.length > 0 && <Space wrap><Select allowClear style={{ width: "var(--rental-control-width-select)" }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map(value => ({ value, label: t(categoryLabels[value] ?? value) }))} /></Space>}
+        {categories.length > 0 && <Space wrap><Select allowClear style={{ width: "var(--rental-control-width-select)" }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map(value => ({ value, label: categoryLabels.label(value) }))} /></Space>}
         <PlanComparison key={tenantId} features={features} prices={query.data.standardPricing} currentPlan={query.data.overview.plan} actionDisabled={!canManage}
           actionLabel={plan => pendingRequest(plan) ? t("查看申请进度") : t(plan === query.data?.overview.plan ? "申请续费" : plan === SubscriptionPlan.Pro ? "升级咨询" : "申请下期基础版")}
           onAction={plan => { const pending = pendingRequest(plan); if (pending) navigate(`${APP_ROUTES.subscription.path}/requests/${encodeURIComponent(pending.id)}`); else setRequestType(actionType(plan)); }} />

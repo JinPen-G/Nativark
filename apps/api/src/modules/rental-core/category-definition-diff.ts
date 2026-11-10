@@ -50,7 +50,8 @@ export function categoryDefinitionDifferences(before: unknown, after: unknown): 
   }
   const roots: Array<[CategoryDraftSection, string, string]> = [
     ["basic", "name", "中文名称"], ["basic", "description", "中文说明"], ["basic", "display", "中英文展示设置"], ["basic", "terminology", "业务术语"],
-    ["attributes", "attributeSchema", "属性概要"], ["capabilities", "defaultCapabilities", "默认能力"], ["capabilities", "requiredCapabilities", "必选能力"]
+    ["attributes", "attributeSchema", "属性概要"], ["capabilities", "defaultCapabilities", "默认能力"], ["capabilities", "requiredCapabilities", "必选能力"],
+    ["capabilities", "conditionalCapabilities", "条件必选能力"]
   ];
   for (const [section, key, label] of roots) walk(section, key, label, read(before, [key]), read(after, [key]));
   const business: Array<[CategoryDraftSection, string, string]> = [

@@ -1,8 +1,7 @@
 import type { CreateBusinessWorkspaceRequest, SaveSharedCustomerRequest, SaveWorkspaceMemberRequest, UpdateBusinessWorkspaceRequest } from "@rental-os/shared";
-import { BUSINESS_WORKSPACE_RUN_MODES, CUSTOMER_GENDERS, CUSTOMER_SOURCE_CHANNELS } from "@rental-os/shared";
-import { IsBoolean, IsDateString, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from "class-validator";
+import { BUSINESS_WORKSPACE_RUN_MODES, CUSTOMER_GENDERS, CUSTOMER_SOURCE_CHANNELS, RENTAL_CATEGORY_CODE_PATTERN } from "@rental-os/shared";
+import { IsBoolean, IsDateString, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, Matches, MaxLength } from "class-validator";
 
-const CATEGORIES = ["vehicle", "camera", "camping", "construction"] as const;
 const WORKSPACE_STATUSES = ["active", "frozen", "disabled"] as const;
 const DATA_SCOPES = ["all", "organization", "store", "own"] as const;
 // 运行模式取值域与共享契约同源，避免两处枚举漂移。
@@ -11,7 +10,7 @@ const RUN_MODES = BUSINESS_WORKSPACE_RUN_MODES;
 export class CreateBusinessWorkspaceDto implements CreateBusinessWorkspaceRequest {
   @IsString() @IsNotEmpty() code!: string;
   @IsString() @IsNotEmpty() name!: string;
-  @IsIn(CATEGORIES) categoryCode!: CreateBusinessWorkspaceRequest["categoryCode"];
+  @IsString() @Matches(RENTAL_CATEGORY_CODE_PATTERN) categoryCode!: CreateBusinessWorkspaceRequest["categoryCode"];
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(191) categoryVersionId?: string;
   @IsOptional() @IsIn(RUN_MODES) runMode?: CreateBusinessWorkspaceRequest["runMode"];
 }

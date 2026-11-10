@@ -22,6 +22,10 @@ export function categoryAdoptionProductGraph(target: RentalCategoryDefinition, i
     if (group.status !== "enabled") continue;
     if (group.defaultPricingUnit !== null && !target.businessModel.pricingUnits.includes(group.defaultPricingUnit as typeof target.businessModel.pricingUnits[number])) blockers.push({ domain: "pricing_group", id: `${group.id}:defaultUnit`, message: "启用定价分组的默认计价单位不适用于目标品类，请通过定价分组配置调整" });
     if (!group.members.length || new Set(group.members.map((member) => member.itemGroupId)).size !== group.members.length || group.members.some((member) => !groups.has(member.itemGroupId))) blockers.push({ domain: "pricing_group", id: `${group.id}:members`, message: "启用定价分组缺少型号、成员重复或关联空间外型号，请通过定价分组配置处理" });
+    const members = group.members.map(member => groups.get(member.itemGroupId));
+    if (members.some(member => member?.status !== "enabled") || new Set(members.map(member => member?.inventoryMode.toLowerCase())).size > 1) {
+      blockers.push({ domain: "pricing_group", id: `${group.id}:inventoryModes`, message: "启用定价分组成员须为启用且库存方式一致的型号，请通过定价分组配置处理" });
+    }
   }
   for (const group of input.groups) {
     if (group.status !== "enabled") continue;

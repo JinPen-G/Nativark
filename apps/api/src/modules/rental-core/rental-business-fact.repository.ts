@@ -1,3 +1,5 @@
+import { rentalCategoryStorageCode } from "./category-identity";
+import { validateQuotedCapabilityRequirements } from "./category-capability-facts";
 import { ConflictException, ForbiddenException, Inject, Injectable, Optional } from "@nestjs/common";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 import { Prisma, type $Enums } from "@prisma/client";
@@ -496,7 +498,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       sourceSnapshot: quote.sourceSnapshot === undefined ? Prisma.DbNull : quote.sourceSnapshot as unknown as Prisma.InputJsonValue,
       deliveryAddressSnapshot: quote.deliveryAddressSnapshot === undefined ? Prisma.DbNull : quote.deliveryAddressSnapshot as unknown as Prisma.InputJsonValue,
       rentalLineAmounts: quote.rentalLineAmounts === undefined ? Prisma.DbNull : quote.rentalLineAmounts as unknown as Prisma.InputJsonValue,
-      categoryCode: upper<$Enums.RentalCategoryCode>(quote.categoryCode),
+      categoryCode: rentalCategoryStorageCode(quote.categoryCode),
       categoryVersionId: quote.categoryVersionId ?? null,
       inspectionTemplateSnapshots: quote.inspectionTemplateSnapshots === undefined ? Prisma.DbNull : quote.inspectionTemplateSnapshots as unknown as Prisma.InputJsonValue,
       request: quote.request as unknown as Prisma.InputJsonValue,
@@ -533,6 +535,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       couponEvaluation: (quote.couponEvaluation ?? null) as unknown as Prisma.InputJsonValue,
       // CORE-EXT-02D：固化报价生成时已启用能力的版本快照，下单时拷进订单。
       capabilitySnapshot: (quote.capabilitySnapshot ?? null) as unknown as Prisma.InputJsonValue,
+      capabilityRequirementsSnapshot: (quote.capabilityRequirementsSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       capabilityDecisions: (quote.capabilityDecisions ?? null) as unknown as Prisma.InputJsonValue,
       customerCouponId: quote.customerCouponId ?? null,
       expiresAt: date(quote.expiresAt),
@@ -567,6 +570,10 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       }
       if (existing && !isDeepStrictEqual(existing.inspectionTemplateSnapshots ?? null, quote.inspectionTemplateSnapshots ?? null)) {
         throw new ConflictException("已有报价的检查模板快照不可改写");
+      }
+      if (existing && ["capabilityRequirementsSnapshot", "capabilitySnapshot"].some(field =>
+        !isDeepStrictEqual(existing[field as keyof typeof existing] ?? null, quote[field as keyof typeof quote] ?? null))) {
+        throw new ConflictException("已有报价的能力适用及执行快照不可改写");
       }
       if (existing) {
         if (original) throw new ConflictException('报价ID已存在，不能补造原操作依据');
@@ -603,6 +610,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
             throw new ConflictException("品类版本在报价期间已变化，请重新报价");
           }
         }
+        await validateQuotedCapabilityRequirements(client, workspaceId, quote);
         await client.rentalQuote.create({
           data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt),
             ...(original ? { originalOperationKey: original.key, originalInputHash: original.inputHash } : {}) }
@@ -1061,6 +1069,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       serviceSnapshots: (row.serviceSnapshots ?? []) as unknown as RentalQuoteSnapshotV1["serviceSnapshots"],
       couponEvaluation: (row.couponEvaluation ?? undefined) as unknown as RentalQuoteSnapshotV1["couponEvaluation"],
       capabilitySnapshot: (row.capabilitySnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilitySnapshot"],
+      capabilityRequirementsSnapshot: (row.capabilityRequirementsSnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilityRequirementsSnapshot"],
       capabilityDecisions: (row.capabilityDecisions ?? undefined) as unknown as RentalQuoteSnapshotV1["capabilityDecisions"],
       customerCouponId: row.customerCouponId ?? undefined,
       expiresAt: iso(row.expiresAt),

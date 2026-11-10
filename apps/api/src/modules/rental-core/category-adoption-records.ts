@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
-import type { CategoryEntityPreparationPatch, RentalCategoryDefinition } from "@rental-os/shared";
+import { CATEGORY_PREPARATION_LIMITS, type CategoryEntityPreparationPatch, type RentalCategoryDefinition } from "@rental-os/shared";
 import { prepareRentalCategoryUniqueClaims } from "./rental-category-attributes";
 
 export interface CategoryPreparationRecord {
@@ -11,9 +11,12 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 
 /** Pure candidate projection. Retired fields and media remain stored but do not become new active fields. */
 export function prepareCategoryAdoptionRecords(
-  definition: RentalCategoryDefinition, groups: CategoryPreparationRecord[], assets: CategoryPreparationRecord[], patches: CategoryEntityPreparationPatch[]
+  definition: RentalCategoryDefinition, groups: CategoryPreparationRecord[], assets: CategoryPreparationRecord[], patches: CategoryEntityPreparationPatch[],
+  source: "batch" | "collection" = "batch"
 ) {
-  if (!Array.isArray(patches) || patches.length > 1000 || Buffer.byteLength(JSON.stringify(patches)) > 256 * 1024) throw new BadRequestException("预备资料过多或超过 256KB，请减少本次修改");
+  const maxEntities = source === "collection" ? CATEGORY_PREPARATION_LIMITS.collectionEntities : CATEGORY_PREPARATION_LIMITS.batchEntities;
+  const maxBytes = source === "collection" ? CATEGORY_PREPARATION_LIMITS.collectionBytes : CATEGORY_PREPARATION_LIMITS.batchBytes;
+  if (!Array.isArray(patches) || patches.length > maxEntities || Buffer.byteLength(JSON.stringify(patches)) > maxBytes) throw new BadRequestException("预备资料超过当前处理范围的安全上限，请核对准备集合");
   const seen = new Set<string>();
   const byIdentity = new Map<string, CategoryEntityPreparationPatch>();
   for (const patch of patches) {

@@ -1,4 +1,4 @@
-import type { CategoryEntityPreparationPatch } from "@rental-os/shared";
+import { CATEGORY_PREPARATION_LIMITS, type CategoryEntityPreparationPatch, type CategoryPreparationEntityView } from "@rental-os/shared";
 import type { CategoryPreparationOperation, CategoryPreparationPreview } from "@/api/categoryPreparation";
 export type CategoryPreparationValues = Record<string, Record<string, string | number | boolean>>;
 export const preparationEntityKey = (scope: "item_group" | "asset", id: string) => `${scope}:${id}`;
@@ -34,4 +34,29 @@ export function categoryPreparationPatches(preview: CategoryPreparationPreview, 
     }
   }
   return result;
+}
+
+/** Page rendering never writes a current value back as a new edit. Stale staged
+ * input remains visible with its warning until the user explicitly withdraws it. */
+export function preparationEntityValue(row: CategoryPreparationEntityView, scope: "item_group" | "asset", code: string) {
+  const value = row.prepared?.values[code] ?? (scope === "asset" && code === "serialNo" ? row.serialNo : row.attributes[code]);
+  return ["string", "number", "boolean"].includes(typeof value) ? value as string | number | boolean : undefined;
+}
+
+/** A click saves one bounded batch. Remaining edits stay in the page draft, and
+ * the caller removes submitted keys only after receiving a real saved receipt. */
+export function nextPreparationBatch(patches: CategoryEntityPreparationPatch[]) {
+  const result: CategoryEntityPreparationPatch[] = [];
+  const encoder = new TextEncoder();
+  let bytes = encoder.encode(JSON.stringify({ patches: [], removals: [] })).length;
+  for (const patch of patches) {
+    const additional = encoder.encode(JSON.stringify(patch)).length + (result.length ? 1 : 0);
+    if (additional + bytes > CATEGORY_PREPARATION_LIMITS.batchBytes) {
+      if (!result.length) throw new Error("单条预备资料过大，请减少本次修改内容");
+      break;
+    }
+    if (result.length === CATEGORY_PREPARATION_LIMITS.batchEntities) break;
+    result.push(structuredClone(patch)); bytes += additional;
+  }
+  return { patches: result, remainingCount: patches.length - result.length };
 }

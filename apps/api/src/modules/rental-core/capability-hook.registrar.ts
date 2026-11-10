@@ -13,6 +13,7 @@ import {
   CAMERA_KIT_HANDOVER_LEGACY_VERSION
 } from "./capabilities/camera-kit-handover";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
+import { buildKitHandoverHookModule } from "./capabilities/kit-handover";
 
 /**
  * 内置能力模块的登记入口。
@@ -42,6 +43,8 @@ export class CapabilityHookRegistrar implements OnApplicationBootstrap {
     // 兼容版本必须与当前版本一起登记，不能让历史订单因新模块上线而被拒绝履约。
     this.runtime.register(buildCameraKitHandoverHookModule());
     this.runtime.register(buildCameraKitHandoverHookModule(CAMERA_KIT_HANDOVER_LEGACY_VERSION));
+    // 通用组合使用独立版本及严格证据门槛；旧摄影版本和历史订单不被改写。
+    this.runtime.register(buildKitHandoverHookModule());
     // CAMP-01A：露营套装清点与清洁周转。两项能力都只返回判定意见，
     // 归还异常与养护工单仍由 Rental Core 的通用链落库，避免复制订单状态机。
     this.runtime.register(buildCampingKitIntegrityHookModule());

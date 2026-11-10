@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 
 require("ts-node").register({
   transpileOnly: false,
-  compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
+  compilerOptions: { target: "es2022", lib: ["es2022", "dom"], module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
 });
 
 const { CapabilityHookRuntime } = require("../apps/api/src/modules/rental-core/capability-hook.runtime");

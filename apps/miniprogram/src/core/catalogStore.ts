@@ -40,6 +40,9 @@ export async function loadCatalog(serviceCode: string, force = false): Promise<C
       throw new Error("当前会话的服务与请求的服务不一致，请先切换服务");
     }
     const catalog = guest ? await fetchPublicCatalog(serviceCode) : await fetchCatalog();
+    if (contextVersion() !== version || isSignedIn() === guest) throw new Error("会话已变化，请重新读取目录");
+    if (catalog.workspace.workspaceCode !== serviceCode || catalog.categoryCode !== catalog.workspace.categoryCode) throw new Error("目录与当前服务不一致");
+    if (catalog.categoryMetadata && catalog.categoryMetadata.structureVersion !== 1) throw new Error("当前客户端不支持此品类展示版本，请升级后重试");
     if (catalog?.timeZone) rememberZone(serviceCode, catalog.timeZone);
     snapshot = { serviceCode, version, guest, catalog, fetchedAt: Date.now() };
     return catalog;
@@ -134,7 +137,7 @@ export function specsOf(item: ClientCatalogItem, limit = 3): string[] {
 export function specEntries(item: ClientCatalogItem): Array<{ label: string; value: string }> {
   return Object.entries(item.attributes ?? {})
     .filter(([key]) => !HIDDEN_ATTRIBUTES.has(key))
-    .map(([key, value]) => ({ label: key, value: attributeText(value) ?? "" }))
+    .map(([key, value]) => ({ label: item.attributeLabels?.[key] ?? key, value: attributeText(value) ?? "" }))
     .filter((row) => row.value)
     .slice(0, 12);
 }

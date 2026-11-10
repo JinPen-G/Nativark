@@ -136,6 +136,23 @@ void (async () => {
   });
   const baselineState = core.seedState("tenant", "camera", "space", "CNY", baseline);
   core.state = () => baselineState;
+  await assert.rejects(core.getWorkspaceCategory("tenant"), /缺少空间配置权威读取器/u, "版本化配置不能用旧缓存替代缺失的权威读取器");
+  core.states = new Map([["space", baselineState]]);
+  core.categoryByWorkspace = new Map([["space", "camera"]]);
+  core.tenantByWorkspace = new Map([["space", "tenant"]]);
+  core.defaultWorkspaceByTenant = new Map([["tenant", "space"]]);
+  // This resolver fixture supplies configuration, not database lock evidence.
+  // The production snapshot repository is exercised by the context-read tests.
+  core.configStore = { loadWorkspaceSnapshot: async (tenantId, workspaceId) => {
+    assert.equal(tenantId, "tenant"); assert.equal(workspaceId, "space");
+    const resolved = await resolver.forWorkspace(tenantId, workspaceId);
+    return clone({ tenantId, workspaceId, workspaceCategoryCode: resolved.definition.code, definition: resolved.definition,
+      binding: { categoryCode: resolved.definition.code, categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision },
+      isDefault: true, profile: baselineState.profile, businessSettings: baselineState.businessSettings,
+      operators: baselineState.operators, locations: baselineState.locations, itemGroups: baselineState.itemGroups,
+      pricingGroups: baselineState.pricingGroups, couponTemplates: baselineState.couponTemplates,
+      inspectionTemplates: baselineState.inspectionTemplates, hasPersistedConfig: true });
+  } };
   assert.ok((await core.listInspectionTemplates("tenant", "pickup"))[0].fields.some((field) => field.code === "version2_optional_check"), "当前模板补齐项应读取绑定版本而非静态四品类默认值");
   const oldOrderTemplates = await core.listInspectionTemplates("tenant", "pickup", {
     tenantId: "tenant", categoryCode: "camera", categoryVersionId: "published-v1"

@@ -38,7 +38,7 @@ import { z } from 'zod';
 export function composeAiAuthorizedBusinessTools(input: {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiOrderRouteCredentialSource;
-  core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
+  core: Pick<RentalCoreService, 'readBusinessContext' | 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
     | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspectionsPage' | 'listItemGroupsPage' | 'queryOrders'>>;
   memberships: AiMembershipCandidateReadPort;

@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException } from "@nestjs/common";
-import { Prisma, type RentalCategoryCode } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { RentalCategoryCode } from "@rental-os/shared";
 import type { PrismaService } from "../database/prisma.service";
 
 export function categoryScopeAllows(scope: string, tenantIds: unknown, tenantId: string) {
@@ -16,7 +17,7 @@ export async function assertCategoryAdoptionAllowed(
   if (operation === "create" && !categoryScopeAllows(category.openingScope, category.openingTenantIds, tenantId)) {
     throw new ForbiddenException("该品类当前不允许本租户新开通空间");
   }
-  const policies = await db.$queryRaw<Array<{ createScope: string; createTenantIds: unknown; upgradeScope: string; upgradeTenantIds: unknown; restoreScope: string; restoreTenantIds: unknown }>>(Prisma.sql`SELECT createScope, createTenantIds, upgradeScope, upgradeTenantIds, restoreScope, restoreTenantIds FROM rental_category_version_policies WHERE versionId = ${versionId} FOR UPDATE`);
+  const policies = await db.$queryRaw<Array<{ createScope: string; createTenantIds: unknown; upgradeScope: string; upgradeTenantIds: unknown; restoreScope: string; restoreTenantIds: unknown; revision: number }>>(Prisma.sql`SELECT createScope, createTenantIds, upgradeScope, upgradeTenantIds, restoreScope, restoreTenantIds, revision FROM rental_category_version_policies WHERE versionId = ${versionId} FOR UPDATE`);
   const version = await db.rentalCategoryVersion.findUnique({ where: { id: versionId } });
   if (!version || version.categoryCode !== categoryCode || !["published", "legacy_baseline"].includes(version.status)) {
     throw new ConflictException("目标品类版本不是可采用的发布版本");
@@ -25,4 +26,5 @@ export async function assertCategoryAdoptionAllowed(
   if (!policy || !categoryScopeAllows(policy[`${operation}Scope`], policy[`${operation}TenantIds`], tenantId)) {
     throw new ForbiddenException("本租户不在目标版本的采用范围内");
   }
+  return { versionPolicyRevision: policy.revision };
 }

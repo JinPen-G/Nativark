@@ -31,7 +31,8 @@ import type {
   RentalMembershipSnapshot,
   RentalRuleConfig
 } from "@rental-os/shared";
-import { RENTAL_CATEGORY_DEFINITIONS, RentalCategoryCode } from "@rental-os/shared";
+import { isRentalCategoryCode } from "@rental-os/shared";
+import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions, readRentalCategoryCode } from "../rental-core/category-identity";
 import { customerRegistrationTransaction } from "./customer-registration.transaction";
 import { CustomerRegistrationService } from "./customer-registration.service";
 import { PrismaService } from "../database/prisma.service";
@@ -108,7 +109,7 @@ export class MembershipService {
       select: { id: true, categoryCode: true }
     });
     if (!workspace) throw new NotFoundException("当前经营空间不存在或不属于本租户");
-    return workspace;
+    return { ...workspace, categoryCode: readRentalCategoryCode(workspace.categoryCode) };
   }
 
   private async requireCustomer(tenantId: string, customerId: string, expectedType?: "personal" | "corporate", tx?: Prisma.TransactionClient) {
@@ -359,7 +360,7 @@ export class MembershipService {
       where: { tenantId, workspaceId }, orderBy: [{ status: "asc" }, { name: "asc" }]
     })).map((row) => ({
       id: row.id, workspaceId: row.workspaceId, code: row.code, name: row.name,
-      categoryCode: row.categoryCode as CustomerMembershipQualificationType["categoryCode"],
+      categoryCode: readRentalCategoryCode(row.categoryCode),
       capabilityCode: row.capabilityCode ?? undefined, requiredForBooking: row.requiredForBooking,
       status: row.status as CustomerMembershipQualificationType["status"],
       createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString()
@@ -440,9 +441,9 @@ export class MembershipService {
       const revision = await tx.customerQualificationRevision.create({
         data: {
           tenantId, workspaceId, customerId, qualificationType: input.qualificationType,
-          categoryCode: type.categoryCode, capabilityCode: type.capabilityCode,
+          categoryCode: readRentalCategoryCode(type.categoryCode), capabilityCode: type.capabilityCode,
           applicableScope: {
-            workspaceId, categoryCode: type.categoryCode,
+            workspaceId, categoryCode: readRentalCategoryCode(type.categoryCode),
             ...(type.capabilityCode ? { capabilityCode: type.capabilityCode } : {}),
             requiredForBooking: type.requiredForBooking
           } as Prisma.InputJsonValue,
@@ -896,7 +897,7 @@ export class MembershipService {
     });
     return {
       workspaces,
-      categories: RENTAL_CATEGORY_DEFINITIONS.map(({ code, name }) => ({ code, name }))
+      categories: await rentalCategoryIdentityOptions(this.prisma)
     };
   }
 
@@ -1260,10 +1261,10 @@ export class MembershipService {
       return { type: "workspaces", workspaceIds: this.normalizeScopeValues(value.workspaceIds, "经营空间") };
     }
     const categoryCodes = this.normalizeScopeValues(value.categoryCodes, "租赁品类");
-    if (categoryCodes.some((code) => !Object.values(RentalCategoryCode).some((category) => category === code))) {
+    if (categoryCodes.some((code) => !isRentalCategoryCode(code))) {
       throw new BadRequestException("权益适用范围包含无效租赁品类");
     }
-    return { type: "categories", categoryCodes: categoryCodes as RentalCategoryCode[] };
+    return { type: "categories", categoryCodes };
   }
 
   private normalizeScopeValues(value: unknown, label: string): string[] {
@@ -1278,6 +1279,7 @@ export class MembershipService {
     const result: CustomerMembershipBenefit[] = [];
     const workspaceIds = new Set<string>();
     const serviceIds = new Set<string>();
+    const categoryCodes = new Set<string>();
     for (const benefit of benefits) {
       if (!benefit || typeof benefit !== "object" || Array.isArray(benefit)
         || !["rental_discount", "deposit_reduction", "preauth_reduction", "service_benefit", "priority_reservation", "quote_validity_extension"].includes(benefit.type)
@@ -1289,6 +1291,7 @@ export class MembershipService {
       }
       const scope = this.normalizeBenefitScope(benefit.scope);
       if (scope.type === "workspaces") scope.workspaceIds.forEach((id) => workspaceIds.add(id));
+      if (scope.type === "categories") scope.categoryCodes.forEach((code) => categoryCodes.add(code));
       let applicableServiceIds: string[] | undefined;
       if (benefit.applicableServiceIds !== undefined) {
         if (!Array.isArray(benefit.applicableServiceIds) || benefit.applicableServiceIds.some((id) => typeof id !== "string" || !id.trim())) {
@@ -1299,6 +1302,7 @@ export class MembershipService {
       }
       result.push({ ...benefit, scope, ...(applicableServiceIds ? { applicableServiceIds } : {}) });
     }
+    await assertPublishedRentalCategoryIdentities(db, [...categoryCodes]);
     if (workspaceIds.size) {
       const count = await db.businessWorkspace.count({ where: { tenantId, id: { in: [...workspaceIds] } } });
       if (count !== workspaceIds.size) throw new BadRequestException("权益范围包含不存在或不属于本租户的经营空间");
@@ -1362,11 +1366,11 @@ export class MembershipService {
     const scope = (row.applicableScope ?? {}) as { workspaceId?: string; categoryCode?: string; capabilityCode?: string; requiredForBooking?: boolean };
     return {
       id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, customerId: row.customerId,
-      qualificationType: row.qualificationType, categoryCode: row.categoryCode as CustomerQualificationRevision["categoryCode"],
+      qualificationType: row.qualificationType, categoryCode: readRentalCategoryCode(row.categoryCode),
       capabilityCode: row.capabilityCode ?? undefined,
       applicableScope: {
         workspaceId: scope.workspaceId ?? row.workspaceId,
-        categoryCode: (scope.categoryCode ?? row.categoryCode) as CustomerQualificationRevision["categoryCode"],
+        categoryCode: readRentalCategoryCode(scope.categoryCode ?? row.categoryCode),
         capabilityCode: scope.capabilityCode ?? row.capabilityCode ?? undefined,
         requiredForBooking: Boolean(scope.requiredForBooking)
       },

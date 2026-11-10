@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 
 require("ts-node").register({
   transpileOnly: false,
-  compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
+  compilerOptions: { target: "es2022", lib: ["es2022", "dom"], module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
 });
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
@@ -61,12 +61,12 @@ const cases = [
 ];
 const tenantId = "tenant_001";
 
-function context(core) {
-  const profile = core.getProfile(tenantId);
+async function context(core) {
+  const profile = await core.getProfile(tenantId);
   return {
     profile,
     category: RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === profile.categoryCode),
-    settings: core.getBusinessSettings(tenantId),
+    settings: await core.getBusinessSettings(tenantId),
     groups: core.listItemGroups(tenantId),
     couponTemplates: core.listCouponTemplates(tenantId),
     locations: core.listLocations(tenantId),
@@ -102,7 +102,7 @@ void (async () => {
     rawState.businessSettings.pricing.enabledUnits = [...RENTAL_PRICING_UNIT_CODES];
     rawState.businessSettings.pricing.defaultUnit = "package";
     rawState.businessSettings.fulfillment.enabledModes = [...RENTAL_FULFILLMENT_MODES];
-    const ctx = context(core);
+    const ctx = await context(core);
     require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, item.workspaceId, ctx);
     const definition = ctx.category;
     const itemGroups = ctx.groups;
@@ -143,19 +143,33 @@ void (async () => {
 
     const mode = ctx.settings.fulfillment.enabledModes[0];
     assert.ok(definition.businessModel.fulfillmentModes.includes(mode), `${item.categoryCode}: 默认履约方式必须受品类支持`);
-    const quote = await business.createQuote(tenantId, ctx, {
+    const quoteInput = {
       customerType: "personal",
       fulfillmentMode: mode,
       fulfillmentLocationId: locations[0].id,
       startAt,
       endAt,
       lines: [{ itemGroupId: itemGroups[0].id, quantity: 1 }]
-    });
+    };
+    let quote = await business.createQuote(tenantId, ctx, quoteInput);
+    const promotedQuote = quote.discountAmount > 0 ? structuredClone(quote) : undefined;
+    if (promotedQuote) {
+      // Keep the original promoted quote for the unsupported segmented-discount case.
+      // Produce a separate ordinary quote through configuration + Core; never erase a saved discount.
+      for (const plan of business.listDiscountPlans(tenantId, ctx).filter(row => row.status === "enabled")) {
+        await business.saveDiscountPlan(tenantId, ctx, { ...plan, status: "disabled", changeReason: "无优惠价格来源矩阵夹具" });
+      }
+      quote = await business.createQuote(tenantId, ctx, quoteInput);
+      assert.equal(quote.discountAmount, 0, "普通价格矩阵使用另行报价，保留原优惠报价");
+    }
     assert.ok(quote.rentalAmount > 0, `${item.categoryCode}: 相同报价链必须算出正租金`);
     assert.equal(quote.categoryCode, item.categoryCode, `${item.categoryCode}: 报价快照不得串品类`);
     assert.equal(quote.request.lines[0].itemGroupId, itemGroups[0].id, `${item.categoryCode}: 报价必须引用本空间商品`);
 
-    business.factStore.findQuote = async (tenant, id) => tenant === tenantId && id === quote.id ? structuredClone(quote) : undefined;
+    business.factStore.findQuote = async (tenant, id) => {
+      const source = [quote, promotedQuote].find(row => row?.id === id);
+      return tenant === tenantId && source ? structuredClone(source) : undefined;
+    };
     // 服务级矩阵：四品类均使用同一续租入口，并各自保留原单位与执行依据。
     // 这里只验试算契约，不把替身仓储当作库存冲突/真实订单状态验收。
     const newEndAt = new Date(Date.parse(endAt) + 24 * 60 * 60 * 1000).toISOString();
@@ -224,6 +238,20 @@ void (async () => {
       fulfillmentMode: mode, locationIds: [locations[0].id], customerType: "personal" };
     const frozenExchangeQuote = structuredClone(quote);
     const frozenOrder = structuredClone(order);
+    // The absorbing store has legacy plans, not published price-version rows.
+    // First assert that this absence is rejected; then supply an explicit immutable
+    // price-reader fixture to exercise the pricing/basis matrix. This is not DB publication evidence.
+    await assert.rejects(business.quotePostPickupExchange(tenantId, exchangeContext,
+      { ...exchangeArgs, priceBasis: "replacement_current_price" }), /缺少已发布价格版本/u);
+    const currentRates = await business.resolveSpaceRates(tenantId, exchangeContext, exchangeArgs.appliedAt);
+    const priceReaderFixture = { versionId: `fixture-published-${item.categoryCode}`, version: "2", rates: structuredClone(currentRates.rates) };
+    business.resolveSpaceRates = async () => structuredClone(priceReaderFixture);
+    if (promotedQuote) {
+      const frozenPromotion = structuredClone(promotedQuote);
+      await assert.rejects(business.quotePostPickupExchange(tenantId, exchangeContext,
+        { ...exchangeArgs, order: { ...order, quoteId: promotedQuote.id }, priceBasis: "replacement_current_price" }), /原优惠的已用与剩余逐段分摊尚不可核实/u);
+      assert.deepEqual(promotedQuote, frozenPromotion, "不能为通过现价换货而抹除旧报价优惠");
+    }
     for (const priceBasis of ["original_order_price", "replacement_current_price"]) {
       const exchanged = await business.quotePostPickupExchange(tenantId, exchangeContext, { ...exchangeArgs, priceBasis });
       assert.equal(exchanged.originalTarget, originalTarget);
@@ -235,6 +263,8 @@ void (async () => {
       assert.equal(exchanged.priced.rateSnapshot[0].baseAmount,
         priceBasis === "original_order_price" ? originalRate.baseAmount : replacementPlan.rates[0].baseAmount);
       assert.equal(Boolean(exchanged.currentVersion), priceBasis === "replacement_current_price");
+      if (exchanged.currentVersion) assert.equal(exchanged.currentVersion.versionId, priceReaderFixture.versionId,
+        "现价换货保留实际读取的价格版本来源，不能冒充原报价来源");
       assert.ok(Number.isFinite(exchanged.priced.pricingSnapshot.recalculatedPayableAmount));
       assert.ok(exchanged.replacementAmount > 0);
       assert.equal(exchanged.originalAmount, quote.rentalAmount);
@@ -262,9 +292,11 @@ void (async () => {
       { ...exchangeArgs, priceBasis: "original_order_price", replacementItemGroupId: itemGroups[0].id }), /不能与原商品相同/u);
     await assert.rejects(() => business.quotePostPickupExchange(tenantId, exchangeContext,
       { ...exchangeArgs, priceBasis: "original_order_price", orderLineId: "missing-line" }), /换货订单行不存在/u);
+    // This timestamp precedes the rental itself. The period gate must reject it;
+    // absent published-price provenance is tested separately above at a valid rental time.
     await assert.rejects(() => business.quotePostPickupExchange(tenantId, exchangeContext,
       { ...exchangeArgs, priceBasis: "replacement_current_price",
-        appliedAt: new Date(Date.parse(replacementPlan.effectiveFrom) - 1000).toISOString() }), /缺少当前价格版本/u);
+        appliedAt: new Date(Date.parse(replacementPlan.effectiveFrom) - 1000).toISOString() }), /必须在实际租期内/u);
     await assert.rejects(() => business.quotePostPickupExchange(tenantId,
       { ...exchangeContext, groups: exchangeContext.groups.map((group) => group.id === replacement.id
         ? { ...group, inventoryMode: group.inventoryMode === "serialized" ? "quantity" : "serialized" } : group) },

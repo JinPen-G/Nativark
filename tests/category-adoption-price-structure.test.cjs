@@ -36,4 +36,13 @@ assert.equal(preview({ ...input, adjustments: [{ id: "a", status: "pending", fin
 assert.equal(preview({ ...input, plans: [{ id: "p", status: "enabled", effectiveTo: null, rates: [invalid] }] }, now).valid, false);
 assert.equal(preview({ ...input, plans: [{ id: "p", status: "enabled", effectiveTo: now, rates: [invalid] }] }, now).valid, true);
 assert.deepEqual(input, before); assert.equal(preview(input, now).complete, false);
-console.log("category-adoption-price-structure: input contract, pricing windows, usage tiers, zero values and historical isolation passed");
+const plan = { id: "fee-plan", status: "enabled", effectiveTo: null, rates: [rate] };
+assert.equal(preview({ ...input, plans: [{ ...plan, fulfillmentFees: [{ mode: "store_pickup_return", amount: 0, crossLocationAmount: 0 }] }] }, now).valid, true, "零履约费合法且不等于缺金额");
+for (const fulfillmentFees of [{}, [{ mode: "store_pickup_return" }], [{ mode: "store_pickup_return", amount: -1 }], [{ mode: "store_pickup_return", amount: "0" }],
+  [{ mode: "store_pickup_return", amount: 0, unknownExecutor: true }], [{ mode: "store_pickup_return", amount: 0 }, { mode: "store_pickup_return", amount: 1 }]]) {
+  const selected = { ...plan, fulfillmentFees }, saved = structuredClone(selected);
+  assert.ok(preview({ ...input, plans: [selected] }, now).blockers.some(row => row.id === "fee-plan:fulfillmentFees"));
+  assert.deepEqual(selected, saved);
+  assert.equal(preview({ ...input, plans: [{ ...selected, effectiveTo: now }] }, now).valid, true);
+}
+console.log("category-adoption-price-structure: input contract, pricing windows, usage tiers, fulfillment fees, zero values and historical isolation passed");

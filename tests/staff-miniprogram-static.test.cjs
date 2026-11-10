@@ -13,6 +13,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { spawnSync } = require("node:child_process");
 const ts = require("typescript");
+const { RENTAL_CATEGORY_DEFINITIONS } = require("../packages/shared/dist");
 
 const root = path.resolve(__dirname, "../apps/staff-miniprogram");
 const src = path.join(root, "src");
@@ -217,7 +218,8 @@ test("订阅动作守卫：到期新业务拒绝，履约善后仍按原权限�
   const rt = runtime((req) => {
     if (req.url.endsWith("/auth/session-context")) return ok(req, login);
     if (req.url.endsWith("/subscription/context")) return ok(req, facts);
-    if (req.url.endsWith("/categories") || req.url.endsWith("/locations")) return ok(req, []);
+    if (req.url.endsWith("/categories")) return ok(req, structuredClone(RENTAL_CATEGORY_DEFINITIONS.filter(row => row.code === "camera")));
+    if (req.url.endsWith("/locations")) return ok(req, []);
     ok(req, { id: "done" });
   });
   rt.load("core/session").saveSession(login, "test");
@@ -457,7 +459,8 @@ test("现场新增与编辑动作调用现有业务契约，创建订单携带�
   const rt = runtime((req) => {
     if (req.url.endsWith("/auth/session-context")) return ok(req, login);
     if (req.url.endsWith("/subscription/context")) return ok(req, subscriptionFixture());
-    if (req.url.endsWith("/categories") || req.url.endsWith("/locations")) return ok(req, []);
+    if (req.url.endsWith("/categories")) return ok(req, structuredClone(RENTAL_CATEGORY_DEFINITIONS.filter(row => row.code === "camera")));
+    if (req.url.endsWith("/locations")) return ok(req, []);
     ok(req, { id: "result-one" });
   });
   rt.load("core/session").saveSession(login, "test");

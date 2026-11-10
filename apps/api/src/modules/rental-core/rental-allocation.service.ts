@@ -428,6 +428,7 @@ export class RentalAllocationService
           )!.itemGroupId = modelId;
           movedModels.add(modelId);
         }
+        const protectManual = (await this.core.getBusinessSettings(tenantId)).allocation?.protectManual ?? true;
         const add = (assetId?: string) => {
           const locked = preserveLock;
           order.allocations.push({
@@ -444,9 +445,7 @@ export class RentalAllocationService
               source,
               protected:
                 source === "manual" &&
-                (this.core.getBusinessSettings(tenantId).allocation
-                  ?.protectManual ??
-                  true),
+                protectManual,
               assignedAt: at,
               lockedAt: locked ? at : undefined,
               itemGroupName: model.name,

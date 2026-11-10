@@ -74,6 +74,7 @@ import { ClientDeliveryAddressService } from "./client-delivery-address.service"
 import { ClientWechatAuthService } from "./client-wechat-auth.service";
 import { validateInspectionCustomerResponse } from "../rental-core/rental-inspection-customer-response";
 import { getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
+import { clientCategoryMetadata, clientItemAttributes, hasLegacyClientCategoryProjection } from "../rental-core/category-client-projection";
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
@@ -128,12 +129,13 @@ export class ClientApiService {
   ) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
-    const profile = this.core.getProfile(tenantId);
+    if (typeof this.core.readBusinessContext === "function") return this.business.refreshWorkspaceContext(tenantId, await this.core.readBusinessContext(tenantId));
+    const profile = await this.core.getProfile(tenantId);
     const category = await this.core.getWorkspaceCategory(tenantId);
     return {
       profile,
       category,
-      settings: this.core.getBusinessSettings(tenantId),
+      settings: await this.core.getBusinessSettings(tenantId),
       groups: this.core.listItemGroups(tenantId),
       pricingGroups: this.core.listPricingGroups(tenantId),
       couponTemplates: this.core.listCouponTemplates(tenantId),
@@ -454,7 +456,7 @@ export class ClientApiService {
     const rows = await this.prisma.businessWorkspace.findMany({ where: { tenantId, code: { in: workspaceCodes } }, select: { id: true } });
     for (const row of rows) {
       try {
-        const enabled = runWithRequestIdentity({ tenantId, workspaceId: row.id, isSaasAdmin: false }, () => this.core.getBusinessSettings(tenantId).fulfillment.enabledModes);
+        const enabled = await runWithRequestIdentity({ tenantId, workspaceId: row.id, isSaasAdmin: false }, async () => (await this.core.getBusinessSettings(tenantId)).fulfillment.enabledModes);
         if (enabled.some((mode) => DELIVERY_MODES.has(mode))) return true;
       } catch {
         // 空间未初始化经营配置：不视为支持配送。
@@ -464,7 +466,13 @@ export class ClientApiService {
   }
 
   private async buildCatalog(tenantId: string, tenantCode: string, summary: ClientWorkspaceSummary): Promise<ClientCatalogResponse> {
-    const business = (await this.context(tenantId));
+    const workspaceId = getRequestIdentity()?.workspaceId;
+    if (this.categoryResolver && !workspaceId) throw new ForbiddenException("客户目录缺少受权空间");
+    const binding = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId!) : undefined;
+    const loaded = await this.context(tenantId);
+    const business = binding ? { ...loaded, category: binding.definition } : loaded;
+    if (business.category.code !== business.profile.categoryCode || business.profile.categoryCode !== summary.categoryCode) throw new ConflictException("目录品类与当前空间不一致，请重新读取");
+    if (!binding && !hasLegacyClientCategoryProjection(business.profile.categoryCode)) throw new ConflictException("动态客户目录缺少可核对的发布版本");
     const context = { tenantId, tenantCode, workspaceCode: summary.workspaceCode, workspaceName: summary.workspaceName, categoryCode: summary.categoryCode, membershipStatus: summary.membershipStatus };
     const workspace = summary;
     // 参考起价：当前生效价格版本中，覆盖该型号（直接或经其定价分组）的最低基础单价。
@@ -483,7 +491,7 @@ export class ClientApiService {
       }
       return best;
     };
-    return {
+    const result: ClientCatalogResponse = {
       apiVersion: "v1",
       tenantCode: context.tenantCode,
       workspace: {
@@ -494,6 +502,7 @@ export class ClientApiService {
         isDefault: workspace?.isDefault
       } satisfies ClientWorkspaceSummary,
       categoryCode: business.profile.categoryCode,
+      categoryMetadata: clientCategoryMetadata(business.category, binding?.categoryVersionId),
       terminology: {
         itemLabel: business.category.terminology.itemLabel,
         itemGroupLabel: business.category.terminology.itemGroupLabel,
@@ -511,7 +520,7 @@ export class ClientApiService {
           : RENTAL_PRICING_UNIT_LABELS[code]
       })),
       timeZone: business.settings.calendar.timeZone ?? "Asia/Shanghai",
-      items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: summary.membershipStatus === "guest" ? `/api/client/v1/public/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}?tenantCode=${encodeURIComponent(tenantCode)}&service=${encodeURIComponent(summary.workspaceCode)}` : `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), attributes: item.attributes, startingPrice: startingPriceOf(item.id) })),
+      items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: summary.membershipStatus === "guest" ? `/api/client/v1/public/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}?tenantCode=${encodeURIComponent(tenantCode)}&service=${encodeURIComponent(summary.workspaceCode)}` : `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), ...clientItemAttributes(business.category, item.attributes), startingPrice: startingPriceOf(item.id) })),
       pricingGroups: enabledPricingGroups.map((group) => ({ id: group.id, code: group.code, name: group.name, memberItemGroupIds: group.memberItemGroupIds, enabled: group.status === "enabled" })),
       services: this.business.listServices(context.tenantId, business).filter((service) => service.status === "enabled").map((service) => ({ id: service.id, code: service.code, name: service.name, description: service.terms, pricingUnit: service.billingUnit, enabled: true })),
       // 地点只投影客户可见的公开信息：地址、营业时段、门店电话与取还能力；经营主体与结算方式不外露。
@@ -528,6 +537,13 @@ export class ClientApiService {
         returnLabel: business.category.terminology.returnLabel
       }
     };
+    // Adoption may complete between the version read and the config/fact reads.
+    // Discard a mixed response instead of caching a projection from another version.
+    if (binding) {
+      const current = await this.categoryResolver!.forWorkspace(tenantId, workspaceId!);
+      if (current.categoryVersionId !== binding.categoryVersionId || current.adoptionRevision !== binding.adoptionRevision) throw new ConflictException("目录读取期间品类版本已变化，请重新读取");
+    }
+    return result;
   }
 
   async readCatalogItemImage(context: ClientRequestContext, itemGroupId: string, imageId: string) {

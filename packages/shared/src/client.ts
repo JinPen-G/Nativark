@@ -15,6 +15,7 @@ import type {
   RentalPricingUnit,
   RentalCategoryTerminology
 } from "./core";
+import type { RentalAttributeDefinition, RentalCategoryDefinition } from "./core";
 import type { AdminLoginBranding } from "./platform";
 import type { CompleteFileUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "./infrastructure";
 
@@ -435,6 +436,7 @@ export interface ClientCatalogItem {
   inventoryMode: string;
   images?: Array<{ url: string; alt?: string }>;
   attributes?: Record<string, unknown>;
+  attributeLabels?: Record<string, string>;
   /** 无生效价格版本或该型号无费率时缺省；客户端不得以 0 元替代。 */
   startingPrice?: ClientCatalogStartingPrice;
 }
@@ -476,6 +478,14 @@ export interface ClientCatalogResponse {
   tenantCode: string;
   workspace: ClientWorkspaceSummary;
   categoryCode: string;
+  categoryMetadata?: {
+    structureVersion: 1;
+    categoryVersionId?: string;
+    definitionVersion: string;
+    name: string;
+    icon?: NonNullable<RentalCategoryDefinition["display"]>["icon"];
+    fields: Array<Pick<RentalAttributeDefinition, "code" | "label" | "type" | "unit" | "options">>;
+  };
   /** 当前品类服务端术语；客户端不得用其它品类的固定取还文案代替。 */
   terminology: Pick<RentalCategoryTerminology, "itemLabel" | "itemGroupLabel" | "assetLabel" | "fulfillmentLabel" | "pickupLabel" | "returnLabel" | "deliveryLabel" | "usageMetricLabel">;
   /** 当前品类允许使用的计价单位及统一显示名；month 明确为 30 日月，usage 使用品类读数名称。 */

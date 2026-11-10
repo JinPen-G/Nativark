@@ -26,6 +26,14 @@ import { TenantAppearanceProfileService } from "../client/tenant-appearance-prof
 import { AccountAppearanceService } from "../client/account-appearance.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
+import { Prisma } from "@prisma/client";
+import { getRequestIdentity } from "../../common/request-identity";
+
+export interface WorkspaceAccessLease {
+  user: SystemUserRow;
+  /** Same transaction and original session; expiry still needs a final check. */
+  revalidate: () => Promise<SystemUserRow>;
+}
 
 interface LoginFailureState {
   count: number;
@@ -341,7 +349,7 @@ export class AuthService {
   async resolveAccessContext(
     authorization?: string,
     options: { allowInvalidWorkspace?: boolean; audience?: AuthAudience } = {}
-  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean } | undefined> {
+  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean; accessSession: { sessionId: string; expiresAt: number } } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
     const payload = this.verifyAccessToken(token);
@@ -373,7 +381,40 @@ export class AuthService {
     // 撤销/停用后 fallback 到租户级身份时，workspaceId 不能再当有效范围使用——
     // 否则被撤销的账号拿着旧会话仍能读旧空间的经营数据。
     const workspaceValid = Boolean(workspaceId) && Boolean(workspaceUser);
-    return { user, tenantUser, workspaceId, hasWorkspaces, workspaceValid };
+    return { user, tenantUser, workspaceId, hasWorkspaces, workspaceValid,
+      accessSession: { sessionId: payload.sid, expiresAt: payload.exp } };
+  }
+
+  /** Lock the current authenticated workspace principal before business locks.
+   * Uses the original Guard evidence and platform permission mapping. The lease
+   * grants no business action and is valid only in the supplied transaction;
+   * callers check their action/scope and revalidate immediately before return. */
+  async lockRequestWorkspaceAccess(tx: Prisma.TransactionClient): Promise<WorkspaceAccessLease> {
+    const identity = getRequestIdentity();
+    const evidence = identity?.accessSession;
+    if (!identity?.tenantId || !identity.userId || !identity.workspaceId ||
+        !["operator", "staff"].includes(identity.audience ?? "") || !evidence?.sessionId ||
+        !Number.isSafeInteger(evidence.expiresAt)) {
+      throw new UnauthorizedException("缺少原认证会话依据，不能执行空间事务");
+    }
+    // Capture values: later context changes must not reinterpret this request.
+    const expected = { tenantId: identity.tenantId, userId: identity.userId, workspaceId: identity.workspaceId,
+      sessionId: evidence.sessionId, audience: identity.audience as AuthAudience };
+    const expiresAt = evidence.expiresAt;
+    const assertNotExpired = () => {
+      if (expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("原访问令牌已到期，请先核对原操作结果");
+    };
+    assertNotExpired();
+    const user = await this.platformService.lockWorkspaceSessionUser(tx, expected);
+    const assertUser = (current: SystemUserRow) => {
+      assertNotExpired();
+      if (!current.isActive || current.mustChangePassword) throw new ForbiddenException("账号已停用或须先修改密码，空间操作未获准");
+      return current;
+    };
+    return { user: assertUser(user), revalidate: async () => {
+      assertNotExpired();
+      return assertUser(await this.platformService.readWorkspaceSessionUser(tx, expected));
+    } };
   }
 
   /** SPACE-02：切换当前经营空间。校验成员资格与空间状态后重新签发访问令牌。 */

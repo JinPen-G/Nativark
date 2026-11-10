@@ -169,12 +169,13 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
   }
 
   private async context(tenantId: string): Promise<BusinessContext> {
-    const profile = this.core.getProfile(tenantId);
+    if (typeof this.core.readBusinessContext === "function") return this.business.refreshWorkspaceContext(tenantId, await this.core.readBusinessContext(tenantId));
+    const profile = await this.core.getProfile(tenantId);
     const category = await this.core.getWorkspaceCategory(tenantId);
     return {
       profile,
       category,
-      settings: this.core.getBusinessSettings(tenantId),
+      settings: await this.core.getBusinessSettings(tenantId),
       groups: this.core.listItemGroups(tenantId),
       pricingGroups: this.core.listPricingGroups(tenantId),
       couponTemplates: this.core.listCouponTemplates(tenantId),

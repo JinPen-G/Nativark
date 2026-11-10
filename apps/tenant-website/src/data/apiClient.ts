@@ -1,3 +1,4 @@
+import type { ClientCatalogItem, ClientCatalogPricingGroup, ClientCatalogResponse, ClientChannelBootstrapResponse, ClientPublicDocumentResponse, ClientWebsiteConfig } from "@rental-os/shared";
 // 官网数据访问的底层：调用租户客户端公开接口 `/api/client/v1/*`。
 // 开发环境经 Vite 代理转发到本地 API（见 vite.config.ts）；生产可用 VITE_API_BASE 指向真实网关。
 // 只消费公开（免登录）接口：bootstrap 与 public/catalog；登录态接口留待后续切片。
@@ -41,78 +42,17 @@ async function postJson<T>(path: string, params: Record<string, string>, payload
 }
 
 /** bootstrap 响应中官网消费到的字段（对应 shared 的 ClientChannelBootstrapResponse，本地只声明用到的部分）。 */
-export interface BootstrapWebsite {
-  slogan?: string;
-  heroTitle?: string;
-  heroDescription?: string;
-  heroImageUrl?: string;
-  secondaryColor?: string;
-  footerText?: string;
-  contactAddress?: string;
-  ctaTitle?: string;
-  ctaDescription?: string;
-  seoTitle?: string;
-  seoDescription?: string;
-  seoKeywords?: string;
-  categoryImages?: Array<{ code: string; imageUrl: string }>;
-  advantages?: Array<{ icon?: string; title: string; description?: string }>;
-  steps?: Array<{ title: string; description?: string }>;
-  testimonials?: Array<{ name: string; context?: string; text: string }>;
-  showPoweredBy: boolean;
-}
+export type BootstrapWebsite = ClientWebsiteConfig;
 
-export interface PublicDocumentResponse {
-  kind: 'user_agreement' | 'privacy_policy' | 'help';
-  name: string;
-  version?: string;
-  url?: string;
-  body?: string;
-  intro?: string;
-  faq?: Array<{ question: string; answer: string }>;
-}
+export type PublicDocumentResponse = ClientPublicDocumentResponse;
 
-export interface BootstrapResponse {
-  tenantCode: string;
-  merchant: { name: string; logoUrl?: string; servicePhone?: string; serviceHours?: string };
-  services: Array<{ code: string; name: string; categoryCode: string; isDefault?: boolean; status: 'open' | 'paused' }>;
-  defaultServiceCode?: string;
-  themeColor?: string;
-  website?: BootstrapWebsite;
-  agreements?: {
-    userAgreement?: { name: string; version: string; url?: string; hasBody: boolean };
-    privacyPolicy?: { name: string; version: string; url?: string; hasBody: boolean };
-  };
-  loginMethods?: Array<'wechat_phone' | 'sms' | 'password'>;
-  capabilities: { publicCatalog: boolean; [key: string]: boolean };
-  source: 'channel' | 'workspace_directory';
-}
+export type BootstrapResponse = ClientChannelBootstrapResponse;
 
-export interface CatalogItem {
-  id: string;
-  code: string;
-  name: string;
-  description?: string;
-  inventoryMode?: string;
-  images?: Array<{ url: string; alt?: string }>;
-  attributes?: Record<string, string>;
-  startingPrice?: { amount: number; unit: string; currency: string };
-}
+export type CatalogItem = ClientCatalogItem;
 
-export interface CatalogPricingGroup {
-  id: string;
-  code: string;
-  name: string;
-  memberItemGroupIds?: string[];
-  enabled?: boolean;
-}
+export type CatalogPricingGroup = ClientCatalogPricingGroup;
 
-export interface PublicCatalogResponse {
-  workspace: string;
-  categoryCode: string;
-  items: CatalogItem[];
-  pricingGroups?: CatalogPricingGroup[];
-  locations?: Array<{ id: string; code: string; name: string; address?: string; businessHours?: string; contactPhone?: string; capabilities?: string[] }>;
-}
+export type PublicCatalogResponse = ClientCatalogResponse;
 
 /** 公开可用性检索：给定门店 + 时段 + 候选型号，返回各行可租状态（供官网按时段/门店真实过滤商品）。 */
 export interface PublicAvailabilityRequest {

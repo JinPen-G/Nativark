@@ -3,8 +3,8 @@ const assert = require("node:assert/strict");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { CategoryAdoptionPreparationService } = require("../apps/api/dist/modules/rental-core/category-adoption-preparation.service.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
-const user = { tenantId: "tenant-a", isSaasAdmin: false, permissions: ["rental-os:category:adopt"] };
-const identity = { tenantId: user.tenantId, workspaceId: "session-space", dataScope: "all", locationScope: { mode: "all", locationIds: [] } };
+const { categoryWorkspaceAuth } = require("./fixtures/category-workspace-auth.cjs");
+const user = { id: "operator", tenantId: "tenant-a", isSaasAdmin: false, permissions: ["rental-os:category:adopt"] };
 const definition = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera");
 const base = { categoryCode: "CAMERA", versionLabel: "label", status: "legacy_baseline", structureVersion: 1, definition: structuredClone(definition) };
 const rows = [
@@ -26,7 +26,10 @@ const db = {
     return rows;
   } }
 };
-const service = new CategoryAdoptionPreparationService(db);
+db.$transaction = run => run(db);
+const access = categoryWorkspaceAuth(db, { tenantId: user.tenantId, userId: user.id, workspaceId: "session-space" });
+const identity = access.identity;
+const service = new CategoryAdoptionPreparationService(db, undefined, undefined, undefined, access.auth);
 const call = (operation, candidate = user, context = identity) => runWithRequestIdentity(context, () => service.candidates(candidate, operation));
 (async () => {
   const result = await call("upgrade");

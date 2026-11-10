@@ -31,6 +31,7 @@ import type {
   TenantBootstrapPreview,
   TenantBootstrapRequest,
   TenantBootstrapResult,
+  RentalCategoryOpeningOptions, RentalCategoryOpeningOptionsQuery,
   TenantSummary,
   UpdateBusinessWorkspaceRequest,
   UpdateTenantRequest,
@@ -76,6 +77,12 @@ export const api = {
 
   // ---- SaaS 平台端：租户生命周期与目标租户经营空间 ----
   tenantBootstrapPreview: () => request<TenantBootstrapPreview>("/platform/tenant-bootstrap/preview"),
+  rentalCategoryOpeningOptions: async (params: RentalCategoryOpeningOptionsQuery = {}) => {
+    const result = await request<RentalCategoryOpeningOptions>("/platform/tenant-bootstrap/category-options", { params });
+    if (result.structureVersion !== 1 || !["published", "builtin_demo"].includes(result.source) || !Array.isArray(result.options) ||
+      result.options.length > 100 || result.source === "published" && result.options.some(option => !option.versionId)) throw new Error("Unsupported rental category options");
+    return result;
+  },
   bootstrapTenant: (payload: TenantBootstrapRequest) => request<TenantBootstrapResult>("/platform/tenant-bootstrap", { method: "post", data: payload }),
   tenants: () => request<TenantSummary[]>("/platform/tenants"),
   updateTenant: (id: string, payload: UpdateTenantRequest) => request<TenantSummary>(`/platform/tenants/${id}`, { method: "put", data: payload }),

@@ -3,7 +3,7 @@ import { request } from "../core/http";
 
 /**
  * 工作上下文数据源：会话上下文（权限/空间/品类/能力）、品类定义（术语/字段）、履约地点、型号目录。
- * 品类定义是租户无关的公共目录，按会话缓存一次即可。
+ * categories返回当前会话空间的明确采用正文；重新加载须复核，不能缓存成全局静态目录。
  */
 export function sessionContext(): Promise<SessionContextResponse> {
   return request<SessionContextResponse>("/auth/session-context", { scope: "tenant" });

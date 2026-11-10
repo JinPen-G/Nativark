@@ -1,4 +1,4 @@
-/** SaaS tenant/workspace lifecycle only. Shared category labels match the bootstrap contract; the server still resolves and authorizes creation. */
+/** SaaS lifecycle shell. Rental Core supplies category/version choices; this page does not evaluate or authorize them. */
 import { ListFilters, useListFilter } from "@/components/ui";
 import { Alert, CopyButton, DataTableRowActions, DataTableText, FormSection, ListSection, Modal, SaveButton } from "@/components/ui";
 import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
@@ -6,8 +6,8 @@ import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { Building2, KeyRound, Pencil, ShieldCheck } from "lucide-react";
 import { PlusOutlined } from "@/components/ui/icons";
-import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
-import { RENTAL_CATEGORY_DEFINITIONS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
+import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
 import { Col, Descriptions, Row, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
 import { Button, Drawer, ListFilterItem } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { api } from "@/api/platform";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -34,17 +34,25 @@ const statusMeta = {
 
 export function TenantManagementPage() {
   const { message, modal } = App.useApp();
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const operator = useAuthStore((state) => state.user?.displayName ?? t("SaaS 平台管理员"));
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("all");
   const [editor, setEditor] = useState<Editor>();
   const [workspaceTenant, setWorkspaceTenant] = useState<TenantSummary>();
   const [workspaceEditor, setWorkspaceEditor] = useState<WorkspaceEditor>();
+  const [categorySearch, setCategorySearch] = useState("");
+  const deferredCategorySearch = useDeferredValue(categorySearch);
   const [form] = Form.useForm<Record<string, unknown>>();
   const [workspaceForm] = Form.useForm<CreateBusinessWorkspaceRequest & UpdateBusinessWorkspaceRequest>();
   const editorDialog = useModalDismissal(Boolean(editor), () => { setEditor(undefined); form.resetFields(); });
   const workspaceDialog = useModalDismissal(Boolean(workspaceEditor), () => { setWorkspaceEditor(undefined); workspaceForm.resetFields(); });
+  const selectedTenantCategory = Form.useWatch("categoryCode", form);
+  const selectedWorkspaceCategory = Form.useWatch("categoryCode", workspaceForm);
+  const categoryTarget = editor?.type === "create" ? undefined : workspaceTenant?.tenantId;
+  const categoryDirectory = useQuery({ queryKey: ["saas-category-opening-options", categoryTarget, deferredCategorySearch],
+    queryFn: () => api.rentalCategoryOpeningOptions({ tenantId: categoryTarget, search: deferredCategorySearch || undefined }),
+    enabled: editorDialog.visible && editor?.type === "create" || workspaceDialog.visible && workspaceEditor?.type === "create" });
 
   const tenants = useQuery({ queryKey: ["saas-tenants"], queryFn: api.tenants });
   const workspaces = useQuery({
@@ -126,6 +134,7 @@ export function TenantManagementPage() {
   }
 
   function openCreate() {
+    setCategorySearch("");
     form.resetFields();
     createTenant.reset();
     form.setFieldsValue({ tenantCode: "", tenantName: "", categoryCode: undefined, currency: "CNY", adminAccount: "admin", adminDisplayName: "租户管理员", storeName: "", storeCode: "" });
@@ -162,6 +171,7 @@ export function TenantManagementPage() {
   }
 
   function openWorkspaceCreate() {
+    setCategorySearch("");
     workspaceForm.resetFields();
     workspaceForm.setFieldsValue({ code: "", name: "", categoryCode: undefined, status: "active" });
     setWorkspaceEditor({ type: "create" });
@@ -182,7 +192,7 @@ export function TenantManagementPage() {
 
   function submitWorkspace(values: CreateBusinessWorkspaceRequest & UpdateBusinessWorkspaceRequest) {
     if (workspaceEditor?.type === "create") {
-      return createWorkspace.mutateAsync({ code: values.code, name: values.name ?? "", categoryCode: values.categoryCode });
+      return createWorkspace.mutateAsync({ code: values.code, name: values.name ?? "", categoryCode: values.categoryCode, categoryVersionId: values.categoryVersionId });
     }
     if (workspaceEditor?.type === "edit") {
       return saveWorkspace.mutateAsync({ id: workspaceEditor.workspace.id, values: { name: values.name, status: values.status } });
@@ -190,8 +200,17 @@ export function TenantManagementPage() {
     return Promise.reject(new Error("Workspace editor unavailable"));
   }
 
-  const categoryNames = useMemo(() => new Map(RENTAL_CATEGORY_DEFINITIONS.map(category => [category.code, category.name])), []);
-  const categoryOptions = RENTAL_CATEGORY_DEFINITIONS.map(category => ({ value: category.code, label: t(category.name) }));
+  const categoryNames = useMemo(() => new Map([...(tenants.data ?? []).filter(tenant => tenant.categoryName).map(tenant => [tenant.categoryCode, tenant.categoryName!] as const),
+    ...(categoryDirectory.data?.options ?? []).map(option => [option.categoryCode, locale === "en-US" && option.nameEn ? option.nameEn : option.name] as const)]), [tenants.data, categoryDirectory.data, locale]);
+  const categoryOptions = [...new Map((categoryDirectory.data?.options ?? []).map(option => [option.categoryCode,
+    { value: option.categoryCode, label: locale === "en-US" && option.nameEn ? option.nameEn : option.name }])).values()];
+  const versionsFor = (code: unknown) => (categoryDirectory.data?.options ?? []).filter(option => option.categoryCode === code && option.versionId);
+  const versionOptions = (code: unknown) => versionsFor(code).map(option => ({ value: option.versionId!, label: `${option.versionLabel}${option.recommended ? ` · ${t("默认推荐版本")}` : ""}` }));
+  const selectCategory = (code: unknown, workspace = false) => {
+    const versions = versionsFor(code);
+    const selected = versions.find(version => version.recommended) ?? (versions.length === 1 ? versions[0] : undefined);
+    if (workspace) workspaceForm.setFieldValue("categoryVersionId", selected?.versionId); else form.setFieldValue("categoryVersionId", selected?.versionId);
+  };
   const saving = createTenant.isPending || saveTenant.isPending || changeStatus.isPending;
   const workspaceSaving = createWorkspace.isPending || saveWorkspace.isPending;
 
@@ -249,7 +268,8 @@ export function TenantManagementPage() {
         onCancel={closeEditor}
         afterClose={editorDialog.afterClose}
         closable={!saving} keyboard={!saving} maskClosable={!saving}
-        footer={<><Button disabled={saving} onClick={closeEditor}>{t("取消")}</Button><SaveButton label={t(editor?.type === "create" ? "创建租户" : "保存")} form={form} pending={saving} onSave={submit} /></>}
+        footer={<><Button disabled={saving} onClick={closeEditor}>{t("取消")}</Button><SaveButton label={t(editor?.type === "create" ? "创建租户" : "保存")} form={form} pending={saving}
+          disabled={editor?.type === "create" && (!categoryDirectory.data || Boolean(categoryDirectory.error))} onSave={submit} /></>}
       >
         {editor && editor.type !== "create" && <Typography.Paragraph type="secondary">{editor.tenant.tenantName} · {editor.tenant.tenantCode}</Typography.Paragraph>}
         <Form form={form} layout="vertical" disabled={saving} onFinish={values => { void submit(values).catch(() => undefined); }}>
@@ -258,8 +278,13 @@ export function TenantManagementPage() {
               { key: "tenant", label: t("租户资料"), content: <FormSection title={t("租户资料")}>
               <Form.Item name="tenantName" label={t("租户名称")} rules={[{ required: true }]}><Input /></Form.Item>
               <Form.Item name="tenantCode" label={t("租户编码")} extra={t("创建后不可修改，用于登录和数据隔离。")} rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: t("以小写字母开头，仅支持小写字母、数字、_ 和 -") }]}><Input /></Form.Item>
-              <Row gutter={16}><Col span={12}><Form.Item name="categoryCode" label={t("默认空间品类")} extra={t("用于创建首个默认经营空间；该空间创建后品类固定。")} rules={[{ required: true }]}><Select options={categoryOptions} /></Form.Item></Col>
+              <QueryState loading={categoryDirectory.isLoading} error={categoryDirectory.error} onRetry={() => categoryDirectory.refetch({ throwOnError: true })}>
+              <Row gutter={16}><Col span={12}><Form.Item name="categoryCode" label={t("默认空间品类")} extra={t("用于创建首个默认经营空间；该空间创建后品类固定。")} rules={[{ required: true }]}><Select showSearch filterOption={false}
+                onSearch={value => setCategorySearch(value.slice(0, 100))} options={categoryOptions} onChange={code => selectCategory(code)} /></Form.Item></Col>
               <Col span={12}><Form.Item name="currency" label={t("结算币种")} extra={t("订单、报价与配置金额的币种，跟随租户；新建经营空间时以此为默认值。")} rules={[{ required: true }]}><Select options={RENTAL_CURRENCY_CODES.map((code) => ({ value: code, label: `${code} · ${t(RENTAL_CURRENCY_META[code].label)}` }))} /></Form.Item></Col></Row>
+              {categoryDirectory.data?.source === "published" && <Form.Item name="categoryVersionId" label={t("采用品类版本")} rules={[{ required: true }]}><Select options={versionOptions(selectedTenantCategory)}/></Form.Item>}
+              {categoryDirectory.data?.truncated && <Alert type="info" title={t("还有更多版本，请按品类名称或编码搜索")}/>}
+              </QueryState>
               </FormSection> },
               { key: "admin", label: t("租户管理员"), content: <FormSection title={t("租户管理员")}>
               <Form.Item name="adminAccount" label={t("租户管理员账号")} rules={[{ required: true }]}><Input /></Form.Item>
@@ -318,13 +343,19 @@ export function TenantManagementPage() {
         onCancel={closeWorkspaceEditor}
         afterClose={workspaceDialog.afterClose}
         closable={!workspaceSaving} keyboard={!workspaceSaving} maskClosable={!workspaceSaving}
-        footer={<><Button disabled={workspaceSaving} onClick={closeWorkspaceEditor}>{t("取消")}</Button><SaveButton label={t("保存")} form={workspaceForm} pending={workspaceSaving} onSave={submitWorkspace} /></>}
+        footer={<><Button disabled={workspaceSaving} onClick={closeWorkspaceEditor}>{t("取消")}</Button><SaveButton label={t("保存")} form={workspaceForm} pending={workspaceSaving}
+          disabled={workspaceEditor?.type === "create" && (!categoryDirectory.data || Boolean(categoryDirectory.error))} onSave={submitWorkspace} /></>}
       >
         <Form form={workspaceForm} layout="vertical" disabled={workspaceSaving} onFinish={values => { void submitWorkspace(values).catch(() => undefined); }}>
           {workspaceEditor?.type === "create" && <Form.Item name="code" label={t("空间编码")} extra={t("创建后不可修改；同一租户内唯一。")} rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: t("以小写字母开头，仅支持小写字母、数字、_ 和 -") }]}><Input /></Form.Item>}
           <Form.Item name="name" label={t("空间名称")} rules={[{ required: true }]}><Input /></Form.Item>
-          {workspaceEditor?.type === "create" && <Form.Item name="categoryCode" label={t("经营品类")} extra={t("创建后固定，不能通过编辑资料直接切换。")} rules={[{ required: true }]}><Select options={categoryOptions} /></Form.Item>}
-          {workspaceEditor?.type === "edit" && <Form.Item label={t("经营品类")}><Select value={workspaceEditor.workspace.categoryCode as RentalCategoryCode} disabled options={categoryOptions} /></Form.Item>}
+          {workspaceEditor?.type === "create" && <QueryState loading={categoryDirectory.isLoading} error={categoryDirectory.error} onRetry={() => categoryDirectory.refetch({ throwOnError: true })}>
+            <Form.Item name="categoryCode" label={t("经营品类")} extra={t("创建后固定，不能通过编辑资料直接切换。")} rules={[{ required: true }]}><Select showSearch filterOption={false}
+              onSearch={value => setCategorySearch(value.slice(0, 100))} options={categoryOptions} onChange={code => selectCategory(code, true)} /></Form.Item>
+            {categoryDirectory.data?.source === "published" && <Form.Item name="categoryVersionId" label={t("采用品类版本")} rules={[{ required: true }]}><Select options={versionOptions(selectedWorkspaceCategory)}/></Form.Item>}
+            {categoryDirectory.data?.truncated && <Alert type="info" title={t("还有更多版本，请按品类名称或编码搜索")}/>}
+          </QueryState>}
+          {workspaceEditor?.type === "edit" && <Form.Item label={t("经营品类")}><Input readOnly value={categoryNames.get(workspaceEditor.workspace.categoryCode) ?? workspaceEditor.workspace.categoryCode}/></Form.Item>}
           {workspaceEditor?.type === "edit" && <Form.Item name="status" label={t("空间状态")} rules={[{ required: true }]}><Select options={[{ value: "active", label: t("正常") }, { value: "frozen", label: t("冻结") }, { value: "disabled", label: t("停用") }]} /></Form.Item>}
         </Form>
       </Modal>

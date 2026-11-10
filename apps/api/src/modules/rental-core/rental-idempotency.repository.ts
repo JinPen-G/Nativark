@@ -14,7 +14,7 @@ export interface IdempotencyHit {
 
 export interface RentalIdempotencyStore {
   find(tenantId: string, action: string, key: string, tx?: RentalIdempotencyTx): Promise<
-    { requestHash: string; orderId: string | null; response: unknown } | undefined
+    { requestHash: string; orderId: string | null; response: unknown; status?: string } | undefined
   >;
   record(
     input: {
@@ -68,7 +68,7 @@ export class RentalIdempotencyRepository implements RentalIdempotencyStore {
       where: { tenantId, workspaceId, action, idempotencyKey: key }
     });
     return row
-      ? { requestHash: row.requestHash, orderId: row.orderId, response: row.response as unknown }
+      ? { requestHash: row.requestHash, orderId: row.orderId, response: row.response as unknown, status: row.status }
       : undefined;
   }
 

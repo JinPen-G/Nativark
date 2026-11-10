@@ -5,6 +5,7 @@ import {
   RENTAL_STOCK_OPERATION_TYPES,
   RentalAssetStatus,
   RentalCategoryCode,
+  RENTAL_CATEGORY_CODE_PATTERN,
   type CancelRentalOrderRequest,
   type ManageRentalAllocationRequest,
   type RentalOperationLockRequest,
@@ -784,7 +785,8 @@ export class ApplyRentalStockOperationDto implements RentalStockOperationRequest
 }
 
 export class SaveTenantRentalProfileDto implements SaveTenantRentalProfileRequest {
-  @IsEnum(RentalCategoryCode)
+  @IsString()
+  @Matches(RENTAL_CATEGORY_CODE_PATTERN)
   categoryCode!: RentalCategoryCode;
 
   @IsOptional()
