@@ -1,0 +1,80 @@
+/* Pricing group board — adapted from UIArc Pro Pricing calculator (price area, unit switch, rolling digits). */
+.board { position: relative; display: grid; gap: var(--space-3); padding: var(--space-4); overflow: hidden; border-radius: 18px; background: radial-gradient(120% 140% at 100% 0%, color-mix(in oklab, var(--accent) 12%, var(--surface-muted)) 0%, var(--surface-muted) 60%); }
+.board[data-empty] { background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+.boardLabel { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: 1; }
+.boardPrice { display: flex; align-items: flex-end; gap: 8px; min-height: 40px; overflow: hidden; }
+.boardValue { display: inline-block; color: var(--rental-content-primary); font-size: 36px; font-weight: 400; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.boardUnit { padding-block-end: 3px; color: var(--text-muted); font-size: var(--rental-typography-meta-size); line-height: 1.3; white-space: nowrap; }
+.boardEmpty { color: var(--text-secondary); font-size: var(--rental-list-primary-size); }
+.units { position: relative; z-index: 2; display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.units button { min-width: 40px; height: 26px; padding: 0 10px; border: 0; border-radius: var(--radius-pill); background: none; color: var(--text-secondary); font: inherit; font-size: var(--rental-typography-meta-size); cursor: pointer; transition: background-color var(--duration-fast, 160ms) ease, color var(--duration-fast, 160ms) ease; }
+.units button[aria-pressed="true"] { background: var(--foreground); color: var(--background); }
+.units button:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+.models { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; }
+.models > span { min-width: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.models b { color: var(--rental-content-primary); font-weight: 500; }
+
+/* Ticket face — adapted from UIArc Pro Ticket tear: notches and a perforated cut between the value stub and the terms; no tear gesture. */
+.ticketWrap { --cut: 36%; --notch: 9px; --hole: 9px; filter: drop-shadow(0 1px 1px oklch(0 0 0 / .06)) drop-shadow(0 8px 18px oklch(0 0 0 / .08)); }
+:root[data-theme="dark"] .ticketWrap { filter: drop-shadow(0 10px 22px oklch(0 0 0 / .4)); }
+.ticket { display: grid; grid-template-columns: var(--cut) minmax(0, 1fr); min-height: 112px; background: linear-gradient(90deg, var(--accent) var(--cut), var(--surface-raised, var(--surface)) var(--cut));
+  -webkit-mask: radial-gradient(circle var(--notch) at var(--cut) 0, #0000 calc(100% - .5px), #000 100%), radial-gradient(circle var(--notch) at var(--cut) 100%, #0000 calc(100% - .5px), #000 100%), radial-gradient(circle 1.9px at var(--cut) 50%, #0000 calc(100% - .5px), #000 100%) 0 0 / 100% var(--hole) repeat-y;
+  -webkit-mask-composite: source-in;
+  mask: radial-gradient(circle var(--notch) at var(--cut) 0, #0000 calc(100% - .5px), #000 100%), radial-gradient(circle var(--notch) at var(--cut) 100%, #0000 calc(100% - .5px), #000 100%), radial-gradient(circle 1.9px at var(--cut) 50%, #0000 calc(100% - .5px), #000 100%) 0 0 / 100% var(--hole) repeat-y;
+  mask-composite: intersect; border-radius: 12px; }
+.ticketWrap[data-inactive] .ticket { background: linear-gradient(90deg, var(--surface-muted) var(--cut), var(--surface-raised, var(--surface)) var(--cut)); }
+.ticketValue { display: grid; align-content: center; justify-items: center; gap: 4px; min-width: 0; padding: var(--space-4) var(--space-2); color: var(--accent-foreground); text-align: center; }
+.ticketWrap[data-inactive] .ticketValue { color: var(--text-secondary); }
+.ticketValue > span, .ticketValue small { color: color-mix(in oklab, currentColor 78%, transparent); font-size: var(--rental-typography-meta-size); line-height: 1.3; }
+.ticketValue strong { max-width: 100%; font-size: 28px; font-weight: 500; line-height: 1.1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ticketTerms { display: grid; align-content: center; gap: var(--space-2); min-width: 0; padding: var(--space-3) var(--space-4); }
+.ticketLead { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); font-weight: 500; line-height: var(--rental-list-primary-line-height); overflow-wrap: anywhere; }
+.ticketFacts { display: grid; gap: 4px; margin: 0; padding-block-start: var(--space-2); border-block-start: 1px dashed var(--border-strong); }
+.ticketFacts > div { display: flex; justify-content: space-between; gap: var(--space-3); min-width: 0; font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.ticketFacts dt { flex: none; color: var(--text-muted); }
+.ticketFacts dd { min-width: 0; margin: 0; color: var(--rental-content-primary); text-align: end; overflow-wrap: anywhere; }
+
+/* Shared-total meter — compact split bar. */
+.meter { display: grid; gap: var(--space-2); }
+.meterCaption { color: var(--rental-content-primary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); font-variant-numeric: tabular-nums; }
+.meterTrack { display: flex; gap: 2px; height: 8px; overflow: hidden; border-radius: var(--radius-pill); background: color-mix(in oklch, var(--foreground) 7%, var(--surface)); }
+.meterTrack span { min-width: 3px; }
+.meterTrack [data-part="redeemed"], .meterLegend i[data-part="redeemed"], .meterTrack [data-part="claimed"], .meterLegend i[data-part="claimed"] { background: var(--accent); }
+.meterTrack [data-part="locked"], .meterLegend i[data-part="locked"] { background: color-mix(in oklch, var(--accent) 45%, var(--surface)); }
+.meterLegend i[data-part="remaining"], .meterLegend i[data-part="unclaimed"] { background: color-mix(in oklch, var(--foreground) 12%, var(--surface)); }
+.meterLegend { display: flex; flex-wrap: wrap; gap: 2px var(--space-4); margin: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.meterLegend > div { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.meterLegend i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.meterLegend dt { display: contents; }
+.meterLegend dd { margin: 0; color: var(--rental-content-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
+.scope { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin: 0; }
+.scope > div { display: grid; gap: 2px; min-width: 0; }
+.scope dt { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.scope dd { margin: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); overflow-wrap: anywhere; }
+.stack { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: var(--space-3) 0 0; border-block-start: 1px solid var(--border-subtle); list-style: none; }
+.stack li { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--rental-content-primary); font-size: var(--rental-typography-meta-size); line-height: 1; }
+.stack li[data-off] { border-style: dashed; color: var(--text-secondary); }
+.stack svg { flex: none; width: 12px; height: 12px; stroke-width: 2.25; }
+.stack li:not([data-off]) svg { color: var(--success); }
+
+/* Value-added service plan — adapted from UIArc Plan comparison: type icon, display price, included rows with checks. */
+.plan { display: grid; gap: var(--space-4); min-width: 0; }
+.planTop { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.icon { display: grid; flex: none; width: 44px; height: 44px; place-items: center; border-radius: 14px; background: var(--accent-subtle, color-mix(in oklab, var(--accent) 12%, var(--surface))); color: var(--accent-strong, var(--accent)); }
+.icon[data-type="insurance"], .icon[data-type="damage_waiver"] { background: color-mix(in oklab, var(--success) 14%, var(--surface)); color: var(--success); }
+.icon[data-type="delivery"], .icon[data-type="operator"] { background: color-mix(in oklab, var(--warning) 16%, var(--surface)); color: var(--rental-status-warning-ink, var(--warning)); }
+.plan[data-disabled] .icon { background: var(--surface-muted); color: var(--text-muted); }
+.icon svg { width: 22px; height: 22px; stroke-width: 1.75; }
+.planName { display: grid; gap: 4px; min-width: 0; }
+.planName > span { color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: 1.2; }
+.price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
+.priceValue { color: var(--rental-content-primary); font-size: 28px; font-weight: 400; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pricePeriod { color: var(--text-muted); font-size: var(--rental-typography-meta-size); white-space: nowrap; }
+.rows { display: grid; gap: var(--space-2); margin: 0; padding: var(--space-3) 0 0; border-block-start: 1px solid var(--border-subtle); list-style: none; }
+.rows li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+.rows svg { width: 14px; height: 14px; color: var(--success); stroke-width: 2.25; }
+.rows span { min-width: 0; color: var(--text-secondary); }
+.rows b { min-width: 0; color: var(--rental-content-primary); font-weight: 500; font-variant-numeric: tabular-nums; text-align: end; overflow-wrap: anywhere; }
+.rows li[data-unset] svg, .rows li[data-unset] b { color: var(--text-muted); font-weight: 400; }@media (prefers-reduced-motion: reduce) { .units button { transition: none; } }
+.modelThumb { display: inline-grid; width: 28px; height: 28px; place-items: center; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-muted); color: var(--text-secondary); font-size: 11px; font-weight: 500; }
+.modelThumb img { width: 100%; height: 100%; object-fit: cover; }

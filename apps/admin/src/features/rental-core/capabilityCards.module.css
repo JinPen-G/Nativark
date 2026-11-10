@@ -1,0 +1,9 @@
+.readiness { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.readiness li { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+.readiness li[data-blocked] { color: var(--text-secondary); }
+.mark { display: grid; flex: none; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: var(--rental-status-success-surface); color: var(--rental-status-success-ink); }
+.readiness li[data-blocked] .mark { background: var(--surface-muted); color: var(--text-secondary); }
+.mark svg { width: 11px; height: 11px; stroke-width: 2.5; }
+.dependencies { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding-block-start: var(--space-3); border-block-start: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.dependencies > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.dependencies > span:last-child { flex: none; font-variant-numeric: tabular-nums; }

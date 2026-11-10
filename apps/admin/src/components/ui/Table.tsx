@@ -43,6 +43,7 @@ export type BusinessTableProps<T extends object> = TableProps<T> & {
   importConfig?: ListImport<unknown>;
   cardView?: ListCard<T> & { defaultView?: "list" | "cards" };
   batchActions?: ListBatchAction<T>[];
+  selectionEnabled?: boolean;
 };
 
 export function readTableValue(record: unknown, field: unknown): unknown {
@@ -114,7 +115,8 @@ export function Table<T extends object>(props: BusinessTableProps<T>) {
   const incompatible = incompatibleSelection || props.components || props.summary || props.children ||
     props.columns?.some(column => "children" in column || column.filters || column.filterDropdown) ||
     props.dataSource?.some(row => Array.isArray((row as Record<string, unknown>).children));
-  const { refreshing: _refreshing, ...fallbackProps } = props;
+  const { refreshing: _refreshing, selectionEnabled, ...fallbackProps } = props;
+  if (selectionEnabled === false) fallbackProps.rowSelection = undefined;
   return incompatible ? <>{toolbarHeading && <div className={styles.sectionHeader}><ListSectionTitle {...toolbarHeading} />{toolbarHeading.extra && <div className={styles.sectionActions}>{toolbarHeading.extra}</div>}</div>}<ListHeadingContext.Provider value={null}>
     {(resolved.toolbar || props.toolbarNote) && <div className={styles.toolbar}>{resolved.toolbar && <div className={styles.toolbarFilters}><ListFilterBar>{resolved.toolbar}</ListFilterBar></div>}{props.toolbarNote && <span className={styles.toolbarNote}>{props.toolbarNote}</span>}</div>}
     <div className={styles.legacyContent}><AntTable<T> {...fallbackProps} pagination={props.pagination === false ? false : { ...props.pagination, showTotal: props.pagination?.showTotal ?? ((total, range) => `${range[0]}–${range[1]} / ${total}`) }} tableLayout={props.tableLayout ?? "auto"} columns={props.tableLayout === "fixed" ? columns : naturalColumns(columns)} scroll={props.scroll ? { ...props.scroll, x: props.tableLayout === "fixed" ? props.scroll.x : "100%" } : undefined} /></div></ListHeadingContext.Provider></> : <BusinessTable {...resolved} />;
@@ -154,8 +156,8 @@ function BusinessTable<T extends object>(props: BusinessTableProps<T> & { toolba
   const getKey = (record: T, index: number) => typeof props.rowKey === "function" ? props.rowKey(record, index)
     : (record as Record<string, Key>)[String(props.rowKey ?? "key")] ?? index;
   const selectionConfig = props.rowSelection || undefined;
-  const selectable = Boolean(selectionConfig || props.batchActions?.length || props.exportConfig);
-  const selectedState = selectionConfig?.selectedRowKeys ? Object.fromEntries(selectionConfig.selectedRowKeys.map(key => [String(key), true])) : selection;
+  const selectable = props.selectionEnabled !== false && Boolean(selectionConfig || props.batchActions?.length || props.exportConfig);
+  const selectedState = !selectable ? {} : selectionConfig?.selectedRowKeys ? Object.fromEntries(selectionConfig.selectedRowKeys.map(key => [String(key), true])) : selection;
   const updateSelection = (next: typeof selectedState) => {
     setSelection(next);
     const keys = Object.keys(next).filter(key => next[key]);

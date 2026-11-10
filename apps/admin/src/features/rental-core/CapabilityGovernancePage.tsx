@@ -1,6 +1,8 @@
 import { DataTableText, ListFilters, useListFilter, ListSection, SaveButton, Tabs } from "@/components/ui";
 import { Button as ArcButton } from "@/registry/components/button/button";
 import { CardBadge, CardFacts, CardSecondary, CardSection } from "@/components/ui/data-table/RecordCard";
+import { Check, Minus } from "lucide-react";
+import capabilityCardStyles from "./capabilityCards.module.css";
 import { HistoryOutlined, SettingOutlined } from "@/components/ui/icons";
 import type {
   RentalCapabilityConfigField,
@@ -256,14 +258,16 @@ export function CapabilityGovernancePage() {
               kind: "capability", defaultView: "cards", title: row => t(row.definition.label), subtitle: row => row.definition.code,
               status: row => <CardBadge tone={row.state === "enabled" ? "positive" : undefined} emphasis={row.state === "declared_not_implemented"}>{t(stateMeta[row.state].label)}</CardBadge>,
               body: row => <>
-                <CardSecondary>{t(row.providedByCore ? "Core 内建" : row.requiredForCategory ? "品类必选" : kindMeta[row.definition.kind].label)}</CardSecondary>
-                <CardFacts items={[
-                  { label: t("依赖"), value: capabilityNames(row.definition.dependsOn) || t("无依赖") },
-                  { label: t("配置项"), value: row.definition.configSchema.length },
-                ]} />
+                {!row.providedByCore && <CardSecondary>{t(row.requiredForCategory ? "品类必选" : kindMeta[row.definition.kind].label)}</CardSecondary>}
+                <ul className={capabilityCardStyles.readiness}>
+                  {[
+                    { ready: row.applicable, text: row.applicable ? "适用于当前品类" : "不适用于当前品类" },
+                    { ready: row.declaredByCategory, text: row.declaredByCategory ? "本品类已声明" : "本品类未声明" },
+                    { ready: row.providedByCore || row.implemented, text: row.providedByCore ? "Core 内建" : row.implemented ? "已实现" : "未实现" },
+                  ].map(item => <li key={item.text} data-blocked={item.ready ? undefined : ""}><span className={capabilityCardStyles.mark}>{item.ready ? <Check aria-hidden="true" /> : <Minus aria-hidden="true" />}</span>{t(item.text)}</li>)}
+                </ul>
+                <div className={capabilityCardStyles.dependencies}><span>{t("依赖")}：{capabilityNames(row.definition.dependsOn) || t("无依赖")}</span><span>{t("配置项")} {row.definition.configSchema.length}</span></div>
                 {!!row.definition.conflictsWith.length && <CardSecondary>{t("互斥")}：{capabilityNames(row.definition.conflictsWith)}</CardSecondary>}
-                {!row.applicable && <CardSecondary>{t("不适用于当前品类")}</CardSecondary>}
-                {row.applicable && !row.declaredByCategory && <CardSecondary>{t("本品类未声明")}</CardSecondary>}
                 {row.upgradeAvailable && <CardSecondary>{t("可升级到")} {row.definition.implementationVersion}</CardSecondary>}
               </>,
               details: row => <CardSection title={t("状态与配置")}>

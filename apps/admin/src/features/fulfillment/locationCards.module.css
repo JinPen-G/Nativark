@@ -1,0 +1,31 @@
+/* Location sign: adapted from the UIArc Contact section office card (live local time + open status). */
+.sign { position: relative; display: grid; height: var(--rental-record-card-media-height); align-content: space-between; padding: var(--space-4); overflow: hidden; background-color: var(--surface-muted); background-image: linear-gradient(var(--border-subtle) 1px, transparent 1px), linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px), linear-gradient(28deg, transparent 47%, color-mix(in oklab, var(--border) 80%, transparent) 47% 53%, transparent 53%); background-size: 28px 28px, 28px 28px, 100% 100%; color: var(--rental-content-primary); }
+.sign::after { position: absolute; inset: 0; background: radial-gradient(70% 90% at 78% 60%, transparent 0, var(--surface-muted) 75%); content: ""; pointer-events: none; }
+.sign[data-disabled] { filter: grayscale(1); opacity: .72; }
+.sign > * { position: relative; z-index: 1; }
+.pin { position: absolute; top: 46%; right: 22%; z-index: 1; display: grid; width: 40px; height: 40px; place-items: center; border-radius: 50% 50% 50% 0; background: var(--foreground); color: var(--background); box-shadow: 0 8px 18px oklch(0 0 0 / .18); rotate: -45deg; translate: 0 -50%; }
+.pin svg { width: 18px; height: 18px; rotate: 45deg; stroke-width: 1.75; }
+.pin::after { position: absolute; bottom: -18px; left: -6px; width: 22px; height: 8px; border-radius: 50%; background: oklch(0 0 0 / .12); content: ""; rotate: 45deg; }
+.signTop { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.type { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); font-size: var(--rental-typography-meta-size); font-weight: 500; }
+.type svg { width: 13px; height: 13px; stroke-width: 1.75; }
+.open { display: inline-flex; align-items: center; gap: var(--space-2); height: 24px; padding: 0 10px; border-radius: var(--radius-pill); background: var(--surface); color: var(--text-secondary); font-size: var(--rental-typography-meta-size); white-space: nowrap; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-strong); }
+.open[data-open] { color: var(--rental-content-primary); }
+.open[data-open] .dot { background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklch, var(--success) 18%, transparent); }
+.clock { display: grid; gap: 2px; }
+.time { font-size: 38px; font-weight: 500; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.time[data-unset] { color: var(--text-muted); font-size: var(--rental-record-card-metric-size); letter-spacing: 0; }
+.zone { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.zone svg { width: 13px; height: 13px; stroke-width: 1.75; }
+.address { display: flex; align-items: flex-start; gap: var(--space-2); margin: 0; color: var(--rental-content-primary); font-style: normal; font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+.address svg { flex: none; width: 14px; height: 14px; margin-block-start: 2px; color: var(--text-secondary); stroke-width: var(--rental-icon-control-stroke); }
+.address span { display: -webkit-box; min-width: 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.address[data-empty] { color: var(--text-secondary); }
+.capabilities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.capabilities li { display: grid; justify-items: center; gap: 4px; min-width: 0; padding: var(--space-2) 2px; border-radius: 12px; background: var(--surface-muted); color: var(--rental-content-primary); font-size: var(--rental-typography-meta-size); line-height: 1.2; text-align: center; }
+.capabilities li[data-off] { background: transparent; box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-muted); text-decoration: line-through; text-decoration-color: color-mix(in oklab, currentColor 50%, transparent); }
+.capabilities svg { width: 16px; height: 16px; stroke-width: var(--rental-icon-control-stroke); }
+.operator { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-secondary); font-size: var(--rental-typography-meta-size); line-height: var(--rental-typography-meta-line-height); }
+.operator svg { flex: none; width: 14px; height: 14px; stroke-width: var(--rental-icon-control-stroke); }
+.operator span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

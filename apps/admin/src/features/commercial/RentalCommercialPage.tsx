@@ -1,4 +1,6 @@
 import { discountCards, serviceCards } from "./commercialCards";
+import { DiscountPlanShowcase } from "./DiscountPlanShowcase";
+import { DISCOUNT_PLAN_DEMO } from "./discountPlanDemo";
 import { ListFilters, useListFilter } from "@/components/ui";
 import { ActionButton, ConfirmAction, DataTableMoney, DataTableRowActions, DataTableText, ListSection, SaveButton } from "@/components/ui";
 import { EditOutlined, HistoryOutlined, PlusOutlined } from "@/components/ui/icons";
@@ -132,7 +134,7 @@ function RentalCommercialWorkspace({ section, scope }: { section: RentalCommerci
   const discounts = useQuery({
     queryKey: ["rental-core", "discount-plans", scope],
     queryFn: rentalCoreApi.discountPlans,
-    enabled: section === "discounts",
+    enabled: section === "discounts" && !DISCOUNT_PLAN_DEMO,
   });
   const locations = useQuery({
     queryKey: ["rental-core", "locations", scope],
@@ -388,7 +390,7 @@ function RentalCommercialWorkspace({ section, scope }: { section: RentalCommerci
             {section === "pricing" && <Button icon={<HistoryOutlined />} onClick={() => setVersionsOpen(true)}>{t("价格版本")}</Button>}
             {section === "pricing" ? (
               <Button type="primary" icon={<PlusOutlined />} disabled={adjustmentBusy || !priceMatrixReady || unpricedCount > 0 || !currentPriceVersion} onClick={openAdjustment}>{t("新增调价计划")}</Button>
-            ) : <Button type="primary" icon={<PlusOutlined />} disabled={section === "services" && (serviceUnavailable || saveService.isPending)} onClick={() => section === "discounts" ? editDiscount() : editService()}>{t(section === "discounts" ? "新增优惠方案" : "新增服务")}</Button>}
+            ) : <Button type="primary" icon={<PlusOutlined />} disabled={section === "services" && (serviceUnavailable || saveService.isPending)} onClick={() => section === "discounts" ? (DISCOUNT_PLAN_DEMO ? message.info(t("演示版：多规则编辑待后端接入，未保存任何内容")) : editDiscount()) : editService()}>{t(section === "discounts" ? "新增优惠方案" : "新增服务")}</Button>}
           </Space>
         }
       />
@@ -445,7 +447,8 @@ function RentalCommercialWorkspace({ section, scope }: { section: RentalCommerci
           </ListSection>
         </Space>
       )}
-      {section === "discounts" && (
+      {section === "discounts" && DISCOUNT_PLAN_DEMO && <DiscountPlanShowcase money={money} />}
+      {section === "discounts" && !DISCOUNT_PLAN_DEMO && (
         <ListSection controls={<ListFilters filter={discountFilter} placeholder="优惠名称或编码" options={[{ value: "draft", label: "草稿" }, { value: "enabled", label: "已启用" }, { value: "disabled", label: "已停用" }]} />}>
           <QueryState loading={discounts.isLoading} error={discounts.error}>
             <Table<RentalDiscountPlan>

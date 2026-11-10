@@ -2,8 +2,10 @@
 import dayjs from "dayjs";
 import type { RentalCouponTemplate, RentalItemGroup } from "@rental-os/shared";
 import { Button } from "@/registry/components/button/button";
-import { CardBadge, CardFacts, CardFootnote, CardHighlights, CardMetric, CardSecondary, CardSection } from "@/components/ui/data-table/RecordCard";
+import { CardBadge, CardFacts, CardSecondary, CardSection } from "@/components/ui/data-table/RecordCard";
 import { AnimatedNumber, type ListCard } from "@/components/ui";
+import { SplitMeter, Ticket } from "./commercialCardParts";
+import styles from "./commercialCards.module.css";
 
 const states: Record<RentalCouponTemplate["status"], string> = {
   draft: "草稿", scheduled: "待开始", active: "进行中", paused: "已暂停", ended: "已结束", void: "已作废",
@@ -28,21 +30,29 @@ export function couponCards({ t, money, groups, edit }: {
     title: row => row.name,
     subtitle: row => `${row.code} · v${row.version}`,
     status: row => <CardBadge tone={row.status === "active" ? "positive" : undefined}>{t(states[row.status])}</CardBadge>,
-    body: row => <>
-      <CardMetric
-        value={row.discountType === "fixed_amount" ? money(row.discountValue) : `${row.discountValue}%`}
-        label={t(row.discountType === "fixed_amount" ? "减免金额" : "优惠比例")}
-      />
-      <CardHighlights items={[
-        { label: t("使用门槛"), value: row.minimumSpend > 0 ? money(row.minimumSpend) : t("无门槛") },
-        { label: t("已领 / 发行"), value: <><AnimatedNumber value={row.claimedQuantity} /> / <AnimatedNumber value={row.totalQuota} /></> },
-      ]} />
-      <CardFootnote>
-        <span>{t(targets[row.appliesTo])}</span>
-        {row.maximumDiscount !== undefined && <span>{t("最高减免")} {money(row.maximumDiscount)}</span>}
-      </CardFootnote>
-      <CardSecondary>{t("使用期限")} · {dayjs(row.effectiveFrom).format("YYYY-MM-DD")} → {dayjs(row.effectiveTo).format("YYYY-MM-DD")}</CardSecondary>
-    </>,
+    body: row => { const value = row.discountType === "fixed_amount" ? money(row.discountValue) : `${row.discountValue}%`;
+      const unclaimed = Math.max(0, row.totalQuota - row.claimedQuantity), budgetUsed = row.lockedBudget + row.redeemedBudget;
+      const remaining = row.totalBudget === undefined ? undefined : Math.max(0, row.totalBudget - budgetUsed);
+      return <>
+        <Ticket inactive={!["active", "scheduled"].includes(row.status)} kind={t(row.discountType === "fixed_amount" ? "减免金额" : "优惠比例")} value={value}
+          cap={row.maximumDiscount !== undefined ? <>{t("最高减免")} {money(row.maximumDiscount)}</> : undefined}>
+          <p className={styles.ticketLead}>{row.minimumSpend > 0 ? <>{t("使用门槛")} {money(row.minimumSpend)}</> : t("无门槛")}</p>
+          <dl className={styles.ticketFacts}>
+            <div><dt>{t("作用费用")}</dt><dd>{t(targets[row.appliesTo])}</dd></div>
+            <div><dt>{t("使用期限")}</dt><dd>{dayjs(row.effectiveFrom).isValid() ? dayjs(row.effectiveFrom).format("YYYY-MM-DD") : t("未提供")} → {dayjs(row.effectiveTo).isValid() ? dayjs(row.effectiveTo).format("YYYY-MM-DD") : t("未提供")}</dd></div>
+          </dl>
+        </Ticket>
+        <SplitMeter label={`${t("已领 / 发行")} ${row.claimedQuantity} / ${row.totalQuota}`} parts={[
+          { id: "claimed", label: t("已领"), value: row.claimedQuantity, text: <AnimatedNumber value={row.claimedQuantity} /> },
+          { id: "unclaimed", label: t("未领取"), value: unclaimed, text: <AnimatedNumber value={unclaimed} /> },
+        ]} />
+        <SplitMeter proportional={row.totalBudget !== undefined} label={`${t("总预算")} ${row.totalBudget === undefined ? t("不限") : money(row.totalBudget)}`} parts={[
+          { id: "redeemed", label: t("已核销"), value: row.redeemedBudget, text: money(row.redeemedBudget) },
+          { id: "locked", label: t("已锁定"), value: row.lockedBudget, text: money(row.lockedBudget) },
+          { id: "remaining", label: t("剩余预算"), value: remaining ?? 0, text: remaining === undefined ? t("不限") : money(remaining) },
+        ]} />
+      </>;
+    },
     details: row => <>
       <CardSection title={t("适用范围")}>
         <CardSecondary>{productNames(row)}</CardSecondary>

@@ -5,5 +5,20 @@
       "maxFindings": 5,
       "maxChars": 8000
     }
+  },
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "apps/admin/src/features/catalog/assetCards.module.css"
+        ],
+        "createdAt": "2026-11-08T16:26:52.356Z",
+        "reason": "Asset nameplate top status strip requested in the user's original per-page plan (顶部用状态色条); it is a top edge, not a side tab."
+      }
+    ]
   }
 }

@@ -1,4 +1,5 @@
-import { membershipPlanCards } from "./membershipPlanCards";
+import { MemberCard, MemberCardFacePicker, membershipPlanCards } from "./membershipPlanCards";
+import { savedMemberCardFace, saveMemberCardFace, type MemberCardFace } from "./memberCardAppearance";
 import { DataTableText, ListFilters, useListFilter } from "@/components/ui";
 import type {
   CustomerMembershipBenefit,
@@ -21,7 +22,6 @@ import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
-import { planBatchActions } from "@/features/listCapabilities";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { ADMIN_TABLE_COLUMN_WIDTH } from "@/app/designTokens";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
@@ -41,6 +41,7 @@ const scopeTypeOptions = [
   { value: "categories", label: "指定租赁品类" },
 ];
 type VersionAction = { kind: "disable" | "restore"; planId: string; versionId: string; version: number; planName: string };
+type PlanEditorValues = SaveCustomerMembershipPlanRequest & { cardFace: MemberCardFace };
 
 /** 列表、版本历史和授予快照共用同一范围说明，不向运营展示内部 ID。 */
 export function MembershipBenefitScopeSummary({ benefits, options }: {
@@ -82,7 +83,7 @@ function MembershipPlanWorkspace({ scope }: { scope: string }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [historyPlan, setHistoryPlan] = useState<CustomerMembershipPlan>();
   const [versionAction, setVersionAction] = useState<VersionAction>();
-  const [form] = Form.useForm<SaveCustomerMembershipPlanRequest>();
+  const [form] = Form.useForm<PlanEditorValues>();
   const [actionForm] = Form.useForm<{ reason: string }>();
   const editor = useModalDismissal(editorOpen, () => { setEditorOpen(false); setSelected(undefined); form.resetFields(); });
   const historyDialog = useModalDismissal(Boolean(historyPlan), () => setHistoryPlan(undefined));
@@ -92,7 +93,12 @@ function MembershipPlanWorkspace({ scope }: { scope: string }) {
   const scopeOptions = useQuery({ queryKey: ["membership-benefit-scope-options", scope], queryFn: membershipApi.benefitScopeOptions, enabled: canView });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["membership-plans"] });
   const save = useMutation({
-    mutationFn: (values: SaveCustomerMembershipPlanRequest) => membershipApi.savePlan({ ...values, id: selected?.id }),
+    mutationFn: async ({ cardFace, ...values }: PlanEditorValues) => {
+      const account = useAuthStore.getState().user?.id;
+      const saved = await membershipApi.savePlan({ ...values, id: selected?.id });
+      saveMemberCardFace(saved, cardFace, account);
+      return saved;
+    },
     onSuccess: async () => {
       await refresh();
       editor.dismiss();
@@ -135,8 +141,9 @@ function MembershipPlanWorkspace({ scope }: { scope: string }) {
       effectiveFrom: version?.effectiveFrom,
       effectiveTo: version?.effectiveTo,
       eligibility: version?.eligibility,
+      cardFace: savedMemberCardFace(plan, useAuthStore.getState().user?.id),
       benefits: (version?.benefits ?? []).map((benefit) => ({ ...benefit, scope: benefit.scope ?? { type: "tenant" } })),
-    } : { targetType: "personal", levelRank: 1, benefits: [] });
+    } : { targetType: "personal", levelRank: 1, benefits: [], cardFace: "pearl" });
     setEditorOpen(true);
   };
   const openVersionAction = (action: VersionAction) => { setVersionAction(action); actionForm.resetFields(); };
@@ -157,9 +164,8 @@ function MembershipPlanWorkspace({ scope }: { scope: string }) {
 
     {scopeOptions.error && <Alert type="error" showIcon title={t("适用范围名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
     <ListSection controls={<ListFilters filter={planFilter} placeholder="方案名称或编码" options={[{ value: "active", label: "已启用" }, { value: "disabled", label: "已停用" }, { value: "draft", label: "草稿" }]} />}>
-      <Table<CustomerMembershipPlan> rowKey="id" onRefresh={() => plans.refetch()} loading={plans.isLoading} refreshing={plans.isFetching} dataSource={planFilter.rows} pagination={planFilter.pagination} scroll={{ x: 1100 }}
+      <Table<CustomerMembershipPlan> rowKey="id" selectionEnabled={false} onRefresh={() => plans.refetch()} loading={plans.isLoading} refreshing={plans.isFetching} dataSource={planFilter.rows} pagination={planFilter.pagination} scroll={{ x: 1100 }}
         exportConfig={{ filename: t("会员方案"), fields: [{ label: t("编码"), value: row => row.code }, { label: t("方案"), value: row => row.name }, { label: t("适用会员"), value: row => t(row.targetType === "corporate" ? "企业会员" : "个人会员") }, { label: t("版本"), value: row => row.currentVersion?.version }, { label: t("状态"), value: row => t(row.status === "active" ? "已启用" : row.status === "disabled" ? "已停用" : "草稿") }] }}
-        batchActions={planBatchActions(refresh)}
         cardView={membershipPlanCards({ t, options: scopeOptions.data, canManage, canPublish, publishing: publish.isPending, edit: open, history: setHistoryPlan, publish: row => { if (row.currentVersion?.status === "draft" && canPublish) publish.mutate({ planId: row.id, versionId: row.currentVersion.id }); } })} columns={[
         { title: t("方案"), dataIndex: "name", minWidth: ADMIN_TABLE_COLUMN_WIDTH.identity, render: (_, row) => <DataTableText primary={row.name} secondary={row.code} /> },
         { title: t("适用会员"), dataIndex: "targetType", render: (value) => value === "corporate" ? t("企业会员") : t("个人会员") },
@@ -191,6 +197,17 @@ function MembershipPlanWorkspace({ scope }: { scope: string }) {
           <Form.Item name="appVisible" valuePropName="checked"><Checkbox>{t("APP 可见（仅预留）")}</Checkbox></Form.Item>
         </Space>
         </div> },
+        { key: "appearance", label: t("卡面样式"), content: <FormSection title={t("卡面样式")}>
+          <Form.Item name="cardFace" extra={t("卡面选择随保存草稿保存在当前浏览器，仅影响展示。") }><MemberCardFacePicker disabled={!canManage} t={t} /></Form.Item>
+          <Form.Item noStyle shouldUpdate>{() => {
+            const values = form.getFieldsValue();
+            const row: CustomerMembershipPlan = {
+              id: selected?.id ?? "preview", tenantId: selected?.tenantId ?? "preview", code: values.code || t("方案编码"), name: values.name || t("方案名称"), targetType: values.targetType ?? "personal", status: "draft", createdAt: "", updatedAt: "",
+              currentVersion: { id: "preview", planId: selected?.id ?? "preview", version: 1, status: "draft", levelRank: values.levelRank ?? 1, isDefault: values.isDefault ?? false, isRecommended: values.isRecommended ?? false, appVisible: values.appVisible ?? false, benefits: values.benefits ?? [], eligibility: values.eligibility ?? {}, effectiveFrom: values.effectiveFrom, effectiveTo: values.effectiveTo, createdAt: "", updatedAt: "" },
+            };
+            return <MemberCard row={row} t={t} options={scopeOptions.data} previewFace={values.cardFace ?? "pearl"} />;
+          }}</Form.Item>
+        </FormSection> },
         { key: "benefits", label: t("权益配置"), content: <>
         <Alert type="info" showIcon title={t("权益配置说明")} description={t("新权益默认适用于租户全部空间。优先预订、报价有效期延长等非金额权益仅保存配置，暂不生效。")} style={{ marginBottom: 16 }} />
         <Form.List name="benefits">

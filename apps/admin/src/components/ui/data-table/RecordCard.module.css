@@ -50,3 +50,14 @@
 :global([role="dialog"][data-framer-portal-id]):not([data-returning]):has(.preview) > div:last-child { min-height: 0; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 :global([role="dialog"][data-framer-portal-id]):has(.preview:not([data-has-media])) h2 { max-width: calc(100% - var(--space-8)); }
 @media (max-width: 639px) { .facts { gap: var(--space-3); } .preview { padding-block-start: var(--space-5); } }
+/* Member plans render as a physical member card: no outer frame, no hover outline, the card itself carries depth. */
+.item[data-kind="membership"] > .card, .item[data-kind="membership"] > .card[data-hover], .item[data-kind="membership"][data-featured] > .card { border-color: transparent; background: transparent; box-shadow: none; overflow: visible; }
+.item[data-kind="membership"] > .card > div:first-child { overflow: visible; background: transparent; }
+.item[data-kind="membership"] > .card > div:first-child > div { transform: none !important; }
+.item[data-kind="membership"] > .card > div:has(> h3) { position: absolute; inset: 0; padding: 0; pointer-events: none; }
+.item[data-kind="membership"] .card h3 { display: none; }
+.item[data-kind="membership"] > .card > div:has(> h3) > div:last-child { position: absolute; right: calc((100% - min(100% - 24px, 290px)) / 2 + 18px); bottom: 24px; margin: 0; z-index: 4; pointer-events: auto; }
+.memberDetails { --surface: #242427; --foreground: #eeeeef; --border: #ffffff30; --text-secondary: #d0d0d3; --surface-muted: #35353a; }
+.item[data-kind="membership"] .mobileHit { display: none; }
+.sheetMedia:has([data-member-holo]) { overflow: visible; }
+.card [data-member-holo] [role="button"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }

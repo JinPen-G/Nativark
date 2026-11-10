@@ -41,7 +41,7 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
   const [selectionHost, setSelectionHost] = useState<HTMLElement | null>(null);
   // Keep selection in the closed article so it moves with the native lift, but
   // outside Card's shared children so it never reappears in the quick look.
-  useLayoutEffect(() => { setSelectionHost(wrapper.current?.querySelector("article") ?? null); }, []);
+  useLayoutEffect(() => { setSelectionHost(wrapper.current?.querySelector("article") ?? null); }, [narrow]);
   const owner = useId(), selector = `[data-record-card-preview-owner="${owner}"]`;
   const trigger = useRef<HTMLButtonElement>(null);
   const observer = useRef<MutationObserver | null>(null);
@@ -80,9 +80,9 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
     {onSelect && selectionHost && createPortal(<div className={styles.selection}><Checkbox aria-label={`${t("选择")} ${title}`} checked={Boolean(selected)} disabled={disabled} onCheckedChange={value => onSelect(value === true)} /></div>, selectionHost)}
     <Card title={title} meta={subtitle ? <span className={styles.secondary}>{subtitle}</span> : undefined} className={styles.card} media={media}
       details={narrow ? undefined : details} open={!narrow && open} onOpenChange={changeOpen}
-      action={!open ? <Button ref={trigger} size="sm" variant="secondary" onClick={() => changeOpen(true)} aria-label={`${t("查看详情")} ${title}`}>{t("查看详情")}</Button> : undefined}>
+      action={!open ? <Button ref={trigger} className={config.kind === "membership" ? styles.memberDetails : undefined} size="sm" variant="secondary" onClick={() => changeOpen(true)} aria-label={`${t("查看详情")} ${title}`}>{t("查看详情")}</Button> : undefined}>
       {narrow && <button type="button" className={styles.mobileHit} data-copilot-reference="" aria-label={`${t("查看详情")} ${title}`} onClick={() => changeOpen(true)} />}
-      {summary}
+      {config.kind !== "membership" && summary}
     </Card>
     {narrow && <BottomSheet open={open} onOpenChange={next => { changeOpen(next); if (!next && !pending.current) requestAnimationFrame(() => trigger.current?.focus()); }} title={title} description={subtitle} closeLabel={t("关闭详情")} detents={[.6, .92]} initialDetent={1}>
       {media && <div className={styles.sheetMedia}>{media}</div>}{summary}{details}
