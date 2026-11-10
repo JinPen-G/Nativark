@@ -6,12 +6,20 @@ import type { AtRule, Rule } from "postcss";
  * let original components read the same browser setting as the workspace. */
 export function motionPreferenceAdapter(): Plugin {
   const id = "\0rental-motion-preference";
+  const restId = "\0rental-rest-motion-preference";
   const upstream = fileURLToPath(import.meta.resolve("motion/react")).replaceAll("\\", "/");
   const hook = fileURLToPath(new URL("../src/lib/usePrefersReducedMotion.ts", import.meta.url)).replaceAll("\\", "/");
+  const restMotion = fileURLToPath(new URL("../src/features/rest/archive/primitives/motion.ts", import.meta.url)).replaceAll("\\", "/");
   return {
     name: "rental-motion-preference", enforce: "pre",
-    resolveId(source) { if (source === "motion/react") return id; },
+    resolveId(source, importer) {
+      if (source === "motion/react") return id;
+      // Keep the supplied player files byte-for-byte: their local motion hook
+      // must honor the same System/Full/Reduced policy as the rest of the admin.
+      if (source === "../primitives/motion" && importer?.replaceAll("\\", "/").includes("/features/rest/archive/")) return restId;
+    },
     load(source) {
+      if (source === restId) return `export * from ${JSON.stringify(restMotion)}; export { usePrefersReducedMotion as useReducedMotion } from ${JSON.stringify(hook)};`;
       if (source !== id) return;
       return `export * from ${JSON.stringify(upstream)}; export { usePrefersReducedMotion as useReducedMotion } from ${JSON.stringify(hook)};`;
     },

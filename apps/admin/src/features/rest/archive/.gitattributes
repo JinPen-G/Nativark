@@ -1,0 +1,2 @@
+# Preserve the supplied component bytes, including their original line endings.
+* -text whitespace=cr-at-eol

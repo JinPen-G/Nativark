@@ -11,6 +11,8 @@ import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { NotificationProvider } from "@/features/notifications/NotificationProvider";
 import { HeaderNotifications } from "@/features/notifications/HeaderNotifications";
+import { RestProvider } from "@/features/rest/RestProvider";
+import { RestEntry } from "@/features/rest/RestEntry";
 import { WorkspaceClock } from "./WorkspaceClock";
 import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
@@ -32,7 +34,7 @@ import "./animate-sidebar/sidebar-adapter.css";
 
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
-  return <CopilotProvider><OperatorProvider><NotificationProvider><AppShellLayout>{children}</AppShellLayout></NotificationProvider></OperatorProvider></CopilotProvider>;
+  return <CopilotProvider><OperatorProvider><NotificationProvider><RestProvider><AppShellLayout>{children}</AppShellLayout></RestProvider></NotificationProvider></OperatorProvider></CopilotProvider>;
 }
 function AppShellLayout({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
@@ -133,6 +135,7 @@ function ShellContents({ children }: { children: ReactNode }) {
           <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
         </div>
         <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
+          <RestEntry />
           {!aiMode && copilot?.available && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
             <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
             {!!copilot.contexts.length && <span className="copilot-entry-count">{copilot.contexts.length}</span>}

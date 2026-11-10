@@ -1,0 +1,68 @@
+{
+  "source": "UI conversation independent reconstruction of UIArc public previews",
+  "version": "snapshot-v3",
+  "date": "2026-11-11",
+  "packageSha256": "f46032b9196f97ce6f8b925796538ef26f59828314d29f7e8ded79b2d200aeb1",
+  "files": [
+    {
+      "path": "now-playing/index.ts",
+      "sha256": "127c40927a63f4eeeb9929a4580a80cde6397f152ed06477a341e48224507924",
+      "bytes": 267
+    },
+    {
+      "path": "now-playing/types.ts",
+      "sha256": "d50d4211b16fa770f601ae97b08afd198ab94402ce5e741914763e6767317218",
+      "bytes": 568
+    },
+    {
+      "path": "now-playing/NowPlaying.tsx",
+      "sha256": "e5b2e6aaf43780356e2fe6a18fd5cf90ee0b4abb89525125ffce07eea4073637",
+      "bytes": 14693
+    },
+    {
+      "path": "now-playing/Waveform.tsx",
+      "sha256": "ee336d71bda7e1dc40731137ee996d6e9fef5fd7e95f237ede5f8cc8f6b75720",
+      "bytes": 4859
+    },
+    {
+      "path": "now-playing/styles.module.css",
+      "sha256": "138af0c112afc6d992a1f955b3996e99da581db8b619917672e54919e9cdca42",
+      "bytes": 10995
+    },
+    {
+      "path": "media-player/index.ts",
+      "sha256": "7c8135d4406b1a1aafb70d5c9f0cf796a2ee62f4c2b3684cc9f169fbc5ef80d6",
+      "bytes": 277
+    },
+    {
+      "path": "media-player/types.ts",
+      "sha256": "6d5503fc94850dabca6ce7da2a2d6f7b2b84a69deecaf0e45314068cad5a828a",
+      "bytes": 1322
+    },
+    {
+      "path": "media-player/playback.ts",
+      "sha256": "36966f8b4fe5b180fdfb4cf6d45f46ae3fd00dd8d039f63ae55dfb73d2d8001f",
+      "bytes": 1301
+    },
+    {
+      "path": "media-player/Transport.tsx",
+      "sha256": "1346063c894f788e60a4639c9eda73c70e6d9b771728e7fd635d7ffec4506b2c",
+      "bytes": 6017
+    },
+    {
+      "path": "media-player/MediaPlayer.tsx",
+      "sha256": "cda9f8c822a18e2045ac6b26debb84c1150e203a0243ca3ccd011755af23d1c4",
+      "bytes": 4901
+    },
+    {
+      "path": "media-player/styles.module.css",
+      "sha256": "8ce4b35ba430ef639b26d92ac30a9743ef5ddd5885b3af35969837562b15be42",
+      "bytes": 10190
+    },
+    {
+      "path": "primitives/motion.ts",
+      "sha256": "14709ce5eb6b399e8735b2b7a8c7722fd680c7b08a98a80f43ca4dfdb6ed8e16",
+      "bytes": 1917
+    }
+  ]
+}
