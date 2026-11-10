@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { createHash } from "node:crypto";
 import { z } from 'zod';
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
-import { lockActiveCategoryBinding, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
+import { lockActiveCategoryBinding, replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { Prisma, type $Enums, type RentalCouponTemplate as CouponTemplateRow } from "@prisma/client";
 import type {
   RentalBundleComponent,
@@ -1109,27 +1109,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         const components = await client.rentalItemGroup.findMany({ where: { id: { in: componentIds }, tenantId: group.tenantId, workspaceId }, select: { id: true } });
         if (components.length !== componentIds.length) throw new ConflictException("套装组成引用了其他租户或经营空间的产品型号");
       }
-      {
-        await client.rentalAttributeUniqueValue.deleteMany({
-          where: { tenantId: group.tenantId, workspaceId, entityType: "item_group", entityId: group.id }
-        });
-        for (const claim of activeWrite.claims) {
-          try {
-            await client.rentalAttributeUniqueValue.create({ data: {
-              id: `attruniq_${createHash("sha256").update(`${workspaceId}|item_group|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
-              tenantId: group.tenantId, workspaceId, entityType: "item_group",
-              fieldCode: claim.fieldCode,
-              normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
-              normalizedValue: claim.normalizedValue, entityId: group.id
-            } });
-          } catch (error) {
-            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-              throw new ConflictException(`${claim.label}已存在`);
-            }
-            throw error;
-          }
-        }
-      }
+      await replaceCategoryUniqueClaims(client, group.tenantId, workspaceId, "item_group", group.id, activeWrite.claims);
       await client.rentalItemGroup.upsert({
         where: { id: group.id },
         create: { workspaceId, id: group.id, ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, createdAt: new Date(group.createdAt) },

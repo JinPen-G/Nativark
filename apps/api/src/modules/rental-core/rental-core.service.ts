@@ -6279,7 +6279,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 默认空间沿用 tenantId 前缀以保持既有 id 不变，其余空间用自己的 id。
    */
   private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId, currency: RentalCurrency = "CNY", resolvedDefinition?: RentalCategoryDefinition): TenantRentalState {
-    const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
+    // 固定样本只属于未装配持久化解析器的内存演示宿主；正式空间由明确建档产生事实。
+    // 不能因租户ID相同就把旧四品类样本注入另一个动态品类或新空间。
+    const isSampleTenant = !this.categoryResolver && (tenantId === "tenant_001" || tenantId === "tenant_002");
     const definition = resolvedDefinition ?? this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
     const initialSetup = definition.businessModel.defaults.initialSetup;
     const operator: RentalFulfillmentOperator = { id: `${idPrefix}_operator_01`, tenantId, code: "SELF", name: initialSetup.operatorName, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };

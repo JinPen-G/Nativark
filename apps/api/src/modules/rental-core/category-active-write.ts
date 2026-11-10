@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { RentalInventoryMode } from "@rental-os/shared";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
@@ -6,6 +7,29 @@ import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } 
 import { lockRentalBusinessTenant } from "./rental-business-fence";
 
 export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevision: number }
+
+/** Caller holds the active space lock and owns this transaction. A collision
+ * rolls back the entity and its declarations; it must never become a skipped
+ * backfill row or release the previous value in a separate transaction. */
+export async function replaceCategoryUniqueClaims(
+  tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
+  entityType: "item_group" | "asset", entityId: string,
+  claims: readonly { fieldCode: string; label: string; normalizedValue: string }[]
+) {
+  await tx.rentalAttributeUniqueValue.deleteMany({ where: { tenantId, workspaceId, entityType, entityId } });
+  for (const claim of claims) {
+    try {
+      await tx.rentalAttributeUniqueValue.create({ data: {
+        id: `attruniq_${createHash("sha256").update(`${workspaceId}|${entityType}|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
+        tenantId, workspaceId, entityType, entityId, fieldCode: claim.fieldCode,
+        normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"), normalizedValue: claim.normalizedValue
+      } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException(`${claim.label}已存在`);
+      throw error;
+    }
+  }
+}
 
 /** Every configuration participating in adoption must share this transaction lock. */
 export async function lockActiveCategoryBinding(

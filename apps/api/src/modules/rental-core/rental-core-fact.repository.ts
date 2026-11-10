@@ -46,7 +46,7 @@ import { PrismaService } from "../database/prisma.service";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { readOrderInspectionBasisInput } from "./rental-order-inspection-basis.read";
-import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
+import { replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { rentalOrderListSort } from "./rental-order-list-sort";
@@ -1640,30 +1640,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         const activeWrite = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
           id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
         }, expectedBinding);
-        await tx.rentalAttributeUniqueValue.deleteMany({
-          where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
-        });
-        for (const claim of activeWrite.claims) {
-          try {
-            await tx.rentalAttributeUniqueValue.create({
-              data: {
-                id: `attruniq_${createHash("sha256").update(`${workspaceId}|asset|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
-                tenantId: asset.tenantId,
-                workspaceId,
-                entityType: "asset",
-                fieldCode: claim.fieldCode,
-                normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
-                normalizedValue: claim.normalizedValue,
-                entityId: asset.id
-              }
-            });
-          } catch (error) {
-            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-              throw new ConflictException(`${claim.label}已存在`);
-            }
-            throw error;
-          }
-        }
+        await replaceCategoryUniqueClaims(tx, asset.tenantId, workspaceId, "asset", asset.id, activeWrite.claims);
         const existing = await tx.rentalAsset.findUnique({
           where: { id: asset.id },
           select: { tenantId: true, workspaceId: true, status: true, assetNo: true }

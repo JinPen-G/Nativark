@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
@@ -26,6 +26,9 @@ import type {
   TenantRentalProfile
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { readRentalCategoryCode } from "./category-identity";
+import { lockRentalBusinessTenant } from "./rental-business-fence";
+import { replaceCategoryUniqueClaims, validateActiveCategoryWrite } from "./category-active-write";
 
 /**
  * 快照 JSON 是领域对象的直接序列化结果，因此按领域类型读取即可。
@@ -362,6 +365,35 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
 
     await this.prisma.$transaction(
       async (tx) => {
+        // 回填也是正式写入：与采用、建档共用父锁/空间锁，等待后重读绑定。
+        // 旧快照不能在空间采用新版后重新插入旧版资料或绕开唯一声明。
+        await lockRentalBusinessTenant(tx, tenantId);
+        const locked = await tx.$queryRaw<Array<{ categoryCode: string; categoryVersionId: string | null; categoryAdoptionRevision: number }>>(
+          Prisma.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision FROM business_workspaces
+            WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`
+        );
+        const current = locked[0];
+        if (!current || !Number.isSafeInteger(current.categoryAdoptionRevision) || current.categoryAdoptionRevision < 0) {
+          throw new ConflictException("快照回填缺少可核对的空间品类绑定");
+        }
+        const workspaceCategory = readRentalCategoryCode(current.categoryCode);
+        const snapshotCategories = [
+          ...(core.profile ? [core.profile.categoryCode] : []), ...(core.businessSettings ? [core.businessSettings.categoryCode] : []),
+          ...(business.categoryCode ? [business.categoryCode] : []),
+          ...(core.itemGroups ?? []).map(row => row.categoryCode), ...(core.inspectionTemplates ?? []).map(row => row.categoryCode),
+          ...(business.pricingPlans ?? []).map(row => row.categoryCode), ...(business.discountPlans ?? []).map(row => row.categoryCode),
+          ...(business.services ?? []).map(row => row.categoryCode), ...(business.ruleVersions ?? []).map(row => row.categoryCode),
+          ...(business.quotes ?? []).map(row => row.categoryCode), ...(core.orders ?? []).map(row => row.categoryCode)
+        ];
+        if (snapshotCategories.some(code => readRentalCategoryCode(code) !== workspaceCategory)) {
+          throw new ConflictException("快照品类与所属经营空间不一致，不能回填");
+        }
+        if ((current.categoryAdoptionRevision > 0 || core.profile?.categoryVersionId !== undefined) &&
+            (core.profile?.categoryVersionId !== current.categoryVersionId || core.profile?.categoryAdoptionRevision !== current.categoryAdoptionRevision)) {
+          throw new ConflictException("快照来源品类版本或采用修订已变化，不能自动回填；原快照与当前事实保留");
+        }
+        const expectedBinding = current.categoryVersionId
+          ? { categoryVersionId: current.categoryVersionId, adoptionRevision: current.categoryAdoptionRevision } : undefined;
         const divergences: string[] = [];
         const categoryCode = core.profile?.categoryCode ?? business.categoryCode;
         const operatorIdMap = new Map<string, string>();
@@ -413,7 +445,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             where: { tenantId },
             create: {
               tenantId,
-              categoryCode: upperEnum(categoryCode, "profile.categoryCode"),
+              categoryCode: readRentalCategoryCode(categoryCode),
               capabilities: jsonArray(snapshotProfile.capabilities),
               terminology: json(snapshotProfile.terminology),
               configVersion: snapshotProfile.configVersion ?? "0.1.0",
@@ -432,7 +464,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             create: {
               tenantId,
               workspaceId,
-              categoryCode: upperEnum(categoryCode, "businessSettings.categoryCode"),
+              categoryCode: readRentalCategoryCode(categoryCode),
               configVersion: settings.configVersion ?? "0.1.0",
               settingsRevision: 1,
               settings: json(settings),
@@ -526,26 +558,36 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               where: { workspaceId_code: { workspaceId, code: group.code } },
               select: { id: true }
             }),
-            () =>
-            tx.rentalItemGroup.upsert({
-            where: { workspaceId_code: { workspaceId, code: group.code } },
-            update: {},
-            create: {
-              id: group.id,
-              tenantId,
-              workspaceId,
-              categoryCode: upperEnum(group.categoryCode, `itemGroup(${group.code}).categoryCode`),
-              code: group.code,
-              name: group.name,
-              inventoryMode: upperEnum(group.inventoryMode, `itemGroup(${group.code}).inventoryMode`),
-              unit: group.unit ?? "件",
-              description: group.description ?? null,
-              attributes: json(group.attributes ?? {}),
-              status: group.status ?? "enabled",
-              createdAt: optionalDate(group.createdAt) ?? new Date()
-            },
-            select: { id: true }
-          }));
+            async () => {
+              const active = expectedBinding ? await validateActiveCategoryWrite(tx, tenantId, workspaceId, {
+                id: group.id, scope: "item_group", categoryCode: workspaceCategory, inventoryMode: group.inventoryMode, attributes: group.attributes ?? {}
+              }, expectedBinding) : undefined;
+              const saved = await tx.rentalItemGroup.upsert({
+                where: { workspaceId_code: { workspaceId, code: group.code } },
+                update: {},
+                create: {
+                  id: group.id,
+                  tenantId,
+                  workspaceId,
+                  categoryCode: readRentalCategoryCode(group.categoryCode),
+                  code: group.code,
+                  name: group.name,
+                  inventoryMode: upperEnum(group.inventoryMode, `itemGroup(${group.code}).inventoryMode`),
+                  unit: group.unit ?? "件",
+                  description: group.description ?? null,
+                  attributes: json(active?.attributes ?? group.attributes ?? {}),
+                  status: group.status ?? "enabled",
+                  createdAt: optionalDate(group.createdAt) ?? new Date()
+                },
+                select: { id: true }
+              });
+              if (active) {
+                if (saved.id !== group.id) throw new ConflictException("回填型号来源已变化，不能为其他型号写入唯一声明");
+                await replaceCategoryUniqueClaims(tx, tenantId, workspaceId, "item_group", saved.id, active.claims);
+              }
+              return saved;
+            }
+          );
           if (resolvedId) itemGroupIdMap.set(group.id, resolvedId);
         }
         count("itemGroups", (core.itemGroups ?? []).length);
@@ -596,24 +638,34 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
               select: { id: true }
             }),
-            () =>
-            tx.rentalAsset.upsert({
-            where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
-            update: {},
-            create: {
-              id: asset.id,
-              tenantId,
-              workspaceId,
-              itemGroupId,
-              assetNo: asset.assetNo,
-              serialNo: asset.serialNo ?? null,
-              locationId,
-              status: upperEnum<$Enums.RentalAssetState>(asset.status, `asset(${asset.assetNo}).status`),
-              attributes: json(asset.attributes ?? {}),
-              createdAt: optionalDate(asset.createdAt) ?? new Date()
-            },
-            select: { id: true }
-          }));
+            async () => {
+              const active = expectedBinding ? await validateActiveCategoryWrite(tx, tenantId, workspaceId, {
+                id: asset.id, scope: "asset", serialNo: asset.serialNo, attributes: asset.attributes ?? {}, categoryCode: workspaceCategory
+              }, expectedBinding) : undefined;
+              const saved = await tx.rentalAsset.upsert({
+                where: { workspaceId_assetNo: { workspaceId, assetNo: asset.assetNo } },
+                update: {},
+                create: {
+                  id: asset.id,
+                  tenantId,
+                  workspaceId,
+                  itemGroupId,
+                  assetNo: asset.assetNo,
+                  serialNo: (active ? active.serialNo : asset.serialNo) ?? null,
+                  locationId,
+                  status: upperEnum<$Enums.RentalAssetState>(asset.status, `asset(${asset.assetNo}).status`),
+                  attributes: json(active?.attributes ?? asset.attributes ?? {}),
+                  createdAt: optionalDate(asset.createdAt) ?? new Date()
+                },
+                select: { id: true }
+              });
+              if (active) {
+                if (saved.id !== asset.id) throw new ConflictException("回填资产来源已变化，不能为其他资产写入唯一声明");
+                await replaceCategoryUniqueClaims(tx, tenantId, workspaceId, "asset", saved.id, active.claims);
+              }
+              return saved;
+            }
+          );
           if (resolvedId) assetIdMap.set(asset.id, resolvedId);
         }
         count("assets", (core.assets ?? []).length);
@@ -762,7 +814,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               id: template.id,
               tenantId,
               workspaceId,
-              categoryCode: upperEnum(template.categoryCode, `inspectionTemplate(${template.code}).categoryCode`),
+              categoryCode: readRentalCategoryCode(template.categoryCode),
               code: template.code,
               name: template.name,
               stage: template.stage,
@@ -786,7 +838,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               id: plan.id,
               tenantId,
               workspaceId,
-              categoryCode: upperEnum(plan.categoryCode, `pricingPlan(${plan.code}).categoryCode`),
+              categoryCode: readRentalCategoryCode(plan.categoryCode),
               code: plan.code,
               name: plan.name,
               currency: plan.currency ?? "CNY",
@@ -813,7 +865,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               id: plan.id,
               tenantId,
               workspaceId,
-              categoryCode: upperEnum(plan.categoryCode, `discountPlan(${plan.code}).categoryCode`),
+              categoryCode: readRentalCategoryCode(plan.categoryCode),
               code: plan.code,
               name: plan.name,
               status: plan.status ?? "draft",
@@ -847,7 +899,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               id: service.id,
               tenantId,
               workspaceId,
-              categoryCode: upperEnum(service.categoryCode, `service(${service.code}).categoryCode`),
+              categoryCode: readRentalCategoryCode(service.categoryCode),
               code: service.code,
               name: service.name,
               serviceType: service.serviceType,
@@ -906,7 +958,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               id: rule.id,
               tenantId,
               workspaceId,
-              categoryCode: upperEnum(rule.categoryCode, `ruleVersion(${rule.version}).categoryCode`),
+              categoryCode: readRentalCategoryCode(rule.categoryCode),
               version: rule.version,
               status: rule.status ?? "draft",
               config: json(rule.config),
@@ -1002,7 +1054,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               tenantId,
               workspaceId,
               quoteNo: quote.quoteNo,
-              categoryCode: upperEnum(quote.categoryCode, `quote(${quote.quoteNo}).categoryCode`),
+              categoryCode: readRentalCategoryCode(quote.categoryCode),
               request: json(quote.request),
               chargeLines: jsonArray(quote.chargeLines),
               rentalAmount: amount(quote.rentalAmount),
@@ -1080,7 +1132,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               tenantId,
               workspaceId,
               orderNo: order.orderNo,
-              categoryCode: upperEnum(order.categoryCode, `order(${order.orderNo}).categoryCode`),
+              categoryCode: readRentalCategoryCode(order.categoryCode),
               status: upperEnum<$Enums.RentalOrderV1Status>(order.status, `order(${order.orderNo}).status`),
               customerType: order.customerType,
               customerId: order.customerId ?? null,
@@ -1352,7 +1404,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
           );
         }
       },
-      { timeout: 60_000 }
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 60_000 }
     );
 
     const summary = Object.entries(inserted).map(([key, value]) => `${key}=${value}`).join(" ");
