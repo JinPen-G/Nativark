@@ -64,7 +64,7 @@ export const ADMIN_LAYOUT_SPACING = {
 } as const;
 /** Dense operational metrics fit the available width rather than leave an orphaned row. */
 export const ADMIN_DASHBOARD_METRICS = { cardMinWidth: 200 } as const;
-export const ADMIN_INSIGHT_METRICS = { gap: 20, panelPadding: 20, donutSize: 176, donutThickness: 18 } as const;
+export const ADMIN_INSIGHT_METRICS = { gap: 20, panelPadding: 20, donutSize: 176, donutThickness: 18, contributionHeight: 300 } as const;
 export const ADMIN_SETTINGS_METRICS = { navWidth: 192, compactAt: 720 } as const;
 export const ADMIN_PERMISSION_MATRIX_METRICS = { labelWidth: 288, roleWidth: 184, compactLabelWidth: 164, compactRoleWidth: 172 } as const;
 /** Detail pages read left to right: business context, then a compact ledger summary. */

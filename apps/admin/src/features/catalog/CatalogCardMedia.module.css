@@ -1,0 +1,4 @@
+/* Packshot geometry is the existing admin media role; the archived photo crossfade stays upstream-owned. */
+.root { width: 100%; height: var(--rental-record-card-media-height); grid-template-rows: minmax(0, 1fr); gap: 0; }
+.frame { height: 100%; aspect-ratio: auto; border-radius: 0; }
+.photo { position: absolute; inset: 0; }

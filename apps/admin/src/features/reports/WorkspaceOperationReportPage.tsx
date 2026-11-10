@@ -1,4 +1,7 @@
-import { DistributionChart, InsightPanel, MetricBand, RankedFacts, ViewChoice, insightStyles } from "@/components/insights/OperationalCharts";
+import { MetricBand, ViewChoice } from "@/components/insights/OperationalCharts";
+import insightStyles from "@/components/insights/OperationalCharts.module.css";
+import { ReportAnalysis } from "@/components/insights/ReportAnalysis";
+import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { CustomerPreview } from "@/features/membership/CustomerPreview";
 import { DownloadOutlined, ReloadOutlined } from "@/components/ui/icons";
 import type {
@@ -9,8 +12,8 @@ import type {
 } from "@rental-os/shared";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
-import { Card, Col, Descriptions, Row, Space, Tag } from "antd";
-import { AnimatedNumber, Statistic } from "@/components/ui";
+import { Col, Descriptions, Row, Space, Tag } from "antd";
+import { AnimatedNumber, DataTableMoney, DataTableText, Tabs } from "@/components/ui";
 import { ListFilterBar, ListFilterItem, ListSection, App } from "@/components/ui";
 import { Alert, DatePicker, Table, TableRefreshProvider } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -23,7 +26,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { useLocale } from "@/app/locale";
-import { orderStatusChartColor, orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
+import { orderStatusTagColor } from "@/features/rental-core/orderStatusSemantics";
 
 /**
  * REPORT-01A/01B：当前经营空间经营报表。
@@ -170,19 +173,20 @@ export function WorkspaceOperationReportPage() {
             <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportCsv()}>
               {t("导出 CSV")}
             </Button>
-            <Button icon={<ReloadOutlined />} aria-label={t("刷新经营报表")} onClick={() => void report.refetch()} />
+            <Button icon={<ReloadOutlined />} loading={report.isFetching} aria-label={t("刷新经营报表")} onClick={() => void report.refetch()} />
           </Space>
         }
       />
-      <QueryState loading={report.isLoading} error={report.error}>
+      <QueryState loading={report.isLoading} error={report.error} onRetry={() => report.refetch({ throwOnError: true })}>
         <TableRefreshProvider onRefresh={() => report.refetch()} busy={report.isFetching}>{data && <ReportBody data={data} />}</TableRefreshProvider>
       </QueryState>
     </>
   );
 }
 function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [view, setView] = useState("visual");
+  const [detailTab, setDetailTab] = useState("customers");
   // 币种取报表自带的快照，而不是再去读一次业务设置：金额是按这个币种算出来的，
   // 两处各读一次就有机会显示成不一致的单位。
   const money = (value: number) => formatRentalMoney(Number(value), data.currency);
@@ -205,76 +209,62 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
   const occupancy = data.utilization.orderOccupancy;
 
   return (
-    <>
+    <ContentTransition value={view}>
       <div className={insightStyles.page}>
         <MetricBand items={cards.slice(0,4).map(card => ({ label: card.label, value: card.precision ? money(card.value) : card.value, detail: card.label === t("应收金额") ? t("调账后应收") : t("当前筛选范围") }))} />
         <div><ViewChoice value={view} onChange={setView} options={[{ value: "visual", label: t("分析视图") }, { value: "details", label: t("明细视图") }]} /></div>
-        {view === "visual" && <>
-          <div className={insightStyles.equal}>
-            <InsightPanel title={t("订单状态分布")} description={t("当前筛选范围的全部订单，不受分页影响")}>
-              <DistributionChart title={t("订单状态")} unit={t("单")} rows={data.statusBreakdown.map(row => ({key:row.status,label:t(statusLabels[row.status]??row.status),value:row.count,color:orderStatusChartColor(row.status)}))} />
-            </InsightPanel>
-            <InsightPanel title={t("应收构成")} description={t("税额已包含在应收金额中")}>
-              <RankedFacts rows={[{id:"net",label:t("不含税应收"),value:data.netOfTaxTotal},{id:"tax",label:t("其中税额"),value:data.taxTotal}]} format={money} empty={t("暂无数据")} />
-              <dl className={insightStyles.facts}><div><dt>{t("优惠金额")}</dt><dd>{money(data.discountTotal)}</dd></div><div><dt>{t("异常费用")}</dt><dd>{money(data.exceptionFeeTotal)}</dd></div><div><dt>{t("异常订单")}</dt><dd><AnimatedNumber value={data.exceptionOrderCount}/></dd></div></dl>
-            </InsightPanel>
-          </div>
-          <div className={insightStyles.equal}>
-            <InsightPanel title={t("客户贡献")} description={t("按当前筛选应收金额排序")}>
-              <RankedFacts rows={[...data.customerBreakdown].sort((a,b)=>b.receivableTotal-a.receivableTotal).slice(0,8).map((row,index)=>({id:row.customerId??String(index),label:row.customerName,value:row.receivableTotal,note:row.orderCount+" "+t("单")}))} format={money} empty={t("当前筛选下没有订单")} />
-            </InsightPanel>
-            <InsightPanel title={t("地点贡献")} description={t("按当前筛选应收金额排序")}>
-              <RankedFacts rows={[...data.locationBreakdown].sort((a,b)=>b.receivableTotal-a.receivableTotal).slice(0,8).map(row=>({id:row.locationId,label:row.locationName,value:row.receivableTotal,note:row.orderCount+" "+t("单")}))} format={money} empty={t("当前筛选下没有订单")} />
-            </InsightPanel>
-          </div>
-          <div className={insightStyles.equal}>
-            <InsightPanel title={t("库存与资产（当前快照）")} description={t("这一节是读取瞬间的快照，不是区间利用率")}>
-              <DistributionChart title={t("序列化资产")} rows={assets.statusBreakdown.map(row=>({key:row.status,label:t(assetStatusLabels[row.status]??row.status),value:row.count}))} />
-              <dl className={insightStyles.facts}><div><dt>{t("数量库存")}</dt><dd><AnimatedNumber value={stock.onHandTotal}/></dd></div><div><dt>{t("可租余量")}</dt><dd><AnimatedNumber value={stock.availableTotal}/></dd></div></dl>
-            </InsightPanel>
-            <InsightPanel title={t("异常费用构成")} description={t("同一订单可能包含多种异常费用")}>
-              <RankedFacts rows={data.exceptionFeeBreakdown.map(row=>({id:row.type,label:t(exceptionLabels[row.type]??row.type),value:row.amount,note:row.orderCount+" "+t("单")}))} format={money} empty={t("当前经营空间没有异常费用")} />
-              <dl className={insightStyles.facts}><div><dt>{t("平均租期")}</dt><dd>{occupancy.averageHours} {t("小时")}</dd></div><div><dt>{t("占用时长合计")}</dt><dd>{occupancy.totalHours} {t("小时")}</dd></div></dl>
-            </InsightPanel>
-          </div>
-        </>}
+        <div hidden={view !== "visual"}><ReportAnalysis data={data} onDetails={dimension => { setDetailTab(dimension ?? "customers"); setView("details"); }} /></div>
       </div>
-      <div hidden={view !== "details"}>
-      <div className="report-metrics">{cards.slice(4).map(card=><Card key={card.label}><Statistic title={card.label} value={card.value} prefix={card.prefix} precision={card.precision}/></Card>)}</div>
-
-      <ListSection title={t("订单量按状态")}>
-        {data.statusBreakdown.length ? (
-          <Space wrap>
-            {data.statusBreakdown.map((row) => (
-              <Tag key={row.status} color={orderStatusTagColor(row.status)}>
-                {t(statusLabels[row.status] ?? row.status)}：<AnimatedNumber value={row.count} />
-              </Tag>
-            ))}
-          </Space>
-        ) : (
-          <span className="muted">{t("当前经营空间尚无非草稿订单")}</span>
-        )}
-      </ListSection>
-
-      <ListSection title={t("异常费用构成")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-        <Table
+      <div hidden={view !== "details"} className={insightStyles.detailViews}>
+        <dl className={insightStyles.snapshotFacts}>{cards.slice(4).map(card => <div key={card.label}><dt>{card.label}</dt><dd>{card.precision ? money(card.value) : <AnimatedNumber value={card.value} />}</dd></div>)}</dl>
+        <Tabs aria-label={t("报表明细")} activeKey={detailTab} onChange={setDetailTab} destroyOnHidden={false} items={[
+          { key: "customers", label: t("客户维度"), children: <>
+      <ListSection title={t("客户维度")}>
+        <Table<RentalWorkspaceCustomerBreakdownRow>
           size="small"
-          rowKey="type"
-          pagination={false}
-          dataSource={data.exceptionFeeBreakdown}
-          locale={{ emptyText: t("当前经营空间没有异常费用") }}
+          rowKey={(row) => row.customerId ?? `name:${row.customerName}`}
+          dataSource={data.customerBreakdown}
+          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          locale={{ emptyText: t("当前筛选下没有订单") }}
           columns={[
-            { title: t("类型"), render: (_: unknown, row) => t(exceptionLabels[row.type] ?? row.type) },
-            { title: t("金额"), align: "right", render: (_: unknown, row) => money(row.amount) },
-            { title: t("涉及订单"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> }
+            { title: t("客户"), render: (_: unknown, row) => <CustomerPreview customerId={row.customerId} name={row.customerName} type={row.customerType === "corporate" ? "corporate" : row.customerType === "personal" ? "personal" : undefined} snapshot presentation="list" /> },
+            { title: t("类型"), render: (_: unknown, row) => <Tag color={row.customerType === "corporate" ? "purple" : "blue"}>{t(row.customerType === "corporate" ? "企业" : "个人")}</Tag> },
+            { title: t("订单量"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> },
+            { title: t("租赁收入"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.rentalRevenue)} /> },
+            { title: t("优惠金额"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.discountTotal)} /> },
+            { title: t("应收金额"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.receivableTotal)} /> },
+            { title: t("异常费用"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.exceptionFeeTotal)} /> }
           ]}
         />
         <div className="muted" >
-          {t("一张订单同时逾期与损坏时，「异常订单」按去重后的订单计，因此可能小于各类型涉及订单之和。")}
+          {t("只展示客户名与类型；手机号、证件号不进报表与导出——报表不是客户资料的第二个出口。")}
         </div>
       </ListSection>
-      {/* 快照与区间必须在同一张卡里说清楚，否则「在租占比」会被当成区间利用率。 */}
-      <ListSection title={t("库存与资产（当前快照）")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
+          </> },
+          { key: "locations", label: t("地点维度"), children: <>
+      <ListSection title={t("地点维度")}>
+        <Table<RentalWorkspaceLocationBreakdownRow>
+          size="small"
+          rowKey="locationId"
+          dataSource={data.locationBreakdown}
+          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          locale={{ emptyText: t("当前筛选下没有订单") }}
+          columns={[
+            { title: t("履约地点"), render: (_: unknown, row) => <DataTableText primary={<span title={row.locationId}>{row.locationName}</span>} /> },
+            { title: t("订单量"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> },
+            { title: t("租赁收入"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.rentalRevenue)} /> },
+            { title: t("优惠金额"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.discountTotal)} /> },
+            { title: t("应收金额"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.receivableTotal)} /> },
+            { title: t("异常费用"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.exceptionFeeTotal)} /> }
+          ]}
+        />
+        <div className="muted" >
+          {t("地点名称取下单时快照；主档改名不改写历史订单，因此这里显示的是该地点订单最多的那个名称。逐行订单量与金额相加等于上方总量，可与订单明细对账。")}
+        </div>
+      </ListSection>
+          </> },
+          { key: "inventory", label: t("库存快照"), children: <>
+      <ListSection title={t("库存与资产（当前快照）")}>
         <Alert
           type="warning"
           showIcon
@@ -287,7 +277,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             <Descriptions
               size="small"
               column={1}
-              title={`${t("序列化资产")} (${assets.snapshotAt.slice(0, 19).replace("T", " ")})`}
+              title={`${t("序列化资产")} · ${new Date(assets.snapshotAt).toLocaleString(locale)}`}
               items={[
                 { key: "total", label: t("在册资产数"), children: `${assets.totalCount}（${t("含停用")}）` },
                 { key: "operable", label: t("可运营资产数（分母）"), children: `${assets.operableCount}　= ${t("在册")} - ${t("停用")}` },
@@ -307,7 +297,7 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             <Descriptions
               size="small"
               column={1}
-              title={`${t("数量库存")} (${stock.snapshotAt.slice(0, 19).replace("T", " ")})`}
+              title={`${t("数量库存")} · ${new Date(stock.snapshotAt).toLocaleString(locale)}`}
               items={[
                 { key: "onhand", label: t("在库总量（分母）"), children: stock.onHandTotal },
                 { key: "reserved", label: t("已占用（分子）"), children: stock.reservedTotal },
@@ -329,51 +319,43 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
           </Col>
         </Row>
       </ListSection>
-      {/* 维度表分页展示：地点与客户基数可能很大，一次全渲染会把页面拖死。
-          分页只是展示层的事——数字本身已由服务端聚合，不受翻页影响。 */}
-      <ListSection title={t("地点维度")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-        <Table<RentalWorkspaceLocationBreakdownRow>
+          </> },
+          { key: "exceptions", label: t("异常费用"), children: <>
+      <ListSection title={t("异常费用构成")}>
+        <Table
           size="small"
-          rowKey="locationId"
-          dataSource={data.locationBreakdown}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          locale={{ emptyText: t("当前筛选下没有订单") }}
+          rowKey="type"
+          pagination={false}
+          dataSource={data.exceptionFeeBreakdown}
+          locale={{ emptyText: t("当前经营空间没有异常费用") }}
           columns={[
-            { title: t("履约地点"), render: (_: unknown, row) => <><b>{row.locationName}</b><br /><span className="muted">{row.locationId}</span></> },
-            { title: t("订单量"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> },
-            { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
-            { title: t("优惠金额"), align: "right", render: (_: unknown, row) => money(row.discountTotal) },
-            { title: t("应收金额"), align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
-            { title: t("异常费用"), align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
+            { title: t("类型"), render: (_: unknown, row) => t(exceptionLabels[row.type] ?? row.type) },
+            { title: t("金额"), align: "right", render: (_: unknown, row) => <DataTableMoney formatted={money(row.amount)} /> },
+            { title: t("涉及订单"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> }
           ]}
         />
         <div className="muted" >
-          {t("地点名称取下单时快照；主档改名不改写历史订单，因此这里显示的是该地点订单最多的那个名称。逐行订单量与金额相加等于上方总量，可与订单明细对账。")}
+          {t("一张订单同时逾期与损坏时，「异常订单」按去重后的订单计，因此可能小于各类型涉及订单之和。")}
         </div>
       </ListSection>
-
-      <ListSection title={t("客户维度")} style={{ marginTop: "var(--rental-layout-section-gap)" }}>
-        <Table<RentalWorkspaceCustomerBreakdownRow>
-          size="small"
-          rowKey={(row) => row.customerId ?? `name:${row.customerName}`}
-          dataSource={data.customerBreakdown}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          locale={{ emptyText: t("当前筛选下没有订单") }}
-          columns={[
-            { title: t("客户"), render: (_: unknown, row) => <><b><CustomerPreview customerId={row.customerId} name={row.customerName} type={row.customerType === "corporate" ? "corporate" : row.customerType === "personal" ? "personal" : undefined} snapshot /></b><br /><span className="muted">{row.customerId ?? t("无主档 id")}</span></> },
-            { title: t("类型"), render: (_: unknown, row) => <Tag color={row.customerType === "corporate" ? "purple" : "blue"}>{t(row.customerType === "corporate" ? "企业" : "个人")}</Tag> },
-            { title: t("订单量"), align: "right", dataIndex: "orderCount", render: (value: number) => <AnimatedNumber value={value} /> },
-            { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
-            { title: t("优惠金额"), align: "right", render: (_: unknown, row) => money(row.discountTotal) },
-            { title: t("应收金额"), align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
-            { title: t("异常费用"), align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
-          ]}
-        />
-        <div className="muted" >
-          {t("只展示客户名与类型；手机号、证件号不进报表与导出——报表不是客户资料的第二个出口。")}
-        </div>
+          </> },
+          { key: "statuses", label: t("订单状态"), children: <>
+      <ListSection title={t("订单量按状态")}>
+        {data.statusBreakdown.length ? (
+          <Space wrap>
+            {data.statusBreakdown.map((row) => (
+              <Tag key={row.status} color={orderStatusTagColor(row.status)}>
+                {t(statusLabels[row.status] ?? row.status)}：<AnimatedNumber value={row.count} />
+              </Tag>
+            ))}
+          </Space>
+        ) : (
+          <span className="muted">{t("当前经营空间尚无非草稿订单")}</span>
+        )}
       </ListSection>
+          </> },
+        ]} />
       </div>
-    </>
+    </ContentTransition>
   );
 }

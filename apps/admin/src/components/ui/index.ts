@@ -38,6 +38,8 @@ export type { ActionButtonIntent } from "./actionButtonIntent";
 export { CopyButton } from "./CopyButton";
 export { Alert } from "./Alert";
 export { Progress } from "./Progress";
+export { DonutChart, type DonutChartDatum, type DonutChartProps } from "./DonutChart";
+export { Treemap, type TreemapNode, type TreemapProps } from "./Treemap";
 export { Steps } from "./Steps";
 export { Pagination } from "./Pagination";
 export { DatePicker } from "./DatePicker";

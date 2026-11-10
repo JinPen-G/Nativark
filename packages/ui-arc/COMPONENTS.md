@@ -2,7 +2,9 @@
 
 > 由 `node scripts/audit-admin-components.cjs` 只读扫描生成。引用不等于运行验收，也不等于所有兼容分支均已替换。
 
-本地 123 个公开源码条目 / 263 个唯一文件；Pro 101 个仅有目录元数据；源码校验异常 0 个（2026-10-24 复核，263 文件零异常）。
+本地保留库 manifest 含 123 个公开源码条目 / 263 个唯一文件，Pro 101 个条目只有目录元数据；独立接入的用户组件归档见各 SOURCE 说明。源码校验异常 0 个（2026-11-09 复核，263 文件零异常）。
+
+运营概览示范页复用现有 Button、Segmented、AnimatedCounter、DonutChart、HoverCard 和 Split bar 集成，增加只读原位指标明细、待办预览与固定，保留原分段图及实际详情路由。KPI drilldown Pro 仅为交互选型参考，未取得受保护源码或补造其所需历史序列。改动与登录后待补验边界见[示范页记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09运营概览交互示范页)。
 
 2026-10-08 原源码复核：日期范围选择器的 TSX/CSS 曾偏离下载清单，已从官方 `https://uiarc.dev/r/date-range-picker.json` 重新同步，并补齐该版本新增的 `lib/use-today.ts`。恢复上游月份容器布局与 `AnimatePresence mode="popLayout"`；仅将上游导入路径映射到项目 vendor 别名，不修改样式、动画参数或行为。三个文件均与本次官网响应逐字核对（导入路径及换行规范化后）；manifest 分别记录上游响应哈希、本地规范化哈希及同步日期。
 
@@ -14,7 +16,17 @@
 
 新增页面先查本清单和适配器 API；备用组件按需单独接入并安装其依赖，不要打包整个目录。不要修改 vendor，尺寸与动效保留原设计；颜色、圆角、语言和声音由平台适配层负责。
 
+型号、资产和数量库存卡使用原 UIArc Card / quick look / BottomSheet；图片区域由 [CatalogCardMedia](../../apps/admin/src/features/catalog/CatalogCardMedia.tsx) 复用本地 Product listing Pro 公开编译预览的图片子树与原 CSS，仍走既有鉴权图片读取和 190px contain 图像区。仅接入图片部分，没有接入商城筛选或快速加购；来源、固定哈希及许可边界见 [SOURCE](../../apps/admin/src/features/catalog/archive/product-listing/SOURCE.md)。定价分组、品类属性、库存余额及异常原因来自原业务接口，相关实页验证见[管理后台记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09型号与库存卡片及租户实页补查)。
+
 已导出的平台 API：`Button`、`Form`、`FormField`、`FormSection`、`SidebarMenu`、`UserMenu`、`Modal`、`App`、`Empty`、`Skeleton`、`Radio`、`Collapse`、`Dropdown`、`Drawer`、`Tabs`、`Segmented`、`Tooltip`、`InfoPopover`、`Input`、`SearchField`、`DataTableLeading`、`DataTableMoney`、`dataTableSelectionColumn`、`DataTableSelectionSummary`、`useDataTableSelection`、`DataTableStatus`、`DataTableNote`、`DataTableStatusTone`、`Select`、`Checkbox`、`Slider`、`PasswordField`、`PasswordStrength`、`PhoneInput`、`FeedbackProvider`、`useFeedback`、`ConfirmAction`、`Switch`、`ActionButton`、`SaveButton`、`CopyButton`、`Alert`、`Progress`、`Steps`、`Pagination`、`DatePicker`、`ColorPicker`、`RichTextEditor`、`Upload`、`Table`、`ListSection`、`ListFilters`、`useListFilter`、`ListFilterBar`、`ListFilterItem`、`AnimatedTable`、`DataTable`、`DataTableColumnHeader`、`DataTableViewOptions`、`DataTableSortList`、`DataTableToolbar`、`TableRefreshProvider`、`DataTableRowActions`、`DataTableRowAction`、`TimePicker`、`TimeInput`、`FileUpload`、`FileUploadItem`、`FileUploadProps`。
+
+## 2026-11-09 运营概览与经营报表
+
+`DonutChart` 与 `Treemap` 已从统一 UI 入口导出。两者由保留的公开源码派生，继续使用原 CSS、公共类型、几何、选择/下钻与动画，只补中文界面和辅助信息；业务标签与金额不改写。来源见 [DonutChart](../../apps/admin/src/components/ui/donut-chart-source.json) 和 [Treemap](../../apps/admin/src/components/ui/treemap-source.json)。英文原版/派生的5种环形图及4种树图 SSR 输出逐字一致，原 vendor 未修改。
+
+概览订单/库存、报表库存/费用使用 [Split bar Pro 的本地完整接入](../../apps/admin/src/components/insights/split-bar/SOURCE.md)。它来自用户提供的公开编译预览还原，保留全部原 CSS、几何、图例隐藏/恢复、键盘及动效参数，不声称官方受保护付费源码。唯一交互修复是稳定外置标签槽，防止悬停小分类时图例跳走而漏接鼠标点击。页面保留全量事实，图中隐藏不会改总订单数、库存或费用；刷新后不允许隐藏全部剩余分类。
+
+Metrics dashboard Pro 仅用于选型和布局参考；当前正式接口无逐日序列，不接示例趋势。客户/地点的贡献切换、分类下钻、报表明细页签和响应式布局的实页证据见[管理后台记录](../../docs/管理后台/管理后台-开发记录.md#2026-11-09运营概览与经营报表分析视图)。原筛选、CSV、权限、币种及业务动作契约保留。
 
 ## 2026-10-29 业务 Copilot 预览
 
@@ -146,11 +158,11 @@
 | date-range-picker | 已引用（可能含兼容分支） | `components/ui/DatePicker.tsx` |
 | color-picker | 已引用（可能含兼容分支） | `components/ui/ColorPicker.tsx` |
 | line-chart | 已下载备用 | — |
-| donut-chart | 已下载备用 | — |
+| donut-chart | 已适配：原CSS/几何/动效，界面本地化 | `components/ui/DonutChart.tsx` → `components/insights/OperationalCharts.tsx` |
 | streamgraph | 已下载备用 | — |
 | brush-chart | 已下载备用 | — |
 | ridgeline | 已下载备用 | — |
-| treemap | 已下载备用 | — |
+| treemap | 已适配：原CSS/几何/下钻，界面本地化 | `components/ui/Treemap.tsx` → `components/insights/ContributionExplorer.tsx` |
 | waffle-chart | 已下载备用 | — |
 | slope-chart | 已下载备用 | — |
 | announcement-bar | 已下载备用 | — |

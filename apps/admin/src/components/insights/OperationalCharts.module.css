@@ -1,8 +1,13 @@
 .page { display: flex; flex-direction: column; gap: var(--rental-insight-gap); min-width: 0; }
+.overviewLayout, .analysisLayout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: var(--rental-insight-gap); align-items: start; }
+.analysisLayout { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+.insightColumn { display: grid; align-content: start; gap: var(--rental-insight-gap); min-width: 0; }
+.overviewLayout > .insightColumn:only-child { grid-column: 1 / -1; }
 .grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--rental-insight-gap); align-items: start; }
 .equal { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--rental-insight-gap); }
 .panel { min-width: 0; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); background: var(--surface); color: var(--rental-content-primary); overflow: clip; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; padding: var(--rental-insight-panel-padding); padding-block-end: var(--space-3); }
+.heading > div:first-child { flex: 1; min-width: 0; }
 .heading h2 { margin: 0; font-size: var(--rental-typography-section-title-size); line-height: var(--rental-typography-section-title-line-height); font-weight: var(--rental-typography-section-title-weight); color: var(--rental-content-primary); }
 .heading p { margin: var(--space-1) 0 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-typography-meta-line-height); }
 .body { padding: 0 var(--rental-insight-panel-padding) var(--rental-insight-panel-padding); min-width: 0; }
@@ -14,10 +19,9 @@
 .metrics dd { font-size: var(--rental-typography-metric-size); line-height: var(--rental-typography-metric-line-height); font-weight: 500; margin: var(--space-2) 0; color: var(--rental-content-primary); font-variant-numeric: tabular-nums; }
 .metrics p { margin: 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-list-secondary-line-height); }
 .ranking { margin: 0; padding: 0; list-style: none; }
-.ranking li { display: flex; gap: var(--space-3); padding-block: var(--space-3); }
-.ranking li + li { border-top: 1px solid var(--rental-content-divider); }
-.rank { color: var(--rental-content-quiet); font-size: var(--rental-list-secondary-size); padding-block-start: 2px; font-variant-numeric: tabular-nums; }
-.rankBody { flex: 1; min-width: 0; }
+.ranking li { display: flex; gap: var(--space-2); padding-block: var(--space-1); }
+.rank { color: var(--rental-content-quiet); font-size: var(--rental-list-secondary-size); padding-block-start: var(--space-2); font-variant-numeric: tabular-nums; }
+.rankBody { position: relative; isolation: isolate; flex: 1; min-width: 0; padding: var(--space-2); }
 .rankTitle { display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
 .rankTitle > :first-child { min-width: 0; overflow-wrap: anywhere; }
 .rankTitle strong { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -25,8 +29,8 @@
 .rankTitle button:hover { text-decoration: underline; text-underline-offset: 3px; }
 .rankTitle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .rankBody p { font-size: var(--rental-list-secondary-size); line-height: var(--rental-list-secondary-line-height); margin: var(--space-1) 0 0; color: var(--rental-content-secondary); }
-.track { height: 4px; background: var(--surface-muted); overflow: hidden; border-radius: var(--radius-pill); margin-top: var(--space-2); }
-.track > span { display: block; height: 100%; background: var(--rental-content-primary); opacity: .72; border-radius: inherit; transition: width 240ms var(--ease-standard); }
+.track { position: absolute; inset: 0; z-index: -1; overflow: hidden; border-radius: var(--rental-ui-radius-sm); }
+.track > span { display: block; height: 100%; background: var(--rental-content-primary); opacity: .06; border-radius: inherit; transition: width 240ms var(--ease-standard); }
 .feed { display: flex; flex-direction: column; }
 .feedItem { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding-block: var(--space-4); border-bottom: 1px solid var(--rental-content-divider); }
 .feedItem:last-child { border: 0; padding-bottom: 0; }
@@ -38,6 +42,44 @@
 .facts dt { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
 .facts dd { color: var(--rental-content-primary); font-size: var(--rental-typography-section-title-size); font-weight: 500; margin: var(--space-1) 0 0; }
 .note { margin: var(--space-3) 0 0; color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-typography-meta-line-height); }
+.inventory { display: grid; gap: var(--space-4); min-width: 0; }
+.inventory > :first-child { justify-self: start; max-width: 100%; }
+.snapshotFacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); margin: var(--space-4) 0 0; padding-block-start: var(--space-4); border-block-start: 1px solid var(--rental-content-divider); }
+.inventory .snapshotFacts { margin-block-start: 0; }
+.snapshotFacts > div { min-width: 0; }
+.snapshotFacts dt, .inlineFacts dt { color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); line-height: var(--rental-list-secondary-line-height); }
+.snapshotFacts dd, .inlineFacts dd { margin: var(--space-2) 0 0; color: var(--rental-content-primary); font-size: var(--rental-typography-section-title-size); font-weight: 500; line-height: var(--rental-typography-section-title-line-height); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.snapshotFacts small, .inlineFacts small { font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); font-weight: 400; }
+.snapshotTime { margin: 0; font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); line-height: var(--rental-list-secondary-line-height); }
+.chartFilter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); font-size: var(--rental-list-secondary-size); color: var(--rental-content-secondary); }
+.explorerTools { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-block-end: var(--space-4); }
+.explorerTools > :last-child { max-width: 100%; }
+.explorerFooter { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); padding-block-start: var(--space-3); margin-block-start: var(--space-3); color: var(--rental-content-secondary); border-block-start: 1px solid var(--rental-content-divider); font-size: var(--rental-list-secondary-size); line-height: var(--rental-list-secondary-line-height); }
+.receivable { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-1) var(--space-3); }
+.receivable > span { font-size: var(--rental-list-primary-size); color: var(--rental-content-secondary); }
+.receivable > strong { font-size: var(--rental-typography-metric-size); font-weight: var(--rental-typography-metric-weight); line-height: var(--rental-typography-metric-line-height); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.inlineFacts { display: flex; flex-wrap: wrap; gap: var(--space-6); margin: var(--space-4) 0; padding-block-start: var(--space-4); border-block-start: 1px solid var(--rental-content-divider); }
+.inlineFacts:first-child { margin-block-start: 0; padding-block-start: 0; border: 0; }
+.feeRows { display: grid; margin: var(--space-4) 0 0; }
+.feeRows > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-3); border-block-start: 1px solid var(--rental-content-divider); }
+.feeRows dt { color: var(--rental-content-primary); font-size: var(--rental-list-primary-size); line-height: var(--rental-list-primary-line-height); }
+.feeRows dt span { display: block; margin-block-start: var(--space-1); color: var(--rental-content-secondary); font-size: var(--rental-list-secondary-size); }
+.feeRows dd { margin: 0; font-size: var(--rental-list-primary-size); font-weight: 500; font-variant-numeric: tabular-nums; }
+.widePanel { grid-column: 1 / -1; }
+.feeAnalysis { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); align-items: start; gap: var(--space-6); }
+.feeAnalysis > * { min-width: 0; }
+.feeAnalysis .feeRows { margin: 0; }
+.warning { margin: 0; color: var(--rental-status-warning-ink); font-size: var(--rental-list-secondary-size); }
+.detailViews { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); min-width: 0; margin-block-start: var(--space-4); }
+.detailViews > * { min-width: 0; }
+.detailViews[hidden] { display: none; }
+.detailViews > .snapshotFacts { margin: 0; padding-block: var(--space-3); border-block: 1px solid var(--rental-content-divider); }
+/* The full original Pro chart inherits the admin theme and typography. */
+:global(.rental-split-bar) { min-width: 0; --font-body: var(--rental-typography-font-family); }
+@container admin-content (max-width: 1100px) { .analysisLayout, .feeAnalysis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container admin-content (max-width: 840px) { .overviewLayout, .analysisLayout { grid-template-columns: minmax(0, 1fr); } }
+@container admin-content (max-width: 840px) { .feeAnalysis { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); } }
+@container admin-content (max-width: 560px) { .snapshotFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .equal { grid-template-columns: 1fr; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metrics > div { padding: var(--space-4); } .metrics > div:nth-child(odd) { border-inline-start: 0; } .metrics > div:nth-child(n+3) { border-top: 1px solid var(--rental-content-divider); } .feedItem { gap: var(--space-2); } }
 :global([data-reduced-motion="true"]) .track > span { transition: none; }

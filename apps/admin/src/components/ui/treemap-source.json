@@ -1,0 +1,11 @@
+{
+  "source": "https://uiarc.dev/components/treemap",
+  "upstreamFile": "packages/ui-arc/vendor/registry/components/treemap/treemap.tsx",
+  "upstreamSha256": "6210275f25caba86ce4159f5ee919c2f70b3de4daceb93e68d3b5cf9cd4b080d",
+  "license": "UIArc MIT; packages/ui-arc/LICENSE",
+  "adaptations": [
+    "Reuse original shared public props and CSS",
+    "Localize path, share, keyboard instructions and accessible table headings with current admin locale",
+    "Keep tile layout, branches, source labels, values, focus and motion unchanged"
+  ]
+}

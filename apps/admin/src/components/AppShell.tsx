@@ -36,6 +36,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 function AppShellLayout({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
+  const { pathname } = useLocation();
+  const tenantConsole = useAuthStore(state => Boolean(state.user && !state.user.isSaasAdmin)) && pathname !== APP_ROUTES.aiOperator.path;
   if (rentalDesktopHost()) {
     return <div className="desktop-business-content" style={{ height: "100vh", overflow: "auto", padding: "24px" }}>
       <main className="content-canvas">{children}</main>
@@ -43,7 +45,7 @@ function AppShellLayout({ children }: { children: ReactNode }) {
     </div>;
   }
   // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
-  return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
+  return <TooltipProvider><div className="app-frame-stage" data-tenant-console={tenantConsole || undefined}><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
     <ShellContents>{children}</ShellContents>
   </SidebarProvider></div></div></TooltipProvider>;
 }
