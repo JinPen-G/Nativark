@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-09",
+  "baseline": "ba107abe8b4a42bdc44efe2caaddfa44c651a8a9",
+  "purpose": "第二轮补充确认前六份现行文档的工作区原文字节；包含本会话第一轮未提交成果，不是该Git提交中的文件版本；相对链接按source解释",
+  "files": [
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-需求.md",
+      "snapshot": "平台Core接入-需求.md",
+      "sha256": "083335d6a123bae1e08fa37cfc3802c793ca85a051d8d1a78ce3618bab01b300",
+      "bytes": 28422
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发任务.md",
+      "snapshot": "平台Core接入-开发任务.md",
+      "sha256": "1daa2e8d63db1c281d1ef7aac5fca77e15120154a849de34ff16d265b3f27395",
+      "bytes": 40584
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发记录.md",
+      "snapshot": "平台Core接入-开发记录.md",
+      "sha256": "9ec663e08bb652fb2e8c0caf40fc88028897b63e533a3ca5aa0a7cdc1bb9d096",
+      "bytes": 15228
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-协作接续.md",
+      "snapshot": "平台Core接入-协作接续.md",
+      "sha256": "0b679ed2caca0473fa3f5aefaf81f3ce27f7de98158dee7f99ce3982308fedf3",
+      "bytes": 4105
+    },
+    {
+      "source": "docs/平台底座/README.md",
+      "snapshot": "平台底座-README.md",
+      "sha256": "c882ca0f8242dad8a6ae6d21a5fd95d600f71f52c471b44be7e73c764625684f",
+      "bytes": 2506
+    },
+    {
+      "source": "docs/平台底座/未来规划/平台底座-通用化与开源方案.md",
+      "snapshot": "平台底座-通用化与开源方案.md",
+      "sha256": "818ec926564fbe7853355fc66424e981157fe572d921e1913235f1a2e6dd6c9a",
+      "bytes": 9775
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-09",
+  "baseline": "44129cd009e5e5389cfc66a9a730eb0a398c080a",
+  "purpose": "AI开发友好底座需求澄清前的六份现行文档原文字节保全；原链接按source路径解释",
+  "files": [
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-需求.md",
+      "snapshot": "平台Core接入-需求.md",
+      "sha256": "97b0ecfb759e44beaddcc1ca1a0306f54b6eb3eff0e17ade7115fb3a7bb3b0f6",
+      "bytes": 20725
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发任务.md",
+      "snapshot": "平台Core接入-开发任务.md",
+      "sha256": "b106ac07c6c2d64bf3bf3952ce937bb4ca4a933e55f8ab4ccae4a7e6dd9abc14",
+      "bytes": 32051
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-开发记录.md",
+      "snapshot": "平台Core接入-开发记录.md",
+      "sha256": "85e6b3d811506f8702b90417cf480c1ce17da80b7e255dda5944351fce3caead",
+      "bytes": 10034
+    },
+    {
+      "source": "docs/平台底座/Core接入/平台Core接入-协作接续.md",
+      "snapshot": "平台Core接入-协作接续.md",
+      "sha256": "33a1d067cec5c8bd176a78ce119f34ba63c37ef0116e1c40b0c4e830a57f04b5",
+      "bytes": 3067
+    },
+    {
+      "source": "docs/平台底座/README.md",
+      "snapshot": "平台底座-README.md",
+      "sha256": "e6b8b9fa0159ace008ad67c0f6031c7c9fac997170bc6f8d0c8ff241260dd90a",
+      "bytes": 2146
+    },
+    {
+      "source": "docs/平台底座/未来规划/平台底座-通用化与开源方案.md",
+      "snapshot": "平台底座-通用化与开源方案.md",
+      "sha256": "2054d267027c8067de20b310f4202756946938a52b41c4b51e200f8042b032f9",
+      "bytes": 7301
+    }
+  ]
+}
