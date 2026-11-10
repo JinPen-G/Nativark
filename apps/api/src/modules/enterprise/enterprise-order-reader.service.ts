@@ -16,7 +16,6 @@ import { enterpriseJson } from "./enterprise-command.service";
 type OriginalMembership = {
   bookingIdentity: unknown;
   personalCustomerId: unknown;
-  personalCustomerName: unknown;
   corporateCustomerId: unknown;
   corporateCustomerName: unknown;
   corporateMembershipId: unknown;
@@ -25,7 +24,7 @@ type OriginalMembership = {
 };
 type OrderRow = {
   id: string; tenantId: string; workspaceId: string; orderNo: string; group: EnterpriseOrderGroup;
-  categoryCode: string; status: string; customerType: string; customerName: string; customerId: string | null; contractSubjectCustomerId: string | null;
+  categoryCode: string; status: string; customerType: string; customerName: string; employeeName: string | null; customerId: string | null; contractSubjectCustomerId: string | null;
   payerSubjectCustomerId: string | null; userSubjectCustomerId: string | null; membership: OriginalMembership | string;
   fulfillmentMode: string; startAt: Date; endAt: Date; effectiveEndAt: Date | null;
   actualRentalStartAt: Date | null; carrierRentalDueAt: Date | null; createdAt: Date; updatedAt: Date;
@@ -99,12 +98,36 @@ export class EnterpriseOrderReaderService {
       AND STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.enterpriseBasis.acknowledgedAt')),'%Y-%m-%dT%H:%i:%s.%fZ')<=o.createdAt)`;
   }
 
+  private employeeName() {
+    const personId = Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerId'))`;
+    const name = Prisma.sql`JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName'))`;
+    const originalPersonal = Prisma.sql`CAST(o.customerType AS BINARY)=CAST('personal' AS BINARY)
+      AND CAST(o.customerId AS BINARY)=CAST(o.userSubjectCustomerId AS BINARY)`;
+    // Search and count must use the exact public name projection. A snapshot
+    // without its original user linkage cannot reveal a hidden name by a hit.
+    // Binary comparisons keep persisted IDs exact under every database collation.
+    return Prisma.sql`CASE
+      WHEN JSON_TYPE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerId'))='STRING'
+        AND REGEXP_LIKE(${personId},'^[a-zA-Z0-9._:-]{1,191}$','c') THEN
+        CASE WHEN CAST(o.userSubjectCustomerId AS BINARY)=CAST(${personId} AS BINARY)
+          OR (o.contractSubjectCustomerId IS NULL AND o.payerSubjectCustomerId IS NULL AND o.userSubjectCustomerId IS NULL
+            AND CAST(o.customerId AS BINARY)=CAST(${personId} AS BINARY)) THEN
+          CASE WHEN JSON_TYPE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName'))='STRING'
+              AND CHAR_LENGTH(${name})<=191 THEN ${name}
+            WHEN (JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName') IS NULL
+              OR JSON_TYPE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName'))='NULL')
+              AND ${originalPersonal} AND CAST(o.customerId AS BINARY)=CAST(${personId} AS BINARY) THEN o.customerName
+          END
+        END
+      WHEN ${originalPersonal} THEN o.customerName
+    END`;
+  }
+
   private predicate(context: ClientRequestContext, corporateId: string, group?: EnterpriseOrderGroup, keyword?: string) {
     const paid = this.paid(corporateId), benefit = this.personalBenefit(corporateId);
     const responsibility = group === "enterprise_paid" ? paid : group === "personal_benefit" ? benefit : Prisma.sql`(${paid} OR ${benefit})`;
     const search = keyword ? Prisma.sql`AND (LOCATE(${keyword},o.orderNo)>0
-      OR LOCATE(${keyword},JSON_UNQUOTE(JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName')))>0
-      OR (o.customerType='personal' AND o.customerId=o.userSubjectCustomerId AND LOCATE(${keyword},o.customerName)>0)
+      OR LOCATE(${keyword},${this.employeeName()})>0
       OR EXISTS (SELECT 1 FROM rental_order_lines line WHERE line.orderId=o.id AND LOCATE(${keyword},line.itemGroupName)>0))` : Prisma.empty;
     // The same visibility predicate applies before count, search and pagination.
     // Historical employees need no present-day relationship to remain in the index.
@@ -117,9 +140,9 @@ export class EnterpriseOrderReaderService {
     return Prisma.sql`o.id,o.tenantId,o.workspaceId,o.orderNo,o.categoryCode,o.status,o.customerType,o.customerName,o.customerId,
       o.contractSubjectCustomerId,o.payerSubjectCustomerId,o.userSubjectCustomerId,
       CASE WHEN ${this.paid(corporateId)} THEN 'enterprise_paid' ELSE 'personal_benefit' END AS \`group\`,
+      ${this.employeeName()} AS employeeName,
       JSON_OBJECT('bookingIdentity',JSON_EXTRACT(o.membershipSnapshot,'$.bookingIdentity'),
         'personalCustomerId',JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerId'),
-        'personalCustomerName',JSON_EXTRACT(o.membershipSnapshot,'$.personalCustomerName'),
         'corporateCustomerId',JSON_EXTRACT(o.membershipSnapshot,'$.corporateCustomerId'),
         'corporateCustomerName',JSON_EXTRACT(o.membershipSnapshot,'$.corporateCustomerName'),
         'corporateMembershipId',JSON_EXTRACT(o.membershipSnapshot,'$.corporateMembershipId'),
@@ -140,7 +163,7 @@ export class EnterpriseOrderReaderService {
 
   private text(value: unknown, maximum = 191): string | null {
     if (value === null || value === undefined) return null;
-    if (typeof value !== "string" || value.length > maximum) throw new ServiceUnavailableException("原订单展示字段不可核对");
+    if (typeof value !== "string" || [...value].length > maximum) throw new ServiceUnavailableException("原订单展示字段不可核对");
     return value;
   }
 
@@ -191,9 +214,8 @@ export class EnterpriseOrderReaderService {
     const personId = reference(snapshot.personalCustomerId) ? snapshot.personalCustomerId : originalPersonal ? row.customerId : null;
     const legacySubjects = row.contractSubjectCustomerId === null && row.payerSubjectCustomerId === null && row.userSubjectCustomerId === null;
     const originalUser = personId && (row.userSubjectCustomerId === personId || legacySubjects && row.customerId === personId);
-    const userName = this.text(snapshot.personalCustomerName) ?? (originalPersonal && row.customerId === personId ? this.text(row.customerName) : null);
     return { orderId: row.id, orderNo: row.orderNo, group: row.group, categoryCode: row.categoryCode, status: row.status.toLowerCase(),
-      employeeCustomerId: originalUser ? personId : null, employeeName: originalUser ? userName : null,
+      employeeCustomerId: originalUser ? personId : null, employeeName: originalUser ? this.text(row.employeeName) : null,
       corporateMembershipId: snapshot.corporateCustomerId === corporateId && reference(snapshot.corporateMembershipId) ? snapshot.corporateMembershipId : null,
       startAt: row.startAt.toISOString(), endAt: row.endAt.toISOString(), effectiveEndAt: row.effectiveEndAt?.toISOString() ?? null,
       currentReturnAt: rentalOrderDueAt(row),
