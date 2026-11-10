@@ -7,10 +7,12 @@ import { getRequestUserId, requireRequestUserId } from "../../common/request-ide
 import { optionalUsageReading, usageDelta } from "./rental-usage-reading";
 import { hasWholeEarlyReturnReduction } from "./rental-early-return";
 import { quoteRentalLineSource } from "./rental-quote-line-source";
+import { inventoryBasisGroups, assertRentalInventoryBasis } from "./rental-quote-inventory-basis";
 import { selectDamageWaiver } from "./rental-damage-waiver";
 import { inspectionClosureError } from "./rental-inspection-customer-response";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
-import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements } from "./rental-exchange-inspection";
+import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements, projectExchangeInspectionTemplates } from "./rental-exchange-inspection";
+import type { RentalOrderInspectionBasisFacts } from "@rental-os/shared";
 import { assertInspectionObservations } from "./rental-inspection-observation";
 import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental-inspection-evidence";
 import { frozenFileContentHash } from "../integrations/file-content-binding";
@@ -79,6 +81,7 @@ import {
   type RentalPricingRate,
   type RentalRuleConfig,
   type RentalQuoteSnapshotV1,
+  type RentalQuoteInventoryBasis,
   type RentalQuoteRequest,
   type CustomerOrderSubjects,
   type RentalReservation,
@@ -132,7 +135,8 @@ import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBloc
 import { RentalFundingService } from "./rental-funding.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
 import { RentalCoreConfigRepository, parseRentalItemGroupPageQuery, type RentalConfigStore, type RentalConfigTx,
-  type RentalItemGroupPageQuery, type RentalItemGroupPage } from "./rental-core-config.repository";
+  type RentalItemGroupPageQuery, type RentalItemGroupPage, RENTAL_OPENING_TERMINOLOGY_FIELDS,
+  type RentalOpeningConfigurationFacts } from "./rental-core-config.repository";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import type { RentalFulfillmentRequirement } from "./rental-fulfillment-admission";
 import { requestFingerprint } from "./rental-idempotency.repository";
@@ -143,6 +147,7 @@ import { normalizedRentalAttributeValue, validateRentalCategoryAttributes, recon
 import {
   RentalCoreFactRepository,
   type ActiveReservationRow,
+  type RentalAvailabilitySnapshot,
   type AssetStatusChange,
   type InventoryLockTarget,
   type RentalFactTx,
@@ -294,10 +299,9 @@ function defaultBusinessSettings(
  * 仍会显示已经不适用的计价/履约选项，而且报价上下文也可能继续使用它们。这里仅
  * 过滤运行设置，不改历史订单、报价或价格版本快照；运营下次保存时自然持久化新值。
  */
-function normalizeBusinessSettingsForCategory(
-  settings: TenantRentalBusinessSettings,
-  definition: RentalCategoryDefinition
-): TenantRentalBusinessSettings {
+function normalizeBusinessOptionsForCategory(
+  settings: RentalOpeningConfigurationFacts['settings'], definition: RentalCategoryDefinition
+) {
   const supportedUnits = new Set(definition.businessModel.pricingUnits);
   const configuredUnits = new Set((settings.pricing.enabledUnits ?? []).filter((unit) => supportedUnits.has(unit)));
   const enabledUnits = definition.businessModel.pricingUnits.filter((unit) => configuredUnits.has(unit));
@@ -310,7 +314,11 @@ function normalizeBusinessSettingsForCategory(
   const configuredModes = new Set((settings.fulfillment.enabledModes ?? []).filter((mode) => supportedModes.has(mode)));
   const enabledModes = definition.businessModel.fulfillmentModes.filter((mode) => configuredModes.has(mode));
   const safeModes = enabledModes.length ? enabledModes : [definition.businessModel.fulfillmentModes[0]];
+  return { enabledUnits: safeUnits, defaultUnit, enabledModes: safeModes };
+}
 
+function normalizeBusinessSettingsForCategory(settings: TenantRentalBusinessSettings, definition: RentalCategoryDefinition): TenantRentalBusinessSettings {
+  const { enabledUnits: safeUnits, defaultUnit, enabledModes: safeModes } = normalizeBusinessOptionsForCategory(settings, definition);
   return {
     ...settings,
     pricing: {
@@ -724,6 +732,67 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
     };
   }
+  /** Current R0 quote preparation context from normalized, bounded tables.
+   * This does not invoke state/cache/seed/factContext or initialize prices;
+   * the existing R1 resolver and quote commit remain separate and unchanged. */
+  async readQuoteConfiguration(tenantId: string) {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!identity?.userId || !workspaceId || identity.tenantId !== tenantId || identity.isSaasAdmin)
+      throw new ForbiddenException('报价只读配置缺少当前租户及经营空间');
+    if (typeof this.configStore.readQuoteConfigurationFacts !== 'function') throw new ServiceUnavailableException('报价持久只读配置端口不可用');
+    const binding = requestFingerprint(identity), facts = await this.configStore.readQuoteConfigurationFacts(tenantId, workspaceId);
+    if (facts.tenantId !== tenantId || facts.workspaceId !== workspaceId || !facts.profile || !facts.settings
+      || facts.profile.tenantId !== tenantId || facts.settings.tenantId !== tenantId
+      || facts.profile.categoryCode !== facts.categoryCode || facts.settings.categoryCode !== facts.categoryCode)
+      throw new ConflictException('报价持久配置来源变化');
+    const category = await this.effectiveCategory(tenantId, facts.categoryCode);
+    // Apply the same existing option normalization and compatible terminology
+    // merge only AFTER a persisted profile/settings exists. Never invent either.
+    const settings = normalizeBusinessSettingsForCategory(facts.settings, category);
+    const profile = { ...facts.profile, terminology: { ...category.terminology, ...facts.profile.terminology,
+      navigationLabels: { ...category.terminology.navigationLabels, ...facts.profile.terminology.navigationLabels } } };
+    if (!settings.payment.enabledMethods?.length) settings.payment = { ...settings.payment, enabledMethods: [...DEFAULT_RENTAL_PAYMENT_METHODS] };
+    if (requestFingerprint(getRequestIdentity()) !== binding) throw new ForbiddenException('报价配置读取期间授权范围变化');
+    return { tenantId, workspaceId, profile, category, settings, groups: facts.groups, pricingGroups: facts.pricingGroups,
+      couponTemplates: facts.couponTemplates, locations: facts.locations, operators: facts.operators };
+  }
+
+  /** R0 report metadata, observed under the existing report Guard/ALS. Does not
+   * initialize configuration or read a quote/price/inventory context. */
+  async readReportConfiguration(tenantId: string): ReturnType<NonNullable<RentalConfigStore['readReportConfigurationFacts']>> {
+    // isPlatformAdmin means tenant administrator in the original Guard, not
+    // SaaS. It supplies no tenant/space grant independently of that Guard/ALS.
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!workspaceId || !identity?.userId || identity.tenantId !== tenantId || identity.isSaasAdmin)
+      throw new ForbiddenException('经营报表配置缺少当前租户及经营空间');
+    if (typeof this.configStore.readReportConfigurationFacts !== 'function') throw new ServiceUnavailableException('经营报表持久配置端口不可用');
+    const binding = requestFingerprint(identity);
+    const facts = await this.configStore.readReportConfigurationFacts(tenantId, workspaceId);
+    if (facts.tenantId !== tenantId || facts.workspaceId !== workspaceId) throw new ConflictException('经营报表配置来源变化');
+    if (requestFingerprint(getRequestIdentity()) !== binding) throw new ForbiddenException('经营报表配置读取期间授权范围变化');
+    return facts;
+  }
+
+  /** Opening-only persisted page and selected fields. No state/seed/cache scan
+   * or quote initialization; option normalization is shared with manual reads. */
+  async readOpeningConfiguration(tenantId: string): Promise<RentalOpeningConfigurationFacts & { categoryVersion: string }> {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!workspaceId || identity?.tenantId !== tenantId) throw new ForbiddenException('开业配置缺少当前租户或经营空间');
+    if (typeof this.configStore.readOpeningConfigurationFacts !== 'function') throw new ServiceUnavailableException('开业配置持久投影不可用');
+    const binding = requestFingerprint(identity);
+    const facts = await this.configStore.readOpeningConfigurationFacts(tenantId, workspaceId);
+    if (facts.tenantId !== tenantId || facts.workspaceId !== workspaceId) throw new ConflictException('开业配置来源变化');
+    const definition = await this.effectiveCategory(tenantId, facts.categoryCode);
+    const options = normalizeBusinessOptionsForCategory(facts.settings, definition);
+    const profile = facts.profile ? { ...facts.profile, terminology: Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field =>
+      [field, facts.profile!.terminology[field] ?? definition.terminology[field]])) } : null;
+    if (getRequestWorkspaceId() !== workspaceId || requestFingerprint(getRequestIdentity()) !== binding)
+      throw new ForbiddenException('开业配置读取期间授权范围变化');
+    return { ...facts, profile, categoryVersion: definition.version,
+      settings: { ...facts.settings, pricing: { ...facts.settings.pricing, enabledUnits: options.enabledUnits, defaultUnit: options.defaultUnit },
+        fulfillment: { enabledModes: options.enabledModes } } };
+  }
+
   getBusinessSettings(tenantId: string) {
     const state = this.state(tenantId);
     const settings = normalizeBusinessSettingsForCategory(
@@ -1101,7 +1170,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (this.workspaceOf(tenantId) !== workspaceId || result.rows.length > query.limit
       || result.rows.some(row => row.tenantId !== tenantId) || result.source !== 'persisted_workspace_configuration')
       throw new ConflictException('商品分页读取来源变化');
-    return { ...result, rows: result.rows.map(row => this.publicItemGroup(row)) };
+    return result;
   }
 
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
@@ -1580,6 +1649,53 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return (await this.listStockBalances(tenantId)).find((row) => row.id === saved.id)!;
   }
 
+  /** R0 availability reads persisted configuration and bounded minimal stock
+   * facts only. It never initializes a tenant or writes sample inventory. The
+   * original arithmetic is shared; final order admission still locks/rechecks. */
+  async readAvailability(tenantId: string, value: RentalAvailabilityRequest): Promise<RentalAvailabilityResult> {
+    const input = structuredClone(value), identity = getRequestIdentity();
+    if (!identity?.workspaceId || !identity.userId || identity.tenantId !== tenantId || identity.isSaasAdmin)
+      throw new ForbiddenException('库存只读查询缺少当前租户及经营空间');
+    const workspaceId = identity.workspaceId, binding = requestFingerprint(identity);
+    const current = () => {
+      if (requestFingerprint(getRequestIdentity()) !== binding) throw new ForbiddenException('库存读取身份或范围变化');
+    };
+    const resourceId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 4
+      || !resourceId(input.locationId) || typeof input.startAt !== 'string' || typeof input.endAt !== 'string'
+      || !Array.isArray(input.lines) || !input.lines.length || input.lines.length > 100
+      || Array.from(input.lines).some(line => !line || typeof line !== 'object' || Array.isArray(line)
+        || Object.keys(line).length !== 2 || !resourceId(line.itemGroupId)
+        || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 100000))
+      throw new BadRequestException('库存只读查询明细无效或超出上限');
+    this.validatePeriod(input.startAt, input.endAt);
+    if (!this.configStore.listItemGroupsPage || !this.factStore.readAvailabilitySnapshot)
+      throw new ServiceUnavailableException('库存持久只读端口不可用');
+    const locationIds = getRequestStaffLocationIds();
+    if (locationIds !== undefined && !locationIds.includes(input.locationId)) throw new ForbiddenException('库存地点不可访问');
+    await this.fulfillmentAdmission(tenantId, [{ locationId: input.locationId }]); current();
+    const pending = [...new Set(input.lines.map(line => line.itemGroupId))], groups = new Map<string, RentalItemGroupPage['rows'][number]>();
+    // Resolve only requested groups and their required bundle dependencies. A
+    // missing/oversized persisted configuration is not a seeded substitute.
+    for (let index = 0; index < pending.length; index++) {
+      if (pending.length > 100) throw new ServiceUnavailableException('套装库存依赖超出只读上限');
+      const groupId = pending[index], query = parseRentalItemGroupPageQuery({ itemGroupId: groupId, limit: 1 });
+      current();
+      const page = structuredClone(await this.configStore.listItemGroupsPage(tenantId, workspaceId, query)); current();
+      if (page.source !== 'persisted_workspace_configuration' || page.truncated || page.rows.length !== 1
+        || page.rows[0].id !== groupId || page.rows[0].tenantId !== tenantId) throw new NotFoundException('商品库存配置缺失或来源无效');
+      const group = page.rows[0]; groups.set(groupId, group);
+      if (group.inventoryMode === RentalInventoryMode.Bundle) for (const component of group.bundleComponents.filter(row => !row.optional)) {
+        if (!Number.isSafeInteger(component.quantity) || component.quantity <= 0) throw new ConflictException('套装库存组成无效');
+        if (!pending.includes(component.itemGroupId)) pending.push(component.itemGroupId);
+      }
+    }
+    current();
+    const snapshot = await this.factStore.readAvailabilitySnapshot(tenantId, workspaceId, { locationId: input.locationId, itemGroupIds: pending });
+    current();
+    return this.computeAvailability({ itemGroups: [...groups.values()] }, snapshot, input);
+  }
+
   async availability(tenantId: string, input: RentalAvailabilityRequest): Promise<RentalAvailabilityResult> {
     const state = await this.factContext(tenantId);
     this.validatePeriod(input.startAt, input.endAt);
@@ -1592,8 +1708,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * RC-03：在订单事务内锁定实际依赖的基础库存并重新计算可用量。
    * 事务外的 availability 只负责快速反馈，最终是否可下单以这里的锁后重算为准。
    */
-  async assertAvailabilityWithLocks(tenantId: string, input: RentalAvailabilityRequest, tx: RentalFactTx, rule?: RentalRuleConfig) {
-    const state = this.state(tenantId);
+  async assertAvailabilityWithLocks(tenantId: string, input: RentalAvailabilityRequest, tx: RentalFactTx, rule?: RentalRuleConfig, quote?: RentalQuoteSnapshotV1) {
+    const workspaceId = this.resolveWorkspaceId(tenantId);
+    const state = quote ? { itemGroups: inventoryBasisGroups(quote.inventoryBasis, tenantId, workspaceId, input.lines) } : this.state(tenantId);
     this.validatePeriod(input.startAt, input.endAt);
     await this.fulfillmentAdmission(tenantId, [{ locationId: input.locationId }], tx);
     if (!input.lines?.length) throw new BadRequestException("至少需要一个租赁明细");
@@ -1609,6 +1726,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
     }
 
+    // Fulfillment admission above acquired the item-group writer's workspace mutex.
+    // Verify CURRENT content before locking frozen targets; never expand a changed kit.
+    if (quote) await assertRentalInventoryBasis(this.configStore, tenantId, workspaceId, input.lines, quote.inventoryBasis, tx);
     await this.factStore.lockInventoryTargets(tenantId, input.locationId, [...targets.values()], tx);
     const checked = this.computeAvailability(state, await this.loadInventorySnapshot(tenantId, tx), {
       ...input, ...bufferedRentalPeriod(input.startAt, input.endAt, rule)
@@ -1921,6 +2041,52 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return order;
   }
 
+  /** R0 only: no state/initialization, aggregate or current-rule fallback. The
+   * repository reuses original order visibility and rechecks its source. */
+  async readOrderFacts(tenantId: string, orderId: string) {
+    const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
+    if (!identity?.userId || identity.isSaasAdmin || identity.tenantId !== tenantId || !workspaceId)
+      throw new ForbiddenException('订单事实缺少当前租户及空间');
+    if (typeof this.factStore.readOrderFacts !== 'function') throw new ServiceUnavailableException('订单持久事实端口不可用');
+    const binding = requestFingerprint(identity);
+    const facts = await this.factStore.readOrderFacts(tenantId, workspaceId, orderId);
+    if (requestFingerprint(getRequestIdentity()) !== binding) throw new ForbiddenException('订单事实读取期间授权变化');
+    if (!facts) throw new NotFoundException('订单不在当前业务范围内');
+    if (facts.id !== orderId || facts.tenantId !== tenantId || facts.workspaceId !== workspaceId)
+      throw new ConflictException('订单事实来源绑定无效');
+    return facts;
+  }
+
+  /** R0 applicability uses the original Core algorithm on narrow frozen refs;
+   * no state/config initialization, inspection-result inference or action grant. */
+  async readOrderInspectionBasis(tenantId: string, orderId: string): Promise<RentalOrderInspectionBasisFacts> {
+    const identity = requestFingerprint(getRequestIdentity());
+    const before = await this.readOrderFacts(tenantId, orderId);
+    if (typeof this.factStore.readOrderInspectionBasis !== 'function') throw new ServiceUnavailableException('冻结检查依据持久端口不可用');
+    const value = await this.factStore.readOrderInspectionBasis(tenantId, before.workspaceId, orderId);
+    const after = await this.readOrderFacts(tenantId, orderId);
+    if (requestFingerprint(getRequestIdentity()) !== identity || requestFingerprint(before) !== requestFingerprint(after)
+      || value.orderId !== orderId || value.tenantId !== tenantId || value.workspaceId !== before.workspaceId
+      || value.sourceOrderUpdatedAt !== before.updatedAt) throw new ConflictException('冻结检查依据读取期间来源或范围变化');
+    const applicable = projectExchangeInspectionTemplates(value.allocations.map(row => ({ ...row,
+      metadata: row.exchangeId ? { exchangeId: row.exchangeId } : undefined })), value.originalTemplateRefs, value.exchanges);
+    if (applicable.length > 200) throw new ServiceUnavailableException('冻结检查适用关系超过只读上限');
+    return { ...value, contractVersion: 'rental-order-inspection-basis-1',
+      applicableTemplateRefs: applicable.map(row => ({ ...row, sourceTemplateId: row.sourceTemplateId ?? row.id })),
+      recordResourceCoverage: 'not_projected', semantics: 'frozen_template_applicability_not_inspection_or_execution_authority' };
+  }
+
+  async readOrderExplanationState(tenantId: string, orderId: string) {
+    const before = await this.readOrderFacts(tenantId, orderId);
+    if (typeof this.factStore.readOrderExplanationState !== 'function') throw new ServiceUnavailableException('解释状态持久端口不可用');
+    const value = await this.factStore.readOrderExplanationState(tenantId, before.workspaceId, orderId);
+    const after = await this.readOrderFacts(tenantId, orderId);
+    if (requestFingerprint(before) !== requestFingerprint(after) || value.orderId !== orderId
+      || value.tenantId !== tenantId || value.workspaceId !== before.workspaceId || value.sourceOrderUpdatedAt !== before.updatedAt)
+      throw new ConflictException('解释状态读取期间来源或范围变化');
+    return value;
+  }
+
   async getOrder(tenantId: string, orderId: string) {
     this.state(tenantId);
     return this.publicOrder(await this.requireOrder(tenantId, orderId));
@@ -2143,6 +2309,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     subjects?: CustomerOrderSubjects
   ) {
     const state = this.state(tenantId);
+    const inventoryState = { itemGroups: inventoryBasisGroups(quote.inventoryBasis, tenantId, this.resolveWorkspaceId(tenantId), input.lines) };
     if (!input.customerName?.trim()) throw new BadRequestException("客户名称不能为空");
     // 能力版本仍消费原报价快照，不因能力升级改写承诺；地点/主体启用是
     // 另一项当前新业务准入，准备与最终提交均重读，归还善后不走该门。
@@ -2163,7 +2330,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         }
       }
     }
-    const checked = await this.availability(tenantId, {
+    this.validatePeriod(input.startAt, input.endAt);
+    const checked = this.computeAvailability(inventoryState, await this.loadInventorySnapshot(tenantId), {
       locationId: input.fulfillmentLocationId, startAt: input.startAt, endAt: input.endAt,
       lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
     });
@@ -2182,7 +2350,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const orderId = id("order");
     const unmatchedQuoteLines = new Set(quote.request.lines.map((_, index) => index));
     const orderLines = input.lines.map((line) => {
-      const group = this.group(state, line.itemGroupId);
+      const group = this.group(inventoryState, line.itemGroupId);
       const pricingGroup = line.pricingGroupId
         ? state.pricingGroups.find((row) => row.id === line.pricingGroupId)
         : undefined;
@@ -2221,7 +2389,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
     const reservations: RentalReservation[] = [];
     for (const line of orderLines) {
-      const group = this.group(state, line.itemGroupId);
+      const group = this.group(inventoryState, line.itemGroupId);
       const reservationTargets = group.inventoryMode === RentalInventoryMode.Bundle
         ? group.bundleComponents.filter((component) => !component.optional).map((component) => ({ itemGroupId: component.itemGroupId, quantity: component.quantity * line.quantity }))
         : [{ itemGroupId: group.id, quantity: line.quantity }];
@@ -2932,6 +3100,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   /** Bounded persisted observations; original order access and workspace are
    * still required. No pricing, inspection submission or liability decision. */
+  /** R0 records only. Keep the normal Core inspection page/aggregate for its
+   * original consumers; AI uses the separately bounded metadata projection. */
+  async readInspectionFactsPage(tenantId: string, orderId: string, value: RentalInspectionPageQuery) {
+    const query = parseRentalInspectionPageQuery(value), before = await this.readOrderFacts(tenantId, orderId);
+    if (typeof this.factStore.readInspectionFactsPage !== 'function') throw new ServiceUnavailableException('检查事实持久投影不可用');
+    const page = await this.factStore.readInspectionFactsPage(tenantId, before.workspaceId, orderId, query);
+    const after = await this.readOrderFacts(tenantId, orderId);
+    if (requestFingerprint(before) !== requestFingerprint(after) || page.coverage !== 'page_not_total'
+      || page.items.length > query.limit || new Set(page.items.map(row => row.id)).size !== page.items.length
+      || page.items.some(row => row.tenantId !== tenantId || row.orderId !== orderId)
+      || (page.nextCursor !== null && (page.items.length !== query.limit || page.nextCursor !== page.items.at(-1)?.id)))
+      throw new ConflictException('检查事实读取期间来源或范围变化');
+    return page;
+  }
+
   async listInspectionsPage(tenantId: string, orderId: string, value: RentalInspectionPageQuery): Promise<RentalInspectionPage> {
     const query = parseRentalInspectionPageQuery(value), workspaceId = this.workspaceOf(tenantId);
     const order = await this.requireOrder(tenantId, orderId);
@@ -5278,7 +5461,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
     return { definition: resolved.definition, binding: { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision } };
   }
-  private group(state: TenantRentalState, groupId: string) { const found = state.itemGroups.find((row) => row.id === groupId); if (!found) throw new NotFoundException("标的分组不存在"); return found; }
+  private group<T extends Pick<RentalItemGroup, 'id'>>(state: { itemGroups: T[] }, groupId: string) { const found = state.itemGroups.find((row) => row.id === groupId); if (!found) throw new NotFoundException("标的分组不存在"); return found; }
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }
 
   private activeLocation(state: TenantRentalState, locationId: string, capability?: RentalFulfillmentLocation["capabilities"][number]) {
@@ -5616,7 +5799,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return startAt && endAt ? peakReservedQuantity(rows, startAt, endAt) : rows.reduce((sum, row) => sum + row.quantity, 0);
   }
 
-  private computeAvailability(state: TenantRentalState, snapshot: InventorySnapshot, input: RentalAvailabilityRequest): RentalAvailabilityResult {
+  private computeAvailability(state: { itemGroups: RentalQuoteInventoryBasis['groups'] }, snapshot: RentalAvailabilitySnapshot, input: RentalAvailabilityRequest): RentalAvailabilityResult {
     const lines = input.lines.map((line) => {
       if (!Number.isInteger(line.quantity) || line.quantity <= 0) throw new BadRequestException("租赁数量必须是正整数");
       const group = this.group(state, line.itemGroupId);
@@ -5651,7 +5834,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { available: lines.every((line) => line.available), locationId: input.locationId, startAt: input.startAt, endAt: input.endAt, lines };
   }
 
-  private availableQuantity(state: TenantRentalState, snapshot: InventorySnapshot, group: RentalItemGroup, locationId: string, startAt: string, endAt: string, visited: Set<string>): number {
+  private availableQuantity(state: { itemGroups: RentalQuoteInventoryBasis['groups'] }, snapshot: RentalAvailabilitySnapshot, group: RentalQuoteInventoryBasis['groups'][number], locationId: string, startAt: string, endAt: string, visited: Set<string>): number {
     if (visited.has(group.id)) throw new BadRequestException("检测到套装组成循环");
     if (group.status !== "enabled") return 0;
     if (group.inventoryMode === RentalInventoryMode.Serialized) {

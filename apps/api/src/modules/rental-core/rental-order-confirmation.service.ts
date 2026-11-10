@@ -47,6 +47,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   return JSON.stringify(canonicalize({
     categoryCode: quote.categoryCode,
     sourceSnapshot: quote.sourceSnapshot,
+    inventoryBasis: quote.inventoryBasis,
     request: quote.request,
     deliveryAddressSnapshot: quote.deliveryAddressSnapshot,
     membershipSnapshot: quote.membershipSnapshot,
@@ -366,7 +367,7 @@ export class RentalOrderConfirmationService {
           startAt: input.startAt,
           endAt: input.endAt,
           lines: input.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))
-        }, tx, quote.ruleSnapshot);
+        }, tx, quote.ruleSnapshot, quote);
 
         // The number belongs to this creation transaction, not to preparation
         // or a process-local count. Hooks and all persisted snapshots see it.
@@ -473,7 +474,12 @@ export class RentalOrderConfirmationService {
           await approval.authorize(structuredClone(approvalBinding));
           await approval.commit(tx, structuredClone(approvalBinding), order.id);
         }
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      // Approved creation also revalidates immutable inputs and current rights
+      // through its original participant before and after the business writes.
+      // Keep that transaction finite without changing manual creation defaults;
+      // a timeout still requires original-key reconciliation, never replay.
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+        ...(approval ? { maxWait: 2500, timeout: 30000 } : {}) });
     } catch (error) {
       // 并发同键：先到者已提交，本次回滚后返回它的结果，而不是报错或重复建单。
       if (error instanceof IdempotentReplay) {

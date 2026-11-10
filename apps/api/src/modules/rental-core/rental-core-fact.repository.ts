@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { usageDelta } from "./rental-usage-reading";
 import { isDeepStrictEqual } from "node:util";
@@ -6,6 +6,9 @@ import { Prisma, type $Enums } from "@prisma/client";
 import {
   RentalAssetStatus,
   RentalCoreOrderStatus,
+  RENTAL_FULFILLMENT_MODES,
+  RENTAL_CURRENCY_CODES,
+  type RentalCurrency,
   RentalInventoryMode,
   RentalReservationStatus,
   type RentalAllocation,
@@ -39,6 +42,7 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { readOrderInspectionBasisInput } from "./rental-order-inspection-basis.read";
 import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
@@ -54,6 +58,7 @@ import {
 } from "./work-order-assignee-scope";
 import {
   getRequestDataScope,
+  getRequestIdentity,
   getRequestLocationIds,
   getRequestStaffLocationIds,
   getRequestUserId,
@@ -69,6 +74,49 @@ export interface ActiveReservationRow {
   quantity: number;
   startAt: string;
   endAt: string;
+}
+
+/** Bounded read facts for Core availability arithmetic; no asset attributes,
+ * allocation bodies, inventory reservation or initialization writes. */
+export interface RentalAvailabilitySnapshot {
+  reservations: ActiveReservationRow[];
+  assets: Array<Pick<RentalAsset, 'itemGroupId' | 'locationId' | 'status'>>;
+  stocks: Array<Pick<RentalStockBalance, 'itemGroupId' | 'locationId' | 'onHandQuantity' | 'maintenanceQuantity'>>;
+}
+export interface RentalAvailabilitySnapshotQuery { locationId: string; itemGroupIds: string[]; }
+const AVAILABILITY_FACT_LIMIT = 10000;
+
+/** Internal current/order-bound history projection. No lines, customer identity,
+ * payment evidence, current configuration or mutable aggregate is loaded. */
+export type RentalOrderReadFacts = Pick<RentalOrder, 'id' | 'tenantId' | 'orderNo' | 'status'
+  | 'startAt' | 'endAt' | 'effectiveEndAt' | 'updatedAt' | 'currency' | 'rentalAmount'
+  | 'serviceAmount' | 'discountAmount' | 'couponAmount' | 'depositAmount' | 'preAuthAmount'
+  | 'finalPayableAmount' | 'quoteId' | 'ruleVersion' | 'pricingPlanVersion'
+  | 'priceVersionId' | 'priceVersion' | 'calendarVersion' | 'fulfillmentMode'
+  | 'actualRentalStartAt' | 'carrierRentalDueAt'> & {
+    workspaceId: string; ruleSnapshot?: unknown; inspectionTemplateSnapshots?: unknown; calendarFacts?: unknown;
+  };
+
+/** The existing order/detail/export predicate, reused by linked historical
+ * quote reads. This supplies no tenant/workspace grant independently of ALS. */
+export function requestRentalOrderVisibilityWhere(): Prisma.RentalOrderWhereInput {
+  const clauses: Prisma.RentalOrderWhereInput[] = [];
+  const locationIds = getRequestLocationIds();
+  if (locationIds !== undefined) {
+    const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+    clauses.push({ OR: [
+      { fulfillmentLocationId: { in: safeIds } },
+      { returnLocationId: { in: safeIds } }
+    ] });
+  }
+  if (getRequestDataScope() === "own") {
+    const userId = getRequestUserId();
+    clauses.push(userId ? { OR: [
+      { createdBy: userId },
+      { workOrders: { some: { OR: [{ createdBy: userId }, { assigneeId: userId }] } } }
+    ] } : { id: "__no_current_user__" });
+  }
+  return clauses.length ? { AND: clauses } : {};
 }
 
 /** 资产状态变更随订单聚合一起提交，避免出现"订单已推进、资产状态没跟上"的中间态。 */
@@ -173,6 +221,11 @@ export interface RentalInspectionPageQuery { limit: number; cursor?: string; }
 export interface RentalInspectionPage {
   items: RentalInspectionRecord[]; nextCursor: string | null; coverage: 'page_not_total';
 }
+export type RentalInspectionReadFacts = Pick<RentalInspectionRecord, 'id' | 'tenantId' | 'orderId'
+  | 'stage' | 'templateId' | 'templateCode' | 'templateVersion' | 'exchangeId' | 'baselineInspectionId' | 'createdAt'> & { exceptions: unknown };
+export interface RentalInspectionFactsPage {
+  items: RentalInspectionReadFacts[]; nextCursor: string | null; coverage: 'page_not_total';
+}
 export function parseRentalInspectionPageQuery(value: RentalInspectionPageQuery): RentalInspectionPageQuery {
   const input = structuredClone(value);
   if (!input || typeof input !== 'object' || Array.isArray(input)
@@ -217,6 +270,9 @@ export interface RentalCoreFactStore {
   /** 找出当前空间中仍处于待确认、且至少一条软预占已过期的订单候选。 */
   listExpiredDraftOrderIds(tenantId: string, expiredBefore: string, take?: number): Promise<string[]>;
   findOrder(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalOrder | undefined>;
+  readOrderFacts?(tenantId: string, workspaceId: string, orderId: string): Promise<RentalOrderReadFacts | undefined>;
+  readOrderExplanationState?: RentalCoreFactRepository['readOrderExplanationState'];
+  readOrderInspectionBasis?: RentalCoreFactRepository['readOrderInspectionBasis'];
   /**
    * 对订单行加排他锁，供状态推进动作在读取聚合前调用。
    * 不加锁时确认、配货、取消会各读一份聚合副本、各跑状态机、各整体写回，
@@ -228,6 +284,7 @@ export interface RentalCoreFactStore {
   saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[], stockTransfers?: StockReturnTransfer[]): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
+  readAvailabilitySnapshot?(tenantId: string, workspaceId: string, query: RentalAvailabilitySnapshotQuery): Promise<RentalAvailabilitySnapshot>;
   /**
    * 对该地点下某商品组的资产行加排他锁，供配货使用。
    *
@@ -269,6 +326,7 @@ export interface RentalCoreFactStore {
   transitionWorkOrder(tenantId: string, workOrderId: string, action: "start" | "submit" | "review" | "cancel", operator: string, input?: { result?: string; attachments?: string[]; decision?: "approved" | "rejected"; reason?: string }, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   listInspections(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalInspectionRecord[]>;
   listInspectionsPage?(tenantId: string, orderId: string, query: RentalInspectionPageQuery, tx?: RentalFactTx): Promise<RentalInspectionPage>;
+  readInspectionFactsPage?(tenantId: string, workspaceId: string, orderId: string, query: RentalInspectionPageQuery): Promise<RentalInspectionFactsPage>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
   correctInspectionUsage(
     tenantId: string,
@@ -466,6 +524,44 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   constructor(private readonly prisma: PrismaService,
     @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant) {}
 
+  /** Separate frozen inspection reference transport, with the same original
+   * parent visibility. Missing history never falls back to mutable templates. */
+  async readOrderInspectionBasis(tenantId: string, workspaceId: string, orderId: string) {
+    return readOrderInspectionBasisInput(this.prisma, tenantId, workspaceId, orderId,
+      () => this.requestOrderVisibilityWhere());
+  }
+
+  /** Bounded explanation metadata only; no allocations' asset/contact JSON,
+   * change request/diff, pricing snapshots or financial receipt inference. */
+  async readOrderExplanationState(tenantId: string, workspaceId: string, orderId: string) {
+    if (await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ForbiddenException('解释事实空间变化');
+    const where = () => ({ id: orderId, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() });
+    const before = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true } });
+    if (!before) throw new NotFoundException('解释事实关联订单不可读');
+    const allocations = await this.prisma.rentalAllocation.findMany({ where: { orderId, order: where() }, take: 201,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, orderId: true, status: true, quantity: true } });
+    if (allocations.length > 200) throw new ServiceUnavailableException('解释分配事实超过上限');
+    const changes = await this.prisma.rentalOrderChange.findMany({ where: { tenantId, workspaceId, orderId }, take: 51,
+      orderBy: [{ sequence: 'asc' }, { id: 'asc' }], select: { id: true, tenantId: true, workspaceId: true, orderId: true,
+        type: true, status: true, requestedAt: true, appliedAt: true } });
+    const extensions = await this.prisma.rentalOrderExtension.findMany({ where: { tenantId, workspaceId, orderId }, take: 51,
+      orderBy: [{ sequence: 'asc' }, { id: 'asc' }], select: { id: true, tenantId: true, workspaceId: true, orderId: true,
+        status: true, originalEndAt: true, newEndAt: true } });
+    const after = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true } });
+    if (!after || after.updatedAt.getTime() !== before.updatedAt.getTime()
+      || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ConflictException('解释事实读取期间订单或范围变化');
+    if (allocations.some(row => row.orderId !== orderId) || [...changes, ...extensions].some(row => row.tenantId !== tenantId
+      || row.workspaceId !== workspaceId || row.orderId !== orderId)) throw new ConflictException('解释事实来源绑定无效');
+    return { orderId, tenantId, workspaceId, sourceOrderUpdatedAt: iso(before.updatedAt),
+      allocations: allocations.map(({ orderId: _order, ...row }) => row),
+      changes: changes.slice(0, 50).map(row => ({ id: row.id, type: row.type, status: row.status,
+        requestedAt: iso(row.requestedAt), appliedAt: optionalIso(row.appliedAt) })),
+      extensions: extensions.slice(0, 50).map(row => ({ id: row.id, status: row.status,
+        originalEndAt: iso(row.originalEndAt), newEndAt: iso(row.newEndAt) })),
+      truncated: { changes: changes.length > 50, extensions: extensions.length > 50 },
+      semantics: 'recorded_lifecycle_not_financial_or_action_eligibility' as const };
+  }
+
   /* ---------- 订单聚合 ---------- */
 
   private orderInclude = {
@@ -476,23 +572,105 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   /** 订单、明细与导出共用的会话可见范围；过滤必须在数据库层完成。 */
   private requestOrderVisibilityWhere(): Prisma.RentalOrderWhereInput {
-    const clauses: Prisma.RentalOrderWhereInput[] = [];
-    const locationIds = getRequestLocationIds();
-    if (locationIds !== undefined) {
-      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
-      clauses.push({ OR: [
-        { fulfillmentLocationId: { in: safeIds } },
-        { returnLocationId: { in: safeIds } }
-      ] });
-    }
-    if (getRequestDataScope() === "own") {
-      const userId = getRequestUserId();
-      clauses.push(userId ? { OR: [
-        { createdBy: userId },
-        { workOrders: { some: { OR: [{ createdBy: userId }, { assigneeId: userId }] } } }
-      ] } : { id: "__no_current_user__" });
-    }
-    return clauses.length ? { AND: clauses } : {};
+    return requestRentalOrderVisibilityWhere();
+  }
+
+  /** Persistent R0 projection. Snapshot metadata is projected before transport;
+   * a missing snapshot differs from an explicitly saved empty template list. */
+  async readOrderFacts(tenantId: string, workspaceId: string, orderId: string): Promise<RentalOrderReadFacts | undefined> {
+    if (await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ForbiddenException('订单事实空间变化');
+    const where = () => ({ id: orderId, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() });
+    const row = await this.prisma.rentalOrder.findFirst({ where: where(), select: {
+      id: true, tenantId: true, workspaceId: true, orderNo: true, status: true,
+      startAt: true, endAt: true, effectiveEndAt: true, actualRentalStartAt: true,
+      carrierRentalDueAt: true, fulfillmentMode: true, updatedAt: true, currency: true,
+      rentalAmount: true, serviceAmount: true, discountAmount: true, couponAmount: true,
+      depositAmount: true, preAuthAmount: true, finalPayableAmount: true,
+      quoteId: true, ruleVersion: true, pricingPlanVersion: true, priceVersionId: true,
+      priceVersion: true, calendarVersion: true
+    } });
+    if (!row) return undefined;
+    if (!(RENTAL_CURRENCY_CODES as readonly string[]).includes(row.currency)
+      || !(RENTAL_FULFILLMENT_MODES as readonly string[]).includes(row.fulfillmentMode)) throw new ConflictException('订单快照币种或履约方式无效');
+    const snapshots = await this.prisma.$queryRaw<Array<{ ruleType: string | null; rule: unknown;
+      templatesType: string | null; templateCount: bigint | number | null; templates: unknown;
+      calendarType: string | null; calendarCount: bigint | number | null; calendar: unknown }>>(Prisma.sql`
+      SELECT JSON_TYPE(o.ruleSnapshot) AS ruleType,
+        CASE WHEN JSON_TYPE(o.ruleSnapshot) = 'OBJECT' THEN JSON_OBJECT('fulfillment', JSON_OBJECT(
+          'pickupInspectionRequired', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.ruleSnapshot, '$.fulfillment.pickupInspectionRequired')) = 'BOOLEAN'
+            THEN JSON_EXTRACT(o.ruleSnapshot, '$.fulfillment.pickupInspectionRequired') ELSE NULL END,
+          'returnInspectionRequired', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.ruleSnapshot, '$.fulfillment.returnInspectionRequired')) = 'BOOLEAN'
+            THEN JSON_EXTRACT(o.ruleSnapshot, '$.fulfillment.returnInspectionRequired') ELSE NULL END)) ELSE NULL END AS rule,
+        JSON_TYPE(o.inspectionTemplateSnapshots) AS templatesType,
+        JSON_LENGTH(o.inspectionTemplateSnapshots) AS templateCount,
+        (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.inspectionTemplateSnapshots, CONCAT('$[', j.ordinality - 1, '].id'))) = 'STRING' THEN j.templateId ELSE NULL END,
+          'tenantId', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.inspectionTemplateSnapshots, CONCAT('$[', j.ordinality - 1, '].tenantId'))) = 'STRING' THEN j.templateTenantId ELSE NULL END,
+          'code', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.inspectionTemplateSnapshots, CONCAT('$[', j.ordinality - 1, '].code'))) = 'STRING' THEN j.templateCode ELSE NULL END,
+          'stage', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.inspectionTemplateSnapshots, CONCAT('$[', j.ordinality - 1, '].stage'))) = 'STRING' THEN j.templateStage ELSE NULL END,
+          'version', CASE WHEN JSON_TYPE(JSON_EXTRACT(o.inspectionTemplateSnapshots, CONCAT('$[', j.ordinality - 1, '].version'))) = 'STRING' THEN j.templateVersion ELSE NULL END))
+          FROM JSON_TABLE(CASE WHEN JSON_TYPE(o.inspectionTemplateSnapshots) = 'ARRAY'
+            AND JSON_LENGTH(o.inspectionTemplateSnapshots) <= 50 THEN o.inspectionTemplateSnapshots ELSE JSON_ARRAY() END,
+            '$[*]' COLUMNS(ordinality FOR ORDINALITY, templateId VARCHAR(192) PATH '$.id', templateTenantId VARCHAR(192) PATH '$.tenantId',
+              templateCode VARCHAR(192) PATH '$.code', templateStage VARCHAR(16) PATH '$.stage',
+              templateVersion VARCHAR(192) PATH '$.version')) AS j) AS templates,
+        JSON_TYPE(o.calendarSnapshot) AS calendarType, JSON_LENGTH(o.calendarSnapshot) AS calendarCount,
+        (SELECT JSON_ARRAYAGG(JSON_OBJECT('ordinality', j.ordinality,
+          'date', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.date')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.date')), 11) ELSE NULL END,
+          'year', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.year')) = 'INTEGER' THEN JSON_EXTRACT(j.entry, '$.year') ELSE NULL END,
+          'dayType', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.dayType')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.dayType')), 32) ELSE NULL END,
+          'businessStatus', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.businessStatus')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.businessStatus')), 32) ELSE NULL END,
+          'source', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.source')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.source')), 32) ELSE NULL END,
+          'calendarVersion', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.calendarVersion')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.calendarVersion')), 192) ELSE NULL END,
+          'itemGroupId', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.itemGroupId')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.itemGroupId')), 192) ELSE NULL END,
+          'unitCount', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.unitCount')) IN ('INTEGER', 'DOUBLE') THEN JSON_EXTRACT(j.entry, '$.unitCount') ELSE NULL END,
+          'unitAmount', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.unitAmount')) IN ('INTEGER', 'DOUBLE') THEN JSON_EXTRACT(j.entry, '$.unitAmount') ELSE NULL END,
+          'multiplier', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.multiplier')) IN ('INTEGER', 'DOUBLE') THEN JSON_EXTRACT(j.entry, '$.multiplier') ELSE NULL END,
+          'amount', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.amount')) IN ('INTEGER', 'DOUBLE') THEN JSON_EXTRACT(j.entry, '$.amount') ELSE NULL END,
+          'priceAt', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.priceAt')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.priceAt')), 41)
+            WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.priceAt')) IS NULL THEN NULL ELSE '!' END,
+          'hitLayer', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.hitLayer')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.hitLayer')), 32)
+            WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.hitLayer')) IS NULL THEN NULL ELSE '!' END,
+          'pricingPlanVersion', CASE WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.pricingPlanVersion')) = 'STRING' THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(j.entry, '$.pricingPlanVersion')), 192)
+            WHEN JSON_TYPE(JSON_EXTRACT(j.entry, '$.pricingPlanVersion')) IS NULL THEN NULL ELSE '!' END))
+          FROM JSON_TABLE(CASE WHEN JSON_TYPE(o.calendarSnapshot) = 'ARRAY' AND JSON_LENGTH(o.calendarSnapshot) <= 200
+            THEN o.calendarSnapshot ELSE JSON_ARRAY() END, '$[*]' COLUMNS(ordinality FOR ORDINALITY, entry JSON PATH '$')) AS j) AS calendar
+      FROM rental_orders AS o WHERE o.id = ${orderId} AND o.tenantId = ${tenantId}
+        AND o.workspaceId = ${workspaceId} AND o.updatedAt = ${row.updatedAt} LIMIT 1`);
+    if (snapshots.length !== 1) throw new ConflictException('订单历史读取期间来源变化');
+    const snapshot = snapshots[0];
+    const absent = (type: string | null) => type === null || type === 'NULL';
+    if (!absent(snapshot.ruleType) && snapshot.ruleType !== 'OBJECT') throw new ConflictException('订单历史规则格式无效');
+    if (!absent(snapshot.templatesType) && snapshot.templatesType !== 'ARRAY') throw new ConflictException('订单历史模板格式无效');
+    const count = snapshot.templatesType === 'ARRAY' ? Number(snapshot.templateCount) : 0;
+    if (!Number.isSafeInteger(count) || count < 0 || count > 50) throw new ServiceUnavailableException('订单历史模板超过只读上限');
+    const templates = snapshot.templatesType === 'ARRAY' ? (count === 0 ? [] : snapshot.templates) : undefined;
+    if (templates !== undefined && (!Array.isArray(templates) || templates.length !== count)) throw new ConflictException('订单历史模板投影不完整');
+    // This optional history must not break an otherwise usable status/amount
+    // read. Refuse oversized or malformed coverage rather than slice it to empty.
+    const calendarCount = Number(snapshot.calendarCount);
+    const calendarRows = calendarCount === 0 ? [] : snapshot.calendar;
+    const calendarFacts = snapshot.calendarType == null || snapshot.calendarType === 'NULL' ? { status: 'missing' as const }
+      : snapshot.calendarType !== 'ARRAY' || !Number.isSafeInteger(calendarCount) || calendarCount < 0 || calendarCount > 200
+        || !Array.isArray(calendarRows) || calendarRows.length !== calendarCount ? { status: 'unavailable' as const }
+        : { status: 'available' as const, rows: calendarRows.sort((left, right) => Number((left as Record<string, unknown>).ordinality) - Number((right as Record<string, unknown>).ordinality)).map(value => {
+          const { ordinality: _ordinality, ...day } = value as Record<string, unknown>;
+          return { ...day, priceAt: day.priceAt === null ? undefined : day.priceAt,
+            hitLayer: day.hitLayer === null ? undefined : day.hitLayer,
+            pricingPlanVersion: day.pricingPlanVersion === null ? undefined : day.pricingPlanVersion };
+        }) };
+    const after = await this.prisma.rentalOrder.findFirst({ where: where(), select: { id: true, updatedAt: true, quoteId: true } });
+    if (!after || after.updatedAt.getTime() !== row.updatedAt.getTime() || after.quoteId !== row.quoteId
+      || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ConflictException('订单事实读取期间范围或版本变化');
+    return { ...row, currency: row.currency as RentalCurrency, fulfillmentMode: row.fulfillmentMode as RentalFulfillmentMode,
+      status: lower<RentalCoreOrderStatus>(row.status), startAt: iso(row.startAt), endAt: iso(row.endAt),
+      effectiveEndAt: optionalIso(row.effectiveEndAt), actualRentalStartAt: optionalIso(row.actualRentalStartAt),
+      carrierRentalDueAt: optionalIso(row.carrierRentalDueAt), updatedAt: iso(row.updatedAt),
+      rentalAmount: num(row.rentalAmount), serviceAmount: num(row.serviceAmount), discountAmount: num(row.discountAmount),
+      couponAmount: num(row.couponAmount), depositAmount: num(row.depositAmount), preAuthAmount: num(row.preAuthAmount), finalPayableAmount: num(row.finalPayableAmount),
+      priceVersionId: row.priceVersionId ?? undefined, priceVersion: row.priceVersion ?? undefined, calendarVersion: row.calendarVersion ?? undefined,
+      ruleSnapshot: absent(snapshot.ruleType) ? undefined : snapshot.rule,
+      inspectionTemplateSnapshots: templates, calendarFacts
+    };
   }
 
   /** 文件读取与订单详情共用原范围；凭证额外限定实际取/还阶段地点。 */
@@ -1257,6 +1435,76 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       quantity: Math.max(0, row.quantity - row.releasedQuantity),
       ...bufferedRentalPeriod(iso(row.startAt), row.status === "FULFILLED" && row.endAt <= now ? "9999-12-30T00:00:00.000Z" : iso(row.endAt), row.order.ruleSnapshot as unknown as RentalRuleConfig)
     }));
+  }
+
+  /** Availability needs complete facts, not a silently truncated inventory.
+   * Read one requested location/dependency set, include a sentinel and refuse
+   * overflow. The original expiry/buffer/overdue rules remain unchanged. */
+  async readAvailabilitySnapshot(tenantId: string, workspaceId: string, value: RentalAvailabilitySnapshotQuery): Promise<RentalAvailabilitySnapshot> {
+    const query = structuredClone(value), id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
+    if (!query || typeof query !== 'object' || Array.isArray(query)
+      || Object.keys(query).length !== 2 || typeof query.locationId !== 'string' || !id.test(query.locationId)
+      || !Array.isArray(query.itemGroupIds) || !query.itemGroupIds.length || query.itemGroupIds.length > 100
+      || Array.from(query.itemGroupIds).some(value => typeof value !== 'string' || !id.test(value))
+      || new Set(query.itemGroupIds).size !== query.itemGroupIds.length) throw new BadRequestException('库存只读查询参数无效');
+    const identity = structuredClone(getRequestIdentity());
+    // Original Guard uses isPlatformAdmin for a tenant administrator. It is not
+    // SaaS and supplies no scope on its own; all current scope checks still apply.
+    if (!identity?.userId || identity.tenantId !== tenantId || identity.isSaasAdmin
+      || identity.workspaceId !== workspaceId || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+      throw new ForbiddenException('库存读取缺少当前经营空间');
+    const locations = getRequestLocationIds();
+    if (locations !== undefined && !locations.includes(query.locationId)) throw new ForbiddenException('库存地点不可访问');
+    const where = { tenantId, workspaceId, locationId: query.locationId, itemGroupId: { in: query.itemGroupIds } };
+    const at = new Date();
+    const [reservations, currentAssets, stocks] = await Promise.all([
+      this.prisma.rentalReservation.findMany({ where: { ...where, status: { in: ACTIVE_RESERVATION_STATES },
+        OR: [{ expiresAt: null }, { expiresAt: { gte: at } }] },
+        select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, quantity: true, releasedQuantity: true,
+          startAt: true, endAt: true, status: true, order: { select: { tenantId: true, workspaceId: true, ruleSnapshot: true } } },
+        orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 }),
+      this.prisma.rentalAsset.findMany({ where,
+        select: { id: true, tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, status: true },
+        orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 }),
+      this.prisma.rentalStockBalance.findMany({ where,
+        select: { tenantId: true, workspaceId: true, itemGroupId: true, locationId: true, onHandQuantity: true, maintenanceQuantity: true },
+        orderBy: { id: 'asc' }, take: AVAILABILITY_FACT_LIMIT + 1 })
+    ]);
+    if ([reservations, currentAssets, stocks].some(rows => rows.length > AVAILABILITY_FACT_LIMIT))
+      throw new ServiceUnavailableException('库存事实超出只读上限，不能按部分事实计算可用量');
+    const inScope = (row: { tenantId: string; workspaceId: string; locationId: string; itemGroupId: string }) => row.tenantId === tenantId && row.workspaceId === workspaceId
+      && row.locationId === query.locationId && query.itemGroupIds.includes(row.itemGroupId);
+    if (!currentAssets.every(inScope) || !stocks.every(inScope) || !reservations.every(row => inScope(row)
+      && row.order.tenantId === tenantId && row.order.workspaceId === workspaceId)) throw new ConflictException('库存事实来源变化');
+    let assets = currentAssets;
+    if (identity.dataScope === 'own' && currentAssets.length) {
+      // A return can move an asset without rewriting its historical work orders.
+      // Bound ownership by CURRENT candidate ids, not the work order's old site/group.
+      const candidateIds = currentAssets.map(row => row.id), candidateSet = new Set(candidateIds);
+      if (candidateIds.some(value => typeof value !== 'string' || !id.test(value)) || candidateSet.size !== candidateIds.length)
+        throw new ConflictException('库存资产来源无效');
+      if (!isDeepStrictEqual(identity, getRequestIdentity())) throw new ForbiddenException('库存读取身份或范围变化');
+      const rows = await this.prisma.rentalWorkOrder.findMany({
+        where: { tenantId, workspaceId, assetId: { in: candidateIds },
+          OR: [{ createdBy: identity.userId }, { assigneeId: identity.userId }] },
+        select: { tenantId: true, workspaceId: true, assetId: true },
+        distinct: ['assetId'], take: AVAILABILITY_FACT_LIMIT + 1, orderBy: { assetId: 'asc' }
+      });
+      if (rows.length > AVAILABILITY_FACT_LIMIT) throw new ServiceUnavailableException('本人库存读取超出上限');
+      if (!rows.every(row => row.tenantId === tenantId && row.workspaceId === workspaceId
+        && row.assetId !== null && candidateSet.has(row.assetId))) throw new ConflictException('本人库存事实来源变化');
+      const ownedIds = new Set(rows.map(row => row.assetId));
+      assets = currentAssets.filter(row => ownedIds.has(row.id));
+    }
+    if (!isDeepStrictEqual(identity, getRequestIdentity()) || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+      throw new ForbiddenException('库存读取身份或范围变化');
+    return { reservations: reservations.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId,
+      quantity: Math.max(0, row.quantity - row.releasedQuantity),
+      ...bufferedRentalPeriod(iso(row.startAt), row.status === 'FULFILLED' && row.endAt <= at
+        ? '9999-12-30T00:00:00.000Z' : iso(row.endAt), row.order.ruleSnapshot as unknown as RentalRuleConfig) })),
+      assets: assets.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId, status: lower<RentalAssetStatus>(row.status) })),
+      stocks: stocks.map(row => ({ itemGroupId: row.itemGroupId, locationId: row.locationId,
+        onHandQuantity: row.onHandQuantity, maintenanceQuantity: row.maintenanceQuantity })) };
   }
 
   /** 已被有效分配占住的资产 id，用于配货时排除。 */
@@ -2531,6 +2779,88 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       || new Set(rows.map(row => row.id)).size !== rows.length) throw new ConflictException('检查记录分页来源不一致');
     const items = rows.slice(0, query.limit).map(row => this.toInspectionRecord(row));
     return { items, nextCursor: rows.length > query.limit ? items[items.length - 1].id : null, coverage: 'page_not_total' };
+  }
+
+  /** R0 page over original records, not current templates or result/attachment
+   * bodies. Keep original scoped cursor and record revisions; bound JSON before
+   * transport rather than letting an output slice mask an aggregate query. */
+  async readInspectionFactsPage(tenantId: string, workspaceId: string, orderId: string, value: RentalInspectionPageQuery): Promise<RentalInspectionFactsPage> {
+    const query = parseRentalInspectionPageQuery(value);
+    const assertScope = async () => {
+      if (getRequestWorkspaceId() !== workspaceId || getRequestIdentity()?.tenantId !== tenantId
+        || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ForbiddenException('检查事实读取空间变化');
+    };
+    await assertScope();
+    const parentWhere = () => ({ id: orderId, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() });
+    const parent = await this.prisma.rentalOrder.findFirst({ where: parentWhere(), select: { id: true, updatedAt: true } });
+    if (!parent) throw new NotFoundException('检查事实关联订单不可读');
+    const where = { tenantId, workspaceId, orderId };
+    if (query.cursor) {
+      const cursor = await this.prisma.rentalInspectionRecord.findFirst({ where: { ...where, id: query.cursor }, select: { id: true } });
+      if (!cursor) throw new BadRequestException('检查记录分页游标不属于当前订单');
+    }
+    const rows = await this.prisma.rentalInspectionRecord.findMany({ where: { ...where,
+      ...(query.cursor ? { id: { gt: query.cursor } } : {}) }, orderBy: { id: 'asc' }, take: query.limit + 1,
+      select: { id: true, tenantId: true, workspaceId: true, orderId: true, stage: true, templateId: true,
+        templateCode: true, templateVersion: true, createdAt: true, updatedAt: true, revision: true } });
+    if (rows.length > query.limit + 1 || rows.some(row => row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.orderId !== orderId)
+      || new Set(rows.map(row => row.id)).size !== rows.length) throw new ConflictException('检查事实分页来源不一致');
+    const selected = rows.slice(0, query.limit), ids = selected.map(row => row.id);
+    // All JSON paths are closed code-owned projections. Required bad/missing
+    // scalar types stay null; optional missing values stay absent, not forged IDs.
+    const text = (document: Prisma.Sql, path: Prisma.Sql, cap: number, optional = false) => Prisma.sql`CASE
+      WHEN JSON_TYPE(JSON_EXTRACT(${document}, ${path})) = 'STRING'
+        THEN LEFT(JSON_UNQUOTE(JSON_EXTRACT(${document}, ${path})), ${cap})
+      WHEN JSON_TYPE(JSON_EXTRACT(${document}, ${path})) IS NULL THEN NULL
+      ELSE ${optional ? '!' : null} END`;
+    const exceptionPath = (field: string) => Prisma.sql`CONCAT('$[', j.ordinality - 1, ${`].${field}`})`;
+    type Projection = { id: string; revision: number | bigint; updatedAt: Date; exchangeId: string | null; baselineInspectionId: string | null;
+      exceptionsType: string | null; exceptionCount: bigint | number | null; exceptions: unknown };
+    const projected = ids.length ? await this.prisma.$queryRaw<Projection[]>(Prisma.sql`
+      SELECT p.id, p.revision, p.updatedAt, p.exchangeId, p.baselineInspectionId, p.exceptionsType, p.exceptionCount,
+        CASE WHEN OCTET_LENGTH(CAST(p.projectedExceptions AS CHAR)) <= 32768 THEN p.projectedExceptions
+          ELSE JSON_OBJECT('readLimitExceeded', TRUE) END AS exceptions
+      FROM (SELECT i.id, i.revision, i.updatedAt,
+        ${text(Prisma.sql`i.results`, Prisma.sql`'$.\"__r1InspectionMeta\".exchangeId'`, 192, true)} AS exchangeId,
+        ${text(Prisma.sql`i.results`, Prisma.sql`'$.\"__r1InspectionMeta\".baselineInspectionId'`, 192, true)} AS baselineInspectionId,
+        JSON_TYPE(i.exceptions) AS exceptionsType, JSON_LENGTH(i.exceptions) AS exceptionCount,
+        (SELECT JSON_ARRAYAGG(JSON_OBJECT(
+          'code', ${text(Prisma.sql`i.exceptions`, exceptionPath('code'), 192)},
+          'description', ${text(Prisma.sql`i.exceptions`, exceptionPath('description'), 2001)},
+          'allocationId', ${text(Prisma.sql`i.exceptions`, exceptionPath('allocationId'), 192, true)},
+          'reviewStatus', ${text(Prisma.sql`i.exceptions`, exceptionPath('reviewStatus'), 16)},
+          'customerResponseStatus', ${text(Prisma.sql`i.exceptions`, exceptionPath('customerResponseStatus'), 32, true)}))
+          FROM JSON_TABLE(CASE WHEN JSON_TYPE(i.exceptions) = 'ARRAY' AND JSON_LENGTH(i.exceptions) <= 50
+            THEN i.exceptions ELSE JSON_ARRAY() END, '$[*]' COLUMNS(ordinality FOR ORDINALITY)) AS j) AS projectedExceptions
+        FROM rental_inspection_records AS i WHERE i.tenantId = ${tenantId} AND i.workspaceId = ${workspaceId}
+          AND i.orderId = ${orderId} AND i.id IN (${Prisma.join(ids)}) ORDER BY i.id LIMIT ${query.limit}) AS p`) : [];
+    if (projected.length !== selected.length || new Set(projected.map(row => row.id)).size !== projected.length) throw new ConflictException('检查事实投影不完整');
+    const items = selected.map(row => {
+      const saved = projected.find(candidate => candidate.id === row.id), count = Number(saved?.exceptionCount);
+      // MySQL raw UNSIGNED INT is bigint while Prisma's scalar read is number.
+      // Normalize only the original persisted range; never accept strings or
+      // truncate a changed revision to make a stale observation appear current.
+      const revision = typeof saved?.revision === 'number' || typeof saved?.revision === 'bigint' ? Number(saved.revision) : NaN;
+      if (!saved || !Number.isSafeInteger(revision) || revision < 1 || revision > 4294967295
+        || revision !== row.revision || saved.updatedAt.getTime() !== row.updatedAt.getTime()) throw new ConflictException('检查记录读取期间修订变化');
+      if (saved.exceptionsType !== 'ARRAY' || !Number.isSafeInteger(count) || count < 0 || count > 50) throw new ServiceUnavailableException('检查异常事实不可用或超过上限');
+      const exceptions = count === 0 ? [] : saved.exceptions;
+      if (!Array.isArray(exceptions) || exceptions.length !== count) throw new ServiceUnavailableException('检查异常投影超过字节上限或不完整');
+      return { id: row.id, tenantId: row.tenantId, orderId: row.orderId, stage: row.stage as 'pickup' | 'return',
+        templateId: row.templateId, templateCode: row.templateCode, templateVersion: row.templateVersion, createdAt: iso(row.createdAt),
+        exchangeId: saved.exchangeId ?? undefined, baselineInspectionId: saved.baselineInspectionId ?? undefined,
+        exceptions: exceptions.map(value => { const item = value as Record<string, unknown>;
+          return { ...item, allocationId: item.allocationId === null ? undefined : item.allocationId,
+            customerResponseStatus: item.customerResponseStatus === null ? undefined : item.customerResponseStatus }; }) };
+    });
+    const after = await this.prisma.rentalOrder.findFirst({ where: parentWhere(), select: { id: true, updatedAt: true } });
+    const current = ids.length ? await this.prisma.rentalInspectionRecord.findMany({ where: { ...where, id: { in: ids } },
+      select: { id: true, revision: true, updatedAt: true }, take: query.limit + 1 }) : [];
+    if (!after || after.updatedAt.getTime() !== parent.updatedAt.getTime() || current.length !== ids.length
+      || selected.some(row => !current.some(now => now.id === row.id && now.revision === row.revision && now.updatedAt.getTime() === row.updatedAt.getTime())))
+      throw new ConflictException('检查事实读取期间范围或记录变化');
+    await assertScope();
+    return { items, nextCursor: rows.length > query.limit ? items.at(-1)!.id : null, coverage: 'page_not_total' };
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {

@@ -26,6 +26,8 @@ import { TenantAppearanceProfileService } from "../client/tenant-appearance-prof
 import { AccountAppearanceService } from "../client/account-appearance.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
+import { resolveUserBusinessLocationScope } from "../../common/business-location-scope";
+import type { OrganizationLocationScope } from "../../common/organization-location-scope";
 
 interface LoginFailureState {
   count: number;
@@ -340,8 +342,9 @@ export class AuthService {
    */
   async resolveAccessContext(
     authorization?: string,
-    options: { allowInvalidWorkspace?: boolean; audience?: AuthAudience } = {}
-  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean } | undefined> {
+    options: { allowInvalidWorkspace?: boolean; audience?: AuthAudience; businessScope?: boolean } = {}
+  ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean;
+    businessLocationScope?: OrganizationLocationScope } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
     const payload = this.verifyAccessToken(token);
@@ -373,7 +376,14 @@ export class AuthService {
     // 撤销/停用后 fallback 到租户级身份时，workspaceId 不能再当有效范围使用——
     // 否则被撤销的账号拿着旧会话仍能读旧空间的经营数据。
     const workspaceValid = Boolean(workspaceId) && Boolean(workspaceUser);
-    return { user, tenantUser, workspaceId, hasWorkspaces, workspaceValid };
+    // Internal business consumers opt into the SAME current organization/location
+    // projection as the Guard. Keep raw role configuration and tenant-wide auth
+    // callers unchanged; this projection is not route/resource authorization.
+    const businessLocationScope = options.businessScope
+      ? await resolveUserBusinessLocationScope(user, workspaceValid ? workspaceId : undefined,
+        user.locationScope ?? { mode: "all", locationIds: [] }, this.prisma) : undefined;
+    return { user, tenantUser, workspaceId, hasWorkspaces, workspaceValid,
+      ...(businessLocationScope ? { businessLocationScope } : {}) };
   }
 
   /** SPACE-02：切换当前经营空间。校验成员资格与空间状态后重新签发访问令牌。 */
