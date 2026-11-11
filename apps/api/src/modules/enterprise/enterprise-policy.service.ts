@@ -354,7 +354,8 @@ export class EnterprisePolicyService {
   }
   assertSameBasis(before: EnterpriseBookingBasis | undefined, after: EnterpriseBookingBasis | undefined) {
     const comparable = (basis?: EnterpriseBookingBasis) => basis ? { ...basis, acknowledgedAt: undefined } : undefined;
-    if (JSON.stringify(comparable(before)) !== JSON.stringify(comparable(after))) throw new ConflictException("企业关系、政策或告知已变化，请重新报价并取得批准");
+    // MySQL JSON reorders keys. Compare original fields through Core's canonical fingerprint.
+    if (requestFingerprint(comparable(before)) !== requestFingerprint(comparable(after))) throw new ConflictException("企业关系、政策或告知已变化，请重新报价并取得批准");
   }
   /** Review window is explicitly configured by the same intersected policies. */
   async approvalLifetime(tenantId: string, corporateId: string, membershipId: string, tx: Prisma.TransactionClient) {
