@@ -1,12 +1,87 @@
-/** Spending review only. Physical exchange, inspection and funding remain in the
- * original merchant flow; original-key recovery never dispatches another command. */
-import { useEffect, useState } from "react";
+/** Enterprise expense review and using-customer inspection consent.
+ * The original merchant flow owns execution and funding. Recovery retains
+ * the original operation and independent consent references. */
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { formatRentalMoney, type EnterpriseExchangeConfirmationResult, type EnterpriseExchangeRequestOriginalResult, type EnterpriseExchangeChoices, type ClientOrderView, type EnterpriseExchangeApprovalView, type EnterpriseExchangeIntent, type EnterpriseOperationResult } from "@rental-os/shared";
+import { enterpriseExchangeInspectionConsentSnapshot, formatRentalMoney, type RentalExchangeInspectionCustomerMaterial, type RentalExchangeInspectionConsent, type EnterpriseExchangeConfirmationResult, type EnterpriseExchangeRequestOriginalResult, type EnterpriseExchangeChoices, type ClientOrderView, type EnterpriseExchangeApprovalView, type EnterpriseExchangeIntent, type EnterpriseOperationResult } from "@rental-os/shared";
 import { ActionButton, Alert, Button, Checkbox, Form, Input, SaveButton, Select, Table } from "@/components/ui/customer-entry";
 import { useLocale } from "@/app/locale";
 import { useEnterprise } from "./enterprise-session";
 import { useOriginalWorkflowOperation } from "./original-workflow-operation";
+
+function ExchangeInspectionReview({ row, english }: { row: EnterpriseExchangeApprovalView; english: boolean }) {
+  const context = useEnterprise(), owner = useRef(context); owner.current = context;
+  const identity = context.identity, tenantCode = context.tenantCode, workspaceCode = context.session?.workspace?.workspaceCode;
+  const customerId = context.session?.customer.customerId, orderId = row.orderId, approvalId = row.id;
+  const [preparationId, setPreparationId] = useState(""), [reviewed, setReviewed] = useState(false);
+  const [consent, setConsent] = useState<{ identity: string; value: RentalExchangeInspectionConsent }>();
+  const operation = useOriginalWorkflowOperation(`exchange-approvals:inspection:${orderId}:${approvalId}`);
+  const assertCurrent = () => {
+    operation.assertCurrent();
+    const current = owner.current;
+    if (current.identity !== identity || current.tenantCode !== tenantCode || current.session?.customer.customerId !== customerId
+      || current.session?.workspace?.workspaceCode !== workspaceCode || current.loading || current.signal.aborted) throw new Error(english ? "Original inspection context changed" : "原检查上下文已变化");
+  };
+  const query = useQuery({ queryKey: ["enterprise-exchange-inspection", identity, approvalId, orderId, preparationId, workspaceCode],
+    enabled: Boolean(customerId && preparationId && row.state === "approved" && !operation.pending),
+    queryFn: async ({ signal }) => {
+      assertCurrent();
+      if (!/^[A-Za-z0-9._:-]{1,191}$/u.test(preparationId)) throw new Error("原检查准备引用无效");
+      const material = await operation.read<RentalExchangeInspectionCustomerMaterial>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-inspections/${encodeURIComponent(preparationId)}`, signal);
+      assertCurrent();
+      if (material.orderId !== orderId || material.customerId !== customerId || material.preparationId !== preparationId
+        || material.expectedOrderUpdatedAt !== row.expectedOrderUpdatedAt || !/^[a-f0-9]{64}$/u.test(material.preparationHash)
+        || !/^[a-f0-9]{64}$/u.test(material.materialHash) || !Array.isArray(material.templates) || material.templates.length > 40
+        || !Array.isArray(material.inspections) || material.inspections.length > 40 || !Array.isArray(material.exceptions) || material.exceptions.length > 200
+        || !Array.isArray(material.photos) || material.photos.length > 4000
+        || material.templates.some(template => !Array.isArray(template.fields) || template.fields.length > 100)
+        || material.inspections.some(inspection => !inspection.results || typeof inspection.results !== "object" || Array.isArray(inspection.results))) throw new Error("原本人检查材料不可核对");
+      return { identity, preparationId, workspaceCode, material };
+    } });
+  const material = !query.error && !query.isFetching && query.data?.identity === identity && query.data.preparationId === preparationId
+    && query.data.workspaceCode === workspaceCode ? query.data.material : undefined;
+  const observed = consent?.identity === identity ? consent.value : undefined;
+  const confirm = () => operation.run<RentalExchangeInspectionConsent>(() => {
+    assertCurrent();
+    if (!material || !reviewed || row.state !== "approved" || !row.employeeConfirmation || material.photos.length) throw new Error("须本人核对原具体检查及照片读取能力后确认");
+    return { path: `/enterprise/orders/${encodeURIComponent(orderId)}/exchange-inspection-consents`, originalTarget: material.preparationId,
+      input: { preparationId: material.preparationId, preparationHash: material.preparationHash, materialHash: material.materialHash,
+        expectedOrderUpdatedAt: material.expectedOrderUpdatedAt, expectedRevision: 0, confirm: true } };
+  }, async value => {
+    assertCurrent();
+    const original = enterpriseExchangeInspectionConsentSnapshot(value, { orderId, customerId: customerId!, preparationId });
+    if (!material || !original || original.preparationHash !== material.preparationHash || original.materialHash !== material.materialHash
+      || original.workspaceId !== material.workspaceId) throw new Error("原具体检查同意结果仍待核对");
+    setConsent({ identity, value: original }); setReviewed(false);
+  });
+  const original = () => operation.recoverInspectionConsent(async value => {
+    assertCurrent(); setPreparationId(value.preparationId); setConsent({ identity, value }); setReviewed(false);
+  });
+  return <section aria-label={english ? "Specific exchange inspection" : "具体换货检查"}>
+    <h4>{english ? "Specific exchange inspection" : "具体换货检查"}</h4>
+    <p>{english ? "Review the original-item inspection and replacement handover submitted by the merchant. Expense consent is recorded separately." : "核对商户提交的旧物检查与替换物交付，费用确认单独保存。"}</p>
+    <Input aria-label={english ? "Original inspection preparation" : "原检查准备引用"} value={preparationId} disabled={operation.busy || Boolean(operation.pending)} maxLength={191}
+      onChange={event => { setPreparationId(event.target.value.trim()); setReviewed(false); setConsent(undefined); }}/>
+    <ActionButton intent="refresh" label={english ? "Read this inspection" : "读取本次具体检查"} disabled={!preparationId || query.isFetching || Boolean(operation.pending)} onAction={async () => { assertCurrent(); await query.refetch({ throwOnError: true }); assertCurrent(); }}/>
+    {query.isFetching && <p role="status">{english ? "Reading the original inspection" : "正在读取原具体检查"}</p>}
+    {query.error && <Alert type="error" title={english ? "Original inspection unavailable" : "原具体检查不可用"}/>}
+    {material && <>
+      {material.templates.map(template => {
+        const inspection = material.inspections.find(value => value.side === template.side && value.templateId === template.templateId && value.templateVersion === template.templateVersion);
+        return <section key={`${template.side}:${template.templateId}`}><h5>{template.name} / {template.templateVersion}</h5>
+          <dl>{template.fields.map(field => <div key={field.code}><dt>{field.label}</dt><dd>{inspection?.results[field.code] === undefined ? english ? "Unrecorded" : "原记录缺失" : JSON.stringify(inspection.results[field.code])}</dd></div>)}</dl>
+        </section>;
+      })}
+      {material.exceptions.map((exception, index) => <p key={index}>{exception.code} / {exception.description}</p>)}
+      {material.photos.length > 0 && <Alert type="warning" title={english ? "Authenticated inspection photo viewing unavailable" : "受权检查照片查看尚未装配"}/>}
+      <Checkbox checked={reviewed} disabled={operation.blocked || material.photos.length > 0} onChange={event => setReviewed(event.target.checked)}>{english ? "I reviewed and agree to this specific inspection and handover" : "我已核对并同意本次具体检查与交付"}</Checkbox>
+      <ActionButton intent="confirm" label={english ? "Confirm this specific inspection" : "确认本次具体检查"} disabled={operation.blocked || !reviewed || material.photos.length > 0} onAction={confirm}/>
+    </>}
+    {operation.pending && <ActionButton intent="refresh" label={english ? "Read original inspection consent" : "读取原检查同意收据"} disabled={operation.busy} onAction={original}/>}
+    {observed && <dl><dt>{english ? "Original consent" : "原检查同意"}</dt><dd>{observed.id}</dd><dt>{english ? "Original confirmation key" : "原确认键"}</dt><dd>{observed.operationKey}</dd><dt>{english ? "Original preparation" : "原检查准备"}</dt><dd>{observed.preparationId}</dd></dl>}
+    {operation.error && <Alert type="error" title={operation.error}/>}
+  </section>;
+}
 
 function ExchangeReview({ row, reviewMode, unavailable, operation, refresh }: {
   row: EnterpriseExchangeApprovalView; reviewMode: boolean; unavailable: boolean;
@@ -42,10 +117,13 @@ function ExchangeReview({ row, reviewMode, unavailable, operation, refresh }: {
       <dt>{english ? "Request expires" : "申请有效期"}</dt><dd>{time(row.expiresAt)}</dd>
       <dt>{english ? "Purpose" : "用途"}</dt><dd>{row.reason}</dd>
     </dl>
-    <Alert type="warning" title={english ? "Approval authorizes this expense only" : "批准仅授权本次费用"}
-      description={english ? "It does not reserve a replacement, collect funds, complete an inspection or apply the exchange. The original merchant execution is not connected yet." : "不预占替换商品、不收款、不代替现场检查，也不执行换货；原商户执行接点尚未接通。"} />
-    {row.employeeConfirmation && <Alert type="info" title={english ? "Expense confirmed by applicant; exchange not executed" : "本人已确认费用；换货尚未执行"}
-      description={english ? "Merchant inspection and your confirmation of that inspection remain separate. This consent does not reserve stock or confirm payment." : "商户检查及对该检查的本人确认仍须另行完成；本次同意不预占库存，不确认收付款。"} />}
+    <Alert type="info" title={english ? "Original expense authorization" : "原费用授权"}
+      description={english ? "The merchant executes under the original approval, expense consent and specific inspection consent. Read the original merchant receipt for the applied result." : "商户依据原批准、本人费用确认和具体检查同意执行换货，执行结果按原商户收据核对。"} />
+    {row.employeeConfirmation && <Alert type="info" title={(row.execution === undefined || row.execution === "original_merchant_execution_not_connected") && row.state !== "consumed"
+      ? english ? "Expense confirmed by applicant; exchange not executed" : "本人已确认费用；换货尚未执行"
+      : english ? "Original expense consent recorded" : "原本人费用确认已记录"}/>}
+    {!blocked && !reviewMode && own && row.employeeConfirmation && <ExchangeInspectionReview key={row.id} row={row} english={english}/>}
+    {row.state === "consumed" && <Alert type="info" title={english ? "Original approval consumed" : "原批准已消费"} description={english ? "Read the original merchant execution receipt." : "请读取原商户执行收据核对结果。"}/>}
     {((reviewMode && !own && row.state === "pending") || (!reviewMode && own && ["pending", "approved"].includes(row.state))) && <>
       <Input.TextArea aria-label={english ? "Reason for this exchange decision" : "本条换货处理原因"} value={reason} maxLength={500} disabled={blocked} onChange={event => setReason(event.target.value)} />
       <Checkbox checked={confirmed} disabled={blocked} onChange={event => setConfirmed(event.target.checked)}>{english ? "I reviewed this original exchange and its expense" : "我已核对本条原换货申请及费用"}</Checkbox>
@@ -59,7 +137,7 @@ function ExchangeReview({ row, reviewMode, unavailable, operation, refresh }: {
     </>}
   </section>;
 }
-const labels = (state: string, english: boolean) => (english ? { pending: "Awaiting approval", approved: "Approved, not applied", rejected: "Rejected", withdrawn: "Withdrawn", expired: "Expired" } : { pending: "待审批", approved: "已批准，未执行", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效" })[state] ?? state;
+const labels = (state: string, english: boolean) => (english ? { pending: "Awaiting approval", approved: "Approved, awaiting execution", rejected: "Rejected", withdrawn: "Withdrawn", expired: "Expired", consumed: "Approval consumed" } : { pending: "待审批", approved: "已批准，待执行", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效", consumed: "批准已消费" })[state] ?? state;
 export function EnterpriseExchangeApprovalsPage() {
   const context = useEnterprise(), { locale } = useLocale(), english = locale === "en-US";
   const [mode, setMode] = useState("mine"), [selected, setSelected] = useState("");

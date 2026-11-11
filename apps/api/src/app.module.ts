@@ -74,6 +74,8 @@ import { PlatformService } from "./modules/platform/platform.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalExchangePreviewService } from "./modules/rental-core/rental-exchange-preview.service";
 import { RentalExchangeInspectionPreparationService } from "./modules/rental-core/rental-exchange-inspection-preparation.service";
+import { RentalExchangeInspectionConsentService } from "./modules/rental-core/rental-exchange-inspection-consent.service";
+import { RentalApprovedExchangeService } from "./modules/rental-core/rental-approved-exchange.service";
 import { RentalExchangeInspectionMediaService } from "./modules/rental-core/rental-exchange-inspection-media.service";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalCategoryResolver } from "./modules/rental-core/rental-category-resolver.service";
@@ -347,6 +349,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     RentalCoreService,
     RentalExchangePreviewService,
     RentalExchangeInspectionPreparationService,
+    RentalExchangeInspectionConsentService,
+    RentalApprovedExchangeService,
     RentalExchangeInspectionMediaService,
     RentalCategoryResolver,
     CategoryGovernanceService,

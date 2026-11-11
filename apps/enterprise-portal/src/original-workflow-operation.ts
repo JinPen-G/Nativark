@@ -1,7 +1,7 @@
 /** Customer workflow writes are single-dispatch. Durable recovery stores only the
  * original key/path/state, never input or credentials; cancellation is not rollback. */
 import { useEffect, useRef, useState } from "react";
-import { ENTERPRISE_PORTAL_ACTIONS, enterpriseExpenseRequestMatches, enterpriseExpenseRequestClosureMatches, enterpriseTransferDecisionResolutionMatches, type EnterpriseTransferDecisionResolution, type EnterpriseExchangeRequestOriginalResult, type EnterpriseExtensionRequestOriginalResult, type EnterpriseOperationResult, type EnterpriseInviteCreated } from "@rental-os/shared";
+import { ENTERPRISE_PORTAL_ACTIONS, enterpriseExchangeInspectionConsentSnapshot, enterpriseExpenseRequestMatches, enterpriseExpenseRequestClosureMatches, enterpriseTransferDecisionResolutionMatches, type RentalExchangeInspectionConsent, type RentalExchangeInspectionConsentOriginal, type EnterpriseTransferDecisionResolution, type EnterpriseExchangeRequestOriginalResult, type EnterpriseExtensionRequestOriginalResult, type EnterpriseOperationResult, type EnterpriseInviteCreated } from "@rental-os/shared";
 import { customerSessionGeneration } from "@rental-os/web-client";
 import { useEnterprise } from "./enterprise-session";
 
@@ -11,7 +11,20 @@ type Slot = { pending?: Pending; busy: boolean; tenantCode: string; generation: 
 // In-memory input freezes dispatch; durable storage holds no application/invitation body.
 const unresolved = new Map<string, Slot>();
 const allowsOriginalTarget = (path: string) => ["/enterprise/extension-approvals/submit", "/enterprise/extension-approvals", "/enterprise/exchange-approvals"].includes(path)
-  || /^\/enterprise\/exchange-approvals\/[a-zA-Z0-9_%~-]+\/expense-confirmation$/u.test(path);
+  || /^\/enterprise\/exchange-approvals\/[a-zA-Z0-9_%~-]+\/expense-confirmation$/u.test(path)
+  || /^\/enterprise\/orders\/[A-Za-z0-9._:%~-]+\/exchange-inspection-consents$/u.test(path);
+const inspectionConsentTarget = (path: string): string | undefined => {
+  if (!path.includes("exchange-inspection-consents")) return undefined;
+  const match = /^\/enterprise\/orders\/([A-Za-z0-9._:%~-]+)\/exchange-inspection-consents$/u.exec(path);
+  let orderId: string | undefined;
+  try { orderId = match && decodeURIComponent(match[1]) || undefined; } catch { /* Invalid encoded references remain blocked. */ }
+  if (!orderId || !/^[A-Za-z0-9._:-]{1,191}$/u.test(orderId)) throw new Error("原检查同意路径不可核对，保留原键");
+  return orderId;
+};
+const inspectionConsentScopeMatches = (scope: string, orderId: string) => {
+  const prefix = `exchange-approvals:inspection:${orderId}:`;
+  return scope.startsWith(prefix) && /^[A-Za-z0-9._:-]{1,191}$/u.test(scope.slice(prefix.length));
+};
 // Only registered original paths can select a narrower receipt reader.
 const policySaveTarget = (path: string): { corporateId: string; membershipId?: string } | undefined => {
   if (!/^\/enterprise\/corporates\/[^/]+\/(?:members\/[^/]+\/)?policy(?:\/|$)/u.test(path)) return undefined;
@@ -220,7 +233,7 @@ function readReference(key: string): Pending | undefined {
   let value;
   try { value = JSON.parse(raw); } catch { throw new Error("原操作引用不可读取，不能重新派发 / Original reference unavailable"); }
   if (!value || typeof value.key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.key)
-    || typeof value.path !== "string" || !/^\/enterprise\/[a-zA-Z0-9_/%-]+$/u.test(value.path) || value.path.length > 600
+    || typeof value.path !== "string" || !/^\/enterprise\/[a-zA-Z0-9_/%-]+$/u.test(value.path) && !inspectionConsentTarget(value.path) || value.path.length > 600
     || value.originalTarget !== undefined && (!allowsOriginalTarget(value.path) || typeof value.originalTarget !== "string" || !value.originalTarget || value.originalTarget.length > 191)
     || value.closureKey !== undefined && ((!transferDecisionTarget(value.path) && (!["/enterprise/extension-approvals", "/enterprise/exchange-approvals"].includes(value.path) || !value.originalTarget)) || typeof value.closureKey !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(value.closureKey) || value.closureKey === value.key)
     || !["unknown", "committed"].includes(value.state)) throw new Error("原操作引用不可读取，不能重新派发 / Original reference unavailable");
@@ -338,6 +351,7 @@ function originalWorkflowReferences(scope: "members" | "invites" | "join" | "joi
 
 export function useOriginalWorkflowOperation(scope: string, recovery?: MemberReadOnlyRecovery) {
   const context = useEnterprise();
+  const identity = context.identity;
   const readOnly = recovery !== undefined, originalOperationKey = recovery?.originalOperationKey, originalMembershipId = recovery?.originalMembershipId, originalInviteId = recovery?.originalInviteId, originalJoinRequestId = recovery?.originalJoinRequestId, originalApplicationId = recovery?.originalApplicationId;
   const operationCorporateId = recovery?.originalCorporateId ?? (scope === "rental-handoff" ? "" : context.selectedCorporateId), originalAdministrator = recovery?.originalAdministrator ?? false, originalJoinSubmission = recovery?.originalJoinSubmission ?? false, originalApplicationSave = recovery?.originalApplicationSave ?? false, originalPolicySave = recovery?.originalPolicySave ?? false;
   const originalManagementSave = recovery?.originalManagementSave ?? false, originalManagementRequestId = recovery?.originalManagementRequestId;
@@ -367,7 +381,7 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
   const [, render] = useState(0);
   const [failure, setFailure] = useState<{ scopeKey: string; message: string }>();
   const report = (error?: unknown) => {
-    if (mounted.current && latestSlotKey.current === slotKey && owner.current.identity === context.identity) setFailure(error === undefined ? undefined : { scopeKey: slotKey, message: workflowError(error) });
+    if (mounted.current && latestSlotKey.current === slotKey && owner.current.identity === identity) setFailure(error === undefined ? undefined : { scopeKey: slotKey, message: workflowError(error) });
   };
   const generation = customerSessionGeneration(context.tenantCode);
   // Permission revisions invalidate running callbacks, not the original receipt
@@ -390,10 +404,10 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
   const assertCurrent = () => {
     if (recoveryError) throw new Error(recoveryError);
     if (latestRecoveryBinding.current !== recoveryBinding) throw sessionChanged();
-    if (!mounted.current || latestSlotKey.current !== slotKey || owner.current.identity !== context.identity || context.signal.aborted
+    if (!mounted.current || latestSlotKey.current !== slotKey || owner.current.identity !== identity || context.signal.aborted
       || customerSessionGeneration(context.tenantCode) !== generation || !context.session) throw sessionChanged();
   };
-  const publish = () => { if (mounted.current && latestSlotKey.current === slotKey && owner.current.identity === context.identity) render(n => n + 1); };
+  const publish = () => { if (mounted.current && latestSlotKey.current === slotKey && owner.current.identity === identity) render(n => n + 1); };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const read = async <T,>(path: string, signal?: AbortSignal) => {
     assertCurrent();
@@ -426,6 +440,9 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
       const saved = readReference(storageKey);
       if (saved) { slot.pending = saved; publish(); throw new Error("请先核对原操作，不能重新发送业务写入 / Read the original result before another write"); }
       const command = await prepare(); assertCurrent();
+      const inspectionOrderId = inspectionConsentTarget(command.path);
+      if (inspectionOrderId && (!inspectionConsentScopeMatches(scope, inspectionOrderId) || !command.originalTarget
+        || !/^[A-Za-z0-9._:-]{1,191}$/u.test(command.originalTarget) || command.method !== undefined && command.method !== "POST")) throw new Error("原检查同意对象或scope不一致，未创建原键");
       const exit = memberExitTarget(command.path), initiation = transferInitiationTarget(command.path), change = memberChangeTarget(command.path), administrator = administratorChangeTarget(command.path), invitation = inviteCreationTarget(command.path), revocation = inviteRevocationTarget(command.path), withdrawal = joinWithdrawalTarget(command.path), joinReview = joinReviewTarget(command.path), submission = joinSubmissionTarget(command.path), applicationWithdrawal = applicationWithdrawalTarget(command.path), applicationSave = applicationSaveTarget(command.path), policySave = policySaveTarget(command.path), managementSave = managementSaveTarget(command.path), managementWithdrawal = managementWithdrawalTarget(command.path), rentalHandoff = rentalHandoffTarget(command.path), rentalHandoffWithdrawal = rentalHandoffWithdrawalTarget(command.path);
       if (Boolean(rentalHandoff || rentalHandoffWithdrawal) !== (scope === "rental-handoff")) throw new Error("原交接申请scope不匹配，未创建原键 / Original rental-handoff scope mismatch");
       if ((invitation || revocation || withdrawal || joinReview || submission || applicationWithdrawal || applicationSave || managementSave || managementWithdrawal || rentalHandoff || rentalHandoffWithdrawal) && command.method !== undefined && command.method !== "POST") throw new Error("原邀请创建只支持登记 POST，未创建原键 / Original invite creation requires the registered POST");
@@ -442,11 +459,22 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
         const latest = readReference(storageKey);
         return latest && latest.key === pending.key && latest.path === pending.path && !latest.closureKey && !latest.originalTarget;
       };
+      const sameInspectionReference = () => {
+        const saved = readReference(storageKey);
+        return saved && saved.key === pending.key && saved.path === pending.path && saved.originalTarget === pending.originalTarget && !saved.closureKey;
+      };
       let value: T;
       try {
         assertCurrent();
         // Dispatch the frozen body once, never the form's later values or a pending operation again.
         value = await context.write<T>(pending.path, { ...JSON.parse(pending.body), operationKey: pending.key }, command.method);
+        if (inspectionOrderId) {
+          const consent = enterpriseExchangeInspectionConsentSnapshot(value, { orderId: inspectionOrderId,
+            customerId: context.session!.customer.customerId, preparationId: pending.originalTarget!, operationKey: pending.key });
+          const originalInput = JSON.parse(pending.body);
+          if (!consent || consent.preparationHash !== originalInput.preparationHash || consent.materialHash !== originalInput.materialHash
+            || consent.expectedOrderUpdatedAt !== originalInput.expectedOrderUpdatedAt) throw new Error("原检查同意结果与本次材料不一致，保留原键");
+        }
         if (exit && !memberExitResultMatches(value, exit)) throw new Error("原退出结果缺少精确关系、状态或修订，保留原引用");
         if (initiation && !transferInitiationResultMatches(value)) throw new Error("原交接发起结果缺少原工作流、pending 或初始修订，保留原引用");
         if (change && !memberChangeResultMatches(value, change)) throw new Error("原成员变更结果缺少精确关系、状态或修订，保留原引用");
@@ -476,11 +504,16 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
         throw error;
       }
       assertCurrent();
+      if (inspectionOrderId && !sameInspectionReference()) throw new Error("原检查同意引用已变化，保留原键");
       if ((exit || initiation || change || administrator || invitation || revocation || withdrawal || joinReview || submission || applicationWithdrawal || applicationSave || policySave || managementSave || managementWithdrawal || rentalHandoff || rentalHandoffWithdrawal) && !sameNarrowReference()) throw new Error("原退出引用已变化，不能覆盖其他请求");
       rememberReference(storageKey, pending); publish();
       try { await afterCommit(value); assertCurrent(); }
       catch (error) { assertCurrent(); throw new Error(`已提交，后续读取失败；仅可刷新已提交结果 / Committed; refresh failed: ${workflowError(error)}`); }
+      if (inspectionOrderId && !sameInspectionReference()) throw new Error("原检查同意引用已变化，保留原键");
       if ((exit || initiation || change || administrator || invitation || revocation || withdrawal || joinReview || submission || applicationWithdrawal || applicationSave || policySave || managementSave || managementWithdrawal || rentalHandoff || rentalHandoffWithdrawal) && !sameNarrowReference()) throw new Error("原退出引用已变化，不能清除其他请求");
+      // A specific inspection has one customer consent. Keep its acknowledged
+      // reference for remount and merchant handover instead of issuing another C.
+      if (inspectionOrderId) { report(); return value; }
       finish(); report(); return value;
       });
     } catch (error) { report(error); throw error; }
@@ -667,6 +700,30 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
     } catch (error) { report(error); throw error; }
     finally { slot.busy = false; publish(); }
   };
+  const recoverInspectionConsent = async (afterRead: (consent: RentalExchangeInspectionConsent) => Promise<void>) => {
+    assertCurrent();
+    const pending = slot.pending, orderId = pending && inspectionConsentTarget(pending.path);
+    if (!pending || !orderId || !inspectionConsentScopeMatches(scope, orderId) || !pending.originalTarget || slot.busy) throw new Error("原检查同意仍待核对，请保留原引用");
+    slot.busy = true; publish();
+    try {
+      if (!navigator.locks?.request) throw new Error("原检查同意协调能力不可用");
+      await navigator.locks.request(`${storageKey}:dispatch`, async () => {
+        assertCurrent();
+        const before = readReference(storageKey);
+        if (!before || before.key !== pending.key || before.path !== pending.path || before.originalTarget !== pending.originalTarget || before.closureKey) throw new Error("原检查同意引用已变化");
+        const result = await read<RentalExchangeInspectionConsentOriginal>(`${pending.path}/operations/${encodeURIComponent(pending.key)}`);
+        const consent = result.state === "observed" && result.retryable === false ? enterpriseExchangeInspectionConsentSnapshot(result.consent,
+          { orderId, customerId: context.session!.customer.customerId, preparationId: pending.originalTarget!, operationKey: pending.key }) : undefined;
+        if (!consent) throw new Error("原检查同意尚无可核对收据，保留原键");
+        await afterRead(consent); assertCurrent();
+        const after = readReference(storageKey);
+        if (!after || after.key !== pending.key || after.path !== pending.path || after.originalTarget !== pending.originalTarget || after.closureKey) throw new Error("原检查同意引用已变化");
+        pending.state = "committed";
+        rememberReference(storageKey, pending); publish(); report();
+      });
+    } catch (error) { report(error); throw error; }
+    finally { slot.busy = false; publish(); }
+  };
   let transferDecisionId: string | undefined, exitTarget: ReturnType<typeof memberExitTarget>, transferInitiationCorporateId: string | undefined, changeTarget: ReturnType<typeof memberChangeTarget>, administratorTarget: ReturnType<typeof administratorChangeTarget>, inviteCreationCorporateId: string | undefined, inviteRevocation: ReturnType<typeof inviteRevocationTarget>, joinWithdrawalId: string | undefined, joinReview: ReturnType<typeof joinReviewTarget>, joinSubmission = false, applicationWithdrawalId: string | undefined, applicationSave = false, policyTarget: ReturnType<typeof policySaveTarget>, managementSaveCorporateId: string | undefined, managementWithdrawalId: string | undefined;
   try { transferDecisionId = slot.pending && transferDecisionTarget(slot.pending.path); exitTarget = slot.pending && memberExitTarget(slot.pending.path); transferInitiationCorporateId = slot.pending && transferInitiationTarget(slot.pending.path); changeTarget = slot.pending && memberChangeTarget(slot.pending.path); administratorTarget = slot.pending && administratorChangeTarget(slot.pending.path); inviteCreationCorporateId = slot.pending && inviteCreationTarget(slot.pending.path); inviteRevocation = slot.pending && inviteRevocationTarget(slot.pending.path); joinWithdrawalId = slot.pending && joinWithdrawalTarget(slot.pending.path); joinReview = slot.pending && joinReviewTarget(slot.pending.path); joinSubmission = Boolean(slot.pending && joinSubmissionTarget(slot.pending.path)); applicationWithdrawalId = slot.pending && applicationWithdrawalTarget(slot.pending.path); applicationSave = Boolean(slot.pending && applicationSaveTarget(slot.pending.path)); policyTarget = slot.pending && policySaveTarget(slot.pending.path); managementSaveCorporateId = slot.pending && managementSaveTarget(slot.pending.path); managementWithdrawalId = slot.pending && managementWithdrawalTarget(slot.pending.path); } catch { /* Invalid references remain blocked; never infer a new target. */ }
   let rentalHandoffOrderId: string | undefined, rentalHandoffWithdrawalId: string | undefined;
@@ -678,5 +735,5 @@ export function useOriginalWorkflowOperation(scope: string, recovery?: MemberRea
     closeExtensionRequest: async (reason: string, afterRead: (result: EnterpriseExtensionRequestOriginalResult) => Promise<void>) => { assertWritable(); return requestOperation("extension", reason, afterRead); },
     recoverExchangeRequest: (afterRead: (result: EnterpriseExchangeRequestOriginalResult) => Promise<void>) => requestOperation("exchange", undefined, afterRead),
     closeExchangeRequest: async (reason: string, afterRead: (result: EnterpriseExchangeRequestOriginalResult) => Promise<void>) => { assertWritable(); return requestOperation("exchange", reason, afterRead); },
-    error: storageError || (failure?.scopeKey === slotKey ? failure.message : ""), run, recover, read, assertCurrent };
+    error: storageError || (failure?.scopeKey === slotKey ? failure.message : ""), run, recover, recoverInspectionConsent, read, assertCurrent };
 }

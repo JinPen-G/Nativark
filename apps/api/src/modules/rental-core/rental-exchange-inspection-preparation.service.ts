@@ -3,8 +3,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { PrepareRentalExchangeInspectionRequest, RentalExchangeInspectionRequirementsRequest, RentalExchangeInspectionRequirements,
-  RentalExchangeInspectionPreparation, RentalExchangeInspectionPreparationOriginal, RentalExchangeInspectionIntent, RentalOrder, SystemUserRow } from "@rental-os/shared";
+import { rentalExchangeExecutionBasisComparable, type PrepareRentalExchangeInspectionRequest, type RentalExchangeInspectionRequirementsRequest, type RentalExchangeInspectionRequirements,
+  type RentalExchangeInspectionPreparation, type RentalExchangeInspectionPreparationOriginal, type RentalExchangeInspectionIntent, type RentalOrder, type SystemUserRow } from "@rental-os/shared";
 import { getRequestIdentity, requireRequestTenantId, requireRequestUserId, requireRequestWorkspaceId } from "../../common/request-identity";
 import { enabledOrganizationSubtreeIds, organizationLocationScope } from "../../common/organization-location-scope";
 import { AuthService } from "../auth/auth.service";
@@ -14,9 +14,10 @@ import { RentalExchangePreviewService } from "./rental-exchange-preview.service"
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 import { requestFingerprint } from "./rental-idempotency.repository";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
-import { preparedInspectionResults } from "./rental-inspection-result-validation";
+import { acceptPreparedExchangeInspectionMedia, readPreparedExchangeInspection, recordPreparedExchangeInspectionMedia,
+  verifyPreparedExchangeInspectionMedia, type ExchangeInspectionPreparationRow } from "./rental-exchange-inspection-preparation.read";
 
-type OriginalRow = { id: string; orderId: string; workspaceId: string; actorUserId: string; operationKey: string; requestHash: string; payloadHash: string; payload: string | RentalExchangeInspectionPreparation };
+type OriginalRow = ExchangeInspectionPreparationRow;
 @Injectable()
 export class RentalExchangeInspectionPreparationService {
   constructor(private readonly prisma: PrismaService, private readonly core: RentalCoreService, private readonly prices: RentalExchangePreviewService,
@@ -77,16 +78,12 @@ export class RentalExchangeInspectionPreparationService {
     const requirementKeys = templates.map(row => `${row.side}:${row.template.id}`);
     if (new Set(requirementKeys).size !== requirementKeys.length) throw new ConflictException("原检查模板关联重复");
     const requirementsHash = requestFingerprint({ orderId: order.id, expectedOrderUpdatedAt: order.updatedAt, exchange: effectiveExchange, templates,
-      basis: { ...basis, effectiveFrom: undefined } });
+      basis: rentalExchangeExecutionBasisComparable(basis) });
     return { orderId: order.id, workspaceId: requireRequestWorkspaceId(), expectedOrderUpdatedAt: order.updatedAt, exchange: effectiveExchange, templates, executionBasis: basis, requirementsHash,
-      media: "unavailable" as const, reservation: "not_reserved" as const };
+      media: "dedicated_source_only" as const, reservation: "not_reserved" as const };
   }
   private async requirementsInTransaction(order: RentalOrder, input: RentalExchangeInspectionRequirementsRequest, tx: Prisma.TransactionClient) {
-    const requirements = await this.sourceRequirements(order, input, tx);
-    // Source creation alone does not connect photo results to preparation or consent.
-    if (order.ruleSnapshot?.fulfillment?.evidenceRequired || requirements.executionBasis.ruleSnapshot?.fulfillment?.evidenceRequired
-      || requirements.templates.some(row => row.template.fields.some(field => field.type === "photo" && field.required))) throw new ConflictException("必需换货检查影像的专用来源未接通");
-    return requirements;
+    return this.sourceRequirements(order, input, tx);
   }
   /** Internal source authority uses the same original order lock and templates,
    * without relaxing the preparation's required-evidence gate. */
@@ -107,11 +104,7 @@ export class RentalExchangeInspectionPreparationService {
     return tx.$queryRaw<OriginalRow[]>`SELECT * FROM rental_exchange_inspection_preparations WHERE tenantId=${tenantId} AND workspaceId=${workspaceId} AND actorUserId=${actorUserId} AND operationKey=${key}`;
   }
   private view(row: OriginalRow, orderId: string): RentalExchangeInspectionPreparation {
-    const value = typeof row.payload === "string" ? JSON.parse(row.payload) as RentalExchangeInspectionPreparation : row.payload;
-    if (!value || row.orderId !== orderId || value.id !== row.id || value.orderId !== orderId || value.workspaceId !== row.workspaceId
-      || value.actorUserId !== row.actorUserId || value.operationKey !== row.operationKey || value.requestHash !== row.requestHash || value.state !== "prepared" || value.revision !== 1
-      || value.customerConsent !== "not_connected" || value.execution !== "not_connected" || requestFingerprint(value) !== row.payloadHash) throw new ConflictException("原换货检查准备证据不一致");
-    return value;
+    return readPreparedExchangeInspection(row, { tenantId: requireRequestTenantId(), workspaceId: requireRequestWorkspaceId(), orderId });
   }
   async requirements(authorization: string | undefined, actor: SystemUserRow, orderId: string, input: RentalExchangeInspectionRequirementsRequest): Promise<RentalExchangeInspectionRequirements> {
     if (!input || Object.keys(input).some(key => !["expectedOrderUpdatedAt", "exchange"].includes(key))) throw new BadRequestException("检查要求请求包含未知字段");
@@ -139,23 +132,24 @@ export class RentalExchangeInspectionPreparationService {
       const requirements = await this.requirementsInTransaction(order, body, tx);
       if (requirements.requirementsHash !== body.requirementsHash) throw new ConflictException("检查要求已变化，请重新审阅");
       if (body.inspections.length !== requirements.templates.length) throw new BadRequestException("须逐份完成原检查模板，不能漏项");
-      const seen = new Set<string>();
-      const inspections = body.inspections.map(row => {
-        if (!row || Object.keys(row).some(key => !["side", "templateId", "templateVersion", "results"].includes(key))) throw new BadRequestException("检查结果字段无效");
-        const key = `${row.side}:${row.templateId}`, template = requirements.templates.find(value => `${value.side}:${value.template.id}` === key)?.template;
-        if (!template || seen.has(key) || row.templateVersion !== template.version) throw new BadRequestException("检查模板或修订不匹配");
-        seen.add(key); return { ...row, results: preparedInspectionResults(template, row.results) };
-      });
+      const { inspections, acceptedMedia } = await acceptPreparedExchangeInspectionMedia(tx,
+        { tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorUserId: scope.userId }, requirements, body.inspections);
+      if (order.ruleSnapshot?.fulfillment?.evidenceRequired && !acceptedMedia.some(row => row.side === "original_return")
+        || requirements.executionBasis.ruleSnapshot?.fulfillment?.evidenceRequired && !acceptedMedia.some(row => row.side === "replacement_pickup")) {
+        throw new ConflictException("原商品或替换商品缺少本侧已核验的必需检查影像");
+      }
       const exceptions = body.exceptions ?? [];
       if (!Array.isArray(exceptions) || exceptions.length > 20 || exceptions.some(row => !row || Object.keys(row).some(key => !["code", "description", "allocationId"].includes(key))
         || typeof row.code !== "string" || !row.code.trim() || row.code.length > 128 || typeof row.description !== "string" || !row.description.trim() || row.description.length > 500
         || row.allocationId !== body.exchange.allocationId)) throw new BadRequestException("异常只能关联原分配项事实，不能提交费用或附件");
       const value: RentalExchangeInspectionPreparation = { ...requirements, id: randomUUID(), actorUserId: scope.userId, operationKey: body.operationKey, requestHash: hash,
-        revision: 1, state: "prepared", reason: body.reason.trim(), createdAt: new Date().toISOString(), inspections, exceptions, customerConsent: "not_connected", execution: "not_connected" };
+        revision: 1, state: "prepared", reason: body.reason.trim(), createdAt: new Date().toISOString(), inspections, exceptions,
+        media: acceptedMedia.length ? "dedicated_source_verified" : "unavailable", acceptedMedia, customerConsent: "not_connected", execution: "not_connected" };
       const rentalKey = requestFingerprint({ actorUserId: scope.userId, operationKey: body.operationKey });
       const result = await this.idempotent.executeInTransaction({ tenantId: scope.tenantId, orderId, action: "order.exchange.inspection.prepare", key: rentalKey,
         fallbackKey: rentalKey, request: { orderId, actorUserId: scope.userId, input: body }, run: async () => {
           await tx.$executeRaw`INSERT INTO rental_exchange_inspection_preparations (tenantId,workspaceId,id,orderId,actorUserId,operationKey,requestHash,payloadHash,payload) VALUES (${scope.tenantId},${scope.workspaceId},${value.id},${orderId},${scope.userId},${body.operationKey},${hash},${requestFingerprint(value)},${JSON.stringify(value)})`;
+          await recordPreparedExchangeInspectionMedia(tx, scope.tenantId, value);
           return value;
         }, replay: async () => {
           const recorded = (await this.rows(tx, scope.tenantId, scope.workspaceId, scope.userId, body.operationKey))[0];
@@ -182,5 +176,22 @@ export class RentalExchangeInspectionPreparationService {
       if (!rows[0]) throw new NotFoundException("本人受权原检查准备不存在");
       const result = this.view(rows[0], orderId); await this.authority(authorization, actor); return result;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  /** Only the original merchant actor can consume its prepared inspection. The
+   * caller keeps this same transaction through approval, stock and receipts. */
+  async readForExecution(authorization: string | undefined, actor: SystemUserRow, orderId: string, preparationId: string,
+    preparationHash: string, expectedOrderUpdatedAt: string, tx: Prisma.TransactionClient) {
+    const { scope, order } = await this.mediaOrder(authorization, actor, orderId, tx);
+    const rows = await tx.$queryRaw<OriginalRow[]>`SELECT * FROM rental_exchange_inspection_preparations
+      WHERE tenantId=${scope.tenantId} AND workspaceId=${scope.workspaceId} AND actorUserId=${scope.userId}
+        AND orderId=${orderId} AND id=${preparationId} FOR UPDATE`;
+    if (rows.length !== 1 || rows[0].id !== preparationId || rows[0].payloadHash !== preparationHash) throw new ConflictException("原检查准备或操作人不一致");
+    const preparation = this.view(rows[0], orderId);
+    if (preparation.expectedOrderUpdatedAt !== expectedOrderUpdatedAt || order.updatedAt !== expectedOrderUpdatedAt) throw new ConflictException("原订单修订已变化，不能执行旧检查准备");
+    const current = await this.sourceRequirements(order, { exchange: preparation.exchange, expectedOrderUpdatedAt }, tx);
+    if (current.requirementsHash !== preparation.requirementsHash) throw new ConflictException("原检查、替换商品或执行价格依据已变化");
+    await verifyPreparedExchangeInspectionMedia(tx, scope.tenantId, preparation);
+    await this.authority(authorization, actor); return { scope, order, preparation };
   }
 }

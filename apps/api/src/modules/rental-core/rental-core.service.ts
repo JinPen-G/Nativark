@@ -19,6 +19,7 @@ import { rentalDefaultWorkspaceName } from "./category-identity";
 import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements, projectExchangeInspectionTemplates } from "./rental-exchange-inspection";
 import type { RentalOrderInspectionBasisFacts } from "@rental-os/shared";
 import { assertInspectionObservations } from "./rental-inspection-observation";
+import { approvedExchangeEvidence, type ApprovedExchangeAuthority } from "./rental-approved-exchange-authorization";
 import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental-inspection-evidence";
 import { frozenFileContentHash } from "../integrations/file-content-binding";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
@@ -36,6 +37,7 @@ import {
 } from "./capability-equipment";
 import {
   DEFAULT_RENTAL_PAYMENT_METHODS,
+  RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
   RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_OFFLINE_PAYMENT_METHOD_CODES,
   RENTAL_PAYMENT_METHOD_CODES,
@@ -3994,7 +3996,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   /** Inspect only original completed uploads under the current transaction;
    * client references cannot confer file ownership or a completed upload. */
   private async assertExchangePickupFiles(tenantId: string, order: RentalOrder, ids: string[], signatureId: string | undefined,
-    batchId: string, tx: RentalFactTx) {
+    batchId: string, tx: RentalFactTx, preparedMedia?: Array<{ side: "original_return" | "replacement_pickup"; fileAssetId: string; contentHash: string }>) {
     const identity = getRequestIdentity();
     if (identity?.staffApi && !signatureId) throw new BadRequestException("员工端换货领取须客户现场签字");
     if (!ids.length) return;
@@ -4008,10 +4010,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     for (const file of files) {
       const metadata = file.metadata && typeof file.metadata === "object" && !Array.isArray(file.metadata)
         ? file.metadata as Record<string, unknown> : {};
+      const dedicated = file.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE
+        && preparedMedia?.some(row => row.side === "replacement_pickup" && row.fileAssetId === file.id && row.contentHash === frozenFileContentHash(file));
       if (!ids.includes(file.id) || file.tenantId !== tenantId || file.status !== "active"
         || file.businessModule !== "rental-core" || file.businessType !== "rental_order" || file.businessId !== order.id
         || metadata.workspaceId !== this.resolveWorkspaceId(tenantId)
-        || !["pickup-evidence", "handover-signature"].includes(file.uploadScene)
+        || !["pickup-evidence", "handover-signature"].includes(file.uploadScene) && !dedicated
         || !file.mimeType.startsWith("image/") && !file.mimeType.startsWith("video/") || !frozenFileContentHash(file)) {
         throw new BadRequestException("换货检查须使用本空间、本订单已冻结的领取影像凭证");
       }
@@ -4058,7 +4062,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     },
     idempotencyKey: string,
     operator: string,
-    tx: RentalFactTx
+    tx: RentalFactTx,
+    approvalAuthority?: ApprovedExchangeAuthority
   ): Promise<{ order: RentalOrder; change: RentalOrderChange }> {
     if (!input.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用换货");
     if (!input.reason?.trim()) throw new BadRequestException("换货原因不能为空");
@@ -4066,7 +4071,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理取货后换货");
-    if (priced.additionalAmount > 0) await this.assertEnterpriseNewExpense(tenantId, order, tx, priced.additionalAmount);
+    // The extra path is an in-process authority issued only after Core verifies
+    // the exact approval/consent/preparation in this transaction. A body flag or
+    // the original booking approval cannot replace the ordinary spending gate.
+    const approved = approvalAuthority ? approvedExchangeEvidence(approvalAuthority, tx, tenantId, this.resolveWorkspaceId(tenantId), order,
+      priced, input, idempotencyKey) : undefined;
+    if (priced.additionalAmount > 0 && !approved) await this.assertEnterpriseNewExpense(tenantId, order, tx, priced.additionalAmount);
     if (order.updatedAt !== input.expectedUpdatedAt) throw new ConflictException("订单已发生变化，请重新试算换货费用");
     if (!hasOriginalRentalCurrency(order.currency, priced.currency)) throw new ConflictException("换货币种与原订单不一致或缺失，不能追加其他币种金额");
     if (!priced.exchange || priced.exchange.orderLineId !== input.orderLineId || priced.exchange.allocationId !== input.allocationId) {
@@ -4228,7 +4238,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const evidenceIds = inspectionEvidenceIds(pickupInput);
       const evidenceError = inspectionEvidenceRequiredError(basis.ruleSnapshot.fulfillment?.evidenceRequired === true, evidenceIds);
       if (evidenceError) throw new BadRequestException(evidenceError);
-      await this.assertExchangePickupFiles(tenantId, order, evidenceIds, pickupInput.handoverSignatureFileAssetId, idempotencyKey, tx);
+      await this.assertExchangePickupFiles(tenantId, order, evidenceIds, pickupInput.handoverSignatureFileAssetId, idempotencyKey, tx, approved?.preparation.acceptedMedia);
       pickupRecord = { id: id("inspection"), tenantId, orderId, stage: "pickup", exchangeId,
         templateId: template.id, templateCode: template.code, templateVersion: template.version,
         pickupItems: [{ allocationId: replacementAllocationId, itemGroupId: replacement.id,
@@ -4236,7 +4246,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         results: structuredClone(pickupInput.results), usageReadings: template.fields.filter(field => field.usageMetric).flatMap(field => {
           const current = optionalUsageReading(pickupInput.results[field.code], field.label);
           return current === undefined ? [] : [{ fieldCode: field.code, current }];
-        }), exceptions: [], attachments: evidenceIds, customerConfirmedAt: exchangeAt, operator, createdAt: exchangeAt };
+        }), exceptions: [], attachments: evidenceIds, customerConfirmedAt: approved?.consent.confirmedAt ?? exchangeAt, operator, createdAt: exchangeAt };
     }
     const replacementAllocation: RentalAllocation = { ...allocation, id: replacementAllocationId, itemGroupId: replacement.id, assetId: input.replacementAssetId,
       assetNo: input.replacementAssetId ? inventory.assets.find(asset => asset.id === input.replacementAssetId)?.assetNo : undefined,
@@ -4269,12 +4279,25 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (originalTemplates.length !== 1) throw new ConflictException("旧商品缺少唯一的冻结换货检查依据，请先核对原检查模板");
     if (!this.factStore.upsertWorkOrder) throw new ConflictException("返库处置工单未装配，不能直接释放换货旧物");
     const originalTemplate = originalTemplates[0];
+    let originalResults: Record<string, unknown> | undefined;
+    if (approved) {
+      const preparedTemplate = approved.preparation.templates.find(row => row.side === "original_return")?.template;
+      const preparedResult = approved.preparation.inspections.find(row => row.side === "original_return");
+      if (!preparedTemplate || !preparedResult || preparedResult.templateId !== originalTemplate.id
+        || requestFingerprint(preparedTemplate) !== requestFingerprint(originalTemplate)) throw new ConflictException("原商品检查与本人同意的准备不一致");
+      originalResults = structuredClone(preparedResult.results);
+      for (const field of originalTemplate.fields.filter(field => field.type === "photo")) {
+        if (typeof originalResults[field.code] === "string") originalResults[field.code] = [originalResults[field.code]];
+      }
+      assertInspectionObservations(originalTemplate, originalResults, true);
+    }
     const inspection: RentalInspectionRecord = {
       id: id("inspection"), tenantId, orderId, stage: "return", exchangeId,
       templateId: originalTemplate.sourceTemplateId ?? originalTemplate.id,
       templateCode: originalTemplate.code, templateVersion: originalTemplate.version,
       // 原模板仅作来源引用；这是换货检查原文，不冒充已完成模板必填项和返库整备。
-      results: { exchangeInspectionSnapshot: structuredClone(input.inspectionSnapshot) },
+      results: originalResults ?? { exchangeInspectionSnapshot: structuredClone(input.inspectionSnapshot) },
+      ...(approved ? { customerConfirmedAt: approved.consent.confirmedAt } : {}),
       returnedItems: [{ allocationId: allocation.id, quantity: allocation.quantity }],
       exceptions: (input.inspectionSnapshot.exceptions ?? []).map(exception => ({
         id: randomUUID(), code: exception.code, description: exception.description, allocationId: allocation.id,

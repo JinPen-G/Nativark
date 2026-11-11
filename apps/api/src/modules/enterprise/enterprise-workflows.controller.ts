@@ -15,7 +15,8 @@ import { EnterpriseMembersService } from "./enterprise-members.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
 import { EnterpriseApprovalService } from "./enterprise-approval.service";
 import { EnterpriseExchangeApprovalService } from "./enterprise-exchange-approval.service";
-import { ConfirmEnterpriseExchangeExpenseDto, CloseEnterpriseExchangeRequestDto, EnterpriseExchangeChoicesQueryDto, RequestEnterpriseExchangeApprovalDto, DecideEnterpriseExchangeApprovalDto } from "./enterprise-exchange-request.dto";
+import { RentalExchangeInspectionConsentService } from "../rental-core/rental-exchange-inspection-consent.service";
+import { ConfirmEnterpriseExchangeInspectionDto, ConfirmEnterpriseExchangeExpenseDto, CloseEnterpriseExchangeRequestDto, EnterpriseExchangeChoicesQueryDto, RequestEnterpriseExchangeApprovalDto, DecideEnterpriseExchangeApprovalDto } from "./enterprise-exchange-request.dto";
 import { EnterpriseExtensionApprovalService } from "./enterprise-extension-approval.service";
 import { RequestEnterpriseExtensionApprovalDto, DecideEnterpriseExtensionApprovalDto, SubmitEnterpriseExtensionApprovalDto, CloseEnterpriseExtensionExecutionDto, CloseEnterpriseExtensionRequestDto } from "./enterprise-extension-request.dto";
 import { EnterpriseTaskCenterService } from "./enterprise-task-center.service";
@@ -23,11 +24,28 @@ import { EnterpriseManagementRequestService } from "./enterprise-management-requ
 import { CloseEnterpriseApprovalExecutionDto, SaveEnterpriseManagementRequestDto } from "./enterprise-request.dto";
 import { CloseEnterpriseTransferDecisionDto } from "./enterprise-transfer-decision.dto";
 import { PreviewEnterpriseInviteRequestDto, ChangeEnterpriseAdministratorRequestDto, ChangeEnterpriseMemberRequestDto, CreateEnterpriseInviteRequestDto, DecideEnterpriseTransferRequestDto, EnterpriseChangeRequestDto, JoinEnterpriseRequestDto, ReviewEnterpriseJoinRequestDto, SaveEnterpriseApplicationRequestDto, TransferEnterpriseAdministratorRequestDto, SaveEnterpriseScopePolicyRequestDto, RequestEnterpriseBookingApprovalDto, DecideEnterpriseBookingApprovalDto, SubmitEnterpriseApprovedBookingDto, EnterpriseAuthorityUploadRequestDto } from "./enterprise-request.dto";
-interface CustomerRequest { client?: ClientRequestContext }
+interface CustomerRequest { client?: ClientRequestContext; headers?: { authorization?: string } }
 const client = (request: CustomerRequest) => { if (!request.client) throw new UnauthorizedException("请先登录客户账号"); return request.client; };
 @Controller("client/v1/enterprise")
 export class EnterpriseWorkflowsController {
-  constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly files: FileStorageRuntimeService, private readonly integrations: TenantIntegrationService, private readonly policies: EnterprisePolicyService, private readonly approvals: EnterpriseApprovalService, private readonly tasks: EnterpriseTaskCenterService, private readonly management: EnterpriseManagementRequestService, private readonly extensions: EnterpriseExtensionApprovalService, private readonly exchanges: EnterpriseExchangeApprovalService, private readonly rentalHandoffs: EnterpriseRentalHandoffService, private readonly membershipAudit: EnterpriseMembershipAuditService) {}
+  constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly files: FileStorageRuntimeService, private readonly integrations: TenantIntegrationService, private readonly policies: EnterprisePolicyService, private readonly approvals: EnterpriseApprovalService, private readonly tasks: EnterpriseTaskCenterService, private readonly management: EnterpriseManagementRequestService, private readonly extensions: EnterpriseExtensionApprovalService, private readonly exchanges: EnterpriseExchangeApprovalService, private readonly rentalHandoffs: EnterpriseRentalHandoffService, private readonly membershipAudit: EnterpriseMembershipAuditService,
+    private readonly exchangeInspections: RentalExchangeInspectionConsentService) {}
+  private inspectionConsentReader() {
+    if (!this.exchangeInspections) throw new ServiceUnavailableException("原本人换货检查同意尚未装配");
+    return this.exchangeInspections;
+  }
+  @Get("orders/:orderId/exchange-inspections/:preparationId")
+  exchangeInspectionMaterial(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Param("preparationId") preparationId: string) {
+    return this.inspectionConsentReader().material(req.headers?.authorization, client(req), orderId, preparationId);
+  }
+  @Post("orders/:orderId/exchange-inspection-consents")
+  confirmExchangeInspection(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Body() input: ConfirmEnterpriseExchangeInspectionDto) {
+    return this.inspectionConsentReader().confirm(req.headers?.authorization, client(req), orderId, input);
+  }
+  @Get("orders/:orderId/exchange-inspection-consents/operations/:key")
+  exchangeInspectionConsentOriginal(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Param("key") key: string) {
+    return this.inspectionConsentReader().original(req.headers?.authorization, client(req), orderId, key);
+  }
   @Get("corporates/:corporateId/profile") profile(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.management.profile(client(req), id); }
   @Get("management-requests") managementMine(@Req() req: CustomerRequest) { return this.management.mine(client(req)); }
   @Get("management-requests/:id") managementDetail(@Req() req: CustomerRequest, @Param("id") id: string) { return this.management.detail(client(req), id); }
