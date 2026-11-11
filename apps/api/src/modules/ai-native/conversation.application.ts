@@ -14,12 +14,14 @@ import { respondAiScene } from './scenes/original-scenes.controller';
 import { withRequestAbort } from './scenes/request-abort';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import type { composeRequestBoundOriginalTaskRecoveryReaders } from './scenes/request-bound-scenes.application';
+import type { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Action = keyof typeof AI_CONVERSATION_HTTP_DRAFT.operations;
 export const AI_CONVERSATION_REQUESTS = Symbol('AI_CONVERSATION_REQUESTS');
 export function composeAiConversationRequests(dependencies: Omit<AiOriginalSceneDependencies, 'credentials'>, enabled = false,
-  observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult'>) {
+  observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult'>,
+  display?: ReturnType<typeof composeAiWorkbenchDisplayRequests>) {
   return { async consume(request: Request, action: Action, value: unknown, signal?: AbortSignal) {
     if (!enabled || 'credentials' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     if (!Object.hasOwn(AI_CONVERSATION_HTTP_DRAFT.operations, action)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -31,6 +33,11 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
     signal?.addEventListener('abort', close, { once: true });
     try {
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
+        if (action === 'display' || action === 'display-revalidate' || action === 'display-source') {
+          if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          if (!display) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          return conversationResponse(action, await display.consume(request, action, command, signal), command);
+        }
         const input = { ...dependencies, credentials: { current: async () => {
           if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
           return { authorization: header, audience: 'operator' as const, requestId };
@@ -83,4 +90,10 @@ export class AiConversationController {
   closeUnstarted(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'closeUnstarted', value); }
   @Post('modelResult') @HttpCode(200) @Header('Cache-Control', 'no-store')
   modelResult(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'modelResult', value); }
+  @Post('display') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  display(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'display', (request as Request & { body?: unknown }).body ?? value); }
+  @Post('display-revalidate') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  displayRevalidate(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'display-revalidate', (request as Request & { body?: unknown }).body ?? value); }
+  @Post('display-source') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  displaySource(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'display-source', (request as Request & { body?: unknown }).body ?? value); }
 }

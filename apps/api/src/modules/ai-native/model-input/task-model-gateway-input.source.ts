@@ -105,7 +105,12 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
         this.scene.orderExplainTool === true, this.scene.structuredOutput === true),
       configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
       ...(this.scene.structuredSchemaHash ? { structuredSchemaHash: this.scene.structuredSchemaHash } : {}),
+      ...(command.material.displayWitness ? { displayWitness: command.material.displayWitness } : {}),
       routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
+    if (input.displayWitness && (this.kind || this.scene.orderExplainTool || this.scene.structuredOutput
+      || input.displayWitness.binding.taskId !== command.taskId
+      || context.scope.kind !== 'workspace' || context.audience !== 'operator' || context.actor.kind !== 'user'
+      || requestFingerprint(input.displayWitness.context.scope) !== requestFingerprint(context.scope))) throw denied();
     if (this.kind) input.media = (await this.media(context, input.intent)).references;
     if ('expectedMedia' in command && command.expectedMedia
       && requestFingerprint(command.expectedMedia) !== requestFingerprint(input.media)) throw denied();

@@ -6,10 +6,11 @@ import { MemberNameFlow } from './MemberNameFlow';
 import { NotificationChangeFlow } from './NotificationChangeFlow';
 /** Owner task observation and explicit human approval/continuation. A cursor
  * grants no execution; original domain services and server configuration do. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiTaskSnapshotDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
+import { createAiWorkbenchDisplayPort } from '@/api/aiWorkbenchDisplays';
 import { currentSessionEpoch } from "@/app/queryClient";
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { PageHeader } from "@/components/PageHeader";
@@ -72,6 +73,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     document.addEventListener("visibilitychange", change); return () => document.removeEventListener("visibilitychange", change); }, []);
   useEffect(() => () => { followOwner.current.active = false; followOwner.current.request?.abort(); }, [identity, selected]);
   const current = () => identityKey() === identity && !!useAuthStore.getState().token && !document.hidden;
+  const displayPort = useMemo(() => createAiWorkbenchDisplayPort({ tenantId, workspaceId,
+    current: () => identityKey() === identity && !!useAuthStore.getState().token && !document.hidden }), [identity, tenantId, workspaceId]);
+  useEffect(() => { displayPort.activate(); return () => displayPort.dispose(); }, [displayPort]);
   const query = useQuery({ queryKey: ["ai-task-center", identity, status, cursors[page - 1]], enabled: opened && visible,
     // One explicit refresh. No ambient query polling creates AI activity.
     retry: false, refetchInterval: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
@@ -210,6 +214,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         query={{ taskId: selected }} identity={identity} current={current}
         onAccessChanged={() => { stopFollowing(); setLiveSnapshot(null); setReadAccessEpoch(value => value + 1); }} />}
     {opened && <AiTaskWorkbench key={`${identity}:${readAccessEpoch}`} translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
+      display={{ identity, port: displayPort, current }}
       statusLabels={Object.fromEntries((data?.items ?? []).map(row => [row.taskId, t(statusLabels[row.status])]))}
       selectedTaskId={!followFailed && data?.items.some(row => row.taskId === selected) ? selected : null}
       onSelectTask={taskId => { stopFollowing(); setLiveSnapshot(null); setSelected(taskId); }} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}

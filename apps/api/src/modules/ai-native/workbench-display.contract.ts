@@ -7,12 +7,12 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AI_WORKBENCH_DISPLAY_SCHEMAS, AI_WORKBENCH_DISPLAY_LIMITS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
   AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS, AI_WORKBENCH_CONTEXT_SCHEMAS, AI_TASK_INPUT_DRAFT_SCHEMAS,
-  AI_SCOPE_DRAFT_SCHEMAS, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
+  AI_SCOPE_DRAFT_SCHEMAS, AI_WORKBENCH_DISPLAY_HTTP_SCHEMAS, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
   type AiWorkbenchContextDraft, type AiWorkbenchFieldMaterialDraft, type AiWorkbenchHostDraft,
   type AiWorkbenchControlIntentDraft, type AiWorkbenchControlObservationDraft,
   type AiTaskInputContractDraft, type AiWorkbenchDisplayBindingDraft, type AiWorkbenchMountBindingDraft,
   type AiWorkbenchPresentationDraft, type AiWorkbenchSandboxMessageDraft, type AiWorkbenchMessageObservationDraft,
-  type AiApprovalApplicationReferenceDraft } from '@rental-os/shared';
+  type AiApprovalApplicationReferenceDraft, type AiWorkbenchDisplayMaterialDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
@@ -20,7 +20,7 @@ import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);
 for (const [name, schema] of Object.entries({ ...AI_NATIVE_COMPONENT_SCHEMAS, ...AI_SCOPE_DRAFT_SCHEMAS,
-  ...AI_TASK_INPUT_DRAFT_SCHEMAS, ...AI_WORKBENCH_DISPLAY_SCHEMAS, ...AI_WORKBENCH_CONTEXT_SCHEMAS,
+  ...AI_TASK_INPUT_DRAFT_SCHEMAS, ...AI_WORKBENCH_DISPLAY_SCHEMAS, ...AI_WORKBENCH_CONTEXT_SCHEMAS, ...AI_WORKBENCH_DISPLAY_HTTP_SCHEMAS,
   AiSceneRequestReadDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft,
   AiApprovalApplicationReferenceDraft: AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS.AiApprovalApplicationReferenceDraft })) {
   ajv.addSchema(schema, `#/components/schemas/${name}`);
@@ -28,6 +28,23 @@ for (const [name, schema] of Object.entries({ ...AI_NATIVE_COMPONENT_SCHEMAS, ..
 const validate = (name: string, value: unknown) => ajv.getSchema(`#/components/schemas/${name}`)!(value) === true;
 const same = (left: unknown, right: unknown) => requestFingerprint(left) === requestFingerprint(right);
 const fail = () => { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); };
+
+/** Closed transport packet only. The producer separately rechecks current
+ * sources, registered versions and time; valid JSON never grants admission. */
+export function inspectAiWorkbenchDisplayMaterial(value: unknown): AiWorkbenchDisplayMaterialDraft {
+  try {
+    const copy = structuredClone(value) as AiWorkbenchDisplayMaterialDraft;
+    if (!validate('AiWorkbenchDisplayMaterialDraft', copy) || Buffer.byteLength(JSON.stringify(copy), 'utf8') > 131072
+      || !same(copy.context.binding, Object.fromEntries(Object.entries(copy.presentation.binding).filter(([key]) => key !== 'presentationRevision')))
+      || copy.context.purpose !== 'display' || copy.fieldMaterial && !same(copy.fieldMaterial.binding, copy.context.binding)) return fail();
+    const retained = copy.presentation.retention, structuralTime = new Date(Date.parse(retained.expiresAt) - 1).toISOString();
+    inspectAiWorkbenchContext(copy.context, copy.context, structuralTime);
+    if (copy.fieldMaterial) inspectAiWorkbenchFieldMaterial(copy.fieldMaterial, copy.fieldMaterial, structuralTime);
+    inspectAiWorkbenchPresentation(copy.presentation, copy.presentation.binding, { now: structuralTime,
+      sourceExpiresAt: retained.sourceExpiresAt, aclRevision: retained.aclRevision, policyVersion: retained.policyVersion });
+    return copy;
+  } catch { return fail(); }
+}
 
 /** Source hash/UTF-8 completeness only. Malicious source can be structurally
  * valid and remains execution:not_admitted; only a verified isolated runtime

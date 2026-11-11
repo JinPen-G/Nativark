@@ -6,6 +6,38 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-main-display-integration-20261112"></a>
+## PM固定原展示生成与只读宿主整合（2026-11-12）
+
+固定来源为已核GitHub包含的`7332875c9a79e36479a87f28848afea43f543962`，main起点`9b616d8e5d5932bffdc26eabce8ab3a47b1627da`。只接本提交27文件（25源码与两份原记录/接续），既有源码起点与main逐blob相同；未收`794724cd1`资源schema/DDL检查点、后继消费者或活动WIP。接续两处冲突保留main既有整合证据并更新来源的当前分工，历史正文及原任务门槛不变。25份源码blob与固定来源一致，排序`{file,blob,sourceBlob,sha256}`清单SHA-256=`93f6eef4d1cd9f89aec7fb9ca10a2b3fd02623111ed652c5abc777a4e2dca395`。
+
+PM沿原conversation/turn→Task/Run及持久输入→展示witness与原Gateway意图→实际Artifact/财务原收据→当前权限/Core/知识来源→公开只读Controller→客户端API/session→TaskCenter隔离宿主核对。生成与重开分开，普通旧结果不能补签；HTML为不可信展示数据，静态nonce引导按有界白名单重建inert template，不执行生成脚本/事件，不开放网络/导航/远程依赖。正式事实和固定批准仍在可信宿主；无真实字段依据保持fieldMaterial:null，纯展示不附业务批准。
+
+独立恢复作者准确`call_SzHAyiIoSq7VGfBS3qAb8wCX`的原整链stdin，SHA-256=`ab321835b8637e70cb16cba77e7164a2c36bd9a4771b7af5193d6d6e8cc58718`。在main组合仅调整依赖根/绝对临时守卫，并增加已读取源码哈希核对，脚本SHA-256=`2292fbed588271a871bd442f7211db7640bf1cec6c1bafa3a8625f4fca252a7a`。退出0：1会话/1轮/1Task/1原模型调用；经过实际Guard、Controller、RequestIdInterceptor和客户端API/session，读取/重验/重开均无新增派发，原状态不变；初始挂载0请求，隐藏读取和停用版本拒绝，销毁frame清除，2019份实际读取源哈希保持、audit0。DB/发布配置/模型传输、wire与浏览器surface是明示fixture；不将该组当真实HTTP、供应商或浏览器隔离证明。恢复原命令时REPL禁止字符串执行，未执行目标代码；改为纯数据读取String.raw和精确字符串变换后才运行同一原断言，原测试/runner未改。
+
+shared原TypeScript5.9.3配置完整内存检查/emit108根、217产物诊断0，API原900根noEmit诊断0；后台原TypeScript7.0.2 CLI `-p apps/admin/tsconfig.json --noEmit --incremental false --pretty false`退出0。原`ai-native-b10-workbench-contract.test.cjs`四项通过、无skip/todo；原组件清单检查263文件badHashes=[]。原路由检查664条退出0，其正则范围不覆盖本片application文件的三个新单引号path，新path的真实Guard证明来自上方整链组。API合同在固定main起点和候选均退出1、504项旧失败逐条相同，无新增；不写全仓合同通过。
+
+两份变更文档链接/显式阶段锚点及差异格式按固定起点核查，无新增问题，AI记录1898项旧断链保持、接续0错误。首次大型记录读取超出Node默认1MiB缓冲而在比对前失败；为同一git show明确8MiB缓冲后复验退出0，原检查器与断言未变。main六项他人WIP逐哈希保持，原播放器/AppShell/认证、schema和Core文件不随本片修改；无物理dist/Client生成、临时文件或新后台进程，自有验证进程均已退出。旧集中待清理残留仍未删除，不绕过自动审批拒绝。
+
+AIN-12仍75%：真实非null字段依据、可信人类输入/重新准备、重排/重生成原调用准入及两入口完整办理控制继续由AI-RD协调；13/14固定后继另片核收，17等待Core原配置counter/同事务事实，18继续真实授权与人工办理。PM已要求Core下一片优先提供这个跨专项前置，不使AI以issue文本、seed或updatedAt补造事实。原模拟研发与负责人真实测试/生产放行分开，未据本阶段变更原任务分母或完成度。
+
+<a id="ain12-original-display-pipeline-20261112"></a>
+## AIN-12原展示生成、公开读取与任务中心消费（2026-11-12）
+
+本片从已推送`ef15308df3c33fbb2b16b48920f12a0cc537a287`继续，25个源码按独占窗口核接，AIN-13/14消费修复、17资源/配置和18人工grant及员工WIP均未夹入。P2已经由PM按单提交差异收main`3a06c8861a25398072c98f8da4e3733c25b5b6a3`并核远端，Root本片不写main。
+
+[原模型准入](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)在原held Run/冻结计划前调用[真实展示生产者](../../apps/api/src/modules/ai-native/workbench-display-generation.service.ts)，核当前本人、唯一原会话/轮次、原输入/Task/实际Run.sequence、材料hash及明确发布的prompt/API/isolation/政策和期限。[displayWitness](../../apps/api/src/modules/ai-native/model-input/task-model-display-witness.ts)随原ActionInput保存，其marker和原登记提示词参与原Gateway intent指纹；不另造Invocation、运行器、预算或业务状态机。原无会话调用仍走普通文字；新答案改变材料时不继承旧展示witness，普通历史不得事后补签。初始无真实字段basis时fieldMaterial明确null，纯展示无审批提案。
+
+[原读取](../../apps/api/src/modules/ai-native/workbench-display-original.reader.ts)与[展示准备](../../apps/api/src/modules/ai-native/workbench-display-preparation.service.ts)已按dev1固定7源核接，继续复验原Auth/Scope、会话/输入/Task/Run lineage、实际测量Artifact及财务原收据、Core/知识当前来源和版本；HTML只取同一completed Artifact.text。新[公开只读应用](../../apps/api/src/modules/ai-native/workbench-display.application.ts)接现有会话Controller/Guard/OpenAPI动态契约，三个操作display/display-revalidate/display-source不派发模型或业务。响应采用[正式shared出口](../../packages/shared/src/ai-workbench-display-http-draft.ts)，来源文本有界且仅原受权引用。
+
+[客户端API](../../apps/admin/src/api/aiWorkbenchDisplays.ts)按当前会话epoch/signal和原generation读取/重验，仅留一个最少locator、不缓存代码/正文、不自动重放POST；dispose/新读取取消旧请求，拒绝迟到结果。[任务中心](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)已提供实际端口，用户明确读取后由原[隔离宿主](../../apps/admin/src/features/ai-native/TaskWorkbenchDisplay.tsx)显示。opaque iframe只allow-scripts、nonce CSP、无网络/导航/远程依赖；生成HTML以inert template及有界白名单重建，不执行其script/on*，原事实与固定确认仍在可信宿主。协议64KiB code/32KiB消息/60次每分钟、深度32/表行200、2秒退出及隐藏/撤权/销毁约束保留；不宣称浏览器硬内存隔离。新增必要文案补英文，UIArc保留源码审计badHashes=[]。
+
+Root必要整链模拟最终exit0（Node REPL“复验正式 Guard 与展示恢复”，实际stdin SHA-256=`ab321835b8637e70cb16cba77e7164a2c36bd9a4771b7af5193d6d6e8cc58718`）：真实会话create/admit、原Task/R1/唯一Gateway mock调用、原witness/Artifact/财务证据，经实际Guard/Controller/RequestIdInterceptor、客户端API和WorkbenchDisplaySession。1会话/1轮/1Task/1原模型调用；display/重验/重开均无新增派发或数据库状态变化，初始挂载0请求，隐藏读拒绝，安全停用版本拒绝，销毁清除frame。DB/配置/模型、JSON wire和浏览器surface均明示夹具，未作真实HTTP、浏览器或供应商验收。作者原7+4组的普通历史、marker/prompt篡改、当前owner/space/撤权/过期证据也保留。
+
+失败与修复不隐去：第一宿主夹具没按真实RequestIdInterceptor包ApiResult且未提供window origin，结果frame不可用；仅修内存宿主后公开packet通过。加入真正Guard后发现新驼峰path与其小写路径匹配冲突，改为上述未发布的小写path，生产Guard未改。该失败在清理前抛出导致验证进程等待session timer，55秒超时已退出，无临时文件或后台残留；最终退出路径清除session/port。第三次完整同组通过后停止扩测。固定索引TypeScript5.9.3：API3根/1782源、admin4根/1548源均0诊断（`8207e2`），locale无重复键、25源diff格式通过。全程审计0，任务临时目录未创建，无安装、Client/dist生成、迁移或实际业务连接。
+
+AIN-12仍75%：非null字段的真实原规则/来源、可信人类输入与重新准备、重排/重新解释的原新调用准入及完整两入口办理控制尚未齐。原事实/审批/同键unknown并不由展示代码获得；本片产物或局部整链不当作整项100%。另原已存在modelResult/closeUnstarted驼峰会话路由与Guard小写匹配的公共修复需PM核最小窗口，不能凭本片新path已通过称旧变体都已修。
+
 <a id="ain-qa-clarified-quote-receipt-20261112"></a>
 ## QA P2关闭报价模型后的原澄清收据读取（2026-11-12）
 

@@ -16,6 +16,8 @@ import { safeDisplayText } from "./safe-display";
 import { VisibleObservationBoundary } from './VisibleObservationBoundary';
 import { ModelText } from "./ModelText";
 import { TaskModelSources, type TaskModelSourceReader } from "./TaskModelSources";
+import { TaskWorkbenchDisplay } from "./TaskWorkbenchDisplay";
+import type { WorkbenchDisplayPort } from "./workbench-display-host";
 import type { AiTaskConfirmationHistoryDraft, AiTaskModelObservationDraft } from "@rental-os/shared";
 import type { DisplayEventInput, EventTimelineState } from "./event-reducer";
 
@@ -79,6 +81,9 @@ export interface AiTaskWorkbenchProps {
   onRecover?: () => Promise<unknown>;
   readConfirmation?: (reference: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => Promise<AiTaskConfirmationHistoryDraft>;
   readSource?: TaskModelSourceReader;
+  /** Original presentation/ACL ports and current authenticated owner. No
+   * automatic model generation or frame authority is inferred from detail. */
+  display?: { identity: string; port: WorkbenchDisplayPort; current(): boolean };
 }
 
 type DetailState = "idle" | "unavailable" | "loading" | "ready" | "failed" | "hidden";
@@ -112,6 +117,7 @@ export function AiTaskWorkbench({
   onRecover,
   readConfirmation,
   readSource,
+  display,
 }: AiTaskWorkbenchProps) {
   const contextKey = JSON.stringify([context.audience, context.tenantId ?? null, context.workspaceId ?? null]);
   const [selection, setSelection] = useState({ contextKey, taskId: controlledTaskId ?? null });
@@ -304,6 +310,11 @@ export function AiTaskWorkbench({
           </>
         )}
         {detailState === "unavailable" && <Alert type="warning" message="宿主未提供任务详情读取能力；不会自动请求或补造结果。" />}
+        {display && taskId && context.tenantId && context.workspaceId && <TaskWorkbenchDisplay
+          identity={display.identity} expected={{ taskId, tenantId: context.tenantId, workspaceId: context.workspaceId,
+            ...(currentDetail?.modelObservation?.status === 'available' ? { runId: currentDetail.modelObservation.runId, resultId: currentDetail.modelObservation.resultId } : {}) }}
+          port={display.port} current={display.current}
+          enabled={visible && enabled && !forbidden && detailSynchronized && currentDetail?.modelObservation?.status === 'available'} />}
         {detailActions}
       </section>}
     </section>

@@ -5,6 +5,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { taskModelMaterialSchema, type parseTaskModelInput } from '../model-input/task-model-input';
+import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 import { preferenceSchema } from '../knowledge/knowledge-validation';
 
 export type AiOriginalSceneKnowledgeOptions = Omit<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials' | 'clock'> & {
@@ -48,7 +49,8 @@ export function continueOriginalSceneMaterial(previous: ReturnType<typeof parseT
   const content: Array<{ kind: 'text'; text: string }> = [];
   for (let offset = 0; offset < text.length; offset += 16000) content.push({ kind: 'text', text: text.slice(offset, offset + 16000) });
   return taskModelMaterialSchema.parse({ maxOutputTokens: previous.intent.maxOutputTokens,
-    messages: previous.intent.messages.map(message => message.role === 'user' ? { role: 'user', content } : structuredClone(message)) });
+    messages: withoutTaskModelDisplayMessages(previous.intent.messages)
+      .map(message => message.role === 'user' ? { role: 'user', content } : structuredClone(message)) });
 }
 
 export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeOptions,

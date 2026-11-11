@@ -1,12 +1,12 @@
 # AI Native：当前协作接续
 
-> 更新日期：2026-11-11。负责人已明确恢复 AI Native 专项研发，由 AI-RD 负责、AI-dev1 与 AI-dev2 协作，唯一开发目录为 `D:/工作文件/rental-OS/worktree/ai-native`，分支 `codex/ai-native`。旧暂停和旧工作树派工不再是本轮停止指令；本轮研发按模拟冒烟验收，真实测试由负责人自行操作，生产开放仍须原授权。覆盖前原文保留在 Git 提交 `98755765cebe35f8775cdd05a72e148e5fdff65b` 的本文件，历史未完项全文仍见[开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。
+> 更新日期：2026-11-12。负责人已明确恢复 AI Native 专项研发，由 AI-RD 负责、AI-dev1 与 AI-dev2 协作，唯一开发目录为 `D:/工作文件/rental-OS/worktree/ai-native`，分支 `codex/ai-native`。旧暂停和旧工作树派工不再是本轮停止指令；本轮研发按模拟冒烟验收，真实测试由负责人自行操作，生产开放仍须原授权。覆盖前原文保留在固定main `9b616d8e5d5932bffdc26eabce8ab3a47b1627da`的本文件，历史未完项全文仍见[开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。
 
 ## 当前目标与结果
 
 目标为完成原 AIN-01～28 及 ENTRY-01～18 的正式开发任务，优先可用的核心场景和实际生产装配；不新增边缘功能、Reserved 范围或测试脚本，仅做必要模拟冒烟与类型检查。按负责人新决定及需求v1.15/任务v1.19，真实测试由负责人自行操作，不再阻塞研发100%；功能范围、原任务代码依赖和独立复核仍须齐备，不以提交或局部绿色计整项完成。
 
-AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI Native-开发记录.md#ain05-simulated-whole-closeout-20261111>)、[06](<AI Native-开发记录.md#ain06-simulated-whole-closeout-20261111>)、[07](<AI Native-开发记录.md#ain07-simulated-whole-closeout-20261111>)、[10](<AI Native-开发记录.md#ain10-simulated-whole-closeout-20261111>)、[11](<AI Native-开发记录.md#ain11-simulated-whole-closeout-20261111>)。首批05/06已合入并推送main`44dc16a4ba816db6ed1de2c53a6a717b880a60f4`并固定同步本树。后继07/10/11由PM按固定`c04dcd73b32800f9d8c887016cc12a4e50ac8ad1`核接六文件增量，见[PM阶段](<AI Native-开发记录.md#ain-fixed-pm-intake-20261112>)；main提交/远端证据沿该次串行收口。dev1继续12隔离HTML宿主，5私有文件已落下且初类型零诊断，仍需Root真实producer/公开接点；dev2继续17资源/配置版本接点。员工16文件仍冻结，真实测试交负责人自行操作。
+AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI Native-开发记录.md#ain05-simulated-whole-closeout-20261111>)、[06](<AI Native-开发记录.md#ain06-simulated-whole-closeout-20261111>)、[07](<AI Native-开发记录.md#ain07-simulated-whole-closeout-20261111>)、[10](<AI Native-开发记录.md#ain10-simulated-whole-closeout-20261111>)、[11](<AI Native-开发记录.md#ain11-simulated-whole-closeout-20261111>)，均已由PM固定核接main。QA P1/P3和P2两原缺陷已分别推送f86b81aea/ef15308df并独立差异收main6fce308c/3a06c8861。AIN-12原展示25源固定7332875c9由PM串行核接，生成、原witness/Gateway、公开只读及TaskCenter消费已有整链模拟，原字段/重新准备/完整控制仍未齐；17等Core原配置counter/同事务真实源，18继续原grant/办理/复查；13/14两消费hash修复已冻结待Root核接。员工16文件仍冻结，真实测试交负责人自行操作。
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 
@@ -22,14 +22,14 @@ AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI 
 
 | 位置 | 当前职责 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | QA P1/P3已交固定`f86b81aea`由PM核接，继续P2关闭报价模型的原澄清/选单收据读取；12真实生成/公开读取WIP保留，17传桥等Core固定合同。四册与索引唯一作者，P1独立片不夹未完成的12/17源码 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 12五前端和两后台私有文件已冻结，reader新blob20a0f40b、preparation87321411；原生成7+权限4组通过。现只读独立核P1别名与必要零初始政策首次start，不写Root文件、不重复旧绿色；后续按明确私有窗口继续 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 17原五文件、resource-store及政策/复核/队列六文件均冻结。现独占新增aiAutomationReviews.ts、automation-review-session.ts、AutomationReviewWorkbench.tsx，接原受权人工API与同键恢复、原办理/复查；不把AUTOMATION Task交普通TaskCenter，不造模型/执行开放，员工冻结成果保持 |
-| `D:/工作文件/rental-OS`／`main` | PM已核GitHub Core`ca1c6a9fc`、AI07/10/11`65aebb1b5`、企业换货`d9af8b33f`及HTTP/构建QA`c7f764fff`；当前仅核接P1固定差异`f86b81aea`，不接其未完schema祖先或展示/事件WIP。原6项其他作者WIP保持 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | QA两独立片已推/收main；负责12原witness/Gateway/公开/TaskCenter25源切片固定提交与剩余字段/原控制，17实际Core源/scoped存储/传桥，18真实grant政策/public/factory/办理挂接；四册与索引唯一作者，不夹其他活动WIP |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 12七源、13/14 ReadinessDiagnosticsCard/ConversationOrderHandoff已冻结；现独占aiConversations.ts及conversation-opening-execution-session.ts，修minimal original ref错调完整create-command reconcile的实际开业启动/历史源读取，保持firstStart/同键/前后来源与scope。测试/runner不改 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 17原五源/store/政策队列六源及18三前端均冻结；18 HumanReview及grant私有两源也已交回Root（f2b86f49/bd11c96b）。Root需接独立runtime publication政策、shared/public/factory与当前policy端口；缺permission/TTL不猜、不从GET推写权，AUTOMATION owner不放宽 |
+| `D:/工作文件/rental-OS`／`main` | PM独占集成，05/06及07/10/11、QA两原AI片均已核收；固定7332875c9仅27文件独立核接，不收794724cd1资源schema检查点或活动WIP。六项他人成果保持，Core读取/counter另等固定完整源 |
 
 三人按负责人明确恢复的原目标持续施工，工具旧失败/旧goal标记不代替实际执行状态。助手只在需要负责人决策的真实阻塞、公共符号冲突或完整阶段冻结交付时合并发送简短消息；不重复心跳、过程日志和旧证据，可自行解决的失败自行处理。shared总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule等跨专项公共文件须与PM协调唯一作者；企业端已获准的ClientApiService.readOrderSubmission第二次读取、AppModule/OpenAPI企业reader/controller/三条GET及后台企业政策材料片段保持其归属。Core交易、资金和品类事实由Core专项提供，AI不重建这些业务权威。
 
-每个可独立验证阶段立即提交推送`codex/ai-native`，由PM按固定成果串行核接main，不再等待两项100%；巡检按PM当前3小时安排，不把patch/冒烟当任务。首批AIN-05/06已由main`44dc16a4b`核闭；11/07/10固定c04dcd73b已由PM收回并核GitHub main`65aebb1b5`；当前P1固定f86b81aea仅按本次差异核接。来源、main、文件、WIP与索引均须实核；争用只暂停该次集成，助手继续开发。
+每个可独立验证阶段立即提交推送`codex/ai-native`，由PM按固定成果串行核接main，不再等待两项100%；巡检按PM当前3小时安排，不把patch/冒烟当任务。05/06及07/10/11、QA两原AI片均已收回并核GitHub；固定7332875c9的27文件按本次差异独立整合，main原schema与六项他人成果保持，见[展示整合证据](<AI Native-开发记录.md#ain12-main-display-integration-20261112>)。后继6d4dda8af与活动WIP另片核验；来源、main、文件、WIP与索引须实核，助手继续独占开发。
 
 ## AIN-17最小Core接点窗口
 
@@ -52,7 +52,7 @@ Core只读合同已固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 
 P1/P3已推送f86b81aea并由PM独立差异核入main6fce308c，dev1零初始政策8+3+5 CAS/一次Core的原通知链也通过。[P2](<AI Native-开发记录.md#ain-qa-clarified-quote-receipt-20261112>)已完成Root原报价/选单同键、精确reference/存储指纹及必要类型，dev1已独立核quote/selection两丢应答的实际Controller/API/session、当前owner/space/撤权、source/hash及unknown反例；按provider/readers两源码和原记录/接续立即固定交付，由PM只收本差异。12生成/公开接点、17资源和18人工消费者WIP分别保留，不随本P2合入。
 
-AIN-12生成前displayWitness、真实Run.sequence、版本化prompt/API/isolation政策及原Gateway指纹接点已落RootWIP；两后台私有源及五前端固定源均保留。三个公开只读方法已落现有会话链，但实际API/客户端/宿主的负责人整链尚未核接，非null字段basis、重排/重新解释和原办理控制仍未齐，不增加100%。Root继续时先接实际消费者，再按原全文核定，普通历史无witness不得补签。
+AIN-12[原展示生产/读取/TaskCenter消费25源](<AI Native-开发记录.md#ain12-original-display-pipeline-20261112>)已核实际Guard、Controller/信封、API/session和固定类型，待本片立即固定上传/PM核接。非null字段basis、可信人类输入/重新准备、重排/重新解释和两入口原办理控制仍未齐，不增加100%；普通历史无witness不得补签。新未发布display-revalidate/display-source已用小写path适配原Guard，旧modelResult/closeUnstarted会话公共路径匹配需PM最小Guard窗口核定，不以新path通过冒充旧路由全通过。
 
 
 ## 后续核心入口及未完项
