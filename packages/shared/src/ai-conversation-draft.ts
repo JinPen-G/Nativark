@@ -5,6 +5,7 @@ import type { AiSceneCode, AiSceneRequestBody, AiSceneRequestReadDraft } from '.
 import { AI_SCENE_CODES, AI_SCENE_REQUEST_DRAFT_VERSION } from './ai-scene-request-draft';
 import type { AiSceneModelResultObservationDraft } from './ai-scene-model-observation-draft';
 import { AI_TASK_DRAFT_VERSION, type AiTaskModelObservationDraft } from './ai-task-draft';
+import { AI_WORKBENCH_DISPLAY_HTTP_SCHEMAS } from './ai-workbench-display-http-draft';
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafList as list, leafRef as ref, leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -92,6 +93,9 @@ export const AI_CONVERSATION_HTTP_DRAFT = Object.freeze({ basePath: 'ai-native/c
   turns: { request: 'AiConversationTurnListDraft', response: 'AiConversationTurnPageDraft', write: false },
   release: { request: 'AiConversationMutationDraft', response: 'AiConversationOperationObservationDraft', write: true },
   modelResult: { request: 'AiConversationModelResultReadDraft', response: 'AiConversationModelResultResponseDraft', write: false },
+  display: { request: 'AiWorkbenchDisplayReadDraft', response: 'AiWorkbenchDisplayMaterialDraft', write: false },
+  'display-revalidate': { request: 'AiWorkbenchDisplayRevalidateDraft', response: 'AiWorkbenchDisplayMaterialDraft', write: false },
+  'display-source': { request: 'AiWorkbenchDisplaySourceReadDraft', response: 'AiWorkbenchDisplaySourceDraft', write: false },
   closeUnstarted: { request: 'AiConversationUnstartedCloseDraft', response: 'AiConversationUnstartedReceiptDraft', write: true },
 } } as const);
 const key = { ...id(), maxLength: 128 };
@@ -107,6 +111,7 @@ const unstartedReceipt = object({ draftVersion: choice(AI_CONVERSATION_UNSTARTED
   status: choice('observed'), conversationId: id(), revision, operation: choice('close_unstarted'),
   creation: choice('permanently_closed'), task: choice('not_created'), taskCancellation: choice('not_requested'), businessRecords: choice('not_modified') });
 export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  ...AI_WORKBENCH_DISPLAY_HTTP_SCHEMAS,
   AiConversationUnstartedCloseDraft: object({ draftVersion: choice(AI_CONVERSATION_UNSTARTED_DRAFT_VERSION),
     conversationId: id(), operationKey: key, expectedRevision: revision, turnId: id(), originalInputRef: id() }),
   AiConversationUnstartedReceiptDraft: unstartedReceipt,

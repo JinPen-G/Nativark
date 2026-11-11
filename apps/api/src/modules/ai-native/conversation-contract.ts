@@ -6,7 +6,8 @@ import { AI_CONVERSATION_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
   type AiConversationCreateDraft, type AiConversationReferenceDraft, type AiConversationMutationDraft,
   type AiConversationListDraft, type AiConversationTurnAdmissionDraft, type AiConversationTurnReferenceDraft,
   type AiConversationOperationRequestDraft, type AiConversationTurnListDraft, type AiConversationModelResultReadDraft,
-  type AiConversationUnstartedCloseDraft } from '@rental-os/shared';
+  type AiConversationUnstartedCloseDraft, type AiWorkbenchDisplayReadDraft,
+  type AiWorkbenchDisplayRevalidateDraft, type AiWorkbenchDisplaySourceReadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { parseOriginalRequest, originalBody } from './task-request/original-request.validation';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiConversationListResponseDraft,
@@ -15,12 +16,13 @@ import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiC
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { AiOriginalRequestResultUnknownError } from './task-request/prisma-original-request.repository';
 import { validateAiConversationModelResponse } from './scenes/scene-observation-contracts';
+import { inspectAiWorkbenchDisplayMaterial } from './workbench-display.contract';
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);
 for (const [name, schema] of Object.entries({ ...AI_CONVERSATION_SCHEMAS,
   AiSceneRequestBodyDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestBodyDraft,
   AiSceneRequestReadDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft })) {
-  if (name !== 'AiConversationModelResultResponseDraft') ajv.addSchema(schema, `#/components/schemas/${name}`);
+  if (!['AiConversationModelResultResponseDraft', 'AiWorkbenchDisplayMaterialDraft'].includes(name)) ajv.addSchema(schema, `#/components/schemas/${name}`);
 }
 interface Requests {
   AiConversationCreateDraft: AiConversationCreateDraft; AiConversationReferenceDraft: AiConversationReferenceDraft;
@@ -29,6 +31,9 @@ interface Requests {
   AiConversationOperationRequestDraft: AiConversationOperationRequestDraft; AiConversationTurnListDraft: AiConversationTurnListDraft;
   AiConversationModelResultReadDraft: AiConversationModelResultReadDraft;
   AiConversationUnstartedCloseDraft: AiConversationUnstartedCloseDraft;
+  AiWorkbenchDisplayReadDraft: AiWorkbenchDisplayReadDraft;
+  AiWorkbenchDisplayRevalidateDraft: AiWorkbenchDisplayRevalidateDraft;
+  AiWorkbenchDisplaySourceReadDraft: AiWorkbenchDisplaySourceReadDraft;
 }
 export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTTP_DRAFT.operations, value: T, command: Requests[keyof Requests]): T {
   const contract = AI_CONVERSATION_HTTP_DRAFT.operations[action];
@@ -37,7 +42,8 @@ export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTT
     if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > 131072) throw Error();
     if (action === 'modelResult') {
       const result = validateAiConversationModelResponse(copy);
-      if (!('resultId' in command) || result.conversationId !== command.conversationId || result.admissionKey !== command.admissionKey
+      if (!('resultId' in command) || !('conversationId' in command) || !('admissionKey' in command)
+        || result.conversationId !== command.conversationId || result.admissionKey !== command.admissionKey
         || result.turn.admissionKey !== command.admissionKey) throw Error();
       if (result.status === 'material_erased') {
         if (result.turn.material !== 'erased') throw Error();
@@ -45,6 +51,9 @@ export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTT
         || result.result.original.inputRef !== result.turn.original.inputRef || result.result.original.requestKey !== result.turn.originalRequestKey
         || result.result.sceneCode !== result.turn.capabilityCode || result.result.original.sceneVersion !== result.turn.capabilityVersion
         || result.result.taskId !== result.turn.task.taskId) throw Error();
+    } else if (action === 'display' || action === 'display-revalidate') {
+      const display = inspectAiWorkbenchDisplayMaterial(copy);
+      if (!('taskId' in command) || display.presentation.binding.taskId !== command.taskId) throw Error();
     } else if (!ajv.getSchema(`#/components/schemas/${contract.response}`)!(copy)) throw Error();
     if (['create', 'archive', 'delete', 'operation', 'release', 'closeUnstarted'].includes(action)) {
       const result = copy as AiConversationOperationObservationDraft;

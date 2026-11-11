@@ -7,6 +7,7 @@ import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 import { nativeToolResultReferenceSchema, nativeToolResultIntentFingerprint } from './native-tool-result.ports';
+import { taskModelDisplayWitnessSchema, inspectTaskModelDisplayInput, withoutTaskModelDisplayMessages } from './task-model-display-witness';
 
 export const TASK_TEXT_MODEL_TOOL = AI_TEXT_MODEL_STEP_CODE;
 export const TASK_IMAGE_MODEL_TOOL = AI_IMAGE_MODEL_STEP_CODE;
@@ -42,7 +43,8 @@ export const taskModelMaterialSchema = z.object({
     content: z.array(z.union([z.object({ kind: z.literal('text'), text: z.string().max(32000) }).strict(),
       z.object({ kind: z.literal('tool_result_reference'), reference: nativeToolResultReferenceSchema }).strict()])).min(1).max(64)
   }).strict()).min(1).max(64),
-  maxOutputTokens: z.number().int().min(1).max(32768)
+  maxOutputTokens: z.number().int().min(1).max(32768),
+  displayWitness: taskModelDisplayWitnessSchema.optional()
 }).strict();
 const mediaReference = z.object({ kind: z.literal('image'), attachmentId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
   attachmentRevision: z.number().int().min(1).max(4294967294) }).strict();
@@ -68,7 +70,7 @@ export const taskModelMediaSchema = z.array(z.union([imageMediaReference, audioM
 const storedSchema = z.object({ mode: z.literal('invoke'), intent: z.unknown(), configuration: z.unknown(),
   priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u), routingHash: hash, identityHash: hash,
   structuredSchemaHash: hash.optional(),
-  media: taskModelMediaSchema.optional() }).strict();
+  media: taskModelMediaSchema.optional(), displayWitness: taskModelDisplayWitnessSchema.optional() }).strict();
 
 export function taskModelIdentity({ requestId: _, authorizedAt: __, ...context }: AiExecutionContext) {
   return requestFingerprint(context);
@@ -79,6 +81,10 @@ export function parseTaskModelInput(value: unknown, policy: TaskModelPolicy) {
   const parsed = storedSchema.parse(structuredClone(value));
   if (!isGatewayIntent(parsed.intent) || !isGatewayConfig(parsed.configuration)) throw new ModelGatewayError('INVALID_REQUEST');
   const input = { ...parsed, intent: parsed.intent, configuration: parsed.configuration };
+  try {
+    inspectTaskModelDisplayInput(input);
+    if (input.displayWitness && (policy.kind || policy.orderExplainTool || policy.structuredOutput)) throw new Error();
+  } catch { throw new ModelGatewayError('INVALID_REQUEST'); }
   if (policy.structuredOutput ? input.structuredSchemaHash !== policy.structuredSchemaHash
     : input.structuredSchemaHash !== undefined) throw new ModelGatewayError('CONFIG_INVALID');
   if (policy.kind === 'image' || policy.kind === 'audio') {
@@ -119,7 +125,7 @@ export function continueTaskModelMaterial(previous: TaskModelInput, value: unkno
     throw new ModelGatewayError('INVALID_REQUEST');
   }
   return (policy.kind === 'image' ? taskImageMaterialSchema : policy.kind === 'audio' ? taskAudioMaterialSchema : taskModelMaterialSchema).parse({
-    messages: [...previous.intent.messages,
+    messages: [...withoutTaskModelDisplayMessages(previous.intent.messages),
       { role: 'assistant', content: [{ kind: 'text', text: result.text }] },
       { role: 'user', content: [{ kind: 'text', text: JSON.stringify({ request: 'clarification_answers', answers }) }] }],
     maxOutputTokens: previous.intent.maxOutputTokens
@@ -127,6 +133,7 @@ export function continueTaskModelMaterial(previous: TaskModelInput, value: unkno
 }
 
 export function taskModelFingerprint(input: TaskModelInput, policy: TaskModelPolicy) {
+  try { inspectTaskModelDisplayInput(input); } catch { throw new ModelGatewayError('INVALID_REQUEST'); }
   if (policy.kind === 'image' || policy.kind === 'audio') {
     input = parseTaskModelInput(input, policy);
     let index = 0;

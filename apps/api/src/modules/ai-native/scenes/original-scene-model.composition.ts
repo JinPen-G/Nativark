@@ -28,6 +28,7 @@ import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-i
 import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey } from './original-quote-input';
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
+import { AiOriginalSceneDisplayGeneration, type AiOriginalSceneDisplayPublication } from '../workbench-display-generation.service';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
@@ -35,6 +36,9 @@ export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & Mod
   knowledge?: AiOriginalSceneKnowledgeOptions;
   /** Server-created original wait/answer witness; never an HTTP mode field. */
   inputWaitMode?: OriginalSceneInputWaitMode;
+  /** Independent trusted display publication. A human-answer successor cannot
+   * carry the old witness; ordinary histories remain ordinary model results. */
+  displayPublication?: AiOriginalSceneDisplayPublication;
 };
 export type AiOriginalSceneRunDependencies = Pick<AuthorizedPersistentTaskInputComposition,
   'clock' | 'monotonic'> & {
@@ -82,6 +86,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
     } }
   } });
   const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock, knowledge);
+  const display = dependencies.displayPublication ? new AiOriginalSceneDisplayGeneration({ db: dependencies.db,
+    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication }, clock) : undefined;
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
   const { current, same, source: originalInputSource } = composeOriginalSceneClarificationSource({
     db: dependencies.db, tasks: model.tasks, scenes, scene, gatewayScene, results,
@@ -113,6 +119,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       if (!continuation && envelope.clarifications) throw denied();
       const revalidate = async () => {
         same(before, await current(ref, command.taskId, command.runId));
+        if (parsedInput.displayWitness) {
+          if (!display) throw unavailable();
+          await display.revalidateInput(before.original.context, command.taskId, command.runId, parsedInput);
+        }
         if (continuation && continuation.questionRevision > 1) {
           const packet = await scenes.prepareTaskMaterial(ref);
           if (before.original.request.sceneCode !== 'quote_clarification'
@@ -155,7 +165,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       if (Buffer.byteLength(content, 'utf8') > 131072) throw unavailable();
       const parts: Array<{ kind: 'text'; text: string }> = [];
       for (let offset = 0; offset < content.length; offset += 16000) parts.push({ kind: 'text', text: content.slice(offset, offset + 16000) });
-      const material = continuation && previous && isGatewayResult(result) && result.status === 'completed'
+      let material = continuation && previous && isGatewayResult(result) && result.status === 'completed'
         ? continueOriginalSceneMaterial(previous, { ...continuation, result }, refreshed ? {
           original: packet.original, materialHash: packet.materialHash, trust: packet.trust, facts: packet.material,
           ...(supplemental ? { knowledge: supplemental } : {}) } : undefined)
@@ -170,6 +180,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       if (!policy) throw unavailable();
       const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(continuation?.limits ?? policy.limits));
       const registrationRef = continuation?.registrationRef ?? registration(command.original.inputRef);
+      if (display && !continuation) material = await display.prepare(context, before.original.receipt,
+        task.id, command.lease.runId, packet.materialHash, material);
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
       const published = await model.publish({ taskId: task.id, registrationRef,
         expectedTaskRevision: command.expectedTaskRevision, lease: command.lease, material });

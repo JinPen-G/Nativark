@@ -4,6 +4,17 @@ import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
   ...platformAiEnglish,
+  '原结果动态展示': 'Original result display',
+  '展示内容来自原结果。事实、候选输入和正式确认分别核对。': 'This display comes from the original result. Review facts, candidate input and formal confirmation separately.',
+  '读取原展示': 'Read original display',
+  '动态展示当前不可用，请使用原事实摘要和人工入口。': 'The display is unavailable. Use the original facts and manual entry.',
+  '隔离的原结果展示': 'Isolated original result display',
+  '以下仅是未提交候选，尚未重新准备或批准。': 'These are unsubmitted candidates. They have not been prepared again or approved.',
+  '材料已更新，保留的候选需要在原输入控件重新核对。': 'The material has changed. Review the retained candidates in the original input controls.',
+  '核对候选输入': 'Review candidate input',
+  '放弃旧候选': 'Discard old candidates',
+  '读取原来源': 'Read original source',
+  '打开原确认材料': 'Open original confirmation material',
   '开始新的检测': 'Start a new check',
   '上次检测已结束，可以发起新的检测。': 'The previous check has ended. You can start a new check.',
   '上次检测已结束。使用当前已保存的 AI 配置发送新的测试消息？费用由你的供应商收取。': 'The previous check has ended. Send a new test message using the currently saved AI settings? Your provider will charge for it.',
