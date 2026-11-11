@@ -6,7 +6,7 @@
 
 目标为完成原 AIN-01～28 及 ENTRY-01～18 的正式开发任务，优先可用的核心场景和实际生产装配；不新增边缘功能、Reserved 范围或测试脚本，仅做必要模拟冒烟与类型检查。按负责人新决定及需求v1.15/任务v1.19，真实测试由负责人自行操作，不再阻塞研发100%；功能范围、原任务代码依赖和独立复核仍须齐备，不以提交或局部绿色计整项完成。
 
-AIN-05与06已完成整项模拟研发收口，见[05](<AI Native-开发记录.md#ain05-simulated-whole-closeout-20261111>)、[06](<AI Native-开发记录.md#ain06-simulated-whole-closeout-20261111>)；下一步核07及11。05固定提交`96b21eb09774a347f33feaffae3941aec7f14799`已推送并远端核实。dev1已交11完整评估后继续10；dev2继续07原批准/Core故障和两处既有通知计量断言维护，员工16文件仍冻结待负责人核接。旧真实测试授权询问已撤下，不继续等待该授权。负责人已补齐[客户/员工部署接线](<AI Native-开发记录.md#ain-client-staff-publication-closeout-20261111>)，规则原body、员工对象比较及原答案明确继续已修。main的AppShell/rest、固定认证文件及企业readerAudit窗口仍由对应作者处理，不夹入AI提交。
+AIN-05、06及11已完成整项模拟研发收口，见[05](<AI Native-开发记录.md#ain05-simulated-whole-closeout-20261111>)、[06](<AI Native-开发记录.md#ain06-simulated-whole-closeout-20261111>)、[11](<AI Native-开发记录.md#ain11-simulated-whole-closeout-20261111>)。首批05/06固定`988605a97aa7708c62b2055924f31f82192db20a`已上传并远端核实；[main三方预检与旧接续原稿](<AI Native-开发记录.md#ain-first-task-batch-main-intake-20261111>)已核，当前PM进入企业串行集成，重新释放窗口前不写main。dev1继续10；dev2的07整项评估及唯一计量断言blob`b71ba679f779d44f29fc51f0dd2489b0c9dd2714`已交，负责人继续独立核接；员工16文件仍冻结。旧真实测试授权询问已撤下，真实测试交负责人自行操作。main的AppShell/rest、认证及企业公共窗口仍保持对应作者归属。
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 
@@ -22,14 +22,14 @@ AIN-05与06已完成整项模拟研发收口，见[05](<AI Native-开发记录.m
 
 | 位置 | 当前职责 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 05/06整项已核；核11与07固定成果、准备首批05/06串行合main，继续独占AI公共装配与四册、Git索引/提交推送。仅完整可信关闭配置保留有限原probe读，全部新执行拒绝 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 规则/连接片已核接；11无源码改动的完整评估已交，转原AIN-10知识/ACL检索/来源与结构化记忆整项核定，需要修改时先报告文件归属，只在重大冲突或完整交付时报告 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 员工16文件冻结待Root核接；原06结论已核。继续原07，独占tests/ai-native-plan-input-source.test.cjs内两处既有通知计量断言点维护，不增用例/脚本或扩大集合；之后转原17可靠事件，公共写权先核归属 |
-| `D:/工作文件/rental-OS`／`main` | PM处理AppShell租户外框/rest provider，沿固定认证文件，不扩写AI；企业作者仅原membership-audit/readerAudit契约与schema窗口。集成按固定提交串行，各作者继续，保留WIP |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 05/06/11已核；核07固定成果、在PMmain窗口释放后合首批。继续独占AI公共装配、schema/向前迁移、四册及Git索引；11同身份新epoch的租户页面由Root修复，原journal保留 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 11评估已交，继续原AIN-10知识/ACL检索/来源与结构化记忆；需要修改先报告文件归属，只在重大冲突或完整交付时报告 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 07原测试83个声明保持，唯一固定文件交回Root；转17，独占business-events四个原outbox/reader/candidate/composition文件，必要时同步原automation authority。已发现资源缺口/开业缺配置两类只有合同而无producer；先核真实持久资源/版本/同事务端口及最少schema，不猜阈值或塞旧CHECK，Core/public/schema窗口先点报 |
+| `D:/工作文件/rental-OS`／`main` | PM外框/rest阶段已上传`6d46b4eaca62cffe6bc06a628cb5d3e901982e73`，当前串行收回企业固定`17f4f98871a23aadb539762a4f87bd38b8cdef47`；仅企业既定公共窗口，不接活动AI代码。旧7项WIP保留，AI接续差异已在本树按原稿保留，尚未改main |
 
 三人按负责人明确恢复的原目标持续施工，工具旧失败/旧goal标记不代替实际执行状态。助手只在需要负责人决策的真实阻塞、公共符号冲突或完整阶段冻结交付时合并发送简短消息；不重复心跳、过程日志和旧证据，可自行解决的失败自行处理。shared总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule等跨专项公共文件须与PM协调唯一作者；企业端已获准的ClientApiService.readOrderSubmission第二次读取、AppModule/OpenAPI企业reader/controller/三条GET及后台企业政策材料片段保持其归属。Core交易、资金和品类事实由Core专项提供，AI不重建这些业务权威。
 
-每个完成阶段立即提交并推送 `codex/ai-native`；累计新增两项正式任务达到100%后，AI-RD 将核定的固定提交合入main并推送。按原任务表中的唯一 AIN/ENTRY 任务ID计数，不把两个patch或冒烟用例当两项任务。合并前核对固定来源SHA、预期main SHA、影响文件和完成任务ID，确认无其他集成或索引争用；有争用只暂停该次集成。当前本批两项为AIN-05/06，需与PM的main写入窗口串行集成；未取得合入及远端证据前不重置批次或声称已合，助手继续施工。
+每个完成阶段立即提交并推送 `codex/ai-native`；累计新增两项正式任务达到100%后，AI-RD 将核定的固定提交合入main并推送。按原任务表中的唯一 AIN/ENTRY 任务ID计数，不把两个patch或冒烟用例当两项任务。合并前核固定来源SHA、预期main SHA、影响文件、WIP与索引；有争用只暂停该次集成。首批为AIN-05/06，后继11已收口、07待核；PM企业集成完成后重新核首批，不追其活动HEAD。未取得main合入及远端证据前不重置批次或声称已合，助手继续施工。
 
 ## 后续核心入口及未完项
 
