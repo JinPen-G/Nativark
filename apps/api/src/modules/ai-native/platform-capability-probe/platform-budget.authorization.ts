@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -45,7 +46,7 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
     // Enforce it here too: non-HTTP/internal callers must retain the boundary.
     if (action !== 'read' && action !== 'settings_read'
       && (!('permissions' in context) || !Array.isArray(context.permissions)
-        || !context.permissions.includes(PLATFORM_AI_PROVIDER_PERMISSIONS.manage))) throw new BudgetError('FORBIDDEN');
+        || !hasEffectivePermission(context.permissions, PLATFORM_AI_PROVIDER_PERMISSIONS.manage))) throw new BudgetError('FORBIDDEN');
     const gatewayContext = { actorId: principal.actorId };
     const clock = this.input.clock ?? (() => new Date());
     let proof: unknown;
@@ -85,7 +86,7 @@ export class PlatformBudgetAuthorizationSource implements BudgetAuthorizationSou
         // level (no `access` member); an absent or non-array list fails closed.
         || !('permissions' in context) || !Array.isArray(context.permissions)
         || policyRow.requiredPermissions.some(permission => typeof permission !== 'string'
-          || !context.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
+          || !hasEffectivePermission(context.permissions, permission))) throw new BudgetError('FORBIDDEN');
       proof = { invocationId: row.id, registrationHash: row.registrationHash, configurationHash: row.configurationHash,
         association: binding.association, reservationId: resource.reservationId ?? null,
         policy: { revision: policyRow.revision, permissions: policyRow.requiredPermissions, expiresAt: policyRow.expiresAt.toISOString() } };

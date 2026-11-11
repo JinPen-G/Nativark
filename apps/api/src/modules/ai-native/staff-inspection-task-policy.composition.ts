@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { Module, type DynamicModule } from '@nestjs/common';
 import { z } from 'zod';
@@ -98,7 +99,7 @@ export function composeStaffInspectionTaskPolicies(dependencies: InspectionRecog
           || plan.sceneVersion !== task.sceneVersion || !(plan.expiresAt instanceof Date)
           || !Number.isFinite(plan.expiresAt.getTime()) || plan.expiresAt <= clock()) throw unavailable();
         const permissions = ['rental-os:order:view', `rental-os:order:${command.reference.stage}`];
-        if (!('access' in context) || permissions.some(code => !context.access.permissions.includes(code))) throw denied();
+        if (!('access' in context) || permissions.some(code => !hasEffectivePermission(context.access.permissions, code))) throw denied();
         const after = await scopes.resolveCurrent();
         if (after.scope.id !== before.scope.id || originalIdentityHash(after.context) !== originalIdentityHash(context)) throw denied();
         const binding = requestFingerprint({ identity: originalIdentityHash(context), scopeId: before.scope.id,

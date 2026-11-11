@@ -1,6 +1,7 @@
 /** Rule page -> original request/creation receipt. It records source metadata
  * only; linked R1 preparation and the original Core draft remain separate.
  * Recorded operation keys are reconciled before reading today's rule fields. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_TASK_RULE_SOURCE_ENTRY_VERSION, AI_TASK_RULE_DRAFT_FIELDS,
@@ -42,7 +43,7 @@ export function composeTaskRuleSourceEntry(d: TaskRuleDraftDependencies) {
     const scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(d.original.auth, credentials, clock), clock);
     const first = await scopes.resolveCurrent(), context = first.context;
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || context.audience !== 'operator'
-      || !('access' in context) || !context.access.permissions.includes('rental-os:rules:manage')) throw denied();
+      || !('access' in context) || !hasEffectivePermission(context.access.permissions, 'rental-os:rules:manage')) throw denied();
     const verify = async () => { if (signal?.aborted) throw denied(); const latest = await scopes.resolveCurrent();
       if (latest.scope.id !== first.scope.id || originalIdentityHash(latest.context) !== originalIdentityHash(context)) throw denied(); };
     return { context, verify, input: { ...d.original, credentials }, routes: new AiBusinessReadRouteAuthority(d.original.guard, credentials, clock) };

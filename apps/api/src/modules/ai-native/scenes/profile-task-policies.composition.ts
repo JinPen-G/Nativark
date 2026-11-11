@@ -2,6 +2,7 @@
  * member Guard, current Core change and untouched creation receipt authorize
  * the native policy CAS. No creation-time policy, approval, profile write,
  * model or renewal; the first admission is atomic and reads only observe. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
@@ -47,12 +48,12 @@ export function composeProfileTaskActionPolicies(d: ApprovedProfileApplicationDe
     const initial = await scopes.resolveCurrent(), context = initial.context;
     if (initial.scope.kind !== 'WORKSPACE' || context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
       || context.audience !== 'operator' || !('access' in context)
-      || ![memberView, memberManage].some(permission => context.access.permissions.includes(permission))) throw profileDenied();
+      || ![memberView, memberManage].some(permission => hasEffectivePermission(context.access.permissions, permission))) throw profileDenied();
     const actor = { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: context.actor.userId };
     const identity = identityHash(context), route = new ApprovedProfileRouteAuthority(dependencies.guard, dependencies.credentials);
     // The original GET permits view OR manage. Select one held business code;
     // a manage-only member must not need an unrelated or additional read role.
-    const readPermission = context.access.permissions.includes(memberView) ? memberView : memberManage;
+    const readPermission = hasEffectivePermission(context.access.permissions, memberView) ? memberView : memberManage;
     const permissions = (operation: AiTaskActionPolicyOperation) => [readers.has(operation) ? readPermission : memberManage];
     const receipt = await creation.read(original);
     if (!('state' in receipt.receipt) || receipt.receipt.state !== 'observed'
@@ -84,7 +85,7 @@ export function composeProfileTaskActionPolicies(d: ApprovedProfileApplicationDe
     let publicationHash: string | undefined;
     const initialSource = async () => {
       const current = await binding(), { task: latest, run } = current, db = dependencies.db;
-      if (!('access' in current.context) || !current.context.access.permissions.includes(memberManage)) throw profileDenied();
+      if (!('access' in current.context) || !hasEffectivePermission(current.context.access.permissions, memberManage)) throw profileDenied();
       if (latest.status !== 'QUEUED' || latest.revision !== 1 || latest.cancelRequestedAt !== null || latest.resultRef !== null
         || latest.eventCursor !== 0n || run.status !== 'QUEUED' || run.revision !== 1 || run.leaseOwnerId !== null
         || run.leaseExpiresAt !== null || run.inputReceiptId !== null || !run.fencingToken.equals(0)) throw profileDenied();
@@ -122,7 +123,7 @@ export function composeProfileTaskActionPolicies(d: ApprovedProfileApplicationDe
           if (!same(guarded, actor)) throw profileDenied();
           const current = await binding();
           const granted = current.context;
-          if (!('access' in granted) || required.some(permission => !granted.access.permissions.includes(permission))) throw profileDenied();
+          if (!('access' in granted) || required.some(permission => !hasEffectivePermission(granted.access.permissions, permission))) throw profileDenied();
           if (writing) await initialSource();
           await revalidate();
           return (await binding()).context;

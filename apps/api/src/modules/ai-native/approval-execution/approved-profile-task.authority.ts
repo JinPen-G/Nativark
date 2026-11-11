@@ -1,6 +1,7 @@
 /** Original Task authority for ordinary personal-name actions. Reuses current
  * auth/action policies, execution/approval admission and original scope; it does
  * not create a task, seed a policy, grant a role or call a model. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiToolCode, type AiExecutionContext } from '@rental-os/shared';
@@ -47,7 +48,7 @@ export class ApprovedProfileTaskAuthority {
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || context.audience !== 'operator'
       || !('access' in context)) throw profileDenied();
     const required = mode === 'read' ? ['rental-os:member:view', 'rental-os:member:manage'] : ['rental-os:member:manage'];
-    if (!required.some(permission => context.access.permissions.includes(permission))) throw profileDenied();
+    if (!required.some(permission => hasEffectivePermission(context.access.permissions, permission))) throw profileDenied();
     const access = aiTaskAccessFromContext(context, taskId, this.clock());
     const task = await db.aiTask.findFirst({ where: access.where, include: { scope: true } });
     if (!task || task.id !== taskId || task.ownerKind !== 'USER' || task.ownerId !== context.actor.userId

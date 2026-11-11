@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiKnowledgePolicyPreparation, type AiKnowledgePolicyManagementOperation } from '@prisma/client';
 import { z } from 'zod';
@@ -48,12 +49,12 @@ export class HumanKnowledgePolicyManagementService {
   private key(access: Access, operationKey: string) { return { ...access.scope, actorId: access.actorId, audience: access.audience, operationKey }; }
   private async authority(access: Access, id: string, db: KnowledgePolicyReadDb, live: boolean) {
     const authority = await knowledgeManagementAuthority(db, id, access.scope, this.clock(), live);
-    if (authority.row.managerId !== access.actorId || authority.required.some(p => !access.permissions.includes(p))) throw unavailable();
+    if (authority.row.managerId !== access.actorId || authority.required.some(p => !hasEffectivePermission(access.permissions, p))) throw unavailable();
     return authority;
   }
   private async source(command: PolicyChange, access: Access, db: KnowledgePolicyReadDb, live = true) {
     const authority = await this.authority(access, command.authorityId, db, live);
-    if (!authority.operations.includes(command.action) || command.requiredPermissions.some(p => !access.permissions.includes(p) || !authority.allowed.includes(p))) throw unavailable();
+    if (!authority.operations.includes(command.action) || command.requiredPermissions.some(p => !hasEffectivePermission(access.permissions, p) || !authority.allowed.includes(p))) throw unavailable();
     const closing = command.action === 'disable';
     const basis = await knowledgePolicyResourceBasis(db, authority, closing, this.clock());
     if (!closing && authority.row.preparationTarget != null && Date.parse(command.expiresAt) > Date.parse(parse(authorityTargetSpec, authority.row.preparationTarget).expiresAt)) throw unavailable();

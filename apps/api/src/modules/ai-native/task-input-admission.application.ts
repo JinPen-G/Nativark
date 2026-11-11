@@ -2,6 +2,7 @@
  * Original question/answer validation and all writes remain in the existing
  * repositories. Preparation and receipt reads never renew, dispatch, reset
  * resources or revive an expired/consumed wait; CAS receipts grant no execution. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
@@ -249,7 +250,7 @@ export function composeTaskInputAdmission(d: TaskInputAdmissionDependencies) {
     const published = await publication(state.task, tx);
     if (published.hash !== reference.publicationHash) throw conflict();
     const held = 'access' in current.context ? current.context.access.permissions : [];
-    if (reference.actions.some(row => row.requiredPermissions.some(permission => !held.includes(permission))
+    if (reference.actions.some(row => row.requiredPermissions.some(permission => !hasEffectivePermission(held, permission))
       || Date.parse(row.expiresAt) <= now().getTime()
       || row.mode === 'configure' && Date.parse(row.expiresAt) > Math.min(now().getTime() + maximumMs,
         published.expiresAt.getTime(), reference.intent === 'explicit_answer_continue' ? Infinity : state.wait.expiresAt.getTime()))) throw denied();
@@ -297,7 +298,7 @@ export function composeTaskInputAdmission(d: TaskInputAdmissionDependencies) {
       const state = await stage(command.original, input, command.intent, command.submission, signal);
       const published = await read(() => publication(state.task), signal);
       const held = 'access' in state.context ? state.context.access.permissions : [];
-      if (!held.includes('rental-os:order:create')) throw denied();
+      if (!hasEffectivePermission(held, 'rental-os:order:create')) throw denied();
       const cutoff = Math.min(now().getTime() + maximumMs, published.expiresAt.getTime(),
         command.intent === 'explicit_answer_continue' ? Infinity : state.wait.expiresAt.getTime());
       const actions: TaskInputAdmissionReference['actions'] = [];
@@ -308,7 +309,7 @@ export function composeTaskInputAdmission(d: TaskInputAdmissionDependencies) {
           || !Number.isSafeInteger(existing.revision) || existing.revision < 1 || !(existing.expiresAt instanceof Date)
           || !Number.isFinite(existing.expiresAt.getTime()) || !permissions.safeParse(existing.requiredPermissions).success)) throw unavailable();
         const requiredPermissions = [...new Set(['rental-os:order:create', ...(existing ? existing.requiredPermissions as string[] : [])])];
-        if (requiredPermissions.some(permission => !held.includes(permission))) throw denied();
+        if (requiredPermissions.some(permission => !hasEffectivePermission(held, permission))) throw denied();
         const retain = !!existing && existing.expiresAt > now() && requiredPermissions.every(permission =>
           Array.isArray(existing.requiredPermissions) && existing.requiredPermissions.includes(permission));
         actions.push(action.parse({ operation: selected, mode: retain ? 'retain' : 'configure', expectedRevision: existing?.revision ?? null,

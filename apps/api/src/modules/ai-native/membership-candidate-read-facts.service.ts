@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../common/permission-match';
 import { z } from 'zod';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberOption, type CustomerMembershipBookingOption } from '@rental-os/shared';
@@ -42,7 +43,7 @@ export interface AiMembershipCandidateReadProjection {
  * caller flag. The surrounding route still revalidates session and permissions. */
 function hasOriginalCreatePermission(context: AiExecutionContext): boolean {
   if (!('access' in context)) return false;
-  if (context.access.permissions.includes('rental-os:order:create') || context.access.permissions.includes('*')) return true;
+  if (hasEffectivePermission(context.access.permissions, 'rental-os:order:create') || hasEffectivePermission(context.access.permissions, '*')) return true;
   const identity = getRequestIdentity();
   return context.actor.kind === 'user' && context.scope.kind === 'workspace'
     && identity?.isPlatformAdmin === true && identity.isSaasAdmin === false

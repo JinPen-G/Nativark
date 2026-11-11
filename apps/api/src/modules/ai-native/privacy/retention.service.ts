@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
@@ -50,7 +51,7 @@ export class AiRetentionService {
   async current(): Promise<Session> {
     const context = await this.identities.resolve();
     if (context.audience !== 'operator' || context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
-      || !('access' in context) || !context.access.permissions.includes('system:params:manage')
+      || !('access' in context) || !hasEffectivePermission(context.access.permissions, 'system:params:manage')
       || context.access.dataScope !== 'all' || context.access.locationScope.mode !== 'all') throw refused();
     const { requestId: _request, authorizedAt: _at, ...stable } = context;
     return { context, hash: fingerprint(stable), tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };

@@ -1,6 +1,7 @@
 /** Prepares and issues minimum original-task action policies under a published
  * scene policy and current business Guard. Original CAS receipts are observed
  * independently; no Run, business approval or Core operation is executed here. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
@@ -222,7 +223,7 @@ export function composeTaskExecutionAdmission(d: TaskExecutionAdmissionDependenc
     for (const action of reference.actions) {
       const existing = current.find(policy => policy.operation === action.operation);
       const expected = [...new Set([...minimum, ...(existing?.requiredPermissions ?? [])])].sort();
-      if (!isDeepStrictEqual(expected, [...action.requiredPermissions].sort()) || expected.some(permission => !held.includes(permission))) throw denied();
+      if (!isDeepStrictEqual(expected, [...action.requiredPermissions].sort()) || expected.some(permission => !hasEffectivePermission(held, permission))) throw denied();
       if (action.mode === 'retain') {
         if (!existing || existing.revision !== action.expectedRevision || existing.expiresAt !== action.expiresAt
           || Date.parse(existing.expiresAt) <= now().getTime()) throw changed();
@@ -276,16 +277,16 @@ export function composeTaskExecutionAdmission(d: TaskExecutionAdmissionDependenc
         if (before.task.sceneCode !== 'opening_diagnosis' || !publication?.tools.some(tool => tool.code === 'tenant.config.propose'))
           missing.push(command.preparation.kind === 'business_calendar' ? 'calendar_preparation_tool_not_published' : 'rule_preparation_tool_not_published');
       }
-      if (minimum.some(permission => !rolePermissions.includes(permission))) missing.push('current_business_permission_missing');
+      if (minimum.some(permission => !hasEffectivePermission(rolePermissions, permission))) missing.push('current_business_permission_missing');
       const expiry = publication ? Math.min(at + maximumMs, Date.parse(publication.expiresAt), Date.parse(before.locator.receipt.expiresAt)) : at;
       const actions = selected.map(operation => {
         const existing = current.find(policy => policy.operation === operation) ?? null;
         const requiredPermissions = [...new Set([...minimum, ...(existing?.requiredPermissions ?? [])])];
         const active = !!existing && Date.parse(existing.expiresAt) > at && minimum.every(permission => existing.requiredPermissions.includes(permission))
-          && existing.requiredPermissions.every(permission => rolePermissions.includes(permission));
+          && existing.requiredPermissions.every(permission => hasEffectivePermission(rolePermissions, permission));
         return { operation, expectedRevision: existing?.revision ?? null, requiredPermissions, current: existing, active };
       });
-      if (actions.some(action => action.requiredPermissions.some(permission => !rolePermissions.includes(permission)))) missing.push('existing_stricter_permission_not_held');
+      if (actions.some(action => action.requiredPermissions.some(permission => !hasEffectivePermission(rolePermissions, permission)))) missing.push('existing_stricter_permission_not_held');
       if (actions.some(action => !action.active && action.expectedRevision === 4294967294)) missing.push('original_policy_cas_exhausted');
       const locator = publication && minimum.length && expiry > at ? {
         version: 'task-execution-admission-2', intent: command.intent, ...(command.preparation ? { preparation: command.preparation } : {}),

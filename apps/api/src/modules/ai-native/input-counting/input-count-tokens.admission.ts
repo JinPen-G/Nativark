@@ -6,6 +6,7 @@
  * frozen input); lifecycle actions verify the counting reservation and the
  * original task's read authority. No token bound is required to admit a count
  * — that would be circular — and calls are never converted into tokens. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiExecutionContext, AiUsageAssociationDraft } from '@rental-os/shared';
@@ -136,7 +137,7 @@ export class InputCountTokensAuthorizationSource implements BudgetAuthorizationS
       || !Number.isFinite(policy.expiresAt.getTime()) || policy.expiresAt <= now
       || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length === 0
       || !('access' in context) || policy.requiredPermissions.some(permission => typeof permission !== 'string'
-        || !context.access.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
+        || !hasEffectivePermission(context.access.permissions, permission))) throw new BudgetError('FORBIDDEN');
     if (identity((await this.taskAuthority.scopes.resolveCurrent()).context) !== identity(context)) throw new BudgetError('FORBIDDEN');
     return { authorizationKey: `count-tokens:${requestFingerprint({ action, identity: identity(context),
       invocationCallId: row.callId, association, reservationOwner: gateway.actorId })}`,

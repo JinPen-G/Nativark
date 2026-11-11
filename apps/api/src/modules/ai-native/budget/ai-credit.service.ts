@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { Injectable, HttpException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID, createHash } from 'node:crypto';
@@ -155,7 +156,7 @@ export class AiCreditService {
     if (!current || !current.user.isActive || current.hasWorkspaces && !current.workspaceValid
       || !!current.user.isSaasAdmin !== platform || (!platform && !current.tenantUser.isPlatformAdmin)) fail('AI_ACCESS_DENIED', 403);
     const required = platform ? manage ? 'system:ai-provider:manage' : 'system:ai-provider:view' : 'system:params:manage';
-    if (!(current.user.permissions.includes(required) || current.user.permissions.includes('*')
+    if (!(hasEffectivePermission(current.user.permissions, required)
       || !platform && current.user.isPlatformAdmin)) fail('AI_ACCESS_DENIED', 403);
     return { userId: current.user.id, tenantId: current.user.tenantId, workspaceId: current.workspaceId,
       permissions: [...current.user.permissions].sort(), tenantPermissions: [...current.tenantUser.permissions].sort(), platform };

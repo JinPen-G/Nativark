@@ -2,6 +2,7 @@
  * No message/body copy, model call, plan publication or budget reset. Delete
  * hides history only; original Task/Artifact, holds and business receipts stay.
  * An occupied turn cannot be replaced without a separate trusted completion. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { AI_CONVERSATION_DRAFT_VERSION as version, AI_CONVERSATION_UNSTARTED_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION,
@@ -48,7 +49,7 @@ export class AiConversationRepository {
   private async current(): Promise<Session> {
     const { context, scope } = await this.scopes.resolveCurrent();
     if (context.audience !== 'operator' || context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
-      || !('access' in context) || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(code => context.access.permissions.includes(code))) throw denied();
+      || !('access' in context) || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(code => hasEffectivePermission(context.access.permissions, code))) throw denied();
     return { scopeId: scope.id, ownerId: context.actor.userId, tenantId: context.scope.tenantId,
       workspaceId: context.scope.workspaceId, binding: originalIdentityHash(context) };
   }

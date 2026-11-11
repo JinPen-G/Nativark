@@ -1,6 +1,7 @@
 /** Human calendar edit -> linked original request -> existing R1 proposal.
  * Current calendar Guard, original task ownership and the persisted source
  * revision are revalidated. Unknown reads never resume or recreate a stage. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TASK_CALENDAR_DRAFT_PREPARATION_VERSION,
@@ -54,7 +55,7 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
     const scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(d.original.auth, credentials, clock), clock);
     const first = await scopes.resolveCurrent(), context = first.context;
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || context.audience !== 'operator'
-      || !('access' in context) || !context.access.permissions.includes('rental-os:calendar:edit')) throw denied();
+      || !('access' in context) || !hasEffectivePermission(context.access.permissions, 'rental-os:calendar:edit')) throw denied();
     const access = aiTaskAccessFromContext(context, taskId, now());
     const task = await db.aiTask.findFirst({ where: { AND: [access.where, { scopeId: first.scope.id }] } });
     if (!task || task.id !== taskId || task.scopeId !== first.scope.id || task.scopeKind !== 'WORKSPACE'

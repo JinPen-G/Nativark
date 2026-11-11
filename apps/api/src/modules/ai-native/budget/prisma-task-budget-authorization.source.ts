@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -94,7 +95,7 @@ export class PrismaTaskBudgetAuthorizationSource implements BudgetAuthorizationS
           || !Number.isFinite(policy.expiresAt.getTime()) || policy.expiresAt <= this.clock()
           || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length === 0
           || !('access' in context) || policy.requiredPermissions.some(permission => typeof permission !== 'string'
-            || !('access' in context) || !context.access.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
+            || !('access' in context) || !hasEffectivePermission(context.access.permissions, permission))) throw new BudgetError('FORBIDDEN');
         const finalTaskContext = dispatching ? await this.authorization.execution.authorize(row.taskId)
           : await this.authorization.authority.resolve(row.taskId, 'read_step_terminal');
         if (identity(finalTaskContext) !== identity(context)) throw new BudgetError('FORBIDDEN');

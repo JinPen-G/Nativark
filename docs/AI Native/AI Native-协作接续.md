@@ -22,10 +22,10 @@ AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI 
 
 | 位置 | 当前职责 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 05/06/07/10/11已核，首批05/06已合main；准备11/07第二批。负责12真实presentation/context/field-material/public生产及原Artifact/ACL/单账，17 schema与Core原配置行修订/事务接点协调；四册和索引唯一作者 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 12五前端文件已冻结、写权回Root；现独占workbench-display-original.reader.ts及workbench-display-preparation.service.ts，接原会话/轮次/原请求/Task/ActionInput/已计量Artifact及当前受权来源。Root负责生成前display witness/public接点；缺用途/版本证据不可事后补签 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 17五文件已冻结、写权回Root；现独占business-events/prisma-business-failure-resource-store.ts，仅实现新列的scoped readBinding/assertStorage/原tx append、不可变去重及原收据。原Core事实/临近政策/配置修订/public/provider由Root协调；员工冻结成果保持 |
-| `D:/工作文件/rental-OS`／`main` | PM独占串行集成，Core固定ca1c6a9f已推送并核远端，索引空且6项原WIP哈希保持；正独立核接AI固定c04dcd73b及其11/07/10。AI及助手继续12/17，不争用main索引、不追活动HEAD |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 优先QA P1/P3当前主体权限及原政策整理，随后P2关闭报价模型的原澄清/选单收据读取；12真实生成/公开读取WIP保留、17传桥等Core固定合同。四册与索引唯一作者，P1独立片不夹12/17未整合源码 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 12五前端和两后台私有文件已冻结，reader新blob20a0f40b、preparation87321411；原生成7+权限4组通过。现只读独立核P1别名与必要零初始政策首次start，不写Root文件、不重复旧绿色；后续按明确私有窗口继续 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 17原五文件、resource-store及政策/复核/队列六文件均冻结。现独占新增aiAutomationReviews.ts、automation-review-session.ts、AutomationReviewWorkbench.tsx，接原受权人工API与同键恢复、原办理/复查；不把AUTOMATION Task交普通TaskCenter，不造模型/执行开放，员工冻结成果保持 |
+| `D:/工作文件/rental-OS`／`main` | PM独占集成，已核收07/10/11至65aebb1b5、企业至d9af8b33f；HTTP取消/构建依赖固定c7f764fff已回报推送。PM只核接AI固定可验证阶段，不收未完schema/生成展示；AI不争用main索引，不追活动HEAD |
 
 三人按负责人明确恢复的原目标持续施工，工具旧失败/旧goal标记不代替实际执行状态。助手只在需要负责人决策的真实阻塞、公共符号冲突或完整阶段冻结交付时合并发送简短消息；不重复心跳、过程日志和旧证据，可自行解决的失败自行处理。shared总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule等跨专项公共文件须与PM协调唯一作者；企业端已获准的ClientApiService.readOrderSubmission第二次读取、AppModule/OpenAPI企业reader/controller/三条GET及后台企业政策材料片段保持其归属。Core交易、资金和品类事实由Core专项提供，AI不重建这些业务权威。
 
@@ -42,7 +42,13 @@ AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI 
 | [rental-business.service.ts](../../apps/api/src/modules/rental-core/rental-business.service.ts) 的 persistBusinessConfig 原tx及 readTenantReadiness | 复用原business settings修订，在原提交内追加相应开业分区事件；读取九项R0的完整basis重核，禁止state/seedState或updatedAt伪造总版本 |
 | [rental-state.repository.ts](../../apps/api/src/modules/rental-core/rental-state.repository.ts) 的 saveCoreState | 前三入口之外确需的最小仓储接点：空间快照原子configurationRevision、scoped原tx及可选opening参加者。仅快照行版本，不当作九项总版本；缺快照不补版1 |
 
-上述Core写窗口尚待PM核定，AI不提前修改权威提交者。Root组合真实readFulfillment/readOpening与dev2私有存储，补human-automation request/provider、原五类policy/review闭合合同；发布阈值未提供保持not_captured/unavailable，不能编造policy。schema检查点和存储冻结均不代表AIN-17整项完成。
+上述Core最小窗口已由PM核准交Core实现，含必要snapshot-backfill兼容；AI等固定原合同，不提前修改权威提交者。Root组合真实readFulfillment/readOpening与dev2私有存储，补human-automation request/provider；原五类policy/review/queue闭合片已冻结待独立核接。发布阈值未提供保持not_captured/unavailable，不能编造policy；九项独立读取不冒称单事务快照。schema检查点和存储冻结均不代表AIN-17整项完成。
+
+## 当前QA与展示接续
+
+[P1/P3固定候选及边界](<AI Native-开发记录.md#ain-qa-current-permission-20261112>)已完成Root必要类型与实际Auth/知识模拟，PM另独立核原Task/Scope/会话列表；只按P1源码差异独立交付。P2仍须沿原scene-answer:${inputRef}:${receiptId}定位澄清报价及选单，关闭模型后只读同键、缺失保持unknown，不能用普通inputRef/contentHash键替换或恢复新执行。
+
+AIN-12生成前displayWitness、真实Run.sequence、版本化prompt/API/isolation政策及原Gateway指纹接点已落RootWIP；两后台私有源及五前端固定源均保留。三个公开只读方法已落现有会话链，但实际API/客户端/宿主的负责人整链尚未核接，非null字段basis、重排/重新解释和原办理控制仍未齐，不增加100%。Root继续时先接实际消费者，再按原全文核定，普通历史无witness不得补签。
 
 ## 后续核心入口及未完项
 

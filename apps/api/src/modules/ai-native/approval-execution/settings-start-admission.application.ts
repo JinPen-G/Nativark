@@ -1,6 +1,7 @@
 /** Explicit initial policies for a Core-prepared notification change and its
  * original creation receipt. Only an untouched QUEUED Task/first Run qualifies.
  * No creation/read call signs; existing waits and unknown work cannot restart. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -58,8 +59,8 @@ const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const snapshotHash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value,
   (_key, entry) => typeof entry === 'bigint' ? { nativeBigInt: entry.toString() } : entry)));
 const minimumPermission = (held: readonly string[], existing: readonly string[] = []) => existing.includes('rental-os:price:manage') ? 'rental-os:price:manage'
-  : existing.includes('rental-os:rules:manage') ? 'rental-os:rules:manage' : held.includes('rental-os:price:manage') ? 'rental-os:price:manage'
-    : held.includes('rental-os:rules:manage') ? 'rental-os:rules:manage' : undefined;
+  : existing.includes('rental-os:rules:manage') ? 'rental-os:rules:manage' : hasEffectivePermission(held, 'rental-os:price:manage') ? 'rental-os:price:manage'
+    : hasEffectivePermission(held, 'rental-os:rules:manage') ? 'rental-os:rules:manage' : undefined;
 
 export function composeSettingsStartAdmission(d: SettingsStartAdmissionDependencies) {
   if (typeof d.db?.$transaction !== 'function' || typeof d.auth?.resolveAccessContext !== 'function' || typeof d.guard?.canActivate !== 'function'
@@ -197,7 +198,7 @@ export function composeSettingsStartAdmission(d: SettingsStartAdmissionDependenc
     if (!minimumPermission(held)) throw denied();
     for (const action of reference.actions) {
       const row = rows.find(value => value.operation === action.operation), minimum = minimumPermission(held, row ? row.requiredPermissions as string[] : []);
-      if (!minimum || !action.requiredPermissions.includes(minimum) || action.requiredPermissions.some(value => !held.includes(value))
+      if (!minimum || !action.requiredPermissions.includes(minimum) || action.requiredPermissions.some(value => !hasEffectivePermission(held, value))
         || Date.parse(action.expiresAt) <= now().getTime() || action.mode === 'configure' && Date.parse(action.expiresAt) > cutoff) throw denied();
       if (action.mode === 'retain') {
         if (!row || row.revision !== action.expectedRevision || row.expiresAt.toISOString() !== action.expiresAt
@@ -247,7 +248,7 @@ export function composeSettingsStartAdmission(d: SettingsStartAdmissionDependenc
         const minimum = minimumPermission(held, row ? row.requiredPermissions as string[] : []);
         if (!minimum) throw denied();
         const requiredPermissions = [...new Set([minimum, ...(row ? row.requiredPermissions as string[] : [])])];
-        if (requiredPermissions.some(value => !held.includes(value))) throw denied();
+        if (requiredPermissions.some(value => !hasEffectivePermission(held, value))) throw denied();
         const retain = !!row && row.expiresAt > now() && requiredPermissions.every(value => (row.requiredPermissions as string[]).includes(value));
         actions.push(action.parse({ operation: selected, mode: retain ? 'retain' : 'configure', expectedRevision: row?.revision ?? null,
           requiredPermissions, expiresAt: retain ? row!.expiresAt.toISOString() : new Date(cutoff).toISOString() }));

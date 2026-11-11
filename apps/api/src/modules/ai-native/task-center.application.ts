@@ -1,6 +1,7 @@
 /** Standard operator task observations, human decisions and explicit original
  * clarification/continuation. Current owner/action policies remain mandatory;
  * execution delegates to existing hosts, never another runner or ledger. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -97,7 +98,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
         const identity = new AiTaskCurrentIdentityAuthority(input.auth, credentials, input.clock);
         const before = await identity.resolve();
         if (before.audience !== 'operator' || !('access' in before)
-          || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(permission => before.access.permissions.includes(permission)))
+          || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(permission => hasEffectivePermission(before.access.permissions, permission)))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const root = composePersistedTaskCenter({ ...input, credentials, includeCancellation: action === 'stop' || action === 'stopReceipt' });
         const originalResult = async (query = schemas.result.parse(command)): Promise<AiTaskModelObservationDraft> => {

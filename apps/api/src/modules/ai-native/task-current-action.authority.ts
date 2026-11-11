@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../common/permission-match';
 import type { AuthService } from '../auth/auth.service';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -53,7 +54,7 @@ export class AiTaskCurrentActionAuthority implements AiTaskRepositoryAuthority {
       const final = await this.identity();
       if (current.fingerprint !== initial.fingerprint || final.fingerprint !== initial.fingerprint || requestFingerprint(rechecked) !== requestFingerprint(policy)
         || Date.parse(policy.expiresAt) <= this.clock().getTime() || !('access' in final.context)
-        || policy.requiredPermissions.some(permission => !('access' in final.context) || !final.context.access.permissions.includes(permission))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        || policy.requiredPermissions.some(permission => !('access' in final.context) || !hasEffectivePermission(final.context.access.permissions, permission))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return structuredClone(final.context);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;

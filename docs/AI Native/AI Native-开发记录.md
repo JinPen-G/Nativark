@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-qa-current-permission-20261112"></a>
+## QA P1当前主体通配权限与P3原读取政策整理（2026-11-12）
+
+原Auth/Guard对合法管理员和固定全权限空间角色输出`permissions=['*']`；AI若只比较具体码，会错误拒绝当前受权主体。新增[统一匹配](../../apps/api/src/common/permission-match.ts)，将37个既有AI源码文件中的当前主体及held/rolePermissions/heldPermissions别名共66处匹配统一为原exact-or-*语义，涵盖任务/会话/初始准入/待答/审批、知识、预算、配置和原历史。上下文权限数组仍原样保留；actor/audience/tenant/workspace/location/dataScope、owner、原政策/TTL/CAS、材料/ACL、预算和同键恢复均未放宽。自动化subject的正式三权限枚举及政策/工具allowed集合仍exact；它们不是当前人类权限。AIN-12两私有读取入口的相同修复保留在其未整合WIP，不夹入P1。
+
+仅按QA P3整理[task-read-policy.application.ts](../../apps/api/src/modules/ai-native/task-read-policy.application.ts)的长行。PM独立将helper还原原includes并规范化纯排版后，AST与原HEAD一致，hash=`4f071d3159cbea46348e4c97d1425837f30a5d9b3f28da8ec7e6dfb7211bb212`；原三政策独立CAS、partial/unknown、只读优先和准入未变。AiCredit移除重复的*分支，原tenantUser/isPlatformAdmin约束保留。
+
+Root只暂存38个已核P1源码（含helper），AIN-12生成/公开链、AIN-17资源/配置schema及助手WIP均未暂存。固定索引`node -`/TypeScript5.9.3/noEmit，AppModule及38根、1914传递源诊断0（`25dcb8`）；1055源清单SHA-256=`792dfa7a45cb0866ca0a2cf9ee67b8174f7d133dbf1574923a435d739acd5b9b`。同一固定索引的实际AuthService→Task authority/repository＋FormalKnowledgeAuthorizationAdapter八组exit0（`bf0c89`）：管理员/全权角色通过且原数组仍只有*、owner查询不扩大；普通准确读与缺执行权、等待后撤权/换空间/失去成员资格、缺政策/未知动作/平台actor、知识原政策actor/空间及撤权均保持拒绝。角色/DB/知识政策为明确模拟；没有模型、业务写入或真实HTTP/数据库。
+
+PM另独立实测原ScopeRepository/ConversationRepository列表及Task查询九组通过：原main拒绝*可复现，候选正常通过，等待后owner/空间改变和缺权/缺政策拒绝。该组为PM回传的独立模拟，本对话未冒称重跑。dev1原展示链7+4组也确认*读取、换空间/owner及空权限边界，展示仍不授执行。
+
+验证驱动失败如实保留：首轮全仓ls-files触发默认maxBuffer，改为仅所需三源码域；源运行时最初读到受版本控制的旧core.js，内存装载改为固定TS正式源码优先，未删除原稿；旧task-action fixture未记录原token.wid，被现行Auth正确拒绝，仅在内存补真实签名空间并固定原token后通过。未修改测试/runner文件、断言或skip。所有审计为空，任务临时目录未创建；原任务/ENTRY分数不因本次缺陷修复改变。
+
 <a id="ain17-resource-schema-checkpoint-20261112"></a>
 ## AIN-17原资源与配置行修订的未完检查点（2026-11-12）
 

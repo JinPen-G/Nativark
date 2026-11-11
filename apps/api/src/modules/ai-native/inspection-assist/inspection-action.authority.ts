@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { AiOrderRouteContextAuthority, type AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import type { AiInspectionActorScope, AiInspectionTarget } from '@rental-os/shared';
@@ -15,8 +16,8 @@ export class InspectionActionAuthority {
         || !['staff', 'operator'].includes(context.audience) || !('access' in context)) throw new InspectionAssistError('ACCESS_DENIED');
       const stagePermission = `rental-os:order:${snapshot.stage}`;
       const permissions = context.access.permissions;
-      if (action !== 'read' && !permissions.includes('*') && !permissions.includes(stagePermission)
-        && (action === 'bind' || !permissions.includes('rental-os:order:operate'))) throw new InspectionAssistError('ACCESS_DENIED');
+      if (action !== 'read' && !hasEffectivePermission(permissions, '*') && !hasEffectivePermission(permissions, stagePermission)
+        && (action === 'bind' || !hasEffectivePermission(permissions, 'rental-os:order:operate'))) throw new InspectionAssistError('ACCESS_DENIED');
       if (context.audience !== 'staff' && context.audience !== 'operator') throw new InspectionAssistError('ACCESS_DENIED');
       try {
         return { ok: true as const, value: await execute({ tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
