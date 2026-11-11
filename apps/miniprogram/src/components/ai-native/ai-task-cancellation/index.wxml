@@ -1,0 +1,6 @@
+<view wx:if="{{ready}}" class="ai-workbench" aria-label="停止本次解释" aria-busy="{{pending}}">
+  <button wx:if="{{status !== 'settled' && status !== 'finished'}}" bindtap="onRequest" disabled="{{pending || (status !== 'closed' && !canRequest)}}">{{english ? 'Request a stop' : '申请停止解释'}}</button>
+  <button bindtap="onRead" disabled="{{pending || (status !== 'closed' && !canRead)}}">{{english ? 'Check original stop record' : '核对停止结果'}}</button>
+  <button wx:if="{{canSettle}}" bindtap="onFinish" disabled="{{pending}}">{{english ? 'Check and finish stopping' : '核对并完成停止'}}</button>
+  <text wx:if="{{statusLabel}}" role="status">{{statusLabel}}</text>
+</view>

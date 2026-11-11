@@ -8,6 +8,7 @@ for(const app of ['miniprogram','staff-miniprogram']) test(app+' unknown events 
  assert.equal(applyCursorEvent(state,event,['known']).reason,'duplicate');
  for(const changed of [{type:'new-event'},{version:'v2'},{cursor:'9007199254740995'},{type:'reset_required'}]){
   const reset=applyCursorEvent(state,{...event,cursor:'9007199254740994',...changed},['known']);
+  if(changed.cursor){assert.equal(reset.sync,'synced');assert.equal(reset.cursor,changed.cursor);continue;}
   assert.equal(reset.sync,'unsynced');assert.equal(reset.cursor,null);
   assert.equal(applyCursorEvent(reset,event,['known']),reset);
  }

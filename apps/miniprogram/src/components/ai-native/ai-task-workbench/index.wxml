@@ -1,14 +1,17 @@
 <view class="ai-workbench" aria-label="AI任务工作台">
-  <text role="status">{{phase}}</text>
+  <text role="status">{{clientModel ? modelStatus : phase}}</text>
   <text wx:if="{{errorLabel}}" role="alert">{{errorLabel}}</text>
-  <ai-task-card wx:for="{{tasks}}" wx:key="id" task="{{item}}" available="{{taskListAvailable}}" bind:open="selectTask" />
-  <ai-step-timeline id="timeline" task-id="{{selectedTaskId}}" steps="{{steps}}" available="{{ready}}" />
+  <ai-task-card wx:if="{{!clientModel}}" wx:for="{{tasks}}" wx:key="id" task="{{item}}" available="{{taskListAvailable}}" bind:open="selectTask" />
+  <ai-step-timeline wx:if="{{!clientModel}}" id="timeline" task-id="{{selectedTaskId}}" steps="{{steps}}" available="{{ready}}" />
   <ai-supplement-input id="clarification" task-id="{{selectedTaskId}}" input-revision="{{inputRevision}}" fields="{{fields}}" disabled="{{!ready || !inputEnabled}}" />
-  <ai-proposal-confirm id="confirmation" proposal="{{proposal}}" disabled="{{!ready || !proposalEnabled}}" pending="{{pending}}" expired="{{proposalExpired}}" />
-  <ai-knowledge-source id="sources" sources="{{sources}}" />
-  <ai-memory-preference id="memory" items="{{memories}}" available="{{ready}}" />
+  <ai-proposal-confirm wx:if="{{!clientModel}}" id="confirmation" proposal="{{proposal}}" disabled="{{!ready || !proposalEnabled}}" pending="{{pending}}" expired="{{proposalExpired}}" />
+  <ai-knowledge-source wx:if="{{!clientModel}}" id="sources" sources="{{sources}}" />
+  <ai-memory-preference wx:if="{{!clientModel}}" id="memory" items="{{memories}}" available="{{ready}}" />
   <ai-status-panel state="{{actionState}}" manual-text="核对" manual-available="{{ready && manualEnabled}}" disabled="{{pending}}" bind:manual="onManual" />
-  <ai-order-explanation id="result" order="{{order}}" available="{{ready}}" />
+  <ai-order-explanation wx:if="{{!clientModel}}" id="result" order="{{order}}" available="{{ready}}" />
+  <button wx:if="{{clientModel && continueAvailable}}" bindtap="onContinue" disabled="{{pending}}">继续回答</button>
+  <view wx:if="{{clientModel && modelText}}"><text selectable="true">{{modelText}}</text><view>模型生成说明；金额、订单和付款状态以原订单信息为准。</view></view>
+  <ai-task-cancellation wx:if="{{clientModel && cancellationAvailable}}" id="cancellation" bind:observed="onCancellationObserved" />
   <slot name="task-card"></slot>
   <slot name="step-timeline"></slot>
   <slot name="clarification"></slot>

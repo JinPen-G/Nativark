@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-task-consumer-closeout-20261111"></a>
+## 客户订单解释、取消与可靠事件的实际消费者（2026-11-11）
+
+前一通知审核/历史读取阶段已提交并推送 `b204f9b9cf487bed695c93ecb81b5f0b08cc5de9`，远端已核。负责人将AI-dev2交付的23个文件逐一与固定Git blob核对，全部相符，再沿[网站实际工作台](../../apps/tenant-website/src/features/ai-native/ClientTaskWorkbench.tsx)、[客户小程序工作台](../../apps/miniprogram/src/components/ai-native/ai-task-workbench/index.ts)与原订单页核接。原创建引用串起模型开始、问题读取、保存答案、明确继续和原结果；取消组件在模型请求进行中也可从已观察Task挂接，回调只读原任务，不重新start/continue。未知开始/继续/取消应答保留原引用，另一页的未知定位不得被覆盖。
+
+事件消费者复用正式快照/事件schema，绑定原taskId、after、严格递增游标、非递减revision及页末水位；水位和读取代次只存内存，不从缓存取得权限。网站核对最多20页，客户小程序沿原AiPollingLoop先排完本批页再读原来源；unknown/reset停流并关闭执行控件，显式原快照读取才能恢复。客户及员工的同一AiTask适配器去掉错误的`+1`前提，保留未知事件/版本、reset及倒序拒绝。仅纠正[原B09游标用例](../../tests/ai-native-b09-cursor.test.cjs)和[原轮询用例](../../tests/ai-native-b09-poll-ack.test.cjs)中合法空洞的错误预期，原用例及拒绝断言保留，未新增测试脚本。
+
+独立复核另发现：任务已取消时，客户端仍可留存补充正文并显示input_saved。负责人同步修复两端session，原快照证明cancelled/failed后清除本地submission正文，保留原material/task引用，禁止继续；unknown或cancel_requested不借此清除恢复资料。必要输入冒烟（tool chunk `dd466e`，命令SHA256 `1d5405926e016412d39ed6af53c38619fb0a88c3e54033715068364686651691`）exit0：两端正常/答案后取消/继续应答丢失6条，正常与未知恢复模型各2次、答案收据1份；取消后模型仍1次，正文已清、原引用保留、继续关闭。原B09两文件6/6、0 fail/skip/todo（chunk `0256da`）。Web2根、客户小程序3根及员工游标1根/传递类型0诊断（session `43031`）；小程序保持ES2019，105份shared声明只在CompilerHost内存生成。
+
+作者已完成的取消父挂接、事件页/水位与迟到结果组作为来源证据保留；负责人没有把作者报告冒称真实宿主验证，也未重复扩大整套回归。公开后端与当前Guard/ALS的原输入恢复另见[前一阶段](<#ain-client-original-input-recovery-20261111>)。所有本片离线组审计0、任务临时目录未创建；既有CRLF源码按水平空白检查，无手改vendor运行时、安装或复制依赖。浏览器/微信、真库、供应商及完整容量/SLO仍未验，AIN-06/20/21/22与适用ENTRY未跨G4，不增加100%任务。
+
 <a id="ain-notification-consumer-history-20261111"></a>
 ## 通知审核入口与过期政策后的原结果读取（2026-11-11）
 

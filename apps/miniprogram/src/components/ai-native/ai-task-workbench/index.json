@@ -1,4 +1,14 @@
 {
   "component": true,
-  "usingComponents": {}
+  "usingComponents": {
+    "ai-task-card": "/components/ai-native/ai-task-card/index",
+    "ai-step-timeline": "/components/ai-native/ai-step-timeline/index",
+    "ai-supplement-input": "/components/ai-native/ai-supplement-input/index",
+    "ai-proposal-confirm": "/components/ai-native/ai-proposal-confirm/index",
+    "ai-knowledge-source": "/components/ai-native/ai-knowledge-source/index",
+    "ai-memory-preference": "/components/ai-native/ai-memory-preference/index",
+    "ai-status-panel": "/components/ai-native/ai-status-panel/index",
+    "ai-order-explanation": "/components/ai-native/ai-order-explanation/index",
+    "ai-task-cancellation": "/components/ai-native/ai-task-cancellation/index"
+  }
 }
