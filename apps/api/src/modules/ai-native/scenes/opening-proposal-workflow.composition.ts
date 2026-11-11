@@ -38,14 +38,15 @@ const receiptSchema = z.object({ original: originalRequestReferenceSchema,
   registrationRef: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
 export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencies,
   host: AiTaskApplicationHost, monotonic?: () => number,
-  calendar?: { requests: PrismaOriginalRequestRepository }) {
+  calendar?: { requests: PrismaOriginalRequestRepository; ruleOnly?: { id: string; version: string } }) {
   if (calendar && !(calendar.requests instanceof PrismaOriginalRequestRepository))
     throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const calendarOnly = calendar !== undefined && calendar.ruleOnly === undefined, ruleOnly = calendar?.ruleOnly;
   const scenes = composeAiOriginalScenes(input), authorization = composePersistedTaskAuthorization(input);
   const clock = input.clock ?? (() => new Date());
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
   const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(input.core, routes), routes, clock,
-    new AiOpeningVersionFieldSource(input.db, routes), calendar !== undefined);
+    new AiOpeningVersionFieldSource(input.db, routes), calendarOnly, ruleOnly);
   // Opening request bodies name workspace sections, not business records. Their
   // original read ACL is the opening Guard; a fresh full diagnosis is neither
   // historical evidence nor a prerequisite for stopping/reconciling old debt.
@@ -145,14 +146,14 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
     };
     await verify();
     const root = composeOpeningProposalTaskHost({ ...input, host, monotonic,
-      calendarOnly: calendar !== undefined,
+      calendarOnly, ruleOnly,
       scene: { code: found.task.sceneCode, version: found.task.sceneVersion }, revalidateOriginal: verify,
       task: { taskId: key.taskId, runId: key.runId, material: packets[0], materials: packets,
         limits: plan.limits, expiresAt: found.original.receipt.expiresAt } });
     return { found, key, root, verify };
   };
   const prepareBatch = async (command: z.infer<typeof batchSchema>) => {
-    if (calendar && command.sections.some(section => section.key !== 'business_calendar'))
+    if (calendar && command.sections.some(section => section.key !== (ruleOnly ? 'business_rule' : 'business_calendar')))
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const found = await target(command.original, false);
     if (command.sections.some(section => !found.sections.includes(section.key))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -262,7 +263,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
           }
         }
         const root = composeOpeningProposalTaskHost({ ...input, host, monotonic,
-          calendarOnly: calendar !== undefined,
+          calendarOnly, ruleOnly,
           scene: { code: found.task.sceneCode, version: found.task.sceneVersion }, revalidateOriginal: () => found.verify(false),
           task: { taskId: key.taskId, runId: key.runId, material: packets[0], materials: packets,
             limits: limits.data, expiresAt: found.original.receipt.expiresAt } });
@@ -288,7 +289,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
         throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const access = await authorization.tasks.resolveAccess(key.taskId, 'read_metadata');
       const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId,
-        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences);
+        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences, calendarOnly, undefined, ruleOnly);
       const sections = [];
       const observedKeys = new Set<string>();
       for (const definition of plan.steps) {
@@ -349,7 +350,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
           material = packet;
         }
         const root = composeOpeningProposalTaskHost({ ...input, host, monotonic,
-          calendarOnly: calendar !== undefined,
+          calendarOnly, ruleOnly,
           scene: { code: found.task.sceneCode, version: found.task.sceneVersion }, revalidateOriginal: () => found.verify(false),
           task: { taskId: found.task.id, runId: found.created.runId, material, limits: limits.data, expiresAt: found.original.receipt.expiresAt } });
         return { found, root, material };
@@ -366,7 +367,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
     async readReceipt(value: unknown) {
       const command = receiptSchema.parse(structuredClone(value)), found = await target(command.original, true);
       const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId,
-        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences, calendar !== undefined);
+        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences, calendarOnly, undefined, ruleOnly);
       const receipt = await proposals.readReceipt({ taskId: found.task.id, runId: found.created.runId, registrationRef: command.registrationRef });
       if (receipt.state === 'ai_proposal_saved') {
         const material = verifyOpeningSectionMaterial(receipt.material);

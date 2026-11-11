@@ -5,6 +5,7 @@ import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_
 import { AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP, AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS, AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS } from '@rental-os/shared';
 import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_SCHEMAS, AI_MEMBER_NAME_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_CONTRACTS, AI_TASK_RULE_DRAFT_SCHEMAS, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_TASK_RULE_SOURCE_ENTRY_HTTP, AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS, AI_TASK_RULE_SOURCE_ENTRY_SCHEMAS } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS, RENTAL_EXCHANGE_INSPECTION_OPERATIONS } from "../modules/rental-core/rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./enterprise-schemas";
@@ -231,6 +232,7 @@ function buildPaths(operations: ContractOperation[]) {
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
+  ...AI_TASK_RULE_SOURCE_ENTRY_SCHEMAS,
   ...AI_TASK_CALENDAR_DRAFT_SCHEMAS,
   ...AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS,
   ...AI_TASK_ORDER_HANDOFF_SCHEMAS,
@@ -2345,6 +2347,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : action === 'preparationOperation' ? 'Read the original linked rule preparation result without restarting it.'
       : 'Current owned rule proposal or full Core candidate review.',
     requestSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].response })),
+  ...Object.entries(AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS).map(([action, contract]) => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_RULE_SOURCE_ENTRY_HTTP.basePath}/${AI_TASK_RULE_SOURCE_ENTRY_HTTP[action as keyof typeof AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS]}`,
+    tag: 'AI Native', authRequired: true, operationId: `aiTaskRuleDraft_${action}`, permissions: ['rental-os:rules:manage'],
+    summary: action === 'source' ? 'Read one original rule version under current rule-management authority. No task creation.'
+      : action === 'entry' ? 'Explicitly record the original rule task from the selected version. No model, rule save or publication.'
+      : 'Read the original rule task creation receipt without retrying creation.',
+    requestSchema: contract.request, responseSchema: contract.response })),
   ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`, tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`,
     permissions: action === 'save' || action === 'review' ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS],

@@ -106,6 +106,7 @@ export * from "./ai-client-entry-http-draft-schemas";
 export * from './ai-member-name';
 
 export * from './ai-task-rule-draft';
+export * from './ai-task-rule-source-entry';
 
 export * from './ai-task-calendar-draft';
 export * from './ai-task-calendar-draft-preparation';

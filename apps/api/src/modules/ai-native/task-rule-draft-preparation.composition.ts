@@ -26,6 +26,8 @@ import { AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { runWithRequestIdentity } from '../../common/request-identity';
+import { createRuleOriginalRequests, createRuleOriginalReadRequests } from './task-rule-original-source.composition';
+import { ruleSourceEntryMarker, ruleSourceEntryOperationId } from './task-rule-source-entry.composition';
 
 type Request = { headers: { authorization?: unknown } };
 type Task = NonNullable<Awaited<ReturnType<PrismaClient['aiTask']['findFirst']>>>;
@@ -61,11 +63,26 @@ export function composeTaskRuleDraftPreparation(d: Dependencies) {
     const credentials = { current: async () => {
       if (signal?.aborted) throw denied(); return { authorization: header, audience: 'operator' as const, requestId: randomUUID() };
     } };
-    const input = { ...d.original, credentials }, scenes = composeAiOriginalScenes(input);
-    const original = await scenes.requests.readHistorical(bound.original), task = await scenes.readTaskReceipt(bound.original.inputRef);
+    const input = { ...d.original, credentials }, defaults = composeAiOriginalScenes(input);
+    // The immutable source journal supplies the rule target before an opening
+    // read can request broader permissions than this dedicated entry has.
+    const sourceRow = await db.aiTaskOriginalRequest.findUnique({ where: { id: bound.original.inputRef } });
+    let entry: z.infer<typeof ruleSourceEntryMarker> | undefined;
+    if (sourceRow?.requestKey.startsWith('rule-entry:')) {
+      const reference = { operationKey: z.string().uuid().parse(sourceRow.requestKey.slice('rule-entry:'.length)) };
+      const row = await db.operationLog.findUnique({ where: { id: ruleSourceEntryOperationId(bound.context, reference) } });
+      if (!row || bound.context.scope.kind !== 'workspace' || bound.context.actor.kind !== 'user'
+        || row.action !== 'ai-native.rule.entry' || row.tenantId !== bound.context.scope.tenantId
+        || row.workspaceId !== bound.context.scope.workspaceId || row.userId !== bound.context.actor.userId) throw denied();
+      entry = ruleSourceEntryMarker.parse(row.detail);
+      if (entry.inputRef !== bound.original.inputRef || entry.operationKey !== reference.operationKey) throw denied();
+    }
+    const requests = entry ? createRuleOriginalRequests(input, entry.target) : defaults.requests;
+    const original = await requests.readHistorical(bound.original), task = await requests.readTaskReceipt(bound.original.inputRef);
     if (original.receipt.state === 'revoked' || original.receipt.contentHash !== bound.task.inputHash
       || original.receipt.sceneCode !== 'opening_diagnosis' || original.receipt.sceneVersion !== bound.task.sceneVersion
       || task.state !== 'observed' || task.taskId !== bound.task.id) throw denied();
+    const scenes = { ...defaults, requests, readTaskReceipt: (inputRef: string) => requests.readTaskReceipt(inputRef) };
     const verify = async () => {
       if (signal?.aborted) throw denied(); await bound.verify();
       const latest = await scenes.requests.readHistorical(bound.original), created = await scenes.readTaskReceipt(bound.original.inputRef);
@@ -74,9 +91,9 @@ export function composeTaskRuleDraftPreparation(d: Dependencies) {
         || created.taskId !== task.taskId || created.runId !== task.runId) throw denied();
     };
     const fields = new AiOpeningVersionFieldSource(db, bound.ruleRoutes);
-    const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(d.original.core, bound.ruleRoutes), bound.ruleRoutes, clock, fields);
-    const workflow = composeOpeningProposalWorkflow(input, d.host);
-    return { bound, scenes, fields, differences, workflow, original, task, verify };
+    const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(d.original.core, bound.ruleRoutes), bound.ruleRoutes, clock, fields, false, entry?.target);
+    const workflow = composeOpeningProposalWorkflow(input, d.host, undefined, entry ? { requests, ruleOnly: entry.target } : undefined);
+    return { bound, scenes, fields, differences, workflow, original, task, entry, verify };
   };
   type Bound = Awaited<ReturnType<typeof bind>>;
   const envelope = (root: Bound) => ({ contractVersion: AI_TASK_RULE_DRAFT_PREPARATION_VERSION, taskId: root.bound.task.id,
@@ -91,6 +108,11 @@ export function composeTaskRuleDraftPreparation(d: Dependencies) {
     return { expiresAt: row.expiresAt, hash: requestFingerprint({ revision: row.revision, tools: tools.data, limits: limits.data, expiresAt: row.expiresAt.toISOString() }) };
   };
   const preview = async (root: Bound, command: z.infer<typeof aiTaskRuleDraftPreparationPreviewInput>, expiresAt?: string) => {
+    if (root.entry && (root.entry.target.id !== command.targetId || root.entry.target.version !== command.version)) throw conflict();
+    if (root.entry) {
+      const source = await root.fields.read({ key: 'business_rule', targetId: command.targetId, expectedVersion: command.version }, root.bound.context);
+      if (requestFingerprint(source.basis) !== root.entry.sourceHash) throw conflict();
+    }
     const publication = await policy(root);
     await root.bound.ruleRoutes.withRuleDraftPreview(command.targetId, async context => { assertAiReadContextBinding(context, root.bound.context); });
     const section = { key: 'business_rule' as const, targetId: command.targetId, expectedVersion: command.version,
@@ -123,8 +145,8 @@ export function composeTaskRuleDraftPreparation(d: Dependencies) {
     if (task.state === 'observed') {
       const plan = await db.aiTaskRunPlan.findFirst({ where: { scopeId: root.bound.task.scopeId, taskId: task.taskId, runId: task.runId } });
       if (plan) {
-        const saved = await root.workflow.readReceipt({ original, registrationRef: `opening-section:business_rule:${material.materialHash}` });
-        if (saved.receipt.state === 'ai_proposal_saved') {
+        const saved = root.entry ? undefined : await root.workflow.readReceipt({ original, registrationRef: `opening-section:business_rule:${material.materialHash}` });
+        if (root.entry || saved?.receipt.state === 'ai_proposal_saved') {
           const items = await d.saved(request, task.taskId), item = items.items.find(item => item.target.id === material.targetId
             && item.target.version === material.expectedVersion && requestFingerprint(item.changes) === requestFingerprint(material.changes));
           if (!item || item.reference.runId !== task.runId) throw denied(); await root.verify();
@@ -155,7 +177,9 @@ export function composeTaskRuleDraftPreparation(d: Dependencies) {
         });
         const hasMore = rows.length > 20, targets = [];
         for (const row of rows.slice(0, 20)) {
+          if (root.entry && (row.id !== root.entry.target.id || row.version !== root.entry.target.version)) continue;
           const fields = await root.fields.read({ key: 'business_rule', targetId: row.id, expectedVersion: row.version }, root.bound.context);
+          if (root.entry && requestFingerprint(fields.basis) !== root.entry.sourceHash) throw conflict();
           const values = Object.fromEntries(AI_TASK_RULE_DRAFT_FIELDS.map(field => [field, z.boolean().parse(fields.fields[field])]));
           targets.push({ id: row.id, version: row.version, status: row.status, values, sourceHash: requestFingerprint(fields.basis) });
         }
@@ -191,7 +215,8 @@ export function composeTaskRuleDraftPreparation(d: Dependencies) {
       try {
         await root.verify(); await root.scenes.requests.createTask(original);
         if (!d.preparationAdmission) return observe(body, root, reference, 'unavailable');
-        await d.preparationAdmission(body, original, { kind: 'business_rule', targetId: checked.material.targetId }, signal);
+        await d.preparationAdmission(body, original, { kind: 'business_rule', targetId: checked.material.targetId,
+          ...(root.entry ? { version: checked.material.expectedVersion } : {}) }, signal);
         await root.workflow.start({ original, section: checked.section }, signal, checked.material.materialHash);
         return await observe(body, root, reference);
       } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }

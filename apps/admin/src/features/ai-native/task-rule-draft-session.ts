@@ -51,6 +51,7 @@ export function createTaskRuleDraftPreparationSession(input: { taskId: string; t
     if (scope.tenantId !== input.tenantId || scope.workspaceId !== input.workspaceId) throw Error('AI_SCOPE_CHANGED');
   };
   const restore = () => {
+    if (view.invalid) return;
     try { const value = input.store.read();
       if (value && value.taskId !== input.taskId || view.pending && (!value || value.operationKey !== view.pending.operationKey)) {
         view = { ...view, invalid: true }; return;

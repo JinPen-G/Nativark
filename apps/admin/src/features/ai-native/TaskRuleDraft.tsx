@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
-import { AI_TASK_RULE_DRAFT_FIELDS, type AiTaskRuleDraftReference } from '@rental-os/shared';
+import { AI_TASK_RULE_DRAFT_FIELDS, type AiTaskRuleDraftReference, type AiTaskRuleDraftOperationResponse } from '@rental-os/shared';
 import { useNavigate } from 'react-router-dom';
 import { ActionButton, Alert, Button, Checkbox, ConfirmAction, Input, Select } from '@/components/ui';
 import { APP_ROUTES } from '@/app/navigation';
@@ -12,17 +12,20 @@ import { formatTimestamp } from './formatters';
 import { RuleDraftDifferences } from './TaskRuleDraftView';
 import styles from './AiManagement.module.css';
 
-export type TaskRuleDraftProps = { taskId: string; identity: string; current(): boolean; onAccessDenied(): void };
+export type TaskRuleDraftProps = { taskId: string; identity: string; current(): boolean; onAccessDenied(): void;
+  onPrepared?(reference: AiTaskRuleDraftReference): void; onCommitted?(value: AiTaskRuleDraftOperationResponse): void };
 export function TaskRuleDraft(props: TaskRuleDraftProps) {
   const [prepared, setPrepared] = useState<{ identity: string; taskId: string } | null>(null);
   const taskId = prepared?.identity === props.identity ? prepared.taskId : props.taskId;
   return <section className={styles.stack}>
-    <RulePreparation {...props} onPrepared={reference => { if (props.current()) setPrepared({ identity: props.identity, taskId: reference.taskId }); }} />
+    <RulePreparation {...props} onPrepared={reference => { if (props.current()) {
+      props.onPrepared?.(reference); setPrepared({ identity: props.identity, taskId: reference.taskId });
+    } }} />
     <RuleDraftConsumer {...props} taskId={taskId} identity={`${props.identity}:${taskId}`} />
   </section>;
 }
 
-function RuleDraftConsumer({ taskId, identity, current, onAccessDenied }: TaskRuleDraftProps) {
+function RuleDraftConsumer({ taskId, identity, current, onAccessDenied, onCommitted }: TaskRuleDraftProps) {
   const { t } = useAiManagementLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
   const [reason, setReason] = useState('依原提案保存规则草稿');
   const stableOwner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
@@ -38,7 +41,9 @@ function RuleDraftConsumer({ taskId, identity, current, onAccessDenied }: TaskRu
     return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
   if (!active()) return null;
   const data = session.view, canManage = auth.hasPermission('rental-os:rules:manage');
-  const action = (work: () => Promise<void>) => async () => { try { await work(); } catch (error) {
+  const action = (work: () => Promise<void>) => async () => { try { await work();
+    if (active() && session.view.operation?.operation.state === 'committed') onCommitted?.(session.view.operation);
+  } catch (error) {
     const status = (error as { response?: { status?: number } }).response?.status;
     if (active() && (status === 401 || status === 403)) onAccessDenied(); throw error;
   } };

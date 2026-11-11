@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-rule-source-intake-20261111"></a>
+## 普通规则用户的原来源、R1及Core草稿整链（2026-11-11）
+
+负责人逐一核对dev1冻结的19个Git blob，全部与本树一致，再核接本人负责的shared总出口、3条OpenAPI和Guard登记，共22个源码文件；不覆盖员工并行片。入口从[RulesTab](../../apps/admin/src/features/settings/governance/RulesTab.tsx)经[原来源/创建收据](../../apps/api/src/modules/ai-native/task-rule-source-entry.composition.ts)、[规则专用原请求](../../apps/api/src/modules/ai-native/task-rule-original-source.composition.ts)、关联R1到原Core规则草稿。只要求当前rules:manage；规则限定由服务端原记录决定，不能混入日历或其他开业分区，旧默认开业/日历签名保留。源版本、字段及hash参与重验，历史读取独立受权；未授发布或采用权限。
+
+负责人review指出的原保存body问题已在本片修复：[Controller](../../apps/api/src/modules/ai-native/task-rule-draft.application.ts)所有原方法保留请求原body给闭合schema，即使全局whitelist已剥离未知字段，仍在领域/写入前拒绝。入口journal只按用户/空间/规则对象定位；显示版本变化不换原键，Core未证实不开始下一轮，明确下一轮先重读原Core收据再精确清理。
+
+检查完整原命令后独立执行一次固定整链，JS SHA256 `cb1b45a71ba2996d545e6f7658af8be9d92aeed39fbd3575d4b4c29b2e6cbc4a`，session `52884`、chunk `b5fcb0`、exit0：实际DTO/Controller/Auth/Guard/ALS、API/session、R1/Core配合明确内存仓储；只含rules:manage，无订单/价格/系统参数权限，源Task零政策，准备8项CAS/1提案，Core写1次、模型0。entry/prepare/save三处丢应答各发一次，重复操作只核原键；关闭新写及严格推进300001ms后仍读原收据，额外workspaceId在写前拒绝且状态不变。未新增测试文件，原fixture函数和nullable缺省仅在内存组合。
+
+以暂存22文件和`2d163ccc1`其余代码核定最终候选：API/公开OpenAPI两根、RulesTab/Vite声明两根及传递依赖TypeScript5.9.3/noEmit均0诊断（session `41239`，chunk `74833f`）。审计0，任务临时目录未创建，无依赖/Client/dist或进程遗留。该阶段补原14/16的规则配置消费者；其余分区与原代码依赖仍按v1.19逐项复核，不把单个规则链计为整项100%。
+
 <a id="ain-auth-storage-reverification-20261111"></a>
 ## 同身份跨标签令牌更新后的可信会话重验（2026-11-11）
 

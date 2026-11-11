@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiProposalPayloadDraft } from '@rental-os/shared';
+import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_RULE_DRAFT_FIELDS, type AiProposalPayloadDraft } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -38,23 +38,31 @@ export class AiOpeningSectionProposalService {
   constructor(private readonly d: PersistedTaskAuthorizationDependencies & { db: PrismaClient;
     guard: Pick<ApiAuthGuard, 'canActivate'>; holderId: string; scene: { code: string; version: string } },
     private readonly differences: AiOpeningSectionDifferenceService, private readonly calendarOnly = false,
-    private readonly calendarReader?: { current(taskId: string): Promise<import('@rental-os/shared').AiExecutionContext> }) {
+    private readonly calendarReader?: { current(taskId: string): Promise<import('@rental-os/shared').AiExecutionContext> },
+    private readonly rule?: { id: string; version: string; reader?: { current(taskId: string): Promise<import('@rental-os/shared').AiExecutionContext> } }) {
     if (calendarReader && !calendarOnly) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (rule && calendarOnly) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     this.authorization = composePersistedTaskAuthorization(d);
     this.routes = new AiBusinessReadRouteAuthority(d.guard, d.credentials, d.clock);
     this.clock = d.clock ?? (() => new Date());
   }
   private withMaterial<T>(material: ReturnType<typeof verifyOpeningSectionMaterial>, consume: (context: import('@rental-os/shared').AiExecutionContext) => Promise<T>) {
+    if (this.rule) {
+      if (material.key !== 'business_rule' || material.targetId !== this.rule.id || material.expectedVersion !== this.rule.version
+        || material.changes.some(change => !(AI_TASK_RULE_DRAFT_FIELDS as readonly string[]).includes(change.field))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return this.routes.withRuleDraftPreview(this.rule.id, consume);
+    }
     if (!this.calendarOnly) return this.routes.withRead('opening', { limit: 50 }, consume);
     if (material.key !== 'business_calendar' || !material.date)
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return this.routes.withCalendarSourceRead({ year: Number(material.date.slice(0, 4)), date: material.date }, consume);
   }
   private async access(taskId: string, writing: boolean) {
+    const reader = this.calendarReader ?? this.rule?.reader;
     const context = writing ? await this.authorization.execution.authorize(taskId)
-      : this.calendarReader ? await this.calendarReader.current(taskId) : await this.authorization.authority.resolve(taskId, 'read_metadata');
+      : reader ? await reader.current(taskId) : await this.authorization.authority.resolve(taskId, 'read_metadata');
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || context.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const access = !writing && this.calendarReader ? aiTaskAccessFromContext(context, taskId, this.clock())
+    const access = !writing && reader ? aiTaskAccessFromContext(context, taskId, this.clock())
       : await this.authorization.tasks.resolveAccess(taskId, 'read_metadata');
     if (access.bindingKey !== aiTaskAccessFromContext(context, taskId, this.clock()).bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const task = await this.d.db.aiTask.findFirst({ where: access.where });
@@ -205,8 +213,8 @@ export class AiOpeningSectionProposalService {
   async readReceipt(value: unknown) {
     const command = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().parse(structuredClone(value));
     const before = await this.access(command.taskId, false);
-    const selected = this.calendarOnly ? await this.d.db.aiTaskActionInput.findFirst({ where: { scopeId: before.task.scopeId, ...command } }) : null;
-    if (this.calendarOnly && !selected) {
+    const selected = this.calendarOnly || this.rule ? await this.d.db.aiTaskActionInput.findFirst({ where: { scopeId: before.task.scopeId, ...command } }) : null;
+    if ((this.calendarOnly || this.rule) && !selected) {
       if ((await this.access(command.taskId, false)).access.bindingKey !== before.access.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return { state: 'not_observed' as const, retryable: false as const };
     }
@@ -244,6 +252,12 @@ export class AiOpeningSectionProposalService {
         businessDraft: 'not_created' as const, activeConfiguration: 'not_attested_by_read' as const,
         publication: 'not_attempted' as const, retryable: false as const };
     };
+    if (this.rule && selected) {
+      const material = verifyOpeningSectionMaterial(selected.payload);
+      if (material.key !== 'business_rule' || material.targetId !== this.rule.id || material.expectedVersion !== this.rule.version)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return this.routes.withRead('rule_version', { version: this.rule.version }, consume);
+    }
     if (this.calendarOnly && selected) {
       const material = verifyOpeningSectionMaterial(selected.payload);
       if (material.key !== 'business_calendar' || !material.date) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');

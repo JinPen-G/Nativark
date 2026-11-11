@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, type AiExecutionContext } from '@rental-os/shared';
 import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from '../../rental-core/rental-core-config.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import type { AiBusinessReadAuthority } from '../business-read-route.authority';
+import type { AiBusinessReadAuthority, AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiOpeningConfigurationSource } from './opening-configuration.source';
 import { assertAiReadContextBinding } from './read-context-binding';
 import { ModelGatewayError } from '../model-gateway.ports';
@@ -86,13 +86,18 @@ export function openingSectionFromMaterial(material: ReturnType<typeof verifyOpe
     changes: material.changes.map(change => ({ field: change.field, value: change.after })) });
 }
 export class AiOpeningSectionDifferenceService {
-  constructor(private readonly sources: AiOpeningConfigurationSource, private readonly authority: AiBusinessReadAuthority,
+  constructor(private readonly sources: AiOpeningConfigurationSource,
+    private readonly authority: AiBusinessReadAuthority & Partial<Pick<AiBusinessReadRouteAuthority, 'withRuleDraftPreview'>>,
     private readonly clock: () => Date = () => new Date(), private readonly versionFields?: AiOpeningVersionFieldSource,
-    private readonly calendarOnly = false) {}
+    private readonly calendarOnly = false, private readonly rule?: { id: string; version: string }) {
+    if (calendarOnly && rule) throw new ModelGatewayError('CONFIG_INVALID');
+  }
   async prepare(value: unknown, expectedContext?: AiExecutionContext) {
     const parsed = openingSectionChangeSchema.safeParse(structuredClone(value));
     if (!parsed.success || !unique(parsed.data.changes.map(row => row.field))) throw new ModelGatewayError('INVALID_REQUEST');
     const input = parsed.data, expected = expectedContext && structuredClone(expectedContext);
+    if (this.rule && (input.key !== 'business_rule' || input.targetId !== this.rule.id || input.expectedVersion !== this.rule.version))
+      throw new ModelGatewayError('FORBIDDEN');
     if (this.calendarOnly && input.key !== 'business_calendar') throw new ModelGatewayError('FORBIDDEN');
     if (this.calendarOnly && input.changes.some(change => !['name', 'businessStatus'].includes(change.field)))
       throw new ModelGatewayError('FORBIDDEN');
@@ -101,7 +106,7 @@ export class AiOpeningSectionDifferenceService {
     const consume = async (context: AiExecutionContext) => {
       assertAiReadContextBinding(context, expected);
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
-      const read = () => this.sources.current(context.scope as Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, context, calendar);
+      const read = () => this.sources.current(context.scope as Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, context, calendar, this.rule);
       const current = structuredClone(await read());
       if (input.key === 'business_rule' || input.key === 'business_calendar') {
         if (!this.versionFields) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
@@ -194,6 +199,10 @@ export class AiOpeningSectionDifferenceService {
     if (calendar) {
       if (!this.authority.withCalendarSourceRead) throw new ModelGatewayError('CONFIG_INVALID');
       return this.authority.withCalendarSourceRead(calendar, consume);
+    }
+    if (this.rule) {
+      if (!this.authority.withRuleDraftPreview) throw new ModelGatewayError('CONFIG_INVALID');
+      return this.authority.withRuleDraftPreview(this.rule.id, consume);
     }
     return this.authority.withRead('opening', { limit: 50 }, consume);
   }

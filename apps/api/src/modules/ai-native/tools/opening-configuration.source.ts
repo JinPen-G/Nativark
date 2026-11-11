@@ -11,15 +11,15 @@ import { assertAiReadContextBinding } from './read-context-binding';
  * equal workspace or by the nested Guard's own before/after identity check. */
 export interface AiOpeningConfigurationSource {
   current(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>,
-    expectedContext?: AiExecutionContext, calendar?: AiCalendarSourceReadTarget): ReturnType<RentalCoreService['readOpeningConfiguration']>;
+    expectedContext?: AiExecutionContext, calendar?: AiCalendarSourceReadTarget, rule?: { id: string; version: string }): ReturnType<RentalCoreService['readOpeningConfiguration']>;
 }
 export class AiGuardedOpeningConfigurationSource implements AiOpeningConfigurationSource {
   constructor(private readonly core: Pick<RentalCoreService, 'readOpeningConfiguration'>,
-    private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withRead'> & Partial<Pick<AiBusinessReadRouteAuthority, 'withCalendarSourceRead'>>) {
+    private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withRead'> & Partial<Pick<AiBusinessReadRouteAuthority, 'withCalendarSourceRead' | 'withRuleDraftPreview'>>) {
     if (typeof core?.readOpeningConfiguration !== 'function' || typeof routes?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, expectedContext?: AiExecutionContext,
-    calendar?: AiCalendarSourceReadTarget) {
+    calendar?: AiCalendarSourceReadTarget, rule?: { id: string; version: string }) {
     if (expected?.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
     const scope = structuredClone(expected);
     const principal = expectedContext && structuredClone(expectedContext);
@@ -31,6 +31,10 @@ export class AiGuardedOpeningConfigurationSource implements AiOpeningConfigurati
       if (result.tenantId !== scope.tenantId || result.workspaceId !== scope.workspaceId) throw new ModelGatewayError('INVALID_RESPONSE');
       return result;
     };
+    if (rule) {
+      if (calendar || !this.routes.withRuleDraftPreview) throw new ModelGatewayError('CONFIG_INVALID');
+      return this.routes.withRuleDraftPreview(rule.id, consume);
+    }
     if (calendar) {
       if (!this.routes.withCalendarSourceRead) throw new ModelGatewayError('CONFIG_INVALID');
       return this.routes.withCalendarSourceRead(calendar, consume);

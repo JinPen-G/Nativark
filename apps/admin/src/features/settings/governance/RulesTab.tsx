@@ -7,11 +7,14 @@ import { Form, FormSection } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Button, DataTableRowActions, SaveButton, type DataTableRowAction } from "@/components/ui";
-import { Ban, History, Pencil, Upload } from "lucide-react";
+import { Ban, FileText, History, Pencil, Upload } from "lucide-react";
 import dayjs from "dayjs";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
+import { useAuthStore } from '@/features/auth/authStore';
+import { currentSessionEpoch } from '@/app/queryClient';
+import { RuleSourceEntry, useRuleSourceLocale } from '@/features/ai-native/RuleSourceEntry';
 import { QueryState } from "@/components/QueryState";
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { RuleSetupWizard } from "./RuleSetupWizard";
@@ -56,9 +59,13 @@ const ruleAuditActionLabels: Record<string, string> = {
 export function RulesTab({ permissions, category }: { permissions: GovernancePermissions; category: RentalCategoryDefinition }) {
   const { message } = App.useApp();
   const { t } = useLocale();
+  const { t: aiT } = useRuleSourceLocale();
+  const auth = useAuthStore();
   const queryClient = useQueryClient();
   const { canEditRules, canPublishRules, canSeeRules } = permissions;
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
+  const [aiEntry, setAiEntry] = useState<{ id: string; version: string; identity: string }>();
+  const aiIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user, currentSessionEpoch()]);
   /** 「新建规则向导」抽屉：首次开业、无版本可编辑时的分步引导入口。 */
   const [wizardOpen, setWizardOpen] = useState(false);
   /** 待发布的草稿。发布原因必填、生效时点可选，因此走独立弹窗并带影响预览。 */
@@ -338,6 +345,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                     ...(row.status === "draft" && canEditRules ? [{ id: "edit", label: t("编辑"), icon: Pencil, onSelect: () => openRule(row) }] : []),
                     ...(row.status === "draft" && canPublishRules ? [{ id: "publish", label: t("发布"), icon: Upload, onSelect: () => openRulePublish(row) }] : []),
                     ...(row.status !== "draft" && canEditRules ? [{ id: "restore", label: t("恢复为草稿"), icon: History, onSelect: () => { ruleRestoreForm.resetFields(); setRuleRestoreTarget(row); } }] : []),
+                    ...(auth.hasPermission('rental-os:rules:manage') ? [{ id: 'ai-rule', label: aiT('准备规则提案'), icon: FileText,
+                      onSelect: () => setAiEntry({ id: row.id, version: row.version, identity: aiIdentity }) }] : []),
                     ...((row.status === "pending" || row.status === "published") && canPublishRules ? [{ id: "void", label: t("作废"), icon: Ban, danger: true, onSelect: () => { ruleVoidForm.resetFields(); setRuleVoidTarget(row); } }] : []),
                   ].map(action => ({ ...action, disabled: readBlocked }));
                   const primary = actions[0];
@@ -380,6 +389,14 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           </QueryState>
         </ListSection>
       </Space>
+
+      <Modal presentation="side" title={aiT('准备规则提案')} open={!!aiEntry && aiEntry.identity === aiIdentity} destroyOnHidden footer={null}
+        onCancel={() => { setAiEntry(undefined); void queryClient.invalidateQueries({ queryKey: ['rental-core', 'rule-versions'] }); }}>
+        {aiEntry?.identity === aiIdentity && <RuleSourceEntry key={`${aiIdentity}:${aiEntry.id}`} targetId={aiEntry.id} version={aiEntry.version}
+          identity={JSON.stringify([aiIdentity, aiEntry.id, aiEntry.version])}
+          current={() => aiEntry.identity === aiIdentity && auth.hasPermission('rental-os:rules:manage')}
+          onAccessDenied={() => setAiEntry(undefined)} />}
+      </Modal>
       </QueryState>
 
       <Modal presentation="side"

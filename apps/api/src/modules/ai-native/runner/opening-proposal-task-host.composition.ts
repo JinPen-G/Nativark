@@ -35,6 +35,8 @@ export function composeOpeningProposalTaskHost(input: AiOriginalSceneDependencie
     limits: z.infer<typeof aiTaskRunnerLimitsSchema>; expiresAt: string }; monotonic?: () => number;
   /** Fixed by the calendar server composition, never by an input DTO. */
   calendarOnly?: boolean;
+  /** Fixed original rule source, never supplied by a DTO or a model. */
+  ruleOnly?: { id: string; version: string };
 }) {
   const task = structuredClone(input.task), host = Object.freeze(structuredClone(input.host));
   task.material = verifyOpeningSectionMaterial(task.material); task.limits = aiTaskRunnerLimitsSchema.parse(task.limits);
@@ -46,11 +48,13 @@ export function composeOpeningProposalTaskHost(input: AiOriginalSceneDependencie
   const allowedMaterials = new Set(materials.map(material => material.materialHash));
   if (input.calendarOnly && materials.some(material => material.key !== 'business_calendar'))
     throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  if (input.ruleOnly && (input.calendarOnly || materials.some(material => material.key !== 'business_rule'
+    || material.targetId !== input.ruleOnly!.id || material.expectedVersion !== input.ruleOnly!.version))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   const clock = input.clock ?? (() => new Date()), authorization = composePersistedTaskAuthorization(input);
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
   const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(input.core, routes), routes, clock,
-    new AiOpeningVersionFieldSource(input.db, routes), input.calendarOnly === true);
-  const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId }, differences, input.calendarOnly === true);
+    new AiOpeningVersionFieldSource(input.db, routes), input.calendarOnly === true, input.ruleOnly);
+  const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId }, differences, input.calendarOnly === true, undefined, input.ruleOnly);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     'tenant.config.propose', undefined, undefined, undefined, undefined, { verify: async (context, material, taskId) => {
       await input.revalidateOriginal();

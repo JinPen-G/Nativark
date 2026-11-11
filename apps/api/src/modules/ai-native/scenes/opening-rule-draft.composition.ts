@@ -3,6 +3,8 @@
  * evidence. Preview grants no save; the save consumer binds a human review to
  * Core's exact version operation. Neither path grants publication. */
 import { z } from 'zod';
+import type { AiExecutionContext } from '@rental-os/shared';
+import type { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
@@ -86,7 +88,12 @@ export function composeOpeningRuleDraftPreview(input: AiOriginalSceneDependencie
  * Original result reads do not require fresh config, a new lease or execution. */
 export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies & {
   business: AiOriginalSceneDependencies['business'] & Pick<RentalBusinessService, 'prepareBoundRuleDraft' | 'refreshBoundRuleDraftVersion'>;
-}, host: AiTaskApplicationHost) {
+}, host: AiTaskApplicationHost, ruleSource?: {
+  read(reference: { original: z.infer<typeof originalRequestReferenceSchema>; registrationRef: string }): Promise<{
+    context: AiExecutionContext; receipt: Awaited<ReturnType<AiOpeningSectionProposalService['readReceipt']>>;
+  }>;
+  context(): Promise<Awaited<ReturnType<AiGuardedQuoteCoreContextSource['current']>>>;
+}) {
   const originals = composeOpeningProposalWorkflow(input, host), routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, input.clock);
   const fields = new AiOpeningVersionFieldSource(input.db, routes), contexts = new AiGuardedQuoteCoreContextSource(input.core, routes);
   const core = new BoundRuleDraftService(input.db, input.business, input.clock);
@@ -95,8 +102,11 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
   const resolve = async (value: unknown) => {
     const parsed = bodySchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const command = freezeOriginalInput(parsed.data), expected = await routes.withRead('opening', {}, async context => freezeOriginalInput(structuredClone(context)));
-    const saved = await originals.readReceipt({ original: command.original, registrationRef: command.registrationRef });
+    const command = freezeOriginalInput(parsed.data);
+    const selected = ruleSource ? await ruleSource.read({ original: command.original, registrationRef: command.registrationRef }) : undefined;
+    const expected = selected ? freezeOriginalInput(structuredClone(selected.context))
+      : await routes.withRead('opening', {}, async context => freezeOriginalInput(structuredClone(context)));
+    const saved = selected ? { receipt: selected.receipt } : await originals.readReceipt({ original: command.original, registrationRef: command.registrationRef });
     if (saved.receipt.state !== 'ai_proposal_saved') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const material = verifyOpeningSectionMaterial(saved.receipt.material), section = openingSectionFromMaterial(material);
     if (material.key !== 'business_rule' || section.key !== 'business_rule' || material.status !== 'difference_ready'
@@ -109,9 +119,13 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
     return { command, expected, saved, material, section, operation };
   };
   const verify = async (found: Awaited<ReturnType<typeof resolve>>) => {
-    if (hash(await originals.readReceipt({ original: found.command.original, registrationRef: found.command.registrationRef })) !== hash(found.saved)) throw conflict();
-    await routes.withRead('opening', {}, async context => { assertAiReadContextBinding(context, found.expected); });
+    const selected = ruleSource ? await ruleSource.read({ original: found.command.original, registrationRef: found.command.registrationRef }) : undefined;
+    const saved = selected ? { receipt: selected.receipt } : await originals.readReceipt({ original: found.command.original, registrationRef: found.command.registrationRef });
+    if (hash(saved) !== hash(found.saved)) throw conflict();
+    if (selected) assertAiReadContextBinding(selected.context, found.expected);
+    else await routes.withRead('opening', {}, async context => { assertAiReadContextBinding(context, found.expected); });
   };
+  const currentContext = (found: Awaited<ReturnType<typeof resolve>>) => ruleSource ? ruleSource.context() : contexts.current(found.material.scope, found.expected);
   const currentFields = async (found: Awaited<ReturnType<typeof resolve>>) => {
     if (hash((await fields.read(found.section, found.expected)).basis) !== found.material.sourceFingerprint) throw conflict();
   };
@@ -125,10 +139,10 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
       const found = await resolve(value); await currentFields(found);
       const review = await routes.withRuleDraftPreview(found.material.targetId, async context => {
         assertAiReadContextBinding(context, found.expected);
-        const business = await contexts.current(found.material.scope, found.expected);
+        const business = await currentContext(found);
         return core.review(found.material.scope.tenantId, business, found.operation, async () => {
           await routes.withRuleDraftPreview(found.material.targetId, async current => { assertAiReadContextBinding(current, found.expected); });
-          if (hash(await contexts.current(found.material.scope, found.expected)) !== hash(business)) throw conflict();
+          if (hash(await currentContext(found)) !== hash(business)) throw conflict();
           await verify(found);
         });
       });
@@ -149,7 +163,7 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
       await currentFields(found);
       const result = await routes.withRuleDraftSave(found.material.targetId, async context => {
         assertAiReadContextBinding(context, found.expected);
-        const business = await contexts.current(found.material.scope, found.expected);
+        const business = await currentContext(found);
         return core.save(found.material.scope.tenantId, business, { ...found.operation, reviewHash }, async () => {
           await routes.withRuleDraftPreview(found.material.targetId, async current => { assertAiReadContextBinding(current, found.expected); });
           await verify(found);
