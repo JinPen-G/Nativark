@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工HEAD及实际GitHub任务分支为`f548a88788d9bdccc717dc19d7c0c2004c8ce5da`；两份本任务Core/领域合同WIP已收口验证，无merge/cherry-pick，当前阶段及来源见[企业读接点记录](<Rental Core-开发记录.md#enterprise-read-current-workspace-20261111>)。日常提交/普通推送沿原授权，开工须重新核实现场。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工HEAD及实际GitHub任务分支为`f548a88788d9bdccc717dc19d7c0c2004c8ce5da`；两份本任务Core/领域合同WIP已收口验证，实现固定`527e731c88bf104a963b1a21e3723b829a585edc`已普通推送核远端，无merge/cherry-pick，当前阶段及来源见[企业读接点记录](<Rental Core-开发记录.md#enterprise-read-current-workspace-20261111>)。日常提交/普通推送沿原授权，开工须重新核实现场。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - PM固定维护`6b2dd0a`已在本树整合；本树自持Client/Shared/API/桌面公共产物保持，当前Shared202文件/API857文件已核对当前源码，客户小程序242文件/22页面隔离构建通过。31项原冒烟17过/14失败、采用/配置读取及其他原失败保留，当前企业授权原测试7项6过/1失败。证据分别见[企业读接点](<Rental Core-开发记录.md#enterprise-read-current-workspace-20261111>)与[品类阶段](品类治理/品类治理-开发记录.md#client-receipt-runtime-wip-20261111)，不计CLOSE进度。公共工具只读使用，同树两个包别名不跨树共享；暂存已删除。真库/宿主/供应商仍未验。
