@@ -13,10 +13,10 @@ import type { ApprovedExtensionBinding, EnterpriseExtensionPrice } from "../rent
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import type { ClientOrderExtensionRequest, RentalOrderExtension } from "@rental-os/shared";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
-import { assertPublishedRentalCategoryIdentities, readRentalCategoryCode } from "../rental-core/category-identity";
+import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions, readRentalCategoryCode } from "../rental-core/category-identity";
 
 type PolicyRow = { scopeKey: string; revision: number; policy: string | EnterpriseScopePolicy; membershipUpdatedAt?: Date | null };
-type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership">;
+type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership" | "rentalCategoryDefinition">;
 const moneyPattern = /^\d{1,12}(?:\.\d{1,2})?$/;
 @Injectable()
 export class EnterprisePolicyService {
@@ -163,9 +163,12 @@ export class EnterprisePolicyService {
     const effectiveWorkspaceIds = merchant && company ? merchant.workspaceIds.filter(id => company.workspaceIds.includes(id) && (!employee || employee.workspaceIds.includes(id))) : [];
     const workspaces = await db.businessWorkspace.findMany({ where: { tenantId, status: "ACTIVE", ...(merchantView ? {} : { id: { in: merchant?.workspaceIds ?? [] } }) }, select: { id: true, name: true, categoryCode: true }, orderBy: { id: "asc" }, take: 201 });
     if (workspaces.length > 200) throw new ConflictException("空间超过当前政策编辑范围");
+    const published = await rentalCategoryIdentityOptions(db, tenantId);
+    const categories = merchantView ? published : published.filter(row => merchant?.categoryCodes.includes(row.code));
+    if (categories.length > 200) throw new ConflictException("品类超过当前政策编辑范围");
     return { revision: merchantView ? m?.revision ?? 0 : membershipId ? e?.revision ?? 0 : c?.revision ?? 0,
       merchantRevision: m?.revision ?? 0, companyRevision: c?.revision ?? 0, employeeRevision: e?.revision ?? 0,
-      merchant, company, employee, effectiveWorkspaceIds, effectiveCategoryCodes, workspaces: workspaces.map(row => ({ ...row, categoryCode: readRentalCategoryCode(row.categoryCode) })) };
+      merchant, company, employee, effectiveWorkspaceIds, effectiveCategoryCodes, categories, workspaces: workspaces.map(row => ({ ...row, categoryCode: readRentalCategoryCode(row.categoryCode) })) };
   }
   async merchantView(user: SystemUserRow, corporateId: string) {
     const { tenantId } = this.commands.operator(user, "rental-os:corporate:manage");
