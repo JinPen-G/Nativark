@@ -322,7 +322,9 @@ export class EnterprisePolicyService {
     // An existing expense authorization never disappears after a policy switch.
     // Unbound legacy/waived extensions need no invented approval record.
     if (!row && !binding && current.approvalMode !== "per_order") return;
-    if (!row || row.expiresAt <= new Date()) throw new ConflictException("续租缺少有效的原变更批准");
+    // Consumption preserves the original extension's expense receipt. Its
+    // effectiveness continues through the current policy and Core gates.
+    if (!row || row.state !== "consumed" && row.expiresAt <= new Date()) throw new ConflictException("续租缺少有效的原变更批准");
     this.assertSameBasis(enterpriseJson(row.basis), current);
     const original = enterpriseJson(row.preview), request = enterpriseJson(row.request);
     if (row.requestFingerprint !== requestFingerprint({ orderId: order.id, extension: request, expectedOrderUpdatedAt: row.expectedOrderUpdatedAt })
