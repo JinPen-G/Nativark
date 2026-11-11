@@ -4,6 +4,20 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="workspace-resolver-binding-20261112"></a>
+
+## 唯一品类读取入口的绑定修订与异步一致性（2026-11-12）
+
+关联CAT-GOV-03/04/08及CAT-A01/A08/A10/A17。本片从已核GitHub的`a060f8b928ca3494e399af3f42418cef2c594b5a`接续，开工源码/暂存区干净，只改[品类解析器](../../apps/api/src/modules/rental-core/rental-category-resolver.service.ts)的`forWorkspace`和现有记录/接续。前片共用写锁已拒绝坏采用修订，但这个元数据/业务读取入口仍直接返回存储值，读写准入不一致。
+
+现在在读取正文前验证真实版本ID/编码及非负安全整数采用修订；缺失/字符串/负值/非整数拒绝，合法初始0保留。先捕获观察到的版本ID/修订，再等待同一不可变正文，避免异步返回混入后来改变的绑定字段。历史`forVersion`继续按原业务明确版本读取，不绑定空间最新版；原当前授权和业务提交点复验保持，无写入/取锁/缓存或政策重建。
+
+原API `--noEmit --incremental false --pretty false`、`node tests/rental-category-core-alignment.test.cjs`均退出0；原resolver fixture的5组限定调用退出0：当前/事务内/历史版本区分、初始0、坏修订不读版本、坏身份不输出、异步正文不混后继绑定。命令/源码/fixture hash和输出见[阶段证据](../../output/category-governance/workspace-resolver-binding-checks-20261112.json)。fixture仅返回指定行，不解释SQL，不证明真实DB/权限/并发；原完整resolver脚本仍用旧API产物，本片不将其当作新源码整组结果，没有改用例/断言。文档344链接/新锚点无新增问题，原28项分类保留；证据固化后8份本片日志/缓存及任务目录删除，暂存路径不存在。
+
+PM通知guard `9380d1bab`已按12行增量收固定main `307abf572701f7ad7d3b4a0e0d82710ea528e37f`；本树仅读取该固定文件核清依赖，没有追活动main。父辅助函数不在该增量中：`replaceCategoryUniqueClaims`来源`e82aac6fb75f3749b61db2076038ee6026091fee`，由型号配置仓储、资产事实仓储和回填真调用；`lockCategoryContext`来源`00f19015a6751b1847d2c1d9a991ef37cc6aaa24`，由规则/日历绑定草稿真调用。按消费片另交函数/必要imports及原调用方，不整包带入父提交/counter/schema。
+
+这两helper分别须保持原tenant→workspace→entity事务内唯一声明替换/冲突回滚，以及原Auth+绑定ID/修订+完整正文的一致性核对。前者依赖已有unique表/规范化口径，不能将冲突吞为skip或分开释放旧声明；后者不授权限、不从持资源锁的事务逆取父锁。完整真库/并发/存量采用门槛仍待验，本片不增加CAT-GOV/CLOSE完整结项或待核实百分比。
+
 <a id="active-binding-revision-guard-20261112"></a>
 
 ## 当前品类绑定修订损坏时拒绝共用写入口（2026-11-12）
