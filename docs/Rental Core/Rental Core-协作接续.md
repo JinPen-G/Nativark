@@ -12,10 +12,10 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。当前已交采用修订校验源码`9380d1bab`及记录`709c69b58`，PM按固定增量收回，见[main阶段](<Rental Core-开发记录.md#active-binding-main-integration-20261112>)。照片固定`e2a1a2b9d`已随企业阶段收main`3cf502b7c`，七组恢复有独立限定证据，不再将照片称当前三份WIP。Core继续同源定义/全部写入口/08存量采用和原CLOSE；配置counter/17只读接点与Outbox完整捕获仍须按各自固定来源和未完项核接，不追活动main，不停工等PM。旧开工/换货及恢复证据原位保留，不得回main施工或重建旧树。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。当前读取侧修订校验固定`cb96a636b`由PM仅按解析器差异核收，原完整resolver断言、五组绑定行为和main API类型通过，见[固定阶段](<Rental Core-开发记录.md#workspace-resolver-main-integration-20261112>)；写锁修复已收main`307abf572`。照片固定`e2a1a2b9d`已随企业阶段收main`3cf502b7c`，七组恢复有独立限定证据。Core继续同源定义/全部写入口/08存量采用和原CLOSE；配置counter/17只读接点与Outbox完整捕获仍须按各自固定来源和未完项核接，不追活动main，不停工等PM。原财务核定到期来源的Core纯decoder与Platform原`recordMaturity`/`readMaturity`必要委托窗口已由PM明确核准，原actor/审计时间、key/锁及operator/staff门闸保持，企业投影第二阶段尚需固定合同与最小窗口。旧开工/换货及恢复证据原位保留，不得回main施工或重建旧树。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
-- main已接`0947a6eb8`的16份换货Core增量及`2a2c9ae64`四份固定记录/接续，具体范围与类型/14项短调用证据见[PM整合](<Rental Core-开发记录.md#approved-exchange-main-integration-20261111>)。未接其他旧Core阶段或活动照片冻结代码；HTTP/DI和企业参与者继续由各自作者实施。25份原JSON证据已迁至主树唯一`D:/工作文件/rental-OS/output/category-governance/`，本树相应旧证据链接须按该位置读取，不复制第二份。原任务及真实验收缺口保持。
+- main已接`0947a6eb8`的16份换货Core增量及`2a2c9ae64`四份固定记录/接续，具体范围与类型/14项短调用证据见[PM整合](<Rental Core-开发记录.md#approved-exchange-main-integration-20261111>)；照片和企业参与者后继已按上述固定阶段接入，其他Core配置/唯一声明父阶段仍待各自消费者核收。HTTP/DI源码接入不等于真实环境验收。25份原JSON证据已迁至主树唯一`D:/工作文件/rental-OS/output/category-governance/`，本树相应旧证据链接须按该位置读取，不复制第二份。原任务及真实验收缺口保持。
 - PM固定维护`6b2dd0a`已在本树整合；当前受管Shared202文件、固定`0947a6eb8`的API863文件已核哈希，未混入照片WIP。客户小程序原242文件/22页面结果、31项原冒烟17过/14失败、采用/配置读取及其他原失败保留，不计CLOSE进度。当前构建及原五项3过/2失败见[本片记录](<Rental Core-开发记录.md#approved-exchange-core-port-20261111>)，企业读取/客户前片沿原证据。公共工具只读使用，同树两个包别名不跨树共享；暂存已删除。真库/宿主/供应商仍未验。
 
 ## 3. 下一入口与原缺口

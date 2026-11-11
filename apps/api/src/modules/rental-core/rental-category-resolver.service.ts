@@ -290,11 +290,16 @@ export class RentalCategoryResolver {
       select: { categoryCode: true, categoryVersionId: true, categoryAdoptionRevision: true }
     });
     if (!workspace) throw new NotFoundException("经营空间不存在或不可用");
-    if (!workspace.categoryVersionId) throw new ConflictException("经营空间尚未绑定品类版本");
-    const definition = await this.forVersion(String(workspace.categoryCode).toLowerCase(), workspace.categoryVersionId, tx);
+    if (typeof workspace.categoryVersionId !== "string" || !workspace.categoryVersionId.trim()) throw new ConflictException("经营空间尚未绑定品类版本");
+    if (typeof workspace.categoryCode !== "string" || !Number.isSafeInteger(workspace.categoryAdoptionRevision)
+      || workspace.categoryAdoptionRevision < 0) throw new ConflictException("经营空间品类绑定来源或采用修订无效");
+    // Capture one observed binding before awaiting its immutable body. Invalid
+    // stored revisions cannot be emitted as metadata or initial/legacy context;
+    // a concurrent adoption is checked by each action's existing commit fence.
+    const categoryVersionId = workspace.categoryVersionId, adoptionRevision = workspace.categoryAdoptionRevision;
+    const definition = await this.forVersion(workspace.categoryCode.toLowerCase(), categoryVersionId, tx);
     return {
-      workspaceId, categoryVersionId: workspace.categoryVersionId,
-      adoptionRevision: workspace.categoryAdoptionRevision,
+      workspaceId, categoryVersionId, adoptionRevision,
       definition
     };
   }

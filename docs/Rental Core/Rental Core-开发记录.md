@@ -4,6 +4,17 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="workspace-resolver-main-integration-20261112"></a>
+## PM固定当前品类读取修订校验整合（2026-11-12）
+
+巡检在四个实际登记工作树核对分支、HEAD、索引、merge/cherry-pick、上游及GitHub。main起点为已推送的`3a06c8861a25398072c98f8da4e3733c25b5b6a3`，Core可独立交付来源为已核远端的`cb96a636b61497243d75032e98d0e301ff3d31a0`。只收本提交`rental-category-resolver.service.ts`的`forWorkspace`差异，完整目标文件与固定来源Git blob一致；不收Core配置counter、唯一声明/草稿锁辅助函数或其他父提交。来源原阶段及未验事项可在[固定Core记录](https://github.com/JinPen-G/rental-OS/blob/cb96a636b61497243d75032e98d0e301ff3d31a0/docs/Rental%20Core/Rental%20Core-%E5%BC%80%E5%8F%91%E8%AE%B0%E5%BD%95.md#workspace-resolver-binding-20261112)核对。
+
+读取正文前拒绝缺失/非法版本ID、非字符串编码及非负安全整数以外的采用修订，合法初始0保留。版本ID/修订在异步读取同一不可变正文前捕获，避免观察对象后续变化造成版本正文与返回绑定混杂；历史`forVersion`不读取当前空间最新版。与前一写锁修复共同维护读写合法性，当前授权与业务提交点复验不变。
+
+PM独立将原`category-version-resolver.test.cjs`通过内存TS映射指向main实际源码，完整原解析/空间/历史版本/客户公开投影断言退出0，原文件和断言未改。五组限定调用退出0，覆盖当前/事务内/历史读取区分、初始0、损坏修订在版本IO前拒绝、缺绑定身份拒绝及异步正文读取不混入后继绑定；脚本SHA-256为`85ccaeca39f690aa51dd626fe3bc08ec7515a4d19c824e003a53e97baadf5ee8`。原API tsconfig、TypeScript5.9.3、895根`--noEmit --incremental false`诊断0。最终源码SHA-256为`cd7d9fe043a43046c950b48f9e14a4e4b82e4cbd8a07d9de62c3ac4ffe5e9a32`，与作者阶段证据相同。纯排版在核对时恢复固定来源，不改变测试逻辑。
+
+SQL/事务/授权来源为明确fixture，不将原用例或类型检查作为真实DB/并发/完整CAT-GOV验收。六份变更记录/接续无新增链接错误，Core记录及三份接续无链接错误，原品类记录两项与后台记录267项历史断链保持。各Node使用原offline preload、固定不可达数据库和关闭缓存，audit0，验证目录未创建，子进程全部退出。main六项他人WIP逐文件SHA-256保持，另外三树继续独占研发。AI Native的12/17/18生产者、公开消费者和原人类grant仍在WIP；企业本单材料选择继续推进；没有据此新增任务或提高完成度。Core继续原同源定义、全部写入口/08存量采用及已协调的财务原核定读源。
+
 <a id="active-binding-main-integration-20261112"></a>
 ## PM固定采用修订校验整合（2026-11-12）
 
