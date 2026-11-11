@@ -139,7 +139,7 @@ Page({
   onClosureReason(event: WechatMiniprogram.Input) { if (!this.data.busy && !this.data.closing) this.setData({ closureReason: String(event.detail.value ?? "").slice(0, 500) }); },
   observed(value: EnterpriseExchangeRequestOriginalResult | undefined) {
     if (!value || value.state === "not_recorded") throw new Error("原申请仍待核对，不能重新发送");
-    const stateLabel = value.state === "observed" ? ({ pending: "待企业批准", approved: "已批准，仍须本人确认费用", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效" }[value.approval.state]) : "";
+    const stateLabel = value.state === "observed" ? ({ pending: "待企业批准", approved: "已批准，仍须本人确认费用", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效", consumed: "原批准已消费" }[value.approval.state]) : "";
     this.resetChoices(); this.setData({ closureReason: "", notice: value.state === "closed" ? "原申请键已永久封闭，未取消任何已成立换货或支付" : `原费用申请已核对：${stateLabel}；批准不等于换货执行` });
   },
   async onRequest() {

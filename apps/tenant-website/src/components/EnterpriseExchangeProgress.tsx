@@ -59,8 +59,8 @@ export function EnterpriseExchangeProgress({ orderId, identity, english }: { ord
   const rows = result?.owner === viewOwner ? result.rows : undefined;
   if (rows && !rows.length && !pending) return null;
   const state = (row: EnterpriseExchangeApprovalView) => (english
-    ? { pending: 'Awaiting enterprise approval', approved: row.employeeConfirmation ? 'Expense confirmed; exchange not executed' : 'Approved; applicant expense confirmation pending', rejected: 'Rejected', withdrawn: 'Withdrawn', expired: 'Expired; original consent is not an execution grant' }
-    : { pending: '待企业批准', approved: row.employeeConfirmation ? '本人已确认费用，换货未执行' : '已批准，待本人确认费用', rejected: '已拒绝', withdrawn: '已撤回', expired: '已失效，原费用确认不是执行授权' })[row.state];
+    ? { pending: 'Awaiting enterprise approval', approved: row.employeeConfirmation ? 'Expense confirmed; exchange not executed' : 'Approved; applicant expense confirmation pending', rejected: 'Rejected', withdrawn: 'Withdrawn', expired: 'Expired; original consent is not an execution grant', consumed: 'Original approval consumed' }
+    : { pending: '待企业批准', approved: row.employeeConfirmation ? '本人已确认费用，换货未执行' : '已批准，待本人确认费用', rejected: '已拒绝', withdrawn: '已撤回', expired: '已失效，原费用确认不是执行授权', consumed: '原批准已消费' })[row.state];
   const money = (value: number, currency: string) => Number.isFinite(value) && currency ? `${formatRentalMoney(value, currency)} ${currency}` : english ? 'Not recorded' : '原金额缺失';
   const time = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(english ? 'en-US' : 'zh-CN', { timeZoneName: 'short' }) : english ? 'Not recorded' : '原时间缺失';
   const link = `${enterpriseHref(tenantCode!, enterpriseDomainBound)}/exchange-approvals`;

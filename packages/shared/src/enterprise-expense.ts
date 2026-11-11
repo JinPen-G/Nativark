@@ -1,7 +1,7 @@
 /** Additional enterprise spending is bound to an original Core preview, not an old
  * booking approval. Approval/creation/payment remain separate business stages. */
-import type { ClientOrderExtensionRequest } from "./client";
-import type { RentalOrderExtensionPreview } from "./core";
+import type { ClientCatalogResponse, ClientOrderExtensionRequest, ClientQuoteServiceRequest } from "./client";
+import { RENTAL_SERVICE_BILLING_UNITS, type RentalOrderExtensionPreview, type RentalQuoteServiceSnapshot } from "./core";
 import type { EnterpriseChangeRequest } from "./enterprise-workflows";
 export interface EnterpriseExtensionEligibility {
   orderId: string;
@@ -14,6 +14,47 @@ export interface RequestEnterpriseExtensionApproval extends EnterpriseChangeRequ
   expectedOrderUpdatedAt: string;
   extension: ClientOrderExtensionRequest;
 }
+export type EnterpriseExtensionService = Pick<RentalQuoteServiceSnapshot, "serviceId" | "serviceName" | "serviceVersion" | "quantity" | "amount" | "billingUnit"
+  | "scheduledStartAt" | "scheduledEndAt" | "serviceLocationId" | "termsVersion" | "terms" | "requiredByRule">;
+export type EnterpriseExtensionServiceDetails = { state: "available"; items: EnterpriseExtensionService[] } | { state: "unavailable" };
+
+/** Preserve the original service facts, including an observed empty collection. */
+export function enterpriseExtensionServiceDetails(value: unknown): EnterpriseExtensionServiceDetails {
+  if (!Array.isArray(value) || value.some(row => !row || typeof row !== "object" || Array.isArray(row)
+    || ["serviceId", "serviceName", "serviceVersion", "serviceLocationId", "termsVersion", "terms"].some(field => typeof row[field] !== "string")
+    || !row.serviceId || !row.serviceName || !row.serviceVersion || !row.termsVersion || !Number.isSafeInteger(row.quantity) || row.quantity < 1
+    || !Number.isFinite(row.amount) || !RENTAL_SERVICE_BILLING_UNITS.includes(row.billingUnit) || typeof row.requiredByRule !== "boolean"
+    || typeof row.scheduledStartAt !== "string" || typeof row.scheduledEndAt !== "string"
+    || !Number.isFinite(Date.parse(row.scheduledStartAt)) || !Number.isFinite(Date.parse(row.scheduledEndAt))
+    || Date.parse(row.scheduledStartAt) >= Date.parse(row.scheduledEndAt))) return { state: "unavailable" };
+  return { state: "available", items: value.map(row => ({ serviceId: row.serviceId, serviceName: row.serviceName, serviceVersion: row.serviceVersion,
+    quantity: row.quantity, amount: row.amount, billingUnit: row.billingUnit, scheduledStartAt: row.scheduledStartAt,
+    scheduledEndAt: row.scheduledEndAt, serviceLocationId: row.serviceLocationId, termsVersion: row.termsVersion, terms: row.terms, requiredByRule: row.requiredByRule })) };
+}
+
+/** New selection intent uses the original published customer catalog. Core owns eligibility and pricing. */
+export function enterpriseExtensionServiceRequests(value: unknown, catalog: Pick<ClientCatalogResponse, "services" | "locations">): ClientQuoteServiceRequest[] {
+  if (!Array.isArray(value) || value.length > 100 || !Array.isArray(catalog.services) || !Array.isArray(catalog.locations)
+    || value.some(row => !row || typeof row !== "object" || Array.isArray(row)
+      || Object.keys(row).some(field => !["serviceId", "quantity", "scheduledStartAt", "scheduledEndAt", "serviceLocationId"].includes(field))
+      || !catalog.services.some(service => service.enabled && service.id === row.serviceId)
+      || !Number.isSafeInteger(row.quantity) || row.quantity < 1
+      || row.serviceLocationId !== undefined && !catalog.locations.some(location => location.status === "enabled" && location.id === row.serviceLocationId)
+      || (row.scheduledStartAt !== undefined || row.scheduledEndAt !== undefined)
+        && (typeof row.scheduledStartAt !== "string" || typeof row.scheduledEndAt !== "string"
+          || !Number.isFinite(Date.parse(row.scheduledStartAt)) || !Number.isFinite(Date.parse(row.scheduledEndAt))
+          || Date.parse(row.scheduledStartAt) >= Date.parse(row.scheduledEndAt)))) throw new Error("须重新核对原公开服务、数量、独立时段和地点 / Review published services, quantities, time ranges and locations");
+  return value.map(row => ({ serviceId: row.serviceId, quantity: row.quantity,
+    ...(row.scheduledStartAt !== undefined ? { scheduledStartAt: row.scheduledStartAt, scheduledEndAt: row.scheduledEndAt } : {}),
+    ...(row.serviceLocationId !== undefined ? { serviceLocationId: row.serviceLocationId } : {}) }));
+}
+export function enterpriseExtensionServiceSelectionKey(services: ClientQuoteServiceRequest[], catalog: ClientCatalogResponse): string {
+  const selected = enterpriseExtensionServiceRequests(services, catalog);
+  return JSON.stringify({ tenantCode: catalog.tenantCode, workspaceCode: catalog.workspace.workspaceCode, timeZone: catalog.timeZone,
+    services: selected.map(request => ({ request, service: catalog.services.find(service => service.id === request.serviceId),
+      location: request.serviceLocationId ? catalog.locations.find(location => location.id === request.serviceLocationId) : undefined })) });
+}
+
 export interface EnterpriseExtensionApprovalView {
   id: string;
   corporateCustomerId: string;
@@ -27,6 +68,7 @@ export interface EnterpriseExtensionApprovalView {
   reason: string;
   preview: Pick<RentalOrderExtensionPreview, "originalEndAt" | "newEndAt" | "rentalAmount" | "serviceAmount" | "depositDelta" | "preAuthDelta" | "payableAmount" | "currency" | "settlementMode" | "paymentRequired"> & {
     chargeLines: Array<Pick<RentalOrderExtensionPreview["chargeLines"][number], "code" | "name" | "type" | "amount">>;
+    services?: EnterpriseExtensionServiceDetails;
   };
   extensionId?: string;
   closedOperationKey?: string;

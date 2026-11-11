@@ -58,6 +58,19 @@
     <view wx:if="{{enterpriseRequired || enterpriseApproval || enterprisePending || enterpriseError || enterpriseResult}}" class="section section--tight">
       <view class="card">
         <view class="subtitle">企业续租批准</view>
+        <view class="muted small">服务计划按 {{timeZone}} 填写，资格、费用与容量由原预览核验。</view>
+        <view wx:if="{{serviceError}}" class="notice notice--warning">{{serviceError}}</view>
+        <view wx:for="{{serviceRows}}" wx:key="index" class="mt-12">
+          <picker mode="selector" range="{{serviceChoices}}" range-key="name" data-index="{{index}}" data-field="serviceId" bindchange="onServiceChange" disabled="{{submitting || enterprisePending}}"><view class="field__picker">新增服务 · {{item.name}}</view></picker>
+          <view class="kv"><view class="kv__label">服务数量</view><input type="number" value="{{item.quantity}}" data-index="{{index}}" data-field="quantity" bindinput="onServiceChange" disabled="{{submitting || enterprisePending}}" /></view>
+          <view class="muted small">独立服务开始</view>
+          <view class="row gap-16"><picker mode="date" value="{{item.startDate}}" data-index="{{index}}" data-field="startDate" bindchange="onServiceChange" disabled="{{submitting || enterprisePending}}"><view class="field__picker">{{item.startDate || '选择日期'}}</view></picker><picker mode="time" value="{{item.startTime}}" data-index="{{index}}" data-field="startTime" bindchange="onServiceChange" disabled="{{submitting || enterprisePending}}"><view class="field__picker">{{item.startTime || '选择时间'}}</view></picker></view>
+          <view class="muted small">独立服务结束</view>
+          <view class="row gap-16"><picker mode="date" value="{{item.endDate}}" data-index="{{index}}" data-field="endDate" bindchange="onServiceChange" disabled="{{submitting || enterprisePending}}"><view class="field__picker">{{item.endDate || '选择日期'}}</view></picker><picker mode="time" value="{{item.endTime}}" data-index="{{index}}" data-field="endTime" bindchange="onServiceChange" disabled="{{submitting || enterprisePending}}"><view class="field__picker">{{item.endTime || '选择时间'}}</view></picker></view>
+          <picker mode="selector" range="{{serviceLocations}}" range-key="name" data-index="{{index}}" data-field="locationId" bindchange="onServiceChange" disabled="{{submitting || enterprisePending}}"><view class="field__picker">服务地点 · {{item.locationName}}</view></picker>
+          <button class="btn btn--secondary" data-index="{{index}}" bindtap="onRemoveService" disabled="{{submitting || enterprisePending}}">移除本次选择</button>
+        </view>
+        <button class="btn btn--secondary btn--block mt-12" bindtap="onAddService" disabled="{{submitting || enterprisePending || serviceError || !serviceChoices.length || serviceRows.length >= 100}}">添加服务选择</button>
         <view class="notice notice--neutral mt-8">企业批准不下单、不预占库存或授信，也不确认到账。须本人核对原费用后明确提交；待补款不等于已延期。</view>
         <textarea class="field__input mt-12" placeholder="用途及本次处理原因" maxlength="500" value="{{enterpriseReason}}" bindinput="onEnterpriseReason" disabled="{{submitting || (enterprisePending && !enterpriseCanClose)}}"></textarea>
         <button wx:if="{{enterpriseRequired && preview && (!enterpriseApproval || (enterpriseApproval.state !== 'pending' && enterpriseApproval.state !== 'approved')) && !pending}}" class="btn btn--secondary btn--block mt-12" bindtap="onRequestEnterpriseExtension" disabled="{{submitting || enterprisePending || !enterpriseReason}}">申请续租批准</button>
@@ -69,7 +82,17 @@
           <view class="kv"><view class="kv__label">押金差额</view><money-text amount="{{enterpriseApproval.preview.depositDelta}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
           <view class="kv"><view class="kv__label">预授权差额</view><money-text amount="{{enterpriseApproval.preview.preAuthDelta}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
           <view wx:for="{{enterpriseApproval.preview.chargeLines}}" wx:key="code" class="kv"><view class="kv__label">{{item.name}}</view><money-text amount="{{item.amount}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
-          <button wx:if="{{enterpriseApproval.state === 'approved'}}" class="btn btn--primary btn--block mt-12" bindtap="onSubmitEnterpriseExtension" disabled="{{submitting || enterprisePending || !enterpriseReason}}">核对后提交本条续租</button>
+          <block wx:if="{{enterpriseApproval.preview.services.state === 'available'}}">
+            <view wx:if="{{!enterpriseApproval.preview.services.items.length}}" class="muted small">原预览已记录无新增服务</view>
+            <view wx:for="{{enterpriseApproval.preview.services.items}}" wx:key="serviceId" class="mt-12">
+              <view class="subtitle">{{item.serviceName}}</view><view class="muted small">{{item.requiredByRule ? '原业务规则要求' : '本次续租选择'}}</view>
+              <view class="kv"><view class="kv__label">数量 {{item.quantity}} · {{item.billingUnit}}</view><money-text amount="{{item.amount}}" currency="{{enterpriseApproval.preview.currency}}" size="small"></money-text></view>
+              <view class="muted small">原计划 {{item.scheduledStartAt}} — {{item.scheduledEndAt}}</view>
+              <view class="muted small">原服务地点 {{item.serviceLocationId}}</view><view class="muted small">服务／条款版本 {{item.serviceVersion}} · {{item.termsVersion}}</view><view>{{item.terms}}</view>
+            </view>
+          </block>
+          <view wx:else class="notice notice--warning">原服务明细不可用</view>
+          <button wx:if="{{enterpriseApproval.state === 'approved'}}" class="btn btn--primary btn--block mt-12" bindtap="onSubmitEnterpriseExtension" disabled="{{submitting || enterprisePending || !enterpriseReason || enterpriseApproval.preview.services.state !== 'available'}}">核对后提交本条续租</button>
         </block>
         <button wx:if="{{enterpriseCanClose}}" class="btn btn--secondary btn--block mt-12" bindtap="onCloseEnterpriseExtension" disabled="{{submitting || !enterpriseReason}}">请求受控结束原提交</button>
         <button class="btn btn--secondary btn--block mt-12" bindtap="onReadEnterpriseExtension" disabled="{{submitting}}">核对原续租申请与结果</button>

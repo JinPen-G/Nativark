@@ -3,6 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { enterpriseExtensionServiceDetails } from "@rental-os/shared";
 import type { CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestClosureReceipt, CloseEnterpriseExtensionExecution, ClientOrderExtensionRequest, DecideEnterpriseExtensionApproval, EnterpriseBookingBasis, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, EnterpriseExtensionRequestOriginalResult, RentalOrder, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
 import { ClientApiService } from "../client/client-api.service";
@@ -45,7 +46,8 @@ export class EnterpriseExtensionApprovalService {
       revision: row.revision, expiresAt: row.expiresAt.toISOString(), reason: row.reason, extensionId: row.extensionId ?? undefined, closedOperationKey: row.closedOperationKey ?? undefined,
       preview: { originalEndAt: p.originalEndAt, newEndAt: p.newEndAt, rentalAmount: p.rentalAmount, serviceAmount: p.serviceAmount, depositDelta: p.depositDelta,
         preAuthDelta: p.preAuthDelta, payableAmount: p.payableAmount, currency: p.currency, settlementMode: p.settlementMode, paymentRequired: p.paymentRequired,
-        chargeLines: p.chargeLines.map(line => ({ code: line.code, name: line.name, type: line.type, amount: line.amount })) } };
+        chargeLines: p.chargeLines.map(line => ({ code: line.code, name: line.name, type: line.type, amount: line.amount })),
+        services: enterpriseExtensionServiceDetails(p.serviceSnapshots) } };
   }
   private owns(context: ClientRequestContext, row: Approval) {
     if (!row || row.applicantCustomerId !== context.customerId || row.workspaceId !== context.workspaceId || requireRequestWorkspaceId() !== context.workspaceId)
