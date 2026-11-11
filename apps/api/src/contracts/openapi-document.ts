@@ -4297,6 +4297,17 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   ...enterpriseWorkflowOperations(),
   clientOperation("get", "/api/client/v1/enterprise/entry", "readEnterpriseEntry", "Read current personal customer's explicitly granted enterprise access", { responseSchema: "EnterpriseEntryResponse", parameters: [{ ...queryParam("tenantCode"), required: true }] }),
   clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateCustomerId}/members", "readEnterpriseMembers", "Read minimal enterprise members after current members:read authorization", { responseSchema: "EnterpriseMembersResponse", parameters: [{ ...queryParam("tenantCode"), required: true }, queryParam("page", numberSchema), queryParam("pageSize", numberSchema)] }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders", "listEnterpriseOrders", "Read original enterprise orders after current orders:read authorization", {
+    responseSchema: "EnterpriseOrdersResponse",
+    parameters: ["group", "keyword", "page", "pageSize"].map(name => queryParam(name, ENTERPRISE_COMPONENT_SCHEMAS.EnterpriseOrdersQuery.properties![name]))
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/export-rows", "exportEnterpriseOrderRows", "Read bounded filtered enterprise order rows after current orders:read and export:create authorization", {
+    responseSchema: "EnterpriseOrderExportResponse",
+    parameters: ["group", "keyword"].map(name => queryParam(name, ENTERPRISE_COMPONENT_SCHEMAS.EnterpriseOrderExportQuery.properties![name]))
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}", "readEnterpriseOrder", "Read curated original enterprise order details after current orders:read authorization", {
+    responseSchema: "EnterpriseOrderDetailResponse"
+  }),
   backlogOperation("get", "/api/membership/enterprise-portal/operations/{operationKey}", "Membership", "readEnterprisePortalOperation", "Read current operator original activation result without reapplying it", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
   backlogOperation("get", "/api/membership/enterprise-portal/settings", "Membership", "readEnterpriseTenantSettings", "Read tenant enterprise portal activation", ["rental-os:corporate:view", "rental-os:corporate:manage"], true, undefined, "EnterpriseTenantSettings"),
   backlogOperation("put", "/api/membership/enterprise-portal/settings", "Membership", "saveEnterpriseTenantSettings", "Change tenant activation with revision and original operation receipt", ["rental-os:corporate:manage"], true, "SaveEnterpriseTenantSettingsRequest", "EnterpriseTenantSettings"),
