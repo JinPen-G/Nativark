@@ -4,6 +4,14 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="preparation-receipt-validation-core-20261112"></a>
+
+## 原批次回执校验收口与Core提交链接续（2026-11-12）
+
+两份Core源码完成原批次JSON/标识绑定校验，原写入重试的资格/来源门槛保持，独立历史GET继续原授权；原消息兼容及错误顺序尝试均按原测试纠正，详见[唯一品类记录](品类治理/品类治理-开发记录.md#preparation-receipt-validation-20261112)。API864文件完整编译/逐文件核对，2份更新，原两批次脚本与限定坏回执检查通过；各次暂存已删除，CLOSE/CAT完整门槛不变。
+
+PM最新指定下一优先：原scanOrder→recordIssue→saveOrderAggregate同事务履约参加者；upsertProfile真实配置行counter/默认与非默认边界及开业参加者；persistBusinessConfig原tx及settingsRevision/开业分区参加者；saveCoreState原tx/scoped原子counter与必要回填兼容。先固定最小内部字段合同和Core可证明的resource_shortage判定，供PM与AI-RD读取；缺已发布临近政策不捕获，不解析issue文本、不把九项独立读取当单事务总版本。公共符号/装配新增须另报具体窗口，原真实环境许可未增加。
+
 <a id="capability-runtime-admission-core-20261112"></a>
 
 ## 必选与历史能力的执行依赖（2026-11-12）

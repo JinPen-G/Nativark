@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import {
   CATEGORY_PREPARATION_LIMITS,
   type CategoryEntityPreparationPatch,
   type CategoryEntityPreparationRemoval,
+  type CategoryPreparationSaveResult,
   type RentalCategoryDefinition,
   type SaveCategoryPreparationBatchRequest
 } from "@rental-os/shared";
@@ -25,6 +26,25 @@ const isoDate = (value: unknown): value is string =>
 const safeField = (code: string) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(code) &&
   !["constructor", "prototype", "__proto__"].includes(code);
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+
+/** Stored batch results are immutable receipts, not the current collection.
+ * Validate their public shape and stable parent/key binding without re-reading
+ * today's target eligibility, preparation basis or entity count. No authority. */
+export function readCategoryPreparationBatchResult(value: unknown,
+  expected: { preparationId: string; targetVersionId: string; batchId: string }): CategoryPreparationSaveResult {
+  const keys = ["id", "revision", "sourceRevision", "targetVersionId", "preparedOnly", "adoptionImplemented", "batchId", "entityCount", "replayed"];
+  const text = (value: unknown, max: number) => typeof value === "string" && Boolean(value.trim()) && value.length <= max;
+  const revision = (value: unknown, minimum: number) => Number.isSafeInteger(value) && Number(value) >= minimum && Number(value) <= 2147483647;
+  if (!object(value) || Object.keys(value).some(key => !keys.includes(key)) ||
+    !text(expected.preparationId, 191) || !text(expected.targetVersionId, 191) || !text(expected.batchId, 128) ||
+    value.id !== expected.preparationId || value.targetVersionId !== expected.targetVersionId || value.batchId !== expected.batchId ||
+    !revision(value.revision, 1) || !revision(value.sourceRevision, 0) || value.preparedOnly !== true || typeof value.adoptionImplemented !== "boolean" ||
+    (value.entityCount !== undefined && (!Number.isSafeInteger(value.entityCount) || Number(value.entityCount) < 0 || Number(value.entityCount) > CATEGORY_PREPARATION_LIMITS.collectionEntities)) ||
+    (value.replayed !== undefined && typeof value.replayed !== "boolean")) {
+    throw new ServiceUnavailableException("原批次回执格式或标识绑定无效，请保留原批次标识核对，不能重新保存");
+  }
+  return structuredClone(value) as unknown as CategoryPreparationSaveResult;
+}
 
 function patchShape(value: unknown): asserts value is CategoryEntityPreparationPatch {
   if (!entityReference(value) || !object(value) ||

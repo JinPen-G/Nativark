@@ -18,9 +18,11 @@
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与写锁外`readTenantReadinessSource`两个只读合同固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`已普通推送核远端，不改原扫描、登记或九项算法。API类型、原分配14断言/开业读取17项及新读取5组通过，暂存已核实删除，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)。ResourcePorts不得重入扫描/新开业务事务，不以独立观察冒充快照；可选参加者未接入，缺正式临近政策/事实/授权不捕获。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - 旧阶段25份清单是主树 `D:/工作文件/rental-OS/output/category-governance` 的唯一跨树原稿，本树26处现行链接已按PM安排改相对主仓库路径；另2处历史附件缺失保留，本树新证据仍在本树同名目录。原检查器继续将跨树路径列为`link-outside`，本片单独核固定原稿，不复制副本或放松规则。PM收回main时须按目标文档位置调整相对层级，见[原稿记录](<Rental Core-开发记录.md#evidence-original-location-20261112>)。
-- Shared202文件保持，本树API现在包含[能力执行依赖准入](<Rental Core-开发记录.md#capability-runtime-admission-core-20261112>)，864份自持JS完整编译/逐文件核对，3份更新，其余861份对应a0编码阶段清单，四项Shared/Client保护未变。准入/初始化短调用及原Hook脚本通过，原冒烟17项11过/6失败。原[编码](<Rental Core-开发记录.md#canonical-category-code-core-20261112>)、[到期构建与消费](<Rental Core-开发记录.md#api-current-core-build-20261112>)及其他失败继续保留；这些研发包结果不计CLOSE完成或真库/HTTP/宿主/发布。工具只读使用，同树包别名不跨树共享。
+- Shared202文件保持，本树API现在包含[原批次回执校验](<Rental Core-开发记录.md#preparation-receipt-validation-core-20261112>)，864份自持JS完整编译/逐文件核对，2份更新，其余862份对应619阶段清单，四项Shared/Client保护未变。原两批次脚本与限定调用通过，原执行依赖17项11过/6失败及其他阶段结果保留；这些研发包结果不计CLOSE完成或真库/HTTP/宿主/发布。工具只读使用，同树包别名不跨树共享。
 
 ## 3. 下一入口与原缺口
+
+当前先沿PM新明确窗口完成AIN-17的Core提交链：配置真实行counter、默认/非默认范围、原tx开业分区及履约参加者；先交固定最小合同与Core结构化resource_shortage依据。原read-only fe65片不替代提交来源，缺临近政策不造事件，九项独立读不冒称同事务总版本。窗口/阶段入口见[接续记录](<Rental Core-开发记录.md#preparation-receipt-validation-core-20261112>)，此优先调整不缩减CAT-GOV/CLOSE原门槛。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
    写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。

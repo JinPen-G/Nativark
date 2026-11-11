@@ -1,6 +1,6 @@
 /** Rental preparation and own-receipt reads. Owns authorization/revision
  * transactions; never activates staged entities, capabilities or bindings. */
-import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { CATEGORY_PREPARATION_LIMITS, RENTAL_CAPABILITY_CODES, type CategoryCapabilityPreparationPatch, type CategoryEntityPreparationPatch, type CategoryPreparationBatchReadResult, type CategoryPreparationEntitiesQuery, type CategoryPreparationEntityPage, type CategoryPreparationSaveResult, type RentalCapability, type RentalCapabilityConfig, type RentalCapabilityLifecycleStatus, type SaveCategoryPreparationBatchRequest, type SaveCategoryPreparationRequest, type SystemUserRow } from "@rental-os/shared";
@@ -16,7 +16,7 @@ import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { SubscriptionService } from "../subscription/subscription.service";
 import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
-import { assertCategoryPreparationBatchSize, categoryPreparationBatchFingerprint, mergeCategoryPreparationBatch } from "./category-preparation-batches";
+import { assertCategoryPreparationBatchSize, categoryPreparationBatchFingerprint, mergeCategoryPreparationBatch, readCategoryPreparationBatchResult } from "./category-preparation-batches";
 import type { CategoryPreparationPreview } from "@rental-os/shared";
 import { AuthService } from "../auth/auth.service";
 import { CategoryAdoptionApplication } from "./category-adoption.application";
@@ -254,9 +254,26 @@ export class CategoryAdoptionPreparationService {
       const receipt = await tx.rentalCategoryPreparationBatch.findFirst({ where: {
         tenantId: user.tenantId, workspaceId, actorId: user.id, batchId,
         preparation: { targetVersionId: targetId }
-      }, select: { result: true } });
-      return receipt ? { outcome: "saved", result: receipt.result as unknown as CategoryPreparationSaveResult } : { outcome: "unknown" };
+      }, select: { result: true, preparationId: true, actorId: true, inputFingerprint: true } });
+      return receipt ? { outcome: "saved", result: this.originalBatchResult(receipt, user, targetId, batchId) } : { outcome: "unknown" };
     });
+  }
+
+  private originalBatchResult(
+    row: { actorId: string; preparationId: string; inputFingerprint: string; result: unknown },
+    user: SystemUserRow, targetId: string, batchId: string, fingerprint?: string,
+    request?: Pick<SaveCategoryPreparationBatchRequest, "expectedPreparationRevision" | "expectedSourceRevision">
+  ) {
+    if (row.actorId !== user.id) throw new ConflictException("同一批次标识已用于不同操作人或内容，请读取原保存结果");
+    if (typeof row.inputFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(row.inputFingerprint)) {
+      throw new ServiceUnavailableException("原批次输入指纹缺失或不可读取，请保留原标识核对");
+    }
+    if (fingerprint && row.inputFingerprint !== fingerprint) throw new ConflictException("同一批次标识已用于不同操作人或内容，请读取原保存结果");
+    const result = readCategoryPreparationBatchResult(row.result, { preparationId: row.preparationId, targetVersionId: targetId, batchId });
+    if (request && (result.revision !== request.expectedPreparationRevision + 1 || result.sourceRevision !== request.expectedSourceRevision)) {
+      throw new ServiceUnavailableException("原批次回执与原输入修订不一致，请保留原标识核对");
+    }
+    return result;
   }
 
   /** Every batch shares the policy -> workspace lock order with adoption. A
@@ -264,6 +281,7 @@ export class CategoryAdoptionPreparationService {
    * a second time, and incomplete staged data never touches current entities. */
   async saveBatch(user: SystemUserRow, targetId: string, body: SaveCategoryPreparationBatchRequest): Promise<CategoryPreparationSaveResult> {
     assertCategoryPreparationPermission(user);
+    if (typeof targetId !== "string" || !targetId.trim() || targetId.length > 191) throw new BadRequestException("目标版本标识无效");
     if (!body || typeof body.reason !== "string" || !body.reason.trim() || body.reason.length > 512 ||
         typeof body.batchId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u.test(body.batchId) ||
         typeof body.expectedSourceVersionId !== "string" || !body.expectedSourceVersionId.trim() || body.expectedSourceVersionId.length > 191 ||
@@ -282,6 +300,8 @@ export class CategoryAdoptionPreparationService {
     }
     const fingerprint = categoryPreparationBatchFingerprint(body);
     return this.transaction(user, async (tx) => {
+      // A write-endpoint retry retains its original current eligibility/source
+      // checks. Historical receipts are read separately through readBatch.
       const context = await this.context(tx, user, targetId, body.operation);
       if (context.workspace.categoryVersionId !== body.expectedSourceVersionId || context.workspace.categoryAdoptionRevision !== body.expectedSourceRevision) {
         throw new ConflictException("来源品类绑定已变化，请核对原准备及当前版本");
@@ -292,8 +312,7 @@ export class CategoryAdoptionPreparationService {
         tenantId: user.tenantId, workspaceId: context.workspaceId, preparationId: context.preparation.id, batchId: body.batchId
       } }) : null;
       if (replay) {
-        if (replay.actorId !== user.id || replay.inputFingerprint !== fingerprint) throw new ConflictException("同一批次标识已用于不同操作人或内容，请读取原保存结果");
-        return { ...(replay.result as unknown as CategoryPreparationSaveResult), replayed: true };
+        return { ...this.originalBatchResult(replay, user, targetId, body.batchId, fingerprint, body), replayed: true };
       }
       if ((context.preparation?.revision ?? 0) !== body.expectedPreparationRevision) throw new ConflictException("准备集合已变化，本批未覆盖其他人的输入");
       const sameSource = prior?.sourceVersionId === body.expectedSourceVersionId && prior.operation === body.operation && context.preparation?.sourceRevision === body.expectedSourceRevision;
