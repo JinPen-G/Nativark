@@ -2572,13 +2572,24 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(h.state.aiTaskExecutionPhaseReceipt[0].payload.version, 'approved-settings-wait-1');
   assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
   assert.equal(h.state.aiTaskExecutionCharge.filter(charge => charge.stepId === h.state.aiStep[0].id).length, 3);
-  const preparationCharge = h.state.aiTaskExecutionCharge.filter(charge => charge.stepId === null);
+  // Run-level overhead also has no Step; preparation retains its original charge binding.
+  const preparationCharge = h.state.aiTaskExecutionCharge.filter(charge => charge.chargeId === h.state.aiTaskRunPreparation[0].chargeId);
   assert.equal(preparationCharge.length, 1); assert.equal(preparationCharge[0].resource, 'ACTIVE_MS');
   assert.equal(preparationCharge[0].status, 'RECORDED');
   assert.equal(h.state.aiTaskRunPreparation.length, 1);
   assert.equal(h.state.aiTaskRunPreparation[0].prepared, true);
   assert.equal(h.state.aiTaskRunPreparation[0].chargeId, preparationCharge[0].chargeId);
-  assert.equal(h.state.aiTaskExecutionCharge.length, 4);
+  const overhead = h.state.aiTaskRunOverhead;
+  assert.equal(overhead.length, 2);
+  const runChargeIds = [preparationCharge[0].chargeId, ...overhead.map(row => row.chargeId)].sort();
+  assert.deepEqual(h.state.aiTaskExecutionCharge.filter(charge => charge.stepId === null).map(charge => charge.chargeId).sort(), runChargeIds);
+  for (const row of overhead) {
+    const charge = h.state.aiTaskExecutionCharge.find(charge => charge.chargeId === row.chargeId);
+    assert.ok(charge); assert.equal(charge.resource, 'ACTIVE_MS'); assert.equal(charge.status, 'RECORDED');
+    assert.equal(charge.actualAmount, row.activeMs); assert.equal(charge.evidenceRef, 'overhead:' + row.id);
+  }
+  assert.equal(h.state.aiTaskExecutionCharge.length, 6);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedActiveMs, preparationCharge[0].actualAmount + overhead.reduce((sum, row) => sum + row.activeMs, 0n));
   const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], proposal = checkpoint.payload.proposal;
   const checkpointRequest = { taskId: 'task-a', runId: 'run-a', stepId: h.state.aiStep[0].id };
   const publishedCheckpoint = await host.application.readConfirmation(checkpointRequest);
@@ -2730,6 +2741,8 @@ for (const mode of ['missing operation', 'cancelled committed operation', 'expir
   assert.equal((await host.application.start(key)).outcome.status, 'paused');
   const originalPlan = h.clone(h.state.aiTaskRunPlan), originalInput = h.clone(h.state.aiTaskActionInput);
   const originalCharges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
+  const originalStepCharges = h.state.aiTaskExecutionCharge.filter(c => c.stepId !== null).map(c => c.chargeId);
+  const originalRunCharges = h.clone(h.state.aiTaskExecutionCharge.filter(c => c.stepId === null));
   const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], proposal = checkpoint.payload.proposal;
   await host.settings.application.decide({ draftVersion: 'ain-approved-settings-draft-1', taskId: key.taskId,
     proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision,
@@ -2782,9 +2795,25 @@ for (const mode of ['missing operation', 'cancelled committed operation', 'expir
   assert.equal(calls, 1, 'reconciliation never re-enters Core commit');
   assert.deepEqual(h.state.aiTaskRunPlan, originalPlan);
   assert.deepEqual(h.state.aiTaskActionInput, originalInput);
-  assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), originalCharges);
+  const currentStepCharges = h.state.aiTaskExecutionCharge.filter(c => c.stepId !== null);
+  assert.ok(currentStepCharges.every(c => c.stepId === h.state.aiStep[0].id));
+  assert.deepEqual(currentStepCharges.map(c => c.chargeId), originalStepCharges);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.slice(0, originalCharges.length).map(c => c.chargeId), originalCharges);
+  for (const previous of originalRunCharges) assert.deepEqual(h.state.aiTaskExecutionCharge.find(c => c.chargeId === previous.chargeId), previous);
+  const runCharges = h.state.aiTaskExecutionCharge.filter(c => c.stepId === null);
+  const measurements = [...h.state.aiTaskRunPreparation.map(row => ({ row, prefix: 'preparation' })), ...h.state.aiTaskRunOverhead.map(row => ({ row, prefix: 'overhead' }))];
+  assert.deepEqual(runCharges.map(c => c.chargeId).sort(), measurements.map(({ row }) => row.chargeId).sort());
+  for (const { row, prefix } of measurements) {
+    const charge = runCharges.find(c => c.chargeId === row.chargeId);
+    assert.ok(charge); assert.equal(charge.resource, 'ACTIVE_MS'); assert.equal(charge.status, 'RECORDED');
+    assert.equal(charge.actualAmount, row.activeMs); assert.equal(charge.evidenceRef, prefix + ':' + row.id);
+  }
+  assert.equal(new Set(h.state.aiTaskExecutionCharge.map(c => c.chargeId)).size, h.state.aiTaskExecutionCharge.length);
+  assert.ok(h.state.aiTaskExecutionCharge.slice(originalCharges.length).every(c => c.stepId === null && c.resource === 'ACTIVE_MS' && c.status === 'RECORDED'));
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedActiveMs, h.state.aiTaskExecutionCharge.filter(c => c.resource === 'ACTIVE_MS' && c.status === 'RECORDED').reduce((sum, c) => sum + c.actualAmount, 0n));
   assert.equal(h.state.aiTaskExecutionPhaseStart.length, 2);
-  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === (mode === 'missing operation' ? 'UNKNOWN' : 'RECORDED')));
+  assert.ok(currentStepCharges.every(c => c.status === (mode === 'missing operation' ? 'UNKNOWN' : 'RECORDED')));
+  assert.ok(runCharges.every(c => c.status === 'RECORDED'));
   assert.equal(h.state.aiRun[0].leaseOwnerId, null);
   assert.equal(h.timers.size, 0);
   h.identity.membership = false;

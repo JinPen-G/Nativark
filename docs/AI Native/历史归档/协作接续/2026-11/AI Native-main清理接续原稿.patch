@@ -1,0 +1,36 @@
+diff --git a/docs/AI Native/AI Native-协作接续.md b/docs/AI Native/AI Native-协作接续.md
+index 21719a7fc..4ec15c269 100644
+--- a/docs/AI Native/AI Native-协作接续.md	
++++ b/docs/AI Native/AI Native-协作接续.md	
+@@ -4,7 +4,7 @@
+ 
+ ## 当前目标与结果
+ 
+-负责人明确授权将AI Native三树及五棵指定工作树成果合入main，再普通推送GitHub；随后要求保留main和AI主树，删除其余工作树。源码归集与合并问题修复已完成；清理后发现的main文件缺失已经恢复，当前复验仍有本地依赖缺件，不能沿用清理前绿色声明全部通过。准确提交与远端核对见[交付回执](../../output/other-worktrees-consolidation-20261110/final-receipt.json)。两侧保持停写，不扩展新功能。工作树目录与登记仅保留main和AI主树；D盘Windows残留尚未物理删除，见[清理回执](../../output/other-worktrees-consolidation-20261110/worktree-removal-result.json)。
++源码归集、合并问题修复与main缺失文件恢复已完成；准确提交与远端核对见[交付回执](../../output/other-worktrees-consolidation-20261110/final-receipt.json)。负责人本轮继续授权清理output及删除AI主树，并明确确认设计和品牌已有副本、要求直接删除。旧Windows残留及AI主树现已物理删除，Git登记仅剩main，见[清理执行记录](../../output/project-size-audit-20261110/worktree-removal-result.json)。不恢复旧分树施工或扩展新功能；整项验证缺口仍按原任务门槛核对。
+ 
+ 原订单人工交接、显式只读政策、首字/首卡宿主，以及原报价再准备、optional runId、订单材料、会员和日历消费者都已进入main。企业成员/门户、MCP/Harness和网站按固定快照核接，文档树已在祖先链。冻结后无新增源码/status差异，七份原稿档案哈希匹配；来源和实际归档位置见[逐树核对](../../output/other-worktrees-consolidation-20261110/source-and-archive-final-audit.json)。旧设计、日志和隔离产物不替代运行依赖或业务验收。
+ 
+@@ -12,12 +12,12 @@
+ 
+ ## 主树与写入归属
+ 
+-主仓库分支为`main`，五树合并基线为`9f5c72f0239f691b07ed4acca5842a1c9d8f74ed`，合后修复另成提交。AI主树HEAD/WIP保留原现场；其余原稿在D盘档案，固定快照提交已在main祖先链，旧SHA不是reset目标。恢复AI主树施工前须从最终main按固定成果核接，不能把保留原现场当作已同步到最新main。
++主仓库分支为`main`，五树合并基线为`9f5c72f0239f691b07ed4acca5842a1c9d8f74ed`，合后修复另成提交。AI原主树HEAD `a064c473279fa58973ffc5f52fd2d6479e496512`无main之外的独有提交；源码差异已核对main、固定快照及既有原稿档案，负责人确认设计和品牌副本后直接删除原现场。现用Harness依赖已归位main，npm位于本树`.tools/npm`；不保留跨树依赖链接，也不新增整树备份。固定快照仍在main祖先链，旧SHA不是reset目标。
+ 
+ | 位置 | 当前职责 |
+ | --- | --- |
+ | `D:/工作文件/rental-OS`／`main` | 本对话负责最终整合、公共契约/装配与唯一四册，后续从当前main接手 |
+-| `claude-ai-native-foundation` | 原主开发树，成果已归main，保留原现场 |
++| 原`claude-ai-native-foundation` | 已按负责人确认删除目录及Git登记；后续仅从main接手 |
+ | 原`claude-ain08-facts-20261105`／ag-服务端1 `01a1bf34-f061-74c2-b588-3e21385c4b49` | 成果已归main和D盘档案，原工作目录按授权移除；不得自行重建、恢复开发或同步公共文件 |
+ | 原`claude-ai-native-gateway-closeout-20261106-src`／ag-服务端2 `01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 成果已归main和D盘档案，原工作目录按授权移除；不得自行重建、恢复开发或验证 |
+ 
+@@ -35,6 +35,6 @@
+ 
+ ## 验证与资源边界
+ 
+-本次使用main原离线preload、固定不可达数据库地址、main/output内audit/TEMP/cache及从当前schema生成的隔离Prisma Client。清理前shared两个出口、MCP和插件在私有目录构建通过；清理后MCP复验只读使用保留AI主树的原SDK依赖，验证源码仍来自main。恢复后企业状态13项、MCP4项、网站1项及员工绑定类型通过；API/后台/企业端/网站完整类型和报价、B02组合未复验通过，当前缺少Nest、UI及ts-node所需包。具体失败见[恢复后回执](../../output/other-worktrees-consolidation-20261110/validation/post-recovery/summary.json)，须先获准恢复锁定依赖再复验失败范围。Git提交/推送按负责人本轮明确授权执行。
++验证使用main原离线preload、固定不可达数据库地址和本树隔离写入目录；保留main的私有Prisma/shared/MCP产物，未以AI旧生成物覆盖共享目录。现用Harness依赖与npm已归位main；[受管工具构建](../../output/project-size-audit-20261110/managed-toolchain-smoke.json)退出0、审计0，员工绑定类型检查退出0。插件/MCP组合本次81项中77通过、4失败：两项夹具报价固定到期日已过，另两项SQL锁断言与当前实现不同；原断言不修改，详见[实际日志](../../output/project-size-audit-20261110/relocation-verification-2/harness-mcp.tap)。此前企业13项、网站1项等仍是原阶段证据；API/后台/企业端/网站完整类型和报价、B02组合尚未复验通过，见[恢复后回执](../../output/other-worktrees-consolidation-20261110/validation/post-recovery/summary.json)。未因清理增加任务百分比，Git提交/推送仍须负责人明确授权。
+ 
+ 类型、构建和定向离线行为不代表真实宿主、数据库、供应商、整项G4或发布通过；本次没有安装、启服务、浏览器/微信、真实HTTP/DB/DNS/模型/支付/对象存储、迁移或部署。旧环境和失败证据保持，文档导航三条既有历史缺链不伪造补绿。

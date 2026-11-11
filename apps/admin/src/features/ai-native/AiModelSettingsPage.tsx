@@ -35,14 +35,17 @@ export function AiModelSettingsPage() {
   const { t } = useLocale();
   const auth = useAuthStore();
   const identity = contextKey();
+  // Even the same actor/space can receive a new session epoch. Its editors
+  // must capture that epoch afresh while original operation locators stay put.
+  const workspaceKey = JSON.stringify([identity, currentSessionEpoch()]);
   const [selection, setSelection] = useState<{ identity: string; mode: AiSettingsMode } | null>(null);
-  const mode = selection?.identity === identity ? selection.mode : null;
-  const onModeChange = useCallback((mode: AiSettingsMode) => setSelection({ identity, mode }), [identity]);
+  const mode = selection?.identity === workspaceKey ? selection.mode : null;
+  const onModeChange = useCallback((mode: AiSettingsMode) => setSelection({ identity: workspaceKey, mode }), [workspaceKey]);
   const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user?.id
     && !auth.user.isSaasAdmin && auth.hasPermission("system:params:manage");
   return <>
     <PageHeader title={t("AI 服务设置")} />
-    {allowed ? <Tabs key={identity} destroyOnHidden={false} items={[
+    {allowed ? <Tabs key={workspaceKey} destroyOnHidden={false} items={[
       { key: 'settings', label: t('服务配置'), children: <>
         <TenantSettingsEditor tenantId={auth.tenant!.tenantId} identity={identity} onModeChange={onModeChange} />
       </> },
