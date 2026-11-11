@@ -38,7 +38,7 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 | `tests`、`scripts` | 契约、业务、数据库与宿主验证，以及开发和运维脚本 | [命令清单](package.json) |
 | `docs` | 专项需求、任务、开发记录、协作接续与公共技术资料 | [文档导航](docs/文档导航.md) |
 
-**安装范围不等于构建范围。** 根 workspaces 匹配 `apps/*` 和 `packages/*` 下的包，但根 `npm run build` 明确只构建 shared → API → admin。网站、小程序、MCP 和 `clients/` 需要各自的构建步骤；`clients/` 不在根工作区中，保留的 Harness 还有独立包管理和锁文件。不要用一个根构建成功来宣布所有端已交付。
+**安装范围不等于构建范围。** 根 workspaces 匹配 `apps/*` 和 `packages/*` 下的包，根 `npm run build` 按 shared → MCP → API → admin 构建；MCP 包提供 API 所需的正式类型出口。网站、小程序和 `clients/` 需要各自的构建步骤；`clients/` 不在根工作区中，保留的 Harness 还有独立包管理和锁文件。不要用一个根构建成功来宣布所有端已交付。
 
 ### 当前能力应如何理解
 
@@ -276,8 +276,8 @@ npm run build:staff-miniprogram
 | 文档检查器本身 | `npm run test:docs` | 检查规则回归，不启动应用 |
 | 公共接口 | `npm run contract:validate` | Controller/OpenAPI、DTO、路由权限及客户写入归属的静态检查；不替代真实权限行为 |
 | 后台结构 | `npm run test:admin` | 后台结构/约定检查，不是浏览器验收 |
-| 类型 | `npm run lint` | 工作区类型链，期间构建 shared；名称是 lint，但不是一次全仓风格检查 |
-| 主工程构建 | `npm run build` | shared、API、admin 编译/打包；不含其他全部工作区 |
+| 类型 | `npm run lint` | 工作区类型链，期间按顺序构建 shared、MCP；名称是 lint，但不是一次全仓风格检查 |
+| 主工程构建 | `npm run build` | shared、MCP、API、admin 按依赖顺序编译/打包；不含其他全部工作区 |
 | 租赁内核 / 计费策略 | `npm run test:rental-core`、`npm run test:pricing-strategy` | 定向业务/策略验证；仓储替身通过不能证明 MySQL 事务 |
 | 微信客户端 | `npm run test:miniprogram`、`npm run test:staff-miniprogram` | 构建及静态/宿主替身检查；不代替开发者工具、真机或真实微信支付 |
 | 数据库 | `test:*db*` 等对应脚本 | 各脚本的目标库、创建/清理范围和凭据不同，必须先阅读，不能全都当作离线测试 |
