@@ -1,6 +1,7 @@
 /** Original extension-command references only: no request body or credentials.
  * Unknown requests never dispatch again; session generations isolate late replies. */
-import { enterpriseExtensionRequestMatches, enterpriseExtensionRequestClosureMatches, type EnterpriseExtensionRecoveryResult, type EnterpriseExtensionApprovalView, type RequestEnterpriseExtensionApproval, type SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
+import type { EnterpriseExtensionRecoveryResult, EnterpriseExtensionApprovalView, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
+import { enterpriseExtensionRequestMatches, enterpriseExtensionRequestClosureMatches } from "../vendor/shared-enterprise-expense/enterprise-expense";
 import { fetchEnterpriseExtensionApprovals, readEnterpriseExtensionRequestOriginal, readEnterpriseExtensionResult, readEnterpriseOperation, requestEnterpriseExtensionApproval, submitEnterpriseExtensionApproval, closeEnterpriseExtensionExecution, closeEnterpriseExtensionRequest } from "../api/enterprise";
 import { PUBLIC_CONFIG } from "../config/public";
 import { newKey } from "./keys";

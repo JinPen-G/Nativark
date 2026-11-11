@@ -3,6 +3,7 @@
  * 小程序构建：
  *   1. tsc 编译 src → dist（严格模式，任何类型错误都中止）；
  *   2. 复制 .wxml/.wxss/.json 与 assets 静态资源；
+ *      正文解析器及原收据匹配函数按既有声明适配生成受管运行文件；
  *   3. 计算公开配置：以 src/config/public.ts 里的常量为默认值（换租户只改那个文件），
  *      环境变量 MINIPROGRAM_TENANT_CODE / MINIPROGRAM_API_ORIGIN / MINIPROGRAM_APP_ID 只在非空时覆盖；
  *   4. 校验并写入 dist/config/public.js：
@@ -22,7 +23,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput } = require('../../../scripts/miniprogram-shared-types.cjs');
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
@@ -145,6 +146,7 @@ function main() {
     const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
     runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
   }
+  emitMiniprogramSharedReceiptRuntime(root, dist);
 
   // 默认值来自编译后的 config/public.js（即 src/config/public.ts 里的常量）。
   const configFile = path.join(dist, "config", "public.js");

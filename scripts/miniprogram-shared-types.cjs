@@ -1,6 +1,7 @@
 'use strict';
 // Mini-program build paths and private shared declarations stay in this checkout.
-// Shared declarations are temporary; mini-program outputs use checked build paths.
+// Shared declarations are temporary; approved public receipt values are packaged
+// without implementing another matcher or exposing a package loader to WeChat.
 const fs = require('node:fs');
 const path = require('node:path');
 const preparations = new Map();
@@ -80,6 +81,39 @@ function clearMiniprogramBuildOutput(appRoot, args) {
   return target;
 }
 
+/** Package the original public receipt functions only. The declarations and
+ * runtime both come from Shared; missing or changed export origins stop build. */
+function emitMiniprogramSharedReceiptRuntime(appRoot, output) {
+  appRoot = path.resolve(appRoot);
+  const root = workspace(appRoot);
+  if (path.basename(appRoot) !== 'miniprogram') throw Error('Receipt runtime is only configured for the customer mini-program');
+  output = miniprogramBuildOutput(appRoot, ['--out-dir', output]);
+  const sharedDist = path.join(root, 'packages', 'shared', 'dist');
+  checkPath(root, sharedDist, true);
+  const entry = require.resolve('@rental-os/shared', { paths: [appRoot, root] });
+  const canonicalDist = fs.realpathSync(sharedDist);
+  if (path.dirname(fs.realpathSync(entry)) !== canonicalDist) throw Error('Shared runtime does not belong to this checkout');
+  const runtime = require(entry);
+  const names = ['enterpriseExpenseRequestMatches', 'enterpriseExpenseRequestClosureMatches',
+    'enterpriseExtensionRequestMatches', 'enterpriseExtensionRequestClosureMatches'];
+  const candidates = Object.values(require.cache).filter(module => module.filename !== entry
+    && module.filename.startsWith(canonicalDist + path.sep) && module.exports
+    && Object.keys(module.exports).length === names.length
+    && names.every(name => typeof runtime[name] === 'function' && module.exports[name] === runtime[name]));
+  if (candidates.length !== 1) throw Error('Shared receipt exports have no unambiguous canonical module');
+  checkPath(root, candidates[0].filename);
+  const source = fs.readFileSync(candidates[0].filename, 'utf8');
+  if (/\brequire\s*\(|\bimport\s*(?:\(|["'{*])/u.test(source)) throw Error('Shared receipt runtime dependencies require a new bundle review');
+  const ts = require(require.resolve('typescript', { paths: [appRoot, root] }));
+  const compiled = ts.transpileModule(source, { fileName: 'shared-enterprise-expense.js', reportDiagnostics: true,
+    compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS } });
+  if (compiled.diagnostics?.length) throw Error('Shared receipt runtime compilation failed');
+  const destination = path.join(output, 'vendor', 'shared-enterprise-expense');
+  checkPath(root, destination, true);
+  fs.mkdirSync(destination, { recursive: true });
+  fs.writeFileSync(path.join(destination, 'enterprise-expense.js'), compiled.outputText);
+}
+
 function releaseMiniprogramSharedTypes(configFile) {
   if (!configFile) return;
   const owned = preparations.get(configFile);
@@ -142,4 +176,4 @@ process.once('exit', () => {
     catch (error) { process.stderr.write(`[mini-program cleanup] ${error.message}\n`); process.exitCode = 1; }
   }
 });
-module.exports = { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, miniprogramBuildOutput, clearMiniprogramBuildOutput };
+module.exports = { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, miniprogramBuildOutput, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime };

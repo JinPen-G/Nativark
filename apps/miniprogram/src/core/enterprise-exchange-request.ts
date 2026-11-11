@@ -1,6 +1,7 @@
 /** Exchange expense request only. Opaque original references survive logout;
  * missing receipts/expiry never permit redispatch or physical execution. */
-import { enterpriseExpenseRequestMatches, enterpriseExpenseRequestClosureMatches, type RequestEnterpriseExchangeApproval } from "@rental-os/shared";
+import type { RequestEnterpriseExchangeApproval } from "@rental-os/shared";
+import { enterpriseExpenseRequestMatches, enterpriseExpenseRequestClosureMatches } from "../vendor/shared-enterprise-expense/enterprise-expense";
 import { readEnterpriseExchangeRequestOriginal, closeEnterpriseExchangeRequest, requestEnterpriseExchangeApproval, readEnterpriseOperation } from "../api/enterprise";
 import { fetchOrder } from "../api/orders";
 import { PUBLIC_CONFIG } from "../config/public";
