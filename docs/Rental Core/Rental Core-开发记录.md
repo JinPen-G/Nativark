@@ -8,7 +8,7 @@
 
 ## 履约已记录问题与原九项开业的只读来源（2026-11-12）
 
-从已核GitHub的`61fece91ae007ed42b02b7c96c1f1ab0d1b0140e`接续，PM明确的分配服务/业务服务窗口仅新增无副作用读取合同。没有改原扫描、问题登记、配置持久化或九项判定，没有接入Outbox参加者、改变人工经营事实、生成Client、改事件Schema或调用模型。此前配置行修订源码仍固定在[配置阶段](#configuration-row-revision-core-source-20261112)。
+从已核GitHub的`61fece91ae007ed42b02b7c96c1f1ab0d1b0140e`接续，源码检查点`fe65ac652076d5bed4c9ca439d50b563c61d17aa`已普通推送并回读任务远端一致，PM明确的分配服务/业务服务窗口仅新增无副作用读取合同。没有改原扫描、问题登记、配置持久化或九项判定，没有接入Outbox参加者、改变人工经营事实、生成Client、改事件Schema或调用模型。此前配置行修订源码仍固定在[配置阶段](#configuration-row-revision-core-source-20261112)。
 
 [分配服务](../../apps/api/src/modules/rental-core/rental-allocation.service.ts)的`readRecordedFulfillmentIssue(tenantId, orderId, tx)`必须使用调用方原事务，复用原事实仓储的订单可见范围并前后核对ALS。它只返回原订单ID、真实assignment修订、订单更新时间/起租时点/地点及已登记问题标记，不返回自由问题文本或完整分配资料；缺订单/问题、非待履约阶段、非法修订/时间不补来源。读取不调用`scanOrder`/`recordIssue`、不锁新资源或开事务，不重新计算实时可交付，也不从分配偏好编临近履约阈值。ResourcePorts须结合正式政策和当前授权判定捕获，缺项保持not_captured。
 
