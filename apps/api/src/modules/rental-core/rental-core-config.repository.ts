@@ -1010,7 +1010,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   ): Promise<void> {
     const client = this.db(tx);
     const workspaceId = `ws_${tenantId}`;
-    await client.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
+    await client.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${readRentalCategoryCode(categoryCode)} FOR UPDATE`);
     const existingWorkspace = await client.businessWorkspace.findUnique({ where: { id: workspaceId } });
     const category = await client.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
     if (existingWorkspace && (existingWorkspace.tenantId !== tenantId || existingWorkspace.categoryCode !== categoryCode ||
@@ -1083,7 +1083,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   async readDefaultWorkspaceInitialization(tenantId: string, categoryCode: RentalCategoryCode,
     tx: RentalConfigTx): Promise<RentalDefaultWorkspaceInitializationState | undefined> {
     const workspaceId = `ws_${tenantId}`;
-    await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
+    await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${readRentalCategoryCode(categoryCode)} FOR UPDATE`);
     // The host owns preceding identity/business fences. Reuse the existing
     // category order; the ordinary writer would acquire a parent after it.
     const workspaces = await tx.$queryRaw<Array<{ id: string; tenantId: string; categoryCode: string;

@@ -15,7 +15,7 @@ import { readFrozenInspectionTemplates, snapshotInspectionTemplate } from "./ren
 import type { BusinessContext } from "./rental-business.service";
 import { capabilityRequirementRoots, resolveCapabilityRequirements } from "./category-capability-conditions";
 import { validateQuotedCapabilityRequirements } from "./category-capability-facts";
-import { rentalDefaultWorkspaceName } from "./category-identity";
+import { readRentalCategoryCode, rentalDefaultWorkspaceName } from "./category-identity";
 import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements, projectExchangeInspectionTemplates } from "./rental-exchange-inspection";
 import type { RentalOrderInspectionBasisFacts } from "@rental-os/shared";
 import { assertInspectionObservations } from "./rental-inspection-observation";
@@ -616,7 +616,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 继续用 tenantId 判断会认为"还没有状态"，从而用空白 seedState
       // 覆盖上一步刚从快照恢复出来的状态（实测表现为重启后配置丢失）。
       if (!tenant.categoryCode || this.states.has(`ws_${tenant.tenantId}`)) continue;
-      const categoryCode = String(tenant.categoryCode).toLowerCase() as RentalCategoryCode;
+      const categoryCode = readRentalCategoryCode(tenant.categoryCode);
       // 品类档案仍是租户级，其对应的是该租户的默认空间。
       // 持久化空间在回填结束后的 bootstrap 按绑定版本装载；这里只保留旧内存宿主的内置样例。
       if (!this.categoryResolver && categories.some((category) => category.code === categoryCode)) {

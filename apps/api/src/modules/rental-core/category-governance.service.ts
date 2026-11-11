@@ -19,6 +19,7 @@ import { categoryCreationTemplates, composeCategoryCreation } from "./category-c
 import { requestFingerprint } from "./rental-idempotency.repository";
 import { AuthService } from "../auth/auth.service";
 import { PlatformRepository } from "../platform/platform.repository";
+import { readRentalCategoryCode } from "./category-identity";
 
 export function assertCategoryGovernancePermission(user: SystemUserRow | undefined, permission: string) {
   if (!user?.isSaasAdmin || !(user.permissions.includes(permission) || user.permissions.includes("*"))) {
@@ -117,7 +118,7 @@ export class CategoryGovernanceService {
     }
     const source = await db.rentalCategoryVersion.findUnique({ where: { id: input.sourceVersionId! } });
     if (!source || !["published", "legacy_baseline"].includes(source.status)) throw new BadRequestException("复制来源必须是已有发布版本");
-    return { definition: resolveRentalCategoryVersionBody(source, source.categoryCode.toLowerCase()), sourceKind: "category_copy" };
+    return { definition: resolveRentalCategoryVersionBody(source, readRentalCategoryCode(source.categoryCode)), sourceKind: "category_copy" };
   }
   async previewCreation(input: PreviewRentalCategoryCreationRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
@@ -212,7 +213,7 @@ export class CategoryGovernanceService {
       const published = row.versions.filter((v) => ["published", "legacy_baseline"].includes(v.status)).sort((a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0));
       const recommended = row.versions.find((version) => version.id === row.recommendedVersionId);
       const body = recommended?.definition as unknown as { name?: string; display?: { nameEn?: string; icon?: string } } | undefined;
-      return { code: row.code.toLowerCase(), name: body?.name ?? row.name, nameEn: body?.display?.nameEn, icon: body?.display?.icon,
+      return { code: readRentalCategoryCode(row.code), name: body?.name ?? row.name, nameEn: body?.display?.nameEn, icon: body?.display?.icon,
         openingScope: row.openingScope, openingTenantIds: row.openingTenantIds ?? [], openingRevision: row.openingRevision,
         recommendedVersionId: row.recommendedVersionId, recommendedVersionLabel: row.versions.find((v) => v.id === row.recommendedVersionId)?.versionLabel ?? null,
         latestPublished: published[0] ? { id: published[0].id, status: published[0].status, versionLabel: published[0].versionLabel, publishedAt: published[0].publishedAt } : null,
@@ -286,7 +287,7 @@ export class CategoryGovernanceService {
   private versionValidation(row: { categoryCode: string; structureVersion: number; status: string; definition: unknown }, code: string) {
     try {
       if (row.structureVersion !== 1) throw new ConflictException("当前程序不支持该品类结构版本，请升级兼容程序");
-      if (row.categoryCode.toLowerCase() !== code) throw new ConflictException("品类版本编码与正文校验对象不一致");
+      if (readRentalCategoryCode(row.categoryCode) !== code) throw new ConflictException("品类版本编码与正文校验对象不一致");
       const body = ["draft", "archived"].includes(row.status)
         ? row.definition : resolveRentalCategoryVersionBody(row, code);
       return this.validation(body, code);
@@ -313,7 +314,7 @@ export class CategoryGovernanceService {
     const row = await this.version(this.prisma, categoryIdentity(code), id);
     const source = row.sourceVersionId ? await this.prisma.rentalCategoryVersion.findUnique({ where: { id: row.sourceVersionId } }) : undefined;
     if (row.sourceVersionId && (!source || !["published", "legacy_baseline"].includes(source.status))) throw new ConflictException("草稿来源发布版本缺失，不能伪造差异依据");
-    const before = source ? resolveRentalCategoryVersionBody(source, source.categoryCode.toLowerCase()) : undefined;
+    const before = source ? resolveRentalCategoryVersionBody(source, readRentalCategoryCode(source.categoryCode)) : undefined;
     const body = row.definition as any;
     return { ...this.versionValidation(row, code), previewOnly: true, revision: row.revision, sourceVersionId: row.sourceVersionId,
       differences: categoryDefinitionDifferences(before, body),
@@ -328,7 +329,7 @@ export class CategoryGovernanceService {
     const categoryCode = categoryIdentity(code);
     return this.platformTransaction(user, P.publish, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
-      await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${categoryCode.toLowerCase()} FOR UPDATE`);
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${readRentalCategoryCode(categoryCode)} FOR UPDATE`);
       const row = await this.version(tx, categoryCode, id);
       if (row.status === "published") {
         const audit = await tx.rentalCategoryGovernanceAudit.findUnique({ where: { id: `publish:${id}` } });

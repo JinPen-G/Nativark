@@ -12,6 +12,7 @@ import type { RentalQuoteOriginalOperation } from './rental-business-fact.reposi
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./category-capability-conditions";
+import { readRentalCategoryCode } from "./category-identity";
 import { readRentalInventoryBasis, assertInventoryBasisContext } from "./rental-quote-inventory-basis";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
@@ -3462,7 +3463,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!identity?.userId || !workspaceId || identity.tenantId !== tenantId || identity.isSaasAdmin || identity.staffApi
       || identity.audience === 'client' || source.tenantId !== tenantId || source.workspaceId !== workspaceId
       || context.profile.tenantId !== tenantId || context.settings.tenantId !== tenantId
-      || source.categoryCode.toLowerCase() !== context.category.code)
+      || readRentalCategoryCode(source.categoryCode) !== context.category.code)
       throw new ForbiddenException('规则预览缺少原经营空间授权');
     const allowed = ['fulfillment.pickupInspectionRequired', 'fulfillment.returnInspectionRequired', 'fulfillment.evidenceRequired',
       'fulfillment.allowDifferentReturnLocation', 'damage.manualReviewRequired', 'cancellation.weatherExceptionEnabled'];
@@ -8041,7 +8042,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       || category.adoptionRevision !== workspace.categoryAdoptionRevision) throw new ConflictException("原报价或续租配置/品类依据缺失或已变化");
     if (core.tenantId !== tenantId || core.workspaceId !== workspaceId || config.tenantId !== tenantId || config.workspaceId !== workspaceId
       || order.tenantId !== tenantId || order.categoryCode !== category.definition.code
-      || originalOrder.id !== order.id || originalOrder.quoteId !== order.quoteId || String(originalOrder.categoryCode).toLowerCase() !== category.definition.code
+      || originalOrder.id !== order.id || originalOrder.quoteId !== order.quoteId || readRentalCategoryCode(originalOrder.categoryCode) !== category.definition.code
       || quote.id !== order.quoteId || quote.tenantId !== tenantId || quote.categoryCode !== category.definition.code
       || core.workspaceCategoryCode !== category.definition.code || config.categoryCode !== category.definition.code
       || core.profile.tenantId !== tenantId || core.profile.categoryCode !== category.definition.code

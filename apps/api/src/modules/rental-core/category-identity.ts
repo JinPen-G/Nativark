@@ -17,6 +17,12 @@ export function readRentalCategoryCode(value: unknown): RentalCategoryCode {
   return legacy;
 }
 
+/** Scanners keep malformed sources in their existing compatibility issue lists. */
+export function matchesRentalCategoryCode(value: unknown, canonicalCode: string): boolean {
+  try { return readRentalCategoryCode(value) === canonicalCode; }
+  catch { return false; }
+}
+
 export function rentalCategoryStorageCode(value: string): RentalCategoryCode {
   if (!isRentalCategoryCode(value)) throw new BadRequestException("经营品类编码格式无效");
   return value;
@@ -35,12 +41,13 @@ export async function rentalCategoryIdentityOptions(db: IdentityReader, tenantId
     orderBy: { code: "asc" }
   });
   return rows.map((row) => {
+    const code = readRentalCategoryCode(row.code);
     const version = row.recommendedVersion;
     const body = version?.definition;
     const name = version && ["published", "legacy_baseline"].includes(version.status) && body &&
-      typeof body === "object" && !Array.isArray(body) && body.code === row.code &&
+      typeof body === "object" && !Array.isArray(body) && body.code === code &&
       typeof body.name === "string" && body.name.trim() ? body.name : row.name;
-    return { code: row.code, name };
+    return { code, name };
   });
 }
 

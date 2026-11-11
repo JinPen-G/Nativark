@@ -8,6 +8,7 @@ import { PrismaService } from "../database/prisma.service";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
 import { assertCategoryAdoptionAllowed, categoryScopeAllows } from "./category-governance-policy";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
+import { readRentalCategoryCode } from "./category-identity";
 import { prepareCategoryAdoptionRecords } from "./category-adoption-records";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
 import { readCategoryAdoptionCompatibility } from "./category-adoption-compatibility-reader";
@@ -59,13 +60,14 @@ export class CategoryAdoptionPreparationService {
     return this.transaction(user, async tx => {
       const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId: user.tenantId, status: "ACTIVE" }, select: { categoryCode: true, categoryVersionId: true, categoryAdoptionRevision: true } });
       if (!workspace?.categoryVersionId) throw new ConflictException("经营空间不可用或尚未绑定版本");
+      const categoryCode = readRentalCategoryCode(workspace.categoryCode);
       const versions = await tx.rentalCategoryVersion.findMany({ where: { categoryCode: workspace.categoryCode, status: { in: ["published", "legacy_baseline"] }, id: { not: workspace.categoryVersionId } }, include: { policy: true }, orderBy: [{ publishedAt: "desc" }, { id: "asc" }] });
       // Opening policy governs NEW spaces, not existing-space upgrades/restores.
       // Never return definitions, pilot tenant lists, drafts or governance audits.
-      return { categoryCode: workspace.categoryCode.toLowerCase(), sourceVersionId: workspace.categoryVersionId, sourceRevision: workspace.categoryAdoptionRevision, operation,
+      return { categoryCode, sourceVersionId: workspace.categoryVersionId, sourceRevision: workspace.categoryAdoptionRevision, operation,
         versions: versions.filter((row) => row.policy && categoryScopeAllows(row.policy[`${operation}Scope`], row.policy[`${operation}TenantIds`], user.tenantId)).map((row) => {
           try {
-            resolveRentalCategoryVersionBody(row, workspace.categoryCode.toLowerCase());
+            resolveRentalCategoryVersionBody(row, categoryCode);
             return { id: row.id, versionLabel: row.versionLabel, definitionExecutable: true };
           } catch (error) {
             return { id: row.id, versionLabel: row.versionLabel, definitionExecutable: false, unavailableReason: error instanceof Error ? error.message : "目标版本无法执行，请联系平台管理员" };
@@ -97,7 +99,7 @@ export class CategoryAdoptionPreparationService {
       tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
       tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
     ]);
-    const code = workspace.categoryCode.toLowerCase();
+    const code = readRentalCategoryCode(workspace.categoryCode);
     const definition = resolveRentalCategoryVersionBody(target, code);
     const sourceDefinition = resolveRentalCategoryVersionBody(source, code);
     const records = { groups: groups.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })), assets: assets.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })) };
@@ -180,7 +182,7 @@ export class CategoryAdoptionPreparationService {
       const operation = query.operation ?? "upgrade";
       const { workspace, workspaceId } = await this.authorizedWorkspace(tx, user, targetId, operation);
       const target = await tx.rentalCategoryVersion.findUnique({ where: { id: targetId } });
-      resolveRentalCategoryVersionBody(target, workspace.categoryCode.toLowerCase());
+      resolveRentalCategoryVersionBody(target, readRentalCategoryCode(workspace.categoryCode));
       const preparation = await tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } });
       const envelope = preparation?.patches as PreparationEnvelope | undefined;
       const stale = Boolean(preparation && (preparation.sourceRevision !== workspace.categoryAdoptionRevision || envelope?.sourceVersionId !== workspace.categoryVersionId));

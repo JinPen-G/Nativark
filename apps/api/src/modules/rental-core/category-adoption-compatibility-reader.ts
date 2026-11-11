@@ -14,6 +14,7 @@ import { categoryAdoptionFulfillmentReferences } from "./category-adoption-fulfi
 import { workspaceCapabilityRequirements } from "./category-capability-conditions";
 import { categoryAdoptionInspectionFieldsValid } from "./category-adoption-business-compatibility";
 import { projectInspectionTemplatePolicy } from "./rental-inspection-template-snapshot";
+import { matchesRentalCategoryCode } from "./category-identity";
 
 /** Shared transaction reader for preparation and the eventual adoption gate.
  * Caller holds the category/policy -> space mutex; records must be freshly read
@@ -73,7 +74,7 @@ export async function readCategoryAdoptionCompatibility(
       const inactive = target.conditionalCapabilities.map(row => row.code).filter(code => !conditionalReadiness.required.includes(code));
       // Use the same projection as quote/fulfillment snapshots. Default required
       // fields are not appended to a tenant template, and old facts stay intact.
-      const templates = inspections.filter(row => row.enabled && row.categoryCode.toLowerCase() === target.code &&
+      const templates = inspections.filter(row => row.enabled && matchesRentalCategoryCode(row.categoryCode, target.code) &&
         ["pickup", "return"].includes(row.stage) && categoryAdoptionInspectionFieldsValid(row.fields, true))
         .map(row => projectInspectionTemplatePolicy(target, { ...row, tenantId,
           categoryCode: target.code as RentalCategoryCode, stage: row.stage as "pickup" | "return",

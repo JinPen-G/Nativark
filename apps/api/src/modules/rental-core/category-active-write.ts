@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Prisma } from "@prisma/client";
 import { RentalCategoryCode, type RentalCategoryDefinition, type RentalInventoryMode } from "@rental-os/shared";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
+import { readRentalCategoryCode } from "./category-identity";
 import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
 
@@ -56,7 +57,7 @@ export async function lockActiveCategoryBinding(
   if (expected && (workspace.categoryVersionId !== expected.categoryVersionId || workspace.categoryAdoptionRevision !== expected.adoptionRevision)) {
     throw new ConflictException("经营空间品类版本已变化，请刷新后重新保存");
   }
-  const code = workspace.categoryCode.toLowerCase();
+  const code = readRentalCategoryCode(workspace.categoryCode);
   if (categoryCode && code !== categoryCode) throw new ConflictException("经营配置与经营空间品类不一致");
   const version = await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } });
   const definition = resolveRentalCategoryVersionBody(version, code);

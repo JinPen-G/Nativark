@@ -1,4 +1,4 @@
-import { rentalCategoryStorageCode } from "./category-identity";
+import { readRentalCategoryCode, rentalCategoryStorageCode } from "./category-identity";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
@@ -562,14 +562,14 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         AND o.quoteId = ${parent.quoteId} AND o.updatedAt = ${parent.updatedAt} LIMIT 1`);
     const row = rows[0];
     if (rows.length !== 1 || row.orderId !== parent.id || row.tenantId !== tenantId || row.workspaceId !== workspaceId
-      || row.quoteId !== parent.quoteId || row.categoryCode.toLowerCase() !== parent.categoryCode.toLowerCase()
+      || row.quoteId !== parent.quoteId || readRentalCategoryCode(row.categoryCode) !== readRentalCategoryCode(parent.categoryCode)
       || row.categoryVersionId !== parent.categoryVersionId) throw new ConflictException("原报价检查依据关联缺失或读取期间变化");
     if (row.templates === null || row.templates === undefined) return undefined;
     let templates = row.templates;
     if (typeof templates === "string") {
       try { templates = JSON.parse(templates); } catch { throw new ConflictException("原报价检查快照JSON不可读"); }
     }
-    return { quoteId: row.quoteId, categoryCode: row.categoryCode.toLowerCase(), categoryVersionId: row.categoryVersionId ?? undefined, templates };
+    return { quoteId: row.quoteId, categoryCode: readRentalCategoryCode(row.categoryCode), categoryVersionId: row.categoryVersionId ?? undefined, templates };
   }
 
   /** Bounded explanation metadata only; no allocations' asset/contact JSON,

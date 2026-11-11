@@ -11,6 +11,7 @@ import { getRequestIdentity } from '../../common/request-identity';
 import type { BusinessContext, RentalBusinessService } from './rental-business.service';
 import { requestFingerprint } from './rental-idempotency.repository';
 import { lockCategoryContext } from './category-active-write';
+import { readRentalCategoryCode } from './category-identity';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -69,7 +70,7 @@ export class BoundRuleDraftService {
     const source = await tx.rentalRuleVersion.findFirst({ where: { id: command.targetId, tenantId: scope.tenantId,
       workspaceId: scope.workspaceId, version: command.version } });
     if (!source || source.id !== command.targetId || source.tenantId !== scope.tenantId || source.workspaceId !== scope.workspaceId
-      || source.version !== command.version || source.categoryCode.toLowerCase() !== command.categoryCode) throw new ConflictException('原规则对象或版本已变化');
+      || source.version !== command.version || readRentalCategoryCode(source.categoryCode) !== command.categoryCode) throw new ConflictException('原规则对象或版本已变化');
     const versions = await tx.rentalRuleVersion.findMany({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
       select: { version: true }, orderBy: { version: 'asc' }, take: 1001 });
     if (versions.length > 1000) throw new ServiceUnavailableException('原规则版本集合超出完整读取上限');
