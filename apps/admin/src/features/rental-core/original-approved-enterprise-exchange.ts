@@ -1,7 +1,7 @@
 /** Merchant execution retains an opaque original K before its single dispatch.
  * Core receipts and the refreshed original change retire that reference. */
 import { useEffect, useRef, useState } from "react";
-import type { ApiResult, ExecuteApprovedRentalExchangeRequest, RentalApprovedExchangeOriginal, RentalApprovedExchangeReceipt } from "@rental-os/shared";
+import { enterpriseMerchantExchangeChoicesSnapshot, type ApiResult, type ExecuteApprovedRentalExchangeRequest, type RentalApprovedExchangeOriginal, type RentalApprovedExchangeReceipt, type RentalOrder } from "@rental-os/shared";
 import { http } from "@/api/http";
 import { currentSessionSignal } from "@/app/queryClient";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -81,6 +81,19 @@ export function useOriginalApprovedEnterpriseExchange(orderId: string, operation
     } finally { busy.current = false; publish(); }
   };
   return { identity, permitted, pending, busy: busy.current, storageError, current,
+    readChoices: async (order: RentalOrder, signal?: AbortSignal) => {
+      current();
+      const expected = { orderId, workspaceId: auth.currentWorkspaceId!, corporateCustomerId: order.membershipSnapshot?.corporateCustomerId!,
+        applicantCustomerId: order.membershipSnapshot?.personalCustomerId!, expectedOrderUpdatedAt: order.updatedAt };
+      if (order.id !== orderId || ![expected.workspaceId, expected.corporateCustomerId, expected.applicantCustomerId].every(validId)) throw new Error("原换货订单与企业使用人不可核对");
+      const response = await http.request<ApiResult<unknown>>({ method: "get",
+        url: `/membership/enterprise-workflows/orders/${encodeURIComponent(orderId)}/exchange-execution-choices`,
+        signal: AbortSignal.any([currentSessionSignal(), controller.current.signal, ...(signal ? [signal] : [])]) });
+      current();
+      const value = enterpriseMerchantExchangeChoicesSnapshot(response.data.data, expected);
+      if (!value) throw new Error("原换货材料与本单、企业或本人不一致");
+      return value;
+    },
     run: (prepare: () => Promise<Omit<ExecuteApprovedRentalExchangeRequest, "operationKey">>, afterRead: (value: RentalApprovedExchangeReceipt) => Promise<void>) => exclusive(async () => {
       if (readReference()) throw new Error("请先核对原换货执行键");
       const input = structuredClone(await prepare()); current();

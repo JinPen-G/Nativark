@@ -8,6 +8,19 @@ const ref = (name: string): SchemaObject => ({ $ref: `#/components/schemas/${nam
 const object = (properties: Record<string, SchemaObject>, required = Object.keys(properties)): SchemaObject => ({ type: "object", properties, required, additionalProperties: false });
 const change = { operationKey: { type: "string", minLength: 1, maxLength: 128 } as SchemaObject, expectedRevision: { type: "integer", minimum: 0 } as SchemaObject, reason: { type: "string", minLength: 1, maxLength: 500 } as SchemaObject };
 export const ENTERPRISE_EXCHANGE_SCHEMAS: Record<string, SchemaObject> = {
+  EnterpriseMerchantExchangePreparation: object({ preparationId: reference, createdAt: date, state: { type: "string", enum: ["waiting_consent", "consent_unavailable", "ready"] },
+    inspection: ref("RentalExchangeInspectionCustomerMaterial"), consentConfirmedAt: date,
+    binding: object({ approvalId: reference, expectedApprovalRevision: { type: "integer", minimum: 3 }, expectedOrderUpdatedAt: date,
+      preparationId: reference, preparationHash: { type: "string", pattern: "^[a-f0-9]{64}$" }, consentId: reference, consentOperationKey: change.operationKey })
+  }, ["preparationId", "createdAt", "state", "inspection"]),
+  EnterpriseMerchantExchangeChoices: object({ orderId: reference, orderNo: string, workspaceId: reference, corporateCustomerId: reference,
+    applicantCustomerId: reference, expectedOrderUpdatedAt: date,
+    approvals: { type: "array", maxItems: 20, items: object({ approval: ref("EnterpriseExchangeApprovalView"),
+      state: { type: "string", enum: ["pending", "expired", "consumed", "rejected", "withdrawn", "waiting_expense", "waiting_inspection", "ready"] },
+      preparations: { type: "array", maxItems: 20, items: ref("EnterpriseMerchantExchangePreparation") } }) },
+    coverage: object({ state: { type: "string", enum: ["captured", "limited"] }, limit: { type: "integer", enum: [20] },
+      approvals: { type: "integer", minimum: 0, maximum: 20 }, preparations: { type: "integer", minimum: 0, maximum: 20 }, consents: { type: "integer", minimum: 0, maximum: 20 } })
+  }),
   ConfirmEnterpriseExchangeExpense: object({ ...change, expectedRevision: { type: "integer", minimum: 1 }, confirm: { type: "boolean", enum: [true] } }),
   EnterpriseExchangeConfirmationCommandResult: object({ id: reference, orderId: reference, workspaceId: reference, applicantCustomerId: reference, operationKey: change.operationKey,
     confirmedAt: date, revision: { type: "integer", minimum: 1 }, scope: { type: "string", enum: ["expense_only_not_inspection_or_execution"] } }),
