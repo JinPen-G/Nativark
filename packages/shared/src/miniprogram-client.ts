@@ -7,9 +7,12 @@ export { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_FIELD_IDS_DRAFT,
 export { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema,
   aiClientHostCapabilitiesSchema, aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
+  aiClientTaskEventsReadRequestSchema, aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema,
   aiClientTaskModelControlResponseSchema, aiClientTaskModelResultReadResponseSchema,
   aiClientTaskInputReadResponseSchema, aiClientTaskInputSubmissionRequestSchema,
-  aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema } from './ai-client-entry-draft-schemas';
+  aiClientTaskInputSubmissionReceiptSchema, aiClientTaskInputReceiptReadResponseSchema,
+  aiClientTaskCancelRequestSchema, aiClientTaskCancelReceiptSchema, aiClientTaskCancellationObservationSchema,
+  aiClientTaskInputCancellationReceiptSchema, aiClientTaskUnstartedCancellationReceiptSchema } from './ai-client-entry-draft-schemas';
 export { AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema, aiClientQuoteResultReadResponseSchema } from './ai-client-quote-draft';
 export { AI_CLIENT_QUOTE_BOOKING_VERSION, aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,

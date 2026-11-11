@@ -19,9 +19,12 @@ const exportsAllowed = Object.freeze([
   'isAiTaskInputContractDraft', 'isAiTaskInputSubmissionDraft',
   'aiClientOrderMaterialRequestSchema', 'aiClientOrderMaterialReceiptSchema',
   'aiClientTaskReadRequestSchema', 'aiClientTaskCreationReceiptSchema',
+  'aiClientTaskEventsReadRequestSchema', 'aiClientTaskSnapshotReadResponseSchema', 'aiClientTaskEventsReadResponseSchema',
   'aiClientTaskModelControlResponseSchema', 'aiClientTaskModelResultReadResponseSchema',
   'aiClientTaskInputReadResponseSchema', 'aiClientTaskInputSubmissionRequestSchema',
-  'aiClientTaskInputSubmissionReceiptSchema', 'aiClientTaskInputReceiptReadResponseSchema'
+  'aiClientTaskInputSubmissionReceiptSchema', 'aiClientTaskInputReceiptReadResponseSchema',
+  'aiClientTaskCancelRequestSchema', 'aiClientTaskCancelReceiptSchema', 'aiClientTaskCancellationObservationSchema',
+  'aiClientTaskInputCancellationReceiptSchema', 'aiClientTaskUnstartedCancellationReceiptSchema'
 ]);
 const inside = (root, file) => {
   const relative = path.relative(root, file);

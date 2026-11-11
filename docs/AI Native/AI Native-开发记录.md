@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-observation-native-contracts-20261111"></a>
+## 客户原取消与事件观察的小程序合同（2026-11-11）
+
+从已上传的 `9350352c9e3194d618620c4f20ca3a081755a9b5` 继续，补齐客户取消的五项既有schema、原事件读取请求及快照/事件响应的[正式窄出口](../../packages/shared/src/miniprogram-client.ts)、本端声明和[受控builder](../../scripts/miniprogram-ai-runtime.cjs)。两个新响应校验直接消费原 `AI_TASK_OBSERVATION_DRAFT_SCHEMAS`，保留 `reset_required`；原报价有界叶校验抽到[共用实现](../../packages/shared/src/ai-leaf-schema-validation.ts)，没有复制客户DTO或引入另一个模型/事件驱动。消费者仍须绑定原taskId、原after、严格递增和末游标，合法空洞不表示丢失。
+
+一组纯内存SDK冒烟 `node --no-compilation-cache -`（session `77617`）exit0：45项出口，101,066字节，SHA256 `55a6f26833b431eb7d23f35937cbd6358a9545431951f3aa33b9cd24920ea7c3`；无URL、TextEncoder、Buffer、process、window、document、structuredClone仍可载入。原快照、合法空洞事件页及reset通过；未知事件/额外字段/无效日期/请求注入taskId拒绝。当前TypeScript5.9.3五个相关根及传递依赖0诊断（session `85321`，exit0）；源码AST比对证明移出的原校验函数体和三个辅助声明未变，函数体SHA256为 `ad93db30bc53ca596e542a5f0c3d67e32f4970e3885a5a7e46a4f772aaac4f15`。SDK及类型验证沿原offline preload，审计0、任务临时目录从未创建，无新增测试文件、依赖或物理构建产物。
+
+本阶段只交付客户取消/观察所需公共合同；两端实际消费者由AI-dev2沿原任务继续。复核AIN-06/21/22及相关ENTRY原门槛，未跨G4，不增加100%任务；真实Guard全链、数据库、浏览器/微信及供应商证据不能由此替代。
+
 <a id="ain-client-task-native-contracts-20261111"></a>
 ## 原订单解释与澄清的小程序合同出口（2026-11-11）
 

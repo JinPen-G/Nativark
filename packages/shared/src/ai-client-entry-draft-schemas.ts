@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT,
+  type AiTaskSnapshotDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft } from './ai-task-draft';
+import { AI_TASK_OBSERVATION_DRAFT_SCHEMAS } from './ai-task-observation-draft-schemas';
+import { validateAiLeafSchemaValue } from './ai-leaf-schema-validation';
 import { AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
 import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft } from './ai-task-input-draft';
@@ -143,6 +146,12 @@ export const aiClientTaskInputReceiptReadResponseSchema = z.discriminatedUnion('
 export const aiClientTaskEventsReadRequestSchema = aiClientTaskReadRequestSchema.extend({
   after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u), limit: z.number().int().min(1).max(100)
 }).strict();
+/** Existing task projections, not another client DTO. The caller still binds
+ * taskId and the original requested cursor before accepting a page. */
+export const aiClientTaskSnapshotReadResponseSchema = z.custom<AiTaskSnapshotDraft>(value =>
+  validateAiLeafSchemaValue(AI_TASK_OBSERVATION_DRAFT_SCHEMAS.AiTaskSnapshotDraft, value, AI_TASK_OBSERVATION_DRAFT_SCHEMAS));
+export const aiClientTaskEventsReadResponseSchema = z.custom<AiTaskEventPageDraft | AiTaskEventResetDraft>(value =>
+  validateAiLeafSchemaValue(AI_TASK_OBSERVATION_DRAFT_SCHEMAS.AiTaskEventsObservationDraft, value, AI_TASK_OBSERVATION_DRAFT_SCHEMAS));
 export const aiClientOrderExplanationReadRequestSchema = z.object({ orderId: id,
   question: z.enum(['status', 'fees']).default('status') }).strict();
 export const aiClientSourceReadRequestSchema = z.object({ materialRef: z.string().uuid() }).strict();

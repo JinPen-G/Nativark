@@ -20,12 +20,12 @@
 
 | 位置 | 当前职责 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-15 报价再准备、TaskHumanApproval/任务中心公共消费者、AI 专项契约/装配和四册；负责独立核接、提交推送与每两项合main |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | settings首次准入两文件已由AI-RD固定并独立通过原HTTP全生命周期；转会员姓名普通用户入口的member:manage与system:params:manage耦合缺口，先明确私有写入范围，不改已交文件。公共装配/TaskCenter/shared/四册归AI-RD |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 原报价13文件已交AI-RD并完成核接；新增客户task API/session/网站workbench，接小程序原workbench和本人order页实际attach/show，原模型开始/等待输入/提交/继续/结果均沿creationKey+materialRef。当前先用原固定订单解释目标，不私加goal/question/messages或taskId/run，不抢写已交13文件；shared/mini正式runtime出口归AI-RD |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 客户原问题/后继Run准入与释放后时间结账、通知原历史读取、TaskHumanApproval/TaskCenter、公共契约/装配和四册；负责独立核接、提交推送与每两项合main |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 会员姓名原member:manage链及个人会员列表/详情入口：navigation.tsx、PersonalMembershipPage、MemberNameEntry和MemberNameFlow；按原customerId显式定位并服务端复核。已交通知三文件保持冻结；公共DTO/shared/TaskCenter/四册归AI-RD |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 客户订单解释/澄清两端API/session/workbench、原取消消费者及父挂接、客户事件读取和cursor-adapter合法空洞。只用原creationKey+materialRef及已观察Task，未知只读原收据；阶段结束交完整固定blob。公共后端/shared/mini正式runtime及四册归AI-RD |
 | `D:/工作文件/rental-OS`／`main` | 仅作跨专项整合入口；当前PM处理环境/治理修复，合并串行；各专项开发继续，保留所有已核及未核WIP |
 
-三人的本轮持续目标均已建立为 active。阻塞或完成须立即给出具体入口、原任务号、固定对象与实际结果，由 AI-RD 决定解决者或接续任务。shared 总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule 等跨专项公共文件须与 PM 协调唯一作者；Core交易、资金和品类事实由 Core 专项提供，AI 不重建这些业务权威。
+三人按负责人明确恢复的原目标持续施工，工具旧失败/旧goal标记不代替实际执行状态。助手只在需要负责人决策的真实阻塞、公共符号冲突或完整阶段冻结交付时合并发送简短消息；不重复心跳、过程日志和旧证据，可自行解决的失败自行处理。shared总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule等跨专项公共文件须与PM协调唯一作者；企业端已获准的ClientApiService.readOrderSubmission第二次读取、AppModule/OpenAPI企业reader/controller/三条GET及后台企业政策材料片段保持其归属。Core交易、资金和品类事实由Core专项提供，AI不重建这些业务权威。
 
 每个完成阶段立即提交并推送 `codex/ai-native`；累计新增两项正式任务达到100%后，AI-RD 将核定的固定提交合入main并推送。按原任务表中的唯一 AIN/ENTRY 任务ID计数，不把两个patch或冒烟用例当两项任务。合并前核对固定来源SHA、预期main SHA、影响文件和完成任务ID，确认无其他集成或索引争用；有争用只暂停该次集成。当前本轮新增完整任务为0，待合批次为空，距下次批次还需2项。
 
@@ -35,7 +35,7 @@
 2. **原AIN-13/ENTRY-05人工交接及只读政策：** 订单v2事实/来源消费者已核接，ordinary-read现在允许当前本人按原业务资源读权明确续期三项读取政策，原manager管理路径保持独立。创建过期/执行关闭不挡合法原读；无必要资源依据仍拒绝。没有在读取时自动种政策或授模型/Core执行；原CAS、TTL、三项独立收据及partial/unknown不重发保持。本片原Controller→实际API/session链已独立验证，真实浏览器与整项门槛仍未代验。
 3. **原AIN-25：** 真实首字/首卡组件及关闭、重开、React效果重放代码已回收，一组离线宿主冒烟通过；真实浏览器可见性、完整场景、容量/SLO、队列/背压/公平性/告警仍需原门槛。客户端报告不成为经营或计费事实；原11同账与累计资源要求保持。
 4. **其余原任务：** 05→06→07完整供应商/能力/往返及故障前置、12/13～16完整Agent和多角色资料隔离、17～28可靠事件/知识隐私/员工与平台治理/组合灰度及交付缺口均保留，详见[原28项摘要](<AI Native-开发记录.md#原28项当前实施摘要>)和[完整未完原文](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。不重开已有100%条目，不新增Reserved或边缘能力。
-5. **客户与ENTRY：** 原本人报价到booking_quote的标准HTTP桥、正式schema及mini受控runtime已核接；[两端消费者](<AI Native-开发记录.md#ain-client-quote-consumers-20261111>)已上传 `8bac24307`，生成草稿/确认进入原页、原键恢复及只读/执行分离经实际Core源码链保持报价新增1张、订单1张。后续由dev2接原模型/等待输入实际workbench；Root已核order material准备只绑定orderId、模型仅消费原材料JSON与服务端固定指令，没有status/fees目标字段，先保持固定订单解释。[所需37项mini正式合同出口](<AI Native-开发记录.md#ain-client-task-native-contracts-20261111>)及88,768字节受控bundle已通过内存验证，客户端可继续接入。入口快照不授业务权，unknown只读原定位；六不可用Action、其他audience、匿名/企业、跨surface重绑定、媒体弱网和真实设备仍需原范围。详见[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)，不以局部绿色加分。
+5. **客户与ENTRY：** 原本人报价到booking_quote的标准HTTP桥、正式schema及mini受控runtime已核接；[两端消费者](<AI Native-开发记录.md#ain-client-quote-consumers-20261111>)已上传 `8bac24307`，生成草稿/确认进入原页、原键恢复及只读/执行分离经实际Core源码链保持报价新增1张、订单1张。dev2继续原模型/等待输入、取消实际workbench及事件读取；Root已核order material准备只绑定orderId，保持原固定订单解释。[mini原取消/事件合同](<AI Native-开发记录.md#ain-client-observation-native-contracts-20261111>)现45项出口、101,066字节内存bundle通过，不依赖浏览器/Node全局。客户原问题/后继执行及原时间结账修复由Root核接，尚未以局部绿色宣布公开全链或整项通过。六不可用Action、其他audience、匿名/企业、跨surface重绑定、媒体弱网和真实设备仍见[ENTRY摘要](<AI Native-开发记录.md#entry-增量实施摘要>)。
 6. **当前核心准入接线：** 初始CAS参加者已接模型明确start、新规则R1准备和新材料关联任务；ordinary-read、有效WAITING_INPUT、原选单订单批准/继续/再准备及原notifications确认等待的3/5项准入均已完成相应实际消费核接。TaskCenter明确写先核当前本人原来源，纯读取不签；真实过期、已消费或unknown不重做。settings首次start现已接原创建/change收据，零预置目标政策的公开Controller/Guard链通过8+3+5 CAS及一次Core设置提交，见[本片记录](<AI Native-开发记录.md#ain-settings-initial-lifecycle-20261111>)。下一缺口是后台原通知变更准备/创建/start消费者，沿既有开业/配置入口接入；会员普通姓名入口由dev1续做，不据服务端片宣布整个AIN-14/16完成。
 
 以上保留原任务范围、编号、依赖和验收；恢复功能施工须沿负责人当次授权。每个完整核心切片只做必要定向冒烟和类型检查，跨原G1～G4门槛后维护唯一任务表；未跨档的缺口留记录，不能把合并或档案数量当100%。
