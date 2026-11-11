@@ -12,16 +12,17 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`dfb65aabbf5461e8750d30a7f4c67df9dd0497f6`；换货执行/原收据固定源码`0947a6eb82cd1e725073131dc11f78a0fc94bf49`已普通推送核远端并交企业作者，见[当前阶段](<Rental Core-开发记录.md#approved-exchange-core-port-20261111>)。照片冻结三份本任务WIP保留工作区另片，不夹入固定源码；暂存验证已退出删除，无merge/cherry-pick。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`2a2c9ae647c55343fb6f39a6e73e12e7489c0c54`；企业作者消费固定换货执行/原收据`0947a6eb82cd1e725073131dc11f78a0fc94bf49`，本树照片冻结及本人读取接点见[当前阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。文件限定调用5组/API类型通过，原整组失败及本人读取/HTTP/DI/浏览器、真实事务/存储未验边界保留；暂存已退出删除，无merge/cherry-pick。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
+- 旧阶段25份清单唯一位于主树 `D:/工作文件/rental-OS/output/category-governance`，当前本树26处旧相对引用因此失效，另2处历史附件缺失保留；本片新证据在本树同名目录。读取旧证据沿主树唯一位置，不复制副本；本次检查只证明新增链接/锚点无问题，见[阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。
 - PM固定维护`6b2dd0a`已在本树整合；当前受管Shared202文件、固定`0947a6eb8`的API863文件已核哈希，未混入照片WIP。客户小程序原242文件/22页面结果、31项原冒烟17过/14失败、采用/配置读取及其他原失败保留，不计CLOSE进度。当前构建及原五项3过/2失败见[本片记录](<Rental Core-开发记录.md#approved-exchange-core-port-20261111>)，企业读取/客户前片沿原证据。公共工具只读使用，同树两个包别名不跨树共享；暂存已删除。真库/宿主/供应商仍未验。
 
 ## 3. 下一入口与原缺口
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。
-3. 企业作者正在消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)。Core商户执行与客户端 `material/confirm/original` 保持各自原身份；企业作者负责批准参与者、本人明确提交及其服务/页面，公共登记/DI窗口由PM指定。照片未冻结保持不可接受；下一口是既有专用文件来源的内容冻结和按原目标核对，不等待真库才交已验证端口，原K/C不能换键重做。源码/类型、11组受限调用、原五项3过/2失败和静态契约边界见[当前记录](<Rental Core-开发记录.md#approved-exchange-core-port-20261111>)。
+3. 企业作者正在消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)。Core商户执行与客户端 `material/confirm/original` 保持各自原身份；企业作者负责批准参与者、本人明确提交及其服务/页面，公共登记/DI窗口由PM指定。本树已有原内容冻结、只核对原目标和本人受权字节读取接点；下一口是实际Core完成应用及本人照片正常读取、HTTP/DI/消费者核验，见[照片阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。未冻结照片仍不可接受，原K/C不能换键重做。原11组调用的精确出处、参与者替身边界及旧失败保留，不替代企业实际参与者或真实验收。
 4. ECP-09/10的[Core当前空间读端口](../../apps/api/src/modules/rental-core/rental-enterprise-read.port.ts)及原48行共享投影仍归Core；PM已按固定`527e731c8`逐blob核实，声明企业17f4f9887及前置已收回并核GitHub main `917a92a1a41caadc1180e8c8b2c8dc0b596c748f`，未取活动换货代码。其DI/登记/消费者已有源码和离线结果，真实HTTP、完整ECP仍待验；本树不追活动main。历史跨空间、全账户其他空间、正式账单/核定到期及保证金专用读源仍不可用，不另算账。企业 `readerCursor/readerAudit` 仅其既有审计段，不占本片租赁合同。按负责人明确交接给企业可消费固定SHA；不以他树环境许可运行本树服务。
 5. 非关键路径CLOSE依原任务留后续，保持用量/免赔、特殊结案、停租、车辆后发现费用、真实保证金及安全的完整门槛。历史CORE-019片不覆盖存量账务、企业原回款冲销或真实供应商保证金。
 

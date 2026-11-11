@@ -4,6 +4,29 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="exchange-photo-freeze-20261111"></a>
+
+## 换货照片的原内容冻结与核对接点（2026-11-11）
+
+本片从已回读 GitHub 的 `2a2c9ae647c55343fb6f39a6e73e12e7489c0c54` 接续，在唯一 `codex/rental-core` 工作树收口原照片 WIP；没有合 main、修改企业内部实现、公共登记或正式任务。源文件哈希与下列行为及类型清单一致，按本分支阶段提交固定。原 CAT-GOV/CLOSE/ECP 完整门槛及百分比保持。
+
+[文件生产者](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)复用原 v2 的 `blob` 暂存路径和冻结格式：读取有界实际字节并验证图片，先同事务保存唯一冻结目标，再向该目标 PUT 并读回原内容摘要。失应答后的 `reconcileExchangeInspectionUpload` 只 GET 已保存目标，不重读暂存、不重传或分配新目标；目标缺失仍不可用。冻结证据同时核对来源、摘要、大小、类型和尺寸，读取期间文件/会话或配置变化拒绝。旧非受控暂存路径在读取字节前阻断，原记录不重写。
+
+[Core 原来源读取](../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.read.ts)保留初始绑定，并识别同一原完成占用对应的冻结中/已完成文件；[完成服务](../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts)仅首次获确认的占用执行暂存读取和 PUT，其余调用核对原目标。正式完成、Core 来源结果与当前订单修订仍在原事务复验。[本人同意服务](../../apps/api/src/modules/rental-core/rental-exchange-inspection-consent.service.ts)新增 `photo` 接点，只允许原本人会话、当前订单和指定准备哈希中的已接受照片，文件 IO 前后复核原客户、材料、订单及照片来源；只返回有界字节和摘要，缺文件供应拒绝。该本人读取接点尚无正常 HTTP/DI/页面消费证据，不写全链通过。
+
+| 验证 | 实际结果与边界 |
+| --- | --- |
+| 既有文件 fixture 的限定调用 | 5组退出0：一次 GET/PUT/GET 冻结、过期后只读原目标、完成与精确字节/坏元数据拒绝、PUT 成功但失应答的原目标恢复、缺目标不另写。实际 FileStorageRuntimeService；原内存文件/会话/配置/事务及对象传输是明确替身，未证明真实存储或事务。见[清单](../../output/category-governance/exchange-photo-freeze-bounded-2-20261111.json) |
+| 当前 API 类型 | 原 tsconfig 的 `--noEmit --incremental false --pretty false` 退出0，四份源码哈希与行为清单一致。见[类型](../../output/category-governance/exchange-photo-api-types-2-20261111.json)。API 受管构建仍为原 `0947a6eb8` 的863文件，不含本片源码，不将旧包作新行为证据 |
+| 原文件生命周期整组 | `node tests/file-storage-lifecycle.test.cjs` 退出1，`:567` 在会员替身缺合法空间品类时先报“已存品类编码缺少兼容解释”，尚未运行后面的专用照片断言。原失败唯一位于主树 `output/category-governance/exchange-photo-file-lifecycle-original-2-20261111.json`；此前证据目录不存在的保存失败不计验证通过。测试/断言未改 |
+| 首次限定调用失败 | 原专用计划使用文件名暂存键，不符合原冻结校验器的 `blob` 格式，导致冻结后回读拒绝。见[原失败](../../output/category-governance/exchange-photo-freeze-bounded-20261111.json)。修复生产者路径后仅复验相关调用，没有放松原冻结校验或修改夹具 |
+
+以上 Node 沿原离线 preload、固定不可用数据库 URL 和单一任务暂存执行，audit 均为0；证据先保存，随后暂存删除，验证进程已退出。既有文件 fixture SHA-256 保持 `0c4a7a211d869575ca88c9a4988a16cef85698861438acd77d72177003089d69`。没有读取环境、启服务、连接真实库/存储、执行迁移或开放生产。Core 完成应用的真实事务、本人照片正常读取/HTTP/DI和浏览器消费仍须原条件验证。
+
+四份记录/接续的首轮定向链接检查退出0，检查300链接、本片8链接及6个照片阶段锚点；与固定开工版本逐项新增问题0，见[文档清单](../../output/category-governance/exchange-photo-docs-20261111.json)。当前本树仍有28处旧链接缺失：26处指向25份已集中于主树 `D:/工作文件/rental-OS/output/category-governance` 的旧清单，逐个核实主树文件存在；另2处历史附件缺失保留。旧清单不复制回工作树填绿，按此唯一位置读取，本片新证据仍在本树同名目录。补充唯一位置后的9个本片链接/8个阶段锚点另作最终核对；上述结果不等于四册无缺失或完整文档验收。
+
+原11组 Core限定调用没有另造测试文件：fixture 来自[既有分段计价测试](../../tests/rental-exchange-segment-pricing.test.cjs)，原命令保留在会话日志 `C:/Users/Penn/.codex/sessions/2026/11/09/rollout-2026-11-09T12-28-01-01a1be90-2a5b-77a2-a995-66f3d56e96f2.jsonl` 的21325～21690行。初始化 Call ID `call_zEFTQ6XYui52iwluruhJtMjd`，实际执行 `call_JnWueM6RWqsHPxqnP0SUHINi`，原K/TTL回读 `call_L6GHSu9L1uIljNOWsUkHup30`，汇总 `call_Cqw0R96teXxkcq8Ci3eGEg43`；原交互会话9008已退出，不能当活进程重启。企业参与者在该原调用中是明确替身，企业作者需消费实际 `prepare/commit/replay`，不将其当企业完整业务或独立审查证据。
+
 <a id="approved-exchange-core-port-20261111"></a>
 
 ## 企业换货执行与原收据 Core 接点（2026-11-11）
