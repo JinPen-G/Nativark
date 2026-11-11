@@ -111,11 +111,12 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     return parsed;
   }
 
-  private async access(lease: AiTaskRunnerLease) {
+  private async access(lease: AiTaskRunnerLease, accountingOnly = false) {
     lease = structuredClone(lease);
     if (!lease || !id.max(36).safeParse(lease.taskId).success || !id.max(36).safeParse(lease.runId).success || !id.safeParse(lease.holderId).success
       || !/^[1-9][0-9]{0,19}$/u.test(lease.fencingToken) || !Number.isSafeInteger(lease.revision) || lease.revision < 1) throw denied();
-    const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, 'write'));
+    const operation = accountingOnly && lease.expiresAt === '' ? 'settle_released_run' : 'write';
+    const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, operation));
     if (!access?.scopeId || access.taskWhere?.id !== lease.taskId || !access.bindingKey) throw denied();
     return access;
   }
@@ -123,7 +124,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
   private async held(db: Pick<PrismaClient, 'aiTask' | 'aiRun'>, lease: AiTaskRunnerLease, before: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>, locked = false, accountingOnly = false) {
     const statuses: import('@prisma/client').AiTaskStatus[] = accountingOnly
       ? ['QUEUED', 'RUNNING', 'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] : ['QUEUED', 'RUNNING'];
-    const current = await this.access(lease);
+    const current = await this.access(lease, accountingOnly);
     if (current.bindingKey !== before.bindingKey || current.scopeId !== before.scopeId) throw denied();
     const task = await db.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true, scopeId: true } });
     const receiptOnly = accountingOnly && lease.expiresAt === '';
@@ -181,7 +182,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
    * live holder; empty released/terminal observation can read saved measurements
    * after release/expiry, never capture, prepare, dispatch or write a new marker. */
   async assertAccountingRun(lease: AiTaskRunnerLease) {
-    const access = await this.access(lease);
+    const access = await this.access(lease, true);
     await this.held(this.db, lease, access, false, true);
     return access.scopeId;
   }
@@ -201,7 +202,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (!before.expiresAt || !Number.isFinite(Date.parse(before.expiresAt)) || receipt?.released !== true
       || !Number.isSafeInteger(receipt.revision) || receipt.revision !== before.revision + 1
       || receipt.revision > 0xffffffff) throw denied();
-    const lease = { ...before, revision: receipt.revision, expiresAt: '' }, access = await this.access(lease);
+    const lease = { ...before, revision: receipt.revision, expiresAt: '' }, access = await this.access(lease, true);
     const key = { scopeId: access.scopeId, taskId: lease.taskId, id: lease.runId, revision: lease.revision,
       fencingToken: new Prisma.Decimal(lease.fencingToken), leaseOwnerId: null, leaseExpiresAt: null };
     try {
@@ -256,7 +257,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
   async resolve(task: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, recovery: boolean, accountingOnly = false): Promise<AiTaskRunnerPlan> {
     task = structuredClone(task); lease = structuredClone(lease);
     if (accountingOnly && !recovery) throw denied();
-    const access = await this.access(lease); await this.held(this.db, lease, access, false, accountingOnly);
+    const access = await this.access(lease, accountingOnly); await this.held(this.db, lease, access, false, accountingOnly);
     const plan = await this.currentPlan(this.db, lease, access.scopeId, recovery);
     if (plan.taskId !== task.taskId) throw denied();
     await this.held(this.db, lease, access, false, accountingOnly);
@@ -265,7 +266,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
 
   async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease, accountingOnly = false): Promise<AiTaskRunnerPlan> {
     plan = planSchema.parse(structuredClone(plan)); lease = structuredClone(lease);
-    const access = await this.access(lease); await this.held(this.db, lease, access, false, accountingOnly);
+    const access = await this.access(lease, accountingOnly); await this.held(this.db, lease, access, false, accountingOnly);
     const key = { scopeId: access.scopeId, taskId: lease.taskId };
     const run = await this.db.aiRun.findFirst({ where: { ...key, id: lease.runId } });
     if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId

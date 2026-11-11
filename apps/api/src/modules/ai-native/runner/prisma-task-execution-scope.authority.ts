@@ -13,9 +13,14 @@ export class PrismaTaskExecutionScopeAuthority implements AiTaskExecutionScopeSo
     if (typeof tasks?.resolveAccess !== 'function' || typeof db?.aiTask?.findFirst !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
   }
 
-  async resolve(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write') {
-    if (lease?.taskId !== taskId || !['read', 'write'].includes(operation)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    const action = operation === 'read' ? 'read_metadata' : 'transition_task';
+  async resolve(taskId: string, lease: AiTaskExecutionLease,
+    operation: Parameters<AiTaskExecutionScopeSource['resolve']>[2]) {
+    if (lease?.taskId !== taskId || !['read', 'write', 'settle_released_run'].includes(operation)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    // A released Run cannot transition again. Its final, already-reserved time
+    // is settled under current receipt access; the ledger checks the exact
+    // release revision, holder, fence and pure ACTIVE_MS charge before writing.
+    const action = operation === 'read' ? 'read_metadata'
+      : operation === 'settle_released_run' ? 'read_step_terminal' : 'transition_task';
     const access = await this.tasks.resolveAccess(taskId, action);
     const row = await this.db.aiTask.findFirst({ where: access.where, select: { scopeId: true } });
     if (!row) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');

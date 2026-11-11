@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-original-input-recovery-20261111"></a>
+## 客户原问题有效期与释放后时间结账（2026-11-11）
+
+前一[客户取消/事件公共合同](<#ain-client-observation-native-contracts-20261111>)已提交并推送 `ec9e98fc59ffb4cb085d61d43732780c3b31e419`，实际远端与本地一致。本阶段修复两处核心问题：[客户原输入入口](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)误用初始订单材料TTL阻挡仍有效的原问题；[客户执行权威](../../apps/api/src/modules/ai-native/scenes/client-task-execution.composition.ts)误用初始创建政策版本/TTL阻挡已及时消费答案的合法后继。原问题读取、提交和继续保留原材料，重新读取当前本人订单权限；新启动仍要求新鲜材料。后继只接受由原问题/单次答案收据证明的同任务Run，当前执行政策及原问题期限仍须有效。
+
+终态Run已经释放后，[原时间证据](../../apps/api/src/modules/ai-native/runner/prisma-task-run-evidence.repository.ts)与[任务资源账本](../../apps/api/src/modules/ai-native/runner/prisma-task-execution-budget.repository.ts)曾借用普通 `transition_task` 授权，导致实际成功后抛 `released Run time acknowledgement is uncertain`。现在仅此原结账路径通过[当前原收据权限](../../apps/api/src/modules/ai-native/runner/prisma-task-execution-scope.authority.ts)核验，事务继续绑定精确释放revision、holder、fence、原ACTIVE_MS占用和同进程计时；不重新领取、预留、调用模型、转换终态或清零旧额度。
+
+负责人两组必要 `node --no-compilation-cache -` 内存冒烟最终exit0。第一组（session `60311`）沿原客户创建/模型/输入仓储：T+30秒保存答案，T+61秒初始60秒输入已过期、当前政策revision=2且关闭新创建，仍有效的原答案只生成一个后继并完成；Task成功、Run共2个、模型调用共2次、答案收据1份、纯Run时间6项均RECORDED，reservedActiveMs=0。当前execute/read撤销以及终态transition均拒绝。第二组（session `45297`）使用真实ClientAuth/Guard/ALS、ClientApi投影、公开request-bound application和原模型/问题生产者：原300秒材料在T+250秒产生问题，T+301秒仍可读/提交/继续，最终同样只有2次模型调用、1份答案收据，原材料字节依据未改；当前提交权及会话撤销仍拒绝。
+
+公开组早期失败来自旧夹具的未装配app渠道、缺网站配置读取叶、遗漏原预算/计划锁SQL转交，以及Gateway与任务时钟不一致、结果artifact沿用旧固定创建时间。仅调整内存夹具到网站渠道、既有锁实现和一致时钟/数据库默认时间后复验，保留原成功、收据及次数断言；未放宽生产校验或重派未知真实操作。5个后端入口及全部传递依赖TypeScript5.9.3/noEmit为0诊断（session `24570`，exit0）；主仓库Prisma5.22生成schema按模型/枚举/数据源274块规范化相等，仅只读复用。离线组审计0、临时目录未创建，没有新增/扩写测试脚本。合成数据、模型运输和财务生命周期沿既有fixture，未验证真实数据库/供应商、浏览器/微信或生产放行。AIN-06/21/22及相关ENTRY保持原档，新增完整100%任务为0。
+
 <a id="ain-client-observation-native-contracts-20261111"></a>
 ## 客户原取消与事件观察的小程序合同（2026-11-11）
 
