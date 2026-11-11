@@ -108,7 +108,8 @@ function createTaskInputStore(initial, constraints = {}) {
           row.status ??= 'succeeded';
         }
         if (name === 'aiApprovalConsumption') row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
-        if (name === 'aiTask') { row.archivedAt ??= null; row.cancelRequestedAt ??= null; row.updatedAt ??= row.createdAt; }
+        if (name === 'aiTask') { row.archivedAt ??= null; row.cancelRequestedAt ??= null; row.resultRef ??= null; row.updatedAt ??= row.createdAt; }
+        if (name === 'aiRun') { row.inputReceiptId ??= null; row.resourceOriginRunId ??= null; }
         if (name === 'aiTaskOriginalRequest') { row.creationClosedAt ??= null; row.creationCloseKey ??= null; row.erasedAt ??= null; }
         if (name === 'aiGatewayInvocation') row.id ??= require('node:crypto').randomUUID();
         if (name === 'aiInvocationAdmission') {

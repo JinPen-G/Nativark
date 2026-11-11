@@ -746,7 +746,7 @@ test('AIN16 human member consumer uses explicit same-name choice, original manag
   }
 });
 
-test('AIN16 original member task gets explicit real-manager policies and one approved Core update without fixture policy seeding', { timeout: 120000 }, async () => {
+test('AIN16 original member task gets explicit member-authorized policies and one approved Core update without fixture policy seeding', { timeout: 120000 }, async () => {
   const h = await genericMemberNameEntrySetup(false, true);
   const inspection = await h.flow.inspect(h.request, h.command);
   const prepared = await h.flow.prepare(h.request, { ...h.command, reviewHash: inspection.reviewHash });
@@ -759,9 +759,9 @@ test('AIN16 original member task gets explicit real-manager policies and one app
     read: value => workflow.readTaskActionAdmission(h.request, value) };
   const intent = { ...prepared.reference, decision: 'allow_original_member_name_task' };
   const permissions = [...h.identity.user.permissions];
-  h.identity.user.permissions = permissions.filter(value => value !== 'system:params:manage');
+  h.identity.user.permissions = permissions.filter(value => value !== 'rental-os:member:manage');
   await assert.rejects(policies.configure(intent)); assert.equal(h.state.aiTaskActionPolicy.filter(row => row.taskId === taskId).length, 0);
-  h.identity.user.permissions = permissions;
+  h.identity.user.permissions = permissions.filter(value => value !== 'system:params:manage');
   const beforeProfiles = h.clone(h.state.customerProfile), beforeApprovals = h.state.aiApproval.length;
   const configured = await policies.configure(intent);
   assert.equal(configured.state, 'recorded'); assert.equal(configured.items.length, 8);

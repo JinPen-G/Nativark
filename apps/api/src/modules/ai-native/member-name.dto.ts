@@ -7,6 +7,7 @@ export class AiMemberNameAvailabilityDto {}
 export class AiMemberNameQueryDto implements AiMemberNameQuery {
   @IsInt() @Min(1) @Max(50) limit!: number;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(191) name?: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(191) @Matches(id) customerId?: string;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(191) @Matches(id) cursor?: string;
 }
 export class AiMemberNameLocatorDto implements AiMemberNameLocator {

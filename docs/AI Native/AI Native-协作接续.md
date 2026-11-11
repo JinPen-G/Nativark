@@ -20,8 +20,8 @@
 
 | 位置 | 当前职责 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 客户原问题/后继Run准入与释放后时间结账、通知原历史读取、TaskHumanApproval/TaskCenter、公共契约/装配和四册；负责独立核接、提交推送与每两项合main |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 会员姓名原member:manage链及个人会员列表/详情入口：navigation.tsx、PersonalMembershipPage、MemberNameEntry和MemberNameFlow；按原customerId显式定位并服务端复核。已交通知三文件保持冻结；公共DTO/shared/TaskCenter/四册归AI-RD |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 已交核心片独立核接；TaskHumanApproval/TaskCenter、公共总出口/跨专项装配与四册、inspection-wire生成器及注册表；负责提交推送与每两项合main |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 会员入口已冻结核接；转AIN-14日历新提案准备的专用合同/DTO/controller/application、前端及必要原开业/日历source/port和初始准入分支。仅calendar:edit下的原日历版本/年份/已存日期name与businessStatus，不扩普通开业/价格读取；总index/OpenAPI/AppModule/全局Guard归AI-RD |
 | AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 客户原Task/取消/事件23文件已交AI-RD冻结核接；转AIN-20员工原检查辅助Task的实际API/session/履约页面消费，限staff-miniprogram必要私有文件。原检查wire生成脚本与注册表由AI-RD补公共依赖；不扩识别引擎、支付或员工新业务 |
 | `D:/工作文件/rental-OS`／`main` | 仅作跨专项整合入口；当前PM处理环境/治理修复，合并串行；各专项开发继续，保留所有已核及未核WIP |
 

@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-member-name-entry-closeout-20261111"></a>
+## 普通会员管理角色的姓名入口与原请求保护（2026-11-11）
+
+前一客户Task/取消/事件阶段已提交并推送 `d49d6013610e61d7d03cacadb36fca054247d355`，远端与本地一致。本片将AI-dev1交付的会员后端、四个UI文件及负责人补齐的公共query/DTO共8文件逐一核对固定blob。个人会员列表和详情沿原tenant-membership路由接受member:manage，按原行customerId打开[姓名入口](../../apps/admin/src/features/membership/MemberNameEntry.tsx)。公共query/OpenAPI/DTO支持可选customerId，真实whitelist保留它，原候选及inspect仍重新核验当前租户/主体和选中ID；同名不自动选人，原TaskCenter无ID的选择方式保留。
+
+[原姓名应用](../../apps/api/src/modules/ai-native/member-name.application.ts)和[初始Task政策](../../apps/api/src/modules/ai-native/scenes/profile-task-policies.composition.ts)改用真实会员Guard/原Core变更及创建收据，解除与system:params:manage的错误耦合。只对未开始的原Task原子配置8项政策，不在创建时种政策，不授账号、资格、手机或企业关系更新。Core姓名写入继续要求原批准及CAS。界面按当前身份/权限/epoch/可见性撤下资料，StrictMode重放重建空闲session，旧403不关闭新入口。
+
+负责人独立复核发现[原会话](../../apps/admin/src/features/ai-native/member-name-session.ts)的complete会无条件删除共享journal，旧成功收据可能擦掉另一页的新未知请求。现仅以本次pending的精确内容清除并读取确认；纯历史读取没有pending时不删除。必要实际DTO→Controller/Guard/Auth/ALS→API/session→原Profile仓储冒烟（session `12191`）exit0：仅member:manage、精确同名B、8次CAS、Core写入和批准消费各1次；执行应答丢失后只读原键恢复；A姓名未动，外租户ID不披露，撤权拒绝；再次读旧收据及旧pending清除均保留另一页的未知journal。
+
+仅修正原member政策用例把系统配置权当会员写权的错误预期，并补原内存仓储遗漏的Task.resultRef、Run.inputReceiptId/resourceOriginRunId三个Prisma nullable默认值；没有删除拒绝断言或新增脚本。该既有用例定向1/1、0 fail/skip/todo（session `49735`），政策到期后原收据读取/重复核对不重签。API3根、后台6根及传递类型0诊断（session `74353`）。作者四UI实际源码hooks组的完整证据仍作为来源记录，未冒称浏览器通过；负责人原ProfileHost使用其既有monotonic/runnerClock端口控制内存时钟，未提高持久限制。所有离线组审计0、临时目录未创建，无安装、服务或外部连接；AIN-12/16原全文和适用实测仍未齐，不调整整项百分比。
+
 <a id="ain-client-task-consumer-closeout-20261111"></a>
 ## 客户订单解释、取消与可靠事件的实际消费者（2026-11-11）
 

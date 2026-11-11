@@ -1,6 +1,7 @@
 /** Fixed human member-name host. Resolves original change/Task/approval/Core
  * records from an id-only locator; no human/model registration or hash input.
- * Preparation is not approval, and unknown mutations are observed only. */
+ * Ordinary-name writes use the original member Guard; preparation is not
+ * approval, and unknown mutations are observed only. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -17,8 +18,6 @@ import type { ApprovedProfileApplicationDependencies } from './approval-executio
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskRunnerError } from './runner/ai-task-runner.service';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from './runner/prisma-task-application';
-import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
-import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { respondAiScene } from './scenes/original-scenes.controller';
 import { withRequestAbort } from './scenes/request-abort';
@@ -69,9 +68,10 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
         newWorkEnabled: enabled, phase: 'availability', scope: { kind: 'tenant', tenantId: actor.tenantId }, locator: null,
         candidates: [], truncated: false, nextCursor: null, selectionHash: null, review: null, change: null, task: null,
         operation: null, retryable: false, sensitiveFields: 'use_original_verification_flow' });
-      const manager = () => new TenantModelConfigurationAuthority(guard, credentials,
-        new AiTaskCurrentIdentityAuthority(d.auth, credentials, clock)).authorize({ tenantId: actor.tenantId,
-          workspaceId: actor.workspaceId, actorId: actor.actorId }, 'manage');
+      const authorizeMemberWrite = (customerId: string) => route.withAuthorization('write', customerId, async (current, revalidate) => {
+        if (hash(current) !== hash(actor)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await revalidate();
+      });
       const change = (value: { baseRevision: number; expiresAt: string; fields: Array<{ before: string; after: string }> }): NonNullable<AiMemberNameResponse['change']> => ({
         before: value.fields[0].before, after: value.fields[0].after, baseRevision: value.baseRevision, expiresAt: value.expiresAt,
         source: 'original_core_profile', sharing: 'tenant_member_master_not_workspace_order_access' });
@@ -143,8 +143,8 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
           candidates: selected, change: changed, review: { intent, reviewHash: found.reviewHash, change: changed } });
       }
       if (action === 'prepare') {
-        await manager();
         const input = parse(aiMemberNamePrepareInput, command), locator = { customerId: input.intent.customerId, requestKey: input.intent.requestKey };
+        await authorizeMemberWrite(locator.customerId);
         if (Date.parse(input.intent.expiresAt) - clock().getTime() > 120000) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         // A fully read-only preflight can prove this request never delegated
         // preparation. Only that response permits new selection/review; any
@@ -168,8 +168,9 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
           return aiMemberNameResponse.parse((await read(locator)).frame);
         } catch (error) { if (entered) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); throw error; }
       }
-      await manager();
-      const input = parse(aiMemberNameExecuteInput, command), current = await read(input.locator);
+      const input = parse(aiMemberNameExecuteInput, command);
+      await authorizeMemberWrite(input.locator.customerId);
+      const current = await read(input.locator);
       if (current.frame.operation) return aiMemberNameResponse.parse(current.frame);
       if (!current.reference || current.frame.phase !== 'waiting_confirmation' || current.frame.task?.confirmationHash !== input.confirmationHash)
         throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
