@@ -7,6 +7,8 @@ import { formatRentalMoney, type RentalEnterpriseCorporateFinancialProjection, t
   type RentalEnterpriseOrderFinancialProjection } from "@rental-os/shared";
 import { Alert, Button, ListSection, Table } from "@/components/ui/customer-entry";
 import { LoadingState } from "@/components/LoadingState";
+import { ListTransferTools } from "@/components/ui/data-table/ListCapabilities";
+import type { ListExport } from "@/components/ui/data-table/listTransfer";
 import { useLocale } from "@/app/locale";
 import { useEnterprise } from "./enterprise-session";
 
@@ -24,6 +26,9 @@ const creditReasons: Record<string, readonly [string, string]> = {
   original_account_configuration_missing_with_ledger: ["原账户配置缺失，已有债权需核对", "Account configuration is missing while original ledger entries exist"],
   authoritative_account_history_space_scope_not_connected: ["历史账户经营空间范围待核对", "Historical account workspace authority needs verification"]
 };
+type CreditExportRow = Extract<RentalEnterpriseCorporateFinancialProjection["credit"], { state: "available" }>["account"] & { observedAt: string };
+type ReceivableExportRow = RentalEnterpriseOrderFinancialProjection["receivableEntries"][number] & { currency: string; observedAt: string };
+type CashExportRow = { name: string; amount: number | null; currency: string; observedAt: string; coverage: string };
 
 export function EnterpriseFinancePage() {
   const context = useEnterprise(), { locale } = useLocale(), english = locale === "en-US";
@@ -34,7 +39,8 @@ export function EnterpriseFinancePage() {
   const workspace = context.session?.workspace;
   const allowed = Boolean(corporate?.actions.includes("finance:read") && workspace);
   const orderAllowed = Boolean(allowed && corporate?.actions.includes("orders:read"));
-  const identity = JSON.stringify([context.identity, workspace?.workspaceCode, allowed, orderAllowed]);
+  const exportAllowed = Boolean(allowed && corporate?.actions.includes("export:create"));
+  const identity = JSON.stringify([context.identity, workspace?.workspaceCode, allowed, orderAllowed, exportAllowed]);
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   const base = `/enterprise/corporates/${encodeURIComponent(corporateId)}`;
 
@@ -64,67 +70,133 @@ export function EnterpriseFinancePage() {
     }
   });
 
+  async function readAccount(url: string, signal: AbortSignal) {
+    const result = await context.read<RentalEnterpriseCorporateFinancialProjection>(url, AbortSignal.any([signal, context.signal]));
+    verifyScope(result, signal);
+    if (result.source !== "original_tenant_corporate_credit_account" || !result.credit
+      || result.statements?.state !== "unavailable" || result.statements.reason !== "formal_statement_provider_not_implemented"
+      || result.maturities?.state !== "unavailable" || result.maturities.reason !== "financially_determined_maturity_read_port_not_connected") {
+      throw new Error(english ? "The original account projection is inconsistent." : "原授信账户投影无法核对");
+    }
+    if (result.credit.state === "available") {
+      const value = result.credit.account;
+      if (!value || ![value.creditLimit, value.reservedAmount, value.receivableAmount, value.availableAmount].every(money)
+        || [value.creditLimit, value.reservedAmount, value.receivableAmount].some(amount => amount < 0) || value.currency !== "CNY"
+        || !["active", "suspended", "revoked"].includes(value.status) || !["monthly", "semi_monthly", "per_order"].includes(value.billingCycle)
+        || !Number.isSafeInteger(value.settlementTermDays) || value.settlementTermDays < 0) {
+        throw new Error(english ? "Original account amounts or configuration need verification." : "原账户金额或结算配置待核对");
+      }
+    } else if (result.credit.state !== "not_configured"
+      && (result.credit.state !== "unavailable" || !Object.hasOwn(creditReasons, result.credit.reason))) {
+      throw new Error(english ? "The original account state is unavailable." : "原账户状态无法核对");
+    }
+    return result;
+  }
   const account = useQuery({
     queryKey: ["enterprise-credit-account", identity, corporateId], enabled: allowed && !invalidReference && !context.loading,
     retry: false, staleTime: 0, gcTime: 0,
-    queryFn: async ({ signal }) => {
-      const result = await context.read<RentalEnterpriseCorporateFinancialProjection>(`${base}/finance`, AbortSignal.any([signal, context.signal]));
-      verifyScope(result, signal);
-      if (result.source !== "original_tenant_corporate_credit_account" || !result.credit
-        || result.statements?.state !== "unavailable" || result.statements.reason !== "formal_statement_provider_not_implemented"
-        || result.maturities?.state !== "unavailable" || result.maturities.reason !== "financially_determined_maturity_read_port_not_connected") {
-        throw new Error(english ? "The original account projection is inconsistent." : "原授信账户投影无法核对");
-      }
-      if (result.credit.state === "available") {
-        const value = result.credit.account;
-        if (!value || ![value.creditLimit, value.reservedAmount, value.receivableAmount, value.availableAmount].every(money)
-          || [value.creditLimit, value.reservedAmount, value.receivableAmount].some(amount => amount < 0) || value.currency !== "CNY"
-          || !["active", "suspended", "revoked"].includes(value.status) || !["monthly", "semi_monthly", "per_order"].includes(value.billingCycle)
-          || !Number.isSafeInteger(value.settlementTermDays) || value.settlementTermDays < 0) {
-          throw new Error(english ? "Original account amounts or configuration need verification." : "原账户金额或结算配置待核对");
-        }
-      } else if (result.credit.state !== "not_configured"
-        && (result.credit.state !== "unavailable" || !Object.hasOwn(creditReasons, result.credit.reason))) {
-        throw new Error(english ? "The original account state is unavailable." : "原账户状态无法核对");
-      }
-      return result;
-    }
+    queryFn: ({ signal }) => readAccount(`${base}/finance`, signal)
   });
 
+  async function readOrder(url: string, signal: AbortSignal) {
+    const acceptedWorkspace = history.data?.workspaces[0];
+    if (!acceptedWorkspace || acceptedWorkspace.workspaceCode !== workspace?.workspaceCode) {
+      throw new Error(english ? "No authorized original financial workspace was observed." : "未读取到原受权财务经营空间");
+    }
+    const result = await context.read<RentalEnterpriseOrderFinancialProjection>(url, AbortSignal.any([signal, context.signal]));
+    verifyScope(result, signal);
+    if (result.source !== "persisted_original_core_finance" || result.orderId !== orderId || result.workspaceId !== acceptedWorkspace.workspaceId
+      || typeof result.currency !== "string" || !/^[A-Z]{3}$/u.test(result.currency)
+      || typeof result.sourceOrderUpdatedAt !== "string" || !Number.isFinite(Date.parse(result.sourceOrderUpdatedAt))
+      || !money(result.corporatePaymentAllocated) || result.corporatePaymentAllocated < 0 || !result.rentalCash
+      || result.guarantee?.state !== "unavailable" || result.guarantee.reason !== "original_payer_or_provider_guarantee_read_port_not_connected"
+      || result.statements?.state !== "unavailable" || result.statements.reason !== "formal_statement_provider_not_implemented"
+      || !Array.isArray(result.receivableEntries) || new Set(result.receivableEntries.map(row => row.id)).size !== result.receivableEntries.length
+      || result.receivableEntries.some(row => typeof row.id !== "string" || !row.id || !Object.hasOwn(entryLabels, row.entryType)
+        || ![row.amount, row.reservedDelta, row.receivableDelta].every(money) || row.amount < 0
+        || typeof row.occurredAt !== "string" || !Number.isFinite(Date.parse(row.occurredAt)))) {
+      throw new Error(english ? "The original order financial projection is inconsistent." : "原订单财务投影无法核对");
+    }
+    if (result.rentalCash.state === "available") {
+      if (![result.rentalCash.collected, result.rentalCash.refunded, result.rentalCash.netReceived].every(money)
+        || result.rentalCash.collected < 0 || result.rentalCash.refunded < 0) {
+        throw new Error(english ? "Original cash receipts need verification." : "原实款记录待核对");
+      }
+    } else if (result.rentalCash.state !== "unavailable" || result.rentalCash.reason !== "unverified_original_cash_receipt") {
+      throw new Error(english ? "The original cash receipt state is inconsistent." : "原实款记录状态无法核对");
+    }
+    return result;
+  }
   const order = useQuery({
     queryKey: ["enterprise-order-finance", identity, corporateId, orderId],
     enabled: orderAllowed && Boolean(orderId) && Boolean(history.data) && !history.error && !invalidReference && !context.loading,
     retry: false, staleTime: 0, gcTime: 0,
-    queryFn: async ({ signal }) => {
-      const acceptedWorkspace = history.data?.workspaces[0];
-      if (!acceptedWorkspace || acceptedWorkspace.workspaceCode !== workspace?.workspaceCode) {
-        throw new Error(english ? "No authorized original financial workspace was observed." : "未读取到原受权财务经营空间");
-      }
-      const result = await context.read<RentalEnterpriseOrderFinancialProjection>(`${base}/orders/${encodeURIComponent(orderId)}/finance`, AbortSignal.any([signal, context.signal]));
-      verifyScope(result, signal);
-      if (result.source !== "persisted_original_core_finance" || result.orderId !== orderId || result.workspaceId !== acceptedWorkspace.workspaceId
-        || typeof result.currency !== "string" || !/^[A-Z]{3}$/u.test(result.currency)
-        || typeof result.sourceOrderUpdatedAt !== "string" || !Number.isFinite(Date.parse(result.sourceOrderUpdatedAt))
-        || !money(result.corporatePaymentAllocated) || result.corporatePaymentAllocated < 0 || !result.rentalCash
-        || result.guarantee?.state !== "unavailable" || result.guarantee.reason !== "original_payer_or_provider_guarantee_read_port_not_connected"
-        || result.statements?.state !== "unavailable" || result.statements.reason !== "formal_statement_provider_not_implemented"
-        || !Array.isArray(result.receivableEntries) || new Set(result.receivableEntries.map(row => row.id)).size !== result.receivableEntries.length
-        || result.receivableEntries.some(row => typeof row.id !== "string" || !row.id || !Object.hasOwn(entryLabels, row.entryType)
-          || ![row.amount, row.reservedDelta, row.receivableDelta].every(money) || row.amount < 0
-          || typeof row.occurredAt !== "string" || !Number.isFinite(Date.parse(row.occurredAt)))) {
-        throw new Error(english ? "The original order financial projection is inconsistent." : "原订单财务投影无法核对");
-      }
-      if (result.rentalCash.state === "available") {
-        if (![result.rentalCash.collected, result.rentalCash.refunded, result.rentalCash.netReceived].every(money)
-          || result.rentalCash.collected < 0 || result.rentalCash.refunded < 0) {
-          throw new Error(english ? "Original cash receipts need verification." : "原实款记录待核对");
-        }
-      } else if (result.rentalCash.state !== "unavailable" || result.rentalCash.reason !== "unverified_original_cash_receipt") {
-        throw new Error(english ? "The original cash receipt state is inconsistent." : "原实款记录状态无法核对");
-      }
-      return result;
-    }
+    queryFn: ({ signal }) => readOrder(`${base}/orders/${encodeURIComponent(orderId)}/finance`, signal)
   });
+
+  function verifyExport() {
+    if (!exportAllowed || context.signal.aborted || currentIdentity.current !== identity) {
+      throw new Error(english ? "Financial export authority changed." : "财务导出权限已变化");
+    }
+  }
+  async function exportCreditRows(): Promise<CreditExportRow[]> {
+    verifyExport();
+    const result = await readAccount(`${base}/finance/export-rows`, context.signal);
+    verifyExport();
+    if (result.credit.state !== "available") throw new Error(english ? "Original account data is unavailable." : "原账户数据不可用");
+    return [{ ...result.credit.account, observedAt: result.observedAt }];
+  }
+  async function exportReceivableRows(): Promise<ReceivableExportRow[]> {
+    verifyExport();
+    if (!orderAllowed || history.error) throw new Error(english ? "Original order export scope is unavailable." : "原订单导出范围不可用");
+    const result = await readOrder(`${base}/orders/${encodeURIComponent(orderId)}/finance/export-rows`, context.signal);
+    verifyExport();
+    return result.receivableEntries.map(row => ({ ...row, currency: result.currency, observedAt: result.observedAt }));
+  }
+  function cashRows(result: RentalEnterpriseOrderFinancialProjection): CashExportRow[] {
+    const common = { currency: result.currency, observedAt: result.observedAt };
+    const rental = result.rentalCash.state === "available" ? [
+      { ...common, name: english ? "Rental cash collected" : "租金实收", amount: result.rentalCash.collected, coverage: "available" },
+      { ...common, name: english ? "Rental cash refunded" : "租金退款", amount: result.rentalCash.refunded, coverage: "available" },
+      { ...common, name: english ? "Net rental cash received" : "净实收租金", amount: result.rentalCash.netReceived, coverage: "available" }
+    ] : [{ ...common, name: english ? "Original cash receipts need verification" : "原实款记录待核对", amount: null, coverage: "unavailable" }];
+    return [...rental, { ...common, name: english ? "Corporate payment allocated" : "企业回款核销", amount: result.corporatePaymentAllocated, coverage: "available" }];
+  }
+  async function exportCashRows(): Promise<CashExportRow[]> {
+    verifyExport();
+    if (!orderAllowed || history.error) throw new Error(english ? "Original order export scope is unavailable." : "原订单导出范围不可用");
+    const result = await readOrder(`${base}/orders/${encodeURIComponent(orderId)}/finance/export-rows`, context.signal);
+    verifyExport();
+    return cashRows(result);
+  }
+
+  const creditExport: ListExport<CreditExportRow> = { filename: "enterprise-credit-account", scope: "filtered", fields: [
+    { label: english ? "Credit limit" : "授信额度", value: row => row.creditLimit },
+    { label: english ? "Reserved" : "已占用", value: row => row.reservedAmount },
+    { label: english ? "Receivables" : "应收余额", value: row => row.receivableAmount },
+    { label: english ? "Available credit" : "可用额度", value: row => row.availableAmount },
+    { label: english ? "Currency" : "币种", value: row => row.currency },
+    { label: english ? "Account status" : "账户状态", value: row => row.status },
+    { label: english ? "Settlement cycle" : "结算周期", value: row => row.billingCycle },
+    { label: english ? "Settlement days" : "结算天数", value: row => row.settlementTermDays },
+    { label: english ? "Observed" : "读取时间", value: row => row.observedAt }
+  ] };
+  const receivableExport: ListExport<ReceivableExportRow> = { filename: `enterprise-order-receivables-${orderId}`, scope: "filtered", fields: [
+    { label: english ? "Entry" : "流水类型", value: row => entryLabels[row.entryType][english ? 1 : 0] },
+    { label: english ? "Amount" : "流水金额", value: row => row.amount },
+    { label: english ? "Reservation change" : "占用变动", value: row => row.reservedDelta },
+    { label: english ? "Receivable change" : "应收变动", value: row => row.receivableDelta },
+    { label: english ? "Currency" : "币种", value: row => row.currency },
+    { label: english ? "Recorded" : "发生时间", value: row => row.occurredAt },
+    { label: english ? "Observed" : "读取时间", value: row => row.observedAt }
+  ] };
+  const cashExport: ListExport<CashExportRow> = { filename: `enterprise-order-cash-${orderId}`, scope: "filtered", fields: [
+    { label: english ? "Fact" : "资金事实", value: row => row.name },
+    { label: english ? "Amount" : "金额", value: row => row.amount },
+    { label: english ? "Currency" : "币种", value: row => row.currency },
+    { label: english ? "Source state" : "来源状态", value: row => row.coverage },
+    { label: english ? "Observed" : "读取时间", value: row => row.observedAt }
+  ] };
 
   if (!allowed) return <Alert type="warning" title={english ? "Enterprise finance access is unavailable" : "当前企业财务查看权限不可用"}
     action={<Button onClick={context.reload}>{english ? "Check access" : "重新核验权限"}</Button>} />;
@@ -136,7 +208,9 @@ export function EnterpriseFinancePage() {
 
   return <section className="enterprise-approval-review">
     <p>{corporate?.corporateName} · {workspace?.workspaceName}</p>
-    <ListSection title={english ? "Original credit account" : "原授信账户"}>
+    <ListSection title={english ? "Original credit account" : "原授信账户"} controls={exportAllowed && !account.error && credit?.state === "available"
+      && <ListTransferTools config={creditExport} rows={[{ ...credit.account, observedAt: account.data!.observedAt }]}
+        busy={account.isFetching} loadExportRows={exportCreditRows} />}>
       {account.error ? <Alert type="error" title={account.error instanceof Error ? account.error.message : "读取失败"}
         action={<Button onClick={() => void account.refetch()}>{english ? "Read again" : "重新读取"}</Button>} />
         : !credit ? <LoadingState /> : credit.state === "available" ? <>
@@ -162,7 +236,8 @@ export function EnterpriseFinancePage() {
       : order.error ? <Alert type="error" title={order.error instanceof Error ? order.error.message : "读取失败"}
         action={<Button onClick={() => void order.refetch()}>{english ? "Read again" : "重新读取"}</Button>} />
       : !financial ? <LoadingState /> : <>
-        <ListSection title={english ? "Original order financial records" : "原订单财务记录"}>
+        <ListSection title={english ? "Original order financial records" : "原订单财务记录"} controls={exportAllowed
+          && <ListTransferTools config={cashExport} rows={cashRows(financial)} busy={order.isFetching} loadExportRows={exportCashRows} />}>
           <p>{financial.orderId} · {financial.currency} · {english ? "Observed" : "原来源读取时间"} {timestamp(financial.observedAt)}</p>
           {financial.rentalCash.state === "available" ? <dl className="enterprise-review-facts" aria-busy={order.isFetching}>
             {([
@@ -173,7 +248,9 @@ export function EnterpriseFinancePage() {
           </dl> : <Alert type="warning" title={english ? "Original cash receipts need verification" : "原实款记录待核对"} />}
           <dl className="enterprise-review-facts"><div className="enterprise-review-fact"><dt>{english ? "Corporate payment allocated" : "企业回款核销"}</dt><dd>{formatRentalMoney(financial.corporatePaymentAllocated, financial.currency)}</dd></div></dl>
         </ListSection>
-        <ListSection title={english ? "Original receivable and reservation entries" : "原应收与占用流水"}>
+        <ListSection title={english ? "Original receivable and reservation entries" : "原应收与占用流水"} controls={exportAllowed
+          && <ListTransferTools config={receivableExport} rows={financial.receivableEntries.map(row => ({ ...row, currency: financial.currency, observedAt: financial.observedAt }))}
+            busy={order.isFetching} loadExportRows={exportReceivableRows} />}>
           <Table rowKey="id" dataSource={financial.receivableEntries} pagination={false} sorting={false} loading={order.isFetching}
             onRefresh={() => order.refetch()} columns={[
               { title: english ? "Entry" : "流水类型", dataIndex: "entryType", render: value => entryLabels[value][english ? 1 : 0] },

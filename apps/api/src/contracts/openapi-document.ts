@@ -4317,6 +4317,12 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}/finance", "readEnterpriseOrderFinance", "Read original enterprise-paid order finance after current orders:read and finance:read authorization", {
     responseSchema: "RentalEnterpriseOrderFinancialProjection"
   }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/finance/export-rows", "exportEnterpriseCorporateFinance", "Read a bounded original corporate account projection after current export:create and finance:read authorization", {
+    responseSchema: "RentalEnterpriseCorporateFinancialProjection"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}/finance/export-rows", "exportEnterpriseOrderFinance", "Read bounded original enterprise-paid order financial rows after current export:create, orders:read and finance:read authorization", {
+    responseSchema: "RentalEnterpriseOrderFinancialProjection"
+  }),
   backlogOperation("get", "/api/membership/enterprise-portal/operations/{operationKey}", "Membership", "readEnterprisePortalOperation", "Read current operator original activation result without reapplying it", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
   backlogOperation("get", "/api/membership/enterprise-portal/settings", "Membership", "readEnterpriseTenantSettings", "Read tenant enterprise portal activation", ["rental-os:corporate:view", "rental-os:corporate:manage"], true, undefined, "EnterpriseTenantSettings"),
   backlogOperation("put", "/api/membership/enterprise-portal/settings", "Membership", "saveEnterpriseTenantSettings", "Change tenant activation with revision and original operation receipt", ["rental-os:corporate:manage"], true, "SaveEnterpriseTenantSettingsRequest", "EnterpriseTenantSettings"),
