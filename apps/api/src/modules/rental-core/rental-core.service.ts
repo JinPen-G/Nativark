@@ -782,11 +782,25 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     initialization?: RentalDefaultWorkspaceInitialization
   ) {
     if (tx && !this.categoryResolver) throw new ServiceUnavailableException("事务初始化缺少持久化品类解析服务");
+    if (this.categoryResolver) {
+      if (!tx || !this.configStore.readDefaultWorkspaceInitialization) {
+        throw new ServiceUnavailableException("持久化租户初始化缺少同事务的默认空间读取接点");
+      }
+      // A cold or stale process cache is not evidence that this tenant is new.
+      // Read the original default before selecting a recommendation or writing.
+      const persisted = await this.configStore.readDefaultWorkspaceInitialization(tenantId, categoryCode, tx);
+      if (persisted) {
+        if (initialization?.categoryVersionId && initialization.categoryVersionId !== persisted.binding.categoryVersionId) {
+          throw new ConflictException("已有默认空间不能通过初始化切换版本，请使用正式采用流程");
+        }
+        return structuredClone(persisted.profile);
+      }
+    }
     // upsertProfile 会在同一事务里建默认经营空间（见 ensureDefaultWorkspace），
     // 但那发生在 persistConfig 内部，而 persistConfig 里的写入已经需要空间。
     // 因此这里先把空间 id 按同一确定性规则登记进查找表，让同步的 workspaceOf 可用。
     const workspaceId = `ws_${tenantId}`;
-    const existing = this.states.get(workspaceId);
+    const existing = tx ? undefined : this.states.get(workspaceId);
     if (existing && existing.profile.categoryCode !== categoryCode) {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
     }

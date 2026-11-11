@@ -75,6 +75,11 @@ export interface WorkspaceCategoryConfigSnapshot extends TenantConfigSnapshot {
  */
 export type RentalConfigTx = Prisma.TransactionClient;
 export interface RentalDefaultWorkspaceInitialization { categoryVersionId?: string; actorId?: string }
+/** An existing default is an observation, never a request to reseed settings. */
+export interface RentalDefaultWorkspaceInitializationState {
+  profile: TenantRentalProfile;
+  binding: CategoryWriteBinding;
+}
 /** Bounded configuration read, not pricing or inventory reservation. */
 export interface RentalItemGroupPageQuery { limit: number; cursor?: string; itemGroupId?: string; name?: string; }
 export type RentalItemGroupReadFacts = Pick<RentalItemGroup, 'id' | 'tenantId' | 'categoryCode' | 'code' | 'name'
@@ -146,6 +151,7 @@ export type RentalQuoteConfigurationFacts = Omit<BusinessContext, 'category'> & 
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
   loadWorkspaceSnapshot?(tenantId: string, workspaceId: string): Promise<WorkspaceCategoryConfigSnapshot>;
+  readDefaultWorkspaceInitialization?(tenantId: string, categoryCode: RentalCategoryCode, tx: RentalConfigTx): Promise<RentalDefaultWorkspaceInitializationState | undefined>;
   readQuoteConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalQuoteConfigurationFacts>;
   readReportConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalReportConfigurationFacts>;
   /** Opening-only projection. No cache initialization, bundle/member joins or credentials. */
@@ -1034,6 +1040,50 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: {}
       });
     }
+  }
+
+  /** Serialize initialization with the original category mutex before selecting
+   * a recommendation. Existing defaults retain their actual binding and data. */
+  async readDefaultWorkspaceInitialization(tenantId: string, categoryCode: RentalCategoryCode,
+    tx: RentalConfigTx): Promise<RentalDefaultWorkspaceInitializationState | undefined> {
+    const workspaceId = `ws_${tenantId}`;
+    await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
+    // The host owns preceding identity/business fences. Reuse the existing
+    // category order; the ordinary writer would acquire a parent after it.
+    const workspaces = await tx.$queryRaw<Array<{ id: string; tenantId: string; categoryCode: string;
+      categoryVersionId: string | null; categoryAdoptionRevision: number; defaultMarker: string | null;
+      isDefault: boolean | number; status: string }>>(Prisma.sql`
+      SELECT id, tenantId, categoryCode, categoryVersionId, categoryAdoptionRevision, defaultMarker, isDefault, status
+      FROM business_workspaces WHERE id = ${workspaceId} AND tenantId = ${tenantId} FOR UPDATE`);
+    if (workspaces.length > 1) throw new ConflictException("默认空间初始化来源不唯一");
+    const workspace = workspaces[0];
+    const row = await tx.tenantRentalProfile.findUnique({ where: { tenantId } });
+    if (!workspace) {
+      if (row) throw new ConflictException("已有品类档案缺少默认空间，须按原依据修复，不能重新初始化");
+      return undefined;
+    }
+    if (workspace.id !== workspaceId || workspace.tenantId !== tenantId || readRentalCategoryCode(workspace.categoryCode) !== categoryCode
+      || workspace.defaultMarker !== "default" || ![true, 1].includes(workspace.isDefault)
+      || workspace.status.toLowerCase() !== "active" || !workspace.categoryVersionId
+      || !Number.isSafeInteger(workspace.categoryAdoptionRevision) || workspace.categoryAdoptionRevision < 0) {
+      throw new ConflictException("已有默认空间的初始化来源不一致");
+    }
+    const definition = resolveRentalCategoryVersionBody(
+      await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }), categoryCode);
+    const current = { definition, binding: { categoryVersionId: workspace.categoryVersionId,
+      adoptionRevision: workspace.categoryAdoptionRevision } };
+    const profile = this.readDefaultWorkspaceProfile(row, tenantId, current.definition);
+    const settings = await tx.rentalTenantBusinessSettings.findUnique({ where: { workspaceId } });
+    if (!profile || !settings || settings.tenantId !== tenantId || settings.workspaceId !== workspaceId
+      || !settings.settings || typeof settings.settings !== "object" || Array.isArray(settings.settings)) {
+      throw new ConflictException("已有默认空间配置缺失，须明确补齐，不能用初始化模板覆盖");
+    }
+    if (profile.configVersion !== current.definition.version
+      || profile.capabilities.some(code => !current.definition.defaultCapabilities.includes(code))) {
+      throw new ConflictException("已有默认空间档案与实际采用品类版本不一致，须核对原配置");
+    }
+    return { profile: { ...profile, categoryVersionId: current.binding.categoryVersionId,
+      categoryAdoptionRevision: current.binding.adoptionRevision }, binding: current.binding };
   }
 
   async readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx): Promise<VersionedBusinessSettings | null> {
