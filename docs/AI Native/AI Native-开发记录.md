@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-notification-consumer-history-20261111"></a>
+## 通知审核入口与过期政策后的原结果读取（2026-11-11）
+
+前一客户恢复阶段已提交并推送 `86bf1f92912990aae24497916f237de69d7babe5`，实际远端已核。本片将AI-dev1交付的原通知API/session/表单接入[TaskCenterPage](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)：读取当前设置、展示原差异、明确准备后沿原change/create/start收据进入原TaskHumanApproval。设置更新仍需要原新批准及继续，未知阶段只读取原定位，不换键重发。
+
+修复[通知专用读取](../../apps/api/src/modules/ai-native/scenes/settings-task-read.composition.ts)对已过期Task动作政策的耦合。当前本人必须通过原Core通知读Guard、原change与creation收据、Task首Run及input/change哈希复核；请求内仅构造metadata/events/terminal三项读取权威，并由[原设置审批应用](../../apps/api/src/modules/ai-native/approval-execution/approved-settings-task.authority.ts)的read模式共同消费。没有伪造OriginalSceneRequest、读时签政策或赋予决定/执行权。原政策过期、执行关闭不抹掉合法历史；引用错误、当前撤权及串Task仍拒绝。
+
+负责人一组 `node --no-compilation-cache -` 实际module→Controller/Guard/RequestIdInterceptor→前端API/session→原仓储/Core夹具冒烟最终exit0（session `31626`）：普通price:manage角色按新原键prepare/create/start，三次真实推进Date使8项初始、批准/继续及最终3项读政策到期；原批准消费1次、Core提交1次。最后result/confirmation/snapshot/events四读均通过，前后持久状态哈希完全相同；错误引用及当前撤权拒绝，start POST只有1次。初次内存运输遗漏API信封、旧夹具缺Prisma nullable默认值，修正这些夹具后复验；另有一次原1秒步骤预算实例启动返回AI_RESULT_UNKNOWN，该实例未重发，保留该失败，不据最终正向样例声称容量/SLO稳定性通过。
+
+同时修复[NotificationChangeFlow](../../apps/admin/src/features/ai-native/NotificationChangeFlow.tsx)的StrictMode效果重放复用已销毁session问题，绑定当前身份/会话epoch并处理隐藏/重开；关闭审核分区或隐藏页面清除所选审核Task。实际TSX/session的必要hooks冒烟（tool chunk `340f26`）exit0：重放后可明确读取、隐藏后的迟到读取拒绝、重开不自动发请求、监听器释放；首次内存编译遗漏真实文件扩展名导致泛型被当JSX，补fileName后通过。后台5个根/noEmit为0诊断（session `10700`），后端与相关合同5根为0诊断（session `85321`）；UIArc来源审计badHashes=[]。离线组审计0、临时目录未创建，无新增测试文件、依赖、服务或构建残留。业务数据库、Core数据与React宿主为明确夹具，未代替浏览器/微信/真库或经营放行；AIN-12/14/16原整项门槛仍未齐，不调整百分比。
+
 <a id="ain-client-original-input-recovery-20261111"></a>
 ## 客户原问题有效期与释放后时间结账（2026-11-11）
 
