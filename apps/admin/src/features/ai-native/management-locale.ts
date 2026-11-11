@@ -4,6 +4,9 @@ import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
   ...platformAiEnglish,
+  '开始新的检测': 'Start a new check',
+  '上次检测已结束，可以发起新的检测。': 'The previous check has ended. You can start a new check.',
+  '上次检测已结束。使用当前已保存的 AI 配置发送新的测试消息？费用由你的供应商收取。': 'The previous check has ended. Send a new test message using the currently saved AI settings? Your provider will charge for it.',
   '按新条件准备报价': 'Prepare a quote with new conditions',
   '核对原新材料操作': 'Check the original material request',
   '输入新的租赁条件': 'Enter new rental conditions',

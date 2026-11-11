@@ -1,4 +1,5 @@
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
+import type { AiExecutionContext } from '@rental-os/shared';
 import type { SecretBox } from '../../common/secret-box';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
 import { AiScopeRepository } from './ai-scope.repository';
@@ -137,12 +138,14 @@ export function composePersistedTaskDispatchEvidence(input: PersistedTaskAuthori
  * that price expires or a new configuration is published. This composition
  * requires no model adapter, profile selection, secret or settings-write grant. */
 export function composePersistedTaskAccountingRecovery(input: PersistedTaskAuthorizationDependencies &
-  Pick<PersistedTaskCallGatewayDependencies, 'guard' | 'taskId'> & { pricing: PersistedTaskGatewayPricing }) {
+  Pick<PersistedTaskCallGatewayDependencies, 'guard' | 'taskId'> & { pricing: PersistedTaskGatewayPricing;
+    /** Server-owned read authority for this exact original task. Never used for mutations. */
+    originalTaskRead?: (taskId: string) => Promise<AiExecutionContext> }) {
   if (!input || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)
     || 'callPriceVersion' in input || typeof input.guard?.canActivate !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const selection = checkedPricing(input.pricing);
   const clock = input.clock ?? (() => new Date());
-  const authorization = new PrismaTaskBudgetAuthorizationSource(input);
+  const authorization = new PrismaTaskBudgetAuthorizationSource(input, input.originalTaskRead);
   const pricing = taskPricing(input.db, authorization.scopes, selection, clock);
   return createPersistedGatewayBudget({ db: input.db, scopes: authorization.scopes,
     subscriptions: input.subscriptions, authorization, pricing, clock }).recovery;

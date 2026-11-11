@@ -11,9 +11,9 @@ export const chatCompletionsUsageSchema = z.object({ prompt_tokens: tokenCount, 
     && (usage.prompt_tokens_details?.cached_tokens ?? 0) <= usage.prompt_tokens,
   'Provider token counters disagree');
 export function chatCompletionsUsage(value: z.infer<typeof chatCompletionsUsageSchema>): ModelUsage {
-  const cached = value.prompt_tokens_details?.cached_tokens ?? 0;
+  const cached = value.prompt_tokens_details?.cached_tokens;
   return { inputTokens: value.prompt_tokens, outputTokens: value.completion_tokens,
-    ...(cached ? { billingDetails: { cachedInputTokens: cached, cacheCreationInputTokens: 0 } } : {}) };
+    ...(cached !== undefined ? { billingDetails: { cachedInputTokens: cached, cacheCreationInputTokens: 0 } } : {}) };
 }
 const fragment = z.object({ index: z.number().int().min(0).max(7), id: z.string().min(1).max(128).optional(), type: z.literal('function').optional(), function: z.object({ name: z.string().max(64).optional(), arguments: z.string().max(16000).optional() }).strict().optional() }).strict();
 const frame = z.object({ choices: z.array(z.object({ index: z.literal(0), delta: z.object({ content: z.string().nullable().optional(), role: z.literal("assistant").optional(), tool_calls: z.array(z.unknown()).max(8).optional(), refusal: z.string().nullable().optional() }), finish_reason: z.string().nullable().optional() })).max(1), usage: chatCompletionsUsageSchema.optional() });

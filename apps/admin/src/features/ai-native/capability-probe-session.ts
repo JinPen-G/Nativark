@@ -3,7 +3,9 @@
  * retried. Cancellation receipts are read-only task-center observations; probe
  * receipt reconciliation can record capability evidence or settle the original
  * ledger. Only an exact original operation receipt clears its unknown marker;
- * current financial balances never grant execution or permit replay. */
+ * current financial balances never grant execution or permit replay. A new
+ * connection check requires the original task, observation and ledger to end. */
+import { AI_TASK_TERMINAL_STATUSES_DRAFT } from '@rental-os/shared';
 import type { AiTextCapabilityHttpResponsesDraft,
   AiTaskStopQueryDraft, AiTaskStopObservationDraft, AiTextCapabilityAccountingResponseDraft,
   AiTextCapabilityAccountingOperationResponseDraft } from '@rental-os/shared';
@@ -23,7 +25,7 @@ type Journal = { requestKey: string; capability: Capability; started: boolean; u
 type Task = { taskId: string; runId?: string; revision: number; status: string };
 type Observation = { status: 'supported' | 'unsupported' | 'unverified'; capability: Capability; mode: 'mock' | 'live' | null;
   checkedAt: string | null; expiresAt: string | null; configurationRevision: number | null };
-type State = Readonly<{ busy: boolean; journal: Journal | null; locked: boolean;
+type State = Readonly<{ busy: boolean; journal: Journal | null; locked: boolean; connectionReady: boolean;
   prepared: { configurationRevision: number; methodVersion: string } | null; published: boolean; task: Task | null;
   policy: { operation: string; revision: number | null } | null; receipt: Observation | null;
   policyReceipt: { revision: number; expiresAt: string } | null;
@@ -34,6 +36,8 @@ type State = Readonly<{ busy: boolean; journal: Journal | null; locked: boolean;
   history: { state: 'historical' | 'not_observed'; originalValidity: string; taskStatus: string; resultObserved: boolean } | null;
   feedback: 'idle' | 'observed' | 'unknown' | 'denied' | 'invalid' | 'unavailable' }>;
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const exact = (v: unknown, keys: readonly string[]): v is Record<string, unknown> => object(v)
+  && Object.keys(v).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(v, key));
 const code = (v: unknown, max = 128): v is string => typeof v === 'string' && v.length <= max && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v);
 const revision = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 4294967295;
 const time = (v: unknown): v is string => typeof v === 'string' && v.length <= 64 && Number.isFinite(Date.parse(v));
@@ -45,11 +49,60 @@ const task = (v: unknown): Task => {
     || v.runId !== undefined && !code(v.runId)) return invalid();
   return { taskId: v.taskId, revision: v.revision, status: v.status, ...(typeof v.runId === 'string' ? { runId: v.runId } : {}) };
 };
+type ConnectionHistory = AiTextCapabilityHttpResponsesDraft['readHistory'];
+function connectionHistory(v: unknown): ConnectionHistory {
+  if (!exact(v, ['requestKey', 'state', 'applicability', 'currentCapability', 'retryable', 'original', 'task', 'run',
+    'resultObserved', 'configurationRevision', 'observation']) || !code(v.requestKey)
+    || !['historical', 'not_observed'].includes(String(v.state)) || v.applicability !== 'historical_only'
+    || v.currentCapability !== 'not_assessed' || v.retryable !== false || typeof v.resultObserved !== 'boolean'
+    || v.configurationRevision !== null && !revision(v.configurationRevision)
+    || v.original !== null && (!exact(v.original, ['expiresAt', 'validity']) || !time(v.original.expiresAt)
+      || !['expired', 'historical_only'].includes(String(v.original.validity)))
+    || v.task !== null && (!exact(v.task, ['taskId', 'status', 'revision', 'cancelRequestedAt'])
+      || !code(v.task.taskId) || !code(v.task.status, 64) || !revision(v.task.revision)
+      || v.task.cancelRequestedAt !== null && !time(v.task.cancelRequestedAt))
+    || v.run !== null && (!exact(v.run, ['runId', 'status']) || !code(v.run.runId) || !code(v.run.status, 64))) return invalid();
+  const observation = v.observation;
+  if (observation !== null && (!exact(observation, ['receiptId', 'methodVersion', 'mode', 'checkedAt', 'expiresAt',
+    'validity', 'matched', 'reportedUsage']) || !code(observation.receiptId) || !code(observation.methodVersion, 64)
+    || !['mock', 'live'].includes(String(observation.mode)) || !time(observation.checkedAt) || !time(observation.expiresAt)
+    || !['expired', 'historical_only'].includes(String(observation.validity)) || typeof observation.matched !== 'boolean'
+    || observation.reportedUsage !== null && (!exact(observation.reportedUsage, ['inputTokens', 'outputTokens'])
+      || !Number.isSafeInteger(observation.reportedUsage.inputTokens) || Number(observation.reportedUsage.inputTokens) < 0
+      || !Number.isSafeInteger(observation.reportedUsage.outputTokens) || Number(observation.reportedUsage.outputTokens) < 0))) return invalid();
+  return v as ConnectionHistory;
+}
+function connectionAccounting(v: unknown, history: ConnectionHistory, journal: Journal): AiTextCapabilityAccountingResponseDraft {
+  if (!exact(v, ['requestKey', 'taskId', 'record', 'accounting', 'execution', 'automaticRetry', 'businessExecution', 'admission'])
+    || v.requestKey !== journal.requestKey || !history.task || !history.run || v.taskId !== history.task.taskId
+    || v.accounting !== 'observed' || v.execution !== 'not_invoked' || v.automaticRetry !== false
+    || v.businessExecution !== 'not_inferred_from_usage' || v.admission !== 'not_granted') return invalid();
+  const record = v.record;
+  if (!exact(record, ['invocationId', 'callId', 'reservationId', 'accounting', 'sceneCode', 'runId', 'stepId', 'revision',
+    'observedVersionAt', 'status', 'reserved', 'actual', 'budgetDispatchMarked', 'modelPolicy'])
+    || record.accounting !== 'recorded' || !code(record.invocationId) || !code(record.callId) || !code(record.reservationId)
+    || !code(record.sceneCode) || record.runId !== history.run.runId || !code(record.stepId) || !revision(record.revision)
+    || !time(record.observedVersionAt) || typeof record.budgetDispatchMarked !== 'boolean'
+    || !['reserved', 'settled', 'released', 'pending_reconciliation'].includes(String(record.status))
+    || !isUsageQuantity(record.reserved) || record.actual !== null && !isUsageQuantity(record.actual)
+    || record.status === 'settled' && record.actual === null
+    || isUsageQuantity(record.actual) && (record.actual.unit !== record.reserved.unit
+      || record.actual.unit === 'money' && record.reserved.unit === 'money' && record.actual.currency !== record.reserved.currency)
+    || !object(record.modelPolicy) || !(exact(record.modelPolicy, ['mode', 'serviceName'])
+      && record.modelPolicy.mode === 'platform_managed' && record.modelPolicy.serviceName === 'Rental OS AI'
+      || exact(record.modelPolicy, ['mode', 'model']) && record.modelPolicy.mode === 'tenant_managed'
+        && typeof record.modelPolicy.model === 'string' && record.modelPolicy.model.length > 0 && record.modelPolicy.model.length <= 256)
+    || journal.policyWrite && journal.policyWrite.taskId !== v.taskId
+    || journal.cancellationWrite && journal.cancellationWrite.taskId !== v.taskId
+    || journal.accountingWrite && (journal.accountingWrite.taskId !== v.taskId || journal.accountingWrite.callId !== record.callId
+      || journal.accountingWrite.reservationId !== record.reservationId)) return invalid();
+  return v as AiTextCapabilityAccountingResponseDraft;
+}
 export class CapabilityProbeSession {
   private state: State; private active = true; private generation = 0; private flight: AbortController | null = null;
   private listeners = new Set<() => void>();
   constructor(private readonly ports: Pick<typeof aiCapabilityProbeApi, 'call' | 'readCancellationReceipt'>, private readonly current: () => boolean,
-    private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | undefined, private readonly storageKey: string,
+    private readonly storage: (Pick<Storage, 'getItem' | 'setItem'> & Partial<Pick<Storage, 'removeItem'>>) | undefined, private readonly storageKey: string,
     private readonly newKey = () => globalThis.crypto.randomUUID()) {
     let journal: Journal | null = null, locked = true;
     try { const raw = storage?.getItem(storageKey); locked = !storage || raw !== null;
@@ -70,14 +123,15 @@ export class CapabilityProbeSession {
           ...(v.accountingWrite === undefined ? {} : { accountingWrite: v.accountingWrite as Journal['accountingWrite'] }) }; locked = false;
       }
     } catch { /* Corrupt/absent original reference storage cannot authorize a fresh request. */ }
-    this.state = { busy: false, journal, locked, prepared: null, published: false, task: null, policy: null,
+    this.state = { busy: false, journal, locked, connectionReady: false, prepared: null, published: false, task: null, policy: null,
       receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null, history: null,
       feedback: locked || journal?.uncertain ? 'unknown' : 'idle' };
   }
   snapshot = () => this.state;
   subscribe = (f: () => void) => { this.listeners.add(f); return () => { this.listeners.delete(f); }; };
-  activate() { this.active = true; this.update({ busy: false }); }
-  dispose() { this.active = false; this.generation++; this.flight?.abort(); this.flight = null; }
+  activate() { this.active = true; this.update({ busy: false, connectionReady: false }); }
+  dispose() { this.active = false; this.generation++; this.flight?.abort(); this.flight = null;
+    this.update({ connectionReady: false, receipt: null, preflight: null }); }
   private update(v: Partial<State>) { this.state = Object.freeze({ ...this.state, ...v }); this.listeners.forEach(f => f()); }
   private check(c: AbortController, g: number) { if (!this.active || c.signal.aborted || !this.current() || g !== this.generation) throw Error('AI_SCOPE_CHANGED'); }
   private persist(v: Journal) {
@@ -86,8 +140,8 @@ export class CapabilityProbeSession {
     if (this.storage.getItem(this.storageKey) !== marker) throw Error('AI_RESULT_UNKNOWN');
     this.update({ journal: Object.freeze(v) });
   }
-  /** One original request per mounted journal. Never clear/replace an unknown
-   * challenge from this screen; further fresh probes require explicit lifecycle support. */
+  /** Ordinary actions keep the original request. Only the connection lifecycle
+   * below can retire its locator after exact original terminal evidence. */
   prepare = (capability: Capability) => this.run('prepare', capability);
   act = (action: Exclude<CapabilityProbeAction, 'prepare'>, operation?: string) => this.run(action, undefined, operation);
   readCancellationReceipt = () => this.run('readCancellationReceipt');
@@ -110,7 +164,86 @@ export class CapabilityProbeSession {
     await this.act('start');
     return this.observeConnection(configurationRevision);
   }
+  /** Explicit new operation, never a retry of the old model call. Re-read the
+   * original closure at confirmation time; a cached button state is insufficient. */
+  async startNewConnection(configurationRevision: number): Promise<ConnectionCheck> {
+    if (!revision(configurationRevision)) return invalid();
+    const generation = this.generation;
+    await this.checkConnectionCompletion(true);
+    if (!this.active || !this.current() || generation !== this.generation || this.state.journal) throw Error('AI_SCOPE_CHANGED');
+    return this.testConnection(configurationRevision);
+  }
+  private async checkConnectionCompletion(retire = false): Promise<ConnectionHistory | null> {
+    if (this.flight) throw Error('AI_BUSY');
+    const c = new AbortController(), g = this.generation; this.flight = c;
+    try {
+      this.check(c, g);
+      const journal = structuredClone(this.state.journal);
+      if (this.state.locked || !journal?.started || journal.capability !== 'text') throw Error('AI_RESULT_UNKNOWN');
+      const marker = JSON.stringify(journal);
+      const current = () => {
+        this.check(c, g);
+        if (JSON.stringify(this.state.journal) !== marker || this.storage?.getItem(this.storageKey) !== marker) throw Error('AI_RESULT_UNKNOWN');
+      };
+      this.update({ busy: true, connectionReady: false }); current();
+      const read = async (action: 'readHistory' | 'readAccounting') => {
+        const value: unknown = structuredClone(await this.ports.call(action, { requestKey: journal.requestKey }, c.signal));
+        current();
+        if (!object(value) || value.requestKey !== journal.requestKey || JSON.stringify(value).length > 32768) return invalid();
+        return value;
+      };
+      const history = connectionHistory(await read('readHistory'));
+      const terminal = (status: string) => AI_TASK_TERMINAL_STATUSES_DRAFT.some(value => value === status);
+      if (history.state !== 'historical' || !history.original || !history.task || !history.run
+        || !terminal(history.task.status) || !terminal(history.run.status)) {
+        if (retire) throw Error('AI_RESULT_UNKNOWN');
+        return history;
+      }
+      const accounting = connectionAccounting(await read('readAccounting'), history, journal);
+      const again = connectionHistory(await read('readHistory'));
+      if (JSON.stringify(again) !== JSON.stringify(history)) throw Error('AI_RESULT_UNKNOWN');
+      const record = accounting.record;
+      const completed = record.status === 'settled' && record.budgetDispatchMarked && !!history.observation && history.resultObserved
+        && history.configurationRevision !== null && history.observation.reportedUsage !== null
+        || record.status === 'released' && !record.budgetDispatchMarked && history.observation === null
+          && history.task.status !== 'succeeded' && history.run.status !== 'succeeded';
+      // A completed original run and settled original call resolve only its
+      // lost start/recovery response. Other writes retain their own receipt gate.
+      const originalRunUnknown = journal.uncertain === 'start' || journal.uncertain === 'reconcile';
+      const ready = completed && (journal.uncertain === null || originalRunUnknown);
+      if (!ready) {
+        if (retire) throw Error('AI_RESULT_UNKNOWN');
+        return history;
+      }
+      current();
+      if (originalRunUnknown) this.persist({ ...journal, uncertain: null });
+      if (retire) {
+        const expected = JSON.stringify(this.state.journal);
+        this.check(c, g);
+        if (!this.storage?.removeItem || this.storage.getItem(this.storageKey) !== expected) throw Error('AI_RESULT_UNKNOWN');
+        this.storage.removeItem(this.storageKey);
+        if (this.storage.getItem(this.storageKey) !== null) throw Error('AI_RESULT_UNKNOWN');
+        this.check(c, g);
+        this.update({ journal: null, locked: false, connectionReady: false, prepared: null, published: false, task: null, policy: null,
+          receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null,
+          history: null, feedback: 'idle' });
+      } else this.update({ connectionReady: typeof this.storage?.removeItem === 'function', feedback: 'observed' });
+      return history;
+    } catch (error) {
+      if (this.active && !c.signal.aborted && g === this.generation) this.update({ connectionReady: false,
+        feedback: !this.current() || error instanceof Error && error.message === 'AI_SCOPE_CHANGED' ? 'denied' : 'unknown' });
+      throw error;
+    } finally {
+      if (this.flight === c) this.flight = null;
+      if (this.active && g === this.generation) this.update({ busy: false });
+    }
+  }
   async observeConnection(configurationRevision: number): Promise<ConnectionCheck> {
+    const generation = this.generation;
+    const current = () => {
+      if (!this.active || !this.current() || generation !== this.generation) throw Error('AI_SCOPE_CHANGED');
+    };
+    current();
     const pending = this.state.journal;
     if (!pending || !revision(configurationRevision)) throw Error('AI_RESOURCE_UNAVAILABLE');
     if (pending.capability !== 'text') { await this.act('readHistory'); return { state: 'pending', checkedAt: null }; }
@@ -119,19 +252,29 @@ export class CapabilityProbeSession {
     if (pending.uncertain === 'publish') await this.act('readOriginal');
     else if (pending.uncertain === 'createTask') await this.act('readTask');
     else if (pending.uncertain === 'configureTaskAction') await this.act('readTaskActionReceipt');
-    if (this.state.journal?.uncertain || !this.state.journal?.started) {
-      await this.act('readHistory');
-      return { state: 'pending', checkedAt: null };
-    }
+    else if (pending.uncertain === 'readCapabilityReceipt') await this.act('readCapabilityReceipt');
+    else if (pending.uncertain === 'cancel' && pending.cancellationWrite) await this.readCancellationReceipt();
+    else if ((pending.uncertain === 'releaseUnsent' || pending.uncertain === 'reconcileAccounting') && pending.accountingWrite)
+      await this.act('readAccountingOperation');
+    if (!this.state.journal?.started) { await this.act('readHistory'); return { state: 'pending', checkedAt: null }; }
+    const history = await this.checkConnectionCompletion();
+    current();
+    if (this.state.journal?.uncertain) return { state: 'pending', checkedAt: history?.observation?.checkedAt ?? null };
+    if (history?.configurationRevision !== configurationRevision || !history.observation || history.observation.validity === 'expired'
+      || Date.parse(history.observation.expiresAt) <= Date.now()) return { state: 'stale', checkedAt: history?.observation?.checkedAt ?? null };
+    const connectionReady = this.state.connectionReady;
     await this.act('readCapabilityReceipt');
     const receipt = this.state.receipt;
+    current();
     if (!receipt || receipt.configurationRevision !== configurationRevision
       || !receipt.expiresAt || Date.parse(receipt.expiresAt) <= Date.now()) return { state: 'stale', checkedAt: receipt?.checkedAt ?? null };
-    if (receipt.status === 'unsupported') return { state: 'unsupported', checkedAt: receipt.checkedAt };
+    if (receipt.status === 'unsupported') { this.update({ connectionReady }); return { state: 'unsupported', checkedAt: receipt.checkedAt }; }
     await this.act('preflight');
-    const current = this.state.preflight;
-    return { state: receipt.status === 'supported' && receipt.mode === 'live' && current?.allowed
-      && !current.missing && !current.stale ? 'supported' : 'pending', checkedAt: receipt.checkedAt };
+    const preflight = this.state.preflight;
+    current();
+    this.update({ connectionReady });
+    return { state: receipt.status === 'supported' && receipt.mode === 'live' && preflight?.allowed
+      && !preflight.missing && !preflight.stale ? 'supported' : 'pending', checkedAt: receipt.checkedAt };
   }
   private async run(action: CapabilityProbeAction | 'readCancellationReceipt', capability?: Capability, operation?: string) {
     if (this.flight) throw Error('AI_BUSY');
@@ -140,7 +283,7 @@ export class CapabilityProbeSession {
     try {
       this.check(c, g);
       const observedAccounting = structuredClone(this.state.accounting);
-      this.update({ busy: true, receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null, history: null });
+      this.update({ busy: true, connectionReady: false, receipt: null, policyReceipt: null, cancellationReceipt: null, accounting: null, accountingOperation: null, preflight: null, history: null });
       if (this.state.locked) throw Error('AI_RESOURCE_UNAVAILABLE');
       let journal = structuredClone(this.state.journal);
       if (!journal) {

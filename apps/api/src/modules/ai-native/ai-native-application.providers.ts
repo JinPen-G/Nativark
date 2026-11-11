@@ -60,7 +60,8 @@ import { composeRequestBoundBudgetManagement } from './budget/budget-management.
 import { BudgetError } from './budget/budget.ports';
 import { AI_COUNTING_REQUESTS } from './input-counting/input-counting-request.module';
 import { composeStandardInputCounting, AI_NATIVE_INPUT_COUNTING_CONFIGURATION } from './input-counting/input-counting-standard.application';
-import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
+import { TextCapabilityProbeRequestFactory, type TextCapabilityRequest } from './text-capability-probe-request.factory';
+import { ModelGatewayError } from './model-gateway.ports';
 import { PLATFORM_CAPABILITY_PROBE_REQUESTS } from './platform-capability-probe/platform-capability-probe.controller';
 import { composeStandardPlatformProbe, AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, AI_NATIVE_PLATFORM_PROBE_AUDIT } from './platform-capability-probe/platform-capability-standard.application';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
@@ -91,7 +92,7 @@ import type { ModelAdapter } from './model-gateway.ports';
 import { HumanAutomationRequestFactory } from './automation/human-automation-request.composition';
 import { HumanAutomationPolicyRequestFactory } from './automation/human-automation-policy-request.composition';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './business-events/prisma-business-failure-outbox';
-import { AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
+import { AI_APPROVED_SETTINGS_TOOL_CODE, AI_CAPABILITY_PROBE_KINDS_DRAFT } from '@rental-os/shared';
 import { AiSettingsTaskHttpModule } from './scenes/settings-task-http.module';
 import { AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS,
   AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS } from './scenes/settings-task.controller';
@@ -632,15 +633,16 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
 /** Separate server-owned probe configuration: enabling an order workflow must
  * not implicitly permit billable capability challenges (or vice versa). The
  * publication supplies its independent gate; construction never seeds policies
- * or runs a probe. */
+ * or runs a probe. A complete disabled configuration retains only authorized
+ * original reads; absence of configuration cannot invent a history host. */
 export const AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION = Symbol('AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION');
-const probeConfiguration = z.discriminatedUnion('enabled', [
+const probeConfiguration = z.union([
   z.object({ enabled: z.literal(false) }).strict(),
-  z.object({ enabled: z.literal(true), platformProfileId: orderExecutionConfiguration.options[1].shape.platformProfileId,
+  z.object({ enabled: z.boolean(), platformProfileId: orderExecutionConfiguration.options[1].shape.platformProfileId,
     priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
     sceneVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
     host: orderExecutionConfiguration.options[1].shape.host,
-    capabilities: z.array(textProbeCommandSchema.shape.capability.unwrap()).min(1).max(6)
+    capabilities: z.array(textProbeCommandSchema.shape.capability.unwrap()).min(1).max(AI_CAPABILITY_PROBE_KINDS_DRAFT.length)
       .refine(values => values.includes('text') && new Set(values).size === values.length),
     taskActionPolicyTtlMs: z.number().int().min(1).max(120000) }).strict()
 ]);
@@ -653,6 +655,8 @@ function readProbeConfiguration(value: unknown) {
 }
 const probeOperations = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
   'claim_recovery_run', 'release_run', 'transition_task', 'request_input'] as const;
+const originalProbeReadMethods: readonly (keyof TextCapabilityRequest)[] = ['readOriginal', 'readTask', 'inspect',
+  'readTaskAction', 'readTaskActionReceipt', 'readHistory', 'readAccounting', 'readAccountingOperation', 'close'];
 /** The existing immutable request -> persistent task -> measured runner ->
  * unique Gateway/dispatch/ledger -> evidence workflow. This factory performs
  * no reads on assembly. Calls quotas are not supplier money/token pricing;
@@ -665,18 +669,29 @@ export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapab
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     secrets: SecretBox, serverValue?: unknown) => {
     const configuration = readProbeConfiguration(serverValue);
-    if (!configuration.enabled) return Object.freeze({ open(): never {
+    if (!('platformProfileId' in configuration)) return Object.freeze({ open(): never {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     } });
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    return new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets,
+    const factory = new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets,
       platformProfileId: configuration.platformProfileId, sceneVersion: configuration.sceneVersion,
       priceVersion: configuration.priceVersion, pricing: { mode: 'persisted_calls', priceVersion: configuration.priceVersion },
       host: configuration.host, probeCapabilities: configuration.capabilities,
       taskActionPolicyTtlMs: configuration.taskActionPolicyTtlMs,
+      ...(!configuration.enabled ? { protocol: { post: async () => { throw new ModelGatewayError('CONFIG_INVALID'); } } } : {}),
       taskActionPolicies: probeOperations.map(operation => ({ operation, requiredPermissions: ['system:params:manage'] })) });
+    if (configuration.enabled) return factory;
+    return Object.freeze({ open: (request: Parameters<TextCapabilityProbeRequestFactory['open']>[0]) => {
+      const current = factory.open(request);
+      // Keep an allowlist: a later factory method cannot silently reopen new
+      // execution or re-publish capability evidence when the gate is closed.
+      return Object.freeze(Object.fromEntries(Object.entries(current).map(([method, operation]) => [method,
+        originalProbeReadMethods.includes(method as keyof TextCapabilityRequest) ? operation : () => {
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        }])) as TextCapabilityRequest);
+    } });
   }
 };
 /** Management has its own server gate. Opening it does not open any model,
