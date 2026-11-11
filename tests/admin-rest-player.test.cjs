@@ -15,7 +15,7 @@ function load(file, imports = {}) {
   loaded.paths = module.paths;
   loaded.require = name => Object.hasOwn(imports, name) ? imports[name] : require(name);
   loaded._compile(ts.transpileModule(fs.readFileSync(filename, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, filename);
   return loaded.exports;
 }
@@ -350,4 +350,72 @@ test("native retry and switching back to the default recording preserve mute and
     assert.equal(h.handlers.size, 0);
     assert.equal(h.windowHandlers.size, 0);
   } finally { h.dispose(); }
+});
+
+test("a started break survives same-owner verification, rejects new starts while unverified and cleans up on logout", () => {
+  const slots = [], effects = [], cleanups = [], timers = new Map();
+  let index = 0, timerId = 0;
+  const auth = { token: "original-session", sessionVerified: true, user: { isSaasAdmin: false }, tenant: {} };
+  const oldWindow = global.window, oldDocument = global.document;
+  const schedule = callback => { timers.set(++timerId, callback); return timerId; };
+  global.window = { setInterval: schedule, setTimeout: schedule, clearInterval: id => timers.delete(id), clearTimeout: id => timers.delete(id),
+    addEventListener() {}, removeEventListener() {} };
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  const hooks = {
+    useRef(initial) { return slots[index++] ??= { current: initial }; },
+    useState(initial) {
+      const at = index++;
+      if (!(at in slots)) slots[at] = typeof initial === "function" ? initial() : initial;
+      return [slots[at], value => { slots[at] = typeof value === "function" ? value(slots[at]) : value; }];
+    },
+    useEffect(fn, deps) {
+      const at = index++, previous = slots[at];
+      if (!previous || deps.some((value, n) => !Object.is(value, previous[n]))) {
+        effects.push(() => { cleanups[at]?.(); cleanups[at] = fn(); }); slots[at] = deps;
+      }
+    },
+    useCallback(fn, deps) {
+      const at = index++, previous = slots[at];
+      if (!previous || deps.some((value, n) => !Object.is(value, previous.deps[n]))) slots[at] = { fn, deps };
+      return slots[at].fn;
+    },
+  };
+  try {
+    const { RestProvider } = load("RestProvider.tsx", { react: hooks,
+      "@/features/auth/authStore": { useAuthStore: selector => selector(auth) },
+      "@/features/agent-desktop/desktop-host": { rentalDesktopHost: () => false },
+      "./RestContext": { RestContext: { Provider: "rest-context" } },
+      "./RestExperience": { RestExperience: "rest-experience" }, "./restSession": session });
+    const render = () => { index = 0; const element = RestProvider({ children: "workspace" }); effects.splice(0).forEach(fn => fn()); return element; };
+    let view = render();
+    view.props.value.start(10);
+    view = render();
+    const original = view.props.value.session;
+    const media = view.props.children[1];
+    assert.equal(original.minutes, 10);
+    assert.equal(timers.size, 2);
+    view.props.value.minimize();
+    auth.token = "rotated-session"; auth.sessionVerified = false;
+    view = render();
+    assert.equal(view.props.value.available, false);
+    assert.equal(view.props.value.session, original);
+    assert.equal(view.props.value.expanded, false);
+    assert.equal(view.props.children[1].key, media.key);
+    view.props.value.start(30);
+    view = render();
+    assert.equal(view.props.value.session, original);
+    auth.sessionVerified = true;
+    view = render();
+    assert.equal(view.props.value.available, true);
+    assert.equal(view.props.value.session.endsAt, original.endsAt);
+    auth.token = undefined; auth.user = undefined; auth.tenant = undefined; auth.sessionVerified = false;
+    render(); view = render();
+    assert.equal(view.props.value.session, null);
+    assert.equal(view.props.children[1], false);
+    assert.equal(timers.size, 0);
+  } finally {
+    cleanups.forEach(fn => fn?.());
+    if (oldWindow === undefined) delete global.window; else global.window = oldWindow;
+    if (oldDocument === undefined) delete global.document; else global.document = oldDocument;
+  }
 });

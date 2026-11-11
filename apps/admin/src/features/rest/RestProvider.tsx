@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
-import { APP_ROUTES } from "@/app/navigation";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { useAuthStore } from "@/features/auth/authStore";
 import { RestContext } from "./RestContext";
 import { RestExperience } from "./RestExperience";
 import { createRestSession, restSecondsRemaining, type RestMinutes, type RestSession } from "./restSession";
 
-/** One break belongs to the current authenticated AppShell. Ordinary navigation
+/** One break belongs to the current authenticated AppShell. Admin/Agent navigation
  * preserves it; the existing account/tenant/workspace shell key tears it down. */
 export function RestProvider({ children }: { children: ReactNode }) {
-  const { pathname } = useLocation();
-  const eligible = useAuthStore(state => Boolean(state.sessionVerified && state.user && state.tenant && !state.user.isSaasAdmin));
-  const available = eligible && pathname !== APP_ROUTES.aiOperator.path && !rentalDesktopHost();
+  const hasSession = useAuthStore(state => Boolean(state.token && state.user && state.tenant && !state.user.isSaasAdmin));
+  const verified = useAuthStore(state => state.sessionVerified);
+  const browserSession = hasSession && !rentalDesktopHost();
+  const available = browserSession && verified;
   const [session, setSession] = useState<RestSession | null>(null);
   const [expanded, setExpanded] = useState(true);
   const [now, setNow] = useState(Date.now);
@@ -38,8 +37,11 @@ export function RestProvider({ children }: { children: ReactNode }) {
   }, [available]);
 
   useEffect(() => {
-    if (!available) close();
-  }, [available, close]);
+    // A same-owner token refresh temporarily re-verifies the original session.
+    // Retain only the already-started local media; new breaks still need verified
+    // auth. Failed verification logs out, and identity changes remount AppShell.
+    if (!browserSession) close();
+  }, [browserSession, close]);
   useEffect(() => {
     if (!session) return;
     // Recompute from the deadline after tab throttling or sleep; never decrement
@@ -65,6 +67,6 @@ export function RestProvider({ children }: { children: ReactNode }) {
     expanded, entryRef, start, close, minimize, expand };
   return <RestContext.Provider value={value}>
     {children}
-    {available && session && <RestExperience key={session.id} />}
+    {browserSession && session && <RestExperience key={session.id} />}
   </RestContext.Provider>;
 }

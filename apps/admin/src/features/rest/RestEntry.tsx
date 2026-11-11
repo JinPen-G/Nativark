@@ -12,7 +12,7 @@ export function RestEntry() {
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const starting = useRef(false);
-  if (!rest.available) return null;
+  if (!rest.available && !rest.session) return null;
   if (rest.session) return <Button ref={rest.entryRef} type="text" className={styles.entry} icon={<Coffee size={17} aria-hidden />}
     aria-label={t("打开休息播放器")} aria-controls="rental-rest-player" aria-expanded={rest.expanded} onClick={rest.expand} data-sound-silent>
     <span className={styles.entryCountdown}>{rest.remaining ? formatMediaTime(rest.remaining) : t("休息结束")}</span>

@@ -38,8 +38,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 function AppShellLayout({ children }: { children: ReactNode }) {
   const { mode } = useAppearance();
-  const { pathname } = useLocation();
-  const tenantConsole = useAuthStore(state => Boolean(state.user && !state.user.isSaasAdmin)) && pathname !== APP_ROUTES.aiOperator.path;
+  const tenantConsole = useAuthStore(state => Boolean(state.user && !state.user.isSaasAdmin));
   if (rentalDesktopHost()) {
     return <div className="desktop-business-content" style={{ height: "100vh", overflow: "auto", padding: "24px" }}>
       <main className="content-canvas">{children}</main>
