@@ -18,6 +18,12 @@ PM指定的企业后继只读来源核查：原财务核定到期事实实际为
 
 可行最小下一接口：在[RentalEnterpriseReadPort](../../apps/api/src/modules/rental-core/rental-enterprise-read.port.ts)提供当前受权空间/企业/原正债权的maturity读取，复用原企业finance权限与会话前后复核，读取原核定收据、共享`CustomerCorporateCreditMaturityReceipt`语义；不自算dueAt、重核定或复制账务。需唯一作者先收口原收据纯读取/actor绑定接点，并协调shared企业投影currently-unavailable分支的最小契约/消费者窗口，本片未改Platform或Shared。
 
+PM后继要求的确定窗口提案（仅设计，公共改码权未开放）：先开两份源码——新增Core纯函数文件`apps/api/src/modules/rental-core/rental-corporate-maturity-receipt.ts`，集中原deterministic audit ID与`readCorporateCreditMaturityEvidence(log, ledger)`；修改原`customer-corporate-settlement.service.ts`的`maturityId`/`maturityReceipt`委托、`recordMaturity`收据写入，以及`readMaturity`/到期准入对同一decoder的消费。decoder无Auth/IO/事务/当前配置，不生成到期日，仍复用原Shared收据类型；营运operator/staff财务门闸、原idempotencyKey/operationLog/ledger锁不改。
+
+旧记录兼容提案：核原ID/action/tenant/customer/workspace/order/正债权ledger/currency/原金额/basis，original audit `userId`须与detail.recordedBy一致，历史操作人后来停用不否定原审计。`createdAt`是可信审计时间，旧detail.recordedAt保留原文并分别标来源，不要求毫秒相等、不编时钟误差阈值。新写入以一个原服务端Date同时写detail.recordedAt与OperationLog.createdAt，增加JSON内审计绑定版本后严格复核；不改Schema、不批量改旧审计。缺userId/createdAt或actor/主体矛盾是已有收据不可核验，不补当前人/当前时间、不当作未核定；只有确定原核定行不存在才明确未核定。未知绑定版本不按legacy忽略。
+
+企业投影后续单独确认窗口：`rental-enterprise-read.port.ts`新增按当前企业finance资格的单ledger原核定读口，取本空间原正债权及真正企业承担订单，复验原客户会话/权限修订；Shared `core.ts`中只扩maturities安全分支和审计来源元数据，消费者/DTO/OpenAPI由PM指定唯一作者。不借operator身份，不把整个客户账或历史空间开放给当前企业会话；原收据中的自由财务原因/操作键不直接进入企业页面。缺完整事实返回unavailable，未核定单独表达。本提案没有实施这些公共/企业改动，也没有修改原测试。
+
 正式账单仍无确认的生产者：当前schema只有企业invoice资料、债权ledger及渠道`PaymentReconciliationLine.statementStatus`，后者不是企业账单；原任务归ECP-10/CLOSE-CORP-VERIFY及原CORP-SETTLE账务接点。历史跨空间授权事实仍仅当前原订单主体/会话空间，不能以会员空间或新租赁allowlist补范围。原payer/guarantee只认可原订单主体、membershipSnapshot及实际资金/供应商记录；混合承担和保证金专用读源未接，继续unavailable，不造账单/账户或改营运授权。
 
 <a id="exchange-photo-core-recovery-20261112"></a>
