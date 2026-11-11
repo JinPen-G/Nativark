@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-staff-initial-start-admission-20261111"></a>
+## 员工检查任务的显式首次准入（2026-11-11）
+
+前一会员入口阶段已提交并推送 `b67e9255febf35496682f38865439577c90f33bf`，本地与GitHub已重新核对。本片修复原员工Task只创建元数据、首次start没有动作政策消费者的问题。[标准装配](../../apps/api/src/modules/ai-native/inspection-assist/inspection-standard.application.ts)在明确start时调用[首次准入](../../apps/api/src/modules/ai-native/inspection-assist/inspection-start-admission.composition.ts)，复用原staff政策权威、当前订单/员工/空间Guard、原创建收据及CAS；没有在创建或读取时签政策。
+
+只有未开始的QUEUED任务及唯一首Run、无租约/步骤/计划/资源/输入收据时可补缺失政策。原订单→scope→Task→Run锁下，所有新增政策及原CAS收据使用同一事务；已有政策的权限、revision和TTL原样保留，原运行器继续检查当前授权、能力、预算和Gateway。准入COMMIT应答未知立即停止该请求，不继续模型；原政策收据不能证明识别、检查或履约成功。标准装配同时以原Controller构造参数约束方法集合，缺接方法会成为类型错误。
+
+必要冒烟通过stdin复用既有检查媒体用例的原文件绑定、Auth/Guard、冻结输入和真实Task创建前段，仅数据库/存储为原内存夹具，没有把截取的前段称为整条旧用例通过。最终 `node --no-compilation-cache -` exit0（chunk `550fc6`）：目标政策0→11、原CAS收据11，Task/Run与原媒体读取次数不变；重复核对不重写；已开始Run拒绝；注入原准入事务COMMIT丢应答后11份原收据保留、模型调用0；当前撤权拒绝。首次执行因旧夹具未声明AiTaskExecutionPhaseReceipt表失败，随后仅在本次进程内使用原store补该空集合，未改测试文件或放宽生产缺失检查。两入口及传递类型TypeScript5.9.3/noEmit诊断0（chunk `d9199d`）。
+
+发布前再以两份暂存源码及`b67e9255f`的其余依赖构成内存快照，类型exit0（chunk `19e7c8`）及同一冒烟exit0（chunk `640729`）；35个源码映射中本片取暂存版本，其余取HEAD前像，未覆盖工作区。重放定位曾两次误选包装命令而产生语法错误，均未进入业务验证；收紧为原冒烟声明后只复验该组。文档检查仍为6处既有缺链，本片新增链接及暂存空白检查无新增问题。
+
+此阶段证明首次政策准入与标准start接线，未声称真实模型调用、MySQL锁/提交、微信宿主或完整员工履约验收。原结果定位/员工页面、日历片仍由各作者收口，独立核接后另交完整阶段。AIN-06/20及适用ENTRY原全文和实测未齐，任务百分比保持。验证审计0，任务临时目录未创建，无安装、外部连接、服务或后台进程遗留。
+
 <a id="ain-member-name-entry-closeout-20261111"></a>
 ## 普通会员管理角色的姓名入口与原请求保护（2026-11-11）
 

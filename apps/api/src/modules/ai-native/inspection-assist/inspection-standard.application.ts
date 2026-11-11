@@ -3,7 +3,7 @@
  * policies/capabilities/entitlement/budget; never an inspection submitter. */
 import { z } from 'zod';
 import { NATIVE_MODEL_PROTOCOLS } from '../native-model-protocols';
-import { isAiTaskInputSubmissionDraft } from '@rental-os/shared';
+import { AI_INSPECTION_TASK_POLICY_OPERATIONS, isAiTaskInputSubmissionDraft } from '@rental-os/shared';
 import type { ModuleRef } from '@nestjs/core';
 import type { AuthService } from '../../auth/auth.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
@@ -18,6 +18,8 @@ import { RentalIdempotencyRepository } from '../../rental-core/rental-idempotenc
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { InspectionRecognitionTaskApplication, type InspectionRecognitionTaskDependencies } from './inspection-recognition-task.application';
+import type { InspectionRecognitionTaskController } from './inspection-recognition-task.controller';
+import { prepareStaffInspectionStartAdmission } from './inspection-start-admission.composition';
 import { StaffInspectionRequestFactory } from './inspection-assist.composition';
 import { composeStaffInspectionTaskReceiptReader } from '../staff-inspection-task-receipt.composition';
 import { composeStaffInspectionTaskPolicies } from '../staff-inspection-task-policy.composition';
@@ -54,6 +56,7 @@ export function readStaffRecognitionConfiguration(value?: unknown) {
 type Dependencies = { db: PrismaService; auth: AuthService; guard: ApiAuthGuard; core: RentalCoreService;
   subscriptions: SubscriptionService; secrets: SecretBox; files: FileStorageRuntimeService; moduleRef: ModuleRef;
   adapters?: readonly ModelAdapter[]; clock?: () => Date };
+type InspectionTaskHttpApplication = ConstructorParameters<typeof InspectionRecognitionTaskController>[0];
 export function composeStandardStaffRecognition(d: Dependencies, value?: unknown) {
   const selected = readStaffRecognitionConfiguration(value);
   const inspection = { db: d.db, guard: d.guard, core: d.core, storage: d.files,
@@ -199,7 +202,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
       readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
-      continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt },
+      continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt } satisfies InspectionTaskHttpApplication,
     policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
     subscriptions: d.subscriptions, clock: d.clock, host: structuredClone(selected.host),
@@ -210,14 +213,16 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   const dependencies: InspectionRecognitionTaskDependencies = { enabled: true, inspection, limits: selected.limits,
     model: select('image', selected.image), ...(selected.audio ? { audioModel: select('audio', selected.audio) } : {}) };
   const application = new InspectionRecognitionTaskApplication(dependencies);
+  const policyOptions = { enabled: true, ttlMs: 120000, operations: AI_INSPECTION_TASK_POLICY_OPERATIONS } as const;
   return { enabled: true as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: application.create.bind(application), readCreation: receipts.readCreation.bind(receipts),
-      start: application.start.bind(application), reconcile: application.reconcile.bind(application),
+      start: async (request, reference, signal) => {
+        await prepareStaffInspectionStartAdmission(dependencies, policyOptions, request, reference, signal);
+        return application.start(request, reference, signal);
+      }, reconcile: application.reconcile.bind(application),
       readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
       readAnswer, continueAnswer: application.continueAnswer.bind(application),
-      requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt },
-    policies: composeStaffInspectionTaskPolicies(dependencies, { enabled: true, ttlMs: 120000,
-      operations: ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run',
-        'transition_task', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] }) };
+      requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt } satisfies InspectionTaskHttpApplication,
+    policies: composeStaffInspectionTaskPolicies(dependencies, policyOptions) };
 }
