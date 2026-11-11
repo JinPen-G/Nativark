@@ -44,9 +44,13 @@ AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI 
 
 上述Core最小窗口已由PM核准交Core实现，含必要snapshot-backfill兼容；AI等固定原合同，不提前修改权威提交者。Root组合真实readFulfillment/readOpening与dev2私有存储，补human-automation request/provider；原五类policy/review/queue闭合片已冻结待独立核接。发布阈值未提供保持not_captured/unavailable，不能编造policy；九项独立读取不冒称单事务快照。schema检查点和存储冻结均不代表AIN-17整项完成。
 
+Core只读合同已固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记录`5983acd3af5c3457dade88fc32515c9a2efc493f`，Root已只读核方法：allocation.readRecordedFulfillmentIssue(tenantId,orderId,tx)只读原业务tx中的实际assignment修订/startAt/location及issue_recorded，不scan、不开新事务；business.readTenantReadinessSource(tenantId)返回九项原判定、独立持久读观察窗口和真实存在的categoryBinding，不补默认版1。这些源尚未由PM核收main，配置counter原提交链仍按Core`5e8d52325/61fece91`检查点等待固定完整实现。桥接还须核issue_recorded能否按Core正式判定得到resource shortage，不能靠解析历史issue文本或直接把任意issue映成shortage；临近政策缺失仍不捕获。
+
 ## 当前QA与展示接续
 
 [P1/P3固定候选及边界](<AI Native-开发记录.md#ain-qa-current-permission-20261112>)已完成Root必要类型与实际Auth/知识模拟，PM另独立核原Task/Scope/会话列表；只按P1源码差异独立交付。P2仍须沿原scene-answer:${inputRef}:${receiptId}定位澄清报价及选单，关闭模型后只读同键、缺失保持unknown，不能用普通inputRef/contentHash键替换或恢复新执行。
+
+P1/P3已推送f86b81aea并由PM独立差异核入main6fce308c，dev1零初始政策8+3+5 CAS/一次Core的原通知链也通过。[P2](<AI Native-开发记录.md#ain-qa-clarified-quote-receipt-20261112>)已完成Root原报价/选单同键、精确reference/存储指纹及必要类型，dev1已独立核quote/selection两丢应答的实际Controller/API/session、当前owner/space/撤权、source/hash及unknown反例；按provider/readers两源码和原记录/接续立即固定交付，由PM只收本差异。12生成/公开接点、17资源和18人工消费者WIP分别保留，不随本P2合入。
 
 AIN-12生成前displayWitness、真实Run.sequence、版本化prompt/API/isolation政策及原Gateway指纹接点已落RootWIP；两后台私有源及五前端固定源均保留。三个公开只读方法已落现有会话链，但实际API/客户端/宿主的负责人整链尚未核接，非null字段basis、重排/重新解释和原办理控制仍未齐，不增加100%。Root继续时先接实际消费者，再按原全文核定，普通历史无witness不得补签。
 

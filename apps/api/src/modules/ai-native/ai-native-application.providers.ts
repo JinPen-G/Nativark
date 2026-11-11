@@ -567,7 +567,12 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
       const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
       return Object.freeze({ start: unavailable, refreshInput: unavailable, submitAnswer: unavailable, resume: unavailable, continueAnswer: unavailable,
         reconcile: unavailable, recover: unavailable, takeover: unavailable, requestCancel: unavailable,
-        readQuotePreparation: unavailable, confirmClarifiedQuote: unavailable, readClarifiedQuoteReceipt: unavailable, readExecution: unavailable });
+        readQuotePreparation: unavailable, confirmClarifiedQuote: unavailable,
+        readClarifiedQuoteReceipt: composeRequestBoundOriginalTaskRecoveryReaders(
+          originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+          { enabled: true, audience: 'operator' },
+          { policy: { sceneCode: 'quote_clarification', routeScene: 'chat', maxOutputTokens: 32768 } }).readClarifiedQuoteReceipt,
+        readExecution: unavailable });
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

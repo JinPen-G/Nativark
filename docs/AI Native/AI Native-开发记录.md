@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-qa-clarified-quote-receipt-20261112"></a>
+## QA P2关闭报价模型后的原澄清收据读取（2026-11-12）
+
+候选只改[标准provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)的报价模型关闭分支及[原request-bound reader](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)：新增只读原澄清报价读取，复用既有readAnswer的当前Auth/owner、原输入/保存答案及Run来源验证，按`scene-answer:${inputRef}:${receiptId}`读取原Core操作；前后再核保存答案、原请求hash/修订、身份和原Task关联。请求header/命令一次冻结，不能在等待后换主体或原键。关闭分支仅提供此原读取；start、confirm、新输入/继续及其他原执行仍unavailable，不构建Gateway、连接、Secrets、预算预留或新报价。
+
+Root固定索引两根/1775传递源、TypeScript5.9.3/noEmit诊断0（`6ad3d1`）。复用原多行Core报价夹具的实际disabled provider组通过（`0232dc`）：原两次mock调用、一个Core报价；丢报价应答后的同一quote恢复、实际recoverOriginal的raw reference完全匹配原澄清标签；读取不新增模型/报价，伪造原答案、经真实Auth确认的其他owner、撤会话均拒绝，新start/confirm仍unavailable。源码清单SHA-256=`9c16cf3dab09c6d33cb3bca96941c6d6a32214db9f30808f2100a910ca22fe89`。早先打印quotes[].key是否有prefix为false是错误测量：存储key本来就是原合同指纹，不是raw reference；没有改业务key来补绿。
+
+PM独立将provider`f4a9bcbd0c2e778dace531117a19371a69dd4266`和reader`783cd4ec84cb4b797190ecb12b71d25d3d2b14d8`叠在main旧schema，以实际disabled provider/Controller复核通过：存储key等于原scene-answer reference的`original-scene-quote-1`指纹且不同于普通inputRef/contentHash键；缺原quote保持quotePersistence:unknown/retryable:false，无新报价。撤权、同键改answer、alien inputRef及读中撤权拒绝，原state/quotes不变。独立脚本SHA-256=`8c050e3d0a046e64d95de2890fa8fdbda61feec0d29d2688de42a8733eb281cb`，源manifest=`c3dcf2a07847524cf00ecaac4d16a99480b682c0215a8f2889d4ca348e03416e`；Decimal状态不能直接structuredClone的验证驱动问题已改用原fixture clone，不改生产代码或断言。
+
+Root追加原选单COMMIT丢应答组通过（`0a31f3`）：原req-bound select已保存后应答丢失，关闭模型的实际provider与composeClarifiedQuoteSelectionRequests.readOriginalOperation按同键回读observed；原Core报价1、选单1、新增模型0。实际存储key按`{contract:'original-scene-quote-1',reference,scope,actor,audience}`指纹，等于原scene-answer reference且不同于普通inputRef/contentHash键。首尝试AI_RESOURCE_UNAVAILABLE的确切原因是验证夹具漏传原confirmation.normalizeOrderInput/assertOrderMatchesQuote端口；补原RentalOrderConfirmationService.prototype后只复验本组通过。此前推测是旧计划问题不成立，以此源码定位为准，没有改生产校验。
+
+dev1独立Controller/API/session完整组通过（`399712`，JS SHA-256=`0dd22cd94dbe2f7741b3f1a38a1527afab413b3a2dea961008ab51a9b1e1bdb3`）：真实会话受理、原Core准备、保存答案和未规划接续，经标准provider/Controller/Guard、实际aiConversations/aiQuoteSelections API与两个原Session，分别模拟quote ACK丢失、selection ACK丢失后关闭模型；新session仅按原journal回读同一quote/selection。原2次mock调用、报价1、选单1，恢复及负例均无新模型/报价/选单。缺原quote保持quotePersistence unknown；缺原selection时锁定unknown、不生成新select。撤会话、其他owner、Auth有效且已登记其他space、原ActionInput fingerprint和journal contentHash篡改均拒绝，新start/confirm不可用；12次raw reference精确原scene-answer标签，合同存储指纹与普通key区分。
+
+本片两候选源码固定为provider`f4a9bcbd0c2e778dace531117a19371a69dd4266`及reader`783cd4ec84cb4b797190ecb12b71d25d3d2b14d8`。PM将同两blob叠在main`3cf502b7c`的原schema/完整API，895根/noEmit诊断0，脚本SHA-256=`3c092d9f7b97cfeecdf4586041b4fe700bb7171849ae6f31cbc040647ffcb6c4`。P2原功能及关键恢复反例已核闭，按这两源码与原记录/接续独立交付，不夹AIN-12/17 WIP。角色、数据库、模型、React/HTTP宿主及丢应答均为明确模拟，不是实环境验收；所有审计0、临时目录未创建，无新增/修改测试或runner、无业务网络/迁移/安装。AIN/ENTRY原任务百分比不因该缺陷修复增加。
+
 <a id="ain-qa-current-permission-20261112"></a>
 ## QA P1当前主体通配权限与P3原读取政策整理（2026-11-12）
 
@@ -16,6 +31,8 @@
 Root只暂存38个已核P1源码（含helper），AIN-12生成/公开链、AIN-17资源/配置schema及助手WIP均未暂存。固定索引`node -`/TypeScript5.9.3/noEmit，AppModule及38根、1914传递源诊断0（`25dcb8`）；1055源清单SHA-256=`792dfa7a45cb0866ca0a2cf9ee67b8174f7d133dbf1574923a435d739acd5b9b`。同一固定索引的实际AuthService→Task authority/repository＋FormalKnowledgeAuthorizationAdapter八组exit0（`bf0c89`）：管理员/全权角色通过且原数组仍只有*、owner查询不扩大；普通准确读与缺执行权、等待后撤权/换空间/失去成员资格、缺政策/未知动作/平台actor、知识原政策actor/空间及撤权均保持拒绝。角色/DB/知识政策为明确模拟；没有模型、业务写入或真实HTTP/数据库。
 
 PM另独立实测原ScopeRepository/ConversationRepository列表及Task查询九组通过：原main拒绝*可复现，候选正常通过，等待后owner/空间改变和缺权/缺政策拒绝。该组为PM回传的独立模拟，本对话未冒称重跑。dev1原展示链7+4组也确认*读取、换空间/owner及空权限边界，展示仍不授执行。
+
+P1/P3已固定并推送`f86b81aeacda3806ee0a5ae2ddd02e8349eff9d3`，Root重读远端一致（`9428ca`）。PM仅按本提交差异核接main`6fce308c4b4a9b54cb5ecb0e48cb448bbe6d7de8`并核远端，未收父schema检查点；其main原配置＋38源内存组合/noEmit诊断0，来源清单SHA-256=`533fa52f26713e947b84ed845739e91bd5b288427c973fde366db9e139eb7ba6`。dev1另独立沿原settingsReconfirmationSetup及真实Module/Controller/Auth/Guard完成零目标政策首次start：*保留原数组，初始8 CAS、批准3 CAS、继续5 CAS，Core设置revision1→2且只写一次，批准消费一次；运行关闭、伪造原键、缺权、真实Auth确认的其他owner均拒绝（`9a34f1`，JS SHA-256=`b4e771b7627836dbec80056fc06d2175081c3f1bb066dcce3e8806d4a6653971`）。仅在内存校正原fixture nullable默认值，原TTL严格推进120001ms，未放宽生产限制、写测试/runner或增加模型调用。
 
 验证驱动失败如实保留：首轮全仓ls-files触发默认maxBuffer，改为仅所需三源码域；源运行时最初读到受版本控制的旧core.js，内存装载改为固定TS正式源码优先，未删除原稿；旧task-action fixture未记录原token.wid，被现行Auth正确拒绝，仅在内存补真实签名空间并固定原token后通过。未修改测试/runner文件、断言或skip。所有审计为空，任务临时目录未创建；原任务/ENTRY分数不因本次缺陷修复改变。
 
