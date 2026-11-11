@@ -4,6 +4,22 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="active-binding-revision-guard-20261112"></a>
+
+## 当前品类绑定修订损坏时拒绝共用写入口（2026-11-12）
+
+关联CAT-GOV-03/08及原CAT-A06/A08/A10/A17。本片从已核GitHub的`c3c93d0fafafdf0de07ce70dd1e0ce17314c2a9e`接续，只改[共用活动绑定锁](../../apps/api/src/modules/rental-core/category-active-write.ts)及既有记录/接续。原`lockActiveCategoryBinding`只比较绑定ID，未核存储的`categoryAdoptionRevision`合法性；负值/缺失值可能通过无期望绑定的初始路径，被配置或恢复快照入口继续消费。
+
+现在先拒绝不完整/非法期望绑定，再沿原租户父锁→空间锁读取；存储行必须唯一、有效active状态、完整编码/版本ID和非负安全整数采用修订。坏值/多行不能进入版本读取或返回可信binding；合法初始0及后继修订保留，未改锁序、权限、版本正文或采用事务。
+
+原API `--noEmit --incremental false --pretty false`退出0，原配置空间范围3项通过，原scope fixture的4组限定调用通过：合法0/后继、存储缺失/字符串/负值/非整数、期望坏值在取锁前拒绝、坏状态/缺版本/重复行不读版本。源码hash、命令/退出码及边界见[阶段证据](../../output/category-governance/active-binding-revision-checks-20261112.json)。fixture只返回查询行，不解释SQL或证明真库/并发/权限；未改测试或断言，完整门槛及待核实百分比不变。定向文档342链接/新锚点无新增问题，28处原分类保留；证据固化后8份本片日志/缓存和任务目录已删除，暂存路径不存在。
+
+PM指定的企业后继只读来源核查：原财务核定到期事实实际为[CustomerCorporateSettlementService](../../apps/api/src/modules/platform/customer-corporate-settlement.service.ts)的`recordMaturity`→`operationLog`→`readMaturity`（不是readCreditMaturity）。原收据绑定tenant/workspace/order/ledger/customer/currency/正债权金额，记录actor、dueAt及basisRef；读取前后复验营运财务资格，但该公共入口只接受operator/staff，不可借身份供企业客户端调用。原decoder只检查detail.recordedBy/recordedAt非空/时间合法，尚未核与log.userId/原审计时间的绑定。
+
+可行最小下一接口：在[RentalEnterpriseReadPort](../../apps/api/src/modules/rental-core/rental-enterprise-read.port.ts)提供当前受权空间/企业/原正债权的maturity读取，复用原企业finance权限与会话前后复核，读取原核定收据、共享`CustomerCorporateCreditMaturityReceipt`语义；不自算dueAt、重核定或复制账务。需唯一作者先收口原收据纯读取/actor绑定接点，并协调shared企业投影currently-unavailable分支的最小契约/消费者窗口，本片未改Platform或Shared。
+
+正式账单仍无确认的生产者：当前schema只有企业invoice资料、债权ledger及渠道`PaymentReconciliationLine.statementStatus`，后者不是企业账单；原任务归ECP-10/CLOSE-CORP-VERIFY及原CORP-SETTLE账务接点。历史跨空间授权事实仍仅当前原订单主体/会话空间，不能以会员空间或新租赁allowlist补范围。原payer/guarantee只认可原订单主体、membershipSnapshot及实际资金/供应商记录；混合承担和保证金专用读源未接，继续unavailable，不造账单/账户或改营运授权。
+
 <a id="exchange-photo-core-recovery-20261112"></a>
 
 ## 照片完成失败、失应答与过期原来源恢复（2026-11-12）

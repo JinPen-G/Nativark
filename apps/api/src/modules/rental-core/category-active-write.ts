@@ -37,12 +37,22 @@ export async function lockActiveCategoryBinding(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
   expected?: CategoryWriteBinding, categoryCode?: string
 ) {
+  if (expected && (typeof expected.categoryVersionId !== "string" || !expected.categoryVersionId.trim()
+    || !Number.isSafeInteger(expected.adoptionRevision) || expected.adoptionRevision < 0)) {
+    throw new ConflictException("期望品类绑定来源不完整或修订无效");
+  }
   await lockRentalBusinessTenant(tx, tenantId);
   const rows = await tx.$queryRaw<Array<{ categoryCode: string; categoryVersionId: string | null; categoryAdoptionRevision: number; status: string }>>(
     Prisma.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`
   );
   const workspace = rows[0];
-  if (!workspace || workspace.status.toLowerCase() !== "active" || !workspace.categoryVersionId) throw new ConflictException("经营空间不可用或尚未绑定品类版本");
+  if (rows.length !== 1 || !workspace || typeof workspace.status !== "string" || workspace.status.toLowerCase() !== "active"
+    || typeof workspace.categoryVersionId !== "string" || !workspace.categoryVersionId.trim() || typeof workspace.categoryCode !== "string"
+    || !Number.isSafeInteger(workspace.categoryAdoptionRevision) || workspace.categoryAdoptionRevision < 0) {
+    // An invalid persisted revision must not enter the unmarked initial/legacy
+    // path or be stamped onto a late recovery snapshot as a trusted binding.
+    throw new ConflictException("经营空间不可用或品类绑定修订无效");
+  }
   if (expected && (workspace.categoryVersionId !== expected.categoryVersionId || workspace.categoryAdoptionRevision !== expected.adoptionRevision)) {
     throw new ConflictException("经营空间品类版本已变化，请刷新后重新保存");
   }
