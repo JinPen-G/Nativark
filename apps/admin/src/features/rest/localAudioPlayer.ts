@@ -1,5 +1,6 @@
-/** Optional user-selected local audio. Object URLs stay in this browser session;
- * no file upload, storage, remote fallback or assumptions about the file's song. */
+/** Native playback for the deployment's fixed audio or a user-selected Object URL.
+ * The host owns source identity and URL revocation; this adapter uploads nothing,
+ * never switches sources on failure, and gates every play against the deadline. */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { MediaSnapshot } from "./youtubePlayer";
 

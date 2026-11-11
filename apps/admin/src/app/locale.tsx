@@ -17,6 +17,8 @@ const ENGLISH: Record<string, string> = {
   "本地音频": "Local audio",
   "选择本地音频": "Choose local audio",
   "更换本地音频": "Change local audio",
+  "播放默认曲目": "Play default track",
+  "默认曲目未能加载，请重试或选择本地音频。": "The default track could not load. Retry or choose a local audio file.",
   "切回官方音源": "Use official audio",
   "文件仅在当前浏览器播放，不上传。": "This file plays in your browser only. It is not uploaded.",
   "此音频无法播放，请选择浏览器支持的音频文件。": "This audio could not play. Choose a file your browser supports.",

@@ -5,7 +5,7 @@ const path = require("node:path");
 const Module = require("node:module");
 const ts = require("typescript");
 
-// Exercise the real timer and IFrame adapter without a browser, network, app
+// Exercise the real timer and media adapters without a browser, network, app
 // startup or environment files. Real provider playback is checked separately.
 const folder = path.resolve(__dirname, "../apps/admin/src/features/rest");
 function load(file, imports = {}) {
@@ -201,5 +201,153 @@ test("expiry destroys the iframe even while the completion panel remains mounted
     player.emit("onStateChange", 0); h.render().play();
     assert.equal(player.calls.length, count);
     assert.equal(h.timers.size, 0);
+  } finally { h.dispose(); }
+});
+
+function nativeHarness({ canPlay = () => true, loop = () => false } = {}) {
+  const slots = [], effects = [], cleanups = [], handlers = new Map(), windowHandlers = new Map();
+  let index = 0, source = `/${session.REST_TRACK.audio}`, enabled = true, disposed = false;
+  let playResult = () => Promise.resolve();
+  const audio = { src: "", currentTime: 0, duration: NaN, volume: 1, muted: false, paused: true, calls: [],
+    addEventListener(name, handler) { handlers.set(name, handler); },
+    removeEventListener(name, handler) { if (handlers.get(name) === handler) handlers.delete(name); },
+    emit(name) { handlers.get(name)?.(); },
+    load() { this.calls.push("load"); },
+    play() { this.calls.push("play"); return playResult(); },
+    pause() { this.calls.push("pause"); if (!this.paused) { this.paused = true; this.emit("pause"); } },
+    removeAttribute(name) { if (name === "src") this.src = ""; },
+  };
+  const oldWindow = global.window;
+  global.window = {
+    addEventListener: (name, handler) => windowHandlers.set(name, handler),
+    removeEventListener: (name, handler) => { if (windowHandlers.get(name) === handler) windowHandlers.delete(name); },
+  };
+  const hooks = {
+    useRef(initial) { return slots[index++] ??= { current: initial }; },
+    useState(initial) {
+      const at = index++;
+      if (!(at in slots)) slots[at] = typeof initial === "function" ? initial() : initial;
+      return [slots[at], value => { slots[at] = typeof value === "function" ? value(slots[at]) : value; }];
+    },
+    useEffect(fn, deps) {
+      const at = index++, previous = slots[at];
+      if (!previous || deps.some((value, n) => !Object.is(value, previous[n]))) {
+        effects.push(() => { cleanups[at]?.(); cleanups[at] = fn(); }); slots[at] = deps;
+      }
+    },
+    useCallback(fn) { return fn; },
+  };
+  const { useLocalAudioPlayer } = load("localAudioPlayer.ts", { react: hooks });
+  const ref = { current: audio };
+  const render = () => {
+    index = 0;
+    const result = useLocalAudioPlayer(ref, source, canPlay, loop, enabled);
+    effects.splice(0).forEach(fn => fn());
+    return result;
+  };
+  render();
+  return { audio, handlers, windowHandlers, render,
+    ready: () => { audio.duration = 613; audio.emit("loadedmetadata"); return render(); },
+    playing: () => { audio.paused = false; audio.emit("playing"); return render(); },
+    changeSource: next => { source = next; render(); return render(); },
+    expire: () => { enabled = false; return render(); },
+    setPlayResult: callback => { playResult = callback; },
+    flush: async () => { await Promise.resolve(); await Promise.resolve(); return render(); },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      cleanups.splice(0).forEach(fn => fn?.());
+      if (oldWindow === undefined) delete global.window; else global.window = oldWindow;
+    },
+  };
+}
+
+test("native default audio reads the actual clock, preserves one instance and releases its source on expiry", () => {
+  const h = nativeHarness();
+  try {
+    assert.equal(h.audio.src, `/${session.REST_TRACK.audio}`);
+    h.ready();
+    assert.equal(h.audio.volume, 0.4);
+    assert.equal(h.playing().status, "playing");
+    h.audio.currentTime = 127.5; h.audio.emit("timeupdate");
+    assert.equal(h.render().currentTime, 127.5);
+    assert.equal(h.render().duration, 613);
+    h.render(); h.render();
+    assert.equal(h.audio.calls.filter(call => call === "load").length, 1);
+    h.render().seek(10000);
+    assert.equal(h.audio.currentTime, 613);
+    h.expire();
+    assert.equal(h.audio.paused, true);
+    assert.equal(h.audio.src, "");
+    assert.equal(h.handlers.size, 0);
+    assert.equal(h.windowHandlers.size, 0);
+  } finally { h.dispose(); }
+});
+
+test("native audio loops only for thirty minutes and never restarts beyond the deadline", () => {
+  for (const loop of [false, true]) {
+    let permitted = true;
+    const h = nativeHarness({ canPlay: () => permitted, loop: () => loop });
+    try {
+      h.ready(); h.playing();
+      const plays = () => h.audio.calls.filter(call => call === "play").length;
+      const firstCount = plays();
+      h.audio.currentTime = 613; h.audio.emit("ended");
+      assert.equal(plays(), firstCount + Number(loop));
+      assert.equal(h.audio.currentTime, loop ? 0 : 613);
+      permitted = false;
+      const expiredCount = plays();
+      h.audio.emit("ended"); h.render().play(); h.render().seek(10);
+      assert.equal(plays(), expiredCount);
+      assert.equal(h.audio.paused, true);
+    } finally { h.dispose(); }
+  }
+});
+
+test("native autoplay rejection remains recoverable and a superseded rejection cannot replace pause or a new source", async () => {
+  const h = nativeHarness();
+  try {
+    h.setPlayResult(() => Promise.reject(new DOMException("Gesture required", "NotAllowedError")));
+    h.ready();
+    assert.equal((await h.flush()).autoplayBlocked, true);
+    assert.equal(h.render().status, "ready");
+    let rejectPending;
+    h.setPlayResult(() => new Promise((_, reject) => { rejectPending = reject; }));
+    h.render().play();
+    h.playing(); h.render().pause();
+    rejectPending(new Error("Late play rejection"));
+    assert.equal((await h.flush()).status, "paused");
+    h.render().play();
+    const rejectOldSource = rejectPending;
+    h.changeSource("blob:replacement-audio");
+    h.ready(); h.playing();
+    rejectOldSource(new Error("Previous source failed late"));
+    assert.equal((await h.flush()).status, "playing");
+    assert.equal(h.render().error, null);
+  } finally { h.dispose(); }
+});
+
+test("native retry and switching back to the default recording preserve mute and close ignores pending playback", async () => {
+  const h = nativeHarness();
+  try {
+    h.ready(); h.render().setVolume(0);
+    h.audio.emit("error");
+    assert.equal(h.render().status, "error");
+    h.render().retry(); h.render(); h.ready();
+    assert.equal(h.audio.volume, 0);
+    h.changeSource("blob:user-selection"); h.ready();
+    assert.equal(h.audio.volume, 0);
+    h.changeSource(`/${session.REST_TRACK.audio}`); h.ready();
+    assert.equal(h.audio.volume, 0);
+    let rejectPending;
+    h.setPlayResult(() => new Promise((_, reject) => { rejectPending = reject; }));
+    h.render().play(); h.dispose();
+    const callsAtClose = h.audio.calls.length;
+    rejectPending(new Error("Closed while starting"));
+    await h.flush();
+    assert.equal(h.audio.src, "");
+    assert.equal(h.audio.calls.length, callsAtClose);
+    assert.equal(h.handlers.size, 0);
+    assert.equal(h.windowHandlers.size, 0);
   } finally { h.dispose(); }
 });

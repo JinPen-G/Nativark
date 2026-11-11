@@ -23,14 +23,17 @@ export function formatMediaTime(seconds: number): string {
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
-// Official album audio supplied to YouTube by Universal Music Group, not the lyric video.
-// The title says “10 Minute Version”; its actual published duration is 10:13.
+// Default audio is the owner-supplied MP3 in the deployment's local media folder.
+// Relative asset paths are resolved against Vite's base by the host. The optional
+// YouTube adapter retains its original video ID; it is not loaded by this player.
 export const REST_TRACK = {
   id: "aPnqx56V8-0",
   title: "All Too Well",
   version: "10 Minute Version · Taylor’s Version",
   artist: "Taylor Swift",
   album: "Red (Taylor’s Version)",
-  artwork: "https://i.ytimg.com/vi/aPnqx56V8-0/maxresdefault.jpg",
+  audio: "media/rest-player/all-too-well-10-minute-version.mp3",
+  artwork: "media/rest-player/red-taylors-version.jpg",
+  albumUrl: "https://music.apple.com/cn/album/red-taylors-version-a-message-from-taylor/1590368448",
   url: "https://www.youtube.com/watch?v=aPnqx56V8-0",
 } as const;
