@@ -23,7 +23,7 @@
 ## 3. 下一入口与原缺口
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
-   写锁`9380d1bab`及唯一读取入口`forWorkspace`现在均拒绝坏采用修订，读口保留初始0/历史明确版本并先捕获同一次绑定；本片API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard；必要的unique替换/草稿上下文helper及消费片另交，不能默认继承counter/schema祖先。真实并发/恢复仍待原门槛。
+   写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。
    AIN-17下一最小口：按固定配置行合同由唯一作者应用两列/DDL，消费`readOpeningConfiguration`的真实profile修订/来源及顶层settingsRevision；ResourcePorts使用已新增的原事务问题读取和锁外原九项来源。业务配置只有价格子段共用事务，九项不是同事务快照；继续核实际参加者，不能在`recordIssue`持锁时重入扫描/另开业务事务，缺临近政策/事实/当前授权保持not_captured。正常/空update/并发/饱和/回滚及真实重放仍需证据。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。
 3. 企业作者消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)，Core/本人原身份与K/C边界保持。照片已有原5组正常消费及本7组恢复限定结果，完成失败保留原占用/目标、失应答及票据过期均不重传；证据唯一见[恢复阶段](<Rental Core-开发记录.md#exchange-photo-core-recovery-20261112>)。下一口由企业唯一作者接HTTP/DI/实际消费者，并按原门槛核真实权限/事务/存储/宿主；未冻结照片不可接受，原11组替身不替代实际企业参与者或正式验收。本树继续品类治理主线。
