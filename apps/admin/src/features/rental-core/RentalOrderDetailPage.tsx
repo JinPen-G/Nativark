@@ -21,6 +21,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OrderFactsEntry } from "@/features/ai-native/OrderFactsEntry";
 import { ExchangeInspectionPreparationPanel } from "./ExchangeInspectionPreparationPanel";
+import { ApprovedEnterpriseExchangePanel } from "./ApprovedEnterpriseExchangePanel";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
 import { OrderQuickActionNotice } from "./OrderQuickActionNotice";
 import { OrderDocumentsPanel } from "./OrderDocumentsPanel";
@@ -1087,7 +1088,11 @@ function RentalOrderDetailContent() {
 {preauthorizationRequirement > 0 && <Button danger onClick={() => setFundingOperation({ instrument: "preauthorization", action: "fail" })}>{t("记录预授权冻结失败")}</Button>}</>}</>,
 }} /> : <p className={detailStyles.note}>{t("当前账号无资金查看权限")}</p>}
 </div> },
-    { key: "inspection", label: <span>{t("检查与处置")}{pendingInspectionCount > 0 ? ' · ' + pendingInspectionCount : ''}</span>, children: <div className={detailStyles.stack}><ExchangeInspectionPreparationPanel order={detail} operationToken={operationToken} unavailable={order.isFetching || Boolean(order.error)} /><QueryState loading={inspections.isLoading} error={inspections.error}>{inspections.data?.length ? <ListSection title={t("检查、使用量与异常审核")}><Space orientation="vertical" style={{ width: "100%" }} size={16}>
+    { key: "inspection", label: <span>{t("检查与处置")}{pendingInspectionCount > 0 ? ' · ' + pendingInspectionCount : ''}</span>, children: <div className={detailStyles.stack}><ExchangeInspectionPreparationPanel order={detail} operationToken={operationToken} unavailable={order.isFetching || Boolean(order.error)} /><ApprovedEnterpriseExchangePanel order={detail} operationToken={operationToken} unavailable={order.isFetching || Boolean(order.error)} onApplied={async receipt => {
+      const [currentOrder, currentChanges] = await Promise.all([order.refetch({ throwOnError: true }), changes.refetch({ throwOnError: true })]);
+      if (currentOrder.data?.id !== receipt.orderId || !currentChanges.data?.some(change => change.id === receipt.changeId && change.orderId === receipt.orderId
+        && change.workspaceId === receipt.workspaceId && change.type === "post_pickup_exchange" && change.status === "applied" && change.idempotencyKey === receipt.coreIdempotencyKey)) throw new Error(t("原换货变更刷新仍待核对"));
+    }}/><QueryState loading={inspections.isLoading} error={inspections.error}>{inspections.data?.length ? <ListSection title={t("检查、使用量与异常审核")}><Space orientation="vertical" style={{ width: "100%" }} size={16}>
         {(inspections.data ?? []).some(record => Boolean(record.usageReadings?.length)) && <Table rowKey={(row) => `${row.inspectionId}:${row.fieldCode}`} size="small" pagination={false} onRefresh={() => inspections.refetch()} loading={inspections.isLoading} refreshing={inspections.isFetching} dataSource={(inspections.data ?? []).flatMap((record) => (record.usageReadings ?? []).map((reading) => ({ ...reading, inspectionId: record.id, stage: record.stage, corrections: (record.usageCorrections ?? []).filter((correction) => correction.fieldCode === reading.fieldCode) })))} columns={[
           { title: t("阶段"), dataIndex: "stage", render: (value) => value === "pickup" ? t("领取基线") : t("归还读数") },
           { title: t("读数字段"), dataIndex: "fieldCode" },

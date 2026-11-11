@@ -106,12 +106,18 @@ export class RentalExchangeInspectionMediaService {
       await this.inspections.mediaScope(authorization, actor);
       return { row: claimedRow, source, dispatchedClaim: this.claim(claimedRow) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
-    // Only this invocation's acknowledged claim can read bytes. A lost claim/GET/commit
-    // acknowledgement leaves a durable unknown, never a lease that may be reclaimed.
-    const dispatchedClaim = initial.dispatchedClaim;
+    // Only this invocation's acknowledged claim can read staging or PUT once.
+    // An existing frozen destination may be observed under the original claim;
+    // no TTL, missing acknowledgement or absent target authorizes another write.
+    if (initial.source.state === "completed") return { state: "observed", source: initial.source, retryable: false };
+    const dispatchedClaim = initial.dispatchedClaim ?? this.claim(initial.row);
     if (!dispatchedClaim) return { state: "observed", source: initial.source, retryable: false };
     await this.inspections.mediaScope(authorization, actor);
-    const binding = this.binding(initial.row, orderId), proof = await this.files.inspectExchangeInspectionUpload(initial.row.tenantId, initial.source.fileAssetId, this.owner(initial.row), binding.configRowHash, binding.storageLocationHash);
+    const binding = this.binding(initial.row, orderId);
+    const proof = initial.dispatchedClaim
+      ? await this.files.inspectExchangeInspectionUpload(initial.row.tenantId, initial.source.fileAssetId, this.owner(initial.row), binding.configRowHash, binding.storageLocationHash)
+      : await this.files.reconcileExchangeInspectionUpload(initial.row.tenantId, initial.source.fileAssetId, this.owner(initial.row), binding.configRowHash, binding.storageLocationHash);
+    if (!proof) return { state: "observed", source: initial.source, retryable: false };
     await this.inspections.mediaScope(authorization, actor);
     return this.prisma.$transaction(async tx => {
       const { scope, order } = await this.inspections.mediaOrder(authorization, actor, orderId, tx), row = (await this.rows(tx, scope, key))[0];

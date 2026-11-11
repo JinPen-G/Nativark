@@ -1,5 +1,5 @@
 /** Customer enterprise workflows and merchant decisions use separate authentication realms. */
-import { Body, Controller, Get, Param, Post, Put, Query, Req, UnauthorizedException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException, ServiceUnavailableException } from "@nestjs/common";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
@@ -37,6 +37,23 @@ export class EnterpriseWorkflowsController {
   @Get("orders/:orderId/exchange-inspections/:preparationId")
   exchangeInspectionMaterial(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Param("preparationId") preparationId: string) {
     return this.inspectionConsentReader().material(req.headers?.authorization, client(req), orderId, preparationId);
+  }
+  @Get("orders/:orderId/exchange-inspections/:preparationId/photos/:fileAssetId")
+  async exchangeInspectionPhoto(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Param("preparationId") preparationId: string,
+    @Param("fileAssetId") fileAssetId: string, @Query("preparationHash") preparationHash: unknown,
+    @Res() response: { setHeader(name: string, value: string): unknown; send(value: Buffer): unknown }) {
+    if (typeof preparationHash !== "string" || !/^[a-f0-9]{64}$/u.test(preparationHash)) throw new BadRequestException("原检查准备哈希无效");
+    const result = await this.inspectionConsentReader().photo(req.headers?.authorization, client(req), orderId, preparationId, fileAssetId, preparationHash);
+    if (!Buffer.isBuffer(result.bytes) || !["image/png", "image/jpeg"].includes(result.mimeType)
+      || !Number.isSafeInteger(result.sizeBytes) || result.sizeBytes < 1 || result.bytes.length !== result.sizeBytes) {
+      throw new ServiceUnavailableException("原检查照片字节不可核对");
+    }
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Vary", "Authorization");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Content-Type", result.mimeType);
+    response.setHeader("Content-Length", String(result.bytes.length));
+    return response.send(result.bytes);
   }
   @Post("orders/:orderId/exchange-inspection-consents")
   confirmExchangeInspection(@Req() req: CustomerRequest, @Param("orderId") orderId: string, @Body() input: ConfirmEnterpriseExchangeInspectionDto) {

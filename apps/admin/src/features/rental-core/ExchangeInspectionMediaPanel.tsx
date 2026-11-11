@@ -8,8 +8,8 @@ import { useLocale } from "@/app/locale";
 import { useOriginalExchangeInspectionMedia } from "./original-exchange-inspection-media";
 import styles from "./OrderDetail.module.css";
 
-type Props = { orderId: string; orderRevision: string; operationToken?: string; request?: RentalExchangeInspectionRequirementsRequest; unavailable: boolean; newDisabled: boolean };
-export function ExchangeInspectionMediaPanel({ orderId, orderRevision, operationToken, request, unavailable, newDisabled }: Props) {
+type Props = { orderId: string; orderRevision: string; operationToken?: string; request?: RentalExchangeInspectionRequirementsRequest; unavailable: boolean; newDisabled: boolean; onSource?: (source: RentalExchangeInspectionMediaSource) => void };
+export function ExchangeInspectionMediaPanel({ orderId, orderRevision, operationToken, request, unavailable, newDisabled, onSource }: Props) {
   const { t } = useLocale(), operation = useOriginalExchangeInspectionMedia(orderId, operationToken, JSON.stringify([orderRevision, request, unavailable]));
   const owner = operation.identity, latest = useRef(owner); latest.current = owner;
   const mounted = useRef(true), sequence = useRef(0);
@@ -28,7 +28,17 @@ export function ExchangeInspectionMediaPanel({ orderId, orderRevision, operation
   const active = requirements?.owner === owner ? requirements.value : undefined;
   const fields = active?.templates.flatMap(row => row.template.fields.filter(field => field.type === "photo").map(field => ({ row, field, key: JSON.stringify([row.side, row.template.id, row.template.version, field.code]) }))) ?? [];
   const chosen = fields.find(field => field.key === selection);
-  const record = (value: RentalExchangeInspectionMediaSource) => setRecords(previous => ({ owner, values: [...(previous?.owner === owner ? previous.values.filter(row => row.operationKey !== value.operationKey) : []), value] }));
+  const useSource = (value: RentalExchangeInspectionMediaSource) => {
+    current();
+    if (newDisabled || !ready || !active || value.state !== "completed" || !/^[a-f0-9]{64}$/u.test(value.requirementsHash)
+      || value.expectedOrderUpdatedAt !== orderRevision || !fields.some(item => item.row.side === value.side && item.row.template.id === value.templateId
+        && item.row.template.version === value.templateVersion && item.field.code === value.fieldCode)) throw new Error(t("须核对本次原影像要求后使用来源"));
+    onSource?.(structuredClone(value));
+  };
+  const record = (value: RentalExchangeInspectionMediaSource) => {
+    setRecords(previous => ({ owner, values: [...(previous?.owner === owner ? previous.values.filter(row => row.operationKey !== value.operationKey) : []), value] }));
+    if (onSource && value.state === "completed" && active?.requirementsHash === value.requirementsHash) useSource(value);
+  };
   const report = (message: string) => { if (mounted.current && latest.current === owner) setFailure({ owner, message: t(message) }); };
   const read = async () => {
     current(); if (gate.current.blocked || !gate.current.request) throw new Error(t("请先核对原整行、替换商品与当前可用资产"));
@@ -64,7 +74,7 @@ export function ExchangeInspectionMediaPanel({ orderId, orderRevision, operation
     catch (error) { report("原影像来源不可核对，保留原引用且不重发"); throw error; }
   };
   return <ListSection title={t("换货检查专用影像")}>
-    <Alert type="info" title={t("影像核验不等于检查准备完成")} description={t("仅为原照片字段建立影像来源；尚未用于检查准备、本人检查同意或换货执行。上传结果未知只核对原来源，不重传、不重新完成。")}/>
+    <Alert type="info" title={t("本次检查影像来源")} description={t("完成的专用来源可在对应模板字段中选择，保存准备后由本人审阅具体检查。上传结果未知时仅核对原来源。")}/>
     {!ready && <Alert type="warning" title={t("当前订单或检查权限不可用")}/>}
     {operation.storageError && <Alert type="error" title={t(operation.storageError)}/>}
     {failure?.owner === owner && <Alert type="error" title={failure.message}/>}
@@ -91,6 +101,8 @@ export function ExchangeInspectionMediaPanel({ orderId, orderRevision, operation
       <dl className={styles.facts}><div><dt>{t("原记录")}</dt><dd>{value.id}</dd></div><div><dt>{t("原订单修订")}</dt><dd>{value.expectedOrderUpdatedAt}</dd></div>
         <div><dt>{t("原检查照片字段")}</dt><dd>{value.fieldCode} · {value.templateVersion}</dd></div><div><dt>{t("文件")}</dt><dd>{value.fileName} · {value.sizeBytes} B</dd></div>
         {value.completion && <><div><dt>{t("影像尺寸")}</dt><dd>{value.completion.width} × {value.completion.height}</dd></div><div><dt>{t("核验时间")}</dt><dd>{new Date(value.completion.completedAt).toLocaleString()}</dd></div></>}</dl>
+      {onSource && value.state === "completed" && <ActionButton intent="review" label={t("用于本次检查字段")} disabled={newDisabled || operation.busy || !active} onAction={async () => useSource(value)}/>}
+      {onSource && value.state === "completed" && active && active.requirementsHash !== value.requirementsHash && <p className={styles.note}>{t("原来源待服务端核验")}</p>}
     </div>)}
   </ListSection>;
 }

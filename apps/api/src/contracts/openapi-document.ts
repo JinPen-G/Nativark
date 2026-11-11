@@ -4086,6 +4086,14 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
       { name: "allocationId", in: "query" as const, required: false, schema: { type: "string" as const, minLength: 1, maxLength: 191 } },
       { name: "replacementItemGroupId", in: "query" as const, required: false, schema: { type: "string" as const, minLength: 1, maxLength: 191 } }
     ] } : {}) })),
+    clientOperation("get", "/api/client/v1/enterprise/orders/{orderId}/exchange-inspections/{preparationId}/photos/{fileAssetId}",
+      "enterpriseExchangeInspectionPhoto", "Read this using customer's exact frozen PNG/JPEG under the current inspection and preparation hash", {
+        parameters: [
+          ...["orderId", "preparationId", "fileAssetId"].map(name => ({ name, in: "path" as const, required: true,
+            schema: { type: "string" as const, pattern: "^[A-Za-z0-9._:-]{1,191}$", minLength: 1, maxLength: 191 } })),
+          { name: "preparationHash", in: "query", required: true, schema: { type: "string", pattern: "^[a-f0-9]{64}$", minLength: 64, maxLength: 64 } }
+        ], responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "image/*"
+      }),
     { method: "get", path: "/api/membership/enterprise-workflows/applications/{id}/files/{fileId}", tag: "Membership", operationId: "readEnterpriseApplicationEvidence", summary: "Read original application evidence under current dual authority; revalidate request and attachment after bytes, no bearer download link", permissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], authRequired: true, responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "application/octet-stream" },
     backlogOperation("get", "/api/membership/enterprise-workflows/operations/{key}", "Membership", "readMerchantEnterpriseWorkflowOperation", "Read this operator's original workflow result", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
     backlogOperation("post", "/api/membership/enterprise-workflows/orders/{orderId}/exchange-approvals/{id}/execute", "Membership", "executeEnterpriseApprovedExchange", "Execute the bound approved exchange under original merchant order and workspace authority", ["rental-os:corporate:manage"], true, "ExecuteApprovedRentalExchangeRequest", "RentalApprovedExchangeReceipt"),

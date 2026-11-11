@@ -1,14 +1,15 @@
 /** Original using-customer consent to a specific prepared inspection/handover.
  * Reuses ClientAuth/ALS, scopes every read, and commits the original key with
  * consent. Does not approve expenses, reserve stock or perform an exchange. */
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, RentalOrderV1Status } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { ConfirmRentalExchangeInspectionRequest, RentalExchangeInspectionConsent, RentalExchangeInspectionConsentOriginal,
-  RentalExchangeInspectionCustomerMaterial, RentalExchangeInspectionPreparation } from "@rental-os/shared";
+import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE, type ConfirmRentalExchangeInspectionRequest, type RentalExchangeInspectionConsent, type RentalExchangeInspectionConsentOriginal,
+  type RentalExchangeInspectionCustomerMaterial, type RentalExchangeInspectionPreparation } from "@rental-os/shared";
 import { getRequestIdentity } from "../../common/request-identity";
 import { ClientAuthService, type ClientRequestContext } from "../client/client-auth.service";
 import { PrismaService } from "../database/prisma.service";
+import { FileStorageRuntimeService } from "../integrations/file-storage.runtime.service";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
 import { readPreparedExchangeInspection, verifyPreparedExchangeInspectionMedia, type ExchangeInspectionPreparationRow } from "./rental-exchange-inspection-preparation.read";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
@@ -67,7 +68,7 @@ export async function verifyExchangeInspectionConsentReceipt(idempotent: RentalI
 @Injectable()
 export class RentalExchangeInspectionConsentService {
   constructor(private readonly prisma: PrismaService, private readonly idempotent: RentalIdempotentActionService,
-    private readonly auth: ClientAuthService) {}
+    private readonly auth: ClientAuthService, @Optional() private readonly files?: FileStorageRuntimeService) {}
 
   private principal(context: ClientRequestContext) {
     const identity = getRequestIdentity();
@@ -133,6 +134,33 @@ export class RentalExchangeInspectionConsentService {
       await this.customer(authorization, customer);
       return exchangeInspectionCustomerMaterial(value, customer.customerId, row.payloadHash);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    await this.customer(authorization, customer); return result;
+  }
+
+  /** Same original using-customer authority and material hash as consent. File
+   * IO occurs between two scoped reads; revoked/changed material is never sent. */
+  async photo(authorization: string | undefined, context: ClientRequestContext, orderId: string, preparationId: string,
+    fileAssetId: string, preparationHash: string) {
+    if (!this.files) throw new ServiceUnavailableException("原检查照片读取服务未装配");
+    if (![orderId, preparationId, fileAssetId].every(validId) || !validHash(preparationHash)) throw new BadRequestException("原检查照片或材料引用无效");
+    const customer = Object.freeze({ ...context }); await this.customer(authorization, customer);
+    const source = async () => this.prisma.$transaction(async tx => {
+      const order = await this.ownOrder(tx, customer, orderId), { row, value } = await this.preparation(tx, customer, orderId, preparationId);
+      if (order.status !== RentalOrderV1Status.RENTING || order.updatedAt.toISOString() !== value.expectedOrderUpdatedAt
+        || row.payloadHash !== preparationHash) throw new ConflictException("原检查材料或订单已变化");
+      await verifyPreparedExchangeInspectionMedia(tx, customer.tenantId, value);
+      const media = (value.acceptedMedia ?? []).filter(media => media.fileAssetId === fileAssetId);
+      if (media.length !== 1) throw new NotFoundException("照片不属于本人当前具体检查材料");
+      await this.customer(authorization, customer);
+      return { media: media[0], actorUserId: value.actorUserId, preparationHash: row.payloadHash };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const before = await source();
+    const result = await this.files.readFrozenExchangeInspectionEvidence(customer.tenantId, fileAssetId,
+      { businessType: "rental_order", businessId: orderId, uploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
+        workspaceId: customer.workspaceId, actorUserId: before.actorUserId, exchangeInspectionSourceId: before.media.sourceId }, before.media.contentHash);
+    await this.customer(authorization, customer);
+    const after = await source();
+    if (requestFingerprint(before) !== requestFingerprint(after)) throw new ConflictException("原照片材料在读取期间发生变化");
     await this.customer(authorization, customer); return result;
   }
 

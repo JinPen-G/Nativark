@@ -97,7 +97,10 @@ http.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error?.config as (InternalAxiosRequestConfig & { _authRetry?: boolean; _authRefreshToken?: string; _sessionEpoch?: number }) | undefined;
-    if (original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
+    // Cancellation belongs to the original caller even while authentication
+    // waits. A refreshed credential cannot authorize a cancelled redispatch.
+    const callerSignal = original?.signal;
+    if (callerSignal?.aborted || original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
     const isAuthEndpoint = original?.url?.includes("/auth/login") || original?.url?.includes("/auth/refresh");
     if (error?.response?.status === 401 && original && !original._authRetry && !isAuthEndpoint) {
       const refreshToken = window.localStorage.getItem("rental_refresh_token");
@@ -106,11 +109,16 @@ http.interceptors.response.use(
         original._authRefreshToken = refreshToken;
         try {
           const session = await refreshSession(refreshToken);
-          if (original._sessionEpoch !== currentSessionEpoch()) throw error;
+          if (callerSignal?.aborted || original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
           const accessToken = session?.accessToken ?? window.localStorage.getItem("rental_access_token");
           if (!accessToken) throw error;
-          // 会话可能由本页或另一个标签更新；重试一律挂当前代 signal。
-          original.signal = currentSessionSignal();
+          // Retain caller cancellation and the current session boundary for
+          // the entire replay, including cancellation after it is dispatched.
+          const retrySignal = callerSignal
+            ? AbortSignal.any([callerSignal as AbortSignal, currentSessionSignal()])
+            : currentSessionSignal();
+          if (retrySignal.aborted) return Promise.reject(error);
+          original.signal = retrySignal;
           original.headers.Authorization = `Bearer ${accessToken}`;
           return http.request(original);
         } catch {
@@ -119,7 +127,7 @@ http.interceptors.response.use(
         }
       }
     }
-    if (original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
+    if (callerSignal?.aborted || original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
     if (error?.response?.status === 401) {
       // 仅当失败时使用的 refresh token 仍是当前 token 才能清理。另一个标签页
       // 可能已先完成轮换并写入新会话，盲删会把成功标签页一起登出。

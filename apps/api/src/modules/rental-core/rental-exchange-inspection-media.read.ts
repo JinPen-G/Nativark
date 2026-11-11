@@ -69,10 +69,13 @@ export async function readExchangeInspectionMedia(row: ExchangeInspectionMediaRo
   if (!row.completion && row.completionHash !== null) throw new ConflictException("原影像完成证据缺失");
   const asset = await tx.fileAsset.findFirst({ where: { id: source.fileAssetId, tenantId: row.tenantId }, include: { uploadSession: true } });
   const session = asset?.uploadSession, metadata = asset?.metadata as Record<string, unknown> | null | undefined;
+  const evidence = metadata?.exchangeInspectionFrozenEvidence as { sourceId?: string; contentHash?: string; sizeBytes?: number; mimeType?: string } | undefined;
+  const freezePlan = evidence?.sourceId === row.id && evidence.contentHash === frozenFileContentHash(asset!)
+    && evidence.sizeBytes === source.sizeBytes && evidence.mimeType === source.mimeType;
   // A staging PUT can remain valid after its first GET. A completed claim must
   // refer to the original source's committed immutable object, not that mutable
   // staging key. Retain the original binding rather than rewriting its history.
-  const storageMatches = row.completion
+  const storageMatches = row.completion || freezePlan
     ? metadata?.stagingStorageKey === storageKey && session?.storageKey === asset?.storageKey
     : session?.storageKey === storageKey && asset?.storageKey === storageKey;
   if (!asset || asset.businessModule !== "rental-core" || asset.businessType !== "rental_order" || asset.businessId !== orderId
@@ -98,6 +101,8 @@ export async function readExchangeInspectionMedia(row: ExchangeInspectionMediaRo
     }
     return { ...source, state: "completed", completion };
   }
+  if (claim && freezePlan && (asset.status === "pending_upload" && session.status === "freeze_pending"
+    || asset.status === "active" && session.status === "completed")) return { ...source, state: "completion_unknown" };
   if (asset.status !== "pending_upload" || session.status !== "pending_upload") throw new ConflictException("原影像上传状态需人工核对，不能重传");
   return { ...source, state: claim || Date.parse(source.expiresAt) <= Date.now() ? "completion_unknown" : "pending_upload" };
 }
