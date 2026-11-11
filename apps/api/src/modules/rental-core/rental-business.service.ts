@@ -14,7 +14,7 @@ import { snapshotInspectionTemplate } from "./rental-inspection-template-snapsho
 import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./category-capability-conditions";
 import { readRentalCategoryCode } from "./category-identity";
 import { readRentalInventoryBasis, assertInventoryBasisContext } from "./rental-quote-inventory-basis";
-import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
+import { assertCapabilityHookRuntimeAvailable, CapabilityBlockedException, CapabilityHookRuntime, requiresCapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
@@ -5941,11 +5941,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     quote: RentalQuoteSnapshotV1
   ): Promise<RentalCapabilityDecisionSnapshot[] | undefined> {
-    if (!this.hooks) {
-      if (context.category.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
-      return undefined;
-    }
+    if (!this.hooks && context.category.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
     const requirements = resolveCapabilityRequirements(context.category, quote.capabilityRequirementsSnapshot);
+    assertCapabilityHookRuntimeAvailable(this.hooks, requirements.required, quote.capabilitySnapshot ?? []);
+    if (!this.hooks) return undefined;
     const workspaceId = this.workspaceOf(tenantId);
     // 富化走与订单、配货**同一份**公共实现（P2-1）：早前这里另写一遍，
     // 找不到商品时用 id 冒充名称、`inventoryMode as never`，与订单侧对同一条脏数据
@@ -7753,12 +7752,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private async captureActionCapabilityBasis(tenantId: string, context: BusinessContext,
     lines: Parameters<typeof capabilityRequirementRoots>[0], fulfillmentMode: RentalFulfillmentMode, categoryVersionId?: string) {
     const conditional = Boolean(context.category.conditionalCapabilities?.length);
-    if (conditional && (!categoryVersionId || !this.hooks || !this.capabilities)) throw new ServiceUnavailableException("条件业务需要发布版本、能力实例及真实执行模块");
-    if (conditional) this.hooks!.assertCategoryComposition(context.category);
+    const requiredHooks = requiresCapabilityHookRuntime(context.category.requiredCapabilities);
+    assertCapabilityHookRuntimeAvailable(this.hooks, context.category.requiredCapabilities);
+    if ((conditional || requiredHooks) && (!categoryVersionId || !this.hooks || !this.capabilities)) throw new ServiceUnavailableException("能力业务需要发布版本、能力实例及真实执行模块");
+    if (conditional || requiredHooks) this.hooks!.assertCategoryComposition(context.category);
     const capabilityRequirementsSnapshot = conditional
       ? captureCapabilityRequirements(context.category, context.groups, capabilityRequirementRoots(lines), fulfillmentMode) : undefined;
     const capabilitySnapshot = this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined;
-    if (conditional) {
+    if (conditional || requiredHooks) {
       const requirements = resolveCapabilityRequirements(context.category, capabilityRequirementsSnapshot);
       const equipment = buildCapabilityEquipment(new Map(context.groups.map(group => [group.id, group])),
         capabilityRequirementRoots(lines).map(itemGroupId => ({ itemGroupId, quantity: 1 })), context.category.businessModel.assetFields);

@@ -22,7 +22,7 @@ import { assertInspectionObservations } from "./rental-inspection-observation";
 import { approvedExchangeEvidence, type ApprovedExchangeAuthority } from "./rental-approved-exchange-authorization";
 import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental-inspection-evidence";
 import { frozenFileContentHash } from "../integrations/file-content-binding";
-import { CapabilityHookRuntime } from "./capability-hook.runtime";
+import { assertCapabilityHookRuntimeAvailable, CapabilityHookRuntime, requiresCapabilityHookRuntime } from "./capability-hook.runtime";
 import { MembershipService } from "../platform/membership.service";
 import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service";
 import { RentalBusinessService } from "./rental-business.service";
@@ -418,7 +418,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 统一从这里取空间与品类：两者都由服务自身按会话解析（`workspaceOf` / `state`），
    * 不接受调用方传入——否则调用方可以声明另一个空间或品类来改变判定口径。
    *
-   * 返回 undefined 表示「本进程没有 Hook 运行时」（仅单测直接构造的场景）。
+   * 只有不依赖Hook且没有已启用Hook依据的基础路径可缺执行器并返回undefined。
    * 能力阻止时 `evaluate` 会抛 `CapabilityBlockedException`，本方法不吞异常：
    * 阻止必须让调用中的 Core 动作整体失败，这就是 fail-closed。
    */
@@ -439,20 +439,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const orderPayload = payload?.order && typeof payload.order === "object"
       ? payload.order as Record<string, unknown> : payload;
     const historical = subjectRef.type === "order" && orderPayload
-      ? orderPayload as Pick<RentalOrder, "categoryCode" | "categoryVersionId" | "capabilityPolicy" | "capabilityRequirementsSnapshot" | "lines" | "fulfillmentMode"> : undefined;
-    if (!this.hooks) {
-      if (historical?.capabilityRequirementsSnapshot || (historical?.categoryVersionId && this.categoryResolver &&
-          (await this.categoryResolver.forVersion(historical.categoryCode, historical.categoryVersionId, tx)).conditionalCapabilities?.length)) {
-        throw new ServiceUnavailableException("条件能力执行模块不可用");
-      }
-      return undefined;
-    }
+      ? orderPayload as Pick<RentalOrder, "categoryCode" | "categoryVersionId" | "capabilityPolicy" | "capabilityRequirementsSnapshot" | "capabilitySnapshot" | "lines" | "fulfillmentMode"> : undefined;
+    if (!this.hooks && historical?.capabilityRequirementsSnapshot) throw new ServiceUnavailableException("条件能力执行模块不可用");
     if (historical?.capabilityRequirementsSnapshot && (!historical.categoryVersionId || !this.categoryResolver)) {
       throw new ConflictException("条件履约依据缺少可核对的品类版本");
     }
+    if (historical?.categoryVersionId && !this.categoryResolver) throw new ServiceUnavailableException("历史品类版本解析服务不可用");
     const definition = historical?.categoryVersionId && this.categoryResolver
       ? await this.categoryResolver.forVersion(this.state(tenantId).profile.categoryCode, historical.categoryVersionId, tx)
       : historical ? undefined : await this.getWorkspaceCategory(tenantId);
+    if (!this.hooks) {
+      if (historical && definition?.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
+      assertCapabilityHookRuntimeAvailable(this.hooks, definition?.requiredCapabilities ?? [],
+        [...(instances ?? []), ...(historical?.capabilitySnapshot ?? [])]);
+      return undefined;
+    }
     const executableSubject = definition && Array.isArray(payload?.equipment)
       ? { ...payload, equipment: projectCapabilityEquipment(payload.equipment as RentalCapabilityEquipmentLine[], definition.businessModel.assetFields) }
       : subject;
@@ -511,15 +512,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   private async assertExtensionCapabilityExecution(tenantId: string, order: RentalOrder,
     basis: RentalOrderExtension["executionBasis"], tx: RentalFactTx, recheckCurrent: boolean) {
-    if (!basis?.categoryVersionId || !this.categoryResolver) {
-      if (basis?.capabilityRequirementsSnapshot || order.capabilityRequirementsSnapshot) throw new ConflictException("续租缺少可核对的条件执行版本");
+    if (!basis?.categoryVersionId) {
+      if (order.categoryVersionId || basis?.capabilityRequirementsSnapshot || order.capabilityRequirementsSnapshot) throw new ConflictException("续租缺少可核对的品类执行版本");
       return;
     }
+    if (!this.categoryResolver) throw new ServiceUnavailableException("续租品类版本解析服务不可用");
     const definition = await this.categoryResolver.forVersion(basis.categoryCode, basis.categoryVersionId, tx);
-    if (!definition.conditionalCapabilities?.length) return;
-    resolveCapabilityRequirements(definition, basis.capabilityRequirementsSnapshot);
-    const snapshot = basis.capabilityRequirementsSnapshot!;
-    const lines = snapshot.rootItemGroupIds.map(itemGroupId => ({ itemGroupId, quantity: 1 }));
+    const requirements = resolveCapabilityRequirements(definition, basis.capabilityRequirementsSnapshot);
+    if (!definition.conditionalCapabilities?.length && !requiresCapabilityHookRuntime(requirements.required)
+      && !requiresCapabilityHookRuntime((basis.capabilitySnapshot ?? []).map(instance => instance.code))) return;
+    assertCapabilityHookRuntimeAvailable(this.hooks, requirements.required, basis.capabilitySnapshot ?? []);
+    const snapshot = basis.capabilityRequirementsSnapshot;
+    const lines = snapshot?.rootItemGroupIds.map(itemGroupId => ({ itemGroupId, quantity: 1 }));
     if (recheckCurrent && basis.policySource === "current_workspace") {
       const rows = await tx.$queryRaw<Array<{ categoryVersionId: string | null; categoryAdoptionRevision: number }>>(Prisma.sql`
         SELECT categoryVersionId, categoryAdoptionRevision FROM business_workspaces
@@ -528,20 +532,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (rows[0]?.categoryVersionId !== basis.categoryVersionId || rows[0]?.categoryAdoptionRevision !== basis.adoptionRevision) {
         throw new ConflictException("品类版本在续租期间已变化，请重新试算");
       }
-      await validateQuotedCapabilityRequirements(tx, this.workspaceOf(tenantId), { tenantId,
+      if (snapshot) await validateQuotedCapabilityRequirements(tx, this.workspaceOf(tenantId), { tenantId,
         categoryCode: basis.categoryCode, categoryVersionId: basis.categoryVersionId,
-        request: { lines, fulfillmentMode: snapshot.fulfillmentMode },
+        request: { lines: lines!, fulfillmentMode: snapshot.fulfillmentMode },
         capabilityRequirementsSnapshot: snapshot, capabilitySnapshot: basis.capabilitySnapshot });
     }
     const actionOrder = { ...order, categoryVersionId: basis.categoryVersionId, capabilityRequirementsSnapshot: snapshot,
-      capabilitySnapshot: basis.capabilitySnapshot, fulfillmentMode: snapshot.fulfillmentMode,
-      lines: snapshot.rootItemGroupIds.map(itemGroupId => {
+      capabilitySnapshot: basis.capabilitySnapshot, fulfillmentMode: snapshot?.fulfillmentMode ?? order.fulfillmentMode,
+      lines: snapshot ? snapshot.rootItemGroupIds.map(itemGroupId => {
         const fact = snapshot.items.find(item => item.itemGroupId === itemGroupId)!;
         const original = order.lines.find(line => line.itemGroupId === itemGroupId) ?? order.lines[0];
         if (!original) throw new ConflictException("续租缺少原订单商品依据");
         return { ...original, itemGroupId, inventoryMode: fact.inventoryMode, pricingGroupId: undefined,
           reservationPrecision: "exact_model" as const, cancelledQuantity: 0 };
-      }) };
+      }) : order.lines };
     await this.runHook(tenantId, "order_confirmation", { type: "order", id: order.id }, actionOrder, tx, undefined,
       this.orderHookInstances(tenantId, actionOrder));
   }
@@ -811,7 +815,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const definition = initialization?.categoryVersionId
         ? await this.categoryResolver!.forVersion(categoryCode, initialization.categoryVersionId, tx)
         : await this.categoryResolver?.forNewWorkspace(categoryCode, tx);
-      if (definition?.conditionalCapabilities?.length) {
+      if (definition) assertCapabilityHookRuntimeAvailable(this.hooks, definition.requiredCapabilities);
+      if (definition && (definition.conditionalCapabilities?.length || requiresCapabilityHookRuntime(definition.requiredCapabilities))) {
         if (!this.hooks) throw new ServiceUnavailableException("条件品类执行模块未装配，不能初始化空间");
         this.hooks.assertCategoryComposition(definition);
       }
@@ -868,7 +873,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (this.states.has(workspaceId)) return;
     if (tx && !this.categoryResolver) throw new ServiceUnavailableException("事务初始化缺少持久化品类解析服务");
     const definition = (await this.categoryResolver?.forWorkspace(tenantId, workspaceId, tx))?.definition;
-    if (definition?.conditionalCapabilities?.length) {
+    if (definition) assertCapabilityHookRuntimeAvailable(this.hooks, definition.requiredCapabilities);
+    if (definition && (definition.conditionalCapabilities?.length || requiresCapabilityHookRuntime(definition.requiredCapabilities))) {
       if (!this.hooks) throw new ServiceUnavailableException("条件品类执行模块未装配，不能初始化空间");
       this.hooks.assertCategoryComposition(definition);
     }
