@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain17-resource-schema-checkpoint-20261112"></a>
+## AIN-17原资源与配置行修订的未完检查点（2026-11-12）
+
+从本地/远端一致的`c04dcd73b32800f9d8c887016cc12a4e50ac8ad1`恢复，索引空、无merge/cherry-pick；助手冻结成果及员工WIP未混入本片。PM已完成并推送Core固定main`ca1c6a9fca1bfe8c9aa8465b4eed88189a17501f`，由PM继续独占main集成。按当前协调，每个可独立验证阶段及时固定交付，不再等待两项100%；原任务分数和门槛不变。
+
+[schema](../../apps/api/prisma/schema.prisma)及[向前DDL](../../apps/api/prisma/migrations/20261111220000_ai_failure_resource_sources/migration.sql)新增默认档案/空间快照自身`configurationRevision`，保留原字符串`configVersion`。Outbox以独立交付订单和配置FK保存两类原资源，含来源hash、地点/到期和已发布政策引用；新CHECK五类互斥、旧三类新列均NULL，以`COALESCE(...,FALSE)`拒绝NULL绕过。配置行修订不代表九项开业依据的总版本，缺行不得补版1；默认空间及九项basis仍须原读取/提交者重核。
+
+纯内存`node -`调用本机已安装Prisma5.22的WASM`validate/get_dmmf/get_config`通过，238模型（chunk `9e9f47`中的验证结果）。schema SHA-256=`9f46a840ffb5a5ea8c1229aaf7bfb1b55a6d0342c20316b8499b3b4f27cd45b8`，向前DDL SHA-256=`3c9497cb22648d0c9c336208ab5ea4b209dd2b3f4d2253fe8fadddf83e5b9142`。同版本schema-engine仅接两份内存datamodel的RPC diff，exit0、43行/11语句，输出SHA-256=`a4914963d39a3a0c08036e64240b0244426ba1875595bec58e4e73e63586d0b3`（chunk `5e5476`）。首轮RPC用`null`回应print导致引擎exit101，改为协议要求的空对象后只复验diff通过；这是验证驱动错误，不隐去失败。差分不验证手写CHECK在真实MySQL的执行。
+
+原preload、固定不可达DATABASE_URL及内存审计已加载，审计为空；无安装、Client生成、迁移执行、真实业务连接或服务启停。包含递归清理的首次临时生命周期命令被自动审批拒绝，仅返回`blocked by policy`，整个命令未执行；已核临时目录不存在。改用纯内存后未创建临时脚本、环境或残留。
+
+本片明确未完：原Core写入者须在原事务原子推进配置行修订，资源桥须读取实际assignment/正式临近政策及九项R0依据，并在原提交内追加Outbox；新类政策/人工读取消费和完整模拟尚未核接。AIN-17保持75%，不将schema检查点算整项完成。
+
 <a id="ain10-simulated-whole-closeout-20261111"></a>
 ## AIN-10整项模拟研发收口（2026-11-11）
 

@@ -1,6 +1,6 @@
 # AI Native：当前协作接续
 
-> 更新日期：2026-11-11。负责人已明确恢复 AI Native 专项研发，由 AI-RD 负责、AI-dev1 与 AI-dev2 协作，唯一开发目录为 `D:/工作文件/rental-OS/worktree/ai-native`，分支 `codex/ai-native`。旧暂停和旧工作树派工不再是本轮停止指令；本轮研发按模拟冒烟验收，真实测试由负责人自行操作，生产开放仍须原授权。覆盖前原文保留在 Git 提交 `98755765cebe35f8775cdd05a72e148e5fdff65b` 的本文件，历史未完项全文仍见[开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。
+> 更新日期：2026-11-12。负责人已明确恢复 AI Native 专项研发，由 AI-RD 负责、AI-dev1 与 AI-dev2 协作，唯一开发目录为 `D:/工作文件/rental-OS/worktree/ai-native`，分支 `codex/ai-native`。旧暂停和旧工作树派工不再是本轮停止指令；本轮研发按模拟冒烟验收，真实测试由负责人自行操作，生产开放仍须原授权。覆盖前原文保留在 Git 提交 `c04dcd73b32800f9d8c887016cc12a4e50ac8ad1` 的本文件，历史未完项全文仍见[开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。
 
 ## 当前目标与结果
 
@@ -23,13 +23,26 @@ AIN-05、06、07、10及11已完成整项模拟研发收口，分别见[05](<AI 
 | 位置 | 当前职责 |
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 05/06/07/10/11已核，首批05/06已合main；准备11/07第二批。负责12真实presentation/context/field-material/public生产及原Artifact/ACL/单账，17 schema与Core原配置行修订/事务接点协调；四册和索引唯一作者 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 10已核接；12五私有文件继续，已给WorkbenchDisplayPort.read/revalidate/readSource/reviewCandidate/openConfirmation接点。HTML仅安全结构化重建，opaque iframe/nonce CSP/有界消息与销毁，候选非人类批准；模型源、run/result、TTL/ACL均须Root真实producer，初类型不等于整项完成 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 07唯一固定文件已核接；17四事件文件及必要automation authority窗口保持。交付取实际assignment修订；开业原档案/快照configVersion是字符串，不能强转uint。Root拟保留C08并在真实配置行补原提交者更新的configurationRevision，九项basis独立复核；缺行不造版1。Core3文件/最少schema待固定Core窗口协调，不先塞旧CHECK |
-| `D:/工作文件/rental-OS`／`main` | 已核并推送首批AI`44dc16a4b`，当前PM独占main/Core集成，接固定`0947a6eb8/2a2c9ae64`及必要前置，不追活动photo WIP；AI不写main。6项无关WIP原字节保留，旧AI接续原差异已固定 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 12五前端文件已冻结、写权回Root；现独占workbench-display-original.reader.ts及workbench-display-preparation.service.ts，接原会话/轮次/原请求/Task/ActionInput/已计量Artifact及当前受权来源。Root负责生成前display witness/public接点；缺用途/版本证据不可事后补签 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 17五文件已冻结、写权回Root；现独占business-events/prisma-business-failure-resource-store.ts，仅实现新列的scoped readBinding/assertStorage/原tx append、不可变去重及原收据。原Core事实/临近政策/配置修订/public/provider由Root协调；员工冻结成果保持 |
+| `D:/工作文件/rental-OS`／`main` | PM独占串行集成，Core固定ca1c6a9f已推送并核远端，索引空且6项原WIP哈希保持；正独立核接AI固定c04dcd73b及其11/07/10。AI及助手继续12/17，不争用main索引、不追活动HEAD |
 
 三人按负责人明确恢复的原目标持续施工，工具旧失败/旧goal标记不代替实际执行状态。助手只在需要负责人决策的真实阻塞、公共符号冲突或完整阶段冻结交付时合并发送简短消息；不重复心跳、过程日志和旧证据，可自行解决的失败自行处理。shared总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule等跨专项公共文件须与PM协调唯一作者；企业端已获准的ClientApiService.readOrderSubmission第二次读取、AppModule/OpenAPI企业reader/controller/三条GET及后台企业政策材料片段保持其归属。Core交易、资金和品类事实由Core专项提供，AI不重建这些业务权威。
 
-每阶段立即提交推送 `codex/ai-native`，每新增两项正式100%按固定成果合main并推送，不把patch/冒烟当任务。首批AIN-05/06由main`44dc16a4b`及远端证据核闭；第二批AIN-11/07固定`157887689`已上传，等PM/Core窗口串行整合；后继已累计AIN-10一项。合前核来源、预期main、文件、WIP与索引，争用只暂停该次集成；助手继续，不追活动HEAD，未合入不重置该批或声称已合。
+每个可独立验证阶段立即提交推送`codex/ai-native`，由PM按固定成果串行核接main，不再等待两项100%；巡检按PM当前3小时安排，不把patch/冒烟当任务。首批AIN-05/06已由main`44dc16a4b`核闭；11/07/10固定c04dcd73b正在PM核接，未取最终main固定SHA前不称已合。来源、main、文件、WIP与索引均须实核；争用只暂停该次集成，助手继续开发。
+
+## AIN-17最小Core接点窗口
+
+本树[资源schema检查点](<AI Native-开发记录.md#ain17-resource-schema-checkpoint-20261112>)已离线验证，未执行DDL。新模型字段：TenantRentalProfile/RentalCoreStateSnapshot.configurationRevision；RentalTenantBusinessSettings新增tenantId/workspaceId复合唯一键，沿已有settingsRevision；AiBusinessFailureOutbox新增fulfillmentOrderId、configurationKind/Id、profileTenantId/snapshotWorkspaceId/settingsWorkspaceId三个配置FK列（正式列名均以前缀configuration开头）、sectionCode、dueAt、locationId、sourceHash、sourcePolicyId/Revision。原C08 number版本与旧三类资源列不改。
+
+| 原Core入口 | 所需最小改动及消费者 |
+| --- | --- |
+| [rental-allocation.service.ts](../../apps/api/src/modules/rental-core/rental-allocation.service.ts) 的 scanOrder → recordIssue → facts.saveOrderAggregate(order,[],tx) | 在原assignment修订及业务tx内追加可选fulfillment Outbox参加者；只用当前Core可交付判定、实际startAt/fulfillmentLocationId和已发布临近政策。消费者为原BusinessFailure候选/人工复查/自动化准入，不另设轮询或调度事实 |
+| [rental-core-config.repository.ts](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts) 的 upsertProfile 原tx/default-workspace分支 | 真实档案行的原子configurationRevision推进与可选opening参加者；非默认分支不修改既有默认档案、不制造缺行事件。readReadinessCoreFacts/readOpeningConfigurationFacts仍是有界R0原读取来源 |
+| [rental-business.service.ts](../../apps/api/src/modules/rental-core/rental-business.service.ts) 的 persistBusinessConfig 原tx及 readTenantReadiness | 复用原business settings修订，在原提交内追加相应开业分区事件；读取九项R0的完整basis重核，禁止state/seedState或updatedAt伪造总版本 |
+| [rental-state.repository.ts](../../apps/api/src/modules/rental-core/rental-state.repository.ts) 的 saveCoreState | 前三入口之外确需的最小仓储接点：空间快照原子configurationRevision、scoped原tx及可选opening参加者。仅快照行版本，不当作九项总版本；缺快照不补版1 |
+
+上述Core写窗口尚待PM核定，AI不提前修改权威提交者。Root组合真实readFulfillment/readOpening与dev2私有存储，补human-automation request/provider、原五类policy/review闭合合同；发布阈值未提供保持not_captured/unavailable，不能编造policy。schema检查点和存储冻结均不代表AIN-17整项完成。
 
 ## 后续核心入口及未完项
 
