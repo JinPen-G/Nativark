@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiAutomationPolicyPreparation, type AiAutomationPolicyManagementOperation } from '@prisma/client';
 import { z } from 'zod';
@@ -62,7 +63,7 @@ export class HumanAutomationPolicyManagementService {
 
   private restrictions(command: PolicyChange, access: Access, time: boolean) {
     const { subject, policy } = command;
-    if (subject.permissions.some(permission => !access.permissions.includes(permission))) throw unavailable();
+    if (subject.permissions.some(permission => !hasEffectivePermission(access.permissions, permission))) throw unavailable();
     if (access.locationScope.mode === 'selected') {
       const allowed = access.locationScope.locationIds;
       if (subject.locationScope.mode !== 'selected' || subject.locationScope.locationIds.some(location => !allowed.includes(location))) throw unavailable();
@@ -110,7 +111,7 @@ export class HumanAutomationPolicyManagementService {
       || !row.enabled || !managementRevision.safeParse(row.revision).success || row.expiresAt <= this.clock()
       || !Array.isArray(row.requiredPermissions) || !row.requiredPermissions.length || row.requiredPermissions.length > 64
       || new Set(row.requiredPermissions).size !== row.requiredPermissions.length
-      || row.requiredPermissions.some(permission => typeof permission !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(permission) || !access.permissions.includes(permission))) throw unavailable();
+      || row.requiredPermissions.some(permission => typeof permission !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(permission) || !hasEffectivePermission(access.permissions, permission))) throw unavailable();
     await this.sameAccess(access, 'manage');
     return { id: row.id, revision: row.revision, expiresAt: row.expiresAt, authorizationHash: hash({ key, id: row.id,
       revision: row.revision, expiresAt: row.expiresAt.toISOString(), permissions: row.requiredPermissions, identity: access.identityHash }) };

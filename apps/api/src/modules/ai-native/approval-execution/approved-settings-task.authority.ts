@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiUsageSettingsDraft } from '@rental-os/shared';
@@ -77,7 +78,7 @@ export class ApprovedSettingsTaskAuthority {
           policy.expiresAt <= this.clock() || !Array.isArray(policy.requiredPermissions) || !policy.requiredPermissions.length ||
           !policy.requiredPermissions.some(p => p === 'rental-os:rules:manage' || p === 'rental-os:price:manage') ||
           policy.requiredPermissions.some(p => typeof p !== 'string' || !p || p.length > 191)) throw settingsUnavailable();
-      if (policy.requiredPermissions.some(p => !context.access.permissions.includes(String(p)))) throw settingsDenied();
+      if (policy.requiredPermissions.some(p => !hasEffectivePermission(context.access.permissions, String(p)))) throw settingsDenied();
       policyAndGates.push(policy);
       for (const expected of [aiPersistenceScopeColumns({ kind: 'platform' }), aiPersistenceScopeColumns({ kind: 'tenant', tenantId: context.scope.tenantId }), access.scope]) {
         const scope = await db.aiScope.findFirst({ where: expected });

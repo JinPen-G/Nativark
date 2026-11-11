@@ -1,6 +1,7 @@
 /** Calendar page -> original request/task metadata. Calendar-edit is checked
  * now and source rows stay bound to the original date/version/revision. Reads
  * never create a request, task or R1 proposal after an uncertain acknowledgement. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_TASK_CALENDAR_DRAFT_PREPARATION_VERSION,
@@ -43,7 +44,7 @@ export function composeTaskCalendarSourceEntry(d: TaskCalendarDraftDependencies)
     const scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(d.original.auth, credentials, clock), clock);
     const first = await scopes.resolveCurrent(), context = first.context;
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || context.audience !== 'operator'
-      || !('access' in context) || !context.access.permissions.includes('rental-os:calendar:edit')) throw denied();
+      || !('access' in context) || !hasEffectivePermission(context.access.permissions, 'rental-os:calendar:edit')) throw denied();
     const verify = async () => {
       if (signal?.aborted) throw denied(); const latest = await scopes.resolveCurrent();
       if (latest.scope.id !== first.scope.id || originalIdentityHash(latest.context) !== originalIdentityHash(context)) throw denied();

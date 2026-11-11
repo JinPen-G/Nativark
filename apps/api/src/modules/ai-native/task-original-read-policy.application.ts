@@ -3,6 +3,7 @@
  * execution settings and the creation deadline do not authorize historical reads.
  * Only enable writes through original CAS/receipts. Observation never dispatches
  * or retries, and sequential rechecks do not attest an atomic Auth transaction. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -112,7 +113,7 @@ export function composeTaskOriginalReadPolicyRequests(d: Dependencies) {
           await verify();
           return context;
         } }, clock);
-        const fallback = readPermissions[task.sceneCode as keyof typeof readPermissions].find(permission => context.access.permissions.includes(permission));
+        const fallback = readPermissions[task.sceneCode as keyof typeof readPermissions].find(permission => hasEffectivePermission(context.access.permissions, permission));
         if (!fallback) throw denied();
         const describe = async () => {
           const rows = [];
@@ -146,7 +147,7 @@ export function composeTaskOriginalReadPolicyRequests(d: Dependencies) {
             scope: context.scope, observedAt: clock().toISOString(), completeRecorded,
             items: rows.map((row, i) => ({ operation: row.operation, current: row.current,
               active: !!row.current && Date.parse(row.current.expiresAt) > clock().getTime()
-                && row.current.requiredPermissions.every(permission => context.access.permissions.includes(permission)),
+                && row.current.requiredPermissions.every(permission => hasEffectivePermission(context.access.permissions, permission)),
               desired: { requiredPermissions: recorded[i].policy?.requiredPermissions ?? row.requiredPermissions, expiresAt: reference.expiresAt },
               receipt: { state: recorded[i].state, policy: recorded[i].policy } })),
             execution: 'not_attempted', authority: 'reading_policy_not_model_or_core_authorization' });
@@ -160,7 +161,7 @@ export function composeTaskOriginalReadPolicyRequests(d: Dependencies) {
           if (receipts.some(row => row.state === 'recorded')) return observe(reference, receipts);
         }
         const rows = await describe();
-        if (rows.some(row => row.requiredPermissions.some(permission => !context.access.permissions.includes(permission)))) throw denied();
+        if (rows.some(row => row.requiredPermissions.some(permission => !hasEffectivePermission(context.access.permissions, permission)))) throw denied();
         if (action === 'inspect') {
           const expiresAt = new Date(clock().getTime() + ttlMs).toISOString();
           const locator = { taskId: task.id, runId, expiresAt,
@@ -170,7 +171,7 @@ export function composeTaskOriginalReadPolicyRequests(d: Dependencies) {
             scope: context.scope, observedAt: clock().toISOString(), completeRecorded: false,
             items: rows.map(row => ({ operation: row.operation, current: row.current,
               active: !!row.current && Date.parse(row.current.expiresAt) > clock().getTime()
-                && row.current.requiredPermissions.every(permission => context.access.permissions.includes(permission)),
+                && row.current.requiredPermissions.every(permission => hasEffectivePermission(context.access.permissions, permission)),
               desired: { requiredPermissions: row.requiredPermissions, expiresAt }, receipt: { state: 'not_checked', policy: null } })),
             execution: 'not_attempted', authority: 'reading_policy_not_model_or_core_authorization' });
         }
@@ -188,7 +189,7 @@ export function composeTaskOriginalReadPolicyRequests(d: Dependencies) {
             const writer = new PrismaTaskActionPolicyRepository(d.db, scopes, { resolve: async (taskId, operation) => {
               if (!writing || action !== 'enable' || taskId !== task.id || operation !== 'configure_action_policy'
                 || !AI_TASK_READ_POLICY_OPERATIONS.includes(row.operation)
-                || row.requiredPermissions.some(permission => !context.access.permissions.includes(permission))) throw denied();
+                || row.requiredPermissions.some(permission => !hasEffectivePermission(context.access.permissions, permission))) throw denied();
               await verify();
               return context;
             } }, clock);

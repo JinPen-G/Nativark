@@ -1,6 +1,7 @@
 /** Different human conditions -> linked original request -> original Core quote
  * selection. The request marker is stored with reissue in one transaction.
  * Receipt reads never recreate a task, quote, selection, plan or approval. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { z } from 'zod';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION,
   type AiSceneRequestReadDraft, type AiExecutionContext, type AiQuoteRequestReissueReferenceDraft,
@@ -62,7 +63,7 @@ export function composeQuoteRequestReissue(d: Dependencies, configuration: Quote
     return requiredPolicies.every(operation => rows.some(row => row.operation === operation && row.scopeId === root.scopeId && row.taskId === taskId
       && Number.isInteger(row.revision) && row.revision > 0 && row.expiresAt instanceof Date && row.expiresAt > now()
       && Array.isArray(row.requiredPermissions) && row.requiredPermissions.includes('rental-os:order:create')
-      && row.requiredPermissions.every(permission => typeof permission === 'string' && permissions.includes(permission))));
+      && row.requiredPermissions.every(permission => typeof permission === 'string' && hasEffectivePermission(permissions, permission))));
   };
   const load = async (value: AiQuoteRequestReissueReferenceDraft, root: Source) => {
     const row = await d.db.operationLog.findUnique({ where: { id: operationId(root.context, value) } });

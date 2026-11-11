@@ -1,6 +1,7 @@
 /** Explicit short policies for the original notification approval wait.
  * The original change/proposal, current category/settings checks and approved
  * transaction remain authoritative. Reads never sign, claim or revive a wait. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -250,8 +251,8 @@ export function composeSettingsApprovalAdmission(d: SettingsApprovalAdmissionDep
     return { hash: snapshotHash({ ...row, allowedTools: tools, limits }), expiresAt: row.expiresAt.getTime() };
   };
   const minimumPermission = (held: readonly string[], existing: readonly string[] = []) => existing.includes('rental-os:price:manage') ? 'rental-os:price:manage'
-    : existing.includes('rental-os:rules:manage') ? 'rental-os:rules:manage' : held.includes('rental-os:price:manage') ? 'rental-os:price:manage'
-      : held.includes('rental-os:rules:manage') ? 'rental-os:rules:manage' : undefined;
+    : existing.includes('rental-os:rules:manage') ? 'rental-os:rules:manage' : hasEffectivePermission(held, 'rental-os:price:manage') ? 'rental-os:price:manage'
+      : hasEffectivePermission(held, 'rental-os:rules:manage') ? 'rental-os:rules:manage' : undefined;
   const policyRows = async (reference: SettingsApprovalAdmissionReference, tx?: Prisma.TransactionClient) => {
     const rows = await (tx ?? d.db).aiTaskActionPolicy.findMany({ where: { scopeId: reference.target.scopeId, taskId: reference.target.taskId,
       operation: { in: reference.actions.map(row => row.operation) } }, take: reference.actions.length + 1 });
@@ -276,7 +277,7 @@ export function composeSettingsApprovalAdmission(d: SettingsApprovalAdmissionDep
     const cutoff = Math.min(now().getTime() + maximumMs, published.expiresAt, Date.parse(target.expiresAt));
     for (const action of reference.actions) {
       const row = rows.find(value => value.operation === action.operation), minimum = minimumPermission(held, row ? row.requiredPermissions as string[] : []);
-      if (!minimum || !action.requiredPermissions.includes(minimum) || action.requiredPermissions.some(value => !held.includes(value))
+      if (!minimum || !action.requiredPermissions.includes(minimum) || action.requiredPermissions.some(value => !hasEffectivePermission(held, value))
         || Date.parse(action.expiresAt) <= now().getTime() || action.mode === 'configure' && Date.parse(action.expiresAt) > cutoff) throw denied();
       if (action.mode === 'retain') {
         if (!row || row.revision !== action.expectedRevision || row.expiresAt.toISOString() !== action.expiresAt
@@ -330,7 +331,7 @@ export function composeSettingsApprovalAdmission(d: SettingsApprovalAdmissionDep
         const minimum = minimumPermission(held, row ? row.requiredPermissions as string[] : []);
         if (!minimum) throw denied();
         const requiredPermissions = [...new Set([minimum, ...(row ? row.requiredPermissions as string[] : [])])];
-        if (requiredPermissions.some(value => !held.includes(value))) throw denied();
+        if (requiredPermissions.some(value => !hasEffectivePermission(held, value))) throw denied();
         const retain = !!row && row.expiresAt > now() && requiredPermissions.every(value => (row.requiredPermissions as string[]).includes(value));
         actions.push(action.parse({ operation: selected, mode: retain ? 'retain' : 'configure', expectedRevision: row?.revision ?? null,
           requiredPermissions, expiresAt: retain ? row!.expiresAt.toISOString() : new Date(cutoff).toISOString() }));

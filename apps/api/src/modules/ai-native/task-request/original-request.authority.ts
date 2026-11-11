@@ -2,6 +2,7 @@
  * Web retains its original credential/Guard path. Native requires explicit current
  * scope, entitlement and original resource producers; no Web/global fallback,
  * transaction creation, task dispatch, business execution or commit attestation. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
@@ -98,7 +99,7 @@ class OriginalRequestChecks implements AiOriginalRequestAuthority {
     // Merely registering the standard host must not enable disabled scenes.
     const rule = this.rule(body.sceneCode), access = await this.current();
     if (!rule.audiences.includes(access.context.audience as 'operator' | 'staff') || !('access' in access.context)
-      || rule.requiredPermissions.some(permission => !('access' in access.context) || !access.context.access.permissions.includes(permission))) throw denied();
+      || rule.requiredPermissions.some(permission => !('access' in access.context) || !hasEffectivePermission(access.context.access.permissions, permission))) throw denied();
     let row;
     this.sources.live();
     try { row = await this.sources.plan(access.scopeId, rule); }

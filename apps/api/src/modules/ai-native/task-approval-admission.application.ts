@@ -1,6 +1,7 @@
 /** Short original-order policies for an explicit decision, continuation or
  * reprepare. Reads never sign. The original wait, proposal, quote, approval,
  * runner and Core retain their deadlines, transactions and execution checks. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { isDeepStrictEqual } from 'node:util';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
@@ -153,7 +154,7 @@ export function composeTaskApprovalAdmission(d: TaskApprovalAdmissionDependencie
   const stage = async (query: z.infer<typeof targetQuery>, mode: 'decide' | 'continue' | 'original_reprepare' | 'replacement',
     tx?: Prisma.TransactionClient, signal?: AbortSignal, reprepareReason?: z.infer<typeof reason>) => {
     const source = await metadata(query.taskId, tx, signal), { task, access, context, db } = source;
-    if (!('access' in context) || !context.access.permissions.includes('rental-os:order:create')) throw denied();
+    if (!('access' in context) || !hasEffectivePermission(context.access.permissions, 'rental-os:order:create')) throw denied();
     const key = { scopeId: task.scopeId, taskId: task.id, runId: query.runId };
     const run = await db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
     const step = await db.aiStep.findFirst({ where: { ...key, toolCode: 'rental.order.commit', ...(query.stepId ? { id: query.stepId } : {}) } });
@@ -359,7 +360,7 @@ export function composeTaskApprovalAdmission(d: TaskApprovalAdmissionDependencie
     }
     const held = 'access' in current.context ? current.context.access.permissions : [], rows = await policyRows(reference, tx);
     for (const action of reference.actions) {
-      if (!action.requiredPermissions.includes('rental-os:order:create') || action.requiredPermissions.some(value => !held.includes(value))
+      if (!action.requiredPermissions.includes('rental-os:order:create') || action.requiredPermissions.some(value => !hasEffectivePermission(held, value))
         || Date.parse(action.expiresAt) <= now().getTime() || action.mode === 'configure' && Date.parse(action.expiresAt) > cutoff) throw denied();
       const row = rows.find(value => value.operation === action.operation);
       if (action.mode === 'retain') {
@@ -424,7 +425,7 @@ export function composeTaskApprovalAdmission(d: TaskApprovalAdmissionDependencie
           || !revision.safeParse(row.revision).success || !permissions.safeParse(row.requiredPermissions).success
           || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()))) throw unavailable();
         const requiredPermissions = [...new Set(['rental-os:order:create', ...(row ? row.requiredPermissions as string[] : [])])];
-        if (requiredPermissions.some(value => !held.includes(value))) throw denied();
+        if (requiredPermissions.some(value => !hasEffectivePermission(held, value))) throw denied();
         const retain = !!row && row.expiresAt > now() && requiredPermissions.every(value => (row.requiredPermissions as string[]).includes(value));
         actions.push(action.parse({ operation: selectedOperation, mode: retain ? 'retain' : 'configure', expectedRevision: row?.revision ?? null,
           requiredPermissions, expiresAt: retain ? row!.expiresAt.toISOString() : new Date(cutoff).toISOString() }));

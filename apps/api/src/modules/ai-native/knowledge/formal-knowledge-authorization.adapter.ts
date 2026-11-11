@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { AuthService } from '../../auth/auth.service';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
@@ -70,7 +71,7 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
         || !validKey(policy.grantKey) || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length < 1
         || policy.requiredPermissions.length > 64 || policy.requiredPermissions.some(permission => !validPermission(permission))
         || new Set(policy.requiredPermissions).size !== policy.requiredPermissions.length) return null;
-      if (!('access' in current) || policy.requiredPermissions.some(permission => !current.access.permissions.includes(permission))) return null;
+      if (!('access' in current) || policy.requiredPermissions.some(permission => !hasEffectivePermission(current.access.permissions, permission))) return null;
       if (resource && fingerprint(policy.resource) !== fingerprint(resource)) return null;
       const rechecked = structuredClone(await this.identities.resolve());
       const latest = structuredClone(await this.policies.resolve(structuredClone(rechecked), structuredClone(policyRequest), structuredClone(resource)));
@@ -116,7 +117,7 @@ export class FormalMemoryAuthorizationAdapter implements MemoryAuthorizationPort
         || Date.parse(policy.expiresAt) <= this.clock().getTime() || !validKey(policy.grantKey)
         || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length < 1
         || policy.requiredPermissions.some(permission => !validPermission(permission))
-        || !('access' in current) || policy.requiredPermissions.some(permission => !current.access.permissions.includes(permission))) return null;
+        || !('access' in current) || policy.requiredPermissions.some(permission => !hasEffectivePermission(current.access.permissions, permission))) return null;
       if (resource && fingerprint(policy.resource) !== fingerprint(resource)) return null;
       const latestContext = await this.identities.resolve(), latest = structuredClone(await this.policies.resolve(structuredClone(latestContext), structuredClone(request)));
       if (!sameCurrentIdentity(latestContext, current, this.clock()) || fingerprint(latest) !== fingerprint(policy)

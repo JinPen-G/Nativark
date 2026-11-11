@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../common/permission-match';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, type AiExecutionContext, type AiUsageSettingsDraft } from '@rental-os/shared';
 import type { AuthService } from '../auth/auth.service';
@@ -167,7 +168,7 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
         || !validRevision(row.revision) || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= clock()
         || !Array.isArray(row.requiredPermissions) || !row.requiredPermissions.length
         || row.requiredPermissions.some(p => typeof p !== 'string' || !p || p.length > 191)) throw unavailable();
-      if (!('access' in context) || row.requiredPermissions.some(p => !context.access.permissions.includes(String(p)))) throw denied();
+      if (!('access' in context) || row.requiredPermissions.some(p => !hasEffectivePermission(context.access.permissions, String(p)))) throw denied();
       approvalPolicy = row;
     }
     // Independent, bounded read-only snapshots may overlap after the original

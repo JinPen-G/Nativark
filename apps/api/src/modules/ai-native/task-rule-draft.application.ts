@@ -2,6 +2,7 @@
  * Locates immutable registration/proposal references on the server. Reads do
  * not prepare/execute; save never publishes. Original operation evidence supplies
  * its own reason/hash for recovery, so a client retains only Task/Step ids. */
+import { hasEffectivePermission } from '../../common/permission-match';
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
@@ -62,7 +63,7 @@ export function composeRequestBoundTaskRuleDraft(d: TaskRuleDraftDependencies) {
     const first = await scopes.resolveCurrent(), context = first.context;
     const access = aiTaskAccessFromContext(context, taskId, clock());
     if (context.actor.kind !== 'user' || context.audience !== 'operator' || context.scope.kind !== 'workspace'
-      || !('access' in context) || !AI_TASK_RULE_DRAFT_READ_PERMISSIONS.some(permission => 'access' in context && context.access.permissions.includes(permission)))
+      || !('access' in context) || !AI_TASK_RULE_DRAFT_READ_PERMISSIONS.some(permission => 'access' in context && hasEffectivePermission(context.access.permissions, permission)))
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const task = await db.aiTask.findFirst({ where: { AND: [access.where, { scopeId: first.scope.id }] } });
     if (!task || task.id !== taskId || task.scopeId !== first.scope.id || task.scopeKind !== 'WORKSPACE' || task.audience !== 'OPERATOR'

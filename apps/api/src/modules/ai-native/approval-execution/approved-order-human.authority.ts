@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { Prisma } from '@prisma/client';
 import { AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiUsageSettingsDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -50,7 +51,7 @@ export class ApprovedOrderHumanAuthority {
         || !policy.requiredPermissions.includes('rental-os:order:create')
         || policy.requiredPermissions.some(p => typeof p !== 'string' || !p || p.length > 191)
         || new Set(policy.requiredPermissions).size !== policy.requiredPermissions.length) throw unavailable();
-      if (policy.requiredPermissions.some(p => typeof p !== 'string' || !context.access.permissions.includes(p))) throw deniedOrder();
+      if (policy.requiredPermissions.some(p => typeof p !== 'string' || !hasEffectivePermission(context.access.permissions, p))) throw deniedOrder();
       const columns = [aiPersistenceScopeColumns({ kind: 'platform' }),
         aiPersistenceScopeColumns({ kind: 'tenant', tenantId: context.scope.tenantId }), aiPersistenceScopeColumns(context.scope)];
       const gates = [];

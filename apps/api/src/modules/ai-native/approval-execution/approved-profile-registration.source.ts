@@ -1,6 +1,7 @@
 /** Dedicated ordinary-name input/registration composition. Uses the original
  * persisted input, plan and Step repositories; no alternate runner, policy seed
  * or dispatch grant. Original recovery never inserts an input or Step. */
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { Prisma } from '@prisma/client';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ApprovedProfileRouteAuthority } from '../../platform/approved-profile-route.authority';
@@ -62,7 +63,7 @@ export function composePersistedProfileTaskInput(d: ApprovedProfileApplicationDe
         if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || context.audience !== 'operator'
           || context.actor.userId !== actor.actorId || context.scope.tenantId !== actor.tenantId
           || context.scope.workspaceId !== actor.workspaceId || !('access' in context)
-          || !context.access.permissions.includes('rental-os:member:manage')) throw profileDenied();
+          || !hasEffectivePermission(context.access.permissions, 'rental-os:member:manage')) throw profileDenied();
         const grant = await authority.resolve(taskId, purpose === 'input' ? 'prepare' : 'read', tx);
         if (requestFingerprint(grant.actor) !== requestFingerprint(actor)) throw profileDenied();
         const change = await app.readChangeReceipt(reference), current = await app.readCurrent({ customerId: reference.customerId });

@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
@@ -82,8 +83,8 @@ export class PlatformTaskActionAuthority implements AiTaskRepositoryAuthority {
       const observing = ['read_metadata', 'read_events', 'read_step_terminal', 'release_run'].includes(operation);
       if (current.fingerprint !== initial.fingerprint || final.fingerprint !== initial.fingerprint || requestFingerprint(rechecked) !== requestFingerprint(policy)
         || Date.parse(policy.expiresAt) <= this.clock().getTime() || heldPermissions === null
-        || !observing && !heldPermissions.includes(PLATFORM_AI_PROVIDER_PERMISSIONS.manage)
-        || policy.requiredPermissions.some(permission => !heldPermissions.includes(permission))) throw denied();
+        || !observing && !hasEffectivePermission(heldPermissions, PLATFORM_AI_PROVIDER_PERMISSIONS.manage)
+        || policy.requiredPermissions.some(permission => !hasEffectivePermission(heldPermissions, permission))) throw denied();
       return structuredClone(final.context);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;

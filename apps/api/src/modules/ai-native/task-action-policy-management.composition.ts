@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../common/permission-match';
 import type { PrismaClient } from '@prisma/client';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import type { AuthService } from '../auth/auth.service';
@@ -37,7 +38,7 @@ export function composeTaskActionPolicyManagement(input: Dependencies) {
       const context = before.context;
       if (context.actor.kind !== 'user' || context.audience !== 'operator' || context.scope.kind !== 'workspace'
         || before.scope.kind !== 'WORKSPACE' || !('access' in context)
-        || permissions.some(permission => !context.access.permissions.includes(permission))) throw denied();
+        || permissions.some(permission => !hasEffectivePermission(context.access.permissions, permission))) throw denied();
       await management.authorize({ tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
         actorId: context.actor.userId }, 'manage');
       const row = await input.db.aiTask.findFirst({ where: { AND: [access.where, { scopeId: before.scope.id }] },

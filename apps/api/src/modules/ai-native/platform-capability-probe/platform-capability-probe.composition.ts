@@ -1,3 +1,4 @@
+import { hasEffectivePermission } from '../../../common/permission-match';
 import type { PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
@@ -164,7 +165,7 @@ export function composeAuthorizedPlatformCapabilityProbe(input: AuthorizedPlatfo
       const access = aiTaskAccessFromContext(before.context, taskId, clock());
       if (access.actorKind !== 'SAAS_ADMIN' || access.audience !== 'OPERATOR' || access.scope.kind !== 'PLATFORM'
         || before.scope.kind !== 'PLATFORM' || before.context.actor.kind !== 'saas_admin'
-        || permissions.some(permission => typeof permission !== 'string' || !heldPermissions(before.context).includes(permission))) throw denied();
+        || permissions.some(permission => typeof permission !== 'string' || !hasEffectivePermission(heldPermissions(before.context), permission))) throw denied();
       const row = await input.db.aiTask.findFirst({ where: { AND: [access.where, { scopeId: before.scope.id }] },
         select: { id: true, scopeId: true, archivedAt: true } });
       if (!row || row.id !== taskId || row.scopeId !== before.scope.id || row.archivedAt !== null) throw denied();
