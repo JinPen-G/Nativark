@@ -20,6 +20,8 @@
 
 ## 3. 下一入口与原缺口
 
+PM最新核收main为`0e9f9394225feea9190eb437afccee1b18764572`，企业原补款与AI展示已有独立阶段证据；Core编码固定a0a045175试应用暴露五份源码前置后，PM仅撤回自己的19个候选路径、保留六项他人WIP，尚未收a0/619f50c5a。Core作者先在原记录列清治理/续租/历史检查/草稿/默认初始化的固定依赖，当前采用回执片后优先AIN-17四入口counter与原tx参加者；同时提供两个新续租报价真实无服务时的空快照来源，旧缺失不回填。企业/AI继续自己的消费者，不等整项。具体冲突、最小窗口与验证边界见[PM依赖协调](<Rental Core-开发记录.md#pm-core-intake-and-dependencies-20261112>)。
+
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。
 3. 企业作者正在消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)。Core商户执行与客户端 `material/confirm/original` 保持各自原身份；企业作者负责批准参与者、本人明确提交及其服务/页面，公共登记/DI窗口由PM指定。照片未冻结保持不可接受；下一口是既有专用文件来源的内容冻结和按原目标核对，不等待真库才交已验证端口，原K/C不能换键重做。源码/类型、11组受限调用、原五项3过/2失败和静态契约边界见[当前记录](<Rental Core-开发记录.md#approved-exchange-core-port-20261111>)。

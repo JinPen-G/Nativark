@@ -4,6 +4,21 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-core-intake-and-dependencies-20261112"></a>
+## PM固定阶段依赖核查与跨专项来源协调（2026-11-12）
+
+本次核定四个实际Git工作树，main已将企业原补款固定`846d16e89`收回为`9b616d8e5d5932bffdc26eabce8ab3a47b1627da`，将AI原展示固定`7332875c9`收回为`0e9f9394225feea9190eb437afccee1b18764572`，两次普通推送后均回读GitHub包含。对应独立模拟/类型及未验环境分别见[企业原补款](../企业客户后台/企业客户后台-开发记录.md#ecp-main-consumed-extension-integration-20261112)与[AI展示](<../AI Native/AI Native-开发记录.md#ain12-main-display-integration-20261112>)，不计作Core原任务完成度。
+
+Core固定`a0a0451754d77b7454de4dad9f5044a4e70c3949`的15源码/4文档已核在实际任务远端。main试应用这一增量时，五个源码冲突暴露未收前置：草稿仍用原lockActiveCategoryBinding，来源已改lockCategoryContext；治理尚缺versionValidation及Auth/Platform装配；默认配置仓储缺readDefaultWorkspaceInitialization；原事实仓储缺readQuotedInspectionTemplates；续租reader缺原订单/报价/配置同源核查。四份文档也冲突。冲突不能只取来源正文，否则把父阶段和未收口counter检查点一并带入。
+
+PM已核归属后仅撤回本次19个候选路径到上述固定main，未重置分支、清理工作树或覆盖其他成果。main六项他人WIP逐哈希保持、暂存区与冲突均清空。a0编码片和后继`619f50c5a04f2af805f84f3977e78dc4683cfb81`必选/历史Hook片继续保留在任务分支，尚未合main。要求Core作者在既有记录给出b6aa09ad3治理、16d080e48续租、9331582b7历史检查、00f19015a草稿、f0e69b960默认初始化等最小固定前置及原证据，区分5e8d52325/fe65ac652未收口的配置/资源检查点；按固定依赖顺序串行核收，作者继续自己的树。
+
+已明确下一核心优先：当前采用回执片收口后，Core提供AIN-17此前已批准的四入口真实configurationRevision/settingsRevision、原业务同事务可选参加者及必要backfill兼容。allocation原recordIssue不能重入scan/另开事务，只有Core真实可证明的资源不足及已发布临近政策才捕获；profile默认/非默认、state scoped版本和九项独立读取分别有界，缺行不造版1、updatedAt/seed不充总版本。AI-RD继续私有store/桥接和18授权消费者，由其协调两助手，PM只向RD协调。
+
+企业三端新增服务又暴露准确Core来源缺口：两个新续租报价无选中服务时目前省略serviceSnapshots，原测试第160行也期待undefined；新企业投影只读持久化快照，不能由零金额/当前catalog补齐。因此已交Core最小新报价窗口，核真实适用及强制服务规则后才记录明确空数组；有服务继续原费用/容量/版本/条款/计划。line_cancellation等复用不隐式新增服务，旧订单/报价/consumed批准/原键及指纹不回填，旧缺数组仍unavailable。原第252行旧订单不凭空补数组门槛保留；原测试/runner/断言不改，不排除类型或skip伪造绿色。
+
+企业作者继续已批服务选择/正常有服务/拒绝恢复片，原缺空快照留记录，不等待Core整项。另核准其网站换货进度、小程序换货与订单三处仅补consumed状态显示，approved才可确认的原门闸及Core执行保持。新Shared/schema/公开入口或其他范围须报精确窗口。此次PM未读环境、启停服务、安装依赖、访问真实业务或生成产物，未创建临时文件/新后台进程；旧集中待清理残留未删除。原CLOSE/CAT完整门槛与百分比待核实保持。
+
 <a id="workspace-resolver-main-integration-20261112"></a>
 ## PM固定当前品类读取修订校验整合（2026-11-12）
 
