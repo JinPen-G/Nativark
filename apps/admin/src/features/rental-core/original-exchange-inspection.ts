@@ -48,7 +48,22 @@ export function useOriginalExchangeInspection(orderId: string, operationToken?: 
     if (!value || !value.id || value.orderId !== orderId || value.workspaceId !== auth.currentWorkspaceId || value.actorUserId !== auth.user?.id
       || value.operationKey !== reference.key || value.requirementsHash !== reference.requirementsHash || !/^[a-f0-9]{64}$/u.test(value.requestHash)
       || value.state !== "prepared" || value.revision !== 1 || value.customerConsent !== "not_connected" || value.execution !== "not_connected"
-      || value.media !== "unavailable" || value.reservation !== "not_reserved" || !Number.isFinite(Date.parse(value.createdAt))) throw new Error("原检查准备与本单原键不匹配，不能清除未决引用");
+      || !["unavailable", "dedicated_source_verified"].includes(value.media) || value.reservation !== "not_reserved" || !Number.isFinite(Date.parse(value.createdAt))) throw new Error("原检查准备与本单原键不匹配，不能清除未决引用");
+    const media = value.acceptedMedia ?? [];
+    if (!Array.isArray(media) || media.length > 4000 || value.media === "dedicated_source_verified" && !media.length
+      || value.media === "unavailable" && media.length || new Set(media.map(row => row.sourceId)).size !== media.length
+      || new Set(media.map(row => row.fileAssetId)).size !== media.length) throw new Error("原检查照片接受记录不可核对");
+    if (media.some(row => {
+      const template = value.templates.find(template => template.side === row.side && template.template.id === row.templateId && template.template.version === row.templateVersion);
+      const inspection = value.inspections.find(inspection => inspection.side === row.side && inspection.templateId === row.templateId && inspection.templateVersion === row.templateVersion);
+      return !template?.template.fields.some(field => field.code === row.fieldCode && field.type === "photo")
+        || inspection?.results[row.fieldCode] !== row.fileAssetId || !inspection.photoSources?.some(reference => reference.fieldCode === row.fieldCode
+          && reference.sourceId === row.sourceId && reference.operationKey === row.operationKey && reference.fileAssetId === row.fileAssetId)
+        || !/^[a-f0-9]{64}$/u.test(row.contentHash) || !/^[a-f0-9]{64}$/u.test(row.completionHash);
+    })) throw new Error("原检查照片与模板、字段或来源不一致");
+    if (value.inspections.some(inspection => (inspection.photoSources ?? []).some(reference => !media.some(row => row.side === inspection.side
+      && row.templateId === inspection.templateId && row.templateVersion === inspection.templateVersion && row.fieldCode === reference.fieldCode
+      && row.sourceId === reference.sourceId && row.operationKey === reference.operationKey && row.fileAssetId === reference.fileAssetId)))) throw new Error("原检查来源缺少接受证据");
     return value;
   };
   const original = async (reference: Reference) => {
@@ -68,9 +83,10 @@ export function useOriginalExchangeInspection(orderId: string, operationToken?: 
       return await navigator.locks.request(`${storageKey}:dispatch`, async () => { current(); return fn(); });
     } finally { busy.current = false; publish(); }
   };
-  return { identity, permitted, workspaceId: auth.currentWorkspaceId, pending, busy: busy.current, storageError, current,
+  return { identity, permitted, workspaceId: auth.currentWorkspaceId, actorUserId: auth.user?.id, pending, busy: busy.current, storageError, current,
     requirements: (input: RentalExchangeInspectionRequirementsRequest) => transport<RentalExchangeInspectionRequirements>(`${path}/requirements`, "post", input),
-    run: (input: Omit<PrepareRentalExchangeInspectionRequest, "operationKey">) => exclusive(async () => {
+    run: (input: Omit<PrepareRentalExchangeInspectionRequest, "operationKey">, beforeDispatch?: () => void) => exclusive(async () => {
+      beforeDispatch?.();
       if (readReference()) throw new Error("请先核对原检查结果，不可再次保存");
       const body = structuredClone(input), reference: Reference = { key: crypto.randomUUID(), orderId, requirementsHash: body.requirementsHash };
       const raw = JSON.stringify(reference); localStorage.setItem(storageKey, raw);

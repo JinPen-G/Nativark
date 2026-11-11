@@ -28,6 +28,7 @@ import { KnowledgeCommitUnknownError } from '../ai-native/knowledge/knowledge-er
 import { knowledgeUploadRevisionSchema, knowledgeUploadKey } from '../ai-native/knowledge/human-knowledge-upload.service';
 
 type JsonRecord = Record<string, unknown>;
+type ExchangeInspectionFrozenEvidence = { sourceId: string; contentHash: string; sizeBytes: number; mimeType: "image/png" | "image/jpeg"; width: number; height: number };
 // Prisma rows carry Date objects; the request canonicalizer expects JSON values.
 const fileFactHash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
 
@@ -340,7 +341,11 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!configBefore || !configRow || fileFactHash(configBefore) !== fileFactHash(configRow)
       || requestFingerprint(configRow.settings) !== requestFingerprint(config.settings)) throw new ConflictException("文件配置已变化");
     const assetId = `file_${randomUUID().replace(/-/g, "")}`, sessionId = randomUUID(), expiresAt = new Date(Date.now() + UPLOAD_TTL_SECONDS * 1000);
-    const storageKey = this.storageKey(config, tenantId, assetId, input.fileName), signed = this.presign(config, "PUT", storageKey, mimeType, expiresAt);
+    // Share the original v2 staging layout so committed evidence has one
+    // validator. The display filename remains a file fact, never the object key.
+    const storageKey = this.storageKey(config, tenantId, assetId, "blob");
+    if (storageKey.length > 380) throw new ConflictException("文件对象定位过长，不能创建安全上传会话");
+    const signed = this.presign(config, "PUT", storageKey, mimeType, expiresAt);
     return { input: structuredClone(input), owner: structuredClone(owner), assetId, sessionId, expiresAt, provider: config.provider, storageKey, mimeType, mode: "provider", config,
       configRowHash: fileFactHash(configRow), storageLocationHash: this.retentionLocationHash(config), uploadUrl: signed.url, uploadHeaders: signed.headers };
   }
@@ -369,23 +374,95 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!configRow || fileFactHash(configRow) !== configRowHash) throw new ConflictException("原影像存储配置已变化");
     const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
     if (!config || this.retentionLocationHash(config) !== storageLocationHash) throw new ServiceUnavailableException("原影像存储位置不可核验");
-    const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, new Date(Date.now() + 60000));
-    const response = await fetchWithTimeout(signed.url, { method: "GET", headers: signed.headers });
-    if (!response.ok || !response.body || response.headers.get("content-length") !== String(asset.sizeBytes)
-      || (response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase() !== asset.mimeType) {
-      if (response.body) void response.body.cancel().catch(() => undefined);
-      throw new ConflictException("原影像内容尚未核验，不能重新上传");
+    const originalMetadata = asset.metadata as JsonRecord;
+    if (originalMetadata.fileUploadVersion !== 2 || asset.storageKey !== this.storageKey(config, tenantId, fileAssetId, "blob")) {
+      throw new ConflictException("原影像缺少受控暂存依据，保留原记录待核对");
     }
+    // Reuse the original bounded object transport. This invocation's Core claim
+    // owns the only staging GET; the validated bytes, not a later mutable copy,
+    // are written to a server-only destination under the existing freeze format.
+    const bytes = await this.readObjectContent(config, asset.storageKey, asset.mimeType, asset.sizeBytes);
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
     try {
-      const content = await readInspectionMedia(response.body, asset.sizeBytes, controller.signal);
+      const stream = new ReadableStream<Uint8Array>({ start(reader) { reader.enqueue(new Uint8Array(bytes)); reader.close(); } });
+      const content = await readInspectionMedia(stream, asset.sizeBytes, controller.signal);
       if (content.sizeBytes !== asset.sizeBytes || content.mediaType !== asset.mimeType || !content.width || !content.height
         || !["image/png", "image/jpeg"].includes(content.mediaType)) throw new BadRequestException("原影像实际格式或大小不匹配");
       const after = await this.exchangeInspectionAsset(tenantId, fileAssetId, owner);
       if (fileFactHash(after) !== fileFactHash(before)) throw new ConflictException("原影像在读取期间已变化");
-      return { contentHash: content.contentHash, sizeBytes: content.sizeBytes, mimeType: content.mediaType as "image/png" | "image/jpeg", width: content.width, height: content.height,
-        assetHash: fileFactHash(asset), sessionHash: fileFactHash(session), configRowHash, storageLocationHash };
+      const evidence: ExchangeInspectionFrozenEvidence = { sourceId: owner.exchangeInspectionSourceId!, contentHash: content.contentHash,
+        sizeBytes: content.sizeBytes, mimeType: content.mediaType as "image/png" | "image/jpeg", width: content.width, height: content.height };
+      const destination = `${asset.storageKey}.committed/${randomUUID()}/${content.contentHash}`;
+      const claimed = await this.prisma.$transaction(async tx => {
+        await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", config.provider);
+        const currentConfig = await tx.tenantIntegrationConfig.findFirst({ where: { tenantId, capability: "file", provider: asset.storageProvider } });
+        const currentAsset = await tx.fileAsset.findFirst({ where: { id: fileAssetId, tenantId }, include: { uploadSession: true } });
+        if (!currentConfig || fileFactHash(currentConfig) !== configRowHash || !currentAsset?.uploadSession
+          || fileFactHash({ asset: currentAsset, session: currentAsset.uploadSession }) !== fileFactHash(before)) throw new ConflictException("原影像冻结前绑定或配置已变化");
+        const sessionClaim = await tx.fileUploadSession.updateMany({ where: { id: session.id, tenantId, status: "pending_upload",
+          fileAssetId, updatedAt: session.updatedAt, storageKey: asset.storageKey }, data: { status: "freeze_pending", storageKey: destination } });
+        const assetClaim = await tx.fileAsset.updateMany({ where: { id: fileAssetId, tenantId, status: "pending_upload", uploadedBy: owner.actorUserId,
+          updatedAt: asset.updatedAt, storageProvider: asset.storageProvider, storageKey: asset.storageKey }, data: { storageKey: destination, checksum: content.contentHash,
+          metadata: { ...originalMetadata, fileContentVersion: 1, contentHash: content.contentHash, stagingStorageKey: asset.storageKey,
+            exchangeInspectionFrozenEvidence: evidence } as Prisma.InputJsonValue } });
+        if (sessionClaim.count !== 1 || assetClaim.count !== 1) throw new ConflictException("原影像冻结已被占用，只能核对原目标");
+        const frozenAsset = await tx.fileAsset.findFirst({ where: { id: fileAssetId, tenantId }, include: { uploadSession: true } });
+        if (!frozenAsset?.uploadSession) throw new ConflictException("原影像冻结记录缺失");
+        return { asset: frozenAsset, session: frozenAsset.uploadSession };
+      });
+      // The exact destination is durable before PUT. A lost acknowledgement is
+      // reconciled there; never allocate another destination or reread staging.
+      const signed = this.presign(config, "PUT", destination, asset.mimeType, new Date(Date.now() + 60000));
+      const written = await this.objectRequest(signed.url, { method: "PUT", headers: signed.headers, body: new Uint8Array(bytes) });
+      if (!written.ok) throw new ServiceUnavailableException("原影像内容冻结结果未知，只能核对已登记目标");
+      const observed = await this.readObjectContent(config, destination, asset.mimeType, asset.sizeBytes);
+      if (createHash("sha256").update(observed).digest("hex") !== evidence.contentHash) throw new ConflictException("原影像冻结字节与已核验内容不同");
+      return { ...evidence, assetHash: fileFactHash(claimed.asset), sessionHash: fileFactHash(claimed.session), configRowHash, storageLocationHash };
     } finally { clearTimeout(timer); }
+  }
+
+  private exchangeFrozenEvidence(asset: { id: string; tenantId: string; storageProvider: string; storageKey: string; checksum: string | null; metadata: unknown; sizeBytes: number; mimeType: string }, owner: FileBusinessOwner) {
+    const metadata = asset.metadata as JsonRecord | null, value = metadata?.exchangeInspectionFrozenEvidence as ExchangeInspectionFrozenEvidence | undefined;
+    if (!value || value.sourceId !== owner.exchangeInspectionSourceId || value.contentHash !== frozenFileContentHash(asset)
+      || !Number.isSafeInteger(value.sizeBytes) || value.sizeBytes < 1 || value.sizeBytes > MAX_FILE_BYTES || !["image/png", "image/jpeg"].includes(value.mimeType)
+      || value.sizeBytes !== asset.sizeBytes || value.mimeType !== asset.mimeType
+      || !Number.isSafeInteger(value.width) || !Number.isSafeInteger(value.height) || value.width < 1 || value.height < 1
+      || value.width > 16384 || value.height > 16384 || value.width * value.height > 40000000) throw new ConflictException("原影像冻结内容证据缺失或不一致");
+    return value;
+  }
+
+  /** Observe only a previously persisted destination. No staging read or PUT;
+   * a missing original freeze intent remains unknown, including after expiry. */
+  async reconcileExchangeInspectionUpload(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, configRowHash: string, storageLocationHash: string) {
+    const before = structuredClone(await this.exchangeInspectionAsset(tenantId, fileAssetId, owner)), { asset, session } = before;
+    if (asset.status === "pending_upload" && session.status === "pending_upload") return undefined;
+    if (!(asset.status === "pending_upload" && session.status === "freeze_pending" || asset.status === "active" && session.status === "completed")) throw new ConflictException("原影像冻结状态不可核对");
+    const evidence = this.exchangeFrozenEvidence(asset, owner);
+    const configRow = await this.prisma.tenantIntegrationConfig.findFirst({ where: { tenantId, provider: asset.storageProvider, capability: "file" } });
+    if (!configRow || fileFactHash(configRow) !== configRowHash) throw new ConflictException("原影像冻结配置已变化");
+    const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
+    if (!config || this.retentionLocationHash(config) !== storageLocationHash || !frozenFileContentHash(asset, config)) throw new ConflictException("原影像冻结位置不可核对");
+    const bytes = await this.readObjectContent(config, asset.storageKey, evidence.mimeType, evidence.sizeBytes);
+    if (createHash("sha256").update(bytes).digest("hex") !== evidence.contentHash) throw new ConflictException("原影像冻结目标尚未核验，不能另写或重传");
+    const after = await this.exchangeInspectionAsset(tenantId, fileAssetId, owner);
+    if (fileFactHash(before) !== fileFactHash(after)) throw new ConflictException("原影像冻结依据在核对期间已变化");
+    return { ...evidence, assetHash: fileFactHash(asset), sessionHash: fileFactHash(session), configRowHash, storageLocationHash };
+  }
+
+  /** Core supplies the verified original preparation's factual owner and hash.
+   * Return bounded immutable bytes, never a PUT/GET ticket or storage key. */
+  async readFrozenExchangeInspectionEvidence(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, contentHash: string) {
+    const before = structuredClone(await this.exchangeInspectionAsset(tenantId, fileAssetId, owner)), { asset, session } = before;
+    const evidence = this.exchangeFrozenEvidence(asset, owner);
+    if (asset.status !== "active" || session.status !== "completed" || evidence.contentHash !== contentHash
+      || (asset.metadata as JsonRecord).exchangeInspectionContentHash !== contentHash) throw new ConflictException("原检查照片尚未正式接受或内容不一致");
+    const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
+    if (!config || !frozenFileContentHash(asset, config)) throw new ConflictException("原检查照片存储位置已变化");
+    const bytes = await this.readObjectContent(config, asset.storageKey, evidence.mimeType, evidence.sizeBytes);
+    if (createHash("sha256").update(bytes).digest("hex") !== contentHash) throw new ConflictException("原检查照片读取字节与同意材料不一致");
+    const after = await this.exchangeInspectionAsset(tenantId, fileAssetId, owner);
+    if (fileFactHash(before) !== fileFactHash(after)) throw new ConflictException("原检查照片读取期间发生变化");
+    return { bytes, mimeType: evidence.mimeType, contentHash, sizeBytes: evidence.sizeBytes };
   }
   async completeExchangeInspectionUpload(tx: Prisma.TransactionClient, tenantId: string, fileAssetId: string, owner: FileBusinessOwner,
     proof: Awaited<ReturnType<FileStorageRuntimeService["inspectExchangeInspectionUpload"]>>) {
@@ -395,11 +472,20 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       || metadata.workspaceId !== owner.workspaceId || metadata.exchangeInspectionSourceId !== owner.exchangeInspectionSourceId
       || metadata.storageLocationHash !== proof.storageLocationHash || fileFactHash(asset) !== proof.assetHash
       || fileFactHash(asset.uploadSession) !== proof.sessionHash) throw new ConflictException("原影像完成绑定已变化");
+    const evidence = this.exchangeFrozenEvidence(asset, owner);
+    if (fileFactHash(evidence) !== fileFactHash({ sourceId: owner.exchangeInspectionSourceId, contentHash: proof.contentHash, sizeBytes: proof.sizeBytes,
+      mimeType: proof.mimeType, width: proof.width, height: proof.height })) throw new ConflictException("原影像完成不属于已核验的冻结内容");
     await this.integrations.assertEnabledInTransaction(tx, tenantId, "file", asset.storageProvider as never);
     const configRow = await tx.tenantIntegrationConfig.findFirst({ where: { tenantId, capability: "file", provider: asset.storageProvider } });
     if (!configRow || fileFactHash(configRow) !== proof.configRowHash) throw new ConflictException("原影像文件配置已变化");
+    if (asset.status === "active" && asset.uploadSession.status === "completed" && asset.uploadSession.completedAt
+      && metadata.exchangeInspectionContentHash === proof.contentHash) {
+      return { contentHash: proof.contentHash, sizeBytes: proof.sizeBytes, mimeType: proof.mimeType, width: proof.width, height: proof.height,
+        completedAt: asset.uploadSession.completedAt.toISOString() };
+    }
+    if (asset.status !== "pending_upload" || asset.uploadSession.status !== "freeze_pending") throw new ConflictException("原影像尚未完成内容冻结");
     const completedAt = new Date();
-    const sessionClaim = await tx.fileUploadSession.updateMany({ where: { id: asset.uploadSession.id, tenantId, status: "pending_upload", updatedAt: asset.uploadSession.updatedAt,
+    const sessionClaim = await tx.fileUploadSession.updateMany({ where: { id: asset.uploadSession.id, tenantId, status: "freeze_pending", updatedAt: asset.uploadSession.updatedAt,
       fileAssetId, provider: asset.storageProvider, storageKey: asset.storageKey }, data: { status: "completed", completedAt, failureReason: null } });
     const assetClaim = await tx.fileAsset.updateMany({ where: { id: fileAssetId, tenantId, status: "pending_upload", updatedAt: asset.updatedAt, uploadedBy: owner.actorUserId,
       storageProvider: asset.storageProvider, storageKey: asset.storageKey }, data: { status: "active", checksum: proof.contentHash,

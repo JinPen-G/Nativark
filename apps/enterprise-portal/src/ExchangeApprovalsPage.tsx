@@ -3,11 +3,80 @@
  * the original operation and independent consent references. */
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { customerFetch, customerSessionGeneration } from "@rental-os/web-client";
 import { enterpriseExchangeInspectionConsentSnapshot, formatRentalMoney, type RentalExchangeInspectionCustomerMaterial, type RentalExchangeInspectionConsent, type EnterpriseExchangeConfirmationResult, type EnterpriseExchangeRequestOriginalResult, type EnterpriseExchangeChoices, type ClientOrderView, type EnterpriseExchangeApprovalView, type EnterpriseExchangeIntent, type EnterpriseOperationResult } from "@rental-os/shared";
 import { ActionButton, Alert, Button, Checkbox, Form, Input, SaveButton, Select, Table } from "@/components/ui/customer-entry";
 import { useLocale } from "@/app/locale";
-import { useEnterprise } from "./enterprise-session";
+import { CLIENT_BASE, useEnterprise } from "./enterprise-session";
 import { useOriginalWorkflowOperation } from "./original-workflow-operation";
+
+function ExchangeInspectionPhoto({ material, photo, english, signal, assertMaterial, onShown }: {
+  material: RentalExchangeInspectionCustomerMaterial;
+  photo: RentalExchangeInspectionCustomerMaterial["photos"][number];
+  english: boolean; signal?: AbortSignal; assertMaterial: () => void; onShown: (shown: boolean) => void;
+}) {
+  const context = useEnterprise(), owner = useRef(context); owner.current = context;
+  const identity = context.identity, tenantCode = context.tenantCode, generation = customerSessionGeneration(tenantCode);
+  const scope = JSON.stringify([identity, generation, tenantCode, context.session?.workspace?.workspaceCode, material.orderId,
+    material.preparationId, material.preparationHash, material.materialHash, photo.fileAssetId, photo.contentHash]);
+  const latest = useRef(scope); latest.current = scope;
+  const mounted = useRef(true), resources = useRef<{ controller?: AbortController; url?: string }>({});
+  const [preview, setPreview] = useState<{ scope: string; url: string }>();
+  const [reading, setReading] = useState(false), [failure, setFailure] = useState<{ scope: string; message: string }>();
+  const current = () => {
+    assertMaterial();
+    if (!mounted.current || latest.current !== scope || owner.current.identity !== identity || owner.current.tenantCode !== tenantCode
+      || owner.current.loading || owner.current.signal.aborted || customerSessionGeneration(tenantCode) !== generation
+      || owner.current.session?.customer.customerId !== material.customerId) throw new Error("原照片身份或材料已变化");
+  };
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false; resources.current.controller?.abort();
+      if (resources.current.url) URL.revokeObjectURL(resources.current.url);
+      resources.current = {};
+    };
+  }, [scope]);
+  const read = async () => {
+    current(); onShown(false); resources.current.controller?.abort();
+    if (resources.current.url) URL.revokeObjectURL(resources.current.url);
+    const controller = new AbortController(); resources.current = { controller };
+    setPreview(undefined); setReading(true); setFailure(undefined);
+    try {
+      if (![material.orderId, material.preparationId, photo.fileAssetId].every(value => /^[A-Za-z0-9._:-]{1,191}$/u.test(value))
+        || !/^[a-f0-9]{64}$/u.test(photo.contentHash)) throw new Error("原照片引用不可核对");
+      const path = `/enterprise/orders/${encodeURIComponent(material.orderId)}/exchange-inspections/${encodeURIComponent(material.preparationId)}/photos/${encodeURIComponent(photo.fileAssetId)}?preparationHash=${encodeURIComponent(material.preparationHash)}`;
+      const response = await customerFetch(tenantCode, CLIENT_BASE, path,
+        { signal: AbortSignal.any([owner.current.signal, signal ?? owner.current.signal, controller.signal]) });
+      current();
+      const mimeType = response.headers.get("Content-Type")?.split(";")[0].trim();
+      if (!response.ok || !mimeType || !["image/png", "image/jpeg"].includes(mimeType)) throw new Error("原照片读取不可用");
+      const bytes = await response.arrayBuffer(); current();
+      if (controller.signal.aborted || resources.current.controller !== controller || bytes.byteLength < 1 || bytes.byteLength > 20 * 1024 * 1024) throw new Error("原照片读取已取消或超出范围");
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); current();
+      const contentHash = Array.from(digest, value => value.toString(16).padStart(2, "0")).join("");
+      if (contentHash !== photo.contentHash || controller.signal.aborted || resources.current.controller !== controller) throw new Error("原照片字节与具体检查材料不一致");
+      const url = URL.createObjectURL(new Blob([bytes], { type: mimeType })); resources.current.url = url;
+      setPreview({ scope, url });
+    } catch (error) {
+      if (mounted.current && latest.current === scope && resources.current.controller === controller) {
+        setFailure({ scope, message: english ? "Original inspection photo unavailable" : "原检查照片不可用" });
+      }
+      throw error;
+    } finally { if (mounted.current && latest.current === scope && resources.current.controller === controller) setReading(false); }
+  };
+  const active = !context.loading && !context.signal.aborted && preview?.scope === scope ? preview : undefined;
+  return <section>
+    <ActionButton intent="review" label={english ? "View this inspection photo" : "查看本条检查照片"} disabled={reading} onAction={read}/>
+    {active && <img src={active.url} alt={`${photo.side} / ${photo.fieldCode}`} style={{ maxWidth: "100%" }}
+      onLoad={() => { try { current(); if (resources.current.url !== active.url) throw new Error("原照片已替换"); onShown(true); } catch { /* A late display cannot confirm an old material. */ } }}
+      onError={() => {
+        try { current(); onShown(false); setFailure({ scope, message: english ? "Photo display failed" : "照片显示失败" }); }
+        catch { /* The old owner receives no display result. */ }
+      }}/>}
+    {failure?.scope === scope && <Alert type="error" title={failure.message}/>}
+  </section>;
+}
 
 function ExchangeInspectionReview({ row, english }: { row: EnterpriseExchangeApprovalView; english: boolean }) {
   const context = useEnterprise(), owner = useRef(context); owner.current = context;
@@ -15,6 +84,8 @@ function ExchangeInspectionReview({ row, english }: { row: EnterpriseExchangeApp
   const customerId = context.session?.customer.customerId, orderId = row.orderId, approvalId = row.id;
   const [preparationId, setPreparationId] = useState(""), [reviewed, setReviewed] = useState(false);
   const [consent, setConsent] = useState<{ identity: string; value: RentalExchangeInspectionConsent }>();
+  const photoEpoch = useRef(0), materialSignal = useRef<AbortSignal | undefined>(undefined);
+  const [viewedPhotos, setViewedPhotos] = useState<{ scope: string; files: string[] }>();
   const operation = useOriginalWorkflowOperation(`exchange-approvals:inspection:${orderId}:${approvalId}`);
   const assertCurrent = () => {
     operation.assertCurrent();
@@ -25,25 +96,37 @@ function ExchangeInspectionReview({ row, english }: { row: EnterpriseExchangeApp
   const query = useQuery({ queryKey: ["enterprise-exchange-inspection", identity, approvalId, orderId, preparationId, workspaceCode],
     enabled: Boolean(customerId && preparationId && row.state === "approved" && !operation.pending),
     queryFn: async ({ signal }) => {
-      assertCurrent();
+      assertCurrent(); photoEpoch.current++; materialSignal.current = signal; setViewedPhotos(undefined); setReviewed(false);
       if (!/^[A-Za-z0-9._:-]{1,191}$/u.test(preparationId)) throw new Error("原检查准备引用无效");
       const material = await operation.read<RentalExchangeInspectionCustomerMaterial>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-inspections/${encodeURIComponent(preparationId)}`, signal);
       assertCurrent();
-      if (material.orderId !== orderId || material.customerId !== customerId || material.preparationId !== preparationId
+      if (material.orderId !== orderId || material.workspaceId !== row.workspaceId || material.customerId !== customerId || material.preparationId !== preparationId
         || material.expectedOrderUpdatedAt !== row.expectedOrderUpdatedAt || !/^[a-f0-9]{64}$/u.test(material.preparationHash)
         || !/^[a-f0-9]{64}$/u.test(material.materialHash) || !Array.isArray(material.templates) || material.templates.length > 40
         || !Array.isArray(material.inspections) || material.inspections.length > 40 || !Array.isArray(material.exceptions) || material.exceptions.length > 200
-        || !Array.isArray(material.photos) || material.photos.length > 4000
+        || !Array.isArray(material.photos) || material.photos.length > 4000 || new Set(material.photos.map(photo => photo.fileAssetId)).size !== material.photos.length
         || material.templates.some(template => !Array.isArray(template.fields) || template.fields.length > 100)
         || material.inspections.some(inspection => !inspection.results || typeof inspection.results !== "object" || Array.isArray(inspection.results))) throw new Error("原本人检查材料不可核对");
       return { identity, preparationId, workspaceCode, material };
     } });
-  const material = !query.error && !query.isFetching && query.data?.identity === identity && query.data.preparationId === preparationId
+  const material = row.state === "approved" && !query.error && !query.isFetching && query.data?.identity === identity && query.data.preparationId === preparationId
     && query.data.workspaceCode === workspaceCode ? query.data.material : undefined;
+  const epoch = photoEpoch.current, photoScope = JSON.stringify([identity, epoch, orderId, preparationId, material?.preparationHash, material?.materialHash]);
+  const latestPhotoScope = useRef(photoScope); latestPhotoScope.current = photoScope;
+  const photoGate = useRef({ scope: photoScope, files: [] as string[], reviewed: false });
+  if (photoGate.current.scope !== photoScope) photoGate.current = { scope: photoScope, files: [], reviewed: false };
+  photoGate.current.reviewed = reviewed;
+  const assertMaterial = () => {
+    assertCurrent();
+    if (!material || photoEpoch.current !== epoch || latestPhotoScope.current !== photoScope || query.isFetching) throw new Error("原照片审阅材料已变化");
+  };
+  const photosReady = Boolean(material && (!material.photos.length || viewedPhotos?.scope === photoScope
+    && material.photos.every(photo => viewedPhotos.files.includes(photo.fileAssetId))));
   const observed = consent?.identity === identity ? consent.value : undefined;
   const confirm = () => operation.run<RentalExchangeInspectionConsent>(() => {
-    assertCurrent();
-    if (!material || !reviewed || row.state !== "approved" || !row.employeeConfirmation || material.photos.length) throw new Error("须本人核对原具体检查及照片读取能力后确认");
+    assertMaterial();
+    if (!material || !photoGate.current.reviewed || row.state !== "approved" || !row.employeeConfirmation
+      || !material.photos.every(photo => photoGate.current.files.includes(photo.fileAssetId))) throw new Error("须本人核对原具体检查及实际照片后确认");
     return { path: `/enterprise/orders/${encodeURIComponent(orderId)}/exchange-inspection-consents`, originalTarget: material.preparationId,
       input: { preparationId: material.preparationId, preparationHash: material.preparationHash, materialHash: material.materialHash,
         expectedOrderUpdatedAt: material.expectedOrderUpdatedAt, expectedRevision: 0, confirm: true } };
@@ -55,14 +138,16 @@ function ExchangeInspectionReview({ row, english }: { row: EnterpriseExchangeApp
     setConsent({ identity, value: original }); setReviewed(false);
   });
   const original = () => operation.recoverInspectionConsent(async value => {
-    assertCurrent(); setPreparationId(value.preparationId); setConsent({ identity, value }); setReviewed(false);
+    assertCurrent();
+    if (value.orderId !== orderId || value.workspaceId !== row.workspaceId) throw new Error("原检查同意与本条订单或空间不一致");
+    photoEpoch.current++; setViewedPhotos(undefined); setPreparationId(value.preparationId); setConsent({ identity, value }); setReviewed(false);
   });
   return <section aria-label={english ? "Specific exchange inspection" : "具体换货检查"}>
     <h4>{english ? "Specific exchange inspection" : "具体换货检查"}</h4>
     <p>{english ? "Review the original-item inspection and replacement handover submitted by the merchant. Expense consent is recorded separately." : "核对商户提交的旧物检查与替换物交付，费用确认单独保存。"}</p>
     <Input aria-label={english ? "Original inspection preparation" : "原检查准备引用"} value={preparationId} disabled={operation.busy || Boolean(operation.pending)} maxLength={191}
-      onChange={event => { setPreparationId(event.target.value.trim()); setReviewed(false); setConsent(undefined); }}/>
-    <ActionButton intent="refresh" label={english ? "Read this inspection" : "读取本次具体检查"} disabled={!preparationId || query.isFetching || Boolean(operation.pending)} onAction={async () => { assertCurrent(); await query.refetch({ throwOnError: true }); assertCurrent(); }}/>
+      onChange={event => { photoEpoch.current++; setViewedPhotos(undefined); setPreparationId(event.target.value.trim()); setReviewed(false); setConsent(undefined); }}/>
+    <ActionButton intent="refresh" label={english ? "Read this inspection" : "读取本次具体检查"} disabled={row.state !== "approved" || !preparationId || query.isFetching || Boolean(operation.pending)} onAction={async () => { assertCurrent(); await query.refetch({ throwOnError: true }); assertCurrent(); }}/>
     {query.isFetching && <p role="status">{english ? "Reading the original inspection" : "正在读取原具体检查"}</p>}
     {query.error && <Alert type="error" title={english ? "Original inspection unavailable" : "原具体检查不可用"}/>}
     {material && <>
@@ -73,12 +158,22 @@ function ExchangeInspectionReview({ row, english }: { row: EnterpriseExchangeApp
         </section>;
       })}
       {material.exceptions.map((exception, index) => <p key={index}>{exception.code} / {exception.description}</p>)}
-      {material.photos.length > 0 && <Alert type="warning" title={english ? "Authenticated inspection photo viewing unavailable" : "受权检查照片查看尚未装配"}/>}
-      <Checkbox checked={reviewed} disabled={operation.blocked || material.photos.length > 0} onChange={event => setReviewed(event.target.checked)}>{english ? "I reviewed and agree to this specific inspection and handover" : "我已核对并同意本次具体检查与交付"}</Checkbox>
-      <ActionButton intent="confirm" label={english ? "Confirm this specific inspection" : "确认本次具体检查"} disabled={operation.blocked || !reviewed || material.photos.length > 0} onAction={confirm}/>
+      {material.photos.map(photo => <ExchangeInspectionPhoto key={`${photoScope}:${photo.fileAssetId}`} material={material} photo={photo} english={english}
+        signal={materialSignal.current} assertMaterial={assertMaterial} onShown={shown => {
+          assertMaterial(); setReviewed(false);
+          const files = [...photoGate.current.files.filter(id => id !== photo.fileAssetId), ...(shown ? [photo.fileAssetId] : [])];
+          photoGate.current = { scope: photoScope, files, reviewed: false }; setViewedPhotos({ scope: photoScope, files });
+        }}/>) }
+      <Checkbox checked={reviewed} disabled={operation.blocked || !photosReady} onChange={event => {
+        assertMaterial();
+        if (!material.photos.every(photo => photoGate.current.files.includes(photo.fileAssetId))) throw new Error("须先查看本次检查照片");
+        photoGate.current.reviewed = event.target.checked; setReviewed(event.target.checked);
+      }}>{english ? "I reviewed and agree to this specific inspection and handover" : "我已核对并同意本次具体检查与交付"}</Checkbox>
+      <ActionButton intent="confirm" label={english ? "Confirm this specific inspection" : "确认本次具体检查"} disabled={operation.blocked || !reviewed || !photosReady} onAction={confirm}/>
     </>}
     {operation.pending && <ActionButton intent="refresh" label={english ? "Read original inspection consent" : "读取原检查同意收据"} disabled={operation.busy} onAction={original}/>}
-    {observed && <dl><dt>{english ? "Original consent" : "原检查同意"}</dt><dd>{observed.id}</dd><dt>{english ? "Original confirmation key" : "原确认键"}</dt><dd>{observed.operationKey}</dd><dt>{english ? "Original preparation" : "原检查准备"}</dt><dd>{observed.preparationId}</dd></dl>}
+    {observed && <dl><dt>{english ? "Original consent" : "原检查同意"}</dt><dd>{observed.id}</dd><dt>{english ? "Original confirmation key" : "原确认键"}</dt><dd>{observed.operationKey}</dd><dt>{english ? "Original preparation" : "原检查准备"}</dt><dd>{observed.preparationId}</dd>
+      <dt>{english ? "Preparation hash" : "准备哈希"}</dt><dd>{observed.preparationHash}</dd><dt>{english ? "Original order" : "原订单"}</dt><dd>{orderId}</dd><dt>{english ? "Expense approval" : "费用批准"}</dt><dd>{approvalId}</dd><dt>{english ? "Current approval revision" : "当前批准修订"}</dt><dd>{row.revision}</dd></dl>}
     {operation.error && <Alert type="error" title={operation.error}/>}
   </section>;
 }
@@ -122,7 +217,7 @@ function ExchangeReview({ row, reviewMode, unavailable, operation, refresh }: {
     {row.employeeConfirmation && <Alert type="info" title={(row.execution === undefined || row.execution === "original_merchant_execution_not_connected") && row.state !== "consumed"
       ? english ? "Expense confirmed by applicant; exchange not executed" : "本人已确认费用；换货尚未执行"
       : english ? "Original expense consent recorded" : "原本人费用确认已记录"}/>}
-    {!blocked && !reviewMode && own && row.employeeConfirmation && <ExchangeInspectionReview key={row.id} row={row} english={english}/>}
+    {!reviewMode && own && row.employeeConfirmation && ["approved", "consumed"].includes(row.state) && <ExchangeInspectionReview key={row.id} row={row} english={english}/>}
     {row.state === "consumed" && <Alert type="info" title={english ? "Original approval consumed" : "原批准已消费"} description={english ? "Read the original merchant execution receipt." : "请读取原商户执行收据核对结果。"}/>}
     {((reviewMode && !own && row.state === "pending") || (!reviewMode && own && ["pending", "approved"].includes(row.state))) && <>
       <Input.TextArea aria-label={english ? "Reason for this exchange decision" : "本条换货处理原因"} value={reason} maxLength={500} disabled={blocked} onChange={event => setReason(event.target.value)} />
