@@ -1,13 +1,17 @@
 /** Shared enterprise policy form presentation. Hosts own current identity and transport. */
 import type { EnterpriseScopePolicy, EnterpriseScopePolicyView } from "@rental-os/shared";
-import { RentalCategoryCode } from "@rental-os/shared";
 import { Checkbox, Form, Input, Select } from "./ui/customer-entry";
 export type EnterprisePolicyForm = EnterpriseScopePolicy & { reason: string };
 export function EnterprisePolicyFields({ view, merchant, english }: { view: EnterpriseScopePolicyView; merchant: boolean; english: boolean }) {
-  const categoryNames: Record<RentalCategoryCode, string> = { vehicle: english ? "Vehicle" : "车辆", camera: english ? "Camera" : "摄影", camping: english ? "Camping" : "露营", construction: english ? "Construction" : "工程设备" };
-  const categories = merchant ? Object.values(RentalCategoryCode) : view.merchant?.categoryCodes ?? [];
+  const categoryNames: Record<string, string> = { ...Object.fromEntries((view.categories ?? []).map(row => [row.code, row.name])),
+    vehicle: english ? "Vehicle" : "车辆", camera: english ? "Camera" : "摄影", camping: english ? "Camping" : "露营", construction: english ? "Construction" : "工程设备" };
+  const categories = merchant ? view.categories?.map(row => row.code) ?? [] : view.merchant?.categoryCodes ?? [];
+  const categoriesUnavailable = merchant && view.categories === undefined;
   return <>
-    <Form.Item name="categoryCodes" label={english ? "Allowed categories" : "允许品类"} rules={[{ required: true }]}><Select mode="multiple" options={categories.map(value => ({ value, label: categoryNames[value] ?? value }))} /></Form.Item>
+    <Form.Item name="categoryCodes" label={english ? "Allowed categories" : "允许品类"} rules={[{ required: true }]}
+      help={categoriesUnavailable ? english ? "Category options are unavailable. Read the policy again." : "品类选项暂不可用，请重新读取政策。" : undefined}>
+      <Select mode="multiple" disabled={categoriesUnavailable ? true : undefined} options={categories.map(value => ({ value, label: categoryNames[value] ?? value }))} />
+    </Form.Item>
     <Form.Item name="workspaceIds" label={english ? "Allowed workspaces" : "允许经营空间"} rules={[{ required: true }]}><Select mode="multiple" options={view.workspaces.map(row => ({ value: row.id, label: `${row.name} / ${categoryNames[row.categoryCode] ?? row.categoryCode}` }))} /></Form.Item>
     <Form.Item name="personalPaymentAllowed" valuePropName="checked"><Checkbox>{english ? "Allow corporate benefits with personal payment" : "允许企业优惠、个人付款"}</Checkbox></Form.Item>
     <Form.Item name="enterprisePaymentAllowed" valuePropName="checked"><Checkbox>{english ? "Allow enterprise contract and payment" : "允许企业签约与付款"}</Checkbox></Form.Item>

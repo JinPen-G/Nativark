@@ -38,6 +38,8 @@ export interface EnterpriseScopePolicyView {
   effectiveWorkspaceIds: string[];
   effectiveCategoryCodes: RentalCategoryCode[];
   workspaces: Array<{ id: string; name: string; categoryCode: RentalCategoryCode }>;
+  /** Published Core labels within the current policy editor's scope. */
+  categories?: Array<{ code: RentalCategoryCode; name: string }>;
 }
 export interface EnterpriseOwnRentalPolicy {
   corporateCustomerId: string;

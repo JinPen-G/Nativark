@@ -65,6 +65,8 @@ import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterpr
 import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
 import { EnterpriseManagementRequestService } from "./modules/enterprise/enterprise-management-request.service";
 import { EnterpriseWorkflowsController } from "./modules/enterprise/enterprise-workflows.controller";
+import { EnterpriseOrderReaderService } from "./modules/enterprise/enterprise-order-reader.service";
+import { EnterpriseReadController } from "./modules/enterprise/enterprise-read.controller";
 import { EnterpriseMerchantController } from "./modules/enterprise/enterprise-merchant.controller";
 import { CustomerAvatarController } from "./modules/platform/customer-avatar.controller";
 import { CustomerAvatarService } from "./modules/platform/customer-avatar.service";
@@ -246,6 +248,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     CategoryAdoptionPreparationController,
     MembershipController,
     EnterpriseWorkflowsController,
+    EnterpriseReadController,
     EnterpriseMerchantController,
     EnterpriseRentalHandoffMerchantController,
     CustomerAvatarController,
@@ -338,6 +341,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     EnterpriseExchangeApprovalService,
     EnterpriseTaskCenterService,
     EnterpriseManagementRequestService,
+    EnterpriseOrderReaderService,
     CustomerAvatarService,
     OperationLogService,
     RentalCoreService,

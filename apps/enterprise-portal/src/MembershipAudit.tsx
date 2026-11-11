@@ -1,39 +1,80 @@
 /** Corporate membership audit is an explicit current action, separate from own
  * receipts. Historical role/actions are read-only results, never today's grants. */
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { enterpriseMembershipAuditSnapshot, type EnterpriseMembershipAudit } from "@rental-os/shared";
 import { ActionButton, Alert, Table } from "@/components/ui/customer-entry";
 import { useEnterprise } from "./enterprise-session";
 export function EnterpriseMembershipAuditRecords({ english }: { english: boolean }) {
   const context = useEnterprise(), owner = useRef(context); owner.current = context;
+  const identity = context.identity, tenantCode = context.tenantCode;
   const corporateId = context.selectedCorporateId, corporate = context.entry?.corporates.find(row => row.corporateCustomerId === corporateId);
   const permitted = Boolean(context.session?.customer.customerType === "personal" && corporate?.actions.includes("audit:read") && !context.loading && !context.signal.aborted);
   const revision = corporate?.permissionRevision, workspaceCode = context.session?.workspace?.workspaceCode;
+  const readAuthority = corporate?.actions.filter(action => ["audit:read", "orders:read", "finance:read"].includes(action)).join("|");
+  const pageScope = JSON.stringify([identity, tenantCode, corporateId, revision, workspaceCode, readAuthority]);
+  const [readerPage, setReaderPage] = useState<{ scope: string; cursor?: string }>({ scope: "" });
+  const readerCursor = readerPage.scope === pageScope ? readerPage.cursor : undefined;
   const assertCurrent = () => {
     const current = owner.current, selected = current.entry?.corporates.find(row => row.corporateCustomerId === current.selectedCorporateId);
-    if (!permitted || current.identity !== context.identity || current.tenantCode !== context.tenantCode || current.selectedCorporateId !== corporateId || current.loading || current.signal.aborted
-      || current.session?.workspace?.workspaceCode !== workspaceCode || !selected?.actions.includes("audit:read") || selected.permissionRevision !== revision) throw new Error(english ? "Current audit authority changed" : "当前审计授权已变化");
+    if (!permitted || current.identity !== identity || current.tenantCode !== tenantCode || current.selectedCorporateId !== corporateId || current.loading || current.signal.aborted
+      || current.session?.workspace?.workspaceCode !== workspaceCode || !selected?.actions.includes("audit:read") || selected.permissionRevision !== revision
+      || selected.actions.filter(action => ["audit:read", "orders:read", "finance:read"].includes(action)).join("|") !== readAuthority) throw new Error(english ? "Current audit authority changed" : "当前审计授权已变化");
   };
-  const query = useQuery({ queryKey: ["enterprise-membership-audit", context.identity, corporateId, revision, workspaceCode], enabled: permitted,
+  const query = useQuery({ queryKey: ["enterprise-membership-audit", identity, corporateId, revision, workspaceCode, readAuthority, readerCursor], enabled: permitted,
     queryFn: async ({ signal }) => {
       assertCurrent();
-      const value = enterpriseMembershipAuditSnapshot(await context.read<EnterpriseMembershipAudit>(`/enterprise/corporates/${encodeURIComponent(corporateId)}/membership-audit`, AbortSignal.any([context.signal,signal])), context.tenantCode, corporateId, context.session?.workspace?.workspaceCode);
-      assertCurrent(); if (!value) throw new Error(english ? "Original membership audit unavailable" : "原成员管理审计不可核对");
-      return { identity: context.identity, corporateId, revision, workspaceCode, value };
+      const path = `/enterprise/corporates/${encodeURIComponent(corporateId)}/membership-audit${readerCursor ? `?readerCursor=${encodeURIComponent(readerCursor)}` : ""}`;
+      const value = enterpriseMembershipAuditSnapshot(await context.read<EnterpriseMembershipAudit>(path, AbortSignal.any([context.signal,signal])), tenantCode, corporateId, workspaceCode);
+      assertCurrent();
+      if (!value || value.permissionRevision !== revision) throw new Error(english ? "Original membership audit unavailable" : "原成员管理审计不可核对");
+      return { identity, corporateId, revision, workspaceCode, readAuthority, readerCursor, value };
     } });
   const refresh = async () => { assertCurrent(); await query.refetch({ throwOnError: true }); };
-  const visible = permitted && !query.isFetching && !query.error && query.data?.identity === context.identity && query.data.corporateId === corporateId && query.data.revision === revision && query.data.workspaceCode === workspaceCode ? query.data.value : undefined;
+  const visible = permitted && !query.isFetching && !query.error && query.data?.identity === identity && query.data.corporateId === corporateId
+    && query.data.revision === revision && query.data.workspaceCode === workspaceCode && query.data.readAuthority === readAuthority
+    && query.data.readerCursor === readerCursor ? query.data.value : undefined;
+  const latestReaderPage = async () => { assertCurrent(); setReaderPage({ scope: pageScope }); };
+  const nextReaderPage = async () => {
+    assertCurrent();
+    if (!visible?.readerAudit?.nextCursor) throw new Error(english ? "Read the current audit page first" : "请先读取当前审计页");
+    setReaderPage({ scope: pageScope, cursor: visible.readerAudit.nextCursor });
+  };
   const action = (value: string) => value === "administrator.change" ? english ? "Administrator authority changed" : "管理员授权变更" : value === "member.exit" ? english ? "Own relationship exit" : "本人关系退出" : english ? "Member relationship changed" : "成员关系变更";
+  const readerGroupLabels = {
+    enterprise_paid: english ? "Enterprise-paid" : "企业承担",
+    personal_benefit: english ? "Personal payment" : "优惠自费",
+    finance: english ? "Enterprise finance" : "企业财务"
+  };
   return <section aria-label={english ? "Corporate membership audit" : "企业成员管理审计"}>
     <h3>{english ? "Corporate membership audit" : "企业成员管理审计"}</h3>
     <Alert type="info" title={english ? "Curated original management receipts" : "限定范围的原管理收据"}
-      description={english ? "Current audit authority is checked separately. Member/admin, invitation/transfer, associated join/management and current-service approval receipts, customer/merchant policy metadata and original application/company approval bindings are shown separately. Missing sources are not empty success. Historical outcomes do not grant current authority or prove Core completion. Remaining management/approval, order and financial audit are not covered. No roles are granted or K/C references resolved." : "单独核验当前审计权。成员/管理员、邀请/交接、有关联的加入/资料申请、当前认证服务批准、客户/商户政策元数据及原申请批准企业关联分列展示，旧接口缺来源不冒充空成功。历史结果不授今天权限或证明Core完成；其余管理/批准类别、订单及财务审计仍未覆盖。不授角色、不解除K/C。"}/>
+      description={english ? "Current audit authority controls the original management receipts. Order and financial read metadata also requires the corresponding current read permission. Each section states its captured scope and remaining history." : "按当前审计权读取原管理收据。订单和财务读取元数据另需对应的当前读取权，各分组标明已捕获范围及历史缺口。"}/>
     {!permitted ? <Alert type="warning" title={english ? "Select an enterprise with current audit permission" : "请选择当前有审计授权的企业"}/> : <>
       <ActionButton intent="refresh" label={english ? "Read membership audit again" : "重新读取成员管理审计"} disabled={query.isFetching} onAction={refresh}/>
       {query.error && <Alert type="error" title={english ? "Original membership audit could not be verified" : "原成员管理审计未核对成功"}/>}
       {query.isFetching && <p role="status">{english ? "Reading original command receipts" : "正在读取原操作收据"}</p>}
       {visible && <><p>{context.tenantCode} / {visible.corporateCustomerId} / {visible.permissionRevision}</p>
+        {visible.readerAudit === undefined ? <Alert type="warning" title={english ? "Original reader metadata unavailable" : "原读取审计元数据不可用"}/> : <>
+          <h4>{english ? "Order and financial read records" : "订单与财务读取记录"}</h4>
+          <p>{english ? "Recorded authorization, original references and projection hashes before delivery. Earlier uncaptured history remains unavailable." : "记录交付前的授权、原引用与投影哈希，更早未捕获的历史保持不可用。"}</p>
+          <div className="enterprise-actions">
+            <ActionButton intent="refresh" label={english ? "Latest read records" : "最新读取记录"} disabled={query.isFetching || !readerCursor} onAction={latestReaderPage}/>
+            <ActionButton intent="refresh" label={english ? "Next read records" : "下一页读取记录"} disabled={query.isFetching || !visible.readerAudit.nextCursor} onAction={nextReaderPage}/>
+          </div>
+          {visible.readerAudit.items.length === 0 && <p>{english ? "No captured read records in the current authorized scope." : "当前受权范围暂无已捕获的读取记录。"}</p>}
+          <Table rowKey="receiptId" dataSource={visible.readerAudit.items} pagination={false} sorting={false} columns={[
+            { title: english ? "Original time (UTC)" : "原时间（UTC）", dataIndex: "createdAt" },
+            { title: english ? "Actor reference" : "操作者引用", dataIndex: "actorCustomerId" },
+            { title: english ? "Action" : "动作", dataIndex: "action" },
+            { title: english ? "Original object" : "原对象", dataIndex: "objectId" },
+            { title: english ? "Responsibility group" : "责任分组", render: (_, row) => readerGroupLabels[row.group ?? "finance"] },
+            { title: english ? "Prepared items" : "准备条数", dataIndex: "itemCount" },
+            { title: english ? "Authority revision" : "授权修订", dataIndex: "permissionRevision" },
+            { title: english ? "Projection hash" : "投影哈希", dataIndex: "projectionHash" },
+            { title: english ? "Original audit receipt" : "原审计收据", dataIndex: "receiptId" }
+          ]}/>
+        </>}
         {visible.items.length === 0 && <p>{english ? "No original member/admin receipts in this scope; not a complete audit history." : "本范围未读到原成员/管理员收据，不代表完整审计历史为空。"}</p>}
         <Table rowKey="operationKey" dataSource={visible.items} pagination={false} sorting={false} onRefresh={refresh} columns={[
           { title: english ? "Original time (UTC)" : "原时间（UTC）", dataIndex: "createdAt" },

@@ -1,7 +1,7 @@
 /** Customer-only enterprise reads. Personal authentication is necessary, not sufficient:
  * current activation, relationship revision and exact action grants are checked again. */
 import { ForbiddenException, Injectable } from "@nestjs/common";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { ENTERPRISE_PORTAL_ACTIONS } from "@rental-os/shared";
 import { type EnterpriseEntryResponse, type EnterpriseManagedCorporate, type EnterpriseMembersResponse, type EnterprisePortalAction } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
@@ -13,11 +13,11 @@ type AccessRow = { corporateCustomerId: string; corporateName: string; membershi
 export class EnterpriseAccessService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async access(context: ClientRequestContext, tenantCode: string, tx?: Prisma.TransactionClient): Promise<AccessRow[]> {
+  private async access(context: ClientRequestContext, tenantCode: string, tx?: Prisma.TransactionClient, currentWorkspace = false): Promise<AccessRow[]> {
     if (context.customerType !== "personal" || !tenantCode || context.tenantCode !== tenantCode) throw new ForbiddenException("企业入口与当前客户商户不一致");
     // One fresh database statement gates the session, both memberships, relation and
     // grants. Neither cached role nor a later restore revives an earlier grant.
-    return (tx ?? this.prisma).$queryRaw<AccessRow[]>`
+    return (tx ?? this.prisma).$queryRaw<AccessRow[]>(Prisma.sql`
       SELECT m.corporateCustomerId, c.name AS corporateName, m.id AS membershipId, m.role,
         g.action, COALESCE(t.revision,0) AS tenantRevision, COALESCE(p.revision,0) AS corporateRevision,
         COALESCE(t.enabled,false) AS tenantEnabled, COALESCE(p.enabled,false) AS corporateEnabled
@@ -27,6 +27,10 @@ export class EnterpriseAccessService {
       JOIN customer_accounts account ON account.tenantId=m.tenantId AND account.customerId=person.id AND account.status='active'
       JOIN customer_memberships personalMember ON personalMember.tenantId=m.tenantId AND personalMember.customerId=person.id AND personalMember.status='active'
       JOIN client_auth_sessions s ON s.tenantId=m.tenantId AND s.customerId=person.id AND s.id=${context.sessionId} AND s.revokedAt IS NULL AND s.expiresAt>NOW(3)
+        ${currentWorkspace ? Prisma.sql`AND s.workspaceId=${context.workspaceId} AND EXISTS (
+          SELECT 1 FROM business_workspaces workspace WHERE workspace.id=s.workspaceId AND workspace.tenantId=s.tenantId
+            AND workspace.code=${context.workspaceCode} AND workspace.status='ACTIVE'
+        )` : Prisma.empty}
       JOIN customer_profiles c ON c.tenantId=m.tenantId AND c.id=m.corporateCustomerId AND c.customerType='corporate' AND c.status='active' AND c.mergedIntoCustomerId IS NULL
       JOIN customer_memberships corporateMember ON corporateMember.tenantId=m.tenantId AND corporateMember.customerId=c.id AND corporateMember.status='active'
       LEFT JOIN enterprise_portal_tenant_settings t ON t.tenantId=m.tenantId
@@ -34,7 +38,7 @@ export class EnterpriseAccessService {
       LEFT JOIN enterprise_portal_grants g ON g.tenantId=m.tenantId AND g.corporateCustomerId=c.id AND g.membershipId=m.id AND g.membershipUpdatedAt=m.updatedAt
       WHERE m.tenantId=${context.tenantId} AND m.personalCustomerId=${context.customerId}
         AND m.status='active' AND m.effectiveFrom<=NOW(3) AND (m.effectiveTo IS NULL OR m.effectiveTo>NOW(3))
-      ORDER BY c.name, m.id, g.action`;
+      ORDER BY c.name, m.id, g.action`);
   }
 
   private corporates(rows: AccessRow[]): EnterpriseManagedCorporate[] {
@@ -49,6 +53,16 @@ export class EnterpriseAccessService {
   async requireAction(context: ClientRequestContext, corporateCustomerId: string, action: EnterprisePortalAction, tx?: Prisma.TransactionClient) {
     const corporate = this.corporates(await this.access(context, context.tenantCode, tx)).find(c => c.corporateCustomerId === corporateCustomerId && c.actions.includes(action));
     if (!corporate) throw new ForbiddenException("当前客户无此企业动作授权");
+    return corporate;
+  }
+
+  /** Workspace-bound readers close grants and the original session in one SQL
+   * observation; tenant-level entry/member callers retain their own scope. */
+  async requireWorkspaceAction(context: ClientRequestContext, corporateCustomerId: string, action: EnterprisePortalAction) {
+    if (!context.workspaceId || !context.workspaceCode) throw new ForbiddenException("当前客户经营空间缺失");
+    const corporate = this.corporates(await this.access(context, context.tenantCode, undefined, true))
+      .find(row => row.corporateCustomerId === corporateCustomerId && row.actions.includes(action));
+    if (!corporate) throw new ForbiddenException("当前客户无此企业经营空间动作授权");
     return corporate;
   }
 

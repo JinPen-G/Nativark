@@ -2,7 +2,7 @@
  * Historical fulfillment is separate. A policy supplies no prices, credit or deposit receipt. */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { RentalCategoryCode } from "@rental-os/shared";
+import { isRentalCategoryCode } from "@rental-os/shared";
 import type { EnterpriseBookingBasis, EnterpriseScopePolicy, EnterpriseScopePolicySaved, EnterpriseScopePolicyView, RentalBookingIdentityInput, RentalQuoteSnapshotV1, RentalOrder, EnterpriseOwnRentalPolicy, EnterpriseOperationResult, SaveEnterpriseScopePolicyRequest, SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestIdentity } from "../../common/request-identity";
@@ -13,9 +13,10 @@ import type { ApprovedExtensionBinding, EnterpriseExtensionPrice } from "../rent
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import type { ClientOrderExtensionRequest, RentalOrderExtension } from "@rental-os/shared";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
+import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions, readRentalCategoryCode } from "../rental-core/category-identity";
 
 type PolicyRow = { scopeKey: string; revision: number; policy: string | EnterpriseScopePolicy; membershipUpdatedAt?: Date | null };
-type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership">;
+type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership" | "rentalCategoryDefinition">;
 const moneyPattern = /^\d{1,12}(?:\.\d{1,2})?$/;
 @Injectable()
 export class EnterprisePolicyService {
@@ -24,7 +25,7 @@ export class EnterprisePolicyService {
   private validate(p: EnterpriseScopePolicy) {
     const ids = (values: unknown, max: number): values is string[] => Array.isArray(values) && values.length <= max
       && new Set(values).size === values.length && values.every(id => typeof id === "string" && !!id.trim() && id.length <= 191);
-    if (!p || !ids(p.workspaceIds, 200) || !ids(p.categoryCodes, 200) || p.categoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code))
+    if (!p || !ids(p.workspaceIds, 200) || !ids(p.categoryCodes, 200) || p.categoryCodes.some(code => !isRentalCategoryCode(code))
       || typeof p.personalPaymentAllowed !== "boolean" || typeof p.enterprisePaymentAllowed !== "boolean"
       || !["per_order", "without_per_order", "unconfigured"].includes(p.approvalMode)
       || typeof p.noticeVersion !== "string" || !p.noticeVersion.trim() || p.noticeVersion.length > 191
@@ -40,11 +41,6 @@ export class EnterprisePolicyService {
     return db.$queryRaw<PolicyRow[]>(Prisma.sql`SELECT scopeKey,revision,policy,membershipUpdatedAt FROM enterprise_scope_policies WHERE tenantId=${tenantId} AND corporateCustomerId=${corporateId} ${db === this.prisma ? Prisma.empty : Prisma.sql`LOCK IN SHARE MODE`}`);
   }
   private decoded(row: PolicyRow) { const policy = enterpriseJson(row.policy); this.validate(policy); return policy; }
-  private category(code: string): RentalCategoryCode {
-    const normalized = Object.values(RentalCategoryCode).find(value => value === code.toLowerCase());
-    if (!normalized) throw new ForbiddenException("空间品类无法映射到正式合同");
-    return normalized;
-  }
   private async company(tenantId: string, corporateId: string, db: PolicyDb) {
     const company = await db.customerProfile.findFirst({ where: { tenantId, id: corporateId, customerType: "corporate", status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } }, select: { id: true } });
     if (!company) throw new ForbiddenException("当前企业会员不可用");
@@ -60,7 +56,10 @@ export class EnterprisePolicyService {
       if (previous.noticeText !== input.policy.noticeText && previous.noticeVersion === input.policy.noticeVersion) throw new ConflictException("企业告知正文变化须使用新的告知版本，不能复用原同意依据");
     }
     const scopes = await tx.businessWorkspace.findMany({ where: { tenantId, id: { in: input.policy.workspaceIds }, status: "ACTIVE" }, select: { id: true, categoryCode: true } });
-    if (scopes.length !== input.policy.workspaceIds.length || scopes.some(scope => !input.policy.categoryCodes.includes(this.category(scope.categoryCode)))) throw new ForbiddenException("政策含未开放空间或未授权品类");
+    if (scopes.length !== input.policy.workspaceIds.length || scopes.some(scope => !input.policy.categoryCodes.includes(readRentalCategoryCode(scope.categoryCode)))) throw new ForbiddenException("政策含未开放空间或未授权品类");
+    // A new policy may name published dynamic codes. The Core directory proves
+    // identity existence; actual workspace adoption and rental eligibility remain separate.
+    await assertPublishedRentalCategoryIdentities(tx, input.policy.categoryCodes);
     if (scopeKey !== "merchant") {
       const merchant = rows.find(r => r.scopeKey === "merchant"), company = rows.find(r => r.scopeKey === "company");
       const upperRow = scopeKey.startsWith("member:") ? company : merchant;
@@ -164,9 +163,12 @@ export class EnterprisePolicyService {
     const effectiveWorkspaceIds = merchant && company ? merchant.workspaceIds.filter(id => company.workspaceIds.includes(id) && (!employee || employee.workspaceIds.includes(id))) : [];
     const workspaces = await db.businessWorkspace.findMany({ where: { tenantId, status: "ACTIVE", ...(merchantView ? {} : { id: { in: merchant?.workspaceIds ?? [] } }) }, select: { id: true, name: true, categoryCode: true }, orderBy: { id: "asc" }, take: 201 });
     if (workspaces.length > 200) throw new ConflictException("空间超过当前政策编辑范围");
+    const published = await rentalCategoryIdentityOptions(db, tenantId);
+    const categories = merchantView ? published : published.filter(row => merchant?.categoryCodes.includes(row.code));
+    if (categories.length > 200) throw new ConflictException("品类超过当前政策编辑范围");
     return { revision: merchantView ? m?.revision ?? 0 : membershipId ? e?.revision ?? 0 : c?.revision ?? 0,
       merchantRevision: m?.revision ?? 0, companyRevision: c?.revision ?? 0, employeeRevision: e?.revision ?? 0,
-      merchant, company, employee, effectiveWorkspaceIds, effectiveCategoryCodes, workspaces: workspaces.map(row => ({ ...row, categoryCode: this.category(row.categoryCode) })) };
+      merchant, company, employee, effectiveWorkspaceIds, effectiveCategoryCodes, categories, workspaces: workspaces.map(row => ({ ...row, categoryCode: readRentalCategoryCode(row.categoryCode) })) };
   }
   async merchantView(user: SystemUserRow, corporateId: string) {
     const { tenantId } = this.commands.operator(user, "rental-os:corporate:manage");
@@ -244,7 +246,7 @@ export class EnterprisePolicyService {
     const workspaces = await db.$queryRaw<Array<{ categoryCode: string }>>(Prisma.sql`SELECT categoryCode FROM business_workspaces WHERE tenantId=${tenantId} AND id=${workspaceId} AND status='ACTIVE' ${tx ? Prisma.sql`LOCK IN SHARE MODE` : Prisma.empty}`);
     const workspace = workspaces[0];
     const policies = [merchant, company, ...(employee ? [employee] : [])];
-    if (!workspace || policies.some(p => !p.workspaceIds.includes(workspaceId) || !p.categoryCodes.includes(this.category(workspace.categoryCode)))) throw new ForbiddenException("不在当前企业品类和空间交集内");
+    if (!workspace || policies.some(p => !p.workspaceIds.includes(workspaceId) || !p.categoryCodes.includes(readRentalCategoryCode(workspace.categoryCode)))) throw new ForbiddenException("不在当前企业品类和空间交集内");
     if (e && (!e.membershipUpdatedAt || e.membershipUpdatedAt.getTime() !== relation.updatedAt.getTime())) throw new ForbiddenException("员工关系已变化，须重新显式核验并授权员工政策");
     const paying = Boolean(input.enterpriseContractAndPayer);
     if (paying && (!employee || policies.some(p => !p.enterprisePaymentAllowed || p.approvalMode === "unconfigured"))) throw new ForbiddenException("员工未获明确企业付费权");
@@ -290,7 +292,9 @@ export class EnterprisePolicyService {
     if (additionalAmount === undefined) this.assertSameBasis(snapshot.enterpriseBasis, current);
     if (snapshot.enterpriseContractAndPayer && current.approvalMode === "per_order") {
       if (additionalAmount !== undefined) throw new ConflictException("新增企业支出的变更批准尚未接通，原订单批准不能重复使用");
-      const approvals = await tx.$queryRaw<Array<{ approvedBy: string; reviewerMembershipId: string; reviewerMembershipUpdatedAt: Date }>>`SELECT approvedBy,reviewerMembershipId,reviewerMembershipUpdatedAt FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND workspaceId=${workspaceId} AND corporateCustomerId=${snapshot.corporateCustomerId} AND applicantCustomerId=${snapshot.personalCustomerId} AND orderId=${order.id} AND state='consumed' AND expiresAt>NOW(3)`;
+      // Consumption makes this the order's durable creation receipt. The TTL
+      // gates unused approval; confirmation still checks current policy/reviewer.
+      const approvals = await tx.$queryRaw<Array<{ approvedBy: string; reviewerMembershipId: string; reviewerMembershipUpdatedAt: Date }>>`SELECT approvedBy,reviewerMembershipId,reviewerMembershipUpdatedAt FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND workspaceId=${workspaceId} AND corporateCustomerId=${snapshot.corporateCustomerId} AND applicantCustomerId=${snapshot.personalCustomerId} AND orderId=${order.id} AND state='consumed'`;
       const approval = approvals[0];
       if (!approval) throw new ConflictException("订单缺少原子消费的企业批准");
       await this.assertReviewer(tenantId, snapshot.corporateCustomerId!, snapshot.personalCustomerId, approval.approvedBy, approval.reviewerMembershipId, approval.reviewerMembershipUpdatedAt, tx);

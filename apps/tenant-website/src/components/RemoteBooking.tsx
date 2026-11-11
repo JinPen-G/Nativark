@@ -10,6 +10,7 @@ import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
 import type { AiBookingHandoff, EnterpriseOwnRentalPolicy, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { formatRentalMoney } from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import { readOriginalBookingQuote, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
 
@@ -168,7 +169,13 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     return <div className="booking-card"><p className="mock-note">{error ? error : <><LoadingOutlined /> {t('loading')}</>}</p></div>;
   }
 
-  const cur = quote?.currency || 'CNY';
+  const money = (amount: unknown, deduction = false) => {
+    const currency = quote?.currency;
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || typeof currency !== 'string' || !/^[A-Z]{3}$/u.test(currency)) {
+      return language === 'en' ? 'Amount or currency unavailable' : '金额或币种待核对';
+    }
+    return `${formatRentalMoney(deduction ? -amount : amount, currency)} ${currency}`;
+  };
   const addrLabel = (a: any) => `${a.recipient} ${a.phoneMasked || a.phone || ''} · ${[a.province, a.city, a.district, a.detail].filter(Boolean).join('')}`.trim();
   return <div className="booking-card booking-total">
     <h2>{t('costConfirm')}</h2>
@@ -181,12 +188,12 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     {coupons.length > 0 && <label className="booking-field">{t('useCoupon')}<select value={couponId} onChange={e => { setCouponId(e.target.value); setQuote(null); }}><option value="">{t('couponNone')}</option>{coupons.map((c, i) => <option key={c.id ?? i} value={c.id}>{c.name || c.templateName || c.title || t('coupon')}</option>)}</select></label>}
     {busy && !quote ? <p className="mock-note"><LoadingOutlined /> {t('quoting')}</p> : null}
     {quote && <>
-      <div><span>{t('rentAmount')}</span><strong>¥{quote.rentalAmount ?? 0}</strong></div>
-      {quote.discountAmount ? <div><span>{t('discount')}</span><strong>-¥{quote.discountAmount}</strong></div> : null}
-      {quote.couponAmount ? <div><span>{t('couponDeducted')}</span><strong>-¥{quote.couponAmount}</strong></div> : null}
-      <div><span>{t('deposit')}</span><strong>¥{quote.depositAmount ?? 0}</strong></div>
-      {quote.preAuthAmount ? <div><span>{t('preAuth')}</span><strong>¥{quote.preAuthAmount}</strong></div> : null}
-      <div className="booking-grand-total"><span>{t('payable')}</span><strong>{cur === 'CNY' ? '¥' : ''}{quote.payableAmount ?? quote.rentalAmount ?? 0}</strong></div>
+      <div><span>{t('rentAmount')}</span><strong>{money(quote.rentalAmount)}</strong></div>
+      {quote.discountAmount !== 0 ? <div><span>{t('discount')}</span><strong>{money(quote.discountAmount, true)}</strong></div> : null}
+      {quote.couponAmount !== 0 ? <div><span>{t('couponDeducted')}</span><strong>{money(quote.couponAmount, true)}</strong></div> : null}
+      <div><span>{t('deposit')}</span><strong>{money(quote.depositAmount)}</strong></div>
+      <div><span>{t('preAuth')}</span><strong>{money(quote.preAuthAmount)}</strong></div>
+      <div className="booking-grand-total"><span>{t('payable')}</span><strong>{money(quote.payableAmount)}</strong></div>
       <p className="mock-note">{t('quoteServerNote')}</p>
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
