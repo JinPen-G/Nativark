@@ -1,6 +1,6 @@
 # Rental Core 协作接续
 
-更新时间：2026-11-11。
+更新时间：2026-11-12。
 
 > 本轮由负责人通过PM正式授权Core研发负责人在指定工作树恢复核心开发。主线为品类治理原CAT-GOV-01～14全部收口，同时独立核实本册原十二项CLOSE及对企业/AI的必要Core接点；不混算进度、不扩大为PCH。日常任务分支精确提交/普通推送持续获准；最新安排为每个可独立验证阶段交固定SHA，由PM串行收回main，不等待两个完整任务。禁止新增/扩写测试脚本，采用已有定向冒烟、短命令及必要类型检查；本轮不含真实环境、依赖安装、迁移、部署或生产启用许可。
 
@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`dfb65aabbf5461e8750d30a7f4c67df9dd0497f6`；换货执行/原收据固定源码`0947a6eb82cd1e725073131dc11f78a0fc94bf49`已普通推送核远端并交企业作者，见[当前阶段](<Rental Core-开发记录.md#approved-exchange-core-port-20261111>)。照片冻结三份本任务WIP保留工作区另片，不夹入固定源码；暂存验证已退出删除，无merge/cherry-pick。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。当前已交采用修订校验源码`9380d1bab`及记录`709c69b58`，PM按固定增量收回，见[main阶段](<Rental Core-开发记录.md#active-binding-main-integration-20261112>)。照片固定`e2a1a2b9d`已随企业阶段收main`3cf502b7c`，七组恢复有独立限定证据，不再将照片称当前三份WIP。Core继续同源定义/全部写入口/08存量采用和原CLOSE；配置counter/17只读接点与Outbox完整捕获仍须按各自固定来源和未完项核接，不追活动main，不停工等PM。旧开工/换货及恢复证据原位保留，不得回main施工或重建旧树。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - main已接`0947a6eb8`的16份换货Core增量及`2a2c9ae64`四份固定记录/接续，具体范围与类型/14项短调用证据见[PM整合](<Rental Core-开发记录.md#approved-exchange-main-integration-20261111>)。未接其他旧Core阶段或活动照片冻结代码；HTTP/DI和企业参与者继续由各自作者实施。25份原JSON证据已迁至主树唯一`D:/工作文件/rental-OS/output/category-governance/`，本树相应旧证据链接须按该位置读取，不复制第二份。原任务及真实验收缺口保持。

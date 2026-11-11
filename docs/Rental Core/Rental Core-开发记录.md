@@ -4,6 +4,17 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="active-binding-main-integration-20261112"></a>
+## PM固定采用修订校验整合（2026-11-12）
+
+来源源码`9380d1bab95e2d78ecb64d0390cfcd03af2ca0f4`及记录固定`709c69b58f288deed3d31c8387c888f3e6ef2153`已核在任务远端，main起点为已推送的`3cf502b7cc7e6443d6ebeaee2442cc2a6e24816e`。本片只取`category-active-write.ts`的12行差异，`lockActiveCategoryBinding`完整函数与固定来源一致；main未有的原UniqueClaims/Context辅助函数和配置修订/Outbox祖先不随此片收回。非法期望修订在取锁前拒绝，存储缺值/负值/字符串/非整数/重复空间行在读版本或返回可信binding前拒绝，合法初始0保留；原锁序、权限和后续字段/媒体规则不改。
+
+PM独立以main真实源码复核原`config-workspace-scope.test.cjs`三项和四组限定行为，均退出0；四组覆盖正常0/后继、损坏存储修订、非法期望值在锁前拒绝及缺失/重复/坏状态行不读版本。四组脚本SHA-256为`89f7d7f4d46dde4fb5367851c2c5ede042e9517d9b1b17d4626c6acadc92a97e`，main目标源码SHA-256为`a54d36bb6dedc8cdf63d247dc8db2e547c4df79f2d0ee33ad988676ec8da002a`。原API tsconfig、TypeScript5.9.3、895根`--noEmit --incremental false`诊断0。旧`category-active-write.test.cjs`仍在第20行的锁次数断言失败：既有Tenant父锁使实际为两次，期望为一次；main原基线和本片结果完全相同，未改原断言/测试或删除父锁来补绿，其后断言不称本次已验证。
+
+仅使用既有fixture的查询行与限定内存调用，SQL/Auth/事务仍为替身，不证明真库、并发、配置恢复全集或完整CAT-GOV/CLOSE验收。五份变更文档链接无新增错误，Core记录/两份接续无链接错误，原CAT记录两项及后台记录267项断链保留。各Node沿原preload、不可达数据库和关闭缓存，audit0，未创建本任务目录，进程已退出；main六项他人WIP保留。照片四模块已经随企业片进入main，七组恢复及消费者证据见[企业固定整合](<../企业客户后台/企业客户后台-开发记录.md#ecp-main-exchange-photo-integration-20261112>)，不重复复制唯一原证据。
+
+Core继续原同源品类/全部写入口/08存量采用及CLOSE核心。企业财务核定来源已定位到原`recordMaturity`/`operationLog`/`readMaturity`，尚需专用当前企业/空间投影及原审计actor绑定；原operator/staff财务授权保持，正式账单、历史跨空间权威范围与混合保证金来源未齐，不自造数据。
+
 <a id="approved-exchange-main-integration-20261111"></a>
 
 ## PM固定换货Core接点整合（2026-11-11）
