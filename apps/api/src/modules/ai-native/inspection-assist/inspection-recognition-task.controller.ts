@@ -1,6 +1,7 @@
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { AI_STAFF_INSPECTION_ACCOUNTING, type composeStaffInspectionAccounting } from '../staff-inspection-accounting.composition';
-import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS, AI_INSPECTION_TASK_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_INSPECTION_TASK_RESULT_REFERENCE_PATH,
+  AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS, AI_INSPECTION_TASK_HTTP_CONTRACTS } from '@rental-os/shared';
 import { inspectionCancellationRequest, inspectionCancellationResponse, inspectionTaskRequest, inspectionTaskResponse } from './inspection-task-http.contract';
 import type { InspectionRecognitionTaskApplication } from './inspection-recognition-task.application';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -43,7 +44,7 @@ export class InspectionRecognitionTaskController {
           result = await operation.call(this.tasks, current, structuredClone(command.reference), structuredClone(command.submission), signal);
         } else {
           const operation: (request: Request, reference: unknown, signal?: AbortSignal) => Promise<unknown>
-            = this.tasks[action as 'create' | 'readCreation' | 'start' | 'reconcile' | 'readInput'];
+            = this.tasks[action as 'create' | 'readCreation' | 'start' | 'reconcile' | 'readInput' | 'readResultReference'];
           result = await operation.call(this.tasks, current, structuredClone(command), signal);
         }
         return inspectionTaskResponse(action, result, command);
@@ -57,6 +58,9 @@ export class InspectionRecognitionTaskController {
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.readCreation)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCreation(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'readCreation'); }
+  @Post(AI_INSPECTION_TASK_RESULT_REFERENCE_PATH)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readResultReference(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'readResultReference'); }
   @Post(AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.start)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   start(@Req() request: Request, @Body() body: unknown) { return this.task(request, body, 'start'); }

@@ -1,5 +1,5 @@
 let nextInputInstance = 0;
-interface ClarificationField { key: string; label: string; value?: string; error?: string; readonly?: boolean; required?: boolean; }
+interface ClarificationField { key: string; label: string; value?: string; error?: string; readonly?: boolean; required?: boolean; maxLength?: number; }
 type ClarificationHandler = (input: { taskId: string; inputRevision: string; draft: Record<string, string> }) => Promise<void>;
 Component({
   properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false } },
@@ -36,8 +36,12 @@ Component({
       const visible = fields.filter(field => {
         if (!field || typeof field.key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field.key) || ["__proto__", "constructor", "prototype"].includes(field.key) || typeof field.label !== "string") return false;
         if (seen.has(field.key)) { definitionUnavailable = true; return false; }
+        if (!Number.isSafeInteger(field.maxLength) || field.maxLength! < 1 || field.maxLength! > 32768) { definitionUnavailable = true; return false; }
         seen.add(field.key); return true;
-      }).map(field => ({ key: field.key, label: field.label.slice(0, 200), value: Object.prototype.hasOwnProperty.call(this.data.localDraft, field.key) ? this.data.localDraft[field.key] : typeof field.value === "string" ? field.value.slice(0, 4000) : "", error: typeof field.error === "string" ? field.error.slice(0, 200) : "", readonly: field.readonly === true, required: field.required === true }));
+      }).map(field => ({ key: field.key, label: field.label.slice(0, 200), maxLength: field.maxLength,
+        value: Object.prototype.hasOwnProperty.call(this.data.localDraft, field.key) ? this.data.localDraft[field.key].slice(0,field.maxLength)
+          : typeof field.value === "string" ? field.value.slice(0,field.maxLength) : "",
+        error: typeof field.error === "string" ? field.error.slice(0, 200) : "", readonly: field.readonly === true, required: field.required === true }));
       if (definitionUnavailable) {
         this.setData({ visibleFields: [], localDraft: {}, definitionUnavailable: true, errorLabel: "字段定义不可用，请刷新" });
       } else this.setData({ visibleFields: visible, definitionUnavailable: false });
@@ -47,7 +51,8 @@ Component({
       const key = event?.currentTarget?.dataset?.key;
       const field = this.data.visibleFields.find(item => item.key === key);
       if (!field || field.readonly || this.data.disabled || this.data.submitting || !this.data.alive || typeof event.detail?.value !== "string") return;
-      this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0, 4000) } }); this.refreshFields();
+      if (!Number.isSafeInteger(field.maxLength) || field.maxLength! < 1) return;
+      this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0,field.maxLength) } }); this.refreshFields();
     },
     async onSubmit(): Promise<void> {
       const handler = hostAction(this) as ClarificationHandler | null;

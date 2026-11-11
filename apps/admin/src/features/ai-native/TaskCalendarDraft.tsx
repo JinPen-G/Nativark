@@ -1,13 +1,15 @@
 /** Existing Task detail -> original calendar proposal -> reviewed Core draft.
  * Only the original save receipt reports completion; unknown is read only. */
-import { useEffect, useId, useMemo, useReducer, useState } from 'react';
-import type { AiTaskCalendarDraftReviewResponse } from '@rental-os/shared';
-import { ActionButton, Alert, Checkbox, ConfirmAction, Input } from '@/components/ui';
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
+import type { AiTaskCalendarDraftReviewResponse, AiTaskCalendarDraftOperationResponse } from '@rental-os/shared';
+import { ActionButton, Alert, Button, Checkbox, ConfirmAction, Input } from '@/components/ui';
 import { aiTaskCalendarDraftApi } from '@/api/aiTaskCalendarDraft';
 import { useAuthStore } from '@/features/auth/authStore';
+import { currentSessionEpoch } from '@/app/queryClient';
 import { useAiManagementLocale } from './management-locale';
 import { createTaskCalendarDraftSession, taskCalendarDraftStore } from './task-calendar-draft-session';
 import { formatTimestamp } from './formatters';
+import { CalendarDraftPreparation, useCalendarDraftLocale } from './CalendarDraftPreparation';
 import styles from './AiManagement.module.css';
 
 function CalendarDifferences({ value }: { value: Pick<AiTaskCalendarDraftReviewResponse, 'before' | 'after'> }) {
@@ -28,22 +30,29 @@ function CalendarDifferences({ value }: { value: Pick<AiTaskCalendarDraftReviewR
   </dl>;
 }
 
-export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied }: {
-  taskId: string; identity: string; current(): boolean; onAccessDenied(): void;
+export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied, allowPreparation = true, onCommitted }: {
+  taskId: string; identity: string; current(): boolean; onAccessDenied(): void; allowPreparation?: boolean;
+  onCommitted?(receipt: AiTaskCalendarDraftOperationResponse): Promise<void>;
 }) {
-  const { t } = useAiManagementLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
+  const { t } = useCalendarDraftLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
   const [reason, setReason] = useState(''), [overrideConfirmed, setOverrideConfirmed] = useState(false);
+  const [preparationBinding, setPreparationBinding] = useState<string>(), [prepared, setPrepared] = useState<{ binding: string; taskId: string }>();
   const stableOwner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
+  const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, taskId, stableOwner, auth.user, epoch]);
+  const owner = useRef({ binding, current }); owner.current = { binding, current };
+  const active = () => owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { if (typeof window !== 'undefined') storage = window.localStorage; } catch { /* Preserve-before-save refuses unavailable storage. */ }
-    return createTaskCalendarDraftSession({ taskId, current, api: aiTaskCalendarDraftApi,
+    return createTaskCalendarDraftSession({ taskId, current: active, api: aiTaskCalendarDraftApi,
       store: taskCalendarDraftStore(`rental-os-calendar-draft:${stableOwner}`, storage), changed });
-  }, [identity, taskId]);
-  useEffect(() => () => session.dispose(), [session]);
+  }, [binding]);
+  useEffect(() => { session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
+    return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
+  if (!active()) return null;
   const data = session.view, canManage = auth.hasPermission('rental-os:calendar:edit');
   const action = (work: () => Promise<void>) => async () => { try { await work(); } catch (error) {
     const status = (error as { response?: { status?: number } }).response?.status;
-    if (status === 401 || status === 403) onAccessDenied(); throw error;
+    if (active() && (status === 401 || status === 403)) onAccessDenied(); throw error;
   } };
   const committed = data.operation?.operation.state === 'committed' ? data.operation.operation : null;
   return <section className={styles.stack} aria-label={t('日历业务草稿')}>
@@ -52,7 +61,12 @@ export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied }:
     {data.pending && <Alert type="warning" title={t('原保存结果待核对。')} description={t('只读取原操作；未观察到结果也不代表未保存，不自动重试。')} />}
     {data.pending ? <ActionButton label={t('核对原保存结果')} disabled={!!data.busy} onAction={action(() => session.operation(data.pending!))} />
       : <ActionButton label={t('读取日历提案')} disabled={!!data.busy} onAction={action(() => session.list())} />}
-    {!data.pending && data.loaded && data.items.length === 0 && <p>{t('本任务没有已保存的日历提案，请继续原开业提案流程。')}</p>}
+    {!data.pending && data.loaded && data.items.length === 0 && <p>{t('本任务没有已保存的日历提案。')}</p>}
+    {allowPreparation && canManage && !data.pending && <Button onClick={() => setPreparationBinding(binding)}>{t('准备日历提案')}</Button>}
+    {allowPreparation && preparationBinding === binding && <CalendarDraftPreparation taskId={taskId} identity={binding} current={active}
+      onAccessDenied={onAccessDenied} onPrepared={taskId => { if (active()) setPrepared({ binding, taskId }); }} />}
+    {prepared?.binding === binding && <TaskCalendarDraft key={`${binding}:${prepared.taskId}`} taskId={prepared.taskId} identity={binding}
+      current={active} onAccessDenied={onAccessDenied} allowPreparation={false} />}
     {!data.pending && data.items.length > 0 && <div className={styles.stack}>
       <div className={styles.field}><label htmlFor={reasonId}>{t('覆盖原因')}</label>
         <Input.TextArea id={reasonId} value={reason} maxLength={1000} disabled={!!data.busy} onChange={event => { setReason(event.target.value); session.clearReview(); }} /></div>
@@ -76,6 +90,11 @@ export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied }:
       <Alert type="success" title={t('原日历草稿已保存。')} description={t('这是保存时的原收据；发布需继续原日历流程。')} />
       <p>{committed.target.date} · {committed.target.version} · {formatTimestamp(committed.committedAt).value}</p>
       <CalendarDifferences value={committed} /><p>{t('覆盖原因')}：{committed.overrideReason}</p>
+      {onCommitted && <ActionButton label={t('完成本次修改')} disabled={!!data.busy}
+        onAction={action(async () => {
+          if (!active() || data.operation?.operation.state !== 'committed') throw Error('AI_SCOPE_CHANGED');
+          await onCommitted(data.operation);
+        })} />}
     </section>}
     {data.operation?.operation.state === 'not_observed' && <Alert type="warning" title={t('未观察到原操作。')} description={t('保留原定位并继续核对，不能据此重发保存。')} />}
     {!!data.error && <Alert type="warning" title={t(data.pending ? '保存未能确认，请核对原结果。' : '当前日历草稿不可核对，请重新读取提案或核对权限。')} />}

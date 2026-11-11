@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, type AiExecutionContext } from '@rental-os/shared';
 import { RENTAL_OPENING_TERMINOLOGY_FIELDS } from '../../rental-core/rental-core-config.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import type { AiBusinessReadAuthority } from '../business-read-route.authority';
+import type { AiBusinessReadAuthority, AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiOpeningConfigurationSource } from './opening-configuration.source';
 import { assertAiReadContextBinding } from './read-context-binding';
 import { ModelGatewayError } from '../model-gateway.ports';
@@ -86,16 +86,27 @@ export function openingSectionFromMaterial(material: ReturnType<typeof verifyOpe
     changes: material.changes.map(change => ({ field: change.field, value: change.after })) });
 }
 export class AiOpeningSectionDifferenceService {
-  constructor(private readonly sources: AiOpeningConfigurationSource, private readonly authority: AiBusinessReadAuthority,
-    private readonly clock: () => Date = () => new Date(), private readonly versionFields?: AiOpeningVersionFieldSource) {}
+  constructor(private readonly sources: AiOpeningConfigurationSource,
+    private readonly authority: AiBusinessReadAuthority & Partial<Pick<AiBusinessReadRouteAuthority, 'withRuleDraftPreview'>>,
+    private readonly clock: () => Date = () => new Date(), private readonly versionFields?: AiOpeningVersionFieldSource,
+    private readonly calendarOnly = false, private readonly rule?: { id: string; version: string }) {
+    if (calendarOnly && rule) throw new ModelGatewayError('CONFIG_INVALID');
+  }
   async prepare(value: unknown, expectedContext?: AiExecutionContext) {
     const parsed = openingSectionChangeSchema.safeParse(structuredClone(value));
     if (!parsed.success || !unique(parsed.data.changes.map(row => row.field))) throw new ModelGatewayError('INVALID_REQUEST');
     const input = parsed.data, expected = expectedContext && structuredClone(expectedContext);
-    return this.authority.withRead('opening', { limit: 50 }, async context => {
+    if (this.rule && (input.key !== 'business_rule' || input.targetId !== this.rule.id || input.expectedVersion !== this.rule.version))
+      throw new ModelGatewayError('FORBIDDEN');
+    if (this.calendarOnly && input.key !== 'business_calendar') throw new ModelGatewayError('FORBIDDEN');
+    if (this.calendarOnly && input.changes.some(change => !['name', 'businessStatus'].includes(change.field)))
+      throw new ModelGatewayError('FORBIDDEN');
+    const calendar = this.calendarOnly && input.key === 'business_calendar'
+      ? { year: Number(input.date.slice(0, 4)), date: input.date } : undefined;
+    const consume = async (context: AiExecutionContext) => {
       assertAiReadContextBinding(context, expected);
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
-      const read = () => this.sources.current(context.scope as Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, context);
+      const read = () => this.sources.current(context.scope as Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, context, calendar, this.rule);
       const current = structuredClone(await read());
       if (input.key === 'business_rule' || input.key === 'business_calendar') {
         if (!this.versionFields) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
@@ -106,11 +117,13 @@ export class AiOpeningSectionDifferenceService {
         const sourceFields: Record<string, unknown> = first.fields;
         const changes = input.changes.map(change => ({ field: change.field, before: sourceFields[change.field], after: change.value }));
         if (changes.some(change => change.before === undefined)) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
-        if (input.key === 'business_calendar') {
+        if (input.key === 'business_calendar' && !this.calendarOnly) {
           const after = { ...sourceFields, ...Object.fromEntries(changes.map(change => [change.field, change.after])) };
           // Core's legacy closed flag means manual service is closed. Self
           // service also closes manual service; capability/fulfillment admission
           // remains Core's responsibility, not this AI-only proposal check.
+          // The calendar-only name/status port has no independent closed
+          // write; the original Core draft preview derives that flag later.
           if (typeof after.businessStatus === 'string' && typeof after.closed === 'boolean'
             && after.closed !== ['closed', 'self_service'].includes(after.businessStatus)) throw new ModelGatewayError('INVALID_REQUEST');
         }
@@ -182,6 +195,15 @@ export class AiOpeningSectionDifferenceService {
         source: 'original_persisted_opening_configuration' as const,
         fieldRevision: input.key === 'workspace_profile' ? 'profile_config_version' as const : 'settings_version_and_checked_source_fingerprint_not_object_cas' as const,
         persistence: 'not_attempted' as const, activeConfiguration: 'unchanged' as const, publication: 'not_attempted' as const };
-    });
+    };
+    if (calendar) {
+      if (!this.authority.withCalendarSourceRead) throw new ModelGatewayError('CONFIG_INVALID');
+      return this.authority.withCalendarSourceRead(calendar, consume);
+    }
+    if (this.rule) {
+      if (!this.authority.withRuleDraftPreview) throw new ModelGatewayError('CONFIG_INVALID');
+      return this.authority.withRuleDraftPreview(this.rule.id, consume);
+    }
+    return this.authority.withRead('opening', { limit: 50 }, consume);
   }
 }

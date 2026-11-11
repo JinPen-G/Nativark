@@ -172,7 +172,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           if (!input.humanApprovals || input.humanApprovals.order.db !== input.db) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           const approvals = composeTaskCenterApproval(input.humanApprovals, credentials, root.tasks);
           if (action === 'review') return approvals.review(command);
-          if (action === 'decision') return approvals.decision(command);
+          if (action === 'decision') return approvals.decision(command, activeSignal);
           return approvals.decisionReceipt(command);
         };
         const originalStop = async () => {
@@ -272,7 +272,15 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         return structuredClone(result);
       });
-      if (!['continue', 'resumeInput', 'continueInput'].includes(action)) return await waitForTaskApplicationDependency(work, action === 'decision' || action === 'stop' || action === 'visibleReport', signal);
+      if (action === 'decision') {
+        try { return await callAiTaskRunnerDependency(work, 20000, 'task_center_explicit_decision', signal); }
+        catch (error) {
+          if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code))
+            throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+          throw error;
+        }
+      }
+      if (!['continue', 'resumeInput', 'continueInput'].includes(action)) return await waitForTaskApplicationDependency(work, action === 'stop' || action === 'visibleReport', signal);
       try { return await callAiTaskRunnerDependency(work, 120000, 'task_center_original_continue', signal); }
       catch (error) {
         if (error instanceof AiTaskRunnerError && ['AI_RESULT_UNKNOWN', 'AI_RUN_LIMIT'].includes(error.code))

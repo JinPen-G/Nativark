@@ -24,7 +24,9 @@ import { QueryState } from "@/components/QueryState";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { useAuthStore } from "@/features/auth/authStore";
+import { useAiManagementLocale } from "@/features/ai-native/management-locale";
 import { CustomerProfileDetails } from "./CustomerProfileDetails";
+import { MemberNameEntry, memberNameEntryReference, type MemberNameEntryReference } from "./MemberNameEntry";
 import { QualificationTypesEditor } from "./QualificationTypesPage";
 import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
 import { MemberListInsights } from "./MemberListInsights";
@@ -63,6 +65,7 @@ export function PersonalMembershipPage() {
 function PersonalMembershipWorkspace({ scope }: { scope: string }) {
   const { message } = App.useApp();
   const { t, locale } = useLocale();
+  const { t: aiT } = useAiManagementLocale();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { customerId } = useParams<{ customerId: string }>();
@@ -84,6 +87,7 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [registrationMode, setRegistrationMode] = useState<"manual" | "automatic">();
   const [editorTab, setEditorTab] = useState("edit");
+  const [nameReviewTarget, setNameReviewTarget] = useState<MemberNameEntryReference>();
   const [form] = Form.useForm<PersonalForm>(); const [qualificationForm] = Form.useForm<SubmitCustomerQualificationRequest>(); const [grantForm] = Form.useForm<{ planVersionId: string; effectiveFrom?: string; effectiveTo?: string; reason?: string }>(); const [revokeForm] = Form.useForm<{ reason: string }>(); const [statusForm] = Form.useForm<StatusForm>();
   const statusValue = Form.useWatch("status", statusForm); const acknowledgedManualChecks = Form.useWatch("acknowledgedManualChecks", statusForm);
   const selectedPlanVersionId = Form.useWatch("planVersionId", grantForm);
@@ -95,6 +99,7 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
   });
   const statusDialog = useModalDismissal(Boolean(statusTarget && statusScope), () => { setStatusTarget(undefined); setStatusScope(undefined); statusForm.resetFields(); });
   const revokeDialog = useModalDismissal(Boolean(revokeTarget), () => { setRevokeTarget(undefined); revokeForm.resetFields(); });
+  const nameReviewDialog = useModalDismissal(Boolean(nameReviewTarget), () => setNameReviewTarget(undefined));
   const members = useQuery({ queryKey: ["membership-personal", scope], queryFn: membershipApi.personal, enabled: canView });
   const detailMember = members.data?.find(member => member.customerId === customerId);
   const memberFilter = useListFilter(members.data, { fields: row => [row.name, row.email, row.phoneMasked], status: row => row.membershipStatus });
@@ -148,6 +153,7 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
   const denied = members.isError && !isTransientRefreshError(members.error);
   useEffect(() => {
     setDrawer(undefined); setSelected(undefined); setStatusTarget(undefined); setStatusScope(undefined); setRevokeTarget(undefined);
+    setNameReviewTarget(undefined);
     setEditorTab("edit"); setRegistrationOpen(false);
   }, [customerId, denied]);
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员")} description={t("需要租户级会员查看或管理权限，且数据范围为全部。")} />;
@@ -165,6 +171,7 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
       { title: t("会员状态"), render: (_, row) => <Tag color={row.membershipStatus === "active" ? "success" : "default"}>{t(membershipLabel[row.membershipStatus])}</Tag> }, { title: t("证件"), render: (_, row) => row.qualifications.length ? row.qualifications.map((item) => <Tag key={item.id} color={qualificationStatus[item.status]?.color}>{item.qualificationType} · {t(qualificationStatus[item.status]?.text ?? item.status)}</Tag>) : "—" },
       { title: t("加入时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString(locale) },
       { title: t("操作"), render: (_, row) => <DataTableRowActions details={() => navigate(`/membership/personal/${encodeURIComponent(row.customerId)}`)} detailsDisabled={!canView} detailLabel={t("查看资料")} detailAccessibleLabel={`${row.name} · ${t("查看资料")}`} menuLabel={`${row.name} · ${t("更多操作")}`} actions={[
+        { id: "name-review", label: aiT("会员姓名修改"), icon: FileCheck, disabled: !canManage || !currentWorkspaceId, onSelect: () => setNameReviewTarget(memberNameEntryReference(row.customerId)) },
         ...(!row.account.provisioned ? [{ id: "provision", label: t("开通账号"), icon: UserPlus, disabled: !canManageAccount || ensureAccount.isPending, onSelect: () => ensureAccount.mutate(row.customerId) }] : []),
         { id: "password", label: t("密码"), icon: KeyRound, disabled: !canManageAccount || !row.account.provisioned || row.account.status === "closed", onSelect: () => { setSelected(row); form.resetFields(); setDrawer("password"); } },
         { id: "account", label: t("账号状态"), icon: ShieldCheck, disabled: (!canManageAccount && !canClose) || !row.account.provisioned || row.account.status === "closed", onSelect: () => openStatus(row, "account") },
@@ -182,10 +189,14 @@ function PersonalMembershipWorkspace({ scope }: { scope: string }) {
       onEdit={() => detailMember && openEdit(detailMember)}
       onQualification={() => { if (detailMember) { setSelected(detailMember); qualificationForm.resetFields(); setDrawer("qualification"); } }}
       actions={detailMember && <>
+        <Button disabled={!canManage || !currentWorkspaceId} onClick={() => setNameReviewTarget(memberNameEntryReference(detailMember.customerId))}>{aiT("会员姓名修改")}</Button>
         <Button disabled={(!canManage && !canRiskAction && !canClose) || detailMember.membershipStatus === "closed"} onClick={() => openStatus(detailMember, "membership")}>{t("会员状态")}</Button>
         <Button disabled={!canGrant} onClick={() => { setSelected(detailMember); grantForm.resetFields(); setDrawer("grant"); }}>{t("授予方案")}</Button>
       </>}
     />}
+    <MemberNameEntry reference={nameReviewTarget}
+      open={nameReviewDialog.visible && !denied && Boolean(nameReviewTarget && members.data?.some(member => member.customerId === nameReviewTarget.customerId))}
+      onClose={nameReviewDialog.dismiss} afterClose={nameReviewDialog.afterClose} />
     <Modal title={t("注册设置")} open={registrationOpen} onCancel={() => setRegistrationOpen(false)} okText={t("保存设置")} confirmLoading={saveMode.isPending} okButtonProps={{ disabled: !canManage || !registrationMode }} cancelButtonProps={{ disabled: saveMode.isPending }} closable={!saveMode.isPending} keyboard={!saveMode.isPending} maskClosable={!saveMode.isPending} onConfirm={() => {
       if (!canManage || !registrationMode) throw new Error(t("当前操作不可用"));
       return saveMode.mutateAsync(registrationMode);

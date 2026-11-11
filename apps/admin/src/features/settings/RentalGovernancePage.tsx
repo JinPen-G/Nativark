@@ -111,14 +111,17 @@ export function RentalGovernancePage() {
   const categories = useQuery({
     queryKey: ["rental-core", "categories"],
     queryFn: rentalCoreApi.categories,
+    enabled: permittedTabs.some(definition => definition.key !== 'calendar'),
   });
   const profile = useQuery({
     queryKey: ["rental-core", "profile"],
     queryFn: rentalCoreApi.profile,
+    enabled: permittedTabs.some(definition => definition.key !== 'calendar'),
   });
   const settings = useQuery({
     queryKey: ["rental-core", "business-settings"],
     queryFn: rentalCoreApi.businessSettings,
+    enabled: permittedTabs.some(definition => definition.key !== 'calendar'),
   });
   const category = useMemo(
     () =>
@@ -183,7 +186,8 @@ export function RentalGovernancePage() {
         destroyOnHidden={false}
         activeKey={tab}
         onChange={(key) => setTab(key as TabKey)}
-        items={localizedTabs.map(({ key, label, icon, render }) => ({ key, label, icon, children: <QueryState
+        items={localizedTabs.map(({ key, label, icon, render }) => ({ key, label, icon, children: key === 'calendar'
+          ? <CalendarTab permissions={permissions} /> : <QueryState
           transitionKey={scope}
           loading={settings.isLoading || profile.isLoading || categories.isLoading}
           error={settings.error || profile.error || categories.error}

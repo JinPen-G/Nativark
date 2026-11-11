@@ -194,4 +194,34 @@ export class AiHumanQuoteOrderController {
   readSelectedReprepareReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondHumanQuote(() => quoteHttpContract(approvalContracts.readSelectedReprepareReceipt, body, command => this.orders.readSelectedReprepareReceipt(request, command)));
   }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readReissuePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReissuePreparation(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(approvalContracts.readReissuePreparation, body,
+      command => this.orders.readReissuePreparation(request, command, signal))));
+  }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.reissueSelectedRequest) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reissueSelectedRequest(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(approvalContracts.reissueSelectedRequest, body,
+      command => this.orders.reissueSelectedRequest(request, command, signal), true)), 'read_reissue_operation');
+  }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readReissueOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReissueOperation(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(approvalContracts.readReissueOperation, body,
+      command => this.orders.readReissueOperation(request, command, signal))));
+  }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readReissuedSelectionPreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReissuedSelectionPreparation(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(approvalContracts.readReissuedSelectionPreparation, body,
+      command => this.orders.readReissuedSelectionPreparation(request, command, signal))));
+  }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.selectReissuedQuote) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  selectReissuedQuote(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(approvalContracts.selectReissuedQuote, body,
+      command => this.orders.selectReissuedQuote(request, command, signal), true)), 'read_reissued_selection_operation');
+  }
+  @Post(AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT.readReissuedSelectionOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReissuedSelectionOperation(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => quoteHttpContract(approvalContracts.readReissuedSelectionOperation, body,
+      command => this.orders.readReissuedSelectionOperation(request, command, signal))));
+  }
 }

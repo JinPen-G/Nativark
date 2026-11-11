@@ -12,6 +12,7 @@ export function applyCursorEvent(state: AiCursorState, event: AiCursorEvent, kno
   if (next === null || (state.cursor !== null && current === null)) return { ...state, events: [], cursor: null, sync: "unsynced", reason: "unknown_version" };
   if (state.cursor === event.cursor) return { ...state, reason: "duplicate" };
   if (current !== null && next <= current) return { ...state, sync: "unsynced", reason: "out_of_order" };
-  if (current !== null && next !== current + BigInt(1)) return { ...state, events: [], cursor: null, sync: "unsynced", reason: "gap" };
+  // Committed cursors increase strictly but can have holes. Page validation
+  // checks the original after/last cursor; arithmetic adjacency is not a fact.
   return { ...state, cursor: event.cursor, events: [...state.events.slice(-99), event], sync: "synced", reason: "none" };
 }

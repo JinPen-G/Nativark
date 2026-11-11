@@ -12,7 +12,7 @@ const taskId = id.max(36), hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const name = z.string().trim().min(1).max(191).refine(value => Array.from(value).length <= 120);
 const time = z.string().datetime({ offset: true });
 export const aiMemberNameQuery = z.object({ limit: z.number().int().min(1).max(50), name: z.string().trim().min(1).max(191).optional(),
-  cursor: id.optional() }).strict();
+  customerId: id.optional(), cursor: id.optional() }).strict();
 export const aiMemberNameLocator = z.object({ customerId: id, requestKey: id.max(128) }).strict();
 export const aiMemberNameSelection = aiMemberNameLocator.extend({ query: aiMemberNameQuery, selectionHash: hash, name }).strict();
 export const aiMemberNameIntent = aiMemberNameSelection.extend({ expiresAt: time }).strict();
@@ -60,7 +60,7 @@ const bool: Schema = { type: 'boolean' }, constant = (value: string | boolean): 
 const choice = (...values: string[]): Schema => ({ type: 'string', enum: values });
 const object = (properties: Record<string, Schema>, required = Object.keys(properties)): Schema => ({ type: 'object', properties, required, additionalProperties: false });
 const nullable = (schema: Schema): Schema => ({ ...schema, nullable: true });
-const query = object({ limit: integer(1, 50), name: text(), cursor: identifier }, ['limit']);
+const query = object({ limit: integer(1, 50), name: text(), customerId: identifier, cursor: identifier }, ['limit']);
 const locator = object({ customerId: identifier, requestKey: { ...identifier, maxLength: 128 } });
 const selection = { customerId: identifier, requestKey: { ...identifier, maxLength: 128 }, query, selectionHash: fingerprint, name: text(120) };
 const intent = object({ ...selection, expiresAt: datetime });

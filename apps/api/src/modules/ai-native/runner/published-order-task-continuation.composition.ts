@@ -11,7 +11,7 @@ import { taskCenterContinueSchema } from '../task-center-continuation.compositio
 import { composeTaskOrderHost, type TaskOrderHostDependencies } from './order-task-host.composition';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency } from './prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency } from './ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease } from './ai-task-runner.service';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ host: z.object({ holderId: id, leaseMs: z.number().int().min(1).max(120000) }).strict(),
@@ -76,17 +76,17 @@ export function composePublishedOrderTaskContinuation(d: ControlledApprovedOrder
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
       // Only the original current CAS grants a fresh continuation lease. A lost
       // claim reply grants no cleanup permission and never enters the runner.
-      const lease = await observe(() => root.authorization.tasks.claimRecoveryRun({ taskId: key.taskId, runId: key.runId,
+      const claim = { taskId: key.taskId, runId: key.runId,
         ...configuration.host, expectedTaskRevision: currentTask.revision, expectedRunRevision: run.revision,
-        expectedFencingToken: run.fencingToken.toFixed(0) }), signal, true);
+        expectedFencingToken: run.fencingToken.toFixed(0) };
+      const lease = snapshotAiTaskRunnerRecoveryLease(claim,
+        await observe(() => root.authorization.tasks.claimRecoveryRun(structuredClone(claim)), signal, true));
       let cleanupSafe = true, failed = false;
       try {
         await observe(verify, signal);
         if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-        cleanupSafe = false;
         const result = await root.application.continueConfirmation({ taskId: key.taskId, runId: key.runId,
-          checkpointRef: command.checkpointRef }, signal);
-        cleanupSafe = result.kind === 'not_started';
+          checkpointRef: command.checkpointRef }, signal, () => { cleanupSafe = false; });
         await observe(verify, undefined, true);
         return result;
       } catch (error) { failed = true; throw error; }
@@ -100,8 +100,12 @@ export function composePublishedOrderTaskContinuation(d: ControlledApprovedOrder
               if (held) {
                 const current = await root.authorization.tasks.readMetadata(key.taskId);
                 if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-                await root.authorization.tasks.releaseRun({ taskId: key.taskId, runId: key.runId, holderId: configuration.host.holderId,
-                  expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+                const release = { taskId: key.taskId, runId: key.runId, holderId: configuration.host.holderId,
+                  expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+                const receipt = structuredClone(await root.authorization.tasks.releaseRun(structuredClone(release)));
+                if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) {
+                  throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'continuation cleanup acknowledgement requires original receipt');
+                }
               }
             }, 5000, 'published_order_continuation_cleanup', undefined, d.runnerClock);
           } catch { if (!failed) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }

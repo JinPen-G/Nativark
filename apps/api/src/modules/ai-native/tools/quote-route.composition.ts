@@ -1,7 +1,7 @@
 import type { AiExecutionContext, RentalQuoteRequest } from '@rental-os/shared';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import type { BusinessContext } from '../../rental-core/rental-business.service';
-import type { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
+import type { AiBusinessReadRouteAuthority, AiCalendarSourceReadTarget } from '../business-read-route.authority';
 import type { AiQuoteCoreContextSource, AiQuotePreviewAuthority } from '../quote-preview.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
@@ -37,14 +37,16 @@ type ContextCore = Pick<RentalCoreService, 'readQuoteConfiguration'>;
  * bind its enclosing server principal before Core access; scope/context are not
  * new authority. Legacy source callers retain the original one-argument port. */
 export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource {
-  constructor(private readonly core: ContextCore, private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withRead'>) {
+  constructor(private readonly core: ContextCore, private readonly routes: Pick<AiBusinessReadRouteAuthority, 'withRead'>
+    & Partial<Pick<AiBusinessReadRouteAuthority, 'withCalendarSourceRead'>>) {
     if (typeof core?.readQuoteConfiguration !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     if (typeof routes?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, expectedContext?: AiExecutionContext): Promise<BusinessContext> {
+  async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>, expectedContext?: AiExecutionContext,
+    calendar?: AiCalendarSourceReadTarget & { readVersion?: string }): Promise<BusinessContext> {
     if (expected?.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
     const scope = structuredClone(expected), principal = expectedContext && structuredClone(expectedContext);
-    return this.routes.withRead('quote_context', {}, async context => {
+    const consume = async (context: AiExecutionContext): Promise<BusinessContext> => {
       assertAiReadContextBinding(context, principal);
       if (context.scope.kind !== 'workspace' || context.scope.tenantId !== scope.tenantId
         || context.scope.workspaceId !== scope.workspaceId) throw new ModelGatewayError('FORBIDDEN');
@@ -54,7 +56,14 @@ export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource
         || facts.settings.tenantId !== tenantId || facts.profile.categoryCode !== facts.category.code) throw new ModelGatewayError('INVALID_RESPONSE');
       return { ...(facts.categoryVersionId ? { categoryVersionId: facts.categoryVersionId, categoryAdoptionRevision: facts.categoryAdoptionRevision } : {}), profile: facts.profile, category: facts.category, settings: facts.settings, groups: facts.groups,
         pricingGroups: facts.pricingGroups, couponTemplates: facts.couponTemplates, locations: facts.locations, operators: facts.operators };
-    });
+    };
+    if (calendar) {
+      if (calendar.readVersion !== undefined) return this.routes.withRead('calendar_version', {
+        year: calendar.year, version: calendar.readVersion }, consume);
+      if (!this.routes.withCalendarSourceRead) throw new ModelGatewayError('CONFIG_INVALID');
+      return this.routes.withCalendarSourceRead(calendar, consume);
+    }
+    return this.routes.withRead('quote_context', {}, consume);
   }
 }
 

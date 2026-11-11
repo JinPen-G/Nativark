@@ -2,18 +2,21 @@
  * Starting is explicit; it cannot save/publish configuration or grant approval.
  * A retained start marker permits observation, never a second dispatch. */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { AiConversationTurnObservationDraft } from '@rental-os/shared';
+import { AI_TASK_RULE_DRAFT_READ_PERMISSIONS, type AiConversationTurnObservationDraft } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
 import { ConversationOpeningExecutionSession } from './conversation-opening-execution-session';
 import { ConversationResult } from './ConversationResult';
 import { useVisibleObservationHost } from './VisibleObservationHost';
 import { useAiManagementLocale } from './management-locale';
+import { useAuthStore } from '@/features/auth/authStore';
+import { TaskRuleDraft } from './TaskRuleDraft';
 
 export function ConversationOpeningExecution({ identity, conversationId, turn, current, showResult = true }: {
   identity: string; conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean; showResult?: boolean;
 }) {
   const visible = useVisibleObservationHost();
+  const auth = useAuthStore();
   const { t } = useAiManagementLocale();
   const owner = JSON.stringify([identity, conversationId, turn]), scope = useRef({ owner, current }); scope.current = { owner, current };
   const session = useMemo(() => {
@@ -39,6 +42,10 @@ export function ConversationOpeningExecution({ identity, conversationId, turn, c
         catch (error) { visible?.cancel(key); throw error; } }} />}
     {state.acknowledgement && <p role="status">{t('诊断启动已返回，结果请从原任务读取。')}</p>}
     {state.feedback === 'unknown' && <Alert type="warning" title={t('开业诊断待核对，请读取原结果；不会自动重新调用模型。')} />}
+    {turn.capabilityCode === 'opening_diagnosis' && turn.material === 'retained' && turn.task && !('creation' in turn)
+      && AI_TASK_RULE_DRAFT_READ_PERMISSIONS.some(permission => auth.hasPermission(permission)) && <TaskRuleDraft
+        taskId={turn.task.taskId} identity={owner} current={() => scope.current.owner === owner && !document.hidden && scope.current.current()}
+        onAccessDenied={() => { if (scope.current.owner === owner && scope.current.current()) session.retract(); }} />}
     {showResult && <ConversationResult conversationId={conversationId} turn={turn} current={() => scope.current.owner === owner && scope.current.current()} />}
   </section>;
 }

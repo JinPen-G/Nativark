@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiTextCapabilityAccountingResponseDraft,
   type AiTextCapabilityAccountingOperationResponseDraft } from '@rental-os/shared';
 import { z } from 'zod';
-import { AiTaskRepositoryError } from './ai-task.repository';
+import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository } from './ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from './task-authorization.composition';
 import { composeAuthorizedPersistentTaskInputRunner, composeCurrentAuthorizedPersistentTaskInputRunner,
   type CurrentPersistentTaskAuthorization } from './runner/authorized-persistent-task-input.composition';
@@ -199,7 +199,8 @@ function requireAuthorization(input: TextCapabilityProbeTaskComposition, clock: 
 /** Server workflow from immutable original request to the existing runner.
  * Starting/reconciling NEVER creates a replacement task or operation. Publish,
  * create, start and receipt read remain separately observable commit points.
- * This is not an HTTP registration or permission to bypass task action policy.
+ * Execution keeps its task action policy. Original history separately checks
+ * current management permission and immutable request/task ownership.
  * taskScopeKind 'PLATFORM' binds the same lifecycle to SaaS platform rows. */
 export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProbeTaskComposition, 'task' | 'probe'> & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -231,6 +232,36 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
   });
   const taskPolicies = input.taskPolicies ?? composeTaskActionPolicyManagement({ db: input.db, auth: input.auth,
     credentials: input.credentials, guard: input.guard, clock: input.clock });
+  type OriginalHistory = NonNullable<Awaited<ReturnType<typeof producer.originals.readHistoricalOriginal>>>;
+  const originalTaskWhere = (requestKey: string, original: OriginalHistory) => ({ ...original.owner,
+    scopeKind: taskScopeKind, sceneCode: TEXT_PROBE_SCENE, sceneVersion: original.sceneVersion,
+    creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef,
+    inputRevision: original.inputRevision, inputHash: original.inputHash });
+  const originalReader = (requestKey: string, original: OriginalHistory, taskId: string) => {
+    const clock = input.clock ?? (() => new Date());
+    if (!expectOriginalActor(original.context)) throw denied();
+    const initial = aiTaskAccessFromContext(original.context, taskId, clock());
+    const current = async (targetId: string) => {
+      if (targetId !== taskId) throw denied();
+      // This existing source rechecks current Auth/management authority; the
+      // old locator or policy expiry never grants permission by itself.
+      const latest = await producer.originals.readHistoricalOriginal(requestKey);
+      if (!latest || latest.inputRef !== original.inputRef || latest.inputHash !== original.inputHash
+        || latest.inputRevision !== original.inputRevision || latest.sceneVersion !== original.sceneVersion
+        || requestFingerprint(latest.owner) !== requestFingerprint(original.owner)) throw denied();
+      const access = aiTaskAccessFromContext(latest.context, taskId, clock());
+      if (access.bindingKey !== initial.bindingKey) throw denied();
+      const where = { ...access.where, ...originalTaskWhere(requestKey, latest), id: taskId };
+      const row = await input.db.aiTask.findFirst({ where, select: { id: true } });
+      if (!row || row.id !== taskId) throw denied();
+      return { context: latest.context, access: { ...access, where } };
+    };
+    const tasks: Pick<AiTaskRepository, 'resolveAccess'> = { resolveAccess: async (targetId, operation = 'read_metadata') => {
+      if (operation !== 'read_metadata' && operation !== 'read_step_terminal') throw denied();
+      return (await current(targetId)).access;
+    } };
+    return { tasks, current: async (targetId: string) => (await current(targetId)).context };
+  };
   const originalTask = async (value: unknown) => {
     const found = await producer.readCreation(structuredClone(value));
     if (!found.task) throw unavailable();
@@ -307,7 +338,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       await observe(verify);
       const recovery = platform ? input.accountingRecovery : composePersistedTaskAccountingRecovery({ db: input.db, auth: input.auth,
         credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard, taskId, clock: input.clock,
-        pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion } });
+        pricing: { kind: reservation.unitKind === 'calls' ? 'calls' : 'recorded', priceVersion: invocation.priceVersion },
+        ...(operation === 'read' || receiptOnly ? { originalTaskRead: originalReader(requestKey, original, taskId).current } : {}) });
       if (!recovery) throw unavailable();
       if (receiptOnly) {
         if (operation === 'read') throw unavailable();
@@ -343,9 +375,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     async readTaskPolicyMutation(requestKey: string, operation: AiTaskActionPolicyMutation['operation'], expectedRevision: number | null) {
       const original = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
       if (!original) throw unavailable();
-      const where = { ...original.owner, scopeKind: taskScopeKind, sceneCode: TEXT_PROBE_SCENE,
-        sceneVersion: original.sceneVersion, creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef,
-        inputRevision: original.inputRevision, inputHash: original.inputHash };
+      const where = originalTaskWhere(requestKey, original);
       const rows = structuredClone(await observe(() => input.db.aiTask.findMany({ where, take: 2,
         select: { id: true, scopeId: true, scopeKind: true, audience: true, ownerKind: true, ownerId: true,
           sceneCode: true, sceneVersion: true, creationKey: true, inputRef: true, inputRevision: true, inputHash: true } })));
@@ -391,18 +421,17 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       }
       const stored = rows[0];
       if (Object.entries(where).some(([key, expected]) => stored[key as keyof typeof stored] !== expected)) throw unavailable();
-      // The original key locates, never authorizes. Use current task policies,
-      // without resolving today's model, plan policy or an execution lease.
-      const authorization = input.authorization ?? (platform ? undefined : composePersistedTaskAuthorization(input));
-      if (!authorization) throw unavailable();
-      const access = await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_metadata'));
-      const metadata = await observe(() => authorization.tasks.readMetadata(stored.id));
+      const reader = originalReader(requestKey, original, stored.id);
+      const access = await observe(() => reader.tasks.resolveAccess(stored.id, 'read_metadata'));
+      const metadata = await observe(() => input.db.aiTask.findFirst({ where: access.where,
+        select: { id: true, revision: true, status: true } }));
+      if (!metadata || metadata.id !== stored.id) throw denied();
       const runs = await observe(() => input.db.aiRun.findMany({ where: { scopeId: stored.scopeId, taskId: stored.id, sequence: 1 }, take: 2,
         select: { id: true, scopeId: true, taskId: true, sequence: true, actorKind: true, actorId: true } }));
       if (runs.length !== 1 || runs[0].scopeId !== stored.scopeId || runs[0].taskId !== stored.id || runs[0].sequence !== 1
         || runs[0].actorKind !== access.actorKind || runs[0].actorId !== access.actorId) throw unavailable();
-      const snapshot = await observe(() => new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks).read({ taskId: stored.id, runId: runs[0].id }));
-      if (snapshot.task.revision !== metadata.revision || snapshot.task.status !== metadata.status
+      const snapshot = await observe(() => new PrismaTaskRecoverySnapshotRepository(input.db, reader.tasks).read({ taskId: stored.id, runId: runs[0].id }));
+      if (snapshot.task.revision !== metadata.revision || snapshot.task.status !== metadata.status.toLowerCase()
         || snapshot.steps.some(step => step.toolCode !== TEXT_CAPABILITY_PROBE_TOOL)) throw unavailable();
       const receipt = await observe(() => new PrismaTextCapabilityReceiptRepository(input.db, input.clock).find(stored.scopeId, original.command.operationId));
       let configurationRevision: number | null = null;
@@ -427,8 +456,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
       }
       const again = await observe(() => producer.originals.readHistoricalOriginal(requestKey));
       if (!again || again.inputRef !== original.inputRef || again.inputHash !== original.inputHash
-        || (await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_metadata'))).bindingKey !== access.bindingKey
-        || (await observe(() => authorization.tasks.resolveAccess(stored.id, 'read_step_terminal'))).bindingKey !== access.bindingKey) throw denied();
+        || (await observe(() => reader.tasks.resolveAccess(stored.id, 'read_metadata'))).bindingKey !== access.bindingKey
+        || (await observe(() => reader.tasks.resolveAccess(stored.id, 'read_step_terminal'))).bindingKey !== access.bindingKey) throw denied();
       return { ...header, state: 'historical' as const,
         task: { taskId: snapshot.task.taskId, status: snapshot.task.status, revision: snapshot.task.revision,
           cancelRequestedAt: snapshot.task.cancelRequestedAt }, run: { runId: snapshot.run.runId, status: snapshot.run.status },

@@ -1,8 +1,11 @@
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP, AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS, AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS } from '@rental-os/shared';
 import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_SCHEMAS, AI_MEMBER_NAME_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_CONTRACTS, AI_TASK_RULE_DRAFT_SCHEMAS, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_TASK_RULE_SOURCE_ENTRY_HTTP, AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS, AI_TASK_RULE_SOURCE_ENTRY_SCHEMAS } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS, RENTAL_EXCHANGE_INSPECTION_OPERATIONS } from "../modules/rental-core/rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./enterprise-schemas";
@@ -229,7 +232,9 @@ function buildPaths(operations: ContractOperation[]) {
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
+  ...AI_TASK_RULE_SOURCE_ENTRY_SCHEMAS,
   ...AI_TASK_CALENDAR_DRAFT_SCHEMAS,
+  ...AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS,
   ...AI_TASK_ORDER_HANDOFF_SCHEMAS,
   ...AI_TASK_READ_POLICY_SCHEMAS,
   // AIN-02/S01：只公开草案结构，无对应运行路由；不得据此认为工具已可执行。
@@ -2329,18 +2334,42 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
     authRequired: true, summary: 'Explicit original member-name human workflow; current original manager and Core remain authoritative. Unknown is read only.',
     requestSchema: AI_MEMBER_NAME_CONTRACTS[action], responseSchema: 'AiMemberNameResponse' })),
-  ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
+  ...(['list', 'review', 'save', 'operation', 'preparation', 'previewPreparation', 'prepare', 'preparationOperation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`, tag: 'AI Native', operationId: `aiTaskRuleDraft_${action}`,
-    permissions: action === 'save' || action === 'review' ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS],
+    permissions: action === 'save' || action === 'review' || action === 'previewPreparation' || action === 'prepare'
+      ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS],
+    authRequired: true,
     summary: action === 'save' ? 'Explicit human save of a reviewed original rule draft. No publication. Unknown: read the same original operation.'
-      : action === 'operation' ? 'Read original rule draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned rule proposal or full Core candidate review.',
+      : action === 'operation' ? 'Read original rule draft operation from server-owned Task/Step/proposal linkage.'
+      : action === 'preparation' ? 'Read current rule candidates for an owned diagnosis. No implicit version selection.'
+      : action === 'previewPreparation' ? 'Review six permitted rule fields under the original rule edit permission. No persistence.'
+      : action === 'prepare' ? 'Explicitly prepare a linked new rule AI proposal. Preserve the original diagnostic plan; no Core draft or publication.'
+      : action === 'preparationOperation' ? 'Read the original linked rule preparation result without restarting it.'
+      : 'Current owned rule proposal or full Core candidate review.',
     requestSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_RULE_DRAFT_CONTRACTS[action].response })),
+  ...Object.entries(AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS).map(([action, contract]) => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_RULE_SOURCE_ENTRY_HTTP.basePath}/${AI_TASK_RULE_SOURCE_ENTRY_HTTP[action as keyof typeof AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS]}`,
+    tag: 'AI Native', authRequired: true, operationId: `aiTaskRuleDraft_${action}`, permissions: ['rental-os:rules:manage'],
+    summary: action === 'source' ? 'Read one original rule version under current rule-management authority. No task creation.'
+      : action === 'entry' ? 'Explicitly record the original rule task from the selected version. No model, rule save or publication.'
+      : 'Read the original rule task creation receipt without retrying creation.',
+    requestSchema: contract.request, responseSchema: contract.response })),
   ...(['list', 'review', 'save', 'operation'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`, tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`,
     permissions: action === 'save' || action === 'review' ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS],
     summary: action === 'save' ? 'Explicit human save of a reviewed original calendar draft. No publication. Unknown: read the same original operation.'
       : action === 'operation' ? 'Read original calendar draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned calendar proposal or full Core candidate review.',
     requestSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].response })),
+  ...Object.entries(AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS).map(([action, contract]) => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP[action as keyof typeof AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS]}`,
+    tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`, permissions: ['rental-os:calendar:edit'],
+    summary: action === 'source' ? 'Read existing draft calendar dates under current calendar edit authority. No task creation.'
+      : action === 'entry' ? 'Explicitly create the original calendar task from a selected existing draft date. No model, calendar save or publication.'
+      : action === 'entryOperation' ? 'Read the original calendar task creation receipt without retrying creation.'
+      : action === 'prepare' ? 'Prepare a linked calendar AI proposal from reviewed name and business status changes. No Core draft save or publication.'
+      : action === 'preparationOperation' ? 'Read the original linked calendar proposal operation without restarting it.'
+      : 'Review an existing calendar draft date and its permitted changes. No persistence or publication.',
+    requestSchema: contract.request, responseSchema: contract.response })),
   { method: 'post', path: `/api/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`, tag: 'AI Native', authRequired: true,
     operationId: 'aiTaskOrderHandoff_read', permissions: ['rental-os:order:view'],
     summary: 'Locate the owned original order Task and reread current order facts and manual reference. No model, business execution or approval.',
@@ -2349,6 +2378,13 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: `/api/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`, tag: 'AI Native', authRequired: true,
     operationId: `aiTaskReadPolicy_${action}`, permissions: ['system:params:manage'],
     summary: 'Explicit same-owner original manager read-policy CAS and original receipts. Never model/Core execution authorization.',
+    requestSchema: action === 'inspect' ? 'AiTaskReadPolicyQuery' : action === 'enable' ? 'AiTaskReadPolicyEnable' : 'AiTaskReadPolicyReference', responseSchema: 'AiTaskReadPolicyResponse' })),
+  ...(['inspect', 'enable', 'operation'] as const).map(action => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_ORIGINAL_READ_POLICY_HTTP.basePath}/${AI_TASK_ORIGINAL_READ_POLICY_HTTP[action]}`, tag: 'AI Native', authRequired: true,
+    operationId: `aiTaskOriginalReadPolicy_${action}`, permissions: [...AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS],
+    summary: action === 'enable' ? 'Explicit renewal of three owned-task read policies under current original business and resource authorization. No model or Core execution.'
+      : action === 'operation' ? 'Read original renewal receipts, including after expiry or new-execution shutdown. No writes or retries.'
+      : 'Inspect owned-task read access through current original resource Guards, independently of new-model publication.',
     requestSchema: action === 'inspect' ? 'AiTaskReadPolicyQuery' : action === 'enable' ? 'AiTaskReadPolicyEnable' : 'AiTaskReadPolicyReference', responseSchema: 'AiTaskReadPolicyResponse' })),
   ...AI_CREDIT_OPERATIONS,
   ...DESKTOP_BUSINESS_OPERATIONS,
@@ -2373,6 +2409,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation, 'AiClientQuotePreparationRequest', 'AiClientQuotePreparationReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking, 'AiClientQuoteBookingRequest', 'AiClientQuoteBookingPreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation, 'AiClientQuoteBookingRequest', 'AiClientQuoteBookingOperationResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskCancelReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation, 'AiClientTaskCancelRequest', 'AiClientTaskInputCancellationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot, 'AiClientTaskReadRequest', 'AiTaskSnapshotDraft'],
@@ -2434,7 +2472,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...Object.entries(AI_INSPECTION_TASK_HTTP_CONTRACTS).map(([operation, contract]) => ({
     method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation as keyof typeof AI_INSPECTION_TASK_HTTP_CONTRACTS]}`, tag: 'AI Native',
     operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
-    summary: ['readCreation', 'readAnswer'].includes(operation)
+    summary: operation === 'readResultReference'
+      ? 'Locate the original owned staff result through verified task, run and answer lineage under current order access. No candidate payload, lease, model dispatch or inspection submission.'
+      : ['readCreation', 'readAnswer'].includes(operation)
       ? 'Original owned staff metadata or exact human-answer receipt under current resource/task read policies, independently of new recognition enablement. No media, lease, model or inspection submission is initiated by observation.'
       : 'Server opt-in candidate recognition through the original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger. Creation is not dispatch; answers are context, not adoption or inspection approval. Unknown uses the original evidence only.',
     requestSchema: contract.request, responseSchema: contract.response
@@ -2720,7 +2760,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     Object.entries(contract).filter(([name]) => name !== 'basePath').map(([name, action]) => ({
       method: 'post' as const, path: `/api/${contract.basePath}${action ? `/${action}` : ''}`, tag: 'AI Native',
       operationId: `originalSelectedQuote_${name}_${contract.basePath.split('/').at(-1)}`,
-      permissions: ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(name)
+      permissions: ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal',
+        'readReissuePreparation', 'reissueSelectedRequest', 'readReissueOperation', 'readReissuedSelectionPreparation',
+        'selectReissuedQuote', 'readReissuedSelectionOperation'].includes(name)
         ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'],
       summary: 'Same current owner/original input and exact persisted Core quote selection. Selection is not approval; only the existing runner consumes a real human approval through the original Core transaction. New actions require the server quote-order host/limits and current persisted policies. Disabled execution still permits original selection/approval/order receipt reads; unknown is never a new quote/order. No model, stock/payment success claim or second runtime. Response is draft-polymorphic.',
       requestSchema: (contract === AI_SELECTED_QUOTE_TASK_HTTP_DRAFT

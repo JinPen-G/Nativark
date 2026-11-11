@@ -22,6 +22,11 @@ for (const app of ['miniprogram', 'staff-miniprogram']) {
       const loop = new AiPollingLoop(controller, clock, 2000, { classify: () => 'unknown', notify: value => notices.push(value) });
       const context = { audience: 'staff', tenantId: 'synthetic-A', taskId: 'task' };
       loop.start(context); await flush();
+      if (type === 'gap') {
+        assert.equal(state.sync, 'synced'); assert.equal(state.cursor, event.cursor);
+        assert.deepEqual(notices, ['synced']); assert.equal(timers.size, 1);
+        loop.destroy(); assert.equal(timers.size, 0); continue;
+      }
       assert.equal(state.sync, 'unsynced');
       assert.deepEqual(notices, ['unsynced']);
       assert.equal(timers.size, 0);

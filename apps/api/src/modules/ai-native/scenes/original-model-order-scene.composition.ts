@@ -8,7 +8,7 @@ import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import type { AiOriginalSceneModelDependencies, AiOriginalSceneRunDependencies } from './original-scene-model.composition';
 import type { composeAiOriginalScenes } from './original-scenes.composition';
@@ -39,21 +39,39 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
   const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens, orderExplainTool: true };
   const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
     waitForTaskApplicationDependency(operation, afterMutation, signal, run.clock);
-  const bound = async (value: unknown) => {
+  const bound = async (value: unknown, allowInitialRead = false) => {
     const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const ref = freezeOriginalInput(parsed.data), original = await scenes.requests.readHistorical(ref);
     const task = await scenes.readTaskReceipt(ref.inputRef);
     if (original.request.sceneCode !== 'order_explanation' || original.receipt.sceneVersion !== input.scene.version
       || original.receipt.state === 'revoked' || task.state !== 'observed') throw denied();
-    const access = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
-    const row = await input.db.aiTask.findFirst({ where: access.where });
+    // The explicit first-start preview may read an empty task through the
+    // original current business authority. Existing preparation/steps still
+    // require their normal task policy; this branch never grants execution.
+    let initialRead = allowInitialRead && task.status === 'queued' && task.revision === 1
+      && task.plan === 'not_observed' && !task.resultAvailable;
+    let access = initialRead ? aiTaskAccessFromContext(original.context, task.taskId, input.clock?.() ?? new Date())
+      : await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+    let row = await input.db.aiTask.findFirst({ where: access.where });
+    if (initialRead && row) {
+      const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
+      const [inputs, steps] = await Promise.all([
+        input.db.aiTaskActionInput.findMany({ where: key, take: 1, select: { id: true } }),
+        input.db.aiStep.findMany({ where: { scopeId: row.scopeId, taskId: task.taskId }, take: 1, select: { id: true } }),
+      ]);
+      if (row.revision !== 1 || row.status !== 'QUEUED' || row.resultRef !== null || inputs.length || steps.length) {
+        initialRead = false;
+        access = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+        row = await input.db.aiTask.findFirst({ where: access.where });
+      }
+    }
     if (!row || row.inputRef !== ref.inputRef || row.inputHash !== original.receipt.contentHash
       || row.inputRevision !== original.receipt.revision) throw denied();
-    return { ref, original, task, scopeId: row.scopeId, bindingKey: access.bindingKey };
+    return { ref, original, task, scopeId: row.scopeId, bindingKey: access.bindingKey, initialRead };
   };
   const verify = async (before: Awaited<ReturnType<typeof bound>>) => {
-    const after = await bound(before.ref);
+    const after = await bound(before.ref, before.initialRead);
     if (originalIdentityHash(after.original.context) !== originalIdentityHash(before.original.context)
       || after.original.receipt.contentHash !== before.original.receipt.contentHash
       || after.scopeId !== before.scopeId || after.bindingKey !== before.bindingKey
@@ -126,13 +144,14 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     /** Observe original preparation without claiming a lease, regenerating
      * input, or treating publication as proof that execution never started. */
     async readPreparation(value: unknown) {
-      const before = await observe(() => bound(structuredClone(value))), key = { scopeId: before.scopeId,
+      const before = await observe(() => bound(structuredClone(value), true)), key = { scopeId: before.scopeId,
         taskId: before.task.taskId, runId: before.task.runId };
       const refs = [`scene-model:${before.ref.inputRef}`, `scene-order:${before.ref.inputRef}`,
         ...(answerRoundTrip ? [`scene-answer:${before.ref.inputRef}`] : [])];
       const collectPreparation = async () => {
         const inputs = await input.db.aiTaskActionInput.findMany({ where: key, take: refs.length + 1 });
         const plan = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+        if (before.initialRead && (inputs.length || plan)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         if (inputs.length > refs.length || new Set(inputs.map(row => row.registrationRef)).size !== inputs.length
           || inputs.some(row => row.scopeId !== key.scopeId || row.taskId !== key.taskId || row.runId !== key.runId
             || !refs.includes(row.registrationRef))

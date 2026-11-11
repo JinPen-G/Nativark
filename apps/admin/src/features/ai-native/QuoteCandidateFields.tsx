@@ -1,35 +1,83 @@
 /** Human rental-condition candidates, not price/stock/identity facts.
  * Missing and ambiguous values remain for the original scene to clarify. */
-import type { AiSceneQuoteCandidate } from '@rental-os/shared';
+import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiSceneQuoteCandidate, type AiSceneQuotePreparationDraft } from '@rental-os/shared';
 import { Input, Select, Button } from '@/components/ui';
 import { useAiManagementLocale } from './management-locale';
 import styles from './AiManagement.module.css';
 
-export function QuoteCandidateFields({ value, onChange, disabled = false }: {
-  value: AiSceneQuoteCandidate; onChange?: (value: AiSceneQuoteCandidate) => void; disabled?: boolean;
+export function QuoteCandidateFields({ value, onChange, disabled = false, preparation }: {
+  value: AiSceneQuoteCandidate; onChange?: (value: AiSceneQuoteCandidate) => void; disabled?: boolean; preparation?: AiSceneQuotePreparationDraft | null;
 }) {
   const { t } = useAiManagementLocale(), locked = disabled || !onChange;
-  const edit = (key: 'customerName' | 'start' | 'end' | 'locationName' | 'returnLocationName', text: string) =>
-    onChange?.({ ...value, [key]: text || undefined });
+  const change = (next: AiSceneQuoteCandidate) => onChange?.({ ...next, selectionRevision: undefined });
+  const edit = (key: 'customerName' | 'start' | 'end' | 'locationName' | 'returnLocationName', text: string) => {
+    const next = { ...value, [key]: text || undefined };
+    // A displayed name cannot retarget an already-resolved object implicitly.
+    if (key === 'customerName') { next.customerId = undefined; next.bookingIdentity = undefined; next.deliveryAddressId = undefined; }
+    if (key === 'locationName') next.locationId = undefined;
+    if (key === 'returnLocationName') next.returnLocationId = undefined;
+    change(next);
+  };
   const items = value.items ?? [];
+  const clarifications = preparation && 'clarifications' in preparation ? preparation.clarifications ?? [] : [];
+  const choose = (field: string, id: string) => {
+    const row = clarifications.find(row => row.field === field), candidate = row?.candidates.find(candidate => candidate.id === id);
+    if (locked || !candidate) return;
+    const next = structuredClone(value), line = /^items\.(\d+)(?:\.(pricingUnit))?$/u.exec(field);
+    if (field === 'customerId') { next.customerId = id; next.customerName = candidate.label; next.deliveryAddressId = undefined; }
+    else if (field === 'location') { next.locationId = id; next.locationName = candidate.label; }
+    else if (field === 'returnLocation') { next.returnLocationId = id; next.returnLocationName = candidate.label; }
+    else if (field === 'fulfillmentMode' && RENTAL_FULFILLMENT_MODES.includes(id as NonNullable<AiSceneQuoteCandidate['fulfillmentMode']>)) {
+      next.fulfillmentMode = id as NonNullable<AiSceneQuoteCandidate['fulfillmentMode']>; next.deliveryAddressId = undefined;
+    } else if (field === 'deliveryAddressId') next.deliveryAddressId = id;
+    else if (field === 'bookingIdentity.corporateCustomerId' && next.bookingIdentity?.bookingIdentity === 'enterprise_employee') next.bookingIdentity.corporateCustomerId = id;
+    else if (field === 'bookingIdentity.enterpriseContractAndPayer' && next.bookingIdentity?.bookingIdentity === 'enterprise_employee') {
+      if (!['personal_payer', 'enterprise_payer'].includes(id)) return; next.bookingIdentity.enterpriseContractAndPayer = id === 'enterprise_payer';
+    } else if (field === 'items') next.items = [{ productName: candidate.label, itemGroupId: id, quantity: 1 }];
+    else if (line && next.items?.[Number(line[1])]) {
+      const item = next.items[Number(line[1])];
+      if (line[2]) { if (!RENTAL_PRICING_UNIT_CODES.includes(id as NonNullable<typeof item.pricingUnit>)) return; item.pricingUnit = id as NonNullable<typeof item.pricingUnit>; item.usageQuantity = undefined; }
+      else { item.itemGroupId = id; item.productName = candidate.label; item.pricingUnit = undefined; item.usageQuantity = undefined; }
+    } else return;
+    change(next);
+  };
+  const choiceLabel = (field: string) => ({ customerId: '选择客户', location: '选择领取地点', returnLocation: '选择归还地点',
+    fulfillmentMode: '选择履约方式', deliveryAddressId: '选择配送地址', items: '选择商品',
+    'bookingIdentity.corporateCustomerId': '选择当前受权企业', 'bookingIdentity.enterpriseContractAndPayer': '选择签约与付款方' }[field]
+    ?? (/^items\.\d+\.pricingUnit$/u.test(field) ? '选择计价单位' : /^items\.\d+$/u.test(field) ? '选择商品' : null));
   return <div className={styles.section} aria-label={t('租赁条件')}>
     <label>{t('客户类型')}<Select value={value.customerType} disabled={locked}
       options={[{ value: 'personal', label: t('个人客户') }, { value: 'corporate', label: t('企业客户') }]}
-      onChange={next => onChange?.({ ...value, customerType: next as AiSceneQuoteCandidate['customerType'] })} /></label>
+      onChange={next => change({ ...value, customerType: next as AiSceneQuoteCandidate['customerType'], customerId: undefined,
+        customerName: undefined, bookingIdentity: undefined, deliveryAddressId: undefined })} /></label>
     <label>{t('客户名称')}<Input value={value.customerName ?? ''} maxLength={191} disabled={locked}
       onChange={event => edit('customerName', event.currentTarget.value)} /></label>
     {items.map((item, index) => <div key={index} className={styles.toolbar}>
       <label>{t('商品名称')}<Input value={item.productName ?? ''} maxLength={191} disabled={locked} onChange={event =>
-        onChange?.({ ...value, items: items.map((row, i) => i === index ? { ...row, productName: event.currentTarget.value || undefined } : row) })} /></label>
+        change({ ...value, items: items.map((row, i) => i === index ? { ...row, productName: event.currentTarget.value || undefined,
+          itemGroupId: undefined, pricingUnit: undefined, usageQuantity: undefined } : row) })} /></label>
       <label>{t('数量')}<Input type="number" value={item.quantity} min={1} max={10000} step={1} disabled={locked} onChange={event =>
-        onChange?.({ ...value, items: items.map((row, i) => i === index ? { ...row, quantity: Number(event.currentTarget.value) } : row) })} /></label>
-      <Button disabled={locked} onClick={() => onChange?.({ ...value, items: items.length > 1 ? items.filter((_, i) => i !== index) : undefined })}>{t('移除商品')}</Button>
+        change({ ...value, items: items.map((row, i) => i === index ? { ...row, quantity: Number(event.currentTarget.value) } : row) })} /></label>
+      {item.pricingUnit && <><span>{t('计价单位')}: {t(item.pricingUnit)}</span><Button disabled={locked} onClick={() => change({ ...value,
+        items: items.map((row, i) => i === index ? { ...row, pricingUnit: undefined, usageQuantity: undefined } : row) })}>{t('重新选择计价单位')}</Button></>}
+      {item.pricingUnit === 'usage' && <label>{t('使用量')}<Input type="number" value={item.usageQuantity ?? ''} min={0} max={1000000} disabled={locked}
+        onChange={event => change({ ...value, items: items.map((row, i) => i === index ? { ...row,
+          usageQuantity: event.currentTarget.value === '' ? undefined : Number(event.currentTarget.value) } : row) })} /></label>}
+      <Button disabled={locked} onClick={() => change({ ...value, items: items.length > 1 ? items.filter((_, i) => i !== index) : undefined })}>{t('移除商品')}</Button>
     </div>)}
-    <Button disabled={locked || items.length >= 50} onClick={() => onChange?.({ ...value, items: [...items, { quantity: 1 }] })}>{t('添加商品')}</Button>
+    <Button disabled={locked || items.length >= 50} onClick={() => change({ ...value, items: [...items, { quantity: 1 }] })}>{t('添加商品')}</Button>
     {(['start', 'end', 'locationName', 'returnLocationName'] as const).map((key, index) => <label key={key}>
       {t(['开始时间', '结束时间', '领取地点', '归还地点'][index])}<Input value={value[key] ?? ''}
         maxLength={key === 'start' || key === 'end' ? 80 : 191} disabled={locked} onChange={event => edit(key, event.currentTarget.value)} />
     </label>)}
+    {clarifications.map(row => { const label = choiceLabel(row.field); return label && row.candidates.length > 0 ? <label key={row.field}>
+      {t(label)}<Select disabled={locked} placeholder={t(label)} options={row.candidates.map(candidate => ({ value: candidate.id,
+        label: `${t(candidate.label)}${candidate.phoneMasked ? ` · ${candidate.phoneMasked}` : ''}` }))}
+        onChange={id => choose(row.field, String(id))} />{row.truncated && <span>{t('候选仅覆盖当前读取范围。')}</span>}
+    </label> : null; })}
+    {preparation && 'selectionRevision' in preparation && typeof preparation.selectionRevision === 'string'
+      && 'missingFields' in preparation && preparation.missingFields?.includes('selectionRevision') && <Button disabled={locked}
+        onClick={() => onChange?.({ ...value, selectionRevision: preparation.selectionRevision })}>{t('确认当前候选选择')}</Button>}
     <p>{t('这些是待核对条件。缺项和歧义由原场景澄清，身份、可租性与金额以 Core 为准。')}</p>
   </div>;
 }

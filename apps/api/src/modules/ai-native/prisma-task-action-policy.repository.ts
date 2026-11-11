@@ -7,10 +7,10 @@ import type { AiScopeRepository } from './ai-scope.repository';
 
 const operations: readonly string[] = [
   'read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run',
-  'transition_task', 'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input', 'decide_approval'
+  'transition_task', 'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input', 'decide_approval', 'reprepare_approval'
 ];
-/** Existing human approval policy, not a new runner operation or model tool. */
-export type AiTaskActionPolicyOperation = AiTaskRepositoryOperation | 'decide_approval';
+/** Existing human decision/reprepare policies, not runner operations or model tools. */
+export type AiTaskActionPolicyOperation = AiTaskRepositoryOperation | 'decide_approval' | 'reprepare_approval';
 export const taskActionPolicyOperations = Object.freeze([...operations]);
 const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
 const permission = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;

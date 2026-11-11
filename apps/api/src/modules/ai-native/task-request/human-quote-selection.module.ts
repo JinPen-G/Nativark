@@ -1,5 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import type { FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
+import type { QuoteRequestReissueConfiguration } from '../scenes/quote-reissue.composition';
+import type { OriginalQuoteApprovalAdmissionConfiguration } from '../task-approval-admission.composition';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from './prisma-quote-selection.repository';
 import { composeHumanQuoteOrder, type HumanQuoteOrderDependencies, type SelectedQuoteTaskConfiguration } from '../scenes/human-quote-order.composition';
 import { AI_HUMAN_QUOTE_SELECTIONS, AI_HUMAN_QUOTE_SELECTION_REQUESTS, AiHumanQuoteSelectionController,
@@ -13,23 +15,25 @@ export { AI_HUMAN_QUOTE_ORDER_REQUESTS } from './human-quote-selection.controlle
 @Module({})
 export class AiHumanQuoteSelectionModule {
   static registerHttpTask(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
-    task: SelectedQuoteTaskConfiguration, reprepare?: FormalApprovedOrderReprepareConfiguration): DynamicModule {
-    const human = this.registerHttpApplication(dependencies, options, reprepare);
+    task: SelectedQuoteTaskConfiguration, reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration,
+    approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration): DynamicModule {
+    const human = this.registerHttpApplication(dependencies, options, reprepare, reissue, approvalAdmission);
     const serverOptions = { ...options }, serverTask = { ...task, host: structuredClone(task.host), limits: structuredClone(task.limits) };
     return { ...human,
       providers: [...(human.providers ?? []), { provide: AI_SELECTED_QUOTE_TASK_REQUESTS,
-        useFactory: () => composeRequestBoundSelectedQuoteTask(dependencies, serverOptions, serverTask) }],
+        useFactory: () => composeRequestBoundSelectedQuoteTask(dependencies, serverOptions, serverTask, approvalAdmission) }],
       exports: [...(human.exports ?? []), AI_SELECTED_QUOTE_TASK_REQUESTS],
       controllers: [...(human.controllers ?? []), AiSelectedQuoteTaskController] };
   }
   static registerHttpApplication(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
-    reprepare?: FormalApprovedOrderReprepareConfiguration): DynamicModule {
+    reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration,
+    approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration): DynamicModule {
     const serverOptions = { ...options };
     const configuration = reprepare ? { holderId: reprepare.holderId,
       creationRules: structuredClone(reprepare.creationRules), memberships: reprepare.memberships } : undefined;
     return { module: AiHumanQuoteSelectionModule, providers: [
       { provide: AI_HUMAN_QUOTE_SELECTION_REQUESTS, useFactory: () => composeRequestBoundQuoteSelections(dependencies, serverOptions) },
-      { provide: AI_HUMAN_QUOTE_ORDER_REQUESTS, useFactory: () => composeRequestBoundHumanQuoteOrder(dependencies, serverOptions, configuration) }
+      { provide: AI_HUMAN_QUOTE_ORDER_REQUESTS, useFactory: () => composeRequestBoundHumanQuoteOrder(dependencies, serverOptions, configuration, reissue, approvalAdmission) }
     ], exports: [AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS],
       controllers: [AiHumanQuoteSelectionController, AiHumanQuoteOrderController] };
   }
@@ -49,9 +53,10 @@ export class AiHumanQuoteSelectionModule {
       exports: [AI_HUMAN_QUOTE_SELECTION_REQUESTS], controllers: [AiHumanQuoteSelectionController] };
   }
   static registerRequestBoundApplication(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
-    reprepare?: FormalApprovedOrderReprepareConfiguration): DynamicModule {
+    reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration,
+    approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration): DynamicModule {
     return { module: AiHumanQuoteSelectionModule,
-      providers: [{ provide: AI_HUMAN_QUOTE_ORDER_REQUESTS, useFactory: () => composeRequestBoundHumanQuoteOrder(dependencies, options, reprepare) }],
+      providers: [{ provide: AI_HUMAN_QUOTE_ORDER_REQUESTS, useFactory: () => composeRequestBoundHumanQuoteOrder(dependencies, options, reprepare, reissue, approvalAdmission) }],
       exports: [AI_HUMAN_QUOTE_ORDER_REQUESTS] };
   }
 }

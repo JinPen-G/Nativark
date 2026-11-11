@@ -41,27 +41,29 @@ function protocolUsage(protocol: Protocol, value: unknown): ModelUsage | undefin
   if (value === undefined || value === null) return undefined;
   const usage = object(value), input = count(usage.input_tokens), output = count(usage.output_tokens);
   let cachedInputTokens = 0;
+  let cacheReported = false;
   if (protocol === 'openai_responses') {
     if (usage.total_tokens !== undefined && BigInt(count(usage.total_tokens)) !== BigInt(input) + BigInt(output)) invalid();
     if (usage.input_tokens_details != null) {
       const cached = object(usage.input_tokens_details).cached_tokens;
-      if (cached !== undefined) cachedInputTokens = count(cached);
+      if (cached !== undefined) { cachedInputTokens = count(cached); cacheReported = true; }
       if (cachedInputTokens > input) invalid();
     }
     if (usage.output_tokens_details != null) {
       const reasoning = object(usage.output_tokens_details).reasoning_tokens;
       if (reasoning !== undefined && count(reasoning) > output) invalid();
     }
-    return { inputTokens: input, outputTokens: output, ...(cachedInputTokens ? {
+    return { inputTokens: input, outputTokens: output, ...(cacheReported ? {
       billingDetails: { cachedInputTokens, cacheCreationInputTokens: 0 } } : {}) };
   }
   // Messages reports cached input separately, unlike Responses. Count every
   // token once, without translating these counters into a guessed money rate.
   cachedInputTokens = usage.cache_read_input_tokens === undefined ? 0 : count(usage.cache_read_input_tokens);
   const cacheCreationInputTokens = usage.cache_creation_input_tokens === undefined ? 0 : count(usage.cache_creation_input_tokens);
+  cacheReported = usage.cache_read_input_tokens !== undefined || usage.cache_creation_input_tokens !== undefined;
   const total = BigInt(input) + BigInt(cachedInputTokens) + BigInt(cacheCreationInputTokens);
   if (total > BigInt(Number.MAX_SAFE_INTEGER)) invalid();
-  return { inputTokens: Number(total), outputTokens: output, ...(cachedInputTokens || cacheCreationInputTokens
+  return { inputTokens: Number(total), outputTokens: output, ...(cacheReported
     ? { billingDetails: { cachedInputTokens, cacheCreationInputTokens } } : {}) };
 }
 function responseContent(protocol: Protocol, raw: unknown): { text: string; calls: ProtocolToolCall[] } {

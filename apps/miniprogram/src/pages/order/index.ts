@@ -1,6 +1,6 @@
 import { themeBehavior } from "../../core/theme-behavior";
 import type { EnterpriseExchangeApprovalView, ClientCatalogResponse, ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
-import { cancelOrder, fetchFeeItems, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation, respondToFee } from "../../api/orders";
+import { cancelOrder, fetchFeeItems, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation, respondToFee, readBookingHostCapabilities } from "../../api/orders";
 import { fetchEnterpriseOrderExchangeApprovals } from "../../api/enterprise";
 import { enterpriseExchangeConfirmation } from "../../core/enterprise-exchange-confirmation";
 import { contractMissing } from "../../contracts/planned";
@@ -21,6 +21,12 @@ import { formatBusinessDateTime, zoneLabel } from "../../core/time";
 import { ROUTES, buildUrl, callPhone, navigate, requireSignIn, toast } from "../../core/ui";
 import { zoneOf, ensureCurrentZone } from "../../core/zones";
 import { customerOrderFacts } from "../../components/ai-native/customer-order-facts";
+import { clientTaskApi } from '../../api/ai-tasks';
+import { PUBLIC_CONFIG } from '../../config/public';
+import { createClientTaskSession, clientTaskStorageKey, type ClientTaskView } from '../../components/ai-native/client-task-session';
+import type { NativeAiHost, NativeAiSnapshot } from '../../components/ai-native/ai-task-workbench/index';
+import type { AiReadContext } from '../../components/ai-native/types';
+import { writeRequiredStorage } from '../../core/storage';
 
 /**
  * P08 订单详情 + P09 取消面板 + 取还指引（需求 §9.3、§10.1、§10.3）。
@@ -90,8 +96,10 @@ interface OrderData {
   feeSubmitting: boolean;
   feeError: string;
   feePendingKey: boolean;
-  /** B13: registered for the real page, but remains false until a server capability is delivered. */
+  /** Actual customer task display is attached only from current original receipts. */
   aiNativeEntryVisible: boolean;
+  aiClientTaskPhase: string;
+  aiClientTaskWorking: boolean;
   aiNativeTasks: unknown[];
   aiNativePreviewTask: Record<string, unknown> | null;
   aiNativeSteps: unknown[];
@@ -163,6 +171,7 @@ Page({
     feeError: "",
     feePendingKey: false,
     aiNativeEntryVisible: false,
+    aiClientTaskPhase: '', aiClientTaskWorking: false,
     aiNativeTasks: [],
     aiNativePreviewTask: null,
     aiNativeSteps: [],
@@ -183,10 +192,112 @@ Page({
   feeExceptionIndex: 0 as number,
   aiOrderFactsActive: false,
   aiFactsUnsubscribe: undefined as (() => void) | undefined,
+  clientTask: undefined as ReturnType<typeof createClientTaskSession> | undefined,
+  clientTaskHostKey: '',
+  clientTaskEpoch: 0,
+  clientTaskReading: false,
+  disposeClientTask() {
+    this.clientTaskEpoch++; this.clientTask?.dispose(); this.clientTask = undefined; this.clientTaskHostKey = ''; this.clientTaskReading = false;
+    this.selectComponent?.('#ai-native-workbench')?.hostLogout?.();
+    this.setData({ aiNativeEntryVisible: false, aiNativeTasks: [], aiClientTaskPhase: '', aiClientTaskWorking: false });
+  },
+  projectClientTask(view: ClientTaskView): NativeAiSnapshot {
+    const labels: Record<ClientTaskView['status'], string> = { closed: '', working: '正在处理本次请求…', ready: '任务已准备', waiting_input: '请补充说明',
+      input_saved: '补充说明已保存，请明确继续取得回答', running: '正在取得回答', complete: '回答已取得', unknown: '原结果待核对，不重复调用模型', unavailable: '解释暂不可用，可继续使用原订单页面' };
+    const question = view.question, field = question?.contract.fields.length === 1 ? question.contract.fields[0] : null;
+    return { modelText: view.modelText, modelStatus: labels[view.status], continueAvailable: view.canContinue,
+      observationGeneration: view.observationGeneration,
+      ...(view.observation ? { cursorState: { taskId: view.observation.taskId, version: view.observation.contractVersion,
+        cursor: view.observation.cursor, events: [], sync: 'synced' as const, reason: 'none' as const },
+        observeEvents: !['succeeded','partially_succeeded','failed','cancelled'].includes(view.observation.status) } : {}),
+      inputRevision: question ? `${question.requestId}:${question.revision}` : '',
+      fields: field?.fieldId === 'clarification_text' && field.kind === 'text'
+        ? [{ key: field.fieldId, label: field.label, required: field.required, readonly: !view.canSubmit, maxLength: field.maxLength }] : [] };
+  },
+  applyClientTask(view: ClientTaskView, current: () => boolean) {
+    if (!current()) return;
+    const projection = this.projectClientTask(view);
+    this.setData({ aiClientTaskPhase: projection.modelStatus ?? '', aiClientTaskWorking: view.status === 'working' });
+    const controller = this.clientTask, original = controller?.cancellationHost();
+    if (!original || !view.scope || !controller || (view.task && view.task.taskId !== original.origin.taskId)) {
+      this.setData({ aiNativeEntryVisible: false, aiNativeTasks: [] }); return;
+    }
+    const taskId = original.origin.taskId;
+    const context: AiReadContext = { audience: 'customer', tenantId: view.scope.tenantId, workspaceId: view.scope.workspaceId, taskId };
+    const key = JSON.stringify(context);
+    const requireContext = (requested: AiReadContext) => {
+      if (!current() || this.clientTask !== controller || requested.taskId !== taskId || requested.tenantId !== context.tenantId
+        || requested.workspaceId !== context.workspaceId || requested.audience !== context.audience) throw Error('client_task_context_changed');
+    };
+    this.setData({ aiNativeEntryVisible: true, aiNativeTasks: [{ id: taskId, title: '解释这笔订单', status: view.task?.status ?? 'unknown',
+      statusLabel: projection.modelStatus, updatedLabel: '', availabilityLabel: '模型生成说明，非业务结果', partial: false }] }, () => {
+      if (!current() || this.clientTask !== controller) return;
+      const widget = this.selectComponent?.('#ai-native-workbench');
+      if (!widget) { this.clientTaskHostKey = ''; return; }
+      if (key !== this.clientTaskHostKey) {
+      const host: NativeAiHost = { context, clientModel: true,
+        clientCancellation: () => current() && this.clientTask === controller ? controller.cancellationHost() : null,
+        readAfterObservation: async requested => { requireContext(requested); await controller.refreshAfterObservation(taskId); requireContext(requested); },
+        readPage: async (requested,signal,after) => {
+          requireContext(requested);
+          if (signal.aborted || typeof after !== 'string') throw Error('client_task_events_unavailable');
+          const page = await controller.readEventPage(after); requireContext(requested);
+          if (signal.aborted || 'status' in page) throw Error('client_task_events_resync');
+          return { cursor: page.nextCursor, version: page.contractVersion, hasMore: page.hasMore,
+            events: page.events.map(event => ({ cursor: event.cursor, taskId: event.taskId, version: event.contractVersion, type: event.type })) };
+        },
+        clock: { schedule: (action,delay) => setTimeout(action,delay), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) },
+        knownEventTypes: ['task.transition','step.registered','step.changed','task.output_ready','task.input_refreshed','access.revoked'],
+        readDetail: async requested => { requireContext(requested); await controller.refresh(); requireContext(requested); return this.projectClientTask(controller.snapshot()); },
+        submitInput: async (requested,value) => {
+          requireContext(requested); const input = value as { taskId?: unknown; inputRevision?: unknown; draft?: Record<string, unknown> } | null;
+          const question = controller.snapshot().question;
+          if (!question || !input || input.taskId !== taskId || input.inputRevision !== `${question.requestId}:${question.revision}`
+            || !input.draft || Object.keys(input.draft).length !== 1 || typeof input.draft.clarification_text !== 'string') throw Error('client_task_input_changed');
+          await controller.submitClarification(input.draft.clarification_text); requireContext(requested);
+        },
+        continueInput: async requested => { requireContext(requested); await controller.continueAnswer(); requireContext(requested); },
+        reconcile: async requested => { requireContext(requested); await controller.refresh(); requireContext(requested); },
+      };
+        widget?.attachHost?.(host); widget?.hostShow?.(true); this.clientTaskHostKey = key;
+      }
+      widget?.receiveClientSnapshot?.(projection,taskId);
+    });
+  },
+  async ensureClientTask() {
+    if (!this.aiOrderFactsActive || this.data.view.status !== 'ready' || !this.data.order) return null;
+    if (this.clientTask) return this.clientTask;
+    const session = currentSession(), version = contextVersion(), epoch = this.clientTaskEpoch, orderId = this.orderId;
+    if (!session?.accessToken || session.customer.customerType !== 'personal') return null;
+    const current = () => this.aiOrderFactsActive && this.clientTaskEpoch === epoch && currentSession() === session
+      && contextVersion() === version && this.orderId === orderId;
+    const context = { tenantCode: PUBLIC_CONFIG.tenantCode, serviceCode: currentServiceCode(), customerId: session.customer.customerId,
+      orderId, surface: 'client_miniprogram' as const, current }, key = clientTaskStorageKey(context);
+    const read = () => { const value: unknown = wx.getStorageSync(key); return value === '' || value === null || value === undefined ? undefined : value; };
+    const owner = createClientTaskSession({ context, api: clientTaskApi, readHost: readBookingHostCapabilities, now: serverNow,
+      newKey: () => `client-task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+      storage: { read, write: value => writeRequiredStorage(key,value) }, changed: view => this.applyClientTask(view,current) });
+    this.clientTask = owner; await owner.open(); return current() ? owner : null;
+  },
+  async onExplainOrder() {
+    if (this.clientTaskReading) return;
+    const epoch = this.clientTaskEpoch; this.clientTaskReading = true;
+    try { await (await this.ensureClientTask())?.explain(); }
+    catch { if (epoch === this.clientTaskEpoch) this.setData({ aiClientTaskPhase: '原解释请求待核对，不重复调用模型' }); }
+    finally { if (epoch === this.clientTaskEpoch) this.clientTaskReading = false; }
+  },
+  async onReadClientTask() {
+    if (this.clientTaskReading) return;
+    const epoch = this.clientTaskEpoch; this.clientTaskReading = true;
+    try { await (await this.ensureClientTask())?.refresh(); }
+    catch { if (epoch === this.clientTaskEpoch) this.setData({ aiClientTaskPhase: '原解释结果暂不可用' }); }
+    finally { if (epoch === this.clientTaskEpoch) this.clientTaskReading = false; }
+  },
 
   onLoad(options: Record<string, string | undefined>) {
     this.aiFactsUnsubscribe?.();
     this.aiFactsUnsubscribe = sessionEvents.on(event => {
+      this.disposeClientTask();
       if (event.type === "refreshed") return;
       this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
       this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false, exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
@@ -208,12 +319,14 @@ Page({
   // Default-off lifecycle hooks are intentionally cleanup-only. They do not attach a host,
   // read AI data, or start polling until a server capability is wired in a later release.
   onHide() {
+    this.disposeClientTask();
     this.aiOrderFactsActive = false; this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
     this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false, exchangeRequests: [], exchangeLoadError: "", exchangeLoading: false, exchangeBlocked: true, exchangePending: false, showExchangeConsent: false, exchangeConsentReason: "", exchangeConsentTarget: undefined, exchangeConfirming: false });
     this.selectComponent?.("#ai-native-workbench")?.hostHide?.();
   },
 
   onUnload() {
+    this.disposeClientTask();
     this.aiFactsUnsubscribe?.(); this.aiFactsUnsubscribe = undefined;
     this.aiOrderFactsActive = false; this.loadVersion++; this.exchangeLoadVersion++; this.exchangeApprovalRows = [];
     this.selectComponent?.("#ai-native-workbench")?.hostLogout?.();

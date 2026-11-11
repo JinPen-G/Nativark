@@ -1,4 +1,5 @@
-import type { RentalFulfillmentMode } from './core';
+import { z } from 'zod';
+import { RENTAL_FULFILLMENT_MODES, type RentalFulfillmentMode } from './core';
 import type { AiCustomerEntryScope, AiCustomerEntrySurface, AiEntryActionDraft } from './ai-entry-action-draft';
 
 export const AI_BOOKING_DRAFT_CONTRACT_VERSION = 'ain-booking-draft-1' as const;
@@ -28,6 +29,30 @@ export interface AiBookingSelection {
   lines: Array<{ itemGroupId: string; quantity: number }>;
   services?: Array<{ serviceId: string; quantity: number; scheduledStartAt?: string; scheduledEndAt?: string; serviceLocationId?: string }>;
 }
+
+/** Same closed human-selection contract used by the original server reader.
+ * Current quote, catalog, identity and availability checks remain server-side. */
+const selectionId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const selectionDate = z.string().datetime({ offset: true }).refine(value => Number.isFinite(Date.parse(value)));
+export const aiBookingSelectionSchema: z.ZodType<AiBookingSelection> = z.object({
+  quoteId: selectionId, timeZone: z.string().min(1).max(100), startAt: selectionDate, endAt: selectionDate,
+  fulfillmentMode: z.enum(RENTAL_FULFILLMENT_MODES), fulfillmentLocationId: selectionId, returnLocationId: selectionId.optional(),
+  deliveryAddressId: selectionId.optional(), deliveryAddressConfirmation: z.object({
+    source: z.literal('original_quote_one_time_address'), snapshotFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), confirmed: z.literal(true)
+  }).strict().optional(),
+  bookingIdentity: z.object({ bookingIdentity: z.enum(['personal', 'enterprise_employee']), corporateCustomerId: selectionId.optional(),
+    enterpriseContractAndPayer: z.boolean() }).strict(),
+  lines: z.array(z.object({ itemGroupId: selectionId, quantity: z.number().int().min(1).max(999) }).strict()).min(1).max(20),
+  services: z.array(z.object({ serviceId: selectionId, quantity: z.number().int().min(1).max(999),
+    scheduledStartAt: selectionDate.optional(), scheduledEndAt: selectionDate.optional(), serviceLocationId: selectionId.optional()
+  }).strict()).max(20).optional()
+}).strict().superRefine((value, context) => {
+  if (Date.parse(value.endAt) <= Date.parse(value.startAt) || new Set(value.lines.map(line => line.itemGroupId)).size !== value.lines.length
+    || (value.bookingIdentity.bookingIdentity === 'enterprise_employee') !== Boolean(value.bookingIdentity.corporateCustomerId)
+    || (value.bookingIdentity.bookingIdentity === 'personal' && value.bookingIdentity.enterpriseContractAndPayer)
+    || Boolean(value.deliveryAddressId && value.deliveryAddressConfirmation))
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Explicit booking conditions required' });
+});
 
 export interface AiBookingQuoteFacts {
   quoteId: string;

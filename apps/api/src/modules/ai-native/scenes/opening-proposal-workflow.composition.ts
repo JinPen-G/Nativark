@@ -18,7 +18,7 @@ import { AiGuardedOpeningConfigurationSource } from '../tools/opening-configurat
 import { AiOpeningSectionDifferenceService, openingSectionChangeSchema, verifyOpeningSectionMaterial } from '../tools/opening-section-difference.service';
 import { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 import { AiOpeningVersionFieldSource } from '../tools/opening-version-fields.source';
-import { AiTaskRunnerError, snapshotAiTaskRunnerClaimLease } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, snapshotAiTaskRunnerRecoveryLease, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
 import type { AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
@@ -37,12 +37,16 @@ const batchReadSchema = z.object({ original: originalRequestReferenceSchema }).s
 const receiptSchema = z.object({ original: originalRequestReferenceSchema,
   registrationRef: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
 export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencies,
-  host: AiTaskApplicationHost, monotonic?: () => number) {
+  host: AiTaskApplicationHost, monotonic?: () => number,
+  calendar?: { requests: PrismaOriginalRequestRepository; ruleOnly?: { id: string; version: string } }) {
+  if (calendar && !(calendar.requests instanceof PrismaOriginalRequestRepository))
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const calendarOnly = calendar !== undefined && calendar.ruleOnly === undefined, ruleOnly = calendar?.ruleOnly;
   const scenes = composeAiOriginalScenes(input), authorization = composePersistedTaskAuthorization(input);
   const clock = input.clock ?? (() => new Date());
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
   const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(input.core, routes), routes, clock,
-    new AiOpeningVersionFieldSource(input.db, routes));
+    new AiOpeningVersionFieldSource(input.db, routes), calendarOnly, ruleOnly);
   // Opening request bodies name workspace sections, not business records. Their
   // original read ACL is the opening Guard; a fresh full diagnosis is neither
   // historical evidence nor a prerequisite for stopping/reconciling old debt.
@@ -55,7 +59,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
     }
   }, clock), clock);
   const target = async (reference: z.infer<typeof originalRequestReferenceSchema>, historical: boolean) => {
-    const requests = historical ? history : scenes.requests;
+    const requests = calendar?.requests ?? (historical ? history : scenes.requests);
     const read = async () => {
       if (!historical) await requests.read(reference);
       return requests.readHistorical(reference);
@@ -71,7 +75,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const identity = originalIdentityHash(original.context);
     const verify = async (historicalRead = historical) => {
-      const selected = historicalRead ? history : scenes.requests;
+      const selected = calendar?.requests ?? (historicalRead ? history : scenes.requests);
       if (!historicalRead) await selected.read(reference);
       const current = await selected.readHistorical(reference);
       const receipt = await selected.readTaskReceipt(reference.inputRef);
@@ -142,12 +146,15 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
     };
     await verify();
     const root = composeOpeningProposalTaskHost({ ...input, host, monotonic,
+      calendarOnly, ruleOnly,
       scene: { code: found.task.sceneCode, version: found.task.sceneVersion }, revalidateOriginal: verify,
       task: { taskId: key.taskId, runId: key.runId, material: packets[0], materials: packets,
         limits: plan.limits, expiresAt: found.original.receipt.expiresAt } });
     return { found, key, root, verify };
   };
   const prepareBatch = async (command: z.infer<typeof batchSchema>) => {
+    if (calendar && command.sections.some(section => section.key !== (ruleOnly ? 'business_rule' : 'business_calendar')))
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const found = await target(command.original, false);
     if (command.sections.some(section => !found.sections.includes(section.key))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const materials: ReturnType<typeof verifyOpeningSectionMaterial>[] = [];
@@ -183,22 +190,38 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
       let lease: AiTaskRunnerRecoveryLease;
       try {
-        const received = structuredClone(await waitForTaskApplicationDependency(() => root.authorization.tasks.claimRecoveryRun(claim), true, signal));
-        if (received.purpose !== 'recovery_only') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-        lease = { ...snapshotAiTaskRunnerClaimLease(claim, received), purpose: received.purpose };
+        const received = await waitForTaskApplicationDependency(() => root.authorization.tasks.claimRecoveryRun(structuredClone(claim)), true, signal);
+        lease = snapshotAiTaskRunnerRecoveryLease(claim, received);
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'AI_STORAGE_UNAVAILABLE') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
         throw error;
       }
-      if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-      // Never turn a queried held lease into permission after a missing ACK.
-      // RecoverResult can retain unknown if original measurement is incomplete;
-      // an AiProposal row alone does not settle a Step or its resource charge.
-      const outcome = await root.runner.recover(lease, signal);
-      try { await waitForTaskApplicationDependency(verify, false, signal); } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
-      return freezeOriginalInput({ original: command.original, kind: 'run_outcome' as const, outcome,
-        execution: 'recovery_only_no_redispatch' as const, atomicity: 'independent_partitions' as const,
-        businessDraft: 'not_created' as const, publication: 'not_attempted' as const, retryable: false as const });
+      let runnerOwnsLease = false;
+      try {
+        if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        // The original engine accepts cleanup inside its try/finally, after
+        // pure reads. Missing ACK never authorizes a holder readback or dispatch.
+        const outcome = await root.runner.recover(lease, signal, () => { runnerOwnsLease = true; });
+        try { await waitForTaskApplicationDependency(verify, false, signal); } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+        return freezeOriginalInput({ original: command.original, kind: 'run_outcome' as const, outcome,
+          execution: 'recovery_only_no_redispatch' as const, atomicity: 'independent_partitions' as const,
+          businessDraft: 'not_created' as const, publication: 'not_attempted' as const, retryable: false as const });
+      } finally {
+        if (!runnerOwnsLease) {
+          // Cleanup is this acknowledged generation's CAS, independently of
+          // host cancellation. It does not cancel remote work or clear old debt.
+          try {
+            await callAiTaskRunnerDependency(async child => {
+              const current = structuredClone(await root.authorization.tasks.readMetadata(lease.taskId));
+              if (child.aborted || current.taskId !== lease.taskId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+              const release = { taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+                expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+              const receipt = structuredClone(await root.authorization.tasks.releaseRun(structuredClone(release)));
+              if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            }, 5000, 'opening_proposal_recovery_cleanup');
+          } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'opening recovery cleanup requires original receipt'); }
+        }
+      }
     },
     async previewSections(value: unknown) {
       const command = batchSchema.parse(structuredClone(value)), { materials } = await prepareBatch(command);
@@ -240,6 +263,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
           }
         }
         const root = composeOpeningProposalTaskHost({ ...input, host, monotonic,
+          calendarOnly, ruleOnly,
           scene: { code: found.task.sceneCode, version: found.task.sceneVersion }, revalidateOriginal: () => found.verify(false),
           task: { taskId: key.taskId, runId: key.runId, material: packets[0], materials: packets,
             limits: limits.data, expiresAt: found.original.receipt.expiresAt } });
@@ -265,7 +289,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
         throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const access = await authorization.tasks.resolveAccess(key.taskId, 'read_metadata');
       const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId,
-        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences);
+        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences, calendarOnly, undefined, ruleOnly);
       const sections = [];
       const observedKeys = new Set<string>();
       for (const definition of plan.steps) {
@@ -298,13 +322,19 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
       await found.verify();
       return freezeOriginalInput({ original: command.original, material, persistence: 'not_attempted' as const });
     },
-    async start(value: unknown, signal?: AbortSignal) {
+    async start(value: unknown, signal?: AbortSignal, reviewedMaterialHash?: string) {
       const command = commandSchema.parse(structuredClone(value));
+      if (reviewedMaterialHash !== undefined && (typeof reviewedMaterialHash !== 'string' || !/^[a-f0-9]{64}$/u.test(reviewedMaterialHash)))
+        throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
       const { found, root } = await waitForTaskApplicationDependency(async () => {
         const found = await target(command.original, false);
         if (!found.sections.includes(command.section.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         let material = verifyOpeningSectionMaterial(await differences.prepare(command.section, found.original.context));
+        // A human consumer may bind its reviewed difference. Refreshing the
+        // source cannot silently approve changed material before plan freezing.
+        if (reviewedMaterialHash !== undefined && material.materialHash !== reviewedMaterialHash)
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         if (material.status === 'no_change') return { found, root: null, material };
         const row = await input.db.aiTaskPlanPolicy.findFirst({ where: { scopeId: found.task.scopeId,
           sceneCode: found.task.sceneCode, sceneVersion: found.task.sceneVersion } });
@@ -320,6 +350,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
           material = packet;
         }
         const root = composeOpeningProposalTaskHost({ ...input, host, monotonic,
+          calendarOnly, ruleOnly,
           scene: { code: found.task.sceneCode, version: found.task.sceneVersion }, revalidateOriginal: () => found.verify(false),
           task: { taskId: found.task.id, runId: found.created.runId, material, limits: limits.data, expiresAt: found.original.receipt.expiresAt } });
         return { found, root, material };
@@ -336,7 +367,7 @@ export function composeOpeningProposalWorkflow(input: AiOriginalSceneDependencie
     async readReceipt(value: unknown) {
       const command = receiptSchema.parse(structuredClone(value)), found = await target(command.original, true);
       const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId,
-        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences);
+        scene: { code: found.task.sceneCode, version: found.task.sceneVersion } }, differences, calendarOnly, undefined, ruleOnly);
       const receipt = await proposals.readReceipt({ taskId: found.task.id, runId: found.created.runId, registrationRef: command.registrationRef });
       if (receipt.state === 'ai_proposal_saved') {
         const material = verifyOpeningSectionMaterial(receipt.material);

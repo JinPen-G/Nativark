@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -11,7 +12,7 @@ import { AiClientTaskAuthority, clientTaskSceneSchema, type AiAuthorizedClientMa
 import { composeClientMaterialTasks } from './client-task.composition';
 import { clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
-import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
+import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 type ClientTaskOperation = 'read' | 'claim' | 'execute' | 'transition' | 'accounting' | 'request_input' | 'submit_input' | 'resume_input' | 'cancel';
@@ -36,6 +37,7 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
 
   const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
     const observingOriginal = ['read', 'accounting', 'cancel'].includes(operation);
+    const originalInputOperation = ['request_input', 'submit_input', 'resume_input'].includes(operation);
     // Original accounting uses current read authority; reserve/dispatch still require execute.
     const grant = await authority.authorize(command.materialRef, operation === 'read' || operation === 'accounting' ? 'read'
       : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute');
@@ -45,8 +47,7 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
     const input = await inputs.findCreation(grant.material, command.creationKey);
     if (!input || input.id !== receipt.inputRef || input.inputHash !== receipt.inputHash
       || input.sceneCode !== scene.sceneCode || input.sceneVersion !== scene.sceneVersion
-      || input.policyId !== grant.policy.id || (!observingOriginal
-        && (input.policyRevision !== grant.policy.revision || input.expiresAt <= clock()))) throw denied();
+      || input.policyId !== grant.policy.id) throw denied();
     const access = aiTaskAccessFromContext(grant.context, id, clock());
     const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: {
       id: true, scopeId: true, scopeKind: true, scope: true, audience: true, ownerKind: true, ownerId: true,
@@ -60,6 +61,44 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
       || task.sceneCode !== scene.sceneCode || task.sceneVersion !== scene.sceneVersion
       || task.inputRef !== input.id || task.inputHash !== input.inputHash || task.inputRevision !== input.revision
       || !Number.isSafeInteger(task.revision) || task.revision < 1 || task.revision > 4294967294) throw denied();
+    let continuationProof: string | null = null;
+    let expiresAt = grant.policy.expiresAt.getTime();
+    if (!observingOriginal && !originalInputOperation) {
+      if (input.policyRevision === grant.policy.revision && input.expiresAt > clock()) {
+        expiresAt = Math.min(expiresAt, input.expiresAt.getTime());
+      } else {
+        // Initial admission cannot restart an expired first run. A successor
+        // already created by a timely, consumed answer has its own immutable
+        // origin and question deadline; current execution policy still applies.
+        const db = dependencies.db as PrismaClient;
+        if (typeof db.aiRun?.findMany !== 'function' || typeof db.aiTaskInputReceipt?.findUnique !== 'function'
+          || typeof db.aiTaskInputRequest?.findUnique !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const runs = await db.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: id,
+          actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
+        const run = runs[0];
+        if (!run || runs[1]?.sequence === run.sequence || run.sequence < 2 || run.id === receipt.task.runId
+          || run.resourceOriginRunId !== receipt.task.runId || !run.inputReceiptId || run.status !== 'RUNNING') throw denied();
+        const origin = await readTaskModelRunOrigin(db, access, { scopeId: task.scopeId, taskId: id,
+          runId: run.id, originRunId: receipt.task.runId, registrationRef: `client-model:${input.id}` });
+        if (!origin.continuation || origin.continuation.receiptId !== run.inputReceiptId) throw denied();
+        const answer = await db.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: {
+          scopeId: task.scopeId, taskId: id, id: run.inputReceiptId } } });
+        if (!answer || answer.id !== run.inputReceiptId || answer.scopeId !== task.scopeId || answer.taskId !== id) throw denied();
+        const question = await db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+          scopeId: task.scopeId, taskId: id, id: answer.requestId } } });
+        if (!question || question.id !== answer.requestId || question.scopeId !== task.scopeId || question.taskId !== id
+          || question.status !== 'CONSUMED' || !(question.expiresAt instanceof Date)
+          || !Number.isFinite(question.expiresAt.getTime()) || question.expiresAt <= clock()) throw denied();
+        expiresAt = Math.min(expiresAt, question.expiresAt.getTime());
+        continuationProof = requestFingerprint({ runId: run.id, runRevision: run.revision,
+          fencingToken: run.fencingToken.toFixed(0), leaseOwnerId: run.leaseOwnerId,
+          leaseExpiresAt: run.leaseExpiresAt?.toISOString() ?? null, origin, questionHash: question.requestHash,
+          expiresAt: question.expiresAt.toISOString() });
+      }
+    }
+    // Input repositories revalidate the original question/result, deadline,
+    // revision and single-consumption receipt. Initial create policy revision
+    // and expiry do not replace those checks or the current input permission.
     if ((operation === 'claim' || operation === 'execute') && (task.cancelRequestedAt !== null
       || !(operation === 'claim' ? ['QUEUED', 'RUNNING'] : ['RUNNING']).includes(task.status))) throw denied();
     // The repository proves the legal transition and holder/fence. Starting a
@@ -70,10 +109,9 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
       'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     if (['request_input', 'submit_input', 'resume_input'].includes(operation) && (task.cancelRequestedAt !== null
       || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
-    return { context: grant.context, taskId: id, expiresAt: new Date(observingOriginal ? grant.policy.expiresAt.getTime()
-      : Math.min(grant.policy.expiresAt.getTime(), input.expiresAt.getTime())),
+    return { context: grant.context, taskId: id, expiresAt: new Date(expiresAt),
       proof: requestFingerprint({ identity: identityHash(grant.context),
-      task, inputHash: input.inputHash, policy: grant.policy, gates: grant.policyHash }) };
+      task, inputHash: input.inputHash, policy: grant.policy, gates: grant.policyHash, continuationProof }) };
   };
   const readGrant = async (taskId: string | null, operation: ClientTaskOperation) => {
     const first = await snapshot(taskId, operation), current = await snapshot(first.taskId, operation);

@@ -11,7 +11,7 @@ type Db = PrismaClient;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 export interface AiTaskExecutionScopeSource {
-  resolve(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write'): Promise<{ scopeId: string; bindingKey: string; taskWhere: Prisma.AiTaskWhereInput }>;
+  resolve(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write' | 'settle_released_run'): Promise<{ scopeId: string; bindingKey: string; taskWhere: Prisma.AiTaskWhereInput }>;
 }
 
 const resources: Record<AiTaskExecutionResource, { max: string; reserved: string; consumed: string; enum: import('@prisma/client').AiTaskExecutionResource }> = {
@@ -56,7 +56,8 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
     }
   }
 
-  private async access(taskId: string, lease: AiTaskExecutionLease, operation: 'read' | 'write' = 'write') {
+  private async access(taskId: string, lease: AiTaskExecutionLease,
+    operation: Parameters<AiTaskExecutionScopeSource['resolve']>[2] = 'write') {
     validateLease(taskId, lease);
     const resolved = structuredClone(await this.scopes.resolve(taskId, structuredClone(lease), operation));
     if (!resolved || !id(resolved.scopeId, 36) || typeof resolved.bindingKey !== 'string' || !resolved.bindingKey || !resolved.taskWhere
@@ -66,13 +67,17 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
 
   private async scope(taskId: string, lease: AiTaskExecutionLease) { return (await this.access(taskId, lease)).scopeId; }
 
-  private async currentTask(tx: Tx, taskId: string, lease: AiTaskExecutionLease, before: Awaited<ReturnType<AiTaskExecutionScopeSource['resolve']>>) {
+  private async currentTask(tx: Tx, taskId: string, lease: AiTaskExecutionLease,
+    before: Awaited<ReturnType<AiTaskExecutionScopeSource['resolve']>>,
+    operation: Parameters<AiTaskExecutionScopeSource['resolve']>[2] = 'write') {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${before.scopeId} AND id = ${taskId} FOR UPDATE`);
-    await this.verifyCurrentAccess(tx, taskId, lease, before);
+    await this.verifyCurrentAccess(tx, taskId, lease, before, operation);
   }
 
-  private async verifyCurrentAccess(tx: Tx, taskId: string, lease: AiTaskExecutionLease, before: Awaited<ReturnType<AiTaskExecutionScopeSource['resolve']>>) {
-    const current = await this.access(taskId, lease);
+  private async verifyCurrentAccess(tx: Tx, taskId: string, lease: AiTaskExecutionLease,
+    before: Awaited<ReturnType<AiTaskExecutionScopeSource['resolve']>>,
+    operation: Parameters<AiTaskExecutionScopeSource['resolve']>[2] = 'write') {
+    const current = await this.access(taskId, lease, operation);
     if (current.scopeId !== before.scopeId || current.bindingKey !== before.bindingKey
       || !await tx.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true } })) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
   }
@@ -331,9 +336,9 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
       || input.release?.released !== true || input.release.revision !== input.lease.revision + 1
       || input.release.revision >= 0xffffffff) throw new AiTaskExecutionBudgetError('AI_INVALID_INPUT');
     const lease = { ...input.lease, revision: input.release.revision };
-    const access = await this.access(input.taskId, lease), policy = await this.policy(input.taskId, lease, true);
+    const access = await this.access(input.taskId, lease, 'settle_released_run'), policy = await this.policy(input.taskId, lease, true);
     await this.db.$transaction(async tx => {
-      await this.currentTask(tx, input.taskId, lease, access);
+      await this.currentTask(tx, input.taskId, lease, access, 'settle_released_run');
       const released = await this.activeLease(tx, access.scopeId, lease, true);
       if (released.leaseOwnerId !== null || released.leaseExpiresAt !== null) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
       const budget = await this.lockBudget(tx, access.scopeId, input.taskId);
@@ -363,7 +368,7 @@ export class PrismaTaskExecutionBudgetRepository implements AiTaskExecutionBudge
         reservedActiveMs: { decrement: charge.amount }, consumedActiveMs: { increment: evidence.actualAmount },
         revision: { increment: 1 } } })).count !== 1) throw new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
       await participant.verify(tx, access.scopeId);
-      await this.verifyCurrentAccess(tx, input.taskId, lease, access);
+      await this.verifyCurrentAccess(tx, input.taskId, lease, access, 'settle_released_run');
       const current = await this.activeLease(tx, access.scopeId, lease, true);
       if (current.leaseOwnerId !== null || current.leaseExpiresAt !== null) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });

@@ -562,7 +562,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           const row = await repository.findSource(scopeOf(bound), materialRef);
           if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          await verify(bound, row);
+          // Original recovery and accepted-answer continuation retain the
+          // original order facts while reloading current ownership. New start
+          // still requires fresh material; the input/runner owns its deadline.
+          await verify(bound, row, control !== undefined || answers !== undefined);
           await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
@@ -603,7 +606,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         await bound.assertCurrent();
         const row = await repository.findSource(scopeOf(bound), materialRef);
         if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        await verify(bound, row);
+        // The original question owns its deadline. Keep its frozen order facts
+        // while reloading current ownership; submission still uses the current
+        // input policy and the repository's single-consumption checks.
+        await verify(bound, row, true);
         await bound.assertCurrent();
         return { row, identity: structuredClone(bound.identity) };
       };

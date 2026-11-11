@@ -1,5 +1,8 @@
 import type { CreateRentalOrderRequest } from './core';
 import type { AiSceneModelAnswerQueryDraft } from './ai-scene-request-draft';
+import type { AiSceneQuoteCandidate, AiSceneRequestReadDraft, AiSceneTaskReceiptDraft } from './ai-scene-request-draft';
+import type { AiSceneQuotePreparationDraft } from './ai-scene-quote-http-draft';
+import type { AiWorkspaceScope } from './ai-native';
 import type { AiTaskRunnerOutcomeDraft } from './ai-task-recovery-draft';
 import type { AiTaskConfirmationHistoryDraft } from './ai-task-confirmation-history-draft';
 import type { AiTaskEventDraft } from './ai-task-draft';
@@ -46,7 +49,10 @@ export const AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT = Object.freeze({
   readSelectedProposal: 'review', decideSelectedProposal: 'decide', readSelectedDecisionReceipt: 'decision-receipt',
   readSelectedOrderResult: 'order-result', readSelectedReprepareEligibility: 'reprepare-eligibility',
   readSelectedRepreparePreparation: 'reprepare-preparation',
-  reprepareSelectedProposal: 'reprepare', readSelectedReprepareReceipt: 'reprepare-receipt'
+  reprepareSelectedProposal: 'reprepare', readSelectedReprepareReceipt: 'reprepare-receipt',
+  readReissuePreparation: 'request-preparation', reissueSelectedRequest: 'request-reissue', readReissueOperation: 'request-operation',
+  readReissuedSelectionPreparation: 'reissued-selection-preparation', selectReissuedQuote: 'reissued-selection',
+  readReissuedSelectionOperation: 'reissued-selection-operation'
 } as const);
 export const AI_SELECTED_QUOTE_TASK_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_QUOTE_SELECTION_HTTP_DRAFT.basePath}/task`,
@@ -77,6 +83,41 @@ export interface AiHumanQuoteOrderRepreparePreparationDraft {
   command: AiApprovalReprepareCommandDraft; originalReview: AiApprovalApplicationReviewDraft;
   replacementReview: AiApprovalApplicationReviewDraft;
   state: 'read_only'; supersession: 'not_attempted'; approval: 'not_granted'; order: 'not_created';
+}
+/** A human starts different rental conditions from an owned original choice.
+ * This locator observes its original request operation; it never substitutes
+ * an uncertain order, approves a successor or carries client business facts. */
+export interface AiQuoteRequestReissuePreparationInputDraft extends AiSelectedQuoteTaskRequestDraft {
+  original: AiApprovalApplicationReferenceDraft; intent: 'inspect' | 'change_plan'; candidate?: AiSceneQuoteCandidate;
+}
+export interface AiQuoteRequestReissueReferenceDraft extends AiSelectedQuoteTaskRequestDraft {
+  original: AiApprovalApplicationReferenceDraft; intent: 'inspect' | 'change_plan'; operationKey: string;
+}
+export interface AiQuoteRequestReissuePreparationDraft {
+  selection: AiQuoteSelectionProofDraft; original: AiApprovalApplicationReferenceDraft; intent: 'inspect' | 'change_plan';
+  candidate: AiSceneQuoteCandidate; scope: AiWorkspaceScope; reason: 'rejected' | 'expired' | 'change_requested';
+  preparation: AiSceneQuotePreparationDraft; sourceHash: string;
+  requestPersistence: 'not_attempted'; quotation: 'not_attempted'; approval: 'not_granted'; order: 'not_created';
+}
+export interface AiQuoteRequestReissueCreateDraft extends AiQuoteRequestReissueReferenceDraft {
+  candidate: AiSceneQuoteCandidate; sourceHash: string; decision: 'create_linked_quote_request';
+}
+export type AiQuoteRequestReissueOperationDraft = {
+  reference: AiQuoteRequestReissueReferenceDraft; scope: AiWorkspaceScope; retryable: false;
+  quotation: 'not_attempted_by_request'; approval: 'not_granted'; order: 'not_created_by_request';
+} & ({ status: 'not_observed' } | { status: 'linked_request_recorded'; original: AiSceneRequestReadDraft;
+  task: AiSceneTaskReceiptDraft; admission: 'current_policies_available' | 'unavailable' });
+export interface AiQuoteRequestReissueSelectionPreparationDraft {
+  reference: AiQuoteRequestReissueReferenceDraft; original: AiSceneRequestReadDraft; scope: AiWorkspaceScope;
+  selection: AiQuoteSelectionCreateDraft; material: AiApprovalOrderMaterialDraft; reviewHash: string;
+  quotation: 'original_saved_quote'; selectionState: 'not_saved'; approval: 'not_granted'; order: 'not_created';
+}
+export interface AiQuoteRequestReissueSelectDraft extends AiQuoteRequestReissueReferenceDraft {
+  reviewHash: string; decision: 'select_reissued_quote';
+}
+export interface AiQuoteRequestReissueSelectionOperationDraft {
+  reference: AiQuoteRequestReissueReferenceDraft; original: AiSceneRequestReadDraft; scope: AiWorkspaceScope;
+  selection: AiQuoteSelectionReconcileResponseDraft; approval: 'not_granted'; order: 'not_created_by_selection';
 }
 /** Legacy original-result locator. Its phase coordinates must match the stored
  * approval consumption; they never grant a lease, submission or replay. New
@@ -148,7 +189,13 @@ export const AI_HUMAN_QUOTE_ORDER_HTTP_CONTRACTS = Object.freeze({
   readSelectedReprepareEligibility: { request: 'AiHumanQuoteOrderReprepareEligibilityRequestDraft', response: 'AiApprovalReprepareEligibilityDraft' },
   readSelectedRepreparePreparation: { request: 'AiHumanQuoteOrderRepreparePreparationInputDraft', response: 'AiHumanQuoteOrderRepreparePreparationDraft' },
   reprepareSelectedProposal: { request: 'AiHumanQuoteOrderReprepareRequestDraft', response: 'AiHumanQuoteOrderReprepareResponseDraft' },
-  readSelectedReprepareReceipt: { request: 'AiHumanQuoteOrderReprepareRequestDraft', response: 'AiHumanQuoteOrderReprepareResponseDraft' }
+  readSelectedReprepareReceipt: { request: 'AiHumanQuoteOrderReprepareRequestDraft', response: 'AiHumanQuoteOrderReprepareResponseDraft' },
+  readReissuePreparation: { request: 'AiQuoteRequestReissuePreparationInputDraft', response: 'AiQuoteRequestReissuePreparationDraft' },
+  reissueSelectedRequest: { request: 'AiQuoteRequestReissueCreateDraft', response: 'AiQuoteRequestReissueOperationDraft' },
+  readReissueOperation: { request: 'AiQuoteRequestReissueReferenceDraft', response: 'AiQuoteRequestReissueOperationDraft' },
+  readReissuedSelectionPreparation: { request: 'AiQuoteRequestReissueReferenceDraft', response: 'AiQuoteRequestReissueSelectionPreparationDraft' },
+  selectReissuedQuote: { request: 'AiQuoteRequestReissueSelectDraft', response: 'AiQuoteRequestReissueSelectionOperationDraft' },
+  readReissuedSelectionOperation: { request: 'AiQuoteRequestReissueReferenceDraft', response: 'AiQuoteRequestReissueSelectionOperationDraft' }
 } as const);
 export type AiSelectedQuoteTaskRunDraft =
   | { kind: 'not_started'; reason: 'host_aborted' | 'plan_unavailable' | 'task_not_runnable' | 'lease_held'

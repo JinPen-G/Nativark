@@ -1,0 +1,2 @@
+.quote-preparation { min-width: 0; font-size: 30rpx; line-height: 1.6; }
+.quote-reference { overflow-wrap: anywhere; word-break: break-all; }

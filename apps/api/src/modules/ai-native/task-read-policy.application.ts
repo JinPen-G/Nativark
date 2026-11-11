@@ -27,6 +27,7 @@ type Policies=ReturnType<typeof composeRequestBoundOriginalTaskActionPolicies>;
 type ReadingReceipt=Awaited<ReturnType<Policies['readReadingRecorded']>>['receipt'];
 type Dependencies=Omit<AiOriginalSceneDependencies,'credentials'> & {policies:Policies};
 type Request={headers:{authorization?:unknown}};
+const supportedScenes=['order_explanation','opening_diagnosis','quote_clarification'] as const;
 const unavailable=()=>new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'), denied=()=>new AiTaskRepositoryError('AI_ACCESS_DENIED');
 export function composeTaskReadPolicyRequests(d:Dependencies){
   const call=async(request:Request,value:unknown,action:'inspect'|'enable'|'operation',signal?:AbortSignal)=>{
@@ -47,17 +48,19 @@ export function composeTaskReadPolicyRequests(d:Dependencies){
       const access=aiTaskAccessFromContext(context,command.taskId,clock());
       const task=await d.db.aiTask.findFirst({where:{AND:[access.where,{scopeId:bound.scope.id}]}});
       if(!task||task.id!==command.taskId||task.ownerId!==context.actor.userId||task.ownerKind!=='USER'||task.audience!=='OPERATOR'
-        ||task.archivedAt!==null||task.sceneCode!=='order_explanation'||!task.inputRef)throw unavailable();
+        ||task.archivedAt!==null||!supportedScenes.some(scene=>scene===task.sceneCode)||!task.inputRef)throw unavailable();
       const scenes=composeAiOriginalScenes(input),original={draftVersion:AI_SCENE_REQUEST_DRAFT_VERSION,inputRef:task.inputRef};
       const source=await scenes.requests.readHistorical(original),creation=await scenes.readTaskReceipt(task.inputRef);
-      if(source.receipt.state==='revoked'||source.receipt.contentHash!==task.inputHash||creation.state!=='observed'
+      if(source.receipt.state==='revoked'||source.receipt.contentHash!==task.inputHash
+        ||source.receipt.sceneCode!==task.sceneCode||source.receipt.sceneVersion!==task.sceneVersion||creation.state!=='observed'
         ||creation.taskId!==task.id||command.runId!==undefined&&command.runId!==creation.runId)throw denied();
       const verify=async()=>{
         if(!active)throw denied();const current=await scopes.resolveCurrent();
         if(current.scope.id!==bound.scope.id||originalIdentityHash(current.context)!==originalIdentityHash(context))throw denied();
         await manager.authorize({tenantId:workspaceScope.tenantId,workspaceId:workspaceScope.workspaceId,actorId:context.actor.userId},'manage');
         const latest=await scenes.requests.readHistorical(original),created=await scenes.readTaskReceipt(task.inputRef!);
-        if(latest.receipt.state==='revoked'||latest.receipt.contentHash!==source.receipt.contentHash||originalIdentityHash(latest.context)!==originalIdentityHash(source.context)
+        if(latest.receipt.state==='revoked'||latest.receipt.contentHash!==source.receipt.contentHash
+          ||latest.receipt.sceneCode!==task.sceneCode||latest.receipt.sceneVersion!==task.sceneVersion||originalIdentityHash(latest.context)!==originalIdentityHash(source.context)
           ||created.state!=='observed'||created.taskId!==task.id||created.runId!==creation.runId)throw denied();
       };
       const describe=async()=>{const rows=[];for(const operation of AI_TASK_READ_POLICY_OPERATIONS){

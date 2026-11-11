@@ -14,9 +14,12 @@ import { BoundRuleDraftUnknownError } from '../rental-core/bound-rule-draft.serv
 import type { RentalQuoteRequest, RentalOrderExtensionRequest, PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest, SystemUserRow } from '@rental-os/shared';
 import { z } from 'zod';
 
-export type AiBusinessReadKind = 'catalog' | 'order_candidates' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'rule_version' | 'calendar_version' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
+export type AiBusinessReadKind = 'catalog' | 'order_candidates' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'rule_versions' | 'rule_version' | 'calendar_version' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
+/** Server-selected calendar partition, never a public permission switch. */
+export interface AiCalendarSourceReadTarget { year: number; date: string }
 export interface AiBusinessReadAuthority {
   withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
+  withCalendarSourceRead?<T>(target: AiCalendarSourceReadTarget, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
 }
 const routes = {
   catalog: { method: 'GET', path: '/rental/v1/item-groups' },
@@ -26,6 +29,7 @@ const routes = {
   booking_identity_options: { method: 'GET', path: '/rental/v1/booking-members/:customerId/booking-options' },
   booking_delivery_addresses: { method: 'GET', path: '/rental/v1/booking-members/:customerId/delivery-addresses' },
   opening: { method: 'GET', path: '/rental/v1/tenant-readiness' },
+  rule_versions: { method: 'GET', path: '/rental/v1/rule-versions' },
   rule_version: { method: 'GET', path: '/rental/v1/rule-versions/:version' },
   rule_draft_preview: { method: 'POST', path: '/rental/v1/rule-versions' },
   rule_draft_save: { method: 'POST', path: '/rental/v1/rule-versions' },
@@ -95,6 +99,18 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     return this.withRoute('calendar_range_preview', { ...command, year }, context => consume(context));
   }
 
+  /** Necessary Core inputs under the actual calendar-edit preview Guard. The
+   * callback does not apply the empty range or read another opening partition. */
+  async withCalendarSourceRead<T>(target: AiCalendarSourceReadTarget,
+    consume: (context: AiExecutionContext) => Promise<T>): Promise<T> {
+    const parsed = z.object({ year: z.number().int().min(1900).max(2200),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) }).strict().safeParse(structuredClone(target));
+    if (!parsed.success || Number(parsed.data.date.slice(0, 4)) !== parsed.data.year)
+      throw new ModelGatewayError('INVALID_REQUEST');
+    return this.withCalendarRangePreview(parsed.data.year, { startDate: parsed.data.date,
+      endDate: parsed.data.date, fields: {} }, consume);
+  }
+
   /** Explicit existing calendar-edit route, distinct from preview and history.
    * Server-only bound Core persistence; never grants publication or arbitrary fields. */
   async withCalendarDraftWrite<T>(year: number, input: ApplyRentalCalendarRangeOverrideRequest,
@@ -138,6 +154,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     if (!Object.prototype.hasOwnProperty.call(routes, kind) || typeof read !== 'function') throw new ModelGatewayError('INVALID_REQUEST');
     const body = structuredClone(input);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ModelGatewayError('INVALID_REQUEST');
+    if (kind === 'rule_versions' && Object.keys(body).length !== 0) throw new ModelGatewayError('INVALID_REQUEST');
     let route: { method: string; path: string } = routes[kind];
     if (kind === 'calendar_range_apply') {
       const parsed = z.object({ year: z.number().int().min(1900).max(2200), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),

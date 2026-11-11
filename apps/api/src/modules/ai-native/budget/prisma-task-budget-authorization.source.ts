@@ -16,8 +16,9 @@ const identity = (context: AiExecutionContext) => {
 const actions = ['settings_read', 'settings_write', 'reserve', 'dispatch', 'read', 'settle', 'release', 'unknown', 'reconcile'];
 
 /** Financial authorization from current Auth, the original task policy and
- * original invocation. No caller scope, entitled constant, dispatch grant or
- * second ledger. Entitlements are checked again by ServerBudgetAuthorityAdapter.
+ * original invocation. An explicit original-task reader can authorize reads
+ * only; mutations still require current task policy. No caller scope, dispatch
+ * grant or second ledger. ServerBudgetAuthorityAdapter retains entitlement checks.
  */
 export class PrismaTaskBudgetAuthorizationSource implements BudgetAuthorizationSource {
   private readonly authorization;
@@ -26,8 +27,10 @@ export class PrismaTaskBudgetAuthorizationSource implements BudgetAuthorizationS
   private readonly clock: () => Date;
   readonly scopes;
   private readonly originalTaskId?: string;
-  constructor(private readonly input: PersistedTaskAuthorizationDependencies & { guard: Pick<ApiAuthGuard, 'canActivate'>; taskId?: string }) {
+  constructor(private readonly input: PersistedTaskAuthorizationDependencies & { guard: Pick<ApiAuthGuard, 'canActivate'>; taskId?: string },
+    private readonly originalTaskRead?: (taskId: string) => Promise<AiExecutionContext>) {
     if (input.taskId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)) throw new BudgetError('FORBIDDEN');
+    if (originalTaskRead !== undefined && (typeof originalTaskRead !== 'function' || input.taskId === undefined)) throw new BudgetError('FORBIDDEN');
     this.originalTaskId = input.taskId;
     this.clock = input.clock ?? (() => new Date());
     this.authorization = composePersistedTaskAuthorization(input);
@@ -72,26 +75,35 @@ export class PrismaTaskBudgetAuthorizationSource implements BudgetAuthorizationS
         ? await this.bindings.resolveForReservation(gatewayContext, resource.reservationId) : null;
       if (!binding || requestFingerprint(binding.association) !== requestFingerprint(association)
         || binding.actorId !== gatewayContext.actorId || binding.sceneCode !== row.sceneCode) throw new BudgetError('FORBIDDEN');
-      const taskContext = dispatching ? await this.authorization.execution.authorize(row.taskId)
-        : await this.authorization.authority.resolve(row.taskId, 'read_step_terminal');
-      if (identity(taskContext) !== identity(context)) throw new BudgetError('FORBIDDEN');
-      const operation = dispatching ? 'transition_task' : 'read_step_terminal';
-      const policy = await this.input.db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: {
-        scopeId: before.scope.id, taskId: row.taskId, operation } } });
-      if (!policy || policy.scopeId !== before.scope.id || policy.taskId !== row.taskId || policy.operation !== operation
-        || !Number.isSafeInteger(policy.revision) || policy.revision < 1 || !(policy.expiresAt instanceof Date)
-        || !Number.isFinite(policy.expiresAt.getTime()) || policy.expiresAt <= this.clock()
-        || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length === 0
-        || !('access' in context) || policy.requiredPermissions.some(permission => typeof permission !== 'string'
-          || !('access' in context) || !context.access.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
-      const finalTaskContext = dispatching ? await this.authorization.execution.authorize(row.taskId)
-        : await this.authorization.authority.resolve(row.taskId, 'read_step_terminal');
-      if (identity(finalTaskContext) !== identity(context)) throw new BudgetError('FORBIDDEN');
-      // Original financial facts already bind reservation/dispatch/usage.
-      // This source authorizes the resource, not the caller's evidence strings.
-      proof = { invocationId: row.id, registrationHash: row.registrationHash, configurationHash: row.configurationHash,
-        association: binding.association, reservationId: resource.reservationId ?? null,
-        policy: { revision: policy.revision, permissions: policy.requiredPermissions, expiresAt: policy.expiresAt.toISOString() } };
+      if (action === 'read' && this.originalTaskRead) {
+        const current = await this.originalTaskRead(row.taskId);
+        if (identity(current) !== identity(context)) throw new BudgetError('FORBIDDEN');
+        // This receipt reader is selected by server composition for one task.
+        // It cannot settle/release a charge or renew an expired execution grant.
+        proof = { invocationId: row.id, registrationHash: row.registrationHash, configurationHash: row.configurationHash,
+          association: binding.association, reservationId: resource.reservationId ?? null, originalTaskRead: identity(current) };
+      } else {
+        const taskContext = dispatching ? await this.authorization.execution.authorize(row.taskId)
+          : await this.authorization.authority.resolve(row.taskId, 'read_step_terminal');
+        if (identity(taskContext) !== identity(context)) throw new BudgetError('FORBIDDEN');
+        const operation = dispatching ? 'transition_task' : 'read_step_terminal';
+        const policy = await this.input.db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: {
+          scopeId: before.scope.id, taskId: row.taskId, operation } } });
+        if (!policy || policy.scopeId !== before.scope.id || policy.taskId !== row.taskId || policy.operation !== operation
+          || !Number.isSafeInteger(policy.revision) || policy.revision < 1 || !(policy.expiresAt instanceof Date)
+          || !Number.isFinite(policy.expiresAt.getTime()) || policy.expiresAt <= this.clock()
+          || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length === 0
+          || !('access' in context) || policy.requiredPermissions.some(permission => typeof permission !== 'string'
+            || !('access' in context) || !context.access.permissions.includes(permission))) throw new BudgetError('FORBIDDEN');
+        const finalTaskContext = dispatching ? await this.authorization.execution.authorize(row.taskId)
+          : await this.authorization.authority.resolve(row.taskId, 'read_step_terminal');
+        if (identity(finalTaskContext) !== identity(context)) throw new BudgetError('FORBIDDEN');
+        // Original financial facts already bind reservation/dispatch/usage.
+        // This source authorizes the resource, not the caller's evidence strings.
+        proof = { invocationId: row.id, registrationHash: row.registrationHash, configurationHash: row.configurationHash,
+          association: binding.association, reservationId: resource.reservationId ?? null,
+          policy: { revision: policy.revision, permissions: policy.requiredPermissions, expiresAt: policy.expiresAt.toISOString() } };
+      }
     }
     const after = await this.authorization.scopes.resolveCurrent();
     if (after.scope.id !== before.scope.id || identity(after.context) !== identity(context)) throw new BudgetError('FORBIDDEN');

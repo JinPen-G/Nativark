@@ -1,10 +1,16 @@
 /** Human reprepare uses an already-selected original task, not editable internal
  * step/plan references. Retain only the original operation before dispatch;
  * an uncertain reply permits receipt reads and never a second reprepare. */
-import { validateAiQuoteSelectionHttpValue, type AiQuoteSelectionProofDraft,
+import { AI_PROPOSAL_DRAFT_VERSION, validateAiQuoteSelectionHttpValue, type AiQuoteSelectionProofDraft,
   type AiApprovalApplicationReferenceDraft, type AiHumanQuoteOrderRepreparePreparationInputDraft,
   type AiHumanQuoteOrderRepreparePreparationDraft, type AiHumanQuoteOrderReprepareRequestDraft,
-  type AiHumanQuoteOrderReprepareResponseDraft, type AiTaskMetadataPageDraft } from '@rental-os/shared';
+  type AiHumanQuoteOrderReprepareResponseDraft, type AiTaskMetadataPageDraft, validateAiSceneQuoteCandidateDraft,
+  type AiSceneQuoteCandidate, type AiSceneRequestReadDraft, type AiSceneQuoteConfirmDraft,
+  type AiOriginalQuoteReviewResponseDraft, type AiOriginalQuoteConfirmResponseDraft, type AiOriginalQuoteReceiptResponseDraft,
+  type AiQuoteRequestReissuePreparationInputDraft, type AiQuoteRequestReissuePreparationDraft,
+  type AiQuoteRequestReissueReferenceDraft, type AiQuoteRequestReissueCreateDraft, type AiQuoteRequestReissueOperationDraft,
+  type AiQuoteRequestReissueSelectionPreparationDraft, type AiQuoteRequestReissueSelectDraft,
+  type AiQuoteRequestReissueSelectionOperationDraft, type AiSelectedQuoteTaskRequestDraft, type AiSelectedQuoteTaskRunDraft } from '@rental-os/shared';
 import { commandHash } from './budget-settings-session';
 
 type Ports = {
@@ -20,6 +26,36 @@ export type QuoteReprepareState = Readonly<{ busy: boolean; locked: boolean; rea
 const normalized = (value: unknown): unknown => Array.isArray(value) ? value.map(normalized) : value && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalized((value as Record<string, unknown>)[key])])) : value;
 const same = (a: unknown, b: unknown) => JSON.stringify(normalized(a)) === JSON.stringify(normalized(b));
+
+/** The live wait may disappear after rejection. Retain only its reviewed
+ * reference so the server can independently authorize the later historical read. */
+export function readQuoteReprepareOriginal(storage: Pick<Storage, 'getItem'> | undefined, key: string,
+  selection: AiQuoteSelectionProofDraft): AiApprovalApplicationReferenceDraft | null {
+  if (!storage) return null;
+  const raw = storage.getItem(key); if (raw === null) return null;
+  if (raw.length > 2048) throw Error('AI_RESULT_UNKNOWN');
+  const value = JSON.parse(raw), ref = value?.original;
+  if (!value || Object.keys(value).length !== 2 || !same(value.selection, selection) || !ref
+    || Object.keys(ref).sort().join(',') !== 'contractVersion,proposalId,proposalRevision,reviewedPayloadHash'
+    || ref.contractVersion !== AI_PROPOSAL_DRAFT_VERSION || typeof ref.proposalId !== 'string'
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(ref.proposalId)
+    || !Number.isSafeInteger(ref.proposalRevision) || ref.proposalRevision < 1 || ref.proposalRevision > 4294967295
+    || typeof ref.reviewedPayloadHash !== 'string' || !/^[a-f0-9]{64}$/u.test(ref.reviewedPayloadHash)) throw Error('AI_RESULT_UNKNOWN');
+  return structuredClone(ref);
+}
+export function retainQuoteReprepareOriginal(storage: Pick<Storage, 'getItem' | 'setItem'> | undefined, key: string,
+  selection: AiQuoteSelectionProofDraft, original: AiApprovalApplicationReferenceDraft) {
+  if (!storage) throw Error('AI_RESULT_UNKNOWN');
+  const previous = readQuoteReprepareOriginal(storage, key, selection);
+  if (previous && !same(previous, original)) throw Error('AI_REVISION_CONFLICT');
+  const raw = JSON.stringify({ selection, original });
+  // Validate the exact journal shape before writing, and never overwrite an
+  // unreadable or different original with a newly observed proposal.
+  readQuoteReprepareOriginal({ getItem: () => raw }, key, selection);
+  storage.setItem(key, raw);
+  if (storage.getItem(key) !== raw) throw Error('AI_RESULT_UNKNOWN');
+  return structuredClone(original);
+}
 
 export class QuoteReprepareSession {
   private active = false; private flight: AbortController | null = null;
@@ -102,15 +138,21 @@ export class QuoteReprepareSession {
       || new Set(page.items.map(row => row.taskId)).size !== page.items.length) throw Error('AI_RESOURCE_UNAVAILABLE');
     this.publish({ items: structuredClone(page.items.filter(row => row.taskId !== this.selection.taskId)), nextCursor: page.nextCursor, listed: true });
   });
-  inspect = (replacementTaskId: string) => this.run(async signal => {
-    if (this.state.locked || !this.state.items.some(row => row.taskId === replacementTaskId)) throw Error('AI_RESOURCE_UNAVAILABLE');
+  inspect = (replacementTaskId: string) => this.inspectReplacement(replacementTaskId);
+  /** An explicitly selected linked quote is already identified by its original
+   * receipt. The server still locates/rechecks its real wait and full material. */
+  inspectLinked = (selection: AiQuoteSelectionProofDraft) => this.inspectReplacement(selection.taskId, selection);
+  private inspectReplacement(replacementTaskId: string, linked?: AiQuoteSelectionProofDraft) { return this.run(async signal => {
+    if (this.state.locked || (linked ? linked.taskId === this.selection.taskId || linked.originalInputRef === this.selection.originalInputRef
+      : !this.state.items.some(row => row.taskId === replacementTaskId))) throw Error('AI_RESOURCE_UNAVAILABLE');
     const original = this.original(); if (!original) throw Error('AI_RESOURCE_UNAVAILABLE');
     this.clearPreparation();
     const input: AiHumanQuoteOrderRepreparePreparationInputDraft = { selection: this.selection, original: structuredClone(original), replacementTaskId,
       operationKey: this.operationKey, intent: 'inspect' };
     const value = await this.read(input, signal), signature = await commandHash(value); this.check(signal, original);
+    if (linked && !same(value.replacement, linked)) throw Error('AI_REVISION_CONFLICT');
     this.prepared = { input, signature }; this.publish({ preparation: value, ready: true, feedback: 'observed' });
-  });
+  }); }
   confirm = () => this.run(async signal => {
     const previous = this.prepared;
     if (this.state.locked || !this.state.ready || !previous || !this.storage || this.storage.getItem(this.key) !== null) throw Error('AI_RESULT_UNKNOWN');
@@ -128,5 +170,220 @@ export class QuoteReprepareSession {
   reconcile = () => this.run(async signal => {
     this.clearPreparation(); const command = this.journal();
     const response = await this.ports.reprepareReceipt(command, signal); this.check(signal); this.observe(response, command);
+  });
+}
+
+type ReissuePorts = {
+  reissuePreparation(input: AiQuoteRequestReissuePreparationInputDraft, signal: AbortSignal): Promise<AiQuoteRequestReissuePreparationDraft>;
+  reissueRequest(input: AiQuoteRequestReissueCreateDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueOperationDraft>;
+  reissueOperation(input: AiQuoteRequestReissueReferenceDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueOperationDraft>;
+  reviewOriginalQuote(input: AiSceneRequestReadDraft, signal: AbortSignal): Promise<AiOriginalQuoteReviewResponseDraft>;
+  confirmOriginalQuote(input: AiSceneQuoteConfirmDraft, signal: AbortSignal): Promise<AiOriginalQuoteConfirmResponseDraft>;
+  originalQuoteReceipt(input: AiSceneRequestReadDraft, signal: AbortSignal): Promise<AiOriginalQuoteReceiptResponseDraft>;
+  reissuedSelectionPreparation(input: AiQuoteRequestReissueReferenceDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueSelectionPreparationDraft>;
+  selectReissuedQuote(input: AiQuoteRequestReissueSelectDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueSelectionOperationDraft>;
+  reissuedSelectionOperation(input: AiQuoteRequestReissueReferenceDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueSelectionOperationDraft>;
+  start(input: AiSelectedQuoteTaskRequestDraft, signal: AbortSignal): Promise<AiSelectedQuoteTaskRunDraft>;
+};
+type RequestPhase = 'request' | 'quote' | 'selection' | 'start';
+type RequestMarker = { version: 1; reference: AiQuoteRequestReissueReferenceDraft; phase: RequestPhase };
+export type QuoteRequestReissueState = Readonly<{ busy: boolean; invalid: boolean; phase: RequestPhase | null; unknown: boolean;
+  candidate: AiSceneQuoteCandidate | null; preparation: AiQuoteRequestReissuePreparationDraft | null;
+  operation: AiQuoteRequestReissueOperationDraft | null; quoteReview: AiOriginalQuoteReviewResponseDraft | null;
+  quote: AiOriginalQuoteConfirmResponseDraft | AiOriginalQuoteReceiptResponseDraft | null;
+  selectionPreparation: AiQuoteRequestReissueSelectionPreparationDraft | null; selection: AiQuoteRequestReissueSelectionOperationDraft | null }>;
+
+/** One linked request, original Core quotation and original selection. Only
+ * phase/locator metadata persists; unknown phases permit their original reads.
+ * This session does not call a model, calculate money or grant a new approval. */
+export class QuoteRequestReissueSession {
+  private active = false; private flight: AbortController | null = null;
+  private readonly listeners = new Set<() => void>(); private state: QuoteRequestReissueState;
+  constructor(private readonly selection: AiQuoteSelectionProofDraft, private readonly ports: ReissuePorts,
+    private readonly current: () => boolean, private readonly original: () => AiApprovalApplicationReferenceDraft | null,
+    private readonly scope: { tenantId: string; workspaceId: string },
+    private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | undefined, private readonly key: string) {
+    let phase: RequestPhase | null = null, invalid = false;
+    try { phase = this.marker()?.phase ?? null; } catch { invalid = true; }
+    this.state = Object.freeze({ busy: false, invalid, phase, unknown: !!phase, candidate: null, preparation: null,
+      operation: null, quoteReview: null, quote: null, selectionPreparation: null, selection: null });
+  }
+  snapshot = () => this.state;
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private publish(patch: Partial<QuoteRequestReissueState>) {
+    if (!this.active || !this.current()) return;
+    this.state = Object.freeze({ ...this.state, ...patch }); this.listeners.forEach(listener => listener());
+  }
+  private check(signal?: AbortSignal, original?: AiApprovalApplicationReferenceDraft) {
+    if (!this.active || !this.current() || signal?.aborted) throw Error('AI_SCOPE_CHANGED');
+    if (original && !same(original, this.original())) throw Error('AI_REVISION_CONFLICT');
+  }
+  private checkScope(scope: { tenantId: string; workspaceId: string }) {
+    if (scope.tenantId !== this.scope.tenantId || scope.workspaceId !== this.scope.workspaceId) throw Error('AI_SCOPE_CHANGED');
+  }
+  private marker(): RequestMarker | null {
+    if (!this.storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+    const raw = this.storage.getItem(this.key); if (raw === null) return null;
+    if (!raw || raw.length > 2048) throw Error('AI_RESULT_UNKNOWN');
+    const value = JSON.parse(raw);
+    if (!value || Object.keys(value).sort().join(',') !== 'phase,reference,version' || value.version !== 1
+      || !['request', 'quote', 'selection', 'start'].includes(value.phase)
+      || !validateAiQuoteSelectionHttpValue('AiQuoteRequestReissueReferenceDraft', value.reference)
+      || !same(value.reference.selection, this.selection)) throw Error('AI_RESULT_UNKNOWN');
+    return value;
+  }
+  private retain(value: RequestMarker, previous: RequestMarker | null) {
+    if (!this.storage || !same(this.marker(), previous)) throw Error('AI_RESULT_UNKNOWN');
+    const raw = JSON.stringify(value); if (raw.length > 2048) throw Error('AI_RESULT_UNKNOWN');
+    this.storage.setItem(this.key, raw); if (this.storage.getItem(this.key) !== raw) throw Error('AI_RESULT_UNKNOWN');
+    this.publish({ phase: value.phase, unknown: true });
+  }
+  activate() { this.active = true; }
+  retract() {
+    this.flight?.abort(); this.flight = null;
+    this.state = Object.freeze({ ...this.state, busy: false, unknown: !!this.state.phase, candidate: null, preparation: null,
+      operation: null, quoteReview: null, quote: null, selectionPreparation: null, selection: null });
+    if (this.active && this.current()) this.listeners.forEach(listener => listener());
+  }
+  dispose() { this.active = false; this.retract(); }
+  private async run(work: (signal: AbortSignal) => Promise<void>) {
+    this.check(); if (this.flight || this.state.invalid) throw Error('AI_OPERATION_BUSY');
+    const controller = new AbortController(); this.flight = controller; this.publish({ busy: true });
+    try { await work(controller.signal); this.check(controller.signal); }
+    catch (error) { if (this.flight === controller && !controller.signal.aborted) this.publish({ unknown: !!this.state.phase,
+      preparation: null, quoteReview: null, selectionPreparation: null }); throw error; }
+    finally { if (this.flight === controller) { this.flight = null; this.publish({ busy: false }); } }
+  }
+  private input(candidate?: AiSceneQuoteCandidate): AiQuoteRequestReissuePreparationInputDraft {
+    const original = this.original(); if (!original || this.marker()) throw Error('AI_RESOURCE_UNAVAILABLE');
+    return { selection: this.selection, original: structuredClone(original), intent: 'change_plan', ...(candidate ? { candidate } : {}) };
+  }
+  private async readConditions(input: AiQuoteRequestReissuePreparationInputDraft, signal: AbortSignal) {
+    this.check(signal, input.original);
+    const value = await this.ports.reissuePreparation(input, signal); this.check(signal, input.original);
+    if (!same(value.selection, this.selection) || !same(value.original, input.original) || value.intent !== input.intent
+      || input.candidate && !same(input.candidate, value.candidate)) throw Error('AI_REVISION_CONFLICT');
+    this.checkScope(value.scope); this.checkScope(value.preparation.scope); return value;
+  }
+  prepareConditions = () => this.run(async signal => {
+    const value = await this.readConditions(this.input(), signal); this.publish({ candidate: structuredClone(value.candidate), preparation: value });
+  });
+  editConditions(value: AiSceneQuoteCandidate) {
+    this.check(); if (this.marker() || this.state.busy) throw Error('AI_OPERATION_BUSY');
+    this.publish({ candidate: structuredClone(value), preparation: null });
+  }
+  inspectConditions = () => this.run(async signal => {
+    const candidate = this.state.candidate;
+    if (!candidate || !validateAiSceneQuoteCandidateDraft(candidate)) throw Error('AI_INVALID_INPUT');
+    const value = await this.readConditions(this.input(structuredClone(candidate)), signal); this.publish({ preparation: value });
+  });
+  private preparedSignature(value: AiQuoteRequestReissuePreparationDraft | AiOriginalQuoteReviewResponseDraft) {
+    const p = 'facts' in value ? value.facts : value.preparation;
+    return commandHash({ source: 'sourceHash' in value ? value.sourceHash : value.original.contentHash,
+      candidate: 'candidate' in value ? value.candidate : undefined, status: p.status,
+      ...('request' in p ? { request: p.request, selectionRevision: p.selectionRevision, configVersion: p.configVersion,
+        configurationFingerprint: p.configurationFingerprint, addressFingerprint: p.addressFingerprint, availability: p.availability.result } : {}) });
+  }
+  createRequest = () => this.run(async signal => {
+    const before = this.state.preparation; if (!before || before.preparation.status !== 'ready' || this.marker()) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const value = await this.readConditions(this.input(structuredClone(before.candidate)), signal);
+    if (value.preparation.status !== 'ready' || await this.preparedSignature(before) !== await this.preparedSignature(value)) throw Error('AI_REVISION_CONFLICT');
+    const reference: AiQuoteRequestReissueReferenceDraft = { selection: this.selection, original: value.original,
+      intent: value.intent, operationKey: crypto.randomUUID() }, marker: RequestMarker = { version: 1, reference, phase: 'request' };
+    this.check(signal, value.original); this.retain(marker, null); this.publish({ candidate: null, preparation: null });
+    this.check(signal, value.original);
+    const response = await this.ports.reissueRequest({ ...reference, candidate: value.candidate, sourceHash: value.sourceHash,
+      decision: 'create_linked_quote_request' }, signal); this.check(signal); this.observeRequest(response, marker);
+  });
+  private observeRequest(value: AiQuoteRequestReissueOperationDraft, marker: RequestMarker) {
+    this.checkScope(value.scope);
+    if (!same(value.reference, marker.reference) || !same(this.marker(), marker)) throw Error('AI_RESULT_UNKNOWN');
+    if (value.status === 'linked_request_recorded' && (value.original.inputRef === this.selection.originalInputRef
+      || value.task.state === 'observed' && value.task.taskId === this.selection.taskId)) throw Error('AI_RESULT_UNKNOWN');
+    this.publish({ operation: value, unknown: value.status !== 'linked_request_recorded' });
+  }
+  private linked() {
+    const marker = this.marker(), value = this.state.operation;
+    if (!marker || !value || value.status !== 'linked_request_recorded' || value.task.state !== 'observed'
+      || !same(marker.reference, value.reference)) throw Error('AI_RESOURCE_UNAVAILABLE');
+    return { marker, original: value.original, task: value.task, admission: value.admission };
+  }
+  inspectQuote = () => this.run(async signal => {
+    const linked = this.linked(); if (linked.marker.phase !== 'request' || this.state.unknown) throw Error('AI_RESULT_UNKNOWN');
+    const value = await this.ports.reviewOriginalQuote(linked.original, signal); this.check(signal);
+    if (value.original.inputRef !== linked.original.inputRef) throw Error('AI_SCOPE_CHANGED'); this.checkScope(value.facts.scope);
+    this.publish({ quoteReview: value });
+  });
+  confirmQuote = () => this.run(async signal => {
+    const linked = this.linked(), before = this.state.quoteReview;
+    if (linked.marker.phase !== 'request' || this.state.unknown || !before || before.facts.status !== 'ready'
+      || before.sources.status !== 'prepared_input_sources') throw Error('AI_RESOURCE_UNAVAILABLE');
+    const value = await this.ports.reviewOriginalQuote(linked.original, signal); this.check(signal);
+    if (value.facts.status !== 'ready' || value.sources.status !== 'prepared_input_sources'
+      || value.original.inputRef !== linked.original.inputRef || await this.preparedSignature(before) !== await this.preparedSignature(value)) throw Error('AI_REVISION_CONFLICT');
+    const fingerprint = await commandHash(value.facts.request);
+    if (fingerprint !== value.sources.inputFingerprint || value.sources.selectionRevision !== value.facts.selectionRevision) throw Error('AI_REVISION_CONFLICT');
+    this.check(signal); this.retain({ ...linked.marker, phase: 'quote' }, linked.marker); this.publish({ quoteReview: null });
+    const result = await this.ports.confirmOriginalQuote({ ...linked.original, selectionRevision: value.facts.selectionRevision,
+      inputFingerprint: fingerprint, confirmQuote: true }, signal); this.check(signal);
+    if (result.result.quote && (result.result.quote.period.startAt !== value.facts.request.startAt || result.result.quote.period.endAt !== value.facts.request.endAt)) throw Error('AI_RESULT_UNKNOWN');
+    this.observeQuote(result, linked.original);
+  });
+  private observeQuote(value: AiOriginalQuoteConfirmResponseDraft | AiOriginalQuoteReceiptResponseDraft, original: AiSceneRequestReadDraft) {
+    if (value.original.inputRef !== original.inputRef) throw Error('AI_SCOPE_CHANGED'); this.checkScope(value.result.scope);
+    this.publish({ quote: value, unknown: !value.result.quote || !['quoted', 'expired'].includes(value.result.status) });
+  }
+  inspectSelection = () => this.run(async signal => {
+    const linked = this.linked(); if (linked.marker.phase !== 'quote' || this.state.unknown || !this.state.quote?.result.quote) throw Error('AI_RESULT_UNKNOWN');
+    const value = await this.ports.reissuedSelectionPreparation(linked.marker.reference, signal); this.check(signal); this.checkScope(value.scope);
+    if (!same(value.reference, linked.marker.reference) || value.original.inputRef !== linked.original.inputRef
+      || value.selection.taskId !== linked.task.taskId || value.selection.runId !== linked.task.runId
+      || value.selection.order.quoteId !== this.state.quote.result.quote.id) throw Error('AI_RESULT_UNKNOWN');
+    this.publish({ selectionPreparation: value });
+  });
+  selectQuote = () => this.run(async signal => {
+    const linked = this.linked(), before = this.state.selectionPreparation;
+    if (linked.marker.phase !== 'quote' || this.state.unknown || !before) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const value = await this.ports.reissuedSelectionPreparation(linked.marker.reference, signal); this.check(signal);
+    if (!same(value.reference, before.reference) || value.reviewHash !== before.reviewHash) throw Error('AI_REVISION_CONFLICT');
+    this.retain({ ...linked.marker, phase: 'selection' }, linked.marker); this.publish({ selectionPreparation: null });
+    const result = await this.ports.selectReissuedQuote({ ...linked.marker.reference, reviewHash: value.reviewHash,
+      decision: 'select_reissued_quote' }, signal); this.check(signal); this.observeSelection(result);
+  });
+  private observeSelection(value: AiQuoteRequestReissueSelectionOperationDraft) {
+    const linked = this.linked(); this.checkScope(value.scope);
+    if (!same(value.reference, linked.marker.reference) || value.original.inputRef !== linked.original.inputRef
+      || value.selection.state === 'observed' && (value.selection.receipt.originalInputRef !== linked.original.inputRef
+        || value.selection.receipt.taskId !== linked.task.taskId || value.selection.receipt.runId !== linked.task.runId)) throw Error('AI_RESULT_UNKNOWN');
+    this.publish({ selection: value, unknown: value.selection.state !== 'observed' || linked.marker.phase === 'start' });
+  }
+  selectionProof(): AiQuoteSelectionProofDraft | null {
+    const value = this.state.selection?.selection; if (!value || value.state !== 'observed') return null;
+    const receipt = value.receipt;
+    return { draftVersion: receipt.draftVersion, originalInputRef: receipt.originalInputRef, selectionId: receipt.selectionId,
+      taskId: receipt.taskId, runId: receipt.runId, inputHash: receipt.inputHash };
+  }
+  startSelection = () => this.run(async signal => {
+    const linked = this.linked(), selection = this.selectionProof();
+    if (linked.marker.phase !== 'selection' || this.state.unknown || !selection || linked.admission !== 'current_policies_available'
+      || this.state.selection?.selection.state !== 'observed' || this.state.selection.selection.receipt.state !== 'selected_not_approved') throw Error('AI_RESOURCE_UNAVAILABLE');
+    this.retain({ ...linked.marker, phase: 'start' }, linked.marker);
+    await this.ports.start({ selection }, signal); this.check(signal);
+    // Only the existing server's new/old material read can attest a waiting
+    // successor; a start acknowledgement cannot stand in for that evidence.
+    this.publish({ unknown: true });
+  });
+  acknowledgePrepared(selection: AiQuoteSelectionProofDraft) {
+    this.check(); if (this.state.phase !== 'start' || !same(selection, this.selectionProof())) throw Error('AI_RESULT_UNKNOWN');
+    this.publish({ unknown: false });
+  }
+  reconcile = () => this.run(async signal => {
+    const marker = this.marker(); if (!marker) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+    const request = await this.ports.reissueOperation(marker.reference, signal); this.check(signal); this.observeRequest(request, marker);
+    if (request.status !== 'linked_request_recorded' || request.task.state !== 'observed') return;
+    if (marker.phase === 'quote') { const quote = await this.ports.originalQuoteReceipt(request.original, signal); this.check(signal); this.observeQuote(quote, request.original); }
+    if (marker.phase === 'selection' || marker.phase === 'start') {
+      const selection = await this.ports.reissuedSelectionOperation(marker.reference, signal); this.check(signal); this.observeSelection(selection);
+    }
   });
 }

@@ -4,6 +4,7 @@ import { AI_CLIENT_ENTRY_APPLICATION, AiClientEntryController } from './client-e
 import { composeRequestBoundClientApplication, type AiClientRequestConfiguration,
   type AiClientRequestDependencies } from './client-request.application';
 import { composeClientOriginalBookingFlow } from './client-original-booking-flow';
+import { composeClientOriginalBookingHttp } from './client-original-booking-http.composition';
 
 export const AI_CLIENT_ORIGINAL_BOOKING_FLOW = Symbol('AI_CLIENT_ORIGINAL_BOOKING_FLOW');
 
@@ -18,7 +19,8 @@ export class AiClientEntryModule {
           || typeof dependencies.guard?.canActivate !== 'function') {
           throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_entry_dependencies_missing');
         }
-        return composeRequestBoundClientApplication(dependencies, server);
+        const application = composeRequestBoundClientApplication(dependencies, server);
+        return Object.freeze({ ...application, ...composeClientOriginalBookingHttp(application) });
       } }, { provide: AI_CLIENT_ORIGINAL_BOOKING_FLOW, inject: [AI_CLIENT_ENTRY_APPLICATION],
         useFactory: (application: ReturnType<typeof composeRequestBoundClientApplication>) => composeClientOriginalBookingFlow(application)
       }], exports: [AI_CLIENT_ENTRY_APPLICATION, AI_CLIENT_ORIGINAL_BOOKING_FLOW] };

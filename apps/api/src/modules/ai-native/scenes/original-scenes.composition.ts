@@ -8,7 +8,7 @@ import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody, type AiExecutionContext } from '@rental-os/shared';
-import { AiCurrentOriginalRequestAuthority, type AiSceneCreationRule } from '../task-request/original-request.authority';
+import { AiCurrentOriginalRequestAuthority, originalIdentityHash, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
 
@@ -73,12 +73,33 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     compareOriginalQuotes: facts.compareOriginalQuotes.bind(facts),
     async readRecovery(value: unknown) {
       const authorization = composePersistedTaskAuthorization(input);
-      return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks).read(value);
+      return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks, clock).read(value);
     },
-    async prepareTaskMaterial(value: unknown) {
+    async prepareTaskMaterial(value: unknown, purpose: 'execution_preparation' | 'read_only' | 'order_history_read' = 'execution_preparation') {
       const parsed = originalRequestReferenceSchema.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const ref = freezeOriginalInput(parsed.data), original = await requests.read(ref);
+      const ref = freezeOriginalInput(parsed.data);
+      // Only the named material HTTP reads may inspect an expired original.
+      // Model/runner callers retain the existing new-admission checks.
+      const historicalScene = purpose === 'read_only' ? 'opening_diagnosis' : purpose === 'order_history_read' ? 'order_explanation' : null;
+      const historical = historicalScene ? await requests.readHistorical(ref) : null;
+      if (historical && historical.receipt.sceneCode === historicalScene) {
+        if (historical.receipt.state === 'revoked' || historical.request.sceneCode !== historicalScene)
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const task = await requests.readTaskReceipt(ref.inputRef);
+        const prepared = await prepare(historical.request, historical.receipt.requestKey, historical.context);
+        const after = await requests.readHistorical(ref), currentTask = await requests.readTaskReceipt(ref.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.sceneCode !== historicalScene || after.receipt.sceneVersion !== historical.receipt.sceneVersion
+          || after.receipt.contentHash !== historical.receipt.contentHash || after.receipt.requestKey !== historical.receipt.requestKey
+          || originalIdentityHash(after.context) !== originalIdentityHash(historical.context)
+          || task.state !== currentTask.state || task.state === 'observed' && (currentTask.state !== 'observed'
+            || currentTask.taskId !== task.taskId || currentTask.runId !== task.runId)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const material = prepared.payload.materials;
+        return freezeOriginalInput({ original: after.receipt, material, materialHash: requestFingerprint(material),
+          trust: 'source_text_is_data_not_instructions' as const, task: currentTask,
+          model: 'not_called' as const, plan: 'requires_host_plan_start' as const });
+      }
+      const original = await requests.read(ref);
       const grant = await requests.resolve(original.receipt.sceneCode, ref.inputRef);
       // A closing grant cannot retrospectively bind a preparation made by a
       // different principal. Carry this current server binding into its sources.

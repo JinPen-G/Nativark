@@ -9,8 +9,12 @@ import { z } from 'zod';
 import { AI_TASK_CALENDAR_DRAFT_VERSION, AI_TASK_CALENDAR_DRAFT_HTTP, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION,
   aiTaskCalendarDraftListInput, aiTaskCalendarDraftReference, aiTaskCalendarDraftReviewInput, aiTaskCalendarDraftSaveInput,
   aiTaskCalendarDraftListResponse, aiTaskCalendarDraftReviewResponse, aiTaskCalendarDraftOperationResponse,
+  AI_TASK_DRAFT_VERSION, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS,
   type AiTaskCalendarDraftReference, type AiProposalPayloadDraft } from '@rental-os/shared';
-import { composePersistedTaskAuthorization } from './task-authorization.composition';
+import { AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP } from '@rental-os/shared';
+import { AiScopeRepository } from './ai-scope.repository';
+import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
+import { originalIdentityHash } from './task-request/original-request.authority';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { aiStepActionId } from './ai-step-registration.repository';
 import { fingerprintAiProposalDraft } from './proposal-binding-draft';
@@ -26,6 +30,17 @@ import { withRequestAbort } from './scenes/request-abort';
 import { AiTaskCalendarDraftListDto, AiTaskCalendarDraftReferenceDto, AiTaskCalendarDraftReviewDto, AiTaskCalendarDraftSaveDto } from './task-calendar-draft.dto';
 import { AiBusinessReadRouteAuthority } from './business-read-route.authority';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
+import { composeTaskCalendarDraftPreparation } from './task-calendar-draft-preparation.composition';
+import { composeTaskCalendarSourceEntry } from './task-calendar-source-entry.composition';
+import { createCalendarOriginalReadRequests } from './task-calendar-original-source.composition';
+import { composeOpeningCalendarDraftSave } from './scenes/opening-calendar-draft.composition';
+import { AiOpeningSectionProposalService } from './tools/opening-section-proposal.service';
+import { AiOpeningSectionDifferenceService } from './tools/opening-section-difference.service';
+import { AiGuardedOpeningConfigurationSource } from './tools/opening-configuration.source';
+import { AiOpeningVersionFieldSource } from './tools/opening-version-fields.source';
+import { AiTaskCalendarDraftPreparationDto, AiTaskCalendarDraftPreparationPreviewDto, AiTaskCalendarDraftPrepareDto,
+  AiTaskCalendarDraftPreparationReferenceDto, AiTaskCalendarDraftSourceDto, AiTaskCalendarDraftEntryDto,
+  AiTaskCalendarDraftEntryReferenceDto } from './task-calendar-draft.dto';
 
 export const AI_TASK_CALENDAR_DRAFT_REQUESTS = Symbol('AI_TASK_CALENDAR_DRAFT_REQUESTS');
 export type TaskCalendarDraftDependencies = { original: Parameters<typeof composeRequestBoundOpeningCalendarDraftSave>[0];
@@ -40,27 +55,37 @@ const parse = <S extends z.ZodTypeAny>(schema: S, value: unknown): z.infer<S> =>
 export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDependencies) {
   const { db } = d.original, clock = d.original.clock ?? (() => new Date());
   const calendars = composeRequestBoundOpeningCalendarDraftSave(d.original, { enabled: true, audience: 'operator', host: d.host });
-  const source = async (request: Request, taskId: string) => {
+  const source = async (request: Request, taskId: string, signal?: AbortSignal) => {
     const header = z.string().regex(/^Bearer \S+$/u).max(8192).safeParse(request.headers.authorization);
     if (!header.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const credential = Object.freeze({ authorization: header.data, audience: 'operator' as const, requestId: randomUUID() });
-    const authorization = composePersistedTaskAuthorization({ ...d.original, credentials: { current: async () => credential } });
-    const context = await authorization.authority.resolve(taskId, 'read_metadata');
-    const access = await authorization.tasks.resolveAccess(taskId, 'read_metadata');
-    if (context.actor.kind !== 'user' || context.audience !== 'operator' || context.scope.kind !== 'workspace'
-      || aiTaskAccessFromContext(context, taskId, clock()).bindingKey !== access.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const task = await db.aiTask.findFirst({ where: access.where });
-    if (!task || task.id !== taskId || task.ownerKind !== 'USER' || task.ownerId !== context.actor.userId
-      || task.sceneCode !== 'opening_diagnosis' || task.archivedAt !== null || !task.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const credentials = { current: async () => {
+      if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); return credential;
+    } };
+    // Human calendar reads have their own current business permission. An
+    // expired R1 execution admission does not revoke original Core receipts.
+    const scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(d.original.auth, credentials, clock), clock);
+    const first = await scopes.resolveCurrent(), context = first.context;
+    if (context.actor.kind !== 'user' || context.audience !== 'operator' || context.scope.kind !== 'workspace' || !('access' in context)
+      || !AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS.some(permission => 'access' in context && context.access.permissions.includes(permission)))
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const access = aiTaskAccessFromContext(context, taskId, clock());
+    const task = await db.aiTask.findFirst({ where: { AND: [access.where, { scopeId: first.scope.id }] } });
+    if (!task || task.id !== taskId || task.scopeId !== first.scope.id || task.scopeKind !== 'WORKSPACE'
+      || task.ownerKind !== 'USER' || task.ownerId !== context.actor.userId || task.audience !== 'OPERATOR'
+      || task.sceneCode !== 'opening_diagnosis' || task.contractVersion !== AI_TASK_DRAFT_VERSION
+      || task.archivedAt !== null || !task.inputRef || !task.inputHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const verify = async () => {
-      const current = await authorization.tasks.resolveAccess(taskId, 'read_metadata');
-      const latest = await db.aiTask.findFirst({ where: current.where });
-      if (current.bindingKey !== access.bindingKey || !latest || latest.id !== task.id || latest.inputRef !== task.inputRef
+      if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const current = await scopes.resolveCurrent(), currentAccess = aiTaskAccessFromContext(current.context, taskId, clock());
+      const latest = await db.aiTask.findFirst({ where: { AND: [currentAccess.where, { scopeId: first.scope.id }] } });
+      if (current.scope.id !== first.scope.id || originalIdentityHash(current.context) !== originalIdentityHash(context)
+        || currentAccess.bindingKey !== access.bindingKey || !latest || latest.id !== task.id || latest.inputRef !== task.inputRef
         || latest.inputHash !== task.inputHash || latest.sceneCode !== task.sceneCode || latest.sceneVersion !== task.sceneVersion
         || latest.ownerId !== task.ownerId || latest.archivedAt !== null) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     };
     await verify();
-    return { context, access, task, verify, calendarRoutes: new AiBusinessReadRouteAuthority(d.original.guard, { current: async () => credential }, clock),
+    return { context, access, task, verify, credentials, calendarRoutes: new AiBusinessReadRouteAuthority(d.original.guard, credentials, clock),
       original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: task.inputRef } };
   };
   const locate = async (bound: Awaited<ReturnType<typeof source>>, reference: AiTaskCalendarDraftReference) => {
@@ -79,6 +104,12 @@ export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDepende
       || material.scope.workspaceId !== bound.access.scope.workspaceId || material.materialHash !== input.fingerprint
       || input.registrationRef !== `opening-section:${material.key}:${material.materialHash}`
       || step.actionId !== aiStepActionId(bound.access.scope, bound.task.id, input.registrationRef)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const originals = createCalendarOriginalReadRequests({ ...d.original, credentials: bound.credentials }, {
+      year: Number(material.date.slice(0, 4)), date: material.date, version: material.expectedVersion });
+    const original = await originals.readHistorical(bound.original), creation = await originals.readTaskReceipt(bound.original.inputRef);
+    if (original.receipt.state === 'revoked' || original.receipt.contentHash !== bound.task.inputHash
+      || original.receipt.sceneVersion !== bound.task.sceneVersion || creation.state !== 'observed'
+      || creation.taskId !== bound.task.id || creation.runId !== run.id) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const proposalId = `oc-${material.materialHash.slice(0, 32)}`;
     const version = await db.aiProposalVersion.findFirst({ where: { scopeId: where.scopeId, taskId: where.taskId, proposalId, revision: 1 } });
     if (!version) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -119,7 +150,7 @@ export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDepende
     const body = freezeOriginalInput({ headers: { authorization: request.headers.authorization } });
     return waitForTaskApplicationDependency(async () => {
       if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const bound = await source(body, command.taskId);
+      const bound = await source(body, command.taskId, signal);
       const at = clock(); if (!(at instanceof Date) || !Number.isFinite(at.getTime())) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const envelope = { contractVersion: AI_TASK_CALENDAR_DRAFT_VERSION, taskId: command.taskId, observedAt: at.toISOString() };
       if (action === 'list') {
@@ -140,9 +171,24 @@ export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDepende
       }
       const reference = parse(aiTaskCalendarDraftReference, { taskId: command.taskId, runId: 'runId' in command ? command.runId : undefined,
         stepId: 'stepId' in command ? command.stepId : undefined }), found = await locate(bound, reference);
+      const input = { ...d.original, credentials: bound.credentials };
+      const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(input.core, bound.calendarRoutes),
+        bound.calendarRoutes, clock, new AiOpeningVersionFieldSource(db, bound.calendarRoutes), true);
+      const proposals = new AiOpeningSectionProposalService({ ...input, holderId: d.host.holderId,
+        scene: { code: bound.task.sceneCode, version: bound.task.sceneVersion } }, differences, true, { current: async taskId => {
+          if (taskId !== bound.task.id) throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); await bound.verify(); return bound.context;
+        } });
+      const calendar = composeOpeningCalendarDraftSave(input, d.host, { read: async value => {
+        if (value.original.inputRef !== found.command.original.inputRef || value.registrationRef !== found.command.registrationRef)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await bound.verify();
+        const receipt = await proposals.readReceipt({ taskId: bound.task.id, runId: reference.runId, registrationRef: value.registrationRef });
+        const context = await bound.calendarRoutes.withRead('calendar_version', { year: found.target.year, version: found.target.version }, async context => context);
+        assertAiReadContextBinding(context, bound.context); return { context, receipt };
+      } });
       if (action === 'review') {
         const input = parse(aiTaskCalendarDraftReviewInput, command);
-        const result = await calendars.reviewDraft(body, { ...found.command, overrideReason: input.overrideReason, overrideConfirmed: input.overrideConfirmed }, signal);
+        const result = await calendar.reviewDraft({ ...found.command, overrideReason: input.overrideReason, overrideConfirmed: input.overrideConfirmed });
         await bound.verify();
         if ((await locate(bound, reference)).snapshot !== found.snapshot) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         return aiTaskCalendarDraftReviewResponse.parse({ ...envelope, reference, target: found.target,
@@ -153,8 +199,8 @@ export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDepende
       if (action === 'save') {
         if (!d.saveEnabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const input = parse(aiTaskCalendarDraftSaveInput, command);
-        const result = await calendars.saveDraft(body, { ...found.command, overrideReason: input.overrideReason, overrideConfirmed: input.overrideConfirmed, reviewHash: input.reviewHash,
-          decision: input.decision }, signal);
+        const result = await calendar.saveDraft({ ...found.command, overrideReason: input.overrideReason, overrideConfirmed: input.overrideConfirmed, reviewHash: input.reviewHash,
+          decision: input.decision });
         try { await bound.verify(); } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
         return aiTaskCalendarDraftOperationResponse.parse({ ...envelope, reference, operation: projectOperation(result.operation, input.overrideReason) });
       }
@@ -167,13 +213,15 @@ export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDepende
         reason: z.string().min(1).max(1000) }).passthrough().parse(row);
       // These fields restore the original read command. The original Core
       // validates the complete receipt proof, identity, target and command hash.
-      const result = await calendars.readDraftOperation(body, { ...found.command, overrideReason: saved.reason,
-        reviewHash: saved.after.__rentalBoundDraftOperation.reviewHash, overrideConfirmed: saved.after.__rentalBoundDraftOperation.overrideConfirmed }, signal);
+      const result = await calendar.readDraftOperation({ ...found.command, overrideReason: saved.reason,
+        reviewHash: saved.after.__rentalBoundDraftOperation.reviewHash, overrideConfirmed: saved.after.__rentalBoundDraftOperation.overrideConfirmed });
       await bound.verify(); return aiTaskCalendarDraftOperationResponse.parse({ ...envelope, reference, operation: projectOperation(result.operation, saved.reason) });
 
     }, action === 'save', signal);
   };
-  return Object.freeze({ list: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'list', signal),
+  const preparation = composeTaskCalendarDraftPreparation({ ...d, saved: (request, taskId, signal) => call(request, { taskId }, 'list', signal) as Promise<import('@rental-os/shared').AiTaskCalendarDraftListResponse> });
+  const entry = composeTaskCalendarSourceEntry(d);
+  return Object.freeze({ ...preparation, ...entry, list: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'list', signal),
     review: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'review', signal),
     save: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'save', signal),
     operation: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'operation', signal) });
@@ -182,11 +230,12 @@ export function composeRequestBoundTaskCalendarDraft(d: TaskCalendarDraftDepende
 @Controller(AI_TASK_CALENDAR_DRAFT_HTTP.basePath)
 export class AiTaskCalendarDraftController {
   constructor(@Inject(AI_TASK_CALENDAR_DRAFT_REQUESTS) private readonly requests: ReturnType<typeof composeRequestBoundTaskCalendarDraft>) {}
-  private respond(request: IncomingMessage & { body?: unknown }, value: unknown, action: 'list' | 'review' | 'save' | 'operation') {
+  private respond(request: IncomingMessage & { body?: unknown }, value: unknown, action: 'list' | 'review' | 'save' | 'operation'
+    | 'preparation' | 'previewPreparation' | 'prepare' | 'preparationOperation' | 'source' | 'entry' | 'entryOperation') {
     // The global DTO whitelist transforms arguments, not the original wire
     // body. Closed contracts must reject extra fields before they disappear.
     const original = Object.hasOwn(request, 'body') ? request.body : value;
-    return respondAiScene(() => withRequestAbort(request, signal => this.requests[action](request, original, signal)), 'read_original_calendar_draft_operation');
+    return respondAiScene(() => withRequestAbort(request, async signal => this.requests[action](request, original, signal)), 'read_original_calendar_draft_operation');
   }
   @Post(AI_TASK_CALENDAR_DRAFT_HTTP.list) @HttpCode(200) @Header('Cache-Control', 'no-store')
   list(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftListDto) { return this.respond(request, body, 'list'); }
@@ -196,4 +245,18 @@ export class AiTaskCalendarDraftController {
   save(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftSaveDto) { return this.respond(request, body, 'save'); }
   @Post(AI_TASK_CALENDAR_DRAFT_HTTP.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   operation(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftReferenceDto) { return this.respond(request, body, 'operation'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.preparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  preparation(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftPreparationDto) { return this.respond(request, body, 'preparation'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.previewPreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  previewPreparation(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftPreparationPreviewDto) { return this.respond(request, body, 'previewPreparation'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.prepare) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepare(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftPrepareDto) { return this.respond(request, body, 'prepare'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.preparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  preparationOperation(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftPreparationReferenceDto) { return this.respond(request, body, 'preparationOperation'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.source) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  source(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftSourceDto) { return this.respond(request, body, 'source'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.entry) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  entry(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftEntryDto) { return this.respond(request, body, 'entry'); }
+  @Post(AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.entryOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  entryOperation(@Req() request: IncomingMessage, @Body() body: AiTaskCalendarDraftEntryReferenceDto) { return this.respond(request, body, 'entryOperation'); }
 }

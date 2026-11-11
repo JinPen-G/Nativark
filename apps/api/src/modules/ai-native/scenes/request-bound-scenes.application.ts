@@ -7,10 +7,21 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication, type SelectedQuoteTaskConfiguration, type HumanQuoteOrderDependencies } from './human-quote-order.composition';
-import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
+import { composeAiOriginalSceneModel, composeOriginalSceneClarificationSource, createOriginalScenePendingInputSource,
+  type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies,
+  type OriginalSceneInputWaitMode } from './original-scene-model.composition';
+import { prepareOriginalInputContinuation, type OriginalInputContinuationConfiguration } from '../task-input-admission.composition';
+import { prepareOriginalQuoteApprovalAdmission, prepareTaskCenterQuoteApprovalAdmission,
+  type OriginalQuoteApprovalAdmissionConfiguration, type TaskCenterQuoteApprovalIntent } from '../task-approval-admission.composition';
+import { prepareOriginalSettingsApprovalAdmission, prepareTaskCenterSettingsApprovalAdmission,
+  type OriginalSettingsApprovalAdmissionConfiguration } from '../approval-execution/settings-approval-admission.composition';
+import { prepareOriginalSettingsStartAdmission,
+  type OriginalSettingsStartAdmissionConfiguration } from '../approval-execution/settings-start-admission.composition';
+import type { TaskInputAdmissionIntent } from '../task-input-admission.application';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import { composeSelectedQuoteStockReview } from './selected-quote-stock-review';
+import { composeQuoteRequestReissue, type QuoteRequestReissueConfiguration } from './quote-reissue.composition';
 import { composeClarifiedQuoteSelectionPreparation } from './clarified-quote-selection-preparation';
 import { composePersistedTaskCenter } from '../task-center.composition';
 import { composeAiTaskCenterScene, readSettingsTaskCenterScene } from '../task-center-scene.composition';
@@ -42,7 +53,7 @@ import { composePersistedTaskCallGateway, composePersistedTaskGateway, composePe
   type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
 import { BudgetError } from '../budget/budget.ports';
 import { presentTaskBudgetUsageRecord } from '../budget/task-budget-usage.reader';
-import { AiTaskRunnerError, inheritAiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, inheritAiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { parseQuoteSelection, parseClarifiedQuoteSelection, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
 import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
@@ -411,10 +422,12 @@ export function composeRequestBoundSettingsTaskCreation(
 }
 
 /** Current original creation receipt -> explicit owner policy management/start.
- * No policy seed, caller permission list, lease or direct business commit. */
+ * An explicitly configured initial issuer runs only on start. Creation and
+ * reads do not seed policies; the original host owns leases/business work. */
 export function composeRequestBoundSettingsTaskControls(
   dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
-  options: AiOriginalTaskActionPolicyOptions & { host: AiTaskApplicationHost }) {
+  options: AiOriginalTaskActionPolicyOptions & { host: AiTaskApplicationHost },
+  startAdmission?: OriginalSettingsStartAdmissionConfiguration) {
   if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   const templates = freezeOriginalInput(z.array(z.object({
     operation: z.string().refine(value => taskActionPolicyOperations.includes(value)),
@@ -535,6 +548,10 @@ export function composeRequestBoundSettingsTaskControls(
       const parsed = reference.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return call(request, parsed.data, async (root, value) => {
+        // The original creation/change receipt authorizes this explicit initial
+        // admission. Keep its possible CAS writes outside the read-only wait.
+        if (startAdmission) await prepareOriginalSettingsStartAdmission(root.input, reference.parse(value),
+          { ...startAdmission, maximumAdmissionMs: Math.min(ttlMs, startAdmission.maximumAdmissionMs ?? ttlMs) }, signal);
         const { found, hostRoot } = await waitForTaskApplicationDependency(async () => {
           const input = reference.parse(value), found = await target(root, request, input, signal);
           const authorization = composePersistedTaskAuthorization(root.input);
@@ -601,11 +618,13 @@ export function composeRequestBoundSettingsTask(dependencies: Omit<ApprovedSetti
  * task/plan; an unpublished task still needs the original explicit producer. */
 export function composeRequestBoundPersistedSettingsTask(
   dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
-  options: AiSceneRequestOptions & { host: AiTaskApplicationHost }) {
+  options: AiSceneRequestOptions & { host: AiTaskApplicationHost },
+  approvalAdmission?: OriginalSettingsApprovalAdmissionConfiguration) {
   const host = Object.freeze(structuredClone(options.host)), scene = freezeOriginalInput(structuredClone(dependencies.scene));
   const selector = z.object({ taskId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     runId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional() }).passthrough();
-  const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, async (input, value) => {
+  const server = { ...dependencies, scene }, requestOptions = { enabled: options.enabled, audience: options.audience };
+  const assemble = async (input: typeof server & { credentials: AiTaskCredentialSource }, value: unknown) => {
     const command = selector.safeParse(value);
     if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const authorization = composePersistedTaskAuthorization(input);
@@ -659,7 +678,9 @@ export function composeRequestBoundPersistedSettingsTask(
     return { settingsHost, input, verify: async () => {
       if ((await read()).binding !== before.binding) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     } };
-  }, { write: false });
+  };
+  const call = bindRequests(server, requestOptions, assemble, { write: false });
+  const admissionCall = bindRequests(server, requestOptions, input => input);
   const use = <R>(request: AiSceneHttpRequest, value: unknown,
     consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown) => Promise<R>,
     lifetime: { write: boolean; signal?: AbortSignal; preflightOnly?: true }) =>
@@ -672,7 +693,27 @@ export function composeRequestBoundPersistedSettingsTask(
       }
       return result;
     }, lifetime);
+  const admitted = <R>(request: AiSceneHttpRequest, value: unknown, intent: 'explicit_decide' | 'explicit_continue',
+    consume: (root: ReturnType<typeof composeTaskSettingsHost>, command: unknown, signal?: AbortSignal) => Promise<R>, signal?: AbortSignal) => {
+    if (!approvalAdmission) return use(request, value, (root, command) => consume(root, command, signal),
+      intent === 'explicit_decide' ? { write: true, signal } : { write: true, signal, preflightOnly: true });
+    return admissionCall(request, value, (input, command) => callAiTaskRunnerDependency(async child => {
+      await prepareOriginalSettingsApprovalAdmission(input, command, intent, approvalAdmission, child);
+      const root = await waitForTaskApplicationDependency(() => assemble(input, command), false, child);
+      const result = await consume(root.settingsHost, command, child);
+      try { await waitForTaskApplicationDependency(root.verify, false, child); }
+      catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+      return result;
+    }, intent === 'explicit_decide' ? 20000 : 120000, 'original_settings_admitted_action', signal),
+    { write: true, signal, preflightOnly: true });
+  };
   return Object.freeze({
+    // Internal task-center preflight; no additional HTTP action is registered.
+    prepareTaskCenterApproval: (request: AiSceneHttpRequest, value: unknown, intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal) =>
+      admissionCall(request, value, (input, command) => callAiTaskRunnerDependency(async child => {
+        if (!approvalAdmission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await prepareTaskCenterSettingsApprovalAdmission(input, command, intent, approvalAdmission, child);
+      }, 15000, 'task_center_settings_admission', signal), { write: true, signal, preflightOnly: true }),
     readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (root, command) => {
       const settings = composeAiSettingsBusinessConsumer({ ...root.input, settingsHost: root.settingsHost });
       const persisted = composePersistedTaskCenter(root.input);
@@ -685,11 +726,11 @@ export function composeRequestBoundPersistedSettingsTask(
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
       use(request, value, (root, command) => root.application.readConfirmation(command), { write: false }),
     decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.settings.application.decide(command), { write: true, signal }),
+      admitted(request, value, 'explicit_decide', (root, command) => root.settings.application.decide(command), signal),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
       use(request, value, (root, command) => root.settings.application.readDecisionReceipt(command), { write: false }),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      use(request, value, (root, command) => root.application.continueOriginalConfirmation(command, signal), { write: true, signal, preflightOnly: true }),
+      admitted(request, value, 'explicit_continue', (root, command, child) => root.application.continueOriginalConfirmation(command, child), signal),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       use(request, value, (root, command) => root.application.reconcileOriginal(command, signal), { write: true, signal, preflightOnly: true }),
     cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -921,6 +962,16 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       if (!scene) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await scenes.readTaskReceipt(reference.inputRef);
       if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (task.status === 'waiting_input' && original.request.sceneCode === 'quote_clarification') {
+        const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
+        // The original pending reader has already checked the persisted wait,
+        // history and current resource in this read-only factory. It renews no
+        // policy and accepts no submission key or execution mode from the client.
+        const pending = await createOriginalScenePendingInputSource({ db: input.db, scenes,
+          scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
+          clock: input.clock, knowledge }, authorization.tasks, reference);
+        return pending.pending;
+      }
       const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
         scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
         results: { read: command => resultReader(scene.sceneCode).read(command) } });
@@ -1271,12 +1322,17 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
   options: AiSceneRequestOptions & { host: AiTaskApplicationHost;
     clock?: AiOriginalSceneRunDependencies['clock']; monotonic?: AiOriginalSceneRunDependencies['monotonic'];
+    /** Actual standard-host publication and database, never a request option. */
+    inputContinuation?: OriginalInputContinuationConfiguration;
     /** Server configuration only. Absence preserves the original single model. */
     orderReadChain?: { enabled: true; inputSource?: AiTaskInputSource; answerRoundTrip?: true } }) {
   if (!dependencies.gateway || dependencies.gateway.routeScene !== dependencies.gatewayScene.routeScene
     || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies || 'inputCounting' in dependencies
     || 'runServices' in options) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  const { host, clock, monotonic, orderReadChain, ...requestOptions } = options;
+  const { host, clock, monotonic, orderReadChain, inputContinuation, ...requestOptions } = options;
+  if (inputContinuation && (!Object.is(inputContinuation.db, dependencies.db)
+    || typeof inputContinuation.currentRuntimeEnabled !== 'function' || dependencies.scene.code !== 'quote_clarification'))
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   if (orderReadChain && (orderReadChain.enabled !== true || dependencies.scene.code !== 'order_explanation'
     || orderReadChain.answerRoundTrip !== undefined && orderReadChain.answerRoundTrip !== true
     || dependencies.gatewayScene.orderExplainTool !== true || dependencies.gatewayScene.structuredOutput
@@ -1297,15 +1353,16 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     ...(gateway.adapters === undefined ? {} : { adapters: Object.freeze([...gateway.adapters]) }),
     ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)),
       ...(gateway.inputCounting ? { inputCounting: freezeOriginalInput(structuredClone(gateway.inputCounting)) } : {}) } : {}) });
-  const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
+  const assemble = async (input: typeof sceneDependencies & { credentials: AiTaskCredentialSource }, command: unknown,
+    inputWaitMode?: OriginalSceneInputWaitMode) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
     const parsed = originalRequestReferenceSchema.safeParse(raw);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const reference = freezeOriginalInput(parsed.data), scenes = composeAiOriginalScenes(input);
     const original = await scenes.requests.readHistorical(reference);
-    // Historical chain reads retain current read authority, not a new-effect
-    // grant. start() still resolves the live original policy during preparation.
-    if (!orderReadChain) await scenes.requests.resolve(original.receipt.sceneCode, reference.inputRef);
+    // Construction only observes the current original resource. The real start
+    // and input source retain their own execution checks; requiring a fresh
+    // creation window here would also block historical input/result readers.
     const task = await scenes.readTaskReceipt(reference.inputRef);
     if (task.state !== 'observed' || original.receipt.state === 'revoked'
       || original.request.sceneCode !== input.scene.code || original.receipt.sceneVersion !== input.scene.version) {
@@ -1318,6 +1375,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       ? composePersistedTaskGateway({ ...gatewayDependencies, pricing: serverGateway.pricing! })
       : composePersistedTaskCallGateway({ ...gatewayDependencies, callPriceVersion: serverGateway.callPriceVersion });
     const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion,
+      ...(inputWaitMode ? { inputWaitMode } : {}),
       ...(persisted.inputCounting ? { inputCounting: persisted.inputCounting } : {}) });
     const orderApplication = orderReadChain ? model.createModelOrderApplication(serverHost, {
       inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },
@@ -1352,7 +1410,20 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readPreparation: orderApplication?.readPreparation ?? unsupported,
       resumePrepared: orderApplication?.resumePrepared ?? unsupported,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
-  }, { write: false });
+  };
+  const call = bindRequests(sceneDependencies, requestOptions, assemble, { write: false });
+  const originalInputCall = bindRequests(sceneDependencies, requestOptions, input => input);
+  const callWaiting = <R>(request: AiSceneHttpRequest, value: unknown, intent: TaskInputAdmissionIntent,
+    consume: (app: Awaited<ReturnType<typeof assemble>>, command: unknown) => Promise<R>, signal?: AbortSignal): Promise<R> => {
+    if (!inputContinuation) return call(request, value, consume, { write: true, signal, preflightOnly: true });
+    // Issuance belongs to the explicit write interval, never the binder's pure
+    // construction timeout. The same request credentials survive into the host.
+    return originalInputCall(request, value, async (input, command) => {
+      const mode = await prepareOriginalInputContinuation(input, command, intent, inputContinuation, signal);
+      const app = await waitForTaskApplicationDependency(() => assemble(input, command, mode), false, signal);
+      return consume(app, command);
+    }, { write: true, signal, preflightOnly: true });
+  };
   return Object.freeze({
     readOriginalAccounting: accounting.read,
     releaseOriginalUnsentAccounting: accounting.releaseUnsent,
@@ -1386,13 +1457,13 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.start(command, signal),
         { write: true, signal, preflightOnly: true }),
-    readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readInput(command)),
+    readInput: recoveryReaders.readInput,
     refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.refreshInput(command), { write: true }),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.resume(command, signal), { write: true, signal, preflightOnly: true }),
+      callWaiting(request, value, 'explicit_wait_resume', (app, command) => app.resume(command, signal), signal),
     readAnswer: recoveryReaders.readAnswer,
-    submitAnswer: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (app, command) => app.submitAnswer(command), { write: true }),
+    submitAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      callWaiting(request, value, 'explicit_wait_submit', (app, command) => app.submitAnswer(command), signal),
     readModelResult: recoveryReaders.readModelResult,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
@@ -1403,7 +1474,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmClarifiedQuote(command), { write: true }),
     readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readClarifiedQuoteReceipt(command)),
     continueAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.continueAnswer(command, signal), { write: true, signal, preflightOnly: true }),
+      callWaiting(request, value, 'explicit_answer_continue', (app, command) => app.continueAnswer(command, signal), signal),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
     recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -1583,7 +1654,7 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     reconcileReissue: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.reconcile(command, true), { write: false, signal }),
     createTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.createTask(command), { write: true, signal }),
     prepareTaskMaterial: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (app, command) => {
-      const packet = await app.prepareTaskMaterial(command);
+      const packet = await app.prepareTaskMaterial(command, 'read_only');
       if (packet.original.sceneCode !== 'order_explanation') return packet;
       if (requestFingerprint(packet.material) !== packet.materialHash) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       const material = projectOrderExplanationMaterial(packet.material);
@@ -1596,7 +1667,7 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
      * preparation seal, never relabel a stored model result or its input hash. */
     prepareOrderTaskMaterialV2: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, async (app, command) => {
       assertOrderPublicationV2Available();
-      const packet = await app.prepareTaskMaterial(command);
+      const packet = await app.prepareTaskMaterial(command, 'order_history_read');
       if (packet.original.sceneCode !== 'order_explanation') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (requestFingerprint(packet.material) !== packet.materialHash) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       const material = projectOrderExplanationMaterialV2(packet.material);
@@ -1923,7 +1994,8 @@ export function composeClarifiedQuoteSelectionRequests(
 }
 
 export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQuoteOrderDependencies,
-  options: AiSceneRequestOptions, configuration: SelectedQuoteTaskConfiguration) {
+  options: AiSceneRequestOptions, configuration: SelectedQuoteTaskConfiguration,
+  approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration) {
   const server = { ...configuration, host: structuredClone(configuration.host), limits: structuredClone(configuration.limits) };
   const retainedCall = bindRequests(dependencies, options, input => {
     const clock = input.clock ?? (() => new Date());
@@ -1964,7 +2036,12 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
     const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business, scenes: { requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
-    return Object.freeze({ ...tasks, readScene: center.readScene,
+    return Object.freeze({ ...tasks,
+      continueConfirmation: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_continue', approvalAdmission, signal);
+        return tasks.continueConfirmation(value, signal);
+      }, readScene: center.readScene,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value),
       readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskReconnect: center.readReconnect, readTaskUsage: center.readUsage });
@@ -1993,7 +2070,8 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
 }
 
 export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
-  reprepare?: FormalApprovedOrderReprepareConfiguration) {
+  reprepare?: FormalApprovedOrderReprepareConfiguration, reissue?: QuoteRequestReissueConfiguration,
+  approvalAdmission?: OriginalQuoteApprovalAdmissionConfiguration) {
   if (reprepare && 'reprepareServices' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const configuration = reprepare ? { holderId: reprepare.holderId, creationRules: structuredClone(reprepare.creationRules),
     memberships: reprepare.memberships } : undefined;
@@ -2011,18 +2089,42 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
       }
     }, clock);
     const originals = new PrismaOriginalRequestRepository(input.db, authority, clock);
-    if (configuration) {
-      // Only the server's formal replacement factory may prepare new material.
-      // Historical access above grants neither a replacement nor approval.
-      const factory = (current: Parameters<typeof composeFormalApprovedOrderReprepareServices>[0]) =>
-        composeFormalApprovedOrderReprepareServices(current, configuration);
-      return Object.freeze({ ...composeHumanQuoteOrder({ ...input, originals, reprepareServices: factory }),
-        readSelectedAvailability: composeSelectedQuoteStockReview({ ...input, originals }) });
-    }
-    return Object.freeze({ ...composeHumanQuoteOrder({ ...input, originals }),
+    // Only the server's formal replacement factory may prepare new material.
+    // Historical access above grants neither a replacement nor approval.
+    const factory = configuration ? (current: Parameters<typeof composeFormalApprovedOrderReprepareServices>[0]) =>
+      composeFormalApprovedOrderReprepareServices(current, configuration) : undefined;
+    const human = composeHumanQuoteOrder({ ...input, originals, ...(factory ? { reprepareServices: factory } : {}) });
+    // Existing history readers do not acquire new Core preparation dependencies.
+    const linked = () => composeQuoteRequestReissue({ ...input, originals, source: human.readRequestReissueSource }, reissue);
+    return Object.freeze({ ...human,
+      prepareTaskCenterApproval: async (value: unknown, intent: TaskCenterQuoteApprovalIntent, signal?: AbortSignal) => {
+        if (!approvalAdmission) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await prepareTaskCenterQuoteApprovalAdmission({ ...input, originals }, value, intent, approvalAdmission, signal);
+      },
+      decideSelectedProposal: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_decide', approvalAdmission, signal);
+        return human.decideSelectedProposal(value);
+      },
+      reprepareSelectedProposal: async (value: unknown, signal?: AbortSignal) => {
+        if (approvalAdmission) await prepareOriginalQuoteApprovalAdmission({ ...input, originals }, value,
+          'explicit_reprepare', approvalAdmission, signal);
+        return human.reprepareSelectedProposal(value);
+      },
+      readReissuePreparation: (value: unknown) => linked().readReissuePreparation(value),
+      reissueSelectedRequest: (value: unknown, signal?: AbortSignal) => linked().reissueSelectedRequest(value, signal),
+      readReissueOperation: (value: unknown) => linked().readReissueOperation(value),
+      readReissuedSelectionPreparation: (value: unknown) => linked().readReissuedSelectionPreparation(value),
+      selectReissuedQuote: (value: unknown, signal?: AbortSignal) => linked().selectReissuedQuote(value, signal),
+      readReissuedSelectionOperation: (value: unknown) => linked().readReissuedSelectionOperation(value),
       readSelectedAvailability: composeSelectedQuoteStockReview({ ...input, originals }) });
   });
   return Object.freeze({
+    // Internal task-center bridge only. No Controller/OpenAPI route is added.
+    prepareTaskCenterApproval: (request: AiSceneHttpRequest, value: unknown, intent: TaskCenterQuoteApprovalIntent, signal?: AbortSignal) =>
+      call(request, value, (app, command) => callAiTaskRunnerDependency(
+        () => app.prepareTaskCenterApproval(command, intent, signal), 15000, 'task_center_approval_admission', signal),
+      { write: true, signal, preflightOnly: true }),
     readSelectedAvailability: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       (app, command) => app.readSelectedAvailability(command), { write: false }),
     readSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedProposal(command), { write: false }),
@@ -2032,7 +2134,19 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
     readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command), { write: false }),
     readSelectedRepreparePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedRepreparePreparation(command), { write: false }),
     reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command), { write: true }),
-    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command), { write: false })
+    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command), { write: false }),
+    readReissuePreparation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuePreparation(command), { write: false, signal }),
+    reissueSelectedRequest: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.reissueSelectedRequest(command, signal), { write: true, signal }),
+    readReissueOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissueOperation(command), { write: false, signal }),
+    readReissuedSelectionPreparation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuedSelectionPreparation(command), { write: false, signal }),
+    selectReissuedQuote: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.selectReissuedQuote(command, signal), { write: true, signal }),
+    readReissuedSelectionOperation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReissuedSelectionOperation(command), { write: false, signal })
   });
 }
 

@@ -18,7 +18,7 @@ import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
 import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerClock, AiTaskRunnerLease } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -180,9 +180,7 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     });
     let lease: AiTaskRunnerLease & { purpose: 'recovery_only' };
     try {
-      const acknowledged = structuredClone(received);
-      if (acknowledged?.purpose !== 'recovery_only') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-      lease = { ...snapshotAiTaskRunnerClaimLease(claim, acknowledged), purpose: acknowledged.purpose };
+      lease = snapshotAiTaskRunnerRecoveryLease(claim, received);
     } catch {
       throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
     }
@@ -190,14 +188,14 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     try {
       if ((await read(() => authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run'))).bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
-      // Once delegated, only the runner knows which writes were acknowledged.
-      // An unchanged lease read is not proof that an in-flight CAS cannot commit.
-      cleanupSafe = false;
+      // Pure application/runner reads retain this host's cleanup ownership.
+      // Its synchronous server hook runs inside the runner's try/finally;
+      // an uncertain write never returns ownership by inspecting a current row.
+      const acceptLease = () => { cleanupSafe = false; };
       const result = await wait(child => confirmation && 'checkpointRef' in command && typeof command.checkpointRef === 'string'
-        ? application.continueConfirmation({ taskId: task.taskId, runId: task.runId, checkpointRef: command.checkpointRef }, child)
-        : application.reconcile({ taskId: task.taskId, runId: task.runId }, child), true,
+        ? application.continueConfirmation({ taskId: task.taskId, runId: task.runId, checkpointRef: command.checkpointRef }, child, acceptLease)
+        : application.reconcile({ taskId: task.taskId, runId: task.runId }, child, acceptLease), true,
       Math.min(120000, task.limits.maxTotalMs + 10000));
-      cleanupSafe = result.kind === 'not_started';
       return result;
     } catch (error) {
       failed = true;
@@ -212,10 +210,14 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
               leaseOwnerId: host.holderId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken) } });
             if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
             if (held) {
-              const latest = await authorization.tasks.readMetadata(task.taskId);
-              if (child.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-              await authorization.tasks.releaseRun({ taskId: task.taskId, runId: task.runId, holderId: host.holderId,
-                expectedTaskRevision: latest.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
+              const latest = structuredClone(await authorization.tasks.readMetadata(task.taskId));
+              if (child.aborted || latest.taskId !== task.taskId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+              const release = { taskId: task.taskId, runId: task.runId, holderId: host.holderId,
+                expectedTaskRevision: latest.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+              const receipt = structuredClone(await authorization.tasks.releaseRun(structuredClone(release)));
+              if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) {
+                throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'settings recovery cleanup requires original receipt');
+              }
             }
           }, true, 5000, new AbortController().signal);
         } catch {

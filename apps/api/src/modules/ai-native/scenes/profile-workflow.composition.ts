@@ -11,7 +11,7 @@ import { ApprovedProfileTaskAuthority, profileDenied, profileConflict, profileUn
 import { profileChangeInputSchema, aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { composeTaskProfileHost } from '../runner/profile-task-host.composition';
-import { snapshotAiTaskRunnerClaimLease, AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { snapshotAiTaskRunnerRecoveryLease, AiTaskRunnerError, callAiTaskRunnerDependency } from '../runner/ai-task-runner.service';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeAiProfileBusinessConsumer } from './profile-business-consumer.composition';
 import { composeProfileReconfirmation } from './profile-reconfirmation.composition';
@@ -19,7 +19,7 @@ import { composeProfileTaskObservation } from './profile-task-observation.compos
 import { composeProfileTaskActionPolicies } from './profile-task-policies.composition';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
-import type { AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
+import type { AiTaskRunnerClaimInput, AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
 
 export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies, host: AiTaskApplicationHost,
   taskPolicyConfiguration: { executionEnabled: boolean; ttlMs: number } = { executionEnabled: false, ttlMs: 120000 }) {
@@ -102,6 +102,37 @@ export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies
     try { await found.verify(); } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
     return result;
   };
+  const claimRecoveryLease = async (root: ReturnType<typeof composeTaskProfileHost>, command: AiTaskRunnerClaimInput, signal?: AbortSignal) => {
+    try {
+      const received = await waitForTaskApplicationDependency(() => root.authorization.tasks.claimRecoveryRun(structuredClone(command)), true, signal);
+      return snapshotAiTaskRunnerRecoveryLease(command, received);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'AI_STORAGE_UNAVAILABLE') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      throw error;
+    }
+  };
+  const withRecoveryLease = async <T>(root: ReturnType<typeof composeTaskProfileHost>, lease: AiTaskRunnerRecoveryLease,
+    run: (acceptLease: () => void) => Promise<T>) => {
+    let runnerOwnsLease = false;
+    try { return await run(() => { runnerOwnsLease = true; }); }
+    finally {
+      if (!runnerOwnsLease) {
+        // Only the positive original claim owns cleanup during pure preflight.
+        // The runner accepts synchronously inside try/finally; its subsequent
+        // writes/unknown result never grant this host a second release attempt.
+        try {
+          await callAiTaskRunnerDependency(async child => {
+            const current = structuredClone(await root.authorization.tasks.readMetadata(lease.taskId));
+            if (child.aborted || current.taskId !== lease.taskId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            const release = { taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+              expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+            const receipt = structuredClone(await root.authorization.tasks.releaseRun(structuredClone(release)));
+            if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+          }, 5000, 'profile_recovery_cleanup');
+        } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'profile recovery cleanup requires original receipt'); }
+      }
+    }
+  };
   const cancellationSchema = profileChangeInputSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
   const cancellation = async (value: unknown, mode: 'request' | 'settle_unstarted' | 'read_request' | 'read_settlement') => {
     const command = cancellationSchema.parse(structuredClone(value)), { expectedRevision, ...reference } = command;
@@ -146,19 +177,13 @@ export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies
         expectedTaskRevision: task.revision, expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) };
       await found.verify();
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-      let lease: AiTaskRunnerRecoveryLease;
-      try {
-        const received = structuredClone(await waitForTaskApplicationDependency(() => found.root.authorization.tasks.claimRecoveryRun(command), true, signal));
-        if (received.purpose !== 'recovery_only') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-        lease = { ...snapshotAiTaskRunnerClaimLease(command, received), purpose: received.purpose };
-      } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'AI_STORAGE_UNAVAILABLE') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-        throw error;
-      }
-      if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+      const lease = await claimRecoveryLease(found.root, command, signal);
       // Pass ONLY the acknowledged CAS tuple to the original recovery engine.
       // Do not query a held lease back into execute/continue after losing ACK.
-      const outcome = await found.root.runner.recover(lease, signal);
+      const outcome = await withRecoveryLease(found.root, lease, async acceptLease => {
+        if (signal?.aborted) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        return found.root.runner.recover(lease, signal, acceptLease);
+      });
       return deliverMutation(found, { kind: 'run_outcome' as const, outcome, execution: 'recovery_only_no_redispatch' as const });
     },
     async start(value: unknown, signal?: AbortSignal) {
@@ -190,9 +215,9 @@ export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies
       // Only a positive original CAS acknowledgement is usable. A lost claim
       // response is unknown; it is never recovered by reading a lease to execute.
       if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
-      snapshotAiTaskRunnerClaimLease(command, await waitForTaskApplicationDependency(() => found.root.authorization.tasks.claimRecoveryRun(command), true, signal));
-      const result = await found.root.application.continueConfirmation({ taskId: found.task.taskId, runId: found.task.runId,
-        checkpointRef: checkpoint.checkpointRef }, signal);
+      const lease = await claimRecoveryLease(found.root, command, signal);
+      const result = await withRecoveryLease(found.root, lease, acceptLease => found.root.application.continueConfirmation({
+        taskId: found.task.taskId, runId: found.task.runId, checkpointRef: checkpoint.checkpointRef }, signal, acceptLease));
       return deliverMutation(found, result);
     }
   });

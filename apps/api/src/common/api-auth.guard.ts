@@ -1,6 +1,8 @@
 import { AI_TASK_READ_POLICY_HTTP } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
+import { AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP, AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS } from '@rental-os/shared';
+import { AI_TASK_RULE_SOURCE_ENTRY_HTTP, AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS } from '@rental-os/shared';
 import { AI_MEMBER_NAME_HTTP } from '@rental-os/shared';
 /** Original route/data authorization for Web sessions and scoped current principals.
  * Trusted catalog/order reads enter the same checks and ALS, never a client-supplied
@@ -19,6 +21,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
@@ -266,6 +269,9 @@ const originalOrderExecutionRoutes = new Set(([
 
 export function requiredPermissions(method: string, path: string) {
   const creditRoute = `${method.toUpperCase()} ${path}`;
+  if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const)
+    .some(action => path === `/${AI_TASK_ORIGINAL_READ_POLICY_HTTP.basePath}/${AI_TASK_ORIGINAL_READ_POLICY_HTTP[action]}`))
+    return [...AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS];
   if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const).some(action => path === `/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST' && path === `/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && Object.entries(AI_MEMBER_NAME_HTTP).some(([key, value]) => key !== 'basePath' && path === `/${AI_MEMBER_NAME_HTTP.basePath}/${value}`))
@@ -282,11 +288,19 @@ export function requiredPermissions(method: string, path: string) {
     return ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/desktop-business\/policy(?:\/(?:change|operation))?$/u.test(path))
     return ['system:params:manage'];
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS)
+    .some(action => path === `/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP[action as keyof typeof AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS]}`))
+    return ['rental-os:calendar:edit'];
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS)
+    .some(action => path === `/${AI_TASK_RULE_SOURCE_ENTRY_HTTP.basePath}/${AI_TASK_RULE_SOURCE_ENTRY_HTTP[action as keyof typeof AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS]}`))
+    return ['rental-os:rules:manage'];
   if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`))
     return path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.review}`)
       ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS];
-  if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`))
-    return path.endsWith(`/${AI_TASK_RULE_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_RULE_DRAFT_HTTP.review}`)
+  if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation', 'preparation', 'previewPreparation', 'prepare', 'preparationOperation'] as const)
+    .some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`))
+    return (['save', 'review', 'previewPreparation', 'prepare'] as const)
+      .some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`)
       ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS];
   if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'source', 'usage', 'usageSummary', 'outcomes', 'performance', 'visibleReport', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business', 'continue', 'stop', 'stopReceipt', 'input', 'resumeInput', 'inputReceipt', 'continueInput'] as const)
     .some(action => path === `/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`))
@@ -309,7 +323,9 @@ export function requiredPermissions(method: string, path: string) {
   if (originalOpeningModelRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   if (originalSettingsRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:price:manage'];
   const selectedQuoteAction = selectedQuoteRoutes.get(`${method.toUpperCase()} ${path}`);
-  if (selectedQuoteAction) return ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal'].includes(selectedQuoteAction)
+  if (selectedQuoteAction) return ['select', 'start', 'continueConfirmation', 'decideSelectedProposal', 'reprepareSelectedProposal',
+    'readReissuePreparation', 'reissueSelectedRequest', 'readReissueOperation', 'readReissuedSelectionPreparation',
+    'selectReissuedQuote', 'readReissuedSelectionOperation'].includes(selectedQuoteAction)
     ? ['rental-os:order:create'] : ['rental-os:order:view', 'rental-os:order:create'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST' && path === `/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm}`)

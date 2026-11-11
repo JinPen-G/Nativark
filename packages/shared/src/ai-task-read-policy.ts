@@ -1,8 +1,15 @@
-/** Original manager-only three-policy read enablement. No caller permissions,
- * scope, model dispatch, Core grant, lease or execution operation is accepted. */
+/** Closed three-policy read enablement. Manager configuration and ordinary
+ * original-resource authorization use separate routes and reference bindings.
+ * No caller permissions, scope, Core grant, lease or execution is accepted. */
 import { z } from 'zod';
 export const AI_TASK_READ_POLICY_VERSION = 'ain-task-read-policy-1' as const;
 export const AI_TASK_READ_POLICY_HTTP = { basePath: 'ai-native/task-read-policy', inspect: 'inspect', enable: 'enable', operation: 'operation' } as const;
+export const AI_TASK_ORIGINAL_READ_POLICY_HTTP = { basePath: 'ai-native/original-task-read-policies',
+  inspect: 'inspect', enable: 'enable', operation: 'operation' } as const;
+/** Entry alternatives from the original order/settings/readiness GET routes.
+ * The application still verifies the specific current resource and owner. */
+export const AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS = ['rental-os:order:view', 'rental-os:order:create',
+  'rental-os:rules:manage', 'rental-os:price:manage', 'system:user:manage', 'system:role:manage'] as const;
 export const AI_TASK_READ_POLICY_OPERATIONS = ['read_metadata','read_events','read_step_terminal'] as const;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u), hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const time = z.string().max(40).datetime({ offset: true }), revision = z.number().int().min(1).max(4294967293);

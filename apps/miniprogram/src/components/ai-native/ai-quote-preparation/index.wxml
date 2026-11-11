@@ -1,0 +1,22 @@
+<view class="quote-preparation">
+  <view class="subtitle">预约草稿</view>
+  <view class="mt-16">按所选条件生成报价和草稿，订单需在原预约页确认提交。</view>
+  <button wx:if="{{!booking.draft && !booking.handoff}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerate"
+    loading="{{working}}" disabled="{{working || paused || !selection || readOnly || booking.readOnly}}">生成预约草稿</button>
+  <button wx:if="{{booking && !booking.readOnly && (booking.canChoose || booking.canHandoff || booking.handoff) && matchesInput}}"
+    class="btn btn--primary btn--block mt-16" bindtap="onContinue" loading="{{working}}" disabled="{{working || paused}}">确认草稿并继续预约</button>
+  <button class="btn btn--block mt-16" bindtap="onRead" disabled="{{working || paused}}">核对原结果</button>
+  <view wx:if="{{working}}" class="mt-16">正在处理所选预约…</view>
+  <view wx:if="{{status === 'unknown' || booking.status === 'unknown'}}" class="notice notice--warning mt-16">原结果待核对，不重复派发。</view>
+  <view wx:if="{{(readOnly && material) || (booking.readOnly && booking.observed)}}" class="notice mt-16">已找到原记录；当前仅可查看，不能继续办理。</view>
+  <view wx:if="{{!matchesInput}}" class="notice mt-16">所选条件已变化，原记录仅供核对。</view>
+  <view wx:if="{{booking.draft}}" class="mt-16">预约草稿已保存，尚未建单或预占资源。</view>
+  <view wx:if="{{booking.observed && !booking.draft && !booking.handoff}}" class="mt-16">原预约操作已记录。</view>
+  <block wx:if="{{quote}}">
+    <view class="kv mt-16"><view>应付</view><view wx:if="{{quote.payableAmount !== null && quote.currency}}"><money-text amount="{{quote.payableAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
+    <view class="kv mt-8"><view>押金</view><view wx:if="{{quote.depositAmount !== null && quote.currency}}"><money-text amount="{{quote.depositAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
+    <view class="kv mt-8"><view>预授权</view><view wx:if="{{quote.preAuthAmount !== null && quote.currency}}"><money-text amount="{{quote.preAuthAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
+  </block>
+  <view wx:if="{{error || status === 'unavailable' || booking.status === 'unavailable'}}" class="notice notice--warning mt-16">当前暂不可用，请保留已有引用并核对原结果。</view>
+  <button wx:if="{{status === 'unavailable' && !material}}" class="btn btn--block mt-16" bindtap="onOrdinary" disabled="{{working}}">继续普通预约</button>
+</view>

@@ -436,7 +436,7 @@ test('authorized original probe request lifecycle executes through persisted run
     assert.equal(writeAttempts, 0); assert.equal(sends, beforeSends); assert.equal(decrypts, beforeDecrypts); assert.equal(stateJson(), beforeHistory);
     const readPolicy = h.state.aiTaskActionPolicy.find(row => row.taskId === created.taskId && row.operation === 'read_step_terminal');
     readPolicy.expiresAt = new Date(h.control.now.getTime() - 1);
-    await assert.rejects(http.readHistory(request(), key), error => error.getStatus() === 403);
+    assert.deepEqual(checked('AiTextCapabilityHistoryResponseDraft', await http.readHistory(request(), key)), history);
     assert.equal(writeAttempts, 0);
   } finally { for (const { target, method, originalMethod } of blocked) target[method] = originalMethod; }
 

@@ -9,7 +9,9 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
-  aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema } from '@rental-os/shared';
+  aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema,
+  aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
+  aiClientQuoteBookingOperationResponseSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -19,6 +21,7 @@ import { withRequestAbort, AiRequestWaitError, type AiRequestAbortSource } from 
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 import { AiClientQuoteResultUnknownError } from '../client-quote-original.composition';
 import { AiClientTaskUnknownError } from './prisma-client-task-input.repository';
+import type { composeClientOriginalBookingHttp } from './client-original-booking-http.composition';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
@@ -31,7 +34,7 @@ export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoun
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
   'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
   'readQuotePreparationOperation' | 'readPreparedQuoteOriginal' | 'prepare' | 'readOrderMaterialReceipt' | 'createTask' | 'readTaskCreation' |
-  'readOriginalTaskAccounting' | 'reconcileOriginalTaskAccounting'>;
+  'readOriginalTaskAccounting' | 'reconcileOriginalTaskAccounting'> & ReturnType<typeof composeClientOriginalBookingHttp>;
 type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
@@ -175,6 +178,26 @@ export class AiClientEntryController {
   readPreparedQuoteOriginal(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(async () => this.preparedQuoteObservation(await this.application.readPreparedQuoteOriginal(request,
       aiClientQuoteConfirmationRequestSchema.parse(body))), 'read_original_quote');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareOriginalQuoteBooking(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = aiClientQuoteBookingRequestSchema.parse(body);
+      const result = await this.application.prepareOriginalQuoteBooking(request, command, signal);
+      const checked = aiClientQuoteBookingPreparationResponseSchema.safeParse(result);
+      if (!checked.success) throw new AiClientQuoteResultUnknownError();
+      return checked.data;
+    }, { maxWaitMs: 15000 }), 'read_original_quote_booking_operation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOriginalQuoteBookingOperation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = aiClientQuoteBookingRequestSchema.parse(body);
+      const result = await this.application.readOriginalQuoteBookingOperation(request, command, signal);
+      const checked = aiClientQuoteBookingOperationResponseSchema.safeParse(result);
+      if (!checked.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return checked.data;
+    }), 'read_original_quote_booking_operation');
   }
   private modelObservation(value: unknown) {
     const wrapped = value && typeof value === 'object' && 'execution' in value ? value.execution : value;

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { Prisma, type PrismaClient, type AiStepStatus, type AiStep } from '@prisma/client';
 import { z } from 'zod';
@@ -110,11 +111,12 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     return parsed;
   }
 
-  private async access(lease: AiTaskRunnerLease) {
+  private async access(lease: AiTaskRunnerLease, accountingOnly = false) {
     lease = structuredClone(lease);
     if (!lease || !id.max(36).safeParse(lease.taskId).success || !id.max(36).safeParse(lease.runId).success || !id.safeParse(lease.holderId).success
       || !/^[1-9][0-9]{0,19}$/u.test(lease.fencingToken) || !Number.isSafeInteger(lease.revision) || lease.revision < 1) throw denied();
-    const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, 'write'));
+    const operation = accountingOnly && lease.expiresAt === '' ? 'settle_released_run' : 'write';
+    const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, operation));
     if (!access?.scopeId || access.taskWhere?.id !== lease.taskId || !access.bindingKey) throw denied();
     return access;
   }
@@ -122,7 +124,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
   private async held(db: Pick<PrismaClient, 'aiTask' | 'aiRun'>, lease: AiTaskRunnerLease, before: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>, locked = false, accountingOnly = false) {
     const statuses: import('@prisma/client').AiTaskStatus[] = accountingOnly
       ? ['QUEUED', 'RUNNING', 'SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] : ['QUEUED', 'RUNNING'];
-    const current = await this.access(lease);
+    const current = await this.access(lease, accountingOnly);
     if (current.bindingKey !== before.bindingKey || current.scopeId !== before.scopeId) throw denied();
     const task = await db.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true, scopeId: true } });
     const receiptOnly = accountingOnly && lease.expiresAt === '';
@@ -180,7 +182,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
    * live holder; empty released/terminal observation can read saved measurements
    * after release/expiry, never capture, prepare, dispatch or write a new marker. */
   async assertAccountingRun(lease: AiTaskRunnerLease) {
-    const access = await this.access(lease);
+    const access = await this.access(lease, true);
     await this.held(this.db, lease, access, false, true);
     return access.scopeId;
   }
@@ -200,7 +202,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (!before.expiresAt || !Number.isFinite(Date.parse(before.expiresAt)) || receipt?.released !== true
       || !Number.isSafeInteger(receipt.revision) || receipt.revision !== before.revision + 1
       || receipt.revision > 0xffffffff) throw denied();
-    const lease = { ...before, revision: receipt.revision, expiresAt: '' }, access = await this.access(lease);
+    const lease = { ...before, revision: receipt.revision, expiresAt: '' }, access = await this.access(lease, true);
     const key = { scopeId: access.scopeId, taskId: lease.taskId, id: lease.runId, revision: lease.revision,
       fencingToken: new Prisma.Decimal(lease.fencingToken), leaseOwnerId: null, leaseExpiresAt: null };
     try {
@@ -255,7 +257,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
   async resolve(task: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, recovery: boolean, accountingOnly = false): Promise<AiTaskRunnerPlan> {
     task = structuredClone(task); lease = structuredClone(lease);
     if (accountingOnly && !recovery) throw denied();
-    const access = await this.access(lease); await this.held(this.db, lease, access, false, accountingOnly);
+    const access = await this.access(lease, accountingOnly); await this.held(this.db, lease, access, false, accountingOnly);
     const plan = await this.currentPlan(this.db, lease, access.scopeId, recovery);
     if (plan.taskId !== task.taskId) throw denied();
     await this.held(this.db, lease, access, false, accountingOnly);
@@ -264,7 +266,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
 
   async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease, accountingOnly = false): Promise<AiTaskRunnerPlan> {
     plan = planSchema.parse(structuredClone(plan)); lease = structuredClone(lease);
-    const access = await this.access(lease); await this.held(this.db, lease, access, false, accountingOnly);
+    const access = await this.access(lease, accountingOnly); await this.held(this.db, lease, access, false, accountingOnly);
     const key = { scopeId: access.scopeId, taskId: lease.taskId };
     const run = await this.db.aiRun.findFirst({ where: { ...key, id: lease.runId } });
     if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
@@ -387,7 +389,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     // A durable started marker precedes the callback. Its unique generation key
     // prevents two instances executing while neither has a completed artifact.
     // COMMIT acknowledgement loss leaves an incomplete marker, not retry permission.
-    const firstPhase = await this.locked(lease, async tx => {
+    const firstPhase = structuredClone(await this.locked(lease, async tx => {
       const plan = await this.currentPlan(tx, lease, access.scopeId);
       const phases = phase ? taskExecutionPhaseStore(tx) : null;
       if (phases && !continuing && ((await phases.readStarts({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId })).length !== 0
@@ -422,7 +424,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         stepsChargeId: lockedCharges.find(c => c.resource === 'STEPS')!.chargeId,
         activeMsChargeId: lockedCharges.find(c => c.resource === 'ACTIVE_MS')!.chargeId,
         outputBytesChargeId: lockedCharges.find(c => c.resource === 'OUTPUT_BYTES')!.chargeId, createdAt: this.wall() });
-    });
+    }));
     if (signal.aborted) throw unavailable();
     if (prepare) {
       // Count is an external request too. Its preparation runs only after the
@@ -473,7 +475,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         const key = { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId };
         const current = await tx.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId,
           id: stepId, status: 'RUNNING', resultRef: null, revision: step.revision, actionId: step.actionId, requestFingerprint: step.requestFingerprint } });
-        const originalPhase = await phases.readStart({ ...key, id: firstPhase.id });
+        const originalPhase = structuredClone(await phases.readStart({ ...key, id: firstPhase.id }));
         const existingReceipt = await phases.readReceipt({ ...key, phaseId: firstPhase.id });
         const previousReceipt = firstPhase.sequence === 2 ? await phases.readReceipt({ ...key, id: firstPhase.previousReceiptId! }) : null;
         if (firstPhase.sequence === 2 && (!previousReceipt || previousReceipt.kind !== 'confirmation'
@@ -486,7 +488,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         const origin = await tx.aiTaskResultArtifact.findFirst({ where: { ...key, id: firstPhase.originalArtifactId } });
         if (!origin || origin.id !== firstPhase.originalArtifactId || origin.outcome !== 'RUNNING' || origin.completeMeasurement) throw denied();
         const heldCharges = await tx.aiTaskExecutionCharge.findMany({ where: { ...key, actionId: step.actionId, stepFingerprint: step.requestFingerprint }, take: 5 });
-        if (!current || requestFingerprint(originalPhase) !== requestFingerprint(firstPhase) || existingReceipt
+        if (!current || !isDeepStrictEqual(originalPhase, firstPhase) || existingReceipt
           || heldCharges.length !== 3 || heldCharges.some(c => c.status !== 'RESERVED' || c.gatewayInvocationId !== null
             || c.leaseOwnerId !== origin.leaseOwnerId || c.fencingToken.toFixed(0) !== origin.fencingToken.toFixed(0)
             || !charges.some(before => before.chargeId === c.chargeId && before.resource === c.resource && before.requestFingerprint === c.requestFingerprint)

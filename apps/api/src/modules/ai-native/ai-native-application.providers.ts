@@ -1,7 +1,10 @@
 import { AI_TASK_READ_POLICY_REQUESTS, composeTaskReadPolicyRequests } from './task-read-policy.application';
+import { AI_TASK_ORIGINAL_READ_POLICY_REQUESTS, composeTaskOriginalReadPolicyRequests } from './task-original-read-policy.application';
 import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } from './task-order-handoff.application';
 import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft } from './task-calendar-draft.application';
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
+import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider } from './runtime-publication.configuration';
+import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
 /**
  * 职责：将正式业务服务、当前身份和持久仓储接到 AI Native 的 Nest provider 入口。
  * 边界：装配不等于执行开放；各请求仍核验当前政策、权限与实际可用的依赖。
@@ -57,7 +60,8 @@ import { composeRequestBoundBudgetManagement } from './budget/budget-management.
 import { BudgetError } from './budget/budget.ports';
 import { AI_COUNTING_REQUESTS } from './input-counting/input-counting-request.module';
 import { composeStandardInputCounting, AI_NATIVE_INPUT_COUNTING_CONFIGURATION } from './input-counting/input-counting-standard.application';
-import { TextCapabilityProbeRequestFactory } from './text-capability-probe-request.factory';
+import { TextCapabilityProbeRequestFactory, type TextCapabilityRequest } from './text-capability-probe-request.factory';
+import { ModelGatewayError } from './model-gateway.ports';
 import { PLATFORM_CAPABILITY_PROBE_REQUESTS } from './platform-capability-probe/platform-capability-probe.controller';
 import { composeStandardPlatformProbe, AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, AI_NATIVE_PLATFORM_PROBE_AUDIT } from './platform-capability-probe/platform-capability-standard.application';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
@@ -88,7 +92,7 @@ import type { ModelAdapter } from './model-gateway.ports';
 import { HumanAutomationRequestFactory } from './automation/human-automation-request.composition';
 import { HumanAutomationPolicyRequestFactory } from './automation/human-automation-policy-request.composition';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './business-events/prisma-business-failure-outbox';
-import { AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
+import { AI_APPROVED_SETTINGS_TOOL_CODE, AI_CAPABILITY_PROBE_KINDS_DRAFT } from '@rental-os/shared';
 import { AiSettingsTaskHttpModule } from './scenes/settings-task-http.module';
 import { AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS,
   AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS } from './scenes/settings-task.controller';
@@ -143,7 +147,7 @@ const settingsEntries = [
   [AI_SETTINGS_CHANGE_REQUESTS, ['prepare']],
   [AI_SETTINGS_TASK_CREATION_REQUESTS, ['create']],
   [AI_SETTINGS_TASK_CONTROL_REQUESTS, ['configurePolicy', 'start']],
-  [AI_SETTINGS_TASK_HTTP_REQUESTS, ['startSettingsTask', 'decideSettingsProposal', 'continueSettingsConfirmation', 'reconcileSettingsTask']],
+  [AI_SETTINGS_TASK_HTTP_REQUESTS, ['startSettingsTask', 'decideSettingsProposal', 'continueSettingsConfirmation', 'reconcileSettingsTask', 'prepareTaskCenterApproval']],
   [AI_SETTINGS_TASK_READ_REQUESTS, []]
 ] as const;
 export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = settingsEntries.map(([provide, executionMethods]) => ({
@@ -158,7 +162,8 @@ export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = setting
       templates: (['read_metadata', 'read_events', 'read_step_terminal', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'decide_approval'] as const)
         .map(operation => ({ operation,
           requiredPermissions: ['rental-os:price:manage'] }))
-    });
+    }, configuration.enabled ? { db, currentRuntimeEnabled: async (sceneCode, sceneVersion) =>
+      configuration.enabled && sceneCode === 'opening_diagnosis' && sceneVersion === '1' } : undefined);
     const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
     if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const requests = entry.useFactory() as Record<string, unknown>;
@@ -204,15 +209,21 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true },
-    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true }],
+    { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true },
+    { token: AI_HUMAN_QUOTE_ORDER_REQUESTS, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService,
     originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
     subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
     quoteFacts: RentalBusinessFactRepository, settingsValue?: unknown, orderValue?: unknown,
     selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
-    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
-    moduleRef?: Pick<ModuleRef, 'get'>) => {
+    settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown>;
+      prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
+        intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> },
+    moduleRef?: Pick<ModuleRef, 'get'>,
+    selectedOrderDecision?: { decideSelectedProposal(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
+      prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
+        intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> }) => {
     const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
     const clarification = () => {
       type Call = (request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) => Promise<unknown>;
@@ -237,7 +248,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       humanApprovals: {
         order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
         settings: { db, auth, guard, subscriptions, core, holderId: 'ai-native-human-review', scene: { code: 'opening_diagnosis', version: '1' } },
-        decisions: { order: order.enabled, settings: settings.enabled }
+        decisions: { order: order.enabled, settings: settings.enabled }, selectedOrderDecision, settingsAdmission: settingsTask
       } });
   }
 };
@@ -401,8 +412,10 @@ export const AI_NATIVE_TASK_RULE_DRAFT_PROVIDER: FactoryProvider = {
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, configuration?: unknown) => {
     const parsed = z.object({ saveEnabled: z.boolean() }).strict().safeParse(configuration ?? { saveEnabled: false });
     if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    return composeRequestBoundTaskRuleDraft({ original: { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), business },
-      saveEnabled: parsed.data.saveEnabled, host: { holderId: 'ai-native-rule-draft-human', leaseMs: 100000 } });
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db, business };
+    return composeRequestBoundTaskRuleDraft({ original,
+      saveEnabled: parsed.data.saveEnabled, host: { holderId: 'ai-native-rule-draft-human', leaseMs: 100000 },
+      preparationAdmission: createOriginalTaskStartAdmission(original, 'opening_diagnosis') });
   }
 };
 
@@ -558,15 +571,24 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    return composeRequestBoundPersistedOriginalSceneModel({
-      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const admission = createOriginalTaskStartAdmission(original, 'quote_clarification');
+    const requests = composeRequestBoundPersistedOriginalSceneModel({
+      ...original,
       scene: { code: 'quote_clarification', version: '1' },
       gatewayScene: { sceneCode: 'quote_clarification', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
         pricing: configuration.pricing, nativeProtocol: NATIVE_MODEL_PROTOCOLS,
         ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
-    }, { enabled: true, audience: 'operator', host: configuration.host });
+    }, { enabled: true, audience: 'operator', host: configuration.host,
+      inputContinuation: { db, currentRuntimeEnabled: async (sceneCode, sceneVersion) =>
+        configuration.enabled && sceneCode === 'quote_clarification' && sceneVersion === '1' } });
+    const start: typeof requests.start = async (request, value, signal) => {
+      await admission(request, value, undefined, signal);
+      return requests.start(request, value, signal);
+    };
+    return Object.freeze({ ...requests, start });
   }
 };
 
@@ -588,8 +610,10 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const admission = createOriginalTaskStartAdmission(original, 'opening_diagnosis');
     const requests = composeRequestBoundPersistedOriginalSceneModel({
-      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+      ...original,
       scene: { code: 'opening_diagnosis', version: '1' },
       gatewayScene: { sceneCode: 'opening_diagnosis', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -597,22 +621,28 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
         ...(configuration.inputCounting ? { inputCounting: configuration.inputCounting } : {}) },
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host });
-    return Object.freeze({ start: requests.start, recover: requests.recover, reconcile: requests.reconcile,
+    const start: typeof requests.start = async (request, value, signal) => {
+      await admission(request, value, undefined, signal);
+      return requests.start(request, value, signal);
+    };
+    return Object.freeze({ start, recover: requests.recover, reconcile: requests.reconcile,
       takeover: requests.takeover, requestCancel: requests.requestCancel, readExecution: requests.readExecution });
   }
 };
 
 /** Separate server-owned probe configuration: enabling an order workflow must
  * not implicitly permit billable capability challenges (or vice versa). The
- * root installs neither token and never seeds policies or runs a probe. */
+ * publication supplies its independent gate; construction never seeds policies
+ * or runs a probe. A complete disabled configuration retains only authorized
+ * original reads; absence of configuration cannot invent a history host. */
 export const AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION = Symbol('AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION');
-const probeConfiguration = z.discriminatedUnion('enabled', [
+const probeConfiguration = z.union([
   z.object({ enabled: z.literal(false) }).strict(),
-  z.object({ enabled: z.literal(true), platformProfileId: orderExecutionConfiguration.options[1].shape.platformProfileId,
+  z.object({ enabled: z.boolean(), platformProfileId: orderExecutionConfiguration.options[1].shape.platformProfileId,
     priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
     sceneVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
     host: orderExecutionConfiguration.options[1].shape.host,
-    capabilities: z.array(textProbeCommandSchema.shape.capability.unwrap()).min(1).max(6)
+    capabilities: z.array(textProbeCommandSchema.shape.capability.unwrap()).min(1).max(AI_CAPABILITY_PROBE_KINDS_DRAFT.length)
       .refine(values => values.includes('text') && new Set(values).size === values.length),
     taskActionPolicyTtlMs: z.number().int().min(1).max(120000) }).strict()
 ]);
@@ -625,6 +655,8 @@ function readProbeConfiguration(value: unknown) {
 }
 const probeOperations = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
   'claim_recovery_run', 'release_run', 'transition_task', 'request_input'] as const;
+const originalProbeReadMethods: readonly (keyof TextCapabilityRequest)[] = ['readOriginal', 'readTask', 'inspect',
+  'readTaskAction', 'readTaskActionReceipt', 'readHistory', 'readAccounting', 'readAccountingOperation', 'close'];
 /** The existing immutable request -> persistent task -> measured runner ->
  * unique Gateway/dispatch/ledger -> evidence workflow. This factory performs
  * no reads on assembly. Calls quotas are not supplier money/token pricing;
@@ -637,18 +669,29 @@ export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapab
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     secrets: SecretBox, serverValue?: unknown) => {
     const configuration = readProbeConfiguration(serverValue);
-    if (!configuration.enabled) return Object.freeze({ open(): never {
+    if (!('platformProfileId' in configuration)) return Object.freeze({ open(): never {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     } });
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function') {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    return new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets,
+    const factory = new TextCapabilityProbeRequestFactory({ db, auth, guard, subscriptions, secrets,
       platformProfileId: configuration.platformProfileId, sceneVersion: configuration.sceneVersion,
       priceVersion: configuration.priceVersion, pricing: { mode: 'persisted_calls', priceVersion: configuration.priceVersion },
       host: configuration.host, probeCapabilities: configuration.capabilities,
       taskActionPolicyTtlMs: configuration.taskActionPolicyTtlMs,
+      ...(!configuration.enabled ? { protocol: { post: async () => { throw new ModelGatewayError('CONFIG_INVALID'); } } } : {}),
       taskActionPolicies: probeOperations.map(operation => ({ operation, requiredPermissions: ['system:params:manage'] })) });
+    if (configuration.enabled) return factory;
+    return Object.freeze({ open: (request: Parameters<TextCapabilityProbeRequestFactory['open']>[0]) => {
+      const current = factory.open(request);
+      // Keep an allowlist: a later factory method cannot silently reopen new
+      // execution or re-publish capability evidence when the gate is closed.
+      return Object.freeze(Object.fromEntries(Object.entries(current).map(([method, operation]) => [method,
+        originalProbeReadMethods.includes(method as keyof TextCapabilityRequest) ? operation : () => {
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        }])) as TextCapabilityRequest);
+    } });
   }
 };
 /** Management has its own server gate. Opening it does not open any model,
@@ -763,12 +806,17 @@ export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOT
     // selection/plan/approval themselves; all methods that can run are closed.
     const task = configuration.enabled ? configuration : { host: { holderId: dependencies.holderId, leaseMs: 1 },
       limits: { maxSteps: 1, maxCalls: 1, maxTotalMs: 1, maxStepMs: 1, maxOutputBytes: 1, maxConcurrent: 1 as const } };
-    const module = AiHumanQuoteSelectionModule.registerHttpTask(dependencies, options, task, reprepare);
+    const admission = createOriginalTaskStartAdmission({ ...dependencies, db }, 'quote_clarification');
+    const module = AiHumanQuoteSelectionModule.registerHttpTask(dependencies, options, task, reprepare,
+      configuration.enabled ? { admission: (request, original, signal) => admission(request, original, undefined, signal) } : undefined,
+      configuration.enabled ? { db, currentRuntimeEnabled: async (sceneCode, sceneVersion) =>
+        configuration.enabled && sceneCode === 'quote_clarification' && sceneVersion === '1' } : undefined);
     const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
     if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const requests = entry.useFactory() as Record<string, unknown>;
     const closedMethods = provide === AI_SELECTED_QUOTE_TASK_REQUESTS ? ['start', 'continueConfirmation', 'reconcile']
-      : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal'];
+      : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal',
+        'reissueSelectedRequest', 'selectReissuedQuote', 'prepareTaskCenterApproval'];
     return Object.freeze(Object.fromEntries(Object.entries(requests).map(([method, call]) => [method,
       !configuration.enabled && closedMethods.includes(method)
         ? async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } : call])));
@@ -824,11 +872,18 @@ export const AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
         enabled: true, audience: 'operator', ttlMs: 120000,
         templates: [...operations.map(operation => ({ operation, requiredPermissions: ['rental-os:order:view'],
           ...((originalReadOperations as readonly string[]).includes(operation) ? {} : { sceneCode: 'order_explanation' }) })),
+          // Reading an owned historical task is independent of enabling its
+          // model or execution host. These templates still require human CAS
+          // configuration and the original current scene permissions.
+          ...originalReadOperations.map(operation => ({ operation, sceneCode: 'quote_clarification',
+            requiredPermissions: ['rental-os:order:create'] })),
+          ...originalReadOperations.map(operation => ({ operation, sceneCode: 'opening_diagnosis',
+            requiredPermissions: ['rental-os:price:manage'] })),
           ...(quote.enabled || quoteModel.enabled ? [...originalOrderExecutionOperations,
             ...(quoteModel.enabled ? ['request_input', 'submit_input', 'resume_input'] as const : []),
             ...(quote.enabled ? ['decide_approval'] as const : [])].map(operation => ({
             operation, sceneCode: 'quote_clarification', requiredPermissions: ['rental-os:order:create'] })) : []),
-          ...(openingModel.enabled ? [...originalReadOperations, ...originalOrderExecutionOperations].map(operation => ({
+          ...(openingModel.enabled ? originalOrderExecutionOperations.map(operation => ({
             operation, sceneCode: 'opening_diagnosis', requiredPermissions: ['rental-os:price:manage'] })) : [])]
       });
   }
@@ -859,7 +914,7 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
         ...(quote.enabled ? ['rental.order.commit'] as const : []),
         ...(quoteModel.enabled ? ['ai.model.text'] as const : [])] as const },
       { scene: { code: 'opening_diagnosis', version: '1' }, tools: [
-        'tenant.opening.diagnose', ...(settings.enabled ? [AI_APPROVED_SETTINGS_TOOL_CODE] as const : []),
+        'tenant.opening.diagnose', 'tenant.config.propose', ...(settings.enabled ? [AI_APPROVED_SETTINGS_TOOL_CODE] as const : []),
         ...(openingModel.enabled ? ['ai.model.text'] as const : [])] as const },
       ...(execution.enabled ? [{ scene: { code: 'order_explanation', version: '1' },
         tools: ['ai.model.text', 'rental.order.explain'] as const }] : []),
@@ -887,8 +942,10 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }]))) as unknown as OriginalOrderReadHttpRequests;
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    return selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
-      ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const admission = createOriginalTaskStartAdmission(original, 'order_explanation');
+    const requests = selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
+      ...original,
       scene: { code: 'order_explanation', version: '1' },
       gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -897,6 +954,11 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       ...(configuration.includeKnowledge ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {})
     }, { enabled: true, audience: 'operator', host: configuration.host,
       orderReadChain: { enabled: true, answerRoundTrip: true } }));
+    const start: typeof requests.start = async (request, value, signal) => {
+      await admission(request, value, undefined, signal);
+      return requests.start(request, value, signal);
+    };
+    return Object.freeze({ ...requests, start });
   }
 };
 
@@ -917,4 +979,36 @@ export const AI_NATIVE_MEMBER_NAME_PROVIDER: FactoryProvider = {
       scene: { code: configuration.sceneCode, version: configuration.sceneVersion } },
       { enabled: configuration.enabled, host: { holderId, leaseMs: 100000 } });
   }
+};
+
+/** Deployment publication supplies existing independent gates. None of these
+ * bindings initializes task policy, approves an action or dispatches a model. */
+export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
+  AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER,
+  runtimeConfigurationProvider(AI_NATIVE_CONVERSATION_CONFIGURATION, 'conversations'),
+  runtimeConfigurationProvider(AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, 'orderModel'),
+  runtimeConfigurationProvider(AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, 'quoteModel'),
+  runtimeConfigurationProvider(AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, 'openingModel'),
+  runtimeConfigurationProvider(AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, 'quoteOrderExecution'),
+  runtimeConfigurationProvider(AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, 'settingsExecution'),
+  runtimeConfigurationProvider(AI_NATIVE_TASK_RULE_DRAFT_CONFIGURATION, 'businessRuleDraft'),
+  runtimeConfigurationProvider(AI_NATIVE_TASK_CALENDAR_DRAFT_CONFIGURATION, 'calendarDraft'),
+  runtimeConfigurationProvider(AI_NATIVE_MEMBER_NAME_CONFIGURATION, 'memberName'),
+  runtimeConfigurationProvider(AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, 'capabilityProbe'),
+  runtimeConfigurationProvider(AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, 'platformCapabilityProbe'),
+  runtimeConfigurationProvider(AI_NATIVE_INPUT_COUNTING_CONFIGURATION, 'inputCounting'),
+  runtimeConfigurationProvider(AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION, 'budgetManagement'),
+  runtimeConfigurationProvider(AI_NATIVE_CLIENT_MODEL_CONFIGURATION, 'clientModel'),
+  runtimeConfigurationProvider(AI_NATIVE_CLIENT_POLICY_CONFIGURATION, 'clientTaskPolicy'),
+  runtimeConfigurationProvider(AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, 'staffRecognition'),
+  runtimeConfigurationProvider(AI_NATIVE_STAFF_MANUAL_CONFIGURATION, 'staffManual'),
+];
+
+/** Current original-resource reads remain available independently of new-model
+ * publication. Only an explicit enable request can renew three read policies. */
+export const AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
+  provide: AI_TASK_ORIGINAL_READ_POLICY_REQUESTS,
+  inject: originalSceneInjection,
+  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
+    composeTaskOriginalReadPolicyRequests(originalSceneDependencies(...args)),
 };

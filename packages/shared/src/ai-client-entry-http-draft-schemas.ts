@@ -1,4 +1,5 @@
 import { AI_CLIENT_QUOTE_PREPARATION_VERSION } from './ai-client-quote-draft';
+import { AI_CLIENT_QUOTE_BOOKING_VERSION } from './ai-client-quote-booking-draft';
 import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 import { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from './ai-entry-management-draft-schemas';
 
@@ -34,6 +35,13 @@ const quoteResult = { contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSI
   source: object({ materialRef: uuid, materialHash: hash }), inventoryReservation: literal('not_attempted'),
   orderExecution: literal('not_attempted'), confirmation: literal('parameters_only_not_order_approval'),
   retryable: literal(false), nextAction: literal('read_original_quote') };
+const quoteBookingSource = object({ materialRef: uuid, materialHash: hash });
+const quoteBookingMaterial = { materialRef: uuid, materialHash: hash, inputHash: hash, expiresAt: date };
+const quoteBookingPreparation = { contractVersion: literal(AI_CLIENT_QUOTE_BOOKING_VERSION), operationKey: id,
+  source: quoteBookingSource, draft: literal('not_created'), humanSelection: literal('required_before_handoff'),
+  pageAcceptance: literal('not_attempted'), orderExecution: literal('not_attempted'), retryable: literal(false) };
+const quoteBookingObservation = { contractVersion: literal(AI_CLIENT_QUOTE_BOOKING_VERSION), operationKey: id,
+  source: quoteBookingSource, currentUse: literal('not_authorized_by_receipt'), execution: literal('not_attested'), retryable: literal(false) };
 const clientPublication = object({ tenantCode: { type: 'string' }, channel: { enum: ['wechat_miniprogram', 'app', 'web'] },
   service: object({ code: { type: 'string' }, name: { type: 'string' }, categoryCode: { type: 'string' }, status: literal('open') }) });
 const clientOrderText = { type: 'string', minLength: 1, maxLength: 191 };
@@ -78,6 +86,17 @@ export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
   AiClientQuoteResultReadResponse: { oneOf: [
     object({ ...quoteResult, state: literal('observed'), quote: ref('AiClientQuoteFacts'), quotePersistence: literal('saved') }),
     object({ ...quoteResult, state: literal('unknown'), quote: { type: 'null' }, quotePersistence: literal('unknown') })] },
+  AiClientQuoteBookingRequest: object({ original: ref('AiClientQuoteConfirmationRequest'), selection: ref('AiBookingSelection'), operationKey: id }),
+  AiClientQuoteBookingPreparationResponse: { oneOf: [
+    object({ ...quoteBookingPreparation, state: literal('prepared'), material: object(quoteBookingMaterial), action: ref('AiEntryActionDraft') }),
+    object({ ...quoteBookingPreparation, state: literal('unknown'), material: { type: 'null' }, action: { type: 'null' },
+      nextAction: literal('read_original_quote') })] },
+  AiClientQuoteBookingOperationResponse: { oneOf: [
+    object({ ...quoteBookingObservation, state: literal('observed'), material: object({ ...quoteBookingMaterial, revision: literal(1),
+      createdAt: date, observedAt: date, materialValidity: { enum: ['expired', 'not_revalidated'] } }),
+      nextAction: literal('revalidate_material_before_action') }),
+    object({ ...quoteBookingObservation, state: literal('unknown'), material: { type: 'null' },
+      nextAction: literal('read_original_quote_booking_operation') })] },
   AiClientTaskCancelReceipt: object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), taskId: { ...id, maxLength: 36 },
     ...cancelTransition, status: literal('cancel_requested'), cancellation: literal('requested_not_rollback'),
     retryable: literal(false), nextAction: literal('read_original_task') }),

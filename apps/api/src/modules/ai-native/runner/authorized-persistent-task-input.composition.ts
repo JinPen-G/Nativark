@@ -14,8 +14,8 @@ import type { PersistentTaskRunnerComposition } from './persistent-task-runner.c
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
 import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';
 import { AiTaskTakeoverCommitUnknownError, PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
-import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
-import { AiTaskRunnerError, callAiTaskRunnerDependency, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import type { AiTaskRunnerClaimInput, AiTaskRunnerOutcome } from './ai-task-runner.ports';
+import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerRecoveryLease, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,
@@ -65,27 +65,39 @@ export function composeCurrentAuthorizedPersistentTaskInputRunner(
       // Only its acknowledged result can be handed to recovery; a deadline
       // aborts late pre-write work, but never grants a lease by rereading it.
       const original = structuredClone(command);
-      lease = await callAiTaskRunnerDependency(child => takeovers.takeover(original, child), 5000, 'takeover', undefined, input.clock);
+      const observed = await callAiTaskRunnerDependency(child => takeovers.takeover(structuredClone(original), child), 5000, 'takeover', undefined, input.clock);
+      // The original repository has validated this command. Preserve that
+      // exact CAS across the await before handing its reply to cleanup/recovery.
+      lease = snapshotAiTaskRunnerRecoveryLease(original as AiTaskRunnerClaimInput, observed);
     } catch (error) {
       if (error instanceof AiTaskRunnerError && (error.code === 'AI_RUN_LIMIT' || error.code === 'AI_RESULT_UNKNOWN')) {
         throw new AiTaskTakeoverCommitUnknownError();
       }
       throw error;
     }
-    if (signal?.aborted) {
-      // No runner was entered. Cleanup is authorized and CAS-bound to this
-      // acknowledged generation, never an inferred rollback of remote work.
-      try {
-        await callAiTaskRunnerDependency(async child => {
-          const current = await authorization.tasks.readMetadata(lease.taskId);
-          if (child.aborted) throw new AiTaskTakeoverCommitUnknownError();
-          await authorization.tasks.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
-            expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
-        }, 5000, 'takeover_cleanup', undefined, input.clock);
-      } catch { throw new AiTaskTakeoverCommitUnknownError(); }
-      return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
+    let runnerOwnsLease = false;
+    try {
+      if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
+      return await composed.runner.recover(lease, signal, () => { runnerOwnsLease = true; });
+    } finally {
+      if (!runnerOwnsLease) {
+        // Recovery's preflight only read metadata. The acknowledged takeover
+        // still owns this exact generation; no recovery write was attempted.
+        // Once runHeld accepts it, its own finally is the sole cleanup owner.
+        try {
+          await callAiTaskRunnerDependency(async child => {
+            const current = structuredClone(await authorization.tasks.readMetadata(lease.taskId));
+            if (child.aborted || current.taskId !== lease.taskId) throw new AiTaskTakeoverCommitUnknownError();
+            const release = { taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+              expectedTaskRevision: current.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken };
+            const receipt = structuredClone(await authorization.tasks.releaseRun(structuredClone(release)));
+            if (child.aborted || !receipt || receipt.released !== true || receipt.revision !== release.expectedRunRevision + 1) {
+              throw new AiTaskTakeoverCommitUnknownError();
+            }
+          }, 5000, 'takeover_cleanup', undefined, input.clock);
+        } catch { throw new AiTaskTakeoverCommitUnknownError(); }
+      }
     }
-    return composed.runner.recover(lease, signal);
   };
   const readTakeoverReceipt = async (command: unknown, signal?: AbortSignal) => {
     const original = structuredClone(command);

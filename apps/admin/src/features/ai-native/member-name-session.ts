@@ -14,7 +14,7 @@ export interface MemberNameApi {
 }
 const pendingSchema = z.object({ locator: aiMemberNameLocator, operation: z.enum(['prepare', 'execute']) }).strict();
 type Pending = z.infer<typeof pendingSchema>;
-export interface MemberNameStore { read(): Pending | null; write(value: Pending): void; clear(): void; }
+export interface MemberNameStore { read(): Pending | null; write(value: Pending): void; clear(expected: Pending): void; }
 export function memberNameStore(key: string, storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): MemberNameStore {
   return { read() { const raw = storage?.getItem(key); if (raw === undefined || raw === null) return null;
     if (!raw || raw.length > 512) throw Error('AI_OPERATION_LOCATOR_DAMAGED');
@@ -25,7 +25,14 @@ export function memberNameStore(key: string, storage?: Pick<Storage, 'getItem' |
       if (storage.getItem(key) !== null) throw Error('AI_OPERATION_LOCATOR_ALREADY_EXISTS');
       const encoded = JSON.stringify(pendingSchema.parse(value));
       storage.setItem(key, encoded); if (storage.getItem(key) !== encoded) throw Error('AI_OPERATION_LOCATOR_UNCONFIRMED'); },
-    clear() { storage?.removeItem(key); } };
+    clear(expected) {
+      if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+      const current = storage.getItem(key);
+      if (current === null) return;
+      if (current !== JSON.stringify(pendingSchema.parse(expected))) throw Error('AI_OPERATION_LOCATOR_ALREADY_EXISTS');
+      storage.removeItem(key);
+      if (storage.getItem(key) !== null) throw Error('AI_OPERATION_LOCATOR_UNCONFIRMED');
+    } };
 }
 const same = (a: AiMemberNameLocator, b: AiMemberNameLocator | null) => a.customerId === b?.customerId && a.requestKey === b.requestKey;
 export function createMemberNameSession(input: { tenantId: string; current(): boolean; api: MemberNameApi; store: MemberNameStore; changed(): void }) {
@@ -53,7 +60,12 @@ export function createMemberNameSession(input: { tenantId: string; current(): bo
       throw error;
     }
   };
-  const complete = () => { input.store.clear(); publish({ pending: null }); };
+  const complete = () => {
+    // An old successful receipt cannot clear a newer request from another tab.
+    // Pure history reads own no pending journal and therefore remove nothing.
+    if (view.pending) input.store.clear(view.pending);
+    publish({ pending: null });
+  };
   return Object.freeze({ get view() { return view; },
     availability() { return run('availability', signal => input.api.availability(signal)); },
     discover(value: AiMemberNameQuery) {

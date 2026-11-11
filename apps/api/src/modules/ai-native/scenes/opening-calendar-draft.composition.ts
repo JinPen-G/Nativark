@@ -4,7 +4,7 @@
  * operation receipt, not the annual apply's latest-version or batch-id shortcut.
  * Neither consumer grants publication, new capability or arbitrary fields. */
 import { z } from 'zod';
-import type { PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest } from '@rental-os/shared';
+import type { PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest, AiExecutionContext } from '@rental-os/shared';
 import { BoundCalendarDraftService, BoundCalendarDraftUnknownError, boundCalendarDraftCommandSchema } from '../../rental-core/bound-calendar-draft.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -18,6 +18,7 @@ import { AiGuardedQuoteCoreContextSource } from '../tools/quote-route.compositio
 import type { AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composeOpeningProposalWorkflow } from './opening-proposal-workflow.composition';
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
+import type { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 
 const commandSchema = z.object({ original: originalRequestReferenceSchema,
   registrationRef: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
@@ -97,7 +98,11 @@ export function composeOpeningCalendarDraftPreview(input: AiOriginalSceneDepende
  * or model call and never publishes the saved Core draft. */
 export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependencies & {
   business: AiOriginalSceneDependencies['business'] & Pick<RentalBusinessService, 'prepareBoundCalendarDraftDay' | 'refreshBoundCalendarDraftYear'>;
-}, host: AiTaskApplicationHost) {
+}, host: AiTaskApplicationHost, calendarSource?: {
+  read(value: { original: z.infer<typeof originalRequestReferenceSchema>; registrationRef: string }): Promise<{
+    context: AiExecutionContext; receipt: Awaited<ReturnType<AiOpeningSectionProposalService['readReceipt']>>;
+  }>;
+}) {
   const originals = composeOpeningProposalWorkflow(input, host), routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, input.clock);
   const fields = new AiOpeningVersionFieldSource(input.db, routes), contexts = new AiGuardedQuoteCoreContextSource(input.core, routes);
   const core = new BoundCalendarDraftService(input.db, input.business, input.clock);
@@ -106,8 +111,12 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
   const resolve = async (value: unknown) => {
     const parsed = operationSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const command = freezeOriginalInput(parsed.data), expected = await routes.withRead('opening', {}, async context => freezeOriginalInput(structuredClone(context)));
-    const saved = await originals.readReceipt({ original: command.original, registrationRef: command.registrationRef });
+    const command = freezeOriginalInput(parsed.data);
+    const selected = calendarSource ? await calendarSource.read({ original: command.original, registrationRef: command.registrationRef }) : undefined;
+    const expected = selected ? freezeOriginalInput(structuredClone(selected.context))
+      : await routes.withRead('opening', {}, async context => freezeOriginalInput(structuredClone(context)));
+    const saved = selected ? { receipt: selected.receipt }
+      : await originals.readReceipt({ original: command.original, registrationRef: command.registrationRef });
     if (saved.receipt.state !== 'ai_proposal_saved') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const material = verifyOpeningSectionMaterial(saved.receipt.material);
     if (material.key !== 'business_calendar' || material.date === undefined || material.baseRevision === undefined
@@ -136,10 +145,16 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
     return { command, expected, saved, material, section, operation, range };
   };
   const verifyOriginal = async (found: Awaited<ReturnType<typeof resolve>>) => {
-    const current = await originals.readReceipt({ original: found.command.original, registrationRef: found.command.registrationRef });
+    const selected = calendarSource ? await calendarSource.read({ original: found.command.original, registrationRef: found.command.registrationRef }) : undefined;
+    const current = selected ? { receipt: selected.receipt }
+      : await originals.readReceipt({ original: found.command.original, registrationRef: found.command.registrationRef });
     if (requestFingerprint(current) !== requestFingerprint(found.saved)) throw conflict();
-    await routes.withRead('opening', {}, async context => { assertAiReadContextBinding(context, found.expected); });
+    if (selected) assertAiReadContextBinding(selected.context, found.expected);
+    else await routes.withRead('opening', {}, async context => { assertAiReadContextBinding(context, found.expected); });
   };
+  const contextFor = (found: Awaited<ReturnType<typeof resolve>>, readOnly = false) => contexts.current(found.material.scope, found.expected,
+    calendarSource ? { year: found.operation.year, date: found.operation.date,
+      ...(readOnly ? { readVersion: found.operation.version } : {}) } : undefined);
   return Object.freeze({
     async reviewDraft(value: unknown) {
       const parsed = schema.safeParse(structuredClone(value));
@@ -148,10 +163,10 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
       if (requestFingerprint(first.basis) !== found.material.sourceFingerprint) throw conflict();
       const result = await routes.withCalendarDraftWrite(found.operation.year, found.range, async context => {
         assertAiReadContextBinding(context, found.expected);
-        const business = await contexts.current(found.material.scope, found.expected);
+        const business = await contextFor(found);
         return core.review(found.material.scope.tenantId, business, found.operation, async () => {
           await routes.withCalendarDraftWrite(found.operation.year, found.range, async current => { assertAiReadContextBinding(current, context); });
-          if (requestFingerprint(await contexts.current(found.material.scope, found.expected)) !== requestFingerprint(business)) throw conflict();
+          if (requestFingerprint(await contextFor(found)) !== requestFingerprint(business)) throw conflict();
           await verifyOriginal(found);
         });
       });
@@ -175,10 +190,10 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
       if (requestFingerprint(first.basis) !== found.material.sourceFingerprint) throw conflict();
       const result = await routes.withCalendarDraftWrite(found.operation.year, found.range, async context => {
         assertAiReadContextBinding(context, found.expected);
-        const business = await contexts.current(found.material.scope, found.expected);
+        const business = await contextFor(found);
         const revalidate = async () => {
           await routes.withCalendarDraftWrite(found.operation.year, found.range, async current => { assertAiReadContextBinding(current, context); });
-          if (requestFingerprint(await contexts.current(found.material.scope, found.expected)) !== requestFingerprint(business)) throw conflict();
+          if (requestFingerprint(await contextFor(found)) !== requestFingerprint(business)) throw conflict();
           await verifyOriginal(found);
         };
         return core.save(found.material.scope.tenantId, business, found.operation, revalidate);
@@ -194,7 +209,7 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
         assertAiReadContextBinding(context, found.expected);
         const result = await core.read(found.material.scope.tenantId, found.operation, () => verifyOriginal(found));
         if (result.state === 'committed') {
-          const business = await contexts.current(found.material.scope, found.expected);
+          const business = await contextFor(found, true);
           await input.business.refreshBoundCalendarDraftYear(found.material.scope.tenantId, business, found.operation.year);
         }
         return result;

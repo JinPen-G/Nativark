@@ -5,10 +5,12 @@ import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepository }
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
 import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint, taskModelPolicy } from '../model-input/task-model-input';
-import { composeOriginalSceneKnowledge, continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
-import { readTaskModelRunOrigin, taskInputReceiptReferenceSchema, type PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
+import { composeOriginalSceneKnowledge, continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledgeOptions,
+  type AiOriginalSceneKnowledge } from './original-scene-knowledge';
+import { readTaskModelRunOrigin, taskInputReceiptReferenceSchema, PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
 import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskPreparationDefinition } from '../runner/task-run-preparation.ports';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
@@ -31,6 +33,8 @@ type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
   db: ModelDependencies['db'] & Pick<PrismaClient, 'aiTaskResultArtifact'>;
   knowledge?: AiOriginalSceneKnowledgeOptions;
+  /** Server-created original wait/answer witness; never an HTTP mode field. */
+  inputWaitMode?: OriginalSceneInputWaitMode;
 };
 export type AiOriginalSceneRunDependencies = Pick<AuthorizedPersistentTaskInputComposition,
   'clock' | 'monotonic'> & {
@@ -80,7 +84,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
   const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock, knowledge);
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
   const { current, same, source: originalInputSource } = composeOriginalSceneClarificationSource({
-    db: dependencies.db, tasks: model.tasks, scenes, scene, gatewayScene, results
+    db: dependencies.db, tasks: model.tasks, scenes, scene, gatewayScene, results,
+    ...(dependencies.inputWaitMode ? { inputWaitMode: dependencies.inputWaitMode } : {})
   });
   const executors: AiTaskRegisteredExecutor = { resolve: async (code, version) => {
     const executor = await model.executors.resolve(code, version);
@@ -517,8 +522,14 @@ export function composeOriginalSceneClarificationSource(input: {
   scene: { code: string; version: string };
   gatewayScene: AiOriginalSceneModelDependencies['gatewayScene'];
   results: Pick<AiOriginalSceneResultService, 'read'>;
+  inputWaitMode?: OriginalSceneInputWaitMode;
+  inputPendingReadMode?: OriginalScenePendingInputReadMode;
 }) {
   const { db, tasks, scenes, results } = input;
+  if (input.inputWaitMode && !originalInputWaitModes.has(input.inputWaitMode)) throw unavailable();
+  if (input.inputPendingReadMode && !originalPendingInputReadModes.has(input.inputPendingReadMode)) throw unavailable();
+  if (input.inputWaitMode && input.inputPendingReadMode) throw unavailable();
+  const sourceMode = input.inputWaitMode ?? input.inputPendingReadMode;
   const scene = Object.freeze(structuredClone(input.scene));
   const { routeScene: _routeScene, ...serverPolicy } = gatewayTextIntentBindingSchema.parse(structuredClone(input.gatewayScene));
   const modelPolicy = taskModelPolicy(serverPolicy);
@@ -533,7 +544,10 @@ export function composeOriginalSceneClarificationSource(input: {
     // or an unexpired original input. All preparation/dispatch/confirmation
     // callers retain execution admission; no client mode is accepted or grant
     // returned by this observation, and unknown modes fail toward execution.
-    if (accessMode !== 'history') await scenes.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (accessMode !== 'history') {
+      if (sourceMode) await sourceMode.assertCurrent(ref, taskId, runId);
+      else await scenes.requests.resolve(original.request.sceneCode, ref.inputRef);
+    }
     const task = await scenes.requests.readTaskReceipt(ref.inputRef);
     if (task.state !== 'observed' || task.taskId !== taskId) throw denied();
     const access = await tasks.resolveAccess(taskId, 'read_metadata');
@@ -619,10 +633,13 @@ export function composeOriginalSceneClarificationSource(input: {
         `需补充：${missing}。本回答不批准报价或建单，不支持的字段需原人工流程。`, offered);
       if (contract.code === 'original_quote_context' && basis.envelope.clarifications?.length) throw new AiTaskInputLimitError();
       same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
+      const wait = sourceMode ? await sourceMode.assertCurrent(
+        { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId) : undefined;
       return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
-        expiresAt: basis.original.receipt.expiresAt, contract };
+        expiresAt: wait?.expiresAt ?? basis.original.receipt.expiresAt, contract };
     },
     async validateAnswers(binding, contract, answers) {
+      if (input.inputPendingReadMode) throw unavailable();
       const command = structuredClone(binding), submittedContract = structuredClone(contract), submittedAnswers = structuredClone(answers);
       const expected = await originalInputSource.resolve(command);
       if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
@@ -643,4 +660,174 @@ export function composeOriginalSceneClarificationSource(input: {
     }
   });
   return Object.freeze({ current, same, source: originalInputSource });
+}
+
+export interface OriginalSceneInputWaitMode {
+  /** Original repository proof only. This observer neither renews a question
+   * nor grants a lease, policy, model call or Core execution. */
+  assertCurrent(original: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string): Promise<{ expiresAt: string }>;
+}
+const originalInputWaitModes = new WeakSet<OriginalSceneInputWaitMode>();
+export interface OriginalScenePendingInputReadMode extends OriginalSceneInputWaitMode {
+  readonly purpose: 'pending_read_only';
+}
+const originalPendingInputReadModes = new WeakSet<OriginalScenePendingInputReadMode>();
+
+/** Produce a server-only mode from the SAME persisted question/answer reader.
+ * The reference contains a real user submission key, never hashes or leases.
+ * Pending waits retain their deadline; consumed answers may identify only their
+ * original successor. No source can supply a permissive replacement witness. */
+export async function createOriginalSceneInputWaitMode(input: {
+  db: AiOriginalSceneModelDependencies['db']; tasks: Pick<AiTaskRepository, 'resolveAccess'>;
+  original: z.infer<typeof originalRequestReferenceSchema>;
+  reference: z.infer<typeof taskInputReceiptReferenceSchema>; clock?: () => Date;
+  currentRuntimeEnabled(sceneCode: 'quote_clarification', sceneVersion: string): Promise<boolean>;
+}): Promise<OriginalSceneInputWaitMode> {
+  const original = originalRequestReferenceSchema.parse(structuredClone(input.original));
+  const reference = taskInputReceiptReferenceSchema.parse(structuredClone(input.reference));
+  const clock = input.clock ?? (() => new Date());
+  if (typeof input.currentRuntimeEnabled !== 'function') throw unavailable();
+  const receipts = PrismaTaskInputRepository.receiptReader(input.db, input.tasks, clock);
+  const assertCurrent = async (selected: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string) => {
+    if (selected.inputRef !== original.inputRef || selected.draftVersion !== original.draftVersion || taskId !== reference.taskId) throw denied();
+    const access = await input.tasks.resolveAccess(taskId, 'read_metadata');
+    const task = await input.db.aiTask.findFirst({ where: access.where });
+    if (!task || task.id !== taskId || task.inputRef !== original.inputRef || task.cancelRequestedAt !== null
+      || task.ownerId !== access.actorId || task.ownerKind !== access.actorKind || task.audience !== access.audience) throw denied();
+    const request = await input.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+      scopeId: task.scopeId, taskId, id: reference.requestId } } });
+    if (!request || request.scopeId !== task.scopeId || request.taskId !== taskId || request.id !== reference.requestId
+      || request.createdBy !== access.actorId) throw unavailable();
+    // This proves the original plan/input/result and immutable question history
+    // even before an answer exists; it never resolves a live input producer.
+    const receipt = await receipts.readSubmissionReference(reference);
+    if (task.sceneCode !== 'quote_clarification'
+      || await input.currentRuntimeEnabled('quote_clarification', task.sceneVersion) !== true) throw unavailable();
+    const publication = await input.db.aiTaskPlanPolicy.findFirst({ where: { scopeId: task.scopeId,
+      sceneCode: task.sceneCode, sceneVersion: task.sceneVersion } });
+    const tools = publication ? aiPersistedPlanToolsSchema.safeParse(publication.allowedTools) : undefined;
+    if (!publication || publication.scopeId !== task.scopeId || publication.sceneCode !== task.sceneCode
+      || publication.sceneVersion !== task.sceneVersion || !publication.enabled || publication.expiresAt <= clock()
+      || !tools?.success || !tools.data.some(tool => tool.code === TASK_TEXT_MODEL_TOOL
+        && tool.version === AI_TOOL_DRAFT_VERSION)) throw unavailable();
+    let expiresAt = request.expiresAt;
+    if (request.status === 'PENDING') {
+      const run = await input.db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId, id: request.runId } });
+      if (receipt.state !== 'not_observed' || task.status !== 'WAITING_INPUT' || task.revision !== request.waitingTaskRevision
+        || request.revision !== reference.expectedRevision || request.expiresAt <= clock() || runId !== request.runId
+        || !run || run.id !== runId || run.actorKind !== access.actorKind || run.actorId !== access.actorId
+        || run.status !== 'RUNNING' || !run.fencingToken.equals(request.fencingToken)) throw denied();
+    } else if (request.status === 'CONSUMED') {
+      if (receipt.state !== 'observed' || receipt.taskId !== taskId || receipt.requestId !== request.id
+        || ![receipt.runId, request.runId].includes(runId) || request.revision !== reference.expectedRevision + 1
+        || !['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL'].includes(task.status)) throw denied();
+      // The original continuation reader revalidates saved answers against the
+      // completed parent binding before preparing the successor. This is a
+      // provenance read of that parent, never permission to claim it again.
+      // A timely saved answer is immutable history. Its old wait deadline is
+      // not the deadline for a new successor question. That source must still
+      // be covered by the current enabled publication for this same scene/tool;
+      // pending questions never borrow or extend this later deadline.
+      expiresAt = publication.expiresAt;
+    } else throw unavailable();
+    const current = await input.tasks.resolveAccess(taskId, 'read_metadata');
+    if (current.bindingKey !== access.bindingKey) throw denied();
+    return { expiresAt: expiresAt.toISOString() };
+  };
+  const access = await input.tasks.resolveAccess(reference.taskId, 'read_metadata');
+  const task = await input.db.aiTask.findFirst({ where: access.where, select: { scopeId: true } });
+  if (!task) throw unavailable();
+  const request = await input.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+    scopeId: task.scopeId, taskId: reference.taskId, id: reference.requestId } } });
+  if (!request) throw unavailable();
+  const receipt = await receipts.readSubmissionReference(reference);
+  await assertCurrent(original, reference.taskId, receipt.state === 'observed' ? receipt.runId : request.runId);
+  const mode = Object.freeze({ assertCurrent });
+  originalInputWaitModes.add(mode);
+  return mode;
+}
+
+/** The existing clarification/result builders under a proved original wait.
+ * No Runtime/Gateway or input producer is replaced. The caller supplies the real
+ * scoped metadata reader; normal start retains its original creation policy. */
+export function createOriginalSceneInputAdmissionSource(input: {
+  db: AiOriginalSceneModelDependencies['db']; scenes: ReturnType<typeof composeAiOriginalScenes>;
+  scene: { code: string; version: string }; gatewayScene: AiOriginalSceneModelDependencies['gatewayScene'];
+  clock?: () => Date; knowledge?: AiOriginalSceneKnowledge;
+}, tasks: Pick<AiTaskRepository, 'resolveAccess'>, inputWaitMode: OriginalSceneInputWaitMode): AiTaskInputSource {
+  if (!originalInputWaitModes.has(inputWaitMode)) throw unavailable();
+  const policy = gatewayTextIntentBindingSchema.parse(structuredClone(input.gatewayScene));
+  const results = new AiOriginalSceneResultService(input.db, tasks, input.scenes, policy, input.clock, input.knowledge);
+  return composeOriginalSceneClarificationSource({ ...input, tasks, results, inputWaitMode }).source;
+}
+
+/** Read the real current question before the browser has a submission key.
+ * The original pending reader performs its full plan/input/result/question-
+ * history checks before this factory exposes its source. This separate mode
+ * rejects answer validation and is never accepted by model execution assembly. */
+export async function createOriginalScenePendingInputSource(
+  input: Parameters<typeof createOriginalSceneInputAdmissionSource>[0],
+  tasks: Pick<AiTaskRepository, 'resolveAccess'>,
+  value: z.infer<typeof originalRequestReferenceSchema>
+): Promise<{ source: AiTaskInputSource; inputPendingReadMode: OriginalScenePendingInputReadMode | null;
+  pending: Awaited<ReturnType<ReturnType<typeof PrismaTaskInputRepository.pendingReader>['readPending']>> }> {
+  const original = originalRequestReferenceSchema.parse(structuredClone(value));
+  const clock = input.clock ?? (() => new Date());
+  const source = await input.scenes.requests.readHistorical(original), creation = await input.scenes.requests.readTaskReceipt(original.inputRef);
+  if (source.receipt.state === 'revoked' || source.request.sceneCode !== 'quote_clarification' || creation.state !== 'observed') throw unavailable();
+  const taskId = creation.taskId;
+  let requestId: string | undefined;
+  const assertCurrent = async (selected: z.infer<typeof originalRequestReferenceSchema>, selectedTask: string, runId: string) => {
+    if (selected.inputRef !== original.inputRef || selected.draftVersion !== original.draftVersion || selectedTask !== taskId) throw denied();
+    const access = await tasks.resolveAccess(taskId, 'read_metadata');
+    const task = await input.db.aiTask.findFirst({ where: access.where });
+    if (!task || task.id !== taskId || task.inputRef !== original.inputRef || task.status !== 'WAITING_INPUT'
+      || task.cancelRequestedAt !== null || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
+      || task.audience !== access.audience) throw unavailable();
+    const questions = await input.db.aiTaskInputRequest.findMany({ where: { scopeId: task.scopeId, taskId,
+      waitingTaskRevision: task.revision, status: 'PENDING' }, take: 2 });
+    if (questions.length !== 1) throw unavailable();
+    const question = questions[0];
+    if (question.scopeId !== task.scopeId || question.taskId !== taskId || question.runId !== runId
+      || question.status !== 'PENDING' || question.waitingTaskRevision !== task.revision || question.createdBy !== access.actorId
+      || question.expiresAt <= clock() || requestId !== undefined && question.id !== requestId) throw unavailable();
+    requestId = question.id;
+    const run = await input.db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId, id: runId } });
+    const step = await input.db.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId, runId, id: question.stepId } });
+    if (!run || run.status !== 'RUNNING' || run.actorKind !== access.actorKind || run.actorId !== access.actorId
+      || !run.fencingToken.equals(question.fencingToken) || !step || step.status !== 'SUCCEEDED' || step.effect !== 'NONE'
+      || step.toolCode !== TASK_TEXT_MODEL_TOOL || step.inputRef !== question.inputRef
+      || step.requestFingerprint !== question.inputHash || step.resultRef !== question.basisResultRef) throw unavailable();
+    const current = await input.scenes.requests.readHistorical(original), after = await tasks.resolveAccess(taskId, 'read_metadata');
+    if (current.receipt.state === 'revoked' || originalIdentityHash(current.context) !== originalIdentityHash(source.context)
+      || current.receipt.contentHash !== source.receipt.contentHash || after.bindingKey !== access.bindingKey) throw denied();
+    return { expiresAt: question.expiresAt.toISOString() };
+  };
+  const access = await tasks.resolveAccess(taskId, 'read_metadata');
+  const task = await input.db.aiTask.findFirst({ where: access.where });
+  if (!task) throw unavailable();
+  if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null) {
+    const policy = gatewayTextIntentBindingSchema.parse(structuredClone(input.gatewayScene));
+    const results = new AiOriginalSceneResultService(input.db, tasks, input.scenes, policy, input.clock, input.knowledge);
+    const originalSource = composeOriginalSceneClarificationSource({ ...input, tasks, results }).source;
+    const source = Object.freeze<AiTaskInputSource>({ resolve: originalSource.resolve.bind(originalSource),
+      validateAnswers: async () => { throw unavailable(); } });
+    const pending = await PrismaTaskInputRepository.pendingReader(input.db, tasks, source, clock).readPending(taskId);
+    if (pending !== null) throw unavailable();
+    return { source, inputPendingReadMode: null, pending };
+  }
+  const questions = await input.db.aiTaskInputRequest.findMany({ where: { scopeId: task.scopeId, taskId,
+    waitingTaskRevision: task.revision, status: 'PENDING' }, take: 2 });
+  if (questions.length !== 1) throw unavailable();
+  await assertCurrent(original, taskId, questions[0].runId);
+  const inputPendingReadMode = Object.freeze({ purpose: 'pending_read_only' as const, assertCurrent });
+  originalPendingInputReadModes.add(inputPendingReadMode);
+  try {
+    const policy = gatewayTextIntentBindingSchema.parse(structuredClone(input.gatewayScene));
+    const results = new AiOriginalSceneResultService(input.db, tasks, input.scenes, policy, input.clock, input.knowledge);
+    const pendingSource = composeOriginalSceneClarificationSource({ ...input, tasks, results, inputPendingReadMode }).source;
+    const pending = await PrismaTaskInputRepository.pendingReader(input.db, tasks, pendingSource, clock).readPending(taskId);
+    if (!pending || pending.requestId !== requestId) throw unavailable();
+    return Object.freeze({ source: pendingSource, inputPendingReadMode, pending });
+  } catch (error) { originalPendingInputReadModes.delete(inputPendingReadMode); throw error; }
 }

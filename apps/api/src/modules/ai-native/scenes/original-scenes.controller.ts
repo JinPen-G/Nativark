@@ -475,9 +475,9 @@ export class AiOriginalQuoteModelExecutionController {
       await this.model.refreshInput(request, body), true), 'read_input');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.submitAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  submitAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+  submitAnswer(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(async () => validateAiModelRecoveryResponse('AiSceneModelSubmitAnswerResponseDraft',
-      await this.model.submitAnswer(request, body), true), 'read_answer');
+      await withRequestAbort(request, signal => this.model.submitAnswer(request, body, signal), { maxWaitMs: 15000 }), true), 'read_answer');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume) @HttpCode(200) @Header('Cache-Control', 'no-store')
   resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {

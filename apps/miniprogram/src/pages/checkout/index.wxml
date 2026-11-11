@@ -1,6 +1,11 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen {{themeClass}}">
   <nav-bar title="确认订单"></nav-bar>
+  <view wx:if="{{!aiEnabled}}" class="section"><view class="card">
+    <ai-quote-preparation id="client-quote-preparation" selection="{{aiQuoteSelection}}" scope-key="{{aiQuoteScopeKey}}"
+      time-zone="{{aiQuoteTimeZone}}" paused="{{locked || enterprisePending || enterpriseIndex >= 0}}"
+      bind:mode="onQuotePreparationMode" bind:handoff="onQuoteBookingHandoff"></ai-quote-preparation>
+  </view></view>
   <view wx:if="{{!aiEnabled}}" class="card mt-16">
     <view>核对本人AI预约草稿；未发布或失效时继续使用原人工表单。</view>
     <label for="ai-original-handoff">原预约草稿交接编号</label>

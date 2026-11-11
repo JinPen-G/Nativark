@@ -9,7 +9,10 @@
     "test": "node --test ../../tests/miniprogram-static.test.cjs"
   },
   "devDependencies": {
+    "memfs": "3.5.3",
     "miniprogram-api-typings": "5.2.3",
-    "typescript": "^5.6.3"
+    "terser-webpack-plugin": "5.5.0",
+    "typescript": "^5.6.3",
+    "webpack": "5.106.2"
   }
 }

@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { runWithRequestIdentity } from '../../../common/request-identity';
-import { composePersistedTaskCenter } from '../task-center.composition';
+import { AiTaskEventRepository } from '../ai-task-event.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepository, AiTaskRepositoryError, aiTaskAccessFromContext,
+  type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaTaskApplication, waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
-import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
 import { composeApprovedSettingsWaiting } from '../approval-execution/approved-settings-waiting.executor';
 import { ApprovedSettingsResultUnknownError } from '../../rental-core/approved-settings-change.ports';
-import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION,
+  AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { composeRequestBoundSettingsTaskCreation, type AiSceneHttpRequest,
@@ -26,17 +27,20 @@ const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/
 
 /** Original owner reference -> existing persistent snapshot/event readers.
  * No current plan, Gateway, admission, lease or execution driver is constructed.
- * Each request must still pass current original-change AND task action access. */
+ * Current Core change access and its original creation receipt authorize only
+ * metadata, events and terminal receipts, independently of execution-policy TTL. */
 export function composeRequestBoundSettingsTaskReads(
   dependencies: Parameters<typeof composeRequestBoundSettingsTaskCreation>[0], options: AiSceneRequestOptions) {
   const selected = z.object({ enabled: z.boolean(), audience: z.literal('operator') }).strict().safeParse(structuredClone(options));
-  if (!selected.success || 'credentials' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  if (!selected.success || 'credentials' in dependencies || 'originalReadAuthority' in dependencies)
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const server = { ...dependencies, scene: freezeOriginalInput(structuredClone(dependencies.scene)) };
   const creation = selected.data.enabled ? composeRequestBoundSettingsTaskCreation(server, selected.data) : undefined;
   const clock = dependencies.clock ?? (() => new Date());
   const consume = async <T>(request: AiSceneHttpRequest, original: z.infer<typeof reference>,
-    read: (center: ReturnType<typeof composePersistedTaskCenter>, taskId: string, runId: string,
-      change: { changeId: string; changeHash: string }, bound: typeof server & { credentials: AiTaskCredentialSource }) => Promise<T>) => {
+    read: (center: { tasks: AiTaskRepository; events: AiTaskEventRepository }, taskId: string, runId: string,
+      change: { changeId: string; changeHash: string }, bound: typeof server & {
+        credentials: AiTaskCredentialSource; originalReadAuthority: AiTaskRepositoryAuthority }) => Promise<T>) => {
     if (!creation) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const authorization = bearer.safeParse(request?.headers?.authorization);
     if (!authorization.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -55,9 +59,36 @@ export function composeRequestBoundSettingsTaskReads(
         if (!('state' in initial.receipt)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         if (initial.receipt.state === 'unknown') throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN' });
         if (initial.receipt.state !== 'observed' || !initial.receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const center = composePersistedTaskCenter({ db: server.db, auth: server.auth, credentials, clock });
+        const originalTask = initial.receipt.task;
+        const originalReadAuthority: AiTaskRepositoryAuthority = { resolve: async (taskId, operation) => {
+          if (taskId !== originalTask.taskId || !['read_metadata', 'read_events', 'read_step_terminal'].includes(operation))
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const current = await identity.resolve();
+          const receipt = await creation.read(boundRequest, original);
+          if (!('state' in receipt.receipt) || receipt.receipt.state !== 'observed' || !receipt.receipt.task
+            || receipt.receipt.task.taskId !== originalTask.taskId || receipt.receipt.task.runId !== originalTask.runId
+            || receipt.original.changeId !== initial.original.changeId || receipt.original.changeHash !== initial.original.changeHash)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const access = aiTaskAccessFromContext(current, taskId, clock());
+          const task = await server.db.aiTask.findFirst({ where: access.where, include: { scope: true } });
+          if (!task || current.actor.kind !== 'user' || current.audience !== 'operator' || current.scope.kind !== 'workspace'
+            || task.id !== taskId || task.ownerKind !== 'USER' || task.ownerId !== current.actor.userId
+            || task.audience !== 'OPERATOR' || task.archivedAt !== null || task.contractVersion !== AI_TASK_DRAFT_VERSION
+            || task.sceneCode !== server.scene.code || task.sceneVersion !== server.scene.version
+            || task.inputRef !== initial.original.changeId || task.inputRevision !== 1 || task.inputHash !== initial.original.changeHash
+            || !task.scope || Object.entries(access.scope).some(([name, value]) => task.scope[name as keyof typeof task.scope] !== value))
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const after = await identity.resolve();
+          if (originalIdentityHash(current) !== originalIdentityHash(after)
+            || originalIdentityHash(before) !== originalIdentityHash(after)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          return after;
+        } };
+        // This authority is kept in the request closure and is never returned
+        // as a policy, approval, lease or reusable execution credential.
+        const center = { tasks: new AiTaskRepository(server.db, originalReadAuthority, clock),
+          events: new AiTaskEventRepository(server.db, originalReadAuthority, clock) };
         const result = structuredClone(await read(center, initial.receipt.task.taskId, initial.receipt.task.runId,
-          initial.original, { ...server, credentials }));
+          initial.original, { ...server, credentials, originalReadAuthority }));
         const latest = await creation.read(boundRequest, original);
         const after = await identity.resolve();
         if (originalIdentityHash(before) !== originalIdentityHash(after)
@@ -78,8 +109,7 @@ export function composeRequestBoundSettingsTaskReads(
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return consume(request, freezeOriginalInput(parsed.data), async (center, taskId, runId, change, bound) => {
         const input = { taskId, runId };
-        const authorization = composePersistedTaskAuthorization(bound);
-        const recovery = new PrismaTaskRecoverySnapshotRepository(bound.db, authorization.tasks);
+        const recovery = new PrismaTaskRecoverySnapshotRepository(bound.db, center.tasks);
         const snapshot = await recovery.read(input);
         // Confirmation continuation ends in a phase receipt, not a model
         // artifact. Preserve the original workflow projection and do not try
@@ -117,15 +147,14 @@ export function composeRequestBoundSettingsTaskReads(
       return consume(request, freezeOriginalInput(parsed.data), async (center, taskId, runId, change, bound) => {
         const snapshot = await center.events.readSnapshot({ taskId });
         if (snapshot.status !== 'waiting_confirmation') {
-          const authorization = composePersistedTaskAuthorization(bound);
-          const recovery = new PrismaTaskRecoverySnapshotRepository(bound.db, authorization.tasks);
+          const recovery = new PrismaTaskRecoverySnapshotRepository(bound.db, center.tasks);
           const original = await recovery.read({ taskId, runId });
           const steps = original.steps;
           if (steps.length > 1 || steps.some(step => step.toolCode !== AI_APPROVED_SETTINGS_TOOL_CODE
             || step.toolVersion !== AI_TOOL_DRAFT_VERSION || step.inputRef !== change.changeId || step.fingerprint !== change.changeHash))
             throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           const history = steps.length ? await PrismaTaskApplication.readConfirmationHistory(
-            { db: bound.db, tasks: authorization.tasks }, { taskId, runId, stepId: steps[0].stepId }) : null;
+            { db: bound.db, tasks: center.tasks }, { taskId, runId, stepId: steps[0].stepId }) : null;
           if (requestFingerprint(await center.events.readSnapshot({ taskId })) !== requestFingerprint(snapshot)
             || requestFingerprint(await recovery.read({ taskId, runId })) !== requestFingerprint(original))
             throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -134,9 +163,8 @@ export function composeRequestBoundSettingsTaskReads(
         }
         const steps = snapshot.steps.filter(step => step.runId === runId && step.status === 'running');
         if (steps.length !== 1) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const authorization = composePersistedTaskAuthorization(bound);
         const originalWait = { taskId, runId, stepId: steps[0].stepId };
-        const checkpoint = await PrismaTaskApplication.readConfirmation({ db: bound.db, tasks: authorization.tasks }, originalWait);
+        const checkpoint = await PrismaTaskApplication.readConfirmation({ db: bound.db, tasks: center.tasks }, originalWait);
         const proposal = { draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, taskId,
           proposalId: checkpoint.proposal.proposalId, proposalRevision: checkpoint.proposal.proposalRevision,
           reviewedPayloadHash: checkpoint.proposal.reviewedPayloadHash };
@@ -144,7 +172,7 @@ export function composeRequestBoundSettingsTaskReads(
         const review = await settings.readProposal(proposal), decision = await settings.readDecisionReceipt(proposal);
         if (review.change.changeId !== change.changeId || review.change.changeHash !== change.changeHash)
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        const current = await PrismaTaskApplication.readConfirmation({ db: bound.db, tasks: authorization.tasks }, originalWait);
+        const current = await PrismaTaskApplication.readConfirmation({ db: bound.db, tasks: center.tasks }, originalWait);
         if (requestFingerprint(current) !== requestFingerprint(checkpoint)
           || requestFingerprint(await settings.readProposal(proposal)) !== requestFingerprint(review)
           || requestFingerprint(await settings.readDecisionReceipt(proposal)) !== requestFingerprint(decision))

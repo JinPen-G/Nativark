@@ -1,4 +1,6 @@
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
+import { AiTaskOriginalReadPolicyController } from './modules/ai-native/task-original-read-policy.application';
+import { AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskOrderHandoffController } from './modules/ai-native/task-order-handoff.application';
 import { AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -151,7 +153,7 @@ import { AiTaskRuleDraftController } from './modules/ai-native/task-rule-draft.a
 import { AI_NATIVE_TASK_RULE_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskCenterController } from './modules/ai-native/task-center.application';
 import { AiConversationController } from './modules/ai-native/conversation.application';
-import { AI_NATIVE_CONVERSATION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_CONVERSATION_PROVIDER, AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
@@ -213,6 +215,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AiTaskCalendarDraftController,
     AiTaskOrderHandoffController,
     AiTaskReadPolicyController,
+    AiTaskOriginalReadPolicyController,
     AiPlatformModelSettingsController,
     HumanMemoryManagementController,
     KnowledgePolicyManagementController,
@@ -283,6 +286,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
     AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
+    ...AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS,
     AI_NATIVE_CONVERSATION_PROVIDER,
     AI_NATIVE_MEMBER_NAME_PROVIDER,
     ApiAuthGuard,
@@ -296,6 +300,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER,
     AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER,
     AI_NATIVE_TASK_READ_POLICY_PROVIDER,
+    AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER,
     AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
     AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER,

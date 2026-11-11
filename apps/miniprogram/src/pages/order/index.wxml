@@ -1,6 +1,12 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen {{themeClass}}">
   <nav-bar title="订单详情"></nav-bar>
+  <view wx:if="{{view.status === 'ready' && order}}" class="section"><view class="card">
+    <view class="subtitle">解释这笔订单</view>
+    <button class="btn btn--block mt-16" bindtap="onExplainOrder" disabled="{{aiClientTaskWorking}}">请求解释</button>
+    <button class="btn btn--block mt-16" bindtap="onReadClientTask" disabled="{{aiClientTaskWorking}}">核对原回答</button>
+    <view wx:if="{{aiClientTaskPhase && !aiNativeEntryVisible}}" class="mt-16">{{aiClientTaskPhase}}</view>
+  </view></view>
   <ai-task-workbench wx:if="{{aiNativeEntryVisible}}" id="ai-native-workbench" tasks="{{aiNativeTasks}}">
     <view slot="task-card"></view>
     <view slot="step-timeline"></view>

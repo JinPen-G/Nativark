@@ -5,7 +5,7 @@ import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { PrismaService } from '../../database/prisma.service';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
+import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { validateBudgetSettings } from '../budget/budget-settings';
@@ -20,6 +20,8 @@ export interface ApprovedSettingsApplicationDependencies extends PersistedTaskAu
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   holderId: string;
   scene: { code: string; version: string };
+  /** Server-bound original change/creation receipts; read modes only. */
+  originalReadAuthority?: AiTaskRepositoryAuthority;
 }
 /** Server-owned acknowledged execution tuple; never a public commit/DTO field. */
 export const settingsExecutionLeaseSchema = z.object({
@@ -54,8 +56,9 @@ export class ApprovedSettingsTaskAuthority {
 
   async resolve(taskId: string, mode: 'read' | 'prepare' | 'decide' | 'execute', tx?: Prisma.TransactionClient) {
     const db = tx ? settingsTransactionDb(this.d.db, tx) : this.d.db;
-    const authorization = composePersistedTaskAuthorization({ ...this.d, db });
-    const context = await authorization.authority.resolve(taskId, 'read_metadata');
+    const taskAuthority = mode === 'read' && this.d.originalReadAuthority
+      ? this.d.originalReadAuthority : composePersistedTaskAuthorization({ ...this.d, db }).authority;
+    const context = await taskAuthority.resolve(taskId, 'read_metadata');
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' ||
         (context.audience !== 'operator' && context.audience !== 'staff') || !('access' in context)) throw settingsDenied();
     const access = aiTaskAccessFromContext(context, taskId, this.clock());
@@ -94,7 +97,7 @@ export class ApprovedSettingsTaskAuthority {
       if (!entitlement.available) throw settingsUnavailable();
       policyAndGates.push(entitlement);
     }
-    const latest = await authorization.authority.resolve(taskId, 'read_metadata');
+    const latest = await taskAuthority.resolve(taskId, 'read_metadata');
     if (identityHash(latest) !== identityHash(context)) throw settingsDenied();
     const taskEvidence = { id: task.id, scopeId: task.scopeId, revision: task.revision, status: task.status, cancelRequestedAt: task.cancelRequestedAt,
       sceneCode: task.sceneCode, sceneVersion: task.sceneVersion, ownerKind: task.ownerKind, ownerId: task.ownerId, audience: task.audience, archivedAt: task.archivedAt };
