@@ -1,10 +1,12 @@
 # AI Native：当前协作接续
 
-> 更新日期：2026-11-11。负责人已明确恢复 AI Native 专项研发，由 AI-RD 负责、AI-dev1 与 AI-dev2 协作，唯一开发目录为 `D:/工作文件/rental-OS/worktree/ai-native`，分支 `codex/ai-native`。旧暂停和旧工作树派工不再是本轮停止指令；外部业务访问与生产开放仍须原授权。覆盖前原文保留在 Git 提交 `7fbfe30d6b600d75361401254bdbed8da31504d4` 的本文件，历史未完项全文仍见[开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。
+> 更新日期：2026-11-11。负责人已明确恢复 AI Native 专项研发，由 AI-RD 负责、AI-dev1 与 AI-dev2 协作，唯一开发目录为 `D:/工作文件/rental-OS/worktree/ai-native`，分支 `codex/ai-native`。旧暂停和旧工作树派工不再是本轮停止指令；外部业务访问与生产开放仍须原授权。覆盖前原文保留在 Git 提交 `607dbab8783f0dbe9e8b3bf7fba8d1b428a97b97` 的本文件，历史未完项全文仍见[开发记录](<AI Native-开发记录.md#ain-three-tree-preserved-open-items-20261109>)。
 
 ## 当前目标与结果
 
 目标为完成原 AIN-01～28 及 ENTRY-01～18 的正式开发任务，优先可用的核心场景和真实生产装配；不新增边缘功能、Reserved 范围或测试脚本，仅做必要冒烟与类型检查。任务百分比仍按原门槛和实际证据维护，不以代码提交、局部修补或缺依赖的替身结果计100%。
+
+当前优先收口AIN-05→06→07，先解除原任务整项验收的共同前置；依据及最小实测范围见[前置核定](<AI Native-开发记录.md#ain-critical-dependency-closeout-20261111>)。两助手收完手中的规则/员工完整核心链后交付，不自行展开下一条小功能；dev2随后核AIN-06已有证据及实质余项。真实数据库/模型操作尚未授权，相关准备可以继续，执行须先取得明确授权；不继续用外围补片代替这个阻塞。
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 
@@ -20,9 +22,9 @@
 
 | 位置 | 当前职责 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 已交核心片独立核接；TaskHumanApproval/TaskCenter、公共总出口/跨专项装配与四册、inspection-wire生成器/注册表、员工标准装配与首次start准入；已接回日历24文件和员工结果读取5文件，负责核接修复、提交推送及每两项合main |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 优先负责AIN-05完整验收及05→06→07依赖收口；继续独占公共总出口/跨专项装配与四册，核接助手固定成果、提交推送及每两项合main；已交日历/员工结果读取不重复拆片 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 日历24文件已冻结交回；继续AIN-14规则专用source/entry/entryOperation合同、DTO/application、原请求helper、RuleSourceEntry/RulesTab与必要原规则准备分支。已获准在opening workflow/host/difference/configuration/proposal五个底层及opening-rule-draft加rule-only端口；保持日历及普通开业原行为，仅rules:manage/原版本/原收据。总index/OpenAPI/Guard由AI-RD补 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | inspection专用shared/controller/application及独立结果reader共5文件已冻结交回；继续AIN-20员工原检查辅助Task的实际API/session/履约页面及原问题/答案最小留存。公共生成/标准装配/首次准入归AI-RD，不扩识别引擎、支付或员工新业务 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | inspection专用shared/controller/application及独立结果reader共5文件已冻结交回；收完员工首启→补充输入→原候选→人工检查后冻结，随后只读核AIN-06原验收和已有证据、反馈实际缺口。公共生成/标准装配/首次准入归AI-RD，不扩识别引擎、支付或员工新业务 |
 | `D:/工作文件/rental-OS`／`main` | 仅作跨专项整合入口；当前PM处理环境/治理修复，合并串行；各专项开发继续，保留所有已核及未核WIP |
 
 三人按负责人明确恢复的原目标持续施工，工具旧失败/旧goal标记不代替实际执行状态。助手只在需要负责人决策的真实阻塞、公共符号冲突或完整阶段冻结交付时合并发送简短消息；不重复心跳、过程日志和旧证据，可自行解决的失败自行处理。shared总出口、OpenAPI总入口、Prisma schema、AuthGuard、AppModule等跨专项公共文件须与PM协调唯一作者；企业端已获准的ClientApiService.readOrderSubmission第二次读取、AppModule/OpenAPI企业reader/controller/三条GET及后台企业政策材料片段保持其归属。Core交易、资金和品类事实由Core专项提供，AI不重建这些业务权威。
