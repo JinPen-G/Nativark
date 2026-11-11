@@ -18,7 +18,7 @@
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与写锁外`readTenantReadinessSource`两个只读合同固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`已普通推送核远端，不改原扫描、登记或九项算法。API类型、原分配14断言/开业读取17项及新读取5组通过，暂存已核实删除，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)。ResourcePorts不得重入扫描/新开业务事务，不以独立观察冒充快照；可选参加者未接入，缺正式临近政策/事实/授权不捕获。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - 旧阶段25份清单是主树 `D:/工作文件/rental-OS/output/category-governance` 的唯一跨树原稿，本树26处现行链接已按PM安排改相对主仓库路径；另2处历史附件缺失保留，本树新证据仍在本树同名目录。原检查器继续将跨树路径列为`link-outside`，本片单独核固定原稿，不复制副本或放松规则。PM收回main时须按目标文档位置调整相对层级，见[原稿记录](<Rental Core-开发记录.md#evidence-original-location-20261112>)。
-- PM固定维护`6b2dd0a`已在本树整合；Shared202文件保持，API863文件仍为固定`3efc62884`照片构建，本片配置行修订未编入，见[原构建](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。旧换货/客户端/采用及其他失败继续保留，不计CLOSE进度。工具只读使用，同树包别名不跨树共享；本片API类型/原配置范围3项/来源读取3组通过，原开业整组5过/8失败。照片原5组限定消费有效，真实HTTP/DI/库/宿主/供应商仍未验。
+- Shared202文件保持，本树API现在为固定`2f1a34897614c413ba1aeebed1d8ee3687571b05`完整构建的864份自持JS，含后续配置修订/解析/读源及maturity decoder，逐文件hash与四项Shared/Client保护通过，见[当前构建](<Rental Core-开发记录.md#api-current-core-build-20261112>)。包内到期限定7组通过，原resolver整组在旧prototype夹具缺内部Map处失败，旧开业/换货/客户端/采用及其他失败保持；这些研发包结果不计CLOSE完成或真库/HTTP/宿主/发布。工具只读使用，同树包别名不跨树共享。
 
 ## 3. 下一入口与原缺口
 
@@ -27,7 +27,7 @@
    AIN-17下一最小口：按固定配置行合同由唯一作者应用两列/DDL，消费`readOpeningConfiguration`的真实profile修订/来源及顶层settingsRevision；ResourcePorts使用已新增的原事务问题读取和锁外原九项来源。业务配置只有价格子段共用事务，九项不是同事务快照；继续核实际参加者，不能在`recordIssue`持锁时重入扫描/另开业务事务，缺临近政策/事实/当前授权保持not_captured。正常/空update/并发/饱和/回滚及真实重放仍需证据。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。
 3. 企业作者消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)，Core/本人原身份与K/C边界保持。照片已有原5组正常消费及本7组恢复限定结果，完成失败保留原占用/目标、失应答及票据过期均不重传；证据唯一见[恢复阶段](<Rental Core-开发记录.md#exchange-photo-core-recovery-20261112>)。下一口由企业唯一作者接HTTP/DI/实际消费者，并按原门槛核真实权限/事务/存储/宿主；未冻结照片不可接受，原11组替身不替代实际企业参与者或正式验收。本树继续品类治理主线。
-4. ECP-10 maturity第一阶段两源码窗口已实施Core纯decoder/原ID、原CorporateSettlementService委托和新收据actor-time绑定，API类型/限定7组通过，原整组Tenant父锁fixture失败保留，见[原核定证据阶段](<Rental Core-开发记录.md#corporate-maturity-evidence-20261112>)。旧时间分别保留，未知/null版本不降级、不补actor/time，原operator/staff门闸不改。第二阶段单ledger企业finance安全字段/coverage方案归该记录，Core企业port/Shared窗口尚未开放，继续CAT-GOV主线；正式账单、历史跨空间和混合payer/guarantee源仍unavailable。
+4. ECP-10 maturity第一阶段源码`2f1a34897614c413ba1aeebed1d8ee3687571b05`已固定推送，Core纯decoder/原ID及原服务actor-time绑定完成类型与源码/当前包限定7组；原整组Tenant父锁fixture失败保留，见[原核定证据阶段](<Rental Core-开发记录.md#corporate-maturity-evidence-20261112>)。旧双时间、未知/null版本不降级及原operator/staff门闸保持。第二阶段单ledger finance字段/coverage方案归记录，企业port/Shared窗口尚未开放，继续CAT-GOV主线；原statement/历史空间/混合guarantee缺口保留。
 5. 非关键路径CLOSE依原任务留后续，保持用量/免赔、特殊结案、停租、车辆后发现费用、真实保证金及安全的完整门槛。历史CORE-019片不覆盖存量账务、企业原回款冲销或真实供应商保证金。
 
 ## 4. 验证与交付边界

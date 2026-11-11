@@ -4,11 +4,23 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="api-current-core-build-20261112"></a>
+
+## 当前Core与核定到期源码的自持API构建（2026-11-12）
+
+固定来源`2f1a34897614c413ba1aeebed1d8ee3687571b05`已普通推送核远端，包含解析器`cb96a636b`及此前配置行修订/只读来源，本片没有新增源码/Schema/Client变更。先核原863文件照片包逐文件与原清单一致、dist未跟踪且无链接、Shared/Client四个保护文件hash未变，再在唯一任务暂存由原tsconfig完整编译并逐文件迁入本树自持API目录。
+
+`tsc --sourceMap false --incremental false --pretty false`退出0，864份JS每文件安装hash与编译结果一致；更新8份原模块，新增1份maturity纯decoder，其余855份原产物不变。原Shared正式出口/租赁合同及Client schema/归属标记四hash保护通过；没有复制别树产物、启动应用或连接环境。唯一[构建清单](../../output/category-governance/api-build-maturity-2f1a34897-20261112.json)保留来源、命令、hash、文件差异及退出清理状态；这只是本树研发包，不是原CAT-A14/A22最终冻结/真库/宿主或发布证据。
+
+当前编译包的CorporateSettlementService/纯decoder/ALS复用原到期fixture，7组限定调用退出0、audit 0，见[包内到期消费](../../output/category-governance/api-maturity-runtime-final-20261112.json)。原ID/旧双时间/原键恢复、未知version/actor-time/金额拒绝及原财务门闸保持。第一次包内装配混用src ALS与dist服务导致财务门闸拒绝，改为同一包上下文后只复验相关调用；[首次运行观察](../../output/category-governance/api-maturity-runtime-checks-20261112.json)保留，没有改授权/断言或把源码别名称为包消费。
+
+原`node tests/category-version-resolver.test.cjs`用这个当前包退出1，`:156`的Object.create(Core.prototype)未初始化configurationReadsByWorkspace，调用已提交配置读取时访问get失败；其后断言不计通过，没有为夹具懒造生产字段/删断言。原主树不同固定基线的源码映射结果不替代本树整组证据。文档351链接/新锚点无新增问题、原28项分类保留；固化证据后7份本片退出日志/缓存及41个编译/任务目录已删除，暂存路径不存在，864份自持研发产物保留。后续仍须原真实DB/全部实例/各端与两新编码不同组合经营，CLOSE和CAT-GOV分母/完整门槛不变。
+
 <a id="corporate-maturity-evidence-20261112"></a>
 
 ## 原财务核定到期收据的纯解码与审计绑定（2026-11-12）
 
-关联CLOSE-CORP-VERIFY及企业ECP-10必要来源，不计CAT-GOV进度。本片从已核GitHub的`8daf022680c8afc42d6e96a8cd4cb5d20c9fb7c1`接续；PM明确准许两源码窗口：[Core纯解码器](../../apps/api/src/modules/rental-core/rental-corporate-maturity-receipt.ts)和[原CorporateSettlementService](../../apps/api/src/modules/platform/customer-corporate-settlement.service.ts)的maturity委托/收据写入。没有改operator/staff财务授权、其他资金动作、原键、ledger/operationLog/锁序、Schema/Client或企业响应投影。
+关联CLOSE-CORP-VERIFY及企业ECP-10必要来源，不计CAT-GOV进度。本片从已核GitHub的`8daf022680c8afc42d6e96a8cd4cb5d20c9fb7c1`接续，源码检查点`2f1a34897614c413ba1aeebed1d8ee3687571b05`已独立提交/普通推送核远端；PM准许两源码窗口：[Core纯解码器](../../apps/api/src/modules/rental-core/rental-corporate-maturity-receipt.ts)和[原CorporateSettlementService](../../apps/api/src/modules/platform/customer-corporate-settlement.service.ts)的maturity委托/收据写入。没有改operator/staff财务授权、其他资金动作、原键、ledger/operationLog/锁序、Schema/Client或企业响应投影。
 
 `corporateCreditMaturityAuditId`保留原SHA-256(JSON.stringify(["corporate.credit.maturity", tenantId, customerId, ledgerId]))字节；`readCorporateCreditMaturityEvidence(log, ledger)`纯读原正债权/原核定审计，返回原Shared receipt及内部audit来源。核原ID/action、tenant/customer/workspace/order/ledger/currency/原Decimal金额精度/basis/key，绑定audit.userId与detail.recordedBy，缺actor/time或矛盾明确不可核验。decoder不查当前用户状态、不读配置或计算dueAt；原操作人后来停用不否定历史审计，当前读取资格仍由原服务前后复验。
 
