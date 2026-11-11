@@ -10,6 +10,7 @@ import { CustomerCorporateSettlementService } from "../platform/customer-corpora
 import { RentalEnterpriseReadPort } from "../rental-core/rental-enterprise-read.port";
 import { RentalFundingService } from "../rental-core/rental-funding.service";
 import { EnterpriseOrderReaderService } from "./enterprise-order-reader.service";
+import { EnterpriseReaderAuditService } from "./enterprise-reader-audit.service";
 import { EnterpriseOrderExportQueryDto, EnterpriseOrdersQueryDto } from "./enterprise-order-query.dto";
 
 interface EnterpriseCustomerRequest {
@@ -20,6 +21,7 @@ interface EnterpriseCustomerRequest {
 export class EnterpriseReadController {
   private readonly finances?: RentalEnterpriseReadPort;
   private readonly exportAccess?: EnterpriseAccessService;
+  private readonly readerAudit?: EnterpriseReaderAuditService;
 
   constructor(private readonly orders: EnterpriseOrderReaderService,
     @Optional() @Inject(PrismaService) prisma?: PrismaService,
@@ -28,6 +30,7 @@ export class EnterpriseReadController {
     if (prisma) {
       this.finances = new RentalEnterpriseReadPort(prisma, funding, credit);
       this.exportAccess = new EnterpriseAccessService(prisma);
+      this.readerAudit = new EnterpriseReaderAuditService(prisma, this.exportAccess);
     }
   }
 
@@ -43,7 +46,8 @@ export class EnterpriseReadController {
 
   private async financialExport<T extends RentalEnterpriseCorporateFinancialProjection | RentalEnterpriseOrderFinancialProjection>(
     inputContext: ClientRequestContext, corporateId: string, required: readonly ("finance:read" | "orders:read")[],
-    read: (context: ClientRequestContext) => Promise<T>
+    read: (context: ClientRequestContext) => Promise<T>,
+    action: "finance.account.export" | "finance.order.export", objectId: string
   ): Promise<T> {
     const context = Object.freeze({ ...inputContext });
     if (!this.exportAccess) throw new ServiceUnavailableException("企业财务导出读取尚未装配");
@@ -62,6 +66,7 @@ export class EnterpriseReadController {
       throw new ForbiddenException("企业财务导出权限或当前经营空间已变化");
     }
     if (Buffer.byteLength(JSON.stringify(result), "utf8") > 65536) throw new ServiceUnavailableException("企业财务导出超过完整投影上限");
+    await this.readerAudit!.record(context, corporateId, action, objectId, null, 1, result);
     return result;
   }
 
@@ -76,9 +81,11 @@ export class EnterpriseReadController {
   @Get("corporates/:corporateId/finance")
   @Header("Cache-Control", "no-store")
   @Header("Vary", "Authorization")
-  corporateFinance(@Req() request: EnterpriseCustomerRequest, @Param("corporateId") corporateId: string) {
-    const context = this.customer(request);
-    return this.financialReader().corporateFinancialProjection(context, corporateId);
+  async corporateFinance(@Req() request: EnterpriseCustomerRequest, @Param("corporateId") corporateId: string) {
+    const context = Object.freeze({ ...this.customer(request) });
+    const result = await this.financialReader().corporateFinancialProjection(context, corporateId);
+    await this.readerAudit!.record(context, corporateId, "finance.account.read", corporateId, null, 1, result);
+    return result;
   }
 
   @Get("corporates/:corporateId/finance/export-rows")
@@ -86,16 +93,18 @@ export class EnterpriseReadController {
   @Header("Vary", "Authorization")
   exportCorporateFinance(@Req() request: EnterpriseCustomerRequest, @Param("corporateId") corporateId: string) {
     const context = this.customer(request);
-    return this.financialExport(context, corporateId, ["finance:read"], subject => this.financialReader().corporateFinancialProjection(subject, corporateId));
+    return this.financialExport(context, corporateId, ["finance:read"], subject => this.financialReader().corporateFinancialProjection(subject, corporateId), "finance.account.export", corporateId);
   }
 
   @Get("corporates/:corporateId/orders/:orderId/finance")
   @Header("Cache-Control", "no-store")
   @Header("Vary", "Authorization")
-  orderFinance(@Req() request: EnterpriseCustomerRequest, @Param("corporateId") corporateId: string,
+  async orderFinance(@Req() request: EnterpriseCustomerRequest, @Param("corporateId") corporateId: string,
     @Param("orderId") orderId: string) {
-    const context = this.customer(request);
-    return this.financialReader().orderFinancialProjection(context, corporateId, orderId);
+    const context = Object.freeze({ ...this.customer(request) });
+    const result = await this.financialReader().orderFinancialProjection(context, corporateId, orderId);
+    await this.readerAudit!.record(context, corporateId, "finance.order.read", orderId, null, 1, result);
+    return result;
   }
 
   @Get("corporates/:corporateId/orders/:orderId/finance/export-rows")
@@ -104,7 +113,7 @@ export class EnterpriseReadController {
   exportOrderFinance(@Req() request: EnterpriseCustomerRequest, @Param("corporateId") corporateId: string,
     @Param("orderId") orderId: string) {
     const context = this.customer(request);
-    return this.financialExport(context, corporateId, ["finance:read", "orders:read"], subject => this.financialReader().orderFinancialProjection(subject, corporateId, orderId));
+    return this.financialExport(context, corporateId, ["finance:read", "orders:read"], subject => this.financialReader().orderFinancialProjection(subject, corporateId, orderId), "finance.order.export", orderId);
   }
 
   @Get("corporates/:corporateId/orders")

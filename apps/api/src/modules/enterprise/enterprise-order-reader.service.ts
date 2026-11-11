@@ -10,6 +10,7 @@ import { getRequestIdentity } from "../../common/request-identity";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
+import { EnterpriseReaderAuditService } from "./enterprise-reader-audit.service";
 import { rentalOrderDueAt } from "../rental-core/rental-carrier-shipment";
 import { enterpriseJson } from "./enterprise-command.service";
 
@@ -35,7 +36,10 @@ const reference = (value: unknown): value is string => typeof value === "string"
 
 @Injectable()
 export class EnterpriseOrderReaderService {
-  constructor(private readonly prisma: PrismaService, private readonly access: EnterpriseAccessService) {}
+  private readonly audit: EnterpriseReaderAuditService;
+  constructor(private readonly prisma: PrismaService, private readonly access: EnterpriseAccessService) {
+    this.audit = new EnterpriseReaderAuditService(prisma, access);
+  }
 
   private principal(context: ClientRequestContext) {
     const identity = getRequestIdentity();
@@ -239,7 +243,9 @@ export class EnterpriseOrderReaderService {
       return { total, items: rows.map(row => this.view(context, corporateId, row)) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     await this.recheck(context, corporateId, scope);
-    return { ...this.readScope(context, corporateId, scope), group, page, pageSize, ...result };
+    const response = { ...this.readScope(context, corporateId, scope), group, page, pageSize, ...result };
+    await this.audit.record(context, corporateId, "orders.list", corporateId, group, result.items.length, response);
+    return response;
   }
 
   async detail(inputContext: ClientRequestContext, corporateId: string, orderId: string): Promise<EnterpriseOrderDetailResponse> {
@@ -277,7 +283,9 @@ export class EnterpriseOrderReaderService {
         corporateBenefits: this.benefits(original.membershipBenefitEvaluations, guaranteeRecorded) } satisfies EnterpriseOrderDetail;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     await this.recheck(context, corporateId, scope);
-    return { ...this.readScope(context, corporateId, scope), order };
+    const response = { ...this.readScope(context, corporateId, scope), order };
+    await this.audit.record(context, corporateId, "orders.detail", orderId, order.group, 1, response);
+    return response;
   }
 
   async exportRows(inputContext: ClientRequestContext, corporateId: string, query: EnterpriseOrderExportQuery = {}): Promise<EnterpriseOrderExportResponse> {
@@ -304,6 +312,8 @@ export class EnterpriseOrderReaderService {
     if (latestExport.membershipId !== exportGrant.membershipId || latestExport.permissionRevision !== exportGrant.permissionRevision) {
       throw new ForbiddenException("企业导出授权已撤销");
     }
-    return { ...this.readScope(context, corporateId, scope), group, items, total: items.length, maxRows: ENTERPRISE_ORDER_EXPORT_LIMIT };
+    const response: EnterpriseOrderExportResponse = { ...this.readScope(context, corporateId, scope), group, items, total: items.length, maxRows: ENTERPRISE_ORDER_EXPORT_LIMIT };
+    await this.audit.record(context, corporateId, "orders.export", corporateId, group, items.length, response);
+    return response;
   }
 }

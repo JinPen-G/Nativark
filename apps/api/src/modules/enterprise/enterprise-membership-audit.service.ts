@@ -9,11 +9,15 @@ import type { ClientRequestContext } from "../client/client-auth.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
 import { enterpriseHash, enterpriseJson } from "./enterprise-command.service";
+import { EnterpriseReaderAuditService } from "./enterprise-reader-audit.service";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 const reference = (v: unknown): v is string => typeof v === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(v);
 @Injectable()
 export class EnterpriseMembershipAuditService {
-  constructor(private readonly prisma: PrismaService, private readonly access: EnterpriseAccessService) {}
+  private readonly readers: EnterpriseReaderAuditService;
+  constructor(private readonly prisma: PrismaService, private readonly access: EnterpriseAccessService) {
+    this.readers = new EnterpriseReaderAuditService(prisma, access);
+  }
   private async workflowAudits(tenantId: string, corporateId: string): Promise<EnterpriseInviteTransferAuditEntry[]> {
     type Row = { tenantId: string; corporateCustomerId: string | null; auditObjectId: string | null; objectType: "invite" | "administrator_transfer"; operationKey: string; actorUserId: string; target: string; reason: string; result: unknown; createdAt: Date; requestHash?: string; applicantCustomerId?: string; association?: unknown; originalTarget?: string; originalResult?: unknown; originalHash?: string };
     // Known creation targets remain in the result even when their ID/association
@@ -263,8 +267,9 @@ export class EnterpriseMembershipAuditService {
       if(!item)throw new ConflictException("原门户配置收据缺少可核对字段");return item;
     });
   }
-  async read(context: ClientRequestContext, corporateId: string): Promise<EnterpriseMembershipAudit> {
+  async read(context: ClientRequestContext, corporateId: string, readerCursor?: string): Promise<EnterpriseMembershipAudit> {
     if (!reference(corporateId)) throw new BadRequestException("企业审计引用无效");
+    if (readerCursor !== undefined && !context.workspaceId) throw new BadRequestException("企业读取审计分页须当前经营空间");
     const scopeKey = () => JSON.stringify([context.tenantId,context.tenantCode,context.customerId,context.sessionId,context.workspaceId,context.workspaceCode]);
     const key = scopeKey();
     const assertScope = () => {
@@ -308,7 +313,10 @@ export class EnterpriseMembershipAuditService {
     });
     const all=[...items,...workflowItems,...businessItems,...expenseItems,...joiningItems,...policyItems,...applicationApprovalItems,...merchantPolicyItems,...(merchantPortalItems ?? [])];
     if (all.length>200 || new Set(all.map(row => row.operationKey)).size!==all.length) throw new ConflictException("企业管理审计超出统一有界范围");
+    const readerAudit = context.workspaceId ? await this.readers.read(context, corporateId, after, readerCursor) : undefined;
+    assertScope();
     return { tenantCode: context.tenantCode, corporateCustomerId: corporateId, permissionRevision: after.permissionRevision,
+      ...(readerAudit ? { readerAudit } : {}),
       coverage: "original_member_and_administrator_commands", workflowCoverage:"original_invite_and_administrator_transfer_commands", workflowItems,
       businessCoverage:"original_management_and_current_workspace_booking_commands", businessItems,
       expenseCoverage:"original_current_workspace_associated_expense_approval_commands",expenseItems,
