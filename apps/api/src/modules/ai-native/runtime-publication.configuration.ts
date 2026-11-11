@@ -25,6 +25,10 @@ const configurations = z.object({
   platformCapabilityProbe: configuration,
   inputCounting: configuration,
   budgetManagement: configuration,
+  clientModel: configuration,
+  clientTaskPolicy: configuration,
+  staffRecognition: configuration,
+  staffManual: configuration,
 }).strict();
 const publicationSchema = z.object({
   version: z.literal('ain-runtime-publication-1'),
@@ -50,7 +54,8 @@ function immutable<T>(value: T): T {
 
 /** Deployment input is JSON, never a path to open or code to evaluate. A missing
  * section stays absent: enabling a model does not enable paid probes, counting,
- * order creation, draft saves or setting changes on its behalf. */
+ * order creation, draft saves, setting changes, client policy management or
+ * staff manual operations on its behalf. */
 export function readRuntimePublication(source: Pick<ConfigService, 'get'>): RuntimePublication {
   const raw: unknown = source.get(AI_NATIVE_RUNTIME_PUBLICATION_KEY);
   if (raw === undefined || raw === '') return immutable({ state: 'unconfigured', revision: null, configurations: {} });

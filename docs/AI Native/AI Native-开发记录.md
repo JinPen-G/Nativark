@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-staff-publication-closeout-20261111"></a>
+## 客户与员工原入口的部署配置接线（2026-11-11）
+
+源码复核发现：AppModule虽已使用原部署发布来源，但其闭合schema和固定注册表遗漏客户模型、客户Task政策、员工识别和员工人工接续四个已有配置token；正常部署发布这些分区会被拒绝，不能从已实现的服务/页面推断实际入口可启用。现于[原发布读取器](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)和[原provider注册](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)补`clientModel`、`clientTaskPolicy`、`staffRecognition`、`staffManual`，共17个独立配置接点。缺项仍保持原默认关闭，每个消费者继续使用自己的闭合schema；模型开启不连带授予政策管理、人工检查提交或其他动作，未修改任何实际环境配置或持久政策。
+
+负责人以本片两份源码及`d6ec1fae5`的其余依赖做固定快照，27份并行tracked WIP仅在内存映射为该基线，没有覆盖工作区。一次stdin冒烟exit0（session `52735`，chunk `9a0dd1`）：原版读取器拒绝新配置复现成功，四个新token均经实际注册唯一注入、独立开启且冻结快照互不共享；客户实际builder得到原三个协议adapter，关闭后仍保留原输入/结果/账务读取；员工识别与人工操作各自开关，均关闭仍保留历史读取。实际客户政策factory在开启后仍调用原Guard，撤权拒绝且DB调用0；未开启时拒绝管理请求。此组只证明原配置与实际消费者装配，没有派发模型或生成业务事实。
+
+两入口及传递依赖TypeScript5.9.3/noEmit最终0诊断（session `63160`，chunk `b0c47b`）。首类型命令继承API专属rootDir，直接映射shared/MCP源码产生128项TS6059；仅将本次内存验证rootDir设为本树，再验同两入口，未改项目tsconfig、放宽类型或重复已绿冒烟。固定Git blob依次为`4e5e6d24122bd246727bbe73fbc8a396c90583b6`、`0e550e2c0e9ca42b651480f88ea5947753e709c0`。新增文档链接和`git diff --check`通过；docs检查仍为6处既有缺链，无本片新增。审计0，单一任务临时目录未创建，无新增测试文件、安装、共享产物或后台进程。真实数据库/模型许可仍待确认，适用G4和前置未齐，任务百分比不变。
+
 <a id="ain-critical-dependency-closeout-20261111"></a>
 ## 原任务整项收口的前置核定（2026-11-11）
 

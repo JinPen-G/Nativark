@@ -983,6 +983,10 @@ export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
   runtimeConfigurationProvider(AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, 'platformCapabilityProbe'),
   runtimeConfigurationProvider(AI_NATIVE_INPUT_COUNTING_CONFIGURATION, 'inputCounting'),
   runtimeConfigurationProvider(AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION, 'budgetManagement'),
+  runtimeConfigurationProvider(AI_NATIVE_CLIENT_MODEL_CONFIGURATION, 'clientModel'),
+  runtimeConfigurationProvider(AI_NATIVE_CLIENT_POLICY_CONFIGURATION, 'clientTaskPolicy'),
+  runtimeConfigurationProvider(AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, 'staffRecognition'),
+  runtimeConfigurationProvider(AI_NATIVE_STAFF_MANUAL_CONFIGURATION, 'staffManual'),
 ];
 
 /** Current original-resource reads remain available independently of new-model
