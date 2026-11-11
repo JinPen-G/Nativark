@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain13-14-original-material-consumers-20261112"></a>
+## AIN-13/14原订单与开业材料消费修复（2026-11-12）
+
+从已上传`7332875c9a79e36479a87f28848afea43f543962`核接dev1两文件：[订单人工交接](../../apps/admin/src/features/ai-native/ConversationOrderHandoff.tsx)固定blob`914f7566367b993751e95d56fdfe292ca6e37fa7`，SHA-256=`a9bc03e6c8d6865fcfc4d97ef21fc151365f517a084b8639803ae44241f5ea35`；[开业诊断](../../apps/admin/src/features/ai-native/ReadinessDiagnosticsCard.tsx)固定blob`42093889d1b46fab1cca71219afe44e34b36d664`，SHA-256=`c3528bc07aa786e20252955f34da60900b7137405d9b4694738cdf0abd23bfdb`。Root逐字节核对并独立审查原生产者、历史观察者与实际页面消费，未夹入开业API/session、自动化及员工活动WIP。
+
+原会话`turn.requestHash`绑定受理场景正文；原业务`receipt.contentHash`另绑定主体、scope和版本，两者不能直接等同。消费者改用原`readTaskScene`取得真实原请求/Task/Run关联，分别校验收据及Task的inputHash/inputRevision、当前空间/audience与快照水位，再将订单/开业材料比较到对应原收据。业务读取前后仍重验原受理、主体及材料；旧事实变化先撤回，人工再次明确选择才导航。无模型、业务写入、重建请求或续权。
+
+作者实际两场景模拟分别通过：订单stdin SHA-256=`1cfd5d8e3a430e43b49e6884b7d8ba94678b63b494bffe4297a752f0a61dfe27`、开业stdin SHA-256=`4eae473d3b688f9b58a57285d892df712bd411431eb50a5113ea6d4b7de914de`；各1原Task、0模型调用，伪造owner/已登记其他空间/版本/hash、撤权、epoch与材料变化均拒绝。合并命令曾在订单loader误把TSX按TS加载时退出1，开业已经通过；仅修内存loader后独立复验订单退出0，未重复开业绿色。Root本片`node -`以原离线preload、不可达数据库地址和纯内存审计核TypeScript5.9.3：两消费根及10份既有声明、1477传递源，0诊断、退出0；两SHA不变，审计为空，任务临时目录未创建。
+
+本片修复两入口的合法来源消费，不据局部修复增加任务百分比。AIN-13全文金额/状态/下一步与经营入口继续独立核定；既有history用例`reads.length===1`与Core当前前后双读不符，失败保留，未删除断言或降低生产一致性。AIN-14还缺四普通配置分区的R1公开准备/提案链及外部配置分类的可信元数据；实际开业API/session的原ref错调完整reconcile请求由dev1独占修复。数据库、模型、React及HTTP均是明确模拟，不称真实宿主或生产验收。
+
 <a id="ain12-original-display-pipeline-20261112"></a>
 ## AIN-12原展示生成、公开读取与任务中心消费（2026-11-12）
 
