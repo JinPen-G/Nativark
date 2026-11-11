@@ -16,21 +16,24 @@
  *   node scripts/build.cjs              # 本机联调构建
  *   node scripts/build.cjs --release    # 发布构建（拒绝 http）
  *   node scripts/build.cjs --check      # 只做类型检查
+ *   node scripts/build.cjs --out-dir <本树 output/.tmp/任务/员工端> # 隔离构建
  */
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
-const dist = path.join(root, "dist");
+let dist;
+let outputPrepared = false;
+let buildCompleted = false;
 const checkOnly = process.argv.includes("--check");
 const releaseMode = process.argv.includes("--release");
 
 function fail(message) {
-  process.stderr.write(`[staff-miniprogram build] ${message}\n`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function walk(dir) {
@@ -51,7 +54,7 @@ function resolveTsc() {
 let privateTypeConfig;
 function runTsc(args) {
   if (args[0] === '-p' && args[1] === 'tsconfig.json') {
-    privateTypeConfig ??= require('../../../scripts/miniprogram-shared-types.cjs').prepareMiniprogramSharedTypes(root);
+    privateTypeConfig ??= prepareMiniprogramSharedTypes(root);
     args = ['-p', privateTypeConfig, ...args.slice(2)];
   }
   const result = spawnSync(process.execPath, [resolveTsc(), ...args], { cwd: root, stdio: "inherit" });
@@ -83,8 +86,9 @@ function main() {
     process.stdout.write("[staff-miniprogram build] 类型检查通过\n");
     return;
   }
-  fs.rmSync(dist, { recursive: true, force: true });
-  runTsc(["-p", "tsconfig.json"]);
+  dist = clearMiniprogramBuildOutput(root, process.argv.slice(2));
+  outputPrepared = true;
+  runTsc(["-p", "tsconfig.json", "--outDir", dist]);
 
   for (const file of walk(src)) {
     if (file.endsWith(".ts")) continue;
@@ -132,7 +136,17 @@ function main() {
   fs.writeFileSync(path.join(dist, "project.config.json"), `${JSON.stringify(projectConfig, null, 2)}\n`);
 
   const mode = releaseMode ? "发布构建" : "本机联调构建（产物只能在开发者工具本地预览，不可上传）";
-  process.stdout.write(`[staff-miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → dist/（API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
+  process.stdout.write(`[staff-miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → ${path.relative(root, dist)}/（API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
 }
 
-main();
+try { main(); buildCompleted = true; }
+catch (error) { process.stderr.write(`[staff-miniprogram build] ${error.message}\n`); process.exitCode = 1; }
+finally {
+  try { releaseMiniprogramSharedTypes(privateTypeConfig); }
+  catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+  if (outputPrepared && !buildCompleted) {
+    try {
+      clearMiniprogramBuildOutput(root, process.argv.slice(2));
+    } catch (error) { process.stderr.write(`[staff-miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+  }
+}
