@@ -11,11 +11,12 @@ import { ConversationQuoteConfirmation } from './ConversationQuoteConfirmation';
 import { ConversationQuoteSelection } from './ConversationQuoteSelection';
 import type { QuoteAnswerReference, ConfirmedQuoteSource } from './conversation-quote-confirmation-session';
 import { useAiManagementLocale } from './management-locale';
+import { useVisibleObservationHost } from './VisibleObservationHost';
 
 export function ConversationQuoteExecution({ identity, conversationId, turn, current, showResult = true, onAccessDenied }: {
   identity: string; conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean; showResult?: boolean; onAccessDenied?: () => void;
 }) {
-  const { t } = useAiManagementLocale(), owner = JSON.stringify([identity, conversationId, turn]);
+  const { t } = useAiManagementLocale(), visible = useVisibleObservationHost(), owner = JSON.stringify([identity, conversationId, turn]);
   const [denied, setDenied] = useState(false), denial = useRef(false);
   const [answer, setAnswer] = useState<QuoteAnswerReference | null>(null);
   const [quoteSource, setQuoteSource] = useState<ConfirmedQuoteSource | null>(null);
@@ -37,7 +38,12 @@ export function ConversationQuoteExecution({ identity, conversationId, turn, cur
     <ActionButton label={t(state.locked ? '核对原报价执行' : '读取报价准备')} disabled={state.busy}
       onAction={() => state.locked ? session.reconcile() : session.inspect(turn)} />
     {state.ready && <ConfirmAction label={t('启动报价澄清')} disabled={state.busy}
-      prompt={t('启动此原报价任务？可能产生模型费用，不批准建单或支付。')} onConfirm={session.start} />}
+      prompt={t('启动此原报价任务？可能产生模型费用，不批准建单或支付。')} onConfirm={async () => {
+        const key = turn.task ? visible?.begin({ taskId: turn.task.taskId, runId: turn.task.runId,
+          trigger: 'original_model_start', originKey: turn.original.inputRef, conversationId, turnId: turn.turnId }) ?? null : null;
+        try { await session.start(); if (!session.snapshot().acknowledgement || session.snapshot().feedback === 'unknown') visible?.cancel(key); }
+        catch (error) { visible?.cancel(key); throw error; }
+      }} />}
     {state.feedback === 'unknown' && <Alert type="warning" title={t('原报价执行待核对，请读取原结果；不会自动重新调用模型。')} />}
     {denied && <Alert type="warning" title={t('无权限查看 AI 任务')} />}
     {!denied && showResult && <ConversationResult conversationId={conversationId} turn={turn} current={active} />}

@@ -1,14 +1,15 @@
 /** Original conversation transport and explicit Task creation/scene-model starts.
  * Starts use the original hosts; reads never recover a run or dispatch a model. */
-import { AI_CONVERSATION_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, type AiSceneRequestReadDraft, type AiConversationListDraft, type AiConversationTurnListDraft,
+import { AI_CONVERSATION_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, aiTaskReadPolicyQuery, type AiSceneRequestReadDraft, type AiConversationListDraft, type AiConversationTurnListDraft,
   type AiConversationTurnReferenceDraft, type AiConversationTurnObservationDraft, type AiConversationCreateDraft,
   type AiConversationMutationDraft, type AiConversationOperationRequestDraft, type AiConversationTurnAdmissionDraft,
   type AiSceneCode, type AiConversationUnstartedCloseDraft, type ApiResult,
-  type AiSceneModelAnswerQueryDraft, type AiSceneModelQuoteConfirmDraft } from '@rental-os/shared';
+  type AiSceneModelAnswerQueryDraft, type AiSceneModelQuoteConfirmDraft, type AiTaskSceneReadDraft, type AiTaskSceneObservationDraft } from '@rental-os/shared';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { readConversationHistory, readConversationDetail, readConversationTaskResult } from '@/features/ai-native/conversation-history-reader';
 import { aiTaskCenterApi } from './aiTaskCenter';
 import { http } from './http';
+import { useAuthStore } from '@/features/auth/authStore';
 
 async function lifecycle(action: 'create' | 'archive' | 'delete' | 'operation' | 'admit' | 'admission' | 'release' | 'closeUnstarted' | 'read', command: unknown, signal: AbortSignal) {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
@@ -17,13 +18,41 @@ async function lifecycle(action: 'create' | 'archive' | 'delete' | 'operation' |
   if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
   return result.data.data;
 }
-async function originalTask(action: 'createTask' | 'recovery' | 'reconcile', input: AiSceneRequestReadDraft, signal: AbortSignal) {
+async function originalTask(action: 'createTask' | 'recovery', input: AiSceneRequestReadDraft, signal: AbortSignal) {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
   if (active.aborted) throw Error('AI_SCOPE_CHANGED');
   const response = await http.post<ApiResult<unknown>>(`/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT[action]}`,
     structuredClone(input), { signal: active });
   if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
   return response.data.data;
+}
+/** Historical source observation uses the persisted Task/Run/reference. The
+ * creation-command reconcile route cannot accept this minimal journal. */
+async function originalReceipt(input: Extract<AiTaskSceneReadDraft, { kind: 'original' }>, signal: AbortSignal) {
+  const command = structuredClone(input);
+  if (!command || command.kind !== 'original' || Object.keys(command).length !== 4 || !command.original
+    || Object.keys(command.original).length !== 2 || command.original.draftVersion !== AI_SCENE_REQUEST_DRAFT_VERSION
+    || typeof command.original.inputRef !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(command.original.inputRef)
+    || typeof command.runId !== 'string') throw Error('AI_INVALID_INPUT');
+  aiTaskReadPolicyQuery.parse({ taskId: command.taskId, runId: command.runId });
+  const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
+  const auth = useAuthStore.getState(), tenantId = auth.tenant?.tenantId, workspaceId = auth.currentWorkspaceId;
+  const owner = JSON.stringify([auth.user, tenantId, workspaceId]);
+  const check = () => {
+    const current = useAuthStore.getState();
+    if (active.aborted || epoch !== currentSessionEpoch() || !tenantId || !workspaceId || !current.token || current.user?.isSaasAdmin
+      || JSON.stringify([current.user, current.tenant?.tenantId, current.currentWorkspaceId]) !== owner) throw Error('AI_SCOPE_CHANGED');
+  };
+  check();
+  const response = await http.post<ApiResult<unknown>>(`/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene}`,
+    command, { signal: active, timeout: 15000 }); check();
+  if (new TextEncoder().encode(JSON.stringify(response.data.data)).length > 262144) throw Error('AI_RESOURCE_UNAVAILABLE');
+  const value = response.data.data as Extract<AiTaskSceneObservationDraft, { kind: 'original' }>;
+  if (!value || value.kind !== 'original' || value.taskId !== command.taskId || value.runId !== command.runId
+    || value.originRunId !== command.runId || !value.task || !value.task.original || typeof value.task.original !== 'object'
+    || !('receipt' in value.task.original) || value.task.original.scope?.tenantId !== tenantId
+    || value.task.original.scope?.workspaceId !== workspaceId || value.task.original.audience !== 'operator') throw Error('AI_SCOPE_CHANGED');
+  return value;
 }
 async function openingStart(input: AiSceneRequestReadDraft, signal: AbortSignal) {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
@@ -64,7 +93,7 @@ export const aiConversationsApi = Object.freeze({
   quotePreparation: (input: AiSceneModelAnswerQueryDraft, signal: AbortSignal) => quoteOperation('readQuotePreparation', input, signal),
   quoteConfirm: (input: AiSceneModelQuoteConfirmDraft, signal: AbortSignal) => quoteOperation('confirmClarifiedQuote', input, signal),
   quoteReceipt: (input: AiSceneModelAnswerQueryDraft, signal: AbortSignal) => quoteOperation('readClarifiedQuoteReceipt', input, signal),
-  originalReceipt: (input: AiSceneRequestReadDraft, signal: AbortSignal) => originalTask('reconcile', input, signal),
+  originalReceipt,
   orderFacts: (input: AiSceneRequestReadDraft, signal: AbortSignal) => orderModel('readOrderResult', input, signal),
   orderAnswer: (input: AiSceneRequestReadDraft, signal: AbortSignal) => orderModel('readAnswer', input, signal),
   orderPreparation: (input: AiSceneRequestReadDraft, signal: AbortSignal) => orderModel('readPreparation', input, signal),
