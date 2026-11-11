@@ -4,6 +4,20 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="exchange-photo-core-recovery-20261112"></a>
+
+## 照片完成失败、失应答与过期原来源恢复（2026-11-12）
+
+从已核GitHub的`5983acd3af5c3457dade88fc32515c9a2efc493f`接续，本片未改生产源码或原测试/断言。照片四个生产模块与固定`e2a1a2b9ddc209e763c9bf050eceafbfa1be872d`逐文件Git差异为空；前置正式检查准备/本人同意/原K/C执行合同仍见`0947a6eb82cd1e725073131dc11f78a0fc94bf49`的[原Core阶段](#approved-exchange-core-port-20261111)。交付该固定照片源码及必要前置，不拿本树配置修订/只读合同替代照片依赖。
+
+原七组Core恢复调用现已退出0、audit 0，唯一[阶段证据](../../output/category-governance/exchange-photo-core-recovery-final-20261112.json)保留原调用摘要、源码/fixture及命令hash、首次失败与最终结果。实际Core/media/FileStorage服务参加，SQL/Auth/配置/库存/事务和对象传输仍为明确替身，不证明真库、供应商、HTTP/DI或宿主。
+
+已验证：完成收据写入失败时文件/来源完成状态一起回滚，保留原占用和冻结目标；撤权不再请求对象，订单修订变化不能完成或重传；PUT失应答后即使暂存已变，只GET原冻结字节恢复；Core已经提交但返回丢失时按原收据读取、不再IO；没有原冻结意图仍unknown，不重读暂存或PUT；原目标在票据过期后缺失也不能分配新目标/重传。同一次过期检查保留completed来源原键可读且无再次派发。没有换原键、删冻结依据、改业务期限或补造费用/企业批准，原K/C恢复边界不变。
+
+时间替身最终采用原生OriginalDate的Proxy：仅无参构造和now使用指定时间，构造返回原生实例，保留prototype/parse/UTC，finally恢复global.Date。之前缺TS注册的加载失败，以及继承Date/内存SQL时间原型与structuredClone结果不一致造成的末组比较失败，均已缩为阶段证据的失败摘要；没有删改原断言或为了夹具修改生产代码。原分段计价fixture hash `24a8c79d3fa686a9291e3c9acdbf55c1e42d326a970ab7f8a5a761f70c18a0fa`、原文件fixture hash `0c4a7a211d869575ca88c9a4988a16cef85698861438acd77d72177003089d69`不变。最终清单固化后，4份本片重复尝试JSON按hash核对删除；8份退出日志/缓存与任务目录已删除，暂存路径不存在，只保留唯一阶段证据及定向文档检查结果。
+
+原5组正常消费与本7组恢复分开留证；两者不关闭完整CAT-GOV/CLOSE/ECP验收。企业作者继续独占本人photo GET/DI/受权Blob和准备面板接线，真实事务/存储/权限及宿主仍待原门槛；本树转回品类同源定义、历史动作、所有写入口及08存量采用主线，不等待17接点回收或新增模型执行许可。
+
 <a id="core-failure-read-ports-20261112"></a>
 
 ## 履约已记录问题与原九项开业的只读来源（2026-11-12）
