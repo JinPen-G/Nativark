@@ -1,24 +1,27 @@
-/** Exchange-spending applications share original order locks and preview sources.
- * Approval never applies an exchange or bypasses merchant inspection/funding. */
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+/** Enterprise exchange expense requests and approvals use original order locks.
+ * Core owns execution with this service participating in its bound transaction. */
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { EnterpriseExchangeConfirmationResult, ConfirmEnterpriseExchangeExpense, CloseEnterpriseExchangeRequest, EnterpriseExchangeRequestOriginalResult, EnterpriseExchangeRequestClosureReceipt, EnterpriseExchangeApprovalView, EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeIntent, RequestEnterpriseExchangeApproval, DecideEnterpriseExchangeApproval, RentalOrderChangePreview, EnterpriseBookingBasis } from "@rental-os/shared";
-import { requireRequestWorkspaceId } from "../../common/request-identity";
+import { rentalExchangePreviewComparable } from "@rental-os/shared";
+import type { EnterpriseExchangeConfirmationResult, ConfirmEnterpriseExchangeExpense, CloseEnterpriseExchangeRequest, EnterpriseExchangeRequestOriginalResult, EnterpriseExchangeRequestClosureReceipt, EnterpriseExchangeApprovalView, EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeIntent, RequestEnterpriseExchangeApproval, DecideEnterpriseExchangeApproval, RentalOrderChangePreview, EnterpriseBookingBasis, SystemUserRow, RentalApprovedExchangeReceipt } from "@rental-os/shared";
+import { getRequestIdentity, requireRequestWorkspaceId } from "../../common/request-identity";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { ClientApiService } from "../client/client-api.service";
+import { AuthService } from "../auth/auth.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { RentalExchangePreviewService } from "../rental-core/rental-exchange-preview.service";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { hasOriginalRentalCurrency } from "../rental-core/rental-money";
+import type { ApprovedExchangeBinding, ApprovedExchangeTransaction } from "../rental-core/approved-exchange-transaction.ports";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
 
 type Approval = {
   id: string; corporateCustomerId: string; applicantCustomerId: string; workspaceId: string; orderId: string; expectedOrderUpdatedAt: string;
-  revision: number; state: "pending" | "approved" | "rejected" | "withdrawn"; reason: string; expiresAt: Date;
+  revision: number; state: "pending" | "approved" | "rejected" | "withdrawn" | "consumed"; reason: string; expiresAt: Date;
   request: EnterpriseExchangeIntent | string; preview: RentalOrderChangePreview | string; basis: EnterpriseBookingBasis | string;
   requestFingerprint: string; previewFingerprint: string;
   approvedBy?: string | null; reviewerMembershipId?: string | null; reviewerMembershipUpdatedAt?: Date | null;
@@ -27,9 +30,10 @@ type Approval = {
 @Injectable()
 export class EnterpriseExchangeApprovalService {
   constructor(private readonly prisma: PrismaService, private readonly commands: EnterpriseCommandService, private readonly policies: EnterprisePolicyService,
-    private readonly access: EnterpriseAccessService, private readonly core: RentalCoreService, private readonly prices: RentalExchangePreviewService, private readonly clientApi: ClientApiService) {}
+    private readonly access: EnterpriseAccessService, private readonly core: RentalCoreService, private readonly prices: RentalExchangePreviewService, private readonly clientApi: ClientApiService,
+    private readonly auth: AuthService) {}
 
-  private rows(context: ClientRequestContext, id: string, tx?: Prisma.TransactionClient) {
+  private rows(context: Pick<ClientRequestContext, "tenantId" | "workspaceId">, id: string, tx?: Prisma.TransactionClient) {
     return (tx ?? this.prisma).$queryRaw<Approval[]>(Prisma.sql`SELECT * FROM enterprise_exchange_approvals WHERE tenantId=${context.tenantId} AND workspaceId=${context.workspaceId} AND id=${id} ${tx ? Prisma.sql`FOR UPDATE` : Prisma.empty}`);
   }
   private owns(context: ClientRequestContext, row?: Approval) {
@@ -55,7 +59,8 @@ export class EnterpriseExchangeApprovalService {
         depositDelta: preview.depositDelta, preAuthDelta: preview.preAuthDelta, currency: preview.currency,
         originalPriceVersion: exchange.originalPriceVersion, replacementPriceVersion: exchange.replacementPriceVersion },
       ...(row.employeeConfirmationOperationKey && row.employeeConfirmedAt ? { employeeConfirmation: { operationKey: row.employeeConfirmationOperationKey,
-        confirmedAt: row.employeeConfirmedAt.toISOString(), scope: "expense_only_not_inspection_or_execution" as const } } : {}), execution: "original_merchant_execution_not_connected" };
+        confirmedAt: row.employeeConfirmedAt.toISOString(), scope: "expense_only_not_inspection_or_execution" as const } } : {}),
+      execution: row.state === "consumed" ? "original_merchant_receipt_required" : "original_merchant_execution_required" };
   }
   private canonical(input: EnterpriseExchangeIntent): EnterpriseExchangeIntent {
     if (!input || [input.orderLineId, input.allocationId, input.replacementItemGroupId].some(id => typeof id !== "string" || !id.trim() || id.length > 191)
@@ -64,13 +69,103 @@ export class EnterpriseExchangeApprovalService {
     return { orderLineId: input.orderLineId.trim(), allocationId: input.allocationId.trim(), replacementItemGroupId: input.replacementItemGroupId.trim(), priceBasis: input.priceBasis,
       ...(input.replacementAssetId ? { replacementAssetId: input.replacementAssetId.trim() } : {}), ...(input.replacementPricingGroupId ? { replacementPricingGroupId: input.replacementPricingGroupId.trim() } : {}) };
   }
-  // Effective-from identifies the preview instant, not a price guarantee. Compare
-  // immutable price/config evidence and public charges, never renew the old approval.
+  // Core's comparison preserves the original fees and versioned sources while
+  // separating the current query instant and generated pricing descriptions.
   private priceBasis(preview: RentalOrderChangePreview) {
-    const basis = preview.exchange?.executionBasis;
-    return { ...preview, exchange: preview.exchange && {
-      ...preview.exchange, executionBasis: basis && { ...basis, effectiveFrom: undefined }
-    } };
+    return rentalExchangePreviewComparable(preview);
+  }
+
+  async merchantExchangeAccess(authorization: string | undefined, actor: SystemUserRow) {
+    if (!this.auth) throw new ServiceUnavailableException("原商户换货认证尚未装配");
+    const identity = getRequestIdentity(), current = await this.auth.resolveAccessContext(authorization, { audience: "operator" }), user = current?.user;
+    if (!identity || identity.audience !== "operator" || identity.staffApi || identity.isSaasAdmin || !actor
+      || !current?.workspaceValid || current.workspaceId !== identity.workspaceId || !user?.isActive || user.isSaasAdmin
+      || user.id !== actor.id || user.id !== identity.userId || user.tenantId !== actor.tenantId || user.tenantId !== identity.tenantId
+      || !(user.isPlatformAdmin || user.permissions.includes("*") || user.permissions.includes("rental-os:corporate:manage"))) throw new ForbiddenException("当前商户企业换货权限或经营空间已变化");
+    return { tenantId: user.tenantId, workspaceId: current.workspaceId!, userId: user.id };
+  }
+
+  async merchantExchangeReference(authorization: string | undefined, actor: SystemUserRow, orderId: string, approvalId: string) {
+    const before = await this.merchantExchangeAccess(authorization, actor);
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; orderId: string }>>`SELECT id,orderId FROM enterprise_exchange_approvals
+      WHERE tenantId=${before.tenantId} AND workspaceId=${before.workspaceId} AND id=${approvalId}`;
+    if (rows.length !== 1 || rows[0].id !== approvalId || rows[0].orderId !== orderId) throw new NotFoundException("当前空间原订单换货批准关联不存在");
+    const after = await this.merchantExchangeAccess(authorization, actor);
+    if (after.workspaceId !== before.workspaceId) throw new ForbiddenException("原换货读取空间已变化");
+  }
+
+  /** The merchant's authenticated Core transaction owns the change. These
+   * callbacks bind and consume this enterprise approval in that same transaction. */
+  approvedExchangeParticipant(inputActor: SystemUserRow, orderId: string, approvalId: string, authorization?: string): ApprovedExchangeTransaction {
+    if (!inputActor?.isActive || inputActor.isSaasAdmin || !orderId || !approvalId) throw new ForbiddenException("需要当前商户换货执行身份及原批准引用");
+    const actor = Object.freeze(structuredClone(inputActor));
+    const assertBinding = async (binding: Readonly<ApprovedExchangeBinding>) => {
+      const current = await this.merchantExchangeAccess(authorization, actor);
+      const identity = getRequestIdentity();
+      if (!identity || identity.audience !== "operator" || identity.staffApi || identity.isSaasAdmin
+        || identity.userId !== actor.id || identity.tenantId !== actor.tenantId || identity.workspaceId !== binding.workspaceId
+        || current.workspaceId !== binding.workspaceId || binding.actorUserId !== actor.id || binding.tenantId !== actor.tenantId || binding.orderId !== orderId
+        || binding.request.approvalId !== approvalId
+        || binding.coreIdempotencyKey !== `approved-exchange:${requestFingerprint({ actorUserId: actor.id, operationKey: binding.request.operationKey })}`
+        || binding.requestHash !== requestFingerprint({ orderId, actorUserId: actor.id, input: binding.request })) {
+        throw new ForbiddenException("原商户、订单、批准或执行键关联不一致");
+      }
+    };
+    const originalApproval = async (tx: Prisma.TransactionClient, binding: Readonly<ApprovedExchangeBinding>, state: "approved" | "consumed") => {
+      await assertBinding(binding);
+      const rows = await this.rows(binding, approvalId, tx), row = rows[0];
+      if (rows.length !== 1 || row.id !== approvalId || row.workspaceId !== binding.workspaceId || row.orderId !== orderId
+        || row.state !== state || row.revision !== binding.request.expectedApprovalRevision + (state === "consumed" ? 1 : 0)
+        || row.expectedOrderUpdatedAt !== binding.request.expectedOrderUpdatedAt || !row.employeeConfirmationOperationKey
+        || !row.employeeConfirmedAt || row.employeeConfirmationFingerprint !== this.confirmationFingerprint(row)
+        || state === "approved" && row.expiresAt <= new Date()) throw new ConflictException("本次原换货批准、费用确认或消费关联已变化");
+      const intent = enterpriseJson(row.request), preview = enterpriseJson(row.preview);
+      if (row.requestFingerprint !== requestFingerprint({ orderId, expected: row.expectedOrderUpdatedAt, exchange: intent })
+        || row.previewFingerprint !== requestFingerprint(preview)) throw new ConflictException("原换货批准快照指纹不一致");
+      await assertBinding(binding);
+      return row;
+    };
+    const originalChange = async (tx: Prisma.TransactionClient, binding: Readonly<ApprovedExchangeBinding>, receipt: Readonly<RentalApprovedExchangeReceipt>) => {
+      await assertBinding(binding);
+      if (receipt.approvalId !== approvalId || receipt.orderId !== orderId || receipt.workspaceId !== binding.workspaceId
+        || receipt.actorUserId !== actor.id || receipt.operationKey !== binding.request.operationKey
+        || receipt.coreIdempotencyKey !== binding.coreIdempotencyKey || receipt.requestHash !== binding.requestHash
+        || receipt.preparationId !== binding.request.preparationId || receipt.preparationHash !== binding.request.preparationHash
+        || receipt.consentId !== binding.request.consentId || receipt.consentOperationKey !== binding.request.consentOperationKey
+        || receipt.state !== "applied" || receipt.retryable !== false) throw new ConflictException("原换货收据与批准及两个确认引用不一致");
+      const change = (await this.core.listOrderChanges(binding.tenantId, orderId, tx)).find(row => row.id === receipt.changeId);
+      if (!change || change.tenantId !== binding.tenantId || change.workspaceId !== binding.workspaceId || change.orderId !== orderId
+        || change.type !== "post_pickup_exchange" || change.status !== "applied" || change.idempotencyKey !== binding.coreIdempotencyKey
+        || requestFingerprint(change) !== receipt.changeHash) throw new ConflictException("原换货变更与消费收据不一致");
+      await assertBinding(binding);
+    };
+    return {
+      prepare: async (tx, binding) => {
+        const row = await originalApproval(tx, binding, "approved");
+        const order = await this.core.lockOrderForUpdate(binding.tenantId, orderId, tx), snapshot = order.membershipSnapshot;
+        if (!snapshot?.enterpriseContractAndPayer || snapshot.corporateCustomerId !== row.corporateCustomerId
+          || snapshot.personalCustomerId !== row.applicantCustomerId || !snapshot.corporateMembershipId) throw new ConflictException("原订单企业与费用申请人不一致");
+        const current = await this.policies.revalidateOrderExpense(binding.tenantId, binding.workspaceId, order, tx);
+        if (!current) throw new ForbiddenException("当前企业新支出政策不可用");
+        this.policies.assertSameBasis(enterpriseJson(row.basis), current);
+        await this.policies.assertReviewer(binding.tenantId, row.corporateCustomerId, row.applicantCustomerId, row.approvedBy ?? null,
+          row.reviewerMembershipId ?? null, row.reviewerMembershipUpdatedAt ?? null, tx);
+        await assertBinding(binding);
+      },
+      commit: async (tx, binding, receipt) => {
+        const row = await originalApproval(tx, binding, "approved");
+        await originalChange(tx, binding, receipt);
+        const changed = await tx.$executeRaw`UPDATE enterprise_exchange_approvals SET state='consumed',revision=revision+1
+          WHERE tenantId=${binding.tenantId} AND workspaceId=${binding.workspaceId} AND id=${approvalId} AND orderId=${orderId}
+            AND state='approved' AND revision=${binding.request.expectedApprovalRevision} AND employeeConfirmationOperationKey=${row.employeeConfirmationOperationKey}`;
+        if (changed !== 1) throw this.commands.conflict();
+        await assertBinding(binding);
+      },
+      replay: async (tx, binding, receipt) => {
+        await originalApproval(tx, binding, "consumed");
+        await originalChange(tx, binding, receipt);
+      }
+    };
   }
   private async ownOrder(context: ClientRequestContext, orderId: string, tx: Prisma.TransactionClient) {
     const order = await this.core.lockOrderForUpdate(context.tenantId, orderId, tx);

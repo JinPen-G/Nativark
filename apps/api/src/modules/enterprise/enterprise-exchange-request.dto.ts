@@ -1,7 +1,29 @@
-/** Exchange intent carries resource references, never caller prices or fulfillment authority. */
+/** Enterprise exchange requests bind original expense, inspection and approval references.
+ * Current customer/merchant authority and the original Core transaction gate execution. */
 import { Type } from "class-transformer";
-import { IsDefined, IsIn, IsInt, IsISO8601, IsNotEmpty, IsOptional, IsString, MaxLength, Min, ValidateNested } from "class-validator";
-import type { ConfirmEnterpriseExchangeExpense, CloseEnterpriseExchangeRequest, EnterpriseExchangeIntent, EnterpriseExchangeChoicesQuery, RequestEnterpriseExchangeApproval, DecideEnterpriseExchangeApproval } from "@rental-os/shared";
+import { IsDefined, IsIn, IsInt, IsISO8601, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
+import type { ConfirmEnterpriseExchangeExpense, CloseEnterpriseExchangeRequest, EnterpriseExchangeIntent, EnterpriseExchangeChoicesQuery, RequestEnterpriseExchangeApproval, DecideEnterpriseExchangeApproval, ExecuteApprovedRentalExchangeRequest, ConfirmRentalExchangeInspectionRequest } from "@rental-os/shared";
+export class ExecuteEnterpriseApprovedExchangeDto implements ExecuteApprovedRentalExchangeRequest {
+  @IsString() @Matches(/^[A-Za-z0-9_-]{1,128}$/u) operationKey!: string;
+  @IsString() @Matches(/^[A-Za-z0-9._:-]{1,191}$/u) approvalId!: string;
+  @IsInt() @Min(3) expectedApprovalRevision!: number;
+  @IsISO8601() expectedOrderUpdatedAt!: string;
+  @IsString() @Matches(/^[A-Za-z0-9._:-]{1,191}$/u) preparationId!: string;
+  @IsString() @Matches(/^[a-f0-9]{64}$/u) preparationHash!: string;
+  @IsString() @Matches(/^[A-Za-z0-9._:-]{1,191}$/u) consentId!: string;
+  @IsString() @Matches(/^[A-Za-z0-9_-]{1,128}$/u) consentOperationKey!: string;
+  @IsString() @Matches(/\S/u) @MaxLength(500) reason!: string;
+  @IsIn([true]) confirm!: true;
+}
+export class ConfirmEnterpriseExchangeInspectionDto implements ConfirmRentalExchangeInspectionRequest {
+  @IsString() @Matches(/^[A-Za-z0-9_-]{1,128}$/u) operationKey!: string;
+  @IsInt() @IsIn([0]) expectedRevision!: 0;
+  @IsString() @Matches(/^[A-Za-z0-9._:-]{1,191}$/u) preparationId!: string;
+  @IsString() @Matches(/^[a-f0-9]{64}$/u) preparationHash!: string;
+  @IsString() @Matches(/^[a-f0-9]{64}$/u) materialHash!: string;
+  @IsISO8601() expectedOrderUpdatedAt!: string;
+  @IsIn([true]) confirm!: true;
+}
 export class ConfirmEnterpriseExchangeExpenseDto implements ConfirmEnterpriseExchangeExpense {
   @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;
   @IsInt() @Min(1) expectedRevision!: number;

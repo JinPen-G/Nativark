@@ -3,6 +3,30 @@
 import type { EnterpriseChangeRequest } from "./enterprise-workflows";
 import type { RentalOrderExchangePriceBasis } from "./core";
 import type { EnterpriseExpenseRequestOriginalResult, EnterpriseExtensionRequestClosureReceipt } from "./enterprise-expense";
+import type { RentalExchangeInspectionConsent } from "./rental-exchange-inspection-preparation";
+
+/** The client matches the original consent to its retained order/preparation/key. */
+export function enterpriseExchangeInspectionConsentSnapshot(value: unknown,
+  expected: { orderId: string; customerId: string; preparationId: string; operationKey?: string }): RentalExchangeInspectionConsent | undefined {
+  const row = value as RentalExchangeInspectionConsent | null;
+  const reference = (candidate: unknown): candidate is string => typeof candidate === "string" && /^[A-Za-z0-9._:-]{1,191}$/u.test(candidate);
+  const hash = (candidate: unknown): candidate is string => typeof candidate === "string" && /^[a-f0-9]{64}$/u.test(candidate);
+  if (!row || typeof row !== "object" || Array.isArray(row) || !reference(row.id) || !reference(row.workspaceId)
+    || row.orderId !== expected.orderId || row.customerId !== expected.customerId || row.preparationId !== expected.preparationId
+    || !reference(row.orderId) || !reference(row.customerId) || !reference(row.preparationId)
+    || typeof row.operationKey !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(row.operationKey)
+    || expected.operationKey !== undefined && row.operationKey !== expected.operationKey
+    || !hash(row.requestHash) || !hash(row.preparationHash) || !hash(row.materialHash)
+    || typeof row.expectedOrderUpdatedAt !== "string" || !Number.isFinite(Date.parse(row.expectedOrderUpdatedAt))
+    || typeof row.confirmedAt !== "string" || !Number.isFinite(Date.parse(row.confirmedAt))
+    || row.revision !== 1 || row.state !== "confirmed" || row.scope !== "specific_exchange_inspection_and_handover" || row.retryable !== false) return undefined;
+  return {
+    id: row.id, orderId: row.orderId, workspaceId: row.workspaceId, customerId: row.customerId,
+    preparationId: row.preparationId, preparationHash: row.preparationHash, materialHash: row.materialHash,
+    expectedOrderUpdatedAt: row.expectedOrderUpdatedAt, operationKey: row.operationKey, requestHash: row.requestHash,
+    confirmedAt: row.confirmedAt, revision: 1, state: "confirmed", scope: row.scope, retryable: false
+  };
+}
 export interface CloseEnterpriseExchangeRequest extends EnterpriseChangeRequest { expectedRevision: 0; confirm: true }
 export type EnterpriseExchangeRequestOriginalResult = EnterpriseExpenseRequestOriginalResult<EnterpriseExchangeApprovalView>;
 export type EnterpriseExchangeRequestClosureReceipt = EnterpriseExtensionRequestClosureReceipt;
@@ -55,7 +79,7 @@ export interface EnterpriseExchangeApprovalView {
   applicantCustomerId: string;
   expectedOrderUpdatedAt: string;
   revision: number;
-  state: "pending" | "approved" | "rejected" | "withdrawn" | "expired";
+  state: "pending" | "approved" | "rejected" | "withdrawn" | "expired" | "consumed";
   reason: string;
   expiresAt: string;
   exchange: EnterpriseExchangeIntent;
@@ -74,5 +98,5 @@ export interface EnterpriseExchangeApprovalView {
   };
   /** Employee consent to this expense only; merchant inspection needs separate consent. */
   employeeConfirmation?: { operationKey: string; confirmedAt: string; scope: "expense_only_not_inspection_or_execution" };
-  execution: "original_merchant_execution_not_connected";
+  execution: "original_merchant_execution_not_connected" | "original_merchant_execution_required" | "original_merchant_receipt_required";
 }

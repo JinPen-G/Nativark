@@ -1,5 +1,5 @@
 /** Merchant decisions and authority evidence remain in the original operator authentication realm. */
-import { Body, Controller, Get, Param, Post, Put, Req, Res, ForbiddenException } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Put, Req, Res, BadRequestException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
 import type { SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { FileStorageRuntimeService } from "../integrations/file-storage.runtime.service";
@@ -8,12 +8,35 @@ import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.s
 import { EnterpriseMembersService } from "./enterprise-members.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
 import { EnterpriseManagementRequestService } from "./enterprise-management-request.service";
+import { EnterpriseExchangeApprovalService } from "./enterprise-exchange-approval.service";
+import { RentalApprovedExchangeService } from "../rental-core/rental-approved-exchange.service";
+import { ExecuteEnterpriseApprovedExchangeDto } from "./enterprise-exchange-request.dto";
 import { ReviewEnterpriseManagementRequestDto } from "./enterprise-request.dto";
 import { ReviewEnterpriseApplicationRequestDto, SaveEnterpriseInvitePolicyRequestDto, SaveEnterpriseScopePolicyRequestDto } from "./enterprise-request.dto";
-interface OperatorRequest { user?: SystemUserRow }
+interface OperatorRequest { user?: SystemUserRow; headers?: { authorization?: string } }
 @Controller("membership/enterprise-workflows")
 export class EnterpriseMerchantController {
-  constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly policies: EnterprisePolicyService, private readonly files: FileStorageRuntimeService, private readonly management: EnterpriseManagementRequestService) {}
+  constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly policies: EnterprisePolicyService, private readonly files: FileStorageRuntimeService, private readonly management: EnterpriseManagementRequestService,
+    private readonly exchanges: EnterpriseExchangeApprovalService, private readonly approvedExchanges: RentalApprovedExchangeService) {}
+  @Post("orders/:orderId/exchange-approvals/:id/execute")
+  async executeExchange(@Req() req: OperatorRequest, @Param("orderId") orderId: string, @Param("id") id: string, @Body() input: ExecuteEnterpriseApprovedExchangeDto) {
+    if (!this.exchanges || !this.approvedExchanges) throw new ServiceUnavailableException("原企业换货执行尚未装配");
+    if (input.approvalId !== id) throw new BadRequestException("地址与本次换货批准引用不一致");
+    await this.exchanges.merchantExchangeAccess(req.headers?.authorization, req.user!);
+    const result = await this.approvedExchanges.execute(req.headers?.authorization, req.user!, orderId, input,
+      this.exchanges.approvedExchangeParticipant(req.user!, orderId, id, req.headers?.authorization));
+    await this.exchanges.merchantExchangeAccess(req.headers?.authorization, req.user!);
+    return result;
+  }
+  @Get("orders/:orderId/exchange-approvals/:id/execution-operations/:key")
+  async exchangeExecutionOriginal(@Req() req: OperatorRequest, @Param("orderId") orderId: string, @Param("id") id: string, @Param("key") key: string) {
+    if (!this.exchanges || !this.approvedExchanges) throw new ServiceUnavailableException("原企业换货执行回读尚未装配");
+    await this.exchanges.merchantExchangeAccess(req.headers?.authorization, req.user!);
+    const result = await this.approvedExchanges.original(req.headers?.authorization, req.user!, orderId, key,
+      this.exchanges.approvedExchangeParticipant(req.user!, orderId, id, req.headers?.authorization));
+    await this.exchanges.merchantExchangeReference(req.headers?.authorization, req.user!, orderId, id);
+    return result;
+  }
   @Get("management-requests") managementList(@Req() req: OperatorRequest) { return this.management.merchantList(req.user!); }
   @Get("management-requests/:id/decision-operations/:key") managementDecisionOriginal(@Req() req: OperatorRequest, @Param("id") id: string, @Param("key") key: string) { return this.management.readReview(req.user!, id, key); }
   @Post("management-requests/:id/decision") managementDecision(@Req() req: OperatorRequest, @Param("id") id: string, @Body() input: ReviewEnterpriseManagementRequestDto) { return this.management.review(req.user!, id, input); }
