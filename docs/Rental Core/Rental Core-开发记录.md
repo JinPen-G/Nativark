@@ -17,7 +17,8 @@
 | 验证 | 实际结果与边界 |
 | --- | --- |
 | 既有文件 fixture 的限定调用 | 5组退出0：一次 GET/PUT/GET 冻结、过期后只读原目标、完成与精确字节/坏元数据拒绝、PUT 成功但失应答的原目标恢复、缺目标不另写。实际 FileStorageRuntimeService；原内存文件/会话/配置/事务及对象传输是明确替身，未证明真实存储或事务。见[清单](../../output/category-governance/exchange-photo-freeze-bounded-2-20261111.json) |
-| 当前 API 类型 | 原 tsconfig 的 `--noEmit --incremental false --pretty false` 退出0，四份源码哈希与行为清单一致。见[类型](../../output/category-governance/exchange-photo-api-types-2-20261111.json)。API 受管构建仍为原 `0947a6eb8` 的863文件，不含本片源码，不将旧包作新行为证据 |
+| API 类型 | 原 tsconfig 的 `--noEmit --incremental false --pretty false` 退出0，四份源码哈希与行为清单一致。见[类型](../../output/category-governance/exchange-photo-api-types-2-20261111.json)。首次类型核对时仍为旧API包，不将它作新行为证据 |
+| 当前 API 构建 | 从固定`3efc62884b303c3c0127e9aeb578cb9ece9d9b3e`完整编译，含照片源码检查点`e2a1a2b9d`；863份JS逐文件哈希一致，只更新四个照片模块，其余859份原产物、Shared正式出口/租赁合同和Client schema/归属文件哈希不变。见[固定构建清单](../../output/category-governance/api-build-photo-e2a1a2b9d-20261111.json)。audit 0、暂存已删除；仅本树研发产物，不是HTTP/DI/本人照片正常消费、真实库/存储、宿主或正式发布验收 |
 | 原文件生命周期整组 | `node tests/file-storage-lifecycle.test.cjs` 退出1，`:567` 在会员替身缺合法空间品类时先报“已存品类编码缺少兼容解释”，尚未运行后面的专用照片断言。原失败唯一位于主树 `output/category-governance/exchange-photo-file-lifecycle-original-2-20261111.json`；此前证据目录不存在的保存失败不计验证通过。测试/断言未改 |
 | 首次限定调用失败 | 原专用计划使用文件名暂存键，不符合原冻结校验器的 `blob` 格式，导致冻结后回读拒绝。见[原失败](../../output/category-governance/exchange-photo-freeze-bounded-20261111.json)。修复生产者路径后仅复验相关调用，没有放松原冻结校验或修改夹具 |
 
