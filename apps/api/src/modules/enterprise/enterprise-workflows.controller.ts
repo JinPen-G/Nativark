@@ -37,7 +37,10 @@ export class EnterpriseWorkflowsController {
   @Post("management-requests/:id/withdraw") withdrawManagement(@Req() req: CustomerRequest, @Param("id") id: string, @Body() input: EnterpriseChangeRequestDto) { return this.management.withdraw(client(req), id, input); }
   @Get("tasks") tasksMine(@Req() req: CustomerRequest) { return this.tasks.tasks(client(req)); }
   @Get("corporates/:corporateId/tasks") corporateTasks(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.tasks.tasks(client(req), id); }
-  @Get("corporates/:corporateId/membership-audit") auditMembership(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.membershipAudit.read(client(req), id); }
+  @Get("corporates/:corporateId/membership-audit")
+  auditMembership(@Req() req: CustomerRequest, @Param("corporateId") id: string, @Query("readerCursor") readerCursor?: string) {
+    return this.membershipAudit.read(client(req), id, readerCursor);
+  }
   @Get("my-approval-notices") approvalNoticesMine(@Req() req: CustomerRequest) { return this.tasks.approvalNotices(client(req)); }
   @Get("corporates/:corporateId/approval-notices") approvalNoticesReview(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.tasks.approvalNotices(client(req), id); }
   @Get("my-retained-merge-messages") retainedMergeMessagesMine(@Req() req: CustomerRequest) { return this.tasks.retainedMergeMessages(client(req)); }

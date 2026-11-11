@@ -476,7 +476,74 @@ export function enterpriseMerchantPortalAuditEntrySnapshot(value:unknown,corpora
     || !r.result || typeof r.result!=="object" || Array.isArray(r.result) || r.result.corporateCustomerId!==corporateCustomerId || typeof r.result.enabled!=="boolean" || !Number.isSafeInteger(r.result.revision) || r.result.revision<1)return undefined;
   return {operationKey:r.operationKey,actor:{kind:"operator",id:r.actor.id},action:"portal.configuration",reason:r.reason,createdAt:r.createdAt,result:{corporateCustomerId,enabled:r.result.enabled,revision:r.result.revision}};
 }
+export const ENTERPRISE_READER_AUDIT_ACTIONS = [
+  "orders.list", "orders.detail", "orders.export", "finance.account.read",
+  "finance.account.export", "finance.order.read", "finance.order.export"
+] as const;
+export type EnterpriseReaderAuditAction = typeof ENTERPRISE_READER_AUDIT_ACTIONS[number];
+export interface EnterpriseReaderAuditEntry {
+  receiptId: string;
+  actorCustomerId: string;
+  membershipId: string;
+  permissionRevision: string;
+  action: EnterpriseReaderAuditAction;
+  objectId: string;
+  group: "enterprise_paid" | "personal_benefit" | null;
+  projectionHash: string;
+  itemCount: number;
+  state: "authorized_projection_prepared";
+  createdAt: string;
+}
+export interface EnterpriseReaderAuditPage {
+  coverage: "original_current_workspace_reader_projections";
+  workspaceCode: string;
+  items: EnterpriseReaderAuditEntry[];
+  nextCursor: string | null;
+  unavailable: ["uncaptured_reader_history"];
+}
+
+/** Metadata identifies the authorized projection prepared before response delivery. */
+export function enterpriseReaderAuditEntrySnapshot(value: unknown): EnterpriseReaderAuditEntry | undefined {
+  const row = value as EnterpriseReaderAuditEntry | null;
+  const reference = (candidate: unknown): candidate is string => typeof candidate === "string" && /^[a-zA-Z0-9._:-]{1,191}$/u.test(candidate);
+  if (!row || typeof row !== "object" || Array.isArray(row)
+    || !reference(row.receiptId) || !reference(row.actorCustomerId) || !reference(row.membershipId) || !reference(row.objectId)
+    || typeof row.permissionRevision !== "string" || !/^\d{1,15}:\d{1,15}$/u.test(row.permissionRevision)
+    || !ENTERPRISE_READER_AUDIT_ACTIONS.includes(row.action)
+    || (row.action.startsWith("orders.") ? !["enterprise_paid", "personal_benefit"].includes(row.group ?? "") : row.group !== null)
+    || typeof row.projectionHash !== "string" || !/^[a-f0-9]{64}$/u.test(row.projectionHash)
+    || !Number.isSafeInteger(row.itemCount) || row.itemCount < 0 || row.itemCount > 500
+    || !["orders.list", "orders.export"].includes(row.action) && row.itemCount !== 1
+    || row.state !== "authorized_projection_prepared" || typeof row.createdAt !== "string"
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(row.createdAt)
+    || !Number.isFinite(Date.parse(row.createdAt)) || new Date(row.createdAt).toISOString() !== row.createdAt) return undefined;
+  return {
+    receiptId: row.receiptId, actorCustomerId: row.actorCustomerId, membershipId: row.membershipId,
+    permissionRevision: row.permissionRevision, action: row.action, objectId: row.objectId, group: row.group,
+    projectionHash: row.projectionHash, itemCount: row.itemCount, state: row.state, createdAt: row.createdAt
+  };
+}
+
+export function enterpriseReaderAuditPageSnapshot(value: unknown, workspaceCode?: string): EnterpriseReaderAuditPage | undefined {
+  const page = value as EnterpriseReaderAuditPage | null;
+  if (!page || typeof page !== "object" || Array.isArray(page)
+    || page.coverage !== "original_current_workspace_reader_projections" || typeof page.workspaceCode !== "string"
+    || !/^[a-zA-Z0-9._:-]{1,191}$/u.test(page.workspaceCode) || page.workspaceCode !== workspaceCode
+    || !Array.isArray(page.items) || page.items.length > 50
+    || page.nextCursor !== null && (typeof page.nextCursor !== "string" || !/^[a-zA-Z0-9_-]{1,512}$/u.test(page.nextCursor) || page.items.length !== 50)
+    || !Array.isArray(page.unavailable) || page.unavailable.length !== 1 || page.unavailable[0] !== "uncaptured_reader_history") return undefined;
+  const items: EnterpriseReaderAuditEntry[] = [], receipts = new Set<string>();
+  for (const candidate of page.items) {
+    const item = enterpriseReaderAuditEntrySnapshot(candidate);
+    if (!item || receipts.has(item.receiptId)) return undefined;
+    receipts.add(item.receiptId);
+    items.push(item);
+  }
+  return { coverage: page.coverage, workspaceCode: page.workspaceCode, items, nextCursor: page.nextCursor, unavailable: ["uncaptured_reader_history"] };
+}
+
 export interface EnterpriseMembershipAudit {
+  readerAudit?: EnterpriseReaderAuditPage;
   merchantPortalCoverage?:"original_bare_actor_corporate_portal_configuration_metadata";
   merchantPortalItems?:EnterpriseMerchantPortalAuditEntry[];
   merchantPolicyCoverage?:"original_merchant_policy_save_metadata";
@@ -626,6 +693,8 @@ export function enterpriseOwnTransferMessagesSnapshot(value: unknown, tenantCode
 }
 export function enterpriseMembershipAuditSnapshot(value: unknown, tenantCode: string, corporateCustomerId: string, workspaceCode?: string): EnterpriseMembershipAudit | undefined {
   const row = value as EnterpriseMembershipAudit | null;
+  const readerAudit = row?.readerAudit === undefined ? undefined : enterpriseReaderAuditPageSnapshot(row.readerAudit, workspaceCode);
+  if (row?.readerAudit !== undefined && !readerAudit) return undefined;
   const extended = row?.workflowItems !== undefined || row?.workflowCoverage !== undefined;
   const business = row?.businessItems !== undefined || row?.businessCoverage !== undefined || row?.bookingWorkspace !== undefined;
   const bookingAvailable = row?.bookingWorkspace?.state === "available";
@@ -665,6 +734,7 @@ export function enterpriseMembershipAuditSnapshot(value: unknown, tenantCode: st
   for(const item of row.merchantPolicyItems ?? []){const original=enterpriseMerchantPolicyAuditEntrySnapshot(item);if(!original || keys.has(original.operationKey))return undefined;keys.add(original.operationKey);merchantPolicyItems.push(original);}
   for(const item of row.merchantPortalItems ?? []){const original=enterpriseMerchantPortalAuditEntrySnapshot(item,corporateCustomerId);if(!original || keys.has(original.operationKey))return undefined;keys.add(original.operationKey);merchantPortalItems.push(original);}
   return { tenantCode, corporateCustomerId, permissionRevision: row.permissionRevision, coverage: row.coverage, unavailable: [...missing], items,
+    ...(readerAudit ? { readerAudit } : {}),
     ...(merchantPortal ? {merchantPortalItems,merchantPortalCoverage:"original_bare_actor_corporate_portal_configuration_metadata" as const} : {}),
     ...(merchantPolicy ? {merchantPolicyItems,merchantPolicyCoverage:"original_merchant_policy_save_metadata" as const} : {}),
     ...(applicationApproval ? {applicationApprovalItems,applicationApprovalCoverage:"original_application_approval_company_binding_receipts" as const} : {}),

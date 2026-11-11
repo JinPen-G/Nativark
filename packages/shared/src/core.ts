@@ -2329,6 +2329,54 @@ export interface CustomerCorporateCreditAccountSummary {
   settlementTermDays: number;
 }
 
+/** Original enterprise order ownership supplies historical read evidence only;
+ * it never opens a new rental scope or replaces current enterprise authorization. */
+export interface RentalEnterpriseHistoryWorkspaceBasis {
+  apiVersion: "v1";
+  corporateCustomerId: string;
+  permissionRevision: string;
+  observedAt: string;
+  source: "original_enterprise_order_subjects";
+  coverage: "current_trusted_workspace_only";
+  crossWorkspaceRead: { state: "unavailable"; reason: "authoritative_enterprise_history_space_scope_not_connected" };
+  workspaces: Array<{ workspaceId: string; workspaceCode: string; workspaceName: string }>;
+}
+
+/** Recorded money is grouped by original currency. Cash receipts and corporate
+ * allocations are separate; neither is a provider refresh or a payment command. */
+export interface RentalEnterpriseOrderFinancialProjection {
+  apiVersion: "v1";
+  corporateCustomerId: string;
+  permissionRevision: string;
+  workspaceId: string;
+  orderId: string;
+  currency: string;
+  sourceOrderUpdatedAt: string;
+  observedAt: string;
+  source: "persisted_original_core_finance";
+  rentalCash: { state: "available"; collected: number; refunded: number; netReceived: number }
+    | { state: "unavailable"; reason: "unverified_original_cash_receipt" };
+  corporatePaymentAllocated: number;
+  receivableEntries: Array<{ id: string; entryType: CustomerCorporateCreditLedgerEntry["entryType"];
+    amount: number; reservedDelta: number; receivableDelta: number; occurredAt: string }>;
+  guarantee: { state: "unavailable"; reason: "original_payer_or_provider_guarantee_read_port_not_connected" };
+  statements: { state: "unavailable"; reason: "formal_statement_provider_not_implemented" };
+}
+
+export interface RentalEnterpriseCorporateFinancialProjection {
+  apiVersion: "v1";
+  corporateCustomerId: string;
+  permissionRevision: string;
+  observedAt: string;
+  source: "original_tenant_corporate_credit_account";
+  credit: { state: "available"; account: Omit<CustomerCorporateCreditAccountSummary, "tenantId" | "customerId"> }
+    | { state: "not_configured" }
+    | { state: "unavailable"; reason: "original_account_source_not_connected"
+      | "original_account_configuration_missing_with_ledger" | "authoritative_account_history_space_scope_not_connected" };
+  maturities: { state: "unavailable"; reason: "financially_determined_maturity_read_port_not_connected" };
+  statements: { state: "unavailable"; reason: "formal_statement_provider_not_implemented" };
+}
+
 /** CORP-SETTLE-01A：授信账务流水，追加式且不可编辑。 */
 export interface CustomerCorporateCreditLedgerEntry {
   id: string;

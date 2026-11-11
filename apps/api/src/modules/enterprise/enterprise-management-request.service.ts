@@ -3,11 +3,12 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { RentalCategoryCode, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseOperationResult, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest, type SystemUserRow } from "@rental-os/shared";
+import { isRentalCategoryCode, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseOperationResult, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest, type SystemUserRow } from "@rental-os/shared";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
+import { assertPublishedRentalCategoryIdentities } from "../rental-core/category-identity";
 
 type Stored = { requestType: EnterpriseManagementRequestType; objectRevision: string; proposal: EnterpriseManagementProposal; evidenceFileIds: string[]; reason: string };
 type Row = { id: string; corporateCustomerId: string; applicantCustomerId: string; state: EnterpriseRequestState; revision: number; payload: Stored | string; decisionReason: string | null; createdAt: Date; updatedAt: Date };
@@ -78,7 +79,7 @@ export class EnterpriseManagementRequestService {
       if (proposal.currency !== "CNY" || typeof proposal.requestedCreditLimit !== "string" || !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/u.test(proposal.requestedCreditLimit)) throw new BadRequestException("原企业授信仅支持人民币及两位小数；此申请不改额度");
     } else if (!Array.isArray(proposal.workspaceIds) || !Array.isArray(proposal.categoryCodes) || proposal.workspaceIds.length > 200 || proposal.categoryCodes.length > 200
       || new Set(proposal.workspaceIds).size !== proposal.workspaceIds.length || new Set(proposal.categoryCodes).size !== proposal.categoryCodes.length
-      || proposal.workspaceIds.some(id => typeof id !== "string" || !id || id.length > 191) || proposal.categoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code))) throw new BadRequestException("范围申请须使用登记的品类和有界空间引用");
+      || proposal.workspaceIds.some(id => typeof id !== "string" || !id || id.length > 191) || proposal.categoryCodes.some(code => !isRentalCategoryCode(code))) throw new BadRequestException("范围申请须使用登记的品类和有界空间引用");
     return proposal;
   }
   private async evidence(tenantId: string, applicant: string, ids: string[], tx: Prisma.TransactionClient) {
@@ -98,6 +99,7 @@ export class EnterpriseManagementRequestService {
         if (enterpriseJson(previous.payload).requestType !== input.requestType) throw new ConflictException("不能改变原申请类别");
       } else if (input.expectedRevision !== 0) throw this.commands.conflict();
       if (await this.revision(context.tenantId, corporateId, input.requestType, tx) !== input.objectRevision) throw this.commands.conflict();
+      if (input.requestType === "scope_change") await assertPublishedRentalCategoryIdentities(tx, input.proposal.categoryCodes!);
       await this.evidence(context.tenantId, context.customerId, input.evidenceFileIds, tx);
       const duplicates = await tx.$queryRaw<Row[]>`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND corporateCustomerId=${corporateId} AND applicantCustomerId=${context.customerId} AND kind='finance_request' AND state IN ('draft','pending','supplement_required') LIMIT 201`;
       if (duplicates.length > 200) throw new ConflictException("本人未决申请超出有界范围");
@@ -272,6 +274,7 @@ export class EnterpriseManagementRequestService {
       const data = enterpriseJson(row.payload);
       if (input.decision === "approve") {
         if (await this.revision(tenantId, row.corporateCustomerId, data.requestType, tx) !== data.objectRevision) throw this.commands.conflict();
+        if (data.requestType === "scope_change") await assertPublishedRentalCategoryIdentities(tx, this.validate({ ...data, submit: true }).categoryCodes!);
         await this.evidence(tenantId, row.applicantCustomerId, data.evidenceFileIds, tx);
       }
       const state = input.decision === "approve" ? "approved" : input.decision === "supplement" ? "supplement_required" : "rejected";

@@ -1,7 +1,7 @@
 /** Bounded original-policy material/input projection shared by merchant and customer editors.
  * It preserves form transforms and independent arrays, never computes rental authority,
  * upper-bound intersections, credit or prices, and does not replace server validation. */
-import { RentalCategoryCode, type EnterpriseScopePolicy, type EnterpriseScopePolicyView } from "@rental-os/shared";
+import { isRentalCategoryCode, type EnterpriseScopePolicy, type EnterpriseScopePolicyView } from "@rental-os/shared";
 import { enterprisePolicyPayload, type EnterprisePolicyForm } from "./EnterprisePolicyFields";
 
 const unavailable = () => new Error("原政策材料、对象或修订不可用，请重新核对 / Original policy material, target or revision unavailable");
@@ -9,7 +9,7 @@ const ids = (value: unknown): value is string[] => Array.isArray(value) && value
   && value.every(id => typeof id === "string" && Boolean(id.trim()) && id.length <= 191);
 export const copyEnterprisePolicy = (p?: EnterpriseScopePolicy): EnterpriseScopePolicy | undefined => {
   if (p === undefined) return undefined;
-  if (!p || !ids(p.workspaceIds) || !ids(p.categoryCodes) || p.categoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code))
+  if (!p || !ids(p.workspaceIds) || !ids(p.categoryCodes) || p.categoryCodes.some(code => !isRentalCategoryCode(code))
     || typeof p.personalPaymentAllowed !== "boolean" || typeof p.enterprisePaymentAllowed !== "boolean"
     || !["per_order", "without_per_order", "unconfigured"].includes(p.approvalMode)
     || typeof p.noticeVersion !== "string" || !p.noticeVersion.trim() || p.noticeVersion.length > 191
@@ -25,11 +25,15 @@ export const copyEnterprisePolicy = (p?: EnterpriseScopePolicy): EnterpriseScope
 export const copyEnterprisePolicyView = (view?: EnterpriseScopePolicyView): EnterpriseScopePolicyView | undefined => {
   if (view === undefined) return undefined;
   if (!view || [view.revision, view.merchantRevision, view.companyRevision, view.employeeRevision].some(value => !Number.isSafeInteger(value) || value < 0)
-    || !ids(view.effectiveWorkspaceIds) || !ids(view.effectiveCategoryCodes) || view.effectiveCategoryCodes.some(code => !Object.values(RentalCategoryCode).some(registered => registered === code)) || !Array.isArray(view.workspaces) || view.workspaces.length > 200
-    || view.workspaces.some(row => !row || typeof row.id !== "string" || !row.id.trim() || row.id.length > 191 || typeof row.name !== "string" || !Object.values(RentalCategoryCode).some(registered => registered === row.categoryCode))) throw unavailable();
+    || !ids(view.effectiveWorkspaceIds) || !ids(view.effectiveCategoryCodes) || view.effectiveCategoryCodes.some(code => !isRentalCategoryCode(code)) || !Array.isArray(view.workspaces) || view.workspaces.length > 200
+    || view.workspaces.some(row => !row || typeof row.id !== "string" || !row.id.trim() || row.id.length > 191 || typeof row.name !== "string" || !isRentalCategoryCode(row.categoryCode))
+    || view.categories !== undefined && (!Array.isArray(view.categories) || view.categories.length > 200
+      || view.categories.some(row => !row || !isRentalCategoryCode(row.code) || typeof row.name !== "string" || !row.name.trim() || [...row.name].length > 191)
+      || new Set(view.categories.map(row => row.code)).size !== view.categories.length)) throw unavailable();
   return { revision: view.revision, merchantRevision: view.merchantRevision, companyRevision: view.companyRevision, employeeRevision: view.employeeRevision,
     merchant: copyEnterprisePolicy(view.merchant), company: copyEnterprisePolicy(view.company), employee: copyEnterprisePolicy(view.employee), effectiveWorkspaceIds: [...view.effectiveWorkspaceIds],
-    effectiveCategoryCodes: [...view.effectiveCategoryCodes], workspaces: view.workspaces.map(row => ({ id: row.id, name: row.name, categoryCode: row.categoryCode })) };
+    effectiveCategoryCodes: [...view.effectiveCategoryCodes], workspaces: view.workspaces.map(row => ({ id: row.id, name: row.name, categoryCode: row.categoryCode })),
+    categories: view.categories?.map(row => ({ code: row.code, name: row.name })) };
 };
 const formFields = ["workspaceIds", "categoryCodes", "personalPaymentAllowed", "enterprisePaymentAllowed", "approvalMode", "noticeVersion", "noticeText", "maxRequestAmount", "currency", "approvalLifetimeMinutes", "reason"] as const;
 export const captureEnterprisePolicyInput = (values: EnterprisePolicyForm) => {

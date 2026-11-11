@@ -4339,6 +4339,32 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   ...enterpriseWorkflowOperations(),
   clientOperation("get", "/api/client/v1/enterprise/entry", "readEnterpriseEntry", "Read current personal customer's explicitly granted enterprise access", { responseSchema: "EnterpriseEntryResponse", parameters: [{ ...queryParam("tenantCode"), required: true }] }),
   clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateCustomerId}/members", "readEnterpriseMembers", "Read minimal enterprise members after current members:read authorization", { responseSchema: "EnterpriseMembersResponse", parameters: [{ ...queryParam("tenantCode"), required: true }, queryParam("page", numberSchema), queryParam("pageSize", numberSchema)] }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders", "listEnterpriseOrders", "Read original enterprise orders after current orders:read authorization", {
+    responseSchema: "EnterpriseOrdersResponse",
+    parameters: ["group", "keyword", "page", "pageSize"].map(name => queryParam(name, ENTERPRISE_COMPONENT_SCHEMAS.EnterpriseOrdersQuery.properties![name]))
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/export-rows", "exportEnterpriseOrderRows", "Read bounded filtered enterprise order rows after current orders:read and export:create authorization", {
+    responseSchema: "EnterpriseOrderExportResponse",
+    parameters: ["group", "keyword"].map(name => queryParam(name, ENTERPRISE_COMPONENT_SCHEMAS.EnterpriseOrderExportQuery.properties![name]))
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}", "readEnterpriseOrder", "Read curated original enterprise order details after current orders:read authorization", {
+    responseSchema: "EnterpriseOrderDetailResponse"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/history-workspaces", "readEnterpriseHistoryWorkspaces", "Read original order workspace evidence within the current trusted client workspace", {
+    responseSchema: "RentalEnterpriseHistoryWorkspaceBasis"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/finance", "readEnterpriseCorporateFinance", "Read original corporate credit account after current finance:read authorization", {
+    responseSchema: "RentalEnterpriseCorporateFinancialProjection"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}/finance", "readEnterpriseOrderFinance", "Read original enterprise-paid order finance after current orders:read and finance:read authorization", {
+    responseSchema: "RentalEnterpriseOrderFinancialProjection"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/finance/export-rows", "exportEnterpriseCorporateFinance", "Read a bounded original corporate account projection after current export:create and finance:read authorization", {
+    responseSchema: "RentalEnterpriseCorporateFinancialProjection"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}/finance/export-rows", "exportEnterpriseOrderFinance", "Read bounded original enterprise-paid order financial rows after current export:create, orders:read and finance:read authorization", {
+    responseSchema: "RentalEnterpriseOrderFinancialProjection"
+  }),
   backlogOperation("get", "/api/membership/enterprise-portal/operations/{operationKey}", "Membership", "readEnterprisePortalOperation", "Read current operator original activation result without reapplying it", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
   backlogOperation("get", "/api/membership/enterprise-portal/settings", "Membership", "readEnterpriseTenantSettings", "Read tenant enterprise portal activation", ["rental-os:corporate:view", "rental-os:corporate:manage"], true, undefined, "EnterpriseTenantSettings"),
   backlogOperation("put", "/api/membership/enterprise-portal/settings", "Membership", "saveEnterpriseTenantSettings", "Change tenant activation with revision and original operation receipt", ["rental-os:corporate:manage"], true, "SaveEnterpriseTenantSettingsRequest", "EnterpriseTenantSettings"),
@@ -4366,7 +4392,10 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/orders/{id}/enterprise-handoff-material", "readClientRentalHandoffMaterial", "Read current-workspace own enterprise-order snapshot material only; no current-member fallback, handoff request, acceptance or authority", { responseSchema: "EnterpriseRentalHandoffMaterial" }),
   clientOperation("post", "/api/client/v1/enterprise/orders/{orderId}/handoff-requests", "createClientRentalHandoffRequest", "Record a frozen original own-order handoff request only; no Core/subject/funds/authority change", { requestSchema: "CreateEnterpriseRentalHandoffRequest", responseSchema: "EnterpriseRentalHandoffCreated" }),
   clientOperation("get", "/api/client/v1/enterprise/orders/{orderId}/handoff-requests/create-operations/{key}", "readClientRentalHandoffCreation", "Read this customer's exact original order/K creation receipt, never today's state", { responseSchema: "EnterprisePortalOperationResponse" }),
-  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/membership-audit", "readCorporateMembershipAudit", "Read original corporate member/admin command receipts under fresh audit:read; not current grants, order/financial audit or merchant security logs", { responseSchema: "EnterpriseMembershipAudit" }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/membership-audit", "readCorporateMembershipAudit", "Read original corporate command and reader metadata under current audit and data-read grants", {
+    responseSchema: "EnterpriseMembershipAudit",
+    parameters: [{ name: "readerCursor", in: "query", required: false, schema: { type: "string", minLength: 1, maxLength: 512, pattern: "^[a-zA-Z0-9_-]+$" } }]
+  }),
   clientOperation("get", "/api/client/v1/enterprise/handoff-orders", "readClientOriginalHandoffOrders", "Current-workspace original own enterprise-employee rentals eligible for coordination review, including unrequested orders; not an in-flight or funding total", { responseSchema: "EnterpriseRentalHandoffOrderSource" }),
   clientOperation("get", "/api/client/v1/enterprise/handoff-requests", "listClientRentalHandoffs", "Bounded original own handoff requests in the current authenticated workspace", { responseSchema: "EnterpriseRentalHandoffList" }),
   clientOperation("post", "/api/client/v1/enterprise/handoff-requests/{id}/withdraw", "withdrawClientRentalHandoff", "Withdraw the original own pending request only; no Core or funding change", { requestSchema: "WithdrawEnterpriseRentalHandoffRequest", responseSchema: "EnterpriseRentalHandoffWithdrawn" }),

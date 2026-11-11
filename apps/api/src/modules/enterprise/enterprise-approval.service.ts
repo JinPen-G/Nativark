@@ -153,7 +153,7 @@ export class EnterpriseApprovalService {
       await this.orders.assertApprovedExecutionCanClose(context.tenantId, enterpriseJson(row.request), row.executionKey, tx);
       const changed = await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state='closed',revision=revision+1 WHERE tenantId=${context.tenantId} AND id=${id} AND state='executing' AND executionKey=${row.executionKey}`;
       if (changed !== 1) throw this.commands.conflict();
-      const receiptChanged = await tx.$executeRaw`UPDATE enterprise_portal_operations SET result=${JSON.stringify({ approvalId: row.id, state: "closed", retryable: false })} WHERE tenantId=${context.tenantId} AND operationKey=${row.executionKey} AND actorUserId=${`customer:${context.customerId}`}`;
+      const receiptChanged = await tx.$executeRaw`UPDATE enterprise_portal_operations SET result=${JSON.stringify({ approvalId: row.id, state: "closed", retryable: false })} WHERE tenantId=${context.tenantId} AND operationKey=${row.executionKey} AND actorUserId=${`customer:${context.customerId}`} AND target=${`approval.submit:${row.id}`}`;
       if (receiptChanged !== 1) throw new ConflictException("原执行收据关联缺失，不能发布结束结果");
       return { id, state: "closed", revision: row.revision + 1, retryable: false };
     }, tx => this.commands.customer(context, tx, false));
@@ -197,7 +197,10 @@ export class EnterpriseApprovalService {
         const latest = (await this.row(context.tenantId, row.id, tx))[0]; this.binding(latest, binding, key);
         const count = await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state='consumed',orderId=${orderId},revision=revision+1 WHERE tenantId=${context.tenantId} AND id=${row.id} AND state='executing' AND executionKey=${key}`;
         if (count !== 1) throw new ConflictException("批准消费竞争，请核对原结果");
-        await tx.$executeRaw`UPDATE enterprise_portal_operations SET result=${JSON.stringify({ approvalId: row.id, state: "consumed", orderId, retryable: false })} WHERE tenantId=${context.tenantId} AND operationKey=${key} AND actorUserId=${`customer:${context.customerId}`}`;
+        const receiptCount = await tx.$executeRaw`UPDATE enterprise_portal_operations SET result=${JSON.stringify({ approvalId: row.id, state: "consumed", orderId, retryable: false })} WHERE tenantId=${context.tenantId} AND operationKey=${key} AND actorUserId=${`customer:${context.customerId}`} AND target=${`approval.submit:${row.id}`}`;
+        // The Core transaction must also commit the original applicant receipt.
+        // A missing or replaced receipt rolls the order and approval back together.
+        if (receiptCount !== 1) throw new ConflictException("原提交收据关联缺失，批准与订单不可提交");
       },
       replay: async (binding, orderId) => { const latest = (await this.row(context.tenantId, row.id))[0]; this.binding(latest, binding, key); if (latest.state !== "consumed" || latest.orderId !== orderId) throw new ConflictException("原订单与批准关联待核对"); }
     };

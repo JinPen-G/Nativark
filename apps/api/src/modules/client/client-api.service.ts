@@ -1343,7 +1343,7 @@ export class ClientApiService {
     const receipt = structuredClone(result);
     await this.assertClientOrder(context, receipt.orderId);
     await this.currentWorkspace(context);
-    const closing = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey);
+    const closing = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey, committedOrderId);
     const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
     if (hash(closing) !== hash(receipt)) throw new ConflictException('原下单收据在当前授权读取期间已变化');
     // End original accepted receipt closing observation.

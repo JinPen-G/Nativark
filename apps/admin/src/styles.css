@@ -59,7 +59,7 @@ button, input, textarea, select { font: inherit; }
   background: var(--rental-color-bg-layout);
   box-shadow: 0 2px 12px rgba(0, 0, 0, .1);
 }
-/* The tenant console fills the browser; its content panel keeps the shared radius. */
+/* Both tenant workspaces fill the browser; their content panel keeps the shared radius. */
 .app-frame-stage[data-tenant-console] { padding: 0; }
 .app-frame-stage[data-tenant-console] > .app-shell { border: 0; border-radius: 0; box-shadow: none; }
 /* The native sidebar follows the frame, while menus/sheets still portal to body. */
