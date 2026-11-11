@@ -4308,6 +4308,15 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}", "readEnterpriseOrder", "Read curated original enterprise order details after current orders:read authorization", {
     responseSchema: "EnterpriseOrderDetailResponse"
   }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/history-workspaces", "readEnterpriseHistoryWorkspaces", "Read original order workspace evidence within the current trusted client workspace", {
+    responseSchema: "RentalEnterpriseHistoryWorkspaceBasis"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/finance", "readEnterpriseCorporateFinance", "Read original corporate credit account after current finance:read authorization", {
+    responseSchema: "RentalEnterpriseCorporateFinancialProjection"
+  }),
+  clientOperation("get", "/api/client/v1/enterprise/corporates/{corporateId}/orders/{orderId}/finance", "readEnterpriseOrderFinance", "Read original enterprise-paid order finance after current orders:read and finance:read authorization", {
+    responseSchema: "RentalEnterpriseOrderFinancialProjection"
+  }),
   backlogOperation("get", "/api/membership/enterprise-portal/operations/{operationKey}", "Membership", "readEnterprisePortalOperation", "Read current operator original activation result without reapplying it", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
   backlogOperation("get", "/api/membership/enterprise-portal/settings", "Membership", "readEnterpriseTenantSettings", "Read tenant enterprise portal activation", ["rental-os:corporate:view", "rental-os:corporate:manage"], true, undefined, "EnterpriseTenantSettings"),
   backlogOperation("put", "/api/membership/enterprise-portal/settings", "Membership", "saveEnterpriseTenantSettings", "Change tenant activation with revision and original operation receipt", ["rental-os:corporate:manage"], true, "SaveEnterpriseTenantSettingsRequest", "EnterpriseTenantSettings"),

@@ -47,7 +47,7 @@
 
 ## 同源分发约束
 
-公共文档路径为 `/:tenantCode/enterprise`，登记商户域为 `/enterprise`。子页仅使用[登记清单](../../packages/web-client/src/enterprise-entry.ts)，包括本人申请、加入、待办、成员、政策和审批。`orders` 的列表、原订单详情和有界导出行已从[企业 Controller](../api/src/modules/enterprise/enterprise-read.controller.ts)登记至[AppModule](../api/src/app.module.ts)与[OpenAPI](../api/src/contracts/openapi-document.ts)，当前覆盖可信会话经营空间的企业订单；`finance` 缺企业客户正式只读端口时保持不可用。`tenantCode` 是商户编码，客户登录后再选择其下可管理企业，query 不能覆盖商户。
+公共文档路径为 `/:tenantCode/enterprise`，登记商户域为 `/enterprise`。子页仅使用[登记清单](../../packages/web-client/src/enterprise-entry.ts)，包括本人申请、加入、待办、成员、政策和审批。`orders` 的列表、原订单详情和有界导出行已从[企业 Controller](../api/src/modules/enterprise/enterprise-read.controller.ts)登记至[AppModule](../api/src/app.module.ts)与[OpenAPI](../api/src/contracts/openapi-document.ts)，当前覆盖可信会话经营空间的企业订单。[财务页](src/FinancePage.tsx)沿[固定 Core 读端口](../api/src/modules/rental-core/rental-enterprise-read.port.ts)读取原账户及企业承担订单资金，订单空间归属由 Core 历史依据核对。实款与企业回款核销分列，历史跨空间账户、账单/到期及保证金原来源缺件沿端口能力状态展示。`tenantCode` 是商户编码，客户登录后再选择其下可管理企业，query 不能覆盖商户。
 
 静态资产固定 `/enterprise-assets/`，不与文档路径混用。获准部署时，先将登记企业路径回源到企业 `index.html`，再应用租户网站的通用 SPA 回退；不能由网站 wildcard 接管企业页。API 保持本站 `/api/client/v1`，两应用共用客户会话和同一 Web Lock；跨 origin 凭据运输和小程序浏览器免登录不在此合同内。
 

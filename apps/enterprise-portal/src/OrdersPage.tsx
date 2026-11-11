@@ -131,6 +131,9 @@ export function EnterpriseOrdersPage() {
           ]} />
       </ListSection>}
     {orderId && !detail.data && detail.isFetching && <LoadingState />}
+    {orderId && !detail.error && detail.data?.order.group === "enterprise_paid" && corporate?.actions.includes("finance:read")
+      && <Link to={`${context.basePath}/finance?${new URLSearchParams({ orderId })}`}
+        onClick={event => { if (context.signal.aborted || detail.isFetching || currentIdentity.current !== identity) event.preventDefault(); }}>{english ? "Read original financial records" : "核对原财务记录"}</Link>}
     {!orderId && group === "personal_benefit" && <p>{english ? "Personal payment. Excluded from enterprise receivables and credit." : "个人签约付款，不计企业应收或用信。"}</p>}
     {!orderId && corporate?.actions.includes("export:create") && <p>{english ? `Exports contain all matching orders, up to ${ENTERPRISE_ORDER_EXPORT_LIMIT} rows. Narrow the search for larger results.` : `导出当前筛选的完整订单，单次最多 ${ENTERPRISE_ORDER_EXPORT_LIMIT} 条，超出时请缩小筛选范围。`}</p>}
   </section>;

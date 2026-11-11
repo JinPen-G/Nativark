@@ -5,6 +5,7 @@ import { ENTERPRISE_WORKFLOW_SCHEMAS } from "../modules/enterprise/enterprise-wo
 import { ENTERPRISE_EXCHANGE_SCHEMAS } from "../modules/enterprise/enterprise-exchange-schemas";
 import { ENTERPRISE_EXTENSION_SCHEMAS } from "../modules/enterprise/enterprise-extension-schemas";
 import { ENTERPRISE_TRANSFER_DECISION_SCHEMAS } from "../modules/enterprise/enterprise-transfer-decision.schemas";
+import { ENTERPRISE_FINANCE_SCHEMAS } from "../modules/enterprise/enterprise-finance-schemas";
 const string: SchemaObject = { type: "string" };
 const integer: SchemaObject = { type: "integer", minimum: 0 };
 const boolean: SchemaObject = { type: "boolean" };
@@ -28,6 +29,7 @@ const orderScope = {
   coverage: { type: "string", enum: ["current_workspace_authorized_enterprise_orders"] } as SchemaObject
 };
 export const ENTERPRISE_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...ENTERPRISE_FINANCE_SCHEMAS,
   ...ENTERPRISE_WORKFLOW_SCHEMAS,
   ...ENTERPRISE_EXTENSION_SCHEMAS,
   ...ENTERPRISE_EXCHANGE_SCHEMAS,
