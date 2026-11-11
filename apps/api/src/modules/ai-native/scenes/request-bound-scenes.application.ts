@@ -1062,6 +1062,35 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     readInput: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, async (root, command) => (await root.center.readInput({ original: command })).input),
     readAnswer: async (request: AiSceneHttpRequest, value: unknown) => (await readAnswer(request, value, false)).receipt,
+    /** Original answer/quote receipts do not require an enabled model host.
+     * The saved answer and Run lineage locate this exact Core operation; an
+     * absent receipt never authorizes another quote or a replacement key. */
+    async readClarifiedQuoteReceipt(request: AiSceneHttpRequest, value: unknown) {
+      const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+      const supplied = freezeOriginalInput(structuredClone(value));
+      const { receipt } = await readAnswer(currentRequest, supplied, false);
+      return call(currentRequest, supplied, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema }).passthrough().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const original = parsed.data.original, before = await root.scenes.requests.readHistorical(original);
+        const task = await root.scenes.readTaskReceipt(original.inputRef);
+        if (before.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, quotation: 'unavailable' as const });
+        if (receipt.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const result = await root.scenes.tools.quote.recoverOriginal(`scene-answer:${original.inputRef}:${receipt.receiptId}`,
+          originalIdentityHash(before.context));
+        const latestAnswer = await readAnswer(currentRequest, supplied, false);
+        const after = await root.scenes.requests.readHistorical(original), latestTask = await root.scenes.readTaskReceipt(original.inputRef);
+        if (requestFingerprint(latestAnswer.receipt) !== requestFingerprint(receipt) || after.receipt.state === 'revoked'
+          || after.receipt.contentHash !== before.receipt.contentHash || after.receipt.revision !== before.receipt.revision
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context) || latestTask.state !== 'observed'
+          || latestTask.taskId !== task.taskId || latestTask.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: before.receipt, receipt, result,
+          observation: 'original_clarified_quote_operation_only' as const, orderApproval: 'not_granted' as const,
+          inventoryReservation: 'not_attempted' as const });
+      });
+    },
     /** Server-internal material for explicit continuation; not an HTTP reader. */
     resolveAnswerContinuation: async (request: AiSceneHttpRequest, value: unknown) => {
       const result = await readAnswer(request, value, true);
