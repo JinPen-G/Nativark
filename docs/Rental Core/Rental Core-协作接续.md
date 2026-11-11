@@ -1,6 +1,6 @@
 # Rental Core 协作接续
 
-更新时间：2026-11-11。
+更新时间：2026-11-12。
 
 > 本轮由负责人通过PM正式授权Core研发负责人在指定工作树恢复核心开发。主线为品类治理原CAT-GOV-01～14全部收口，同时独立核实本册原十二项CLOSE及对企业/AI的必要Core接点；不混算进度、不扩大为PCH。日常任务分支精确提交/普通推送持续获准；最新安排为每个可独立验证阶段交固定SHA，由PM串行收回main，不等待两个完整任务。禁止新增/扩写测试脚本，采用已有定向冒烟、短命令及必要类型检查；本轮不含真实环境、依赖安装、迁移、部署或生产启用许可。
 
@@ -22,7 +22,7 @@
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。
-3. 企业作者正在消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)。Core商户执行与客户端 `material/confirm/original` 保持各自原身份；企业作者负责批准参与者、本人明确提交及其服务/页面，公共登记/DI窗口由PM指定。本树已有原内容冻结、只核对原目标和本人受权字节读取接点；下一口是实际Core完成应用及本人照片正常读取、HTTP/DI/消费者核验，见[照片阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。未冻结照片仍不可接受，原K/C不能换键重做。原11组调用的精确出处、参与者替身边界及旧失败保留，不替代企业实际参与者或真实验收。
+3. 企业作者正在消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)。Core商户执行与客户端 `material/confirm/original` 保持各自原身份；企业作者负责批准参与者、本人明确提交及其服务/页面，公共登记/DI窗口由PM指定。本树原内容冻结、Core完成/原键回读、原准备接受及本人精确字节读取已有5组限定消费，撤权、订单变化和跨空间拒绝通过，见[消费阶段](<Rental Core-开发记录.md#exchange-photo-core-consumption-20261112>)。下一口是Core完成收据失败/失应答恢复、HTTP/DI/实际消费者及真实事务/存储核验。未冻结照片仍不可接受，原K/C不能换键重做；原11组调用和企业参与者替身边界不替代实际企业参与者或正式验收。
 4. ECP-09/10的[Core当前空间读端口](../../apps/api/src/modules/rental-core/rental-enterprise-read.port.ts)及原48行共享投影仍归Core；PM已按固定`527e731c8`逐blob核实，声明企业17f4f9887及前置已收回并核GitHub main `917a92a1a41caadc1180e8c8b2c8dc0b596c748f`，未取活动换货代码。其DI/登记/消费者已有源码和离线结果，真实HTTP、完整ECP仍待验；本树不追活动main。历史跨空间、全账户其他空间、正式账单/核定到期及保证金专用读源仍不可用，不另算账。企业 `readerCursor/readerAudit` 仅其既有审计段，不占本片租赁合同。按负责人明确交接给企业可消费固定SHA；不以他树环境许可运行本树服务。
 5. 非关键路径CLOSE依原任务留后续，保持用量/免赔、特殊结案、停租、车辆后发现费用、真实保证金及安全的完整门槛。历史CORE-019片不覆盖存量账务、企业原回款冲销或真实供应商保证金。
 

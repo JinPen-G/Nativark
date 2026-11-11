@@ -4,6 +4,18 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="exchange-photo-core-consumption-20261112"></a>
+
+## 换货照片的 Core 完成与本人读取限定消费（2026-11-12）
+
+从已核 GitHub 的 `5c755c64920217328cea504acde2c19c19296759` 接续，工作树/暂存区干净，无 merge/cherry-pick，恢复后未发现本任务验证残留。沿[照片源码检查点](#exchange-photo-freeze-20261111)复用原分段计价与文件 fixture，本片没有修改生产源码、测试文件/断言、公共登记或正式任务。
+
+实际 Core/预览/准备、专用影像、本人同意和文件服务参与5组限定调用：影像经一次暂存 GET、唯一目标 PUT、目标 GET 完成，原键重复调用不再请求字节；原准备接受该原来源并记录唯一消费，本人从该准备读取精确照片字节；IO期间撤销原客户、改变原订单修订，以及跨空间请求均被拒绝。`boolean false` 检查值保留，没有补造费用确认、企业批准或执行成功。
+
+命令使用原离线 preload、固定不可用数据库 URL、同一任务暂存和 TS 优先解析，退出0、audit 0。原初始化 Call ID、5组输出、源码提交与边界见[消费清单](../../output/category-governance/exchange-photo-core-calls-20261112.json)。原 SQL/Auth/配置/库存/事务和对象传输为明确替身；本次证明服务限定消费，不证明真实数据库权限/事务、对象存储、HTTP/DI、页面或微信宿主。Core完成收据失败与失应答的恢复应用尚未在本次5组中验证，沿原完整门槛继续核对。
+
+两份既有 fixture 的SHA-256保持：分段计价 `24a8c79d3fa686a9291e3c9acdbf55c1e42d326a970ab7f8a5a761f70c18a0fa`，文件 `0c4a7a211d869575ca88c9a4988a16cef85698861438acd77d72177003089d69`。证据已固化，暂存删除、验证进程退出；API仍为[当前固定构建](#exchange-photo-freeze-20261111)的863份受管文件。本片不提高CAT-GOV/CLOSE/ECP百分比或完整结项，不合main、不执行真实环境。
+
 <a id="exchange-photo-freeze-20261111"></a>
 
 ## 换货照片的原内容冻结与核对接点（2026-11-11）
