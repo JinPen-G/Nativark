@@ -6,7 +6,7 @@
 
 目标为完成原 AIN-01～28 及 ENTRY-01～18 的正式开发任务，优先可用的核心场景和实际生产装配；不新增边缘功能、Reserved 范围或测试脚本，仅做必要模拟冒烟与类型检查。按负责人新决定及需求v1.15/任务v1.19，真实测试由负责人自行操作，不再阻塞研发100%；功能范围、原任务代码依赖和独立复核仍须齐备，不以提交或局部绿色计整项完成。
 
-当前优先收口AIN-05→06→07，按[新的模拟研发验收分工](<AI Native-开发记录.md#ain-owner-simulated-acceptance-20261111>)核清完整实现和证据；旧真实测试授权询问已撤下，不继续等待该授权。两助手收完规则/员工整链后交付，dev1转原05独立复核、dev2转原06原任务收口。负责人已补齐[客户/员工原入口的部署接线](<AI Native-开发记录.md#ain-client-staff-publication-closeout-20261111>)，17项开关独立注入；当前同片修复规则原body校验、员工合法对象比较及原答案明确继续。PM提出的同身份跨标签token更新后verified不恢复由AI-RD在原认证store核查修复，不降低可信回执门槛、不改PM播放器/locale。
+当前优先收口AIN-05→06→07，按[新的模拟研发验收分工](<AI Native-开发记录.md#ain-owner-simulated-acceptance-20261111>)核清完整实现和证据；旧真实测试授权询问已撤下，不继续等待该授权。两助手收完规则/员工整链后交付，dev1转原05独立复核、dev2转原06原任务收口。负责人已补齐[客户/员工原入口的部署接线](<AI Native-开发记录.md#ain-client-staff-publication-closeout-20261111>)，17项开关独立注入；当前同片修复规则原body校验、员工合法对象比较及原答案明确继续。PM提出的同身份跨标签token更新后verified不恢复已在[原认证store修复并模拟验证](<AI Native-开发记录.md#ain-auth-storage-reverification-20261111>)，旧响应不能覆盖新会话，门槛保持；main认证文件、PM播放器/locale未改。
 
 本次从已上传的 `859ad9abdccd017de3dd24bf7767ffb16a311a7a` 开工；此前三树/五树整合成果均沿 main 历史继承，旧 AI 主树和残留目录已经移除。main 的原WIP及PM当前环境/治理修复均不混入本专项提交，PM集成期间本树继续独立开发。历史 `output` 证据统一在主仓库 `D:/工作文件/rental-OS/output` 对应路径只读查阅，未复制到新工作树。本批固定消费者、恢复宿主及实际失败见[未完成检查点](<AI Native-开发记录.md#ain-core-checkpoint-20261111>)。
 

@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-auth-storage-reverification-20261111"></a>
+## 同身份跨标签令牌更新后的可信会话重验（2026-11-11）
+
+PM报告同身份双标签中RestEntry与Copilot消失，缓存身份齐全而`sessionVerified=false`。负责人只读核main与AI树的authStore、RequireAuth、HTTP刷新和queryClient，四个文件逐一同blob且认证路径无并行WIP；原authStore为`613262ea14e322ff266864c79dfa4187c6247f5f`。源码确认storage同步会因token不同撤销验证，而已挂载RequireAuth只在首次effect执行bootstrap，缺少再次可信读取；没有把PM的候选原因直接当实页根因。
+
+仅修改[原认证store](../../apps/admin/src/features/auth/authStore.ts)：缓存同步后有token但未验证时调用原`sessionContext`；按会话epoch与确切token合并同一次核验，并要求当前attempt一致才采用成功或失败结果。新token、后来的核验或原refresh回执胜出后，旧响应不能覆盖新身份或登出新会话；相同token文本的新可信refresh也使旧核验失效。纯品牌/主题字段沿原条件保留验证，DOM/storage事件不能自行置真，未降低RequireAuth、Copilot或播放器门槛。main工作区及PM播放器/locale未修改。
+
+一次stdin模拟冒烟exit0（chunk `bb9b2b`）：使用实际Zustand store和queryClient，运输/存储/DOM为明确内存替身；原版在token更新后保持false且没有新请求的现象复现，新版自动核验、storage事件去重、主题不撤权、旧成功/旧失败隔离、token来回变化、同token新refresh优先、DOM伪造不授信、登出后旧响应不能恢复及当前核验失败退出均通过。模拟服务器回执是唯一置真依据，未从缓存强行改状态。
+
+authStore及Vite声明/传递依赖TypeScript5.9.3/noEmit为0诊断（chunk `0c6477`），24份并行代码只在内存映射为`98755765c`，未覆盖工作区。首类型准备误把大于1MB的开发记录装进Git默认缓冲，ENOBUFS发生在类型检查前；只将映射限制为代码/JSON后重跑，未改测试或生产类型条件。最终源码blob为`666450d453872fd4ce0e8588de02d997e3baab9c`。审计0、任务临时目录未创建，无新测试文件、服务、依赖或真实接口调用；本阶段为自复查和模拟证据，不声称已在main实页或真实服务验收。
+
 <a id="ain-owner-simulated-acceptance-20261111"></a>
 ## 负责人确认模拟研发验收与真实测试分工（2026-11-11）
 
