@@ -2,6 +2,7 @@ import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-o
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
+import { AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP, AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS, AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS } from '@rental-os/shared';
 import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_SCHEMAS, AI_MEMBER_NAME_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_CONTRACTS, AI_TASK_RULE_DRAFT_SCHEMAS, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
@@ -231,6 +232,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
   ...AI_TASK_CALENDAR_DRAFT_SCHEMAS,
+  ...AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS,
   ...AI_TASK_ORDER_HANDOFF_SCHEMAS,
   ...AI_TASK_READ_POLICY_SCHEMAS,
   // AIN-02/S01：只公开草案结构，无对应运行路由；不得据此认为工具已可执行。
@@ -2349,6 +2351,16 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: action === 'save' ? 'Explicit human save of a reviewed original calendar draft. No publication. Unknown: read the same original operation.'
       : action === 'operation' ? 'Read original calendar draft operation from server-owned Task/Step/proposal linkage.' : 'Current owned calendar proposal or full Core candidate review.',
     requestSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].request, responseSchema: AI_TASK_CALENDAR_DRAFT_CONTRACTS[action].response })),
+  ...Object.entries(AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS).map(([action, contract]) => ({ method: 'post' as const,
+    path: `/api/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP[action as keyof typeof AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS]}`,
+    tag: 'AI Native', authRequired: true, operationId: `aiTaskCalendarDraft_${action}`, permissions: ['rental-os:calendar:edit'],
+    summary: action === 'source' ? 'Read existing draft calendar dates under current calendar edit authority. No task creation.'
+      : action === 'entry' ? 'Explicitly create the original calendar task from a selected existing draft date. No model, calendar save or publication.'
+      : action === 'entryOperation' ? 'Read the original calendar task creation receipt without retrying creation.'
+      : action === 'prepare' ? 'Prepare a linked calendar AI proposal from reviewed name and business status changes. No Core draft save or publication.'
+      : action === 'preparationOperation' ? 'Read the original linked calendar proposal operation without restarting it.'
+      : 'Review an existing calendar draft date and its permitted changes. No persistence or publication.',
+    requestSchema: contract.request, responseSchema: contract.response })),
   { method: 'post', path: `/api/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`, tag: 'AI Native', authRequired: true,
     operationId: 'aiTaskOrderHandoff_read', permissions: ['rental-os:order:view'],
     summary: 'Locate the owned original order Task and reread current order facts and manual reference. No model, business execution or approval.',

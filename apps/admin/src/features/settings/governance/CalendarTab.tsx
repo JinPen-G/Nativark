@@ -18,6 +18,10 @@ import { Button, Drawer } from "@/components/ui";
 import dayjs from "dayjs";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuthStore } from '@/features/auth/authStore';
+import { currentSessionEpoch } from '@/app/queryClient';
+import { CalendarSourceEntry } from '@/features/ai-native/CalendarSourceEntry';
+import { useCalendarDraftLocale } from '@/features/ai-native/CalendarDraftPreparation';
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
@@ -68,8 +72,10 @@ const previewFieldLabels: Record<string, string> = {
 export function CalendarTab({ permissions }: { permissions: GovernancePermissions }) {
   const { message } = App.useApp();
   const { t, locale } = useLocale();
+  const { t: aiT } = useCalendarDraftLocale();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const auth = useAuthStore();
   const { canManagePrice, canEditCalendar, canPublishCalendar, canViewCalendarHistory, canSeeCalendar } = permissions;
   const [year, setYear] = useState(currentYear);
   // PRICE-02A（需求 4.5.9）：默认按自然月运营日历；全年列表仅作为可选视图保留。
@@ -78,6 +84,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
   const [rangeOpen, setRangeOpen] = useState(false);
   const [rangeMode, setRangeMode] = useState<"override" | "remove">("override");
   const [calendarDay, setCalendarDay] = useState<RentalCalendarDay>();
+  const [aiEntry, setAiEntry] = useState<{ date: string; identity: string }>();
   const [importOpen, setImportOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   /** 历史版本抽屉。选中版本后展开逐日差异与覆盖审计（需求 4.5.7/4.5.8）。 */
@@ -100,6 +107,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
     queryFn: () => rentalCoreApi.calendar(year),
     enabled: canSeeCalendar,
   });
+  const aiIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user, currentSessionEpoch(), year,
+    calendar.data?.version, calendar.data?.revision]);
   /** 版本历史只在抽屉打开时拉，且属管理视图。 */
   const calendarVersions = useQuery({
     queryKey: ["rental-core", "calendar-versions", year],
@@ -508,6 +517,14 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         />
       </Space>
 
+      <Drawer title={aiT('准备日历提案')} open={!!aiEntry && aiEntry.identity === aiIdentity} destroyOnHidden
+        onClose={() => { setAiEntry(undefined); void queryClient.invalidateQueries({ queryKey: ['rental-core', 'calendar', year] }); }}>
+        {aiEntry?.identity === aiIdentity && <CalendarSourceEntry key={`${aiEntry.identity}:${aiEntry.date}`} date={aiEntry.date} identity={aiIdentity}
+          current={() => aiEntry.identity === aiIdentity && auth.hasPermission('rental-os:calendar:edit')}
+          onAccessDenied={() => setAiEntry(undefined)}
+          onComplete={() => { setAiEntry(undefined); void queryClient.invalidateQueries({ queryKey: ['rental-core', 'calendar', year] }); }} />}
+      </Drawer>
+
       <Modal presentation="side"
         title={`${t(canEditCalendar ? "覆盖营业日" : "营业日详情")} · ${calendarDay?.date ?? ""}`}
         width={640}
@@ -525,6 +542,10 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           { key: "hours", label: "营业时段", value: calendarDay.hours?.windows?.map(window => `${window.start}–${window.end}`).join("、") || t("沿用每周模板") },
           ...(calendarDay.overriddenFrom ? [{ key: "original", label: "被覆盖的原始值", value: `${calendarDay.overriddenFrom.name} · ${t(calendarDayTypeLabels[calendarDay.overriddenFrom.dayType])} · ${t(businessStatusLabels[calendarDay.overriddenFrom.businessStatus ?? (calendarDay.overriddenFrom.closed ? "closed" : "open")])}`, wide: true }] : []),
         ]} />}
+        {calendarDay && auth.hasPermission('rental-os:calendar:edit') && <Button disabled={saveDay.isPending}
+          onClick={() => { setAiEntry({ date: calendarDay.date, identity: aiIdentity }); setCalendarDay(undefined); }}>
+          {aiT('准备日历提案')}
+        </Button>}
         <Form
           form={calendarDayForm}
           layout="vertical"

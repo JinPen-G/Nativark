@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-calendar-source-consumer-closeout-20261111"></a>
+## 日历原页面、差异提案与跨修订恢复（2026-11-11）
+
+原员工结果读取阶段已提交并推送 `7fbfe30d6b600d75361401254bdbed8da31504d4`，本地/GitHub已重新核对。负责人先将dev1交回的24个日历专用文件逐一匹配固定blob，再沿[原日期入口](../../apps/admin/src/features/settings/governance/CalendarTab.tsx)→[原Task来源](../../apps/api/src/modules/ai-native/task-calendar-source-entry.composition.ts)→[关联新提案](../../apps/api/src/modules/ai-native/task-calendar-draft-preparation.composition.ts)→原R1/BoundCalendarDraft核接。仅calendar:edit角色可准备已存草稿日期的name/businessStatus，原Calendar Guard/ALS、原版本/年份/日期/revision仍核验；不新建年度/日期、不发布，不扩大通用开业/订单/价格权限。日历页签独立渲染，只有日历权限时不请求三个无关设置资源。
+
+负责人发现原持久sourceKey含可变calendar.revision；Core保存会改变修订，关闭重开可能换键并遗失旧unknown入口。[入口组件](../../apps/admin/src/features/ai-native/CalendarSourceEntry.tsx)现以用户/租户/空间/日期固定定位，修订只撤下旧展示。原Core收据确认committed后，[草稿组件](../../apps/admin/src/features/ai-native/TaskCalendarDraft.tsx)才提供“完成本次修改”；当前入口核对关联Task与日期，按精确原键清理入口和提案定位后返回日历。新页面的不同定位不会被旧完成回调清除，卸载后的旧回调拒绝；未观察到结果、未完成或权限变化不清理，不据换修订重发。原服务端Task/提案/Core事实继续保留。
+
+负责人检查原验证命令后，以stdin合并原Core链和两个实际组件/session的必要恢复冒烟，命令SHA256 `a8111dc3ebb12a2ddfe829e231d274ef537b663cf2fd14b5947af774c585fb38`，exit0（chunk `e05b32`）。实际DTO whitelist/Controller/Auth/Guard/ALS→API/session→原R1/Core夹具：仅calendar:edit、新目标零预置政策，新增2 Task、1 Proposal、8 CAS、Core保存1次、模型0；entry/prepare/save三处丢应答各只发一次。严格推进120001ms后政策到期仍读原键，关闭写入且仅view-history也可读原Core收据，published原像保持。增加的组件冒烟覆盖修订变化重开仍读原操作、unknown拒绝结束、保留其他页面新定位、committed后清理及重新进入、卸载旧回调拒绝，Core仍只写一次。hooks/视觉控件为明确的内存宿主，未冒称浏览器验证。
+
+后台两入口及传递类型0诊断（chunk `1819ef`）；API首轮缺既有MCP审计类型入口的映射，补到本树正式源码后仅复验API，TypeScript5.9.3/noEmit诊断0（chunk `3e94e2`），未安装或复制依赖。发布前使用本片暂存源码及`7fbfe30d6`其余依赖做固定快照核验，API2根/后台2根及vite声明均0诊断，同一Core与组件恢复组exit0（chunk `ee85e6`）；39个源码映射只在内存选择版本，工作区和并行规则片均保留。原fixture函数仅在内存提取并补已核默认/表声明，没有新增或扩写测试文件。审计0，单一任务临时目录未创建。真实数据库、浏览器/微信、供应商及AIN-12/14/16、适用ENTRY全文门槛仍未齐，不增加100%任务或触发合main。
+
 <a id="ain-staff-original-result-reference-20261111"></a>
 ## 员工原识别结果定位与正式读取装配（2026-11-11）
 

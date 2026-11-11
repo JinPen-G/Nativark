@@ -33,6 +33,8 @@ export function composeOpeningProposalTaskHost(input: AiOriginalSceneDependencie
     /** Closed server batch; never appended to an already-frozen plan. */
     materials?: readonly ReturnType<typeof verifyOpeningSectionMaterial>[];
     limits: z.infer<typeof aiTaskRunnerLimitsSchema>; expiresAt: string }; monotonic?: () => number;
+  /** Fixed by the calendar server composition, never by an input DTO. */
+  calendarOnly?: boolean;
 }) {
   const task = structuredClone(input.task), host = Object.freeze(structuredClone(input.host));
   task.material = verifyOpeningSectionMaterial(task.material); task.limits = aiTaskRunnerLimitsSchema.parse(task.limits);
@@ -42,11 +44,13 @@ export function composeOpeningProposalTaskHost(input: AiOriginalSceneDependencie
     || new Set(materials.map(material => material.key)).size !== materials.length
     || materials[0].materialHash !== task.material.materialHash) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   const allowedMaterials = new Set(materials.map(material => material.materialHash));
+  if (input.calendarOnly && materials.some(material => material.key !== 'business_calendar'))
+    throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   const clock = input.clock ?? (() => new Date()), authorization = composePersistedTaskAuthorization(input);
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, clock);
   const differences = new AiOpeningSectionDifferenceService(new AiGuardedOpeningConfigurationSource(input.core, routes), routes, clock,
-    new AiOpeningVersionFieldSource(input.db, routes));
-  const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId }, differences);
+    new AiOpeningVersionFieldSource(input.db, routes), input.calendarOnly === true);
+  const proposals = new AiOpeningSectionProposalService({ ...input, holderId: host.holderId }, differences, input.calendarOnly === true);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     'tenant.config.propose', undefined, undefined, undefined, undefined, { verify: async (context, material, taskId) => {
       await input.revalidateOriginal();

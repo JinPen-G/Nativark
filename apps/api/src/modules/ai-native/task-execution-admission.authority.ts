@@ -19,7 +19,8 @@ import { PrismaTaskActionPolicyRepository, type AiTaskActionPolicyMutationAuthor
 import type { TaskExecutionAdmissionReference } from './task-execution-admission.application';
 
 export interface TaskExecutionAdmissionSigningDependencies {
-  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskActionPolicy' | 'aiTaskPlanPolicy' | 'operationLog' | 'rentalRuleVersion'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTask' | 'aiTaskActionPolicy' | 'aiTaskPlanPolicy' | 'operationLog' | 'rentalRuleVersion'>
+    & Partial<Pick<PrismaClient, 'rentalBusinessCalendar'>>;
   auth: Pick<AuthService, 'resolveAccessContext'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: AiTaskCredentialSource;
@@ -86,6 +87,21 @@ export class TaskExecutionAdmissionAuthority implements AiTaskActionPolicyMutati
         if (!version || Object.entries(where).some(([key, value]) => version[key as keyof typeof version] !== value)) throw denied();
         // The real POST rule-version Guard, never the opening price read Guard.
         await this.routes.withRuleDraftPreview(version.id, async context => check(context));
+      } else if (this.reference.preparation?.kind === 'business_calendar') {
+        const selected = this.reference.preparation;
+        if (original.request.sceneCode !== 'opening_diagnosis' || original.request.input.sections.length !== 1
+          || original.request.input.sections[0] !== 'business_calendar'
+          || Number(selected.date.slice(0, 4)) !== selected.year || !this.d.db.rentalBusinessCalendar) throw denied();
+        const where = { id: selected.targetId, tenantId: expected.scope.tenantId, workspaceId: expected.scope.workspaceId,
+          year: selected.year, version: selected.version, revision: selected.revision, status: 'draft' };
+        const calendars = tx?.rentalBusinessCalendar ?? this.d.db.rentalBusinessCalendar;
+        if (!calendars) throw denied();
+        const row = await calendars.findFirst({ where });
+        if (!row || Object.entries(where).some(([key, value]) => row[key as keyof typeof row] !== value) || !Array.isArray(row.days)) throw denied();
+        const days = row.days.filter(day => day && typeof day === 'object' && !Array.isArray(day) && day.date === selected.date);
+        if (days.length !== 1 || !days[0] || typeof days[0] !== 'object' || Array.isArray(days[0]) || typeof days[0].name !== 'string') throw denied();
+        await this.routes.withCalendarRangePreview(selected.year, { startDate: selected.date, endDate: selected.date,
+          fields: { name: days[0].name } }, async context => check(context));
       } else if (original.request.sceneCode === 'order_explanation') {
         await new AiOrderRouteContextAuthority(this.d.guard, this.d.credentials, original.request.input.orderId, this.wall)
           .withOrderRead(async context => check(context));

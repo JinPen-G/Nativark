@@ -11,13 +11,15 @@ import { AiTaskRunnerError, callAiTaskRunnerDependency } from './runner/ai-task-
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './scenes/original-scenes.composition';
 import { composeTaskExecutionAdmission } from './task-execution-admission.application';
 import { originalRequestReferenceSchema } from './task-request/original-request.validation';
+import { createCalendarOriginalRequests } from './task-calendar-original-source.composition';
 
 type Dependencies = Omit<AiOriginalSceneDependencies, 'credentials' | 'db'> & { db: PrismaClient };
 type Request = { headers: { authorization?: unknown } };
 type RulePreparation = { kind: 'business_rule'; targetId: string };
+type CalendarPreparation = { kind: 'business_calendar'; targetId: string; version: string; year: number; date: string; revision: number };
 
 export function createOriginalTaskStartAdmission(d: Dependencies, scene: AiSceneCode) {
-  return async (request: Request, value: unknown, preparation?: RulePreparation, signal?: AbortSignal): Promise<void> => {
+  return async (request: Request, value: unknown, preparation?: RulePreparation | CalendarPreparation, signal?: AbortSignal): Promise<void> => {
     const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const authorization = request.headers.authorization;
@@ -32,7 +34,9 @@ export function createOriginalTaskStartAdmission(d: Dependencies, scene: AiScene
     } };
     try {
       await callAiTaskRunnerDependency(() => runWithRequestIdentity({}, async () => {
-        const originals = composeAiOriginalScenes({ ...d, credentials }).requests;
+        const originals = preparation?.kind === 'business_calendar'
+          ? createCalendarOriginalRequests({ ...d, credentials }, { year: preparation.year, date: preparation.date })
+          : composeAiOriginalScenes({ ...d, credentials }).requests;
         const locator = await originals.readTaskLocator(parsed.data);
         if (locator.receipt.sceneCode !== scene || locator.receipt.state === 'revoked'
           || locator.task.state !== 'observed') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -45,7 +49,8 @@ export function createOriginalTaskStartAdmission(d: Dependencies, scene: AiScene
         }
         const admission = composeTaskExecutionAdmission({ db: d.db, originals, clock: d.clock },
           { db: d.db, auth: d.auth, guard: d.guard, credentials, originals, clock: d.clock });
-        const intent = preparation ? 'explicit_rule_preparation' as const : 'explicit_start' as const;
+        const intent = preparation?.kind === 'business_calendar' ? 'explicit_calendar_preparation' as const
+          : preparation ? 'explicit_rule_preparation' as const : 'explicit_start' as const;
         const prepared = await admission.prepare({ original: parsed.data, intent, ...(preparation ? { preparation } : {}) }, signal);
         if (prepared.phase !== 'prepared' || !prepared.reference) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         // Existing current policies need no new issuance. The original guarded

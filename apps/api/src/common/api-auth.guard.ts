@@ -1,6 +1,7 @@
 import { AI_TASK_READ_POLICY_HTTP } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
+import { AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP, AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS } from '@rental-os/shared';
 import { AI_MEMBER_NAME_HTTP } from '@rental-os/shared';
 /** Original route/data authorization for Web sessions and scoped current principals.
  * Trusted catalog/order reads enter the same checks and ALS, never a client-supplied
@@ -286,6 +287,9 @@ export function requiredPermissions(method: string, path: string) {
     return ['rental-core:catalog:view', 'rental-core:catalog:manage', 'rental-os:order:view', 'rental-os:order:create'];
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/desktop-business\/policy(?:\/(?:change|operation))?$/u.test(path))
     return ['system:params:manage'];
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS)
+    .some(action => path === `/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP[action as keyof typeof AI_TASK_CALENDAR_DRAFT_PREPARATION_CONTRACTS]}`))
+    return ['rental-os:calendar:edit'];
   if (method.toUpperCase() === 'POST' && (['list', 'review', 'save', 'operation'] as const).some(action => path === `/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${AI_TASK_CALENDAR_DRAFT_HTTP[action]}`))
     return path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.save}`) || path.endsWith(`/${AI_TASK_CALENDAR_DRAFT_HTTP.review}`)
       ? ['rental-os:calendar:edit'] : [...AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS];

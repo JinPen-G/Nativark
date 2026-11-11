@@ -24,8 +24,13 @@ const permissions = z.array(id).min(1).max(64).refine(values => new Set(values).
 const operation = z.custom<AiTaskActionPolicyOperation>(value => typeof value === 'string' && taskActionPolicyOperations.includes(value));
 const policyView = z.object({ taskId: id.max(36), operation, revision, requiredPermissions: permissions,
   expiresAt: z.string().datetime({ offset: true }) }).strict();
-const intent = z.enum(['explicit_start', 'explicit_rule_preparation']);
-const preparation = z.object({ kind: z.literal('business_rule'), targetId: id }).strict();
+const intent = z.enum(['explicit_start', 'explicit_rule_preparation', 'explicit_calendar_preparation']);
+const preparation = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('business_rule'), targetId: id }).strict(),
+  z.object({ kind: z.literal('business_calendar'), targetId: id, version: id,
+    year: z.number().int().min(1900).max(2200), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    revision: z.number().int().min(0).max(4294967294) }).strict()
+]);
 const actionReference = z.object({ operation, mode: z.enum(['configure', 'retain']), expectedRevision: revision.nullable(), requiredPermissions: permissions,
   expiresAt: z.string().datetime({ offset: true }) }).strict();
 const taskReference = z.object({ taskId: id.max(36), runId: id.max(36), scopeId: id.max(36), ownerId: id,
@@ -39,7 +44,8 @@ const referenceSchema = z.object({ version: z.literal('task-execution-admission-
   publication: publicationView, actions: z.array(actionReference).min(1).max(12)
     .refine(values => new Set(values.map(value => value.operation)).size === values.length), intentHash: hash }).strict();
 const prepareSchema = z.object({ original: originalRequestReferenceSchema, intent, preparation: preparation.optional() }).strict()
-  .refine(value => value.intent === 'explicit_rule_preparation' ? value.preparation !== undefined : value.preparation === undefined);
+  .refine(value => value.intent === 'explicit_rule_preparation' ? value.preparation?.kind === 'business_rule'
+    : value.intent === 'explicit_calendar_preparation' ? value.preparation?.kind === 'business_calendar' : value.preparation === undefined);
 
 export type TaskExecutionAdmissionReference = z.infer<typeof referenceSchema>;
 export interface TaskExecutionAdmissionPolicyReceipt {
@@ -172,12 +178,15 @@ export function composeTaskExecutionAdmission(d: TaskExecutionAdmissionDependenc
   const parseReference = (value: unknown) => {
     const parsed = referenceSchema.safeParse(structuredClone(value)); if (!parsed.success) throw invalid();
     const reference = parsed.data, { intentHash, ...locator } = reference, { contentHash, ...publication } = reference.publication;
-    if (reference.intent === 'explicit_rule_preparation' ? !reference.preparation : reference.preparation !== undefined) throw invalid();
+    if (reference.intent === 'explicit_rule_preparation' ? reference.preparation?.kind !== 'business_rule'
+      : reference.intent === 'explicit_calendar_preparation' ? reference.preparation?.kind !== 'business_calendar'
+        : reference.preparation !== undefined) throw invalid();
     if (intentHash !== referenceHash(locator) || contentHash !== requestFingerprint({ version: 'task-plan-publication-1', ...publication })) throw invalid();
     return reference;
   };
   const minimumPermissions = (scene: Scene, reference: { preparation?: z.infer<typeof preparation> }): string[] =>
-    reference.preparation ? ['rental-os:rules:manage'] : [sceneTools[scene].permission];
+    reference.preparation?.kind === 'business_calendar' ? ['rental-os:calendar:edit']
+      : reference.preparation ? ['rental-os:rules:manage'] : [sceneTools[scene].permission];
   const operationsFor = (publication: z.infer<typeof publicationView>, scene: string) => {
     const selected = [...initialOperations];
     if (publication.tools.some(tool => tool.code === 'ai.model.text') && scene === 'quote_clarification') selected.push('request_input', 'submit_input', 'resume_input');
@@ -261,10 +270,11 @@ export function composeTaskExecutionAdmission(d: TaskExecutionAdmissionDependenc
       if (publication?.tools.some(tool => ['rental.order.commit', 'tenant.notifications.commit'].includes(tool.code))) selected.push('decide_approval');
       const current = await policies(before.task, selected, signal);
       const rolePermissions = 'access' in before.locator.context ? before.locator.context.access.permissions : [];
-      const minimum: string[] = scene ? command.preparation ? ['rental-os:rules:manage'] : [scene.permission] : [];
+      const minimum: string[] = scene ? command.preparation?.kind === 'business_calendar' ? ['rental-os:calendar:edit']
+        : command.preparation ? ['rental-os:rules:manage'] : [scene.permission] : [];
       if (command.preparation) {
         if (before.task.sceneCode !== 'opening_diagnosis' || !publication?.tools.some(tool => tool.code === 'tenant.config.propose'))
-          missing.push('rule_preparation_tool_not_published');
+          missing.push(command.preparation.kind === 'business_calendar' ? 'calendar_preparation_tool_not_published' : 'rule_preparation_tool_not_published');
       }
       if (minimum.some(permission => !rolePermissions.includes(permission))) missing.push('current_business_permission_missing');
       const expiry = publication ? Math.min(at + maximumMs, Date.parse(publication.expiresAt), Date.parse(before.locator.receipt.expiresAt)) : at;

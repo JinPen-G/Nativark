@@ -15,8 +15,11 @@ import type { RentalQuoteRequest, RentalOrderExtensionRequest, PreviewRentalCale
 import { z } from 'zod';
 
 export type AiBusinessReadKind = 'catalog' | 'order_candidates' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'rule_versions' | 'rule_version' | 'calendar_version' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
+/** Server-selected calendar partition, never a public permission switch. */
+export interface AiCalendarSourceReadTarget { year: number; date: string }
 export interface AiBusinessReadAuthority {
   withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
+  withCalendarSourceRead?<T>(target: AiCalendarSourceReadTarget, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
 }
 const routes = {
   catalog: { method: 'GET', path: '/rental/v1/item-groups' },
@@ -94,6 +97,18 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     consume: (context: AiExecutionContext) => Promise<T>): Promise<T> {
     const command = structuredClone(input);
     return this.withRoute('calendar_range_preview', { ...command, year }, context => consume(context));
+  }
+
+  /** Necessary Core inputs under the actual calendar-edit preview Guard. The
+   * callback does not apply the empty range or read another opening partition. */
+  async withCalendarSourceRead<T>(target: AiCalendarSourceReadTarget,
+    consume: (context: AiExecutionContext) => Promise<T>): Promise<T> {
+    const parsed = z.object({ year: z.number().int().min(1900).max(2200),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u) }).strict().safeParse(structuredClone(target));
+    if (!parsed.success || Number(parsed.data.date.slice(0, 4)) !== parsed.data.year)
+      throw new ModelGatewayError('INVALID_REQUEST');
+    return this.withCalendarRangePreview(parsed.data.year, { startDate: parsed.data.date,
+      endDate: parsed.data.date, fields: {} }, consume);
   }
 
   /** Explicit existing calendar-edit route, distinct from preview and history.
