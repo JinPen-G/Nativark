@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
@@ -28,7 +29,8 @@ import {
 import { RentalCoreService } from "./rental-core.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
-import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
+import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
+import { requestFingerprint } from "./rental-idempotency.repository";
 import {
   ACTIVE_ASSIGNMENTS,
   allocationComplete,
@@ -36,6 +38,20 @@ import {
   lockedAssignment,
   type AssignmentOccupancy,
 } from "./rental-allocation-policy";
+
+/** The original recorded issue, not current inventory availability, a near-term
+ * policy or permission to capture/execute an AI action. No free issue text or
+ * allocations are projected. Consumers recheck this same source revision. */
+export interface RentalRecordedFulfillmentIssueSource {
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  assignmentRevision: number;
+  orderUpdatedAt: string;
+  startAt: string;
+  fulfillmentLocationId: string;
+  state: "issue_recorded";
+}
 
 @Injectable()
 export class RentalAllocationService
@@ -747,6 +763,27 @@ export class RentalAllocationService
     };
     if (existingTx) return run(existingTx);
     return this.prisma.$transaction(run, { isolationLevel: "ReadCommitted" });
+  }
+
+  /** Internal source read in the caller's original transaction. Never calls
+   * scanOrder/recordIssue, acquires resource locks, starts a transaction or
+   * substitutes an allocation preference for a formal near-fulfillment policy.
+   * The existing fact reader preserves original order visibility. */
+  async readRecordedFulfillmentIssue(tenantId: string, orderId: string, tx: RentalFactTx): Promise<RentalRecordedFulfillmentIssueSource | undefined> {
+    const workspaceId = getRequestWorkspaceId(), identity = requestFingerprint(getRequestIdentity());
+    if (!tx || !workspaceId || getRequestTenantId() !== tenantId) throw new ForbiddenException("履约来源缺少原事务或当前租户空间");
+    const order = await this.facts.findOrder(tenantId, orderId, tx);
+    if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
+      || requestFingerprint(getRequestIdentity()) !== identity) throw new ForbiddenException("履约来源读取期间授权范围变化");
+    if (!order) return undefined;
+    if (order.id !== orderId || order.tenantId !== tenantId) throw new ConflictException("履约来源订单与原范围不一致");
+    const revision = order.assignment?.revision;
+    if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)
+      || typeof order.assignment?.issue !== "string" || !order.assignment.issue.trim()
+      || !Number.isSafeInteger(revision) || revision! < 1 || !order.fulfillmentLocationId
+      || !Number.isFinite(Date.parse(order.startAt)) || !Number.isFinite(Date.parse(order.updatedAt))) return undefined;
+    return { tenantId, workspaceId, orderId, assignmentRevision: revision!, orderUpdatedAt: order.updatedAt,
+      startAt: order.startAt, fulfillmentLocationId: order.fulfillmentLocationId, state: "issue_recorded" };
   }
 
   /** 无论是否开启自动分配，都检查已有预分配/锁定；异常不自动解除资源锁。 */

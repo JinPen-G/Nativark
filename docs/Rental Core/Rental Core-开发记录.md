@@ -4,6 +4,26 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="core-failure-read-ports-20261112"></a>
+
+## 履约已记录问题与原九项开业的只读来源（2026-11-12）
+
+从已核GitHub的`61fece91ae007ed42b02b7c96c1f1ab0d1b0140e`接续，PM明确的分配服务/业务服务窗口仅新增无副作用读取合同。没有改原扫描、问题登记、配置持久化或九项判定，没有接入Outbox参加者、改变人工经营事实、生成Client、改事件Schema或调用模型。此前配置行修订源码仍固定在[配置阶段](#configuration-row-revision-core-source-20261112)。
+
+[分配服务](../../apps/api/src/modules/rental-core/rental-allocation.service.ts)的`readRecordedFulfillmentIssue(tenantId, orderId, tx)`必须使用调用方原事务，复用原事实仓储的订单可见范围并前后核对ALS。它只返回原订单ID、真实assignment修订、订单更新时间/起租时点/地点及已登记问题标记，不返回自由问题文本或完整分配资料；缺订单/问题、非待履约阶段、非法修订/时间不补来源。读取不调用`scanOrder`/`recordIssue`、不锁新资源或开事务，不重新计算实时可交付，也不从分配偏好编临近履约阈值。ResourcePorts须结合正式政策和当前授权判定捕获，缺项保持not_captured。
+
+[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)的`readTenantReadinessSource(tenantId)`在业务写锁外调用原`readTenantReadiness`→`renderTenantReadiness`，保留原九项结果；只增加读取起止窗口、`independent_persisted_reads`声明和存在时的真实品类绑定ID/采用修订，前后复验绑定及范围。旧显式legacy宿主不补绑定ID或版1；该结果不宣称事务快照，不写配置/事件，不取代原[Core配置行来源](#configuration-row-revision-core-source-20261112)。原只读调用者继续使用原方法和结果形状。
+
+| 验证 | 实际结果与边界 |
+| --- | --- |
+| API类型 | 原tsconfig的`--noEmit --incremental false --pretty false`退出0，见[原入口核对](../../output/category-governance/core-failure-source-original-checks-20261112.json) |
+| 原分配/开业读取 | `node tests/rental-allocation.test.cjs`退出0、原14个断言通过；`node --test tests/ai-native-ain08-opening-read.test.cjs`退出0、17项通过，没有改原用例/断言。仅该两份原入口，不覆盖前片开业配置13项的5过/8失败 |
+| 新读取合同限定调用 | [原fixture限定调用](../../output/category-governance/core-failure-source-bounded-20261112.json)退出0、5组通过：原事务问题及重复读取不改修订/不扫描写入，缺问题/非法修订不补来源，迟到范围变化/外租户原行拒绝；开业合同保留原九项和独立观察、旧宿主不补绑定，最后一次绑定变化拒绝。实际Core服务参加，原fact/query/事务为明确替身，不解释SQL或证明真实Auth/DB/政策/捕获/模型执行 |
+
+原离线preload、固定不可用DB URL及同一任务暂存/缓存，audit 0。两个原fixture与输入/输出在清单可追踪，没有新增测试脚本。验证进程退出，11份本片日志/缓存及2个任务目录在证据固化后删除，原暂存路径不存在。本片源码尚未编入原863文件API包，不沿用该包作新接点证据；完整品类/AI/CLOSE门槛不变。
+
+下一接点：AI作者在其ResourcePorts消费原事务问题读取及锁外开业来源，先排除在`recordIssue`里重入扫描/另开业务事务的锁环。`persistBusinessConfig`仍只有价格子段共用事务，不提前捕获其余配置尚未提交的九项状态。Core可选参加者尚未接入，需要明确其当前政策/授权、无副作用读源、原事务写入及失败处理；读取可用不等于已捕获，不补默认临近政策/资源ID/修订或让模型改变配置、资源与资金。
+
 <a id="configuration-row-revision-core-source-20261112"></a>
 
 ## 配置行修订与原开业读取来源（2026-11-12）

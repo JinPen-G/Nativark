@@ -861,6 +861,29 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       enabledItemGroupCount: core.enabledItemGroupCount, serviceableLocationCount: core.serviceableLocationCount });
   }
 
+  /** Source envelope for the original nine-item read, used outside business
+   * write locks. It never captures an event, writes configuration, calls persist
+   * or claims that independently read facts form one transaction snapshot. */
+  async readTenantReadinessSource(tenantId: string) {
+    const workspaceId = getRequestWorkspaceId(), identity = requestFingerprint(getRequestIdentity());
+    if (!workspaceId || getRequestTenantId() !== tenantId) throw new ForbiddenException("开业来源缺少当前租户或经营空间");
+    const startedAt = new Date().toISOString();
+    const binding = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
+    const readiness = await this.readTenantReadiness(tenantId);
+    if (binding) {
+      const current = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      if (current.categoryVersionId !== binding.categoryVersionId || current.adoptionRevision !== binding.adoptionRevision) {
+        throw new ConflictException("开业来源读取期间品类绑定变化");
+      }
+    }
+    if (readiness.tenantId !== tenantId || readiness.workspaceId !== workspaceId
+      || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
+      || requestFingerprint(getRequestIdentity()) !== identity) throw new ForbiddenException("开业来源读取期间授权范围变化");
+    return { tenantId, workspaceId, readiness: structuredClone(readiness), observations: { startedAt, completedAt: new Date().toISOString(),
+      consistency: "independent_persisted_reads" as const }, ...(binding ? { categoryBinding: {
+        categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision } } : {}) };
+  }
+
   private async readReadinessMembershipFacts(tenantId: string) {
     let membershipPlanCount = 0, membershipUnavailable = typeof this.memberships?.countPlans !== 'function';
     if (!membershipUnavailable) {
