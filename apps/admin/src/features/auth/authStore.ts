@@ -34,7 +34,7 @@ function persistSession(
 
 interface AuthState {
   ready: boolean;
-  /** Only original server responses establish desktop admission; storage synchronization never does. */
+  /** Only original server responses verify the session; storage synchronization never does. */
   sessionVerified: boolean;
   token?: string;
   tenant?: TenantContext;
@@ -56,8 +56,9 @@ interface AuthState {
   hasCapability: (capability?: RentalCapability) => boolean;
 }
 
+let verification: { epoch: number; token: string; promise: Promise<void> } | undefined;
+
 export const useAuthStore = create<AuthState>((set, get) => {
-  let verification: { epoch: number; promise: Promise<void> } | undefined;
   return {
   ready: false,
   sessionVerified: false,
@@ -70,17 +71,20 @@ export const useAuthStore = create<AuthState>((set, get) => {
     const token = window.localStorage.getItem(keys.token);
     const epoch = currentSessionEpoch();
     if (!token) {
+      verification = undefined;
       set({ ready: true, sessionVerified: false, token: undefined, user: undefined, tenant: undefined, workspaces: [], currentWorkspaceId: undefined });
       return Promise.resolve();
     }
-    if (verification?.epoch === epoch) return verification.promise;
-    const attempt = { epoch, promise: Promise.resolve() };
+    if (verification?.epoch === epoch && verification.token === token) return verification.promise;
+    const attempt = { epoch, token, promise: Promise.resolve() };
+    verification = attempt;
     attempt.promise = (async () => {
       try {
         const context = await api.sessionContext();
-        // A refresh can rotate the token within this generation; a logout or identity/space switch cannot.
-        if (currentSessionEpoch() !== epoch || !window.localStorage.getItem(keys.token)) return;
-        if (get().sessionVerified && token !== window.localStorage.getItem(keys.token)) return;
+        // A newer verification or original refresh receipt owns the current
+        // session, even when the user/space or access-token text is unchanged.
+        if (verification !== attempt || currentSessionEpoch() !== epoch
+          || token !== window.localStorage.getItem(keys.token)) return;
         const previous = get();
         if (previous.user?.id !== context.user.id || previous.tenant?.tenantId !== context.tenant.tenantId
           || previous.currentWorkspaceId !== context.currentWorkspaceId) clearSessionQueryCache();
@@ -95,12 +99,12 @@ export const useAuthStore = create<AuthState>((set, get) => {
           currentWorkspaceId: context.currentWorkspaceId
         });
       } catch {
-        if (currentSessionEpoch() !== epoch || (get().sessionVerified && token !== window.localStorage.getItem(keys.token))) return;
+        if (verification !== attempt || currentSessionEpoch() !== epoch
+          || token !== window.localStorage.getItem(keys.token)) return;
         get().logout();
         set({ ready: true });
       }
     })().finally(() => { if (verification === attempt) verification = undefined; });
-    verification = attempt;
     return attempt.promise;
   },
   async login(tenantCode, account, password) {
@@ -251,6 +255,10 @@ function syncSessionFromStorage() {
   if (previous.currentWorkspaceId !== nextWorkspaceId || previous.user?.id !== nextUser?.id
     || previous.tenant?.tenantId !== nextTenant?.tenantId || Boolean(previous.token) !== Boolean(token)) clearSessionQueryCache();
   setAuthStateFromStorage(useAuthStore, nextWorkspaceId);
+  // Mounted route gates do not bootstrap again after another tab rotates its
+  // token. Recover through the original server read, never through cached flags.
+  const current = useAuthStore.getState();
+  if (current.token && !current.sessionVerified) void current.bootstrap();
 }
 
 function setAuthStateFromStorage(store: typeof useAuthStore, currentWorkspaceId?: string) {
@@ -286,6 +294,7 @@ function setAuthStateFromStorage(store: typeof useAuthStore, currentWorkspaceId?
 // 同一标签页内由 axios 拦截器触发的静默刷新。
 const unsubscribeRefresh = onSessionRefreshed((receipt) => {
   if (!receipt || receipt.accessToken !== window.localStorage.getItem(keys.token)) return;
+  verification = undefined;
   const previous = useAuthStore.getState();
   if (previous.user?.id !== receipt.user.id || previous.tenant?.tenantId !== receipt.tenant.tenantId
     || previous.currentWorkspaceId !== receipt.currentWorkspaceId) clearSessionQueryCache();
@@ -298,6 +307,7 @@ const onStorage = (event: StorageEvent) => {
 };
 window.addEventListener("storage", onStorage);
 if (import.meta.hot) import.meta.hot.dispose(() => {
+  verification = undefined;
   unsubscribeRefresh();
   window.removeEventListener("rental-session-updated", syncSessionFromStorage);
   window.removeEventListener("storage", onStorage);
