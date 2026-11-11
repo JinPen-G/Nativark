@@ -7,6 +7,7 @@ import { InputNumber } from "antd";
 import { enterpriseExtensionServiceRequests, enterpriseExtensionServiceSelectionKey, formatRentalMoney, type ClientCatalogResponse, type ClientOrderView, type ClientQuoteServiceRequest, type EnterpriseExtensionApprovalView, type EnterpriseExtensionOriginalResult, type EnterpriseExtensionRequestOriginalResult, type EnterpriseOperationResult } from "@rental-os/shared";
 import { ActionButton, Alert, Button, Checkbox, Form, Input, SaveButton, Select, Table } from "@/components/ui/customer-entry";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { formSnapshotFingerprint } from "@/app/serverFormSnapshot";
 import { zoneSupported, zonedToInstant } from "../../miniprogram/src/core/time";
 import { useLocale } from "@/app/locale";
 import { useEnterprise } from "./enterprise-session";
@@ -119,6 +120,7 @@ export function EnterpriseExtensionApprovalsPage() {
   const [requestClosureReason, setRequestClosureReason] = useState(""), [requestClosureConfirmed, setRequestClosureConfirmed] = useState(false), [requestClosed, setRequestClosed] = useState(false);
   const [mode, setMode] = useState("mine"), [selected, setSelected] = useState("");
   const [form] = Form.useForm<ExtensionValues>(), changed = useRef(0);
+  const capturedRequest = useRef<{ identity: string; generation: number; draft: string; catalog?: ClientCatalogResponse } | undefined>(undefined);
   const operation = useOriginalWorkflowOperation(`extension-approvals:${mode}`), closureOperation = useOriginalWorkflowOperation(`extension-closure:${mode}`);
   const canReview = Boolean(context.entry?.corporates.find(c => c.corporateCustomerId === context.selectedCorporateId)?.actions.includes("approvals:review"));
   const path = mode === "review" ? `/enterprise/corporates/${encodeURIComponent(context.selectedCorporateId)}/extension-approvals` : "/enterprise/my-extension-approvals";
@@ -183,18 +185,24 @@ export function EnterpriseExtensionApprovalsPage() {
         <Button disabled={operation.blocked || !catalog.data || Boolean(catalog.error) || fields.length >= 100} onClick={() => { changed.current++; add({ quantity: 1 }); }}>{english ? "Add a service selection" : "添加服务选择"}</Button>
       </>}</Form.List>
       <Form.Item name="reason" label={english ? "Purpose" : "用途及原因"} rules={[{ required: true, whitespace: true }]}><Input.TextArea maxLength={500} /></Form.Item>
-      <SaveButton form={form} disabled={operation.blocked || catalog.isFetching || !catalog.data || Boolean(catalog.error)} label={english ? "Request extension approval" : "申请续租批准"} onSave={() => { const generation = changed.current;
+      <SaveButton form={form} disabled={operation.blocked || catalog.isFetching || !catalog.data || Boolean(catalog.error)} label={english ? "Request extension approval" : "申请续租批准"}
+        onClickCapture={() => { capturedRequest.current = { identity: context.identity, generation: changed.current, draft: formSnapshotFingerprint(form.getFieldsValue(true)), catalog: catalog.data ? structuredClone(catalog.data) : undefined }; }}
+        onSave={submitted => {
+        // SaveButton validates before onSave. Retain the click's input and catalog through both waits.
+        const original = capturedRequest.current ?? { identity: context.identity, generation: changed.current, draft: formSnapshotFingerprint(form.getFieldsValue(true)), catalog: catalog.data ? structuredClone(catalog.data) : undefined };
+        capturedRequest.current = undefined;
+        const { generation, draft } = original;
+        if (original.identity !== context.identity || generation !== changed.current || submitted && draft !== formSnapshotFingerprint(submitted)) return Promise.reject(new Error("原服务选择已变化 / Service selection changed"));
         return operation.run(async () => {
-        const draft = JSON.stringify(form.getFieldsValue(true));
         const values = await form.validateFields(), orderId = values.orderId.trim();
-        const source = catalog.data; if (!source || catalog.error || generation !== changed.current || draft !== JSON.stringify(form.getFieldsValue(true))) throw new Error("原服务选择已变化 / Service selection changed");
+        const source = original.catalog; if (!source || catalog.error || generation !== changed.current || draft !== formSnapshotFingerprint(form.getFieldsValue(true))) throw new Error("原服务选择已变化 / Service selection changed");
         const services: ClientQuoteServiceRequest[] = (values.services ?? []).map(service => ({ serviceId: service.serviceId, quantity: service.quantity,
           ...(service.scheduledRange ? { scheduledStartAt: serviceInstant(service.scheduledRange[0], source.timeZone), scheduledEndAt: serviceInstant(service.scheduledRange[1], source.timeZone) } : {}),
           ...(service.serviceLocationId ? { serviceLocationId: service.serviceLocationId } : {}) }));
         const originalKey = enterpriseExtensionServiceSelectionKey(services, source), currentCatalog = await readCatalog();
-        if (generation !== changed.current || draft !== JSON.stringify(form.getFieldsValue(true)) || originalKey !== enterpriseExtensionServiceSelectionKey(services, currentCatalog)) throw new Error("原服务候选或选择已变化 / Service catalog or selection changed");
+        if (generation !== changed.current || draft !== formSnapshotFingerprint(form.getFieldsValue(true)) || originalKey !== enterpriseExtensionServiceSelectionKey(services, currentCatalog)) throw new Error("原服务候选或选择已变化 / Service catalog or selection changed");
         const order = await operation.read<ClientOrderView>(`/orders/${encodeURIComponent(orderId)}`); operation.assertCurrent();
-        if (generation !== changed.current || draft !== JSON.stringify(form.getFieldsValue(true)) || order.id !== orderId || !order.updatedAt || !values.newEndAt?.isValid()) throw new Error("原订单修订或时间不可核对 / Original order or time unavailable");
+        if (generation !== changed.current || draft !== formSnapshotFingerprint(form.getFieldsValue(true)) || order.id !== orderId || !order.updatedAt || !values.newEndAt?.isValid()) throw new Error("原订单修订或时间不可核对 / Original order or time unavailable");
         return { path: "/enterprise/extension-approvals", originalTarget: orderId, input: { orderId, expectedOrderUpdatedAt: order.updatedAt,
           extension: { newEndAt: serviceInstant(values.newEndAt, source.timeZone), services: enterpriseExtensionServiceRequests(services, currentCatalog) }, expectedRevision: 0, reason: values.reason.trim() } };
       }, async () => { await refresh(); form.resetFields(); }, refresh); }} />
