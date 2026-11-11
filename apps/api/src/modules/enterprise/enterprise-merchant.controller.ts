@@ -18,6 +18,13 @@ interface OperatorRequest { user?: SystemUserRow; headers?: { authorization?: st
 export class EnterpriseMerchantController {
   constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly policies: EnterprisePolicyService, private readonly files: FileStorageRuntimeService, private readonly management: EnterpriseManagementRequestService,
     private readonly exchanges: EnterpriseExchangeApprovalService, private readonly approvedExchanges: RentalApprovedExchangeService) {}
+  @Get("orders/:orderId/exchange-execution-choices")
+  async exchangeExecutionChoices(@Req() req: OperatorRequest, @Param("orderId") orderId: string,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Vary", "Authorization");
+    return this.exchanges.merchantExecutionChoices(req.headers?.authorization, req.user!, orderId);
+  }
   @Post("orders/:orderId/exchange-approvals/:id/execute")
   async executeExchange(@Req() req: OperatorRequest, @Param("orderId") orderId: string, @Param("id") id: string, @Body() input: ExecuteEnterpriseApprovedExchangeDto) {
     if (!this.exchanges || !this.approvedExchanges) throw new ServiceUnavailableException("原企业换货执行尚未装配");
