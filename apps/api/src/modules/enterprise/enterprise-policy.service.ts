@@ -292,7 +292,9 @@ export class EnterprisePolicyService {
     if (additionalAmount === undefined) this.assertSameBasis(snapshot.enterpriseBasis, current);
     if (snapshot.enterpriseContractAndPayer && current.approvalMode === "per_order") {
       if (additionalAmount !== undefined) throw new ConflictException("新增企业支出的变更批准尚未接通，原订单批准不能重复使用");
-      const approvals = await tx.$queryRaw<Array<{ approvedBy: string; reviewerMembershipId: string; reviewerMembershipUpdatedAt: Date }>>`SELECT approvedBy,reviewerMembershipId,reviewerMembershipUpdatedAt FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND workspaceId=${workspaceId} AND corporateCustomerId=${snapshot.corporateCustomerId} AND applicantCustomerId=${snapshot.personalCustomerId} AND orderId=${order.id} AND state='consumed' AND expiresAt>NOW(3)`;
+      // Consumption makes this the order's durable creation receipt. The TTL
+      // gates unused approval; confirmation still checks current policy/reviewer.
+      const approvals = await tx.$queryRaw<Array<{ approvedBy: string; reviewerMembershipId: string; reviewerMembershipUpdatedAt: Date }>>`SELECT approvedBy,reviewerMembershipId,reviewerMembershipUpdatedAt FROM enterprise_booking_approvals WHERE tenantId=${tenantId} AND workspaceId=${workspaceId} AND corporateCustomerId=${snapshot.corporateCustomerId} AND applicantCustomerId=${snapshot.personalCustomerId} AND orderId=${order.id} AND state='consumed'`;
       const approval = approvals[0];
       if (!approval) throw new ConflictException("订单缺少原子消费的企业批准");
       await this.assertReviewer(tenantId, snapshot.corporateCustomerId!, snapshot.personalCustomerId, approval.approvedBy, approval.reviewerMembershipId, approval.reviewerMembershipUpdatedAt, tx);
