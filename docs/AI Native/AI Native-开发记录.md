@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。只补已核的主线实现/消费者门槛，没有增加100%任务；原AIN-07仍受[完整依赖门槛](<#ain07-dependency-gate-correction-20261106>)约束。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-staff-original-result-reference-20261111"></a>
+## 员工原识别结果定位与正式读取装配（2026-11-11）
+
+首次准入阶段已提交并推送 `6dc1419d6530b6a34a6ec8cacedd8defb5ed4126`，GitHub远端已核。本片将dev2交付的两个inspection专用shared文件、Controller/application及[独立读取器](../../apps/api/src/modules/ai-native/inspection-assist/inspection-task-result-reference.reader.ts)共5文件逐一核对固定Git blob。原创建收据和当前员工/订单范围确定Task及首Run，原问题/答案收据逐项验证后继，再由原结果仓储验证已保存产物；只返回定位与元数据，unknown或计量未完成不退回父结果，不读取附件、不取租约、不调用模型。
+
+负责人独立复核并复现正式标准装配漏方法：原对象没有readResultReference，实际Controller返回503（chunk `a8508b`）。现开启和关闭识别的两分支都接同一最少依赖reader，缺凭据均403，构造和拒绝过程服务调用0（chunk `4e98d8`）；新识别仍保留原开关/准入。原[标准装配](../../apps/api/src/modules/ai-native/inspection-assist/inspection-standard.application.ts)的Controller类型约束保持。提取时残留的执行开关和selected变量遮蔽已按实际诊断修复，六入口及传递类型最终0诊断（chunk `935e85`）。
+
+原[生成入口](../../scripts/generate-inspection-wire-schemas.cjs)改为内存编译/装载，只写明确指定的注册表；finally释放内存，没有临时shared/dist或依赖复制。原21项manual/lifecycle合同保持，新增9项taskContracts及正式taskHttp，引用闭包共52 schemas；规范化注册表SHA256 `efa414030815e75b6d155eca5ff64bcca2e6df7025cca6b6fd271d654d08439d`。负责人核过实际Ajv/员工叶校验、未知字段/客户端Run拒绝、唯一POST/OpenAPI/Staff权限和路由保留（chunk `e5d149`）。首次源码装载误选既有受控core.js，改用preferTsExts读取本树TS后仅复验同组，没有删除历史源码。
+
+负责人检查原冒烟全文后独立执行 `node --no-compilation-cache -`，命令SHA256 `d139cf6c2a0b401de33bf7f8787ce249ef7d0624e6f819d189ef3c47fd4d4156`，最终exit0（chunk `d7482f`）：原Run及答案后继、篡改答案、错误resourceOrigin、未关联Run、unknown/不完整后继、外部owner不披露，以及结果读取中撤权均核；禁用识别的独立读取仍可用。复用真实Auth/Guard、原媒体/创建前段和结果读取器，后继输入/答案/完整artifact是明确的数据库收据夹具；模型/文件调用新增0，未把夹具称为真实模型产生或完整首启派发。发布前对本片暂存源码及`6dc1419d6`其余依赖的固定快照复核，6根类型0诊断、同组冒烟exit0（chunk `06490d`）；37个源码映射只在内存中选择本片暂存版本或其余HEAD前像，未覆盖并行工作区。验证审计0、临时目录未创建；员工私有页面继续施工，微信/真库/供应商与整项AIN-19/20及ENTRY门槛未齐，百分比不调整。
+
 <a id="ain-staff-initial-start-admission-20261111"></a>
 ## 员工检查任务的显式首次准入（2026-11-11）
 

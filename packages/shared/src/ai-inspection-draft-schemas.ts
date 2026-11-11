@@ -1,5 +1,6 @@
 import { AI_INSPECTION_DRAFT_VERSION, AI_INSPECTION_TASK_POLICY_OPERATIONS } from "./ai-inspection-draft";
-import { AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS } from './ai-inspection-lifecycle-http-draft';
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS } from './ai-task-recovery-draft';
 import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafId as id, leafInt as int, leafList as list, leafText as text, leafTime, type AiLeafSchemaDraft } from "./ai-gateway-draft-schemas";
@@ -34,6 +35,13 @@ const cancellationObservation = (settled: boolean): AiLeafSchemaDraft => ({ oneO
   absenceSemantics: choice('not_observed_is_not_proof_of_uncommitted')
 })) });
 export const AI_INSPECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiInspectionTaskResultReferenceObservation: { oneOf: [
+    obj({ contractVersion: choice(AI_TASK_DRAFT_VERSION), task: taskSummary, state: choice('observed'),
+      reference: AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS.AiInspectionResultReadRequest,
+      execution: choice('read_only_no_lease_or_dispatch'), retryable: no, nextAction: choice('read_original_result') }),
+    obj({ contractVersion: choice(AI_TASK_DRAFT_VERSION), task: { oneOf: [taskSummary, { type: 'null' }] }, state: choice('not_observed'),
+      reference: { type: 'null' }, execution: choice('read_only_no_lease_or_dispatch'), retryable: no, nextAction: choice('read_original_task') })
+  ] },
   AiInspectionTaskPolicyRequest: obj(policyRequest),
   AiInspectionTaskPolicyConfigureRequest: obj({ ...policyRequest, expectedRevision: { oneOf: [int(1, 4294967293), { type: 'null' }] } }),
   AiInspectionTaskPolicyClearRequest: obj({ ...policyRequest, expectedRevision: int(1, 4294967293) }),

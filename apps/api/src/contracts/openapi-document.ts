@@ -2451,7 +2451,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...Object.entries(AI_INSPECTION_TASK_HTTP_CONTRACTS).map(([operation, contract]) => ({
     method: 'post' as const, path: `/api/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT.basePath}/${AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT[operation as keyof typeof AI_INSPECTION_TASK_HTTP_CONTRACTS]}`, tag: 'AI Native',
     operationId: `staffRecognition_${operation}`, permissions: ['rental-os:order:view'],
-    summary: ['readCreation', 'readAnswer'].includes(operation)
+    summary: operation === 'readResultReference'
+      ? 'Locate the original owned staff result through verified task, run and answer lineage under current order access. No candidate payload, lease, model dispatch or inspection submission.'
+      : ['readCreation', 'readAnswer'].includes(operation)
       ? 'Original owned staff metadata or exact human-answer receipt under current resource/task read policies, independently of new recognition enablement. No media, lease, model or inspection submission is initiated by observation.'
       : 'Server opt-in candidate recognition through the original owner/order/stage/attachment, current policies, entitlement, capabilities and single Gateway ledger. Creation is not dispatch; answers are context, not adoption or inspection approval. Unknown uses the original evidence only.',
     requestSchema: contract.request, responseSchema: contract.response

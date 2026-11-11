@@ -4,6 +4,11 @@ import type { AiTaskEventDraft, AiTaskStatusDraft } from './ai-task-draft';
 import type { AiModelCancellationTransitionReceiptDraft, AiSceneModelPendingInputDraft,
   AiSceneModelResumeResponseDraft, AiSceneModelExecutionDraft } from './ai-task-recovery-draft';
 import type { AiTaskInputReceiptObservationDraft } from './ai-task-input-draft';
+import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
+import type { AiInspectionResultReadRequest } from './ai-inspection-lifecycle-http-draft';
+
+/** Relative to the original inspection-task controller, not an arbitrary navigation target. */
+export const AI_INSPECTION_TASK_RESULT_REFERENCE_PATH = 'results/reference/read' as const;
 
 export const AI_INSPECTION_TASK_POLICY_OPERATIONS = ['read_metadata', 'read_events', 'read_step_terminal', 'claim_run',
   'claim_recovery_run', 'release_run', 'transition_task', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] as const;
@@ -33,7 +38,8 @@ export const AI_INSPECTION_TASK_HTTP_CONTRACTS = {
   readInput: { request: 'AiInspectionRecognitionTaskReference', response: 'AiInspectionTaskPendingInputResponse', write: false, nextAction: 'read_creation' },
   resume: { request: 'AiInspectionRecognitionTaskResumeRequest', response: 'AiInspectionTaskResumeResponse', write: true, nextAction: 'read_answer' },
   readAnswer: { request: 'AiInspectionRecognitionTaskResumeRequest', response: 'AiInspectionTaskAnswerObservation', write: false, nextAction: 'read_answer' },
-  continueAnswer: { request: 'AiInspectionRecognitionTaskResumeRequest', response: 'AiInspectionTaskContinueResponse', write: true, nextAction: 'read_answer' }
+  continueAnswer: { request: 'AiInspectionRecognitionTaskResumeRequest', response: 'AiInspectionTaskContinueResponse', write: true, nextAction: 'read_answer' },
+  readResultReference: { request: 'AiInspectionRecognitionTaskReference', response: 'AiInspectionTaskResultReferenceObservation', write: false, nextAction: 'read_original_task' }
 } as const;
 export type AiInspectionTaskCreationResponse = { task: { taskId: string; runId: string; status: AiTaskStatusDraft; revision: number; replayed: boolean };
   execution: 'not_attested'; purpose: 'inspection_candidates_only' };
@@ -49,6 +55,17 @@ export type AiInspectionTaskResumeResponse = Omit<AiSceneModelResumeResponseDraf
 export type AiInspectionTaskAnswerObservation = AiTaskInputReceiptObservationDraft;
 export type AiInspectionTaskContinueResponse = { receipt: Extract<AiTaskInputReceiptObservationDraft, { state: 'not_observed' }>; continuation: 'unavailable' }
   | { receipt: Extract<AiTaskInputReceiptObservationDraft, { state: 'observed' }>; result: AiInspectionTaskExecutionResponse };
+
+/** Original owned model result locator only. Source access and candidate
+ * validity are checked again by the existing result reader; no model body,
+ * approval, execution or refund is asserted by this observation. */
+export type AiInspectionTaskResultReferenceObservation = {
+  contractVersion: typeof AI_TASK_DRAFT_VERSION;
+  execution: 'read_only_no_lease_or_dispatch'; retryable: false;
+} & (
+  | { state: 'observed'; task: AiInspectionTaskCreationResponse['task']; reference: AiInspectionResultReadRequest; nextAction: 'read_original_result' }
+  | { state: 'not_observed'; task: AiInspectionTaskCreationResponse['task'] | null; reference: null; nextAction: 'read_original_task' }
+);
 
 export const AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS = {
   requestCancel: { request: 'AiInspectionRecognitionTaskCancelRequest', response: 'AiInspectionTaskCancelResponse', write: true, nextAction: 'read_cancel_receipt' },

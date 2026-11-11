@@ -108,6 +108,82 @@ export const contracts = {
     "write": false
   }
 } as const;
+export const taskContracts = {
+  "create": {
+    "request": "AiInspectionRecognitionTaskReference",
+    "response": "AiInspectionTaskCreationResponse",
+    "write": true,
+    "nextAction": "read_creation"
+  },
+  "readCreation": {
+    "request": "AiInspectionRecognitionTaskReference",
+    "response": "AiInspectionTaskCreationObservation",
+    "write": false,
+    "nextAction": "read_creation"
+  },
+  "start": {
+    "request": "AiInspectionRecognitionTaskReference",
+    "response": "AiInspectionTaskExecutionResponse",
+    "write": true,
+    "nextAction": "reconcile"
+  },
+  "reconcile": {
+    "request": "AiInspectionRecognitionTaskReference",
+    "response": "AiInspectionTaskExecutionResponse",
+    "write": true,
+    "nextAction": "reconcile"
+  },
+  "readInput": {
+    "request": "AiInspectionRecognitionTaskReference",
+    "response": "AiInspectionTaskPendingInputResponse",
+    "write": false,
+    "nextAction": "read_creation"
+  },
+  "resume": {
+    "request": "AiInspectionRecognitionTaskResumeRequest",
+    "response": "AiInspectionTaskResumeResponse",
+    "write": true,
+    "nextAction": "read_answer"
+  },
+  "readAnswer": {
+    "request": "AiInspectionRecognitionTaskResumeRequest",
+    "response": "AiInspectionTaskAnswerObservation",
+    "write": false,
+    "nextAction": "read_answer"
+  },
+  "continueAnswer": {
+    "request": "AiInspectionRecognitionTaskResumeRequest",
+    "response": "AiInspectionTaskContinueResponse",
+    "write": true,
+    "nextAction": "read_answer"
+  },
+  "readResultReference": {
+    "request": "AiInspectionRecognitionTaskReference",
+    "response": "AiInspectionTaskResultReferenceObservation",
+    "write": false,
+    "nextAction": "read_original_task"
+  }
+} as const;
+export const taskHttp = {
+  "basePath": "staff/v1/ai-native/inspection-tasks",
+  "method": "POST",
+  "create": "create",
+  "readCreation": "creation/read",
+  "start": "start",
+  "readResultReference": "results/reference/read",
+  "readAccounting": "accounting/read",
+  "reconcileAccounting": "accounting/reconcile",
+  "reconcile": "reconcile",
+  "requestCancel": "cancel",
+  "readCancelReceipt": "cancel/receipt",
+  "readInput": "input/read",
+  "resume": "input/resume",
+  "settleUnstartedCancellation": "cancel/settle-unstarted",
+  "readCancellationSettlementReceipt": "cancel/settlement/receipt",
+  "settleReleasedInputCancellation": "cancel/settle-released-input",
+  "readAnswer": "input/receipt",
+  "continueAnswer": "input/continue"
+} as const;
 export const schemas: Record<string, AiLeafSchemaDraft> = {
   "AiStaffInspectionHistoryRequest": {
     "type": "object",
@@ -4462,6 +4538,1801 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "semantics",
           "status",
           "draftLinked",
+          "nextAction"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionRecognitionTaskReference": {
+    "type": "object",
+    "properties": {
+      "orderId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "allocationId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "stage": {
+        "type": "string",
+        "enum": [
+          "pickup",
+          "return"
+        ]
+      },
+      "templateId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "draftId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "inputId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "expectedRevision": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 999
+      }
+    },
+    "required": [
+      "orderId",
+      "allocationId",
+      "stage",
+      "templateId",
+      "draftId",
+      "inputId",
+      "expectedRevision"
+    ],
+    "additionalProperties": false
+  },
+  "AiInspectionTaskCreationResponse": {
+    "type": "object",
+    "properties": {
+      "task": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "waiting_input",
+              "waiting_confirmation",
+              "waiting_external",
+              "cancel_requested",
+              "succeeded",
+              "partially_succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "taskId",
+          "runId",
+          "status",
+          "revision",
+          "replayed"
+        ],
+        "additionalProperties": false
+      },
+      "execution": {
+        "type": "string",
+        "enum": [
+          "not_attested"
+        ]
+      },
+      "purpose": {
+        "type": "string",
+        "enum": [
+          "inspection_candidates_only"
+        ]
+      }
+    },
+    "required": [
+      "task",
+      "execution",
+      "purpose"
+    ],
+    "additionalProperties": false
+  },
+  "AiInspectionTaskCreationObservation": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "creationKey": {
+            "type": "string",
+            "pattern": "^inspection:[a-f0-9]{64}$"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "not_attested"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_observed"
+            ]
+          },
+          "task": {
+            "type": "null"
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_task"
+            ]
+          }
+        },
+        "required": [
+          "creationKey",
+          "execution",
+          "retryable",
+          "state",
+          "task",
+          "nextAction"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "creationKey": {
+            "type": "string",
+            "pattern": "^inspection:[a-f0-9]{64}$"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "not_attested"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_observed",
+              "unknown"
+            ]
+          },
+          "task": {
+            "type": "null"
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "reconcile"
+            ]
+          },
+          "semantics": {
+            "type": "string",
+            "enum": [
+              "original_metadata_not_dispatch_or_candidate_evidence"
+            ]
+          }
+        },
+        "required": [
+          "creationKey",
+          "execution",
+          "retryable",
+          "state",
+          "task",
+          "nextAction",
+          "semantics"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "creationKey": {
+            "type": "string",
+            "pattern": "^inspection:[a-f0-9]{64}$"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "not_attested"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "observed"
+            ]
+          },
+          "task": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "queued",
+                  "running",
+                  "waiting_input",
+                  "waiting_confirmation",
+                  "waiting_external",
+                  "cancel_requested",
+                  "succeeded",
+                  "partially_succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "taskId",
+              "runId",
+              "status",
+              "revision",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_task"
+            ]
+          },
+          "semantics": {
+            "type": "string",
+            "enum": [
+              "original_metadata_not_dispatch_or_candidate_evidence"
+            ]
+          }
+        },
+        "required": [
+          "creationKey",
+          "execution",
+          "retryable",
+          "state",
+          "task",
+          "nextAction",
+          "semantics"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionTaskExecutionResponse": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "not_started"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "host_aborted",
+              "plan_unavailable",
+              "task_not_runnable",
+              "lease_held",
+              "recovery_lease_unavailable"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run_outcome"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/AiTaskRunnerOutcomeDraft"
+          }
+        },
+        "required": [
+          "kind",
+          "outcome"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiTaskRunnerOutcomeDraft": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "completedSteps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "cleanupFailed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "partially_succeeded",
+              "paused",
+              "cancel_requested",
+              "cancelled",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "completedSteps",
+          "cleanupFailed",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "completedSteps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "cleanupFailed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          },
+          "stopReason": {
+            "type": "string",
+            "enum": [
+              "input_limit_reached"
+            ]
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "manual_handoff"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "completedSteps",
+          "cleanupFailed"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "completedSteps": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "cleanupFailed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          "errorCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          }
+        },
+        "required": [
+          "completedSteps",
+          "cleanupFailed",
+          "status",
+          "errorCode"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionTaskPendingInputResponse": {
+    "$ref": "#/components/schemas/AiSceneModelPendingInputDraft"
+  },
+  "AiSceneModelPendingInputDraft": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967294
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "minLength": 20,
+            "maxLength": 40
+          },
+          "contract": {
+            "$ref": "#/components/schemas/AiTaskInputContractDraft"
+          }
+        },
+        "required": [
+          "requestId",
+          "revision",
+          "expiresAt",
+          "contract"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "null"
+      }
+    ]
+  },
+  "AiTaskInputContractDraft": {
+    "type": "object",
+    "properties": {
+      "draftVersion": {
+        "type": "string",
+        "enum": [
+          "ain-c04-input-draft-1"
+        ]
+      },
+      "code": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "version": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "fields": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "uniqueItems": true,
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                "fieldId": {
+                  "type": "string",
+                  "enum": [
+                    "customer_selection",
+                    "item_selection",
+                    "pickup_location",
+                    "return_location",
+                    "fulfillment_selection",
+                    "pricing_unit_selection",
+                    "delivery_address_selection",
+                    "enterprise_selection",
+                    "enterprise_payer_selection"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "choice"
+                  ]
+                },
+                "options": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 191,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "\\S",
+                        "not": {
+                          "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                        }
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "required",
+                "label",
+                "fieldId",
+                "kind",
+                "options"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                "fieldId": {
+                  "type": "string",
+                  "enum": [
+                    "quantity"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "integer"
+                  ]
+                },
+                "minimum": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "maximum": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                }
+              },
+              "required": [
+                "required",
+                "label",
+                "fieldId",
+                "kind",
+                "minimum",
+                "maximum"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                "fieldId": {
+                  "type": "string",
+                  "enum": [
+                    "starts_at",
+                    "ends_at",
+                    "usage_quantity",
+                    "clarification_text"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "text"
+                  ]
+                },
+                "maxLength": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2048
+                }
+              },
+              "required": [
+                "required",
+                "label",
+                "fieldId",
+                "kind",
+                "maxLength"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                "fieldId": {
+                  "type": "string",
+                  "enum": [
+                    "item_selection",
+                    "pricing_unit_selection"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "choice"
+                  ]
+                },
+                "options": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 191,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 160,
+                        "pattern": "\\S",
+                        "not": {
+                          "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                        }
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "label"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "bindingVersion": {
+                      "type": "string",
+                      "enum": [
+                        "ain-quote-row-target-1"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "quote_item"
+                      ]
+                    },
+                    "rowIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidateInputFingerprint": {
+                      "type": "string",
+                      "minLength": 64,
+                      "maxLength": 64,
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "bindingVersion",
+                    "kind",
+                    "rowIndex",
+                    "candidateInputFingerprint"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "required",
+                "label",
+                "fieldId",
+                "kind",
+                "options",
+                "target"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                "fieldId": {
+                  "type": "string",
+                  "enum": [
+                    "quantity"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "integer"
+                  ]
+                },
+                "minimum": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "maximum": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "bindingVersion": {
+                      "type": "string",
+                      "enum": [
+                        "ain-quote-row-target-1"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "quote_item"
+                      ]
+                    },
+                    "rowIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidateInputFingerprint": {
+                      "type": "string",
+                      "minLength": 64,
+                      "maxLength": 64,
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "bindingVersion",
+                    "kind",
+                    "rowIndex",
+                    "candidateInputFingerprint"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "required",
+                "label",
+                "fieldId",
+                "kind",
+                "minimum",
+                "maximum",
+                "target"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                "fieldId": {
+                  "type": "string",
+                  "enum": [
+                    "usage_quantity"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "text"
+                  ]
+                },
+                "maxLength": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2048
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "bindingVersion": {
+                      "type": "string",
+                      "enum": [
+                        "ain-quote-row-target-1"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "quote_item"
+                      ]
+                    },
+                    "rowIndex": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "candidateInputFingerprint": {
+                      "type": "string",
+                      "minLength": 64,
+                      "maxLength": 64,
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "bindingVersion",
+                    "kind",
+                    "rowIndex",
+                    "candidateInputFingerprint"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "required",
+                "label",
+                "fieldId",
+                "kind",
+                "maxLength",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "required": [
+      "draftVersion",
+      "code",
+      "version",
+      "fields"
+    ],
+    "additionalProperties": false
+  },
+  "AiInspectionRecognitionTaskResumeRequest": {
+    "type": "object",
+    "properties": {
+      "reference": {
+        "$ref": "#/components/schemas/AiInspectionRecognitionTaskReference"
+      },
+      "submission": {
+        "$ref": "#/components/schemas/AiTaskInputSubmissionDraft"
+      }
+    },
+    "required": [
+      "reference",
+      "submission"
+    ],
+    "additionalProperties": false
+  },
+  "AiTaskInputSubmissionDraft": {
+    "type": "object",
+    "properties": {
+      "draftVersion": {
+        "type": "string",
+        "enum": [
+          "ain-c04-input-draft-1"
+        ]
+      },
+      "taskId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 36,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "requestId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 36,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "expectedRevision": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4294967294
+      },
+      "submissionKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 191,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "answers": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "uniqueItems": true,
+        "items": {
+          "type": "object",
+          "properties": {
+            "fieldId": {
+              "type": "string",
+              "enum": [
+                "customer_selection",
+                "item_selection",
+                "pickup_location",
+                "return_location",
+                "fulfillment_selection",
+                "pricing_unit_selection",
+                "delivery_address_selection",
+                "enterprise_selection",
+                "enterprise_payer_selection",
+                "quantity",
+                "usage_quantity",
+                "starts_at",
+                "ends_at",
+                "clarification_text"
+              ]
+            },
+            "value": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "\\S",
+                  "not": {
+                    "pattern": "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]"
+                  }
+                },
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000
+                }
+              ]
+            }
+          },
+          "required": [
+            "fieldId",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "draftVersion",
+      "taskId",
+      "requestId",
+      "expectedRevision",
+      "submissionKey",
+      "answers"
+    ],
+    "additionalProperties": false
+  },
+  "AiInspectionTaskResumeResponse": {
+    "type": "object",
+    "properties": {
+      "receipt": {
+        "$ref": "#/components/schemas/AiTaskInputSavedReceiptDraft"
+      },
+      "continuation": {
+        "oneOf": [
+          {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "not_started"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "host_aborted",
+                      "plan_unavailable",
+                      "task_not_runnable",
+                      "lease_held",
+                      "recovery_lease_unavailable"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "run_outcome"
+                    ]
+                  },
+                  "outcome": {
+                    "$ref": "#/components/schemas/AiTaskRunnerOutcomeDraft"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "not_started"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "receipt_replayed"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unavailable"
+                ]
+              },
+              "errorCode": {
+                "type": "string",
+                "enum": [
+                  "AI_DISABLED",
+                  "AI_PROVIDER_UNAVAILABLE",
+                  "AI_BUDGET_EXCEEDED",
+                  "AI_TOOL_UNAVAILABLE",
+                  "AI_SCOPE_CHANGED",
+                  "AI_APPROVAL_EXPIRED",
+                  "AI_PROPOSAL_STALE",
+                  "AI_RESULT_UNKNOWN",
+                  "AI_INVALID_INPUT",
+                  "AI_UNSUPPORTED_VERSION",
+                  "AI_ACCESS_DENIED",
+                  "AI_BUSINESS_REJECTED",
+                  "AI_RESOURCE_UNAVAILABLE",
+                  "AI_REVISION_CONFLICT",
+                  "AI_STORAGE_UNAVAILABLE",
+                  "AI_RUN_LIMIT"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "errorCode"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "required": [
+      "receipt",
+      "continuation"
+    ],
+    "additionalProperties": false
+  },
+  "AiTaskInputSavedReceiptDraft": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "input_received"
+        ]
+      },
+      "taskId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 36,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "requestId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 36,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "receiptId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 36,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "taskRevision": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4294967294
+      },
+      "replayed": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "status",
+      "taskId",
+      "requestId",
+      "receiptId",
+      "taskRevision",
+      "replayed"
+    ],
+    "additionalProperties": false
+  },
+  "AiInspectionTaskAnswerObservation": {
+    "$ref": "#/components/schemas/AiTaskInputReceiptObservationDraft"
+  },
+  "AiTaskInputReceiptObservationDraft": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_observed"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "state",
+          "retryable"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "observed"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "receiptId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "taskRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967294
+          },
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "not_inferred_from_receipt"
+            ]
+          }
+        },
+        "required": [
+          "state",
+          "retryable",
+          "taskId",
+          "requestId",
+          "receiptId",
+          "taskRevision",
+          "runId",
+          "execution"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionTaskContinueResponse": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "receipt": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "not_observed"
+                ]
+              },
+              "retryable": {
+                "type": "boolean",
+                "const": false
+              }
+            },
+            "required": [
+              "state",
+              "retryable"
+            ],
+            "additionalProperties": false
+          },
+          "continuation": {
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          }
+        },
+        "required": [
+          "receipt",
+          "continuation"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "receipt": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "observed"
+                ]
+              },
+              "retryable": {
+                "type": "boolean",
+                "const": false
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "requestId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "receiptId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "taskRevision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967294
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "execution": {
+                "type": "string",
+                "enum": [
+                  "not_inferred_from_receipt"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "retryable",
+              "taskId",
+              "requestId",
+              "receiptId",
+              "taskRevision",
+              "runId",
+              "execution"
+            ],
+            "additionalProperties": false
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "not_started"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "host_aborted",
+                      "plan_unavailable",
+                      "task_not_runnable",
+                      "lease_held",
+                      "recovery_lease_unavailable"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "run_outcome"
+                    ]
+                  },
+                  "outcome": {
+                    "$ref": "#/components/schemas/AiTaskRunnerOutcomeDraft"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "outcome"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "receipt",
+          "result"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionTaskResultReferenceObservation": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "string",
+            "enum": [
+              "ain-c04-draft-1"
+            ]
+          },
+          "task": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 36,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "queued",
+                  "running",
+                  "waiting_input",
+                  "waiting_confirmation",
+                  "waiting_external",
+                  "cancel_requested",
+                  "succeeded",
+                  "partially_succeeded",
+                  "failed",
+                  "cancelled"
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "taskId",
+              "runId",
+              "status",
+              "revision",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "observed"
+            ]
+          },
+          "reference": {
+            "type": "object",
+            "properties": {
+              "orderId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "allocationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "templateId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "stage": {
+                "type": "string",
+                "enum": [
+                  "pickup",
+                  "return"
+                ]
+              },
+              "draftId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "inputId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 999
+              },
+              "taskId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "resultId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [
+              "orderId",
+              "allocationId",
+              "templateId",
+              "stage",
+              "draftId",
+              "inputId",
+              "expectedRevision",
+              "taskId",
+              "resultId"
+            ],
+            "additionalProperties": false
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "read_only_no_lease_or_dispatch"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_result"
+            ]
+          }
+        },
+        "required": [
+          "contractVersion",
+          "task",
+          "state",
+          "reference",
+          "execution",
+          "retryable",
+          "nextAction"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "string",
+            "enum": [
+              "ain-c04-draft-1"
+            ]
+          },
+          "task": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 36,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 36,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "running",
+                      "waiting_input",
+                      "waiting_confirmation",
+                      "waiting_external",
+                      "cancel_requested",
+                      "succeeded",
+                      "partially_succeeded",
+                      "failed",
+                      "cancelled"
+                    ]
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4294967295
+                  },
+                  "replayed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "runId",
+                  "status",
+                  "revision",
+                  "replayed"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_observed"
+            ]
+          },
+          "reference": {
+            "type": "null"
+          },
+          "execution": {
+            "type": "string",
+            "enum": [
+              "read_only_no_lease_or_dispatch"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_task"
+            ]
+          }
+        },
+        "required": [
+          "contractVersion",
+          "task",
+          "state",
+          "reference",
+          "execution",
+          "retryable",
           "nextAction"
         ],
         "additionalProperties": false

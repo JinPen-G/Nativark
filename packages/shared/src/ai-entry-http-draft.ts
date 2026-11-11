@@ -1,4 +1,5 @@
 /** Explicit opt-in transport locations; publication never enables production routes. */
+import { AI_INSPECTION_TASK_RESULT_REFERENCE_PATH } from './ai-inspection-draft';
 export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/client-entry', method: 'POST',
   /** Current Client Guard authenticates this prefix; old opt-in path is retained. */
@@ -58,6 +59,7 @@ export const AI_KNOWLEDGE_POLICY_HTTP_DRAFT = Object.freeze({
 export const AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT = Object.freeze({
   basePath: 'staff/v1/ai-native/inspection-tasks', method: 'POST',
   create: 'create', readCreation: 'creation/read', start: 'start',
+  readResultReference: AI_INSPECTION_TASK_RESULT_REFERENCE_PATH,
     readAccounting: 'accounting/read', reconcileAccounting: 'accounting/reconcile',
     reconcile: 'reconcile', requestCancel: 'cancel', readCancelReceipt: 'cancel/receipt', readInput: 'input/read', resume: 'input/resume',
     settleUnstartedCancellation: 'cancel/settle-unstarted', readCancellationSettlementReceipt: 'cancel/settlement/receipt',

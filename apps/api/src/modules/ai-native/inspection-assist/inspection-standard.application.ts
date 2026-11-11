@@ -18,6 +18,7 @@ import { RentalIdempotencyRepository } from '../../rental-core/rental-idempotenc
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { InspectionRecognitionTaskApplication, type InspectionRecognitionTaskDependencies } from './inspection-recognition-task.application';
+import { createInspectionTaskResultReferenceReader } from './inspection-task-result-reference.reader';
 import type { InspectionRecognitionTaskController } from './inspection-recognition-task.controller';
 import { prepareStaffInspectionStartAdmission } from './inspection-start-admission.composition';
 import { StaffInspectionRequestFactory } from './inspection-assist.composition';
@@ -62,9 +63,13 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   const inspection = { db: d.db, guard: d.guard, core: d.core, storage: d.files,
     originalInspection: { controller: { createInspection: (...args: Parameters<RentalCoreController['createInspection']>) =>
       d.moduleRef.get(RentalCoreController, { strict: false }).createInspection(...args) }, receipts: new RentalIdempotencyRepository(d.db) } };
-  const receipts = composeStaffInspectionTaskReceiptReader({ db: d.db, auth: d.auth, inspection, clock: d.clock }, { enabled: true,
-    scenes: [{ kind: 'image', code: STAFF_RECOGNITION_SCENES.image, version: '1' },
-      { kind: 'audio', code: STAFF_RECOGNITION_SCENES.audio, version: '1' }] });
+  const scenes = [{ kind: 'image', code: STAFF_RECOGNITION_SCENES.image, version: '1' },
+    { kind: 'audio', code: STAFF_RECOGNITION_SCENES.audio, version: '1' }] as const;
+  const receipts = composeStaffInspectionTaskReceiptReader({ db: d.db, auth: d.auth, inspection, clock: d.clock }, { enabled: true, scenes });
+  // Both publication modes observe the same original result under current
+  // read authority. Disabling recognition must not reconstruct a model host.
+  const { readResultReference } = createInspectionTaskResultReferenceReader({ db: d.db, auth: d.auth, guard: d.guard,
+    readCreation: receipts.readCreation.bind(receipts), scenes, clock: d.clock });
   const absent = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   // Original metadata/answer receipts and cancellation use current action
   // policies, not new recognition. No profile, bytes, budget or lease is minted.
@@ -201,7 +206,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   };
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
-      readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
+      readResultReference, readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
       continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt } satisfies InspectionTaskHttpApplication,
     policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
@@ -220,7 +225,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
         await prepareStaffInspectionStartAdmission(dependencies, policyOptions, request, reference, signal);
         return application.start(request, reference, signal);
       }, reconcile: application.reconcile.bind(application),
-      readResultReview, saveResultReview: application.saveResultReview.bind(application),
+      readResultReference, readResultReview, saveResultReview: application.saveResultReview.bind(application),
       readInput: application.readInput.bind(application), resume: application.resume.bind(application),
       readAnswer, continueAnswer: application.continueAnswer.bind(application),
       requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt } satisfies InspectionTaskHttpApplication,

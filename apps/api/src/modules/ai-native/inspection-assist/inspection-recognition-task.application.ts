@@ -6,6 +6,7 @@ import { runWithRequestIdentity } from '../../../common/request-identity';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { createInspectionTaskResultReferenceReader } from './inspection-task-result-reference.reader';
 import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
@@ -227,6 +228,17 @@ export class InspectionRecognitionTaskApplication {
       scenes: [{ kind: this.server.mediaKind ?? 'image', code: model.scene.code, version: model.scene.version },
         ...(audio ? [{ kind: 'audio' as const, code: audio.scene.code, version: audio.scene.version }] : [])] })
       .readCreation(request, reference, signal);
+  }
+  /** Delegate the original result observation to the same read-only port used
+   * by the standard assembly, independently of current execution readiness. */
+  readResultReference(request: Request, reference: unknown, signal?: AbortSignal) {
+    const model = this.server.model, audio = this.server.audioModel;
+    const scenes = [{ kind: this.server.mediaKind === 'audio' ? 'audio' as const : 'image' as const, code: model.scene.code, version: model.scene.version },
+      ...(audio ? [{ kind: 'audio' as const, code: audio.scene.code, version: audio.scene.version }] : [])];
+    const original = composeStaffInspectionTaskReceiptReader({ db: model.db, auth: model.auth,
+      inspection: this.server.inspection, clock: model.clock }, { enabled: true, scenes });
+    return createInspectionTaskResultReferenceReader({ db: model.db, auth: model.auth, guard: model.guard,
+      readCreation: original.readCreation, scenes, clock: model.clock }).readResultReference(request, reference, signal);
   }
   start(request: Request, reference: unknown, signal?: AbortSignal) {
     return this.request(request, reference, async bound => {
