@@ -8,7 +8,7 @@
 
 ## 当前品类绑定修订损坏时拒绝共用写入口（2026-11-12）
 
-关联CAT-GOV-03/08及原CAT-A06/A08/A10/A17。本片从已核GitHub的`c3c93d0fafafdf0de07ce70dd1e0ce17314c2a9e`接续，只改[共用活动绑定锁](../../apps/api/src/modules/rental-core/category-active-write.ts)及既有记录/接续。原`lockActiveCategoryBinding`只比较绑定ID，未核存储的`categoryAdoptionRevision`合法性；负值/缺失值可能通过无期望绑定的初始路径，被配置或恢复快照入口继续消费。
+关联CAT-GOV-03/08及原CAT-A06/A08/A10/A17。本片从已核GitHub的`c3c93d0fafafdf0de07ce70dd1e0ce17314c2a9e`接续，源码检查点`9380d1bab95e2d78ecb64d0390cfcd03af2ca0f4`已普通推送并回读任务远端一致，只改[共用活动绑定锁](../../apps/api/src/modules/rental-core/category-active-write.ts)及既有记录/接续。原`lockActiveCategoryBinding`只比较绑定ID，未核存储的`categoryAdoptionRevision`合法性；负值/缺失值可能通过无期望绑定的初始路径，被配置或恢复快照入口继续消费。
 
 现在先拒绝不完整/非法期望绑定，再沿原租户父锁→空间锁读取；存储行必须唯一、有效active状态、完整编码/版本ID和非负安全整数采用修订。坏值/多行不能进入版本读取或返回可信binding；合法初始0及后继修订保留，未改锁序、权限、版本正文或采用事务。
 
