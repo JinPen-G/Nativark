@@ -9,12 +9,11 @@ import { PrismaService } from "../database/prisma.service";
 import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
 import { RentalExchangeInspectionPreparationService } from "./rental-exchange-inspection-preparation.service";
 import { requestFingerprint } from "./rental-idempotency.repository";
+import { exchangeInspectionFileKey, readExchangeInspectionMedia, readExchangeInspectionMediaBinding,
+  readExchangeInspectionMediaClaim, type ExchangeInspectionMediaBinding, type ExchangeInspectionMediaRow } from "./rental-exchange-inspection-media.read";
 
-type Binding = { source: RentalExchangeInspectionMediaSource; requirements: Awaited<ReturnType<RentalExchangeInspectionMediaService["requirements"]>>;
-  provider: string; storageKey: string; configRowHash: string; storageLocationHash: string };
-type Row = { tenantId: string; workspaceId: string; actorUserId: string; orderId: string; operationKey: string; id: string; requestHash: string;
-  binding: string | Binding; bindingHash: string; completion: string | RentalExchangeInspectionMediaSource["completion"] | null; completionHash: string | null;
-  completionClaimId: string | null; completionClaimedAt: Date | string | null };
+type Binding = ExchangeInspectionMediaBinding;
+type Row = ExchangeInspectionMediaRow;
 const keyPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 @Injectable()
 export class RentalExchangeInspectionMediaService {
@@ -33,53 +32,17 @@ export class RentalExchangeInspectionMediaService {
     return rows;
   }
   private binding(row: Row, orderId: string): Binding {
-    const binding: Binding = typeof row.binding === "string" ? JSON.parse(row.binding) : row.binding, value = binding?.source;
-    if (!value || row.orderId !== orderId || value.orderId !== orderId || value.id !== row.id || value.actorUserId !== row.actorUserId || value.workspaceId !== row.workspaceId
-      || value.operationKey !== row.operationKey || value.requestHash !== row.requestHash || value.state !== "pending_upload" || value.completion !== undefined
-      || value.retryable !== false || value.preparationUse !== "not_connected" || !Number.isFinite(Date.parse(value.expiresAt)) || !Number.isFinite(Date.parse(value.createdAt))
-      || !["s3_compatible", "aliyun_oss", "tencent_cos"].includes(binding.provider)
-      || binding.requirements?.requirementsHash !== value.requirementsHash || binding.requirements.orderId !== orderId
-      || binding.requirements.expectedOrderUpdatedAt !== value.expectedOrderUpdatedAt || binding.requirements.workspaceId !== row.workspaceId
-      || requestFingerprint(binding) !== row.bindingHash) throw new ConflictException("原影像上传绑定证据不一致");
-    return binding;
+    return readExchangeInspectionMediaBinding(row, orderId);
   }
   private owner(row: Row): FileBusinessOwner { return { businessType: "rental_order", businessId: row.orderId, uploadScene: RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE,
     workspaceId: row.workspaceId, actorUserId: row.actorUserId, exchangeInspectionSourceId: row.id }; }
   private claim(row: Row) {
-    // Missing columns must not silently restore dispatch permission during an incomplete rollout.
-    if (row.completionClaimId === null && row.completionClaimedAt === null) return undefined;
-    if (row.completionClaimedAt instanceof Date && !Number.isFinite(row.completionClaimedAt.getTime()))
-      throw new ConflictException("原影像完成占用时间不可核验");
-    const at = row.completionClaimedAt instanceof Date ? row.completionClaimedAt.toISOString() : row.completionClaimedAt;
-    if (typeof row.completionClaimId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(row.completionClaimId)
-      || typeof at !== "string" || !Number.isFinite(Date.parse(at))) throw new ConflictException("原影像完成占用证据不一致");
-    return { id: row.completionClaimId, at };
+    return readExchangeInspectionMediaClaim(row);
   }
   private async view(row: Row, orderId: string, tx: Prisma.TransactionClient): Promise<RentalExchangeInspectionMediaSource> {
-    const { source, provider, storageKey, storageLocationHash } = this.binding(row, orderId), claim = this.claim(row);
-    if (!row.completion && row.completionHash !== null) throw new ConflictException("原影像完成证据缺失");
-    const asset = await tx.fileAsset.findFirst({ where: { id: source.fileAssetId, tenantId: row.tenantId }, include: { uploadSession: true } });
-    const session = asset?.uploadSession, metadata = asset?.metadata as Record<string, unknown> | null | undefined;
-    if (!asset || asset.businessModule !== "rental-core" || asset.businessType !== "rental_order" || asset.businessId !== orderId || asset.uploadScene !== RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE
-      || asset.uploadedBy !== row.actorUserId || metadata?.workspaceId !== row.workspaceId || metadata.exchangeInspectionSourceId !== row.id
-      || asset.fileName !== source.fileName.trim() || asset.mimeType !== source.mimeType || asset.sizeBytes !== source.sizeBytes || asset.storageProvider !== provider
-      || !session || session.id !== source.sessionId || session.tenantId !== row.tenantId || session.fileAssetId !== source.fileAssetId || session.provider !== provider
-      || session.storageKey !== storageKey || asset.storageKey !== storageKey || session.expiresAt.toISOString() !== source.expiresAt || session.idempotencyKey !== this.fileKey(row.actorUserId, row.workspaceId, row.operationKey)
-      || metadata.storageLocationHash !== storageLocationHash) throw new ConflictException("原影像文件或会话关联不一致");
-    if (row.completion) {
-      const completion = typeof row.completion === "string" ? JSON.parse(row.completion) as NonNullable<Row["completion"]> : row.completion;
-      if (typeof completion === "string" || !completion || requestFingerprint(completion) !== row.completionHash || !/^[a-f0-9]{64}$/u.test(completion.contentHash)
-        || completion.sizeBytes !== source.sizeBytes || completion.mimeType !== source.mimeType || session.status !== "completed" || asset.status !== "active"
-        || !session.completedAt || !Number.isFinite(Date.parse(completion.completedAt)) || session.completedAt.toISOString() !== completion.completedAt
-        || !Number.isSafeInteger(completion.width) || !Number.isSafeInteger(completion.height) || completion.width < 1 || completion.height < 1
-        || completion.width > 16384 || completion.height > 16384 || completion.width * completion.height > 40000000
-        || asset.checksum !== completion.contentHash || metadata.exchangeInspectionContentHash !== completion.contentHash) throw new ConflictException("原影像完成证据不一致");
-      return { ...source, state: "completed", completion };
-    }
-    if (asset.status !== "pending_upload" || session.status !== "pending_upload") throw new ConflictException("原影像上传状态需人工核对，不能重传");
-    return { ...source, state: claim || Date.parse(source.expiresAt) <= Date.now() ? "completion_unknown" : "pending_upload" };
+    return readExchangeInspectionMedia(row, orderId, tx);
   }
-  private fileKey(actorUserId: string, workspaceId: string, key: string) { return `exchange-image-${requestFingerprint({ actorUserId, workspaceId, key })}`; }
+  private fileKey(actorUserId: string, workspaceId: string, key: string) { return exchangeInspectionFileKey(actorUserId, workspaceId, key); }
   async requirements(authorization: string | undefined, actor: SystemUserRow, orderId: string, input: RentalExchangeInspectionRequirementsRequest) {
     if (!input || Object.keys(input).some(key => !["expectedOrderUpdatedAt", "exchange"].includes(key))) throw new BadRequestException("影像要求请求字段无效");
     return this.prisma.$transaction(tx => this.inspections.mediaRequirementsInTransaction(authorization, actor, orderId, input, tx), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -167,8 +130,9 @@ export class RentalExchangeInspectionMediaService {
       const updated = await tx.$executeRaw`UPDATE rental_exchange_inspection_media SET completion=${JSON.stringify(completion)}, completionHash=${requestFingerprint(completion)} WHERE tenantId=${scope.tenantId} AND workspaceId=${scope.workspaceId} AND actorUserId=${scope.userId} AND operationKey=${key} AND bindingHash=${row.bindingHash}
         AND completionClaimId=${dispatchedClaim.id} AND completionClaimedAt=${new Date(dispatchedClaim.at)} AND completion IS NULL AND completionHash IS NULL`;
       if (updated !== 1) throw new ConflictException("原影像完成结果需核对");
+      const committedSource = await this.view({ ...row, completion, completionHash: requestFingerprint(completion) }, orderId, tx);
       await this.inspections.mediaScope(authorization, actor);
-      return { state: "observed", source: { ...binding.source, state: "completed", completion }, retryable: false };
+      return { state: "observed", source: committedSource, retryable: false };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 }

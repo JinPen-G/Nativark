@@ -103,8 +103,8 @@ export class RentalIdempotentActionService implements OnApplicationBootstrap {
   async readReceipt<T>(input: {
     tenantId: string; action: string; key: string; orderId: string;
     replay: (response: unknown) => Promise<T | undefined>;
-  }): Promise<T | undefined> {
-    const original = await this.idempotency.find(input.tenantId, input.action, input.key);
+  }, tx?: RentalIdempotencyTx): Promise<T | undefined> {
+    const original = await this.idempotency.find(input.tenantId, input.action, input.key, tx);
     if (!original) return undefined;
     if (original.orderId !== input.orderId) throw new ConflictException("原操作收据与当前订单不一致");
     const result = await input.replay(original.response);
