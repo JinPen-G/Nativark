@@ -9,11 +9,17 @@
 <a id="ain-first-task-batch-main-intake-20261111"></a>
 ## 首批两项任务的main集成与旧接续差异保留（2026-11-11）
 
-首批固定成果为AIN-05/06，来源`988605a97aa7708c62b2055924f31f82192db20a`及其已提交前置。PM外框/休息阶段已上传`6d46b4eaca62cffe6bc06a628cb5d3e901982e73`，负责人重新读取本地和GitHub均为该SHA，索引为空、无merge/cherry-pick；原7项WIP仍在。`git merge-tree --write-tree --messages`只读预检exit0（`bd1c8a`），候选tree`1595ceceb00eac7ffad7332365f02a74e04d5712`，212项固定增量中仅AI接续与WIP重叠，没有源码冲突。PM随后进入企业固定阶段，当前main窗口再次串行占用；这份旧候选只作预检证据，不能在main变更后直接应用。
+首批固定成果为AIN-05/06，来源`988605a97aa7708c62b2055924f31f82192db20a`及其已提交前置。先在PM外框/休息阶段的`6d46b4eaca62cffe6bc06a628cb5d3e901982e73`核本地/远端、空索引与原7项WIP；三方只读预检exit0（`bd1c8a`），候选tree`1595ceceb00eac7ffad7332365f02a74e04d5712`。随后PM完成企业阶段，实际main已为`917a92a1a41caadc1180e8c8b2c8dc0b596c748f`，旧候选不直接应用。重新核定212项固定增量，源码仅RemoteBooking两块冲突：企业金额/币种格式与AI原报价模式控制，原稿保留后在唯一main窗口串行解决。
 
 重叠AI接续是本对话旧清理阶段的未提交现场，仍含当时“只剩main/旧fork停写”、恢复验证缺口和MCP/Harness 81项中77过/4失败，不能直接覆盖或混作今天的开发授权。以固定main提交为前像，最少原差异保留在[旧清理接续原稿](<历史归档/协作接续/2026-11/AI Native-main清理接续原稿.patch>)；5968字节、SHA256`c3b4672741fa5ded8052cb3997f176410115e5196ebeb04f8aa8851ff6a5dc94`，原文件raw blob`4ec15c2690cfb67f820d8a7d14f6b29b0eb0ba71`、raw SHA256`49eb95abe92ce105ce57947e2ed097dd12b8be731de443ec9442726585f252c5`。原清理事实/失败按当时证据保留，当前四棵树及AI恢复授权以实际登记和本轮指令为准，不把旧失败补写为新通过，也不丢MCP/Harness的未解决项。
 
-差异读取前后原文件字节相同，当前只写AI树中的这一必要原稿，尚未还原或改写main；另外6项WIP未碰。首两次将Git换行过滤后的hash-object结果用于raw前置而拒绝，未创建文件；按原字节计算的blob与原diff一致后才保留（`a4ff52`）。归档提交用该原稿无过滤blob，防止换行转换改掉原patch。main窗口释放后重新核本地/远端、索引、WIP原字节及新的merge-tree；只在原稿已固定且相同前置仍成立时处理本对话AI接续重叠，按固定成果合并并验证/推送，助手继续施工。
+差异读取前后原文件字节相同，原稿已在AI固定`86edc923e22a772ec1a5a1a3bf8697c851c74411`中以无过滤blob`ca988d2dc8e4edc4839f4e5906e6854bcdacc696`提交推送。首两次将Git换行过滤后的hash-object结果用于raw前置而拒绝，未创建文件；按原字节计算的blob与原diff一致后才保留（`a4ff52`）。实际合并前再验该已上传原稿SHA和main源raw SHA，只还原本对话已保留的旧AI接续路径；另外6项WIP在merge前后及索引校验中逐字节相同，不混入提交。
+
+RemoteBooking保留企业`formatRentalMoney`、未知金额/币种不补零及AI`quoteMode`下不重复手动报价/提交；合并检查另发现OrderPages三条新行混合CRLF，只调整这三条换行。其余所有索引成员与新固定三方候选一致，最终tree`b3789d482f464cc5765f888b31ba19f7c042e50a`（`7d1b07`），无ours/theirs整册覆盖。main API AppModule一根/1930源及预约网站三个根/289源TypeScript5.9.3/noEmit均零诊断；当前模型→原Core读→模型三步及两原账/累计资源、释放与终态重读无派发模拟通过（`4161eb/94619/bb42d6`）。首金额显示预期错误遗漏公共工具的货币符号，未改产品实现；仅同组件未知金额/币种、真实零和BHD公共精度再验，`92d02e`exit0/audit0。main docs仍为3处既有历史导航缺链。
+
+必要核验后以`44dc16a4ba816db6ed1de2c53a6a717b880a60f4`合入并普通推送main，父为`917a92a1a`和固定`988605a97`，`git ls-remote`重新核同一SHA；空索引、无merge，原6项无关WIP保留，窗口已释放。新业务功能及共享字段没有从助手活动WIP取用，真实外部测试/生产启用未执行。两处声明的离线临时目录从未创建，没有验证残留。
+
+负责人随后把固定main`44dc16a4b`合回AI任务树，形成`dda1eb28723a1e627ef68e73cb488065b341f3f5`并推送，远端同SHA（`184104`）。73项固定main源码/资料增量同步，18项本树活动WIP原字节保持；没有复制主仓库依赖、output或未提交媒体。首次预检误把成功输出的空分隔行当冲突，未写入；忽略空行后原预检exit0，实际merge无冲突。首批两项已完成main同步；11及后续新整项按下一批累计，助手继续各自核心入口。
 
 <a id="ain11-simulated-whole-closeout-20261111"></a>
 ## AIN-11整项模拟研发收口与租户会话恢复（2026-11-11）
