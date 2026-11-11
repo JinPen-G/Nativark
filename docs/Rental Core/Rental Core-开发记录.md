@@ -4,6 +4,32 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="configuration-row-revision-core-source-20261112"></a>
+
+## 配置行修订与原开业读取来源（2026-11-12）
+
+从已核GitHub的`ec42c7bdc7e87628ecedd345009b7405982b0044`接续，开工工作区/暂存区干净，无merge/cherry-pick。PM明确指定[配置仓储](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)、[快照仓储](../../apps/api/src/modules/rental-core/rental-state.repository.ts)和[原回填](../../apps/api/src/modules/rental-core/rental-snapshot-backfill.service.ts)的独占窗口。本片只改这三份Core源码及既有记录/接续，服务端Schema/DDL归AI作者；未修改AI/企业/照片模块、公共入口、Shared、原测试或正式任务。
+
+`TenantRentalProfile.configurationRevision`和`RentalCoreStateSnapshot.configurationRevision`的最小合同均为数据库`Int`、初始创建/结构迁移存储值1，合法范围1～2147483647。它们是各自原行的修订，原`configVersion`品类字符串和快照`state`正文保持原意；不能将字符串/JSON强转修订，读取缺列、缺行或不合法值不补1。发生实际修改时在原写事务内读取当前修订并CAS递增，饱和拒绝修改；相同内容、非默认档案空update及重复回填不凭空增版。结构迁移产生的1只表示开始跟踪该当前行，不证明任何历史报价/品类版本。
+
+已核写入口：默认档案在`upsertProfile`原事务内维护正文/修订；非默认空间保持兼容档案create/空update，自己的显式档案与`saveCoreState`共用快照行CAS。普通快照继续保留已提交的显式档案，只按原绑定更新标记；实际快照正文变化才增加该行修订，不将它当作全部规范化配置的总版本。比较在MySQL中对JSON作二进制比较，避免大小写变化被数据库排序规则忽略；相同档案保留原编辑时间。回填和Seed仍只补缺失兼容档案，回填复验实际存储修订，既有行不覆盖。没有复制/生成Client，本树Schema未改，真实执行必须先由唯一作者应用这两列及DDL。
+
+[原Core开业配置读取](../../apps/api/src/modules/rental-core/rental-core.service.ts)的`readOpeningConfiguration`已经透传仓储结果，本片不改Service：`profile.configurationRevision`及`profile.configurationSource`分别来自当前默认档案行或本空间快照行，来源值为`TenantRentalProfile`/`RentalCoreStateSnapshot`；`settingsRevision`位于读取结果顶层，来自原经营设置行，设置正文及原单位/方式规范化合同不变。缺档案仍为原`profile:null`，不能为签名补来源。原九项判定唯一在[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)的`readTenantReadiness`→`renderTenantReadiness`：workspace_profile、accounts_roles、fulfillment_network、business_rule、business_calendar、item_groups、pricing_groups_rates、price_version、membership_base。没有另造readiness算法，也不把九项独立读取称为单事务快照。
+
+| 验证 | 实际结果与边界 |
+| --- | --- |
+| 当前API类型 | 原tsconfig的`--noEmit --incremental false --pretty false`退出0，当前三份源文件hash见[最终核对](../../output/category-governance/configuration-row-revision-final-checks-20261112.json)。首次设置修订误放正文造成类型失败，已改为原读取元数据层；[首次类型证据](../../output/category-governance/configuration-row-revision-types-20261112.json)保留 |
+| 原配置空间范围 | `node tests/config-workspace-scope.test.cjs`退出0，原3项通过；未改原断言，见[原配置核对](../../output/category-governance/configuration-row-revision-checks-20261112.json) |
+| 当前开业来源限定读取 | 原开业fixture的3组限定调用退出0：保留品类字符串/真实数值修订、拒绝缺失/字符串/非法/超范围修订、只投影两种来源并不读取聚合。见[读取证据](../../output/category-governance/configuration-row-revision-reader-20261112.json)。实际Core/config读取参加；fixture只返回指定查询行，不解释SQL，不证明真实授权、DDL、事务或AI签名 |
+| 原开业整组 | 原入口`node --test tests/ai-native-ain08-opening-configuration.test.cjs`退出1，13项5过/8失败：原元数据fixture未提供新增行修订，原风险读取2次与旧1次预期仍失败。原[失败及输出](../../output/category-governance/configuration-row-revision-final-checks-20261112.json)保留；未弱化读取、改fixture/断言或记整组通过 |
+| 命令及检查范围错误 | 首次整组额外注册ts-node使编译后的JS再次被当TS检查；改回原自注册入口。限定读取首轮正则误把`JSON_EXTRACT(cs.state,...)`当作裸聚合列，改为仅检查真实裸列/全量SELECT后复验；原失败仍在上述清单。没有改原测试脚本 |
+
+上述有效Node使用原离线preload、固定不可用DB URL、本树同一暂存和写缓存，audit 0。API产物仍为原863文件照片构建，本片配置修订源码尚未编入，不拿旧包验证新来源。配置写入的正常/无变化、并发CAS、饱和、失败回滚和重放仍缺真库证据；本片不计原CAT-GOV/CLOSE完整结项或提高待核实百分比。
+
+PM后续另准[分配服务](../../apps/api/src/modules/rental-core/rental-allocation.service.ts)的`recordIssue`原事务参加者，以及业务配置/九项源的最小窗口。源码已确认`persistBusinessConfig`只有初始价格计划/价格版本共用事务，其余配置分别写入；`readTenantReadiness`是独立读取。不能在持业务锁时重新调用`scanOrder`或开新业务事务捕获，也不补临近政策/默认阈值。后续先提供无副作用的原来源合同并核AI参加者/ResourcePorts，缺事实/政策/授权保持not_captured；这两处参加者尚未在本片接入。
+
+本片照片完成收据失败/失应答恢复命令未取得有效业务结果：外层工具定位/传递失败，原历史日志的普通读取又被在用文件锁阻断，均不计通过。实际暂存发现一次被离线守卫阻止的目录外写入尝试；递归清理被自动审批以`blocked by policy`拒绝后，已用同一PowerShell入口逐文件/空目录安全回收并核实，见[失败观察](../../output/category-governance/exchange-photo-core-recovery-2-20261112.json)。原5组照片消费证据不变，恢复仍待下一限定调用；没有读环境、启服务、真实DB/存储或合main。
+
 <a id="evidence-original-location-20261112"></a>
 
 ## 旧证据唯一原稿的跨树现行链接（2026-11-12）

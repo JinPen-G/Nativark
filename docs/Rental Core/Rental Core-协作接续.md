@@ -12,15 +12,17 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`2a2c9ae647c55343fb6f39a6e73e12e7489c0c54`，照片源码检查点`e2a1a2b9ddc209e763c9bf050eceafbfa1be872d`已普通推送核远端；企业作者消费固定换货执行/原收据`0947a6eb82cd1e725073131dc11f78a0fc94bf49`。本树照片冻结及本人读取接点见[当前阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。文件限定调用5组/API类型通过，原整组失败及本人读取/HTTP/DI/浏览器、真实事务/存储未验边界保留；暂存已退出删除，无merge/cherry-pick。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`ec42c7bdc7e87628ecedd345009b7405982b0044`，无merge/cherry-pick。照片`e2a1a2b9d`和原5组Core消费已固定；完成失败/失应答恢复未取得有效新结果，HTTP/DI/浏览器和真实事务/存储仍未验。企业作者独占本人photo GET/DI/受权Blob及准备面板接线，不改本树四个冻结模块。不得回main施工、重建旧C树或处理负责人接管的空目录。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
+- PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，本片已补原行CAS/来源，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行而非缓存/品类字符串猜修订。PM另准分配服务`recordIssue`原事务参加者及业务配置/九项源的最小片，尚未接入；AI的OutboxParticipant/ResourcePorts和事件模型仍归AI作者，main HTTP/构建由PM独占。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - 旧阶段25份清单是主树 `D:/工作文件/rental-OS/output/category-governance` 的唯一跨树原稿，本树26处现行链接已按PM安排改相对主仓库路径；另2处历史附件缺失保留，本树新证据仍在本树同名目录。原检查器继续将跨树路径列为`link-outside`，本片单独核固定原稿，不复制副本或放松规则。PM收回main时须按目标文档位置调整相对层级，见[原稿记录](<Rental Core-开发记录.md#evidence-original-location-20261112>)。
-- PM固定维护`6b2dd0a`已在本树整合；Shared202文件保持，当前API863文件从固定`3efc62884`完整编译，包含照片`e2a1a2b9d`的四个模块，逐文件哈希一致，Shared/Client保护哈希不变，见[当前构建](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。原换货五项3过/2失败、客户小程序242文件/22页面、31项原冒烟17过/14失败、采用/配置及其他失败继续保留，不计CLOSE进度。公共工具只读使用，同树两个包别名不跨树共享；暂存已删除。Core照片正常消费、HTTP/DI、真库/宿主/供应商仍未验。
+- PM固定维护`6b2dd0a`已在本树整合；Shared202文件保持，API863文件仍为固定`3efc62884`照片构建，本片配置行修订未编入，见[原构建](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。旧换货/客户端/采用及其他失败继续保留，不计CLOSE进度。工具只读使用，同树包别名不跨树共享；本片API类型/原配置范围3项/来源读取3组通过，原开业整组5过/8失败。照片原5组限定消费有效，真实HTTP/DI/库/宿主/供应商仍未验。
 
 ## 3. 下一入口与原缺口
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
+   AIN-17下一最小口：按固定配置行合同由唯一作者应用两列/DDL，消费`readOpeningConfiguration`的真实profile修订/来源及顶层settingsRevision，九项仍调用原`readTenantReadiness`。业务配置只有价格子段共用事务、其他配置分别写入，九项不是同事务快照；先核无副作用来源及实际参加者，不能在`recordIssue`持锁时重入`scanOrder`/另开业务事务，缺临近政策/事实/当前授权保持not_captured。正常/空update/并发/饱和/回滚及真实重放仍需证据。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。
 3. 企业作者正在消费[固定换货端口](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)和[企业参与合同](../../apps/api/src/modules/rental-core/approved-exchange-transaction.ports.ts)。Core商户执行与客户端 `material/confirm/original` 保持各自原身份；企业作者负责批准参与者、本人明确提交及其服务/页面，公共登记/DI窗口由PM指定。本树原内容冻结、Core完成/原键回读、原准备接受及本人精确字节读取已有5组限定消费，撤权、订单变化和跨空间拒绝通过，见[消费阶段](<Rental Core-开发记录.md#exchange-photo-core-consumption-20261112>)。下一口是Core完成收据失败/失应答恢复、HTTP/DI/实际消费者及真实事务/存储核验。未冻结照片仍不可接受，原K/C不能换键重做；原11组调用和企业参与者替身边界不替代实际企业参与者或正式验收。
 4. ECP-09/10的[Core当前空间读端口](../../apps/api/src/modules/rental-core/rental-enterprise-read.port.ts)及原48行共享投影仍归Core；PM已按固定`527e731c8`逐blob核实，声明企业17f4f9887及前置已收回并核GitHub main `917a92a1a41caadc1180e8c8b2c8dc0b596c748f`，未取活动换货代码。其DI/登记/消费者已有源码和离线结果，真实HTTP、完整ECP仍待验；本树不追活动main。历史跨空间、全账户其他空间、正式账单/核定到期及保证金专用读源仍不可用，不另算账。企业 `readerCursor/readerAudit` 仅其既有审计段，不占本片租赁合同。按负责人明确交接给企业可消费固定SHA；不以他树环境许可运行本树服务。

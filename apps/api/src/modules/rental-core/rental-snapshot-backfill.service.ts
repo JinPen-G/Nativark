@@ -29,6 +29,7 @@ import { PrismaService } from "../database/prisma.service";
 import { readRentalCategoryCode } from "./category-identity";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
 import { replaceCategoryUniqueClaims, validateActiveCategoryWrite } from "./category-active-write";
+import { readRentalConfigurationRevision } from "./rental-state.repository";
 
 /**
  * 快照 JSON 是领域对象的直接序列化结果，因此按领域类型读取即可。
@@ -453,6 +454,13 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
             },
             update: {}
           }));
+          // Initial rows receive the DDL's revision 1. Repeated backfill keeps
+          // the actual existing revision, including the default-space owner;
+          // an absent rollout column or unreadable row is never assumed to be 1.
+          const profiles = await tx.$queryRaw<Array<{ tenantId: string; configurationRevision: unknown }>>(
+            Prisma.sql`SELECT tenantId, configurationRevision FROM tenant_rental_profiles WHERE tenantId = ${tenantId} FOR UPDATE`);
+          if (profiles.length !== 1 || profiles[0].tenantId !== tenantId) throw new ConflictException("回填档案配置行来源不可核验");
+          readRentalConfigurationRevision(profiles[0].configurationRevision, "回填经营档案");
         }
 
         // 2. 业务设置

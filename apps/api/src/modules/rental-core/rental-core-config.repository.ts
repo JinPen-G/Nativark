@@ -29,6 +29,8 @@ import type { RentalUniqueAttributeClaim } from "./rental-core-fact.repository";
 import type { VersionedBusinessSettings } from './approved-settings-change.ports';
 import { readRentalFulfillmentAdmission, type RentalFulfillmentRequirement } from './rental-fulfillment-admission';
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
+import { requestFingerprint } from "./rental-idempotency.repository";
+import { readRentalConfigurationRevision, RENTAL_CONFIGURATION_REVISION_MAX, writeRentalCoreConfigurationSnapshot } from "./rental-state.repository";
 
 // Stored terminology can originate from a published definition, whose accepted
 // limit is 100. A narrower action-input limit cannot make that source unreadable.
@@ -126,7 +128,9 @@ export type RentalOpeningTerminology = Pick<TenantRentalProfile['terminology'], 
 /** Internal opening projection, not a quote context or a new public DTO. */
 export interface RentalOpeningConfigurationFacts {
   tenantId: string; workspaceId: string; categoryCode: RentalCategoryCode;
-  profile: { configVersion: string; terminology: Partial<RentalOpeningTerminology> } | null;
+  settingsRevision: number;
+  profile: { configVersion: string; configurationRevision: number; configurationSource: 'TenantRentalProfile' | 'RentalCoreStateSnapshot';
+    terminology: Partial<RentalOpeningTerminology> } | null;
   settings: { configVersion: string; pricing: Pick<TenantRentalBusinessSettings['pricing'], 'currency' | 'enabledUnits' | 'defaultUnit'>;
     fulfillment: Pick<TenantRentalBusinessSettings['fulfillment'], 'enabledModes'> };
   groups: Array<Pick<RentalItemGroup, 'id' | 'code' | 'status' | 'inventoryMode' | 'unit'>>;
@@ -228,6 +232,8 @@ function workspaceProfileReadSql() {
         AND JSON_TYPE(JSON_EXTRACT(cs.state, '$.profile.initializedAt')) = 'STRING'
         AND JSON_TYPE(JSON_EXTRACT(cs.state, '$.profile.updatedAt')) = 'STRING'`,
     version: choose(Prisma.sql`p.configVersion`, Prisma.sql`LEFT(JSON_UNQUOTE(${saved('configVersion')}), 192)`),
+    configurationRevision: choose(Prisma.sql`p.configurationRevision`, Prisma.sql`cs.configurationRevision`),
+    configurationSource: Prisma.sql`CASE WHEN w.isDefault = TRUE THEN 'TenantRentalProfile' ELSE 'RentalCoreStateSnapshot' END`,
     category: choose(Prisma.sql`p.categoryCode`, Prisma.sql`LEFT(JSON_UNQUOTE(${saved('categoryCode')}), 65)`),
     capabilities: choose(Prisma.sql`p.capabilities`, saved('capabilities')),
     terminology: choose(Prisma.sql`p.terminology`, saved('terminology')),
@@ -588,19 +594,21 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     const locationIds = getRequestStaffLocationIds();
     const selectedLocations = locationIds === undefined ? Prisma.empty : locationIds.length
       ? Prisma.sql`AND l.id IN (${Prisma.join(locationIds)})` : Prisma.sql`AND 1 = 0`;
-    type Meta = { tenantId: string; workspaceId: string; categoryCode: string; configVersion: string;
-      options: unknown; profileVersion: string | null; profileCategoryCode: string | null; terminology: unknown };
+    type Meta = { tenantId: string; workspaceId: string; categoryCode: string; configVersion: string; settingsRevision: unknown;
+      options: unknown; profileVersion: string | null; profileCategoryCode: string | null; profileRevision: unknown;
+      profileSource: unknown; terminology: unknown };
     type Location = { tenantId: string; workspaceId: string; id: string; code: string; status: string; capabilities: unknown };
     const [workspace, metadata, groups, pricingGroups, locations, enabledItemGroupCount, enabledLocationCount] = await Promise.all([
       this.prisma.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { id: true, tenantId: true, categoryCode: true } }),
       this.prisma.$queryRaw<Meta[]>(Prisma.sql`
-        SELECT s.tenantId, s.workspaceId, s.categoryCode, s.configVersion,
+        SELECT s.tenantId, s.workspaceId, s.categoryCode, s.configVersion, s.settingsRevision,
           JSON_OBJECT('configVersion', LEFT(JSON_UNQUOTE(JSON_EXTRACT(s.settings, '$.configVersion')), 192),
             'currency', LEFT(JSON_UNQUOTE(JSON_EXTRACT(s.settings, '$.pricing.currency')), 4),
             'defaultUnit', LEFT(JSON_UNQUOTE(JSON_EXTRACT(s.settings, '$.pricing.defaultUnit')), 192),
             'enabledUnits', ${boundedArray(Prisma.sql`JSON_EXTRACT(s.settings, '$.pricing.enabledUnits')`)},
             'enabledModes', ${boundedArray(Prisma.sql`JSON_EXTRACT(s.settings, '$.fulfillment.enabledModes')`)}) AS options,
           ${profileSql.version} AS profileVersion, ${profileSql.category} AS profileCategoryCode,
+          ${profileSql.configurationRevision} AS profileRevision, ${profileSql.configurationSource} AS profileSource,
           JSON_OBJECT('itemLabel', ${term('itemLabel')}, 'itemGroupLabel', ${term('itemGroupLabel')},
             'assetLabel', ${term('assetLabel')}, 'fulfillmentLabel', ${term('fulfillmentLabel')},
             'pickupLabel', ${term('pickupLabel')}, 'returnLabel', ${term('returnLabel')}) AS terminology
@@ -644,11 +652,14 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       const options = z.object({ configVersion: atom, currency: atom.refine(value => (RENTAL_CURRENCY_CODES as string[]).includes(value)),
         defaultUnit: atom, enabledUnits: z.array(atom).max(100), enabledModes: z.array(atom).max(100) }).strict().parse(parseJson(meta.options));
       if (options.configVersion !== meta.configVersion) throw new ConflictException('开业配置版本来源变化');
+      const settingsRevision = readRentalConfigurationRevision(meta.settingsRevision, '经营设置');
       let profile: RentalOpeningConfigurationFacts['profile'] = null;
       if (meta.profileVersion !== null) {
         if (meta.profileCategoryCode === null || lower(meta.profileCategoryCode) !== lower(workspace.categoryCode)) throw new ConflictException('开业术语品类来源变化');
         const terms = z.object(Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field => [field, z.string().min(1).max(PROFILE_TERMINOLOGY_MAX_LENGTH).nullable().optional()]))).strict().parse(parseJson(meta.terminology));
-        profile = { configVersion: atom.parse(meta.profileVersion), terminology: Object.fromEntries(Object.entries(terms).filter(([, value]) => value != null)) };
+        const configurationSource = z.enum(['TenantRentalProfile', 'RentalCoreStateSnapshot']).parse(meta.profileSource);
+        profile = { configVersion: atom.parse(meta.profileVersion), configurationRevision: readRentalConfigurationRevision(meta.profileRevision, '经营档案'),
+          configurationSource, terminology: Object.fromEntries(Object.entries(terms).filter(([, value]) => value != null)) };
       }
       const itemPage = page(groups, row => groupSchema.parse({ ...row, inventoryMode: lower(row.inventoryMode) }));
       const pricingPage = page(pricingGroups, row => pricingSchema.parse(row));
@@ -656,7 +667,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (![enabledItemGroupCount, enabledLocationCount].every(value => Number.isSafeInteger(value) && value >= 0))
         throw new ConflictException('开业配置计数无效');
       await assertScope();
-      return { tenantId, workspaceId, categoryCode: lower<RentalCategoryCode>(workspace.categoryCode), profile,
+      return { tenantId, workspaceId, categoryCode: lower<RentalCategoryCode>(workspace.categoryCode), profile, settingsRevision,
         settings: { configVersion: options.configVersion, pricing: { currency: options.currency as TenantRentalBusinessSettings['pricing']['currency'],
           enabledUnits: options.enabledUnits as TenantRentalBusinessSettings['pricing']['enabledUnits'], defaultUnit: options.defaultUnit as TenantRentalBusinessSettings['pricing']['defaultUnit'] },
           fulfillment: { enabledModes: options.enabledModes as TenantRentalBusinessSettings['fulfillment']['enabledModes'] } },
@@ -919,11 +930,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       }
     }
     if (isDefaultWorkspaceWrite) {
-      await this.db(tx).tenantRentalProfile.upsert({
-        where: { tenantId: profile.tenantId },
-        create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
-        update: data
-      });
+      await this.persistCompatibilityProfile(profile, data, tx, true);
       if (!expectedBinding) await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx, initialization);
       return;
     }
@@ -934,23 +941,52 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     }
     const storedProfile = this.parseWorkspaceProfile({ ...profile, categoryVersionId: current.binding.categoryVersionId,
       categoryAdoptionRevision: current.binding.adoptionRevision }, profile.tenantId, profile.categoryCode);
-    const encoded = JSON.stringify(storedProfile);
-    if (Buffer.byteLength(encoded, "utf8") > 65536) throw new BadRequestException("空间档案超过64KiB");
+    if (Buffer.byteLength(JSON.stringify(storedProfile), "utf8") > 65536) throw new BadRequestException("空间档案超过64KiB");
     // 非默认空间：确保兼容档案存在，但绝不改既有品类；父锁和空间锁已先取得。
-    await this.db(tx).tenantRentalProfile.upsert({
-      where: { tenantId: profile.tenantId },
-      create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) },
-      update: {}
-    });
-    const existing = await tx.rentalCoreStateSnapshot.findUnique({ where: { workspaceId }, select: { tenantId: true } });
-    if (existing && existing.tenantId !== profile.tenantId) throw new ConflictException("空间档案已属于其他租户，拒绝覆盖");
+    await this.persistCompatibilityProfile(profile, data, tx, false);
     // This facet commits with profile/binding validation. Ordinary backup writes
     // preserve it, so a late cache snapshot cannot undo explicit terminology.
-    const initial = JSON.stringify({ profile: storedProfile, configPersisted: true, profilePersisted: true });
-    await tx.$executeRaw(Prisma.sql`INSERT INTO rental_core_state_snapshots (workspaceId, tenantId, state, updatedAt)
-      VALUES (${workspaceId}, ${profile.tenantId}, CAST(${initial} AS JSON), NOW(3))
-      ON DUPLICATE KEY UPDATE state = JSON_SET(state, '$.profile', CAST(${encoded} AS JSON),
-        '$.profilePersisted', CAST('true' AS JSON), '$.configPersisted', CAST('true' AS JSON)), updatedAt = NOW(3)`);
+    const encoded = JSON.stringify(storedProfile);
+    // The service stamps identical input too. Preserve the original edit time
+    // when its actual profile facts match; compare in SQL without loading the
+    // recovery aggregate or modifying any other facet.
+    const nextProfile = Prisma.sql`CASE WHEN JSON_TYPE(JSON_EXTRACT(state, '$.profile')) = 'OBJECT'
+      AND CAST(JSON_REMOVE(JSON_EXTRACT(state, '$.profile'), '$.updatedAt') AS BINARY)
+        = CAST(JSON_REMOVE(CAST(${encoded} AS JSON), '$.updatedAt') AS BINARY)
+      THEN JSON_EXTRACT(state, '$.profile') ELSE CAST(${encoded} AS JSON) END`;
+    await writeRentalCoreConfigurationSnapshot(tx, profile.tenantId, workspaceId,
+      { profile: storedProfile, configPersisted: true, profilePersisted: true }, Prisma.sql`JSON_SET(state, '$.profile', ${nextProfile},
+        '$.profilePersisted', CAST('true' AS JSON), '$.configPersisted', CAST('true' AS JSON))`);
+  }
+
+  /** The compatibility row belongs to the default workspace. Non-default and
+   * backfill paths only create a missing row; they cannot advance its revision.
+   * SQL observes the new column without depending on a regenerated Client. */
+  private async persistCompatibilityProfile(profile: TenantRentalProfile, data: {
+    categoryCode: RentalCategoryCode; capabilities: Prisma.InputJsonValue; terminology: Prisma.InputJsonValue; configVersion: string;
+  }, tx: RentalConfigTx, updateExisting: boolean) {
+    await tx.tenantRentalProfile.upsert({ where: { tenantId: profile.tenantId },
+      create: { tenantId: profile.tenantId, ...data, initializedAt: new Date(profile.initializedAt) }, update: {} });
+    const rows = await tx.$queryRaw<Array<{ tenantId: string; categoryCode: string; capabilities: unknown; terminology: unknown;
+      configVersion: string; configurationRevision: unknown }>>(Prisma.sql`
+      SELECT tenantId, categoryCode, capabilities, terminology, configVersion, configurationRevision FROM tenant_rental_profiles
+      WHERE tenantId = ${profile.tenantId} FOR UPDATE`);
+    if (rows.length !== 1 || rows[0].tenantId !== profile.tenantId) throw new ConflictException("经营档案配置行不存在或来源变化");
+    const row = rows[0], revision = readRentalConfigurationRevision(row.configurationRevision, "经营档案");
+    if (!updateExisting) return;
+    const parsed = (value: unknown) => typeof value === "string" ? JSON.parse(value) : value;
+    let unchanged: boolean;
+    try { unchanged = requestFingerprint({ categoryCode: readRentalCategoryCode(row.categoryCode), capabilities: parsed(row.capabilities),
+      terminology: parsed(row.terminology), configVersion: row.configVersion }) === requestFingerprint(data); }
+    catch { throw new ConflictException("经营档案原配置不可读取"); }
+    if (unchanged) return;
+    if (revision === RENTAL_CONFIGURATION_REVISION_MAX) throw new ConflictException("经营档案配置行修订已达上限");
+    const changed = await tx.$executeRaw(Prisma.sql`UPDATE tenant_rental_profiles
+      SET categoryCode = ${data.categoryCode}, capabilities = CAST(${JSON.stringify(data.capabilities)} AS JSON),
+        terminology = CAST(${JSON.stringify(data.terminology)} AS JSON), configVersion = ${data.configVersion},
+        configurationRevision = ${revision + 1}, updatedAt = NOW(3)
+      WHERE tenantId = ${profile.tenantId} AND configurationRevision = ${revision}`);
+    if (changed !== 1) throw new ConflictException("经营档案配置行修订已变化，拒绝覆盖");
   }
 
   /**
