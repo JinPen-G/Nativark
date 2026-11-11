@@ -4,6 +4,22 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="corporate-maturity-evidence-20261112"></a>
+
+## 原财务核定到期收据的纯解码与审计绑定（2026-11-12）
+
+关联CLOSE-CORP-VERIFY及企业ECP-10必要来源，不计CAT-GOV进度。本片从已核GitHub的`8daf022680c8afc42d6e96a8cd4cb5d20c9fb7c1`接续；PM明确准许两源码窗口：[Core纯解码器](../../apps/api/src/modules/rental-core/rental-corporate-maturity-receipt.ts)和[原CorporateSettlementService](../../apps/api/src/modules/platform/customer-corporate-settlement.service.ts)的maturity委托/收据写入。没有改operator/staff财务授权、其他资金动作、原键、ledger/operationLog/锁序、Schema/Client或企业响应投影。
+
+`corporateCreditMaturityAuditId`保留原SHA-256(JSON.stringify(["corporate.credit.maturity", tenantId, customerId, ledgerId]))字节；`readCorporateCreditMaturityEvidence(log, ledger)`纯读原正债权/原核定审计，返回原Shared receipt及内部audit来源。核原ID/action、tenant/customer/workspace/order/ledger/currency/原Decimal金额精度/basis/key，绑定audit.userId与detail.recordedBy，缺actor/time或矛盾明确不可核验。decoder不查当前用户状态、不读配置或计算dueAt；原操作人后来停用不否定历史审计，当前读取资格仍由原服务前后复验。
+
+旧记录无auditBindingVersion时保留原detail.recordedAt和原audit.createdAt两处时间，不要求应用/DB毫秒相等、不编时差阈值或回写；新核定用同一个服务端Date写两处，并在原JSON存`corporate-credit-maturity-audit-1`绑定版本，严格复核一致。版本属性存在但null/undefined/未知均不可当legacy；只有确定原审计行不存在才沿原readMaturity返回未核定，有行但缺证据仍抛不可核验。原合法收据同键回放不重写/换ID/改旧时间。
+
+原API `--noEmit --incremental false --pretty false`退出0；原credit fixture的7组限定实际服务/decoder调用退出0、audit 0：ID原字节、新写/read/replay一条收据、legacy双时间保留、版本/新时间矛盾、actor/主体/金额缺失、当前撤权/client audience门闸、无行与不可核验区分。源码/fixture/调用hash及原失败唯一见[最终阶段证据](../../output/category-governance/corporate-maturity-final-20261112.json)。限定装配仅补当前合成tenant的原父锁返回，其他未知SQL仍拒绝，固定原生Date使原fixture返回与明确写入时间一致；真实SQL/Auth/事务仍为替身，不证明真库/供应商/企业消费。
+
+原`node tests/corporate-credit-settlement.test.cjs`退出1，FakeDb:117不识别既有Tenant LOCK IN SHARE MODE，停在新maturity场景之前；原资金/receipt断言及父锁未改，失败缩入上述最终清单，不记整组通过。没有新增/扩写测试脚本或反复建环境；固化原失败/最终结果/hash后2份本片重复证据删除，10份退出日志/缓存及任务目录删除，暂存路径不存在。本片未生成API/Client产物，原863文件包不能当作新decoder验证。
+
+第二阶段待确认的最小投影：仅在`rental-enterprise-read.port.ts`和Shared `core.ts`提供当前企业finance资格下的单ledger原核定明细，调用方scope绑定tenant/corporateCustomer/workspace、原正债权及真正企业承担订单；读取前后复验原客户会话/permissionRevision。字段限workspaceId、ledgerId、orderId、currency、dueAt、basisRef、原auditId/auditCreatedAt及bindingVersion；coverage固定current_trusted_workspace_only，明确determined/not_determined/unavailable，缺审计不补当前时间/人物，不出自由财务原因、操作键或原operator ID。单债权明细不冒充完整账户/账单/历史空间清单，不重算应收/到期/保证金；对应DTO/OpenAPI/消费者由PM另指唯一作者。公共企业投影尚未开放，原statement/跨历史space/混合payer-guarantee缺口保留。
+
 <a id="workspace-resolver-binding-20261112"></a>
 
 ## 唯一品类读取入口的绑定修订与异步一致性（2026-11-12）
