@@ -8,7 +8,7 @@
 
 ## 换货照片的原内容冻结与核对接点（2026-11-11）
 
-本片从已回读 GitHub 的 `2a2c9ae647c55343fb6f39a6e73e12e7489c0c54` 接续，在唯一 `codex/rental-core` 工作树收口原照片 WIP；没有合 main、修改企业内部实现、公共登记或正式任务。源文件哈希与下列行为及类型清单一致，按本分支阶段提交固定。原 CAT-GOV/CLOSE/ECP 完整门槛及百分比保持。
+本片从已回读 GitHub 的 `2a2c9ae647c55343fb6f39a6e73e12e7489c0c54` 接续，源码检查点固定 `e2a1a2b9ddc209e763c9bf050eceafbfa1be872d`，已普通推送并回读 `codex/rental-core` 一致。在唯一工作树保全原照片 WIP及未验接点；没有合 main、修改企业内部实现、公共登记或正式任务。四份源文件哈希与下列行为及类型清单一致；检查点不代表完成应用/本人照片消费者或真实验收。原 CAT-GOV/CLOSE/ECP 完整门槛及百分比保持。
 
 [文件生产者](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)复用原 v2 的 `blob` 暂存路径和冻结格式：读取有界实际字节并验证图片，先同事务保存唯一冻结目标，再向该目标 PUT 并读回原内容摘要。失应答后的 `reconcileExchangeInspectionUpload` 只 GET 已保存目标，不重读暂存、不重传或分配新目标；目标缺失仍不可用。冻结证据同时核对来源、摘要、大小、类型和尺寸，读取期间文件/会话或配置变化拒绝。旧非受控暂存路径在读取字节前阻断，原记录不重写。
 

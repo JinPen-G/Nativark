@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`2a2c9ae647c55343fb6f39a6e73e12e7489c0c54`；企业作者消费固定换货执行/原收据`0947a6eb82cd1e725073131dc11f78a0fc94bf49`，本树照片冻结及本人读取接点见[当前阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。文件限定调用5组/API类型通过，原整组失败及本人读取/HTTP/DI/浏览器、真实事务/存储未验边界保留；暂存已退出删除，无merge/cherry-pick。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工及GitHub核对为`2a2c9ae647c55343fb6f39a6e73e12e7489c0c54`，照片源码检查点`e2a1a2b9ddc209e763c9bf050eceafbfa1be872d`已普通推送核远端；企业作者消费固定换货执行/原收据`0947a6eb82cd1e725073131dc11f78a0fc94bf49`。本树照片冻结及本人读取接点见[当前阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。文件限定调用5组/API类型通过，原整组失败及本人读取/HTTP/DI/浏览器、真实事务/存储未验边界保留；暂存已退出删除，无merge/cherry-pick。不得回main施工或重建C盘旧树；旧空目录负责人已接管。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - 旧阶段25份清单唯一位于主树 `D:/工作文件/rental-OS/output/category-governance`，当前本树26处旧相对引用因此失效，另2处历史附件缺失保留；本片新证据在本树同名目录。读取旧证据沿主树唯一位置，不复制副本；本次检查只证明新增链接/锚点无问题，见[阶段](<Rental Core-开发记录.md#exchange-photo-freeze-20261111>)。
