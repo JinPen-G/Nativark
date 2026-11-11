@@ -332,9 +332,21 @@ export class CategoryGovernanceService {
       const row = await this.version(tx, categoryCode, id);
       if (row.status === "published") {
         const audit = await tx.rentalCategoryGovernanceAudit.findUnique({ where: { id: `publish:${id}` } });
-        const after = audit?.after as any;
-        if (after?.idempotencyKey === input.idempotencyKey && after?.expectedRevision === input.expectedRevision && audit?.reason === input.reason.trim()) return row;
-        throw new ConflictException("该版本已经发布；只有同请求重试可返回原结果");
+        const before = audit?.before && typeof audit.before === "object" && !Array.isArray(audit.before)
+          ? audit.before as Record<string, unknown> : undefined;
+        const after = audit?.after && typeof audit.after === "object" && !Array.isArray(audit.after)
+          ? audit.after as Record<string, unknown> : undefined;
+        if (!audit || audit.action !== "publish" || audit.categoryCode !== categoryCode || audit.versionId !== id || row.id !== id || !before || !after)
+          throw new ServiceUnavailableException("原发布审计缺失或对象不一致，请核对原收据，禁止重新发布");
+        if (audit.actorId !== user.id || after.idempotencyKey !== input.idempotencyKey || after.expectedRevision !== input.expectedRevision || audit.reason !== input.reason.trim())
+          throw new ConflictException("该版本已经发布；只有原操作人的同请求可返回原结果");
+        // Publication is immutable, while adoption policy and available runtime
+        // implementations may advance. Verify the original committed body and
+        // revision, not today's execution validation; never rerun publication.
+        if (before.revision !== input.expectedRevision || row.revision !== input.expectedRevision + 1 || after.digest !== digest(row.definition)
+          || row.publishedBy !== audit.actorId || row.publishReason !== audit.reason)
+          throw new ServiceUnavailableException("原发布版本与审计依据不一致，请核对原收据，禁止重新发布");
+        return row;
       }
       if (row.status !== "draft" || row.revision !== input.expectedRevision) throw new ConflictException("草稿已变更或归档，请重新校验");
       const validation = this.versionValidation(row, code);
