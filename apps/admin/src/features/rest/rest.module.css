@@ -30,7 +30,7 @@
 .sourceRow a:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
 .notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; color: var(--foreground); line-height: 1.5; }
 .notice:not(:empty) { margin-top: 12px; }
-.localFile { margin-top: 8px; }
+.sourceActions { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
 .experience::selection { color: var(--accent-foreground); background: var(--accent); }
 @media (min-width: 1024px) {
   :global(body:has(.copilot-host.is-open)) .experience[data-expanded="false"] { right: 392px; }

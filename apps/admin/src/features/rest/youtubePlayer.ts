@@ -84,6 +84,7 @@ export function useYouTubePlayer(host: RefObject<HTMLDivElement | null>, canPlay
   callbacks.current = { canPlay, onEnded };
   const desiredVolume = useRef(initialSnapshot.volume);
   const readyRef = useRef(false);
+  const wantsInitialPlayback = useRef(true);
 
   useEffect(() => {
     const container = host.current;
@@ -91,7 +92,9 @@ export function useYouTubePlayer(host: RefObject<HTMLDivElement | null>, canPlay
     let disposed = false;
     let instance: YouTubePlayer | null = null;
     let readyTimeout = 0;
+    let failed = false;
     readyRef.current = false;
+    wantsInitialPlayback.current = true;
     setSnapshot({ ...initialSnapshot, volume: desiredVolume.current });
     // This DOM island stays in one location across expanded/mini layouts. Moving
     // an iframe between portals would reload it even if its React key stayed put.
@@ -106,7 +109,7 @@ export function useYouTubePlayer(host: RefObject<HTMLDivElement | null>, canPlay
     container.appendChild(frame);
 
     const update = () => {
-      if (disposed || !instance || !readyRef.current) return;
+      if (disposed || failed || !instance || !readyRef.current) return;
       if (!callbacks.current.canPlay()) instance.pauseVideo();
       const duration = bounded(instance.getDuration(), 86_400);
       const currentTime = bounded(instance.getCurrentTime(), duration);
@@ -121,16 +124,18 @@ export function useYouTubePlayer(host: RefObject<HTMLDivElement | null>, canPlay
       }, 15_000);
       instance = new api.Player(frame, { events: {
         onReady: event => {
-          if (disposed) return;
+          if (disposed || failed) return;
           window.clearTimeout(readyTimeout);
           readyRef.current = true;
           event.target.setVolume(desiredVolume.current);
           setSnapshot(previous => ({ ...previous, status: "ready", error: null }));
-          if (callbacks.current.canPlay()) event.target.playVideo(); else event.target.pauseVideo();
+          if (callbacks.current.canPlay() && wantsInitialPlayback.current) event.target.playVideo(); else event.target.pauseVideo();
           update();
         },
         onStateChange: event => {
-          if (disposed) return;
+          // A late ready/paused event cannot erase an embed refusal. Retrying
+          // creates a fresh instance with its own provider result.
+          if (disposed || failed) return;
           const status: MediaStatus = ({ [-1]: "ready", 0: "ended", 1: "playing", 2: "paused", 3: "buffering", 5: "ready" } as const)[event.data] ?? "ready";
           setSnapshot(previous => ({ ...previous, status, error: null, autoplayBlocked: status === "playing" ? false : previous.autoplayBlocked }));
           update();
@@ -139,9 +144,11 @@ export function useYouTubePlayer(host: RefObject<HTMLDivElement | null>, canPlay
             event.target.playVideo();
           }
         },
-        onAutoplayBlocked: () => { if (!disposed) setSnapshot(previous => ({ ...previous, status: "ready", autoplayBlocked: true })); },
+        onAutoplayBlocked: () => { if (!disposed && !failed) setSnapshot(previous => ({ ...previous, status: "ready", autoplayBlocked: true })); },
         onError: event => {
           if (disposed) return;
+          failed = true;
+          readyRef.current = false;
           window.clearTimeout(readyTimeout);
           const error = event.data === 101 || event.data === 150 || event.data === 153 ? "embed" : event.data === 100 ? "unavailable" : "browser";
           setSnapshot(previous => ({ ...previous, status: "error", error, errorCode: event.data }));
@@ -166,8 +173,14 @@ export function useYouTubePlayer(host: RefObject<HTMLDivElement | null>, canPlay
     };
   }, [host, attempt, enabled]);
 
-  const play = useCallback(() => { if (readyRef.current && callbacks.current.canPlay()) player.current?.playVideo(); }, []);
-  const pause = useCallback(() => { if (readyRef.current) player.current?.pauseVideo(); }, []);
+  const play = useCallback(() => {
+    wantsInitialPlayback.current = true;
+    if (readyRef.current && callbacks.current.canPlay()) player.current?.playVideo();
+  }, []);
+  const pause = useCallback(() => {
+    wantsInitialPlayback.current = false;
+    if (readyRef.current) player.current?.pauseVideo();
+  }, []);
   const seek = useCallback((seconds: number) => {
     if (!readyRef.current || !player.current || !callbacks.current.canPlay()) return;
     player.current.seekTo(bounded(seconds, player.current.getDuration()), true);

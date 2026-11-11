@@ -25,6 +25,7 @@ export function RestExperience() {
   const mediaHost = useRef<HTMLDivElement>(null);
   const audioElement = useRef<HTMLAudioElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const sourceButton = useRef<HTMLButtonElement>(null);
   const viewButton = useRef<HTMLButtonElement>(null);
   const [localFile, setLocalFile] = useState<{ url: string; name: string }>();
   const [mediaBox, setMediaBox] = useState<CSSProperties>();
@@ -46,7 +47,8 @@ export function RestExperience() {
   const status = ended ? "ready" : media.status === "loading" ? "loading" : media.status === "error" ? "error" : "ready";
   const playerProps = {
     track: { ...REST_TRACK, title: localFile ? localFile.name.replace(/\.[^.]+$/, "") : REST_TRACK.title,
-      artist: localFile ? t("本地音频") : REST_TRACK.artist, artworkAlt: "Red (Taylor’s Version) — Taylor Swift" },
+      artist: localFile ? t("本地音频") : REST_TRACK.artist,
+      artworkAlt: localFile ? t("本地音频") : "Red (Taylor’s Version) — Taylor Swift" },
     playing: !ended && (media.status === "playing" || media.status === "buffering"), currentTime: media.currentTime, duration: media.duration,
     status, disabled: ended, labels,
     onPlayingChange: (playing: boolean) => playing ? media.play() : media.pause(),
@@ -129,7 +131,10 @@ export function RestExperience() {
     {localFile && !ended && <audio ref={audioElement} preload="metadata" hidden />}
     <input ref={fileInput} type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac" hidden onChange={event => {
       const file = event.currentTarget.files?.[0];
-      if (file && !ended) setLocalFile({ url: URL.createObjectURL(file), name: file.name });
+      if (file && !ended) {
+        localMedia.setVolume(media.volume);
+        setLocalFile({ url: URL.createObjectURL(file), name: file.name });
+      }
       event.currentTarget.value = "";
     }} />
     {(rest.expanded || ended || media.status === "error" || media.autoplayBlocked) && <footer className={styles.footer}>
@@ -143,8 +148,15 @@ export function RestExperience() {
           : media.status === "loading" ? <span>{t("正在加载音乐")}</span>
           : media.status === "buffering" ? <span>{t("音乐缓冲中")}</span> : null}
       </div>
-      {!ended && (localFile || media.status === "error") && <Button type="text" size="small" className={styles.localFile} icon={<FolderOpen size={14} aria-hidden />}
-        onClick={() => fileInput.current?.click()}>{t(localFile ? "更换本地音频" : "选择本地音频")}</Button>}
+      {!ended && <div className={styles.sourceActions}>
+        <Button ref={sourceButton} type="text" size="small" icon={<FolderOpen size={14} aria-hidden />}
+          onClick={() => fileInput.current?.click()}>{t(localFile ? "更换本地音频" : "选择本地音频")}</Button>
+        {localFile && <Button type="text" size="small" onClick={() => {
+          remoteMedia.setVolume(media.volume);
+          sourceButton.current?.focus({ preventScroll: true });
+          setLocalFile(undefined);
+        }}>{t("切回官方音源")}</Button>}
+      </div>}
     </footer>}
   </dialog>, document.body);
 }

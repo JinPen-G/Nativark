@@ -13,32 +13,47 @@ export function useLocalAudioPlayer(element: RefObject<HTMLAudioElement | null>,
   const callbacks = useRef({ canPlay, onEnded });
   callbacks.current = { canPlay, onEnded };
   const playRef = useRef<() => void>(() => undefined);
+  const desiredVolume = useRef(initial.volume);
+  const wantsPlayback = useRef(true);
+  const playRequest = useRef(0);
 
   useEffect(() => {
     const audio = element.current;
     if (!audio || !source || !enabled) return;
     let disposed = false;
-    setSnapshot(initial);
-    audio.volume = initial.volume / 100;
+    wantsPlayback.current = true;
+    setSnapshot({ ...initial, volume: desiredVolume.current });
+    audio.volume = desiredVolume.current / 100;
     const play = () => {
-      if (disposed || !callbacks.current.canPlay()) return;
+      if (disposed || !wantsPlayback.current || !callbacks.current.canPlay()) return;
+      const request = ++playRequest.current;
       void audio.play().catch((error: unknown) => {
-        if (disposed) return;
+        // A pause or a newer play request owns the UI now. Its interrupted
+        // promise must not overwrite that state with an apparent media failure.
+        if (disposed || request !== playRequest.current || !wantsPlayback.current) return;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          setSnapshot(previous => ({ ...previous, status: "paused" }));
+          return;
+        }
         const blocked = error instanceof DOMException && error.name === "NotAllowedError";
         setSnapshot(previous => ({ ...previous, status: blocked ? "ready" : "error", autoplayBlocked: blocked,
           error: blocked ? null : "browser" }));
       });
     };
-    playRef.current = play;
+    playRef.current = () => { wantsPlayback.current = true; play(); };
     const update = () => {
       if (disposed) return;
       if (!callbacks.current.canPlay()) audio.pause();
       setSnapshot(previous => ({ ...previous, duration: bounded(audio.duration, 86_400),
         currentTime: bounded(audio.currentTime, Number.isFinite(audio.duration) ? audio.duration : 0), volume: audio.muted ? 0 : audio.volume * 100 }));
     };
-    const ready = () => { update(); setSnapshot(previous => ({ ...previous, status: "ready" })); play(); };
+    const ready = () => {
+      update();
+      setSnapshot(previous => ({ ...previous, status: wantsPlayback.current ? "ready" : "paused" }));
+      play();
+    };
     const playing = () => {
-      if (!callbacks.current.canPlay()) { audio.pause(); return; }
+      if (!wantsPlayback.current || !callbacks.current.canPlay()) { audio.pause(); return; }
       setSnapshot(previous => ({ ...previous, status: "playing", autoplayBlocked: false, error: null }));
     };
     const paused = () => { if (!disposed) setSnapshot(previous => ({ ...previous, status: "paused" })); };
@@ -58,6 +73,7 @@ export function useLocalAudioPlayer(element: RefObject<HTMLAudioElement | null>,
     audio.load();
     return () => {
       disposed = true;
+      ++playRequest.current;
       playRef.current = () => undefined;
       for (const [name, handler] of Object.entries(handlers)) audio.removeEventListener(name, handler);
       window.removeEventListener("pagehide", pagehide);
@@ -68,7 +84,11 @@ export function useLocalAudioPlayer(element: RefObject<HTMLAudioElement | null>,
   }, [element, source, enabled, attempt]);
 
   const play = useCallback(() => playRef.current(), []);
-  const pause = useCallback(() => element.current?.pause(), [element]);
+  const pause = useCallback(() => {
+    wantsPlayback.current = false;
+    ++playRequest.current;
+    element.current?.pause();
+  }, [element]);
   const seek = useCallback((seconds: number) => {
     const audio = element.current;
     if (audio && callbacks.current.canPlay() && Number.isFinite(audio.duration)) {
@@ -79,10 +99,11 @@ export function useLocalAudioPlayer(element: RefObject<HTMLAudioElement | null>,
     }
   }, [element]);
   const setVolume = useCallback((volume: number) => {
+    desiredVolume.current = bounded(volume, 100);
     const audio = element.current;
     if (audio) {
       audio.muted = false;
-      audio.volume = bounded(volume, 100) / 100;
+      audio.volume = desiredVolume.current / 100;
       setSnapshot(previous => ({ ...previous, volume: audio.volume * 100 }));
     }
   }, [element]);
