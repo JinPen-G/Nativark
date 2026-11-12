@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain23-category-credential-core-20261113"></a>
+## 治理草稿消费者向新 Core 转交原签名身份（2026-11-13）
+
+PM 转交的 QA P2 为原 CategoryDraftApplication 经 Guard 后仅向 Core Controller 传 user，新 Core Auth 缺 authorization，create/patch 返回未知且未写草稿。单文件前像 Git blob `366f9c1890f9d8e28fd4b0872137c40e55a42ec6`，后像 `3843338a6b759f212253351c35ef9bbd6b9f170c`。current 回调转交该次已捕获 credential.authorization，两个写入请求在原 user 上附 headers.authorization。原 Guard/ALS、DTO、CAS、前后权限复核及新 Core Auth 保持。[消费者](../../apps/api/src/modules/ai-native/category-assist/category-draft.application.ts)
+
+dev2 复用 QA 原治理身份夹具，实际 AuthService 签名/会话、ApiAuthGuard、PlatformService/Repository、AI Controller/应用及 Core Controller/服务，十场景必要模拟退出 0，stdin SHA-256 `a0d95f495a28b4d93e7bea19959e93063e73f805521e459489e382d2976998b5`。前像两个入口缺 header 拒绝、零审计，后继 create/patch 各写一次审计。外部 credential 在等待中变化仍只转交原捕获 header，Core await 中撤会话/撤 edit 和审计后撤权均拒绝并回滚，body 注入身份由 DTO 拒绝。关闭创建后同原 K 仍恢复原版本，重复不增审计，撤 edit 继续拒绝读取。DB/storage 及部署开关为明确内存夹具。
+
+Core 仅用 PM `654a5e35` 固定补片的两个源码对象做内存组合，service `09eca288fdfdcc66b2ab005199a5c588b4769a5f`、Controller `e4900454be98043074b69301bf3d99a215523e01`，没有改 Core 文件。作者按原 shared/MCP/API 声明配置检查 3 根/1199 源零诊断，退出 0，stdin SHA-256 `b991f698dd34ee98dc70308927123f9f157e45a9ad1ef8c3b86453cb584577cb`。Root 逐 blob 核同，复核同签名捕获与前后权限流程，固定 Core/本单文件 3 根/1200 源 TypeScript 5.9.3 零诊断，退出 0，stdin SHA-256 `510b08deb6d283b6cae4d83a8bba0d5cb3134b88aa73be695ebe98320f5e99aa`。
+
+原命令/输出只保留 dev2/AI-RD 既有会话，未新增脚本、测试文件、client/dist 或附件副本。所有验证进程退出，审计为空，任务临时目录未创建。本单文件交 PM 与固定 Core 两源组成完整候选，由既有 QA 复验。AIN-23 仍缺新类草稿/目录、发布与采用的 AI 消费及后台入口，原完整任务百分比不因兼容补片改变。
+
 <a id="ain12-fixed-main-closure-20261113"></a>
 ## 指定 main 的模型控制与首字观察整合闭包（2026-11-13）
 
@@ -26,6 +37,8 @@ PM 指定的 main 为 `2a5c56471abb5714f80715e2cfa0aa236f003f51`。QA 将 c4 十
 全部固定 main/API/admin/shared 源在内存读取，缺少的路径保持缺少，声明与运行模块均按候选解析。TypeScript 5.9.3，API 4 根/1959 源、后台 4 根/1601 源零诊断，退出 0，stdin SHA-256 `71d2962db2e43cb30de71255938b064ac458c6cd5959309fcf5af79cd2384750`。候选实际原首字/首卡 callback 退出 0，stdin SHA-256 `21d54aa96bd4d048749f169cd33c8ad13c0ca464d8fc132d47ef7d1bb65d4a87`。候选标准 TaskCenter provider/Guard/Controller→原模型读取/日志的必要模拟退出 0，stdin SHA-256 `33740d7c4da39c50d193f3240fdbc0ebada287b3f0f6b265ac0fa08eb77253d3`，1 日志及精确重放，十项拒绝边界，原 Task/Run/Step/Artifact/charge 保持。这里 control-read 使用明确合同夹具，完整模型控制执行沿[原固定阶段](<#ain12-model-control-consumer-20261113>)证据，由 PM 安排 QA 对主树候选独立核接。
 
 初始虚拟运行器只替换读取，无法解析 AI 稀疏树中不存在的 main 企业模块，失败保留。加入固定源路径解析后复验，使用的始终是指定 main 与固定增量。初始批量 Git 读取超出默认 buffer 的失败及 TaskCenter 原 hunk 上下文不符也保留，后者按 main 的现有上下文逐段核接。所有模拟进程退出，审计为空，临时目录未创建。该候选是可独立整合的固定阶段，main 实际集成由 PM 串行执行，任务进度仍按原全文。
+
+PM 随后指出 5426 十四源中的 TaskCenter hunk 在 630 的 main 页面上下文未能直接匹配。原十三文件按 5426 精确 hunk 保留，页面单独在 630 基础逐段接入候选/当前字段来源，继续保留 main 原展开/权限及两旁支取舍。后继为 `d201979963e4f4474acd23ff1981ad81930fdfcd`，父为 630，仍在同一整合分支普通推送并回读一致，14 个产品路径。最终 TaskCenter blob `d20e308154aae16304b43acd66a74fc07a580aae`，Guard blob `18bfe319da8033e0c8369a1a0d13b4433d5ec3a1`。Guard diff 仅含原 createTask 精确登记。API 4 根/1959 源、后台连 Copilot 5 根/1778 源零诊断、退出 0，stdin SHA-256 `9d5c0e3bb1a6d2dbd8939bf018535eb6eaa481a57705179e118c09b1e7b968c3`。精确页面 hunk 可由 `git diff 630ac26af1fda5c6fca001bdeac507b301f5281d d201979963e4f4474acd23ff1981ad81930fdfcd -- apps/admin/src/features/ai-native/TaskCenterPage.tsx` 复核，固定 13 文件没有重做。
 
 <a id="ain12-copilot-and-parameter-consumer-20261113"></a>
 ## Copilot 当前订单与动态候选到原重新准备（2026-11-13）

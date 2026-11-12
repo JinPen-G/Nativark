@@ -6,7 +6,7 @@
 
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。2026-11-13 首次修改前核对 AI 本地及 GitHub 均为 `7e4d1aaef2df3c3aebe5c02f95adc56a759a964d`；随后模型控制和首字阶段分别推 `c4b26faf29a241e602c28914edf7e646cf225be0`、`07d2ae645b1aaac632bfa0dc0df5bae981f3c91c` 并回读一致。Copilot/参数接续十四源已按固定索引收口，两个助手转独占后继。main 由 PM 串行集成，使用前重新核对，不能追活动 HEAD 或将旧 SHA 当重置目标。
 
-PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包](<AI Native-开发记录.md#ain12-fixed-main-closure-20261113>)已生成并推送 `630ac26af1fda5c6fca001bdeac507b301f5281d`／codex/ai-native-main-closure-20261113，共44个必要源。公共 AppModule/index 使用精确 hunk，Guard 在此候选保持指定 main，TaskCenter 保留 main 原旁支。该分支仅作 PM 可审查整合候选，AI 施工仍在原树。PM 后续 main 已推进 AIN-19 等独立片，集成按固定 diff 与新现场复核。
+PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包](<AI Native-开发记录.md#ain12-fixed-main-closure-20261113>)已推 630，5426 十四源的主树页面后继已推 `d201979963e4f4474acd23ff1981ad81930fdfcd`，均在 codex/ai-native-main-closure-20261113 并回读一致。公共 AppModule/index 用精确 hunk，首候选 Guard 保持原 main，后继仅补 createTask 原登记，TaskCenter 保留 main 原展开/权限与旁支。该分支仅作 PM 整合候选，AI 施工仍在原树。PM 串行收每个 QA 通过的可独立阶段，任务进度仍按原全文。
 
 开业/资源/经营待办已在未完检查点 `ea9a3ec2b` 同步任务分支，开业导航与原字段接线分别推送 `c53e3bded` 和 `270fbb7af`，PM 按固定依赖闭包整合，不整收混有未完事件的检查点。[检查点与前置补正](<AI Native-开发记录.md#ain-opening-automation-checkpoint-20261112>)保留原依据。AIN-13 自身实现与模拟证据已具备，但前置 AIN-12 全文未齐，原 100% 结论已纠正；不回退已完成源码。PM 交付的 OP SecretBox 固定修复已按[正常 Nest 与 AI 配置兼容核验](<AI Native-开发记录.md#ain-secret-box-nest-compatibility-20261112>)接入并推送 `b408e806349f2dfc743a1a6dbc9df8dad2858c37`，GitHub 已核一致。QA 指出的任务中心受控展开回归已按[有限交互核验](<AI Native-开发记录.md#ain-task-center-section-regression-20261112>)修复；后台其余原缺口继续推进。
 
@@ -20,7 +20,7 @@ PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 持有十四源固定阶段及四册/索引，已完成完整字段投影、回答后新准备来源和 TaskCenter prop。固定 main 闭包已推，整合/QA 只经 PM。AIN-12 原全文待该阶段独立核定，AIN-13 自身证据已具备。AIN-15 三叶和员工漏交样式待核接，AIN-17 等 Core 正式来源。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | Copilot 四源及完整必要模拟已冻结交 Root。当前独占 original-scene-result.service.ts 的 opening 文本分支和必要 opening-diagnosis-renderer.ts，修开业缺项/未实测被模型原文写成成功的实际反例，再核 AIN-14 原全文。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 候选四源及15项必要行为、最终类型已冻结交 Root。当前仅写 category-assist/category-draft.application.ts，补原捕获 credential.authorization 到 create/patch 的 Core 请求，保持原 Guard/ALS/DTO/CAS/新 Auth。完成后只读核 AIN-23 原范围，Core 654a5e35 两源仅作固定组合读取。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 候选四源及治理身份单文件 P2 已冻结交 Root。[单消费者/Core 组合](<AI Native-开发记录.md#ain23-category-credential-core-20261113>)十场景模拟、作者/Root 类型均通过，由 PM 交 QA。当前只读核 AIN-23 新类/模板目录、发布/采用及实际后台消费，写入窗口由 Root 分配。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
 
 公共窗口不得夹带企业端的 ClientApiService.readOrderSubmission、企业 reader/controller/GET 和后台企业材料。PM 已将 `openapi-document.ts` 的企业申请/专用凭证登记、`enterprise-workflows.ts` 的 payment_proof/企业消息及 `file-storage.runtime.service.ts` 的 enterprise-payment-proof 区域交企业 RD。AI 本片保留其写权，确需重叠增量先交 PM 串行协调。Core 订单、资金、品类与配置权威仍由原专项负责，AI 不重建这些规则。

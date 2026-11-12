@@ -49,14 +49,16 @@ export class CategoryDraftApplication {
   async create(value: unknown) {
     const input = this.parse(z.object({ code, body: z.unknown() }).strict(), value);
     const body = await this.dto(CreateCategoryDraftDto, input.body);
-    return this.current('POST', `${input.code}/drafts`, user => this.dependencies.controller.create(input.code, body, { user }), true);
+    return this.current('POST', `${input.code}/drafts`, (user, authorization) =>
+      this.dependencies.controller.create(input.code, body, { user, headers: { authorization } }), true);
   }
 
   async patch(value: unknown) {
     const input = this.parse(versionRequest.extend({ section: z.enum(['basic', 'attributes', 'inventory', 'pricing', 'inspection', 'capabilities']), body: z.unknown() }).strict(), value);
     const body = await this.dto(PatchCategoryDraftDto, input.body);
     return this.current('PATCH', `${input.code}/versions/${input.versionId}/sections/${input.section}`,
-      user => this.dependencies.controller.patch(input.code, input.versionId, input.section, body, { user }), true);
+      (user, authorization) => this.dependencies.controller.patch(input.code, input.versionId, input.section,
+        body, { user, headers: { authorization } }), true);
   }
 
   async review(value: unknown) {
@@ -96,7 +98,8 @@ export class CategoryDraftApplication {
     return result;
   }
 
-  private async current<T>(method: string, suffix: string, execute: (user: SystemUserRow) => Promise<T>, mutating = false): Promise<T> {
+  private async current<T>(method: string, suffix: string,
+    execute: (user: SystemUserRow, authorization: string) => Promise<T>, mutating = false): Promise<T> {
     const credential = structuredClone(await this.dependencies.credentials.current());
     if (credential.audience !== 'operator' || typeof credential.authorization !== 'string'
       || credential.authorization.length < 1 || credential.authorization.length > 8192) throw new CategoryAssistError('ACCESS_DENIED');
@@ -114,7 +117,8 @@ export class CategoryDraftApplication {
     try { before = await resolve(); } catch { throw new CategoryAssistError('ACCESS_DENIED'); }
     // Execute inside independent ALS; do not borrow an active tenant context.
     return runWithRequestIdentity(before.identity, async () => {
-      const result = await execute(before.user);
+      // Core revalidates the same signed credential that passed this Guard.
+      const result = await execute(before.user, credential.authorization);
       let after: Awaited<ReturnType<typeof resolve>>;
       try { after = await resolve(); } catch { throw new CategoryAssistError('ACCESS_DENIED', mutating); }
       if (JSON.stringify(after) !== JSON.stringify(before)) throw new CategoryAssistError('ACCESS_DENIED', mutating);
