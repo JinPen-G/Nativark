@@ -4,6 +4,16 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-adoption-input-capture-integration-20261112"></a>
+
+## 采用与准备输入副本的主线整合（2026-11-12）
+
+按 QA 的固定结论，从 Core `16401c422419aa2e0368b914ecb4a4135a0788d8` 仅收[采用应用](../../apps/api/src/modules/rental-core/category-adoption.application.ts)及[准备服务](../../apps/api/src/modules/rental-core/category-adoption-preparation.service.ts)的增量，保留 main 既有前置。原调用方在等待锁时改原因，可使采用审计与原收据输入不一致，已提交后原键回读 503；本片在首次等待前固定正式采用、批次及旧整份准备输入，使执行、审计、原键和嵌套准备内容保持一致。
+
+QA 在固定底座 `b0b586ea07b69bb3b44b2d08ef03bfc84cdaa7fb` 复现原问题，六组离线场景覆盖等待时改键/原因、修订和操作变化、嵌套补丁/撤回、旧整份准备、撤权与收据失败回滚；退出 0。限定类型检查为 2 根/1213 源零诊断，Shared/MCP 直接声明通过，退出 0。整合后两份源码的 LF SHA-256 分别为 `3c0f7e2f548d8fa1d489ac5780bde998ffd21694fc6d09ec82eba12a48a2e58d`、`4b2dd9af450433f6753c9615ec34094853abfc2ac55c55bd777f13cda1681db2`，与 QA 固定组合一致；复用已通过的限定检查，没有重复运行。
+
+上述为 QA 主审及离线替身证据，本次没有新增独立复核，真实 MySQL 锁并发、完整 Controller/Guard 和宿主未验。原 CAT-GOV-08、两组不同动态组合及完整结项门槛保持；Core 作者继续后续治理，治理入口 `48e1b6807` 另待 QA，未一并收取。其他 main 工作区改动未纳入本片。
+
 <a id="pm-readiness-original-transaction-integration-20261112"></a>
 
 ## PM按QA方法闭包收回原九项同client读取（2026-11-12）
