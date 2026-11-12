@@ -4,11 +4,25 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="business-config-original-transaction-20261112"></a>
+
+## 业务配置补落的完整原事务（2026-11-12）
+
+从已核GitHub的`6390f89a9d38b499ca8d43a3b38dccef0641e13c`接续，按PM的AIN-17 Core窗口只改[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)和[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)。`persistBusinessConfig`把基础价格及初始价格版本、优惠、服务及版本、日历、规则、通知模板六类补落纳入同一ReadCommitted事务，先持原Tenant/空间品类锁；新增事务参数沿原方法追加，范围读取也使用同一client，不从根连接逃出。直接消费者仍为`persistScope`和首次报价的原配置补落；普通发布/资金/客户入口及Shared/DI未改，不声明已接入Outbox。
+
+等锁前固定六类配置并拒绝其他商户行。保存期间输入变化在提交前拒绝并回滚，新的输入保留；提交应答期间又变化，则明确保存后冲突，保留已提交事实及新输入，调用方不把它标作已保存，也不假称事务回滚。`configPersisted`仍仅在完整返回后设置，初始价格不单独成为可见前缀，原报价/金额算法与历史版本保护不变。
+
+API原noEmit与最终完整emit退出0；原`config-workspace-scope.test.cjs`3项退出0。原日历脚本源码装配只补合成Tenant父锁叶子，其全部修订/审计/发布范围原断言退出0；未改测试文件。原续租配置fixture的实际服务/六类仓储限定调用退出0：同一tx、末段失败/提交前输入变化回滚及标记未完成、提交后变化保留已提交事实/新输入、初始价格版本同提交、重复persist不重初始化、原报价不变。首次数据库替身不能克隆Prisma.Decimal的失败保留，改为原JSON表达后只复验相关调用；SQL/锁/授权/回滚仍为替身，不当作真库证据。
+
+当前864份自持API完整编译并逐文件核对，累计更新业务配置/业务服务及此前R08 Core/快照共4份，Shared/Client四项保护hash未变。最终提交后复核补入业务服务，其他863文件保持；命令、源码/文件hash、失败及清理状态唯一见[阶段证据](../../output/category-governance/business-config-original-transaction-20261112.json)。最终864份退出文件/缓存及40个目录、其余本片退出暂存已删除。原真库价格版本入口读取环境/连接专用库，未获许可未执行；原0/14完整结项及CLOSE门槛不变，真实配置行counter/开业分区、资源短缺和四入口参加者仍未齐。
+
+PM新增的下一Core独占窗口为[订单确认服务](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)与一份Core sealed商户委托authority/端口，必要时仅扩[原参加者合同](../../apps/api/src/modules/rental-core/approved-order-transaction.ports.ts)的服务端字段；公共AppModule/shared-index/OpenAPI、商户Controller/admin由企业作者负责。依据固定企业源`7179bafb0f6fea09e1832ea75ddf2a0a610c28f6`及恢复补片`a130e89fb6c54ff4789a57830b2a028ffa41f7d0`，当前只读核准入口，不继承整个父提交或改企业政策。企业另获准固定私有`readMerchantDelegatedSubmission(actorAuth, reference)`补片，Core等待其固定来源后消费原descriptor/state/状态修订，不以公开view补request，不另建公共Core源合同。下一片保持operator Auth/Guard/ALS、不可变个人使用人、D/K/原quote/签发修订/指纹及同一参加者；执行严格issued/签发修订/期限，原结果用私有read与recover/replay，consumed状态修订和自然TTL不触发新准备，源/批准/订单/Core收据同事务。完成后再继续AIN-17/CAT-GOV，不扩常设或私人保证金委托。
+
 <a id="snapshot-original-transaction-20261112"></a>
 
 ## Core快照的原事务复用与固定输入（2026-11-12）
 
-按PM核准的AIN-17四入口顺序，从已核GitHub的`5d6c6dffdfaf11b0bc6d759ab87ae983d31edd0c`接续，仅改[快照仓储](../../apps/api/src/modules/rental-core/rental-state.repository.ts)。`saveCoreState`允许服务端调用者传入原事务，绑定锁、快照读取及原行CAS在该事务执行，不另开事务/自行提交；未传事务时仍由仓储拥有原ReadCommitted事务。原CoreService恢复备份调用保持，正式宿主尚未消费新增事务参数，不声明四入口参加者已接通。
+按PM核准的AIN-17四入口顺序，从已核GitHub的`5d6c6dffdfaf11b0bc6d759ab87ae983d31edd0c`接续，源码固定`6390f89a9d38b499ca8d43a3b38dccef0641e13c`并已普通推送核远端；仅改[快照仓储](../../apps/api/src/modules/rental-core/rental-state.repository.ts)。`saveCoreState`允许服务端调用者传入原事务，绑定锁、快照读取及原行CAS在该事务执行，不另开事务/自行提交；未传事务时仍由仓储拥有原ReadCommitted事务。原CoreService恢复备份调用保持，正式宿主尚未消费新增事务参数，不声明四入口参加者已接通。
 
 在第一次等待数据库前固定JSON快照；绑定依据、新建行内容与替换SQL使用同一次输入。修复原新建分支在等锁后再次序列化活缓存、可能混入后继改动的问题；明确档案保留、合法修订范围、无变化不写和饱和拒绝仍沿原CAS，不改Schema/Client或历史事实。
 

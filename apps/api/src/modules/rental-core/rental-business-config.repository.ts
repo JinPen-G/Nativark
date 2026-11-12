@@ -57,10 +57,6 @@ export interface TenantBusinessConfigSnapshot {
   hasPersistedConfig: boolean;
 }
 
-/**
- * 业务配置的库侧接口。与核心配置仓储同构：库是事实源，服务层内存副本是写穿缓存，
- * 不连库的单元测试注入吸收式 stub，持久化语义只在 MySQL E2E 验证。
- */
 export interface RentalReadinessBusinessFacts {
   tenantId: string;
   workspaceId: string;
@@ -95,6 +91,11 @@ export async function readRentalReadinessAccountFacts(prisma: Pick<PrismaService
 export type RentalQuoteRateTarget = Pick<RentalPricingRate, 'itemGroupId' | 'pricingGroupId' | 'unit'> & {
   priceVersionId: string; priceVersion: string;
 };
+/**
+ * 业务配置的库侧接口。库是事实源，服务层内存副本是写穿缓存。
+ * 各写入口可复用调用者原事务；范围读取和写入均参加该事务，提交/回滚仍归调用者。
+ * 不连库的测试可注入吸收式store，但不能证明MySQL持久化与锁语义。
+ */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
   loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot>;
@@ -103,14 +104,15 @@ export interface RentalBusinessConfigStore {
   readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[]): Promise<RentalReadinessBusinessFacts>;
   loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
-  upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
-  upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding, tx?: RentalConfigTx): Promise<void>;
+  upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding, tx?: RentalConfigTx): Promise<void>;
   /** Current service admission under the same workspace mutex as service writers. */
   readServicesForExchange?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<RentalValueAddedService[]>;
   upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
-    audits?: RentalCalendarOverrideAudit[]
+    audits?: RentalCalendarOverrideAudit[],
+    tx?: RentalConfigTx
   ): Promise<void>;
   /**
    * 重新读取某年度的全部版本。乐观锁冲突后必须用它刷新进程内缓存：
@@ -134,7 +136,7 @@ export interface RentalBusinessConfigStore {
     superseded?: RentalCalendarYear,
     expectedRevisions?: { next: number; superseded: number }
   ): Promise<void>;
-  upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding, tx?: RentalConfigTx): Promise<void>;
   /** Exact original target for refreshing a confirmed bound draft operation. */
   loadRuleVersionById?(tenantId: string, workspaceId: string, id: string): Promise<RentalRuleVersion | null>;
   /**
@@ -150,7 +152,7 @@ export interface RentalBusinessConfigStore {
     expectedBinding?: CategoryWriteBinding
   ): Promise<void>;
   loadRuleVersionAudits(tenantId: string, workspaceId: string, ruleVersionId?: string): Promise<RentalRuleVersionAudit[]>;
-  upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
+  upsertNotificationTemplate(template: RentalNotificationTemplateV1, tx?: RentalConfigTx): Promise<void>;
   replaceNotificationTemplateVersion(
     previous: RentalNotificationTemplateV1,
     next: RentalNotificationTemplateV1
@@ -414,10 +416,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       // 与"配了一个空清单"在语义上同义，但省掉一次无意义的 JSON 解析。
       fulfillmentFees: (plan.fulfillmentFees ?? null) as unknown as Prisma.InputJsonValue
     };
-    // Resolve outside our transaction so the workspace lock is its first read:
-    // a normal scope SELECT before waiting for the lock would establish an old
-    // MySQL repeatable-read snapshot of the price rows.
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
+    // Standalone scope resolution precedes our transaction so the workspace
+    // lock is its first read. A caller-owned transaction retains its own fence
+    // and must also own the scope read; never escape through the root client.
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, plan.tenantId);
     const write = async (client: RentalConfigTx) => {
     const { definition } = await lockActiveCategoryBinding(client, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
     const existing = await client.rentalPricingPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
@@ -433,7 +435,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
-  async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: rentalCategoryStorageCode(plan.categoryCode),
@@ -458,8 +460,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       effectiveTo: plan.effectiveTo ? new Date(plan.effectiveTo) : null,
       version: plan.version
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
-    await this.prisma.$transaction(async (tx) => {
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, plan.tenantId);
+    const write = async (tx: RentalConfigTx) => {
       await lockActiveCategoryBinding(tx, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
       const existing = await tx.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
       assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
@@ -468,7 +470,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
         update: data
       });
-    });
+    };
+    if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
   }
 
   async readServicesForExchange(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<RentalValueAddedService[]> {
@@ -486,7 +489,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: service.tenantId,
       categoryCode: rentalCategoryStorageCode(service.categoryCode),
@@ -513,9 +516,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       status: service.status,
       version: service.version
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, service.tenantId);
     const snapshot = JSON.parse(JSON.stringify({ ...service, workspaceId })) as Prisma.InputJsonValue;
-    await this.prisma.$transaction(async (tx) => {
+    const write = async (tx: RentalConfigTx) => {
       const { definition } = await lockActiveCategoryBinding(tx, service.tenantId, workspaceId, expectedBinding, service.categoryCode);
       const modes = [...service.applicableFulfillmentModes, ...(service.mandatoryRule?.fulfillmentModes ?? [])];
       if (modes.some((mode) => !definition.businessModel.fulfillmentModes.includes(mode))) throw new ConflictException("增值服务包含当前品类不支持的履约方式");
@@ -557,7 +560,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
           createdAt: new Date(service.updatedAt)
         }
       });
-    });
+    };
+    if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
   }
 
   /** 日历按 (租户, 年份, 版本) 唯一；整年按日明细随该行一起写。 */
@@ -609,12 +613,13 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
-    audits: RentalCalendarOverrideAudit[] = []
+    audits: RentalCalendarOverrideAudit[] = [],
+    existingTx?: RentalConfigTx
   ): Promise<void> {
     const data = this.calendarData(calendar);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, calendar.tenantId);
     try {
-      await this.prisma.$transaction(async (tx) => {
+      const write = async (tx: RentalConfigTx) => {
       // Calendar changes participate in adoption preflight. Hold the same space
       // lock until both the calendar and its override audit have committed.
       await lockActiveCategoryBinding(tx, calendar.tenantId, workspaceId);
@@ -667,7 +672,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
           }))
         });
       }
-    });
+      };
+      if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
     } catch (error) {
       // 并发落库冲突转 409：条件更新前的「先查后写」在并发下必然有窗口——两路恢复/编辑
       // 可能都查到无该版本号、算出同一个新版本号并进入 create，唯一键 (ws,year,version)
@@ -807,11 +813,11 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
   }
 
-  async upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<void> {
     const data = this.ruleVersionData(version);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, version.tenantId);
     try {
-      await this.prisma.$transaction(async (tx) => {
+      const write = async (tx: RentalConfigTx) => {
       await lockActiveCategoryBinding(tx, version.tenantId, workspaceId, expectedBinding, version.categoryCode);
       const existing = await tx.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true, status: true, config: true } });
       assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
@@ -821,7 +827,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
         update: data
       });
-      });
+      };
+      if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("规则版本号已被其他操作占用，请刷新后重试");
@@ -945,9 +952,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
   }
 
-  async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
+  async upsertNotificationTemplate(template: RentalNotificationTemplateV1, existingTx?: RentalConfigTx): Promise<void> {
     const data = this.notificationTemplateData(template);
-    await this.prisma.$transaction(async (tx) => {
+    const write = async (tx: RentalConfigTx) => {
       const workspaceId = await resolveScopeWorkspaceId(tx, template.tenantId);
       // MySQL 的 Prisma upsert 可能拆成读取和创建；并发首次补落默认配置
       // 不能同时观察到“模板不存在”。与品类采用共用空间锁，并在锁后检查范围。
@@ -959,7 +966,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: template.id, ...data },
         update: data
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    };
+    if (existingTx) await write(existingTx);
+    else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async replaceNotificationTemplateVersion(

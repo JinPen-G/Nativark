@@ -650,8 +650,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async persist(tenantId: string) {
-    // 默认配置分批写入时，运行期刷新不得把中间态（已有价格、尚无规则）
-    // 覆盖回同一内存对象，否则后续规则写入会读到被清空的数组。
+    // 默认配置准备和写入期间，运行期刷新不得把未完成的保存结果
+    // 覆盖回同一内存对象，否则后续配置写入会读到被清空的数组。
     // 与提交后刷新共用队列；失败不阻断后续任务，不改变库缺失时的 fail-closed 行为。
     const next = this.refreshQueue.catch(() => undefined).then(() => this.persistScope(tenantId));
     this.refreshQueue = next;
@@ -670,7 +670,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 从未被显式保存过的租户在库中就是空的——阶段 4b 的通知记录外键指向通知模板，
     // 那时才发现就晚了。
     if (!state.configPersisted) {
-      await this.persistBusinessConfig(state);
+      await this.persistBusinessConfig(tenantId, state);
       state.configPersisted = true;
     }
     await this.stateRepository?.saveBusinessState(tenantId, workspaceId, state);
@@ -720,24 +720,41 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
   }
 
-  private async persistBusinessConfig(state: RentalBusinessState) {
+  /** Complete initial workspace configuration joins one Core transaction.
+   * Captured rows cannot change while locks are pending. The caller updates its
+   * persisted flag only after this transaction commits; no AI event is implied. */
+  private async persistBusinessConfig(tenantId: string, state: RentalBusinessState) {
     const mysql = this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql";
-    if (mysql && state.pricingPlans.length) {
-      // 懒加载演示/新空间的价格计划是在 PRICE-03 迁移之后才第一次落库，
-      // 因而不会被迁移回填。计划行和首个空间整体版本必须在同一事务内出现，
-      // 否则应用重启后报价会看到计划、却因没有版本而拒绝。
-      await this.prisma!.$transaction(async (tx) => {
-        for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx);
-        await this.ensureInitialSpacePriceVersion(state, tx);
-      });
-    } else {
-      for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
+    const workspaceId = mysql ? this.workspaceOf(tenantId) : undefined;
+    const readConfig = () => ({ categoryCode: state.categoryCode, pricingPlans: state.pricingPlans,
+      discountPlans: state.discountPlans, services: state.services, calendars: state.calendars,
+      ruleVersions: state.ruleVersions, notificationTemplates: state.notificationTemplates });
+    const config = structuredClone(readConfig());
+    if ([...config.pricingPlans, ...config.discountPlans, ...config.services, ...config.calendars,
+      ...config.ruleVersions, ...config.notificationTemplates].some(row => row.tenantId !== tenantId)) {
+      throw new ConflictException("补落业务配置包含其他商户资料");
     }
-    for (const plan of state.discountPlans) await this.configStore.upsertDiscountPlan(plan);
-    for (const service of state.services) await this.configStore.upsertService(service);
-    for (const calendar of state.calendars) await this.configStore.upsertCalendar(calendar);
-    for (const version of state.ruleVersions) await this.configStore.upsertRuleVersion(version);
-    for (const template of state.notificationTemplates) await this.configStore.upsertNotificationTemplate(template);
+    const write = async (tx?: Prisma.TransactionClient) => {
+      const binding = tx ? (await lockActiveCategoryBinding(tx, tenantId, workspaceId!, undefined, config.categoryCode)).binding : undefined;
+      for (const plan of config.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx, binding);
+      // PRICE-03: plans and their initial immutable version must be committed
+      // with the remaining defaults, never as a separately visible prefix.
+      if (tx) await this.ensureInitialSpacePriceVersion(config, tx);
+      for (const plan of config.discountPlans) await this.configStore.upsertDiscountPlan(plan, binding, tx);
+      for (const service of config.services) await this.configStore.upsertService(service, binding, tx);
+      for (const calendar of config.calendars) await this.configStore.upsertCalendar(calendar, undefined, [], tx);
+      for (const version of config.ruleVersions) await this.configStore.upsertRuleVersion(version, binding, tx);
+      for (const template of config.notificationTemplates) await this.configStore.upsertNotificationTemplate(template, tx);
+      // A later cache edit is still unsaved input. Do not mark it persisted when
+      // only our earlier captured rows were written; roll back the whole batch.
+      if (!isDeepStrictEqual(config, readConfig())) throw new ConflictException("补落业务配置期间输入已变化，请重新保存");
+    };
+    if (mysql) await this.prisma!.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    else await write();
+    // The transaction may commit before its response reaches this caller.
+    // Preserve later input and leave its persisted flag unset; this conflict
+    // describes a completed save, not a rollback of the captured configuration.
+    if (!isDeepStrictEqual(config, readConfig())) throw new ConflictException("业务配置保存后输入已变化，请重新保存");
   }
 
   /**
@@ -747,7 +764,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 才写入计划行，因此必须在同一事务中补建首版。首版只包含其最早生效时刻实际
    * 有效的计划，避免把未来才生效的计划提前写入当前价格事实。
    */
-  private async ensureInitialSpacePriceVersion(state: RentalBusinessState, tx: Prisma.TransactionClient) {
+  private async ensureInitialSpacePriceVersion(state: Pick<RentalBusinessState, "pricingPlans">, tx: Prisma.TransactionClient) {
     const plans = state.pricingPlans.filter((plan) => plan.status === "enabled");
     if (!plans.length) return;
     const tenantId = plans[0].tenantId;
@@ -5166,7 +5183,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 再等一个无关的保存动作来触发持久化。MySQL 路径在报价前补落计划与首版，
     // 仍由 resolveSpaceRates 对所有后续报价执行不可变版本校验。
     if (this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql" && !state.configPersisted) {
-      await this.persistBusinessConfig(state);
+      await this.persistBusinessConfig(tenantId, state);
       state.configPersisted = true;
     }
     // 正式经营门禁：缺品类必选能力的 production 空间不得出新报价（Review P1-4）。
