@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工/GitHub核对`045ff2114b1a25943419b88dd153e7d94685fd18`，无merge/cherry-pick；六类配置原事务已独立推送核远端，864文件包与各原失败保留。按PM新窗口先独立交委托内部proof类型，确认服务与sealed端口为本树WIP，见[类型阶段](<Rental Core-开发记录.md#merchant-delegation-core-proof-type-20261112>)；企业私有read已固定86dc，政策guard由企业唯一作者接入，main由PM按固定来源核收。照片原阶段及企业photo/Panel独占保持，HTTP/DI/真实事务/存储仍未验。不得回main施工、重建旧C树或处理负责人接管的空目录。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工/GitHub核对`b869f72b1117b4511a330af4937f11ecf6710756`，无merge/cherry-pick，类型已推送交企业。Core authority与确认原入口两文件构成最小封存闭包，原proof/binding身份、原Core两模式创建/恢复及拒绝取得限定证据，见[运行时阶段](<Rental Core-开发记录.md#merchant-delegation-core-sealed-runtime-20261112>)；企业guard和公共/Controller/admin仍由企业作者接入，PM按固定来源收回并送QA。045配置事务864文件包及原失败保留，本片未更新包。照片/企业Panel独占、HTTP/DI/真实事务/存储未验边界保持，不回main/旧C树或处理负责人接管空目录。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行而非缓存/品类字符串猜修订。验证暂存已核实删除。PM另准分配服务`recordIssue`原事务参加者及业务配置/九项源的最小片，尚未接入；AI的OutboxParticipant/ResourcePorts和事件模型仍归AI作者，main HTTP/构建由PM独占。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与写锁外`readTenantReadinessSource`两个只读合同固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`已普通推送核远端，不改原扫描、登记或九项算法。API类型、原分配14断言/开业读取17项及新读取5组通过，暂存已核实删除，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)。ResourcePorts不得重入扫描/新开业务事务，不以独立观察冒充快照；可选参加者未接入，缺正式临近政策/事实/授权不捕获。
@@ -22,7 +22,7 @@
 
 ## 3. 下一入口与原缺口
 
-当前先按PM确认的proof字段独立交固定类型，再沿企业私有read固定86dc及7179/a130完成Core确认服务/sealed执行与原结果窄片，运行时验证名为`assertCoreMerchantDelegationProof`，类型标记或普通字段复制不能授予权。企业唯一修改policy签源guard并承担公共/Controller/admin装配，Core不抢写。当前operator身份与真实个人使用人分开，原签发expectedRevision=1与当前consumed/revoked修订分开；执行严格issued/期限，恢复只用private read+recover/replay及原D/K，不新prepare或改ALS。类型证据和WIP边界见[当前阶段](<Rental Core-开发记录.md#merchant-delegation-core-proof-type-20261112>)。窄片后继续AIN-17真实profile/settings修订/相关变更、结构化resource_shortage及参加者；快照和业务补落已共用原tx，但AI适配/公共符号/DI尚未齐，不缩减CAT-GOV/CLOSE原门槛。
+当前先固定两文件Core封存闭包交企业/PM/QA；`assertCoreMerchantDelegationProof`要求原proof及原binding双登记，普通类型cast/字段复制/更换callback不能授予权。企业guard接86dc原私有源并直接传Core原对象，公共/Controller/admin及宿主284ccd仍由企业作者负责，Core不抢写。原签发1与当前consumed/revoked修订分开，恢复只private read+recover/replay及原D/K，不新prepare或改ALS；闭包限定正常/拒绝/失应答证据及真实未验项见[当前阶段](<Rental Core-开发记录.md#merchant-delegation-core-sealed-runtime-20261112>)。依固定guard完成组合后继续AIN-17真实profile/settings修订/相关变更、结构化resource_shortage及参加者；快照和业务补落已共用原tx，但AI适配/公共符号/DI尚未齐，不缩减CAT-GOV/CLOSE原门槛。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
    写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。

@@ -4,11 +4,25 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="merchant-delegation-core-sealed-runtime-20261112"></a>
+
+## 商户委托的Core封存来源与原binding闭包（2026-11-12）
+
+从已核GitHub的类型片`b869f72b1117b4511a330af4937f11ecf6710756`接续，最小安全闭包为[Core authority/端口](../../apps/api/src/modules/rental-core/rental-merchant-delegated-order.authority.ts)与[原确认服务](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)两文件。authority私有mint只能沿宿主提供的既有企业私有源读取/严格prepare到达；原确认入口才把证明注入并登记真实binding。只交类型/校验文件不能固定该原入口来源，拆出任意callback造binding会削弱封存约束，因此两文件同交，企业policy和公共宿主仍归原作者。
+
+`assertCoreMerchantDelegationProof(proof, binding)`核原proof与原binding的WeakMap登记、当前operator ALS/身份指纹、tenant/workspace、D=K、原request/quote/个人使用人及同一参加者方法。`bindCoreMerchantDelegationProof(authority, binding)`只接受Core已封存authority，固定原binding/request；普通字段相等、JSON/structuredClone复制、保留真实proof但重建binding、更换participant或方法均不能授予委托权。mint不导出；输入/秘密不从HTTP或模型取得，不另建公共源DTO、不保存Authorization。类型标记只是编译约束，企业policy须使用原Core运行时对象校验。
+
+宿主端口`RentalMerchantDelegatedOrderPort.execute(actorAuth, reference, userName, context)`及`readOriginal(actorAuth, reference)`消费企业固定`86dc23917336b35b1842c2873ed6ac0c7790549d`的私有读与原participant。read提供原签发1/当前state与revision，prepare仍去掉state/issuedRevision：Core从私有read固定签发，再比较prepare原修订/不可变请求及hash关联。执行调用原`createApprovedOrder`受控分支，保留当前operator和不可变个人使用人、原企业付款/quote/身份、资格、库存、服务容量、资金及原Core事务；原结果只读同D/K及source/participant recover/replay，consumed/TTL后不新prepare、不换K/ALS。未观察到原结果保持unknown或待核对，不转成重新提交权限。
+
+原批准Core fixture的限定实际服务调用退出0：per_order/without_per_order正常创建、Tenant X先于库存、五阶段同事务消费；proof/authority复制、匹配普通binding、替换callback及裸callback拒绝；订单/批准失败回滚；提交失应答保留一次订单，Core收据过期和原source自然TTL后恢复不重复准备/创建；过期issued只读unknown且不写。另一限定调用拒绝12类版本/tenant/workspace/D/K/source/basis/request hash/个人/企业/quote/签发矛盾，以及错operator/把当前2当签发1。SourceOwner、policy、Auth/SQL/锁、库存和资金均是声明fixture，未记真实企业guard或外部服务通过。
+
+当前API原noEmit退出0、audit0，源码hash和实际命令唯一见[闭包证据](../../output/category-governance/merchant-delegation-core-runtime-20261112.json)。原夹具/断言不改；首次未注册TS、重复注册后编译JS被再当TS、夹具展开导致proof观察值不更新均保留为装配失败，限定修正后只复验相关调用。各次退出暂存已删除，当前864文件研发包仍是045配置事务阶段，本片未更新包或改AppModule/shared-index/OpenAPI/企业policy/商户Controller/admin。PM送QA；企业唯一作者接guard后再核相同正反例、真实权限/事务/宿主，完整execute/result交付仍不由本片源fixture替代，CAT-GOV/CLOSE原门槛和0/14不变。
+
 <a id="merchant-delegation-core-proof-type-20261112"></a>
 
 ## 商户单次委托的Core内部证明类型（2026-11-12）
 
-按PM确认的唯一作者窗口，从已核GitHub的`045ff2114b1a25943419b88dd153e7d94685fd18`接续，先独立交[原五阶段参加者类型](../../apps/api/src/modules/rental-core/approved-order-transaction.ports.ts)的`ApprovedOrderBinding.merchantDelegation`可选字段，不改变authorize/recover/prepare/commit/replay签名或普通批准语义。`ApprovedOrderMerchantDelegation`含version/purpose、D、sourceHash/basisHash/requestHash、quoteId、原签发expectedRevision、personalCustomerId/corporateCustomerId及原operator actorUserId；tenant/workspace和K仍在原binding。当前源版本只接受原签发1，consumed/revoked当前2不替代它。
+按PM确认的唯一作者窗口，从已核GitHub的`045ff2114b1a25943419b88dd153e7d94685fd18`接续，独立类型片`b869f72b1117b4511a330af4937f11ecf6710756`已普通推送核远端并交企业作者；[原五阶段参加者类型](../../apps/api/src/modules/rental-core/approved-order-transaction.ports.ts)只加`ApprovedOrderBinding.merchantDelegation`可选字段，不改变authorize/recover/prepare/commit/replay签名或普通批准语义。`ApprovedOrderMerchantDelegation`含version/purpose、D、sourceHash/basisHash/requestHash、quoteId、原签发expectedRevision、personalCustomerId/corporateCustomerId及原operator actorUserId；tenant/workspace和K仍在原binding。当前源版本只接受原签发1，consumed/revoked当前2不替代它。
 
 证明带模块私有unique-symbol类型标记，仅Core由真实私有读结果/原请求校验后封存注入。类型转换、HTTP/Shared DTO或普通callback自填字段不获得运行时来源；企业政策必须使用Core运行时`assertCoreMerchantDelegationProof(proof, binding)`校验原proof对象，再逐字段核持久源和当前operator。原binding复制给五阶段参加者只携带投影，不以其JSON复制作为授权。这一运行时接点与确认服务仍是本树WIP，待对应固定实现，不声明类型本身已完成执行链。
 
