@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain14-opening-authoritative-text-20261113"></a>
+## 开业诊断正文沿原检查材料确定性投影（2026-11-13）
+
+原 opening 结果分支直接返回模型原文，Core 分区缺配置、第三方检测未读取时仍可能显示“已配置、真实连接成功”。本阶段从当次受权复核且与冻结材料一致的原开业材料生成正文，保留各分区必需/可选、五种状态、原检查说明及来源/版本/观察时间；第三方配置与八种检测状态分别展示，未读取、模拟、失败和历史记录不冒充当前实时连接。正文明确未核验外部凭据/实时连接、未加载后续业务草稿/发布/采用结果，各分区为独立读取。原模型 Artifact、费用、ACL 与其他场景分支保持原链。[结果读取](../../apps/api/src/modules/ai-native/scenes/original-scene-result.service.ts)、[确定性正文](../../apps/api/src/modules/ai-native/scenes/opening-diagnosis-renderer.ts)。
+
+固定前置为 `23e4cd71ce16f6289c06eec299571abf142547e5`；两份最终 Git blob 分别为 `98663d991fa874e611b3addf00d5b94ad16f2c48`、`a414353fa58454f0c2a6b8bc48131455a8b7fbc6`。Root 实际 Core 缺产品配置→模拟 Gateway 假成功 Artifact→标准 provider/Guard/Controller→原正文必要模拟退出 0，stdin SHA-256 `781251bd7a5f8efb55d9c17ffb6cf80331cb260df230c4f874a2d5168bf46aad`。五种分区、八种 integration 状态、坏字段拒绝、当前真实产品材料变化与撤权拒绝均通过；1 次模拟模型、7 条原 charge、0 次业务写入。TypeScript 5.9.3，2 根/1558 源零诊断，退出 0，stdin SHA-256 `a85d1af21ba4ec111d862c38d84dff781ab9db59e683926268902865a19286c0`。
+
+初次驱动从 TaskCenter 紧凑结果取 facts，因该结果不含 facts 失败；改从原 `prepareTaskMaterial(..., 'read_only')` 读取。随后修改未投影的 fixture profile.configVersion 未影响原材料，stale 断言失败保留；改动实际被读取的 products rows 后，原结果正确变 stale/null。未放宽生产对比或删除断言。命令与原输出仅保留既有会话，无新增测试脚本或环境副本；进程已退出、审计为空、任务临时目录未创建。
+
+本片仅修确定性正文，AIN-14 仍须核规则/日历真实版本是否完整传递、原五条及 AIN-12 前置，不按两源提高整项百分比。PM 安排现有 QA 复验；浏览器、MySQL 和外部服务由负责人后续实测。
+
 <a id="ain23-category-credential-core-20261113"></a>
 ## 治理草稿消费者向新 Core 转交原签名身份（2026-11-13）
 
