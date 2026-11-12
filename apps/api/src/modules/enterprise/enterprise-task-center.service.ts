@@ -2,6 +2,7 @@
  * notification sender. Corporate queues recheck their exact action and workspace. */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import type { EnterpriseManagedCorporate } from "@rental-os/shared";
 import { enterpriseOwnEmployeePolicyMessagesSnapshot, ENTERPRISE_EMPLOYEE_POLICY_MESSAGE_UNAVAILABLE, type EnterpriseOwnEmployeePolicyMessages, enterpriseOwnCorporateStatusMessagesSnapshot, type EnterpriseOwnCorporateStatusMessages, enterpriseOwnManagementReviewMessagesSnapshot, type EnterpriseOwnManagementReviewMessages, enterpriseOwnJoinReviewMessagesSnapshot, type EnterpriseOwnJoinReviewMessages, enterpriseOwnApplicationReviewMessagesSnapshot, type EnterpriseOwnApplicationReviewMessages, enterpriseOwnRetainedMergeMessagesSnapshot, type EnterpriseOwnRetainedMergeMessages, enterpriseOwnStatusMessagesSnapshot, type EnterpriseOwnStatusMessages, enterpriseOwnTransferMessagesSnapshot, type EnterpriseOwnTransferMessages, enterpriseOwnRelationshipMessagesSnapshot, type EnterpriseOwnRelationshipMessages, enterpriseApprovalNoticesSnapshot, type EnterpriseApprovalNotices, enterpriseOwnMessagesSnapshot, ENTERPRISE_OWN_MESSAGE_UNAVAILABLE, type EnterpriseOwnMessages, type EnterpriseAuditView, type EnterpriseTaskCenter, type EnterpriseTaskItem } from "@rental-os/shared";
 import { getRequestIdentity } from "../../common/request-identity";
 import type { ClientRequestContext } from "../client/client-auth.service";
@@ -23,6 +24,7 @@ export class EnterpriseTaskCenterService {
     private readonly approvals: EnterpriseApprovalService, private readonly access: EnterpriseAccessService, private readonly management: EnterpriseManagementRequestService, private readonly extensions: EnterpriseExtensionApprovalService, private readonly exchanges: EnterpriseExchangeApprovalService, private readonly handoffs: EnterpriseRentalHandoffService) {}
   async tasks(context: ClientRequestContext, corporateId?: string): Promise<EnterpriseTaskCenter> {
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    let corporate: EnterpriseManagedCorporate | undefined;
     const applications = await this.applications.mine(context), own = await this.members.joinRequests(context);
     const items: EnterpriseTaskItem[] = [...applications, ...own].map(row => ({ id: row.id, kind: row.kind as EnterpriseTaskItem["kind"], state: row.state,
       revision: row.revision, corporateCustomerId: row.corporateCustomerId ?? undefined, createdAt: row.createdAt,
@@ -47,7 +49,7 @@ export class EnterpriseTaskCenterService {
       items.push(...exchanges.map(row => ({ id: row.id, kind: "exchange_approval" as const, state: row.state, revision: row.revision,
         corporateCustomerId: row.corporateCustomerId, expiresAt: row.expiresAt, requiresAction: row.state === "approved" && !row.employeeConfirmation, page: "exchange-approvals" as const })));
       if (corporateId) {
-        const corporate = await this.access.requireAction(context, corporateId, "portal:enter");
+        corporate = await this.access.requireAction(context, corporateId, "portal:enter");
         if (corporate.actions.includes("members:manage")) {
           const joins = await this.members.joinRequests(context, corporateId);
           items.push(...joins.filter(row => row.state === "pending").map(row => ({ id: row.id, kind: "join_request" as const, state: row.state,
@@ -67,8 +69,6 @@ export class EnterpriseTaskCenterService {
             kind: "extension_approval" as const, state: row.state, revision: row.revision, corporateCustomerId: corporateId,
             expiresAt: row.expiresAt, requiresAction: true, page: "extension-approvals" as const })));
         }
-        const after = await this.access.requireAction(context, corporateId, "portal:enter");
-        if (corporate.permissionRevision !== after.permissionRevision || corporate.actions.some(action => !after.actions.includes(action))) throw new ConflictException("企业任务权限已变化，请重新读取");
       }
     }
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
@@ -83,6 +83,12 @@ export class EnterpriseTaskCenterService {
       handoffOrders = { state: "unavailable", coverage: "current_workspace_original_own_enterprise_employee_orders" };
     }
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    // 交接订单来源可能等待额外 IO，企业待办在全部来源完成后再复验原关系与动作。
+    if (corporate) {
+      const after = await this.access.requireAction(context, corporate.corporateCustomerId, "portal:enter");
+      if (corporate.membershipId !== after.membershipId || corporate.permissionRevision !== after.permissionRevision
+        || corporate.actions.some(action => !after.actions.includes(action))) throw new ConflictException("企业任务权限已变化，请重新读取");
+    }
     return { items: unique, handoffOrders,
       coverage: "own_requests_and_current_workspace_approvals", unavailable: ["order_alerts", "financial_alerts", "external_notifications"] };
   }
