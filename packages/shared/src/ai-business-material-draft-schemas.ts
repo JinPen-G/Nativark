@@ -1,6 +1,7 @@
 /** Shared closed projections of the existing guarded scene readers. Missing
  * evidence stays explicit; these schemas neither grant access nor price data. */
 import { AI_CONTRACT_DRAFT_VERSION } from './ai-native';
+import { AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS } from './ai-opening-integration-observation';
 import { AI_ORDER_EXPLANATION_MATERIAL_V2_VERSION, AI_ORDER_EXPLANATION_SOURCE_FIELDS_V2 } from './ai-business-material-draft';
 import { RentalCoreOrderStatus, RentalInventoryMode, RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES } from './core';
 import { AI_ORDER_FACTS_DRAFT_SCHEMAS } from './ai-order-facts-draft-schemas';
@@ -68,6 +69,7 @@ const sceneMaterial = (scene: string, material: string) => obj({
   task: ref('AiSceneTaskReceiptDraft'), model: choice('not_called'), plan: choice('requires_host_plan_start') });
 
 export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  ...AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS,
   AiOrderEvidenceReferenceDraft: reference,
   AiOrderHistoryFactsDraft: obj({ ...meta, contractVersion: choice(AI_CONTRACT_DRAFT_VERSION), requestId: id(), orderId: id(),
     sourceOrderUpdatedAt: time, basis: choice('order_snapshot'), complete: no,
@@ -110,7 +112,8 @@ export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraf
       fulfillment: obj({ source: configurationSource, enabledModes: list(choice(...RENTAL_FULFILLMENT_MODES), RENTAL_FULFILLMENT_MODES.length),
         locations: list(obj({ id: id(), code: text(191), status: choice('enabled', 'disabled'), capabilities: { ...list(choice(...locationCapabilities), locationCapabilities.length), uniqueItems: true } }), 100), truncated: bool }),
       inventory: obj({ source: configurationSource, coverage: choice('not_loaded'), meaning: choice('item_modes_are_not_stock_balances') })
-    }, []), atomicity: choice('independent_sections_not_a_transaction'), externalVerification: choice('not_loaded') }),
+    }, []), atomicity: choice('independent_sections_not_a_transaction'), externalVerification: choice('not_loaded'),
+    integrationObservation: ref('AiOpeningIntegrationFactsDraft') }, [...Object.keys(meta), 'configVersion', 'sections', 'configuration', 'atomicity', 'externalVerification']),
   AiQuoteBusinessFactsDraft: rawQuoteFacts,
   AiQuoteBusinessMaterialDraft: sealed('quote_clarification', obj({ ...meta, facts: rawQuoteFacts, model,
     gaps: list(choice('human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'), 3, 3), execution: choice('not_attempted') })),

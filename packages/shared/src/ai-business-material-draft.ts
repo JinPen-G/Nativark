@@ -183,6 +183,7 @@ export interface AiOpeningSectionMaterialDraft { key: string; title: string; req
     | 'not_implemented' | 'external_credentials_pending' | 'owner_decision_pending'>;
 }
 export interface AiOpeningBusinessMaterialDraft { scope: AiWorkspaceScope; audience: ReadAudience; configVersion: string; observedAt: string;
+  integrationObservation?: import('./ai-opening-integration-observation').AiOpeningIntegrationFactsDraft;
   sections: AiOpeningSectionMaterialDraft[];
   configuration: {
     products?: { source: ConfigurationSource; rows: Array<{ id: string; code: string; status: 'enabled' | 'disabled'; inventoryMode: RentalInventoryMode; unit: string }>; truncated: boolean };

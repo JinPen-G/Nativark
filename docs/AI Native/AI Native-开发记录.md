@@ -6,6 +6,49 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain14-main-opening-observation-integration-20261112"></a>
+## PM按QA最小闭包收回开业观察与人工导航（2026-11-12）
+
+main 起点 `34f8ec9efa99d515bfb0fea56f2ac623d9d63cf6`。根据 QA 独立依赖审查，仅接 `c53e3bdedcc1f0c5334b6ae9b998826daa89274e` 的十二份完整源码、`ea9a3ec2bbe2d82ea9cbafd48f76c153f8dcd39b` 原 providers 五个观察工厂增量，以及 shared 唯一 `ai-opening-integration-observation` 出口；不整取 ea9 检查点、TaskOpeningProposals、经营待办、automation grant 或资源事件。十二源码覆盖诊断卡/状态、原请求/恢复、业务材料/观察服务、TenantIntegrationService 和 shared 合同/schema。现有企业委托出口及其他 providers 保持。
+
+QA 在 main `179fb4941` 构造的十四路径清单 SHA-256 为 `ae79fc1ab3fd605fa0389d4bbe084c23a5f2ce48902f2d5a20712ef06a167716`；PM 五段 providers 的 LF 文本 SHA-256 精确匹配 `cd575c08a4d257d8166958edef507e5230c0e3419a29e52845c6c48c198a551d`。shared/index 在同基线的唯一出口候选匹配 `5267496da428979458e8590fe03ef40f612b2bc2f3f64de100461efeaf6a7604`，当前 main 另保留已集成企业出口，不覆盖完整 index。首次定位出口前行时命中未收的 TaskOpeningProposal 导出，断言在修改 index 前停止；按 QA 已核的 automation-policy 相邻出口定位后只加本行，未为解冲突夹入该提案。
+
+QA 核原资源授权与完整集成材料读取分离、当前 GET integrations 权限/ALS和前后来源绑定、只观察字段存在性/配置时间/原检测元数据、不解密或探测，以及登记人工导航前重读材料。字段变化要求重新明确核对，观察时间本身不改变材料意义；原九项 Core 判定继续独立来源。作者 56 次 API/两次导航及元数据读取 3922→30 的行为属于已有模拟证据，不冒称真库时延或 SLO。
+
+QA 独立以 Shared/MCP 内存声明核 main 完整 API 901 根/2052 源及后台相关十二根/1465 源，TypeScript 5.9.3 noEmit 零诊断，Node 最终退出0；stdin SHA-256 `d88ef8085e133a6c477767b437f10aed023bc1a515167d6fc9c18e972fb2841e`。QA 再确认当前 main 企业 proof 和开业观察分属不同链路，没有新增交互依赖需要重复全仓类型。物理写入0、audit0、临时目录未创建，真实 Nest DI/Auth/DB/外部配置及浏览器仍未验。
+
+原 ea9 检查点全文保留在下一阶段作为来源和未完证据，不代表其中五十一文件已收 main。其明确纠正的 AIN-13 前置漏算同步到正式任务册：AIN-12 尚未完整满足，AIN-13 保持 G3/75%，原二十八项覆盖率 76.8%、完整研发结项 11/28；不改变编号、依赖或验收，不以本片导航另加分。读取原记录首次因 Git 输出超过 Node 默认缓冲失败，改为有界8MB读取后提取准确阶段，未改来源内容或重复留副本。六项 main WIP 保持，所有本片临时产物和后台进程新增为0。
+
+<a id="ain14-integration-navigation-20261112"></a>
+## 开业第三方配置人工入口与重复读取收口（2026-11-12）
+
+在已上传的 `ea9a3ec2bbe2d82ea9cbafd48f76c153f8dcd39b` 上逐字节核接 dev1 的[诊断卡](../../apps/admin/src/features/ai-native/ReadinessDiagnosticsCard.tsx) blob `12bf93cc0486fa45d5e6ace55a49241f1f702c5f` 和[服务状态](../../apps/admin/src/features/ai-native/OpeningIntegrationStatus.tsx) blob `b5b2c6da1110c489f861a131f79ffd56733c6026`。只有当前受权且服务端原观察为 observed 才显示第三方服务入口；点击前重读完整原材料，配置/检测状态变化须再次明确核对，当前撤权、隐藏、旧 epoch 或来源不可用不得导航。不创建检测、R1、模型或业务操作。
+
+Root 的同一原 Card→API→Controller/Guard/ALS→原请求/Core 材料模拟先通过交互断言，但 56 个实际 API 调用累计触发 3922 次集成元数据查询，暴露原资源授权反复生成完整诊断材料。修复[原场景资源授权](../../apps/api/src/modules/ai-native/scenes/original-scenes.composition.ts)：开业请求仅通过原 Guard 和 Core 九分区读取核当前访问及真实分区；完整配置和第三方材料仍在其显式消费处独立鉴权、前后重读。没有缓存授权、移除关闭时复核或把缺配置判成功。
+
+修复后同一组退出 0，命令 SHA-256 `39e9a32faf8133da4896536e345954baf4f38ecb1aa20f13266b0467344e68c8`：1 原 Task、0 模型、同样 56 个 API 调用、2 次注册导航；配置变化重确认、撤权在请求前拒绝、隐藏/旧 epoch 与服务端观察不可用拒绝均通过，第三方查询降为 30 次。该数字只描述本组合模拟，不冒称真实数据库延迟或 SLO 通过。原 3922 次结果、两个内存 loader 缺依赖和撤权后未重新读取导致驱动找不到按钮的失败均保留；只修模拟装配/步骤，没有放松生产判断。
+
+仅将这 3 个源码暂存后核 Git 索引的最终组合，排除 AIN-12、报价和小程序活动 WIP：TypeScript 5.9.3，API 1 根/1534 源、后台 3 根/1456 源均零诊断、退出 0，命令 SHA-256 `4185d5cd1c29ae679e66c73c01ef106598c71a211e1c9f09efa0b08f2b13f707`。UIArc 123 条目/263 源哈希异常为空。审计 0、任务临时目录未创建，无新增测试脚本/依赖/生成物或后台资源。
+
+本片依赖 `ea9a3ec2b` 已固定的开业提案、第三方观察及其 shared/Guard/provider/公开材料接点；该基线同时包含未完资源事件/经营待办检查点，PM 须按开业依赖和公共 hunk 独立取用，不能整树收回冒充完成。AIN-14 的本次人工出口已闭合，整项仍等待 AIN-12 前置及全文复核，进度不因导航或查询次数加分。已核 PM 对话中负责人在 2026-11-11 的直接授权：可独立验证并已推送的阶段由 PM 串行收 main，不再等待两项任务；任务完成仍按原门槛，研发继续独占施工。
+
+<a id="ain-opening-automation-checkpoint-20261112"></a>
+## 开业提案与经营待办集成检查点、前置进度补正（2026-11-12）
+
+从本地及 GitHub 同一 `026e8e3efa8280b6df1c74edf5cef38dc74c4373` 恢复，索引及 merge/cherry-pick 状态为空。按每日先同步规则，先固定已有且归属明确的开业、资源事件及经营待办源码；这是尚未整项验收的任务分支检查点，不作为 main 完成交付。员工小程序、自然语言报价三份 leaf 及助手仍在验证的第三方配置导航分别保留，不混入本检查点。
+
+已核现有生产装配：四个普通开业分区通过 原应用（固定源码 `ea9a3ec2bbe2d82ea9cbafd48f76c153f8dcd39b:apps/api/src/modules/ai-native/task-opening-proposal.application.ts`，本阶段未收 main）、Controller、Guard、公开合同和 TaskCenter，显式准备新的关联 R1 Task 及 AI 提案，不保存活动配置或发布；第三方配置观察只读取有界字段存在性、原检测状态与配置时点，不解密、不探测。经营待办通过独立 `automationReviewGrant` 发布来源、当前权限、原 CAS 和收据；后台实际宿主复用原业务导航，退款仅消费既有财务 GET，不刷新供应商或再次退款。AIN-17 的 scoped Outbox 存储及候选/复查扩展尚待 Core 权威版本与同事务入口接齐，默认缺依赖拒绝。
+
+此前 [AIN-13 收口记录](#ain13-simulated-whole-closeout-20261112)保留原文和有效功能证据，但“已交付的部分 AIN-12 接点足以满足全文前置”的结论不符合任务册 §3。AIN-12 的字段来源、可信编辑/重新准备及原解释控制仍未齐，因此本次将 AIN-13 恢复到 G3/75%，同步唯一任务表算术；订单解释已完成的源码与模拟证据不回退、不重复施工。待 AIN-12 全文满足后，再复核该前置并恢复整项验收。用户授权模拟测试改变的是验证环境，并未取消原任务依赖。
+
+本次只读 TypeScript 5.9.3 核验：API 7 个实际入口及 1943 个传递源零诊断；后台 6 个实际入口、10 份既有声明及 1619 个传递源零诊断。首命令误用不存在的 `.prisma/client` 路径，在检查前退出；更正为主仓库已管理的 `apps/api/node_modules/@prisma/client` 后，合并命令在 API 结果输出后超时，未把它称为全通过，后台单独执行退出 0，命令 SHA-256 为 `ac5ddf85a0eb78417a3c08b862bf0a4f4d6a3c685ecdeb9df05544c1ba706f0b`。没有生成或复制 Client/dist。原 grant 的实际 provider/Guard/原收据模拟及退款读取模拟已在本会话执行并保持原失败记录；最终组件与公开生产组合的核接仍在本阶段后续完成，不以类型检查代替行为验收。
+
+按 51 个核定路径暂存后，使用 Git 索引中的 1847 个源码/配置对象独立核验最终组合；未暂存的助手叶模块不可回退到工作区参与检查。API 6 根/1928 源、后台 5 根/1608 源均零诊断且退出 0，命令 SHA-256 分别为 `4edd6b44124d080c78bc854c6a062f6ca286a61582641128e8f88b632a38c7ed`、`951111e8fc44963dc4451611e1ae50df995d959e93c180f078c2c38a1e2ede22`；审计为空且未创建目录。
+
+本次覆盖更新当前接续，旧全文仍可从 `026e8e3ef` 同路径查阅；未完成项目分别保留当前入口或原记录索引。`node scripts/validate-docs.cjs` 实际仍报 4 处既有缺链（导航历史 3、稀疏站点示例 1）；旧接续的 2 条跨树历史 output 引用已改为原记录追溯，没有伪造附件。任务算术、当前新增链接通过。`business-tools.composition.ts` 的历史 Git blob 原本为 CRLF，普通 diff 检查把新增行的 CR 报为尾空白；核实原字节后保留原换行，仅使用 `core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol` 做本次差异检查，不更改仓库配置或归一化整文件。
+
+审计为空，`output/.tmp/ain-core-closeout-20261112` 未创建。没有新增/扩写测试脚本、依赖安装、业务外联或后台服务。真实数据库、浏览器、微信及供应商测试仍交负责人自行操作；此检查点不增加任何任务的 100%。
+
 <a id="ain13-main-consumer-integration-20261112"></a>
 ## PM固定订单解释与原启动消费者整合（2026-11-12）
 

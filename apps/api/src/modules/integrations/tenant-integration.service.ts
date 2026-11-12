@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -17,7 +17,8 @@ import {
 } from "@rental-os/shared";
 import { OperationLogService } from "../../common/operation-log.service";
 import { UnsafeOutboundUrlError, validateProviderOutboundUrls } from "../../common/outbound-url";
-import { requireRequestTenantId } from "../../common/request-identity";
+import { getRequestIdentity, requireRequestTenantId } from "../../common/request-identity";
+import { hasEffectivePermission } from "../../common/permission-match";
 import { SecretBox } from "../../common/secret-box";
 import { PrismaService } from "../database/prisma.service";
 
@@ -57,6 +58,39 @@ export interface TenantIntegrationTestConfig extends TenantIntegrationRuntimeCon
   configurationError?: string;
   lastTestAt?: Date;
 }
+
+export interface TenantOpeningIntegrationQuery { limit?: number; after?: string; }
+export type TenantOpeningIntegrationState = "not_loaded" | "not_implemented" | "missing_configuration"
+  | "configured_unverified" | "mock" | "failed" | "historical_live_success" | "current_live_success";
+export interface TenantOpeningIntegrationItem {
+  configId: string | null; capability: string; provider: string; registered: boolean; implemented: boolean;
+  state: TenantOpeningIntegrationState; enabled: boolean | null; isDefault: boolean | null;
+  /** The original config CAS timestamp, not a workspace or aggregate version. */
+  configurationUpdatedAt: string | null;
+  requiredFields: string[]; missingFields: string[] | null;
+  structuralConfigurationComplete: boolean | null; conditionalFieldsValid: boolean | null; credentialMaterialPresent: boolean | null;
+  test: { status: "not_tested" | "passed" | "failed" | "unknown";
+    mode: "none" | "configuration" | "live" | "mock" | "unknown"; checkedAt: string | null;
+    matchesCurrentConfiguration: boolean } | null;
+}
+export interface TenantOpeningIntegrationObservation {
+  tenantId: string; workspaceId: string; observedAt: string; items: TenantOpeningIntegrationItem[];
+  hasMore: boolean; nextAfter: string | null; limit: number;
+  coverage: "all_persisted_configuration_records" | "configuration_window";
+  credentialEvidence: "stored_field_presence_only_not_decrypted";
+}
+
+// Closed original SMS, payment and file-storage adapters. A new catalog entry
+// must not become an implemented runtime merely by appearing in that catalog.
+const openingRuntimeProviders: Readonly<Record<TenantIntegrationProvider, TenantIntegrationCapability>> = {
+  aliyun_sms: "sms", tencent_sms: "sms", alipay: "payment", wechat_pay: "payment", stripe: "payment",
+  aliyun_oss: "file", tencent_cos: "file", s3_compatible: "file"
+};
+type OpeningObservationRow = {
+  id: string; tenantId: string; capability: string; provider: string; enabled: unknown; isDefault: unknown;
+  updatedAt: Date; lastTestStatus: string; lastTestMode: string; lastTestAt: Date | null;
+  credentialMaterialPresent: unknown; fieldPresence: unknown; conditionalFieldsValid: unknown;
+};
 
 @Injectable()
 export class TenantIntegrationService {
@@ -147,6 +181,110 @@ export class TenantIntegrationService {
         configured.has(definition.provider)
     );
     return { providers, configs: configs.map((row) => this.summary(row)) };
+  }
+
+  /** Internal R0 observation under the original integration Guard/ALS. SQL
+   * returns field-presence scalars, never settings, URLs, ciphertext or errors.
+   * Secret markers are not decryption evidence. Original live-test bookkeeping
+   * is adopted only for a complete active default config at the same revision;
+   * it does not run a test or prove a new external operation will succeed. */
+  async observeOpeningConfiguration(query: TenantOpeningIntegrationQuery = {}, clock: () => Date = () => new Date()): Promise<TenantOpeningIntegrationObservation> {
+    const identity = structuredClone(getRequestIdentity()), tenantId = requireRequestTenantId();
+    if (!identity?.userId || !identity.workspaceId || identity.isSaasAdmin || identity.audience !== "operator"
+      || !hasEffectivePermission(identity.permissions ?? [], "system:integration:manage")) throw new ForbiddenException("第三方配置观察缺少当前原读取权限");
+    if (!query || typeof query !== "object" || Array.isArray(query) || Object.keys(query).some(key => !["limit", "after"].includes(key)))
+      throw new BadRequestException("第三方配置观察窗口无效");
+    const limit = query.limit ?? 16, after = query.after;
+    const identifier = (value: unknown, max = 191): value is string => typeof value === "string" && value.length <= max && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 32 || after !== undefined && !identifier(after)) throw new BadRequestException("第三方配置观察窗口无效");
+    const unavailable = () => new ServiceUnavailableException("第三方配置观察来源无效");
+    const definitions = structuredClone(TENANT_INTEGRATION_PROVIDERS);
+    if (!definitions.length || definitions.length > 16 || new Set(definitions.map(row => `${row.capability}:${row.provider}`)).size !== definitions.length
+      || definitions.some(row => row.fields.length > 32 || new Set(row.fields.map(field => field.key)).size !== row.fields.length
+        || row.fields.some(field => !/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(field.key)))) throw unavailable();
+    const secretMaterial = Prisma.sql`(c.credentialsEncrypted IS NOT NULL AND CHAR_LENGTH(c.credentialsEncrypted) > 0)`;
+    const present = (field: { key: string; secret: boolean }) => field.secret
+      ? Prisma.sql`COALESCE((${secretMaterial} AND JSON_TYPE(c.secretFields) = 'ARRAY' AND JSON_CONTAINS(c.secretFields, JSON_QUOTE(${field.key}))), 0)`
+      : Prisma.sql`COALESCE((JSON_TYPE(JSON_EXTRACT(c.settings, ${`$."${field.key}"`})) IN ('STRING', 'BOOLEAN', 'INTEGER', 'DOUBLE')
+          AND CHAR_LENGTH(REGEXP_REPLACE(JSON_UNQUOTE(JSON_EXTRACT(c.settings, ${`$."${field.key}"`})), '^[[:space:]]+|[[:space:]]+$', '')) > 0), 0)`;
+    const presenceCases = definitions.map(definition => Prisma.sql`WHEN c.capability = ${definition.capability} AND c.provider = ${definition.provider}
+      THEN JSON_OBJECT(${Prisma.join(definition.fields.flatMap(field => [Prisma.sql`${field.key}`, present(field)]))})`);
+    const pair = (key: string, secret: boolean) => present({ key, secret });
+    const conditional = Prisma.sql`CASE WHEN c.capability = 'payment' AND c.provider = 'wechat_pay' THEN
+      (${pair("platformCertificateSerial", false)} = ${pair("wechatPlatformCertificate", true)}
+        AND ${pair("platformPublicKeyId", false)} = ${pair("wechatPlatformPublicKey", true)}
+        AND (${pair("wechatPlatformCertificate", true)} OR ${pair("wechatPlatformPublicKey", true)})
+        AND (NOT ${pair("wechatPlatformPublicKey", true)} OR JSON_UNQUOTE(JSON_EXTRACT(c.settings, '$.platformPublicKeyId')) REGEXP '^PUB_KEY_ID_[0-9]+$'))
+      ELSE 1 END`;
+    const rows = await this.prisma.$queryRaw<OpeningObservationRow[]>(Prisma.sql`
+      SELECT c.id, c.tenantId, c.capability, c.provider, c.enabled, c.isDefault, c.updatedAt,
+        c.lastTestStatus, c.lastTestMode, c.lastTestAt, ${secretMaterial} AS credentialMaterialPresent,
+        CASE ${Prisma.join(presenceCases, " ")} ELSE NULL END AS fieldPresence,
+        ${conditional} AS conditionalFieldsValid
+      FROM tenant_integration_configs AS c
+      WHERE c.tenantId = ${tenantId} ${after === undefined ? Prisma.empty : Prisma.sql`AND BINARY c.id > BINARY ${after}`}
+      ORDER BY BINARY c.id ASC LIMIT ${limit + 1}`);
+    if (!isDeepStrictEqual(getRequestIdentity(), identity)) throw new ForbiddenException("第三方配置读取期间身份或范围变化");
+    const observed = clock();
+    if (!(observed instanceof Date) || !Number.isFinite(observed.getTime()) || !Array.isArray(rows) || rows.length > limit + 1) throw unavailable();
+    const boolean = (value: unknown) => {
+      if (value === true || value === 1 || value === "1" || value === BigInt(1)) return true;
+      if (value === false || value === 0 || value === "0" || value === BigInt(0)) return false;
+      throw unavailable();
+    };
+    const decoded = rows.map((row, index): TenantOpeningIntegrationItem => {
+      if (!identifier(row.id) || row.tenantId !== tenantId || !identifier(row.capability, 20) || !identifier(row.provider, 40)
+        || index > 0 && rows[index - 1].id >= row.id || after !== undefined && row.id <= after
+        || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())
+        || row.lastTestAt !== null && (!(row.lastTestAt instanceof Date) || !Number.isFinite(row.lastTestAt.getTime()))
+        || typeof row.lastTestStatus !== "string" || row.lastTestStatus.length > 20 || typeof row.lastTestMode !== "string" || row.lastTestMode.length > 20) throw unavailable();
+      const enabled = boolean(row.enabled), isDefault = boolean(row.isDefault), credentialMaterialPresent = boolean(row.credentialMaterialPresent);
+      const conditionalFieldsValid = boolean(row.conditionalFieldsValid);
+      const definition = definitions.find(value => value.capability === row.capability && value.provider === row.provider);
+      const implemented = Boolean(definition && openingRuntimeProviders[definition.provider] === definition.capability);
+      let missingFields: string[] | null = null, complete: boolean | null = null;
+      if (definition) {
+        let fields = row.fieldPresence;
+        if (typeof fields === "string") { if (fields.length > 4096) throw unavailable(); try { fields = JSON.parse(fields); } catch { throw unavailable(); } }
+        if (!fields || typeof fields !== "object" || Array.isArray(fields) || Object.keys(fields).length !== definition.fields.length
+          || Object.keys(fields).some(key => !definition.fields.some(field => field.key === key))) throw unavailable();
+        const known = fields as Record<string, unknown>;
+        for (const field of definition.fields) boolean(known[field.key]);
+        missingFields = definition.fields.filter(field => field.required && !boolean(known[field.key])).map(field => field.key);
+        complete = missingFields.length === 0 && conditionalFieldsValid;
+      } else if (row.fieldPresence !== null) throw unavailable();
+      const mock = row.lastTestMode === "mock" || ["mock_success", "mock_failed"].includes(row.lastTestStatus);
+      const status = ["not_tested", "passed", "failed"].includes(row.lastTestStatus) ? row.lastTestStatus as "not_tested" | "passed" | "failed" : "unknown";
+      const mode = mock ? "mock" : ["none", "configuration", "live"].includes(row.lastTestMode)
+        ? row.lastTestMode as "none" | "configuration" | "live" : "unknown";
+      // save invalidates test fields and advances this exact config CAS. The
+      // recorded test is historical if its original timestamp predates that
+      // revision; a live success on a disabled/nondefault config is not ready.
+      const matchesCurrentConfiguration = status !== "not_tested" && status !== "unknown" && ["live", "configuration"].includes(mode) && row.lastTestAt !== null
+        && row.lastTestAt >= row.updatedAt && row.lastTestAt <= observed;
+      const recordedTest = row.lastTestAt !== null && row.lastTestAt <= observed;
+      const state: TenantOpeningIntegrationState = mock ? "mock" : !implemented ? "not_implemented" : !complete ? "missing_configuration"
+        : status === "failed" && recordedTest ? "failed" : status === "passed" && mode === "live" && recordedTest
+          ? matchesCurrentConfiguration && enabled && isDefault ? "current_live_success" : "historical_live_success" : "configured_unverified";
+      return { configId: row.id, capability: row.capability, provider: row.provider, registered: Boolean(definition), implemented,
+        state, enabled, isDefault, configurationUpdatedAt: row.updatedAt.toISOString(),
+        requiredFields: definition?.fields.filter(field => field.required).map(field => field.key) ?? [], missingFields,
+        structuralConfigurationComplete: complete, conditionalFieldsValid: definition ? conditionalFieldsValid : null, credentialMaterialPresent,
+        test: { status, mode, checkedAt: row.lastTestAt?.toISOString() ?? null, matchesCurrentConfiguration } };
+    });
+    const hasMore = decoded.length > limit, items = decoded.slice(0, limit), completeWindow = after === undefined && !hasMore;
+    for (const definition of definitions) if (!items.some(item => item.capability === definition.capability && item.provider === definition.provider)) {
+      items.push({ configId: null, capability: definition.capability, provider: definition.provider, registered: true,
+        implemented: openingRuntimeProviders[definition.provider] === definition.capability,
+        state: openingRuntimeProviders[definition.provider] !== definition.capability ? "not_implemented" : completeWindow ? "missing_configuration" : "not_loaded",
+        enabled: null, isDefault: null, configurationUpdatedAt: null, requiredFields: definition.fields.filter(field => field.required).map(field => field.key),
+        missingFields: null, structuralConfigurationComplete: null, conditionalFieldsValid: null, credentialMaterialPresent: null, test: null });
+    }
+    if (!isDeepStrictEqual(getRequestIdentity(), identity)) throw new ForbiddenException("第三方配置读取期间身份或范围变化");
+    return { tenantId, workspaceId: identity.workspaceId, observedAt: observed.toISOString(), items, hasMore,
+      nextAfter: hasMore ? decoded[limit - 1].configId : null, limit,
+      coverage: completeWindow ? "all_persisted_configuration_records" : "configuration_window",
+      credentialEvidence: "stored_field_presence_only_not_decrypted" };
   }
 
   /**

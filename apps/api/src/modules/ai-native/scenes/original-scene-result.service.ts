@@ -119,6 +119,11 @@ function openingFactsFingerprint(material: unknown) {
       if (source && typeof source === 'object' && !Array.isArray(source)) delete (source as Record<string, unknown>).observedAt;
     }
   }
+  const integration = (facts as Record<string, unknown>).integrationObservation;
+  if (integration && typeof integration === 'object' && !Array.isArray(integration) && 'observation' in integration) {
+    const observation = integration.observation;
+    if (observation && typeof observation === 'object' && !Array.isArray(observation)) delete (observation as Record<string, unknown>).observedAt;
+  }
   return requestFingerprint(facts);
 }
 
