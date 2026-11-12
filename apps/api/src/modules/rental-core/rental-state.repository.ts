@@ -90,26 +90,33 @@ export class RentalStateRepository {
    * 「固定挑默认空间」来避免互相覆盖。
    * 配置仓储已提交的档案路径须保留；采用后缺来源或旧来源的恢复副本拒绝写入，
    * 不把旧集合重新标记成当前版本，也不以快照重建正式经营事实。
+   * 原事务调用者保留提交/回滚所有权；读取和CAS不得另开事务。
    */
-  async saveCoreState(tenantId: string, workspaceId: string, state: unknown) {
+  async saveCoreState(tenantId: string, workspaceId: string, state: unknown, existingTx?: Prisma.TransactionClient) {
     if (!this.enabled()) return;
     if (!state || typeof state !== "object" || Array.isArray(state)) throw new ConflictException("Core快照配置结构无效");
     const encoded = JSON.stringify(state);
-    const profile = state && typeof state === "object" && "profile" in state ? state.profile as { categoryVersionId?: string; categoryAdoptionRevision?: number } : undefined;
+    // Capture one detached payload before waiting on locks. The CAS replacement
+    // and initial insert must not observe different edits of the live cache.
+    const snapshot: unknown = JSON.parse(encoded);
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new ConflictException("Core快照配置结构无效");
+    const profile = "profile" in snapshot ? snapshot.profile as { categoryVersionId?: string; categoryAdoptionRevision?: number } : undefined;
     const expected = profile?.categoryVersionId && Number.isSafeInteger(profile.categoryAdoptionRevision)
       ? { categoryVersionId: profile.categoryVersionId, adoptionRevision: profile.categoryAdoptionRevision! } : undefined;
-    await this.prisma.$transaction(async tx => {
+    const write = async (tx: Prisma.TransactionClient) => {
       const { binding } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected);
       if (!expected && binding.adoptionRevision > 0) throw new ConflictException("Core快照缺少当前采用来源，不能重新标记旧资料");
       // Explicit workspace profile edits are owned by the config repository.
       // Retain that path while replacing only the recovery snapshot collections.
-      await writeRentalCoreConfigurationSnapshot(tx, tenantId, workspaceId, state as Record<string, unknown>, Prisma.sql`
+      await writeRentalCoreConfigurationSnapshot(tx, tenantId, workspaceId, snapshot as Record<string, unknown>, Prisma.sql`
         CASE WHEN JSON_EXTRACT(state, '$.profilePersisted') = CAST('true' AS JSON)
           THEN JSON_SET(CAST(${encoded} AS JSON), '$.profile', JSON_SET(JSON_EXTRACT(state, '$.profile'),
             '$.categoryVersionId', ${binding.categoryVersionId}, '$.categoryAdoptionRevision', ${binding.adoptionRevision}),
             '$.profilePersisted', CAST('true' AS JSON), '$.configPersisted', CAST('true' AS JSON))
           ELSE CAST(${encoded} AS JSON) END`);
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    };
+    if (existingTx) await write(existingTx);
+    else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async saveBusinessState(tenantId: string, workspaceId: string, state: unknown) {

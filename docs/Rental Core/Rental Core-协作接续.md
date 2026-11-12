@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工/GitHub核对`3ed71c1ade0fc3447d26608ea3b108dcc024e863`，无merge/cherry-pick，该[续租片](<Rental Core-开发记录.md#extension-service-empty-snapshots-20261112>)已普通推送并回读一致；R08纯保证金门闸的原第五参数/明确0及批准专用边界已取得限定调用和API类型证据，见[门闸阶段](<Rental Core-开发记录.md#exchange-guarantee-current-gate-20261112>)。PM确认批次原收据最小片已独立收main `b527ef20a0b5c0669f6a022a336b7e66ee0b4d2a`并核远端，本树不追活动main。照片固定源码`e2a1a2b9d`、前置`0947a6eb8`及原恢复结果保留，见[照片恢复阶段](<Rental Core-开发记录.md#exchange-photo-core-recovery-20261112>)；企业作者独占本人photo GET/DI/受权Blob及准备面板接线，HTTP/DI/浏览器和真实事务/存储仍未验。不得回main施工、重建旧C树或处理负责人接管的空目录。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。本片开工/GitHub核对`5d6c6dffdfaf11b0bc6d759ab87ae983d31edd0c`，无merge/cherry-pick；[续租片](<Rental Core-开发记录.md#extension-service-empty-snapshots-20261112>)与[R08门闸片](<Rental Core-开发记录.md#exchange-guarantee-current-gate-20261112>)已独立推送核远端。快照原事务复用/固定输入已取得类型及限定调用证据，四入口的实际缺口/候选合同见[事务阶段](<Rental Core-开发记录.md#snapshot-original-transaction-20261112>)；尚未装配参加者。PM确认批次原收据最小片已独立收main `b527ef20a0b5c0669f6a022a336b7e66ee0b4d2a`并核远端，本树不追活动main。照片固定源码`e2a1a2b9d`、前置`0947a6eb8`及原恢复结果保留，见[照片恢复阶段](<Rental Core-开发记录.md#exchange-photo-core-recovery-20261112>)；企业作者独占本人photo GET/DI/受权Blob及准备面板接线，HTTP/DI/浏览器和真实事务/存储仍未验。不得回main施工、重建旧C树或处理负责人接管的空目录。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行而非缓存/品类字符串猜修订。验证暂存已核实删除。PM另准分配服务`recordIssue`原事务参加者及业务配置/九项源的最小片，尚未接入；AI的OutboxParticipant/ResourcePorts和事件模型仍归AI作者，main HTTP/构建由PM独占。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与写锁外`readTenantReadinessSource`两个只读合同固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`已普通推送核远端，不改原扫描、登记或九项算法。API类型、原分配14断言/开业读取17项及新读取5组通过，暂存已核实删除，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)。ResourcePorts不得重入扫描/新开业务事务，不以独立观察冒充快照；可选参加者未接入，缺正式临近政策/事实/授权不捕获。
@@ -22,7 +22,7 @@
 
 ## 3. 下一入口与原缺口
 
-当前优先AIN-17四入口的Core提交链：`recordIssue`原订单事务、`upsertProfile`真实配置行counter/默认与非默认范围、`persistBusinessConfig`原tx及settingsRevision、`saveCoreState`原tx/scoped counter；先交固定最小合同与Core结构化resource_shortage依据。新续租服务解析/空快照与R08普通换货原第五参数/明确0的阶段证据已固定，不扩企业政策签名或混入保证金授信。原read-only fe65片不替代提交来源，缺临近政策不造事件，九项独立读不冒称同事务总版本。窗口/阶段入口见[接续记录](<Rental Core-开发记录.md#preparation-receipt-validation-core-20261112>)，此安排不缩减CAT-GOV/CLOSE原门槛。企业单次本人核对后委托仍须sealed authority、原身份及C/K绑定，未取得合同/执行验证不计链路完成。
+当前优先AIN-17四入口的Core提交链，最小来源字段及提交点已列[事务阶段](<Rental Core-开发记录.md#snapshot-original-transaction-20261112>)。快照已复用原tx并固定输入，下一步是业务配置全部写入复用原tx、真实profile/settings行修订/相关变更来源，以及Core结构化resource_shortage和参加者；AI适配/公共符号/DI仍须PM指定唯一作者。新续租与R08两片已固定，不扩企业政策签名或混入保证金授信。原read-only fe65片不替代提交来源，缺临近政策不造事件，九项独立读不冒称同事务总版本；普通资金/订单备份不冒充配置改变。此安排不缩减CAT-GOV/CLOSE原门槛。企业单次本人核对后委托仍须sealed authority、原身份及C/K绑定，未取得合同/执行验证不计链路完成。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
    写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。

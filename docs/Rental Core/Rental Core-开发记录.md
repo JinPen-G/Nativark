@@ -4,11 +4,32 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="snapshot-original-transaction-20261112"></a>
+
+## Core快照的原事务复用与固定输入（2026-11-12）
+
+按PM核准的AIN-17四入口顺序，从已核GitHub的`5d6c6dffdfaf11b0bc6d759ab87ae983d31edd0c`接续，仅改[快照仓储](../../apps/api/src/modules/rental-core/rental-state.repository.ts)。`saveCoreState`允许服务端调用者传入原事务，绑定锁、快照读取及原行CAS在该事务执行，不另开事务/自行提交；未传事务时仍由仓储拥有原ReadCommitted事务。原CoreService恢复备份调用保持，正式宿主尚未消费新增事务参数，不声明四入口参加者已接通。
+
+在第一次等待数据库前固定JSON快照；绑定依据、新建行内容与替换SQL使用同一次输入。修复原新建分支在等锁后再次序列化活缓存、可能混入后继改动的问题；明确档案保留、合法修订范围、无变化不写和饱和拒绝仍沿原CAS，不改Schema/Client或历史事实。
+
+当前API原noEmit退出0。复用原采用fixture的数据库行和回滚装配，限定实际仓储调用退出0：原事务不嵌套、独立调用只开一次、等待时修改原输入不污染新建快照、无变化不写、外空间/饱和/陈旧绑定及坏快照拒绝、原所有者回滚。仅补当前合成Tenant父锁与快照SQL叶子；不解释MySQL表达式、不证明真实锁/DDL/权限。原`tests/rental-state-persistence.test.cjs`在`:37`同步读取`getProfile`、期待camera而得到undefined处退出1，未跑到重启恢复断言；原测试未改。命令、源码hash和原失败唯一见[事务证据](../../output/category-governance/core-snapshot-original-transaction-20261112.json)，audit0；5份退出文件/缓存及3个目录已删除，未生成新API包。
+
+**四入口参加者待核的最小合同：** 以下是实际缺口及交PM/AI唯一作者核定的字段/提交点，不是已实现接口或新增任务。
+
+| Core入口 | 原事务来源与下一接点 |
+| --- | --- |
+| `recordIssue` | 原订单/assignment修订、订单更新时间、起租时点和地点；`resource_shortage`须由Core实际资源判定，现有`issue_recorded`不能按自由文本转成缺货。保存原订单后、提交前调用参加者，问题恢复须使旧来源失效 |
+| `upsertProfile` | tenant/workspace、默认或非默认范围、实际`configurationSource/configurationRevision`及是否修改；非默认兼容行空update和重复回填不触发默认档案事件 |
+| `persistBusinessConfig` | 所有实际配置和初始价格版本先复用原tx，完成后提供原设置行`settingsRevision`与各规则/日历/价格引用；设置修订不充当九项配置总修订，不回读另一个事务的R0来源 |
+| `saveCoreState` | 本片已支持原tx及固定输入；下一步提供实际行修订/相关配置变更依据后接参加者，普通订单/资金备份变化不冒充开业配置改变 |
+
+参加者只在原事务登记待处理事实；缺当前授权、正式临近政策或可靠来源保持not_captured，不能外调模型/通知/扫描全部业务。已接入参加者的写入失败须传播给原事务所有者回滚，不吞成捕获成功。Core提供领域来源合同，AI负责既有Outbox/ResourcePorts适配，公共符号和宿主DI须由PM指定唯一作者；本片没有改AI接口、装配或新增恒真依赖。原CAT-GOV/CLOSE完整门槛不变，08原子采用及两新编码不同组合经营仍必做。
+
 <a id="exchange-guarantee-current-gate-20261112"></a>
 
 ## 普通换货纯保证金增额的企业门闸（2026-11-12）
 
-按PM明确窗口，从已推送并回读一致的续租片`3ed71c1ade0fc3447d26608ea3b108dcc024e863`接续，仅改[Core正式换货](../../apps/api/src/modules/rental-core/rental-core.service.ts)的新增义务条件。租金补差、押金增额或预授权增额任一为正时，普通入口复用原`assertEnterpriseNewExpense`，继续把本次Core报价的`additionalAmount`作为原第五参数，明确0也保留。保证金增额不计入租金授信，租金核减不抵消保证金增额；未扩[企业政策](../../apps/api/src/modules/enterprise/enterprise-policy.service.ts)签名。
+按PM明确窗口，从已推送并回读一致的续租片`3ed71c1ade0fc3447d26608ea3b108dcc024e863`接续，源码固定`5d6c6dffdfaf11b0bc6d759ab87ae983d31edd0c`并已普通推送核远端；仅改[Core正式换货](../../apps/api/src/modules/rental-core/rental-core.service.ts)的新增义务条件。租金补差、押金增额或预授权增额任一为正时，普通入口复用原`assertEnterpriseNewExpense`，继续把本次Core报价的`additionalAmount`作为原第五参数，明确0也保留。保证金增额不计入租金授信，租金核减不抵消保证金增额；未扩[企业政策](../../apps/api/src/modules/enterprise/enterprise-policy.service.ts)签名。
 
 直接消费者仍为CoreController普通换货及[批准换货服务](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)。批准专用路径原sealed authority及事务、范围、订单、输入、C/K核验保持；本片不新增本人委托接口或声明其完整执行链。普通入口需当前企业关系和当前政策，逐单批准不能复用原订单批准，伪造authority不能替代核验。
 
