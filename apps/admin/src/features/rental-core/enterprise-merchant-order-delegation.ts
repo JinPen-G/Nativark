@@ -148,7 +148,8 @@ export function useMerchantOrderDelegationSource(active: boolean) {
           || value.delegationKey !== delegationKey || value.retryable !== false
           || !(value.state === "observed" && validId(value.orderId) || value.state === "unknown" && value.orderId === null)
           || readReference()?.delegationKey !== delegationKey) throw new Error("原 D 与 Core 结果无法核对 / Original D and Core result mismatch");
-        remember({ delegationKey, state: value.state === "observed" ? "observed" : source || previous?.state === "unknown" ? "unknown" : "source" });
+        // 每次 Core unknown 观察都保留本条未决 D，直到原结果可以核对。
+        remember({ delegationKey, state: value.state });
         return structuredClone(value);
       });
     } finally {
