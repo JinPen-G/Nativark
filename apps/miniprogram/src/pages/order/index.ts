@@ -294,7 +294,8 @@ Page({
       const money = (value: number, currency: string) => Number.isFinite(value) && currency ? formatMoney(value, currency) : "原金额缺失";
       this.exchangeApprovalRows = rows;
       this.setData({ exchangeBlocked: Boolean(operation.pending()), exchangeRequests: rows.map(row => ({ id: row.id, items: `${row.preview.originalItemGroupName} → ${row.preview.replacementItemGroupName}`,
-        stateLabel: row.state === "approved" && row.employeeConfirmation ? "本人已确认费用，换货未执行" : labels[row.state],
+        stateLabel: row.state === "approved" && row.execution === "original_merchant_execution_not_connected" ? "本次费用变更暂不可执行"
+          : row.state === "approved" && row.employeeConfirmation ? "本人已确认费用，换货未执行" : labels[row.state],
         tone: ["pending", "approved"].includes(row.state) ? "warning" : "neutral", amount: money(row.preview.additionalAmount, row.preview.currency),
         deposit: money(row.preview.depositDelta, row.preview.currency), preAuth: money(row.preview.preAuthDelta, row.preview.currency),
         expires: time(row.expiresAt), reason: row.reason, confirmedAt: row.employeeConfirmation ? time(row.employeeConfirmation.confirmedAt) : "",

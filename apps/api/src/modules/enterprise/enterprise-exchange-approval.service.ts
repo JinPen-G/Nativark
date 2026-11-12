@@ -52,6 +52,10 @@ export class EnterpriseExchangeApprovalService {
   private view(row: Approval): EnterpriseExchangeApprovalView {
     const preview = enterpriseJson(row.preview), exchange = preview.exchange;
     if (!exchange) throw new ConflictException("原换货试算关联缺失");
+    // The fixed Core execution port accepts added rent with unchanged guarantees.
+    // Expense consent alone cannot supply an unsupported funding source.
+    const executionSupported = Number.isFinite(preview.additionalAmount) && preview.additionalAmount > 0
+      && preview.depositDelta === 0 && preview.preAuthDelta === 0;
     if ((row.employeeConfirmationOperationKey || row.employeeConfirmedAt || row.employeeConfirmationFingerprint)
       && (!row.employeeConfirmationOperationKey || !row.employeeConfirmedAt || row.employeeConfirmationFingerprint !== this.confirmationFingerprint(row))) throw new ConflictException("原员工费用确认依据不一致");
     if (row.employeeConfirmationOperationKey && (row.requestFingerprint !== requestFingerprint({ orderId: row.orderId, expected: row.expectedOrderUpdatedAt, exchange: enterpriseJson(row.request) })
@@ -65,7 +69,8 @@ export class EnterpriseExchangeApprovalService {
         originalPriceVersion: exchange.originalPriceVersion, replacementPriceVersion: exchange.replacementPriceVersion },
       ...(row.employeeConfirmationOperationKey && row.employeeConfirmedAt ? { employeeConfirmation: { operationKey: row.employeeConfirmationOperationKey,
         confirmedAt: row.employeeConfirmedAt.toISOString(), scope: "expense_only_not_inspection_or_execution" as const } } : {}),
-      execution: row.state === "consumed" ? "original_merchant_receipt_required" : "original_merchant_execution_required" };
+      execution: row.state === "consumed" ? "original_merchant_receipt_required"
+        : executionSupported ? "original_merchant_execution_required" : "original_merchant_execution_not_connected" };
   }
   private canonical(input: EnterpriseExchangeIntent): EnterpriseExchangeIntent {
     if (!input || [input.orderLineId, input.allocationId, input.replacementItemGroupId].some(id => typeof id !== "string" || !id.trim() || id.length > 191)
@@ -142,7 +147,7 @@ export class EnterpriseExchangeApprovalService {
       }
       const state = approval.state === "approved" ? row.employeeConfirmationOperationKey ? "waiting_inspection" : "waiting_expense" : approval.state;
       const entry: EnterpriseMerchantExchangeChoices["approvals"][number] = { approval, state, preparations: [] };
-      if (approval.state === "approved" && row.employeeConfirmationOperationKey) {
+      if (approval.state === "approved" && row.employeeConfirmationOperationKey && approval.execution === "original_merchant_execution_required") {
         if (row.expectedOrderUpdatedAt !== snapshot.order.updatedAt) throw new ConflictException("原批准订单修订已变化");
         const intent = enterpriseJson(row.request), preview = enterpriseJson(row.preview);
         const pricingGroupId = preview.exchange?.replacementPricingGroupId ?? intent.replacementPricingGroupId;

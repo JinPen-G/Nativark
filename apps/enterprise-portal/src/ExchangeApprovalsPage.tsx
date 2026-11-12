@@ -214,6 +214,9 @@ function ExchangeReview({ row, reviewMode, unavailable, operation, refresh }: {
     </dl>
     <Alert type="info" title={english ? "Original expense authorization" : "原费用授权"}
       description={english ? "The merchant executes under the original approval, expense consent and specific inspection consent. Read the original merchant receipt for the applied result." : "商户依据原批准、本人费用确认和具体检查同意执行换货，执行结果按原商户收据核对。"} />
+    {row.state === "approved" && row.execution === "original_merchant_execution_not_connected" && <Alert type="warning"
+      title={english ? "Exchange execution is unavailable" : "换货执行暂不可用"}
+      description={english ? "This expense change requires a supported execution and funding path. Contact the merchant to review the original request." : "本次费用变更需要受支持的执行和资金来源，请联系商户核对原申请。"} />}
     {row.employeeConfirmation && <Alert type="info" title={(row.execution === undefined || row.execution === "original_merchant_execution_not_connected") && row.state !== "consumed"
       ? english ? "Expense confirmed by applicant; exchange not executed" : "本人已确认费用；换货尚未执行"
       : english ? "Original expense consent recorded" : "原本人费用确认已记录"}/>}
