@@ -1,3 +1,5 @@
+/** Rental category drafts, immutable publication and adoption policies.
+ * Requests are detached before waits so keys, writes and audits share one input. */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
@@ -82,6 +84,7 @@ export class CategoryGovernanceService {
   }
   async previewCreation(input: PreviewRentalCategoryCreationRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
+    input = structuredClone(input);
     const source = await this.creationSource(this.prisma, input);
     const preview = composeCategoryCreation(source.definition, input);
     const validation = this.validation(preview.definition, input.code);
@@ -107,6 +110,7 @@ export class CategoryGovernanceService {
     assertCategoryGovernancePermission(user, P.edit);
     categoryIdentity(input.code);
     if (!input.reason?.trim() || input.reason.length > 512) throw new BadRequestException("请填写创建原因");
+    input = structuredClone(input);
     const requestHash = requestFingerprint(input);
     const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
     if (replay) return replay;
@@ -206,6 +210,7 @@ export class CategoryGovernanceService {
   }
   async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     try { return await this.prisma.$transaction(async (tx) => {
       await this.lockedCategory(tx, categoryCode);
@@ -225,6 +230,7 @@ export class CategoryGovernanceService {
   async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
     if (!CATEGORY_DRAFT_SECTIONS.includes(section)) throw new BadRequestException("未知草稿页签");
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       const row = await this.version(tx, categoryCode, id);
@@ -272,6 +278,7 @@ export class CategoryGovernanceService {
   }
   async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.publish);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       await this.lockedCategory(tx, categoryCode);
@@ -296,6 +303,7 @@ export class CategoryGovernanceService {
   }
   async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
+    input = structuredClone(input);
     return this.prisma.$transaction(async (tx) => {
       const categoryCode = categoryIdentity(code);
       const changed = await tx.rentalCategoryVersion.updateMany({ where: { id, categoryCode, revision: input.expectedRevision, status: "draft" }, data: { status: "archived", revision: { increment: 1 } } });
@@ -306,6 +314,7 @@ export class CategoryGovernanceService {
   }
   async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.opening);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       const category = await this.lockedCategory(tx, categoryCode);
@@ -328,6 +337,7 @@ export class CategoryGovernanceService {
   }
   async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.publish);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.prisma.$transaction(async (tx) => {
       await this.lockedCategory(tx, categoryCode);
