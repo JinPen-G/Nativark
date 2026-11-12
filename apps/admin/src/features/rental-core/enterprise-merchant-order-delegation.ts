@@ -1,13 +1,14 @@
-/** Reads one original customer delegation under the current operator scope.
- * This source reference records a lookup. Core execution uses a separate receipt. */
+/** Coordinates one customer delegation's source, explicit execution and Core result.
+ * The original D and its observation state stay scoped to the current operator.
+ * Core and the private source owner supply the authority and durable receipts. */
 import { useEffect, useRef, useState } from "react";
-import type { ApiResult, EnterpriseOrderDelegationView } from "@rental-os/shared";
+import type { ApiResult, EnterpriseMerchantOrderDelegationResult, EnterpriseOrderDelegationView } from "@rental-os/shared";
 import { http } from "@/api/http";
 import { currentSessionSignal } from "@/app/queryClient";
 import { useAuthStore } from "@/features/auth/authStore";
 import { enterpriseOperatorIdentity } from "../membership/original-enterprise-operation";
 
-type SourceReference = { delegationKey: string; state: "source" };
+type SourceReference = { delegationKey: string; state: "source" | "unknown" | "observed" };
 const validKey = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
 const validId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9._:-]{1,191}$/u.test(value);
 const sourceFields = new Set(["delegationKey", "personalCustomerId", "corporateCustomerId", "quoteId", "workspaceId", "requestReference", "state", "revision", "expiresAt", "confirmedAt", "purpose", "original", "retryable"]);
@@ -27,8 +28,12 @@ export function useMerchantOrderDelegationSource(active: boolean) {
     if (raw === null) return;
     const value = JSON.parse(raw);
     if (!value || Object.keys(value).some(key => !["delegationKey", "state"].includes(key))
-      || !validKey(value.delegationKey) || value.state !== "source") throw new Error("原委托来源引用不可读取 / Original source reference unavailable");
+      || !validKey(value.delegationKey) || !["source", "unknown", "observed"].includes(value.state)) throw new Error("原委托来源引用不可读取 / Original source reference unavailable");
     return value;
+  };
+  const remember = (reference: SourceReference) => {
+    const encoded = JSON.stringify(reference); localStorage.setItem(storageKey, encoded);
+    if (localStorage.getItem(storageKey) !== encoded) throw new Error("原 D 未可靠保存 / Original D was not retained");
   };
   let saved: SourceReference | undefined, storageError = "";
   if (permitted) {
@@ -63,10 +68,9 @@ export function useMerchantOrderDelegationSource(active: boolean) {
       return await navigator.locks.request(`${storageKey}:lookup`, async () => {
         current();
         if (ownedSignal.aborted) throw new Error("原来源读取已取消 / Original source read was cancelled");
-        readReference();
-        const reference: SourceReference = { delegationKey, state: "source" };
-        const encoded = JSON.stringify(reference); localStorage.setItem(storageKey, encoded);
-        if (localStorage.getItem(storageKey) !== encoded) throw new Error("原 D 未可靠保存 / Original D was not retained");
+        const previous = readReference();
+        if (previous?.state === "unknown" && previous.delegationKey !== delegationKey) throw new Error("须先核对原 D 的未决提交 / Read the unresolved original D first");
+        remember({ delegationKey, state: previous?.delegationKey === delegationKey ? previous.state : "source" });
         const response = await http.request<ApiResult<EnterpriseOrderDelegationView>>({
           url: `/membership/enterprise-workflows/order-delegations/${encodeURIComponent(delegationKey)}`,
           method: "get", _authRetry: true,
@@ -107,5 +111,60 @@ export function useMerchantOrderDelegationSource(active: boolean) {
       publish();
     }
   };
-  return { actorIdentity, identity, permitted, savedKey: saved?.delegationKey, storageError, busy: busy.current === controller.current.signal, current, read };
+
+  const originalResult = async (delegationKey: string, source?: EnterpriseOrderDelegationView, reviewed?: () => void): Promise<EnterpriseMerchantOrderDelegationResult> => {
+    current();
+    const ownedSignal = controller.current.signal;
+    if (!validKey(delegationKey) || storageError) throw new Error(storageError || "原委托键无效 / Invalid original delegation key");
+    if (busy.current === ownedSignal) throw new Error("原委托仍在核对 / Original delegation is still pending");
+    busy.current = ownedSignal; publish();
+    try {
+      if (!navigator.locks?.request) throw new Error("原引用协调能力不可用 / Original reference coordination unavailable");
+      return await navigator.locks.request(`${storageKey}:lookup`, async () => {
+        current();
+        if (ownedSignal.aborted) throw new Error("原委托操作已隔离 / Original delegation operation was isolated");
+        const previous = readReference();
+        if (previous?.state === "unknown" && previous.delegationKey !== delegationKey) throw new Error("须先核对原 D 的未决提交 / Read the unresolved original D first");
+        if (source) {
+          reviewed?.();
+          if (previous?.delegationKey !== delegationKey || previous.state !== "source" || source.state !== "issued" || source.revision !== 1
+            || source.workspaceId !== auth.currentWorkspaceId || !source.personalCustomerId || !source.corporateCustomerId || !source.quoteId
+            || Date.parse(source.expiresAt) <= Date.now()) throw new Error("须重新核对原委托或读取原结果 / Recheck the original delegation or read its result");
+        }
+        remember({ delegationKey, state: source ? "unknown" : previous?.delegationKey === delegationKey ? previous.state : "source" });
+        current();
+        const response = await http.request<ApiResult<EnterpriseMerchantOrderDelegationResult>>({
+          url: `/membership/enterprise-workflows/order-delegations/${encodeURIComponent(delegationKey)}/${source ? "execute" : "result"}`,
+          method: source ? "post" : "get", _authRetry: true,
+          ...(source ? { data: { delegationKey, expectedRevision: 1, confirm: true,
+            ...("approvalId" in source.requestReference ? { approvalId: source.requestReference.approvalId } : {}) } } : {}),
+          signal: AbortSignal.any([currentSessionSignal(), ownedSignal]),
+        } as Parameters<typeof http.request<ApiResult<EnterpriseMerchantOrderDelegationResult>>>[0]);
+        current();
+        if (ownedSignal.aborted) throw new Error("原委托操作已隔离 / Original delegation operation was isolated");
+        reviewed?.();
+        const value = response.data.data;
+        if (!value || Object.keys(value).some(key => !["delegationKey", "state", "orderId", "retryable"].includes(key))
+          || value.delegationKey !== delegationKey || value.retryable !== false
+          || !(value.state === "observed" && validId(value.orderId) || value.state === "unknown" && value.orderId === null)
+          || readReference()?.delegationKey !== delegationKey) throw new Error("原 D 与 Core 结果无法核对 / Original D and Core result mismatch");
+        remember({ delegationKey, state: value.state === "observed" ? "observed" : source || previous?.state === "unknown" ? "unknown" : "source" });
+        return structuredClone(value);
+      });
+    } finally {
+      if (busy.current === ownedSignal) busy.current = undefined;
+      publish();
+    }
+  };
+  const execute = async (source: EnterpriseOrderDelegationView, reviewed: () => void) => {
+    current(); reviewed();
+    const original = structuredClone(source), previous = readReference();
+    if (previous?.state === "unknown" || previous?.state === "observed") throw new Error("须读取原 Core 结果 / Read the original Core result");
+    const latestSource = await read(original.delegationKey);
+    current(); reviewed();
+    if (JSON.stringify(latestSource) !== JSON.stringify(original)) throw new Error("原委托明细已变化，须重新核对 / Original delegation changed, review it again");
+    return originalResult(original.delegationKey, latestSource, reviewed);
+  };
+  return { actorIdentity, identity, permitted, savedKey: saved?.delegationKey, savedState: saved?.state, storageError,
+    busy: busy.current === controller.current.signal, current, read, execute, readOriginal: (delegationKey: string) => originalResult(delegationKey) };
 }
