@@ -1,0 +1,235 @@
+diff --git a/apps/api/src/modules/rental-core/category-governance.service.ts b/apps/api/src/modules/rental-core/category-governance.service.ts
+index 0bdbf0b1b..09eca288f 100644
+--- a/apps/api/src/modules/rental-core/category-governance.service.ts
++++ b/apps/api/src/modules/rental-core/category-governance.service.ts
+@@ -1,6 +1,8 @@
+-/** Rental category drafts, immutable publication and adoption policies.
+- * Requests are detached before waits so keys, writes and audits share one input. */
+-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
++/** Rental definition drafts, immutable publication and separate adoption policy.
++ * Requests are detached before waits so keys, writes and audits share one input.
++ * Writes reuse original platform identity/permission reads in one transaction;
++ * tenant business facts and production enablement remain outside this service. */
++import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+ import { Prisma } from "@prisma/client";
+ import { createHash, randomUUID } from "node:crypto";
+ import { CATEGORY_DRAFT_SECTIONS, CATEGORY_GOVERNANCE_PERMISSIONS as P, RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, isRentalCategoryCode,
+@@ -16,6 +18,8 @@ import { categoryScopeAllows } from "./category-governance-policy";
+ import { categoryDefinitionDifferences } from "./category-definition-diff";
+ import { categoryCreationTemplates, composeCategoryCreation } from "./category-creation-templates";
+ import { requestFingerprint } from "./rental-idempotency.repository";
++import { AuthService } from "../auth/auth.service";
++import { PlatformRepository } from "../platform/platform.repository";
+ 
+ export function assertCategoryGovernancePermission(user: SystemUserRow | undefined, permission: string) {
+   if (!user?.isSaasAdmin || !(user.permissions.includes(permission) || user.permissions.includes("*"))) {
+@@ -63,7 +67,41 @@ const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(va
+ 
+ @Injectable()
+ export class CategoryGovernanceService {
+-  constructor(private readonly prisma: PrismaService, private readonly hooks: CapabilityHookRuntime) {}
++  constructor(private readonly prisma: PrismaService, private readonly hooks: CapabilityHookRuntime,
++    @Optional() private readonly auth?: AuthService, @Optional() private readonly principals?: PlatformRepository) {}
++
++  /** Original signed platform session and permission mapping under Serializable.
++   * Identity/role reads precede category locks and are checked again before return.
++   * No bearer token is stored, no workspace grant is inferred, and no write retries. */
++  private async platformTransaction<T>(user: SystemUserRow, permission: string, authorization: string | undefined,
++    run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
++    assertCategoryGovernancePermission(user, permission);
++    if (!this.auth || !this.principals) throw new ServiceUnavailableException("平台品类事务缺少原身份复核接点");
++    const auth = this.auth, principals = this.principals;
++    const signal = AbortSignal.timeout(30000);
++    try {
++      return await this.prisma.$transaction(async tx => {
++        const before = await auth.resolveTrustedPlatformBrowserPrincipal(authorization, tx, signal);
++        if (!before || before.userId !== user.id || before.tenantId !== user.tenantId) throw new UnauthorizedException("当前平台会话与品类操作人不一致");
++        assertCategoryGovernancePermission(await principals.findUserById(before.userId, tx), permission);
++        if (signal.aborted || before.expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("平台会话已到期，品类写入未获准");
++        const result = await run(tx);
++        const after = await auth.resolveTrustedPlatformBrowserPrincipal(authorization, tx, signal);
++        if (!after || after.userId !== before.userId || after.tenantId !== before.tenantId ||
++            after.sessionId !== before.sessionId || after.expiresAt !== before.expiresAt ||
++            user.id !== before.userId || user.tenantId !== before.tenantId) throw new UnauthorizedException("平台会话在品类操作期间变化，请核对原结果");
++        assertCategoryGovernancePermission(await principals.findUserById(before.userId, tx), permission);
++        // Permission reads may wait too; expiry must be checked after the last await.
++        if (signal.aborted || after.expiresAt <= Math.floor(Date.now() / 1000)) throw new UnauthorizedException("平台会话已到期，请核对原品类操作结果");
++        return result;
++      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 10000, timeout: 30000 });
++    } catch (error) {
++      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
++        throw new ConflictException("平台身份或品类请求发生并发冲突，请保留原输入核对原结果");
++      }
++      throw error;
++    }
++  }
+   private dynamicCreationEnabled() {
+     return process.env.NODE_ENV !== "production" && process.env.RENTAL_CATEGORY_DYNAMIC_CREATION === "true";
+   }
+@@ -101,24 +139,23 @@ export class CategoryGovernanceService {
+     if (expectedHash && expectedHash !== after.requestHash) throw new ConflictException("原操作键已用于不同新品类输入，请先核对原收据");
+     return after.version;
+   }
+-  async readCreationReceipt(key: string, user: SystemUserRow): Promise<RentalCategoryCreationReceipt> {
+-    assertCategoryGovernancePermission(user, P.edit);
+-    const version = await this.creationReceipt(this.prisma, user, key);
+-    return version ? { outcome: "created", version } : { outcome: "unknown" };
++  async readCreationReceipt(key: string, user: SystemUserRow, authorization?: string): Promise<RentalCategoryCreationReceipt> {
++    return this.platformTransaction<RentalCategoryCreationReceipt>(user, P.edit, authorization, async tx => {
++      const version = await this.creationReceipt(tx, user, key);
++      return version ? { outcome: "created", version } : { outcome: "unknown" };
++    });
+   }
+-  async createCategory(input: CreateRentalCategoryRequest, user: SystemUserRow) {
++  async createCategory(input: CreateRentalCategoryRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.edit);
+     categoryIdentity(input.code);
+     if (!input.reason?.trim() || input.reason.length > 512) throw new BadRequestException("请填写创建原因");
+     input = structuredClone(input);
+     const requestHash = requestFingerprint(input);
+-    const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
+-    if (replay) return replay;
+-    if (!this.dynamicCreationEnabled()) throw new ServiceUnavailableException("动态品类创建尚未开放");
+     try {
+-      return await this.prisma.$transaction(async tx => {
++      return await this.platformTransaction(user, P.edit, authorization, async tx => {
+         const replay = await this.creationReceipt(tx, user, input.idempotencyKey, requestHash);
+         if (replay) return replay;
++        if (!this.dynamicCreationEnabled()) throw new ServiceUnavailableException("动态品类创建尚未开放");
+         const source = await this.creationSource(tx, input);
+         const composed = composeCategoryCreation(source.definition, input);
+         if (composed.definitionHash !== input.expectedDefinitionHash) throw new ConflictException("创建内容与已核对预览不同，请重新预览");
+@@ -140,7 +177,8 @@ export class CategoryGovernanceService {
+       });
+     } catch (error) {
+       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+-        const replay = await this.creationReceipt(this.prisma, user, input.idempotencyKey, requestHash);
++        const replay = await this.platformTransaction(user, P.edit, authorization,
++          tx => this.creationReceipt(tx, user, input.idempotencyKey, requestHash));
+         if (replay) return replay;
+         throw new ConflictException("品类编码或原操作键已被并发占用，请核对原收据");
+       }
+@@ -208,11 +246,11 @@ export class CategoryGovernanceService {
+     return rows.filter((row) => row.policy && categoryScopeAllows(row.policy[`${op}Scope`], row.policy[`${op}TenantIds`], tenantId))
+       .map((row) => ({ id: row.id, versionLabel: row.versionLabel, operation: op }));
+   }
+-  async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow) {
++  async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.edit);
+     input = structuredClone(input);
+     const categoryCode = categoryIdentity(code);
+-    try { return await this.prisma.$transaction(async (tx) => {
++    try { return await this.platformTransaction(user, P.edit, authorization, async (tx) => {
+       await this.lockedCategory(tx, categoryCode);
+       const source = await this.version(tx, categoryCode, input.sourceVersionId);
+       if (!["published", "legacy_baseline"].includes(source.status)) throw new ConflictException("只能从同品类已发布版本复制新草稿");
+@@ -227,12 +265,12 @@ export class CategoryGovernanceService {
+       throw error;
+     }
+   }
+-  async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow) {
++  async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.edit);
+     if (!CATEGORY_DRAFT_SECTIONS.includes(section)) throw new BadRequestException("未知草稿页签");
+     input = structuredClone(input);
+     const categoryCode = categoryIdentity(code);
+-    return this.prisma.$transaction(async (tx) => {
++    return this.platformTransaction(user, P.edit, authorization, async (tx) => {
+       const row = await this.version(tx, categoryCode, id);
+       if (row.status !== "draft" || row.revision !== input.expectedRevision) throw new ConflictException("草稿已变更或不是可编辑状态，请刷新后核对");
+       const definition = patchCategorySection(row.definition, section, input.values);
+@@ -276,11 +314,11 @@ export class CategoryGovernanceService {
+       }))), itemFields: body?.businessModel?.assetFields ?? [], inspectionFields: body?.businessModel?.defaults?.inspectionFields ?? [],
+       affectedSpaces: await this.prisma.businessWorkspace.count({ where: { categoryCode: row.categoryCode } }) };
+   }
+-  async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow) {
++  async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.publish);
+     input = structuredClone(input);
+     const categoryCode = categoryIdentity(code);
+-    return this.prisma.$transaction(async (tx) => {
++    return this.platformTransaction(user, P.publish, authorization, async (tx) => {
+       await this.lockedCategory(tx, categoryCode);
+       await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_category_versions WHERE id = ${id} AND categoryCode = ${categoryCode.toLowerCase()} FOR UPDATE`);
+       const row = await this.version(tx, categoryCode, id);
+@@ -301,10 +339,10 @@ export class CategoryGovernanceService {
+       return this.version(tx, categoryCode, id);
+     });
+   }
+-  async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow) {
++  async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.edit);
+     input = structuredClone(input);
+-    return this.prisma.$transaction(async (tx) => {
++    return this.platformTransaction(user, P.edit, authorization, async (tx) => {
+       const categoryCode = categoryIdentity(code);
+       const changed = await tx.rentalCategoryVersion.updateMany({ where: { id, categoryCode, revision: input.expectedRevision, status: "draft" }, data: { status: "archived", revision: { increment: 1 } } });
+       if (changed.count !== 1) throw new ConflictException("只能归档当前修订的未发布草稿");
+@@ -312,11 +350,11 @@ export class CategoryGovernanceService {
+       return this.version(tx, categoryCode, id);
+     });
+   }
+-  async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow) {
++  async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.opening);
+     input = structuredClone(input);
+     const categoryCode = categoryIdentity(code);
+-    return this.prisma.$transaction(async (tx) => {
++    return this.platformTransaction(user, P.opening, authorization, async (tx) => {
+       const category = await this.lockedCategory(tx, categoryCode);
+       if (category.openingRevision !== input.expectedRevision) throw new ConflictException("品类开通政策已变更");
+       await this.tenants(tx, input.scope, input.tenantIds);
+@@ -335,11 +373,11 @@ export class CategoryGovernanceService {
+       return after;
+     });
+   }
+-  async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow) {
++  async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow, authorization?: string) {
+     assertCategoryGovernancePermission(user, P.publish);
+     input = structuredClone(input);
+     const categoryCode = categoryIdentity(code);
+-    return this.prisma.$transaction(async (tx) => {
++    return this.platformTransaction(user, P.publish, authorization, async (tx) => {
+       await this.lockedCategory(tx, categoryCode);
+       const row = await this.version(tx, categoryCode, id);
+       if (!["published", "legacy_baseline"].includes(row.status) || !row.policy) throw new ConflictException("只能维护已发布版本的独立采用政策");
+diff --git a/apps/api/src/modules/rental-core/category-governance.controller.ts b/apps/api/src/modules/rental-core/category-governance.controller.ts
+index 0c12209f7..e4900454b 100644
+--- a/apps/api/src/modules/rental-core/category-governance.controller.ts
++++ b/apps/api/src/modules/rental-core/category-governance.controller.ts
+@@ -3,7 +3,7 @@ import { CategoryGovernancePreviewGuard } from "./category-governance-preview.gu
+ import type { CategoryDraftSection, SystemUserRow } from "@rental-os/shared";
+ import { CategoryGovernanceService } from "./category-governance.service";
+ import { ArchiveCategoryDraftDto, CreateCategoryDraftDto, CreateRentalCategoryDto, PreviewRentalCategoryCreationDto, PatchCategoryDraftDto, PublishCategoryDraftDto, SaveCategoryOpeningDto, SaveCategoryVersionPolicyDto } from "./category-governance-request.dto";
+-interface PlatformRequest { user: SystemUserRow }
++interface PlatformRequest { user: SystemUserRow; headers?: { authorization?: string } }
+ 
+ @Controller("platform/rental-categories")
+ @UseGuards(CategoryGovernancePreviewGuard)
+@@ -12,18 +12,18 @@ export class CategoryGovernanceController {
+   @Get() list(@Req() req: PlatformRequest) { return this.governance.list(req.user); }
+   @Get("capability-catalog") catalog(@Req() req: PlatformRequest) { return this.governance.catalog(req.user); }
+   @Get("tenant-directory") tenants(@Req() req: PlatformRequest) { return this.governance.tenantDirectory(req.user); }
+-  @Post() createCategory(@Body() body: CreateRentalCategoryDto, @Req() req: PlatformRequest) { return this.governance.createCategory(body, req.user); }
++  @Post() createCategory(@Body() body: CreateRentalCategoryDto, @Req() req: PlatformRequest) { return this.governance.createCategory(body, req.user, req.headers?.authorization); }
+   @Post("creation-preview") previewCreation(@Body() body: PreviewRentalCategoryCreationDto, @Req() req: PlatformRequest) { return this.governance.previewCreation(body, req.user); }
+-  @Get("creation-requests/:key") creationReceipt(@Param("key") key: string, @Req() req: PlatformRequest) { return this.governance.readCreationReceipt(key, req.user); }
++  @Get("creation-requests/:key") creationReceipt(@Param("key") key: string, @Req() req: PlatformRequest) { return this.governance.readCreationReceipt(key, req.user, req.headers?.authorization); }
+   @Get(":code") detail(@Param("code") code: string, @Req() req: PlatformRequest) { return this.governance.detail(code, req.user); }
+   @Get(":code/candidates/:tenantId/:operation") candidates(@Param("code") code: string, @Param("tenantId") tenantId: string, @Param("operation") operation: string, @Req() req: PlatformRequest) { return this.governance.candidates(code, tenantId, operation, req.user); }
+-  @Post(":code/drafts") create(@Param("code") code: string, @Body() body: CreateCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.createDraft(code, body, req.user); }
+-  @Patch(":code/versions/:id/sections/:section") patch(@Param("code") code: string, @Param("id") id: string, @Param("section") section: CategoryDraftSection, @Body() body: PatchCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.patchDraft(code, id, section, body, req.user); }
++  @Post(":code/drafts") create(@Param("code") code: string, @Body() body: CreateCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.createDraft(code, body, req.user, req.headers?.authorization); }
++  @Patch(":code/versions/:id/sections/:section") patch(@Param("code") code: string, @Param("id") id: string, @Param("section") section: CategoryDraftSection, @Body() body: PatchCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.patchDraft(code, id, section, body, req.user, req.headers?.authorization); }
+   @Post(":code/versions/:id/validate") validate(@Param("code") code: string, @Param("id") id: string, @Req() req: PlatformRequest) { return this.governance.validate(code, id, req.user); }
+   @Get(":code/versions/:id/preview") preview(@Param("code") code: string, @Param("id") id: string, @Req() req: PlatformRequest) { return this.governance.preview(code, id, req.user); }
+-  @Post(":code/versions/:id/publish") publish(@Param("code") code: string, @Param("id") id: string, @Body() body: PublishCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.publish(code, id, body, req.user); }
+-  @Post(":code/versions/:id/archive") archive(@Param("code") code: string, @Param("id") id: string, @Body() body: ArchiveCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.archive(code, id, body, req.user); }
+-  @Put(":code/opening-policy") opening(@Param("code") code: string, @Body() body: SaveCategoryOpeningDto, @Req() req: PlatformRequest) { return this.governance.opening(code, body, req.user); }
+-  @Put(":code/versions/:id/adoption-policy") policy(@Param("code") code: string, @Param("id") id: string, @Body() body: SaveCategoryVersionPolicyDto, @Req() req: PlatformRequest) { return this.governance.policy(code, id, body, req.user); }
++  @Post(":code/versions/:id/publish") publish(@Param("code") code: string, @Param("id") id: string, @Body() body: PublishCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.publish(code, id, body, req.user, req.headers?.authorization); }
++  @Post(":code/versions/:id/archive") archive(@Param("code") code: string, @Param("id") id: string, @Body() body: ArchiveCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.archive(code, id, body, req.user, req.headers?.authorization); }
++  @Put(":code/opening-policy") opening(@Param("code") code: string, @Body() body: SaveCategoryOpeningDto, @Req() req: PlatformRequest) { return this.governance.opening(code, body, req.user, req.headers?.authorization); }
++  @Put(":code/versions/:id/adoption-policy") policy(@Param("code") code: string, @Param("id") id: string, @Body() body: SaveCategoryVersionPolicyDto, @Req() req: PlatformRequest) { return this.governance.policy(code, id, body, req.user, req.headers?.authorization); }
+   @Get(":code/audits") audits(@Param("code") code: string, @Req() req: PlatformRequest) { return this.governance.audits(code, req.user); }
+ }

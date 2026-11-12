@@ -4,6 +4,29 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="governance-authority-main-closure-20261113"></a>
+
+## 治理平台身份的固定main父闭包（2026-11-13）
+
+按PM要求为CAT-GOV-05/07提供原平台身份父闭包。固定来源为`8b64f8efa2146ddb53a9e5de8f95f53d926d9cc3`的治理服务及Controller增量；其两个源文件的父像与固定main `2a5c56471abb5714f80715e2cfa0aa236f003f51`逐字节相同。与QA固定的八句输入副本服务blob `0bdbf0b1bcb03c1a4c2ca0db0705ee95cd9aa6e9`叠加后，交付[准确二文件补片](../../output/category-governance/governance-authority-main-closure-20261113.patch)。该补片是本次明确要求的集成交付物，随本阶段纳入Git。
+
+| 文件 | 补片输入blob | 应用后blob |
+| --- | --- | --- |
+| `apps/api/src/modules/rental-core/category-governance.service.ts` | `0bdbf0b1bcb03c1a4c2ca0db0705ee95cd9aa6e9` | `09eca288fdfdcc66b2ab005199a5c588b4769a5f` |
+| `apps/api/src/modules/rental-core/category-governance.controller.ts` | `0c12209f7ffc6b011a5edab301df811664674f53` | `e4900454be98043074b69301bf3d99a215523e01` |
+
+补片20,603字节，SHA-256为`8065ea1629a4a79dddb12e349fe67878caaad8df707e253a6ec40c879e478bc8`。独立临时索引仅登记上述两个固定输入，`git apply --cached --check`及实际应用均退出0，结果blob逐项一致，实际工作树索引和三份定价分组WIP保留。合并时两处冲突已核明并解决，文件头保留请求副本与身份职责，归档同时保留输入复制和`platformTransaction`。见[补片来源及应用证据](../../output/category-governance/governance-authority-main-closure-20261113.json)。
+
+所需公共依赖已存在于固定main。`AuthService.resolveTrustedPlatformBrowserPrincipal`及原`verifyAccessToken/sign/tokenSecret`与本树方法正文一致；`PlatformService.getAuthSession/assertTrustedSaasManagement`及`PlatformRepository.getAuthSession/findUserById`来自完全相同的两份平台文件。原Auth签名、operator audience、会话/期限、SaaS账号和当前角色映射由这些原接点提供。固定main的AppModule已登记`AuthService`、`PlatformRepository`、`CategoryGovernanceService`及Controller，补片消费其现有DI。公共文件的准确读取路径、方法哈希和注册核对见[当前API及依赖证据](../../output/category-governance/pricing-group-transaction-compile-20261113.json)。
+
+Core的`platformTransaction`承担Serializable、身份/权限前后复验及最后等待后的到期检查，maxWait为10秒、timeout为30秒。原Controller从请求Header传入真实authorization，创建原结果读取也经过当前身份；请求体SaaS字段或自由操作人不授予权限。八个请求副本均保留，缺Auth/Platform注入503，缺会话或签名401，撤销动作权限403，事务冲突保留原输入和原键核对。
+
+两份候选在本树原API类型链的单一程序检查退出0、867个根、零诊断，见[候选类型](../../output/category-governance/governance-authority-closure-candidate-compile-20261113.json)。当前API另一次单一程序检查也退出0。首次将两份完整类型程序保留于一个进程导致堆内存不足、退出134，保留[首次类型失败](../../output/category-governance/governance-authority-closure-compile-20261113.json)。两份必要完整emit与来源/哈希见[候选产物](../../output/category-governance/governance-authority-closure-candidate-emit-20261113.json)。
+
+完整编译候选与原Controller的9组限定调用退出0、audit0，覆盖正常创建/归档、原键在创建开关关闭后回读、同键改变内容、缺DI/会话、坏签名、等待期间撤权及提交前撤权回滚。执行原Auth签名和平台会话/角色映射算法，账号/会话/ORM及事务回滚为明确替身，见[完整编译行为](../../output/category-governance/governance-authority-closure-compiled-runtime-20261113.json)。首次限定归档夹具缺`findFirst`的[失败](../../output/category-governance/governance-authority-closure-runtime-20261113.json)保留，补齐该原读取后9组[源码调用](../../output/category-governance/governance-authority-closure-runtime-final-20261113.json)也通过。未新增测试文件或改原断言，尚需QA在main定向复验及原真实环境门槛。
+
+四份记录/接续新增15处本地链接、5处片段已定向核对，阶段`git diff --check`退出0。本片一个临时基线源文件已删除。其余8个已退出候选、emit和临时索引共155,026字节，批量原生删除被自动审批以`blocked by policy`拒绝，未提供具体理由；已同卷归集至[唯一责任清单](../../../../output/.cleanup-pending/rental-core/governance-authority-main-closure-validation/manifest.json)，状态为已归集、未删除。原单一任务目录仅保留下一独立定价分组验证仍使用的空audit，片尾按原生命周期清理。原CAT-GOV-08、两个动态编码不同组合的冻结经营、真库/多实例、浏览器/微信及独立Review仍未收口，完整结项0/14，实现百分比待核实。
+
 <a id="extension-services-fixture-guarantee-sources-20261112"></a>
 
 ## 续租服务原夹具与保证金来源核查（2026-11-12）
