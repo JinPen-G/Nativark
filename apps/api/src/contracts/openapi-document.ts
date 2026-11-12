@@ -3089,7 +3089,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     path: "/api/auth/development/reset-demo-password",
     tag: "Auth",
     operationId: "resetLocalDemoPassword",
-    summary: "Reset demo passwords through explicitly enabled development maintenance",
+    summary: "Reset demo passwords in an explicit personal demo or authorized development maintenance",
     permissions: ["system:params:manage"],
     requestSchema: "ResetLocalDemoPasswordRequest",
     responseSchema: "ResetLocalDemoPasswordResult"

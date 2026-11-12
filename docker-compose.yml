@@ -1,17 +1,17 @@
 services:
   mysql:
     image: mysql:8.4
-    container_name: rental-os-mysql
+    container_name: ${OPS_MYSQL_CONTAINER:-rental-os-mysql}
     restart: unless-stopped
     # Local development: retain binary logs for seven days, without disabling logging.
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --binlog-expire-logs-seconds=604800 --binlog-expire-logs-auto-purge=ON
     environment:
-      MYSQL_ROOT_PASSWORD: rental_os_root
-      MYSQL_DATABASE: rental_os
-      MYSQL_USER: rental_os
-      MYSQL_PASSWORD: rental_os
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in the selected environment file}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-rental_os}
+      MYSQL_USER: ${MYSQL_USER:-rental_os}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in the selected environment file}
     ports:
-      - "3306:3306"
+      - "${MYSQL_BIND_HOST:-127.0.0.1}:${MYSQL_HOST_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
 
@@ -20,7 +20,7 @@ services:
     container_name: rental-os-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_BIND_HOST:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
 

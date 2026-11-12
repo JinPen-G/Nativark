@@ -1054,6 +1054,11 @@ export class ApiAuthGuard implements CanActivate {
       return true;
     }
 
+    if (request.method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password"
+      && this.authService.isPersonalDemoPasswordResetEnabled?.()) {
+      return true;
+    }
+
     if (
       path === "/health" ||
       path === "/openapi.json" ||

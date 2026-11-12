@@ -119,7 +119,7 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 
 ### 2. 配置独立环境
 
-将根目录 [.env.example](.env.example)复制为本地 `.env`；已有文件不要覆盖。至少检查：
+根目录 [.env.example](.env.example)是基础运行、Web 构建和运维配置的共同模板。实际配置使用根 `.env`，或通过 `RENTAL_ENV_FILE` 指定一份外部环境文件。已有配置需按下面的变量用途核对。
 
 | 配置 | 应当确认的内容 |
 | --- | --- |
@@ -128,14 +128,24 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 | `AUTH_TOKEN_SECRET`、`INTEGRATION_ENCRYPTION_KEY` | 自行生成独立随机密钥，不使用模板占位值；集成凭据加密密钥不能随意更换，否则旧数据可能无法解密 |
 | `SEED_PLATFORM_PASSWORD`、`SEED_DEMO_PASSWORD` | 仅执行演示 Seed 时填写自选强口令；仓库不提供共享默认管理员密码 |
 | `API_PORT` | API 默认端口 3000 |
+| `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER` | Compose 初始化 MySQL 所用参数，两项口令必填，库名与应用账号默认 `rental_os`。应用连接串按实际账号与 URL 编码填写 |
+| `MYSQL_BIND_HOST`、`MYSQL_HOST_PORT`、`REDIS_BIND_HOST`、`REDIS_HOST_PORT` | 容器端口默认仅映射 `127.0.0.1`，MySQL 为 3306，Redis 为 6379 |
+| `NODE_ENV` | Node 运行模式，本地为 `development`，正式生产为 `production` |
+| `RENTAL_DEPLOYMENT_PROFILE` | 部署用途，个人演示为 `personal-demo`，正式经营部署为 `production`。发布门禁要求显式填写 |
 | `DATABASE_CONNECT_ON_START` | 是否启动时主动连接；设为 `false` **不是离线模式**，业务请求仍可连接数据库 |
 | `TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS` | 按真实代理拓扑和允许的浏览器 origin 配置，CORS 不代替业务鉴权 |
+| `VITE_SHOW_ACCOUNT_SHORTCUTS` | 公开布尔开关。个人测试填 `true`，生产构建也可显示账号选择，仍需输入密码 |
+| `LOCAL_DEMO_PASSWORD_RESET_ENABLED` | 个人演示模板填 `true`，保留登录前重置。省略时默认 `false`。普通开发启用后需要当前平台管理员的系统参数管理权限，正式生产用途关闭 |
 
-环境装载有三处区别：
+配置加载与校验由 [config/environment.cjs](config/environment.cjs)统一提供。
 
-- 根 `db:*` 包装脚本读取根 `.env`，已有进程环境变量优先。
-- Nest 配置读取 API 工作目录 `.env` 和根 `../../.env`，避免维护相互冲突的配置副本。
-- Vite 按应用工作目录装载配置，不应假定根 `.env` 会自动传到所有前端。默认管理后台通过 `/api` 代理本地 API；改地址时核对 [admin Vite 配置](apps/admin/vite.config.ts)和 [HTTP 客户端](apps/admin/src/api/http.ts)。`VITE_*` 是客户端可见配置，不能放私钥。
+- 进程环境的优先级最高。指定 `RENTAL_ENV_FILE` 时，文件路径从项目根解析，绝对路径直接使用，该文件必须存在。
+- 使用默认入口时，各目录的文件优先级由高到低为 `.env.<mode>.local`、`.env.<mode>`、`.env.local`、`.env`。API 与原应用目录配置继续作为根配置的兼容覆盖。API、数据库和运维命令的 mode 取启动进程的 `NODE_ENV`，Web 使用 Vite 的 mode。部署使用显式环境文件可以固定各入口的来源。
+- 根环境文件按标准 dotenv 字面值解析，带引号的多行内容、注释和密码中的 `$` 都由同一解析器处理。原 Web 应用目录的环境文件保留 Vite 插值兼容。API 在导入业务模块前完成加载与关键值校验，Nest 从已准备的进程环境注入配置。
+- Web 构建按各端清单投影公开字段。管理后台接收 API 地址、快选和品类预览开关，租户网站接收 API 地址、基础域名和默认租户，企业端接收公共入口 host。其余服务器配置留在后端。公开构建参数修改后须重新构建，后端环境修改后须重启进程。
+- 开发代理统一使用 `API_PROXY_TARGET`，兼容旧 `VITE_API_TARGET`。管理后台浏览器地址为 `VITE_API_BASE_URL`，租户网站为 `VITE_API_BASE`，同源部署均可设为 `/api`。企业端保持原 `/api/client/v1` 与 `/enterprise-assets/` 路径。[后台配置](apps/admin/vite.config.ts)和[企业端配置](apps/enterprise-portal/vite.config.ts)保留各自的宿主约束。
+- 发布构建、启动和门禁应使用同一部署环境文件。发布清单包含 `config/environment.cjs` 与其类型声明，交付时须保留项目的 `apps/api/dist` 和 `config` 相对目录。真实环境文件由部署方托管。
+- 租户支付、短信、存储、品牌、价格等业务配置通过后台及其原数据库服务维护。登录页保留原账号快选、重置弹窗与全部登录操作。个人演示同时配置 `RENTAL_DEPLOYMENT_PROFILE=personal-demo`、`LOCAL_DEMO_PASSWORD_RESET_ENABLED=true` 和 `VITE_SHOW_ACCOUNT_SHORTCUTS=true`，重置入口可在登录前使用，账号快选填写群组与账号并清空密码。
 
 ### 3. 安装与数据库初始化
 
@@ -151,7 +161,9 @@ npm ci
 docker compose up -d mysql
 ```
 
-[Compose 文件](docker-compose.yml)只提供数据库基础设施，不包含应用部署。它带有本地开发凭据，并映射数据库端口；不要直接暴露到公网或用作生产配置。已有数据库占用 3306 时，调整本地端口与连接串，不删除数据卷来解决冲突。
+[Compose 文件](docker-compose.yml)提供 MySQL 与 Redis 基础设施，口令由所选环境文件注入，缺少任一 MySQL 口令时会明确失败。默认只映射本机 `127.0.0.1` 的 3306 和 6379，`OPS_MYSQL_CONTAINER` 同时决定 Compose 的 MySQL 容器名及 OPS 操作目标。服务与应用的部署阶段由现行任务协调。
+
+根 `.env` 由 Compose 原生读取。使用外部文件时，Docker 通过 `docker compose --env-file <环境文件路径> up -d` 选择同一文件，API、Web 和 OPS 通过 `RENTAL_ENV_FILE` 选择该文件。现有 MySQL 数据卷的账号状态由数据库维护，环境中的初始化口令用于新数据卷，已有账号变更须核对原库与恢复步骤。端口被占用时，统一调整 host port 和对应连接串。
 
 构建后端所需的共享运行时，并生成 Prisma Client：
 

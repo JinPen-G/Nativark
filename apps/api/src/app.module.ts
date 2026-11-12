@@ -190,7 +190,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AiDesktopBusinessModule,
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [".env", "../../.env"]
+      // main.ts loads and validates the selected project environment before importing this module.
+      ignoreEnvFile: true
     }),
     DatabaseModule
   ],

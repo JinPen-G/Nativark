@@ -12,15 +12,19 @@ const BUILD_PROVENANCE_FILE = path.join(ARTIFACT_DIR, "build-provenance.json");
 const BUILD_TARGETS = [
   { name: "@rental-os/api", dir: path.join(ROOT, "apps", "api", "dist") },
   { name: "@rental-os/admin", dir: path.join(ROOT, "apps", "admin", "dist") },
-  { name: "@rental-os/shared", dir: path.join(ROOT, "packages", "shared", "dist") }
+  { name: "@rental-os/shared", dir: path.join(ROOT, "packages", "shared", "dist") },
+  { name: "config", dir: path.join(ROOT, "config"), files: ["environment.cjs", "environment.d.cts"] }
 ];
 
-function collectFiles(dir) {
+function collectFiles(dir, requiredFiles) {
   if (!fs.existsSync(dir)) return [];
   const files = [];
-  for (const entry of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    const full = path.join(entry.parentPath ?? entry.path, entry.name);
+  const paths = requiredFiles
+    ? requiredFiles.map(name => path.join(dir, name))
+    : fs.readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter(entry => entry.isFile()).map(entry => path.join(entry.parentPath ?? entry.path, entry.name));
+  if (requiredFiles && paths.some(file => !fs.existsSync(file))) return [];
+  for (const full of paths) {
     files.push({ path: path.relative(ROOT, full), bytes: fs.statSync(full).size, contents: fs.readFileSync(full) });
   }
   return files;
@@ -28,7 +32,7 @@ function collectFiles(dir) {
 
 function summarizeBuilds() {
   return BUILD_TARGETS.map((target) => {
-    const digest = digestFiles(collectFiles(target.dir));
+    const digest = digestFiles(collectFiles(target.dir, target.files));
     return { name: target.name, dir: path.relative(ROOT, target.dir), ...digest };
   });
 }

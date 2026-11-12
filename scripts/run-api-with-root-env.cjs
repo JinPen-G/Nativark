@@ -1,6 +1,6 @@
-const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { loadProjectEnvironment } = require("../config/environment.cjs");
 
 const apiScript = process.argv[2];
 if (!apiScript) {
@@ -9,23 +9,7 @@ if (!apiScript) {
 }
 
 const rootDir = path.resolve(__dirname, "..");
-const envPath = path.join(rootDir, ".env");
-const loadedEnv = {};
-
-if (fs.existsSync(envPath)) {
-  for (const rawLine of fs.readFileSync(envPath, "utf8").split(/\r?\n/u)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
-    const separator = line.indexOf("=");
-    if (separator <= 0) continue;
-    const key = line.slice(0, separator).trim();
-    let value = line.slice(separator + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if (!(key in process.env)) loadedEnv[key] = value;
-  }
-}
+const loadedEnv = loadProjectEnvironment({ appDirectory: path.join(rootDir, "apps", "api"), mode: process.env.NODE_ENV });
 
 const extraArgs = process.argv.slice(3);
 const npmExecPath = process.env.npm_execpath;

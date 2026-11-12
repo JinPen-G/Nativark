@@ -144,8 +144,15 @@ export class AuthService {
     );
   }
 
+  isPersonalDemoPasswordResetEnabled() {
+    return this.configService.get<string>("RENTAL_DEPLOYMENT_PROFILE") === "personal-demo"
+      && this.configService.get<string>("LOCAL_DEMO_PASSWORD_RESET_ENABLED") === "true";
+  }
+
   private async assertLocalDemoResetAccess(authorization?: string) {
+    if (this.isPersonalDemoPasswordResetEnabled()) return;
     if (this.configService.get<string>("NODE_ENV") !== "development"
+      || this.configService.get<string>("RENTAL_DEPLOYMENT_PROFILE") === "production"
       || this.configService.get<string>("LOCAL_DEMO_PASSWORD_RESET_ENABLED") !== "true") {
       throw new ForbiddenException("演示账号密码重置未启用");
     }
@@ -156,9 +163,9 @@ export class AuthService {
     }
   }
 
-  /** Explicit development maintenance under the original authenticated platform identity.
-   * Password policy waits cannot preserve revoked access. The repository hashes the
-   * replacement and revokes existing demo sessions in its original transaction.
+  /** Personal-demo configuration enables the original pre-login demonstration reset.
+   * Other development maintenance requires current platform authentication. The
+   * configuration and authority are rechecked after reading the password policy.
    */
   async resetLocalDemoPassword(password: string, authorization?: string): Promise<ResetLocalDemoPasswordResult> {
     await this.assertLocalDemoResetAccess(authorization);

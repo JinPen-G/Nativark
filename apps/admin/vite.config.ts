@@ -7,14 +7,17 @@ import { nativeSidebarStyles } from "./config/nativeSidebarStyles.js";
 import { actionButtonIconAdapter } from "./config/actionButtonIconAdapter.js";
 import { copilotArchiveStyles } from "./config/copilotArchiveStyles.js";
 import { kanbanBoardAdapter } from "./config/kanbanBoardAdapter.js";
+import { apiProxyTarget, loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 
 export default defineConfig(({ mode }) => {
   const offline = mode === "ai-offline";
-  const env = offline ? {} : loadEnv(mode, process.cwd(), "");
+  const env = loadViteEnvironment(mode, fileURLToPath(new URL(".", import.meta.url)), loadEnv, { offline });
 
   return {
     // Explicit verification mode: never load deployment secrets or replace release artifacts.
-    envDir: offline ? false : undefined,
+    envDir: false,
+    envPrefix: [],
+    define: publicEnvironmentDefinitions("admin", env),
     build: offline ? { outDir: "dist-ai-offline" } : undefined,
     plugins: [motionPreferenceAdapter(), actionButtonIconAdapter(), kanbanBoardAdapter(), tailwindcss(), react()],
     css: { postcss: { plugins: [motionPreferenceStyles(), nativeSidebarStyles(), copilotArchiveStyles()] } },
@@ -37,7 +40,7 @@ export default defineConfig(({ mode }) => {
       port: Number(process.env.PORT ?? env.REACT_ADMIN_PORT ?? 5175),
       proxy: {
         "/api": {
-          target: env.VITE_API_BASE_URL?.replace(/\/api$/, "") ?? "http://localhost:3000",
+          target: apiProxyTarget(env),
           changeOrigin: true
         }
       }
