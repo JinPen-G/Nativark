@@ -18,6 +18,7 @@ import { validateQuotedCapabilityRequirements } from "./category-capability-fact
 import { rentalDefaultWorkspaceName } from "./category-identity";
 import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates, exchangePickupInspectionRequirements, projectExchangeInspectionTemplates } from "./rental-exchange-inspection";
 import type { RentalOrderInspectionBasisFacts } from "@rental-os/shared";
+import { projectAllocationPickupBasis, type RentalOrderAllocationPickupBasis } from "./rental-order-allocation-pickup.read";
 import { assertInspectionObservations } from "./rental-inspection-observation";
 import { approvedExchangeEvidence, type ApprovedExchangeAuthority } from "./rental-approved-exchange-authorization";
 import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental-inspection-evidence";
@@ -2317,6 +2318,29 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return { ...value, contractVersion: 'rental-order-inspection-basis-1',
       applicableTemplateRefs: applicable.map(row => ({ ...row, sourceTemplateId: row.sourceTemplateId ?? row.id })),
       recordResourceCoverage: 'not_projected', semantics: 'frozen_template_applicability_not_inspection_or_execution_authority' };
+  }
+
+  /** Authorized single-resource read for inspection candidates. Current asset
+   * validators and original pickup evidence are separate; no initialization,
+   * current-template fallback, recognition, writes or business action grant. */
+  async readOrderAllocationPickupBasis(tenantId: string, orderId: string, allocationId: string): Promise<RentalOrderAllocationPickupBasis> {
+    const actor = getRequestIdentity(), identity = requestFingerprint(actor);
+    if (!actor?.userId || actor.isSaasAdmin || !["operator", "staff"].includes(actor.audience ?? "")
+      || actor.tenantId !== tenantId || !actor.workspaceId) throw new ForbiddenException("领取资源缺少当前原营运身份及空间");
+    if (typeof this.factStore.readOrderAllocationPickupBasis !== "function") throw new ServiceUnavailableException("单资产原领取依据持久端口不可用");
+    const before = await this.readOrderFacts(tenantId, orderId);
+    const current = this.categoryResolver ? structuredClone(await this.categoryResolver.forWorkspace(tenantId, before.workspaceId)) : undefined;
+    const input = await this.factStore.readOrderAllocationPickupBasis(tenantId, before.workspaceId, orderId, allocationId);
+    const after = await this.readOrderFacts(tenantId, orderId);
+    if (requestFingerprint(getRequestIdentity()) !== identity || requestFingerprint(before) !== requestFingerprint(after)
+      || input.tenantId !== tenantId || input.workspaceId !== before.workspaceId || input.orderId !== orderId
+      || input.allocation.id !== allocationId || input.sourceOrderUpdatedAt !== before.updatedAt) throw new ConflictException("领取资源读取期间原订单或范围变化");
+    if (current) {
+      const latest = await this.categoryResolver!.forWorkspace(tenantId, before.workspaceId);
+      if (requestFingerprint(latest) !== requestFingerprint(current)) throw new ConflictException("领取资源读取期间当前品类定义变化");
+    }
+    if (requestFingerprint(getRequestIdentity()) !== identity) throw new ForbiddenException("领取资源读取期间当前身份变化");
+    return projectAllocationPickupBasis(input, current);
   }
 
   async readOrderExplanationState(tenantId: string, orderId: string) {
