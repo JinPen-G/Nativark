@@ -4173,7 +4173,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // the original booking approval cannot replace the ordinary spending gate.
     const approved = approvalAuthority ? approvedExchangeEvidence(approvalAuthority, tx, tenantId, this.resolveWorkspaceId(tenantId), order,
       priced, input, idempotencyKey) : undefined;
-    if (priced.additionalAmount > 0 && !approved) await this.assertEnterpriseNewExpense(tenantId, order, tx, priced.additionalAmount);
+    // Each positive component is a new obligation; a rental reduction cannot
+    // offset a guarantee increase. Explicit zero still invokes the original new
+    // expense gate; guarantee amounts never become rental-credit occupancy.
+    if ((priced.additionalAmount > 0 || priced.depositDelta > 0 || priced.preAuthDelta > 0) && !approved) {
+      await this.assertEnterpriseNewExpense(tenantId, order, tx, priced.additionalAmount);
+    }
     if (order.updatedAt !== input.expectedUpdatedAt) throw new ConflictException("订单已发生变化，请重新试算换货费用");
     if (!hasOriginalRentalCurrency(order.currency, priced.currency)) throw new ConflictException("换货币种与原订单不一致或缺失，不能追加其他币种金额");
     if (!priced.exchange || priced.exchange.orderLineId !== input.orderLineId || priced.exchange.allocationId !== input.allocationId) {

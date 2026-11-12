@@ -4,11 +4,23 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="exchange-guarantee-current-gate-20261112"></a>
+
+## 普通换货纯保证金增额的企业门闸（2026-11-12）
+
+按PM明确窗口，从已推送并回读一致的续租片`3ed71c1ade0fc3447d26608ea3b108dcc024e863`接续，仅改[Core正式换货](../../apps/api/src/modules/rental-core/rental-core.service.ts)的新增义务条件。租金补差、押金增额或预授权增额任一为正时，普通入口复用原`assertEnterpriseNewExpense`，继续把本次Core报价的`additionalAmount`作为原第五参数，明确0也保留。保证金增额不计入租金授信，租金核减不抵消保证金增额；未扩[企业政策](../../apps/api/src/modules/enterprise/enterprise-policy.service.ts)签名。
+
+直接消费者仍为CoreController普通换货及[批准换货服务](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts)。批准专用路径原sealed authority及事务、范围、订单、输入、C/K核验保持；本片不新增本人委托接口或声明其完整执行链。普通入口需当前企业关系和当前政策，逐单批准不能复用原订单批准，伪造authority不能替代核验。
+
+使用原换货fixture、Shared正式摄影定义及实际PreviewService/BusinessService得到两份正常报价：仅押金+100和仅预授权+100，均租金补差0。限定调用覆盖逐单批准拒绝、免逐单模式继续按0复核、当前企业关系停用及伪造authority拒绝，退出0、无业务前缀写入。仅时钟、SQL/当前关系与库存为替身；在陈旧修订处停止的调用不证明后续库存、收款、批准消费或真实事务。前两次分别因手造预览缺`additionalAmount`及旧fixture缺完整品类字段失败，原失败保留，未改生产门闸/测试断言。命令与结果唯一见[门闸证据](../../output/category-governance/exchange-guarantee-gate-20261112.json)。
+
+当前API原`--noEmit --incremental false --pretty false`退出0、audit0，源码hash固定；各次退出暂存已删除。本片未生成新运行包，原864文件研发包只覆盖已提交续租片。CLOSE-CORP/GUARANTEE、CAT-GOV-04/13及企业委托的真实权限、事务、HTTP/宿主与原完整验收仍未收口，不更新完整结项比例。下一优先为AIN-17四入口真实counter/同事务参加者。
+
 <a id="extension-service-empty-snapshots-20261112"></a>
 
 ## 新续租的服务解析与明确空快照（2026-11-12）
 
-按PM明确窗口，从已核GitHub的`b659aa857088e01cab277d4270390e9845eeaead`接续，只改[报价服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)与[事实仓储](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts)。新增时段独立续租及普通原价全租期补差均解析本空间服务目录，即使请求未选服务也检查必选规则；明确无新增服务返回`[]`，不调用空服务容量检查。已有核减/重价模式保持原语义，不隐式追加服务。
+按PM明确窗口，从已核GitHub的`b659aa857088e01cab277d4270390e9845eeaead`接续，源码固定`3ed71c1ade0fc3447d26608ea3b108dcc024e863`，已普通推送并回读一致；只改[报价服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)与[事实仓储](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts)。新增时段独立续租及普通原价全租期补差均解析本空间服务目录，即使请求未选服务也检查必选规则；明确无新增服务返回`[]`，不调用空服务容量检查。已有核减/重价模式保持原语义，不隐式追加服务。
 
 新续租持久化保留解析所得的空数组；旧`undefined/null`仍写`Prisma.DbNull`，不由金额补快照，不改原订单服务发生项。直接消费者为CoreController续租预览/申请、ClientApiService本人及企业续租报价/核对和Core批准生效；沿原报价、服务容量及幂等链，未扩Shared、DTO、OpenAPI或企业政策签名。
 
