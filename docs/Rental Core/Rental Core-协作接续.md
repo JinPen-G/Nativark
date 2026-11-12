@@ -12,13 +12,13 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。PM已转交原九项同client阶段收main并普通推送`e96e3e9a1952c813d1d6e6d9a4b12f3a77dfd186`的结果；reader及[原来源证据](<Rental Core-开发记录.md#readiness-original-transaction-20261112>)保留。本片从已推送`16401c422`完成[履约结构化来源与原事务参加者](<Rental Core-开发记录.md#fulfillment-issue-transaction-participant-20261112>)，Shared窄字段获准，AI两文件沿固定blob接入；最终Shared/API零诊断、原14断言及8组限定调用通过。当前自持API867份JS，仅更新必要emit；无merge/cherry-pick，不回main施工。正式ResourcePorts/临近政策/宿主及开业counter/原写入参加者仍缺，默认履约not_captured。企业与QA协调由PM承担，本树不处理负责人接管空目录。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。PM已转交原九项同client阶段收main并普通推送`e96e3e9a1952c813d1d6e6d9a4b12f3a77dfd186`的结果；原来源/reader证据保留。本片从已推送`0475af5c5`完成[治理请求副本](<Rental Core-开发记录.md#governance-input-detached-20261112>)：原键错位已实际复现，八入口、恢复和拒绝10组限定调用与Shared/API零诊断通过；原创建整组3/6失败保留。当前867份API仅更新治理emit，不回main施工。前片[履约来源与原tx](<Rental Core-开发记录.md#fulfillment-issue-transaction-participant-20261112>)已固定；正式ResourcePorts/临近政策/宿主、开业counter/写入参加者和真实环境仍缺，默认履约not_captured。企业/QA及共同文件由PM协调，原08与动态组合经营继续必做。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行读取修订。分配服务已在原聚合提交前接可选fulfillment参加者，并明确结构化来源生命周期；AI参加者/存储仅按指定两blob接入，ResourcePorts和事件模型算法仍归原作者，宿主/共同装配由PM指定唯一作者。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与原`readTenantReadinessSource`两个只读合同的`fe65ac652076d5bed4c9ca439d50b563c61d17aa`证据保留，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)；九项随后支持同client，履约本片仅对有效结构化原因及正数活动分配授源。ResourcePorts不得重入扫描/新开业务事务，不以独立观察或同client冒充快照；缺正式临近政策/事实/授权保持不捕获。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - 旧阶段25份清单是主树 `D:/工作文件/rental-OS/output/category-governance` 的唯一跨树原稿，本树26处现行链接已按PM安排改相对主仓库路径；另2处历史附件缺失保留，本树新证据仍在本树同名目录。原检查器继续将跨树路径列为`link-outside`，本片单独核固定原稿，不复制副本或放松规则。PM收回main时须按目标文档位置调整相对层级，见[原稿记录](<Rental Core-开发记录.md#evidence-original-location-20261112>)。
-- Shared202文件保持，本树当前API867份自持JS：c24固定构建及原输入捕获、当前履约/固定AI必要emit，原结果/失败保留；最终三份实际保护文件和Shared运行时核对见[履约阶段](<Rental Core-开发记录.md#fulfillment-issue-transaction-participant-20261112>)，不当作完整构建/真库/HTTP/宿主/发布验收。原c24的862文件、采用输入4文件、治理首次加载1文件及当前履约8文件均已归集主仓库原任务责任目录、未删除；清单分别从原[构建](<Rental Core-开发记录.md#api-current-build-cleanup-20261112>)、[输入](<Rental Core-开发记录.md#adoption-input-capture-20261112>)及履约阶段定位。原任务暂存不存在，工具只读使用，同树包别名不跨树共享。
+- Shared202文件保持，本树当前API867份自持JS：c24固定构建及原输入捕获、当前履约/固定AI必要emit，原结果/失败保留；最终三份实际保护文件和Shared运行时核对见[履约阶段](<Rental Core-开发记录.md#fulfillment-issue-transaction-participant-20261112>)，不当作完整构建/真库/HTTP/宿主/发布验收。原c24的862文件、采用输入4文件、治理验证2文件及当前履约8文件均已归集主仓库原任务责任目录、未删除；清单分别从原[构建](<Rental Core-开发记录.md#api-current-build-cleanup-20261112>)、[输入](<Rental Core-开发记录.md#adoption-input-capture-20261112>)及履约阶段定位。原任务暂存不存在，工具只读使用，同树包别名不跨树共享。
 
 ## 3. 下一入口与原缺口
 

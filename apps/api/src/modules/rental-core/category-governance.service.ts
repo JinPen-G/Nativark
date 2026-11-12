@@ -1,4 +1,5 @@
 /** Rental definition drafts, immutable publication and separate adoption policy.
+ * Requests are detached before waits so keys, writes and audits share one input.
  * Writes reuse original platform identity/permission reads in one transaction;
  * tenant business facts and production enablement remain outside this service. */
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
@@ -122,6 +123,7 @@ export class CategoryGovernanceService {
   }
   async previewCreation(input: PreviewRentalCategoryCreationRequest, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.edit);
+    input = structuredClone(input);
     const source = await this.creationSource(this.prisma, input);
     const preview = composeCategoryCreation(source.definition, input);
     const validation = this.validation(preview.definition, input.code);
@@ -148,6 +150,7 @@ export class CategoryGovernanceService {
     assertCategoryGovernancePermission(user, P.edit);
     categoryIdentity(input.code);
     if (!input.reason?.trim() || input.reason.length > 512) throw new BadRequestException("请填写创建原因");
+    input = structuredClone(input);
     const requestHash = requestFingerprint(input);
     try {
       return await this.platformTransaction(user, P.edit, authorization, async tx => {
@@ -246,6 +249,7 @@ export class CategoryGovernanceService {
   }
   async createDraft(code: string, input: CreateCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     try { return await this.platformTransaction(user, P.edit, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
@@ -265,6 +269,7 @@ export class CategoryGovernanceService {
   async patchDraft(code: string, id: string, section: CategoryDraftSection, input: PatchCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
     if (!CATEGORY_DRAFT_SECTIONS.includes(section)) throw new BadRequestException("未知草稿页签");
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.platformTransaction(user, P.edit, authorization, async (tx) => {
       const row = await this.version(tx, categoryCode, id);
@@ -326,6 +331,7 @@ export class CategoryGovernanceService {
   }
   async publish(code: string, id: string, input: PublishCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.publish);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.platformTransaction(user, P.publish, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);
@@ -362,6 +368,7 @@ export class CategoryGovernanceService {
   }
   async archive(code: string, id: string, input: ArchiveCategoryDraftRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.edit);
+    input = structuredClone(input);
     return this.platformTransaction(user, P.edit, authorization, async (tx) => {
       const categoryCode = categoryIdentity(code);
       const changed = await tx.rentalCategoryVersion.updateMany({ where: { id, categoryCode, revision: input.expectedRevision, status: "draft" }, data: { status: "archived", revision: { increment: 1 } } });
@@ -372,6 +379,7 @@ export class CategoryGovernanceService {
   }
   async opening(code: string, input: SaveCategoryOpeningRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.opening);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.platformTransaction(user, P.opening, authorization, async (tx) => {
       const category = await this.lockedCategory(tx, categoryCode);
@@ -394,6 +402,7 @@ export class CategoryGovernanceService {
   }
   async policy(code: string, id: string, input: SaveCategoryVersionPolicyRequest, user: SystemUserRow, authorization?: string) {
     assertCategoryGovernancePermission(user, P.publish);
+    input = structuredClone(input);
     const categoryCode = categoryIdentity(code);
     return this.platformTransaction(user, P.publish, authorization, async (tx) => {
       await this.lockedCategory(tx, categoryCode);

@@ -4,6 +4,22 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="governance-input-detached-20261112"></a>
+
+## 品类治理原输入与创建收据一致性（2026-11-12）
+
+从已推送并核GitHub的`0475af5c547df6d0bf4c7f3139e3fa955f2a2dbb`接续，仅修改[治理服务](../../apps/api/src/modules/rental-core/category-governance.service.ts)的请求副本和文件头，支撑CAT-GOV-05及CAT-A03/A04/A05。原反例在实际编译服务及原创建fixture中确认：首次权限读取等待时修改调用方原键与原因，创建成功却写到后改键下，原键返回unknown，审计原因变为后改值、请求哈希仍指向原输入，见[已确认反例](../../output/category-governance/governance-input-capture-confirmed-20261112.json)。此前Shared替身缺权限导出的[首次失败](../../output/category-governance/governance-input-capture-before-20261112.json)及本片fixture提取未处理CRLF的[加载失败](../../output/category-governance/governance-input-capture-reproduction-20261112.json)均发生在场景执行前，不作为反例成立证据；原fixture文件和断言未改。
+
+创建预览、正式创建、复制草稿、页签补丁、发布、归档、开通政策及版本采用政策共八入口，在首次等待前复制请求；原键/指纹、来源、修订、原因、嵌套字段和租户数组从同一次副本读取。调用方仍可继续编辑自己的对象，服务不回写或冻结其后继输入。原Auth/权限前后复验、Serializable/锁序、P2002原收据恢复、不可变发布、页签归属、正文大小及生产关闭保持；Shared、DTO/OpenAPI、Controller、共同装配及其他源码不改。
+
+原Shared/API配置TypeScript5.9.3检查零诊断（101个Shared根、867个API根/2012个源），仅内存emit并安装本树治理JS，SHA-256为`43268a570e0ed1f5f40acfadc282eb191e9841fc4e0963b056aaf262ed07df23`；Shared运行时及前片分配/两AI产物五份保护文件未变，见[编译/安装证据](../../output/category-governance/governance-input-capture-compile-20261112.json)。实际编译服务复用原创建fixture，八入口、原创建/发布回读、同键改内容及当前撤权共10组限定调用退出0，见[最终行为证据](../../output/category-governance/governance-input-capture-final-20261112.json)。SQL、Auth/权限和ORM为明确替身，未证明HTTP、真实数据库/并发事务或宿主，不把复制输入等同永久授权。
+
+原`category-governance.test.cjs`退出0；原`category-creation.test.cjs`六项3通过/3失败、退出1：两项缺原身份复核接点，复制来源项缺结构版本。当前失败原样保留，不补恒真生产Auth、不删除断言或将限定调用替代整组，见[原脚本结果](../../output/category-governance/governance-input-capture-original-tests-20261112.json)。实际命令均使用`node --no-compilation-cache --require tests/fixtures/ai-native/prisma-offline-preload.cjs`，源码/命令/退出码均在上述最小证据，审计为空、未新增或扩写测试脚本。
+
+本次验证已退出，Node及独立V8缓存均禁用，没有新增缓存/环境，仅一个空audit。原生PowerShell删除再次被自动审批以`blocked by policy`拒绝，命令未执行、无详细理由；该文件同卷归入原治理待清理任务的`confirmed/`，原暂存不存在。该任务连同旧首次失败audit共2文件/0字节，已归集未删除，责任只在[原唯一清单](../../../../output/.cleanup-pending/rental-core/governance-input-capture-validation/manifest.json)，状态见[退出证据](../../output/category-governance/governance-input-capture-exit-cleanup-20261112.json)。其他原残留保持，工具恢复后由创建者清理。
+
+前片履约结构化来源固定`0475af5c5`，正式ResourcePorts/临近政策/宿主及开业counter/写入参加者仍需原作者闭合，默认履约not_captured。原08、同一冻结构建两个动态编码不同组合经营、真库/多实例、浏览器/微信及独立Review继续按原门槛；完整结项仍0/14。本片不改变需求、任务、实现百分比或生产开放。
+
 <a id="fulfillment-issue-transaction-participant-20261112"></a>
 
 ## 履约结构化来源与原事务参加者（2026-11-12）
