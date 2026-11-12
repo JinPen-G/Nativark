@@ -15,6 +15,7 @@ import type { ClientOrderExtensionRequest, RentalOrderExtension } from "@rental-
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions, readRentalCategoryCode } from "../rental-core/category-identity";
 import { readQuoteEnterpriseDelegation } from "./enterprise-order-delegation-source";
+import { assertCoreMerchantDelegationProof } from "../rental-core/rental-merchant-delegated-order.authority";
 
 type PolicyRow = { scopeKey: string; revision: number; policy: string | EnterpriseScopePolicy; membershipUpdatedAt?: Date | null };
 type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership" | "rentalCategoryDefinition">;
@@ -266,11 +267,26 @@ export class EnterprisePolicyService {
     // read belongs before stock locking and persists until the order commits.
     await tx.$queryRaw`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' FOR UPDATE`;
     const delegation = await readQuoteEnterpriseDelegation(tx, tenantId, quote.id);
-    if (delegation && (delegation.state !== "issued" || Date.parse(delegation.source.expiresAt) <= Date.now() || !binding
-      || delegation.source.workspaceId !== workspaceId || delegation.source.personalCustomerId !== snapshot.personalCustomerId
-      || delegation.source.corporateCustomerId !== snapshot.corporateCustomerId || delegation.source.quoteId !== quote.id
-      || binding.idempotencyKey !== delegation.source.delegationKey || binding.requestFingerprint !== delegation.source.requestHash
-      || requestFingerprint(quote) !== delegation.source.quoteHash)) throw new ForbiddenException("原报价已绑定本人委托源，只能按原D/K受控提交");
+    if (delegation || binding?.merchantDelegation) {
+      if (!delegation || !binding?.merchantDelegation) throw new ForbiddenException("原报价须使用本人委托源与Core封存证明");
+      // Core registers this original binding/proof pair. Verify its provenance
+      // before matching the durable source under the existing tenant lock.
+      const proof = assertCoreMerchantDelegationProof(binding.merchantDelegation, binding);
+      const source = delegation.source, identity = getRequestIdentity();
+      if (delegation.state !== "issued" || Date.parse(source.expiresAt) <= Date.now()
+        || proof.expectedRevision !== 1 || delegation.revision !== proof.expectedRevision
+        || proof.version !== source.version || proof.purpose !== source.purpose
+        || source.tenantId !== tenantId || source.workspaceId !== workspaceId
+        || binding.tenantId !== tenantId || binding.workspaceId !== workspaceId
+        || proof.delegationKey !== source.delegationKey || binding.idempotencyKey !== source.delegationKey
+        || proof.sourceHash !== source.integrityHash || proof.basisHash !== source.basisHash
+        || proof.requestHash !== source.requestHash || binding.requestFingerprint !== source.requestHash
+        || proof.quoteId !== source.quoteId || source.quoteId !== quote.id
+        || proof.personalCustomerId !== source.personalCustomerId || source.personalCustomerId !== snapshot.personalCustomerId
+        || proof.corporateCustomerId !== source.corporateCustomerId || source.corporateCustomerId !== snapshot.corporateCustomerId
+        || !identity || proof.actorUserId !== identity.userId || identity.tenantId !== tenantId || identity.workspaceId !== workspaceId
+        || requestFingerprint(quote) !== source.quoteHash) throw new ForbiddenException("原报价已绑定本人委托源，只能按原D/K受控提交");
+    }
     const current = snapshot.enterpriseBasis ? await this.revalidateQuote(tenantId, workspaceId, quote, tx) : await this.evaluate(tenantId, workspaceId, snapshot.personalCustomerId, quote.request.bookingIdentity!, tx);
     this.assertSameBasis(snapshot.enterpriseBasis, current);
     if (!current) return;
