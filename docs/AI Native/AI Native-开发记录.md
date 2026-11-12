@@ -6,6 +6,50 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-fixed-main-closure-20261113"></a>
+## 指定 main 的模型控制与首字观察整合闭包（2026-11-13）
+
+PM 指定的 main 为 `2a5c56471abb5714f80715e2cfa0aa236f003f51`。QA 将 c4 十九源叠到该主树后，四个后端入口出现十八条缺前置诊断，主要为模型控制 shared/私有契约、source/service、请求映射、原资源及 reader 接点缺失。本阶段按 `ce8697ad8f3253085d215de5860e3cd53c6b38ef`、`c4b26faf29a241e602c28914edf7e646cf225be0`、`07d2ae645b1aaac632bfa0dc0df5bae981f3c91c` 的具体 hunk 组装固定主树候选，未整收检查点。
+
+候选为 `630ac26af1fda5c6fca001bdeac507b301f5281d`，父提交为上述指定 main，tree 为 `2ae60ea0e9f9845deada74b547a612a1e205f9cc`，44 个必要源路径。已普通推送 `codex/ai-native-main-closure-20261113`，重新读取 GitHub 与本地一致。使用 Git 对象组装，没有创建工作树、复制源码包或争用 main 索引。AI 施工分支仍为 codex/ai-native，活动 WIP 保留。完整路径/最终 blob 与精确 hunk 可由 `git diff-tree --no-commit-id --raw -r 630ac26af1fda5c6fca001bdeac507b301f5281d` 和 `git diff 2a5c56471abb5714f80715e2cfa0aa236f003f51 630ac26af1fda5c6fca001bdeac507b301f5281d` 直接核验。
+
+公共文件按固定主树增量处理。AppModule 只追加模型控制 provider 的导入/登记，shared 总出口只补原模型控制 leaf，Guard 在此候选中保持指定主树 blob。TaskCenter 的模型控制/原选单消费 hunk 逐段接入 main 已有页面，保留其原展开与字段消费者。未在该候选加入 AI 树的经营待办和开业提案两个旁支，避免用整页覆盖带入未完窗口。关键最终 blob 如下。
+
+| 文件 | 最终 Git blob |
+| --- | --- |
+| AppModule | `8c94f9e5e47c9b2bf19610a433eb8749aeba0793` |
+| Guard | `05e09a277bd2708531233c3ded7ece9fe9ddd6f8` |
+| shared 总出口 | `20b1e39721e19cb922421f9cf238bd05a1917ade` |
+| AI 标准 providers | `46174cac4d22b9653ee113492190d181329ae70c` |
+| TaskCenterPage | `cf348954d1bea0019e02eb528bf44579e2d03eb7` |
+
+全部固定 main/API/admin/shared 源在内存读取，缺少的路径保持缺少，声明与运行模块均按候选解析。TypeScript 5.9.3，API 4 根/1959 源、后台 4 根/1601 源零诊断，退出 0，stdin SHA-256 `71d2962db2e43cb30de71255938b064ac458c6cd5959309fcf5af79cd2384750`。候选实际原首字/首卡 callback 退出 0，stdin SHA-256 `21d54aa96bd4d048749f169cd33c8ad13c0ca464d8fc132d47ef7d1bb65d4a87`。候选标准 TaskCenter provider/Guard/Controller→原模型读取/日志的必要模拟退出 0，stdin SHA-256 `33740d7c4da39c50d193f3240fdbc0ebada287b3f0f6b265ac0fa08eb77253d3`，1 日志及精确重放，十项拒绝边界，原 Task/Run/Step/Artifact/charge 保持。这里 control-read 使用明确合同夹具，完整模型控制执行沿[原固定阶段](<#ain12-model-control-consumer-20261113>)证据，由 PM 安排 QA 对主树候选独立核接。
+
+初始虚拟运行器只替换读取，无法解析 AI 稀疏树中不存在的 main 企业模块，失败保留。加入固定源路径解析后复验，使用的始终是指定 main 与固定增量。初始批量 Git 读取超出默认 buffer 的失败及 TaskCenter 原 hunk 上下文不符也保留，后者按 main 的现有上下文逐段核接。所有模拟进程退出，审计为空，临时目录未创建。该候选是可独立整合的固定阶段，main 实际集成由 PM 串行执行，任务进度仍按原全文。
+
+<a id="ain12-copilot-and-parameter-consumer-20261113"></a>
+## Copilot 当前订单与动态候选到原重新准备（2026-11-13）
+
+以 `07d2ae645b1aaac632bfa0dc0df5bae981f3c91c` 为基线，收回 dev1 的 Copilot 四源、dev2 的候选四源及 Root 六源，按十四源固定阶段收口。登记订单页仅提供当前 orderId 定位，经原会话/请求、Auth/Guard/ALS、场景/Task 与 Core 再受权。原订单字段由可信上下文固定，A→B→A、切空间、隐藏、撤权和 epoch 变化撤回旧回调。转入工作中心复用原 conversationId、inputRef、Task/Run 和原 journal。[Copilot](../../apps/admin/src/features/copilot/CopilotLayout.tsx)、[服务端会话面板](../../apps/admin/src/features/ai-native/ServerConversationPanel.tsx)与[原受理](../../apps/admin/src/features/ai-native/ConversationAdmission.tsx)
+
+实际组合发现 create-task 精确 POST 漏登 Guard。现复用原 scene intake 入口许可，原 owner、当前资源/场景政策及创建围栏继续由原服务核验。Root 实际 Guard→Controller→原请求/创建服务模拟，1 原 Task/Run、0 Step、0 模型/Core 写入，重复只回原 Task/Run 并标 replayed，陌生引用/匿名/额外字段和未知路由拒绝，退出 0，stdin SHA-256 `fa27f6ee1863b256faa511ad00f955d212b27d0eae1ec15915c2667cccee71f2`。[原 Guard](../../apps/api/src/common/api-auth.guard.ts)
+
+原字段生产者在同一次受权 Core 候选准备中提供完整数量/租期/取还地点投影。quantity 始终有原行 target 与原候选指纹，当前值与约束来自原输入及 Core/配置，地点和数量的明确选择、报价/批准仍由原链处理。资源选择修订需重新核对时，准备结果保持原 missing_input 与重确认要求。旧原问题 witness 保留原窄投影重新验证，兼容当前新增的完整字段能力，原 null witness 仍不补签。[候选准备](../../apps/api/src/modules/ai-native/tools/quote-candidate-preparation.service.ts)与[字段材料服务](../../apps/api/src/modules/ai-native/workbench-field-material.service.ts)
+
+重新准备的起始来源原先只返回初始请求，后续已消费的人类回答未进入 candidate。现仅在新准备时按初始 Run/原选单 Run 读取并复核原回答 lineage，使用 applyOriginalQuoteAnswers 重建，前后再核原选单/历史并把 candidateHash 绑定 sourceHash。原操作观察保留既有历史路径。模型正文不能填入这条来源，初始请求原稿保持。[原再准备来源](../../apps/api/src/modules/ai-native/scenes/human-quote-order.composition.ts)
+
+前端 parameters 与 pending question 的 review 分开。沙箱仍只提交未确认候选，可信控件明确采用时，先读当前原 reissue 起始来源，再由原显示端口重核字段和当前 review/原 input/修订/期限/行指纹，然后填原新条件表单。已有合法人类编辑保留并报告冲突，原引用或字段变化撤回准备状态，条件变动清除 selectionRevision。TaskCenter 的候选入口展开人工确认区，普通问题仍走 TaskClarification。原 source/字段 read 不保存报价或批准，后续沿既有 Core 新报价、新选单、新批准及原收据。[原表单消费](../../apps/admin/src/features/ai-native/QuoteReprepare.tsx)与[接续会话](../../apps/admin/src/features/ai-native/quote-reprepare-session.ts)
+
+dev1 四个实际组件→API→原 Controller/Auth/Guard/ALS→Task/Core/模型宿主及同原对话转接模拟退出 0，1 Task/Run、2 次模拟模型调用、16 API 请求、0 业务写入，受理丢 ACK 仅读原 admissionKey。stdin SHA-256 `358feb7aff927d51e1edac0c2d377f61bef03b6301baf9cab39ff59151cff440`。四根/1737 源 noEmit 零诊断，stdin SHA-256 `481789a3f3a04e4971541004efc130b4bc536a11671a087f8d32c643591b8817`。ConvoDetail、TaskCreation、Closure 的 React 子组件是明确替身，相关原 API/服务实际执行，未称浏览器通过。
+
+dev2 复用原真实回答 fixture、字段生产者、原 reissue 准备与实际候选组件，15/15 退出 0，初始 candidate 与回答后 candidate 不同，字段 target、reissue candidate 和已验证回答后的 hash 相同。行重排、合法编辑、坏 target、伪人类来源、await 中字段/绑定/TTL/身份/提案变化拒绝，关联请求丢 ACK 后只读原键。2 个原回答、2 次模拟模型，stdin SHA-256 `7499041e2244540be7d888b248c675d8424793083da7fcf3a2302f33be755b6d`。四源、TaskCenter 与 Vite 声明 6 根/1615 源 noEmit 零诊断，stdin SHA-256 `30daafbdfe7a7df5fe7bd907424a2812e890610d441e17280fae9327aa3d1fab`。
+
+Root 独立核原 Core 完整字段、默认值、当前重验、篡改默认值/伪上下文拒绝及旧窄投影兼容，退出 0，stdin SHA-256 `9d201e4b8a17907f635d96899d90d1cbe43f974f75923b11555f842f78b9d9a8`。原模型/回答/选单 fixture→原新准备来源→字段 target→实际显式候选合并，2 次模型、0 订单，其他行和合法人类编辑保持，读来源无新增写入，退出 0，stdin SHA-256 `8d0d1084c21e48ebc785e59fb805225981fea51e549fc4dc66746161ac6ac7bf`。Root 的模拟客户端时钟在原 Task 创建前与本组实际日期对齐，未延长旧材料或修改期限校验。
+
+Root 固定索引类型检查使用 TypeScript 5.9.3，生产 4 根/1954 源、后台 5 根/1615 源零诊断、退出 0，stdin SHA-256 `9a6a5fadcbdc6ecf99a021b3dc5c40da288a60f5fc7b63bd4e4fd8e4f97f222d`。十四源与两侧冻结 blob 一致，后继 AIN-14/23 仅在验证器中按 HEAD 隔离，没有覆盖物理 WIP。
+
+命令均为既有会话内 `node --no-compilation-cache -`。首次驱动误读 save 的直接 receipt、忽略 replayed 标记变化，以及字段规则投影与资源重确认混用的失败保留。两侧 VM/夹具/日期等装配失败原样保留，修正验证入口后复验，原测试文件、断言和权限校验未删除。所有本阶段进程退出、审计为空、临时目录未创建，未新增脚本或构建副本。十四源固定阶段交 PM 做 AIN-12 原全文核定，AIN-13 自身五条证据沿助手原交付，前置核闭后及时更新唯一任务表。AIN-14 开业模型正文可伪造成功的反例及 AIN-23 新 Core 身份转交 P2 已分别分配独占后继，尚未混入本阶段。
+
 <a id="ain25-model-control-visible-20261113"></a>
 ## 原模型控制新 Run 的首字观察与推进时钟读回（2026-11-13）
 

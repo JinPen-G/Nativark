@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Synt
 import { ContextMenu } from '@animate-ui/react/primitives/base-ui/context-menu';
 import { ArrowUp, FileText, PanelRightClose, Plus, RotateCcw, ShieldCheck, Square, X } from 'lucide-react';
 import Markdown from 'react-markdown';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useLocale } from '@/app/locale';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { APP_ROUTES, canAccessRoute } from '@/app/navigation';
@@ -73,6 +73,16 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
   const [availableContext, setAvailableContext] = useState({ detail: false, configuration: false });
   const [serverOpen, setServerOpen] = useState(false);
   const auth = useAuthStore();
+  const orderMatch = matchPath({ path: APP_ROUTES.orderDetail.path, end: true }, pathname);
+  const orderId = orderMatch?.params.id;
+  const currentOrderId = orderId && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(orderId) ? orderId : undefined;
+  const source = useRef({ pathname, orderId: currentOrderId, open, serverOpen, generation: 0 });
+  if (source.current.pathname !== pathname || source.current.orderId !== currentOrderId
+    || source.current.open !== open || source.current.serverOpen !== serverOpen) {
+    source.current = { pathname, orderId: currentOrderId, open, serverOpen, generation: source.current.generation + 1 };
+  }
+  const generation = source.current.generation;
+  const currentSource = () => source.current.generation === generation && source.current.open && source.current.serverOpen;
   const canContinue = canAccessRoute(APP_ROUTES.aiOperator, auth.hasPermission, auth.hasCapability,
     auth.tenant?.categoryCode, Boolean(auth.user?.isSaasAdmin), auth.hasTenantMembershipPermission);
   useEffect(() => { setServerOpen(false); }, [open, pathname, copilot.focusVersion]);
@@ -123,9 +133,9 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
       <Button onClick={() => setServerOpen(false)}>{t('返回示例工作区')}</Button>
       <button type="button" aria-label={t('关闭 Copilot')} data-sound="press" onClick={copilot.close}><PanelRightClose size={16} /></button>
     </div></header>
-    <div className="asp-thread"><ServerConversationPanel visible={open} onOpenConversation={canContinue ? selection => {
+    <div className="asp-thread"><ServerConversationPanel visible={open} orderId={currentOrderId} current={currentSource} onOpenConversation={canContinue ? selection => {
       const now = useAuthStore.getState();
-      if (!canAccessRoute(APP_ROUTES.aiOperator, now.hasPermission, now.hasCapability, now.tenant?.categoryCode,
+      if (!currentSource() || !canAccessRoute(APP_ROUTES.aiOperator, now.hasPermission, now.hasCapability, now.tenant?.categoryCode,
         Boolean(now.user?.isSaasAdmin), now.hasTenantMembershipPermission)) return;
       navigate(APP_ROUTES.aiOperator.path, { state: { aiConversation: { ...selection,
         identity: JSON.stringify([now.tenant?.tenantId, now.currentWorkspaceId, now.user?.id]), sessionEpoch: currentSessionEpoch() } } });

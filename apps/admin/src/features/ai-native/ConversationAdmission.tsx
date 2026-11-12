@@ -1,7 +1,8 @@
 /** Typed order/setup request admission only. Bodies stay in memory and the
  * journal retains only original keys/hashes. Task metadata and execution are
- * separate explicit operations; hiding or changing scope retracts the draft. */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+ * separate explicit operations; hiding or changing scope retracts the draft.
+ * Copilot's current order is a locator for original Guard checks, not facts. */
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { AiConversationObservationDraft, AiSceneCode, AiSceneQuoteCandidate } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
@@ -13,6 +14,7 @@ import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
 
 type Question = 'status' | 'fees' | 'payments' | 'next_steps';
+export const ConversationOrderContext = createContext<{ orderId: string; current(): boolean } | null>(null);
 // Existing tenantReadiness section keys, not checks, routes or write authority.
 // The original service must still accept each selected key under current access.
 const openingSections = [
@@ -25,19 +27,22 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
   current: () => boolean; onChanged: () => void;
 }) {
   const { t } = useAiManagementLocale();
+  const source = useContext(ConversationOrderContext);
+  const sourceOrderId = source?.orderId;
   const [orderId, setOrderId] = useState(''), [question, setQuestion] = useState<Question>('status');
   const [sections, setSections] = useState<string[]>([]);
   const [quoteCandidate, setQuoteCandidate] = useState<AiSceneQuoteCandidate>({ customerType: 'personal', items: [{ quantity: 1 }] });
   const capability = capabilityCode ?? observation?.capabilityCode;
-  const scope = useRef({ conversationId, identity, capability, observation, current, onChanged });
-  scope.current = { conversationId, identity, capability, observation, current, onChanged };
+  const scope = useRef({ conversationId, identity, capability, observation, current, onChanged, source });
+  scope.current = { conversationId, identity, capability, observation, current, onChanged, source };
+  const active = () => scope.current.identity === identity && scope.current.conversationId === conversationId
+    && scope.current.capability === capability && scope.current.source?.orderId === sourceOrderId
+    && (!scope.current.source || scope.current.source.current()) && !document.hidden && scope.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { storage = window.sessionStorage; } catch { /* no durable key means no send */ }
-    return new ConversationAdmissionSession(conversationId, aiConversationsApi, () => scope.current.identity === identity
-      && scope.current.conversationId === conversationId && scope.current.capability === capability
-      && !document.hidden && scope.current.current(), storage,
+    return new ConversationAdmissionSession(conversationId, aiConversationsApi, active, storage,
     `ai-conversation-admission:${identity}:${conversationId}`);
-  }, [conversationId, identity, capability]);
+  }, [conversationId, identity, capability, sourceOrderId]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   useEffect(() => { session.activate(); return () => session.dispose(); }, [session]);
   useEffect(() => {
@@ -47,8 +52,7 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
     return () => { clear(); document.removeEventListener('visibilitychange', clear); };
   }, [session]);
   const check = () => {
-    if (scope.current.identity !== identity || scope.current.conversationId !== conversationId
-      || scope.current.capability !== capability || !scope.current.current() || document.hidden) throw Error('AI_SCOPE_CHANGED');
+    if (!active()) throw Error('AI_SCOPE_CHANGED');
   };
   const run = async (send: boolean | 'rotation') => {
     check(); scope.current.onChanged(); setOrderId(''); setSections([]); setQuoteCandidate({ customerType: 'personal', items: [{ quantity: 1 }] });
@@ -59,7 +63,8 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
   };
   const opening = capability === 'opening_diagnosis';
   const quote = capability === 'quote_clarification';
-  const canPrepare = observation?.status === 'active' && observation.capabilityCode === capability && !!capability && !observation.currentTurn;
+  const canPrepare = observation?.status === 'active' && observation.capabilityCode === capability && !!capability && !observation.currentTurn
+    && (!source || capability === 'order_explanation');
   return <section aria-label={t(quote ? '报价条件受理' : opening ? '开业诊断原轮次受理' : '订单解读原轮次受理')} aria-busy={state.busy}>
     <p>{t(quote ? '先核对租赁条件并受理原请求；报价、建单和支付仍需各自正式确认。' : opening ? '仅保存选定分区的开业诊断原请求；受理不创建任务、不调用模型、不修改或发布配置。'
       : '仅保存订单解读原请求；受理不创建任务、不调用模型、不执行业务。')}</p>
@@ -67,7 +72,7 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
       {quote ? <QuoteCandidateFields value={quoteCandidate} onChange={setQuoteCandidate} disabled={state.busy || !canPrepare} /> : opening ? <Select<string[]> mode="multiple" showSearch={false} aria-label={t('诊断分区')} value={sections}
         disabled={state.busy || !canPrepare} options={openingSections.map(([value, label]) => ({ value, label: t(label) }))}
         onChange={value => setSections(value)} /> : <>
-        <Input aria-label={t('订单标识')} value={orderId} maxLength={191} disabled={state.busy || !canPrepare}
+        <Input aria-label={t('订单标识')} value={sourceOrderId ?? orderId} readOnly={!!source} maxLength={191} disabled={state.busy || !canPrepare}
           onChange={event => setOrderId(event.currentTarget.value)} />
         <Select aria-label={t('订单问题')} value={question} disabled={state.busy || !canPrepare}
           options={(['status', 'fees', 'payments', 'next_steps'] as const).map(value => ({ value, label: t(value === 'status' ? '订单状态'
@@ -77,7 +82,7 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
         check(); const latest = scope.current.observation;
         if (!observation || !latest || latest.revision !== observation.revision || latest.currentTurn !== null) throw Error('AI_SCOPE_CHANGED');
         if (opening && sections.some(section => !openingSections.some(([key]) => key === section))) throw Error('AI_INVALID_INPUT');
-        return quote ? session.prepareQuote(latest, quoteCandidate) : opening ? session.prepareOpening(latest, sections) : session.prepare(latest, orderId, question);
+        return quote ? session.prepareQuote(latest, quoteCandidate) : opening ? session.prepareOpening(latest, sections) : session.prepare(latest, sourceOrderId ?? orderId, question);
       }} />
     </>}
     {state.reviewedInput && <p>{t('订单标识')}: {safeDisplayText(state.reviewedInput.orderId, 191)} · {t('订单问题')}: {t(state.reviewedInput.question === 'status' ? '订单状态'
@@ -95,11 +100,11 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
     {state.feedback === 'prepared' && <p>{t('原定位已保留，尚未发送或受理；关闭后只核对原键，不重建正文。')}</p>}
     {state.feedback === 'unknown' && <Alert type="warning" title={t('原轮次待核对，已禁止换键发送；没有受理观察不证明未提交。')} />}
     {state.feedback === 'unavailable' && <Alert type="warning" title={t('原请求定位不可用，未发送；请核对输入和存储。')} />}
-    <ConversationClosure identity={identity} conversationId={conversationId} observation={observation} current={current}
+    <ConversationClosure identity={identity} conversationId={conversationId} observation={observation} current={active}
       onChanged={onChanged} canClose={session.canClose(observation)} beforeClose={session.assertClosure}
       onRotate={(proof, acknowledge) => session.rotate(aiConversationsApi, proof.operationKey, proof, acknowledge)} />
     {state.observation?.result && <ConversationTaskCreation key={state.observation.result.admissionKey} identity={identity}
-      conversationId={conversationId} turn={state.observation.result} current={current} onChanged={onChanged} />}
+      conversationId={conversationId} turn={state.observation.result} current={active} onChanged={onChanged} />}
     {state.observation?.result && <p role="status">{t('已观察原请求受理，不代表模型调用或业务完成。')}
       {' '}{safeDisplayText(state.observation.result.original.inputRef, 191)}</p>}
   </section>;

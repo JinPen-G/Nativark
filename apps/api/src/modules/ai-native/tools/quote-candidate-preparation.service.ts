@@ -1,9 +1,12 @@
 import { z } from 'zod';
-import type { AiExecutionContext, RentalFulfillmentLocation, RentalPricingRate } from '@rental-os/shared';
+import type { AiExecutionContext, AiTaskInputContractDraft, AiTaskInputAnswerDraft, AiTaskInputFieldDraft,
+  RentalFulfillmentLocation, RentalPricingRate } from '@rental-os/shared';
 import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import { assertAiReadContextBinding } from './read-context-binding';
 import { isDeepStrictEqual } from 'node:util';
-import { RENTAL_CATEGORY_DEFINITIONS, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
+import { RENTAL_CATEGORY_DEFINITIONS, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES,
+  AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION, isAiTaskInputContractDraft,
+  validateAiTaskInputAnswersDraft } from '@rental-os/shared';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 import type { AiMembershipCandidateReadFactsService } from '../membership-candidate-read-facts.service';
 import { aiQuotePreviewInputSchema, aiQuotePersonalBookingIdentitySchema, type AiQuoteCoreContextSource } from '../quote-preview.service';
@@ -90,7 +93,20 @@ export class AiQuoteCandidatePreparationService {
       return this.prepareBound(snapshot, context);
     });
   }
-  private async prepareBound(value: unknown, expectedContext?: AiExecutionContext) {
+  /** The same protected preparation can expose editable fields for a complete
+   * candidate. This is a display projection, never a persisted question. */
+  async prepareWorkbenchFields(value: unknown, expectedContext?: AiExecutionContext) {
+    const snapshot = structuredClone(value), expected = expectedContext && structuredClone(expectedContext);
+    const projection: { contract: AiTaskInputContractDraft | null; defaults: AiTaskInputAnswerDraft[] } = { contract: null, defaults: [] };
+    const preparation = this.aggregateAuthority
+      ? await this.aggregateAuthority.withRead('quote_context', {}, async context => {
+        assertAiReadContextBinding(context, expected);
+        return this.prepareBound(snapshot, context, projection);
+      }) : await this.prepareBound(snapshot, expected, projection);
+    return { preparation, editableContract: projection.contract, defaults: projection.defaults };
+  }
+  private async prepareBound(value: unknown, expectedContext?: AiExecutionContext,
+    workbench?: { contract: AiTaskInputContractDraft | null; defaults: AiTaskInputAnswerDraft[] }) {
     const parsed = aiQuoteCandidateInputSchema.safeParse(value);
     if (!parsed.success) {
       const missingFields = [...new Set(parsed.error.issues.map(row => row.path.join('.') || 'request'))];
@@ -348,6 +364,45 @@ export class AiQuoteCandidatePreparationService {
       reason: 'duplicate_product_lines_require_original_form' as const, selectionRevision,
       missingFields: duplicateFields, clarifications: duplicateFields.map(field => ({ field,
         reason: 'explicit_product_and_quantity_correction_required', action: 'use_original_booking_flow', candidates: [] })) };
+    const request = aiQuotePreviewInputSchema.safeParse({ customerType: input.customerType, customerId: input.customerId,
+      ...(input.bookingIdentity ? { bookingIdentity: input.bookingIdentity } : {}),
+      ...(selectedAddress ? { deliveryAddressId: selectedAddress.id } : {}),
+      lines, startAt, endAt, fulfillmentMode: input.fulfillmentMode, fulfillmentLocationId, ...(returnLocationId ? { returnLocationId } : {}) });
+    if (workbench && !ambiguous.length && !missingFields.length && request.success) {
+      // Field rules and original values are an editable projection. A stale
+      // resource-choice revision still follows the original reconfirmation below.
+      const quantityTarget = {
+        bindingVersion: AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION, kind: 'quote_item' as const,
+        rowIndex: 0, candidateInputFingerprint: requestFingerprint(input),
+      };
+      const fields: AiTaskInputFieldDraft[] = [
+        { fieldId: 'quantity', kind: 'integer', required: true, label: input.items && input.items.length > 1 ? '第1行商品数量' : '明确商品数量',
+          minimum: 1, maximum: AI_QUOTE_CANDIDATE_LIMITS.quantity, target: quantityTarget },
+        { fieldId: 'starts_at', kind: 'text', required: true, maxLength: 80, label: '明确开始时间（带时区的绝对时间）' },
+        { fieldId: 'ends_at', kind: 'text', required: true, maxLength: 80, label: '明确结束时间（带时区的绝对时间）' },
+      ];
+      for (const [fieldId, capability, selectedId, required, label] of [
+        ['pickup_location', pickupCapability, fulfillmentLocationId, true, '明确取货或交付地点'],
+        ['return_location', 'return', returnLocationId, false, '明确归还地点'],
+      ] as const) {
+        const rows = eligibleLocations(capability);
+        const selected = rows.find(row => row.id === selectedId);
+        const options = [...(selected ? [selected] : []), ...rows.filter(row => row.id !== selectedId)].slice(0, 50)
+          .map(row => ({ value: row.id, label: row.name.slice(0, 160) }));
+        if (options.length) fields.push({ fieldId, kind: 'choice', required, label, options });
+      }
+      const contract: AiTaskInputContractDraft = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,
+        code: 'original_quote_editable_parameters', version: selectionRevision, fields };
+      const defaults: AiTaskInputAnswerDraft[] = [
+        { fieldId: 'quantity', value: request.data.lines[0].quantity },
+        { fieldId: 'starts_at', value: request.data.startAt }, { fieldId: 'ends_at', value: request.data.endAt },
+        { fieldId: 'pickup_location', value: request.data.fulfillmentLocationId },
+        ...(request.data.returnLocationId ? [{ fieldId: 'return_location' as const, value: request.data.returnLocationId }] : []),
+      ];
+      if (!isAiTaskInputContractDraft(contract) || !validateAiTaskInputAnswersDraft(contract, defaults))
+        throw new ModelGatewayError('CONFIG_INVALID');
+      workbench.contract = contract; workbench.defaults = defaults;
+    }
     const hasExplicitResourceSelection = Boolean(enterprise || input.locationId || input.returnLocationId || input.deliveryAddressId || input.items?.some(item => item.itemGroupId));
     if ((hasExplicitResourceSelection && !input.selectionRevision) || (input.selectionRevision && input.selectionRevision !== selectionRevision)) {
       // Offer current authorized choices again, rather than advancing the old
@@ -379,10 +434,6 @@ export class AiQuoteCandidatePreparationService {
     }
     if (ambiguous.length) return { status: 'ambiguous' as const, ambiguousFields: ambiguous, missingFields, customerCandidates, clarifications, selectionRevision };
     if (missingFields.length) return { status: 'missing_input' as const, missingFields, clarifications, selectionRevision };
-    const request = aiQuotePreviewInputSchema.safeParse({ customerType: input.customerType, customerId: input.customerId,
-      ...(input.bookingIdentity ? { bookingIdentity: input.bookingIdentity } : {}),
-      ...(selectedAddress ? { deliveryAddressId: selectedAddress.id } : {}),
-      lines, startAt, endAt, fulfillmentMode: input.fulfillmentMode, fulfillmentLocationId, ...(returnLocationId ? { returnLocationId } : {}) });
     if (!request.success) return { status: 'missing_input' as const, missingFields: ['request'] };
     return { status: 'needs_confirmation' as const, request: request.data, timeZone, observedAt: now.toISOString(), selectionRevision,
       ...(selectedAddress && addresses ? { addressFingerprint: quoteAddressFingerprint(scope, input.customerId!, selectedAddress, addresses.identityHash) } : {}),

@@ -561,6 +561,8 @@ const english: Record<string, string> = {
   "紧凑视口": "Compact viewport",
   "宽视口": "Wide viewport",
   "以上为客户端报告，不是经营事实或 SLO 判定；不证明当前内容仍可见。": "These are client reports, not business facts or an SLO verdict. They do not assert that content is still visible.",
+  "采用候选租赁条件": "Apply candidate rental conditions",
+  "将已核对候选填入新条件？已填写的合法输入会保留，关联请求、Core 报价、选单和新批准仍需分别确认。": "Apply the reviewed candidate to the new conditions? Existing valid input will be kept. The linked request, Core quote, selection and new approval each require confirmation.",
 };
 
 /** New feature copy shares the existing language preference and dictionary fallback. */

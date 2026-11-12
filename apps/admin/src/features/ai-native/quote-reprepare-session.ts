@@ -10,8 +10,10 @@ import { AI_PROPOSAL_DRAFT_VERSION, validateAiQuoteSelectionHttpValue, type AiQu
   type AiQuoteRequestReissuePreparationInputDraft, type AiQuoteRequestReissuePreparationDraft,
   type AiQuoteRequestReissueReferenceDraft, type AiQuoteRequestReissueCreateDraft, type AiQuoteRequestReissueOperationDraft,
   type AiQuoteRequestReissueSelectionPreparationDraft, type AiQuoteRequestReissueSelectDraft,
-  type AiQuoteRequestReissueSelectionOperationDraft, type AiSelectedQuoteTaskRequestDraft, type AiSelectedQuoteTaskRunDraft } from '@rental-os/shared';
+  type AiQuoteRequestReissueSelectionOperationDraft, type AiSelectedQuoteTaskRequestDraft, type AiSelectedQuoteTaskRunDraft,
+  type AiTaskInputFieldDraft, type AiWorkbenchFieldMaterialDraft } from '@rental-os/shared';
 import { commandHash } from './budget-settings-session';
+import { inspectWorkbenchQuoteParameterCandidate, type WorkbenchQuoteParameterReview } from './workbench-input-review-session';
 
 type Ports = {
   list(input: { sceneCode: string; status: 'waiting_confirmation'; limit: number; cursor?: string }, signal: AbortSignal): Promise<AiTaskMetadataPageDraft>;
@@ -26,6 +28,60 @@ export type QuoteReprepareState = Readonly<{ busy: boolean; locked: boolean; rea
 const normalized = (value: unknown): unknown => Array.isArray(value) ? value.map(normalized) : value && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, normalized((value as Record<string, unknown>)[key])])) : value;
 const same = (a: unknown, b: unknown) => JSON.stringify(normalized(a)) === JSON.stringify(normalized(b));
+
+function quoteParameterValue(candidate: AiSceneQuoteCandidate, field: AiTaskInputFieldDraft) {
+  switch (field.fieldId) {
+    case 'quantity': return candidate.items?.[field.target!.rowIndex]?.quantity;
+    case 'starts_at': return candidate.start;
+    case 'ends_at': return candidate.end;
+    case 'pickup_location': return candidate.locationId;
+    case 'return_location': return candidate.returnLocationId;
+    default: throw Error('AI_INVALID_INPUT');
+  }
+}
+function quoteParameterBasis(candidate: AiSceneQuoteCandidate, field: AiTaskInputFieldDraft) {
+  if (field.fieldId === 'pickup_location') return [candidate.locationId, candidate.locationName];
+  if (field.fieldId === 'return_location') return [candidate.returnLocationId, candidate.returnLocationName];
+  return quoteParameterValue(candidate, field);
+}
+
+/** Fill only this explicitly adopted, current original projection. A row target
+ * binds the pre-edit candidate; human edits are kept and reported as conflicts. */
+export async function mergeWorkbenchQuoteParameters(review: WorkbenchQuoteParameterReview,
+  source: AiSceneQuoteCandidate, current: AiSceneQuoteCandidate | null) {
+  const checked = inspectWorkbenchQuoteParameterCandidate(review.candidate, review.fieldMaterial);
+  if (!same(checked, review) || !validateAiSceneQuoteCandidateDraft(source)
+    || current !== null && !validateAiSceneQuoteCandidateDraft(current)) throw Error('AI_INVALID_INPUT');
+  const original = structuredClone(source), draft = structuredClone(current ?? source);
+  const contract = checked.fieldMaterial.contract!, conflicts: string[] = [];
+  const target = contract.fields.find(field => field.fieldId === 'quantity')?.target;
+  if (target && (target.candidateInputFingerprint !== await commandHash(original)
+    || !original.items?.[target.rowIndex])) throw Error('AI_REVISION_CONFLICT');
+  for (const answer of checked.candidate.answers) {
+    const field = contract.fields.find(field => field.fieldId === answer.fieldId)!;
+    if (field.fieldId === 'quantity') {
+      const row = draft.items?.[field.target!.rowIndex], sourceRow = original.items?.[field.target!.rowIndex];
+      const { quantity: _sourceQuantity, ...sourceItem } = sourceRow!;
+      const { quantity: _draftQuantity, ...draftItem } = row ?? {};
+      if (!row || !same(sourceItem, draftItem)) { conflicts.push(field.fieldId); continue; }
+    }
+    if (!same(quoteParameterBasis(original, field), quoteParameterBasis(draft, field))) {
+      if (quoteParameterValue(draft, field) !== answer.value) conflicts.push(field.fieldId);
+      continue;
+    }
+    if (field.fieldId === 'quantity') draft.items![field.target!.rowIndex].quantity = Number(answer.value);
+    else if (field.fieldId === 'starts_at') draft.start = String(answer.value);
+    else if (field.fieldId === 'ends_at') draft.end = String(answer.value);
+    else if (field.kind === 'choice') {
+      const option = field.options.find(option => option.value === answer.value)!;
+      if (field.fieldId === 'pickup_location') { draft.locationId = option.value; draft.locationName = option.label; }
+      else { draft.returnLocationId = option.value; draft.returnLocationName = option.label; }
+    }
+  }
+  if (!same(draft, current ?? source)) delete draft.selectionRevision;
+  if (!validateAiSceneQuoteCandidateDraft(draft)) throw Error('AI_INVALID_INPUT');
+  return { candidate: draft, conflicts };
+}
 
 /** The live wait may disappear after rejection. Retain only its reviewed
  * reference so the server can independently authorize the later historical read. */
@@ -174,6 +230,7 @@ export class QuoteReprepareSession {
 }
 
 type ReissuePorts = {
+  revalidateParameters?(review: WorkbenchQuoteParameterReview, signal: AbortSignal): Promise<AiWorkbenchFieldMaterialDraft>;
   reissuePreparation(input: AiQuoteRequestReissuePreparationInputDraft, signal: AbortSignal): Promise<AiQuoteRequestReissuePreparationDraft>;
   reissueRequest(input: AiQuoteRequestReissueCreateDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueOperationDraft>;
   reissueOperation(input: AiQuoteRequestReissueReferenceDraft, signal: AbortSignal): Promise<AiQuoteRequestReissueOperationDraft>;
@@ -188,6 +245,7 @@ type ReissuePorts = {
 type RequestPhase = 'request' | 'quote' | 'selection' | 'start';
 type RequestMarker = { version: 1; reference: AiQuoteRequestReissueReferenceDraft; phase: RequestPhase };
 export type QuoteRequestReissueState = Readonly<{ busy: boolean; invalid: boolean; phase: RequestPhase | null; unknown: boolean;
+  parameterFeedback: 'adopted' | 'conflict' | null;
   candidate: AiSceneQuoteCandidate | null; preparation: AiQuoteRequestReissuePreparationDraft | null;
   operation: AiQuoteRequestReissueOperationDraft | null; quoteReview: AiOriginalQuoteReviewResponseDraft | null;
   quote: AiOriginalQuoteConfirmResponseDraft | AiOriginalQuoteReceiptResponseDraft | null;
@@ -205,7 +263,7 @@ export class QuoteRequestReissueSession {
     private readonly storage: Pick<Storage, 'getItem' | 'setItem'> | undefined, private readonly key: string) {
     let phase: RequestPhase | null = null, invalid = false;
     try { phase = this.marker()?.phase ?? null; } catch { invalid = true; }
-    this.state = Object.freeze({ busy: false, invalid, phase, unknown: !!phase, candidate: null, preparation: null,
+    this.state = Object.freeze({ busy: false, invalid, phase, unknown: !!phase, parameterFeedback: null, candidate: null, preparation: null,
       operation: null, quoteReview: null, quote: null, selectionPreparation: null, selection: null });
   }
   snapshot = () => this.state;
@@ -239,13 +297,15 @@ export class QuoteRequestReissueSession {
     this.publish({ phase: value.phase, unknown: true });
   }
   activate() { this.active = true; }
-  retract() {
+  retract(preserveDraft = false) {
     this.flight?.abort(); this.flight = null;
-    this.state = Object.freeze({ ...this.state, busy: false, unknown: !!this.state.phase, candidate: null, preparation: null,
+    this.state = Object.freeze({ ...this.state, busy: false, unknown: !!this.state.phase,
+      candidate: preserveDraft && !this.state.phase ? this.state.candidate : null, preparation: null, parameterFeedback: null,
       operation: null, quoteReview: null, quote: null, selectionPreparation: null, selection: null });
     if (this.active && this.current()) this.listeners.forEach(listener => listener());
   }
   dispose() { this.active = false; this.retract(); }
+  clearConditionPreview() { this.publish({ preparation: null, parameterFeedback: null }); }
   private async run(work: (signal: AbortSignal) => Promise<void>) {
     this.check(); if (this.flight || this.state.invalid) throw Error('AI_OPERATION_BUSY');
     const controller = new AbortController(); this.flight = controller; this.publish({ busy: true });
@@ -255,22 +315,41 @@ export class QuoteRequestReissueSession {
     finally { if (this.flight === controller) { this.flight = null; this.publish({ busy: false }); } }
   }
   private input(candidate?: AiSceneQuoteCandidate): AiQuoteRequestReissuePreparationInputDraft {
-    const original = this.original(); if (!original || this.marker()) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const original = this.original(); if (!original || this.state.phase || this.state.unknown || this.marker()) throw Error('AI_RESOURCE_UNAVAILABLE');
     return { selection: this.selection, original: structuredClone(original), intent: 'change_plan', ...(candidate ? { candidate } : {}) };
   }
   private async readConditions(input: AiQuoteRequestReissuePreparationInputDraft, signal: AbortSignal) {
     this.check(signal, input.original);
     const value = await this.ports.reissuePreparation(input, signal); this.check(signal, input.original);
-    if (!same(value.selection, this.selection) || !same(value.original, input.original) || value.intent !== input.intent
+    if (!validateAiQuoteSelectionHttpValue('AiQuoteRequestReissuePreparationDraft', value)
+      || !same(value.selection, this.selection) || !same(value.original, input.original) || value.intent !== input.intent
       || input.candidate && !same(input.candidate, value.candidate)) throw Error('AI_REVISION_CONFLICT');
     this.checkScope(value.scope); this.checkScope(value.preparation.scope); return value;
   }
   prepareConditions = () => this.run(async signal => {
-    const value = await this.readConditions(this.input(), signal); this.publish({ candidate: structuredClone(value.candidate), preparation: value });
+    const value = await this.readConditions(this.input(), signal);
+    this.publish({ candidate: structuredClone(value.candidate), preparation: value, parameterFeedback: null });
+  });
+  adoptParameters = (review: WorkbenchQuoteParameterReview, currentReview: () => WorkbenchQuoteParameterReview | null) => this.run(async signal => {
+    const checked = inspectWorkbenchQuoteParameterCandidate(review.candidate, review.fieldMaterial), current = this.state.candidate;
+    const valid = () => {
+      this.check(signal);
+      if (!same(currentReview(), checked) || checked.candidate.binding.taskId !== this.selection.taskId
+        || checked.candidate.binding.original.inputRef !== this.selection.originalInputRef
+        || Date.parse(checked.expiresAt) <= Date.now()) throw Error('AI_REVISION_CONFLICT');
+    };
+    valid();
+    if (!this.ports.revalidateParameters) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const source = await this.readConditions(this.input(), signal); valid();
+    const material = await this.ports.revalidateParameters(checked, signal); valid();
+    if (!same(material, checked.fieldMaterial)) throw Error('AI_REVISION_CONFLICT');
+    const merged = await mergeWorkbenchQuoteParameters(checked, source.candidate, current); valid();
+    this.publish({ candidate: merged.candidate, preparation: null,
+      parameterFeedback: merged.conflicts.length ? 'conflict' : 'adopted' });
   });
   editConditions(value: AiSceneQuoteCandidate) {
     this.check(); if (this.marker() || this.state.busy) throw Error('AI_OPERATION_BUSY');
-    this.publish({ candidate: structuredClone(value), preparation: null });
+    this.publish({ candidate: structuredClone(value), preparation: null, parameterFeedback: null });
   }
   inspectConditions = () => this.run(async signal => {
     const candidate = this.state.candidate;
