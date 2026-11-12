@@ -4047,10 +4047,16 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
     ["post", "approvals/{id}/close-execution", "closeEnterpriseApprovalExecution", "CloseEnterpriseApprovalExecution"],
     ["get", "approvals/{id}/result", "enterpriseApprovalOriginalResult"], ["post", "approvals/submit", "submitEnterpriseApproval", "SubmitEnterpriseApprovedBooking"],
     ["get", "operations/{key}", "readEnterpriseWorkflowOperation"],
+    ["get", "corporates/{corporateId}/orders/{orderId}/payment-proof-basis", "readEnterprisePaymentProofBasis"],
+    ["post", "corporates/{corporateId}/orders/{orderId}/payment-proof/upload-sessions", "createEnterprisePaymentProofUpload", "EnterprisePaymentProofUploadRequest"],
+    ["get", "corporates/{corporateId}/orders/{orderId}/payment-proof/upload-operations/{key}", "readEnterprisePaymentProofUpload"],
+    ["post", "corporates/{corporateId}/orders/{orderId}/payment-proof/upload-sessions/{id}/complete", "completeEnterprisePaymentProofUpload", "ClientQualificationUploadCompleteRequest"],
     ["get", "authority/upload-operations/{key}", "enterpriseAuthorityOriginalUpload"],
     ["post", "authority/upload-sessions", "enterpriseAuthorityUpload", "EnterpriseAuthorityUploadRequest"], ["post", "authority/upload-sessions/{id}/complete", "completeEnterpriseAuthorityUpload", "ClientQualificationUploadCompleteRequest"]
   ];
   const responses: Record<string, string> = {
+    readEnterprisePaymentProofBasis: "EnterprisePaymentProofBasis", createEnterprisePaymentProofUpload: "FileUploadSessionSummary",
+    readEnterprisePaymentProofUpload: "EnterprisePaymentProofUploadOperation", completeEnterprisePaymentProofUpload: "GenericObject",
     issueEnterpriseOrderDelegation: "EnterpriseOrderDelegationOriginal", readEnterpriseOrderDelegation: "EnterpriseOrderDelegationOriginal", revokeEnterpriseOrderDelegation: "EnterpriseOrderDelegationOriginal",
     enterpriseApplications: "EnterpriseWorkflowList", readEnterpriseApplicationDetail: "EnterpriseWorkflowView", enterpriseOwnRequests: "EnterpriseWorkflowList", enterpriseJoinRequests: "EnterpriseWorkflowList", enterpriseOwnRelations: "EnterpriseOwnRelations", previewEnterpriseInvite: "EnterpriseInvitePreview",
     enterpriseExtensionEligibility: "EnterpriseExtensionEligibility", enterpriseExtensionRequestOriginalResult: "EnterpriseExtensionRequestOriginalResult", closeEnterpriseExtensionRequest: "EnterpriseExtensionRequestOriginalResult",
@@ -4092,6 +4098,10 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
       { name: "allocationId", in: "query" as const, required: false, schema: { type: "string" as const, minLength: 1, maxLength: 191 } },
       { name: "replacementItemGroupId", in: "query" as const, required: false, schema: { type: "string" as const, minLength: 1, maxLength: 191 } }
     ] } : {}) })),
+    clientOperation("get", "/api/client/v1/enterprise/management-requests/{id}/files/{fileId}", "readEnterprisePaymentProofEvidence", "Read this applicant's frozen rental-fee payment evidence under current enterprise, order and financial authority", {
+      parameters: ["id", "fileId"].map(name => ({ name, in: "path" as const, required: true, schema: { type: "string" as const, minLength: 1, maxLength: 191 } })),
+      responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "application/octet-stream"
+    }),
     clientOperation("get", "/api/client/v1/enterprise/orders/{orderId}/exchange-inspections/{preparationId}/photos/{fileAssetId}",
       "enterpriseExchangeInspectionPhoto", "Read this using customer's exact frozen PNG/JPEG under the current inspection and preparation hash", {
         parameters: [

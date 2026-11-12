@@ -3,6 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { EnterpriseManagedCorporate } from "@rental-os/shared";
+import { ENTERPRISE_REVIEW_REQUEST_TYPES } from "@rental-os/shared";
 import { enterpriseOwnEmployeePolicyMessagesSnapshot, ENTERPRISE_EMPLOYEE_POLICY_MESSAGE_UNAVAILABLE, type EnterpriseOwnEmployeePolicyMessages, enterpriseOwnCorporateStatusMessagesSnapshot, type EnterpriseOwnCorporateStatusMessages, enterpriseOwnManagementReviewMessagesSnapshot, type EnterpriseOwnManagementReviewMessages, enterpriseOwnJoinReviewMessagesSnapshot, type EnterpriseOwnJoinReviewMessages, enterpriseOwnApplicationReviewMessagesSnapshot, type EnterpriseOwnApplicationReviewMessages, enterpriseOwnRetainedMergeMessagesSnapshot, type EnterpriseOwnRetainedMergeMessages, enterpriseOwnStatusMessagesSnapshot, type EnterpriseOwnStatusMessages, enterpriseOwnTransferMessagesSnapshot, type EnterpriseOwnTransferMessages, enterpriseOwnRelationshipMessagesSnapshot, type EnterpriseOwnRelationshipMessages, enterpriseApprovalNoticesSnapshot, type EnterpriseApprovalNotices, enterpriseOwnMessagesSnapshot, ENTERPRISE_OWN_MESSAGE_UNAVAILABLE, type EnterpriseOwnMessages, type EnterpriseAuditView, type EnterpriseTaskCenter, type EnterpriseTaskItem } from "@rental-os/shared";
 import { getRequestIdentity } from "../../common/request-identity";
 import type { ClientRequestContext } from "../client/client-auth.service";
@@ -110,7 +111,7 @@ export class EnterpriseTaskCenterService {
     if (rows.length>200) throw new ConflictException("本人反馈超出当前有界范围，请在原申请页核对");
     const items=rows.map(row=>{
       if (row.tenantId!==context.tenantId || row.applicantCustomerId!==context.customerId || !["corporate_application","join_request","finance_request"].includes(row.kind)
-        || row.kind === "finance_request" && !["profile_change","credit_change","scope_change"].includes(row.requestType ?? "")
+        || row.kind === "finance_request" && !ENTERPRISE_REVIEW_REQUEST_TYPES.some(type => type === row.requestType)
         || !Number.isFinite(row.updatedAt?.getTime()) || row.decisionReason!==null && typeof row.decisionReason!=="string") throw new ConflictException("原本人反馈关联不可核对");
       return {requestId:row.id,kind:row.kind === "finance_request" ? "management_request" : row.kind,state:row.state,revision:row.revision,updatedAt:row.updatedAt.toISOString(),
         page:row.kind === "corporate_application" ? "applications" : row.kind === "join_request" ? "join" : "profile",...(row.decisionReason!==null ? {feedback:row.decisionReason} : {})};
@@ -190,7 +191,9 @@ export class EnterpriseTaskCenterService {
       const original=decoded as Record<string,unknown>;if(original.id!==requestId)throw new ConflictException("原本人管理审核申请引用不一致");
       return {requestId,corporateCustomerId:row.corporateCustomerId,requestType:row.originalRequestType,operationKey:row.operationKey,state:original.state,revision:original.revision,effect:original.effect,reason:row.reason,createdAt:row.createdAt.toISOString()};
     });
-    const result=enterpriseOwnManagementReviewMessagesSnapshot({tenantCode:context.tenantCode,customerId:context.customerId,coverage:"own_original_management_review_only_receipts",delivery:"not_reported",readState:"not_recorded",items},context.tenantCode,context.customerId);
+    const paymentProofItems = items.filter(item => item.requestType === "payment_proof");
+    const result=enterpriseOwnManagementReviewMessagesSnapshot({tenantCode:context.tenantCode,customerId:context.customerId,coverage:"own_original_management_review_only_receipts",delivery:"not_reported",readState:"not_recorded",items:items.filter(item => item.requestType !== "payment_proof"),
+      ...(paymentProofItems.length ? {paymentProofItems} : {})},context.tenantCode,context.customerId);
     if(!result)throw new ConflictException("原本人管理审核消息缺少可核对字段");return result;
   }
   /** Original member-policy target and retained immutable relation ownership only.

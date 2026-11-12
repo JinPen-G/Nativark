@@ -8,6 +8,7 @@
 
 | 领域 | 入口 → 应用服务 → 原来源与消费者 |
 | --- | --- |
+| 逐单费用回款凭证核对 | [原财务页](src/FinancePage.tsx)定位企业承担订单 → [资料申请页](src/ManagementRequestsPage.tsx)/[原反馈](src/ManagementRequestFeedback.tsx) → [原管理服务](../api/src/modules/enterprise/enterprise-management-request.service.ts)与[订单/凭证来源校验](../api/src/modules/enterprise/enterprise-payment-proof-source.ts)。企业当前申请、订单和财务权限共同准入，保存原订单/空间/币种/版本、正金额申报及冻结凭证绑定，专用上传复用原文件内容冻结。商户当前企业/财务权和原空间复验后记录 review_only 结果，原 K 单独回读。凭证字节经本人或商户受控入口读取，通用下载关闭。审核历史以可选 paymentProofItems 追加，原三类 items 合同继续可读。正式到账/核销、保证金原来源和完整账单异议沿原业务接点与验收门槛。 |
 | 企业订单分页、详情与导出 | [订单页](src/OrdersPage.tsx) → [企业专用 Controller](../api/src/modules/enterprise/enterprise-read.controller.ts) → [原事实 reader](../api/src/modules/enterprise/enterprise-order-reader.service.ts) → 原订单主体列／身份告知快照／商品和费用。当前覆盖可信客户经营空间，`orders:read` 与 `export:create` 在 IO 前后分别复验；计数、搜索和分页共用原责任／告知条件，已离职员工的原订单沿原事实读取。详情沿 Core 原归还时间与历史保证金标记，空金额保留缺失，企业优惠自费组只投影公开租赁费用。导出复用原 ListTransferTools／CSV 防公式执行，完整筛选快照单次有界 500 条，超限拒绝；后台总入口接入、行为／宿主及跨空间历史授权仍待收口。 |
 | 商户入口、客户会话与企业选择 | [main](src/main.tsx) / [App](src/App.tsx) → [企业会话宿主](src/enterprise-session.tsx) → [共用客户 transport](../../packages/web-client/src/session.ts) → 原客户 Auth/Guard、[企业访问服务](../api/src/modules/client/enterprise-access.service.ts) |
 | 界面与显式开通 | [Shell](src/EnterpriseShell.tsx) → [窄 UI 出口](../admin/src/components/ui/customer-entry.ts) / [UI 宿主作用域](../admin/src/components/ui/BusinessUiScope.tsx)；商户[配置面板](../admin/src/features/membership/EnterprisePortalConfiguration.tsx) → [门户配置服务](../api/src/modules/platform/enterprise-portal.service.ts) |

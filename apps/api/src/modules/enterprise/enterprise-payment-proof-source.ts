@@ -50,7 +50,9 @@ export class EnterprisePaymentProofSource {
       WHERE s.tenantId=${context.tenantId} AND s.customerId=${context.customerId} AND s.id=${context.sessionId}
         AND s.workspaceId=${context.workspaceId} AND w.code=${context.workspaceCode} AND s.revokedAt IS NULL AND s.expiresAt>NOW(3)
       ${tx === this.prisma as unknown as Prisma.TransactionClient ? Prisma.empty : Prisma.sql`FOR UPDATE`}`);
-    if (sessions.length !== 1 || sessions[0].id !== context.sessionId || getRequestIdentity()?.workspaceId !== context.workspaceId) throw new ForbiddenException("回款核对原会话或经营空间已变化");
+    const after = getRequestIdentity();
+    if (sessions.length !== 1 || sessions[0].id !== context.sessionId || !after || after.workspaceId !== context.workspaceId || after.tenantId !== context.tenantId
+      || after.userId !== context.customerId || after.audience !== "client" || after.isSaasAdmin || after.staffApi || after.dataScope !== undefined) throw new ForbiddenException("回款核对原会话或经营空间已变化");
     return enterpriseHash([grant.membershipId, grant.permissionRevision, grant.actions]);
   }
 
@@ -98,7 +100,7 @@ export class EnterprisePaymentProofSource {
       const basis = metadata?.enterprisePaymentProof as Record<string, unknown> | undefined;
       if (!row || row.tenantId !== tenantId || row.businessId !== source.orderId || row.uploadedBy !== applicant
         || metadata?.workspaceId !== source.workspaceId || basis?.corporateCustomerId !== source.corporateCustomerId || basis?.orderId !== source.orderId
-        || basis?.objectRevision !== source.objectRevision || metadata?.fileUploadVersion !== 2 || metadata.fileContentVersion !== 1
+        || basis?.objectRevision !== source.objectRevision || basis?.purpose !== "rental_fee" || metadata?.fileUploadVersion !== 2 || metadata.fileContentVersion !== 1
         || typeof row.checksum !== "string" || !/^[a-f0-9]{64}$/u.test(row.checksum) || metadata.contentHash !== row.checksum
         || !row.uploadSession || row.uploadSession.status !== "completed" || !row.uploadSession.completedAt
         || row.uploadSession.provider !== row.storageProvider || row.uploadSession.storageKey !== row.storageKey

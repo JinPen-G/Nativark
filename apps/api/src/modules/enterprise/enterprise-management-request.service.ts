@@ -3,7 +3,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { ENTERPRISE_MANAGEMENT_REQUEST_TYPES, isRentalCategoryCode, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseOperationResult, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest, type SystemUserRow } from "@rental-os/shared";
+import { ENTERPRISE_REVIEW_REQUEST_TYPES, isRentalCategoryCode, type EnterpriseChangeRequest, type EnterpriseManagementProposal, type EnterpriseManagementRequestType, type EnterpriseManagementRequestView, type EnterpriseOperationResult, type EnterpriseProfileView, type EnterpriseRequestState, type ReviewEnterpriseManagementRequest, type SaveEnterpriseManagementRequest, type SystemUserRow } from "@rental-os/shared";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { PrismaService } from "../database/prisma.service";
@@ -15,8 +15,13 @@ import { ENTERPRISE_PAYMENT_PROOF_SCENE, EnterprisePaymentProofSource, type Paym
 
 type Stored = { requestType: EnterpriseManagementRequestType; objectRevision: string; proposal: EnterpriseManagementProposal; evidenceFileIds: string[]; reason: string; paymentProof?: PaymentProofReceipt };
 type Row = { tenantId: string; id: string; corporateCustomerId: string; applicantCustomerId: string; state: EnterpriseRequestState; revision: number; payload: Stored | string; decisionReason: string | null; createdAt: Date; updatedAt: Date };
-const requestTypes: readonly EnterpriseManagementRequestType[] = ENTERPRISE_MANAGEMENT_REQUEST_TYPES;
-const fields: Record<EnterpriseManagementRequestType, string[]> = { profile_change: ["legalName", "registeredAddress", "email"], credit_change: ["requestedCreditLimit", "currency"], scope_change: ["workspaceIds", "categoryCodes"], payment_proof: ["orderId", "workspaceId", "reportedAmount", "currency", "paymentPurpose"] };
+const requestTypes: readonly EnterpriseManagementRequestType[] = ENTERPRISE_REVIEW_REQUEST_TYPES;
+const fields: Record<EnterpriseManagementRequestType, string[]> = {
+  profile_change: ["legalName", "registeredAddress", "email"],
+  credit_change: ["requestedCreditLimit", "currency"],
+  scope_change: ["workspaceIds", "categoryCodes"],
+  payment_proof: ["orderId", "workspaceId", "reportedAmount", "currency", "paymentPurpose"]
+};
 @Injectable()
 export class EnterpriseManagementRequestService {
   private readonly proofs: EnterprisePaymentProofSource;
@@ -105,7 +110,8 @@ export class EnterpriseManagementRequestService {
     context = Object.freeze({ ...context });
     input = { ...input, proposal: this.validate(input), evidenceFileIds: [...input.evidenceFileIds] };
     let paymentProof: PaymentProofReceipt | undefined;
-    const result = await this.commands.execute(context.tenantId, `customer:${context.customerId}`, "management-request.save", corporateId, input, async tx => {
+    const target = input.requestType === "payment_proof" ? `payment_proof:${corporateId}` : corporateId;
+    const result = await this.commands.execute(context.tenantId, `customer:${context.customerId}`, "management-request.save", target, input, async tx => {
       let previous: Row | undefined;
       if (input.requestId) {
         previous = (await tx.$queryRaw<Row[]>`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND id=${input.requestId} AND corporateCustomerId=${corporateId} AND applicantCustomerId=${context.customerId} AND kind='finance_request'`)[0];
@@ -126,6 +132,7 @@ export class EnterpriseManagementRequestService {
         && (input.requestType !== "payment_proof" || enterpriseJson(row.payload).proposal.orderId === input.proposal.orderId))) throw new ConflictException("同类原对象已有本人未决申请，请编辑或撤回原申请");
       const id = previous?.id ?? randomUUID(), revision = (previous?.revision ?? 0) + 1, state = input.submit ? "pending" : "draft";
       const payload = JSON.stringify({ requestType: input.requestType, objectRevision: input.objectRevision, proposal: input.proposal, evidenceFileIds: input.evidenceFileIds, reason: input.reason.trim(), ...(paymentProof ? { paymentProof } : {}) });
+      if (paymentProof) await this.proofs.customer(context, corporateId, tx);
       if (previous) await tx.$executeRaw`UPDATE enterprise_workflow_requests SET state=${state},revision=${revision},payload=${payload},updatedAt=NOW(3) WHERE tenantId=${context.tenantId} AND id=${id}`;
       else await tx.$executeRaw`INSERT INTO enterprise_workflow_requests (tenantId,id,kind,applicantCustomerId,corporateCustomerId,state,revision,payload,updatedAt) VALUES (${context.tenantId},${id},'finance_request',${context.customerId},${corporateId},${state},${revision},${payload},NOW(3))`;
       return { id, state, revision, effect: "review_only_no_business_change" as const, ...(paymentProof ? { paymentProof } : {}) };
@@ -170,22 +177,35 @@ export class EnterpriseManagementRequestService {
       || source.purpose !== data.proposal.paymentPurpose || JSON.stringify(source.evidenceFileIds) !== JSON.stringify(data.evidenceFileIds)) throw new ConflictException("原回款申请材料与持久绑定不一致");
     return source;
   }
-  /** Own receipt recovery does not need today's management grant or enterprise state.
-   * Only the linked original save result is projected, never current material or a later decision. */
+  /** Legacy proposals recover the exact own receipt. Rental-fee evidence also
+   * rechecks current order/financial admission against its original saved binding. */
   async readSave(context: ClientRequestContext, corporateId: string, key: string): Promise<EnterpriseOperationResult> {
     if (typeof corporateId !== "string" || !corporateId.trim() || corporateId.length > 191
       || typeof key !== "string" || !key.trim() || key.length > 128) throw new BadRequestException("原管理申请企业或保存操作键无效");
     const tx = this.prisma as unknown as Prisma.TransactionClient;
     await this.commands.customer(context, tx, false);
-    const receipts = await tx.$queryRaw<Array<{ managementSaveKey: string; managementSaveResult: string | Record<string, unknown>; requestId: string | null; corporateCustomerId: string | null; requestType?: EnterpriseManagementRequestType | null }>>`
-      SELECT o.operationKey AS managementSaveKey,o.result AS managementSaveResult,w.id AS requestId,w.corporateCustomerId,
-        JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(w.payload),w.payload,'{}'),'$.requestType')) AS requestType
+    type Receipt = { managementSaveKey: string; managementSaveResult: string | Record<string, unknown>; requestId: string | null; corporateCustomerId: string | null };
+    let receipts = await tx.$queryRaw<Receipt[]>`
+      SELECT o.operationKey AS managementSaveKey,o.result AS managementSaveResult,w.id AS requestId,w.corporateCustomerId
       FROM enterprise_portal_operations o
       LEFT JOIN enterprise_workflow_requests w ON w.tenantId=o.tenantId
         AND w.id=JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.id'))
         AND w.corporateCustomerId=${corporateId} AND w.applicantCustomerId=${context.customerId} AND w.kind='finance_request'
       WHERE o.tenantId=${context.tenantId} AND o.operationKey=${key} AND o.actorUserId=${`customer:${context.customerId}`}
         AND o.target=${`management-request.save:${corporateId}`}`;
+    let paymentProof = false;
+    if (!receipts.length) {
+      const proofReceipts = await tx.$queryRaw<Array<{ paymentProofSaveKey: string; paymentProofSaveResult: string | Record<string, unknown>; requestId: string | null; corporateCustomerId: string | null }>>`
+        SELECT o.operationKey AS paymentProofSaveKey,o.result AS paymentProofSaveResult,w.id AS requestId,w.corporateCustomerId
+        FROM enterprise_portal_operations o
+        LEFT JOIN enterprise_workflow_requests w ON w.tenantId=o.tenantId
+          AND w.id=JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.id'))
+          AND w.corporateCustomerId=${corporateId} AND w.applicantCustomerId=${context.customerId} AND w.kind='finance_request'
+        WHERE o.tenantId=${context.tenantId} AND o.operationKey=${key} AND o.actorUserId=${`customer:${context.customerId}`}
+          AND o.target=${`management-request.save:payment_proof:${corporateId}`}`;
+      paymentProof = true;
+      receipts = proofReceipts.map(row => ({ managementSaveKey: row.paymentProofSaveKey, managementSaveResult: row.paymentProofSaveResult, requestId: row.requestId, corporateCustomerId: row.corporateCustomerId }));
+    }
     await this.commands.customer(context, tx, false);
     const receipt = receipts[0]; if (!receipt) return { state: "not_recorded" };
     const unavailable = () => new ConflictException("原管理申请保存收据或对象关联无法精确核对，保留原引用");
@@ -200,14 +220,14 @@ export class EnterpriseManagementRequestService {
       || typeof result.state !== "string" || !["draft", "pending"].includes(result.state)
       || typeof result.revision !== "number" || !Number.isSafeInteger(result.revision) || result.revision < 1
       || result.effect !== "review_only_no_business_change") throw unavailable();
-    if (receipt.requestType === "payment_proof" || result.paymentProof !== undefined) {
-      if (receipt.requestType !== "payment_proof" || !result.paymentProof) throw unavailable();
+    if (paymentProof) {
+      if (!result.paymentProof) throw unavailable();
       await this.customerProof(context, corporateId, result.paymentProof as PaymentProofReceipt);
-    }
+    } else if (result.paymentProof !== undefined) throw unavailable();
     return { state: "committed", result: { corporateCustomerId: corporateId, id: result.id, state: result.state, revision: result.revision, effect: "review_only_no_business_change" } };
   }
-  /** Exact own feedback is independent of the bounded list and today's enterprise grant.
-   * Current request material is not a command receipt and never unlocks an unknown K. */
+  /** Exact own feedback stays independent of the bounded list. Payment evidence
+   * retains current financial admission. Original command recovery uses its own K. */
   async detail(context: ClientRequestContext, id: string): Promise<EnterpriseManagementRequestView> {
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(id)) throw new BadRequestException("原本人管理申请引用无效");
     const tx = this.prisma as unknown as Prisma.TransactionClient;
@@ -260,7 +280,8 @@ export class EnterpriseManagementRequestService {
     const { paymentProof: _internalProof, ...response } = result;
     return response;
   }
-  /** Withdrawal recovery follows the original owner/request/K, never today's state or grants. */
+  /** Original owner/request/K recovery retains legacy withdrawal access. Payment
+   * evidence also verifies its saved order and frozen-file admission. */
   async readWithdrawal(context: ClientRequestContext, id: string, key: string): Promise<EnterpriseOperationResult> {
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]{1,191}$/u.test(id) || typeof key !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/u.test(key)) throw new BadRequestException("原管理申请或撤回操作键无效");
     const tx = this.prisma as unknown as Prisma.TransactionClient;
@@ -406,6 +427,7 @@ export class EnterpriseManagementRequestService {
         if (data.requestType !== "payment_proof") await this.evidence(tenantId, row.applicantCustomerId, data.evidenceFileIds, tx);
       }
       const state = input.decision === "approve" ? "approved" : input.decision === "supplement" ? "supplement_required" : "rejected";
+      if (data.requestType === "payment_proof") await this.merchantProof(user, row.applicantCustomerId, this.storedProof(row), authorization, tx);
       await tx.$executeRaw`UPDATE enterprise_workflow_requests SET state=${state},decisionReason=${input.reason.trim()},revision=revision+1,updatedAt=NOW(3) WHERE tenantId=${tenantId} AND id=${id}`;
       return { id, state, revision: row.revision + 1, effect: "review_only_no_business_change" as const, ...(data.requestType === "payment_proof" ? { paymentProof: this.storedProof(row) } : {}) };
     }, verify);

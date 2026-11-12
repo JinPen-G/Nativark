@@ -296,22 +296,42 @@ export function enterpriseOwnJoinReviewMessagesSnapshot(value:unknown,tenantCode
     keys.add(r.operationKey);items.push({requestId:r.requestId,corporateCustomerId:r.corporateCustomerId,operationKey:r.operationKey,state:r.state,revision:r.revision,reason:r.reason,createdAt:r.createdAt});}
   return {tenantCode,customerId,coverage:"own_original_join_review_receipts",delivery:"not_reported",readState:"not_recorded",items};
 }
-export const ENTERPRISE_MANAGEMENT_REQUEST_TYPES = ["profile_change","credit_change","scope_change","payment_proof"] as const;
+export const ENTERPRISE_MANAGEMENT_REQUEST_TYPES = ["profile_change","credit_change","scope_change"] as const;
+export const ENTERPRISE_REVIEW_REQUEST_TYPES = [...ENTERPRISE_MANAGEMENT_REQUEST_TYPES, "payment_proof"] as const;
 export const ENTERPRISE_PAYMENT_PROOF_SCENE = "enterprise-payment-proof";
+export interface EnterpriseManagementReviewMessage {
+  requestId: string; corporateCustomerId: string; requestType: EnterpriseManagementRequestType; operationKey: string;
+  state: "approved" | "rejected" | "supplement_required"; revision: number; reason: string; createdAt: string; effect: "review_only_no_business_change";
+}
 export interface EnterpriseOwnManagementReviewMessages {
   tenantCode:string;customerId:string;coverage:"own_original_management_review_only_receipts";
   delivery:"not_reported";readState:"not_recorded";
-  items:Array<{requestId:string;corporateCustomerId:string;requestType:EnterpriseManagementRequestType;operationKey:string;state:"approved"|"rejected"|"supplement_required";revision:number;reason:string;createdAt:string;effect:"review_only_no_business_change"}>;
+  items:Array<EnterpriseManagementReviewMessage & { requestType: typeof ENTERPRISE_MANAGEMENT_REQUEST_TYPES[number] }>;
+  paymentProofItems?: Array<EnterpriseManagementReviewMessage & { requestType: "payment_proof" }>;
 }
 /** Immutable retained request type and original review-only result, not current business facts. */
 export function enterpriseOwnManagementReviewMessagesSnapshot(value:unknown,tenantCode:string,customerId:string):EnterpriseOwnManagementReviewMessages|undefined {
   const row=value as EnterpriseOwnManagementReviewMessages|null,ref=(v:unknown,max=191):v is string=>typeof v==="string" && new RegExp(`^[a-zA-Z0-9_-]{1,${max}}$`,"u").test(v);
   const utc=(v:unknown):v is string=>typeof v==="string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(v) && Number.isFinite(Date.parse(v)) && new Date(v).toISOString()===v;
   if(!row || typeof row!=="object" || Array.isArray(row) || row.tenantCode!==tenantCode || row.customerId!==customerId || !ref(customerId) || row.coverage!=="own_original_management_review_only_receipts" || row.delivery!=="not_reported" || row.readState!=="not_recorded" || !Array.isArray(row.items) || row.items.length>200)return undefined;
-  const items:EnterpriseOwnManagementReviewMessages["items"]=[],keys=new Set<string>();
-  for(const r of row.items){if(!r || typeof r!=="object" || Array.isArray(r) || !ref(r.requestId) || !ref(r.corporateCustomerId) || !ENTERPRISE_MANAGEMENT_REQUEST_TYPES.includes(r.requestType) || !ref(r.operationKey,128) || keys.has(r.operationKey) || !["approved","rejected","supplement_required"].includes(r.state) || !Number.isSafeInteger(r.revision) || r.revision<2 || typeof r.reason!=="string" || !r.reason.trim() || r.reason.length>500 || !utc(r.createdAt) || r.effect!=="review_only_no_business_change")return undefined;
-    keys.add(r.operationKey);items.push({requestId:r.requestId,corporateCustomerId:r.corporateCustomerId,requestType:r.requestType,operationKey:r.operationKey,state:r.state,revision:r.revision,reason:r.reason,createdAt:r.createdAt,effect:r.effect});}
-  return {tenantCode,customerId,coverage:"own_original_management_review_only_receipts",delivery:"not_reported",readState:"not_recorded",items};
+  if (row.items.some(item => !ENTERPRISE_MANAGEMENT_REQUEST_TYPES.includes(item?.requestType))
+    || row.paymentProofItems !== undefined && (!Array.isArray(row.paymentProofItems) || row.paymentProofItems.some(item => item?.requestType !== "payment_proof"))
+    || row.items.length + (row.paymentProofItems?.length ?? 0) > 200) return undefined;
+  const items: EnterpriseOwnManagementReviewMessages["items"] = [];
+  const paymentProofItems: NonNullable<EnterpriseOwnManagementReviewMessages["paymentProofItems"]> = [];
+  const keys = new Set<string>();
+  for (const r of [...row.items, ...(row.paymentProofItems ?? [])]) {
+    if (!r || typeof r !== "object" || Array.isArray(r) || !ref(r.requestId) || !ref(r.corporateCustomerId)
+      || !ENTERPRISE_REVIEW_REQUEST_TYPES.includes(r.requestType) || !ref(r.operationKey, 128) || keys.has(r.operationKey)
+      || !["approved", "rejected", "supplement_required"].includes(r.state) || !Number.isSafeInteger(r.revision) || r.revision < 2
+      || typeof r.reason !== "string" || !r.reason.trim() || r.reason.length > 500 || !utc(r.createdAt) || r.effect !== "review_only_no_business_change") return undefined;
+    keys.add(r.operationKey);
+    const item = { requestId: r.requestId, corporateCustomerId: r.corporateCustomerId, operationKey: r.operationKey,
+      state: r.state, revision: r.revision, reason: r.reason, createdAt: r.createdAt, effect: r.effect };
+    if (r.requestType === "payment_proof") paymentProofItems.push({ ...item, requestType: r.requestType });
+    else items.push({ ...item, requestType: r.requestType });
+  }
+  return {tenantCode,customerId,coverage:"own_original_management_review_only_receipts",delivery:"not_reported",readState:"not_recorded",items,...(row.paymentProofItems !== undefined ? {paymentProofItems} : {})};
 }
 export interface EnterpriseListResponse<T> { items: T[]; page: number; pageSize: number; total: number }
 export interface EnterpriseMembershipAuditEntry {
@@ -750,7 +770,7 @@ export interface EnterpriseAuditView { operationKey: string; action: string; tar
 
 /** Management requests propose a change; approval records review only, never writes
  * a customer master, credit limit, policy, payment or ledger. */
-export type EnterpriseManagementRequestType = typeof ENTERPRISE_MANAGEMENT_REQUEST_TYPES[number];
+export type EnterpriseManagementRequestType = typeof ENTERPRISE_REVIEW_REQUEST_TYPES[number];
 export interface EnterprisePaymentProofBasis {
   corporateCustomerId: string;
   orderId: string;

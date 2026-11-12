@@ -2,7 +2,7 @@
  * 401 write replay. Durable recovery holds only key/path/state, never input/token. */
 import { useEffect, useRef, useState } from "react";
 import type { AxiosRequestConfig } from "axios";
-import type { ApiResult, EnterpriseOperationResult } from "@rental-os/shared";
+import { ENTERPRISE_REVIEW_REQUEST_TYPES, type ApiResult, type EnterpriseOperationResult } from "@rental-os/shared";
 import { http } from "@/api/http";
 import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -47,7 +47,7 @@ function merchantManagementResultMatches(value: unknown, id: string, originalRea
   return row && !Array.isArray(row) && row.id === id && (row.state === "approved" || row.state === "rejected" || row.state === "supplement_required")
     && typeof row.revision === "number" && Number.isSafeInteger(row.revision) && row.revision >= 2 && row.effect === "review_only_no_business_change"
     && (!originalRead || typeof row.corporateCustomerId === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(row.corporateCustomerId)
-      && (row.requestType === "profile_change" || row.requestType === "credit_change" || row.requestType === "scope_change"));
+      && ENTERPRISE_REVIEW_REQUEST_TYPES.some(type => type === row.requestType));
 }
 function merchantApplicationTarget(path: string) {
   const match = /^\/membership\/enterprise-workflows\/applications\/([a-zA-Z0-9_%-]+)\/decision$/u.exec(path);
@@ -268,7 +268,7 @@ export function useOriginalEnterpriseOperation(scope = "enterprise-applications"
         if (receipt.state !== "committed") throw new Error("尚未读到原收据，不代表未写入；请保留原请求，不能重发");
         if (policyCorporateId && !merchantPolicyResultMatches(receipt.result, policyCorporateId, true)) throw new Error("原商户政策收据缺少精确企业、scope 或修订，保留原引用");
         if (managementRequestId && (!merchantManagementResultMatches(receipt.result, managementRequestId, true) || pending.body && !merchantDecisionInputMatches(receipt.result, pending.body))) throw new Error("原商户审核收据缺少精确绑定，保留原引用");
-        if (managementRequestId && receipt.result?.requestType === "credit_change" && !useAuthStore.getState().hasTenantMembershipPermission("rental-os:finance:manage")) throw new Error("原授信审核读取须当前财务管理权");
+        if (managementRequestId && (receipt.result?.requestType === "credit_change" || receipt.result?.requestType === "payment_proof") && !useAuthStore.getState().hasTenantMembershipPermission("rental-os:finance:manage")) throw new Error("原财务审核读取须当前财务管理权");
         if ((policyCorporateId || managementRequestId || applicationRequestId || handoffId) && !sameOriginalReference()) throw new Error("原商户政策引用已变化，不能覆盖其他请求");
         pending.state = "committed"; publish();
       }

@@ -2,7 +2,7 @@ import { Type } from "class-transformer";
 import type { CreateEnterpriseRentalHandoffRequest, ReviewEnterpriseRentalHandoffRequest, WithdrawEnterpriseRentalHandoffRequest } from "@rental-os/shared";
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsDefined, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import type { EnterpriseApplicationInput, EnterpriseChangeRequest, SaveEnterpriseApplicationRequest, ReviewEnterpriseApplicationRequest, EnterpriseInvitePolicy, SaveEnterpriseInvitePolicyRequest, CreateEnterpriseInviteRequest, JoinEnterpriseRequest, ReviewEnterpriseJoinRequest, ChangeEnterpriseMemberRequest, TransferEnterpriseAdministratorRequest, DecideEnterpriseTransferRequest, EnterpriseScopePolicy, SaveEnterpriseScopePolicyRequest, EnterpriseDisclosure, RequestEnterpriseBookingApproval, DecideEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking, EnterpriseAuthorityUploadRequest } from "@rental-os/shared";
-import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CURRENCY_CODES, ENTERPRISE_MANAGEMENT_REQUEST_TYPES, ENTERPRISE_PORTAL_ACTIONS, type RentalCategoryCode, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest, type EnterprisePaymentProofUploadRequest } from "@rental-os/shared";
+import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CURRENCY_CODES, ENTERPRISE_REVIEW_REQUEST_TYPES, ENTERPRISE_PORTAL_ACTIONS, type RentalCategoryCode, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest, type EnterprisePaymentProofUploadRequest } from "@rental-os/shared";
 export class ReviewEnterpriseRentalHandoffRequestDto implements ReviewEnterpriseRentalHandoffRequest {
   @IsString() @Matches(/^[a-zA-Z0-9_-]{1,128}$/u) operationKey!: string;
   @IsInt() @Min(1) @Max(1) expectedRevision!: number;
@@ -35,7 +35,7 @@ export class SaveEnterpriseManagementRequestDto implements SaveEnterpriseManagem
   @IsInt() @Min(0) expectedRevision!: number;
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsOptional() @IsString() @MaxLength(191) requestId?: string;
-  @IsIn(ENTERPRISE_MANAGEMENT_REQUEST_TYPES) requestType!: import("@rental-os/shared").EnterpriseManagementRequestType;
+  @IsIn(ENTERPRISE_REVIEW_REQUEST_TYPES) requestType!: import("@rental-os/shared").EnterpriseManagementRequestType;
   @IsString() @IsNotEmpty() @MaxLength(191) objectRevision!: string;
   @IsDefined() @ValidateNested() @Type(() => EnterpriseManagementProposalDto) proposal!: EnterpriseManagementProposalDto;
   @IsArray() @ArrayMaxSize(10) @ArrayUnique() @IsString({ each: true }) @MaxLength(191, { each: true }) evidenceFileIds!: string[];
