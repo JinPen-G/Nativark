@@ -33,14 +33,14 @@ export function EnterpriseManagementRequests() {
   } catch { rows = []; materialError = true; }
   const blocked = !permitted || operation.blocked || list.isFetching || Boolean(list.error) || materialError || !Array.isArray(list.data);
   const latest = useRef({ selected, list }); latest.current = { selected, list };
-  const requestLabels: Record<EnterpriseManagementRequestType, string> = { profile_change: "资料更正", credit_change: "授信调整申请", scope_change: "使用范围调整" };
-  const proposalLabels: Record<keyof EnterpriseManagementProposal, string> = { legalName: "申请主体名称", registeredAddress: "申请注册地址", email: "企业联系邮箱", requestedCreditLimit: "申请额度", currency: "原授信币种", workspaceIds: "申请空间引用", categoryCodes: "申请品类代码" };
+  const requestLabels: Record<EnterpriseManagementRequestType, string> = { profile_change: "资料更正", credit_change: "授信调整申请", scope_change: "使用范围调整", payment_proof: "逐单费用回款凭证核对" };
+  const proposalLabels: Record<keyof EnterpriseManagementProposal, string> = { legalName: "申请主体名称", registeredAddress: "申请注册地址", email: "企业联系邮箱", requestedCreditLimit: "申请额度", currency: "原币种", workspaceIds: "申请空间引用", categoryCodes: "申请品类代码", orderId: "原订单引用", workspaceId: "原经营空间", reportedAmount: "申报费用回款金额", paymentPurpose: "回款核对用途" };
   const unavailable = () => new Error(t("原申请材料或审核依据已变化，请重新核对"));
   const refresh = async () => { await list.refetch({ throwOnError: true }); operation.assertCurrent(); };
   const assertMaterial = (material: EnterpriseManagementRequestView, key: string, pending = false) => {
     operation.assertCurrent(); const currentAuth = useAuthStore.getState(), query = latest.current.list;
     if (!currentAuth.sessionVerified || !currentAuth.hasTenantMembershipPermission("rental-os:corporate:manage") || query.isFetching || query.error || !Array.isArray(query.data)) throw unavailable();
-    if (material.requestType === "credit_change" && !currentAuth.hasTenantMembershipPermission("rental-os:finance:manage")) throw new Error(t("授信申请须当前财务管理权"));
+    if ((material.requestType === "credit_change" || material.requestType === "payment_proof") && !currentAuth.hasTenantMembershipPermission("rental-os:finance:manage")) throw new Error(t("财务申请须当前财务管理权"));
     const current = query.data.find(row => row.id === material.id);
     if (!current || JSON.stringify(copyEnterpriseManagementRequest(current)) !== key || pending && current.state !== "pending") throw unavailable();
   };
@@ -115,7 +115,7 @@ export function EnterpriseManagementRequests() {
     <Table rowKey="id" dataSource={permitted && !list.error ? rows : []} loading={list.isFetching} pagination={false} sorting={false} onRefresh={refresh} columns={[
       { title: t("企业引用"), dataIndex: "corporateCustomerId" }, { title: t("申请类别"), render: (_, row: EnterpriseManagementRequestView) => t(requestLabels[row.requestType]) }, { title: t("申请人引用"), dataIndex: "applicantCustomerId" },
       { title: t("申请原因"), dataIndex: "reason" }, { title: t("状态"), dataIndex: "state" }, { title: t("原对象修订"), dataIndex: "objectRevision" },
-      { title: t("申请明细"), render: (_, row: EnterpriseManagementRequestView) => <dl>{Object.entries(row.proposal).map(([key, value]) => <div key={key}><dt>{t(proposalLabels[key as keyof EnterpriseManagementProposal])}</dt><dd>{Array.isArray(value) ? value.join("、") : value}</dd></div>)}</dl> },
+      { title: t("申请明细"), render: (_, row: EnterpriseManagementRequestView) => <dl>{Object.entries(row.proposal).map(([key, value]) => <div key={key}><dt>{t(proposalLabels[key as keyof EnterpriseManagementProposal])}</dt><dd>{key === "paymentPurpose" ? t("租赁费用") : Array.isArray(value) ? value.join("、") : value}</dd></div>)}</dl> },
       { title: t("申请材料"), render: (_, row: EnterpriseManagementRequestView) => row.evidenceFileIds.map((id, index) => <ActionButton key={id} disabled={blocked} intent="review" label={`${t("读取材料")} ${index + 1}`} onAction={() => evidence(row, id)} />) },
       { title: t("审核"), render: (_, row: EnterpriseManagementRequestView) => actions(row) },
     ]} />

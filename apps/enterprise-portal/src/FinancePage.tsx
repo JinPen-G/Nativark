@@ -261,6 +261,7 @@ export function EnterpriseFinancePage() {
             ]} />
         </ListSection>
         <Alert type="info" title={english ? "Original guarantee payer and provider records are unavailable" : "保证金原出资人及供应商记录尚未接通"} />
+        {corporate?.actions.includes("requests:manage") && <Link to={`${context.basePath}/profile?${new URLSearchParams({ orderId: financial.orderId })}`}>{english ? "Submit rental-fee payment evidence" : "提交费用回款凭证核对申请"}</Link>}
         <Link to={`${context.basePath}/orders?${new URLSearchParams({ orderId })}`}>{english ? "Back to original order" : "返回原订单"}</Link>
       </> : orderAllowed && <Link to={`${context.basePath}/orders`}>{english ? "Choose an original enterprise-paid order" : "选择原企业承担订单核对财务"}</Link>}
   </section>;

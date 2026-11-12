@@ -3,7 +3,7 @@ import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectRea
 import { KNOWLEDGE_FILE_ACCESS, type KnowledgeFileAccess } from "../ai-native/knowledge/knowledge-file-access";
 import type { KnowledgeUploadRevision } from "../ai-native/knowledge/knowledge.ports";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
-import { RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
+import { ENTERPRISE_PAYMENT_PROOF_SCENE, RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE } from "@rental-os/shared";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type {
@@ -44,6 +44,8 @@ export interface FileBusinessOwner {
   actorName?: string;
   /** Internal dedicated source id; never accepted by the generic HTTP upload DTO. */
   exchangeInspectionSourceId?: string;
+  /** Supplied by the dedicated enterprise controller after original-order admission. */
+  enterprisePaymentProof?: { corporateCustomerId: string; orderId: string; objectRevision: string; purpose: "rental_fee" };
 }
 
 type UploadFacts = { input: CreateFileUploadSessionRequest; owner?: FileBusinessOwner; assetId: string; sessionId: string;
@@ -186,6 +188,12 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   ): Promise<FileUploadSessionSummary> {
     input = structuredClone(input); owner = structuredClone(owner);
     if (input.uploadScene?.trim() === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("换货检查影像必须经专用原业务入口上传");
+    if (input.uploadScene?.trim() === ENTERPRISE_PAYMENT_PROOF_SCENE) {
+      if (!owner?.enterprisePaymentProof || owner.enterprisePaymentProof.purpose !== "rental_fee" || owner.enterprisePaymentProof.orderId !== input.businessId
+        || !owner.workspaceId || !owner.actorUserId || input.businessModule !== "enterprise" || input.businessType !== "rental_order"
+        || owner.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE) throw new BadRequestException("费用回款凭证须经原企业订单专用入口上传");
+      input.metadata = { ...input.metadata, enterprisePaymentProof: { ...owner.enterprisePaymentProof } };
+    }
     const mimeType = this.validateInput(input);
     const idempotencyKey = input.idempotencyKey.trim();
     if (owner && !this.matchesOwner({ businessType: input.businessType, businessId: input.businessId, uploadScene: input.uploadScene }, owner)) {
@@ -295,7 +303,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
             metadata: {
               ...Object.fromEntries(Object.entries(input.metadata ?? {}).filter(([key]) => ![
                 "fileUploadVersion", "fileContentVersion", "contentHash", "stagingStorageKey", "storageLocationHash", "uploadConfigHash",
-                "knowledgeUploadVersion", "knowledgeContentHash", "knowledgeRevision", "uploadMode", "workspaceId", "uploadedByUserId"
+                "knowledgeUploadVersion", "knowledgeContentHash", "knowledgeRevision", "uploadMode", "workspaceId", "uploadedByUserId", "enterprisePaymentProof"
               ].includes(key))),
               ...(owner?.actorUserId ? {
                 uploadedByUserId: owner.actorUserId,
@@ -303,6 +311,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
                 uploadedAt: new Date().toISOString()
               } : {}),
               ...(owner?.workspaceId ? { workspaceId: owner.workspaceId } : {}),
+              ...(owner?.enterprisePaymentProof ? { enterprisePaymentProof: { ...owner.enterprisePaymentProof } } : {}),
               ...(configured ? { fileUploadVersion: 2,
                 storageLocationHash: this.retentionLocationHash(configured),
                 uploadConfigHash: requestFingerprint({ id: configured.id, provider: configured.provider, settings: configured.settings, credentials: configured.credentials }) } : {}),
@@ -967,6 +976,11 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (!session) throw new NotFoundException("上传会话不存在");
     let asset = structuredClone(await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } }));
     if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new BadRequestException("专用换货影像只能核验原业务完成入口");
+    if (asset?.uploadScene === ENTERPRISE_PAYMENT_PROOF_SCENE && (!owner?.enterprisePaymentProof || owner.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE
+      || (asset.metadata as JsonRecord | null)?.workspaceId !== owner.workspaceId
+      || fileFactHash((asset.metadata as JsonRecord | null)?.enterprisePaymentProof ?? null) !== fileFactHash(owner.enterprisePaymentProof))) {
+      throw new BadRequestException("费用回款凭证只能经原企业订单入口核验归档");
+    }
     if (!asset || (owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId)))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
     const knowledgeInput: CreateFileUploadSessionRequest | undefined = asset.businessType === 'ai_knowledge_document' ? {
       businessModule: asset.businessModule, businessType: asset.businessType, businessId: asset.businessId ?? '', uploadScene: asset.uploadScene,
@@ -1126,11 +1140,26 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   /** Merchant application evidence is read through the authenticated controller,
    * not a reusable bearer download URL. The controller rechecks its reviewer. */
   async readAuthorityBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string) {
-    const asset = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: fileAssetId, businessType: "customer", businessId: applicantCustomerId, uploadedBy: applicantCustomerId, uploadScene: "enterprise-authority", status: "active" }, include: { uploadSession: true } });
+    return this.readEnterpriseEvidenceBytes(tenantId, fileAssetId, applicantCustomerId, { businessType: "customer", businessId: applicantCustomerId, uploadScene: "enterprise-authority" });
+  }
+
+  async readPaymentProofBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string, orderId: string, workspaceId: string, contentHash: string) {
+    if (!workspaceId || !orderId || !/^[a-f0-9]{64}$/u.test(contentHash)) throw new BadRequestException("原费用回款凭证字节绑定无效");
+    return this.readEnterpriseEvidenceBytes(tenantId, fileAssetId, applicantCustomerId,
+      { businessType: "rental_order", businessId: orderId, workspaceId, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE }, contentHash);
+  }
+
+  private async readEnterpriseEvidenceBytes(tenantId: string, fileAssetId: string, applicantCustomerId: string, owner: FileBusinessOwner, contentHash?: string) {
+    const asset = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: fileAssetId, businessType: owner.businessType, businessId: owner.businessId, uploadedBy: applicantCustomerId, uploadScene: owner.uploadScene, status: "active" }, include: { uploadSession: true } });
     if (!asset || asset.storageProvider === "local_mock" || asset.uploadSession?.status !== "completed" || !asset.uploadSession.completedAt
       || !["application/pdf", "image/png", "image/jpeg"].includes(asset.mimeType) || asset.sizeBytes < 1 || asset.sizeBytes > MAX_FILE_BYTES) throw new NotFoundException("授权材料未真实归档或不属于当前申请");
+    if (owner.uploadScene === ENTERPRISE_PAYMENT_PROOF_SCENE && (asset.businessModule !== "enterprise" || asset.checksum !== contentHash
+      || (asset.metadata as JsonRecord | null)?.workspaceId !== owner.workspaceId || (asset.metadata as JsonRecord | null)?.fileUploadVersion !== 2
+      || (asset.metadata as JsonRecord | null)?.fileContentVersion !== 1 || (asset.metadata as JsonRecord | null)?.contentHash !== contentHash
+      || asset.uploadSession.provider !== asset.storageProvider || asset.uploadSession.storageKey !== asset.storageKey)) throw new ConflictException("原费用回款凭证冻结内容不可核对");
     const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never);
     if (!config) throw new ServiceUnavailableException("授权材料存储不可用");
+    if (contentHash && (asset.metadata as JsonRecord | null)?.storageLocationHash !== this.retentionLocationHash(config)) throw new ConflictException("原费用回款凭证存储位置已变化");
     const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, new Date(Date.now() + 60000));
     const target = await assertOutboundUrl(signed.url, "授权材料存储地址", { allowQuery: true });
     const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(8000) });
@@ -1146,6 +1175,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const after = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: asset.id, status: "active", updatedAt: asset.updatedAt, storageKey: asset.storageKey } });
     if (!after || size !== asset.sizeBytes) throw new ConflictException("读取期间授权材料已变化或不完整");
     const content = Buffer.concat(chunks);
+    if (contentHash && createHash("sha256").update(content).digest("hex") !== contentHash) throw new ConflictException("原费用回款凭证读取字节与冻结摘要不一致");
     const signatures = asset.mimeType === "application/pdf" ? content.subarray(0, 5).toString("ascii") === "%PDF-"
       : asset.mimeType === "image/png" ? content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) : content[0] === 255 && content[1] === 216 && content[2] === 255;
     if (!signatures) throw new BadRequestException("授权材料格式与登记类型不匹配");
@@ -1157,6 +1187,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (asset?.uploadScene === RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE) throw new ServiceUnavailableException("专用换货影像必须按原业务权限和内容指纹读取，不签发下载URL");
     if (asset?.businessType === 'ai_knowledge_document') throw new ServiceUnavailableException('知识附件必须经当前文档权限读取，不签发下载URL');
     if (asset?.uploadScene === 'enterprise-authority') throw new ServiceUnavailableException('企业授权材料必须经当前申请及审核权限读取，不签发可复用下载URL');
+    if (asset?.uploadScene === ENTERPRISE_PAYMENT_PROOF_SCENE) throw new ServiceUnavailableException('费用回款凭证须经原申请与当前财务权限读取');
     if (asset && owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId))) throw new NotFoundException("文件不存在或不属于当前业务对象");
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
     if (asset.businessType === "customer" && asset.uploadScene === "identity-verification"
@@ -1353,7 +1384,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   }
 
   private matchesUploadRequest(
-    asset: { businessModule: string; businessType: string; businessId: string | null; fileName: string; mimeType: string; sizeBytes: number; uploadScene: string },
+    asset: { businessModule: string; businessType: string; businessId: string | null; fileName: string; mimeType: string; sizeBytes: number; uploadScene: string; metadata?: unknown },
     input: CreateFileUploadSessionRequest,
     mimeType: string
   ) {
@@ -1363,7 +1394,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       && asset.fileName === input.fileName.trim()
       && asset.mimeType === mimeType
       && asset.sizeBytes === input.sizeBytes
-      && asset.uploadScene === input.uploadScene.trim();
+      && asset.uploadScene === input.uploadScene.trim()
+      && (asset.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE
+        || fileFactHash((asset.metadata as JsonRecord | null)?.enterprisePaymentProof ?? null) === fileFactHash(input.metadata?.enterprisePaymentProof ?? null));
   }
 
   private async assertBusinessReference(tenantId: string, businessType: string, businessId: string, workspaceId?: string) {

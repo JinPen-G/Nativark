@@ -61,16 +61,22 @@ export class EnterpriseMembershipAuditService {
       applicantCustomerId: string | null; workspaceId?: string; expectedRequestTarget?: string; operationKey: string; actorUserId: string; target: string; reason: string; result: unknown; createdAt: Date };
     // Only the public management-review receipt is included from operators. Other
     // operator/security logs and the request's proposal/evidence are not read.
+    const grant = await this.access.requireAction(context, corporateId, "audit:read");
+    const proofAllowed = Boolean(context.workspaceId) && ["requests:manage", "orders:read", "finance:read"].every(action => grant.actions.includes(action as typeof grant.actions[number]));
     const management = await this.prisma.$queryRaw<Row[]>`
       SELECT o.tenantId,w.corporateCustomerId,w.id AS auditObjectId,'management_request' AS objectType,w.applicantCustomerId,
         o.operationKey,o.actorUserId,o.target,o.reason,o.result,o.createdAt
       FROM enterprise_portal_operations o LEFT JOIN enterprise_workflow_requests w ON w.tenantId=o.tenantId AND w.corporateCustomerId=${corporateId} AND w.kind='finance_request'
-        AND ((o.target=CONCAT('management-request.save:',${corporateId}) AND w.id=JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.id')))
+        AND ((o.target IN (CONCAT('management-request.save:',${corporateId}),CONCAT('management-request.save:payment_proof:',${corporateId})) AND w.id=JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.id')))
           OR o.target IN (CONCAT('management-request.withdraw:',w.id),CONCAT('management-request.review:',w.id)))
       WHERE o.tenantId=${context.tenantId}
-        AND ((o.actorUserId LIKE 'customer:%' AND (o.target=CONCAT('management-request.save:',${corporateId}) OR o.target=CONCAT('management-request.withdraw:',w.id)))
+        AND (JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.paymentProof') IS NULL
+          OR (${proofAllowed} AND JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(o.result),o.result,'{}'),'$.paymentProof.workspaceId'))=${context.workspaceId ?? ""}))
+        AND ((o.actorUserId LIKE 'customer:%' AND (o.target IN (CONCAT('management-request.save:',${corporateId}),CONCAT('management-request.save:payment_proof:',${corporateId})) OR o.target=CONCAT('management-request.withdraw:',w.id)))
           OR (o.actorUserId LIKE 'operator:%' AND o.target=CONCAT('management-request.review:',w.id)))
       ORDER BY o.createdAt DESC,o.operationKey DESC LIMIT 201`;
+    const current = await this.access.requireAction(context, corporateId, "audit:read");
+    if (enterpriseHash([current.membershipId, current.permissionRevision, current.actions]) !== enterpriseHash([grant.membershipId, grant.permissionRevision, grant.actions])) throw new ForbiddenException("财务申请审计读取期间权限已变化");
     // The current trusted workspace is applied before LIMIT, not post-filtered
     // from an enterprise-wide approval list. Missing workspace never means all.
     const bookings = context.workspaceId ? await this.prisma.$queryRaw<Row[]>`
@@ -88,6 +94,10 @@ export class EnterpriseMembershipAuditService {
       const actorMatch=/^(customer|operator):([a-zA-Z0-9_-]{1,191})$/u.exec(row.actorUserId);
       if (!actorMatch) throw invalid();
       let raw: Record<string,unknown>; try { const decoded=enterpriseJson(row.result); if (!decoded || typeof decoded!=="object" || Array.isArray(decoded)) throw invalid(); raw=decoded as Record<string,unknown>; } catch { throw invalid(); }
+      if (raw.paymentProof !== undefined) {
+        const proof = raw.paymentProof as Record<string, unknown> | null;
+        if (!proofAllowed || !proof || proof.corporateCustomerId !== corporateId || proof.workspaceId !== context.workspaceId || proof.purpose !== "rental_fee") throw invalid();
+      }
       const action=row.target.slice(0,row.target.indexOf(":")), kind=actorMatch[1] as "customer"|"operator", actorId=actorMatch[2];
       if (row.objectType === "booking_approval") {
         if (row.workspaceId!==context.workspaceId || kind!=="customer" || !["approval.request","approval.decision","approval.submit","approval.close"].includes(action)
@@ -97,7 +107,7 @@ export class EnterpriseMembershipAuditService {
           || action === "approval.submit" && raw.state === "executing" && raw.executionKey!==row.operationKey) throw invalid();
       } else if (row.objectType === "management_request") {
         if (!["management-request.save","management-request.withdraw","management-request.review"].includes(action)
-          || row.target!==(action === "management-request.save" ? `management-request.save:${corporateId}` : `${action}:${row.auditObjectId}`)
+          || row.target!==(action === "management-request.save" ? `management-request.save:${raw.paymentProof !== undefined ? "payment_proof:" : ""}${corporateId}` : `${action}:${row.auditObjectId}`)
           || raw.id!==row.auditObjectId || (action === "management-request.review" ? kind!=="operator" : kind!=="customer" || actorId!==row.applicantCustomerId)) throw invalid();
       } else throw invalid();
       const result={id:row.auditObjectId,state:raw.state,revision:raw.revision,effect:raw.effect,execution:raw.execution,inventory:raw.inventory,expiresAt:raw.expiresAt,retryable:raw.retryable};

@@ -1,5 +1,6 @@
 /** Customer enterprise workflows and merchant decisions use separate authentication realms. */
-import { BadRequestException, Body, Controller, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UnauthorizedException, ServiceUnavailableException } from "@nestjs/common";
+import { ENTERPRISE_PAYMENT_PROOF_SCENE } from "@rental-os/shared";
 import type { ClientRequestContext } from "../client/client-auth.service";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
@@ -23,7 +24,7 @@ import { EnterpriseExtensionApprovalService } from "./enterprise-extension-appro
 import { RequestEnterpriseExtensionApprovalDto, DecideEnterpriseExtensionApprovalDto, SubmitEnterpriseExtensionApprovalDto, CloseEnterpriseExtensionExecutionDto, CloseEnterpriseExtensionRequestDto } from "./enterprise-extension-request.dto";
 import { EnterpriseTaskCenterService } from "./enterprise-task-center.service";
 import { EnterpriseManagementRequestService } from "./enterprise-management-request.service";
-import { CloseEnterpriseApprovalExecutionDto, SaveEnterpriseManagementRequestDto } from "./enterprise-request.dto";
+import { CloseEnterpriseApprovalExecutionDto, SaveEnterpriseManagementRequestDto, EnterprisePaymentProofUploadRequestDto } from "./enterprise-request.dto";
 import { CloseEnterpriseTransferDecisionDto } from "./enterprise-transfer-decision.dto";
 import { PreviewEnterpriseInviteRequestDto, ChangeEnterpriseAdministratorRequestDto, ChangeEnterpriseMemberRequestDto, CreateEnterpriseInviteRequestDto, DecideEnterpriseTransferRequestDto, EnterpriseChangeRequestDto, JoinEnterpriseRequestDto, ReviewEnterpriseJoinRequestDto, SaveEnterpriseApplicationRequestDto, TransferEnterpriseAdministratorRequestDto, SaveEnterpriseScopePolicyRequestDto, RequestEnterpriseBookingApprovalDto, DecideEnterpriseBookingApprovalDto, SubmitEnterpriseApprovedBookingDto, EnterpriseAuthorityUploadRequestDto } from "./enterprise-request.dto";
 interface CustomerRequest { client?: ClientRequestContext; headers?: { authorization?: string } }
@@ -78,11 +79,79 @@ export class EnterpriseWorkflowsController {
     return this.inspectionConsentReader().original(req.headers?.authorization, client(req), orderId, key);
   }
   @Get("corporates/:corporateId/profile") profile(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.management.profile(client(req), id); }
-  @Get("management-requests") managementMine(@Req() req: CustomerRequest) { return this.management.mine(client(req)); }
-  @Get("management-requests/:id") managementDetail(@Req() req: CustomerRequest, @Param("id") id: string) { return this.management.detail(client(req), id); }
-  @Get("corporates/:corporateId/management-requests/save-operations/:key") managementSaveOriginal(@Req() req: CustomerRequest, @Param("corporateId") id: string, @Param("key") key: string) { return this.management.readSave(client(req), id, key); }
+  @Get("management-requests") managementMine(@Req() req: CustomerRequest, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.mine(client(req));
+  }
+  @Get("management-requests/:id") managementDetail(@Req() req: CustomerRequest, @Param("id") id: string, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.detail(client(req), id);
+  }
+  @Get("corporates/:corporateId/management-requests/save-operations/:key") managementSaveOriginal(@Req() req: CustomerRequest, @Param("corporateId") id: string, @Param("key") key: string, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.readSave(client(req), id, key);
+  }
   @Post("corporates/:corporateId/management-requests") saveManagement(@Req() req: CustomerRequest, @Param("corporateId") id: string, @Body() input: SaveEnterpriseManagementRequestDto) { return this.management.save(client(req), id, input); }
-  @Get("management-requests/:id/withdraw-operations/:key") managementWithdrawalOriginal(@Req() req: CustomerRequest, @Param("id") id: string, @Param("key") key: string) { return this.management.readWithdrawal(client(req), id, key); }
+  @Get("corporates/:corporateId/orders/:orderId/payment-proof-basis")
+  async paymentProofBasis(@Req() req: CustomerRequest, @Param("corporateId") corporateId: string, @Param("orderId") orderId: string,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
+    return this.management.paymentProofBasis(client(req), corporateId, orderId);
+  }
+  @Post("corporates/:corporateId/orders/:orderId/payment-proof/upload-sessions")
+  async paymentProofUpload(@Req() req: CustomerRequest, @Param("corporateId") corporateId: string, @Param("orderId") orderId: string, @Body() input: EnterprisePaymentProofUploadRequestDto) {
+    const context = Object.freeze({ ...client(req) }), basis = await this.management.paymentProofBasis(context, corporateId, orderId);
+    if (basis.objectRevision !== input.objectRevision) throw this.commands.conflict();
+    const config = await this.integrations.runtimeConfig("file", context.tenantId);
+    if (!config) throw new ServiceUnavailableException("费用回款凭证需要真实文件存储");
+    const owner = { businessType: "rental_order", businessId: orderId, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE, workspaceId: basis.workspaceId, actorUserId: context.customerId,
+      enterprisePaymentProof: { corporateCustomerId: corporateId, orderId, objectRevision: basis.objectRevision, purpose: "rental_fee" as const } };
+    const result = await this.files.createUploadSession(context.tenantId, { fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes,
+      idempotencyKey: input.idempotencyKey, businessModule: "enterprise", businessType: "rental_order", businessId: orderId, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE }, owner);
+    if ((await this.management.paymentProofBasis(context, corporateId, orderId)).objectRevision !== basis.objectRevision) throw this.commands.conflict();
+    return result;
+  }
+  @Get("corporates/:corporateId/orders/:orderId/payment-proof/upload-operations/:key")
+  async paymentProofUploadOriginal(@Req() req: CustomerRequest, @Param("corporateId") corporateId: string, @Param("orderId") orderId: string, @Param("key") key: string,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
+    const context = Object.freeze({ ...client(req) }), basis = await this.management.paymentProofBasis(context, corporateId, orderId);
+    const session = await this.prisma.fileUploadSession.findFirst({ where: { tenantId: context.tenantId, idempotencyKey: key }, include: { fileAsset: true } }), asset = session?.fileAsset;
+    const metadata = asset?.metadata as Record<string, unknown> | undefined, original = metadata?.enterprisePaymentProof as Record<string, unknown> | undefined;
+    const after = await this.management.paymentProofBasis(context, corporateId, orderId);
+    if (after.objectRevision !== basis.objectRevision || after.permissionRevision !== basis.permissionRevision || after.workspaceId !== basis.workspaceId) throw this.commands.conflict();
+    if (!session || !asset || asset.businessType !== "rental_order" || asset.businessId !== orderId || asset.uploadedBy !== context.customerId
+      || asset.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE || metadata?.workspaceId !== basis.workspaceId || original?.corporateCustomerId !== corporateId
+      || original?.orderId !== orderId || original?.purpose !== "rental_fee") return { state: "not_recorded" };
+    if (original.objectRevision !== basis.objectRevision) throw this.commands.conflict();
+    return { state: "observed", session: { sessionId: session.id, fileAssetId: asset.id, provider: session.provider, mode: session.provider === "local_mock" ? "simulation" : "provider", status: session.status, expiresAt: session.expiresAt.toISOString() },
+      file: { id: asset.id, fileName: asset.fileName, status: asset.status } };
+  }
+  @Post("corporates/:corporateId/orders/:orderId/payment-proof/upload-sessions/:id/complete")
+  async paymentProofUploadComplete(@Req() req: CustomerRequest, @Param("corporateId") corporateId: string, @Param("orderId") orderId: string, @Param("id") id: string, @Body() input: ClientQualificationUploadCompleteRequestDto) {
+    const context = Object.freeze({ ...client(req) }), basis = await this.management.paymentProofBasis(context, corporateId, orderId);
+    const session = await this.prisma.fileUploadSession.findFirst({ where: { tenantId: context.tenantId, id }, include: { fileAsset: true } });
+    const asset = session?.fileAsset, metadata = asset?.metadata as Record<string, unknown> | undefined, original = metadata?.enterprisePaymentProof as Record<string, unknown> | undefined;
+    if (!asset || asset.businessType !== "rental_order" || asset.businessId !== orderId || asset.uploadedBy !== context.customerId || asset.uploadScene !== ENTERPRISE_PAYMENT_PROOF_SCENE
+      || metadata?.workspaceId !== basis.workspaceId || original?.corporateCustomerId !== corporateId || original?.orderId !== orderId || original?.purpose !== "rental_fee") throw new ForbiddenException("原回款上传不属于本订单与当前客户");
+    if (original.objectRevision !== basis.objectRevision) throw this.commands.conflict();
+    const owner = { businessType: "rental_order", businessId: orderId, uploadScene: ENTERPRISE_PAYMENT_PROOF_SCENE, workspaceId: basis.workspaceId, actorUserId: context.customerId,
+      enterprisePaymentProof: { corporateCustomerId: corporateId, orderId, objectRevision: basis.objectRevision, purpose: "rental_fee" as const } };
+    const result = await this.files.completeUpload(context.tenantId, id, input, owner);
+    if ((await this.management.paymentProofBasis(context, corporateId, orderId)).objectRevision !== basis.objectRevision) throw this.commands.conflict();
+    return result;
+  }
+  @Get("management-requests/:id/files/:fileId")
+  async paymentProofFile(@Req() req: CustomerRequest, @Param("id") id: string, @Param("fileId") fileId: string,
+    @Res() response: { setHeader(name: string, value: string): unknown; send(value: Buffer): unknown }) {
+    const context = Object.freeze({ ...client(req) }), before = await this.management.customerEvidenceOwner(context, id, fileId);
+    const result = await this.files.readPaymentProofBytes(before.tenantId, fileId, before.applicantCustomerId, before.orderId, before.workspaceId, before.contentHash);
+    const after = await this.management.customerEvidenceOwner(context, id, fileId);
+    if (after.materialKey !== before.materialKey || after.contentHash !== before.contentHash) throw new ConflictException("原回款凭证读取期间材料已变化");
+    response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization"); response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Content-Type", result.mimeType); response.setHeader("Content-Disposition", "attachment; filename=enterprise-payment-proof");
+    return response.send(result.content);
+  }
+  @Get("management-requests/:id/withdraw-operations/:key") managementWithdrawalOriginal(@Req() req: CustomerRequest, @Param("id") id: string, @Param("key") key: string, @Res({ passthrough: true }) response?: { setHeader(name: string, value: string): unknown }) {
+    response?.setHeader("Cache-Control", "no-store"); response?.setHeader("Vary", "Authorization"); return this.management.readWithdrawal(client(req), id, key);
+  }
   @Post("management-requests/:id/withdraw") withdrawManagement(@Req() req: CustomerRequest, @Param("id") id: string, @Body() input: EnterpriseChangeRequestDto) { return this.management.withdraw(client(req), id, input); }
   @Get("tasks") tasksMine(@Req() req: CustomerRequest) { return this.tasks.tasks(client(req)); }
   @Get("corporates/:corporateId/tasks") corporateTasks(@Req() req: CustomerRequest, @Param("corporateId") id: string) { return this.tasks.tasks(client(req), id); }
@@ -211,6 +280,12 @@ export class EnterpriseWorkflowsController {
     const context = client(req); await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
     const rows = await this.prisma.$queryRaw<Array<{ result: string | object; target?: string }>>`SELECT result,target FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key} AND actorUserId=${`customer:${context.customerId}`}`;
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    if (rows[0] && (enterpriseJson(rows[0].result) as { paymentProof?: unknown }).paymentProof !== undefined) {
+      const target = rows[0].target ?? "", save = /^management-request\.save:payment_proof:([a-zA-Z0-9_-]{1,191})$/u.exec(target), withdrawal = /^management-request\.withdraw:([a-zA-Z0-9_-]{1,191})$/u.exec(target);
+      if (save) return this.management.readSave(context, save[1], key);
+      if (withdrawal) return this.management.readWithdrawal(context, withdrawal[1], key);
+      throw new ForbiddenException("原费用回款收据须专用核对入口");
+    }
     if (rows[0]?.target?.startsWith("order.delegation.issue:")) return { state: "committed", result: await this.delegations.readCustomer(context, key) };
     return rows[0] ? { state: "committed", result: enterpriseJson(rows[0].result) } : { state: "not_recorded" };
   }

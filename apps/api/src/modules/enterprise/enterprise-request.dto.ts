@@ -2,7 +2,7 @@ import { Type } from "class-transformer";
 import type { CreateEnterpriseRentalHandoffRequest, ReviewEnterpriseRentalHandoffRequest, WithdrawEnterpriseRentalHandoffRequest } from "@rental-os/shared";
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsDefined, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
 import type { EnterpriseApplicationInput, EnterpriseChangeRequest, SaveEnterpriseApplicationRequest, ReviewEnterpriseApplicationRequest, EnterpriseInvitePolicy, SaveEnterpriseInvitePolicyRequest, CreateEnterpriseInviteRequest, JoinEnterpriseRequest, ReviewEnterpriseJoinRequest, ChangeEnterpriseMemberRequest, TransferEnterpriseAdministratorRequest, DecideEnterpriseTransferRequest, EnterpriseScopePolicy, SaveEnterpriseScopePolicyRequest, EnterpriseDisclosure, RequestEnterpriseBookingApproval, DecideEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking, EnterpriseAuthorityUploadRequest } from "@rental-os/shared";
-import { RENTAL_CATEGORY_CODE_PATTERN, ENTERPRISE_PORTAL_ACTIONS, type RentalCategoryCode, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest } from "@rental-os/shared";
+import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CURRENCY_CODES, ENTERPRISE_REVIEW_REQUEST_TYPES, ENTERPRISE_PORTAL_ACTIONS, type RentalCategoryCode, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest, type EnterprisePaymentProofUploadRequest } from "@rental-os/shared";
 export class ReviewEnterpriseRentalHandoffRequestDto implements ReviewEnterpriseRentalHandoffRequest {
   @IsString() @Matches(/^[a-zA-Z0-9_-]{1,128}$/u) operationKey!: string;
   @IsInt() @Min(1) @Max(1) expectedRevision!: number;
@@ -22,16 +22,20 @@ export class EnterpriseManagementProposalDto implements EnterpriseManagementProp
   @IsOptional() @IsString() @MaxLength(1000) registeredAddress?: string;
   @IsOptional() @IsEmail() @MaxLength(191) email?: string;
   @IsOptional() @IsString() @MaxLength(32) requestedCreditLimit?: string;
-  @IsOptional() @IsIn(["CNY"]) currency?: string;
+  @IsOptional() @IsIn(RENTAL_CURRENCY_CODES) currency?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(200) @ArrayUnique() @IsString({ each: true }) @MaxLength(191, { each: true }) workspaceIds?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(200) @ArrayUnique() @Matches(RENTAL_CATEGORY_CODE_PATTERN, { each: true }) categoryCodes?: string[];
+  @IsOptional() @IsString() @Matches(/^[a-zA-Z0-9._:-]{1,191}$/u) orderId?: string;
+  @IsOptional() @IsString() @Matches(/^[a-zA-Z0-9._:-]{1,191}$/u) workspaceId?: string;
+  @IsOptional() @IsString() @Matches(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/u) reportedAmount?: string;
+  @IsOptional() @IsIn(["rental_fee"]) paymentPurpose?: "rental_fee";
 }
 export class SaveEnterpriseManagementRequestDto implements SaveEnterpriseManagementRequest {
   @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;
   @IsInt() @Min(0) expectedRevision!: number;
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsOptional() @IsString() @MaxLength(191) requestId?: string;
-  @IsIn(["profile_change", "credit_change", "scope_change"]) requestType!: import("@rental-os/shared").EnterpriseManagementRequestType;
+  @IsIn(ENTERPRISE_REVIEW_REQUEST_TYPES) requestType!: import("@rental-os/shared").EnterpriseManagementRequestType;
   @IsString() @IsNotEmpty() @MaxLength(191) objectRevision!: string;
   @IsDefined() @ValidateNested() @Type(() => EnterpriseManagementProposalDto) proposal!: EnterpriseManagementProposalDto;
   @IsArray() @ArrayMaxSize(10) @ArrayUnique() @IsString({ each: true }) @MaxLength(191, { each: true }) evidenceFileIds!: string[];
@@ -59,6 +63,9 @@ export class EnterpriseAuthorityUploadRequestDto implements EnterpriseAuthorityU
   @IsString() @IsNotEmpty() @MaxLength(127) mimeType!: string;
   @IsInt() @Min(1) @Max(20 * 1024 * 1024) sizeBytes!: number;
   @IsString() @IsNotEmpty() @MaxLength(191) idempotencyKey!: string;
+}
+export class EnterprisePaymentProofUploadRequestDto extends EnterpriseAuthorityUploadRequestDto implements EnterprisePaymentProofUploadRequest {
+  @IsISO8601() @MaxLength(24) objectRevision!: string;
 }
 export class RequestEnterpriseBookingApprovalDto implements RequestEnterpriseBookingApproval {
   @IsString() @IsNotEmpty() @MaxLength(128) operationKey!: string;

@@ -1,7 +1,7 @@
 /** Curated enterprise order reads use original subjects and disclosure evidence.
  * Current grants and client workspace are checked before and after IO. Rental
  * policies govern new use separately. Money, stock and payment states remain Core facts. */
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { ENTERPRISE_ORDER_EXPORT_LIMIT, ENTERPRISE_ORDER_GROUPS, type EnterpriseOrderDetail, type EnterpriseOrderDetailResponse,
   type EnterpriseOrderExportQuery, type EnterpriseOrderExportResponse, type EnterpriseOrderGroup,
@@ -13,6 +13,7 @@ import { PrismaService } from "../database/prisma.service";
 import { EnterpriseReaderAuditService } from "./enterprise-reader-audit.service";
 import { rentalOrderDueAt } from "../rental-core/rental-carrier-shipment";
 import { enterpriseJson } from "./enterprise-command.service";
+import { hasOriginalRentalCurrency } from "../rental-core/rental-money";
 
 type OriginalMembership = {
   bookingIdentity: unknown;
@@ -84,6 +85,27 @@ export class EnterpriseOrderReaderService {
     return Prisma.sql`((o.contractSubjectCustomerId=${corporateId} AND o.payerSubjectCustomerId=${corporateId})
       OR (o.contractSubjectCustomerId IS NULL AND o.payerSubjectCustomerId IS NULL AND o.userSubjectCustomerId IS NULL
         AND o.customerType='corporate' AND o.customerId=${corporateId}))`;
+  }
+
+  /** The request service supplies current authorization and its transaction.
+   * Lock the same original order whose subjects determine enterprise responsibility. */
+  async financialRequestOrder(tenantId: string, corporateId: string, workspaceId: string, orderId: string, tx: Prisma.TransactionClient) {
+    if (![tenantId, corporateId, workspaceId, orderId].every(reference)) throw new BadRequestException("原回款核对对象引用无效");
+    const rows = await tx.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string; currency: string; updatedAt: Date;
+      customerType: string; customerId: string | null; contractSubjectCustomerId: string | null; payerSubjectCustomerId: string | null; userSubjectCustomerId: string | null }>>(Prisma.sql`
+      SELECT o.id,o.tenantId,o.workspaceId,o.currency,o.updatedAt,o.customerType,o.customerId,
+        o.contractSubjectCustomerId,o.payerSubjectCustomerId,o.userSubjectCustomerId
+      FROM rental_orders o JOIN business_workspaces w ON w.tenantId=o.tenantId AND w.id=o.workspaceId AND w.status='ACTIVE'
+      WHERE o.tenantId=${tenantId} AND o.workspaceId=${workspaceId} AND o.id=${orderId} AND ${this.paid(corporateId)} FOR UPDATE`);
+    const row = rows[0];
+    if (rows.length !== 1 || row.tenantId !== tenantId || row.id !== orderId || row.workspaceId !== workspaceId
+      || !(row.contractSubjectCustomerId === corporateId && row.payerSubjectCustomerId === corporateId
+        || row.contractSubjectCustomerId === null && row.payerSubjectCustomerId === null && row.userSubjectCustomerId === null
+          && row.customerType === "corporate" && row.customerId === corporateId)) throw new NotFoundException("原企业承担订单不可用于回款核对");
+    if (!hasOriginalRentalCurrency(row.currency, row.currency) || !(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())) {
+      throw new ConflictException("原订单币种或修订缺少核对依据");
+    }
+    return { orderId: row.id, workspaceId: row.workspaceId, currency: row.currency, objectRevision: row.updatedAt.toISOString() };
   }
 
   private personalBenefit(corporateId: string) {
