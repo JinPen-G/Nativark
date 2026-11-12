@@ -29,7 +29,9 @@ export type StaffUploadObservationResponse = {
 } & ({ state: 'observed'; session: StaffUploadObservedSession }
   | { state: 'not_observed'; session: null });
 
-const reference: AiLeafSchemaDraft = { oneOf: [object({ idempotencyKey: id() }), object({ sessionId: id() })] };
+// Upload operation keys are original caller text, unlike generated session IDs.
+// The server validates the original length and then applies create's trim rule.
+const reference: AiLeafSchemaDraft = { oneOf: [object({ idempotencyKey: { ...text(191), pattern: '\\S' } }), object({ sessionId: id() })] };
 const file = object({ businessModule: choice('rental-core'), businessType: choice('rental_order', 'rental_work_order'),
   businessId: id(), fileName: text(180), mimeType: { ...text(127), pattern: '^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+-]+$' },
   sizeBytes: integer(1, 20971520), uploadScene: choice('pickup-evidence', 'return-evidence', 'handover-signature', 'work-order-evidence', 'offline-payment-proof'),

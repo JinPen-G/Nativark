@@ -15,7 +15,16 @@ export class StaffUploadObservationDto implements StaffUploadObservationRequest 
 export function parseStaffUploadObservation(value: unknown): StaffUploadObservationRequest {
   try {
     const input = structuredClone(value);
-    if (Buffer.byteLength(JSON.stringify(input) ?? '', 'utf8') <= 8192 && validStaffObservation(input)) return input;
+    if (Buffer.byteLength(JSON.stringify(input) ?? '', 'utf8') <= 8192 && validStaffObservation(input)) {
+      if ('idempotencyKey' in input.reference) {
+        // Match createUploadSession: the raw UTF-16 length is bounded before
+        // trimming; a lost create response must remain findable by its old key.
+        const original = input.reference.idempotencyKey;
+        if (original.length > 191 || !original.trim()) throw new Error('Invalid original upload key');
+        input.reference.idempotencyKey = original.trim();
+      }
+      return input;
+    }
   } catch { /* A malformed descriptor is not an upload observation. */ }
   throw new BadRequestException('原上传会话引用或文件描述无效');
 }

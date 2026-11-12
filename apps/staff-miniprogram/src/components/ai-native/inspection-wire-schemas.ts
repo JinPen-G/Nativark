@@ -6359,7 +6359,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 191,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                "pattern": "\\S"
               }
             },
             "required": [
@@ -6485,7 +6485,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 191,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    "pattern": "\\S"
                   }
                 },
                 "required": [
@@ -6639,7 +6639,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 191,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    "pattern": "\\S"
                   }
                 },
                 "required": [

@@ -18,7 +18,7 @@
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 接 AIN-19 的 shared/StaffFactory/provider 与 Core 单资产 reader；原上传观察后端 7 源已独立核验，继续原生成器及 AIN-20 消费者闭合。继续 AIN-12 字段 lineage/原解释控制、AIN-15 原请求/模型/Reader 公共出口；AIN-17 等 Core 固定来源。公共依赖、QA 与 main 整合集中经 PM 协调。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-19 五源已固定交回 Root。现独占四个 workbench-model-control 私有 contract/repository/source/service 文件，接同 Task 的重新解释/重新排版和原操作收据；共用 origin reader 接点仍归 Root，禁止放开普通终态或客户/媒体的原 lineage。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-20 重新开放原员工 16 源及 uploads.ts，共 17 源；补新图片→原草稿/证据、录音、上传观察与迟到回写隔离。原生 WAV、单声道/16kHz、最长 12 秒且实际大小不超过 524288 字节；不转码或混入图片。quote-goal 三源继续冻结交 Root。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-20 原员工 16 源及 uploads.ts，追加 inspection-transport.ts、inspection-host.ts、ai-inspection-assist/index.wxml、ai-inspection-draft/index.ts/.wxml 五个私有消费者，共 22 源；补图片/录音、原上传/草稿恢复、迟到回写隔离及 basis/reviewIssues/basisIssues 的原理由显示和采用限制。原生 WAV、单声道/16kHz、最长 12 秒且实际大小不超过 524288 字节；不转码或混入图片，不在前端重写业务判定。quote-goal 三源继续冻结交 Root。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
 
 公共窗口不得夹带企业端的 ClientApiService.readOrderSubmission、企业 reader/controller/GET 和后台企业材料。Core 订单、资金、品类与配置权威仍由原专项负责，AI 不重建这些规则。
@@ -32,6 +32,8 @@
 5. **员工与客户。** [员工原结果定位](<AI Native-开发记录.md#ain-staff-original-result-reference-20261111>)和显式首次准入已核接。AIN-19 五源已交回 Root；公共 basis 引用及 lifecycle 闭包已接，旧输入不补签。Core 单分配项 reader 固定 `6d35ab7489daa6403da30956d776a5a6331bedb1`，字段规则/缺值补片 `800a38925f7dd1a81d6e87af02301517eff5fd50` 已接 AI 工作区；当前正核默认 StaffFactory→Core→原候选及采用链，不能把其单目标证明包装成完整分页或给新明确缺依据的候选放宽采用。AIN-20 dev2 继续原 16 源及 uploads.ts；[原上传观察后端](<AI Native-开发记录.md#ain-staff-upload-observation-20261112>)已推 `b704dddf9`，[原生成器/本地合同](<AI Native-开发记录.md#ain-staff-upload-native-contract-20261112>)已核，继续实际页面恢复，不得 runtime require shared、新键重发或借 knowledge 权限。客户[报价两端](<AI Native-开发记录.md#ain-client-quote-consumers-20261111>)和[原订单任务](<AI Native-开发记录.md#ain-client-task-consumer-closeout-20261111>)已固定；其余 audience、跨 surface、匿名/企业及媒体弱网按原 ENTRY 范围核定。
 
 日历 24 源及规则 19 源/3 公共注册已分别在[日历核接](<AI Native-开发记录.md#ain-calendar-source-consumer-closeout-20261111>)、[规则核接](<AI Native-开发记录.md#ain-rule-source-intake-20261111>)保留完整证据。会员姓名和通知首次 start/原历史也已接原权限及收据，不重复施工；AIN-16 余范围仍须逐字段和实际写入/发布边界核实。
+
+上传观察的幂等键兼容缺口已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并完成必要模拟：观察与创建使用相同的原始长度和 trim 规则，唯一 registry 已同步；AIN-19 活动 schema 未混入。AIN-12 新控制 Run 的公共 preparation/resourceOrigin 仍需接入专用 operator 原操作证明，普通回答后继与 Task 累计额度保持原规则；dev1 继续四私有源，Root 接公共运行器及结果/展示读取。
 
 ## AIN-17 等待的 Core 固定来源
 

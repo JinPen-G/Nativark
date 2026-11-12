@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-staff-upload-key-compatibility-20261112"></a>
+## 员工原上传键兼容与丢回执恢复（2026-11-12）
+
+QA 指出观察合同把幂等键当生成 ID 校验，原 create 可接受的 `staff/upload/one` 因此无法回读。沿[原 shared 合同](../../packages/shared/src/staff-upload-observation.ts)与[原 DTO 解析](../../apps/api/src/modules/integrations/file-upload.dto.ts)改为非空白文本，先按原 create 校验原始 UTF-16 长度不超过 191，再 trim；不改变 session ID 格式、二选一、闭合请求及员工/租户/空间/业务 ACL。
+
+在固定 `46d9b2376b7303efc9b10a98b45c48cf52790da3` 源码闭包中只叠加上述两源，复用原 file-storage fixture 运行实际 Guard→Controller/DTO→FileStorageRuntime→FileBusinessAccess/Core 模拟：带斜杠及首尾空白的原创建丢 ACK 后可按原键观察；191 边界、空白、超长、UTF-16 长度、错误 session 格式及额外选择器均按原规则处理。原错员工/空间、撤权、错文件/批次、过期和读取时记录变化检查保留。仅创建 1 会话/1 文件、原 complete 1 次，观察 0 写入及 0 provider 调用。命令 `node --no-compilation-cache -`，退出 0，stdin SHA-256 `f246e2fcf86ca10cb166a2b421fa0461147e43814e87a12763f967403f04a36c`；TypeScript 5.9.3 的 4 根/1183 源零诊断，命令 SHA-256 `308d5c5a1a5de7788c52c12ff9948ee0353998fb26198bbb40b2d7091174232c`。
+
+沿原生成器重新生成[员工唯一 registry](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)，保留 21 检查/9 任务操作及 54 schema，不混入 AIN-19 活动合同。产物 SHA-256 `2485a8c803f5a0828285d6da88eb31f5a152065797c19a256d2914551480227e`，生成命令 SHA-256 `7ce9d865fe851f2b0b36fbc5432cca203d1ec22e5a764c3c6457ff637a68c851`。当前原 native validator 的请求/响应和拒绝模拟通过，命令 SHA-256 `d981961b0b8ecff7227ee8c58bc6d23d83da3f5eed95ba8683c2bf16d03470e7`，退出 0；该助手活动 validator 不混入本片提交。
+
+全部审计为空、逻辑任务目录未创建，无新增测试脚本或临时产物。`node scripts/validate-docs.cjs` 退出 1，仍为导航历史三处及稀疏站点示例一处既有缺链；本片未新增链接或任务算术错误，定向差异检查退出 0。真实微信/数据库/存储由负责人后续实测；本片只关闭原键兼容缺口，不代表 AIN-19/20 整项完成。公共 Run 控制来源、AIN-19 默认员工装配及媒体最终消费者继续分别收口。
+
 <a id="ain-staff-upload-native-contract-20261112"></a>
 ## 员工原上传观察的本地运行合同（2026-11-12）
 
