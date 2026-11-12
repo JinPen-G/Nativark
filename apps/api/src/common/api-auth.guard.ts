@@ -174,6 +174,8 @@ export function isClientPublicRoute(method: string, path: string) {
 }
 
 export function isTenantMembershipRoute(path: string) {
+  // 原委托关联当前空间的报价和 Core 订单，必须保留空间身份供来源复验。
+  if (/^\/membership\/enterprise-workflows\/order-delegations\/[^/]+(?:\/(?:execute|result))?$/u.test(path)) return false;
   if (path === "/membership" || path.startsWith("/membership/")) {
     return !path.startsWith("/membership/qualification-types");
   }
@@ -1322,6 +1324,7 @@ export class ApiAuthGuard implements CanActivate {
       (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
       (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
       path.startsWith("/reports") || path.startsWith("/files") || path.startsWith("/integrations") ||
+      /^\/membership\/enterprise-workflows\/order-delegations\/[^/]+(?:\/(?:execute|result))?$/u.test(path) ||
       /^\/platform\/customers\/[^/]+\/(?:profile|credit\/(?:account|ledger|payments(?:\/[^/]+\/reverse)?|maturities(?:\/[^/]+)?))$/u.test(path) ||
       path === "/platform/workspace-customers" ||
       path.startsWith("/platform/workspace-customers/");
