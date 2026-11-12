@@ -4,6 +4,18 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="api-current-build-cleanup-20261112"></a>
+
+## 当前固定源码的API构建与退出残留（2026-11-12）
+
+从已推送并回读GitHub的`c24fd4e848565af87e751046911aedb25f5d7bf1`完整离线编译本树API，本阶段未改业务源码、Schema或Client。原`tsc -p apps/api/tsconfig.json --outDir <任务暂存>/api --sourceMap false --incremental false --pretty false`退出0，preload审计0；866份JS逐文件核对，9份差异已安装到本树自持`apps/api/dist`，4份Shared/Client保护文件hash不变。完整来源、命令与产物hash唯一见[构建清单](../../output/category-governance/api-build-c24fd4e84.manifest.json)。这次没有重跑业务用例，不把编译或包更新记作CAT-GOV/CLOSE验收。
+
+构建及hash核对进程已退出，独占暂存含862文件、12,140,642字节，未含reparse point。原生PowerShell递归删除再次被CreateProcess自动审批以`blocked by policy`拒绝，命令未执行、未给具体理由；没有换壳或改用其他删除工具。按根规则将原目录安全移动到主仓库唯一`output/.cleanup-pending/rental-core/rental-core-validation/residue`，复核文件数/体积不变、无链接且原`output/.tmp/rental-core-validation`不存在。归属、原/现路径、拒绝原因及恢复条件只维护[待清理责任清单](../../../../output/.cleanup-pending/rental-core/rental-core-validation/manifest.json)，没有复制第二套构建环境。**已归集，未删除**；工具恢复后由本对话继续清理，不宣称退出产物全部收尾。
+
+本树当前包已包含原九项同client、单目标资料及商户委托封存补片；此前864份包的证据继续作为原阶段记录，不作为当前包版本。原四入口Outbox参加者、真实配置counter闭环、结构化`resource_shortage`来源及`assignment.issueSource`窗口仍未齐；后者由PM核准后才施工，不从自由issue文本推断短缺。原08采用/恢复、两动态编码不同组合经营、真库/多实例、浏览器/微信和独立Review门槛保持，完整结项仍0/14。阶段与依赖仅向PM一次必要回报，不抄送其他专项。
+
+四份记录/接续的新增导航用原生PowerShell定向核对：7处新增本地链接、5处片段均存在，唯一跨树待清理清单保留跨树分类并核明实际位置；没有放松原检查器或复制证据。`git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check`退出0。本片仅文档和证据收口，不运行应用、业务测试或真实环境。
+
 <a id="readiness-original-transaction-20261112"></a>
 
 ## 原九项开业来源的同client读取（2026-11-12）
