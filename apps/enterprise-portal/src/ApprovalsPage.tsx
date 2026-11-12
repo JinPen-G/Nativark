@@ -147,12 +147,16 @@ function EnterpriseOrderDelegationControls({ approval, english, refresh }: { app
       <ActionButton intent="confirm" disabled={operation.blocked || !revokeConfirmed || !reason.trim()} label={english ? "Revoke original delegation" : "撤销原委托源"} onAction={revoke} />
     </>}
     {operation.pending && <ActionButton intent="review" disabled={operation.busy} label={english ? "Read original delegation operation" : "核对原委托操作"} onAction={() => operation.recover(async receipt => {
-      if (receipt?.state !== "committed" || !receipt.result || typeof receipt.result.delegationKey !== "string") throw new Error("原委托操作收据仍待核对");
       const pending = operation.pending;
-      const sourceKey = pending?.path === "/enterprise/order-delegations/issue" ? pending.key : pending?.path.match(/^\/enterprise\/order-delegations\/([^/]+)\/revoke$/u)?.[1];
+      if (!pending) throw new Error("原委托操作引用仍待核对");
+      // A known commit may omit the callback receipt. Read the same command
+      // before retiring its reference, including after a failed refresh.
+      const original = receipt ?? await operation.read<EnterpriseOperationResult>(`/enterprise/operations/${encodeURIComponent(pending.key)}`);
+      if (original.state !== "committed" || !original.result || typeof original.result.delegationKey !== "string") throw new Error("原委托操作收据仍待核对");
+      const sourceKey = pending.path === "/enterprise/order-delegations/issue" ? pending.key : pending.path.match(/^\/enterprise\/order-delegations\/([^/]+)\/revoke$/u)?.[1];
       if (!sourceKey) throw new Error("原委托操作路径不一致");
       const decoded = decodeURIComponent(sourceKey);
-      if (receipt.result.delegationKey !== decoded) throw new Error("原委托操作键与原源不一致");
+      if (original.result.delegationKey !== decoded) throw new Error("原委托操作键与原源不一致");
       await finish(await readSource(decoded), decoded);
     })} />}
     {operation.error && <Alert type="error" title={operation.error} />}
