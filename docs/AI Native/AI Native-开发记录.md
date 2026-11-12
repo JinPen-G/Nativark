@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain23-category-credential-main-integration-20261113"></a>
+
+## 治理人工草稿原凭据的 main 收回（2026-11-13）
+
+固定`23e4cd71`仅人工应用文件与Core`654a5e35`两源组成QA通过组合，三源最终blob一致。create/patch/等待改header/撤权回滚/失交付人工核对/原创建K六项相关复验闭合，3根/1206源零诊断，完整证据见[Core记录](<../Rental Core/Rental Core-开发记录.md#pm-governance-authority-main-integration-20261113>)。本片不整收AI父级模型控制或两个近期文档，原AIN-23新类草稿/发布/采用消费者与完整入口仍须实施；任务进度不变，真实HTTP/DI/MySQL及宿主未验。下方保留作者原单文件阶段。
+
+<a id="ain23-category-credential-core-20261113"></a>
+## 治理草稿消费者向新 Core 转交原签名身份（2026-11-13）
+
+PM 转交的 QA P2 为原 CategoryDraftApplication 经 Guard 后仅向 Core Controller 传 user，新 Core Auth 缺 authorization，create/patch 返回未知且未写草稿。单文件前像 Git blob `366f9c1890f9d8e28fd4b0872137c40e55a42ec6`，后像 `3843338a6b759f212253351c35ef9bbd6b9f170c`。current 回调转交该次已捕获 credential.authorization，两个写入请求在原 user 上附 headers.authorization。原 Guard/ALS、DTO、CAS、前后权限复核及新 Core Auth 保持。[消费者](../../apps/api/src/modules/ai-native/category-assist/category-draft.application.ts)
+
+dev2 复用 QA 原治理身份夹具，实际 AuthService 签名/会话、ApiAuthGuard、PlatformService/Repository、AI Controller/应用及 Core Controller/服务，十场景必要模拟退出 0，stdin SHA-256 `a0d95f495a28b4d93e7bea19959e93063e73f805521e459489e382d2976998b5`。前像两个入口缺 header 拒绝、零审计，后继 create/patch 各写一次审计。外部 credential 在等待中变化仍只转交原捕获 header，Core await 中撤会话/撤 edit 和审计后撤权均拒绝并回滚，body 注入身份由 DTO 拒绝。关闭创建后同原 K 仍恢复原版本，重复不增审计，撤 edit 继续拒绝读取。DB/storage 及部署开关为明确内存夹具。
+
+Core 仅用 PM `654a5e35` 固定补片的两个源码对象做内存组合，service `09eca288fdfdcc66b2ab005199a5c588b4769a5f`、Controller `e4900454be98043074b69301bf3d99a215523e01`，没有改 Core 文件。作者按原 shared/MCP/API 声明配置检查 3 根/1199 源零诊断，退出 0，stdin SHA-256 `b991f698dd34ee98dc70308927123f9f157e45a9ad1ef8c3b86453cb584577cb`。Root 逐 blob 核同，复核同签名捕获与前后权限流程，固定 Core/本单文件 3 根/1200 源 TypeScript 5.9.3 零诊断，退出 0，stdin SHA-256 `510b08deb6d283b6cae4d83a8bba0d5cb3134b88aa73be695ebe98320f5e99aa`。
+
+原命令/输出只保留 dev2/AI-RD 既有会话，未新增脚本、测试文件、client/dist 或附件副本。所有验证进程退出，审计为空，任务临时目录未创建。本单文件交 PM 与固定 Core 两源组成完整候选，由既有 QA 复验。AIN-23 仍缺新类草稿/目录、发布与采用的 AI 消费及后台入口，原完整任务百分比不因兼容补片改变。
+
 <a id="ain12-main-field-input-integration-20261112"></a>
 ## PM按QA闭包收回原字段与可信输入（2026-11-12）
 

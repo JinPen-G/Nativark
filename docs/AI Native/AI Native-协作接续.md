@@ -48,6 +48,8 @@ Core只读合同已固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 
 ## 当前QA与展示接续
 
+AI治理原header补片`23e4cd71`与Core`654a5e35`两源码已按QA三源固定组合收回main，原P2闭合；人工create/patch同一捕获签名、当前权限、CAS/原K及失交付核对保持，见[本片收回](<AI Native-开发记录.md#ain23-category-credential-main-integration-20261113>)。AIN-23完整新类/发布/采用消费者继续原目标。630/d201原模型控制因当前display publication时间窗口P2仍暂缓；AI-RD修固定时间门禁后仅相关QA复验，不以其他片集成替代该阻断。
+
 [P1/P3固定修复及边界](<AI Native-开发记录.md#ain-qa-current-permission-20261112>)已收main`6fce308c4`。P2固定`ef15308df`完成Controller/API/session两个丢应答窗口，PM按本提交两源码差异串行收回，沿[原阶段](<AI Native-开发记录.md#ain-qa-clarified-quote-receipt-20261112>)核证。原`scene-answer:${inputRef}:${receiptId}`仍是澄清报价及选单的唯一读取依据，关闭模型后只读同键、缺失保持unknown，不用普通inputRef/contentHash键替换或恢复新执行。
 
 P1/P3已推送f86b81aea并由PM独立差异核入main6fce308c，dev1零初始政策8+3+5 CAS/一次Core的原通知链也通过。[P2](<AI Native-开发记录.md#ain-qa-clarified-quote-receipt-20261112>)已完成Root原报价/选单同键、精确reference/存储指纹及必要类型，dev1已独立核quote/selection两丢应答的实际Controller/API/session、当前owner/space/撤权、source/hash及unknown反例；按provider/readers两源码和原记录/接续立即固定交付，由PM只收本差异。12生成/公开接点、17资源和18人工消费者WIP分别保留，不随本P2合入。
