@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-resource-outbox-core-contract-20261112"></a>
+## 资源事件参加者向 Core 的固定接口（2026-11-12）
+
+PM 请求的窄接点已经在 Git `b690e4f3751bcaa1beac30cde88b55ea596ec1de`：只引用[原 Outbox 参加者/资源端口](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts)，blob `10f1d833f98f4e048889ab1c053efc5b349a8ace`；[原 scoped 存储](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-resource-store.ts)，blob `1a06a119dd798d1dfa8b43beeb826ff2e5a63f40`。不是整收 `ea9a3ec2b` 检查点；schema 固定 blob `cd96f441281263ec9095423e4b1420e870fbf444` 只供差异核对，本轮没有 DDL 或重新生成客户端。
+
+`BusinessFailureOutboxParticipant.fulfillment(tx, {tenantId, workspaceId}, orderId)` 与 `opening(tx, scope, {kind, id}, sectionCode)` 均为可选原事务参加者，返回 `captured/eventId` 或 `not_captured/source_unavailable|not_current_failure`。`BusinessFailureResourcePorts` 的 `readFulfillment(scope, orderId, tx?)`、`readOpening(scope, configuration, tx?)`、`readBinding(event, tx?)`、`assertStorage(tx)`、`append(tx, {event, reference, expiresAt, failureCode})` 使用调用方已有事务，不重入 `scanOrder`、不另开业务事务，也不调用模型。只读接口同时支持原无事务观察；捕获时必须传原 tx。
+
+履约来源闭合字段为 scope、orderId、assignmentRevision、dueAt、locationId、`state: shortage|deliverable|unavailable`、sourceHash 及可空的正式政策 `{id, revision, validFrom, expiresAt, lookAheadMs}`。Core 负责结构化不足判定及原版本，AI 不解析 issue 文本；临近窗口、状态或政策不齐保持未捕获。开业来源为原 configuration 的 kind/id/rowRevision、defaultWorkspaceId、sourceHash 和九项唯一 section 状态，不能将独立九读冒称总版本或单事务快照。已有只读来源是否足以提供这些证据，由 Core 原作者逐项核定。
+
+资源引用把原 scope、资源修订/来源哈希、时间/地点和政策版本冻结；trace 来自 scope/资源（开业另含分区），causation 来自 trace/完整引用，去重键为 eventType/causation 的原指纹。原唯一约束为 `(tenantId, workspaceId, deduplicationKey)`，重复命中只读取原行，`ON DUPLICATE KEY UPDATE id = id` 不覆盖旧依据。缺资源端口或政策可返回 `not_captured`；尝试 append 后回执缺失为 `result_unknown`，调用方不能换键补发或吞掉原事务一致性失败。停用不因缺模型阻塞原业务。
+
+沿固定源码运行一次必要接口模拟，验证所有读/append 收到同一原 tx、缺政策与可履约零捕获、重复引用返回原事件、append 丢回执保持 unknown。存储为内存替身，只证明接口和原算法，不证明真库原子性；1 唯一事件，审计为空、临时目录未创建。命令 `node --no-compilation-cache -` 退出 0，stdin SHA-256 `c12ed359a1eda4dd95aa4d461d3558ba2782c7f7f419cf21b02cdab31d11223c`。AIN-17 原业务捕获装配及完整事件消费者仍未收口，百分比不变；固定接口只交 PM，由其定向协调 Core。
+
 <a id="ain-staff-upload-key-compatibility-20261112"></a>
 ## 员工原上传键兼容与丢回执恢复（2026-11-12）
 
