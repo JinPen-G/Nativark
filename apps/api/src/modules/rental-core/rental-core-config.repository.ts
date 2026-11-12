@@ -161,7 +161,7 @@ export interface RentalConfigStore {
   /** Opening-only projection. No cache initialization, bundle/member joins or credentials. */
   readReadinessCoreFacts?(tenantId: string, workspaceId: string): Promise<RentalReadinessCoreFacts>;
   /** Bounded page/minimal settings/profile fields; no bundles, members or credentials. */
-  readOpeningConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalOpeningConfigurationFacts>;
+  readOpeningConfigurationFacts?(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalOpeningConfigurationFacts>;
   listItemGroupsPage?(tenantId: string, workspaceId: string, query: RentalItemGroupPageQuery, tx?: RentalConfigTx): Promise<RentalItemGroupPage>;
   listInspectionTemplates?(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalInspectionTemplate[]>;
   loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantConfigSnapshot>;
@@ -567,12 +567,16 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       enabledItemGroupCount, serviceableLocationCount, pricingGroups: groups.map(({ id, name }) => ({ id, name })) };
   }
 
-  async readOpeningConfigurationFacts(tenantId: string, workspaceId: string): Promise<RentalOpeningConfigurationFacts> {
+  /** A commit participant may read through its original transaction after the
+   * caller's fences. No new transaction/locks or business scanning occurs here;
+   * the source row revisions never imply a total nine-section readiness version. */
+  async readOpeningConfigurationFacts(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalOpeningConfigurationFacts> {
+    const client = tx ?? this.prisma;
     const locationWhere = staffLocationWhere('id'), locationBinding = JSON.stringify(locationWhere);
     const assertScope = async () => {
       if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
         || JSON.stringify(staffLocationWhere('id')) !== locationBinding
-        || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+        || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
         throw new ForbiddenException('开业配置读取范围变化');
     };
     await assertScope();
@@ -599,8 +603,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       profileSource: unknown; terminology: unknown };
     type Location = { tenantId: string; workspaceId: string; id: string; code: string; status: string; capabilities: unknown };
     const [workspace, metadata, groups, pricingGroups, locations, enabledItemGroupCount, enabledLocationCount] = await Promise.all([
-      this.prisma.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { id: true, tenantId: true, categoryCode: true } }),
-      this.prisma.$queryRaw<Meta[]>(Prisma.sql`
+      client.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { id: true, tenantId: true, categoryCode: true } }),
+      client.$queryRaw<Meta[]>(Prisma.sql`
         SELECT s.tenantId, s.workspaceId, s.categoryCode, s.configVersion, s.settingsRevision,
           JSON_OBJECT('configVersion', LEFT(JSON_UNQUOTE(JSON_EXTRACT(s.settings, '$.configVersion')), 192),
             'currency', LEFT(JSON_UNQUOTE(JSON_EXTRACT(s.settings, '$.pricing.currency')), 4),
@@ -617,18 +621,18 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         LEFT JOIN tenant_rental_profiles AS p ON p.tenantId = s.tenantId AND w.isDefault = TRUE
         ${profileSql.joins}
         WHERE s.tenantId = ${tenantId} AND s.workspaceId = ${workspaceId} LIMIT 1`),
-      this.prisma.rentalItemGroup.findMany({ where, orderBy: { id: 'asc' }, take: limit + 1,
+      client.rentalItemGroup.findMany({ where, orderBy: { id: 'asc' }, take: limit + 1,
         select: { tenantId: true, workspaceId: true, id: true, code: true, status: true, inventoryMode: true, unit: true } }),
-      this.prisma.rentalPricingGroup.findMany({ where, orderBy: { id: 'asc' }, take: limit + 1,
+      client.rentalPricingGroup.findMany({ where, orderBy: { id: 'asc' }, take: limit + 1,
         select: { tenantId: true, workspaceId: true, id: true, code: true, status: true, version: true } }),
-      this.prisma.$queryRaw<Location[]>(Prisma.sql`
+      client.$queryRaw<Location[]>(Prisma.sql`
         SELECT l.tenantId, l.workspaceId, l.id, l.code, l.status,
           ${boundedArray(Prisma.sql`l.capabilities`)} AS capabilities
         FROM rental_fulfillment_locations AS l
         WHERE l.tenantId = ${tenantId} AND l.workspaceId = ${workspaceId} ${selectedLocations}
         ORDER BY l.id LIMIT ${limit + 1}`),
-      this.prisma.rentalItemGroup.count({ where: { ...where, status: 'enabled' } }),
-      this.prisma.rentalFulfillmentLocation.count({ where: { ...where, ...locationWhere, status: 'enabled' } })
+      client.rentalItemGroup.count({ where: { ...where, status: 'enabled' } }),
+      client.rentalFulfillmentLocation.count({ where: { ...where, ...locationWhere, status: 'enabled' } })
     ]);
     const owns = (row: { tenantId: string; workspaceId: string }) => row.tenantId === tenantId && row.workspaceId === workspaceId;
     const atom = z.string().min(1).max(191), status = z.enum(['enabled', 'disabled']);

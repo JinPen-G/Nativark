@@ -987,13 +987,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   /** Opening-only persisted page and selected fields. No state/seed/cache scan
    * or quote initialization; option normalization is shared with manual reads. */
-  async readOpeningConfiguration(tenantId: string): Promise<RentalOpeningConfigurationFacts & { categoryVersion: string }> {
+  /** Optional client belongs to the original Core write owner. This projection
+   * never starts a transaction or replaces that owner's locking/authorization. */
+  async readOpeningConfiguration(tenantId: string, tx?: RentalConfigTx): Promise<RentalOpeningConfigurationFacts & { categoryVersion: string }> {
     const identity = getRequestIdentity(), workspaceId = getRequestWorkspaceId();
     if (!workspaceId || identity?.tenantId !== tenantId) throw new ForbiddenException('开业配置缺少当前租户或经营空间');
     if (typeof this.configStore.readOpeningConfigurationFacts !== 'function') throw new ServiceUnavailableException('开业配置持久投影不可用');
     const binding = requestFingerprint(identity);
-    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
-    const facts = await this.configStore.readOpeningConfigurationFacts(tenantId, workspaceId);
+    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx) : undefined;
+    const facts = await this.configStore.readOpeningConfigurationFacts(tenantId, workspaceId, tx);
     if (facts.tenantId !== tenantId || facts.workspaceId !== workspaceId) throw new ConflictException('开业配置来源变化');
     const definition = published?.definition ?? await this.effectiveCategory(tenantId, facts.categoryCode);
     if (definition.code !== facts.categoryCode) throw new ConflictException('开业配置品类来源变化');
@@ -1001,7 +1003,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const profile = facts.profile ? { ...facts.profile, terminology: Object.fromEntries(RENTAL_OPENING_TERMINOLOGY_FIELDS.map(field =>
       [field, facts.profile!.terminology[field] ?? definition.terminology[field]])) } : null;
     if (published) {
-      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId, tx);
       if (latest.categoryVersionId !== published.categoryVersionId || latest.adoptionRevision !== published.adoptionRevision)
         throw new ConflictException('开业配置读取期间采用版本已变化，请重新读取');
     }

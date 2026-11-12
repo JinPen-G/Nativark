@@ -4,11 +4,23 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="opening-original-transaction-20261112"></a>
+
+## 开业配置来源的原事务读取（2026-11-12）
+
+从已核GitHub的`89261ed60993e41c0595519c6bb0dd6e46fb2835`接续，按AIN-17既有Core来源窗口只改[配置仓储](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)和[Core读取](../../apps/api/src/modules/rental-core/rental-core.service.ts)。`readOpeningConfiguration`及`readOpeningConfigurationFacts`追加可选服务器原事务参数：当前范围、配置元数据、分页/计数和品类绑定前后读取均复用该client，不逃出根连接；未传参数仍沿原独立观察语义。
+
+调用方仍负责原Tenant/空间锁序和当前授权，读取不新建事务、追加锁、初始化缓存、扫描经营或捕获事件。实际profile行的`configurationSource/configurationRevision`及原设置行`settingsRevision`保留，缺失/坏结构不补1；这不是九项开业事实的总修订，也不凭同client宣称全部事实已形成真实同事务快照。
+
+API原noEmit退出0。复用原`ai-native-ain08-opening-configuration.test.cjs`fixture，只明确给出当前合成元数据行的真实数值修订/来源，限定实际Core/仓储调用退出0：默认TenantRentalProfile与非默认RentalCoreStateSnapshot两来源透传、Root连接禁止下全部查询/绑定读使用原tx、无新事务/缓存、原归一化与未传tx读取、101哨兵、跨范围/缺失或坏修订及后继绑定拒绝。Source行、SQL/Auth/锁/关系均为fixture；原整组缺新增修订字段及旧读取次数失败仍在[原行修订阶段](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)保留，未改测试或用当前默认补历史。命令/源码hash/结果唯一见[原事务证据](../../output/category-governance/opening-original-transaction-20261112.json)，audit0、退出暂存已删除，未生成新包。
+
+企业guard仍在原作者树验证，尚未给Core固定提交，不读取或整合其活动WIP；Core封存892已交企业/PM，QA及正式guard/HTTP/DI/真库/宿主待组合。下一独占入口为AIN-17业务/会员九项来源的原client、真实配置行counter/相关变更及资源短缺参加者；缺正式临近政策/当前权限保持not_captured，原CAT-GOV/CLOSE与0/14门槛不变。
+
 <a id="merchant-delegation-core-sealed-runtime-20261112"></a>
 
 ## 商户委托的Core封存来源与原binding闭包（2026-11-12）
 
-从已核GitHub的类型片`b869f72b1117b4511a330af4937f11ecf6710756`接续，最小安全闭包为[Core authority/端口](../../apps/api/src/modules/rental-core/rental-merchant-delegated-order.authority.ts)与[原确认服务](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)两文件。authority私有mint只能沿宿主提供的既有企业私有源读取/严格prepare到达；原确认入口才把证明注入并登记真实binding。只交类型/校验文件不能固定该原入口来源，拆出任意callback造binding会削弱封存约束，因此两文件同交，企业policy和公共宿主仍归原作者。
+从已核GitHub的类型片`b869f72b1117b4511a330af4937f11ecf6710756`接续，固定闭包源码`89261ed60993e41c0595519c6bb0dd6e46fb2835`已普通推送核远端并交企业/PM送QA；首次TLS握手失败以同分支同提交普通重试恢复，未改remote/SSL或强推。最小安全闭包为[Core authority/端口](../../apps/api/src/modules/rental-core/rental-merchant-delegated-order.authority.ts)与[原确认服务](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)两文件。authority私有mint只能沿宿主提供的既有企业私有源读取/严格prepare到达；原确认入口才把证明注入并登记真实binding。只交类型/校验文件不能固定该原入口来源，拆出任意callback造binding会削弱封存约束，因此两文件同交，企业policy和公共宿主仍归原作者。
 
 `assertCoreMerchantDelegationProof(proof, binding)`核原proof与原binding的WeakMap登记、当前operator ALS/身份指纹、tenant/workspace、D=K、原request/quote/个人使用人及同一参加者方法。`bindCoreMerchantDelegationProof(authority, binding)`只接受Core已封存authority，固定原binding/request；普通字段相等、JSON/structuredClone复制、保留真实proof但重建binding、更换participant或方法均不能授予委托权。mint不导出；输入/秘密不从HTTP或模型取得，不另建公共源DTO、不保存Authorization。类型标记只是编译约束，企业policy须使用原Core运行时对象校验。
 
