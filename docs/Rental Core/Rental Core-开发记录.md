@@ -28,7 +28,7 @@ API原noEmit退出0。复用原`ai-native-ain08-opening-configuration.test.cjs`f
 
 原批准Core fixture的限定实际服务调用退出0：per_order/without_per_order正常创建、Tenant X先于库存、五阶段同事务消费；proof/authority复制、匹配普通binding、替换callback及裸callback拒绝；订单/批准失败回滚；提交失应答保留一次订单，Core收据过期和原source自然TTL后恢复不重复准备/创建；过期issued只读unknown且不写。另一限定调用拒绝12类版本/tenant/workspace/D/K/source/basis/request hash/个人/企业/quote/签发矛盾，以及错operator/把当前2当签发1。SourceOwner、policy、Auth/SQL/锁、库存和资金均是声明fixture，未记真实企业guard或外部服务通过。
 
-当前API原noEmit退出0、audit0，源码hash和实际命令唯一见[闭包证据](../../output/category-governance/merchant-delegation-core-runtime-20261112.json)。原夹具/断言不改；首次未注册TS、重复注册后编译JS被再当TS、夹具展开导致proof观察值不更新均保留为装配失败，限定修正后只复验相关调用。各次退出暂存已删除，当前864文件研发包仍是045配置事务阶段，本片未更新包或改AppModule/shared-index/OpenAPI/企业policy/商户Controller/admin。PM送QA；企业唯一作者接guard后再核相同正反例、真实权限/事务/宿主，完整execute/result交付仍不由本片源fixture替代，CAT-GOV/CLOSE原门槛和0/14不变。
+当前API原noEmit退出0、audit0，源码hash和实际命令唯一见[闭包证据](../../output/category-governance/merchant-delegation-core-runtime-20261112.json)。原夹具/断言不改；首次未注册TS、重复注册后编译JS被再当TS、夹具展开导致proof观察值不更新均保留为装配失败，限定修正后只复验相关调用。各次退出暂存已删除，当前864文件研发包仍是045配置事务阶段，本片未更新包或改AppModule/shared-index/OpenAPI/企业policy/商户Controller/admin。PM通报QA接受892/b869最小源码闭包，固定main三文件组合API原配置901根/2051编译源诊断0，未发现阻断源码集成的P1/P2；新增品类记录段行尾另按QA反馈修正，历史保留；企业唯一作者接guard后再核相同正反例、真实权限/事务/宿主，完整execute/result交付仍不由本片源fixture替代，CAT-GOV/CLOSE原门槛和0/14不变。
 
 <a id="merchant-delegation-core-proof-type-20261112"></a>
 
