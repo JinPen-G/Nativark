@@ -1,145 +1,917 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Calendar, Receipt, Store, Payment } from '../components/SiteIcon';
-import { MemberLayout } from '../components/MemberLayout';
-import { Breadcrumbs, PageHeading } from '../components/PageHeader';
-import { LoadingState, PageState } from '../components/PageState';
-import { useSite } from '../SiteContext';
-import { useAuth } from '../AuthContext';
-import { sessionApi } from '../data/authClient';
-import { siteRepository } from '../data/siteRepository';
-import { Img } from '../components/Img';
-import { customerOrderFacts } from '../features/ai-native/customer-order-facts';
-import { ClientTaskWorkbench } from '../features/ai-native/ClientTaskWorkbench';
-import { EnterpriseExtensionApproval } from '../components/EnterpriseExtensionApproval';
-import { EnterpriseExchangeProgress } from '../components/EnterpriseExchangeProgress';
-import { EnterpriseExchangeRequest } from '../components/EnterpriseExchangeRequest';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import {
+  safeDocumentHref,
+  type ClientOrderView,
+  type ClientPaymentIntentResponse,
+} from "@rental-os/shared";
+import { Calendar, Receipt, Store, Payment } from "../components/SiteIcon";
+import { MemberLayout } from "../components/MemberLayout";
+import { Breadcrumbs, PageHeading } from "../components/PageHeader";
+import { LoadingState, PageState } from "../components/PageState";
+import { useSite } from "../SiteContext";
+import { useAuth } from "../AuthContext";
+import { sessionApi } from "../data/authClient";
+import { siteRepository } from "../data/siteRepository";
+import { knownMoney } from "../data/money";
+import { Img } from "../components/Img";
+import { customerOrderFacts } from "../features/ai-native/customer-order-facts";
+import { ClientTaskWorkbench } from "../features/ai-native/ClientTaskWorkbench";
+import { EnterpriseExtensionApproval } from "../components/EnterpriseExtensionApproval";
+import { EnterpriseExchangeProgress } from "../components/EnterpriseExchangeProgress";
+import { EnterpriseExchangeRequest } from "../components/EnterpriseExchangeRequest";
 
-function money(amount: unknown, currency = 'CNY') {
-  if (amount == null || amount === '') return '—';
-  return (currency === 'CNY' ? '¥' : currency + ' ') + String(amount);
+const date = (value: unknown) =>
+  typeof value === "string" ? value.slice(0, 16).replace("T", " ") : "—";
+
+const statusKeys = {
+  draft: "orderStatus_draft",
+  reserved: "orderStatus_reserved",
+  pickup_overdue: "orderStatus_pickup_overdue",
+  ready_for_pickup: "orderStatus_ready_for_pickup",
+  renting: "orderStatus_renting",
+  return_inspection: "orderStatus_return_inspection",
+  settling: "orderStatus_settling",
+  completed: "orderStatus_completed",
+  cancelled: "orderStatus_cancelled",
+  no_show: "orderStatus_no_show",
+} as const;
+
+function statusLabel(
+  status: string,
+  translate: ReturnType<typeof useSite>["t"],
+) {
+  return Object.hasOwn(statusKeys, status)
+    ? translate(statusKeys[status as keyof typeof statusKeys])
+    : status;
 }
-const date = (value: unknown) => typeof value === 'string' ? value.slice(0, 16).replace('T', ' ') : '—';
 
-/** Preserve remote order reads; demos are only the current browser's stored records. */
+interface OrderSummary {
+  orderId?: string;
+  id?: string;
+  orderNo?: string;
+  workspaceName?: string;
+  startAt?: string;
+  endAt?: string;
+  finalPayableAmount?: number;
+  currency?: string;
+  status?: string;
+}
+
+/** 本人订单来自原会话接口，本地演示记录按租户分隔。 */
 export function OrdersPage() {
-  const { tenant, href, isRemote, localizeProduct, language, t } = useSite();
-  const { isAuthenticated } = useAuth();
+  const { tenant, tenantCode, href, isRemote, localizeProduct, language, t } =
+    useSite();
+  const { isAuthenticated, session, currentWorkspace } = useAuth();
   const remote = isRemote && isAuthenticated;
-  const en = language === 'en';
-  const [rows, setRows] = useState<any[]>([]);
+  const en = language === "en";
+  const [rows, setRows] = useState<OrderSummary[]>([]);
   const [loading, setLoading] = useState(remote);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [search, setSearch] = useState("");
+  const identity = JSON.stringify([
+    tenantCode,
+    session?.customer.customerId,
+    currentWorkspace?.workspaceCode,
+  ]);
+  const [rowsOwner, setRowsOwner] = useState(identity);
   useEffect(() => {
-    if (!remote) { setRows([]); setLoading(false); return; }
+    setPage(1);
+    setSearch("");
+  }, [identity]);
+  useEffect(() => {
     let cancelled = false;
-    setLoading(true); setError('');
-    sessionApi.myOrders({ page: 1, pageSize: 50 }).then(response => { if (!cancelled) setRows(response.items ?? []); })
-      .catch((e: any) => { if (!cancelled) setError(e?.message || t('loadFailed')); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [remote, tenant.id, revision]);
-  const demos = siteRepository.getOrders(tenant);
-  const records = remote ? rows.map(order => ({
-    id: String(order.orderId), title: order.orderNo || order.orderId, cover: '', subtitle: order.workspaceName || '',
-    start: order.startAt, end: order.endAt, amount: order.finalPayableAmount, currency: order.currency || 'CNY',
-    status: t('orderStatus', { status: t(('orderStatus_' + order.status) as any) || order.status }),
-  })) : demos.map(order => {
-    const raw = siteRepository.getProduct(tenant, order.productId);
-    const product = raw && localizeProduct(raw);
-    return { id: order.id, title: product?.name || t('allProducts'), cover: product?.cover || '', subtitle: order.id, start: order.startDate, end: order.endDate, amount: order.rentalAmount, currency: 'CNY', status: en ? 'Browser record' : '浏览器记录' };
-  });
-  const filtered = records.filter(order => (order.title + ' ' + order.subtitle).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  return <MemberLayout active="orders" title={t('orders')} description={remote ? t('myRentalsRemoteDesc') : t('myRentalsDescription')}>
-    {isRemote && !isAuthenticated ? <PageState icon={<Receipt />} title={t('loginRequired')}><Link className="button button-dark" to={href('/login?redirect=/orders')}>{t('loginCta')}</Link></PageState>
-      : loading ? <LoadingState label={t('loading')} />
-      : error ? <PageState error title={t('loadFailed')} description={error}><button type="button" className="button button-outline" onClick={() => setRevision(revision + 1)}>{en ? 'Try again' : '重新加载'}</button></PageState>
-      : <><div className="member-section-toolbar"><label className="member-search"><span className="sr-only">{en ? 'Search your bookings' : '搜索订单'}</span><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={en ? 'Booking number or product' : '输入预约编号或商品名称'} /></label><span>{filtered.length} {en ? 'record(s)' : '条记录'}</span></div>
-        {filtered.length ? <div className="reservation-list">{filtered.map(order => <article className="reservation-card" key={order.id}>
-          <div className="reservation-card-top"><span>{order.subtitle}</span><span className="quiet-tag">{order.status}</span></div>
-          <div className="reservation-card-main">{order.cover ? <Img src={order.cover} alt="" /> : <div className="reservation-symbol"><Receipt /></div>}<div><h2><Link to={href('/orders/' + order.id)}>{order.title}</Link></h2><p><Calendar />{date(order.start)} – {date(order.end)}</p></div><div className="reservation-amount"><span>{remote ? t('payable') : t('estimatedRent')}</span><strong>{money(order.amount, order.currency)}</strong></div></div>
-          <div className="reservation-card-actions"><Link className="button button-outline" to={href('/orders/' + order.id)}>{t('details')}</Link></div>
-        </article>)}</div> : <PageState icon={<Receipt />} title={search ? en ? 'No matching bookings' : '未找到匹配的记录' : t('noOrders')} description={search ? en ? 'Try another product or booking number.' : '试试其他商品名称或预约编号。' : t('noOrdersDescription')}>{search ? <button type="button" className="button button-outline" onClick={() => setSearch('')}>{en ? 'Clear search' : '清空搜索'}</button> : <Link className="button button-dark" to={href('/products')}>{t('browseProducts')}</Link>}</PageState>}
-      </>}
-  </MemberLayout>;
+    setRows([]);
+    setError("");
+    setRowsOwner(identity);
+    if (!remote) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    sessionApi
+      .myOrders({ page, pageSize: 20 })
+      .then((response) => {
+        if (cancelled) return;
+        if (
+          !Array.isArray(response.items) ||
+          response.items.some(
+            (item) => typeof (item.orderId ?? item.id) !== "string",
+          )
+        )
+          throw new Error(t("loadFailed"));
+        setRows(response.items);
+        setTotal(response.total);
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : t("loadFailed"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [remote, identity, page, revision, t]);
+
+  const records = remote
+    ? (rowsOwner === identity ? rows : []).map((order) => ({
+        id: order.orderId ?? order.id!,
+        title: order.orderNo || order.orderId || order.id || "",
+        cover: "",
+        subtitle: order.workspaceName || "",
+        start: order.startAt,
+        end: order.endAt,
+        amount: order.finalPayableAmount,
+        currency: order.currency,
+        status: order.status
+          ? statusLabel(order.status, t)
+          : en
+            ? "Status unavailable"
+            : "状态待核对",
+      }))
+    : siteRepository.getOrders(tenant).map((order) => {
+        const raw = siteRepository.getProduct(tenant, order.productId);
+        const current = raw && localizeProduct(raw);
+        const snapshot = order.productSnapshot;
+        const title = snapshot
+          ? en
+            ? snapshot.nameEn || snapshot.name
+            : snapshot.name
+          : current?.name || order.productId;
+        return {
+          id: order.id,
+          title,
+          cover:
+            snapshot?.cover || current?.cover || "/media/image-unavailable.svg",
+          subtitle: order.id,
+          start: order.startDate,
+          end: order.endDate,
+          amount: order.rentalAmount,
+          currency: order.currency ?? "CNY",
+          status: en ? "Demo saved" : "演示已保存",
+        };
+      });
+  const filtered = records.filter((order) =>
+    `${order.title} ${order.subtitle} ${order.id}`
+      .toLocaleLowerCase()
+      .includes(search.trim().toLocaleLowerCase()),
+  );
+
+  return (
+    <MemberLayout
+      active="orders"
+      title={t("orders")}
+      description={
+        remote ? t("myRentalsRemoteDesc") : t("myRentalsDescription")
+      }
+    >
+      {isRemote && !isAuthenticated ? (
+        <PageState icon={<Receipt />} title={t("loginRequired")}>
+          <Link
+            className="button button-dark"
+            to={href("/login?redirect=/orders")}
+          >
+            {t("loginCta")}
+          </Link>
+        </PageState>
+      ) : loading ? (
+        <LoadingState label={t("loading")} />
+      ) : error ? (
+        <PageState error title={t("loadFailed")} description={error}>
+          <button
+            type="button"
+            className="button button-outline"
+            onClick={() => setRevision(revision + 1)}
+          >
+            {en ? "Reload orders" : "重新加载订单"}
+          </button>
+        </PageState>
+      ) : (
+        <>
+          <div className="member-section-toolbar">
+            <label className="member-search">
+              <span className="sr-only">
+                {remote
+                  ? en
+                    ? "Search this page of orders"
+                    : "搜索本页订单"
+                  : en
+                    ? "Search your bookings"
+                    : "搜索预约记录"}
+              </span>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={
+                  en ? "Booking number or product" : "输入预约编号或商品名称"
+                }
+              />
+            </label>
+            <span role="status">
+              {filtered.length} {en ? "record(s)" : "条记录"}
+            </span>
+          </div>
+          {filtered.length ? (
+            <div className="reservation-list">
+              {filtered.map((order) => (
+                <article className="reservation-card" key={order.id}>
+                  <div className="reservation-card-top">
+                    <span>{order.subtitle}</span>
+                    <span className="quiet-tag">{order.status}</span>
+                  </div>
+                  <div className="reservation-card-main">
+                    {order.cover ? (
+                      <Img src={order.cover} alt="" width="800" height="800" />
+                    ) : (
+                      <div className="reservation-symbol">
+                        <Receipt aria-hidden="true" />
+                      </div>
+                    )}
+                    <div>
+                      <h2>
+                        <Link
+                          to={href("/orders/" + encodeURIComponent(order.id))}
+                        >
+                          {order.title}
+                        </Link>
+                      </h2>
+                      <p>
+                        <Calendar aria-hidden="true" />
+                        {date(order.start)} — {date(order.end)}
+                      </p>
+                    </div>
+                    <div className="reservation-amount">
+                      <span>{remote ? t("payable") : t("estimatedRent")}</span>
+                      <strong>
+                        {knownMoney(order.amount, order.currency) ?? "—"}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="reservation-card-actions">
+                    <Link
+                      className="button button-outline"
+                      to={href("/orders/" + encodeURIComponent(order.id))}
+                    >
+                      {t("details")}
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <PageState
+              icon={<Receipt />}
+              title={
+                search
+                  ? en
+                    ? "No matching bookings"
+                    : "未找到匹配的记录"
+                  : t("noOrders")
+              }
+              description={
+                search
+                  ? en
+                    ? "Try another product or booking number."
+                    : "试试其他商品名称或预约编号。"
+                  : t("noOrdersDescription")
+              }
+            >
+              {search ? (
+                <button
+                  type="button"
+                  className="button button-outline"
+                  onClick={() => setSearch("")}
+                >
+                  {en ? "Clear search" : "清空搜索"}
+                </button>
+              ) : (
+                <Link className="button button-dark" to={href("/products")}>
+                  {t("browseProducts")}
+                </Link>
+              )}
+            </PageState>
+          )}
+          {remote && total > 20 && (
+            <nav
+              className="pagination"
+              aria-label={en ? "Orders pages" : "订单分页"}
+            >
+              <button
+                className="button button-outline"
+                type="button"
+                disabled={page === 1}
+                onClick={() => {
+                  setPage(page - 1);
+                  setSearch("");
+                }}
+              >
+                {en ? "Previous" : "上一页"}
+              </button>
+              <span>
+                {page} / {Math.ceil(total / 20)}
+              </span>
+              <button
+                className="button button-outline"
+                type="button"
+                disabled={page * 20 >= total}
+                onClick={() => {
+                  setPage(page + 1);
+                  setSearch("");
+                }}
+              >
+                {en ? "Next" : "下一页"}
+              </button>
+            </nav>
+          )}
+        </>
+      )}
+    </MemberLayout>
+  );
 }
 
-/** Existing payment intents and original Core facts remain the source of truth. */
+/** 费用与状态读取原订单，支付由原幂等意图入口执行。 */
 export function OrderDetailPage() {
-  const { tenant, tenantCode, href, isRemote, localizeProduct, language, t } = useSite();
+  const { tenant, tenantCode, href, isRemote, localizeProduct, language, t } =
+    useSite();
   const { isAuthenticated, session, currentWorkspace } = useAuth();
   const { orderId } = useParams();
   const remote = isRemote && isAuthenticated;
-  const en = language === 'en';
+  const en = language === "en";
   const [revision, setRevision] = useState(0);
-  const owner = useMemo(() => ({}), [remote, tenantCode, orderId, session, currentWorkspace?.workspaceCode, revision]);
-  const [orderRecord, setOrderRecord] = useState<{ owner: object; order: any } | null>(null);
-  const order = orderRecord?.owner === owner ? orderRecord.order : null;
+  const owner = useMemo(
+    () => ({}),
+    [
+      remote,
+      tenantCode,
+      orderId,
+      session,
+      currentWorkspace?.workspaceCode,
+      revision,
+    ],
+  );
+  const currentOwner = useRef(owner);
+  currentOwner.current = owner;
+  const [record, setRecord] = useState<{
+    owner: object;
+    order: ClientOrderView;
+  } | null>(null);
+  const order = record?.owner === owner ? record.order : null;
   const [loading, setLoading] = useState(remote);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [methods, setMethods] = useState<string[]>([]);
-  const [payNote, setPayNote] = useState('');
+  const [payNote, setPayNote] = useState("");
   const [payError, setPayError] = useState(false);
-  const [payUrl, setPayUrl] = useState('');
+  const [payUrl, setPayUrl] = useState("");
   const [paying, setPaying] = useState(false);
+  const paymentBusy = useRef(false);
+
   useEffect(() => {
-    if (!remote || !orderId) return;
     let cancelled = false;
-    setOrderRecord(null); setLoading(true); setError(''); setPayNote(''); setPayUrl(''); setPayError(false);
-    Promise.all([sessionApi.order(orderId), sessionApi.paymentCapabilities().catch(() => ({ methods: [] as string[] }))])
-      .then(([record, caps]) => { if (cancelled) return; setOrderRecord({ owner, order: record }); const list = (caps.methods as string[] | undefined) ?? Object.keys(caps).filter(key => (caps as any)[key] === true); setMethods(list.filter(method => method === 'alipay' || method === 'wechat_pay')); })
-      .catch((e: any) => { if (!cancelled) setError(e?.message || t('loadFailed')); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [owner]);
-  const pay = useCallback(async (method: string) => {
-    if (!orderId) return;
-    setPaying(true); setPayNote(''); setPayUrl(''); setPayError(false);
+    setRecord(null);
+    setMethods([]);
+    setPayNote("");
+    setPayUrl("");
+    setPayError(false);
+    setError("");
+    setPaying(false);
+    if (!remote || !orderId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      sessionApi.order(orderId),
+      sessionApi.paymentCapabilities().catch(() => null),
+    ])
+      .then(([value, caps]) => {
+        if (cancelled) return;
+        if (
+          value.id !== orderId ||
+          !Array.isArray(value.lines) ||
+          !Array.isArray(value.chargeLines)
+        )
+          throw new Error(t("loadFailed"));
+        setRecord({ owner, order: value as unknown as ClientOrderView });
+        if (caps?.realPaymentEnabled === true && Array.isArray(caps.methods)) {
+          setMethods(
+            caps.methods.filter(
+              (method) => method === "alipay" || method === "wechat_pay",
+            ),
+          );
+        }
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : t("loadFailed"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, t]);
+
+  async function pay(method: string) {
+    if (!orderId || !order || paymentBusy.current || !methods.includes(method))
+      return;
+    const operationOwner = owner;
+    paymentBusy.current = true;
+    setPaying(true);
+    setPayNote("");
+    setPayUrl("");
+    setPayError(false);
     try {
-      const intent = await sessionApi.createPaymentIntent(orderId, { instrument: 'rental', method }, 'pay-' + orderId + '-' + method);
-      const url = intent.checkoutUrl || intent.payUrl || intent.codeUrl;
-      if (url) setPayUrl(url);
-      setPayNote(t('paymentCreated'));
-    } catch (e: any) { setPayError(true); setPayNote(e?.message || t('paymentFailed')); }
-    finally { setPaying(false); }
-  }, [orderId, t]);
-  const demoOrder = !isRemote ? siteRepository.getOrders(tenant).find(item => item.id === orderId) : undefined;
-  const rawProduct = demoOrder && siteRepository.getProduct(tenant, demoOrder.productId);
-  const product = rawProduct && localizeProduct(rawProduct);
-  const facts = remote && order ? customerOrderFacts(order, orderId ?? '') : null;
-  const lines: any[] = Array.isArray(order?.lines) ? order.lines : [];
-  const charges: any[] = Array.isArray(order?.chargeLines) ? order.chargeLines : [];
-  const currency = order?.currency || 'CNY';
-  const title = remote ? order?.orderNo || t('orderNumber') : t('savedTitle');
-  return <div className="shell order-page">
-    <Breadcrumbs items={[{ label: t('home'), to: href('/') }, { label: t('orders'), to: href('/orders') }, { label: title }]} />
-    {isRemote && !isAuthenticated ? <PageState icon={<Receipt />} title={t('loginRequired')}><Link className="button button-dark" to={href('/login?redirect=' + encodeURIComponent('/orders/' + orderId))}>{t('loginCta')}</Link></PageState>
-      : loading ? <LoadingState label={t('loading')} />
-      : error ? <PageState error title={t('loadFailed')} description={error}><button type="button" className="button button-outline" onClick={() => setRevision(revision + 1)}>{en ? 'Try again' : '重试'}</button></PageState>
-      : (!remote && (!demoOrder || !product)) || (remote && !order) ? <PageState icon={<Receipt />} title={t('missingOrder')}><Link className="button button-dark" to={href('/orders')}>{t('returnOrders')}</Link></PageState>
-      : <><PageHeading title={title} description={remote ? t('orderStatus', { status: t(('orderStatus_' + order.status) as any) || order.status }) : t('orderNumber') + ' ' + demoOrder!.id} />
-        {!remote && <p className="preview-notice">{t('savedDescription')}</p>}
-        {remote && orderId && session?.customer.customerType === 'personal' && <ClientTaskWorkbench orderId={orderId}
-          scopeKey={JSON.stringify([tenantCode,session.customer.customerId,currentWorkspace?.workspaceCode,orderId,revision])} english={en} />}
-        <div className="order-detail-layout"><div>
-          <section className="order-section"><h2><Receipt />{t('bookingInfo')}</h2>
-            {remote ? <div className="order-item-list">{lines.map((line, index) => <div key={line.id ?? index}><span>{line.itemGroupName || line.itemGroupId} × {line.quantity ?? 1}</span><strong>{money(line.amount, currency)}</strong></div>)}</div> : <div className="booking-product"><Img src={product!.cover} alt={product!.name} /><div><strong>{product!.name}</strong><p>{product!.subtitle}</p></div></div>}
-          </section>
-          <section className="order-section"><h2><Calendar />{t('rentalDate')}</h2><dl className="spec-list"><div><dt>{t('startDate')}</dt><dd>{date(remote ? order.startAt : demoOrder!.startDate)}</dd></div><div><dt>{t('endDate')}</dt><dd>{date(remote ? order.endAt : demoOrder!.endDate)}</dd></div>{!remote && <div><dt>{t('rentalQuantity')}</dt><dd>{demoOrder!.quantity} {t('itemUnit')}</dd></div>}</dl></section>
-          <section className="order-section"><h2><Store />{t('pickupDelivery')}</h2><dl className="spec-list"><div><dt>{t('pickupDelivery')}</dt><dd>{remote ? order.fulfillmentLocationName || order.fulfillmentMode || '—' : demoOrder!.fulfillment === 'pickup' ? t('pickup') : t('deliveryHome')}</dd></div>{!remote && <div><dt>{t('contactPerson')}</dt><dd>{demoOrder!.contactName}</dd></div>}</dl></section>
-          {facts && <details className="original-order-facts"><summary>{en ? 'Original order facts (not an AI answer)' : '原订单事实（非AI回答）'}</summary><dl className="spec-list"><div><dt>应收 / Receivable</dt><dd>{facts.receivable}</dd></div><div><dt>实收 / Received</dt><dd>{facts.paid}</dd></div><div><dt>押金要求 / Deposit requirement</dt><dd>{facts.deposit}</dd></div><div><dt>预授权要求 / Preauthorization requirement</dt><dd>{facts.preAuth}</dd></div><div><dt>退款 / Refund</dt><dd>{facts.refundStatus}</dd></div><div><dt>原状态码 / Original status code</dt><dd>{facts.status}</dd></div><div><dt>来源 / Source</dt><dd>{facts.sourceId} / {facts.updatedAt}</dd></div></dl><p>{facts.note}</p></details>}
-        </div><aside className="order-cost"><h2><Payment />{remote ? t('payable') : t('costConfirm')}</h2><dl>
-          {remote ? <>{charges.length ? charges.map((charge, index) => <div key={index}><dt>{charge.name || charge.type}</dt><dd>{money(charge.amount, currency)}</dd></div>) : <div><dt>{t('rentAmount')}</dt><dd>{money(order.rentalAmount, currency)}</dd></div>}{order.depositAmount != null && <div><dt>{t('deposit')}</dt><dd>{money(order.depositAmount, currency)}</dd></div>}{order.preAuthAmount != null && <div><dt>{t('preAuth')}</dt><dd>{money(order.preAuthAmount, currency)}</dd></div>}<div className="order-cost-total"><dt>{t('payable')}</dt><dd>{money(order.finalPayableAmount ?? order.payableAmount, currency)}</dd></div></>
-            : <><div><dt>{t('estimatedRent')}</dt><dd>{money(demoOrder!.rentalAmount)}</dd></div><div><dt>{t('referenceDeposit')}</dt><dd>{money(demoOrder!.depositAmount)}</dd></div></>}
-        </dl>{remote ? <><h3>{t('payTitle')}</h3>{methods.length ? <div className="payment-actions">{methods.map(method => <button key={method} type="button" className="button button-dark" disabled={paying} onClick={() => { void pay(method); }}>{method === 'alipay' ? t('payAlipay') : t('payWechat')}</button>)}</div> : <p>{t('payUnavailable')}</p>}{payNote && <p className={payError ? 'form-error' : 'field-note'} role={payError ? 'alert' : 'status'}>{payNote}</p>}{payUrl && <a className="button button-dark button-block" href={payUrl} target="_blank" rel="noreferrer">{t('payGo')}</a>}<p>{t('paySettleNote')}</p></> : <p>{t('feeNote')}</p>}</aside></div>
-        {remote && <>
-      {orderId && <EnterpriseExtensionApproval key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
-      {orderId && <EnterpriseExchangeRequest key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} allowNewRequest={order.status === 'renting'} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
-      {orderId && <EnterpriseExchangeProgress key={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} orderId={orderId} identity={JSON.stringify([tenantCode, orderId, session?.customer.customerId, currentWorkspace?.workspaceCode])} english={language === 'en'} />}
-        </>}
-        <div className="order-bottom-actions"><Link className="button button-outline" to={href('/orders')}>{t('returnOrders')}</Link><Link className="button button-dark" to={href('/products')}>{t('continueExplore')}</Link></div>
-      </>}
-  </div>;
+      const result = await sessionApi.createPaymentIntent(
+        orderId,
+        { instrument: "rental", method },
+        `pay-${orderId}-${method}`,
+      );
+      if (currentOwner.current !== operationOwner) return;
+      const intent = result as ClientPaymentIntentResponse;
+      if (!intent.intentId || intent.instrument !== "rental")
+        throw new Error(t("paymentFailed"));
+      const url = intent.checkoutUrl;
+      if (
+        typeof url === "string" &&
+        safeDocumentHref(url) &&
+        (/^https?:\/\//i.test(url) || /^\/(?!\/)/.test(url))
+      )
+        setPayUrl(url);
+      setPayNote(intent.message || t("paymentCreated"));
+    } catch (e) {
+      if (currentOwner.current === operationOwner) {
+        setPayError(true);
+        setPayNote(e instanceof Error ? e.message : t("paymentFailed"));
+      }
+    } finally {
+      paymentBusy.current = false;
+      if (currentOwner.current === operationOwner) setPaying(false);
+    }
+  }
+
+  const demo = !isRemote
+    ? siteRepository.getOrders(tenant).find((item) => item.id === orderId)
+    : undefined;
+  const rawProduct = demo && siteRepository.getProduct(tenant, demo.productId);
+  const currentProduct = rawProduct && localizeProduct(rawProduct);
+  const snapshot = demo?.productSnapshot;
+  const productName = snapshot
+    ? en
+      ? snapshot.nameEn || snapshot.name
+      : snapshot.name
+    : currentProduct?.name || demo?.productId || "";
+  const productSubtitle = snapshot
+    ? en
+      ? snapshot.subtitleEn || snapshot.subtitle
+      : snapshot.subtitle
+    : currentProduct?.subtitle || "";
+  const productCover =
+    snapshot?.cover || currentProduct?.cover || "/media/image-unavailable.svg";
+  const currency = remote ? order?.currency : (demo?.currency ?? "CNY");
+  const facts = order ? customerOrderFacts(order, orderId ?? "") : null;
+  const title = remote ? order?.orderNo || t("orderNumber") : t("savedTitle");
+  const businessIdentity = JSON.stringify([
+    tenantCode,
+    orderId,
+    session?.customer.customerId,
+    currentWorkspace?.workspaceCode,
+  ]);
+
+  return (
+    <div className="shell order-page">
+      <Breadcrumbs
+        items={[
+          { label: t("home"), to: href("/") },
+          { label: t("orders"), to: href("/orders") },
+          { label: title },
+        ]}
+      />
+      {isRemote && !isAuthenticated ? (
+        <PageState icon={<Receipt />} title={t("loginRequired")}>
+          <Link
+            className="button button-dark"
+            to={href(
+              "/login?redirect=" + encodeURIComponent("/orders/" + orderId),
+            )}
+          >
+            {t("loginCta")}
+          </Link>
+        </PageState>
+      ) : loading || (remote && !order && !error) ? (
+        <LoadingState label={t("loading")} />
+      ) : error ? (
+        <PageState error title={t("loadFailed")} description={error}>
+          <button
+            type="button"
+            className="button button-outline"
+            onClick={() => setRevision(revision + 1)}
+          >
+            {en ? "Reload order" : "重新加载订单"}
+          </button>
+        </PageState>
+      ) : remote ? (
+        order && (
+          <>
+            <PageHeading
+              title={title}
+              description={statusLabel(order.status, t)}
+            />
+            <div className="order-detail-layout">
+              <div>
+                <section className="order-section">
+                  <h2>
+                    <Receipt aria-hidden="true" />
+                    {t("bookingInfo")}
+                  </h2>
+                  <div className="order-item-list">
+                    {order.lines.map((line) => (
+                      <div key={line.id}>
+                        <span>
+                          {line.itemGroupName || line.itemGroupId} ×{" "}
+                          {line.quantity}
+                        </span>
+                        <strong>
+                          {knownMoney(line.amount, currency) ?? "—"}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className="order-section">
+                  <h2>
+                    <Calendar aria-hidden="true" />
+                    {t("rentalDate")}
+                  </h2>
+                  <dl className="spec-list">
+                    <div>
+                      <dt>{t("startDate")}</dt>
+                      <dd>{date(order.startAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>{t("endDate")}</dt>
+                      <dd>{date(order.effectiveEndAt || order.endAt)}</dd>
+                    </div>
+                  </dl>
+                </section>
+                <section className="order-section">
+                  <h2>
+                    <Store aria-hidden="true" />
+                    {t("pickupDelivery")}
+                  </h2>
+                  <dl className="spec-list">
+                    <div>
+                      <dt>{en ? "Fulfillment" : "履约方式"}</dt>
+                      <dd>{order.fulfillmentMode || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>{en ? "Pickup store" : "取货门店"}</dt>
+                      <dd>{order.fulfillmentLocationName || "—"}</dd>
+                    </div>
+                    {order.returnLocationName && (
+                      <div>
+                        <dt>{en ? "Return store" : "归还门店"}</dt>
+                        <dd>{order.returnLocationName}</dd>
+                      </div>
+                    )}
+                    {order.deliveryAddress && (
+                      <div>
+                        <dt>{en ? "Delivery address" : "配送地址"}</dt>
+                        <dd>
+                          {[
+                            order.deliveryAddress.province,
+                            order.deliveryAddress.city,
+                            order.deliveryAddress.district,
+                            order.deliveryAddress.detail,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          <br />
+                          {order.deliveryAddress.recipient}{" "}
+                          {order.deliveryAddress.phoneMasked}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </section>
+                {facts && (
+                  <details className="original-order-facts">
+                    <summary>
+                      {en ? "Original order facts" : "原订单事实"}
+                    </summary>
+                    <dl className="spec-list">
+                      <div>
+                        <dt>{en ? "Receivable" : "应收"}</dt>
+                        <dd>{facts.receivable}</dd>
+                      </div>
+                      <div>
+                        <dt>{en ? "Received" : "实收"}</dt>
+                        <dd>{facts.paid}</dd>
+                      </div>
+                      <div>
+                        <dt>{en ? "Deposit requirement" : "押金要求"}</dt>
+                        <dd>{facts.deposit}</dd>
+                      </div>
+                      <div>
+                        <dt>
+                          {en ? "Preauthorization requirement" : "预授权要求"}
+                        </dt>
+                        <dd>{facts.preAuth}</dd>
+                      </div>
+                      <div>
+                        <dt>{en ? "Refund" : "退款"}</dt>
+                        <dd>{facts.refundStatus}</dd>
+                      </div>
+                      <div>
+                        <dt>{en ? "Source" : "来源"}</dt>
+                        <dd>
+                          {facts.sourceId} / {facts.updatedAt}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p>{facts.note}</p>
+                  </details>
+                )}
+              </div>
+              <aside className="order-cost">
+                <h2>
+                  <Payment aria-hidden="true" />
+                  {t("payable")}
+                </h2>
+                <dl>
+                  {order.chargeLines.length ? (
+                    order.chargeLines.map((charge, index) => (
+                      <div key={index}>
+                        <dt>{charge.name || charge.type}</dt>
+                        <dd>{knownMoney(charge.amount, currency) ?? "—"}</dd>
+                      </div>
+                    ))
+                  ) : (
+                    <div>
+                      <dt>{t("rentAmount")}</dt>
+                      <dd>{knownMoney(order.rentalAmount, currency) ?? "—"}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>{t("deposit")}</dt>
+                    <dd>{knownMoney(order.depositAmount, currency) ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("preAuth")}</dt>
+                    <dd>{knownMoney(order.preAuthAmount, currency) ?? "—"}</dd>
+                  </div>
+                  <div className="order-cost-total">
+                    <dt>{t("payable")}</dt>
+                    <dd>
+                      {knownMoney(order.finalPayableAmount, currency) ?? "—"}
+                    </dd>
+                  </div>
+                </dl>
+                <h3>{t("payTitle")}</h3>
+                {methods.length ? (
+                  <div className="payment-actions">
+                    {methods.map((method) => (
+                      <button
+                        key={method}
+                        type="button"
+                        className="button button-dark"
+                        disabled={paying}
+                        onClick={() => {
+                          void pay(method);
+                        }}
+                      >
+                        {method === "alipay" ? t("payAlipay") : t("payWechat")}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p>{t("payUnavailable")}</p>
+                )}
+                {payNote && (
+                  <p
+                    className={payError ? "form-error" : "field-note"}
+                    role={payError ? "alert" : "status"}
+                  >
+                    {payNote}
+                  </p>
+                )}
+                {payUrl && (
+                  <a
+                    className="button button-dark button-block"
+                    href={payUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t("payGo")}
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={paying}
+                  onClick={() => setRevision(revision + 1)}
+                >
+                  {en ? "Refresh original order" : "刷新原订单状态"}
+                </button>
+                <p>{t("paySettleNote")}</p>
+              </aside>
+            </div>
+            {orderId && session?.customer.customerType === "personal" && (
+              <div className="order-assistance">
+                <ClientTaskWorkbench
+                  orderId={orderId}
+                  scopeKey={JSON.stringify([
+                    tenantCode,
+                    session.customer.customerId,
+                    currentWorkspace?.workspaceCode,
+                    orderId,
+                    revision,
+                  ])}
+                  english={en}
+                />
+                <EnterpriseExtensionApproval
+                  key={"extension" + businessIdentity}
+                  orderId={orderId}
+                  identity={businessIdentity}
+                  english={en}
+                />
+                <EnterpriseExchangeRequest
+                  key={"request" + businessIdentity}
+                  orderId={orderId}
+                  allowNewRequest={order.status === "renting"}
+                  identity={businessIdentity}
+                  english={en}
+                />
+                <EnterpriseExchangeProgress
+                  key={"progress" + businessIdentity}
+                  orderId={orderId}
+                  identity={businessIdentity}
+                  english={en}
+                />
+              </div>
+            )}
+            <div className="order-bottom-actions">
+              <Link className="button button-outline" to={href("/orders")}>
+                {t("returnOrders")}
+              </Link>
+              <Link className="button button-dark" to={href("/products")}>
+                {t("continueExplore")}
+              </Link>
+            </div>
+          </>
+        )
+      ) : demo ? (
+        <>
+          <PageHeading
+            title={title}
+            description={t("orderNumber") + " " + demo.id}
+          />
+          <p className="preview-notice">{t("savedDescription")}</p>
+          <div className="order-detail-layout">
+            <div>
+              <section className="order-section">
+                <h2>
+                  <Receipt aria-hidden="true" />
+                  {t("bookingInfo")}
+                </h2>
+                <div className="booking-product">
+                  <Img src={productCover} alt="" width="800" height="800" />
+                  <div>
+                    <strong>{productName}</strong>
+                    <p>{productSubtitle}</p>
+                  </div>
+                </div>
+              </section>
+              <section className="order-section">
+                <h2>
+                  <Calendar aria-hidden="true" />
+                  {t("rentalDate")}
+                </h2>
+                <dl className="spec-list">
+                  <div>
+                    <dt>{t("startDate")}</dt>
+                    <dd>{date(demo.startDate)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("endDate")}</dt>
+                    <dd>{date(demo.endDate)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("rentalQuantity")}</dt>
+                    <dd>
+                      {demo.quantity} {t("itemUnit")}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+              <section className="order-section">
+                <h2>
+                  <Store aria-hidden="true" />
+                  {t("pickupDelivery")}
+                </h2>
+                <dl className="spec-list">
+                  <div>
+                    <dt>{t("pickupDelivery")}</dt>
+                    <dd>
+                      {demo.fulfillment === "pickup"
+                        ? t("pickup")
+                        : en
+                          ? "Delivery"
+                          : "配送"}
+                    </dd>
+                  </div>
+                  {demo.pickupStoreId && (
+                    <div>
+                      <dt>{en ? "Pickup store" : "取货门店"}</dt>
+                      <dd>
+                        {tenant.stores?.find(
+                          (store) => store.id === demo.pickupStoreId,
+                        )?.name || demo.pickupStoreId}
+                      </dd>
+                    </div>
+                  )}
+                  {demo.returnStoreId && (
+                    <div>
+                      <dt>{en ? "Return store" : "归还门店"}</dt>
+                      <dd>
+                        {tenant.stores?.find(
+                          (store) => store.id === demo.returnStoreId,
+                        )?.name || demo.returnStoreId}
+                      </dd>
+                    </div>
+                  )}
+                  {demo.deliveryAddress && (
+                    <div>
+                      <dt>{en ? "Demo delivery address" : "演示配送地址"}</dt>
+                      <dd>{demo.deliveryAddress}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>{t("contactPerson")}</dt>
+                    <dd>{demo.contactName}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("contactPhone")}</dt>
+                    <dd>{demo.contactPhone || "—"}</dd>
+                  </div>
+                  {demo.note && (
+                    <div>
+                      <dt>{en ? "Note" : "备注"}</dt>
+                      <dd>{demo.note}</dd>
+                    </div>
+                  )}
+                </dl>
+              </section>
+            </div>
+            <aside className="order-cost">
+              <h2>
+                <Payment aria-hidden="true" />
+                {t("costConfirm")}
+              </h2>
+              <dl>
+                <div>
+                  <dt>{t("estimatedRent")}</dt>
+                  <dd>{knownMoney(demo.rentalAmount, currency) ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>{t("referenceDeposit")}</dt>
+                  <dd>{knownMoney(demo.depositAmount, currency) ?? "—"}</dd>
+                </div>
+                <div className="order-cost-total">
+                  <dt>{t("totalEstimated")}</dt>
+                  <dd>
+                    {knownMoney(
+                      demo.rentalAmount + demo.depositAmount,
+                      currency,
+                    ) ?? "—"}
+                  </dd>
+                </div>
+              </dl>
+              <p>{t("feeNote")}</p>
+            </aside>
+          </div>
+          <div className="order-bottom-actions">
+            <Link className="button button-outline" to={href("/orders")}>
+              {t("returnOrders")}
+            </Link>
+            <Link className="button button-dark" to={href("/products")}>
+              {t("continueExplore")}
+            </Link>
+          </div>
+        </>
+      ) : (
+        <PageState icon={<Receipt />} title={t("missingOrder")}>
+          <Link className="button button-dark" to={href("/orders")}>
+            {t("returnOrders")}
+          </Link>
+        </PageState>
+      )}
+    </div>
+  );
 }

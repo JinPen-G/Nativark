@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
-    <link id="site-favicon" rel="icon" type="image/svg+xml" href="/brand/mark-black.svg" />
+    <link id="site-favicon" rel="icon" type="image/svg+xml" href="/brand/yicheng.svg" />
     <title>租赁官网</title>
     <script>
       (() => {
@@ -14,7 +14,7 @@
         } catch (error) {}
         const systemTheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         document.documentElement.dataset.theme = savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : systemTheme;
-        document.getElementById('site-favicon').href = document.documentElement.dataset.theme === 'dark' ? '/brand/mark-white.svg' : '/brand/mark-black.svg';
+        document.getElementById('site-favicon').href = document.documentElement.dataset.theme === 'dark' ? '/brand/yicheng-dark.svg' : '/brand/yicheng.svg';
       })();
     </script>
   </head>
