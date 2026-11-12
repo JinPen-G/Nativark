@@ -843,14 +843,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** R0 persisted opening facts only. Does not enter state()/seedState(), load
    * quote context, initialize configuration, or recalculate pricing/inventory.
-   * The original Guard/ALS establishes authority; missing producers fail closed. */
-  async readTenantReadiness(tenantId: string) {
+   * The original Guard/ALS establishes authority; missing producers fail closed.
+   * A supplied client belongs to the caller's original transaction/fences. */
+  async readTenantReadiness(tenantId: string, tx?: RentalConfigTx) {
     const workspaceId = getRequestWorkspaceId(), now = new Date();
     if (!workspaceId || getRequestTenantId() !== tenantId) throw new HttpException('开业读取缺少当前租户或经营空间', HttpStatus.FORBIDDEN);
     if (typeof this.coreConfigStore.readReadinessCoreFacts !== 'function'
       || typeof this.configStore.readReadinessBusinessFacts !== 'function') throw new ServiceUnavailableException('开业持久事实源不可用');
-    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
-    const core = await this.coreConfigStore.readReadinessCoreFacts(tenantId, workspaceId);
+    const published = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx) : undefined;
+    const core = await this.coreConfigStore.readReadinessCoreFacts(tenantId, workspaceId, tx);
     if (core.tenantId !== tenantId || core.workspaceId !== workspaceId) throw new ConflictException('开业配置来源变化');
     // The format-checked scalar row cannot authorize an unknown implementation.
     // Versioned hosts use their actual binding; explicit legacy hosts know four.
@@ -864,12 +865,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const endYear = businessYearFromDateKey(businessDateKey(new Date(Date.parse(endAt) - 1).toISOString(), timeZone));
     const years = Array.from({ length: endYear - startYear + 1 }, (_unused, index) => startYear + index);
     const [business, membership] = await Promise.all([
-      this.configStore.readReadinessBusinessFacts(tenantId, workspaceId, now, years), this.readReadinessMembershipFacts(tenantId)
+      this.configStore.readReadinessBusinessFacts(tenantId, workspaceId, now, years, tx), this.readReadinessMembershipFacts(tenantId, tx)
     ]);
     if (business.tenantId !== tenantId || business.workspaceId !== workspaceId
       || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId) throw new ConflictException('开业事实来源变化');
     if (published) {
-      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      const latest = await this.categoryResolver!.forWorkspace(tenantId, workspaceId, tx);
       if (latest.categoryVersionId !== published.categoryVersionId || latest.adoptionRevision !== published.adoptionRevision)
         throw new ConflictException('开业检查期间采用版本已变化，请重新读取');
     }
@@ -879,17 +880,17 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       enabledItemGroupCount: core.enabledItemGroupCount, serviceableLocationCount: core.serviceableLocationCount });
   }
 
-  /** Source envelope for the original nine-item read, used outside business
-   * write locks. It never captures an event, writes configuration, calls persist
-   * or claims that independently read facts form one transaction snapshot. */
-  async readTenantReadinessSource(tenantId: string) {
+  /** Original nine-item observation through the supplied caller transaction or
+   * the default independent reads. It captures no event, takes no new lock and
+   * never claims a total readiness revision or a caller-owned snapshot fence. */
+  async readTenantReadinessSource(tenantId: string, tx?: RentalConfigTx) {
     const workspaceId = getRequestWorkspaceId(), identity = requestFingerprint(getRequestIdentity());
     if (!workspaceId || getRequestTenantId() !== tenantId) throw new ForbiddenException("开业来源缺少当前租户或经营空间");
     const startedAt = new Date().toISOString();
-    const binding = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId) : undefined;
-    const readiness = await this.readTenantReadiness(tenantId);
+    const binding = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx) : undefined;
+    const readiness = await this.readTenantReadiness(tenantId, tx);
     if (binding) {
-      const current = await this.categoryResolver!.forWorkspace(tenantId, workspaceId);
+      const current = await this.categoryResolver!.forWorkspace(tenantId, workspaceId, tx);
       if (current.categoryVersionId !== binding.categoryVersionId || current.adoptionRevision !== binding.adoptionRevision) {
         throw new ConflictException("开业来源读取期间品类绑定变化");
       }
@@ -898,15 +899,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
       || requestFingerprint(getRequestIdentity()) !== identity) throw new ForbiddenException("开业来源读取期间授权范围变化");
     return { tenantId, workspaceId, readiness: structuredClone(readiness), observations: { startedAt, completedAt: new Date().toISOString(),
-      consistency: "independent_persisted_reads" as const }, ...(binding ? { categoryBinding: {
+      consistency: tx ? "caller_transaction_reads" as const : "independent_persisted_reads" as const }, ...(binding ? { categoryBinding: {
         categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision } } : {}) };
   }
 
-  private async readReadinessMembershipFacts(tenantId: string) {
+  private async readReadinessMembershipFacts(tenantId: string, tx?: RentalConfigTx) {
     let membershipPlanCount = 0, membershipUnavailable = typeof this.memberships?.countPlans !== 'function';
     if (!membershipUnavailable) {
       try {
-        membershipPlanCount = await this.memberships!.countPlans(tenantId);
+        membershipPlanCount = await this.memberships!.countPlans(tenantId, tx);
         if (!Number.isSafeInteger(membershipPlanCount) || membershipPlanCount < 0) throw new ConflictException('开业会员计数无效');
       } catch (error) {
         if (error instanceof HttpException && [401, 403].includes(error.getStatus())) throw error;
