@@ -4,6 +4,27 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-preparation-receipt-integration-20261112"></a>
+## PM固定原准备批次收据整合（2026-11-12）
+
+固定来源为已核实际GitHub任务分支的`b659aa857088e01cab277d4270390e9845eeaead`，main起点`212df5bd6b463f62f98d040c18afea9088543f87`。仅收两份批次源码及对应四份原记录/接续增量，不取Core活动HEAD或未完服务/保证金/配置事件WIP。准备服务的来源父文件仅比main多前一a0编码片的解码替换，该差异与本批次修复无调用依赖；三方应用只加入b659回执增量，未取a0/619祖先或整份父文件。批次纯函数blob与来源一致，准备服务保留main编码实现；四份文档冲突保留main完整历史，仅加入固定批次阶段，原记录的源码/环境证据不改成当前main全量验收。
+
+实际入口为原准备Controller/权限→CategoryAdoptionPreparationService.readBatch/saveBatch→category-preparation-batches.readCategoryPreparationBatchResult。结果必须匹配原准备集合、目标、批次、输入指纹及原输入修订，合法零计数保留，未知字段/坏JSON/不合法修订不能作为saved返回。原记录不重写，缺行仍unknown且不授重发权。写入接口的原键重试先复验当前采用资格/来源；独立历史GET仍按当前人员/空间读原收据，不重新要求目标资格。
+
+PM在固定main组合以已有离线preload、不可达数据库、纯内存TypeScript装载复用原`category-preparation-batches.test.cjs`和`category-preparation-batch-service.test.cjs`，两份脚本均退出0、原文件/断言未改：部分累积、撤回、原事实/唯一性、原键回放、资格/修订冲突、回滚、显式重置及legacy覆盖拒绝通过。复用作者阶段清单的最终boundary原命令，九类坏回执、缺指纹、原输入修订矛盾和改输入拒绝，当前资格收窄时写入重试拒绝、历史GET仍可读，缺收据unknown及原记录不变均通过，退出0。三份内存脚本SHA-256依次为`2a8e43b09ff7054d12e3e17b36e707de422bc05e0a2a37495490a135e00494a0`、`01e09cfd4a6bb61084fdc74e7839726e8a05a943eda3788ab982cecb7210b228`、`ab1e417cc905c0dbf3c98654ee14de855db714eeb987a6451702c1c19937352f`。SQL、Auth/事务存储仍为原fixture，测试不证明真实MySQL锁、并发、最终采用或浏览器。
+
+shared原TypeScript5.9.3配置完整内存检查/emit108根、217产物诊断0；API消费内存新声明按原900根noEmit诊断0、退出0，未覆盖物理dist/Client。四份文档新阶段链接/显式锚点、原内容保留及格式按固定main核验；源码与两个原测试哈希保持。作者唯一原始JSON证据仍在其树，链接明确指向这份单一原稿，不复制整个output/环境；必要main独立结论和命令哈希保存在本段。所有本轮自有验证进程退出、任务临时目录未创建，六项他人main WIP逐哈希保持；旧集中待清理残留仍未删除，不绕过此前自动审批拒绝。
+
+原14项完整结项仍0/14，实现百分比待核实。本次巡检四树本地提交均与实际GitHub一致，AI仍推进14四分区提案/18受权待办，企业推进原本人委托源及参与者，Core继续新服务空快照/纯保证金门闸后转AIN-17四入口真实counter/同事务参加者。未完成成果保留任务分支，a0/619其余固定前置按原记录另片核收；不以本片收据修复代替这些核心功能或经营放行。
+
+<a id="preparation-receipt-validation-core-20261112"></a>
+
+## 原批次回执校验收口与Core提交链接续（2026-11-12）
+
+两份Core源码完成原批次JSON/标识绑定校验，原写入重试的资格/来源门槛保持，独立历史GET继续原授权；原消息兼容及错误顺序尝试均按原测试纠正，详见[唯一品类记录](品类治理/品类治理-开发记录.md#preparation-receipt-validation-20261112)。API864文件完整编译/逐文件核对，2份更新，原两批次脚本与限定坏回执检查通过；各次暂存已删除，CLOSE/CAT完整门槛不变。
+
+PM最新指定下一优先：原scanOrder→recordIssue→saveOrderAggregate同事务履约参加者；upsertProfile真实配置行counter/默认与非默认边界及开业参加者；persistBusinessConfig原tx及settingsRevision/开业分区参加者；saveCoreState原tx/scoped原子counter与必要回填兼容。先固定最小内部字段合同和Core可证明的resource_shortage判定，供PM与AI-RD读取；缺已发布临近政策不捕获，不解析issue文本、不把九项独立读取当单事务总版本。公共符号/装配新增须另报具体窗口，原真实环境许可未增加。
+
 <a id="pm-core-intake-and-dependencies-20261112"></a>
 ## PM固定阶段依赖核查与跨专项来源协调（2026-11-12）
 
