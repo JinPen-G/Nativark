@@ -4,6 +4,17 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-exchange-guarantee-integration-20261112"></a>
+## PM换货保证金准入固定整合（2026-11-12）
+
+main起点与实际GitHub均为`7772d302003697dfe2a0de2da8f4ee104933baaa`，来源`5d6c6dffdfaf11b0bc6d759ab87ae983d31edd0c`已核包含于实际Core远端`045ff2114b1a25943419b88dd153e7d94685fd18`。仅收[Core服务](../../apps/api/src/modules/rental-core/rental-core.service.ts)的七行增量，不取尚未核收的配置、counter或来源父文件。普通换货只增加押金或预授权时也进入原企业新支出门闸；租金补差仍按原值传入，显式0不省略，保证金不并入租金授信。已核的本次换货批准仍走原事务内封存authority，旧建单批准不能替代新支出批准。
+
+PM在main以`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs -e`复用[作者唯一证据](../../worktree/rental-core/output/category-governance/exchange-guarantee-gate-20261112.json)的`completeCategoryPreviewProbe.inlineCommand`，仅把其ts-node注册替换为内存main源码装载。两种真实Core预览均为租金增量0、相应保证金增量100；逐单政策拒绝旧批准、免逐单仍以0复验、当前关系停用拒绝、伪造authority拒绝及原订单不变均通过，退出0。复用命令SHA-256为`e861dfd101f0c5b5df1969e3e1702f60c443d888ae8d4616bba3fabc70af70f1`。首次装载误读既有src同名JS而退出1，改为优先实际TS后通过；未改、删除或覆盖这些既有产物及原测试断言。
+
+TypeScript5.9.3按原shared108根内存检查/emit及API900根noEmit检查，诊断0、退出0，未写物理dist、Client或缓存。限定预览/准入检查在原后续订单修订门闸停止，SQL、当前政策来源与存储为fixture，不代表完整换货、真实事务/资金或全专项验收。所有本片进程退出，临时目录未创建；main六项他人WIP逐文件哈希保持，旧已集中残留仍未删除。原CLOSE/CAT-GOV/ECP门槛不变。
+
+后续企业三端服务与点击冻结按空快照前置核收。完整委托新增的最小政策窗口由企业RD独占`EnterprisePolicyService.assertOrderCreation`签源分支；Core独占服务器封存authority和`ApprovedOrderBinding`证明类型。证明必须匹配原来源/请求/报价/依据/签发修订及当前operator，普通五阶段callback不能自行取得委托权；历史原键读取区分原签发修订与consumed当前修订。两作者继续独占研发，固定合同及组合证据完成后再收main。
+
 <a id="pm-extension-empty-snapshot-integration-20261112"></a>
 ## PM新续租服务空快照固定整合（2026-11-12）
 
