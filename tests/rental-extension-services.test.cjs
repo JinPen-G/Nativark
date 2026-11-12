@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 
 require("ts-node").register({
+  project: require("node:path").resolve(__dirname, "../apps/api/tsconfig.json"),
+  preferTsExts: true,
   transpileOnly: false,
   compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
 });
@@ -72,16 +74,16 @@ async function pricingFixture(spy) {
   );
   await core.onApplicationBootstrap();
   await business.onApplicationBootstrap();
-  const profile = core.getProfile(tenantId);
-  const ctx = {
-    profile,
-    category: core.listCategories().find((row) => row.code === profile.categoryCode),
-    settings: core.getBusinessSettings(tenantId),
-    groups: core.listItemGroups(tenantId),
-    pricingGroups: core.listPricingGroups(tenantId),
-    couponTemplates: core.listCouponTemplates(tenantId),
-    locations: core.listLocations(tenantId),
-    operators: core.listOperators(tenantId)
+  const ctx = await core.readBusinessContext(tenantId);
+  const profile = ctx.profile;
+  // The absorbing store has no catalog queries. Supply only this fixture's
+  // exact scoped rows; this is not evidence of SQL persistence or locking.
+  business.coreConfigStore.listItemGroupsPage = async (scopeTenantId, workspaceId, query) => {
+    assert.equal(scopeTenantId, tenantId);
+    assert.equal(workspaceId, "ws_tenant_002");
+    assert.equal(query.limit, 1);
+    return { rows: structuredClone(ctx.groups.filter((row) => row.id === query.itemGroupId)),
+      truncated: false, source: "persisted_workspace_configuration" };
   };
   require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', ctx);
   const group = ctx.groups.find((row) => row.status === "enabled") ?? ctx.groups[0];
@@ -157,7 +159,7 @@ void (async () => {
   const { business, ctx, args } = await pricingFixture(spy);
   const preview = await business.quoteOrderExtension(tenantId, ctx, args);
   assert.equal(spy.calls.asserted.length, 0, "只延长租期不该触发服务容量校验");
-  assert.equal(preview.serviceSnapshots, undefined);
+  assert.deepEqual(preview.serviceSnapshots, [], "新续租已解析且无新增服务，须保留确定的空快照");
   ok("只延长租期的续租不碰服务容量");
 }
 

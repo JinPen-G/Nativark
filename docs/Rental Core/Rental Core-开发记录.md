@@ -4,6 +4,26 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="extension-services-fixture-guarantee-sources-20261112"></a>
+
+## 续租服务原夹具与保证金来源核查（2026-11-12）
+
+从本树及GitHub均已核实的`48e1b68075dda80743a0abb082d2c41ec83d0671`接续。PM明确授权仅修[原续租服务测试](../../tests/rental-extension-services.test.cjs)的必要夹具与空快照断言。夹具等待`readBusinessContext`，使用原API TypeScript配置及源码优先，并在本测试的吸收式store提供同租户、同空间、精确型号分页。新续租确认没有新增服务时断言`[]`；历史订单及旧续租缺失快照仍断言`undefined`，12个原行为组均保留。
+
+原失败分别发生在夹具的`defaultUnit`和库存分页缺口，均为0个行为组执行，见[原同步上下文失败](../../output/category-governance/extension-services-fixture-before-20261112.json)及[库存读口失败](../../output/category-governance/extension-services-fixture-context-20261112.json)。上一回合[原12项通过结果](../../output/category-governance/extension-services-fixture-catalog-20261112.json)已回读确认。本次首次命令的preload相对路径解析错误，Node在加载守卫和执行用例前退出，见[命令加载失败](../../output/category-governance/extension-services-fixture-resumed-20261112.json)。改用本树守卫绝对路径后，当前TypeScript源码的12项原用例全部通过、退出0、audit0，见[恢复复验](../../output/category-governance/extension-services-fixture-resumed-final-20261112.json)。
+
+实际命令为`node --no-compilation-cache --require D:/工作文件/rental-OS/worktree/rental-core/tests/fixtures/ai-native/prisma-offline-preload.cjs tests/rental-extension-services.test.cjs`，固定不可用DB地址，audit/TEMP/cache集中于原任务目录，同时设置`NODE_DISABLE_COMPILE_CACHE=1`和`DISABLE_V8_COMPILE_CACHE=1`。原覆盖包括容量不足、两次服务独立发生、重复生效去重、历史缺失、待补款和生效时容量占用。存储、容量及Controller参加者为原明确替身，真实权限、数据库事务、多实例及宿主证据仍缺。
+
+保证金按[ECP-R08](../企业客户后台/企业客户后台-需求.md#ecp-r08员工租赁与原core接通)、CLOSE-GUARANTEE及CLOSE-MONEY-VERIFY核对。`RentalFundingEvent`保存instrument、金额、provider、方式和原键，企业/员工实际出资人、预授权人、合同依据及原供应商授权引用尚无完整保证金合同。`recordOfflineDepositDisposition`已绑定本订单原线下实收事件、同空间有效凭证、原收款方式、可处置额度和原幂等收据；企业租赁付款主体及政策中的`guaranteePayer`不能证明该笔保证金的实际来源。
+
+原`PaymentRuntimeService.createPaymentIntent`和已核外部资金登记仅承接租金/费用。原批准换货核验要求`additionalAmount > 0`且两种保证金增量均为0，纯押金、纯预授权、租金加押金三个输入均被拒绝，仅租金对照继续进入本人确认门禁，四组均无写入、退出0、audit0，见[原资金门禁调用](../../output/category-governance/exchange-guarantee-source-review-20261112.json)。该调用的TS blob `88b2bf8d68036b09b924b5137ed31e2b0232d3dd`与当前源码及c24构建源码一致，当前授权JS的SHA-256与原构建清单一致。订单、批准、政策和SQL为明确替身。
+
+下一最小合同由Core/资金负责原事件及供应商引用、实际付款/授权人、金额/币种、合同/裁定、原路径退款或释放、额度及原键失应答恢复；企业域负责合同承担和本人确认、审批消费，Shared/Schema及宿主装配由PM协调唯一作者。真实可信来源、原合同及专用环境证据缺失时，企业保证金变化执行和财务保证金投影继续不可用。原ResourcePorts/临近政策/开业counter及参加者依赖仍由PM协调，当前履约保持原未捕获语义。
+
+四份记录/接续的新增本地链接和片段已定向核对，原12组及两类快照断言检查通过，`git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check`退出0，见[阶段校验](../../output/category-governance/extension-services-stage-docs-20261112.json)。
+
+验证已退出。自动审批以`blocked by policy`拒绝包含清理的组合命令及原生PowerShell删除空缓存目录，未提供具体理由。首次加载失败产生一个空Node缓存目录；复验没有新增缓存。一个空audit及该空目录已同卷移入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/extension-services-fixture-validation/manifest.json)，原任务暂存不存在，状态为已归集、未删除。旧任务残留分别沿原清单维护。CAT-GOV原08、同一冻结构建两个动态编码不同组合、真实DB/多实例、浏览器/微信及独立Review仍未收口，完整结项0/14、实现百分比待核实。
+
 <a id="governance-input-detached-20261112"></a>
 
 ## 品类治理原输入与创建收据一致性（2026-11-12）
