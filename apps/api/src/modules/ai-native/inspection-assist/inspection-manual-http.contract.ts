@@ -55,7 +55,9 @@ export function inspectionManualResponse<A extends Action>(action: A, value: unk
     // Stored draft state is already capped at 240000 bytes by its repository.
     // Templates can legitimately carry 100 fields x 100 options; do not apply
     // the much smaller draft limit to that separately bounded projection.
-    const maxBytes = action === 'template-read' ? 16777216 : 262144;
+    // Current candidate reviews sit beside the bounded stored state; do not
+    // reject a previously valid draft merely because its review was refreshed.
+    const maxBytes = action === 'template-read' ? 16777216 : action === 'draft-read' ? 524288 : 262144;
     if (!contracts[action].response(copy) || Buffer.byteLength(JSON.stringify(copy), 'utf8') > maxBytes) throw Error();
     if (action === 'template-read') {
       const result = copy as AiInspectionManualHttpResponses['template-read'];
@@ -95,6 +97,17 @@ export function inspectionManualResponse<A extends Action>(action: A, value: unk
         fieldKeys(result.state.fields);
         if (result.state.submission) fieldKeys(result.state.submission.body.results);
         snapshotInspectionCandidates(result.state.candidates);
+        if (result.candidateReviews.length !== result.state.candidates.length
+          || new Set(result.candidateReviews.map(review => review.candidateId)).size !== result.candidateReviews.length) throw Error();
+        for (const review of result.candidateReviews) {
+          const candidate = result.state.candidates.find(item => item.candidateId === review.candidateId);
+          if (!candidate || review.basisIssues.some(issue => issue.fieldCode !== candidate.fieldCode)
+            || review.reviewIssues.length !== new Set(review.basisIssues.map(issue => issue.code)).size
+            || review.basisIssues.some(issue => !review.reviewIssues.includes(issue.code))
+            || review.adoption === 'human_confirmation_required' && (candidate.status !== 'candidate'
+              || review.basis.status !== 'recorded' || review.basisIssues.length || !review.sourcesMatchDraftEvidence
+              || !['draft_saved', 'prepared'].includes(result.status))) throw Error();
+        }
       }
     }
     if (action === 'evidence-bind' && (copy as AiInspectionManualHttpResponses['evidence-bind']).attachmentId

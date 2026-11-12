@@ -3,9 +3,10 @@
  * separate. Unknown results are original-key observations, never retry grants. */
 import { leafClosed as object, leafEnum as choice, leafId as genericId, leafInt as integer,
   leafList as list, leafRef as ref, leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
-import type { AiInspectionCandidateDraft } from './ai-inspection-draft';
+import type { AiInspectionCandidateDraft, AiInspectionReviewIssueDraft } from './ai-inspection-draft';
 import type { AiInspectionRecognitionRequest, AiInspectionRecognitionTaskReference, AiStaffInspectionSavedReference,
-  AiInspectionOperationResult, AiInspectionDraftReadRequest, AiInspectionPrepareSubmissionRequest, AiInspectionSubmitRequest } from './ai-inspection-persistence';
+  AiInspectionOperationResult, AiInspectionDraftReadRequest, AiInspectionPrepareSubmissionRequest, AiInspectionSubmitRequest,
+  AiInspectionRecognitionBasisReference } from './ai-inspection-persistence';
 
 type DraftSaved = AiInspectionOperationResult & { status: 'draft_saved'; inspectionId: null };
 type Prepared = AiInspectionOperationResult & { status: 'prepared'; inspectionId: null };
@@ -13,9 +14,15 @@ export type AiInspectionResultReadRequest = AiInspectionRecognitionTaskReference
 export type AiInspectionInputPrepareResponse = DraftSaved & { inputId: string; dispatch: 'unavailable'; code: 'CAPABILITY_UNSUPPORTED' };
 export type AiInspectionInputReceiptResponse = { inputId: string; execution: 'not_attested'; retryable: false } & (
   | { status: 'found'; result: DraftSaved } | { status: 'absent' | 'unavailable' });
+/** A server-derived review reason, without the protected comparison values. */
+export interface AiInspectionRecognitionBasisIssueDraft {
+  fieldCode: string; code: AiInspectionReviewIssueDraft; reason: string; originalRecordId?: string;
+}
 export type AiInspectionResultReadResponse = AiInspectionResultReadRequest & {
   resultHash: string; inputFingerprint: string; runId: string; stepId: string; observedAt: string;
   trust: 'untrusted_candidate'; automaticRetry: false; persistence: 'not_saved'; execution: 'not_attempted';
+  basis: AiInspectionRecognitionBasisReference; reviewIssues: AiInspectionReviewIssueDraft[];
+  basisIssues: AiInspectionRecognitionBasisIssueDraft[];
 } & (
   | { status: 'available'; candidates: AiInspectionCandidateDraft[]; recognitionEvidence: 'persisted_image_step' | 'persisted_audio_step'; nextAction: 'human_review' }
   | { status: 'unknown' | 'failed'; candidates: []; recognitionEvidence: 'not_confirmed'; nextAction: 'reconcile_or_manual_review' });
@@ -69,12 +76,19 @@ const prepared = { ...saved, status: choice('prepared') };
 const operation = { ...target, operationId: id, expectedRevision: integer(1, 998) };
 const preparation = object({ ...operation, expectedRevision: integer(1, 997), actionId: id, handoverSignatureFileAssetId: id }, [...Object.keys(operation), 'actionId']);
 const mode = choice('original_single', 'manual_review_only'), validation = choice('required_at_original_inspection_entry');
+export const AI_INSPECTION_REVIEW_ISSUE_SCHEMA = choice('baseline_missing', 'meter_replaced', 'reading_backwards', 'field_unavailable', 'source_unclear');
+const reviewIssue = AI_INSPECTION_REVIEW_ISSUE_SCHEMA;
+const basisIssue = object({ fieldCode: id, code: reviewIssue, reason: { ...text(128), pattern: '^[a-z_]+$' },
+  originalRecordId: id }, ['fieldCode', 'code', 'reason']);
 const recognitionBase = { ...recognition, resultHash: hash, inputFingerprint: hash, runId: id, stepId: id, observedAt: time,
-  trust: choice('untrusted_candidate'), automaticRetry: no, persistence: choice('not_saved'), execution: choice('not_attempted') };
+  trust: choice('untrusted_candidate'), automaticRetry: no, persistence: choice('not_saved'), execution: choice('not_attempted'),
+  basis: ref('AiInspectionRecognitionBasisReference'), reviewIssues: { ...list(reviewIssue, 5), uniqueItems: true },
+  basisIssues: list(basisIssue, 100) };
 const inputReceipt = { inputId: id, execution: choice('not_attested'), retryable: no };
 const readBase = { draftId: id, revision: integer(1, 1000), retryable: no };
 const observed = { ...readBase, actionId: id, requestHash: hash, semantics: choice('original_receipt_observation_not_submission_or_draft_link') };
 export const AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiInspectionRecognitionBasisIssueDraft: basisIssue,
   AiInspectionRecognitionRequest: object({ ...target, operationId: id, expectedRevision: integer(1, 999), question: text(4000) }),
   AiInspectionInputPrepareResponse: object({ ...saved, inputId: id, dispatch: choice('unavailable'), code: choice('CAPABILITY_UNSUPPORTED') }),
   AiInspectionInputReceiptResponse: { oneOf: [object({ ...inputReceipt, status: choice('found'), result: object(saved) }),

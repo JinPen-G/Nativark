@@ -4,6 +4,8 @@ import { AI_INSPECTION_DRAFT_SCHEMAS, type AiInspectionCandidateDraft, type AiIn
 import { optionalUsageReading } from '../../rental-core/rental-usage-reading';
 import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
+import { InspectionRecognitionBasisService, unrecordedInspectionRecognitionBasis,
+  type InspectionRecognitionBasisReference, type InspectionRecognitionBasisIssue } from './inspection-recognition-basis.service';
 
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 function localRefs(value: unknown): unknown {
@@ -35,9 +37,12 @@ export interface InspectionEvidenceAuthority {
 }
 
 export class InspectionCandidateService {
-  constructor(private readonly templates: InspectionTemplateService, private readonly evidence?: InspectionEvidenceAuthority) {}
+  constructor(private readonly templates: InspectionTemplateService, private readonly evidence?: InspectionEvidenceAuthority,
+    private readonly basis?: InspectionRecognitionBasisService) {}
 
-  async consume(value: unknown) {
+  /** The optional reference comes only from the server-frozen model input or
+   * its saved candidate association; it is deliberately absent from HTTP input. */
+  async consume(value: unknown, basisReference?: InspectionRecognitionBasisReference) {
     const input = parseInspectionInput(requestSchema, value);
     // Detach every candidate before the first authorization await. z.unknown()
     // deliberately preserves references and must not carry caller-owned state.
@@ -80,11 +85,20 @@ export class InspectionCandidateService {
     }
     const final = await this.templates.read(target);
     if (final.bindingFingerprint !== before.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+    if (basisReference?.status === 'recorded' && !this.basis) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    const basis = this.basis ? await this.basis.revalidate(target, basisReference) : null;
+    const basisIssues: InspectionRecognitionBasisIssue[] = basis && this.basis
+      ? this.basis.assess(basis, before.template.fields, candidates)
+      : candidates.map(candidate => ({ fieldCode: candidate.fieldCode, code: 'field_unavailable' as const, reason: 'original_basis_not_recorded' }));
+    const closing = await this.templates.read(target);
+    if (closing.bindingFingerprint !== before.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
     return { orderId: before.orderId, allocationId: before.allocationId, assetId: before.assetId, stage: before.stage,
       frozenTemplate: { templateId: before.template.id, version: before.template.version },
       bindingFingerprint: before.bindingFingerprint, candidates,
       missingFields: before.template.fields.filter(field => field.required && !candidates.some(row => row.fieldCode === field.code && row.status === 'candidate')).map(field => field.code),
       trust: 'untrusted_data' as const, status: 'awaiting_human_review' as const,
-      persistence: 'unavailable' as const, recognitionEvidence: 'caller_supplied_not_model_execution_proof' as const };
+      persistence: 'unavailable' as const, recognitionEvidence: 'caller_supplied_not_model_execution_proof' as const,
+      basis: basis?.reference ?? unrecordedInspectionRecognitionBasis(), basisIssues,
+      reviewIssues: [...new Set(basisIssues.map(issue => issue.code))] };
   }
 }

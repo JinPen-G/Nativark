@@ -1564,6 +1564,161 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "caller_supplied_not_model_execution_proof"
         ]
       },
+      "candidateReviews": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "candidateId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "basis": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "recorded"
+                      ]
+                    },
+                    "referenceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "sourceHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status",
+                    "referenceId",
+                    "sourceHash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "not_recorded"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "reviewIssues": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "baseline_missing",
+                  "meter_replaced",
+                  "reading_backwards",
+                  "field_unavailable",
+                  "source_unclear"
+                ]
+              },
+              "minItems": 0,
+              "maxItems": 5,
+              "uniqueItems": true
+            },
+            "basisIssues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "fieldCode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "baseline_missing",
+                      "meter_replaced",
+                      "reading_backwards",
+                      "field_unavailable",
+                      "source_unclear"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[a-z_]+$"
+                  },
+                  "originalRecordId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "fieldCode",
+                  "code",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "sourcesMatchDraftEvidence": {
+              "type": "boolean"
+            },
+            "adoption": {
+              "type": "string",
+              "enum": [
+                "human_confirmation_required",
+                "unavailable"
+              ]
+            }
+          },
+          "required": [
+            "candidateId",
+            "basis",
+            "reviewIssues",
+            "basisIssues",
+            "sourcesMatchDraftEvidence",
+            "adoption"
+          ],
+          "additionalProperties": false
+        },
+        "minItems": 0,
+        "maxItems": 100
+      },
       "state": {
         "type": "object",
         "properties": {
@@ -1841,6 +1996,14 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                             },
                             "minItems": 0,
                             "maxItems": 100
+                          },
+                          "unit": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 64
+                          },
+                          "usageMetric": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -1861,6 +2024,66 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                     "fields"
                   ],
                   "additionalProperties": false
+                },
+                "basis": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "enum": [
+                            "inspection-recognition-basis-1"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "recorded"
+                          ]
+                        },
+                        "referenceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "sourceHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "status",
+                        "referenceId",
+                        "sourceHash"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "enum": [
+                            "inspection-recognition-basis-1"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "not_recorded"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 },
                 "media": {
                   "type": "array",
@@ -1952,6 +2175,70 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
             },
             "minItems": 0,
             "maxItems": 8
+          },
+          "candidateBasis": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "recorded"
+                      ]
+                    },
+                    "referenceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "sourceHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status",
+                    "referenceId",
+                    "sourceHash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "not_recorded"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
           }
         },
         "required": [
@@ -1975,6 +2262,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
       "bindingFingerprint",
       "inspectionId",
       "recognitionEvidence",
+      "candidateReviews",
       "state"
     ],
     "additionalProperties": false
@@ -3645,6 +3933,69 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
               "not_attempted"
             ]
           },
+          "basis": {
+            "$ref": "#/components/schemas/AiInspectionRecognitionBasisReference"
+          },
+          "reviewIssues": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "baseline_missing",
+                "meter_replaced",
+                "reading_backwards",
+                "field_unavailable",
+                "source_unclear"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 5,
+            "uniqueItems": true
+          },
+          "basisIssues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldCode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "baseline_missing",
+                    "meter_replaced",
+                    "reading_backwards",
+                    "field_unavailable",
+                    "source_unclear"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z_]+$"
+                },
+                "originalRecordId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "required": [
+                "fieldCode",
+                "code",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -3692,6 +4043,9 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "automaticRetry",
           "persistence",
           "execution",
+          "basis",
+          "reviewIssues",
+          "basisIssues",
           "status",
           "candidates",
           "recognitionEvidence",
@@ -3804,6 +4158,69 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
               "not_attempted"
             ]
           },
+          "basis": {
+            "$ref": "#/components/schemas/AiInspectionRecognitionBasisReference"
+          },
+          "reviewIssues": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "baseline_missing",
+                "meter_replaced",
+                "reading_backwards",
+                "field_unavailable",
+                "source_unclear"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 5,
+            "uniqueItems": true
+          },
+          "basisIssues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldCode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "baseline_missing",
+                    "meter_replaced",
+                    "reading_backwards",
+                    "field_unavailable",
+                    "source_unclear"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z_]+$"
+                },
+                "originalRecordId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "required": [
+                "fieldCode",
+                "code",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -3851,10 +4268,73 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "automaticRetry",
           "persistence",
           "execution",
+          "basis",
+          "reviewIssues",
+          "basisIssues",
           "status",
           "candidates",
           "recognitionEvidence",
           "nextAction"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionRecognitionBasisReference": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "inspection-recognition-basis-1"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "recorded"
+            ]
+          },
+          "referenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "sourceHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "version",
+          "status",
+          "referenceId",
+          "sourceHash"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "inspection-recognition-basis-1"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_recorded"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "status"
         ],
         "additionalProperties": false
       }

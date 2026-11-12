@@ -10,8 +10,11 @@ import type { AiInspectionDraftCreateRequest, AiInspectionDraftEditRequest, AiIn
   AiInspectionDraftState, AiInspectionDraftStatus, AiInspectionOperationResult, AiInspectionReceiptLookup,
   AiInspectionOriginalOperationRequest, AiStaffInspectionHostProjection, AiStaffInspectionSavedReference,
   AiStaffInspectionHistoryRequest, AiStaffInspectionHistoryResponse, AiStaffInspectionReceiptHostRequest,
-  AiStaffInspectionReceiptHostProjection } from './ai-inspection-persistence';
+  AiStaffInspectionReceiptHostProjection, AiInspectionRecognitionBasisReference } from './ai-inspection-persistence';
 import { AI_STAFF_INSPECTION_HISTORY_SCHEMAS } from './ai-inspection-persistence';
+import type { AiInspectionReviewIssueDraft } from './ai-inspection-draft';
+import { AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS, AI_INSPECTION_REVIEW_ISSUE_SCHEMA,
+  type AiInspectionRecognitionBasisIssueDraft } from './ai-inspection-lifecycle-http-draft';
 
 export interface AiInspectionTemplateResponseDraft {
   scope: AiWorkspaceScope; owner: { actorKind: 'user'; actorId: string }; audience: 'operator' | 'staff';
@@ -20,10 +23,17 @@ export interface AiInspectionTemplateResponseDraft {
   allocationStatus: Exclude<RentalAllocation['status'], 'released' | 'returned'>;
   bindingFingerprint: string; status: 'template_ready'; semantics: 'read_projection_not_inspection_or_action_authorization';
 }
+/** Current read projection only; never persisted as authority or an edit grant. */
+export interface AiInspectionSavedCandidateReview {
+  candidateId: string; basis: AiInspectionRecognitionBasisReference;
+  reviewIssues: AiInspectionReviewIssueDraft[]; basisIssues: AiInspectionRecognitionBasisIssueDraft[];
+  sourcesMatchDraftEvidence: boolean; adoption: 'human_confirmation_required' | 'unavailable';
+}
 export interface AiInspectionDraftReadResponse {
   draftId: string; revision: number; status: AiInspectionDraftStatus; target: AiInspectionTarget; assetId: string;
   templateVersion: string; bindingFingerprint: string; state: AiInspectionDraftState; inspectionId: string | null;
   recognitionEvidence: 'caller_supplied_not_model_execution_proof';
+  candidateReviews: AiInspectionSavedCandidateReview[];
 }
 export interface AiInspectionManualHttpRequests {
   'history-read': AiStaffInspectionHistoryRequest; 'receipt-host-read': AiStaffInspectionReceiptHostRequest;
@@ -77,10 +87,16 @@ const submission = object({ mode: choice('original_single', 'manual_review_only'
   body: object({ templateId: id, results: map({ oneOf: [text(2000, 0), { type: 'number' }, bool, list(id, 100)] }),
     attachments: list(id, 101), handoverSignatureFileAssetId: id }, ['templateId', 'results', 'attachments']) }, ['actionId', 'requestHash', 'body']);
 const nullable = (value: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [value, nil] });
+const basisReference: AiLeafSchemaDraft = { oneOf: [
+  object({ version: choice('inspection-recognition-basis-1'), status: choice('recorded'), referenceId: id, sourceHash: hash }),
+  object({ version: choice('inspection-recognition-basis-1'), status: choice('not_recorded') }),
+] };
 const recognition = object({ inputId: id, inputFingerprint: hash, bindingFingerprint: hash, question: text(4000),
-  template: object({ id, version: id, fields: list(object({ ...field, options }, Object.keys(field)), 100) }),
+  template: object({ id, version: id, fields: list(object({ ...field, options, unit: text(64, 0), usageMetric: bool }, Object.keys(field)), 100) }),
+  basis: basisReference,
   media: list(object({ ...evidence.properties, contentHash: hash, mediaType: text(128), sizeBytes: positive,
-    width: nullable(positive), height: nullable(positive), durationMs: nullable({ type: 'integer', minimum: 0 }) }), 8) });
+    width: nullable(positive), height: nullable(positive), durationMs: nullable({ type: 'integer', minimum: 0 }) }), 8) },
+  ['inputId', 'inputFingerprint', 'bindingFingerprint', 'question', 'template', 'media']);
 const receipt = object({ draftId: id, revision: integer(1, 1000), status: draftStatus, inspectionId: nullable(id) });
 const create = object({ ...target, operationId: id, bindingFingerprint: hash, results: map(scalar), evidence: list(evidence, 100) });
 const edit = object({ ...changed, edits: list(object({ fieldCode: id, decision: choice('manual', 'accepted', 'modified', 'rejected'),
@@ -88,6 +104,7 @@ const edit = object({ ...changed, edits: list(object({ fieldCode: id, decision: 
 const replace = object({ ...changed, evidence: list(evidence, 100) });
 export const AI_INSPECTION_MANUAL_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   ...AI_STAFF_INSPECTION_HISTORY_SCHEMAS,
+  AiInspectionRecognitionBasisReference: basisReference,
   AiInspectionTarget: object(target),
   AiInspectionDraftReadRequest: object({ ...target, draftId: id }),
   AiInspectionDraftCreateRequest: create, AiInspectionDraftEditRequest: edit,
@@ -107,10 +124,14 @@ export const AI_INSPECTION_MANUAL_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
     capabilities: object({ edit: bool, evidence: bool, review: bool, submit: bool }), observedAt: time, execution: choice('not_attested') }),
   AiInspectionDraftReadResponse: object({ draftId: id, revision: integer(1, 1000), status: draftStatus, target: object(target), assetId: id,
     templateVersion: id, bindingFingerprint: hash, inspectionId: nullable(id), recognitionEvidence: choice('caller_supplied_not_model_execution_proof'),
+    candidateReviews: list(object({ candidateId: id, basis: basisReference,
+      reviewIssues: { ...list(AI_INSPECTION_REVIEW_ISSUE_SCHEMA, 5), uniqueItems: true },
+      basisIssues: list(AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS.AiInspectionRecognitionBasisIssueDraft, 100),
+      sourcesMatchDraftEvidence: bool, adoption: choice('human_confirmation_required', 'unavailable') }), 100),
     state: object({ version: { type: 'integer', const: 1 }, fields: map(object({ value: scalar,
       decision: choice('manual', 'accepted', 'modified', 'rejected'), candidateId: id, actorId: id }, ['value', 'decision', 'actorId'])),
       candidates: list(ref('AiInspectionCandidateDraft'), 100), evidence: list(evidence, 100), missingFields: list(id, 100),
-      reviewRequired: bool, submission, recognitionInputs: list(recognition, 8) },
+      reviewRequired: bool, submission, recognitionInputs: list(recognition, 8), candidateBasis: map(basisReference) },
       ['version', 'fields', 'candidates', 'evidence', 'missingFields', 'reviewRequired']) }),
   AiInspectionOperationResult: receipt,
   AiInspectionReceiptLookup: { oneOf: [object({ status: choice('found'), result: receipt }),

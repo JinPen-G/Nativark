@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-inspection-core-basis-review-20261112"></a>
+## 默认员工识别的 Core 依据与保存后候选复核（2026-11-12）
+
+本阶段沿[默认 StaffFactory/识别组合](../../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition.ts)装配[原 Core 单分配项来源](../../apps/api/src/modules/ai-native/inspection-assist/inspection-recognition-core.source.ts)与[识别依据服务](../../apps/api/src/modules/ai-native/inspection-assist/inspection-recognition-basis.service.ts)。Core 固定来源为 `6d35ab7489daa6403da30956d776a5a6331bedb1`、字段补片 `800a38925f7dd1a81d6e87af02301517eff5fd50`、日期围栏 `5b51b90dd01feae189d06d8c66d59875c8172401`；单 reader 与最终 blob `a732cfd562b104c6b4e0d75e13a89af2f3891aec` 一致，Service/FactRepository 只移植原方法、导入及查询 hunk，保留 AI 树其余后继。
+
+原 Guard/员工地点与订单范围核验后，读取当前资产原字段规则、明确缺值、原领取模板/读数及纠正链；不枚举资产，不把单目标投影装成完整分页，也不拿当前模板或自由备注伪造领取/换表历史。服务端冻结 opaque basis 引用，模型只获得原模板/媒体与引用；预期 VIN 和基线比较值不外发。每次发布、结果读取和直接采用继续核原引用，旧输入没有引用不补签，新明确 `not_recorded` 的候选不能直接采用。
+
+dev2 在实际消费中指出，原 result-read 的 expectedRevision 不能在保存后挪给新草稿，因此本阶段同时补[原草稿读取](../../apps/api/src/modules/ai-native/inspection-assist/inspection-draft.service.ts)的顶层 `candidateReviews`。它按已保存的 candidateBasis 与原证据复核每个候选，返回原问题、来源匹配及 `human_confirmation_required|unavailable`；不持久化为授权。缺基线、跨资产、倒退、单位不匹配、明确换表来源及依据变化仍由原服务判定；缓存不能补这些事实。读取等待后复核原草稿行，额外闭合合同校验候选 ID、字段和问题对应；直接采用仍在原 draft-edit 再验证。手工改值、拒绝与原收据入口保留，已移除证据不能支持旧候选。
+
+固定 16 源闭包以 Git 索引基线加本阶段准确源码在内存装载，排除 AIN-12 公共运行器及助手活动文件。实际 StaffFactory→原 inspection Guard→Core Service/FactRepository/单 reader→原图片/音频 Task/Gateway/资源账模拟均通过：每种媒体 1 调用，累计 calls=1；模型结果→保存原候选/basis→当前草稿复核→明确采用，保存前人类值 42 保持，明确采用后为 60。来源版本变化显示不可采用并拒绝写入，证据移除拒绝采用，恢复原证据后重新核验。命令 `node --no-compilation-cache -` 退出 0，stdin SHA-256 `2f1b8e9d1c8b06bdb4469487ff49db33caf8e932720f9e59657f0d2ba8d0a689`。最初内存夹具把策略管理也切成 staff，触发正确拒绝；改为先以原 operator 配置，再切实际 staff 会话，生产授权未放宽。
+
+复用既有识别 fixture 的原依据组：标识匹配/不符、倒退、缺领取、旧记录缺资源、歧义、分页未全、跨资产、明确换表来源及撤权/变化；另核图片/音频和明确缺依据三条模型路径、保存后采用限制。退出 0，stdin SHA-256 `cb708f2bc3d82eb1c65f0541b0dcad157175ba7954fd985768c65448e22ba358`。这里的可选旧来源/换表端口和运输、数据存储为明确替身；默认 Core 来源没有结构化换表证据时不伪称已记录。固定生产闭包 TypeScript 5.9.3，4 根/1794 源零诊断，退出 0，命令 SHA-256 `4c1cf0c973a476722ee7bf7c21234bf25593a52feda4755275822ed85f796cd9`。
+
+三份正式 shared 的运行合同和[员工唯一 registry](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)已同步，55 schema、21 检查操作/9 任务操作，生成 SHA-256 `1ce55786cc278611c81ffb27eee15cfae6fabe97ec2a65192563f818e9fb69b7`，产物 SHA-256 `62aa2f7ff41c01365b289ae5561a47e54d74b7c7dd89fa03caee7e364c02ab65`。保留上传键兼容修复，不运行时引用 shared 源码或另建生成器。全部审计为空、临时目录未创建，没有新增测试脚本、client/dist、服务或真实外联。
+
+AIN-19/20 本片不提前计整项完成：默认后端及保存后投影已具备模拟证据，交 PM 做原范围 QA 复核；dev2 持有 22 个员工消费文件，继续媒体、问题显示、人工值与原操作恢复的完整页面链。真实微信、数据库、对象存储及供应商由负责人后续操作，不作为本轮研发等待条件。
+
 <a id="ain-resource-outbox-core-contract-20261112"></a>
 ## 资源事件参加者向 Core 的固定接口（2026-11-12）
 

@@ -46,6 +46,7 @@ import { PrismaService } from "../database/prisma.service";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { readOrderInspectionBasisInput } from "./rental-order-inspection-basis.read";
+import { readAllocationPickupInput } from "./rental-order-allocation-pickup.read";
 import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
@@ -276,6 +277,7 @@ export interface RentalCoreFactStore {
   readOrderFacts?(tenantId: string, workspaceId: string, orderId: string): Promise<RentalOrderReadFacts | undefined>;
   readOrderExplanationState?: RentalCoreFactRepository['readOrderExplanationState'];
   readOrderInspectionBasis?: RentalCoreFactRepository['readOrderInspectionBasis'];
+  readOrderAllocationPickupBasis?: RentalCoreFactRepository['readOrderAllocationPickupBasis'];
   /**
    * 对订单行加排他锁，供状态推进动作在读取聚合前调用。
    * 不加锁时确认、配货、取消会各读一份聚合副本、各跑状态机、各整体写回，
@@ -532,6 +534,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async readOrderInspectionBasis(tenantId: string, workspaceId: string, orderId: string) {
     return readOrderInspectionBasisInput(this.prisma, tenantId, workspaceId, orderId,
       () => this.requestOrderVisibilityWhere());
+  }
+
+  /** One explicit allocation/asset only; reuse the original order and asset
+   * predicates without enumerating owned assets or reading current checks. */
+  async readOrderAllocationPickupBasis(tenantId: string, workspaceId: string, orderId: string, allocationId: string) {
+    return readAllocationPickupInput(this.prisma, tenantId, workspaceId, orderId, allocationId,
+      () => this.requestOrderVisibilityWhere(), assetId => this.assetVisibilityWhere(this.prisma, tenantId, workspaceId, assetId));
   }
 
   /** Bounded explanation metadata only; no allocations' asset/contact JSON,
@@ -1562,9 +1571,15 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   /* ---------- 资产 ---------- */
 
-  private async assetVisibilityWhere(client: Prisma.TransactionClient, tenantId: string, workspaceId: string): Promise<Prisma.RentalAssetWhereInput> {
+  private async assetVisibilityWhere(client: Prisma.TransactionClient, tenantId: string, workspaceId: string, assetId?: string): Promise<Prisma.RentalAssetWhereInput> {
     const ownScope = getRequestDataScope() === "own";
     const userId = getRequestUserId();
+    if (ownScope && assetId) {
+      const owned = userId ? await client.rentalWorkOrder.findFirst({
+        where: { tenantId, workspaceId, assetId, OR: [{ createdBy: userId }, { assigneeId: userId }] }, select: { id: true }
+      }) : null;
+      return { ...this.staffLocationWhere(), id: owned ? assetId : "__no_owned_asset__" };
+    }
     const ownAssetIds = ownScope && userId
       ? (await client.rentalWorkOrder.findMany({
           where: { tenantId, workspaceId, assetId: { not: null }, OR: [{ createdBy: userId }, { assigneeId: userId }] },
