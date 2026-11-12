@@ -71,7 +71,7 @@ export class EnterpriseMerchantController {
     const before = await this.management.evidenceOwner(req.user!, id, fileId);
     const result = await this.files.readAuthorityBytes(before.tenantId, fileId, before.applicantCustomerId);
     const after = await this.management.evidenceOwner(req.user!, id, fileId);
-    if (after.revision !== before.revision || after.applicantCustomerId !== before.applicantCustomerId) throw new ForbiddenException("申请附件关联已变化");
+    if (after.tenantId !== before.tenantId || after.actor !== before.actor || after.materialKey !== before.materialKey) throw new ForbiddenException("申请附件关联或读取身份已变化");
     response.setHeader("Cache-Control", "no-store"); response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Content-Type", result.mimeType); response.setHeader("Content-Disposition", "attachment; filename=enterprise-request-evidence"); response.send(result.content);
   }

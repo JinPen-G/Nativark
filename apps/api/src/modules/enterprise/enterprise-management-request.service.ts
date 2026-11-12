@@ -11,7 +11,7 @@ import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.s
 import { assertPublishedRentalCategoryIdentities } from "../rental-core/category-identity";
 
 type Stored = { requestType: EnterpriseManagementRequestType; objectRevision: string; proposal: EnterpriseManagementProposal; evidenceFileIds: string[]; reason: string };
-type Row = { id: string; corporateCustomerId: string; applicantCustomerId: string; state: EnterpriseRequestState; revision: number; payload: Stored | string; decisionReason: string | null; createdAt: Date; updatedAt: Date };
+type Row = { tenantId: string; id: string; corporateCustomerId: string; applicantCustomerId: string; state: EnterpriseRequestState; revision: number; payload: Stored | string; decisionReason: string | null; createdAt: Date; updatedAt: Date };
 const requestTypes: EnterpriseManagementRequestType[] = ["profile_change", "credit_change", "scope_change"];
 const fields: Record<EnterpriseManagementRequestType, string[]> = { profile_change: ["legalName", "registeredAddress", "email"], credit_change: ["requestedCreditLimit", "currency"], scope_change: ["workspaceIds", "categoryCodes"] };
 @Injectable()
@@ -206,14 +206,21 @@ export class EnterpriseManagementRequestService {
     return { state: "committed", result: { id, state: "withdrawn", revision: result.revision } };
   }
   async evidenceOwner(user: SystemUserRow, id: string, fileId: string) {
-    const { tenantId } = this.merchant(user);
+    if (![id, fileId].every(value => typeof value === "string" && /^[a-zA-Z0-9_-]{1,191}$/u.test(value))) throw new BadRequestException("原申请或附件引用无效");
+    const before = this.merchant(user), { tenantId } = before;
     const row = (await this.prisma.$queryRaw<Row[]>`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${tenantId} AND id=${id} AND kind='finance_request'`)[0];
     if (!row) throw new NotFoundException("企业申请不存在");
-    const data = enterpriseJson(row.payload);
-    if (!requestTypes.includes(data.requestType)) throw new ConflictException("原申请类别不可核对");
-    this.merchant(user, data.requestType);
-    if (!data.evidenceFileIds.includes(fileId)) throw new ForbiddenException("附件不属于此申请");
-    return { tenantId, applicantCustomerId: row.applicantCustomerId, revision: row.revision };
+    let view: EnterpriseManagementRequestView;
+    try {
+      view = this.view(row);
+      this.validate({ ...view, submit: false });
+      if (row.tenantId !== tenantId || row.id !== id || ![row.corporateCustomerId, row.applicantCustomerId].every(value => /^[a-zA-Z0-9_-]{1,191}$/u.test(value))
+        || !Number.isSafeInteger(row.revision) || row.revision < 1) throw new Error("request binding");
+    } catch { throw new ConflictException("原申请类别或附件材料不可核对"); }
+    const after = this.merchant(user, view.requestType);
+    if (after.tenantId !== before.tenantId || after.actor !== before.actor) throw new ForbiddenException("申请附件读取身份已变化");
+    if (!view.evidenceFileIds.includes(fileId)) throw new ForbiddenException("附件不属于此申请");
+    return { tenantId, actor: after.actor, applicantCustomerId: row.applicantCustomerId, revision: row.revision, materialKey: JSON.stringify(view) };
   }
   private merchant(user: SystemUserRow, type?: EnterpriseManagementRequestType) {
     const actor = this.commands.operator(user, "rental-os:corporate:manage");
