@@ -1,5 +1,7 @@
 import { themeBehavior } from "../../core/theme-behavior";
-import type { ClientOrderView, RentalOrderExtension, RentalOrderExtensionPreview, EnterpriseExtensionApprovalView } from "@rental-os/shared";
+import { enterpriseExtensionServiceRequests, enterpriseExtensionServiceSelectionKey, type ClientCatalogResponse, type ClientOrderView, type ClientQuoteServiceRequest, type RentalOrderExtension, type RentalOrderExtensionPreview, type EnterpriseExtensionApprovalView } from "@rental-os/shared";
+import { fetchCatalog } from "../../api/catalog";
+import { PUBLIC_CONFIG } from "../../config/public";
 import { fetchEnterpriseExtensionEligibility } from "../../api/enterprise";
 import { enterpriseExtensionOperation } from "../../core/enterprise-extension-operation";
 import { contextVersion, currentSession, sessionEvents } from "../../core/session";
@@ -12,7 +14,7 @@ import { describeDelta } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { rentalDue } from "../../core/payment";
 import { currentServiceCode, isSignedIn } from "../../core/session";
-import { formatBusinessDateTime, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
+import { formatBusinessDateTime, splitInstant, todayInZone, zoneLabel, zoneSupported, zonedToInstant } from "../../core/time";
 import { ROUTES, buildUrl, navigate, requireSignIn, toast } from "../../core/ui";
 import { zoneOf, ensureCurrentZone } from "../../core/zones";
 
@@ -49,6 +51,10 @@ interface ExtendData {
   enterprisePending: boolean;
   enterpriseCanClose: boolean;
   enterpriseResult: string;
+  serviceChoices: Array<{ id: string; name: string }>;
+  serviceLocations: Array<{ id: string; name: string }>;
+  serviceRows: Array<{ serviceId: string; quantity: number; startDate: string; startTime: string; endDate: string; endTime: string; locationId: string; name: string; locationName: string }>;
+  serviceError: string;
 }
 
 Page({
@@ -75,7 +81,7 @@ Page({
     enterpriseReason: "",
     enterprisePending: false,
     enterpriseCanClose: false,
-    enterpriseResult: ""
+    enterpriseResult: "", serviceChoices: [], serviceLocations: [], serviceRows: [], serviceError: ""
   } as ExtendData,
 
   orderId: "" as string,
@@ -85,14 +91,19 @@ Page({
   visible: false,
   viewIdentity: "",
   unsubscribeSession: undefined as (() => void) | undefined,
+  serviceCatalog: undefined as ClientCatalogResponse | undefined,
+  serviceVersion: 0,
+  previewServiceKey: "",
 
   sessionIdentity() { return JSON.stringify([contextVersion(), currentSession()?.customer.customerId, currentServiceCode()]); },
   viewCurrent(epoch: number, identity: string) { return this.visible && epoch === this.viewEpoch && identity === this.sessionIdentity(); },
   invalidateView() {
+    this.serviceCatalog = undefined; this.serviceVersion++; this.previewServiceKey = "";
     this.viewEpoch++; this.enterpriseOperation = undefined; this.viewIdentity = "";
     this.setData({ view: loadingState(), order: undefined, preview: undefined, pending: undefined, endDate: "", endTime: "10:00",
       currentEndText: "", pendingText: "", previewError: "", previewLoading: false, submitting: false, unknownResult: false,
-      enterpriseRequired: undefined, enterpriseApproval: undefined, enterpriseReason: "", enterprisePending: false, enterpriseCanClose: false, enterpriseResult: "", enterpriseError: "" });
+      enterpriseRequired: undefined, enterpriseApproval: undefined, enterpriseReason: "", enterprisePending: false, enterpriseCanClose: false, enterpriseResult: "", enterpriseError: "",
+      serviceChoices: [], serviceLocations: [], serviceRows: [], serviceError: "" });
   },
   finishEnterprise(operation: ReturnType<typeof enterpriseExtensionOperation>, epoch: number, identity: string) {
     if (!this.viewCurrent(epoch, identity)) return;
@@ -153,6 +164,16 @@ Page({
       const [order, extensions, eligibility] = await Promise.all([fetchOrder(this.orderId), listExtensions(this.orderId),
         fetchEnterpriseExtensionEligibility(this.orderId).catch(error => { if (this.viewCurrent(epoch, identity)) this.setData({ enterpriseError: describeError(error).message }); return undefined; }), ensureCurrentZone()]);
       if (!this.viewCurrent(epoch, identity)) return;
+      if (eligibility?.approvalRequired) {
+        try {
+          const catalog = await fetchCatalog(); if (!this.viewCurrent(epoch, identity)) return;
+          if (catalog.tenantCode !== PUBLIC_CONFIG.tenantCode || catalog.workspace?.workspaceCode !== currentServiceCode()
+            || !Array.isArray(catalog.services) || !Array.isArray(catalog.locations) || typeof catalog.timeZone !== "string" || !catalog.timeZone.trim()
+            || !zoneSupported(catalog.timeZone)) throw new Error("原公开服务候选或时区不可核对");
+          this.serviceCatalog = catalog; this.setData({ serviceChoices: catalog.services.filter(service => service.enabled).map(service => ({ id: service.id, name: service.name })),
+            serviceLocations: [{ id: "", name: "原规则默认地点" }, ...catalog.locations.filter(location => location.status === "enabled").map(location => ({ id: location.id, name: location.name }))], serviceError: "" });
+        } catch (error) { if (!this.viewCurrent(epoch, identity)) return; this.serviceCatalog = undefined; this.setData({ serviceError: describeError(error).message }); }
+      }
       const operation = enterpriseExtensionOperation(this.orderId, () => { if (!this.viewCurrent(epoch, identity)) throw new Error("原续租页面已变化，只能在当前页面核对"); });
       this.enterpriseOperation = operation;
       const originalOperation = operation.pending(), enterprisePending = Boolean(originalOperation);
@@ -162,7 +183,7 @@ Page({
       operation.current();
       const enterpriseApproval = originalOperation?.approvalId ? approvals.find(row => row.id === originalOperation.approvalId) : this.preferredApproval(approvals);
       const knownZone = zoneOf(currentServiceCode());
-      const timeZone = knownZone ?? "Asia/Shanghai";
+      const timeZone = eligibility?.approvalRequired && this.serviceCatalog ? this.serviceCatalog.timeZone : knownZone ?? "Asia/Shanghai";
       const currentEnd = order.effectiveEndAt ?? order.endAt;
       const pending = extensions.find((row) => row.status === "pending_payment");
       const status = String(order.status);
@@ -172,7 +193,7 @@ Page({
         view: readyState(),
         order,
         timeZone,
-        zoneNote: knownZone ? zoneLabel(timeZone) : "营业时区暂未获取，以下时间按 Asia/Shanghai 显示",
+        zoneNote: (eligibility?.approvalRequired && this.serviceCatalog) || knownZone ? zoneLabel(timeZone) : "营业时区暂未获取，以下时间按 Asia/Shanghai 显示",
         currentEndText: formatBusinessDateTime(currentEnd, timeZone),
         minDate: split.date || todayInZone(timeZone),
         endDate: this.data.endDate || split.date,
@@ -199,8 +220,38 @@ Page({
 
   onDateChange(event: WechatMiniprogram.PickerChange) {
     if (this.data.enterprisePending || this.data.submitting) return;
+    this.serviceVersion++; this.previewServiceKey = "";
     const field = String(event.currentTarget.dataset.field) as "endDate" | "endTime";
-    this.setData({ [field]: String(event.detail.value), preview: undefined, deltaText: "", previewError: "" });
+    this.setData({ [field]: String(event.detail.value), preview: undefined, previewLoading: false, deltaText: "", previewError: "" });
+  },
+
+  onAddService() {
+    if (this.data.submitting || this.data.enterprisePending || !this.serviceCatalog || this.data.serviceRows.length >= 100) return;
+    this.serviceVersion++; this.previewServiceKey = "";
+    this.setData({ preview: undefined, previewLoading: false, previewError: "", serviceRows: [...this.data.serviceRows, { serviceId: "", quantity: 1, startDate: "", startTime: "", endDate: "", endTime: "", locationId: "", name: "选择服务", locationName: "原规则默认地点" }] });
+  },
+  onRemoveService(event: WechatMiniprogram.CustomEvent) {
+    if (this.data.submitting || this.data.enterprisePending) return;
+    const index = Number(event.currentTarget.dataset.index); this.serviceVersion++; this.previewServiceKey = "";
+    this.setData({ preview: undefined, previewLoading: false, previewError: "", serviceRows: this.data.serviceRows.filter((_, position) => position !== index) });
+  },
+  onServiceChange(event: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    if (this.data.submitting || this.data.enterprisePending) return;
+    const index = Number(event.currentTarget.dataset.index), field = String(event.currentTarget.dataset.field), rows = this.data.serviceRows.map(row => ({ ...row })), row = rows[index];
+    if (!row) return;
+    if (field === "serviceId") { const selected = this.data.serviceChoices[Number(event.detail.value)]; if (!selected) return; row.serviceId = selected.id; row.name = selected.name; }
+    else if (field === "locationId") { const selected = this.data.serviceLocations[Number(event.detail.value)]; if (!selected) return; row.locationId = selected.id; row.locationName = selected.name; }
+    else if (field === "quantity") row.quantity = Number(event.detail.value);
+    else if (["startDate", "startTime", "endDate", "endTime"].includes(field)) Object.assign(row, { [field]: event.detail.value });
+    else return;
+    this.serviceVersion++; this.previewServiceKey = ""; this.setData({ serviceRows: rows, preview: undefined, previewLoading: false, previewError: "" });
+  },
+  serviceRequest(): ClientQuoteServiceRequest[] {
+    if (!this.data.enterpriseRequired) return [];
+    const catalog = this.serviceCatalog; if (!catalog) throw new Error("原服务候选不可用，请先刷新");
+    return enterpriseExtensionServiceRequests(this.data.serviceRows.map(row => ({ serviceId: row.serviceId, quantity: row.quantity,
+      ...(row.startDate || row.startTime || row.endDate || row.endTime ? { scheduledStartAt: zonedToInstant(row.startDate, row.startTime, catalog.timeZone), scheduledEndAt: zonedToInstant(row.endDate, row.endTime, catalog.timeZone) } : {}),
+      ...(row.locationId ? { serviceLocationId: row.locationId } : {}) })), catalog);
   },
 
   newEndAt(): string | undefined {
@@ -222,10 +273,14 @@ Page({
       this.setData({ previewError: "新的归还时间必须晚于当前归还时间" });
       return;
     }
+    const generation = this.serviceVersion;
     this.setData({ previewLoading: true, previewError: "", preview: undefined });
     try {
-      const preview = await previewExtension(this.orderId, { newEndAt });
-      if (!this.viewCurrent(epoch, identity)) return;
+      const services = this.serviceRequest(), sourceKey = this.data.enterpriseRequired && this.serviceCatalog ? enterpriseExtensionServiceSelectionKey(services, this.serviceCatalog) : "";
+      const preview = await previewExtension(this.orderId, { newEndAt, ...(services.length ? { services } : {}) });
+      if (!this.viewCurrent(epoch, identity) || generation !== this.serviceVersion) return;
+      if (Date.parse(preview.newEndAt) !== Date.parse(newEndAt)) throw new Error("原预览的归还时间与本次选择不一致");
+      this.previewServiceKey = JSON.stringify([Date.parse(newEndAt), sourceKey]);
       this.setData({
         preview,
         deltaText: describeDelta(preview.payableAmount, preview.currency),
@@ -233,9 +288,9 @@ Page({
         preAuthDeltaText: preview.preAuthDelta ? describeDelta(preview.preAuthDelta, preview.currency) : "无变化"
       });
     } catch (error) {
-      if (this.viewCurrent(epoch, identity)) this.setData({ previewError: describeError(error).message });
+      if (this.viewCurrent(epoch, identity) && generation === this.serviceVersion) this.setData({ previewError: describeError(error).message });
     } finally {
-      if (this.viewCurrent(epoch, identity)) this.setData({ previewLoading: false });
+      if (this.viewCurrent(epoch, identity) && generation === this.serviceVersion) this.setData({ previewLoading: false });
     }
   },
 
@@ -298,7 +353,13 @@ Page({
     if (!operation || !order || !preview || !reason || this.data.submitting || this.data.enterprisePending || !this.data.enterpriseRequired || this.data.pending || this.data.blockedReason
       || this.data.enterpriseApproval && ["pending", "approved"].includes(this.data.enterpriseApproval.state)) return;
     this.setData({ submitting: true, enterpriseError: "" });
-    try { const result = await operation.request(order.updatedAt, preview.newEndAt, reason); operation.current(); if (result) {
+    try {
+      const generation = this.serviceVersion, services = this.serviceRequest(), catalog = this.serviceCatalog;
+      if (!catalog || this.previewServiceKey !== JSON.stringify([Date.parse(preview.newEndAt), enterpriseExtensionServiceSelectionKey(services, catalog)])) throw new Error("原服务选择或预览已变化");
+      const currentCatalog = await fetchCatalog(); operation.current();
+      if (generation !== this.serviceVersion || currentCatalog.tenantCode !== PUBLIC_CONFIG.tenantCode || currentCatalog.workspace?.workspaceCode !== currentServiceCode()
+        || enterpriseExtensionServiceSelectionKey(services, currentCatalog) !== enterpriseExtensionServiceSelectionKey(services, catalog)) throw new Error("原服务候选在申请前已变化");
+      const result = await operation.request(order.updatedAt, preview.newEndAt, reason, services.length ? services : undefined); operation.current(); if (result) {
       if ("state" in result) this.setData({ enterpriseApproval: undefined, preview: undefined, enterpriseResult: "原申请键已封闭；新申请须重新试算并明确发起" });
       else this.setData({ enterpriseApproval: result.approval, enterpriseResult: "批准仅为企业费用授权，不代表续租已生效" });
     } }
@@ -338,11 +399,13 @@ Page({
   async onSubmitEnterpriseExtension() {
     const operation = this.enterpriseOperation, approval = this.data.enterpriseApproval, reason = this.data.enterpriseReason.trim(), epoch = this.viewEpoch, identity = this.sessionIdentity();
     if (!operation || approval?.state !== "approved" || !reason || this.data.submitting || this.data.enterprisePending) return;
+    if (approval.preview.services?.state !== "available") { this.setData({ enterpriseError: "原服务明细不可用，请重新核对本条申请" }); return; }
+    const approvalKey = JSON.stringify(approval);
     this.setData({ submitting: true, enterpriseError: "" });
     try {
       operation.current();
       const answer = await wx.showModal({ title: "核对原续租费用", content: `延长至 ${formatBusinessDateTime(approval.preview.newEndAt, this.data.timeZone)}；租赁应付 ${describeDelta(approval.preview.payableAmount, approval.preview.currency)}，押金差额 ${describeDelta(approval.preview.depositDelta, approval.preview.currency)}，预授权差额 ${describeDelta(approval.preview.preAuthDelta, approval.preview.currency)}。明确提交本条批准；待补款不代表已延期。` });
-      operation.current(); if (!answer.confirm || approval !== this.data.enterpriseApproval) return;
+      operation.current(); if (!answer.confirm || approval !== this.data.enterpriseApproval || approvalKey !== JSON.stringify(this.data.enterpriseApproval)) return;
       const result = await operation.submit(approval, reason); operation.current(); if (!result) return;
       if ("state" in result) { this.setData({ enterpriseApproval: undefined, preview: undefined, enterpriseResult: "原申请键已封闭" }); return; }
       this.setData({ enterpriseApproval: result.approval, enterpriseResult: result.original.state === "observed" && result.original.extensionState === "pending_payment" ? "待补款，原租期不变；请按原续租记录完成补款" : "原续租已提交，请读取原订单及续租状态" });

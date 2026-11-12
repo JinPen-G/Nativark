@@ -8,6 +8,11 @@ const object = (properties: Record<string, SchemaObject>, required = Object.keys
 const ref = (name: string): SchemaObject => ({ $ref: `#/components/schemas/${name}` });
 const change = { operationKey: { type: "string", minLength: 1, maxLength: 128 } as SchemaObject, expectedRevision: integer, reason: { type: "string", minLength: 1, maxLength: 500 } as SchemaObject };
 export const ENTERPRISE_EXTENSION_SCHEMAS: Record<string, SchemaObject> = {
+  EnterpriseExtensionService: object({ serviceId: string, serviceName: string, serviceVersion: string, quantity: { type: "integer", minimum: 1 },
+    amount: { type: "number" }, billingUnit: { type: "string", enum: ["per_order", "per_unit", "per_day", "per_night", "per_hour", "per_rental_period"] },
+    scheduledStartAt: date, scheduledEndAt: date, serviceLocationId: string, termsVersion: string, terms: string, requiredByRule: { type: "boolean" } }),
+  EnterpriseExtensionServiceDetails: { oneOf: [object({ state: { type: "string", enum: ["available"] },
+    items: { type: "array", items: ref("EnterpriseExtensionService") } }), object({ state: { type: "string", enum: ["unavailable"] } })] },
   EnterpriseExtensionEligibility: object({ orderId: string, expectedOrderUpdatedAt: date, approvalRequired: { type: "boolean" }, corporateCustomerId: string }, ["orderId", "expectedOrderUpdatedAt", "approvalRequired"]),
   EnterpriseExtensionInput: object({ newEndAt: date, services: { type: "array", maxItems: 100, items: object({ serviceId: string, quantity: { type: "integer", minimum: 1 }, scheduledStartAt: date, scheduledEndAt: date, serviceLocationId: string }, ["serviceId", "quantity"]) }, memo: { type: "string", maxLength: 500 } }, ["newEndAt"]),
   RequestEnterpriseExtensionApproval: object({ ...change, orderId: string, expectedOrderUpdatedAt: date, extension: ref("EnterpriseExtensionInput") }),
@@ -18,7 +23,8 @@ export const ENTERPRISE_EXTENSION_SCHEMAS: Record<string, SchemaObject> = {
   EnterpriseExtensionReview: object({ originalEndAt: date, newEndAt: date,
     rentalAmount: { type: "number" }, serviceAmount: { type: "number" }, depositDelta: { type: "number" }, preAuthDelta: { type: "number" }, payableAmount: { type: "number" }, currency: string,
     settlementMode: { type: "string", enum: ["immediate", "monthly"] }, paymentRequired: { type: "boolean" },
-    chargeLines: { type: "array", items: object({ code: string, name: string, type: string, amount: { type: "number" } }) } }),
+    chargeLines: { type: "array", items: object({ code: string, name: string, type: string, amount: { type: "number" } }) },
+    services: ref("EnterpriseExtensionServiceDetails") }, ["originalEndAt", "newEndAt", "rentalAmount", "serviceAmount", "depositDelta", "preAuthDelta", "payableAmount", "currency", "settlementMode", "paymentRequired", "chargeLines"]),
   EnterpriseExtensionApprovalView: object({ id: string, corporateCustomerId: string, applicantCustomerId: string, workspaceId: string, orderId: string, expectedOrderUpdatedAt: date,
     state: { type: "string", enum: ["pending", "approved", "rejected", "withdrawn", "expired", "consumed", "closed"] }, revision: integer, expiresAt: date, reason: string,
     preview: ref("EnterpriseExtensionReview"), extensionId: string, closedOperationKey: string }, ["id", "corporateCustomerId", "applicantCustomerId", "workspaceId", "orderId", "expectedOrderUpdatedAt", "state", "revision", "expiresAt", "reason", "preview"]),

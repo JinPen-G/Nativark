@@ -1,6 +1,6 @@
 /** Original extension-command references only: no request body or credentials.
  * Unknown requests never dispatch again; session generations isolate late replies. */
-import { enterpriseExtensionRequestMatches, enterpriseExtensionRequestClosureMatches, type EnterpriseExtensionRecoveryResult, type EnterpriseExtensionApprovalView, type RequestEnterpriseExtensionApproval, type SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
+import { enterpriseExtensionRequestMatches, enterpriseExtensionRequestClosureMatches, type ClientQuoteServiceRequest, type EnterpriseExtensionRecoveryResult, type EnterpriseExtensionApprovalView, type RequestEnterpriseExtensionApproval, type SubmitEnterpriseExtensionApproval } from "@rental-os/shared";
 import { fetchEnterpriseExtensionApprovals, readEnterpriseExtensionRequestOriginal, readEnterpriseExtensionResult, readEnterpriseOperation, requestEnterpriseExtensionApproval, submitEnterpriseExtensionApproval, closeEnterpriseExtensionExecution, closeEnterpriseExtensionRequest } from "../api/enterprise";
 import { PUBLIC_CONFIG } from "../config/public";
 import { newKey } from "./keys";
@@ -107,7 +107,11 @@ export function enterpriseExtensionOperation(orderId: string, assertView: () => 
       current(); return recover();
     },
     async list() { current(); const rows = await fetchEnterpriseExtensionApprovals(); current(); return rows.filter(row => row.orderId === orderId); },
-    request: (expectedOrderUpdatedAt: string, newEndAt: string, reason: string) => execute("request", { operationKey: newKey("enterprise-extension"), orderId, expectedOrderUpdatedAt, extension: { newEndAt }, expectedRevision: 0, reason }),
+    request: (expectedOrderUpdatedAt: string, newEndAt: string, reason: string, services?: ClientQuoteServiceRequest[]) => execute("request", {
+      operationKey: newKey("enterprise-extension"), orderId, expectedOrderUpdatedAt, extension: { newEndAt, ...(services ? { services: services.map(service => ({
+        serviceId: service.serviceId, quantity: service.quantity, scheduledStartAt: service.scheduledStartAt,
+        scheduledEndAt: service.scheduledEndAt, serviceLocationId: service.serviceLocationId
+      })) } : {}) }, expectedRevision: 0, reason }),
     submit: (approval: EnterpriseExtensionApprovalView, reason: string) => execute("submit", { operationKey: newKey("enterprise-extension-submit"), approvalId: approval.id, expectedRevision: approval.revision, confirm: true, reason }),
   };
 }

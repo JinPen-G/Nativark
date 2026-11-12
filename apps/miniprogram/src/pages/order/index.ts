@@ -402,7 +402,7 @@ Page({
       const rows = await fetchEnterpriseOrderExchangeApprovals(orderId);
       if (!current()) return;
       if (!Array.isArray(rows) || rows.length > 200 || rows.some(row => row.orderId !== orderId || row.applicantCustomerId !== customerId || !row.workspaceId)) throw new Error("原换货申请与本人订单不匹配");
-      const labels: Record<EnterpriseExchangeApprovalView["state"], string> = { pending: "待企业批准", approved: "已批准，待本人确认费用", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效，不能用原批准执行" };
+      const labels: Record<EnterpriseExchangeApprovalView["state"], string> = { pending: "待企业批准", approved: "已批准，待本人确认费用", rejected: "已拒绝", withdrawn: "已撤回", expired: "已失效，不能用原批准执行", consumed: "原批准已消费" };
       const time = (value: string) => Number.isFinite(Date.parse(value)) ? formatBusinessDateTime(value, this.data.timeZone) : "原时间缺失";
       const money = (value: number, currency: string) => Number.isFinite(value) && currency ? formatMoney(value, currency) : "原金额缺失";
       this.exchangeApprovalRows = rows;
