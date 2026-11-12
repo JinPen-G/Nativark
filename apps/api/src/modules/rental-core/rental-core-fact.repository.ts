@@ -3016,7 +3016,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         rateSnapshot: extension.rateSnapshot as unknown as Prisma.InputJsonValue,
         ruleSnapshot: extension.ruleSnapshot as unknown as Prisma.InputJsonValue,
         calendarSnapshot: extension.calendarSnapshot as unknown as Prisma.InputJsonValue,
-        serviceSnapshots: extension.serviceSnapshots?.length ? extension.serviceSnapshots as unknown as Prisma.InputJsonValue : Prisma.DbNull,
+        // A newly resolved empty array is complete evidence of no additions.
+        // Legacy absence remains missing; it is never backfilled from amount.
+        serviceSnapshots: extension.serviceSnapshots == null ? Prisma.DbNull : extension.serviceSnapshots as unknown as Prisma.InputJsonValue,
         pricingSnapshot: extension.pricingSnapshot ? extension.pricingSnapshot as unknown as Prisma.InputJsonValue : Prisma.DbNull,
         settlementMode: extension.settlementMode,
         idempotencyKey: extension.idempotencyKey,

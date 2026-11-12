@@ -4,6 +4,27 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-extension-empty-snapshot-integration-20261112"></a>
+## PM新续租服务空快照固定整合（2026-11-12）
+
+来源为实际GitHub任务分支已包含的`3ed71c1ade0fc3447d26608ea3b108dcc024e863`，main起点`b527ef20a0b5c0669f6a022a336b7e66ee0b4d2a`。只按来源两源码增量整合，保留main已核的经营/币种/资格修复和六项他人WIP，不取Core活动配置事务、编码、counter或完整来源父文件。直接消费者仍沿原Core续租报价/持久化及企业批准。两种普通新续租解析原服务目录，只有解析器确认无新增才保存`[]`；旧缺失/核减模式继续缺失，不以0金额补历史。
+
+PM复用来源唯一JSON的fixtureMatrix原命令，以固定main内存装载复验两种模式的空明细与持久化、必选遗漏拒绝、已选零价服务保留、原报价不变及旧单缺明细，通过、退出0。批准保存原命令首次遇到main已核的原币种门闸（来源fixture订单缺currency），保留该拒绝；仅在原正常订单fixture加入与priced一致的真实币种后，实际批准保存空明细/原预览指纹通过，退出0，不改产品门闸或原用例。最初装载被用例内部ts-node注册替换而产生诊断，复验只保留既有固定snapshot装载，不改原测试/runner/断言。最终脚本SHA-256为`bb337b792d5478ccd93a2cf6f902cd5c5653ca8de73e5dc5248174e45d2e0a43`及`f48f71d03689de28a17a9aa12b7486f59d881db4ab656bfc06d0e6436f27c097`。
+
+TypeScript5.9.3原shared108根完整内存检查/emit216产物和API900根noEmit诊断0，退出0；未改物理dist/Client或访问真实HTTP/DB。SQL/授权/事务/批准仍为fixture，不证明真实锁/并发、库存/资金或完整ECP；来源原续租脚本同步getter及期待undefined的已知失败仍保留。源码候选blob为business `5cd2ed9f05986fbb1221656ed2618e55d5b15879`、facts `311214f417ae35d8b382b1d7618ae64bdcda6402`。唯一原JSON沿下方来源链接保留，不复制output；本轮未创建任务临时目录，验证进程已退出。原CLOSE/CAT-GOV/ECP完整门槛不变，下一片核保证金门闸及企业服务/点击消费者。
+
+<a id="extension-service-empty-snapshots-20261112"></a>
+
+## 新续租的服务解析与明确空快照（2026-11-12）
+
+按PM明确窗口，从已核GitHub的`b659aa857088e01cab277d4270390e9845eeaead`接续，只改[报价服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)与[事实仓储](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts)。新增时段独立续租及普通原价全租期补差均解析本空间服务目录，即使请求未选服务也检查必选规则；明确无新增服务返回`[]`，不调用空服务容量检查。已有核减/重价模式保持原语义，不隐式追加服务。
+
+新续租持久化保留解析所得的空数组；旧`undefined/null`仍写`Prisma.DbNull`，不由金额补快照，不改原订单服务发生项。直接消费者为CoreController续租预览/申请、ClientApiService本人及企业续租报价/核对和Core批准生效；沿原报价、服务容量及幂等链，未扩Shared、DTO、OpenAPI或企业政策签名。
+
+原续租服务fixture的限定装配覆盖两种模式：无新增服务的报价及持久化、遗漏必选拒绝、已选择零价必选服务保留、已有核减模式和旧缺失保留、原报价不变，退出0；实际批准申请保存空快照和原预览指纹的限定调用退出0。仅补原异步getter与同空间库存读取夹具，SQL/授权/事务/批准仍为替身。API原tsconfig完整emit退出0，864份自持JS逐文件核对，更新本片2份，四项Shared/Client保护未变；当前源码hash与构建清单一致。命令、首次失败、源码及产物hash唯一见[阶段证据](../../worktree/rental-core/output/category-governance/extension-service-snapshots-20261112.json)。
+
+原`tests/rental-extension-services.test.cjs`直接运行仍在旧同步getter导致的`defaultUnit`处退出1；限定调用保留`:160`期待`undefined`、实际`[]`的原断言失败，不修改测试或回退已批准的空快照语义。固化证据后867份退出文件/缓存及42个暂存目录已删除。原CAT-GOV-04/13动作矩阵和CLOSE/企业完整验收仍需真实事务、权限及消费者证据；本片不抬完整结项比例，R08后续Core源码尚未纳入本次包验证。
+
 <a id="pm-preparation-receipt-integration-20261112"></a>
 ## PM固定原准备批次收据整合（2026-11-12）
 
