@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-client-mini-type-evidence-20261112"></a>
+## 客户小程序完整类型告警的固定源码复核（2026-11-12）
+
+PM 报告 main `179fb4941` 原配置类型检查出现 78 诊断，企业后继消去 2 个 consumed 标签后仍有 76 个 AI 响应 unknown/null 告警。Root 先安排 dev2 核查，再独立验证声明解析，未直接修改业务源码或放宽配置。
+
+固定 AI `ea9a3ec2bbe2d82ea9cbafd48f76c153f8dcd39b` 和 main `179fb4941` 的客户报价/Task/取消/page 源码及原小程序配置一致，client-entry schemas、quote schemas、miniprogram-client 出口及 native vendor 声明分别同 blob。使用 TypeScript 5.9.3、原 ES2019/ES2020/strict 及所有原检查选项，从固定 Git 对象完整生成 shared 声明到内存，编译原小程序全部 107 个入口；虚拟宿主同时实现 fileExists/readFile/directoryExists/getDirectories，正确解析声明的传递依赖。未用 any、声明替身、忽略诊断或修改 tsconfig。
+
+- AI 固定源码：110 份 shared 声明、295 个传递源，0 诊断、退出 0；`node --no-compilation-cache -` 的 SHA-256 为 `93c459938015a6d2b447aff4726e8cb4e8c37b6bc2fd7ffcc15041803a8e8cc2`。
+- main 固定源码：108 份 shared 声明、293 个传递源，2 诊断、退出 1；SHA-256 为 `d6d21b1837a81aef756c038c04baca4a3cc71329e3a946d68d08b7c3d90bbf65`。仅为 exchange/index.ts:142 与 order/index.ts:405 缺 consumed 状态标签，对应企业审批状态扩展，不是 76 个 AI 会话错误。
+- 进一步核实际编译选项和源码包含性，并用 TypeChecker 读取 `clientTaskApi.readCreation/readModelResult/readInput`，均推断为完整对象 Promise，既非 any 也非 unknown。报价/session 实际正文均进入编译；Zod 3.25.76 的正式 `.d.cts` 依赖已解析。该检查命令 SHA-256 为 `939ab23ce1918cbcf1793b283ee2a295a48e4290bcd1064f73bf11ace09096f2`。dev2 的原失败结果只有 291 个源，差异先按验证器/声明加载排查，不能据该失败批量修改正确业务类型。
+
+两个 main 标签已由 PM 的企业后继负责；未在 AI 树尚无 consumed 的旧合同上造额外状态或越权修改企业文件。dev2 暂停这批源码补丁并核查其虚拟声明加载，已有差异保留待判；其余核心研发继续。该阶段只有类型证据，未重复运行无源码变化的业务冒烟，不声称微信、真实接口或生产验收通过。审计为空、任务临时目录未创建，无脚本、声明目录或 Client/dist 遗留。
+
 <a id="ain14-integration-navigation-20261112"></a>
 ## 开业第三方配置人工入口与重复读取收口（2026-11-12）
 

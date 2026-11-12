@@ -18,7 +18,7 @@
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 收口 AIN-14/18 已有生产装配及固定提交；纠正 AIN-13 前置记录并优先补 AIN-12 实际字段/控制链；接 AIN-15 的原请求、模型、Reader 与公共出口；AIN-17 等 Core 固定权威来源后组合。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 开业提案/第三方桥及两导航源均已交回。当前独占 workbench-field-material.service.ts、workbench-input-review-session.ts 和 TaskClarification.tsx，接有限原字段、候选核对和合法草稿保留；Root 接公共发布与宿主，不等待阶段集成。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 三份 quote-goal leaf 已固定交 Root，企业入口只读定位暂后移。现优先修 PM 报告的客户小程序 client-quote-session、client-task-cancellation-session、client-task-session、pages/order 及必要直接 API 的类型/模拟缺口；不得用 any、忽略或放宽配置补绿。员工冻结成果仍待核接。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 三份 quote-goal leaf 已固定交 Root。客户小程序告警经 Root 完整声明对照，AI 固定源 0 诊断、main 基线仅 2 处企业 consumed 标签；先核自身 291 源验证器与完整声明加载差异，暂不据假 unknown 修改业务源码，收束后继续企业本人报价宿主只读定位。员工冻结成果仍待核接。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
 
 公共窗口不得夹带企业端的 ClientApiService.readOrderSubmission、企业 reader/controller/GET 和后台企业材料。Core 订单、资金、品类与配置权威仍由原专项负责，AI 不重建这些规则。
@@ -45,6 +45,7 @@ Core 只读合同固定源码 `fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 
 - 原 05/06/07/10/11 已按模拟研发口径核闭。13 已交自身功能证据，当前等待 12 全文前置。19～28 的识别、员工/客户/平台、安全、SLO、组合验收和交付范围仍按[原任务](<AI Native-开发任务.md>)及[实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)逐项核定；不能把旧真实测试要求当研发阻塞，也不取消功能或部署/回退准备。
 - AIN-25 首字/首卡已有原宿主片，完整容量/背压/公平性/告警等继续按原门槛；客户端观察不成为业务或财务事实。QA P1/P3 当前权限和 P2 原澄清同键读取已收口，证据见原记录，不重开已解决问题。
+- [客户小程序类型告警对照](<AI Native-开发记录.md#ain-client-mini-type-evidence-20261112>)已从固定 AI/main 源完成原 107 入口检查：完整共享声明解析后，AI 0 诊断，main 基线仅两处 consumed 标签；不得凭不完整虚拟依赖的 unknown 告警批量改会话或强断言。两标签由 PM 企业后继处理，dev2 核其验证器差异。
 - 新树稀疏检出，不复制依赖、output 或环境。验证只读使用主仓库受管依赖；TypeScript 5.9.3 从 ts-node 解析，Prisma 只读 `apps/api/node_modules/@prisma/client` 的已生成入口，不能误用根未生成壳或旧临时树路径。源码与生成 schema 须按当前检查内容核对，不覆盖共享产物。
 - 离线使用本树原 prisma-offline-preload、固定不可达 DATABASE_URL；审计/写根/TEMP/TMP 指向本树单一任务目录，能纯内存就不创建目录。创建者负责 finally 清理，不遗留脚本、生成 client/dist 或后台资源。
 - 禁止读 .env、安装、启停服务、真实业务 HTTP/DB/DNS/模型/资金/存储、迁移和部署。模型、DB、React 或 HTTP 替身必须明确标模拟。每片只做必要冒烟/类型，不新增或扩写测试脚本、不删断言、不 skip/todo 补绿。
