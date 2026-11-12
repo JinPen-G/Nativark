@@ -4,6 +4,26 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pricing-main-minimal-closure-20261113"></a>
+
+## 定价事务的固定main最小补片（2026-11-13）
+
+按PM指定的主版本闭包要求，基于固定main `2a5c56471abb5714f80715e2cfa0aa236f003f51`交付原定价功能`f4d7fa84eb9045c6c1a31e8c28fa4c84920ac716`的三源必要增量。[准确补片](../../output/category-governance/pricing-main-minimal-20261113.patch)为10837字节，SHA-256 `0faa1642efc0cc354a6d05cba86cffbf60db5376f4f30a9cba0a73f98ec0e0a4`；来源、结果blob和核验见[闭包证据](../../output/category-governance/pricing-main-minimal-closure-20261113.json)。本树不回main施工，地点/主体两源WIP保留。
+
+| 必要源码 | 固定main应用后的blob |
+| --- | --- |
+| `rental-core.service.ts` | `5b6bb505e32b00b2cad581ea524c0f271f6740be` |
+| `rental-core-config.repository.ts` | `b45cf170692252b3ecadc4aff395fb978826d187` |
+| `rental-core.controller.ts` | `75527f286ed28b4fc189b94a4771e00f3d551fb1` |
+
+仓储与Core只读口透传原client，事务视图在缓存发布前返回；分组在该视图核对成员/单位，Controller先完成独立价格上下文，再在原分组/价格事务复验绑定，提交后发布缓存。首个等待前复制请求。固定main原无tx读取、AI/企业接点和价格算法保留，无需整取本树`configurationReadsByWorkspace`或`missingCommittedProfiles`父字段。三个候选只在上述方法及仓储接口改动；未改区域保留原行尾，规范换行后与已验证候选逐字节一致。
+
+TypeScript5.9.3在固定main的1019份源码输入和正式Shared下检查三根/1224源，零诊断，见[类型与必要emit](../../output/category-governance/pricing-main-minimal-compile-20261113.json)。对应编译候选及固定main原调用依赖的七组入口模拟退出0、audit0，覆盖正常同tx、价格失败回滚、后继采用拒绝、事务读不发布缓存、缺实际设置拒绝、实际仓储复用client和等待时修改原输入，见[原入口行为](../../output/category-governance/pricing-main-minimal-runtime-20261113.json)。保留原行尾后的补片在独占临时index准确应用，三个结果blob一致、格式退出0，真实工作区/暂存区和两源WIP未受影响。SQL、价格写入、身份和事务仍为明确替身；不证明真实MySQL锁、完整定价算法、HTTP/DI或宿主。
+
+原七项配置读取夹具已单独固定并普通推送`3037d919d146bfd6981762eb7ed25eefb01e3922`，GitHub回读一致，证据沿[独立测试阶段](#context-refresh-fixture-contract-20261113)。该单测试与本生产补片分别交PM/QA复验，未降低CAT-GOV/CLOSE原完整门槛。
+
+补片及最小证据已固化，三份候选/三份emit、临时index和空audit共8文件/1459496字节均已退出。原生PowerShell删除再次被CreateProcess自动审批以`blocked by policy`拒绝，整条命令未执行、无详细理由；这8文件已安全同卷移入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/pricing-main-minimal-validation/manifest.json)，原任务暂存不存在、逐文件哈希一致，见[退出结果](../../output/category-governance/pricing-main-minimal-cleanup-20261113.json)。旧七批残留也未删除，继续原清单；没有换壳/工具绕过拒绝。完整结项仍0/14，实现百分比待核实，真实环境与独立Review尚缺。
+
 <a id="context-refresh-fixture-contract-20261113"></a>
 
 ## 原配置读取七项的本地夹具合同（2026-11-13）
