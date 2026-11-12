@@ -38,7 +38,18 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
         return context;
       });
     }
-    return routes.withRead(body.sceneCode === 'opening_diagnosis' ? 'opening' : 'quote_context', {}, async context => {
+    if (body.sceneCode === 'opening_diagnosis') {
+      return routes.withRead('opening', {}, async context => {
+        // Original-request reads need current access to these Core sections.
+        // Rebuilding the full diagnosis here recursively reloads unrelated
+        // integration/configuration material during every receipt check.
+        // The explicit material reader retains those independent authorities
+        // and its before/after source checks at the point of consumption.
+        await tools.opening.read({ limit: 50, sections: [...body.input.sections] }, context);
+        return context;
+      });
+    }
+    return routes.withRead('quote_context', {}, async context => {
       await prepare(body, 'resource-check', context);
       return context;
     });

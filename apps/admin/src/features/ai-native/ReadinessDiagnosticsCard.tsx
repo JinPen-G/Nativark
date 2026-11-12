@@ -18,13 +18,14 @@ import { useAiManagementLocale } from './management-locale';
 import { formatTimestamp } from './formatters';
 import { safeDisplayText } from './safe-display';
 import { validateTaskCenterSnapshot } from './task-center-reader';
+import { OpeningIntegrationStatus } from './OpeningIntegrationStatus';
 import styles from './AiManagement.module.css';
 
 export type ReadinessDiagnosticsOriginalProps = { conversationId: string; turn: AiConversationTurnObservationDraft; current(): boolean; onUnavailable?(): void };
 export type ReadinessDiagnosticsCardProps = { data?: unknown } | ReadinessDiagnosticsOriginalProps;
 const labels = { required: '必需', optional: '可选', unavailable: '事实源不可用', completed: '检查已通过', unclassified: '尚无法分类' } as const;
 const sectionRoutes: Readonly<Record<string, AppRouteDefinition>> = {
-  workspace_profile: APP_ROUTES.workbench, accounts_roles: APP_ROUTES.tenantAccounts,
+  workspace_profile: APP_ROUTES.tenantReadiness, accounts_roles: APP_ROUTES.tenantAccounts,
   fulfillment_network: APP_ROUTES.locations, business_rule: APP_ROUTES.rentalSettings,
   business_calendar: APP_ROUTES.rentalSettings, item_groups: APP_ROUTES.itemGroups,
   pricing_groups_rates: APP_ROUTES.pricingGroups, price_version: APP_ROUTES.pricing, membership_base: APP_ROUTES.membershipPlans
@@ -39,9 +40,15 @@ const routeFor = (key: string) => {
   if (key === 'accounts_roles' && route && !permitted(route) && permitted(APP_ROUTES.tenantRoles)) return APP_ROUTES.tenantRoles;
   return route;
 };
+const integrationBasis = (value: OpeningTaskMaterial) => {
+  const facts = value.material.integrationObservation && structuredClone(value.material.integrationObservation);
+  if (facts?.state === 'observed') delete (facts.observation as Partial<typeof facts.observation>).observedAt;
+  return facts;
+};
 const basis = (value: OpeningTaskMaterial) => JSON.stringify({
   taskId: value.task.state === 'observed' ? value.task.taskId : null, scope: value.material.scope,
   origin: [value.original.inputRef, value.original.contentHash, value.original.sceneVersion], version: value.material.configVersion,
+  integrations: integrationBasis(value),
   sections: value.material.sections.map(row => ({ key: row.key, title: row.title, status: row.status, issue: row.issue,
     required: row.required, impact: row.impact, version: row.evidence.version, manual: row.manual,
     candidateVersion: row.candidate.currentVersion, fields: row.candidate.fieldsToReview })).sort((a, b) => a.key.localeCompare(b.key))
@@ -145,9 +152,20 @@ function OriginalOpeningDiagnostics({ conversationId, turn, current, onUnavailab
         setFrame(null); setChanged(false); const value = await read(signal, check); check(); setFrame(value);
       })} />
       {permitted(APP_ROUTES.tenantReadiness) && <Button onClick={() => { if (valid() && permitted(APP_ROUTES.tenantReadiness)) navigate(APP_ROUTES.tenantReadiness.path); }}>{t('开业配置')}</Button>}
+      {frame?.material.integrationObservation?.state === 'observed' && valid() && permitted(APP_ROUTES.tenantIntegrations) && <ActionButton
+        label={t('第三方服务')} disabled={busy} onAction={() => run(async (signal, check) => {
+          if (!permitted(APP_ROUTES.tenantIntegrations)) throw Error('AI_ACCESS_DENIED');
+          const latest = await read(signal, check); check();
+          if (basis(latest) !== basis(frame)) { setFrame(latest); setChanged(true); onUnavailable?.(); throw Error('AI_RECONFIRM_OPENING'); }
+          // The independent server observation proves current integration read
+          // access; a cached frontend permission or opening read cannot do so.
+          if (latest.material.integrationObservation?.state !== 'observed' || !permitted(APP_ROUTES.tenantIntegrations)) throw Error('AI_ACCESS_DENIED');
+          check(); navigate(APP_ROUTES.tenantIntegrations.path);
+        })} />}
     </div>
     {error && <Alert type="warning" title={t('开业事实不可读取，旧事实已撤回；请进入原开业配置页。')} />}
     {changed && <Alert type="warning" title={t('分区配置或检查已变化，请核对新事实后再次选择。')} />}
+    {frame && valid() && <OpeningIntegrationStatus facts={frame.material.integrationObservation} />}
     {display && frame && <ReadinessDisplay display={display} action={row => manualRoute(row, frame) && <ActionButton
       label={t(row.state === 'completed' ? '查看' : '去配置')} disabled={busy} onAction={() => run(async (signal, check) => {
         const latest = await read(signal, check); check();
