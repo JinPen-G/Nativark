@@ -4,6 +4,20 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="context-refresh-fixture-contract-20261113"></a>
+
+## 原配置读取七项的本地夹具合同（2026-11-13）
+
+按PM指定的原测试维护范围，仅修改[原context-refresh测试](../../tests/category-adoption-context-refresh.test.cjs)的本地`fixture`，保留七项用例正文及全部原断言。原`category-workspace-auth`共用夹具继续核验其Auth独占锁，本地fixture单独登记`SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE`并核对原tenant参数。原生产锁、Auth、Guard及采用实现仍按固定源码执行。
+
+补齐共享父锁后六项通过，最后AI消费项进入Core原R0读口，暴露本地数据库替身缺少有界档案/设置、地点/券和型号属性查询。该fixture仅从原`f.state`的同空间配置与型号行提供这些投影，分别核对tenant/workspace、请求型号和32768/101两个原读取界限；提供本fixture明确的配置时点/编辑人。其Core实例注入原`RentalCategoryResolver`以提供真实版本行的ID/采用修订，未注入时R0只读返回无绑定标记，不能据此要求`v1/v2`事实成立。
+
+最终原七项全部通过、退出0、audit0，blob为`f8430a52167aa7b95a9187b12b1a2c60b932554d`，见[最终原用例](../../output/category-governance/context-refresh-fixture-resolver-20261113.json)。实际命令为`node --no-compilation-cache --require D:/工作文件/rental-OS/worktree/rental-core/tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/category-adoption-context-refresh.test.cjs`。原7项全失败的[前片结果](../../output/category-governance/pricing-group-transaction-original-tests-20261113.json)、补父锁后6/7的[阶段](../../output/category-governance/context-refresh-tenant-fixture-20261113.json)、R0额外参数/投影缺口与缺解析器标记的[后续失败](../../output/category-governance/context-refresh-fixture-verified-20261113.json)均保留。
+
+七项原用例正文经AST提取并按规范换行逐字节核对一致，新增9处链接、4处片段及该单测试/现行文档格式检查退出0。验证使用当前本树固定f4d编译产物，数据库、范围和路由为原明确替身。该结果证明原场景在完整夹具合同下执行，不证明真实MySQL锁/多实例或Guard接受。没有改生产源码迁就用例、删除断言或新建测试文件。当前原单一任务目录同时承载仍用于定价main补片的六份候选/emit和空audit，原环境/缓存与退出清理约束继续执行。
+
+本树另两份地点/主体原子保存源码为独立WIP，已确认旧路径在地点拒绝后仍写主体及缓存，尚未完成其类型/行为收口。本阶段仅固定本测试与记录/接续，定价生产补片继续独立；其固定main三源类型3根/1224源零诊断、原入口七组模拟已有结果。原CAT-GOV-01～14、两个动态编码不同组合的冻结经营及真实数据库/宿主/独立Review仍未结项，0/14和实现百分比待核实。
+
 <a id="pricing-group-original-transaction-20261113"></a>
 
 ## 定价分组与基本价的原事务读取（2026-11-13）

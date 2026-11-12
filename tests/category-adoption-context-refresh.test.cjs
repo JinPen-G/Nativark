@@ -4,6 +4,7 @@ const { test, before, after } = require("node:test");
 const { adoptionFixture } = require("./fixtures/category-adoption-fixture.cjs");
 const { RentalCoreService } = require("../apps/api/dist/modules/rental-core/rental-core.service.js");
 const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-core-config.repository.js");
+const { RentalCategoryResolver } = require("../apps/api/dist/modules/rental-core/rental-category-resolver.service.js");
 const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-business-config.repository.js");
 const { RentalBusinessService } = require("../apps/api/dist/modules/rental-core/rental-business.service.js");
 const flags = ["NODE_ENV", "RENTAL_CATEGORY_GOVERNANCE_PREVIEW", "RENTAL_CATEGORY_ADOPTION"];
@@ -12,6 +13,44 @@ before(() => { process.env.NODE_ENV = "test"; process.env.RENTAL_CATEGORY_GOVERN
 after(() => { for (const key of flags) if (original[key] === undefined) delete process.env[key]; else process.env[key] = original[key]; });
 function fixture() {
   const f = adoptionFixture(), at = new Date("2026-11-09T00:00:00Z");
+  Object.assign(f.state.configurations.rentalTenantBusinessSettings[0].settings,
+    { updatedAt: at.toISOString(), updatedBy: "fixture" });
+  const originalQuery = f.db.$queryRaw.bind(f.db);
+  // Business reads also take the original shared Tenant parent fence. Keep the
+  // existing Auth fixture's exclusive principal-lock assertions for its queries.
+  f.db.$queryRaw = async query => {
+    if (query.sql === "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE") {
+      assert.deepEqual(query.values, ["tenant"]);
+      return [{ id: "tenant" }];
+    }
+    // R0 quote preparation reads the same fixture's persisted profile/settings
+    // and scoped collections. It does not reconstruct them from the Core cache.
+    if (query.sql.includes("AS profileVersion") && query.sql.includes("FROM business_workspaces AS w")) {
+      assert.deepEqual(query.values.slice(-2), ["tenant", "space"]);
+      const settings = f.state.configurations.rentalTenantBusinessSettings[0]?.settings;
+      assert.ok(settings);
+      return [{ tenantId: "tenant", workspaceId: "space", categoryCode: f.state.workspace.categoryCode,
+        settingsCategoryCode: settings.categoryCode, configVersion: settings.configVersion, settings: structuredClone(settings),
+        profileVersion: profile.configVersion, profileCategoryCode: profile.categoryCode, capabilities: structuredClone(profile.capabilities),
+        terminology: structuredClone(profile.terminology), initializedAt: at, profileUpdatedAt: at }];
+    }
+    if (query.sql.includes("FROM rental_fulfillment_locations AS l")) {
+      assert.deepEqual(query.values.filter(value => typeof value === "string"), ["tenant", "space"]);
+      return structuredClone(f.state.configurations.rentalFulfillmentLocation);
+    }
+    if (query.sql.includes("FROM rental_coupon_templates AS c")) {
+      assert.deepEqual(query.values.filter(value => typeof value === "string"), ["tenant", "space"]);
+      return structuredClone(f.state.configurations.rentalCouponTemplate);
+    }
+    if (query.sql.includes("FROM rental_item_groups AS g") && query.sql.includes("AS attributes")) {
+      assert.deepEqual(query.values.slice(0, 3), [32768, "tenant", "space"]);
+      assert.equal(query.values.at(-1), 101);
+      const ids = query.values.slice(3, -1);
+      assert.ok(ids.every(id => f.state.groups.some(row => row.id === id)));
+      return structuredClone(f.state.groups.filter(row => ids.includes(row.id)));
+    }
+    return originalQuery(query);
+  };
   f.state.workspace.defaultMarker = "default";
   for (const group of f.state.groups) Object.assign(group, { unit: "件", description: null, createdAt: at });
   const profile = Object.create(RentalCoreService.prototype).seedState("tenant", "camera", "space", "CNY", f.source).profile;
@@ -21,7 +60,8 @@ function fixture() {
   } };
   const repository = new RentalCoreConfigRepository(f.db);
   const facts = new Proxy({}, { get: (_, method) => async () => assert.fail("context reads must not write or seed facts: " + String(method)) });
-  const createCore = () => new RentalCoreService(repository, facts);
+  const createCore = () => new RentalCoreService(repository, facts, undefined, undefined, undefined,
+    undefined, undefined, undefined, new RentalCategoryResolver(f.db));
   return { f, repository, first: createCore(), second: createCore(), createCore };
 }
 test("two independent Core instances read the newly adopted committed definition and attributes while old contexts stay frozen", async () => {
