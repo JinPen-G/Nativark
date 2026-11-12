@@ -594,10 +594,15 @@ export class RentalCoreController {
   @Get("pricing-groups") async pricingGroups(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listPricingGroups(req.user.tenantId); }
   @Post("pricing-groups") async savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) {
     const tenantId = req.user.tenantId;
+    // The group and its initial rates must share one intent across every wait.
+    body = structuredClone(body);
     if (!body.initialRates?.length) throw new BadRequestException("新建定价分组时至少填写一条基本价");
     const uniqueUnits = new Set(body.initialRates.map((row) => row.unit));
     if (uniqueUnits.size !== body.initialRates.length) throw new BadRequestException("同一个计价单位只能填写一条基本价");
 
+    // Finish independent reads before the write owns the workspace lock. Core
+    // and pricing writes recheck this binding through the same original client.
+    const context = await this.context(tenantId);
     let group!: Awaited<ReturnType<RentalCoreService["savePricingGroup"]>>;
     let plan!: Awaited<ReturnType<RentalBusinessService["savePricingPlan"]>>;
     await this.prisma.$transaction(async (tx) => {
@@ -607,7 +612,6 @@ export class RentalCoreController {
         tx,
         true
       );
-      const context = (await this.context(tenantId));
       const pricingGroups = [group, ...(context.pricingGroups ?? []).filter((row) => row.id !== group.id)];
       plan = await this.business.savePricingPlan(tenantId, { ...context, pricingGroups }, {
         code: `BASE-${group.code}-${group.id.slice(-8)}`,
@@ -637,7 +641,7 @@ export class RentalCoreController {
           preAuthMultiple: row.preAuthMultiple
         }))
       }, req.user.displayName, tx, true);
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     this.service.commitPricingGroup(group);
     this.business.commitPricingPlan(tenantId, { ...(await this.context(tenantId)), pricingGroups: [group, ...this.service.listPricingGroups(tenantId).filter((row) => row.id !== group.id)] }, plan);
     return this.committed(tenantId, group);

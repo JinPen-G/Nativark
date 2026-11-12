@@ -712,27 +712,29 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.loadCommittedWorkspace(tenantId, this.workspaceOf(tenantId));
   }
 
-  private async loadCommittedWorkspace(tenantId: string, workspaceId: string) {
+  private async loadCommittedWorkspace(tenantId: string, workspaceId: string, tx?: RentalConfigTx) {
     if (!this.configStore?.loadWorkspaceSnapshot) {
       if (this.categoryResolver) throw new ServiceUnavailableException("品类已版本化但缺少空间配置权威读取器");
       return undefined; // Explicit absorbing/memory stores have no DB authority.
     }
-    const previous = this.configurationReadsByWorkspace.get(workspaceId) ?? Promise.resolve();
-    const reading = previous.catch(() => undefined).then(async () => {
-      const snapshot = await this.configStore.loadWorkspaceSnapshot!(tenantId, workspaceId);
+    const read = async () => {
+      const snapshot = await this.configStore.loadWorkspaceSnapshot!(tenantId, workspaceId, tx);
       if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.definition.code !== snapshot.workspaceCategoryCode) {
         throw new ConflictException("空间配置快照的作用域或品类不一致");
       }
       if (snapshot.profile && (snapshot.profile.tenantId !== tenantId || snapshot.profile.categoryCode !== snapshot.definition.code)) {
         throw new ConflictException("经营空间档案与当前租户或品类不一致，不能用模板覆盖");
       }
-      const seeded = this.seedState(tenantId, snapshot.definition.code, this.seedPrefix(tenantId, workspaceId), snapshot.businessSettings?.pricing.currency ?? "CNY", snapshot.definition);
-      const state = this.states.get(workspaceId) ?? seeded;
       const profile = snapshot.profile;
       const effectiveProfile = profile ? { ...structuredClone(profile), terminology: {
         ...snapshot.definition.terminology, ...profile.terminology,
         navigationLabels: { ...snapshot.definition.terminology.navigationLabels, ...profile.terminology.navigationLabels }
       }, categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision } : undefined;
+      // A caller-owned transaction may see its own uncommitted configuration.
+      // Return that detached view without publishing it to the shared cache.
+      if (tx) return { ...snapshot, effectiveProfile: structuredClone(effectiveProfile) };
+      const seeded = this.seedState(tenantId, snapshot.definition.code, this.seedPrefix(tenantId, workspaceId), snapshot.businessSettings?.pricing.currency ?? "CNY", snapshot.definition);
+      const state = this.states.get(workspaceId) ?? seeded;
       if (effectiveProfile) this.missingCommittedProfiles.delete(workspaceId); else this.missingCommittedProfiles.add(workspaceId);
       // Keep the internal editor's template placeholder only for an explicit
       // profile save. Business readers and recovery writes reject its absence.
@@ -744,16 +746,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       this.categoryByWorkspace.set(workspaceId, snapshot.definition.code); this.tenantByWorkspace.set(workspaceId, tenantId);
       this.states.set(workspaceId, state);
       return { ...snapshot, effectiveProfile: structuredClone(effectiveProfile) };
-    });
+    };
+    // A queued independent reader can itself be waiting for this transaction's
+    // workspace lock. The owner reads directly through its original client.
+    if (tx) return read();
+    const previous = this.configurationReadsByWorkspace.get(workspaceId) ?? Promise.resolve();
+    const reading = previous.catch(() => undefined).then(read);
     const settled = reading.then(() => undefined, () => undefined);
     this.configurationReadsByWorkspace.set(workspaceId, settled);
     try { return await reading; }
     finally { if (this.configurationReadsByWorkspace.get(workspaceId) === settled) this.configurationReadsByWorkspace.delete(workspaceId); }
   }
-  /** Production business callers consume this single committed combination,
-   * instead of independently combining profile/definition/cache getters. */
-  async readBusinessContext(tenantId: string): Promise<BusinessContext> {
-    const snapshot = await this.refreshCommittedWorkspace(tenantId);
+  /** Production callers consume one configuration combination. An original
+   * transaction reads its own view without publishing before its commit. */
+  async readBusinessContext(tenantId: string, tx?: RentalConfigTx): Promise<BusinessContext> {
+    const snapshot = tx
+      ? await this.loadCommittedWorkspace(tenantId, this.workspaceOf(tenantId), tx)
+      : await this.refreshCommittedWorkspace(tenantId);
     if (snapshot) {
       if (!snapshot.effectiveProfile) throw new ConflictException("经营空间档案尚未持久化，不能以模板值创建业务");
       if (!snapshot.businessSettings) throw new ConflictException("经营设置尚未持久化，不能以当前默认值创建业务");
@@ -1446,10 +1455,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
 
   async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: RentalConfigTx, deferCache = false) {
-    const state = this.state(tenantId);
-    const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+    const transactionContext = tx ? await this.readBusinessContext(tenantId, tx) : undefined;
+    const state = transactionContext ? { ...this.state(tenantId), profile: transactionContext.profile,
+      itemGroups: transactionContext.groups, pricingGroups: transactionContext.pricingGroups ?? [] } : this.state(tenantId);
+    const writeContext = transactionContext ? { definition: transactionContext.category,
+      binding: transactionContext.categoryVersionId !== undefined && transactionContext.categoryAdoptionRevision !== undefined
+        ? { categoryVersionId: transactionContext.categoryVersionId, adoptionRevision: transactionContext.categoryAdoptionRevision }
+        : undefined } : await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("定价分组编码和名称不能为空");
-    if (input.defaultPricingUnit && !(await this.getBusinessSettings(tenantId)).pricing.enabledUnits.includes(input.defaultPricingUnit)) {
+    if (input.defaultPricingUnit && !(transactionContext?.settings ?? await this.getBusinessSettings(tenantId)).pricing.enabledUnits.includes(input.defaultPricingUnit)) {
       throw new BadRequestException("定价分组默认计价单位必须是当前品类已启用的计价单位");
     }
     if (!input.memberItemGroupIds?.length) throw new BadRequestException("定价分组至少选择一个产品型号");

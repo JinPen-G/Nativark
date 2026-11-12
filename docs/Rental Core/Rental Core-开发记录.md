@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pricing-group-original-transaction-20261113"></a>
+
+## 定价分组与基本价的原事务读取（2026-11-13）
+
+支撑CAT-GOV-03/08及动态品类建档/定价正常入口。本片仅修改[Core服务](../../apps/api/src/modules/rental-core/rental-core.service.ts)、[配置仓储](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)和[原Controller](../../apps/api/src/modules/rental-core/rental-core.controller.ts)。原`POST pricing-groups`在创建分组的外层事务中独立读配置，写分组取得空间互斥后又调用独立Core/业务上下文读取，形成等待自身空间锁的路径。限定实际入口证明外层事务内存在独立读取dispatch，真实MySQL等待尚未执行，见[已确认调用路径](../../output/category-governance/pricing-group-transaction-confirmed-20261113.json)。首次限定夹具缺初始化空间的[失败](../../output/category-governance/pricing-group-transaction-before-20261112.json)发生在该读取前。
+
+`loadWorkspaceSnapshot`与`readBusinessContext`可透传服务器原client，继续沿原空间绑定锁、同空间型号/组成/定价成员及实际档案/设置读取。原tx路径直接读取其事务视图，绕过可能等待该写锁的独立读队列，并返回分离的上下文，不写共享缓存、缺档案标记或样本。普通无tx读取保留原串行发布路径。
+
+定价分组在原tx内按该视图核对成员、默认单位、版本和绑定；Controller在取得写锁前完成独立价格上下文读取，原分组与价格写入继续同client复验绑定，并在ReadCommitted事务提交后发布缓存。价格失败或前置上下文与后继采用版本不同均回滚分组。Controller在首个等待前复制分组和基本价请求，调用方后继修改不改变这次输入，价格与库存算法沿原实现。
+
+当前API原配置的TypeScript5.9.3检查867个根/2012个源、零诊断，只安装三份必要emit，本树API仍867份JS，Shared运行时/声明及自持Client四份保护文件哈希一致，见[原三份编译及安装](../../output/category-governance/pricing-group-transaction-compile-20261113.json)。最后请求捕获调整后再次检查退出0、零诊断，只更新Controller，SHA-256为`53847404ad7b36bd23b042c23b097686d907c654d0327967802ee0cbe1906015`，见[最终编译](../../output/category-governance/pricing-group-transaction-final-compile-20261113.json)。
+
+最终当前编译产物7组限定调用退出0、audit0，覆盖正常分组/基本价同tx、价格失败回滚、采用变版拒绝、原tx绕过独立队列且不发布、缺实际设置拒绝、实际仓储复用原client及等待期间原请求修改，见[最终原入口行为](../../output/category-governance/pricing-group-transaction-final-runtime-20261113.json)。首轮六组SQL记录器未识别原`Tenant LOCK IN SHARE MODE`的[失败](../../output/category-governance/pricing-group-transaction-after-20261113.json)和补正该明确替身后的[六组结果](../../output/category-governance/pricing-group-transaction-after-final-20261113.json)保留。SQL、价格写入、身份和事务回滚为明确替身，未证明真实锁/并发或完整定价算法。
+
+原`category-adoption-context-refresh.test.cjs`7项0过/7失败、退出1，仍因`category-workspace-auth.cjs`只登记`FOR UPDATE`而拒绝原Tenant共享父锁，原文件及断言保留。另一次误用不存在的`rental-config-scope.test.cjs`未执行用例，均见[原脚本结果](../../output/category-governance/pricing-group-transaction-original-tests-20261113.json)。正确原`config-workspace-scope.test.cjs`3项全部通过、退出0、audit0，见[空间范围复验](../../output/category-governance/pricing-group-transaction-original-scope-20261113.json)。`rental-price-version.test.cjs`会读取环境及连接专用库，其实际价格版本/并发门槛仍须环境授权。
+
+四份记录/接续新增21处链接、7处片段及三组源/emit哈希已核对，源码和现行文档`git diff --check`退出0。验证均使用本树绝对preload、不可用DB地址和原单一临时目录，Node/独立V8缓存关闭，没有新增测试脚本或扩写原断言。两次空audit删除被自动审批以`blocked by policy`拒绝，原因未细化；已同卷归入[同一任务责任清单](../../../../output/.cleanup-pending/rental-core/pricing-group-transaction-validation/manifest.json)，共2文件/0字节，原任务目录不存在，见[最终退出](../../output/category-governance/pricing-group-transaction-final-cleanup-20261113.json)。原治理父补片`654a5e35cb010aa15bd164db127b00a1f12835e3`已推送并交PM，等待QA；当前03/08、动态组合、原真库/多实例/宿主与独立Review门槛仍未齐，完整结项0/14，实现百分比待核实。
+
 <a id="governance-authority-main-closure-20261113"></a>
 
 ## 治理平台身份的固定main父闭包（2026-11-13）

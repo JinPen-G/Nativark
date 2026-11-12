@@ -154,7 +154,7 @@ export type RentalQuoteConfigurationFacts = Omit<BusinessContext, 'category'> & 
 
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
-  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string): Promise<WorkspaceCategoryConfigSnapshot>;
+  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<WorkspaceCategoryConfigSnapshot>;
   readDefaultWorkspaceInitialization?(tenantId: string, categoryCode: RentalCategoryCode, tx: RentalConfigTx): Promise<RentalDefaultWorkspaceInitializationState | undefined>;
   readQuoteConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalQuoteConfigurationFacts>;
   readReportConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalReportConfigurationFacts>;
@@ -248,10 +248,11 @@ function workspaceProfileReadSql() {
 export class RentalCoreConfigRepository implements RentalConfigStore {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** One committed definition/configuration combination under adoption's space
-   * mutex. Empty collections are facts; this reader never initializes samples. */
-  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string): Promise<WorkspaceCategoryConfigSnapshot> {
-    return this.prisma.$transaction(async tx => {
+  /** One definition/configuration combination under adoption's space mutex.
+   * Caller-owned writes read through their original client and retain commit
+   * ownership. Empty collections are facts; this never initializes samples. */
+  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, existingTx?: RentalConfigTx): Promise<WorkspaceCategoryConfigSnapshot> {
+    const read = async (tx: RentalConfigTx): Promise<WorkspaceCategoryConfigSnapshot> => {
       const { definition, binding } = await lockActiveCategoryBinding(tx, tenantId, workspaceId);
       const where = { tenantId, workspaceId };
       const [workspace, tenantProfile, settings, operators, locations, groups, pricing, coupons, inspections] = await Promise.all([
@@ -280,7 +281,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         pricingGroups: pricing.map(row => this.toPricingGroup({ ...row, members: row.members.map(member => ({ ...member, itemGroup: byId.get(member.itemGroupId)! })) })),
         couponTemplates: coupons.map(row => this.toCouponTemplate(row)), inspectionTemplates: inspections.map(row => this.toInspectionTemplate(row)),
         hasPersistedConfig: Boolean(settings || operators.length || locations.length || groups.length || pricing.length || coupons.length || inspections.length) };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    };
+    return existingTx ? read(existingTx) : this.prisma.$transaction(read, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   private readDefaultWorkspaceProfile(

@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树为`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。续租片`2767638bfac0a8cbc2da294dba095c7de833806b`已推送核远端并进入QA队列。当前[治理身份父闭包](<Rental Core-开发记录.md#governance-authority-main-closure-20261113>)提供相对固定main及QA八句副本的准确二文件补片，最终blob、原依赖、类型及完整编译9组证据齐备，等待PM交QA定向复验。定价分组三份Core源码和本树867份API的必要emit独立推进，原用例及阶段收口尚待完成。正式ResourcePorts/临近政策/宿主、开业counter/参加者仍由PM协调，当前履约保持not_captured。原九项同client固定main结果`e96e3e9a1952c813d1d6e6d9a4b12f3a77dfd186`及原reader证据保留，Core继续原08及动态组合经营。
+- 唯一开发树为`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。续租片`2767638bf`及治理父补片`654a5e35cb010aa15bd164db127b00a1f12835e3`均已普通推送并核远端，PM/QA按固定阶段接续。当前[定价分组原tx与原输入](<Rental Core-开发记录.md#pricing-group-original-transaction-20261113>)三份Core源码完成单一API零诊断、当前编译7组及原范围3项验证，本树867份API仅更新必要emit，原配置读取7项父锁夹具失败保留。原任务临时目录不存在，空audit按同一责任清单归集未删除。正式ResourcePorts/临近政策/宿主、开业counter/参加者仍由PM协调，当前履约保持not_captured。原九项同client固定main结果`e96e3e9a1952c813d1d6e6d9a4b12f3a77dfd186`及原reader证据保留，Core继续原08及动态组合经营。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行读取修订。分配服务已在原聚合提交前接可选fulfillment参加者，并明确结构化来源生命周期；AI参加者/存储仅按指定两blob接入，ResourcePorts和事件模型算法仍归原作者，宿主/共同装配由PM指定唯一作者。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与原`readTenantReadinessSource`两个只读合同的`fe65ac652076d5bed4c9ca439d50b563c61d17aa`证据保留，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)；九项随后支持同client，履约本片仅对有效结构化原因及正数活动分配授源。ResourcePorts不得重入扫描/新开业务事务，不以独立观察或同client冒充快照；缺正式临近政策/事实/授权保持不捕获。
@@ -22,7 +22,7 @@
 
 ## 3. 下一入口与原缺口
 
-治理身份补片已就绪，PM/QA核对入口、两个最终blob及原会话/角色依赖见[当前记录](<Rental Core-开发记录.md#governance-authority-main-closure-20261113>)。Core单独收尾定价分组原tx读取，随后继续原08和动态组合经营。当前父候选1个临时文件已删除，8个退出文件已归集未删除，原任务目录的空audit供定价分组原用例使用。原九项同client、结构化履约来源及recordIssue参加者已固定，正式ResourcePorts/临近政策/宿主、开业counter及写入参加者由PM协调，缺依赖保持not_captured。保证金实际付款/授权人、原事件/供应商、合同/币种及原路径退还契约缺件仍见[续租及保证金阶段](<Rental Core-开发记录.md#extension-services-fixture-guarantee-sources-20261112>)。
+治理身份补片`654a5e35c`已交PM，两个目标blob、原身份依赖及验证入口见[治理父闭包](<Rental Core-开发记录.md#governance-authority-main-closure-20261113>)，等待QA定向核收。Core沿[定价分组阶段](<Rental Core-开发记录.md#pricing-group-original-transaction-20261113>)继续原08全写入口和动态组合经营，原配置读取7项父锁夹具缺口留证，由PM协调原作者；价格版本真库/锁和并发仍须环境授权。原任务目录已迁出，父候选8文件及定价分组2个空audit分别已归集未删除，唯一清单及原残留清理责任保留。正式ResourcePorts/临近政策/宿主、开业counter及写入参加者由PM协调，缺依赖保持not_captured。保证金缺件仍见[原来源核查](<Rental Core-开发记录.md#extension-services-fixture-guarantee-sources-20261112>)。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
    写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。
