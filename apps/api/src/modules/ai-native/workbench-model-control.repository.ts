@@ -46,10 +46,12 @@ function taskProvenance(task: AiTask) {
 
 export class WorkbenchModelControlRepository {
   constructor(private readonly db: WorkbenchModelControlDatabase, private readonly authority: AiTaskRepositoryAuthority,
-    private readonly clock: () => Date = () => new Date()) {
+    private readonly clock: () => Date = () => new Date(),
+    private readonly assertRegistrationCurrent?: (sceneCode: string) => void) {
     if (typeof db?.$transaction !== 'function' || typeof db.operationLog?.findFirst !== 'function'
       || typeof db.aiTaskRunPreparation?.findMany !== 'function'
-      || typeof authority?.resolve !== 'function') throw unavailable();
+      || typeof authority?.resolve !== 'function'
+      || assertRegistrationCurrent !== undefined && typeof assertRegistrationCurrent !== 'function') throw unavailable();
   }
   async current(taskId: string) {
     const context = structuredClone(await this.authority.resolve(taskId, 'read_metadata'));
@@ -153,6 +155,7 @@ export class WorkbenchModelControlRepository {
         const existing = await this.receipt(tx, initial, { taskId: command.taskId, operationId: command.operationId });
         if (existing) { if (existing.commandHash !== requestFingerprint(command)) throw changed(); return { receipt: existing, created: false }; }
         const current = await this.current(command.taskId), task = current.task;
+        this.assertRegistrationCurrent?.(task.sceneCode);
         if (current.identityHash !== initial.identityHash || current.access.bindingKey !== initial.access.bindingKey
           || task.revision !== command.expectedTaskRevision || task.status !== 'SUCCEEDED' || task.cancelRequestedAt !== null
           || task.inputRef === null || task.inputHash === null || task.inputRevision === null
@@ -186,6 +189,7 @@ export class WorkbenchModelControlRepository {
           registrationRef: `workbench-control-${requestFingerprint({ key, command: requestFingerprint(command) })}`,
           resourceRegistrationRef: rootPlan.data.steps[0].registrationRef,
           budgetPolicyVersion: budget.policyVersion, budgetPolicyHash: budget.policyFingerprint, createdAt: now.toISOString() });
+        this.assertRegistrationCurrent?.(task.sceneCode);
         const locked = await tx.aiTask.updateMany({ where: { ...current.access.where, revision: task.revision, status: 'SUCCEEDED',
           resultRef: task.resultRef, inputHash: task.inputHash, cancelRequestedAt: null, archivedAt: null },
           data: { status: 'RUNNING', revision: { increment: 1 } } });
@@ -204,6 +208,9 @@ export class WorkbenchModelControlRepository {
           action: WORKBENCH_MODEL_CONTROL_ACTION, detail: { [WORKBENCH_MODEL_CONTROL_MARKER]: receipt } as Prisma.InputJsonValue, createdAt: now } });
         const closing = await this.current(command.taskId);
         if (closing.identityHash !== current.identityHash || closing.access.bindingKey !== current.access.bindingKey) throw denied();
+        // Registration waits on persisted parents and CAS writes. Recheck in
+        // this same transaction so late withdrawal rolls back the new Run.
+        this.assertRegistrationCurrent?.(task.sceneCode);
         return { receipt, created: true };
       }, { isolationLevel: 'Serializable' });
     } catch (error) {

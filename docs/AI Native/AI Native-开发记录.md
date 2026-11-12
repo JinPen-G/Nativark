@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-publication-window-p2-20261113"></a>
+## 模型控制持续复核当前发布生效窗口（2026-11-13）
+
+PM 转交 QA 固定 630 的 P2：原 display witness 仍有效时，将当前 enabled 配置换成未来 validFrom 或已过 expiresAt，标准模型控制入口仍能新增 Run、模型调用与账务收据。原反例 stdin SHA-256 `91f9e66a53b618ad257bcf82455eb2b4e9984a1beb4f25aa90e89911232f1b0a`。本阶段从[原展示生成服务](../../apps/api/src/modules/ai-native/workbench-display-generation.service.ts)抽出同一当前时钟/窗口校验，[标准 provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)在 available、build 等待前后及 Gateway 原材料复核前后消费；[请求应用](../../apps/api/src/modules/ai-native/workbench-model-control.application.ts)补准备末尾校验，[登记仓储](../../apps/api/src/modules/ai-native/workbench-model-control.repository.ts)在新登记事务内前后核验，晚到期回滚 Run 与 CAS。已有原 K 的收据/结果读取保持当前独立读权，不构造新宿主或恢复派发。
+
+AI 树前置为 `e4a9d5779174908ac8108d306cbed691f1252cc8`，四份最终 Git blob：provider `98a81c759bcce39cf81a9c28765b09f1c4228514`、生成服务 `608da051d7fbd4d54b8358e7f31129f245d6cefa`、请求应用 `d0ea27da066170a5f8505c94587be39dfd355002`、仓储 `aa02a2f8deee331e5e818d5e51d7c58c1d6691b3`。以 d201 为父的固定主线候选 `fc808e7af723ae6bca6d9d756d4d7c1b9f78fe71` 已普通推送 `codex/ai-native-main-closure-20261113` 并回读一致，只变更四个源；其 provider blob 为 `e733dbdb08b647d237361c90e0e8b3faa2e31868`，其余三源与 AI 树逐 blob 相同，保留主线原装配。精确增量可由 `git diff d201979963e4f4474acd23ff1981ad81930fdfcd fc808e7af723ae6bca6d9d756d4d7c1b9f78fe71` 核验；未争用 main 索引或新建工作树。
+
+AI 树实际标准 provider→原控制应用/Task host/Gateway/单账的五种定向模拟退出 0，stdin SHA-256 `881d9f3394cb9752ed4e9a64d6852ac8fff99e10513198dad567d8de5b5ae50c`。正常新解释累计 2 次模型/2 次 calls；未来与过期配置拒绝准备和执行，Run/操作/账无新增；登记写入等待中到期回滚，保持原 1 次模型/1 个 Run；预算派发后的当前窗口撤回阻止新 transport，已登记原操作保持 unknown，重复与只读不再派发，原保留额度不冒充已释放。原结果在新窗口不可用时仍按同 K 读取，撤当前会员权继续拒绝。validFrom 等于当前时点可用，expiresAt 等于当前时点不可用，非法时钟与停用配置拒绝。
+
+同五种反例在 fc808 的固定 d201 源组合复验退出 0，stdin SHA-256 `c956ffe4219d18dc58b94297da87cf8d4b74381d9e409f84f1e51ab30602f751`；固定 API 4 根/1959 源、后台含 Copilot 5 根/1778 源 TypeScript 5.9.3 零诊断，退出 0，stdin SHA-256 `5c6ecda3e1e30927c901af05162267facd0e0e7a7dd46f07c2e9842cc2fbee92`。原 Gateway 装配在驱动中明确替换为已有 model host 与内存财务/运输 fixture，未执行 SecretBox、真实数据库或供应商；不能称完整外部装配实测。
+
+初次裸 AI 四根类型检查暴露已提交治理身份消费者与本树旧 Core PlatformRequest 的两条 headers 诊断；该配套 Core 源由 PM 独立核接，不能为补绿回退消费者或覆盖他人文件。第一次内存前置过滤误用 Windows 路径分隔符，未装入两源，原失败保留。沿 PM 固定 service `09eca288fdfdcc66b2ab005199a5c588b4769a5f`、Controller `e4900454be98043074b69301bf3d99a215523e01` 的实际两源组合，AI 四根/1816 源零诊断，退出 0，stdin SHA-256 `242314216c57ca283d569bf375e1328ec23a1d830d36bbc3bdd0915f85a2f9c7`。本树 Core 文件未改；固定 fc808 主线类型单独通过。
+
+所有模拟/类型进程已退出，审计为空，任务临时目录未创建；无新增测试脚本、client/dist 或附件副本。时间 P2 修复候选交 PM 安排原 QA 复验，AIN-12 全文及停止交付等原门槛仍继续独立核定，不以本片调整整项百分比。
+
 <a id="ain14-opening-authoritative-text-20261113"></a>
 ## 开业诊断正文沿原检查材料确定性投影（2026-11-13）
 

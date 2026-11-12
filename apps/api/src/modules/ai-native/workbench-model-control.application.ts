@@ -51,7 +51,8 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
           if (!active) throw denied(); return { authorization: header, audience: 'operator' as const, requestId };
         } } }, clock = input.clock ?? (() => new Date());
         const authorization = composePersistedTaskAuthorization(input), scenes = composeAiOriginalScenes(input);
-        const repository = new WorkbenchModelControlRepository(input.db, authorization.authority, clock);
+        const assertGenerationCurrent = (sceneCode: string) => { if (!options.available(sceneCode)) throw unavailable(); };
+        const repository = new WorkbenchModelControlRepository(input.db, authorization.authority, clock, assertGenerationCurrent);
         const current = await repository.current(command.taskId);
         if (!['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(current.task.sceneCode)) throw denied();
         const policy = { sceneCode: current.task.sceneCode, maxOutputTokens: 32768 };
@@ -73,9 +74,9 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
           create: async original => {
             // Gate new registration as well as dispatch. An old prepared
             // command cannot leave a new Run when generation is now disabled.
-            if (!options.available(original.sceneCode)) throw unavailable();
+            assertGenerationCurrent(original.sceneCode);
             const grant = await scenes.creationAuthority.create(original);
-            if (!options.available(original.sceneCode)) throw unavailable();
+            assertGenerationCurrent(original.sceneCode);
             return grant;
           },
         },
@@ -100,6 +101,7 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
         const after = await repository.current(command.taskId);
         if (after.identityHash !== current.identityHash || after.access.bindingKey !== current.access.bindingKey
           || !isDeepStrictEqual(after.task, current.task)) throw denied();
+        assertGenerationCurrent(current.task.sceneCode);
         const { operationId: _operation, kind: _kind, ...original } = selected;
         return { version: AI_WORKBENCH_MODEL_CONTROL_VERSION, ...original,
           kinds: ['reinterpret', 'reformat'], semantics: 'current_original_source_not_model_permission' } satisfies AiWorkbenchModelControlPreparation;
