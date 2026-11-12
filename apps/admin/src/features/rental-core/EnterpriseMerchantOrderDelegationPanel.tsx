@@ -1,9 +1,9 @@
-/** Displays one signed customer source in the current merchant order workspace.
- * Source lookup is separate from the Core execution and original-order receipt. */
+/** Reviews one signed customer source in the current merchant order workspace.
+ * Explicit execution and original Core results retain the same customer D. */
 import { useEffect, useRef, useState } from "react";
 import { Descriptions, Space } from "antd";
-import type { EnterpriseOrderDelegationView } from "@rental-os/shared";
-import { ActionButton, Alert, Button, Form, Input } from "@/components/ui";
+import type { EnterpriseMerchantOrderDelegationResult, EnterpriseOrderDelegationView } from "@rental-os/shared";
+import { ActionButton, Alert, Checkbox, Form, Input } from "@/components/ui";
 import { useLocale } from "@/app/locale";
 import { useMerchantOrderDelegationSource } from "./enterprise-merchant-order-delegation";
 
@@ -13,20 +13,23 @@ export function EnterpriseMerchantOrderDelegationPanel({ active }: { active: boo
   const [key, setKey] = useState("");
   const [record, setRecord] = useState<{ identity: string; value: EnterpriseOrderDelegationView }>();
   const [failure, setFailure] = useState<{ identity: string; message: string }>();
+  const [confirmed, setConfirmed] = useState(false);
+  const [coreResult, setCoreResult] = useState<{ identity: string; value: EnterpriseMerchantOrderDelegationResult }>();
+  const confirmation = useRef(confirmed); confirmation.current = confirmed;
   const selectedKey = useRef(key); selectedKey.current = key;
   const latest = useRef(operation.identity); latest.current = operation.identity;
   const mounted = useRef(true), generation = useRef(0);
   useEffect(() => {
     mounted.current = true; generation.current++;
-    setKey(operation.savedKey ?? ""); setRecord(undefined); setFailure(undefined);
+    setKey(operation.savedKey ?? ""); setRecord(undefined); setFailure(undefined); setConfirmed(false); setCoreResult(undefined);
     return () => { mounted.current = false; generation.current++; };
   }, [operation.actorIdentity]);
-  useEffect(() => { generation.current++; setRecord(undefined); setFailure(undefined); }, [active]);
+  useEffect(() => { generation.current++; setRecord(undefined); setFailure(undefined); setConfirmed(false); setCoreResult(undefined); }, [active]);
 
   const read = async () => {
     operation.current();
     const delegationKey = selectedKey.current.trim(), observation = ++generation.current;
-    setRecord(undefined); setFailure(undefined);
+    setRecord(undefined); setFailure(undefined); setConfirmed(false);
     try {
       const value = await operation.read(delegationKey);
       operation.current();
@@ -42,6 +45,37 @@ export function EnterpriseMerchantOrderDelegationPanel({ active }: { active: boo
     }
   };
   const source = record?.identity === operation.identity ? record.value : undefined;
+  const original = coreResult?.identity === operation.identity && coreResult.value.delegationKey === key.trim() ? coreResult.value : undefined;
+  const readCore = async () => {
+    operation.current();
+    const delegationKey = selectedKey.current.trim(), observation = ++generation.current;
+    setFailure(undefined); setConfirmed(false);
+    try {
+      const value = await operation.readOriginal(delegationKey);
+      operation.current();
+      if (!mounted.current || observation !== generation.current || selectedKey.current.trim() !== delegationKey) throw new Error("原委托选择已变化 / Original delegation selection changed");
+      setCoreResult({ identity: operation.identity, value });
+    } catch (error) {
+      if (mounted.current && observation === generation.current && latest.current === operation.identity) setFailure({ identity: operation.identity, message: error instanceof Error ? error.message : "原 Core 结果读取失败" });
+      throw error;
+    }
+  };
+  const execute = async () => {
+    if (!source) throw new Error("须先读取原委托 / Read the original delegation first");
+    const delegationKey = source.delegationKey, observation = ++generation.current;
+    const reviewed = () => {
+      operation.current();
+      if (!mounted.current || observation !== generation.current || selectedKey.current.trim() !== delegationKey || !confirmation.current) throw new Error("须核对本条原委托后明确确认 / Confirm this original delegation after review");
+    };
+    reviewed(); setFailure(undefined);
+    try {
+      const value = await operation.execute(source, reviewed);
+      reviewed(); setCoreResult({ identity: operation.identity, value }); setConfirmed(false);
+    } catch (error) {
+      if (mounted.current && observation === generation.current && latest.current === operation.identity) setFailure({ identity: operation.identity, message: error instanceof Error ? error.message : "原委托提交结果待核对" });
+      throw error;
+    }
+  };
   const missing = english ? "Original reference unavailable" : "原引用未提供";
   const labels = english
     ? { issued: "Issued", expired: "Expired", revoked: "Revoked", consumed: "Consumed" }
@@ -55,7 +89,7 @@ export function EnterpriseMerchantOrderDelegationPanel({ active }: { active: boo
       <Form.Item label={english ? "Original delegation D" : "原委托 D"}>
         <Input value={key} maxLength={128} disabled={!operation.permitted || operation.busy}
           aria-label={english ? "Original delegation D" : "原委托 D"}
-          onChange={event => { selectedKey.current = event.target.value; generation.current++; setKey(event.target.value); setRecord(undefined); setFailure(undefined); }} />
+          onChange={event => { selectedKey.current = event.target.value; generation.current++; setKey(event.target.value); setRecord(undefined); setFailure(undefined); setConfirmed(false); setCoreResult(undefined); }} />
       </Form.Item>
       <ActionButton intent="review" disabled={!operation.permitted || operation.busy || Boolean(operation.storageError) || !key.trim()}
         label={english ? "Read original source" : "读取原来源"} onAction={read} />
@@ -78,9 +112,19 @@ export function EnterpriseMerchantOrderDelegationPanel({ active }: { active: boo
     ]} />}
     {source && (!source.personalCustomerId || !source.corporateCustomerId || !source.quoteId || !source.workspaceId) &&
       <Alert type="warning" title={english ? "Original subject references are unavailable" : "原请求主体引用不可用"} />}
-    <Alert type="warning" title={source?.state === "consumed"
-      ? english ? "Core original-order receipt reader awaits connection" : "Core 原订单收据读取待接入"
-      : english ? "Core sealed submission awaits connection" : "Core 封存提交接点待接入"} />
-    <Button type="primary" disabled>{english ? "Explicitly execute this original delegation" : "明确执行本条原委托"}</Button>
+    {operation.savedState === "unknown" && <Alert type="warning" title={english ? "Original submission outcome requires verification" : "原提交结果待核对"}
+      description={english ? "Read the same D and Core result to continue." : "读取同一 D 的 Core 原结果后继续。"} />}
+    {original && <Alert type={original.state === "observed" ? "success" : "warning"}
+      title={original.state === "observed" ? english ? "Original Core order observed" : "已读取 Core 原订单" : english ? "Original Core result remains unknown" : "Core 原结果仍待核对"}
+      description={original.state === "observed" ? original.orderId : english ? "Keep this original D for further verification." : "保留本条原 D 继续核对。"} />}
+    {source?.state === "issued" && operation.savedState === "source" && <Checkbox checked={confirmed} disabled={!operation.permitted || operation.busy}
+      onChange={event => setConfirmed(event.target.checked)}>{english ? "I reviewed this customer's original delegation and request" : "我已核对客户本条原委托和原请求"}</Checkbox>}
+    <Space wrap>
+      <ActionButton intent="create" disabled={!operation.permitted || operation.busy || !confirmed || operation.savedState !== "source" || source?.state !== "issued"
+        || !source.personalCustomerId || !source.corporateCustomerId || !source.quoteId || !source.workspaceId}
+        label={english ? "Explicitly execute this original delegation" : "明确执行本条原委托"} onAction={execute} />
+      <ActionButton intent="review" disabled={!operation.permitted || operation.busy || Boolean(operation.storageError) || !key.trim()}
+        label={english ? "Read original Core result" : "读取 Core 原结果"} onAction={readCore} />
+    </Space>
   </Space>;
 }
