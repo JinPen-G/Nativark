@@ -13,6 +13,12 @@ export const ENTERPRISE_ORDER_DELEGATION_SCHEMAS: Record<string, SchemaObject> =
   IssueEnterpriseOrderDelegation: object({ ...change, requestReference: ref("EnterpriseOrderDelegationRequestReference"), confirm: { type: "boolean", enum: [true] } }),
   RevokeEnterpriseOrderDelegation: object({ ...change, delegationKey: key, confirm: { type: "boolean", enum: [true] } }),
   EnterpriseOrderDelegationReference: object({ delegationKey: key, expectedRevision: { type: "integer", minimum: 1, maximum: 1 }, approvalId: string }, ["delegationKey", "expectedRevision"]),
+  ExecuteEnterpriseMerchantOrderDelegation: object({ delegationKey: key, expectedRevision: { type: "integer", enum: [1] }, approvalId: string,
+    confirm: { type: "boolean", enum: [true] } }, ["delegationKey", "expectedRevision", "confirm"]),
+  EnterpriseMerchantOrderDelegationResult: { oneOf: [
+    object({ delegationKey: key, state: { type: "string", enum: ["observed"] }, orderId: string, retryable: noRetry }),
+    object({ delegationKey: key, state: { type: "string", enum: ["unknown"] }, orderId: { type: "null" }, retryable: noRetry })
+  ] },
   EnterpriseOrderDelegationReceipt: object({ state: { type: "string", enum: ["consumed"] }, delegationKey: key, sourceHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
     tenantId: string, workspaceId: string, personalCustomerId: string, corporateCustomerId: string, quoteId: string, requestHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
     coreIdempotencyKey: key, actorUserId: string, orderId: string, consumedAt: date, retryable: noRetry }),

@@ -21,6 +21,15 @@ export interface EnterpriseOrderDelegationReference {
   approvalId?: string;
 }
 
+export interface ExecuteEnterpriseMerchantOrderDelegation extends EnterpriseOrderDelegationReference {
+  confirm: true;
+}
+
+export type EnterpriseMerchantOrderDelegationResult = {
+  delegationKey: string;
+  retryable: false;
+} & ({ state: "observed"; orderId: string } | { state: "unknown"; orderId: null });
+
 export interface RevokeEnterpriseOrderDelegation extends EnterpriseChangeRequest {
   delegationKey: string;
   confirm: true;

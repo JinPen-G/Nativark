@@ -61,6 +61,7 @@ import { EnterpriseMembersService } from "./modules/enterprise/enterprise-member
 import { EnterprisePolicyService } from "./modules/enterprise/enterprise-policy.service";
 import { EnterpriseApprovalService } from "./modules/enterprise/enterprise-approval.service";
 import { EnterpriseMerchantDelegationService } from "./modules/enterprise/enterprise-merchant-delegation.service";
+import { EnterpriseMerchantOrderSubmissionService } from "./modules/enterprise/enterprise-merchant-order-submission.service";
 import { EnterpriseExchangeApprovalService } from "./modules/enterprise/enterprise-exchange-approval.service";
 import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterprise-extension-approval.service";
 import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
@@ -341,6 +342,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     EnterprisePolicyService,
     EnterpriseApprovalService,
     EnterpriseMerchantDelegationService,
+    EnterpriseMerchantOrderSubmissionService,
     EnterpriseExtensionApprovalService,
     EnterpriseExchangeApprovalService,
     EnterpriseTaskCenterService,
