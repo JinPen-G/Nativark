@@ -10,6 +10,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { isIP } = require("node:net");
 const { spawnSync } = require("node:child_process");
 const { redact, resolveDedicatedTarget, OpsTargetError } = require("./dedicated-env.cjs");
 const { loadProjectEnvironment, readEnvironmentFile } = require("../../config/environment.cjs");
@@ -39,19 +40,31 @@ function requireTarget(envFile) {
 }
 
 /**
- * 本阶段的 mysql 客户端固定在 `OPS_MYSQL_CONTAINER` 内执行，因此只支持该容器
- * 自身的 3306 端点。若 URL 指向远程主机或另一个端口却仍静默连接本地容器，日志
- * 显示的目标与实际操作目标会不一致；这种情况必须拒绝，而不是猜测网络映射。
+ * mysql 客户端固定在 `OPS_MYSQL_CONTAINER` 内执行，容器端口始终为 3306。
+ * 宿主连接只接受 Compose 显式配置的 IPv4 回环绑定和映射端口；默认保留
+ * 127.0.0.1 / localhost 的 3306。容器服务名仍只接受 mysql 和固定容器名。
+ * Prisma 使用原宿主连接串，mysql 使用容器内部端点，两者必须指向同一容器。
  */
 function assertContainerEndpoint(target) {
-  const allowedHosts = new Set(["localhost", "127.0.0.1", "mysql", CONTAINER.toLowerCase()]);
-  if (!allowedHosts.has(String(target.host).toLowerCase()) || target.port !== 3306) {
-    throw new OpsTargetError(
-      `当前 OPS-01A 只支持容器 ${CONTAINER} 的本地 3306 端点；实际为 ${target.host}:${target.port}。`
-      + "远程环境必须使用后续发布编排，不能让本脚本静默改连本地容器。"
-    );
+  const rawPort = process.env.MYSQL_HOST_PORT || "3306";
+  const hostPort = Number(rawPort);
+  const bindHost = process.env.MYSQL_BIND_HOST || "127.0.0.1";
+  if (!/^\d+$/u.test(rawPort) || !Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65535) {
+    throw new OpsTargetError("MYSQL_HOST_PORT 必须是 1 到 65535 的整数");
   }
-  return target;
+  if (isIP(bindHost) !== 4 || !bindHost.startsWith("127.")) {
+    throw new OpsTargetError("MYSQL_BIND_HOST 必须是 IPv4 回环地址，OPS 不接受远程或公开绑定");
+  }
+  const host = String(target.host).toLowerCase();
+  const localHost = host === bindHost || (bindHost === "127.0.0.1" && host === "localhost");
+  const containerHost = host === "mysql" || host === CONTAINER.toLowerCase();
+  if ((localHost && target.port === hostPort) || (containerHost && target.port === 3306)) {
+    return target;
+  }
+  throw new OpsTargetError(
+    `当前 OPS-01A 只支持容器 ${CONTAINER} 的本地 3306 端点及 ${bindHost}:${hostPort} 宿主映射。实际为 ${target.host}:${target.port}。`
+    + "主机或端口必须与显式配置一致，不能静默改连其他容器或远程数据库。"
+  );
 }
 
 /**

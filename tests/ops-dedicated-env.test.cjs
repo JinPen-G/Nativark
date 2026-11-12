@@ -85,16 +85,79 @@ void (() => {
     assert.equal(ops.rejectionReason(`rental_os_${marker}`), undefined, `带 ${marker} 标记的库应放行`);
   }
   ok("带专用标记的库放行，主机、端口、账号与库名如实解析");
-  assert.equal(
-    runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@localhost:3306/rental_os_claude")).database,
-    "rental_os_claude"
-  );
-  rejects(
-    () => runtime.assertContainerEndpoint(target),
-    /只支持容器.*本地 3306/u,
-    "远程主机或非 3306 端口"
-  );
-  ok("运行时不会把远程连接串静默改连本地 MySQL 容器");
+  const previousMapping = {
+    MYSQL_HOST_PORT: process.env.MYSQL_HOST_PORT,
+    MYSQL_BIND_HOST: process.env.MYSQL_BIND_HOST
+  };
+  try {
+    delete process.env.MYSQL_HOST_PORT;
+    delete process.env.MYSQL_BIND_HOST;
+    assert.equal(
+      runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@localhost:3306/rental_os_claude")).database,
+      "rental_os_claude"
+    );
+    rejects(
+      () => runtime.assertContainerEndpoint(target),
+      /只支持容器.*本地 3306/u,
+      "远程主机或非 3306 端口"
+    );
+    rejects(
+      () => runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@127.0.0.1:3308/rental_os_claude")),
+      /主机或端口必须与显式配置一致/u,
+      "未声明的宿主映射端口"
+    );
+    process.env.MYSQL_HOST_PORT = "3308";
+    process.env.MYSQL_BIND_HOST = "127.0.0.1";
+    for (const host of ["127.0.0.1", "localhost"]) {
+      const mapped = ops.resolveDedicatedTarget(`mysql://svc:p@${host}:3308/rental_os_claude`);
+      assert.equal(runtime.assertContainerEndpoint(mapped), mapped, "宿主连接串必须保留原主机与映射端口");
+    }
+    for (const host of ["mysql", runtime.CONTAINER]) {
+      const direct = ops.resolveDedicatedTarget(`mysql://svc:p@${host}:3306/rental_os_claude`);
+      assert.equal(runtime.assertContainerEndpoint(direct), direct, "固定容器内部仍使用 3306");
+      rejects(
+        () => runtime.assertContainerEndpoint({ ...direct, port: 3308 }),
+        /主机或端口必须与显式配置一致/u,
+        "容器内部不能使用宿主映射端口"
+      );
+    }
+    for (const url of [
+      "mysql://svc:p@127.0.0.1:3306/rental_os_claude",
+      "mysql://svc:p@127.0.0.2:3308/rental_os_claude",
+      "mysql://svc:p@db.internal:3308/rental_os_claude",
+      "mysql://svc:p@other-mysql:3306/rental_os_claude"
+    ]) {
+      rejects(() => runtime.assertContainerEndpoint(ops.resolveDedicatedTarget(url)),
+        /主机或端口必须与显式配置一致/u, "错误宿主、端口或其他容器");
+    }
+    process.env.MYSQL_BIND_HOST = "127.0.0.2";
+    assert.equal(runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@127.0.0.2:3308/rental_os_claude")).host, "127.0.0.2");
+    rejects(() => runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@localhost:3308/rental_os_claude")),
+      /主机或端口必须与显式配置一致/u, "localhost 不能代替其他回环绑定地址");
+    process.env.MYSQL_BIND_HOST = "127.0.0.1";
+    for (const port of ["1", "65535"]) {
+      process.env.MYSQL_HOST_PORT = port;
+      assert.equal(runtime.assertContainerEndpoint(ops.resolveDedicatedTarget(`mysql://svc:p@127.0.0.1:${port}/rental_os_claude`)).port, Number(port));
+    }
+    for (const port of ["0", "65536", "3308.5", "3.308e3", "-3308", "bad", " 3308 "]) {
+      process.env.MYSQL_HOST_PORT = port;
+      rejects(() => runtime.assertContainerEndpoint(target), /MYSQL_HOST_PORT/u, "无效宿主映射端口");
+    }
+    process.env.MYSQL_HOST_PORT = "3308";
+    for (const host of ["0.0.0.0", "10.0.0.8", "db.internal", "127.999.0.1", "::1"]) {
+      process.env.MYSQL_BIND_HOST = host;
+      rejects(() => runtime.assertContainerEndpoint(target), /MYSQL_BIND_HOST/u, "未支持的绑定地址");
+    }
+    process.env.MYSQL_HOST_PORT = "";
+    process.env.MYSQL_BIND_HOST = "";
+    assert.equal(runtime.assertContainerEndpoint(ops.resolveDedicatedTarget("mysql://svc:p@127.0.0.1:3306/rental_os_claude")).port, 3306);
+  } finally {
+    for (const [name, value] of Object.entries(previousMapping)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+  ok("宿主端口按显式回环映射校验，容器内固定 3306，坏配置及错目标均拒绝");
 
   // ============ 5. 演练库必须是新库，且与源库不同名 ============
   const drill = ops.buildDrillDatabaseName("rental_os_claude", new Date("2026-08-30T01:02:03.000Z"));
