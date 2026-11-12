@@ -296,7 +296,8 @@ export function enterpriseOwnJoinReviewMessagesSnapshot(value:unknown,tenantCode
     keys.add(r.operationKey);items.push({requestId:r.requestId,corporateCustomerId:r.corporateCustomerId,operationKey:r.operationKey,state:r.state,revision:r.revision,reason:r.reason,createdAt:r.createdAt});}
   return {tenantCode,customerId,coverage:"own_original_join_review_receipts",delivery:"not_reported",readState:"not_recorded",items};
 }
-export const ENTERPRISE_MANAGEMENT_REQUEST_TYPES = ["profile_change","credit_change","scope_change"] as const;
+export const ENTERPRISE_MANAGEMENT_REQUEST_TYPES = ["profile_change","credit_change","scope_change","payment_proof"] as const;
+export const ENTERPRISE_PAYMENT_PROOF_SCENE = "enterprise-payment-proof";
 export interface EnterpriseOwnManagementReviewMessages {
   tenantCode:string;customerId:string;coverage:"own_original_management_review_only_receipts";
   delivery:"not_reported";readState:"not_recorded";
@@ -750,6 +751,18 @@ export interface EnterpriseAuditView { operationKey: string; action: string; tar
 /** Management requests propose a change; approval records review only, never writes
  * a customer master, credit limit, policy, payment or ledger. */
 export type EnterpriseManagementRequestType = typeof ENTERPRISE_MANAGEMENT_REQUEST_TYPES[number];
+export interface EnterprisePaymentProofBasis {
+  corporateCustomerId: string;
+  orderId: string;
+  workspaceId: string;
+  workspaceCode: string;
+  currency: string;
+  objectRevision: string;
+  permissionRevision: string;
+  source: "original_enterprise_paid_order";
+  purpose: "rental_fee";
+}
+export interface EnterprisePaymentProofUploadRequest extends EnterpriseAuthorityUploadRequest { objectRevision: string }
 export interface EnterpriseProfileView {
   corporateCustomerId: string;
   corporateName: string;
@@ -771,6 +784,11 @@ export interface EnterpriseManagementProposal {
   currency?: string;
   workspaceIds?: string[];
   categoryCodes?: string[];
+  /** Reported payment evidence for this original order. The amount is a proposal. */
+  orderId?: string;
+  workspaceId?: string;
+  reportedAmount?: string;
+  paymentPurpose?: "rental_fee";
 }
 export interface SaveEnterpriseManagementRequest extends EnterpriseChangeRequest {
   requestId?: string;
