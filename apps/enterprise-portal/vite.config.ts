@@ -1,10 +1,11 @@
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { motionPreferenceAdapter, motionPreferenceStyles } from "../admin/config/motionPreferenceAdapter";
 import { nativeSidebarStyles } from "../admin/config/nativeSidebarStyles";
 import { actionButtonIconAdapter } from "../admin/config/actionButtonIconAdapter";
+import { loadViteEnvironment, publicEnvironmentDefinitions } from "../../config/environment.cjs";
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 function customerBoundary(): Plugin {
   return { name: "enterprise-no-operator-runtime", enforce: "pre", configureServer(server) {
@@ -18,8 +19,13 @@ function customerBoundary(): Plugin {
     }
   } };
 }
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode }) => {
+  const env = loadViteEnvironment(mode, at("."), loadEnv, { offline: mode === "offline" });
+  const port = Number(env.ENTERPRISE_PORTAL_PORT ?? 4191);
+  return {
   envDir: false,
+  envPrefix: [],
+  define: publicEnvironmentDefinitions("enterprisePortal", env),
   cacheDir: at("../../output/enterprise-offline/vite-cache"),
   base: "/enterprise-assets/",
   plugins: [customerBoundary(), motionPreferenceAdapter(), actionButtonIconAdapter(), tailwindcss(), react()],
@@ -34,6 +40,7 @@ export default defineConfig(({ mode }) => ({
     { find: "@", replacement: at("../admin/src") }
   ] },
   build: { outDir: mode === "offline" ? at("../../output/enterprise-offline/build") : "dist", emptyOutDir: false },
-  server: { host: "127.0.0.1", port: 4191, strictPort: true },
-  preview: { host: "127.0.0.1", port: 4191, strictPort: true }
-}));
+  server: { host: "127.0.0.1", port, strictPort: true },
+  preview: { host: "127.0.0.1", port, strictPort: true }
+  };
+});

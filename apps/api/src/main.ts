@@ -7,14 +7,19 @@ import "reflect-metadata";
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import { AppModule } from "./app.module";
+import { resolve } from "node:path";
+import { loadProjectEnvironment, validateApiEnvironment } from "../../../config/environment.cjs";
 import { requestIdentityMiddleware } from "./common/request-identity";
 import { staffApiRoutingMiddleware } from "./common/staff-api-routing";
-import { assertProductionDataSource } from "./common/production-data-source.guard";
 import { apiCorsOrigins } from "./common/cors-origins";
 
 async function bootstrap() {
-  process.env.PLATFORM_DATA_SOURCE = assertProductionDataSource(process.env.NODE_ENV, process.env.PLATFORM_DATA_SOURCE);
+  Object.assign(process.env, validateApiEnvironment(loadProjectEnvironment({
+    appDirectory: resolve(__dirname, ".."),
+    mode: process.env.NODE_ENV
+  })));
+  // Configuration is ready before business modules evaluate their runtime switches.
+  const { AppModule } = await import("./app.module");
   // 微信支付 v3 验签必须使用原始请求体；Express 解析后的 JSON 可能改变空白与字段顺序。
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
 

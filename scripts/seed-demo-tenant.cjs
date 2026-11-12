@@ -10,31 +10,18 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { URL } = require("node:url");
+const { loadProjectEnvironment } = require("../config/environment.cjs");
 
 const ROOT = path.resolve(__dirname, "..");
+Object.assign(process.env, loadProjectEnvironment({
+  appDirectory: path.join(ROOT, "apps", "api"), mode: process.env.NODE_ENV
+}));
 const API_BASE = (process.env.DEMO_API_BASE_URL || "http://localhost:3000/api").replace(/\/$/u, "");
 const TENANT_ID = "tenant_001";
 const TENANT_CODE = "demo";
 const DEMO_YEAR = 2026;
 const DEMO_START = "2026-10-15T10:00:00+08:00";
 const DEMO_END = "2026-10-17T10:00:00+08:00";
-
-function loadRootEnv() {
-  const envPath = path.join(ROOT, ".env");
-  if (!fs.existsSync(envPath)) return;
-  for (const raw of fs.readFileSync(envPath, "utf8").split(/\r?\n/u)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const index = line.indexOf("=");
-    if (index <= 0) continue;
-    const key = line.slice(0, index).trim();
-    let value = line.slice(index + 1).trim();
-    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if (!(key in process.env)) process.env[key] = value;
-  }
-}
 
 function assertLocalDatabase() {
   // RENTAL_OS_DATA_SOURCE / PLATFORM_DATA_SOURCE 在应用配置里是“驱动标识”时，
@@ -254,7 +241,6 @@ async function ensureDemoLifecycle(token, input, target) {
 }
 
 async function main() {
-  loadRootEnv();
   assertLocalDatabase();
   const demoMemberPassword = process.env.DEMO_MEMBER_PASSWORD || process.env.E2E_DEMO_PASSWORD;
   if (!demoMemberPassword) throw new Error("缺少 E2E_DEMO_PASSWORD 或 DEMO_MEMBER_PASSWORD，无法建立演示会员账号");

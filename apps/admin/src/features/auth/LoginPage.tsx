@@ -27,6 +27,10 @@ import { useAuthStore } from "./authStore";
 type LoginValues = { tenantCode: string; account: string; password: string };
 type DemoPasswordValues = { password: string; confirmPassword: string };
 
+const SHOW_ACCOUNT_SHORTCUTS = import.meta.env.VITE_SHOW_ACCOUNT_SHORTCUTS === undefined
+  ? import.meta.env.DEV
+  : import.meta.env.VITE_SHOW_ACCOUNT_SHORTCUTS === "true";
+
 const LOCAL_DEMO_ACCOUNTS = [
   { label: "演示香港租户管理员", tenantCode: "demo", account: "admin" },
   { label: "演示深圳租户管理员", tenantCode: "demo2", account: "admin" },
@@ -208,7 +212,7 @@ export function LoginPage() {
                     <a onClick={() => navigate("/login", { replace: true })}>{t("不是这家租户？切换到通用登录入口")}</a>
                   </Typography.Paragraph>
                 ) : null}
-                {import.meta.env.DEV && loginMode === "password" ? (
+                {SHOW_ACCOUNT_SHORTCUTS && loginMode === "password" ? (
                   <div className="login-demo">
                     <Button type="link" className="login-demo-toggle" onClick={() => setDemoAccountsOpen((open) => !open)}>
                       {demoAccountsOpen ? t("收起本地开发示例群组 ▲") : t("使用本地开发示例群组 ▾")}

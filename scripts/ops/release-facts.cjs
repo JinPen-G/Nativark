@@ -11,6 +11,7 @@
  */
 
 const crypto = require("node:crypto");
+const { validateApiEnvironment } = require("../../config/environment.cjs");
 
 /**
  * 发布必须确认的环境变量。
@@ -19,16 +20,20 @@ const crypto = require("node:crypto");
  *   - `DATABASE_URL`：没有它服务连不上库；
  *   - `AUTH_TOKEN_SECRET`：缺失时 `NODE_ENV=production` 会直接抛错，
  *     非生产则回落到仓库里那个公开的开发密钥——发布候选不接受这种回落。
- * 其余是行为选择项，缺失有明确默认值，因此只提示不拦。
+ * 生产运行模式和独立凭据加密密钥同属发布必需项，值由共用校验层核对。
  */
 const RELEASE_ENV_VARS = [
+  { name: "NODE_ENV", required: true, purpose: "Node 运行模式，正式生产为 production" },
+  { name: "RENTAL_DEPLOYMENT_PROFILE", required: true, purpose: "显式选择 personal-demo 或 production 部署用途" },
   { name: "DATABASE_URL", required: true, purpose: "数据库连接串（值不入清单）" },
   { name: "AUTH_TOKEN_SECRET", required: true, purpose: "令牌签名密钥（值不入清单）" },
+  { name: "INTEGRATION_ENCRYPTION_KEY", required: true, purpose: "凭据加密密钥（值不入清单）" },
   { name: "PLATFORM_DATA_SOURCE", required: false, purpose: "平台模块数据源选择" },
   { name: "RENTAL_OS_DATA_SOURCE", required: false, purpose: "租赁业务模块数据源选择" },
   { name: "INFRA_DATA_SOURCE", required: false, purpose: "基础设施模块数据源选择" },
   { name: "API_PORT", required: false, purpose: "API 监听端口，默认 3000" },
-  { name: "DATABASE_CONNECT_ON_START", required: false, purpose: "启动时是否立即连库" }
+  { name: "DATABASE_CONNECT_ON_START", required: false, purpose: "启动时是否立即连库" },
+  { name: "LOCAL_DEMO_PASSWORD_RESET_ENABLED", required: false, purpose: "个人演示可显式保留登录前重置，正式生产关闭" }
 ];
 
 /** 发布后用于确认服务可用的入口。只记录路径与期望，不在门禁里替代真实巡检。 */
@@ -54,6 +59,15 @@ function inspectEnvNames(env, vars = RELEASE_ENV_VARS) {
     missing: vars.filter((row) => row.required && !has(row.name)).map((row) => row.name),
     optionalMissing: vars.filter((row) => !row.required && !has(row.name)).map((row) => row.name)
   };
+}
+
+function inspectReleaseEnvironment(env) {
+  try {
+    validateApiEnvironment(env, { release: true });
+    return { ok: true, problems: [] };
+  } catch (error) {
+    return { ok: false, problems: [error.message] };
+  }
 }
 
 /**
@@ -178,6 +192,7 @@ module.exports = {
   RELEASE_ENV_VARS,
   HEALTH_ENTRYPOINTS,
   inspectEnvNames,
+  inspectReleaseEnvironment,
   digestFiles,
   summarizeWorktree,
   inspectBuildProvenance,

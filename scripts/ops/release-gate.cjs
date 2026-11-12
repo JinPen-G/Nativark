@@ -20,6 +20,7 @@ const {
   RELEASE_ENV_VARS,
   HEALTH_ENTRYPOINTS,
   inspectEnvNames,
+  inspectReleaseEnvironment,
   summarizeWorktree,
   inspectBuildProvenance,
   assertNoSecrets
@@ -97,7 +98,7 @@ void (async () => {
   );
 
   // ---------- 4. 环境变量名（只记名，不记值） ----------
-  const env = { ...readEnvFile(".env"), ...process.env };
+  const env = { ...readEnvFile(), ...process.env };
   const envNames = inspectEnvNames(env);
   record(
     "必需环境变量已配置",
@@ -107,6 +108,8 @@ void (async () => {
   if (envNames.optionalMissing.length) {
     log(`  · 可选变量未设置（使用默认值）：${envNames.optionalMissing.join(", ")}`);
   }
+  const environment = inspectReleaseEnvironment(env);
+  record("发布配置值有效", environment.ok, environment.ok ? "运行模式、数据源、密钥及端口校验通过" : environment.problems.join("；"));
 
   // ---------- 5. 目标库守卫与迁移状态（只读） ----------
   let target;

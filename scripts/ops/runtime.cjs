@@ -12,30 +12,29 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { redact, resolveDedicatedTarget, OpsTargetError } = require("./dedicated-env.cjs");
+const { loadProjectEnvironment, readEnvironmentFile } = require("../../config/environment.cjs");
 
 const ROOT = path.resolve(__dirname, "..", "..");
+// CLI entry points need the environment before deriving container and output names.
+// Library imports keep their existing explicit loading boundary.
+if (require.main && path.dirname(require.main.filename) === __dirname) {
+  Object.assign(process.env, loadProjectEnvironment({ appDirectory: path.join(ROOT, "apps", "api"), mode: process.env.NODE_ENV }));
+}
 const CONTAINER = process.env.OPS_MYSQL_CONTAINER || "rental-os-mysql";
 
 /** 从 env 文件读取键值。仅用于本地开发；CI 应直接给进程环境变量。 */
-function readEnvFile(relative = ".env") {
-  const file = path.join(ROOT, relative);
-  if (!fs.existsSync(file)) return {};
-  return Object.fromEntries(
-    fs.readFileSync(file, "utf8").split(/\r?\n/)
-      .filter((line) => line.includes("=") && !line.trim().startsWith("#"))
-      .map((line) => {
-        const at = line.indexOf("=");
-        return [line.slice(0, at).trim(), line.slice(at + 1).trim().replace(/^"|"$/g, "")];
-      })
-  );
+function readEnvFile(relative) {
+  if (relative !== undefined) return readEnvironmentFile(path.resolve(ROOT, relative));
+  return loadProjectEnvironment({ appDirectory: path.join(ROOT, "apps", "api"), mode: process.env.NODE_ENV,
+    env: { RENTAL_ENV_FILE: process.env.RENTAL_ENV_FILE } });
 }
 
 /** 进程环境优先于 env 文件：CI/运维现场用环境变量覆盖，不必改仓库里的文件。 */
-function loadDatabaseUrl(envFile = ".env") {
+function loadDatabaseUrl(envFile) {
   return process.env.DATABASE_URL || readEnvFile(envFile).DATABASE_URL || "";
 }
 
-function requireTarget(envFile = ".env") {
+function requireTarget(envFile) {
   return assertContainerEndpoint(resolveDedicatedTarget(loadDatabaseUrl(envFile)));
 }
 
@@ -62,7 +61,7 @@ function assertContainerEndpoint(target) {
  * 备份仍用应用账号只读源库，只有演练库的 CREATE/DROP/导入/校验用管理账号。
  * 没配置就明确失败——不回退到应用账号偷偷试一把，也不内置任何默认口令。
  */
-function requireAdminTarget(target, envFile = ".env") {
+function requireAdminTarget(target, envFile) {
   const env = readEnvFile(envFile);
   const user = process.env.OPS_ADMIN_USER || env.OPS_ADMIN_USER || "root";
   const password = process.env.OPS_ADMIN_PASSWORD || env.OPS_ADMIN_PASSWORD

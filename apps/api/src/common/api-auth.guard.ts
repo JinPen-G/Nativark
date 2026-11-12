@@ -107,7 +107,6 @@ export const PUBLIC_ROUTES = new Set([
   "/openapi.json",
   "/public/demo-requests",
   "/auth/login",
-  "/auth/development/reset-demo-password",
   "/auth/refresh",
   "/auth/logout",
   "/auth/me",
@@ -271,6 +270,7 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password") return ["system:params:manage"];
   const creditRoute = `${method.toUpperCase()} ${path}`;
   // Entry read rights do not replace original owner/scope or each financial
   // source's independent authority inside the material/source readers.
@@ -1054,11 +1054,15 @@ export class ApiAuthGuard implements CanActivate {
       return true;
     }
 
+    if (request.method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password"
+      && this.authService.isPersonalDemoPasswordResetEnabled?.()) {
+      return true;
+    }
+
     if (
       path === "/health" ||
       path === "/openapi.json" ||
       path === "/auth/login" ||
-      path === "/auth/development/reset-demo-password" ||
       path === "/auth/refresh" ||
       // 退出只消费原刷新令牌撤销其会话，不要求已被本地清空的access token，不授予业务访问。
       (request.method.toUpperCase() === "POST" && path === "/auth/logout") ||
@@ -1152,6 +1156,9 @@ export class ApiAuthGuard implements CanActivate {
     if (!user) {
       throw new UnauthorizedException("请先登录");
     }
+    if (path === "/auth/development/reset-demo-password" && !user.isSaasAdmin) {
+      throw new ForbiddenException("演示账号密码重置仅向平台管理员开放");
+    }
     if (isBudgetPlatformRoute(request.method, path) && !user.isSaasAdmin) {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
@@ -1179,6 +1186,7 @@ export class ApiAuthGuard implements CanActivate {
         "/auth/session-context",
         "/auth/change-password",
         "/auth/logout",
+        "/auth/development/reset-demo-password",
         "/rental/v1/categories"
       ].includes(path) &&
       !path.startsWith("/platform/tenants") &&
