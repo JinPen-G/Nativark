@@ -7940,10 +7940,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
     // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
     let serviceAmount = 0;
-    let serviceSnapshots: RentalQuoteServiceSnapshot[] | undefined;
-    if (args.services?.length) {
+    let serviceSnapshots: RentalQuoteServiceSnapshot[];
+    // New previews always resolve eligibility and mandatory-rule omissions.
+    // Only the resolver's confirmed empty result means no added services.
+    {
       const resolved = resolveQuoteServices(state.services, {
-        selections: args.services,
+        selections: args.services ?? [],
         itemGroupIds: args.lines.map((line) => line.itemGroupId),
         fulfillmentMode: args.fulfillmentMode,
         locationIds: args.locationIds,
@@ -7956,7 +7958,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       });
       // 与下单报价同一道闸门：续租此前从不校验容量，于是可以给容量已满的服务加单，
       // 到履约那天没人能做。快照也必须带出去，否则生效时无从占用容量。
-      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots, extensionPricingContext.getStore()?.tx);
+      if (resolved.snapshots.length) await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots, extensionPricingContext.getStore()?.tx);
       serviceAmount = resolved.totalAmount;
       serviceSnapshots = resolved.snapshots;
       // 增量式续租按新增时段单独计费，不复算原订单的优惠链，因此这段服务费确实没有减免。
@@ -8241,9 +8243,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 增量期的增值服务：按新增时间段单独计费，与原订单已有的服务互不影响。
     let serviceAmount = 0;
     let serviceSnapshots: RentalQuoteServiceSnapshot[] | undefined;
-    if (args.services?.length) {
+    // Ordinary new extensions need a complete service result. Repricing modes
+    // keep their existing behavior and do not introduce implicit new services.
+    if (args.services?.length || !args.mode) {
       const resolved = resolveQuoteServices(state.services, {
-        selections: args.services,
+        selections: args.services ?? [],
         itemGroupIds: args.lines.map((line) => line.itemGroupId),
         fulfillmentMode: args.fulfillmentMode,
         locationIds: args.locationIds,
@@ -8255,7 +8259,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         workspaceId: this.workspaceOf(tenantId)
       });
       // 与下单报价同一道闸门；快照带出去供生效时占用容量。理由同增量式续租那一处。
-      await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots, extensionPricingContext.getStore()?.tx);
+      if (resolved.snapshots.length) await this.serviceCapacities?.assertAvailableForQuote(tenantId, resolved.snapshots, extensionPricingContext.getStore()?.tx);
       serviceAmount = resolved.totalAmount;
       serviceSnapshots = resolved.snapshots;
       for (const snapshot of resolved.snapshots) {

@@ -4,6 +4,38 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="extension-service-empty-snapshots-20261112"></a>
+
+## 新续租的服务解析与明确空快照（2026-11-12）
+
+按PM明确窗口，从已核GitHub的`b659aa857088e01cab277d4270390e9845eeaead`接续，只改[报价服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)与[事实仓储](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts)。新增时段独立续租及普通原价全租期补差均解析本空间服务目录，即使请求未选服务也检查必选规则；明确无新增服务返回`[]`，不调用空服务容量检查。已有核减/重价模式保持原语义，不隐式追加服务。
+
+新续租持久化保留解析所得的空数组；旧`undefined/null`仍写`Prisma.DbNull`，不由金额补快照，不改原订单服务发生项。直接消费者为CoreController续租预览/申请、ClientApiService本人及企业续租报价/核对和Core批准生效；沿原报价、服务容量及幂等链，未扩Shared、DTO、OpenAPI或企业政策签名。
+
+原续租服务fixture的限定装配覆盖两种模式：无新增服务的报价及持久化、遗漏必选拒绝、已选择零价必选服务保留、已有核减模式和旧缺失保留、原报价不变，退出0；实际批准申请保存空快照和原预览指纹的限定调用退出0。仅补原异步getter与同空间库存读取夹具，SQL/授权/事务/批准仍为替身。API原tsconfig完整emit退出0，864份自持JS逐文件核对，更新本片2份，四项Shared/Client保护未变；当前源码hash与构建清单一致。命令、首次失败、源码及产物hash唯一见[阶段证据](../../output/category-governance/extension-service-snapshots-20261112.json)。
+
+原`tests/rental-extension-services.test.cjs`直接运行仍在旧同步getter导致的`defaultUnit`处退出1；限定调用保留`:160`期待`undefined`、实际`[]`的原断言失败，不修改测试或回退已批准的空快照语义。固化证据后867份退出文件/缓存及42个暂存目录已删除。原CAT-GOV-04/13动作矩阵和CLOSE/企业完整验收仍需真实事务、权限及消费者证据；本片不抬完整结项比例，R08后续Core源码尚未纳入本次包验证。
+
+<a id="fixed-category-prerequisites-20261112"></a>
+
+## a0编码及619执行依赖的固定前置核收顺序（2026-11-12）
+
+按PM反馈，以固定main `0e9f9394225feea9190eb437afccee1b18764572`作只读对照。本树a0/619已推送不代表可把整份文件覆盖main；同文件里的父功能和counter检查点须分开。以下是可按自身固定差异核收的功能片及依赖入口，不声明原CAT/CLOSE整项完成，不重跑已绿组、不复制环境。
+
+| 建议顺序/固定源码 | 最小功能与源码范围 | 原验证入口/边界 |
+| --- | --- | --- |
+| 1：8b64f8efa2146ddb53a9e5de8f95f53d926d9cc3 → b6aa09ad368bf55697e67867f9958e57049a5621 | governance.service/controller原SaaS身份头及AuthService/PlatformRepository同事务复验，再接versionValidation/统一业务解码、来源差异和开放资格；原Auth方法须已在宿主存在 | [治理原身份阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)、[结构阶段](品类治理/品类治理-开发记录.md#governance-version-structure-20261111)；原治理脚本及类型、限定真实签名/角色读取替身。不是只复制新增method |
+| 2：8fb37b4e4a3b455c143eead3cae95d6ce2b8116d；40eaeb8983955acd5eacaee6b877a4d18567bed9 | 配置仓储/Core/state恢复的本空间profile读取/保存及保留边界，再核缺已提交档案不补模板；这些实际档案接点是下面初始化/续租所需基础 | [空间档案](品类治理/品类治理-开发记录.md#workspace-profile-persistence-20261111)、[缺档案](品类治理/品类治理-开发记录.md#committed-profile-presence-20261111)；原config-workspace-scope、初始化刷新及限定保存/缺源调用。counter未进入此片 |
+| 3：f0e69b9600cbb8110bcc0d8b0ede09bbf894477b | CoreConfigStore的readDefaultWorkspaceInitialization合同、仓储实现及Core.initializeTenant原事务重入；缺资料拒绝、原默认绑定不被推荐覆盖 | [默认重入阶段](品类治理/品类治理-开发记录.md#default-initialization-reentry-20261111)；10组有限调用、配置范围3项，原初始化夹具缺读接点失败保留。选版前宿主人员/商业锁缺口另由原平台作者闭合 |
+| 4：16d080e48c5ad507f847e4f7b422eb1610725434 | config.loadWorkspace同空间档案及成员/组成读取；business.quoteEnterpriseExtension原订单/报价/配置同源校验。依赖真实本空间profile读取，不带5e counter | [续租同源阶段](品类治理/品类治理-开发记录.md#extension-scoped-config-20261111)；配置范围3项/限定来源通过，原renewal-repricing旧同步getter夹具失败。未执行金额全链或真库 |
+| 5：9331582b7506eede97c8ef02c19d8b5528601249 | fact.readQuotedInspectionTemplates、Core检查恢复/本批换货范围、frozen模板解码、R0 order-inspection-basis引用恢复，共4源码文件 | [历史检查阶段](品类治理/品类治理-开发记录.md#historical-inspection-source-20261111)；原inspection-resource/core-closure及限定恢复/空/坏/跨范围通过，exchange-inspection查询记录器一处失败保留。关联原报价JOIN须一起收 |
+| 6：00f19015a6751b1847d2c1d9a991ef37cc6aaa24 | category-active-write的lockCategoryContext及规则/日历绑定草稿两个消费者，复验绑定ID/修订/正文；不能只替换main原lockActiveCategoryBinding调用 | [绑定草稿阶段](品类治理/品类治理-开发记录.md#bound-draft-category-context-20261111)；原规则/日历及限定锁口/类型，旧缺标记/别名夹具失败保留。e82的replaceCategoryUniqueClaims不是此helper的函数依赖，同文件不整包带入 |
+| 7：cb96a636b61497243d75032e98d0e301ff3d31a0 → a0a0451754d77b7454de4dad9f5044a4e70c3949 → 619f50c5a04f2af805f84f3977e78dc4683cfb81 | 确认主树已收forWorkspace绑定修订片，再按a0自身编码差异接上面已核功能，最后接Runtime/Core/business必选及历史Hook依赖。a0为15源码编码差异，619为3源码执行差异 | [编码](品类治理/品类治理-开发记录.md#canonical-category-code-20261112)、[执行依赖](品类治理/品类治理-开发记录.md#capability-runtime-admission-20261112)；类型/原Hook/限定调用通过，原7项5过/2失败及17项11过/6失败分别保留 |
+
+`34df464ecd3e8f8b5a59fca187eef25b90f5868c`的已发布原收据审计校验另可按[发布回读](品类治理/品类治理-开发记录.md#publication-receipt-integrity-20261111)独立核收；它不是a0编码函数的直接前置。`e82aac6fb75f3749b61db2076038ee6026091fee`的唯一声明/回填helper只随其真实型号/资产/回填消费者另片核，不能借00f/a0收完整父文件。
+
+**继续留作未收口检查点：** `5e8d52325b37cf6b613c103b2e291b25843e35ec`及其记录检查点`61fece91ae007ed42b02b7c96c1f1ab0d1b0140e`涉及配置行counter/回填；`fe65ac652076d5bed4c9ca439d50b563c61d17aa`仅原事务issue_recorded及九项独立读。两者不能标作已经接入四入口参加者、完整短缺判定或同事务开业总版；列/DDL/正式政策及真实资源仍缺相应证据。PM按上述功能差异串行，若应用需counter段即暂停该段核收并另报最小依赖。本树不追main活动HEAD、不改main工作区。
+
 <a id="preparation-receipt-validation-core-20261112"></a>
 
 ## 原批次回执校验收口与Core提交链接续（2026-11-12）
