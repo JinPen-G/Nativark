@@ -68,12 +68,15 @@ export function projectAllocationPickupBasis(input: RentalAllocationPickupInput,
     if (scope === "asset") delete active.serialNo;
     try { validateRentalCategoryAttributes(fields, scope, active, scope === "asset" ? { serialNo } : {}, false); }
     catch { throw new ConflictException("当前受权资产资料与品类字段定义不一致"); }
-    return fields.filter(field => field.scope === scope).flatMap(field => {
+    return fields.filter(field => field.scope === scope).map(field => {
       const value = scope === "asset" && field.code === "serialNo" ? serialNo : active[field.code];
       const normalizedValue = normalizedRentalAttributeValue(value);
-      if (normalizedValue === undefined) return [];
-      return [{ scope, code: field.code, label: field.label, type: field.type,
-        value: value as string | number | boolean, normalizedValue, ...(field.unit ? { unit: field.unit } : {}) }];
+      // Missing data does not retire its current required/unique/option rules.
+      // Preserve the original optional flags; do not invent identifier formats.
+      return { scope, code: field.code, label: field.label, type: field.type,
+        required: field.required, unique: field.unique, options: field.options === undefined ? undefined : [...field.options],
+        unit: field.unit, valueState: normalizedValue === undefined ? "not_recorded" as const : "recorded" as const,
+        value: normalizedValue === undefined ? null : value as string | number | boolean, normalizedValue: normalizedValue ?? null };
     });
   };
   if (input.asset && (!current || current.workspaceId !== input.workspaceId

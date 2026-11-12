@@ -4,6 +4,16 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="allocation-pickup-field-rules-20261112"></a>
+
+## 单资产当前字段的原规则与缺值定义（2026-11-12）
+
+从已推送核GitHub的reader `6d35ab7489daa6403da30956d776a5a6331bedb1`接续，按AI-RD/PM反馈仅修改[原投影](../../apps/api/src/modules/rental-core/rental-order-allocation-pickup.read.ts)：当前受权单资产的每个已定义字段保留原required/unique/options/unit，true、false和省略语义分别透传，选项复制不暴露可变定义。无值不再删除定义，valueState明确not_recorded，value/normalizedValue为null；合法零/false仍recorded。未新增VIN/车牌格式或唯一规则，不用当前定义补领取历史，也不把单分配项的完整投影当作资产目录全覆盖。
+
+限定字段调用退出0，核原规则/选项、必填无值、省略与显式false、零/false、选项独立副本及领取缺失分区。API沿原配置作内存类型：只把两份未提交AIN-17仓储WIP恢复为6d35原文件，866根/2011源诊断0，证明本reader后继不依赖未提交透传片；没有复制工作目录或生成包。源码hash、实际短命令及结果唯一见[字段规则证据](../../output/category-governance/allocation-pickup-field-rules-20261112.json)，audit0、退出暂存已删除。原6d35六SQL替身/范围/历史证据保留，当前仍未执行真实SQL/Auth/媒体/模型/宿主或独立Review。
+
+后继交AI-RD/PM，由QA合核6d35与本片，再由AI作者接公共/StaffFactory/provider消费。AIN-17两Core仓储的原tx透传另为WIP；PM已核五树无重叠并授权membership.service.ts仅countPlans原tx参数/原租户总体计数两行，尚未接完整九项/参加者，不夹入本reader提交或抬CAT-GOV/CLOSE进度。
+
 <a id="allocation-pickup-core-source-20261112"></a>
 
 ## 单资产资料与原领取依据的只读接点（2026-11-12）
