@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-task-center-section-regression-20261112"></a>
+## 任务中心待处理区域默认展开回归修复（2026-11-12）
+
+QA 对固定 `270fbb7af` 指出 [TaskCenterPage](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx) 同时传入受控空数组和 defaultOpen；[原 Accordion](../../apps/admin/src/components/ui/Accordion.tsx) 优先使用 value，导致首次待补充/待确认均折叠。Root 独立核对后，改为仅在当前 taskId 或原任务状态变化时按语义 key 打开 input/approval；移除失效的索引默认项以及候选会话激活时的无条件清空。普通刷新不覆盖手动开合，候选移入继续打开 input 并保留其他已开区域，订单人工办理等前置条目不影响目标定位。源码 blob `1c88ed8f85a612b2c2e46ee621b2220e3030bd5f`；原 Accordion/vendor/样式、读取与执行边界均未修改。
+
+沿既有有限 hook 宿主方法，以 `node --no-compilation-cache -` 在内存装载实际 TaskCenterPage 与 Accordion 源码；query、候选核对会话和组件宿主明确使用替身。首次 waiting_input、带额外首项的 waiting_confirmation、手动开合后同状态刷新、普通任务切换、同任务状态推进、候选移入并保留 usage 六类交互通过，退出 0，命令 SHA-256 `2e10054bc68d06a7303a5544946106661960eaa32c376a85384e3fffaf1fbf98`。首次模拟缺少无关经营区常量替身，其后 loader 误把 motion-tokens 指向应用 lib，均在执行交互前失败；更正为原 tsconfig 的 vendor 别名后通过，未修改生产组件来适应夹具。
+
+TypeScript 5.9.3 检查实际任务中心及原 Vite 声明 2 根/1610 源，零诊断、退出 0，命令 SHA-256 `89d975c16ccffac07f33fd36793abe3cabfec7f82efe24ebaccafc6306edf70b`。`docs:check` 仍为相同 4 处既有缺链，本片链接及任务算术没有新增错误；定向差异格式检查退出 0。审计为空，任务临时目录未创建，无新增测试脚本或产物。此为源码交互模拟和类型证据，不是浏览器视觉/真实业务验收；AIN-12 的其他原缺口继续保留，不能据此提高整项百分比。
+
 <a id="ain-secret-box-nest-compatibility-20261112"></a>
 ## 原凭据服务 Nest 注入修复与 AI 配置兼容核验（2026-11-12）
 

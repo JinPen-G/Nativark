@@ -87,7 +87,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     () => selected !== null && selectedOwner.current === selected && identityKey() === identity
       && !!useAuthStore.getState().token && !document.hidden), [identity, selected]);
   const inputReviewState = useSyncExternalStore(inputReview.subscribe, inputReview.snapshot, inputReview.snapshot);
-  useEffect(() => { inputReview.activate(); setDetailSections([]); return () => inputReview.dispose(); }, [inputReview]);
+  useEffect(() => { inputReview.activate(); return () => inputReview.dispose(); }, [inputReview]);
   const displayPort = useMemo(() => createAiWorkbenchDisplayPort({ tenantId, workspaceId,
     current: () => identityKey() === identity && !!useAuthStore.getState().token && !document.hidden,
     reviewCandidate: async (candidate, fields, signal) => {
@@ -186,6 +186,11 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const data = originalPage && { ...originalPage, items: originalPage.items.map(row => observed?.taskId === row.taskId
     ? { ...row, status: observed.status, revision: observed.revision, updatedAt: observed.updatedAt, cancelRequestedAt: observed.cancelRequestedAt } : row)
     .filter(row => status === 'all' || row.status === status) };
+  const selectedStatus = data?.items.find(row => row.taskId === selected)?.status;
+  // Initialize only for a different task or workflow state; ordinary refreshes
+  // and candidate review updates preserve the user's controlled panel choices.
+  useEffect(() => { setDetailSections(selectedStatus === 'waiting_input' ? ['input']
+    : selectedStatus === 'waiting_confirmation' ? ['approval'] : []); }, [selected, selectedStatus]);
   const selectedVisible = !!data?.items.some(row => row.taskId === selected);
   useEffect(() => { if (query.error || followFailed || originalPage && selected && !selectedVisible) {
     if (followFailed) setFollowError(true);
@@ -245,7 +250,6 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       error={query.error ? t("当前任务不可读取，请重新核对权限或稍后重试。") : null}
       detailActions={visible && !followFailed && selected && data?.items.some(row => row.taskId === selected) ? <Accordion key={selected}
         value={detailSections} onValueChange={setDetailSections}
-        defaultOpen={data.items.find(row => row.taskId === selected)?.status === 'waiting_confirmation' ? 0 : data.items.find(row => row.taskId === selected)?.status === 'waiting_input' ? 1 : -1}
         items={[
           ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'order_explanation'
             && useAuthStore.getState().hasPermission('rental-os:order:view') ? [{ key: 'order-handoff', title: t('订单人工办理'),
