@@ -529,7 +529,10 @@ test('exchange duplicate original key, ACK loss and receipt failure never create
   f.flags.failReceipt = true; await assert.rejects(f.decide(original.id), /receipt/u); assert.equal(f.state().exchangeApprovals[0].state, 'pending');
   const failed = exchangeFixture(); failed.flags.failReceipt = true; await assert.rejects(failed.request(), /receipt/u);
   assert.equal(failed.state().exchangeApprovals.length, 0); assert.equal(failed.state().receipts.length, 0);
-  const missing = exchangeFixture(); missing.preview.additionalAmount = 0; await assert.rejects(missing.request(), /新增/u);
+  const missing = exchangeFixture(); missing.preview.additionalAmount = 0;
+  missing.preview.depositDelta = 0;
+  missing.preview.preAuthDelta = 0;
+  await assert.rejects(missing.request(), /新增/u);
 });
 
 test('order exchange history stays applicant/workspace/order scoped after spending grants change and performs no new spending', async () => {
