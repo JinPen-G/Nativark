@@ -6,6 +6,25 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-original-field-human-input-20261112"></a>
+## AIN-12 原字段生产、候选核对与原回答接线（2026-11-12）
+
+从已上传的 `41244ecbcf0b1185a722838a0f450cda123b9153` 接入本片。dev1 三份私有源逐一同 blob：字段服务 `12856bf5e173a6f05e4bb07bfb864283655a1b68`、输入核对会话 `96c95797ad7f63bb5d66769fefc5fb805577d683`、原补充信息组件 `f326110d83d46a89183ee137850ab03e538b5abb`。Root 补原生成/读取/API/TaskCenter 和英文文案，共 11 个源码；报价 goal leaf、员工冻结成果及模型控制设计不混入本片。
+
+[字段服务](../../apps/api/src/modules/ai-native/workbench-field-material.service.ts)直接调用原 `quote.candidates.prepare` 和 `originalQuoteAnswerContract`，只投影实际提供的数量、UTC 时间和受权地点。当前原 quote-input 配置读取独立核原主体；引用标为 current，不捏造历史配置快照。缺依据返回 null，默认值未提供就保持 unavailable，客户/地址/企业选择及金额不进入此字段包。当前再验证重读原准备源，保留原引用和观察时间，字段/候选版本、范围、政策和期限变化仍拒绝。
+
+[原生成](../../apps/api/src/modules/ai-native/workbench-display-generation.service.ts)在原 plan/input 冻结前把字段包写入 witness，并将安全控件合同作为独立 system part 送入同一个 Gateway 请求；[输入校验](../../apps/api/src/modules/ai-native/model-input/task-model-display-witness.ts)核该合同、marker 和原 witness 一致。该 part 只描述 `data-field-id`、原字段/约束和候选语义，不携带完整配置或人类回答证明。旧无字段 witness 不在历史读取时补签；后继 Run 暂不继承首轮 candidate。
+
+[公开展示读取](../../apps/api/src/modules/ai-native/workbench-display.application.ts)复用同一真实字段权威；字段来源请求只返回安全合同和原引用。后台 [display API](../../apps/admin/src/api/aiWorkbenchDisplays.ts)在移交候选前重验原展示，随后 [输入核对会话](../../apps/admin/src/features/ai-native/workbench-input-review-session.ts)读取实际完整 question；安全投影与完整问题明确区分。TaskCenter 打开原补充信息区域，[可信组件](../../apps/admin/src/features/ai-native/TaskClarification.tsx)再次核原问题后移入表单，保留合法人工改值和冲突提示，最终仍由既有 ConfirmAction/原输入仓储产生回答收据。候选移入表单不等于已记录人类回答，更不等于批准。
+
+Root 一组实际代码组合模拟最终退出 0，`node --no-compilation-cache -` SHA-256 为 `83b0205e8274de68c9b2302544004db025121b2b5d008c1392f9ccc8311cf9ce`：原会话/Task、真实 Gateway 与字段 witness、标准公开 Controller/Guard/RequestIdInterceptor、实际 display API/MessageChannel/session 和原 TaskCenter API/B/C 串接。该 Core 夹具实际提供 quantity、pickup_location、starts_at、ends_at 四字段；不把未提供的 return_location 写成已覆盖。合成通道值及伪造 human receipt 来源不产生回答；人工数量 3 在重新读取后保留。明确提交后丢 ACK，浏览器只留原三字段 locator；读回原回答后明确继续，最终 1 原 Task、2 次模型调用、1 原回答收据、0 报价、0 订单写入。首个 resume 的 continuation 为 unavailable，原键核对和明确继续仍可推进；第二 Run 的 RUNNING 状态没有被称为任务或业务完成。身份/可见性失效拒绝继续交付。
+
+运输、路由准入、数据库数据及 React/窗口是明确夹具；没有真实 HTTP、浏览器、数据库或供应商验收。原失败记录保留：最初错误要求未提供的 return_location、模拟 document 缺监听方法、把 input/resume 截成 resume 导致路由未调用；只修模拟驱动与不成立的夹具假设，没有放宽生产校验或新增测试文件。dev1 自身的原 Core→字段/完整问题→API/B/C 模拟、时钟变化引用复核和连续空问题草稿保留三组均已交回，各组范围不冒称本公共装配已验证。
+
+最终暂存 11 源后以 Git 索引 1850 个源对象再次核定，排除其他活动 WIP：TypeScript 5.9.3，API 2 根/1537 源、后台 2 根/1610 源均 0 诊断、退出 0，命令 SHA-256 分别为 `1156229cb6fb37c90ea3c281479a201b32daf075ed1b066e1874b684a55b6160`、`d47a0a2715d3bd3effe493d3e360866d1be21122107670a0411de7bc282b74ce`。三条新增冲突提示有英文映射。审计 0，唯一临时根未创建，没有脚本/声明/Client/dist 或后台资源遗留。
+
+AIN-12 尚缺已准备条件到既有 linked 重新准备的右侧消费，以及重新排版/重新解释的原 Task 控制准入；首轮以外的字段仍需原候选 lineage，不能从旧字段包推断。停止可沿现有“请求取消原任务”及原收据分支，不另造停止执行器。新的解释/排版必须经同 Task 的受控新模型 Run、原操作收据与累计资源，默认的人类回答 lineage 和终态规则不得全局放宽到客户/媒体；实施须限定 operator workbench 的显式组合。以上是当前未完范围，AIN-12/13/14 不据本片增加 100%。
+
 <a id="ain-client-mini-type-evidence-20261112"></a>
 ## 客户小程序完整类型告警的固定源码复核（2026-11-12）
 
@@ -17,7 +36,9 @@ PM 报告 main `179fb4941` 原配置类型检查出现 78 诊断，企业后继�
 - main 固定源码：108 份 shared 声明、293 个传递源，2 诊断、退出 1；SHA-256 为 `d6d21b1837a81aef756c038c04baca4a3cc71329e3a946d68d08b7c3d90bbf65`。仅为 exchange/index.ts:142 与 order/index.ts:405 缺 consumed 状态标签，对应企业审批状态扩展，不是 76 个 AI 会话错误。
 - 进一步核实际编译选项和源码包含性，并用 TypeChecker 读取 `clientTaskApi.readCreation/readModelResult/readInput`，均推断为完整对象 Promise，既非 any 也非 unknown。报价/session 实际正文均进入编译；Zod 3.25.76 的正式 `.d.cts` 依赖已解析。该检查命令 SHA-256 为 `939ab23ce1918cbcf1793b283ee2a295a48e4290bcd1064f73bf11ace09096f2`。dev2 的原失败结果只有 291 个源，差异先按验证器/声明加载排查，不能据该失败批量修改正确业务类型。
 
-两个 main 标签已由 PM 的企业后继负责；未在 AI 树尚无 consumed 的旧合同上造额外状态或越权修改企业文件。dev2 暂停这批源码补丁并核查其虚拟声明加载，已有差异保留待判；其余核心研发继续。该阶段只有类型证据，未重复运行无源码变化的业务冒烟，不声称微信、真实接口或生产验收通过。审计为空、任务临时目录未创建，无脚本、声明目录或 Client/dist 遗留。
+dev2 随后确认实因：原 driver 的 paths 为 null，父包读到了主仓库 dist，`@rental-os/shared/miniprogram-client` 无法按 Node10 解析；vendor 声明错误又被 skipLibCheck 隐去，调用才推断为 Promise<unknown>。两边实际加载相同的 14 个 Zod 3.25.76 声明，并非 Zod 版本或 `.d.cts` 缺失。补齐内存声明的父包/子路径映射后，固定 ea9、110 声明、107 根/295 源独立复验 0 诊断、退出 0（`67ec68/86820/ee176b`）；正式 `scripts/miniprogram-shared-types.cjs` 原本已有两项映射，无须改仓库验证入口。助手撤回 78 项源码待修判断，期间客户端源码改动为 0。
+
+两个 main 标签已由 PM 的企业后继负责；未在 AI 树尚无 consumed 的旧合同上造额外状态或越权修改企业文件。dev2 已回企业本人报价的正式宿主定位，其余核心研发继续。该阶段只有类型证据，未重复运行无源码变化的业务冒烟，不声称微信、真实接口或生产验收通过。审计为空、任务临时目录未创建，无脚本、声明目录或 Client/dist 遗留。
 
 <a id="ain14-integration-navigation-20261112"></a>
 ## 开业第三方配置人工入口与重复读取收口（2026-11-12）

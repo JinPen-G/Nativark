@@ -17,15 +17,15 @@
 | 负责人 | 当前范围 |
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 收口 AIN-14/18 已有生产装配及固定提交；纠正 AIN-13 前置记录并优先补 AIN-12 实际字段/控制链；接 AIN-15 的原请求、模型、Reader 与公共出口；AIN-17 等 Core 固定权威来源后组合。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 开业提案/第三方桥及两导航源均已交回。当前独占 workbench-field-material.service.ts、workbench-input-review-session.ts 和 TaskClarification.tsx，接有限原字段、候选核对和合法草稿保留；Root 接公共发布与宿主，不等待阶段集成。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 三份 quote-goal leaf 已固定交 Root。客户小程序告警经 Root 完整声明对照，AI 固定源 0 诊断、main 基线仅 2 处企业 consumed 标签；先核自身 291 源验证器与完整声明加载差异，暂不据假 unknown 修改业务源码，收束后继续企业本人报价宿主只读定位。员工冻结成果仍待核接。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 字段服务、输入核对会话与 TaskClarification 三源已冻结交 Root；已交 operator 专用模型控制来源核定。现转 AIN-19 图片/语音识别到原候选草稿的全文核定，按原证据收口或报告最小私有修复窗口；不改 Root 控制/公共入口或员工冻结源。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 三份 quote-goal leaf 已固定交 Root。已确认客户小程序误报来自原 driver 遗漏 Runtime 子路径映射；同一完整声明独立复验 0 诊断、源码改动 0。现继续企业本人报价的 Client/ECP 正式宿主只读定位；员工冻结成果仍待核接。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
 
 公共窗口不得夹带企业端的 ClientApiService.readOrderSubmission、企业 reader/controller/GET 和后台企业材料。Core 订单、资金、品类与配置权威仍由原专项负责，AI 不重建这些规则。
 
 ## 当前收口入口
 
-1. **AIN-12 后台任务中心。** [原展示生产/读取/实际消费者](<AI Native-开发记录.md#ain12-original-display-pipeline-20261112>)的 25 源已推 `7332875c9`，PM 已收 main `0e9f93942`。实际会话→原请求/Task/Gateway→witness/Artifact→Guard/HTTP/API/session 的一组模拟通过；原展示历史重开不补签、不派发，opaque iframe、封闭桥、限额及可信摘要降级保留。尚缺非 null 字段的真实来源/规则、可信人类输入与重新准备、重排/重新解释的原调用准入，以及完整业务入口的办理控制。先复用既有合同/草稿和原业务准备链，不另外制造报价、批准或执行状态机。旧 modelResult/closeUnstarted Guard 大小写匹配已在后继修复，无需重做。
+1. **AIN-12 后台任务中心。** [原展示生产/读取/实际消费者](<AI Native-开发记录.md#ain12-original-display-pipeline-20261112>)的 25 源已推 `7332875c9`，PM 已收 main `0e9f93942`。随后[原字段→候选→可信原问题→原回答](<AI Native-开发记录.md#ain12-original-field-human-input-20261112>)已完成实际公开组合模拟和固定类型；首轮字段在原模型计划前冻结，原 null witness 不补签，合法草稿保留，unknown 沿原输入收据。尚缺首轮以外的真实字段 lineage、已准备条件到既有 linked 重新准备的右侧消费，以及排版/重新解释的同 Task 控制准入。停止复用原 TaskCancellation 的请求取消/原收据，不另造执行器。新的模型控制须专用 operator origin reader 与原操作记录，不用假回答/new Task 重置资源，也不全局放开客户/图片/语音共享的回答 lineage 或普通终态。Root 拥有这些组合接点；先复用原 Gateway/运行器/草稿和业务链，不另造状态机。旧 modelResult/closeUnstarted Guard 大小写匹配已修，无需重做。
 2. **AIN-14 开业诊断。** TaskOpeningProposalApplication、aiTaskOpeningProposals、task-opening-proposal-session、TaskOpeningProposals 已接普通四分区的原材料→显式预览→关联新 R1→AI 提案与原操作读回；仅保存 AI 提案，不直接保存活动配置/发布。Root 已接 Controller/Guard/provider/OpenAPI/shared/TaskCenter。第三方配置读通过原 integration 权限，只返回有界字段存在性和原检测/修订元数据；普通开业角色不会得到第三方配置，读取不解密或探测。[注册人工导航与重复查询修复](<AI Native-开发记录.md#ain14-integration-navigation-20261112>)已完成 Root 实际组合模拟：变化重确认及撤权/隐藏/旧 epoch 拒绝，原资源授权不再重复生成完整集成材料。最后按空租户、部分开业、未交付能力、mock/失败、旧规则及并发变化逐项核；AIN-12 未满足前不宣布整项 100%。
 3. **AIN-18 经营待办。** Root 已接独立 automationReviewGrant 发布来源、原权限/CAS/TTL/收据和标准 provider/Controller/Guard；grant 启用及 close 丢 ACK 后只读原操作的实际模拟已通过。后台三文件冻结 blob 为 `8bb90e17af6085795f9ce803266d4ed73f0b8447`、`a682b46028320b7756275245c385abef46a0a96f`、`fd6ad0456c4fbf91225c2caf469136f92218f34a`。AutomationReviewSection/TaskCenter 已挂接；交付/归还走原订单，通知走原治理页，退款只读原 GET，opening 走原受权配置；打开入口、关闭待办和事实解决分别判断。退款 accepted 不称 succeeded，不在读取时 refresh 或重退。尚待最终固定组合/API/session/组件核接与 AIN-17 前置；原模型解释宿主未接时须明确不可用，不能走 AUTOMATION owner 的普通 TaskCenter。
 4. **AIN-15 自然语言报价。** 原新材料关联、Core 候选/选单、完整比较、新批准与单次开单已由[关联再准备阶段](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)核接，unknown 不换原操作，变更不挪用旧批准。dev2 三份 goal leaf 只让目标原文进入原冻结模型输入并投影受权候选，不能自动选同名客户、商品或付款人。Root 补 SceneRequest/模型/Reader 正式接线；企业本人入口及四品类目标代表过程继续按原范围收口，不让 operator 冒充企业员工。

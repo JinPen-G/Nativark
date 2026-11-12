@@ -15,6 +15,7 @@ import { conversationCommand } from './conversation-contract';
 import { AiWorkbenchDisplayOriginalReader } from './workbench-display-original.reader';
 import { AiWorkbenchDisplayPreparationService } from './workbench-display-preparation.service';
 import { AiOriginalSceneDisplayGeneration, type AiOriginalSceneDisplayPublication } from './workbench-display-generation.service';
+import { AiWorkbenchFieldMaterialService } from './workbench-field-material.service';
 import { PrismaTaskPlanInputSource } from './runner/prisma-task-plan-input.source';
 import { PrismaModelStepEvidenceAuthority } from './model-input/prisma-model-step-evidence.authority';
 import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocation-bindings';
@@ -87,7 +88,9 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
           tasks: authorization.tasks, evidence, policy,
           observations: { readModelResult: query => observations.readModelResult(request, query) } });
         const producer = new AiOriginalSceneDisplayGeneration({ db: input.db, scopes: authorization.scopes,
-          originals: scenes.requests, publication }, clock);
+          originals: scenes.requests, publication,
+          quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),
+            describe: scenes.tools.quote.businessPreparation.describeInput.bind(scenes.tools.quote.businessPreparation) } }, clock);
         const service = new AiWorkbenchDisplayPreparationService(originals, producer, clock);
         const material = inspectAiWorkbenchDisplayMaterial(await service.read(before.reference));
         const binding = material.presentation.binding, generation = material.presentation.generation;
@@ -109,11 +112,22 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
           const original = await originals.read(before.reference), sources = original.observation.sources;
           const orderIndex = sources.findIndex(source => requestFingerprint(source) === sourceId);
           const knowledgeIndex = original.observation.knowledge?.material.sources.findIndex(source => source.sourceId === sourceId) ?? -1;
-          if (orderIndex < 0 && knowledgeIndex < 0) throw unavailable();
-          const source = await observations.reopenModelSource(request, { original: binding.original, resultId: generation.resultId,
-            sourceIndex: orderIndex >= 0 ? orderIndex : knowledgeIndex, ...(orderIndex >= 0 ? {} : { sourceKind: 'knowledge' }) });
-          if (!source || typeof source !== 'object' || !('source' in source)) throw unavailable();
-          const full = JSON.stringify(source.source); if (!full || Buffer.byteLength(full, 'utf8') > 131072) throw unavailable();
+          const fieldSource = material.fieldMaterial?.sources.find(source => source.sourceId === sourceId);
+          let sourceBody: unknown;
+          if (fieldSource && material.fieldMaterial) {
+            // service.read already revalidated the original configuration and
+            // field rules. Reveal only that safe projection, never its Core
+            // configuration body or the other fields of the human question.
+            sourceBody = { reference: fieldSource.reference, fieldRevision: material.fieldMaterial.fieldRevision,
+              contract: material.fieldMaterial.contract, authority: material.fieldMaterial.authority };
+          } else {
+            if (orderIndex < 0 && knowledgeIndex < 0) throw unavailable();
+            const source = await observations.reopenModelSource(request, { original: binding.original, resultId: generation.resultId,
+              sourceIndex: orderIndex >= 0 ? orderIndex : knowledgeIndex, ...(orderIndex >= 0 ? {} : { sourceKind: 'knowledge' }) });
+            if (!source || typeof source !== 'object' || !('source' in source)) throw unavailable();
+            sourceBody = source.source;
+          }
+          const full = JSON.stringify(sourceBody); if (!full || Buffer.byteLength(full, 'utf8') > 131072) throw unavailable();
           let text = '', bytes = 0;
           for (const character of full) { const next = Buffer.byteLength(character, 'utf8'); if (bytes + next > 8192) break; text += character; bytes += next; }
           result = { text, trust: 'source_data_not_instructions', truncated: text.length < full.length };

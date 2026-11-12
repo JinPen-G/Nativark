@@ -1,21 +1,23 @@
 /** Current-session reads of the original server display artifact and sources.
- * Keeps only one original generation locator in memory; no code/body cache,
- * model generation, Task start, candidate submission or approval is exposed. */
+ * Keeps one generation locator and its safe field projection in memory. A
+ * candidate can open trusted review; no code cache, submission or approval. */
 import { AI_CONVERSATION_HTTP_DRAFT, type ApiResult, type AiWorkbenchDisplayBindingDraft,
   type AiWorkbenchDisplayReadDraft, type AiWorkbenchDisplayRevalidateDraft,
-  type AiWorkbenchDisplaySourceReadDraft } from '@rental-os/shared';
+  type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchFieldMaterialDraft, type AiWorkbenchHostDraft } from '@rental-os/shared';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { inspectWorkbenchDisplay, displayLease, displaySame, type WorkbenchDisplayPort,
   type WorkbenchDisplayExpectation, type WorkbenchDisplayLease, type WorkbenchDisplayMaterial } from '@/features/ai-native/workbench-display-host';
 import { http } from './http';
 
-type Owner = Pick<WorkbenchDisplayExpectation, 'tenantId' | 'workspaceId'> & { current(): boolean };
+type Owner = Pick<WorkbenchDisplayExpectation, 'tenantId' | 'workspaceId'> & { current(): boolean;
+  reviewCandidate?(candidate: AiWorkbenchHostDraft, material: AiWorkbenchFieldMaterialDraft, signal: AbortSignal): Promise<void> };
 type Port = WorkbenchDisplayPort & { activate(): void; dispose(): void };
 type Original = { binding: AiWorkbenchDisplayBindingDraft; runId: string; resultId: string };
 const unavailable = () => Error('AI_RESOURCE_UNAVAILABLE');
 
 export function createAiWorkbenchDisplayPort(owner: Owner): Port {
   let active = true, generation = 0, lifecycle = new AbortController(), original: Original | null = null;
+  let fieldMaterial: AiWorkbenchFieldMaterialDraft | null = null, lease: WorkbenchDisplayLease | null = null;
   const live = (signal: AbortSignal, version = generation) => {
     if (!active || !owner.current() || signal.aborted || lifecycle.signal.aborted || version !== generation) throw unavailable();
   };
@@ -41,32 +43,49 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
     if (!original || !displaySame(original.binding, binding)) throw unavailable();
     return original;
   };
+  const revalidate = async (previous: WorkbenchDisplayLease, signal: AbortSignal): Promise<WorkbenchDisplayLease> => {
+    const ref = locator(previous.binding), binding = previous.binding;
+    const command: AiWorkbenchDisplayRevalidateDraft = { taskId: binding.taskId,
+      inputFingerprint: binding.inputFingerprint, materialHash: binding.materialHash, materialRevision: binding.materialRevision,
+      presentationRevision: binding.presentationRevision, runId: ref.runId, resultId: ref.resultId,
+      fieldRevision: previous.fieldRevision, aclRevision: previous.aclRevision, policyVersion: previous.policyVersion, expiresAt: previous.expiresAt };
+    const result = await material(await post('display-revalidate', command, signal), binding.taskId, signal);
+    const current = displayLease(result);
+    if (!displaySame(current.binding, binding) || current.fieldRevision !== previous.fieldRevision
+      || current.aclRevision !== previous.aclRevision || current.policyVersion !== previous.policyVersion
+      || result.presentation.generation.runId !== ref.runId || result.presentation.generation.resultId !== ref.resultId
+      || Date.parse(current.expiresAt) > Date.parse(previous.expiresAt)) throw unavailable();
+    fieldMaterial = result.fieldMaterial ? structuredClone(result.fieldMaterial) : null;
+    lease = structuredClone(current);
+    return current;
+  };
   return {
     activate() { if (active) return; active = true; lifecycle = new AbortController(); },
-    dispose() { active = false; generation++; lifecycle.abort(); original = null; },
+    dispose() { active = false; generation++; lifecycle.abort(); original = null; fieldMaterial = null; lease = null; },
     async read(taskId, signal): Promise<WorkbenchDisplayMaterial> {
       live(signal);
       generation++; lifecycle.abort(); lifecycle = new AbortController();
-      original = null;
+      original = null; fieldMaterial = null; lease = null;
       const result = await material(await post('display', { taskId }, signal), taskId, signal);
       original = { binding: structuredClone(result.presentation.binding),
         runId: result.presentation.generation.runId, resultId: result.presentation.generation.resultId };
+      fieldMaterial = result.fieldMaterial ? structuredClone(result.fieldMaterial) : null;
+      lease = displayLease(result);
       return result;
     },
-    async revalidate(lease, signal): Promise<WorkbenchDisplayLease> {
-      const ref = locator(lease.binding), binding = lease.binding;
-      const command: AiWorkbenchDisplayRevalidateDraft = { taskId: binding.taskId,
-        inputFingerprint: binding.inputFingerprint, materialHash: binding.materialHash, materialRevision: binding.materialRevision,
-        presentationRevision: binding.presentationRevision, runId: ref.runId, resultId: ref.resultId,
-        fieldRevision: lease.fieldRevision, aclRevision: lease.aclRevision, policyVersion: lease.policyVersion, expiresAt: lease.expiresAt };
-      const result = await material(await post('display-revalidate', command, signal), binding.taskId, signal);
-      const current = displayLease(result);
-      if (!displaySame(current.binding, binding) || current.fieldRevision !== lease.fieldRevision
-        || current.aclRevision !== lease.aclRevision || current.policyVersion !== lease.policyVersion
-        || result.presentation.generation.runId !== ref.runId || result.presentation.generation.resultId !== ref.resultId
-        || Date.parse(current.expiresAt) > Date.parse(lease.expiresAt)) throw unavailable();
-      return current;
-    },
+    revalidate,
+    ...(owner.reviewCandidate ? { async reviewCandidate(candidate: AiWorkbenchHostDraft, signal: AbortSignal) {
+      const command = structuredClone(candidate), version = generation;
+      live(signal, version);
+      if (!lease || !fieldMaterial || !displaySame(command.binding, fieldMaterial.binding)
+        || command.fieldRevision !== fieldMaterial.fieldRevision) throw unavailable();
+      await revalidate(structuredClone(lease), signal);
+      live(signal, version);
+      if (!fieldMaterial || !displaySame(command.binding, fieldMaterial.binding)
+        || command.fieldRevision !== fieldMaterial.fieldRevision) throw unavailable();
+      await owner.reviewCandidate!(command, structuredClone(fieldMaterial), signal);
+      live(signal, version);
+    } } : {}),
     async readSource(binding, sourceId, signal) {
       const ref = locator(binding);
       const command: AiWorkbenchDisplaySourceReadDraft = { taskId: binding.taskId, sourceId,

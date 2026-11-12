@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { AI_TEXT_MODEL_STEP_CODE, AI_WORKBENCH_CONTEXT_DRAFT_VERSION, AI_WORKBENCH_DISPLAY_DRAFT_VERSION,
-  type AiExecutionContext, type AiSceneRequestReceiptDraft, type AiWorkbenchContextDraft } from '@rental-os/shared';
+  type AiExecutionContext, type AiFactReference, type AiSceneRequestReceiptDraft, type AiWorkbenchContextDraft,
+  type AiWorkbenchFieldMaterialDraft, type AiWorkbenchMaterialBindingDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import type { AiScopeRepository } from './ai-scope.repository';
 import type { PrismaOriginalRequestRepository } from './task-request/prisma-original-request.repository';
@@ -13,8 +14,11 @@ import { freezeOriginalInput } from './task-request/original-request.validation'
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { taskModelMaterialSchema, type TaskModelInput } from './model-input/task-model-input';
-import { parseTaskModelDisplayWitness, taskModelDisplayWitnessMarker, type TaskModelDisplayWitness } from './model-input/task-model-display-witness';
+import { parseTaskModelDisplayWitness, taskModelDisplayWitnessMarker, taskModelDisplayFieldContract,
+  type TaskModelDisplayWitness } from './model-input/task-model-display-witness';
 import type { AiWorkbenchDisplayOriginalMaterial } from './workbench-display-original.reader';
+import type { AiWorkbenchFieldMaterialService } from './workbench-field-material.service';
+import type { AiQuoteBusinessPreparationService } from './tools/quote-business-preparation.service';
 
 export const AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION = Symbol('AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION');
 export const WORKBENCH_DISPLAY_PROMPT_REFERENCE = 'workbench-display-html-v1';
@@ -38,7 +42,9 @@ export function readWorkbenchDisplayConfiguration(value: unknown) {
 export type AiOriginalSceneDisplayPublication = { currentConfiguration(): unknown };
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiConversation' | 'aiConversationTurn'>;
 type Input = { db: Db; scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
-  originals: Pick<PrismaOriginalRequestRepository, 'readHistorical'>; publication: AiOriginalSceneDisplayPublication };
+  originals: Pick<PrismaOriginalRequestRepository, 'readHistorical'>; publication: AiOriginalSceneDisplayPublication;
+  quoteFields?: { material: Pick<AiWorkbenchFieldMaterialService, 'prepare' | 'revalidate'>;
+    describe: AiQuoteBusinessPreparationService['describeInput'] } };
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const same = (a: unknown, b: unknown) => requestFingerprint(a) === requestFingerprint(b);
@@ -52,6 +58,39 @@ export class AiOriginalSceneDisplayGeneration {
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !configuration.enabled
       || Date.parse(configuration.validFrom) > now.getTime() || Date.parse(configuration.expiresAt) <= now.getTime()) throw unavailable();
     return { configuration, now };
+  }
+  private async fields(context: AiExecutionContext, original: AiSceneRequestReceiptDraft,
+    binding: AiWorkbenchMaterialBindingDraft, fieldRevision: number,
+    retention: AiWorkbenchFieldMaterialDraft['retention'], expected?: AiWorkbenchFieldMaterialDraft) {
+    const source = this.input.quoteFields;
+    if (!source || original.sceneCode !== 'quote_clarification') {
+      if (expected) throw unavailable();
+      return null;
+    }
+    const retained = await this.input.originals.readHistorical(binding.original);
+    if (retained.receipt.state === 'revoked' || retained.receipt.contentHash !== original.contentHash
+      || retained.receipt.revision !== original.revision || originalIdentityHash(retained.context) !== originalIdentityHash(context)
+      || retained.request.sceneCode !== 'quote_clarification') throw denied();
+    // Initial fields are a projection of the original preparation. A later
+    // question/answer chain needs its own verified candidate, not the initial
+    // request silently reused as an editable successor.
+    if (!('candidate' in retained.request.input) || fieldRevision !== 1) {
+      if (expected) throw unavailable();
+      return null;
+    }
+    const description = await source.describe(context);
+    if (context.scope.kind !== 'workspace' || !same(description.scope, context.scope)
+      || description.audience !== context.audience || !id.safeParse(description.configVersion).success
+      || !time.safeParse(description.observedAt).success) throw denied();
+    const prior = expected?.sources[0]?.reference;
+    const reference: AiFactReference = { scope: context.scope, resourceType: 'configuration',
+      resourceId: context.scope.workspaceId, observedAt: prior?.observedAt ?? description.observedAt, basis: { kind: 'current' } };
+    // The reference identifies the original workspace quote-input reader. It
+    // is a current observation, never a fabricated historical config snapshot.
+    // Retaining its timestamp on revalidation does not replace the fresh read.
+    if (expected && (expected.sources.length !== 1 || !prior || !same(prior, reference))) throw denied();
+    const input = { context, binding, candidate: retained.request.input.candidate, fieldRevision, sources: [reference], retention };
+    return expected ? source.material.revalidate(input, expected) : source.material.prepare(input);
   }
   private async binding(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string, generation: boolean) {
     const current = await this.input.scopes.resolveCurrent();
@@ -105,15 +144,18 @@ export class AiOriginalSceneDisplayGeneration {
         persistentConstraints: { humanInputReceipts: [], pendingInputRequests: [], unknownOperations: [] },
         expiresAt: sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion },
       authority: 'none_reauthorize_before_consumption' };
-    // Before the first reply there is no original wait/field basis. Empty
-    // editability must stay explicit, rather than inventing a quote contract.
+    const fieldMaterial = await this.fields(found.current.context, original, binding, found.run.sequence,
+      { expiresAt: sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion });
+    // The original preparation supplies this safe field projection before the
+    // plan is frozen. It is not a persisted question or a human input receipt.
     const witness = parseTaskModelDisplayWitness({ version: 'ain-workbench-generation-witness-1', purpose: 'display', binding,
-      context: displayContext, fieldMaterial: null, presentationRevision: found.run.sequence, prompt: configuration.prompt,
+      context: displayContext, fieldMaterial, presentationRevision: found.run.sequence, prompt: configuration.prompt,
       displayApiVersion: configuration.displayApiVersion, isolationVersion: configuration.isolationVersion,
       sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion });
     const material = taskModelMaterialSchema.parse({ ...value, displayWitness: witness, messages: [...value.messages,
       { role: 'system', content: [{ kind: 'text', text: WORKBENCH_DISPLAY_SYSTEM_PROMPT },
-        { kind: 'text', text: taskModelDisplayWitnessMarker(witness) }] }] });
+        { kind: 'text', text: taskModelDisplayWitnessMarker(witness) },
+        ...(fieldMaterial ? [{ kind: 'text' as const, text: taskModelDisplayFieldContract(witness)! }] : [])] }] });
     await this.assertOriginal(context, original, taskId, runId, witness, true);
     return freezeOriginalInput(material);
   }
@@ -127,8 +169,13 @@ export class AiOriginalSceneDisplayGeneration {
       || witness.binding.conversationId !== found.turn.conversationId || witness.binding.turnId !== found.turn.id
       || witness.binding.taskId !== taskId || witness.binding.inputFingerprint !== found.task.inputHash
       || witness.presentationRevision !== found.run.sequence || !same(witness.binding.original, { draftVersion: original.draftVersion, inputRef: original.inputRef })
-      || witness.fieldMaterial !== null || Date.parse(witness.sourceExpiresAt) <= now.getTime()
+      || Date.parse(witness.sourceExpiresAt) <= now.getTime()
       || Date.parse(witness.sourceExpiresAt) > Math.min(Date.parse(original.expiresAt), Date.parse(configuration.expiresAt))) throw denied();
+    if (witness.fieldMaterial) {
+      if (witness.fieldMaterial.fieldRevision !== found.run.sequence) throw denied();
+      await this.fields(found.current.context, original, witness.binding,
+        witness.fieldMaterial.fieldRevision, witness.fieldMaterial.retention, witness.fieldMaterial);
+    }
     return witness;
   }
   async revalidateInput(context: AiExecutionContext, taskId: string, runId: string, modelInput: TaskModelInput) {

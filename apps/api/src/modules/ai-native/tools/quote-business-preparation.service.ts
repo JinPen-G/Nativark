@@ -24,8 +24,10 @@ export class AiQuoteBusinessPreparationService {
     private readonly authority: AiBusinessReadAuthority,
     private readonly sources: { contexts: AiQuotePreparationContextSource; catalog: Pick<AiCatalogReadFactsService, 'read'> }) {}
 
-  async describeInput() {
+  async describeInput(expectedContext?: AiExecutionContext) {
+    const expected = expectedContext && structuredClone(expectedContext);
     return this.authority.withRead('quote_context', {}, async context => {
+      assertAiReadContextBinding(context, expected);
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
       const current = structuredClone(await this.sources.contexts.current(context.scope, context));
       const category = current.category.businessModel;
