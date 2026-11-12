@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-staff-upload-native-contract-20261112"></a>
+## 员工原上传观察的本地运行合同（2026-11-12）
+
+原会话观察后端已推送 `b704dddf9332fb0e210ca22091d64e6ecbcbdd76` 并读取 GitHub 核同。按 PM 扩定的两路径窗口，只修改[原生成器](../../scripts/generate-inspection-wire-schemas.cjs)和[唯一运行数据](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)：从 shared 取原上传观察路由及两个 schema，提供 uploadObservationHttp/uploadObservationContract，不改员工 build、依赖或另建生成器。仍保留仅 import type shared、禁止在微信包中 require shared 的原边界。
+
+生成使用原 buildInspectionWireRegistry，TypeScript 编译和声明均在内存；shared 来自固定 `b704dddf9` 的索引对象，生成器 blob `c662985d79761b0aa044f822d1603a24f5f4ddaa`，未混入进行中的 AIN-19 合同。注册数据覆盖 21 项检查操作、9 项任务操作及原上传观察路由，共 54 个 schema（含新增观察的 2 个）；唯一产物 175074 字节、SHA-256 `fdc6a96ff67d907232c1928f4329f54df760232a93fdc7f97bc3d62fc01f292c`。原文件前像为 Git blob `0332ab19ded64d2a9f380912d26a9a1a34352bce`，检查无并行差异后更新，产物与原生成器内容同字节；生成命令 SHA-256 `7a1578cfd420cbe2348ff6f18c653be1f3924034f38775f7d5dc4e97f817f01b`、退出 0。
+
+定向消费使用助手已写的原 native validator 固定文本 SHA-256 `ff7bbb9bd51a932bcbcb54d20df72b8bfe1ee383331d5ed8ea53e68fff70ddac`，这份助手文件不混入本次两源提交。原键/会话 ID、观测/未观测通过；双选择器、额外上传 URL、内部对象键及重试授权拒绝。保留原 ES2019/ES2020 目标，用正式 shared 内存声明核 2 根/170 源，TypeScript 5.9.3 零诊断，退出 0，命令 SHA-256 `6aaa22ca4f0d45e2b6d40d97ab378e9f559730d4fff308184641e69ad3075bbb`。首驱动把 shared 的实现源码放进旧目标检查，产生 ES2022 API 告警；更正为原构建采用的独立声明后通过，没有提高微信目标或改业务实现。
+
+审计为空，两个逻辑临时目录均未创建，无生成声明目录、临时脚本或重复产物。实际页面上传恢复及媒体完整链仍由 dev2 继续；AIN-19 后端固定后再用原生成器更新其必要 basis 合同，不用当前混合 WIP 充当本片来源。本阶段不改变 AIN-19/20 的整项百分比。
+
 <a id="ain-staff-upload-observation-20261112"></a>
 ## 员工原上传会话只读观察接点（2026-11-12）
 

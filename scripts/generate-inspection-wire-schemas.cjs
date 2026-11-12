@@ -59,9 +59,14 @@ function buildInspectionWireRegistry() {
     const taskHttp = shared.AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT;
     if (!taskHttp || Object.keys(taskContracts).some(name => typeof taskHttp[name] !== 'string' || !taskHttp[name]))
       throw Error('Inspection task route missing');
+    const uploadObservationHttp = shared.STAFF_UPLOAD_OBSERVATION_HTTP;
+    const uploadObservationContract = { request: 'StaffUploadObservationRequest', response: 'StaffUploadObservationResponse' };
+    if (uploadObservationHttp?.basePath !== 'staff/v1/uploads' || uploadObservationHttp.observe !== 'sessions/observe')
+      throw Error('Original staff upload observation route missing');
     const all = { ...shared.AI_INSPECTION_DRAFT_SCHEMAS, ...shared.AI_INSPECTION_MANUAL_HTTP_SCHEMAS,
       ...shared.AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS, ...shared.AI_TASK_RECOVERY_HTTP_SCHEMAS,
-      ...shared.AI_TASK_INPUT_DRAFT_SCHEMAS, ...shared.AI_TASK_OBSERVATION_DRAFT_SCHEMAS, ...shared.AI_SCOPE_DRAFT_SCHEMAS };
+      ...shared.AI_TASK_INPUT_DRAFT_SCHEMAS, ...shared.AI_TASK_OBSERVATION_DRAFT_SCHEMAS, ...shared.AI_SCOPE_DRAFT_SCHEMAS,
+      ...shared.STAFF_UPLOAD_OBSERVATION_SCHEMAS };
     const schemas = {};
     function add(name) {
       if (Object.hasOwn(schemas, name)) return;
@@ -78,7 +83,7 @@ function buildInspectionWireRegistry() {
       }
       refs(all[name]);
     }
-    for (const row of [...Object.values(contracts), ...Object.values(taskContracts)]) { add(row.request); add(row.response); }
+    for (const row of [...Object.values(contracts), ...Object.values(taskContracts), uploadObservationContract]) { add(row.request); add(row.response); }
     // A concurrent edit must not publish a registry from mixed source versions.
     for (const source of program.getSourceFiles()) {
       if (inside(path.join(sharedRoot, 'src'), path.resolve(source.fileName)) && ts.sys.readFile(source.fileName) !== source.text)
@@ -89,6 +94,8 @@ function buildInspectionWireRegistry() {
       + 'export const contracts = ' + JSON.stringify(contracts, null, 2) + ' as const;\n'
       + 'export const taskContracts = ' + JSON.stringify(taskContracts, null, 2) + ' as const;\n'
       + 'export const taskHttp = ' + JSON.stringify(taskHttp, null, 2) + ' as const;\n'
+      + 'export const uploadObservationHttp = ' + JSON.stringify(uploadObservationHttp, null, 2) + ' as const;\n'
+      + 'export const uploadObservationContract = ' + JSON.stringify(uploadObservationContract, null, 2) + ' as const;\n'
       + 'export const schemas: Record<string, AiLeafSchemaDraft> = ' + JSON.stringify(schemas, null, 2) + ';\n';
     return { content, contracts: Object.keys(contracts).length, taskContracts: Object.keys(taskContracts).length,
       schemas: Object.keys(schemas).length, privateEmit: 'memory' };

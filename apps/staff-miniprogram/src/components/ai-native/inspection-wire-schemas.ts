@@ -184,6 +184,14 @@ export const taskHttp = {
   "readAnswer": "input/receipt",
   "continueAnswer": "input/continue"
 } as const;
+export const uploadObservationHttp = {
+  "basePath": "staff/v1/uploads",
+  "observe": "sessions/observe"
+} as const;
+export const uploadObservationContract = {
+  "request": "StaffUploadObservationRequest",
+  "response": "StaffUploadObservationResponse"
+} as const;
 export const schemas: Record<string, AiLeafSchemaDraft> = {
   "AiStaffInspectionHistoryRequest": {
     "type": "object",
@@ -6334,6 +6342,373 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "execution",
           "retryable",
           "nextAction"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "StaffUploadObservationRequest": {
+    "type": "object",
+    "properties": {
+      "reference": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [
+              "sessionId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "file": {
+        "type": "object",
+        "properties": {
+          "businessModule": {
+            "type": "string",
+            "enum": [
+              "rental-core"
+            ]
+          },
+          "businessType": {
+            "type": "string",
+            "enum": [
+              "rental_order",
+              "rental_work_order"
+            ]
+          },
+          "businessId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 180
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 127,
+            "pattern": "^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+-]+$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20971520
+          },
+          "uploadScene": {
+            "type": "string",
+            "enum": [
+              "pickup-evidence",
+              "return-evidence",
+              "handover-signature",
+              "work-order-evidence",
+              "offline-payment-proof"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "handoverStage": {
+                "type": "string",
+                "enum": [
+                  "pickup",
+                  "return"
+                ]
+              },
+              "handoverBatchId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "businessModule",
+          "businessType",
+          "businessId",
+          "fileName",
+          "mimeType",
+          "sizeBytes",
+          "uploadScene"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "reference",
+      "file"
+    ],
+    "additionalProperties": false
+  },
+  "StaffUploadObservationResponse": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "idempotencyKey"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "descriptionHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observation": {
+            "type": "string",
+            "enum": [
+              "stored_metadata_not_transfer_proof"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "uploadGrant": {
+            "type": "string",
+            "enum": [
+              "not_provided"
+            ]
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_upload"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "observed"
+            ]
+          },
+          "session": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "fileAssetId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending_upload",
+                  "freeze_pending",
+                  "completed",
+                  "failed"
+                ]
+              },
+              "fileStatus": {
+                "type": "string",
+                "enum": [
+                  "pending_upload",
+                  "active",
+                  "failed",
+                  "delete_pending",
+                  "deleted"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "provider",
+                  "simulation"
+                ]
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "minLength": 20,
+                "maxLength": 40
+              },
+              "completedAt": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "minLength": 20,
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "sessionId",
+              "fileAssetId",
+              "status",
+              "fileStatus",
+              "mode",
+              "expiresAt",
+              "completedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "reference",
+          "descriptionHash",
+          "observation",
+          "retryable",
+          "uploadGrant",
+          "nextAction",
+          "state",
+          "session"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "idempotencyKey"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "descriptionHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observation": {
+            "type": "string",
+            "enum": [
+              "stored_metadata_not_transfer_proof"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "uploadGrant": {
+            "type": "string",
+            "enum": [
+              "not_provided"
+            ]
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_upload"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_observed"
+            ]
+          },
+          "session": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "reference",
+          "descriptionHash",
+          "observation",
+          "retryable",
+          "uploadGrant",
+          "nextAction",
+          "state",
+          "session"
         ],
         "additionalProperties": false
       }
