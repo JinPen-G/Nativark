@@ -7,7 +7,9 @@ import { AI_CONVERSATION_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
   type AiConversationListDraft, type AiConversationTurnAdmissionDraft, type AiConversationTurnReferenceDraft,
   type AiConversationOperationRequestDraft, type AiConversationTurnListDraft, type AiConversationModelResultReadDraft,
   type AiConversationUnstartedCloseDraft, type AiWorkbenchDisplayReadDraft,
-  type AiWorkbenchDisplayRevalidateDraft, type AiWorkbenchDisplaySourceReadDraft } from '@rental-os/shared';
+  type AiWorkbenchDisplayRevalidateDraft, type AiWorkbenchDisplaySourceReadDraft,
+  type AiWorkbenchModelControlCommand, type AiWorkbenchModelControlReference,
+  type AiWorkbenchModelControlObservation, type AiWorkbenchModelControlPreparation } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { parseOriginalRequest, originalBody } from './task-request/original-request.validation';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiConversationListResponseDraft,
@@ -34,6 +36,8 @@ interface Requests {
   AiWorkbenchDisplayReadDraft: AiWorkbenchDisplayReadDraft;
   AiWorkbenchDisplayRevalidateDraft: AiWorkbenchDisplayRevalidateDraft;
   AiWorkbenchDisplaySourceReadDraft: AiWorkbenchDisplaySourceReadDraft;
+  AiWorkbenchModelControlCommand: AiWorkbenchModelControlCommand;
+  AiWorkbenchModelControlReference: AiWorkbenchModelControlReference;
 }
 export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTTP_DRAFT.operations, value: T, command: Requests[keyof Requests]): T {
   const contract = AI_CONVERSATION_HTTP_DRAFT.operations[action];
@@ -55,7 +59,17 @@ export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTT
       const display = inspectAiWorkbenchDisplayMaterial(copy);
       if (!('taskId' in command) || display.presentation.binding.taskId !== command.taskId) throw Error();
     } else if (!ajv.getSchema(`#/components/schemas/${contract.response}`)!(copy)) throw Error();
-    if (['create', 'archive', 'delete', 'operation', 'release', 'closeUnstarted'].includes(action)) {
+    if (action === 'model-control-prepare') {
+      const result = copy as AiWorkbenchModelControlPreparation;
+      if (!('taskId' in command) || result.taskId !== command.taskId) throw Error();
+    } else if (action === 'model-control' || action === 'model-control-read') {
+      const result = copy as AiWorkbenchModelControlObservation;
+      if (!('taskId' in command) || !('operationId' in command) || result.taskId !== command.taskId
+        || result.operationId !== command.operationId || contract.write && result.status === 'not_observed'
+        || 'kind' in command && result.kind !== command.kind
+        || 'sourceRunId' in command && result.sourceRunId !== undefined && result.sourceRunId !== command.sourceRunId
+        || 'sourceResultId' in command && result.sourceResultId !== undefined && result.sourceResultId !== command.sourceResultId) throw Error();
+    } else if (['create', 'archive', 'delete', 'operation', 'release', 'closeUnstarted'].includes(action)) {
       const result = copy as AiConversationOperationObservationDraft;
       if (!('operationKey' in command) || result.operationKey !== command.operationKey || contract.write && result.status !== 'observed') throw Error();
       if (result.status === 'observed' && action !== 'operation') {

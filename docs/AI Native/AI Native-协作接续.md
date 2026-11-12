@@ -33,7 +33,7 @@
 
 日历 24 源及规则 19 源/3 公共注册已分别在[日历核接](<AI Native-开发记录.md#ain-calendar-source-consumer-closeout-20261111>)、[规则核接](<AI Native-开发记录.md#ain-rule-source-intake-20261111>)保留完整证据。会员姓名和通知首次 start/原历史也已接原权限及收据，不重复施工；AIN-16 余范围仍须逐字段和实际写入/发布边界核实。
 
-上传观察的幂等键兼容已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并推送 `b690e4f3751bcaa1beac30cde88b55ea596ec1de`。其后[默认识别 Core 依据与保存后复核](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)已完成固定 16 源模拟和类型检查；55 schema registry 包含新 result/draft 复核合同，22 源员工实际消费已经交回；按[媒体消费证据](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)连前置 AIN-19 交 PM 复核。AIN-12 的公共 preparation/resourceOrigin、文本材料派发前复核和结果/展示 reader 已提供可选专用 operator 接点，仍在活动 WIP，待实际生产 provider/HTTP/页面接线与 dev1 同组核验；普通回答后继和 Task 累计额度不放宽。
+上传观察的幂等键兼容已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并推送 `b690e4f3751bcaa1beac30cde88b55ea596ec1de`。其后[默认识别 Core 依据与保存后复核](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)已完成固定 16 源模拟和类型检查；55 schema registry 包含新 result/draft 复核合同，22 源员工实际消费已经交回；按[媒体消费证据](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)连前置 AIN-19 交 PM 复核。AIN-12 的生产接线和 dev1 四私有源已按[未完检查点](<AI Native-开发记录.md#ain12-model-control-checkpoint-20261112>)固定并完成必要类型检查。Root 先修报价观察 requestId 的指纹误判，再修人类回答后继 preparationDefinition 和原字段 witness，随后核 dev1 实际组合及 dev2 后台消费者。原回答收据、资源 lineage 和 Task 累计额度仍由原服务负责，未知原操作只读核对。
 
 ## AIN-17 等待的 Core 固定来源
 

@@ -10,7 +10,8 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskExecutionBudgetError, type AiTaskExecutionBudgetPort, type AiTaskExecutionLease,
   type AiTaskExecutionPolicy, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority, type PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
-import { taskPreparationDefinitionSchema, type AiTaskPreparationDefinition, type AiTaskPreparationTicket } from './task-run-preparation.ports';
+import { taskPreparationDefinitionSchema, type AiTaskPreparationDefinition, type AiTaskPreparationTicket,
+  type AiTaskControlResourceOrigin } from './task-run-preparation.ports';
 import type { AiTaskRunnerLease } from './ai-task-runner.ports';
 import { readOriginalRunTimeCharges, taskOverheadNonEffectChargeIds } from './prisma-task-run-overhead';
 
@@ -67,7 +68,8 @@ export class PrismaTaskRunPreparation {
     private readonly evidence: Pick<PrismaTaskRunEvidenceRepository, 'assertHeldRun' | 'assertExecutable' | 'withHeldRun' | 'resolve' | 'resourceOrigin'>
       & Partial<Pick<PrismaTaskRunEvidenceRepository, 'assertAccountingRun'>>,
     private readonly authority: AiTaskPlanEvidenceAuthority, private readonly wall: () => Date = () => new Date(),
-    private readonly monotonic: () => number = () => performance.now()) {}
+    private readonly monotonic: () => number = () => performance.now(),
+    private readonly controlResourceOrigin?: AiTaskControlResourceOrigin) {}
 
   private store(db: Partial<Pick<PrismaClient, 'aiTaskRunPreparation'>> = this.db) {
     const value = db.aiTaskRunPreparation;
@@ -101,6 +103,20 @@ export class PrismaTaskRunPreparation {
     // clarification. Its current plan is not a new cumulative resource origin.
     // Preserve the exact original answer/parent chain before accepting either.
     const originId = run.resourceOriginRunId;
+    if (run.inputReceiptId == null && originId && run.sequence > 1 && this.controlResourceOrigin) {
+      if (run.actorKind !== 'USER' || (!currentDefinition && originId !== definition.runId)) throw denied();
+      const original = aiTaskRunPlanSchema.parse(await this.controlResourceOrigin({ ...key, runId: run.id,
+        resourceOriginRunId: originId }));
+      const saved = await this.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { ...key, runId: originId } } });
+      if (!saved || saved.scopeId !== scopeId || saved.taskId !== lease.taskId || saved.runId !== originId
+        || original.taskId !== lease.taskId || original.runId !== originId
+        || saved.planHash !== requestFingerprint(saved.payload) || saved.planHash !== requestFingerprint(original)
+        || (currentDefinition ? typeof this.authority.authorizePreparation !== 'function'
+          || Object.entries(original.limits).some(([name, ceiling]) => definition.limits[name as keyof typeof definition.limits] > ceiling)
+          : requestFingerprint(original.steps) !== requestFingerprint(definition.steps)
+            || requestFingerprint(original.limits) !== requestFingerprint(definition.limits))) throw denied();
+      return original;
+    }
     if (!run.inputReceiptId || !originId || run.sequence < 2
       || (!currentDefinition && originId !== definition.runId)) throw denied();
     const receipt = await this.db.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: { ...key, id: run.inputReceiptId } } });

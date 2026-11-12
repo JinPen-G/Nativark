@@ -23,6 +23,10 @@ const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expect
 type ExecutionInput = Parameters<NonNullable<Awaited<ReturnType<AiTaskRegisteredExecutor['resolve']>>>['execute']>[0];
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+/** Optional stricter current-source check owned by the composing text host.
+ * It cannot replace the original input, identity, model or financial gates. */
+export type TaskModelMaterialRevalidation = (key: { taskId: string; runId: string },
+  material: z.infer<typeof taskModelMaterialSchema>) => Promise<void>;
 
 export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   private readonly scene: GatewayTextIntentBinding & { nativeToolResults?: boolean };
@@ -32,7 +36,8 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     | 'aiInvocationAdmission' | 'aiGatewayAccountingReceipt' | 'aiBudgetReservation'> & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>,
     private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
     runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding & { nativeToolResults?: boolean }, priceVersion: string,
-  private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
+  private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind,
+    private readonly revalidateMaterial?: TaskModelMaterialRevalidation) {
     this.scene = gatewayTextIntentBindingSchema.extend({ nativeToolResults: z.boolean().optional() }).parse(structuredClone(scene));
     taskModelPolicy(this.policy);
     this.priceVersion = id.max(64).parse(priceVersion);
@@ -91,6 +96,13 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     if (input.identityHash !== taskModelIdentity(context) || input.routingHash !== gatewayRoutingBinding(route)
       || input.priceVersion !== this.priceVersion || requestFingerprint(input.configuration) !== requestFingerprint(taskModelConfiguration(route))) throw denied();
   }
+  private async currentMaterial(key: { taskId: string; runId: string }, input: TaskModelInput) {
+    if (!this.revalidateMaterial) return;
+    if (this.kind) throw denied();
+    await this.revalidateMaterial(structuredClone(key), taskModelMaterialSchema.parse({
+      messages: structuredClone(input.intent.messages), maxOutputTokens: input.intent.maxOutputTokens,
+      ...(input.displayWitness ? { displayWitness: structuredClone(input.displayWitness) } : {}) }));
+  }
 
   async publish(value: unknown) {
     const parsed = (this.kind === 'image' ? publishSchema.extend({ material: taskImageMaterialSchema,
@@ -116,10 +128,12 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       && requestFingerprint(command.expectedMedia) !== requestFingerprint(input.media)) throw denied();
     taskModelFingerprint(input, this.policy);
     await this.runtime.ports.routing.assertCurrent(this.narrow(context), route);
+    await this.currentMaterial({ taskId: command.taskId, runId: command.lease.runId }, input);
     const result = await this.inputs.publishModelInput({ taskId: command.taskId, registrationRef: command.registrationRef,
       expectedTaskRevision: command.expectedTaskRevision, lease: command.lease, input });
     this.frozen(await this.execution.authorize(command.taskId), input, await this.route(context));
     await this.verifyMedia(context, input);
+    await this.currentMaterial({ taskId: command.taskId, runId: command.lease.runId }, input);
     return result;
   }
   /** Revalidate an original frozen publication without regenerating messages,
@@ -135,6 +149,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       || taskModelIdentity(receipt.context) !== taskModelIdentity(context)) throw denied();
     this.frozen(context, input, await this.route(context));
     await this.verifyMedia(context, input);
+    await this.currentMaterial({ taskId: command.taskId, runId: command.runId }, input);
     const latest = await this.inputs.readModelInputReceipt(command);
     if (latest.state !== 'published' || latest.id !== receipt.id || latest.fingerprint !== receipt.fingerprint
       || requestFingerprint(latest.payload) !== requestFingerprint(receipt.payload)
@@ -260,6 +275,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       await ports.routing.assertCurrent(narrow, route);
       await this.verifyRoute(context, route);
       this.frozen(await this.execution.authorize(binding.taskId), input, route);
+      await this.currentMaterial({ taskId: binding.taskId, runId: binding.runId }, input);
     };
     const gateway = new PublicAiGatewayService({ ...this.runtime, ports: { ...ports, media: frozenMedia, routing: {
       resolve: async (caller, required) => {

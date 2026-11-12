@@ -155,7 +155,8 @@ export class AiOriginalSceneResultService {
   private readonly policy: GatewayTextIntentPolicy;
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
     private readonly scenes: Scenes, policy: GatewayTextIntentBinding, clock: () => Date = () => new Date(),
-    private readonly knowledge?: AiOriginalSceneKnowledge) {
+    private readonly knowledge?: AiOriginalSceneKnowledge,
+    private readonly readRunOrigin: typeof readTaskModelRunOrigin = readTaskModelRunOrigin) {
     this.results = new AiTaskResultRepository(db, tasks, clock);
     this.policy = taskModelPolicy({ sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens,
       ...(policy.orderExplainTool !== undefined ? { orderExplainTool: policy.orderExplainTool } : {}),
@@ -182,7 +183,7 @@ export class AiOriginalSceneResultService {
     const provenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: access.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return { ...await readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+      return { ...await this.readRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
         originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
@@ -289,7 +290,7 @@ export class AiOriginalSceneResultService {
     const finalProvenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: finalAccess.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return { ...await readTaskModelRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+      return { ...await this.readRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
         originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
         originalAuthorizationHash: await originalBinding(tx, row) };
     });

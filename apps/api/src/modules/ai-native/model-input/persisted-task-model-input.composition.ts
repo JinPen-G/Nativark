@@ -11,7 +11,7 @@ import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invoca
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelPolicy, type TaskModelKind } from './task-model-input';
-import { TaskModelGatewayInputSource } from './task-model-gateway-input.source';
+import { TaskModelGatewayInputSource, type TaskModelMaterialRevalidation } from './task-model-gateway-input.source';
 import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.authority';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import type { AiTaskRunnerRepositoryCommandFactory } from '../runner/ai-task-runner.repository-adapter';
@@ -31,6 +31,7 @@ type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'd
   runtime: PublicGatewayRuntime;
   /** Server-selected tool policy; never an Agent-controlled feature switch. */
   kind?: TaskModelKind;
+  revalidateMaterial?: TaskModelMaterialRevalidation;
   /** Explicit server scene assembly; policy management still requires its Guard and CAS. */
   planTools?: readonly PersistedTaskInputTool[];
   /** Recorded hosts only: the in-task counting chain (count the registered
@@ -70,7 +71,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   const plans = new PrismaTaskRunEvidenceRepository(input.db, scopes, source, clock);
   const registrations = new AiStepRegistrationRepository(input.db, source, clock);
   const inputs = new TaskModelGatewayInputSource(input.db, source, authorization.execution, input.runtime,
-    input.gatewayScene, input.priceVersion, clock, input.kind);
+    input.gatewayScene, input.priceVersion, clock, input.kind, input.revalidateMaterial);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock, modelPolicy);
   const plainInvocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
   const countedInvocations = input.inputCounting?.preparation(plainInvocations, inputs, modelPolicy, input.nativeCounting);

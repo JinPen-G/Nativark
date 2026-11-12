@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-model-control-checkpoint-20261112"></a>
+## AIN-12 模型控制生产接线未完检查点（2026-11-12）
+
+以已上传的 `cd90e57bf862de68565698da6d4ba29491925f7b` 为前置，固定 Root 的模型控制公共合同、Controller/Guard/provider、原 Gateway/Run 准备和结果读取接点，以及 dev1 已交回的四份私有源。四个 Git blob 依次为 contract `49c99945e6a1e47cce4012556e4c3cc1f21b3263`、repository `9c45747d709ca5859a9281103813d1d8bb834149`、source `96e2e32ca08b012f8924e525e0291da8d72ecefa`、service `f0c937d4c3898796224ae0391e8b626174c27728`。本检查点不包含 dev2 的活动后台消费者、冻结的报价 goal leaf 或未核接员工样式。
+
+`node --no-compilation-cache -` 使用本树原离线 preload、不可达数据库地址及内存 TypeScript 编译，4 根/1954 源零诊断，TypeScript 5.9.3，退出 0，stdin SHA-256 `55aa626c198c2ae8bc690d568a3f21cf9beadb2ae279fd9a91c308fba6fe72cf`。审计为空，`output/.tmp/ain12-rd-control` 未创建，无新增测试脚本、生成物或后台资源。此前 Controller/三路合同模拟只证明合同和转发，完整生产执行仍待后续核接。
+
+保留两个实际组合失败。报价当前材料中的 `availability.requestId` 随读取请求变化，导致业务内容相同的原观察被标为 stale。人类回答已保存并创建后继 Run 后，resume 未传原 preparationDefinition，准备阶段先读取尚未发布的后继计划而返回 `AI_RESOURCE_UNAVAILABLE`。后继还缺原回答候选的字段 witness；修复须在新 input 发布前核原收据和累计资源，不给旧 input 补签。以上由 Root 处理，完整模拟通过后再核 AIN-12 原全文，当前百分比不变。
+
+dev1 补交 AIN-14 的独立分区冲突、缺失持久档案、等待后 readiness 再观察三个既有 callback，3/3 退出 0，stdin SHA-256 `78876c60e8cb96dfce44a930780779880f836a0247abe2ce1f005b171601cfd0`，原会话工具调用 `call_128d6b0edf714f56ae30c1ac05c0306f`。首轮旧 callback 未等待当前异步 Core.getProfile 而 TypeError，失败保留；只在内存编译给该调用补 await，原断言与测试文件未改。这组证据供 AIN-14 后续核定，不代表整项完成。
+
 <a id="ain-staff-media-review-consumer-20261112"></a>
 ## 员工图片/录音、原草稿恢复与逐候选复核消费（2026-11-12）
 

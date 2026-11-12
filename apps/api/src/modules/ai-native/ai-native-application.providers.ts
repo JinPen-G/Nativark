@@ -7,6 +7,8 @@ import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider } 
 import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
 import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
 import { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
+import { AI_WORKBENCH_MODEL_CONTROL_REQUESTS, composeWorkbenchModelControlRequests } from './workbench-model-control.application';
+import { composePersistedTaskModelHost } from './task-model-gateway.composition';
 /**
  * 职责：将正式业务服务、当前身份和持久仓储接到 AI Native 的 Nest provider 入口。
  * 边界：装配不等于执行开放；各请求仍核验当前政策、权限与实际可用的依赖。
@@ -26,7 +28,7 @@ import { RentalCoreService } from '../rental-core/rental-core.service';
 import { RentalCoreController } from '../rental-core/rental-core.controller';
 import { RentalOrderConfirmationService } from '../rental-core/rental-order-confirmation.service';
 import { RentalBusinessFactRepository } from '../rental-core/rental-business-fact.repository';
-import { RentalIdempotencyRepository } from '../rental-core/rental-idempotency.repository';
+import { RentalIdempotencyRepository, requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { CategoryGovernanceController } from '../rental-core/category-governance.controller';
 import { AI_CATEGORY_DRAFT_REQUESTS, composeCategoryDraftRequests } from './category-assist/category-draft.application';
 import { RentalBusinessService } from '../rental-core/rental-business.service';
@@ -454,19 +456,20 @@ export const AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_CONVERSATION_CONFIGURATION = Symbol('AI_NATIVE_CONVERSATION_CONFIGURATION');
 export const AI_NATIVE_CONVERSATION_PROVIDER: FactoryProvider = {
   provide: AI_CONVERSATION_REQUESTS, inject: [...originalSceneInjection, { token: AI_NATIVE_CONVERSATION_CONFIGURATION, optional: true },
-    { token: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }],
+    { token: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true },
+    { token: AI_WORKBENCH_MODEL_CONTROL_REQUESTS, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, value?: unknown,
     observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult' | 'reopenModelSource'>,
-    displayValue?: unknown) => {
+    displayValue?: unknown, modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>) => {
     const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding);
     const display = readWorkbenchDisplayConfiguration(displayValue);
     const reads = display.enabled && observations ? composeAiWorkbenchDisplayRequests(original,
       { currentConfiguration: () => displayValue }, observations) : undefined;
-    return composeAiConversationRequests(original, parsed.data.enabled, observations, reads);
+    return composeAiConversationRequests(original, parsed.data.enabled, observations, reads, modelControls);
   }
 };
 export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
@@ -653,6 +656,57 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
     return Object.freeze({ start, recover: requests.recover, reconcile: requests.reconcile,
       takeover: requests.takeover, requestCancel: requests.requestCancel, readExecution: requests.readExecution });
   }
+};
+
+/** Explicit model controls reuse the selected scene's original Gateway and
+ * Task budget. Observing their original operations remains available when a
+ * new-generation switch is off; reads never build a model host. */
+export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
+  provide: AI_WORKBENCH_MODEL_CONTROL_REQUESTS,
+  inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, TenantIntegrationService],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
+    files: FileStorageRuntimeService, orderValue?: unknown, quoteValue?: unknown, openingValue?: unknown,
+    displayValue?: unknown, integrations?: TenantIntegrationService) => {
+    const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations);
+    const configuration = (scene: string) => {
+      if (!['order_explanation', 'quote_clarification', 'opening_diagnosis'].includes(scene)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return readOrderExecutionConfiguration(scene === 'order_explanation' ? orderValue : scene === 'quote_clarification' ? quoteValue : openingValue);
+    };
+    return composeWorkbenchModelControlRequests(original, {
+      available: scene => readWorkbenchDisplayConfiguration(displayValue).enabled && configuration(scene).enabled,
+      ...(files ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {}),
+      async build(input, control) {
+        const selected = configuration(control.receipt.sceneCode);
+        if (!selected.enabled || !readWorkbenchDisplayConfiguration(displayValue).enabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const receipt = control.receipt;
+        const resource = await control.readPreparationOrigin({ scopeId: receipt.scopeId, taskId: receipt.command.taskId,
+          runId: receipt.runId, resourceOriginRunId: receipt.resourceOriginRunId });
+        return composePersistedTaskModelHost({ ...input,
+          scene: { code: receipt.sceneCode, version: receipt.sceneVersion },
+          gatewayScene: { sceneCode: receipt.sceneCode, routeScene: 'chat', maxOutputTokens: selected.maxOutputTokens },
+          gateway: { secrets, platformProfileId: selected.platformProfileId, routeScene: 'chat', pricing: selected.pricing,
+            nativeProtocol: NATIVE_MODEL_PROTOCOLS, ...(selected.inputCounting ? { inputCounting: selected.inputCounting } : {}) },
+          host: selected.host,
+          task: { taskId: receipt.command.taskId, runId: receipt.runId, registrationRef: receipt.registrationRef,
+            material: control.material, limits: aiTaskRunnerLimitsSchema.parse(resource.limits) },
+          // An explicit pure text control accepts no new human-answer lineage.
+          inputSource: { resolve: async () => ({ kind: 'not_required' as const }),
+            validateAnswers: async () => { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); } },
+          readRunOrigin: control.readOrigin, controlResourceOrigin: control.readPreparationOrigin,
+          revalidateMaterial: async (key, material) => {
+            if (key.taskId !== receipt.command.taskId || key.runId !== receipt.runId
+              || requestFingerprint(material) !== requestFingerprint(await control.revalidate())) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          },
+        });
+      },
+    });
+  },
 };
 
 /** Separate server-owned probe configuration: enabling an order workflow must
