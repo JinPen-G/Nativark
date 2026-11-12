@@ -73,12 +73,15 @@ export function EnterpriseExchangeProgress({ orderId, identity, english }: { ord
       <h3>{row.preview.originalItemGroupName} — {row.preview.replacementItemGroupName}</h3>
       <dl className="spec-list">
         <div><dt>{english ? 'Request state' : '申请状态'}</dt><dd>{state(row)}</dd></div>
-        <div><dt>{english ? 'Added spending' : '新增支出'}</dt><dd>{money(row.preview.additionalAmount, row.preview.currency)}</dd></div>
+        <div><dt>{english ? 'Added rental charges' : '新增租赁费用'}</dt><dd>{money(row.preview.additionalAmount, row.preview.currency)}</dd></div>
         <div><dt>{english ? 'Deposit / preauthorization delta' : '押金／预授权差额'}</dt><dd>{money(row.preview.depositDelta, row.preview.currency)} / {money(row.preview.preAuthDelta, row.preview.currency)}</dd></div>
         <div><dt>{english ? 'Approval expires' : '批准有效期'}</dt><dd>{time(row.expiresAt)}</dd></div>
         <div><dt>{english ? 'Purpose' : '原用途'}</dt><dd>{row.reason}</dd></div>
         {row.employeeConfirmation && <div><dt>{english ? 'Applicant expense consent' : '本人费用确认'}</dt><dd>{time(row.employeeConfirmation.confirmedAt)}</dd></div>}
       </dl>
+      {row.state === 'approved' && row.execution === 'original_merchant_execution_not_connected' && <p role="alert" className="mock-note">
+        {english ? 'Exchange execution is unavailable for this expense change. Contact the merchant to review the original request.' : '本次费用变更暂不可执行，请联系商户核对原申请。'}
+      </p>}
       {row.state === 'approved' && !row.employeeConfirmation && <button type="button" className="button button-outline" disabled={busy || pending || Boolean(error)} onClick={() => { if (!current()) return; setSelected(row.id); setReason(''); setAgreed(false); }}>{english ? 'Review this approved expense' : '核对本次已批准费用'}</button>}
       {selected === row.id && row.state === 'approved' && !row.employeeConfirmation && <div>
         <label className="booking-field">{english ? 'Reason for this expense consent' : '本次费用确认原因'}<textarea value={reason} maxLength={500} disabled={busy || pending} onChange={event => setReason(event.target.value)} /></label>
