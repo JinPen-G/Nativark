@@ -23,6 +23,7 @@ import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
@@ -217,6 +218,8 @@ const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
   AI_SCENE_REQUEST_HTTP_DRAFT.reconcile, AI_SCENE_REQUEST_HTTP_DRAFT.material,
   AI_SCENE_REQUEST_HTTP_DRAFT.recovery].map(action =>
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
+const originalOrderMaterialV2Routes = new Set([AI_ORDER_EXPLANATION_HTTP_V2.material, AI_ORDER_EXPLANATION_HTTP_V2.source]
+  .map(action => `POST /${AI_ORDER_EXPLANATION_HTTP_V2.basePath}/${action}`));
 const originalQuoteReadRoutes = new Set([AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview, AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt,
   AI_SCENE_REQUEST_HTTP_DRAFT.compareOriginalQuotes].map(action => `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${action}`));
 // Fixed quote model execution; the original scene, owner and task policies
@@ -269,6 +272,9 @@ const originalOrderExecutionRoutes = new Set(([
 
 export function requiredPermissions(method: string, path: string) {
   const creditRoute = `${method.toUpperCase()} ${path}`;
+  // Entry read rights do not replace original owner/scope or each financial
+  // source's independent authority inside the material/source readers.
+  if (originalOrderMaterialV2Routes.has(creditRoute)) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const)
     .some(action => path === `/${AI_TASK_ORIGINAL_READ_POLICY_HTTP.basePath}/${AI_TASK_ORIGINAL_READ_POLICY_HTTP[action]}`))
     return [...AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS];
@@ -279,7 +285,7 @@ export function requiredPermissions(method: string, path: string) {
   if (creditTenantRoutes.has(creditRoute)) return ['system:params:manage'];
   if (creditPlatformRoutes.has(creditRoute)) return [path.endsWith('/platform-decide') ? 'system:ai-provider:manage' : 'system:ai-provider:view'];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_CONVERSATION_HTTP_DRAFT.operations)
-    .some(action => path === `/${AI_CONVERSATION_HTTP_DRAFT.basePath}/${action}`)) return [...AI_TASK_CENTER_ENTRY_PERMISSIONS];
+    .some(action => path === `/${AI_CONVERSATION_HTTP_DRAFT.basePath}/${action}`.toLowerCase())) return [...AI_TASK_CENTER_ENTRY_PERMISSIONS];
   const counting = countingRouteAccess.get(`${method.toUpperCase()} ${path}`);
   if (counting) return counting === 'management' ? ['system:params:manage'] : [...AI_TASK_CENTER_ENTRY_PERMISSIONS];
   const platformProbePermission = platformCapabilityProbePermission(method, path);

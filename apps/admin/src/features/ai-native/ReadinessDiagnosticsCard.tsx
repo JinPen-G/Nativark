@@ -3,18 +3,21 @@
  * draft, approval, configuration write or publication. */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AI_CONVERSATION_DRAFT_VERSION, validateAiConversationAdmissionDraft, validateAiConversationTurnDraft,
-  type AiConversationTurnObservationDraft } from '@rental-os/shared';
+import { AI_CONVERSATION_DRAFT_VERSION, AI_SCENE_MODEL_HTTP_DRAFT, validateAiConversationAdmissionDraft, validateAiConversationTurnDraft,
+  validateAiSceneRequestReceiptDraft, validateAiSceneRequestReconcileDraft,
+  type AiConversationTurnObservationDraft, type AiTaskSceneReadDraft, type AiTaskSceneObservationDraft, type ApiResult } from '@rental-os/shared';
 import { APP_ROUTES, type AppRouteDefinition } from '@/app/navigation';
 import { currentSessionEpoch } from '@/app/queryClient';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { aiOpeningDiagnosticsApi, type OpeningTaskMaterial } from '@/api/aiOpeningDiagnostics';
+import { http } from '@/api/http';
 import { ActionButton, Alert, Button } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 import { toOpeningReadinessDiagnostics, toReadinessDiagnostics, type ReadinessDiagnosticRow, type ReadinessDiagnosticsDisplay } from './readiness-diagnostics';
 import { useAiManagementLocale } from './management-locale';
 import { formatTimestamp } from './formatters';
 import { safeDisplayText } from './safe-display';
+import { validateTaskCenterSnapshot } from './task-center-reader';
 import styles from './AiManagement.module.css';
 
 export type ReadinessDiagnosticsOriginalProps = { conversationId: string; turn: AiConversationTurnObservationDraft; current(): boolean; onUnavailable?(): void };
@@ -87,10 +90,46 @@ function OriginalOpeningDiagnostics({ conversationId, turn, current, onUnavailab
       check(); const value = await aiConversationsApi.admission(query, signal); check();
       if (!validateAiConversationAdmissionDraft(value, query) || JSON.stringify(value.result) !== JSON.stringify(turn)) throw Error('AI_REVISION_CONFLICT');
     };
+    const source = async () => {
+      check();
+      const query: AiTaskSceneReadDraft = { kind: 'original', taskId: task.taskId, runId: task.runId, original: turn.original };
+      // This historical observer accepts the original reference. The legacy
+      // reconcile endpoint instead requires the complete creation command.
+      const response = await http.post<ApiResult<unknown>>(`/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene}`,
+        query, { signal, timeout: 15000 }); check();
+      if (new TextEncoder().encode(JSON.stringify(response.data.data)).length > 262144) throw Error('AI_RESOURCE_UNAVAILABLE');
+      const value = response.data.data as AiTaskSceneObservationDraft;
+      if (!value || value.kind !== 'original' || value.taskId !== task.taskId || value.runId !== task.runId
+        || value.originRunId !== task.runId || !value.originalInput || !value.task || !value.snapshot
+        || value.snapshot.availability !== 'available') throw Error('AI_REVISION_CONFLICT');
+      const receipt = value.originalInput.receipt, origin = value.task.original;
+      const observed = { state: 'observed' as const, receipt, task: value.task.task };
+      if (!validateAiSceneRequestReconcileDraft(observed, turn.original, turn) || observed.task.state !== 'observed'
+        || observed.task.taskId !== task.taskId || observed.task.runId !== task.runId || receipt.state === 'revoked'
+        || !origin || typeof origin !== 'object' || !('receipt' in origin)
+        || !validateAiSceneRequestReceiptDraft(origin.receipt, turn.original, turn)
+        || origin.receipt.contentHash !== receipt.contentHash || origin.receipt.revision !== receipt.revision
+        || origin.inputRef !== turn.original.inputRef || origin.inputHash !== receipt.contentHash || origin.inputRevision !== receipt.revision
+        || origin.sceneCode !== turn.capabilityCode || origin.sceneVersion !== turn.capabilityVersion || origin.audience !== 'operator'
+        || origin.scope?.tenantId !== auth.tenant?.tenantId || origin.scope?.workspaceId !== auth.currentWorkspaceId) throw Error('AI_REVISION_CONFLICT');
+      const snapshot = validateTaskCenterSnapshot(value.snapshot.value, task.taskId);
+      if (snapshot.sceneCode !== turn.capabilityCode || snapshot.sceneVersion !== turn.capabilityVersion
+        || snapshot.revision !== observed.task.revision) throw Error('AI_REVISION_CONFLICT');
+      return { receipt, task: observed.task };
+    };
     await verify();
+    const original = await source(); check();
     const value = await aiOpeningDiagnosticsApi.read(task, turn.original, signal); check();
-    if (value.original.contentHash !== turn.requestHash || value.original.requestKey !== turn.originalRequestKey
-      || value.original.sceneVersion !== turn.capabilityVersion) throw Error('AI_REVISION_CONFLICT');
+    // The turn hashes the admitted scene body; the original receipt separately
+    // hashes its scope, owner and version. Compare each to its original reader.
+    if (!validateAiSceneRequestReceiptDraft(value.original, turn.original, turn) || value.original.state === 'revoked'
+      || value.original.contentHash !== original.receipt.contentHash || value.original.revision !== original.receipt.revision
+      || value.task.state !== 'observed' || value.task.taskId !== task.taskId || value.task.runId !== task.runId
+      || value.task.revision !== original.task.revision || value.material.audience !== 'operator'
+      || value.material.scope.tenantId !== auth.tenant?.tenantId || value.material.scope.workspaceId !== auth.currentWorkspaceId) throw Error('AI_REVISION_CONFLICT');
+    const closing = await source(); check();
+    if (closing.receipt.contentHash !== original.receipt.contentHash || closing.receipt.revision !== original.receipt.revision
+      || JSON.stringify(closing.task) !== JSON.stringify(original.task)) throw Error('AI_REVISION_CONFLICT');
     await verify(); check(); return value;
   };
   const manualRoute = (row: ReadinessDiagnosticRow, value: OpeningTaskMaterial) => {
