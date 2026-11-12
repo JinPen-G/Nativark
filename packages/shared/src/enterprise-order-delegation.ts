@@ -68,6 +68,10 @@ export interface EnterpriseOrderDelegationReceipt {
 
 export interface EnterpriseOrderDelegationView {
   delegationKey: string;
+  personalCustomerId?: string;
+  corporateCustomerId?: string;
+  quoteId?: string;
+  workspaceId?: string;
   requestReference: EnterpriseOrderDelegationRequestReference;
   state: "issued" | "expired" | "revoked" | "consumed";
   revision: number;

@@ -54,6 +54,8 @@ export class EnterpriseMerchantDelegationService {
   }
   private view(record: Stored): EnterpriseOrderDelegationView {
     return { delegationKey: record.source.delegationKey, requestReference: structuredClone(record.source.requestReference),
+      personalCustomerId: record.source.personalCustomerId, corporateCustomerId: record.source.corporateCustomerId,
+      quoteId: record.source.quoteId, workspaceId: record.source.workspaceId,
       state: record.state === "issued" && Date.parse(record.source.expiresAt) <= Date.now() ? "expired" : record.state,
       revision: record.revision, expiresAt: record.source.expiresAt, confirmedAt: record.source.confirmation.confirmedAt,
       purpose: "merchant_operator", original: record.receipt ? structuredClone(record.receipt)
@@ -159,12 +161,19 @@ export class EnterpriseMerchantDelegationService {
     await this.actorScope(actorAuth);
     return { scope, row, record, quote };
   }
-  async readMerchant(actorAuth: EnterpriseMerchantDelegationActorAuth, key: string) {
-    const reference = { delegationKey: key };
-    const original = await this.merchantSource(actorAuth, reference), latest = (await this.rows(original.scope.tenantId, reference.delegationKey))[0];
+  private async stableMerchantSource(actorAuth: EnterpriseMerchantDelegationActorAuth,
+    reference: Omit<EnterpriseOrderDelegationReference, "expectedRevision"> & { expectedRevision?: number }) {
+    const original = await this.merchantSource(actorAuth, reference);
+    const latest = (await this.rows(original.scope.tenantId, reference.delegationKey))[0];
     if (requestFingerprint(latest) !== requestFingerprint(original.row)) throw new ConflictException("原委托在商户授权读取期间已变化");
     await this.actorScope(actorAuth);
-    return this.view(original.record);
+    const closing = (await this.rows(original.scope.tenantId, reference.delegationKey))[0];
+    if (requestFingerprint(closing) !== requestFingerprint(original.row)) throw new ConflictException("原委托在商户最终授权核对期间已变化");
+    return original;
+  }
+  async readMerchant(actorAuth: EnterpriseMerchantDelegationActorAuth, key: string) {
+    const value = await this.stableMerchantSource(actorAuth, { delegationKey: key });
+    return this.view(value.record);
   }
   private async newSubmission(value: Awaited<ReturnType<EnterpriseMerchantDelegationService["merchantSource"]>>, tx: Prisma.TransactionClient) {
     const { source } = value.record;
@@ -175,15 +184,24 @@ export class EnterpriseMerchantDelegationService {
     await this.policies.assertQuoteAmount(source.tenantId, source.corporateCustomerId, source.corporateMembershipId, value.quote, tx);
     await this.approvals.checkDelegatedApproval(source, tx);
   }
-  async prepareMerchantDelegatedSubmission(actorAuth: EnterpriseMerchantDelegationActorAuth, reference: EnterpriseOrderDelegationReference) {
-    const value = await this.merchantSource(actorAuth, reference);
-    if (value.record.state !== "issued" || value.record.revision !== reference.expectedRevision || Date.parse(value.record.source.expiresAt) <= Date.now()) throw new ConflictException("原委托不能新提交，请读取原收据");
+  /** Server-only original material for Core receipt checks. The issuing revision
+   * stays fixed while consumption or revocation advances the current revision. */
+  async readMerchantDelegatedSubmission(actorAuth: EnterpriseMerchantDelegationActorAuth,
+    reference: EnterpriseOrderDelegationReference) {
+    if (!Number.isSafeInteger(reference.expectedRevision) || reference.expectedRevision !== 1) throw new BadRequestException("原委托引用或签发修订无效");
+    const value = await this.stableMerchantSource(actorAuth, reference);
     return { tenantId: value.scope.tenantId, workspaceId: value.scope.workspaceId, personalCustomerId: value.record.source.personalCustomerId,
       corporateCustomerId: value.record.source.corporateCustomerId, delegationKey: reference.delegationKey, coreIdempotencyKey: reference.delegationKey,
       version: value.record.source.version, purpose: value.record.source.purpose, quoteId: value.record.source.quoteId,
-      approvalId: value.record.source.approval?.id, revision: value.record.revision, expiresAt: value.record.source.expiresAt,
+      approvalId: value.record.source.approval?.id, issuedRevision: 1 as const, state: value.record.state,
+      revision: value.record.revision, expiresAt: value.record.source.expiresAt,
       sourceHash: value.record.source.integrityHash, basisHash: value.record.source.basisHash,
       requestHash: value.record.source.requestHash, request: structuredClone(value.record.source.request) };
+  }
+  async prepareMerchantDelegatedSubmission(actorAuth: EnterpriseMerchantDelegationActorAuth, reference: EnterpriseOrderDelegationReference) {
+    const { state, issuedRevision, ...value } = await this.readMerchantDelegatedSubmission(actorAuth, reference);
+    if (state !== "issued" || issuedRevision !== reference.expectedRevision || value.revision !== issuedRevision || Date.parse(value.expiresAt) <= Date.now()) throw new ConflictException("原委托不能新提交，请读取原收据");
+    return value;
   }
   merchantDelegationParticipant(actorAuth: EnterpriseMerchantDelegationActorAuth, reference: EnterpriseOrderDelegationReference): ApprovedOrderTransaction {
     const actor = structuredClone(actorAuth), original = structuredClone(reference);

@@ -17,8 +17,10 @@ export const ENTERPRISE_ORDER_DELEGATION_SCHEMAS: Record<string, SchemaObject> =
     tenantId: string, workspaceId: string, personalCustomerId: string, corporateCustomerId: string, quoteId: string, requestHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
     coreIdempotencyKey: key, actorUserId: string, orderId: string, consumedAt: date, retryable: noRetry }),
   EnterpriseOrderDelegationView: object({ delegationKey: key, requestReference: ref("EnterpriseOrderDelegationRequestReference"),
+    personalCustomerId: string, corporateCustomerId: string, quoteId: string, workspaceId: string,
     state: { type: "string", enum: ["issued", "expired", "revoked", "consumed"] }, revision: integer, expiresAt: date, confirmedAt: date,
     purpose: { type: "string", enum: ["merchant_operator"] }, original: { oneOf: [ref("EnterpriseOrderDelegationReceipt"),
-      object({ state: { type: "string", enum: ["not_submitted", "revoked"] }, retryable: noRetry })] }, retryable: noRetry }),
+      object({ state: { type: "string", enum: ["not_submitted", "revoked"] }, retryable: noRetry })] }, retryable: noRetry },
+    ["delegationKey", "requestReference", "state", "revision", "expiresAt", "confirmedAt", "purpose", "original", "retryable"]),
   EnterpriseOrderDelegationOriginal: { oneOf: [ref("EnterpriseOrderDelegationView"), object({ state: { type: "string", enum: ["not_recorded"] }, delegationKey: key, retryable: noRetry })] }
 };
