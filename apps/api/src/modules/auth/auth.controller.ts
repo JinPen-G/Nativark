@@ -27,13 +27,10 @@ export class AuthController {
     return this.authService.login(body);
   }
 
-  /**
-   * 本机开发登录页的兜底入口：让非技术使用者自行设置演示账号密码，
-   * 不把任何可登录密码写进源码、构建产物或响应。
-   */
+  /** Explicit development maintenance with current platform authentication. */
   @Post("development/reset-demo-password")
-  resetLocalDemoPassword(@Body() body: ResetLocalDemoPasswordDto) {
-    return this.authService.resetLocalDemoPassword(body.password);
+  resetLocalDemoPassword(@Body() body: ResetLocalDemoPasswordDto, @Headers("authorization") authorization?: string) {
+    return this.authService.resetLocalDemoPassword(body.password, authorization);
   }
 
   @Get("me")

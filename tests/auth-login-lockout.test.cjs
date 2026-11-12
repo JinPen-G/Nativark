@@ -122,13 +122,17 @@ function makeService(prisma, dataSource = "mysql") {
     async getSecurityBaseline() { return { passwordPolicy: { minLength: 8, requireLetter: true, requireNumber: true, disallowDefaultPassword: true } }; },
     async setLocalDemoAccountPassword() {}
   };
-  const resetConfig = { get: (key) => key === "NODE_ENV" ? "development" : key === "AUTH_TOKEN_SECRET" ? "lockout-unit-test-secret" : key === "PLATFORM_DATA_SOURCE" ? "mysql" : undefined };
+  const resetConfig = { get: (key) => key === "NODE_ENV" ? "development" : key === "LOCAL_DEMO_PASSWORD_RESET_ENABLED" ? "true" : key === "AUTH_TOKEN_SECRET" ? "lockout-unit-test-secret" : key === "PLATFORM_DATA_SOURCE" ? "mysql" : undefined };
   const resetService = new AuthService(resetPlatform, resetConfig, undefined, undefined, undefined, resetStore);
+  resetService.getCurrentUser = async (authorization) => {
+    assert.equal(authorization, "Bearer reset-fixture");
+    return { isSaasAdmin: true, mustChangePassword: false, permissions: ["system:params:manage"] };
+  };
   resetService.loginFailureKeyHash = (value) => value;
   for (const key of ["demo:admin", "demo2:admin", "platform:admin", "tenant-one:admin"]) {
     resetStore.rows.set(key, { id: key, loginKeyHash: key, failureCount: 1, firstFailedAt: new Date(), lockedUntil: null, expiresAt: new Date(Date.now() + 600_000), revision: 1 });
   }
-  await resetService.resetLocalDemoPassword("New!Pass1234");
+  await resetService.resetLocalDemoPassword("New!Pass1234", "Bearer reset-fixture");
   assert.deepEqual([...resetStore.rows.keys()], ["tenant-one:admin"], "demo password reset must not clear other tenant lockouts");
 
   console.log("auth login lockout tests passed: shared hash storage, threshold lock, clear, disabled policy, unique race, CAS race, memory fallback");

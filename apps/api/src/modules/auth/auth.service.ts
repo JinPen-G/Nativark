@@ -144,16 +144,27 @@ export class AuthService {
     );
   }
 
-  /**
-   * 仅非生产环境的本地演示重置。此处刻意只返回固定账号标识，不返回提交的密码；
-   * 密码由下游立即哈希，且全部既有会话都会失效。
-   */
-  async resetLocalDemoPassword(password: string): Promise<ResetLocalDemoPasswordResult> {
-    if (this.configService.get<string>("NODE_ENV") === "production") {
-      throw new ForbiddenException("生产环境不提供演示账号密码重置入口");
+  private async assertLocalDemoResetAccess(authorization?: string) {
+    if (this.configService.get<string>("NODE_ENV") !== "development"
+      || this.configService.get<string>("LOCAL_DEMO_PASSWORD_RESET_ENABLED") !== "true") {
+      throw new ForbiddenException("演示账号密码重置未启用");
     }
+    const user = await this.getCurrentUser(authorization);
+    if (!user.isSaasAdmin || user.mustChangePassword
+      || !user.permissions?.some(permission => permission === "system:params:manage" || permission === "*")) {
+      throw new ForbiddenException("演示账号密码重置需要当前平台管理员的系统参数管理权限");
+    }
+  }
+
+  /** Explicit development maintenance under the original authenticated platform identity.
+   * Password policy waits cannot preserve revoked access. The repository hashes the
+   * replacement and revokes existing demo sessions in its original transaction.
+   */
+  async resetLocalDemoPassword(password: string, authorization?: string): Promise<ResetLocalDemoPasswordResult> {
+    await this.assertLocalDemoResetAccess(authorization);
     const security = await this.platformService.getSecurityBaseline();
     this.assertPasswordPolicy(password, security.passwordPolicy);
+    await this.assertLocalDemoResetAccess(authorization);
     await this.platformService.setLocalDemoAccountPassword(password);
     // 重置这三个演示账号时，只清理它们各自的失败计数。清空整张表会让其他租户
     // 的锁定状态被本地开发操作解除，既越出目标范围，也会削弱跨账号暴力破解保护。
