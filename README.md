@@ -124,7 +124,7 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 | 配置 | 应当确认的内容 |
 | --- | --- |
 | `DATABASE_URL` | 确实指向自己的开发库，连接用户具备本次迁移所需权限 |
-| `PLATFORM_DATA_SOURCE`、`RENTAL_OS_DATA_SOURCE`、`INFRA_DATA_SOURCE` | 持久化开发使用 `mysql`；`memory` 只用于明确的演示/测试边界，不能证明数据库行为 |
+| `PLATFORM_DATA_SOURCE`、`RENTAL_OS_DATA_SOURCE`、`INFRA_DATA_SOURCE` | 持久化使用 `mysql`，`memory` 用于明确的演示/测试。省略 `INFRA_DATA_SOURCE` 时继承 `RENTAL_OS_DATA_SOURCE`，两者均省略时使用 `mysql` |
 | `AUTH_TOKEN_SECRET`、`INTEGRATION_ENCRYPTION_KEY` | 自行生成独立随机密钥，不使用模板占位值；集成凭据加密密钥不能随意更换，否则旧数据可能无法解密 |
 | `SEED_PLATFORM_PASSWORD`、`SEED_DEMO_PASSWORD` | 仅执行演示 Seed 时填写自选强口令；仓库不提供共享默认管理员密码 |
 | `API_PORT` | API 默认端口 3000 |
@@ -143,7 +143,7 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 - 使用默认入口时，各目录的文件优先级由高到低为 `.env.<mode>.local`、`.env.<mode>`、`.env.local`、`.env`。API 与原应用目录配置继续作为根配置的兼容覆盖。API、数据库和运维命令的 mode 取启动进程的 `NODE_ENV`，Web 使用 Vite 的 mode。部署使用显式环境文件可以固定各入口的来源。
 - 根环境文件按标准 dotenv 字面值解析，带引号的多行内容、注释和密码中的 `$` 都由同一解析器处理。原 Web 应用目录的环境文件保留 Vite 插值兼容。API 在导入业务模块前完成加载与关键值校验，Nest 从已准备的进程环境注入配置。
 - Web 构建按各端清单投影公开字段。管理后台接收 API 地址、快选和品类预览开关，租户网站接收 API 地址、基础域名和默认租户，企业端接收公共入口 host。其余服务器配置留在后端。公开构建参数修改后须重新构建，后端环境修改后须重启进程。
-- 开发代理统一使用 `API_PROXY_TARGET`，兼容旧 `VITE_API_TARGET`。管理后台浏览器地址为 `VITE_API_BASE_URL`，租户网站为 `VITE_API_BASE`，同源部署均可设为 `/api`。企业端保持原 `/api/client/v1` 与 `/enterprise-assets/` 路径。[后台配置](apps/admin/vite.config.ts)和[企业端配置](apps/enterprise-portal/vite.config.ts)保留各自的宿主约束。
+- 开发代理统一使用 `API_PROXY_TARGET`，兼容旧 `VITE_API_TARGET`。管理后台的 `VITE_API_BASE_URL` 在同源部署填 `/api`。租户网站的 `VITE_API_BASE` 表示网关基址，同源部署留空，由客户端追加 `/api/client/v1`。公共数据请求支持 `https://gateway.example.com` 等外部网关及其路由前缀，登录态请求遵循原共享会话的同源及固定接口路径约束。企业端使用原 `/api/client/v1` 与 `/enterprise-assets/` 路径。[后台配置](apps/admin/vite.config.ts)和[企业端配置](apps/enterprise-portal/vite.config.ts)定义各自的宿主约束。
 - 发布构建、启动和门禁应使用同一部署环境文件。发布清单包含 `config/environment.cjs` 与其类型声明，交付时须保留项目的 `apps/api/dist` 和 `config` 相对目录。真实环境文件由部署方托管。
 - 租户支付、短信、存储、品牌、价格等业务配置通过后台及其原数据库服务维护。登录页保留原账号快选、重置弹窗与全部登录操作。个人演示同时配置 `RENTAL_DEPLOYMENT_PROFILE=personal-demo`、`LOCAL_DEMO_PASSWORD_RESET_ENABLED=true` 和 `VITE_SHOW_ACCOUNT_SHORTCUTS=true`，重置入口可在登录前使用，账号快选填写群组与账号并清空密码。
 

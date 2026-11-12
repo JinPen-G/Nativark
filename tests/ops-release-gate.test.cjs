@@ -40,6 +40,12 @@ void (() => {
   const crypto = require("node:crypto");
   const environment = require("../config/environment.cjs");
   const valid = { ...complete, AUTH_TOKEN_SECRET: crypto.randomBytes(32).toString("hex"), INTEGRATION_ENCRYPTION_KEY: crypto.randomBytes(32).toString("hex") };
+  const memoryEnvironment = { NODE_ENV: "development", PLATFORM_DATA_SOURCE: "memory", RENTAL_OS_DATA_SOURCE: "memory" };
+  assert.equal(environment.validateApiEnvironment(memoryEnvironment).INFRA_DATA_SOURCE, "memory", "省略基础设施数据源时继承租赁数据源");
+  assert.equal(environment.validateApiEnvironment({ ...memoryEnvironment, INFRA_DATA_SOURCE: "mysql" }).INFRA_DATA_SOURCE, "mysql", "显式基础设施数据源优先");
+  assert.equal(environment.validateApiEnvironment({}).INFRA_DATA_SOURCE, "mysql", "数据源均省略时回落 MySQL");
+  assert.throws(() => environment.validateApiEnvironment({ ...memoryEnvironment, INFRA_DATA_SOURCE: "invalid" }), /INFRA_DATA_SOURCE/);
+  assert.equal(facts.inspectReleaseEnvironment({ ...valid, RENTAL_OS_DATA_SOURCE: "memory" }).ok, false, "生产发布继续拒绝继承的内存数据源");
   assert.equal(facts.inspectReleaseEnvironment(valid).ok, true);
   for (const change of [{ NODE_ENV: "development" }, { RENTAL_DEPLOYMENT_PROFILE: "demo" }, { RENTAL_DEPLOYMENT_PROFILE: "development" }, { INFRA_DATA_SOURCE: "memory" }, { AUTH_TOKEN_SECRET: "x".repeat(40) }, { LOCAL_DEMO_PASSWORD_RESET_ENABLED: "true" }, { API_PORT: "3000bad" }]) {
     const rejected = facts.inspectReleaseEnvironment({ ...valid, ...change });
@@ -51,13 +57,14 @@ void (() => {
   assert.equal(facts.inspectReleaseEnvironment(personalDemo).ok, true, "显式个人演示可在生产运行模式保留登录前重置");
   assert.equal(facts.inspectReleaseEnvironment({ ...personalDemo, NODE_ENV: "development" }).ok, true);
   assert.equal(facts.inspectReleaseEnvironment({ ...personalDemo, NODE_ENV: "test" }).ok, false);
-  const publicValues = { ...valid, VITE_API_BASE_URL: "/api", VITE_SHOW_ACCOUNT_SHORTCUTS: "true", VITE_API_BASE: "/api", VITE_ENTERPRISE_PUBLIC_HOSTS: "example.test", VITE_UNREGISTERED_SECRET: "private-fixture" };
+  const publicValues = { ...valid, VITE_API_BASE_URL: "/api", VITE_SHOW_ACCOUNT_SHORTCUTS: "true", VITE_API_BASE: "", VITE_ENTERPRISE_PUBLIC_HOSTS: "example.test", VITE_UNREGISTERED_SECRET: "private-fixture" };
   for (const [application, expected] of [["admin", ["VITE_API_BASE_URL", "VITE_SHOW_ACCOUNT_SHORTCUTS"]], ["tenantWebsite", ["VITE_API_BASE"]], ["enterprisePortal", ["VITE_ENTERPRISE_PUBLIC_HOSTS"]]]) {
     const projected = environment.publicEnvironmentDefinitions(application, publicValues);
     assert.deepEqual(Object.keys(projected).sort(), expected.map(name => `import.meta.env.${name}`).sort());
     assert.equal(JSON.stringify(projected).includes("private-fixture"), false);
     assert.equal(JSON.stringify(projected).includes(valid.AUTH_TOKEN_SECRET), false);
   }
+  assert.equal(environment.publicEnvironmentDefinitions("tenantWebsite", publicValues)["import.meta.env.VITE_API_BASE"], '""', "租户网站的同源空基址必须保留到公开配置");
   ok("发布配置值经过统一校验，公开字段按各端清单投影");
 
   // ============ 2. 产物指纹：可比对、与顺序无关、随内容变 ============

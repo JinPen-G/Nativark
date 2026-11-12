@@ -62,13 +62,13 @@ function validateApiEnvironment(input, { release = false } = {}) {
     NODE_ENV: "development",
     PLATFORM_DATA_SOURCE: "mysql",
     RENTAL_OS_DATA_SOURCE: "mysql",
-    INFRA_DATA_SOURCE: "mysql",
     API_PORT: "3000",
     TRUST_PROXY_HOPS: "0",
     DATABASE_CONNECT_ON_START: "false",
     LOCAL_DEMO_PASSWORD_RESET_ENABLED: "false",
     ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined))
   };
+  env.INFRA_DATA_SOURCE ??= env.RENTAL_OS_DATA_SOURCE;
   const errors = [];
   env.NODE_ENV = String(env.NODE_ENV ?? "development").trim().toLowerCase();
   if (!["development", "test", "production"].includes(env.NODE_ENV)) {
