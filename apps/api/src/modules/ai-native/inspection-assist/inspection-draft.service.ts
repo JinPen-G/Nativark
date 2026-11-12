@@ -97,9 +97,9 @@ export class InspectionDraftService {
           value = candidate.value.kind === 'photo' ? candidate.value.attachmentId : candidate.value.value;
           const basis = state.candidateBasis?.[candidate.candidateId];
           const checked = await this.candidates.consume({ ...target, bindingFingerprint: input.bindingFingerprint, candidates: [candidate] }, basis);
-          // A newly frozen explicit absence is not a weaker adoption gate than
-          // a recorded mismatch. Manual entry remains the human fallback.
-          if (basis !== undefined && checked.basisIssues.length) throw new InspectionAssistError('BINDING_CHANGED');
+          // Legacy omission and explicit absence both lack an adoption basis.
+          // Original-operation replay above remains a receipt read.
+          if (checked.basis.status !== 'recorded' || checked.basisIssues.length) throw new InspectionAssistError('BINDING_CHANGED');
         }
         if (edit.decision === 'rejected') {
           if (edit.value !== undefined) throw new InspectionAssistError('INVALID_INPUT');

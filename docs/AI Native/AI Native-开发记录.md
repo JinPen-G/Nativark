@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-inspection-legacy-adoption-p2-20261112"></a>
+## 历史检查候选缺依据时的采用门禁修复（2026-11-12）
+
+QA 经 PM 提交的原反例为历史草稿省略 `candidateBasis`，读取显示不可采用，正常 `draft-edit` 却仍可保存 `accepted`。修复将新采用统一限制为原复核结果 `basis.status=recorded` 且 `basisIssues` 为空。省略和显式 `not_recorded` 均拒绝，原操作收据重放仍在采用检查之前，人工填写、更正和拒绝沿原服务处理。源码固定 blob 为 `82b32af271b0bbc2010a601677bf8ba7b5dbccfe`。[采用服务](../../apps/api/src/modules/ai-native/inspection-assist/inspection-draft.service.ts)
+
+复用原检查持久化 fixture，以实际 StaffFactory、Auth/Guard、Controller、草稿仓储及原媒体校验运行必要模拟。省略和显式缺依据均返回当前 HTTP 合同的 `AI_PROPOSAL_STALE`，原值和 revision 保持，新采用操作写入为 0。两种历史状态分别完成 manual、modified、rejected 及同键读回。新原输入由真实依据服务从明确合成来源冻结 recorded 引用，候选可明确采用一次。随后移除该依据关联，原已发生操作仍可按同键读回，新键采用拒绝。仅有读取权限时可观察原收据，撤销会话后拒绝读取。未调用模型或提交 Core 检查。
+
+命令为 `node --no-compilation-cache -`，退出 0，stdin SHA-256 `b7f9d96b140033c9a9822988ba97f96836179458f2e1116bdaa613d72d918e9a`。TypeScript 5.9.3 对服务、Controller 和正式 shared 三根共 1436 源检查，零诊断，退出 0，stdin SHA-256 `b6466b35135b04edf080ddfe97b37a760c5906d0b4f5a09d205a2686977cd131`。原命令和输出保留 AI-RD 会话，未另存脚本或环境。
+
+内存驱动的前次失败保留在同会话。先发生夹具重复注册编译器，继而发现模拟媒体尚未按原服务冻结，最后纠正驱动使用的历史错误别名。复验只调整内存加载和原 fixture 准备，生产权限、校验、测试文件和断言均保持。全部模拟进程已退出，审计为空，任务临时目录未创建。该修复交 PM 安排 QA 复验，AIN-19 整项进度仍待原范围核定，真实微信、数据库、模型与存储由负责人后续操作。
+
 <a id="ain12-model-control-checkpoint-20261112"></a>
 ## AIN-12 模型控制生产接线未完检查点（2026-11-12）
 
