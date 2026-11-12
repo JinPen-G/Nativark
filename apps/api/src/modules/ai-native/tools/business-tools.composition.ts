@@ -38,6 +38,8 @@ import { AiOrderCandidatesService } from './order-candidates.service';
 import { z } from 'zod';
 import { AiOpeningSectionDifferenceService } from './opening-section-difference.service';
 import { AiOpeningSectionProposalService } from './opening-section-proposal.service';
+import { AiOpeningIntegrationFactsService } from './opening-integration-facts.service';
+import type { TenantIntegrationService } from '../../integrations/tenant-integration.service';
 import { AiOpeningVersionFieldSource, type OpeningVersionFieldDb } from './opening-version-fields.source';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { MembershipService } from '../../platform/membership.service';
@@ -74,6 +76,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   openingProposals?: Omit<ConstructorParameters<typeof AiOpeningSectionProposalService>[0], 'guard' | 'credentials'>;
   /** Real version-row reader only; missing storage is unavailable, not cache. */
   openingVersionFields?: OpeningVersionFieldDb;
+  integrations?: Pick<TenantIntegrationService, 'observeOpeningConfiguration'>;
   clock?: () => Date;
 }) {
   for (const [port, method] of [[input?.business, 'loadQuote'], [input?.reports, 'getBoundedOperationReport']] as const) {
@@ -121,7 +124,9 @@ export function composeAiAuthorizedBusinessTools(input: {
     current: scope => input.core.readReportConfiguration(scope.tenantId)
   }, diagnostics, input.clock);
   const openingSource = new AiGuardedOpeningConfigurationSource(input.core, routes);
-  const openingActions = new AiOpeningActionListService(opening, risks, openingSource, diagnostics);
+  const openingIntegration = input.integrations ? new AiOpeningIntegrationFactsService({ integrations: input.integrations,
+    guard: input.guard, credentials: input.credentials, clock: input.clock }) : undefined;
+  const openingActions = new AiOpeningActionListService(opening, risks, openingSource, diagnostics, input.clock, openingIntegration);
   const openingFields = new AiOpeningSectionDifferenceService(openingSource, routes, input.clock,
     input.openingVersionFields ? new AiOpeningVersionFieldSource(input.openingVersionFields, routes) : undefined);
   const sectionProposals = input.openingProposals ? new AiOpeningSectionProposalService({ ...input.openingProposals,

@@ -1,5 +1,6 @@
 /** Opt-in, read-only discovery of already persisted human automation reviews.
  * A cursor is an untrusted position, never task access or execution permission. */
+import type { AiBusinessEventDraft } from './ai-events-draft';
 export const AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT = {
   method: 'POST', operation: 'reviews/queue',
   operatorBasePath: 'ai-native/automation/operator', staffBasePath: 'ai-native/automation/staff'
@@ -7,7 +8,7 @@ export const AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT = {
 
 export type AiAutomationReviewQueueFiltersDraft = {
   reviewStatus?: 'open' | 'closed';
-  eventType?: 'notification.failed' | 'refund.failed' | 'inspection.return_exception';
+  eventType?: AiBusinessEventDraft['type'];
 };
 export type AiAutomationReviewQueueRequestDraft = {
   /** Required, 1 through 10. No scan-to-fill. */
@@ -19,7 +20,7 @@ export type AiAutomationReviewQueueItemDraft = {
   inputRef: string;
   mode: 'shadow' | 'manual_confirmation';
   review: { status: 'open' | 'closed'; revision: number; closeReason: string | null; feedbackCode: string | null };
-  event: { eventId: string; type: 'notification.failed' | 'refund.failed' | 'inspection.return_exception';
+  event: { eventId: string; type: AiBusinessEventDraft['type'];
     status: string; resourceRevision: number; fence: number; expiresAt: string };
   task: { state: 'observed'; taskId: string; runId: string; status: string; revision: number; archived: boolean }
     | { state: 'not_observed'; taskId: null; runId: null };

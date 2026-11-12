@@ -5,6 +5,13 @@ import { leafClosed as object, leafEnum as choice, leafInt as integer, leafList 
 import { AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
 import type { AiBusinessEventDraft } from './ai-events-draft';
 
+/** Human metadata authority is prepared, explicitly enabled and read back by
+ * its original reference; it never grants model or Core execution. */
+export const AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT = Object.freeze({
+  method: 'POST',
+  operations: Object.freeze({ prepareGrant: 'reviews/grant/prepare', enableGrant: 'reviews/grant/enable', readGrant: 'reviews/grant/read' }),
+} as const);
+
 export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
   readCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
   prepareCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
@@ -18,7 +25,10 @@ export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
   forEvent: { request: 'AiAutomationReviewsForEventRequestDraft', response: 'AiAutomationReviewsForEventDraft' },
   close: { request: 'AiAutomationReviewCloseDraft', response: 'AiAutomationReviewOperationDraft' },
   feedback: { request: 'AiAutomationReviewFeedbackDraft', response: 'AiAutomationReviewOperationDraft' },
-  operation: { request: 'AiAutomationReviewOperationReadDraft', response: 'AiAutomationReviewOperationDraft' }
+  operation: { request: 'AiAutomationReviewOperationReadDraft', response: 'AiAutomationReviewOperationDraft' },
+  prepareGrant: { request: 'AiAutomationReviewGrantQueryDraft', response: 'AiAutomationReviewGrantPreparationDraft' },
+  enableGrant: { request: 'AiAutomationReviewGrantPreparationDraft', response: 'AiAutomationReviewGrantEnableDraft' },
+  readGrant: { request: 'AiAutomationReviewGrantReadDraft', response: 'AiAutomationReviewGrantObservationDraft' }
 } as const);
 export interface AiAutomationCandidateRequestDraft { eventId: string }
 export interface AiAutomationPendingCandidatesRequestDraft { limit: number }
@@ -44,6 +54,41 @@ export type AiAutomationTaskCreationObservationDraft = InputSemantics & { inputR
 export interface AiAutomationReviewReadDraft { inputRef: string }
 export interface AiAutomationReviewsForEventRequestDraft { eventId: string; limit: number; after?: string }
 export interface AiAutomationReviewOperationReadDraft extends AiAutomationReviewReadDraft { operationKey: string }
+export interface AiAutomationReviewGrantQueryDraft extends AiAutomationReviewReadDraft { action: 'close' | 'feedback' }
+export interface AiAutomationReviewGrantReadDraft extends AiAutomationReviewGrantQueryDraft { expectedRevision: number; preparedRef?: string }
+export interface AiAutomationReviewGrantKeyDraft {
+  tenantId: string; workspaceId: string; scopeId: string; userId: string;
+  actorKind: 'user'; actorId: string; audience: 'operator' | 'staff'; inputId: string;
+  eventId: string; action: 'close' | 'feedback'; expectedRevision: number;
+}
+type GrantMaterial = {
+  version: 'human-automation-review-grant-1'; preparedRef: string; key: AiAutomationReviewGrantKeyDraft;
+  grantId: string; expectedGrantRevision: number | null; previousGrantFingerprint: string | null;
+  targetFingerprint: string; principalFingerprint: string; sourceFingerprint: string;
+  resourceHash: string; inputHash: string; creationKey: string;
+  policy: { policyId: string; revision: number; fingerprint: string }; requiredPermissions: string[];
+  preparedAt: string; expiresAt: string;
+};
+export type AiAutomationReviewGrantPreparationDraft = GrantMaterial & {
+  state: 'prepared'; executionPermission: false; businessActionRequested: false;
+};
+export type AiAutomationReviewGrantReceiptDraft = GrantMaterial & {
+  grantRevision: number; enabledAtCommit: true; recordedAt: string;
+};
+type GrantSemantics = { executionPermission: false; businessActionRequested: false;
+  automaticRetry: false; semantics: 'human_review_metadata_only' };
+type GrantSnapshot = { id: string; key: AiAutomationReviewGrantKeyDraft; revision: number; enabled: boolean;
+  resourceHash: string; requiredPermissions: string[]; expiresAt: string };
+export type AiAutomationReviewGrantEnableDraft = GrantSemantics & (
+  | { state: 'observed'; receipt: AiAutomationReviewGrantReceiptDraft; replayed: boolean }
+  | { state: 'unknown'; inputRef: string; action: 'close' | 'feedback'; expectedRevision: number; preparedRef: string;
+      retryable: false; nextAction: 'read_original_grant' });
+export type AiAutomationReviewGrantObservationDraft = GrantSemantics & {
+  key: AiAutomationReviewGrantKeyDraft; preparedRef: string | null;
+} & (
+  | { state: 'unknown'; retryable: false; nextAction: 'read_original_grant'; active: false }
+  | { state: 'not_observed'; receipt: null; grant: GrantSnapshot | null; active: false }
+  | { state: 'observed'; receipt: AiAutomationReviewGrantReceiptDraft | null; grant: GrantSnapshot; active: boolean });
 type Mutation = AiAutomationReviewOperationReadDraft & { expectedRevision: number; expectedEventFence: number; expectedTaskId: string | null };
 export type AiAutomationReviewCloseReasonDraft = 'resolved' | 'dismissed' | 'duplicate' | 'not_applicable';
 export type AiAutomationReviewFeedbackCodeDraft = 'helpful' | 'not_helpful' | 'incorrect' | 'not_applicable';
@@ -53,7 +98,7 @@ type Semantics = { executionPermission: false; businessActionRequested: false };
 type Source = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string; sourceHash?: string };
 type Task = { state: 'observed'; taskId: string; runId: string; status: string; revision: number; archived: boolean }
   | { state: 'not_observed'; taskId: null; runId: null };
-type Event = { eventId: string; type: 'notification.failed' | 'refund.failed' | 'inspection.return_exception';
+type Event = { eventId: string; type: AiBusinessEventDraft['type'];
   status: string; fence: number; resourceRevision: number };
 export type AiAutomationReviewDraft = Semantics & {
   inputRef: string; inputStatus: 'prepared' | 'creation_unknown' | 'linked'; inputHash: string;
@@ -76,7 +121,9 @@ export type AiAutomationReviewsForEventDraft = Semantics & {
   event: Event; currentSource: Source; originalResource:
     | { kind: 'notification'; id: string; orderId: string | null }
     | { kind: 'inspection'; id: string; exceptionId: string | null; orderId: string | null }
-    | { kind: 'refund'; id: string; orderId: string | null; paymentIntentId?: string };
+    | { kind: 'refund'; id: string; orderId: string | null; paymentIntentId?: string }
+    | { kind: 'order'; id: string; orderId: string; version: number }
+    | { kind: 'configuration'; id: string; orderId: null; version: number; sectionCode: string };
   inputs: { state: 'observed' | 'not_observed'; items: AiAutomationReviewDraft[]; hasMore: boolean;
     nextAfter: string | null; coverage: 'bounded_authorized_event_window' };
   nextAction: 'read_original_resource' | 'human_business_review';
@@ -94,7 +141,8 @@ const feedbackCode = choice('helpful', 'not_helpful', 'incorrect', 'not_applicab
 const semantics = { executionPermission: no, businessActionRequested: no };
 const inputStatus = choice('prepared', 'creation_unknown', 'linked');
 const inputSemantics = { dispatchRequested: no, confirmationGranted: no, semantics: choice('metadata_only_not_execution_permission') };
-const eventType = choice('notification.failed', 'refund.failed', 'inspection.return_exception');
+const eventType = choice('notification.failed', 'refund.failed', 'inspection.return_exception',
+  'fulfillment.resource_shortage', 'opening.missing_configuration');
 const event = { eventId: uuid, type: eventType, status: choice('pending', 'claimed', 'retry_scheduled', 'ready', 'closed', 'expired', 'dead_letter'),
   fence, resourceRevision: revision };
 const review = object({ revision, status: choice('open', 'closed'), closeReason: nullable(closeReason), feedbackCode: nullable(feedbackCode) });
@@ -107,6 +155,22 @@ const originalResource = (kind: string, extra: Record<string, AiLeafSchemaDraft>
   const properties = { kind: choice(kind), id: id(), orderId: nullable(id()), ...extra };
   return object(properties, Object.keys(properties).filter(name => !optional.includes(name)));
 };
+const grantRevision = integer(1, 4294967293);
+const grantAction = choice('close', 'feedback');
+const grantKey = object({ tenantId: id(), workspaceId: id(), scopeId: { ...id(), maxLength: 36 }, userId: id(),
+  actorKind: choice('user'), actorId: id(), audience: choice('operator', 'staff'), inputId: uuid,
+  eventId: uuid, action: grantAction, expectedRevision: grantRevision });
+const grantPermissions = { ...list({ ...id(), pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' }, 64, 1), uniqueItems: true };
+const grantMaterial = { version: choice('human-automation-review-grant-1'), preparedRef: hash, key: grantKey,
+  grantId: { ...id(), maxLength: 36 }, expectedGrantRevision: nullable(grantRevision), previousGrantFingerprint: nullable(hash),
+  targetFingerprint: hash, principalFingerprint: hash, sourceFingerprint: hash, resourceHash: hash, inputHash: hash,
+  creationKey: id(), policy: object({ policyId: id(), revision: grantRevision, fingerprint: hash }),
+  requiredPermissions: grantPermissions, preparedAt: time, expiresAt: time };
+const grantPreparation = object({ ...grantMaterial, state: choice('prepared'), ...semantics });
+const grantReceipt = object({ ...grantMaterial, grantRevision, enabledAtCommit: { type: 'boolean', const: true }, recordedAt: time });
+const grantSemantics = { ...semantics, automaticRetry: no, semantics: choice('human_review_metadata_only') };
+const grantSnapshot = object({ id: { ...id(), maxLength: 36 }, key: grantKey, revision: grantRevision, enabled: bool,
+  resourceHash: hash, requiredPermissions: grantPermissions, expiresAt: time });
 const candidateBase = { eventId: uuid, attempts: integer(0, 4294967295), fence, taskCreated: no };
 const candidate = { oneOf: [
   object({ ...candidateBase, status: choice('ready'), material: object({ event: ref('AiBusinessEventDraft'),
@@ -136,6 +200,21 @@ export const AI_AUTOMATION_REVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiAutomationReviewReadDraft: object({ inputRef: uuid }),
   AiAutomationReviewsForEventRequestDraft: object({ eventId: uuid, limit: integer(1, 10), after: uuid }, ['eventId', 'limit']),
   AiAutomationReviewOperationReadDraft: object(resource),
+  AiAutomationReviewGrantQueryDraft: object({ inputRef: uuid, action: grantAction }),
+  AiAutomationReviewGrantReadDraft: object({ inputRef: uuid, action: grantAction,
+    expectedRevision: grantRevision, preparedRef: hash }, ['inputRef', 'action', 'expectedRevision']),
+  AiAutomationReviewGrantPreparationDraft: grantPreparation,
+  AiAutomationReviewGrantEnableDraft: { oneOf: [
+    object({ ...grantSemantics, state: choice('observed'), receipt: grantReceipt, replayed: bool }),
+    object({ ...grantSemantics, state: choice('unknown'), inputRef: uuid, action: grantAction, expectedRevision: grantRevision,
+      preparedRef: hash, retryable: no, nextAction: choice('read_original_grant') })] },
+  AiAutomationReviewGrantObservationDraft: { oneOf: [
+    object({ ...grantSemantics, state: choice('unknown'), key: grantKey, preparedRef: nullable(hash),
+      retryable: no, nextAction: choice('read_original_grant'), active: no }),
+    object({ ...grantSemantics, state: choice('not_observed'), key: grantKey, preparedRef: nullable(hash),
+      receipt: { type: 'null' }, grant: nullable(grantSnapshot), active: no }),
+    object({ ...grantSemantics, state: choice('observed'), key: grantKey, preparedRef: nullable(hash),
+      receipt: nullable(grantReceipt), grant: grantSnapshot, active: bool })] },
   AiAutomationReviewCloseDraft: object({ ...mutation, reason: closeReason }),
   AiAutomationReviewFeedbackDraft: object({ ...mutation, code: feedbackCode }),
   AiAutomationReviewDraft: object({ ...semantics, inputRef: uuid, inputStatus, inputHash: hash,
@@ -152,7 +231,11 @@ export const AI_AUTOMATION_REVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
       recordedAt: time, retryable: no })] },
   AiAutomationReviewsForEventDraft: object({ ...semantics, event: object(event), currentSource: source,
     originalResource: { oneOf: [originalResource('notification'), originalResource('inspection', { exceptionId: nullable(id()) }),
-      originalResource('refund', { paymentIntentId: id() }, ['paymentIntentId'])] },
+      originalResource('refund', { paymentIntentId: id() }, ['paymentIntentId']),
+      originalResource('order', { orderId: id(), version: revision }),
+      originalResource('configuration', { orderId: { type: 'null' }, version: revision,
+        sectionCode: choice('workspace_profile', 'accounts_roles', 'fulfillment_network', 'business_rule', 'business_calendar',
+          'item_groups', 'pricing_groups_rates', 'price_version', 'membership_base') })] },
     inputs: object({ state: choice('observed', 'not_observed'), items: list(ref('AiAutomationReviewDraft'), 10), hasMore: bool,
       nextAfter: nullable(uuid), coverage: choice('bounded_authorized_event_window') }),
     nextAction: choice('read_original_resource', 'human_business_review') }),

@@ -1,5 +1,6 @@
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { AiBusinessFailureOutbox, PrismaClient } from '@prisma/client';
+import type { AiBusinessEventDraft } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestDataScope, getRequestIdentity, getRequestLocationIds, runWithRequestIdentity } from '../../../common/request-identity';
 import type { AuthService } from '../../auth/auth.service';
@@ -8,17 +9,20 @@ import { canManageWorkspaceWideNotifications, canResolveNotificationOrderScope }
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
-import { BusinessFailureError } from './prisma-business-failure-outbox';
+import { BusinessFailureError, isResourceFailureEvent, readBusinessFailureResourceBinding, readBusinessFailureResource,
+  resourceFailureEvent, requireBusinessFailureResourcePorts, type BusinessFailureResourcePorts } from './prisma-business-failure-outbox';
 import { returnExceptionSource } from './return-exception-source';
 
-export type FailureSource = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string; sourceHash?: string };
+export type FailureSource = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string;
+  sourceHash?: string; capturedSourceHash?: string; resourceEvent?: AiBusinessEventDraft };
 export class BusinessFailureReadAuthority {
   private readonly identities: AiTaskCurrentIdentityAuthority;
   constructor(private readonly db: Pick<PrismaClient, 'rentalNotificationLog' | 'rentalPaymentRefund' | 'rentalInspectionRecord'>,
     auth: Pick<AuthService, 'resolveAccessContext'>, private readonly credentials: AiTaskCredentialSource,
     private readonly guard: Pick<ApiAuthGuard, 'canActivate'>, private readonly core: Pick<RentalCoreService, 'getOrder'>,
-    clock: () => Date = () => new Date()) {
+    private readonly clock: () => Date = () => new Date(), private readonly resources?: BusinessFailureResourcePorts) {
     this.identities = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
+    requireBusinessFailureResourcePorts(resources);
   }
 
   async current() {
@@ -31,10 +35,14 @@ export class BusinessFailureReadAuthority {
     const authorize = async <R>(read: (source: FailureSource, principal: string) => Promise<R>): Promise<R> => {
       const current = await this.current(), context = current.context;
       if (event.tenantId !== current.scope.tenantId || event.workspaceId !== current.scope.workspaceId) throw new BusinessFailureError('unavailable');
-      const source = await this.source(event);
-      const path = event.notificationId ? '/rental/v1/notification-logs'
-        : event.inspectionId ? `/rental/v1/orders/${encodeURIComponent(source.orderId!)}/inspections`
-        : `/rental/v1/orders/${encodeURIComponent(source.orderId!)}/payment-intents/${encodeURIComponent(source.paymentIntentId!)}/refunds`;
+      if (isResourceFailureEvent(event) && !this.resources) throw new BusinessFailureError('unavailable');
+      const reference = isResourceFailureEvent(event) ? await readBusinessFailureResourceBinding(event, this.resources!) : null;
+      const original = reference ? null : await this.source(event);
+      const path = reference ? reference.kind === 'order_assignment'
+        ? `/rental/v1/orders/${encodeURIComponent(reference.id)}` : '/rental/v1/tenant-readiness'
+        : event.notificationId ? '/rental/v1/notification-logs'
+          : event.inspectionId ? `/rental/v1/orders/${encodeURIComponent(original!.orderId!)}/inspections`
+            : `/rental/v1/orders/${encodeURIComponent(original!.orderId!)}/payment-intents/${encodeURIComponent(original!.paymentIntentId!)}/refunds`;
       const credentials = structuredClone(await this.credentials.current());
       if (!credentials || credentials.audience !== context.audience || typeof credentials.authorization !== 'string') throw new BusinessFailureError('unavailable');
       return runWithRequestIdentity({}, async () => {
@@ -49,20 +57,28 @@ export class BusinessFailureReadAuthority {
             || context.actor.kind !== 'user' || identity.userId !== context.actor.userId || request.user.id !== context.actor.userId
             || identity.staffApi !== staff || identity.isSaasAdmin) throw new BusinessFailureError('unavailable');
           if (event.notificationId && !canManageWorkspaceWideNotifications(getRequestDataScope(), getRequestLocationIds())) {
-            if (!source.orderId || !canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) throw new BusinessFailureError('unavailable');
-            await this.core.getOrder(event.tenantId, source.orderId);
+            if (!original!.orderId || !canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) throw new BusinessFailureError('unavailable');
+            await this.core.getOrder(event.tenantId, original!.orderId);
           }
-          if (event.refundId || event.inspectionId) await this.core.getOrder(event.tenantId, source.orderId!);
+          if (event.refundId || event.inspectionId) await this.core.getOrder(event.tenantId, original!.orderId!);
+          if (reference?.kind === 'order_assignment') await this.core.getOrder(event.tenantId, reference.id);
         } catch { throw new BusinessFailureError('unavailable'); }
+        // Original Guard/ALS must be established before any new Core/readiness
+        // callback. The stored reference locates evidence; it grants no access.
+        const observed = reference ? await readBusinessFailureResource(current.scope, reference, this.resources!, this.clock()) : null;
+        const source: FailureSource = observed ? { revision: observed.revision, failed: observed.failed, orderId: observed.orderId,
+          sourceHash: observed.sourceHash, capturedSourceHash: observed.capturedSourceHash,
+          resourceEvent: resourceFailureEvent(event, reference!) } : original!;
         const principal = requestFingerprint({ actor: context.actor, audience: context.audience, scope: context.scope,
           access: 'access' in context ? context.access : null });
         return read(source, principal);
       });
     };
     return authorize(async (source, principal) => {
+      const sourceBinding = requestFingerprint(source);
       const result = await execute(source);
       await authorize(async (latest, latestPrincipal) => {
-        if (principal !== latestPrincipal || requestFingerprint(source) !== requestFingerprint(latest)) throw new BusinessFailureError('unavailable');
+        if (principal !== latestPrincipal || sourceBinding !== requestFingerprint(latest)) throw new BusinessFailureError('unavailable');
       });
       return result;
     });

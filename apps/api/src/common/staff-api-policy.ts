@@ -1,4 +1,5 @@
 import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 const inspectionPolicyPaths = new Set([AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.read,
   AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.configure, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.clear]
   .map(operation => `/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.basePath}/${operation}`));
@@ -18,7 +19,9 @@ const STAFF_AUTH_PATHS = new Set([
 
 const humanAutomationActions = new Set([
   'candidates/read', 'candidates/prepare', 'candidates/prepare-pending', 'inputs/prepare', 'inputs/read',
-  'tasks/create', 'tasks/read-creation', 'reviews/read', 'reviews/for-event', 'reviews/close', 'reviews/feedback', 'reviews/operation', 'reviews/queue'
+  'tasks/create', 'tasks/read-creation', 'reviews/read', 'reviews/for-event', 'reviews/close', 'reviews/feedback', 'reviews/operation', 'reviews/queue',
+  AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation,
+  ...Object.values(AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT.operations)
 ]);
 export function isHumanAutomationRoute(method: string, path: string, audience: 'operator' | 'staff') {
   const prefix = `/ai-native/automation/${audience}/`;

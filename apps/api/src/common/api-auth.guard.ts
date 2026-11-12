@@ -24,6 +24,7 @@ import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@r
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
+import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
@@ -275,6 +276,10 @@ export function requiredPermissions(method: string, path: string) {
   // Entry read rights do not replace original owner/scope or each financial
   // source's independent authority inside the material/source readers.
   if (originalOrderMaterialV2Routes.has(creditRoute)) return ['rental-os:order:view'];
+  if (method.toUpperCase() === 'POST' && ['list', 'preview', 'prepare', 'operation'].some(action =>
+    path === `/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`)) {
+    return path.endsWith('/prepare') ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'];
+  }
   if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const)
     .some(action => path === `/${AI_TASK_ORIGINAL_READ_POLICY_HTTP.basePath}/${AI_TASK_ORIGINAL_READ_POLICY_HTTP[action]}`))
     return [...AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS];

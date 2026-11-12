@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AiOpeningIntegrationFactsService } from './opening-integration-facts.service';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './read-context-binding';
 import type { AiOpeningReadFactsService, AiRiskReadFactsService, AiDiagnosticReadAuthority } from './diagnostic-read-facts.service';
@@ -43,7 +44,8 @@ export class AiOpeningActionListService {
   constructor(private readonly opening: Pick<AiOpeningReadFactsService, 'read'>,
     private readonly risks: Pick<AiRiskReadFactsService, 'read'>,
     private readonly contexts: AiOpeningConfigurationSource, private readonly authority: AiDiagnosticReadAuthority,
-    private readonly clock: () => Date = () => new Date()) {}
+    private readonly clock: () => Date = () => new Date(),
+    private readonly integrations?: Pick<AiOpeningIntegrationFactsService, 'read'>) {}
   async read(value: unknown = {}, expectedContext?: AiExecutionContext) {
     const input = inputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -67,6 +69,8 @@ export class AiOpeningActionListService {
         }
       }
       if (risk && requestFingerprint(risk.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
+      let integrationObservation = this.integrations ? await this.integrations.read({ limit: 32 }, authorized)
+        : undefined;
       const after = await this.contexts.current(scope, authorized);
       if (requestFingerprint(before) !== requestFingerprint(after)) throw new ModelGatewayError('CONFIG_INVALID');
       // Accounts/roles and persisted readiness can change without updating the
@@ -80,6 +84,16 @@ export class AiOpeningActionListService {
         items: value.items.slice().sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0) });
       if (requestFingerprint(basis(facts)) !== requestFingerprint(basis(currentFacts))) throw new ModelGatewayError('CONFIG_INVALID');
       facts = currentFacts;
+      if (this.integrations && integrationObservation) {
+        const closing = await this.integrations.read({ limit: 32 }, authorized);
+        const basis = (value: typeof closing) => {
+          const copy = structuredClone(value);
+          if (copy.state === 'observed') delete (copy.observation as Partial<typeof copy.observation>).observedAt;
+          return requestFingerprint(copy);
+        };
+        if (basis(closing) !== basis(integrationObservation)) throw new ModelGatewayError('CONFIG_INVALID');
+        integrationObservation = closing;
+      }
       if (before.profile && !z.string().min(1).max(191).safeParse(before.profile.configVersion).success)
         throw new ModelGatewayError('INVALID_RESPONSE');
       const source = { scope, resourceType: 'business_configuration' as const,
@@ -99,6 +113,7 @@ export class AiOpeningActionListService {
         inventory: { source, coverage: 'not_loaded' as const, meaning: 'item_modes_are_not_stock_balances' as const }
       };
       return { requestId: authorized.requestId, audience: authorized.audience, scope, observedAt: facts.observedAt,
+        ...(integrationObservation ? { integrationObservation } : {}),
         configVersion: before.settings.configVersion, ready: facts.ready,
         configuration,
         atomicity: 'independent_sections_not_a_transaction' as const,

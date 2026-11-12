@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma, type PrismaClient, type AiAutomationReviewOperation } from '@prisma/client';
+import { Prisma, type PrismaClient, type AiAutomationReviewOperation, type AiBusinessFailureOutbox } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, type AiExecutionContext, type AiAutomationReviewDraft, type AiAutomationReviewsForEventDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { BusinessFailureReadAuthority, type FailureSource } from '../business-events/business-failure-read.authority';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 
@@ -19,8 +20,9 @@ const operationInput = readInput.extend({ operationKey: key }).strict();
 const mutation = operationInput.extend({ expectedRevision: revision, expectedEventFence: fence, expectedTaskId: uuid.nullable() }).strict();
 const closeInput = mutation.extend({ reason }).strict();
 const feedbackInput = mutation.extend({ code: feedback }).strict();
+const grantTargetInput = readInput.extend({ action: z.enum(['close', 'feedback']) }).strict();
 type Command = (z.infer<typeof closeInput> & { action: 'close' }) | (z.infer<typeof feedbackInput> & { action: 'feedback' });
-type ReadDb = Pick<PrismaClient, 'aiAutomationInput' | 'aiBusinessFailureOutbox' | 'aiScope' | 'aiTask' | 'aiAutomationReviewGrant' | 'aiAutomationReviewOperation'>;
+type ReadDb = Pick<PrismaClient, 'aiAutomationInput' | 'aiBusinessFailureOutbox' | 'aiScope' | 'aiTask' | 'aiAutomationReviewGrant' | 'aiAutomationReviewOperation' | 'operationLog'>;
 const taskSelect = { id: true, scopeId: true, scopeKind: true, audience: true, ownerKind: true, ownerId: true,
   policyId: true, policyRevision: true, sceneCode: true, sceneVersion: true, creationKey: true, inputRef: true, inputHash: true, inputRevision: true,
   contractVersion: true, status: true, revision: true, archivedAt: true,
@@ -41,9 +43,27 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
 };
 type Target = Awaited<ReturnType<HumanAutomationReviewService['load']>>;
 
+/** Internal current-human target, not a public grant or policy. The publication
+ * policy consumer supplies concrete permissions and TTL separately. */
+export type HumanAutomationReviewGrantTarget = {
+  scopeId: string; tenantId: string; workspaceId: string; userId: string; actorKind: 'user'; actorId: string;
+  audience: 'operator' | 'staff'; inputId: string; eventId: string; action: 'close' | 'feedback';
+  expectedRevision: number; resourceHash: string; inputHash: string; creationKey: string;
+  reviewStatus: 'open' | 'closed'; eventStatus: string; principalFingerprint: string; sourceFingerprint: string;
+  targetFingerprint: string; resource: Target['resource']; context: AiExecutionContext;
+};
+export type HumanAutomationOriginalGrantTarget = Pick<HumanAutomationReviewGrantTarget,
+  'scopeId' | 'tenantId' | 'workspaceId' | 'userId' | 'actorKind' | 'actorId' | 'audience' | 'inputId' | 'eventId'
+  | 'action' | 'expectedRevision' | 'resourceHash' | 'inputHash' | 'creationKey' | 'reviewStatus' | 'eventStatus'
+  | 'principalFingerprint' | 'sourceFingerprint' | 'resource'>;
+export type HumanAutomationCurrentGrantPort = (inputRef: string, action: 'close' | 'feedback', db: ReadDb,
+  original: HumanAutomationOriginalGrantTarget) => Promise<{ id: string; revision: number; policyFingerprint: string; preparedRef: string }>;
+
 export class HumanAutomationReviewService {
   constructor(private readonly db: ReadDb & Pick<PrismaClient, '$transaction'>,
-    private readonly reads: BusinessFailureReadAuthority, private readonly clock: () => Date = () => new Date()) {}
+    private readonly reads: BusinessFailureReadAuthority, private readonly clock: () => Date = () => new Date(),
+    /** Required only for new metadata writes. Historical reads use original access. */
+    private readonly currentGrant?: HumanAutomationCurrentGrantPort) {}
 
   private async load(inputRef: string, db: ReadDb) {
     const { context, scope } = await this.reads.current();
@@ -113,6 +133,37 @@ export class HumanAutomationReviewService {
     });
   }
 
+  /** Feature-private policy/grant port. Fresh Auth, original Guard/Scope/source,
+   * input and review bindings are checked around the callback, including within
+   * the caller's original DB transaction. No permission or TTL is inferred here. */
+  async withGrantTarget<T>(value: unknown, execute: (target: HumanAutomationReviewGrantTarget) => Promise<T>, db: ReadDb = this.db): Promise<T> {
+    const query = parse(grantTargetInput, value);
+    if (typeof execute !== 'function') throw unavailable();
+    const snapshot = (target: Target) => requestFingerprint({ row: target.row, event: target.event,
+      task: target.task, principal: target.principal });
+    let observed: HumanAutomationReviewGrantTarget | undefined, fingerprint: string | undefined;
+    const result = await this.withTarget(query.inputRef, async target => {
+      if (target.context.actor.kind !== 'user' || !['operator', 'staff'].includes(target.context.audience)) throw unavailable();
+      fingerprint = snapshot(target);
+      const fields = { scopeId: target.row.scopeId, ...target.scope, userId: target.context.actor.userId,
+        ...target.person, audience: target.person.audience as 'operator' | 'staff',
+        inputId: target.row.id, eventId: target.event.id, action: query.action,
+        expectedRevision: target.row.reviewRevision, resourceHash: target.resourceHash,
+        inputHash: target.row.inputHash, creationKey: target.row.creationKey,
+        reviewStatus: target.row.reviewStatus as 'open' | 'closed', eventStatus: target.event.status, principalFingerprint: target.principal,
+        sourceFingerprint: requestFingerprint(target.source), resource: structuredClone(target.resource) };
+      observed = { ...fields, targetFingerprint: requestFingerprint(fields), context: structuredClone(target.context) };
+      return execute(structuredClone(observed));
+    }, db);
+    const latest = await this.load(query.inputRef, db);
+    if (!observed || snapshot(latest) !== fingerprint || latest.principal !== observed.principalFingerprint) throw conflict();
+    return this.reads.withEvent(latest.event, async source => {
+      if (requestFingerprint(source) !== observed!.sourceFingerprint
+        || principal((await this.reads.current()).context) !== observed!.principalFingerprint) throw unavailable();
+      return result;
+    });
+  }
+
   private operationKey(target: Target, operationKey: string) {
     return { scopeId: target.row.scopeId, actorId: target.person.actorId, audience: target.person.audience, operationKey };
   }
@@ -120,10 +171,20 @@ export class HumanAutomationReviewService {
     return requestFingerprint({ version: 'human-automation-review-1', command, person: target.person, scope: target.scope,
       inputHash: target.row.inputHash, eventId: target.row.eventId, creationKey: target.row.creationKey });
   }
-  private async grant(target: Target, action: Command['action'], db: ReadDb) {
+  private async grant(target: Target & { source: FailureSource }, action: Command['action'], db: ReadDb) {
     const current = (await this.reads.current()).context;
     if (principal(current) !== target.principal || !('access' in current)) throw unavailable();
     const currentPermissions = current.access.permissions;
+    if (!this.currentGrant) throw unavailable();
+    const original: HumanAutomationOriginalGrantTarget = {
+      scopeId: target.row.scopeId, ...target.scope, userId: target.person.actorId, ...target.person,
+      audience: target.person.audience as 'operator' | 'staff', inputId: target.row.id, eventId: target.event.id,
+      action, expectedRevision: target.row.reviewRevision, resourceHash: target.resourceHash,
+      inputHash: target.row.inputHash, creationKey: target.row.creationKey,
+      reviewStatus: target.row.reviewStatus as 'open' | 'closed', eventStatus: target.event.status, principalFingerprint: target.principal,
+      sourceFingerprint: requestFingerprint(target.source), resource: structuredClone(target.resource),
+    };
+    const published = await this.currentGrant(target.row.id, action, db, original);
     const where = { scopeId: target.row.scopeId, actorId: target.person.actorId, audience: target.person.audience,
       inputId: target.row.id, action, expectedRevision: target.row.reviewRevision };
     const row = await db.aiAutomationReviewGrant.findFirst({ where });
@@ -134,9 +195,12 @@ export class HumanAutomationReviewService {
       || !Array.isArray(row.requiredPermissions) || !row.requiredPermissions.length || row.requiredPermissions.length > 64
       || new Set(row.requiredPermissions).size !== row.requiredPermissions.length
       || row.requiredPermissions.some(permission => typeof permission !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(permission)
-        || !currentPermissions.includes(permission))) throw unavailable();
+        || !hasEffectivePermission(currentPermissions, permission))) throw unavailable();
+    if (!published || published.id !== row.id || published.revision !== row.revision
+      || !/^[a-f0-9]{64}$/u.test(published.policyFingerprint) || !/^[a-f0-9]{64}$/u.test(published.preparedRef)) throw unavailable();
     const authorizationHash = requestFingerprint({ principal: target.principal, key: where, id: row.id, revision: row.revision,
-      resourceHash: row.resourceHash, permissions: row.requiredPermissions, expiresAt: row.expiresAt.toISOString() });
+      resourceHash: row.resourceHash, permissions: row.requiredPermissions, expiresAt: row.expiresAt.toISOString(),
+      publication: published.policyFingerprint, preparedRef: published.preparedRef });
     if (principal((await this.reads.current()).context) !== target.principal) throw unavailable();
     return { id: row.id, revision: row.revision, authorizationHash };
   }
@@ -161,13 +225,51 @@ export class HumanAutomationReviewService {
       inputStatusAtCommit: row.inputStatusAtCommit, recordedAt: row.createdAt.toISOString(), retryable: false as const, ...readSemantics };
   }
 
+  /** Current result fields only. Internal original-event material and its
+   * captured binding remain available to authorization, never to the wire. */
+  private sourceView(source: FailureSource): AiAutomationReviewDraft['currentSource'] {
+    return { revision: source.revision, failed: source.failed, orderId: source.orderId,
+      ...(source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }),
+      ...(source.sourceHash === undefined ? {} : { sourceHash: source.sourceHash }) };
+  }
+
+  private suggestionCurrent(event: AiBusinessFailureOutbox, source: FailureSource) {
+    const originalResource = event.eventType === 'fulfillment.resource_shortage' || event.eventType === 'opening.missing_configuration';
+    return source.failed && source.revision === event.resourceRevision && event.expiresAt > this.clock()
+      && !['closed', 'expired', 'dead_letter'].includes(event.status)
+      && (!originalResource || Boolean(source.sourceHash && source.sourceHash === source.capturedSourceHash));
+  }
+
+  private originalResource(event: AiBusinessFailureOutbox, source: FailureSource): AiAutomationReviewsForEventDraft['originalResource'] {
+    if (event.eventType === 'fulfillment.resource_shortage' || event.eventType === 'opening.missing_configuration') {
+      const original = source.resourceEvent;
+      if (!original || original.type !== event.eventType || original.eventId !== event.id
+        || original.resource.version !== event.resourceRevision || original.scope.kind !== 'workspace'
+        || original.scope.tenantId !== event.tenantId || original.scope.workspaceId !== event.workspaceId) throw unavailable();
+      if (original.type === 'fulfillment.resource_shortage') {
+        if (source.orderId !== event.orderId || original.resource.id !== event.orderId) throw unavailable();
+        return { kind: 'order', id: original.resource.id, orderId: original.resource.id, version: original.resource.version };
+      }
+      if (original.type !== 'opening.missing_configuration' || source.orderId !== null || event.orderId !== null) throw unavailable();
+      return { kind: 'configuration', id: original.resource.id, orderId: null, version: original.resource.version,
+        sectionCode: original.payload.sectionCode };
+    }
+    if (event.eventType === 'notification.failed' && event.notificationId && !event.refundId && !event.inspectionId)
+      return { kind: 'notification', id: event.notificationId, orderId: source.orderId };
+    if (event.eventType === 'inspection.return_exception' && event.inspectionId && event.exceptionId && !event.notificationId && !event.refundId)
+      return { kind: 'inspection', id: event.inspectionId, exceptionId: event.exceptionId, orderId: source.orderId };
+    if (event.eventType === 'refund.failed' && event.refundId && !event.notificationId && !event.inspectionId)
+      return { kind: 'refund', id: event.refundId, orderId: source.orderId,
+        ...(source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }) };
+    throw unavailable();
+  }
+
   async read(value: unknown) {
     const { inputRef } = parse(readInput, value);
     return this.withStableTarget(inputRef, async target => ({ inputRef, inputStatus: target.row.status, inputHash: target.row.inputHash,
       inputMode: target.inputMode, policyReference: { policyId: target.row.policyId, revision: target.row.policyRevision },
       nextAction: target.row.reviewStatus === 'closed' ? 'read_review_operation' as const
-        : !target.source.failed || target.source.revision !== target.event.resourceRevision || target.event.expiresAt <= this.clock()
-          || ['closed', 'expired', 'dead_letter'].includes(target.event.status) ? 'read_original_resource' as const
+        : !this.suggestionCurrent(target.event, target.source) ? 'read_original_resource' as const
         : target.row.status === 'creation_unknown' ? 'read_original_creation' as const : 'human_review' as const,
       review: { revision: target.row.reviewRevision, status: target.row.reviewStatus, closeReason: target.row.closeReason, feedbackCode: target.row.feedbackCode },
       event: { eventId: target.event.id, type: target.event.eventType, resourceRevision: target.event.resourceRevision,
@@ -175,7 +277,7 @@ export class HumanAutomationReviewService {
       task: target.task ? { state: 'observed' as const, taskId: target.task.id, runId: target.task.runs[0].id,
         status: target.task.status.toLowerCase(), revision: target.task.revision, archived: Boolean(target.task.archivedAt) }
         : { state: 'not_observed' as const, taskId: null, runId: null },
-      currentSource: target.source, actionResource: target.resource, resourceHash: target.resourceHash, ...readSemantics }));
+      currentSource: this.sourceView(target.source), actionResource: target.resource, resourceHash: target.resourceHash, ...readSemantics }));
   }
 
   /** Read existing work for a business event, never prepare/create/re-dispatch it.
@@ -212,16 +314,11 @@ export class HumanAutomationReviewService {
       if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
       const hasMore = rows.length > input.limit;
       return { event: { eventId: event.id, type: event.eventType, status: event.status, fence: event.fence,
-        resourceRevision: event.resourceRevision }, currentSource: source,
-        originalResource: event.notificationId
-          ? { kind: 'notification' as const, id: event.notificationId, orderId: source.orderId }
-          : event.inspectionId
-            ? { kind: 'inspection' as const, id: event.inspectionId, exceptionId: event.exceptionId, orderId: source.orderId }
-            : { kind: 'refund' as const, id: event.refundId!, orderId: source.orderId, paymentIntentId: source.paymentIntentId },
+        resourceRevision: event.resourceRevision }, currentSource: this.sourceView(source),
+        originalResource: this.originalResource(event, source),
         inputs: { state: items.length ? 'observed' as const : 'not_observed' as const, items, hasMore,
           nextAfter: hasMore ? items[items.length - 1].inputRef : null, coverage: 'bounded_authorized_event_window' as const },
-        nextAction: !source.failed || source.revision !== event.resourceRevision || event.expiresAt <= this.clock()
-          || ['closed', 'expired', 'dead_letter'].includes(event.status) ? 'read_original_resource' as const : 'human_business_review' as const,
+        nextAction: !this.suggestionCurrent(event, source) ? 'read_original_resource' as const : 'human_business_review' as const,
         ...readSemantics };
     });
   }

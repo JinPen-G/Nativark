@@ -30,6 +30,8 @@ import { TaskCancellation } from "./TaskCancellation";
 import { TaskClarification } from "./TaskClarification";
 import { VisibleObservationHost } from './VisibleObservationHost';
 import { ConversationHistory } from './ConversationHistory';
+import { AutomationReviewSection, AUTOMATION_REVIEW_ENTRY_PERMISSIONS } from './AutomationReviewSection';
+import { TaskOpeningProposals } from './TaskOpeningProposals';
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -45,10 +47,15 @@ export function TaskCenterPage() {
   const auth = useAuthStore();
   const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user && !auth.user.isSaasAdmin
     && AI_TASK_CENTER_ENTRY_PERMISSIONS.some(auth.hasPermission);
+  const reviewAllowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user && !auth.user.isSaasAdmin
+    && AUTOMATION_REVIEW_ENTRY_PERMISSIONS.some(auth.hasPermission);
+  const identity = identityKey();
   return <>
     <PageHeader title={t("AI 任务中心")} />
     {allowed ? <TaskCenterReader key={identityKey()} identity={identityKey()} tenantId={auth.tenant!.tenantId} workspaceId={auth.currentWorkspaceId!} />
       : <Alert type="warning" title={t("当前没有任务中心读取入口权限。")}/>}
+    {reviewAllowed && <AutomationReviewSection key={`review:${identity}`} identity={identity}
+      current={() => identityKey() === identity} />}
   </>;
 }
 function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: string; tenantId: string; workspaceId: string }) {
@@ -244,7 +251,12 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
           ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'opening_diagnosis'
             && AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS.some(permission => useAuthStore.getState().hasPermission(permission)) ? [{
             key: 'calendar-draft', title: t('日历业务草稿'), content: <TaskCalendarDraft key={`calendar:${selected}`} taskId={selected} identity={identity} current={current}
-              onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : [])
+              onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
+          ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'opening_diagnosis'
+            && useAuthStore.getState().hasPermission('rental-os:price:manage') ? [{
+            key: 'opening-proposals', title: locale === 'en-US' ? 'Opening section proposals' : '开业分区提案',
+            content: <TaskOpeningProposals key={`opening:${identity}:${selected}`} taskId={selected} identity={identity} current={current} />,
+          }] : []),
         ]} /> : null}
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }

@@ -2,6 +2,7 @@
  * grant an automation identity nor start a task, worker or business operation. */
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafList as list, leafTime as time, leafRef as ref, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
+import type { AiBusinessEventDraft } from './ai-events-draft';
 
 export const AI_AUTOMATION_POLICY_HTTP_CONTRACTS = Object.freeze({
   read: { request: 'AiAutomationPolicyReadRequestDraft', response: 'AiAutomationPolicyCurrentDraft' },
@@ -19,7 +20,7 @@ export interface AiAutomationSubjectSettingsDraft {
 }
 export interface AiAutomationPolicySettingsDraft {
   mode: 'disabled' | 'shadow' | 'manual_confirmation'; revoked: boolean; sceneCode: string; sceneVersion: string;
-  allowedEventTypes: Array<'notification.failed' | 'refund.failed' | 'inspection.return_exception'>;
+  allowedEventTypes: Array<AiBusinessEventDraft['type']>;
   maxTasksPerDay: number; cooldownSeconds: number; validFrom: string; expiresAt: string;
 }
 export interface AiAutomationPolicyChangeDraft {
@@ -74,7 +75,8 @@ const subjectProperties = { enabled: bool, revoked: bool,
   locationScope: { oneOf: [object({ mode: choice('all'), locationIds: list(id(), 0) }),
     object({ mode: choice('selected'), locationIds: { ...list(id(), 100, 1), uniqueItems: true } })] }, expiresAt: time };
 const policyProperties = { mode: choice('disabled', 'shadow', 'manual_confirmation'), revoked: bool, sceneCode: sceneId, sceneVersion: sceneId,
-  allowedEventTypes: { ...list(choice('notification.failed', 'refund.failed', 'inspection.return_exception'), 3, 1), uniqueItems: true },
+  allowedEventTypes: { ...list(choice('notification.failed', 'refund.failed', 'inspection.return_exception',
+    'fulfillment.resource_shortage', 'opening.missing_configuration'), 5, 1), uniqueItems: true },
   maxTasksPerDay: integer(0, 10000), cooldownSeconds: integer(1, 86400), validFrom: time, expiresAt: time };
 const provenance = { enabledBy: nullable(id()), enabledAudience: nullable(choice('operator')), enabledAt: nullable(time) };
 const subject = object(subjectProperties), policy = object(policyProperties);

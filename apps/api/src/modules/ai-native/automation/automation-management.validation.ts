@@ -13,7 +13,8 @@ export const subjectSettings = z.object({ enabled: z.boolean(), revoked: z.boole
     z.object({ mode: z.literal('selected'), locationIds: locations }).strict()]), expiresAt: managementTime }).strict();
 export const policySettings = z.object({ mode: z.enum(['disabled', 'shadow', 'manual_confirmation']), revoked: z.boolean(),
   sceneCode: managementId.max(64), sceneVersion: managementId.max(64),
-  allowedEventTypes: z.array(z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception'])).min(1).max(3)
+  allowedEventTypes: z.array(z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception',
+    'fulfillment.resource_shortage', 'opening.missing_configuration'])).min(1).max(5)
     .refine(value => new Set(value).size === value.length).transform(value => value.sort()),
   maxTasksPerDay: z.number().int().min(0).max(10000), cooldownSeconds: z.number().int().min(1).max(86400),
   validFrom: managementTime, expiresAt: managementTime }).strict();

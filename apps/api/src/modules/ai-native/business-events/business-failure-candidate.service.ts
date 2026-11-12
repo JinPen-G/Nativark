@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AiBusinessFailureOutbox, PrismaClient } from '@prisma/client';
 import { AI_EVENTS_DRAFT_VERSION, type AiBusinessEventDraft } from '@rental-os/shared';
 import { BusinessFailureReadAuthority, type FailureSource } from './business-failure-read.authority';
-import { BusinessFailureError, type FailureScope } from './prisma-business-failure-outbox';
+import { BusinessFailureError, isResourceFailureEvent, type FailureScope } from './prisma-business-failure-outbox';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const inputSchema = z.object({ eventId: z.string().min(1).max(36).regex(/^[a-f0-9-]+$/i) }).strict();
@@ -22,7 +22,7 @@ export class BusinessFailureCandidateService {
     const row = await this.load(scope, eventId);
     return this.authority.withEvent(row, async source => {
       if (!this.current(row, source)) return this.invalidate(row, 'expired');
-      return this.view(row);
+      return this.view(row, source);
     });
   }
 
@@ -31,23 +31,23 @@ export class BusinessFailureCandidateService {
     const row = await this.load(scope, eventId);
     return this.authority.withEvent(row, async source => {
       if (!this.current(row, source)) return this.invalidate(row, 'expired');
-      if (['ready', 'closed', 'expired', 'dead_letter'].includes(row.status)) return this.view(row);
+      if (['ready', 'closed', 'expired', 'dead_letter'].includes(row.status)) return this.view(row, source);
       const now = this.clock();
-      if (row.status === 'claimed' && row.leaseUntil && row.leaseUntil > now || row.nextAttemptAt > now) return this.view(row);
+      if (row.status === 'claimed' && row.leaseUntil && row.leaseUntil > now || row.nextAttemptAt > now) return this.view(row, source);
       if (row.attempts >= 3) return this.invalidate(row, 'dead_letter');
       const leaseOwner = randomUUID();
       const claim = await this.db.aiBusinessFailureOutbox.updateMany({ where: {
         id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, fence: row.fence, attempts: { lt: 3 }, expiresAt: { gt: now },
         OR: [{ status: { in: ['pending', 'retry_scheduled'] }, nextAttemptAt: { lte: now } }, { status: 'claimed', leaseUntil: { lte: now } }]
       }, data: { status: 'claimed', leaseOwner, leaseUntil: new Date(now.getTime() + 10000), fence: { increment: 1 }, attempts: { increment: 1 } } });
-      if (claim.count !== 1) return this.view(await this.load(scope, row.id));
+      if (claim.count !== 1) return this.view(await this.load(scope, row.id), source);
       const claimed = await this.load(scope, row.id);
       if (claimed.leaseOwner !== leaseOwner || claimed.fence !== row.fence + 1) throw new BusinessFailureError('result_unknown');
       try {
         return await this.authority.withEvent(claimed, async fresh => {
           const state = this.current(claimed, fresh) ? 'ready' : 'expired';
           await this.finish(claimed, state);
-          return this.view(await this.load(scope, row.id));
+          return this.view(await this.load(scope, row.id), fresh);
         });
       } catch (error) {
         const state = claimed.attempts >= 3 ? 'dead_letter' : 'retry_scheduled';
@@ -92,7 +92,8 @@ export class BusinessFailureCandidateService {
   }
 
   private current(row: AiBusinessFailureOutbox, source: FailureSource) {
-    return row.expiresAt > this.clock() && source.failed && source.revision === row.resourceRevision && source.orderId === row.orderId;
+    return row.expiresAt > this.clock() && source.failed && source.revision === row.resourceRevision && source.orderId === row.orderId
+      && (!isResourceFailureEvent(row) || source.resourceEvent && source.sourceHash && source.sourceHash === source.capturedSourceHash);
   }
 
   private async invalidate(row: AiBusinessFailureOutbox, status: 'expired' | 'dead_letter') {
@@ -115,15 +116,22 @@ export class BusinessFailureCandidateService {
     if (result.count !== 1) throw new BusinessFailureError('result_unknown');
   }
 
-  private view(row: AiBusinessFailureOutbox) {
+  private view(row: AiBusinessFailureOutbox, source?: FailureSource) {
     return { eventId: row.id, status: row.status, attempts: row.attempts, fence: row.fence,
-      material: row.status === 'ready' ? { event: this.event(row), nextAction: 'human_review' as const, semantics: 'candidate_not_task_or_execution' as const } : null,
+      material: row.status === 'ready' ? { event: this.event(row, source), nextAction: 'human_review' as const, semantics: 'candidate_not_task_or_execution' as const } : null,
       retryAt: row.status === 'retry_scheduled' ? row.nextAttemptAt.toISOString() : null,
       nextAction: row.status === 'dead_letter' ? 'manual' as const : 'read_original_event' as const,
       taskCreated: false as const };
   }
 
-  private event(row: AiBusinessFailureOutbox): AiBusinessEventDraft {
+  private event(row: AiBusinessFailureOutbox, source?: FailureSource): AiBusinessEventDraft {
+    if (isResourceFailureEvent(row)) {
+      const event = source?.resourceEvent;
+      if (!event || event.eventId !== row.id || event.type !== row.eventType || event.resource.version !== row.resourceRevision
+        || event.scope.kind !== 'workspace' || event.scope.tenantId !== row.tenantId || event.scope.workspaceId !== row.workspaceId)
+        throw new BusinessFailureError('unavailable');
+      return structuredClone(event);
+    }
     const base = { draftVersion: AI_EVENTS_DRAFT_VERSION, eventId: row.id, eventVersion: '1' as const,
       scope: { kind: 'workspace' as const, tenantId: row.tenantId, workspaceId: row.workspaceId },
       occurredAt: row.occurredAt.toISOString(), traceId: row.traceId, causationId: row.causationId,

@@ -11,17 +11,21 @@ import { requestFingerprint as hash } from '../../rental-core/rental-idempotency
 import { composeAutomationFailureTasks, type AutomationDependencies } from './automation.composition';
 import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewService } from './human-automation-review.service';
+import { HumanAutomationReviewGrantService, type HumanAutomationReviewGrantPolicySource } from './human-automation-review-grant.service';
 import { HumanAutomationReviewQueueService } from './human-automation-review-queue.service';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import type { IncomingMessage } from 'node:http';
 
 export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
-export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencies, 'db' | 'auth' | 'guard' | 'core' | 'clock'> & {
+export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencies, 'db' | 'auth' | 'guard' | 'core' | 'clock' | 'resources'> & {
   /** Server configuration, never selected by the HTTP body. History reads need no active policy. */
   automation?: Pick<AutomationDependencies, 'policyId' | 'subscriptions'>;
+  /** Separate trusted human metadata policy, never the automation subject's grant. */
+  reviewGrantPolicy?: HumanAutomationReviewGrantPolicySource;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
-  | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue';
+  | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue'
+  | 'prepareGrant' | 'enableGrant' | 'readGrant';
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const eventInput = z.object({ eventId: z.string().uuid() }).strict();
 const unavailable = () => new AutomationError('unavailable');
@@ -29,7 +33,7 @@ const unavailable = () => new AutomationError('unavailable');
 export class HumanAutomationRequestFactory {
   private readonly dependencies: HumanAutomationRequestDependencies;
   constructor(input: HumanAutomationRequestDependencies) {
-    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'core', 'clock', 'automation'].includes(key))
+    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'core', 'clock', 'automation', 'resources', 'reviewGrantPolicy'].includes(key))
       || typeof input.db?.$transaction !== 'function' || typeof input.db.aiBusinessFailureOutbox?.findFirst !== 'function'
       || typeof input.db.aiAutomationInput?.findFirst !== 'function' || typeof input.db.aiTask?.findFirst !== 'function'
       || typeof input.auth?.resolveAccessContext !== 'function' || typeof input.guard?.canActivate !== 'function'
@@ -42,6 +46,7 @@ export class HumanAutomationRequestFactory {
     if (input.automation && (Object.keys(input.automation).some(key => !['policyId', 'subscriptions'].includes(key))
       || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u).safeParse(input.automation.policyId).success
       || typeof input.automation.subscriptions?.readCategoryCommercialContext !== 'function')) throw unavailable();
+    if (input.reviewGrantPolicy !== undefined && typeof input.reviewGrantPolicy?.read !== 'function') throw unavailable();
     this.dependencies = { ...input, ...(input.automation ? { automation: { ...input.automation } } : {}) };
   }
 
@@ -61,7 +66,7 @@ export class HumanAutomationRequestFactory {
     if (signal?.aborted) close();
     // A stale candidate read can expire its original outbox marker. Treat
     // interruption conservatively even though it never changes the business.
-    const write = ['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'createEventTask', 'close', 'feedback'].includes(action);
+    const write = ['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'createEventTask', 'close', 'feedback', 'enableGrant'].includes(action);
     let writeReturned = false;
     const credentials = { current: async () => {
       if (!active) throw unavailable();
@@ -92,9 +97,15 @@ export class HumanAutomationRequestFactory {
     try {
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         await identity.resolve();
-        const reads = new BusinessFailureReadAuthority(server.db, auth, credentials, guard, server.core, clock);
+        const reads = new BusinessFailureReadAuthority(server.db, auth, credentials, guard, server.core, clock, server.resources);
         const candidates = new BusinessFailureCandidateService(server.db, reads, clock);
-        const reviews = new HumanAutomationReviewService(server.db, reads, clock);
+        let grants: HumanAutomationReviewGrantService | undefined;
+        const reviews = new HumanAutomationReviewService(server.db, reads, clock,
+          (inputRef, kind, tx, original) => {
+            if (!grants) throw unavailable();
+            return grants.assertCurrentGrant(inputRef, kind, tx, original);
+          });
+        if (server.reviewGrantPolicy) grants = new HumanAutomationReviewGrantService(server.db, reviews, server.reviewGrantPolicy, clock);
         const automation = () => {
           if (!server.automation) throw unavailable();
           // This request path always supplies original human resource authority.
@@ -174,6 +185,20 @@ export class HumanAutomationRequestFactory {
             case 'read': return reviews.read(command);
             case 'forEvent': return reviews.forEvent(command);
             case 'operation': return reviews.operation(command);
+            case 'prepareGrant': {
+              if (!grants) throw unavailable();
+              return grants.prepare(command);
+            }
+            case 'readGrant': {
+              if (!grants) throw unavailable();
+              return grants.read(command);
+            }
+            case 'enableGrant': {
+              if (!grants) throw unavailable();
+              const result = await grants.enable(command);
+              writeReturned = true;
+              return result;
+            }
             case 'close':
             case 'feedback': {
               const result = await (action === 'close' ? reviews.close(command) : reviews.feedback(command));

@@ -14,9 +14,12 @@ const configuration = z.record(z.unknown()).optional();
 const configurations = z.object({
   conversations: configuration,
   workbenchDisplay: configuration,
+  businessFailure: configuration,
+  automationReviewGrant: configuration,
   orderModel: configuration,
   quoteModel: configuration,
   openingModel: configuration,
+  openingProposals: configuration,
   quoteOrderExecution: configuration,
   settingsExecution: configuration,
   businessRuleDraft: configuration,

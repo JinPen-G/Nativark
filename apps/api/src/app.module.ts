@@ -1,4 +1,6 @@
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
+import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
+import { AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskOriginalReadPolicyController } from './modules/ai-native/task-original-read-policy.application';
 import { AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -193,6 +195,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     DatabaseModule
   ],
   controllers: [
+    TaskOpeningProposalController,
     AiCreditController,
     InspectionRecognitionTaskController,
     StaffInspectionAccountingController,
@@ -282,6 +285,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     PlatformDemoRequestController
   ],
   providers: [
+    AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER,
     AiCreditService,
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
