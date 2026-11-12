@@ -1,3 +1,4 @@
+import { isRentalCategoryCode } from "@rental-os/shared";
 import { rentalCategoryStorageCode, rentalDefaultWorkspaceName } from "./category-identity";
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
@@ -145,7 +146,7 @@ export interface RentalConfigStore {
   readQuoteConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalQuoteConfigurationFacts>;
   readReportConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalReportConfigurationFacts>;
   /** Opening-only projection. No cache initialization, bundle/member joins or credentials. */
-  readReadinessCoreFacts?(tenantId: string, workspaceId: string): Promise<RentalReadinessCoreFacts>;
+  readReadinessCoreFacts?(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalReadinessCoreFacts>;
   /** Bounded page/minimal settings/profile fields; no bundles, members or credentials. */
   readOpeningConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalOpeningConfigurationFacts>;
   listItemGroupsPage?(tenantId: string, workspaceId: string, query: RentalItemGroupPageQuery, tx?: RentalConfigTx): Promise<RentalItemGroupPage>;
@@ -454,19 +455,22 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return { tenantId, workspaceId, categoryCode: lower<RentalCategoryCode>(row.categoryCode), currency: row.currency as RentalCurrency };
   }
 
-  async readReadinessCoreFacts(tenantId: string, workspaceId: string): Promise<RentalReadinessCoreFacts> {
+  /** Optional client belongs to the caller's original transaction. Reusing it
+   * adds no lock, configuration initialization or total readiness revision. */
+  async readReadinessCoreFacts(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<RentalReadinessCoreFacts> {
+    const client = tx ?? this.prisma;
     if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId)
       throw new ForbiddenException('开业读取缺少当前租户或经营空间');
-    if (await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ForbiddenException('开业读取经营空间变化');
+    if (await resolveScopeWorkspaceId(client, tenantId) !== workspaceId) throw new ForbiddenException('开业读取经营空间变化');
     // Same selected-location population as Core.listLocations; scalar counts
     // must not widen a member's location scope merely because names are absent.
     const locationWhere = staffLocationWhere('id'), locationBinding = JSON.stringify(locationWhere);
     const where = { tenantId, workspaceId };
     const [workspace, settings, enabledItemGroupCount, serviceableLocationCount, groups] = await Promise.all([
-      this.prisma.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId },
+      client.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId },
         select: { id: true, tenantId: true, categoryCode: true } }),
       // Only the timezone is needed: never materialize the settings JSON or its unrelated fields.
-      this.prisma.$queryRaw<Array<{ tenantId: string; workspaceId: string; timeZone: string | null }>>(Prisma.sql`
+      client.$queryRaw<Array<{ tenantId: string; workspaceId: string; timeZone: string | null }>>(Prisma.sql`
         SELECT tenantId, workspaceId,
           CASE WHEN JSON_TYPE(JSON_EXTRACT(settings, '$.calendar.timeZone')) = 'STRING'
             THEN JSON_UNQUOTE(JSON_EXTRACT(settings, '$.calendar.timeZone'))
@@ -474,11 +478,11 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
               OR JSON_TYPE(JSON_EXTRACT(settings, '$.calendar.timeZone')) = 'NULL' THEN NULL
             ELSE '' END AS timeZone
         FROM rental_tenant_business_settings WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} LIMIT 1`),
-      this.prisma.rentalItemGroup.count({ where: { ...where, status: 'enabled' } }),
-      this.prisma.rentalFulfillmentLocation.count({ where: { ...where, ...locationWhere, status: 'enabled',
+      client.rentalItemGroup.count({ where: { ...where, status: 'enabled' } }),
+      client.rentalFulfillmentLocation.count({ where: { ...where, ...locationWhere, status: 'enabled',
         capabilities: { array_contains: ['pickup', 'return'] },
         operator: { is: { ...where, status: 'enabled' } } } }),
-      this.prisma.rentalPricingGroup.findMany({ where: { ...where, status: 'enabled' },
+      client.rentalPricingGroup.findMany({ where: { ...where, status: 'enabled' },
         select: { id: true, tenantId: true, workspaceId: true, name: true },
         orderBy: { id: 'asc' }, take: RENTAL_READINESS_FACT_LIMIT + 1 })
     ]);
@@ -488,7 +492,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         || typeof row.id !== 'string' || !row.id || row.id.length > 191
         || typeof row.name !== 'string' || !row.name || row.name.length > 191)
       || new Set(groups.map(row => row.id)).size !== groups.length
-      || !Object.prototype.hasOwnProperty.call(RENTAL_CATEGORY_WORKSPACE_NAMES, lower(workspace.categoryCode)))
+      || !isRentalCategoryCode(lower(workspace.categoryCode)))
       throw new ConflictException('开业配置来源变化');
     if (groups.length > RENTAL_READINESS_FACT_LIMIT) throw new ServiceUnavailableException('开业定价分组超出读取上限');
     if (![enabledItemGroupCount, serviceableLocationCount].every(value => Number.isSafeInteger(value) && value >= 0))
@@ -498,7 +502,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     try { new Intl.DateTimeFormat('en', { timeZone }); } catch { throw new ConflictException('开业营业时区无效'); }
     if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
       || JSON.stringify(staffLocationWhere('id')) !== locationBinding
-      || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId) throw new ForbiddenException('开业读取经营空间或地点范围变化');
+      || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId) throw new ForbiddenException('开业读取经营空间或地点范围变化');
     return { tenantId, workspaceId, categoryCode: lower<RentalCategoryCode>(workspace.categoryCode), timeZone,
       enabledItemGroupCount, serviceableLocationCount, pricingGroups: groups.map(({ id, name }) => ({ id, name })) };
   }

@@ -20,7 +20,7 @@
 
 ## 3. 下一入口与原缺口
 
-AIN-19 单资产/原领取依据的 `6d35ab7`＋字段规则 `800a389`＋日期修复 `5b51b90` 已由 QA 完成最小闭包及 P2 相关复验，按[主线整合](<Rental Core-开发记录.md#pm-allocation-pickup-main-integration-20261112>)收回；不将缺 pickupItems 的历史补成已记录。AI 原 StaffFactory/识别与媒体消费者由 AI-RD 继续。下一固定候选为 AIN-17 四源码 `483b887dc23dd252ecb423806ac5030204c39812` 和记录 `c24fd4e848565af87e751046911aedb25f5d7bf1`，QA 核原九项同client的最小依赖，未收前不复制全文件；Core下一步仍等 AI-RD 给正式原participant/ResourcePorts合同，不变更九项算法、会员租户总体或创建额外事务。
+AIN-19 单资产/原领取依据已收 main `12a454937`，见[主线整合](<Rental Core-开发记录.md#pm-allocation-pickup-main-integration-20261112>)；缺 pickupItems 仍为未记录，AI识别/媒体消费者另片。AIN-17 `483b887d` 四源码方法闭包与记录 `c24fd4e8` 已获 QA 独立通过，按[同client整合](<Rental Core-开发记录.md#pm-readiness-original-transaction-integration-20261112>)收回，不包含其他父级写入实现。PM 已给 Core `RentalAssignmentState.issueSource` 可选原结构化来源窗口，并定向转交 AI-RD 固定 `b690e4f3` 的 Outbox/资源存储两个接口及 `7f4a2f1a` 记录；下一步沿原业务事务接真实短缺/配置参加者。旧 issue 文本不作来源、会员租户总体与九项算法保持，不另开事务或把同client读等同捕获完成。
 
 批次回执、新续租空快照与纯保证金门闸已按各固定阶段收 main，原依赖/失败继续见[批次](<Rental Core-开发记录.md#pm-preparation-receipt-integration-20261112>)、[空快照](<Rental Core-开发记录.md#pm-extension-empty-snapshot-integration-20261112>)和[保证金](<Rental Core-开发记录.md#pm-exchange-guarantee-integration-20261112>)。企业服务/点击已收 `dac6d4d89`；Core `b869f72b1` 类型及 `89261ed60` 两源码封存闭包由 QA 核验后按[最小整合](<Rental Core-开发记录.md#pm-merchant-delegation-source-runtime-integration-20261112>)收回，企业签源 guard `7f39b4d6` 与真实 execute/result/宿主另片复验。六项 main 他人 WIP 保留，a0/619 与 6390/045 等其他源码仍按各自固定依赖，不整取父版本。Core RD 继续 AIN-17 原配置事务/参加者和 CAT-GOV；AIN-19 单资产及原领取资源/计量依据 reader 已由 PM 协调给原 Core，AI-RD 接 shared/StaffFactory/provider；AI 的上传只读观察另在文件域最小窗口。开发者继续，审查交 QA，PM 串行整合不改变原门槛。
 

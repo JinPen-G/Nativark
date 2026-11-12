@@ -4,6 +4,44 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-readiness-original-transaction-integration-20261112"></a>
+
+## PM按QA方法闭包收回原九项同client读取（2026-11-12）
+
+固定源码为 `483b887dc23dd252ecb423806ac5030204c39812`，原阶段记录为 `c24fd4e848565af87e751046911aedb25f5d7bf1`；main 起点 `b0b586ea07b69bb3b44b2d08ef03bfc84cdaa7fb`。依 QA 在 main `ca760b9e4` 核定的最小闭包，Core 配置仓储只取 readReadinessCoreFacts 接口/完整方法和正式 isRentalCategoryCode 导入，业务配置仓储只取 readReadinessBusinessFacts 接口/完整方法，会员只取 countPlans 原可选 tx 与计数两行，业务服务取原两读取方法并新增 readTenantReadinessSource。其他配置写入/初始化/版本与 045/6390 等未收父实现保持 main 原内容，不整取四文件。
+
+PM 在内存以原方法节点替换、保留原注释边界和文件其余字节，再核四个 LF SHA-256 与 QA 候选完全一致：Core 配置 `2808cc12dc1befb95b932b31c1c5e7c5b28d486a34a65aa6503d047dcf7d568a`；业务配置 `3337bff90029d0d88a1c52210c4524ec60947c5fb80eb9cabea3632f51b9f4bf`；会员 `431ae6f9150003cec817dcaf190608bfe5304f848ed63e3061166f405a371018`；业务服务 `1e02a5074fbb77f6c10222777a1dae5e5e512244059dc3426e778c60f84636eb`。新增来源方法沿 QA 合成位置放类末尾，其他主线独有方法保留。
+
+QA 主审与独立复核已运行固定实际服务/仓储、Auth/Guard及 main 的品类解析，331个固定模块，原 opening-read 17/17 和另十六组同tx/无tx/身份/地点/绑定变化通过。十类查询全部使用调用方 client，根连接和 states 缓存访问0；原会员租户总体与 unavailable/401/403 保持。行为 stdin SHA-256 为 `93ce4478cc4ff2595b6ef84f80f111396724248bc1ee8b18bc4da6a763fe8a53`，退出0。
+
+QA 按同四文件方法闭包、原 shared110根及 MCP 唯一直接声明在内存检查四根/1187源，TypeScript5.9.3零诊断，stdin SHA-256 `42345ffc6de87af1d74fd5f694a2af0310243e83b4d4ccc0506e5e228291a7a2`，退出0、audit0。首轮内存装配缺 category 导入/MCP 声明的失败保留，补齐固定依赖后复验；本次相同候选不重复运行已通过的检查。物理写入仅本片源码和原四册，未创建验证目录、依赖或后台进程。
+
+caller_transaction_reads 仅证明原查询复用 client，不表示九项总修订、数据库快照栅栏或 Outbox 已捕获。SQL/身份/版本行仍为 fixture，真实隔离/并发/锁及原四入口参加者待原门槛。Core 已获原 assignment.issueSource 的可选类型最小窗口，旧自由文本不推结构化短缺；AI-RD 固定 participant/ResourcePorts 已由 PM 单点交 Core，来源为 `b690e4f3` 的原 Outbox 两文件和 `7f4a2f1a` 接口记录。后继源码与直接消费者须另片核验，原 CAT-GOV/CLOSE 分数不变，六项 main WIP 保持。
+
+<a id="readiness-original-transaction-20261112"></a>
+
+## 原九项开业来源的同client读取（2026-11-12）
+
+从已推送核GitHub的800a接续，先按PM要求固定reader时间P2为5b51，四份AIN-17原tx源码固定`483b887dc23dd252ecb423806ac5030204c39812`，由本记录同步交付状态。本片沿原Core窗口修改[Core配置仓储](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)、[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)和[原九项读取](../../apps/api/src/modules/rental-core/rental-business.service.ts)；PM另核五个登记树无重叠，仅授权[会员countPlans](../../apps/api/src/modules/platform/membership.service.ts)的原tx参数/计数两行。其他会员/企业政策、Auth、计数范围、算法及入口不改。
+
+readTenantReadiness/readTenantReadinessSource与两仓储readReadinessCoreFacts/readReadinessBusinessFacts追加可选服务器原事务；绑定前后读、范围核对和全部原事实读取透传同client。会员仍统计原tenant总体的方案，含草稿/空方案，不改成workspace计数。未传参数保留原结果和independent_persisted_reads，传入仅标caller_transaction_reads；不声明总修订、快照栅栏或事件已捕获，不新增锁/事务、扫描、配置写入或缓存，原锁序/当前授权与一致性归调用方。
+
+| 原项目 | 保留的实际来源 | 原tx透传 |
+| --- | --- | --- |
+| workspace_profile | 当前workspace品类标量，沿原九项判定；完整档案/设置修订仍由独立开业配置口提供 | Core配置仓储的workspace/范围读 |
+| accounts_roles | 原启用成员与原角色覆盖口径的两次count | 业务仓储readRentalReadinessAccountFacts |
+| fulfillment_network | 原受权地点与已启用履约方count | Core配置仓储 |
+| business_rule | 原最近两条签发规则元数据，保留同时间冲突 | 业务配置仓储 |
+| business_calendar | 原时区/时间边界下的发布年度count | 业务配置仓储 |
+| item_groups | 当前空间启用型号count | Core配置仓储 |
+| pricing_groups_rates | 当前定价组与原启用价格目标引用，不读金额JSON | Core/业务配置仓储均同client |
+| price_version | 原查询时点适用的价格版本引用 | 业务配置仓储 |
+| membership_base | 原租户总体方案count，含草稿/空方案 | MembershipService.countPlans |
+
+API原noEmit退出0，原ai-native-ain08-opening-read.test.cjs 17项全部通过，没有改用例/断言。原fixture限定实际服务/仓储/会员/解析器调用退出0：根连接禁止下观察到workspace、sql、items、locations、pricingGroups、membership、rules、calendars、accounts、priceVersion十类查询，原九项及无写入/缓存保持；旧无tx/legacy不补绑定，原client透传到明确版本正文读取，后继绑定/范围变化及跨租户前置拒绝通过。首次变版断言失败是限定夹具只修改返回副本，保留失败后改为原rows共享修订持有者，不放松生产复核。
+
+源码/规范化hash、命令/输出及原失败唯一见[同client证据](../../worktree/rental-core/output/category-governance/readiness-original-transaction-20261112.json)，audit0、退出暂存/缓存已删除；仅本片改动行规范LF，源码内容不变。查询、权限行和版本正文仍为fixture，真实SQL/隔离/并发/锁及原四入口Outbox参加者未验证/接入。固定后交AI作者消费原client，继续真实counter/资源短缺/参加者、CAT-GOV原08及两个不同动态组合；不重建045/864运行包、不读取环境或迁移，原完整结项0/14不变。
+
 <a id="pm-allocation-pickup-main-integration-20261112"></a>
 
 ## PM按QA复验收回单资产与原领取依据（2026-11-12）
