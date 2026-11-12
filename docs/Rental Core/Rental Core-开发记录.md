@@ -4,6 +4,22 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="allocation-pickup-core-source-20261112"></a>
+
+## 单资产资料与原领取依据的只读接点（2026-11-12）
+
+按已协调的AIN-19必要Core窗口，从已核GitHub的`1bffc40821c253738e719691c3ae1d73cc1b907f`接续。最小闭包为[Core入口](../../apps/api/src/modules/rental-core/rental-core.service.ts)、[事实仓储](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts)及[有界读取与投影](../../apps/api/src/modules/rental-core/rental-order-allocation-pickup.read.ts)。`readOrderAllocationPickupBasis(tenantId, orderId, allocationId)`沿当前原operator/staff Guard/ALS、tenant/workspace、地点及dataScope读取一个明确分配项；精确资产ID与原可见条件同时保留，own范围只查询该资产的原工单存在性，不枚举全空间资产。
+
+输出分为原allocation引用/更新时间、当前受权单资产资料、原领取依据。当前资产只投影当前定义的字段、原序列号及Core规范化值，带当前categoryVersionId/adoptionRevision/definitionVersion；退役属性不泄露。原领取从持久record、显式pickupItems关联及原订单/报价或对应已应用换货的冻结模板读取，返回原recordId/revision/time、template id/code/version、resourceBinding及冻结单位，不使用当前资产属性或当前模板补历史。projectionHash只是本次持久投影的SHA-256，不编造历史版本/hash，也不授予执行权。
+
+无资产、无原分配领取绑定、缺冻结计量字段/单位或原读数均明确not_recorded；多资源整单读数不冒充单资产基线。原结果与有效修正读数分开，修正链核原from/to及记录引用，不输出自由原因、操作人或文件下载授权。复用原optionalUsageReading/usageDelta，合法零保留，非法负数/倒退或矛盾原差值拒绝；没有基线不补零、不解释为可换表结算。单项JSON在传输前限64KiB，计量字段/读数/修正各100项、资源与冻结模板各200项，重复记录/绑定、坏源或超限拒绝。超限用不匹配的JSON容器表示，避免与合法动态字段名冲突；前后核订单、分配、资产/型号、record、当前定义与ALS，仍是有界观察，不冒称同事务快照。
+
+最终API原`tsc -p apps/api/tsconfig.json --noEmit --incremental false --pretty false`退出0；原`rental-inspection-resource.test.cjs`、`rental-inspection-usage-correction.test.cjs`、`rental-usage-reading-validation.test.cjs`均退出0。复用原inspection-differential fixture的限定实际Core/仓储调用退出0：精确资产/own/地点条件、六条有界SQL替身、零值及原单位、合法同名字段、原/有效修正链、缺字段/单位/绑定、多资源歧义、坏读数、后继定义及当前身份变化拒绝。SQL/权限数据为明确替身，未执行真实MySQL；首次合成定义误用目录对象形状的失败保留，仅改限定调用按实际数组取值，没有改生产实现迎合夹具或新增/扩写测试文件。
+
+源码hash、实际命令/输出、首次失败及Shared/自持Client保护hash唯一见[阶段证据](../../output/category-governance/allocation-pickup-core-source-20261112.json)。audit0，退出暂存和编译缓存已核实删除；此前组合命令被自动审批以blocked by policy拒绝且未执行，随后改为明确路径、逐文件/空目录非递归清理完成。本片未重建API，864文件研发包仍045阶段；Shared/StaffFactory/provider、AI私有消费、HTTP/DI及宿主由原作者接固定成果。没有真实DB/Auth/并发、媒体/模型、浏览器/微信或独立Review证据，不提升原CAT-GOV-14项/CAT-A22项或CLOSE门槛。
+
+PM已确认b869类型/892两源码随企业来源进入main `3647fd0ed5e978921a483c9ba4cc26077d8a25aa`，随后企业签源guard单文件进入`34f8ec9efa99d515bfb0fea56f2ac623d9d63cf6`，均已普通推送回读；本树按后一个固定提交核原Core三blob一致，不追main活动HEAD。PM报告20路径Shared/MCP/API/admin/portal诊断0、后继guard类型0；这不是完整执行/HTTP/真库验收，也没有整收6390/045及其他祖先。当前继续AIN-17业务/会员九项原client、真实counter/资源短缺参加者与CAT-GOV主线；原08采用、两动态编码不同组合及0/14完整结项保持。
+
 <a id="opening-original-transaction-20261112"></a>
 
 ## 开业配置来源的原事务读取（2026-11-12）
