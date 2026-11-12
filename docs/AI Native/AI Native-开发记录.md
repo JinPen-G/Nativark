@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-secret-box-nest-compatibility-20261112"></a>
+## 原凭据服务 Nest 注入修复与 AI 配置兼容核验（2026-11-12）
+
+在已上传的 `270fbb7aff07fd4dab1e0c96cd43a76acb13000a` 上，按 PM 交付的 OP 固定提交 `54e7308ccc55325873cccbe9fb62090a0a9bc564` 接入 [SecretBox](../../apps/api/src/common/secret-box.ts) 的 Injectable 导入与装饰器。工作区文件和固定来源 blob 同为 `2267d4f2f489f0ac421d599fec33ef2d7dcfbade`；没有修改 AppModule、加密算法、密文格式、指纹或财务账。原问题是正常 Nest 注入缺少 ConfigService 构造元数据，手动 new 的既有夹具不能覆盖此装配缺口。
+
+执行 `node --no-compilation-cache -`，预加载本树原离线守卫，在内存复用 `tests/ai-native-tenant-profile-transaction.test.cjs` 的数据库夹具。通过正常 Nest TestingModule 注册 ConfigService/SecretBox，再把注入的实例交给实际 `createPersistedTenantModelConfiguration` 和 `createScopeBoundTenantModelConnection`，未手动创建被测 SecretBox。配置保存、原 v1/v2 密文读取、密钥轮换后的两种旧密文读取及稳定指纹通过；旧 Profile 版本、跨租户、撤权、篡改密文和已清除凭据均拒绝。合计 3 次配置事务、1 配置行、1 Profile；保存不伪造已验证能力，公开摘要不返回凭据。没有调用模型或财务账，此处不另称单账回归或真实供应商验收。
+
+该组合模拟退出 0。TypeScript 5.9.3 检查 SecretBox、原配置组合及实际管理 Controller 共 3 根/1297 源，零诊断、退出 0。首次通过内存 REPL 等待结果时工具超时重置，结果未被观察，不算通过；随后由同一离线入口完成上述可观察核验。两项有效检查的审计均为空，任务临时目录未创建，没有新增测试脚本、依赖、生成物或后台服务。`node scripts/validate-docs.cjs` 仍报 4 处既有缺链（导航历史 3、稀疏站点示例 1），本片链接与任务算术无新增错误；定向 `git diff --check` 退出 0。仅本修复与两册现场记录纳入本阶段提交，识别依据、报价和员工活动源码继续保留各自窗口。AIN-05 的既有模拟研发完成状态由此次生产装配修复补正，不增加新的整项完成数。
+
 <a id="ain12-original-field-human-input-20261112"></a>
 ## AIN-12 原字段生产、候选核对与原回答接线（2026-11-12）
 

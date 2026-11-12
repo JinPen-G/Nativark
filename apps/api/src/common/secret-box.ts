@@ -1,10 +1,11 @@
-import { ServiceUnavailableException } from "@nestjs/common";
+import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 
 export const SECRET_BOX_ENVELOPE_PATTERN = /^(?:v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+|v2:[A-Za-z0-9._-]{1,64}:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)$/u;
 
 /** 服务端保存租户第三方凭据的 AES-256-GCM 小封装。 */
+@Injectable()
 export class SecretBox {
   constructor(private readonly config: ConfigService) {}
 
