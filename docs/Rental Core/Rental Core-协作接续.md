@@ -20,6 +20,8 @@
 
 ## 3. 下一入口与原缺口
 
+原续租服务夹具 `2767638bf` 已按 QA 单测试文件候选收回 main，十二组原断言通过，明确新空服务快照与历史缺失；见[测试整合](<Rental Core-开发记录.md#pm-extension-fixture-main-integration-20261113>)。治理输入/身份及 AI 直接消费者候选仍按各自前置另片核验。
+
 采用/准备输入副本已按 QA 固定两源码收回 main，证据与未验边界见[主线整合](<Rental Core-开发记录.md#pm-adoption-input-capture-integration-20261112>)；治理入口 `48e1b6807` 仍待 QA。Core 继续原 CAT-GOV 和 CLOSE，不以此调整完整进度。
 
 AIN-19 单资产/原领取依据已收 main `12a454937`，见[主线整合](<Rental Core-开发记录.md#pm-allocation-pickup-main-integration-20261112>)；缺 pickupItems 仍为未记录，AI识别/媒体消费者另片。AIN-17 `483b887d` 四源码方法闭包与记录 `c24fd4e8` 已获 QA 独立通过，按[同client整合](<Rental Core-开发记录.md#pm-readiness-original-transaction-integration-20261112>)收回，不包含其他父级写入实现。PM 已给 Core `RentalAssignmentState.issueSource` 可选原结构化来源窗口，并定向转交 AI-RD 固定 `b690e4f3` 的 Outbox/资源存储两个接口及 `7f4a2f1a` 记录；下一步沿原业务事务接真实短缺/配置参加者。旧 issue 文本不作来源、会员租户总体与九项算法保持，不另开事务或把同client读等同捕获完成。

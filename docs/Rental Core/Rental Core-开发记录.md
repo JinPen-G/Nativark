@@ -4,6 +4,16 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-extension-fixture-main-integration-20261113"></a>
+
+## 原续租服务夹具与空快照断言的 main 集成（2026-11-13）
+
+按 QA 主审与独立静态复核，只收 Core `2767638bfac0a8cbc2da294dba095c7de833806b` 的[原续租服务测试](../../tests/rental-extension-services.test.cjs)，blob `b0864b67072b95e271a99065ac53a33b03ea2798`、SHA-256 `1c08078199fe37391de3f5db09270b1b5005b298351a73e71456fd1d9b9a9b03`。原十二组行为及全部断言保持：等待真实 `readBusinessContext`，精确型号分页只作原 fixture 供应，新解析且无服务的续租保留 `[]`，历史缺失继续断言 `undefined`。
+
+QA 在 main `2a5c56471` 的实际 Core/Business/Controller 及原 absorbing/fulfillment 夹具内执行原测试全文，十二组全通过，`node --no-compilation-cache -` 退出 0，stdin SHA-256 `6c196be93d25870c05ded301978573e6fa80589b46eb80860c619f872381babe`。同装配的旧 main 测试在 defaultUnit 初始化前因未等待上下文失败，原行为组执行 0、退出 1，命令 SHA-256 `6da699af9673e9d3c2f0a0248b0b33b18e82eb759976a626860891da7ec0c34a`。这是完整原断言的限定内存行为证据，ts-node 由固定 loader 接管、metadata 关闭，未执行真实物理 CLI/DI。
+
+仅收本测试及此处阶段记录、接续的新增证据。此前治理输入/身份候选及其四份文档差异保留在主工作区，未夹带入本提交；治理完整组合仍等 AI 直接消费者兼容修复与 QA。测试 blob 与固定版本一致，语法、差异及新增文档链接定向核对。存储/容量/Controller 参加者为显式替身，真实权限、数据库/多实例与宿主未验，完整保证金来源/退款门槛不变。六项其他作者 WIP 保持，本轮无新增临时目录或进程。实际集成提交以包含本段的 Git 对象为准，普通推送后回读 GitHub。
+
 <a id="pm-adoption-input-capture-integration-20261112"></a>
 
 ## 采用与准备输入副本的主线整合（2026-11-12）
