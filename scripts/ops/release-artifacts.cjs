@@ -13,6 +13,7 @@ const BUILD_TARGETS = [
   { name: "@rental-os/api", dir: path.join(ROOT, "apps", "api", "dist") },
   { name: "@rental-os/admin", dir: path.join(ROOT, "apps", "admin", "dist") },
   { name: "@rental-os/shared", dir: path.join(ROOT, "packages", "shared", "dist") },
+  { name: "@rental-os/mcp-server", dir: path.join(ROOT, "packages", "mcp-server", "dist") },
   { name: "config", dir: path.join(ROOT, "config"), files: ["environment.cjs", "environment.d.cts"] }
 ];
 

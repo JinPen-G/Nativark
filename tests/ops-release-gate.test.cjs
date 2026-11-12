@@ -12,6 +12,7 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const facts = require(path.join(ROOT, "scripts/ops/release-facts.cjs"));
+const artifacts = require(path.join(ROOT, "scripts/ops/release-artifacts.cjs"));
 
 const ok = (m) => console.log(`  ✓ ${m}`);
 const buf = (text) => Buffer.from(text, "utf8");
@@ -99,6 +100,64 @@ void (() => {
   );
   assert.equal(facts.inspectBuildProvenance(undefined, "abc", currentBuilds).ok, false, "没有来源证明的旧 dist 必须失败");
   ok("构建来源证明：当前提交和当前产物摘要必须同时匹配");
+
+  // 使用原产物收集入口和内存文件系统，验证 MCP 确实参与完整发布摘要。
+  // 夹具不读取部署目录，所有文件系统方法都在 finally 中恢复。
+  assert.deepEqual(artifacts.BUILD_TARGETS.map(target => target.name), [
+    "@rental-os/api", "@rental-os/admin", "@rental-os/shared", "@rental-os/mcp-server", "config"
+  ], "MCP 与原四个目标必须同时纳入发布来源");
+  const mcpDirectory = path.join(ROOT, "packages", "mcp-server", "dist");
+  assert.equal(artifacts.BUILD_TARGETS.find(target => target.name === "@rental-os/mcp-server").dir, mcpDirectory);
+  const mcpEntry = path.join(mcpDirectory, "index.js");
+  const mcpTypes = path.join(mcpDirectory, "index.d.ts");
+  const fixtureFiles = new Map([
+    [path.join(ROOT, "apps", "api", "dist", "main.js"), buf("api")],
+    [path.join(ROOT, "apps", "admin", "dist", "index.html"), buf("admin")],
+    [path.join(ROOT, "packages", "shared", "dist", "index.js"), buf("shared")],
+    [mcpEntry, buf("mcp")], [mcpTypes, buf("types")],
+    [path.join(ROOT, "config", "environment.cjs"), buf("config")],
+    [path.join(ROOT, "config", "environment.d.cts"), buf("types")]
+  ]);
+  const fixtureDirectories = new Set(artifacts.BUILD_TARGETS.map(target => target.dir));
+  const originalFs = { existsSync: fs.existsSync, readdirSync: fs.readdirSync, statSync: fs.statSync, readFileSync: fs.readFileSync };
+  try {
+    fs.existsSync = file => fixtureDirectories.has(file) || fixtureFiles.has(file);
+    fs.readdirSync = directory => [...fixtureFiles.keys()]
+      .filter(file => file.startsWith(directory + path.sep))
+      .map(file => ({ name: path.basename(file), parentPath: path.dirname(file), isFile: () => true }));
+    fs.statSync = file => ({ size: fixtureFiles.get(file).length });
+    fs.readFileSync = file => fixtureFiles.get(file);
+    const completeBuilds = artifacts.summarizeBuilds();
+    const completeProof = { kind: "release-build-provenance", git: { commit: "mcp-fixture" }, builds: completeBuilds };
+    assert.equal(completeBuilds.length, 5);
+    assert.ok(completeBuilds.every(build => build.fileCount > 0 && build.digest), "原完整目标均应有有效摘要");
+    assert.equal(completeBuilds.find(build => build.name === "@rental-os/mcp-server").fileCount, 2);
+    assert.equal(facts.inspectBuildProvenance(completeProof, "mcp-fixture", completeBuilds).ok, true);
+    assert.equal(facts.assertNoSecrets({ builds: completeBuilds }, [valid.AUTH_TOKEN_SECRET, valid.DATABASE_URL]), true);
+    const omittedProof = { ...completeProof, builds: completeBuilds.filter(build => build.name !== "@rental-os/mcp-server") };
+    assert.equal(facts.inspectBuildProvenance(omittedProof, "mcp-fixture", completeBuilds).ok, false,
+      "旧来源证明未记录 MCP 时必须拒绝");
+
+    fixtureFiles.delete(mcpEntry);
+    fixtureFiles.delete(mcpTypes);
+    const missingBuilds = artifacts.summarizeBuilds();
+    const missingMcp = missingBuilds.find(build => build.name === "@rental-os/mcp-server");
+    assert.equal(missingMcp.fileCount, 0, "缺少 MCP dist 时必须在正常摘要入口暴露缺件");
+    assert.equal(missingMcp.digest, undefined);
+    assert.equal(facts.inspectBuildProvenance(completeProof, "mcp-fixture", missingBuilds).ok, false);
+
+    fixtureFiles.set(mcpEntry, buf("MCP"));
+    fixtureFiles.set(mcpTypes, buf("types"));
+    const changedBuilds = artifacts.summarizeBuilds();
+    const originalMcp = completeBuilds.find(build => build.name === "@rental-os/mcp-server");
+    const changedMcp = changedBuilds.find(build => build.name === "@rental-os/mcp-server");
+    assert.equal(changedMcp.totalBytes, originalMcp.totalBytes);
+    assert.notEqual(changedMcp.digest, originalMcp.digest, "同长度的 MCP 内容变化也必须改变来源指纹");
+    assert.equal(facts.inspectBuildProvenance(completeProof, "mcp-fixture", changedBuilds).ok, false);
+  } finally {
+    Object.assign(fs, originalFs);
+  }
+  ok("MCP 纳入原完整发布摘要，缺件、来源遗漏和内容变化均可被原门禁识别");
 
   // ============ 3. 工作区状态 ============
   assert.equal(facts.summarizeWorktree("").clean, true, "空 porcelain 表示干净");
