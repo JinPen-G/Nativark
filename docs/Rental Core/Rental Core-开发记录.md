@@ -4,11 +4,21 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="merchant-delegation-core-proof-type-20261112"></a>
+
+## 商户单次委托的Core内部证明类型（2026-11-12）
+
+按PM确认的唯一作者窗口，从已核GitHub的`045ff2114b1a25943419b88dd153e7d94685fd18`接续，先独立交[原五阶段参加者类型](../../apps/api/src/modules/rental-core/approved-order-transaction.ports.ts)的`ApprovedOrderBinding.merchantDelegation`可选字段，不改变authorize/recover/prepare/commit/replay签名或普通批准语义。`ApprovedOrderMerchantDelegation`含version/purpose、D、sourceHash/basisHash/requestHash、quoteId、原签发expectedRevision、personalCustomerId/corporateCustomerId及原operator actorUserId；tenant/workspace和K仍在原binding。当前源版本只接受原签发1，consumed/revoked当前2不替代它。
+
+证明带模块私有unique-symbol类型标记，仅Core由真实私有读结果/原请求校验后封存注入。类型转换、HTTP/Shared DTO或普通callback自填字段不获得运行时来源；企业政策必须使用Core运行时`assertCoreMerchantDelegationProof(proof, binding)`校验原proof对象，再逐字段核持久源和当前operator。原binding复制给五阶段参加者只携带投影，不以其JSON复制作为授权。这一运行时接点与确认服务仍是本树WIP，待对应固定实现，不声明类型本身已完成执行链。
+
+现有API原noEmit退出0、audit0，含当前Core实现WIP，类型hash/命令与退出清理唯一见[类型证据](../../output/category-governance/merchant-delegation-core-types-20261112.json)。本阶段仅提交类型和既有记录/接续；确认服务与sealed端口未混入类型片，也未生成新包或改企业政策/共同入口。企业私有读取已固定`86dc23917336b35b1842c2873ed6ac0c7790549d`：read返回原request/hash、issuedRevision/state/当前revision，prepare复用read后去掉state/issuedRevision并保留原prepared形状。Core沿该固定来源完成执行/原结果，恢复不走新prepare、不改ALS userId；完整正常、失应答、TTL及当前权限/原Core事务验证仍未完成。
+
 <a id="business-config-original-transaction-20261112"></a>
 
 ## 业务配置补落的完整原事务（2026-11-12）
 
-从已核GitHub的`6390f89a9d38b499ca8d43a3b38dccef0641e13c`接续，按PM的AIN-17 Core窗口只改[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)和[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)。`persistBusinessConfig`把基础价格及初始价格版本、优惠、服务及版本、日历、规则、通知模板六类补落纳入同一ReadCommitted事务，先持原Tenant/空间品类锁；新增事务参数沿原方法追加，范围读取也使用同一client，不从根连接逃出。直接消费者仍为`persistScope`和首次报价的原配置补落；普通发布/资金/客户入口及Shared/DI未改，不声明已接入Outbox。
+从已核GitHub的`6390f89a9d38b499ca8d43a3b38dccef0641e13c`接续，固定源码`045ff2114b1a25943419b88dd153e7d94685fd18`已普通推送核远端；按PM的AIN-17 Core窗口只改[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)和[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)。`persistBusinessConfig`把基础价格及初始价格版本、优惠、服务及版本、日历、规则、通知模板六类补落纳入同一ReadCommitted事务，先持原Tenant/空间品类锁；新增事务参数沿原方法追加，范围读取也使用同一client，不从根连接逃出。直接消费者仍为`persistScope`和首次报价的原配置补落；普通发布/资金/客户入口及Shared/DI未改，不声明已接入Outbox。
 
 等锁前固定六类配置并拒绝其他商户行。保存期间输入变化在提交前拒绝并回滚，新的输入保留；提交应答期间又变化，则明确保存后冲突，保留已提交事实及新输入，调用方不把它标作已保存，也不假称事务回滚。`configPersisted`仍仅在完整返回后设置，初始价格不单独成为可见前缀，原报价/金额算法与历史版本保护不变。
 
