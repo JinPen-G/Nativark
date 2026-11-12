@@ -16,6 +16,7 @@ import type { AiTaskInputReader } from '../task-input/task-input.ports';
 import { PersistedPlanResourcePolicySource } from './persisted-plan-resource-policy.source';
 import { PrismaTaskRunPreparation } from './prisma-task-run-preparation';
 import { PrismaTaskRunOverhead } from './prisma-task-run-overhead';
+import type { AiTaskControlResourceOrigin } from './task-run-preparation.ports';
 
 export interface PersistentTaskRunnerComposition {
   db: PrismaClient;
@@ -40,6 +41,7 @@ export interface PersistentTaskRunnerComposition {
   financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   orderEvidence?: AiTaskOrderPhaseBusinessEvidence;
   confirmationTool?: AiConfirmationTool;
+  controlResourceOrigin?: AiTaskControlResourceOrigin;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -67,8 +69,8 @@ export function composePersistentTaskRunner(input: PersistentTaskRunnerCompositi
   requires(input?.planAuthority, ['authorize']); requires(input?.toolCatalog, ['resolve']); requires(input?.executors, ['resolve']);
   if (input.invocations) requires(input.financialEvidence, ['readDispatch']);
   const scopes = new PrismaTaskExecutionScopeAuthority(input.tasks, input.db);
-  const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic, input.financialEvidence, input.orderEvidence, input.confirmationTool);
-  const preparation = new PrismaTaskRunPreparation(input.db, evidence, input.planAuthority, input.wall, input.monotonic);
+  const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic, input.financialEvidence, input.orderEvidence, input.confirmationTool, input.controlResourceOrigin);
+  const preparation = new PrismaTaskRunPreparation(input.db, evidence, input.planAuthority, input.wall, input.monotonic, input.controlResourceOrigin);
   const overhead = new PrismaTaskRunOverhead(input.db, evidence, input.wall, input.monotonic);
   evidence.bindToolActivityObserver((lease, chargeId, started, ended) => overhead.excludeToolActivity(lease, chargeId, started, ended));
   const policy = input.policy ?? new PersistedPlanResourcePolicySource(input.tasks, evidence, preparation);

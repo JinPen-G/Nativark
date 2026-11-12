@@ -30,6 +30,7 @@ import { AiWorkbenchFieldMaterialService } from '../workbench-field-material.ser
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 import { AiOriginalSceneDisplayGeneration, type AiOriginalSceneDisplayPublication } from '../workbench-display-generation.service';
+import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
@@ -115,7 +116,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const previous = parseTaskModelInput(continuation.input, modelPolicy), result = continuation.result;
         if (taskModelFingerprint(previous, modelPolicy) !== continuation.inputHash || !isGatewayResult(result)
           || result.status !== 'completed' || result.usage.kind !== 'reported' || result.requestId !== previous.intent.requestId
-          || requestFingerprint(parsedInput.intent.messages) !== requestFingerprint(continueOriginalSceneMaterial(previous,
+          || requestFingerprint(withoutTaskModelDisplayMessages(parsedInput.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
             { ...continuation, result }, continuation.questionRevision > 1 ? readOriginalSceneEnvelope(parsedInput) : undefined).messages)) throw denied();
       }
       const envelope = readOriginalSceneEnvelope(parsedInput);
@@ -124,7 +125,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         same(before, await current(ref, command.taskId, command.runId));
         if (parsedInput.displayWitness) {
           if (!display) throw unavailable();
-          await display.revalidateInput(before.original.context, command.taskId, command.runId, parsedInput);
+          await display.revalidateInput(before.original.context, command.taskId, command.runId, parsedInput, before.provenance.history);
         }
         if (continuation && continuation.questionRevision > 1) {
           const packet = await scenes.prepareTaskMaterial(ref);
@@ -183,8 +184,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       if (!policy) throw unavailable();
       const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(continuation?.limits ?? policy.limits));
       const registrationRef = continuation?.registrationRef ?? registration(command.original.inputRef);
-      if (display && !continuation) material = await display.prepare(context, before.original.receipt,
-        task.id, command.lease.runId, packet.materialHash, material);
+      if (display && (!continuation || previous?.displayWitness)) material = await display.prepare(context, before.original.receipt,
+        task.id, command.lease.runId, packet.materialHash, material, before.provenance.history);
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
       const published = await model.publish({ taskId: task.id, registrationRef,
         expectedTaskRevision: command.expectedTaskRevision, lease: command.lease, material });
@@ -365,7 +366,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const before = await observe(() => bound(parsed.data.original)), submission = parsed.data.submission;
         if (submission.taskId !== before.task.taskId) throw denied();
-        const receipt = await application(before.reference).resume(submission, signal);
+        // The answer successor has no published plan yet. Supply the original
+        // preparation proof before the runner meters its held publication.
+        const definition = await observe(() => preparationDefinition(before), signal);
+        const receipt = await application(before.reference, definition).resume(submission, signal);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(receipt); // The original app keeps receipt and continuation distinct.
       }, async submitAnswer(value: unknown) {

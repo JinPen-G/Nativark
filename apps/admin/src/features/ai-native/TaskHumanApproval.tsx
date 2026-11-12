@@ -7,7 +7,7 @@ import { AI_PROPOSAL_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, AI_STEP_STATUSES_DRAF
   type AiTaskSnapshotDraft, type AiTaskDecisionQueryDraft, type AiTaskHumanReviewDraft,
   type AiTaskHumanDecisionReceiptDraft, type AiTaskReviewQueryDraft, type AiTaskBusinessObservationDraft,
   type AiTaskHumanContinueDraft, type AiApprovalOrderMaterialDraft, type AiApprovalApplicationReferenceDraft,
-  type AiApprovalApplicationReviewDraft } from "@rental-os/shared";
+  type AiApprovalApplicationReviewDraft, type AiQuoteSelectionProofDraft, validateAiQuoteSelectionHttpValue } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { ActionButton, Alert, ConfirmAction, Select } from "@/components/ui";
@@ -216,9 +216,12 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
     <p>{t("仅审阅这份不可变提案。批准不是订单创建、支付成功或设置已生效；继续执行需要另行明确确认。")}</p>
   </div>;
 }
+export type TaskOrderReviewReference = AiTaskReviewQueryDraft & {
+  original: AiApprovalApplicationReferenceDraft; selection?: AiQuoteSelectionProofDraft;
+};
 export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, runId, onOrderReviewed }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void; runId?: string;
-  onOrderReviewed?: (value: AiTaskReviewQueryDraft & { original: AiApprovalApplicationReferenceDraft }) => void;
+  onOrderReviewed?: (value: TaskOrderReviewReference | null) => void;
 }) {
   const { t } = useLocale(), labelId = useId();
   const storageKey = `ai-task-decision:${identity}:${taskId}${runId ? `:${runId}` : ''}`;
@@ -232,6 +235,11 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
   const [business, setBusiness] = useState<AiTaskBusinessObservationDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null), [busy, setBusy] = useState(false);
   const active = useRef({ current, onAccessDenied, onOrderReviewed }); active.current = { current, onAccessDenied, onOrderReviewed };
+  const reviewedOrder = useRef<TaskOrderReviewReference | null>(null);
+  const reportOrderReview = (value: TaskOrderReviewReference | null) => {
+    reviewedOrder.current = value;
+    active.current.onOrderReviewed?.(value);
+  };
   const flight = useRef<AbortController | null>(null);
   useEffect(() => () => { flight.current?.abort(); }, []);
   const run = async (work: (signal: AbortSignal) => Promise<void>, write = false) => {
@@ -243,19 +251,26 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
       if (same()) {
         setReview(null); setReceipt(null); setBusiness(null); setStepObservations({});
         setMessage(write ? t("本次写入应答未确认。保留原引用，只核对原决定或业务收据，不再次提交。") : t("当前不可读取，请核对权限、原版本或人工业务页。"));
-        if ([401, 403].includes((error as { response?: { status?: number } }).response?.status ?? 0)) active.current.onAccessDenied();
+        if ([401, 403].includes((error as { response?: { status?: number } }).response?.status ?? 0)) {
+          reportOrderReview(null); active.current.onAccessDenied();
+        }
       }
       throw error;
     } finally { if (flight.current === controller) { flight.current = null; if (same()) setBusy(false); } }
   };
   const same = (signal: AbortSignal) => active.current.current() && !signal.aborted;
   const readSteps = () => run(async signal => {
-    setReview(null); setReceipt(null); setBusiness(null); setStepObservations({}); setSteps([]); setSelected(null);
+    setReview(null); setReceipt(null); setBusiness(null); setStepObservations({}); setSteps([]);
     const snapshot = await aiTaskCenterApi.snapshot(taskId, signal);
     if (!same(signal)) return;
     if (runId !== undefined && !id(runId)) throw Error('AI_INVALID_INPUT');
     const candidates = taskHumanSteps(snapshot, taskId).filter(step => runId === undefined || step.runId === runId);
     setSteps(candidates);
+    setSelected(previous => candidates.some(step => `${step.runId}:${step.stepId}` === previous) ? previous : null);
+    const source = reviewedOrder.current;
+    // Refreshing the same original step preserves its editor. Removing that
+    // step retracts the old proposal locator before another task can use it.
+    if (source && !candidates.some(step => step.runId === source.runId && step.stepId === source.stepId)) reportOrderReview(null);
     if (!candidates.length) setMessage(t("本次没有可观察的原业务步骤。没有记录不代表业务未执行。"));
   });
   const readReview = () => run(async signal => {
@@ -285,11 +300,14 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
     }
     if (value.kind === 'order') {
       const proposal = value.review.proposal;
-      active.current.onOrderReviewed?.({ taskId, runId: value.runId, stepId: value.stepId, original: {
+      if (value.selection && (!validateAiQuoteSelectionHttpValue('AiQuoteSelectionProofRequest', value.selection)
+        || value.selection.taskId !== taskId || value.selection.runId !== value.runId)) throw Error('AI_RESOURCE_UNAVAILABLE');
+      reportOrderReview({ taskId, runId: value.runId, stepId: value.stepId,
+        ...(value.selection ? { selection: value.selection } : {}), original: {
         contractVersion: proposal.payload.contractVersion, proposalId: proposal.payload.proposalId,
         proposalRevision: proposal.payload.revision, reviewedPayloadHash: proposal.payloadHash
       } });
-    }
+    } else reportOrderReview(null);
     setReview(structuredClone(value));
   });
   const observe = (result: AiTaskHumanDecisionReceiptDraft, query: AiTaskDecisionQueryDraft, signal: AbortSignal) => {
@@ -353,7 +371,12 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
       <ActionButton label={t("读取原业务步骤")} disabled={busy || !!original || !!continuation} onAction={readSteps} />
       {!!steps.length && <><label id={labelId}>{t("原业务步骤")}</label><Select aria-labelledby={labelId} value={selected}
         disabled={busy || !!original || !!continuation} options={steps.map(step => ({ value: `${step.runId}:${step.stepId}`, label: safeDisplayText(step.stepId, 36) }))}
-        onChange={(value: unknown) => { setSelected(typeof value === 'string' ? value : null); setReview(null); setReceipt(null); setBusiness(null); }} />
+        onChange={(value: unknown) => {
+          const next = typeof value === 'string' ? value : null;
+          const source = reviewedOrder.current;
+          if (source && next !== `${source.runId}:${source.stepId}`) reportOrderReview(null);
+          setSelected(next); setReview(null); setReceipt(null); setBusiness(null);
+        }} />
         <ActionButton label={t("审阅当前等待提案")} disabled={!selected || busy || !!original || !!continuation} onAction={readReview} /></>}
       <ActionButton label={t("读取原业务结果")} disabled={busy || !selected && (!original || original === "invalid") && (!continuation || continuation === "invalid")}
         onAction={() => run(async signal => {

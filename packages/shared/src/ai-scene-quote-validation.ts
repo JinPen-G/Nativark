@@ -15,7 +15,7 @@ import type { AiSceneTaskMaterialResponseDraft, AiOrderSceneTaskMaterialV2 } fro
 import { z } from 'zod';
 import { validateAiLeafSchemaValue } from './ai-leaf-schema-validation';
 import type { AiClarifiedQuoteSelectionPreparationDraft, AiClarifiedQuoteSelectionOriginalOperationReadDraft,
-  AiQuoteSelectionSelectResponseDraft, AiQuoteSelectionReconcileResponseDraft,
+  AiQuoteSelectionSelectResponseDraft, AiQuoteSelectionReconcileResponseDraft, AiQuoteSelectionProofDraft,
   AiSelectedQuoteTaskRunDraft, AiSelectedQuoteTaskResultDraft, AiHumanQuoteOrderRepreparePreparationDraft,
   AiHumanQuoteOrderReprepareRequestDraft, AiHumanQuoteOrderReprepareResponseDraft,
   AiQuoteRequestReissuePreparationInputDraft, AiQuoteRequestReissueReferenceDraft, AiQuoteRequestReissuePreparationDraft,
@@ -32,6 +32,7 @@ interface Responses {
   AiOriginalQuoteReceiptResponseDraft: AiOriginalQuoteReceiptResponseDraft;
 }
 interface SelectionValues {
+  AiQuoteSelectionProofRequest: AiQuoteSelectionProofDraft;
   AiQuoteRequestReissuePreparationInputDraft: AiQuoteRequestReissuePreparationInputDraft;
   AiQuoteRequestReissueReferenceDraft: AiQuoteRequestReissueReferenceDraft;
   AiQuoteRequestReissuePreparationDraft: AiQuoteRequestReissuePreparationDraft;

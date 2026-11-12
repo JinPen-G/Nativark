@@ -1,9 +1,9 @@
 /** One live host window, not a telemetry store or business authority. Only an
  * explicit original action arms it; reopening never restores timing state. */
-import type { AiTaskClientVisibleReportDraft, AiTaskClientVisibleSourceDraft } from '@rental-os/shared';
+import type { AiTaskClientVisibleReportDraft, AiTaskClientVisibleSourceDraft, AiWorkbenchModelControlObservation } from '@rental-os/shared';
 
 export interface VisibleOrigin {
-  taskId: string; runId?: string; trigger: 'original_model_start' | 'original_input_resume'; originKey: string;
+  taskId: string; runId?: string; trigger: 'original_model_start' | 'original_input_resume' | 'original_model_control'; originKey: string;
   conversationId?: string; turnId?: string;
 }
 export interface VisibleSourceReference { taskId: string; runId: string; source: AiTaskClientVisibleSourceDraft }
@@ -22,7 +22,7 @@ export class LiveVisibleObservationSession {
   private readonly listeners = new Set<() => void>();
   private readonly seen = new Set<string>();
   private window: { key: string; origin: VisibleOrigin; epoch: number; started: number; documentId: string;
-    generation: number; baseline: Set<string>; attempted: Set<'text' | 'card'> } | null = null;
+    generation: number; baseline: Set<string>; attempted: Set<'text' | 'card'>; controlResultId?: string } | null = null;
   constructor(private readonly surface: AiTaskClientVisibleReportDraft['surface'], private readonly driver: VisibleObservationDriver,
     private readonly expected: { taskId?: string; conversationId?: string } = {}) {}
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
@@ -36,10 +36,12 @@ export class LiveVisibleObservationSession {
     this.invalidate();
     try {
       const origin = structuredClone(originValue), started = this.driver.now(), epoch = this.driver.epoch();
+      const control = origin.trigger === 'original_model_control';
       if (!this.driver.available() || !this.driver.current() || !Number.isFinite(started)
         || !Number.isSafeInteger(epoch) || epoch < 0 || !id(origin.taskId) || origin.runId !== undefined && !id(origin.runId)
-        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(origin.originKey)
-        || !['original_model_start', 'original_input_resume'].includes(origin.trigger)
+        || !(control ? id(origin.originKey, 128) : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(origin.originKey))
+        || !['original_model_start', 'original_input_resume', 'original_model_control'].includes(origin.trigger)
+        || control && (this.surface !== 'task_center' || origin.conversationId !== undefined || origin.turnId !== undefined)
         || this.expected.taskId !== undefined && origin.taskId !== this.expected.taskId
         || this.expected.conversationId !== undefined && origin.conversationId !== this.expected.conversationId
         || origin.conversationId !== undefined && !id(origin.conversationId, 191)
@@ -66,6 +68,21 @@ export class LiveVisibleObservationSession {
     if (window.origin.runId !== undefined && window.origin.runId !== runId) { this.invalidate(); return false; }
     window.origin.runId = runId; this.notify(); return true;
   }
+  /** Only an available receipt for this live control can bind its new text.
+   * Reading a retained operation never creates or restores this window. */
+  bindControl(key: string | null, value: AiWorkbenchModelControlObservation): boolean {
+    const window = this.active();
+    if (!window || key !== window.key || window.origin.trigger !== 'original_model_control'
+      || value.status !== 'available' || value.taskId !== window.origin.taskId || value.operationId !== window.origin.originKey
+      || !id(value.runId) || !id(value.resultId) || !id(value.operationLogId)
+      || value.runId === value.sourceRunId || value.resultId === value.sourceResultId) return false;
+    if (window.origin.runId !== undefined && window.origin.runId !== value.runId
+      || window.controlResultId !== undefined && window.controlResultId !== value.resultId) {
+      this.cancel(key); return false;
+    }
+    window.origin.runId = value.runId; window.controlResultId = value.resultId;
+    this.notify(); return true;
+  }
   cancel(key: string | null) { if (key && this.window?.key === key) this.invalidate(); }
   cancelTask(taskId: string) { if (this.window?.origin.taskId === taskId) this.invalidate(); }
 
@@ -78,6 +95,8 @@ export class LiveVisibleObservationSession {
         || (kind === 'text' ? reference.source.kind !== 'model_result' || !id(reference.source.resultId)
           : reference.source.kind !== 'approval_card' || !id(reference.source.stepId) || !id(reference.source.proposalId)
             || !Number.isSafeInteger(reference.source.proposalRevision) || reference.source.proposalRevision < 1)) return false;
+      if (window?.origin.trigger === 'original_model_control' && (kind !== 'text' || reference.source.kind !== 'model_result'
+        || !window.controlResultId || reference.source.resultId !== window.controlResultId)) return false;
       if (this.seen.size >= 50 && !this.seen.has(key)) return false;
       this.seen.add(key);
       if (!window || !window.origin.runId || window.origin.taskId !== reference.taskId

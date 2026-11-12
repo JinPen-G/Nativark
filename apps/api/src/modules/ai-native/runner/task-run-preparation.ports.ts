@@ -8,6 +8,11 @@ import { aiTaskRunPlanSchema, isAiTaskRunPlanBounded } from './prisma-task-run-e
 import type { AiTaskExecutionLease, AiTaskExecutionPolicy, AiTaskExecutionSettlementRequest, AiTaskExecutionChargeEvidence } from '../task-execution-budget.ports';
 
 export type AiTaskPreparationDefinition = Omit<AiTaskRunnerPlan, 'taskRevision'> & { bindingHash: string };
+/** Optional server-owned proof for an explicit operator model-control Run.
+ * Returns the original saved resource plan, never a new allowance or a grant.
+ * Ordinary and human-answer runs keep their existing lineage reader. */
+export type AiTaskControlResourceOrigin = (key: { scopeId: string; taskId: string; runId: string;
+  resourceOriginRunId: string }) => Promise<AiTaskRunnerPlan>;
 export const taskPreparationDefinitionSchema = aiTaskRunPlanSchema.innerType().omit({ taskRevision: true }).extend({
   bindingHash: z.string().regex(/^[a-f0-9]{64}$/u)
 }).strict().refine(isAiTaskRunPlanBounded);

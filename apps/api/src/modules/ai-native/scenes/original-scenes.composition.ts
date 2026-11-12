@@ -69,7 +69,9 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
         state: error.code === 'AI_STORAGE_UNAVAILABLE' ? 'requires_reconciliation' as const : 'blocked' as const, retryable: false as const }, model: 'not_called' as const };
     }
   };
-  return Object.freeze({ requests, tools, create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
+  // Composition-only current preflight; not an HTTP grant or request producer.
+  return Object.freeze({ requests, tools, creationAuthority: authority,
+    create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
     queryOrders: tools.orders.read.bind(tools.orders),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),
     readTaskReceipt: requests.readTaskReceipt.bind(requests),

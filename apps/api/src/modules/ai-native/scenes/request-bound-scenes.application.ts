@@ -67,6 +67,7 @@ import { AI_TASK_RECOVERY_READ_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_
   type AiOriginalTaskAccountingOperationResponseDraft } from '@rental-os/shared';
 import { PrismaTaskInputRepository, readTaskModelRunOrigin, taskInputReceiptReferenceSchema } from '../task-input/prisma-task-input.repository';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
+import { WorkbenchModelControlRepository } from '../workbench-model-control.repository';
 import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
 import { composePersistedReadonlyBusinessTaskHost } from '../runner/persisted-catalog-runner.composition';
@@ -945,7 +946,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     const resultReader = (sceneCode = resultPolicy?.sceneCode) => {
       const selected = observationPolicy(sceneCode);
       const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
-      return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, selected, input.clock, knowledge);
+      const control = options.audience === 'operator' && typeof input.db.operationLog?.findFirst === 'function'
+        ? new WorkbenchModelControlRepository(input.db, authorization.authority, input.clock) : undefined;
+      return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, selected, input.clock, knowledge,
+        control ? control.readOrigin.bind(control) : undefined);
     };
     const originalResultReader = async (value: unknown) => {
       const parsed = z.object({ original: originalRequestReferenceSchema }).passthrough().safeParse(structuredClone(value));
