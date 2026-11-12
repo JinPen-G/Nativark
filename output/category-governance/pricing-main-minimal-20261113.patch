@@ -1,0 +1,130 @@
+diff --git a/apps/api/src/modules/rental-core/rental-core.service.ts b/apps/api/src/modules/rental-core/rental-core.service.ts
+index 38cadf647..5b6bb505e 100644
+--- a/apps/api/src/modules/rental-core/rental-core.service.ts
++++ b/apps/api/src/modules/rental-core/rental-core.service.ts
+@@ -692,13 +692,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
+   /** Refresh only current configuration from a scoped committed snapshot. It
+    * never republishes snapshots or creates sample facts; old contexts hold their
+    * own detached arrays/definition when a later adoption advances the cache. */
+-  async refreshCommittedWorkspace(tenantId: string) {
++  async refreshCommittedWorkspace(tenantId: string, tx?: RentalConfigTx) {
+     if (!this.configStore?.loadWorkspaceSnapshot) {
+       if (this.categoryResolver) throw new ServiceUnavailableException("品类已版本化但缺少空间配置权威读取器");
+       return undefined; // Explicit absorbing/memory stores have no DB authority.
+     }
+     const workspaceId = this.workspaceOf(tenantId);
+-    const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId);
++    const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId, tx);
+     if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.definition.code !== snapshot.workspaceCategoryCode) {
+       throw new ConflictException("空间配置快照的作用域或品类不一致");
+     }
+@@ -706,6 +706,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
+     const state = this.states.get(workspaceId) ?? seeded;
+     const profile = snapshot.isDefault && snapshot.profile?.categoryCode === snapshot.definition.code ? snapshot.profile : seeded.profile;
+     const effectiveProfile = { ...structuredClone(profile), categoryVersionId: snapshot.binding.categoryVersionId, categoryAdoptionRevision: snapshot.binding.adoptionRevision };
++    // The original transaction returns its view before shared cache publication.
++    if (tx) return { ...snapshot, effectiveProfile: structuredClone(effectiveProfile) };
+     Object.assign(state, { profile: effectiveProfile,
+       businessSettings: snapshot.businessSettings ? structuredClone(snapshot.businessSettings) : seeded.businessSettings,
+       operators: structuredClone(snapshot.operators), locations: structuredClone(snapshot.locations), itemGroups: structuredClone(snapshot.itemGroups),
+@@ -717,8 +719,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
+   }
+   /** Production business callers consume this single committed combination,
+    * instead of independently combining profile/definition/cache getters. */
+-  async readBusinessContext(tenantId: string): Promise<BusinessContext> {
+-    const snapshot = await this.refreshCommittedWorkspace(tenantId);
++  async readBusinessContext(tenantId: string, tx?: RentalConfigTx): Promise<BusinessContext> {
++    const snapshot = await this.refreshCommittedWorkspace(tenantId, tx);
+     if (snapshot) {
+       if (!snapshot.businessSettings) throw new ConflictException("经营设置尚未持久化，不能以当前默认值创建业务");
+       return structuredClone({ profile: snapshot.effectiveProfile, category: snapshot.definition, settings: snapshot.businessSettings,
+@@ -1374,10 +1376,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
+   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
+ 
+   async savePricingGroup(tenantId: string, input: SaveRentalPricingGroupRequest, tx?: RentalConfigTx, deferCache = false) {
+-    const state = this.state(tenantId);
+-    const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
++    const transactionContext = tx ? await this.readBusinessContext(tenantId, tx) : undefined;
++    const state = transactionContext ? { ...this.state(tenantId), profile: transactionContext.profile,
++      itemGroups: transactionContext.groups, pricingGroups: transactionContext.pricingGroups ?? [] } : this.state(tenantId);
++    const writeContext = transactionContext ? { definition: transactionContext.category,
++      binding: transactionContext.categoryVersionId !== undefined && transactionContext.categoryAdoptionRevision !== undefined
++        ? { categoryVersionId: transactionContext.categoryVersionId, adoptionRevision: transactionContext.categoryAdoptionRevision }
++        : undefined } : await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("定价分组编码和名称不能为空");
+-    if (input.defaultPricingUnit && !(await this.getBusinessSettings(tenantId)).pricing.enabledUnits.includes(input.defaultPricingUnit)) {
++    if (input.defaultPricingUnit && !(transactionContext?.settings ?? await this.getBusinessSettings(tenantId)).pricing.enabledUnits.includes(input.defaultPricingUnit)) {
+       throw new BadRequestException("定价分组默认计价单位必须是当前品类已启用的计价单位");
+     }
+     if (!input.memberItemGroupIds?.length) throw new BadRequestException("定价分组至少选择一个产品型号");
+diff --git a/apps/api/src/modules/rental-core/rental-core-config.repository.ts b/apps/api/src/modules/rental-core/rental-core-config.repository.ts
+index 2c655e83d..b45cf1706 100644
+--- a/apps/api/src/modules/rental-core/rental-core-config.repository.ts
++++ b/apps/api/src/modules/rental-core/rental-core-config.repository.ts
+@@ -142,7 +142,7 @@ export type RentalQuoteConfigurationFacts = Omit<BusinessContext, 'category'> &
+ 
+ export interface RentalConfigStore {
+   loadAll(): Promise<TenantConfigSnapshot[]>;
+-  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string): Promise<WorkspaceCategoryConfigSnapshot>;
++  loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, tx?: RentalConfigTx): Promise<WorkspaceCategoryConfigSnapshot>;
+   readQuoteConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalQuoteConfigurationFacts>;
+   readReportConfigurationFacts?(tenantId: string, workspaceId: string): Promise<RentalReportConfigurationFacts>;
+   /** Opening-only projection. No cache initialization, bundle/member joins or credentials. */
+@@ -239,8 +239,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
+ 
+   /** One committed definition/configuration combination under adoption's space
+    * mutex. Empty collections are facts; this reader never initializes samples. */
+-  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string): Promise<WorkspaceCategoryConfigSnapshot> {
+-    return this.prisma.$transaction(async tx => {
++  async loadWorkspaceSnapshot(tenantId: string, workspaceId: string, existingTx?: RentalConfigTx): Promise<WorkspaceCategoryConfigSnapshot> {
++    const read = async (tx: RentalConfigTx): Promise<WorkspaceCategoryConfigSnapshot> => {
+       const { definition, binding } = await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+       const where = { tenantId, workspaceId };
+       const [workspace, profile, settings, operators, locations, groups, pricing, coupons, inspections] = await Promise.all([
+@@ -266,7 +266,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
+         pricingGroups: pricing.map(row => this.toPricingGroup({ ...row, members: row.members.map(member => ({ ...member, itemGroup: byId.get(member.itemGroupId)! })) })),
+         couponTemplates: coupons.map(row => this.toCouponTemplate(row)), inspectionTemplates: inspections.map(row => this.toInspectionTemplate(row)),
+         hasPersistedConfig: Boolean(settings || operators.length || locations.length || groups.length || pricing.length || coupons.length || inspections.length) };
+-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
++    };
++    return existingTx ? read(existingTx) : this.prisma.$transaction(read, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+   }
+ 
+   /** Dedicated R0 preparation source. Collections stay normalized; only the
+diff --git a/apps/api/src/modules/rental-core/rental-core.controller.ts b/apps/api/src/modules/rental-core/rental-core.controller.ts
+index bd2244224..75527f286 100644
+--- a/apps/api/src/modules/rental-core/rental-core.controller.ts
++++ b/apps/api/src/modules/rental-core/rental-core.controller.ts
+@@ -593,10 +593,15 @@ export class RentalCoreController {
+   @Get("pricing-groups") async pricingGroups(@Req() req: AuthenticatedRequest) { await this.service.refreshCommittedWorkspace(req.user.tenantId); return this.service.listPricingGroups(req.user.tenantId); }
+   @Post("pricing-groups") async savePricingGroup(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingGroupDto) {
+     const tenantId = req.user.tenantId;
++    // The group and its initial rates must share one intent across every wait.
++    body = structuredClone(body);
+     if (!body.initialRates?.length) throw new BadRequestException("新建定价分组时至少填写一条基本价");
+     const uniqueUnits = new Set(body.initialRates.map((row) => row.unit));
+     if (uniqueUnits.size !== body.initialRates.length) throw new BadRequestException("同一个计价单位只能填写一条基本价");
+ 
++    // Finish independent reads before the write owns the workspace lock. Core
++    // and pricing writes recheck this binding through the same original client.
++    const context = await this.context(tenantId);
+     let group!: Awaited<ReturnType<RentalCoreService["savePricingGroup"]>>;
+     let plan!: Awaited<ReturnType<RentalBusinessService["savePricingPlan"]>>;
+     await this.prisma.$transaction(async (tx) => {
+@@ -606,7 +611,6 @@ export class RentalCoreController {
+         tx,
+         true
+       );
+-      const context = (await this.context(tenantId));
+       const pricingGroups = [group, ...(context.pricingGroups ?? []).filter((row) => row.id !== group.id)];
+       plan = await this.business.savePricingPlan(tenantId, { ...context, pricingGroups }, {
+         code: `BASE-${group.code}-${group.id.slice(-8)}`,
+@@ -636,7 +640,7 @@ export class RentalCoreController {
+           preAuthMultiple: row.preAuthMultiple
+         }))
+       }, req.user.displayName, tx, true);
+-    });
++    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+     this.service.commitPricingGroup(group);
+     this.business.commitPricingPlan(tenantId, { ...(await this.context(tenantId)), pricingGroups: [group, ...this.service.listPricingGroups(tenantId).filter((row) => row.id !== group.id)] }, plan);
+     return this.committed(tenantId, group);
