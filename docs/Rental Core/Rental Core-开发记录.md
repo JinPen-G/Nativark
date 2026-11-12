@@ -4,6 +4,30 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="readiness-original-transaction-20261112"></a>
+
+## 原九项开业来源的同client读取（2026-11-12）
+
+从已推送核GitHub的800a接续，先按PM要求固定reader时间P2为5b51，四份AIN-17原tx源码固定`483b887dc23dd252ecb423806ac5030204c39812`，由本记录同步交付状态。本片沿原Core窗口修改[Core配置仓储](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)、[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)和[原九项读取](../../apps/api/src/modules/rental-core/rental-business.service.ts)；PM另核五个登记树无重叠，仅授权[会员countPlans](../../apps/api/src/modules/platform/membership.service.ts)的原tx参数/计数两行。其他会员/企业政策、Auth、计数范围、算法及入口不改。
+
+readTenantReadiness/readTenantReadinessSource与两仓储readReadinessCoreFacts/readReadinessBusinessFacts追加可选服务器原事务；绑定前后读、范围核对和全部原事实读取透传同client。会员仍统计原tenant总体的方案，含草稿/空方案，不改成workspace计数。未传参数保留原结果和independent_persisted_reads，传入仅标caller_transaction_reads；不声明总修订、快照栅栏或事件已捕获，不新增锁/事务、扫描、配置写入或缓存，原锁序/当前授权与一致性归调用方。
+
+| 原项目 | 保留的实际来源 | 原tx透传 |
+| --- | --- | --- |
+| workspace_profile | 当前workspace品类标量，沿原九项判定；完整档案/设置修订仍由独立开业配置口提供 | Core配置仓储的workspace/范围读 |
+| accounts_roles | 原启用成员与原角色覆盖口径的两次count | 业务仓储readRentalReadinessAccountFacts |
+| fulfillment_network | 原受权地点与已启用履约方count | Core配置仓储 |
+| business_rule | 原最近两条签发规则元数据，保留同时间冲突 | 业务配置仓储 |
+| business_calendar | 原时区/时间边界下的发布年度count | 业务配置仓储 |
+| item_groups | 当前空间启用型号count | Core配置仓储 |
+| pricing_groups_rates | 当前定价组与原启用价格目标引用，不读金额JSON | Core/业务配置仓储均同client |
+| price_version | 原查询时点适用的价格版本引用 | 业务配置仓储 |
+| membership_base | 原租户总体方案count，含草稿/空方案 | MembershipService.countPlans |
+
+API原noEmit退出0，原ai-native-ain08-opening-read.test.cjs 17项全部通过，没有改用例/断言。原fixture限定实际服务/仓储/会员/解析器调用退出0：根连接禁止下观察到workspace、sql、items、locations、pricingGroups、membership、rules、calendars、accounts、priceVersion十类查询，原九项及无写入/缓存保持；旧无tx/legacy不补绑定，原client透传到明确版本正文读取，后继绑定/范围变化及跨租户前置拒绝通过。首次变版断言失败是限定夹具只修改返回副本，保留失败后改为原rows共享修订持有者，不放松生产复核。
+
+源码/规范化hash、命令/输出及原失败唯一见[同client证据](../../output/category-governance/readiness-original-transaction-20261112.json)，audit0、退出暂存/缓存已删除；仅本片改动行规范LF，源码内容不变。查询、权限行和版本正文仍为fixture，真实SQL/隔离/并发/锁及原四入口Outbox参加者未验证/接入。固定后交AI作者消费原client，继续真实counter/资源短缺/参加者、CAT-GOV原08及两个不同动态组合；不重建045/864运行包、不读取环境或迁移，原完整结项0/14不变。
+
 <a id="allocation-pickup-date-fences-20261112"></a>
 
 ## 单资产读取的显式时间复核（2026-11-12）
