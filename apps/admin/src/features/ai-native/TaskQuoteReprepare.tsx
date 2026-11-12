@@ -4,9 +4,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { TaskHumanApproval, type TaskOrderReviewReference } from './TaskHumanApproval';
 import { QuoteReprepare } from './QuoteReprepare';
+import type { AiWorkbenchFieldMaterialDraft } from '@rental-os/shared';
+import type { WorkbenchQuoteParameterReview } from './workbench-input-review-session';
 
-export function TaskQuoteReprepare({ taskId, identity, current, onAccessDenied }: {
+export function TaskQuoteReprepare({ taskId, identity, current, onAccessDenied, parameterReview,
+  revalidateParameters, onParameterReviewed }: {
   taskId: string; identity: string; current(): boolean; onAccessDenied(): void;
+  parameterReview?: WorkbenchQuoteParameterReview | null;
+  revalidateParameters?(review: WorkbenchQuoteParameterReview, signal: AbortSignal): Promise<AiWorkbenchFieldMaterialDraft>;
+  onParameterReviewed?(status: 'adopted' | 'conflict'): void;
 }) {
   const [source, setSource] = useState<{ owner: string; value: TaskOrderReviewReference } | null>(null);
   const owner = JSON.stringify([identity, taskId]);
@@ -24,7 +30,11 @@ export function TaskQuoteReprepare({ taskId, identity, current, onAccessDenied }
         setSource(value?.taskId === taskId && value.selection ? { owner, value: structuredClone(value) } : null);
       }} />
     {active() && source?.owner === owner && source.value.selection && source.value.taskId === taskId && <QuoteReprepare
-      key={JSON.stringify([owner, source.value.selection, source.value.original])} selection={source.value.selection}
+      key={JSON.stringify([owner, source.value.selection.draftVersion, source.value.selection.taskId,
+        source.value.selection.runId, source.value.selection.selectionId, source.value.selection.originalInputRef, source.value.selection.inputHash])}
+      selection={source.value.selection}
+      parameterReview={parameterReview?.candidate.binding.taskId === taskId ? parameterReview : null}
+      revalidateParameters={revalidateParameters} onParameterReviewed={onParameterReviewed}
       original={source.value.original} showOriginalApproval={false} identity={identity} current={active} onAccessDenied={onAccessDenied} />}
   </>;
 }

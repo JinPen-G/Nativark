@@ -31,7 +31,8 @@ import { TaskCancellation } from "./TaskCancellation";
 import { TaskClarification } from "./TaskClarification";
 import { VisibleObservationHost } from './VisibleObservationHost';
 import { ConversationHistory } from './ConversationHistory';
-import { WorkbenchInputReviewSession } from './workbench-input-review-session';
+import { WorkbenchInputReviewSession, type WorkbenchQuoteParameterReview } from './workbench-input-review-session';
+import { displaySame } from './workbench-display-host';
 import { TaskWorkbenchModelControlProvider } from './TaskWorkbenchModelControls';
 import { readWorkbenchControlResult } from './workbench-model-control-session';
 import type { AiWorkbenchModelControlObservation } from '@rental-os/shared';
@@ -97,18 +98,31 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   }), [identity, selected, readAccessEpoch]);
   const inputReview = useMemo(() => new WorkbenchInputReviewSession({ readQuestion: aiTaskCenterApi.input },
     () => selected !== null && selectedOwner.current === selected && identityKey() === identity
-      && !!useAuthStore.getState().token && !document.hidden), [identity, selected]);
+      && readAccessOwner.current === readAccessEpoch && !!useAuthStore.getState().token && !document.hidden), [identity, selected, readAccessEpoch]);
   const inputReviewState = useSyncExternalStore(inputReview.subscribe, inputReview.snapshot, inputReview.snapshot);
   useEffect(() => { inputReview.activate(); return () => inputReview.dispose(); }, [inputReview]);
   const displayPort = useMemo(() => createAiWorkbenchDisplayPort({ tenantId, workspaceId,
     current: () => identityKey() === identity && !!useAuthStore.getState().token && !document.hidden,
     reviewCandidate: async (candidate, fields, signal) => {
       if (!selected || selectedOwner.current !== selected || candidate.binding.taskId !== selected) throw Error('AI_SCOPE_CHANGED');
-      await inputReview.reviewCandidate(candidate, fields, signal);
+      const review = await inputReview.reviewCandidate(candidate, fields, signal);
       if (signal.aborted || selectedOwner.current !== selected || !current()) throw Error('AI_SCOPE_CHANGED');
-      setDetailSections(sections => sections.includes('input') ? sections : [...sections, 'input']);
+      const section = 'kind' in review && review.kind === 'quote_parameters' ? 'approval' : 'input';
+      setDetailSections(sections => sections.includes(section) ? sections : [...sections, section]);
     } }), [identity, tenantId, workspaceId, inputReview, selected]);
   useEffect(() => { displayPort.activate(); return () => displayPort.dispose(); }, [displayPort]);
+  const revalidateParameters = useCallback(async (review: WorkbenchQuoteParameterReview, signal: AbortSignal) => {
+    const same = () => selected !== null && selectedOwner.current === selected && review.candidate.binding.taskId === selected
+      && current() && !signal.aborted && displaySame(inputReview.snapshot().parameters, review);
+    if (!same()) throw Error('AI_SCOPE_CHANGED');
+    if (!displayPort.reviewCandidate) throw Error('AI_RESOURCE_UNAVAILABLE');
+    // The original display port revalidates its retained source and field
+    // witness before publishing a fresh candidate review to this owner.
+    await displayPort.reviewCandidate(structuredClone(review.candidate), signal);
+    const updated = inputReview.snapshot().parameters;
+    if (!same() || !updated) throw Error('AI_SCOPE_CHANGED');
+    return structuredClone(updated.fieldMaterial);
+  }, [identity, selected, inputReview, displayPort]);
   const query = useQuery({ queryKey: ["ai-task-center", identity, status, cursors[page - 1]], enabled: opened && visible,
     // One explicit refresh. No ambient query polling creates AI activity.
     retry: false, refetchInterval: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
@@ -272,6 +286,8 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
               onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
           { key: 'approval', title: t('人工确认'), content: data.items.find(row => row.taskId === selected)?.sceneCode === 'quote_clarification'
             ? <TaskQuoteReprepare key={`quote-review:${identity}:${selected}`} taskId={selected} identity={identity} current={current}
+              parameterReview={inputReviewState.parameters} revalidateParameters={revalidateParameters}
+              onParameterReviewed={status => { if (status === 'adopted') inputReview.clear(); }}
               onAccessDenied={() => { setSelected(null); setOpened(false); }} />
             : <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
               onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },

@@ -4,6 +4,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { AI_WORKBENCH_CONTEXT_DRAFT_VERSION,
   type AiExecutionContext, type AiFactReference, type AiSceneQuoteCandidate,
+  type AiTaskInputContractDraft, type AiTaskInputAnswerDraft,
   type AiWorkbenchFieldMaterialDraft, type AiWorkbenchMaterialBindingDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { originalQuoteAnswerContract } from './scenes/original-quote-input';
@@ -23,6 +24,8 @@ export interface WorkbenchQuoteFieldInput {
 }
 interface OriginalQuotePreparationSource {
   prepare(candidate: unknown, expectedContext?: AiExecutionContext): Promise<unknown>;
+  prepareWorkbenchFields?(candidate: unknown, expectedContext?: AiExecutionContext): Promise<{
+    preparation: unknown; editableContract: AiTaskInputContractDraft | null; defaults: AiTaskInputAnswerDraft[] }>;
 }
 const editable = new Set(['quantity', 'starts_at', 'ends_at', 'pickup_location', 'return_location']);
 const hash = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value);
@@ -49,7 +52,7 @@ export class AiWorkbenchFieldMaterialService {
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw unavailable();
     return now;
   }
-  async prepare(value: WorkbenchQuoteFieldInput): Promise<AiWorkbenchFieldMaterialDraft | null> {
+  async prepare(value: WorkbenchQuoteFieldInput, originalQuestionProjection = false): Promise<AiWorkbenchFieldMaterialDraft | null> {
     // Keep the same enclosing principal and candidate through the original
     // asynchronous reads; caller mutation cannot supply a different closing basis.
     const input = structuredClone(value), { context, binding, retention } = input, now = this.now();
@@ -62,7 +65,9 @@ export class AiWorkbenchFieldMaterialService {
       || !Array.isArray(input.sources) || input.sources.length > 50) throw denied();
     const parsed = aiQuoteCandidateInputSchema.safeParse(input.candidate);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const prepared = await this.source.prepare(structuredClone(parsed.data), structuredClone(context));
+    const projection = !originalQuestionProjection && this.source.prepareWorkbenchFields
+      ? await this.source.prepareWorkbenchFields(structuredClone(parsed.data), structuredClone(context)) : null;
+    const prepared = projection ? projection.preparation : await this.source.prepare(structuredClone(parsed.data), structuredClone(context));
     if (!prepared || typeof prepared !== 'object' || Array.isArray(prepared)) throw unavailable();
     const result = prepared as { status?: unknown; selectionRevision?: unknown };
     if (result.status === 'unavailable') return null;
@@ -70,7 +75,9 @@ export class AiWorkbenchFieldMaterialService {
     // Without the original selection revision there is no independently
     // reproducible field basis. A syntactically valid candidate is insufficient.
     if (!hash(result.selectionRevision)) return null;
-    const original = originalQuoteAnswerContract(parsed.data, prepared, '请在原输入控件核对其余条件。');
+    const original = projection?.editableContract ?? originalQuoteAnswerContract(parsed.data, prepared, '请在原输入控件核对其余条件。');
+    if (projection?.editableContract && (original.code !== 'original_quote_editable_parameters'
+      || original.version !== result.selectionRevision)) throw denied();
     const fields = original.fields.filter(field => editable.has(field.fieldId));
     if (!fields.length) return null;
     const references = input.sources.filter(source => source?.resourceType === 'configuration'
@@ -81,11 +88,14 @@ export class AiWorkbenchFieldMaterialService {
     const reference = references[0], sourceId = requestFingerprint(reference);
     const material: AiWorkbenchFieldMaterialDraft = {
       draftVersion: AI_WORKBENCH_CONTEXT_DRAFT_VERSION, binding, fieldRevision: input.fieldRevision,
-      // This is explicitly a safe projection. The human consumer must retain
-      // and re-read its actual complete question, including any other fields.
+      // Missing-input fields retain their complete original question. Complete
+      // editable fields belong to linked reprepare and mint no input receipt.
       contract: { ...original, fields },
-      fields: fields.map(field => ({ fieldId: field.fieldId, editable: true, sourceId,
-        defaultValue: { status: 'unavailable' as const } })),
+      fields: fields.map(field => {
+        const current = projection?.defaults.find(value => value.fieldId === field.fieldId);
+        return { fieldId: field.fieldId, editable: true, sourceId,
+          defaultValue: current ? { status: 'provided' as const, value: current.value } : { status: 'unavailable' as const } };
+      }),
       sources: [{ sourceId, reference }], retention,
       authority: 'original_business_rules_not_model_rules',
     };
@@ -97,7 +107,9 @@ export class AiWorkbenchFieldMaterialService {
     if (!isDeepStrictEqual(input.binding, original.binding) || input.fieldRevision !== original.fieldRevision) throw denied();
     // Call the real original preparation again. Returning the stored field
     // packet by itself would turn historical material into current authority.
-    const current = await this.prepare(input);
+    // Retained question witnesses keep their original narrow projection when
+    // the server gains a separate complete-condition editing projection.
+    const current = await this.prepare(input, original.contract?.code !== 'original_quote_editable_parameters');
     if (!current) throw unavailable();
     // A fresh read has its own observation time. It must prove the same
     // configuration, rules and retention without relabeling the old witness

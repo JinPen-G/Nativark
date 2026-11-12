@@ -2,7 +2,7 @@
  * Only server-reviewed quotations are compared; uncertainty reads the original
  * receipt, and the replacement still requires its own approval and execution. */
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { AiApprovalApplicationReferenceDraft, AiQuoteSelectionProofDraft } from '@rental-os/shared';
+import type { AiApprovalApplicationReferenceDraft, AiQuoteSelectionProofDraft, AiWorkbenchFieldMaterialDraft } from '@rental-os/shared';
 import { aiQuoteSelectionsApi } from '@/api/aiQuoteSelections';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { ActionButton, Alert, ConfirmAction, Select } from '@/components/ui';
@@ -14,13 +14,19 @@ import { safeDisplayText } from './safe-display';
 import { QuoteCandidateFields } from './QuoteCandidateFields';
 import { useAuthStore } from '@/features/auth/authStore';
 import { currentSessionEpoch } from '@/app/queryClient';
+import type { WorkbenchQuoteParameterReview } from './workbench-input-review-session';
 
-export function QuoteReprepare({ selection, identity, current, onAccessDenied, original, showOriginalApproval = true }: {
+export function QuoteReprepare({ selection, identity, current, onAccessDenied, original, showOriginalApproval = true,
+  parameterReview, revalidateParameters, onParameterReviewed }: {
   selection: AiQuoteSelectionProofDraft; identity: string; current: () => boolean; onAccessDenied: () => void;
   original?: AiApprovalApplicationReferenceDraft | null; showOriginalApproval?: boolean;
+  parameterReview?: WorkbenchQuoteParameterReview | null;
+  revalidateParameters?(review: WorkbenchQuoteParameterReview, signal: AbortSignal): Promise<AiWorkbenchFieldMaterialDraft>;
+  onParameterReviewed?(status: 'adopted' | 'conflict'): void;
 }) {
   const { t } = useAiManagementLocale(), labelId = useId(), auth = useAuthStore();
-  const epoch = currentSessionEpoch(), owner = JSON.stringify([identity, selection, auth.user, auth.currentWorkspaceId, epoch]);
+  const epoch = currentSessionEpoch(), owner = JSON.stringify([identity, selection.draftVersion, selection.taskId,
+    selection.runId, selection.selectionId, selection.originalInputRef, selection.inputHash, auth.user, auth.currentWorkspaceId, epoch]);
   const key = `ai-quote-reprepare:${identity}:${selection.selectionId}`;
   const storage = useMemo(() => {
     try { return window.sessionStorage; } catch { return undefined; }
@@ -30,13 +36,17 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied, o
   });
   const [selected, setSelected] = useState<string | null>(null), [message, setMessage] = useState<string | null>(null);
   const effectiveReference = original === undefined ? reference : original;
-  const scope = useRef({ owner, reference, current, onAccessDenied });
-  scope.current = { owner, reference: effectiveReference, current, onAccessDenied };
+  const scope = useRef({ owner, reference: effectiveReference, current, onAccessDenied, parameterReview, revalidateParameters, onParameterReviewed });
+  scope.current = { owner, reference: effectiveReference, current, onAccessDenied, parameterReview, revalidateParameters, onParameterReviewed };
   const active = () => scope.current.owner === owner && epoch === currentSessionEpoch() && !document.hidden && scope.current.current();
   const session = useMemo(() => new QuoteReprepareSession(selection,
     { ...aiQuoteSelectionsApi, list: aiTaskCenterApi.list }, active, () => scope.current.reference, storage, key), [owner]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
-  const materials = useMemo(() => new QuoteRequestReissueSession(selection, aiQuoteSelectionsApi, active,
+  const materials = useMemo(() => new QuoteRequestReissueSession(selection, { ...aiQuoteSelectionsApi,
+    revalidateParameters: async (review, signal) => {
+      if (!scope.current.revalidateParameters) throw Error('AI_RESOURCE_UNAVAILABLE');
+      return scope.current.revalidateParameters(review, signal);
+    } }, active,
     () => scope.current.reference, { tenantId: auth.tenant?.tenantId ?? '', workspaceId: auth.currentWorkspaceId ?? '' }, storage,
     `ai-quote-linked-request:${JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, selection.selectionId])}`), [owner]);
   const materialState = useSyncExternalStore(materials.subscribe, materials.snapshot, materials.snapshot);
@@ -44,8 +54,10 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied, o
   useEffect(() => { materials.activate(); return () => materials.dispose(); }, [materials]);
   const sourceRevision = JSON.stringify(original);
   useEffect(() => {
-    if (original !== undefined) { session.retract(); materials.retract(); setSelected(null); setMessage(null); }
+    if (original !== undefined) { session.retract(); materials.retract(true); setSelected(null); setMessage(null); }
   }, [session, materials, sourceRevision]);
+  const parameterRevision = JSON.stringify(parameterReview);
+  useEffect(() => { materials.clearConditionPreview(); }, [materials, parameterRevision]);
   useEffect(() => {
     const retract = () => { session.retract(); materials.retract(); setSelected(null); setMessage(null); };
     document.addEventListener('visibilitychange', retract);
@@ -87,11 +99,23 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied, o
       <p className="muted">{t('旧提案拒绝或失效后，可选择已准备的新报价重新提交审批。')}</p>
       <section aria-label={t('按新条件准备报价')} aria-busy={materialState.busy}>
         <div className="panel-toolbar">
+          {parameterReview?.candidate.binding.taskId === selection.taskId && <ConfirmAction label={t('采用候选租赁条件')}
+            disabled={busy || state.locked || !!materialState.phase || materialState.unknown || materialState.invalid
+              || !effectiveReference || !canCreate || !revalidateParameters || Date.parse(parameterReview.expiresAt) <= Date.now()}
+            prompt={t('将已核对候选填入新条件？已填写的合法输入会保留，关联请求、Core 报价、选单和新批准仍需分别确认。')}
+            onConfirm={() => run(async () => {
+              const review = scope.current.parameterReview;
+              if (!review) throw Error('AI_RESOURCE_UNAVAILABLE');
+              await materials.adoptParameters(review, () => scope.current.parameterReview ?? null);
+              if (active()) scope.current.onParameterReviewed?.(materials.snapshot().parameterFeedback ?? 'conflict');
+            })} />}
           {materialState.phase ? <ActionButton label={t('核对原新材料操作')} disabled={busy || materialState.invalid}
             onAction={() => run(materials.reconcile)} /> : <ActionButton label={t('输入新的租赁条件')}
             disabled={busy || state.locked || !effectiveReference || !canCreate || materialState.invalid} onAction={() => run(materials.prepareConditions)} />}
         </div>
         {materialState.invalid && <Alert type="warning" title={t('原新材料定位不可读取，不能重新发起。')} />}
+        {materialState.parameterFeedback === 'conflict' && <Alert type="warning"
+          title={t('候选与已填写内容不同；已保留原输入，请逐项核对。')} />}
         {materialState.candidate && !materialState.phase && <>
           <QuoteCandidateFields value={materialState.candidate} preparation={conditions} disabled={busy || state.locked || !canCreate}
             onChange={value => materials.editConditions(value)} />
