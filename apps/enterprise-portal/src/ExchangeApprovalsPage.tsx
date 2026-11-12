@@ -206,7 +206,7 @@ function ExchangeReview({ row, reviewMode, unavailable, operation, refresh }: {
       <dt>{english ? "Replacement item" : "替换商品"}</dt><dd>{row.preview.replacementItemGroupName}</dd>
       <dt>{english ? "Price basis" : "价格依据"}</dt><dd>{row.exchange.priceBasis === "original_order_price" ? english ? "Original order price" : "原订单价格" : english ? "Replacement current price" : "替换商品当前价格"}</dd>
       <dt>{english ? "Original / replacement amount" : "原商品／新商品金额"}</dt><dd>{money(row.preview.originalAmount)} / {money(row.preview.replacementAmount)}</dd>
-      <dt>{english ? "Added enterprise spending" : "新增企业支出"}</dt><dd>{money(row.preview.additionalAmount)}</dd>
+      <dt>{english ? "Added rental charges" : "新增租赁费用"}</dt><dd>{money(row.preview.additionalAmount)}</dd>
       <dt>{english ? "Refund for review" : "待审核核减"}</dt><dd>{money(row.preview.refundAmount)}</dd>
       <dt>{english ? "Deposit / preauthorization delta" : "押金／预授权差额"}</dt><dd>{money(row.preview.depositDelta)} / {money(row.preview.preAuthDelta)}</dd>
       <dt>{english ? "Request expires" : "申请有效期"}</dt><dd>{time(row.expiresAt)}</dd>

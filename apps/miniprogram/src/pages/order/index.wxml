@@ -111,7 +111,7 @@
           <view class="cell__body">
             <view class="cell__title">{{item.items}}</view>
             <view class="mt-8"><status-tag label="{{item.stateLabel}}" tone="{{item.tone}}"></status-tag></view>
-            <view class="cell__desc">新增支出 {{item.amount}}</view>
+            <view class="cell__desc">新增租赁费用 {{item.amount}}</view>
             <view class="cell__desc">押金差额 {{item.deposit}} · 预授权差额 {{item.preAuth}}</view>
             <view class="cell__desc">批准有效期 {{item.expires}}</view>
             <view class="cell__desc">用途：{{item.reason}}</view>
@@ -169,7 +169,7 @@
 
     <sheet visible="{{showExchangeConsent}}" title="核对本次换货费用" closable="{{!exchangeConfirming}}" footer="{{true}}" bind:close="onCloseExchangeConsent">
       <view class="kv"><view class="kv__label">原商品／替换商品</view><view class="kv__value">{{exchangeConsentTarget.items}}</view></view>
-      <view class="kv"><view class="kv__label">新增支出</view><view class="kv__value">{{exchangeConsentTarget.amount}}</view></view>
+      <view class="kv"><view class="kv__label">新增租赁费用</view><view class="kv__value">{{exchangeConsentTarget.amount}}</view></view>
       <view class="kv"><view class="kv__label">押金／预授权差额</view><view class="kv__value">{{exchangeConsentTarget.deposit}} / {{exchangeConsentTarget.preAuth}}</view></view>
       <view class="kv"><view class="kv__label">有效期</view><view class="kv__value">{{exchangeConsentTarget.expires}}</view></view>
       <view class="notice notice--neutral mt-16">仅同意本次已批准费用，不确认商户检查、不收付款、不执行换货；未知结果只能按原键核对。</view>

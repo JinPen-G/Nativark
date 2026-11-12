@@ -73,7 +73,7 @@ export function EnterpriseExchangeProgress({ orderId, identity, english }: { ord
       <h3>{row.preview.originalItemGroupName} — {row.preview.replacementItemGroupName}</h3>
       <dl className="spec-list">
         <div><dt>{english ? 'Request state' : '申请状态'}</dt><dd>{state(row)}</dd></div>
-        <div><dt>{english ? 'Added spending' : '新增支出'}</dt><dd>{money(row.preview.additionalAmount, row.preview.currency)}</dd></div>
+        <div><dt>{english ? 'Added rental charges' : '新增租赁费用'}</dt><dd>{money(row.preview.additionalAmount, row.preview.currency)}</dd></div>
         <div><dt>{english ? 'Deposit / preauthorization delta' : '押金／预授权差额'}</dt><dd>{money(row.preview.depositDelta, row.preview.currency)} / {money(row.preview.preAuthDelta, row.preview.currency)}</dd></div>
         <div><dt>{english ? 'Approval expires' : '批准有效期'}</dt><dd>{time(row.expiresAt)}</dd></div>
         <div><dt>{english ? 'Purpose' : '原用途'}</dt><dd>{row.reason}</dd></div>

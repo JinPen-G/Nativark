@@ -305,7 +305,9 @@ export class EnterpriseExchangeApprovalService {
     if (!catalog.items.some(item => item.id === intent.replacementItemGroupId)) throw new ForbiddenException("替换商品未向当前客户空间开放");
     const { preview } = await this.prices.preview(context.tenantId, orderId, intent, tx);
     if (!hasOriginalRentalCurrency(order.currency, preview.currency)) throw new ConflictException("换货币种与原订单不一致或缺失，须核对原币种后重新试算与审批");
-    if (!(preview.additionalAmount > 0) || !Number.isFinite(preview.additionalAmount) || !preview.exchange?.executionBasis) throw new ConflictException("此接点仅申请真实新增换货支出，缺原试算依据不放行");
+    // 押金或预授权增加同样需要本次批准，金额上限继续沿新增租赁费用核对。
+    const obligations = [preview.additionalAmount, preview.depositDelta, preview.preAuthDelta];
+    if (!obligations.every(Number.isFinite) || !obligations.some(amount => amount > 0) || !preview.exchange?.executionBasis) throw new ConflictException("此接点仅申请真实新增换货支出，缺原试算依据不放行");
     const snapshot = order.membershipSnapshot!;
     await this.policies.assertQuoteAmount(context.tenantId, snapshot.corporateCustomerId!, snapshot.corporateMembershipId!, { payableAmount: preview.additionalAmount, currency: preview.currency }, tx);
     return { order, basis, preview };
