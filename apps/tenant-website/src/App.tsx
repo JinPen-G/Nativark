@@ -4,13 +4,11 @@ import { SiteProvider, useSite } from './SiteContext';
 import { AuthProvider } from './AuthContext';
 import { SiteLayout } from './components/SiteLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { RouteTransition } from './components/RouteTransition';
-import { RouteProgress } from './components/RouteProgress';
 import { ToastProvider } from './components/Toast';
 import { BookingHandoffBridge } from './features/ai-native/BookingHandoffBridge';
 
 // 路由级分包：首屏只加载首页所需代码，其余页面按需加载，减小初始包体。
-const HomePageV2 = lazy(() => import('./pages/HomePageV2').then(m => ({ default: m.HomePageV2 })));
+const HomePage = lazy(() => import('./pages/HomePage').then(m => ({ default: m.HomePage })));
 const ProductsPage = lazy(() => import('./pages/ProductsPage').then(m => ({ default: m.ProductsPage })));
 const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage').then(m => ({ default: m.ProductDetailPage })));
 const BookingPage = lazy(() => import('./pages/BookingPage').then(m => ({ default: m.BookingPage })));
@@ -37,13 +35,11 @@ function RouteFallback() {
 
 export function App() {
   return <BrowserRouter><SiteProvider><AuthProvider><ToastProvider>
-    <RouteProgress />
     <SiteLayout>
       <ErrorBoundary>
-        <RouteTransition>
-          {location => <Suspense fallback={<RouteFallback />}>
-            <Routes location={location}>
-              <Route path="/" element={<HomePageV2 />} />
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/category/:categoryId" element={<ProductsPage />} />
               <Route path="/product/:productId" element={<ProductDetailPage />} />
@@ -59,8 +55,7 @@ export function App() {
               <Route path="/privacy" element={<DocumentPage kind="privacy_policy" />} />
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
-          </Suspense>}
-        </RouteTransition>
+          </Suspense>
       </ErrorBoundary>
     </SiteLayout>
   </ToastProvider></AuthProvider></SiteProvider></BrowserRouter>;
