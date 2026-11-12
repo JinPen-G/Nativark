@@ -155,16 +155,16 @@ export class EnterpriseManagementRequestService {
     context = Object.freeze({ ...context });
     if (receipt?.corporateCustomerId !== corporateId || receipt.workspaceId !== context.workspaceId) throw new ForbiddenException("原回款申请企业或空间不一致");
     const db = this.prisma as unknown as Prisma.TransactionClient, before = await this.proofs.customer(context, corporateId, db);
-    const evidence = await this.prisma.$transaction(tx => this.proofs.verify(context.tenantId, context.customerId, receipt, tx), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const evidence = await this.prisma.$transaction(tx => this.proofs.readOriginal(context.tenantId, context.customerId, receipt, tx), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (await this.proofs.customer(context, corporateId, db) !== before) throw new ForbiddenException("原回款申请读取期间权限已变化");
     return evidence;
   }
 
-  private async merchantProof(user: SystemUserRow, applicant: string, receipt: PaymentProofReceipt, authorization?: string, tx?: Prisma.TransactionClient) {
+  private async merchantProof(user: SystemUserRow, applicant: string, receipt: PaymentProofReceipt, authorization?: string, tx?: Prisma.TransactionClient, mode: "current_version" | "original_receipt" = "current_version") {
     if (!receipt) throw new ConflictException("原回款申请缺少订单与凭证绑定");
     const before = await this.proofs.merchant(authorization, user, receipt.workspaceId);
-    const evidence = tx ? await this.proofs.verify(user.tenantId, applicant, receipt, tx)
-      : await this.prisma.$transaction(db => this.proofs.verify(user.tenantId, applicant, receipt, db), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    const verify = (db: Prisma.TransactionClient) => mode === "original_receipt" ? this.proofs.readOriginal(user.tenantId, applicant, receipt, db) : this.proofs.verify(user.tenantId, applicant, receipt, db);
+    const evidence = tx ? await verify(tx) : await this.prisma.$transaction(verify, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     if (await this.proofs.merchant(authorization, user, receipt.workspaceId) !== before) throw new ForbiddenException("原回款申请核对期间商户权限已变化");
     return evidence;
   }
@@ -177,8 +177,8 @@ export class EnterpriseManagementRequestService {
       || source.purpose !== data.proposal.paymentPurpose || JSON.stringify(source.evidenceFileIds) !== JSON.stringify(data.evidenceFileIds)) throw new ConflictException("原回款申请材料与持久绑定不一致");
     return source;
   }
-  /** Legacy proposals recover the exact own receipt. Rental-fee evidence also
-   * rechecks current order/financial admission against its original saved binding. */
+  /** Legacy proposals recover the exact own receipt. Rental-fee evidence retains
+   * the saved version and rechecks current subjects, financial access and frozen files. */
   async readSave(context: ClientRequestContext, corporateId: string, key: string): Promise<EnterpriseOperationResult> {
     if (typeof corporateId !== "string" || !corporateId.trim() || corporateId.length > 191
       || typeof key !== "string" || !key.trim() || key.length > 128) throw new BadRequestException("原管理申请企业或保存操作键无效");
@@ -256,16 +256,30 @@ export class EnterpriseManagementRequestService {
     const rows = await this.prisma.$queryRaw<Row[]>`SELECT * FROM enterprise_workflow_requests WHERE tenantId=${context.tenantId} AND applicantCustomerId=${context.customerId} AND kind='finance_request' ORDER BY createdAt DESC LIMIT 201`;
     if (rows.length > 200) throw new ConflictException("本人申请超出有界范围");
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
-    const result: EnterpriseManagementRequestView[] = [];
+    let result: EnterpriseManagementRequestView[] = [];
     for (const row of rows) {
       const view = this.view(row);
       if (view.requestType === "payment_proof") {
         if (view.proposal.workspaceId !== context.workspaceId) continue;
         try { await this.customerProof(context, view.corporateCustomerId, this.storedProof(row)); }
-        catch (error) { if (error instanceof ForbiddenException) continue; throw error; }
+        catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException || error instanceof ConflictException || error instanceof BadRequestException) continue;
+          throw error;
+        }
       }
       result.push(view);
     }
+    // A later row can observe revoked corporate authority. Remove that
+    // company's earlier proof rows before publishing the combined list.
+    const corporates = new Set(result.filter(row => row.requestType === "payment_proof").map(row => row.corporateCustomerId));
+    for (const corporateId of corporates) {
+      try { await this.proofs.customer(context, corporateId, this.prisma as unknown as Prisma.TransactionClient); }
+      catch (error) {
+        if (!(error instanceof ForbiddenException)) throw error;
+        result = result.filter(row => row.requestType !== "payment_proof" || row.corporateCustomerId !== corporateId);
+      }
+    }
+    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
     return result;
   }
   async withdraw(context: ClientRequestContext, id: string, input: EnterpriseChangeRequest) {
@@ -328,7 +342,7 @@ export class EnterpriseManagementRequestService {
     if (!view.evidenceFileIds.includes(fileId)) throw new ForbiddenException("附件不属于此申请");
     let proofFile: { orderId: string; workspaceId: string; contentHash: string } | undefined;
     if (view.requestType === "payment_proof") {
-      const proof = this.storedProof(row), evidence = await this.merchantProof(user, row.applicantCustomerId, proof, authorization);
+      const proof = this.storedProof(row), evidence = await this.merchantProof(user, row.applicantCustomerId, proof, authorization, undefined, "original_receipt");
       const file = evidence.files.find(file => file.id === fileId);
       if (!file) throw new ForbiddenException("原回款凭证不属于此申请");
       proofFile = { orderId: proof.orderId, workspaceId: proof.workspaceId, contentHash: file.contentHash };
@@ -367,10 +381,16 @@ export class EnterpriseManagementRequestService {
       this.merchant(user, type);
       if (type === "payment_proof") {
         if (enterpriseJson(row.payload).proposal.workspaceId !== getRequestIdentity()?.workspaceId) continue;
-        await this.merchantProof(user, row.applicantCustomerId, this.storedProof(row), authorization);
+        try { await this.merchantProof(user, row.applicantCustomerId, this.storedProof(row), authorization, undefined, "original_receipt"); }
+        catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException || error instanceof ConflictException || error instanceof BadRequestException) continue;
+          throw error;
+        }
       }
       result.push(this.view(row));
     }
+    if (result.some(row => row.requestType === "payment_proof")) await this.proofs.merchant(authorization, user, getRequestIdentity()?.workspaceId ?? "");
+    this.merchant(user);
     return result;
   }
   /** Read this operator's original review only. The immutable stored request type
@@ -402,7 +422,7 @@ export class EnterpriseManagementRequestService {
     if (row.requestType === "payment_proof" || result.paymentProof !== undefined) {
       const proof = result.paymentProof as PaymentProofReceipt | undefined;
       if (row.requestType !== "payment_proof" || !proof || proof.corporateCustomerId !== row.corporateCustomerId || !row.applicantCustomerId) throw unavailable();
-      await this.merchantProof(user, row.applicantCustomerId, proof, authorization);
+      await this.merchantProof(user, row.applicantCustomerId, proof, authorization, undefined, "original_receipt");
     }
     return { state: "committed", result: { corporateCustomerId: row.corporateCustomerId, requestType: row.requestType, id, state: result.state, revision: result.revision, effect: "review_only_no_business_change" } };
   }

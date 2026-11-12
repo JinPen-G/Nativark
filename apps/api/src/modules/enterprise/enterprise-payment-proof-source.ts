@@ -122,9 +122,19 @@ export class EnterprisePaymentProofSource {
   }
 
   async verify(tenantId: string, applicant: string, receipt: PaymentProofReceipt, tx: Prisma.TransactionClient) {
+    return this.verifyReceipt(tenantId, applicant, receipt, tx, true);
+  }
+
+  /** Historical metadata retains the saved revision while current subjects,
+   * workspace, currency and frozen-file access still qualify the reader. */
+  async readOriginal(tenantId: string, applicant: string, receipt: PaymentProofReceipt, tx: Prisma.TransactionClient) {
+    return this.verifyReceipt(tenantId, applicant, receipt, tx, false);
+  }
+
+  private async verifyReceipt(tenantId: string, applicant: string, receipt: PaymentProofReceipt, tx: Prisma.TransactionClient, requireCurrentOrderRevision: boolean) {
     this.receipt(receipt);
     const order = await this.orders.financialRequestOrder(tenantId, receipt.corporateCustomerId, receipt.workspaceId, receipt.orderId, tx);
-    if (order.objectRevision !== receipt.objectRevision || order.currency !== receipt.currency) throw this.commands.conflict();
+    if ((requireCurrentOrderRevision && order.objectRevision !== receipt.objectRevision) || order.currency !== receipt.currency) throw this.commands.conflict();
     const evidence = await this.files(tenantId, applicant, receipt, receipt.evidenceFileIds, tx);
     if (evidence.evidenceHash !== receipt.evidenceHash) throw new ConflictException("原回款申请的凭证绑定已变化");
     return evidence;
