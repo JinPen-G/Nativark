@@ -244,6 +244,15 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       return { resume: original.resume.bind(original), continueAnswer: original.continueAnswer.bind(original) };
     };
     return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, performanceDb: db, visibleDb: db, originalResults,
+      originalModelControls: { async readOperation(request, value, signal) {
+        let controls: ReturnType<typeof composeWorkbenchModelControlRequests> | undefined;
+        try { controls = moduleRef?.get(AI_WORKBENCH_MODEL_CONTROL_REQUESTS, { strict: false }); }
+        catch { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }
+        if (typeof controls?.consume !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        // Resolve the standard original-operation reader lazily. Recording a
+        // browser observation must never build or resume a model host.
+        return controls.consume(request, 'model-control-read', value, signal);
+      } },
       business: { db, selectedOrderResult, originalOrder: { db, auth, guard, subscriptions, core } },
       originalInputs: { readInput: originalResults.readInput.bind(originalResults),
         readAnswer: originalResults.readAnswer.bind(originalResults),

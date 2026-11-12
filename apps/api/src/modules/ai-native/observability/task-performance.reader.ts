@@ -62,7 +62,9 @@ export class TaskPerformanceReader {
     const authorize = async (taskId: string, operation: 'read_metadata' | 'read_step_terminal') => {
       try {
         const context = structuredClone(await this.actions.resolve(taskId, operation));
-        aiTaskAccessFromContext(context, taskId, now);
+        // Authorization completes after the observation window is captured.
+        // Validate its current time without widening that original log window.
+        aiTaskAccessFromContext(context, taskId, this.clock());
         return context;
       } catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
     };
@@ -83,7 +85,7 @@ export class TaskPerformanceReader {
         const stable = identity(context);
         if (sampleIdentity !== undefined && stable !== sampleIdentity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         sampleIdentity = stable;
-        const access = aiTaskAccessFromContext(context, taskId, now);
+        const access = aiTaskAccessFromContext(context, taskId, this.clock());
         const task = structuredClone(await db.aiTask.findFirst({ where: access.where, select: taskSelect }));
         const status = task && AI_TASK_STATUSES_DRAFT.find(status => status === task.status.toLowerCase());
         if (!task || task.id !== taskId || !status || !revision(task.revision) || !task.scopeId
@@ -171,7 +173,7 @@ export class TaskPerformanceReader {
       const visibleNow = this.clock(); time(visibleNow);
       if (clientSourceBinding) {
         const visibleContext = await this.actions.resolve(command.taskId, 'read_step_terminal');
-        aiTaskAccessFromContext(visibleContext, command.taskId, visibleNow);
+        aiTaskAccessFromContext(visibleContext, command.taskId, this.clock());
         if (identity(visibleContext) !== identity(before)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       }
       const readVisibleLogs = () => clientSourceBinding ? this.db.operationLog.findMany({ where: {

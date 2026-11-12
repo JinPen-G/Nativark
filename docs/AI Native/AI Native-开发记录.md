@@ -6,6 +6,25 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-model-control-visible-20261113"></a>
+## 原模型控制新 Run 的首字观察与推进时钟读回（2026-11-13）
+
+以已上传的 `c4b26faf29a241e602c28914edf7e646cf225be0` 为基线，接入 dev2 冻结的三个首字观察消费者和 AI-RD 的四个公共/服务端源。原 command 在跨标签锁内持久化并读回后、显式 execute 前开始 monotonic 计时，严格核验 available ACK 后绑定原 operationId、新 Run 和精确 result。实际文字进入视口且经历两帧后才上报，prepare、重开和原操作读取不新建计时。unknown、隐藏、存储提示、卸载和迟到回调关闭原窗口，观察故障仍允许原模型操作完成。[控制会话](../../apps/admin/src/features/ai-native/workbench-model-control-session.ts)与[可见观察会话](../../apps/admin/src/features/ai-native/visible-observation-session.ts)
+
+公共合同新增 `original_model_control` 的封闭变体，只允许 task_center 的 text/model_result，原 operationId 上限 128；原启动/回答两个 trigger 保留 UUID 要求。标准 TaskCenter provider 延迟获取原 model-control-read，按当前 Task/Scope/动作政策核原操作、新 Run、result 和展示修订，sourceBinding 保留该原控制观察。写入原诊断日志前后再次核当前身份和来源，原报告重放只返回同一收据。客户端声明沿用 client_reported 标签，运行 SLO、模型费用和业务执行各有原独立依据。[公共合同](../../packages/shared/src/ai-task-performance-draft.ts)、[标准装配](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)与[原报告消费](../../apps/api/src/modules/ai-native/task-center.application.ts)
+
+dev2 的组合暴露原性能 Reader 的时间错误。它先缓存 visibleNow，再等待当前授权，返回的 authorizedAt 晚于旧校验时间，合法读回被拒绝。修复 read 与 sample 三处当前授权校验，使用 await 后的 clock，保留原 now/visibleNow 作为原日志窗口上界。原未来授权时间、身份/范围和撤权检查继续执行。[性能与样本 Reader](../../apps/api/src/modules/ai-native/observability/task-performance.reader.ts)
+
+dev2 原控制 React/session→精确 result reader→Host/Boundary 两帧→API→Controller→标准 provider→原授权/control-read/sourceBinding→诊断日志→performance/closed read view 组合，修 Reader 后保留原断言和推进 Date clock，7/7 退出 0。stdin SHA-256 `4287702d68ece83d09a2e2c4f94b3f0b16117cb0a1908e016ed3d30368f83c4b`，Reader 源 SHA-256 `26ce71d92aa4ea349cdc39cb06eef6b05fc4213fc2662cc6681aaa74179117f6`。正常模型控制操作和报告各 1 次，原重放无新日志。单独模拟丢写入 ACK 返回 AI_RESULT_UNKNOWN，日志保留，原模型操作次数仍 1。另有 34 个客户端/组件边界子场景通过，stdin SHA-256 `5772bb06e412ce3727673ad7475f1177f20e17c02289bd8bcf90c0a75998b15b`。Auth、原 control/model 读取、DB、DOM、React 调度和 HTTP wire 均为声明的内存替身，实际 Guard 的独立证据沿 Root 组。
+
+Root 使用实际标准 provider、Guard、Controller、原 Task/模型结果读取和原日志服务做必要模拟，原报告精确重放、错误 Run/result、跨 surface、卡片冒充、新键上限、旧 UUID、raw body 额外字段、unknown、损坏 ACK 和撤权均按原边界处理，1 日志、1 次初始模拟模型调用，原 Task/Run/Step/Artifact/charge 不变化，退出 0，stdin SHA-256 `1f76e782809dc6d812e85cf7dddb72dc1ae19213b676bc83aba22ea6b972bdda`。该组的 control-read 为封闭合同夹具，原模型读取和 Guard 使用实际源码。既有首字/首卡完整 callback 复验退出 0，stdin SHA-256 `49cd22b9ae03e5d956d93fe57f7fa3613d31c49c03a19a2bf74d9eb96e54b8d2`。原正常模型 Task 的标准快照另以 `65a36e1a7b04932375047ac4d21067774ae9eb25d94cb67434bd0c5e022ff8e0` 核验退出 0。
+
+Root 在同一原可见 Reader callback 内让授权异步推进时钟，并核 outcome sample，推进 180ms 后读取及样本均通过，退出 0，stdin SHA-256 `47c9f9ccbfa3f66198c9de8b37adfa282818ad8f1023f8fa94f6562d074fc7a4`。TypeScript 5.9.3 生产 4 根/1954 源、后台 5 根/1615 源零诊断，stdin SHA-256 `2d1e660c2819a036a2f5b4b2c5ea5493c9753f6ccf4ee75034beb53dcd43a5d3`；Reader 修复后 2 根/1562 源零诊断，stdin SHA-256 `f363b385bf80d61adec4ebcd22c5b3f2291efcacd6549de557fe2709378a8255`，均退出 0。
+
+失败证据原位保留。Root 首次加载被源码目录既有旧 JS 生成物遮住，改为验证器 preferTsExts 后使用本片 TS；没有覆盖或删除这些未核归属文件。dev2 首次快照失败来自夹具缺少三个原仓储方法，补齐后出现上述推进时钟的实际源码错误，原组合退出 1 的输出及最小诊断 `4daad6ca24d3a04719823c880d644f5bebc168af115ef8b79f0221c312779c93` 保留。最终三源 blob 为 `64febaa7d0ed59af0e3426045229f75aab58b35d`、`b3a0ed2776c71bc57bb42a03bb694f7f1243b602`、`542eee20d81d8f543a90177285bcdf7e2b99c033`。命令均在 AI-RD/dev2 既有会话内运行，没有新增测试脚本或证据副本。
+
+AIN-25 仍按原容量、背压、多租户公平性、告警、成本限制和回退全文核定，本阶段只收口该首字来源及读回故障。AIN-12 独立核查确认动态候选到 linked reprepare 和 Copilot 当前订单对象尚缺消费，分别由 dev2 四源及 dev1 四源接续，AI-RD 补原字段来源和 TaskCenter prop。所有本阶段模拟子进程已退出，审计为空，任务临时目录未创建。真实浏览器、微信、数据库与供应商由负责人后续操作。
+
 <a id="ain12-model-control-consumer-20261113"></a>
 ## 同 Task 模型控制、回答后继展示与任务中心重新准备（2026-11-13）
 

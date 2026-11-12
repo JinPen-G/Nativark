@@ -7,6 +7,7 @@ import { AI_TASK_DRAFT_VERSION, AI_WORKBENCH_MODEL_CONTROL_VERSION, AI_WORKBENCH
   type AiWorkbenchModelControlPreparation, type AiWorkbenchModelControlReference, type AiWorkbenchModelControlObservation,
   type AiTaskModelObservationDraft, type AiTaskSnapshotDraft } from '@rental-os/shared';
 import { validateTaskCenterSnapshot } from './task-center-reader';
+import type { LiveVisibleObservationSession } from './visible-observation-session';
 
 type Values = {
   AiWorkbenchDisplayReadDraft: { taskId: string };
@@ -67,9 +68,11 @@ export class WorkbenchModelControlSession {
   private held: string | null = null;
   private state = initial();
   private applied: string | null = null;
+  private observationKey: string | null = null;
   private readonly listeners = new Set<() => void>();
   constructor(private readonly input: { taskId: string; port: WorkbenchModelControlPort; store: WorkbenchModelControlStore;
     current(): boolean; sourceEnabled(): boolean; newKey(): string;
+    visible?: LiveVisibleObservationSession | null;
     onAvailable(value: AiWorkbenchModelControlObservation, signal: AbortSignal): Promise<void> }) {
     parseWorkbenchModelControl('AiWorkbenchDisplayReadDraft', { taskId: input.taskId });
   }
@@ -115,8 +118,13 @@ export class WorkbenchModelControlSession {
     try { this.restore(); } catch { this.publish({ invalid: true, preparation: null, error: 'journal_unavailable' }); }
   }
   clearPreparation() { this.publish({ preparation: null }); }
+  private cancelObservation(key = this.observationKey) {
+    if (key === this.observationKey) this.observationKey = null;
+    try { this.input.visible?.cancel(key); } catch { /* Observation cleanup cannot change the original operation outcome. */ }
+  }
   suspend() {
     this.generation++; this.request?.abort(); this.request = null;
+    this.cancelObservation();
     this.applied = null;
     this.publish({ busy: null, preparation: null, observation: null, error: null });
   }
@@ -128,6 +136,7 @@ export class WorkbenchModelControlSession {
     this.publish({ busy: kind, error: null });
     try { await work(request.signal); this.check(request.signal, generation); }
     catch (error) {
+      if (generation === this.generation) this.cancelObservation();
       if (this.active && generation === this.generation && this.input.current()) {
         const resultUnavailable = this.state.error === 'result_unavailable';
         this.publish({ preparation: null, ...(kind === 'read' && !resultUnavailable && !this.state.invalid ? { observation: null } : {}),
@@ -198,8 +207,22 @@ export class WorkbenchModelControlSession {
         this.held = raw; this.publish({ invalid: false }); this.check(signal);
         return command;
       });
-      const value = await this.input.port.execute(structuredClone(command), signal); this.check(signal); this.unchanged();
-      await this.apply(this.accept(value, command), signal);
+      this.check(signal); this.unchanged(); this.cancelObservation();
+      let observationKey: string | null = null;
+      // The persisted original command owns the start. No clock or observation
+      // key enters its journal, and observation failure cannot block dispatch.
+      try { observationKey = this.input.visible?.begin({ taskId: command.taskId,
+        trigger: 'original_model_control', originKey: command.operationId }) ?? null; } catch { /* Optional client measurement. */ }
+      this.observationKey = observationKey;
+      try {
+        this.check(signal); this.unchanged();
+        const value = await this.input.port.execute(structuredClone(command), signal); this.check(signal); this.unchanged();
+        const observation = this.accept(value, command);
+        let bound = false;
+        try { bound = this.input.visible?.bindControl(observationKey, observation) ?? false; } catch { /* Keep the original result readable. */ }
+        if (!bound) this.cancelObservation(observationKey);
+        await this.apply(observation, signal);
+      } catch (error) { this.cancelObservation(observationKey); throw error; }
     });
   }
   async read() {

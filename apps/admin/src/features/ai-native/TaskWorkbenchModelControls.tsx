@@ -8,6 +8,7 @@ import { aiConversationsApi } from '@/api/aiConversations';
 import { useAuthStore } from '@/features/auth/authStore';
 import { useAiManagementLocale } from './management-locale';
 import { WorkbenchModelControlSession, workbenchModelControlStorageKey, type WorkbenchModelControlState } from './workbench-model-control-session';
+import { useVisibleObservationHost } from './VisibleObservationHost';
 import styles from './AiManagement.module.css';
 
 interface ControlHost {
@@ -42,11 +43,12 @@ export function TaskWorkbenchModelControls({ identity, taskId, sourceEnabled, so
   onAvailable(value: AiWorkbenchModelControlObservation, signal: AbortSignal): Promise<void>;
 }) {
   const { t } = useAiManagementLocale(), auth = useAuthStore.getState();
+  const visible = useVisibleObservationHost();
   const storageKey = workbenchModelControlStorageKey({ tenantId: auth.tenant?.tenantId ?? '',
     workspaceId: auth.currentWorkspaceId ?? '', userId: auth.user?.id ?? '', taskId });
   const scope = useRef({ identity, taskId, storageKey, sourceEnabled, current, onAvailable });
   scope.current = { identity, taskId, storageKey, sourceEnabled, current, onAvailable };
-  const session = useMemo(() => new WorkbenchModelControlSession({ taskId, port,
+  const session = useMemo(() => new WorkbenchModelControlSession({ taskId, port, visible,
     current: () => scope.current.identity === identity && scope.current.taskId === taskId && scope.current.storageKey === storageKey
       && !document.hidden && scope.current.current(),
     sourceEnabled: () => scope.current.sourceEnabled,
@@ -57,7 +59,7 @@ export function TaskWorkbenchModelControls({ identity, taskId, sourceEnabled, so
         return await navigator.locks.request(storageKey, async () => work());
       } },
     onAvailable: (value, signal) => scope.current.onAvailable(value, signal),
-  }), [identity, taskId, storageKey]);
+  }), [identity, taskId, storageKey, visible]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
   useEffect(() => {
     session.activate();
