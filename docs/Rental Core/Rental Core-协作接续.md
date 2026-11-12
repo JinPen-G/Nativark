@@ -22,7 +22,7 @@
 
 原续租服务夹具 `2767638bf` 已按 QA 单测试文件候选收回 main，十二组原断言通过，明确新空服务快照与历史缺失；见[测试整合](<Rental Core-开发记录.md#pm-extension-fixture-main-integration-20261113>)。治理输入/身份及 AI 直接消费者候选仍按各自前置另片核验。
 
-采用/准备输入副本沿[原整合](<Rental Core-开发记录.md#pm-adoption-input-capture-integration-20261112>)保持；治理八句输入副本、Core `654a5e35c` 身份两源与 AI `23e4cd71` 同捕获 header 消费者已按 QA 六项相关复验收回 main，原P2闭合，见[主线集成](<Rental Core-开发记录.md#pm-governance-authority-main-integration-20261113>)。Core定价主线最小补片固定 `fe89a692` 与单测试 `3037d919` 正交QA，队列/缺档案标记父字段不整取；地点/主体原子保存继续原作者独占WIP。CAT-GOV/CLOSE完整门槛与真实环境条件不变。
+采用/准备输入副本沿[原整合](<Rental Core-开发记录.md#pm-adoption-input-capture-integration-20261112>)保持；治理八句输入副本、Core `654a5e35c` 身份两源与 AI `23e4cd71` 同捕获 header 消费者已按 QA 六项相关复验收回 main，原P2闭合，见[主线集成](<Rental Core-开发记录.md#pm-governance-authority-main-integration-20261113>)。原配置读取单测试 `3037d919` 已按QA七项固定main复验收回，见[单文件集成](<Rental Core-开发记录.md#pm-context-refresh-fixture-integration-20261113>)。Core定价主线 `fe89a692` 对应准确三源patch仍待固定远端来源及QA，队列/缺档案标记父字段不整取；地点/主体原子保存继续原作者独占WIP。CAT-GOV/CLOSE完整门槛与真实环境条件不变。
 
 AIN-19 单资产/原领取依据已收 main `12a454937`，见[主线整合](<Rental Core-开发记录.md#pm-allocation-pickup-main-integration-20261112>)；缺 pickupItems 仍为未记录，AI识别/媒体消费者另片。AIN-17 `483b887d` 四源码方法闭包与记录 `c24fd4e8` 已获 QA 独立通过，按[同client整合](<Rental Core-开发记录.md#pm-readiness-original-transaction-integration-20261112>)收回，不包含其他父级写入实现。PM 已给 Core `RentalAssignmentState.issueSource` 可选原结构化来源窗口，并定向转交 AI-RD 固定 `b690e4f3` 的 Outbox/资源存储两个接口及 `7f4a2f1a` 记录；下一步沿原业务事务接真实短缺/配置参加者。旧 issue 文本不作来源、会员租户总体与九项算法保持，不另开事务或把同client读等同捕获完成。
 

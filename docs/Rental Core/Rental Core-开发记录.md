@@ -4,6 +4,16 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-context-refresh-fixture-integration-20261113"></a>
+
+## 原配置读取七项夹具的 main 收回（2026-11-13）
+
+固定来源`3037d919d146bfd6981762eb7ed25eefb01e3922`已核GitHub。仅收[原测试](../../tests/category-adoption-context-refresh.test.cjs)，最终blob `f8430a52167aa7b95a9187b12b1a2c60b932554d`；七项原用例正文与断言逐字不变。原fixture补Tenant共享父锁、同空间有界R0档案/设置/地点/券/型号查询和原RentalCategoryResolver注入，生产Auth/锁及Core源码不由本片调整。原6/7、缺R0字段/解析器等失败与修正依据保留于[作者固定阶段](https://github.com/JinPen-G/rental-OS/blob/3037d919d146bfd6981762eb7ed25eefb01e3922/docs/Rental%20Core/Rental%20Core-%E5%BC%80%E5%8F%91%E8%AE%B0%E5%BD%95.md#context-refresh-fixture-contract-20261113)。
+
+QA在固定main `abfe65248`产品源上用该单文件复验原Core/业务/品类采用/SQL与Auth夹具，七项全过，未发现需要f4父生产实现的缺口。覆盖两实例读取新采用且旧上下文冻结、空集无样例重建、旧Core与新业务配置不拼接、空间外组成/型号拒绝、缺持久设置不补默认、当前地点投影及AI单个Core快照。原Node用例回调和断言保持，dist引用按固定main真实源码解析。命令`node --no-compilation-cache -`退出0，stdin SHA-256 `514497f55a8267a37692d2a25637dc5283304c301e6202473e040e4bd083f7d5`，audit为空，任务临时目录不存在。
+
+PM逐blob与范围核收，定向差异和新增链接检查通过；与包含本段的中文提交绑定，普通推送后回读GitHub。生产定价三源补片独立待QA，不由本测试扩大收取；治理身份三源与企业回款已集成的成果保持。此为七项限定离线fixture证据，真实MySQL锁/事务、HTTP/DI与宿主仍未验，原CAT-GOV/CLOSE门槛不变。六份他人WIP未变，本阶段无新临时环境、进程或重复副本。
+
 <a id="pm-governance-authority-main-integration-20261113"></a>
 
 ## 治理身份与 AI 原凭据转交的 main 集成（2026-11-13）
