@@ -40,6 +40,21 @@ function ExtensionDecision({ row, reviewMode, english, operation, closureOperati
   const current = () => { operation.assertCurrent(); if (!mounted.current || unavailable) throw new Error("原续租审阅已变化，请重新核对 / Original extension review changed"); };
   const money = (amount: number) => Number.isFinite(amount) && p.currency ? `${formatRentalMoney(amount, p.currency)} ${p.currency}` : english ? "Original amount unavailable" : "原金额不可核对";
   const time = (value: string) => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(english ? "en-US" : "zh-CN", { timeZoneName: "short" }) : english ? "Not recorded" : "原依据缺失";
+  const billingUnitLabels: Record<string, string> = english ? {
+    per_order: "Per order",
+    per_unit: "Per item",
+    per_day: "Per calendar day",
+    per_night: "Per night",
+    per_hour: "Per hour",
+    per_rental_period: "Per rental period",
+  } : {
+    per_order: "每订单",
+    per_unit: "每份/每件",
+    per_day: "每自然日",
+    per_night: "每晚",
+    per_hour: "每小时",
+    per_rental_period: "每租期",
+  };
   const readOriginal = async () => {
     current(); const result = await operation.read<EnterpriseExtensionOriginalResult>(`/enterprise/extension-approvals/${encodeURIComponent(row.id)}/result`); current();
     if (result.approval.id !== row.id || result.approval.orderId !== row.orderId || result.approval.applicantCustomerId !== context.session?.customer.customerId
@@ -90,6 +105,7 @@ function ExtensionDecision({ row, reviewMode, english, operation, closureOperati
       : p.services.items.map((service, index) => <section key={`${service.serviceId}:${index}`}>
         <h4>{service.serviceName}</h4><p>{service.requiredByRule ? english ? "Required by the original business rule" : "原业务规则要求" : english ? "Selected for this extension" : "本次续租选择"}</p>
         <dl className="enterprise-review-facts"><dt>{english ? "Quantity / amount" : "数量／金额"}</dt><dd>{service.quantity} · {money(service.amount)}</dd>
+          <dt>{english ? "Billing unit" : "计费单位"}</dt><dd>{billingUnitLabels[service.billingUnit] ?? (english ? "Original billing unit unavailable" : "原计费单位不可核对")}</dd>
           <dt>{english ? "Original service plan" : "原服务计划"}</dt><dd>{service.scheduledStartAt} — {service.scheduledEndAt}</dd>
           <dt>{english ? "Original service location" : "原服务地点引用"}</dt><dd>{service.serviceLocationId}</dd>
           <dt>{english ? "Service / terms version" : "服务／条款版本"}</dt><dd>{service.serviceVersion} · {service.termsVersion}</dd></dl><p>{service.terms}</p>
