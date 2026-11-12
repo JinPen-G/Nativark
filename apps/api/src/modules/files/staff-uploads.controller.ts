@@ -1,14 +1,16 @@
-import { BadRequestException, ForbiddenException, Controller, Get, Param, Post, Body, Req, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Controller, Get, Param, Post, Body, Req, Optional, ServiceUnavailableException, Header, HttpCode } from "@nestjs/common";
 import { PrismaInspectionEvidenceAuthority } from "../ai-native/inspection-assist/prisma-inspection-evidence.authority";
 import type { AiInspectionTarget } from "@rental-os/shared";
 import type { SystemUserRow } from "@rental-os/shared";
+import { STAFF_UPLOAD_OBSERVATION_HTTP } from '@rental-os/shared';
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
 import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
-import { CompleteFileUploadDto, CreateFileUploadSessionDto } from "../integrations/file-upload.dto";
+import { CompleteFileUploadDto, CreateFileUploadSessionDto, StaffUploadObservationDto, parseStaffUploadObservation } from "../integrations/file-upload.dto";
 
 interface StaffUploadRequest {
   user: SystemUserRow;
+  body?: unknown;
   staffLocationScope?: { mode: "all" | "selected"; locationIds: string[] };
 }
 
@@ -77,6 +79,27 @@ export class StaffUploadsController {
       actorUserId: req.user.id,
       actorName: req.user.displayName
     });
+  }
+
+  @Post(STAFF_UPLOAD_OBSERVATION_HTTP.observe)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
+  async observeSession(@Req() req: StaffUploadRequest, @Body() body: StaffUploadObservationDto) {
+    // Inspect the original body as well as the DTO: global whitelist must not
+    // erase a caller-supplied owner/selector into a valid closed request.
+    const input = parseStaffUploadObservation(Object.prototype.hasOwnProperty.call(req, 'body') ? req.body : body);
+    const file = input.file, workspaceId = getRequestWorkspaceId();
+    if (!workspaceId) throw new ForbiddenException('缺少已验证的经营空间');
+    this.assertPermission(req.user, this.scenePermission(file.uploadScene, file.businessType));
+    const locations = await this.assertOwnerInScope(req, file.businessType, file.businessId, workspaceId, file.uploadScene, file.metadata);
+    this.evidenceMetadata(file.uploadScene, file.metadata, locations);
+    const result = await this.storage.observeStaffUpload(req.user.tenantId, input, {
+      businessType: file.businessType, businessId: file.businessId, uploadScene: file.uploadScene,
+      workspaceId, actorUserId: req.user.id,
+    });
+    this.assertPermission(req.user, this.scenePermission(file.uploadScene, file.businessType));
+    await this.assertOwnerInScope(req, file.businessType, file.businessId, workspaceId, file.uploadScene, file.metadata);
+    if (workspaceId !== getRequestWorkspaceId()) throw new ForbiddenException('原上传观察期间经营空间已变化');
+    return result;
   }
 
   @Get(":fileAssetId/download-url")

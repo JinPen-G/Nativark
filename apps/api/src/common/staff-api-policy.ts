@@ -1,5 +1,7 @@
 import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { STAFF_UPLOAD_OBSERVATION_HTTP } from '@rental-os/shared';
+const staffUploadObservationPath = `/${STAFF_UPLOAD_OBSERVATION_HTTP.basePath}/${STAFF_UPLOAD_OBSERVATION_HTTP.observe}`;
 const inspectionPolicyPaths = new Set([AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.read,
   AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.configure, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.clear]
   .map(operation => `/${AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.basePath}/${operation}`));
@@ -43,6 +45,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
   // authorities still recheck ownership, location and the current stage.
   if (inspectionTaskPaths.has(path)) return verb === inspectionTaskMethod;
   if (path === "/staff/v1/uploads/sessions" && verb === "POST") return true;
+  if (path === staffUploadObservationPath && verb === 'POST') return true;
   if (/^\/staff\/v1\/uploads\/sessions\/[^/]+\/complete$/u.test(path) && verb === "POST") return true;
   if (/^\/staff\/v1\/uploads\/[^/]+\/download-url$/u.test(path) && verb === "GET") return true;
   if (path === "/staff/v1/offline-payments") return verb === "GET" || verb === "POST";
@@ -95,6 +98,16 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
 }
 
 export function staffRoutePermissions(method: string, path: string, body?: unknown) {
+  if (path === staffUploadObservationPath) {
+    const file = body && typeof body === 'object' ? (body as { file?: unknown }).file : undefined;
+    const scene = file && typeof file === 'object' ? (file as { uploadScene?: unknown }).uploadScene : undefined;
+    if (scene === 'pickup-evidence') return ['rental-os:order:pickup'];
+    if (scene === 'return-evidence') return ['rental-os:order:return'];
+    if (scene === 'handover-signature') return ['rental-os:order:pickup', 'rental-os:order:return'];
+    if (scene === 'work-order-evidence') return ['rental-core:maintenance:manage'];
+    if (scene === 'offline-payment-proof') return ['rental-os:order:offline-payment'];
+    return ['__unmatched_staff_upload_observation__'];
+  }
   if (method.toUpperCase() === 'POST' && inspectionPolicyPaths.has(path)) return ['rental-os:order:view'];
   if (isHumanAutomationRoute(method, path, 'staff')) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && inspectionAssistPaths.has(path)) return ['rental-os:order:view'];

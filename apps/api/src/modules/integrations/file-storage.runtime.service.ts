@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
 import { KNOWLEDGE_FILE_ACCESS, type KnowledgeFileAccess } from "../ai-native/knowledge/knowledge-file-access";
 import type { KnowledgeUploadRevision } from "../ai-native/knowledge/knowledge.ports";
@@ -12,8 +12,10 @@ import type {
   FileAssetSummary,
   FileUploadCleanupSummary,
   FileDownloadUrlSummary,
-  FileUploadSessionSummary
+  FileUploadSessionSummary,
+  StaffUploadObservationRequest, StaffUploadObservationResponse, StaffUploadObservedSession
 } from "@rental-os/shared";
+import { parseStaffUploadObservation } from './file-upload.dto';
 import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
@@ -794,6 +796,86 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       }
     }
     return { scanned, deleted, pending };
+  }
+
+  /** Original employee upload metadata under the existing file/business ACL.
+   * Expiry or absence never grants another PUT, completion, or changed key.
+   * No provider configuration, object request, signing or mutation is used. */
+  async observeStaffUpload(tenantId: string, value: StaffUploadObservationRequest,
+    valueOwner: FileBusinessOwner): Promise<StaffUploadObservationResponse> {
+    const input = parseStaffUploadObservation(value), owner = structuredClone(valueOwner), access = this.fileAccess;
+    const file = { ...input.file, fileName: input.file.fileName.trim(), mimeType: input.file.mimeType.trim().toLowerCase() };
+    if (!access || !owner?.workspaceId || !owner.actorUserId || owner.businessType !== file.businessType
+      || owner.businessId !== file.businessId || owner.uploadScene !== file.uploadScene
+      || (file.uploadScene === 'work-order-evidence') !== (file.businessType === 'rental_work_order')) {
+      throw new ForbiddenException('原员工上传观察归属不可用');
+    }
+    const currentOwner = () => {
+      const identity = getRequestIdentity();
+      if (!identity || identity.isSaasAdmin || identity.audience !== 'staff' || identity.staffApi !== true
+        || identity.tenantId !== tenantId || identity.workspaceId !== owner.workspaceId || identity.userId !== owner.actorUserId) {
+        throw new ForbiddenException('原员工上传观察身份已变化');
+      }
+      return access.authorityKey(tenantId);
+    };
+    const authority = currentOwner();
+    const current = () => { if (currentOwner() !== authority) throw new ForbiddenException('原员工上传观察权限已变化'); };
+    const load = async () => {
+      current();
+      const session = await this.prisma.fileUploadSession.findFirst({ where: 'sessionId' in input.reference
+        ? { tenantId, id: input.reference.sessionId } : { tenantId, idempotencyKey: input.reference.idempotencyKey } });
+      if (!session) return null;
+      const asset = await this.prisma.fileAsset.findFirst({ where: { tenantId, id: session.fileAssetId } });
+      const metadata = asset?.metadata && typeof asset.metadata === 'object' && !Array.isArray(asset.metadata)
+        ? asset.metadata as JsonRecord : null;
+      // A tenant-wide unique-key hit must not disclose another employee's or
+      // workspace's upload, even when its business object is otherwise visible.
+      if (!asset || !metadata || asset.uploadedBy !== owner.actorUserId || metadata.workspaceId !== owner.workspaceId
+        || metadata.source !== 'staff-miniprogram') return null;
+      const mimeType = this.validateInput({ ...file, idempotencyKey: session.idempotencyKey ?? '' });
+      if (!this.matchesOwner(asset, owner) || !this.matchesUploadRequest(asset, { ...file, idempotencyKey: session.idempotencyKey ?? '' }, mimeType)
+        || session.tenantId !== tenantId || asset.tenantId !== tenantId || session.fileAssetId !== asset.id
+        || session.provider !== asset.storageProvider || session.storageKey !== asset.storageKey
+        || ('sessionId' in input.reference ? session.id !== input.reference.sessionId : session.idempotencyKey !== input.reference.idempotencyKey)) {
+        throw new ConflictException('原上传会话与文件描述不一致');
+      }
+      if (['pickup-evidence', 'return-evidence', 'handover-signature'].includes(file.uploadScene)) {
+        const stage = file.uploadScene === 'pickup-evidence' ? 'pickup' : file.uploadScene === 'return-evidence' ? 'return' : file.metadata?.handoverStage;
+        if (!stage || !file.metadata?.handoverBatchId || metadata.handoverStage !== stage
+          || metadata.handoverBatchId !== file.metadata.handoverBatchId
+          || file.metadata.handoverStage !== undefined && file.metadata.handoverStage !== stage) {
+          throw new ConflictException('原上传交接阶段或批次不一致');
+        }
+      }
+      if (!['pending_upload', 'freeze_pending', 'completed', 'failed'].includes(session.status)
+        || !['pending_upload', 'active', 'failed', 'delete_pending', 'deleted'].includes(asset.status)
+        || ['pending_upload', 'freeze_pending'].includes(session.status) && asset.status !== 'pending_upload'
+        || session.status === 'completed' && !['active', 'delete_pending', 'deleted'].includes(asset.status)
+        || session.status === 'failed' && !['failed', 'deleted'].includes(asset.status)
+        || !(session.expiresAt instanceof Date) || !Number.isFinite(session.expiresAt.getTime())
+        || session.completedAt != null && (!(session.completedAt instanceof Date) || !Number.isFinite(session.completedAt.getTime()))) {
+        throw new ServiceUnavailableException('原上传状态暂不可核对');
+      }
+      return { session, asset };
+    };
+    const before = structuredClone(await load());
+    if (before) await access.assertRead(tenantId, before.asset);
+    current();
+    const after = await load();
+    if (fileFactHash(before) !== fileFactHash(after)) throw new ConflictException('原上传观察期间记录已变化');
+    if (after) await access.assertRead(tenantId, after.asset);
+    current();
+    const semantics = { reference: structuredClone(input.reference), descriptionHash: requestFingerprint(file),
+      observation: 'stored_metadata_not_transfer_proof' as const, retryable: false as const,
+      uploadGrant: 'not_provided' as const, nextAction: 'read_original_upload' as const };
+    if (!before) return { ...semantics, state: 'not_observed', session: null };
+    return { ...semantics, state: 'observed', session: {
+      sessionId: before.session.id, fileAssetId: before.asset.id,
+      status: before.session.status as StaffUploadObservedSession['status'],
+      fileStatus: before.asset.status as StaffUploadObservedSession['fileStatus'],
+      mode: before.session.provider === 'local_mock' ? 'simulation' : 'provider',
+      expiresAt: before.session.expiresAt.toISOString(), completedAt: before.session.completedAt?.toISOString() ?? null,
+    } };
   }
 
   /** Current-authorized observation of the original knowledge upload only.

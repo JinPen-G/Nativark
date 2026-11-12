@@ -11,6 +11,7 @@ export * from "./common";
 export * from "./core";
 export * from "./platform";
 export * from "./infrastructure";
+export * from "./staff-upload-observation";
 export * from "./client";
 export * from "./enterprise";
 export * from "./enterprise-workflows";

@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-staff-upload-observation-20261112"></a>
+## 员工原上传会话只读观察接点（2026-11-12）
+
+在已推送的 `69ab9ba269da6cb41b75a885b624d647cb893bf9` 上按 PM 明确的 7 源窗口补齐 AIN-20 的后端阻塞：[员工上传 Controller](../../apps/api/src/modules/files/staff-uploads.controller.ts)、[原文件 Runtime](../../apps/api/src/modules/integrations/file-storage.runtime.service.ts)、[DTO](../../apps/api/src/modules/integrations/file-upload.dto.ts)、staff-api-policy、OpenAPI，以及 [shared 唯一观察合同](../../packages/shared/src/staff-upload-observation.ts)和总出口。`POST /api/staff/v1/uploads/sessions/observe` 以原幂等键或已知原会话 ID，加原业务/文件描述和交接批次，读取当前员工本人、当前空间内的既有会话。原 create/complete 保持不变；读取沿原 FileBusinessAccess 与 Core 的业务 ACL，不借 knowledge 权限、不增加表或迁移。
+
+新增入口保存原始 body 的闭合校验，避免全局 whitelist 剥离额外主体/选择器后通过。服务端前后核对当前员工身份/权限、原会话与文件绑定；租户内命中他人或其他空间的键不暴露其存在，同一本人原键命中不同文件/批次拒绝。响应只有必要原关联、安全状态、原时点和声明文件描述摘要，明确不是文件字节校验或传输证明。过期不抹掉旧观察；未找到仅 `not_observed`，不证明未执行。没有新的 PUT URL、凭据、内部对象键、下载 URL 或对象存储请求。
+
+仅暂存该 7 源后，按 Git 索引的 1071 份源/契约对象建立内存闭包，排除 AIN-19 与员工活动 WIP。`node --no-compilation-cache -` 预加载原离线守卫，复用 `tests/file-storage-lifecycle.test.cjs` 的内存数据库/Auth 边界，实际运行 Guard→Controller/DTO→FileStorageRuntime→原 FileBusinessAccess/Core 读取：创建提交后丢 ACK、按原键/已知 ID 观察、过期仍可读、错文件/批次、额外主体及双选择器拒绝、错员工隐藏、错空间/撤权拒绝、缺记录保持未观测、原记录变化拒绝、原 complete 后只读观察均通过。只有 1 次创建、1 次原 complete、1 会话/1 文件；观察阶段 0 写入、0 provider 配置/传输，退出 0，命令 SHA-256 `d51776224195045fea384a32326c8d94850cc7a16a1962d4f4f088b5f2312af2`。
+
+TypeScript 5.9.3，4 根/1183 源最终零诊断，退出 0，命令 SHA-256 `7261ab8951c8986d307b375e274b2e1573b17094328c7a488fd20b2696e79069`。首轮 3 个 metadata 可空诊断用明确缺失拒绝分支修复，没有断言绕过。`docs:check` 仍为相同 4 处既有缺链，本片链接/任务算术无新增错误，定向差异检查退出 0。审计为空、任务临时目录未创建，无新增测试脚本、生成 client/dist、服务或业务外联。未运行真实数据库、微信或对象存储；这只是原会话观察后端片，不是完整 AIN-20 验收。
+
+客户端须继续由 dev2 在原 17 源接消费。原员工 build 禁止 shared 运行时 require，必须沿 `scripts/generate-inspection-wire-schemas.cjs` 及唯一 `inspection-wire-schemas.ts` 生成数据；Root 已向 PM 报告这两路径的最小扩窗，用于此观察及 AIN-19 basis 依赖，不手抄 schema 或另建生成器。生成器/消费者闭合和原图片/录音/草稿链完成后再核整项。
+
 <a id="ain-task-center-section-regression-20261112"></a>
 ## 任务中心待处理区域默认展开回归修复（2026-11-12）
 

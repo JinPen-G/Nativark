@@ -1,4 +1,5 @@
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { STAFF_UPLOAD_OBSERVATION_HTTP, STAFF_UPLOAD_OBSERVATION_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
@@ -231,6 +232,7 @@ function buildPaths(operations: ContractOperation[]) {
 }
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
   ...AI_TASK_RULE_SOURCE_ENTRY_SCHEMAS,
@@ -3174,6 +3176,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/staff/v1/auth/change-password", "Auth", "changeStaffPassword", "Change a staff password and revoke other sessions", [], true, "ChangePasswordRequest", "LoginResponse"),
   backlogOperation("post", "/api/staff/v1/auth/switch-workspace", "Auth", "switchStaffWorkspace", "Switch the current staff workspace", [], true, "SwitchWorkspaceRequest", "LoginResponse"),
   backlogOperation("post", "/api/staff/v1/uploads/sessions", "Files", "createStaffUploadSession", "Create a staff-scoped upload session bound to an order or work order", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
+  backlogOperation('post', `/api/${STAFF_UPLOAD_OBSERVATION_HTTP.basePath}/${STAFF_UPLOAD_OBSERVATION_HTTP.observe}`, 'Files', 'observeStaffUploadSession',
+    'Observe one original employee upload by key or id; metadata only, no upload grant or storage request',
+    ['rental-os:order:pickup', 'rental-os:order:return', 'rental-os:order:offline-payment', 'rental-core:maintenance:manage'], true,
+    'StaffUploadObservationRequest', 'StaffUploadObservationResponse'),
   backlogOperation("post", "/api/staff/v1/uploads/sessions/{id}/complete", "Files", "completeStaffUpload", "Complete a staff upload after verifying its actor, scope and business owner", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
   backlogOperation("get", "/api/staff/v1/uploads/{fileAssetId}/download-url", "Files", "getStaffFileDownloadUrl", "Create a staff-scoped short-lived file URL", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/staff/v1/offline-payments", "RentalCore", "listStaffOfflinePaymentRegistrations", "List pending and confirmed offline payment registrations for an order", ["rental-os:order:view"], true, undefined, "GenericObject", [{ name: "orderId", in: "query", required: true, schema: stringSchema }]),
