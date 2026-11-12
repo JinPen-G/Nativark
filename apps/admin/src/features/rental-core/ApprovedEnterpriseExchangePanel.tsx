@@ -19,7 +19,8 @@ const stateLabels = {
 export function ApprovedEnterpriseExchangePanel({ order, operationToken, unavailable = false, onApplied }: {
   order: RentalOrder; operationToken?: string; unavailable?: boolean; onApplied: (receipt: RentalApprovedExchangeReceipt) => Promise<void>;
 }) {
-  const { t } = useLocale(), operation = useOriginalApprovedEnterpriseExchange(order.id, operationToken);
+  const { t, locale } = useLocale(), operation = useOriginalApprovedEnterpriseExchange(order.id, operationToken);
+  const unavailableLabel = locale === "en-US" ? "Exchange execution is unavailable" : "换货执行暂不可用";
   const [form] = Form.useForm<Values>(), approvalId = Form.useWatch("approvalId", form), preparationId = Form.useWatch("preparationId", form);
   const owner = JSON.stringify([operation.identity, order.updatedAt]), latestOwner = useRef(owner); latestOwner.current = owner;
   const confirmation = useRef<Confirmation | undefined>(undefined);
@@ -32,7 +33,7 @@ export function ApprovedEnterpriseExchangePanel({ order, operationToken, unavail
   const source = choices.error ? undefined : choices.data;
   const approval = source?.approvals.find(entry => entry.approval.id === approvalId), preparation = approval?.preparations.find(entry => entry.preparationId === preparationId);
   const materialReady = operation.permitted && !unavailable && eligible && !choices.isFetching && approval?.state === "ready" && preparation?.state === "ready" && Boolean(preparation.binding)
-    && Date.parse(approval.approval.expiresAt) > Date.now();
+    && approval.approval.execution !== "original_merchant_execution_not_connected" && Date.parse(approval.approval.expiresAt) > Date.now();
   const executable = !blocked && materialReady;
   const gate = useRef({ order, unavailable, materialReady, approval, preparation }); gate.current = { order, unavailable, materialReady, approval, preparation };
   useEffect(() => { confirmation.current = undefined; form.resetFields(); setFailure(undefined); }, [owner, form]);
@@ -66,6 +67,7 @@ export function ApprovedEnterpriseExchangePanel({ order, operationToken, unavail
         const currentApproval = current.approvals.find(entry => entry.approval.id === original.values.approvalId);
         const currentPreparation = currentApproval?.preparations.find(entry => entry.preparationId === original.values.preparationId);
         if (!currentApproval || currentApproval.state !== "ready" || !currentPreparation || currentPreparation.state !== "ready"
+          || currentApproval.approval.execution === "original_merchant_execution_not_connected"
           || materialKey(currentApproval, currentPreparation) !== original.materialKey) throw new Error(t("原换货执行材料已变化"));
         return { ...structuredClone(original.binding), reason: original.values.reason, confirm: true };
       }, afterRead);
@@ -89,9 +91,15 @@ export function ApprovedEnterpriseExchangePanel({ order, operationToken, unavail
       {source && source.approvals.length > 0 && <Form form={form} name="approved-enterprise-exchange" layout="vertical" disabled={blocked || choices.isFetching}
         onValuesChange={changed => { confirmation.current = undefined; if (Object.hasOwn(changed, "approvalId")) form.setFieldsValue({ preparationId: undefined }); }}>
         <Form.Item name="approvalId" label={t("本单费用批准")} rules={[{ required: true }]}>
-          <Select options={source.approvals.map(entry => ({ value: entry.approval.id,
-            label: `${entry.approval.preview.originalItemGroupName} → ${entry.approval.preview.replacementItemGroupName} · ${formatRentalMoney(entry.approval.preview.additionalAmount, entry.approval.preview.currency)} · ${t(stateLabels[entry.state])}` }))}/>
+          <Select options={source.approvals.map(entry => {
+            const statusLabel = entry.approval.state === "approved" && entry.approval.execution === "original_merchant_execution_not_connected"
+              ? unavailableLabel : t(stateLabels[entry.state]);
+            return { value: entry.approval.id,
+              label: `${entry.approval.preview.originalItemGroupName} → ${entry.approval.preview.replacementItemGroupName} · ${formatRentalMoney(entry.approval.preview.additionalAmount, entry.approval.preview.currency)} · ${statusLabel}` };
+          })}/>
         </Form.Item>
+        {approval?.approval.state === "approved" && approval.approval.execution === "original_merchant_execution_not_connected" && <Alert type="warning"
+          title={unavailableLabel} description={locale === "en-US" ? "This expense change requires a supported execution and funding path. Review the original request before proceeding." : "本次费用变更需要受支持的执行和资金来源，请核对原申请。"} />}
         {approval && <dl className={styles.facts}>
           <div><dt>{t("原商品")}</dt><dd>{approval.approval.preview.originalItemGroupName}</dd></div>
           <div><dt>{t("替换商品")}</dt><dd>{approval.approval.preview.replacementItemGroupName}</dd></div>
