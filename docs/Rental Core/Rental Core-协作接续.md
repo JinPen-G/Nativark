@@ -20,7 +20,7 @@
 
 ## 3. 下一入口与原缺口
 
-PM已核main`212df5bd6`包含企业原补款/政策比较及AI展示/订单消费者，只接Core固定`b659aa857`的两份批次源码与四份记录/接续，原两脚本、九类坏回执和main共享/API类型通过，见[批次整合](<Rental Core-开发记录.md#pm-preparation-receipt-integration-20261112>)。六项他人WIP保留；a0/619仍待原固定依赖，不取整份父文件。新续租空服务快照固定`3ed71c1a`已收main`7772d3020`，见[空快照整合](<Rental Core-开发记录.md#pm-extension-empty-snapshot-integration-20261112>)；保证金门闸`5d6c6dff`已按七行增量核收，两种Core预览/政策拒绝及shared/API类型通过，见[保证金整合](<Rental Core-开发记录.md#pm-exchange-guarantee-integration-20261112>)。企业服务/点击/本人委托补片按依赖继续核收；Core封存委托证明与企业签源政策分别由两RD独占，固定合同与组合待交。Core作者继续AIN-17四入口counter/原tx参加者；企业/AI继续自己的核心消费者，不等整项。原依赖冲突及最小窗口见[PM协调](<Rental Core-开发记录.md#pm-core-intake-and-dependencies-20261112>)。
+批次回执、新续租空快照与纯保证金门闸已按各固定阶段收 main，原依赖/失败继续见[批次](<Rental Core-开发记录.md#pm-preparation-receipt-integration-20261112>)、[空快照](<Rental Core-开发记录.md#pm-extension-empty-snapshot-integration-20261112>)和[保证金](<Rental Core-开发记录.md#pm-exchange-guarantee-integration-20261112>)。企业服务/点击已收 `dac6d4d89`；Core `b869f72b1` 类型及 `89261ed60` 两源码封存闭包由 QA 核验后按[最小整合](<Rental Core-开发记录.md#pm-merchant-delegation-source-runtime-integration-20261112>)收回，企业签源 guard `7f39b4d6` 与真实 execute/result/宿主另片复验。六项 main 他人 WIP 保留，a0/619 与 6390/045 等其他源码仍按各自固定依赖，不整取父版本。Core RD 继续 AIN-17 原配置事务/参加者和 CAT-GOV；AIN-19 单资产及原领取资源/计量依据 reader 已由 PM 协调给原 Core，AI-RD 接 shared/StaffFactory/provider；AI 的上传只读观察另在文件域最小窗口。开发者继续，审查交 QA，PM 串行整合不改变原门槛。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
 2. 原十二项CLOSE首轮静态核实见[本轮记录](<Rental Core-开发记录.md#core-resume-20261110>)：实际用量/完整免赔、非实物/停租/结算后追加及真实预授权仍有实现缺口，其余保留原真实证据门槛。旧状态仅是2026-10-18口径，不新增分数，不计入CAT-GOV分母。

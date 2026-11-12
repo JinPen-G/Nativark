@@ -62,6 +62,7 @@ import { EnterpriseRentalHandoffMerchantController } from "./modules/enterprise/
 import { EnterpriseMembersService } from "./modules/enterprise/enterprise-members.service";
 import { EnterprisePolicyService } from "./modules/enterprise/enterprise-policy.service";
 import { EnterpriseApprovalService } from "./modules/enterprise/enterprise-approval.service";
+import { EnterpriseMerchantDelegationService } from "./modules/enterprise/enterprise-merchant-delegation.service";
 import { EnterpriseExchangeApprovalService } from "./modules/enterprise/enterprise-exchange-approval.service";
 import { EnterpriseExtensionApprovalService } from "./modules/enterprise/enterprise-extension-approval.service";
 import { EnterpriseTaskCenterService } from "./modules/enterprise/enterprise-task-center.service";
@@ -344,6 +345,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     EnterpriseMembersService,
     EnterprisePolicyService,
     EnterpriseApprovalService,
+    EnterpriseMerchantDelegationService,
     EnterpriseExtensionApprovalService,
     EnterpriseExchangeApprovalService,
     EnterpriseTaskCenterService,

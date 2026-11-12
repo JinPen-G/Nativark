@@ -7,6 +7,7 @@ import { EnterpriseApplicationService } from "./enterprise-application.service";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { EnterpriseMembersService } from "./enterprise-members.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
+import { EnterpriseMerchantDelegationService } from "./enterprise-merchant-delegation.service";
 import { EnterpriseManagementRequestService } from "./enterprise-management-request.service";
 import { EnterpriseExchangeApprovalService } from "./enterprise-exchange-approval.service";
 import { RentalApprovedExchangeService } from "../rental-core/rental-approved-exchange.service";
@@ -17,7 +18,12 @@ interface OperatorRequest { user?: SystemUserRow; headers?: { authorization?: st
 @Controller("membership/enterprise-workflows")
 export class EnterpriseMerchantController {
   constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly policies: EnterprisePolicyService, private readonly files: FileStorageRuntimeService, private readonly management: EnterpriseManagementRequestService,
-    private readonly exchanges: EnterpriseExchangeApprovalService, private readonly approvedExchanges: RentalApprovedExchangeService) {}
+    private readonly exchanges: EnterpriseExchangeApprovalService, private readonly approvedExchanges: RentalApprovedExchangeService, private readonly delegations: EnterpriseMerchantDelegationService) {}
+  @Get("order-delegations/:key") async readOrderDelegation(@Req() req: OperatorRequest, @Param("key") key: string,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
+    return this.delegations.readMerchant({ authorization: req.headers?.authorization, user: req.user! }, key);
+  }
   @Get("orders/:orderId/exchange-execution-choices")
   async exchangeExecutionChoices(@Req() req: OperatorRequest, @Param("orderId") orderId: string,
     @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {

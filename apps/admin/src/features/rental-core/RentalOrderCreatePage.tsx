@@ -16,15 +16,16 @@ import { Form } from "@/components/ui";
 import { Alert, DatePicker } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button, Select } from "@/components/ui";
+import { Button, Select, Tabs } from "@/components/ui";
 import dayjs, { type Dayjs } from "dayjs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import styles from "./RentalOrderCreatePage.module.css";
 import { fulfillmentModeLabels } from "@/features/fulfillment/fulfillmentLabels";
+import { EnterpriseMerchantOrderDelegationPanel } from "./EnterpriseMerchantOrderDelegationPanel";
 
 type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
   period: [Dayjs, Dayjs];
@@ -45,6 +46,8 @@ export function RentalOrderCreatePage() {
   const [form] = Form.useForm<FormValues>();
   const [quote, setQuote] = useState<RentalQuoteSnapshotV1>();
   const [created, setCreated] = useState<{ id: string; orderNo: string }>();
+  const [submissionMode, setSubmissionMode] = useState("ordinary");
+  const currentSubmissionMode = useRef(submissionMode); currentSubmissionMode.current = submissionMode;
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
   const customerId = Form.useWatch("customerId", form);
   const bookingIdentity = Form.useWatch("bookingIdentity", form);
@@ -129,7 +132,9 @@ export function RentalOrderCreatePage() {
   }
 
   async function quoteOrder() {
+    if (currentSubmissionMode.current !== "ordinary") return;
     const values = await form.validateFields();
+    if (currentSubmissionMode.current !== "ordinary") return;
     if (!selectedMember) {
       message.error(t("请选择租户内的有效个人会员"));
       return;
@@ -162,7 +167,7 @@ export function RentalOrderCreatePage() {
   }
 
   function submitOrder() {
-    if (!quote || !selectedMember) return;
+    if (currentSubmissionMode.current !== "ordinary" || !quote || !selectedMember) return;
     const input: CreateRentalOrderRequest = {
       quoteId: quote.id,
       customerType: "personal",
@@ -210,12 +215,7 @@ export function RentalOrderCreatePage() {
   const pickupLabel = t(profile.data?.terminology.pickupLabel ?? "领取");
   const returnLabel = t(profile.data?.terminology.returnLabel ?? "归还");
 
-  return <>
-    <PageHeader
-      title={t("新建租赁订单")}
-      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
-    />
-    <Form<FormValues> form={form} layout="vertical" onValuesChange={() => setQuote(undefined)}>
+  const ordinaryForm = <Form<FormValues> form={form} layout="vertical" onValuesChange={() => setQuote(undefined)}>
       <Row gutter={[16, 16]} align="stretch">
         <Col xs={24} xl={17}>
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -510,6 +510,18 @@ export function RentalOrderCreatePage() {
           </div>
         </Col>
       </Row>
-    </Form>
+    </Form>;
+  return <>
+    <PageHeader
+      title={t("新建租赁订单")}
+      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
+    />
+    <Tabs activeKey={submissionMode} destroyOnHidden={false} onChange={setSubmissionMode} items={[
+      { key: "ordinary", label: locale === "en-US" ? "Ordinary order" : "常规订单", children: ordinaryForm,
+        disabled: createQuote.isPending || createOrder.isPending },
+      { key: "delegated", label: locale === "en-US" ? "Customer delegation" : "客户本次委托",
+        children: <EnterpriseMerchantOrderDelegationPanel active={submissionMode === "delegated"} />,
+        disabled: createQuote.isPending || createOrder.isPending },
+    ]} />
   </>;
 }
