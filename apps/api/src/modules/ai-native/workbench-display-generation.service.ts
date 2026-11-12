@@ -41,6 +41,15 @@ export function readWorkbenchDisplayConfiguration(value: unknown) {
     throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   return freezeOriginalInput(parsed.data);
 }
+/** Current publication gates new generation. Historical reads retain their
+ * original object/receipt and independent current read authorization. */
+export function readCurrentWorkbenchDisplayConfiguration(value: unknown, clock: () => Date = () => new Date()) {
+  const configuration = readWorkbenchDisplayConfiguration(value), now = clock();
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !configuration.enabled
+    || Date.parse(configuration.validFrom) > now.getTime() || Date.parse(configuration.expiresAt) <= now.getTime())
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return { configuration, now };
+}
 export type AiOriginalSceneDisplayPublication = { currentConfiguration(): unknown };
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiConversation' | 'aiConversationTurn'>;
 type Input = { db: Db; scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
@@ -57,10 +66,7 @@ export class AiOriginalSceneDisplayGeneration {
     if (typeof input.publication?.currentConfiguration !== 'function' || typeof input.scopes?.resolveCurrent !== 'function') throw unavailable();
   }
   private configuration() {
-    const configuration = readWorkbenchDisplayConfiguration(this.input.publication.currentConfiguration()), now = this.clock();
-    if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !configuration.enabled
-      || Date.parse(configuration.validFrom) > now.getTime() || Date.parse(configuration.expiresAt) <= now.getTime()) throw unavailable();
-    return { configuration, now };
+    return readCurrentWorkbenchDisplayConfiguration(this.input.publication.currentConfiguration(), this.clock);
   }
   private async fields(context: AiExecutionContext, original: AiSceneRequestReceiptDraft,
     binding: AiWorkbenchMaterialBindingDraft, fieldRevision: number,

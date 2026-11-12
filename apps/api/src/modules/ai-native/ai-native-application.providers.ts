@@ -5,7 +5,8 @@ import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft }
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
 import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider } from './runtime-publication.configuration';
 import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
-import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
+import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration,
+  readCurrentWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
 import { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
 import { AI_WORKBENCH_MODEL_CONTROL_REQUESTS, composeWorkbenchModelControlRequests } from './workbench-model-control.application';
 import { composePersistedTaskModelHost } from './task-model-gateway.composition';
@@ -682,15 +683,18 @@ export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
       if (!['order_explanation', 'quote_clarification', 'opening_diagnosis'].includes(scene)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return readOrderExecutionConfiguration(scene === 'order_explanation' ? orderValue : scene === 'quote_clarification' ? quoteValue : openingValue);
     };
+    const currentPublication = () => readCurrentWorkbenchDisplayConfiguration(displayValue, original.clock);
     return composeWorkbenchModelControlRequests(original, {
-      available: scene => readWorkbenchDisplayConfiguration(displayValue).enabled && configuration(scene).enabled,
+      available: scene => { currentPublication(); return configuration(scene).enabled; },
       ...(files ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {}),
       async build(input, control) {
         const selected = configuration(control.receipt.sceneCode);
-        if (!selected.enabled || !readWorkbenchDisplayConfiguration(displayValue).enabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        currentPublication();
+        if (!selected.enabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const receipt = control.receipt;
         const resource = await control.readPreparationOrigin({ scopeId: receipt.scopeId, taskId: receipt.command.taskId,
           runId: receipt.runId, resourceOriginRunId: receipt.resourceOriginRunId });
+        currentPublication();
         return composePersistedTaskModelHost({ ...input,
           scene: { code: receipt.sceneCode, version: receipt.sceneVersion },
           gatewayScene: { sceneCode: receipt.sceneCode, routeScene: 'chat', maxOutputTokens: selected.maxOutputTokens },
@@ -704,8 +708,13 @@ export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
             validateAnswers: async () => { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); } },
           readRunOrigin: control.readOrigin, controlResourceOrigin: control.readPreparationOrigin,
           revalidateMaterial: async (key, material) => {
-            if (key.taskId !== receipt.command.taskId || key.runId !== receipt.runId
-              || requestFingerprint(material) !== requestFingerprint(await control.revalidate())) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            currentPublication();
+            if (key.taskId !== receipt.command.taskId || key.runId !== receipt.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            const current = await control.revalidate();
+            // Source/authorization reads can yield while publication expires or
+            // is withdrawn. The Gateway calls this again before dispatch.
+            currentPublication();
+            if (requestFingerprint(material) !== requestFingerprint(current)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
           },
         });
       },
