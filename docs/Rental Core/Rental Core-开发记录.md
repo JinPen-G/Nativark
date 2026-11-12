@@ -4,6 +4,26 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="fulfillment-issue-transaction-participant-20261112"></a>
+
+## 履约结构化来源与原事务参加者（2026-11-12）
+
+从已推送并回读的`16401c422419aa2e0368b914ecb4a4135a0788d8`接续，按PM核准的窄窗口修改[Shared原分配状态](../../packages/shared/src/core.ts)及[Core分配服务](../../apps/api/src/modules/rental-core/rental-allocation.service.ts)，支撑AIN-17的必要Core来源。原扫描、库存与分配算法、自由异常文本、状态机和调度顺序保持；未改其他Shared定义、总出口、AppModule、DTO/OpenAPI、Schema或迁移，不混算CAT-GOV/CLOSE进度。
+
+`assignment.issueSource`是服务器记录的可选只读来源，版本为`rental-fulfillment-issue-1`。原扫描分别记录配置不可用、已分配资源不可用、数量不足或未配齐；保留全部原文本，混合问题依此顺序选择保守的主要原因。原数量检查把缺库存行作为零生成提示，但结构化来源只有真实、有限非负的库存及预占数量才能记为`resource_shortage`，缺源标为`configuration_unavailable`。文本相同但来源变化仍推进原assignment修订；问题恢复、分配动作和办理锁修订清除旧来源。部分取消原有对象重建也不携带旧来源。
+
+原事务内`readRecordedFulfillmentIssue`继续保留`issue_recorded`兼容合同，仅有效版本/原因且存在正数活动分配时提供结构化来源与范围、修订、时点、地点和状态绑定的哈希。历史只有文本、坏版本、额外字段或无活动分配均不授予可信来源；此口不重新扫描、取资源锁或开启事务，也不把提示解释成当前可交付事实。
+
+原聚合写后、提交前调用可选`BusinessFailureOutboxParticipant.fulfillment`，透传同一个原tx和ALS租户/空间。未变化的扫描也可参加原事务，原事件去重由参加者承担；缺参加者直接维持原业务，参加者失败及`result_unknown`向原事务传播，不换键重发或吞异常。仅接入AI固定`b690e4f3751bcaa1beac30cde88b55ea596ec1de`的[参加者](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts)，blob `10f1d833f98f4e048889ab1c053efc5b349a8ace`，及[scoped存储](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-resource-store.ts)，blob `1a06a119dd798d1dfa8b43beeb826ff2e5a63f40`；两文件不改原AI算法。
+
+原Shared/API配置的TypeScript5.9.3最终检查零诊断：101个Shared根、867个API根/2012个源。Shared仅更新`core.d.ts`，`core.js`运行时逐字节不变；四份必要emit已安装，本树API现867份JS，Shared仍202文件，其他产物沿c24及原两份输入捕获来源。最终分配JS的SHA-256为`9cbf865230ba88cae7a435d9a579f474b31b52d80680a3388dfad8ae4ca66aad`。首轮四emit及来源在[原编译证据](../../output/category-governance/fulfillment-source-compile-20261112.json)，最终类型、分配emit/来源及实际三份保护文件在[最终编译证据](../../output/category-governance/fulfillment-source-final-compile-20261112.json)，未重建整套依赖、Client或完整API目录。
+
+原`node --no-compilation-cache --require tests/fixtures/ai-native/prisma-offline-preload.cjs tests/rental-allocation.test.cjs`的14个断言通过，退出0，见[原分配结果](../../output/category-governance/fulfillment-source-original-allocation-20261112.json)。首轮实际编译服务的四种原因、混合文本、来源变化/恢复、旧文本未知和同tx失败传播7组退出0，见[原行为证据](../../output/category-governance/fulfillment-source-behavior-20261112.json)。最终实际编译Core与固定AI参加者的8组限定调用退出0，覆盖原tx、重复引用原事件、缺政策及可履约观察零捕获、缺库存/无活动分配不授源、append丢收据和来源变化回滚，见[参加者证据](../../output/category-governance/fulfillment-source-participant-20261112.json)。审计均为空；候选、DB/Auth、政策、ResourcePorts和回滚为明确替身，scoped存储的真实SQL/约束、权限与事务未运行。未新增或扩写测试脚本、修改原断言。
+
+**直接依赖仍未闭合：**正式ResourcePorts的数据源/宿主装配和已发布临近政策尚缺；当前默认DI构造没有这些资源口，履约保持`not_captured/source_unavailable`，不能以分配偏好代替政策。开业原九项已有同client读取，仍须实际配置行counter及各原写入点参加者闭合，不能把九项合成总修订或把同client当真库快照。真实捕获、消费者、DB/多实例、浏览器/微信及独立Review均未取得本片证据，生产开关和原08、两个动态编码不同组合经营及0/14完整结项不变。
+
+本次验证已退出；原生PowerShell递归及逐文件删除均被CreateProcess自动审批以`blocked by policy`拒绝，命令没有执行、未提供具体理由。原三个新退出文件共2,547,452字节已安全同卷归入原待清理任务的`participant/`，文件哈希一致，原`output/.tmp/rental-core-validation`不存在。该任务连同原残留共8文件、5,096,112字节，**已归集、未删除**；责任只维护[原唯一清单](../../../../output/.cleanup-pending/rental-core/fulfillment-source-validation/manifest.json)，本次状态见[退出证据](../../output/category-governance/fulfillment-source-exit-cleanup-20261112.json)。原c24、采用输入及治理首次加载残留仍分别保留原清单；删除工具恢复后由创建者处理。原ts-node使用独立的`v8-compile-cache-lib`，后续必要短调用同时禁用其缓存，避免只关闭Node自身编译缓存仍产生退出文件。
+
 <a id="adoption-input-capture-20261112"></a>
 
 ## 采用与准备的原输入、审计及恢复一致性（2026-11-12）

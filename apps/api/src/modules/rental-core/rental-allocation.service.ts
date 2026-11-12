@@ -1,12 +1,16 @@
+/** Core owns allocation and the recorded scan cause. Optional failure capture
+ * participates in the original transaction; it never decides stock or retries. */
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
   Logger,
   OnApplicationBootstrap,
   OnModuleDestroy,
+  Optional,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import {
@@ -31,6 +35,7 @@ import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import { requestFingerprint } from "./rental-idempotency.repository";
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 import {
   ACTIVE_ASSIGNMENTS,
   allocationComplete,
@@ -51,7 +56,12 @@ export interface RentalRecordedFulfillmentIssueSource {
   startAt: string;
   fulfillmentLocationId: string;
   state: "issue_recorded";
+  issueSource?: NonNullable<RentalOrder["assignment"]>["issueSource"];
+  sourceHash?: string;
 }
+
+type FulfillmentIssueSource = NonNullable<NonNullable<RentalOrder["assignment"]>["issueSource"]>;
+const issueCodes: FulfillmentIssueSource["code"][] = ["configuration_unavailable", "assigned_resource_unavailable", "resource_shortage", "allocation_incomplete"];
 
 @Injectable()
 export class RentalAllocationService
@@ -64,6 +74,7 @@ export class RentalAllocationService
     private readonly prisma: PrismaService,
     private readonly facts: RentalCoreFactRepository,
     private readonly core: RentalCoreService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant,
   ) {}
 
   onApplicationBootstrap() {
@@ -597,6 +608,9 @@ export class RentalAllocationService
     order.assignment = {
       ...state,
       revision: state.revision + 1,
+      // This action changes resources without running the complete scan below.
+      // Preserve its issue text, but never carry a prior scan cause forward.
+      issueSource: undefined,
       issue: invalid
         ? "分配资源不可交付，请释放或改配"
         : !allocationComplete(order) && source === "automatic"
@@ -706,6 +720,7 @@ export class RentalAllocationService
         order.assignment = {
           ...state,
           revision: state.revision + 1,
+          issueSource: undefined,
           operationLock:
             action === "acquire"
               ? {
@@ -782,8 +797,18 @@ export class RentalAllocationService
       || typeof order.assignment?.issue !== "string" || !order.assignment.issue.trim()
       || !Number.isSafeInteger(revision) || revision! < 1 || !order.fulfillmentLocationId
       || !Number.isFinite(Date.parse(order.startAt)) || !Number.isFinite(Date.parse(order.updatedAt))) return undefined;
+    const raw = order.assignment?.issueSource;
+    const hasRecordedAllocation = order.allocations.some(allocation =>
+      ACTIVE_ASSIGNMENTS.includes(allocation.status) && Number.isFinite(allocation.quantity) && allocation.quantity > 0);
+    const known = hasRecordedAllocation && raw && !Array.isArray(raw) && typeof raw === "object" &&
+      Object.keys(raw).every(key => key === "version" || key === "code") &&
+      raw.version === "rental-fulfillment-issue-1" && issueCodes.includes(raw.code);
+    const issueSource = known ? structuredClone(raw) : undefined;
     return { tenantId, workspaceId, orderId, assignmentRevision: revision!, orderUpdatedAt: order.updatedAt,
-      startAt: order.startAt, fulfillmentLocationId: order.fulfillmentLocationId, state: "issue_recorded" };
+      startAt: order.startAt, fulfillmentLocationId: order.fulfillmentLocationId, state: "issue_recorded",
+      ...(issueSource ? { issueSource, sourceHash: requestFingerprint({ tenantId, workspaceId, orderId,
+        assignmentRevision: revision, orderUpdatedAt: order.updatedAt, startAt: order.startAt,
+        fulfillmentLocationId: order.fulfillmentLocationId, status: order.status, issueSource }) } : {}) };
   }
 
   /** 无论是否开启自动分配，都检查已有预分配/锁定；异常不自动解除资源锁。 */
@@ -806,13 +831,16 @@ export class RentalAllocationService
         if (!active.length) return order;
         const options = await this.buildCandidates(tenantId, order, tx);
         const issues: string[] = [];
+        const causes = new Set<FulfillmentIssueSource["code"]>();
         if (
           this.core
             .listLocations(tenantId)
             .find((l) => l.id === order.fulfillmentLocationId)?.status !==
           "enabled"
-        )
+        ) {
           issues.push("领取地点已停用");
+          causes.add("configuration_unavailable");
+        }
         for (const a of active) {
           const row = options.reservations.find((r) =>
             a.metadata?.reservationId
@@ -823,15 +851,20 @@ export class RentalAllocationService
           const model = row?.models.find(
             (m) => m.itemGroupId === a.itemGroupId,
           );
-          if (!model?.enabled) issues.push("预留或型号已失效");
+          if (!model?.enabled) {
+            issues.push("预留或型号已失效");
+            causes.add("configuration_unavailable");
+          }
           if (a.assetId) {
             const c = row?.candidates.find(
               (x) => x.assetId === a.assetId && x.itemGroupId === a.itemGroupId,
             );
-            if (!c?.available)
+            if (!c?.available) {
               issues.push(
                 `${a.assetNo ?? a.assetId}：${c?.reason ?? "资产不在约定地点或型号已变更"}`,
               );
+              causes.add("assigned_resource_unavailable");
+            }
           }
         }
         const [stock, reservations] = await Promise.all([
@@ -873,15 +906,27 @@ export class RentalAllocationService
               (balance?.maintenanceQuantity ?? 0) -
               reserved <
             required
-          )
+          ) {
             issues.push(`${r.itemGroupName}：可交付数量不足`);
+            // The original check treats a missing balance as zero for its issue
+            // text. That is not evidence of actual stock for an event source.
+            const knownStock = balance && Number.isFinite(balance.onHandQuantity) && balance.onHandQuantity >= 0
+              && Number.isFinite(balance.maintenanceQuantity) && balance.maintenanceQuantity >= 0
+              && Number.isFinite(required) && required > 0 && Number.isFinite(reserved) && reserved >= 0;
+            causes.add(knownStock ? "resource_shortage" : "configuration_unavailable");
+          }
         }
         const issue = issues.length
           ? [...new Set(issues)].join("；")
           : !allocationComplete(order)
             ? "资源未配齐，待人工处理"
             : undefined;
-        await this.recordIssue(order, issue, tx);
+        if (issue && !causes.size) causes.add("allocation_incomplete");
+        // Keep every original text cause. A configuration/assigned-asset problem
+        // takes precedence, so their concurrent quantity check cannot claim a
+        // usable resource-shortage source. No inventory decision is changed.
+        const code = issueCodes.find(value => causes.has(value));
+        await this.recordIssue(order, issue, tx, code ? { version: "rental-fulfillment-issue-1", code } : undefined);
         return order;
       },
       { isolationLevel: "ReadCommitted" },
@@ -892,14 +937,19 @@ export class RentalAllocationService
     order: RentalOrder,
     issue: string | undefined,
     tx: RentalFactTx,
+    issueSource?: FulfillmentIssueSource,
   ) {
-    if (order.assignment?.issue === issue) return;
+    if (order.assignment?.issue === issue && requestFingerprint(order.assignment?.issueSource ?? null) === requestFingerprint(issueSource ?? null)) {
+      await this.captureFulfillment(order, tx);
+      return;
+    }
     const state = order.assignment ?? { revision: 0, history: [] };
     const at = new Date().toISOString();
     order.assignment = {
       ...state,
       revision: state.revision + 1,
       issue,
+      issueSource: issue ? issueSource : undefined,
       history: [
         ...state.history,
         {
@@ -915,6 +965,17 @@ export class RentalAllocationService
     };
     order.updatedAt = at;
     await this.facts.saveOrderAggregate(order, [], tx);
+    await this.captureFulfillment(order, tx);
+  }
+
+  /** Participate after the original aggregate write, in that same transaction.
+   * The adapter owns source/policy checks; absence stays uncaptured. Never scan,
+   * start another transaction, swallow unknown results or call a model here. */
+  private async captureFulfillment(order: RentalOrder, tx: RentalFactTx) {
+    if (!this.failureEvents?.fulfillment) return;
+    const workspaceId = getRequestWorkspaceId();
+    if (!workspaceId || getRequestTenantId() !== order.tenantId) throw new ForbiddenException("履约事件缺少原事务的可信空间范围");
+    await this.failureEvents.fulfillment(tx, { tenantId: order.tenantId, workspaceId }, order.id);
   }
 
   /** 自动操作仅在管理员显式开启时执行；逐订单事务，失败记录待人工处理。 */
