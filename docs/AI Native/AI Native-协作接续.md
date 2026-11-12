@@ -1,10 +1,10 @@
 # AI Native：当前协作接续
 
-更新：2026-11-12。负责人已明确继续专项，以完整实现、必要模拟冒烟和复核作为本轮研发验收；真实环境由负责人自行操作。正式依据仍为[需求 v1.15](<AI Native-需求.md>)、[任务 v1.19](<AI Native-开发任务.md>)。任务百分比只维护任务册，本文只定位当前工作。
+更新：2026-11-13。负责人已明确继续专项，以完整实现、必要模拟冒烟和复核作为本轮研发验收；真实环境由负责人自行操作。正式依据仍为[需求 v1.15](<AI Native-需求.md>)、[任务 v1.19](<AI Native-开发任务.md>)。任务百分比只维护任务册，本文只定位当前工作。
 
 ## 当前目标与现场
 
-在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。2026-11-12 恢复时 AI 本地及 GitHub 均为 `ce8697ad8f3253085d215de5860e3cd53c6b38ef`，23 项未提交成果逐项核明作者，索引、MERGE_HEAD、CHERRY_PICK_HEAD 为空。main 由 PM 串行集成，使用前重新核对。不能追活动 HEAD 或将旧 SHA 当重置目标。
+在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。2026-11-13 首次修改前核对 AI 本地及 GitHub 均为 `7e4d1aaef2df3c3aebe5c02f95adc56a759a964d`，19 项 AIN-12 阶段源码已暂存，MERGE_HEAD、CHERRY_PICK_HEAD 为空。两个模型控制文件的索引固定版本属于本阶段，工作区后继属于 dev2 的 AIN-25。main 由 PM 串行集成，使用前重新核对。不能追活动 HEAD 或将旧 SHA 当重置目标。
 
 开业/资源/经营待办已在未完检查点 `ea9a3ec2b` 同步任务分支，开业导航与原字段接线分别推送 `c53e3bded` 和 `270fbb7af`，PM 按固定依赖闭包整合，不整收混有未完事件的检查点。[检查点与前置补正](<AI Native-开发记录.md#ain-opening-automation-checkpoint-20261112>)保留原依据。AIN-13 自身实现与模拟证据已具备，但前置 AIN-12 全文未齐，原 100% 结论已纠正；不回退已完成源码。PM 交付的 OP SecretBox 固定修复已按[正常 Nest 与 AI 配置兼容核验](<AI Native-开发记录.md#ain-secret-box-nest-compatibility-20261112>)接入并推送 `b408e806349f2dfc743a1a6dbc9df8dad2858c37`，GitHub 已核一致。QA 指出的任务中心受控展开回归已按[有限交互核验](<AI Native-开发记录.md#ain-task-center-section-regression-20261112>)修复；后台其余原缺口继续推进。
 
@@ -16,16 +16,16 @@
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 持有 AIN-19 历史缺依据采用修复及 AIN-12 模型控制四源、后台七源和原选单到 linked reprepare 公共接线，独立验证后分阶段提交。AIN-15 三叶和 AIN-20 漏交样式已核作者及冻结 blob。AIN-17 等 Core 正式来源。QA、公共依赖及 main 整合仅经 PM 协调。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 模型控制私有四源已固定交 Root，连续原回答及公开解释/排版模拟已交。当前只读定位一次 `overhead.timeDebt` unknown 的原 charge、Run、租约和 wall/monotonic 计量因果，正常复跑不能关闭该问题。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-12 后台七源已冻结交 Root。当前核 AIN-25 模型控制新 Run 的首字来源，已交封闭合同、原 operationId 与原控制收据接点建议，等 Root 公共窗口后接 feature-local 消费。quote-goal 三叶及员工 index.wxss 均已核原作者并冻结交 Root。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-19 历史缺依据采用修复已推 `7e4d1aaef` 并交 PM 复验。AIN-12 模型控制、回答后继展示及任务中心重新准备阶段按固定索引提交，随后接 AIN-25 公共观察来源，核 AIN-12 原全文余项。AIN-15 三叶和 AIN-20 漏交样式已核作者及冻结 blob。AIN-17 等 Core 正式来源。QA、公共依赖及 main 整合仅经 PM 协调。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 模型控制实际组合、停用门禁和受控 timeDebt 反例已交 Root，旧偶发事件仍缺原证据。当前只读核 AIN-13 五项原全文、状态金额、公开结果及后台消费证据，只报告完整交付或阻塞。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-12 后台七源固定索引交 Root。当前独占 visible-observation-session.ts、workbench-model-control-session.ts、TaskWorkbenchModelControls.tsx 的 AIN-25 后继，接原 model-control operationId、新 Run 和 result 的首字观察，公共 shared/report 来源由 Root 处理。quote-goal 三叶及员工 index.wxss 已冻结交 Root。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
 
 公共窗口不得夹带企业端的 ClientApiService.readOrderSubmission、企业 reader/controller/GET 和后台企业材料。PM 已将 `openapi-document.ts` 的企业申请/专用凭证登记、`enterprise-workflows.ts` 的 payment_proof/企业消息及 `file-storage.runtime.service.ts` 的 enterprise-payment-proof 区域交企业 RD。AI 本片保留其写权，确需重叠增量先交 PM 串行协调。Core 订单、资金、品类与配置权威仍由原专项负责，AI 不重建这些规则。
 
 ## 当前收口入口
 
-1. **AIN-12 后台任务中心。** [原展示生产/读取/实际消费者](<AI Native-开发记录.md#ain12-original-display-pipeline-20261112>)的 25 源已推 `7332875c9`，PM 已收 main `0e9f93942`。随后[原字段→候选→可信原问题→原回答](<AI Native-开发记录.md#ain12-original-field-human-input-20261112>)已完成实际公开组合模拟和固定类型；首轮字段在原模型计划前冻结，原 null witness 不补签，合法草稿保留，unknown 沿原输入收据。尚缺首轮以外的真实字段 lineage、已准备条件到既有 linked 重新准备的右侧消费，以及排版/重新解释的同 Task 控制准入。停止复用原 TaskCancellation 的请求取消/原收据，不另造执行器。新的模型控制须专用 operator origin reader 与原操作记录，不用假回答/new Task 重置资源，也不全局放开客户/图片/语音共享的回答 lineage 或普通终态。Root 拥有这些组合接点；先复用原 Gateway/运行器/草稿和业务链，不另造状态机。旧 modelResult/closeUnstarted Guard 大小写匹配已修，无需重做。
+1. **AIN-12 后台任务中心。** [原展示生产/读取/实际消费者](<AI Native-开发记录.md#ain12-original-display-pipeline-20261112>)的 25 源已推 `7332875c9`，PM 已收 main `0e9f93942`。[原字段→候选→可信原问题→原回答](<AI Native-开发记录.md#ain12-original-field-human-input-20261112>)与[同 Task 控制、回答后继及任务中心重新准备](<AI Native-开发记录.md#ain12-model-control-consumer-20261113>)已有必要模拟及固定类型证据。后继字段从已验证的原回答重建，纯模型控制沿原 operationId/Gateway/单账/累计资源，开关关闭拒绝新登记。任务中心已用受权 review 的原选单消费既有 linked reprepare，切步骤撤回旧定位，刷新同一原步骤保留编辑。下一步核动态展示候选到正式修改条件、重新准备、批准/原结果的完整消费及两个 Web 入口协作，按原全文决定整项门槛。停止仍用原 TaskCancellation 的请求取消/原收据。旧 modelResult/closeUnstarted Guard 大小写匹配已修，无需重做。
 2. **AIN-14 开业诊断。** TaskOpeningProposalApplication、aiTaskOpeningProposals、task-opening-proposal-session、TaskOpeningProposals 已接普通四分区的原材料→显式预览→关联新 R1→AI 提案与原操作读回；仅保存 AI 提案，不直接保存活动配置/发布。Root 已接 Controller/Guard/provider/OpenAPI/shared/TaskCenter。第三方配置读通过原 integration 权限，只返回有界字段存在性和原检测/修订元数据；普通开业角色不会得到第三方配置，读取不解密或探测。[注册人工导航与重复查询修复](<AI Native-开发记录.md#ain14-integration-navigation-20261112>)已完成 Root 实际组合模拟：变化重确认及撤权/隐藏/旧 epoch 拒绝，原资源授权不再重复生成完整集成材料。最后按空租户、部分开业、未交付能力、mock/失败、旧规则及并发变化逐项核；AIN-12 未满足前不宣布整项 100%。
 3. **AIN-18 经营待办。** Root 已接独立 automationReviewGrant 发布来源、原权限/CAS/TTL/收据和标准 provider/Controller/Guard；grant 启用及 close 丢 ACK 后只读原操作的实际模拟已通过。后台三文件冻结 blob 为 `8bb90e17af6085795f9ce803266d4ed73f0b8447`、`a682b46028320b7756275245c385abef46a0a96f`、`fd6ad0456c4fbf91225c2caf469136f92218f34a`。AutomationReviewSection/TaskCenter 已挂接；交付/归还走原订单，通知走原治理页，退款只读原 GET，opening 走原受权配置；打开入口、关闭待办和事实解决分别判断。退款 accepted 不称 succeeded，不在读取时 refresh 或重退。尚待最终固定组合/API/session/组件核接与 AIN-17 前置；原模型解释宿主未接时须明确不可用，不能走 AUTOMATION owner 的普通 TaskCenter。
 4. **AIN-15 自然语言报价。** 原新材料关联、Core 候选/选单、完整比较、新批准与单次开单已由[关联再准备阶段](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)核接，unknown 不换原操作，变更不挪用旧批准。dev2 三份 goal leaf 只让目标原文进入原冻结模型输入并投影受权候选，不能自动选同名客户、商品或付款人。Root 补 SceneRequest/模型/Reader 正式接线；企业本人入口及四品类目标代表过程继续按原范围收口，不让 operator 冒充企业员工。
@@ -35,7 +35,7 @@
 
 上传观察的幂等键兼容已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并推送 `b690e4f3751bcaa1beac30cde88b55ea596ec1de`。[默认识别 Core 依据与保存后复核](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)和[媒体消费](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)已交 PM，55 schema 和原 22 源保留。QA 新发现的历史省略 `candidateBasis` 采用漏洞已按[最小门禁修复](<AI Native-开发记录.md#ain-inspection-legacy-adoption-p2-20261112>)完成模拟与类型验证，独立交 PM 复验。
 
-AIN-12 的公共生产接线和 dev1 四私有源已在[未完检查点](<AI Native-开发记录.md#ain12-model-control-checkpoint-20261112>)固定。报价观察 requestId 指纹、回答后继 preparationDefinition 和字段 witness 的四源 WIP 已核冻结 blob，连续三条原回答后同 Task 解释/排版的助手实际组合已通过。Root 继续最终生产组合与后台七源、任务中心原选单到 linked reprepare 的消费者复验，并核清 `timeDebt` 那次 unknown。原回答收据、资源 lineage 和 Task 累计额度仍由原服务负责，未知原操作只读核对。
+AIN-12 的公共接线检查点及其反例原位保留，[阶段收口](<AI Native-开发记录.md#ain12-model-control-consumer-20261113>)记录最终源码、后台消费者与模拟。`timeDebt` 的受控超时保护及连续三读已核，旧偶发 unknown 缺原 charge、时钟和首个错误，仍待核明；不能借正常重跑关闭旧事件。原回答收据、资源 lineage 和 Task 累计额度仍由原服务负责，未知原操作只读核对。
 
 ## AIN-17 等待的 Core 固定来源
 

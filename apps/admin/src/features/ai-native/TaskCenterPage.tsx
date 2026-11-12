@@ -26,6 +26,7 @@ import { TaskUsageObservation } from "./TaskUsageObservation";
 import { TaskRuleDraft } from "./TaskRuleDraft";
 import { AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { TaskHumanApproval } from "./TaskHumanApproval";
+import { TaskQuoteReprepare } from './TaskQuoteReprepare';
 import { TaskCancellation } from "./TaskCancellation";
 import { TaskClarification } from "./TaskClarification";
 import { VisibleObservationHost } from './VisibleObservationHost';
@@ -33,6 +34,9 @@ import { ConversationHistory } from './ConversationHistory';
 import { AutomationReviewSection, AUTOMATION_REVIEW_ENTRY_PERMISSIONS } from './AutomationReviewSection';
 import { TaskOpeningProposals } from './TaskOpeningProposals';
 import { WorkbenchInputReviewSession } from './workbench-input-review-session';
+import { TaskWorkbenchModelControlProvider } from './TaskWorkbenchModelControls';
+import { readWorkbenchControlResult } from './workbench-model-control-session';
+import type { AiWorkbenchModelControlObservation } from '@rental-os/shared';
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -69,8 +73,10 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
+  const [modelControlResult, setModelControlResult] = useState<AiWorkbenchModelControlObservation | null>(null);
   const [detailSections, setDetailSections] = useState<string[]>([]);
   const selectedOwner = useRef(selected); selectedOwner.current = selected;
+  const readAccessOwner = useRef(readAccessEpoch); readAccessOwner.current = readAccessEpoch;
   const [followTask, setFollowTask] = useState<string | null>(null);
   const [followEpoch, setFollowEpoch] = useState(0);
   const [followError, setFollowError] = useState(false);
@@ -79,10 +85,23 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     { active: false, reads: 0, deadline: 0 });
   const stopFollowing = () => { followOwner.current.active = false; followOwner.current.request?.abort(); setFollowTask(null); };
   const [visible, setVisible] = useState(() => !document.hidden);
+  useEffect(() => { setModelControlResult(null); }, [selected, visible, readAccessEpoch]);
   useEffect(() => { const change = () => { stopFollowing(); setLiveSnapshot(null); setVisible(!document.hidden); setSelected(null); setNotificationTask(null); };
     document.addEventListener("visibilitychange", change); return () => document.removeEventListener("visibilitychange", change); }, []);
   useEffect(() => () => { followOwner.current.active = false; followOwner.current.request?.abort(); }, [identity, selected]);
   const current = () => identityKey() === identity && !!useAuthStore.getState().token && !document.hidden;
+  const controlHost = useMemo(() => ({ identity, taskId: selected,
+    current: () => selected !== null && selectedOwner.current === selected && identityKey() === identity
+      && readAccessOwner.current === readAccessEpoch && !!useAuthStore.getState().token && !document.hidden,
+    refresh: async (value: AiWorkbenchModelControlObservation, signal: AbortSignal) => {
+      const same = () => selected !== null && value.taskId === selected && selectedOwner.current === selected
+        && readAccessOwner.current === readAccessEpoch && current() && !signal.aborted;
+      if (!same()) throw Error('AI_SCOPE_CHANGED');
+      await readWorkbenchControlResult(aiTaskCenterApi, value, signal, same);
+      if (!same()) throw Error('AI_SCOPE_CHANGED');
+      stopFollowing(); setLiveSnapshot(null); setFollowError(false); setModelControlResult(structuredClone(value));
+    },
+  }), [identity, selected, readAccessEpoch]);
   const inputReview = useMemo(() => new WorkbenchInputReviewSession({ readQuestion: aiTaskCenterApi.input },
     () => selected !== null && selectedOwner.current === selected && identityKey() === identity
       && !!useAuthStore.getState().token && !document.hidden), [identity, selected]);
@@ -140,7 +159,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const readTask: AiTaskDetailReader = useCallback(async (taskId, _context, signal) => {
     const same = () => identityKey() === identity && !signal.aborted && !document.hidden;
     if (!same()) throw Error("AI_SCOPE_CHANGED");
-    const { snapshot, result, coverage } = await readTaskCenterDetail(aiTaskCenterApi, taskId, signal, same);
+    const { snapshot, result, coverage } = modelControlResult?.taskId === taskId
+      ? await readWorkbenchControlResult(aiTaskCenterApi, modelControlResult, signal, same)
+      : await readTaskCenterDetail(aiTaskCenterApi, taskId, signal, same);
     if (!same() || snapshot.contractVersion !== AI_TASK_DRAFT_VERSION || snapshot.taskId !== taskId
       || !AI_TASK_STATUSES_DRAFT.includes(snapshot.status) || !Array.isArray(snapshot.steps) || snapshot.steps.length > 1000
       || !/^(0|[1-9][0-9]{0,19})$/u.test(snapshot.cursor)) throw Error("AI_RESOURCE_UNAVAILABLE");
@@ -151,13 +172,14 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         action: `${step.runId} / ${step.sequence}`, occurredAt: null })),
       factRows: [{ label: t("任务修订"), value: String(snapshot.revision) }, { label: t("持久事件水位"), value: snapshot.cursor },
         { label: t("观察时间依据"), value: formatTimestamp(snapshot.updatedAt).value },
-        { label: t("事件范围"), value: t(coverage === "reset_required" ? "历史游标已失效，不补造事件；仅按现存引用独立复验结果。"
+        { label: t("事件范围"), value: t(coverage === 'original_control_reference' ? '按已核对的原模型操作定位读取本次结果。'
+          : coverage === "reset_required" ? "历史游标已失效，不补造事件；仅按现存引用独立复验结果。"
           : coverage === "first_page_only" ? "仅前50条保留事件，未加载后续；本页结果不是最新结果保证。" : "当前保留事件，未证明完整业务历史。") },
         { label: t("原结果"), value: t(result?.status === "available" ? "当前事实及来源复验后可读，AI文本不是业务执行证据。"
           : result?.status === "stale" ? "事实已变化，旧正文不显示，请回原业务页核对。"
             : result?.status === "unknown" ? "结果待核对，不自动重试。" : result?.status === "failed" ? "原步骤失败，未产生可展示答案。"
               : "本次没有可读取的结果，不能推断未执行或已成功。") }] };
-  }, [identity, t, observationKey]);
+  }, [identity, t, observationKey, modelControlResult]);
   const readConfirmation = useCallback(async (reference: { taskId: string; runId: string; stepId: string }, signal: AbortSignal) => {
     if (!current() || signal.aborted) throw Error("AI_SCOPE_CHANGED");
     try {
@@ -239,11 +261,11 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       && ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(row.sceneCode)) && <TaskReadPolicy key={`task-read-policy:${identity}:${selected}`}
         query={{ taskId: selected }} identity={identity} current={current}
         onAccessChanged={() => { stopFollowing(); setLiveSnapshot(null); setReadAccessEpoch(value => value + 1); }} />}
-    {opened && <AiTaskWorkbench key={`${identity}:${readAccessEpoch}`} translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
+    {opened && <TaskWorkbenchModelControlProvider value={controlHost}><AiTaskWorkbench key={`${identity}:${readAccessEpoch}`} translate={t} context={{ audience: "operator", tenantId, workspaceId }} visible={visible} enabled
       display={{ identity, port: displayPort, current }}
       statusLabels={Object.fromEntries((data?.items ?? []).map(row => [row.taskId, t(statusLabels[row.status])]))}
       selectedTaskId={!followFailed && data?.items.some(row => row.taskId === selected) ? selected : null}
-      onSelectTask={taskId => { stopFollowing(); setLiveSnapshot(null); setSelected(taskId); }} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}
+      onSelectTask={taskId => { stopFollowing(); setLiveSnapshot(null); setModelControlResult(null); setSelected(taskId); }} readTask={readTask} readConfirmation={readConfirmation} readSource={readSource}
       tasks={(data?.items ?? []).map(row => ({ id: row.taskId, status: displayStatus(row.status), scene: safeDisplayText(row.sceneCode), updatedAt: row.updatedAt }))}
       loading={query.isFetching} paging={query.isFetching} page={page} hasNext={!!data?.nextCursor}
       forbidden={[401, 403].includes((query.error as { response?: { status?: number } } | null)?.response?.status ?? 0)}
@@ -255,8 +277,11 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
             && useAuthStore.getState().hasPermission('rental-os:order:view') ? [{ key: 'order-handoff', title: t('订单人工办理'),
             content: <OrderHumanHandoff key={`order-handoff:${identity}:${selected}`} query={{ taskId: selected }} identity={identity} current={current}
               onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
-          { key: 'approval', title: t('人工确认'), content: <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
-            onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
+          { key: 'approval', title: t('人工确认'), content: data.items.find(row => row.taskId === selected)?.sceneCode === 'quote_clarification'
+            ? <TaskQuoteReprepare key={`quote-review:${identity}:${selected}`} taskId={selected} identity={identity} current={current}
+              onAccessDenied={() => { setSelected(null); setOpened(false); }} />
+            : <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
+              onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
           { key: 'input', title: t('补充信息'), content: <TaskClarification key={`input:${selected}`} taskId={selected} identity={identity} current={current}
             candidateReview={inputReviewState.review} onCandidateReviewed={status => { if (status === 'adopted') inputReview.clear(); }}
             onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> },
@@ -280,6 +305,6 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
         ]} /> : null}
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
-        stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(next); }} />}
+        stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(next); }} /></TaskWorkbenchModelControlProvider>}
   </section></VisibleObservationHost>;
 }

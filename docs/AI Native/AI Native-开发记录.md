@@ -6,6 +6,25 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-model-control-consumer-20261113"></a>
+## 同 Task 模型控制、回答后继展示与任务中心重新准备（2026-11-13）
+
+以已上传的 `7e4d1aaef2df3c3aebe5c02f95adc56a759a964d` 为基线，收口模型控制后端、dev2 后台七源及任务中心原选单到既有 linked reprepare 的 19 源阶段。解释和排版沿同一 Task 的原 Gateway、财务单账和累计资源执行，保存原 operationId 后派发，未知应答只读取该操作。生成开关在原创建权限校验前后复核，关闭后不能用旧准备登记新 Run，已发生操作仍按原收据读取。[生产组合](../../apps/api/src/modules/ai-native/workbench-model-control.application.ts)与[后台控制](../../apps/admin/src/features/ai-native/TaskWorkbenchModelControls.tsx)
+
+报价材料仅移除每次可用性读取的 `requestId`，保留库存、报价、来源及业务修订。人类回答继续时先传原 preparationDefinition，按已验证的原回答历史重建字段候选和 witness。展示修订按 Run 增长，字段修订按原回答数量增长，纯模型控制继承回答链。Root 对观察标识和业务差异的八个正反例模拟退出 0，stdin SHA-256 `4996d13cd43658117c34fed5c0a5c0d469f31998bf870e4e1a1e43b8b57c5a5a`。dev1 的公开组合完成三条原回答后的解释、排版，累计模型调用 6 次，展示修订 4→5→6，原回答收据保持，退出 0，stdin SHA-256 `dc3a402fad39b37115bf6fbc497da10344453c1f5223d1031c4182e7ae05f8c0`。关闭生成及权限等待中关闭均无新增操作、Run、账或模型，原同键读取保持，退出 0，stdin SHA-256 `cedbbf3a11b20371983f5d9f47fd7ebd62adc5bbe837a479828e5f263f85caac`。[回答后继组合](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)与[展示字段生成](../../apps/api/src/modules/ai-native/workbench-display-generation.service.ts)
+
+后台 API/session/React/Controller/axios 的助手必要模拟 31 项通过，stdin SHA-256 `231aeded361eee9479fddd2a06e5b4c9246eadaddcf2792c4882ed2c16feae38`，七源已逐 blob 核接。普通展示暂不可用时，合法候选按原字段期限保留并标记待重核，失权、隐藏、卸载及范围变化撤回。读取新结果再次验证原 Task/Run/result，展示刷新不触发业务准备。两个模型控制文件的 AIN-12 固定索引 blob 为 `6e0d6f278f86c5e38caf07d76dba3a83bca01c7c`、`82766e60bc9a08a8cad2b085307edc69a3555516`，后继 AIN-25 工作区修改由 dev2 继续持有。
+
+任务中心的受权 review 可返回服务端推导的原选单 proof，旧合同省略该字段仍可读，额外授权字段拒绝。用户审阅原步骤后使用既有重新准备组件输入新条件、比较新旧材料、要求新批准并读取原收据。刷新同一原步骤保留编辑，改选其他步骤或原步骤消失立即撤回旧提案定位。Root 实际 Guard→Controller→Core requote fixture、TaskHumanApproval 与 TaskQuoteReprepare 有限 React 宿主模拟退出 0，核对旧/新合同、撤权、伪造、刷新、切步骤、身份切换和隐藏，读取不新增模型、订单、审批或选单写入。stdin SHA-256 `3b8c78c900cf4ba560f90c52c3573be4af2b497f95b0862d460762e71b397631`。[原 review 生产者](../../apps/api/src/modules/ai-native/task-center-approval.composition.ts)与[任务中心消费者](../../apps/admin/src/features/ai-native/TaskQuoteReprepare.tsx)
+
+原必要类型检查使用 TypeScript 5.9.3，生产 4 根/1954 源、后台 4 根/1615 源零诊断，退出 0，stdin SHA-256 分别为 `55aa626c198c2ae8bc690d568a3f21cf9beadb2ae279fd9a91c308fba6fe72cf`、`b941ecab2644d17dad1694b2bc127f98d4fd882549aa51b6e8fba0a19e459a04`。命令均为 `node --no-compilation-cache -`，原驱动和输出保留 AI-RD/dev1/dev2 会话，没有另存测试脚本。曾失败的内存驱动因重复变量、编译器注册和 CommonJS/ES module 加载方式修正后复验，失败记录保留。实际浏览器、微信、数据库和模型供应商由负责人后续操作。
+
+2026-11-13 复核固定索引时，生产 4 根/1954 源仍为零诊断。后台最终连原 vite-env.d.ts 共 5 根/1615 源零诊断，退出 0，stdin SHA-256 `13086d1f7719bb70ce4ec48272f66eef59cb756c661362b41503ea634d9bc5d0`。首次内存命令因换行拼接错误退出，随后漏纳 Vite 声明，以及纳入助手活动 AIN-25 后继分别产生验证器诊断，均保留原失败输出。最终只调整验证器的正式声明和索引源码读取，源码未为这些诊断改动。`node scripts/validate-docs.cjs` 退出 1，仍为导航三处历史附件和稀疏站点示例四处既有缺链，无新增链接或任务算术错误。
+
+`timeDebt` 保留两类证据。dev1 在原 `cancel_metadata` 读取受控停顿 5091ms，超过约 4991ms 工作窗口后，原 5000ms charge 保持 UNKNOWN，收尾重新准入被拒绝。推进时间、租约到期后，公开原操作连续三读仍保持同一 Run、收据和占用，模型及 build 次数不增加。反例驱动保留原 available 断言并退出 1，stdin SHA-256 `42cfc2dc6cdcdd51da13182d6fdda84512b68879a51c1307dae23af0d0d0d964`，三读观察断言通过，观察 SHA-256 `4d6fb27ca91144d6fa3b761a83331aca7a31ba9726c43e5118525ad58f32f015`。旧偶发 unknown 缺原 charge、时钟和首个错误，仍待核明，不能用正常重跑或本次受控停顿关闭旧问题。
+
+AIN-12 原全文仍需核定动态展示候选到正式修改条件、重新准备、批准与原结果的完整消费及两个 Web 入口协作，当前任务百分比沿原门槛保持。AIN-25 模型控制首字观察后继由 dev2 继续，公共来源和报告由 AI-RD 接线。AIN-13 自身证据由 dev1 按原全文核查，前置仍按正式任务。全部已核模拟进程退出，审计为空，任务临时目录未创建。
+
 <a id="ain-inspection-legacy-adoption-p2-20261112"></a>
 ## 历史检查候选缺依据时的采用门禁修复（2026-11-12）
 

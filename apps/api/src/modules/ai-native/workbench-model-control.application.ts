@@ -69,7 +69,16 @@ export function composeWorkbenchModelControlRequests(dependencies: Omit<AiOrigin
           tasks: authorization.tasks, evidence, policy, observations: { readModelResult: query => observations.read(query) },
           readRunOrigin: repository.readOrigin.bind(repository) });
         const source = new WorkbenchModelControlSource({ db: input.db, repository, originals });
-        const service = new WorkbenchModelControlService({ repository, source, authority: scenes.creationAuthority,
+        const service = new WorkbenchModelControlService({ repository, source, authority: {
+          create: async original => {
+            // Gate new registration as well as dispatch. An old prepared
+            // command cannot leave a new Run when generation is now disabled.
+            if (!options.available(original.sceneCode)) throw unavailable();
+            const grant = await scenes.creationAuthority.create(original);
+            if (!options.available(original.sceneCode)) throw unavailable();
+            return grant;
+          },
+        },
           build: control => options.build(input, control) });
         if (action === 'model-control-read') return service.read(command as AiWorkbenchModelControlReference);
         if (action === 'model-control') return service.execute(command as AiWorkbenchModelControlCommand, signal);

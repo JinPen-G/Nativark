@@ -19,6 +19,8 @@ import { parseTaskModelDisplayWitness, taskModelDisplayWitnessMarker, taskModelD
 import type { AiWorkbenchDisplayOriginalMaterial } from './workbench-display-original.reader';
 import type { AiWorkbenchFieldMaterialService } from './workbench-field-material.service';
 import type { AiQuoteBusinessPreparationService } from './tools/quote-business-preparation.service';
+import { applyOriginalQuoteAnswers } from './scenes/original-quote-input';
+import type { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
 
 export const AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION = Symbol('AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION');
 export const WORKBENCH_DISPLAY_PROMPT_REFERENCE = 'workbench-display-html-v1';
@@ -45,6 +47,7 @@ type Input = { db: Db; scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   originals: Pick<PrismaOriginalRequestRepository, 'readHistorical'>; publication: AiOriginalSceneDisplayPublication;
   quoteFields?: { material: Pick<AiWorkbenchFieldMaterialService, 'prepare' | 'revalidate'>;
     describe: AiQuoteBusinessPreparationService['describeInput'] } };
+type QuoteFieldHistory = Awaited<ReturnType<typeof readTaskModelRunOrigin>>['history'];
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const same = (a: unknown, b: unknown) => requestFingerprint(a) === requestFingerprint(b);
@@ -61,7 +64,8 @@ export class AiOriginalSceneDisplayGeneration {
   }
   private async fields(context: AiExecutionContext, original: AiSceneRequestReceiptDraft,
     binding: AiWorkbenchMaterialBindingDraft, fieldRevision: number,
-    retention: AiWorkbenchFieldMaterialDraft['retention'], expected?: AiWorkbenchFieldMaterialDraft) {
+    retention: AiWorkbenchFieldMaterialDraft['retention'], history: QuoteFieldHistory,
+    expected?: AiWorkbenchFieldMaterialDraft) {
     const source = this.input.quoteFields;
     if (!source || original.sceneCode !== 'quote_clarification') {
       if (expected) throw unavailable();
@@ -71,13 +75,10 @@ export class AiOriginalSceneDisplayGeneration {
     if (retained.receipt.state === 'revoked' || retained.receipt.contentHash !== original.contentHash
       || retained.receipt.revision !== original.revision || originalIdentityHash(retained.context) !== originalIdentityHash(context)
       || retained.request.sceneCode !== 'quote_clarification') throw denied();
-    // Initial fields are a projection of the original preparation. A later
-    // question/answer chain needs its own verified candidate, not the initial
-    // request silently reused as an editable successor.
-    if (!('candidate' in retained.request.input) || fieldRevision !== 1) {
-      if (expected) throw unavailable();
-      return null;
-    }
+    // The enclosing publisher/reader has already verified the persisted answer
+    // chain. Rebuild its candidate rather than borrowing the initial fields.
+    const candidate = applyOriginalQuoteAnswers(retained.request.input.candidate, history);
+    if (fieldRevision !== history.length + 1) throw denied();
     const description = await source.describe(context);
     if (context.scope.kind !== 'workspace' || !same(description.scope, context.scope)
       || description.audience !== context.audience || !id.safeParse(description.configVersion).success
@@ -89,7 +90,7 @@ export class AiOriginalSceneDisplayGeneration {
     // is a current observation, never a fabricated historical config snapshot.
     // Retaining its timestamp on revalidation does not replace the fresh read.
     if (expected && (expected.sources.length !== 1 || !prior || !same(prior, reference))) throw denied();
-    const input = { context, binding, candidate: retained.request.input.candidate, fieldRevision, sources: [reference], retention };
+    const input = { context, binding, candidate, fieldRevision, sources: [reference], retention };
     return expected ? source.material.revalidate(input, expected) : source.material.prepare(input);
   }
   private async binding(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string, generation: boolean) {
@@ -122,7 +123,7 @@ export class AiOriginalSceneDisplayGeneration {
     return { current, task, run, turn, conversation };
   }
   async prepare(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string,
-    materialHash: string, value: z.infer<typeof taskModelMaterialSchema>) {
+    materialHash: string, value: z.infer<typeof taskModelMaterialSchema>, history: QuoteFieldHistory = []) {
     if (value.displayWitness) throw denied();
     const found = await this.binding(context, original, taskId, runId, true);
     if (!found) return freezeOriginalInput(taskModelMaterialSchema.parse(value));
@@ -141,11 +142,11 @@ export class AiOriginalSceneDisplayGeneration {
         { kind: 'turn', id: found.turn.id, version: String(found.turn.admissionRevision), sha256: found.turn.inputHash },
         { kind: 'input', id: original.inputRef, version: String(original.revision), sha256: original.contentHash },
         { kind: 'task', id: taskId, version: String(found.task.revision), sha256: requestFingerprint({ taskId, runId, inputRef: original.inputRef }) }],
-        persistentConstraints: { humanInputReceipts: [], pendingInputRequests: [], unknownOperations: [] },
+        persistentConstraints: { humanInputReceipts: history.map(round => round.receiptId), pendingInputRequests: [], unknownOperations: [] },
         expiresAt: sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion },
       authority: 'none_reauthorize_before_consumption' };
-    const fieldMaterial = await this.fields(found.current.context, original, binding, found.run.sequence,
-      { expiresAt: sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion });
+    const fieldMaterial = await this.fields(found.current.context, original, binding, history.length + 1,
+      { expiresAt: sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion }, history);
     // The original preparation supplies this safe field projection before the
     // plan is frozen. It is not a persisted question or a human input receipt.
     const witness = parseTaskModelDisplayWitness({ version: 'ain-workbench-generation-witness-1', purpose: 'display', binding,
@@ -156,11 +157,11 @@ export class AiOriginalSceneDisplayGeneration {
       { role: 'system', content: [{ kind: 'text', text: WORKBENCH_DISPLAY_SYSTEM_PROMPT },
         { kind: 'text', text: taskModelDisplayWitnessMarker(witness) },
         ...(fieldMaterial ? [{ kind: 'text' as const, text: taskModelDisplayFieldContract(witness)! }] : [])] }] });
-    await this.assertOriginal(context, original, taskId, runId, witness, true);
+    await this.assertOriginal(context, original, taskId, runId, witness, true, history);
     return freezeOriginalInput(material);
   }
   private async assertOriginal(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string,
-    witness: TaskModelDisplayWitness, generation: boolean) {
+    witness: TaskModelDisplayWitness, generation: boolean, history: QuoteFieldHistory) {
     const { configuration, now } = this.configuration(), found = await this.binding(context, original, taskId, runId, generation);
     if (!found) throw denied();
     if (!same(configuration.prompt, witness.prompt) || configuration.policyVersion !== witness.policyVersion
@@ -168,21 +169,25 @@ export class AiOriginalSceneDisplayGeneration {
       || !same(witness.context.scope, found.current.context.scope) || witness.aclRevision !== originalIdentityHash(found.current.context)
       || witness.binding.conversationId !== found.turn.conversationId || witness.binding.turnId !== found.turn.id
       || witness.binding.taskId !== taskId || witness.binding.inputFingerprint !== found.task.inputHash
+      || !same(witness.context.history.persistentConstraints.humanInputReceipts, history.map(round => round.receiptId))
       || witness.presentationRevision !== found.run.sequence || !same(witness.binding.original, { draftVersion: original.draftVersion, inputRef: original.inputRef })
       || Date.parse(witness.sourceExpiresAt) <= now.getTime()
       || Date.parse(witness.sourceExpiresAt) > Math.min(Date.parse(original.expiresAt), Date.parse(configuration.expiresAt))) throw denied();
     if (witness.fieldMaterial) {
-      if (witness.fieldMaterial.fieldRevision !== found.run.sequence) throw denied();
+      // Pure model controls advance presentation only. Human answer receipts
+      // advance the field revision, independently of additional model Runs.
+      if (witness.fieldMaterial.fieldRevision !== history.length + 1) throw denied();
       await this.fields(found.current.context, original, witness.binding,
-        witness.fieldMaterial.fieldRevision, witness.fieldMaterial.retention, witness.fieldMaterial);
+        witness.fieldMaterial.fieldRevision, witness.fieldMaterial.retention, history, witness.fieldMaterial);
     }
     return witness;
   }
-  async revalidateInput(context: AiExecutionContext, taskId: string, runId: string, modelInput: TaskModelInput) {
+  async revalidateInput(context: AiExecutionContext, taskId: string, runId: string, modelInput: TaskModelInput,
+    history: QuoteFieldHistory = []) {
     if (!modelInput.displayWitness) return;
     const witness = parseTaskModelDisplayWitness(modelInput.displayWitness), original = await this.input.originals.readHistorical(witness.binding.original);
     if (original.receipt.state !== 'stored' || originalIdentityHash(original.context) !== originalIdentityHash(context)) throw denied();
-    await this.assertOriginal(context, original.receipt, taskId, runId, witness, true);
+    await this.assertOriginal(context, original.receipt, taskId, runId, witness, true, history);
   }
   async revalidateOriginal(material: AiWorkbenchDisplayOriginalMaterial, value: TaskModelDisplayWitness): Promise<TaskModelDisplayWitness> {
     const witness = parseTaskModelDisplayWitness(value);
@@ -190,7 +195,8 @@ export class AiOriginalSceneDisplayGeneration {
       || witness.binding.materialHash !== material.envelope.materialHash || witness.binding.materialRevision !== material.original.revision) throw denied();
     const original = await this.input.originals.readHistorical(witness.binding.original);
     if (original.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(material.context)) throw denied();
-    await this.assertOriginal(material.context, original.receipt, material.task.taskId, material.model.step.runId, witness, false);
+    await this.assertOriginal(material.context, original.receipt, material.task.taskId, material.model.step.runId,
+      witness, false, material.lineage.history);
     return freezeOriginalInput(witness);
   }
 }

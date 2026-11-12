@@ -305,7 +305,7 @@ export class WorkbenchModelControlRepository {
     const parentOrigin = await this.readOrigin(transaction, access, { ...key, runId: parent.run.id,
       originRunId: receipt.resourceOriginRunId, registrationRef: parent.input.registrationRef }, visited);
     if (![receipt.registrationRef, parentOrigin.registrationRef, receipt.resourceRegistrationRef].includes(key.registrationRef)) throw denied();
-    return { registrationRef: receipt.registrationRef, continuation: undefined, history: [],
+    return { registrationRef: receipt.registrationRef, continuation: undefined, history: parentOrigin.history,
       control: { operationLogId: receipt.operationLogId, presentationRevision: receipt.presentationRevision,
         sourceRunId: receipt.command.sourceRunId, sourceResultId: receipt.command.sourceResultId,
         resourceOriginRunId: receipt.resourceOriginRunId } };

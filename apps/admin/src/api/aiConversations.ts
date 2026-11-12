@@ -4,12 +4,40 @@ import { AI_CONVERSATION_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_REQUE
   type AiConversationTurnReferenceDraft, type AiConversationTurnObservationDraft, type AiConversationCreateDraft,
   type AiConversationMutationDraft, type AiConversationOperationRequestDraft, type AiConversationTurnAdmissionDraft,
   type AiSceneCode, type AiConversationUnstartedCloseDraft, type ApiResult,
+  type AiWorkbenchModelControlCommand, type AiWorkbenchModelControlReference, type AiWorkbenchModelControlPreparation,
+  type AiWorkbenchModelControlObservation,
   type AiSceneModelAnswerQueryDraft, type AiSceneModelQuoteConfirmDraft, type AiTaskSceneReadDraft, type AiTaskSceneObservationDraft } from '@rental-os/shared';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { readConversationHistory, readConversationDetail, readConversationTaskResult } from '@/features/ai-native/conversation-history-reader';
 import { aiTaskCenterApi } from './aiTaskCenter';
 import { http } from './http';
 import { useAuthStore } from '@/features/auth/authStore';
+import { parseWorkbenchModelControl } from '@/features/ai-native/workbench-model-control-session';
+
+async function workbenchControl(action: 'model-control-prepare', input: { taskId: string }, signal: AbortSignal): Promise<AiWorkbenchModelControlPreparation>;
+async function workbenchControl(action: 'model-control' | 'model-control-read', input: AiWorkbenchModelControlCommand | AiWorkbenchModelControlReference,
+  signal: AbortSignal): Promise<AiWorkbenchModelControlObservation>;
+async function workbenchControl(action: 'model-control-prepare' | 'model-control' | 'model-control-read', input: unknown, signal: AbortSignal) {
+  const command = action === 'model-control-prepare' ? parseWorkbenchModelControl('AiWorkbenchDisplayReadDraft', input)
+    : action === 'model-control' ? parseWorkbenchModelControl('AiWorkbenchModelControlCommand', input)
+      : parseWorkbenchModelControl('AiWorkbenchModelControlReference', input);
+  const auth = useAuthStore.getState(), epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
+  const owner = JSON.stringify([auth.user, auth.tenant?.tenantId, auth.currentWorkspaceId]);
+  const check = () => { const next = useAuthStore.getState();
+    if (active.aborted || epoch !== currentSessionEpoch() || !next.token || !next.user || next.user.isSaasAdmin
+      || !next.tenant?.tenantId || !next.currentWorkspaceId
+      || JSON.stringify([next.user, next.tenant.tenantId, next.currentWorkspaceId]) !== owner) throw Error('AI_SCOPE_CHANGED');
+  };
+  check();
+  // The canonical interceptor already recognizes this flag. A credential
+  // refresh must return control to the original operation reader, never replay.
+  const config = { signal: active, timeout: action === 'model-control' ? 125000 : 15000, _authRetry: true };
+  const response = await http.post<ApiResult<unknown>>(`/${AI_CONVERSATION_HTTP_DRAFT.basePath}/${action}`, command, config); check();
+  const value = action === 'model-control-prepare' ? parseWorkbenchModelControl('AiWorkbenchModelControlPreparation', response.data.data)
+    : parseWorkbenchModelControl('AiWorkbenchModelControlObservation', response.data.data);
+  if (value.taskId !== command.taskId || 'operationId' in command && (!('operationId' in value) || value.operationId !== command.operationId)) throw Error('AI_SCOPE_CHANGED');
+  return value;
+}
 
 async function lifecycle(action: 'create' | 'archive' | 'delete' | 'operation' | 'admit' | 'admission' | 'release' | 'closeUnstarted' | 'read', command: unknown, signal: AbortSignal) {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
@@ -88,6 +116,9 @@ async function orderModel(action: 'readPreparation' | 'start' | 'readOrderResult
   return response.data.data;
 }
 export const aiConversationsApi = Object.freeze({
+  prepareModelControl: (input: { taskId: string }, signal: AbortSignal) => workbenchControl('model-control-prepare', input, signal),
+  modelControl: (input: AiWorkbenchModelControlCommand, signal: AbortSignal) => workbenchControl('model-control', input, signal),
+  readModelControl: (input: AiWorkbenchModelControlReference, signal: AbortSignal) => workbenchControl('model-control-read', input, signal),
   openingStart,
   quoteStart,
   quotePreparation: (input: AiSceneModelAnswerQueryDraft, signal: AbortSignal) => quoteOperation('readQuotePreparation', input, signal),

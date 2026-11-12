@@ -13,7 +13,7 @@ import { composeApprovedSettingsApplication } from './approval-execution/approve
 import type { ApprovedSettingsApplicationDependencies } from './approval-execution/approved-settings-task.authority';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { resolveTaskCenterBusinessTarget, readTaskCenterOrderSelection } from './task-center-business.reader';
-import { validateQuoteSelectionResponse } from './task-request/quote-selection.validation';
+import { parseQuoteSelectionProof, validateQuoteSelectionResponse } from './task-request/quote-selection.validation';
 
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const taskCenterReviewSchema = z.object({ taskId: id, runId: id, stepId: id }).strict();
@@ -114,9 +114,14 @@ export function composeTaskCenterApproval(d: TaskCenterApprovalDependencies, cre
       const review = approvalApplicationContract('AiApprovalApplicationReviewDraft', {
         draftVersion: AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, proposal, deterministic, generatedText
       }, true);
+      const target = await resolveTaskCenterBusinessTarget({ db }, tasks, query);
+      const selected = target.task.inputRef ? await readTaskCenterOrderSelection(db, target) : null;
+      if (selected) await selected.verify();
+      else await target.verify();
       await recheck(query, before);
       return { ...query, taskRevision: wait.taskRevision, checkpointRef: wait.checkpointRef,
-        kind: 'order', review, businessExecution: 'not_attested' };
+        kind: 'order', review, ...(selected ? { selection: parseQuoteSelectionProof(selected.selection) } : {}),
+        businessExecution: 'not_attested' };
     }
     const review = await settings().readProposal(settingsReference(query.taskId, { ...wait.proposal, decision: 'approve' }));
     await recheck(query, before);
