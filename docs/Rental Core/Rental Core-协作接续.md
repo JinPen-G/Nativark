@@ -12,13 +12,13 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。reader6d35/800a及时间补片`5b51b90dd01feae189d06d8c66d59875c8172401`已推送核GitHub，QA/集成结论由PM转交后核定。当前[原九项同client来源](<Rental Core-开发记录.md#readiness-original-transaction-20261112>)四源码已完成类型、原17项及限定验证，含PM仅授权的membership.countPlans两行，源码固定`483b887dc23dd252ecb423806ac5030204c39812`。无merge/cherry-pick；当前API已从固定c24源码更新为866文件，见[构建及退出残留](<Rental Core-开发记录.md#api-current-build-cleanup-20261112>)。原四入口捕获/真实counter/资源短缺参加者未齐；main固定来源和企业/AI公共消费仍按原作者协调，不追活动WIP或处理负责人接管空目录。
+- 唯一开发树：`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。reader6d35/800a/5b51及[原九项同client来源](<Rental Core-开发记录.md#readiness-original-transaction-20261112>)固定成果保留，QA/集成结论由PM转交后核定。本片从已推送c14记录接续，完成[采用/准备输入副本](<Rental Core-开发记录.md#adoption-input-capture-20261112>)两源码、原复现/6组限定调用及全API类型诊断0；866文件包已安装两份emit，其余864份沿c24构建。无merge/cherry-pick；原四入口捕获/真实counter/资源短缺参加者未齐，assignment.issueSource等待PM核准。main固定来源和企业/AI公共消费按原作者协调，不追活动WIP或处理负责人接管空目录。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行而非缓存/品类字符串猜修订。验证暂存已核实删除。PM另准分配服务`recordIssue`原事务参加者及业务配置/九项源的最小片，尚未接入；AI的OutboxParticipant/ResourcePorts和事件模型仍归AI作者，main HTTP/构建由PM独占。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与写锁外`readTenantReadinessSource`两个只读合同固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`已普通推送核远端，不改原扫描、登记或九项算法。API类型、原分配14断言/开业读取17项及新读取5组通过，暂存已核实删除，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)。ResourcePorts不得重入扫描/新开业务事务，不以独立观察冒充快照；可选参加者未接入，缺正式临近政策/事实/授权不捕获。
 - 主树、AI及企业树的并行成果保留，不追活动HEAD、不夹带他人WIP。固定整合按来源SHA及受影响路径核对；原63项审查全文仍见[平台开发记录](../管理后台/管理后台-开发记录.md#review-63)，不由旧状态推定当前已完成。
 - 旧阶段25份清单是主树 `D:/工作文件/rental-OS/output/category-governance` 的唯一跨树原稿，本树26处现行链接已按PM安排改相对主仓库路径；另2处历史附件缺失保留，本树新证据仍在本树同名目录。原检查器继续将跨树路径列为`link-outside`，本片单独核固定原稿，不复制副本或放松规则。PM收回main时须按目标文档位置调整相对层级，见[原稿记录](<Rental Core-开发记录.md#evidence-original-location-20261112>)。
-- Shared202文件保持，本树当前API为c24固定源码的866份自持JS，包含原批次/续租、R08、快照、完整配置补落及原九项/reader/委托封存补片，四项Shared/Client保护未变。原各阶段结果/失败保留，包不计CLOSE或真库/HTTP/宿主/发布完成。上次退出暂存已安全移至主仓库统一待清理目录，862文件尚未删除；责任清单和实际构建范围唯一见[当前阶段](<Rental Core-开发记录.md#api-current-build-cleanup-20261112>)。工具只读使用，同树包别名不跨树共享。
+- Shared202文件保持，本树当前API为866份自持JS：c24固定构建加本次两份输入捕获emit，包含原批次/续租、R08、快照、配置补落及原九项/reader/委托封存；四项Shared/Client保护未变。原各阶段结果/失败保留，包不计CLOSE或真库/HTTP/宿主/发布完成。原c24退出暂存862文件及本次4份最小验证残留已归集主仓库统一待清理目录，未删除；两份唯一责任清单分别从[构建阶段](<Rental Core-开发记录.md#api-current-build-cleanup-20261112>)与[输入阶段](<Rental Core-开发记录.md#adoption-input-capture-20261112>)定位。工具只读使用，同树包别名不跨树共享。
 
 ## 3. 下一入口与原缺口
 

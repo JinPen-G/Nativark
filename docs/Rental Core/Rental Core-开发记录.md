@@ -4,6 +4,18 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="adoption-input-capture-20261112"></a>
+
+## 采用与准备的原输入、审计及恢复一致性（2026-11-12）
+
+支撑CAT-GOV-08及CAT-A08/A17，未改变原任务或CLOSE门槛。从已推送核远端的`c14d1c6c86fb5aace414783577d0c7e150275ad7`接续，仅改[采用应用](../../apps/api/src/modules/rental-core/category-adoption.application.ts)和[准备服务](../../apps/api/src/modules/rental-core/category-adoption-preparation.service.ts)。原采用先为收据复制输入，却在等Auth/数据库后继续读取调用方对象；限定复现中，调用方在首个Tenant锁处改原因，采用返回adopted、审计写新原因、收据保留旧原因，原键回读因此503。原始[复现证据](../../output/category-governance/adoption-input-capture-reproduction-20261112.json)保留；[首次调用](../../output/category-governance/adoption-input-capture-before-20261112.json)在原夹具范围内未完成，重新声明原Tenant共享父锁查询后才取得上述复现，首次结果不当作缺陷证据。
+
+正式采用、分批准备及兼容整份准备现在在第一次等待前复制请求，后续执行、原因、期望修订、原键/指纹、嵌套补丁和撤回均使用同一次副本；分批复制在原大小/条数检查后进行。调用方的新输入仍保留，服务不回写或自动采用新输入，不改变原Auth/Guard/ALS复验、事务、政策、幂等/原收据算法或生产关闭条件。直接消费者仍为原准备Controller的保存/批次/采用入口和后台原准备流程，Shared、DTO/OpenAPI与共同装配没有变更。
+
+原API配置/受管TypeScript5.9.3全程序诊断0（866根、2011源），只对两份变更源码用原编译选项emit，未复制依赖或另建完整构建目录。原采用fixture的6组限定实际服务调用退出0、audit0：等待时改原因/原键、来源/准备/政策修订与操作、分批嵌套补丁/撤回、旧整份保存、当前撤权及收据写失败回滚；原键回读/原输入重放无新增写，同键改内容仍拒绝。仅声明原Tenant共享父锁查询，其余Auth映射/业务仓储仍用既有明确替身；这不是真实SQL、Controller/Guard、并发事务或宿主证据，没有新增/扩写测试脚本或修改旧断言。
+
+两份JS已安装到本树自持API，866文件全部hash一致，另外864份沿c24固定构建、4份Shared/Client保护未变。源码、原命令、6组结果、两份emit/hash及安装来源唯一见[最终证据](../../output/category-governance/adoption-input-capture-final-20261112.json)。四份记录/接续新增10处本地链接、4处片段均存在，唯一跨树责任清单保留原跨树分类，格式检查退出0。原任务暂存路径不存在；本次3份空审计及1份1385字节中间结果已归集，未删除，责任只见[同一待清理清单](../../../../output/.cleanup-pending/rental-core/adoption-input-capture-validation/manifest.json)。原c24构建的862文件待清理事项仍见下节，不重复保全。完整结项仍0/14；真实采用/恢复、多实例、两动态组合经营及独立Review继续按原门槛，下一独占入口仍为原08及历史保护，assignment.issueSource/AI参加者合同由PM核准后接入。
+
 <a id="api-current-build-cleanup-20261112"></a>
 
 ## 当前固定源码的API构建与退出残留（2026-11-12）

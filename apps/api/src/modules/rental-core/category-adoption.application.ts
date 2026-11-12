@@ -46,7 +46,10 @@ export class CategoryAdoptionApplication {
     if (!this.enabled()) throw new NotFoundException("正式采用测试入口尚未开放");
     if (typeof targetId !== "string" || !targetId.trim() || targetId.length > 191) throw new BadRequestException("目标版本标识无效");
     validateInput(body);
-    const input = { targetVersionId: targetId, ...structuredClone(body) };
+    // Capture before awaiting locks: execution, audit and original-key recovery
+    // must use the same request even if the caller later edits its object.
+    body = structuredClone(body);
+    const input = { targetVersionId: targetId, ...body };
     const workspaceId = requireRequestWorkspaceId();
     const fingerprint = requestFingerprint({ actorId: user.id, workspaceId, input });
     try {

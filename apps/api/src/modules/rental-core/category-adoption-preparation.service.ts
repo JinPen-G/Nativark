@@ -219,6 +219,8 @@ export class CategoryAdoptionPreparationService {
   async save(user: SystemUserRow, targetId: string, body: SaveCategoryPreparationRequest) {
     assertCategoryPreparationPermission(user);
     if (!body.reason?.trim() || body.reason.length > 512) throw new BadRequestException("必须填写准备原因（最多512字）");
+    // A late caller edit must not replace the staged input while awaiting Auth.
+    body = structuredClone(body);
     return this.transaction(user, async (tx) => {
       const context = await this.context(tx, user, targetId, body.operation);
       if (context.workspace.categoryVersionId !== body.expectedSourceVersionId || context.workspace.categoryAdoptionRevision !== body.expectedSourceRevision) throw new ConflictException("来源品类版本已变化，请刷新后重新准备");
@@ -291,13 +293,17 @@ export class CategoryAdoptionPreparationService {
       throw new BadRequestException("批次标识、准备原因或期望修订无效");
     }
     assertCategoryPreparationBatchSize(body.patches, body.removals ?? []);
-    const removeCapabilities = body.removeCapabilityCodes ?? [];
-    if (!Array.isArray(removeCapabilities) || removeCapabilities.length > 100 || new Set(removeCapabilities).size !== removeCapabilities.length ||
-        removeCapabilities.some((code) => !RENTAL_CAPABILITY_CODES.includes(code)) ||
+    const requestedRemovals = body.removeCapabilityCodes ?? [];
+    if (!Array.isArray(requestedRemovals) || requestedRemovals.length > 100 || new Set(requestedRemovals).size !== requestedRemovals.length ||
+        requestedRemovals.some((code) => !RENTAL_CAPABILITY_CODES.includes(code)) ||
         (body.capabilityPatches !== undefined && (!Array.isArray(body.capabilityPatches) || body.capabilityPatches.length > 100)) ||
         Buffer.byteLength(JSON.stringify(body)) > CATEGORY_PREPARATION_LIMITS.batchBytes * 2 + 4096) {
       throw new BadRequestException("能力批次或请求大小超过受支持范围");
     }
+    // Preserve nested patches/removals as well as the key: a receipt's input
+    // fingerprint cannot describe one request while another is staged.
+    body = structuredClone(body);
+    const removeCapabilities = body.removeCapabilityCodes ?? [];
     const fingerprint = categoryPreparationBatchFingerprint(body);
     return this.transaction(user, async (tx) => {
       // A write-endpoint retry retains its original current eligibility/source
