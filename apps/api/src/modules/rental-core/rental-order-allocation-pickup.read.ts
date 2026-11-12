@@ -167,6 +167,7 @@ export async function readAllocationPickupInput(prisma: PrismaService, tenantId:
   const parent = await prisma.rentalOrder.findFirst({ where: parentWhere(), select: parentSelect });
   if (!parent) throw new NotFoundException("订单不在当前读取范围");
   if (parent.id !== orderId || parent.tenantId !== tenantId || parent.workspaceId !== workspaceId || !date(parent.updatedAt)) throw invalid();
+  const sourceOrderTime = parent.updatedAt.getTime();
   const allocationSelect = { id: true, orderId: true, orderLineId: true, itemGroupId: true, assetId: true,
     assetNo: true, quantity: true, status: true, updatedAt: true,
     orderLine: { select: { orderId: true } } } as const;
@@ -176,6 +177,7 @@ export async function readAllocationPickupInput(prisma: PrismaService, tenantId:
   if (!text(allocation.orderLineId) || !date(allocation.updatedAt) || !Number.isSafeInteger(allocation.quantity) || allocation.quantity < 1
     || allocation.assetId !== null && !text(allocation.assetId) || allocation.assetNo !== null && !text(allocation.assetNo)
     || !["pre_assigned", "locked", "allocated", "picked_up", "consumed", "returned", "released"].includes(allocation.status)) throw invalid();
+  const sourceAllocationTime = allocation.updatedAt.getTime();
   const links = await prisma.$queryRaw<Array<{ id: string; updatedAt: Date; metadataType: string | null;
     exchangeType: string | null; exchangeId: unknown }>>(Prisma.sql`SELECT a.id, a.updatedAt,
       JSON_TYPE(a.metadata) AS metadataType, JSON_TYPE(JSON_EXTRACT(a.metadata, '$.exchangeId')) AS exchangeType,
@@ -195,6 +197,7 @@ export async function readAllocationPickupInput(prisma: PrismaService, tenantId:
       quantity: allocation.quantity, status: allocation.status, updatedAt: allocation.updatedAt.toISOString(), exchangeId } };
   let assetBefore: { id: string; tenantId: string; workspaceId: string; itemGroupId: string; updatedAt: Date;
     itemGroup: { id: string; tenantId: string; workspaceId: string; updatedAt: Date } } | null = null;
+  let assetTimes: { asset: number; itemGroup: number } | undefined;
   const assetWhere = async () => ({ id: allocation.assetId!, tenantId, workspaceId, AND: [await assetVisibility(allocation.assetId!)] });
   const assetSelect = { id: true, tenantId: true, workspaceId: true, itemGroupId: true, updatedAt: true,
     itemGroup: { select: { id: true, tenantId: true, workspaceId: true, updatedAt: true } } } as const;
@@ -207,8 +210,9 @@ export async function readAllocationPickupInput(prisma: PrismaService, tenantId:
     else {
       if (assetBefore.id !== allocation.assetId || assetBefore.tenantId !== tenantId || assetBefore.workspaceId !== workspaceId
         || assetBefore.itemGroupId !== allocation.itemGroupId || !date(assetBefore.updatedAt)
-        || assetBefore.itemGroup.id !== allocation.itemGroupId || assetBefore.itemGroup.tenantId !== tenantId
+        || !assetBefore.itemGroup || assetBefore.itemGroup.id !== allocation.itemGroupId || assetBefore.itemGroup.tenantId !== tenantId
         || assetBefore.itemGroup.workspaceId !== workspaceId || !date(assetBefore.itemGroup.updatedAt)) throw invalid();
+      assetTimes = { asset: assetBefore.updatedAt.getTime(), itemGroup: assetBefore.itemGroup.updatedAt.getTime() };
       const assets = await prisma.$queryRaw<Array<{ id: string; tenantId: string; workspaceId: string; itemGroupId: string;
         updatedAt: Date; serialNo: string | null; attributes: unknown; itemGroupAttributes: unknown }>>(Prisma.sql`
         SELECT a.id, a.tenantId, a.workspaceId, a.itemGroupId, a.updatedAt, LEFT(a.serialNo, 192) AS serialNo,
@@ -331,11 +335,18 @@ export async function readAllocationPickupInput(prisma: PrismaService, tenantId:
   }
   const after = await prisma.rentalOrder.findFirst({ where: parentWhere(), select: parentSelect });
   const allocationAfter = await prisma.rentalAllocation.findFirst({ where: allocationWhere(), select: allocationSelect });
-  if (!after || !allocationAfter || requestFingerprint(after) !== requestFingerprint(parent)
+  // The original idempotency fingerprint intentionally has no Date encoding.
+  // These read fences compare captured milliseconds, leaving old keys intact.
+  if (!after || !allocationAfter || !date(after.updatedAt) || after.updatedAt.getTime() !== sourceOrderTime
+    || !date(allocationAfter.updatedAt) || allocationAfter.updatedAt.getTime() !== sourceAllocationTime
+    || requestFingerprint(after) !== requestFingerprint(parent)
     || requestFingerprint(allocationAfter) !== requestFingerprint(allocation) || requestFingerprint(getRequestIdentity()) !== identityHash
     || await resolveScopeWorkspaceId(prisma, tenantId) !== workspaceId) throw invalid();
   if (allocation.assetId) {
     const assetAfter = await prisma.rentalAsset.findFirst({ where: await assetWhere(), select: assetSelect });
+    if (assetBefore && (!assetAfter || !assetTimes || !date(assetAfter.updatedAt)
+      || assetAfter.updatedAt.getTime() !== assetTimes.asset || !assetAfter.itemGroup || !date(assetAfter.itemGroup.updatedAt)
+      || assetAfter.itemGroup.updatedAt.getTime() !== assetTimes.itemGroup)) throw invalid();
     if (requestFingerprint(assetAfter) !== requestFingerprint(assetBefore)) throw invalid();
   }
   if (requestFingerprint(getRequestIdentity()) !== identityHash) throw new ForbiddenException("领取资源读取期间当前身份变化");

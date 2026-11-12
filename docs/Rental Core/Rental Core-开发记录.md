@@ -4,6 +4,18 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="allocation-pickup-date-fences-20261112"></a>
+
+## 单资产读取的显式时间复核（2026-11-12）
+
+QA按6d35/800a实际reader与外层Core确认P2：原requestFingerprint将Date视为空对象，最后一次资产或关联型号仅updatedAt变化仍返回旧recorded投影；原反例stdin SHA为`5454b7c82fb287bd0edbcddee20c5c77781fd3a544331065c452d41986918906`，其退出0表示反例成立。本片仅修[原reader](../../apps/api/src/modules/rental-core/rental-order-allocation-pickup.read.ts)，从已推送的800a接续，不改全局指纹、历史幂等键、范围/资源算法或字段/冻结模板/修正链。
+
+初次读取即捕获订单、分配、资产和关联型号的有效毫秒时间，最终ORM复读显式校验Date有效性及getTime相等；缺/坏日期和单独时间变化按原来源不可核对拒绝。其余字段继续原指纹，原已记录/未记录分区保持，日期对象引用相同或不同不代替时间比较。记录修订/时间、原SQL时间绑定的既有复核不变。
+
+隔离原API类型866根/2011源诊断0，四AIN-17源码WIP以800a原blob在内存排除；限定实际reader与外层Core调用退出0：四类行的时间变化、缺日期、无效日期共12组拒绝，同值新Date实例通过，原字段规则、零读数和冻结km单位保持，并确认历史指纹Date语义未改变。SQL/Auth/行均为既有明确替身，不扩写测试或重跑广域/QA原16拒绝组；这些原组留原固定证据，本片只复验P2影响范围。
+
+源码hash、短命令/结果与QA反例引用唯一见[时间复核证据](../../output/category-governance/allocation-pickup-date-fences-20261112.json)，audit0、退出暂存已删除。固定最小后继交PM/QA复验，与6d35/800a同核，不将reader半片记作完整AIN-19或CAT/CLOSE结项。AIN-17四源码原tx透传已完成类型/原17项/限定同client验证，保留待单独固定；当前不重建045运行包、执行真实DB/宿主或改其他并行作者文件。
+
 <a id="allocation-pickup-field-rules-20261112"></a>
 
 ## 单资产当前字段的原规则与缺值定义（2026-11-12）
