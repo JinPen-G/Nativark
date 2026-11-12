@@ -4,6 +4,20 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="pm-governance-authority-qa-blocker-20261113"></a>
+
+## 治理身份闭包复验与 AI 直接消费者缺口（2026-11-13）
+
+Core 固定 `654a5e35cb010aa15bd164db127b00a1f12835e3` 的最小补片 SHA-256 `8065ea1629a4a79dddb12e349fe67878caaad8df707e253a6ec40c879e478bc8` 已由 QA 独立核对。严格应用于 main `2a5c56471` 加原八句输入副本后，治理服务 blob `09eca288fdfdcc66b2ab005199a5c588b4769a5f` 与 Controller blob `e4900454be98043074b69301bf3d99a215523e01` 匹配，Auth/PlatformRepository 及 DI 已在主线。
+
+QA 实际 Auth 签名、PlatformService 会话/SaaS 校验、角色映射及 Controller/服务的十一组限定行为全部通过，命令 `node --no-compilation-cache -` 退出 0，stdin SHA-256 `37e756ffc633b15264e60b2c9897e7670b57805db8de6dd934b7d36861c22072`。两源码 noEmit 为 2 根/1194 源零诊断，命令 SHA-256 `1a590048e18fb9c39023d0c43016795bd0aba52b8ce0a94dc400d160dc590d3a`，退出 0。原创建六项仍三过三失败、退出 1，缺 Auth 注入及后段来源结构版本门槛保留，未删除断言补绿。
+
+完整组合暂缓集成：QA 发现 [AI 人工草稿应用](../../apps/api/src/modules/ai-native/category-assist/category-draft.application.ts)的 create/patch 完成 Guard 校验后仅向治理 Controller 传 user，遗漏已捕获的原 authorization。新 Core 门闸正确拒绝，已登记人工入口返回 AI_RESULT_UNKNOWN、零草稿/审计；相同签名/角色/JSON 夹具下旧组合可正常各写一次。反例命令 SHA-256 `02ead9c9ce80c024414efb55c020b60187648b226d4f33fdb98e304d318528fe`，旧对照 `7234101b7377490f87b2279055dac53b7411101387f78d1d8b2c525219ebe8a6`，均退出 0。首次持久化 JSON/Prisma 空字段夹具校准失败由 QA 留证，产品与原测试未改。
+
+PM 已将 P2 交 AI-RD，由其在唯一应用文件转交同一捕获凭据、保留 Guard/ALS/DTO/CAS 和新 Auth，再给固定 blob/必要模拟与类型交 QA 复验；PM 不修改 AI 产品代码或放宽 Core 授权。Core 两源和原输入副本的完整集成等该直接消费者，其他 Core/AI 独占主线继续。原输入候选已作任务分支检查点 `b5c1b3f5214985998252123a12ae95717d2108d4` 并回读 GitHub，主线运行源码尚未提交身份闭包。
+
+SQL/事务、会话/角色行及元数据为明确替身，真实 HTTP/DI、MySQL/并发与宿主未验。记录仅核定当前问题/归属，不改变原 CAT-GOV/CLOSE 范围、百分比或完整门槛。六项其他作者 WIP 保持，本次无新增临时文件或验证进程。
+
 <a id="pm-extension-fixture-main-integration-20261113"></a>
 
 ## 原续租服务夹具与空快照断言的 main 集成（2026-11-13）
@@ -13,6 +27,18 @@
 QA 在 main `2a5c56471` 的实际 Core/Business/Controller 及原 absorbing/fulfillment 夹具内执行原测试全文，十二组全通过，`node --no-compilation-cache -` 退出 0，stdin SHA-256 `6c196be93d25870c05ded301978573e6fa80589b46eb80860c619f872381babe`。同装配的旧 main 测试在 defaultUnit 初始化前因未等待上下文失败，原行为组执行 0、退出 1，命令 SHA-256 `6da699af9673e9d3c2f0a0248b0b33b18e82eb759976a626860891da7ec0c34a`。这是完整原断言的限定内存行为证据，ts-node 由固定 loader 接管、metadata 关闭，未执行真实物理 CLI/DI。
 
 仅收本测试及此处阶段记录、接续的新增证据。此前治理输入/身份候选及其四份文档差异保留在主工作区，未夹带入本提交；治理完整组合仍等 AI 直接消费者兼容修复与 QA。测试 blob 与固定版本一致，语法、差异及新增文档链接定向核对。存储/容量/Controller 参加者为显式替身，真实权限、数据库/多实例与宿主未验，完整保证金来源/退款门槛不变。六项其他作者 WIP 保持，本轮无新增临时目录或进程。实际集成提交以包含本段的 Git 对象为准，普通推送后回读 GitHub。
+
+<a id="pm-governance-input-capture-integration-20261112"></a>
+
+## 品类治理八入口输入副本的 main 候选核验（2026-11-12）
+
+QA 已核 Core 固定阶段 `48e1b68075dda80743a0abb082d2c41ec83d0671`。父版本 `0475af5c547df6d0bf4c7f3139e3fa955f2a2dbb` 在等待期间修改调用方的键、原因、修订或嵌套数组后，八个入口均出现输入与实际写入、审计或原收据分离的反例。候选十组限定复验通过，覆盖八个入口、缺 Auth 与错误原修订的拒绝，原创建键回读及同请求发布恢复也使用原输入。实际服务、能力 Hook、模板及原创建夹具在固定源码内存装配，权限、SQL 和 ORM 为替身。候选 stdin SHA-256 为 `fcee602e975b3ea24b44d7ac9cd31a29e2fba5db3db38e154f2a6db5098b1546`，退出 0，121 个固定模块，审计为空且未创建临时目录。
+
+PM 从 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 仅移植[治理服务](../../apps/api/src/modules/rental-core/category-governance.service.ts)八句首次等待前的请求复制及职责说明，Git blob 为 `0bdbf0b1bcb03c1a4c2ca0db0705ee95cd9aa6e9`。2026-11-13 首次核对时，该候选及四份对应记录、接续尚未提交，main 与 GitHub 为该起点。输入源码现已保全并上传至 `codex/pm-governance-input-checkpoint` 固定 `b5c1b3f5214985998252123a12ae95717d2108d4`，只含本服务十行增量，不代表已合 main。QA 已确认相对原服务 blob `a8dc23fe93f62bde79707c1e328ea0bffacc830c` 恰为十行新增，独立代理静态复核确认首次等待后只使用请求副本。Core 原作者正在固定含原身份持续复核的最小服务与 Controller 闭包，QA 复验后再安排整合。来源完整服务的其他父阶段事务及版本恢复差异继续按各自固定闭包核收。
+
+QA 按 main 的实际等待位置运行原夹具，八个输入变化场景和错误修订拒绝通过，创建原键及发布同请求恢复也成立。stdin SHA-256 为 `f991bb3efc79e1238be210868113731fc05379c383ac36b84ea463e055bc3746`，129 个固定模块，审计为空，临时目录不存在。完整进程退出 1，九项通过、一项额外检查失败。失败检查沿用 Core 父版本的缺 Auth 拒绝场景，而 main 原二参数服务尚未接入父版本的 Auth/platformTransaction 机制，因此完成了归档。QA 将其归为原有前置差异，并明确同意限定集成输入复制。该身份持续复核闭包交 Core 原作者单独处理及 QA 复验。
+
+原 `category-creation.test.cjs` 六项三过、三失败保留，两项缺 Auth 接点、一项缺来源结构版本。原作者 Shared/API 类型检查零诊断仍为作者证据，QA 本片未新增完整 noEmit 结论。真实 MySQL 锁并发、HTTP/DI、浏览器及正式资源口未验。原 CAT-GOV-08、两组不同动态组合和完整结项门槛继续执行。PM 定向核四份文档新增七处本地链接、六处锚点及允许原 CRLF 的差异格式，退出 0。此次 PM 仅写固定源码增量及现有记录、接续，无新增验证环境或临时文件。
 
 <a id="pm-adoption-input-capture-integration-20261112"></a>
 
