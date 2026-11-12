@@ -14,6 +14,7 @@ import { requestFingerprint } from "../rental-core/rental-idempotency.repository
 import type { ClientOrderExtensionRequest, RentalOrderExtension } from "@rental-os/shared";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions, readRentalCategoryCode } from "../rental-core/category-identity";
+import { readQuoteEnterpriseDelegation } from "./enterprise-order-delegation-source";
 
 type PolicyRow = { scopeKey: string; revision: number; policy: string | EnterpriseScopePolicy; membershipUpdatedAt?: Date | null };
 type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership" | "rentalCategoryDefinition">;
@@ -264,6 +265,12 @@ export class EnterprisePolicyService {
     // All ECP policy/member writes take this same tenant lock. The authoritative
     // read belongs before stock locking and persists until the order commits.
     await tx.$queryRaw`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' FOR UPDATE`;
+    const delegation = await readQuoteEnterpriseDelegation(tx, tenantId, quote.id);
+    if (delegation && (delegation.state !== "issued" || Date.parse(delegation.source.expiresAt) <= Date.now() || !binding
+      || delegation.source.workspaceId !== workspaceId || delegation.source.personalCustomerId !== snapshot.personalCustomerId
+      || delegation.source.corporateCustomerId !== snapshot.corporateCustomerId || delegation.source.quoteId !== quote.id
+      || binding.idempotencyKey !== delegation.source.delegationKey || binding.requestFingerprint !== delegation.source.requestHash
+      || requestFingerprint(quote) !== delegation.source.quoteHash)) throw new ForbiddenException("原报价已绑定本人委托源，只能按原D/K受控提交");
     const current = snapshot.enterpriseBasis ? await this.revalidateQuote(tenantId, workspaceId, quote, tx) : await this.evaluate(tenantId, workspaceId, snapshot.personalCustomerId, quote.request.bookingIdentity!, tx);
     this.assertSameBasis(snapshot.enterpriseBasis, current);
     if (!current) return;

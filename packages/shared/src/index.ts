@@ -17,6 +17,7 @@ export * from "./enterprise-workflows";
 export * from "./enterprise-transfer-decision";
 export * from "./enterprise-policy";
 export * from "./enterprise-expense";
+export * from "./enterprise-order-delegation";
 export * from "./enterprise-exchange";
 export * from "./rental-exchange-inspection-preparation";
 export * from "./tenant-integrations";

@@ -14,6 +14,8 @@ import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.s
 import { EnterpriseMembersService } from "./enterprise-members.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
 import { EnterpriseApprovalService } from "./enterprise-approval.service";
+import { EnterpriseMerchantDelegationService } from "./enterprise-merchant-delegation.service";
+import { IssueEnterpriseOrderDelegationDto, RevokeEnterpriseOrderDelegationDto } from "./enterprise-order-delegation.dto";
 import { EnterpriseExchangeApprovalService } from "./enterprise-exchange-approval.service";
 import { RentalExchangeInspectionConsentService } from "../rental-core/rental-exchange-inspection-consent.service";
 import { ConfirmEnterpriseExchangeInspectionDto, ConfirmEnterpriseExchangeExpenseDto, CloseEnterpriseExchangeRequestDto, EnterpriseExchangeChoicesQueryDto, RequestEnterpriseExchangeApprovalDto, DecideEnterpriseExchangeApprovalDto } from "./enterprise-exchange-request.dto";
@@ -29,7 +31,19 @@ const client = (request: CustomerRequest) => { if (!request.client) throw new Un
 @Controller("client/v1/enterprise")
 export class EnterpriseWorkflowsController {
   constructor(private readonly applications: EnterpriseApplicationService, private readonly members: EnterpriseMembersService, private readonly commands: EnterpriseCommandService, private readonly prisma: PrismaService, private readonly files: FileStorageRuntimeService, private readonly integrations: TenantIntegrationService, private readonly policies: EnterprisePolicyService, private readonly approvals: EnterpriseApprovalService, private readonly tasks: EnterpriseTaskCenterService, private readonly management: EnterpriseManagementRequestService, private readonly extensions: EnterpriseExtensionApprovalService, private readonly exchanges: EnterpriseExchangeApprovalService, private readonly rentalHandoffs: EnterpriseRentalHandoffService, private readonly membershipAudit: EnterpriseMembershipAuditService,
-    private readonly exchangeInspections: RentalExchangeInspectionConsentService) {}
+    private readonly exchangeInspections: RentalExchangeInspectionConsentService, private readonly delegations: EnterpriseMerchantDelegationService) {}
+  @Post("order-delegations/issue") issueOrderDelegation(@Req() req: CustomerRequest, @Body() input: IssueEnterpriseOrderDelegationDto) {
+    return this.delegations.issue(client(req), input);
+  }
+  @Get("order-delegations/:key") readOrderDelegation(@Req() req: CustomerRequest, @Param("key") key: string,
+    @Res({ passthrough: true }) response: { setHeader(name: string, value: string): unknown }) {
+    response.setHeader("Cache-Control", "no-store"); response.setHeader("Vary", "Authorization");
+    return this.delegations.readCustomer(client(req), key);
+  }
+  @Post("order-delegations/:key/revoke") revokeOrderDelegation(@Req() req: CustomerRequest, @Param("key") key: string, @Body() input: RevokeEnterpriseOrderDelegationDto) {
+    if (input.delegationKey !== key) throw new BadRequestException("原委托地址与撤销引用不一致");
+    return this.delegations.revoke(client(req), input);
+  }
   private inspectionConsentReader() {
     if (!this.exchangeInspections) throw new ServiceUnavailableException("原本人换货检查同意尚未装配");
     return this.exchangeInspections;
@@ -195,8 +209,9 @@ export class EnterpriseWorkflowsController {
   @Post("approvals/submit") submitApproval(@Req() req: CustomerRequest, @Body() input: SubmitEnterpriseApprovedBookingDto) { return this.approvals.submit(client(req), input); }
   @Get("operations/:key") async operation(@Req() req: CustomerRequest, @Param("key") key: string) {
     const context = client(req); await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
-    const rows = await this.prisma.$queryRaw<Array<{ result: string | object }>>`SELECT result FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key} AND actorUserId=${`customer:${context.customerId}`}`;
+    const rows = await this.prisma.$queryRaw<Array<{ result: string | object; target?: string }>>`SELECT result,target FROM enterprise_portal_operations WHERE tenantId=${context.tenantId} AND operationKey=${key} AND actorUserId=${`customer:${context.customerId}`}`;
     await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient, false);
+    if (rows[0]?.target?.startsWith("order.delegation.issue:")) return { state: "committed", result: await this.delegations.readCustomer(context, key) };
     return rows[0] ? { state: "committed", result: enterpriseJson(rows[0].result) } : { state: "not_recorded" };
   }
   @Get("authority/upload-operations/:key") async authorityOriginal(@Req() req: CustomerRequest, @Param("key") key: string) {
