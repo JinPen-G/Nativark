@@ -1,8 +1,11 @@
 let nextInputInstance = 0;
-interface ClarificationField { key: string; label: string; value?: string; error?: string; readonly?: boolean; required?: boolean; }
+interface ClarificationField { key: string; label: string; value?: string; error?: string; readonly?: boolean; required?: boolean;
+  kind?: 'text' | 'integer' | 'choice'; maxLength?: number; minimum?: number; maximum?: number;
+  options?: { value: string; label: string }[]; optionLabels?: string[]; selectedLabel?: string; }
 type ClarificationHandler = (input: { taskId: string; inputRevision: string; draft: Record<string, string> }) => Promise<void>;
 Component({
-  properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false } },
+  properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" },
+    disabled: { type: Boolean, value: false }, submitLabel: { type: String, value: '提交补充信息' } },
   data: { hostAvailable: false, instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], definitionUnavailable: false, submitting: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: {
     attached() { this.setData({ instanceId: "ai-input-" + (++nextInputInstance) }); this.refreshFields(); },
@@ -36,8 +39,23 @@ Component({
       const visible = fields.filter(field => {
         if (!field || typeof field.key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field.key) || ["__proto__", "constructor", "prototype"].includes(field.key) || typeof field.label !== "string") return false;
         if (seen.has(field.key)) { definitionUnavailable = true; return false; }
+        if (field.kind === 'text' && (!Number.isInteger(field.maxLength) || field.maxLength! < 1 || field.maxLength! > 4000)
+          || field.kind === 'integer' && (!Number.isSafeInteger(field.minimum) || !Number.isSafeInteger(field.maximum) || field.minimum! > field.maximum!)
+          || field.kind === 'choice' && (!Array.isArray(field.options) || !field.options.length || field.options.length > 30
+            || field.options.some(option => !option || typeof option.value !== 'string' || typeof option.label !== 'string')
+            || new Set(field.options.map(option => option.value)).size !== field.options.length)
+          || field.kind !== undefined && !['text','integer','choice'].includes(field.kind)) { definitionUnavailable = true; return false; }
         seen.add(field.key); return true;
-      }).map(field => ({ key: field.key, label: field.label.slice(0, 200), value: Object.prototype.hasOwnProperty.call(this.data.localDraft, field.key) ? this.data.localDraft[field.key] : typeof field.value === "string" ? field.value.slice(0, 4000) : "", error: typeof field.error === "string" ? field.error.slice(0, 200) : "", readonly: field.readonly === true, required: field.required === true }));
+      }).map(field => {
+        const maxLength = field.kind === 'text' ? field.maxLength! : 4000;
+        const value = Object.prototype.hasOwnProperty.call(this.data.localDraft, field.key) ? this.data.localDraft[field.key]
+          : typeof field.value === 'string' ? field.value.slice(0,maxLength) : '';
+        return { key: field.key, label: field.label.slice(0,200), value, error: typeof field.error === 'string' ? field.error.slice(0,200) : '',
+          readonly: field.readonly === true, required: field.required === true, kind: field.kind ?? 'text', maxLength,
+          minimum: field.minimum, maximum: field.maximum, options: field.options,
+          optionLabels: field.options?.map(option => option.label.slice(0,200)) ?? [],
+          selectedLabel: field.options?.find(option => option.value === value)?.label.slice(0,200) ?? '请选择' };
+      });
       if (definitionUnavailable) {
         this.setData({ visibleFields: [], localDraft: {}, definitionUnavailable: true, errorLabel: "字段定义不可用，请刷新" });
       } else this.setData({ visibleFields: visible, definitionUnavailable: false });
@@ -47,7 +65,15 @@ Component({
       const key = event?.currentTarget?.dataset?.key;
       const field = this.data.visibleFields.find(item => item.key === key);
       if (!field || field.readonly || this.data.disabled || this.data.submitting || !this.data.alive || typeof event.detail?.value !== "string") return;
-      this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0, 4000) } }); this.refreshFields();
+      if (field.kind === 'choice') return;
+      this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0, field.maxLength ?? 4000) } }); this.refreshFields();
+    },
+    onFieldChoice(event: WechatMiniprogram.CustomEvent) {
+      const field = this.data.visibleFields.find(item => item.key === event?.currentTarget?.dataset?.key);
+      if (!this.data.alive || this.data.disabled || this.data.submitting || !field || field.readonly || field.kind !== 'choice') return;
+      const index = Number(event.detail?.value);
+      if (!Number.isInteger(index) || index < 0 || !field.options?.[index]) return;
+      this.setData({ localDraft: { ...this.data.localDraft, [field.key]: field.options[index].value } }); this.refreshFields();
     },
     async onSubmit(): Promise<void> {
       const handler = hostAction(this) as ClarificationHandler | null;
@@ -58,7 +84,7 @@ Component({
       const input = { taskId: this.data.taskId, inputRevision: this.data.inputRevision, draft: Object.fromEntries(this.data.visibleFields.map(field => [field.key, field.value ?? ""])) };
       this.setData({ submitting: true, errorLabel: "" });
       try { await handler(input); if (this.data.alive && !this.data.disabled && generation === this.data.generation) this.triggerEvent("submit", input); }
-      catch { if (this.data.alive && !this.data.disabled && generation === this.data.generation) this.setData({ errorLabel: "提交失败，请重试" }); }
+      catch { if (this.data.alive && !this.data.disabled && generation === this.data.generation) this.setData({ errorLabel: "原提交结果待核对，请读取原收据" }); }
       finally { if (this.data.alive) this.setData({ submitting: false }); }
     },
   },

@@ -13,7 +13,8 @@ Component({
   properties: { items: { type: Array, value: [] }, missing: { type: Array, value: [] }, readonly: { type: Boolean, value: true },
     candidateActions: { type: Boolean, value: false }, revision: { type: Number, value: 0 } },
   data: { visibleItems: [] as { key: string; label: string; candidate: string; humanValue: string; sourceLabel: string;
-    candidateId: string; candidateActionable: boolean; decisionLabel: string; error: string }[], visibleMissing: [] as string[] },
+    sourceLabels: string[]; differenceLabel: string; reviewMessages: string[];
+    candidateId: string; candidateActionable: boolean; candidateCanAccept: boolean; decisionLabel: string; error: string }[], visibleMissing: [] as string[] },
   lifetimes: { attached() { detachedViews.delete(this); this.project(); }, detached() { detachedViews.add(this); } },
   observers: { "items,missing"() { this.project(); } },
   methods: {
@@ -23,9 +24,15 @@ Component({
         key: item.key as string, label: typeof item.label === "string" ? boundedText(item.label, 200) : "检查项不可用",
         candidate: inspectionValue(item.candidate), humanValue: inspectionValue(item.humanValue),
         sourceLabel: typeof item.sourceLabel === "string" ? boundedText(item.sourceLabel, 200) : "来源不可用",
+        sourceLabels: Array.isArray(item.sourceLabels) ? item.sourceLabels.slice(0, 100)
+          .filter((value): value is string => typeof value === 'string').map(value => boundedText(value, 512)) : [],
+        differenceLabel: typeof item.differenceLabel === 'string' ? boundedText(item.differenceLabel, 200) : '',
+        reviewMessages: Array.isArray(item.reviewMessages) ? item.reviewMessages.slice(0, 100)
+          .filter((value): value is string => typeof value === 'string').map(value => boundedText(value, 768)) : [],
         error: typeof item.error === "string" ? boundedText(item.error, 200) : "",
         candidateId: typeof item.candidateId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(item.candidateId) ? item.candidateId : "",
         candidateActionable: item.candidateActionable === true,
+        candidateCanAccept: item.candidateCanAccept === true,
         decisionLabel: item.decision === "accepted" ? "人工采用" : item.decision === "rejected" ? "人工拒绝" : item.decision === "modified" ? "人工更正" : item.decision === "manual" ? "人工填入" : "尚待核实",
       }));
       const missing: unknown[] = Array.isArray(this.data.missing) ? this.data.missing : [];
@@ -44,6 +51,7 @@ Component({
         || !["accepted", "rejected"].includes(decision)) return;
       const item = this.data.visibleItems.find(row => row.key === key);
       if (!item?.candidateActionable || !item.candidateId || item.candidateId !== candidate) return;
+      if (decision === 'accepted' && !item.candidateCanAccept) return;
       this.triggerEvent("candidatedecision", { key, candidateId: candidate, decision, revision });
     },
   },

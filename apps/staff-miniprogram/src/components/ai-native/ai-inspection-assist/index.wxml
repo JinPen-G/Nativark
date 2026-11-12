@@ -15,7 +15,17 @@
   <ai-task-workbench id="workbench"><ai-inspection-draft slot="inspection-draft" items="{{items}}" missing="{{missing}}" readonly="{{!editable}}" candidate-actions="{{editable}}" revision="{{revision}}" bind:draftchange="onEdit" bind:candidatedecision="onCandidate" /></ai-task-workbench>
   <view aria-label="原识别结果待人工审阅">
     <text role="status">原识别结果：{{recognitionStatus}}。候选未采用，不代表业务事实。</text>
-    <view wx:for="{{recognitionItems}}" wx:key="candidateId"><text>{{item.fieldCode}}：{{item.value}} · {{item.status}}</text><text>依据：{{item.sourceLabel}}</text></view>
+    <text wx:if="{{recognitionBasisLabel}}" role="status">{{recognitionBasisLabel}}</text>
+    <text wx:if="{{recognitionReviewSummary}}" role="status">待核实：{{recognitionReviewSummary}}</text>
+    <view wx:for="{{recognitionReviewIssues}}" wx:key="key" aria-label="{{item.fieldLabel}}待核理由">
+      <text>{{item.fieldLabel}}：{{item.message}}</text><text wx:if="{{item.recordLabel}}">{{item.recordLabel}}</text>
+    </view>
+    <text wx:if="{{recognitionStatus === 'available' && !recognitionItems.length}}">没有可供采用的候选，请继续人工检查。</text>
+    <view wx:for="{{recognitionItems}}" wx:key="candidateId">
+      <text>{{item.fieldCode}}：{{item.value}} · {{item.status}}</text>
+      <text wx:for="{{item.sourceLabels}}" wx:for-item="source" wx:key="*this">来源：{{source}}</text>
+      <text wx:if="{{!item.sourceLabels.length}}">来源未记录，请人工核实。</text>
+    </view>
     <button disabled="{{!canReadRecognition || pending}}" bindtap="onReadRecognition">读取原识别结果</button>
     <button disabled="{{!canSaveRecognition || pending}}" bindtap="onSaveRecognition">保存候选供逐项人工核实</button>
   </view>

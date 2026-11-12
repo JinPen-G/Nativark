@@ -28,8 +28,7 @@ const revision = (value: unknown) => typeof value === 'number' && Number.isSafeI
 const exact = (value: unknown, keys: string[]) => closed(value, keys) && Object.keys(value as object).length === keys.length;
 function resultProjection(value: AiInspectionResultReadResponse, reference: InspectionRecognitionReference): InspectionRecognitionObservation {
   if (Object.entries(reference).some(([key, expected]) => value[key as keyof AiInspectionResultReadResponse] !== expected)) throw Error('inspection result unavailable');
-  return { ...reference, status: value.status, candidates: value.candidates, trust: value.trust,
-    automaticRetry: value.automaticRetry, persistence: value.persistence, execution: value.execution };
+  return { ...value };
 }
 function submissionProjection(value: AiInspectionSubmissionReadResponse | AiInspectionSubmissionSubmitResponse, draftId: string): InspectionSubmissionObservation {
   if (value.draftId !== draftId) throw Error('inspection receipt unavailable');
@@ -171,13 +170,14 @@ export async function createStaffInspectionTransportHost(reference: AiInspection
     } },
     drafts: { read: async value => {
       const result = await call('draft-read', bound(value));
-      if (!exact(result, ['draftId', 'revision', 'status', 'target', 'assetId', 'templateVersion', 'bindingFingerprint', 'state', 'inspectionId', 'recognitionEvidence'])
+      if (!exact(result, ['draftId', 'revision', 'status', 'target', 'assetId', 'templateVersion', 'bindingFingerprint', 'state', 'inspectionId', 'recognitionEvidence', 'candidateReviews'])
         || result.draftId !== input.draftId || !sameTarget(result.target, target) || !revision(result.revision)
         || !['draft_saved', 'prepared', 'submission_unknown', 'submitted'].includes(result.status) || !id(result.assetId)
         || !id(result.templateVersion) || !hash(result.bindingFingerprint) || result.inspectionId !== null && !id(result.inspectionId)
         || result.recognitionEvidence !== 'caller_supplied_not_model_execution_proof') throw Error('inspection draft unavailable');
       return { draftId: result.draftId, revision: result.revision, status: result.status, target: result.target,
-        templateVersion: result.templateVersion, bindingFingerprint: result.bindingFingerprint, state: result.state };
+        templateVersion: result.templateVersion, bindingFingerprint: result.bindingFingerprint, state: result.state,
+        candidateReviews: result.candidateReviews };
     },
       ...(capabilities.edit ? { edit: (value: Parameters<NonNullable<StaffInspectionHost['drafts']['edit']>>[0]) => call('draft-edit', bound(value), true) } : {}),
       ...(capabilities.edit && capabilities.evidence ? { replaceEvidence: (value: Parameters<NonNullable<StaffInspectionHost['drafts']['replaceEvidence']>>[0]) => call('evidence-replace', bound(value), true) } : {}),

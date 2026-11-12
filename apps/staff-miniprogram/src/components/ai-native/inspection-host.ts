@@ -1,25 +1,86 @@
 import type { AiInspectionActorScope, AiInspectionTarget, AiInspectionDraftState, AiInspectionDraftEditRequest,
   AiInspectionPrepareSubmissionRequest, AiInspectionSubmitRequest, AiInspectionReceiptLookup, AiInspectionOperationResult, AiInspectionEvidenceRef,
-  RentalInspectionTemplate, AiInspectionRecognitionTaskReference, AiStaffInspectionSavedReference } from "@rental-os/shared";
+  RentalInspectionTemplate, AiInspectionRecognitionTaskReference, AiStaffInspectionSavedReference,
+  AiInspectionResultReadResponse, AiInspectionRecognitionBasisIssueDraft, AiInspectionReviewIssueDraft,
+  AiInspectionSavedCandidateReview } from "@rental-os/shared";
 import { boundedText } from "./display-format";
+import { validateInspectionWire, isInspectionSavedCandidateReview } from "./inspection-wire";
 import type { NativeAiHost } from "./ai-task-workbench/index";
 
 type InspectionDisplayTemplate = Pick<RentalInspectionTemplate, 'id' | 'version' | 'stage' | 'fields'>;
+const reviewLabels: Record<AiInspectionReviewIssueDraft, string> = {
+  baseline_missing: '缺少领取基线', meter_replaced: '计量表更换待核实', reading_backwards: '读数倒退待核实',
+  field_unavailable: '检查依据不可用', source_unclear: '原材料不清楚',
+};
+const reviewReasons: Record<string, string> = {
+  source_blurred: '原材料模糊，无法确认读数', source_missing: '原材料缺少该字段',
+  original_basis_not_recorded: '没有记录本次识别的原检查依据',
+  original_basis_unavailable: '原检查依据当前无法核对', draft_evidence_changed: '原候选来源与当前草稿不一致',
+  original_attribute_format_invalid: '识别值不符合原字段格式',
+  asset_identifier_not_recorded: '分配资源未记录可核对的标识',
+  asset_identifier_mismatch: '识别标识与分配资源不一致',
+  original_meter_evidence_recorded: '原记录存在计量表更换依据，请按人工异常流程核实',
+  pickup_baseline_missing: '缺少领取时的原读数', pickup_reading_missing: '原领取记录未填写读数',
+  original_pickup_reading_missing: '原领取记录未填写读数',
+  original_pickup_reading_not_unique: '原领取记录存在多个读数，尚不能确定依据',
+  pickup_reading_not_unique: '原领取记录存在多个读数，尚不能确定依据',
+  original_pickup_unit_mismatch: '当前检查单位与原领取读数单位不一致',
+  frozen_unit_missing: '原领取模板未记录读数单位', pickup_reading_not_resource_specific: '原领取读数未明确属于本次资源',
+  original_pickup_reading_invalid: '原领取读数无法用于核对',
+  original_usage_validation_failed: '当前读数未通过原业务增量校验',
+  pickup_baseline_unknown: '原领取基线尚不可核对',
+};
+/** Translate server findings only; resource, unit and reading comparisons stay in Core. */
+function reviewMessage(issue: AiInspectionRecognitionBasisIssueDraft): string {
+  const reason = Object.prototype.hasOwnProperty.call(reviewReasons, issue.reason)
+    ? reviewReasons[issue.reason] : boundedText(issue.reason, 512);
+  return `${reviewLabels[issue.code]}：${reason}`;
+}
+function candidateSources(candidate: AiInspectionDraftState['candidates'][number]): string[] {
+  return candidate.sources.map(source => {
+    const original = `${source.attachmentId} · 修订 ${source.attachmentRevision}`;
+    if (source.kind === 'audio') return `${original} · 录音 ${(source.span.startMs / 1000).toFixed(2)}–${(source.span.endMs / 1000).toFixed(2)} 秒`;
+    const region = source.region;
+    return `${original} · 图片区域：左 ${(region.x * 100).toFixed(1)}%、上 ${(region.y * 100).toFixed(1)}%、宽 ${(region.width * 100).toFixed(1)}%、高 ${(region.height * 100).toFixed(1)}%`;
+  });
+}
+function candidateDifference(candidate: AiInspectionDraftState['candidates'][number] | undefined,
+  human: AiInspectionDraftState['fields'][string] | undefined): string {
+  if (human?.decision === 'rejected') return '已人工拒绝此候选';
+  if (!candidate || candidate.status !== 'candidate') return '候选未明确，请人工核实';
+  if (!human || human.value === null) return '尚未填写人工值';
+  const value = candidate.value.kind === 'photo' ? candidate.value.attachmentId : candidate.value.value;
+  return value === human.value ? '人工值与候选一致' : '人工值与候选不同';
+}
 /** Internal display binding, not an HTTP DTO or an authorization source. */
 export interface InspectionHostDetail {
   draftId: string; revision: number; status: string; target: AiInspectionTarget;
   templateVersion: string; bindingFingerprint: string; state: AiInspectionDraftState;
+  candidateReviews?: AiInspectionSavedCandidateReview[];
+}
+function savedCandidateReview(detail: InspectionHostDetail, candidateId: string): AiInspectionSavedCandidateReview | undefined {
+  if (!Array.isArray(detail.candidateReviews) || detail.candidateReviews.length > 100) return;
+  const matches = detail.candidateReviews.filter(review => review?.candidateId === candidateId);
+  return matches.length === 1 && isInspectionSavedCandidateReview(matches[0]) ? matches[0] : undefined;
+}
+function canAdoptCandidate(review: AiInspectionSavedCandidateReview | undefined): boolean {
+  return review?.adoption === 'human_confirmation_required' && review.sourcesMatchDraftEvidence === true
+    && review.basis.status === 'recorded' && review.reviewIssues.length === 0 && review.basisIssues.length === 0;
+}
+function savedReviewMessages(review: AiInspectionSavedCandidateReview | undefined): string[] {
+  if (!review) return ['当前候选复核尚不可用，请重读原稿；仍可人工更正或拒绝'];
+  if (review.basisIssues.length) return review.basisIssues.map(reviewMessage);
+  if (review.reviewIssues.length) return review.reviewIssues.map(code => reviewLabels[code]);
+  if (!review.sourcesMatchDraftEvidence) return ['原候选来源与当前草稿不一致，请人工核实'];
+  if (review.basis.status !== 'recorded') return ['原检查依据未记录，请人工核实'];
+  return review.adoption === 'unavailable' ? ['当前候选不可直接采用，请按原人工流程核实'] : [];
 }
 type PendingInspectionCommand =
   | { kind: "prepare" | "prepareReview"; request: AiInspectionPrepareSubmissionRequest }
   | { kind: "edit" | "evidence" | "submission" | "recognition"; request: unknown };
 /** Feature-local consumption of the existing result-read/save endpoints. Not a dispatch request. */
 export type InspectionRecognitionReference = AiInspectionRecognitionTaskReference & { taskId: string; resultId: string };
-export type InspectionRecognitionObservation = InspectionRecognitionReference & {
-  status: "available" | "unknown" | "failed";
-  candidates: AiInspectionDraftState["candidates"];
-  trust: "untrusted_candidate"; automaticRetry: false; persistence: "not_saved"; execution: "not_attempted";
-};
+export type InspectionRecognitionObservation = AiInspectionResultReadResponse;
 /** Original business receipt observation, independent of the draft back-write. */
 export interface InspectionSubmissionObservation {
   status: string; inspectionId?: string; draftLinked?: boolean;
@@ -69,7 +130,9 @@ export const emptyInspectionView = () => ({ mode: "unavailable", phase: "unavail
   missing: [] as string[], evidence: [] as AiInspectionEvidenceRef[], editable: false, canRemove: false, canReview: false, canSubmit: false, canReconcile: false,
   originalReceiptObserved: false, originalInspectionId: "", draftLinkStatus: "unknown", canReadReceipts: false,
   recognitionSaveObserved: false, recognitionSavedRevision: 0,
-  recognitionStatus: "unavailable", recognitionItems: [] as unknown[], canReadRecognition: false, canSaveRecognition: false });
+  recognitionStatus: "unavailable", recognitionItems: [] as unknown[], recognitionBasisLabel: '', recognitionReviewSummary: '',
+  recognitionReviewIssues: [] as { key: string; fieldLabel: string; message: string; recordLabel: string }[],
+  canReadRecognition: false, canSaveRecognition: false });
 
 /** No timers, storage, network, token or shared state. Old epochs cannot update this view. */
 export class StaffInspectionHostBinding {
@@ -147,19 +210,30 @@ export class StaffInspectionHostBinding {
       view.recognitionItems = this.recognition?.candidates.map(candidate => ({
         candidateId: boundedText(candidate.candidateId, 191), fieldCode: boundedText(candidate.fieldCode, 200), status: candidate.status,
         value: candidate.status === "candidate" ? boundedText(String(candidate.value.kind === "photo" ? candidate.value.attachmentId : candidate.value.value), 4000) : "待人工核实",
-        sourceLabel: candidate.sources.map(source => `${source.attachmentId}@${source.attachmentRevision}`).join(", ").slice(0, 200)
+        sourceLabels: candidateSources(candidate),
       })) ?? [];
+      if (this.recognition) {
+        view.recognitionBasisLabel = this.recognition.basis.status === 'recorded' ? '原检查依据已记录' : '原检查依据未记录，请人工核实';
+        view.recognitionReviewSummary = this.recognition.reviewIssues.map(code => reviewLabels[code]).join('；');
+        view.recognitionReviewIssues = this.recognition.basisIssues.map((issue, index) => ({ key: String(index),
+          fieldLabel: boundedText(this.template!.fields.find(field => field.code === issue.fieldCode)?.label ?? issue.fieldCode, 200),
+          message: reviewMessage(issue), recordLabel: issue.originalRecordId ? `原检查记录：${issue.originalRecordId}` : '' }));
+      }
       view.revision = d.revision;
       view.items = this.template.fields.slice(0, 64).map(field => {
         const matches = d.state.candidates.filter(item => item.fieldCode === field.code);
         const candidate = matches.length === 1 ? matches[0] : undefined;
+        const review = candidate ? savedCandidateReview(d, candidate.candidateId) : undefined;
         return { key: field.code, label: boundedText(field.label, 200), error: this.fieldErrors[field.code] ?? "",
           candidate: candidate?.status === "candidate" ? (candidate.value.kind === "photo" ? candidate.value.attachmentId : candidate.value.value) : null,
           candidateId: candidate?.candidateId ?? "",
-          candidateActionable: candidate?.status === "candidate" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidate.candidateId)
-            && candidate.sources.every(source => d.state.evidence.some(ref => ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision)),
+          candidateActionable: candidate?.status === "candidate" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidate.candidateId),
+          candidateCanAccept: Boolean(candidate?.status === 'candidate' && canAdoptCandidate(review)),
+          reviewMessages: candidate ? savedReviewMessages(review) : [],
           decision: d.state.fields[field.code]?.decision ?? "",
           humanValue: d.state.fields[field.code]?.value ?? null,
+          differenceLabel: candidateDifference(candidate, d.state.fields[field.code]),
+          sourceLabels: candidate ? candidateSources(candidate) : [],
           sourceLabel: candidate?.sources.map(source => `${source.attachmentId}@${source.attachmentRevision}`).join(", ").slice(0, 200) ?? "来源不可用" };
       });
       view.missing = d.state.missingFields.slice(0, 64); view.evidence = d.state.evidence.slice(0, 100);
@@ -269,7 +343,8 @@ export class StaffInspectionHostBinding {
       if (!this.active(epoch)) return;
       await this.load(epoch);
       if (!this.active(epoch)) return;
-      if (this.detail?.revision !== revision || revision !== port.reference.expectedRevision
+      if (!validateInspectionWire('result-read', 'response', value)
+        || this.detail?.revision !== revision || revision !== port.reference.expectedRevision
         || Object.entries(port.reference).some(([key, expected]) => value[key as keyof InspectionRecognitionObservation] !== expected)
         || value.trust !== "untrusted_candidate" || value.automaticRetry !== false || value.execution !== "not_attempted" || value.persistence !== "not_saved"
         || !["available", "unknown", "failed"].includes(value.status) || !Array.isArray(value.candidates) || value.candidates.length > 100
@@ -345,7 +420,11 @@ export class StaffInspectionHostBinding {
     if (field.type === "select" && !field.options?.includes(text)) { invalid(); return; }
     const epoch = this.epoch;
     try {
-      const request = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint, edits: [{ fieldCode, decision: "manual" as const, value }] };
+      const matches = this.detail.state.candidates.filter(candidate => candidate.fieldCode === fieldCode);
+      const candidate = matches.length === 1 && matches[0].sources.every(source => this.detail!.state.evidence.some(ref =>
+        ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision)) ? matches[0] : undefined;
+      const request: AiInspectionDraftEditRequest = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint,
+        edits: [{ fieldCode, decision: candidate ? 'modified' : 'manual', value, ...(candidate ? { candidateId: candidate.candidateId } : {}) }] };
       delete this.fieldErrors[fieldCode];
       await this.action({ kind: "edit", request }, () => this.host!.drafts.edit!(request));
     } catch { if (this.active(epoch)) invalid(); }
@@ -360,8 +439,9 @@ export class StaffInspectionHostBinding {
     const candidate = matches.length === 1 ? matches[0] : undefined;
     if (!candidate || candidate.candidateId !== candidateId || candidate.status !== "candidate"
       || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidateId)) return;
-    if (decision === "accepted" && !candidate.sources.every(source => this.detail!.state.evidence.some(ref =>
-      ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision))) return;
+    if (decision === "accepted" && (!canAdoptCandidate(savedCandidateReview(this.detail, candidateId))
+      || !candidate.sources.every(source => this.detail!.state.evidence.some(ref =>
+        ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision)))) return;
     try {
       const request: AiInspectionDraftEditRequest = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint,
         edits: [{ fieldCode, candidateId, decision }] };

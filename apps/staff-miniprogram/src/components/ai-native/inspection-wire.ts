@@ -1,10 +1,11 @@
 /** Validation of the existing inspection HTTP schema registry only. This reader
  * admits no arbitrary schema, route or action, and grants no host authority. */
-import type { AiLeafSchemaDraft } from '@rental-os/shared';
-import { contracts, schemas } from './inspection-wire-schemas';
+import type { AiLeafSchemaDraft, StaffUploadObservationRequest, StaffUploadObservationResponse,
+  AiInspectionSavedCandidateReview } from '@rental-os/shared';
+import { contracts, schemas, taskContracts, uploadObservationHttp, uploadObservationContract } from './inspection-wire-schemas';
 const keywords = new Set(['type', 'oneOf', '$ref', 'properties', 'required', 'additionalProperties', 'maxProperties',
   'items', 'minItems', 'maxItems', 'uniqueItems', 'minLength', 'maxLength', 'pattern', 'format', 'enum', 'const',
-  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum']);
+  'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'not']);
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const dateTime = (value: string) => {
@@ -21,10 +22,43 @@ const dateTime = (value: string) => {
 };
 export function validateInspectionWire(operation: keyof typeof contracts, direction: 'request' | 'response', value: unknown): boolean {
   if (!own(contracts, operation)) return false;
+  return validateRegisteredSchema(contracts[operation][direction], value);
+}
+/** The task registry is generated from the same original shared contracts.
+ * This selects a fixed operation; it cannot accept caller-provided schemas. */
+export function validateInspectionTaskWire(operation: keyof typeof taskContracts, direction: 'request' | 'response', value: unknown): boolean {
+  if (!own(taskContracts, operation)) return false;
+  return validateRegisteredSchema(taskContracts[operation][direction], value);
+}
+/** Validate only the server's current saved-candidate review projection. */
+export function isInspectionSavedCandidateReview(value: unknown): value is AiInspectionSavedCandidateReview {
+  return validateRegisteredSchema('AiInspectionDraftReadResponse', value, 'candidateReviews');
+}
+/** Only the original published upload observation, never a caller schema. */
+export function isStaffUploadObservationRequest(value: unknown): value is StaffUploadObservationRequest {
+  return validateStaffUploadObservation('request', value);
+}
+export function isStaffUploadObservationResponse(value: unknown): value is StaffUploadObservationResponse {
+  return validateStaffUploadObservation('response', value);
+}
+export function validateStaffUploadObservation(direction: 'request' | 'response', value: unknown): boolean {
+  return validateRegisteredSchema(uploadObservationContract[direction], value);
+}
+export function staffUploadObservationRoute(): string {
+  if (uploadObservationHttp.basePath !== 'staff/v1/uploads' || uploadObservationHttp.observe !== 'sessions/observe') throw Error('原上传观察入口不可用');
+  return `/uploads/${uploadObservationHttp.observe}`;
+}
+function validateRegisteredSchema(name: string, value: unknown, item?: 'candidateReviews'): boolean {
   // The fixed schemas bound text, maps and lists. A second aggregate size/node
   // limit would reject valid historical drafts containing repeated field facts.
   const valid = (schema: AiLeafSchemaDraft, value: unknown, depth = 0): boolean => {
     if (depth > 32 || !schema || Object.keys(schema).some(key => !keywords.has(key))) return false;
+    // The original task contracts exclude control characters with not.pattern.
+    // Support that fixed form; other negative schemas remain unavailable.
+    const excluded = (schema as AiLeafSchemaDraft & { not?: unknown }).not;
+    if (excluded !== undefined && (!object(excluded) || Object.keys(excluded).length !== 1
+      || typeof excluded.pattern !== 'string'
+      || typeof value === 'string' && new RegExp(excluded.pattern, 'u').test(value))) return false;
     if (schema.$ref) {
       const match = /^#\/components\/schemas\/([A-Za-z0-9]+)$/u.exec(schema.$ref);
       return !!match && own(schemas, match[1]) && valid(schemas[match[1]], value, depth + 1);
@@ -57,6 +91,7 @@ export function validateInspectionWire(operation: keyof typeof contracts, direct
     return false;
   };
   try {
-    return valid(schemas[contracts[operation][direction]], value);
+    const registered = schemas[name], schema = item ? registered?.properties?.[item]?.items : registered;
+    return !!schema && valid(schema, value);
   } catch { return false; }
 }

@@ -27,5 +27,20 @@
   </block>
   <button class="btn btn--secondary" disabled="{{aiInspectionHistoryLoading || !id}}" bindtap="onInspectionHistory">选择本人检查历史（只读）</button>
   <text wx:if="{{aiInspectionHistoryMessage}}" role="status">{{aiInspectionHistoryMessage}}</text>
+  <view aria-label="本次 AI 检查材料">
+    <text class="muted tiny">AI图片限PNG/JPEG、512KB；WAV录音最长12秒。本次只选一种材料。</text>
+    <button class="btn btn--secondary" disabled="{{aiInspectionMediaBusy || aiInspectionRecording || noTemplate || !id}}" bindtap="onInspectionImage">拍照 / 相册选取AI材料</button>
+    <button class="btn btn--secondary" disabled="{{aiInspectionMediaBusy || aiInspectionRecording || noTemplate || !id}}" bindtap="onInspectionRecord">录制WAV说明</button>
+    <button wx:if="{{aiInspectionRecording}}" bindtap="onInspectionStopRecord">停止本次录音</button>
+    <button disabled="{{!aiInspectionCanUpload}}" loading="{{aiInspectionMediaBusy}}" bindtap="onInspectionUploadMedia">上传选定材料</button>
+    <button wx:if="{{aiInspectionMediaBusy}}" bindtap="onInspectionCancelUpload">停止本端文件上传</button>
+    <button wx:if="{{aiInspectionCanSaveDraft}}" bindtap="onInspectionSaveMediaDraft">明确保存AI检查草稿</button>
+    <button wx:if="{{aiInspectionCanRecoverMedia}}" bindtap="onInspectionRecoverMedia">核对原上传 / 草稿</button>
+    <button wx:if="{{aiInspectionCanVerifyUpload}}" bindtap="onInspectionVerifyUpload">明确核验原上传</button>
+    <text wx:if="{{aiInspectionMediaMessage}}" role="status">{{aiInspectionMediaMessage}}</text>
+  </view>
+  <button class="btn btn--secondary" disabled="{{aiInspectionTaskLoading || noTemplate || !id}}" bindtap="onInspectionTask">选择原检查草稿使用 AI</button>
+  <text wx:if="{{aiInspectionTaskMessage}}" role="status">{{aiInspectionTaskMessage}}</text>
+  <ai-inspection-task wx:if="{{aiInspectionTaskVisible}}" id="ai-inspection-task" bind:result="onInspectionTaskResult" />
   <ai-inspection-assist id="ai-inspection-assist" hidden="{{!aiInspectionVisible}}" />
 </view>

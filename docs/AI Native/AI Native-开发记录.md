@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-staff-media-review-consumer-20261112"></a>
+## 员工图片/录音、原草稿恢复与逐候选复核消费（2026-11-12）
+
+dev2 在固定 `70a1a60498c75d7547f679bc93bc4c94562389d8` 交回 22 源，Root 已逐文件核工作区与冻结 Git blob 一致。范围为[原上传 API](../../apps/staff-miniprogram/src/api/uploads.ts)、[原识别任务 API](../../apps/staff-miniprogram/src/api/ai-inspection-tasks.ts)、[任务会话](../../apps/staff-miniprogram/src/components/ai-native/inspection-task-session.ts)、[媒体/页面绑定](../../apps/staff-miniprogram/src/components/ai-native/inspection-task-page-binding.ts)，以及原交付/归还页、任务/补充输入组件、transport/host/wire 和检查草稿组件。Root 接管后仅在 uploads.ts 补正原键规范化：先核原始 UTF-16 长度再 trim，与已合后端相同；避免合法旧键的空白导致客户端把服务器原观察误判为不同操作。
+
+实际页面显式选图/录音、上传和保存草稿；PNG/JPEG 与单声道 16kHz WAV 分开，录音最多 12000ms、实际文件最多 524288 字节。原上传或草稿创建丢 ACK 时保留原定位，只核对原操作；明确观察到原草稿保存后，下一次显式选材才释放已完成上传定位，不阻塞下一份材料。Task 首次启动和原补充回答/继续保持同 Task 累计额度；没有原结果时不换键重做。隐藏、上下文变化、卸载及迟到回调受 epoch 和原存储 CAS 约束，不覆盖别页 unknown。
+
+result-read 保留完整 basis/reviewIssues/basisIssues，保存后和重开使用服务端当前 candidateReviews。候选、来源区域/音频时段、缺依据/倒退等待核理由及人工值分别呈现；只有当前服务器允许人工确认、来源匹配、有 recorded 依据且无问题时显示可采用。更正保留原 candidateId/modified 关系，来源已无法关联时走原手工值；拒绝可继续，缺值不补 0。采用仍经原 draft-edit 验证，不在页面重算业务规则。
+
+助手固定交付报告中的必要模拟结果：`AIN20_NATIVE_MEDIA_DRAFT_RECOVERY_V3` 7 项通过，覆盖交付/归还图片/WAV、创建丢 ACK、下一份选材、未观察到不重做及迟到 ACK 隔离，upload/PUT/complete 各 6、模型/Core 提交 0。`AIN20_NATIVE_COMPLETE_MEDIA_REVIEW` 的 `node - image pickup` 与 `node - audio return` 均退出 0：两条分别上传/原草稿/候选保存各 1、模型 2 次、同 Task 累计 calls=2、租约均释放；交付图片可明确采用，归还缺基线保持不可采用，人工更正/拒绝及全新页面重开复核通过。这里 Core 检查提交为 0，不能称为正式履约已经完成；原手工提交/原收据链仍按既有独立证据核定。数据、模型、上传传输和设备为明确替身，Core 使用正式单分配投影，默认完整 Core 方法的独立证据见前一阶段。
+
+助手原 ES2019 类型检查为 103 员工根/291 源、112 shared 根零诊断，shared 声明仅在内存；22 源前后哈希一致，3 个 JSON 解析及差异检查通过。7 个界面/绑定文件的 impeccable detect 返回空发现。原脚本/输出保留助手会话 `01a1bf35-1ee5-7400-a97d-c0ebf5f9482c`：最终媒体流程修订调用 `call_j7eMlYAY5qsGQnOuBjcLkL92`、恢复调用 `call_krkrEJFLEvGokvbtAxf55el3`、最终类型调用 `call_tQ1CKIyAiLCsTHxcLbnkRlvf`；没有另存脚本或第五册。
+
+Root 静态核对原定位持久化、发送前读回、unknown/继续标志、页面生命周期和服务端问题消费，修复上述上传观察客户端原键比较后，用实际 API/validator 做一组定向模拟：斜杠/空白旧键、错误原引用、超长/UTF-16 长度和失效页面；不自动重放，退出 0，stdin SHA-256 `c3b81b458c8ef980f71d4c4012c647bfb05597ad821f17aea727cb7a61ee9d8c`。Root 对受影响 API/页面绑定按原 ES2019 做 2 根/209 源类型复验，零诊断，退出 0，stdin SHA-256 `df19f969dfeeb9b8bdbca1afe71b0bff78b1f16746a15a95f4eacbd83db238f7`；首次内存命令的换行拼接及虚拟声明目录解析已更正，未以类型断言改业务代码。本片真实微信、数据库、模型与存储未验，全部自行启动的模拟进程退出，监听器/定时器/审计为 0，未创建任务临时目录。AIN-20 等原范围 QA 复核与前置 AIN-19 整项核定后更新进度；dev2 已转 AIN-12 后台原模型控制消费者，不等待 main 集成。
+
 <a id="ain-inspection-core-basis-review-20261112"></a>
 ## 默认员工识别的 Core 依据与保存后候选复核（2026-11-12）
 

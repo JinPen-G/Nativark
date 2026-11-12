@@ -37,6 +37,7 @@ async function chooseHistoryItem(labels: string[], current: () => boolean): Prom
   }
   return null;
 }
+export { chooseHistoryItem as chooseInspectionHistoryItem };
 export async function openInspectionReceiptHistory(page: InspectionPage, stage: 'pickup' | 'return') {
   if (remoteLoads.has(page)) return false;
   clearInspectionPage(page);

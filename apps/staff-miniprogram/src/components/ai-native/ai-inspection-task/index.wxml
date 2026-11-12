@@ -1,0 +1,13 @@
+<view class="inspection-task" aria-label="原检查识别任务" aria-busy="{{pending}}">
+  <text role="status">{{statusLabel}}</text>
+  <text wx:if="{{errorLabel}}" role="alert">{{errorLabel}}</text>
+  <ai-task-card wx:if="{{currentTask}}" task="{{currentTask}}" available="{{true}}" bind:open="onRead" />
+  <button wx:if="{{canBegin}}" disabled="{{pending}}" bindtap="onBegin">准备原识别任务</button>
+  <button wx:if="{{canStart}}" disabled="{{pending}}" bindtap="onStart">开始识别现有证据</button>
+  <button disabled="{{!canRead && !pending}}" bindtap="onRead">读取原任务与结果引用</button>
+  <ai-supplement-input id="task-input" task-id="{{taskId}}" input-revision="{{inputRevision}}" fields="{{fields}}"
+    disabled="{{!canSubmit || pending}}" submit-label="提交补充并继续识别" />
+  <button wx:if="{{canContinue}}" disabled="{{pending}}" bindtap="onContinue">继续已保存的原补充</button>
+  <button wx:if="{{resultAvailable}}" bindtap="onReviewResult">审阅原识别候选</button>
+  <text class="inspection-task__note">识别只提供候选；检查、判责及收费沿原人工流程。</text>
+</view>

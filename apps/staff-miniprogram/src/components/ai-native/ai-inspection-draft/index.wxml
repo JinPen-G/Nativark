@@ -2,11 +2,15 @@
   <text>候选与人工值均待核实，不代表业务检查事实</text>
   <view class="ai-inspection-draft__row" wx:for="{{visibleItems}}" wx:key="key">
     <text>{{item.label}}</text><text>候选：{{item.candidate}}</text>
-    <text>人工值：{{item.humanValue}} · {{item.decisionLabel}}</text><text class="source">来源：{{item.sourceLabel}}</text>
+    <text>人工值：{{item.humanValue}} · {{item.decisionLabel}}</text>
+    <text wx:if="{{item.differenceLabel}}" role="status">{{item.differenceLabel}}</text>
+    <text wx:for="{{item.reviewMessages}}" wx:for-item="reason" wx:key="*this" role="status" aria-label="{{item.label}}待核理由">{{reason}}</text>
+    <block wx:if="{{item.sourceLabels.length}}"><text class="source" wx:for="{{item.sourceLabels}}" wx:for-item="source" wx:key="*this">来源：{{source}}</text></block>
+    <text wx:else class="source">来源：{{item.sourceLabel}}</text>
     <input wx:if="{{!readonly}}" data-key="{{item.key}}" maxlength="4000" aria-label="{{item.label}} 人工更正 {{item.error}}" bindinput="onHumanInput"/>
     <text wx:if="{{item.error}}" role="alert">{{item.label}}：{{item.error}}</text>
     <view wx:if="{{candidateActions && item.candidateActionable && item.candidateId}}">
-      <button disabled="{{readonly}}" data-key="{{item.key}}" data-candidate="{{item.candidateId}}" data-revision="{{revision}}" data-decision="accepted" bindtap="onCandidateDecision" aria-label="人工采用{{item.label}}候选">采用此候选</button>
+      <button disabled="{{readonly || !item.candidateCanAccept}}" data-key="{{item.key}}" data-candidate="{{item.candidateId}}" data-revision="{{revision}}" data-decision="accepted" bindtap="onCandidateDecision" aria-label="人工采用{{item.label}}候选">采用此候选</button>
       <button disabled="{{readonly}}" data-key="{{item.key}}" data-candidate="{{item.candidateId}}" data-revision="{{revision}}" data-decision="rejected" bindtap="onCandidateDecision" aria-label="人工拒绝{{item.label}}候选">拒绝此候选</button>
     </view>
   </view>
