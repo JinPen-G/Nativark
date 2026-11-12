@@ -19,6 +19,10 @@ export function EnterpriseManagementReviewMessagesPanel({english}:{english:boole
   const kind=(v:EnterpriseManagementRequestType)=>v==="profile_change" ? english ? "Profile request" : "资料申请" : v==="credit_change" ? english ? "Credit request" : "授信申请"
     : v==="payment_proof" ? english ? "Rental-fee payment evidence" : "费用回款凭证" : english ? "Scope request" : "范围申请";
   const state=(v:EnterpriseOwnManagementReviewMessages["items"][number]["state"])=>v==="approved" ? english ? "Approval recorded (review only)" : "已记录审核通过（仅审核）" : v==="rejected" ? english ? "Rejection recorded" : "已记录审核拒绝" : english ? "Supplement requested" : "已记录补件要求";
+  const reviews = visible ? [...visible.items, ...(visible.paymentProofItems ?? [])] : [];
+  if (visible?.paymentProofItems?.length) {
+    reviews.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.operationKey.localeCompare(left.operationKey));
+  }
   return <section aria-label={english ? "Own original management-review messages" : "本人资料管理申请原审核消息"}>
     <h3>{english ? "Management requests: original review history" : "本人资料/管理申请：原审核历史"}</h3>
     <Alert type="info" title={english ? "Review only, no business change" : "仅原审核，不代表业务已变更"} description={english ? "Only original review-only receipts and the fixed original request category. Approval does not change a master, credit limit or policy, confirm payment or settle a debt. Private proposal/evidence and internal logs are not included. Delivery/read receipts remain unrecorded; no review or K/C recovery runs here." : "仅原 review-only 收据与固定的原申请类别。审核通过不表示主档、额度或政策已变更，也不确认到账或清偿债务。不公开私有提案/证据或内部日志；送达/已读未记录，不执行审核或恢复 K/C。"}/>
@@ -27,7 +31,7 @@ export function EnterpriseManagementReviewMessagesPanel({english}:{english:boole
       {query.isFetching && <p role="status">{english ? "Reading original management-review receipts" : "正在读取原管理审核收据"}</p>}
       {query.error && <Alert type="error" title={english ? "Original management-review messages could not be verified" : "本人管理原审核消息未核对成功"}/>}
       {visible && <>{visible.items.length===0 && !visible.paymentProofItems?.length && <p>{english ? "No original management reviews in this scope; not complete history." : "本范围未读到原管理审核收据，不代表完整历史为空。"}</p>}
-        <Table rowKey="operationKey" dataSource={[...visible.items, ...(visible.paymentProofItems ?? [])]} sorting={false} pagination={false} onRefresh={refresh} columns={[
+        <Table rowKey="operationKey" dataSource={reviews} sorting={false} pagination={false} onRefresh={refresh} columns={[
           {title:english ? "Original time (UTC)" : "原时间（UTC）",dataIndex:"createdAt"},{title:english ? "Original request" : "原申请",dataIndex:"requestId"},{title:english ? "Original category" : "原类别",render:(_,r)=>kind(r.requestType)},{title:english ? "Original enterprise reference" : "原企业引用",dataIndex:"corporateCustomerId"},{title:english ? "Original review result" : "原审核结果",render:(_,r)=>state(r.state)},
           {title:english ? "Original revision" : "原修订",dataIndex:"revision"},{title:english ? "Original operation reason" : "原操作原因",dataIndex:"reason"},{title:english ? "Original receipt key" : "原收据键",dataIndex:"operationKey"},{title:english ? "Own page" : "本人入口",render:(_,r)=>{const path=entry(r.requestId);return path ? <Link to={path}>{english ? "Open own request page" : "打开本人申请页"}</Link> : english ? "Own entry unavailable" : "本人入口不可用";}}
         ]}/>
