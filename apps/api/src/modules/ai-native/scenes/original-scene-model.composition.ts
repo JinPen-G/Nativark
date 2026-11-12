@@ -26,6 +26,7 @@ import { composeAuthorizedPersistentTaskInputRunner,
 import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
 import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey } from './original-quote-input';
+import { AiWorkbenchFieldMaterialService } from '../workbench-field-material.service';
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 import { AiOriginalSceneDisplayGeneration, type AiOriginalSceneDisplayPublication } from '../workbench-display-generation.service';
@@ -87,7 +88,9 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
   } });
   const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock, knowledge);
   const display = dependencies.displayPublication ? new AiOriginalSceneDisplayGeneration({ db: dependencies.db,
-    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication }, clock) : undefined;
+    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication,
+    quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),
+      describe: scenes.tools.quote.businessPreparation.describeInput.bind(scenes.tools.quote.businessPreparation) } }, clock) : undefined;
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
   const { current, same, source: originalInputSource } = composeOriginalSceneClarificationSource({
     db: dependencies.db, tasks: model.tasks, scenes, scene, gatewayScene, results,
