@@ -14,7 +14,7 @@ type Action = keyof typeof AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS;
 const ajv = new Ajv({ strict: true, coerceTypes: false, removeAdditional: false, useDefaults: false });
 addFormats(ajv);
 const definitions = { ...AI_INSPECTION_LIFECYCLE_HTTP_SCHEMAS,
-  ...Object.fromEntries(['AiInspectionDraftReadRequest', 'AiStaffInspectionSavedReference']
+  ...Object.fromEntries(['AiInspectionDraftReadRequest', 'AiStaffInspectionSavedReference', 'AiInspectionRecognitionBasisReference']
     .map(name => [name, AI_INSPECTION_MANUAL_HTTP_SCHEMAS[name]])),
   ...Object.fromEntries(['AiInspectionCandidateDraft', 'AiInspectionSourceDraft', 'AiInspectionValueDraft']
     .map(name => [name, AI_INSPECTION_DRAFT_SCHEMAS[name]])) };

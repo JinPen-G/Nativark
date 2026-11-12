@@ -9,6 +9,8 @@ import { PrismaInspectionEvidenceAuthority } from './prisma-inspection-evidence.
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import type { GatewayMediaAttachmentResolver } from '../gateway-intent';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { InspectionRecognitionBasisService, unrecordedInspectionRecognitionBasis,
+  type InspectionRecognitionBasisReference } from './inspection-recognition-basis.service';
 
 const schema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, operationId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), question: z.string().trim().min(1).max(4000) }).strict();
@@ -25,7 +27,14 @@ export function inspectionRecognitionMediaKind(input: AiInspectionRecognitionInp
 export class InspectionRecognitionService {
   constructor(private readonly repository: PrismaInspectionDraftRepository, private readonly drafts: InspectionDraftService,
     private readonly authority: InspectionActionAuthority, private readonly templates: InspectionTemplateService,
-    private readonly evidence: PrismaInspectionEvidenceAuthority) {}
+    private readonly evidence: PrismaInspectionEvidenceAuthority, private readonly basis?: InspectionRecognitionBasisService) {}
+
+  /** Current Core comparison stays on the trusted server. An old input without
+   * this original stamp never acquires current-asset evidence on replay. */
+  async revalidateBasis(target: AiInspectionTarget, reference: InspectionRecognitionBasisReference | undefined, signal?: AbortSignal) {
+    if (reference?.status === 'recorded' && !this.basis) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    return this.basis ? (await this.basis.revalidate(target, reference, signal)).reference : unrecordedInspectionRecognitionBasis();
+  }
 
   /** Server-only adapter for the existing Gateway. The returned function stays
    * in request memory, never a DTO, dispatch grant or persisted credential. */
@@ -54,6 +63,7 @@ export class InspectionRecognitionService {
         || await this.evidence.fingerprint(target, detail.state.evidence) !== row.evidenceFingerprint) {
         throw new InspectionAssistError('BINDING_CHANGED');
       }
+      await this.revalidateBasis(target, frozen.basis);
       const current = await this.repository.read(scope, input.draftId);
       if (!current || current.revision !== row.revision || current.status !== row.status
         || current.expiresAt.getTime() <= Date.now() || requestFingerprint(current.state) !== requestFingerprint(row.state)) {
@@ -141,6 +151,7 @@ export class InspectionRecognitionService {
       if (!['draft_saved', 'prepared'].includes(row.status) || row.expiresAt.getTime() <= Date.now() || row.revision !== input.expectedRevision) throw new InspectionAssistError('REVISION_CONFLICT');
       const detail = await this.drafts.read({ ...target, draftId: row.id }), binding = await this.templates.read(target);
       if (binding.bindingFingerprint !== row.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+      const basis = this.basis ? (await this.basis.prepare(target, signal)).reference : unrecordedInspectionRecognitionBasis();
       const sources = detail.state.evidence;
       if (!sources.length || sources.length > 8 || (detail.state.recognitionInputs?.length ?? 0) >= 8) throw new InspectionAssistError('INVALID_INPUT');
       const media: AiInspectionRecognitionInput['media'] = [];
@@ -155,16 +166,20 @@ export class InspectionRecognitionService {
       }
       const payload = { inputId, bindingFingerprint: row.bindingFingerprint, question: input.question,
         template: { id: binding.template.id, version: binding.template.version, fields: binding.template.fields.map(field => ({ code: field.code,
-          type: field.type, label: field.label, required: field.required, ...(field.options ? { options: [...field.options] } : {}) })) }, media };
+          type: field.type, label: field.label, required: field.required, ...(field.options ? { options: [...field.options] } : {}),
+          ...(field.unit !== undefined ? { unit: field.unit } : {}),
+          ...(field.usageMetric !== undefined ? { usageMetric: field.usageMetric } : {}) })) }, media, basis };
       const frozen: AiInspectionRecognitionInput = { ...payload, inputFingerprint: requestFingerprint(payload) };
       const evidenceFingerprint = await this.evidence.fingerprint(target, sources);
       const after = await this.templates.read(target);
       if (after.bindingFingerprint !== row.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+      await this.revalidateBasis(target, basis, signal);
       const state = { ...detail.state, reviewRequired: true, recognitionInputs: [...(detail.state.recognitionInputs ?? []), frozen] };
       delete state.submission;
       return this.authority.withAction(target, 'bind', async current => {
         if (requestFingerprint(current) !== requestFingerprint(scope)) throw new InspectionAssistError('ACCESS_DENIED');
         if (signal.aborted) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+        await this.revalidateBasis(target, basis, signal);
         const result = await this.repository.change(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: row.revision },
           row.bindingFingerprint, { state: JSON.parse(JSON.stringify(state)), inputFingerprint: frozen.inputFingerprint, evidenceFingerprint, status: 'draft_saved' });
         return { ...result, inputId, dispatch: 'unavailable' as const, code: 'CAPABILITY_UNSUPPORTED' as const };

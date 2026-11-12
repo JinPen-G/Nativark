@@ -184,6 +184,14 @@ export const taskHttp = {
   "readAnswer": "input/receipt",
   "continueAnswer": "input/continue"
 } as const;
+export const uploadObservationHttp = {
+  "basePath": "staff/v1/uploads",
+  "observe": "sessions/observe"
+} as const;
+export const uploadObservationContract = {
+  "request": "StaffUploadObservationRequest",
+  "response": "StaffUploadObservationResponse"
+} as const;
 export const schemas: Record<string, AiLeafSchemaDraft> = {
   "AiStaffInspectionHistoryRequest": {
     "type": "object",
@@ -1556,6 +1564,161 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "caller_supplied_not_model_execution_proof"
         ]
       },
+      "candidateReviews": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "candidateId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "basis": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "recorded"
+                      ]
+                    },
+                    "referenceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "sourceHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status",
+                    "referenceId",
+                    "sourceHash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "not_recorded"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "reviewIssues": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "baseline_missing",
+                  "meter_replaced",
+                  "reading_backwards",
+                  "field_unavailable",
+                  "source_unclear"
+                ]
+              },
+              "minItems": 0,
+              "maxItems": 5,
+              "uniqueItems": true
+            },
+            "basisIssues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "fieldCode": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "baseline_missing",
+                      "meter_replaced",
+                      "reading_backwards",
+                      "field_unavailable",
+                      "source_unclear"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[a-z_]+$"
+                  },
+                  "originalRecordId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "fieldCode",
+                  "code",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 0,
+              "maxItems": 100
+            },
+            "sourcesMatchDraftEvidence": {
+              "type": "boolean"
+            },
+            "adoption": {
+              "type": "string",
+              "enum": [
+                "human_confirmation_required",
+                "unavailable"
+              ]
+            }
+          },
+          "required": [
+            "candidateId",
+            "basis",
+            "reviewIssues",
+            "basisIssues",
+            "sourcesMatchDraftEvidence",
+            "adoption"
+          ],
+          "additionalProperties": false
+        },
+        "minItems": 0,
+        "maxItems": 100
+      },
       "state": {
         "type": "object",
         "properties": {
@@ -1833,6 +1996,14 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                             },
                             "minItems": 0,
                             "maxItems": 100
+                          },
+                          "unit": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 64
+                          },
+                          "usageMetric": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -1853,6 +2024,66 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                     "fields"
                   ],
                   "additionalProperties": false
+                },
+                "basis": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "enum": [
+                            "inspection-recognition-basis-1"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "recorded"
+                          ]
+                        },
+                        "referenceId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "sourceHash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "status",
+                        "referenceId",
+                        "sourceHash"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "enum": [
+                            "inspection-recognition-basis-1"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "not_recorded"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "version",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 },
                 "media": {
                   "type": "array",
@@ -1944,6 +2175,70 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
             },
             "minItems": 0,
             "maxItems": 8
+          },
+          "candidateBasis": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "recorded"
+                      ]
+                    },
+                    "referenceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "sourceHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status",
+                    "referenceId",
+                    "sourceHash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "enum": [
+                        "inspection-recognition-basis-1"
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "not_recorded"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
           }
         },
         "required": [
@@ -1967,6 +2262,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
       "bindingFingerprint",
       "inspectionId",
       "recognitionEvidence",
+      "candidateReviews",
       "state"
     ],
     "additionalProperties": false
@@ -3637,6 +3933,69 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
               "not_attempted"
             ]
           },
+          "basis": {
+            "$ref": "#/components/schemas/AiInspectionRecognitionBasisReference"
+          },
+          "reviewIssues": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "baseline_missing",
+                "meter_replaced",
+                "reading_backwards",
+                "field_unavailable",
+                "source_unclear"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 5,
+            "uniqueItems": true
+          },
+          "basisIssues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldCode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "baseline_missing",
+                    "meter_replaced",
+                    "reading_backwards",
+                    "field_unavailable",
+                    "source_unclear"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z_]+$"
+                },
+                "originalRecordId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "required": [
+                "fieldCode",
+                "code",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -3684,6 +4043,9 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "automaticRetry",
           "persistence",
           "execution",
+          "basis",
+          "reviewIssues",
+          "basisIssues",
           "status",
           "candidates",
           "recognitionEvidence",
@@ -3796,6 +4158,69 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
               "not_attempted"
             ]
           },
+          "basis": {
+            "$ref": "#/components/schemas/AiInspectionRecognitionBasisReference"
+          },
+          "reviewIssues": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "baseline_missing",
+                "meter_replaced",
+                "reading_backwards",
+                "field_unavailable",
+                "source_unclear"
+              ]
+            },
+            "minItems": 0,
+            "maxItems": 5,
+            "uniqueItems": true
+          },
+          "basisIssues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fieldCode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "baseline_missing",
+                    "meter_replaced",
+                    "reading_backwards",
+                    "field_unavailable",
+                    "source_unclear"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[a-z_]+$"
+                },
+                "originalRecordId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "required": [
+                "fieldCode",
+                "code",
+                "reason"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -3843,10 +4268,73 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "automaticRetry",
           "persistence",
           "execution",
+          "basis",
+          "reviewIssues",
+          "basisIssues",
           "status",
           "candidates",
           "recognitionEvidence",
           "nextAction"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "AiInspectionRecognitionBasisReference": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "inspection-recognition-basis-1"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "recorded"
+            ]
+          },
+          "referenceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "sourceHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "version",
+          "status",
+          "referenceId",
+          "sourceHash"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "inspection-recognition-basis-1"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_recorded"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "status"
         ],
         "additionalProperties": false
       }
@@ -6334,6 +6822,373 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "execution",
           "retryable",
           "nextAction"
+        ],
+        "additionalProperties": false
+      }
+    ]
+  },
+  "StaffUploadObservationRequest": {
+    "type": "object",
+    "properties": {
+      "reference": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "idempotencyKey": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [
+              "sessionId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "file": {
+        "type": "object",
+        "properties": {
+          "businessModule": {
+            "type": "string",
+            "enum": [
+              "rental-core"
+            ]
+          },
+          "businessType": {
+            "type": "string",
+            "enum": [
+              "rental_order",
+              "rental_work_order"
+            ]
+          },
+          "businessId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 191,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "fileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 180
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 127,
+            "pattern": "^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+-]+$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20971520
+          },
+          "uploadScene": {
+            "type": "string",
+            "enum": [
+              "pickup-evidence",
+              "return-evidence",
+              "handover-signature",
+              "work-order-evidence",
+              "offline-payment-proof"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "handoverStage": {
+                "type": "string",
+                "enum": [
+                  "pickup",
+                  "return"
+                ]
+              },
+              "handoverBatchId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "businessModule",
+          "businessType",
+          "businessId",
+          "fileName",
+          "mimeType",
+          "sizeBytes",
+          "uploadScene"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "reference",
+      "file"
+    ],
+    "additionalProperties": false
+  },
+  "StaffUploadObservationResponse": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "\\S"
+                  }
+                },
+                "required": [
+                  "idempotencyKey"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "descriptionHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observation": {
+            "type": "string",
+            "enum": [
+              "stored_metadata_not_transfer_proof"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "uploadGrant": {
+            "type": "string",
+            "enum": [
+              "not_provided"
+            ]
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_upload"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "observed"
+            ]
+          },
+          "session": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "fileAssetId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 191,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending_upload",
+                  "freeze_pending",
+                  "completed",
+                  "failed"
+                ]
+              },
+              "fileStatus": {
+                "type": "string",
+                "enum": [
+                  "pending_upload",
+                  "active",
+                  "failed",
+                  "delete_pending",
+                  "deleted"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "provider",
+                  "simulation"
+                ]
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time",
+                "minLength": 20,
+                "maxLength": 40
+              },
+              "completedAt": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "minLength": 20,
+                    "maxLength": 40
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "sessionId",
+              "fileAssetId",
+              "status",
+              "fileStatus",
+              "mode",
+              "expiresAt",
+              "completedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "reference",
+          "descriptionHash",
+          "observation",
+          "retryable",
+          "uploadGrant",
+          "nextAction",
+          "state",
+          "session"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "\\S"
+                  }
+                },
+                "required": [
+                  "idempotencyKey"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 191,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "required": [
+                  "sessionId"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "descriptionHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "observation": {
+            "type": "string",
+            "enum": [
+              "stored_metadata_not_transfer_proof"
+            ]
+          },
+          "retryable": {
+            "type": "boolean",
+            "const": false
+          },
+          "uploadGrant": {
+            "type": "string",
+            "enum": [
+              "not_provided"
+            ]
+          },
+          "nextAction": {
+            "type": "string",
+            "enum": [
+              "read_original_upload"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_observed"
+            ]
+          },
+          "session": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "reference",
+          "descriptionHash",
+          "observation",
+          "retryable",
+          "uploadGrant",
+          "nextAction",
+          "state",
+          "session"
         ],
         "additionalProperties": false
       }

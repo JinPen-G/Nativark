@@ -18,6 +18,12 @@ export type AiInspectionTarget = {
 
 export type AiInspectionEvidenceRef = { attachmentId: string; attachmentRevision: number };
 export type AiInspectionFieldValue = string | number | boolean | null;
+/** Reference to server-observed comparison material. Expected identifiers and
+ * baseline readings stay behind the original inspection authority. An absent
+ * or unrecorded reference cannot be filled from newer configuration. */
+export type AiInspectionRecognitionBasisReference =
+  | { version: 'inspection-recognition-basis-1'; status: 'recorded'; referenceId: string; sourceHash: string }
+  | { version: 'inspection-recognition-basis-1'; status: 'not_recorded' };
 export type AiInspectionHumanField = {
   value: AiInspectionFieldValue;
   decision: 'manual' | 'accepted' | 'modified' | 'rejected';
@@ -34,6 +40,7 @@ export type AiInspectionDraftState = {
   reviewRequired: boolean;
   submission?: AiInspectionSubmissionMaterial;
   recognitionInputs?: AiInspectionRecognitionInput[];
+  candidateBasis?: Record<string, AiInspectionRecognitionBasisReference>;
 };
 
 export type AiInspectionRecognitionInput = {
@@ -41,7 +48,9 @@ export type AiInspectionRecognitionInput = {
   inputFingerprint: string;
   bindingFingerprint: string;
   question: string;
-  template: { id: string; version: string; fields: Array<{ code: string; type: string; label: string; required: boolean; options?: string[] }> };
+  template: { id: string; version: string; fields: Array<{ code: string; type: string; label: string; required: boolean;
+    options?: string[]; unit?: string; usageMetric?: boolean }> };
+  basis?: AiInspectionRecognitionBasisReference;
   media: Array<AiInspectionEvidenceRef & { contentHash: string; mediaType: string; sizeBytes: number; width: number | null; height: number | null; durationMs: number | null }>;
 };
 

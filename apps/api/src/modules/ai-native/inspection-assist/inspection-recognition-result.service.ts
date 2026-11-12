@@ -16,6 +16,7 @@ import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionCandidateService, snapshotInspectionCandidates } from './inspection-candidate.service';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import { type RecognitionSaveAssociation } from './inspection-recognition-save.association';
+import { unrecordedInspectionRecognitionBasis, type InspectionRecognitionBasisIssue } from './inspection-recognition-basis.service';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, inputId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), taskId: inspectionId, resultId: inspectionId }).strict();
@@ -180,7 +181,8 @@ export class InspectionRecognitionResultService {
       const persisted = await this.readBinding(input, scope, result, taskModelIdentity(initial));
       const expectedText = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts', draftId: bound.draftId,
         draftRevision: input.expectedRevision, inputFingerprint: bound.input.inputFingerprint,
-        question: bound.input.question, template: bound.input.template });
+        question: bound.input.question, template: bound.input.template,
+        ...(bound.input.basis !== undefined ? { basis: bound.input.basis } : {}) });
       let messages: TaskModelInput['intent']['messages'] = [{ role: 'user', content: [{ kind: 'text', text: expectedText }, ...bound.input.media.map(ref =>
         ({ kind: source.policy.kind!, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }];
       const media = bound.input.media.map(ref => ({ kind: source.policy.kind, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision,
@@ -195,6 +197,7 @@ export class InspectionRecognitionResultService {
       if (requestFingerprint(persisted.input.intent.messages) !== requestFingerprint(messages)
         || requestFingerprint(persisted.input.media) !== requestFingerprint(media)) throw changed();
       let values: ReturnType<typeof snapshotInspectionCandidates> = [];
+      let basisIssues: InspectionRecognitionBasisIssue[] = [];
       let status: 'available' | 'unknown' | 'failed' = result.status === 'failed' ? 'failed' : 'unknown';
       const payload = result.payload;
       if (result.status === 'succeeded' && result.completeMeasurement && isGatewayResult(payload)
@@ -210,7 +213,8 @@ export class InspectionRecognitionResultService {
           || !bound.input.media.some(original => original.attachmentId === ref.attachmentId
             && original.attachmentRevision === ref.attachmentRevision
             && (ref.kind !== 'audio' || original.durationMs !== null && ref.span.endMs <= original.durationMs))))) throw changed();
-        values = (await this.candidates!.consume({ ...target, bindingFingerprint: bound.input.bindingFingerprint, candidates: values })).candidates;
+        const checked = await this.candidates!.consume({ ...target, bindingFingerprint: bound.input.bindingFingerprint, candidates: values }, bound.input.basis);
+        values = checked.candidates; basisIssues = checked.basisIssues;
         await this.verifyDispatch(persisted, scope, payload.usage);
         status = 'available';
       }
@@ -240,6 +244,8 @@ export class InspectionRecognitionResultService {
         association: { actionId: result.actionId, actionInputId: persisted.actionInputId,
           inputHash: taskModelFingerprint(persisted.input, source.policy) },
         projection: { status, ...input, candidates: values, resultHash: result.contentHash, inputFingerprint: bound.input.inputFingerprint,
+          basis: bound.input.basis ?? unrecordedInspectionRecognitionBasis(), basisIssues,
+          reviewIssues: [...new Set(basisIssues.map(issue => issue.code))],
           runId: result.runId, stepId: result.stepId, observedAt: result.observedAt, trust: 'untrusted_candidate' as const,
           recognitionEvidence: status === 'available' ? (source.policy.kind === 'audio' ? 'persisted_audio_step' as const : 'persisted_image_step' as const) : 'not_confirmed' as const,
           nextAction: status === 'available' ? 'human_review' as const : 'reconcile_or_manual_review' as const,

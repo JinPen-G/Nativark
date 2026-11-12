@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { AiInspectionActorScope, AiInspectionDraftState, AiInspectionTarget } from '@rental-os/shared';
+import { isDeepStrictEqual } from 'node:util';
+import type { AiInspectionActorScope, AiInspectionDraftState, AiInspectionTarget, AiInspectionSavedCandidateReview } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionTemplateService } from './inspection-template.service';
@@ -8,6 +9,7 @@ import { InspectionCandidateService, snapshotInspectionCandidates } from './insp
 import { PrismaInspectionDraftRepository } from './prisma-inspection-draft.repository';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import { recognitionSaveAssociationSchema, recognitionSaveReferenceSchema, type RecognitionSaveAssociation } from './inspection-recognition-save.association';
+import { inspectionRecognitionBasisReferenceSchema, unrecordedInspectionRecognitionBasis } from './inspection-recognition-basis.service';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const targetSchema = inspectionTargetSchema.extend({ templateId: inspectionId }).strict();
@@ -25,12 +27,16 @@ export const inspectionSubmissionMaterialSchema = z.object({ mode: z.enum(['orig
   body: z.object({ templateId: inspectionId, results: z.record(inspectionId, z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.array(inspectionId).max(100)])),
     attachments: z.array(inspectionId).max(101), handoverSignatureFileAssetId: inspectionId.optional() }).strict() }).strict();
 export const inspectionRecognitionInputSchema = z.object({ inputId: inspectionId, inputFingerprint: hash, bindingFingerprint: hash, question: z.string().min(1).max(4000),
-  template: z.object({ id: inspectionId, version: inspectionId, fields: z.array(z.object({ code: inspectionId, type: z.string(), label: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }).strict()).max(100) }).strict(),
+  template: z.object({ id: inspectionId, version: inspectionId, fields: z.array(z.object({ code: inspectionId, type: z.string(), label: z.string(), required: z.boolean(),
+    options: z.array(z.string()).optional(), unit: z.string().max(64).optional(), usageMetric: z.boolean().optional() }).strict()).max(100) }).strict(),
+  basis: inspectionRecognitionBasisReferenceSchema.optional(),
   media: z.array(evidenceRef.extend({ contentHash: hash, mediaType: z.string(), sizeBytes: z.number().int().positive(), width: z.number().int().positive().nullable(),
     height: z.number().int().positive().nullable(), durationMs: z.number().int().nonnegative().nullable() }).strict()).max(8) }).strict();
 const stateSchema = z.object({ version: z.literal(1), fields: z.record(inspectionId, z.object({ value: scalar,
   decision: z.enum(['manual', 'accepted', 'modified', 'rejected']), candidateId: inspectionId.optional(), actorId: inspectionId }).strict()),
-  candidates: z.array(z.unknown()).max(100), evidence: z.array(evidenceRef).max(100), missingFields: z.array(inspectionId).max(100), reviewRequired: z.boolean(), submission: inspectionSubmissionMaterialSchema.optional(), recognitionInputs: z.array(inspectionRecognitionInputSchema).max(8).optional() }).strict();
+  candidates: z.array(z.unknown()).max(100), evidence: z.array(evidenceRef).max(100), missingFields: z.array(inspectionId).max(100), reviewRequired: z.boolean(), submission: inspectionSubmissionMaterialSchema.optional(),
+  recognitionInputs: z.array(inspectionRecognitionInputSchema).max(8).optional(),
+  candidateBasis: z.record(inspectionId, inspectionRecognitionBasisReferenceSchema).refine(value => Object.keys(value).length <= 100).optional() }).strict();
 export interface InspectionDraftEvidence {
   fingerprint(target: AiInspectionTarget, refs: Array<z.infer<typeof evidenceRef>>): Promise<string>;
 }
@@ -86,8 +92,14 @@ export class InspectionDraftService {
         let value = edit.value;
         if (edit.decision === 'accepted') {
           if (!candidate || candidate.status !== 'candidate' || edit.value !== undefined) throw new InspectionAssistError('INVALID_INPUT');
+          if (candidate.sources.some(source => !state.evidence.some(ref => ref.attachmentId === source.attachmentId
+            && ref.attachmentRevision === source.attachmentRevision))) throw new InspectionAssistError('BINDING_CHANGED');
           value = candidate.value.kind === 'photo' ? candidate.value.attachmentId : candidate.value.value;
-          await this.candidates.consume({ ...target, bindingFingerprint: input.bindingFingerprint, candidates: [candidate] });
+          const basis = state.candidateBasis?.[candidate.candidateId];
+          const checked = await this.candidates.consume({ ...target, bindingFingerprint: input.bindingFingerprint, candidates: [candidate] }, basis);
+          // Legacy omission and explicit absence both lack an adoption basis.
+          // Original-operation replay above remains a receipt read.
+          if (checked.basis.status !== 'recorded' || checked.basisIssues.length) throw new InspectionAssistError('BINDING_CHANGED');
         }
         if (edit.decision === 'rejected') {
           if (edit.value !== undefined) throw new InspectionAssistError('INVALID_INPUT');
@@ -135,13 +147,20 @@ export class InspectionDraftService {
       const row = await this.load(scope, input.draftId, target);
       this.editable(row, input.expectedRevision);
       if (row.bindingFingerprint !== input.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
-      const consumed = await this.candidates.consume({ ...target, bindingFingerprint: input.bindingFingerprint, candidates: snapshot });
       const state = this.state(row.state);
+      const originals = association ? state.recognitionInputs?.filter(original => original.inputId === association.reference.inputId) ?? [] : [];
+      if (association && (originals.length !== 1 || originals[0].inputFingerprint !== association.inputFingerprint)) throw new InspectionAssistError('BINDING_CHANGED');
+      const basis = originals[0]?.basis;
+      const consumed = await this.candidates.consume({ ...target, bindingFingerprint: input.bindingFingerprint, candidates: snapshot }, basis);
       if (snapshot.some(candidate => candidate.sources.some(source => !state.evidence.some(ref => ref.attachmentId === source.attachmentId
         && ref.attachmentRevision === source.attachmentRevision)))) throw new InspectionAssistError('BINDING_CHANGED');
       if (snapshot.some(candidate => state.candidates.some(old => old.candidateId === candidate.candidateId))) throw new InspectionAssistError('REVISION_CONFLICT');
       if (state.candidates.length + snapshot.length > 100) throw new InspectionAssistError('INVALID_INPUT');
       state.candidates.push(...consumed.candidates);
+      if (basis !== undefined) {
+        state.candidateBasis ??= {};
+        for (const candidate of consumed.candidates) state.candidateBasis[candidate.candidateId] = structuredClone(basis);
+      }
       delete state.submission;
       state.reviewRequired = true;
       await this.binding(target, scope, input.bindingFingerprint);
@@ -203,15 +222,49 @@ export class InspectionDraftService {
     return this.authority.withAction(target, 'read', async scope => {
       const row = await this.load(scope, input.draftId, target), state = this.state(row.state);
       let reviewRequired = state.reviewRequired || row.expiresAt.getTime() <= Date.now();
+      let bindingCurrent = true;
       try {
         await this.binding(target, scope, row.bindingFingerprint);
-        if (await this.evidenceHash(target, state.evidence) !== row.evidenceFingerprint) reviewRequired = true;
+        if (await this.evidenceHash(target, state.evidence) !== row.evidenceFingerprint) bindingCurrent = false;
       } catch (error) {
-        if (error instanceof InspectionAssistError && ['BINDING_CHANGED', 'TEMPLATE_UNAVAILABLE', 'STORAGE_UNAVAILABLE'].includes(error.code)) reviewRequired = true;
+        if (error instanceof InspectionAssistError && ['BINDING_CHANGED', 'TEMPLATE_UNAVAILABLE', 'STORAGE_UNAVAILABLE'].includes(error.code)) bindingCurrent = false;
         else throw error;
       }
+      const candidateReviews: AiInspectionSavedCandidateReview[] = [];
+      // Reopening a saved draft must not revive an old model-result revision or
+      // rely on a browser cache. Recheck each original candidate association.
+      for (const candidate of state.candidates) {
+        const basis = state.candidateBasis?.[candidate.candidateId];
+        const sourcesMatchDraftEvidence = bindingCurrent && this.sourcesIncluded(candidate, state.evidence);
+        const review: AiInspectionSavedCandidateReview = { candidateId: candidate.candidateId,
+          basis: basis ?? unrecordedInspectionRecognitionBasis(), sourcesMatchDraftEvidence,
+          reviewIssues: [], basisIssues: [], adoption: 'unavailable' };
+        if (sourcesMatchDraftEvidence) {
+          try {
+            const checked = await this.candidates.consume({ ...target, bindingFingerprint: row.bindingFingerprint,
+              candidates: [candidate] }, basis);
+            review.basis = checked.basis; review.basisIssues = checked.basisIssues; review.reviewIssues = checked.reviewIssues;
+            if (candidate.status === 'candidate' && checked.basis.status === 'recorded' && !checked.basisIssues.length
+              && row.expiresAt.getTime() > Date.now() && ['draft_saved', 'prepared'].includes(row.status))
+              review.adoption = 'human_confirmation_required';
+          } catch (error) {
+            if (!(error instanceof InspectionAssistError)
+              || !['BINDING_CHANGED', 'TEMPLATE_UNAVAILABLE', 'STORAGE_UNAVAILABLE'].includes(error.code)) throw error;
+            review.basisIssues = [{ fieldCode: candidate.fieldCode, code: 'source_unclear', reason: 'original_basis_unavailable' }];
+            review.reviewIssues = ['source_unclear'];
+          }
+        } else {
+          review.basisIssues = [{ fieldCode: candidate.fieldCode, code: 'source_unclear', reason: 'draft_evidence_changed' }];
+          review.reviewIssues = ['source_unclear'];
+        }
+        candidateReviews.push(review);
+      }
+      const current = await this.load(scope, input.draftId, target);
+      if (!isDeepStrictEqual(row, current)) throw new InspectionAssistError('REVISION_CONFLICT');
+      reviewRequired ||= !bindingCurrent || candidateReviews.some(review => review.basisIssues.length > 0);
       return { draftId: row.id, revision: row.revision, status: row.status, target, assetId: row.assetId,
         templateVersion: row.templateVersion, bindingFingerprint: row.bindingFingerprint, state: { ...state, reviewRequired },
+        candidateReviews,
         recognitionEvidence: 'caller_supplied_not_model_execution_proof' as const, inspectionId: row.inspectionId };
     });
   }

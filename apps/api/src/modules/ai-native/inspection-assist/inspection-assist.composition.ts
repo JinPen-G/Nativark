@@ -14,12 +14,15 @@ import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionSubmissionService } from './inspection-submission.service';
 import { InspectionRecognitionService, inspectionRecognitionMediaKind } from './inspection-recognition.service';
 import { InspectionRecognitionResultService } from './inspection-recognition-result.service';
+import { InspectionRecognitionBasisService, type InspectionRecognitionBasisPorts } from './inspection-recognition-basis.service';
+import { createInspectionRecognitionCoreSource } from './inspection-recognition-core.source';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { taskAudioMaterialSchema, taskImageMaterialSchema, type TaskModelPolicy } from '../model-input/task-model-input';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { OriginalInspectionApplication } from './original-inspection.application';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
+import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import type { RentalIdempotencyRepository } from '../../rental-core/rental-idempotency.repository';
 import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionManualPreparationService } from './inspection-manual-preparation.service';
@@ -36,7 +39,8 @@ function inspectionTaskMaterial(bound: Awaited<ReturnType<InspectionRecognitionS
   const kind = inspectionRecognitionMediaKind(bound.input);
   const text = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts',
     draftId: bound.draftId, draftRevision: bound.draftRevision, inputFingerprint: bound.input.inputFingerprint,
-    question: bound.input.question, template: bound.input.template });
+    question: bound.input.question, template: bound.input.template,
+    ...(bound.input.basis ? { basis: bound.input.basis } : {}) });
   return (kind === 'audio' ? taskAudioMaterialSchema : taskImageMaterialSchema).parse({ maxOutputTokens,
     messages: [{ role: 'user', content: [{ kind: 'text', text }, ...bound.input.media.map(ref => ({ kind,
       attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }] });
@@ -59,7 +63,9 @@ export async function composeInspectionRecognitionTaskHost(recognition: Pick<Ins
     task: { ...dependencies.task, material } });
 }
 
-type Dependencies = ConstructorParameters<typeof InspectionTemplateService>[0] & {
+type TemplateDependencies = ConstructorParameters<typeof InspectionTemplateService>[0];
+type Dependencies = Omit<TemplateDependencies, 'core'> & {
+  core: TemplateDependencies['core'] & Partial<Pick<RentalCoreService, 'readOrderAllocationPickupBasis'>>;
   /** Server-only dependencies; credentials are bound by THIS request factory,
    * never independently supplied by an external result caller. */
   recognitionResults?: Omit<PersistedTaskAuthorizationDependencies, 'credentials'> & {
@@ -69,6 +75,8 @@ type Dependencies = ConstructorParameters<typeof InspectionTemplateService>[0] &
     policy: TaskModelPolicy; financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   };
   evidence?: InspectionEvidenceAuthority;
+  /** Built with this request's server credential lifetime, never body fields. */
+  recognitionBasis?: (credentials: ConstructorParameters<typeof InspectionTemplateService>[0]['credentials']) => InspectionRecognitionBasisPorts;
   storage?: Pick<FileStorageRuntimeService, 'readInspectionBytes'>;
   originalInspection?: { controller: Pick<RentalCoreController, 'createInspection'>; receipts: Pick<RentalIdempotencyRepository, 'find'> };
   db?: Pick<PrismaClient, '$transaction' | 'aiInspectionDraft' | 'aiInspectionOperation' | 'aiInspectionEvidenceBinding' | 'fileAsset'>;
@@ -238,13 +246,15 @@ export function composeInspectionAssist(dependencies: Dependencies) {
   const authority = new InspectionActionAuthority(dependencies.guard, dependencies.credentials);
   const evidence = dependencies.db ? new PrismaInspectionEvidenceAuthority(dependencies.db, authority, templates, dependencies.storage) : undefined;
   const manual = new InspectionManualPreparationService(templates, evidence);
-  const candidates = new InspectionCandidateService(templates, evidence ?? dependencies.evidence);
+  const basis = new InspectionRecognitionBasisService(templates, authority,
+    dependencies.recognitionBasis?.(dependencies.credentials) ?? createInspectionRecognitionCoreSource(dependencies));
+  const candidates = new InspectionCandidateService(templates, evidence ?? dependencies.evidence, basis);
   const repository = dependencies.db ? new PrismaInspectionDraftRepository(dependencies.db) : undefined;
   const drafts = repository ? new InspectionDraftService(repository, authority, templates, manual, candidates, evidence) : undefined;
   const original = dependencies.originalInspection ? new OriginalInspectionApplication(dependencies.guard, dependencies.credentials,
     dependencies.originalInspection.controller, dependencies.originalInspection.receipts) : undefined;
   const submission = repository && drafts && evidence ? new InspectionSubmissionService(repository, drafts, authority, templates, manual, evidence, dependencies.core, original) : undefined;
-  const recognition = repository && drafts && evidence ? new InspectionRecognitionService(repository, drafts, authority, templates, evidence) : undefined;
+  const recognition = repository && drafts && evidence ? new InspectionRecognitionService(repository, drafts, authority, templates, evidence, basis) : undefined;
   const resultSource = dependencies.recognitionResults;
   const resultAuthorization = resultSource ? composePersistedTaskAuthorization({ ...resultSource, credentials: dependencies.credentials }) : undefined;
   const primaryResults = new InspectionRecognitionResultService(authority, recognition, candidates, drafts,
