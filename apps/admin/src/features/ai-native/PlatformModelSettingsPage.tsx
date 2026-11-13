@@ -6,6 +6,7 @@ import { platformAiSettingsApi } from "@/api/platformAiSettings";
 import { currentSessionEpoch } from "@/app/queryClient";
 import { useAiManagementLocale as useLocale } from "./management-locale";
 import { PageHeader } from "@/components/PageHeader";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import { ActionButton, Alert, FormSection, Input, Segmented, Select, Switch, Tabs } from "@/components/ui";
 import { useAuthStore } from "@/features/auth/authStore";
 import { PLATFORM_MODEL_CAPABILITIES, PlatformModelSettingsSession } from "./platform-model-settings-session";
@@ -176,11 +177,11 @@ function ProfileEditor({ session, disabled }: { session: PlatformModelSettingsSe
     <div className={styles.enable}><label htmlFor={`${id}-enabled`}>{t("启用平台配置")}</label> <Switch id={`${id}-enabled`} checked={draft.enabled} disabled={disabled || !summary || draft.secret === "clear"} onChange={enabled => setDraft({ ...draft, enabled })} /></div>
     </FormSection>
     {!valid && <p className={styles.help} role="status">{t("请填写支持的协议、HTTPS 地址、模型标识、输出上限及所需新密钥。首次配置保持停用。")}</p>}
-    <div className={styles.actions}>
+    <WorkspacePageActions>
     <ActionButton label={t("保存平台 AI 配置")} successLabel={t("配置已保存，待重新读取")} disabled={disabled || !valid}
       onAction={() => session.save({ expectedRevision: summary?.revision ?? 0, protocol: draft.protocol as AiPlatformModelSettingsInputDraft["protocol"],
         model: draft.model, baseUrl: draft.baseUrl, maxOutputTokens: Number(draft.maxOutputTokens), allowedCapabilities: [...draft.capabilities], enabled: draft.secret === "clear" ? false : draft.enabled,
         secretChange: draft.secret === "replace" ? { operation: "replace", apiKey: draft.apiKey } : { operation: draft.secret as "retain" | "clear" } })} />
-    </div>
+    </WorkspacePageActions>
   </section>;
 }

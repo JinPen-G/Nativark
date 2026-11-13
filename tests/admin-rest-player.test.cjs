@@ -21,6 +21,38 @@ function load(file, imports = {}) {
 }
 const session = load("restSession.ts");
 
+test("break entry stays icon-only before and during a break while preserving accessible actions", () => {
+  let rest = { available: true, session: null, remaining: 0, expanded: false, entryRef: { current: null }, expand() {} };
+  const { RestEntry } = load("RestEntry.tsx", {
+    react: { useRef: value => ({ current: value }), useState: value => [value, () => {}] },
+    "@/app/locale": { useLocale: () => ({ t: text => text }) },
+    "@/components/ui": { Button: "button", Tooltip: "tooltip" },
+    "@/registry/components/popover/popover": { Popover: "popover", PopoverContent: "content", PopoverTrigger: "trigger" },
+    "./RestContext": { useRest: () => rest }, "./restSession": session,
+    "./rest.module.css": { default: { entry: "entry" } },
+  });
+  const elements = function*(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const child of node) yield* elements(child); return; }
+    if (node.props) { yield node; yield* elements(node.props.children); }
+  };
+  const idle = [...elements(RestEntry())].find(node => node.type === "button" && node.props["aria-label"] === "休息一下");
+  assert.ok(idle.props.icon);
+  assert.equal(idle.props.children, undefined);
+  assert.equal(idle.props.ref, rest.entryRef);
+  rest = { ...rest, session: { minutes: 10 }, remaining: 83 };
+  const active = RestEntry(), reopen = [...elements(active)].find(node => node.type === "button");
+  assert.equal(reopen.props["aria-label"], "打开休息播放器");
+  assert.equal(reopen.props.children, undefined, "Countdown is in the tooltip/player, never printed beside the header icon.");
+  assert.equal(reopen.props.onClick, rest.expand);
+  assert.equal(reopen.props["aria-controls"], "rental-rest-player");
+  assert.equal(active.props.title, "打开休息播放器 · 1:23");
+  rest = { ...rest, remaining: 0 };
+  assert.match(RestEntry().props.title, /休息结束/u);
+  rest = { ...rest, available: false, session: null };
+  assert.equal(RestEntry(), null);
+});
+
 test("10/30-minute deadlines survive delayed callbacks and never use song position", () => {
   const ten = session.createRestSession(1, 10, 100_000);
   const thirty = session.createRestSession(2, 30, 100_000);

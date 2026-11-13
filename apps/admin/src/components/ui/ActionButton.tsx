@@ -5,6 +5,7 @@ import { useLocale } from "@/app/locale";
 import { formSnapshotFingerprint, notifyFormSaved } from "@/app/serverFormSnapshot";
 import { ActionButtonIconContext } from "./ActionButtonIcon";
 import { resolveActionButtonIntent, type ActionButtonIntent } from "./actionButtonIntent";
+import { useWorkspaceActionForm } from "../workspace/WorkspaceHeader";
 
 export interface ActionButtonProps extends Omit<ArcProps, "onAction"> {
   /** Resolve only after the real operation completes. Throw on failure. */
@@ -45,7 +46,8 @@ export interface SaveButtonProps<Values> extends Omit<ActionButtonProps, "onActi
 /** Validate first, then await the same mutation as Enter-key submission. No synthetic submit/click. */
 export function SaveButton<Values>({ form, onSave, ...props }: SaveButtonProps<Values>) {
   const { t } = useLocale();
-  return <ActionButton {...props} intent={props.intent ?? resolveActionButtonIntent(props.label, "save")} type="submit" onClickCapture={(event) => {
+  const formId = useWorkspaceActionForm();
+  return <ActionButton {...props} form={formId} intent={props.intent ?? resolveActionButtonIntent(props.label, "save")} type="submit" onClickCapture={(event) => {
     // Preserve the browser's implicit Enter-key submit button, but prevent a second native
     // onFinish request. Arc's click handler below validates and awaits the single mutation.
     props.onClickCapture?.(event);

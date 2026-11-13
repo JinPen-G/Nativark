@@ -1,4 +1,5 @@
 import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import { DeleteOutlined, PlusOutlined } from "@/components/ui/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
@@ -87,6 +88,7 @@ export function CategoryTab({
 
   return (
     <Form<CategorySettingsFormValues> form={form} layout="vertical" disabled={saving} onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
+      <WorkspacePageActions><SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} /></WorkspacePageActions>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <CategoryPreparationEntry />
       <Alert
@@ -95,7 +97,7 @@ export function CategoryTab({
         title={t(category.name)}
         description={t("经营品类创建后固定；租户只能在品类支持的计价、履约、库存、预授权和资质能力内配置。")}
       />
-      <SettingsGroups footer={<SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />}><FormSection title={t("计价方式")} data-copilot-anchor="pricing-method">
+      <SettingsGroups><FormSection title={t("计价方式")} data-copilot-anchor="pricing-method">
               {/* 结算币种在租户开通时确定并跟随租户（需求 §948）：这里只展示。
                   允许在这里改会让同一空间的历史配置金额换一种含义，而配置里没有币种快照。 */}
               <Form.Item

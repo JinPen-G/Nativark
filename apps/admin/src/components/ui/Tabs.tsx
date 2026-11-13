@@ -3,6 +3,7 @@ import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { Tabs as ArcTabs, TabsList, TabsTrigger, TabsContent } from "@/registry/components/tabs/tabs";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
 import { useLocale } from "@/app/locale";
+import { WorkspaceHeaderScope } from "@/components/workspace/WorkspaceHeader";
 
 export function Tabs(props: TabsProps) {
   const { t, locale } = useLocale();
@@ -46,23 +47,24 @@ export function Tabs(props: TabsProps) {
     schedule();
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   }, [compatible, listId, locale, t]);
-  // Editable, vertical and custom tab bars keep their existing behavior until Arc provides matching capabilities.
-  if (!compatible) return <AntTabs {...props} items={items} className={classes} />;
   const change = (key: string) => { setInternal(key); setVisited(previous => new Set([...previous, key])); onChange?.(key); };
+  // Editable, vertical and custom tab bars keep their existing behavior until Arc provides matching capabilities.
+  if (!compatible) return <AntTabs {...props} onChange={change} items={items.map(item => ({ ...item, children: <WorkspaceHeaderScope active={item.key === selected}>{item.children}</WorkspaceHeaderScope> }))} className={classes} />;
   return <ArcTabs value={selected} onValueChange={change} className={classes} style={style}>
     <TabsList id={listId} aria-label={props["aria-label"] ?? "Tabs"}>{items.map(item => <TabsTrigger key={item.key} value={item.key} disabled={item.disabled}>{item.label}</TabsTrigger>)}</TabsList>
     {items.map(item => {
       if (item.children == null) return null;
+      const content = <WorkspaceHeaderScope active={item.key === selected}>{item.children}</WorkspaceHeaderScope>;
       const destroy = item.destroyOnHidden ?? destroyOnHidden ?? false;
-      if (destroy) return <TabsContent key={item.key} value={item.key}>{item.children}</TabsContent>;
+      if (destroy) return <TabsContent key={item.key} value={item.key}>{content}</TabsContent>;
       if (item.key !== selected && !visited.has(item.key) && !item.forceRender) return null;
       // Explicit retention keeps a visited form alive without loading unseen tabs.
       // forceRender also mounts unseen content, matching its existing Ant contract.
       if (item.forceRender || item.destroyOnHidden === false || destroyOnHidden === false) return <TabsContent key={item.key} value={item.key} forceMount hidden={item.key !== selected}>
-        <ContentTransition value={item.key === selected ? "active" : "inactive"}>{item.children}</ContentTransition>
+        <ContentTransition value={item.key === selected ? "active" : "inactive"}>{content}</ContentTransition>
       </TabsContent>;
       // Ordinary read views retain the original directional presence animation.
-      return <TabsContent key={item.key} value={item.key}>{item.children}</TabsContent>;
+      return <TabsContent key={item.key} value={item.key}>{content}</TabsContent>;
     })}
   </ArcTabs>;
 }

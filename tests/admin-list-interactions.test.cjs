@@ -12,6 +12,135 @@ function load(file, dependencies) {
   return exported.exports;
 }
 
+const workspaceHeaderContext = load('apps/admin/src/components/workspace/WorkspaceHeaderContext.ts', {});
+const workspaceHeader = load('apps/admin/src/components/workspace/WorkspaceHeader.tsx', { './WorkspaceHeaderContext': workspaceHeaderContext });
+
+test('refreshed header consumers share the retained provider and inactive parent scopes suppress nested actions', () => {
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const refreshed = load('apps/admin/src/components/workspace/WorkspaceHeader.tsx', { './WorkspaceHeaderContext': workspaceHeaderContext });
+  const Consumer = () => React.createElement('span', null, refreshed.useWorkspaceHeader() ? 'connected' : 'missing');
+  assert.equal(renderToStaticMarkup(React.createElement(workspaceHeader.WorkspaceHeaderProvider, null, React.createElement(Consumer))), '<span>connected</span>');
+  for (const parentActive of [true, false]) {
+    const markup = renderToStaticMarkup(React.createElement(workspaceHeader.WorkspaceHeaderScope, { active: parentActive },
+      React.createElement(refreshed.WorkspaceHeaderScope, { active: true },
+        React.createElement(refreshed.WorkspacePageActions, { label: 'current form' }, React.createElement('button', null, 'Save')))));
+    assert.equal(markup.includes('hidden=""'), !parentActive);
+    assert.equal(markup.includes('inert=""'), !parentActive, 'A hidden retained parent must not expose a nested active tab in the header.');
+    assert.match(markup, /<button>Save<\/button>/u, 'Inactive actions keep their original React subtree.');
+  }
+  assert.equal(renderToStaticMarkup(React.createElement(workspaceHeader.WorkspacePageActions, null, false)), '');
+});
+
+test('sidebar rail changes retain inline submenu nodes, group choices and guarded navigation', () => {
+  const sidebar = { state: 'expanded', isMobile: false };
+  const state = [], navigated = [];
+  let hook = 0;
+  const names = ['SidebarGroup','SidebarGroupLabel','SidebarMenu','SidebarMenuItem','SidebarMenuButton','SidebarMenuSub','SidebarMenuSubItem','SidebarMenuSubButton'];
+  const dropdownNames = ['DropdownMenu','DropdownMenuTrigger','DropdownMenuContent','DropdownMenuGroup','DropdownMenuLabel','DropdownMenuItem'];
+  const { NativeNavigation } = load('apps/admin/src/components/animate-sidebar/NativeNavigation.tsx', {
+    react: { ...React, useId: () => 'navigation', useEffect: () => {}, useState: initial => {
+      const slot = hook++; if (!(slot in state)) state[slot] = initial;
+      return [state[slot], next => { state[slot] = typeof next === 'function' ? next(state[slot]) : next; }];
+    } },
+    '@/app/navigation-display': { MENU_GROUP_LABELS: {}, menuRouteLabel: (_, label) => label },
+    '@/app/designTokens': load('apps/admin/src/app/designTokens.ts', { '@rental-os/shared': {} }),
+    '@/app/locale': { useLocale: () => ({ t: text => text }) },
+    'motion/react': { motion: { div: 'motion-panel' } },
+    '@animate-ui/react/utils/motion': { useShouldReduceMotion: () => false, useTempoTransition: value => value },
+    '@animate-ui/react/primitives/effects/highlight': { Highlight: 'Highlight', HighlightItem: 'HighlightItem' },
+    '@hugeicons/react': { HugeiconsIcon: 'Icon' }, '@hugeicons/core-free-icons': { ArrowRight01Icon: [], Tick02Icon: [] },
+    './runtime/sidebar': { ...Object.fromEntries(names.map(name => [name, name])), useSidebar: () => sidebar },
+    './runtime/dropdown-menu': Object.fromEntries(dropdownNames.map(name => [name, name])),
+    '../ui/AnimatedIcon': { AnimatedIcon: 'AnimatedIcon' },
+  });
+  const sections = [{ key: 'inventory', label: '器材', routes: [
+    { path: '/rental/item-groups', label: '器材型号' }, { path: '/rental/assets', label: '器材库存' },
+  ] }, { key: 'commercial', label: '定价', routes: [{ path: '/rental/pricing', label: '价格调价' }] }];
+  const render = () => { hook = 0; return NativeNavigation({ sections, selectedKey: '/rental/item-groups', query: '', onNavigate: path => navigated.push(path) }); };
+  const nodes = tree => {
+    const result = [];
+    const visit = (node, ancestry = []) => { if (!React.isValidElement(node)) return;
+      const address = [...ancestry, [node.type, node.key]]; result.push({ node, address });
+      React.Children.forEach(node.props.children, child => visit(child, address));
+    }; visit(tree); return result;
+  };
+  const find = (tree, predicate) => nodes(tree).find(({ node }) => predicate(node));
+  const panel = tree => find(tree, node => node.props.id === 'navigation-inventory').node;
+  const inventory = tree => find(tree, node => node.type === 'DropdownMenu' && node.key === 'inventory').node;
+  const trigger = tree => find(tree, node => node.type === 'DropdownMenuTrigger' && node.props['aria-label'] === '器材').node;
+  const route = tree => find(tree, node => node.type === 'SidebarMenuSubButton' && node.props['data-route'] === '/rental/assets');
+  const wide = render();
+  assert.equal(panel(wide).props.animate.height, 'auto');
+  assert.equal(trigger(wide).props['aria-expanded'], true);
+  sidebar.state = 'collapsed';
+  const rail = render();
+  assert.deepEqual(route(rail).address, route(wide).address, 'The same keyed inline rows must survive the rail change, so their exit can finish.');
+  assert.equal(panel(rail).props.animate.height, 0);
+  assert.equal(panel(rail).props.inert, true, 'Exiting rows cannot remain keyboard or business-action targets.');
+  assert.equal(rail.props.value, 'group:inventory');
+  inventory(rail).props.onOpenChange(true, { cancel: () => assert.fail('Rail menu must be available.') });
+  const opened = render(); assert.equal(inventory(opened).props.open, true);
+  const popupRoute = find(opened, node => node.type === 'DropdownMenuItem' && node.props['data-route'] === '/rental/assets').node;
+  popupRoute.props.onClick({ button: 0, ctrlKey: true, preventDefault: () => assert.fail('Modified links keep native browser navigation.') });
+  assert.deepEqual(navigated, []);
+  popupRoute.props.onClick({ button: 0, preventDefault() {} });
+  assert.deepEqual(navigated, ['/rental/assets']); assert.equal(inventory(render()).props.open, false);
+  sidebar.state = 'expanded';
+  assert.equal(panel(render()).props.animate.height, 'auto', 'Opening the rail restores the same expanded group.');
+  trigger(render()).props.onClick();
+  assert.equal(panel(render()).props.animate.height, 0);
+  sidebar.state = 'collapsed'; render(); sidebar.state = 'expanded';
+  assert.equal(panel(render()).props.animate.height, 0, 'An explicitly closed group stays closed after another rail round trip.');
+  let canceled = false;
+  inventory(render()).props.onOpenChange(true, { cancel: () => { canceled = true; } });
+  assert.equal(canceled, true, 'Wide-mode group clicks never open a duplicate popup.');
+});
+
+test('portaled saves retain native submit association and validate before a single guarded operation', async () => {
+  const refs = [];
+  let cursor = 0, formOwner = 'original-form', disabled = false;
+  const events = [], drafts = { value: 'first' }, saved = [];
+  let valid = false, finish;
+  const snapshot = load('apps/admin/src/app/serverFormSnapshot.ts', {});
+  const { SaveButton } = load('apps/admin/src/components/ui/ActionButton.tsx', {
+    react: { ...React, useRef: initial => { const index = cursor++; return refs[index] ??= { current: initial }; } },
+    antd: { ConfigProvider: { useConfig: () => ({ componentDisabled: disabled }) } },
+    '@/registry/components/action-button/action-button': { ActionButton: 'arc-action' },
+    '@/app/locale': { useLocale: () => ({ t: text => text }) },
+    '@/app/serverFormSnapshot': snapshot,
+    './ActionButtonIcon': { ActionButtonIconContext: React.createContext('none') },
+    './actionButtonIntent': load('apps/admin/src/components/ui/actionButtonIntent.ts', {}),
+    '../workspace/WorkspaceHeader': { useWorkspaceActionForm: () => formOwner },
+  });
+  const form = { getFieldsValue: () => ({ ...drafts }), validateFields: async () => { events.push('validate'); if (!valid) throw Error('required'); return { ...drafts }; } };
+  const marked = [], unsubscribe = snapshot.subscribeFormSave(form, fingerprint => marked.push(fingerprint));
+  const props = { label: '保存配置', form, onClickCapture: () => events.push('capture'), onSave: values => {
+    saved.push(values); return new Promise(resolve => { finish = resolve; });
+  } };
+  const render = () => { cursor = 0; const action = SaveButton(props); return action.type(action.props).props.children; };
+  let action = render();
+  assert.equal(action.props.form, 'original-form');
+  assert.equal(action.props.type, 'submit');
+  action.props.onClickCapture({ preventDefault: () => events.push('prevent') });
+  assert.deepEqual(events, ['capture', 'prevent'], 'Implicit Enter click must suppress the duplicate native onFinish request.');
+  await assert.rejects(action.props.onAction(), /required/u);
+  assert.equal(saved.length, 0, 'Invalid fields never reach the mutation.');
+  assert.deepEqual(marked, []);
+  valid = true; action = render();
+  const first = action.props.onAction(), duplicate = action.props.onAction();
+  assert.equal(first, duplicate, 'Pending click and implicit Enter use the same in-flight operation.');
+  await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(saved, [{ value: 'first' }]);
+  drafts.value = 'later'; finish({ ok: true }); await first;
+  assert.deepEqual(marked, ['{"value":"first"}'], 'Completion only marks the submitted draft saved; edits typed during the request stay dirty.');
+  disabled = true; action = render();
+  assert.equal(action.props.disabled, true, 'The original form disabled context survives portaling.');
+  await assert.rejects(action.props.onAction(), /disabled/iu);
+  assert.equal(saved.length, 1);
+  formOwner = undefined; assert.equal(render().props.form, undefined, 'Inline and modal saves keep their original native form ancestor.');
+  unsubscribe();
+});
+
 test('locale consumers keep their provider when the translation module is refreshed', () => {
   const context = load('apps/admin/src/app/localeContext.ts', {});
   const previous = load('apps/admin/src/app/locale.tsx', { './localeContext': context });
@@ -288,6 +417,7 @@ test('persistent settings tabs retain hidden form controls through the real UIAr
     antd: { Tabs: () => { throw Error('Unexpected fallback'); } },
     '@/registry/components/tabs/tabs': nativeTabs,
     '@/components/workspace/ContentTransition': { ContentTransition: ({ children }) => children },
+    '@/components/workspace/WorkspaceHeader': workspaceHeader,
     '@/app/locale': { useLocale: () => ({ locale: 'en-US', t: text => text }) },
   });
   const render = (activeKey, forceRender, destroyOnHidden = false) => renderToStaticMarkup(React.createElement(Tabs, {
@@ -323,6 +453,7 @@ test('lazy settings panels stay hidden after visiting and release their content 
     antd: { Tabs: () => { throw Error('Unexpected fallback'); } },
     '@/registry/components/tabs/tabs': nativeTabs,
     '@/components/workspace/ContentTransition': { ContentTransition: ({ children }) => children },
+    '@/components/workspace/WorkspaceHeader': workspaceHeader,
     '@/app/locale': { useLocale: () => ({ locale: 'en-US', t: text => text }) },
   });
   const items = ['common', 'website', 'wechat'].map(key => ({ key, label: key, children: React.createElement('input', { name: key, defaultValue: `${key}-draft` }) }));

@@ -1,5 +1,6 @@
 import { ActionButton, FormSection, SaveButton } from "@/components/ui";
 import { SettingsGroups } from "@/components/settings/SettingsWorkspace";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import { useQuery } from "@tanstack/react-query";
 import type { TenantRentalBusinessSettings } from "@rental-os/shared";
 import { Col, InputNumber, Row, Space } from "antd";
@@ -67,6 +68,7 @@ export function MembershipRewardRulesTab({
     : t(type === "coupon" ? "奖励券数量" : "奖励积分");
   return (
     <Form<MembershipSettingsFormValues> form={form} layout="vertical" disabled={saving} onFinish={values => { void saveCurrent(values).catch(() => undefined); }}>
+      <WorkspacePageActions><SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} /></WorkspacePageActions>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type="info"
@@ -75,7 +77,7 @@ export function MembershipRewardRulesTab({
         description={t("人工补发、客户权益账户与奖励流水在「会员激励」页维护。营销余额属于客户权益，不是支付机构资金账户。")}
       />
       {needsCouponTemplates && couponTemplates.isError && <Alert type="error" showIcon title={t("奖励券模板读取失败，请刷新后重试")} action={<ActionButton variant="secondary" label={t("重试")} onAction={() => couponTemplates.refetch({ throwOnError: true })} />} />}
-      <SettingsGroups footer={<SaveButton label={t("保存本页")} form={form} pending={saving} onSave={saveCurrent} />}>
+      <SettingsGroups>
           <FormSection title={t("注册赠礼")}>
             <Form.Item
               name={["membership", "signupRewardEnabled"]}

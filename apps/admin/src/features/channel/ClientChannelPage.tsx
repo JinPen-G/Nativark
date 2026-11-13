@@ -21,6 +21,7 @@ import { apiAssetOrigin } from "@/api/http";
 import { ADMIN_LOGIN_DEFAULTS } from "@/app/branding";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
@@ -156,10 +157,8 @@ function ProfileCard() {
           ? t("小程序与后续 APP 都会读取这份品牌、协议、客服、帮助与发布服务配置。")
           : <span>{t("还需完成：")}{data.readiness.missing.join("、")}{t("。未完成前小程序对客户显示租户名与“商户未提供”，不会用占位品牌或协议。")}</span>} />
       <Form id="client-profile" form={form} layout="vertical" onFinish={(values) => save.mutate(values)} onFinishFailed={()=>revealSettingsValidation("client-profile")}>
-        <SettingsGroups footer={<>
-          <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
-          {data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{dayjs(data.updatedAt).format("YYYY-MM-DD HH:mm")}</Typography.Text> : null}
-        </>}>
+        <WorkspacePageActions><SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></WorkspacePageActions>
+        <SettingsGroups footer={data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{dayjs(data.updatedAt).format("YYYY-MM-DD HH:mm")}</Typography.Text> : undefined}>
         <Card size="small" title={t("品牌与客服")}>
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="brandName" label={t("商户展示名")} extra={t("登录页标题、启动配置与分享使用；缺省用租户名")}><Input maxLength={191} placeholder={t("如：光影摄影器材租赁")} /></Form.Item></Col>
@@ -328,8 +327,8 @@ function WechatCredentialsCard() {
           <Col xs={24} md={12}><Form.Item name="appSecret" label="AppSecret" extra={data?.secretConfigured ? t("已配置；留空保持原密钥不变") : t("首次配置必填")}><Input.Password placeholder={data?.secretConfigured ? t("已配置（留空不修改）") : "AppSecret"} /></Form.Item></Col>
         </Row>
         <Form.Item name="enabled" label={t("启用渠道")} valuePropName="checked" extra={t("启用前须已填写 AppSecret")}><Switch /></Form.Item>
+        <WorkspacePageActions><SaveButton label={t("保存凭证")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></WorkspacePageActions>
         <Space wrap>
-          <SaveButton label={t("保存凭证")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           <ActionButton variant="secondary" label={t("测试连接")} pendingLabel={t("检测中")} successLabel={t("检测通过")} pending={test.isPending} disabled={!data?.secretConfigured && !enabled} onAction={async () => { const result = await test.mutateAsync(); if (!result.ok) throw new Error(result.message); }} />
           {data?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}：{new Date(data.lastTestAt).toLocaleString()}</Typography.Text> : null}
         </Space>
@@ -408,10 +407,8 @@ function WebsiteProfileCard() {
           ? t("官网将读取这份官网特有配置；商户名、Logo、协议、客服等通用项仍来自“通用客户端配置”。")
           : <span>{t("还需完成：")}{data.readiness.missing.join("、")}{t("。未启用或缺 Hero 标题前，官网会回退到通用品牌文案。")}</span>} />
       <Form id="website-profile" form={form} layout="vertical" onFinish={(values) => save.mutate(values)} onFinishFailed={()=>revealSettingsValidation("website-profile")}>
-        <SettingsGroups footer={<>
-          <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
-          {data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{dayjs(data.updatedAt).format("YYYY-MM-DD HH:mm")}</Typography.Text> : null}
-        </>}>
+        <WorkspacePageActions><SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></WorkspacePageActions>
+        <SettingsGroups footer={data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{dayjs(data.updatedAt).format("YYYY-MM-DD HH:mm")}</Typography.Text> : undefined}>
         <Card size="small" title={t("官网开关")}>
           <Form.Item name="enabled" label={t("启用官网渠道")} extra={t("关闭后，官网使用通用客户端的品牌配置。")} valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="showPoweredBy" label={t("页脚显示 Powered by Rental OS")} valuePropName="checked"><Switch /></Form.Item>

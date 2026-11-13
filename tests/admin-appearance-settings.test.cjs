@@ -263,7 +263,7 @@ test('appearance form maps old radii only into its draft and saves the original 
       resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii,
       ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN,
       isTransientRefreshError: () => false, Typography: { Paragraph: 'p' },
-      ...Object.fromEntries(['PageHeader','SettingsWorkspace','ThemeModeChoices','AccountThemeColorCard','LoadingState','Alert','Button','CopilotSection','Card','Row','Col','AdminRadiusSlider','RadiusPreview','SaveButton','MotionSettingCard','SoundSettingCard'].map(name => [name, name]))
+      ...Object.fromEntries(['PageHeader','SettingsWorkspace','WorkspacePageActions','ThemeModeChoices','AccountThemeColorCard','LoadingState','Alert','Button','CopilotSection','Card','Row','Col','AdminRadiusSlider','RadiusPreview','SaveButton','MotionSettingCard','SoundSettingCard'].map(name => [name, name]))
     };
     const exports = {};
     new Function('require','exports',...Object.keys(dependencies),code)(require,exports,...Object.values(dependencies));

@@ -25,7 +25,7 @@ type Capture = { finished: Promise<void>; skipTransition: () => void };
 type Pending = { target: string; from: string; release: () => void };
 const ROOT_MARK = "data-workspace-navigation";
 
-export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>, sidebar?: RefObject<HTMLElement | null>) {
+export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>, sidebar?: RefObject<HTMLElement | null>, identity?: string) {
   const navigate = useNavigate(), { pathname } = useLocation(), reduced = useReducedMotion();
   const owner = useId();
   const enter = useContentTransition();
@@ -41,6 +41,11 @@ export function useWorkspaceNavigation(container: RefObject<HTMLElement | null>,
     restore.current?.(); restore.current = null;
     if (document.documentElement.getAttribute(ROOT_MARK) === owner) document.documentElement.removeAttribute(ROOT_MARK);
   }, [owner]);
+  useLayoutEffect(() => {
+    ++navigationRequest.current;
+    stop();
+    enteredPath.current = null;
+  }, [identity, stop]);
   useEffect(() => { if (reduced) stop(); }, [reduced, stop]);
   useEffect(() => {
     mounted.current = true;

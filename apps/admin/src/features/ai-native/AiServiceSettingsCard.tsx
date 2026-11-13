@@ -4,6 +4,7 @@ import type { AiLegacyModelConfigurationReferenceDraft, AiTenantModelSettingsSum
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { fromAiServiceSummary, setAiSettingsMode, toAiSettingsInput, validateAiSettingsDraft, type AiServiceSettingsDraft, type AiSettingsMode } from "./ai-service-settings-model";
 import { SettingsSaveSession } from "./settings-save-session";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import styles from './AiManagement.module.css';
 
 export interface AiServiceSettingsCardProps {
@@ -126,6 +127,7 @@ export function AiServiceSettingsCard({ headerActions, summary, configId, expect
     </div>}
     {error || currentState === "failed" ? <Alert type="error" title={t("AI 设置保存未确认，请核对原操作收据、修订与权限。请勿盲目重试。")}/> : null}
     {!onSave && <p role="status">{t("保存能力未提供，当前配置不会写入。")}</p>}
-    {onSave && <div className={styles.actions}><ActionButton label={t("保存 AI 设置")} successLabel={t("请求已返回")} pendingLabel={t("保存中…")} disabled={disabled || discoveryState.busy || !validation.ok} onAction={save} />{dirty && <span className={styles.help} role="status">{t("更改尚未保存")}</span>}</div>}
+    {onSave && <WorkspacePageActions><ActionButton label={t("保存 AI 设置")} successLabel={t("请求已返回")} pendingLabel={t("保存中…")} disabled={disabled || discoveryState.busy || !validation.ok} onAction={save} /></WorkspacePageActions>}
+    {onSave && dirty && <div className={styles.actions}><span className={styles.help} role="status">{t("更改尚未保存")}</span></div>}
   </section>;
 }

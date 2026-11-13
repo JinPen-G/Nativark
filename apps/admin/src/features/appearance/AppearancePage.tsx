@@ -19,6 +19,7 @@ import { accountAppearanceApi } from "@/api/accountAppearance";
 import { resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii } from "@/app/designTokens";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { SoundSettingCard } from "@/features/sound/SoundSettingCard";
@@ -85,7 +86,7 @@ function AccountThemeColorCard() {
         <Form.Item name="themeColor" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: t("请输入 #RRGGBB 十六进制颜色") }]}>
           <ColorPicker label={t("主题色")} />
         </Form.Item>
-        <SaveButton label={t("保存主题色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
+        <WorkspacePageActions><SaveButton label={t("保存主题色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></WorkspacePageActions>
       </Form>
     </Card>
   );
@@ -166,7 +167,7 @@ export function AppearancePage() {
                 <Col xs={24} md={8}><AdminRadiusSlider name="adminButtonRadius" kind="button" legacy={profile.data.adminCornerRadius} label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} /><RadiusPreview kind="button" radius={previewRadii.button} /></Col>
                 <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" kind="input" legacy={profile.data.adminCornerRadius} label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} /><RadiusPreview kind="input" radius={previewRadii.input} /></Col>
               </Row>
-              <SaveButton label={t("保存圆角设置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 16 }} />
+              <WorkspacePageActions><SaveButton label={t("保存圆角设置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} /></WorkspacePageActions>
             </Card></CopilotSection>
           </Form>
         ))},

@@ -1,8 +1,6 @@
 /* Host layout only. Native Media Player / Now Playing geometry, cover, controls,
    type and motion are preserved in archive; no descendant restyling here. */
-.entry { white-space: nowrap; flex: none; }
-.entryLabel { font-size: var(--rental-typography-meta-size); }
-.entryCountdown { font-variant-numeric: tabular-nums; font-size: var(--rental-typography-meta-size); }
+.entry { width: var(--rental-control-height-toolbar); min-height: var(--rental-control-height-toolbar); height: var(--rental-control-height-toolbar); padding: 0; flex: none; justify-content: center; }
 .chooser { width: min(340px, calc(100vw - 24px)); }
 .chooser h2 { margin: 0; font-size: 16px; font-weight: 500; }
 .chooser p { margin: 6px 0 18px; color: var(--text-secondary); font-size: 13px; }
@@ -32,7 +30,6 @@
   :global(body:has(.copilot-host.is-open)) .experience[data-expanded="false"] { right: 392px; }
 }
 @media (max-width: 600px) {
-  .entryLabel { display: none; }
   .experience { width: calc(100vw - 24px); padding: 10px 12px 12px; }
   .experience[data-expanded="false"] { right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); }
   .timer { gap: 8px; }

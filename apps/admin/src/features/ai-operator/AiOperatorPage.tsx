@@ -14,6 +14,7 @@ import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { ArcLocale } from "@/components/ui/ArcLocale";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
+import { WorkspacePageActions, WorkspacePageTitle } from "@/components/workspace/WorkspaceHeader";
 import { AiChat } from "./archive/ai-chat/AiChat";
 import { AgentRun } from "./archive/agent-run/AgentRun";
 import { BrandMark } from "./archive/shared/BrandMark";
@@ -200,7 +201,9 @@ function ArtifactView({ artifact }: { artifact: OperatorArtifact }) {
 }
 function PluginCatalog() {
   const operator = useOperator(); const [query, setQuery] = useState("");
-  return <section className="operator-catalog"><header className="operator-section-header"><div><h1 data-icon-hover=""><AnimatedIcon name="plugins" />插件</h1><p>选择对话可使用的经营能力</p></div><span className="operator-demo-tag">前端演示</span></header>
+  return <section className="operator-catalog">
+    <WorkspacePageTitle><h1 className="workspace-page-title">插件</h1></WorkspacePageTitle>
+    <header className="operator-section-header"><p>选择对话可使用的经营能力</p><span className="operator-demo-tag">前端演示</span></header>
     <div className="operator-catalog-search"><Input allowClear aria-label="搜索插件" placeholder="搜索能力" value={query} onChange={event => setQuery(event.target.value)} /></div>
     <div className="operator-plugin-grid">{operator.permitted.filter(item => `${item.name}${item.description}`.includes(query.trim())).map(item => <Card key={item.id} title={item.name} description={item.description} className="operator-plugin-card"
       avatar={<span className="operator-plugin-icon"><AnimatedIcon name={item.icon} /></span>} meta="经营能力 · 演示" action={<Switch aria-label={`启用${item.name}`} checked={!operator.disabled.includes(item.id)} onChange={next => operator.togglePlugin(item.id, next)} />} />)}</div>
@@ -224,7 +227,10 @@ function AutomationTasks() {
     const candidates = [{ capabilityId: "brief", name: "晨间经营简报", frequency: "daily", time: "09:00" }, { capabilityId: "orders", name: "归还验收跟进", frequency: "daily", time: "16:00" }, { capabilityId: "review", name: "每周经营复盘", frequency: "weekly", time: "17:00" }] as const;
     operator.setTasks(previous => [...previous, ...candidates.filter(candidate => allowed(candidate.capabilityId) && !previous.some(task => task.name === candidate.name)).map(candidate => ({ ...candidate, id: crypto.randomUUID(), enabled: true, prompt: OPERATOR_CAPABILITIES.find(item => item.id === candidate.capabilityId)!.prompt }))]);
   }
-  return <section className="operator-catalog"><header className="operator-section-header"><div><h1 data-icon-hover=""><AnimatedIcon name="schedule" />自动化任务</h1><p>设定时间与目标，让重复待办按计划整理</p></div><Button type="primary" icon={<Plus size={16} />} disabled={!operator.available.length} onClick={create}>新建任务</Button></header>
+  return <section className="operator-catalog">
+    <WorkspacePageTitle><h1 className="workspace-page-title">自动化任务</h1></WorkspacePageTitle>
+    <WorkspacePageActions><Button type="primary" icon={<Plus size={16} />} disabled={!operator.available.length} onClick={create}>新建任务</Button></WorkspacePageActions>
+    <header className="operator-section-header"><p>设定时间与目标，让重复待办按计划整理</p></header>
     <div className="operator-automation-note"><AnimatedIcon name="schedule" /><span>前端演示：任务仅保留在当前会话，不会按时自动执行；可手动运行查看效果。</span></div>
     {operator.tasks.length ? <><div className="operator-catalog-search"><Input allowClear aria-label="搜索任务" placeholder="搜索任务" value={query} onChange={event => setQuery(event.target.value)} /></div><div className="operator-task-list">{visible.map(task => <article key={task.id} className="operator-task-row"><AnimatedIcon name="schedule" /><div><h2>{task.name}</h2><p>{frequencyLabels[task.frequency]} {task.time} · {OPERATOR_CAPABILITIES.find(item => item.id === task.capabilityId)?.name}</p></div><div className="operator-task-actions"><Switch aria-label={`${task.name}开关`} checked={task.enabled} disabled={!allowed(task.capabilityId)} onChange={enabled => operator.setTasks(previous => previous.map(item => item.id === task.id ? { ...item, enabled } : item))} /><Button disabled={!task.enabled || !allowed(task.capabilityId)} onClick={() => operator.runTask(task)}>运行演示</Button><Button onClick={() => { setEditing({ ...task }); setError(""); }}>编辑</Button><Button type="text" aria-label={`删除${task.name}`} icon={<X size={16} />} onClick={() => operator.setTasks(previous => previous.filter(item => item.id !== task.id))} /></div></article>)}</div>{!visible.length && <p className="operator-empty">没有匹配的任务</p>}</> : <div className="operator-task-empty"><AnimatedIcon name="schedule" /><h2>把重复待办安排好</h2><p>从晨间简报、归还跟进或每周复盘开始。</p><Button disabled={!operator.available.length} onClick={presets}>添加示例任务</Button></div>}
     <Modal title={editing && operator.tasks.some(task => task.id === editing.id) ? "编辑演示任务" : "新建演示任务"} open={Boolean(editing)} onCancel={() => setEditing(null)} onOk={save} okText="保存演示任务">

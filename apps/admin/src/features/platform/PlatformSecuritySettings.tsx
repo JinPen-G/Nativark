@@ -11,6 +11,7 @@ import { useServerFormSync } from "@/app/useServerFormSync";
 import { QueryState } from "@/components/QueryState";
 import { RecordFacts } from "@/components/RecordDetailLayout";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
+import { WorkspacePageActions } from "@/components/workspace/WorkspaceHeader";
 import { ActionButton, Alert, App, Button, ConfirmAction, Form, FormSection, SaveButton, Select, Switch } from "@/components/ui";
 import { useAuthStore } from "@/features/auth/authStore";
 import styles from "./PlatformSettings.module.css";
@@ -37,6 +38,7 @@ export function PlatformSecuritySettings() {
   if (!allowed) return <Alert type="warning" showIcon title={t("当前没有平台参数管理权限")} />;
   return <QueryState loading={security.isLoading} error={security.error} onRetry={() => security.refetch({ throwOnError: true })}>
     {security.data && <Form form={form} layout="vertical" disabled={!canSave || save.isPending} onFinish={values => save.mutate(values)}>
+      <WorkspacePageActions>{canSave && <SaveButton label={t("保存安全基线")} form={form} pending={save.isPending} onSave={values => save.mutateAsync(values)} />}</WorkspacePageActions>
       <SettingsWorkspace sections={[
         { key: "login", label: t("登录限流"), content: <FormSection title={t("登录限流")}>
           <Form.Item name={["loginRateLimit", "enabled"]} label={t("启用失败锁定")} valuePropName="checked"><Switch /></Form.Item>
@@ -70,7 +72,6 @@ export function PlatformSecuritySettings() {
           // Explicitly reloading permits discarding a stale draft; background refetch never does.
           form.resetFields(); setResetVersion(value => value + 1); save.reset();
         }} />
-        {canSave && <SaveButton label={t("保存安全基线")} form={form} pending={save.isPending} onSave={values => save.mutateAsync(values)} />}
       </>} />
       {!canSave && <p className={styles.context}>{t("当前仅可查看，全平台安全设置须由获权的平台管理员保存。")}</p>}
     </Form>}

@@ -52,11 +52,13 @@ export const ADMIN_TABLE_COLUMN_WIDTH = {
   select: 52, identifier: 180, identity: 176, summary: 216, dateTime: 176, dateTimeWithNote: 184,
   money: 120, status: 155, actions: 208, resources: 240, location: 210, security: 190, snapshot: 210,
 } as const;
-/** Shared shell spacing, derived from the existing foundation scale. Never
- * compensate for the breadcrumb/title gap in individual business pages. */
+/** Shared shell spacing. The first row follows UIArc Kanban's 52px row and 20/12px insets;
+ * individual pages never compensate for breadcrumb/action placement. */
 export const ADMIN_LAYOUT_SPACING = {
-  contextHeight: 48,
+  contextHeight: 52,
   contextOpticalInset: "var(--space-1)",
+  contextInlineStart: "var(--space-5)",
+  contextInlineEnd: "var(--space-3)",
   pageTop: "0px",
   headerContent: "var(--space-2)",
   tabsContent: "var(--space-2)",
@@ -87,8 +89,15 @@ export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75, titleS
 export const ADMIN_LOGIN_METRICS = { titleSize: 40, titleLineHeight: 44, titleWeight: 400, compactTitleSize: 32, compactTitleLineHeight: 35.2, brandHeight: 24, providerIconSize: 17 } as const;
 /** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
 export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;
-/** UIArc screen-shell CSS geometry; tenant modes share it without changing the native rail or account menu. */
-export const ADMIN_SHELL_METRICS = { panelInset: 8, topRowHeight: 40, workspaceHeight: 36, workspaceMarkSize: 22, triggerSize: 32, tenantNameSize: 13, tenantNameLineHeight: 18, workspaceNameSize: 12, workspaceNameLineHeight: 14 } as const;
+/** Match the breadcrumb centre from the sidebar's outer inset, including the panel border. */
+export const ADMIN_SHELL_METRICS = { panelInset: 8, sidebarWidth: 248, sidebarCollapsedWidth: 56, topRowHeight: ADMIN_LAYOUT_SPACING.contextHeight + 2, workspaceHeight: 48, workspaceMarkSize: 22, triggerSize: 32, accountHeight: 44, tenantNameSize: 13, tenantNameLineHeight: 18, workspaceNameSize: 12, workspaceNameLineHeight: 14 } as const;
+/** UIArc screen-shell: width and submenu height share the same non-overshooting spring. */
+export const ADMIN_SIDEBAR_REFERENCE_MOTION = {
+  layout: { type: "spring", visualDuration: 0.3, bounce: 0 },
+  label: { duration: 0.15, ease: [0.22, 1, 0.36, 1] },
+  contentEnter: { duration: 0.2 },
+  contentExit: { duration: 0.14 },
+} as const;
 /** Status ink and surface are paired independently of the tenant brand color. */
 export const ADMIN_STATUS_COLORS = {
   light: { success: ["#176B45", "#EDF7F0"], warning: ["#925600", "#FFF5E3"], error: ["#B42332", "#FFF0F1"], info: ["#2359B8", "#EDF3FF"], neutral: ["#535B66", "#F1F3F5"] },
@@ -227,6 +236,8 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-layout-page-top-gap": ADMIN_LAYOUT_SPACING.pageTop,
     "--rental-layout-context-height": px(ADMIN_LAYOUT_SPACING.contextHeight),
     "--rental-layout-context-optical-inset": ADMIN_LAYOUT_SPACING.contextOpticalInset,
+    "--rental-layout-context-inline-start": ADMIN_LAYOUT_SPACING.contextInlineStart,
+    "--rental-layout-context-inline-end": ADMIN_LAYOUT_SPACING.contextInlineEnd,
     "--rental-layout-header-content-gap": ADMIN_LAYOUT_SPACING.headerContent,
     "--rental-layout-tabs-content-gap": ADMIN_LAYOUT_SPACING.tabsContent,
     "--rental-layout-list-toolbar-gap": ADMIN_LAYOUT_SPACING.listToolbar,

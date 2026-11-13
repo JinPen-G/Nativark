@@ -5,6 +5,7 @@ import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { useLocale } from "@/app/locale";
 import { ADMIN_SETTINGS_METRICS } from "@/app/designTokens";
 import { useContentTransition } from "@/components/workspace/ContentTransition";
+import { WorkspaceHeaderScope } from "@/components/workspace/WorkspaceHeader";
 import styles from "./SettingsWorkspace.module.css";
 
 export interface SettingsSection {
@@ -89,7 +90,7 @@ export function SettingsWorkspace({ sections, value, onChange, footer }: { secti
       </button>)}
     </nav>
     <div className={styles.content}>
-      {sections.map(section => <section key={section.key} data-settings-panel={section.key} id={`${uid}-panel-${section.key}`} role="tabpanel" aria-labelledby={`${uid}-tab-${section.key}`} hidden={active !== section.key} className={styles.panel}>{section.content}</section>)}
+      {sections.map(section => <section key={section.key} data-settings-panel={section.key} id={`${uid}-panel-${section.key}`} role="tabpanel" aria-labelledby={`${uid}-tab-${section.key}`} hidden={active !== section.key} className={styles.panel}><WorkspaceHeaderScope active={active === section.key}>{section.content}</WorkspaceHeaderScope></section>)}
       {footer && <div className={styles.footer}>{footer}</div>}
     </div>
   </div>;
