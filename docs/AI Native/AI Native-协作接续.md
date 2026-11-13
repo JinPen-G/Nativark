@@ -23,7 +23,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 | 负责人 | 当前范围 |
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 全专项按原门槛收口；AIN-14全文已核闭，原事件批次已推。AIN-16姓名/通知公开重新确认、独立原读及初次CAS后端已完成固定必要模拟/类型，当前核接dev2前端恢复，再核原五条。独占四册/索引、公共装配/合同，阶段即中文提交并回读GitHub；按固定成果登记main集成节点，助手继续。AIN-15三叶和员工样式待核不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原事件批次已上传，通知拒绝终结两叶已交权Root。当前修AIN-17/18政策停用后原Task创建应答丢失的收据恢复，独占automation/original-automation-creation.reader.ts和human-automation-request.composition.ts的readCreation窄分支；不改Core、公共provider/Guard或四册，不写活动配置，不把自由文本当资源事件。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原创建历史两源已冻结交权Root，通知拒绝终结也已上传。当前修原grant启用丢应答后、当前来源/政策停用仍可受权原读，独占human-automation-review.service.ts、human-automation-review-grant.service.ts、automation-review-session.ts及必要business-failure-read.authority.ts窄读取；新prepare/enable/close/feedback原当前门禁不放宽，不写Core/公共provider/Guard/四册。 |
 | AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 规则/日历九源已冻结交回并由Root核接。继续AIN-16普通姓名/通知原审核终结后的重新确认消费者，独占aiMemberName.ts、aiNotificationChanges.ts、member-name-session.ts、notification-change-session.ts、MemberNameFlow.tsx、NotificationChangeFlow.tsx及必要feature-local新叶；公开后端/合同归Root，不改已交九源、四册或索引。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源及独立全文结论已交回，Root核blob和必要实际provider模拟通过。既有Core治理两源来源/类型因果已只读核清，Root按固定提交同步本树；当前无活动写权。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |

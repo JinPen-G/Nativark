@@ -13,6 +13,7 @@ import { AutomationError } from './prisma-automation.authority';
 import { HumanAutomationReviewService } from './human-automation-review.service';
 import { HumanAutomationReviewGrantService, type HumanAutomationReviewGrantPolicySource } from './human-automation-review-grant.service';
 import { HumanAutomationReviewQueueService } from './human-automation-review-queue.service';
+import { OriginalAutomationCreationReader } from './original-automation-creation.reader';
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import type { IncomingMessage } from 'node:http';
 
@@ -177,8 +178,8 @@ export class HumanAutomationRequestFactory {
               if (hash(result) !== hash(await service.read(command))) throw unavailable();
               return result;
             }
-            case 'createTask':
-            case 'readCreation': return creation(command, action === 'createTask');
+            case 'createTask': return creation(command, true);
+            case 'readCreation': return new OriginalAutomationCreationReader(server.db, reads, clock).readCreation(command);
             case 'readQueue': return new HumanAutomationReviewQueueService(server.db, reads, reviews, async () => {
               await identity.resolve();
               if (!initialIdentity) throw unavailable();

@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13及本次14已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain18-original-creation-history-20261113"></a>
+## AIN-17/18 政策停用后的原Task创建收据恢复（2026-11-13）
+
+待办已创建但HTTP应答丢失后，旧readCreation重新检查当前自动化政策，停用政策或来源变化使原收据也不可读。本阶段[独立原创建reader](../../apps/api/src/modules/ai-native/automation/original-automation-creation.reader.ts)沿冻结Input/Event、原AUTOMATION主体/政策修订、creationKey/inputHash/authorityHash、原Task和首Run核对持久证明；当前人类读权仍经原Auth/Guard/ALS与业务对象前后复验。原政策期限只证明当时的创建，不续期或授新执行；无原Task/not_observed/读取未知保持只读，不修改Input状态。factory仅readCreation分支委托新reader，新创建及当前异常检查保持原路径。
+
+两源已冻结交权并由Root逐blob核同：reader `a07b8c2f75fcf1ce14951ac22c9a4a3b207742c1`、factory `cea5d9ddd49a68c1c7ac427db686ff1c106032e3`。dev1实际API/session→Controller/外层Guard/Auth/ALS→原receiptReader三类模拟通过，履约/开业/归还检查停用policy后仍返回同Task/Run，原定位解除，新增Task/写入0；输入 `1035f743a78d89053724f460f7eb827d284106cd28831487ed0528dbb408b42a`／0。错owner/scope/payload/hash/Run/期限及等待撤权拒绝，负例输入 `096e33c702c73cd4a1503043630c341fd44faef4435de6dc7b7738158e83ad5d`／0；作者当前2根/1311源TypeScript5.9.3零诊断，输入 `6e0a8f62bf1ea46d7d4d1e76fc1819f3cf2c6fc208b6c483803b2264038df799`／0。旧scope过严、BigInt留证及VM原型比较失败保留，仅修实际ID校验或驱动。
+
+Root独立 `node --no-compilation-cache -`、实际Guard/Controller/receiptReader及原inspection fixture核接，输入 `2990e4fd0f925418ff94f97d389f32e92f041b5901e6ef1b5613353b111c2d06`／0：删除当前policy后原Task/Run仍可读，Input字节不变、原读0写、总Task1；错owner及撤会话拒绝。固定两源独立类型TypeScript5.9.3、2根/1311源0诊断，输入 `fa896dbac135015fbe859bdb63fce3ded551cd7416d0a1b5cea1cdeb2e992103`／0，无关WIP只在内存回到b310537b1。全部验证使用原offline preload、不可达数据库和内存audit，任务临时目录未创建、作者/Root进程均退出；无新测试脚本或依赖副本。
+
+AIN-17/18仍有正式资源生产/临近政策和原grant恢复缺口，不因这一收据补片上调整项进度。dev1继续原grant停用后的历史读取，保持新prepare/enable/close/feedback的当前业务权限和政策；真实数据库、宿主及供应商由负责人后测。
+
 <a id="ain16-name-notification-reconfirmation-backend-20261113"></a>
 ## AIN-16 姓名／通知原审核终结后的公开重新确认后端（2026-11-13）
 
