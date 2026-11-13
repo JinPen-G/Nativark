@@ -34,9 +34,15 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
     cancelReaders(); revalidating.current = false; setEntry(undefined); setLoading(true);
     if (!preserveSelection) setSelection("");
   };
+  const synchronizeSession = () => {
+    invalidate(); setSessionState(loadCustomerSession(tenantCode)); setGeneration(customerSessionGeneration(tenantCode));
+  };
+  const suspendAccess = () => { cancelReaders(); revalidating.current = false; setLoading(true); };
   const revalidateAccess = () => {
-    if (!session || !tenantName || offline || document.visibilityState === "hidden" || revalidating.current) return;
-    invalidate(true); revalidating.current = true; setAccessRevision(current => current + 1);
+    if (!tenantName || offline || document.visibilityState === "hidden") return;
+    if (customerSessionGeneration(tenantCode) !== generation) { synchronizeSession(); return; }
+    if (!session || revalidating.current) return;
+    suspendAccess(); revalidating.current = true; setAccessRevision(current => current + 1);
   };
   useEffect(() => {
     if (owner.current.signal.aborted) {
@@ -75,7 +81,7 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
   }, [revision]);
   useEffect(() => {
     if (!tenantCode || !tenantName) return;
-    const changed = () => { invalidate(); setSessionState(loadCustomerSession(tenantCode)); setGeneration(customerSessionGeneration(tenantCode)); };
+    const changed = () => synchronizeSession();
     changed();
     return subscribeCustomerSession(tenantCode, changed);
   }, [tenantCode, tenantName]);
@@ -99,11 +105,11 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
     const resume = () => {
       if (document.visibilityState === "hidden") return;
       if (!tenantName) { invalidate(); setRevision(current => current + 1); }
-      else if (session) revalidateAccess();
+      else if (session || customerSessionGeneration(tenantCode) !== generation) revalidateAccess();
       else setLoading(false);
     };
     const visibility = () => {
-      if (document.visibilityState === "hidden") invalidate(true);
+      if (document.visibilityState === "hidden") suspendAccess();
       else resume();
     };
     const restored = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
@@ -122,7 +128,7 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
     if (!entry?.corporates.some(c => c.corporateCustomerId === id)) throw new Error("当前企业不可访问");
     cancelReaders(); setSelection(id);
   };
-  const identity = JSON.stringify([tenantCode, session?.customer.customerId, generation, selectedCorporateId, entry?.corporates.map(c => [c.corporateCustomerId, c.permissionRevision]), revision, accessRevision]);
+  const identity = JSON.stringify([tenantCode, session?.customer.customerId, generation, selectedCorporateId, entry?.corporates.map(c => [c.corporateCustomerId, c.membershipId, c.permissionRevision, c.actions]), revision]);
   const accessScope = JSON.stringify([tenantCode, session?.customer.customerId, generation, session?.workspace?.workspaceCode, selectedCorporateId, entry?.corporates.map(c => [c.corporateCustomerId, c.permissionRevision])]);
   const renderOwner = owner.current;
   const request = async <T,>(path: string, init: RequestInit, externalSignal?: AbortSignal): Promise<T> => {

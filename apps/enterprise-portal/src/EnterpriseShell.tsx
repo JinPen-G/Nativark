@@ -15,7 +15,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
   const { locale } = useLocale(), context = useEnterprise();
   const [logoutError, setLogoutError] = useState("");
   const english = locale === "en-US";
-  const corporate = context.entry?.corporates.find(row => row.corporateCustomerId === context.selectedCorporateId);
+  const corporate = context.loading ? undefined : context.entry?.corporates.find(row => row.corporateCustomerId === context.selectedCorporateId);
   const location = useLocation(), activePage = location.pathname.slice(context.basePath.length).replace(/^\//, "") || "members";
   const menus: Array<{ path: string; zh: string; en: string; icon: ReactNode; action?: EnterprisePortalAction }> = [
     { path: "tasks", zh: "企业待办", en: "Tasks", icon: <InboxOutlined /> }, { path: "records", zh: "操作记录", en: "Records", icon: <HistoryOutlined /> },
@@ -35,10 +35,10 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
   const corporateName = corporate?.corporateName || (english ? "Choose enterprise" : "选择企业");
   const sections = [{ key: "overview", label: "", routes: visible.map(menu => ({ path: context.basePath + "/" + menu.path,
     label: english ? menu.en : menu.zh, icon: menu.icon })) }];
-  return <BusinessShell fullWidth identity={context.identity} selectedKey={context.basePath + "/" + activePage}
+  return <BusinessShell fullWidth identity={JSON.stringify([context.identity, context.loading])} selectedKey={context.basePath + "/" + activePage}
     brand={<NativeContextSwitcher title={tenantName} subtitle={corporateName} brand={<Building2 aria-hidden="true" />}
       label={english ? "Current enterprise" : "当前企业"} value={context.selectedCorporateId}
-      options={(context.entry?.corporates ?? []).map(row => ({ id: row.corporateCustomerId, name: row.corporateName, icon: <Building2 aria-hidden="true" /> }))}
+      options={(context.loading ? [] : context.entry?.corporates ?? []).map(row => ({ id: row.corporateCustomerId, name: row.corporateName, icon: <Building2 aria-hidden="true" /> }))}
       onChange={context.selectCorporate} />}
     account={<NativeAccountMenuView name={context.session?.customer.displayName || (english ? "Customer account" : "客户账号")}
       account={tenantName} onSignOut={context.session ? () => context.logout() : undefined}

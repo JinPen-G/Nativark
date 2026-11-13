@@ -87,10 +87,13 @@ export class EnterpriseAccessService {
   }
 
   async entry(context: ClientRequestContext, tenantCode: string): Promise<EnterpriseEntryResponse> {
-    const rows = await this.access(context, tenantCode);
-    const corporates = this.corporates(rows);
+    context = Object.freeze({ ...context });
     const tenant = await this.prisma.tenant.findFirst({ where: { id: context.tenantId, code: tenantCode, status: "ACTIVE" }, select: { name: true } });
     if (!tenant) throw new ForbiddenException("商户不可用");
+    // Read authority last so a revocation while loading the merchant name cannot
+    // return an earlier set of granted actions to the customer host.
+    const rows = await this.access(context, tenantCode);
+    const corporates = this.corporates(rows);
     return { apiVersion: "v1", tenantCode, tenantName: tenant.name, customerId: context.customerId, displayName: context.displayName,
       state: context.membershipStatus !== "active" ? "membership_restricted" : corporates.length ? "ready" : rows.some(r => r.tenantEnabled) ? "no_management_access" : "not_enabled",
       corporates, ownRelations: [...new Map(rows.map(r => [r.membershipId, { corporateCustomerId: r.corporateCustomerId, corporateName: r.corporateName, role: r.role }])).values()] };
