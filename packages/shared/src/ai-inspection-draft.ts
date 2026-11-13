@@ -97,7 +97,10 @@ export type AiInspectionValueDraft =
   | { kind: "boolean"; value: boolean }
   | { kind: "text" | "select"; value: string }
   | { kind: "photo"; attachmentId: string; attachmentRevision: number };
-export type AiInspectionCandidateDraft = { candidateId: string; fieldCode: string; sources: AiInspectionSourceDraft[] } & (
+export type AiInspectionCandidateDraft = { candidateId: string; fieldCode: string; sources: AiInspectionSourceDraft[];
+  /** Quoted media text is untrusted recognition evidence, never an instruction
+   * or a human-approved value. Old candidates can have no recorded quote. */
+  sourceText?: string } & (
   | { status: "candidate"; value: AiInspectionValueDraft; confidence: number }
   | { status: "missing" | "blurred"; reason: string }
 );

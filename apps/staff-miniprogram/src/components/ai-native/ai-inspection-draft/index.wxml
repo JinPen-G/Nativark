@@ -1,7 +1,13 @@
 <view class="ai-inspection-draft" aria-label="检查草稿">
-  <text>候选与人工值均待核实，不代表业务检查事实</text>
+  <text>候选与人工值均待核实，模型置信提示不代表业务事实</text>
   <view class="ai-inspection-draft__row" wx:for="{{visibleItems}}" wx:key="key">
     <text>{{item.label}}</text><text>候选：{{item.candidate}}</text>
+    <text>识别状态：{{item.candidateStatusLabel}}</text>
+    <text wx:if="{{item.candidateReason}}">待核实：{{item.candidateReason}}</text>
+    <text wx:if="{{item.sourceText}}">原文：{{item.sourceText}}</text>
+    <text wx:else>原文未记录</text>
+    <text wx:if="{{item.confidenceLabel}}">模型置信提示：{{item.confidenceLabel}}（0～1）</text>
+    <text wx:else>模型置信提示未记录</text>
     <text>人工值：{{item.humanValue}} · {{item.decisionLabel}}</text>
     <text wx:if="{{item.differenceLabel}}" role="status">{{item.differenceLabel}}</text>
     <text wx:for="{{item.reviewMessages}}" wx:for-item="reason" wx:key="*this" role="status" aria-label="{{item.label}}待核理由">{{reason}}</text>

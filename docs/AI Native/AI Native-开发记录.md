@@ -3,8 +3,37 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14及本次16已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain19-source-text-simulated-whole-closeout-20261114"></a>
+## AIN-19 识别原文、置信展示与整项模拟研发收口（2026-11-14）
+
+在已上传 `585b36eb670feb792b62e1cf010ffffc838e2696` 上，独立全文核定发现候选合同没有识别原文、员工页面不呈现原置信值。Root补[公共候选合同](../../packages/shared/src/ai-inspection-draft.ts)、闭合schema及持久输入；新 preparation 冻结 `outputContract:inspection-candidate-source-text-1`，[原生产组合](../../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition.ts)与[结果读取](../../apps/api/src/modules/ai-native/inspection-assist/inspection-recognition-result.service.ts)共同使用[冻结消息叶](../../apps/api/src/modules/ai-native/inspection-assist/inspection-recognition-prompt.ts)。新数字、文字和选择候选须提供非空 `sourceText`，纯视觉布尔／照片可空；缺失、遮挡、模糊不造值。旧input没有标记时保留原消息，旧候选可省略原文，不从值反推、不给历史补签。原文仍为不可信识别数据，不成为人类决定、费用、责任或操作授权；原Artifact、用量、累计资源与收据保持原链。
+
+dev2交回[原宿主投影](../../apps/staff-miniprogram/src/components/ai-native/inspection-host.ts)、[显示叶](../../apps/staff-miniprogram/src/components/ai-native/inspection-candidate-display.ts)及检查辅助／草稿的TS和WXML共六源。实际结果和保存后原稿均呈现原文、0～1原置信提示及图片区域／音频时段；旧／空原文显示未记录，缺项和模糊分开，置信0不被当缺失。纯文本显示并脱敏常见凭据和个人字段，不执行HTML／URL／指令；隐藏、撤权和卸载清除，人工更正保留原候选关联。六个固定blob逐字节核同；[唯一本地registry](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)由原 `buildInspectionWireRegistry()` 在内存生成，55 schema、21检查／9任务操作，产物SHA-256 `a036d1cf83e2227a112a21fdeb33f7c2bedd09a14779075ab4126128faa92923`、Git blob `152252826eaa9ff8d67378aff2c9e32576bd80f1`，未另建生成器或依赖副本。
+
+| 必要验证 | 固定命令与实际结果 |
+| --- | --- |
+| 原StaffFactory／Controller→Core单分配项→原Task/Gateway／账→结果保存和人工更正 | `node --no-compilation-cache -`，stdin `c74ec3ad0436478bbd423aaba096955ea4bb015e121ec57043e834e2eaf24a11`，退出0。图片、音频、旧输入、缺原文拒绝、恶意原文五条各1次模型、1原账收据；缺原文不保存，重复保存读回原收据，无新增模型／业务写入，撤权拒绝。 |
+| 同一生产结果到实际员工投影／草稿组件 | stdin `45a447ac32edec5e06b1773c19e95ceeb47fc996199f100078f3232d09491cb4`，退出0；在上述五条原链读取结果及保存后的原文、置信、区域／时段，缺原文旧包兼容，原表单值不被自动采用，隐藏和实际detach→dispose后清除。 |
+| 合成遮挡／无可辨语音及媒体内恶意指令 | stdin `afdf37e5d9c5bc3325288951ca99acb88658c0b6da0dca7040c3dd0a69413766`，退出0；内存生成遮挡PNG和原PCM WAV，PNG元数据保留恶意指令。模型响应明确为替身，blurred不造值／置信／原文、不允许直接采用，恶意内容仅候选文字，人工更正和原账不变；三条各1模型，无业务写入。该组不证明供应商识别准确率。 |
+| 作者六源完整消费者组及Root类型复核 | dev2同组最终24场景／退出0，stdin `4159374e03eb4825c345cb227bf452179445d8f809ef967106b3eb7b9df4586e`；其4根／204源／115份内存声明类型零诊断，`c7ada94917164d676f7484cc798a5af291574d813f952037495fcda50498be80`。Root独立最终6根／238源／115份内存声明零诊断，`a870d91d382461b3a7efc341047d55669f139da53734e09553c725af34dee400`，均TypeScript5.9.3及原ES2019。 |
+| 标准API、OpenAPI、shared及原结果读取依赖 | stdin `475046c2726cd980a473a39fe41bd38ed306ad96335613a9f5db350bc0b61775`，退出0；TypeScript5.9.3，6根／1978源零诊断。原生成器stdin `eab084396cc0e451eb0e70532da8a48c7f632f27d5d49a484e564f9f8b16a29c`退出0，生成内容与唯一registry核同。 |
+
+按原五条和04／05／10完整前置核定：
+
+| 原AIN-19条款 | 实现与验收依据 |
+| --- | --- |
+| 文件／模型能力、订单资源阶段及冻结模板绑定 | 原文件上传／冻结字节／员工Guard和单分配Core来源、显式能力与标准识别provider齐备；[原固定闭包](#ain-inspection-core-basis-review-20261112)及本片图片／音频实际组合核对同Task／Run／材料和原账。 |
+| 字段、值、原文、位置／时段、置信和更正关联 | 本片补齐最后两处生产／消费者缺口；原保存收据、当前candidateReviews和人工modified仍保留同candidateId，不把保存当采用。 |
+| 原格式／模糊／疑损边界 | 复用原品类属性与usage校验，[既有依据组](#ain-inspection-core-basis-review-20261112)的VIN匹配／不符、跨资产、倒退、缺基线／旧资源／单位／明确换表来源及撤权；stdin `cb708f2bc3d82eb1c65f0541b0dcad157175ba7954fd985768c65448e22ba358`退出0，本片遮挡和无法辨听保持空候选。缺结构化换表事实不伪造，疑损不裁责／计费。 |
+| 多模态配置和恶意／超大附件 | 沿唯一Gateway的当前配置／能力／数据范围、原媒体大小／尺寸／PCM帧及总输入上限；未知容器、URL和工具候选拒绝，媒体内容不执行。不同供应商及生产数据责任仍须原AIN-D01／D04审批，本片不开放新供应商或真实调用。 |
+| 原代表素材与独立复核 | 既有固定依据组＋本片实际媒体／结果／组件组合覆盖原负例；dev2独立核原五条、公共生产和固定证据，未把替身或缺设备当真实验收。Root复验其六源消费者及当前整合链，失败记录保留。 |
+
+本片16必要产品源的路径→blob集合SHA-256 `665d82318db79daf81fabf30f57fdaa77fe0d7309df4e1e920db3ec0f613402f`，对应提交可复核，不另存整树。精确stdin和输出在AI-RD及dev2原会话。首轮驱动误用不存在的 `result-receipt`（实际为 `result-save-receipt`）、旧input分类缺 `requestFingerprint` 导入、卸载断言只调dispose而遗漏实际detach，分别退出1；仅修内存驱动，原断言／测试文件／生产授权不削弱。作者结果夹具误用basis版本的失败也保留。`node scripts/validate-docs.cjs`仍为4处既有缺链／退出1（导航历史3、稀疏站点示例1），本片无新增链接／任务算术错误；定向 `git diff --check`退出0。所有验证沿本树offline preload、不可达DATABASE_URL、内存audit和同一绝对任务根；子进程退出，audit为空，`output/.tmp/ain19-source-text-closeout-20261114`未创建，无新增／扩写测试脚本、client／dist或依赖副本。
+
+AIN-19的G1～G4及原依赖齐备，唯一任务册只更新该项与汇总；真实微信、模型、数据库、对象存储、识别准确率及数据放行由负责人后续实际操作。本批新完成一项，尚未形成新的两项main节点，PM仍独占main。AIN-20全文复核发现“页面重开重建原表单却沿用已上传未提交签名”的风险，已交dev2最小修复；原提交／上传unknown不得清除或换键，该项完成前不升档。dev1继续原AUTOMATION解释私有宿主，公共Gateway／原账接点由Root处理，助手不等待提交或main。
 
 <a id="ain17-standard-resource-capture-history-20261114"></a>
 ## AIN-17 标准资源来源、原事务捕获与停用历史恢复（2026-11-14）

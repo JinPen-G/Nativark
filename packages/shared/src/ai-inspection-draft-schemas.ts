@@ -7,7 +7,7 @@ import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafId as id, le
 const coordinate = { type: "number", minimum: 0, maximum: 1 };
 const dimension = { type: "number", exclusiveMinimum: 0, maximum: 1 };
 const source = { attachmentId: id(), attachmentRevision: int(1) };
-const candidate = { candidateId: id(), fieldCode: id() };
+const candidate = { candidateId: id(), fieldCode: id(), sourceText: text(2000, 0) };
 const taskId = { ...id(), maxLength: 128 };
 const no: AiLeafSchemaDraft = { type: 'boolean', const: false };
 const taskSummary = obj({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, status: choice(...AI_TASK_STATUSES_DRAFT),
@@ -73,7 +73,7 @@ export const AI_INSPECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiInspectionRecognitionTaskResumeRequest: obj({ reference: ref("AiInspectionRecognitionTaskReference"), submission: ref("AiTaskInputSubmissionDraft") }),
   AiInspectionSourceDraft: { oneOf: [obj({ ...source, kind: choice("image"), region: obj({ x: coordinate, y: coordinate, width: dimension, height: dimension }) }), obj({ ...source, kind: choice("audio"), span: obj({ startMs: int(0, 86400000), endMs: int(0, 86400000) }) })] },
   AiInspectionValueDraft: { oneOf: [obj({ kind: choice("number"), value: { type: "number", minimum: -1e12, maximum: 1e12 } }), obj({ kind: choice("boolean"), value: { type: "boolean" } }), obj({ kind: choice("text", "select"), value: text(2000, 0) }), obj({ kind: choice("photo"), ...source })] },
-  AiInspectionCandidateDraft: { oneOf: [obj({ ...candidate, sources: list(ref("AiInspectionSourceDraft"), 16, 1), status: choice("candidate"), value: ref("AiInspectionValueDraft"), confidence: coordinate }), obj({ ...candidate, sources: list(ref("AiInspectionSourceDraft"), 16), status: choice("missing", "blurred"), reason: text(512) })] },
+  AiInspectionCandidateDraft: { oneOf: [obj({ ...candidate, sources: list(ref("AiInspectionSourceDraft"), 16, 1), status: choice("candidate"), value: ref("AiInspectionValueDraft"), confidence: coordinate }, ['candidateId', 'fieldCode', 'sources', 'status', 'value', 'confidence']), obj({ ...candidate, sources: list(ref("AiInspectionSourceDraft"), 16), status: choice("missing", "blurred"), reason: text(512) }, ['candidateId', 'fieldCode', 'sources', 'status', 'reason'])] },
   AiInspectionCorrectionDraft: obj({ correctionId: id(), candidateId: id(), expectedDraftRevision: int(1), value: ref("AiInspectionValueDraft"), reason: text(512), recordedAt: leafTime }),
   AiInspectionExtractDraft: obj({ draftVersion: choice(AI_INSPECTION_DRAFT_VERSION), draftId: id(), revision: int(1), scope: ref("AiWorkspaceScope"), orderId: id(), assetId: id(), allocationId: id(), stage: choice("pickup", "return"), frozenTemplate: obj({ templateId: id(), version: text(64) }), status: choice("awaiting_review", "pending_submission"), candidates: list(ref("AiInspectionCandidateDraft"), 100), corrections: list(ref("AiInspectionCorrectionDraft"), 100), reviewIssues: { ...list(choice("baseline_missing", "meter_replaced", "reading_backwards", "field_unavailable", "source_unclear"), 5), uniqueItems: true } })
 };

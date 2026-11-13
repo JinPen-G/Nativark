@@ -8,7 +8,7 @@ Component({
       bindings.set(this, new StaffInspectionHostBinding(view => this.setData(view),
         () => this.selectComponent("#workbench")?.detachHost?.()));
     },
-    detached() { bindings.get(this)?.dispose(); bindings.delete(this); this.selectComponent?.("#workbench")?.detachHost?.(); },
+    detached() { bindings.get(this)?.dispose(); bindings.delete(this); this.setData(emptyInspectionView()); this.selectComponent?.("#workbench")?.detachHost?.(); },
   },
   methods: {
     attachHost(host: StaffInspectionHost) {

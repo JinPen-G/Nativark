@@ -17,6 +17,7 @@ import { InspectionCandidateService, snapshotInspectionCandidates } from './insp
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import { type RecognitionSaveAssociation } from './inspection-recognition-save.association';
 import { unrecordedInspectionRecognitionBasis, type InspectionRecognitionBasisIssue } from './inspection-recognition-basis.service';
+import { inspectionRecognitionMessages } from './inspection-recognition-prompt';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, inputId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), taskId: inspectionId, resultId: inspectionId }).strict();
@@ -179,12 +180,7 @@ export class InspectionRecognitionResultService {
       const bound = await this.recognition!.gatewayMedia(mediaReference);
       const result = await this.results!.read({ taskId: input.taskId, resultId: input.resultId });
       const persisted = await this.readBinding(input, scope, result, taskModelIdentity(initial));
-      const expectedText = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts', draftId: bound.draftId,
-        draftRevision: input.expectedRevision, inputFingerprint: bound.input.inputFingerprint,
-        question: bound.input.question, template: bound.input.template,
-        ...(bound.input.basis !== undefined ? { basis: bound.input.basis } : {}) });
-      let messages: TaskModelInput['intent']['messages'] = [{ role: 'user', content: [{ kind: 'text', text: expectedText }, ...bound.input.media.map(ref =>
-        ({ kind: source.policy.kind!, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }];
+      let messages = inspectionRecognitionMessages({ ...bound, draftRevision: input.expectedRevision }, source.policy.kind!);
       const media = bound.input.media.map(ref => ({ kind: source.policy.kind, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision,
         mediaType: ref.mediaType, contentHash: ref.contentHash, sizeBytes: ref.sizeBytes }));
       for (const round of persisted.history) {
@@ -209,6 +205,11 @@ export class InspectionRecognitionResultService {
         try { decoded = JSON.parse(payload.text); } catch { throw new InspectionAssistError('INVALID_INPUT'); }
         if (!Array.isArray(decoded)) throw new InspectionAssistError('INVALID_INPUT');
         values = snapshotInspectionCandidates(decoded);
+        if (bound.input.outputContract === 'inspection-candidate-source-text-1'
+          && values.some(candidate => candidate.status === 'candidate' && (candidate.sourceText === undefined
+            || candidate.value.kind !== 'boolean' && candidate.value.kind !== 'photo' && !candidate.sourceText.trim()))) {
+          throw new InspectionAssistError('INVALID_INPUT');
+        }
         if (values.some(candidate => candidate.sources.some(ref => ref.kind !== source.policy.kind
           || !bound.input.media.some(original => original.attachmentId === ref.attachmentId
             && original.attachmentRevision === ref.attachmentRevision

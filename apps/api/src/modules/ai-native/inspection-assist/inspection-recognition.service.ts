@@ -165,6 +165,7 @@ export class InspectionRecognitionService {
           width: bytes.width, height: bytes.height, durationMs: bytes.durationMs });
       }
       const payload = { inputId, bindingFingerprint: row.bindingFingerprint, question: input.question,
+        outputContract: 'inspection-candidate-source-text-1' as const,
         template: { id: binding.template.id, version: binding.template.version, fields: binding.template.fields.map(field => ({ code: field.code,
           type: field.type, label: field.label, required: field.required, ...(field.options ? { options: [...field.options] } : {}),
           ...(field.unit !== undefined ? { unit: field.unit } : {}),

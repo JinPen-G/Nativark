@@ -92,6 +92,7 @@ const basisReference: AiLeafSchemaDraft = { oneOf: [
   object({ version: choice('inspection-recognition-basis-1'), status: choice('not_recorded') }),
 ] };
 const recognition = object({ inputId: id, inputFingerprint: hash, bindingFingerprint: hash, question: text(4000),
+  outputContract: choice('inspection-candidate-source-text-1'),
   template: object({ id, version: id, fields: list(object({ ...field, options, unit: text(64, 0), usageMetric: bool }, Object.keys(field)), 100) }),
   basis: basisReference,
   media: list(object({ ...evidence.properties, contentHash: hash, mediaType: text(128), sizeBytes: positive,

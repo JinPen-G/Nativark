@@ -48,6 +48,9 @@ export type AiInspectionRecognitionInput = {
   inputFingerprint: string;
   bindingFingerprint: string;
   question: string;
+  /** Frozen only on new preparations; absent historical inputs keep the exact
+   * original messages and never receive a reconstructed source quote. */
+  outputContract?: 'inspection-candidate-source-text-1';
   template: { id: string; version: string; fields: Array<{ code: string; type: string; label: string; required: boolean;
     options?: string[]; unit?: string; usageMetric?: boolean }> };
   basis?: AiInspectionRecognitionBasisReference;

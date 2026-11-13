@@ -4,6 +4,7 @@ import type { AiInspectionActorScope, AiInspectionTarget, AiInspectionDraftState
   AiInspectionResultReadResponse, AiInspectionRecognitionBasisIssueDraft, AiInspectionReviewIssueDraft,
   AiInspectionSavedCandidateReview } from "@rental-os/shared";
 import { boundedText } from "./display-format";
+import { inspectionSourceText, inspectionConfidenceLabel, inspectionCandidateStatusLabel } from "./inspection-candidate-display";
 import { validateInspectionWire, isInspectionSavedCandidateReview } from "./inspection-wire";
 import type { NativeAiHost } from "./ai-task-workbench/index";
 
@@ -43,6 +44,16 @@ function candidateSources(candidate: AiInspectionDraftState['candidates'][number
     const region = source.region;
     return `${original} · 图片区域：左 ${(region.x * 100).toFixed(1)}%、上 ${(region.y * 100).toFixed(1)}%、宽 ${(region.width * 100).toFixed(1)}%、高 ${(region.height * 100).toFixed(1)}%`;
   });
+}
+function candidateDisplay(candidate: AiInspectionDraftState['candidates'][number] | undefined) {
+  // Old saved candidates have no sourceText; neither their value nor model
+  // answer can substitute for the missing original recognition wording.
+  const sourceText = candidate && 'sourceText' in candidate ? candidate.sourceText : undefined;
+  const confidence = candidate?.status === 'candidate' ? candidate.confidence : null;
+  return { sourceText: inspectionSourceText(sourceText), confidence,
+    confidenceLabel: inspectionConfidenceLabel(candidate?.status, confidence),
+    candidateStatus: candidate?.status ?? '', candidateStatusLabel: inspectionCandidateStatusLabel(candidate?.status),
+    candidateReason: candidate && candidate.status !== 'candidate' ? inspectionSourceText(candidate.reason) : '' };
 }
 function candidateDifference(candidate: AiInspectionDraftState['candidates'][number] | undefined,
   human: AiInspectionDraftState['fields'][string] | undefined): string {
@@ -211,6 +222,7 @@ export class StaffInspectionHostBinding {
         candidateId: boundedText(candidate.candidateId, 191), fieldCode: boundedText(candidate.fieldCode, 200), status: candidate.status,
         value: candidate.status === "candidate" ? boundedText(String(candidate.value.kind === "photo" ? candidate.value.attachmentId : candidate.value.value), 4000) : "待人工核实",
         sourceLabels: candidateSources(candidate),
+        ...candidateDisplay(candidate),
       })) ?? [];
       if (this.recognition) {
         view.recognitionBasisLabel = this.recognition.basis.status === 'recorded' ? '原检查依据已记录' : '原检查依据未记录，请人工核实';
@@ -234,6 +246,7 @@ export class StaffInspectionHostBinding {
           humanValue: d.state.fields[field.code]?.value ?? null,
           differenceLabel: candidateDifference(candidate, d.state.fields[field.code]),
           sourceLabels: candidate ? candidateSources(candidate) : [],
+          ...candidateDisplay(candidate),
           sourceLabel: candidate?.sources.map(source => `${source.attachmentId}@${source.attachmentRevision}`).join(", ").slice(0, 200) ?? "来源不可用" };
       });
       view.missing = d.state.missingFields.slice(0, 64); view.evidence = d.state.evidence.slice(0, 100);

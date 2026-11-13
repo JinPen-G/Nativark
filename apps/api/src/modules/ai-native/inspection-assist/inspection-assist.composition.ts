@@ -14,6 +14,7 @@ import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionSubmissionService } from './inspection-submission.service';
 import { InspectionRecognitionService, inspectionRecognitionMediaKind } from './inspection-recognition.service';
 import { InspectionRecognitionResultService } from './inspection-recognition-result.service';
+import { inspectionRecognitionMessages } from './inspection-recognition-prompt';
 import { InspectionRecognitionBasisService, type InspectionRecognitionBasisPorts } from './inspection-recognition-basis.service';
 import { createInspectionRecognitionCoreSource } from './inspection-recognition-core.source';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
@@ -38,13 +39,8 @@ import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED, StaffInspect
  * inspection input, never a request-provided prompt/hash or an SDK result. */
 function inspectionTaskMaterial(bound: Awaited<ReturnType<InspectionRecognitionService['gatewayMedia']>>, maxOutputTokens: number) {
   const kind = inspectionRecognitionMediaKind(bound.input);
-  const text = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts',
-    draftId: bound.draftId, draftRevision: bound.draftRevision, inputFingerprint: bound.input.inputFingerprint,
-    question: bound.input.question, template: bound.input.template,
-    ...(bound.input.basis ? { basis: bound.input.basis } : {}) });
   return (kind === 'audio' ? taskAudioMaterialSchema : taskImageMaterialSchema).parse({ maxOutputTokens,
-    messages: [{ role: 'user', content: [{ kind: 'text', text }, ...bound.input.media.map(ref => ({ kind,
-      attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }] });
+    messages: inspectionRecognitionMessages(bound, kind) });
 }
 export type PersistedInspectionTaskHostDependencies = Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence' | 'inputSource' | 'kind' | 'task'> & {
   task: Omit<TaskModelHostDependencies['task'], 'material'>;

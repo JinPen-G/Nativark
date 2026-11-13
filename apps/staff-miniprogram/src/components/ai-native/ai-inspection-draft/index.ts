@@ -1,5 +1,6 @@
 import { identityRows } from "../identity-rows";
 import { boundedText } from "../display-format";
+import { inspectionSourceText, inspectionConfidenceLabel, inspectionCandidateStatusLabel } from "../inspection-candidate-display";
 const detachedViews = new WeakSet<object>();
 function inspectionValue(value: unknown): string {
   if (value === null || value === undefined) return "缺失";
@@ -14,8 +15,10 @@ Component({
     candidateActions: { type: Boolean, value: false }, revision: { type: Number, value: 0 } },
   data: { visibleItems: [] as { key: string; label: string; candidate: string; humanValue: string; sourceLabel: string;
     sourceLabels: string[]; differenceLabel: string; reviewMessages: string[];
+    sourceText: string; confidenceLabel: string; candidateStatusLabel: string; candidateReason: string;
     candidateId: string; candidateActionable: boolean; candidateCanAccept: boolean; decisionLabel: string; error: string }[], visibleMissing: [] as string[] },
-  lifetimes: { attached() { detachedViews.delete(this); this.project(); }, detached() { detachedViews.add(this); } },
+  lifetimes: { attached() { detachedViews.delete(this); this.project(); },
+    detached() { detachedViews.add(this); this.setData({ items: [], missing: [], visibleItems: [], visibleMissing: [] }); } },
   observers: { "items,missing"() { this.project(); } },
   methods: {
     project() {
@@ -26,6 +29,10 @@ Component({
         sourceLabel: typeof item.sourceLabel === "string" ? boundedText(item.sourceLabel, 200) : "来源不可用",
         sourceLabels: Array.isArray(item.sourceLabels) ? item.sourceLabels.slice(0, 100)
           .filter((value): value is string => typeof value === 'string').map(value => boundedText(value, 512)) : [],
+        sourceText: inspectionSourceText(item.sourceText),
+        confidenceLabel: inspectionConfidenceLabel(item.candidateStatus, item.confidence),
+        candidateStatusLabel: inspectionCandidateStatusLabel(item.candidateStatus),
+        candidateReason: inspectionSourceText(item.candidateReason),
         differenceLabel: typeof item.differenceLabel === 'string' ? boundedText(item.differenceLabel, 200) : '',
         reviewMessages: Array.isArray(item.reviewMessages) ? item.reviewMessages.slice(0, 100)
           .filter((value): value is string => typeof value === 'string').map(value => boundedText(value, 768)) : [],

@@ -27,6 +27,7 @@ export const inspectionSubmissionMaterialSchema = z.object({ mode: z.enum(['orig
   body: z.object({ templateId: inspectionId, results: z.record(inspectionId, z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.array(inspectionId).max(100)])),
     attachments: z.array(inspectionId).max(101), handoverSignatureFileAssetId: inspectionId.optional() }).strict() }).strict();
 export const inspectionRecognitionInputSchema = z.object({ inputId: inspectionId, inputFingerprint: hash, bindingFingerprint: hash, question: z.string().min(1).max(4000),
+  outputContract: z.literal('inspection-candidate-source-text-1').optional(),
   template: z.object({ id: inspectionId, version: inspectionId, fields: z.array(z.object({ code: inspectionId, type: z.string(), label: z.string(), required: z.boolean(),
     options: z.array(z.string()).optional(), unit: z.string().max(64).optional(), usageMetric: z.boolean().optional() }).strict()).max(100) }).strict(),
   basis: inspectionRecognitionBasisReferenceSchema.optional(),

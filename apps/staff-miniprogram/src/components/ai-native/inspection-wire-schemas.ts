@@ -1943,6 +1943,12 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                   "minLength": 1,
                   "maxLength": 4000
                 },
+                "outputContract": {
+                  "type": "string",
+                  "enum": [
+                    "inspection-candidate-source-text-1"
+                  ]
+                },
                 "template": {
                   "type": "object",
                   "properties": {
@@ -2284,6 +2290,11 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
             "maxLength": 191,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
           },
+          "sourceText": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
           "sources": {
             "type": "array",
             "items": {
@@ -2331,6 +2342,11 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
             "minLength": 1,
             "maxLength": 191,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "sourceText": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
           },
           "sources": {
             "type": "array",
