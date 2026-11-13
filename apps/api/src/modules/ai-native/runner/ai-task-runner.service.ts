@@ -26,6 +26,13 @@ export class AiTaskRunnerPreReservationLimitError extends AiTaskRunnerError {
   constructor() { super('AI_RUN_LIMIT', 'original task resources cannot admit the next step'); }
 }
 
+/** Original-registration observation completed without a stored step. This
+ * signal permits only the existing local measurement/release path, not insertion
+ * or a new effect. Generic storage failures and late replies remain unknown. */
+export class AiTaskRunnerOriginalStepUnavailableError extends AiTaskRunnerError {
+  constructor() { super('AI_RESOURCE_UNAVAILABLE', 'original step is not registered'); }
+}
+
 /** Claim acknowledgement, not a later lease read, owns execution/cleanup.
  * Share this check with original business recovery hosts; an uncertain claim
  * may already have committed, so no guessed release or second claim is safe. */
@@ -592,7 +599,19 @@ export class AiTaskRunner {
         const cancelling = await checkCancel(true);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
-        const registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery || continuation !== undefined), workMs(), 'step_register'));
+        let registered: Awaited<ReturnType<AiTaskRunnerDependencies['steps']['register']>>;
+        try {
+          registered = structuredClone(await this.callWriteBounded(() => this.deps.steps.register(structuredClone(stepPlan),
+            structuredClone(lease), recovery || continuation !== undefined), workMs(), 'step_register'));
+        } catch (error) {
+          // A settled original-only read may stop at the unregistered suffix.
+          // Keep this measured interval for the exact release receipt in finally;
+          // no step is registered or dispatched and no old time debt is cleared.
+          if (recovery && error instanceof AiTaskRunnerOriginalStepUnavailableError) {
+            return { status: 'unavailable', completedSteps, cleanupFailed };
+          }
+          throw error;
+        }
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };

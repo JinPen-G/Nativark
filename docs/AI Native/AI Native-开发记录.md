@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-recovery-prefix-measurement-20261113"></a>
+## 原前缀恢复在未注册后继处停止的耗时收尾（2026-11-13）
+
+已复现确定性缺口：原订单第 1 步及前三段 overhead 均已记账、active_ms 占用为 0；恢复仅回读原已完成前缀，遇尚未注册的第 2 步时，原仓储明确返回注册缺失。[adapter](../../apps/api/src/modules/ai-native/runner/ai-task-runner.repository-adapter.ts)原将这个有类型的信号转成普通错误，[runner](../../apps/api/src/modules/ai-native/runner/ai-task-runner.service.ts)通用异常路径 abandon 仍完整的本轮计时帧，产生 5000 ms UNKNOWN，导致之后显式 resumePrepared 被拒。
+
+最小修复只保留 existingOnly 下的原注册缺失信号，并只在 recovery 分支返回 unavailable，原已完成前缀保留；finally 沿既有 release→completeAfterRelease 用准确释放回执结算本轮真实测量。未注册后缀不插入、不派发，旧耗时债务不重算。[overhead 门禁](../../apps/api/src/modules/ai-native/runner/prisma-task-run-overhead.ts)未改，blob 保持 `e3305bda393c61ac434ccfa0fa29ad9bf258783c`。普通异常、权限变化、超时及未知写入不进入这个明确停止分支。
+
+前置 `636ca2c0fe319185a7dae87c2c5a3c44078f5700` 已推 GitHub 并回读一致。两产品文件固定 blob：runner `38164f7bf09aad606ae1b30dfbcf6f7f2eabd056`、adapter `bd4a1f815216e1463c67a9dbe00787f0818f79c3`，Root 已核同。助手以固定旧订单两源复现反例并采集原 overhead/charge/wall/mono/lease/receipt，命令 SHA-256 `94e68c378155afc72d62764ca59dd12b7623e99d5f775062ec354c51cee056cd`，退出 1；修后同一过程退出 0，SHA `7575c0748b8c06137e93bcbaf031a40221123f2ae48b9620367dd5de2739b6d2`。原释放已提交但应答丢失负例退出 0，SHA `0916639f11b4eb8932032a7dcbebf218781b3501ea31695c563f364c91d24567`：仍 AI_RESULT_UNKNOWN、5000 ms RESERVED，测量字段保持 null，继续执行被拒，调用数保持 1。
+
+Root 独立从原订单夹具执行固定本片 `node --no-compilation-cache -`，原前缀恢复→显式 resumePrepared 完成 3 步、2 次原模型调用、同一累计预算；原 plan/input/hash、第 1 步 ID 和结果引用不变。命令 SHA `3037407f1f7e34551202683f0cd38a0c507f0a0479e4191302c7eabc5f37fc45`，退出 0。TypeScript 5.9.3 两根/1283 源零诊断，SHA `0d2205b0ad5fd0b7efc3d2a47298c417accca577302bf597d7b30ed9fb2d6a21`，退出 0。全部沿原离线 preload、不可达数据库与内存审计，审计为空，临时目录未创建，验证进程退出，未新增测试脚本。
+
+本片修复明确来源的错误 UNKNOWN，不恢复已经丢失且没有持久测量的旧计时帧。旧数据只有原 completedAt/activeMs/measurementHash 已持久存在时，才可带原 chargeId、overhead evidenceRef 和当前受权 accounting lease 核对；缺测量保持占用与人工接管。历史和订单首次运行中的另一条偶发 timeDebt 失败仍缺当次完整证据，不能据本片关闭。原任务百分比不因修复切片或提交数量上调。
+
 <a id="ain12-authorized-conversation-history-20261113"></a>
 ## 同能力历史上下文进入原模型及当前读取复核（2026-11-13）
 

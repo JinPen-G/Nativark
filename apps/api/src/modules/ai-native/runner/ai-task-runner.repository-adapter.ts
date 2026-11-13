@@ -3,7 +3,7 @@ import type { AiTaskRepository } from "../ai-task.repository";
 import { AiStepOriginalRegistrationUnavailableError, type AiStepRegistrationCommand, type AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
 import { AI_STEP_STATUSES_DRAFT, AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
-import { AiTaskRunnerError } from './ai-task-runner.service';
+import { AiTaskRunnerError, AiTaskRunnerOriginalStepUnavailableError } from './ai-task-runner.service';
 
 /**
  * The only runner-to-persistence wiring point. The command factory belongs to the
@@ -91,7 +91,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
         // Stop original-only recovery at the unregistered suffix. The runner
         // keeps its observed prefix and must not finish the task or dispatch.
         if (existingOnly && error instanceof AiStepOriginalRegistrationUnavailableError) {
-          throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+          throw new AiTaskRunnerOriginalStepUnavailableError();
         }
         throw error;
       });
