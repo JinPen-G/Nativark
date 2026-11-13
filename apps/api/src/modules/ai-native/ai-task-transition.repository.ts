@@ -120,9 +120,16 @@ export class AiTaskTransitionRepository {
               throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
             }
             const initiator = envelope.data.initiator;
+            const ownerInitiated = initiator.kind === (initial.actorKind === 'AUTOMATION' ? 'system' : 'user')
+              && initiator.id === initial.actorId;
+            // The original task transaction fences the worker before storing
+            // this owner-attributed settlement event. A current lease is not
+            // historical proof; no caller-supplied worker/lease is accepted.
+            const workerSettled = target === 'cancelled' && initiator.kind === 'worker'
+              && envelope.data.data.from === 'cancel_requested' && row.occurredAt >= task.cancelRequestedAt;
             if (envelope.data.data.reason !== (target === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled')
-              || initiator.kind !== (initial.actorKind === 'AUTOMATION' ? 'system' : 'user')
-              || initiator.id !== initial.actorId || initiator.actorId !== initial.actorId || initiator.actorKind !== initial.actorKind) {
+              || (!ownerInitiated && !workerSettled)
+              || initiator.actorId !== initial.actorId || initiator.actorKind !== initial.actorKind) {
               throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             }
             event = { contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, type: 'task.transition',

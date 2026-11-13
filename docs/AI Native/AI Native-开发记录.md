@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-original-worker-cancel-receipt-20261114"></a>
+## AIN-25 原 worker 取消收口收据修复（2026-11-14）
+
+dev2沿原持久运行器确认：人类请求取消后，worker已在原事务将Task写为CANCELLED并释放租约，但[原取消收据读取](../../apps/api/src/modules/ai-native/ai-task-transition.repository.ts)仅允许user／system，因而返回AI_ACCESS_DENIED。最小修复只在读取原cancel_settled事件时接受已存储的worker归属：原前态必须cancel_requested，发生时间不得早于原请求，actorKind／actorId必须与当前受权Task owner一致。原请求取消仍只认本人user或对应automation system，不接受客户端worker／lease字段，不以当前租约替代历史证明。
+
+作者固定单源blob `9703cc4afa01fcbeecaceb8454a7b64c59559306`，Root逐字核同并独立复验原运行器→取消→原收据／公共HTTP响应。原失败与修后同命令stdin `b618a9eb8420fe8bb92ccf6084e2c85a3d4279f988d3e067c6a76aa73ba78c3c`分别退出1／0；失败时Task已取消、租约已释放，不能将读取失败误判为未执行或允许重发。作者边界模拟 `b119d651f575948c14f0f2f2956e8be16acefac8672d5e28e49fe1dba7b58a1c`退出0，Root独立 `node --no-compilation-cache -` stdin `6045336e2006fac8b170cada53eeda4991555076f94cb3f90d58a3e1d9b9bc01`退出0，21项必要正反边界通过；仅原运行器执行1次，读回写0，错owner／actor namespace／前态／时间／cursor、重复记录、伪造租约、会话／空间／等待中撤权均拒绝。缺收据保持not_observed；remoteCancellation=not_attested，取消不证明业务回滚，不授自动重发。
+
+Root独立类型stdin `8d4053ecbfea6cdec48a24026b6ae65f0f4a7f570510468cdc633dc507c459ff`退出0，TypeScript5.9.3，1根／1284源／116份内存shared声明零诊断。作者首个类型驱动未给出完整shared声明而失败，后改内存声明后通过，未改产品校验或测试文件。所有命令沿原offline preload、不可达DATABASE_URL和本树同一绝对任务根；audit为空，子进程已退出，`output/.tmp/ain25-cancellation-receipt-20261114`未创建，无新增或扩写测试脚本／依赖副本。该修复完成原收据观察，不是取消／恢复成功率、容量、公平调度或告警闭环；AIN-25全文仍有这些缺口，任务百分比不变。真实设备／模型／数据库及生产运行由负责人后续测试。
+
 <a id="ain12-13-current-main-fixed-closure-20261114"></a>
 ## AIN-12／13 已完成源码在当前main的固定整合闭包（2026-11-14）
 
