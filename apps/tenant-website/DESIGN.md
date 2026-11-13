@@ -1,36 +1,35 @@
 ---
 name: 一程租赁 · Yicheng Rentals
-description: 白色、深海蓝与暖黄组成的消费者租赁网站设计系统。
+description: 纯黑白文字、开放排版与清楚控件边界组成的消费者租赁网站设计系统。
 colors:
   page: '#ffffff'
-  surface: '#f4f6f7'
+  surface: '#f5f5f5'
   surface-raised: '#ffffff'
-  ink: '#17334a'
-  muted: '#60717e'
-  line: '#dfe6ea'
-  brand: '#17334a'
+  ink: '#000000'
+  line: '#dedede'
+  control-line: '#767676'
+  brand: '#000000'
   brand-contrast: '#ffffff'
-  accent: '#f4ce64'
   brand-soft: color-mix(in srgb, var(--brand) 8%, var(--page))
+  accent: '#ffffff'
   danger: '#a93235'
   success: '#276341'
-  focus: '#b2780c'
-  dark-page: '#111d26'
-  dark-surface: '#192934'
-  dark-surface-raised: '#20323e'
-  dark-ink: '#e8eff3'
-  dark-muted: '#b2c0cb'
-  dark-line: '#364752'
+  dark-page: '#000000'
+  dark-surface: '#171717'
+  dark-surface-raised: '#222222'
+  dark-ink: '#ffffff'
+  dark-line: '#3d3d3d'
+  dark-control-line: '#999999'
   dark-brand-soft: color-mix(in srgb, var(--brand) 16%, var(--surface))
   dark-danger: '#ffb5b5'
   dark-success: '#9ad6b4'
-  dark-action-hover: '#ffdd80'
+  dark-action-hover: '#e8e8e8'
 typography:
   display:
     fontFamily: '"Manrope", "PingFang SC", "Microsoft YaHei", sans-serif'
-    fontSize: clamp(42px, 4.1vw, 60px)
+    fontSize: clamp(42px, 4.3vw, 62px)
     fontWeight: 650
-    lineHeight: 1.24
+    lineHeight: 1.25
     letterSpacing: -0.03em
   headline:
     fontFamily: '"Manrope", "PingFang SC", "Microsoft YaHei", sans-serif'
@@ -46,7 +45,7 @@ typography:
     letterSpacing: -0.025em
   product-title:
     fontFamily: '"Manrope", "PingFang SC", "Microsoft YaHei", sans-serif'
-    fontSize: 15px
+    fontSize: 16px
     fontWeight: 650
     lineHeight: 1.6
   body:
@@ -55,7 +54,7 @@ typography:
     lineHeight: 1.9
   label:
     fontFamily: '"Manrope", "PingFang SC", "Microsoft YaHei", sans-serif'
-    fontSize: 12px
+    fontSize: 13px
     lineHeight: 1.5
   button:
     fontFamily: '"Manrope", "PingFang SC", "Microsoft YaHei", sans-serif'
@@ -64,15 +63,17 @@ typography:
     lineHeight: 1.5
   price:
     fontFamily: '"Manrope", "PingFang SC", "Microsoft YaHei", sans-serif'
-    fontSize: 18px
+    fontSize: 20px
     fontWeight: 700
 rounded:
   tag: 5px
-  finder-field: 7px
+  control: 6px
+  catalog-select: 7px
   field: 8px
-  control: 9px
+  icon: 9px
+  toast: 10px
   card: 12px
-  feature: 14px
+  large-photo: 14px
   chip: 22px
   circle: 50%
 spacing:
@@ -95,13 +96,14 @@ components:
     typography: '{typography.button}'
     rounded: '{rounded.control}'
     padding: 12px 22px
-  button-primary-hover:
-    backgroundColor: 'color-mix(in srgb, var(--brand) 88%, #000)'
   button-primary-dark:
     backgroundColor: '{colors.accent}'
-    textColor: '{colors.ink}'
+    textColor: '#000000'
   button-primary-dark-hover:
     backgroundColor: '{colors.dark-action-hover}'
+  button-disabled:
+    backgroundColor: '{colors.surface}'
+    textColor: '{colors.ink}'
   button-outline:
     backgroundColor: transparent
     textColor: '{colors.ink}'
@@ -110,6 +112,10 @@ components:
     padding: 12px 22px
   button-outline-hover:
     backgroundColor: '{colors.surface}'
+  icon-button:
+    textColor: '{colors.ink}'
+    rounded: '{rounded.icon}'
+    size: 44px
   text-link:
     textColor: '{colors.ink}'
     typography: '{typography.button}'
@@ -119,11 +125,11 @@ components:
     rounded: '{rounded.field}'
     padding: 11px 12px
   finder-input:
-    backgroundColor: '{colors.surface}'
+    backgroundColor: '{colors.page}'
     textColor: '{colors.ink}'
-    rounded: '{rounded.finder-field}'
-    padding: 0 11px
-    height: 46px
+    rounded: '{rounded.control}'
+    padding: 0 12px
+    height: 50px
   filter-chip:
     backgroundColor: transparent
     textColor: '{colors.ink}'
@@ -139,7 +145,7 @@ components:
     padding: 6px 10px
   product-image:
     backgroundColor: '{colors.surface}'
-    rounded: '{rounded.card}'
+    rounded: '{rounded.field}'
   booking-card:
     textColor: '{colors.ink}'
     rounded: '{rounded.card}'
@@ -150,126 +156,115 @@ components:
     rounded: '{rounded.field}'
     padding: 12px
   rental-finder:
-    backgroundColor: '{colors.surface-raised}'
-    rounded: '{rounded.feature}'
-    padding: 22px 28px 24px
+    textColor: '{colors.ink}'
+    padding: 28px 0
 ---
 
 # Design System: 一程租赁 · Yicheng Rentals
 
 ## Overview
 
-**Creative North Star** 「海边的租赁计划」
+**Creative North Star** 「黑白与留白」
 
-一程租赁的演示视觉以白色页面、深海蓝文字和少量暖黄建立识别。几何门形标志、海边生活照片与直接的商品摄影共同呈现租赁内容。Manrope 配合系统中文字体，标题、条件与金额通过字号和间距形成层次。
+一程租赁的演示网站以白底黑字、单色标志和直接摄影呈现商品。深色主题采用黑底白字，说明、标签和导航与正文保持同样明确的文字对比。信息层级通过字号、字重、排列与留白表达。
 
-商品区域保留清楚的图片与名称，预约和账户区域使用细分隔线、浅底信息块及原生表单。演示品牌由当前实现提供，真实租户的名称、标志、图片与主色由租户配置读取。
+内容区域使用开放排版、细分隔线和局部浅底。表单采用持续可见的标签及清楚的控件边界，图片保留自然色彩。真实租户的名称、标志、图片与有效品牌主色由配置读取。
 
 **Key Characteristics**
 
-- 深海蓝文字、白色主背景、暖黄局部强调。
-- 摄影与商品信息直接相邻，常规内容使用开放布局。
-- 圆角控件、细线分隔和局部柔和投影。
+- 纯黑／纯白文字，字号、字重和间距建立层级。
+- 分隔线组织内容，较深边框标识可操作控件。
+- 单色演示标志、自然场景与商品摄影。
 - 中英文共用字体栈，金额采用等宽数字。
 
-系统值来自 [styles.css](src/styles.css) 与 [theme.ts](src/theme.ts)。页面模式、路由构成与首屏策略保留在 [surface brief](.impeccable/surfaces/src-pages-homepage-tsx.md)。
+系统值来自 [styles.css](src/styles.css) 与 [theme.ts](src/theme.ts)。页面模式与构成保留在 [surface brief](.impeccable/surfaces/src-pages-homepage-tsx.md)。
 
 ## Colors
 
 ### Primary
 
-深海蓝用于正文、标题、图标与默认品牌主色。`brand` 可由租户覆盖，`brand-contrast` 由实际背景亮度计算。浅色模式主按钮和选中筛选项读取这两个变量。
-
-**The Tenant Color Rule.** 品牌主色读取当前租户配置，浅色主按钮的文字由亮度计算选择黑色或白色。
-
-### Secondary
-
-暖黄用于演示标志、账户头像与预约步骤。深色模式的主按钮和选中筛选项使用暖黄，文字使用深海蓝。
+默认品牌为纯黑，浅色主操作使用品牌底色及对比文字。租户自定义主色仅接受 `#RRGGBB`，无效值回退默认值。文字由背景亮度选择纯黑或纯白。深色主操作使用白底黑字，悬停改为浅灰底。
 
 ### Neutral
 
-白色为页面与浮起表面，浅灰蓝用于查询字段、说明区域与页脚，灰蓝用于次要文字，细线色用于表单边框和分隔。`brand-soft` 保留源码的动态混色表达。
+页面、正文、说明、标签和导航使用主题的纯黑／纯白。浅灰表面用于摘要、提示与选中导航，内容分隔采用 `line`，表单与描边按钮使用对比更清楚的 `control-line`。前置信息中的 `dark-*` 记录深色模式的实际变量覆盖。
 
-深色模式覆盖页面、表面、文字、分隔线及语义色。前置信息中的 `dark-*` 对应这些实际覆盖值，组件继续消费同名 CSS 变量。
-
-错误使用 `danger`，成功提示使用 `success`。浅色键盘焦点使用琥珀色，深色键盘焦点使用暖黄，轮廓宽度（3px）与偏移（4px）来自全局样式。
+`brand-soft` 保留源码的动态混色表达。错误与成功保留 `danger` 和 `success` 语义色。键盘焦点读取 `ink`，轮廓宽度（3px），偏移（4px）。文本选区反转页面与文字颜色。
 
 ## Typography
 
-全站使用本地可变 Manrope（200–800），依次回退 PingFang SC、Microsoft YaHei 和 sans-serif。中文由系统字体呈现，标题常用字重（650），品牌字重（750），金额常用字重（700）。
+全站采用本地可变 Manrope（200–800），依次回退 PingFang SC、Microsoft YaHei 和 sans-serif。标题常用字重（650），品牌字重（750），金额常用字重（700）。
 
 ### Hierarchy
 
-- **Display** 用于首页标题，桌面使用前置信息中的流体字号。820px 以下为（42px），600px 以下改为 `clamp(34px, 8.7vw, 46px)`，行高（1.3），字距（-0.025em）。
-- **Headline** 用于常规页面标题。600px 以下字号（31px），账户页标题按自身区域使用（32px），手机为（28px）。
-- **Section title** 用于首页分区，手机字号（23px），行高（1.5）。商品名使用 `product-title`，手机字号（13px）。
-- **Body** 对应文档正文，行宽上限（70ch），行高（1.9）。普通段落默认行高（1.8），业务说明常用（12–14px）。
-- **Label / Button** 分别用于表单标签和主要按钮。手机端文本输入与日期输入按现有选择器提升至（16px）。
-- **Price** 对应商品卡价格，详情价格为（34px），手机为（31px）。预约合计为（25px），订单合计为（24px）。
-
-**The Numeric Alignment Rule.** 价格、数量和费用明细使用 tabular-nums，金额与计费单位保持可分别辨认。
+- **Display** 对应首页主标题，桌面使用前置信息的流体字号。820px 以下为（42px），600px 以下改为 `clamp(36px, 8.7vw, 46px)`，行高（1.3），字距（-0.025em）。
+- **Headline** 对应常规页面标题，手机字号（31px）。账户页标题为（32px），手机为（28px）。
+- **Section title / Product title** 对应分区标题与商品名称。手机分区标题为（23px），行高（1.5），商品名称为（15px）。
+- **Body** 对应文档正文，行高（1.9），行宽上限（70ch）。普通段落默认行高（1.8），业务说明常用（12–14px）。
+- **Label / Button** 对应表单标签与主操作。查询标签字重（600），手机主要文本和日期输入为（16px）。
+- **Price** 对应桌面商品卡价格，手机为（18px）。详情价格为（34px），手机为（31px）。预约与订单合计分别为（25px）与（24px）。金额、数量和费用明细使用 `tabular-nums`。
 
 ## Layout
 
-主容器最大宽度（1240px），桌面两侧各留（48px）。1100px 以下两侧各留（32px），600px 以下两侧各留（16px），页面最小宽度（320px）。间距前置信息提取了复用的实际步长，局部构图仍保留源码自身的数值。
+主容器最大宽度（1240px），桌面两侧各留（48px）。1100px 以下两侧各留（32px），600px 以下两侧各留（16px）。`body` 最小宽度为（0），内容通过网格收缩与换行适应窄屏。间距前置信息提取复用的实际步长。
 
-目录采用侧栏加内容网格，商品默认三列。首页推荐采用自适应列，820px 以下为两列。手机商品保持两列，详情、预约、订单详情和门店列表按各自媒体规则堆叠。
+目录为侧栏加内容网格，商品默认三列。首页推荐采用自适应列，820px 以下为两列，手机商品继续使用两列。目录、账户与文档导航在820px 以下改为横向滚动，当前项可滚动到可视区域。
 
-目录、账户和文档导航在820px 以下改为横向滚动。正文与指南阅读区域上限（780px），文档正文另限制为（70ch）。完整断点及影响范围见 sidecar 的 `extensions.breakpoints`。
+查询字段在1100px 以下采用四列、整行提交按钮，820px 以下改为两列。600px 以下日期字段各占整行，预约面板内全部表单网格改为单列，详情与预约区域按各自媒体规则堆叠。阅读区域上限（780px），文档正文另限制（70ch）。断点保存在 sidecar。
 
 ## Elevation & Depth
 
-背景切换、单像素边框与留白承担日常层次。桌面查询面板、浮动提示和跳转链接复用一组柔和投影，深色模式提高阴影浓度。手机查询改为浅底平面。精确阴影与过渡值保存在 sidecar。
+内容主要依靠留白、背景变化与单像素边框建立层次。浮动提示和聚焦跳转链接使用柔和投影，查询区域通过上下分隔线与页面相接。精确阴影与动态值保存在 sidecar。
 
-**The Local Elevation Rule.** 柔和投影用于桌面查询面板、浮动提示及跳转链接的聚焦状态，常规商品与业务内容使用底色和分隔线组织。
-
-按钮和分类入口使用短暂颜色过渡。商品图片悬停轻微放大（1.025），FAQ 箭头随展开旋转（180deg）。系统减少动态效果时，动画和过渡缩短至（0.01ms），页面内容默认可见。
+按钮按下移动（1px），悬停使用下划线或底色变化。商品图片悬停放大（1.025），FAQ 箭头随展开旋转（180deg）。系统减少动态效果时，动画和过渡缩短至（0.01ms），动画仅迭代一次。
 
 ## Shapes
 
-控件使用小圆角，表单、导航和数量字段使用 `field`，按钮及图标入口使用 `control`。分类、预约面板与商品图使用 `card`，横幅和桌面查询面板使用 `feature`。手机商品图改用 `control`。
+主按钮、账户入口与查询字段采用 `control` 圆角，普通字段、导航和商品图采用 `field`，预约面板与横幅采用 `card`。图标按钮采用 `icon`，登录场景图与详情主图保留较大的圆角（14px）。
 
-筛选项采用圆头轮廓，步骤编号、头像和商品图片上的进入箭头为圆形。商品图片容器负责裁切，常规商品文字直接排在图片下方。图标使用线形 SVG，常规尺寸（20px），线宽（1.6），局部按信息密度缩小。
+筛选项采用圆头轮廓，头像使用圆形。商品图容器负责裁切，名称、简述和价格直接排在图片下方。分类入口使用底部分隔线。常规 SVG 图标尺寸（20px），线宽（1.6），局部按信息密度调整。
 
 ## Components
 
 ### Buttons
 
-主按钮沿用租户主色与对比文字，最小高度（48px），水平间距（12px），内边距与字型见前置信息。悬停将品牌主色与黑色混合，按下下移（1px）。描边按钮使用分隔线色，悬停切换表面底色。文字入口通过下划线反馈悬停，图标入口为（44px）方形。
+主按钮最小高度（48px），内边距（12px 22px），圆角（6px）。浅色悬停加下划线，深色悬停改变白色底色。描边按钮使用 `control-line`，悬停切换 `surface`。文字入口悬停加下划线，图标入口为（44px）方形。
 
-禁用按钮和表单控件使用透明度（0.58）及不可操作指针。可聚焦元素沿用全局焦点轮廓，样例同时包含 hover 与 focus-visible 状态。
+禁用控件保留完整文字对比与不可操作指针，禁用主／描边按钮增加虚线边框并改用 `surface` 背景。焦点沿用全局纯黑／纯白轮廓。
 
 ### Chips
 
-筛选项最小高度（44px），默认透明底与细边框，选中时改为品牌主色和对比文字，深色模式改为暖黄与深海蓝。当前筛选项使用相同边框作为悬停基线。商品属性标签使用浅底、小圆角及小字号（11px）。
+筛选项最小高度（44px），默认透明底与 `line` 边框。选中项使用品牌底色与对比文字，深色主题使用白底黑字。属性标签采用浅底、小圆角和字号（12px）。
 
 ### Cards / Containers
 
-商品卡由图片、名称、简述和价格组成。图片比例（1.08），名称与价格分别链接或展示，图片上的圆形箭头说明可进入详情。缺失价格显示询价入口，不可租显示文字状态。预约面板采用细边框和 `card` 圆角，常规内边距（28px），手机为（22px 19px）。
+商品卡采用摄影、名称、简述和价格的开放排列。图片比例（1.08），圆角（8px），悬停轻微放大。缺失价格显示询价文案，不可租显示文字状态。
+
+预约面板使用 `line` 边框和圆角（12px），桌面内边距（28px），平板（22px），手机（22px 19px）。费用摘要使用 `surface`，保持金额、单位和说明可分别辨认。
 
 ### Inputs / Fields
 
-普通字段使用页面底色、单像素边框、`field` 圆角与最小高度（46px）。首页查询字段为浅底、无边框，手机改为页面底色与高度（48px）。日期、时间、下拉和文本字段保留原生输入行为，错误说明显示在相关操作附近。
+普通字段使用页面底色、`control-line` 边框、圆角（8px）、最小高度（46px）。标签持续可见，placeholder 使用 `ink`。查询字段高度（50px），手机为（48px），日期与下拉保留原生输入行为。错误文字显示在相关操作附近。
 
 ### Navigation
 
-页头固定在滚动顶部，桌面高度基线（76px），820px 以下为（72px），600px 以下为（68px）。桌面当前入口用文字加深与底部线标识，账户和文档当前入口用浅底标识。手机菜单位于页头下方，支持 Escape 关闭和焦点回到触发按钮。横向导航将当前项滚动到可视区域。
+页头滚动时固定在顶部，桌面最小高度（80px），820px 以下为（72px），600px 以下为（68px）。当前桌面入口使用底部线，账户和文档当前入口使用浅底及字重。手机菜单支持 Escape 关闭并将焦点归还触发按钮。
 
 ### Rental Finder / Page State
 
-查询面板集中品类、门店和取还时间，桌面照片边缘叠放，手机平铺。校验说明使用错误语义色，提交后延续所选条件。页面状态采用居中标题、短说明与恢复动作，错误可由 alert 读出，加载使用 status。代表性 HTML/CSS 样例收录于 [.impeccable/design.json](.impeccable/design.json)。
+查询区保留品类、可用门店和取还时间标签，校验后将条件传递到商品页面。页面状态采用居中标题、短说明与恢复动作，错误支持 alert，加载使用 status。自包含 HTML/CSS 样例见 [.impeccable/design.json](.impeccable/design.json)。
 
 ## Do's and Don'ts
 
 ### Do
 
-- Do 延续当前租户的名称、标志、图片和动态主色。
-- Do 沿用 Manrope 与系统中文回退，并保留金额的等宽数字。
-- Do 为交互元素保留键盘焦点、可读文字和已实现的禁用反馈。
-- Do 使用清楚的商品照片，并明确展示演示、参考价格和缺失内容的状态。
+- Do 使用当前主题的纯黑或纯白正文、说明、标签和导航文字。
+- Do 使用 control-line 标识表单边界，line 分隔内容。
+- Do 保留真实租户配置、键盘焦点、禁用说明及缺失内容的明确状态。
+- Do 沿用 Manrope 与系统中文回退，并为金额、数量和费用明细使用 tabular-nums。
 
 ### Don't
 
-- Don't 将演示品牌主色硬编码到真实租户配置入口。
-- Don't 以当前配置信息补造缺失的商品型号、金额或库存状态。
-- Don't 用视觉隐藏替代明确的加载、错误、空内容或不可用说明。
+- Don't 用灰蓝或降低文字透明度建立说明和标签层级。
+- Don't 把自然照片中的色彩扩展为固定的界面强调色。
+- Don't 为商品缺失的型号、金额、库存或服务能力补造事实。

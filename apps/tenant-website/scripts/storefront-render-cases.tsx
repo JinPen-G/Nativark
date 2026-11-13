@@ -227,9 +227,7 @@ export async function verify(root: string) {
             );
             assert.ok(
               rentalSteps?.includes(
-                language === "en"
-                  ? "Review your rental"
-                  : "核对预约与费用",
+                language === "en" ? "Review your rental" : "核对预约与费用",
               ) &&
                 rentalSteps.includes(
                   language === "en"

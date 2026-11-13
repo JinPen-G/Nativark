@@ -114,7 +114,9 @@ export function HomePage() {
       <section className="shell home-featured">
         <div className="section-heading">
           <div>
-            <h2>{en ? "Equipment for your plans" : "为下一次计划，选好装备"}</h2>
+            <h2>
+              {en ? "Equipment for your plans" : "为下一次计划，选好装备"}
+            </h2>
             <p>
               {en
                 ? "Explore the selection. Your dates determine availability."
@@ -157,11 +159,7 @@ export function HomePage() {
       <section className="rental-story">
         <div className="shell story-inner">
           <div className="story-heading">
-            <h2>
-              {en
-                ? "Rent in three steps."
-                : "租赁，只需三步。"}
-            </h2>
+            <h2>{en ? "Rent in three steps." : "租赁，只需三步。"}</h2>
             <Link className="button button-outline" to={href("/guide")}>
               {en ? "Read the rental guide" : "查看租赁指南"}
               <ArrowRight aria-hidden="true" />
@@ -185,7 +183,9 @@ export function HomePage() {
 
       <section className="shell home-store-callout">
         <div>
-          <h2>{en ? "Collect somewhere convenient." : "找一家方便取还的门店"}</h2>
+          <h2>
+            {en ? "Collect somewhere convenient." : "找一家方便取还的门店"}
+          </h2>
           <p>
             {isRemote
               ? tenant.address

@@ -60,8 +60,11 @@ function textOnBackground(hex: string): "#000000" | "#ffffff" {
 
 export function applyTenantTheme(tenant: Tenant) {
   const root = document.documentElement;
-  const primaryColor =
+  const configuredColor =
     tenant.primaryColor?.trim() || PLATFORM_THEME.primaryColor;
+  const primaryColor = /^#[\da-f]{6}$/i.test(configuredColor)
+    ? configuredColor
+    : PLATFORM_THEME.primaryColor;
   // 主色来自当前租户配置，按钮文字按亮度选取可读的对比色。
   root.style.setProperty("--brand", primaryColor);
   root.style.setProperty("--brand-contrast", textOnBackground(primaryColor));

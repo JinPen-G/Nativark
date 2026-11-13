@@ -53,14 +53,14 @@ export function RentalFinder() {
   return (
     <form
       className="rental-finder"
-      aria-label={en ? "Find equipment for your rental dates" : "按租期查询商品"}
+      aria-label={
+        en ? "Find equipment for your rental dates" : "按租期查询商品"
+      }
       onSubmit={submit}
     >
       <div className="finder-fields">
         <label className="finder-field">
-          <span>
-            {en ? "Equipment" : "商品品类"}
-          </span>
+          <span>{en ? "Equipment" : "商品品类"}</span>
           <select
             value={category}
             onChange={(event) => setCategory(event.target.value)}
@@ -75,9 +75,7 @@ export function RentalFinder() {
         </label>
         {stores.length > 0 && (
           <label className="finder-field">
-            <span>
-              {en ? "Pickup store" : "取货门店"}
-            </span>
+            <span>{en ? "Pickup store" : "取货门店"}</span>
             <select
               value={store}
               onChange={(event) => setStore(event.target.value)}
@@ -92,9 +90,7 @@ export function RentalFinder() {
           </label>
         )}
         <label className="finder-field">
-          <span>
-            {en ? "Pickup time" : "取货时间"}
-          </span>
+          <span>{en ? "Pickup time" : "取货时间"}</span>
           <input
             type="datetime-local"
             value={start}
@@ -107,9 +103,7 @@ export function RentalFinder() {
           />
         </label>
         <label className="finder-field">
-          <span>
-            {en ? "Return time" : "归还时间"}
-          </span>
+          <span>{en ? "Return time" : "归还时间"}</span>
           <input
             type="datetime-local"
             value={end}

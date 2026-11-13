@@ -47,7 +47,7 @@
 }
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 0;
 }
 button,
 input,
@@ -189,7 +189,7 @@ html {
   color: var(--brand-contrast);
 }
 .button-dark:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--brand) 88%, #000);
+  text-decoration: underline;
 }
 :root[data-theme="dark"] .button-dark {
   background: var(--accent);
@@ -769,7 +769,8 @@ html {
   padding-top: 20px;
   border-top: 1px solid var(--line);
 }
-.conditions-form .form-actions {
+.conditions-form .form-actions,
+.conditions-form > .form-error {
   grid-column: 1 / -1;
 }
 .condition-note {
@@ -833,7 +834,7 @@ html {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 8px;
   padding: 0 10px;
   min-height: 44px;
@@ -1132,7 +1133,7 @@ textarea::placeholder {
   display: flex;
   min-height: 46px;
   align-items: center;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 8px;
 }
 .quantity-field button {
@@ -1438,7 +1439,8 @@ textarea::placeholder {
   margin-top: 18px;
 }
 .choice-group {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-top: 18px;
 }
@@ -1451,6 +1453,7 @@ textarea::placeholder {
   border: 1px solid var(--line);
   border-radius: 8px;
   font-size: 12px;
+  min-width: 0;
 }
 .choice-group .choice-active {
   border-color: var(--ink);
@@ -1518,6 +1521,10 @@ input[type="radio"] {
   height: 17px;
   min-height: auto;
   flex-shrink: 0;
+}
+:root[data-theme="dark"] input[type="checkbox"],
+:root[data-theme="dark"] input[type="radio"] {
+  accent-color: var(--ink);
 }
 .auth-page {
   padding-block: 50px 70px;
@@ -1783,7 +1790,7 @@ input[type="radio"] {
   min-height: 44px;
   padding: 12px;
   border-radius: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   background: var(--page);
   font-size: 14px;
 }
@@ -2144,7 +2151,7 @@ input[type="radio"] {
   display: flex;
   align-items: center;
   gap: 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 9px;
   padding: 0 16px;
   min-height: 52px;
@@ -2531,6 +2538,9 @@ input[type="radio"] {
   .hero-scene {
     height: 320px;
   }
+  .finder-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .category-tiles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2601,6 +2611,9 @@ input[type="radio"] {
   }
   .booking-card {
     padding: 22px;
+  }
+  .choice-group {
+    grid-template-columns: 1fr;
   }
   .booking-progress {
     gap: 7px;
@@ -2996,7 +3009,7 @@ input[type="radio"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .rental-panel .form-grid:has(input[type="datetime-local"]),
-  .booking-card .form-grid:has(input[type="datetime-local"]) {
+  .booking-card .form-grid {
     grid-template-columns: 1fr;
   }
   .form-grid input,
@@ -3048,9 +3061,6 @@ input[type="radio"] {
   }
   .booking-product p {
     font-size: 12px;
-  }
-  .booking-contact .form-grid {
-    grid-template-columns: 1fr;
   }
   .auth-page {
     padding-block: 34px 50px;

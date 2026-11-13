@@ -1,103 +1,15 @@
 [
   {
-    "antipattern": "design-system-font",
-    "name": "Font outside DESIGN.md",
-    "description": "A font is used that is not declared in DESIGN.md typography. Use the documented type system or update DESIGN.md if this is an intentional brand addition.",
-    "severity": "warning",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2,
-    "snippet": "font-family: Manrope is not declared in DESIGN.md typography",
-    "ignoreValue": "Manrope",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font",
-    "name": "Font outside DESIGN.md",
-    "description": "A font is used that is not declared in DESIGN.md typography. Use the documented type system or update DESIGN.md if this is an intentional brand addition.",
-    "severity": "warning",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 25,
-    "snippet": "font-family: Manrope is not declared in DESIGN.md typography",
-    "ignoreValue": "Manrope",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 115,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 116,
-    "snippet": "Undocumented color #f4ce64 is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#f4ce64",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 119,
-    "snippet": "Undocumented color #b2780c is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#b2780c",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 123,
-    "snippet": "Undocumented color #f4ce64 is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#f4ce64",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
     "antipattern": "design-system-radius",
     "name": "Radius outside DESIGN.md",
     "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 179,
-    "snippet": "border-radius: 9px is outside the DESIGN.md rounded scale",
+    "line": 176,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
     "advisory": true,
-    "ignoreValue": "9px",
+    "ignoreValue": "6px",
     "importedBy": [
       "main.tsx"
     ]
@@ -109,55 +21,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 195,
-    "snippet": "Undocumented color #000 is outside DESIGN.md colors",
+    "line": 196,
+    "snippet": "Undocumented color #000000 is outside DESIGN.md colors",
     "advisory": true,
-    "ignoreValue": "#000",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 199,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 202,
-    "snippet": "Undocumented color #ffdd80 is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#ffdd80",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 222,
-    "snippet": "border-radius: 9px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "9px",
+    "ignoreValue": "#000000",
     "importedBy": [
       "main.tsx"
     ]
@@ -169,7 +36,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 261,
+    "line": 263,
     "snippet": "font-size: 20px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "20px",
@@ -184,157 +51,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 322,
-    "snippet": "border-radius: 9px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "9px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 344,
-    "snippet": "font-size: clamp(42px, 4.1vw, 60px) has fluid endpoint 60px off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "60px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 388,
-    "snippet": "Undocumented color rgba(23, 51, 74, 0.87) is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "rgba(23, 51, 74, 0.87)",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 389,
-    "snippet": "border-radius: 5px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "5px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 409,
-    "snippet": "font-size: 17px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "17px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 445,
-    "snippet": "border-radius: 7px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "7px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 466,
-    "snippet": "font-size: clamp(24px, 2.4vw, 32px) has fluid endpoint 24px off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "24px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 497,
-    "snippet": "border-radius: 7px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "7px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 560,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 567,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 570,
+    "line": 325,
     "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
     "advisory": true,
     "ignoreValue": "6px",
@@ -349,10 +66,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 595,
-    "snippet": "font-size: 18px is off the DESIGN.md type ramp",
+    "line": 348,
+    "snippet": "font-size: clamp(42px, 4.3vw, 62px) has fluid endpoint 62px off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "18px",
+    "ignoreValue": "62px",
     "importedBy": [
       "main.tsx"
     ]
@@ -364,10 +81,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 605,
-    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
+    "line": 361,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "10px",
+    "ignoreValue": "16px",
     "importedBy": [
       "main.tsx"
     ]
@@ -379,7 +96,157 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 666,
+    "line": 400,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 411,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 460,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 466,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 506,
+    "snippet": "Undocumented color #000000 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#000000",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 509,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 515,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 523,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 534,
+    "snippet": "font-size: 20px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "20px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 558,
+    "snippet": "font-size: clamp(28px, 3vw, 40px) has fluid endpoints 28px and 40px off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "28px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 591,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
@@ -394,10 +261,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 683,
-    "snippet": "font-size: 30px is off the DESIGN.md type ramp",
+    "line": 810,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "30px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -409,85 +276,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 762,
-    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
+    "line": 854,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "10px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 778,
-    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "10px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 789,
-    "snippet": "font-size: clamp(30px, 3.4vw, 46px) has fluid endpoints 30px and 46px off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "30px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 916,
-    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "10px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 966,
-    "snippet": "border-radius: 7px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "7px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 981,
-    "snippet": "border-radius: 22px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "22px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -499,10 +291,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 991,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
+    "line": 897,
+    "snippet": "Undocumented color #000000 is outside DESIGN.md colors",
     "advisory": true,
-    "ignoreValue": "#17334a",
+    "ignoreValue": "#000000",
     "importedBy": [
       "main.tsx"
     ]
@@ -514,7 +306,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1017,
+    "line": 923,
     "snippet": "font-size: 22px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "22px",
@@ -523,31 +315,16 @@
     ]
   },
   {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1114,
-    "snippet": "border-radius: 14px is outside the DESIGN.md rounded scale",
+    "line": 931,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "14px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1190,
-    "snippet": "border-radius: 5px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "5px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -559,7 +336,37 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1200,
+    "line": 954,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1075,
+    "snippet": "font-size: clamp(28px, 3vw, 40px) has fluid endpoints 28px and 40px off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "28px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1106,
     "snippet": "font-size: 34px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "34px",
@@ -574,7 +381,22 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1219,
+    "line": 1112,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1125,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -589,25 +411,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1324,
-    "snippet": "font-size: 18px is off the DESIGN.md type ramp",
+    "line": 1207,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "18px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1396,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -619,10 +426,115 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1412,
+    "line": 1236,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1251,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1318,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1370,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1380,
+    "snippet": "font-size: 25px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "25px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1466,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1547,
+    "snippet": "font-size: 38px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "38px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1569,
+    "snippet": "Undocumented color #000000 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#000000",
     "importedBy": [
       "main.tsx"
     ]
@@ -634,10 +546,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1438,
-    "snippet": "border-radius: 9px is outside the DESIGN.md rounded scale",
+    "line": 1571,
+    "snippet": "border-radius: 10px is outside the DESIGN.md rounded scale",
     "advisory": true,
-    "ignoreValue": "9px",
+    "ignoreValue": "10px",
     "importedBy": [
       "main.tsx"
     ]
@@ -649,52 +561,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1474,
-    "snippet": "font-size: 25px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "25px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1640,
-    "snippet": "border-radius: 14px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "14px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1657,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1662,
+    "line": 1574,
     "snippet": "font-size: 25px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "25px",
@@ -709,25 +576,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1668,
-    "snippet": "Undocumented color #60717e is outside DESIGN.md colors",
+    "line": 1580,
+    "snippet": "Undocumented color #000000 is outside DESIGN.md colors",
     "advisory": true,
-    "ignoreValue": "#60717e",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-color",
-    "name": "Color outside DESIGN.md",
-    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1800,
-    "snippet": "Undocumented color #17334a is outside DESIGN.md colors",
-    "advisory": true,
-    "ignoreValue": "#17334a",
+    "ignoreValue": "#000000",
     "importedBy": [
       "main.tsx"
     ]
@@ -739,7 +591,22 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1802,
+    "line": 1594,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1714,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
@@ -754,10 +621,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1889,
-    "snippet": "font-size: 18px is off the DESIGN.md type ramp",
+    "line": 1733,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "18px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -769,7 +636,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 1938,
+    "line": 1850,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
@@ -784,7 +651,22 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2041,
+    "line": 1863,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 1953,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -799,7 +681,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2066,
+    "line": 1978,
     "snippet": "font-size: 19px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "19px",
@@ -814,7 +696,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2097,
+    "line": 2009,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -829,7 +711,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2116,
+    "line": 2028,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
@@ -844,25 +726,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2141,
-    "snippet": "font-size: 24px is off the DESIGN.md type ramp",
+    "line": 2038,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "24px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2243,
-    "snippet": "border-radius: 9px is outside the DESIGN.md rounded scale",
-    "advisory": true,
-    "ignoreValue": "9px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -874,7 +741,37 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2306,
+    "line": 2104,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2202,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2218,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
@@ -889,10 +786,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2324,
-    "snippet": "font-size: clamp(30px, 3.5vw, 48px) has fluid endpoints 30px and 48px off the DESIGN.md type ramp",
+    "line": 2236,
+    "snippet": "font-size: clamp(30px, 3.5vw, 48px) has fluid endpoint 48px off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "30px",
+    "ignoreValue": "48px",
     "importedBy": [
       "main.tsx"
     ]
@@ -904,7 +801,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2365,
+    "line": 2277,
     "snippet": "font-size: 17px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "17px",
@@ -919,7 +816,37 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2423,
+    "line": 2283,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2314,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2335,
     "snippet": "font-size: 23px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "23px",
@@ -928,16 +855,16 @@
     ]
   },
   {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2471,
-    "snippet": "border-radius: 5px is outside the DESIGN.md rounded scale",
+    "line": 2346,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "5px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -949,10 +876,115 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2506,
+    "line": 2371,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2418,
     "snippet": "font-size: 27px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "27px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2441,
+    "snippet": "border-radius: 10px is outside the DESIGN.md rounded scale",
+    "advisory": true,
+    "ignoreValue": "10px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2442,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2555,
+    "snippet": "font-size: 28px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "28px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2593,
+    "snippet": "font-size: 28px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "28px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2686,
+    "snippet": "font-size: 17px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "17px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2733,
+    "snippet": "font-size: clamp(36px, 8.7vw, 46px) has fluid endpoint 36px off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "36px",
     "importedBy": [
       "main.tsx"
     ]
@@ -965,36 +997,6 @@
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
     "line": 2769,
-    "snippet": "font-size: 17px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "17px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2819,
-    "snippet": "font-size: clamp(34px, 8.7vw, 46px) has fluid endpoints 34px and 46px off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "34px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2866,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -1009,10 +1011,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2882,
-    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "line": 2775,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "16px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -1024,7 +1026,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2904,
+    "line": 2790,
     "snippet": "font-size: 23px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "23px",
@@ -1033,16 +1035,16 @@
     ]
   },
   {
-    "antipattern": "design-system-radius",
-    "name": "Radius outside DESIGN.md",
-    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2945,
-    "snippet": "border-radius: 9px is outside the DESIGN.md rounded scale",
+    "line": 2830,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "9px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -1054,10 +1056,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2973,
-    "snippet": "font-size: 18px is off the DESIGN.md type ramp",
+    "line": 2862,
+    "snippet": "font-size: 28px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "18px",
+    "ignoreValue": "28px",
     "importedBy": [
       "main.tsx"
     ]
@@ -1069,37 +1071,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2981,
-    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "10px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 2984,
-    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "10px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3004,
+    "line": 2870,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -1114,10 +1086,10 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3015,
-    "snippet": "font-size: 24px is off the DESIGN.md type ramp",
+    "line": 2873,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
     "advisory": true,
-    "ignoreValue": "24px",
+    "ignoreValue": "13px",
     "importedBy": [
       "main.tsx"
     ]
@@ -1129,7 +1101,22 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3062,
+    "line": 2885,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2926,
     "snippet": "font-size: 31px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "31px",
@@ -1144,7 +1131,22 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3096,
+    "line": 2929,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 2960,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -1159,7 +1161,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3111,
+    "line": 2975,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -1174,7 +1176,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3129,
+    "line": 2993,
     "snippet": "font-size: 29px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "29px",
@@ -1189,7 +1191,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3138,
+    "line": 3002,
     "snippet": "font-size: 31px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "31px",
@@ -1204,67 +1206,97 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3019,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3028,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3053,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3075,
+    "snippet": "font-size: 28px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "28px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3088,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3140,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
     "line": 3155,
-    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "16px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3189,
-    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "16px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3227,
-    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "16px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3279,
-    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
-    "advisory": true,
-    "ignoreValue": "16px",
-    "importedBy": [
-      "main.tsx"
-    ]
-  },
-  {
-    "antipattern": "design-system-font-size",
-    "name": "Font size outside DESIGN.md",
-    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
-    "severity": "advisory",
-    "category": "quality",
-    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3294,
     "snippet": "font-size: 33px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "33px",
@@ -1279,7 +1311,22 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3304,
+    "line": 3159,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
+    "line": 3165,
     "snippet": "font-size: 16px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "16px",
@@ -1294,7 +1341,7 @@
     "severity": "advisory",
     "category": "quality",
     "file": "D:\\工作文件\\rental-OS\\worktree\\tenant-website-redesign\\apps\\tenant-website\\src\\styles.css",
-    "line": 3323,
+    "line": 3184,
     "snippet": "font-size: 20px is off the DESIGN.md type ramp",
     "advisory": true,
     "ignoreValue": "20px",
