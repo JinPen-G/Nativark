@@ -2338,6 +2338,12 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...Object.entries(AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `taskOpeningProposal_${action}`, permissions: action === 'prepare' ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'],
+    summary: 'Current original diagnosis and Core section are revalidated. Preview is read-only; explicit preparation creates one linked original R1 Task and AI proposal. No active configuration, business draft, publication or model dispatch. Unknown uses the same original operation; history never resumes preparation.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
   ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,
     permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
