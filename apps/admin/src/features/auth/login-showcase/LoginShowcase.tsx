@@ -18,9 +18,10 @@ import "./login-showcase.css";
 
 const slides = [
   { key: "agent", component: BusinessPreview, width: 960, height: 612 },
-  { key: "plugins", component: ReturnReminderDemo, width: 600, height: 400 },
-  { key: "deliverables", component: DeliverablesDemo, width: 600, height: 400 },
-  { key: "workflow", component: ScheduledOperationsDemo, width: 600, height: 400 },
+  // The reminder's 4:3 canvas includes the full expanded card and its controls.
+  { key: "plugins", component: ReturnReminderDemo, width: 600, height: 480 },
+  { key: "deliverables", component: DeliverablesDemo, width: 600, height: 480 },
+  { key: "workflow", component: ScheduledOperationsDemo, width: 600, height: 480 },
   { key: "trace", component: ExecutionTraceDemo, width: 600, height: 400 },
 ] as const;
 // Reference: UIArc sign-in showcase, observed 2026-11-06. CSS completion owns

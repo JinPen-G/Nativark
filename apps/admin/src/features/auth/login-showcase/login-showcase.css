@@ -18,23 +18,197 @@
 .login-showcase-background { position: absolute; z-index: -1; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .12; }
 .login-showcase-stage { display: grid; place-items: center; position: relative; flex: 1; min-height: 0; margin: clamp(12px, 3dvh, 32px) clamp(12px, 2vw, 24px) 0; }
 .login-showcase-slide { position: absolute; inset: 0; display: grid; place-items: center; }
-.login-showcase-demo { position: absolute; flex: none; transform-origin: center; --ds-radius-panel: 20px; --ds-radius-media: 16px; --ds-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace; color: #f9fafb; }
-/* The original translucent sidebar expects the website's dark backdrop.
-   Keep that backdrop inside the demo so the pale login panel cannot wash it out. */
-.login-showcase-demo--agent { border-radius: 20px; background: #172331; }
+.login-showcase-demo {
+  position: absolute;
+  flex: none;
+  transform-origin: center;
+  --ds-radius-panel: 20px;
+  --ds-radius-media: 16px;
+  --ds-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --login-demo-canvas: var(--surface);
+  --login-demo-panel: var(--surface);
+  --login-demo-card: var(--surface-raised);
+  --login-demo-message: color-mix(in srgb, var(--foreground) 8%, var(--surface));
+  --login-demo-inset: var(--surface-muted);
+  --login-demo-workspace: var(--surface-muted);
+  --login-demo-dialog: var(--surface-raised);
+  --login-demo-trace: var(--surface);
+  --login-demo-details: var(--surface-muted);
+  --login-demo-agent-backdrop: var(--surface-muted);
+  --login-demo-sidebar: color-mix(in srgb, var(--surface-muted) 96%, transparent);
+  --login-demo-layer: color-mix(in oklab, var(--surface-muted) 88%, var(--foreground));
+  --login-demo-fill: color-mix(in srgb, var(--foreground) 8%, transparent);
+  --login-demo-selected-fill: color-mix(in srgb, var(--foreground) 12%, transparent);
+  --login-demo-violet: #71429b;
+  --login-demo-keyword: #a02b57;
+  --login-demo-logo-filter: brightness(0);
+  --login-demo-hover-filter: brightness(.96);
+  color: var(--foreground);
+}
+:root[data-theme="dark"] .login-showcase-demo {
+  /* Preserve the source's distinct surfaces beneath bubbles, tools and dialogs. */
+  --login-demo-canvas: #101012;
+  --login-demo-panel: #151517;
+  --login-demo-card: #212123;
+  --login-demo-message: #2c2c2e;
+  --login-demo-inset: #19191b;
+  --login-demo-workspace: #18181a;
+  --login-demo-dialog: #242426;
+  --login-demo-trace: #232324;
+  --login-demo-details: #26262a;
+  --login-demo-agent-backdrop: #172331;
+  --login-demo-sidebar: #343a43;
+  --login-demo-layer: #353638;
+  --login-demo-violet: #c4a7e7;
+  --login-demo-keyword: #faa2c1;
+  --login-demo-logo-filter: brightness(0) invert(1);
+  --login-demo-hover-filter: brightness(1.15);
+}
+/* The local backdrop follows the login theme beneath the translucent sidebar. */
+.login-showcase-demo--agent { border-radius: 20px; background: var(--login-demo-agent-backdrop); }
 :where(.login-showcase-demo) :where(h1, h2, h3, h4, p, dl, dd, figure) { margin: 0; }
 :where(.login-showcase-demo) :where(button, input) { font: inherit; color: inherit; }
 :where(.login-showcase-demo) :where(button) { border: 0; cursor: pointer; background: transparent; padding: 0; }
 :where(.login-showcase-demo) :where(svg, img) { vertical-align: middle; }
-:where(.login-showcase-demo) :where(button, a):focus-visible { outline: 2px solid #9dbaff; outline-offset: 3px; }
-.login-showcase-demo:not(.login-showcase-demo--agent) { overflow: hidden; border-radius: 24px; background: #101012; padding: 12px; box-shadow: 0 16px 48px rgb(0 0 0 / .13); }
+:where(.login-showcase-demo) :where(button, a):focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+.login-showcase-demo:not(.login-showcase-demo--agent) { overflow: hidden; border-radius: 24px; background: var(--login-demo-canvas); padding: 12px; box-shadow: 0 16px 48px rgb(0 0 0 / .13); }
 .login-showcase-demo > figure { margin-top: 12px; }
+/* Keep complete foreground panels inside each source animation's local canvas. */
+.login-showcase-demo--deliverables .HarnessDeliverablesPreview_composition__dEBy5,
+.login-showcase-demo--workflow .HarnessWorkflowPreview_canvas__mynQw {
+  aspect-ratio: 4 / 3;
+}
+.login-showcase-demo--deliverables,
+.login-showcase-demo--deliverables .HarnessDeliverablesPreview_composition__dEBy5,
+.login-showcase-demo--deliverables .HarnessDeliverablesPreview_fileCarousel__V4j3X {
+  overflow: clip;
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_canvas__FFpDR {
+  --widget-width: 44%;
+  --compact-width: 34%;
+  --widget-expanded-h: 60%;
+  --widget-expanded-top: 37%;
+  --widget-pad-bottom: calc(var(--u) * 12);
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_widgetTitle__6WMw_ {
+  white-space: nowrap;
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_completionCopy__ySttt {
+  max-width: calc(100% - var(--widget-width) - 5%);
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_widgetTitle__6WMw_ > svg {
+  flex: none;
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_widgetExpanded__p7a5b {
+  gap: calc(var(--u) * 6);
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_widgetExpanded__p7a5b > * {
+  flex-shrink: 0;
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_timerStart__34s_M {
+  font-size: max(10px, calc(var(--u) * 11));
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_compactLabel__EbQlt {
+  white-space: nowrap;
+}
+/* The invisible compact layer must not cover the expanded card's button. */
+.login-showcase-demo--plugins .HarnessPluginsPreview_widgetCompact__l8x0u {
+  pointer-events: none;
+}
+.login-showcase-demo--plugins .HarnessPluginsPreview_widgetTitle__6WMw_ > span {
+  min-width: 0;
+  font-size: inherit;
+}
+.login-showcase-demo--deliverables .rentalos-result-panel,
+.login-showcase-demo--deliverables [data-picked="true"] .rentalos-result-panel {
+  display: flex;
+  flex-direction: column;
+  top: 4%;
+  left: 42%;
+  width: 55%;
+  height: 92%;
+}
+.login-showcase-demo--deliverables [data-picked="true"] .rentalos-result-panel {
+  left: 9%;
+  width: 88%;
+}
+.login-showcase-demo--deliverables .rentalos-result-panel > :not(.rentalos-result-content) {
+  flex: none;
+}
+.login-showcase-demo--deliverables .rentalos-result-content {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  padding-block: calc(var(--u) * 12);
+}
+.login-showcase-demo--deliverables .rentalos-result-content h4 {
+  margin-block: calc(var(--u) * 10);
+}
+.login-showcase-demo--deliverables .rentalos-result-content dl > div {
+  padding-block: calc(var(--u) * 5);
+}
+.login-showcase-demo--trace .HarnessTracePreview_row__IQaoe {
+  width: 100%;
+  min-width: 0;
+}
+.login-showcase-demo--trace .HarnessTracePreview_content__eQelE {
+  flex: 1;
+}
+.login-showcase-demo--trace .rentalos-trace-detail {
+  display: flex;
+  flex-direction: column;
+}
+.login-showcase-demo--trace .rentalos-trace-evidence {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.login-showcase-demo--trace .HarnessTracePreview_detailsBody__jqLfp {
+  overflow-y: auto;
+}
 .login-showcase[data-running="false"] .login-showcase-demo *,
 .login-showcase[data-running="false"] .login-showcase-demo *::before,
 .login-showcase[data-running="false"] .login-showcase-demo *::after { animation-play-state: paused !important; }
 .login-showcase[data-reduced-motion="true"] .login-showcase-demo *,
 .login-showcase[data-reduced-motion="true"] .login-showcase-demo *::before,
 .login-showcase[data-reduced-motion="true"] .login-showcase-demo *::after { animation: none !important; transition: none !important; }
+/* 本地演示保留真实节点，没有官网的静态备用图片。 */
+.login-showcase[data-reduced-motion="true"] .HarnessPluginsPreview_canvas__FFpDR {
+  display: block;
+}
+.login-showcase[data-reduced-motion="true"] :is(
+  .HarnessPluginsPreview_conversation__oxg8B,
+  .HarnessPluginsPreview_manager__eeDKj,
+  .HarnessPluginsPreview_workingState__4gTVb,
+  .HarnessPluginsPreview_toolCalls__Q_wtM,
+  .HarnessPluginsPreview_widgetCompact__l8x0u
+) {
+  display: none;
+}
+.login-showcase[data-reduced-motion="true"] .HarnessPluginsPreview_finishedState__FKp0E {
+  position: static;
+}
+.login-showcase[data-reduced-motion="true"] .HarnessPluginsPreview_timerWidget__DN7am {
+  top: var(--widget-expanded-top);
+  width: var(--widget-width);
+  height: var(--widget-expanded-h);
+  border-radius: calc(var(--u) * 20);
+}
+.login-showcase[data-reduced-motion="true"] .HarnessTracePreview_canvas__ZedKT {
+  display: flex;
+}
+.login-showcase[data-reduced-motion="true"] .HarnessTracePreview_details__W_Mjw[data-panel] {
+  display: none;
+}
+.login-showcase[data-reduced-motion="true"] .HarnessTracePreview_listViewport__llpPv {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
 .login-showcase-footer { display: grid; flex: none; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(8px, 2dvh, 16px) 20px; padding: clamp(12px, 3dvh, 24px) clamp(16px, 2.5vw, 32px) clamp(12px, 2dvh, 20px); }
 .login-showcase-caption { min-width: 0; }
 .login-showcase-caption h2 { margin: 0; color: inherit; font-size: 16px; font-weight: 500; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
@@ -54,14 +228,14 @@
 .login-showcase-demo [data-demo-stage="1"] .rentalos-demo-response { display: none; }
 .login-showcase-demo [data-demo-stage] .rentalos-demo-output-placeholder { display: none; }
 .login-showcase-demo :is([data-demo-stage="0"], [data-demo-stage="1"], [data-demo-stage="2"]) .rentalos-agent-output > :not(.rentalos-demo-output-placeholder) { display: none; }
-.login-showcase-demo :is([data-demo-stage="0"], [data-demo-stage="1"], [data-demo-stage="2"]) .rentalos-demo-output-placeholder { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-block: 40px; color: #b9bdc6; }
+.login-showcase-demo :is([data-demo-stage="0"], [data-demo-stage="1"], [data-demo-stage="2"]) .rentalos-demo-output-placeholder { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding-block: 40px; color: var(--text-secondary); }
 .rentalos-demo-output-placeholder > svg { width: 28px; height: 28px; }
 .login-showcase-demo [data-demo-stage="3"] .rentalos-agent-output > .rentalos-agent-section,
 .login-showcase-demo [data-demo-stage="4"] .rentalos-agent-output > .rentalos-agent-section:last-child { display: none; }
 .login-showcase-demo [data-demo-stage] .rentalos-agent-output > :not(.rentalos-demo-output-placeholder) { opacity: 1; transform: none; transition: opacity .24s ease-out, transform .24s ease-out; }
 @starting-style { .login-showcase-demo [data-demo-stage] .rentalos-agent-output > :not(.rentalos-demo-output-placeholder) { opacity: 0; transform: translateY(8px); } }
-.login-showcase-demo [data-demo-stage="7"] .rentalos-demo-auto-confirm { transform: scale(.96); box-shadow: 0 0 0 3px rgb(255 255 255 / .22); }
-.login-showcase-demo .rentalos-demo-typing { color: #f4f4f5; min-height: 44px; }
+.login-showcase-demo [data-demo-stage="7"] .rentalos-demo-auto-confirm { transform: scale(.96); box-shadow: 0 0 0 3px var(--login-demo-selected-fill); }
+.login-showcase-demo .rentalos-demo-typing { color: var(--foreground); min-height: 44px; }
 .rentalos-demo-caret { animation: login-agent-caret .5s step-end infinite; }
 @keyframes login-agent-caret { 50% { opacity: 0; } }
 .login-showcase-note { grid-column: 1 / -1; margin: 0; font-size: 11px; line-height: 1.5; color: color-mix(in srgb, currentColor 70%, transparent); }
