@@ -6,6 +6,32 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain18-original-policy-boundary-manager-20261114"></a>
+## AIN-18 原政策约束、明确管理事务与冻结输入（2026-11-14）
+
+在已推且回读一致的 `aa9bf5979b1437f45ffb4a275e9c0b8c8e992ba2` 上，补齐原政策对工具／收件人／动作／数量／因果深度的持久化消费。原[政策管理服务](../../apps/api/src/modules/ai-native/automation/human-automation-policy-management.service.ts)复用当前 operator 的 `system:params:manage`、原 Auth／Guard／ALS 和 scope；[公共合同](../../packages/shared/src/ai-automation-policy-http-draft.ts)及 Controller／OpenAPI 同步增加当前空间有界 discovery、明确 prepare-confirmed 与 commit-confirmed。发现窗口最多各20条主体／政策／场景，不表示全空间完整清单。新主体和政策仍须先以停用记录建立；拟改、准备、政策保存和模型运行分别确认，管理元数据不是业务或模型授权。
+
+明确准备的最小管理 grant 与原 preparation 同一事务；明确保存的 grant、原 CAS、[完整政策边界](../../apps/api/src/modules/ai-native/automation/automation-policy-boundary.ts)和原 operation 收据也同一事务，不会先留下半步 grant。边界按原 scope／policy／revision 确定性 ID 存入既有 OperationLog，绑定原主体修订／配置哈希／启用人／时间，计数和 updatedAt 不进配置哈希；无新表、无迁移。[原 source](../../apps/api/src/modules/ai-native/automation/prisma-automation.authority.ts)的新 snapshot／input 必须有真实边界，并复核当前政策、原材料、计划、三层额度和工具；缺记录不补签旧输入。首期工具和收件人白名单为空，仅原 `ai.model.text` 解释计划可用，不开放自动业务、通知或退款；动作／数量／因果上限保存完整且限制当前计划，原冷却、每日次数、TTL、停用和预算仍独立生效。旧输入保持原字节，原 creation／model／账单历史经当前读权读取，不因缺新边界取得执行权。
+
+Root 核接 dev1 固定单叶 `d4b582625d6839762b6ef342f1fdc95f22959e75` 后，独立必要模拟发现并修复三个正常管理缺口：过期政策的明确停用不能受其旧执行期限阻断；另一位当前管理者保存相同配置保留原边界作者，而单独记录自己的 no-op 操作；共享主体在另一政策修改后，当前管理者仍可读原政策约束并重新预览，但严格执行 reader 拒绝旧主体证明，只有明确 CAS 新政策修订才能重新绑定。未从当前主体复原旧权限或期限，未更新旧收据，也未让 configuration reader 被执行 source 使用。
+
+| 必要模拟／类型 | 命令与实际结果 |
+| --- | --- |
+| 原 Controller discovery→preview→明确准备→CAS／边界原读 | `node --no-compilation-cache -`，stdin `6144072befb71d1003e1b50581e3bf8dd277f8fdb2d0d6e0b07d22d45285391b`／退出0；原准备不改政策，revision1→2，2个元数据 grant、1条边界，工具／收件人0、模型0。 |
+| 原管理事务→新冻结 input／Task／Run／当前 authority | stdin `d37cc7ee1ea27f999285b6419b429f9aeaa7a2dd53c6a9a722b584b0353da258`／退出0；完整边界进入新 input，同1 Task／Run，缺边界／撤权拒绝新用，原创建收据可读。 |
+| 当前同库管理→公开解释 Controller／Application→原 Gateway／单账 | stdin `571388588bfd42e00efa6264cb5c0473b6ffaa7a065673688e8684542847f28e`／退出0；原管理 CAS、政策边界和新 input 由实际源码形成。首次确认前动作政策0，确认后8个固定政策／1个准入收据，模型1次、Invocation1、原 CALLS 消耗1／预留0、Task／Run成功，停用／到期仍原读，撤权拒绝，业务写0。模型／存储／运输和可信时钟为明示替身。 |
+| 准备／保存 COMMIT 丢应答、原读及省略已记录约束 | stdin `73430ff10f2386c614d038305e1eee23e9efecbf2f6015d69770903a4f5e49d0`最终退出0；原 preparation1、grants2、boundary1、revision2，unknown 只读原键，重复读／重入不增写；省略已记录约束、伪收件人和撤权拒绝。 |
+| 已过期原政策明确停用 | 原反例 `893d903f18cd2d2af753e8df5e48aa04e74a6655ac4d51ae6202021501d38d06`／退出1；修后 `fb91ad4c2381f4cf9335dc1118728a944e02c5526d3508ad6228bcc7633fc7e2`／退出0。原到期不延长，停用保存有原收据，模型／业务写0。 |
+| 另一当前管理者保存完全相同配置 | 同命令 `c7425dd98e8b87787eeafd9e62d42d58ef6b9ac3b834ddfbd980f70d2f814e78`修前／修后退出1／0；原 revision2、边界1且作者不变，新的当前管理操作正常观察。 |
+| 共享主体变更后的另一政策管理与严格执行区分 | 原反例 `1328b28123dc9d87b312d117f95e391c5598e9ea550eb3f41e05d0080af9ab00`／退出1；修后 `8ee44300d34e08ce2927bc93e72fa2223489e3abffc37e91fe7b29ec9805497b`／退出0，主体修订2，旧边界只供管理显示，执行拒绝；明确重新准备／保存后另一政策修订3，无自动补签。 |
+| 最终公开装配、当前边界与共享出口类型 | stdin `4ea56b4d01b38eaa2b53c3211698e392718826b3a2b98d6cdbfed2e273ac600f`／退出0，TypeScript5.9.3，23根／1988源零诊断。后台五源依赖类型 `644504054c71692c38f7cc418645ba22bed3aea4073bd2f63dd62f9f5ffe35b2`最终退出0，5根／1512源；页面行为完整交付仍由 dev2 完成，不用类型通过代替其消费验证。 |
+
+固定十二个核心产品源的路径／blob／SHA-256集合摘要 `4295e09e74aad5537923e63ad98d1d31dddfbdc934265f32533db7537dd689c8`；最终 manager blob `0efeefad863454a6be04d32b98056f075c1f2939`、boundary blob `22c10573e70ea8c758a3fcac458329d3f04a1fcc`。精确 stdin 和退出码保留本对话，来源以本阶段提交固定，不另复制 output／依赖／环境。
+
+失败保留：首次同库驱动只沿旧fixture的1000ms／4096字节计划，真实运行器停止、零模型／Invocation、返回unknown；命令 `8d34ba24e9075a68f1832f9b6fafa82d5a469d967cc18c7a82fe5abee6dcaefa`及诊断 `1a98ac2aca0f29aec107b6f0dbf3a68c99874a3758885dcca629b02579e3d4df`均退出1。只调整可信server fixture在创建前的原计划到足量限制，未放宽生产校验，未将原失败核销。其余初始化缺 tenant ACTIVE／预算／Prisma 默认字段和跨 VM prototype 比较失误均只修内存夹具；后台作者两处类型问题也由实际类型校验暴露后修复，不删断言或扩大测试脚本。
+
+本阶段核心源码／公开装配和必要模拟已完成，**AIN-18整项不升档**：dev2 后台五源尚待冻结、Root 行为核接及原全文最终核定。dev1 单叶已交权，Root 持公共接点，dev1继续 AIN-21 原全文只读核查。原模型历史、人工办理和当前事实复查沿已推阶段证据，不把解释或政策保存当事实处理成功。所有验证使用本树原 offline preload、不可达 DATABASE_URL、内存 audit 及同一绝对任务根；Root 已启动进程全部退出、audit0，`output/.tmp/ain18-automation-model-closeout-20261114`从未创建，无新增／扩写测试文件、client／dist／依赖副本。文档检查仍4处既有缺链，范围另按实际检查结果记录；真实浏览器／数据库／供应商／生产启用由负责人后续测试。main 仍由 PM 串行集成，助手不等待。
+
 <a id="ain17-simulated-whole-closeout-20261114"></a>
 ## AIN-17 可靠事件原五条全文模拟研发收口（2026-11-14）
 

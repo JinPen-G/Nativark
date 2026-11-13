@@ -10,6 +10,7 @@ import type { AiTaskCreationAuthority } from '../ai-task-creation.repository';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { returnExceptionSource } from '../business-events/return-exception-source';
 import type { BusinessFailureReadAuthority, FailureSource } from '../business-events/business-failure-read.authority';
+import { readOriginalAutomationPolicyBoundary } from './automation-policy-boundary';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -42,7 +43,7 @@ const toolsSchema = z.array(z.object({ code: z.string().refine(value => value ==
   .refine(values => new Set(values.map(value => value.code)).size === values.length);
 export type AutomationReadDb = Pick<PrismaClient, 'aiAutomationSubject' | 'aiAutomationPolicy' | 'aiAutomationInput'
   | 'aiBusinessFailureOutbox' | 'businessWorkspace' | 'rentalNotificationLog' | 'rentalPaymentRefund' | 'rentalOrder' | 'rentalInspectionRecord'
-  | 'aiScope' | 'aiBudgetPolicy' | 'aiTaskPlanPolicy'>;
+  | 'aiScope' | 'aiBudgetPolicy' | 'aiTaskPlanPolicy' | 'operationLog'>;
 
 export class AutomationError extends Error {
   readonly retryable = false;
@@ -64,13 +65,14 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     this.policyId = parse(id.max(36), policyId);
   }
 
-  async inspect(eventId: string, db: AutomationReadDb = this.db) {
+  async inspect(eventId: string, db: AutomationReadDb = this.db, requireBoundary = false) {
     const now = this.clock(), human = await this.humanReads?.current();
     const policy = parse(policySchema, await db.aiAutomationPolicy.findUnique({ where: { id: this.policyId } }));
     const scope = { tenantId: policy.tenantId, workspaceId: policy.workspaceId };
     if (human && (human.scope.tenantId !== scope.tenantId || human.scope.workspaceId !== scope.workspaceId)) throw unavailable();
     if (policy.id !== this.policyId || policy.validFrom > now || policy.expiresAt <= now) throw unavailable();
-    const subject = parse(subjectSchema, await db.aiAutomationSubject.findFirst({ where: { id: policy.subjectId, ...scope } }));
+    const rawSubject = await db.aiAutomationSubject.findFirst({ where: { id: policy.subjectId, ...scope } });
+    const subject = parse(subjectSchema, rawSubject);
     if (subject.id !== policy.subjectId || subject.tenantId !== scope.tenantId || subject.workspaceId !== scope.workspaceId
       || subject.expiresAt <= now) throw unavailable();
     // Independent subjects have no user session for tenant freezing to revoke.
@@ -179,6 +181,19 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     if (!plan || Object.entries(planKey).some(([name, value]) => plan[name as keyof typeof plan] !== value)
       || !plan.enabled || plan.expiresAt <= now || !revision.safeParse(plan.revision).success) throw unavailable();
     const limits = parse(aiTaskRunnerLimitsSchema, plan.limits), tools = parse(toolsSchema, plan.allowedTools);
+    const rawPolicy = await db.aiAutomationPolicy.findFirst({ where: { id: policy.id, ...scope } });
+    const boundary = requireBoundary || typeof db.operationLog?.findUnique === 'function'
+      ? rawPolicy && rawSubject ? await readOriginalAutomationPolicyBoundary(db, rawPolicy, rawSubject) : undefined
+      : undefined;
+    if (requireBoundary && !boundary) throw unavailable();
+    if (boundary && (boundary.policyId !== policy.id || boundary.revision !== policy.revision
+      || boundary.subject.subjectId !== subject.id || boundary.subject.authorizationRevision !== subject.authorizationRevision
+      || boundary.mode !== policy.mode || boundary.allowedTools.length || boundary.allowedRecipientIds.length
+      || boundary.scope.kind !== 'workspace' || boundary.scope.tenantId !== scope.tenantId || boundary.scope.workspaceId !== scope.workspaceId
+      || !boundary.allowedWorkspaces.includes(scope.workspaceId) || boundary.limits.maxRunsPerDay !== policy.maxTasksPerDay
+      || boundary.limits.cooldownSeconds !== policy.cooldownSeconds || boundary.limits.maxCausalDepth < 1
+      || boundary.r3Policy !== 'human_and_original_approval' || limits.maxSteps > boundary.limits.maxActionsPerRun
+      || limits.maxCalls > boundary.limits.maxActionsPerRun || tools.length !== 1 || tools[0].code !== 'ai.model.text')) throw unavailable();
     if (limits.maxStepMs > limits.maxTotalMs || gates.some(gate => limits.maxCalls > gate.settings.maxCallsPerRun
       || limits.maxConcurrent > gate.settings.maxConcurrent)) throw unavailable();
     const expiresAt = new Date(Math.min(subject.expiresAt.getTime(), policy.expiresAt.getTime(), event.expiresAt.getTime(), plan.expiresAt.getTime()));
@@ -209,22 +224,24 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     }
     const policyEvidence = { ...policy, validFrom: policy.validFrom.toISOString(), expiresAt: policy.expiresAt.toISOString() };
     const subjectEvidence = { ...subject, expiresAt: subject.expiresAt.toISOString() };
-    const materialHash = requestFingerprint({ subject: subjectEvidence, policy: policyEvidence, event: material, ...(sourceHash ? { sourceHash } : {}), expiresAt: expiresAt.toISOString(), orderLocations,
+    const materialHash = requestFingerprint({ subject: subjectEvidence, policy: policyEvidence, event: material, ...(sourceHash ? { sourceHash } : {}),
+      ...(boundary ? { policyBoundary: boundary } : {}), expiresAt: expiresAt.toISOString(), orderLocations,
       scopeId, gates, plan: { ...planKey, revision: plan.revision, limits, tools, expiresAt: plan.expiresAt.toISOString() } });
     const key = { ...scope, policyId: policy.id, policyRevision: policy.revision, eventId: event.id };
     return { policy, subject, event, context, scopeId, expiresAt, key, materialHash,
       creationKey: requestFingerprint({ version: 'automation-creation-1', ...key, sceneCode: policy.sceneCode, sceneVersion: policy.sceneVersion }),
       payload: { version: 'automation-input-1', trust: 'untrusted_data', purpose: 'review_only', mode: policy.mode, event: material,
+        ...(boundary ? { policyBoundary: boundary } : {}),
         subject: { id: subject.id, authorizationRevision: subject.authorizationRevision },
         policy: { id: policy.id, revision: policy.revision, sceneCode: policy.sceneCode, sceneVersion: policy.sceneVersion } } };
   }
 
   async snapshot(eventId: string) {
     try {
-      const before = await this.inspect(eventId);
+      const before = await this.inspect(eventId, this.db, true);
       const entitlement = await this.entitlements.check(before.context, 'ai.native.use');
       if (!entitlement.available) throw unavailable();
-      const current = await this.inspect(eventId);
+      const current = await this.inspect(eventId, this.db, true);
       if (before.materialHash !== current.materialHash) throw unavailable();
       const authorityHash = requestFingerprint({ materialHash: current.materialHash, entitlement });
       const payload = { ...current.payload, authorityHash };
@@ -253,6 +270,9 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     const row = await this.db.aiAutomationInput.findFirst({ where: inputKey });
     if (!row || row.id !== inputRef) throw unavailable();
     const current = await this.snapshot(row.eventId);
+    if (!row.payload || typeof row.payload !== 'object' || Array.isArray(row.payload)
+      || !('policyBoundary' in row.payload) || requestFingerprint((row.payload as { policyBoundary?: unknown }).policyBoundary)
+      !== requestFingerprint(current.payload.policyBoundary)) throw unavailable();
     this.verifyInput(row, current);
     const again = await this.db.aiAutomationInput.findFirst({ where: inputKey });
     if (!again || again.id !== inputRef) throw unavailable();

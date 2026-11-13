@@ -68,7 +68,8 @@ export class AutomationFailureTaskService {
           subjectId: before.subject.id, authorizationRevision: before.subject.authorizationRevision,
           resourceRevision: before.event.resourceRevision, deduplicationKey: before.event.deduplicationKey,
           sceneCode: before.policy.sceneCode, sceneVersion: before.policy.sceneVersion, creationKey: before.creationKey,
-          payload: before.payload, inputHash: before.inputHash, authorityHash: before.authorityHash,
+          payload: JSON.parse(JSON.stringify(before.payload)) as Prisma.InputJsonValue,
+          inputHash: before.inputHash, authorityHash: before.authorityHash,
           expiresAt: before.expiresAt, status: 'prepared', taskId: null, runId: null } });
         if ((await this.authority.inspect(eventId, tx)).materialHash !== before.materialHash) throw new AutomationError('unavailable');
         return inputRef;

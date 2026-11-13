@@ -3,15 +3,19 @@
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafList as list, leafTime as time, leafRef as ref, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 import type { AiBusinessEventDraft } from './ai-events-draft';
+import type { AiAutomationToolReferenceDraft } from './ai-events-draft';
 
 export const AI_AUTOMATION_POLICY_HTTP_CONTRACTS = Object.freeze({
+  discover: { request: 'AiAutomationPolicyDiscoverDraft', response: 'AiAutomationPolicyDiscoveryDraft' },
   read: { request: 'AiAutomationPolicyReadRequestDraft', response: 'AiAutomationPolicyCurrentDraft' },
   preview: { request: 'AiAutomationPolicyChangeDraft', response: 'AiAutomationPolicyPreviewDraft' },
   prepare: { request: 'AiAutomationPolicyChangeDraft', response: 'AiAutomationPolicyPreparationDraft' },
+  prepareConfirmed: { request: 'AiAutomationPolicyConfirmedPreparationDraft', response: 'AiAutomationPolicyPreparationDraft' },
   preparation: { request: 'AiAutomationPolicyOperationReadRequestDraft', response: 'AiAutomationPolicyPreparationReadDraft' },
   review: { request: 'AiAutomationPolicyPreparationReadRequestDraft', response: 'AiAutomationPolicyReviewDraft' },
   operation: { request: 'AiAutomationPolicyOperationReadRequestDraft', response: 'AiAutomationPolicyOperationDraft' },
-  commit: { request: 'AiAutomationPolicyCommitRequestDraft', response: 'AiAutomationPolicyCommitResultDraft' }
+  commit: { request: 'AiAutomationPolicyCommitRequestDraft', response: 'AiAutomationPolicyCommitResultDraft' },
+  commitConfirmed: { request: 'AiAutomationPolicyConfirmedCommitDraft', response: 'AiAutomationPolicyCommitResultDraft' },
 } as const);
 type Permission = 'system:integration:manage' | 'rental-os:finance:view' | 'rental-os:order:view';
 export interface AiAutomationSubjectSettingsDraft {
@@ -22,6 +26,13 @@ export interface AiAutomationPolicySettingsDraft {
   mode: 'disabled' | 'shadow' | 'manual_confirmation'; revoked: boolean; sceneCode: string; sceneVersion: string;
   allowedEventTypes: Array<AiBusinessEventDraft['type']>;
   maxTasksPerDay: number; cooldownSeconds: number; validFrom: string; expiresAt: string;
+  /** Stored with the original policy CAS. Absence is legacy evidence, never
+   * permission for a new unattended action or model execution. */
+  constraints?: AiAutomationPolicyConstraintsDraft;
+}
+export interface AiAutomationPolicyConstraintsDraft {
+  allowedTools: AiAutomationToolReferenceDraft[]; allowedRecipientIds: string[];
+  limits: { maxActionsPerRun: number; maxQuantity: number; maxCausalDepth: number };
 }
 export interface AiAutomationPolicyChangeDraft {
   operationKey: string; subjectId: string | null; policyId: string | null;
@@ -34,6 +45,14 @@ export interface AiAutomationPolicyPreparationReadRequestDraft { preparationId: 
 export interface AiAutomationPolicyCommitRequestDraft extends AiAutomationPolicyPreparationReadRequestDraft {
   changeHash: string; confirm: 'apply_automation_policy_change';
 }
+export interface AiAutomationPolicyConfirmedPreparationDraft {
+  decision: 'prepare_original_automation_policy'; command: AiAutomationPolicyChangeDraft;
+  changeHash: string; sourceHash: string;
+}
+export interface AiAutomationPolicyConfirmedCommitDraft extends AiAutomationPolicyPreparationReadRequestDraft {
+  decision: 'apply_original_automation_policy'; changeHash: string;
+}
+export interface AiAutomationPolicyDiscoverDraft {}
 type Provenance = { enabledBy: string | null; enabledAudience: 'operator' | null; enabledAt: string | null };
 type Semantics = { executionPermission: false; businessActionRequested: false };
 export interface AiAutomationPolicyConfigurationDraft {
@@ -49,6 +68,12 @@ export interface AiAutomationPolicySourceDraft {
     tools: Array<{ code: string; version: string }>; limits: { maxSteps: number; maxCalls: number; maxConcurrent: 1;
       maxTotalMs: number; maxStepMs: number; maxOutputBytes: number }; expiresAt: string };
 }
+export type AiAutomationPolicyDiscoveryDraft = Semantics & {
+  subjects: AiAutomationPolicyConfigurationDraft['subject'][];
+  policies: AiAutomationPolicyConfigurationDraft['policy'][];
+  scenes: Array<Omit<AiAutomationPolicySourceDraft['scene'], 'scopeId'>>;
+  coverage: 'bounded_current_workspace';
+};
 export type AiAutomationPolicyPreviewDraft = Semantics & { command: AiAutomationPolicyChangeDraft; before: AiAutomationPolicySourceDraft;
   changeHash: string; sourceHash: string; prepareResourceHash: string };
 type Recorded = Semantics & { state: 'observed'; operationId: string; operationKey: string; preparationId: string;
@@ -74,12 +99,17 @@ const subjectProperties = { enabled: bool, revoked: bool,
   permissions: { ...list(choice('system:integration:manage', 'rental-os:finance:view', 'rental-os:order:view'), 3, 1), uniqueItems: true },
   locationScope: { oneOf: [object({ mode: choice('all'), locationIds: list(id(), 0) }),
     object({ mode: choice('selected'), locationIds: { ...list(id(), 100, 1), uniqueItems: true } })] }, expiresAt: time };
+const constraints = object({ allowedTools: list(ref('AiAutomationToolReferenceDraft'), 14),
+  allowedRecipientIds: { ...list(id(), 100), uniqueItems: true }, limits: object({ maxActionsPerRun: integer(1, 20),
+    maxQuantity: integer(1, 1000), maxCausalDepth: integer(0, 20) }) });
 const policyProperties = { mode: choice('disabled', 'shadow', 'manual_confirmation'), revoked: bool, sceneCode: sceneId, sceneVersion: sceneId,
   allowedEventTypes: { ...list(choice('notification.failed', 'refund.failed', 'inspection.return_exception',
     'fulfillment.resource_shortage', 'opening.missing_configuration'), 5, 1), uniqueItems: true },
-  maxTasksPerDay: integer(0, 10000), cooldownSeconds: integer(1, 86400), validFrom: time, expiresAt: time };
+  maxTasksPerDay: integer(0, 10000), cooldownSeconds: integer(1, 86400), validFrom: time, expiresAt: time, constraints };
 const provenance = { enabledBy: nullable(id()), enabledAudience: nullable(choice('operator')), enabledAt: nullable(time) };
-const subject = object(subjectProperties), policy = object(policyProperties);
+const policyObject = (properties: Record<string, AiLeafSchemaDraft>) => object(properties,
+  Object.keys(properties).filter(name => name !== 'constraints'));
+const subject = object(subjectProperties), policy = policyObject(policyProperties);
 const commandBase = { operationKey: key, subject, policy };
 // The same identity/revision pairs as the original service: a new policy needs
 // an existing subject or a new subject in this exact preparation, never a free ID.
@@ -88,7 +118,7 @@ const command = { oneOf: [
   object({ ...commandBase, subjectId: shortId, policyId: { type: 'null' }, expectedSubjectRevision: revision, expectedPolicyRevision: { type: 'null' } }),
   object({ ...commandBase, subjectId: shortId, policyId: shortId, expectedSubjectRevision: revision, expectedPolicyRevision: revision })] };
 const configuration = { subject: object({ ...subjectProperties, ...provenance, id: shortId, authorizationRevision: revision }),
-  policy: object({ ...policyProperties, ...provenance, id: shortId, subjectId: shortId, revision, counterDay: nullable(time),
+  policy: policyObject({ ...policyProperties, ...provenance, id: shortId, subjectId: shortId, revision, counterDay: nullable(time),
     preparedCount: integer(0, 4294967295), lastPreparedAt: nullable(time) }) };
 const recorded = object({ ...semantics, state: choice('observed'), operationId: uuid, operationKey: key, preparationId: uuid,
   changeHash: hash, result: object(configuration), recordedAt: time, retryable: no });
@@ -98,11 +128,21 @@ const unknown = object({ ...semantics, state: choice('unknown'), operationKey: k
   preparationId: uuid, nextAction: choice('read_preparation', 'read_operation') }, ['executionPermission', 'businessActionRequested', 'state', 'operationKey', 'retryable']);
 const absent = object({ ...semantics, state: choice('not_observed'), operationKey: key, retryable: no });
 export const AI_AUTOMATION_POLICY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiAutomationPolicyConstraintsDraft: constraints,
+  AiAutomationPolicyDiscoverDraft: object({}),
+  AiAutomationPolicyDiscoveryDraft: object({ ...semantics, subjects: list(configuration.subject, 20),
+    policies: list(configuration.policy, 20), coverage: choice('bounded_current_workspace'), scenes: list(object({
+      sceneCode: sceneId, sceneVersion: sceneId, revision, enabled: bool, tools: list(object({ code: id(), version: id() }), 1000),
+      limits: object({ maxSteps: integer(1, 1000), maxCalls: integer(1, 1000), maxConcurrent: { type: 'integer', const: 1 },
+        maxTotalMs: integer(1, 86400000), maxStepMs: integer(1, 86400000), maxOutputBytes: integer(1, 16777216) }), expiresAt: time }), 20) }),
   AiAutomationPolicyReadRequestDraft: object({ subjectId: shortId, policyId: shortId }),
   AiAutomationPolicyChangeDraft: command,
   AiAutomationPolicyOperationReadRequestDraft: object({ operationKey: key }),
   AiAutomationPolicyPreparationReadRequestDraft: object({ preparationId: uuid }),
   AiAutomationPolicyCommitRequestDraft: object({ preparationId: uuid, changeHash: hash, confirm: choice('apply_automation_policy_change') }),
+  AiAutomationPolicyConfirmedPreparationDraft: object({ decision: choice('prepare_original_automation_policy'),
+    command: ref('AiAutomationPolicyChangeDraft'), changeHash: hash, sourceHash: hash }),
+  AiAutomationPolicyConfirmedCommitDraft: object({ decision: choice('apply_original_automation_policy'), preparationId: uuid, changeHash: hash }),
   AiAutomationPolicyCurrentDraft: object({ ...semantics, state: choice('configured'), ...configuration }),
   AiAutomationPolicySourceDraft: object({
     subject: nullable(object({ ...provenance, id: shortId, revision, settings: subject })),

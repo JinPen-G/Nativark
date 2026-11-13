@@ -2764,8 +2764,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Current original diagnosis and Core section are revalidated. Preview is read-only; explicit preparation creates one linked original R1 Task and AI proposal. No active configuration, business draft, publication or model dispatch. Unknown uses the same original operation; history never resumes preparation.',
     requestSchema: contract.request, responseSchema: contract.response,
   })),
-  ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
-    method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
+  ...(['discover', 'read', 'preview', 'prepare', 'prepareConfirmed', 'preparation', 'review', 'operation', 'commit', 'commitConfirmed'] as const).map(action => ({
+    method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action === 'prepareConfirmed' ? 'prepare-confirmed'
+      : action === 'commitConfirmed' ? 'commit-confirmed' : action}`, tag: 'AI Native',
     operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
     summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Named closed contracts distinguish current configuration, preview, prepared/stale/expired metadata and the original commit receipt.',
     requestSchema: AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action].request,

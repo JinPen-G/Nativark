@@ -370,7 +370,7 @@ export function requiredPermissions(method: string, path: string) {
   if (isBudgetPlatformRoute(method, path)) return ['system:ai-provider:manage'];
   if (aiManagementRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST'
-    && /^\/ai-native\/automation\/operator\/policies\/(?:read|preview|prepare|preparation|review|operation|commit)$/u.test(path)) {
+    && /^\/ai-native\/automation\/operator\/policies\/(?:discover|read|preview|prepare|prepare-confirmed|preparation|review|operation|commit|commit-confirmed)$/u.test(path)) {
     return ['system:params:manage'];
   }
   if (isHumanAutomationRoute(method, path, 'staff')) return ['rental-os:order:view'];

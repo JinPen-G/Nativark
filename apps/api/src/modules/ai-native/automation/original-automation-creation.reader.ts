@@ -18,6 +18,7 @@ const instant = z.date().refine(value => Number.isFinite(value.getTime()));
 const command = z.object({ inputRef: uuid }).strict();
 const payloadSchema = z.object({ version: z.literal('automation-input-1'), trust: z.literal('untrusted_data'),
   purpose: z.literal('review_only'), mode: z.enum(['shadow', 'manual_confirmation']), event: z.unknown(),
+  policyBoundary: z.unknown().optional(),
   subject: z.object({ id: id.max(36), authorizationRevision: revision }).strict(),
   policy: z.object({ id: id.max(36), revision, sceneCode: id.max(64), sceneVersion: id.max(64) }).strict(),
   authorityHash: hash }).strict();
