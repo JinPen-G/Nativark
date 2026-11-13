@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13及本次14已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain16-notification-original-first-start-20261113"></a>
+## AIN-16 通知原Task未启动窗口的明确接续（2026-11-13）
+
+原前端已持久化stage=start但请求尚未派发时，原Task仍QUEUED/revision1，客户端此前永久pending；不能只凭queued推定可以重发。[原通知host](../../apps/api/src/modules/ai-native/runner/settings-task-host.composition.ts)新增仅服务器消费的startUnstarted，当前权/政策、原Task/Run、无租约/准备/Step/phase/批准/资源账/业务operation均复核后，保留初始CAS `taskRevision=1/runRevision=1/fence=0` 调用原runner。原[controls.start](../../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application.ts)仍先消费原明确准入政策及当前Core基准，再委托这条初始接点；RUNNING、已有原效果或新Run修订拒绝，不借重读租约恢复派发。普通恢复/批准继续仍使用原接口。
+
+两源固定blob分别为 `4263d36b6e8805b70f5d4f01070047fd248124c2`、`3900bda3422b093fb06bf8c9c7fddee2a3060f43`。Root原Controller/控制组合→原持久运行器必要模拟输入 `2ca1400fec2cbf88526a09fdb7ecb19c0406226d3a6224d45ff3f5c316ca3dd4`／0：改变初始Run修订拒绝、untouched明确启动至原等待，重复不再启动，业务写0；保留有界tick计量及真实超时定时器。正式API/AppModule/OpenAPI/shared四根/1972源TypeScript5.9.3零诊断，输入 `500ea4e51c091d8f98809edeb568dd3cc168dc15482fd85bcc99a272649b1ad6`／0。进程退出、audit0、任务临时目录未创建。
+
+dev2前端已加入stage=start原queued/rev1时的明确继续，并在点击后重读原记录；读取本身不发送。Root实际通知API/session/reconfirmation→Controller/原应用模拟输入 `683445ed4f8af5549d10a2eb9493c702ad5f1397aa72e718f9c9a5921b75eb0a`／0：prepare/create/start各丢一次HTTP应答，原键只读恢复，3写POST/16读取，未批准/未业务写；完整前端仍待最终固定交权与页面核接。AIN-16原五条尚未整收，不据两源加分，真实MySQL/浏览器留负责人操作。
+
 <a id="ain18-original-creation-history-20261113"></a>
 ## AIN-17/18 政策停用后的原Task创建收据恢复（2026-11-13）
 

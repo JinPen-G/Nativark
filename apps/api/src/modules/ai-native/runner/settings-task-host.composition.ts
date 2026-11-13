@@ -253,8 +253,34 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     }
     return { ...result, reconciliation };
   };
+  const startUnstarted = async (signal?: AbortSignal) => {
+    const access = await authorization.tasks.resolveAccess(task.taskId, 'claim_run');
+    if (access.scope.kind !== 'WORKSPACE' || !access.scope.tenantId || !access.scope.workspaceId)
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const queued = await input.db.aiTask.findFirst({ where: access.where });
+    const run = queued && await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: queued.scopeId } });
+    if (signal?.aborted || !queued || queued.status !== 'QUEUED' || queued.revision !== 1 || queued.archivedAt !== null
+      || queued.cancelRequestedAt !== null || queued.resultRef !== null || queued.eventCursor !== 0n || !run
+      || run.status !== 'QUEUED' || run.revision !== 1 || run.leaseOwnerId !== null || run.leaseExpiresAt !== null
+      || run.inputReceiptId !== null || !run.fencingToken.equals(0)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    const where = { scopeId: queued.scopeId, taskId: task.taskId };
+    const traces = await Promise.all([input.db.aiStep.findFirst({ where }), input.db.aiTaskRunPlan.findFirst({ where }),
+      input.db.aiTaskActionInput.findFirst({ where }), input.db.aiTaskRunPreparation.findFirst({ where }),
+      input.db.aiTaskExecutionPhaseStart.findFirst({ where }), input.db.aiTaskExecutionPhaseReceipt.findFirst({ where }),
+      input.db.aiTaskResultArtifact.findFirst({ where }), input.db.aiProposal.findFirst({ where }), input.db.aiApproval.findFirst({ where }),
+      input.db.aiApprovalConsumption.findFirst({ where }), input.db.aiTaskExecutionCharge.findFirst({ where }),
+      input.db.aiTaskExecutionBudget.findFirst({ where }), input.db.aiGatewayInvocation.findFirst({ where }),
+      input.db.rentalApprovedSettingsOperation.findFirst({ where: { changeId: task.change.changeId,
+        tenantId: access.scope.tenantId, workspaceId: access.scope.workspaceId } })]);
+    if (signal?.aborted || traces.some(Boolean)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    // The explicit original-start request retains the first CAS tuple through
+    // all waits. It never borrows a concurrent caller's newer Run or time debt.
+    return { kind: 'run_outcome' as const, outcome: await root.runner.runPrepared({ taskId: task.taskId, runId: task.runId,
+      holderId: host.holderId, leaseMs: host.leaseMs, expectedTaskRevision: 1, expectedRunRevision: 1,
+      expectedFencingToken: '0' }, prepare, signal) };
+  };
   return Object.freeze({ settings, inputs, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
-    application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
+    application: Object.freeze({ start: application.start.bind(application), startUnstarted, continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
       readConfirmationHistory: application.readConfirmationHistory.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application),

@@ -589,7 +589,7 @@ export function composeRequestBoundSettingsTaskControls(
             limits: limits.data } });
           return { found, hostRoot };
         }, false, signal);
-        const result = await hostRoot.application.start({ taskId: found.task.taskId, runId: found.task.runId }, signal);
+        const result = await hostRoot.application.startUnstarted(signal);
         try { await waitForTaskApplicationDependency(found.verify, false, signal); }
         catch { throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false }); }
         return freezeOriginalInput(result);
