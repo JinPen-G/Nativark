@@ -20,7 +20,7 @@
 
 全部验证退出、必要单emit在本树自持产物，唯一暂存剩空audit。原生精确删除被CreateProcess自动审批`blocked by policy`拒绝，整条未执行/无详细理由；已安全同卷归[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-input-capture-validation/manifest.json)，[退出](../../output/category-governance/quote-input-capture-cleanup-20261113.json)确认原暂存不存在、已归集未删除。旧各批继续创建者责任；没有主动跨对话消息、合main或环境新增执行。
 
-完整CAT-GOV仍0/14、实现百分比待核实。本片证明原请求生命周期，不证明完整报价配置一致性；业务缓存等待期间、价格/规则/检查与全部写入口的并发组合继续核查，真库容量/锁/多实例、两个动态编码不同执行组合冻结经营、浏览器/微信及独立Review保持原门槛。CLOSE、企业/AI接点分别沿原任务处理。
+单份源码与四份记录/接续已固定为`006293fcec07a3a0a5074bd018168e0c9dcc6f48`，普通推送`codex/rental-core`并[回读GitHub同SHA](../../output/category-governance/quote-input-capture-github-20261113.json)，工作树干净、上游0/0。完整CAT-GOV仍0/14、实现百分比待核实。本片证明原请求生命周期，不证明完整报价配置一致性；业务缓存等待期间、价格/规则/检查与全部写入口的并发组合继续核查，真库容量/锁/多实例、两个动态编码不同执行组合冻结经营、浏览器/微信及独立Review保持原门槛。CLOSE、企业/AI接点分别沿原任务处理。
 
 <a id="quote-capability-commit-20261113"></a>
 
