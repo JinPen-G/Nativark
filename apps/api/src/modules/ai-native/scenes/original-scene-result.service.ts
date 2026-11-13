@@ -201,6 +201,7 @@ export class AiOriginalSceneResultService {
     const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId,
       runId: result.runId, resultId: result.resultId,
       observedAt: result.observedAt, businessExecution: 'not_inferred_from_model_result' as const };
+    let revalidateHistory: (() => Promise<unknown>) | undefined;
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
       nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown;
@@ -254,16 +255,23 @@ export class AiOriginalSceneResultService {
         }
         if (provenance.continuation) {
           const continuation = provenance.continuation, previous = parseTaskModelInput(continuation.input, this.policy), priorResult = continuation.result;
+          const { conversationHistory: _history, ...refreshed } = envelope;
           if (taskModelFingerprint(previous, this.policy) !== continuation.inputHash || !isGatewayResult(priorResult)
             || priorResult.status !== 'completed' || priorResult.usage.kind !== 'reported' || priorResult.requestId !== previous.intent.requestId
             || requestFingerprint(withoutTaskModelDisplayMessages(input.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
-              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? envelope : undefined).messages)) throw denied();
+              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? refreshed : undefined).messages)) throw denied();
         }
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();
         return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash,
-          callId: invocation.callId, knowledge: envelope.knowledge, toolRequests: structuredClone(gateway.toolRequests) };
+          callId: invocation.callId, knowledge: envelope.knowledge, conversationHistory: envelope.conversationHistory,
+          toolRequests: structuredClone(gateway.toolRequests) };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+      if (frozen.conversationHistory) {
+        const history = this.scenes.createHistoryReader(this.tasks), packet = frozen.conversationHistory;
+        revalidateHistory = () => history.revalidate(packet, command.original, original.context, 'observation');
+        await revalidateHistory();
+      }
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
       // old diagnosis after configuration/coverage or current permissions change.
@@ -315,6 +323,9 @@ export class AiOriginalSceneResultService {
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
     if (requestFingerprint(provenance) !== requestFingerprint(finalProvenance)) throw denied();
+    // The same reader is used by model-only controls. Reopen inherited history
+    // after the final awaits; a readable current result cannot renew old sources.
+    await revalidateHistory?.();
     if ((await this.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== finalAccess.bindingKey) throw denied();
     // A historical read may cross natural expiry while validating its sources.
     // Publish the checked closing receipt, without renewing execution authority.

@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-authorized-conversation-history-20261113"></a>
+## 同能力历史上下文进入原模型及当前读取复核（2026-11-13）
+
+[原对话仓储](../../apps/api/src/modules/ai-native/conversation.repository.ts)按同一 owner/scope/能力版本、原 admissionRevision 读取前序轮次；[历史 reader](../../apps/api/src/modules/ai-native/conversation-context.reader.ts)复验原请求、Task 终态、原人类回答、选单和审批阶段收据。最多 8 轮、16 KiB，超限明确不可用；保留独立人类/选择/审批引用，不将模型摘要当作权限或业务结果。描述只含原问题类型/开业分区，不复制姓名、电话、地址、回答正文或完整业务载荷。
+
+[原模型组合](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)只在首次 operator 准备时收集并将同一包放入 user envelope，发布前后与 Gateway 派发前后复验。已发布输入及回答/刷新后继保留原包，旧无包不补签，staff 不走 operator 收集。[原结果 reader](../../apps/api/src/modules/ai-native/scenes/original-scene-result.service.ts)独立复验当前历史，删除、撤权、超期或前序 unknown 不再暴露正文。[展示生成](../../apps/api/src/modules/ai-native/workbench-display-generation.service.ts)引用同一包、前序 turn/input/task 和原人类回答收据，期限取原请求、配置、历史来源最短值。原 v1/v2 提示词不变。
+
+[场景工厂](../../apps/api/src/modules/ai-native/scenes/original-scenes.composition.ts)的 historySelection 只使用真实 RentalOrderConfirmationService、RentalBusinessFactRepository 与 Core；[标准 providers](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)向 quote/opening/order、原 observation、conversation display、model-control 六宿主接入这些原依赖，缺失不构造假 Core。独立 display producer 复用 scenes.createHistoryReader。恢复定位的刷新后继先排除新读 envelope 中的历史字段，继续由 previous 保留原包，未重签来源。
+
+前置为 `135a30015d83c8666deab26f63c3bd1fc18dc750`，该取消阶段已推 GitHub 并回读一致；首次远端 failed/Windows TLS handshake 失败保留，随后仅该次命令切换 OpenSSL 后端且保留证书校验后普通推送成功。历史七源固定 blob 已核同：reader `531c1d829b0eb0423a9a08a8bb0db69a2644dcf6`、仓储 `e32af3960d7205bf216d89944af11ecd1e2c2efd`、envelope `6d4a5e2ab67e23c872dcccd784f0fe94e4d9c688`、模型组合 `f136e0d43bd9905e14d01e755c77229a78e097c9`、结果 `e52fe86a58ac3b01f54d210ad154ca5ebaa97fcf`、工厂 `101f9505f228002ae73e6460d5233664db9a056f`、展示 `bffe36dfdc3fd6955b503fb337e21a1c4b96fdae`。本片与订单最终展示/控制活动增量分开固定。
+
+Root 用固定 Git 源及既有内存 fixture 执行 `node --no-compilation-cache -`，实际首次准备→唯一 Gateway 输入→标准 observation provider→原 result/display 复验通过；前序历史包 1710 字节、模型一次、只读不重派，推进查询时钟保持，删除对话后原结果和展示拒绝。stdin SHA-256 `ec0b27decb5a5af8936a80c2f3cb7cfc083548f29b83493e773a8e218621b8b8`，退出 0。TypeScript 5.9.3 固定 4 根/1960 源零诊断，命令 SHA `f3e961eda17bf94b5d2947459d76e514562e7d5f2121d7e4c289461d9898f856`，退出 0。
+
+助手另已核派发前撤回零发送、前序 unknown 零发布、人类后继保包、刷新后继、旧输入不改字节、staff 路径、历史剩余两分钟缩短展示期限、真实 selection 仓储构造身份；原命令及失败均留其会话 `01a1d2b8-d5ab-75f3-a042-034cff02f0fb`。Root 第一次标准读取组合曾在 timeDebt 返回 AI_RESULT_UNKNOWN（SHA `148350e1914141da4ddd144ecc2a2e440c39012064cb707da093f13b5a48895e`，退出 1），随后带原行诊断复验通过但未重现，该旧事件不凭正常重跑关闭。独立可复现的前缀恢复后 timeDebt 缺口已定位至未注册后继信号的处理，另片修复并复验，不放宽 unknown 或伪造耗时。
+
+原离线 preload、不可达 DATABASE_URL、内存审计；审计为空，任务临时目录未创建，进程已退出，无新增测试脚本/临时产物。专用订单三步不经过本片 prepareHeldRun，其首/最终材料与派发/读取历史另由订单片接入；同 Task 订单重生成及停用后独立原答复读取仍在施工。以上不代表 AIN-12 全文完成，不提高整项百分比；真实宿主与外部环境由负责人另验。
+
 <a id="ain12-explicit-cancellation-entry-20261113"></a>
 ## 对话与模型处理中取消入口及停止展示（2026-11-13）
 

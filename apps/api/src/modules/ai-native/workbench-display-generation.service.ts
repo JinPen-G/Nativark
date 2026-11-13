@@ -21,6 +21,8 @@ import type { AiWorkbenchFieldMaterialService } from './workbench-field-material
 import type { AiQuoteBusinessPreparationService } from './tools/quote-business-preparation.service';
 import { applyOriginalQuoteAnswers } from './scenes/original-quote-input';
 import type { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
+import type { AiConversationContextReader, AiConversationHistoryContext } from './conversation-context.reader';
+import { readOriginalSceneEnvelope } from './scenes/original-scene-knowledge';
 
 export const AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION = Symbol('AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION');
 export const WORKBENCH_DISPLAY_PROMPT_REFERENCE = 'workbench-display-html-v1';
@@ -62,12 +64,32 @@ export type AiOriginalSceneDisplayPublication = { currentConfiguration(): unknow
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiConversation' | 'aiConversationTurn'>;
 type Input = { db: Db; scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   originals: Pick<PrismaOriginalRequestRepository, 'readHistorical'>; publication: AiOriginalSceneDisplayPublication;
+  /** Same current source reader as the frozen scene envelope; never a new
+   * summary created while displaying or regenerating a retained result. */
+  history?: Pick<AiConversationContextReader, 'revalidate'>;
   quoteFields?: { material: Pick<AiWorkbenchFieldMaterialService, 'prepare' | 'revalidate'>;
     describe: AiQuoteBusinessPreparationService['describeInput'] } };
 type QuoteFieldHistory = Awaited<ReturnType<typeof readTaskModelRunOrigin>>['history'];
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const same = (a: unknown, b: unknown) => requestFingerprint(a) === requestFingerprint(b);
+function historyProjection(history: QuoteFieldHistory, packet?: AiConversationHistoryContext) {
+  const references: AiWorkbenchContextDraft['history']['references'] = packet ? [
+    { kind: 'turn', id: packet.turnId, version: packet.version, sha256: packet.contentHash },
+    ...packet.entries.flatMap(entry => [
+      { kind: 'turn' as const, id: entry.turnId, version: String(entry.admissionRevision), sha256: requestFingerprint(entry) },
+      { kind: 'input' as const, id: entry.original.inputRef, version: String(entry.originalRevision), sha256: entry.originalHash },
+      ...(entry.task ? [{ kind: 'task' as const, id: entry.task.taskId, version: String(entry.task.revision), sha256: requestFingerprint(entry.task) }] : [])
+    ])
+  ] : [];
+  const humanInputReceipts = [...(packet?.entries.flatMap(entry => entry.task?.humanInputReceipts.map(row => row.receiptId) ?? []) ?? []),
+    ...history.map(round => round.receiptId)];
+  // The public display contract is narrower than the history package. Reject
+  // overflow explicitly rather than dropping independent human constraints.
+  if (references.length + 3 > 50 || humanInputReceipts.length > 50) throw Object.assign(unavailable(), {
+    reason: 'history_limit_exceeded', nextAction: 'narrow_goal_or_new_conversation' });
+  return { references, humanInputReceipts };
+}
 
 export class AiOriginalSceneDisplayGeneration {
   constructor(private readonly input: Input, private readonly clock: () => Date = () => new Date()) {
@@ -137,12 +159,15 @@ export class AiOriginalSceneDisplayGeneration {
     return { current, task, run, turn, conversation };
   }
   async prepare(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string,
-    materialHash: string, value: z.infer<typeof taskModelMaterialSchema>, history: QuoteFieldHistory = []) {
+    materialHash: string, value: z.infer<typeof taskModelMaterialSchema>, history: QuoteFieldHistory = [],
+    conversationHistory?: AiConversationHistoryContext) {
     if (value.displayWitness) throw denied();
     const found = await this.binding(context, original, taskId, runId, true);
     if (!found) return freezeOriginalInput(taskModelMaterialSchema.parse(value));
     const { configuration } = this.configuration();
-    const sourceExpiresAt = new Date(Math.min(Date.parse(original.expiresAt), Date.parse(configuration.expiresAt))).toISOString();
+    const projectedHistory = historyProjection(history, conversationHistory);
+    const sourceExpiresAt = new Date(Math.min(Date.parse(original.expiresAt), Date.parse(configuration.expiresAt),
+      conversationHistory ? Date.parse(conversationHistory.expiresAt) : Infinity)).toISOString();
     const binding = { conversationId: found.turn.conversationId, turnId: found.turn.id,
       capabilityCode: found.turn.capabilityCode, capabilityVersion: found.turn.capabilityVersion,
       original: { draftVersion: original.draftVersion, inputRef: original.inputRef }, taskId,
@@ -155,8 +180,9 @@ export class AiOriginalSceneDisplayGeneration {
       history: { coverage: 'bounded_authorized_references', references: [
         { kind: 'turn', id: found.turn.id, version: String(found.turn.admissionRevision), sha256: found.turn.inputHash },
         { kind: 'input', id: original.inputRef, version: String(original.revision), sha256: original.contentHash },
-        { kind: 'task', id: taskId, version: String(found.task.revision), sha256: requestFingerprint({ taskId, runId, inputRef: original.inputRef }) }],
-        persistentConstraints: { humanInputReceipts: history.map(round => round.receiptId), pendingInputRequests: [], unknownOperations: [] },
+        { kind: 'task', id: taskId, version: String(found.task.revision), sha256: requestFingerprint({ taskId, runId, inputRef: original.inputRef }) },
+        ...projectedHistory.references],
+        persistentConstraints: { humanInputReceipts: projectedHistory.humanInputReceipts, pendingInputRequests: [], unknownOperations: [] },
         expiresAt: sourceExpiresAt, aclRevision, policyVersion: configuration.policyVersion },
       authority: 'none_reauthorize_before_consumption' };
     const fieldMaterial = await this.fields(found.current.context, original, binding, history.length + 1,
@@ -172,13 +198,14 @@ export class AiOriginalSceneDisplayGeneration {
         && prompt.sha256 === configuration.prompt.sha256)!.text },
         { kind: 'text', text: taskModelDisplayWitnessMarker(witness) },
         ...(fieldMaterial ? [{ kind: 'text' as const, text: taskModelDisplayFieldContract(witness)! }] : [])] }] });
-    await this.assertOriginal(context, original, taskId, runId, witness, true, history);
+    await this.assertOriginal(context, original, taskId, runId, witness, true, history, conversationHistory);
     return freezeOriginalInput(material);
   }
   private async assertOriginal(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string,
-    witness: TaskModelDisplayWitness, generation: boolean, history: QuoteFieldHistory) {
+    witness: TaskModelDisplayWitness, generation: boolean, history: QuoteFieldHistory, conversationHistory?: AiConversationHistoryContext) {
     const { configuration, now } = this.configuration(), found = await this.binding(context, original, taskId, runId, generation);
     if (!found) throw denied();
+    const projectedHistory = historyProjection(history, conversationHistory);
     // Current publication selects new generations. A retained result keeps its
     // original registered prompt bytes; a version upgrade never re-signs it.
     const promptAllowed = generation ? same(configuration.prompt, witness.prompt) : displayPrompts.some(prompt =>
@@ -188,10 +215,12 @@ export class AiOriginalSceneDisplayGeneration {
       || !same(witness.context.scope, found.current.context.scope) || witness.aclRevision !== originalIdentityHash(found.current.context)
       || witness.binding.conversationId !== found.turn.conversationId || witness.binding.turnId !== found.turn.id
       || witness.binding.taskId !== taskId || witness.binding.inputFingerprint !== found.task.inputHash
-      || !same(witness.context.history.persistentConstraints.humanInputReceipts, history.map(round => round.receiptId))
+      || !same(witness.context.history.persistentConstraints.humanInputReceipts, projectedHistory.humanInputReceipts)
+      || !same(witness.context.history.references.slice(3), projectedHistory.references)
       || witness.presentationRevision !== found.run.sequence || !same(witness.binding.original, { draftVersion: original.draftVersion, inputRef: original.inputRef })
       || Date.parse(witness.sourceExpiresAt) <= now.getTime()
-      || Date.parse(witness.sourceExpiresAt) > Math.min(Date.parse(original.expiresAt), Date.parse(configuration.expiresAt))) throw denied();
+      || Date.parse(witness.sourceExpiresAt) > Math.min(Date.parse(original.expiresAt), Date.parse(configuration.expiresAt),
+        conversationHistory ? Date.parse(conversationHistory.expiresAt) : Infinity)) throw denied();
     if (witness.fieldMaterial) {
       // Pure model controls advance presentation only. Human answer receipts
       // advance the field revision, independently of additional model Runs.
@@ -199,6 +228,14 @@ export class AiOriginalSceneDisplayGeneration {
       await this.fields(found.current.context, original, witness.binding,
         witness.fieldMaterial.fieldRevision, witness.fieldMaterial.retention, history, witness.fieldMaterial);
     }
+    if (conversationHistory) {
+      if (!this.input.history) throw unavailable();
+      if (conversationHistory.conversationId !== found.turn.conversationId || conversationHistory.turnId !== found.turn.id
+        || conversationHistory.admissionRevision !== found.turn.admissionRevision) throw denied();
+      await this.input.history.revalidate(conversationHistory, witness.binding.original, context, generation ? 'generation' : 'observation');
+    }
+    const closing = this.configuration();
+    if (!same(closing.configuration, configuration) || Date.parse(witness.sourceExpiresAt) <= closing.now.getTime()) throw unavailable();
     return witness;
   }
   async revalidateInput(context: AiExecutionContext, taskId: string, runId: string, modelInput: TaskModelInput,
@@ -206,7 +243,8 @@ export class AiOriginalSceneDisplayGeneration {
     if (!modelInput.displayWitness) return;
     const witness = parseTaskModelDisplayWitness(modelInput.displayWitness), original = await this.input.originals.readHistorical(witness.binding.original);
     if (original.receipt.state !== 'stored' || originalIdentityHash(original.context) !== originalIdentityHash(context)) throw denied();
-    await this.assertOriginal(context, original.receipt, taskId, runId, witness, true, history);
+    await this.assertOriginal(context, original.receipt, taskId, runId, witness, true, history,
+      readOriginalSceneEnvelope(modelInput).conversationHistory);
   }
   async revalidateOriginal(material: AiWorkbenchDisplayOriginalMaterial, value: TaskModelDisplayWitness): Promise<TaskModelDisplayWitness> {
     const witness = parseTaskModelDisplayWitness(value);
@@ -215,7 +253,7 @@ export class AiOriginalSceneDisplayGeneration {
     const original = await this.input.originals.readHistorical(witness.binding.original);
     if (original.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(material.context)) throw denied();
     await this.assertOriginal(material.context, original.receipt, material.task.taskId, material.model.step.runId,
-      witness, false, material.lineage.history);
+      witness, false, material.lineage.history, material.envelope.conversationHistory);
     return freezeOriginalInput(witness);
   }
 }

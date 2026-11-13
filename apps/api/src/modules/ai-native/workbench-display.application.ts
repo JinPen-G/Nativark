@@ -105,7 +105,7 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
           tasks: authorization.tasks, evidence, policy, readRunOrigin: controls?.readOrigin.bind(controls),
           observations: { readModelResult: query => observations.readModelResult(request, query) } });
         const producer = new AiOriginalSceneDisplayGeneration({ db: input.db, scopes: authorization.scopes,
-          originals: scenes.requests, publication,
+          originals: scenes.requests, publication, history: scenes.createHistoryReader(authorization.tasks),
           quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),
             describe: scenes.tools.quote.businessPreparation.describeInput.bind(scenes.tools.quote.businessPreparation) } }, clock);
         const confirmations = confirmation && createWorkbenchDisplayConfirmationReader({ db: input.db, tasks: authorization.tasks, clock,

@@ -89,9 +89,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       }
     } }
   } });
+  const history = scenes.createHistoryReader(model.tasks);
   const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock, knowledge);
   const display = dependencies.displayPublication ? new AiOriginalSceneDisplayGeneration({ db: dependencies.db,
-    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication,
+    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication, history,
     quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),
       describe: scenes.tools.quote.businessPreparation.describeInput.bind(scenes.tools.quote.businessPreparation) } }, clock) : undefined;
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
@@ -116,10 +117,11 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       const continuation = before.provenance.continuation;
       if (continuation) {
         const previous = parseTaskModelInput(continuation.input, modelPolicy), result = continuation.result;
+        const { conversationHistory: _history, ...refreshed } = readOriginalSceneEnvelope(parsedInput);
         if (taskModelFingerprint(previous, modelPolicy) !== continuation.inputHash || !isGatewayResult(result)
           || result.status !== 'completed' || result.usage.kind !== 'reported' || result.requestId !== previous.intent.requestId
           || requestFingerprint(withoutTaskModelDisplayMessages(parsedInput.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
-            { ...continuation, result }, continuation.questionRevision > 1 ? readOriginalSceneEnvelope(parsedInput) : undefined).messages)) throw denied();
+            { ...continuation, result }, continuation.questionRevision > 1 ? refreshed : undefined).messages)) throw denied();
       }
       const envelope = readOriginalSceneEnvelope(parsedInput);
       if (!continuation && envelope.clarifications) throw denied();
@@ -139,6 +141,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
           if (!knowledge) throw unavailable();
           await knowledge.revalidate(envelope.knowledge, ref.inputRef);
         }
+        if (envelope.conversationHistory) await history.revalidate(envelope.conversationHistory, ref, before.original.context);
       };
       await revalidate();
       // The Gateway repeats its current-route check immediately before transport.
@@ -160,14 +163,30 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         || taskModelFingerprint(previous, modelPolicy) !== continuation.inputHash || !isGatewayResult(result)
         || result.status !== 'completed' || result.usage.kind !== 'reported' || result.requestId !== previous.intent.requestId)) throw denied();
       const priorEnvelope = previous ? readOriginalSceneEnvelope(previous) : undefined;
+      const registrationRef = continuation?.registrationRef ?? registration(command.original.inputRef);
+      const publishedInput = await model.planAuthority.readModelInputReceipt({ taskId: command.lease.taskId,
+        runId: command.lease.runId, registrationRef });
+      const existingEnvelope = publishedInput.state === 'published'
+        ? readOriginalSceneEnvelope(parseTaskModelInput(publishedInput.payload, modelPolicy)) : undefined;
+      // Only an unprepared original turn collects history. A persisted legacy
+      // input or a human successor retains its original package, including absence.
+      const conversationHistory = priorEnvelope ? priorEnvelope.conversationHistory
+        : existingEnvelope ? existingEnvelope.conversationHistory : before.original.context.audience === 'operator'
+          ? await history.collect(command.original, before.original.context) : undefined;
+      if (existingEnvelope && requestFingerprint(existingEnvelope.conversationHistory ?? null) !== requestFingerprint(conversationHistory ?? null)) throw denied();
       const refreshed = continuation && continuation.questionRevision > 1;
       const packet = priorEnvelope && !refreshed ? { materialHash: priorEnvelope.materialHash, material: priorEnvelope.facts,
         original: priorEnvelope.original, trust: priorEnvelope.trust } : await scenes.prepareTaskMaterial(command.original);
       const supplemental = priorEnvelope ? priorEnvelope.knowledge : await knowledge?.collect(command.original.inputRef, before.original.request);
       same(before, await current(command.original, command.lease.taskId, command.lease.runId));
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
+      const revalidateHistory = async () => {
+        if (conversationHistory) await history.revalidate(conversationHistory, command.original, before.original.context);
+      };
+      await revalidateHistory();
       const content = JSON.stringify({ original: packet.original, materialHash: packet.materialHash,
-        trust: packet.trust, facts: packet.material, ...(supplemental ? { knowledge: supplemental } : {}) });
+        trust: packet.trust, facts: packet.material, ...(supplemental ? { knowledge: supplemental } : {}),
+        ...(conversationHistory ? { conversationHistory } : {}) });
       if (Buffer.byteLength(content, 'utf8') > 131072) throw unavailable();
       const parts: Array<{ kind: 'text'; text: string }> = [];
       for (let offset = 0; offset < content.length; offset += 16000) parts.push({ kind: 'text', text: content.slice(offset, offset + 16000) });
@@ -185,19 +204,21 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         sceneCode: task.sceneCode, sceneVersion: task.sceneVersion } });
       if (!policy) throw unavailable();
       const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(continuation?.limits ?? policy.limits));
-      const registrationRef = continuation?.registrationRef ?? registration(command.original.inputRef);
       if (display && (!continuation || previous?.displayWitness)) material = await display.prepare(context, before.original.receipt,
-        task.id, command.lease.runId, packet.materialHash, material, before.provenance.history);
+        task.id, command.lease.runId, packet.materialHash, material, before.provenance.history, conversationHistory);
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
+      await revalidateHistory();
       const published = await model.publish({ taskId: task.id, registrationRef,
         expectedTaskRevision: command.expectedTaskRevision, lease: command.lease, material });
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
+      await revalidateHistory();
       same(before, await current(command.original, command.lease.taskId, command.lease.runId));
       const plan = { taskId: task.id, runId: command.lease.runId, taskRevision: command.expectedTaskRevision,
         limits, steps: [{ registrationRef, operation: 'external_unknown' as const,
           toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }] };
       const saved = await model.plans.savePlan(plan, command.lease);
       same(before, await current(command.original, command.lease.taskId, command.lease.runId));
+      await revalidateHistory();
       return freezeOriginalInput({ stage: 'model_input_and_plan_published' as const,
         inputRef: published.id, registrationRef, planHash: saved.planHash,
         materialHash: packet.materialHash, messageHash: requestFingerprint(material),

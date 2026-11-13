@@ -204,10 +204,11 @@ export async function readTaskCenterRecoveryTarget(d: TaskCenterRecoveryTargetDe
             if (requestFingerprint(receipt) !== requestFingerprint(expected) || requestFingerprint(envelope.facts) !== envelope.materialHash) throw unavailable();
             if (lineage.continuation) {
               const prior = parseTaskModelInput(lineage.continuation.input, policy), result = lineage.continuation.result;
+              const { conversationHistory: _history, ...refreshed } = envelope;
               if (taskModelFingerprint(prior, policy) !== lineage.continuation.inputHash || !isGatewayResult(result)
                 || result.status !== 'completed' || result.usage.kind !== 'reported'
                 || requestFingerprint(withoutTaskModelDisplayMessages(model.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(prior,
-                  { ...lineage.continuation, result }, lineage.continuation.questionRevision > 1 ? envelope : undefined).messages)) throw unavailable();
+                  { ...lineage.continuation, result }, lineage.continuation.questionRevision > 1 ? refreshed : undefined).messages)) throw unavailable();
             } else if (envelope.clarifications) throw unavailable();
           }
         } else if (planned.toolCode === 'rental.order.explain') {
