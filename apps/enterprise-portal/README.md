@@ -4,6 +4,8 @@
 
 视觉和交互沿[管理后台规范](../../docs/公共技术资料/界面规范/管理后台-界面规范.md)及[UI 适配规则](../admin/AGENTS.md)，复用原 React/UIArc、主题、语言与原生侧栏，不修改 vendor。订单、财务、全员审计和导出缺正式授权或来源时保持不可用，不展示假记录或假额度。
 
+管理端与企业端共用 [BusinessShell](../admin/src/components/BusinessShell.tsx)、[导航](../admin/src/components/animate-sidebar/NativeNavigation.tsx)、[上下文选择器](../admin/src/components/animate-sidebar/NativeContextSwitcher.tsx)及[账号菜单](../admin/src/components/animate-sidebar/NativeAccountMenuView.tsx)。框架布局、侧栏、顶部栏、间距、深浅主题及动效只维护这些共用组件和管理端原样式/token。企业 [Shell](src/EnterpriseShell.tsx)仅提供客户身份、当前企业、受权菜单与原客户动作。修改共用源码后，两端开发入口均使用更新后的实现，发行时重新构建两端产物。
+
 ## 阅读路线
 
 | 领域 | 入口 → 应用服务 → 原来源与消费者 |

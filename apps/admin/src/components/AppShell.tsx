@@ -1,24 +1,21 @@
 import { Breadcrumb } from "antd";
-import { Bell } from "lucide-react";
-import { Button, Tooltip } from "@/components/ui";
+import { Tooltip } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { APP_ROUTES, buildNavigationSections, canAccessRoute } from "@/app/navigation";
-import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { NotificationProvider } from "@/features/notifications/NotificationProvider";
 import { HeaderNotifications } from "@/features/notifications/HeaderNotifications";
+import { RestProvider } from "@/features/rest/RestProvider";
+import { RestEntry } from "@/features/rest/RestEntry";
 import { WorkspaceClock } from "./WorkspaceClock";
 import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
-import { WorkspaceNavigationProvider, useWorkspaceNavigation } from "./workspace/WorkspaceNavigation";
-import { Sidebar, SidebarProvider, SidebarHeader, SidebarContent, SidebarFooter, SidebarRail, SidebarTrigger, SidebarInset, SidebarInput, useSidebar } from "./animate-sidebar/runtime/sidebar";
-import { TooltipProvider } from "./animate-sidebar/runtime/tooltip";
-import { Separator } from "./animate-sidebar/runtime/separator";
+import { BusinessShell } from "./BusinessShell";
 import { NativeAccountMenu } from "./animate-sidebar/NativeAccountMenu";
 import { NativeWorkspaceSwitcher } from "./animate-sidebar/NativeWorkspaceSwitcher";
 import { NativeNavigation } from "./animate-sidebar/NativeNavigation";
@@ -27,37 +24,26 @@ import { AiOperatorNavigation, OperatorModeSwitch } from "@/features/ai-operator
 import { CopilotProvider, useCopilot } from "@/features/copilot/CopilotProvider";
 import { CopilotLayout } from "@/features/copilot/CopilotLayout";
 import "@/features/ai-operator/ai-operator.css";
-import "./animate-sidebar/animate-sidebar.css";
-import "./animate-sidebar/sidebar-adapter.css";
 
 /** Native Animate UI Base UI sidebar; business route/permission data stays unchanged. */
 export function AppShell({ children }: { children: ReactNode }) {
-  return <CopilotProvider><OperatorProvider><NotificationProvider><AppShellLayout>{children}</AppShellLayout></NotificationProvider></OperatorProvider></CopilotProvider>;
+  return <CopilotProvider><OperatorProvider><NotificationProvider><RestProvider><AppShellLayout>{children}</AppShellLayout></RestProvider></NotificationProvider></OperatorProvider></CopilotProvider>;
 }
 function AppShellLayout({ children }: { children: ReactNode }) {
-  const { mode } = useAppearance();
-  const { pathname } = useLocation();
-  const tenantConsole = useAuthStore(state => Boolean(state.user && !state.user.isSaasAdmin)) && pathname !== APP_ROUTES.aiOperator.path;
   if (rentalDesktopHost()) {
     return <div className="desktop-business-content" style={{ height: "100vh", overflow: "auto", padding: "24px" }}>
       <main className="content-canvas">{children}</main>
       <SubscriptionExpiryFloatingCard />
     </div>;
   }
-  // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
-  return <TooltipProvider><div className="app-frame-stage" data-tenant-console={tenantConsole || undefined}><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
-    <ShellContents>{children}</ShellContents>
-  </SidebarProvider></div></div></TooltipProvider>;
+  return <ShellContents>{children}</ShellContents>;
 }
 
 function ShellContents({ children }: { children: ReactNode }) {
   const copilot = useCopilot();
-  const { state, openMobile, setOpenMobile } = useSidebar();
-  const [query, setQuery] = useState("");
-  const navRef = useRef<HTMLDivElement>(null), contentRef = useRef<HTMLDivElement>(null);
-  const navigation = useWorkspaceNavigation(contentRef, navRef);
   const location = useLocation(), navigate = useNavigate(), { t } = useLocale();
   const tenant = useAuthStore(s => s.tenant), user = useAuthStore(s => s.user);
+  const tenantConsole = Boolean(user && !user.isSaasAdmin);
   const hasPermission = useAuthStore(s => s.hasPermission), hasCapability = useAuthStore(s => s.hasCapability);
   const hasTenantMembershipPermission = useAuthStore(s => s.hasTenantMembershipPermission);
   const currentWorkspaceId = useAuthStore(s => s.currentWorkspaceId);
@@ -102,46 +88,26 @@ function ShellContents({ children }: { children: ReactNode }) {
     ...(detailRoute && current.route && detailRoute.path !== current.route.path ? [{ title: t(detailRoute.label) }] : []),
   ];
 
-  useEffect(() => { setOpenMobile(false); }, [location.pathname, setOpenMobile]);
-  useEffect(() => {
-    const host = navRef.current;
-    if (!host) return;
-    let frame = 0;
-    const reveal = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
-      const selected = Array.from(host.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"][data-active], [data-sidebar="menu-sub-button"][data-active]')).find(e => e.getBoundingClientRect().height > 0);
-      if (selected) { selected.scrollIntoView({ block: "nearest" }); observer.disconnect(); }
-    }); };
-    const observer = new MutationObserver(reveal); observer.observe(host, {childList:true, subtree:true}); reveal();
-    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
-  }, [selectedKey, sections, state, openMobile]);
-  return <>
-    <Sidebar collapsible="icon" className="rental-sidebar-colors">
-      <SidebarHeader><NativeWorkspaceSwitcher />
-        <SidebarInput className="group-data-[collapsible=icon]:hidden" type="search" aria-label={t("搜索菜单")} placeholder={t("搜索菜单")} value={query} onChange={event => setQuery(event.target.value)} />
-      </SidebarHeader>
-      {canUseOperator && <OperatorModeSwitch ai={aiMode} onChange={next => { setQuery(""); navigation.fromSidebar(next ? APP_ROUTES.aiOperator.path : routes.some(route => lastAdminPath.current.split("?")[0] === route.path || lastAdminPath.current.startsWith(`${route.path}/`)) ? lastAdminPath.current : routes[0]?.path ?? "/"); }} />}
-      <SidebarContent ref={navRef}>
-        {aiMode ? <AiOperatorNavigation query={query} /> : <NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} />}
-      </SidebarContent>
-      <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
-    </Sidebar>
-    <SidebarInset className="app-workspace min-h-0">
-      <header className={`rental-sidebar-colors native-workspace-context flex shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing)${aiMode ? " operator-context-header" : ""}`}>
-        <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
-          <SidebarTrigger className="-ml-1" aria-label={t(state === "collapsed" ? "展开导航" : "收起导航")} />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
-        </div>
-        <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
-          {!aiMode && copilot?.available && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
-            <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
-            {!!copilot.contexts.length && <span className="copilot-entry-count">{copilot.contexts.length}</span>}
-          </button></Tooltip>}
-          <HeaderNotifications />
-        </div>
-      </header>
-      <CopilotLayout suspended={aiMode}><div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div></CopilotLayout>
-    </SidebarInset>
-    <SubscriptionExpiryFloatingCard />
-  </>;
+  return <BusinessShell fullWidth={tenantConsole} selectedKey={selectedKey}
+    brand={<NativeWorkspaceSwitcher compact={tenantConsole} />} account={<NativeAccountMenu />}
+    navigation={({ query, onNavigate }) => aiMode ? <AiOperatorNavigation query={query} />
+      : <NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={onNavigate} />}
+    sidebarExtra={canUseOperator ? ({ resetSearch, onNavigate }) => <OperatorModeSwitch ai={aiMode} onChange={next => {
+      resetSearch();
+      onNavigate(next ? APP_ROUTES.aiOperator.path : routes.some(route => lastAdminPath.current.split("?")[0] === route.path || lastAdminPath.current.startsWith(route.path + "/")) ? lastAdminPath.current : routes[0]?.path ?? "/");
+    }} /> : undefined}
+    headerClassName={aiMode ? "operator-context-header" : undefined}
+    headerContext={<Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} />}
+    headerActions={<><WorkspaceClock /><RestEntry />
+      {!aiMode && copilot?.available && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
+        <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
+        {!!copilot.contexts.length && <span className="copilot-entry-count">{copilot.contexts.length}</span>}
+      </button></Tooltip>}
+      <HeaderNotifications />
+    </>}
+    contentClassName={aiMode ? "ai-operator-host" : undefined}
+    wrapContent={content => <CopilotLayout suspended={aiMode}>{content}</CopilotLayout>}
+    overlay={<SubscriptionExpiryFloatingCard />}>
+    {children}
+  </BusinessShell>;
 }

@@ -1,47 +1,26 @@
-import { useState } from "react";
+/** Operator workspace data for the shared shell context picker. */
 import { useNavigate } from "react-router-dom";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { UnfoldMoreIcon } from "@hugeicons/core-free-icons";
 import { AnimatedIcon, type AnimatedIconName } from "@/components/ui/AnimatedIcon";
 import { useAdminBrandIcon } from "@/app/BrandIconProvider";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { useFeedback } from "@/components/ui";
-import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "./runtime/sidebar";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem } from "./runtime/dropdown-menu";
+import { NativeContextSwitcher } from "./NativeContextSwitcher";
 
 const categoryIcons: Record<string, AnimatedIconName> = { camera: "camera", vehicle: "vehicle", camping: "camping", construction: "construction" };
 
-export function NativeWorkspaceSwitcher() {
-  const { isMobile, setOpenMobile } = useSidebar(), { t } = useLocale(), icon = useAdminBrandIcon();
+export function NativeWorkspaceSwitcher({ compact = false }: { compact?: boolean }) {
+  const { t } = useLocale(), icon = useAdminBrandIcon();
   const tenant = useAuthStore(s => s.tenant), user = useAuthStore(s => s.user), workspaces = useAuthStore(s => s.workspaces);
   const currentId = useAuthStore(s => s.currentWorkspaceId), switchWorkspace = useAuthStore(s => s.switchWorkspace);
-  const [switching, setSwitching] = useState(false);
   const navigate = useNavigate(), { toast } = useFeedback();
   const title = user?.isSaasAdmin ? "Rental OS" : tenant?.tenantName ?? t("租户");
-  const subtitle = workspaces.find(w => w.id === currentId)?.name ?? t(user?.isSaasAdmin ? "平台管理面" : "尚无经营空间");
-  const content = <><div data-sidebar="brand-mark" data-brand-inverted={icon.isPlatformMark || undefined} className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"><img src={icon.src} onError={icon.onError} alt="" className="size-8 rounded-lg bg-sidebar object-contain" /></div>
-    <div className="grid flex-1 text-left text-sm leading-tight"><span className="truncate font-medium">{title}</span><span className="truncate text-xs">{t(subtitle)}</span></div></>;
-  if (workspaces.length < 2) return <SidebarMenu><SidebarMenuItem><SidebarMenuButton size="lg" render={<div aria-label={`${title} · ${t(subtitle)}`} />}>{content}</SidebarMenuButton></SidebarMenuItem></SidebarMenu>;
-  const change = async (id: string) => {
-    if (id === currentId || switching) return;
-    setSwitching(true);
-    try { await switchWorkspace(id); setOpenMobile(false); navigate("/workbench", { replace: true }); }
-    catch { toast({ type: "error", title: t("切换经营空间失败") }); }
-    finally { setSwitching(false); }
-  };
-  return <SidebarMenu><SidebarMenuItem><DropdownMenu>
-    <DropdownMenuTrigger aria-label={`${title} · ${t(subtitle)}`} disabled={switching} render={<SidebarMenuButton size="lg" className="data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground" />}>
-      {content}<HugeiconsIcon icon={UnfoldMoreIcon} strokeWidth={2} className="ml-auto" />
-    </DropdownMenuTrigger>
-    <DropdownMenuContent className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg" align="start" side={isMobile ? "bottom" : "right"} sideOffset={4}>
-      <DropdownMenuGroup><DropdownMenuLabel className="text-xs text-muted-foreground">{t("经营空间")}</DropdownMenuLabel>
-        {workspaces.map(w => <DropdownMenuItem key={w.id} data-icon-hover="" className="gap-2 p-2" disabled={switching} onClick={() => void change(w.id)}>
-          <span data-sidebar="workspace-icon" className="flex size-6 shrink-0 items-center justify-center">
-            <AnimatedIcon name={categoryIcons[w.categoryCode] ?? "inventory"} style={{ fontSize: 20 }} />
-          </span><span className="truncate">{t(w.name)}</span>
-        </DropdownMenuItem>)}
-      </DropdownMenuGroup>
-    </DropdownMenuContent>
-  </DropdownMenu></SidebarMenuItem></SidebarMenu>;
+  const subtitle = workspaces.find(workspace => workspace.id === currentId)?.name ?? t(user?.isSaasAdmin ? "平台管理面" : "尚无经营空间");
+  return <NativeContextSwitcher title={title} subtitle={compact ? subtitle : t(subtitle)} compact={compact}
+    brand={<img src={icon.src} onError={icon.onError} alt="" className="size-8 rounded-lg bg-sidebar object-contain" />}
+    brandInverted={icon.isPlatformMark} label={t("经营空间")} value={currentId ?? ""}
+    options={workspaces.map(workspace => ({ id: workspace.id, name: compact ? workspace.name : t(workspace.name),
+      icon: <AnimatedIcon name={categoryIcons[workspace.categoryCode] ?? "inventory"} style={{ fontSize: 20 }} /> }))}
+    onChange={async id => { await switchWorkspace(id); navigate("/workbench", { replace: true }); }}
+    onError={() => toast({ type: "error", title: t("切换经营空间失败") })} />;
 }

@@ -29,6 +29,7 @@ import type { EnterpriseMembersResponse } from "@rental-os/shared";
 import { customerLogin, parseEnterpriseRoute } from "@rental-os/web-client";
 import { CLIENT_BASE, EnterpriseSessionProvider, useEnterprise } from "./enterprise-session";
 import { EnterpriseShell } from "./EnterpriseShell";
+import { WorkspaceRouteReady } from "@/components/workspace/WorkspaceNavigation";
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 }, mutations: { retry: false } } });
 function EnterprisePage() {
   const context = useEnterprise(), { locale } = useLocale(), english = locale === "en-US", location = useLocation();
@@ -84,7 +85,7 @@ function View() {
   useLayoutEffect(() => { applyAdminRadiusTokens(document.documentElement, {}); applyArcThemeTokens(document.documentElement, mode === "dark"); }, [mode]);
   useEffect(() => { void queries.cancelQueries(); queries.clear(); }, [context.identity]);
   return <ConfigProvider theme={createThemeConfig(mode)}><AntMotionProvider motion={!reduced}><AntApp><FeedbackProvider><BusinessUiScopeProvider value={{ identity: context.identity, currentIdentity: () => identity.current }}>
-    <EnterpriseShell><EnterprisePage /></EnterpriseShell>
+    <EnterpriseShell><WorkspaceRouteReady><EnterprisePage /></WorkspaceRouteReady></EnterpriseShell>
   </BusinessUiScopeProvider></FeedbackProvider></AntApp></AntMotionProvider></ConfigProvider>;
 }
 const router = createBrowserRouter([{ path: "*", element: <View />, errorElement: <p role="alert">企业页面无法打开，请重新进入当前商户企业服务。</p> }]);
