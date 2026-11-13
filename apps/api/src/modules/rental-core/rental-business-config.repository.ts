@@ -100,7 +100,7 @@ export interface RentalBusinessConfigStore {
   loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot>;
   readQuoteRateTargets?(tenantId: string, workspaceId: string, at: Date): Promise<RentalQuoteRateTarget[]>;
   /** Opening metadata only; never loads rule config, calendar days or prices. */
-  readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[]): Promise<RentalReadinessBusinessFacts>;
+  readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts>;
   loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
@@ -262,14 +262,15 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async readReadinessBusinessFacts(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[]): Promise<RentalReadinessBusinessFacts> {
+  async readReadinessBusinessFacts(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts> {
+    const client = tx ?? this.prisma;
     const now = new Date(at), years = [...calendarYears];
     if (!Number.isFinite(now.getTime()) || years.length < 1 || years.length > 3
       || years.some(year => !Number.isInteger(year) || year < 1 || year > 9999)
       || new Set(years).size !== years.length) throw new ConflictException('开业查询时点或营业年度无效');
     const assertScope = async () => {
       if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
-        || await resolveScopeWorkspaceId(this.prisma, tenantId) !== workspaceId)
+        || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
         throw new ForbiddenException('开业读取缺少当前租户或经营空间');
     };
     await assertScope();
@@ -280,14 +281,14 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const [rules, calendarCounts, refs, accounts, priceVersion] = await Promise.all([
       // Two latest issued rows are enough to preserve the original same-time
       // conflict test. Older rule contents/history are not opening facts.
-      this.prisma.rentalRuleVersion.findMany({ where: { ...where, status: { in: [...RULE_VERSION_ISSUED_STATUSES] }, effectiveFrom: { lte: now } },
+      client.rentalRuleVersion.findMany({ where: { ...where, status: { in: [...RULE_VERSION_ISSUED_STATUSES] }, effectiveFrom: { lte: now } },
         select: { id: true, tenantId: true, workspaceId: true, version: true, status: true, effectiveFrom: true },
         orderBy: [{ effectiveFrom: 'desc' }, { id: 'asc' }], take: 2 }),
-      Promise.all(years.map(year => this.prisma.rentalBusinessCalendar.count({ where: { ...where, year, status: 'published' } }))),
+      Promise.all(years.map(year => client.rentalBusinessCalendar.count({ where: { ...where, year, status: 'published' } }))),
       // JSON_TABLE supplies only ordinality; extract target identifiers, not
       // monetary fields or full rates JSON. Empty plans still get a sentinel
       // row, and the global LIMIT bounds both plans and rate references.
-      this.prisma.$queryRaw<RateReference[]>(Prisma.sql`
+      client.$queryRaw<RateReference[]>(Prisma.sql`
         SELECT p.tenantId, p.workspaceId, p.id AS planId, JSON_TYPE(p.rates) AS ratesType,
           r.rateIndex,
           JSON_UNQUOTE(JSON_EXTRACT(p.rates, CONCAT('$[', r.rateIndex - 1, '].pricingGroupId'))) AS pricingGroupId,
@@ -298,8 +299,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         LEFT JOIN JSON_TABLE(p.rates, '$[*]' COLUMNS (rateIndex FOR ORDINALITY)) AS r ON TRUE
         WHERE p.tenantId = ${tenantId} AND p.workspaceId = ${workspaceId} AND p.status = 'enabled'
         ORDER BY p.id, r.rateIndex LIMIT ${RENTAL_READINESS_FACT_LIMIT + 1}`),
-      readRentalReadinessAccountFacts(this.prisma, tenantId, workspaceId),
-      this.prisma.rentalPriceVersion.findFirst({ where: { ...where, effectiveFrom: { lte: now } },
+      readRentalReadinessAccountFacts(client, tenantId, workspaceId),
+      client.rentalPriceVersion.findFirst({ where: { ...where, effectiveFrom: { lte: now } },
         orderBy: [{ effectiveFrom: 'desc' }, { sequence: 'desc' }],
         select: { tenantId: true, workspaceId: true, sequence: true, effectiveFrom: true } })
     ]);

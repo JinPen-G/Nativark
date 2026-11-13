@@ -5926,6 +5926,12 @@ export interface RentalAllocation {
 export interface RentalAssignmentState {
   revision: number;
   issue?: string;
+  /** Server-recorded primary scan cause. Legacy absence is unknown; free text
+   * cannot establish this source, and clearing/changing resources invalidates it. */
+  readonly issueSource?: {
+    readonly version: "rental-fulfillment-issue-1";
+    readonly code: "resource_shortage" | "assigned_resource_unavailable" | "configuration_unavailable" | "allocation_incomplete";
+  };
   history: Array<{ id: string; at: string; actor: string; action: string; reason?: string; before: RentalAllocation[]; after: RentalAllocation[] }>;
   operationLock?: { ownerId: string; ownerName: string; token: string; expiresAt: string };
 }

@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14及本次16已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain17-fixed-core-resource-source-intake-20261114"></a>
+## AIN-17 原 Core 来源、配置行修订与资源读取接回（2026-11-14）
+
+在固定前置 `4dbcf1037327f78da09aca0b5eb09f7d80d24a2c` 上按方法接回七份必要源码，没有整覆其他 Core 后继。履约结构化 issueSource 和原 scan/recordIssue 事务参加者来自 `0475af5c547df6d0bf4c7f3139e3fa955f2a2dbb`，原只读来源前置为 `fe65ac652076d5bed4c9ca439d50b563c61d17aa`；配置行修订与快照 CAS 来自 `5e8d52325b37cf6b613c103b2e291b25843e35ec`，冻结快照沿调用方原事务的后继为 `6390f89a9d38b499ca8d43a3b38dccef0641e13c`。九项开业及会员计数沿原 tx 的固定来源为 `e96e3e9a1952c813d1d6e6d9a4b12f3a77dfd186`。这些来源不是一条可直接整收的祖先链，公共声明、imports 和方法逐项组合，保留本树其余实现。
+
+[Core 资源来源适配](../../apps/api/src/modules/ai-native/business-events/core-business-failure-resource.source.ts)已由 dev1 冻结交权，Root 核同 blob `ff10230be2dd4ae4b5bf371daaa5e97cc9a06ff8` 并独立核接。履约仅接受原 Core 的 resource_shortage 判定，原库存缺行、其他异常及不可读不冒充不足；解决须有原 ready 状态、exception_resolved 记录和原 allocationComplete。临近政策须明确 id/revision/scope/生效窗口/lookAheadMs，缺政策不捕获。开业逐项对照原九项检查及实际受权计数／版本，规则冲突、会员不可读和缺配置行不冒充 missing；配置修订、当前身份和等待后的来源变化拒绝。适配复用原资源存储与 Outbox，不能创建事务、模型调用或业务写入。
+
+| 必要模拟／类型 | 固定证据与实际结果 |
+| --- | --- |
+| Root 当前完整 RentalAllocationService→资源来源→原 Outbox/storage | `node --no-compilation-cache -`，stdin `9955b41df590cbf146f8e442bdbcf0ef9365f3217c37688f42c312813c855c98`／退出0；履约与开业各捕获一事件，重复复用同事件，原修订可读；缺／停用政策、非正式不足、冲突规则和不可读会员均不新增事件。新增事务0；开业依赖与 SQL 为明确内存替身，本组不证明原配置保存已捕获事件。 |
+| Root 当前身份、原材料修订和窗口变化 | stdin `2077c2a6522ed0597bc2ce4c2565ea307fa85891aba849217cbb855190e7abb1`／退出0；13个必要正反边界包含错政策／scope／订单、读取中撤权、配置或政策变更、done=false但无缺项事实、缺原方法、缺解决记录及最终读取期间到期，均无新增写入。 |
+| 落盘源码与标准 AppModule／Controller／shared 依赖类型 | stdin `0a932cb4a4dee1346b92dd698adcf434718bd53018163661b4ff1ac46073d05e`／退出0；TypeScript5.9.3，5根/1976源零诊断。此前固定内存候选 `0a312d8bd2fb38e3f65d244a638a7281e6d961ea816acd5ef2e4eb754149b048`／退出0；4根/1974源零诊断。 |
+
+保留整合驱动首轮五条类型失败：新增方法误放到首个错误类、缺正式品类校验 import；只修方法提取的所属类及必要 import 后核定候选，未放宽产品校验。作者原负例把政策 scope 与请求 scope 引用共用，以及未识别原 Core 异常；仅修内存驱动，原失败不称产品通过。Root 使用当前完整 Core 类，未重建其库存判断。
+
+本阶段为已验证源码接回检查点，AIN-17/18 原全文仍未完成：标准 Outbox 和人工消费尚未注入 resources，可信临近政策尚未接 runtime，开业原配置保存事务尚未接 opening 参加者，AUTOMATION 模型解释尚未接原独立主体／Gateway／单账。后续分别补装配与生产，不以只读来源或本组替身宣称捕获闭环。没有执行迁移／回填或启用真实事件。所有本组进程已退出、audit0，`output/.tmp/ain17-resource-source-closeout-20261114` 未创建；未新增或扩写测试脚本、复制依赖或生成产物。真实 MySQL、微信、供应商及生产放行由负责人后续操作。
+
 <a id="ain20-original-fulfillment-receipt-20261114"></a>
 ## AIN-20 员工原履约收据与写请求恢复边界（2026-11-14）
 
