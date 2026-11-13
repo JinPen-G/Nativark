@@ -227,7 +227,11 @@ function workbenchFrameBootstrap() {
       const source = output.getAttribute('data-source-id'), confirmation = output.getAttribute('data-confirmation-index');
       if (source || confirmation !== null) {
         if (tag !== 'button' && tag !== 'a' || source && !seed.sourceIds.includes(source)
-          || confirmation !== null && (!/^(0|[1-9][0-9]?)$/u.test(confirmation) || !seed.proposals[Number(confirmation)])) throw Error('invalid_code');
+          || source && confirmation !== null
+          || confirmation !== null && !/^(0|[1-9][0-9]?)$/u.test(confirmation)) throw Error('invalid_code');
+        // The model can ask for review before the business step has prepared a
+        // proposal. No current original proposal means no business control.
+        if (confirmation !== null && !seed.proposals[Number(confirmation)]) return null;
         output.setAttribute('role', 'button'); output.tabIndex = 0;
         const request = () => { try { if (source) send({ kind: 'request_source', sourceId: source });
           else send({ kind: 'request_confirmation', proposal: seed.proposals[Number(confirmation)] }); } catch { fail('resource_limit'); } };

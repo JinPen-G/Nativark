@@ -5,7 +5,8 @@ import { hasEffectivePermission } from '../../common/permission-match';
 import { randomUUID } from 'node:crypto';
 import { AI_CONVERSATION_DRAFT_VERSION, AI_TASK_CENTER_ENTRY_PERMISSIONS,
   type AiWorkbenchDisplayReadDraft, type AiWorkbenchDisplayRevalidateDraft,
-  type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchDisplayMaterialDraft } from '@rental-os/shared';
+  type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchDisplayMaterialDraft,
+  type AiTaskReviewQueryDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composePersistedTaskAuthorization } from './task-authorization.composition';
@@ -25,6 +26,7 @@ import { inspectAiWorkbenchDisplayMaterial } from './workbench-display.contract'
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { WorkbenchModelControlRepository } from './workbench-model-control.repository';
+import { createWorkbenchDisplayConfirmationReader } from './workbench-display-confirmations.reader';
 
 type Request = { headers: { authorization?: unknown } };
 type Reads = { readModelResult(request: Request, value: unknown): Promise<unknown>; reopenModelSource(request: Request, value: unknown): Promise<unknown> };
@@ -34,7 +36,8 @@ const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const same = (a: unknown, b: unknown) => requestFingerprint(a) === requestFingerprint(b);
 
 export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalSceneDependencies, 'credentials'>,
-  publication: AiOriginalSceneDisplayPublication, observations: Reads) {
+  publication: AiOriginalSceneDisplayPublication, observations: Reads,
+  confirmation?: { review(request: Request, query: AiTaskReviewQueryDraft, signal?: AbortSignal): Promise<unknown> }) {
   return { async consume(request: Request, action: Action, value: unknown, signal?: AbortSignal) {
     if (!['display', 'display-revalidate', 'display-source'].includes(action)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const header = request?.headers?.authorization;
@@ -61,18 +64,29 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
           const key = { scopeId: current.scope.id, taskId: task.id };
           const turns = await input.db.aiConversationTurn.findMany({ where: { scopeId: key.scopeId,
             ownerId: context.actor.userId, originalRequestId: task.inputRef }, take: 2 });
-          const runs = await input.db.aiRun.findMany({ where: key, orderBy: { sequence: 'desc' }, take: 1 });
-          if (turns.length !== 1 || runs.length !== 1) throw unavailable();
-          const run = runs[0], turn = turns[0];
+          const runs = await input.db.aiRun.findMany({ where: key, orderBy: { sequence: 'desc' }, take: 2 });
+          const latestRun = runs[0];
+          if (!latestRun || latestRun.scopeId !== key.scopeId || latestRun.taskId !== task.id
+            || latestRun.actorKind !== 'USER' || latestRun.actorId !== context.actor.userId
+            || runs[1]?.sequence === latestRun.sequence) throw unavailable();
+          // A later original business-confirmation Run has no model Artifact.
+          // Read the latest retained completed model step under this same Task;
+          // the original reader still proves its entire measured lineage.
+          const steps = await input.db.aiStep.findMany({ where: { ...key, toolCode: 'ai.model.text', status: 'SUCCEEDED',
+            run: { is: { actorKind: 'USER', actorId: context.actor.userId } } },
+            orderBy: [{ run: { sequence: 'desc' } }, { sequence: 'desc' }], take: 2,
+            include: { run: true } });
+          if (turns.length !== 1 || !steps.length || steps[1]?.runId === steps[0].runId) throw unavailable();
+          const step = steps[0], run = step.run, turn = turns[0];
           if (run.scopeId !== key.scopeId || run.taskId !== task.id || run.actorKind !== 'USER' || run.actorId !== context.actor.userId
             || turn.scopeId !== key.scopeId || turn.ownerId !== context.actor.userId || turn.originalRequestId !== task.inputRef) throw denied();
-          const steps = await input.db.aiStep.findMany({ where: { ...key, runId: run.id, toolCode: 'ai.model.text', status: 'SUCCEEDED' }, take: 2 });
-          if (steps.length !== 1 || !steps[0].resultRef) throw unavailable();
-          const step = steps[0];
-          if (step.scopeId !== key.scopeId || step.taskId !== task.id || step.runId !== run.id) throw denied();
+          if (!step.resultRef || step.scopeId !== key.scopeId || step.taskId !== task.id || step.runId !== run.id) throw denied();
+          if (run.id !== latestRun.id && (!confirmation || task.status !== 'WAITING_CONFIRMATION' || latestRun.status !== 'RUNNING'
+            || !latestRun.inputReceiptId || !latestRun.resourceOriginRunId
+            || run.sequence >= latestRun.sequence)) throw unavailable();
           return { reference: { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId: turn.conversationId,
             admissionKey: turn.admissionKey, resultId: step.resultRef! }, task, runId: run.id,
-            identity: originalIdentityHash(context), scopeId: current.scope.id };
+            currentRunId: latestRun.id, identity: originalIdentityHash(context), scopeId: current.scope.id };
         };
         const before = await locate(command);
         const policy = { sceneCode: before.task.sceneCode, maxOutputTokens: 32768 };
@@ -94,7 +108,9 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
           originals: scenes.requests, publication,
           quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),
             describe: scenes.tools.quote.businessPreparation.describeInput.bind(scenes.tools.quote.businessPreparation) } }, clock);
-        const service = new AiWorkbenchDisplayPreparationService(originals, producer, clock);
+        const confirmations = confirmation && createWorkbenchDisplayConfirmationReader({ db: input.db, tasks: authorization.tasks, clock,
+          review: query => confirmation.review(request, query, signal) });
+        const service = new AiWorkbenchDisplayPreparationService(originals, producer, clock, confirmations);
         const material = inspectAiWorkbenchDisplayMaterial(await service.read(before.reference));
         const binding = material.presentation.binding, generation = material.presentation.generation;
         if (action !== 'display') {
@@ -138,7 +154,7 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
         }
         const after = await locate(command);
         if (!active || !same(before.reference, after.reference) || before.identity !== after.identity || before.scopeId !== after.scopeId
-          || before.task.revision !== after.task.revision || before.runId !== after.runId) throw denied();
+          || before.task.revision !== after.task.revision || before.runId !== after.runId || before.currentRunId !== after.currentRunId) throw denied();
         return result;
       }), false, signal);
     } finally { close(); signal?.removeEventListener('abort', close); }

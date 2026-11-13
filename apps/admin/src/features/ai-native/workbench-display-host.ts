@@ -2,7 +2,7 @@
  * human-input/approval receipts; HTML and frame messages never grant authority. */
 import {
   AI_WORKBENCH_CONTEXT_DRAFT_VERSION, AI_WORKBENCH_DISPLAY_DRAFT_VERSION, AI_WORKBENCH_DISPLAY_LIMITS,
-  AI_SCENE_REQUEST_DRAFT_VERSION, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
+  AI_SCENE_REQUEST_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
   type AiApprovalApplicationReferenceDraft, type AiTaskInputAnswerDraft,
   type AiWorkbenchContextDraft, type AiWorkbenchDisplayBindingDraft, type AiWorkbenchFieldMaterialDraft,
   type AiWorkbenchHostDraft, type AiWorkbenchMountBindingDraft, type AiWorkbenchPresentationDraft,
@@ -37,7 +37,7 @@ export interface WorkbenchDisplayPort {
 
 export const displayUnavailable = () => Error('AI_RESOURCE_UNAVAILABLE');
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const id = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(v);
+const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(v);
 const hash = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v);
 const revision = (v: unknown) => Number.isSafeInteger(v) && Number(v) >= 1 && Number(v) <= 4294967294;
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
@@ -110,6 +110,11 @@ export async function inspectWorkbenchDisplay(value: unknown, expected: Workbenc
         || !field.defaultValue || !['provided', 'unavailable'].includes(field.defaultValue.status))) throw displayUnavailable();
   }
   if (new TextEncoder().encode(JSON.stringify(result.proposals)).byteLength > AI_WORKBENCH_DISPLAY_LIMITS.messageBytes / 2) throw displayUnavailable();
+  if (result.proposals.some(proposal => !object(proposal)
+    || Object.keys(proposal).sort().join(',') !== 'contractVersion,proposalId,proposalRevision,reviewedPayloadHash'
+    || proposal.contractVersion !== AI_PROPOSAL_DRAFT_VERSION || !id(proposal.proposalId)
+    || proposal.proposalId.length > 36 || !revision(proposal.proposalRevision) || !hash(proposal.reviewedPayloadHash))
+    || new Set(result.proposals.map(proposal => proposal.proposalId)).size !== result.proposals.length) throw displayUnavailable();
   const bytes = new TextEncoder().encode(p.code.source);
   if (!bytes.length || bytes.byteLength > AI_WORKBENCH_DISPLAY_LIMITS.codeBytes || !globalThis.crypto?.subtle) throw displayUnavailable();
   const digest = await crypto.subtle.digest('SHA-256', bytes);

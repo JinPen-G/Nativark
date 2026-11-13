@@ -26,18 +26,18 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
   const [detail, setDetail] = useState<Detail | null>(null), [error, setError] = useState(false), [busy, setBusy] = useState(false);
   const [resultEpochs, setResultEpochs] = useState<Record<string, number>>({});
   const request = useRef<AbortController | null>(null), generation = useRef(0);
-  const scope = useRef({ conversationId, capabilityCode, current }); scope.current = { conversationId, capabilityCode, current };
+  const scope = useRef({ identity, conversationId, capabilityCode, current }); scope.current = { identity, conversationId, capabilityCode, current };
   useEffect(() => {
     const clear = () => { generation.current++; request.current?.abort(); request.current = null; setDetail(null); setBusy(false); setError(false); setResultEpochs({}); };
     clear(); document.addEventListener('visibilitychange', clear);
     return () => { generation.current++; request.current?.abort(); request.current = null; document.removeEventListener('visibilitychange', clear); };
-  }, [conversationId, capabilityCode]);
+  }, [identity, conversationId, capabilityCode]);
   const read = async (beforeId?: string) => {
-    if (request.current || document.hidden || !scope.current.current() || scope.current.conversationId !== conversationId
+    if (request.current || document.hidden || !scope.current.current() || scope.current.identity !== identity || scope.current.conversationId !== conversationId
       || scope.current.capabilityCode !== capabilityCode) throw Error('AI_SCOPE_CHANGED');
     const owner = ++generation.current, controller = new AbortController(); request.current = controller;
     setDetail(null); setError(false); setBusy(true);
-    const active = () => owner === generation.current && !controller.signal.aborted && !document.hidden
+    const active = () => owner === generation.current && !controller.signal.aborted && !document.hidden && scope.current.identity === identity
       && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode && scope.current.current();
     try {
       const value = await aiConversationsApi.detail({ draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId, limit: 20,
@@ -75,8 +75,9 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
         </span>
         <time dateTime={turn.createdAt}>{formatTimestamp(turn.createdAt).value}</time>
       </li>)}</ol>
-      {detail.turns.items.map(turn => <ConversationResult key={`${turn.turnId}:${resultEpochs[turn.turnId] ?? 0}`} conversationId={conversationId} turn={turn}
-        current={() => !document.hidden && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
+      {detail.turns.items.map(turn => <ConversationResult key={`${identity}:${conversationId}:${capabilityCode}:${turn.turnId}:${resultEpochs[turn.turnId] ?? 0}`}
+        identity={identity} conversationId={conversationId} turn={turn}
+        current={() => !document.hidden && scope.current.identity === identity && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode
           && scope.current.current()} />)}
       {detail.turns.items.filter(turn => turn.capabilityCode === capabilityCode
         && ['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(turn.capabilityCode)

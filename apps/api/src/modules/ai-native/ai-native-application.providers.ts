@@ -467,18 +467,24 @@ export const AI_NATIVE_CONVERSATION_CONFIGURATION = Symbol('AI_NATIVE_CONVERSATI
 export const AI_NATIVE_CONVERSATION_PROVIDER: FactoryProvider = {
   provide: AI_CONVERSATION_REQUESTS, inject: [...originalSceneInjection, { token: AI_NATIVE_CONVERSATION_CONFIGURATION, optional: true },
     { token: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true },
-    { token: AI_WORKBENCH_MODEL_CONTROL_REQUESTS, optional: true }],
+    { token: AI_WORKBENCH_MODEL_CONTROL_REQUESTS, optional: true }, { token: ModuleRef, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, value?: unknown,
     observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult' | 'reopenModelSource'>,
-    displayValue?: unknown, modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>) => {
+    displayValue?: unknown, modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>, moduleRef?: Pick<ModuleRef, 'get'>) => {
     const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding);
     const display = readWorkbenchDisplayConfiguration(displayValue);
     const reads = display.enabled && observations ? composeAiWorkbenchDisplayRequests(original,
-      { currentConfiguration: () => displayValue }, observations) : undefined;
+      { currentConfiguration: () => displayValue }, observations, { async review(request, query, signal) {
+        // Resolve the existing request-bound reader lazily to keep the model
+        // control/conversation/TaskCenter provider graph acyclic.
+        const center = moduleRef?.get<ReturnType<typeof composeRequestBoundTaskCenter>>(AI_NATIVE_TASK_CENTER_REQUESTS, { strict: false });
+        if (!center) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return center.review(request, query, signal);
+      } }) : undefined;
     return composeAiConversationRequests(original, parsed.data.enabled, observations, reads, modelControls);
   }
 };

@@ -27,7 +27,8 @@ const same = (left: unknown, right: unknown) => requestFingerprint(left) === req
 export class AiWorkbenchDisplayPreparationService {
   constructor(private readonly originals: Pick<AiWorkbenchDisplayOriginalReader, 'read' | 'revalidate'>,
     private readonly authority: AiWorkbenchDisplayCurrentAuthority,
-    private readonly clock: () => Date = () => new Date()) {
+    private readonly clock: () => Date = () => new Date(),
+    private readonly confirmations?: (original: AiWorkbenchDisplayOriginalMaterial) => Promise<AiApprovalApplicationReferenceDraft[]>) {
     if (typeof originals?.read !== 'function' || typeof originals.revalidate !== 'function'
       || typeof authority?.revalidateOriginal !== 'function') throw unavailable();
   }
@@ -80,13 +81,15 @@ export class AiWorkbenchDisplayPreparationService {
       ...original.observation.sources.map(source => requestFingerprint(source)),
       ...(original.observation.knowledge?.material.sources.map(source => source.sourceId) ?? [])])];
     if (sourceIds.length > AI_WORKBENCH_DISPLAY_LIMITS.sourceReferences) throw unavailable();
+    const proposals = this.confirmations ? await this.confirmations(original) : [];
     const after = await this.originals.revalidate(original.command, original.bindingHash);
     const closing = await this.current(after);
     if (!same(checked.witness, closing.witness) || Date.parse(expiresAt) <= Date.parse(closing.now)) throw denied();
-    // Pure display has no implied approval request. Existing TaskCenter
-    // approval controls continue to consume their separate original records.
-    return freezeOriginalInput({ context, presentation, fieldMaterial, sourceIds,
-      proposals: [] as AiApprovalApplicationReferenceDraft[] });
+    if (this.confirmations && !same(proposals, await this.confirmations(after))) throw denied();
+    if (Date.parse(expiresAt) <= Date.parse(this.now())) throw unavailable();
+    // Only independently read, currently waiting original proposals may be
+    // requested by the frame. The host opens its separate fixed review.
+    return freezeOriginalInput({ context, presentation, fieldMaterial, sourceIds, proposals });
   }
   async revalidate(value: AiConversationModelResultReadDraft, expected: AiWorkbenchDisplayBindingDraft) {
     const current = await this.read(value);

@@ -3,14 +3,16 @@
  * candidate can open trusted review; no code cache, submission or approval. */
 import { AI_CONVERSATION_HTTP_DRAFT, type ApiResult, type AiWorkbenchDisplayBindingDraft,
   type AiWorkbenchDisplayReadDraft, type AiWorkbenchDisplayRevalidateDraft,
-  type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchFieldMaterialDraft, type AiWorkbenchHostDraft } from '@rental-os/shared';
+  type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchFieldMaterialDraft, type AiWorkbenchHostDraft,
+  type AiApprovalApplicationReferenceDraft } from '@rental-os/shared';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { inspectWorkbenchDisplay, displayLease, displaySame, type WorkbenchDisplayPort,
   type WorkbenchDisplayExpectation, type WorkbenchDisplayLease, type WorkbenchDisplayMaterial } from '@/features/ai-native/workbench-display-host';
 import { http } from './http';
 
 type Owner = Pick<WorkbenchDisplayExpectation, 'tenantId' | 'workspaceId'> & { current(): boolean;
-  reviewCandidate?(candidate: AiWorkbenchHostDraft, material: AiWorkbenchFieldMaterialDraft, signal: AbortSignal): Promise<void> };
+  reviewCandidate?(candidate: AiWorkbenchHostDraft, material: AiWorkbenchFieldMaterialDraft, signal: AbortSignal): Promise<void>;
+  openConfirmation?(binding: AiWorkbenchDisplayBindingDraft, reference: AiApprovalApplicationReferenceDraft, signal: AbortSignal): Promise<void> };
 type Port = WorkbenchDisplayPort & { activate(): void; dispose(): void };
 type Original = { binding: AiWorkbenchDisplayBindingDraft; runId: string; resultId: string };
 const unavailable = () => Error('AI_RESOURCE_UNAVAILABLE');
@@ -18,6 +20,7 @@ const unavailable = () => Error('AI_RESOURCE_UNAVAILABLE');
 export function createAiWorkbenchDisplayPort(owner: Owner): Port {
   let active = true, generation = 0, lifecycle = new AbortController(), original: Original | null = null;
   let fieldMaterial: AiWorkbenchFieldMaterialDraft | null = null, lease: WorkbenchDisplayLease | null = null;
+  let proposals: WorkbenchDisplayMaterial['proposals'] = [];
   const live = (signal: AbortSignal, version = generation) => {
     if (!active || !owner.current() || signal.aborted || lifecycle.signal.aborted || version !== generation) throw unavailable();
   };
@@ -56,20 +59,22 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
       || result.presentation.generation.runId !== ref.runId || result.presentation.generation.resultId !== ref.resultId
       || Date.parse(current.expiresAt) > Date.parse(previous.expiresAt)) throw unavailable();
     fieldMaterial = result.fieldMaterial ? structuredClone(result.fieldMaterial) : null;
+    proposals = structuredClone(result.proposals);
     lease = structuredClone(current);
     return current;
   };
   return {
     activate() { if (active) return; active = true; lifecycle = new AbortController(); },
-    dispose() { active = false; generation++; lifecycle.abort(); original = null; fieldMaterial = null; lease = null; },
+    dispose() { active = false; generation++; lifecycle.abort(); original = null; fieldMaterial = null; lease = null; proposals = []; },
     async read(taskId, signal): Promise<WorkbenchDisplayMaterial> {
       live(signal);
       generation++; lifecycle.abort(); lifecycle = new AbortController();
-      original = null; fieldMaterial = null; lease = null;
+      original = null; fieldMaterial = null; lease = null; proposals = [];
       const result = await material(await post('display', { taskId }, signal), taskId, signal);
       original = { binding: structuredClone(result.presentation.binding),
         runId: result.presentation.generation.runId, resultId: result.presentation.generation.resultId };
       fieldMaterial = result.fieldMaterial ? structuredClone(result.fieldMaterial) : null;
+      proposals = structuredClone(result.proposals);
       lease = displayLease(result);
       return result;
     },
@@ -86,6 +91,17 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
       await owner.reviewCandidate!(command, structuredClone(fieldMaterial), signal);
       live(signal, version);
     } } : {}),
+    ...(owner.openConfirmation ? { async openConfirmation(binding: AiWorkbenchDisplayBindingDraft,
+      reference: AiApprovalApplicationReferenceDraft, signal: AbortSignal) {
+      const command = structuredClone(reference), version = generation;
+      live(signal, version);
+      if (!lease || !displaySame(binding, lease.binding) || !proposals.some(value => displaySame(value, command))) throw unavailable();
+      await revalidate(structuredClone(lease), signal);
+      live(signal, version);
+      if (!proposals.some(value => displaySame(value, command))) throw unavailable();
+      await owner.openConfirmation!(structuredClone(binding), command, signal);
+      live(signal, version);
+    } } : {}),
     async readSource(binding, sourceId, signal) {
       const ref = locator(binding);
       const command: AiWorkbenchDisplaySourceReadDraft = { taskId: binding.taskId, sourceId,
@@ -94,7 +110,7 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
       const value = await post('display-source', command, signal);
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw unavailable();
       const source = value as Record<string, unknown>;
-      if (Object.keys(source).sort().join(',') !== 'text,trust,truncated' || typeof source.text !== 'string'
+      if (Object.keys(source).sort().join(',') !== 'text,truncated,trust' || typeof source.text !== 'string'
         || new TextEncoder().encode(source.text).byteLength > 8192 || typeof source.truncated !== 'boolean'
         || source.trust !== 'source_data_not_instructions') throw unavailable();
       return { text: source.truncated ? `${source.text}\n…` : source.text, trust: 'source_data_not_instructions' as const };

@@ -38,7 +38,7 @@ import { WorkbenchInputReviewSession, type WorkbenchQuoteParameterReview } from 
 import { displaySame } from './workbench-display-host';
 import { TaskWorkbenchModelControlProvider } from './TaskWorkbenchModelControls';
 import { readWorkbenchControlResult } from './workbench-model-control-session';
-import type { AiWorkbenchModelControlObservation } from '@rental-os/shared';
+import type { AiWorkbenchModelControlObservation, AiApprovalApplicationReferenceDraft, AiTaskReviewQueryDraft } from '@rental-os/shared';
 
 const identityKey = () => {
   const auth = useAuthStore.getState();
@@ -80,6 +80,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
   const [modelControlResult, setModelControlResult] = useState<AiWorkbenchModelControlObservation | null>(null);
+  const [requestedProposal, setRequestedProposal] = useState<(AiTaskReviewQueryDraft & { proposal: AiApprovalApplicationReferenceDraft }) | null>(null);
   const [detailSections, setDetailSections] = useState<string[]>([]);
   const selectedOwner = useRef(selected); selectedOwner.current = selected;
   const readAccessOwner = useRef(readAccessEpoch); readAccessOwner.current = readAccessEpoch;
@@ -91,7 +92,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     { active: false, reads: 0, deadline: 0 });
   const stopFollowing = () => { followOwner.current.active = false; followOwner.current.request?.abort(); setFollowTask(null); };
   const [visible, setVisible] = useState(() => !document.hidden);
-  useEffect(() => { setModelControlResult(null); }, [selected, visible, readAccessEpoch]);
+  useEffect(() => { setModelControlResult(null); setRequestedProposal(null); }, [selected, visible, readAccessEpoch]);
   useEffect(() => { const change = () => { stopFollowing(); setLiveSnapshot(null); setVisible(!document.hidden); setSelected(null); setNotificationTask(null); };
     document.addEventListener("visibilitychange", change); return () => document.removeEventListener("visibilitychange", change); }, []);
   useEffect(() => () => { followOwner.current.active = false; followOwner.current.request?.abort(); }, [identity, selected]);
@@ -121,6 +122,25 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       if (signal.aborted || selectedOwner.current !== selected || !current()) throw Error('AI_SCOPE_CHANGED');
       const section = 'kind' in review && review.kind === 'quote_parameters' ? 'approval' : 'input';
       setDetailSections(sections => sections.includes(section) ? sections : [...sections, section]);
+    },
+    openConfirmation: async (binding, proposal, signal) => {
+      const same = () => selected !== null && binding.taskId === selected && selectedOwner.current === selected && current() && !signal.aborted;
+      if (!same()) throw Error('AI_SCOPE_CHANGED');
+      const snapshot = validateTaskCenterSnapshot(await aiTaskCenterApi.snapshot(binding.taskId, signal), binding.taskId);
+      if (!same() || snapshot.status !== 'waiting_confirmation') throw Error('AI_REVISION_CONFLICT');
+      const candidates = snapshot.steps.filter(step => step.kind === 'confirmation' && step.status === 'running');
+      if (candidates.length !== 1) throw Error('AI_RESOURCE_UNAVAILABLE');
+      const target = { taskId: binding.taskId, runId: candidates[0].runId, stepId: candidates[0].stepId };
+      const review = await aiTaskCenterApi.review(target, signal), original = review.review.proposal;
+      if (!same() || review.taskId !== target.taskId || review.runId !== target.runId || review.stepId !== target.stepId
+        || review.taskRevision !== snapshot.revision || review.businessExecution !== 'not_attested'
+        || original.payload.taskId !== binding.taskId || original.status !== 'pending_confirmation'
+        || original.payload.scope.kind !== 'workspace' || original.payload.scope.tenantId !== tenantId
+        || original.payload.scope.workspaceId !== workspaceId || !displaySame(proposal, {
+          contractVersion: original.payload.contractVersion, proposalId: original.payload.proposalId,
+          proposalRevision: original.payload.revision, reviewedPayloadHash: original.payloadHash })) throw Error('AI_REVISION_CONFLICT');
+      setRequestedProposal({ ...target, proposal: structuredClone(proposal) });
+      setDetailSections(sections => sections.includes('approval') ? sections : [...sections, 'approval']);
     } }), [identity, tenantId, workspaceId, inputReview, selected]);
   useEffect(() => { displayPort.activate(); return () => displayPort.dispose(); }, [displayPort]);
   const revalidateParameters = useCallback(async (review: WorkbenchQuoteParameterReview, signal: AbortSignal) => {
@@ -323,10 +343,12 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
               onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
           { key: 'approval', title: t('人工确认'), content: data.items.find(row => row.taskId === selected)?.sceneCode === 'quote_clarification'
             ? <TaskQuoteReprepare key={`quote-review:${identity}:${selected}`} taskId={selected} identity={identity} current={current}
+              requestedProposal={requestedProposal?.taskId === selected ? requestedProposal : undefined}
               parameterReview={inputReviewState.parameters} revalidateParameters={revalidateParameters}
               onParameterReviewed={status => { if (status === 'adopted') inputReview.clear(); }}
               onAccessDenied={() => { setSelected(null); setOpened(false); }} />
             : <TaskHumanApproval key={`review:${selected}`} taskId={selected} identity={identity} current={current}
+              requestedProposal={requestedProposal?.taskId === selected ? requestedProposal : undefined}
               onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
           { key: 'input', title: t('补充信息'), content: <TaskClarification key={`input:${selected}`} taskId={selected} identity={identity} current={current}
             candidateReview={inputReviewState.review} onCandidateReviewed={status => { if (status === 'adopted') inputReview.clear(); }}

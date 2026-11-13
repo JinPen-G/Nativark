@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-model-confirmation-and-chat-display-20261113"></a>
+## 模型请求原提案确认与聊天动态工作区消费（2026-11-13）
+
+本阶段将模型的“查看原提案”请求接回[任务中心原审批区](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)。[服务端确认 reader](../../apps/api/src/modules/ai-native/workbench-display-confirmations.reader.ts)按当前 owner/scope、原请求、Task 修订、唯一待审 Run/Step 和两次原提案 review 返回原引用；读取前后复验步骤、Run、载荷、权限与期限，不新建、批准或执行。展示可沿同 Task 已验证的模型结果读取后继业务待审提案，不能用任意旧 Run 配新材料。[正式 provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)延迟解析原 TaskCenter review，避免循环装配；[准备服务](../../apps/api/src/modules/ai-native/workbench-display-preparation.service.ts)及[应用](../../apps/api/src/modules/ai-native/workbench-display.application.ts)结束前再核原绑定。
+
+[实际展示端口](../../apps/admin/src/api/aiWorkbenchDisplays.ts)只接受本次材料给出的原 proposal，重新读取材料后才调用可信宿主；[TaskHumanApproval](../../apps/admin/src/features/ai-native/TaskHumanApproval.tsx)复用原固定控件，按请求的原 Run/Step/版本/hash 审阅，旧异步回调不能替换新目标，未明决定/继续的原 journal 不被模型请求覆盖。[TaskQuoteReprepare](../../apps/admin/src/features/ai-native/TaskQuoteReprepare.tsx)沿同一审批面板透传，不复制批准链。关闭/撤权/过期不产生批准，unknown 保持原收据语义。
+
+[提示词登记](../../apps/api/src/modules/ai-native/workbench-display-generation.service.ts)新增严格登记的 workbench-html-2，允许报价说明生成 `data-confirmation-index="0"` 的查看请求；保留 workbench-html-1 原字节及 hash，版本/hash 混配拒绝，新版本不回签旧 Artifact。[隔离 frame](../../apps/admin/src/features/ai-native/workbench-display-frame.ts)没有当前原提案时省去该请求控件，坏索引或双用途控件拒绝；生成代码不拥有批准按钮。`workbench-display-host` 补原引用闭合校验。另修来源读回的字段排序字面量，原合法 `text,truncated,trust` 不再被误拒绝，未知字段仍拒绝。
+
+[ConversationDetail](../../apps/admin/src/features/ai-native/ConversationDetail.tsx)→[ConversationResult](../../apps/admin/src/features/ai-native/ConversationResult.tsx)共同入口接 TaskWorkbenchDisplay；每个原 turn 独占 port，绑定身份、epoch、能力、原请求及准确结果。原结果重读保留实例但禁用，隐藏重开重建 port，旧回调不能借新结果复活。候选/审批宿主尚未在聊天中装配时对应动作不可用。两文件固定 blob `171d4ab10680a8803bf975815e045bd7c9b36d2b`、`c506e2f761dffe63c68261e837b72d12f29a5d08`，Root 核同；助手三能力原 API、原 session/frame、撤权/旧调用和 Detail props 必要模拟全部退出 0，主要 stdin SHA-256 `b751ac620da02e134fcea6c027fdcb00018adda6a3b9ac5bdf4aef7d788c37c9`、`ed97cba586b17489395e2d332d16c49cd18c6451d3e3a2380edf58781cdd6bc9`、`82e059a8325df6acde0158d72c2261a685f69cf8d29ec87b376a990c8c05bd81`。
+
+Root 最终固定源码组合使用既有两行报价 fixture，经正式 conversation admit/create、模型准备/Gateway、原回答、Core 报价/选单、原等待审批，再走标准 provider/Guard/Controller→实际前端 API/MessagePort→TaskCenter 原审批区→实际 TaskHumanApproval 读取正式材料。Node stdin SHA-256 `881b2aa3713443dbcbae0e0fdd80d22183c18c940cb134668c774d7daf6c54ce`，退出 0：原两个模型调用/一张报价不增，审批/订单均为 0；不同 Task、原载荷改变、review 等待期间 Step/Run 改变、撤权、过期、原始 body 额外字段拒绝；取消后原展示不提供确认引用。隔离 bootstrap 的最小 DOM/消息模拟退出 0，SHA-256 `b87d0b8e01c771b27fc23ebb122df2fee0fe422601d171266663d6f0f2a2bd35`；提示词旧字节及新版本闭合模拟退出 0，SHA-256 `6d6f9b44fce3c7e76c0746230d4e3c561e36ae4e3fc6b0a706a976a19bdeb3b1`。固定 API 3 根/1817 源、后台 4 根/1615 源 TypeScript 5.9.3 零诊断，Node stdin SHA-256 `d00d360e23266060efb597a065235b138ded2e7c569ffda94038fce735683934`；当前并行历史/恢复 WIP 在该检查中取原 HEAD，未夹入本阶段。
+
+保留原失败：VM 跨 realm 对象、缺 HTTP url/别名、旧夹具时间与标准服务实时时钟不一致、内存 JS 括号/port.close 缺项先后阻止验证；均修驱动后以最终组合复验。等待变化首个反例修改了已被 fixture 事务替换的旧对象，未发生实际行变化；改当前存储行后相同拒绝断言通过。后台引用类型收窄及 provider 宽泛返回类型在本片修正，review 包按闭合结构加原域校验，不靠强制类型断言。进程退出、审计为空、任务临时目录未创建，无新测试脚本；本阶段为模拟和类型，真实浏览器、数据库及供应商由负责人操作。
+
+独立核定还确认实际订单三步链与普通单模型不同：标准 order-read 在同 Run 有 `scene-model → scene-order → scene-answer`，最终回答尚无 display witness，通用两处唯一结果选择器不接受它。不能因聊天已挂组件便称订单动态展示生产链完成，也不能简单取最后模型或删除校验；需只为原最终 answer 接独立无 tools 展示策略，继续复用原 readAnswerResult/财务/Core 证据。此项及后台恢复/接管、跨轮历史上下文仍在施工，AIN-12/13/14 依赖进度不提前上调。
+
 <a id="ain14-calendar-and-saved-proposal-20261113"></a>
 ## 开业日历采用来源与已保存提案差异（2026-11-13）
 

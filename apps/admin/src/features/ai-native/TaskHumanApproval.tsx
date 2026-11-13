@@ -222,9 +222,10 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
 export type TaskOrderReviewReference = AiTaskReviewQueryDraft & {
   original: AiApprovalApplicationReferenceDraft; selection?: AiQuoteSelectionProofDraft;
 };
-export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, runId, onOrderReviewed }: {
+export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, runId, onOrderReviewed, requestedProposal }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void; runId?: string;
   onOrderReviewed?: (value: TaskOrderReviewReference | null) => void;
+  requestedProposal?: AiTaskReviewQueryDraft & { proposal: AiApprovalApplicationReferenceDraft };
 }) {
   const { t } = useLocale(), labelId = useId();
   const storageKey = `ai-task-decision:${identity}:${taskId}${runId ? `:${runId}` : ''}`;
@@ -237,6 +238,8 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
   const [receipt, setReceipt] = useState<AiTaskHumanDecisionReceiptDraft | null>(null);
   const [business, setBusiness] = useState<AiTaskBusinessObservationDraft | null>(null);
   const [message, setMessage] = useState<string | null>(null), [busy, setBusy] = useState(false);
+  const requestedKey = JSON.stringify(requestedProposal ?? null), requestedOwner = useRef(requestedKey);
+  requestedOwner.current = requestedKey;
   const active = useRef({ current, onAccessDenied, onOrderReviewed }); active.current = { current, onAccessDenied, onOrderReviewed };
   const reviewedOrder = useRef<TaskOrderReviewReference | null>(null);
   const reportOrderReview = (value: TaskOrderReviewReference | null) => {
@@ -245,8 +248,21 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
   };
   const flight = useRef<AbortController | null>(null);
   useEffect(() => () => { flight.current?.abort(); }, []);
+  useEffect(() => {
+    if (!requestedProposal || requestedProposal.taskId !== taskId || runId !== undefined && requestedProposal.runId !== runId) return;
+    // A model request is only a locator for the original fixed review. Pending
+    // user decisions/continuations keep their own journal and are never replaced.
+    if (original || continuation || !active.current.current()) return;
+    flight.current?.abort();
+    const source = reviewedOrder.current;
+    if (source && (source.runId !== requestedProposal.runId || source.stepId !== requestedProposal.stepId
+      || source.original.proposalId !== requestedProposal.proposal.proposalId
+      || source.original.proposalRevision !== requestedProposal.proposal.proposalRevision
+      || source.original.reviewedPayloadHash !== requestedProposal.proposal.reviewedPayloadHash)) reportOrderReview(null);
+    setReview(null); setReceipt(null); setBusiness(null); setSteps([]); setSelected(null);
+  }, [requestedKey, taskId, runId]);
   const run = async (work: (signal: AbortSignal) => Promise<void>, write = false) => {
-    if (flight.current || !active.current.current()) throw Error("AI_SCOPE_CHANGED");
+    if (flight.current || !active.current.current() || requestedOwner.current !== requestedKey) throw Error("AI_SCOPE_CHANGED");
     const controller = new AbortController(); flight.current = controller; setBusy(true); setMessage(null);
     const same = () => active.current.current() && !controller.signal.aborted;
     try { await work(controller.signal); if (!same()) throw Error("AI_SCOPE_CHANGED"); }
@@ -261,7 +277,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
       throw error;
     } finally { if (flight.current === controller) { flight.current = null; if (same()) setBusy(false); } }
   };
-  const same = (signal: AbortSignal) => active.current.current() && !signal.aborted;
+  const same = (signal: AbortSignal) => active.current.current() && !signal.aborted && requestedOwner.current === requestedKey;
   const readSteps = () => run(async signal => {
     setReview(null); setReceipt(null); setBusiness(null); setStepObservations({}); setSteps([]);
     const snapshot = await aiTaskCenterApi.snapshot(taskId, signal);
@@ -269,7 +285,8 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
     if (runId !== undefined && !id(runId)) throw Error('AI_INVALID_INPUT');
     const candidates = taskHumanSteps(snapshot, taskId).filter(step => runId === undefined || step.runId === runId);
     setSteps(candidates);
-    setSelected(previous => candidates.some(step => `${step.runId}:${step.stepId}` === previous) ? previous : null);
+    setSelected(previous => requestedProposal && candidates.some(step => step.runId === requestedProposal.runId && step.stepId === requestedProposal.stepId)
+      ? taskHumanStepKey(requestedProposal) : candidates.some(step => `${step.runId}:${step.stepId}` === previous) ? previous : null);
     const source = reviewedOrder.current;
     // Refreshing the same original step preserves its editor. Removing that
     // step retracts the old proposal locator before another task can use it.
@@ -288,6 +305,14 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
       || !/^[a-f0-9]{64}$/u.test(value.review.proposal.payloadHash)
       || value.review.proposal.payload.actions[0].toolCode !== (value.kind === "order" ? "rental.order.commit" : "tenant.notifications.commit")
       || !formatTimestamp(value.review.proposal.payload.expiresAt).available) throw Error("AI_RESOURCE_UNAVAILABLE");
+    if (requestedProposal) {
+      const proposal = value.review.proposal;
+      if (requestedProposal.taskId !== taskId || requestedProposal.runId !== value.runId || requestedProposal.stepId !== value.stepId
+        || requestedProposal.proposal.contractVersion !== proposal.payload.contractVersion
+        || requestedProposal.proposal.proposalId !== proposal.payload.proposalId
+        || requestedProposal.proposal.proposalRevision !== proposal.payload.revision
+        || requestedProposal.proposal.reviewedPayloadHash !== proposal.payloadHash) throw Error('AI_REVISION_CONFLICT');
+    }
     if (value.kind === "order") {
       if (!hasOrderReviewMaterial(value) || typeof value.review.deterministic.currency !== "string" || value.review.deterministic.currency.length > 16
         || !formatTimestamp(value.review.deterministic.quoteExpiresAt).available
@@ -370,6 +395,7 @@ export function TaskHumanApproval({ taskId, identity, current, onAccessDenied, r
   }, true);
   return <section aria-label={t("原提案人工审阅")} aria-busy={busy}>
     <p className="muted">{t("批准与继续执行分开确认。")}</p>
+    {requestedProposal && <p>{t('已定位原提案。读取原业务步骤并审阅后，再明确决定。')}</p>}
     <div className="panel-toolbar">
       <ActionButton label={t("读取原业务步骤")} disabled={busy || !!original || !!continuation} onAction={readSteps} />
       {!!steps.length && <><label id={labelId}>{t("原业务步骤")}</label><Select aria-labelledby={labelId} value={selected}

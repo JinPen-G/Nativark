@@ -33,6 +33,7 @@ const english: Record<string, string> = {
   '租赁报价': 'Rental quote',
   '普通资料修改': 'Ordinary profile change',
   '模型能力检测': 'Model capability check',
+  '已定位原提案。读取原业务步骤并审阅后，再明确决定。': 'The original proposal is located. Read its business step and review it before deciding.',
   '解释与排版操作': 'Explanation and layout controls',
   '重新解释': 'Regenerate explanation',
   '重新排版': 'Regenerate layout',
