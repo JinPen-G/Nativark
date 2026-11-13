@@ -6,6 +6,7 @@ import { AI_SCENE_CODES, AI_SCENE_REQUEST_DRAFT_VERSION } from './ai-scene-reque
 import type { AiSceneModelResultObservationDraft } from './ai-scene-model-observation-draft';
 import { AI_TASK_DRAFT_VERSION, type AiTaskModelObservationDraft } from './ai-task-draft';
 import { AI_WORKBENCH_DISPLAY_HTTP_SCHEMAS } from './ai-workbench-display-http-draft';
+import { AI_WORKBENCH_MODEL_CONTROL_SCHEMAS } from './ai-workbench-model-control-draft';
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafList as list, leafRef as ref, leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -80,6 +81,15 @@ export interface AiConversationTurnPageDraft extends Version {
   conversationId: string; items: AiConversationTurnObservationDraft[]; nextBeforeId: string | null;
   coverage: 'page_not_total'; execution: 'not_started_by_read';
 }
+/** A server-selected original or receipt-proven successor. The admission Run
+ * remains unchanged; a new locator is read authority, never permission to run. */
+export type AiConversationTaskResultDraft = Version & {
+  conversationId: string; admissionKey: string; turn: AiConversationTurnObservationDraft;
+  execution: 'read_only_no_start_no_dispatch';
+} & ({ status: 'observed'; result: AiTaskModelObservationDraft; lineage: {
+  kind: 'original_run' | 'human_answer' | 'model_control'; originRunId: string;
+  runId: string; runSequence: number; proofHash: string;
+} } | { status: 'material_erased' | 'no_task_observed' | 'no_unique_result'; result: null; lineage: null });
 
 export const AI_CONVERSATION_HTTP_DRAFT = Object.freeze({ basePath: 'ai-native/conversations', operations: {
   create: { request: 'AiConversationCreateDraft', response: 'AiConversationOperationObservationDraft', write: true },
@@ -93,9 +103,13 @@ export const AI_CONVERSATION_HTTP_DRAFT = Object.freeze({ basePath: 'ai-native/c
   turns: { request: 'AiConversationTurnListDraft', response: 'AiConversationTurnPageDraft', write: false },
   release: { request: 'AiConversationMutationDraft', response: 'AiConversationOperationObservationDraft', write: true },
   modelResult: { request: 'AiConversationModelResultReadDraft', response: 'AiConversationModelResultResponseDraft', write: false },
+  'task-result': { request: 'AiConversationTurnReferenceDraft', response: 'AiConversationTaskResultDraft', write: false },
   display: { request: 'AiWorkbenchDisplayReadDraft', response: 'AiWorkbenchDisplayMaterialDraft', write: false },
   'display-revalidate': { request: 'AiWorkbenchDisplayRevalidateDraft', response: 'AiWorkbenchDisplayMaterialDraft', write: false },
   'display-source': { request: 'AiWorkbenchDisplaySourceReadDraft', response: 'AiWorkbenchDisplaySourceDraft', write: false },
+  'model-control-prepare': { request: 'AiWorkbenchDisplayReadDraft', response: 'AiWorkbenchModelControlPreparation', write: false },
+  'model-control': { request: 'AiWorkbenchModelControlCommand', response: 'AiWorkbenchModelControlObservation', write: true },
+  'model-control-read': { request: 'AiWorkbenchModelControlReference', response: 'AiWorkbenchModelControlObservation', write: false },
   closeUnstarted: { request: 'AiConversationUnstartedCloseDraft', response: 'AiConversationUnstartedReceiptDraft', write: true },
 } } as const);
 const key = { ...id(), maxLength: 128 };
@@ -111,6 +125,7 @@ const unstartedReceipt = object({ draftVersion: choice(AI_CONVERSATION_UNSTARTED
   status: choice('observed'), conversationId: id(), revision, operation: choice('close_unstarted'),
   creation: choice('permanently_closed'), task: choice('not_created'), taskCancellation: choice('not_requested'), businessRecords: choice('not_modified') });
 export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  ...AI_WORKBENCH_MODEL_CONTROL_SCHEMAS,
   ...AI_WORKBENCH_DISPLAY_HTTP_SCHEMAS,
   AiConversationUnstartedCloseDraft: object({ draftVersion: choice(AI_CONVERSATION_UNSTARTED_DRAFT_VERSION),
     conversationId: id(), operationKey: key, expectedRevision: revision, turnId: id(), originalInputRef: id() }),
@@ -124,6 +139,13 @@ export const AI_CONVERSATION_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiConversationTurnAdmissionDraft: object({ ...reference, expectedRevision: revision, admissionKey: { ...id(), maxLength: 128 }, request: ref('AiSceneRequestBodyDraft') }),
   AiConversationTurnReferenceDraft: object({ ...reference, admissionKey: key }),
   AiConversationModelResultReadDraft: object({ ...reference, admissionKey: key, resultId: id() }),
+  AiConversationTaskResultDraft: { oneOf: [
+    object({ ...reference, admissionKey: key, turn: ref('AiConversationTurnObservationDraft'), status: choice('observed'),
+      result: ref('AiTaskModelObservationDraft'), lineage: object({ kind: choice('original_run', 'human_answer', 'model_control'),
+        originRunId: id(), runId: id(), runSequence: revision, proofHash: hash }), execution: choice('read_only_no_start_no_dispatch') }),
+    object({ ...reference, admissionKey: key, turn: ref('AiConversationTurnObservationDraft'),
+      status: choice('material_erased', 'no_task_observed', 'no_unique_result'), result: nil, lineage: nil,
+      execution: choice('read_only_no_start_no_dispatch') })] },
   AiConversationModelResultResponseDraft: { oneOf: [
     object({ ...reference, admissionKey: key, turn: ref('AiConversationTurnObservationDraft'), status: choice('observed'),
       result: ref('AiSceneModelResultObservationDraft'), execution: choice('read_only_no_start_no_dispatch') }),
@@ -261,10 +283,14 @@ export function validateAiConversationOperationDraft(value: unknown, operationKe
  * reach history. The admitted original Run, not the currently selected Task,
  * binds the result. Valid shape still requires the server's current read policy. */
 export function validateAiConversationTaskModelDraft(value: unknown, turn: AiConversationTurnObservationDraft): value is AiTaskModelObservationDraft {
+  return validateConversationTaskModel(value, turn, turn?.task?.runId);
+}
+function validateConversationTaskModel(value: unknown, turn: AiConversationTurnObservationDraft,
+  permittedRun: string | undefined): value is AiTaskModelObservationDraft {
   if (!validateAiConversationTurnDraft(turn) || !turn.task || turn.material !== 'retained'
     || !conversationClosed(value, ['contractVersion', 'taskId', 'runId', 'resultId', 'sceneCode', 'status', 'text', 'sources',
       'observedAt', 'businessExecution', 'execution']) || value.contractVersion !== AI_TASK_DRAFT_VERSION
-    || value.taskId !== turn.task.taskId || value.runId !== turn.task.runId || !conversationId(value.resultId)
+    || value.taskId !== turn.task.taskId || value.runId !== permittedRun || !conversationId(value.resultId)
     || value.sceneCode !== turn.capabilityCode || !['available', 'stale', 'unknown', 'failed'].includes(value.status as string)
     || !conversationTime(value.observedAt) || value.businessExecution !== 'not_inferred_from_model_result'
     || value.execution !== 'read_only_no_start_no_reconnect_side_effect' || !Array.isArray(value.sources) || value.sources.length > 9) return false;
@@ -279,4 +305,36 @@ export function validateAiConversationTaskModelDraft(value: unknown, turn: AiCon
   return conversationClosed(value.text, ['value', 'trust']) && typeof value.text.value === 'string'
     && value.text.trust === 'unverified_model_text_not_execution_evidence'
     && value.text.value.length <= 131072 && new TextEncoder().encode(value.text.value).byteLength <= 131072;
+}
+
+/** The successor proof is delivered only by the original authorized reader.
+ * Keep the old model validator pinned to its admitted Run for all old callers. */
+export function validateAiConversationTaskResultDraft(value: unknown, reference: AiConversationTurnReferenceDraft,
+  expected?: AiConversationTurnObservationDraft): value is AiConversationTaskResultDraft {
+  if (!conversationClosed(reference, ['draftVersion', 'conversationId', 'admissionKey'])
+    || reference.draftVersion !== AI_CONVERSATION_DRAFT_VERSION || !conversationId(reference.conversationId)
+    || !conversationId(reference.admissionKey) || reference.admissionKey.length > 128
+    || !conversationClosed(value, ['draftVersion', 'conversationId', 'admissionKey', 'turn', 'status', 'result', 'lineage', 'execution'])
+    || value.draftVersion !== AI_CONVERSATION_DRAFT_VERSION || value.conversationId !== reference.conversationId
+    || value.admissionKey !== reference.admissionKey || value.execution !== 'read_only_no_start_no_dispatch'
+    || !validateAiConversationTurnDraft(value.turn) || value.turn.admissionKey !== reference.admissionKey) return false;
+  const turn = value.turn;
+  if (expected && (!validateAiConversationTurnDraft(expected) || turn.turnId !== expected.turnId
+    || turn.admissionKey !== expected.admissionKey || turn.originalRequestKey !== expected.originalRequestKey
+    || turn.requestHash !== expected.requestHash || turn.capabilityCode !== expected.capabilityCode
+    || turn.capabilityVersion !== expected.capabilityVersion || turn.createdAt !== expected.createdAt
+    || turn.original.inputRef !== expected.original.inputRef || turn.material !== expected.material
+    || turn.task?.taskId !== expected.task?.taskId || turn.task?.runId !== expected.task?.runId)) return false;
+  if (value.status !== 'observed') return value.result === null && value.lineage === null
+    && (value.status === 'material_erased' ? turn.material === 'erased'
+      : value.status === 'no_task_observed' ? turn.material === 'retained' && !turn.task
+        : value.status === 'no_unique_result' && turn.material === 'retained' && !!turn.task);
+  const lineage = value.lineage;
+  if (!turn.task || !conversationClosed(lineage, ['kind', 'originRunId', 'runId', 'runSequence', 'proofHash'])
+    || lineage.originRunId !== turn.task.runId || !conversationId(lineage.runId) || !conversationRevision(lineage.runSequence)
+    || typeof lineage.proofHash !== 'string' || !/^[a-f0-9]{64}$/u.test(lineage.proofHash)
+    || (lineage.kind === 'original_run' ? lineage.runId !== lineage.originRunId || lineage.runSequence !== 1
+      : !['human_answer', 'model_control'].includes(lineage.kind as string) || lineage.runId === lineage.originRunId
+        || (lineage.runSequence as number) < 2)) return false;
+  return validateConversationTaskModel(value.result, turn, lineage.runId);
 }

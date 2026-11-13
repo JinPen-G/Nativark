@@ -56,10 +56,15 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     { kind: choice('run_outcome'), status: choice('succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed') }
   ] as Array<Record<string, SchemaObject>>).map(result => closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
     automaticRetry: { type: 'boolean', enum: [false] }, businessExecution: choice('read_original_receipt'), ...result })) },
-  AiTaskHumanReviewDraft: { oneOf: ['order', 'settings'].map(kind => closed({
-    taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 }, taskRevision: revision,
-    checkpointRef: { ...id(), maxLength: 36 }, kind: choice(kind),
-    review: ref(kind === 'order' ? 'AiApprovalApplicationReviewDraft' : 'AiApprovedSettingsReviewDraft'), businessExecution: choice('not_attested') })) },
+  AiTaskHumanReviewDraft: { oneOf: ['order', 'settings'].map(kind => {
+    const properties = {
+      taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 }, taskRevision: revision,
+      checkpointRef: { ...id(), maxLength: 36 }, kind: choice(kind),
+      review: ref(kind === 'order' ? 'AiApprovalApplicationReviewDraft' : 'AiApprovedSettingsReviewDraft'), businessExecution: choice('not_attested')
+    };
+    return { ...closed(properties), properties: { ...properties,
+      ...(kind === 'order' ? { selection: ref('AiQuoteSelectionProofRequest') } : {}) } };
+  }) },
   AiTaskHumanDecisionReceiptDraft: closed({ taskId: { ...id(), maxLength: 36 }, runId: { ...id(), maxLength: 36 }, stepId: { ...id(), maxLength: 36 },
     receipt: ref('AiApprovalApplicationReceiptDraft'), businessExecution: choice('not_attested') }),
   AiTaskBusinessObservationDraft: { oneOf: ([

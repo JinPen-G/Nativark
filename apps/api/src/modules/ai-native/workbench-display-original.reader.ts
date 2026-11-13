@@ -5,7 +5,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { hasEffectivePermission } from '../../common/permission-match';
 import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TOOL_DRAFT_VERSION,
-  type AiConversationModelResultReadDraft } from '@rental-os/shared';
+  type AiConversationModelResultReadDraft, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.repository';
 import type { AiScopeRepository } from './ai-scope.repository';
 import type { AiConversationRepository } from './conversation.repository';
@@ -23,6 +23,8 @@ import { originalIdentityHash } from './task-request/original-request.authority'
 import { freezeOriginalInput } from './task-request/original-request.validation';
 import { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { orderAnswerDisplayObservation, readOrderAnswerDisplayEnvelope, readOrderAnswerDisplayLineage } from './order-answer-display.adapter';
+import type { WorkbenchModelControlOriginReader, WorkbenchModelControlOrigin } from './workbench-model-control.contract';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiTaskActionInput' | 'aiTaskResultArtifact'>;
 export interface AiWorkbenchDisplayOriginalDependencies {
@@ -32,8 +34,13 @@ export interface AiWorkbenchDisplayOriginalDependencies {
   originals: Pick<PrismaOriginalRequestRepository, 'readHistorical'>;
   tasks: Pick<AiTaskRepository, 'resolveAccess'>;
   evidence: Pick<PrismaModelStepEvidenceAuthority, 'readOriginalCompletedEvidence'>;
-  observations: { readModelResult(value: unknown): Promise<unknown> };
+  observations: { readModelResult(value: unknown): Promise<unknown>;
+    /** Explicit final-answer reader of the fixed original order chain. It must
+     * recheck the original Core result and measured answer, never raw text. */
+    readOrderAnswer?(original: AiSceneRequestReadDraft): Promise<unknown> };
   policy: TaskModelPolicy;
+  /** Operator-only control provenance. Ordinary hosts keep the answer reader. */
+  readRunOrigin?: WorkbenchModelControlOriginReader;
 }
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -102,7 +109,12 @@ export class AiWorkbenchDisplayOriginalReader {
     if (!stored || stored.id !== completed.step.inputRef || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId
       || stored.runId !== completed.step.runId || stored.toolCode !== completed.step.toolCode
       || stored.toolVersion !== completed.step.toolVersion || stored.fingerprint !== completed.step.fingerprint) throw denied();
-    const modelInput = parseTaskModelInput(stored.payload, this.policy), envelope = readOriginalSceneEnvelope(modelInput);
+    const orderAnswer = turn.capabilityCode === 'order_explanation'
+      && stored.registrationRef === `scene-answer:${original.receipt.inputRef}`;
+    if (orderAnswer && (this.policy.orderExplainTool || this.policy.structuredOutput
+      || !this.input.observations.readOrderAnswer)) throw unavailable();
+    const modelInput = parseTaskModelInput(stored.payload, this.policy);
+    const envelope = orderAnswer ? readOrderAnswerDisplayEnvelope(modelInput, original.receipt) : readOriginalSceneEnvelope(modelInput);
     // The trusted publisher seals this witness before the original plan/input
     // fingerprint. An ordinary completed result can never acquire it on read.
     if (!modelInput.displayWitness) throw unavailable();
@@ -124,17 +136,39 @@ export class AiWorkbenchDisplayOriginalReader {
       if (!run || run.id !== completed.step.runId || run.scopeId !== key.scopeId || run.taskId !== task.id
         || run.actorKind !== currentAccess.actorKind || run.actorId !== currentAccess.actorId
         || !Number.isSafeInteger(run.sequence) || run.sequence < 1 || run.sequence > 4294967294) throw denied();
-      const origin = await readTaskModelRunOrigin(tx, currentAccess, { ...key, runId: completed.step.runId,
-        originRunId: turn.task!.runId, registrationRef: `scene-model:${original.receipt.inputRef}`, includeHistory: true });
+      const answerLineage = orderAnswer ? await readOrderAnswerDisplayLineage(tx, { task: currentTask, access: currentAccess,
+        turn, original: original.receipt, inputId: stored.id, stepId: completed.step.id, resultId: command.resultId, modelInput }) : null;
+      const origin: WorkbenchModelControlOrigin = answerLineage ?? await (this.input.readRunOrigin ?? readTaskModelRunOrigin)(tx, currentAccess,
+        { ...key, runId: completed.step.runId, originRunId: turn.task!.runId,
+          registrationRef: `scene-model:${original.receipt.inputRef}`, includeHistory: true });
       if (origin.registrationRef !== stored.registrationRef || provenance.authorizationHash !== modelInput.identityHash) throw denied();
       if (witness.presentationRevision !== run.sequence) throw denied();
-      return { provenance, origin, generationRevision: run.sequence };
+      return { provenance, origin, answer: answerLineage?.orderAnswer ?? null, generationRevision: run.sequence };
     });
     const lineage = await readLineage(task, access);
     const gateway = completed.artifact.payload;
     if (!isGatewayResult(gateway) || gateway.status !== 'completed' || gateway.usage.kind !== 'reported'
       || gateway.requestId !== modelInput.intent.requestId || !same(gateway.actual, modelInput.configuration)) throw unavailable();
-    const observation = validateAiSceneModelObservation(await this.input.observations.readModelResult({ original: turn.original, resultId: command.resultId }));
+    if (orderAnswer && gateway.toolRequests.length) throw unavailable();
+    const readObservation = async () => {
+      const controlledOrder = lineage.origin.orderAnswerOrigin;
+      if (!orderAnswer && controlledOrder) {
+        if (turn.capabilityCode !== 'order_explanation' || !lineage.origin.control || !this.input.observations.readOrderAnswer
+          || controlledOrder.rootRunId !== turn.task!.runId || gateway.toolRequests.length) throw denied();
+        // The control has a new measured model result, but its business
+        // explanation still comes from the same verified original Core answer.
+        const originalAnswer = orderAnswerDisplayObservation(await this.input.observations.readOrderAnswer(structuredClone(turn.original)),
+          { turn, original: original.receipt, modelInput, resultId: controlledOrder.resultId,
+            originalReadResultId: controlledOrder.originalReadResultId });
+        return { ...originalAnswer, runId: completed.step.runId, resultId: command.resultId };
+      }
+      if (!orderAnswer) return validateAiSceneModelObservation(await this.input.observations.readModelResult({ original: turn.original, resultId: command.resultId }));
+      if (!lineage.answer) throw unavailable();
+      return orderAnswerDisplayObservation(await this.input.observations.readOrderAnswer!(structuredClone(turn.original)),
+        { turn, original: original.receipt, modelInput, resultId: command.resultId,
+          originalReadResultId: lineage.answer.originalReadResultId });
+    };
+    const observation = await readObservation();
     if (observation.status !== 'available' || observation.taskId !== task.id || observation.runId !== completed.step.runId
       || observation.resultId !== command.resultId || observation.sceneCode !== turn.capabilityCode
       || observation.materialHash !== envelope.materialHash || receiptBinding(observation.original) !== receiptBinding(original.receipt)) throw unavailable();
@@ -146,6 +180,7 @@ export class AiWorkbenchDisplayOriginalReader {
     if (!afterTask || !afterStored || !same(taskBinding(task), taskBinding(afterTask))
       || !same(inputBinding(stored), inputBinding(afterStored)) || !same(lineage, await readLineage(afterTask, afterAccess))) throw denied();
     const afterEvidence = await this.input.evidence.readOriginalCompletedEvidence(task.id, locator.stepId, command.resultId);
+    if ((orderAnswer || lineage.origin.orderAnswerOrigin) && !same(observation, await readObservation())) throw denied();
     const after = await this.current();
     if (before.identity !== after.identity || before.scope.id !== after.scope.id || !same(admission, afterAdmission)
       || afterOriginal.receipt.state === 'revoked' || originalIdentityHash(afterOriginal.context) !== before.identity

@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION, type AiOrderExplainRequestDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, aiOpeningCalendarSourceBasis, type AiOrderExplainRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
@@ -15,6 +15,9 @@ import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.reposito
 import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
 import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools/order-explanation-renderer';
 import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
+import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
+import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
+import { buildQuotePreparationSummary } from '../workbench-authoritative-summary';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -97,10 +100,16 @@ function orderFactsFingerprint(material: unknown) {
 }
 
 function openingFactsFingerprint(material: unknown) {
-  const current = z.object({ scope: z.unknown(), audience: z.string(), configVersion: z.string(),
+  const current = z.object({ scope: z.object({ kind: z.literal('workspace'), tenantId: z.string(), workspaceId: z.string() }).strict(),
+    audience: z.string(), configVersion: z.string(),
     observedAt: z.string(), sections: z.array(z.object({ key: z.string().min(1).max(191) }).passthrough()).max(9), configuration: z.unknown() })
     .passthrough().parse(structuredClone(material));
   const { observedAt: _observation, ...facts } = current;
+  if (facts.calendarSource !== undefined) {
+    const calendar = readAiOpeningCalendarSource(facts.calendarSource, facts.scope, current.observedAt);
+    if (!calendar || !facts.sections.some(section => section.key === 'business_calendar')) throw unavailable();
+    facts.calendarSource = aiOpeningCalendarSourceBasis(calendar);
+  }
   // Original readiness keys are unique; their display order is not a business
   // revision. Canonicalize this comparison copy only, keeping every section's
   // content and the immutable materialHash/returned current order unchanged.
@@ -136,6 +145,8 @@ export function quoteFactsFingerprint(material: unknown) {
   delete facts.observedAt;
   const availability = facts.availability;
   if (availability && typeof availability === 'object' && !Array.isArray(availability)) {
+    // This identifies the fresh availability read, not stock or quote revision.
+    delete (availability as Record<string, unknown>).requestId;
     delete (availability as Record<string, unknown>).observedAt;
     if ('source' in availability && availability.source && typeof availability.source === 'object' && !Array.isArray(availability.source)) {
       delete (availability.source as Record<string, unknown>).observedAt;
@@ -156,7 +167,8 @@ export class AiOriginalSceneResultService {
   private readonly policy: GatewayTextIntentPolicy;
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
     private readonly scenes: Scenes, policy: GatewayTextIntentBinding, clock: () => Date = () => new Date(),
-    private readonly knowledge?: AiOriginalSceneKnowledge) {
+    private readonly knowledge?: AiOriginalSceneKnowledge,
+    private readonly readRunOrigin: typeof readTaskModelRunOrigin = readTaskModelRunOrigin) {
     this.results = new AiTaskResultRepository(db, tasks, clock);
     this.policy = taskModelPolicy({ sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens,
       ...(policy.orderExplainTool !== undefined ? { orderExplainTool: policy.orderExplainTool } : {}),
@@ -183,13 +195,14 @@ export class AiOriginalSceneResultService {
     const provenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: access.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return { ...await readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
-        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
+      return { ...await this.readRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}`, includeHistory: true }),
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
     const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId,
       runId: result.runId, resultId: result.resultId,
       observedAt: result.observedAt, businessExecution: 'not_inferred_from_model_result' as const };
+    let revalidateHistory: (() => Promise<unknown>) | undefined;
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
       nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown;
@@ -232,19 +245,34 @@ export class AiOriginalSceneResultService {
           || gateway.toolRequests.some(candidate => !isGatewayOrderExplainRequest(candidate)
             || candidate.input.orderId !== orderId))) throw denied();
         const envelope = readOriginalSceneEnvelope(input);
-        if (!provenance.continuation && envelope.clarifications) throw denied();
+        if (!provenance.continuation && envelope.clarifications) {
+          // An operator model-only control may retain its parent's verified
+          // human receipts. Ordinary root Runs have no such answer history.
+          const history = provenance.history;
+          if (!history.length || envelope.clarifications.length !== history.length
+            || envelope.clarifications.some((answer, index) => answer.receiptId !== history[index].receiptId
+              || answer.inputHash !== history[index].inputHash
+              || requestFingerprint(answer.answers) !== requestFingerprint(history[index].answers))) throw denied();
+        }
         if (provenance.continuation) {
           const continuation = provenance.continuation, previous = parseTaskModelInput(continuation.input, this.policy), priorResult = continuation.result;
+          const { conversationHistory: _history, ...refreshed } = envelope;
           if (taskModelFingerprint(previous, this.policy) !== continuation.inputHash || !isGatewayResult(priorResult)
             || priorResult.status !== 'completed' || priorResult.usage.kind !== 'reported' || priorResult.requestId !== previous.intent.requestId
-            || requestFingerprint(input.intent.messages) !== requestFingerprint(continueOriginalSceneMaterial(previous,
-              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? envelope : undefined).messages)) throw denied();
+            || requestFingerprint(withoutTaskModelDisplayMessages(input.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
+              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? refreshed : undefined).messages)) throw denied();
         }
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();
         return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash,
-          callId: invocation.callId, knowledge: envelope.knowledge, toolRequests: structuredClone(gateway.toolRequests) };
+          callId: invocation.callId, knowledge: envelope.knowledge, conversationHistory: envelope.conversationHistory,
+          toolRequests: structuredClone(gateway.toolRequests) };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+      if (frozen.conversationHistory) {
+        const history = this.scenes.createHistoryReader(this.tasks), packet = frozen.conversationHistory;
+        revalidateHistory = () => history.revalidate(packet, command.original, original.context, 'observation');
+        await revalidateHistory();
+      }
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
       // old diagnosis after configuration/coverage or current permissions change.
@@ -270,7 +298,8 @@ export class AiOriginalSceneResultService {
       }
       output = fingerprint(current) === fingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text
-            : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current) : frozen.text,
+          : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current)
+            : buildQuotePreparationSummary({ request: original.request, material: frozen.material, history: provenance.history }),
             trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId,
           facts: isOrder ? projectOrderExplanationMaterial(current) : current, sources: isOrder ? orderSources(frozen.material) : [],
@@ -291,11 +320,14 @@ export class AiOriginalSceneResultService {
     const finalProvenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: finalAccess.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return { ...await readTaskModelRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
-        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
+      return { ...await this.readRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}`, includeHistory: true }),
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
     if (requestFingerprint(provenance) !== requestFingerprint(finalProvenance)) throw denied();
+    // The same reader is used by model-only controls. Reopen inherited history
+    // after the final awaits; a readable current result cannot renew old sources.
+    await revalidateHistory?.();
     if ((await this.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== finalAccess.bindingKey) throw denied();
     // A historical read may cross natural expiry while validating its sources.
     // Publish the checked closing receipt, without renewing execution authority.

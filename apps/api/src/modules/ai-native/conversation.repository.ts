@@ -21,6 +21,7 @@ import { conversationCommand } from './conversation-contract';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { aiTaskHasUnresolvedEffects } from './task-unresolved-effects';
 import { validateAiSceneModelObservation } from './scenes/scene-observation-contracts';
+import { originalRequestReferenceSchema, freezeOriginalInput } from './task-request/original-request.validation';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -293,6 +294,59 @@ export class AiConversationRepository {
     const after = await this.row(this.db, session, row.id); if (row.revision !== after.revision) throw conflict(); await this.check(session);
     return { draftVersion: version, conversationId: row.id, items, nextBeforeId: turns.length > command.limit ? turns[command.limit - 1].id : null,
       coverage: 'page_not_total', execution: 'not_started_by_read' };
+  }
+  /** Internal context locator only. Sequence comes from immutable admission
+   * revisions, never UUID ordering. Overflow is explicit; no earlier constraint
+   * is silently dropped. Body/Task permissions still belong to original readers. */
+  async readContextHistory(value: unknown, limit = 8) {
+    const original = originalRequestReferenceSchema.safeParse(structuredClone(value));
+    if (!original.success || !Number.isSafeInteger(limit) || limit < 1 || limit > 8)
+      throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const session = await this.current(), owner = this.owner(session);
+    const matches = await this.db.aiConversationTurn.findMany({ where: { ...owner, originalRequestId: original.data.inputRef }, take: 2 });
+    if (!matches.length) { await this.check(session); return undefined; }
+    if (matches.length !== 1) throw unavailable();
+    const target = matches[0], conversation = await this.row(this.db, session, target.conversationId);
+    if (!Number.isSafeInteger(conversation.revision) || conversation.revision < 1 || conversation.revision > 4294967294) throw unavailable();
+    const metadata = (turn: Turn) => {
+      const id = (input: unknown) => typeof input === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(input);
+      if (turn.scopeId !== session.scopeId || turn.ownerId !== session.ownerId || turn.conversationId !== conversation.id
+        || turn.capabilityCode !== conversation.capabilityCode || !id(turn.id) || !id(turn.admissionKey)
+        || !id(turn.originalRequestKey) || !id(turn.capabilityVersion) || !/^[a-f0-9]{64}$/u.test(turn.inputHash)
+        || !Number.isSafeInteger(turn.admissionRevision) || turn.admissionRevision < 1 || turn.admissionRevision >= conversation.revision
+        || !(turn.createdAt instanceof Date) || !Number.isFinite(turn.createdAt.getTime()) || turn.createdAt > this.now()) throw unavailable();
+      const reference = originalRequestReferenceSchema.safeParse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: turn.originalRequestId });
+      if (!reference.success) throw unavailable();
+      return { turnId: turn.id, admissionRevision: turn.admissionRevision, admissionKey: turn.admissionKey,
+        original: reference.data, originalRequestKey: turn.originalRequestKey, requestHash: turn.inputHash,
+        capabilityCode: turn.capabilityCode as AiSceneCode, capabilityVersion: turn.capabilityVersion,
+        createdAt: turn.createdAt.toISOString() };
+    };
+    const selected = metadata(target);
+    if (target.originalRequestId !== original.data.inputRef) throw unavailable();
+    const prior = await this.db.aiConversationTurn.findMany({ where: { ...owner, conversationId: conversation.id,
+      admissionRevision: { lt: target.admissionRevision } }, orderBy: [{ admissionRevision: 'asc' }, { id: 'asc' }], take: limit + 1 });
+    if (prior.length > limit) throw Object.assign(unavailable(), {
+      reason: 'history_limit_exceeded', nextAction: 'narrow_goal_or_new_conversation' });
+    const earlier = [];
+    let previous = 0;
+    for (const turn of prior) {
+      const item = metadata(turn);
+      if (item.admissionRevision <= previous || item.admissionRevision >= target.admissionRevision
+        || item.capabilityVersion !== selected.capabilityVersion || item.createdAt > selected.createdAt)
+        throw unavailable();
+      previous = item.admissionRevision;
+      earlier.push({ ...item, observation: await this.turn(turn) });
+    }
+    const observation = await this.turn(target), after = await this.row(this.db, session, conversation.id);
+    const currentTarget = await this.db.aiConversationTurn.findFirst({ where: { ...owner, conversationId: conversation.id, id: target.id } });
+    if (!currentTarget || requestFingerprint(metadata(currentTarget)) !== requestFingerprint(selected)
+      || after.revision !== conversation.revision || after.status !== conversation.status || after.activeTurnId !== conversation.activeTurnId)
+      throw conflict();
+    await this.check(session);
+    return freezeOriginalInput({ session, conversation: { id: conversation.id, revision: conversation.revision,
+      status: conversation.status as 'active' | 'archived', activeTurnId: conversation.activeTurnId },
+      target: { ...selected, observation }, earlier });
   }
   async readAdmission(value: unknown): Promise<AiConversationAdmissionResponseDraft> {
     const command = conversationCommand('AiConversationTurnReferenceDraft', value), session = await this.current();

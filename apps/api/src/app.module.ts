@@ -1,4 +1,9 @@
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
+import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
+import { AiTaskCenterRecoveryController } from './modules/ai-native/task-center-recovery.application';
+import { AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskOriginalReadPolicyController } from './modules/ai-native/task-original-read-policy.application';
 import { AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -159,7 +164,7 @@ import { AiTaskCenterController } from './modules/ai-native/task-center.applicat
 import { AiConversationController } from './modules/ai-native/conversation.application';
 import { AI_NATIVE_CONVERSATION_PROVIDER, AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER, AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
 import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
   AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -198,6 +203,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     DatabaseModule
   ],
   controllers: [
+    AiTaskCenterRecoveryController,
+    TaskOpeningProposalController,
     AiCreditController,
     InspectionRecognitionTaskController,
     StaffInspectionAccountingController,
@@ -287,6 +294,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     PlatformDemoRequestController
   ],
   providers: [
+    AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER,
     AiCreditService,
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
@@ -301,6 +309,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
     AI_NATIVE_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_TASK_CENTER_PROVIDER,
+    AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER,
     AI_NATIVE_TASK_RULE_DRAFT_PROVIDER,
     AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER,
     AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER,
@@ -319,8 +328,10 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_INPUT_COUNTING_PROVIDER,
     AI_NATIVE_PLATFORM_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
+    AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER,
     AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
     AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,
+    AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER,
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,

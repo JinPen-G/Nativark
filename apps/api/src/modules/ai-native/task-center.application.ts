@@ -7,10 +7,13 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_STATUSES_DRAFT,
-  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft } from '@rental-os/shared';
+  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft,
+  type AiWorkbenchModelControlObservation, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError } from './ai-task.repository';
+import { aiStepActionId } from './ai-step-registration.repository';
+import { aiTaskMetadataQuerySchema } from './ai-task-list.repository';
 import { composePersistedTaskCenter } from './task-center.composition';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { originalIdentityHash } from './task-request/original-request.authority';
@@ -30,7 +33,8 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskCenterInputReceipt, type TaskCenterInputDependencies } from './task-center-input.composition';
 import { recordTaskVisibleObservation, type TaskVisibleObservationDependencies } from './observability/task-visible-observation.service';
 import { validateAiTaskObservation } from './task-contract-validation';
-import { validateAiSceneSourceObservation } from './scenes/scene-observation-contracts';
+import { validateAiOrderReadResponse, validateAiSceneSourceObservation } from './scenes/scene-observation-contracts';
+import { conversationResponse } from './conversation-contract';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown }; body?: unknown } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -39,7 +43,10 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   usageDb?: TaskBudgetUsageDb;
   visibleDb?: TaskVisibleObservationDependencies['db'];
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown>;
+    readOrderAnswer?(request: Request, value: AiSceneRequestReadDraft): Promise<unknown>;
     reopenModelSource?(request: Request, value: unknown): Promise<unknown> };
+  originalModelControls?: { readOperation(request: Request, value: { taskId: string; operationId: string }, signal?: AbortSignal): Promise<unknown>;
+    readResult?(request: Request, value: { taskId: string; resultId: string }, signal?: AbortSignal): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
@@ -51,8 +58,7 @@ const schemas = {
   performance: z.object({ taskId: id.max(36), usageLimit: z.number().int().min(1).max(20), usageAfter: id.max(36).optional(), includeTaskFinancial: z.boolean().optional() }).strict(),
   usageSummary: z.object({ taskId: id.max(36) }).strict(),
   outcomes: z.object({ taskIds: z.array(id.max(36)).min(1).max(50).refine(ids => new Set(ids).size === ids.length) }).strict(),
-  list: z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
-    status: z.enum(AI_TASK_STATUSES_DRAFT).optional(), sceneCode: id.optional() }).strict(),
+  list: aiTaskMetadataQuerySchema,
   snapshot: z.object({ taskId: id }).strict(),
   events: z.object({ taskId: id, after: z.string().max(20).regex(/^(0|[1-9][0-9]*)$/u), limit: z.number().int().min(1).max(100) }).strict(),
   result: z.object({ taskId: id, resultId: id }).strict(),
@@ -110,9 +116,32 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           // Task ID and result ID are lookup keys, not caller-selected original
           // input or permission. Use the stored immutable task provenance.
           const provenance = await readOriginalTaskModelProvenance(input.originalDb, task);
-          const result = modelObservation.safeParse(structuredClone(await readOriginalResult(
-            { headers: { authorization: header.data } }, { original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION,
-              inputRef: provenance.inputRef }, resultId: query.resultId })));
+          const original = { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: provenance.inputRef };
+          let observed: unknown;
+          if (task.sceneCode === 'order_explanation' && input.originalResults?.readOrderAnswer) {
+            const artifact = await input.db.aiTaskResultArtifact.findFirst({ where: { scopeId: task.scopeId,
+              taskId: task.id, id: query.resultId }, select: { stepId: true, runId: true } });
+            const step = artifact ? await input.db.aiStep.findFirst({ where: { scopeId: task.scopeId,
+              taskId: task.id, runId: artifact.runId, id: artifact.stepId } }) : null;
+            const answerActionId = aiStepActionId(access.scope, task.id, `scene-answer:${provenance.inputRef}`);
+            if (step?.actionId === answerActionId) {
+              const response = validateAiOrderReadResponse('readAnswer', await input.originalResults.readOrderAnswer(
+                { headers: { authorization: header.data } }, original), original);
+              const answer = response.result;
+              if (answer.status === 'not_observed' || answer.resultId !== query.resultId || step.resultRef !== query.resultId
+                || step.toolCode !== 'ai.model.text') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+              observed = { taskId: task.id, runId: step.runId, resultId: query.resultId, sceneCode: task.sceneCode,
+                status: answer.status, text: answer.status === 'available'
+                  ? { value: answer.text, trust: 'unverified_model_text_not_execution_evidence' } : null,
+                observedAt: answer.status === 'available' ? answer.snapshotObservedAt : (input.clock?.() ?? new Date()).toISOString(),
+                sources: [], businessExecution: 'not_inferred_from_model_result' };
+            }
+          }
+          if (observed === undefined && task.sceneCode === 'order_explanation' && input.originalModelControls?.readResult) {
+            observed = await input.originalModelControls.readResult({ headers: { authorization: header.data } }, query, activeSignal);
+          }
+          const result = modelObservation.safeParse(structuredClone(observed ?? await readOriginalResult(
+            { headers: { authorization: header.data } }, { original, resultId: query.resultId })));
           if (!result.success || result.data.taskId !== query.taskId || result.data.resultId !== query.resultId || result.data.sceneCode !== task.sceneCode
             || (result.data.status === 'available') !== (result.data.text !== null)
             || result.data.text && Buffer.byteLength(result.data.text.value, 'utf8') > 131072)
@@ -230,6 +259,19 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
                 if (!input.originalDb || (await readOriginalTaskModelProvenance(input.originalDb, task)).inputRef !== report.originKey)
                   throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
               }
+              let control: AiWorkbenchModelControlObservation | undefined;
+              if (report.trigger === 'original_model_control') {
+                if (report.surface !== 'task_center' || report.kind !== 'text' || report.source.kind !== 'model_result')
+                  throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+                if (!input.originalModelControls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+                const reference = { taskId: report.taskId, operationId: report.originKey };
+                control = conversationResponse('model-control-read', await input.originalModelControls.readOperation(
+                  { headers: { authorization: header.data } }, reference, activeSignal), reference) as AiWorkbenchModelControlObservation;
+                if (control.status !== 'available') return null;
+                if (control.taskId !== report.taskId || control.operationId !== report.originKey
+                  || control.runId !== report.runId || control.resultId !== report.source.resultId)
+                  throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+              }
               if (report.source.kind === 'model_result') {
                 const result = await originalResult({ taskId: report.taskId, resultId: report.source.resultId });
                 if (result.status !== 'available' || result.runId !== report.runId || !result.text?.value.trim())
@@ -243,7 +285,8 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
                   || !['pending_confirmation', 'confirmed'].includes(result.review.proposal.status))
                   return null;
               }
-              return requestFingerprint({ taskId: report.taskId, runId: report.runId, source: report.source });
+              return requestFingerprint({ taskId: report.taskId, runId: report.runId, source: report.source,
+                ...(control ? { originalControl: control } : {}) });
         };
         const result = action === 'visibleReport' ? await (async () => {
           if (!input.visibleDb || !Object.is(input.db, input.visibleDb)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

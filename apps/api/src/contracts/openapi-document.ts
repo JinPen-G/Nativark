@@ -1,3 +1,4 @@
+import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT, AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
 import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
@@ -32,6 +33,7 @@ import { AI_CREDIT_COMPONENT_SCHEMAS, AI_CREDIT_OPERATIONS } from './ai-credit';
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_PROVIDER_DISCOVERY_INPUT_SCHEMA, AI_PROVIDER_DISCOVERY_RESULT_SCHEMA } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from '@rental-os/shared';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT,
   AI_QUOTE_SELECTION_HTTP_CONTRACTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS,
   AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS, AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS,
@@ -2336,6 +2338,12 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...Object.entries(AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `taskOpeningProposal_${action}`, permissions: action === 'prepare' ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'],
+    summary: 'Current original diagnosis and Core section are revalidated. Preview is read-only; explicit preparation creates one linked original R1 Task and AI proposal. No active configuration, business draft, publication or model dispatch. Unknown uses the same original operation; history never resumes preparation.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
   ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,
     permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
@@ -2457,6 +2465,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `aiConversation_${operation}`, authRequired: true, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
     summary: operation === 'modelResult'
       ? 'Current owner-authorized conversation turn reads its existing source-revalidated model artifact through the original reader. Erased input exposes only its attested task locator, never recovered text. No model dispatch, task start, approval or business commit. Default-disabled conversation provider requires migration and explicit configuration.'
+      : operation === 'task-result'
+        ? '读取当前受权会话原 Task 的准确结果。原 admission Run 不变；回答或模型控制后继必须由原收据、计划与累计资源来源证明，再经原结果 reader 复核。读取不启动模型、恢复执行或创建业务操作。'
+      : operation === 'model-control'
+        ? '明确为同一当前受权材料登记一次重新解释或排版，沿原 Task、Gateway 与累计预算执行模型。原操作重放只读原收据，不重报价格、重放业务工具或授予业务批准。'
       : 'Current operator-owned conversation metadata and original request admission only. No model start, task cancellation, approval or business commit; unknown uses the original operation/admission. Default-disabled provider requires migration and explicit server configuration.',
     requestSchema: contract.request, responseSchema: contract.response })),
   ...Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) => ({
@@ -2616,6 +2628,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: 'readOriginalPlatformModelConfigurationSave', permissions: ['system:ai-provider:view'],
     summary: 'Current SaaS viewer and original actor only. Exact immutable save receipt, independent of later config rotations; missing is unknown, not rollback or permission to resend. No credential or execution grant.',
     responseSchema: 'AiModelConfigurationOperationDraft' },
+  ...Object.entries(AI_TASK_CENTER_RECOVERY_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_TASK_CENTER_RECOVERY_HTTP.basePath}/${AI_TASK_CENTER_RECOVERY_HTTP[action as keyof typeof AI_TASK_CENTER_RECOVERY_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `aiTaskCenterRecovery_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    requestSchema: contract.request, responseSchema: contract.response,
+    summary: contract.write ? '沿原持久宿主恢复或接管已审阅的 Task/Run/计划/CAS；不创建新计划或额度，unknown 只读原操作。'
+      : '当前本人、空间与原来源复验后的准确恢复定位或原收据；不领取租约、不启动模型。' })),
   ...(['input', 'resumeInput', 'inputReceipt', 'continueInput'] as const).map(action => ({
     method: 'post' as const, path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `aiTaskCenterOriginalClarification_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],

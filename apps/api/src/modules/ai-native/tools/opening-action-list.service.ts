@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiOpeningIntegrationFactsService } from './opening-integration-facts.service';
-import type { AiExecutionContext } from '@rental-os/shared';
+import { aiOpeningCalendarSourceBasis, type AiExecutionContext } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './read-context-binding';
 import type { AiOpeningReadFactsService, AiRiskReadFactsService, AiDiagnosticReadAuthority } from './diagnostic-read-facts.service';
 import { AiDiagnosticSourceUnavailable, aiRiskReadInputSchema } from './diagnostic-read-facts.service';
@@ -81,6 +81,7 @@ export class AiOpeningActionListService {
       if (requestFingerprint(currentFacts.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       const basis = (value: typeof facts) => ({ scope: value.scope, ready: value.ready,
         readinessBasis: value.readinessBasis, coverage: value.coverage,
+        calendarSource: value.calendarSource && aiOpeningCalendarSourceBasis(value.calendarSource),
         items: value.items.slice().sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0) });
       if (requestFingerprint(basis(facts)) !== requestFingerprint(basis(currentFacts))) throw new ModelGatewayError('CONFIG_INVALID');
       facts = currentFacts;
@@ -114,6 +115,7 @@ export class AiOpeningActionListService {
       };
       return { requestId: authorized.requestId, audience: authorized.audience, scope, observedAt: facts.observedAt,
         ...(integrationObservation ? { integrationObservation } : {}),
+        ...(facts.calendarSource ? { calendarSource: facts.calendarSource } : {}),
         configVersion: before.settings.configVersion, ready: facts.ready,
         configuration,
         atomicity: 'independent_sections_not_a_transaction' as const,
@@ -124,6 +126,10 @@ export class AiOpeningActionListService {
             : row.key === 'fulfillment_network' && before.enabledLocationCount === 0 ? 'missing_configuration' as const
             : Object.prototype.hasOwnProperty.call(sections, row.key) ? 'readiness_unsatisfied' as const : 'unclassified' as const,
           issue: row.status === 'ready' ? undefined : row.missing,
+          // Preserve Core's original observation, including its rule summary.
+          // It participates in the two-read comparison; it is not parsed into
+          // a synthetic rule/calendar revision or configuration write grant.
+          ...(row.summary !== undefined ? { summary: row.summary } : {}),
           impact: row.optional ? 'optional_configuration' as const : 'required_readiness_item' as const,
           evidence: { scope, resourceType: 'readiness_item' as const, resourceId: row.key,
             version: before.settings.configVersion, observedAt: facts.observedAt },

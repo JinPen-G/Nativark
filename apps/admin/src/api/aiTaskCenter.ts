@@ -19,6 +19,7 @@ async function read<T>(action: Exclude<keyof typeof AI_TASK_CENTER_HTTP_DRAFT, '
   if (typeof AI_TASK_CENTER_HTTP_DRAFT[action] !== 'string' || signal.aborted) throw Error('AI_RESOURCE_UNAVAILABLE');
   const result = await http.post<ApiResult<T>>(`/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     data, { signal: AbortSignal.any([signal, currentSessionSignal()]),
+      ...(action === 'stop' ? { _authRetry: true } : {}),
       ...(action === 'decision' ? { timeout: AI_APPROVAL_RESPONSE_TIMEOUT_MS }
         : ['continue', 'continueInput'].includes(action) ? { timeout: AI_EXECUTION_RESPONSE_TIMEOUT_MS } : {}) });
   return result.data.data;

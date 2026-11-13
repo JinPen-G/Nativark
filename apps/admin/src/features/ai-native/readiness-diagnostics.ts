@@ -1,4 +1,5 @@
-import type { AiOpeningBusinessMaterialDraft, AiOpeningSectionMaterialDraft, TenantReadinessStatus } from "@rental-os/shared";
+import { aiOpeningCalendarSourceDraft, type AiOpeningBusinessMaterialDraft, type AiOpeningCalendarSourceDraft,
+  type AiOpeningSectionMaterialDraft, type TenantReadinessStatus } from "@rental-os/shared";
 
 export type ReadinessItemState = "required" | "optional" | "unavailable" | "completed" | "unclassified";
 
@@ -25,6 +26,18 @@ export interface ReadinessDiagnosticsDisplay {
   observedAt?: string;
   configVersion?: string;
   externalVerification?: "not_loaded";
+  calendarSource?: AiOpeningCalendarSourceDraft;
+}
+
+/** Shape/scope projection only. The original async reader also checks the
+ * source hash; these metadata never authorize navigation or configuration. */
+export function readinessCalendarSource(value: unknown, scope: { tenantId: string; workspaceId: string }, observedAt?: string) {
+  if (value === undefined) return undefined;
+  const result = aiOpeningCalendarSourceDraft.safeParse(value);
+  if (!result.success || result.data.tenantId !== scope.tenantId || result.data.workspaceId !== scope.workspaceId
+    || observedAt !== undefined && (!Number.isFinite(Date.parse(observedAt))
+      || Date.parse(result.data.observations.completedAt) > Date.parse(observedAt))) throw Error('AI_RESOURCE_UNAVAILABLE');
+  return result.data;
 }
 
 /**
@@ -34,7 +47,7 @@ export interface ReadinessDiagnosticsDisplay {
  */
 export function toReadinessDiagnostics(input: unknown): ReadinessDiagnosticsDisplay | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
-  const value = input as Partial<TenantReadinessStatus>;
+  const value = input as Partial<TenantReadinessStatus> & { calendarSource?: unknown };
   if (
     typeof value.tenantId !== "string" ||
     !value.tenantId || value.tenantId.length > 191 ||
@@ -59,6 +72,10 @@ export function toReadinessDiagnostics(input: unknown): ReadinessDiagnosticsDisp
     const state: ReadinessItemState = row.unavailable ? "unavailable" : row.done ? "completed" : row.optional ? "optional" : "required";
     rows.push({ key: row.key, title: row.title, state, missing: row.missing, nextHref: row.nextHref, ...(row.summary ? { summary: row.summary } : {}) });
   }
+  let calendarSource: AiOpeningCalendarSourceDraft | undefined;
+  try { calendarSource = readinessCalendarSource(value.calendarSource, { tenantId: value.tenantId, workspaceId: value.workspaceId }); }
+  catch { return null; }
+  if (calendarSource && !rows.some(row => row.key === 'business_calendar')) return null;
   return {
     tenantId: value.tenantId,
     workspaceId: value.workspaceId,
@@ -66,22 +83,28 @@ export function toReadinessDiagnostics(input: unknown): ReadinessDiagnosticsDisp
     ready: value.ready,
     rows,
     quoteBlockers: value.quoteBlockers.slice(),
-    unavailable: rows.some((row) => row.state === "unavailable")
+    unavailable: rows.some((row) => row.state === "unavailable"),
+    ...(calendarSource ? { calendarSource } : {})
   };
 }
 
 /** Project an already validated original opening material. Selected sections
  * cannot establish the Core aggregate or quote blockers that were not sent. */
-export function toOpeningReadinessDiagnostics(material: AiOpeningBusinessMaterialDraft): ReadinessDiagnosticsDisplay {
+export function toOpeningReadinessDiagnostics(material: AiOpeningBusinessMaterialDraft): ReadinessDiagnosticsDisplay | null {
+  let calendarSource: AiOpeningCalendarSourceDraft | undefined;
+  try { calendarSource = readinessCalendarSource(material.calendarSource, material.scope, material.observedAt); }
+  catch { return null; }
+  if (calendarSource && !material.sections.some(section => section.key === 'business_calendar')) return null;
   const rows: ReadinessDiagnosticRow[] = material.sections.map(section => ({
     key: section.key, title: section.title,
     state: section.status === "source_unavailable" ? "unavailable"
       : section.status === "readiness_check_passed" ? "completed"
         : section.status === "unclassified" ? "unclassified" : section.required ? "required" : "optional",
-    missing: section.issue ?? "", nextHref: "", evidence: section.evidence, manual: section.manual,
+    missing: section.issue ?? "", summary: section.summary, nextHref: "", evidence: section.evidence, manual: section.manual,
     fieldsToReview: [...section.candidate.fieldsToReview]
   }));
   return { tenantId: material.scope.tenantId, workspaceId: material.scope.workspaceId,
     status: null, ready: null, rows, quoteBlockers: null, unavailable: rows.some(row => row.state === "unavailable"),
-    observedAt: material.observedAt, configVersion: material.configVersion, externalVerification: material.externalVerification };
+    observedAt: material.observedAt, configVersion: material.configVersion, externalVerification: material.externalVerification,
+    ...(calendarSource ? { calendarSource } : {}) };
 }

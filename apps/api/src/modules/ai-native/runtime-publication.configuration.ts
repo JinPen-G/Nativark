@@ -17,6 +17,7 @@ const configurations = z.object({
   orderModel: configuration,
   quoteModel: configuration,
   openingModel: configuration,
+  openingProposals: configuration,
   quoteOrderExecution: configuration,
   settingsExecution: configuration,
   businessRuleDraft: configuration,

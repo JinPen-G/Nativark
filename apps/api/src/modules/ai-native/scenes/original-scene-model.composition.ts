@@ -25,11 +25,15 @@ import { composeAuthorizedPersistentTaskInputRunner,
   type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
 import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
-import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey } from './original-quote-input';
+import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey,
+  originalQuoteInitialParameterContract, ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE } from './original-quote-input';
 import { AiWorkbenchFieldMaterialService } from '../workbench-field-material.service';
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 import { AiOriginalSceneDisplayGeneration, type AiOriginalSceneDisplayPublication } from '../workbench-display-generation.service';
+import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
+import { assertTaskCenterRecoveryFence, snapshotTaskCenterRecoveryFence,
+  type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
@@ -86,9 +90,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       }
     } }
   } });
+  const history = scenes.createHistoryReader(model.tasks);
   const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock, knowledge);
   const display = dependencies.displayPublication ? new AiOriginalSceneDisplayGeneration({ db: dependencies.db,
-    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication,
+    scopes: model.authorization.scopes, originals: scenes.requests, publication: dependencies.displayPublication, history,
     quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),
       describe: scenes.tools.quote.businessPreparation.describeInput.bind(scenes.tools.quote.businessPreparation) } }, clock) : undefined;
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
@@ -113,10 +118,11 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       const continuation = before.provenance.continuation;
       if (continuation) {
         const previous = parseTaskModelInput(continuation.input, modelPolicy), result = continuation.result;
+        const { conversationHistory: _history, ...refreshed } = readOriginalSceneEnvelope(parsedInput);
         if (taskModelFingerprint(previous, modelPolicy) !== continuation.inputHash || !isGatewayResult(result)
           || result.status !== 'completed' || result.usage.kind !== 'reported' || result.requestId !== previous.intent.requestId
-          || requestFingerprint(parsedInput.intent.messages) !== requestFingerprint(continueOriginalSceneMaterial(previous,
-            { ...continuation, result }, continuation.questionRevision > 1 ? readOriginalSceneEnvelope(parsedInput) : undefined).messages)) throw denied();
+          || requestFingerprint(withoutTaskModelDisplayMessages(parsedInput.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
+            { ...continuation, result }, continuation.questionRevision > 1 ? refreshed : undefined).messages)) throw denied();
       }
       const envelope = readOriginalSceneEnvelope(parsedInput);
       if (!continuation && envelope.clarifications) throw denied();
@@ -124,7 +130,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         same(before, await current(ref, command.taskId, command.runId));
         if (parsedInput.displayWitness) {
           if (!display) throw unavailable();
-          await display.revalidateInput(before.original.context, command.taskId, command.runId, parsedInput);
+          await display.revalidateInput(before.original.context, command.taskId, command.runId, parsedInput, before.provenance.history);
         }
         if (continuation && continuation.questionRevision > 1) {
           const packet = await scenes.prepareTaskMaterial(ref);
@@ -136,6 +142,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
           if (!knowledge) throw unavailable();
           await knowledge.revalidate(envelope.knowledge, ref.inputRef);
         }
+        if (envelope.conversationHistory) await history.revalidate(envelope.conversationHistory, ref, before.original.context);
       };
       await revalidate();
       // The Gateway repeats its current-route check immediately before transport.
@@ -157,14 +164,30 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         || taskModelFingerprint(previous, modelPolicy) !== continuation.inputHash || !isGatewayResult(result)
         || result.status !== 'completed' || result.usage.kind !== 'reported' || result.requestId !== previous.intent.requestId)) throw denied();
       const priorEnvelope = previous ? readOriginalSceneEnvelope(previous) : undefined;
+      const registrationRef = continuation?.registrationRef ?? registration(command.original.inputRef);
+      const publishedInput = await model.planAuthority.readModelInputReceipt({ taskId: command.lease.taskId,
+        runId: command.lease.runId, registrationRef });
+      const existingEnvelope = publishedInput.state === 'published'
+        ? readOriginalSceneEnvelope(parseTaskModelInput(publishedInput.payload, modelPolicy)) : undefined;
+      // Only an unprepared original turn collects history. A persisted legacy
+      // input or a human successor retains its original package, including absence.
+      const conversationHistory = priorEnvelope ? priorEnvelope.conversationHistory
+        : existingEnvelope ? existingEnvelope.conversationHistory : before.original.context.audience === 'operator'
+          ? await history.collect(command.original, before.original.context) : undefined;
+      if (existingEnvelope && requestFingerprint(existingEnvelope.conversationHistory ?? null) !== requestFingerprint(conversationHistory ?? null)) throw denied();
       const refreshed = continuation && continuation.questionRevision > 1;
       const packet = priorEnvelope && !refreshed ? { materialHash: priorEnvelope.materialHash, material: priorEnvelope.facts,
         original: priorEnvelope.original, trust: priorEnvelope.trust } : await scenes.prepareTaskMaterial(command.original);
       const supplemental = priorEnvelope ? priorEnvelope.knowledge : await knowledge?.collect(command.original.inputRef, before.original.request);
       same(before, await current(command.original, command.lease.taskId, command.lease.runId));
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
+      const revalidateHistory = async () => {
+        if (conversationHistory) await history.revalidate(conversationHistory, command.original, before.original.context);
+      };
+      await revalidateHistory();
       const content = JSON.stringify({ original: packet.original, materialHash: packet.materialHash,
-        trust: packet.trust, facts: packet.material, ...(supplemental ? { knowledge: supplemental } : {}) });
+        trust: packet.trust, facts: packet.material, ...(supplemental ? { knowledge: supplemental } : {}),
+        ...(conversationHistory ? { conversationHistory } : {}) });
       if (Buffer.byteLength(content, 'utf8') > 131072) throw unavailable();
       const parts: Array<{ kind: 'text'; text: string }> = [];
       for (let offset = 0; offset < content.length; offset += 16000) parts.push({ kind: 'text', text: content.slice(offset, offset + 16000) });
@@ -182,19 +205,21 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         sceneCode: task.sceneCode, sceneVersion: task.sceneVersion } });
       if (!policy) throw unavailable();
       const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(continuation?.limits ?? policy.limits));
-      const registrationRef = continuation?.registrationRef ?? registration(command.original.inputRef);
-      if (display && !continuation) material = await display.prepare(context, before.original.receipt,
-        task.id, command.lease.runId, packet.materialHash, material);
+      if (display && (!continuation || previous?.displayWitness)) material = await display.prepare(context, before.original.receipt,
+        task.id, command.lease.runId, packet.materialHash, material, before.provenance.history, conversationHistory);
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
+      await revalidateHistory();
       const published = await model.publish({ taskId: task.id, registrationRef,
         expectedTaskRevision: command.expectedTaskRevision, lease: command.lease, material });
       if (supplemental) await knowledge!.revalidate(supplemental, command.original.inputRef);
+      await revalidateHistory();
       same(before, await current(command.original, command.lease.taskId, command.lease.runId));
       const plan = { taskId: task.id, runId: command.lease.runId, taskRevision: command.expectedTaskRevision,
         limits, steps: [{ registrationRef, operation: 'external_unknown' as const,
           toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }] };
       const saved = await model.plans.savePlan(plan, command.lease);
       same(before, await current(command.original, command.lease.taskId, command.lease.runId));
+      await revalidateHistory();
       return freezeOriginalInput({ stage: 'model_input_and_plan_published' as const,
         inputRef: published.id, registrationRef, planHash: saved.planHash,
         materialHash: packet.materialHash, messageHash: requestFingerprint(material),
@@ -365,7 +390,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const before = await observe(() => bound(parsed.data.original)), submission = parsed.data.submission;
         if (submission.taskId !== before.task.taskId) throw denied();
-        const receipt = await application(before.reference).resume(submission, signal);
+        // The answer successor has no published plan yet. Supply the original
+        // preparation proof before the runner meters its held publication.
+        const definition = await observe(() => preparationDefinition(before), signal);
+        const receipt = await application(before.reference, definition).resume(submission, signal);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(receipt); // The original app keeps receipt and continuation distinct.
       }, async submitAnswer(value: unknown) {
@@ -455,23 +483,31 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const result = await application(before.reference).reconcile({ taskId: before.task.taskId, runId }, signal);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(result); // Original held lease only, never a new claim/re-dispatch.
-      }, async recover(value: unknown, signal?: AbortSignal) {
+      }, async recover(value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) {
+        const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
         const original = structuredClone(value);
         const before = await observe(() => bound(original), signal);
-        const runId = await observe(() => originalRun(before), signal), reader = application(before.reference);
+        const selectedRunId = await observe(() => originalRun(before), signal);
+        if (fence && (fence.taskId !== before.task.taskId || fence.runId !== selectedRunId))
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const runId = fence?.runId ?? selectedRunId, reader = application(before.reference);
         const snapshot = await observe(() => reader.inspect({ taskId: before.task.taskId, runId }), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence, snapshot);
         if (!snapshot.plan || !['running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
           return freezeOriginalInput({ kind: 'not_started' as const, reason: 'task_not_runnable' as const });
         }
         await observe(() => verify(before), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence,
+          await observe(() => reader.inspect({ taskId: fence.taskId, runId: fence.runId }), signal));
         // Reclaim only this persisted original/successor. The existing CAS and
         // fencing gate owns current authority, old leases and recovery facts.
         // Recovery never publishes a replacement input/plan or resets usage.
         const outcome = await root.runner.run({ taskId: before.task.taskId, runId,
           holderId: serverHost.holderId, leaseMs: serverHost.leaseMs,
-          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-          expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+          expectedTaskRevision: fence?.expectedTaskRevision ?? snapshot.task.revision,
+          expectedRunRevision: fence?.expectedRunRevision ?? snapshot.run.revision,
+          expectedFencingToken: fence?.expectedFencingToken ?? snapshot.run.fencingToken, recovery: true }, signal);
         await observe(() => verify(before), signal, true);
         return freezeOriginalInput({ kind: 'run_outcome' as const, outcome });
       }, async readExecution(value: unknown) {
@@ -479,15 +515,22 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const snapshot = await application(before.reference).inspect({ taskId: before.task.taskId, runId });
         await verify(before);
         return freezeOriginalInput(snapshot);
-      }, async takeover(value: unknown, signal?: AbortSignal) {
+      }, async takeover(value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) {
+        const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
         const parsed = z.object({ original: originalRequestReferenceSchema, expectedTaskRevision: revision,
           expectedRunRevision: revision, expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict()
           .safeParse(structuredClone(value));
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
         const before = await observe(() => bound(parsed.data.original), signal);
-        const runId = await observe(() => originalRun(before), signal);
+        const selectedRunId = await observe(() => originalRun(before), signal);
+        if (fence && (fence.taskId !== before.task.taskId || fence.runId !== selectedRunId
+          || fence.expectedTaskRevision !== parsed.data.expectedTaskRevision
+          || fence.expectedRunRevision !== parsed.data.expectedRunRevision
+          || fence.expectedFencingToken !== parsed.data.expectedFencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const runId = fence?.runId ?? selectedRunId;
         const snapshot = await observe(() => application(before.reference).inspect({ taskId: before.task.taskId, runId }), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence, snapshot);
         if (!snapshot.plan || snapshot.task.revision !== parsed.data.expectedTaskRevision
           || snapshot.run.revision !== parsed.data.expectedRunRevision || snapshot.run.fencingToken !== parsed.data.expectedFencingToken) {
           throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -500,14 +543,17 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (!storedRun?.leaseOwnerId || storedRun.leaseOwnerId === serverHost.holderId || storedRun.revision !== snapshot.run.revision
           || !storedRun.fencingToken.equals(snapshot.run.fencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         await observe(() => verify(before), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence,
+          await observe(() => application(before.reference).inspect({ taskId: fence.taskId, runId: fence.runId }), signal));
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
         // Human permission comes from the current action policy, not a claimed
         // administrator role. Previous/new holders are server-owned. Takeover
         // atomically fences the old worker and recovers original facts only.
         const outcome = await root.takeoverAndRecover({ taskId: before.task.taskId, runId,
           previousHolderId: storedRun.leaseOwnerId, holderId: serverHost.holderId,
-          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-          expectedFencingToken: snapshot.run.fencingToken, leaseMs: serverHost.leaseMs }, signal);
+          expectedTaskRevision: fence?.expectedTaskRevision ?? parsed.data.expectedTaskRevision,
+          expectedRunRevision: fence?.expectedRunRevision ?? parsed.data.expectedRunRevision,
+          expectedFencingToken: fence?.expectedFencingToken ?? parsed.data.expectedFencingToken, leaseMs: serverHost.leaseMs }, signal);
         await observe(() => verify(before), signal, true);
         return freezeOriginalInput({ kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
           businessExecution: 'not_inferred_from_model_result' as const });
@@ -605,7 +651,8 @@ export function composeOriginalSceneClarificationSource(input: {
         || step.toolVersion !== binding.toolVersion || input.fingerprint !== binding.inputHash) throw denied();
       const parsed = parseTaskModelInput(input.payload, modelPolicy);
       if (taskModelFingerprint(parsed, modelPolicy) !== binding.inputHash) throw denied();
-      return { envelope: readOriginalSceneEnvelope(parsed), limits: aiTaskRunnerLimitsSchema.parse(payload.data.limits) };
+      return { envelope: readOriginalSceneEnvelope(parsed), limits: aiTaskRunnerLimitsSchema.parse(payload.data.limits),
+        fieldMaterial: parsed.displayWitness?.fieldMaterial ?? null };
     });
     // The actual result reader proves invocation, dispatch/usage, original lineage,
     // source freshness and current Guard/owner access. Unknown is never a question basis.
@@ -617,19 +664,36 @@ export function composeOriginalSceneClarificationSource(input: {
       || result.taskId !== binding.taskId || result.runId !== binding.runId) throw unavailable();
     same(before, await current(ref, binding.taskId, binding.runId));
     if ((await tasks.resolveAccess(binding.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
-    return { original: before.original, envelope: stored.envelope, limits: stored.limits, history: before.provenance.history, current: before };
+    return { original: before.original, envelope: stored.envelope, limits: stored.limits, history: before.provenance.history,
+      fieldMaterial: stored.fieldMaterial, current: before };
   };
   const originalInputSource = Object.freeze<AiTaskInputSource>({
     async resolve(binding: Readonly<AiTaskInputBinding>) {
       const command = structuredClone(binding), basis = await readClarificationBasis(command);
       if (basis.original.request.sceneCode !== 'quote_clarification') return { kind: 'not_required' as const };
       const candidate = applyOriginalQuoteAnswers(basis.original.request.input.candidate, basis.history);
-      const prepared = await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
+      const initialParameters = basis.fieldMaterial?.contract?.code === ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE;
+      const projection = initialParameters ? await scenes.tools.quote.candidates.prepareWorkbenchFields(candidate, basis.original.context) : null;
+      const prepared = projection?.preparation ?? await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
       const parsed = z.object({ status: z.string(),
         missingFields: z.array(z.string()).max(100).optional(), ambiguousFields: z.array(z.string()).max(100).optional()
       }).passthrough().safeParse(prepared);
       if (!parsed.success) throw unavailable();
       const facts = parsed.data;
+      if (initialParameters) {
+        if (basis.history.length + 1 >= basis.limits.maxCalls) throw new AiTaskInputLimitError();
+        if (facts.status !== 'needs_confirmation' || !projection?.editableContract) throw unavailable();
+        const contract = originalQuoteInitialParameterContract(projection.editableContract);
+        if (requestFingerprint(contract) !== requestFingerprint(basis.fieldMaterial!.contract)) throw denied();
+        // The existing afterSucceeded transaction persists this exact question.
+        // Display fields alone are never consumed as a human answer receipt.
+        same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION,
+          inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
+        const wait = sourceMode ? await sourceMode.assertCurrent({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION,
+          inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId) : undefined;
+        return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
+          expiresAt: wait?.expiresAt ?? basis.original.receipt.expiresAt, contract };
+      }
       if (!['missing_input', 'ambiguous'].includes(facts.status)) return { kind: 'not_required' as const };
       if (!(facts.missingFields?.length || facts.ambiguousFields?.length)) throw unavailable();
       // A completed model turn is not a completed goal while Core still needs
@@ -659,7 +723,7 @@ export function composeOriginalSceneClarificationSource(input: {
       const expected = await originalInputSource.resolve(command);
       if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
         || !validateAiTaskInputAnswersDraft(expected.contract, submittedAnswers)) throw denied();
-      if (submittedContract.code === 'original_quote_parameters') {
+      if (submittedContract.code === 'original_quote_parameters' || submittedContract.code === ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE) {
         const basis = await readClarificationBasis(command);
         if (basis.original.request.sceneCode !== 'quote_clarification') throw unavailable();
         // The same deterministic consumer used by successor preparation validates

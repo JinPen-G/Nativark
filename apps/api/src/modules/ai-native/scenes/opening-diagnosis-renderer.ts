@@ -7,6 +7,7 @@ import { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS,
   AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS, type AiOpeningBusinessMaterialDraft,
   type AiOpeningSectionMaterialDraft, type AiOpeningIntegrationState } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
 
 const definitions = JSON.parse(JSON.stringify({ ...AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS,
   ...AI_SCOPE_DRAFT_SCHEMAS, ...AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS })
@@ -39,6 +40,8 @@ export function buildOpeningDiagnosisText(value: unknown): string {
   try {
     const copy = structuredClone(value);
     if (!valid(copy) || new Set(copy.sections.map(section => section.key)).size !== copy.sections.length) throw unavailable();
+    readAiOpeningCalendarSource(copy.calendarSource, copy.scope, copy.observedAt);
+    if (copy.calendarSource && !copy.sections.some(section => section.key === 'business_calendar')) throw unavailable();
     material = copy;
   } catch { throw unavailable(); }
 
@@ -46,9 +49,30 @@ export function buildOpeningDiagnosisText(value: unknown): string {
     `经营配置版本 ${quoted(material.configVersion)}`, '以下仅覆盖本次原材料的已读取分区。'];
   for (const section of material.sections) {
     lines.push(`${quoted(section.title)}（${section.required ? '必需' : '可选'}） ${sectionStates[section.status]}`);
+    if (section.summary !== undefined) lines.push(`原检查摘要 ${quoted(section.summary)}`);
     if (section.issue) lines.push(`原检查说明 ${quoted(section.issue)}`);
     const source = section.evidence;
     lines.push(`来源 ${source.resourceType} / ${quoted(source.resourceId)} · 版本 ${quoted(source.version)} · 观察时间 ${source.observedAt}`);
+    if (section.key === 'business_calendar') {
+      const calendar = material.calendarSource;
+      if (!calendar) lines.push('当前日历来源未加载，不能确定已采用版本。');
+      else {
+        for (const row of calendar.years) {
+          if (row.status === 'not_adopted') { lines.push(`${row.year} 年：未采用已发布日历。`); continue; }
+          const binding = row.binding, official = binding.officialSource;
+          lines.push(`${row.year} 年：当前日历版本 ${quoted(binding.version)} · 原修订 ${binding.revision}`,
+            `日历引用 ${quoted(binding.id)} · 原发布时间 ${binding.publishedAt}`);
+          if (Object.values(official).every(value => value === null)) lines.push('原官方来源引用未记录；不代表当前日历未发布。');
+          else lines.push(`原官方来源版本 ${official.version === null ? '未记录' : quoted(official.version)}`,
+            `原官方来源引用 ${official.versionId === null ? '未记录' : quoted(official.versionId)}`,
+            `原官方发布时间 ${official.publishedAt ?? '未记录'} · 原导入时间 ${official.importedAt ?? '未记录'}`);
+        }
+        lines.push(`日历来源观察 ${calendar.observations.startedAt} — ${calendar.observations.completedAt}`,
+          calendar.observations.consistency === 'caller_transaction_reads'
+            ? '日历来源在调用方原事务内读取。' : '日历来源来自独立持久化读取，不是整体快照。',
+          '官方引用仅为原日历记录，未重新核验官方来源。');
+      }
+    }
   }
 
   const integrations = material.integrationObservation;
@@ -68,7 +92,8 @@ export function buildOpeningDiagnosisText(value: unknown): string {
   }
   // The material can carry a saved live test. It cannot attest a new probe,
   // whole-tenant readiness, or the later proposal/draft/publication lifecycle.
-  lines.push('外部凭据与实时连接未核验。', '业务草稿、发布与采用结果未加载。', '各分区为独立读取观察。');
+  lines.push('外部凭据与实时连接未核验。', material.calendarSource
+    ? '日历仅显示当前原发布与采用记录；本次未保存草稿、发布或采用。' : '业务草稿、发布与采用结果未加载。', '各分区为独立读取观察。');
   const text = lines.join('\n');
   if (Buffer.byteLength(text, 'utf8') > 131072) throw unavailable();
   return text;

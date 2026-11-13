@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AI_CONVERSATION_DRAFT_VERSION, AI_SCENE_MODEL_HTTP_DRAFT, validateAiConversationAdmissionDraft, validateAiConversationTurnDraft,
-  validateAiSceneRequestReceiptDraft, validateAiSceneRequestReconcileDraft,
+  validateAiSceneRequestReceiptDraft, validateAiSceneRequestReconcileDraft, aiOpeningCalendarSourceBasis,
   type AiConversationTurnObservationDraft, type AiTaskSceneReadDraft, type AiTaskSceneObservationDraft, type ApiResult } from '@rental-os/shared';
 import { APP_ROUTES, type AppRouteDefinition } from '@/app/navigation';
 import { currentSessionEpoch } from '@/app/queryClient';
@@ -13,12 +13,14 @@ import { aiOpeningDiagnosticsApi, type OpeningTaskMaterial } from '@/api/aiOpeni
 import { http } from '@/api/http';
 import { ActionButton, Alert, Button } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
-import { toOpeningReadinessDiagnostics, toReadinessDiagnostics, type ReadinessDiagnosticRow, type ReadinessDiagnosticsDisplay } from './readiness-diagnostics';
+import { toOpeningReadinessDiagnostics, toReadinessDiagnostics, readinessCalendarSource,
+  type ReadinessDiagnosticRow, type ReadinessDiagnosticsDisplay } from './readiness-diagnostics';
 import { useAiManagementLocale } from './management-locale';
 import { formatTimestamp } from './formatters';
 import { safeDisplayText } from './safe-display';
 import { validateTaskCenterSnapshot } from './task-center-reader';
 import { OpeningIntegrationStatus } from './OpeningIntegrationStatus';
+import { commandHash } from './budget-settings-session';
 import styles from './AiManagement.module.css';
 
 export type ReadinessDiagnosticsOriginalProps = { conversationId: string; turn: AiConversationTurnObservationDraft; current(): boolean; onUnavailable?(): void };
@@ -49,7 +51,8 @@ const basis = (value: OpeningTaskMaterial) => JSON.stringify({
   taskId: value.task.state === 'observed' ? value.task.taskId : null, scope: value.material.scope,
   origin: [value.original.inputRef, value.original.contentHash, value.original.sceneVersion], version: value.material.configVersion,
   integrations: integrationBasis(value),
-  sections: value.material.sections.map(row => ({ key: row.key, title: row.title, status: row.status, issue: row.issue,
+  calendarSource: value.material.calendarSource && aiOpeningCalendarSourceBasis(value.material.calendarSource),
+  sections: value.material.sections.map(row => ({ key: row.key, title: row.title, status: row.status, issue: row.issue, summary: row.summary,
     required: row.required, impact: row.impact, version: row.evidence.version, manual: row.manual,
     candidateVersion: row.candidate.currentVersion, fields: row.candidate.fieldsToReview })).sort((a, b) => a.key.localeCompare(b.key))
 });
@@ -134,6 +137,13 @@ function OriginalOpeningDiagnostics({ conversationId, turn, current, onUnavailab
       || value.task.state !== 'observed' || value.task.taskId !== task.taskId || value.task.runId !== task.runId
       || value.task.revision !== original.task.revision || value.material.audience !== 'operator'
       || value.material.scope.tenantId !== auth.tenant?.tenantId || value.material.scope.workspaceId !== auth.currentWorkspaceId) throw Error('AI_REVISION_CONFLICT');
+    const calendar = readinessCalendarSource(value.material.calendarSource, value.material.scope, value.material.observedAt);
+    if (calendar) {
+      const { sourceHash, observations: _observations, ...source } = calendar;
+      if (!value.material.sections.some(section => section.key === 'business_calendar') || await commandHash(source) !== sourceHash)
+        throw Error('AI_RESOURCE_UNAVAILABLE');
+      check();
+    }
     const closing = await source(); check();
     if (closing.receipt.contentHash !== original.receipt.contentHash || closing.receipt.revision !== original.receipt.revision
       || JSON.stringify(closing.task) !== JSON.stringify(original.task)) throw Error('AI_REVISION_CONFLICT');
@@ -170,11 +180,35 @@ function OriginalOpeningDiagnostics({ conversationId, turn, current, onUnavailab
       label={t(row.state === 'completed' ? '查看' : '去配置')} disabled={busy} onAction={() => run(async (signal, check) => {
         const latest = await read(signal, check); check();
         if (basis(latest) !== basis(frame)) { setFrame(latest); setChanged(true); onUnavailable?.(); throw Error('AI_RECONFIRM_OPENING'); }
-        const selected = toOpeningReadinessDiagnostics(latest.material).rows.find(item => item.key === row.key);
+        const selected = toOpeningReadinessDiagnostics(latest.material)?.rows.find(item => item.key === row.key);
         const route = selected && manualRoute(selected, latest);
         if (!route) throw Error('AI_ACCESS_DENIED'); check(); navigate(route.path);
       })} />} />}
   </section>;
+}
+
+function OpeningCalendarDetails({ source }: { source: ReadinessDiagnosticsDisplay['calendarSource'] }) {
+  const { t } = useAiManagementLocale();
+  if (!source) return <dd>{t('当前日历来源未加载，不能确定已采用版本。')}</dd>;
+  return <>
+    {source.years.map(row => <dd key={row.year}>
+      <p>{row.year} · {row.status === 'not_adopted' ? t('未采用已发布日历')
+        : <>{t('当前日历版本')}：{safeDisplayText(row.binding.version, 191)} · {t('原修订')}：{row.binding.revision}</>}</p>
+      {row.status === 'adopted' && <>
+        <p>{t('日历引用')}：{safeDisplayText(row.binding.id, 191)} · {t('原发布时间')}：{formatTimestamp(row.binding.publishedAt).value}</p>
+        {Object.values(row.binding.officialSource).every(value => value === null)
+          ? <p>{t('原官方来源引用未记录；不代表当前日历未发布。')}</p>
+          : <>
+            <p>{t('原官方来源版本')}：{row.binding.officialSource.version === null ? t('未记录') : safeDisplayText(row.binding.officialSource.version, 191)} · {t('原官方来源引用')}：{row.binding.officialSource.versionId === null ? t('未记录') : safeDisplayText(row.binding.officialSource.versionId, 191)}</p>
+            <p>{t('原官方发布时间')}：{row.binding.officialSource.publishedAt === null ? t('未记录') : formatTimestamp(row.binding.officialSource.publishedAt).value} · {t('原导入时间')}：{row.binding.officialSource.importedAt === null ? t('未记录') : formatTimestamp(row.binding.officialSource.importedAt).value}</p>
+          </>}
+      </>}
+    </dd>)}
+    <dd>{t('日历来源观察')}：{formatTimestamp(source.observations.startedAt).value} – {formatTimestamp(source.observations.completedAt).value}</dd>
+    <dd>{t(source.observations.consistency === 'caller_transaction_reads'
+      ? '日历来源在调用方原事务内读取。' : '日历来源来自独立持久化读取，不是整体快照。')}</dd>
+    <dd>{t('官方引用仅为原日历记录，未重新核验官方来源。')}</dd>
+  </>;
 }
 
 function ReadinessDisplay({ display, action }: { display: ReadinessDiagnosticsDisplay | null; action?(row: ReadinessDiagnosticRow): ReactNode }) {
@@ -189,11 +223,14 @@ function ReadinessDisplay({ display, action }: { display: ReadinessDiagnosticsDi
       {row.state !== 'completed' && <dd>{row.state === 'unavailable' ? t('事实源不可用，不能据此判定完成。') : t(safeDisplayText(row.missing, 1000))}</dd>}
       {row.summary && <dd>{t(safeDisplayText(row.summary, 1000))}</dd>}
       {row.evidence && <dd>{t('来源版本')}：{safeDisplayText(row.evidence.version, 191)}</dd>}
+      {row.key === 'business_calendar' && <OpeningCalendarDetails source={display.calendarSource} />}
       {action && <dd>{action(row)}</dd>}
     </div>)}</dl>
     {display.quoteBlockers === null ? <p>{t('本次材料未提供整体开业判定或报价阻塞，请以原开业页面为准。')}</p>
       : display.quoteBlockers.length > 0 && <p role="status">{t('报价/下单阻塞')}：{display.quoteBlockers.map(value => t(safeDisplayText(value, 1000))).join('、')}</p>}
-    {display.externalVerification === 'not_loaded' && <p>{t('外部凭据、真实连接、发布与采用结果尚未核验。')}</p>}
+    {display.externalVerification === 'not_loaded' && <p>{t(display.calendarSource
+      ? '日历仅显示当前原发布与采用记录；外部凭据和真实连接仍未核验。'
+      : '外部凭据、真实连接、发布与采用结果尚未核验。')}</p>}
     <p className={styles.help}>{t('各分区独立读取；保存草稿、审核发布和采用需继续原业务流程。')}</p>
   </section>;
 }

@@ -33,6 +33,8 @@ export * from "./ai-order-candidates-draft";
 export * from "./ai-extension-preview-http-draft";
 export * from "./ai-workbench-display-draft";
 export * from "./ai-workbench-display-http-draft";
+export * from "./ai-task-center-recovery-draft";
+export * from "./ai-workbench-model-control-draft";
 export * from "./ai-conversation-draft";
 export * from "./ai-task-draft";
 export * from "./ai-task-input-draft";
@@ -117,3 +119,4 @@ export * from './ai-task-calendar-draft-preparation';
 export * from './ai-task-order-handoff';
 
 export * from './ai-task-read-policy';
+export * from "./ai-task-opening-proposal-http-draft";

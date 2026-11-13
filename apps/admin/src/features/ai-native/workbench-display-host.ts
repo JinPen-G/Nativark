@@ -2,11 +2,12 @@
  * human-input/approval receipts; HTML and frame messages never grant authority. */
 import {
   AI_WORKBENCH_CONTEXT_DRAFT_VERSION, AI_WORKBENCH_DISPLAY_DRAFT_VERSION, AI_WORKBENCH_DISPLAY_LIMITS,
-  AI_SCENE_REQUEST_DRAFT_VERSION, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
+  AI_SCENE_REQUEST_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
   type AiApprovalApplicationReferenceDraft, type AiTaskInputAnswerDraft,
   type AiWorkbenchContextDraft, type AiWorkbenchDisplayBindingDraft, type AiWorkbenchFieldMaterialDraft,
   type AiWorkbenchHostDraft, type AiWorkbenchMountBindingDraft, type AiWorkbenchPresentationDraft,
   type AiWorkbenchSandboxMessageDraft,
+  type AiWorkbenchAuthoritativeSummaryDraft,
 } from '@rental-os/shared';
 
 export const WORKBENCH_HTML_ISOLATION_VERSION = 'opaque-html-static-1' as const;
@@ -17,6 +18,7 @@ export interface WorkbenchDisplayMaterial {
   fieldMaterial: AiWorkbenchFieldMaterialDraft | null;
   sourceIds: readonly string[];
   proposals: readonly AiApprovalApplicationReferenceDraft[];
+  authoritativeSummary?: AiWorkbenchAuthoritativeSummaryDraft;
 }
 export interface WorkbenchDisplayExpectation { taskId: string; tenantId: string; workspaceId: string; runId?: string; resultId?: string }
 export interface WorkbenchDisplayLease {
@@ -37,7 +39,7 @@ export interface WorkbenchDisplayPort {
 
 export const displayUnavailable = () => Error('AI_RESOURCE_UNAVAILABLE');
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const id = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(v);
+const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(v);
 const hash = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{64}$/u.test(v);
 const revision = (v: unknown) => Number.isSafeInteger(v) && Number(v) >= 1 && Number(v) <= 4294967294;
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
@@ -75,7 +77,9 @@ export async function inspectWorkbenchDisplay(value: unknown, expected: Workbenc
   now = Date.now()): Promise<WorkbenchDisplayMaterial> {
   const result = structuredClone(value) as WorkbenchDisplayMaterial;
   const p = result?.presentation, c = result?.context, fields = result?.fieldMaterial;
-  if (!object(result) || Object.keys(result).length !== 5 || !p || !c || !validBinding(p.binding)
+  if (!object(result) || Object.keys(result).length !== (result.authoritativeSummary ? 6 : 5)
+    || Object.keys(result).some(key => !['context', 'presentation', 'fieldMaterial', 'sourceIds', 'proposals', 'authoritativeSummary'].includes(key))
+    || !p || !c || !validBinding(p.binding)
     || p.binding.taskId !== expected.taskId || c.draftVersion !== AI_WORKBENCH_CONTEXT_DRAFT_VERSION
     || c.scope.kind !== 'workspace' || c.scope.tenantId !== expected.tenantId || c.scope.workspaceId !== expected.workspaceId
     || c.purpose !== 'display' || c.authority !== 'none_reauthorize_before_consumption'
@@ -91,6 +95,12 @@ export async function inspectWorkbenchDisplay(value: unknown, expected: Workbenc
     || ['runId', 'stepId', 'resultId', 'promptVersion', 'displayApiVersion'].some(key => !id(p.generation[key as keyof typeof p.generation]))
     || !Array.isArray(result.sourceIds) || result.sourceIds.length > 50 || new Set(result.sourceIds).size !== result.sourceIds.length
     || result.sourceIds.some(source => !id(source)) || !Array.isArray(result.proposals) || result.proposals.length > 20) throw displayUnavailable();
+  const summary = result.authoritativeSummary;
+  if (summary && (!object(summary) || Object.keys(summary).sort().join(',') !== 'binding,observedAt,resultId,runId,source,text,version'
+    || summary.version !== 'ain-workbench-facts-1' || summary.source !== 'current_original_business_facts'
+    || !displaySame(summary.binding, p.binding) || summary.runId !== p.generation.runId || summary.resultId !== p.generation.resultId
+    || !Number.isFinite(Date.parse(summary.observedAt)) || typeof summary.text !== 'string' || !summary.text.trim()
+    || new TextEncoder().encode(summary.text).byteLength > 32768)) throw displayUnavailable();
   const retained = p.retention, sourceExpiry = Date.parse(retained.sourceExpiresAt), expiry = Date.parse(retained.expiresAt);
   if (![sourceExpiry, expiry, Date.parse(c.history.expiresAt)].every(Number.isFinite) || expiry <= now || expiry > sourceExpiry
     || sourceExpiry > Date.parse(c.history.expiresAt) || !id(retained.aclRevision) || !id(retained.policyVersion)
@@ -110,6 +120,11 @@ export async function inspectWorkbenchDisplay(value: unknown, expected: Workbenc
         || !field.defaultValue || !['provided', 'unavailable'].includes(field.defaultValue.status))) throw displayUnavailable();
   }
   if (new TextEncoder().encode(JSON.stringify(result.proposals)).byteLength > AI_WORKBENCH_DISPLAY_LIMITS.messageBytes / 2) throw displayUnavailable();
+  if (result.proposals.some(proposal => !object(proposal)
+    || Object.keys(proposal).sort().join(',') !== 'contractVersion,proposalId,proposalRevision,reviewedPayloadHash'
+    || proposal.contractVersion !== AI_PROPOSAL_DRAFT_VERSION || !id(proposal.proposalId)
+    || proposal.proposalId.length > 36 || !revision(proposal.proposalRevision) || !hash(proposal.reviewedPayloadHash))
+    || new Set(result.proposals.map(proposal => proposal.proposalId)).size !== result.proposals.length) throw displayUnavailable();
   const bytes = new TextEncoder().encode(p.code.source);
   if (!bytes.length || bytes.byteLength > AI_WORKBENCH_DISPLAY_LIMITS.codeBytes || !globalThis.crypto?.subtle) throw displayUnavailable();
   const digest = await crypto.subtle.digest('SHA-256', bytes);

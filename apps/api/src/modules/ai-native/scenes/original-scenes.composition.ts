@@ -6,16 +6,22 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody, type AiExecutionContext } from '@rental-os/shared';
 import { AiCurrentOriginalRequestAuthority, originalIdentityHash, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
+import { AiConversationRepository } from '../conversation.repository';
+import { AiConversationContextReader } from '../conversation-context.reader';
+import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 
 type BusinessDependencies = Parameters<typeof composeAiAuthorizedBusinessTools>[0];
 export type AiOriginalSceneDependencies = PersistedTaskAuthorizationDependencies & BusinessDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   creationRules: readonly AiSceneCreationRule[];
+  /** Real server-owned original selection readers. Historical context never
+   * constructs a replacement Core or borrows order-execution authorization. */
+  historySelection?: Pick<HumanQuoteSelectionDependencies, 'confirmation' | 'quoteFacts' | 'core'>;
 };
 
 export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
@@ -56,6 +62,13 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
   } }, clock);
   const requests = new PrismaOriginalRequestRepository(input.db, authority, clock);
   const facts = new AiOriginalSceneFactsService(requests, tools);
+  const createHistoryReader = (tasks: Pick<AiTaskRepository, 'resolveAccess'> = composePersistedTaskAuthorization(input).tasks) =>
+    new AiConversationContextReader({ db: input.db, originals: requests, tasks,
+      conversations: new AiConversationRepository(input, requests),
+      ...(input.historySelection ? { selections: new PrismaQuoteSelectionRepository({
+        db: input.db, auth: input.auth, credentials: input.credentials, guard: input.guard, clock,
+        confirmation: input.historySelection.confirmation, quoteFacts: input.historySelection.quoteFacts,
+        core: input.historySelection.core, originals: requests }) } : {}) }, clock);
   const create = async (value: unknown, reissue = false) => {
     const command = parseOriginalRequest(value, reissue);
     const { replayed, ...receipt } = await requests.save(command, reissue);
@@ -69,7 +82,9 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
         state: error.code === 'AI_STORAGE_UNAVAILABLE' ? 'requires_reconciliation' as const : 'blocked' as const, retryable: false as const }, model: 'not_called' as const };
     }
   };
-  return Object.freeze({ requests, tools, create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
+  // Composition-only current preflight; not an HTTP grant or request producer.
+  return Object.freeze({ requests, tools, creationAuthority: authority, createHistoryReader,
+    create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
     queryOrders: tools.orders.read.bind(tools.orders),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),
     readTaskReceipt: requests.readTaskReceipt.bind(requests),

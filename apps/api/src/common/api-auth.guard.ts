@@ -1,3 +1,4 @@
+import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_READ_POLICY_HTTP } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
@@ -23,6 +24,7 @@ import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from '@rental-os/shared';
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
@@ -215,7 +217,9 @@ const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRo
 // scene policy, original owner and actual business Guard/ALS. The R1 human
 // quote confirmation below has its own create permission, never order approval.
 const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
-  AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders,
+  // Task metadata creation uses the same original scene intake gate. The
+  // original owner, current scene/resource policy and creation fence remain required.
+  AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders, AI_SCENE_REQUEST_HTTP_DRAFT.createTask,
   AI_SCENE_REQUEST_HTTP_DRAFT.reconcile, AI_SCENE_REQUEST_HTTP_DRAFT.material,
   AI_SCENE_REQUEST_HTTP_DRAFT.recovery].map(action =>
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
@@ -272,6 +276,10 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && ['list', 'preview', 'prepare', 'operation'].some(action =>
+    path === `/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`)) {
+    return path.endsWith('/prepare') ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'];
+  }
   if (method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password") return ["system:params:manage"];
   const creditRoute = `${method.toUpperCase()} ${path}`;
   // Entry read rights do not replace original owner/scope or each financial
@@ -310,6 +318,9 @@ export function requiredPermissions(method: string, path: string) {
     return (['save', 'review', 'previewPreparation', 'prepare'] as const)
       .some(action => path === `/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${AI_TASK_RULE_DRAFT_HTTP[action]}`)
       ? ['rental-os:rules:manage'] : [...AI_TASK_RULE_DRAFT_READ_PERMISSIONS];
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_TASK_CENTER_RECOVERY_CONTRACTS).some(action =>
+    path === `/${AI_TASK_CENTER_RECOVERY_HTTP.basePath}/${AI_TASK_CENTER_RECOVERY_HTTP[action as keyof typeof AI_TASK_CENTER_RECOVERY_CONTRACTS]}`))
+    return [...AI_TASK_CENTER_ENTRY_PERMISSIONS];
   if (method.toUpperCase() === 'POST' && (['list', 'snapshot', 'events', 'result', 'source', 'usage', 'usageSummary', 'outcomes', 'performance', 'visibleReport', 'confirmation', 'review', 'decision', 'decisionReceipt', 'business', 'continue', 'stop', 'stopReceipt', 'input', 'resumeInput', 'inputReceipt', 'continueInput'] as const)
     .some(action => path === `/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`))
     return [...AI_TASK_CENTER_ENTRY_PERMISSIONS]; // entry alternatives only; original per-task owner/action checks still apply

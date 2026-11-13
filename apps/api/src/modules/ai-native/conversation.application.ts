@@ -1,6 +1,6 @@
-/** Opt-in operator conversation transport. Current Auth/ALS and original scene
- * policies remain mandatory; the provider cannot generate, publish plans or
- * execute a Task. Disabled construction is inert, never an empty-success stub. */
+/** Operator conversation metadata and explicit model-control transport.
+ * Current Auth/ALS and original scene policies remain mandatory. Only an
+ * explicit control delegates to the existing Task host; no Core write is made. */
 import { randomUUID } from 'node:crypto';
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
@@ -15,15 +15,19 @@ import { withRequestAbort } from './scenes/request-abort';
 import { waitForTaskApplicationDependency } from './runner/prisma-task-application';
 import type { composeRequestBoundOriginalTaskRecoveryReaders } from './scenes/request-bound-scenes.application';
 import type { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
+import type { composeWorkbenchModelControlRequests } from './workbench-model-control.application';
+import { readConversationTaskResult } from './conversation-task-result.reader';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Action = keyof typeof AI_CONVERSATION_HTTP_DRAFT.operations;
 export const AI_CONVERSATION_REQUESTS = Symbol('AI_CONVERSATION_REQUESTS');
 export function composeAiConversationRequests(dependencies: Omit<AiOriginalSceneDependencies, 'credentials'>, enabled = false,
   observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult'>,
-  display?: ReturnType<typeof composeAiWorkbenchDisplayRequests>) {
+  display?: ReturnType<typeof composeAiWorkbenchDisplayRequests>,
+  modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>,
+  taskResults?: { read(request: Request, value: { taskId: string; resultId: string }, signal?: AbortSignal): Promise<unknown> }) {
   return { async consume(request: Request, action: Action, value: unknown, signal?: AbortSignal) {
-    if (!enabled || 'credentials' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if ((!enabled && action !== 'model-control-read') || 'credentials' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     if (!Object.hasOwn(AI_CONVERSATION_HTTP_DRAFT.operations, action)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const contract = AI_CONVERSATION_HTTP_DRAFT.operations[action], header = request?.headers?.authorization;
     if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -32,6 +36,13 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
     const close = () => { active = false; };
     signal?.addEventListener('abort', close, { once: true });
     try {
+      if (action === 'model-control-prepare' || action === 'model-control' || action === 'model-control-read') {
+        if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (!modelControls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        // The model host owns its measured call lifetime. A metadata-only
+        // five-second wrapper cannot truncate it into an untracked retry.
+        return conversationResponse(action, await modelControls.consume(request, action, command, signal), command);
+      }
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         if (action === 'display' || action === 'display-revalidate' || action === 'display-source') {
           if (!active) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -43,6 +54,14 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
           return { authorization: header, audience: 'operator' as const, requestId };
         } } };
         const root = composeAiOriginalScenes(input), app = new AiConversationRepository(input, root.requests), supplied = structuredClone(command);
+        if (action === 'task-result') {
+          if (!taskResults || !modelControls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const result = await readConversationTaskResult(input, conversationCommand('AiConversationTurnReferenceDraft', supplied), {
+            result: query => taskResults.read(request, query, signal),
+            lineage: query => modelControls.readLineage(request, query, signal),
+          });
+          return conversationResponse(action, result, command);
+        }
         const result = action === 'archive' || action === 'delete' ? await app.mutate(supplied, action)
           : action === 'operation' ? await app.readOperation(supplied)
           : action === 'admission' ? await app.readAdmission(supplied)
@@ -63,7 +82,8 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
 export class AiConversationController {
   constructor(@Inject(AI_CONVERSATION_REQUESTS) private readonly requests: ReturnType<typeof composeAiConversationRequests>) {}
   private call(request: Request, action: Action, value: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.requests.consume(request, action, value, signal), { maxWaitMs: 15000 }),
+    return respondAiScene(() => withRequestAbort(request, signal => this.requests.consume(request, action, value, signal),
+      { maxWaitMs: action === 'model-control' ? 120000 : 15000 }),
       action === 'admit' ? 'read_original_admission' : 'read_original_operation');
   }
   @Post('create') @HttpCode(200) @Header('Cache-Control', 'no-store')
@@ -88,8 +108,16 @@ export class AiConversationController {
   release(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'release', value); }
   @Post('closeUnstarted') @HttpCode(200) @Header('Cache-Control', 'no-store')
   closeUnstarted(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'closeUnstarted', value); }
+  @Post('model-control-prepare') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareModelControl(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'model-control-prepare', value); }
+  @Post('model-control') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  modelControl(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'model-control', value); }
+  @Post('model-control-read') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readModelControl(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'model-control-read', value); }
   @Post('modelResult') @HttpCode(200) @Header('Cache-Control', 'no-store')
   modelResult(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'modelResult', value); }
+  @Post('task-result') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  taskResult(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'task-result', (request as Request & { body?: unknown }).body ?? value); }
   @Post('display') @HttpCode(200) @Header('Cache-Control', 'no-store')
   display(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'display', (request as Request & { body?: unknown }).body ?? value); }
   @Post('display-revalidate') @HttpCode(200) @Header('Cache-Control', 'no-store')
