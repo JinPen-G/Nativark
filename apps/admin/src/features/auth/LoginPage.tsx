@@ -18,7 +18,7 @@ import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, applyAdminFavicon } from "@/app/b
 import { apiAssetOrigin } from "@/api/http";
 import { useLocale } from "@/app/locale";
 import { createThemeConfig, useAppearance } from "@/app/theme";
-import { applyArcThemeTokens } from "@/app/arcTokens";
+import { applyArcThemeTokens, getArcPalette } from "@/app/arcTokens";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { api } from "@/api/platform";
@@ -82,6 +82,16 @@ export function LoginPage() {
   // 通用页（含登录中）保留平台配色，专属页只采用当前网址租户的公开主题。
   const loginThemeColor = tenantBrand?.themeColor;
   const loginTheme = createThemeConfig(mode, loginThemeColor);
+  const loginPalette = getArcPalette(mode === "dark", loginThemeColor);
+  // 路由先变化、登录页后退出；主按钮锁定本入口配色，不能被后台账号主题的祖先规则染色。
+  const loginButtonBackground = loginPalette.custom ? loginPalette.primary : "var(--foreground)";
+  const loginButtonStyle = {
+    background: loginButtonBackground,
+    borderColor: loginButtonBackground,
+    color: loginPalette.custom ? "var(--accent-foreground)" : "var(--background)",
+    // 回车直接触发表单时也保持等待态颜色；禁用和原按钮状态仍由原组件处理。
+    opacity: loggingIn ? 1 : undefined
+  };
   useLayoutEffect(() => {
     if (stageRef.current) applyArcThemeTokens(stageRef.current, mode === "dark", loginThemeColor);
   }, [mode, loginThemeColor]);
@@ -197,7 +207,7 @@ export function LoginPage() {
                     <Form.Item label={t("密码")} name="password" rules={[{ required: true, message: t("请输入密码") }]}><PasswordField autoComplete="current-password" /></Form.Item>
                     <Button type="text" size="small" className="login-forgot-password" disabled={loggingIn} onClick={() => switchLoginMode("reset")}>{t("忘记密码？")}</Button>
                   </div>
-                  <SaveButton className="login-submit" label={t("进入工作台")} pendingLabel={t("登录中")} successLabel={t("登录成功")} form={form} onSave={submitPasswordLogin} />
+                  <SaveButton className="login-submit" label={t("进入工作台")} pendingLabel={t("登录中")} successLabel={t("登录成功")} form={form} onSave={submitPasswordLogin} style={loginButtonStyle} />
                 </Form>
                 {loginMode !== "password" && <AuthCodePreview key={loginMode} mode={loginMode} tenantCode={effectiveTenantCode} tenantLocked={isTenantLocked} onTenantChange={value => form.setFieldValue("tenantCode", value)} onBack={() => switchLoginMode("password")} />}
                 {loginMode !== "reset" && <div className="login-provider-preview">
