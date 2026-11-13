@@ -32,7 +32,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 公共窗口不得夹带企业端的 ClientApiService.readOrderSubmission、企业 reader/controller/GET 和后台企业材料。PM 已将 `openapi-document.ts` 的企业申请/专用凭证登记、`enterprise-workflows.ts` 的 payment_proof/企业消息及 `file-storage.runtime.service.ts` 的 enterprise-payment-proof 区域交企业 RD。AI 本片保留其写权，确需重叠增量先交 PM 串行协调。Core 订单、资金、品类与配置权威仍由原专项负责，AI 不重建这些规则。
 
-负责人 2026-11-13 已要求更新三人的目标，以上为现行执行范围。全专项 Goal 保持 active，不为改写目标虚标完成；不等待 main 或其他助手才继续。原任务全文、生产装配、必要模拟和类型齐备才计100%，两个补丁不当两项任务。只做核心功能，不新增/扩写测试脚本；实际环境由负责人自测。助手结果由 AI-RD 主动读取，完整交付与具体阻塞留原对话，不发一般进度、回执或跨对话通知。
+负责人 2026-11-13 已要求更新三人的目标，以上为现行执行范围。AI-RD 和 dev1 的 Goal 实核 active；dev2 的旧 Goal 仍显示 blocked，但已按新授权恢复实际工具执行。当前接口不能改写未完 Goal 或恢复 blocked，未将旧目标虚标完成；已向负责人说明需在 dev2 原目标卡继续，当前源码施工仍按新分工推进。原任务全文、生产装配、必要模拟和类型齐备才计100%，两个补丁不当两项任务。只做核心功能，不新增/扩写测试脚本；实际环境由负责人自测。助手结果由 AI-RD 主动读取，完整交付与具体阻塞留原对话，不发一般进度、回执或跨对话通知。
 
 ## 当前收口入口
 
@@ -43,6 +43,8 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 5. **员工与客户。** [员工原结果定位](<AI Native-开发记录.md#ain-staff-original-result-reference-20261111>)和显式首次准入已核接。AIN-19 默认 StaffFactory→原 Core 单分配项→图片/音频 Task/单账→保存/当前复核及明确采用，已按[固定闭包](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)通过必要模拟和类型；原 Core 日期围栏补片 `5b51b90dd01feae189d06d8c66d59875c8172401` 已包含。旧输入不补签，新明确缺依据及已移除证据不可直接采用；后端原门槛由 PM 安排 QA 核定。AIN-20 的 22 个员工消费者已按[媒体与复核阶段](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)交回 Root，dev2 转后台模型控制；[原上传观察后端](<AI Native-开发记录.md#ain-staff-upload-observation-20261112>)已推 `b704dddf9`，[原生成器/本地合同](<AI Native-开发记录.md#ain-staff-upload-native-contract-20261112>)已核，继续实际页面恢复，不得 runtime require shared、新键重发或借 knowledge 权限。客户[报价两端](<AI Native-开发记录.md#ain-client-quote-consumers-20261111>)和[原订单任务](<AI Native-开发记录.md#ain-client-task-consumer-closeout-20261111>)已固定；其余 audience、跨 surface、匿名/企业及媒体弱网按原 ENTRY 范围核定。
 
 日历 24 源及规则 19 源/3 公共注册已分别在[日历核接](<AI Native-开发记录.md#ain-calendar-source-consumer-closeout-20261111>)、[规则核接](<AI Native-开发记录.md#ain-rule-source-intake-20261111>)保留完整证据。会员姓名和通知首次 start/原历史也已接原权限及收据；[通知冲突刷新与作用空间](<AI Native-开发记录.md#ain16-notification-conflict-refresh-20261113>)三源已由 Root 核接必要模拟/类型，原五条全文与 AIN-14 前置继续核定。
+
+[经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)两源已由 dev1 完成固定组合、Root 核 blob 和现稿类型；原 operation/同键恢复与当前触发政策分离，不续权、不派发，新操作仍保留当前来源和授权。dev1 已接新事件有界领取和原批次恢复：现有 limit-only 批次丢应答没有 eventId 清单，必须补原 OperationLog 固定批次/只读查询；已追加其 feature-local 后端和 pending 合同写权，Guard/总出口/四册仍归 Root。AIN-17/18 全文尚有原生产来源/窗口等缺口，不因该修复片提高任务百分比。
 
 上传观察的幂等键兼容已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并推送 `b690e4f3751bcaa1beac30cde88b55ea596ec1de`。[默认识别 Core 依据与保存后复核](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)和[媒体消费](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)已交 PM，55 schema 和原 22 源保留。QA 新发现的历史省略 `candidateBasis` 采用漏洞已按[最小门禁修复](<AI Native-开发记录.md#ain-inspection-legacy-adoption-p2-20261112>)完成模拟与类型验证，独立交 PM 复验。
 

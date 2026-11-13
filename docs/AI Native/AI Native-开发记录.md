@@ -6,12 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11及本次12、13已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain17-original-human-operation-recovery-20261113"></a>
+## AIN-17/18 原人工操作读取与触发政策分离（2026-11-13）
+
+原经营待办操作查询重新核当前触发政策和风险，政策停用或删除后，已发生 close/feedback 的原收据也不可读。dev1 在[原来源授权](../../apps/api/src/modules/ai-native/business-events/business-failure-read.authority.ts)和[原人工复核](../../apps/api/src/modules/ai-native/automation/human-automation-review.service.ts)增加独立只读路径，读取冻结事件、原资源关联、Input/Task 和操作证明；按当前 Auth/Guard/ALS 与业务读权前后复验，不重新调用当前异常/政策、不续权或触发新操作。新 close/feedback/grant/candidate/input/task 继续核原当前来源、政策与授权。
+
+恢复仍沿同 inputRef/operationKey，操作不存在不表示可以重发。原 Input/Event/Task 和操作时间按原始时刻比较，末尾 Core/Guard 等待期间变化或撤权拒绝交付；历史请求 hash 和键没有重新编码。未知读失败返回 unknown，不补造失败已经解决、零消耗或已回滚。
+
+固定作者交付与 Root 逐 blob 核同：`business-failure-read.authority.ts` 为 `946b8f49116dc1717691cf323efef93cdef88212`，`human-automation-review.service.ts` 为 `e17e1db1ae262b3200f278386f36d81efc33ca0e`。dev1 在固定前置 `3a7aa6158431b993adf1b7854d6b20b4dac2f25b` 的实际 Controller/request factory/Auth/Guard/ALS/grant/review 内存组合验证履约与开业两条原事件：启用授权并 close 丢应答后，停用政策/grant 仍只读和重放原收据，恢复新增写入和当前触发来源调用均为0。四类末尾等待变化（operation time、Task revision、Input time、Event time）和撤权拒绝。命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin SHA-256 `36159cce3aef703cd02d430fce7f8adb778113239be76c9cfd946a1d6be61a4c`，退出0；两根/1193源类型输入 `0af21b38854620c47e277e2d3857b2a050705fa09edb5edf61949b96da6d8d43`，TypeScript5.9.3/0诊断/退出0。原命令、输出和旧失败保留在 dev1 会话，Root 已只读核输出与代码，不称 Root 独立重跑该行为组合。
+
+Root 又按现稿执行两根/1193源定向类型：`node --no-compilation-cache -`，stdin `b170b5cd62fab35515625d6ace4fcf87fb3ce89bb5a2b093027aa3c134765283`，退出0、无诊断，`git diff --check` 通过。本阶段没有新测试脚本或临时目录，作者与 Root 验证进程均退出，离线审计0。真实 MySQL、模型和外部宿主未验，本片不提高 AIN-17/18 整项百分比；原资源事件生产依赖及新事件领取/批次恢复仍见[接续](<AI Native-协作接续.md#ain-17-等待的-core-固定来源>)。
+
 <a id="ain-team-execution-goals-20261113"></a>
 ## 三人当前目标与助手执行恢复（2026-11-13）
 
 负责人明确指出助手未开始，并要求更新三人目标。AI-RD 重新读取实际回合，恢复 dev1/dev2 原聊天；恢复后两者均出现新的实际工具执行，不再将失败回合或 active 标签单独当作施工证据。dev1 原回合受供应商配额影响，恢复回合 `01a1d4c7-9e05-7b13-bef3-d9591049e0a3` 已完成原操作读取两源冻结；新回合 `01a1d4d3-1f22-73d0-8ae0-9b059b65bd1d` 已开始有界领取消费。dev2 原连接断流后，新回合 `01a1d4c6-fa43-7992-a6b8-a8a7cc097c69` 已修改并验证规则/日历消费者，继续原日历页面收尾。
 
-三人的持续目标仍是原专项核心任务按全文收口，当前执行分工已覆盖更新到[协作接续](<AI Native-协作接续.md#写入归属与协作>)：AI-RD 先收 AIN-14/16 完整生产链、核定任务与固定提交；dev1 收 AIN-17/18 原事件、有界领取和经营待办；dev2 收 AIN-16 原拒绝→当前差异→新提案→再次确认→原收据与页面。现有全专项 Goal 保持 active，不为更改目标文字虚标完成；原任务百分比不因更新分工或恢复助手改变。内部开业助手仅补已退出作者的 AIN-14 既有范围，不扩展新功能。必要具体派工已单点发送，助手不主动汇报，结果由 AI-RD 读取；未向 PM、QA 或其他专项发送进度。
+三人的持续目标仍是原专项核心任务按全文收口，当前执行分工已覆盖更新到[协作接续](<AI Native-协作接续.md#写入归属与协作>)：AI-RD 先收 AIN-14/16 完整生产链、核定任务与固定提交；dev1 收 AIN-17/18 原事件、有界领取和经营待办；dev2 收 AIN-16 原拒绝→当前差异→新提案→再次确认→原收据与页面。AI-RD/dev1 的 Goal 实核 active，dev2 自查旧 Goal 为 blocked，当前接口不支持恢复或改写未完目标；执行目标已更新，未虚标旧目标完成，已向负责人说明目标卡仍需继续。助手实际施工和目标卡状态分别判断，原任务百分比不因调整分工或恢复助手改变。内部开业助手仅补已退出作者的 AIN-14 既有范围，不扩展新功能。必要具体派工已单点发送，助手不主动汇报，结果由 AI-RD 读取；未向 PM、QA 或其他专项发送进度。
 
 目标调整时，AI 本地/GitHub 实核均为 `3a7aa6158431b993adf1b7854d6b20b4dac2f25b`，索引空、无合并/挑拣。源码并行 WIP 保留，这次文档提交不夹带它们。`node scripts/validate-docs.cjs` 退出 1，仍是导航三个历史附件和稀疏站点示例共四处既有缺链，无新增链接或任务算术错误；未伪造附件补绿。验证使用内存命令，本阶段未新建临时脚本、依赖、工作树或任务临时目录。
 
