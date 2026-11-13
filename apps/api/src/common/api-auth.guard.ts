@@ -1,3 +1,4 @@
+import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_READ_POLICY_HTTP } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
@@ -275,6 +276,10 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && ['list', 'preview', 'prepare', 'operation'].some(action =>
+    path === `/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`)) {
+    return path.endsWith('/prepare') ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'];
+  }
   if (method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password") return ["system:params:manage"];
   const creditRoute = `${method.toUpperCase()} ${path}`;
   // Entry read rights do not replace original owner/scope or each financial

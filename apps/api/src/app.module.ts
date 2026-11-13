@@ -294,6 +294,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     PlatformDemoRequestController
   ],
   providers: [
+    AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER,
     AiCreditService,
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,

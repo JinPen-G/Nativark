@@ -1,3 +1,4 @@
+import { TaskOpeningProposalApplication, AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION } from './task-opening-proposal.application';
 import { AI_TASK_READ_POLICY_REQUESTS, composeTaskReadPolicyRequests } from './task-read-policy.application';
 import { AI_TASK_ORIGINAL_READ_POLICY_REQUESTS, composeTaskOriginalReadPolicyRequests } from './task-original-read-policy.application';
 import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } from './task-order-handoff.application';
@@ -1194,4 +1195,24 @@ export const AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER: FactoryProvider = {
   inject: originalSceneInjection,
   useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
     composeTaskOriginalReadPolicyRequests(originalSceneDependencies(...args)),
+};
+
+
+/** Independently published ordinary-section AI proposals. Original Task policy,
+ * initial admission and R1 receipts remain mandatory; no Core save or publish. */
+export const AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER: FactoryProvider = {
+  provide: TaskOpeningProposalApplication,
+  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService, RentalBusinessService,
+    RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService, RentalFundingService,
+    { token: AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION, optional: true }, TenantIntegrationService],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository, memberships: MembershipService,
+    payments: PaymentRuntimeService, funding: RentalFundingService, value?: unknown, integrations?: TenantIntegrationService) => {
+    const configuration = z.object({ enabled: z.boolean(), host: z.object({
+      holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+      leaseMs: z.number().int().min(1).max(120000),
+    }).strict() }).strict().parse(value ?? { enabled: false, host: { holderId: 'ai-native-opening-proposals', leaseMs: 100000 } });
+    return new TaskOpeningProposalApplication(originalSceneDependencies(db, auth, guard, subscriptions, core, business,
+      reports, memberships, payments, funding, integrations), configuration);
+  },
 };

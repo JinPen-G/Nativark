@@ -44,3 +44,8 @@ for (const leaf of [AI_RETENTION_HTTP_SCHEMAS, AI_ORIGINAL_POLICY_HTTP_SCHEMAS, 
     AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
   }
 }
+
+for (const [name, schema] of Object.entries(AI_TASK_OPENING_PROPOSAL_HTTP_SCHEMAS)) {
+  if (Object.prototype.hasOwnProperty.call(AI_LEAF_COMPONENT_SCHEMAS, name)) throw new Error(`Duplicate AI component: ${name}`);
+  AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
+}
