@@ -9,7 +9,7 @@ import { NativeAccountMenuView } from "@/components/animate-sidebar/NativeAccoun
 import { NativeNavigation } from "@/components/animate-sidebar/NativeNavigation";
 import { WorkspaceClock } from "@/components/WorkspaceClock";
 import { Building2 } from "lucide-react";
-import { TeamOutlined, HistoryOutlined, FileTextOutlined, FormOutlined, IdcardOutlined, GiftOutlined, SafetyCertificateOutlined, ControlOutlined, FileSearchOutlined, InboxOutlined } from "@/components/ui/icons";
+import { TeamOutlined, HistoryOutlined, FileTextOutlined, FormOutlined, IdcardOutlined, GiftOutlined, SafetyCertificateOutlined, ControlOutlined, FileSearchOutlined, InboxOutlined, CalculatorOutlined } from "@/components/ui/icons";
 import { useEnterprise } from "./enterprise-session";
 export function EnterpriseShell({ children }: { children: ReactNode }) {
   const { locale } = useLocale(), context = useEnterprise();
@@ -26,6 +26,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
     { path: "policy", zh: "使用政策", en: "Rental policy", icon: <ControlOutlined />, action: "policy:manage" },
     { path: "approvals", zh: "预约审批", en: "Approvals", icon: <FileSearchOutlined /> },
     { path: "orders", zh: "企业订单", en: "Orders", icon: <FileSearchOutlined />, action: "orders:read" },
+    { path: "finance", zh: "企业财务", en: "Finances", icon: <CalculatorOutlined />, action: "finance:read" },
     { path: "exchange-approvals", zh: "换货审批", en: "Exchange approvals", icon: <FileSearchOutlined /> },
     { path: "extension-approvals", zh: "续租审批", en: "Extension approvals", icon: <FileSearchOutlined /> }
   ];
