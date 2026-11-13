@@ -217,10 +217,26 @@ export async function verify(root: string) {
             "Legacy design asset rendered",
           );
           if (item.path === "/") {
+            const rentalSteps = html.match(
+              /<ol class="rental-steps">([\s\S]*?)<\/ol>/,
+            )?.[1];
+            assert.equal(
+              rentalSteps?.match(/<li>/g)?.length,
+              3,
+              "Home must explain all three rental steps in order",
+            );
             assert.ok(
-              html.includes("lucide-calendar-days") &&
-                html.includes("lucide-package-check"),
-              "Rental steps lost their contextual icons",
+              rentalSteps?.includes(
+                language === "en"
+                  ? "Review your rental"
+                  : "核对预约与费用",
+              ) &&
+                rentalSteps.includes(
+                  language === "en"
+                    ? "Collect, use and return"
+                    : "取走、使用、归还",
+                ),
+              "Rental steps must explain quote review and fulfillment",
             );
             assert.equal(
               html.match(/type="datetime-local"/g)?.length,

@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, CalendarDays, MapPin, Search } from "lucide-react";
 import { useSite } from "../SiteContext";
 import { nowInput, offsetDaysInput, validRentalPeriod } from "../data/datetime";
 
@@ -52,17 +51,14 @@ export function RentalFinder() {
     );
   }
   return (
-    <form className="rental-finder" onSubmit={submit}>
-      <div className="finder-title">
-        <strong>{en ? "Make your rental plan" : "这次，想租点什么？"}</strong>
-        <span>
-          {en ? "Choose equipment and dates" : "选商品、定租期，再确认取还安排"}
-        </span>
-      </div>
+    <form
+      className="rental-finder"
+      aria-label={en ? "Find equipment for your rental dates" : "按租期查询商品"}
+      onSubmit={submit}
+    >
       <div className="finder-fields">
         <label className="finder-field">
           <span>
-            <Search />
             {en ? "Equipment" : "商品品类"}
           </span>
           <select
@@ -80,7 +76,6 @@ export function RentalFinder() {
         {stores.length > 0 && (
           <label className="finder-field">
             <span>
-              <MapPin />
               {en ? "Pickup store" : "取货门店"}
             </span>
             <select
@@ -98,7 +93,6 @@ export function RentalFinder() {
         )}
         <label className="finder-field">
           <span>
-            <CalendarDays />
             {en ? "Pickup time" : "取货时间"}
           </span>
           <input
@@ -114,7 +108,6 @@ export function RentalFinder() {
         </label>
         <label className="finder-field">
           <span>
-            <CalendarDays />
             {en ? "Return time" : "归还时间"}
           </span>
           <input
@@ -130,7 +123,6 @@ export function RentalFinder() {
         </label>
         <button type="submit" className="button button-dark finder-submit">
           {en ? "Find rentals" : "查找商品"}
-          <ArrowRight />
         </button>
       </div>
       {error && (

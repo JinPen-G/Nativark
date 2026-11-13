@@ -5,8 +5,8 @@ export const THEME_STORAGE_KEY = "rental-os-theme";
 
 /** Platform brand defaults used until a tenant supplies its own theme settings. */
 export const PLATFORM_THEME = {
-  primaryColor: "#17334a",
-  secondaryColor: "#f4ce64",
+  primaryColor: "#000000",
+  secondaryColor: "#ffffff",
 } as const;
 
 export function getInitialTheme(): ThemeMode {
@@ -26,7 +26,7 @@ export function applyColorMode(mode: ThemeMode) {
   const themeColor = document.querySelector<HTMLMetaElement>(
     'meta[name="theme-color"]',
   );
-  if (themeColor) themeColor.content = mode === "dark" ? "#111d26" : "#ffffff";
+  if (themeColor) themeColor.content = mode === "dark" ? "#000000" : "#ffffff";
 }
 
 /** 页签沿用当前租户身份，内置演示标志随明暗模式切换。 */

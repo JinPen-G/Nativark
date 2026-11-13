@@ -11,6 +11,7 @@ import {
   type PublicCatalogResponse,
 } from "./apiClient";
 import type { Category, Product, Store, SubCategory, Tenant } from "../types";
+import { PLATFORM_THEME } from "../theme";
 
 /** Core icon codes adapt to the website's existing icon set. */
 const CATEGORY_ICON: Record<string, string> = {
@@ -166,8 +167,8 @@ function buildTenant(
       : "/brand/yicheng-dark.svg",
     logoCompact: bootstrap.merchant.logoUrl || "/brand/yicheng.svg",
     slogan: website?.slogan || merchantName,
-    primaryColor: bootstrap.themeColor || "#17334a",
-    secondaryColor: website?.secondaryColor || "#f4ce64",
+    primaryColor: bootstrap.themeColor || PLATFORM_THEME.primaryColor,
+    secondaryColor: website?.secondaryColor || PLATFORM_THEME.secondaryColor,
     phone: bootstrap.merchant.servicePhone || "",
     customerService: bootstrap.merchant.serviceHours || "在线客服",
     address: website?.contactAddress || "",

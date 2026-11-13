@@ -1,4 +1,3 @@
-import { ArrowUpRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSite } from "../SiteContext";
 import { Img } from "./Img";
@@ -28,9 +27,6 @@ export function ProductCard({
         aria-label={en ? `View ${product.name}` : `查看${product.name}`}
       >
         <Img src={product.cover} alt={product.name} width="640" height="640" />
-        <span className="product-open" aria-hidden="true">
-          <ArrowUpRight />
-        </span>
         {unavailable && (
           <span className="product-unavailable">
             {en ? "Currently unavailable" : "暂时不可租"}

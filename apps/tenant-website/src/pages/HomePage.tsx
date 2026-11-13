@@ -1,11 +1,4 @@
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Check,
-  PackageCheck,
-  CalendarDays,
-  MapPin,
-} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSite } from "../SiteContext";
 import { RentalFinder } from "../components/RentalFinder";
@@ -44,21 +37,18 @@ export function HomePage() {
     .map(localizeProduct);
   const steps = [
     {
-      icon: <CalendarDays />,
       title: en ? "Choose your equipment and dates" : "选好商品与租期",
       description: en
         ? "Find the equipment and dates that fit your plan."
         : "找到适合的商品，选择这次需要使用的时间。",
     },
     {
-      icon: <PackageCheck />,
       title: en ? "Review your rental" : "核对预约与费用",
       description: en
         ? "Review the quote and collection details before booking."
         : "查看报价，确认取还安排，再提交预约。",
     },
     {
-      icon: <MapPin />,
       title: en ? "Collect, use and return" : "取走、使用、归还",
       description: en
         ? "Follow your confirmed booking for collection and return."
@@ -74,8 +64,7 @@ export function HomePage() {
           <div>
             <p>{tenant.heroDescription}</p>
             <Link className="text-link" to={href("/guide")}>
-              {en ? "How your first rental works" : "第一次租？先看看流程"}
-              <ArrowUpRight aria-hidden="true" />
+              {en ? "How to rent" : "了解租赁流程"}
             </Link>
           </div>
         </div>
@@ -94,14 +83,6 @@ export function HomePage() {
             width="1600"
             height="800"
           />
-          {!isRemote && (
-            <div className="hero-caption">
-              <span>
-                {en ? "A weekend by the coast" : "留一段时间，去海边。"}
-              </span>
-              <span>{en ? "Equipment for your plans" : "按需租赁"}</span>
-            </div>
-          )}
         </div>
         <RentalFinder />
       </section>
@@ -112,22 +93,19 @@ export function HomePage() {
       >
         <div className="section-heading">
           <h2 id="categories-title">
-            {en ? "Find what you need" : "你的计划，需要什么？"}
+            {en ? "Explore by category" : "按品类探索"}
           </h2>
           <Link className="text-link" to={href("/products")}>
             {en ? "All rentals" : "浏览全部商品"}
-            <ArrowUpRight aria-hidden="true" />
           </Link>
         </div>
         <div className="category-tiles">
           {categoryLinks.map((category) => (
             <Link key={category.id} to={href(category.to)}>
-              <Img src={category.image} alt="" width="800" height="800" />
               <div>
                 <h3>{category.name}</h3>
                 <span>{category.description}</span>
               </div>
-              <ArrowUpRight aria-hidden="true" />
             </Link>
           ))}
         </div>
@@ -136,7 +114,7 @@ export function HomePage() {
       <section className="shell home-featured">
         <div className="section-heading">
           <div>
-            <h2>{en ? "Start with these" : "从这几件开始"}</h2>
+            <h2>{en ? "Equipment for your plans" : "为下一次计划，选好装备"}</h2>
             <p>
               {en
                 ? "Explore the selection. Your dates determine availability."
@@ -145,7 +123,6 @@ export function HomePage() {
           </div>
           <Link className="text-link" to={href("/products")}>
             {en ? "View all" : "查看全部"}
-            <ArrowUpRight aria-hidden="true" />
           </Link>
         </div>
         {!productsReady ? (
@@ -182,8 +159,8 @@ export function HomePage() {
           <div className="story-heading">
             <h2>
               {en
-                ? "Choose your gear.\nGet ready to go."
-                : "从选好装备，\n到准备出发。"}
+                ? "Rent in three steps."
+                : "租赁，只需三步。"}
             </h2>
             <Link className="button button-outline" to={href("/guide")}>
               {en ? "Read the rental guide" : "查看租赁指南"}
@@ -197,7 +174,6 @@ export function HomePage() {
                   {index + 1}
                 </span>
                 <div>
-                  {step.icon}
                   <h3>{step.title}</h3>
                   <p>{step.description}</p>
                 </div>
@@ -209,7 +185,7 @@ export function HomePage() {
 
       <section className="shell home-store-callout">
         <div>
-          <h2>{en ? "Find a convenient store." : "找到方便取还的门店。"}</h2>
+          <h2>{en ? "Collect somewhere convenient." : "找一家方便取还的门店"}</h2>
           <p>
             {isRemote
               ? tenant.address
@@ -217,19 +193,11 @@ export function HomePage() {
                 ? "Check the address and opening hours before planning collection."
                 : "查看门店地址与营业时间，为这次取还提前安排。"}
           </p>
-          <Link className="text-link" to={href("/about#stores")}>
-            {en ? "Find a store" : "查找门店"}
-            <ArrowUpRight aria-hidden="true" />
-          </Link>
         </div>
-        <div className="store-callout-note">
-          <Check aria-hidden="true" />
-          <p>
-            {en
-              ? "Review the store, dates and quote together in your booking."
-              : "门店、租期与费用，\n都在预约中逐项核对。"}
-          </p>
-        </div>
+        <Link className="button button-dark" to={href("/about#stores")}>
+          {en ? "Find a store" : "查找门店"}
+          <ArrowRight aria-hidden="true" />
+        </Link>
       </section>
     </>
   );
