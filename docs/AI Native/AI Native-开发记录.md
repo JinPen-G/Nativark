@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-explicit-cancellation-entry-20261113"></a>
+## 对话与模型处理中取消入口及停止展示（2026-11-13）
+
+按需求§10.6 原宿主仅支持任务取消的例外，[对话详情](../../apps/admin/src/features/ai-native/ConversationDetail.tsx)的当前正式 Task 及[模型解释/排版操作](../../apps/admin/src/features/ai-native/TaskWorkbenchModelControls.tsx)的未完原 Task 均挂接同一[原取消组件](../../apps/admin/src/features/ai-native/TaskCancellation.tsx)。按钮明确为“请求取消任务”，先读原任务修订、提交原取消意图并读原收据；模型正在处理或响应未知时仍可到达，不能把断开页面称为取消成功。[API](../../apps/admin/src/api/aiTaskCenter.ts)的 stop 设置原拦截器防重试标记，避免凭据刷新后自动重发；隐藏或当前身份失效立即停止暴露组件。
+
+[动态展示](../../apps/admin/src/features/ai-native/TaskWorkbenchDisplay.tsx)增加“停止当前展示”，仅调用原 session.suspend 撤回本页请求/iframe/消息桥，合法未提交候选保留待重核，明确它与原任务取消的区别。取消受理后原运行器阻止新步骤；已派发、已提交操作、费用和业务事实保留，unknown 只读原收据。原取消协议和业务状态机不变。
+
+前置为已推送并回读一致的 `74367697d17beea451033f8a9d4e459228fc01af`。Root 固定六份前端源码，内存运行 `node --no-compilation-cache -`：实际取消组件→正式 API→Guard/Controller→原仓储，丢应答后重开只发 stopReceipt，原 stop 写入一次，模型/Gateway 调用均 0；停止展示不发取消请求，隐藏/撤权不暴露旧控件。stdin SHA-256 `d04f2eddc56d1e3d23daab80f83565a6651dcbaed1f657a283e743c83a26db4e`，退出 0。两个实际父组件挂接同一原 TaskCancellation 的有限宿主模拟退出 0，SHA `6d7ecc67ae8a4e457ec59576623ecc5b208ef3b129aceb07a1697e41ed54f630`；初次 CSS 默认导出缺失属于内存装载器错误，保留后修正复验。dev1 已独立核三个既有取消用例，原收据保留、unknown 与新步骤阻止均通过。
+
+TypeScript 5.9.3 固定六根/1574 源零诊断，退出 0，stdin SHA-256 `b194ce96a35deba3df0fa71cd80112f45a713283719b32c6c5baa3f471e1f2be`。离线审计为空、任务临时目录未创建、验证进程已退出，没有新增测试脚本或临时产物。以上为模拟/类型证据；真实浏览器由负责人另验。停止条款本片收口，AIN-12 整项仍待历史上下文和订单最终展示/重生成完整生产接线，未计 100%。
+
 <a id="ain12-task-center-recovery-20261113"></a>
 ## 任务中心原运行恢复、接管与收据核对（2026-11-13）
 

@@ -5,6 +5,10 @@ import { platformAiEnglish } from './platform-management-locale';
 const english: Record<string, string> = {
   ...platformAiEnglish,
   '原任务恢复与接管': 'Original task recovery and takeover',
+  '请求取消任务': 'Request task cancellation',
+  '取消请求被接受后不再启动新步骤；已发生的操作不会自动撤销或退款。': 'Once accepted, the cancellation request prevents new steps. Existing operations are not automatically reversed or refunded.',
+  '停止当前展示': 'Stop this display',
+  '停止展示只撤回本页内容；需要取消任务时，请使用原取消请求。': 'Stopping the display withdraws this page content only. Use the original cancellation request to cancel the task.',
   '当前日历来源未加载，不能确定已采用版本。': 'The current calendar source is not loaded. Its adopted version cannot be determined.',
   '未采用已发布日历': 'No published calendar adopted',
   '当前日历版本': 'Current calendar version',

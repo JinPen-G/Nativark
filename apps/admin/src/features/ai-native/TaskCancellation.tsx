@@ -28,7 +28,7 @@ export function TaskCancellation({ taskId, identity, current, onAccessDenied }: 
   const active = useRef({ taskId, identity, current, onAccessDenied }); active.current = { taskId, identity, current, onAccessDenied };
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current?.abort(); }; }, []);
   const run = async (operation: 'prepare' | 'stop' | 'receipt') => {
-    const same = () => mounted.current && active.current.taskId === taskId && active.current.identity === identity && active.current.current();
+    const same = () => mounted.current && !document.hidden && active.current.taskId === taskId && active.current.identity === identity && active.current.current();
     if (!same() || request.current) throw Error('AI_RESOURCE_UNAVAILABLE');
     const controller = new AbortController(); request.current = controller; setPending(true); setError(false); setReceipt(null);
     try {
@@ -76,11 +76,12 @@ export function TaskCancellation({ taskId, identity, current, onAccessDenied }: 
       throw failure;
     } finally { if (request.current === controller) request.current = null; if (same()) setPending(false); }
   };
+  if (!current() || document.hidden) return null;
   return <section aria-label={t('原任务停止请求')}>
-    <p className="muted">{t('停止后不再启动新步骤；已发生的操作不会自动撤销或退款。')}</p>
+    <p className="muted">{t('取消请求被接受后不再启动新步骤；已发生的操作不会自动撤销或退款。')}</p>
     <div className="panel-toolbar">
       <ActionButton label={t('读取停止目标')} pendingLabel={t('读取中…')} disabled={pending || !!original} onAction={() => run('prepare')} />
-      {target && <ConfirmAction label={t('请求停止原任务')} prompt={t('确认请求停止？已派发或已提交的业务不会因此回滚。')}
+      {target && <ConfirmAction label={t('请求取消任务')} prompt={t('确认请求停止？已派发或已提交的业务不会因此回滚。')}
         doneLabel={t('请求已观察，未证明取消完成')} disabled={pending || !!original} onConfirm={() => run('stop')} />}
       {original && original !== 'invalid' && <ActionButton label={t('核对原停止收据')} pendingLabel={t('核对中…')} disabled={pending} onAction={() => run('receipt')} />}
     </div>

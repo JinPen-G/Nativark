@@ -16,6 +16,7 @@ import { ConversationOrderExecution } from './ConversationOrderExecution';
 import { ConversationOpeningExecution } from './ConversationOpeningExecution';
 import { ConversationQuoteExecution } from './ConversationQuoteExecution';
 import { ReadinessDiagnosticsCard } from './ReadinessDiagnosticsCard';
+import { TaskCancellation } from './TaskCancellation';
 import styles from './AiManagement.module.css';
 
 type Detail = Awaited<ReturnType<typeof aiConversationsApi.detail>>;
@@ -66,6 +67,13 @@ export function ConversationDetail({ conversationId, capabilityCode, current, id
         <div><dt>{t('对话修订')}</dt><dd>{detail.conversation.revision}</dd></div>
         <div><dt>{t('当前轮次')}</dt><dd>{detail.conversation.currentTurn?.turnId ?? t('无当前轮次，不代表无历史任务。')}</dd></div>
       </dl>
+      {detail.conversation.currentTurn?.task && <TaskCancellation
+        key={`cancel:${identity}:${detail.conversation.currentTurn.task.taskId}`}
+        taskId={detail.conversation.currentTurn.task.taskId} identity={identity}
+        current={() => !document.hidden && scope.current.identity === identity
+          && scope.current.conversationId === conversationId && scope.current.capabilityCode === capabilityCode && scope.current.current()}
+        onAccessDenied={() => { generation.current++; request.current?.abort(); request.current = null;
+          setDetail(null); setBusy(false); setError(true); setResultEpochs({}); }} />}
       {!detail.turns.items.length && <p>{t('本页没有轮次，不推断模型未调用或任务未执行。')}</p>}
       <ol className={styles.timeline}>{detail.turns.items.map(turn => <li key={turn.turnId}>
         <div><strong>{safeDisplayText(turn.turnId, 191)}</strong><p className={styles.help}>{t('原请求')}: {safeDisplayText(turn.original.inputRef, 191)}</p></div>
