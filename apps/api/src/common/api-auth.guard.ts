@@ -289,7 +289,8 @@ export function requiredPermissions(method: string, path: string) {
   if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const).some(action => path === `/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST' && path === `/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && Object.entries(AI_MEMBER_NAME_HTTP).some(([key, value]) => key !== 'basePath' && path === `/${AI_MEMBER_NAME_HTTP.basePath}/${value}`))
-    return path.endsWith('/prepare') || path.endsWith('/execute') ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'];
+    return path.endsWith('/prepare') || path.endsWith('/execute') || path.endsWith('/review/start')
+      ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'];
   if (creditTenantRoutes.has(creditRoute)) return ['system:params:manage'];
   if (creditPlatformRoutes.has(creditRoute)) return [path.endsWith('/platform-decide') ? 'system:ai-provider:manage' : 'system:ai-provider:view'];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_CONVERSATION_HTTP_DRAFT.operations)

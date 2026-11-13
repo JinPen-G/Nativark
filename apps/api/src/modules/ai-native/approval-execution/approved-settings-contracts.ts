@@ -18,11 +18,19 @@ import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsCurrentReadDraft
   AiApprovedSettingsTaskPolicyOperationDraft, AiApprovedSettingsTaskPolicyReadResultDraft } from '@rental-os/shared';
 import { AI_TASK_RECOVERY_HTTP_SCHEMAS, AI_TASK_CONFIRMATION_HISTORY_SCHEMAS } from '@rental-os/shared';
 import type { AiApprovedSettingsTaskResultDraft, AiApprovedSettingsTaskConfirmationReadDraft,
-  AiApprovedSettingsTaskEventsDraft, AiTaskSnapshotDraft } from '@rental-os/shared';
+  AiApprovedSettingsTaskEventsDraft, AiTaskSnapshotDraft, AiSettingsReconfirmationReadDraft, AiSettingsReconfirmationReviewDraft,
+  AiSettingsReconfirmationPrepareDraft, AiSettingsReconfirmationDifferenceDraft, AiSettingsReconfirmationPreparedDraft,
+  AiSettingsReconfirmationObservationDraft } from '@rental-os/shared';
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from '../../../contracts/ai-task-draft-schemas';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {
+  AiSettingsReconfirmationReadDraft: AiSettingsReconfirmationReadDraft;
+  AiSettingsReconfirmationReviewDraft: AiSettingsReconfirmationReviewDraft;
+  AiSettingsReconfirmationPrepareDraft: AiSettingsReconfirmationPrepareDraft;
+  AiSettingsReconfirmationDifferenceDraft: AiSettingsReconfirmationDifferenceDraft;
+  AiSettingsReconfirmationPreparedDraft: AiSettingsReconfirmationPreparedDraft;
+  AiSettingsReconfirmationObservationDraft: AiSettingsReconfirmationObservationDraft;
   AiApprovedSettingsTaskResultDraft: AiApprovedSettingsTaskResultDraft;
   AiApprovedSettingsTaskConfirmationReadDraft: AiApprovedSettingsTaskConfirmationReadDraft;
   AiApprovedSettingsTaskEventsDraft: AiApprovedSettingsTaskEventsDraft;

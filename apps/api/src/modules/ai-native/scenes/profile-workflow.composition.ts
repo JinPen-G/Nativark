@@ -20,11 +20,13 @@ import { composeProfileTaskActionPolicies } from './profile-task-policies.compos
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import type { AiTaskRunnerClaimInput, AiTaskRunnerRecoveryLease } from '../runner/ai-task-runner.ports';
+import { composeOriginalProfileReadAuthority } from './profile-original-read.authority';
 
 export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies, host: AiTaskApplicationHost,
   taskPolicyConfiguration: { executionEnabled: boolean; ttlMs: number } = { executionEnabled: false, ttlMs: 120000 }) {
   host = Object.freeze(structuredClone(host));
   if (host.holderId !== d.holderId) throw profileDenied();
+  d = { ...d, originalReadAuthority: composeOriginalProfileReadAuthority(d) };
   const app = composeApprovedProfileApplication(d), creation = composeProfileTaskCreation(d), authority = new ApprovedProfileTaskAuthority(d);
   const taskPolicies = composeProfileTaskActionPolicies(d, taskPolicyConfiguration);
   const authorization = composePersistedTaskAuthorization(d);
@@ -189,6 +191,11 @@ export function composeProfileWorkflow(d: ApprovedProfileApplicationDependencies
     async start(value: unknown, signal?: AbortSignal) {
       const found = await waitForTaskApplicationDependency(() => target(value), false, signal);
       const result = await found.root.application.start({ taskId: found.task.taskId, runId: found.task.runId }, signal);
+      return deliverMutation(found, result);
+    },
+    async startUnstarted(value: unknown, signal?: AbortSignal) {
+      const found = await waitForTaskApplicationDependency(() => target(value), false, signal);
+      const result = await found.root.application.startUnstarted(signal);
       return deliverMutation(found, result);
     },
     async read(value: unknown) { return (await observation(value)).result; },

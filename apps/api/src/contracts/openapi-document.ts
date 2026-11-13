@@ -2333,9 +2333,11 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
-  ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute'] as const).map(action => ({ method: 'post' as const,
+  ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute', 'inspectReconfirmation',
+    'prepareReconfirmation', 'readReconfirmation', 'startReview'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,
-    permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
+    permissions: ['prepare', 'execute', 'prepareReconfirmation', 'startReview'].includes(action)
+      ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
     authRequired: true, summary: 'Explicit original member-name human workflow; current original manager and Core remain authoritative. Unknown is read only.',
     requestSchema: AI_MEMBER_NAME_CONTRACTS[action], responseSchema: 'AiMemberNameResponse' })),
   ...(['list', 'review', 'save', 'operation', 'preparation', 'previewPreparation', 'prepare', 'preparationOperation'] as const).map(action => ({ method: 'post' as const,

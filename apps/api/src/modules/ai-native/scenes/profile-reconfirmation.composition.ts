@@ -17,6 +17,7 @@ import { composePersistedTaskAuthorization } from '../task-authorization.composi
 import { PrismaTaskConfirmationHistoryReader } from '../runner/prisma-task-confirmation-history.reader';
 import { aiTaskResumedConfirmationSchema } from '../runner/prisma-task-run-evidence.repository';
 import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
+import { AiTaskRepository } from '../ai-task.repository';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const reviewInput = z.object({ original: profileChangeInputSchema,
@@ -52,8 +53,11 @@ export function composeProfileReconfirmation(d: ApprovedProfileApplicationDepend
       await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${scopeId} AND id = ${taskId} FOR UPDATE`);
       await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${taskId} AND id = ${runId} FOR UPDATE`);
       const task = await tx.aiTask.findFirst({ where: { id: taskId, scopeId, ownerKind: 'USER', ownerId: actor.actorId } });
+      const tasksForChange = await tx.aiTask.findMany({ where: { scopeId, inputRef: found.reference.changeId }, take: 2 });
       const runs = await tx.aiRun.findMany({ where: { taskId, scopeId }, take: 2 }), run = runs[0];
       if (!task || task.id !== taskId || task.scopeId !== scopeId
+        || tasksForChange.length !== 1 || tasksForChange[0].id !== taskId || task.inputRef !== found.reference.changeId
+        || task.inputHash !== found.reference.changeHash || task.inputRevision !== 1
         || task.archivedAt !== null || runs.length !== 1 || !run || run.id !== runId || run.taskId !== taskId || run.scopeId !== scopeId
         || run.actorKind !== 'USER' || run.actorId !== actor.actorId
         || run.leaseOwnerId !== null || run.leaseExpiresAt !== null) throw profileUnavailable();
@@ -85,7 +89,8 @@ export function composeProfileReconfirmation(d: ApprovedProfileApplicationDepend
           return Reflect.get(tx, name) ?? Reflect.get(target, name);
         } });
         const authorization = composePersistedTaskAuthorization({ ...d, db: readDb });
-        const history = await new PrismaTaskConfirmationHistoryReader(readDb, authorization.tasks).read({ taskId, runId, stepId: step.id });
+        const tasks = d.originalReadAuthority ? new AiTaskRepository(readDb, d.originalReadAuthority, clock) : authorization.tasks;
+        const history = await new PrismaTaskConfirmationHistoryReader(readDb, tasks).read({ taskId, runId, stepId: step.id });
         const resumed = await tx.aiTaskEvent.findMany({ where: { ...taskKey, type: 'task.transition',
           payload: { path: '$.confirmation.checkpointRef', equals: step.resultRef } }, take: 3 });
         const continued = resumed.map(event => ({ event, parsed: aiTaskResumedConfirmationSchema.safeParse(event.payload) }))
@@ -111,6 +116,18 @@ export function composeProfileReconfirmation(d: ApprovedProfileApplicationDepend
           || !(terminal.event.occurredAt instanceof Date) || !(resume.event.occurredAt instanceof Date)
           || !Number.isFinite(terminal.event.occurredAt.getTime()) || terminal.event.occurredAt < resume.event.occurredAt
           || terminal.event.occurredAt > clock()) throw profileUnavailable();
+        const completed = await tx.aiTaskEvent.findFirst({ where: { ...taskKey, type: 'task.transition',
+          cursor: task.eventCursor, taskRevision: task.revision } });
+        const completion = z.object({ data: z.object({ from: z.literal('running'), to: z.literal('failed'),
+          reason: z.literal('execution_failed') }).strict(), initiator: z.object({ kind: z.literal('worker'), id: z.string(),
+          actorKind: z.literal('USER'), actorId: z.string() }).strict() }).passthrough().safeParse(completed?.payload);
+        if (!completed || completed.scopeId !== scopeId || completed.taskId !== taskId || !completion.success
+          || typeof completed.cursor !== 'bigint' || completed.cursor !== terminal.event.cursor + 1n
+          || completed.taskRevision !== terminal.event.taskRevision + 1 || completion.data.initiator.id !== proof.holderId
+          || completion.data.initiator.actorId !== actor.actorId || !(completed.occurredAt instanceof Date)
+          || !Number.isFinite(completed.occurredAt.getTime()) || completed.occurredAt < terminal.event.occurredAt
+          || completed.occurredAt > clock() || !(run.endedAt instanceof Date)
+          || run.endedAt.getTime() !== completed.occurredAt.getTime()) throw profileUnavailable();
         return { taskId, runId, taskRevision: task.revision, state: 'closed_no_business_submission' as const };
       }
       if (task.status !== 'CANCELLED' || !task.cancelRequestedAt || run.status !== 'CANCELLED') throw profileUnavailable();

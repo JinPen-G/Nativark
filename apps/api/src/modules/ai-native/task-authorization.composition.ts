@@ -34,6 +34,9 @@ export interface PersistedTaskAuthorizationDependencies {
   credentials: AiTaskCredentialSource;
   subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
   clock?: () => Date;
+  /** Server-owned original receipt observer only. Never used for execution,
+   * approval, policy mutation or a new action; missing source remains denied. */
+  originalReadAuthority?: AiTaskRepositoryAuthority;
 }
 
 /** Explicit workspace-user assembly, never AppModule/Worker registration.
@@ -199,7 +202,9 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
     }
   };
   const authority: AiTaskRepositoryAuthority = {
-    resolve: (taskId, operation) => operation === 'claim_run' ? authorize(taskId, 'claim_run') : actions.resolve(taskId, operation)
+    resolve: (taskId, operation) => operation === 'claim_run' ? authorize(taskId, 'claim_run')
+      : input.originalReadAuthority && ['read_metadata', 'read_events', 'read_step_terminal'].includes(operation)
+        ? input.originalReadAuthority.resolve(taskId, operation) : actions.resolve(taskId, operation)
   };
   return Object.freeze({ scopes, authority, tasks: new AiTaskRepository(db, authority, clock),
     execution: Object.freeze({ authorize: (taskId: string) => authorize(taskId, 'transition_task') }),

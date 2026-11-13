@@ -156,6 +156,29 @@ export class AiSettingsChangeController {
       catch { return invalidSettingsResponse(false); }
     });
   }
+  @Post(routes.readSettingsReconfirmationDifference) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReconfirmationDifference(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = settingsContract('AiSettingsReconfirmationReviewDraft', body);
+      return settingsContract('AiSettingsReconfirmationDifferenceDraft', await this.changes.readUpdatedDifference(request, command, signal), true);
+    }));
+  }
+  @Post(routes.prepareReconfirmedSettingsChange) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareReconfirmation(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const { decision: _decision, ...command } = settingsContract('AiSettingsReconfirmationPrepareDraft', body);
+      const result = await this.changes.prepareReconfirmedChange(request, command, signal);
+      try { return settingsContract('AiSettingsReconfirmationPreparedDraft', result, true); }
+      catch { return invalidSettingsResponse(true); }
+    }));
+  }
+  @Post(routes.readReconfirmedSettingsChange) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReconfirmation(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = settingsContract('AiSettingsReconfirmationReadDraft', body);
+      return settingsContract('AiSettingsReconfirmationObservationDraft', await this.changes.readReconfirmedChange(request, command, signal), true);
+    }));
+  }
 }
 /** Original receipt selects the owned task; the body cannot supply permissions,
  * holder, limits, plan or approval. Configuration remains a guarded CAS action. */

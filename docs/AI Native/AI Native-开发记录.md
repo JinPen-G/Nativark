@@ -6,6 +6,31 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13及本次14已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain16-name-notification-reconfirmation-backend-20261113"></a>
+## AIN-16 姓名／通知原审核终结后的公开重新确认后端（2026-11-13）
+
+此前已有服务器重新准备组合，但后台无法从原姓名或通知定位读取新差异、准备新变更并恢复原结果。本阶段[姓名公开宿主](../../apps/api/src/modules/ai-native/member-name.application.ts)新增核对／准备／原读与显式启动审核；姓名新定位由服务端返回 `{customerId,requestKey,kind:'reconfirmed'}`，内部changeHash/Task/Run不由人类填写。新准备只保存原不可变变更，不创建Task或批准；后续明确启动和确认提交分别复用原工作流、Core普通姓名CAS和原收据。[通知原Controller](../../apps/api/src/modules/ai-native/scenes/settings-task.controller.ts)新增三条窄路，由原creationKey/changeKey推导Task/Run。shared类型/闭合schema、DTO、OpenAPI、原Guard和标准生命周期provider同步；执行停用拒绝新准备，原读取仍按当前业务权观察。
+
+终结证明保持原事务核定。姓名补唯一原Task以及原拒绝后的Task终结事件，通知沿[拒绝终结reader](../../apps/api/src/modules/ai-native/scenes/settings-rejected-closure.reader.ts)核同Task/Run/Step、原唯一REJECTED批准、冻结计划/输入、原确认phase和paused→continued→Step→Task终结，必须未消费批准、无原Core操作；取消分支仍核原cancel_settled及无效果证明。FAILED/NONE、缺收据、超时或TTL不授新准备。dev1通知两叶固定blob `91b25d7e0cd516f619da603a084cc4392f5ba4cb`／`d8c2f135b657e70399fe99d703ade0f4b814857f`，Root逐blob核同；作者行为输入 `6dd7dcdaba48d1d3f8cc3ee2f3e2e1617937162f17ea40392d63715eedd45f78`／0，12类缺证、冲突批准、已操作及撤权拒绝，新增Task/批准/活动配置写0；两根/1292源类型输入 `0f228eb2176c766c48ac0aaf96f019020cf8d99fb5422700be59442ccdb03a33`／0。
+
+原读政策TTL不再挡住合法历史：姓名按[原会员读权](../../apps/api/src/modules/ai-native/scenes/profile-original-read.authority.ts)，通知按[原Core变更和创建收据](../../apps/api/src/modules/ai-native/scenes/settings-original-read.authority.ts)复核当前Auth、owner、空间、原输入及规范Run，局限metadata/events/terminal三种读取。通知历史与重新确认共用这一叶；写入、批准、恢复/claim及新执行仍走原政策/权益/预算，不续TTL。姓名新审核创建应答丢失后，仅原QUEUED/revision1、Run无租约/trace/账/效果可以再次人工明确初次启动；[原host](../../apps/api/src/modules/ai-native/runner/profile-task-host.composition.ts)保留CAS `taskRevision=1/runRevision=1/fence=0`，不将重读后的新租约当执行许可。
+
+Root必要模拟使用实际Controller/Guard/原应用/原Corefixture，命令 `node --no-compilation-cache -`，无测试文件变更：
+
+| 核接范围 | stdin SHA-256／实际结果 |
+| --- | --- |
+| 两种原审核取消后，时间超过旧输入及读取政策期限，再读差异／准备／原读 | `24320474914dfa2a5a36807fce249779ad973af27f5bf6aa262f43cbdea3836b`／0；新变更各1份，旧读0写，不创建新Task/批准/业务操作。 |
+| 姓名公共Controller：原准备→拒绝继续→时间推进→新差异／变更→新审核／批准→Core→重复原读 | `f6d07283fec319b256d13ec2c688df86f9174997ea43a73c69a26964f847730b`／0；旧Task保持，新批准消费1、姓名业务写1、模型0，撤权及伪造额外字段拒绝。 |
+| 姓名原终结事件缺失与到期历史 | `a6d325c228ae6e9882e6b8926982e30d8b1f7611bfc71935812d3ccaaca5687d`／0；缺Task终结不准备，证据恢复后新变更1，原读0写。 |
+| 新姓名Task已创建但未启动的明确接续及Run修订竞态 | `7890b2db0633e572b4878684cbedbc3c85bcd3fbe008b655b99d83b01951f53b`／0；原读0写、再次明确才启动。Run先变化组 `e4c9949f5a971a6b5a93d8bb5b3724ef6a3fb7732d02b4f7a58833ac53fdba99`／0，unknown不派发；正向业务写1。 |
+| 通知公开Guard／Controller／重新确认及原新变更读取 | `0d1c17c3e439d5a8c98b8ffa838111c74b4898867d342d14951fffe7ac5b3f05`／0；旧读政策到期后合法准备，Task/批准/业务写0，未知不重发，伪造runId拒绝。 |
+| 通知新Task→原等待→新批准／继续→Core→再次到期历史 | `cd068931952a9a41e95367bdfdc438a20a7575ecaf46f5d05b3c82c294b8d6fb`／0；新Task1、批准消费1、Core写1；到期后原读不增写。新执行与模型/DB是明确fixture，不称生产实测。 |
+| 后端22源固定、无关并行WIP仅内存回到daef63611的正式装配类型 | TypeScript5.9.3，4根/1971源0诊断，输入 `8bd550a4ab18a5518f1a7a6c52ba402ff49364f8fc4316fdabc0d6414e0c8485`／0。当前完整类型同4根/1971源0诊断，输入 `500ea4e51c091d8f98809edeb568dd3cc168dc15482fd85bcc99a272649b1ad6`／0。 |
+
+保留驱动失败：REPL恢复时ts/require绑定缺失及诊断字符串引号错误未进入产品检查；通知首次输入等于当前设置被原冲突拒绝，改成不同渠道；外层Guardfixture缺price:manage被拒，只在内存补已注册入口权。姓名正向首次受真实performance.now的原窗口耗尽而unknown，首因AI_RUN_LIMIT；随后以既有有界tick计量复验，原超时定时器保留，没有放宽生产预算或核销UNKNOWN。created.receipt联合未收窄、误以仓储错误类型表达AI_RESULT_UNKNOWN等类型诊断均修为原收据检查和AiTaskRunnerError，未强断言补绿。
+
+后端22源已核明，前端由dev2完成实际session/页面恢复及独立核接，AIN-16整项尚不提高百分比。全部Root/作者进程退出，audit0，任务临时目录未创建；未新增脚本/依赖/生成物/截图或副本。真实数据库、浏览器及性能由负责人后测，main仍由PM串行处理。
+
 <a id="ain17-durable-pending-batch-consumer-20261113"></a>
 ## AIN-17/18 固定事件批次、一次领取与原键恢复（2026-11-13）
 

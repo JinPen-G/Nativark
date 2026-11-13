@@ -18,7 +18,7 @@ import type { AiSceneHttpRequest, composeRequestBoundProfileWorkflow } from './r
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9._:-]+$/u), hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const query = z.object({ limit: z.number().int().min(1).max(50), name: z.string().trim().min(1).max(191).optional(),
   customerId: id.optional(), cursor: id.optional() }).strict();
-const locator = z.object({ customerId: id, requestKey: id.max(128) }).strict();
+const locator = z.object({ customerId: id, requestKey: id.max(128), kind: z.literal('reconfirmed').optional() }).strict();
 const intent = locator.extend({ query, selectionHash: hash, name: z.string().trim().min(1).refine(value => Array.from(value).length <= 120),
   expiresAt: z.string().datetime({ offset: true }) }).strict();
 const preparation = intent.extend({ reviewHash: hash }).strict();
@@ -51,8 +51,9 @@ export function composeMemberProfileChangeFlow(input: { guard: Pick<ApiAuthGuard
       return { authorization: request.headers.authorization, audience: 'operator' as const, requestId };
     } });
   };
-  const key = (actor: ApprovedProfileActor, command: z.infer<typeof locator>) =>
-    `member-name-${requestFingerprint({ kind: 'member-profile-name', actor, customerId: command.customerId, requestKey: command.requestKey })}`;
+  const key = (actor: ApprovedProfileActor, command: z.infer<typeof locator>) => command.kind === 'reconfirmed'
+    ? `profile-reconfirm-${command.requestKey}`
+    : `member-name-${requestFingerprint({ kind: 'member-profile-name', actor, customerId: command.customerId, requestKey: command.requestKey })}`;
   const page = (request: AiSceneHttpRequest, command: z.infer<typeof query>) => authority(request).withListRead(async (actor, revalidate) => {
     let observed;
     try { observed = await input.memberships.listPersonalProfileCandidatesPage(actor.tenantId, command); }
@@ -81,6 +82,9 @@ export function composeMemberProfileChangeFlow(input: { guard: Pick<ApiAuthGuard
     return { ...found, member: row };
   };
   const inspect = async (request: AiSceneHttpRequest, command: z.infer<typeof intent>) => {
+    // Reconfirmed references are server-derived historical locators. They
+    // cannot be used to bypass the original closed-action proof with prepare.
+    if (command.kind !== undefined) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const before = await selected(request, command);
     return authority(request).withAuthorization('read', command.customerId, async (actor, revalidate) => {
       if (requestFingerprint(actor) !== requestFingerprint(before.actor)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -101,6 +105,8 @@ export function composeMemberProfileChangeFlow(input: { guard: Pick<ApiAuthGuard
   // It never reruns discovery or derives a new key from today's name/revision.
   const load = (request: AiSceneHttpRequest, command: z.infer<typeof locator>) => authority(request).withAuthorization('read', command.customerId,
     async (actor, revalidate) => {
+      if (command.kind === 'reconfirmed' && !z.string().uuid().safeParse(command.requestKey).success)
+        throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const changeKey = key(actor, command);
       const row = await input.db.customerApprovedProfileChange.findUnique({ where: { tenantId_customerId_actorId_changeKey: {
         tenantId: actor.tenantId, customerId: command.customerId, actorId: actor.actorId, changeKey } } });

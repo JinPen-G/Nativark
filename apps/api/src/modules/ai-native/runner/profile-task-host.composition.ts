@@ -21,7 +21,7 @@ import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmati
 import { PrismaTaskRecoverySnapshotRepository } from './prisma-task-recovery-snapshot.repository';
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
-import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from './ai-task-runner.service';
+import { withAiTaskHeldPreparationDefinition, AiTaskRunnerError, type AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 
@@ -80,8 +80,33 @@ export function composeTaskProfileHost(input: ApprovedProfileApplicationDependen
   const unavailable = async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   const application = new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: root.runner, recovery, events,
     host, prepare, clock: input.runnerClock, inputs: { submit: unavailable, readPending: unavailable } });
+  const startUnstarted = async (signal?: AbortSignal) => {
+    const access = await authorization.tasks.resolveAccess(task.taskId, 'claim_run');
+    if (access.scope.kind !== 'WORKSPACE' || !access.scope.tenantId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const queued = await input.db.aiTask.findFirst({ where: access.where });
+    const run = queued && await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: queued.scopeId } });
+    if (signal?.aborted || !queued || queued.status !== 'QUEUED' || queued.revision !== 1 || queued.archivedAt !== null
+      || queued.cancelRequestedAt !== null || queued.resultRef !== null || queued.eventCursor !== 0n || !run
+      || run.status !== 'QUEUED' || run.revision !== 1 || run.leaseOwnerId !== null || run.leaseExpiresAt !== null
+      || run.inputReceiptId !== null || !run.fencingToken.equals(0)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    const where = { scopeId: queued.scopeId, taskId: task.taskId };
+    const traces = await Promise.all([input.db.aiStep.findFirst({ where }), input.db.aiTaskRunPlan.findFirst({ where }),
+      input.db.aiTaskActionInput.findFirst({ where }), input.db.aiTaskRunPreparation.findFirst({ where }),
+      input.db.aiTaskExecutionPhaseStart.findFirst({ where }), input.db.aiTaskExecutionPhaseReceipt.findFirst({ where }),
+      input.db.aiTaskResultArtifact.findFirst({ where }), input.db.aiProposal.findFirst({ where }), input.db.aiApproval.findFirst({ where }),
+      input.db.aiApprovalConsumption.findFirst({ where }), input.db.aiTaskExecutionCharge.findFirst({ where }),
+      input.db.aiTaskExecutionBudget.findFirst({ where }), input.db.aiGatewayInvocation.findFirst({ where }),
+      input.db.customerApprovedProfileOperation.findFirst({ where: { changeId: task.change.changeId,
+        tenantId: access.scope.tenantId, customerId: task.change.customerId } })]);
+    if (signal?.aborted || traces.some(Boolean)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+    // Keep the original first CAS tuple. A concurrent start changes its run
+    // revision/fence; never reread that newer lease into permission to execute.
+    return { kind: 'run_outcome' as const, outcome: await root.runner.runPrepared({ taskId: task.taskId, runId: task.runId,
+      holderId: host.holderId, leaseMs: host.leaseMs, expectedTaskRevision: 1, expectedRunRevision: 1,
+      expectedFencingToken: '0' }, prepare, signal) };
+  };
   return Object.freeze({ profile, inputs, authorization, registrations, transitions, taskTransitions, recovery, events, ...root,
-    application: Object.freeze({ start: application.start.bind(application), inspect: application.inspect.bind(application),
+    application: Object.freeze({ start: application.start.bind(application), startUnstarted, inspect: application.inspect.bind(application),
       continueConfirmation: application.continueConfirmation.bind(application), readConfirmation: application.readConfirmation.bind(application),
       readConfirmationHistory: application.readConfirmationHistory.bind(application), reconcile: application.reconcile.bind(application),
       readEvents: application.readEvents.bind(application) }) });

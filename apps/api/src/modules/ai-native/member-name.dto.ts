@@ -13,6 +13,7 @@ export class AiMemberNameQueryDto implements AiMemberNameQuery {
 export class AiMemberNameLocatorDto implements AiMemberNameLocator {
   @IsString() @MinLength(1) @MaxLength(191) @Matches(id) customerId!: string;
   @IsString() @MinLength(1) @MaxLength(128) @Matches(id) requestKey!: string;
+  @IsOptional() @Equals('reconfirmed') kind?: 'reconfirmed';
 }
 export class AiMemberNameDiscoverDto {
   @ValidateNested() @Type(() => AiMemberNameQueryDto) query!: AiMemberNameQueryDto;
@@ -36,4 +37,15 @@ export class AiMemberNameReadDto {
 export class AiMemberNameExecuteDto extends AiMemberNameReadDto implements AiMemberNameExecuteInput {
   @IsString() @Matches(hash) confirmationHash!: string;
   @Equals('approve_and_execute_original_member_name') decision!: 'approve_and_execute_original_member_name';
+}
+export class AiMemberNameReconfirmationInspectDto extends AiMemberNameReadDto {
+  @IsString() @MinLength(1) @MaxLength(120) name!: string;
+}
+export class AiMemberNameReconfirmationPrepareDto extends AiMemberNameReconfirmationInspectDto {
+  @IsISO8601({ strict: true }) expiresAt!: string;
+  @IsString() @Matches(hash) reviewHash!: string;
+  @Equals('prepare_reconfirmed_member_name_change') decision!: 'prepare_reconfirmed_member_name_change';
+}
+export class AiMemberNameStartReviewDto extends AiMemberNameReadDto {
+  @Equals('start_original_member_name_review') decision!: 'start_original_member_name_review';
 }

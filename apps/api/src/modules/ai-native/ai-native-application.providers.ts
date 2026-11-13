@@ -157,7 +157,7 @@ function readSettingsExecutionConfiguration(value: unknown) {
   return parsed.data;
 }
 const settingsEntries = [
-  [AI_SETTINGS_CHANGE_REQUESTS, ['prepare']],
+  [AI_SETTINGS_CHANGE_REQUESTS, ['prepare', 'prepareReconfirmedChange']],
   [AI_SETTINGS_TASK_CREATION_REQUESTS, ['create']],
   [AI_SETTINGS_TASK_CONTROL_REQUESTS, ['configurePolicy', 'start']],
   [AI_SETTINGS_TASK_HTTP_REQUESTS, ['startSettingsTask', 'decideSettingsProposal', 'continueSettingsConfirmation', 'reconcileSettingsTask', 'prepareTaskCenterApproval']],
