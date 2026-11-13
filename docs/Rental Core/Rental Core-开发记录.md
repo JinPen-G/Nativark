@@ -20,7 +20,7 @@
 
 全部验证已退出，唯一暂存只剩空audit。原生PowerShell精确删除再次被自动审批`blocked by policy`拒绝，整条未执行且无详细理由；已安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-capability-commit-validation/manifest.json)，[退出证据](../../output/category-governance/quote-capability-commit-cleanup-20261113.json)确认原暂存不存在、已归集未删除，旧批责任保持。阶段固定版本/验证/未验/阻塞留本对话及原资料供PM主动读取，没有跨对话消息、合main或新增环境执行。
 
-仍未证明MySQL查询/锁/容量、真实并发采用与新报价、服务进程/缓存、多端宿主或独立Review。当前完整CAT-GOV为0/14、实现百分比待核实；后续继续完整报价的配置/价格/规则/检查组合及全部写入口，两个动态编码不同组合的同一冻结构建经营和原22项验收，CLOSE及企业/AI接点分别核实，不混算。
+两份源码与四份记录/接续已固定为`c67281023ef57e0b0effa4c6a7245769cc18b490`，普通推送`codex/rental-core`并[读取GitHub同SHA](../../output/category-governance/quote-capability-commit-github-20261113.json)，工作树干净、上游0/0。仍未证明MySQL查询/锁/容量、真实并发采用与新报价、服务进程/缓存、多端宿主或独立Review。当前完整CAT-GOV为0/14、实现百分比待核实；后续继续完整报价的配置/价格/规则/检查组合及全部写入口，两个动态编码不同组合的同一冻结构建经营和原22项验收，CLOSE及企业/AI接点分别核实，不混算。
 
 <a id="adoption-configuration-preflight-20261113"></a>
 
