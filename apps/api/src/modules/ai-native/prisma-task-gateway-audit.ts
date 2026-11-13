@@ -75,7 +75,8 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
         const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
           scopeId: before.resolved.scope.id, callId: input.callId } } });
         const audience = before.resolved.context.audience === 'client' ? 'CLIENT'
-          : before.resolved.context.audience === 'staff' ? 'STAFF' : 'OPERATOR';
+          : before.resolved.context.audience === 'staff' ? 'STAFF'
+            : before.resolved.context.audience === 'automation' ? 'AUTOMATION' : 'OPERATOR';
         if (!task || task.id !== this.taskId || task.scopeId !== before.resolved.scope.id || task.scopeKind !== 'WORKSPACE'
           || task.ownerId !== before.principal.actorId || task.ownerKind !== before.principal.actorKind
           || task.audience !== audience || task.archivedAt !== null || task.contractVersion !== AI_TASK_DRAFT_VERSION
@@ -166,7 +167,8 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
         open();
         const task = await tx.aiTask.findFirst({ where: { id: this.taskId, scopeId: call.binding.scope.id,
           ownerKind: before.subject.actorKind, ownerId: before.subject.actorId,
-          audience: before.resolved.context.audience === 'client' ? 'CLIENT' : before.resolved.context.audience === 'staff' ? 'STAFF' : 'OPERATOR',
+          audience: before.resolved.context.audience === 'client' ? 'CLIENT' : before.resolved.context.audience === 'staff' ? 'STAFF'
+            : before.resolved.context.audience === 'automation' ? 'AUTOMATION' : 'OPERATOR',
           archivedAt: null }, select: { id: true, contractVersion: true } });
         const invocation = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
           scopeId: call.binding.scope.id, callId: call.request.callId } }, select: { id: true, scopeId: true, taskId: true,
@@ -264,7 +266,8 @@ export class PrismaTaskGatewayAudit implements UnifiedGatewayAudit {
       };
       const before = await current(), scopeId = before.resolved.scope.id;
       const audience = before.resolved.context.audience === 'client' ? 'CLIENT'
-        : before.resolved.context.audience === 'staff' ? 'STAFF' : 'OPERATOR';
+        : before.resolved.context.audience === 'staff' ? 'STAFF'
+          : before.resolved.context.audience === 'automation' ? 'AUTOMATION' : 'OPERATOR';
       const verifyCurrent = async () => { if ((await current()).binding !== before.binding) throw denied(); };
       const load = async (tx: Prisma.TransactionClient) => {
         const task = await tx.aiTask.findFirst({ where: { id: this.taskId, scopeId,

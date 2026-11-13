@@ -136,7 +136,7 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
     const resolved = (await this.scopes.resolveCurrent()).context;
     // No synthetic principal: the platform arm resolves the SaaS principal and
     // derives ownerKind directly, so no caller can ever read fake attribution.
-    let ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN';
+    let ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN' | 'AUTOMATION';
     if ('tenantId' in call.context) {
       const principal = gatewayBudgetPrincipal(resolved);
       if (principal.actorId !== call.context.actorId || principal.tenantId !== call.context.tenantId

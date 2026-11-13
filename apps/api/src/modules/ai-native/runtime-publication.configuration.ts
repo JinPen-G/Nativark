@@ -15,6 +15,7 @@ const configurations = z.object({
   conversations: configuration,
   workbenchDisplay: configuration,
   businessFailure: configuration,
+  automationExplanation: configuration,
   automationReviewGrant: configuration,
   orderModel: configuration,
   quoteModel: configuration,

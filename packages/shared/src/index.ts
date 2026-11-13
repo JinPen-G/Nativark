@@ -100,6 +100,7 @@ export * from "./ai-budget-management-http-draft";
 export * from "./ai-text-capability-http-draft";
 export * from "./ai-automation-review-queue-http-draft";
 export * from "./ai-automation-review-http-draft";
+export * from "./ai-automation-explanation-draft";
 export * from "./ai-task-opening-proposal-http-draft";
 export * from "./ai-opening-integration-observation";
 export * from "./ai-automation-policy-http-draft";

@@ -20,6 +20,7 @@ import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desk
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES, FeatureOwnership, FeatureReleaseStatus, SubscriptionRequestType, SubscriptionPlan } from '@rental-os/shared';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT, AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
@@ -2334,6 +2335,13 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...Object.entries(AI_AUTOMATION_EXPLANATION_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `automationExplanation_${action}`,
+    permissions: ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view'],
+    summary: 'Current human original-resource access; explicit first model execution retains the independent automation policy and single ledger. Unknowns only read the original input.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
   ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute', 'inspectReconfirmation',
     'prepareReconfirmation', 'readReconfirmation', 'startReview'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,

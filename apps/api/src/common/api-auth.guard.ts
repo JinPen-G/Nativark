@@ -24,6 +24,7 @@ import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@r
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from '@rental-os/shared';
+import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
@@ -275,6 +276,10 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_AUTOMATION_EXPLANATION_CONTRACTS).some(action =>
+    path === `/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`)) {
+    return ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view'];
+  }
   const creditRoute = `${method.toUpperCase()} ${path}`;
   // Entry read rights do not replace original owner/scope or each financial
   // source's independent authority inside the material/source readers.

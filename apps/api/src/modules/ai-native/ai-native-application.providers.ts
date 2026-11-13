@@ -3,7 +3,7 @@ import { AI_TASK_ORIGINAL_READ_POLICY_REQUESTS, composeTaskOriginalReadPolicyReq
 import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } from './task-order-handoff.application';
 import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft } from './task-calendar-draft.application';
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
-import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider } from './runtime-publication.configuration';
+import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider, readRuntimePublication } from './runtime-publication.configuration';
 import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
 import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration,
   readCurrentWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
@@ -12,6 +12,7 @@ import { AI_TASK_CENTER_RECOVERY_REQUESTS, composeTaskCenterRecoveryRequests,
   type TaskCenterRecoveryDependencies } from './task-center-recovery.application';
 import { AI_WORKBENCH_MODEL_CONTROL_REQUESTS, composeWorkbenchModelControlRequests } from './workbench-model-control.application';
 import { composePersistedTaskModelHost } from './task-model-gateway.composition';
+import { AutomationExplanationApplication } from './automation/automation-explanation.application';
 /**
  * 职责：将正式业务服务、当前身份和持久仓储接到 AI Native 的 Nest provider 入口。
  * 边界：装配不等于执行开放；各请求仍核验当前政策、权限与实际可用的依赖。
@@ -127,6 +128,18 @@ import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
 export const AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION = Symbol('AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION');
 export const AI_NATIVE_BUSINESS_FAILURE_RESOURCES = Symbol('AI_NATIVE_BUSINESS_FAILURE_RESOURCES');
 export const AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION = Symbol('AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION');
+export const AI_NATIVE_AUTOMATION_EXPLANATION_CONFIGURATION = Symbol('AI_NATIVE_AUTOMATION_EXPLANATION_CONFIGURATION');
+/** Default-closed model use; historical reads keep independent current human
+ * access. A missing policy or budget is never initialized by this provider. */
+export const AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER: FactoryProvider = {
+  provide: AutomationExplanationApplication,
+  inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox,
+    AI_NATIVE_BUSINESS_FAILURE_RESOURCES, ConfigService],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService,
+    subscriptions: SubscriptionService, secrets: SecretBox, resources: BusinessFailureResourcePorts, configuration: ConfigService) =>
+    new AutomationExplanationApplication({ db, auth, guard, core, subscriptions, secrets, resources,
+      currentConfiguration: () => readRuntimePublication(configuration).configurations.automationExplanation }),
+};
 export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
   provide: AI_NATIVE_BUSINESS_FAILURE_RESOURCES, inject: [PrismaService, ConfigService, ModuleRef],
   useFactory: (db: PrismaService, configurationSource: ConfigService, moduleRef: Pick<ModuleRef, 'get'>): BusinessFailureResourcePorts => {
@@ -1253,6 +1266,7 @@ export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
   runtimeConfigurationProvider(AI_NATIVE_CONVERSATION_CONFIGURATION, 'conversations'),
   runtimeConfigurationProvider(AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, 'workbenchDisplay'),
   runtimeConfigurationProvider(AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION, 'businessFailure'),
+  runtimeConfigurationProvider(AI_NATIVE_AUTOMATION_EXPLANATION_CONFIGURATION, 'automationExplanation'),
   runtimeConfigurationProvider(AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, 'orderModel'),
   runtimeConfigurationProvider(AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, 'quoteModel'),
   runtimeConfigurationProvider(AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, 'openingModel'),

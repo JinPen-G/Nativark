@@ -6,6 +6,31 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain18-original-explanation-public-consumer-20261114"></a>
+## AIN-18 原经营事件模型解释、首次准入和后台公开闭环（2026-11-14）
+
+在已推 `bc1bdb02e1aa08d51a99f1a301fe131d2efcd2e7` 上，原经营待办新增[明确解释入口](../../apps/admin/src/features/ai-native/AutomationExplanation.tsx)：原事件→读取原结果→准备→人类明确确认→同原AUTOMATION Task／Run及唯一Gateway／单账→原结果读回。公共[三路合同](../../packages/shared/src/ai-automation-explanation-draft.ts)、[Controller](../../apps/api/src/modules/ai-native/automation/automation-explanation.controller.ts)、当前Guard、OpenAPI、标准provider和runtime `automationExplanation`同时登记。客户端只提交inputRef及服务端准备证明，不自行填subject／policy／Task／Run／provider或工具；原全局DTO剥离不能掩盖未知字段，Controller核原request.body并输出闭合响应。默认不发布解释配置，不读取环境文件、不启用模型或自动化。
+
+[原请求应用](../../apps/api/src/modules/ai-native/automation/automation-explanation.application.ts)通过当前人类业务权限读取原创建收据，从原input定位Task／Run，再复核原注册subject／policy、当前来源、场景计划和三层预算。AUTOMATION在原Gateway、routing、invocation、模型步骤证据、审计和CALLS结算中保持独立命名空间，不借USER／CUSTOMER身份。[平台连接](../../apps/api/src/modules/ai-native/platform-model-connection.ts)也核同当前自动主体及已发布profile、配置修订和加密凭据；原管理路径仍限SaaS管理者。模型只生成文字解释，源内容为不可信数据，不分配资产、不重新计价／判责、不批准、发送通知、重退或发布配置；业务办理继续原受权入口及收据。
+
+独立核查发现原Task创建只建Task／Run，通用政策管理仅本人USER Task，作者正向夹具却预置8政策。现补[明确首次准入](../../apps/api/src/modules/ai-native/automation/automation-explanation-start-admission.ts)：准备只读原subject／source／plan／预算及现有政策，确认后仅对未动过的原首Run补缺失固定读／启动政策。原PrismaTaskActionPolicyRepository以null-CAS写入，期限不超过原input与计划；已有权限／修订／TTL逐字保留，过期或更严政策不重置。政策及人类启动记录在同一原事务，原subject／policy／事件／Task／Run围栏后复核当前权限和publication。已有启动记录只读取，尚无步骤也保持unknown，不将COMMIT丢ACK或空结果当作可重发；不自动种subject、计划或预算，不授业务执行。
+
+[独立原派发证据](../../apps/api/src/modules/ai-native/automation/original-automation-dispatch.reader.ts)以当前人类原业务读权核原调用、预约、财务／准入收据和全部原关联，停用或旧自动政策到期不挡合法历史、不续权／派发／清占用。读前后及最终等待核同原记录；用量缺失保持pending_reconciliation和原CALLS占用。后台发送前仅持久化`{version,inputRef}`并读回，存储失败不发送；丢ACK重开只read，StrictMode重新建立取消源，身份／空间变化、隐藏、撤权和迟到响应撤回正文。正文纯文本，不解释为Core办理成功；共享safeDisplayText保持原20000字符展示上限。
+
+| 必要模拟／类型 | 固定命令与实际结果 |
+| --- | --- |
+| Root原Controller→Application，从空政策准备／确认→原Task／Gateway／单账 | `node --no-compilation-cache -` stdin `4bddc8312b3d0fb559ae20f96b4feed03c0576457e1cb91d77f769bfd0c96755`／退出0；准备写0，确认后1Task／1Run／1Step／1模型／1预约、8政策／1人类准入收据、7资源charge；Task／Run SUCCEEDED、原CALLS consumed1／reserved0，停用／到期原读无新增写，撤权拒绝。 |
+| Root准入COMMIT丢ACK及缺模型用量 | `21ffb7bfd621974cf267251b3e45c886b09357a78d133ee2899aa273c24217b8`／退出0；丢ACK保留8政策／原记录，模型0，原read与再次start均只返回unknown；停用／到期仍受权原读。缺usage只1模型，pending_reconciliation，CALLS reserved1，原读不重派／清账。 |
+| Root撤权／publication停用与部分已有政策 | `cd6a8bb49fd2f596ce72c68d2a36fef9f4a4e9eaafdc7a9e2375c6b2376a50ea`／退出0；撤权／停用写0，现有read_metadata修订9及原TTL不变，仅补7缺项，模型1。 |
+| Root实际API／Controller合同与有限React宿主 | `a893ebe92c4644ef05c6315866b29c19023bceb0c0fc1449835fbac3f6495af3`／退出0；实际确认、原键存储、读回、丢ACK／重开／隐藏／scope／StrictMode均核定，存储或准备证明失败不start，纯文本不执行HTML。本组application为明示合同夹具，完整生产应用沿前三组独立核接。 |
+| Root标准provider、Guard及OpenAPI | `a3ceafcb98199a880cc0ea2f4109d24eeb6a245dc56ffdd1ad6ab4bc527eadc6`／退出0；provider构造业务读取0，默认关闭，三路请求／响应与原权限登记一致。 |
+| dev1固定平台原金额账及发布等待后撤回 | 平台同组修前／修后stdin `ae82b57f37d6aebf1b60113d6a2b7293438f00829130a516efc4b77ebf058f42`分别退出1／0；修前原平台resolver拒绝AUTOMATION、模型0且预约unknown，修后匹配profile1模型／原金额预约结清。`66f02dd6da26d433317a78d6f02b27b8339adcfbcc4540720429124d0b26a890`／退出0，错profile和prepare／Gateway等待中撤publication均模型0，已发生准入保留unknown。价格及输入界限为明示合成原证据，不是实际供应商费用。 |
+| Root最终公开装配及后台类型 | API stdin `bd663db628df46bc4b29090c49406e23a883b6e833232641ca2662b6d3b3982b`／退出0，TypeScript5.9.3，20根／1987源零诊断；后台 `e4bf55beffb9657dd0c66c50e582eda8a1bae479dc87f4fd2bd9d9f394b03e58`／退出0，4根／1509源零诊断。32必要产品源路径→blob集合SHA-256 `f70355481cfe8bc95bc85c9b81b6285d35042b3cb648988e1a935a077a25a24e`，最终工作区逐字核同。 |
+
+失败如实保留：Application的as换行在最新编辑后成为语法错误，原同类型命令退出1，最小接回表达式后0；初次后台API额外axios字段、时间formatter及ConfirmAction props错误已按实际契约修正。Root有限宿主首轮事件误用非正式resource/type和缺事件字段、随后JSX运行时未替换、隐藏请求本应拒绝却驱动期待resolve，均修内存驱动，未放宽生产schema。空政策初次真实performance.now链已提交准入／派发1模型，后收尾AI_RUN_LIMIT，原占用／unknown保留；正向仅使用可信可替换时钟口和原fixture tick，原setTimeout／clearTimeout仍在，默认生产时钟未改。该模拟不证明真实SLO，也不关闭旧慢读。平台组曾误用calls价格证明平台金额，改为原明确价格／输入界限fixture后仍暴露正式platform主体拒绝，已修并沿同组复验。
+
+本阶段不改任务分数：AIN-17全文正在独立核定，AIN-18还须对应原逐场景办理／复查、政策、停用及全篇门槛，不能用解释或影子待办代替业务结果。原实时／供应商／MySQL／浏览器／微信测试由负责人后续操作。`docs:check`仍四处既有缺链／退出1，无新增任务算术或链接错误；定向diff检查退出0。Root本阶段进程已退出，audit0，`output/.tmp/ain18-automation-model-closeout-20261114`未创建，无新增／扩写测试脚本、client／dist／依赖或环境副本。未核AIN-15三叶及员工旧样式排除。AI分支阶段提交／普通推送，main仍由PM按固定依赖串行集成。
+
 <a id="ain25-original-worker-cancel-receipt-20261114"></a>
 ## AIN-25 原 worker 取消收口收据修复（2026-11-14）
 

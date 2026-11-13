@@ -9,6 +9,7 @@ import { useAiManagementLocale } from './management-locale';
 import { AutomationReviewWorkbench } from './AutomationReviewWorkbench';
 import { createAutomationOriginalNavigation } from './automation-original-navigation';
 import { AutomationRefundRecords } from './AutomationRefundRecords';
+import { AutomationExplanation } from './AutomationExplanation';
 import type { AutomationReviewOriginalTarget } from './automation-review-session';
 
 export const AUTOMATION_REVIEW_ENTRY_PERMISSIONS = Object.freeze([
@@ -19,6 +20,7 @@ export function AutomationReviewSection({ identity, current }: { identity: strin
   const auth = useAuthStore(), { locale } = useAiManagementLocale(), navigate = useNavigate();
   const [opened, setOpened] = useState<string[]>([]);
   const [refund, setRefund] = useState<AutomationReviewOriginalTarget | null>(null);
+  const [explanation, setExplanation] = useState<{ inputRef: string; eventId: string } | null>(null);
   const tenantId = auth.tenant?.tenantId, workspaceId = auth.currentWorkspaceId;
   const permitted = () => useAuthStore.getState().sessionVerified && !!useAuthStore.getState().token && !useAuthStore.getState().user?.isSaasAdmin
     && AUTOMATION_REVIEW_ENTRY_PERMISSIONS.some(useAuthStore.getState().hasPermission) && current();
@@ -28,7 +30,7 @@ export function AutomationReviewSection({ identity, current }: { identity: strin
     hasPermission: code => useAuthStore.getState().hasPermission(code), navigate,
   }), [identity, tenantId, workspaceId, navigate]);
   if (!tenantId || !workspaceId || !permitted()) return null;
-  return <><Accordion value={opened} onValueChange={value => { setOpened(value); if (!value.includes('human-automation-review')) setRefund(null); }} items={[{
+  return <><Accordion value={opened} onValueChange={value => { setOpened(value); if (!value.includes('human-automation-review')) { setRefund(null); setExplanation(null); } }} items={[{
     key: 'human-automation-review', title: locale === 'en-US' ? 'Business reviews' : '经营待办',
     content: opened.includes('human-automation-review') ? <AutomationReviewWorkbench identity={identity}
       current={() => permitted() && !document.hidden} onOpenOriginal={async (target, signal) => {
@@ -42,7 +44,12 @@ export function AutomationReviewSection({ identity, current }: { identity: strin
           setRefund(structuredClone(target)); return { state: 'opened' };
         }
         return original(target, signal);
-      }} onAccessDenied={() => { setRefund(null); setOpened([]); }} /> : null,
+      }} onExplainOriginal={async (target, signal) => {
+        if (signal.aborted || !permitted() || document.hidden || !target.inputRef || target.scope.tenantId !== tenantId
+          || target.scope.workspaceId !== workspaceId || target.scope.actorId !== useAuthStore.getState().user?.id) return { state: 'unavailable' };
+        setExplanation({ inputRef: target.inputRef, eventId: target.eventId }); return { state: 'opened' };
+      }} onAccessDenied={() => { setRefund(null); setExplanation(null); setOpened([]); }} /> : null,
   }]} />{refund && <AutomationRefundRecords key={JSON.stringify(refund)} target={refund} current={() => permitted()}
-    close={() => setRefund(null)} />}</>;
+    close={() => setRefund(null)} />}{explanation && <AutomationExplanation key={`${identity}:${explanation.inputRef}`}
+      {...explanation} identity={identity} current={permitted} close={() => setExplanation(null)} />}</>;
 }

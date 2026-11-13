@@ -33,7 +33,8 @@ export async function readAutomationOriginalRefund(target: AutomationReviewOrigi
     check(); const value: AiAutomationReviewsForEventDraft = await aiAutomationReviewsApi.forEvent({ eventId: original.eventId, limit: 1 }, active); check();
     if (value.event.eventId !== original.eventId || value.event.type !== original.eventType
       || value.event.resourceRevision !== original.resourceRevision || value.currentSource.revision !== original.currentRevision
-      || value.currentSource.sourceHash !== original.sourceHash || JSON.stringify(value.originalResource) !== JSON.stringify(resource)) throw Error('AI_REVISION_CONFLICT');
+      || ('sourceHash' in value.currentSource ? value.currentSource.sourceHash : undefined) !== original.sourceHash
+      || JSON.stringify(value.originalResource) !== JSON.stringify(resource)) throw Error('AI_REVISION_CONFLICT');
     return { failed: value.currentSource.failed,
       signature: JSON.stringify({ event: value.event, source: value.currentSource, resource: value.originalResource }) };
   };

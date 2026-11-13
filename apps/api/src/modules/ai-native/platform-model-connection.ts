@@ -254,7 +254,9 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       const owner = await this.currentOwner(), actor = owner.context.actor, scope = owner.context.scope;
       const workspaceContext = context as { tenantId: string; workspaceId: string; actorId: string };
       const actorId = actor.kind === 'user' ? actor.userId
-        : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context) ? actor.customerId : null;
+        : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context) ? actor.customerId
+          : actor.kind === 'automation' && owner.context.audience === 'automation' && isAiStepExecutionContext(owner.context)
+            ? actor.subjectId : null;
       if (!actorId || actorId !== context.actorId || scope.kind !== 'workspace' || scope.tenantId !== workspaceContext.tenantId
         || scope.workspaceId !== workspaceContext.workspaceId || owner.configurationScope.kind !== 'PLATFORM'
         || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');
@@ -304,12 +306,13 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }
       const owner = await this.currentOwner(), actor = owner.context.actor, scope = owner.context.scope;
       const workspaceContext = context as { tenantId: string; workspaceId: string; actorId: string };
-      // Customer invocation is only possible with the formal client execution
-      // context and a separately supplied current task authority. It confers no
-      // platform management permission; automation/platform jobs stay refused.
+      // Customer and automation invocation require their distinct current task
+      // authorities. This consumes no user identity or platform management grant.
       const actorId = actor.kind === 'user' ? actor.userId
         : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context)
-          ? actor.customerId : null;
+          ? actor.customerId
+          : actor.kind === 'automation' && owner.context.audience === 'automation' && isAiStepExecutionContext(owner.context)
+            ? actor.subjectId : null;
       if (!actorId || actorId !== context.actorId || scope.kind !== 'workspace'
         || scope.tenantId !== context.tenantId || scope.workspaceId !== context.workspaceId
         || owner.configurationScope.kind !== 'PLATFORM' || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');

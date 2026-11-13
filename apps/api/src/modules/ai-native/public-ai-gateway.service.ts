@@ -38,9 +38,9 @@ function identity(value: AiExecutionContext) {
   return requestFingerprint(rest);
 }
 
-/** C03 public port for the existing workspace/user engine. The customer `client`
- * audience uses the same server-selected route and single ledger as operator/staff;
- * automation and other identities still fail closed.
+/** C03 public port for server-authorized workspace principals. Customer and
+ * automation owners keep their distinct namespace in the original task/ledger;
+ * routing must revalidate the same current principal before every effect.
  * No production root registers this module automatically, and no default evidence verifier is supplied.
  */
 export class PublicAiGatewayService implements AiGatewayPortDraft {
@@ -68,13 +68,15 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     const platformCall = isAiStepExecutionContext(value) && value.scope.kind === 'platform'
       && value.audience === 'operator' && value.actor.kind === 'saas_admin';
     if (!platformCall && (!isAiStepExecutionContext(value) || value.scope.kind !== 'workspace'
-      || (value.audience === 'client' ? value.actor.kind !== 'customer' : value.actor.kind !== 'user')
-      || !['operator', 'staff', 'client'].includes(value.audience))) throw new ModelGatewayError('FORBIDDEN');
+      || (value.audience === 'client' ? value.actor.kind !== 'customer'
+        : value.audience === 'automation' ? value.actor.kind !== 'automation' : value.actor.kind !== 'user')
+      || !['operator', 'staff', 'client', 'automation'].includes(value.audience))) throw new ModelGatewayError('FORBIDDEN');
     const context = structuredClone(value), binding = this.scenes.get(intent?.sceneCode);
     if (!binding) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const expected = identity(context);
     const actorId = value.actor.kind === 'customer' ? value.actor.customerId
-      : 'userId' in value.actor ? value.actor.userId : (() => { throw new ModelGatewayError('FORBIDDEN'); })();
+      : value.actor.kind === 'automation' ? value.actor.subjectId
+        : 'userId' in value.actor ? value.actor.userId : (() => { throw new ModelGatewayError('FORBIDDEN'); })();
     // Explicit SaaS platform principal: actorId only, no tenant attribution.
     const workspaceScope = value.scope as { tenantId: string; workspaceId: string };
     const narrow: GatewayContext = platformCall

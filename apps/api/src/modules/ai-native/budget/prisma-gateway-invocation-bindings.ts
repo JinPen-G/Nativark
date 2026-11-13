@@ -89,7 +89,7 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
         : scopeRow.kind !== 'TENANT' || scopeRow.tenantId !== owner.tenantId)) throw new BudgetError('FORBIDDEN');
     return profile;
   }
-  private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string, ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN') {
+  private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string, ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN' | 'AUTOMATION') {
     const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind } });
     if (!task || task.audience.toLowerCase() !== audience || task.archivedAt) throw new BudgetError('FORBIDDEN');
     return task;
@@ -107,7 +107,7 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
       || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
     return { command: command.data, prepared: textProbeIntent(command.data.operationId, step.scopeId, textProbeCapability(command.data)) };
   }
-  private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string, ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN') {
+  private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string, ownerKind: 'USER' | 'CUSTOMER' | 'SAAS_ADMIN' | 'AUTOMATION') {
     const task = await this.task(db, row.scopeId, row.taskId, row.actorId, audience, ownerKind);
     const run = await db.aiRun.findFirst({ where: { id: row.runId, scopeId: row.scopeId, taskId: row.taskId } });
     const step = await db.aiStep.findFirst({ where: { id: row.stepId, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId } });

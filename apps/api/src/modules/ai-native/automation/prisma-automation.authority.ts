@@ -35,7 +35,9 @@ const eventSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId:
     'resource_shortage', 'missing_configuration']),
   traceId: id, causationId: id, deduplicationKey: z.string().regex(/^[a-f0-9]{64}$/u),
   occurredAt: z.date(), expiresAt: z.date(), status: z.enum(['pending', 'claimed', 'retry_scheduled', 'ready']) });
-const toolsSchema = z.array(z.object({ code: z.string().refine(value => AI_TOOL_CODES.some(code => code === value)),
+// Model explanation requires the explicitly registered text step. This does
+// not add media, arbitrary tools or a default execution policy to old plans.
+const toolsSchema = z.array(z.object({ code: z.string().refine(value => value === 'ai.model.text' || AI_TOOL_CODES.some(code => code === value)),
   version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(30)
   .refine(values => new Set(values.map(value => value.code)).size === values.length);
 export type AutomationReadDb = Pick<PrismaClient, 'aiAutomationSubject' | 'aiAutomationPolicy' | 'aiAutomationInput'
