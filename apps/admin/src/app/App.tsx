@@ -19,6 +19,7 @@ import { applyArcThemeTokens } from "./arcTokens";
 import { FeedbackProvider } from "@/components/ui/Feedback";
 import { MotionPreferenceProvider } from "./MotionPreferenceProvider";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
+import { isAdminLoginPath } from "@/features/auth/login-entry";
 
 // Keep existing descendant routes; data router supplies supported SPA blockers.
 const router = createBrowserRouter([{ path: "*", element: <AppRouter />, errorElement: <RouteErrorPage /> }]);
@@ -30,7 +31,7 @@ function ThemedApp() {
   const tenant = useAuthStore((state) => state.tenant);
   const user = useAuthStore((state) => state.user);
   const pathname = useSyncExternalStore(router.subscribe, () => router.state.location.pathname);
-  const isLoginRoute = /^\/login(?:\/|$)/.test(pathname);
+  const isLoginRoute = isAdminLoginPath(pathname);
   // 后台主色跟随**登录账户**的主题色（与租户品牌色相互独立）；未设置时回退平台默认灰。
   // Public login must never inherit a cached account's accent or tenant radii.
   // Its verified public tenant preview is scoped inside LoginPage instead.

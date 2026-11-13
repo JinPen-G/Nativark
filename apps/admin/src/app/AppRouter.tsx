@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Button, Result } from "@/components/ui";
-import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { APP_ROUTES, canAccessRoute, type AppRouteDefinition } from "@/app/navigation";
 import { AppShell } from "@/components/AppShell";
 import { LoadingState } from "@/components/LoadingState";
@@ -11,6 +11,7 @@ import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview
 import { WorkspaceRouteReady } from "@/components/workspace/WorkspaceNavigation";
 import { DesktopSessionBridge } from "@/features/agent-desktop/DesktopSessionBridge";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
+import { isTenantLoginAliasPath } from "@/features/auth/login-entry";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const MessageCenterPage = lazy(() => import("@/features/notifications/MessageCenterPage"));
@@ -208,6 +209,7 @@ function ProtectedRoutes() {
 }
 
 export function AppRouter() {
+  const { pathname } = useLocation();
   return (
     <Suspense fallback={<PageLoader />}>
       {rentalDesktopHost() && <DesktopSessionBridge />}
@@ -215,6 +217,8 @@ export function AppRouter() {
         <Route path="/login" element={<LoginPage />} />
         {/* 租户专属登录链接：/login/:tenantCode 直接显示该租户品牌，隐藏租户编码输入。 */}
         <Route path="/login/:tenantCode" element={<LoginPage />} />
+        {/* 简写入口保留原业务和兼容路由；它只展示公开品牌，不建立会话。 */}
+        {isTenantLoginAliasPath(pathname) && <Route path="/:tenantCode" element={<LoginPage />} />}
         <Route path="/*" element={<ProtectedRoutes />} />
       </Routes>
     </Suspense>

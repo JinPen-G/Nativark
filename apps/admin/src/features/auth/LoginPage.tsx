@@ -23,6 +23,7 @@ import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { api } from "@/api/platform";
 import { useAuthStore } from "./authStore";
+import { resolveLoginTenantCode } from "./login-entry";
 
 type LoginValues = { tenantCode: string; account: string; password: string };
 type DemoPasswordValues = { password: string; confirmPassword: string };
@@ -37,8 +38,6 @@ const LOCAL_DEMO_ACCOUNTS = [
   { label: "SaaS 平台管理员", tenantCode: "platform", account: "admin" },
 ] as const;
 
-const TENANT_CODE_PATTERN = /^[a-z][a-z0-9_-]{1,31}$/u;
-
 export function LoginPage() {
   const [form] = Form.useForm<LoginValues>();
   const [demoPasswordForm] = Form.useForm<DemoPasswordValues>();
@@ -48,10 +47,10 @@ export function LoginPage() {
   const stageRef = useRef<HTMLDivElement>(null);
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
-  // 租户专属登录链接 /login/:tenantCode：租户编码来自 URL、不再要求手输，也不在页面上展示可编辑的租户编码框。
+  // 只有网址指定的租户才展示其品牌；通用页手输编码只参与原登录。
   const { tenantCode: urlTenantCode } = useParams<{ tenantCode?: string }>();
-  const lockedTenantCode = urlTenantCode?.trim().toLowerCase();
-  const isTenantLocked = Boolean(lockedTenantCode && TENANT_CODE_PATTERN.test(lockedTenantCode));
+  const lockedTenantCode = resolveLoginTenantCode(urlTenantCode);
+  const isTenantLocked = Boolean(lockedTenantCode);
   const [demoPasswordOpen, setDemoPasswordOpen] = useState(false);
   const [resettingDemoPassword, setResettingDemoPassword] = useState(false);
   const [demoAccountsOpen, setDemoAccountsOpen] = useState(false);
@@ -62,25 +61,26 @@ export function LoginPage() {
   const watchedTenantCode = Form.useWatch("tenantCode", form)?.trim().toLowerCase();
   const effectiveTenantCode = isTenantLocked ? lockedTenantCode : watchedTenantCode;
   const publicBootstrap = useQuery({
-    queryKey: ["public-admin-brand", effectiveTenantCode],
-    queryFn: () => clientChannelApi.getPublicBootstrap(effectiveTenantCode as string),
-    enabled: Boolean(effectiveTenantCode && TENANT_CODE_PATTERN.test(effectiveTenantCode)),
+    queryKey: ["public-admin-brand", lockedTenantCode],
+    queryFn: () => clientChannelApi.getPublicBootstrap(lockedTenantCode as string),
+    enabled: isTenantLocked,
     retry: false,
     staleTime: 5 * 60 * 1000
   });
+  const tenantBrand = isTenantLocked && resolveLoginTenantCode(publicBootstrap.data?.tenantCode) === lockedTenantCode
+    ? publicBootstrap.data : undefined;
   // 锁定租户但该编码查不到品牌（未开通/已停用）时，不冒充成"平台默认"，明确提示，不让人对着错的品牌登录。
-  const tenantLockedButUnresolved = isTenantLocked && publicBootstrap.isFetched && !publicBootstrap.data;
-  const loginBrandName = publicBootstrap.data?.merchant.name?.trim() || ADMIN_BRAND_NAME;
-  const loginBrandLogo = publicBootstrap.data?.merchant.logoUrl?.trim() || ADMIN_DEFAULT_LOGO;
-  const loginBranding = publicBootstrap.data?.adminLogin;
+  const tenantLockedButUnresolved = isTenantLocked && publicBootstrap.isFetched && !tenantBrand;
+  const loginBrandName = tenantBrand?.merchant.name?.trim() || ADMIN_BRAND_NAME;
+  const loginBrandLogo = tenantBrand?.merchant.logoUrl?.trim() || ADMIN_DEFAULT_LOGO;
+  const loginBranding = tenantBrand?.adminLogin;
   const showBrandTitle = loginBranding?.showTitle !== false;
   const showBrandDescription = loginBranding?.showDescription !== false;
   const showBrandFooter = loginBranding?.showFooter !== false;
   const backgroundPath = loginBranding?.backgroundImageUrl;
   const backgroundSrc = backgroundPath?.startsWith("/") ? `${apiAssetOrigin}${backgroundPath}` : backgroundPath;
-  // Only the current public tenant response can color the login surface.
-  // Clearing/changing its query key immediately drops the previous preview.
-  const loginThemeColor = publicBootstrap.data?.themeColor;
+  // 通用页（含登录中）保留平台配色，专属页只采用当前网址租户的公开主题。
+  const loginThemeColor = tenantBrand?.themeColor;
   const loginTheme = createThemeConfig(mode, loginThemeColor);
   useLayoutEffect(() => {
     if (stageRef.current) applyArcThemeTokens(stageRef.current, mode === "dark", loginThemeColor);
