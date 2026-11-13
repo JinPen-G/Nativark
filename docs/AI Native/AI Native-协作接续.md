@@ -48,7 +48,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 [规则/日历拒绝与重新确认后端](<AI Native-开发记录.md#ain16-original-draft-rejection-refresh-20261113>)13源已固定上传 `75f86be57e772218774080d0d337dde6536b26df`；[九源消费者与原页面收尾](<AI Native-开发记录.md#ain16-draft-rejection-consumer-20261113>)已由dev2冻结交权，Root独立实际组合和类型通过。原拒绝丢应答只读原键，合法拒绝才能刷新旧entry来源，新提案和Core保存保持独立确认、不发布。AIN-16明确剩余为会员姓名/通知原审核终结后的新差异/新变更公开消费者；不把unknown当未提交，后端沿既有reconfirmation，dev2继续其前端，Root接公开合同。原五条及AIN-14前置齐备后再核整项。
 
-[经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)两源已由 dev1 完成固定组合、Root 核 blob 和现稿类型；原 operation/同键恢复与当前触发政策分离，不续权、不派发，新操作仍保留当前来源和授权。dev1 已接新事件有界领取和原批次恢复：现有 limit-only 批次丢应答没有 eventId 清单，必须补原 OperationLog 固定批次/只读查询；已追加其 feature-local 后端和 pending 合同写权，Guard/总出口/四册仍归 Root。AIN-17/18 全文尚有原生产来源/窗口等缺口，不因该修复片提高任务百分比。
+[经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)两源与[固定事件批次消费者](<AI Native-开发记录.md#ain17-durable-pending-batch-consumer-20261113>)八源已交权、Root独立原Guard/Controller/OperationLog模拟及两端类型通过。原operation和batch重开只读，最多10项清单先记录，提交或确认未知不继续领取；公共staff路由归Root。AIN-17/18明确剩余为正式ResourcePorts生产装配、同原事务结构化资源不足/缺项来源和可信临近政策，dev1继续有限只读定位，未获新源码写权。原未知不换键或从自由文本补造事件。
 
 上传观察的幂等键兼容已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并推送 `b690e4f3751bcaa1beac30cde88b55ea596ec1de`。[默认识别 Core 依据与保存后复核](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)和[媒体消费](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)已交 PM，55 schema 和原 22 源保留。QA 新发现的历史省略 `candidateBasis` 采用漏洞已按[最小门禁修复](<AI Native-开发记录.md#ain-inspection-legacy-adoption-p2-20261112>)完成模拟与类型验证，独立交 PM 复验。
 

@@ -1,10 +1,14 @@
 /** A current-human review driver. Storage contains original references and CAS
  * commands only, never resource facts, model text or authority. Unknown writes
  * recover through the original event/creation/operation reads; no replay.
- * Human grants keep a separate original locator, never a cached permission. */
+ * Human grants keep a separate original locator, never a cached permission.
+ * Pending-candidate batches record their key before calling the server. A lost
+ * or partial reply is observed through the original batch, never prepared again. */
 import { z } from 'zod';
 import type {
   AiAutomationCandidateDraft, AiAutomationEventTaskResponseDraft,
+  AiAutomationPendingCandidatesRequestDraft, AiAutomationPendingCandidatesDraft,
+  AiAutomationPendingBatchObservationDraft,
   AiAutomationReviewCloseDraft, AiAutomationReviewCloseReasonDraft, AiAutomationReviewDraft,
   AiAutomationReviewFeedbackCodeDraft, AiAutomationReviewFeedbackDraft, AiAutomationReviewOperationDraft,
   AiAutomationReviewQueueFiltersDraft, AiAutomationReviewQueueResponseDraft, AiAutomationReviewsForEventDraft,
@@ -20,6 +24,11 @@ const uuid = z.string().uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const revision = z.number().int().min(1).max(4294967293), fence = z.number().int().min(0).max(4294967293);
 const scopeSchema = z.object({ tenantId: id, workspaceId: id, actorId: id, audience: z.literal('operator') }).strict();
 export type AutomationReviewScope = z.infer<typeof scopeSchema>;
+const batchSchema = z.object({ kind: z.literal('automation-pending-candidates-1'), scope: scopeSchema,
+  status: z.enum(['dispatched', 'observed']), limit: z.number().int().min(1).max(10), eventIds: z.array(uuid).max(10),
+  operationKey: id.max(128).optional(), batchId: uuid.optional() }).strict()
+  .refine(value => value.eventIds.length <= value.limit && new Set(value.eventIds).size === value.eventIds.length);
+type CandidateBatch = z.infer<typeof batchSchema>;
 const command = { scope: scopeSchema, status: z.enum(['pending', 'observed']), eventId: uuid, inputRef: uuid,
   inputHash: hash, creationKey: id, operationKey: id.max(128), expectedRevision: revision,
   expectedEventFence: fence, expectedTaskId: uuid.nullable(), expectedRunId: uuid.nullable() };
@@ -44,6 +53,10 @@ export interface AutomationReviewStore {
   read(): Journal | null;
   write(next: Journal, expected: Journal | null): void;
   clear(expected: Journal): void;
+  batch: {
+    read(): CandidateBatch | null;
+    write(next: CandidateBatch, expected: CandidateBatch | null): void;
+  };
   grant: {
     read(): AutomationReviewGrantLocator | null;
     write(next: AutomationReviewGrantLocator, expected: AutomationReviewGrantLocator | null): void;
@@ -51,10 +64,13 @@ export interface AutomationReviewStore {
   };
 }
 export const automationReviewGrantStorageName = (name: string) => `${name}:grant`;
+export const automationReviewBatchStorageName = (name: string) => `${name}:pending-candidates`;
 export function automationReviewStore(name: string, storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): AutomationReviewStore {
   const encode = (value: Journal) => JSON.stringify(journalSchema.parse(value));
   const grantName = automationReviewGrantStorageName(name);
   const encodeGrant = (value: AutomationReviewGrantLocator) => JSON.stringify(grantLocatorSchema.parse(value));
+  const batchName = automationReviewBatchStorageName(name);
+  const encodeBatch = (value: CandidateBatch) => JSON.stringify(batchSchema.parse(value));
   return {
     read() {
       const raw = storage?.getItem(name);
@@ -76,6 +92,24 @@ export function automationReviewStore(name: string, storage?: Pick<Storage, 'get
       if (!storage || storage.getItem(name) !== encode(expected)) throw Error('AI_OPERATION_LOCATOR_ALREADY_EXISTS');
       storage.removeItem(name);
       if (storage.getItem(name) !== null) throw Error('AI_OPERATION_LOCATOR_UNCONFIRMED');
+    },
+    batch: {
+      read() {
+        const raw = storage?.getItem(batchName);
+        if (raw === null || raw === undefined) return null;
+        try {
+          if (!raw || raw.length > 2048) throw Error();
+          const parsed = batchSchema.parse(JSON.parse(raw));
+          if (encodeBatch(parsed) !== raw) throw Error();
+          return parsed;
+        } catch { throw Error('AI_BATCH_LOCATOR_DAMAGED'); }
+      },
+      write(next, expected) {
+        if (!storage) throw Error('AI_BATCH_LOCATOR_UNAVAILABLE');
+        if (storage.getItem(batchName) !== (expected ? encodeBatch(expected) : null)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
+        const raw = encodeBatch(next); storage.setItem(batchName, raw);
+        if (storage.getItem(batchName) !== raw) throw Error('AI_BATCH_LOCATOR_UNCONFIRMED');
+      },
     },
     grant: {
       read() {
@@ -116,6 +150,8 @@ export type AutomationReviewOriginalEntry = (target: AutomationReviewOriginalTar
 export type AutomationReviewView = {
   eventId: string | null; inputRef: string | null;
   queue: AiAutomationReviewQueueResponseDraft | null; queueFilters: AiAutomationReviewQueueFiltersDraft;
+  candidateBatch: AiAutomationPendingCandidatesDraft | null; batch: CandidateBatch | null; batchLocatorDamaged: boolean;
+  batchObservation: AiAutomationPendingBatchObservationDraft | null;
   event: AiAutomationReviewsForEventDraft | null; candidate: AiAutomationCandidateDraft | null;
   review: AiAutomationReviewDraft | null; creation: AiAutomationTaskCreationObservationDraft | null;
   operation: AiAutomationReviewOperationDraft | null; pending: Journal | null; lastOperation: MutationJournal | null;
@@ -137,6 +173,7 @@ export function createAutomationReviewSession(input: {
   let active = true, owner: AbortController | null = null, record: Journal | null = null;
   let damaged = false, initialError: string | null = null;
   let grantRecord: AutomationReviewGrantLocator | null = null, grantDamaged = false;
+  let batchRecord: CandidateBatch | null = null, batchDamaged = false;
   let preparedReview: string | null = null;
   let verifiedGrant: { locator: AutomationReviewGrantLocator; review: string; expiresAt: string } | null = null;
   try {
@@ -145,9 +182,14 @@ export function createAutomationReviewSession(input: {
   } catch { record = null; damaged = true; initialError = 'AI_OPERATION_LOCATOR_DAMAGED'; }
   try { grantRecord = input.store.grant.read(); }
   catch { grantDamaged = true; initialError ??= 'AI_GRANT_LOCATOR_DAMAGED'; }
+  try {
+    batchRecord = input.store.batch.read();
+    if (batchRecord && !same(batchRecord.scope, scope)) throw Error('AI_BATCH_LOCATOR_DAMAGED');
+  } catch { batchRecord = null; batchDamaged = true; initialError ??= 'AI_BATCH_LOCATOR_DAMAGED'; }
   let view: AutomationReviewView = {
     eventId: record?.eventId ?? (uuid.safeParse(input.eventId).success ? input.eventId! : null),
     inputRef: record?.inputRef ?? grantRecord?.inputRef ?? null, queue: null, queueFilters: {}, event: null, candidate: null,
+    candidateBatch: null, batchObservation: null, batch: batchRecord, batchLocatorDamaged: batchDamaged,
     review: null, creation: null, operation: null,
     pending: record?.status === 'pending' ? record : null,
     lastOperation: record?.status === 'observed' ? record : null,
@@ -165,7 +207,7 @@ export function createAutomationReviewSession(input: {
     preparedReview = null; verifiedGrant = null;
     view = { ...view, grantPreparation: null, grantObservation: null };
   };
-  const scrub = () => { retractGrant(); view = { ...view, queue: null, event: null, candidate: null, review: null,
+  const scrub = () => { retractGrant(); view = { ...view, queue: null, candidateBatch: null, batchObservation: null, event: null, candidate: null, review: null,
     creation: null, operation: null, recheck: null, openedEntry: null }; };
   const store = (next: Journal) => {
     assert();
@@ -178,6 +220,11 @@ export function createAutomationReviewSession(input: {
     try { if (record) input.store.clear(record); record = null; publish({ pending: null, lastOperation: null }); }
     catch (error) { damaged = true; publish({ locatorDamaged: true }); throw error; }
   };
+  const writeBatch = (next: CandidateBatch) => {
+    assert();
+    try { input.store.batch.write(next, batchRecord); batchRecord = next; publish({ batch: next }); }
+    catch (error) { batchDamaged = true; publish({ batchLocatorDamaged: true }); throw error; }
+  };
   const run = async <T>(name: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> => {
     assert(); if (view.busy) throw Error('AI_OPERATION_BUSY');
     const request = new AbortController(); owner = request; publish({ busy: name, error: null });
@@ -187,14 +234,16 @@ export function createAutomationReviewSession(input: {
       const knownCodes = ['AI_RESOURCE_UNAVAILABLE', 'AI_ACCESS_DENIED', 'AI_REVISION_CONFLICT', 'AI_INVALID_INPUT', 'AI_RESULT_UNKNOWN'];
       scrub(); const code = typeof publicCode === 'string' && knownCodes.includes(publicCode) ? publicCode
         : error instanceof Error && /^AI_[A-Z_]+$/u.test(error.message) ? error.message
-        : record?.status === 'pending' || grantRecord ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE';
+        : record?.status === 'pending' || grantRecord || batchRecord?.status === 'dispatched' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE';
       publish({ error: code }); throw error;
     } finally { if (owner === request) { owner = null; publish({ busy: null }); } }
   };
   const assertWritable = () => {
-    assert(); if (damaged || grantDamaged || record?.status === 'pending' || grantRecord) throw Error('AI_RESULT_UNKNOWN');
+    assert(); if (damaged || grantDamaged || batchDamaged || batchRecord?.status === 'dispatched'
+      || record?.status === 'pending' || grantRecord) throw Error('AI_RESULT_UNKNOWN');
     if (!same(input.store.read(), record)) { damaged = true; publish({ locatorDamaged: true }); throw Error('AI_OPERATION_LOCATOR_ALREADY_EXISTS'); }
     if (!same(input.store.grant.read(), grantRecord)) { grantDamaged = true; publish({ grantLocatorDamaged: true }); throw Error('AI_GRANT_LOCATOR_ALREADY_EXISTS'); }
+    if (!same(input.store.batch.read(), batchRecord)) { batchDamaged = true; publish({ batchLocatorDamaged: true }); throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS'); }
   };
   const parsedReview = (value: unknown, inputRef: string, eventId: string) => {
     const result = validateAutomationReview<AiAutomationReviewDraft>('AiAutomationReviewDraft', value);
@@ -254,7 +303,8 @@ export function createAutomationReviewSession(input: {
       input.store.grant.clear(original); grantRecord = null; publish({ pendingGrant: null });
     } catch (error) { grantDamaged = true; publish({ grantLocatorDamaged: true }); throw error; }
   };
-  const usableGrant = (action: GrantAction) => Boolean(active && input.current() && !damaged && !grantDamaged
+  const usableGrant = (action: GrantAction) => Boolean(active && input.current() && !damaged && !grantDamaged && !batchDamaged
+    && batchRecord?.status !== 'dispatched'
     && record?.status !== 'pending' && !grantRecord && view.review && verifiedGrant
     && verifiedGrant.locator.action === action && verifiedGrant.locator.inputRef === view.review.inputRef
     && verifiedGrant.locator.expectedRevision === view.review.review.revision
@@ -355,10 +405,11 @@ export function createAutomationReviewSession(input: {
     return result;
   };
   const operation = async (original: MutationJournal, signal: AbortSignal) => {
-    const latest = parsedReview(await input.api.review(original.inputRef, signal), original.inputRef, original.eventId); assert();
-    if (latest.inputHash !== original.inputHash || latest.actionResource.creationKey !== original.creationKey) throw unavailable();
+    // The original-operation endpoint independently verifies current business
+    // access and frozen input/event/task bindings. Current failure or trigger
+    // policy is unnecessary for an already recorded human operation.
     const result = observedOperation(await input.api.operation({ inputRef: original.inputRef, operationKey: original.operationKey }, signal), original); assert();
-    publish({ operation: result, eventId: original.eventId, inputRef: original.inputRef, review: latest });
+    scrub(); publish({ operation: result, eventId: original.eventId, inputRef: original.inputRef });
     if (result.state === 'observed' && original.status === 'pending') {
       store({ ...original, status: 'observed' }); publish({ queue: null });
     }
@@ -371,6 +422,31 @@ export function createAutomationReviewSession(input: {
       resourceRevision: event.event.resourceRevision, currentRevision: event.currentSource.revision,
       ...(event.currentSource.sourceHash ? { sourceHash: event.currentSource.sourceHash } : {}),
       resource: structuredClone(event.originalResource), inputRef: view.inputRef };
+  };
+  const candidateForScope = (value: unknown, eventId?: string) => {
+    const result = validateAutomationReview<AiAutomationCandidateDraft>('AiAutomationCandidateDraft', value);
+    if (eventId !== undefined && result.eventId !== eventId) throw unavailable();
+    if (result.material && (result.material.event.eventId !== result.eventId || result.material.event.scope.kind !== 'workspace'
+      || result.material.event.scope.tenantId !== scope.tenantId || result.material.event.scope.workspaceId !== scope.workspaceId)) throw unavailable();
+    return result;
+  };
+  const acceptBatch = (value: unknown, original: CandidateBatch) => {
+    const result = validateAutomationReview<AiAutomationPendingBatchObservationDraft>('AiAutomationPendingBatchObservationDraft', value);
+    if (!original.operationKey || result.operationKey !== original.operationKey || result.limit !== original.limit) throw unavailable();
+    if (result.state !== 'observed') {
+      if (original.status === 'observed') writeBatch(batchSchema.parse({ ...original, status: 'dispatched' }));
+      publish({ batchObservation: result, candidateBatch: null });
+      return result;
+    }
+    const eventIds = result.events.map(event => event.eventId);
+    if (eventIds.length > original.limit || new Set(eventIds).size !== eventIds.length
+      || original.batchId !== undefined && original.batchId !== result.batchId
+      || (original.batchId !== undefined || original.eventIds.length > 0) && !same(original.eventIds, eventIds)
+      || result.complete !== result.events.every(event => event.preparationState === 'observed')) throw unavailable();
+    const items = result.events.map(event => candidateForScope(event.candidate, event.eventId));
+    writeBatch(batchSchema.parse({ ...original, status: result.complete ? 'observed' : 'dispatched', eventIds, batchId: result.batchId }));
+    publish({ batchObservation: result, candidateBatch: { items, coverage: 'bounded_authorized_window', workerStarted: false, batch: result } });
+    return result;
   };
   const mutate = async (kind: 'close' | 'feedback', value: AiAutomationReviewCloseReasonDraft | AiAutomationReviewFeedbackCodeDraft, preparedRef: string) =>
     run(kind, async signal => {
@@ -409,6 +485,42 @@ export function createAutomationReviewSession(input: {
       return structuredClone(view);
     },
     isCurrent: () => active && input.current(),
+    canPreparePending: () => active && input.current() && !view.busy && !damaged && !grantDamaged && !batchDamaged
+      && record?.status !== 'pending' && !grantRecord && batchRecord?.status !== 'dispatched',
+    preparePending: (limit = 10) => run('prepare-pending', async signal => {
+      assertWritable();
+      const operationKey = (input.newKey ?? (() => crypto.randomUUID()))();
+      const command = validateAutomationReview<AiAutomationPendingCandidatesRequestDraft>('AiAutomationPendingCandidatesRequestDraft', { limit, operationKey });
+      const original = batchSchema.parse({ kind: 'automation-pending-candidates-1', scope, status: 'dispatched', limit, eventIds: [], operationKey });
+      // Persist and read back the key before the single write request. Restored
+      // sessions can only call readPendingBatch until this batch is complete.
+      writeBatch(original);
+      assert();
+      const result = validateAutomationReview<AiAutomationPendingCandidatesDraft>('AiAutomationPendingCandidatesDraft',
+        await input.api.preparePending(command, signal)); assert();
+      const items = result.items.map(item => candidateForScope(item));
+      if (items.length > limit || new Set(items.map(item => item.eventId)).size !== items.length) throw unavailable();
+      if (!result.batch) throw Error('AI_RESULT_UNKNOWN');
+      const observation = validateAutomationReview<AiAutomationPendingBatchObservationDraft>('AiAutomationPendingBatchObservationDraft', result.batch);
+      if (observation.state === 'observed' && !same(items, observation.events.filter(event => event.preparationState === 'observed').map(event => event.candidate))
+        || observation.state !== 'observed' && items.length > 0) throw unavailable();
+      const batch = acceptBatch(observation, original);
+      retractGrant();
+      if (batch.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
+      return result;
+    }),
+    readPendingCandidates: () => run('pending-read', async signal => {
+      assert();
+      if (batchDamaged || !batchRecord?.operationKey) throw Error('AI_BATCH_ORIGINAL_READ_UNAVAILABLE');
+      const original = structuredClone(batchRecord);
+      const result = await input.api.readPendingBatch({ limit: original.limit, operationKey: original.operationKey! }, signal); assert();
+      if (!same(original, batchRecord) || !same(input.store.batch.read(), original)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
+      return acceptBatch(result, original);
+    }),
+    selectPendingCandidate: (eventId: string) => run('event', async signal => {
+      if (batchDamaged || !batchRecord || !batchRecord.eventIds.includes(eventId)) throw unavailable();
+      scrub(); publish({ eventId, inputRef: null }); return readEvent(eventId, signal);
+    }),
     queue: (filters: AiAutomationReviewQueueFiltersDraft = {}, after?: string) => run('queue', async signal => {
       const query = validateAutomationReview<{ limit: number; filters: AiAutomationReviewQueueFiltersDraft; after?: string }>('AiAutomationReviewQueueRequestDraft', { limit: 10, filters, ...(after ? { after } : {}) });
       const result = validateAutomationReview<AiAutomationReviewQueueResponseDraft>('AiAutomationReviewQueueResponseDraft', await input.api.queue(query, signal)); assert();
@@ -445,8 +557,10 @@ export function createAutomationReviewSession(input: {
     recover: () => run('operation', async signal => {
       if (damaged || !record) throw unavailable();
       const original = structuredClone(record);
-      const event = await readEvent(original.eventId, signal);
-      if (original.kind === 'from_event') return readCreation(original, event, signal);
+      if (original.kind === 'from_event') {
+        const event = await readEvent(original.eventId, signal);
+        return readCreation(original, event, signal);
+      }
       return operation(original, signal);
     }),
     prepareGrant: (action: GrantAction) => run('grant-prepare', async signal => {
@@ -460,7 +574,8 @@ export function createAutomationReviewSession(input: {
       retractGrant(); preparedReview = reviewStamp(after);
       publish({ review: after, grantPreparation: preparation }); return preparation;
     }),
-    canEnableGrant: () => Boolean(active && input.current() && !view.busy && !damaged && !grantDamaged
+    canEnableGrant: () => Boolean(active && input.current() && !view.busy && !damaged && !grantDamaged && !batchDamaged
+      && batchRecord?.status !== 'dispatched'
       && record?.status !== 'pending' && !grantRecord && view.review && view.grantPreparation
       && preparedReview === reviewStamp(view.review) && Date.parse(view.grantPreparation.expiresAt) > clock()),
     enableGrant: (preparedRef: string) => run('grant-enable', async signal => {

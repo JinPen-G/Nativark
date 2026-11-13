@@ -12,10 +12,17 @@ export const AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT = Object.freeze({
   operations: Object.freeze({ prepareGrant: 'reviews/grant/prepare', enableGrant: 'reviews/grant/enable', readGrant: 'reviews/grant/read' }),
 } as const);
 
+/** Pending-batch writes retain the original operation key. Reopening observes
+ * the captured event window and never continues or repeats its preparation. */
+export const AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT = Object.freeze({
+  preparePending: 'candidates/prepare-pending', readPendingBatch: 'candidates/pending/read',
+} as const);
+
 export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
   readCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
   prepareCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
   preparePending: { request: 'AiAutomationPendingCandidatesRequestDraft', response: 'AiAutomationPendingCandidatesDraft' },
+  readPendingBatch: { request: 'AiAutomationPendingBatchReferenceDraft', response: 'AiAutomationPendingBatchObservationDraft' },
   prepareInput: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationInputPreparationDraft' },
   readInput: { request: 'AiAutomationReviewReadDraft', response: 'AiAutomationInputObservationDraft' },
   createTask: { request: 'AiAutomationReviewReadDraft', response: 'AiAutomationTaskCreationObservationDraft' },
@@ -31,7 +38,8 @@ export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
   readGrant: { request: 'AiAutomationReviewGrantReadDraft', response: 'AiAutomationReviewGrantObservationDraft' }
 } as const);
 export interface AiAutomationCandidateRequestDraft { eventId: string }
-export interface AiAutomationPendingCandidatesRequestDraft { limit: number }
+export interface AiAutomationPendingCandidatesRequestDraft { limit: number; operationKey?: string }
+export interface AiAutomationPendingBatchReferenceDraft { limit: number; operationKey: string }
 type CandidateBase = { eventId: string; attempts: number; fence: number; taskCreated: false };
 export type AiAutomationCandidateDraft = CandidateBase & (
   | { status: 'ready'; material: { event: AiBusinessEventDraft; nextAction: 'human_review'; semantics: 'candidate_not_task_or_execution' };
@@ -39,7 +47,20 @@ export type AiAutomationCandidateDraft = CandidateBase & (
   | { status: 'retry_scheduled'; material: null; retryAt: string; nextAction: 'read_original_event' }
   | { status: 'dead_letter'; material: null; retryAt: null; nextAction: 'manual' }
   | { status: 'pending' | 'claimed' | 'closed' | 'expired'; material: null; retryAt: null; nextAction: 'read_original_event' });
-export interface AiAutomationPendingCandidatesDraft { items: AiAutomationCandidateDraft[]; coverage: 'bounded_authorized_window'; workerStarted: false }
+export type AiAutomationPendingBatchObservationDraft = AiAutomationPendingBatchReferenceDraft & {
+  retryable: false; automaticRetry: false; readOnly: true; workerStarted: false;
+  executionPermission: false; businessActionRequested: false; nextAction: 'read_original_batch';
+  sourceBasis: 'recorded_event_not_current_failure';
+} & (
+  | { state: 'observed'; batchId: string; recordedAt: string; complete: boolean;
+      events: { eventId: string; preparationState: 'observed' | 'unconfirmed'; candidate: AiAutomationCandidateDraft }[] }
+  | { state: 'unknown' | 'not_observed' });
+/** Limit-only callers keep their original response. Keyed callers also receive
+ * their durable batch observation; missing/partial observations permit no retry. */
+export interface AiAutomationPendingCandidatesDraft {
+  items: AiAutomationCandidateDraft[]; coverage: 'bounded_authorized_window'; workerStarted: false;
+  batch?: AiAutomationPendingBatchObservationDraft;
+}
 type InputSemantics = { dispatchRequested: false; confirmationGranted: false; semantics: 'metadata_only_not_execution_permission' };
 export type AiAutomationInputPreparationDraft = InputSemantics & { inputRef: string; creationKey: string } & (
   | { state: 'prepared' } | { state: 'unknown'; retryable: false; nextAction: 'read_original_input' });
@@ -179,12 +200,22 @@ const candidate = { oneOf: [
   object({ ...candidateBase, status: choice('dead_letter'), material: { type: 'null' }, retryAt: { type: 'null' }, nextAction: choice('manual') }),
   object({ ...candidateBase, status: choice('pending', 'claimed', 'closed', 'expired'), material: { type: 'null' },
     retryAt: { type: 'null' }, nextAction: choice('read_original_event') })] };
+const pendingBatchReference = { limit: integer(1, 10), operationKey: key };
+const pendingBatchSemantics = { retryable: no, automaticRetry: no, readOnly: { type: 'boolean', const: true },
+  workerStarted: no, ...semantics, nextAction: choice('read_original_batch'), sourceBasis: choice('recorded_event_not_current_failure') };
+const pendingBatch = { oneOf: [
+  object({ ...pendingBatchReference, ...pendingBatchSemantics, state: choice('observed'), batchId: uuid, recordedAt: time,
+    complete: bool, events: list(object({ eventId: uuid, preparationState: choice('observed', 'unconfirmed'), candidate }), 10) }),
+  object({ ...pendingBatchReference, ...pendingBatchSemantics, state: choice('unknown', 'not_observed') })] };
 
 export const AI_AUTOMATION_REVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiAutomationCandidateRequestDraft: object({ eventId: uuid }),
-  AiAutomationPendingCandidatesRequestDraft: object({ limit: integer(1, 10) }),
+  AiAutomationPendingCandidatesRequestDraft: object({ ...pendingBatchReference }, ['limit']),
+  AiAutomationPendingBatchReferenceDraft: object(pendingBatchReference),
+  AiAutomationPendingBatchObservationDraft: pendingBatch,
   AiAutomationCandidateDraft: candidate,
-  AiAutomationPendingCandidatesDraft: object({ items: list(candidate, 10), coverage: choice('bounded_authorized_window'), workerStarted: no }),
+  AiAutomationPendingCandidatesDraft: object({ items: list(candidate, 10), coverage: choice('bounded_authorized_window'), workerStarted: no,
+    batch: pendingBatch }, ['items', 'coverage', 'workerStarted']),
   AiAutomationInputPreparationDraft: { oneOf: [
     object({ ...inputSemantics, state: choice('prepared'), inputRef: uuid, creationKey: id() }),
     object({ ...inputSemantics, state: choice('unknown'), inputRef: uuid, creationKey: id(), retryable: no, nextAction: choice('read_original_input') })] },

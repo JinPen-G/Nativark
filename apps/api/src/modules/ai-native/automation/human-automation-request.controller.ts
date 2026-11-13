@@ -1,7 +1,7 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS } from '@rental-os/shared';
-import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS,
+import { AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT, AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS,
   AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
 import Ajv from 'ajv';
@@ -53,7 +53,8 @@ abstract class HumanAutomationController {
       // Even a failed batch may already have prepared some original candidates.
       // Never turn this into an empty success, a retry instruction or an approval.
       throw new HttpException({ code, retryable: false, executionPermission: false, businessActionRequested: false,
-        nextAction: action === 'readQueue' ? 'read_review_queue'
+        nextAction: action === 'preparePending' || action === 'readPendingBatch' ? 'read_original_batch'
+          : action === 'readQueue' ? 'read_review_queue'
           : action === 'prepareGrant' || action === 'enableGrant' || action === 'readGrant' ? 'read_original_grant'
           : action === 'close' || action === 'feedback' || action === 'operation' ? 'read_original_operation'
           : action === 'createTask' || action === 'readCreation' ? 'read_original_creation' : 'read_original_event' },
@@ -67,8 +68,11 @@ abstract class HumanAutomationController {
   @Post('candidates/prepare') @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareCandidate(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'prepareCandidate', value); }
 
-  @Post('candidates/prepare-pending') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  @Post(AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT.preparePending) @HttpCode(200) @Header('Cache-Control', 'no-store')
   preparePending(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'preparePending', value); }
+
+  @Post(AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT.readPendingBatch) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPendingBatch(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'readPendingBatch', value); }
 
   @Post('inputs/prepare') @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareInput(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'prepareInput', value); }

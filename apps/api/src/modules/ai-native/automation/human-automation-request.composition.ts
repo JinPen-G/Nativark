@@ -24,6 +24,7 @@ export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencie
   reviewGrantPolicy?: HumanAutomationReviewGrantPolicySource;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
+  | 'readPendingBatch'
   | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue'
   | 'prepareGrant' | 'enableGrant' | 'readGrant';
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
@@ -98,7 +99,7 @@ export class HumanAutomationRequestFactory {
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         await identity.resolve();
         const reads = new BusinessFailureReadAuthority(server.db, auth, credentials, guard, server.core, clock, server.resources);
-        const candidates = new BusinessFailureCandidateService(server.db, reads, clock);
+        const candidates = new BusinessFailureCandidateService(server.db, reads, clock, server.db);
         let grants: HumanAutomationReviewGrantService | undefined;
         const reviews = new HumanAutomationReviewService(server.db, reads, clock,
           (inputRef, kind, tx, original) => {
@@ -144,6 +145,7 @@ export class HumanAutomationRequestFactory {
             case 'prepareCandidate': return candidates.prepare(command);
             // The original bounded algorithm owns partial failures and final re-reads.
             case 'preparePending': return candidates.preparePending(command);
+            case 'readPendingBatch': return candidates.readPendingBatch(command);
             case 'createEventTask': {
               const selected = eventInput.safeParse(command);
               if (!selected.success) throw new AutomationError('invalid_input');

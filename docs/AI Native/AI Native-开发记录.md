@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13及本次14已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain17-durable-pending-batch-consumer-20261113"></a>
+## AIN-17/18 固定事件批次、一次领取与原键恢复（2026-11-13）
+
+原 limit-only 领取在整批应答丢失时没有原 eventId 清单，前端无法只读恢复；本阶段沿原 OperationLog 固定最多10项事件及本人/空间/audience/operationKey/limit，用同事务记录原窗口与事件绑定。只有收到该事务明确成功的创建者才逐项调用原候选准备，并按原次序CAS记录确认。日志提交未知、单项准备失败或确认丢应答都停止后续领取；同键调用和公开 `readPendingBatch` 只观察，not_observed、超时或政策停用不推导可重发。旧limit-only合同和算法保持兼容。
+
+原批次读权与当前触发政策分离：每个冻结事件仍经当前Auth/Guard/ALS和原业务对象读权前后核对，最后再次复验事件及日志；不续权、不调用当前异常来源、不创建Task/执行。公共shared合同及动态OpenAPI、operator/staff Controller和Root独占staff路由同步。后台实际API/session/组件先存并读回最少原键，丢应答后仅读取原批次；部分未确认保持pending，不能换键自动领下一批。显式选择候选后才沿原Task创建与人工处理入口。
+
+dev1八源已冻结交权，Root逐字节和Git blob核同：API `1d926102ed64361132573e564da194fd5aa63644`、session `6eb30e4d36b6d0314f22215bc25f89fe9eccb1cf`、workbench `2c808b01d019af489c52f094a5238647b34db2b7`、candidate service `425d9ec5a9cda7992ce58d4a8e53aa48e310c06c`、factory `b72131c62b1a0d9929b35456c78c843406f1ce19`、Controller `1889b31247d9a2ccaa17ff940578bdc34d62811b`、shared合同 `731752ed5cb5499d70734dee605504b4be7d90ac`、journal repository `fc26022e07c09e086f982d89c40799b8a37fadfd`；staff路由由Root补入原封闭集合。
+
+| 必要模拟／类型 | 已核证据 |
+| --- | --- |
+| 作者实际API/session/组件→Controller/外层Guard→原Core与OperationLog fixture | stdin `f393d43827a0b4d6d40321a39eda04110e559795b66ea1531591d9e2b90c00c5`，退出0，18场景；12事件只选10项/一次查询，重复新增claim0、原读写0；日志提交未知0claim、部分失败/确认丢应答不继续；错scope/limit、当前撤权、隐藏/迟到回复拒绝；旧limit-only兼容、空批次不自动下一批，operator/staff原读不写。 |
+| Root独立原Guard→Controller→真实batch repository/candidate service | `node --no-compilation-cache -`，stdin `dab48b627b6e5eba4dd87dfb466b55e93e2818b5914fd9339aa560f66230fbc8`，退出0；一次原claim，原日志COMMIT丢应答后不claim，重复与重开只读且不增日志写，错limit unknown，缺原键not_observed不授重试，撤会话拒绝，Task创建0。 |
+| Root最终生产者与消费者类型 | TypeScript5.9.3，API4根/1310源、后台4根/1488源0诊断，stdin `b2b3bc62d5afbe26fd0b5b611d667d20c1b78877679a2ccfd133e286901829ac`／0。作者固定前置两端同为0诊断，输入分别 `c95193400dc763dc77147f7c35b46ff5acc0f60edcdcb6eaac923c2c625cc51f`、`a9f023f9172c50200f701a53bec004fcecf6a912b48898485bdfcaf95e49a61e`／0。 |
+
+全部作者/Root进程退出、audit0、任务临时目录未创建，无新增或扩写测试脚本。原ResourcePorts正式装配、同事务结构化不足/缺项来源及可信临近政策仍未闭，AIN-17/18不提高百分比；不能从issue_recorded、done=false或自由文本构造正式资源事件。dev1继续有限只读核这些原接点，Root接姓名/通知，助手不等本片提交或main。模拟不等于真实MySQL故障、浏览器或生产自动化。
+
 <a id="ain14-category-capability-whole-closeout-20261113"></a>
 ## AIN-14 品类、能力原材料与开业诊断全文收口（2026-11-13）
 

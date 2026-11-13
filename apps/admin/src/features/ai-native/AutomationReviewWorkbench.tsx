@@ -10,6 +10,7 @@ import { useAuthStore } from '@/features/auth/authStore';
 import { ActionButton, Alert, ConfirmAction, Input, ListFilterBar, ListFilterItem, Select } from '@/components/ui';
 import { aiAutomationReviewsApi } from '@/api/aiAutomationReviews';
 import { automationReviewStore, automationReviewGrantStorageName, createAutomationReviewSession,
+  automationReviewBatchStorageName,
   type AutomationReviewOriginalEntry, type AutomationReviewScope } from './automation-review-session';
 import { useAiManagementLocale } from './management-locale';
 import { formatTimestamp } from './formatters';
@@ -17,6 +18,18 @@ import styles from './AiManagement.module.css';
 
 const english: Record<string, string> = {
   '异常人工复核': 'Human exception review', '原事件': 'Original event', '原事件标识': 'Original event ID',
+  '待处理事件': 'Pending events', '领取待处理事件': 'Prepare pending events',
+  '领取当前空间最多10项待处理事件并准备候选？选中后再办理。': 'Prepare candidates for up to 10 pending events in this workspace? Select an event before proceeding.',
+  '每次最多10项，候选不会自动创建待办或执行业务。': 'Each request covers up to 10 events. Candidates do not automatically create reviews or execute business actions.',
+  '候选来自原事件，选中后核对当前情况。': 'Candidates come from original events. Check the current situation after selecting one.',
+  '尚未领取当前空间的待处理事件。': 'Pending events in this workspace have not been prepared.',
+  '本次领取窗口没有返回候选，不代表没有其他事件。': 'This preparation window returned no candidates. Other events may still exist.',
+  '选择原事件': 'Select original event', '核对原事件': 'Read original event', '读取已知候选': 'Read known candidates',
+  '核对原领取': 'Read original batch', '领取未确认': 'Preparation unconfirmed',
+  '可选择': 'Ready for selection', '待领取': 'Pending preparation', '领取中': 'Being prepared',
+  '等待原重试': 'Original retry scheduled', '需人工处理': 'Manual review required', '已失效': 'Expired', '待核对': 'Awaiting read',
+  '该批领取已发起但结果未确认，继续核对已知原事件；暂不能再次领取。': 'This preparation was dispatched and its outcome is unconfirmed. Read known original events; another batch cannot be prepared yet.',
+  '批次定位不可读取，新的领取和写入已停止。': 'The batch reference cannot be read. New preparation and writes are blocked.',
   '读取原事件': 'Read original event', '读取待办': 'Read reviews', '待办列表': 'Review queue',
   '待办状态': 'Review status', '异常类型': 'Exception type', '全部类型': 'All types',
   '待复核': 'Open', '已关闭': 'Closed', '读取下一组': 'Read next window',
@@ -62,6 +75,7 @@ const english: Record<string, string> = {
   '反馈': 'Feedback', '选择反馈': 'Choose feedback', '有帮助': 'Helpful', '无帮助': 'Not helpful', '不正确': 'Incorrect',
   '记录反馈': 'Record feedback', '记录此原待办的反馈？不修改业务事实。': 'Record feedback for this original review? Business facts are unchanged.',
   '核对原操作': 'Read original operation', '原记录已观察到，不代表业务已完成。': 'The original record was observed. This does not establish business completion.',
+  '原操作收据': 'Original operation receipt', '记录动作': 'Recorded action', '记录时间': 'Recorded at',
   '未观察到原操作，不证明未提交；继续按原键核对。': 'The original operation is not observed. This does not prove non-commit; keep checking its original key.',
   '原写入结果尚未确认，只核对原事件和原操作，不重复提交。': 'The original write is unconfirmed. Read its original event and operation without resubmitting.',
   '原定位不可读取，新写入已停止。': 'The original reference cannot be read. New writes are blocked.',
@@ -109,6 +123,8 @@ const closeNames: Record<AiAutomationReviewCloseReasonDraft, string> = {
 const feedbackNames: Record<AiAutomationReviewFeedbackCodeDraft, string> = {
   helpful: '有帮助', not_helpful: '无帮助', incorrect: '不正确', not_applicable: '不适用',
 };
+const candidateStatusNames: Record<string, string> = { ready: '可选择', pending: '待领取', claimed: '领取中',
+  retry_scheduled: '等待原重试', dead_letter: '需人工处理', closed: '已关闭', expired: '已失效' };
 const taskNames: Record<string, string> = { queued: '排队', running: '运行中', waiting_input: '等待补充',
   waiting_confirmation: '等待确认', waiting_external: '等待外部结果', succeeded: '任务完成',
   failed: '任务失败', cancelled: '任务取消', partially_completed: '部分完成' };
@@ -152,6 +168,7 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
   const owner = useRef({ binding, props }); owner.current = { binding, props };
   const storageName = `rental-os-automation-review:${JSON.stringify(scope)}`;
   const grantStorageName = automationReviewGrantStorageName(storageName);
+  const batchStorageName = automationReviewBatchStorageName(storageName);
   const controller = useMemo(() => {
     if (!scope.tenantId || !scope.workspaceId || !scope.actorId || !auth.sessionVerified || !auth.token) return null;
     const current = () => {
@@ -187,7 +204,9 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
       setReason(undefined); setFeedback(undefined); setGrantAction(undefined); refresh(value => value + 1);
     };
     const storage = (event: StorageEvent) => {
-      if (event.key === storageName || event.key === grantStorageName) { controller.dispose(); controller.activate(); refresh(value => value + 1); }
+      if (event.key === null || event.key === storageName || event.key === grantStorageName || event.key === batchStorageName) {
+        controller.dispose(); controller.activate(); refresh(value => value + 1);
+      }
     };
     const signal = currentSessionSignal(); signal.addEventListener('abort', hidden, { once: true });
     document.addEventListener('visibilitychange', hidden);
@@ -208,7 +227,8 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
     data?.grantObservation?.preparedRef, data?.grantObservation?.key.action]);
   if (!session?.isCurrent() || !data) return null;
   const busy = !!data.busy, pending = !!data.pending, grantPending = !!data.pendingGrant;
-  const disabled = busy || pending || grantPending || data.locatorDamaged || data.grantLocatorDamaged;
+  const batchPending = data.batch?.status === 'dispatched';
+  const disabled = busy || pending || grantPending || batchPending || data.locatorDamaged || data.grantLocatorDamaged || data.batchLocatorDamaged;
   const event = data.event, review = data.review;
   const grantMaterial = data.grantPreparation ?? (data.grantObservation?.state === 'observed' ? data.grantObservation.receipt : null);
   const grantRef = data.grantObservation?.state === 'observed' ? data.grantObservation.receipt?.preparedRef : undefined;
@@ -226,19 +246,57 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
     : ['AI_REVIEW_GRANT_INACTIVE', 'AI_RECONFIRM_GRANT'].includes(data.error ?? '') ? '处理授权已变化或不可用，请重新读取并核对。'
     : data.error === 'AI_REVISION_CONFLICT' ? '原版本已变化，请重新读取并核对。'
     : ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(data.error ?? '') ? '当前操作不可用，请核对权限、原操作授权与材料。'
+    : batchPending ? '该批领取已发起但结果未确认，继续核对已知原事件；暂不能再次领取。'
     : grantPending ? '原授权启用结果尚未确认，只能核对原授权，不重复启用。'
     : pending ? '原写入结果尚未确认，只核对原事件和原操作，不重复提交。' : '读取未能完成，请核对当前访问权限与原来源。';
 
   return <section className={styles.stack} aria-label={t('异常人工复核')} aria-busy={busy}>
     {data.locatorDamaged && <Alert type="warning" title={t('原定位不可读取，新写入已停止。')} />}
     {data.grantLocatorDamaged && <Alert type="warning" title={t('原授权定位不可读取，新写入已停止。')} />}
+    {data.batchLocatorDamaged && <Alert type="warning" title={t('批次定位不可读取，新的领取和写入已停止。')} />}
+    {batchPending && <Alert type="warning" title={t('该批领取已发起但结果未确认，继续核对已知原事件；暂不能再次领取。')} />}
+    {data.batch?.operationKey && <ActionButton intent="review" label={t('核对原领取')} successLabel={t('已读取')}
+      disabled={busy || data.batchLocatorDamaged} onAction={action(() => session.readPendingCandidates())} />}
     {pending && <Alert type="warning" title={t('原写入结果尚未确认，只核对原事件和原操作，不重复提交。')} />}
     {grantPending && <Alert type="warning" title={t('原授权启用结果尚未确认，只能核对原授权，不重复启用。')} />}
     {!!data.error && <Alert type="error" title={t(errorText)} />}
     {(pending || data.lastOperation) && <ActionButton intent="review" label={t('核对原操作')} successLabel={t('已读取')}
       disabled={busy || data.locatorDamaged} onAction={action(() => session.recover())} />}
+    {data.operation && <section className={styles.section} aria-label={t('原操作收据')}>
+      <h3>{t('原操作收据')}</h3>
+      <Alert type={data.operation.state === 'observed' ? 'info' : 'warning'}
+        title={t(data.operation.state === 'observed' ? '原记录已观察到，不代表业务已完成。' : '未观察到原操作，不证明未提交；继续按原键核对。')} />
+      {data.operation.state === 'observed' && <dl className={styles.facts}>
+        <div><dt>{t('原事件标识')}</dt><dd>{data.operation.eventId}</dd></div>
+        <div><dt>{t('待办标识')}</dt><dd>{data.operation.inputRef}</dd></div>
+        <div><dt>{t('记录动作')}</dt><dd>{t(data.operation.action === 'close' ? '关闭此待办' : '记录反馈')}</dd></div>
+        <div><dt>{t('记录时间')}</dt><dd>{formatTimestamp(data.operation.recordedAt).value}</dd></div>
+      </dl>}
+    </section>}
     {grantPending && <ActionButton intent="review" label={t('核对原授权')} successLabel={t('原授权收据已读取')}
       disabled={busy || data.grantLocatorDamaged} onAction={action(() => session.recoverGrant())} />}
+    <section className={styles.section} aria-label={t('待处理事件')}>
+      <h3>{t('待处理事件')}</h3>
+      <ConfirmAction label={t('领取待处理事件')} prompt={t('领取当前空间最多10项待处理事件并准备候选？选中后再办理。')}
+        doneLabel={t('已读取')} disabled={disabled || !session.canPreparePending()} onConfirm={action(() => session.preparePending(10))} />
+      <p className={styles.help}>{t('每次最多10项，候选不会自动创建待办或执行业务。')}</p>
+      <p className={styles.help}>{t('候选来自原事件，选中后核对当前情况。')}</p>
+      {data.batch && (data.batch.status === 'observed' || data.batch.eventIds.length > 0) ? <>
+        {data.batch.status === 'observed' && !data.batch.eventIds.length && <p className={styles.help}>{t('本次领取窗口没有返回候选，不代表没有其他事件。')}</p>}
+        <ul className={styles.taskList}>{data.batch.eventIds.map(eventId => {
+          const candidate = data.candidateBatch?.items.find(item => item.eventId === eventId);
+          const unconfirmed = data.batchObservation?.state === 'observed'
+            && data.batchObservation.events.find(item => item.eventId === eventId)?.preparationState === 'unconfirmed';
+          return <li key={eventId}>
+            <div className={styles.taskIdentity}><span>{t(candidate?.material ? eventNames[candidate.material.event.type] : '原事件')}</span>
+              <span className={styles.help} title={eventId}>{eventId}</span></div>
+            <span className={styles.status}>{t(unconfirmed ? '领取未确认' : candidate ? candidateStatusNames[candidate.status] : '待核对')}</span>
+            <ActionButton intent="review" label={t(candidate?.status === 'ready' && !unconfirmed ? '选择原事件' : '核对原事件')} successLabel={t('已读取')}
+              disabled={busy} onAction={action(() => session.selectPendingCandidate(eventId))} />
+          </li>;
+        })}</ul>
+      </> : !batchPending && <p className={styles.help}>{t('尚未领取当前空间的待处理事件。')}</p>}
+    </section>
     <section className={styles.section} aria-label={t('待办列表')}>
       <h3>{t('待办列表')}</h3>
       <ListFilterBar>
@@ -364,8 +422,6 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
               doneLabel={t('已记录')} disabled={disabled || !feedback || !session.canMutate('feedback')}
               onConfirm={action(() => session.feedback(feedback!, grantRef!))} /></div>
         </>}
-        {data.operation && <Alert type={data.operation.state === 'observed' ? 'info' : 'warning'}
-          title={t(data.operation.state === 'observed' ? '原记录已观察到，不代表业务已完成。' : '未观察到原操作，不证明未提交；继续按原键核对。')} />}
       </section>
       <details><summary>{t('原定位')}</summary><dl className={styles.facts}>
         <div><dt>{t('原事件标识')}</dt><dd>{event.event.eventId}</dd></div>
