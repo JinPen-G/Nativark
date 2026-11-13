@@ -174,6 +174,8 @@ export type AiOrderSourceReadV2 =
 interface ConfigurationSource { scope: AiWorkspaceScope; resourceType: 'business_configuration'; version: string; observedAt: string }
 export interface AiOpeningSectionMaterialDraft { key: string; title: string; required: boolean;
   status: 'source_unavailable' | 'readiness_check_passed' | 'missing_configuration' | 'readiness_unsatisfied' | 'unclassified';
+  /** Original bounded Core text, never parsed to attest a rule/calendar revision. */
+  summary?: string;
   issue?: string; impact: 'optional_configuration' | 'required_readiness_item';
   evidence: { scope: AiWorkspaceScope; resourceType: 'readiness_item'; resourceId: string; version: string; observedAt: string };
   manual: { kind: 'configuration_section'; section: string; scope: AiWorkspaceScope; navigation: 'host_existing_section' } | { status: 'unavailable' };

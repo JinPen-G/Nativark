@@ -78,7 +78,7 @@ export function toOpeningReadinessDiagnostics(material: AiOpeningBusinessMateria
     state: section.status === "source_unavailable" ? "unavailable"
       : section.status === "readiness_check_passed" ? "completed"
         : section.status === "unclassified" ? "unclassified" : section.required ? "required" : "optional",
-    missing: section.issue ?? "", nextHref: "", evidence: section.evidence, manual: section.manual,
+    missing: section.issue ?? "", summary: section.summary, nextHref: "", evidence: section.evidence, manual: section.manual,
     fieldsToReview: [...section.candidate.fieldsToReview]
   }));
   return { tenantId: material.scope.tenantId, workspaceId: material.scope.workspaceId,

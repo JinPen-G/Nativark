@@ -50,7 +50,7 @@ const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const amount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const readiness = z.object({ tenantId: id, workspaceId: id, ready: z.boolean(), items: z.array(z.object({
   key: id, title: z.string().min(1).max(200), done: z.boolean(), missing: z.string().max(1000),
-  unavailable: z.boolean().optional(), optional: z.boolean().optional()
+  summary: z.string().max(1000).optional(), unavailable: z.boolean().optional(), optional: z.boolean().optional()
 })).max(50) });
 const report = z.object({ tenantId: id, workspaceId: id, currency: z.string().regex(/^[A-Z]{3}$/u), generatedAt: instant,
   orderCount: count, rentalRevenue: amount, receivableTotal: amount, exceptionOrderCount: count,
@@ -96,6 +96,7 @@ export class AiOpeningReadFactsService {
         readinessBasis: 'core_workspace_aggregate' as const,
         coverage: selected ? 'requested_sections' as const : 'all_readiness_sections' as const,
         items: parsed.data.items.filter(row => !selected || selected.has(row.key)).map(row => ({ key: row.key, title: row.title, missing: row.missing,
+          ...(row.summary !== undefined ? { summary: row.summary } : {}),
           optional: row.optional === true, status: row.unavailable ? 'unavailable' as const : row.done ? 'ready' as const : 'missing' as const })) };
     });
   }

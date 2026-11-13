@@ -49,7 +49,7 @@ const basis = (value: OpeningTaskMaterial) => JSON.stringify({
   taskId: value.task.state === 'observed' ? value.task.taskId : null, scope: value.material.scope,
   origin: [value.original.inputRef, value.original.contentHash, value.original.sceneVersion], version: value.material.configVersion,
   integrations: integrationBasis(value),
-  sections: value.material.sections.map(row => ({ key: row.key, title: row.title, status: row.status, issue: row.issue,
+  sections: value.material.sections.map(row => ({ key: row.key, title: row.title, status: row.status, issue: row.issue, summary: row.summary,
     required: row.required, impact: row.impact, version: row.evidence.version, manual: row.manual,
     candidateVersion: row.candidate.currentVersion, fields: row.candidate.fieldsToReview })).sort((a, b) => a.key.localeCompare(b.key))
 });

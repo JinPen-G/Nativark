@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain14-core-summary-projection-20261113"></a>
+## 原开业规则摘要完整传递与材料失效（2026-11-13）
+
+独立只读核定发现 Core 的规则摘要从“生效版本 rule-v1”变为“生效版本 rule-v2”时，AI 丢弃 summary，经营 settings 版本相同的两份材料指纹仍相同，读取期间也不能识别变化。原反例使用实际 RentalBusinessService 和原 Guard/ALS、明确内存来源，工具结果 `93b182`、退出 0，仅证明缺口成立；原模型和业务写入均为 0。不能从自由摘要解析并伪造结构化版本。
+
+本阶段在原有闭合合同中增加可选、最长 1000 字符的 summary，沿[事实读取](../../apps/api/src/modules/ai-native/tools/diagnostic-read-facts.service.ts)→[分区读取](../../apps/api/src/modules/ai-native/tools/opening-action-list.service.ts)→[公共类型](../../packages/shared/src/ai-business-material-draft.ts)/[schema](../../packages/shared/src/ai-business-material-draft-schemas.ts)→[正文](../../apps/api/src/modules/ai-native/scenes/opening-diagnosis-renderer.ts)/[诊断投影](../../apps/admin/src/features/ai-native/readiness-diagnostics.ts)/[诊断卡](../../apps/admin/src/features/ai-native/ReadinessDiagnosticsCard.tsx)原样传递。原两次事实比较自然包含摘要，页面导航前也比较它；设置 evidence.version 保持原设置版本，不冒充规则或日历版本。原材料指纹与 Artifact 不回写，旧材料缺 summary 仍按原合同读取。
+
+前置 `2bc72fa9dd66670657c45b85244b1c2bf17e481a`。上述七源 Git blob 依次为 `948c58ebaaed40b292978fe2eaa2a59e6f8efb3a`、`904242606b7ae5e50d96b117e3b91f89908b5969`、`48a63625e87b60aecbc6e99bc77320bdf7da01cb`、`695cef896d5feed1e105dfd1a341eadf62f65d8d`、`2ab58a5ec3be6967ef814db58b72380153dd2109`、`ada64447c71a7cee5725667a090180233311c53e`、`99f8476e98ad49e156b01dfd4faff57ab5ea4d36`。
+
+必要模拟沿实际 Core 规则行→原 Guard/Controller→正式 shared 校验→真实诊断投影、显示函数及导航比较→原模型结果失效。Node stdin SHA-256 `0cd2a94b0d162286bf4e0ec743eca9535e7e91c4f53245b4faf613f1316df4fb`，退出 0：v1/v2 指纹不同、原设置版本不变、等待期间变化拒绝、旧模型结果 stale/null、原 Artifact 哈希不变；旧缺省字段兼容、超长/对象摘要拒绝、React SSR 转义文本、撤权拒绝均通过。1 次模拟模型、0 业务写入/审批。TypeScript 5.9.3，API/shared 5 根/1204 源、后台 3 根/1505 源零诊断，退出 0，stdin SHA-256 `3e39d795c80a5cf41afb941a6e1ef06885410b9f3f88881f186e4c2485f6bc68`。UI 为实际纯显示/投影函数加明确语言/时间替身与 React SSR，没有浏览器验收。组件清单审计 123 条、badHashes 为空。
+
+初次等待反例只在请求最早一次前置读取从 v1 变为 v2，之后被比较的原两次读取已稳定为 v2，因预期拒绝未出现而失败；诊断核明同一 HTTP 含原前置读取，不放宽产品。最终同时验证直接原分区两读与 HTTP 中反复版本变化，两者均拒绝。恢复工具状态时系统 PATH 未含 node 的一次定位失败未进入验证，后使用已核本机绝对可执行路径。进程已退出，审计为空，任务临时目录未创建；没有新增测试脚本或环境副本。
+
+AIN-14 第 1/5 条的规则摘要反例已修，第 2/4 条原提案与分区边界已有生产接点，第 3 条沿确定性正文片。精确日历当前版本仍待 PM 协调 Core 原结构化来源，AIN-12 全文前置保留，本片不提高整项百分比。AIN-12 独立全文核定还确认运行中新草稿、模型确认请求正向接线、任务筛选、后台恢复/接管消费者、两个实际对话宿主的动态工作区与受权历史上下文仍缺实现；原取消入口已明确“请求停止原任务”，符合需求 §10.6 的宿主例外，不另造停止接口阻塞。AIN-16 独立核定确认通知冲突后显示旧修订及来源/空间说明两项缺口，姓名/通知/规则/日历的原 Core、批准与收据链保持；相关助手继续定向修复。
+
 <a id="ain12-publication-window-p2-20261113"></a>
 ## 模型控制持续复核当前发布生效窗口（2026-11-13）
 

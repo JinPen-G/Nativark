@@ -46,6 +46,7 @@ export function buildOpeningDiagnosisText(value: unknown): string {
     `经营配置版本 ${quoted(material.configVersion)}`, '以下仅覆盖本次原材料的已读取分区。'];
   for (const section of material.sections) {
     lines.push(`${quoted(section.title)}（${section.required ? '必需' : '可选'}） ${sectionStates[section.status]}`);
+    if (section.summary !== undefined) lines.push(`原检查摘要 ${quoted(section.summary)}`);
     if (section.issue) lines.push(`原检查说明 ${quoted(section.issue)}`);
     const source = section.evidence;
     lines.push(`来源 ${source.resourceType} / ${quoted(source.resourceId)} · 版本 ${quoted(source.version)} · 观察时间 ${source.observedAt}`);

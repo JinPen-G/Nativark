@@ -49,6 +49,7 @@ const template = obj({ id: id(), code: text(191), stage: choice('pickup', 'retur
 const configurationSource = obj({ scope, resourceType: choice('business_configuration'), version, observedAt: time });
 const section = obj({ key: id(), title: text(200), required: bool,
   status: choice('source_unavailable', 'readiness_check_passed', 'missing_configuration', 'readiness_unsatisfied', 'unclassified'), issue: text(1000, 0),
+  summary: text(1000, 0),
   impact: choice('optional_configuration', 'required_readiness_item'), evidence: obj({ scope, resourceType: choice('readiness_item'),
     resourceId: id(), version, observedAt: time }), manual: { oneOf: [obj({ kind: choice('configuration_section'), section: id(), scope,
       navigation: choice('host_existing_section') }), obj({ status: choice('unavailable') })] },

@@ -124,6 +124,10 @@ export class AiOpeningActionListService {
             : row.key === 'fulfillment_network' && before.enabledLocationCount === 0 ? 'missing_configuration' as const
             : Object.prototype.hasOwnProperty.call(sections, row.key) ? 'readiness_unsatisfied' as const : 'unclassified' as const,
           issue: row.status === 'ready' ? undefined : row.missing,
+          // Preserve Core's original observation, including its rule summary.
+          // It participates in the two-read comparison; it is not parsed into
+          // a synthetic rule/calendar revision or configuration write grant.
+          ...(row.summary !== undefined ? { summary: row.summary } : {}),
           impact: row.optional ? 'optional_configuration' as const : 'required_readiness_item' as const,
           evidence: { scope, resourceType: 'readiness_item' as const, resourceId: row.key,
             version: before.settings.configVersion, observedAt: facts.observedAt },
