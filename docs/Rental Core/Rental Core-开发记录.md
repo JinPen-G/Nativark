@@ -4,6 +4,18 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="core-pause-closeout-20261113"></a>
+
+## 收口暂停与未修复反例（2026-11-13）
+
+负责人要求“先收口暂停，提交最后的代码”。收口核查时，`codex/rental-core`与GitHub实际目标分支均为`8f7f164f7e30c5bd3e9b77642a263eaa5a4c7534`，工作区/暂存区干净、上游0/0、无merge/cherry-pick。最后两片源码分别为[配置副本](#quote-configuration-snapshot-20261113)`5340ce40e`和[普通报价历史保护](#quote-history-immutable-20261113)`a591e7aea`，已提交上传；此后只做只读核查及限定反例，没有开始新的源码修复。暂停收口仅补本记录、接续和品类治理对应两册，不启动新的开发或业务验证，不合main或发跨对话消息。
+
+保留[独立价格读取反例](../../output/category-governance/quote-atomic-configuration-before-20261113.json)：报价取得旧业务配置后等待履约读取，价格源推进时可得到`price-later`，同时仍记录计划/规则1.0和履约费10，后继费用为25。限定调用退出0/audit0，使用当前编译报价、原计价和明确配置/价格/容量/保存fixture，不能当作MySQL或真实经营证据。原进程内配置副本修复保持有效，但完整数据库价格、Core配置、能力及检查模板的同源计算/提交复核尚未闭合；原组合、全部写入口及真实并发门槛不变。恢复后先从本反例及原`createQuote`、配置仓储和`persistQuote`继续，不将未实施方案写成已修复。
+
+[暂停核查摘要](../../output/category-governance/quote-atomic-configuration-pause-summary-20261113.json)确认反例进程已退出、源码无新增修改、唯一暂存只剩一份零字节audit。原生PowerShell精确删除被CreateProcess自动审批`blocked by policy`拒绝，整条未执行且无具体理由；已安全同卷移至[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-atomic-configuration-probe-validation/manifest.json)，[退出证据](../../output/category-governance/quote-atomic-configuration-pause-cleanup-20261113.json)核原暂存不存在，已归集未删除。前两片及旧批残留继续原清单责任，不宣称全部清理。
+
+原恢复4/5与库存夹具缺失、续租数据库脚本改写历史的需求冲突、正式ResourcePorts/临近政策/宿主和开业counter/参加者缺口均保留。CAT-GOV完整结项仍0/14、实现百分比待核实；两个动态新编码不同组合冻结经营、真库/容量/锁/回滚/多实例、浏览器/微信及独立Review尚未完成，原CLOSE与企业/AI门槛分别核实。当前目标已暂停；本次收口不降低原范围，也不提供任何新增环境执行许可。
+
 <a id="quote-history-immutable-20261113"></a>
 
 ## 普通报价历史与消费保护（2026-11-13）
