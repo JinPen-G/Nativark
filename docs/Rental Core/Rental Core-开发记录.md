@@ -20,7 +20,7 @@
 
 全部验证已退出、三emit在本树自持产物；一份零字节audit原生精确删除被自动审批`blocked by policy`拒绝，整条未执行/无详细理由。已安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/adoption-configuration-preflight-validation/manifest.json)，[退出证据](../../output/category-governance/adoption-configuration-preflight-cleanup-20261113.json)确认原任务暂存不存在，已归集未删除；此前各批继续原清单责任。结果仅留本对话及原记录/接续供PM主动读取，没有主动发消息、合main或新环境执行。
 
-本片补齐已知配置读取顺序，不计整项完成；完整CAT-GOV仍0/14、百分比待核实。剩余包括当前配置/历史动作与全部写入口的并发组合、真库总规模/锁/回滚/多实例、两个动态编码不同执行组合的同一冻结构建经营、浏览器/微信及独立Review；原CLOSE和企业/AI接点另按各自门槛核实。
+三份源码与四份记录/接续已固定为`da06e2463c5da1ee10495dbb1dfda37794fb2bb4`，普通推送`codex/rental-core`并[回读GitHub同SHA](../../output/category-governance/adoption-configuration-preflight-github-20261113.json)，工作树干净、上游0/0，未合main。本片补齐已知配置读取顺序，不计整项完成；完整CAT-GOV仍0/14、百分比待核实。剩余包括当前配置/历史动作与全部写入口的并发组合、真库总规模/锁/回滚/多实例、两个动态编码不同执行组合的同一冻结构建经营、浏览器/微信及独立Review；原CLOSE和企业/AI接点另按各自门槛核实。
 
 <a id="preparation-bounded-read-20261113"></a>
 
