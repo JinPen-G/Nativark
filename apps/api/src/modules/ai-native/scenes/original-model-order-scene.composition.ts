@@ -16,6 +16,7 @@ import { composePersistedTaskAuthorization } from '../task-authorization.composi
 import { composePersistedTaskCenter } from '../task-center.composition';
 import { composeAiTaskCenterScene } from '../task-center-scene.composition';
 import type { AiOriginalSceneResultService } from './original-scene-result.service';
+import { snapshotTaskCenterRecoveryFence, type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Run = Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource?: AiTaskInputSource };
@@ -229,10 +230,13 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome, businessExecution: 'readonly_not_business_commit' as const });
     },
-    async recover(value: unknown, signal?: AbortSignal) {
+    async recover(value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
       const original = structuredClone(value);
       const { before, runner } = await observe(() => assemble(original, false), signal);
-      const outcome = await runner.recoverOriginal(signal); await observe(() => verify(before), signal, true);
+      if (fence && (fence.taskId !== before.task.taskId || fence.runId !== before.task.runId))
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      const outcome = await runner.recoverOriginal(signal, fence); await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome, automaticRetry: false as const });
     },
     async resumePrepared(value: unknown, signal?: AbortSignal) {
@@ -244,7 +248,8 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         automaticRetry: false as const, preparation: 'original_inputs_only' as const,
         businessExecution: 'readonly_not_business_commit' as const });
     },
-    async takeover(value: unknown, signal?: AbortSignal) {
+    async takeover(value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
       const parsed = z.object({ original: originalRequestReferenceSchema,
         expectedTaskRevision: z.number().int().min(1).max(4294967294),
         expectedRunRevision: z.number().int().min(1).max(4294967294),
@@ -252,7 +257,10 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { original, ...command } = parsed.data;
       const { before, runner } = await observe(() => assemble(original, false), signal);
-      const outcome = await runner.takeoverOriginal(command, signal);
+      if (fence && (fence.taskId !== before.task.taskId || fence.runId !== before.task.runId
+        || fence.expectedTaskRevision !== command.expectedTaskRevision || fence.expectedRunRevision !== command.expectedRunRevision
+        || fence.expectedFencingToken !== command.expectedFencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      const outcome = await runner.takeoverOriginal(command, signal, fence);
       await observe(() => verify(before), signal, true);
       return freezeOriginalInput({ original: before.original.receipt, outcome,
         takeover: 'same_owner_recovery_only' as const, automaticRetry: false as const,

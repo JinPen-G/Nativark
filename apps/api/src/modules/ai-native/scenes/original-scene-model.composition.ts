@@ -31,6 +31,8 @@ import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 import { AiOriginalSceneDisplayGeneration, type AiOriginalSceneDisplayPublication } from '../workbench-display-generation.service';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
+import { assertTaskCenterRecoveryFence, snapshotTaskCenterRecoveryFence,
+  type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
@@ -459,23 +461,31 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const result = await application(before.reference).reconcile({ taskId: before.task.taskId, runId }, signal);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(result); // Original held lease only, never a new claim/re-dispatch.
-      }, async recover(value: unknown, signal?: AbortSignal) {
+      }, async recover(value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) {
+        const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
         const original = structuredClone(value);
         const before = await observe(() => bound(original), signal);
-        const runId = await observe(() => originalRun(before), signal), reader = application(before.reference);
+        const selectedRunId = await observe(() => originalRun(before), signal);
+        if (fence && (fence.taskId !== before.task.taskId || fence.runId !== selectedRunId))
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const runId = fence?.runId ?? selectedRunId, reader = application(before.reference);
         const snapshot = await observe(() => reader.inspect({ taskId: before.task.taskId, runId }), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence, snapshot);
         if (!snapshot.plan || !['running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
           return freezeOriginalInput({ kind: 'not_started' as const, reason: 'task_not_runnable' as const });
         }
         await observe(() => verify(before), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence,
+          await observe(() => reader.inspect({ taskId: fence.taskId, runId: fence.runId }), signal));
         // Reclaim only this persisted original/successor. The existing CAS and
         // fencing gate owns current authority, old leases and recovery facts.
         // Recovery never publishes a replacement input/plan or resets usage.
         const outcome = await root.runner.run({ taskId: before.task.taskId, runId,
           holderId: serverHost.holderId, leaseMs: serverHost.leaseMs,
-          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-          expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+          expectedTaskRevision: fence?.expectedTaskRevision ?? snapshot.task.revision,
+          expectedRunRevision: fence?.expectedRunRevision ?? snapshot.run.revision,
+          expectedFencingToken: fence?.expectedFencingToken ?? snapshot.run.fencingToken, recovery: true }, signal);
         await observe(() => verify(before), signal, true);
         return freezeOriginalInput({ kind: 'run_outcome' as const, outcome });
       }, async readExecution(value: unknown) {
@@ -483,15 +493,22 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const snapshot = await application(before.reference).inspect({ taskId: before.task.taskId, runId });
         await verify(before);
         return freezeOriginalInput(snapshot);
-      }, async takeover(value: unknown, signal?: AbortSignal) {
+      }, async takeover(value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) {
+        const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
         const parsed = z.object({ original: originalRequestReferenceSchema, expectedTaskRevision: revision,
           expectedRunRevision: revision, expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict()
           .safeParse(structuredClone(value));
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
         const before = await observe(() => bound(parsed.data.original), signal);
-        const runId = await observe(() => originalRun(before), signal);
+        const selectedRunId = await observe(() => originalRun(before), signal);
+        if (fence && (fence.taskId !== before.task.taskId || fence.runId !== selectedRunId
+          || fence.expectedTaskRevision !== parsed.data.expectedTaskRevision
+          || fence.expectedRunRevision !== parsed.data.expectedRunRevision
+          || fence.expectedFencingToken !== parsed.data.expectedFencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const runId = fence?.runId ?? selectedRunId;
         const snapshot = await observe(() => application(before.reference).inspect({ taskId: before.task.taskId, runId }), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence, snapshot);
         if (!snapshot.plan || snapshot.task.revision !== parsed.data.expectedTaskRevision
           || snapshot.run.revision !== parsed.data.expectedRunRevision || snapshot.run.fencingToken !== parsed.data.expectedFencingToken) {
           throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -504,14 +521,17 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         if (!storedRun?.leaseOwnerId || storedRun.leaseOwnerId === serverHost.holderId || storedRun.revision !== snapshot.run.revision
           || !storedRun.fencingToken.equals(snapshot.run.fencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         await observe(() => verify(before), signal);
+        if (fence) assertTaskCenterRecoveryFence(fence,
+          await observe(() => application(before.reference).inspect({ taskId: fence.taskId, runId: fence.runId }), signal));
         if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
         // Human permission comes from the current action policy, not a claimed
         // administrator role. Previous/new holders are server-owned. Takeover
         // atomically fences the old worker and recovers original facts only.
         const outcome = await root.takeoverAndRecover({ taskId: before.task.taskId, runId,
           previousHolderId: storedRun.leaseOwnerId, holderId: serverHost.holderId,
-          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-          expectedFencingToken: snapshot.run.fencingToken, leaseMs: serverHost.leaseMs }, signal);
+          expectedTaskRevision: fence?.expectedTaskRevision ?? parsed.data.expectedTaskRevision,
+          expectedRunRevision: fence?.expectedRunRevision ?? parsed.data.expectedRunRevision,
+          expectedFencingToken: fence?.expectedFencingToken ?? parsed.data.expectedFencingToken, leaseMs: serverHost.leaseMs }, signal);
         await observe(() => verify(before), signal, true);
         return freezeOriginalInput({ kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
           businessExecution: 'not_inferred_from_model_result' as const });

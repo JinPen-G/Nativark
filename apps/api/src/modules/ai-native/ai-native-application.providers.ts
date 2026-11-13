@@ -8,6 +8,8 @@ import { createOriginalTaskStartAdmission } from './task-start-admission.composi
 import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration,
   readCurrentWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
 import { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
+import { AI_TASK_CENTER_RECOVERY_REQUESTS, composeTaskCenterRecoveryRequests,
+  type TaskCenterRecoveryDependencies } from './task-center-recovery.application';
 import { AI_WORKBENCH_MODEL_CONTROL_REQUESTS, composeWorkbenchModelControlRequests } from './workbench-model-control.application';
 import { composePersistedTaskModelHost } from './task-model-gateway.composition';
 /**
@@ -581,6 +583,26 @@ function readOrderExecutionConfiguration(value: unknown) {
 /** Quote model execution is independent of order creation and capability probes. */
 export const AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION');
 export const AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION');
+
+export const AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER: FactoryProvider = {
+  provide: AI_TASK_CENTER_RECOVERY_REQUESTS,
+  inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, ModuleRef,
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, original: TaskCenterRecoveryDependencies['original'], moduleRef: Pick<ModuleRef, 'get'>,
+    orderValue?: unknown, openingValue?: unknown, quoteValue?: unknown) =>
+    composeTaskCenterRecoveryRequests({ db, auth, original, host(kind) {
+      const value = kind === 'order_read' ? orderValue : kind === 'opening_model' ? openingValue : quoteValue;
+      if (kind === 'opening_read' || !readOrderExecutionConfiguration(value).enabled) return undefined;
+      const token = kind === 'order_read' ? AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS
+        : kind === 'opening_model' ? AI_ORIGINAL_OPENING_MODEL_REQUESTS : AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS;
+      try {
+        const host = moduleRef.get<ReturnType<TaskCenterRecoveryDependencies['host']>>(token, { strict: false });
+        return typeof host?.recover === 'function' && typeof host.takeover === 'function' ? host : undefined;
+      } catch { return undefined; }
+    } })
+};
 
 const quoteModelRequestMethods = ['start', 'refreshInput', 'submitAnswer', 'resume', 'continueAnswer', 'reconcile', 'recover',
   'takeover', 'requestCancel', 'readQuotePreparation', 'confirmClarifiedQuote', 'readClarifiedQuoteReceipt', 'readExecution'] as const;

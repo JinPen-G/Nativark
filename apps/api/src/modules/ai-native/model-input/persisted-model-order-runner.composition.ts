@@ -29,6 +29,8 @@ import { renderOrderReadAnswer } from '../tools/order-explanation-renderer';
 import { AI_GATEWAY_TOOL_RESULT_REFERENCE_VERSION } from '@rental-os/shared';
 import { OriginalNativeToolResultSource } from './original-native-tool-result.source';
 import { PrismaNativeToolCallBindings } from './prisma-native-tool-call-bindings';
+import { assertTaskCenterRecoveryFence, snapshotTaskCenterRecoveryFence,
+  type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), modelRegistrationRef: id,
@@ -719,13 +721,18 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       || taskModelIdentity(original.context) !== taskModelIdentity(current.context)) throw denied();
     return receipt;
   };
-  const takeoverOriginal = async (value: unknown, signal?: AbortSignal) => {
+  const takeoverOriginal = async (value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+    const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
     const parsed = takeoverRevisionSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (fence && (fence.taskId !== task.taskId || fence.runId !== task.runId
+      || fence.expectedTaskRevision !== parsed.data.expectedTaskRevision || fence.expectedRunRevision !== parsed.data.expectedRunRevision
+      || fence.expectedFencingToken !== parsed.data.expectedFencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     const observe = <T>(operation: () => Promise<T>) => waitForTaskApplicationDependency(operation, false, signal);
     const original = await observe(() => assertOriginal());
     const snapshot = await observe(() => application.inspect({ taskId: task.taskId, runId: task.runId }));
+    if (fence) assertTaskCenterRecoveryFence(fence, snapshot);
     if (!snapshot.plan || snapshot.task.revision !== parsed.data.expectedTaskRevision
       || snapshot.run.revision !== parsed.data.expectedRunRevision
       || snapshot.run.fencingToken !== parsed.data.expectedFencingToken) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -750,6 +757,8 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     if (current.receipt.contentHash !== original.receipt.contentHash
       || taskModelIdentity(current.context) !== taskModelIdentity(original.context)
       || (await observe(() => model.tasks.resolveAccess(task.taskId, 'takeover_run'))).bindingKey !== access.bindingKey) throw denied();
+    if (fence) assertTaskCenterRecoveryFence(fence,
+      await observe(() => application.inspect({ taskId: fence.taskId, runId: fence.runId })));
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     // Previous/new holders are server-derived. The original transactional
     // takeover performs owner/action authorization, task/run CAS and fencing.
@@ -760,20 +769,26 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     return { kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
       automaticRetry: false as const, businessExecution: 'readonly_not_business_commit' as const };
   };
-  const recoverOriginal = async (signal?: AbortSignal) => {
+  const recoverOriginal = async (signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+    const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+    if (fence && (fence.taskId !== task.taskId || fence.runId !== task.runId)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     await waitForTaskApplicationDependency(() => assertOriginal(), false, signal);
     const snapshot = await waitForTaskApplicationDependency(() => application.inspect({ taskId: task.taskId, runId: task.runId }), false, signal);
+    if (fence) assertTaskCenterRecoveryFence(fence, snapshot);
     if (!snapshot.plan || !['running', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
       return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
     }
+    if (fence) assertTaskCenterRecoveryFence(fence,
+      await waitForTaskApplicationDependency(() => application.inspect({ taskId: fence.taskId, runId: fence.runId }), false, signal));
     // Recovery receives the repository's current-authority/CAS recovery lease.
     // The runner reloads and validates expectedSteps through planAuthority.
     // It never calls prepare(), publishes inputs or dispatches a model again.
     const outcome = await root.runner.run({ taskId: task.taskId, runId: task.runId,
       holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs,
-      expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
-      expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+      expectedTaskRevision: fence?.expectedTaskRevision ?? snapshot.task.revision,
+      expectedRunRevision: fence?.expectedRunRevision ?? snapshot.run.revision,
+      expectedFencingToken: fence?.expectedFencingToken ?? snapshot.run.fencingToken, recovery: true }, signal);
     await waitForTaskApplicationDependency(() => assertOriginal(), true, signal);
     return { kind: 'run_outcome' as const, outcome };
   };

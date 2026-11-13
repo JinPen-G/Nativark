@@ -33,6 +33,7 @@ export * from "./ai-order-candidates-draft";
 export * from "./ai-extension-preview-http-draft";
 export * from "./ai-workbench-display-draft";
 export * from "./ai-workbench-display-http-draft";
+export * from "./ai-task-center-recovery-draft";
 export * from "./ai-workbench-model-control-draft";
 export * from "./ai-conversation-draft";
 export * from "./ai-task-draft";

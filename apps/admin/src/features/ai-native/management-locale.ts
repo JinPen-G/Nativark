@@ -4,6 +4,7 @@ import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
   ...platformAiEnglish,
+  '原任务恢复与接管': 'Original task recovery and takeover',
   '当前日历来源未加载，不能确定已采用版本。': 'The current calendar source is not loaded. Its adopted version cannot be determined.',
   '未采用已发布日历': 'No published calendar adopted',
   '当前日历版本': 'Current calendar version',

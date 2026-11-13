@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-task-center-recovery-20261113"></a>
+## 任务中心原运行恢复、接管与收据核对（2026-11-13）
+
+本阶段接通[任务中心恢复控件](../../apps/admin/src/features/ai-native/TaskRecovery.tsx)、[原操作会话](../../apps/admin/src/features/ai-native/task-recovery-session.ts)与[正式 API](../../apps/admin/src/api/aiTaskRecovery.ts)。[公共合同](../../packages/shared/src/ai-task-center-recovery-draft.ts)定义 target、snapshot、recover、takeover、receipt 五路；[应用与 Controller](../../apps/api/src/modules/ai-native/task-center-recovery.application.ts)及原 Guard、AppModule、OpenAPI 同步登记。服务端按原请求、本人 Task、准确 Run、固定计划和已消费回答链定位宿主；客户端不提供场景、holder 或新原请求。写入将审阅过的 Task/Run 修订、planHash 和 fencingToken 一直送到原 claim/takeover CAS，原政策等待后再次核对 Task/Run；并发变化拒绝。
+
+恢复与接管复用原开业、报价模型及订单宿主，不发布替代输入/计划，不创建新 Run 或额度。订单原接管响应先按其专用合同完整校验，再投影通用结果，保留只读业务语义。当前执行配置关闭时不展示可提交动作；原 snapshot/receipt 继续按当前本人、空间和读权访问。仅开业配置权限的用户可读本人原开业收据，不借订单权限入口，也不自动取得恢复权。选单业务 Run 和纯模型控制 Run 需各自专用宿主，不冒充通用恢复。
+
+后台先显式核对目标，再固定本地原操作，跨标签互斥且写前读回。丢应答或 unknown 只读同一原运行/接管收据；重开、刷新和存储事件不再发送，缺收据不能推断回滚。页面区分已完成、待核对、未执行步骤及 Task 累计资源，原接管收据不表示远端停止或业务完成。
+
+固定前置 `f398f7f80560d77caee1eccd826b1b276960e0d6`。dev1 五文件窄片已核同：target reader `d1edbb41f67a9cb57a812958208658d00c41952b`、原模型恢复组合 `dc7dcf6859b2f5981bb2703d4d3f5de384261a2c`、订单场景 `8194fc0e404a76bca63ffd96696f7f23fc5b84e0`、订单 runner `f61a6afb72036731faa49dfb13d8a4fc78a9b4f4`、request-bound 委托 `d5a770ba4418abb1ce4f9439ef0848061d340830`。dev2 API/session/组件三份固定 blob 依次为 `8e1200f259ea91c875b02abd7f022c08fe4c559c`、`5e10b8f5c2d21a35ee0d07695920ec126080ffe7`、`6b904e46fe1a1caf41695559f732659c2c37f804`。并行历史和订单展示改动未混入本阶段。
+
+Root 用固定 Git 源在内存执行 `node --no-compilation-cache -`，实际恢复 provider→Guard→Controller→原持久运行器/Gateway 夹具→后台 API/session 模拟退出 0，stdin SHA-256 `34025b4b04ff66e6a74d8eaba33d7019b8afe8a6cc53edbcfcbd71ffbd1409cd`。开业、订单各有一次原模型调用，明确恢复及接管共各两次宿主调用；丢接管应答后重开读回唯一原收据，新增模型/Run/输入/Gateway 记录均为 0。覆盖旧 CAS、关闭配置仍可原读、撤权拒读及五路 OpenAPI/Controller 登记。原 unknown 保持 unknown，不因成功读回而伪称模型或业务成功。dev2 另有 21 项会话、9 项 API、5 项有限组件模拟及实际 provider 组合证据，Root 已读取其固定交付并独立核接上述两场景。
+
+固定源码 TypeScript 5.9.3 检查：API 4 根/1959 源、后台 4 根/1629 源均零诊断、退出 0，stdin SHA-256 分别为 `01a6ab7ac4ebc285d881c97abf876e9eee166a931ad2c4386cadda9e6b3e9d0b`、`d494d57a44d396f93f2dac4d70e6e3ba9279dda37e08abd3d0eddade495bc99a`。只读组件清单审计 `badHashes=[]`。最初模拟缺会话表、内存命令括号及字符串替换错误均留在本对话；仅修驱动后定向复验。另一个中断点留下原未完成运行耗时，接管能恢复已测步骤但返回人工核对；旧 holder 未过期时普通 recover 正确 CAS 拒绝，未放宽为自动接管或重派。
+
+所有模拟使用原离线 preload、不可达 DATABASE_URL、内存审计；审计为空，`output/.tmp/ain12-confirmation-closeout-20261113` 未创建，验证子进程已退出，无新增测试脚本或临时产物。以上是类型和模拟行为证据，不是浏览器、微信、真实数据库/供应商验收。AIN-12 的订单最终展示、跨轮历史及停止交付条款继续按原全文核定，未将本片计作整项 100%。
+
 <a id="ain12-model-confirmation-and-chat-display-20261113"></a>
 ## 模型请求原提案确认与聊天动态工作区消费（2026-11-13）
 

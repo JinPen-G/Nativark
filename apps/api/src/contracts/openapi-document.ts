@@ -32,6 +32,7 @@ import { AI_CREDIT_COMPONENT_SCHEMAS, AI_CREDIT_OPERATIONS } from './ai-credit';
 import { AI_MODEL_SETTINGS_HTTP_DRAFT, AI_PLATFORM_MODEL_SETTINGS_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_PROVIDER_DISCOVERY_INPUT_SCHEMA, AI_PROVIDER_DISCOVERY_RESULT_SCHEMA } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from '@rental-os/shared';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT,
   AI_QUOTE_SELECTION_HTTP_CONTRACTS, AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS,
   AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS, AI_APPROVED_SETTINGS_READ_HTTP_CONTRACTS,
@@ -2612,6 +2613,12 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: 'readOriginalPlatformModelConfigurationSave', permissions: ['system:ai-provider:view'],
     summary: 'Current SaaS viewer and original actor only. Exact immutable save receipt, independent of later config rotations; missing is unknown, not rollback or permission to resend. No credential or execution grant.',
     responseSchema: 'AiModelConfigurationOperationDraft' },
+  ...Object.entries(AI_TASK_CENTER_RECOVERY_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_TASK_CENTER_RECOVERY_HTTP.basePath}/${AI_TASK_CENTER_RECOVERY_HTTP[action as keyof typeof AI_TASK_CENTER_RECOVERY_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `aiTaskCenterRecovery_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
+    requestSchema: contract.request, responseSchema: contract.response,
+    summary: contract.write ? '沿原持久宿主恢复或接管已审阅的 Task/Run/计划/CAS；不创建新计划或额度，unknown 只读原操作。'
+      : '当前本人、空间与原来源复验后的准确恢复定位或原收据；不领取租约、不启动模型。' })),
   ...(['input', 'resumeInput', 'inputReceipt', 'continueInput'] as const).map(action => ({
     method: 'post' as const, path: `/api/${AI_TASK_CENTER_HTTP_DRAFT.basePath}/${AI_TASK_CENTER_HTTP_DRAFT[action]}`,
     tag: 'AI Native', operationId: `aiTaskCenterOriginalClarification_${action}`, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],

@@ -75,6 +75,7 @@ import { composeProfileWorkflow } from './profile-workflow.composition';
 import { composeOpeningProposalWorkflow } from './opening-proposal-workflow.composition';
 import { composeOpeningRuleDraftSave } from './opening-rule-draft.composition';
 import type { ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';
+import { snapshotTaskCenterRecoveryFence, type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -1510,13 +1511,17 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       callWaiting(request, value, 'explicit_answer_continue', (app, command) => app.continueAnswer(command, signal), signal),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, async (app, command) => await app.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
-    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, async (app, command) => await app.recover(command, signal),
-        { write: true, signal, preflightOnly: true }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, async (app, command) => await app.recover(command, signal, fence),
+        { write: true, signal, preflightOnly: true });
+    },
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readExecution(command)),
-    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, async (app, command) => await app.takeover(command, signal),
-        { write: true, signal, preflightOnly: true }),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, async (app, command) => await app.takeover(command, signal, fence),
+        { write: true, signal, preflightOnly: true });
+    },
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       async (app, command) => await app.requestCancel(command), { write: true })
   });
@@ -1652,11 +1657,15 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       call(request, value, (app, command) => app.application.continueAnswer(command, signal), { write: true, signal, preflightOnly: true }),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.reconcile(command, signal), { write: true, signal, preflightOnly: true }),
-    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.recover(command, signal), { write: true, signal, preflightOnly: true }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, (app, command) => app.application.recover(command, signal, fence), { write: true, signal, preflightOnly: true });
+    },
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readExecution(command)),
-    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.application.takeover(command, signal), { write: true, signal, preflightOnly: true }),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal, exact?: Readonly<TaskCenterRecoveryFence>) => {
+      const fence = exact === undefined ? undefined : snapshotTaskCenterRecoveryFence(exact);
+      return call(request, value, (app, command) => app.application.takeover(command, signal, fence), { write: true, signal, preflightOnly: true });
+    },
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       (app, command) => app.application.requestCancel(command), { write: true }),
     readModelResult: recoveryReaders.readModelResult,

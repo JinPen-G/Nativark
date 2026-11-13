@@ -1,5 +1,7 @@
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
 import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
+import { AiTaskCenterRecoveryController } from './modules/ai-native/task-center-recovery.application';
+import { AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskOriginalReadPolicyController } from './modules/ai-native/task-original-read-policy.application';
 import { AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -195,6 +197,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     DatabaseModule
   ],
   controllers: [
+    AiTaskCenterRecoveryController,
     TaskOpeningProposalController,
     AiCreditController,
     InspectionRecognitionTaskController,
@@ -300,6 +303,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER,
     AI_NATIVE_MODEL_SETTINGS_PROVIDER,
     AI_NATIVE_TASK_CENTER_PROVIDER,
+    AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER,
     AI_NATIVE_TASK_RULE_DRAFT_PROVIDER,
     AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER,
     AI_NATIVE_TASK_ORDER_HANDOFF_PROVIDER,

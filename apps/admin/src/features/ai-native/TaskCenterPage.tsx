@@ -29,6 +29,8 @@ import { AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { TaskHumanApproval } from "./TaskHumanApproval";
 import { TaskQuoteReprepare } from './TaskQuoteReprepare';
 import { TaskCancellation } from "./TaskCancellation";
+import { TaskRecovery } from './TaskRecovery';
+import { aiTaskRecoveryApi } from '@/api/aiTaskRecovery';
 import { TaskClarification } from "./TaskClarification";
 import { VisibleObservationHost } from './VisibleObservationHost';
 import { ConversationHistory } from './ConversationHistory';
@@ -355,6 +357,9 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
             onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> },
           { key: 'cancel', title: t('取消任务'), content: <TaskCancellation key={`stop:${selected}`} taskId={selected} identity={identity} current={current}
             onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> },
+          { key: 'recovery', title: t('原任务恢复与接管'), content: <TaskRecovery key={`recovery:${identity}:${selected}`}
+            taskId={selected} identity={identity} current={current} locate={aiTaskRecoveryApi.locate}
+            onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
           { key: 'usage', title: t('用量记录'), content: <TaskUsageObservation key={selected} taskId={selected} current={current}
             onAccessDenied={() => { setSelected(null); setOpened(false); }} /> },
           ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'opening_diagnosis'
