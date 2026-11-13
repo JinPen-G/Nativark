@@ -4,6 +4,18 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="calendar-r0-main-minimal-20261113"></a>
+
+## 日历R0固定main最小闭包（2026-11-13）
+
+PM已核`da3002b2942fa31c6a81631d3f438d8e245d2455`的原合同/验证/GitHub，但该提交相对父版本的两源差异无法直接应用到主版本的仓储268/服务875。按指定固定main `1abf3c6bc7e204b6dd1b1bed1d20ac244982b114`重建仅日历新增合同的[准确补片](../../output/category-governance/calendar-r0-main-minimal-20261113.patch)，12969字节，SHA-256 `1551737a6a68a67a9828caeda8fb99ff1b84b858218910789f36a8bfc641f390`；结果与来源见[闭包证据](../../output/category-governance/calendar-r0-main-minimal-closure-20261113.json)。本树/主树生产文件未改，父级其他R0、counter、queue及成员来源方法不整取。
+
+最终`rental-business-config.repository.ts` blob为`1c96579b7356432238faf5add50195da75f48869`，`rental-business.service.ts`为`61979bc8504c2d2579ed56dd1ffec7694f0b6ca8`。仓储只加原身份指纹导入、两个来源接口与日历元数据读取/复验；服务只在原`readTenantReadiness`返回附加`calendarSource`。原main已具有所需R0方法、成员计数及可传原client的接点，无其他必要父方法。scope、原九项结果、未采用/缺来源和原发布行语义沿[已冻结合同](#calendar-r0-binding-source-20261113)，AI窄消费归AI-RD。
+
+固定main的1023份原API/正式Shared输入在内存读取，TypeScript5.9.3检查两根/1189源零诊断，见[类型](../../output/category-governance/calendar-r0-main-minimal-compile-20261113.json)。对应完整编译两候选加固定main原依赖的十三组来源行为退出0、audit0，见[实际组合行为](../../output/category-governance/calendar-r0-main-minimal-behavior-20261113.json)。只在独占临时index应用补片，两个最终blob一致、格式退出0；真实暂存区未动，不用活动main或本树其他服务替代组合。SQL/配置/账号仍为明确替身，不证明真库、HTTP/AI宿主或独立Review。
+
+补片移到唯一交付路径并核哈希后，候选TS/emit/index/audit共6文件/1468005字节已退出。原生PowerShell删除被自动审批`blocked by policy`拒绝，命令未执行、无详细理由；已同卷归入[原唯一责任清单](../../../../output/.cleanup-pending/rental-core/calendar-r0-main-minimal-validation/manifest.json)，原任务暂存不存在、逐文件哈希一致，见[退出结果](../../output/category-governance/calendar-r0-main-minimal-cleanup-20261113.json)。其他旧批未删除，继续各清单。本片精确上传批准补片和本专项记录/接续供PM/QA，不夹其他output；原08/两个动态编码不同组合与CAT/CLOSE完整门槛不变。
+
 <a id="calendar-r0-binding-source-20261113"></a>
 
 ## 日历R0当前采用来源的窄合同（2026-11-13）
