@@ -16,7 +16,7 @@ import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { SubscriptionService } from "../subscription/subscription.service";
 import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
-import { assertCategoryPreparationBatchSize, categoryPreparationBatchFingerprint, mergeCategoryPreparationBatch, readCategoryPreparationBatchResult } from "./category-preparation-batches";
+import { assertCategoryPreparationBatchSize, categoryPreparationBatchFingerprint, categoryPreparationEnvelopeSource, mergeCategoryPreparationBatch, readCategoryPreparationBatchResult } from "./category-preparation-batches";
 import type { CategoryPreparationPreview } from "@rental-os/shared";
 import { AuthService } from "../auth/auth.service";
 import { CategoryAdoptionApplication } from "./category-adoption.application";
@@ -99,6 +99,7 @@ export class CategoryAdoptionPreparationService {
       tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
       tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
     ]);
+    if (preparation) categoryPreparationEnvelopeSource(preparation.patches);
     const code = readRentalCategoryCode(workspace.categoryCode);
     const definition = resolveRentalCategoryVersionBody(target, code);
     const sourceDefinition = resolveRentalCategoryVersionBody(source, code);
@@ -119,7 +120,8 @@ export class CategoryAdoptionPreparationService {
       let candidateRecords = context.records;
       try {
         if (stale) throw new ConflictException("当前绑定已变化，预备资料必须重新准备");
-        const projected = prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, patches, envelope?.formatVersion === 2 ? "collection" : "batch");
+        const projected = prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, patches,
+          envelope ? categoryPreparationEnvelopeSource(envelope) : "batch");
         const groups = new Map(projected.itemGroups.map((row) => [row.id, row]));
         const assets = new Map(projected.assets.map((row) => [row.id, row]));
         candidateRecords = {
@@ -184,6 +186,7 @@ export class CategoryAdoptionPreparationService {
       const target = await tx.rentalCategoryVersion.findUnique({ where: { id: targetId } });
       resolveRentalCategoryVersionBody(target, readRentalCategoryCode(workspace.categoryCode));
       const preparation = await tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } });
+      if (preparation) categoryPreparationEnvelopeSource(preparation.patches);
       const envelope = preparation?.patches as PreparationEnvelope | undefined;
       const stale = Boolean(preparation && (preparation.sourceRevision !== workspace.categoryAdoptionRevision || envelope?.sourceVersionId !== workspace.categoryVersionId));
       const prepared = new Map((envelope?.operation === operation ? envelope.items ?? [] : [])
@@ -313,7 +316,7 @@ export class CategoryAdoptionPreparationService {
         throw new ConflictException("来源品类绑定已变化，请核对原准备及当前版本");
       }
       const prior = context.preparation?.patches as PreparationEnvelope | undefined;
-      if (prior?.formatVersion !== undefined && prior.formatVersion !== 2) throw new ConflictException("准备集合结构不受当前程序支持");
+      if (context.preparation) categoryPreparationEnvelopeSource(prior);
       const replay = context.preparation ? await tx.rentalCategoryPreparationBatch.findFirst({ where: {
         tenantId: user.tenantId, workspaceId: context.workspaceId, preparationId: context.preparation.id, batchId: body.batchId
       } }) : null;

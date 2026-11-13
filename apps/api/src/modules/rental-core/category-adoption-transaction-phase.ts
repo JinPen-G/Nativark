@@ -13,6 +13,7 @@ import { assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibil
 import type { AuthService } from "../auth/auth.service";
 import { lockCategoryAdoptionAccess } from "./category-adoption-access";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
+import { assertCategoryPreparationBatchSize, categoryPreparationEnvelopeSource } from "./category-preparation-batches";
 
 /** Applies staged entities/configuration and checks the final scoped combination.
  * Caller owns the original-key receipt and commit in this SAME ReadCommitted
@@ -75,9 +76,13 @@ export async function writePreparedCategoryAdoptionPhase(
       envelope?.sourceVersionId !== expected.categoryVersionId || envelope.operation !== operation) {
     throw new ConflictException("预备资料或来源版本修订已变化，请重新准备");
   }
+  const preparationSource = categoryPreparationEnvelopeSource(envelope);
   if (typeof envelope.reason !== "string" || !envelope.reason.trim() || envelope.reason.length > 512 || !Array.isArray(envelope.items)) {
     throw new ConflictException("预备资料格式或采用原因无效，请重新准备");
   }
+  // Legacy single-save data retains its original smaller request limit. A
+  // missing format version cannot silently authorize a larger collection.
+  if (preparationSource === "batch") assertCategoryPreparationBatchSize(envelope.items);
   if (envelope.capabilityPatches !== undefined && !Array.isArray(envelope.capabilityPatches)) {
     throw new ConflictException("能力预备配置格式无效，采用未完成；预备输入已保留");
   }

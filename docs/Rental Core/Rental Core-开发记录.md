@@ -4,6 +4,22 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="adoption-preparation-format-20261113"></a>
+
+## 准备结构门禁与原收据保护（2026-11-13）
+
+沿CAT-GOV-08核对准备/采用/恢复。原最终采用把准备JSON当已知结构读取，`formatVersion=999`仍能升级、写一条采用审计及收据；已用原Application/phase/Auth映射与原fixture确认[反例](../../output/category-governance/adoption-preparation-format-before-20261113.json)。限定调用只在本fixture记录器补登记原`Tenant LOCK IN SHARE MODE`，不改原用例或生产Auth；SQL/事务仍为明确替身。
+
+本片只改[原批次辅助](../../apps/api/src/modules/rental-core/category-preparation-batches.ts)、[准备服务](../../apps/api/src/modules/rental-core/category-adoption-preparation.service.ts)和[采用事务阶段](../../apps/api/src/modules/rental-core/category-adoption-transaction-phase.ts)。同一容器门禁只识别原无`formatVersion`单份准备及版本2的累计集合；未知版本/字段或非对象明确拒绝，保留原版和准备。预览、实体分页、单份保存/分批保存及最终采用复用该门禁，旧客户端或显式reset不能覆盖未知未来结构。原单份准备采用仍执行1000条/256KiB限制，不能省略版本冒充更大集合；版本2继续沿原10000条/2MiB集合和最终事务门限。
+
+原批次回读及采用收据核对不重新解析今天的准备结构；已成功操作仍按原键、审计、当前权限回读，不重发、不把未知准备当回滚。原升级/恢复权限、目标政策、source/revision、实体/声明和提交机制不变。Shared/DTO/HTTP/Schema未改，不新增业务动作、版本号或测试脚本。
+
+原API TypeScript5.9.3检查867根/2012源零诊断，只安装三个必要emit；Shared运行时/Client、原Application及前片日历两份产物六保护文件哈希未变，见[类型与安装](../../output/category-governance/adoption-preparation-format-compile-20261113.json)。当前完整编译产物十组限定行为退出0、audit0：999/字符串2/null/显式1、未知字段拒绝且无写；原单份可采用、超单批旧结构拒绝；两批1001条成功采用并建立声明；预览/分页/两保存未知结构拒绝；已提交原收据在后继准备损坏后仍可读取和重放，见[行为证据](../../output/category-governance/adoption-preparation-format-behavior-20261113.json)。SQL/事务/Auth行是原明确替身，不证明真库锁、HTTP或宿主。
+
+原`node --no-compilation-cache --require <本树绝对preload> --test tests/category-preparation-batches.test.cjs tests/category-adoption-records.test.cjs tests/category-preparation-permission.test.cjs`三文件全部通过、退出0、audit0，见[原用例](../../output/category-governance/adoption-preparation-format-original-tests-20261113.json)。原采用应用和批次整组的共享父锁夹具失败仍沿历史结果保留，未改断言或把限定调用当整组通过。
+
+全部验证退出，三个必要emit已移入本树在用产物，剩一个空audit。原生PowerShell删除被自动审批`blocked by policy`拒绝，未执行/无详细理由；已同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/adoption-preparation-format-validation/manifest.json)，原暂存不存在，见[退出](../../output/category-governance/adoption-preparation-format-cleanup-20261113.json)。本批及旧批未删除，继续创建者责任。日历main补片`3cbc802d789242a895e9f25046ccdf76e24b2aca`已上传核GitHub并交PM；完整CAT-GOV仍0/14、百分比待核实，08真库/并发及两个动态编码不同组合冻结经营/宿主/独立Review继续原门槛。
+
 <a id="calendar-r0-main-minimal-20261113"></a>
 
 ## 日历R0固定main最小闭包（2026-11-13）

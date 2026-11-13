@@ -27,6 +27,19 @@ const safeField = (code: string) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(code) &
   !["constructor", "prototype", "__proto__"].includes(code);
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 
+/** Only the original unversioned single-save envelope and the version-2 staged
+ * collection have executable meaning. Unknown stored fields/versions must not
+ * be read as legacy data or overwritten by an older preparation client. This
+ * checks the container, not completeness or authority to adopt its contents. */
+export function categoryPreparationEnvelopeSource(value: unknown): "batch" | "collection" {
+  const keys = ["formatVersion", "sourceVersionId", "operation", "reason", "items", "capabilityPatches"];
+  if (!object(value) || value.formatVersion !== undefined && value.formatVersion !== 2
+    || Object.keys(value).some(key => !keys.includes(key))) {
+    throw new ConflictException("准备集合结构不受当前程序支持，原版与准备资料保留；请核对程序兼容性");
+  }
+  return value.formatVersion === 2 ? "collection" : "batch";
+}
+
 /** Stored batch results are immutable receipts, not the current collection.
  * Validate their public shape and stable parent/key binding without re-reading
  * today's target eligibility, preparation basis or entity count. No authority. */
