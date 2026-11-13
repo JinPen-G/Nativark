@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "brand": "Nativark",
+  "date": "2026-11-14",
+  "status": "待用户选择",
+  "source": {
+    "reference": "http://127.0.0.1:5264/index.html",
+    "observedTitle": "Preview · Logo 动效",
+    "design": "本轮手工绘制静态矢量，参考圆角、轮廓和蓝色渐变。",
+    "priorCommit": "633fdf889fe2db46bf99b15d4bf2da53b851a7d6"
+  },
+  "directions": [
+    {
+      "id": "A",
+      "stem": "nativark-core-dock",
+      "title": "模块托座",
+      "meaning": "三个可辨认中心核的 Core 模块，共用一座圆角托座。"
+    },
+    {
+      "id": "B",
+      "stem": "nativark-core-isometric",
+      "title": "Core 平台",
+      "meaning": "三个等距立方 Core，共用厚实公共平台。"
+    }
+  ],
+  "dimensions": {
+    "svg": [
+      512,
+      512
+    ],
+    "png": [
+      512,
+      512
+    ],
+    "preview": [
+      960,
+      320
+    ]
+  },
+  "backgrounds": {
+    "standalone": "transparent",
+    "previewColumns": [
+      "white",
+      "light blue",
+      "charcoal"
+    ]
+  },
+  "preserved": [
+    {
+      "file": "nativark-logo-color.svg",
+      "bytes": 2133,
+      "sha256": "142ca0c20889c29b2cd423b824701dd6a6217d3ff88485293dd4a39d6054feae"
+    },
+    {
+      "file": "nativark-logo-black.svg",
+      "bytes": 2737,
+      "sha256": "ce4bdcd113a81ace09d7acc5c1ff7178be0afe4db495aafbf3de74af7d07ce20"
+    },
+    {
+      "file": "nativark-logo-white.svg",
+      "bytes": 2737,
+      "sha256": "dc227261b7c9a0ac488225cd8b6c24f16d6681f6b7d584948c6f1634e27746c9"
+    },
+    {
+      "file": "nativark-logo-color.png",
+      "bytes": 22241,
+      "sha256": "4fb1a3645a19461b2ce0ddaf83bcd0337624989b706bcf1c578af9dbb02d99f4"
+    },
+    {
+      "file": "nativark-logo-black.png",
+      "bytes": 13921,
+      "sha256": "599e6c5b13adfd3900618a39fee59b8c6949e06be800a62db37f32196b6a68ed"
+    },
+    {
+      "file": "nativark-logo-white.png",
+      "bytes": 14112,
+      "sha256": "4e41d377fa87e27df53208de3630af4d0efc9da74af8077c434df918a8c2790d"
+    },
+    {
+      "file": "nativark-logo-preview.png",
+      "bytes": 37121,
+      "sha256": "45b186093f852e019e506216c51d1075cacb67ea8f9c025a5e4f61f255725d67"
+    }
+  ],
+  "exports": [
+    {
+      "file": "nativark-core-dock-color.svg",
+      "bytes": 3033,
+      "sha256": "e992063e8d0e74b15f128bc99e76f51e7889ed3a34fc11b839f2ddd71dd093bd"
+    },
+    {
+      "file": "nativark-core-dock-color.png",
+      "bytes": 25047,
+      "sha256": "272af6e34a47888427dca37a97b187242c07a4b3a812d34ae415573dfbf728aa"
+    },
+    {
+      "file": "nativark-core-dock-black.svg",
+      "bytes": 3840,
+      "sha256": "f5cf384b3c1ae0a8746061bf86b37c13264f07db8a9ee91096b9e11b1432d043"
+    },
+    {
+      "file": "nativark-core-dock-black.png",
+      "bytes": 14845,
+      "sha256": "201ab8f8c2165a872b513a5db81048068b1d1b1acbc3ef955cd6cc1c1956f108"
+    },
+    {
+      "file": "nativark-core-dock-white.svg",
+      "bytes": 3840,
+      "sha256": "b77a696c6088b3d6b67122de3265b7f91d4d885528ea9a7f5e10a76d02673c33"
+    },
+    {
+      "file": "nativark-core-dock-white.png",
+      "bytes": 15388,
+      "sha256": "2007e4a9dc74e89454ade1da2fd6bc2fad9bf2c0b53cae1d60acba4f6bcb2b6d"
+    },
+    {
+      "file": "nativark-core-dock-preview.png",
+      "bytes": 79543,
+      "sha256": "5aed8fa59fc08f95eeab3944406c58fb6555f83cf17e46ca0933fdda8343fc46"
+    },
+    {
+      "file": "nativark-core-isometric-color.svg",
+      "bytes": 6814,
+      "sha256": "c2ac7ff68a002055bc3f260edd19eeff3bc0daff304ab3353a261ebc127f7512"
+    },
+    {
+      "file": "nativark-core-isometric-color.png",
+      "bytes": 35383,
+      "sha256": "f6c6901c116db90a9f80dd72113a8fc59743905a74a91c67a9dbc02b19341c99"
+    },
+    {
+      "file": "nativark-core-isometric-black.svg",
+      "bytes": 4609,
+      "sha256": "d9fdf6584714af0cc611511f06c8b6ba55ae050b6cf42d3deb1b1d9ade1c1f5e"
+    },
+    {
+      "file": "nativark-core-isometric-black.png",
+      "bytes": 11668,
+      "sha256": "98ee6d4e902b367ef110cdae567b2a4d6ae60b2a2741f6b01cb3f36b12f14f60"
+    },
+    {
+      "file": "nativark-core-isometric-white.svg",
+      "bytes": 4609,
+      "sha256": "b4c00023ada2ba79d6944308a2c953c01ff61c9715616f188251ebfdf4e287ae"
+    },
+    {
+      "file": "nativark-core-isometric-white.png",
+      "bytes": 12210,
+      "sha256": "6187b29871afe13c98a3383d0671809cade83027e9cb63aa99220344398cd191"
+    },
+    {
+      "file": "nativark-core-isometric-preview.png",
+      "bytes": 91697,
+      "sha256": "d44c50a929e59f00a535c99b08da814160480a299e43c4456a2a409155e0f970"
+    }
+  ]
+}
