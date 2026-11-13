@@ -1,4 +1,4 @@
-import { IsBoolean, IsDateString, IsIn, IsNotEmpty, IsObject, IsString, IsUUID, Matches, MaxLength, ValidateNested } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import type { AiTaskRuleDraftListInput, AiTaskRuleDraftReference, AiTaskRuleDraftReviewInput, AiTaskRuleDraftSaveInput,
   AiTaskRuleDraftPreparationPreviewInput, AiTaskRuleDraftPrepareInput, AiTaskRuleDraftPreparationReference } from '@rental-os/shared';
@@ -10,6 +10,9 @@ export class AiTaskRuleDraftListDto implements AiTaskRuleDraftListInput {
 export class AiTaskRuleDraftReferenceDto extends AiTaskRuleDraftListDto implements AiTaskRuleDraftReference {
   @IsString() @IsNotEmpty() @MaxLength(36) @Matches(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) runId!: string;
   @IsString() @IsNotEmpty() @MaxLength(36) @Matches(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) stepId!: string;
+}
+export class AiTaskRuleDraftPreparationDto extends AiTaskRuleDraftListDto {
+  @IsOptional() @IsObject() @ValidateNested() @Type(() => AiTaskRuleDraftReferenceDto) rejected?: AiTaskRuleDraftReferenceDto;
 }
 export class AiTaskRuleDraftReviewDto extends AiTaskRuleDraftReferenceDto implements AiTaskRuleDraftReviewInput {
   @IsString() @IsNotEmpty() @MaxLength(500) changeReason!: string;
@@ -26,7 +29,7 @@ export class AiTaskRuleDraftPreparationValuesDto {
   @IsBoolean() 'damage.manualReviewRequired'!: boolean;
   @IsBoolean() 'cancellation.weatherExceptionEnabled'!: boolean;
 }
-export class AiTaskRuleDraftPreparationPreviewDto extends AiTaskRuleDraftListDto implements AiTaskRuleDraftPreparationPreviewInput {
+export class AiTaskRuleDraftPreparationPreviewDto extends AiTaskRuleDraftPreparationDto implements AiTaskRuleDraftPreparationPreviewInput {
   @IsString() @IsNotEmpty() @MaxLength(191) @Matches(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) targetId!: string;
   @IsString() @IsNotEmpty() @MaxLength(191) @Matches(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) version!: string;
   @IsObject() @ValidateNested() @Type(() => AiTaskRuleDraftPreparationValuesDto) values!: AiTaskRuleDraftPreparationValuesDto;

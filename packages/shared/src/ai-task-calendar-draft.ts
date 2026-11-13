@@ -1,6 +1,7 @@
 /** Original Task/Run/Step calendar draft consumption. IDs locate server-owned
  * material; neither references nor review responses grant scope or publication. */
 import { z } from 'zod';
+import { aiTaskDraftRejectedOperation } from './ai-task-rule-draft';
 export const AI_TASK_CALENDAR_DRAFT_VERSION = 'ain-task-calendar-draft-1' as const;
 export const AI_TASK_CALENDAR_DRAFT_HTTP = { basePath: 'ai-native/task-calendar-drafts', list: 'list', review: 'review', save: 'save', operation: 'operation' } as const;
 export const AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS = ['rental-os:calendar:view-history', 'rental-os:calendar:edit', 'rental-os:calendar:publish', 'rental-os:price:manage', 'rental-os:rules:manage'] as const;
@@ -28,6 +29,7 @@ export const aiTaskCalendarDraftReviewResponse = envelope.extend({ reference: ai
   persistence: z.literal('not_attempted'), publication: z.literal('not_attempted') }).strict();
 export const aiTaskCalendarDraftOperationResponse = envelope.extend({ reference: aiTaskCalendarDraftReference, operation: z.union([
   z.object({ state: z.literal('not_observed'), retryable: z.literal(false) }).strict(),
+  aiTaskDraftRejectedOperation,
   z.object({ state: z.literal('committed'), receiptId: resource, target, resultRevision: revision, before: snapshot, after: snapshot,
     overrideReason: z.string().min(1).max(1000), committedAt: z.string().datetime({ offset: true }), businessDraft: z.literal('saved_not_published'), publication: z.literal('not_attempted') }).strict()]) }).strict();
 export type AiTaskCalendarDraftReference = z.infer<typeof aiTaskCalendarDraftReference>;
@@ -74,7 +76,10 @@ export const AI_TASK_CALENDAR_DRAFT_SCHEMAS = {
     overrideReason: reason, overrideConfirmed: boolean, overrideRequired: boolean, existingOverrideReason: { oneOf: [reason, { type: 'null' }] }, before: snapshotSchema, after: snapshotSchema,
     persistence: literal('not_attempted'), publication: literal('not_attempted') }),
   AiTaskCalendarDraftOperationResponse: object({ ...base, reference: referenceSchema, operation: { oneOf: [
-    object({ state: literal('not_observed'), retryable: literal(false) }), object({ state: literal('committed'), receiptId: res,
+    object({ state: literal('not_observed'), retryable: literal(false) }),
+    object({ state: literal('rejected_no_commit'), receiptId: res, reason: literal('revision_conflict'), reviewHash: fingerprint,
+      recordedAt: datetime, nextAction: literal('prepare_new_proposal'), retryable: literal(false),
+      businessDraft: literal('not_written'), publication: literal('not_attempted') }), object({ state: literal('committed'), receiptId: res,
       target: targetSchema, resultRevision: rev, before: snapshotSchema, after: snapshotSchema, overrideReason: reason, committedAt: datetime,
       businessDraft: literal('saved_not_published'), publication: literal('not_attempted') })] } })
 } as const;

@@ -4,6 +4,7 @@
  * operation receipt, not the annual apply's latest-version or batch-id shortcut.
  * Neither consumer grants publication, new capability or arbitrary fields. */
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import type { PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest, AiExecutionContext } from '@rental-os/shared';
 import { BoundCalendarDraftService, BoundCalendarDraftUnknownError, boundCalendarDraftCommandSchema } from '../../rental-core/bound-calendar-draft.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
@@ -19,6 +20,7 @@ import type { AiOriginalSceneDependencies } from './original-scenes.composition'
 import { composeOpeningProposalWorkflow } from './opening-proposal-workflow.composition';
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
+import { OriginalDraftRejectionStore, OriginalDraftRejectedError, type OriginalDraftRejectionBinding } from '../original-draft-rejection.store';
 
 const commandSchema = z.object({ original: originalRequestReferenceSchema,
   registrationRef: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
@@ -106,6 +108,7 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
   const originals = composeOpeningProposalWorkflow(input, host), routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, input.clock);
   const fields = new AiOpeningVersionFieldSource(input.db, routes), contexts = new AiGuardedQuoteCoreContextSource(input.core, routes);
   const core = new BoundCalendarDraftService(input.db, input.business, input.clock);
+  const rejections = new OriginalDraftRejectionStore(input.db, input.clock);
   const schema = commandSchema.extend({ overrideReason: z.string().trim().min(1).max(1000), overrideConfirmed: z.boolean() }).strict();
   const operationSchema = schema.extend({ reviewHash: z.string().regex(/^[a-f0-9]{64}$/u).optional() }).strict();
   const resolve = async (value: unknown) => {
@@ -142,7 +145,14 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
     const range: ApplyRentalCalendarRangeOverrideRequest = { startDate: material.date, endDate: material.date, fields: rangeFields,
       expectedRevision: material.baseRevision, overrideReason: command.overrideReason, overrideConfirmed: command.overrideConfirmed,
       batchId: operation.operationKey };
-    return { command, expected, saved, material, section, operation, range };
+    if (expected.actor.kind !== 'user') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const scope = { tenantId: material.scope.tenantId, workspaceId: material.scope.workspaceId, actorId: expected.actor.userId };
+    const digest = requestFingerprint({ kind: 'calendar-bound-draft-1', scope, operationKey: operation.operationKey });
+    const rejection: OriginalDraftRejectionBinding = { kind: 'business_calendar', scope, original: command.original,
+      registrationRef: command.registrationRef, materialHash: material.materialHash, payloadHash: saved.receipt.payloadHash,
+      targetId: material.targetId, targetVersion: material.expectedVersion, operationKey: operation.operationKey,
+      operationId: `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}` };
+    return { command, expected, saved, material, section, operation, range, rejection };
   };
   const verifyOriginal = async (found: Awaited<ReturnType<typeof resolve>>) => {
     const selected = calendarSource ? await calendarSource.read({ original: found.command.original, registrationRef: found.command.registrationRef }) : undefined;
@@ -155,6 +165,52 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
   const contextFor = (found: Awaited<ReturnType<typeof resolve>>, readOnly = false) => contexts.current(found.material.scope, found.expected,
     calendarSource ? { year: found.operation.year, date: found.operation.date,
       ...(readOnly ? { readVersion: found.operation.version } : {}) } : undefined);
+  const readRejected = (found: Awaited<ReturnType<typeof resolve>>) => routes.withRead('calendar_version',
+    { year: found.operation.year, version: found.operation.version }, async context => {
+      assertAiReadContextBinding(context, found.expected);
+      const result = await rejections.read(found.rejection); await verifyOriginal(found); return result;
+    });
+  const assertNotRejected = async (found: Awaited<ReturnType<typeof resolve>>) => {
+    const rejected = await readRejected(found); if (rejected) throw new OriginalDraftRejectedError(rejected);
+  };
+  const currentFields = async (found: Awaited<ReturnType<typeof resolve>>) => {
+    const row = await routes.withRead('calendar_version', { year: found.operation.year, version: found.operation.version }, async context => {
+      assertAiReadContextBinding(context, found.expected);
+      return input.db.rentalBusinessCalendar.findFirst({ where: { id: found.material.targetId,
+        tenantId: found.material.scope.tenantId, workspaceId: found.material.scope.workspaceId,
+        year: found.operation.year, version: found.operation.version }, select: { revision: true } });
+    });
+    if (!row || row.revision !== found.material.baseRevision) throw conflict();
+    const originalFields = await fields.read(found.section, found.expected);
+    if (requestFingerprint(originalFields.basis) !== found.material.sourceFingerprint) throw conflict();
+  };
+  const rejectChanged = (found: Awaited<ReturnType<typeof resolve>>) => routes.withCalendarSourceRead(
+    { year: found.operation.year, date: found.operation.date }, async context => {
+      assertAiReadContextBinding(context, found.expected); await verifyOriginal(found);
+      if (!found.operation.reviewHash) throw conflict();
+      const source = async (db: Pick<Prisma.TransactionClient, 'rentalBusinessCalendar'>) => {
+        const rows = await db.rentalBusinessCalendar.findMany({ where: { tenantId: found.rejection.scope.tenantId,
+          workspaceId: found.rejection.scope.workspaceId, year: found.operation.year }, orderBy: { id: 'asc' }, take: 1001 });
+        if (rows.length > 1000) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return requestFingerprint(JSON.parse(JSON.stringify({ rows, context: await contextFor(found) })));
+      };
+      const before = await source(input.db);
+      let stale = false;
+      try {
+        await currentFields(found);
+        const context = await contextFor(found);
+        if (context.category.code !== found.material.categoryCode || context.category.version !== found.material.categoryVersion) stale = true;
+        else {
+          const current = await core.review(found.material.scope.tenantId, context, found.operation, () => verifyOriginal(found));
+          stale = current.reviewHash !== found.operation.reviewHash;
+        }
+      } catch (error) {
+        if (error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT') stale = true;
+        else throw error;
+      }
+      if (!stale || await source(input.db) !== before) return null;
+      return rejections.record(found.rejection, found.operation.reviewHash, () => verifyOriginal(found), async tx => await source(tx) === before);
+    });
   return Object.freeze({
     async reviewDraft(value: unknown) {
       const parsed = schema.safeParse(structuredClone(value));
@@ -179,6 +235,9 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
       const parsed = operationSchema.extend({ decision: z.literal('save_original_business_draft') }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { decision: _decision, ...body } = parsed.data, found = await resolve(body);
+      const rejected = await readRejected(found);
+      if (rejected) return freezeOriginalInput({ original: found.command.original, operation: rejected, replayed: true,
+        task: 'original_unchanged' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const });
       // Replaying the original committed operation is a read, not a new CAS.
       const observed = await routes.withRead('calendar_version', { year: found.operation.year, version: found.operation.version }, async context => {
         assertAiReadContextBinding(context, found.expected);
@@ -186,18 +245,30 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
       });
       if (observed.state === 'committed') return freezeOriginalInput({ original: found.command.original, operation: observed,
         replayed: true, businessDraft: 'saved_not_published' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const });
-      const first = await fields.read(found.section, found.expected);
-      if (requestFingerprint(first.basis) !== found.material.sourceFingerprint) throw conflict();
-      const result = await routes.withCalendarDraftWrite(found.operation.year, found.range, async context => {
+      let result;
+      try {
+      await currentFields(found);
+      result = await routes.withCalendarDraftWrite(found.operation.year, found.range, async context => {
         assertAiReadContextBinding(context, found.expected);
         const business = await contextFor(found);
         const revalidate = async () => {
           await routes.withCalendarDraftWrite(found.operation.year, found.range, async current => { assertAiReadContextBinding(current, context); });
           if (requestFingerprint(await contextFor(found)) !== requestFingerprint(business)) throw conflict();
           await verifyOriginal(found);
+          await assertNotRejected(found);
         };
         return core.save(found.material.scope.tenantId, business, found.operation, revalidate);
       });
+      } catch (error) {
+        if (error instanceof OriginalDraftRejectedError) return freezeOriginalInput({ original: found.command.original,
+          operation: error.operation, replayed: true, task: 'original_unchanged' as const,
+          approval: 'not_granted' as const, publication: 'not_attempted' as const });
+        if (!(error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT')) throw error;
+        const rejection = await rejectChanged(found);
+        if (!rejection) throw error;
+        return freezeOriginalInput({ original: found.command.original, operation: rejection, replayed: false,
+          task: 'original_unchanged' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const });
+      }
       try { await verifyOriginal(found); } catch { throw new BoundCalendarDraftUnknownError(); }
       return freezeOriginalInput({ original: found.command.original, operation: result.receipt, replayed: result.replayed,
         businessDraft: 'saved_not_published' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const,
@@ -205,6 +276,9 @@ export function composeOpeningCalendarDraftSave(input: AiOriginalSceneDependenci
     },
     async readDraftOperation(value: unknown) {
       const found = await resolve(value);
+      const rejected = await readRejected(found);
+      if (rejected) return freezeOriginalInput({ original: found.command.original, operation: rejected,
+        execution: 'read_only_no_save_or_publish' as const });
       const operation = await routes.withRead('calendar_version', { year: found.operation.year, version: found.operation.version }, async context => {
         assertAiReadContextBinding(context, found.expected);
         const result = await core.read(found.material.scope.tenantId, found.operation, () => verifyOriginal(found));

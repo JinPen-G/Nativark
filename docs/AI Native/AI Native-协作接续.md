@@ -23,7 +23,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 | 负责人 | 当前范围 |
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 持续目标为全专项按原门槛收口；当前先独立核接 AIN-14 全文，再收 AIN-16 原拒绝收据、并发阻断与重新确认，完成一项即同步任务册/记录、中文提交并回读 GitHub。独占四册/索引、公共装配/合同；按固定成果登记 main 集成节点，助手继续施工。AIN-15 三叶和员工样式待核，不能夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 持续目标为 AIN-17/18 事件与经营待办核心链按原全文收口；原历史读取两源已冻结交权，当前接现有 preparePending 的显式最多10项领取、原候选选择与原事件复核。独占 aiAutomationReviews.ts、automation-review-session.ts、AutomationReviewWorkbench.tsx，不改 Core/公共合同；未知批次恢复缺口先留具体接点，不自动重发或新增业务动作。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 持续目标为 AIN-17/18 事件与经营待办核心链按原全文收口；原历史读取两源已固定上传，当前接显式最多10项领取、原候选选择与原批次恢复。独占 aiAutomationReviews.ts、automation-review-session.ts、AutomationReviewWorkbench.tsx，以及已追加的 pending batch 仓储、candidate service、request factory/controller 和 shared 的 pending 合同区；不改 Core、公共总出口、Guard或四册，不自动重发或新增业务动作。 |
 | AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 持续目标为 AIN-16 普通资料与获准配置消费者按原全文收口；当前规则/日历拒绝收据→刷新现值和差异→新 linked 提案→再次明确保存→原收据与原页面收尾。独占原八份规则/日历 API/session/组件及 CalendarSourceEntry 的新定位/收尾挂接；RuleSourceEntry 仅确有阻断时最小接入，不改公共接点/四册。 |
 | 内部开业助手／`/root/opening_core_closeout` | 接已退出作者的 AIN-14 品类/能力 WIP，核正式能力读权、完整材料/指纹/确定性正文/后台，做必要模拟与类型后固定交权。独占既有开业材料/工具/后台投影及 provider 的开业注入区，保持 Core 九项判定权威；不扩规则/日历、事件或主树范围。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
@@ -34,6 +34,8 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 负责人 2026-11-13 已要求更新三人的目标，以上为现行执行范围。AI-RD 和 dev1 的 Goal 实核 active；dev2 的旧 Goal 仍显示 blocked，但已按新授权恢复实际工具执行。当前接口不能改写未完 Goal 或恢复 blocked，未将旧目标虚标完成；已向负责人说明需在 dev2 原目标卡继续，当前源码施工仍按新分工推进。原任务全文、生产装配、必要模拟和类型齐备才计100%，两个补丁不当两项任务。只做核心功能，不新增/扩写测试脚本；实际环境由负责人自测。助手结果由 AI-RD 主动读取，完整交付与具体阻塞留原对话，不发一般进度、回执或跨对话通知。
 
+负责人已更新持续目标：每次开始任务先主动核两助手的实际回合，未开始或断流后需恢复原任务并确认新工具执行，不能仅发送消息就称已启动。2026-11-13 原两助手分别遇EOF与HTML应答再次失败，已单点发送继续；新回合 `01a1d505-a90a-70e0-8480-8757f2d0d475`、`01a1d505-f566-7fe1-9099-2c525dc96d11` 均已出现实际工具进展。内部开业助手同次断流后也已恢复原范围，不改模型或供应商设置。
+
 ## 当前收口入口
 
 1. **AIN-12/13 已完成本轮研发验收。** [全文核定](<AI Native-开发记录.md#ain12-13-simulated-whole-closeout-20261113>)按原门槛对应会话/上下文、可信动态展示、字段/审批、取消/恢复/控制及设置；[最终阶段](<AI Native-开发记录.md#ain12-order-chat-current-result-20261113>)固定 `ade6dd10b`，模型原账与业务效果分别判断，最后报价三问题均已修复复验。后续任务复用这些固定接点，main 集成由 PM 处理；实际环境测试与 AIN-25 旧性能证据另列，不重开已闭的实现缺口。
@@ -43,6 +45,8 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 5. **员工与客户。** [员工原结果定位](<AI Native-开发记录.md#ain-staff-original-result-reference-20261111>)和显式首次准入已核接。AIN-19 默认 StaffFactory→原 Core 单分配项→图片/音频 Task/单账→保存/当前复核及明确采用，已按[固定闭包](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)通过必要模拟和类型；原 Core 日期围栏补片 `5b51b90dd01feae189d06d8c66d59875c8172401` 已包含。旧输入不补签，新明确缺依据及已移除证据不可直接采用；后端原门槛由 PM 安排 QA 核定。AIN-20 的 22 个员工消费者已按[媒体与复核阶段](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)交回 Root，dev2 转后台模型控制；[原上传观察后端](<AI Native-开发记录.md#ain-staff-upload-observation-20261112>)已推 `b704dddf9`，[原生成器/本地合同](<AI Native-开发记录.md#ain-staff-upload-native-contract-20261112>)已核，继续实际页面恢复，不得 runtime require shared、新键重发或借 knowledge 权限。客户[报价两端](<AI Native-开发记录.md#ain-client-quote-consumers-20261111>)和[原订单任务](<AI Native-开发记录.md#ain-client-task-consumer-closeout-20261111>)已固定；其余 audience、跨 surface、匿名/企业及媒体弱网按原 ENTRY 范围核定。
 
 日历 24 源及规则 19 源/3 公共注册已分别在[日历核接](<AI Native-开发记录.md#ain-calendar-source-consumer-closeout-20261111>)、[规则核接](<AI Native-开发记录.md#ain-rule-source-intake-20261111>)保留完整证据。会员姓名和通知首次 start/原历史也已接原权限及收据；[通知冲突刷新与作用空间](<AI Native-开发记录.md#ain16-notification-conflict-refresh-20261113>)三源已由 Root 核接必要模拟/类型，原五条全文与 AIN-14 前置继续核定。
+
+[规则/日历拒绝与重新确认后端](<AI Native-开发记录.md#ain16-original-draft-rejection-refresh-20261113>)13源已在固定前置独立通过原页面完整旅程、正常保存与冲突的串行竞态及类型；原拒绝丢应答只读原键，合法拒绝证明才能刷新旧entry sourceHash/revision。新linked提案和Core保存保持独立确认、不发布。dev2继续九源消费者最后收尾；按原AIN-16五条及AIN-14前置再核整项，不用本后端切片提高百分比。
 
 [经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)两源已由 dev1 完成固定组合、Root 核 blob 和现稿类型；原 operation/同键恢复与当前触发政策分离，不续权、不派发，新操作仍保留当前来源和授权。dev1 已接新事件有界领取和原批次恢复：现有 limit-only 批次丢应答没有 eventId 清单，必须补原 OperationLog 固定批次/只读查询；已追加其 feature-local 后端和 pending 合同写权，Guard/总出口/四册仍归 Root。AIN-17/18 全文尚有原生产来源/窗口等缺口，不因该修复片提高任务百分比。
 

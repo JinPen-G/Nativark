@@ -11,6 +11,7 @@ import { aiQuotePreviewInputSchema } from './quote-preview.service';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { BoundCalendarDraftUnknownError } from '../rental-core/bound-calendar-draft.service';
 import { BoundRuleDraftUnknownError } from '../rental-core/bound-rule-draft.service';
+import { OriginalDraftRejectedError, OriginalDraftRejectionUnknownError } from './original-draft-rejection.store';
 import type { RentalQuoteRequest, RentalOrderExtensionRequest, PreviewRentalCalendarRangeOverrideRequest, ApplyRentalCalendarRangeOverrideRequest, SystemUserRow } from '@rental-os/shared';
 import { z } from 'zod';
 
@@ -119,7 +120,8 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     try {
       return await this.withRoute('calendar_range_apply', { ...structuredClone(input), year }, context => { entered = true; return consume(context); });
     } catch (error) {
-      if (entered && !(error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT'))
+      if (entered && !(error instanceof OriginalDraftRejectedError)
+        && !(error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT'))
         throw new BoundCalendarDraftUnknownError();
       throw error;
     }
@@ -143,7 +145,8 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     let entered = false;
     try { return await this.withRoute('rule_draft_save', { versionId: parsed.data }, context => { entered = true; return consume(context); }); }
     catch (error) {
-      if (!entered || error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT'
+      if (!entered || error instanceof OriginalDraftRejectedError
+        || error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT'
         || error instanceof HttpException && error.getStatus() === 400) throw error;
       throw new BoundRuleDraftUnknownError();
     }
@@ -252,6 +255,11 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
         // Guard/session failure, may become a safe unavailable response.
         await authorize(async current => { if (binding(current) !== before) throw new ModelGatewayError('FORBIDDEN'); });
         if (failed) {
+          // A durable rejection can lose its reply after COMMIT. Preserve that
+          // known uncertainty only after the closing Guard; optional-source
+          // degradation must not turn it into a missing dependency or a retry.
+          if (['rule_version', 'calendar_version', 'rule_draft_preview', 'calendar_range_preview'].includes(kind)
+            && failure instanceof OriginalDraftRejectionUnknownError) throw failure;
           // This new validation leaf preserves a definite Core rejection only
           // AFTER the existing closing Guard, never as optional-source success.
           if (kind === 'rule_draft_preview' && failure instanceof HttpException && failure.getStatus() === 400) throw failure;
@@ -269,6 +277,9 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
         return result;
       });
     } catch (error) {
+      if (['rule_version', 'calendar_version', 'rule_draft_preview', 'calendar_range_preview'].includes(kind)
+        && error instanceof OriginalDraftRejectionUnknownError) throw error;
+      if (error instanceof OriginalDraftRejectedError && (kind === 'rule_draft_save' || kind === 'calendar_range_apply')) throw error;
       if (kind === 'rule_draft_save' && error instanceof BoundRuleDraftUnknownError) throw error;
       if (kind === 'rule_draft_save' && error instanceof HttpException && error.getStatus() === 400) throw error;
       if (kind === 'rule_draft_save' && error instanceof HttpException && error.getStatus() === 409)

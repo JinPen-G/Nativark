@@ -6,6 +6,27 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11及本次12、13已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain16-original-draft-rejection-refresh-20261113"></a>
+## AIN-16 原规则/日历拒绝收据与重新确认后端（2026-11-13）
+
+原规则/日历提案在复核后被他人修改时，save 明确冲突，但客户端持有原保存定位，operation 只返回 not_observed，无法安全开始新提案；原页面入口又绑定旧 sourceHash。本阶段复用原 Core 草稿保存及其业务操作键，在[原拒绝收据仓储](../../apps/api/src/modules/ai-native/original-draft-rejection.store.ts)封存 `rejected_no_commit`，只在原 tenant 共享锁→workspace 行锁内、原成功收据不存在且当前完整有界来源仍符合已观察冲突时记录。缺行、未知异常或普通409不证明未写；原成功与拒绝同时存在保持 unknown。
+
+[规则](../../apps/api/src/modules/ai-native/scenes/opening-rule-draft.composition.ts)及[日历](../../apps/api/src/modules/ai-native/scenes/opening-calendar-draft.composition.ts)的新写前复核读取同操作拒绝，避免并发等待后再提交原已拒绝操作。拒绝写入丢应答保留 `AI_RESULT_UNKNOWN`，原读取适配不能把它降为存储缺失。operation 与同键 save 先读原终态，拒绝不可改内容重试；新保存仍需原 Guard、当前权限及人类复核，不授发布。
+
+[规则准备](../../apps/api/src/modules/ai-native/task-rule-draft-preparation.composition.ts)及[日历准备](../../apps/api/src/modules/ai-native/task-calendar-draft-preparation.composition.ts)接可选原拒绝 Task/Run/Step，服务端独立核当前本人、同空间、原提案、目标版本及本 Task 或直接 linked 子 Task。仅合法原拒绝允许读取当前 sourceHash/revision，新请求、R1 提案和再次保存分别确认，不能从 not_observed/TTL/缓存自授刷新或重发。shared 运行时/闭合 schema、DTO 和原动态 OpenAPI 同步，原无 rejected 输入保持旧限制。
+
+Root 先在当前WIP验证，再将无关并行源码只在内存固定到 `4b1950a33a6ce1ca56aedb3c33a78614e8970937`，冻结本片13源重核可独立提交组合；未覆盖物理WIP或新建验证树。命令均为 `node --no-compilation-cache -`、原 offline preload 和既有 `ai-native-plan-input-source.test.cjs` fixture，无新增测试脚本：
+
+| 必要模拟/类型 | 已核结果 | stdin SHA-256／退出 |
+| --- | --- | --- |
+| 原规则/日历页面 source→entry→首 linked 提案→save 冲突并丢拒绝应答→原 operation→当前差异→新 linked 提案→再次明确 Core 保存 | 两条链分别只写一份未发布草稿；规则保留他人字段修改，日历原修订4→5；新/旧 Task 与原请求 lineage 分离，原拒绝仍可读，同键不增写，模型/发布0 | `7dc66c603f95a98f57ecb778708d6b0409f509a817f671e89c21f46f199aea64`／0 |
+| 原 workspace 串行存储：正常保存持有提交点，旧 review 的并发 save 在其后核对 | 两条链原保存成功、后继冲突拒绝，业务草稿仅1写；已有成功不封未提交拒绝，重复原读0写 | `4d6ec24b0a091a2cdc3cc4aa0f1230f22737e3fd3228e1b31f643a2ba1eb6311`／0 |
+| 当前13源及固定前置定向类型 | TypeScript5.9.3，5根/1581源，0诊断 | `d54c1ebd7e3cc5bfa4a44421f5f2b0e1ed93f9d88279eb5dd405a26b1a6ad97b`／0 |
+
+保留失败与补正：原拒绝应答丢失确被适配吞为 `AI_STORAGE_UNAVAILABLE`，Root修复后原 unknown/receipt 恢复通过。旧规则fixture缺日历审计空表、日历fixture缺OperationLog，且替换configStore丢原readiness端口；仅在内存补明确原表并保留既有readReadinessBusinessFacts。驱动误用prepare短方法名作HTTP路径、错误decision和数据库 previousInputRef 字段，均被原契约拒绝或断言发现；按正式路由、decision及 previousRequestId 修正，未放宽生产权限或删除原断言。无拒绝证明的旧日历entry返回空候选而非抛错，本组核“无新目标披露”及仍不可准备，与规则拒绝旧 sourceHash 的语义分别判断。
+
+本片13源固定对象和命令保留于本会话，`git diff --check` 通过；全部Root验证进程退出、审计0、任务临时目录未创建。模拟ORM的串行事务不冒充MySQL锁故障验收，真实数据库/宿主由负责人自测。前端九源仍由dev2完成原页面收尾与固定交权；AIN-16原五条与AIN-14前置未在此片判定，不上调任务百分比。
+
 <a id="ain17-original-human-operation-recovery-20261113"></a>
 ## AIN-17/18 原人工操作读取与触发政策分离（2026-11-13）
 

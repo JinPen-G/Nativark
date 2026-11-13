@@ -30,12 +30,13 @@ import { AiTaskRuleDraftListDto, AiTaskRuleDraftReferenceDto, AiTaskRuleDraftRev
 import { AiBusinessReadRouteAuthority } from './business-read-route.authority';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { composeTaskRuleDraftPreparation } from './task-rule-draft-preparation.composition';
-import { AiTaskRuleDraftPreparationPreviewDto, AiTaskRuleDraftPrepareDto, AiTaskRuleDraftPreparationReferenceDto } from './task-rule-draft.dto';
+import { AiTaskRuleDraftPreparationDto, AiTaskRuleDraftPreparationPreviewDto, AiTaskRuleDraftPrepareDto, AiTaskRuleDraftPreparationReferenceDto } from './task-rule-draft.dto';
 import { AI_TASK_RULE_SOURCE_ENTRY_HTTP, AI_TASK_DRAFT_VERSION, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from '@rental-os/shared';
 import { createRuleOriginalReadRequests } from './task-rule-original-source.composition';
 import { composeOpeningRuleDraftSave } from './scenes/opening-rule-draft.composition';
 import { composeTaskRuleSourceEntry } from './task-rule-source-entry.composition';
 import { AiTaskRuleSourceDto, AiTaskRuleSourceEntryDto, AiTaskRuleSourceEntryReferenceDto } from './task-rule-draft.dto';
+import { OriginalDraftRejectionStore, type OriginalDraftRejectionBinding } from './original-draft-rejection.store';
 
 export const AI_TASK_RULE_DRAFT_REQUESTS = Symbol('AI_TASK_RULE_DRAFT_REQUESTS');
 export type TaskRuleDraftDependencies = { original: Parameters<typeof composeRequestBoundOpeningRuleDraftSave>[0];
@@ -53,6 +54,7 @@ const parse = <S extends z.ZodTypeAny>(schema: S, value: unknown): z.infer<S> =>
 
 export function composeRequestBoundTaskRuleDraft(d: TaskRuleDraftDependencies) {
   const { db } = d.original, clock = d.original.clock ?? (() => new Date());
+  const rejections = new OriginalDraftRejectionStore(db, clock);
   const rules = composeRequestBoundOpeningRuleDraftSave(d.original, { enabled: true, audience: 'operator', host: d.host });
   const source = async (request: Request, taskId: string, signal?: AbortSignal) => {
     const header = z.string().regex(/^Bearer \S+$/u).max(8192).safeParse(request.headers.authorization);
@@ -122,12 +124,16 @@ export function composeRequestBoundTaskRuleDraft(d: TaskRuleDraftDependencies) {
     const actor = { tenantId: material.scope.tenantId, workspaceId: material.scope.workspaceId, actorId: bound.task.ownerId };
     const digest = requestFingerprint({ kind: 'rule-bound-draft-1', scope: actor, operationKey: `rule-draft-${bindingHash}` });
     const operationId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
-    return { command, material, operationId, actor, snapshot: requestFingerprint(canonical({ input, version })),
+    const rejection: OriginalDraftRejectionBinding = { kind: 'business_rule', scope: actor, ...command,
+      materialHash: material.materialHash, payloadHash: version.payloadHash, targetId: material.targetId,
+      targetVersion: material.expectedVersion, operationKey: `rule-draft-${bindingHash}`, operationId };
+    return { command, material, operationId, actor, rejection, snapshot: requestFingerprint(canonical({ input, version })),
       receipt: { state: 'ai_proposal_saved' as const, material: input.payload, proposal: version.payload, payloadHash: version.payloadHash,
         businessDraft: 'not_created' as const, activeConfiguration: 'not_attested_by_read' as const, publication: 'not_attempted' as const, retryable: false as const } };
   };
   const projectOperation = (value: Awaited<ReturnType<typeof rules.readDraftOperation>>['operation']) => value.state === 'not_observed'
-    ? { state: 'not_observed' as const, retryable: false as const } : { state: 'committed' as const, receiptId: value.receiptId,
+    ? { state: 'not_observed' as const, retryable: false as const } : value.state === 'rejected_no_commit' ? value
+    : { state: 'committed' as const, receiptId: value.receiptId,
       source: { id: value.source.id, version: value.source.version }, draft: { id: value.draft.id, version: value.draft.version, mode: value.draft.mode },
       changes: value.changes, normalizations: value.normalizations, committedAt: value.committedAt, publication: value.publication };
   const call = async (request: Request, value: unknown, action: 'list' | 'review' | 'save' | 'operation', signal?: AbortSignal) => {
@@ -157,6 +163,12 @@ export function composeRequestBoundTaskRuleDraft(d: TaskRuleDraftDependencies) {
       }
       const reference = parse(aiTaskRuleDraftReference, { taskId: command.taskId, runId: 'runId' in command ? command.runId : undefined,
         stepId: 'stepId' in command ? command.stepId : undefined }), found = await locate(bound, reference);
+      const rejected = await bound.ruleRoutes.withRead('rule_version', { version: found.material.expectedVersion }, async context => {
+        assertAiReadContextBinding(context, bound.context); const receipt = await rejections.read(found.rejection);
+        await bound.verify(); return receipt;
+      });
+      if (rejected && action !== 'review') return aiTaskRuleDraftOperationResponse.parse({ ...envelope, reference, operation: rejected });
+      if (rejected) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       const rules = composeOpeningRuleDraftSave({ ...d.original, credentials: bound.credentials }, d.host, {
         read: async value => {
           if (value.original.inputRef !== bound.original.inputRef || value.registrationRef !== found.command.registrationRef)
@@ -206,7 +218,28 @@ export function composeRequestBoundTaskRuleDraft(d: TaskRuleDraftDependencies) {
       await bound.verify(); return aiTaskRuleDraftOperationResponse.parse({ ...envelope, reference, operation: projectOperation(result.operation) });
     }, action === 'save', signal);
   };
-  const preparation = composeTaskRuleDraftPreparation({ ...d, resolve: source,
+  const rejectedForPreparation = async (request: Request, taskId: string, reference: AiTaskRuleDraftReference, signal?: AbortSignal) => {
+    const parent = await source(request, taskId, signal), bound = await source(request, reference.taskId, signal);
+    if (originalIdentityHash(parent.context) !== originalIdentityHash(bound.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const found = await locate(bound, reference);
+    const requests = createRuleOriginalReadRequests({ ...d.original, credentials: bound.credentials },
+      { id: found.material.targetId, version: found.material.expectedVersion });
+    const original = await requests.readHistorical(bound.original);
+    if (original.receipt.state === 'revoked' || reference.taskId !== taskId && original.receipt.previousInputRef !== parent.original.inputRef)
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const read = async () => bound.ruleRoutes.withRuleDraftPreview(found.material.targetId, async context => {
+      assertAiReadContextBinding(context, bound.context); await parent.verify(); await bound.verify();
+      const receipt = await rejections.read(found.rejection);
+      if (!receipt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); return receipt;
+    });
+    const receipt = await read();
+    return { targetId: found.material.targetId, version: found.material.expectedVersion, receipt,
+      verify: async () => {
+        if ((await locate(bound, reference)).snapshot !== found.snapshot || requestFingerprint(await read()) !== requestFingerprint(receipt))
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      } };
+  };
+  const preparation = composeTaskRuleDraftPreparation({ ...d, resolve: source, rejected: rejectedForPreparation,
     saved: async (request, taskId, signal) => aiTaskRuleDraftListResponse.parse(await call(request, { taskId }, 'list', signal)) });
   const entry = composeTaskRuleSourceEntry(d);
   return Object.freeze({ ...preparation, ...entry, list: (request: Request, value: unknown, signal?: AbortSignal) => call(request, value, 'list', signal),
@@ -236,7 +269,7 @@ export class AiTaskRuleDraftController {
     return respondAiScene(() => withRequestAbort(request, async signal => this.requests[action](request, original, signal)), 'read_original_rule_preparation');
   }
   @Post(AI_TASK_RULE_DRAFT_HTTP.preparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  preparation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftListDto) { return this.prepareResponse(request, body, 'preparation'); }
+  preparation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftPreparationDto) { return this.prepareResponse(request, body, 'preparation'); }
   @Post(AI_TASK_RULE_DRAFT_HTTP.previewPreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   previewPreparation(@Req() request: IncomingMessage, @Body() body: AiTaskRuleDraftPreparationPreviewDto) { return this.prepareResponse(request, body, 'previewPreparation'); }
   @Post(AI_TASK_RULE_DRAFT_HTTP.prepare) @HttpCode(200) @Header('Cache-Control', 'no-store')

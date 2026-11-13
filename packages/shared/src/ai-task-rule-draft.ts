@@ -32,8 +32,15 @@ export const aiTaskRuleDraftReviewResponse = envelope.extend({ reference: aiTask
 const committed = z.object({ state: z.literal('committed'), receiptId: resource, source: target,
   draft: target.extend({ mode: z.enum(['restored_new_draft', 'updated_original_draft']) }).strict(), changes, normalizations,
   committedAt: z.string().datetime({ offset: true }), publication: z.literal('not_performed_by_operation') }).strict();
+/** Durable terminal rejection of this original save. Absence or a transport
+ * error cannot produce it, and the rejected operation cannot be sent again. */
+export const aiTaskDraftRejectedOperation = z.object({ state: z.literal('rejected_no_commit'), receiptId: resource,
+  reason: z.literal('revision_conflict'), reviewHash: hash, recordedAt: z.string().datetime({ offset: true }),
+  nextAction: z.literal('prepare_new_proposal'), retryable: z.literal(false), businessDraft: z.literal('not_written'),
+  publication: z.literal('not_attempted') }).strict();
+export type AiTaskDraftRejectedOperation = z.infer<typeof aiTaskDraftRejectedOperation>;
 export const aiTaskRuleDraftOperationResponse = envelope.extend({ reference: aiTaskRuleDraftReference,
-  operation: z.union([committed, z.object({ state: z.literal('not_observed'), retryable: z.literal(false) }).strict()]) }).strict();
+  operation: z.union([committed, z.object({ state: z.literal('not_observed'), retryable: z.literal(false) }).strict(), aiTaskDraftRejectedOperation]) }).strict();
 export type AiTaskRuleDraftReference = z.infer<typeof aiTaskRuleDraftReference>;
 export type AiTaskRuleDraftListInput = z.infer<typeof aiTaskRuleDraftListInput>;
 export type AiTaskRuleDraftReviewInput = z.infer<typeof aiTaskRuleDraftReviewInput>;
@@ -58,11 +65,14 @@ const preparationTarget = target.extend({ status: z.enum(['draft', 'pending', 'p
   values: preparationValues, sourceHash: hash }).strict();
 const preparationBase = z.object({ contractVersion: z.literal(AI_TASK_RULE_DRAFT_PREPARATION_VERSION), taskId: id, runId: id,
   scope: preparationScope, original: preparationOriginal, observedAt: z.string().datetime({ offset: true }) }).strict();
-export const aiTaskRuleDraftPreparationInput = aiTaskRuleDraftListInput;
+export const aiTaskRuleDraftPreparationInput = aiTaskRuleDraftListInput.extend({
+  /** Exact rejected original save, verified by the server before refreshing. */
+  rejected: aiTaskRuleDraftReference.optional()
+}).strict();
 export const aiTaskRuleDraftPreparationResponse = preparationBase.extend({ targets: z.array(preparationTarget).max(20), hasMore: z.boolean(),
   coverage: z.literal('latest_20_candidates'),
   preparation: z.literal('new_linked_opening_request'), businessDraft: z.literal('not_created'), publication: z.literal('not_attempted') }).strict();
-export const aiTaskRuleDraftPreparationPreviewInput = aiTaskRuleDraftListInput.extend({ targetId: resource, version: resource, values: preparationValues }).strict();
+export const aiTaskRuleDraftPreparationPreviewInput = aiTaskRuleDraftPreparationInput.extend({ targetId: resource, version: resource, values: preparationValues }).strict();
 export const aiTaskRuleDraftPreparationPreviewResponse = preparationBase.extend({ target, values: preparationValues,
   changes: changes.min(0), reviewHash: hash, expiresAt: z.string().datetime({ offset: true }),
   status: z.enum(['difference_ready', 'no_change']), preparation: z.literal('new_linked_opening_request'),
@@ -106,8 +116,8 @@ type RuleDraftJsonSchema = { type?: string; $ref?: string; format?: string; enum
   minLength?: number; maxLength?: number; pattern?: string; minimum?: number; maximum?: number;
   properties?: Record<string, RuleDraftJsonSchema>; required?: string[]; additionalProperties?: boolean;
   items?: RuleDraftJsonSchema; minItems?: number; maxItems?: number; oneOf?: RuleDraftJsonSchema[] };
-const object = (properties: Record<string, RuleDraftJsonSchema>): RuleDraftJsonSchema =>
-  ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+const object = (properties: Record<string, RuleDraftJsonSchema>, optional: readonly string[] = []): RuleDraftJsonSchema =>
+  ({ type: 'object', properties, required: Object.keys(properties).filter(key => !optional.includes(key)), additionalProperties: false });
 const array = (items: RuleDraftJsonSchema, maxItems: number, minItems = 0): RuleDraftJsonSchema => ({ type: 'array', items, minItems, maxItems });
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const reference = { taskId: atom, runId: atom, stepId: atom };
@@ -128,7 +138,8 @@ const preparationTaskSchema = object({ state: literal('observed'), taskId: atom,
 const preparationRequestSchema = object({ draftVersion: literal(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: { type: 'string', format: 'uuid' } });
 const preparationBaseSchema = { contractVersion: literal(AI_TASK_RULE_DRAFT_PREPARATION_VERSION), taskId: atom, runId: atom,
   scope: preparationScopeSchema, original: preparationOriginalSchema, observedAt: time };
-const preparationPreviewInputSchema = { taskId: atom, targetId: resourceSchema, version: resourceSchema, values: preparationValuesSchema };
+const preparationPreviewInputSchema = { taskId: atom, targetId: resourceSchema, version: resourceSchema, values: preparationValuesSchema,
+  rejected: ref('AiTaskRuleDraftReference') };
 export const AI_TASK_RULE_DRAFT_SCHEMAS = {
   AiTaskRuleDraftReference: object(reference), AiTaskRuleDraftListInput: object({ taskId: atom }),
   AiTaskRuleDraftReviewInput: object({ ...reference, changeReason: reason }),
@@ -142,18 +153,21 @@ export const AI_TASK_RULE_DRAFT_SCHEMAS = {
     object({ state: literal('committed'), receiptId: resourceSchema, source: targetSchema,
       draft: object({ id: resourceSchema, version: resourceSchema, mode: { type: 'string', enum: ['restored_new_draft', 'updated_original_draft'] } }),
       changes: array(changeSchema, 6, 1), normalizations: array(normalizedSchema, 2), committedAt: time, publication: literal('not_performed_by_operation') }),
-    object({ state: literal('not_observed'), retryable: literal(false) })] } }),
-  AiTaskRuleDraftPreparationInput: object({ taskId: atom }),
+    object({ state: literal('not_observed'), retryable: literal(false) }),
+    object({ state: literal('rejected_no_commit'), receiptId: resourceSchema, reason: literal('revision_conflict'),
+      reviewHash: fingerprint, recordedAt: time, nextAction: literal('prepare_new_proposal'), retryable: literal(false),
+      businessDraft: literal('not_written'), publication: literal('not_attempted') })] } }),
+  AiTaskRuleDraftPreparationInput: object({ taskId: atom, rejected: ref('AiTaskRuleDraftReference') }, ['rejected']),
   AiTaskRuleDraftPreparationResponse: object({ ...preparationBaseSchema,
     targets: array(object({ ...targetSchema.properties!, status: { type: 'string', enum: ['draft', 'pending', 'published', 'superseded', 'void'] },
       values: preparationValuesSchema, sourceHash: fingerprint }), 20), hasMore: { type: 'boolean' }, coverage: literal('latest_20_candidates'), preparation: literal('new_linked_opening_request'),
     businessDraft: literal('not_created'), publication: literal('not_attempted') }),
-  AiTaskRuleDraftPreparationPreviewInput: object(preparationPreviewInputSchema),
+  AiTaskRuleDraftPreparationPreviewInput: object(preparationPreviewInputSchema, ['rejected']),
   AiTaskRuleDraftPreparationPreviewResponse: object({ ...preparationBaseSchema, target: targetSchema, values: preparationValuesSchema,
     changes: array(changeSchema, 6), reviewHash: fingerprint, expiresAt: time, status: { type: 'string', enum: ['difference_ready', 'no_change'] },
     preparation: literal('new_linked_opening_request'), persistence: literal('not_attempted'), businessDraft: literal('not_created'), publication: literal('not_attempted') }),
   AiTaskRuleDraftPrepareInput: object({ ...preparationPreviewInputSchema, operationKey: { type: 'string', format: 'uuid' }, reviewHash: fingerprint,
-    expiresAt: time, decision: literal('prepare_new_rule_ai_proposal') }),
+    expiresAt: time, decision: literal('prepare_new_rule_ai_proposal') }, ['rejected']),
   AiTaskRuleDraftPreparationReference: preparationReferenceSchema,
   AiTaskRuleDraftPreparationOperationResponse: object({ contractVersion: literal(AI_TASK_RULE_DRAFT_PREPARATION_VERSION), reference: preparationReferenceSchema,
     scope: preparationScopeSchema, observedAt: time, operation: { oneOf: [object({ state: literal('not_observed'), retryable: literal(false) }),

@@ -3,7 +3,7 @@
  * save/publication. An uncertain operation is observed by its original key. */
 import { z } from 'zod';
 import { AI_SCENE_REQUEST_DRAFT_VERSION } from './ai-scene-request-draft';
-import { aiTaskCalendarDraftListResponse, AI_TASK_CALENDAR_DRAFT_SCHEMAS } from './ai-task-calendar-draft';
+import { aiTaskCalendarDraftListResponse, aiTaskCalendarDraftReference, AI_TASK_CALENDAR_DRAFT_SCHEMAS } from './ai-task-calendar-draft';
 
 export const AI_TASK_CALENDAR_DRAFT_PREPARATION_VERSION = 'ain-task-calendar-preparation-1' as const;
 export const AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP = {
@@ -32,7 +32,9 @@ const changes = z.array(z.union([
   z.object({ field: z.literal('name'), before: z.string().min(1).max(120), after: z.string().min(1).max(120) }).strict(),
   z.object({ field: z.literal('businessStatus'), before: status, after: status }).strict()
 ])).max(2);
-export const aiTaskCalendarDraftPreparationInput = z.object({ taskId: id, date }).strict();
+export const aiTaskCalendarDraftPreparationInput = z.object({ taskId: id, date,
+  /** Exact rejected original save, verified by the server before refreshing. */
+  rejected: aiTaskCalendarDraftReference.optional() }).strict();
 export const aiTaskCalendarDraftPreparationPreviewInput = aiTaskCalendarDraftPreparationInput.extend({
   targetId: resource, version: resource, revision, values: aiTaskCalendarDraftPreparationValues
 }).strict();
@@ -111,7 +113,9 @@ const targetSchema = object({ id: res, year: { type: 'integer', minimum: 1900, m
 const base = { contractVersion: literal(AI_TASK_CALENDAR_DRAFT_PREPARATION_VERSION), taskId: identifier, runId: identifier,
   scope: scopeSchema, original: object({ draftVersion: literal(AI_SCENE_REQUEST_DRAFT_VERSION), inputRef: { type: 'string', format: 'uuid' },
     contentHash: fingerprint, sceneVersion: { ...res, maxLength: 64 } }), observedAt: time };
-const previewFields = { taskId: identifier, date: dateSchema, targetId: res, version: res, revision: revisionSchema, values: valuesSchema };
+const rejectedReference = object({ taskId: identifier, runId: identifier, stepId: identifier });
+const previewFields = { taskId: identifier, date: dateSchema, targetId: res, version: res, revision: revisionSchema, values: valuesSchema,
+  rejected: rejectedReference };
 const referenceSchema = object({ taskId: identifier, operationKey: { type: 'string', format: 'uuid' } });
 const createdSchema = object({ state: literal('observed'), taskId: identifier, runId: identifier });
 const savedProposal = AI_TASK_CALENDAR_DRAFT_SCHEMAS.AiTaskCalendarDraftListResponse.properties?.items.items;
@@ -132,10 +136,10 @@ export const AI_TASK_CALENDAR_DRAFT_PREPARATION_SCHEMAS = {
       object({ state: literal('not_observed'), retryable: literal(false) }), object({ state: literal('original_request_recorded'),
         original: originalSchema, target: targetSchema, task: { oneOf: [createdSchema, object({ state: literal('not_observed') })] } })
     ] } }),
-  AiTaskCalendarDraftPreparationInput: object({ taskId: identifier, date: dateSchema }),
-  AiTaskCalendarDraftPreparationPreviewInput: object(previewFields),
+  AiTaskCalendarDraftPreparationInput: object({ taskId: identifier, date: dateSchema, rejected: rejectedReference }, ['rejected']),
+  AiTaskCalendarDraftPreparationPreviewInput: object(previewFields, ['rejected']),
   AiTaskCalendarDraftPrepareInput: object({ ...previewFields, operationKey: { type: 'string', format: 'uuid' }, reviewHash: fingerprint,
-    expiresAt: time, decision: literal('prepare_new_calendar_ai_proposal') }),
+    expiresAt: time, decision: literal('prepare_new_calendar_ai_proposal') }, ['rejected']),
   AiTaskCalendarDraftPreparationReference: referenceSchema,
   AiTaskCalendarDraftPreparationResponse: object({ ...base, date: dateSchema,
     targets: { type: 'array', maxItems: 20, items: object({ id: res, year: { type: 'integer', minimum: 1900, maximum: 2200 }, version: res,
