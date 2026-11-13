@@ -9,5 +9,6 @@
     disabled="{{!canSubmit || pending}}" submit-label="提交补充并继续识别" />
   <button wx:if="{{canContinue}}" disabled="{{pending}}" bindtap="onContinue">继续已保存的原补充</button>
   <button wx:if="{{resultAvailable}}" bindtap="onReviewResult">审阅原识别候选</button>
+  <button disabled="{{pending || !canUseHumanValues}}" bindtap="onUseHumanValues">核对已保存人工值并填入原表单</button>
   <text class="inspection-task__note">识别只提供候选；检查、判责及收费沿原人工流程。</text>
 </view>

@@ -1,6 +1,7 @@
 /** Original staff recognition Task controls beside the existing inspection
  * draft. Host callbacks remain private; result references only open the
- * existing candidate review and never submit a Core inspection. */
+ * existing candidate review. Saved employee values may be explicitly handed
+ * to the original form; this component never submits a Core inspection. */
 import { createStaffInspectionTaskApi } from '../../../api/ai-inspection-tasks';
 import { serverNow } from '../../../core/clock';
 import { readStorage, writeStorage } from '../../../core/storage';
@@ -8,6 +9,7 @@ import { AiPollingController, AiPollingLoop } from '../polling-controller';
 import { createStaffInspectionTaskSession, staffInspectionTaskStorageKey,
   type StaffInspectionTaskContext, type StaffInspectionTaskView } from '../inspection-task-session';
 import { chooseInspectionHistoryItem } from '../inspection-page-binding';
+import type { InspectionHumanHandoff } from '../inspection-human-form';
 
 export interface StaffInspectionTaskHost { context: StaffInspectionTaskContext }
 interface Runtime {
@@ -18,7 +20,7 @@ interface Runtime {
 const instances = new WeakMap<object, Runtime>();
 const state = (instance: object) => { const value = instances.get(instance); if (!value) throw Error('staff_inspection_task_unavailable'); return value; };
 const blank = { statusLabel: '', currentTask: null as Record<string, unknown> | null, canBegin: false, canStart: false,
-  canRead: false, canSubmit: false, canContinue: false, pending: false, resultAvailable: false, taskId: '', inputRevision: '', fields: [] as unknown[], errorLabel: '' };
+  canRead: false, canSubmit: false, canContinue: false, canUseHumanValues: false, pending: false, resultAvailable: false, taskId: '', inputRevision: '', fields: [] as unknown[], errorLabel: '' };
 function label(status: StaffInspectionTaskView['status']): string {
   switch (status) {
     case 'working': return '正在处理原检查任务';
@@ -109,7 +111,7 @@ Component({
         signature = question ? JSON.stringify([taskId,question.requestId,question.revision,question.contract]) : '';
       const changed = signature !== r.inputSignature;
       this.setData({ statusLabel: label(view.status), canBegin: view.canBegin, canStart: view.canStart, canRead: view.canRead,
-        canSubmit: view.canSubmit, canContinue: view.canContinue, resultAvailable: Boolean(view.result), taskId: view.task?.taskId ?? '',
+        canSubmit: view.canSubmit, canContinue: view.canContinue, canUseHumanValues: Boolean(owner), resultAvailable: Boolean(view.result), taskId: view.task?.taskId ?? '',
         currentTask: view.task ? { id: view.task.taskId, title: '本次检查识别', status: view.task.status, statusLabel: label(view.status),
           updatedLabel: '', summary: '候选由员工核实，任务不提交检查', availabilityLabel: '原受权任务', partial: false } : null,
         ...(changed ? { inputRevision: question ? `${question.requestId}:${question.revision}` : '', fields: question?.contract.fields.map(field => ({
@@ -162,6 +164,22 @@ Component({
     onStart(): void { void this.work('start'); },
     onContinue(): void { void this.work('continue'); },
     onRead(): void { void this.work('read'); },
+    async originalHumanValues(): Promise<InspectionHumanHandoff> {
+      const r = state(this), host = r.host, owner = r.owner, epoch = r.epoch;
+      if (!r.alive || !r.shown || r.pending || !host?.context.current() || !owner) throw Error('原人工检查值暂不可用');
+      const current = () => r.alive && r.shown && r.host === host && r.owner === owner && r.epoch === epoch && host.context.current();
+      r.pending = true; this.setData({ pending: true });
+      try {
+        const handoff = await owner.readHumanValues();
+        if (!current()) throw Error('原人工检查值已撤回');
+        return { ...handoff, current: () => current() && handoff.current(),
+          async revalidate() { if (!current()) throw Error('原人工检查值已撤回'); await handoff.revalidate(); if (!current()) throw Error('原人工检查值已撤回'); } };
+      } finally { if (current()) { r.pending = false; this.setData({ pending: false }); } }
+    },
+    onUseHumanValues(): void {
+      const r = state(this);
+      if (r.alive && r.shown && !r.pending && r.host?.context.current() && r.owner) this.triggerEvent('humanvalues');
+    },
     originalResultReference() {
       const r = state(this); return r.alive && r.shown && this.data.resultAvailable && r.host?.context.current() && r.view?.result ? { ...r.view.result } : null;
     },

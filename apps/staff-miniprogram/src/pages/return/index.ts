@@ -3,7 +3,7 @@ import { createInspection, getOrder, handover, listInspectionTemplates, operatio
 import { loadContext, terms } from "../../core/context";
 import { describeError } from "../../core/errors";
 import { inspectionResults, inspectionRows, type InspectionFieldRow } from "../../core/inspection-form";
-import { actionKey, releaseActionKey } from "../../core/keys";
+import { newKey } from "../../core/keys";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { can, isSignedIn } from "../../core/session";
 import { maskPhone } from "../../core/presenters";
@@ -11,9 +11,14 @@ import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessRange } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 import { uploadStaffImage } from "../../api/uploads";
+import { emptyInspectionHandover, handoverPageSession, showInspectionHandover, clearInspectionHandoverPage,
+  hideInspectionHumanForm, recoverInspectionSignature, readInspectionHandoverReceipt, previewInspectionHumanValues,
+  adoptInspectionHumanValues, cancelInspectionHumanValues, openInspectionHumanReview, beginInspectionFormEdit,
+  restoreInspectionHandover } from '../../components/ai-native/inspection-handover-page';
+import { createOriginalHandoverKey, type InspectionHandoverSession } from '../../components/ai-native/inspection-handover-session';
 import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage, openInspectionReceiptHistory } from "../../components/ai-native/inspection-page-binding";
 import type { StaffInspectionHost, InspectionRecognitionReference } from "../../components/ai-native/inspection-host";
-import { openInspectionTaskPage, openInspectionTaskResult, clearInspectionTaskPage, hideInspectionTaskPage,
+import { openInspectionTaskPage, clearInspectionTaskPage, hideInspectionTaskPage,
   showInspectionTaskPage, captureInspectionPageWork, inspectionPageScopeKey, subscribeInspectionPageScope,
   type InspectionPageWorkContext, chooseInspectionPageImage, startInspectionPageRecording, stopInspectionPageRecording,
   uploadInspectionPageMedia, saveInspectionPageMediaDraft, recoverInspectionPageMedia, verifyInspectionPageUpload,
@@ -27,7 +32,7 @@ const EXCEPTION_CHARGE_TYPES = ["damage", "overdue", "cancellation"];
 
 Page({
   behaviors: [themeBehavior],
-  data: { aiInspectionRecording: false, aiInspectionMediaBusy: false, aiInspectionMediaReady: false, aiInspectionCanUpload: false, aiInspectionCanSaveDraft: false, aiInspectionCanRecoverMedia: false, aiInspectionCanVerifyUpload: false, aiInspectionMediaMessage: '', aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: "", aiInspectionVisible: false, aiInspectionHistoryLoading: false, aiInspectionHistoryMessage: "", view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", returnLocation: "", allocations: [] as ReturnAllocation[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, templateName: "", noTemplate: false, currency: "", feeRent: 0, feeException: 0, feeOther: 0, feeFinal: 0, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
+  data: { ...emptyInspectionHandover(), aiInspectionRecording: false, aiInspectionMediaBusy: false, aiInspectionMediaReady: false, aiInspectionCanUpload: false, aiInspectionCanSaveDraft: false, aiInspectionCanRecoverMedia: false, aiInspectionCanVerifyUpload: false, aiInspectionMediaMessage: '', aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: "", aiInspectionVisible: false, aiInspectionHistoryLoading: false, aiInspectionHistoryMessage: "", view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", returnLocation: "", allocations: [] as ReturnAllocation[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, templateName: "", noTemplate: false, currency: "", feeRent: 0, feeException: 0, feeOther: 0, feeFinal: 0, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
   order: undefined as RentalOrder | undefined,
   template: undefined as RentalInspectionTemplate | undefined,
   boolCodes: [] as string[],
@@ -40,6 +45,7 @@ Page({
   inspectionUploadAbort: undefined as (() => void) | undefined,
   clearInspectionContext() {
     this.inspectionPageEpoch++; clearInspectionPageMedia(this); this.inspectionUploadAbort?.(); this.inspectionUploadAbort = undefined;
+    clearInspectionHandoverPage(this);
     this.order = undefined; this.template = undefined; this.boolCodes = []; this.inspectionLoadedScope = '';
     this.signatureDrawing = false; this.signatureContext = undefined;
     clearInspectionPage(this); clearInspectionTaskPage(this);
@@ -60,8 +66,36 @@ Page({
   onInspectionRecoverMedia() { return recoverInspectionPageMedia(this, 'return'); },
   onInspectionVerifyUpload() { return verifyInspectionPageUpload(this, 'return'); },
   onInspectionTask() { return openInspectionTaskPage(this,'return'); },
-  onInspectionTaskResult(event: WechatMiniprogram.CustomEvent) { return openInspectionTaskResult(this,'return',event.detail?.reference); },
+  onInspectionTaskResult(event: WechatMiniprogram.CustomEvent) { return openInspectionHumanReview(this,'return',event.detail?.reference); },
+  onInspectionHumanValues() { return previewInspectionHumanValues(this, 'return'); },
+  onAdoptInspectionHumanValues() { return adoptInspectionHumanValues(this); },
+  onCancelInspectionHumanValues() { cancelInspectionHumanValues(this); },
+  handoverSession(): InspectionHandoverSession {
+    return handoverPageSession(this, 'return', () => createOriginalHandoverKey('return.handover', this.data.id), 'return.handover');
+  },
+  restoreHandover() {
+    restoreInspectionHandover(this, 'return', () => createOriginalHandoverKey('return.handover', this.data.id), 'return.handover');
+  },
+  async onReadHandoverReceipt() {
+    if (await readInspectionHandoverReceipt(this, this.handoverSession())) {
+      toast('已核对原归还提交', { icon: 'success' }); relaunch(buildUrl(ROUTES.order, { id: this.data.id }));
+    }
+  },
+  onRecoverSignature() { return recoverInspectionSignature(this, this.handoverSession()); },
+  async onUploadSignature() {
+    if (this.data.busy || this.data.uploading || this.data.fulfillmentPending || this.data.fulfillmentUnavailable) return;
+    const work = captureInspectionPageWork(this), session = this.handoverSession();
+    if (session.snapshot().signaturePending) return recoverInspectionSignature(this, session);
+    this.setData({ uploading: true, error: '' });
+    try {
+      if (!await confirmDialog({ title: '上传现场签名', content: '将客户现场签名保存为本批交接证据；检查和归还仍须另行确认提交。' }) || !work.current()) return;
+      await this.uploadSignature(session.key());
+    }
+    catch (error) { if (work.current()) this.setData({ error: describeError(error).message }); }
+    finally { if (work.current()) { this.setData({ uploading: false }); showInspectionHandover(this, session); } }
+  },
   onHide() { this.inspectionPageShown = false; this.inspectionPageEpoch++; this.inspectionUploadAbort?.(); this.inspectionUploadAbort = undefined;
+    hideInspectionHumanForm(this);
     stopInspectionPageRecording(this, true); cancelInspectionPageUpload(this); hideInspectionPage(this); hideInspectionTaskPage(this); this.setData({ uploading: false, busy: false, aiInspectionRecording: false, aiInspectionMediaBusy: false }); },
   onUnload() { this.inspectionPageShown = false; this.clearInspectionContext(); this.inspectionContextUnsubscribe?.(); this.inspectionContextUnsubscribe = undefined; },
   onLoad(query: Record<string, string>) { this.inspectionPageShown = false; this.clearInspectionContext(); const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
@@ -73,6 +107,7 @@ Page({
       this.clearInspectionContext(); if (this.inspectionPageShown && isSignedIn()) void this.load();
     });
     if (this.inspectionLoadedScope !== inspectionPageScopeKey()) this.clearInspectionContext();
+    this.restoreHandover();
     void this.selectComponent('#ai-inspection-assist')?.hostShow?.(); showInspectionTaskPage(this);
     if (!this.order) void this.load();
   },
@@ -86,10 +121,11 @@ Page({
       const [order, templates, context] = await Promise.all([getOrder(work.orderId), listInspectionTemplates("return", work.orderId), loadContext()]);
       if (!work.current()) return;
       if (order.id !== work.orderId) throw new Error('原订单引用不一致');
-      if (order.status !== "renting") { this.setData({ view: blockedState("当前不能办理归还", `订单当前状态：${order.status}`) }); return; }
       if (!can("rental-os:order:return")) { this.setData({ view: blockedState("无归还权限", "请联系管理员授权") }); return; }
       this.order = order; this.inspectionLoadedScope = work.scopeKey;
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
+      this.restoreHandover();
+      if (order.status !== 'renting') { this.setData({ view: blockedState('当前不能办理归还', `订单当前状态：${order.status}`) }); return; }
       const allRows = inspectionRows(this.template);
       const boolRows = allRows.filter((row) => row.type === "boolean");
       const sharedFields = allRows.filter((row) => row.type !== "boolean");
@@ -103,15 +139,16 @@ Page({
       this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, returnLabel: terms().returnLabel, returnLocation: order.returnLocationName ?? order.fulfillmentLocationName, allocations, sharedFields, hasBulk: boolRows.length > 0, templateName: this.template?.name ?? "无需检查模板", noTemplate: !this.template, currency: order.currency ?? "", feeRent, feeException, feeOther: feeFinal - feeRent - feeException, feeFinal, error: "" }, () => { if (work.current()) this.initSignatureCanvas(); });
     } catch (error) { if (work.current()) this.setData({ view: errorState(error) }); }
   },
-  onToggleAllocation(event: WechatMiniprogram.SwitchChange) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`allocations[${index}].selected`]: Boolean(event.detail.value), error: "" }); },
-  onQuantity(event: WechatMiniprogram.Input) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`allocations[${index}].quantity`]: String(event.detail.value ?? ""), error: "" }); },
-  onFieldInput(event: WechatMiniprogram.Input) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`sharedFields[${index}].value`]: String(event.detail.value ?? ""), error: "" }); },
-  onFieldBool(event: WechatMiniprogram.SwitchChange) { const ai = Number(event.currentTarget.dataset.ai); const fi = Number(event.currentTarget.dataset.fi); this.setData({ [`allocations[${ai}].fields[${fi}].checked`]: Boolean(event.detail.value), error: "" }); },
-  onFieldSelect(event: WechatMiniprogram.PickerChange) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`sharedFields[${index}].value`]: this.data.sharedFields[index]?.options[Number(event.detail.value)] ?? "", error: "" }); },
-  onBulkPass() { const allocations = this.data.allocations.map((row) => ({ ...row, fields: row.fields.map((field) => ({ ...field, checked: true })) })); this.setData({ allocations, error: "" }); },
+  onToggleAllocation(event: WechatMiniprogram.SwitchChange) { if (!beginInspectionFormEdit(this)) return; const index = Number(event.currentTarget.dataset.index); this.setData({ [`allocations[${index}].selected`]: Boolean(event.detail.value), error: "" }); },
+  onQuantity(event: WechatMiniprogram.Input) { if (!beginInspectionFormEdit(this)) return; const index = Number(event.currentTarget.dataset.index); this.setData({ [`allocations[${index}].quantity`]: String(event.detail.value ?? ""), error: "" }); },
+  onFieldInput(event: WechatMiniprogram.Input) { if (!beginInspectionFormEdit(this)) return; const index = Number(event.currentTarget.dataset.index); this.setData({ [`sharedFields[${index}].value`]: String(event.detail.value ?? ""), error: "" }); },
+  onFieldBool(event: WechatMiniprogram.SwitchChange) { if (!beginInspectionFormEdit(this)) return; const ai = Number(event.currentTarget.dataset.ai); const fi = Number(event.currentTarget.dataset.fi); this.setData({ [`allocations[${ai}].fields[${fi}].checked`]: Boolean(event.detail.value), error: "" }); },
+  onFieldSelect(event: WechatMiniprogram.PickerChange) { if (!beginInspectionFormEdit(this)) return; const index = Number(event.currentTarget.dataset.index); this.setData({ [`sharedFields[${index}].value`]: this.data.sharedFields[index]?.options[Number(event.detail.value)] ?? "", error: "" }); },
+  onBulkPass() { if (!beginInspectionFormEdit(this)) return; const allocations = this.data.allocations.map((row) => ({ ...row, fields: row.fields.map((field) => ({ ...field, checked: true })) })); this.setData({ allocations, error: "" }); },
   initSignatureCanvas() { this.signatureContext = wx.createCanvasContext("returnSignature", this); },
-  currentHandoverKey() { return actionKey("return.handover", this.data.id, "handover"); },
+  currentHandoverKey() { return this.handoverSession().key(); },
   onChooseEvidencePhoto(event: WechatMiniprogram.TouchEvent) {
+    if (this.data.busy || this.data.uploading || this.data.signaturePending || this.data.fulfillmentPending || this.data.fulfillmentUnavailable) return;
     const index = Number(event.currentTarget.dataset.index), field = this.data.sharedFields[index];
     if (!Number.isInteger(index) || !field || field.type !== 'photo' || this.data.uploading || field.photos.length >= 5) return;
     let work: InspectionPageWorkContext;
@@ -128,6 +165,7 @@ Page({
     const fieldCode = this.data.sharedFields[index]?.code;
     const current = () => work.current() && this.data.sharedFields[index]?.code === fieldCode;
     if (!fieldCode || !current()) return;
+    if (!beginInspectionFormEdit(this)) return;
     this.setData({ uploading: true, error: '' });
     try {
       const handoverBatchId = this.currentHandoverKey();
@@ -146,7 +184,9 @@ Page({
   },
   onSignatureStart(event: WechatMiniprogram.TouchEvent) {
     const point = event.touches[0] as unknown as WechatMiniprogram.TouchCanvasDetail | undefined;
-    if (!point || !this.signatureContext) return;
+    if (!point || !this.signatureContext || this.data.uploading || this.data.busy || this.data.signaturePending
+      || this.data.fulfillmentPending || this.data.fulfillmentUnavailable) return;
+    if (this.data.signatureFileAssetId) { this.setData({ error: '请先清除原签名再重签' }); return; }
     this.signatureDrawing = true;
     this.signatureContext.beginPath();
     this.signatureContext.setStrokeStyle("#20242b");
@@ -164,18 +204,40 @@ Page({
     if (!this.data.signatureDrawn) this.setData({ signatureDrawn: true });
   },
   onSignatureEnd() { this.signatureDrawing = false; },
-  onClearSignature() { this.signatureContext?.clearRect(0, 0, this.data.signatureWidth, this.data.signatureHeight); this.signatureContext?.draw(); this.setData({ signatureDrawn: false, signatureFileAssetId: "" }); },
+  invalidateInspectionSignature() {
+    if (!this.data.signatureDrawn && !this.data.signatureFileAssetId) return;
+    this.handoverSession().clearSignature();
+    this.signatureContext?.clearRect(0, 0, this.data.signatureWidth, this.data.signatureHeight); this.signatureContext?.draw();
+    this.signatureDrawing = false; this.setData({ signatureDrawn: false, signatureFileAssetId: '' });
+  },
+  onClearSignature() {
+    if (this.data.busy || this.data.uploading) return;
+    try { this.handoverSession().clearSignature(); }
+    catch (error) { this.setData({ error: describeError(error).message }); return; }
+    this.signatureContext?.clearRect(0, 0, this.data.signatureWidth, this.data.signatureHeight); this.signatureContext?.draw();
+    this.setData({ signatureDrawn: false, signatureFileAssetId: '' });
+  },
   async uploadSignature(batchId: string) {
     const work = captureInspectionPageWork(this);
-    if (this.data.signatureFileAssetId) return this.data.signatureFileAssetId;
+    const session = this.handoverSession(), view = session.snapshot();
+    if (session.key() !== batchId || view.pending || view.completed) throw Error('原交接结果待核对，不重复上传');
+    if (view.signatureFileAssetId) return view.signatureFileAssetId;
+    if (view.signaturePending) throw Error('原签名上传待核对，请读取原上传');
     if (!this.data.signatureDrawn) throw new Error("请让客户在签名框内完成现场签字");
     const filePath = await new Promise<string>((resolve, reject) => wx.canvasToTempFilePath({ canvasId: "returnSignature", fileType: "png", width: this.data.signatureWidth, height: this.data.signatureHeight, destWidth: this.data.signatureWidth, destHeight: this.data.signatureHeight, success: (result) => resolve(result.tempFilePath), fail: () => reject(new Error("导出签字图片失败，请重签")) }, this));
     if (!work.current()) throw new Error('原签名导出后页面已改变');
     const size = await new Promise<number>((resolve, reject) => wx.getFileSystemManager().getFileInfo({ filePath, success: (result) => resolve(result.size), fail: () => reject(new Error("读取签字图片失败")) }));
     if (!work.current()) throw new Error('原签名读取后页面已改变');
-    const asset = await uploadStaffImage({ path: filePath, size, fileName: `handover-signature-${Date.now()}.png`, mimeType: "image/png", businessType: "rental_order", businessId: work.orderId, uploadScene: "handover-signature", metadata: { handoverStage: "return", handoverBatchId: batchId } }, { current: work.current, onAbort: abort => { this.inspectionUploadAbort = abort ?? undefined; } });
+    const fileName = `handover-signature-${Date.now()}.png`, metadata = { handoverStage: 'return' as const, handoverBatchId: batchId }, operationKey = newKey('staff-signature');
+    session.beginSignature({ businessModule: 'rental-core', businessType: 'rental_order', businessId: work.orderId,
+      fileName, mimeType: 'image/png', sizeBytes: size, uploadScene: 'handover-signature', metadata },
+    { operationKey, sessionId: null, fileAssetId: null, stage: 'registering' });
+    const asset = await uploadStaffImage({ path: filePath, size, fileName, mimeType: 'image/png', businessType: 'rental_order',
+      businessId: work.orderId, uploadScene: 'handover-signature', metadata }, { operationKey,
+      current: () => work.current() && session.current(), onReference: reference => session.observeSignature(reference),
+      onAbort: abort => { this.inspectionUploadAbort = abort ?? undefined; } });
     if (!work.current()) throw new Error('原签名上传后页面已改变');
-    this.setData({ signatureFileAssetId: asset.id });
+    session.completeSignature(asset.id); showInspectionHandover(this, session);
     return asset.id;
   },
   /** 逐设备勾选合并回订单级 results：boolean 项本次归还的设备全部勾选才算通过（AND）；数值/文本/选择/照片仍是订单级一份。 */
@@ -192,6 +254,11 @@ Page({
     if (this.data.busy || this.data.uploading || !this.order) return;
     let work: InspectionPageWorkContext;
     try { work = captureInspectionPageWork(this); } catch { return; }
+    const session = this.handoverSession(), view = session.snapshot();
+    if (!view.available) { showInspectionHandover(this, session); return; }
+    if (view.pending || view.completed) { await this.onReadHandoverReceipt(); return; }
+    if (view.signaturePending) { await this.onRecoverSignature(); return; }
+    if (this.order.status !== 'renting') { this.setData({ error: '当前订单不能再提交归还，请读取原订单和收据' }); return; }
     const template = this.template;
     const items: Array<{ allocationId: string; quantity: number }> = [];
     for (const row of this.data.allocations) {
@@ -204,29 +271,31 @@ Page({
     const partial = items.length !== this.data.allocations.length || items.some((item) => item.quantity !== this.data.allocations.find((row) => row.id === item.allocationId)?.max);
     const { results, error } = this.collectResults(items.map((item) => item.allocationId));
     if (error) { this.setData({ error }); return; }
-    if (!await confirmDialog({ title: partial ? "确认分批归还" : "确认整单归还", content: partial ? "本次仅归还选定数量，其余资源继续在租。" : "提交后订单将进入结算，请先核对资源和检查结果。" })) return;
+    this.setData({ busy: true });
+    if (!await confirmDialog({ title: partial ? "确认分批归还" : "确认整单归还", content: partial ? "本次仅归还选定数量，其余资源继续在租。" : "提交后订单将进入结算，请先核对资源和检查结果。" })) { if (work.current()) this.setData({ busy: false }); return; }
     if (!work.current()) return;
-    const action = "return.handover";
-    const key = this.currentHandoverKey();
+    const operation = template ? 'inspection' as const : partial ? 'partial_return' as const : 'return' as const;
     this.setData({ busy: true, error: "" });
     let lockToken: string | undefined;
     try {
       if (!work.current()) return;
+      const key = session.key();
       const lock = await operationLock(work.orderId, { action: "acquire" });
       lockToken = lock.token;
       if (!lockToken) throw new Error("未取得交接操作锁，请稍后重试");
       if (!work.current()) return;
       const handoverSignatureFileAssetId = await this.uploadSignature(key);
       if (!work.current()) return;
+      session.markSubmitted(operation, template?.id); showInspectionHandover(this, session);
       if (template) await createInspection(work.orderId, { templateId: template.id, results, handoverSignatureFileAssetId, ...(partial ? { returnItems: items, returnBatchNo: key } : {}) }, { idempotencyKey: key, operationToken: lockToken });
       else if (partial) await partialReturn(work.orderId, { items, batchNo: key, handoverSignatureFileAssetId }, { idempotencyKey: key, operationToken: lockToken });
       else await handover(work.orderId, "return", { idempotencyKey: key, operationToken: lockToken, handoverSignatureFileAssetId });
       if (!work.current()) return;
-      releaseActionKey(action, work.orderId);
-      toast(partial ? "本批归还已记录" : "归还交接已完成", { icon: "success" });
-      relaunch(buildUrl(ROUTES.order, { id: work.orderId }));
+      this.setData({ busy: false });
+      await this.onReadHandoverReceipt();
     } catch (caught) { if (work.current()) this.setData({ error: describeError(caught).message }); }
-    finally { if (lockToken && work.current()) await operationLock(work.orderId, { action: "release", token: lockToken }).catch(() => undefined); if (work.current()) this.setData({ busy: false }); }
+    finally { if (lockToken && work.current()) await operationLock(work.orderId, { action: "release", token: lockToken }).catch(() => undefined);
+      if (work.current()) { this.setData({ busy: false }); showInspectionHandover(this, session); } }
   },
   onViewAction() { if (!handleCommonViewAction(this.data.view, { redirect: buildUrl(ROUTES.return, { id: this.data.id }) })) void this.load(); }
 });

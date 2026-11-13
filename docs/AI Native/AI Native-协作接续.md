@@ -4,7 +4,7 @@
 
 ## 当前目标与现场
 
-在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[AIN-16原五条](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)已核闭，任务文档已推 `3a8b8cbeacede7a7c2af7d227625e8c71beb31dc`；[原grant恢复](<AI Native-开发记录.md#ain18-original-grant-recovery-20261114>)已推 `012517f7bb596b5d9a48294607463a3d35e200ec`，[员工原履约收据公共接点](<AI Native-开发记录.md#ain20-original-fulfillment-receipt-20261114>)已推 `4dbcf1037327f78da09aca0b5eb09f7d80d24a2c`，均回读GitHub一致。Root 已按固定来源接回[Core配置行修订、原tx及资源来源](<AI Native-开发记录.md#ain17-fixed-core-resource-source-intake-20261114>)，必要模拟和完整依赖类型通过；这是标准装配未完检查点，继续补 resources provider、runtime临近政策及开业原保存事务。dev1只读定位经营解释的独立自动主体与原Gateway/单账接点，dev2继续员工签名／人工值／首次最终提交和原键恢复。两助手均有实际工具执行，不等提交或main。本批14/16固定集成节点仍由PM按记录串行收，AI未合main，不追活动HEAD或将旧SHA当重置目标。
+在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[AIN-16全文](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)、[原grant恢复](<AI Native-开发记录.md#ain18-original-grant-recovery-20261114>)及[员工原履约收据公共接点](<AI Native-开发记录.md#ain20-original-fulfillment-receipt-20261114>)均已推；[Core来源检查点](<AI Native-开发记录.md#ain17-fixed-core-resource-source-intake-20261114>)已推 `1c44acdac974a0acbbd93555b90a1305c07c2c0f` 并回读GitHub一致。Root随后补标准resources provider、当前runtime临近政策和开业原保存事务，必要模拟通过，尚在独立核定／提交阶段；有限地点视图不捕获整空间缺项。[员工原人工值／签名／最终提交阶段](<AI Native-开发记录.md#ain20-original-final-form-consumer-20261114>)十源已冻结，Root独立7条实际页面/Controller/Core模拟及微信类型通过，先独立提交。dev1已获两个私有叶写权，实现经营解释的独立自动主体宿主，公共Gateway/账务接点仍归Root；dev2转AIN-19原全文核定，识别候选原文合同缺口正在核实。两助手都有实际工具执行，不等提交或main。本批14/16固定集成节点仍由PM按记录串行收，AI未合main，不追活动HEAD或将旧SHA当重置目标。
 
 PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包](<AI Native-开发记录.md#ain12-fixed-main-closure-20261113>)已推 630，5426 十四源的主树页面后继已推 `d201979963e4f4474acd23ff1981ad81930fdfcd`，均在 codex/ai-native-main-closure-20261113 并回读一致。公共 AppModule/index 用精确 hunk，首候选 Guard 保持原 main，后继仅补 createTask 原登记，TaskCenter 保留 main 原展开/权限与旁支。该分支仅作 PM 整合候选，AI 施工仍在原树。PM 串行收每个 QA 通过的可独立阶段，任务进度仍按原全文。
 
@@ -22,9 +22,9 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 全专项按原门槛收口；14/16已核闭并登记本批两项集成节点。Core七源和dev1资源叶已固定核接，当前补标准ResourcePorts／runtime临近政策与开业原事务生产；核员工最终提交交付。独占四册/索引、公共装配/合同，阶段即中文提交并回读GitHub；PM串行main，助手继续。AIN-15三叶和员工样式待核不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原创建历史、grant恢复和Core资源来源已冻结交权Root。当前只读核限定经营事件的实际模型解释宿主，定位独立AUTOMATION主体、原Task/Gateway/单账和两三处最小接点；尚无该方向新写权。不写Core/公共provider/Guard/四册或已交源码，不借普通用户TaskCenter授权，不等Root提交。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-16原五条已交回。当前修员工最终提交的签名／人工值消费，独占 ai-inspection-task/index.ts/index.wxml、inspection-task-session.ts、pickup/index.ts/index.wxml、return/index.ts/index.wxml 及必要feature-local新叶；沿原上传／检查提交／原收据，不造署名／批次或新提交链。公共合同/API/Core及四册/索引归Root，未知不换键，不等main。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 全专项按原门槛收口；14/16两项节点保留。当前核定标准资源／runtime／开业原事务并接员工完整阶段，随后補经营Gateway/账务公共自动主体与识别原文合同。独占四册/索引、公共装配/合同，阶段即中文提交并回读GitHub；PM串行main，助手继续。AIN-15三叶和员工样式待核不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原创建历史、grant恢复及Core资源来源已交回。获权新建 automation-task-model.authority.ts、automation-model-explanation.composition.ts 两私有叶及确需同目录输入叶，实现限定事件的原AUTOMATION Task解释／明确首次启动／独立原结果；公共Gateway、budget、runner、Guard/shared/provider及四册归Root。不借用户身份、不新建账或业务动作，unknown只核原调用，不等Root提交。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 员工最终提交十源已冻结交权Root；原人工值／签名批次／Core提交及恢复证据已留本对话。当前只读核AIN-19五条及04/05/10前置，定位识别原文、媒体／Core依据、候选格式／模糊及恶意附件边界；不给已交源码新写权。公共合同/API/Core及四册/索引归Root，不重复局部模拟，不等main。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源及独立全文结论已交回，Root核blob和必要实际provider模拟通过。既有Core治理两源来源/类型因果已只读核清，Root按固定提交同步本树；当前无活动写权。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |

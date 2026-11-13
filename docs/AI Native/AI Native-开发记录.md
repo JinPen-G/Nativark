@@ -6,6 +6,26 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14及本次16已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain20-original-final-form-consumer-20261114"></a>
+## AIN-20 原人工值、客户签名与最终履约提交接回（2026-11-14）
+
+在已上传的员工原履约收据前置 `4dbcf1037327f78da09aca0b5eb09f7d80d24a2c` 上，dev2 将[领取页](../../apps/staff-miniprogram/src/pages/pickup/index.ts)、[归还页](../../apps/staff-miniprogram/src/pages/return/index.ts)接回原检查／交接／分批归还入口。[人工值转交](../../apps/staff-miniprogram/src/components/ai-native/inspection-human-form.ts)显式读取当前原草稿及模板、展示差异后再次复核，只携带员工已保存的人工值；原 accepted 候选须仍有 recorded 依据、当前来源匹配及无阻塞，模糊／缺项／失效来源不填入。布尔字段只改所选资源，共享字段说明整单作用，原表单再校验；采用或编辑签名字段后须重新现场签字，候选保存不能冒充履约完成。
+
+[原交接 session](../../apps/staff-miniprogram/src/components/ai-native/inspection-handover-session.ts)在任何签名上传及提交前持久化原键并读回，独立于旧 actionKey 的 TTL／表单指纹；已有旧键不猜未发送、不换键。签名上传绑定同订单、阶段和原批次，上传 unknown 只读原上传；最终 Core unknown 只读原履约收据。重开／切空间／隐藏／竞争定位仍保留原操作，不再发起同写；确认 committed 后只清理精确原定位，当前页不能立即生成下一批新键。原提交继续核客户签名、模板、分配和业务状态，分批归还保留其他资源在租。
+
+dev2 已冻结交回十源，Root 逐 blob 核同：task组件 `8b8d2c691bae67bd8013098212d3b1aeb688961c`、WXML `a323827bfeef220bd8a2c92a67f46ada39b5ff46`、task session `5537ad88afa949b8c36b482db46e16933e6a764d`；pickup TS/WXML `8be49d44030b6b2346740ebdf798b6fc60183df1`／`240240ba9cd68e8beab65408f18988cb2bbfe1e4`；return TS/WXML `82fc77014e9540f779b60c0b318ec622f5087d63`／`dd51ab02c921942d9ec2e6e2ae40140908e7f883`；human form `e4e71a02991182fc5f8d6f0dc8db238b0d344f33`、handover session `093433e86b01bd05e3defaf36c90e2f16a69fddf`、handover page `168cfb5509231bf4e69703bc814f4bac7b2b8692`。未夹带旧员工样式或 AIN-15 未核叶。
+
+| 必要模拟／类型 | 固定证据与实际结果 |
+| --- | --- |
+| dev2 最终实际组件／页面→原 Guard/Controller/Core | stdin `c10e7f27b8c39d931174d9a67dcdc918427e9570baba1e4690723114f283460f`／退出0；7条为正常领取／归还、两类提交丢应答、签名丢应答、多资源领取和分批归还。每条检查提交、Core检查记录和订单保存各1次。 |
+| Root 独立加载当前实际源码和相同原 Core 夹具 | `node --no-compilation-cache -`，stdin `392708860699ca69d460f397b4c1c7185cee23a651652b5fc355735cb1b455f1`／退出0；同7条全部通过，原签名批次校验不放宽，领取进入renting、整单归还settling、分批归还其余资源仍renting；unknown恢复仅原读，定时器0，audit0。 |
+| 原键／候选／重开／生命周期与界面绑定 | dev2 stdin `5d8ab994ed5a04ee994327d38de232e1d192c7a631d397cb532c908b7dc86cd9`（15项原键）、`fc49aa47ec4b8bead8ce218a7b4037becf58c41e0ee802846ef561cf73c2581b`（6项候选）、`15c804b1c41f657827ac4e75de0bda7bad44ab7568fbf97e863c75e7485f5623`（卸载重开）、`40b32a25a3c7897498f9c90c844e83b9f3ef7248081b4f59d5e4f9975c10e516`（存储拒绝／隐藏回调）及 `759ecc91f46ef3116c08047bfb11d7b7941b1b56a149e3d095b2c290fc8ba43c`（WXML绑定），均退出0；界面静态检测无发现，不称真机验收。 |
+| Root 微信正式 ES2019 声明与受影响源码类型 | stdin `46a9c6e010dcdc6c584b7f58eb8ff0d0a1cbbb106290cc0e35eed7c1a31ce085`／退出0；TypeScript5.9.3，7根/235源零诊断，115份shared声明只在内存。作者类型 `20813368ecc77299cdfff563a791029b64a9f523a79f67f767521df061a8b24e`／退出0。 |
+
+保留驱动失败：作者首组把boolean事件值传成布尔而非原字符串、员工ID与fixture不符、签名元数据缺原上传owner/space，以及原归还依赖缺延期／stock disposition方法；仅补正确夹具格式和原声明依赖。Root 首组省略内存 prelude 的 assert，加载失败后补引用，再核同一原组件链；产品权限和业务断言未放宽。Core仓储／资金／上传运输和设备为明确合成替身，实际业务方法与签名验证保持，未连接 MySQL、微信或供应商。
+
+本阶段不把部分绿色算 AIN-20 全文100%，仍须 AIN-19 前置及全文复核；AIN-19 原识别候选的“原文”合同与消费者尚待核定，不能因区域／时段存在就冒充原文已交付。当前阶段完整源码与证据独立固化。作者／Root 所有本组进程已退出，`output/.tmp/ain20-final-form-consumer-20261114` 未创建，没有新增或扩写测试脚本、依赖副本或构建残留。真实设备、数据库、对象存储及供应商由负责人后续操作。
+
 <a id="ain17-fixed-core-resource-source-intake-20261114"></a>
 ## AIN-17 原 Core 来源、配置行修订与资源读取接回（2026-11-14）
 

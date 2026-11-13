@@ -6,6 +6,7 @@ import type { AiInspectionDraftReadRequest, AiInspectionRecognitionRequest, AiIn
   AiInspectionResultReadRequest, AiInspectionTaskAnswerObservation, AiTaskInputFieldDraft } from '@rental-os/shared';
 import type { StaffInspectionTaskApi } from '../../api/ai-inspection-tasks';
 import { validateInspectionWire, validateInspectionTaskWire } from './inspection-wire';
+import { readInspectionHumanHandoff } from './inspection-human-form';
 
 export interface StaffInspectionTaskContext {
   tenantId: string; workspaceId: string; ownerId: string; source: AiInspectionDraftReadRequest; current(): boolean;
@@ -182,6 +183,16 @@ export function createStaffInspectionTaskSession(input: {
     hasOriginal: () => current() && Boolean(saved),
     open: () => run(async () => saved ? 'unknown' : 'ready'),
     refresh: () => run(readOriginal),
+    async readHumanValues() {
+      if (!current() || busy || invalid) throw Error('staff_inspection_context_changed');
+      const status = view.status;
+      busy = true; emit('working');
+      try {
+        load();
+        return await readInspectionHumanHandoff({ ...input.context, source: clone(source),
+          current: () => current() && !invalid && same(input.storage.read(), held) }, input.api);
+      } finally { busy = false; emit(status); }
+    },
     async observe(): Promise<void> {
       if (!current() || invalid || !saved?.reference) return;
       const reference = clone(saved.reference);
