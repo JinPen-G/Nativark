@@ -85,6 +85,8 @@ export const ADMIN_ICON_METRICS = { controlSize: 16, controlStroke: 1.75, titleS
 export const ADMIN_LOGIN_METRICS = { titleSize: 40, titleLineHeight: 44, titleWeight: 400, compactTitleSize: 32, compactTitleLineHeight: 35.2, brandHeight: 24, providerIconSize: 17 } as const;
 /** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
 export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;
+/** UIArc screen-shell CSS geometry; tenant modes share it without changing the native rail or account menu. */
+export const ADMIN_SHELL_METRICS = { panelInset: 8, topRowHeight: 40, workspaceHeight: 36, workspaceMarkSize: 22, triggerSize: 32, tenantNameSize: 13, tenantNameLineHeight: 18, workspaceNameSize: 12, workspaceNameLineHeight: 14 } as const;
 /** Status ink and surface are paired independently of the tenant brand color. */
 export const ADMIN_STATUS_COLORS = {
   light: { success: ["#176B45", "#EDF7F0"], warning: ["#925600", "#FFF5E3"], error: ["#B42332", "#FFF0F1"], info: ["#2359B8", "#EDF3FF"], neutral: ["#535B66", "#F1F3F5"] },
@@ -273,6 +275,9 @@ export function applyAdminTypographyTokens(root: HTMLElement) {
     "--rental-record-card-media-height": px(ADMIN_RECORD_CARD_METRICS.mediaHeight),
     ...Object.fromEntries(Object.entries(ADMIN_SIDEBAR_METRICS).map(([role, value]) => [
       `--rental-sidebar-${role.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}`, px(value),
+    ])),
+    ...Object.fromEntries(Object.entries(ADMIN_SHELL_METRICS).map(([role, value]) => [
+      `--rental-shell-${role.replace(/[A-Z]/g, part => `-${part.toLowerCase()}`)}`, px(value),
     ])),
     "--rental-navigation-duration": `${ADMIN_NAVIGATION_MOTION.durationMs}ms`,
     "--rental-navigation-easing": ADMIN_NAVIGATION_MOTION.easing,

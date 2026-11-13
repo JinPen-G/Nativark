@@ -37,6 +37,118 @@
   --rental-sidebar-selected-ink: var(--accent-foreground);
 }
 .rental-sidebar-colors { --sidebar-ring: var(--rental-sidebar-selected-bg); }
+/* UIArc screen-shell palette, measured at /components/screens/metrics-dashboard/frame.
+ * Resolve foundation colors at the root before the native sidebar shadows them.
+ * The tenant host also scopes its body portals; other consumers keep their palette. */
+:root:has(.app-frame-stage[data-tenant-console]) {
+  --rental-sidebar-surface: color-mix(in oklab, var(--surface-muted) 72%, var(--background));
+  --rental-shell-panel: var(--background);
+  --rental-shell-foreground: var(--foreground);
+  --rental-shell-secondary: var(--text-secondary);
+  --rental-shell-muted: var(--text-muted);
+  --rental-shell-border: var(--border);
+  --rental-shell-field: var(--background);
+  --rental-shell-selected-icon: oklch(33% 0 0);
+  --rental-shell-hover: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+  --rental-sidebar-selected-bg: color-mix(in oklab, var(--foreground) 7%, transparent);
+  --rental-sidebar-selected-ink: var(--foreground);
+}
+:root[data-theme="dark"]:has(.app-frame-stage[data-tenant-console]) {
+  --rental-sidebar-surface: var(--background);
+  --rental-shell-panel: var(--surface);
+  --rental-shell-field: color-mix(in oklab, var(--surface) 70%, var(--background));
+  --rental-shell-selected-icon: oklch(80% 0 0);
+  --rental-shell-hover: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --rental-sidebar-selected-bg: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors {
+  --sidebar: var(--rental-sidebar-surface);
+  --sidebar-foreground: var(--rental-shell-secondary);
+  --sidebar-primary: var(--rental-shell-selected-icon);
+  --sidebar-accent: var(--rental-shell-hover);
+  --sidebar-accent-foreground: var(--rental-shell-foreground);
+  --sidebar-border: var(--rental-shell-border);
+  --sidebar-ring: var(--rental-shell-selected-icon);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors [data-sidebar="group-label"] {
+  color: var(--rental-shell-muted);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-navigation :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"]) {
+  color: var(--rental-shell-secondary);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-navigation :is([data-sidebar="menu-button"], [data-sidebar="menu-sub-button"]):is([data-active], :hover, :focus-visible) {
+  color: var(--rental-shell-foreground);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-navigation [data-sidebar="menu-button"] > :is(svg, .rental-animated-icon) {
+  color: var(--rental-shell-muted);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-navigation [data-sidebar="menu-button"]:is(:hover, :focus-visible) > :is(svg, .rental-animated-icon) {
+  color: var(--rental-shell-foreground);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-navigation [data-sidebar="menu-button"][data-active] > :is(svg, .rental-animated-icon) {
+  color: var(--rental-shell-selected-icon);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors [data-sidebar="input"] {
+  background: var(--rental-shell-field);
+  border-color: var(--rental-shell-border);
+  color: var(--rental-shell-foreground);
+  caret-color: var(--rental-shell-foreground);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors [data-sidebar="input"]::placeholder { color: var(--rental-shell-muted); }
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"] {
+  color: var(--rental-shell-secondary);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"]:is(:hover, :focus, [data-highlighted]) {
+  background: var(--rental-shell-hover);
+  color: var(--rental-shell-foreground);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"][aria-current] {
+  background: var(--rental-sidebar-selected-bg);
+  color: var(--rental-shell-foreground);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"] > span {
+  color: inherit;
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"] :is(svg, .rental-animated-icon) {
+  color: var(--rental-shell-muted);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"]:is(:hover, :focus, [data-highlighted]) :is(svg, .rental-animated-icon) {
+  color: var(--rental-shell-foreground);
+}
+:root:has(.app-frame-stage[data-tenant-console]) .rental-sidebar-colors :is(.rental-sidebar-submenu, .rental-workspace-popup) [data-slot="dropdown-menu-item"][aria-current] :is(svg, .rental-animated-icon) {
+  color: var(--rental-shell-selected-icon);
+}
+
+/* Two independent controls share the top row; long names surrender width first. */
+.rental-sidebar-top-row { display: flex; align-items: center; gap: var(--space-1); height: var(--rental-shell-top-row-height); min-width: 0; }
+.rental-sidebar-top-row .rental-workspace-menu { flex: 0 1 auto; width: auto; max-width: calc(100% - var(--rental-shell-trigger-size) - var(--space-1)); margin: 0; }
+.rental-sidebar-colors .rental-workspace-trigger {
+  height: var(--rental-shell-workspace-height);
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  color: var(--rental-shell-foreground);
+}
+.rental-sidebar-colors .rental-workspace-trigger [data-sidebar="brand-mark"] { flex: none; width: var(--rental-shell-workspace-mark-size); height: var(--rental-shell-workspace-mark-size); }
+.rental-sidebar-colors .rental-workspace-trigger [data-sidebar="brand-mark"] img { max-width: 100%; max-height: 100%; }
+.rental-workspace-identity { display: grid; flex: 1 1 auto; min-width: 0; text-align: left; }
+.rental-workspace-identity > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rental-workspace-tenant-name { font-size: var(--rental-shell-tenant-name-size); line-height: var(--rental-shell-tenant-name-line-height); font-weight: 500; }
+.rental-workspace-name { font-size: var(--rental-shell-workspace-name-size); line-height: var(--rental-shell-workspace-name-line-height); font-weight: 400; color: var(--rental-shell-secondary); }
+.rental-workspace-chevron { flex: none; color: var(--rental-shell-muted); }
+.rental-sidebar-colors [data-sidebar="trigger"].rental-sidebar-top-trigger { flex: none; margin-inline-start: auto; width: var(--rental-shell-trigger-size); height: var(--rental-shell-trigger-size); padding: 0; background: transparent; color: var(--rental-shell-secondary); }
+.rental-sidebar-colors [data-sidebar="trigger"].rental-sidebar-top-trigger:hover { background: var(--rental-shell-hover); color: var(--rental-shell-foreground); }
+.rental-sidebar-colors :is(.rental-sidebar-top-trigger, .rental-workspace-trigger):focus-visible { outline: 2px solid var(--rental-shell-selected-icon); outline-offset: -2px; }
+.rental-sidebar-colors .rental-workspace-trigger[role="group"]:is(:hover, :active) { background: transparent; }
+.rental-sidebar-colors .rental-workspace-popup { max-width: min(var(--available-width), calc(100vw - var(--space-4))); }
+.rental-workspace-option-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+/* A 48px rail cannot fit both targets side by side. Keep workspace access and a visible restore button. */
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] .rental-sidebar-top-row { flex-direction: column; height: auto; }
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] .rental-workspace-menu { width: var(--rental-sidebar-menu-height); max-width: 100%; }
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] .rental-workspace-trigger { justify-content: center; }
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] :is(.rental-workspace-identity, .rental-workspace-chevron) { display: none; }
+.native-admin-shell [data-slot="sidebar"][data-collapsible="icon"] .rental-sidebar-top-trigger { margin-inline-start: 0; }
 /* Chinese labels use the shared control height and one compact spacing rhythm. */
 .rental-sidebar-colors [data-sidebar="content"] { gap: var(--rental-sidebar-menu-gap); }
 .rental-sidebar-colors [data-sidebar="menu"] { gap: var(--rental-sidebar-menu-gap); }

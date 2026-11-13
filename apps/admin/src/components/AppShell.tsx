@@ -1,6 +1,5 @@
 import { Breadcrumb } from "antd";
-import { Bell } from "lucide-react";
-import { Button, Tooltip } from "@/components/ui";
+import { Tooltip } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
@@ -53,12 +52,15 @@ function AppShellLayout({ children }: { children: ReactNode }) {
 
 function ShellContents({ children }: { children: ReactNode }) {
   const copilot = useCopilot();
-  const { state, openMobile, setOpenMobile } = useSidebar();
+  const { state, isMobile, openMobile, setOpenMobile } = useSidebar();
   const [query, setQuery] = useState("");
   const navRef = useRef<HTMLDivElement>(null), contentRef = useRef<HTMLDivElement>(null);
   const navigation = useWorkspaceNavigation(contentRef, navRef);
   const location = useLocation(), navigate = useNavigate(), { t } = useLocale();
   const tenant = useAuthStore(s => s.tenant), user = useAuthStore(s => s.user);
+  const tenantConsole = Boolean(user && !user.isSaasAdmin);
+  const navigationExpanded = isMobile ? openMobile : state === "expanded";
+  const navigationToggleLabel = t(navigationExpanded ? "收起导航" : "展开导航");
   const hasPermission = useAuthStore(s => s.hasPermission), hasCapability = useAuthStore(s => s.hasCapability);
   const hasTenantMembershipPermission = useAuthStore(s => s.hasTenantMembershipPermission);
   const currentWorkspaceId = useAuthStore(s => s.currentWorkspaceId);
@@ -117,11 +119,17 @@ function ShellContents({ children }: { children: ReactNode }) {
   }, [selectedKey, sections, state, openMobile]);
   return <>
     <Sidebar collapsible="icon" className="rental-sidebar-colors">
-      <SidebarHeader><NativeWorkspaceSwitcher />
+      <SidebarHeader>
+        {tenantConsole ? <div className="rental-sidebar-top-row">
+          <NativeWorkspaceSwitcher compact />
+          <SidebarTrigger className="rental-sidebar-top-trigger" aria-label={navigationToggleLabel}
+            aria-expanded={navigationExpanded} aria-controls="app-sidebar-navigation" aria-keyshortcuts="Control+B Meta+B"
+            title={`${navigationToggleLabel} (Ctrl / ⌘ B)`} data-sound="press" />
+        </div> : <NativeWorkspaceSwitcher />}
         <SidebarInput className="group-data-[collapsible=icon]:hidden" type="search" aria-label={t("搜索菜单")} placeholder={t("搜索菜单")} value={query} onChange={event => setQuery(event.target.value)} />
       </SidebarHeader>
       {canUseOperator && <OperatorModeSwitch ai={aiMode} onChange={next => { setQuery(""); navigation.fromSidebar(next ? APP_ROUTES.aiOperator.path : routes.some(route => lastAdminPath.current.split("?")[0] === route.path || lastAdminPath.current.startsWith(`${route.path}/`)) ? lastAdminPath.current : routes[0]?.path ?? "/"); }} />}
-      <SidebarContent ref={navRef}>
+      <SidebarContent id="app-sidebar-navigation" ref={navRef}>
         {aiMode ? <AiOperatorNavigation query={query} /> : <NativeNavigation sections={sections} selectedKey={selectedKey} query={query} onNavigate={navigation.fromSidebar} />}
       </SidebarContent>
       <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
@@ -129,8 +137,11 @@ function ShellContents({ children }: { children: ReactNode }) {
     <SidebarInset className="app-workspace min-h-0">
       <header className={`rental-sidebar-colors native-workspace-context flex shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing)${aiMode ? " operator-context-header" : ""}`}>
         <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
-          <SidebarTrigger className="-ml-1" aria-label={t(state === "collapsed" ? "展开导航" : "收起导航")} />
-          <Separator orientation="vertical" className="mr-2 h-4" />
+          {(!tenantConsole || isMobile) && <>
+            <SidebarTrigger className="-ml-1" aria-label={navigationToggleLabel} aria-expanded={tenantConsole ? navigationExpanded : undefined}
+              aria-controls="app-sidebar-navigation" aria-keyshortcuts="Control+B Meta+B" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+          </>}
           <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
         </div>
         <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
