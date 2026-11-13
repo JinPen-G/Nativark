@@ -95,6 +95,13 @@ export function createNotificationChangeSession(input: { current(): boolean; api
     catch (error) { publish({ error }); throw error; }
     finally { if (owner === request) { owner = null; publish({ busy: null }); } }
   };
+  const readCurrent = async (signal: AbortSignal) => {
+    try {
+      const found = current(await input.api.current(signal)); assert();
+      // A fresh read replaces the old comparison, never its confirmation.
+      publish({ current: found, review: null }); return found;
+    } catch (error) { publish({ current: null, review: null }); throw error; }
+  };
   const read = async (original: Original, signal: AbortSignal) => {
     assert();
     const prepared = await input.api.change(original.changeKey, signal); assert();
@@ -166,19 +173,19 @@ export function createNotificationChangeSession(input: { current(): boolean; api
     load() { return run('load', async signal => {
       if (pending || damaged) throw Error('AI_RESULT_UNKNOWN');
       if (input.store.read() !== null) throw Error('AI_OPERATION_LOCATOR_ALREADY_EXISTS');
-      const found = current(await input.api.current(signal)); assert(); publish({ current: found, review: null }); return found;
+      return readCurrent(signal);
     }); },
     inspect(value: Notifications, expiresAt: string) {
       assert(); if (view.busy || pending || damaged || !view.current) throw invalid();
       const after = notifications(value), at = (input.clock ?? (() => new Date()))();
       if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= at.getTime()) throw Error('AI_INVALID_INPUT');
       if (same(after, view.current.notifications)) throw Error('AI_INVALID_INPUT');
-      publish({ review: { before: structuredClone(view.current), after, expiresAt } });
+      publish({ review: { before: structuredClone(view.current), after, expiresAt }, error: null });
     },
     prepare(original: Original) { return run('prepare', async signal => {
       if (pending || damaged || !view.review || view.original || input.store.read() !== null) throw Error('AI_RESULT_UNKNOWN');
       const keys = journalSchema.parse({ original, stage: 'prepare' }).original, reviewed = structuredClone(view.review);
-      const fresh = current(await input.api.current(signal)); assert();
+      const fresh = await readCurrent(signal);
       if (!same(fresh, reviewed.before)) throw Error('AI_REVISION_CONFLICT');
       persist(keys, 'prepare');
       const saved = await input.api.prepare({ changeKey: keys.changeKey, baseRevision: fresh.settingsRevision,

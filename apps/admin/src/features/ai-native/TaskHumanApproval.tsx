@@ -208,7 +208,10 @@ export function TaskHumanReviewDetails({ value }: { value: AiTaskHumanReviewDraf
     <TaskProposalExecutionBoundary value={value} />
     {order && <TaskOrderMaterialDetails order={order} />}
     {value.kind === "order" ? <TaskOrderQuoteAmounts review={value.review} />
-      : <dl>{Object.entries(value.review.change.diff).map(([field, change]) => <div key={field}>
+      : <dl><dt>{t("来源")}</dt><dd>{t("原通知设置")}</dd>
+        <dt>{t("受影响经营空间")}</dt><dd>{value.review.proposal.payload.scope.kind === 'workspace'
+          ? safeDisplayText(value.review.proposal.payload.scope.workspaceId, 36) : t("不可用")}</dd>
+        {Object.entries(value.review.change.diff).map(([field, change]) => <div key={field}>
         <dt>{t(field === "notifications.enabledEvents" ? "通知事件" : "通知渠道")}</dt>
         <dd>{t("当前值")}: {change.before.map(item => safeDisplayText(item, 128)).join(", ") || t("空列表")}</dd>
         <dd>{t("候选值")}: {change.after.map(item => safeDisplayText(item, 128)).join(", ") || t("空列表")}</dd>

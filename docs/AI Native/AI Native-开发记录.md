@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain16-notification-conflict-refresh-20261113"></a>
+## 通知并发冲突撤回旧差异并显示原作用空间（2026-11-13）
+
+AIN-16 原反例为当前设置 7→其他人提交 8，准备前重读已阻止写入，但界面继续显示修订 7 的“当前值”和旧 review。原反例 stdin SHA-256 `e56d6e88dfc2e790fa563cfd7655c5d7e4b9ada7459335dd0face1d99480cf59`、工具 `d76fbb` 退出 0 只证明缺口。本阶段[通知会话](../../apps/admin/src/features/ai-native/notification-change-session.ts)每次当前值读取成功替换真实设置并撤旧差异，失败撤回 current/review，保留未发送输入和已持久化原操作；[通知流程](../../apps/admin/src/features/ai-native/NotificationChangeFlow.tsx)明确冲突后重新核对、来源为原通知设置且影响当前空间；[审批通知详情窄分支](../../apps/admin/src/features/ai-native/TaskHumanApproval.tsx)显示原提案 scope 的经营空间，不从差异补造权限。相关两条中英文案已随 a99b396 提交。
+
+三源已由助手冻结交回，Git blob 依次为 `1a0d1df3a6521bfc40663d932983eb1d137c632b`、`e048b03b0143d1c2dfb5c9717100de26e2009b06`、`2d3848151691e6a053de8d7d0e9d72f651a83b22`，Root 逐字核同。助手实际 session 正反例退出 0，stdin SHA-256 `50b00e3186523ff406f6e9ab1a2f2fda570bf5af34122bc53da3a33d1fe9e833`；实际 Flow/审批组件有限宿主模拟退出 0，SHA-256 `fb23f8c481dc06ae470d58cd1e671073cf9785d64b958527bc954995234eaf56`；TypeScript 5.9.3 三根/1457 源零诊断，退出 0，SHA-256 `cb6f6a66a0b31c06c181a999edea11c7de70eeb6aa517ec85bf92ff418d70e79`。覆盖撤权、迟到响应、prepare/start unknown 重挂、原定位和原 Core 收据；首次组件文本空白匹配失败保留，修正内存归一化后通过，产品未为测试改写。
+
+Root 独立实际 session 模拟退出 0，stdin SHA-256 `53ba8d9babd8369f396ab7d3984d48612d1cab4bf92fa9d200e8dfe57cf59c22`：7→8 后 current=8、review=null、prepare=0、无 journal；读取失败清旧值；首次派发应答丢失后原 journal 保留，两个原读取不再派发，换键拒绝，重挂仍同原操作。只有后续明确准备触发一次模拟 prepare，不因冲突/重读自动重试。
+
+原组件清单 123 条/263 源零哈希异常，Impeccable detector 空列表，diff 格式无误。进程退出、审计为空、全部任务临时路径不存在，无新测试文件或缓存。验证是内存 API/存储/React 替身及类型，真实界面和外部服务由负责人实测。AIN-16 本片两项消费者问题已修，整项仍沿 AIN-14 前置与原五条独立核定，由 PM 安排 QA。
+
 <a id="ain12-task-list-filters-20261113"></a>
 ## 任务中心场景、本人发起人与创建时间筛选（2026-11-13）
 

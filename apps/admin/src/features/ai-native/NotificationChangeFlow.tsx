@@ -17,7 +17,7 @@ import styles from './AiManagement.module.css';
 const english: Record<string, string> = {
   '通知设置审核': 'Notification settings review',
   '读取当前通知设置': 'Read current notification settings',
-  '先核对当前通知设置，再准备原审核任务。': 'Review current notification settings, then prepare the original review task.',
+  '来源为原通知设置；仅影响当前经营空间。': 'From the original notification settings; affects only the current workspace.',
   '当前设置版本': 'Current settings revision',
   '启用事件': 'Enabled events', '通知渠道': 'Notification channels', '审核有效期': 'Review expiry',
   '核对通知差异': 'Review notification differences', '准备审核任务': 'Prepare review task',
@@ -33,6 +33,7 @@ const english: Record<string, string> = {
   '通知设置已由原 Core 更新。': 'Notification settings were updated by the original Core.',
   '当前值': 'Current value', '新值': 'New value', '没有启用事件': 'No events enabled',
   '读取或准备失败，请核对当前权限和原请求。': 'Reading or preparation failed. Check current permissions and the original request.',
+  '通知设置已变化，请重新核对差异并确认。': 'Notification settings have changed. Review the differences again before confirming.',
   '短信': 'SMS', '应用推送': 'App push', '微信': 'WeChat', '邮件': 'Email',
   '会员注册': 'Member registration', '订单创建': 'Order creation', '订单确认': 'Order confirmation',
   '订单取消': 'Order cancellation', '超时未取': 'Overdue pickup', '爽约': 'No-show', '订单逾期': 'Overdue order',
@@ -94,12 +95,15 @@ export function NotificationChangeFlow({ identity, current, onTaskReady, onAcces
     'notifications.editableChannels': { before: view.review.before.notifications.editableChannels, after: view.review.after.editableChannels }
   } : null);
   const waiting = view.confirmation?.state === 'waiting_confirmation';
+  const failure = view.error as { message?: string; response?: { data?: { code?: string } } } | null;
+  const conflict = failure?.message === 'AI_REVISION_CONFLICT' || failure?.response?.data?.code === 'AI_REVISION_CONFLICT';
   if (!active()) return null;
   return <section className={styles.stack} aria-label={t('通知设置审核')}>
-    <p className={styles.help}>{t('先核对当前通知设置，再准备原审核任务。')}</p>
+    <p className={styles.help}>{t('来源为原通知设置；仅影响当前经营空间。')}</p>
     {view.locatorDamaged && <Alert type="warning" title={t('原定位无法读取，已阻止新通知请求。')} />}
     {view.pending && <Alert type="warning" title={t('原请求结果待核对。')} description={t('保留原定位，核对原收据后再继续。')} />}
-    {!!view.error && <Alert type="error" title={t('读取或准备失败，请核对当前权限和原请求。')} />}
+    {!!view.error && <Alert type={conflict ? 'warning' : 'error'} title={t(conflict && !view.original
+      ? '通知设置已变化，请重新核对差异并确认。' : '读取或准备失败，请核对当前权限和原请求。')} />}
     {view.original ? <ActionButton label={t('核对原通知请求')} disabled={busy || view.locatorDamaged} onAction={action(() => session.read())} />
       : <ActionButton label={t('读取当前通知设置')} disabled={busy || view.locatorDamaged} onAction={action(async () => {
         const found = await session.load(); if (active()) { setDraft(structuredClone(found.notifications)); setExpiry(null); }
