@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-original-time-limit-cause-20261113"></a>
+## 耗时窗口耗尽后保留原失败原因（2026-11-13）
+
+前置 `1e1a916cf3025fa480b7df31d0d3dcbb12b74669` 已回读 GitHub 一致。首次执行原失败只留下末端 `timeDebt:154`，未保存最早慢读采样；助手在同一订单 producer、原 5000 ms 窗口中加入有界的真实本地等待，确认 `workMs` 耗尽→abandon 原帧→同一租约再 begin(finish)→后发 unknown 的完整路径。这里的本地计时反例仍是模拟，不涉及真实数据库、模型或业务服务。
+
+[runner](../../apps/api/src/modules/ai-native/runner/ai-task-runner.service.ts)只在已经 abandon 本轮 overhead 后保留原 `AI_RUN_LIMIT`，不再申请同租约的 finish。原 UNKNOWN 优先级、finally 释放和 5000 ms 原占用不变；[overhead](../../apps/api/src/modules/ai-native/runner/prisma-task-run-overhead.ts)与 adapter 未改。固定 runner blob `25c5e7a026b66114cbd47064d2efa7c6ec5451f6`，Root 已逐字节核同并核对 catch/finally，不夹订单/聊天活动增量。
+
+助手执行 `node --no-compilation-cache -`，原耗时反例 stdin SHA-256 `22dbc4bf43341ca9964b583af77af8f73a96ef3e60b970593e855438ef1f438a`，退出 0：本地等待 5216.8842 ms，剩余 -284 ms，返回原 workMs 的 AI_RUN_LIMIT，finish 与后发 timeDebt 均未发生。原 charge 仍 UNKNOWN/5000 ms，activeMs、measurementHash、evidenceRef 为空；释放 revision 3→4、fence 1，Step/模型调用均 0。TypeScript 5.9.3 单根/1281 源零诊断，stdin SHA `ad530e028990b1a24c16c31340cf0bf85f27487d02a06dafc8a75cf60eb4b112`，退出 0。原反例和结果留内部会话 `01a1d2b8-d5ab-75f3-a042-034cff02f0fb`；本树 offline preload、不可达数据库、内存审计，审计为空，验证进程退出，无新增脚本或临时目录。
+
+该修复消除后发错误，未给 UNKNOWN 补结算，也未证明原历史那次慢读的具体原因。原无法计量占用继续要求可信原证据，不能靠重跑、延长默认限额或新键恢复。AIN-12 仍需聊天交互宿主和与材料绑定的可信业务摘要，以及正在核接的订单控制完整组合；不按本修复增加任务百分比。
+
 <a id="ain12-recovery-prefix-measurement-20261113"></a>
 ## 原前缀恢复在未注册后继处停止的耗时收尾（2026-11-13）
 

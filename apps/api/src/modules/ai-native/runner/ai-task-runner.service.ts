@@ -851,6 +851,7 @@ export class AiTaskRunner {
       const keepSettledInputTime = settledInputFailure && completedSteps > 0 && !primaryUnknown
         && !activeResourceTicket && !outcomeAttempted && meter?.includesEffectInterval === true
         && typeof meter.rotate === 'function' && typeof meter.completeAfterRelease === 'function';
+      let overheadAbandoned = false;
       // Only this settled supervision failure may retain the original interval
       // through its exact release receipt. It grants no aggregate outcome or new
       // action; missing authority/receipt/time still fails closed in finally.
@@ -860,6 +861,7 @@ export class AiTaskRunner {
         await this.callBounded(() => this.deps.resources!.overhead!.abandon(structuredClone(overheadTicket!),
           structuredClone(lease)), 5000, 'overhead_unknown').catch(() => {});
         overheadTicket = undefined;
+        overheadAbandoned = true;
       }
       if (activeResourceTicket && this.deps.resources) {
         await this.callBounded(() => this.deps.resources!.markUnknown(activeResourceTicket!, structuredClone(lease)), 5000, 'resource_unknown').catch(() => {});
@@ -874,7 +876,9 @@ export class AiTaskRunner {
         return { status: 'unavailable', completedSteps, cleanupFailed, nextAction: 'manual_handoff' };
       }
       if (error instanceof AiTaskRunnerError && !outcomeAttempted && error.code === "AI_RUN_LIMIT") {
-        if (!this.deps.taskOutcome) throw error;
+        // Abandoned time still occupies its original charge. This lease cannot
+        // admit terminal work over that debt; keep the original limit error.
+        if (overheadAbandoned || !this.deps.taskOutcome) throw error;
         return await finish({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code });
       }
       if (error instanceof AiTaskRunnerError) return { status: "unavailable", completedSteps, cleanupFailed,
