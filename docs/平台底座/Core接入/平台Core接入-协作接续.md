@@ -2,9 +2,11 @@
 
 更新时间：2026-11-14。
 
-> 状态：原实施准备文档及 QA 一致性复核已完成并归并 main，工程待原实施授权。本会话按PM安排核定两轮决定及PCH-01/02开工入口，当前写入仍限文档；不因“恢复”自动启动代码拆分。完整核对及公共文件安排见[准备记录](平台Core接入-开发记录.md#pch-preparation-20261112)。
+> 状态：原实施准备文档及 QA 一致性复核已完成并归并 main，工程待原实施授权。本会话按PM安排核定两轮决定及PCH-01/02开工入口，当前交付为底座品牌文档、许可及静态标志保留稿，代码拆分仍按原实施入口授权。完整核对及公共文件安排见[准备记录](平台Core接入-开发记录.md#pch-preparation-20261112)。
 
-负责人本轮确认开源品牌为 Nativark，开源主体为公共底座，Rental Core 将作为首个业务 Core 示范。底座视角的 README、MIT 许可及根包许可元数据已完成文档与许可自检，任务分支为 `codex/nativark-mit`，主线归并沿现有流程办理，固定交付与验证见[本阶段记录](平台Core接入-开发记录.md#nativark-mit-20261114)。
+负责人本轮确认开源品牌为 Nativark，开源主体为公共底座，Rental Core 将作为首个业务 Core 示范。底座视角的 README、MIT 许可及根包许可元数据已以固定提交 `d4ea8aa340a77e996bb5c54f76e2f98b9fdedb43` 上传 `codex/nativark-mit`，主线归并沿现有流程办理，验证见[许可阶段记录](平台Core接入-开发记录.md#nativark-mit-20261114)。
+
+参考 Preview 风格制作的三份静态 SVG 及对应 PNG、对比图已按负责人要求完整保留为 N 方案原稿。N 为助手自行采用的品牌首字母；负责人强调底座承载的是 Core，该反馈作为后续设计依据。当前任务分支为 `codex/nativark-logo`，资产及验证入口见[保留稿记录](平台Core接入-开发记录.md#nativark-logo-n-retained-20261114)。
 
 > 正式依据：[需求v1.2](平台Core接入-需求.md)、[开发任务v1.2](平台Core接入-开发任务.md)。原PCH编号、依赖、顺序与门槛保留，文档准备不计研发进度，不继承AIN/CAT-GOV完成度。
 
@@ -20,8 +22,8 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 2. 写入归属与固定来源
 
-- 本次文档树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，当前任务分支为 `codex/nativark-mit`，许可阶段固定基线为 `9fb20dd236143f9b4c502bf7651b94ecc6bced8f`。原 PCH 准备提交及基线沿准备记录查阅。
-- 本轮写入范围为根 LICENSE、README 产品与开发介绍、根 package.json/package-lock.json 的许可字段及 PCH 开发记录、接续。主树索引及各研发树由原作者负责。
+- 本次文档树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，当前任务分支为 `codex/nativark-logo`，标志阶段固定父版本为 `d4ea8aa340a77e996bb5c54f76e2f98b9fdedb43`。许可阶段原文及基线直接从该固定版本查阅。原 PCH 准备提交及基线沿准备记录查阅。
+- 本轮写入范围为 `assets/01_Logo/nativark-logo-*` 的七份保留稿资产及 PCH 开发记录、接续。主树索引及各研发树由原作者负责。
 - 两轮需求和12份前像已随 `d1ae52df6d8207e913d6e49fde1dd28c7c962bc3` 进入当前main历史。本次旧接续以固定基线Git原文保全；此前“未提交”是当时阶段状态，原记录保留历史语境，不再复制归档。
 - PCH源码工作树与公共文件唯一作者窗口尚待PM明确。建议01/02先共用一棵PCH作者树，按固定基线和真实依赖扩展检出；本次创建的文档树本身不授源码施工权。
 
@@ -37,6 +39,6 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 4. 验证边界与保留事项
 
-本片只核对文档、固定源码和Git来源。白名单文档检查仍有总导航三处历史附件缺失；本片定向结果、实际命令及退出码见准备记录。未安装依赖、启应用、执行Prisma/数据库、浏览器/Host、模型或供应商验证，QA 已完成文档和固定来源的一致性复核，见[main 归并证据](平台Core接入-开发记录.md#pch-preparation-main-integration-20261113)；源码/运行的独立审查尚未实施，不得写成 SDK 或底座已运行。
+PCH 准备证据只覆盖文档、固定源码和 Git 来源，QA 的文档与固定来源一致性复核见[main 归并证据](平台Core接入-开发记录.md#pch-preparation-main-integration-20261113)。README/MIT 阶段的白名单定向核对仍有总导航三份历史附件及 AI Native 接续两份 output 证据缺失，具体命令与退出码见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)。标志保留稿验证实际参考页风格、静态 SVG、PNG 渲染与文件完整性，结果见[资产记录](平台Core接入-开发记录.md#nativark-logo-n-retained-20261114)。本任务未安装依赖、启业务应用或执行 Prisma/数据库、模型、供应商与真实宿主验证，源码/运行的独立审查及底座工程验收尚未实施。
 
 初版与两轮原文分别见[方案基线](历史归档/方案基线/2026-10-31/README.md)、[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)、[第二轮前像](历史归档/需求澄清/2026-11-09/第二轮补充前/manifest.json)。旧记录中的缺失附件、历史临时验证材料去向及未验工程继续由原所有者核明；本片不接管未知产物。保留所有Rental、AI Native、旧方案和测试。

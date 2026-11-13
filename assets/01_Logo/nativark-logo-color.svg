@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="nativark-color-title nativark-color-description">
+  <title id="nativark-color-title">Nativark 彩色标志</title>
+  <desc id="nativark-color-description">错位层叠的圆角业务模块，前景为 N 字母，下方圆角托座承载各模块。</desc>
+  <defs>
+    <linearGradient id="nativark-sky" x1="111" y1="107" x2="253" y2="325" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B7E0FF"/>
+      <stop offset="1" stop-color="#69B8FF"/>
+    </linearGradient>
+    <linearGradient id="nativark-back" x1="240" y1="64" x2="380" y2="305" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#58AEFF"/>
+      <stop offset="1" stop-color="#0D6EFD"/>
+    </linearGradient>
+    <linearGradient id="nativark-front" x1="179" y1="157" x2="370" y2="371" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1D7DFF"/>
+      <stop offset="1" stop-color="#0958D9"/>
+    </linearGradient>
+    <linearGradient id="nativark-base" x1="139" y1="344" x2="372" y2="441" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4495FF"/>
+      <stop offset="1" stop-color="#1555CF"/>
+    </linearGradient>
+  </defs>
+  <g id="nativark-module-left" transform="rotate(-8 183 218)">
+    <rect x="105" y="110" width="156" height="216" rx="33" fill="url(#nativark-sky)"/>
+  </g>
+  <g id="nativark-module-back" transform="rotate(4 306 184)">
+    <rect x="235" y="64" width="142" height="240" rx="30" fill="url(#nativark-back)"/>
+  </g>
+  <g id="nativark-module-front" transform="rotate(-4 273 266)">
+    <rect x="170" y="157" width="206" height="218" rx="38" fill="url(#nativark-front)"/>
+    <path d="M232 308V222L311 308V222" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path id="nativark-platform" d="M105 350H407C419 350 428 361 424 373L413 407C409 421 396 430 381 430H131C116 430 103 421 99 407L88 373C84 361 93 350 105 350Z" fill="url(#nativark-base)"/>
+  <path d="M181 389H331" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" opacity=".94"/>
+</svg>
