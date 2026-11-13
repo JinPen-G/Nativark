@@ -875,9 +875,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         throw new ConflictException('开业检查期间采用版本已变化，请重新读取');
     }
     if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId) throw new ConflictException('开业事实来源变化');
-    return this.renderTenantReadiness({ ...business, ...membership, nowAt: now.getTime(), priceVersionAvailable: true,
+    const readiness = this.renderTenantReadiness({ ...business, ...membership, nowAt: now.getTime(), priceVersionAvailable: true,
       profileCategoryCode: core.categoryCode, categoryName: published?.definition.name, enabledGroups: core.pricingGroups,
       enabledItemGroupCount: core.enabledItemGroupCount, serviceableLocationCount: core.serviceableLocationCount });
+    // Keep the original nine-item decision and attach its persisted calendar
+    // source. Legacy stores without metadata cannot manufacture version proof.
+    return { ...readiness, ...(business.calendarSource ? { calendarSource: structuredClone(business.calendarSource) } : {}) };
   }
 
   /** Original nine-item observation through the supplied caller transaction or

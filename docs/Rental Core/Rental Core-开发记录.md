@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="calendar-r0-binding-source-20261113"></a>
+
+## 日历R0当前采用来源的窄合同（2026-11-13）
+
+按PM指定的AIN-14/Core接点，只改[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)和[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)。原受权开业读取只按年度统计已发布行数，同年从一个日历版本换到另一个版本时summary/年度集合不变，不能据此证明采用来源未变。本片不改日历发布/采用动作、计价、Schema、Shared出口、Auth/Guard或AI源码；原返回接点先冻结给PM，由AI-RD另行消费。
+
+`readReadinessBusinessFacts.calendarSource`的合同为`rental-calendar-read-source-1`，通过原`readTenantReadiness.calendarSource`及`readTenantReadinessSource.readiness.calendarSource`返回，详见[合同证据](../../output/category-governance/calendar-r0-binding-contract-20261113.json)。每个原业务时区请求年度最多读取2个`status=published`的持久行，唯一行才提供`id/year/version/status/revision/publishedAt`；0行明确`not_adopted/binding=null`，2行409冲突，不选最大版本。绑定来自原`rental_business_calendars`当前发布行；其原`publishCalendarVersion`将新行发布/旧行取代放在同一事务，R0不从缓存、summary、默认版号或官方注册表反造采用。
+
+同一行的官方来源ID/版本、来源发布时间和导入时间只提供原存储引用或null；不提供URL、自由原因、发布人、日期明细或金额，不把来源引用当官方注册表验收。缺原发布时点/读取端口503，坏范围/修订/引用或多发布行409；旧显式store没有`calendarSource`时保留字段缺失，不补版1。`sourceHash`使用原`requestFingerprint`绑定协议、tenant/workspace及各年度记录；不含观察时间，同年ID/版本/revision/发布来源变化可核对。原九项开业结果及缺项仍由原渲染逻辑决定。
+
+读取前后核对原ALS完整身份指纹和空间，末次空间查询等待后再次核对；同一个原client末次复读日历元数据，变化拒绝。观察提供开始/结束时间及`independent_persisted_reads`或`caller_transaction_reads`，不新开事务、不新增业务锁，不宣称总开业修订、对象CAS或真实MySQL快照。调用者原事务/锁及所有原写入冲突机制保持。
+
+最终TypeScript5.9.3使用原API配置，867根/2012源零诊断，只安装两个必要emit；Shared/Client及前片地点两份产物六份保护文件哈希不变，见[最终编译/安装](../../output/category-governance/calendar-r0-binding-final-compile-20261113.json)。实际仓储及原R0服务十三组限定调用和末次空间查询等待中身份变化各退出0、audit0，见[最终行为](../../output/category-governance/calendar-r0-binding-final-behavior-20261113.json)。覆盖同年换版、revision变化、读取中换版、空绑定、重复发布、坏范围/修订、缺发布依据、同原client、官方引用、九项结果和旧store缺来源；SQL/Core配置/账号计数为明确替身，不证明真库或真实权限。
+
+原`node --no-compilation-cache --require <本树绝对preload> --test tests/ai-native-lane-a-diagnostics.test.cjs`十六项全部通过，退出0、audit0，见[原诊断用例](../../output/category-governance/calendar-r0-binding-original-diagnostics-20261113.json)。这证明原读取/范围兼容，AI现行schema仍未消费新字段，不能写为AIN-14当前采用来源已端到端接通。没有新增/扩写测试脚本或改原断言。
+
+本批验证已退出，两份emit移入本树在用产物，剩一个空audit。原生PowerShell删除再次被自动审批`blocked by policy`拒绝，命令未执行、无详细理由；已同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/calendar-r0-binding-validation/manifest.json)，原任务暂存不存在，见[退出结果](../../output/category-governance/calendar-r0-binding-cleanup-20261113.json)。本批及旧批未删除，继续原清单留责。地点功能已独立提交/上传`4bc12d3a6971cc43cd6df5c774babe29fb46c7b4`并核GitHub；PM安排QA/集成。本片继续原08、两种动态编码不同组合的冻结经营及真实环境/独立Review门槛，完整0/14与百分比待核实不变。
+
 <a id="location-operator-atomic-save-20261113"></a>
 
 ## 地点与名称主体的原子保存（2026-11-13）

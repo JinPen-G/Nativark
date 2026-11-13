@@ -21,7 +21,8 @@ import type {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { RENTAL_READINESS_FACT_LIMIT, type RentalConfigTx } from "./rental-core-config.repository";
-import { getRequestTenantId, getRequestWorkspaceId } from '../../common/request-identity';
+import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId } from '../../common/request-identity';
+import { requestFingerprint } from './rental-idempotency.repository';
 import { RULE_VERSION_ISSUED_STATUSES, type RuleVersionTimelineEntry } from './rental-rule-version-chain';
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
@@ -66,6 +67,42 @@ export interface RentalReadinessBusinessFacts {
   operationsAccounts: number;
   hasActiveRole: boolean;
   priceVersion: { sequence: number; effectiveFrom: string } | null;
+  /** Present only when the persisted producer supplied this bounded source.
+   * Legacy/test stores without it cannot attest an adopted calendar version. */
+  calendarSource?: RentalReadinessCalendarSource;
+}
+
+/** Read-only current annual adoption metadata, never calendar days, prices or
+ * an editable target. Publication/source references describe stored facts;
+ * they do not attest the official registry or grant a calendar write. */
+export interface RentalReadinessCalendarSource {
+  readonly version: 'rental-calendar-read-source-1';
+  readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly years: ReadonlyArray<{
+    readonly year: number;
+    readonly status: 'adopted' | 'not_adopted';
+    readonly binding: {
+      readonly id: string;
+      readonly year: number;
+      readonly version: string;
+      readonly status: 'published';
+      readonly revision: number;
+      readonly publishedAt: string;
+      readonly officialSource: {
+        readonly versionId: string | null;
+        readonly version: string | null;
+        readonly publishedAt: string | null;
+        readonly importedAt: string | null;
+      };
+    } | null;
+  }>;
+  readonly sourceHash: string;
+  readonly observations: {
+    readonly startedAt: string;
+    readonly completedAt: string;
+    readonly consistency: 'caller_transaction_reads' | 'independent_persisted_reads';
+  };
 }
 
 /** Preserve the original role override semantics without materializing members
@@ -268,27 +305,32 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
    * no new transaction, lock or readiness algorithm is introduced. */
   async readReadinessBusinessFacts(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts> {
     const client = tx ?? this.prisma;
-    const now = new Date(at), years = [...calendarYears];
+    const now = new Date(at), years = [...calendarYears], identity = requestFingerprint(getRequestIdentity());
     if (!Number.isFinite(now.getTime()) || years.length < 1 || years.length > 3
       || years.some(year => !Number.isInteger(year) || year < 1 || year > 9999)
       || new Set(years).size !== years.length) throw new ConflictException('开业查询时点或营业年度无效');
     const assertScope = async () => {
       if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
-        || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
+        || requestFingerprint(getRequestIdentity()) !== identity)
+        throw new ForbiddenException('开业读取缺少当前租户或经营空间');
+      const resolved = await resolveScopeWorkspaceId(client, tenantId);
+      if (resolved !== workspaceId || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
+        || requestFingerprint(getRequestIdentity()) !== identity)
         throw new ForbiddenException('开业读取缺少当前租户或经营空间');
     };
     await assertScope();
+    const startedAt = new Date().toISOString();
     const where = { tenantId, workspaceId };
     type RateReference = { tenantId: string; workspaceId: string; planId: string; ratesType: string;
       rateIndex: number | null; pricingGroupId: string | null; pricingGroupIdType: string | null;
       itemGroupId: string | null; itemGroupIdType: string | null };
-    const [rules, calendarCounts, refs, accounts, priceVersion] = await Promise.all([
+    const [rules, calendarBindings, refs, accounts, priceVersion] = await Promise.all([
       // Two latest issued rows are enough to preserve the original same-time
       // conflict test. Older rule contents/history are not opening facts.
       client.rentalRuleVersion.findMany({ where: { ...where, status: { in: [...RULE_VERSION_ISSUED_STATUSES] }, effectiveFrom: { lte: now } },
         select: { id: true, tenantId: true, workspaceId: true, version: true, status: true, effectiveFrom: true },
         orderBy: [{ effectiveFrom: 'desc' }, { id: 'asc' }], take: 2 }),
-      Promise.all(years.map(year => client.rentalBusinessCalendar.count({ where: { ...where, year, status: 'published' } }))),
+      this.readReadinessCalendarBindings(client, tenantId, workspaceId, now, years),
       // JSON_TABLE supplies only ordinality; extract target identifiers, not
       // monetary fields or full rates JSON. Empty plans still get a sentinel
       // row, and the global LIMIT bounds both plans and rate references.
@@ -315,7 +357,6 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       || !(RULE_VERSION_ISSUED_STATUSES as readonly string[]).includes(row.status)
       || !(row.effectiveFrom instanceof Date) || !Number.isFinite(row.effectiveFrom.getTime()) || row.effectiveFrom > now)
       || new Set(rules.map(row => row.id)).size !== rules.length
-      || calendarCounts.some(value => !Number.isSafeInteger(value) || value < 0)
       || priceVersion && (!owns(priceVersion) || !Number.isSafeInteger(priceVersion.sequence) || priceVersion.sequence < 1
         || !(priceVersion.effectiveFrom instanceof Date) || !Number.isFinite(priceVersion.effectiveFrom.getTime()) || priceVersion.effectiveFrom > now))
       throw new ConflictException('开业业务元数据来源或内容无效');
@@ -342,12 +383,53 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       if (!target) throw new ConflictException('开业价格引用缺少目标');
       identifiers.add(target);
     }
+    // A same-year replacement must not disappear behind an unchanged annual
+    // count or summary. Re-read metadata through this original client; this is
+    // an observation fence, not a new transaction or a total readiness version.
+    const currentCalendars = await this.readReadinessCalendarBindings(client, tenantId, workspaceId, now, years);
+    const calendarBasis = { version: 'rental-calendar-read-source-1' as const, tenantId, workspaceId, years: calendarBindings };
+    const sourceHash = requestFingerprint(calendarBasis);
+    if (requestFingerprint({ ...calendarBasis, years: currentCalendars }) !== sourceHash)
+      throw new ConflictException('开业读取期间营业日历采用版本已变化，请重新读取');
     await assertScope();
     return { tenantId, workspaceId, ruleVersions: rules.map(row => ({ id: row.id, version: row.version,
       status: row.status as RentalRuleVersion['status'], effectiveFrom: row.effectiveFrom!.toISOString() })),
-      publishedCalendarYears: years.filter((_year, index) => calendarCounts[index] > 0),
+      publishedCalendarYears: calendarBindings.filter(row => row.status === 'adopted').map(row => row.year),
+      calendarSource: { ...calendarBasis, sourceHash, observations: { startedAt, completedAt: new Date().toISOString(),
+        consistency: tx ? 'caller_transaction_reads' : 'independent_persisted_reads' } },
       pricedGroupIds: [...identifiers], ...accounts,
       priceVersion: priceVersion ? { sequence: priceVersion.sequence, effectiveFrom: priceVersion.effectiveFrom.toISOString() } : null };
+  }
+
+  /** At most two current rows per requested year: the second proves a conflict,
+   * never a reason to pick the largest version. Missing publication facts are
+   * unavailable; zero rows explicitly mean no adopted version, not a default. */
+  private async readReadinessCalendarBindings(client: RentalConfigTx, tenantId: string, workspaceId: string,
+    at: Date, years: readonly number[]): Promise<RentalReadinessCalendarSource['years']> {
+    if (typeof client.rentalBusinessCalendar?.findMany !== 'function')
+      throw new ServiceUnavailableException('营业日历绑定来源不可用');
+    return Promise.all(years.map(async year => {
+      const rows = await client.rentalBusinessCalendar.findMany({ where: { tenantId, workspaceId, year, status: 'published' },
+        select: { id: true, tenantId: true, workspaceId: true, year: true, version: true, status: true, revision: true,
+          publishedAt: true, sourceVersionId: true, sourceVersion: true, sourcePublishedAt: true, importedAt: true },
+        orderBy: { id: 'asc' }, take: 2 });
+      if (rows.length > 1) throw new ConflictException(`${year} 年度存在多个已发布营业日历，无法唯一确定采用版本`);
+      const row = rows[0];
+      if (!row) return { year, status: 'not_adopted' as const, binding: null };
+      const identifier = (value: unknown) => typeof value === 'string' && Boolean(value.trim()) && value.length <= 191;
+      const instant = (value: unknown) => value instanceof Date && Number.isFinite(value.getTime()) && value <= at;
+      if (row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.year !== year || row.status !== 'published'
+        || !identifier(row.id) || !identifier(row.version) || !Number.isSafeInteger(row.revision) || row.revision < 0 || row.revision > 2147483647)
+        throw new ConflictException('营业日历绑定范围或原修订无效');
+      if (!instant(row.publishedAt)) throw new ServiceUnavailableException('营业日历缺少可核对的原发布依据');
+      if (row.sourceVersionId !== null && !identifier(row.sourceVersionId) || row.sourceVersion !== null && !identifier(row.sourceVersion)
+        || row.sourcePublishedAt !== null && !instant(row.sourcePublishedAt) || row.importedAt !== null && !instant(row.importedAt))
+        throw new ConflictException('营业日历原来源引用或时点无效');
+      return { year, status: 'adopted' as const, binding: { id: row.id, year: row.year, version: row.version,
+        status: 'published' as const, revision: row.revision, publishedAt: row.publishedAt!.toISOString(),
+        officialSource: { versionId: row.sourceVersionId, version: row.sourceVersion,
+          publishedAt: row.sourcePublishedAt?.toISOString() ?? null, importedAt: row.importedAt?.toISOString() ?? null } } };
+    }));
   }
 
   async loadAll(): Promise<TenantBusinessConfigSnapshot[]> {
