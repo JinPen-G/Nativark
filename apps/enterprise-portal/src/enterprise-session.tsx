@@ -2,7 +2,7 @@
  * hidden pages and authority rereads cancel readers while retaining original operations. */
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ClientMembershipSessionResponse, EnterpriseEntryResponse } from "@rental-os/shared";
-import { ClientTransportError, customerFetch, customerSessionGeneration, loadCustomerSession, parseCustomerResponse, parseEnterpriseRoute, logoutCustomerSession, subscribeCustomerSession } from "@rental-os/web-client";
+import { ClientTransportError, customerFetch, customerSessionGeneration, loadCustomerSession, parseCustomerResponse, parseEnterpriseRoute, logoutCustomerSession, subscribeCustomerSession, switchCustomerWorkspace } from "@rental-os/web-client";
 export const CLIENT_BASE = "/api/client/v1";
 const offline = import.meta.env.MODE === "offline";
 interface EnterpriseContextValue {
@@ -10,6 +10,7 @@ interface EnterpriseContextValue {
   session: ClientMembershipSessionResponse | null; entry?: EnterpriseEntryResponse;
   loading: boolean; error: string; identity: string; signal: AbortSignal;
   selectedCorporateId: string; selectCorporate: (id: string) => void;
+  selectWorkspace: (workspaceCode: string) => Promise<void>;
   reload: () => void; logout: () => Promise<void>;
   read: <T>(path: string, signal?: AbortSignal) => Promise<T>;
   write: <T>(path: string, body: unknown, method?: "POST" | "PUT") => Promise<T>;
@@ -27,6 +28,7 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
   const [accessRevision, setAccessRevision] = useState(0);
   const owner = useRef(new AbortController());
   const revalidating = useRef(false);
+  const switchingWorkspace = useRef(false);
   const deniedAccessScope = useRef("");
   const [signal, setSignal] = useState(owner.current.signal);
   const cancelReaders = () => { owner.current.abort(); owner.current = new AbortController(); setSignal(owner.current.signal); };
@@ -40,6 +42,7 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
   const suspendAccess = () => { cancelReaders(); revalidating.current = false; setLoading(true); };
   const revalidateAccess = () => {
     if (!tenantName || offline || document.visibilityState === "hidden") return;
+    if (switchingWorkspace.current) return;
     if (customerSessionGeneration(tenantCode) !== generation) { synchronizeSession(); return; }
     if (!session || revalidating.current) return;
     suspendAccess(); revalidating.current = true; setAccessRevision(current => current + 1);
@@ -131,6 +134,20 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
   const identity = JSON.stringify([tenantCode, session?.customer.customerId, generation, selectedCorporateId, entry?.corporates.map(c => [c.corporateCustomerId, c.membershipId, c.permissionRevision, c.actions]), revision]);
   const accessScope = JSON.stringify([tenantCode, session?.customer.customerId, generation, session?.workspace?.workspaceCode, selectedCorporateId, entry?.corporates.map(c => [c.corporateCustomerId, c.permissionRevision])]);
   const renderOwner = owner.current;
+  const selectWorkspace = async (workspaceCode: string) => {
+    if (!session || loading || switchingWorkspace.current || document.visibilityState === "hidden"
+      || renderOwner.signal.aborted || owner.current !== renderOwner || customerSessionGeneration(tenantCode) !== generation
+      || !session.workspaces.some(workspace => workspace.workspaceCode === workspaceCode)) throw new Error("当前客户服务选择已失效");
+    if (workspaceCode === session.workspace?.workspaceCode) return;
+    switchingWorkspace.current = true; suspendAccess();
+    try { await switchCustomerWorkspace(tenantCode, CLIENT_BASE, workspaceCode); }
+    finally {
+      switchingWorkspace.current = false;
+      // A failed switch keeps the original session. Reread its current grants
+      // without repeating the authentication command or applying the target locally.
+      if (customerSessionGeneration(tenantCode) === generation) revalidateAccess();
+    }
+  };
   const request = async <T,>(path: string, init: RequestInit, externalSignal?: AbortSignal): Promise<T> => {
     if (offline) throw new Error("未连接企业服务");
     const requestOwner = renderOwner;
@@ -164,6 +181,6 @@ export function EnterpriseSessionProvider({ children }: { children: ReactNode })
     catch (e) { setError(e instanceof Error ? e.message : "会话撤销结果待核对"); throw e; }
   };
   return <Context.Provider value={{ tenantCode, tenantName, basePath: route?.basePath ?? "/enterprise", domainBound: route?.boundDomain ?? false,
-    session, entry, loading, error, identity, signal, selectedCorporateId, selectCorporate, read, write, logout, reload: () => { invalidate(); setRevision(r => r + 1); } }}>{children}</Context.Provider>;
+    session, entry, loading, error, identity, signal, selectedCorporateId, selectCorporate, selectWorkspace, read, write, logout, reload: () => { invalidate(); setRevision(r => r + 1); } }}>{children}</Context.Provider>;
 }
 export function useEnterprise() { const value = useContext(Context); if (!value) throw new Error("Enterprise session host is required"); return value; }

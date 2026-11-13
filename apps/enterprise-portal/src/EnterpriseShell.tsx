@@ -8,12 +8,13 @@ import { NativeContextSwitcher } from "@/components/animate-sidebar/NativeContex
 import { NativeAccountMenuView } from "@/components/animate-sidebar/NativeAccountMenuView";
 import { NativeNavigation } from "@/components/animate-sidebar/NativeNavigation";
 import { WorkspaceClock } from "@/components/WorkspaceClock";
-import { Building2 } from "lucide-react";
+import { Building2, Store } from "lucide-react";
 import { TeamOutlined, HistoryOutlined, FileTextOutlined, FormOutlined, IdcardOutlined, GiftOutlined, SafetyCertificateOutlined, ControlOutlined, FileSearchOutlined, InboxOutlined, CalculatorOutlined } from "@/components/ui/icons";
 import { useEnterprise } from "./enterprise-session";
 export function EnterpriseShell({ children }: { children: ReactNode }) {
   const { locale } = useLocale(), context = useEnterprise();
   const [logoutError, setLogoutError] = useState("");
+  const [workspaceError, setWorkspaceError] = useState<{ identity: string; message: string }>();
   const english = locale === "en-US";
   const corporate = context.loading ? undefined : context.entry?.corporates.find(row => row.corporateCustomerId === context.selectedCorporateId);
   const location = useLocation(), activePage = location.pathname.slice(context.basePath.length).replace(/^\//, "") || "members";
@@ -44,8 +45,15 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
       account={tenantName} onSignOut={context.session ? () => context.logout() : undefined}
       onError={error => setLogoutError(error instanceof Error ? error.message : (english ? "Sign out failed" : "退出失败"))} />}
     navigation={({ query, onNavigate }) => <NativeNavigation flat sections={sections} selectedKey={context.basePath + "/" + activePage} query={query} onNavigate={onNavigate} />}
-    headerContext={<span className="enterprise-context">{tenantName}{corporate && <> · {corporate.corporateName}</>}</span>}
+    headerContext={context.session ? <NativeContextSwitcher title={context.session.workspace?.workspaceName || (english ? "Choose service" : "选择服务")}
+      subtitle={context.session.workspace?.workspaceCode ?? ""} brand={<Store aria-hidden="true" />}
+      label={english ? "Current customer service" : "当前客户服务"} value={context.session.workspace?.workspaceCode ?? ""}
+      options={(context.loading ? [] : context.session.workspaces).map(workspace => ({ id: workspace.workspaceCode, name: `${workspace.workspaceName} · ${workspace.workspaceCode}`, icon: <Store aria-hidden="true" /> }))}
+      onChange={async code => { setWorkspaceError(undefined); await context.selectWorkspace(code); }}
+      onError={() => setWorkspaceError({ identity: context.identity, message: english ? "Service switching could not be verified. Read the current service again." : "服务切换结果未核对，请重新读取当前服务。" })} />
+      : <span className="enterprise-context">{tenantName}</span>}
     headerActions={<WorkspaceClock />}>
-    {logoutError && <p role="alert">{logoutError}</p>}{children}
+    {logoutError && <p role="alert">{logoutError}</p>}
+    {workspaceError?.identity === context.identity && <p role="alert">{workspaceError.message}</p>}{children}
   </BusinessShell>;
 }
