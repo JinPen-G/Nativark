@@ -178,7 +178,10 @@ export interface RentalConfigStore {
   /** preserveStatus carries an omitted edit field into the writer's lock; the
    * returned status updates the local cache without reviving a stale flag. */
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus?: boolean): Promise<RentalFulfillmentOperator['status'] | void>;
-  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus?: boolean): Promise<RentalFulfillmentLocation['status'] | void>;
+  /** A name-only legacy request supplies an uncommitted operator draft. The
+   * writer must create it with the location in this same transaction. */
+  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus?: boolean,
+    newOperator?: RentalFulfillmentOperator): Promise<RentalFulfillmentLocation['status'] | void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean): Promise<void>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
@@ -1211,7 +1214,13 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus = false): Promise<RentalFulfillmentLocation['status']> {
+  /** Location and a legacy operator draft commit together after binding and
+   * scope validation. No independent operator transaction or early cache write. */
+  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus = false,
+    newOperator?: RentalFulfillmentOperator): Promise<RentalFulfillmentLocation['status']> {
+    location = structuredClone(location);
+    newOperator = newOperator ? structuredClone(newOperator) : undefined;
+    expectedBinding = expectedBinding ? { ...expectedBinding } : undefined;
     const data = {
       tenantId: location.tenantId,
       organizationId: location.organizationId ?? null,
@@ -1247,9 +1256,10 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (preserveStatus && (!current || current.tenantId !== location.tenantId || current.workspaceId !== workspaceId)) throw new ConflictException("履约地点原状态不可核实，请重新读取配置");
       const status = preserveStatus ? current!.status : location.status;
       if (status !== 'enabled' && status !== 'disabled') throw new BadRequestException("履约地点状态无效");
-      if (location.operatorId) {
-        const operator = await client.rentalFulfillmentOperator.findFirst({ where: { id: location.operatorId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
+      if (location.operatorId && !newOperator) {
+        const operator = await client.rentalFulfillmentOperator.findFirst({ where: { id: location.operatorId, tenantId: location.tenantId, workspaceId }, select: { id: true, status: true } });
         if (!operator) throw new ConflictException("履约地点引用了其他租户或经营空间的经营主体");
+        if (operator.status !== 'enabled') throw new ConflictException("履约地点经营主体已停用，请重新读取配置");
       }
       if (location.organizationId) {
         const organization = await client.organizationUnit.findFirst({
@@ -1261,6 +1271,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (location.parentLocationId) {
         const parent = await client.rentalFulfillmentLocation.findFirst({ where: { id: location.parentLocationId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
         if (!parent) throw new ConflictException("履约地点引用了其他租户或经营空间的上级地点");
+      }
+      if (newOperator) {
+        if (newOperator.tenantId !== location.tenantId || newOperator.id !== location.operatorId
+          || newOperator.name !== location.operatorName || newOperator.type !== location.operatorType || newOperator.status !== 'enabled') {
+          throw new ConflictException("新增经营主体与地点的原创建依据不一致");
+        }
+        const present = await client.rentalFulfillmentOperator.findUnique({ where: { id: newOperator.id }, select: { id: true } });
+        if (present) throw new ConflictException("新增经营主体标识已存在，请重新读取地点配置");
+        await this.upsertOperator(newOperator, client);
       }
       const saved = { ...data, status };
       await client.rentalFulfillmentLocation.upsert({

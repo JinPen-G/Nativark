@@ -1327,6 +1327,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest) {
     const state = this.state(tenantId);
+    const { result, existing } = this.buildOperator(tenantId, input, state);
+    const preserveStatus = Boolean(existing && input.status === undefined);
+    const savedStatus = await this.configStore.upsertOperator(result, undefined, preserveStatus);
+    if (preserveStatus && savedStatus === undefined) throw new ServiceUnavailableException("经营主体原状态读取不可用");
+    if (savedStatus !== undefined) result.status = savedStatus;
+
+    if (existing) state.operators.splice(state.operators.indexOf(existing), 1, result); else state.operators.unshift(result);
+    return result;
+  }
+
+  private buildOperator(tenantId: string, input: SaveRentalFulfillmentOperatorRequest, state: TenantRentalState) {
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("经营主体编码和名称不能为空");
     if (input.status !== undefined && input.status !== 'enabled' && input.status !== 'disabled') throw new BadRequestException("经营主体状态无效");
     const duplicate = state.operators.find((row) => row.code === input.code.trim() && row.id !== input.id);
@@ -1340,25 +1351,27 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       settlementMode: input.settlementMode ?? (input.type === "partner" ? "monthly" : "self"),
       status: input.status ?? existing?.status ?? "enabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    const preserveStatus = Boolean(existing && input.status === undefined);
-    const savedStatus = await this.configStore.upsertOperator(result, undefined, preserveStatus);
-    if (preserveStatus && savedStatus === undefined) throw new ServiceUnavailableException("经营主体原状态读取不可用");
-    if (savedStatus !== undefined) result.status = savedStatus;
-
-    if (existing) state.operators.splice(state.operators.indexOf(existing), 1, result); else state.operators.unshift(result);
-    return result;
+    return { result, existing };
   }
 
   async saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
+    input = structuredClone(input);
     const state = this.state(tenantId);
     const { definition, binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("地点编码和名称不能为空");
     if (input.status !== undefined && input.status !== 'enabled' && input.status !== 'disabled') throw new BadRequestException("履约地点状态无效");
     let operator = input.operatorId ? state.operators.find((row) => row.id === input.operatorId) : undefined;
+    let newOperator: RentalFulfillmentOperator | undefined;
     if (!operator && input.operatorName?.trim()) {
       operator = state.operators.find((row) => row.name === input.operatorName?.trim());
-      if (!operator) operator = await this.saveOperator(tenantId, { code: `LEGACY-${state.operators.length + 1}`, name: input.operatorName.trim(), type: input.operatorType ?? "self_operated" });
+      if (!operator) {
+        // Legacy name-only requests prepare a new operator without writing it.
+        // The location writer owns both records and their rollback boundary.
+        newOperator = this.buildOperator(tenantId, { code: `LEGACY-${state.operators.length + 1}`,
+          name: input.operatorName.trim(), type: input.operatorType ?? "self_operated" }, state).result;
+        operator = newOperator;
+      }
     }
     if (!operator || operator.status !== "enabled") throw new BadRequestException("请选择已启用的经营主体");
     if (!input.capabilities?.length) throw new BadRequestException("履约地点至少需要一种能力");
@@ -1393,11 +1406,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       status: input.status ?? existing?.status ?? "enabled"
     };
     const preserveStatus = Boolean(existing && input.status === undefined);
-    const savedStatus = await this.configStore.upsertLocation(result, undefined, binding, preserveStatus);
+    const savedStatus = await this.configStore.upsertLocation(result, undefined, binding, preserveStatus, newOperator);
     if (preserveStatus && savedStatus === undefined) throw new ServiceUnavailableException("履约地点原状态读取不可用");
     if (savedStatus !== undefined) result.status = savedStatus;
 
-    if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
+    if (newOperator) {
+      const currentIndex = state.operators.findIndex((row) => row.id === newOperator.id);
+      if (currentIndex >= 0) state.operators[currentIndex] = newOperator;
+      else state.operators.unshift(newOperator);
+    }
+    // A concurrent committed read may have replaced the old object while this
+    // writer waited. Match its stable ID instead of removing an unrelated row.
+    const locationIndex = state.locations.findIndex((row) => row.id === result.id);
+    if (locationIndex >= 0) state.locations[locationIndex] = result;
+    else state.locations.unshift(result);
     return result;
   }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups.map((group) => this.publicItemGroup(group)); }

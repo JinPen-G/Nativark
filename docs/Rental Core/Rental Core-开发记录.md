@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="location-operator-atomic-save-20261113"></a>
+
+## 地点与名称主体的原子保存（2026-11-13）
+
+支撑CAT-GOV-03/08及新品类履约配置。原[地点保存入口](../../apps/api/src/modules/rental-core/rental-core.service.ts)收到仅有经营主体名称的兼容请求时，先独立写主体、发布缓存，再检查地点能力等字段；已确认地点被拒绝后仍有一条主体写入及新增缓存，见[原反例](../../output/category-governance/location-operator-atomic-before-20261113.json)。
+
+本片仅改Core服务与[配置仓储](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)：主体先成为未提交的创建资料，在地点校验、原空间绑定与组织/上级地点范围核对后，随地点在同一ReadCommitted事务落库。任何地点校验/写入失败、采用版本变化均不提交新主体；缓存只在仓储成功后更新。既有主体在持锁后复读启用状态，等待期间停用不沿用旧缓存。服务与仓储在首个等待前复制地点/新主体及期望绑定；缓存按稳定地点ID更新，避免并发刷新替换原对象后误删其他地点。原独立主体保存、身份/空间锁、状态省略保留语义及价格/库存算法继续原实现，Shared/DTO/Controller无新增合同。
+
+TypeScript5.9.3使用本树原API配置，867根/2012源零诊断，只安装两份必要emit，API仍867份JS；Shared运行时/声明、自持Client及原Controller五份保护文件哈希未变，见[编译与安装](../../output/category-governance/location-operator-atomic-compile-20261113.json)。首次Node启动因`--no-compilation-cache`不能放在`NODE_OPTIONS`而退出9，未执行编译；已改为原CLI参数并保留[启动失败](../../output/category-governance/location-operator-atomic-runner-startup-20261113.json)。
+
+当前TS Core及实际仓储的九组限定调用退出0、audit0，覆盖正常同tx创建、非法地点无写入、地点写失败回滚、采用变版拒绝、持锁后主体停用、组织范围拒绝、等待时原输入修改、并发替换对象后的按ID缓存和仓储请求副本，见[行为证据](../../output/category-governance/location-operator-atomic-behavior-20261113.json)。SQL、配置快照和事务回滚为明确替身，未证明真实MySQL、Auth/HTTP或宿主。
+
+原`config-workspace-scope.test.cjs`三个业务组通过；原`rental-fulfillment-admission.test.cjs`九项中4过/5失败，合并runner统计5过/5失败、退出1、audit0，见[原测试结果](../../output/category-governance/location-operator-atomic-original-tests-20261113.json)。三项被原共享Tenant父锁的`Unexpected configuration query`阻断，另两项分别把Promise当快照及缺报价库存依据。原文件/断言未修改，没有新增测试脚本，不把限定调用替代整组通过。直接涉及地点锁内主体状态的旧fixture亦须按真实查询合同复核，由PM安排维护范围和QA。
+
+验证全部退出，两份emit已移入本树在用产物，剩余只有一个空audit。定向原生PowerShell删除该明确文件及空目录仍被自动审批以`blocked by policy`拒绝，整条未执行、无详细理由；已同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/location-operator-atomic-validation/manifest.json)，原暂存不存在，见[退出结果](../../output/category-governance/location-operator-atomic-cleanup-20261113.json)。本批及旧批均未删除，等待原生工具恢复后由作者处理。
+
+定价补片的远端来源已单独补齐`f3a3d5fa1b5dc9286d0856dc48826a5c4bdca30a`，只有原批准patch一个文件，Git blob `50e6db127f2953a2a3315b1bdf843cd1d3cd1c76`、10837字节及0faa1642哈希与本地原稿一致，普通推送后GitHub回读一致；`fe89a6920`仅四份文档，不能当补片已上传的证据。PM继续安排QA/main串行整合。原14项/22项完整结项仍0/14，实现百分比待核实；本片未执行迁移、真实环境或生产开放。
+
 <a id="pricing-main-minimal-closure-20261113"></a>
 
 ## 定价事务的固定main最小补片（2026-11-13）
