@@ -1,4 +1,4 @@
-import { rentalCategoryStorageCode } from "./category-identity";
+import { matchesRentalCategoryCode, rentalCategoryStorageCode } from "./category-identity";
 import { validateNewQuoteCapabilitySnapshot, validateQuotedCapabilityRequirements } from "./category-capability-facts";
 import { ConflictException, ForbiddenException, Inject, Injectable, Optional } from "@nestjs/common";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
@@ -543,7 +543,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void> {
-    await this.persistQuote(quote, expectedBinding);
+    await this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding });
   }
 
   async saveQuoteForOriginalOperation(quote: RentalQuoteSnapshotV1, value: RentalQuoteOriginalOperation,
@@ -641,19 +641,36 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       }
       if (existing) {
         if (original) throw new ConflictException('报价ID已存在，不能补造原操作依据');
-        if (existing.originalOperationKey) {
-          // Ordinary consumption may update the original quote's consumption
-          // markers, never replace the evidence covered by its operation key.
-          for (const [field, value] of Object.entries(data)) {
-            if (field === 'consumedAt' || field === 'consumedOrderId') continue;
-            const saved = existing[field as keyof typeof existing];
-            const same = value instanceof Prisma.Decimal ? saved instanceof Prisma.Decimal && value.equals(saved)
-              : isDeepStrictEqual(value === Prisma.DbNull ? null : value, saved);
-            if (!same) throw new ConflictException('原操作报价依据不可改写');
+        // Every saved quote freezes its business basis, including quotes which
+        // predate operation keys. The decoder's legacy NULL-to-empty-array
+        // projection is accepted for comparison only; no history is backfilled.
+        const legacyEmptyLists = ['chargeLines', 'rateSnapshot', 'calendarSnapshot', 'calendarWarnings',
+          'appliedDiscountPlanIds', 'discountEvaluations', 'serviceSnapshots'];
+        for (const [field, value] of Object.entries(data)) {
+          if (field === 'consumedAt' || field === 'consumedOrderId') continue;
+          const saved = existing[field as keyof typeof existing];
+          const same = field === 'categoryCode' ? matchesRentalCategoryCode(saved, quote.categoryCode)
+            : value instanceof Prisma.Decimal ? saved instanceof Prisma.Decimal && value.equals(saved)
+            : isDeepStrictEqual(value === Prisma.DbNull ? null : value, saved)
+              || saved === null && legacyEmptyLists.includes(field) && Array.isArray(value) && value.length === 0;
+          if (!same) throw new ConflictException(existing.originalOperationKey ? '原操作报价依据不可改写' : '已有报价的业务依据不可改写');
+        }
+        if (existing.createdAt.getTime() !== date(quote.createdAt).getTime()) {
+          throw new ConflictException('已有报价的创建时点不可改写');
+        }
+        const sameConsumption = optionalDate(quote.consumedAt)?.getTime() === existing.consumedAt?.getTime()
+          && data.consumedOrderId === existing.consumedOrderId;
+        // The original workspace mutex serializes this transition with quote
+        // consumption. A delayed stale copy cannot erase or replace its winner.
+        if (existing.consumedAt || existing.consumedOrderId) {
+          if (!sameConsumption) throw new ConflictException('已有报价的消费依据不可清除或替换');
+        } else if (data.consumedAt || data.consumedOrderId) {
+          if (!data.consumedAt || !Number.isFinite(data.consumedAt.getTime()) || !data.consumedOrderId?.trim()) {
+            throw new ConflictException('报价消费需要完整的原时点和订单依据');
           }
           await client.rentalQuote.update({ where: { id: quote.id }, data: {
             consumedAt: data.consumedAt, consumedOrderId: data.consumedOrderId } });
-        } else await client.rentalQuote.update({ where: { id: quote.id }, data });
+        }
       } else {
         // New quotes share the configuration writers' space lock. Replaying or
         // consuming an existing quote above never re-authorizes new business.

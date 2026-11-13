@@ -4,6 +4,26 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="quote-history-immutable-20261113"></a>
+
+## 普通报价历史与消费保护（2026-11-13）
+
+沿CAT-GOV-04与需求§6.3.1继续核有效报价及旧单依据，从已核GitHub的`721deb6410ec59e22bdd925cb6c4dafb6f3259bc`接续。原[仓储反例](../../output/category-governance/quote-history-immutable-before-20261113.json)确认：无原操作键的已保存报价，同ID写入可将金额100改为101、规则1改为2及价格版本改为v2，也可清除已消费时点/订单。原SQL、持久行和事务为明确fixture；反例不证明真实库或授权绕过。
+
+仅修改[原报价事实仓储](../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts)。`upsertQuote`首次await前固定请求副本与期望绑定；所有已保存报价都核对原金额、客户/会员、费用/优惠/券/服务、价格/规则/日历、能力/检查及来源快照、币种和创建/到期时点。普通报价与原键报价同样不可改写，正常回放无写；原键读取仍优先返回已保存原结果，不重跑当前新业务准入。
+
+消费沿原空间互斥入口，只允许添加完整的原消费时点与订单；写入仅更新这两字段。已消费后同结果回放无写，迟到旧副本不可清除、换订单或重置时点；部分/坏时点/空订单明确拒绝。旧四品类大写枚举名复用原兼容解释器比较，保留原存储编码。原decoder明确把部分历史NULL列表投影为空数组，此类无变化回读可接受，但不把空数组写回数据库；来源/库存/检查/能力的未知证据不能补造。未改Shared、DTO/OpenAPI/Schema、Guard/DI、金额算法或测试脚本。
+
+原API配置、受管TypeScript5.9.3最终867根/2012源零诊断，仅安装本仓储必要emit，六份Shared运行时/Client、Core、前片配置副本及能力产物哈希未变，见[类型与安装](../../output/category-governance/quote-history-immutable-final-compile-20261113.json)。[当前编译十四组限定行为](../../output/category-governance/quote-history-immutable-current-behavior-20261113.json)退出0/audit0，覆盖全业务正文与时间不可变、旧空值无补写、完整消费/已消费保护、首等待前输入、原互斥后赢家、原键回读及空间归属。首轮[失败](../../output/category-governance/quote-history-immutable-behavior-20261113.json)暴露旧枚举比较，已修生产兼容；[后续失败](../../output/category-governance/quote-history-immutable-final-behavior-20261113.json)经字段诊断定位短调用读回仍引用持久request，仅修其明确JSON传输副本后通过，不改旧断言或放宽拒绝。
+
+[原恢复及纯脚本运行](../../output/category-governance/quote-history-immutable-original-tests-20261113.json)使用当前编译仓储和原ts-node源码优先装载，执行`tests/rental-quote-recovery-review.test.cjs`、`tests/rental-quote-validity.test.cjs`、`tests/rental-order-quote-scope.test.cjs`：恢复4/5，两个纯脚本通过，总退出1/audit0。恢复第5项在111行新建夹具报价缺inventoryBasis，未进入本片历史分支；[固定721deb641原仓储对照](../../output/category-governance/quote-history-immutable-original-baseline-20261113.json)同4/5、同错误及退出1。保留原失败，不将其写为整组通过。
+
+**待负责人协调的原验证冲突：** [续租数据库脚本](../../tests/rental-renewal-persistence.test.cjs)37～38行通过`upsertQuote`改写旧pricingContext，109行再恢复原稿，与品类治理需求§6.3.1历史保护冲突。本片没有执行真实脚本、改断言或扩大测试维护；下一由PM协调原作者使用独立新报价fixture，保留原持久化覆盖。原其他父锁/异步/宿主及资金失败继续原记录。
+
+全部验证已退出，唯一暂存只剩空audit。原生PowerShell精确删除被CreateProcess自动审批`blocked by policy`拒绝，整条未执行且无具体理由；已安全同卷归[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-history-immutable-validation/manifest.json)，[退出证据](../../output/category-governance/quote-history-immutable-cleanup-20261113.json)确认原暂存不存在、已归集未删除。旧批继续创建者责任。结果留本对话/原记录供PM主动读取，没有主动消息、合main或新环境执行。
+
+本片完成已存报价仓储保护，不证明新报价MySQL价格/能力/检查的完整组合、真实消费并发或多实例。完整CAT-GOV仍0/14、实现百分比待核实；全部写入口、真库容量/锁/回滚、两个动态新编码不同组合冻结经营、浏览器/微信和独立Review继续原门槛，CLOSE/企业/AI按原任务分别核实。固定提交与GitHub回读沿本章节登记。
+
 <a id="quote-configuration-snapshot-20261113"></a>
 
 ## 报价配置副本与提交后缓存（2026-11-13）
