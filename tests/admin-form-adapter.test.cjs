@@ -93,17 +93,25 @@ const { createThemeConfig } = load('apps/admin/src/app/theme.tsx', {
   './motionPreferences': load('apps/admin/src/app/motionPreferences.ts'),
   antd: { theme: { defaultAlgorithm: 'default', darkAlgorithm: 'dark', compactAlgorithm: 'compact' } },
 });
-for (const inputRadius of [8, 18, 40]) for (const button of [18, 999]) for (const mode of ['default', 'dark', 'compact']) {
-  const groups = { input: inputRadius, button, container: 26 };
+assert.deepEqual(tokens.resolveAdminRadii(undefined), { container: 12, button: 8, input: 8 });
+assert.deepEqual(tokens.resolveAdminRadii({ container: null, button: null, input: null }), { container: 12, button: 8, input: 8 });
+assert.deepEqual(tokens.resolveAdminRadii({ legacy: 12 }), { container: 16, button: 12, input: 12 });
+for (const legacy of [24, 40, 999]) {
+  assert.deepEqual(tokens.resolveAdminRadii({ legacy }), { container: 20, button: 16, input: 16 });
+  assert.deepEqual(tokens.resolveAdminRadii({ legacy, button: 8 }), { container: 20, button: 8, input: 16 });
+}
+for (const inputRadius of [4, 8, 40]) for (const button of [8, 999]) for (const mode of ['default', 'dark', 'compact']) {
+  const groups = { input: inputRadius, button, container: 24 };
+  const effectiveInput = Math.min(inputRadius, 16), effectiveButton = Math.min(button, 16);
   const vars = new Map();
   tokens.applyAdminRadiusTokens({ style: { setProperty: (key, value) => vars.set(key, value) } }, groups);
-  assert.equal(vars.get('--rental-ui-radius-input'), inputRadius + 'px');
-  assert.equal(vars.get('--rental-ui-radius-input-sm'), tokens.resolveAdminInputRadii(inputRadius).borderRadiusSM + 'px');
+  assert.equal(vars.get('--rental-ui-radius-input'), effectiveInput + 'px');
+  assert.equal(vars.get('--rental-ui-radius-input-sm'), tokens.resolveAdminInputRadii(effectiveInput).borderRadiusSM + 'px');
   const config = createThemeConfig(mode, undefined, groups);
-  const expected = tokens.resolveAdminInputRadii(inputRadius);
+  const expected = tokens.resolveAdminInputRadii(effectiveInput);
   for (const name of ['Input', 'InputNumber', 'Select', 'DatePicker', 'Cascader', 'TreeSelect', 'Mentions']) assert.deepEqual(config.components[name], expected, name);
-  assert.equal(config.components.Button.borderRadius, button);
-  assert.equal(config.token.borderRadiusLG, 26);
+  assert.equal(config.components.Button.borderRadius, effectiveButton);
+  assert.equal(config.token.borderRadiusLG, 20);
 }
 const { inputRadiusClip, useInputRadiusClip } = load('apps/admin/src/components/ui/useInputRadiusClip.ts');
 for (const clip of ['inset(0px 140px 376px 0px round 22px)', 'inset(0px 0px 0px 0px round 26px)']) {

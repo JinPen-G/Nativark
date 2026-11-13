@@ -19,9 +19,9 @@ import { navigationTarget } from './destinations';
 import './archive/ai-side-panel/side-panel.css';
 import './copilot.css';
 
-/** Original ai-side-panel dock geometry and curve; only the document/demo is replaced.
- * The single business-area trigger delegates to whole records, not individual fields. */
-export function CopilotLayout({ children, suspended = false }: { children: ReactNode; suspended?: boolean }) {
+/** Sibling workspace and Copilot panels retain the original dock/sheet motion and session.
+ * Archive resets stay inside the chat panel; the business trigger captures whole records. */
+export function CopilotLayout({ children, header, suspended = false }: { children: ReactNode; header?: ReactNode; suspended?: boolean }) {
   const copilot = useCopilot(), { t } = useLocale(), location = useLocation(), { pathname } = location;
   const [menuOpen, setMenuOpen] = useState(false), [target, setTarget] = useState<CopilotRecord[]>([]), [narrow, setNarrow] = useState(false);
   const root = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
@@ -43,12 +43,12 @@ export function CopilotLayout({ children, suspended = false }: { children: React
     }
     setTarget(items);
   };
-  return <div ref={root} className={`ai-side-panel copilot-host${shown ? ' is-open' : ''}${narrow ? ' is-sheet' : ''}`}>
+  return <div ref={root} className={`copilot-host${shown ? ' is-open' : ''}${narrow ? ' is-sheet' : ''}`}>
     <CopilotNavigation />
     <ContextMenu.Root open={menuOpen} onOpenChange={next => setMenuOpen(next)}>
       <ContextMenu.Trigger render={<div className="asp-page-column" ref={content} inert={shown && narrow || undefined} />}
         onContextMenuCapture={capture} onTouchStartCapture={capture}>
-        {children}
+        {header}{children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal><ContextMenu.Positioner className="copilot-menu-positioner" sideOffset={5} collisionPadding={8}>
         <ContextMenu.Popup className="copilot-menu" aria-label={t('Copilot 上下文操作')}>
@@ -59,7 +59,7 @@ export function CopilotLayout({ children, suspended = false }: { children: React
       </ContextMenu.Positioner></ContextMenu.Portal>
     </ContextMenu.Root>
     {shown && narrow && <div className="asp-scrim" aria-hidden="true" onClick={copilot?.close} />}
-    <div className="asp-dock" inert={!shown || undefined} aria-hidden={!shown || undefined}><div className="asp-dock-inner">
+    <div className="asp-dock" inert={!shown || undefined} aria-hidden={!shown || undefined}><div className="asp-dock-inner ai-side-panel">
       {copilot && <CopilotPanel narrow={narrow} open={shown} background={content.current} />}
     </div></div>
   </div>;

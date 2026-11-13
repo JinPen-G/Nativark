@@ -61,3 +61,35 @@
 .item[data-kind="membership"] .mobileHit { display: none; }
 .sheetMedia:has([data-member-holo]) { overflow: visible; }
 .card [data-member-holo] [role="button"]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; }
+
+/* Product listing screen geometry, adapted only for explicitly opted-in records.
+   The native Card still owns preview/focus/motion; other card kinds retain their surface. */
+.item[data-presentation="product-listing"] { align-self: start; container-type: inline-size; --rental-record-card-media-height: 100%; --listing-card-padding: 8px; }
+.item[data-presentation="product-listing"] > .card { height: auto; padding: var(--listing-card-padding); border: 0; border-radius: 14px; background: transparent; box-shadow: none; }
+.item[data-presentation="product-listing"] > .card[data-hover], .item[data-presentation="product-listing"][data-current] > .card { background: color-mix(in oklab, var(--foreground) 4.5%, transparent); }
+.item[data-presentation="product-listing"][data-selected] > .card { background: color-mix(in oklab, var(--foreground) 7%, transparent); outline: none; }
+.item[data-presentation="product-listing"] > .card > div:first-child:not(:has(> h3)) { aspect-ratio: 1; border-radius: 10px; }
+.item[data-presentation="product-listing"] > .card > div:first-child:not(:has(> h3)) > div { height: 100%; min-height: 0; }
+.item[data-presentation="product-listing"] > .card > div:has(> h3) { display: grid; gap: 3px; padding: 10px 2px 2px; }
+.item[data-presentation="product-listing"] .card h3 { width: 100%; margin: 0; font-size: 13px; line-height: 1.4; font-weight: 500; white-space: nowrap; text-wrap: nowrap; }
+.item[data-presentation="product-listing"] .card h3, .item[data-presentation="product-listing"] .card h3 > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item[data-presentation="product-listing"] .card h3 > button { display: block; max-width: 100%; }
+.item[data-presentation="product-listing"] > .card > div:has(> h3) > div:has([data-record-card-meta]) { display: none; }
+.listingSummary { display: grid; min-width: 0; gap: 3px; color: var(--foreground); font-size: 13px; line-height: 1.4; }
+.item[data-presentation="product-listing"] .selection { top: calc(100cqw - var(--listing-card-padding) + 5px); right: var(--listing-card-padding); height: 28px; opacity: 0; pointer-events: none; }
+.item[data-presentation="product-listing"]:is(:hover, :focus-within, [data-selected]) .selection { opacity: 1; pointer-events: auto; }
+.item[data-presentation="product-listing"] .selection button[role="checkbox"] { width: 28px; height: 28px; }
+.item[data-presentation="product-listing"] .selection button[role="checkbox"] > span { width: 16px; height: 16px; }
+.item[data-presentation="product-listing"] .selection button[role="checkbox"] svg { inset: -2px; }
+.item[data-presentation="product-listing"] .card:has(h3 > button:focus-visible), .item[data-presentation="product-listing"] .mobileHit:focus-visible { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.item[data-presentation="product-listing"][data-selectable] .card h3 { max-width: calc(100% - 28px); }
+:global([role="dialog"]):has(.preview) .listingSummary { display: none; }
+@container admin-content (max-width: 640px) {
+  .item[data-presentation="product-listing"] { --listing-card-padding: 6px; }
+  .item[data-presentation="product-listing"] > .card { border-radius: 12px; }
+}
+@container record-screen (min-width: 641px) {
+  .item[data-presentation="product-listing"] { --listing-card-padding: 8px; }
+  .item[data-presentation="product-listing"] > .card { border-radius: 14px; }
+}
+@media (hover: none) { .item[data-presentation="product-listing"] .selection { opacity: 1; pointer-events: auto; } }

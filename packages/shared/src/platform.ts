@@ -174,11 +174,14 @@ export interface TenantContext {
   capabilities?: RentalCapability[];
 }
 
-/** 管理后台圆角的可配置范围。数值只表达基础控件圆角，胶囊与圆形控件仍是平台保留形态。 */
-export const ADMIN_UI_CORNER_RADIUS_MIN = 8;
-export const ADMIN_UI_CORNER_RADIUS_MAX = 40;
+/** 管理后台普通圆角：容器 4–20px，按钮/输入 4–16px；头像、圆形图标与开关保留原形。 */
+export const ADMIN_UI_CORNER_RADIUS_MIN = 4;
+export const ADMIN_UI_CORNER_RADIUS_MAX = 20;
+export const ADMIN_UI_CORNER_RADIUS_CONTROL_MAX = 16;
 export const ADMIN_UI_CORNER_RADIUS_DEFAULT = 12;
-/** 「极致圆角」离散档：跳过 20→999 之间的所有值，只允许直接取 20 或 999（CSS 常用胶囊值）。 */
+/** UIArc Metrics Dashboard / Product listing Screen 的角色默认值。 */
+export const ADMIN_UI_CORNER_RADIUS_DEFAULTS = { container: 12, button: 8, input: 8 } as const;
+/** @deprecated 仅标识历史存量；新保存请求不接受此值，也不提供对应档位。 */
 export const ADMIN_UI_CORNER_RADIUS_FULL = 999;
 
 export interface AuthUser {
@@ -815,7 +818,7 @@ export interface TenantAppearanceProfile {
   faviconUrl?: string;
   /** 客户端与管理后台主色（#RRGGBB）；未设置各端回退系统默认色。 */
   themeColor?: string;
-  /** 旧的统一圆角（回退基准，8-40 或 999）。 */
+  /** 旧的统一圆角回退基准；读取保留历史 24/40/999，显示时按角色上限收敛，不在读取时改库。 */
   adminCornerRadius?: number;
   /** 容器（卡片/弹窗/抽屉/表格）圆角。 */
   adminContainerRadius?: number;
@@ -828,17 +831,19 @@ export interface TenantAppearanceProfile {
   updatedAt?: string;
 }
 
-/** 保存品牌与外观（§租户后台「品牌与外观」页）。expectedRevision 乐观并发，缺省字段留空=清除/回退。 */
+/** 保存品牌与外观。expectedRevision 保留原乐观并发；省略圆角字段保持原值，显式 null 清除该覆盖。 */
 export interface SaveTenantAppearanceRequest {
   expectedRevision?: number;
   brandName?: string;
   brandLogoUrl?: string;
   faviconUrl?: string;
   themeColor?: string;
-  adminCornerRadius?: number;
-  adminContainerRadius?: number;
-  adminButtonRadius?: number;
-  adminInputRadius?: number;
+  /** 旧统一基准及容器只接受 4–20px 整数，不接受历史极值重新写入。 */
+  adminCornerRadius?: number | null;
+  adminContainerRadius?: number | null;
+  /** 按钮与输入只接受 4–16px 整数。 */
+  adminButtonRadius?: number | null;
+  adminInputRadius?: number | null;
 }
 
 /** 账户级外观（跟随登录账户，与租户品牌色相互独立）。目前仅管理后台主题色。 */
@@ -918,14 +923,14 @@ export interface SaveClientChannelProfileRequest {
   adminLogin?: AdminLoginBranding;
   /** 客户端与管理后台主题色（#RRGGBB）；留空表示回退系统默认色。 */
   themeColor?: string;
-  /** 管理后台基础控件圆角（8-20px 或 999，旧字段/回退基准）；留空沿用当前值或平台默认值。 */
-  adminCornerRadius?: number;
-  /** 容器（卡片/弹窗/抽屉/表格）圆角（8-20px 或 999）；留空沿用当前值，再回退 adminCornerRadius。 */
-  adminContainerRadius?: number;
-  /** 按钮/分段/选中菜单圆角（8-20px 或 999）；留空沿用当前值，再回退 adminCornerRadius。 */
-  adminButtonRadius?: number;
-  /** 输入/选择/日期等录入控件圆角（8-20px 或 999）；留空沿用当前值，再回退 adminCornerRadius。 */
-  adminInputRadius?: number;
+  /** 旧统一圆角（4–20px）；省略保留存量，显式 null 清除覆盖；新请求不接受历史极值。 */
+  adminCornerRadius?: number | null;
+  /** 容器圆角（4–20px）；省略保留，显式 null 回退旧统一值或角色默认值。 */
+  adminContainerRadius?: number | null;
+  /** 按钮/分段/选中菜单圆角（4–16px）；省略保留，显式 null 回退。 */
+  adminButtonRadius?: number | null;
+  /** 输入/选择/日期等录入圆角（4–16px）；省略保留，显式 null 回退。 */
+  adminInputRadius?: number | null;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];

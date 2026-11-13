@@ -1,9 +1,10 @@
 import type { SaveTenantAppearanceRequest } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
 
 /**
  * 品牌与外观（管理后台 UI 身份）保存 DTO（从客户端渠道拆出）。
- * expectedRevision 乐观并发；圆角范围由服务层精确校验（8-40 连续或 999 极致，且极致仅按钮组）。
+ * expectedRevision 乐观并发；DTO 与服务层共用普通圆角范围，显式 null 清除覆盖。
  */
 export class SaveTenantAppearanceDto implements SaveTenantAppearanceRequest {
   @IsOptional() @IsInt() @Min(0)
@@ -22,16 +23,16 @@ export class SaveTenantAppearanceDto implements SaveTenantAppearanceRequest {
   @IsOptional() @IsString() @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u, { message: "主题色需为 #RRGGBB 十六进制颜色" })
   themeColor?: string;
 
-  /** 旧的统一圆角（回退基准）：8-40 连续或 999 极致。 */
-  @IsOptional() @IsInt() @Min(8) @Max(999)
-  adminCornerRadius?: number;
+  /** 旧统一回退基准的新写入范围与容器相同。 */
+  @IsOptional() @IsInt() @Min(ADMIN_UI_CORNER_RADIUS_MIN) @Max(ADMIN_UI_CORNER_RADIUS_MAX)
+  adminCornerRadius?: number | null;
 
-  @IsOptional() @IsInt() @Min(8) @Max(999)
-  adminContainerRadius?: number;
+  @IsOptional() @IsInt() @Min(ADMIN_UI_CORNER_RADIUS_MIN) @Max(ADMIN_UI_CORNER_RADIUS_MAX)
+  adminContainerRadius?: number | null;
 
-  @IsOptional() @IsInt() @Min(8) @Max(999)
-  adminButtonRadius?: number;
+  @IsOptional() @IsInt() @Min(ADMIN_UI_CORNER_RADIUS_MIN) @Max(ADMIN_UI_CORNER_RADIUS_CONTROL_MAX)
+  adminButtonRadius?: number | null;
 
-  @IsOptional() @IsInt() @Min(8) @Max(999)
-  adminInputRadius?: number;
+  @IsOptional() @IsInt() @Min(ADMIN_UI_CORNER_RADIUS_MIN) @Max(ADMIN_UI_CORNER_RADIUS_CONTROL_MAX)
+  adminInputRadius?: number | null;
 }

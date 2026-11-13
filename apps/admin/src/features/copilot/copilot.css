@@ -1,14 +1,21 @@
-/* Geometry/motion from archive/ai-side-panel/side-panel.css; platform tokens only. */
-.copilot-host.ai-side-panel { height:auto; min-height:0; flex:1 1 0; font:inherit; --asp-ink:var(--foreground); --asp-muted:var(--text-secondary); --asp-faint:var(--text-meta); --asp-ground:var(--surface); --asp-soft:var(--surface-muted); --asp-line:var(--border); }
-.copilot-host > .asp-page-column { display:flex; min-height:0; flex-direction:column; }
-.copilot-host .asp-panel { font-size:14px; }
-.copilot-host .asp-identity > button { margin-left:0; }
-.copilot-host .asp-identity > button:first-of-type { margin-left:auto; }
+/* The screen shell gives the siblings separate surfaces and its 340px panel width;
+   archive easing and the mobile sheet stay intact. Chat resets never wrap the header. */
+.copilot-host { display:flex; width:100%; min-width:0; height:auto; min-height:0; flex:1 1 0; position:relative; overflow:hidden; isolation:isolate; container-type:inline-size; font:inherit; color:var(--foreground); --asp-ink:var(--foreground); --asp-muted:var(--text-secondary); --asp-faint:var(--text-meta); --asp-ground:var(--rental-shell-panel, var(--surface)); --asp-soft:var(--surface-muted); --asp-line:var(--rental-shell-border, var(--border)); --copilot-panel-gap:var(--rental-workspace-inset, 6px); }
+.copilot-host > .asp-page-column { display:flex; min-height:0; flex-direction:column; overflow:hidden; container:record-screen / inline-size; }
+.copilot-host.is-open:not(.is-sheet) > .asp-dock { width:calc(340px + var(--copilot-panel-gap)); }
+.copilot-host .asp-dock-inner.ai-side-panel { width:340px; height:100%; min-height:0; margin-inline-start:var(--copilot-panel-gap); background:transparent; container-type:normal; font:inherit; }
+.copilot-host .asp-panel { width:100%; font-size:14px; border:1px solid var(--asp-line); border-radius:var(--rental-ui-radius-container); overflow:hidden; }
+.copilot-host .asp-identity > span { min-width:0; flex:1; }
+.copilot-host .asp-identity > button { margin-left:0; flex-shrink:0; }
+.copilot-host .asp-identity > button:first-of-type { margin-left:auto; width:auto; padding-inline:4px; font-size:12px; white-space:nowrap; }
 .copilot-host .asp-context > span { border-radius:var(--rental-ui-radius-button); }
 .copilot-host .asp-composer { border-radius:var(--rental-ui-radius-input); }
 .copilot-host .asp-primary,.copilot-host .asp-send { background:var(--accent) !important; color:var(--accent-foreground) !important; }
 .copilot-host .asp-suggestions button,.copilot-host .asp-change,.copilot-host .asp-user p { border-radius:var(--rental-ui-radius-container); }
-.copilot-host.is-sheet .asp-dock { border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.copilot-host.is-sheet > .asp-dock { position:absolute; inset:auto 0 0; z-index:3; width:100%; height:74%; transform:translateY(101%); transition:transform 460ms cubic-bezier(.22,1,.36,1); border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.copilot-host.is-sheet.is-open > .asp-dock { transform:translateY(0); }
+.copilot-host.is-sheet .asp-dock-inner.ai-side-panel { width:100%; margin-inline-start:0; }
+.copilot-host.is-sheet .asp-panel { border-width:1px 0 0; border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
 .copilot-host .asp-thread { scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
 .copilot-host .asp-reading { font-size:13px; }
 .copilot-host .copilot-contexts { flex:none; max-height:126px; overflow:auto; margin:8px 12px 0; }

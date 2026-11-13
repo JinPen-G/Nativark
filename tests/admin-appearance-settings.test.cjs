@@ -55,8 +55,8 @@ function fixture(appearance = initial) {
 
 test('radius-only save preserves branding and omitted radius groups', async () => {
   const f = fixture();
-  const saved = await f.appearance.save({ adminContainerRadius: 24, expectedRevision: 3 }, user);
-  assert.equal(saved.adminContainerRadius, 24);
+  const saved = await f.appearance.save({ adminContainerRadius: 12, expectedRevision: 3 }, user);
+  assert.equal(saved.adminContainerRadius, 12);
   for (const k of ['brandName', 'brandLogoUrl', 'faviconUrl', 'themeColor', 'adminCornerRadius', 'adminButtonRadius', 'adminInputRadius']) assert.equal(saved[k], initial[k], k);
   assert.equal(saved.revision, 4);
 });
@@ -72,22 +72,22 @@ test('explicit clearing differs from omission and preserves unrelated fields', a
 
 test('first radius save retains legacy branding instead of creating empty branding', async () => {
   const f = fixture(null);
-  const saved = await f.appearance.save({ adminContainerRadius: 24, expectedRevision: 0 }, user);
+  const saved = await f.appearance.save({ adminContainerRadius: 12, expectedRevision: 0 }, user);
   assert.equal(saved.brandName, 'Legacy brand');
   assert.equal(saved.themeColor, '#111111');
   assert.equal(saved.adminButtonRadius, 999);
-  assert.equal(saved.adminContainerRadius, 24);
+  assert.equal(saved.adminContainerRadius, 12);
 });
 
 test('stale revision and a revision change between read and write are rejected', async () => {
   const f = fixture();
-  await assert.rejects(f.appearance.save({ adminInputRadius: 18, expectedRevision: 2 }, user), e => e.getStatus() === 409);
+  await assert.rejects(f.appearance.save({ adminInputRadius: 12, expectedRevision: 2 }, user), e => e.getStatus() === 409);
   const update = f.db.tenantAppearanceProfile.update.bind(f.db.tenantAppearanceProfile);
   f.db.tenantAppearanceProfile.update = async args => {
     f.state.appearance.revision += 1;
     return update(args);
   };
-  await assert.rejects(f.appearance.save({ adminInputRadius: 18, expectedRevision: 3 }, user), e => e.getStatus() === 409);
+  await assert.rejects(f.appearance.save({ adminInputRadius: 12, expectedRevision: 3 }, user), e => e.getStatus() === 409);
   assert.equal(f.state.appearance.adminInputRadius, 16);
 });
 
@@ -111,7 +111,7 @@ test('channel saves branding into the canonical profile without reverting new ra
   assert.equal(data.adminContainerRadius, 28);
   assert.equal(f.state.appearance.adminContainerRadius, 28);
   assert.equal(f.state.appearance.revision, 4);
-  await assert.rejects(f.appearance.save({ adminInputRadius: 18, expectedRevision: 3 }, user), e => e.getStatus() === 409);
+  await assert.rejects(f.appearance.save({ adminInputRadius: 12, expectedRevision: 3 }, user), e => e.getStatus() === 409);
 });
 
 test('brand sync failure rolls back the channel write in the transaction', async () => {
@@ -141,7 +141,7 @@ test('login branding round-trips through the channel facade without changing rad
   assert.equal(f.state.channel.adminLoginJson, undefined, 'only the canonical appearance stores login branding');
   assert.equal(f.state.appearance.adminButtonRadius, 999);
   assert.equal(f.state.appearance.adminContainerRadius, 20);
-  await f.appearance.save({ expectedRevision: 4, adminInputRadius: 18 }, user);
+  await f.appearance.save({ expectedRevision: 4, adminInputRadius: 12 }, user);
   assert.deepEqual(f.state.appearance.adminLoginJson, expected);
   await assert.rejects(f.channel.save({ expectedRevision: 1, publishedWorkspaceIds: [], adminLogin: {} }, user), e => e.getStatus() === 409);
   assert.deepEqual(f.state.appearance.adminLoginJson, expected);
@@ -162,7 +162,7 @@ test('login visibility survives save and read without clearing copy, and can be 
   const adminLogin = { title: '保留的自定义标题', showTitle: false, showDescription: false, showHighlights: false, showFooter: false };
   await f.channel.save({ publishedWorkspaceIds: [], adminLogin }, user);
   assert.deepEqual((await f.channel.get(user)).adminLogin, adminLogin);
-  await f.appearance.save({ expectedRevision: 4, adminInputRadius: 18 }, user);
+  await f.appearance.save({ expectedRevision: 4, adminInputRadius: 12 }, user);
   assert.deepEqual(f.state.appearance.adminLoginJson, adminLogin);
   const restored = { ...adminLogin, showTitle: true };
   await f.channel.save({ publishedWorkspaceIds: [], adminLogin: restored }, user);
@@ -201,6 +201,81 @@ test('first login branding save creates canonical config and transactional failu
   f.db.clientChannelWorkspace.deleteMany = async () => { throw new Error('rollback'); };
   await assert.rejects(f.channel.save({ publishedWorkspaceIds: [], adminLogin: { title: '不可保存' } }, user), /rollback/);
   assert.equal(f.state.appearance.adminLoginJson.title, '新建登录页');
+});
+
+test('current radius bounds reject new extremes in both DTOs and services while stored values remain readable', async () => {
+  const { validateSync } = require('class-validator');
+  const { SaveTenantAppearanceDto } = require('../apps/api/src/modules/client/tenant-appearance-profile.dto');
+  const { SaveClientChannelProfileDto } = require('../apps/api/src/modules/client/client-channel-profile.dto');
+  for (const Dto of [SaveTenantAppearanceDto, SaveClientChannelProfileDto]) {
+    const base = { smsLoginEnabled: true, passwordLoginEnabled: true, publishedWorkspaceIds: [] };
+    assert.equal(validateSync(Object.assign(new Dto(), base, { adminCornerRadius: 4, adminContainerRadius: 20, adminButtonRadius: 16, adminInputRadius: null })).length, 0);
+    for (const [key, value] of [['adminContainerRadius', 24], ['adminCornerRadius', 40], ['adminButtonRadius', 999], ['adminInputRadius', 17], ['adminButtonRadius', 3], ['adminInputRadius', 8.5]]) {
+      assert.ok(validateSync(Object.assign(new Dto(), base, { [key]: value })).some(error => error.property === key));
+    }
+  }
+  for (const [key, value] of [['adminContainerRadius', 24], ['adminCornerRadius', 40], ['adminButtonRadius', 999], ['adminInputRadius', 17]]) {
+    const f = fixture({ ...initial, adminCornerRadius: 40, adminContainerRadius: 24, adminInputRadius: 40 });
+    assert.equal((await f.appearance.get(user))[key], f.state.appearance[key]);
+    assert.equal((await f.channel.get(user))[key], f.state.appearance[key]);
+    await assert.rejects(f.appearance.save({ [key]: value, expectedRevision: 3 }, user), error => error.getStatus() === 400);
+    await assert.rejects(f.channel.save({ [key]: value, expectedRevision: 1, publishedWorkspaceIds: [] }, user), error => error.getStatus() === 400);
+    assert.deepEqual(f.state.writes, []);
+  }
+});
+
+test('channel radius changes and explicit clearing reach canonical appearance without copying omitted legacy radii', async () => {
+  const f = fixture();
+  const saved = await f.channel.save({ adminContainerRadius: 4, adminButtonRadius: 16, adminInputRadius: null, expectedRevision: 1, publishedWorkspaceIds: [] }, user);
+  assert.equal(saved.adminContainerRadius, 4);
+  assert.equal(saved.adminButtonRadius, 16);
+  assert.equal(saved.adminInputRadius, undefined);
+  for (const row of [f.state.channel, f.state.appearance]) {
+    assert.equal(row.adminInputRadius, null);
+    assert.equal(row.adminCornerRadius, initial.adminCornerRadius);
+  }
+  assert.equal(f.state.appearance.revision, 4);
+});
+
+test('appearance form maps old radii only into its draft and saves the original revision with radius fields only', async () => {
+  const ts = require('typescript');
+  const file = path.join(__dirname, '../apps/admin/src/features/appearance/AppearancePage.tsx');
+  const ast = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const declaration = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AppearancePage');
+  const code = ts.transpileModule(declaration.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+  const tokenCode = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/admin/src/app/designTokens.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const tokenModule = { exports: {} };
+  new Function('require', 'module', 'exports', tokenCode)(require, tokenModule, tokenModule.exports);
+  const { resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii } = tokenModule.exports;
+  const { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } = require('@rental-os/shared');
+  for (const stored of [{ revision: 7, adminCornerRadius: 999, adminContainerRadius: 24, adminButtonRadius: 40, adminInputRadius: 999 }, { revision: 8, adminCornerRadius: 40 }]) {
+    const values = {}, saves = [];
+    const form = { setFieldsValue: next => Object.assign(values, next), getFieldValue: key => values[key] };
+    let save;
+    const dependencies = {
+      Form: Object.assign(() => null, { useForm: () => [form], useWatch: key => values[key] }),
+      useLocale: () => ({ t: text => text }), App: { useApp: () => ({ message: {} }) },
+      useQueryClient: () => ({}), useAuthStore: select => select({ tenant: { tenantId: 'appearance-test' }, setTenantBranding: () => assert.fail('reading cannot update applied branding') }),
+      queryOptions: options => options, useQuery: () => ({ data: stored }),
+      useServerFormSync: (_form, _source, apply) => apply(),
+      useMutation: options => { save = options.mutationFn; return { isPending: false }; },
+      appearanceApi: { getProfile() {}, saveProfile: payload => { saves.push(payload); return payload; } },
+      resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii,
+      ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN,
+      isTransientRefreshError: () => false, Typography: { Paragraph: 'p' },
+      ...Object.fromEntries(['PageHeader','SettingsWorkspace','ThemeModeChoices','AccountThemeColorCard','LoadingState','Alert','Button','CopilotSection','Card','Row','Col','AdminRadiusSlider','RadiusPreview','SaveButton','MotionSettingCard','SoundSettingCard'].map(name => [name, name]))
+    };
+    const exports = {};
+    new Function('require','exports',...Object.keys(dependencies),code)(require,exports,...Object.values(dependencies));
+    exports.AppearancePage();
+    assert.deepEqual(saves, [], 'initializing the draft never saves');
+    assert.deepEqual(values, stored.revision === 7
+      ? { adminContainerRadius: 20, adminButtonRadius: 16, adminInputRadius: 16, expectedRevision: 7 }
+      : { adminContainerRadius: undefined, adminButtonRadius: undefined, adminInputRadius: undefined, expectedRevision: 8 });
+    await save({ ...values, adminInputRadius: null, expectedRevision: 999, brandName: 'unrelated' });
+    assert.deepEqual(saves[0], { adminContainerRadius: values.adminContainerRadius, adminButtonRadius: values.adminButtonRadius, adminInputRadius: null, expectedRevision: stored.revision });
+    assert.equal(stored.adminCornerRadius, stored.revision === 7 ? 999 : 40, 'the source snapshot remains untouched');
+  }
 });
 
 test('settings are mounted in the requested pages and sound has an unambiguous module path', () => {

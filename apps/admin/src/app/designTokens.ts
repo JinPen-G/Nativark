@@ -4,7 +4,7 @@
  * 页面只使用语义层级，不在组件里重新决定字号和字重。Ant Design 的基础
  * token 由 theme.tsx 消费，自定义 CSS 通过同一份 token 注入 CSS 变量。
  */
-import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_DEFAULTS, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 
 export const ADMIN_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif";
@@ -27,6 +27,8 @@ export const ADMIN_LIST_TYPOGRAPHY = {
   summaryValue: { size: 13, lineHeight: 20, weight: 500 },
 } as const;
 export const ARC_DEFAULT_RADII = { container: 26, button: 18, input: 18 } as const;
+/** Screen defaults are separate from reserved native components such as the 26px HoverCard. */
+export const ADMIN_DEFAULT_RADII = ADMIN_UI_CORNER_RADIUS_DEFAULTS;
 /** Idle text/search fields share the same theme-aware edge as date/select controls. */
 export const ADMIN_INPUT_COLORS = { borderDefault: "var(--border)" } as const;
 /** Navigation tabs and segmented criteria share neutral selection ink, never brand accent. */
@@ -120,11 +122,9 @@ export function resolveAdminPrimaryColorRgb(value?: string | null): string {
  * 租户可配置的后台基础圆角。这里只接受平台规定的整数范围，
  * 旧会话或异常数据也会在前端安全回退，不把任意值写进 CSS。
  */
-export function resolveAdminCornerRadius(value?: number | null) {
+export function resolveAdminCornerRadius(value?: number | null, max = ADMIN_UI_CORNER_RADIUS_MAX) {
   if (!Number.isInteger(value)) return ADMIN_UI_CORNER_RADIUS_DEFAULT;
-  // 「极致圆角」是离散档，直接放行，不参与 8-20 的区间夹取。
-  if (value === ADMIN_UI_CORNER_RADIUS_FULL) return ADMIN_UI_CORNER_RADIUS_FULL;
-  return Math.min(ADMIN_UI_CORNER_RADIUS_MAX, Math.max(ADMIN_UI_CORNER_RADIUS_MIN, value as number));
+  return Math.min(max, Math.max(ADMIN_UI_CORNER_RADIUS_MIN, value as number));
 }
 
 export const ADMIN_TYPOGRAPHY = {
@@ -151,20 +151,21 @@ export interface AdminRadiusGroups {
   legacy?: number | null;
 }
 
-/** 容器组的历史观感：旧统一圆角在卡片/表格上按 1.33× 放大并封顶 24px（与旧 borderRadiusLG 一致）。 */
+/** 旧统一值保留容器倍率，但与显式分组一样受当前常用范围约束。 */
 function legacyContainerRadius(unified: number) {
-  return Math.min(24, Math.round(unified * 1.33));
+  return Math.min(ADMIN_UI_CORNER_RADIUS_MAX, Math.round(unified * 1.33));
 }
 
 /**
  * 解析某一组圆角：显式设了该组值就按字面像素用；否则回退旧的统一圆角——
- * 容器沿用旧的 1.33× 放大（保持既有卡片观感），按钮/输入沿用原值；旧值也缺省时用平台默认。
- * 这样老租户升级后默认观感不变，而新设的分组值是所见即所得的字面像素。
+ * 容器沿用旧倍率；各组都在显示边界截到当前上限。无分组和统一值时采用 Screen 的角色默认值。
+ * 此处只解析显示，不更新服务端或缓存中的历史配置。
  */
 export function resolveAdminRadiusGroup(value: number | null | undefined, legacy: number | null | undefined, kind: "container" | "button" | "input") {
-  if (Number.isInteger(value)) return resolveAdminCornerRadius(value);
-  if (!Number.isInteger(legacy)) return ARC_DEFAULT_RADII[kind];
-  const base = Number.isInteger(legacy) ? resolveAdminCornerRadius(legacy as number) : ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  const max = kind === "container" ? ADMIN_UI_CORNER_RADIUS_MAX : ADMIN_UI_CORNER_RADIUS_CONTROL_MAX;
+  if (Number.isInteger(value)) return resolveAdminCornerRadius(value, max);
+  if (!Number.isInteger(legacy)) return ADMIN_DEFAULT_RADII[kind];
+  const base = resolveAdminCornerRadius(legacy, max);
   return kind === "container" ? legacyContainerRadius(base) : base;
 }
 

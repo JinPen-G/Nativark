@@ -21,6 +21,8 @@ export interface RecordCardConfig<T> {
   featured?: (row: T) => boolean;
   status?: (row: T) => ReactNode;
   body: (row: T) => ReactNode;
+  /** Compact product-listing rows; the complete body remains in the original quick look. */
+  listing?: (row: T) => ReactNode;
   details?: (row: T) => ReactNode;
   actions?: (row: T, afterClose: CardAfterClose) => ReactNode;
 }
@@ -29,8 +31,9 @@ const query = "(max-width: 639px)";
 const subscribe = (notify: () => void) => { const media = matchMedia(query); media.addEventListener("change", notify); return () => media.removeEventListener("change", notify); };
 const narrowSnapshot = () => matchMedia(query).matches;
 
-export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disabled }: {
+export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disabled, current, onActivate }: {
   row: T; config: RecordCardConfig<T>; rowKey: string; selected?: boolean; onSelect?: (checked: boolean) => void; disabled?: boolean;
+  current?: boolean; onActivate?: () => void;
 }) {
   const { t } = useLocale();
   const reduced = usePrefersReducedMotion();
@@ -50,7 +53,7 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
   const cancel = () => { observer.current?.disconnect(); observer.current = null; pending.current = undefined; };
   useEffect(() => () => cancel(), []);
   useEffect(() => { setOpen(false); cancel(); }, [narrow]);
-  const changeOpen = (next: boolean) => { if (next) cancel(); setOpen(next); };
+  const changeOpen = (next: boolean) => { if (next) { cancel(); onActivate?.(); } setOpen(next); };
   const afterClose: CardAfterClose = operation => {
     cancel();
     const scope = identity(); pending.current = operation;
@@ -68,20 +71,23 @@ export function RecordCard<T>({ row, config, rowKey, selected, onSelect, disable
     run();
   };
   const title = config.title(row), subtitle = config.subtitle?.(row), media = config.media?.(row);
-  const details = <PreviewContent owner={owner} kind={config.kind} hasMedia={Boolean(media)}>
-    {config.details?.(row)}
-    {config.actions && <div className={styles.previewActions}>{config.actions(row, afterClose)}</div>}
-  </PreviewContent>;
-  const summary = <div className={styles.summary} data-kind={config.kind} data-copilot-field="summary" data-copilot-label={t("摘要")}>
+  const body = <div className={styles.summary} data-kind={config.kind} data-copilot-field="summary" data-copilot-label={t("摘要")}>
     {config.status && <div className={styles.context}>{config.status(row)}</div>}
     {config.body(row)}
   </div>;
-  return <motion.div layout={reduced || open ? false : "position"} transition={{duration:.2}} ref={wrapper} className={styles.item} data-copilot-record={rowKey} data-copilot-label={title} data-copilot-disabled={disabled ? "true" : undefined} data-record-card={rowKey} data-kind={config.kind ?? "catalog"} data-has-media={Boolean(media) || undefined} data-featured={config.featured?.(row) || undefined} data-selected={selected || undefined} data-selectable={Boolean(onSelect) || undefined}>
-    {onSelect && selectionHost && createPortal(<div className={styles.selection}><Checkbox aria-label={`${t("选择")} ${title}`} checked={Boolean(selected)} disabled={disabled} onCheckedChange={value => onSelect(value === true)} /></div>, selectionHost)}
-    <Card title={title} meta={subtitle ? <span className={styles.secondary}>{subtitle}</span> : undefined} className={styles.card} media={media}
+  const summary = config.listing ? <div className={styles.listingSummary} data-copilot-field="summary" data-copilot-label={t("摘要")}>{config.listing(row)}</div> : body;
+  const details = <PreviewContent owner={owner} kind={config.kind} hasMedia={Boolean(media)}>
+    {config.listing && body}
+    {config.details?.(row)}
+    {config.actions && <div className={styles.previewActions}>{config.actions(row, afterClose)}</div>}
+  </PreviewContent>;
+  const recordLabel = config.listing && subtitle ? `${title} · ${subtitle}` : title;
+  return <motion.div layout={reduced || open ? false : "position"} transition={{duration:.2}} ref={wrapper} className={styles.item} role={config.listing ? "group" : undefined} aria-label={config.listing ? recordLabel : undefined} aria-current={current || undefined} data-current={current || undefined} data-copilot-record={rowKey} data-copilot-label={recordLabel} data-copilot-disabled={disabled ? "true" : undefined} data-record-card={rowKey} data-kind={config.kind ?? "catalog"} data-presentation={config.listing ? "product-listing" : undefined} data-has-media={Boolean(media) || undefined} data-featured={config.featured?.(row) || undefined} data-selected={selected || undefined} data-selectable={Boolean(onSelect) || undefined}>
+    {onSelect && selectionHost && createPortal(<div className={styles.selection}><Checkbox aria-label={`${t("选择")} ${recordLabel}`} checked={Boolean(selected)} disabled={disabled} onCheckedChange={value => onSelect(value === true)} /></div>, selectionHost)}
+    <Card title={title} meta={subtitle ? <span className={styles.secondary} data-record-card-meta="">{subtitle}</span> : undefined} className={styles.card} media={media}
       details={narrow ? undefined : details} open={!narrow && open} onOpenChange={changeOpen}
-      action={!open ? <Button ref={trigger} className={config.kind === "membership" ? styles.memberDetails : undefined} size="sm" variant="secondary" onClick={() => changeOpen(true)} aria-label={`${t("查看详情")} ${title}`}>{t("查看详情")}</Button> : undefined}>
-      {narrow && <button type="button" className={styles.mobileHit} data-copilot-reference="" aria-label={`${t("查看详情")} ${title}`} onClick={() => changeOpen(true)} />}
+      action={!open && !config.listing ? <Button ref={trigger} className={config.kind === "membership" ? styles.memberDetails : undefined} size="sm" variant="secondary" onClick={() => changeOpen(true)} aria-label={`${t("查看详情")} ${title}`}>{t("查看详情")}</Button> : undefined}>
+      {narrow && <button ref={config.listing ? trigger : undefined} type="button" className={styles.mobileHit} data-copilot-reference="" aria-label={`${t("查看详情")} ${recordLabel}`} onClick={() => changeOpen(true)} />}
       {config.kind !== "membership" && summary}
     </Card>
     {narrow && <BottomSheet open={open} onOpenChange={next => { changeOpen(next); if (!next && !pending.current) requestAnimationFrame(() => trigger.current?.focus()); }} title={title} description={subtitle} closeLabel={t("关闭详情")} detents={[.6, .92]} initialDetent={1}>

@@ -7,6 +7,7 @@ import { CardFacts, CardSecondary, CardSection } from "@/components/ui/data-tabl
 import { CatalogCardMedia } from "./CatalogCardMedia";
 import { catalogAttributeText } from "./catalogAttributeText";
 import styles from "./assetCards.module.css";
+import listing from "./catalogListing.module.css";
 
 type Translate = (key: string) => string;
 const assetStatus = {
@@ -18,9 +19,9 @@ const assetStatus = {
   disabled: { tone: "neutral", icon: CirclePause },
 } as const;
 
-function photo(groups: RentalItemGroup[], id: string) {
+function photo(groups: RentalItemGroup[], id: string, name: string) {
   const group = groups.find(item => item.id === id);
-  return group?.images?.length ? <CatalogCardMedia group={group} /> : null;
+  return <CatalogCardMedia group={group} label={name} />;
 }
 
 export function assetCards({ t, groups, statusLabel, canManage, canView, edit, history, fields = [], summaryFields = [], itemGroupLabel, locationLabel, serialLabel }: {
@@ -47,9 +48,20 @@ export function assetCards({ t, groups, statusLabel, canManage, canView, edit, h
   };
   return {
     kind: "asset",
-    title: row => row.assetNo,
-    subtitle: row => row.itemGroupCode,
-    media: row => photo(groups, row.itemGroupId),
+    title: row => row.itemGroupName,
+    subtitle: row => row.assetNo,
+    media: row => photo(groups, row.itemGroupId, row.itemGroupName),
+    listing: row => {
+      const status = assetStatus[row.status];
+      const StatusIcon = status?.icon ?? Box;
+      return <>
+        <p className={listing.row}>
+          <span className={listing.identity} title={row.assetNo}>{row.assetNo}</span>
+          <span className={listing.state} data-warning={status?.tone === "warning" || undefined}><StatusIcon aria-hidden="true" />{statusLabel(row.status)}</span>
+        </p>
+        <p className={listing.row}><span className={`${listing.metadata} ${listing.location}`} title={`${locationLabel ?? t("履约地点")} · ${row.locationName}`}><MapPin aria-hidden="true" /><span>{row.locationName}</span></span></p>
+      </>;
+    },
     status: row => <DataTableStatus variant="soft" {...assetStatus[row.status]}>{statusLabel(row.status)}</DataTableStatus>,
     body: row => <div className={styles.asset}>
       <dl className={styles.identity}>
@@ -82,8 +94,25 @@ export function stockCards({ t, groups, dispositions, locale, locationLabel }: {
   return {
     kind: "stock",
     title: row => row.itemGroupName,
-    subtitle: row => row.itemGroupCode,
-    media: row => photo(groups, row.itemGroupId),
+    subtitle: row => `${row.itemGroupCode} · ${row.locationName}`,
+    media: row => photo(groups, row.itemGroupId, row.itemGroupName),
+    listing: row => {
+      const unit = groups.find(group => group.id === row.itemGroupId)?.unit;
+      const restrictions = restricted(row);
+      const exceedsOnHand = row.reservedQuantity + row.maintenanceQuantity > row.onHandQuantity;
+      const blocked = restrictions.some(item => item.status === "blocked");
+      const warning = exceedsOnHand ? t("库存异常") : blocked ? t("异常隔离") : restrictions.length ? t("周转缓冲") : row.maintenanceQuantity > 0 ? `${t("维护/清洁")} ${row.maintenanceQuantity}` : undefined;
+      return <>
+        <p className={`${listing.row} ${listing.quantityRow}`}>
+          <span className={listing.identity}>{t("可用")} {row.availableQuantity}{unit && ` ${t(unit)}`}</span>
+          <span className={listing.state}><Box aria-hidden="true" />{t("在手")} {row.onHandQuantity}</span>
+        </p>
+        <p className={listing.row}>
+          <span className={`${listing.metadata} ${listing.location}`} title={`${locationLabel ?? t("履约地点")} · ${row.locationName}`}><MapPin aria-hidden="true" /><span>{row.locationName}</span></span>
+          {warning ? <span className={listing.state} data-warning={!blocked || undefined} data-error={blocked || undefined} title={restrictions.map(item => item.blockReason || t("养护处理中")).join("；") || warning}><TriangleAlert aria-hidden="true" />{warning}</span> : row.reservedQuantity > 0 ? <span className={listing.state}>{t("已预占")} {row.reservedQuantity}</span> : null}
+        </p>
+      </>;
+    },
     status: row => <span className={styles.location} title={locationLabel ?? t("履约地点")}><MapPin aria-hidden="true" />{row.locationName}</span>,
     body: row => {
       const unit = groups.find(group => group.id === row.itemGroupId)?.unit;

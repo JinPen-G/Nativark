@@ -117,6 +117,24 @@ function ShellContents({ children }: { children: ReactNode }) {
     const observer = new MutationObserver(reveal); observer.observe(host, {childList:true, subtree:true}); reveal();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); };
   }, [selectedKey, sections, state, openMobile]);
+  const workspaceHeader = <header className={`rental-sidebar-colors native-workspace-context flex shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing)${aiMode ? " operator-context-header" : ""}`}>
+    <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
+      {(!tenantConsole || isMobile) && <>
+        <SidebarTrigger className="-ml-1" aria-label={navigationToggleLabel} aria-expanded={tenantConsole ? navigationExpanded : undefined}
+          aria-controls="app-sidebar-navigation" aria-keyshortcuts="Control+B Meta+B" />
+        <Separator orientation="vertical" className="mr-2 h-4" />
+      </>}
+      <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
+    </div>
+    <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
+      <RestEntry />
+      {!aiMode && copilot?.available && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
+        <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
+        {!!copilot.contexts.length && <span className="copilot-entry-count">{copilot.contexts.length}</span>}
+      </button></Tooltip>}
+      <HeaderNotifications />
+    </div>
+  </header>;
   return <>
     <Sidebar collapsible="icon" className="rental-sidebar-colors">
       <SidebarHeader>
@@ -135,25 +153,7 @@ function ShellContents({ children }: { children: ReactNode }) {
       <SidebarFooter><NativeAccountMenu /></SidebarFooter><SidebarRail />
     </Sidebar>
     <SidebarInset className="app-workspace min-h-0">
-      <header className={`rental-sidebar-colors native-workspace-context flex shrink-0 items-center gap-2 transition-[width,height] duration-(--animate-ui-sidebar-duration) ease-(--animate-ui-sidebar-easing)${aiMode ? " operator-context-header" : ""}`}>
-        <div className="flex min-w-0 flex-1 items-center gap-2 px-4">
-          {(!tenantConsole || isMobile) && <>
-            <SidebarTrigger className="-ml-1" aria-label={navigationToggleLabel} aria-expanded={tenantConsole ? navigationExpanded : undefined}
-              aria-controls="app-sidebar-navigation" aria-keyshortcuts="Control+B Meta+B" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-          </>}
-          <div className="workspace-context-location"><Breadcrumb aria-label={t("面包屑")} items={breadcrumbItems} /></div>
-        </div>
-        <div className="flex shrink-0 items-center gap-4 px-4"><WorkspaceClock />
-          <RestEntry />
-          {!aiMode && copilot?.available && <Tooltip title="Copilot"><button type="button" className="workspace-copilot-entry" aria-label="Copilot" aria-controls="business-copilot" aria-expanded={copilot.open} data-sound="press" onClick={() => copilot.open ? copilot.close() : copilot.show()}>
-            <AnimatedIcon name="ai" /><span className="workspace-copilot-label">Copilot</span>
-            {!!copilot.contexts.length && <span className="copilot-entry-count">{copilot.contexts.length}</span>}
-          </button></Tooltip>}
-          <HeaderNotifications />
-        </div>
-      </header>
-      <CopilotLayout suspended={aiMode}><div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div></CopilotLayout>
+      <CopilotLayout suspended={aiMode} header={workspaceHeader}><div ref={contentRef} className={`app-content${aiMode ? " ai-operator-host" : ""}`} data-admin-content style={{ flex: "1 1 auto" }}><div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div></div></CopilotLayout>
     </SidebarInset>
     <SubscriptionExpiryFloatingCard />
   </>;

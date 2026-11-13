@@ -1,5 +1,5 @@
 /** Model summaries show catalog facts and every rate-group membership; editing stays in the original guarded flow. */
-import { Boxes, Check, Layers3 } from "lucide-react";
+import { Boxes, Check, CircleCheck, CirclePause, Layers3 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { RentalAttributeDefinition, RentalItemGroup, RentalPricingGroup } from "@rental-os/shared";
 import type { ListCard } from "@/components/ui";
@@ -8,6 +8,7 @@ import { CardBadge, CardFacts, CardList, CardSecondary, CardSection } from "@/co
 import { CatalogCardMedia } from "./CatalogCardMedia";
 import { catalogAttributeText } from "./catalogAttributeText";
 import styles from "./catalogCards.module.css";
+import listing from "./catalogListing.module.css";
 
 type Translate = (key: string) => string;
 const inventoryLabels: Record<string, string> = {
@@ -37,7 +38,17 @@ export function catalogCards({ t, fields, summaryFields, pricingGroups, canManag
     kind: "catalog",
     title: row => row.name,
     subtitle: row => row.code,
-    media: row => row.images?.length ? <CatalogCardMedia group={row} /> : null,
+    media: row => <CatalogCardMedia group={row} />,
+    listing: row => <>
+      <p className={listing.row}>
+        <span className={listing.identity} title={row.code}>{row.code}</span>
+        <span className={listing.state}>{row.status === "enabled" ? <CircleCheck aria-hidden="true" /> : <CirclePause aria-hidden="true" />}{t(row.status === "enabled" ? "已启用" : "已停用")}</span>
+      </p>
+      <p className={listing.row}>
+        <span className={listing.metadata} title={t(inventoryLabels[row.inventoryMode] ?? row.inventoryMode)}>{t(inventoryLabels[row.inventoryMode] ?? row.inventoryMode)}{row.unit && ` · ${t(row.unit)}`}</span>
+        <span className={listing.risk}>{risk(row)}</span>
+      </p>
+    </>,
     status: row => <div className={styles.context}>
       <span className={styles.mode}><Boxes aria-hidden="true" />{t(inventoryLabels[row.inventoryMode] ?? row.inventoryMode)}{row.unit && <span title={t("单位")}> · {t(row.unit)}</span>}</span>
       <span className={styles.badges}>

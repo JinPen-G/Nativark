@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import type {
   AdminLoginBranding,
   ClientChannelFaqItem,
@@ -47,29 +47,18 @@ function normalizeThemeColor(value: string | undefined): string | null {
   return `#${hex.toUpperCase()}`;
 }
 
-function normalizeAdminCornerRadius(value: number | undefined | null): number {
-  if (value === undefined || value === null) return ADMIN_UI_CORNER_RADIUS_DEFAULT;
-  // 极致圆角是允许的离散档；其余必须落在连续区间内，20 与 999 之间的值一律拒绝。
-  if (value === ADMIN_UI_CORNER_RADIUS_FULL) return value;
-  if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > ADMIN_UI_CORNER_RADIUS_MAX) {
-    throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），或极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
-  }
-  return value;
+/** Read stored radii without treating historical values as a new write request. */
+function readAdminCornerRadius(value: number | undefined | null): number {
+  return Number.isInteger(value) ? value as number : ADMIN_UI_CORNER_RADIUS_DEFAULT;
 }
 
 /**
- * 分组圆角（容器/按钮/输入）归一化：与统一圆角同档校验，但**缺省保留 null**，
- * 不落默认值——这样某组未设置时前端回退到旧的统一圆角，而不是被强制成 12。
+ * 仅校验显式提交的圆角；null 清除，省略由调用方保留原字段，不能把历史极值重新当新输入。
  */
-function normalizeAdminRadiusGroup(value: number | undefined | null, allowFull = true): number | null {
+function normalizeAdminRadiusGroup(value: number | undefined | null, max: number): number | null {
   if (value === undefined || value === null) return null;
-  if (value === ADMIN_UI_CORNER_RADIUS_FULL) {
-    // 极致圆角 999 仅按钮组可用；容器/输入不提供该档（写入时挡住越过 UI 的注入）。
-    if (allowFull) return value;
-    throw new BadRequestException(`该项圆角仅支持 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），不支持极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
-  }
-  if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > ADMIN_UI_CORNER_RADIUS_MAX) {
-    throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），或极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
+  if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > max) {
+    throw new BadRequestException(`该项圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${max} 的整数（px）`);
   }
   return value;
 }
@@ -160,10 +149,10 @@ export class ClientChannelProfileService {
       bannerTitle: row?.bannerTitle ?? undefined,
       bannerSubtitle: row?.bannerSubtitle ?? undefined,
       themeColor: row?.themeColor ?? undefined,
-      adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius),
-      adminContainerRadius: normalizeAdminRadiusGroup(row?.adminContainerRadius) ?? undefined,
-      adminButtonRadius: normalizeAdminRadiusGroup(row?.adminButtonRadius) ?? undefined,
-      adminInputRadius: normalizeAdminRadiusGroup(row?.adminInputRadius) ?? undefined,
+      adminCornerRadius: readAdminCornerRadius(row?.adminCornerRadius),
+      adminContainerRadius: row?.adminContainerRadius ?? undefined,
+      adminButtonRadius: row?.adminButtonRadius ?? undefined,
+      adminInputRadius: row?.adminInputRadius ?? undefined,
       smsLoginEnabled: row?.smsLoginEnabled ?? true,
       passwordLoginEnabled: row?.passwordLoginEnabled ?? true,
       publishedWorkspaceIds,
@@ -190,7 +179,7 @@ export class ClientChannelProfileService {
       faviconUrl: appearance.faviconUrl ?? undefined,
       themeColor: appearance.themeColor ?? undefined,
       adminLogin: (appearance.adminLoginJson ?? undefined) as AdminLoginBranding | undefined,
-      adminCornerRadius: normalizeAdminCornerRadius(appearance.adminCornerRadius),
+      adminCornerRadius: readAdminCornerRadius(appearance.adminCornerRadius),
       adminContainerRadius: appearance.adminContainerRadius ?? undefined,
       adminButtonRadius: appearance.adminButtonRadius ?? undefined,
       adminInputRadius: appearance.adminInputRadius ?? undefined,
@@ -227,10 +216,10 @@ export class ClientChannelProfileService {
       brandLogoUrl: row?.brandLogoUrl ?? undefined,
       faviconUrl: row?.faviconUrl ?? undefined,
       themeColor: row?.themeColor ?? undefined,
-      adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius),
-      adminContainerRadius: normalizeAdminRadiusGroup(row?.adminContainerRadius) ?? undefined,
-      adminButtonRadius: normalizeAdminRadiusGroup(row?.adminButtonRadius) ?? undefined,
-      adminInputRadius: normalizeAdminRadiusGroup(row?.adminInputRadius) ?? undefined
+      adminCornerRadius: readAdminCornerRadius(row?.adminCornerRadius),
+      adminContainerRadius: row?.adminContainerRadius ?? undefined,
+      adminButtonRadius: row?.adminButtonRadius ?? undefined,
+      adminInputRadius: row?.adminInputRadius ?? undefined
     };
   }
 
@@ -305,6 +294,12 @@ export class ClientChannelProfileService {
     if (typeof input.expectedRevision === "number" && existing && existing.revision !== input.expectedRevision) {
       throw new ConflictException("配置已被其他人更新，请刷新后重试");
     }
+    const radiusChanges = {
+      ...(input.adminCornerRadius !== undefined ? { adminCornerRadius: normalizeAdminRadiusGroup(input.adminCornerRadius, ADMIN_UI_CORNER_RADIUS_MAX) } : {}),
+      ...(input.adminContainerRadius !== undefined ? { adminContainerRadius: normalizeAdminRadiusGroup(input.adminContainerRadius, ADMIN_UI_CORNER_RADIUS_MAX) } : {}),
+      ...(input.adminButtonRadius !== undefined ? { adminButtonRadius: normalizeAdminRadiusGroup(input.adminButtonRadius, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX) } : {}),
+      ...(input.adminInputRadius !== undefined ? { adminInputRadius: normalizeAdminRadiusGroup(input.adminInputRadius, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX) } : {})
+    };
     const requestedWorkspaceIds = Array.from(new Set((input.publishedWorkspaceIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
     const workspaces = await this.prisma.businessWorkspace.findMany({ where: { tenantId, id: { in: requestedWorkspaceIds } }, select: { id: true, status: true } });
     const unknown = requestedWorkspaceIds.filter((id) => !workspaces.some((row) => row.id === id));
@@ -341,10 +336,7 @@ export class ClientChannelProfileService {
       bannerTitle: text(input.bannerTitle, 64, "首页横幅标题"),
       bannerSubtitle: text(input.bannerSubtitle, 120, "首页横幅副标题"),
       themeColor: normalizeThemeColor(input.themeColor),
-      adminCornerRadius: normalizeAdminCornerRadius(input.adminCornerRadius ?? existing?.adminCornerRadius),
-      adminContainerRadius: normalizeAdminRadiusGroup(input.adminContainerRadius ?? existing?.adminContainerRadius, false),
-      adminButtonRadius: normalizeAdminRadiusGroup(input.adminButtonRadius ?? existing?.adminButtonRadius, true),
-      adminInputRadius: normalizeAdminRadiusGroup(input.adminInputRadius ?? existing?.adminInputRadius, false),
+      ...radiusChanges,
       smsLoginEnabled: Boolean(input.smsLoginEnabled),
       passwordLoginEnabled: Boolean(input.passwordLoginEnabled),
       defaultWorkspaceId
@@ -355,12 +347,12 @@ export class ClientChannelProfileService {
         ? await tx.clientChannelProfile.update({ where: { id: existing.id }, data: { ...data, revision: { increment: 1 } } })
         : await tx.clientChannelProfile.create({ data: { tenantId, ...data } });
       // 品牌与主题色仍在客户端配置维护，同时更新登录/启动配置读取的外观记录。
-      // 已有外观记录只更新品牌，不把渠道里的旧圆角写回去。
+      // 仅传递显式圆角变更，不把渠道里的旧值覆盖回当前外观；null 保持清除语义。
       const branding = { brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, ...(adminLoginJson !== undefined ? { adminLoginJson } : {}) };
       await tx.tenantAppearanceProfile.upsert({
         where: { tenantId },
-        create: { tenantId, ...branding, adminCornerRadius: data.adminCornerRadius, adminContainerRadius: data.adminContainerRadius, adminButtonRadius: data.adminButtonRadius, adminInputRadius: data.adminInputRadius },
-        update: { ...branding, revision: { increment: 1 } }
+        create: { tenantId, ...branding, adminCornerRadius: row.adminCornerRadius, adminContainerRadius: row.adminContainerRadius, adminButtonRadius: row.adminButtonRadius, adminInputRadius: row.adminInputRadius },
+        update: { ...branding, ...radiusChanges, revision: { increment: 1 } }
       });
       await tx.clientChannelWorkspace.deleteMany({ where: { profileId: row.id, workspaceId: { notIn: requestedWorkspaceIds } } });
       for (const workspaceId of requestedWorkspaceIds) {
@@ -387,7 +379,7 @@ export class ClientChannelProfileService {
       faviconUrl: appearance.faviconUrl ?? undefined,
       themeColor: appearance.themeColor ?? undefined,
       adminLogin: (appearance.adminLoginJson ?? undefined) as AdminLoginBranding | undefined,
-      adminCornerRadius: normalizeAdminCornerRadius(appearance.adminCornerRadius),
+      adminCornerRadius: readAdminCornerRadius(appearance.adminCornerRadius),
       adminContainerRadius: appearance.adminContainerRadius ?? undefined,
       adminButtonRadius: appearance.adminButtonRadius ?? undefined,
       adminInputRadius: appearance.adminInputRadius ?? undefined,

@@ -1,0 +1,17 @@
+/* Two short rows follow the Product listing screen's name/primary fact/metadata rhythm. */
+.row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; min-height: 18px; margin: 0; }
+.identity, .metadata { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.identity { color: var(--foreground); }
+.quantityRow { flex-wrap: wrap; }
+.quantityRow .identity { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.quantityRow .state { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.metadata { color: var(--text-secondary); font-size: 12px; }
+.state { display: inline-flex; flex: none; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.state svg, .metadata svg { width: 14px; height: 14px; flex: none; stroke-width: 1.75; }
+.state svg { color: var(--text-muted); }
+.state[data-warning], .state[data-warning] svg { color: var(--rental-status-warning-ink); }
+.state[data-error], .state[data-error] svg { color: var(--rental-status-error-ink); }
+.risk { display: inline-flex; flex: none; align-items: center; font-size: 12px; }
+:global(html[data-theme]) .risk :global(.ant-tag[class]:not(.ant-tag-disabled)) { margin: 0; min-height: 0; padding: 0; border: 0; background: transparent; font-size: inherit; line-height: 18px; }
+.location { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.location > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

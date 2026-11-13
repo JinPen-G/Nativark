@@ -5,6 +5,15 @@
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @container list-tools (max-width: 960px) { .transferLabel { display: none; } }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--rental-list-card-min-width)), 1fr)); gap: var(--space-4); }
+/* UIArc Product listing screen: 172px minimum tracks, 8px gaps, and square product images. */
+.grid[data-presentation="product-listing"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 172px), 1fr)); gap: var(--space-2); margin-inline: calc(-1 * var(--space-2)); align-items: start; }
+@container admin-content (max-width: 640px) {
+  .grid[data-presentation="product-listing"] { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-1); margin-inline: -6px; }
+}
+/* The reference breakpoint measures the screen panel, before page padding and scrollbar. */
+@container record-screen (min-width: 641px) {
+  .grid[data-presentation="product-listing"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 172px), 1fr)); gap: var(--space-2); margin-inline: calc(-1 * var(--space-2)); }
+}
 .card { min-width: 0; border: 1px solid var(--border); border-radius: var(--rental-ui-radius-container); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); overflow-wrap: anywhere; color: var(--foreground); background: var(--surface); }
 .cardHead { display: flex; align-items: start; justify-content: space-between; gap: var(--space-2); }
 .cardTitle { font-size: var(--rental-typography-section-title-size); font-weight: var(--rental-typography-section-title-weight); margin: 0; }

@@ -1,4 +1,5 @@
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
@@ -102,6 +103,10 @@ export interface ContractOperation {
 const stringSchema: SchemaObject = { type: "string" };
 const rentalCategoryCodeSchema: SchemaObject = { type: "string", pattern: RENTAL_CATEGORY_CODE_PATTERN.source, minLength: 2, maxLength: 64 };
 const numberSchema: SchemaObject = { type: "number" };
+// Stored values may include retired radii. Only an explicit save uses the current bounds.
+const storedAdminRadiusSchema: SchemaObject = { type: "integer", description: "保留历史配置值；后台显示按容器 4–20px、按钮/输入 4–16px 收敛，读取不改库。无覆盖时分别默认 12/8/8px。" };
+const adminContainerRadiusInput: SchemaObject = { type: "integer", nullable: true, minimum: ADMIN_UI_CORNER_RADIUS_MIN, maximum: ADMIN_UI_CORNER_RADIUS_MAX, description: "省略保留，null 清除覆盖。只接受当前常用范围；未配置容器默认 12px。" };
+const adminControlRadiusInput: SchemaObject = { type: "integer", nullable: true, minimum: ADMIN_UI_CORNER_RADIUS_MIN, maximum: ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, description: "省略保留，null 清除覆盖。只接受当前常用范围；未配置按钮/输入默认 8px。" };
 const booleanSchema: SchemaObject = { type: "boolean" };
 const objectSchema: SchemaObject = { type: "object", additionalProperties: true };
 
@@ -540,10 +545,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       brandLogoUrl: stringSchema,
       faviconUrl: stringSchema,
       themeColor: stringSchema,
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminCornerRadius: storedAdminRadiusSchema,
+      adminContainerRadius: storedAdminRadiusSchema,
+      adminButtonRadius: storedAdminRadiusSchema,
+      adminInputRadius: storedAdminRadiusSchema,
       categoryCode: stringSchema,
       categoryName: stringSchema,
       capabilities: arrayOf(stringSchema)
@@ -591,10 +596,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   TenantAppearanceProfile: objectOf(
     {
       brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, themeColor: stringSchema,
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminCornerRadius: storedAdminRadiusSchema,
+      adminContainerRadius: storedAdminRadiusSchema,
+      adminButtonRadius: storedAdminRadiusSchema,
+      adminInputRadius: storedAdminRadiusSchema,
       revision: numberSchema, updatedAt: { type: "string", format: "date-time" }
     },
     ["revision"],
@@ -604,10 +609,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     {
       expectedRevision: numberSchema,
       brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, themeColor: stringSchema,
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 }
+      adminCornerRadius: adminContainerRadiusInput,
+      adminContainerRadius: adminContainerRadiusInput,
+      adminButtonRadius: adminControlRadiusInput,
+      adminInputRadius: adminControlRadiusInput
     },
     [],
     false
@@ -630,10 +635,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       adminLogin: ref("AdminLoginBranding"),
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminCornerRadius: storedAdminRadiusSchema,
+      adminContainerRadius: storedAdminRadiusSchema,
+      adminButtonRadius: storedAdminRadiusSchema,
+      adminInputRadius: storedAdminRadiusSchema,
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
       publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema,
       workspaces: arrayOf("ClientChannelWorkspaceOption"),
@@ -649,10 +654,10 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       adminLogin: ref("AdminLoginBranding"),
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
-      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminCornerRadius: adminContainerRadiusInput,
+      adminContainerRadius: adminContainerRadiusInput,
+      adminButtonRadius: adminControlRadiusInput,
+      adminInputRadius: adminControlRadiusInput,
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
     },
     ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]

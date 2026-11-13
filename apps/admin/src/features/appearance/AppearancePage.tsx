@@ -2,7 +2,7 @@ import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { RadioCards } from "@/registry/components/radio-cards/radio-cards";
 import { useAppearance } from "@/app/theme";
 import { Monitor, Moon, Sun } from "lucide-react";
-import { Card, Col, Row, Space, Typography } from "antd";
+import { Card, Col, Row, Typography } from "antd";
 import { Slider } from "@/components/ui";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
@@ -13,10 +13,10 @@ import { useServerFormSync } from "@/app/useServerFormSync";
 import { isTransientRefreshError } from "@/app/queryClient";
 import { useMutation, useQuery, queryOptions, useQueryClient } from "@tanstack/react-query";
 import type { SaveTenantAppearanceRequest } from "@rental-os/shared";
-import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULTS, ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import { appearanceApi } from "@/api/appearance";
 import { accountAppearanceApi } from "@/api/accountAppearance";
-import { resolveAdminRadii } from "@/app/designTokens";
+import { resolveAdminCornerRadius, resolveAdminRadiusGroup, resolveAdminRadii } from "@/app/designTokens";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -25,20 +25,20 @@ import { SoundSettingCard } from "@/features/sound/SoundSettingCard";
 import { MotionSettingCard } from "./MotionSettingCard";
 import { CopilotSection } from "@/features/copilot/CopilotSection";
 
-/** 仅按钮组允许 999 离散档，容器与输入组沿用已配置的连续范围。 */
-function AdminRadiusSlider({ name, label, tooltip, allowFull = true }: { name: string; label: string; tooltip: string; allowFull?: boolean }) {
-  const sliderMax = allowFull ? ADMIN_UI_CORNER_RADIUS_MAX + 4 : ADMIN_UI_CORNER_RADIUS_MAX;
+/** The slider and preview show the same effective radius, including inherited values. */
+function AdminRadiusSlider({ name, kind, label, tooltip, legacy }: { name: string; kind: "container" | "button" | "input"; label: string; tooltip: string; legacy?: number }) {
+  const sliderMax = kind === "container" ? ADMIN_UI_CORNER_RADIUS_MAX : ADMIN_UI_CORNER_RADIUS_CONTROL_MAX;
   const marks: Record<number, string> = {
     [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`,
-    [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`,
-    [sliderMax]: `${allowFull ? ADMIN_UI_CORNER_RADIUS_FULL : ADMIN_UI_CORNER_RADIUS_MAX}px`
+    [ADMIN_UI_CORNER_RADIUS_DEFAULTS[kind]]: `${ADMIN_UI_CORNER_RADIUS_DEFAULTS[kind]}px`,
+    [sliderMax]: `${sliderMax}px`
   };
   return (
     <Form.Item name={name} extra={<span className="text-meta">{tooltip}</span>}
-      getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? sliderMax : value })}
-      trigger="onValueChange" normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? (allowFull ? ADMIN_UI_CORNER_RADIUS_FULL : ADMIN_UI_CORNER_RADIUS_MAX) : value}>
+      getValueProps={(value) => ({ value: resolveAdminRadiusGroup(value, legacy, kind) })}
+      trigger="onValueChange" rules={[{ type: "integer", min: ADMIN_UI_CORNER_RADIUS_MIN, max: sliderMax }]}>
       <Slider label={label} min={ADMIN_UI_CORNER_RADIUS_MIN} max={sliderMax} step={1} marks={Object.entries(marks).map(([value, label]) => ({ value: Number(value), label }))}
-        format={value => allowFull && value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px`} />
+        format={value => `${value}px`} />
     </Form.Item>
   );
 }
@@ -109,7 +109,11 @@ export function AppearancePage() {
   useServerFormSync(form, profile.data, () => {
     if (!profile.data) return;
     const d = profile.data;
-    form.setFieldsValue({ adminContainerRadius: d.adminContainerRadius, adminButtonRadius: d.adminButtonRadius, adminInputRadius: d.adminInputRadius,
+    // Map stored extremes into the editable draft only. Null/omitted groups keep inheritance;
+    // the original revision still protects the explicit save, and reading does not write.
+    form.setFieldsValue({ adminContainerRadius: d.adminContainerRadius == null ? d.adminContainerRadius : resolveAdminRadiusGroup(d.adminContainerRadius, d.adminCornerRadius, "container"),
+      adminButtonRadius: d.adminButtonRadius == null ? d.adminButtonRadius : resolveAdminRadiusGroup(d.adminButtonRadius, d.adminCornerRadius, "button"),
+      adminInputRadius: d.adminInputRadius == null ? d.adminInputRadius : resolveAdminRadiusGroup(d.adminInputRadius, d.adminCornerRadius, "input"),
       expectedRevision: d.revision });
   });
 
@@ -141,24 +145,26 @@ export function AppearancePage() {
         ) : (
           <Form<AppearanceForm> form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
             <CopilotSection id="admin-radii" title={t("管理后台圆角（分组）")} fields={[
-              { key: 'adminContainerRadius', label: t('容器圆角'), value: watchContainer == null ? 'inherit' : String(watchContainer) },
-              { key: 'adminButtonRadius', label: t('按钮圆角'), value: watchButton == null ? 'inherit' : String(watchButton) },
-              { key: 'adminInputRadius', label: t('输入框圆角'), value: watchInput == null ? 'inherit' : String(watchInput) },
+              { key: 'adminContainerRadius', label: t('容器圆角'), value: watchContainer == null ? 'inherit' : String(watchContainer), max: ADMIN_UI_CORNER_RADIUS_MAX },
+              { key: 'adminButtonRadius', label: t('按钮圆角'), value: watchButton == null ? 'inherit' : String(watchButton), max: ADMIN_UI_CORNER_RADIUS_CONTROL_MAX },
+              { key: 'adminInputRadius', label: t('输入框圆角'), value: watchInput == null ? 'inherit' : String(watchInput), max: ADMIN_UI_CORNER_RADIUS_CONTROL_MAX },
             ].map(field => ({ ...field, options: [
               { value: 'inherit', label: t('沿用默认') },
-              ...Array.from({ length: ADMIN_UI_CORNER_RADIUS_MAX - ADMIN_UI_CORNER_RADIUS_MIN + 1 }, (_, index) => ({ value: String(index + ADMIN_UI_CORNER_RADIUS_MIN), label: `${index + ADMIN_UI_CORNER_RADIUS_MIN}px` })),
-              ...(field.key === 'adminButtonRadius' ? [{ value: String(ADMIN_UI_CORNER_RADIUS_FULL), label: t('胶囊') }] : []),
+              ...Array.from({ length: field.max - ADMIN_UI_CORNER_RADIUS_MIN + 1 }, (_, index) => ({ value: String(index + ADMIN_UI_CORNER_RADIUS_MIN), label: `${index + ADMIN_UI_CORNER_RADIUS_MIN}px` })),
             ] }))} onFill={save.isPending || profile.isFetching ? undefined : values => {
               const allowed = ['adminContainerRadius', 'adminButtonRadius', 'adminInputRadius'];
               form.setFieldsValue(Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)).map(([key, value]) => [key, value === 'inherit' ? null : Number(value)])));
             }}><Card size="small" title={t("管理后台圆角（分组）")}>
               <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
-                {t("三组圆角独立调整；留空沿用统一圆角，圆形与胶囊控件保留原形态。")}
+                {t("默认：容器 12px，按钮和输入框 8px。头像、圆形图标和开关保留原形。")}
               </Typography.Paragraph>
+              {[profile.data.adminContainerRadius, profile.data.adminButtonRadius, profile.data.adminInputRadius, profile.data.adminCornerRadius].some((value, index) => value != null && value !== resolveAdminCornerRadius(value, index === 1 || index === 2 ? ADMIN_UI_CORNER_RADIUS_CONTROL_MAX : ADMIN_UI_CORNER_RADIUS_MAX)) && <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
+                {t("旧配置超出当前范围，已按上限预览；点击保存后才更新本页设置。")}
+              </Typography.Paragraph>}
               <Row gutter={[16, 0]}>
-                <Col xs={24} md={8}><AdminRadiusSlider name="adminContainerRadius" label={t("容器圆角")} tooltip={t("卡片、弹窗、抽屉、表格外框等大面")} allowFull={false} /><RadiusPreview kind="container" radius={previewRadii.container} /></Col>
-                <Col xs={24} md={8}><AdminRadiusSlider name="adminButtonRadius" label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} /><RadiusPreview kind="button" radius={previewRadii.button} /></Col>
-                <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} allowFull={false} /><RadiusPreview kind="input" radius={previewRadii.input} /></Col>
+                <Col xs={24} md={8}><AdminRadiusSlider name="adminContainerRadius" kind="container" legacy={profile.data.adminCornerRadius} label={t("容器圆角")} tooltip={t("卡片、弹窗、抽屉、表格外框等大面")} /><RadiusPreview kind="container" radius={previewRadii.container} /></Col>
+                <Col xs={24} md={8}><AdminRadiusSlider name="adminButtonRadius" kind="button" legacy={profile.data.adminCornerRadius} label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} /><RadiusPreview kind="button" radius={previewRadii.button} /></Col>
+                <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" kind="input" legacy={profile.data.adminCornerRadius} label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} /><RadiusPreview kind="input" radius={previewRadii.input} /></Col>
               </Row>
               <SaveButton label={t("保存圆角设置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 16 }} />
             </Card></CopilotSection>

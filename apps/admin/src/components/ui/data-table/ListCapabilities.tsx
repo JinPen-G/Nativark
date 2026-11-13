@@ -72,7 +72,11 @@ export function ListViewSwitch({ value, onChange, disabled }: { value: "list" | 
   ]} /></div>;
 }
 export function ListCards<T>({ rows, config, getKey, selected, onSelect, busy, canSelect }: { rows: T[]; config: ListCard<T>; getKey: (row: T) => string; selected?: Set<string>; onSelect?: (row: T, checked: boolean) => void; busy?: boolean; canSelect?: (row: T) => boolean }) {
-  return <div className={styles.grid} aria-busy={busy || undefined}>{rows.map(row => <RecordCard key={getKey(row)} row={row} rowKey={getKey(row)} config={config}
+  const [activeKey, setActiveKey] = useState<string>();
+  // Browsing highlights the first visible record without adding it to a bulk operation.
+  const currentKey = activeKey && rows.some(row => getKey(row) === activeKey) ? activeKey : rows[0] ? getKey(rows[0]) : undefined;
+  return <div className={styles.grid} data-presentation={config.listing ? "product-listing" : undefined} aria-busy={busy || undefined}>{rows.map(row => <RecordCard key={getKey(row)} row={row} rowKey={getKey(row)} config={config}
+    current={config.listing ? getKey(row) === currentKey : undefined} onActivate={config.listing ? () => setActiveKey(getKey(row)) : undefined}
     selected={selected?.has(getKey(row)) ?? false} disabled={busy || canSelect?.(row) === false} onSelect={onSelect ? checked => onSelect(row, checked) : undefined} />)}</div>;
 }
 
