@@ -72,6 +72,14 @@ const section = obj({ key: id(), title: text(200), required: bool,
 const rawQuoteFacts = { oneOf: AI_SCENE_QUOTE_HTTP_SCHEMAS.AiSceneQuotePreparationDraft.oneOf!.map(branch => ({ ...branch,
   properties: Object.fromEntries(Object.entries(branch.properties!).filter(([key]) => !['next', 'authority', 'sideEffects'].includes(key))),
   required: branch.required!.filter(key => !['next', 'authority', 'sideEffects'].includes(key)) })) };
+const capabilityObservation = obj({ tenantId: id(), workspaceId: id(), categoryCode: id(), observedAt: time,
+  source: choice('original_workspace_capability_overview'), capabilities: list(obj({ code: id(), providedByCore: bool,
+    declaredByCategory: bool, requiredForCategory: bool, implemented: bool, applicable: bool,
+    state: choice('enabled', 'paused', 'disabled', 'declared_not_implemented', 'not_enabled'),
+    implementationVersion: { oneOf: [id(), { type: 'null' }] }, upgradeAvailable: bool,
+    instance: { oneOf: [obj({ status: choice('enabled', 'paused', 'disabled'), implementationVersion: id(), configVersion: id(),
+      revision: integer(1, Number.MAX_SAFE_INTEGER), updatedAt: time }), { type: 'null' }] } }), 128),
+  missingRequired: { ...list(id(), 128), uniqueItems: true }, productionReady: bool });
 const sceneMaterial = (scene: string, material: string) => obj({
   original: { ...AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReceiptDraft,
     properties: { ...AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReceiptDraft.properties!, sceneCode: choice(scene) } },
@@ -80,6 +88,11 @@ const sceneMaterial = (scene: string, material: string) => obj({
 
 export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   ...AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS,
+  AiOpeningCategorySourceDraft: obj({ source: choice('current_core_opening_configuration'), categoryCode: id(), categoryVersion: version }),
+  AiOpeningCapabilityObservationDraft: capabilityObservation,
+  AiOpeningCapabilityFactsDraft: { oneOf: [obj({ state: choice('observed'), scope, actorId: id(), audience: choice('operator'),
+    observation: ref('AiOpeningCapabilityObservationDraft') }), obj({ state: choice('unavailable'),
+    reason: choice('current_capability_permission_required', 'capability_observation_unavailable'), observation: { type: 'null' } })] },
   AiOrderEvidenceReferenceDraft: reference,
   AiOrderHistoryFactsDraft: obj({ ...meta, contractVersion: choice(AI_CONTRACT_DRAFT_VERSION), requestId: id(), orderId: id(),
     sourceOrderUpdatedAt: time, basis: choice('order_snapshot'), complete: no,
@@ -124,7 +137,8 @@ export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraf
         locations: list(obj({ id: id(), code: text(191), status: choice('enabled', 'disabled'), capabilities: { ...list(choice(...locationCapabilities), locationCapabilities.length), uniqueItems: true } }), 100), truncated: bool }),
       inventory: obj({ source: configurationSource, coverage: choice('not_loaded'), meaning: choice('item_modes_are_not_stock_balances') })
     }, []), atomicity: choice('independent_sections_not_a_transaction'), externalVerification: choice('not_loaded'),
-    integrationObservation: ref('AiOpeningIntegrationFactsDraft'), calendarSource: ref('AiOpeningCalendarSourceDraft') },
+    integrationObservation: ref('AiOpeningIntegrationFactsDraft'), calendarSource: ref('AiOpeningCalendarSourceDraft'),
+    categorySource: ref('AiOpeningCategorySourceDraft'), capabilityObservation: ref('AiOpeningCapabilityFactsDraft') },
     [...Object.keys(meta), 'configVersion', 'sections', 'configuration', 'atomicity', 'externalVerification']),
   AiQuoteBusinessFactsDraft: rawQuoteFacts,
   AiQuoteBusinessMaterialDraft: sealed('quote_clarification', obj({ ...meta, facts: rawQuoteFacts, model,

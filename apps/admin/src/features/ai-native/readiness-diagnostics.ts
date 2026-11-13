@@ -1,4 +1,5 @@
-import { aiOpeningCalendarSourceDraft, type AiOpeningBusinessMaterialDraft, type AiOpeningCalendarSourceDraft,
+import { aiOpeningCalendarSourceDraft, aiOpeningCategorySourceDraft, aiOpeningCapabilityFactsDraft,
+  type AiOpeningCategorySourceDraft, type AiOpeningCapabilityFactsDraft, type AiOpeningBusinessMaterialDraft, type AiOpeningCalendarSourceDraft,
   type AiOpeningSectionMaterialDraft, type TenantReadinessStatus } from "@rental-os/shared";
 
 export type ReadinessItemState = "required" | "optional" | "unavailable" | "completed" | "unclassified";
@@ -27,6 +28,8 @@ export interface ReadinessDiagnosticsDisplay {
   configVersion?: string;
   externalVerification?: "not_loaded";
   calendarSource?: AiOpeningCalendarSourceDraft;
+  categorySource?: AiOpeningCategorySourceDraft;
+  capabilityObservation?: AiOpeningCapabilityFactsDraft;
 }
 
 /** Shape/scope projection only. The original async reader also checks the
@@ -92,7 +95,15 @@ export function toReadinessDiagnostics(input: unknown): ReadinessDiagnosticsDisp
  * cannot establish the Core aggregate or quote blockers that were not sent. */
 export function toOpeningReadinessDiagnostics(material: AiOpeningBusinessMaterialDraft): ReadinessDiagnosticsDisplay | null {
   let calendarSource: AiOpeningCalendarSourceDraft | undefined;
-  try { calendarSource = readinessCalendarSource(material.calendarSource, material.scope, material.observedAt); }
+  let categorySource: AiOpeningCategorySourceDraft | undefined, capabilityObservation: AiOpeningCapabilityFactsDraft | undefined;
+  try {
+    calendarSource = readinessCalendarSource(material.calendarSource, material.scope, material.observedAt);
+    categorySource = material.categorySource === undefined ? undefined : aiOpeningCategorySourceDraft.parse(material.categorySource);
+    capabilityObservation = material.capabilityObservation === undefined ? undefined : aiOpeningCapabilityFactsDraft.parse(material.capabilityObservation);
+    if (capabilityObservation?.state === 'observed' && (!categorySource
+      || capabilityObservation.scope.tenantId !== material.scope.tenantId || capabilityObservation.scope.workspaceId !== material.scope.workspaceId
+      || capabilityObservation.observation.categoryCode !== categorySource.categoryCode)) return null;
+  }
   catch { return null; }
   if (calendarSource && !material.sections.some(section => section.key === 'business_calendar')) return null;
   const rows: ReadinessDiagnosticRow[] = material.sections.map(section => ({
@@ -106,5 +117,6 @@ export function toOpeningReadinessDiagnostics(material: AiOpeningBusinessMateria
   return { tenantId: material.scope.tenantId, workspaceId: material.scope.workspaceId,
     status: null, ready: null, rows, quoteBlockers: null, unavailable: rows.some(row => row.state === "unavailable"),
     observedAt: material.observedAt, configVersion: material.configVersion, externalVerification: material.externalVerification,
+    ...(categorySource ? { categorySource } : {}), ...(capabilityObservation ? { capabilityObservation } : {}),
     ...(calendarSource ? { calendarSource } : {}) };
 }

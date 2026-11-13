@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { AiOpeningIntegrationFactsService } from './opening-integration-facts.service';
-import { aiOpeningCalendarSourceBasis, type AiExecutionContext } from '@rental-os/shared';
+import type { AiOpeningCapabilityFactsService } from './opening-capability-facts.service';
+import { aiOpeningCalendarSourceBasis, aiOpeningCategorySourceDraft, aiOpeningCapabilitySourceBasis,
+  type AiExecutionContext, type AiOpeningCapabilityFactsDraft } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './read-context-binding';
 import type { AiOpeningReadFactsService, AiRiskReadFactsService, AiDiagnosticReadAuthority } from './diagnostic-read-facts.service';
 import { AiDiagnosticSourceUnavailable, aiRiskReadInputSchema } from './diagnostic-read-facts.service';
@@ -45,7 +47,8 @@ export class AiOpeningActionListService {
     private readonly risks: Pick<AiRiskReadFactsService, 'read'>,
     private readonly contexts: AiOpeningConfigurationSource, private readonly authority: AiDiagnosticReadAuthority,
     private readonly clock: () => Date = () => new Date(),
-    private readonly integrations?: Pick<AiOpeningIntegrationFactsService, 'read'>) {}
+    private readonly integrations?: Pick<AiOpeningIntegrationFactsService, 'read'>,
+    private readonly capabilities?: Pick<AiOpeningCapabilityFactsService, 'read'>) {}
   async read(value: unknown = {}, expectedContext?: AiExecutionContext) {
     const input = inputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -55,6 +58,8 @@ export class AiOpeningActionListService {
       if (authorized.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
       const scope = structuredClone(authorized.scope);
       const before = structuredClone(await this.contexts.current(scope, authorized));
+      const categorySource = aiOpeningCategorySourceDraft.parse({ source: 'current_core_opening_configuration',
+        categoryCode: before.categoryCode, categoryVersion: before.categoryVersion });
       let facts = await this.opening.read({ limit: 50 }, authorized);
       if (requestFingerprint(facts.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       let risk: Awaited<ReturnType<AiRiskReadFactsService['read']>> | undefined;
@@ -71,6 +76,11 @@ export class AiOpeningActionListService {
       if (risk && requestFingerprint(risk.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       let integrationObservation = this.integrations ? await this.integrations.read({ limit: 32 }, authorized)
         : undefined;
+      let capabilityObservation: AiOpeningCapabilityFactsDraft = this.capabilities ? await this.capabilities.read(authorized)
+        : { state: 'unavailable', reason: 'capability_observation_unavailable', observation: null };
+      if (capabilityObservation.state === 'observed' && (capabilityObservation.observation.categoryCode !== categorySource.categoryCode
+        || capabilityObservation.scope.tenantId !== scope.tenantId || capabilityObservation.scope.workspaceId !== scope.workspaceId))
+        throw new ModelGatewayError('CONFIG_INVALID');
       const after = await this.contexts.current(scope, authorized);
       if (requestFingerprint(before) !== requestFingerprint(after)) throw new ModelGatewayError('CONFIG_INVALID');
       // Accounts/roles and persisted readiness can change without updating the
@@ -95,6 +105,16 @@ export class AiOpeningActionListService {
         if (basis(closing) !== basis(integrationObservation)) throw new ModelGatewayError('CONFIG_INVALID');
         integrationObservation = closing;
       }
+      if (this.capabilities) {
+        const closing = await this.capabilities.read(authorized);
+        if (requestFingerprint(aiOpeningCapabilitySourceBasis(closing)) !== requestFingerprint(aiOpeningCapabilitySourceBasis(capabilityObservation)))
+          throw new ModelGatewayError('CONFIG_INVALID');
+        capabilityObservation = closing;
+      }
+      // Optional source closing reads add waits after the configuration check.
+      // Recheck adoption there without rescanning source-free legacy callers.
+      if ((this.capabilities || this.integrations)
+        && requestFingerprint(before) !== requestFingerprint(await this.contexts.current(scope, authorized))) throw new ModelGatewayError('CONFIG_INVALID');
       if (before.profile && !z.string().min(1).max(191).safeParse(before.profile.configVersion).success)
         throw new ModelGatewayError('INVALID_RESPONSE');
       const source = { scope, resourceType: 'business_configuration' as const,
@@ -114,6 +134,7 @@ export class AiOpeningActionListService {
         inventory: { source, coverage: 'not_loaded' as const, meaning: 'item_modes_are_not_stock_balances' as const }
       };
       return { requestId: authorized.requestId, audience: authorized.audience, scope, observedAt: facts.observedAt,
+        categorySource, capabilityObservation,
         ...(integrationObservation ? { integrationObservation } : {}),
         ...(facts.calendarSource ? { calendarSource: facts.calendarSource } : {}),
         configVersion: before.settings.configVersion, ready: facts.ready,
