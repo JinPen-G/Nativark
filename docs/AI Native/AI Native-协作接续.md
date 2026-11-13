@@ -10,6 +10,8 @@ PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包
 
 开业确定性正文已推 `e4a9d5779174908ac8108d306cbed691f1252cc8`，GitHub 回读一致。QA 的 publication 时间 P2 已按[同一当前窗口及事务复核](<AI Native-开发记录.md#ain12-publication-window-p2-20261113>)完成四源/必要模拟；固定 d201 后继 `fc808e7af723ae6bca6d9d756d4d7c1b9f78fe71` 已推同一整合分支并回读一致，待 PM/QA 复验，原停止交付与任务取消语义继续核明。
 
+规则摘要七源已推 `d0b39e53f5cf589bac14678b73f1b7185b25269c`，回读 GitHub 一致。[任务筛选六源](<AI Native-开发记录.md#ain12-task-list-filters-20261113>)已完成必要模拟/类型：场景、当前本人及显式创建时段接入实际列表，游标绑定原条件；当前继续收模型确认等未完入口。
+
 开业/资源/经营待办已在未完检查点 `ea9a3ec2b` 同步任务分支，开业导航与原字段接线分别推送 `c53e3bded` 和 `270fbb7af`，PM 按固定依赖闭包整合，不整收混有未完事件的检查点。[检查点与前置补正](<AI Native-开发记录.md#ain-opening-automation-checkpoint-20261112>)保留原依据。AIN-13 自身实现与模拟证据已具备，但前置 AIN-12 全文未齐，原 100% 结论已纠正；不回退已完成源码。PM 交付的 OP SecretBox 固定修复已按[正常 Nest 与 AI 配置兼容核验](<AI Native-开发记录.md#ain-secret-box-nest-compatibility-20261112>)接入并推送 `b408e806349f2dfc743a1a6dbc9df8dad2858c37`，GitHub 已核一致。QA 指出的任务中心受控展开回归已按[有限交互核验](<AI Native-开发记录.md#ain-task-center-section-regression-20261112>)修复；后台其余原缺口继续推进。
 
 原接续完整字节保存在 Git `026e8e3ef` 的同路径，不另复制附件。三树/五树整合、模型/运行器/审批/知识/预算、原订单与开业启动观察的既有证据仍在[开发记录](<AI Native-开发记录.md>)；旧输出只按主仓库 `D:/工作文件/rental-OS/output` 的实际路径只读查证，不复制到工作树。
@@ -30,6 +32,8 @@ PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包
 ## 当前收口入口
 
 1. **AIN-12 后台任务中心。** [原展示生产/读取/实际消费者](<AI Native-开发记录.md#ain12-original-display-pipeline-20261112>)、[原字段与可信问题](<AI Native-开发记录.md#ain12-original-field-human-input-20261112>)、[同 Task 控制及后继](<AI Native-开发记录.md#ain12-model-control-consumer-20261113>)均保留固定证据。[Copilot 当前订单及参数接续](<AI Native-开发记录.md#ain12-copilot-and-parameter-consumer-20261113>)十四源已具备必要模拟，完整字段在原一次受权读取提供，原问题与命名参数分开，可信采用后走原 linked reprepare，起始 candidate 使用已消费原回答。Copilot 只传登记 orderId，经原 Guard/Task/Core，原会话转接复用旧引用。create-task 漏登已补，切步骤/对象/身份撤旧定位。QA 时间 P2 已由[四源当前窗口修复](<AI Native-开发记录.md#ain12-publication-window-p2-20261113>)核明五种定向模拟与类型，原 K 读取独立，fc808 候选待 PM/QA 复验。停止回复/停止交付与 TaskCancellation 的实际关系仍按原条款核定，不能把阶段提交计作新任务。
+
+   [整项只读核定](<AI Native-开发记录.md#ain14-core-summary-projection-20261113>)已确认原 TaskCancellation 文案符合需求 §10.6 宿主例外，不新增独立停止接口门槛。[列表筛选](<AI Native-开发记录.md#ain12-task-list-filters-20261113>)已补；运行中新草稿由内部助手验证收口。模型确认 requests 到固定审批控件、后台恢复/接管消费、ServerConversationPanel 实际动态工作区和受权历史上下文仍缺实现，Root 继续沿原服务补齐。
 2. **AIN-14 开业诊断。** 原四分区材料→预览→关联 R1→提案/原操作、integration 有界元数据及注册人工导航已有固定证据。[导航与重复查询修复](<AI Native-开发记录.md#ain14-integration-navigation-20261112>)原位保留。[确定性正文两源](<AI Native-开发记录.md#ain14-opening-authoritative-text-20261113>)已推 e4a9；[Core 原摘要七源透传](<AI Native-开发记录.md#ain14-core-summary-projection-20261113>)已完成模拟/类型，规则 v1→v2 指纹变化、旧结果失效、等待期间变化拒绝和旧材料兼容均核实，不解析摘要伪造版本。当前日历来源仅给已发布年度，精确当前版本仍需 Core 原结构化来源，已按 PM 单点协调；原五条及 AIN-12 前置继续核定。
 3. **AIN-18 经营待办。** Root 已接独立 automationReviewGrant 发布来源、原权限/CAS/TTL/收据和标准 provider/Controller/Guard；grant 启用及 close 丢 ACK 后只读原操作的实际模拟已通过。后台三文件冻结 blob 为 `8bb90e17af6085795f9ce803266d4ed73f0b8447`、`a682b46028320b7756275245c385abef46a0a96f`、`fd6ad0456c4fbf91225c2caf469136f92218f34a`。AutomationReviewSection/TaskCenter 已挂接；交付/归还走原订单，通知走原治理页，退款只读原 GET，opening 走原受权配置；打开入口、关闭待办和事实解决分别判断。退款 accepted 不称 succeeded，不在读取时 refresh 或重退。尚待最终固定组合/API/session/组件核接与 AIN-17 前置；原模型解释宿主未接时须明确不可用，不能走 AUTOMATION owner 的普通 TaskCenter。
 4. **AIN-15 自然语言报价。** 原新材料关联、Core 候选/选单、完整比较、新批准与单次开单已由[关联再准备阶段](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)核接，unknown 不换原操作，变更不挪用旧批准。dev2 三份 goal leaf 只让目标原文进入原冻结模型输入并投影受权候选，不能自动选同名客户、商品或付款人。Root 补 SceneRequest/模型/Reader 正式接线；企业本人入口及四品类目标代表过程继续按原范围收口，不让 operator 冒充企业员工。

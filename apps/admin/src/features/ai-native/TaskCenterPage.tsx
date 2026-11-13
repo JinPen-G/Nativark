@@ -8,13 +8,14 @@ import { NotificationChangeFlow } from './NotificationChangeFlow';
  * grants no execution; original domain services and server configuration do. */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiTaskSnapshotDraft } from "@rental-os/shared";
+import type { Dayjs } from 'dayjs';
+import { AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_SCENE_CODES, type AiTaskSnapshotDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { createAiWorkbenchDisplayPort } from '@/api/aiWorkbenchDisplays';
 import { currentSessionEpoch } from "@/app/queryClient";
 import { useAiManagementLocale as useLocale } from './management-locale';
 import { PageHeader } from "@/components/PageHeader";
-import { ActionButton, Alert, Select, Accordion } from "@/components/ui";
+import { ActionButton, Alert, Select, Accordion, DatePicker, ListFilterBar, ListFilterItem } from "@/components/ui";
 import { ListTodo } from 'lucide-react';
 import styles from './AiManagement.module.css';
 import { useAuthStore } from "@/features/auth/authStore";
@@ -47,6 +48,8 @@ const statusLabels = { queued: "已登记", running: "运行中", waiting_input:
   waiting_external: "等待外部核对", cancel_requested: "取消已请求", cancelled: "已取消", succeeded: "已完成",
   partially_succeeded: "部分完成", failed: "失败" } as const;
 const displayStatus = (status: string) => status === "queued" ? "registered" : status.startsWith("waiting_") ? "waiting" : status;
+const sceneLabels: Record<string, string> = { order_explanation: '订单解释', opening_diagnosis: '开业诊断',
+  quote_clarification: '租赁报价', ordinary_profile_change: '普通资料修改', 'ai.capability.text': '模型能力检测' };
 
 export function TaskCenterPage() {
   const { t } = useLocale();
@@ -71,6 +74,8 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
   const [historyOpen, setHistoryOpen] = useState<string[]>([]);
   const [notificationTask, setNotificationTask] = useState<{ taskId: string; runId: string } | null>(null);
   const [status, setStatus] = useState<string>("all");
+  const [sceneCode, setSceneCode] = useState('all');
+  const [period, setPeriod] = useState<[Dayjs, Dayjs] | null>(null), [rangeError, setRangeError] = useState(false);
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
@@ -130,13 +135,20 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
     if (!same() || !updated) throw Error('AI_SCOPE_CHANGED');
     return structuredClone(updated.fieldMaterial);
   }, [identity, selected, inputReview, displayPort]);
-  const query = useQuery({ queryKey: ["ai-task-center", identity, status, cursors[page - 1]], enabled: opened && visible,
+  const initiator = useAuthStore.getState().user;
+  const createdFrom = period?.[0].toISOString(), createdBefore = period?.[1].toISOString();
+  const resetPage = () => { stopFollowing(); setLiveSnapshot(null); setSelected(null); setPage(1); setCursors([null]); };
+  const query = useQuery({ queryKey: ["ai-task-center", identity, status, sceneCode, initiator?.id, createdFrom, createdBefore, cursors[page - 1]],
+    enabled: opened && visible && !rangeError,
     // One explicit refresh. No ambient query polling creates AI activity.
     retry: false, refetchInterval: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
     meta: { liveRefresh: false }, queryFn: async ({ signal }) => {
-      if (!current()) throw Error("AI_SCOPE_CHANGED");
+      if (!current() || !initiator?.id) throw Error("AI_SCOPE_CHANGED");
+      if (rangeError) throw Error('AI_INVALID_INPUT');
       const result = await aiTaskCenterApi.list({ limit: 20, ...(cursors[page - 1] ? { cursor: cursors[page - 1]! } : {}),
-        ...(status === "all" ? {} : { status: status as typeof AI_TASK_STATUSES_DRAFT[number] }) }, signal);
+        ...(status === "all" ? {} : { status: status as typeof AI_TASK_STATUSES_DRAFT[number] }),
+        ...(sceneCode === 'all' ? {} : { sceneCode }), initiatorId: initiator.id,
+        ...(createdFrom && createdBefore ? { createdFrom, createdBefore } : {}) }, signal);
       if (!current() || !result || !Array.isArray(result.items) || result.items.length > 20
         || new Set(result.items.map(row => row.taskId)).size !== result.items.length
         || result.items.some(row => !row || typeof row.taskId !== "string" || !AI_TASK_STATUSES_DRAFT.includes(row.status))
@@ -216,7 +228,7 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
       throw failure;
     }
   }, [identity]);
-  const originalPage = query.error ? undefined : query.data;
+  const originalPage = query.error || rangeError ? undefined : query.data;
   // Only this currently reauthorized row is refreshed; not a claim that every
   // page/order was observed, nor a model-derived optimistic status update.
   const data = originalPage && { ...originalPage, items: originalPage.items.map(row => observed?.taskId === row.taskId
@@ -252,13 +264,31 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
             taskId={notificationTask.taskId} runId={notificationTask.runId} identity={identity} current={current}
             onAccessDenied={() => { setNotificationTask(null); setHistoryOpen([]); }} />}
         </> : null }] : [])]} />
-    <div className={styles.toolbar}>
-      <Select aria-label={t("任务状态")} value={status} disabled={!opened || query.isFetching}
+    <ListFilterBar>
+      <ListFilterItem label={t('任务状态')} active={status !== 'all'}><Select aria-label={t("任务状态")} value={status} disabled={query.isFetching}
         options={[{ value: "all", label: t("全部状态") }, ...AI_TASK_STATUSES_DRAFT.map(value => ({ value, label: t(statusLabels[value]) }))]}
-        onChange={value => { stopFollowing(); setLiveSnapshot(null); setSelected(null); setStatus(String(value)); setPage(1); setCursors([null]); }} />
-      <ActionButton className={styles.toolbarEnd} variant={opened ? 'secondary' : 'primary'} label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching}
+        onChange={value => { resetPage(); setStatus(String(value)); }} /></ListFilterItem>
+      <ListFilterItem label={t('任务场景')} active={sceneCode !== 'all'}><Select aria-label={t('任务场景')} value={sceneCode} disabled={query.isFetching}
+        options={[{ value: 'all', label: t('全部场景') }, ...Array.from(new Set([...AI_SCENE_CODES, 'ai.capability.text', 'ordinary_profile_change',
+          ...(query.data?.items.map(row => row.sceneCode) ?? [])])).map(value => ({ value, label: t(sceneLabels[value] ?? safeDisplayText(value, 191)) }))]}
+        onChange={value => { resetPage(); setSceneCode(String(value)); }} /></ListFilterItem>
+      <ListFilterItem label={t('发起人')}><Select aria-label={t('发起人')} value={initiator?.id} disabled
+        options={initiator ? [{ value: initiator.id, label: `${t('本人')} · ${safeDisplayText(initiator.displayName, 80)}` }] : []} /></ListFilterItem>
+      <ListFilterItem label={t('创建时间')} width="dateRange" active={period !== null}><DatePicker.RangePicker showTime allowClear value={period}
+        disabled={query.isFetching} placeholder={[t('开始时间（含）'), t('结束时间（不含）')]}
+        onChange={value => {
+          resetPage();
+          if (!value) { setPeriod(null); setRangeError(false); return; }
+          if (!value[0]?.isValid() || !value[1]?.isValid() || value[1].valueOf() <= value[0].valueOf()) {
+            setPeriod(null); setRangeError(true); return;
+          }
+          setPeriod([value[0], value[1]]); setRangeError(false);
+        }} /></ListFilterItem>
+      <ListFilterItem kind="action"><ActionButton variant={opened ? 'secondary' : 'primary'} label={t(opened ? "刷新任务" : "读取本人任务")} successLabel={t("读取已结束")} disabled={!visible || query.isFetching || rangeError}
         onAction={async () => { stopFollowing(); setLiveSnapshot(null); setFollowError(false); setSelected(null); if (!opened) setOpened(true); await query.refetch({ throwOnError: true }); }} />
-    </div>
+      </ListFilterItem>
+    </ListFilterBar>
+    {rangeError && <Alert type="warning" title={t('请选择完整的创建时间范围，结束时间须晚于开始时间。')} />}
     {!opened && <div className={styles.empty}><ListTodo size={28} aria-hidden="true" /><strong>{t('查看我的任务')}</strong><span className={styles.help}>{t('读取任务，查看进度与待办事项。')}</span></div>}
     {opened && visible && selected && <div className={styles.toolbar}>
       <ActionButton variant="secondary" label={t(followTask === selected ? '停止刷新状态' : '自动刷新状态')}

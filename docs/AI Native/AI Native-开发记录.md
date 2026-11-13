@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-task-list-filters-20261113"></a>
+## 任务中心场景、本人发起人与创建时间筛选（2026-11-13）
+
+原任务元数据页只有状态和场景服务端字段，后台仅发送状态，缺发起人/时间筛选。本阶段从[公共查询类型](../../packages/shared/src/ai-task-draft.ts)和[同一 OpenAPI schema](../../packages/shared/src/ai-task-observation-draft-schemas.ts)补 initiatorId、createdFrom、createdBefore，[仓储](../../apps/api/src/modules/ai-native/ai-task-list.repository.ts)与[Controller 应用](../../apps/api/src/modules/ai-native/task-center.application.ts)复用严格查询校验。发起人只可匹配当前原授权主体，仍保留 owner/scope/audience 与逐 Task 读权；时间采用显式时区和含开始/不含结束的创建时段。新游标以筛选指纹绑定全部条件；旧两字段游标仅在没有新增条件时兼容，游标不授予读取权。
+
+[实际后台列表](../../apps/admin/src/features/ai-native/TaskCenterPage.tsx)接场景、本人发起人和原日期范围控件，切条件清旧分页与详情，查询键包含全部条件。未完整/反向时间范围不读取，列表读取仍无模型/业务副作用。发起人当前固定为本人，未开放组织共享或添加员工检索权限。[文案](../../apps/admin/src/features/ai-native/management-locale.ts)含筛选中英与已分配通知详情的两条来源文案，其他审批实现由独占助手交付。
+
+前置 `d0b39e53f5cf589bac14678b73f1b7185b25269c`，六源最终 Git blob 依次为 shared 类型 `52de51e39b010565f1718c95a7326603752f6bd6`、schema `cc4532f0cbc7453bc7a209bc97b6790b5023b00d`、仓储 `b69261e0cbec66ad1213a55742e3da581e5f4fd1`、应用 `d3a39125e3cdc8f4eae470527d85498a56a4ae5b`、页面 `d698f55ef77202e62d7124457f15b2a82aaf9402`、文案 `fe1ad93052dda6c4577e2f3fe38d00fd61e3189d`。实际 Auth/Guard/Controller/查询仓储的必要模拟退出 0，stdin SHA-256 `2255806044147a6cd08c9f2e4f086a0937a1b02fe280ab9000cd901791b42291`：边界日期、两页排序、等价时区、变条件旧游标、旧合同、未知字段、其他发起人及当前/等待撤权均核实，读取新增 Task/政策写入 0。原内存 DB 缺 gte 语义，仅在驱动中按原查询补该选择，没有修改测试文件。
+
+实际页面查询块按固定源码抽取的 API/React Query 替身模拟退出 0，stdin SHA-256 `40f5a2a7b94b762bf68a9e6a1ac8ca35cf22b19bb3ca21a75fefccfbc4f4e5e4`，核筛选实际 payload、查询键、旧游标参数和失权/坏时间不发请求；不是浏览器操作。TypeScript 5.9.3，API/shared 4 根/1563 源、后台 3 根/1615 源零诊断，退出 0，stdin SHA-256 `19d0f10607717789cc0a3a6140b0daec21961999063c14c36033a5de73b85763`。日期 CLI 查询因初始化缓存超出未创建临时根而被离线守卫拒绝，未运行成功；后依据现有 DatePicker 适配及 AiCallRecords 同控件用法接入，没有安装/升级依赖或伪称 CLI 检查通过。
+
+本阶段进程已退出、审计为空、临时目录未创建；未新增/扩写测试脚本。场景筛选不代表对应能力已发布，AIN-12 仍缺原模型确认请求正向接线、后台恢复/接管以及实际对话宿主的动态展示和历史上下文；草稿助手继续收口运行中输入，不按本片提高整项百分比。
+
 <a id="ain14-core-summary-projection-20261113"></a>
 ## 原开业规则摘要完整传递与材料失效（2026-11-13）
 

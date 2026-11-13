@@ -12,6 +12,7 @@ import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_ST
 import type { PrismaClient } from '@prisma/client';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError } from './ai-task.repository';
+import { aiTaskMetadataQuerySchema } from './ai-task-list.repository';
 import { composePersistedTaskCenter } from './task-center.composition';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { originalIdentityHash } from './task-request/original-request.authority';
@@ -54,8 +55,7 @@ const schemas = {
   performance: z.object({ taskId: id.max(36), usageLimit: z.number().int().min(1).max(20), usageAfter: id.max(36).optional(), includeTaskFinancial: z.boolean().optional() }).strict(),
   usageSummary: z.object({ taskId: id.max(36) }).strict(),
   outcomes: z.object({ taskIds: z.array(id.max(36)).min(1).max(50).refine(ids => new Set(ids).size === ids.length) }).strict(),
-  list: z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
-    status: z.enum(AI_TASK_STATUSES_DRAFT).optional(), sceneCode: id.optional() }).strict(),
+  list: aiTaskMetadataQuerySchema,
   snapshot: z.object({ taskId: id }).strict(),
   events: z.object({ taskId: id, after: z.string().max(20).regex(/^(0|[1-9][0-9]*)$/u), limit: z.number().int().min(1).max(100) }).strict(),
   result: z.object({ taskId: id, resultId: id }).strict(),
