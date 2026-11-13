@@ -1,7 +1,7 @@
 /** Persisted observations, not an SLO verdict, provider bill or execution grant. */
 import type { AiTaskBudgetUsagePageDraft, AiTaskBudgetUsageSummaryDraft } from './ai-scene-request-draft';
 import { AI_TASK_STATUSES_DRAFT, type AiTaskStatusDraft } from './ai-task-draft';
-import { leafClosed as object, leafEnum as choice, leafInt as integer, leafList as list,
+import { leafClosed as object, leafEnum as choice, leafId as identifier, leafInt as integer, leafList as list,
   leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 export type AiTaskPerformanceObservationDraft = {
@@ -53,7 +53,7 @@ export interface AiTaskClientVisibleReportDraft {
   version: 'client-visible-1'; observationId: string; documentId: string;
   taskId: string; runId: string; surface: 'task_center' | 'server_conversation';
   kind: 'text' | 'card'; source: AiTaskClientVisibleSourceDraft;
-  trigger: 'original_model_start' | 'original_input_resume'; originKey: string;
+  trigger: 'original_model_start' | 'original_input_resume' | 'original_model_control'; originKey: string;
   conversationId?: string; turnId?: string;
   clientEpoch: number; elapsedMs: number; viewport: 'compact_viewport' | 'wide_viewport';
   sampleSize: 1; basis: 'viewport_intersection_after_two_frames'; provenance: 'client_reported_not_business_fact';
@@ -76,18 +76,26 @@ const visibleSource = { oneOf: [object({ kind: choice('model_result'), resultId:
   object({ kind: choice('approval_card'), stepId: id, proposalId: id, proposalRevision: revision })] };
 const visibleFields = { version: choice('client-visible-1'), observationId: { type: 'string', format: 'uuid' },
   documentId: { type: 'string', format: 'uuid' }, taskId: id, runId: id, surface: choice('task_center', 'server_conversation'),
-  kind: choice('text', 'card'), source: visibleSource, trigger: choice('original_model_start', 'original_input_resume'),
-  originKey: { type: 'string', format: 'uuid' }, conversationId: text(191), turnId: text(191), clientEpoch: integer(0, Number.MAX_SAFE_INTEGER),
+  kind: choice('text', 'card'), source: visibleSource, clientEpoch: integer(0, Number.MAX_SAFE_INTEGER),
   elapsedMs: integer(0, 600000), viewport: choice('compact_viewport', 'wide_viewport'), sampleSize: integer(1, 1),
   basis: choice('viewport_intersection_after_two_frames'), provenance: choice('client_reported_not_business_fact') };
-const visibleRequired = Object.keys(visibleFields).filter(key => !['conversationId', 'turnId'].includes(key));
+// A model control has its own original operation key. It cannot masquerade as
+// a conversation start, answer receipt or approval-card observation.
+const visibleReport = (extra: Record<string, AiLeafSchemaDraft> = {}): AiLeafSchemaDraft => ({ oneOf: [
+  object({ ...visibleFields, trigger: choice('original_model_start', 'original_input_resume'),
+    originKey: { type: 'string', format: 'uuid' }, conversationId: text(191), turnId: text(191), ...extra },
+    [...Object.keys(visibleFields), 'trigger', 'originKey', ...Object.keys(extra)]),
+  object({ ...visibleFields, surface: choice('task_center'), kind: choice('text'),
+    source: object({ kind: choice('model_result'), resultId: id }), trigger: choice('original_model_control'),
+    originKey: { ...identifier(), maxLength: 128 }, ...extra }),
+] });
 export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
-  AiTaskClientVisibleReportDraft: object(visibleFields, visibleRequired),
+  AiTaskClientVisibleReportDraft: visibleReport(),
   AiTaskClientVisibleReceiptDraft: object({ version: choice('client-visible-1'), observationId: { type: 'string', format: 'uuid' },
     taskId: id, runId: id, kind: choice('text', 'card'), status: choice('recorded'), recordedAt: time,
     provenance: choice('client_reported_not_business_fact'), effects: choice('no_authorization_execution_accounting_or_slo') }),
   AiTaskClientVisibleObservationDraft: { oneOf: [object({ state: choice('not_recorded') }), object({ state: choice('client_reported'),
-    observations: list(object({ ...visibleFields, recordedAt: time }, [...visibleRequired, 'recordedAt']), 20, 1), truncated: flag,
+    observations: list(visibleReport({ recordedAt: time }), 20, 1), truncated: flag,
     coverage: choice('original_host_reports_not_task_or_tenant_rate'), evaluation: choice('not_slo_evidence'), currentDisplay: choice('not_asserted') })] },
   AiTaskPerformanceReadDraft: object({ taskId: id, usageLimit: integer(1, 20), usageAfter: id, includeTaskFinancial: flag }, ['taskId', 'usageLimit']),
   AiTaskOutcomeSampleReadDraft: object({ taskIds: { ...list(id, 50, 1), uniqueItems: true } }),

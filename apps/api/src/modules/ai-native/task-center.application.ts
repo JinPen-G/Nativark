@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_STATUSES_DRAFT,
-  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft } from '@rental-os/shared';
+  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft,
+  type AiWorkbenchModelControlObservation } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError } from './ai-task.repository';
@@ -31,6 +32,7 @@ import { callTaskCenterInput, taskCenterInputQuery, taskCenterInputAnswer, taskC
 import { recordTaskVisibleObservation, type TaskVisibleObservationDependencies } from './observability/task-visible-observation.service';
 import { validateAiTaskObservation } from './task-contract-validation';
 import { validateAiSceneSourceObservation } from './scenes/scene-observation-contracts';
+import { conversationResponse } from './conversation-contract';
 
 export const AI_NATIVE_TASK_CENTER_REQUESTS = Symbol('AI_NATIVE_TASK_CENTER_REQUESTS');
 type Request = { headers: { authorization?: unknown }; body?: unknown } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -40,6 +42,7 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   visibleDb?: TaskVisibleObservationDependencies['db'];
   originalResults?: { readModelResult(request: Request, value: unknown): Promise<unknown>;
     reopenModelSource?(request: Request, value: unknown): Promise<unknown> };
+  originalModelControls?: { readOperation(request: Request, value: { taskId: string; operationId: string }, signal?: AbortSignal): Promise<unknown> };
   humanApprovals?: TaskCenterApprovalDependencies;
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
@@ -230,6 +233,19 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
                 if (!input.originalDb || (await readOriginalTaskModelProvenance(input.originalDb, task)).inputRef !== report.originKey)
                   throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
               }
+              let control: AiWorkbenchModelControlObservation | undefined;
+              if (report.trigger === 'original_model_control') {
+                if (report.surface !== 'task_center' || report.kind !== 'text' || report.source.kind !== 'model_result')
+                  throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+                if (!input.originalModelControls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+                const reference = { taskId: report.taskId, operationId: report.originKey };
+                control = conversationResponse('model-control-read', await input.originalModelControls.readOperation(
+                  { headers: { authorization: header.data } }, reference, activeSignal), reference) as AiWorkbenchModelControlObservation;
+                if (control.status !== 'available') return null;
+                if (control.taskId !== report.taskId || control.operationId !== report.originKey
+                  || control.runId !== report.runId || control.resultId !== report.source.resultId)
+                  throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+              }
               if (report.source.kind === 'model_result') {
                 const result = await originalResult({ taskId: report.taskId, resultId: report.source.resultId });
                 if (result.status !== 'available' || result.runId !== report.runId || !result.text?.value.trim())
@@ -243,7 +259,8 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
                   || !['pending_confirmation', 'confirmed'].includes(result.review.proposal.status))
                   return null;
               }
-              return requestFingerprint({ taskId: report.taskId, runId: report.runId, source: report.source });
+              return requestFingerprint({ taskId: report.taskId, runId: report.runId, source: report.source,
+                ...(control ? { originalControl: control } : {}) });
         };
         const result = action === 'visibleReport' ? await (async () => {
           if (!input.visibleDb || !Object.is(input.db, input.visibleDb)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

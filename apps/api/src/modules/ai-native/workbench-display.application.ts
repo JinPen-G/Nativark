@@ -24,6 +24,7 @@ import { waitForTaskApplicationDependency } from './runner/prisma-task-applicati
 import { inspectAiWorkbenchDisplayMaterial } from './workbench-display.contract';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { originalIdentityHash } from './task-request/original-request.authority';
+import { WorkbenchModelControlRepository } from './workbench-model-control.repository';
 
 type Request = { headers: { authorization?: unknown } };
 type Reads = { readModelResult(request: Request, value: unknown): Promise<unknown>; reopenModelSource(request: Request, value: unknown): Promise<unknown> };
@@ -83,9 +84,11 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
         const financial = new PrismaGatewayAccountingFacts(input.db, bindings, authorization.scopes,
           { quantity: async () => { throw unavailable(); } }, clock);
         const evidence = new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, plans, policy, financial, clock);
+        const controls = typeof input.db.operationLog?.findFirst === 'function'
+          ? new WorkbenchModelControlRepository(input.db, authorization.authority, clock) : undefined;
         const originals = new AiWorkbenchDisplayOriginalReader({ db: input.db, scopes: authorization.scopes,
           conversations: new AiConversationRepository(input, scenes.requests), originals: scenes.requests,
-          tasks: authorization.tasks, evidence, policy,
+          tasks: authorization.tasks, evidence, policy, readRunOrigin: controls?.readOrigin.bind(controls),
           observations: { readModelResult: query => observations.readModelResult(request, query) } });
         const producer = new AiOriginalSceneDisplayGeneration({ db: input.db, scopes: authorization.scopes,
           originals: scenes.requests, publication,

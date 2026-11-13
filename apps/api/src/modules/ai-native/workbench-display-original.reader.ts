@@ -34,6 +34,8 @@ export interface AiWorkbenchDisplayOriginalDependencies {
   evidence: Pick<PrismaModelStepEvidenceAuthority, 'readOriginalCompletedEvidence'>;
   observations: { readModelResult(value: unknown): Promise<unknown> };
   policy: TaskModelPolicy;
+  /** Operator-only control provenance. Ordinary hosts keep the answer reader. */
+  readRunOrigin?: typeof readTaskModelRunOrigin;
 }
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -124,7 +126,7 @@ export class AiWorkbenchDisplayOriginalReader {
       if (!run || run.id !== completed.step.runId || run.scopeId !== key.scopeId || run.taskId !== task.id
         || run.actorKind !== currentAccess.actorKind || run.actorId !== currentAccess.actorId
         || !Number.isSafeInteger(run.sequence) || run.sequence < 1 || run.sequence > 4294967294) throw denied();
-      const origin = await readTaskModelRunOrigin(tx, currentAccess, { ...key, runId: completed.step.runId,
+      const origin = await (this.input.readRunOrigin ?? readTaskModelRunOrigin)(tx, currentAccess, { ...key, runId: completed.step.runId,
         originRunId: turn.task!.runId, registrationRef: `scene-model:${original.receipt.inputRef}`, includeHistory: true });
       if (origin.registrationRef !== stored.registrationRef || provenance.authorizationHash !== modelInput.identityHash) throw denied();
       if (witness.presentationRevision !== run.sequence) throw denied();

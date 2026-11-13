@@ -215,7 +215,9 @@ const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRo
 // scene policy, original owner and actual business Guard/ALS. The R1 human
 // quote confirmation below has its own create permission, never order approval.
 const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
-  AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders,
+  // Task metadata creation uses the same original scene intake gate. The
+  // original owner, current scene/resource policy and creation fence remain required.
+  AI_SCENE_REQUEST_HTTP_DRAFT.queryOrders, AI_SCENE_REQUEST_HTTP_DRAFT.createTask,
   AI_SCENE_REQUEST_HTTP_DRAFT.reconcile, AI_SCENE_REQUEST_HTTP_DRAFT.material,
   AI_SCENE_REQUEST_HTTP_DRAFT.recovery].map(action =>
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));

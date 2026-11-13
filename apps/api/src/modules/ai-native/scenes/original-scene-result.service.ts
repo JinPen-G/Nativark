@@ -15,6 +15,7 @@ import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.reposito
 import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
 import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools/order-explanation-renderer';
 import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
+import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -136,6 +137,8 @@ export function quoteFactsFingerprint(material: unknown) {
   delete facts.observedAt;
   const availability = facts.availability;
   if (availability && typeof availability === 'object' && !Array.isArray(availability)) {
+    // This identifies the fresh availability read, not stock or quote revision.
+    delete (availability as Record<string, unknown>).requestId;
     delete (availability as Record<string, unknown>).observedAt;
     if ('source' in availability && availability.source && typeof availability.source === 'object' && !Array.isArray(availability.source)) {
       delete (availability.source as Record<string, unknown>).observedAt;
@@ -156,7 +159,8 @@ export class AiOriginalSceneResultService {
   private readonly policy: GatewayTextIntentPolicy;
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
     private readonly scenes: Scenes, policy: GatewayTextIntentBinding, clock: () => Date = () => new Date(),
-    private readonly knowledge?: AiOriginalSceneKnowledge) {
+    private readonly knowledge?: AiOriginalSceneKnowledge,
+    private readonly readRunOrigin: typeof readTaskModelRunOrigin = readTaskModelRunOrigin) {
     this.results = new AiTaskResultRepository(db, tasks, clock);
     this.policy = taskModelPolicy({ sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens,
       ...(policy.orderExplainTool !== undefined ? { orderExplainTool: policy.orderExplainTool } : {}),
@@ -183,8 +187,8 @@ export class AiOriginalSceneResultService {
     const provenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: access.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return { ...await readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
-        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
+      return { ...await this.readRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}`, includeHistory: true }),
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
     const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId,
@@ -232,12 +236,20 @@ export class AiOriginalSceneResultService {
           || gateway.toolRequests.some(candidate => !isGatewayOrderExplainRequest(candidate)
             || candidate.input.orderId !== orderId))) throw denied();
         const envelope = readOriginalSceneEnvelope(input);
-        if (!provenance.continuation && envelope.clarifications) throw denied();
+        if (!provenance.continuation && envelope.clarifications) {
+          // An operator model-only control may retain its parent's verified
+          // human receipts. Ordinary root Runs have no such answer history.
+          const history = provenance.history;
+          if (!history.length || envelope.clarifications.length !== history.length
+            || envelope.clarifications.some((answer, index) => answer.receiptId !== history[index].receiptId
+              || answer.inputHash !== history[index].inputHash
+              || requestFingerprint(answer.answers) !== requestFingerprint(history[index].answers))) throw denied();
+        }
         if (provenance.continuation) {
           const continuation = provenance.continuation, previous = parseTaskModelInput(continuation.input, this.policy), priorResult = continuation.result;
           if (taskModelFingerprint(previous, this.policy) !== continuation.inputHash || !isGatewayResult(priorResult)
             || priorResult.status !== 'completed' || priorResult.usage.kind !== 'reported' || priorResult.requestId !== previous.intent.requestId
-            || requestFingerprint(input.intent.messages) !== requestFingerprint(continueOriginalSceneMaterial(previous,
+            || requestFingerprint(withoutTaskModelDisplayMessages(input.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
               { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? envelope : undefined).messages)) throw denied();
         }
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
@@ -291,8 +303,8 @@ export class AiOriginalSceneResultService {
     const finalProvenance = await this.db.$transaction(async tx => {
       const row = await tx.aiTask.findFirst({ where: finalAccess.where });
       if (!row || row.inputRef !== command.original.inputRef) throw denied();
-      return { ...await readTaskModelRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
-        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` }),
+      return { ...await this.readRunOrigin(tx, finalAccess, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
+        originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}`, includeHistory: true }),
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
     if (requestFingerprint(provenance) !== requestFingerprint(finalProvenance)) throw denied();

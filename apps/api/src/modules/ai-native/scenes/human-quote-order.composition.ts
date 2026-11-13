@@ -22,6 +22,8 @@ import { AiApprovedOrderResultUnknownError } from '../approval-execution/approve
 import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClaimLease } from '../runner/ai-task-runner.service';
 import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
+import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { applyOriginalQuoteAnswers } from './original-quote-input';
 
 export type HumanQuoteOrderDependencies = ControlledApprovedOrderDependencies &
   Pick<HumanQuoteSelectionDependencies, 'originals'>;
@@ -135,11 +137,26 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       const access = await controlled.tasks.resolveAccess(old.ref.taskId, 'read_metadata');
       const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: { id: true, scopeId: true, inputRef: true } });
       if (!task || task.id !== old.ref.taskId || task.inputRef !== reference.inputRef) throw denied();
+      let candidate = original.request.input.candidate;
+      if (requireEligible) {
+        const initial = await dependencies.originals.readTaskReceipt(reference.inputRef);
+        if (initial.state !== 'observed' || initial.taskId !== task.id) throw denied();
+        const readHistory = () => dependencies.db.$transaction(tx => readTaskModelRunOrigin(tx, access, {
+          scopeId: task.scopeId, taskId: task.id, runId: old.ref.runId, originRunId: initial.runId,
+          registrationRef: `scene-model:${reference.inputRef}`, includeHistory: true,
+        }));
+        const lineage = await readHistory();
+        // New preparation uses the selected Run's verified human answers.
+        // Original-operation observation retains its existing historical reader.
+        candidate = applyOriginalQuoteAnswers(original.request.input.candidate, lineage.history);
+        if (!isDeepStrictEqual(await readHistory(), lineage)) throw denied();
+        await selectedReview(old.ref, input.original);
+      }
       return freezeOriginalInput({ selection: old.ref, original: input.original, context: original.context,
         scopeId: task.scopeId,
-        candidate: original.request.input.candidate, originalInput: reference, originalHash: original.receipt.contentHash,
+        candidate, originalInput: reference, originalHash: original.receipt.contentHash,
         reason: eligibility?.state, sourceHash: requestFingerprint({ selection: old.ref, original: input.original,
-          originalHash: original.receipt.contentHash }), intent: input.intent });
+          originalHash: original.receipt.contentHash, candidateHash: requestFingerprint(candidate) }), intent: input.intent });
     },
     /** Only locate a new already-selected normal-run wait. The original
      * reprepare transaction still owns supersession and revalidates all refs. */

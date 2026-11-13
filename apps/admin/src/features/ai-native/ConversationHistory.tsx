@@ -11,17 +11,19 @@ import { safeDisplayText } from './safe-display';
 import styles from './AiManagement.module.css';
 import { ConversationDetail } from './ConversationDetail';
 import { ConversationLifecycle } from './ConversationLifecycle';
+import { ConversationOrderContext } from './ConversationAdmission';
 import type { ConversationSelection } from './conversation-navigation';
 
 const scenes: Record<AiSceneCode, string> = {
   order_explanation: '订单解读', opening_diagnosis: '开业诊断', quote_clarification: '报价说明',
 };
-export function ConversationHistory({ current, enabled, identity, initialConversation, onOpenConversation }: {
+export function ConversationHistory({ current, enabled, identity, initialConversation, onOpenConversation, orderId }: {
   current: () => boolean; enabled: boolean; identity: string; initialConversation?: ConversationSelection;
   onOpenConversation?: (selection: ConversationSelection) => void;
+  orderId?: string;
 }) {
   const { t } = useAiManagementLocale();
-  const [capability, setCapability] = useState<AiSceneCode | 'all'>(initialConversation?.capabilityCode ?? 'all');
+  const [capability, setCapability] = useState<AiSceneCode | 'all'>(orderId ? 'order_explanation' : initialConversation?.capabilityCode ?? 'all');
   const [status, setStatus] = useState<'active' | 'archived'>('active');
   const [page, setPage] = useState<AiConversationListResponseDraft | null>(null);
   const [selected, setSelected] = useState<string | null>(initialConversation?.conversationId ?? null);
@@ -29,7 +31,7 @@ export function ConversationHistory({ current, enabled, identity, initialConvers
   const [index, setIndex] = useState(0), [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const [visible, setVisible] = useState(() => !document.hidden);
   const request = useRef<AbortController | null>(null), generation = useRef(0);
-  const scope = useRef({ current, enabled, selected }); scope.current = { current, enabled, selected };
+  const scope = useRef({ current, enabled, selected, orderId }); scope.current = { current, enabled, selected, orderId };
   const reset = () => {
     generation.current++; request.current?.abort(); request.current = null;
     setPage(null); setSelected(null); setCursors([undefined]); setIndex(0); setBusy(false); setError(false);
@@ -66,11 +68,13 @@ export function ConversationHistory({ current, enabled, identity, initialConvers
     }
   };
   if (!enabled) return null;
-  return <section className={styles.section} aria-label={t('本人对话历史')} aria-busy={busy}>
+  return <ConversationOrderContext.Provider value={orderId ? { orderId,
+    current: () => scope.current.orderId === orderId && scope.current.enabled && scope.current.current() && !document.hidden } : null}>
+    <section className={styles.section} aria-label={t('本人对话历史')} aria-busy={busy}>
     <h2>{t('本人对话历史')}</h2>
     <p className={styles.help}>{t('只读取对话记录，不启动任务；完整对话与结果仍需独立受权读取。')}</p>
     <div className={styles.toolbar}>
-      <Select aria-label={t('对话能力')} value={capability} disabled={busy || !visible}
+      <Select aria-label={t('对话能力')} value={capability} disabled={busy || !visible || !!orderId}
         options={[{ value: 'all', label: t('全部能力') }, ...AI_SCENE_CODES.map(value => ({ value, label: t(scenes[value]) }))]}
         onChange={value => { reset(); setCapability(value as AiSceneCode | 'all'); }} />
       <Select aria-label={t('对话状态')} value={status} disabled={busy || !visible}
@@ -108,5 +112,5 @@ export function ConversationHistory({ current, enabled, identity, initialConvers
         capabilityCode={selectedConversation.capabilityCode} current={() => scope.current.enabled && scope.current.current() && !document.hidden
           && scope.current.selected === selectedConversation.conversationId} />
     </>}
-  </section>;
+  </section></ConversationOrderContext.Provider>;
 }

@@ -1,12 +1,19 @@
-/** Candidate handoff to the original trusted question, never answer submission.
- * Full original contracts remain on this host; the sandbox's safe projection
- * cannot attest a human choice, replace a question or create an input receipt. */
+/** Candidate review for an original question or the separate new-condition
+ * form. Full contracts stay on the trusted host; the sandbox cannot attest a
+ * human choice, replace a question or create an input receipt. */
 import { AI_WORKBENCH_CONTEXT_DRAFT_VERSION, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft,
   type AiTaskClarificationObservationDraft, type AiTaskInputAnswerDraft,
   type AiWorkbenchFieldMaterialDraft, type AiWorkbenchHostDraft } from '@rental-os/shared';
 import { displayPartialAnswers, displaySame } from './workbench-display-host';
 
 export type WorkbenchInputQuestion = NonNullable<AiTaskClarificationObservationDraft['input']>;
+export const WORKBENCH_QUOTE_PARAMETER_CODE = 'original_quote_editable_parameters';
+export interface WorkbenchQuoteParameterReview {
+  kind: 'quote_parameters'; status: 'ready';
+  candidate: AiWorkbenchHostDraft; fieldMaterial: AiWorkbenchFieldMaterialDraft;
+  expiresAt: string; humanChoice: 'not_attested';
+  preparation: 'not_attempted'; approval: 'not_granted';
+}
 export interface WorkbenchInputCandidateReview {
   status: 'ready' | 'conflict';
   reason: 'no_original_question' | 'contract_changed' | 'field_changed' | null;
@@ -70,6 +77,23 @@ export function inspectWorkbenchInputCandidate(candidate: AiWorkbenchHostDraft, 
   };
 }
 
+/** This named projection belongs to the new-condition form. It cannot stand
+ * in for a persisted question or a saved answer to the original Task. */
+export function inspectWorkbenchQuoteParameterCandidate(candidate: AiWorkbenchHostDraft,
+  fieldMaterial: AiWorkbenchFieldMaterialDraft, now = Date.now()): WorkbenchQuoteParameterReview {
+  const checked = inspectWorkbenchInputCandidate(candidate, fieldMaterial, null, now);
+  const material = checked.fieldMaterial, contract = material.contract;
+  if (checked.candidate.binding.capabilityCode !== 'quote_clarification'
+    || contract?.code !== WORKBENCH_QUOTE_PARAMETER_CODE
+    || material.fields.length !== contract.fields.length
+    || new Set(material.fields.map(field => field.fieldId)).size !== material.fields.length
+    || contract.fields.some(field => !material.fields.some(policy => policy.fieldId === field.fieldId && policy.editable)
+      || field.fieldId === 'quantity' && !field.target)
+    || material.fields.some(field => !material.sources.some(source => source.sourceId === field.sourceId))) throw invalid();
+  return { kind: 'quote_parameters', status: 'ready', candidate: checked.candidate, fieldMaterial: material,
+    expiresAt: checked.expiresAt, humanChoice: 'not_attested', preparation: 'not_attempted', approval: 'not_granted' };
+}
+
 /** Preserve values which still match the new original rules; never silently
  * merge a different candidate over a human's existing legal edits. */
 export function preserveWorkbenchQuestionDraft(question: WorkbenchInputQuestion | null, previous: Readonly<Record<string, string>>,
@@ -96,7 +120,8 @@ export class WorkbenchInputReviewSession {
   private active = true;
   private generation = 0;
   private request: AbortController | null = null;
-  private state: { busy: boolean; review: WorkbenchInputCandidateReview | null; unavailable: boolean } = { busy: false, review: null, unavailable: false };
+  private state: { busy: boolean; review: WorkbenchInputCandidateReview | null;
+    parameters: WorkbenchQuoteParameterReview | null; unavailable: boolean } = { busy: false, review: null, parameters: null, unavailable: false };
   private readonly listeners = new Set<() => void>();
   constructor(private readonly port: { readQuestion(taskId: string, signal: AbortSignal): Promise<AiTaskClarificationObservationDraft> },
     private readonly current: () => boolean, private readonly at: () => number = Date.now) {
@@ -106,9 +131,10 @@ export class WorkbenchInputReviewSession {
   snapshot = () => this.state;
   private update(patch: Partial<typeof this.state>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   activate() { this.active = true; }
-  clear() { this.generation++; this.request?.abort(); this.request = null; this.update({ busy: false, review: null, unavailable: false }); }
+  clear() { this.generation++; this.request?.abort(); this.request = null; this.update({ busy: false, review: null, parameters: null, unavailable: false }); }
   dispose() { this.active = false; this.clear(); }
-  async reviewCandidate(candidate: AiWorkbenchHostDraft, material: AiWorkbenchFieldMaterialDraft, signal?: AbortSignal): Promise<WorkbenchInputCandidateReview> {
+  async reviewCandidate(candidate: AiWorkbenchHostDraft, material: AiWorkbenchFieldMaterialDraft,
+    signal?: AbortSignal): Promise<WorkbenchInputCandidateReview | WorkbenchQuoteParameterReview> {
     if (!this.active || !this.current() || signal?.aborted) { this.clear(); throw Error('AI_SCOPE_CHANGED'); }
     if (this.request) throw Error('AI_OPERATION_BUSY');
     // Check the candidate before reading sensitive original fields. A caller's
@@ -119,15 +145,19 @@ export class WorkbenchInputReviewSession {
     const abort = () => controller.abort(); signal?.addEventListener('abort', abort, { once: true });
     const timeout = setTimeout(abort, 5000);
     const check = () => { if (!this.active || !this.current() || controller.signal.aborted || generation !== this.generation) throw Error('AI_SCOPE_CHANGED'); };
-    this.update({ busy: true, review: null, unavailable: false });
+    this.update({ busy: true, review: null, parameters: null, unavailable: false });
     try {
       check();
+      if (fields.contract?.code === WORKBENCH_QUOTE_PARAMETER_CODE) {
+        const parameters = inspectWorkbenchQuoteParameterCandidate(draft, fields, this.at());
+        check(); this.update({ parameters }); return structuredClone(parameters);
+      }
       const question = inspectWorkbenchInputQuestion(await this.port.readQuestion(draft.binding.taskId, controller.signal), draft.binding.taskId, this.at());
       check();
       const review = inspectWorkbenchInputCandidate(draft, fields, question, this.at());
       check(); this.update({ review }); return structuredClone(review);
     } catch (error) {
-      if (generation === this.generation) this.update({ review: null, unavailable: true });
+      if (generation === this.generation) this.update({ review: null, parameters: null, unavailable: true });
       throw error;
     } finally {
       clearTimeout(timeout); signal?.removeEventListener('abort', abort);

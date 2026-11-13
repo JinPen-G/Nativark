@@ -15,6 +15,7 @@ import { readModelNonDispatchEvidence } from '../model-input/prisma-model-nondis
 import { isTaskModelCountCharge, taskStepChargesValid } from './task-model-count-charge';
 import { PrismaCountTokensReceipts, countTokensOperationId, countTokensCallId, countTokensSceneCode } from '../input-counting/input-count-tokens.receipt';
 import type { composeControlledApprovedOrder } from '../approval-execution/controlled-approved-order.composition';
+import type { AiTaskControlResourceOrigin } from './task-run-preparation.ports';
 type OrderBusiness = ReturnType<typeof composeControlledApprovedOrder>['waiting'];
 export type AiTaskOrderPhaseBusinessEvidence = {
   readWaiting(input: Parameters<OrderBusiness['readWaiting']>[0], tx?: Prisma.TransactionClient): ReturnType<OrderBusiness['readWaiting']>;
@@ -98,7 +99,8 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     private readonly monotonic: () => number = () => performance.now(),
     private readonly financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
     private readonly orderEvidence?: AiTaskOrderPhaseBusinessEvidence,
-    private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit') {
+    private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit',
+    private readonly controlResourceOrigin?: AiTaskControlResourceOrigin) {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskRunPlan?.findUnique !== 'function'
       || typeof db?.aiTaskResultArtifact?.create !== 'function' || typeof scopes?.resolve !== 'function' || typeof planAuthority?.authorize !== 'function'
       || !['rental.order.commit', 'tenant.notifications.commit', 'membership.profile.commit'].includes(confirmationTool)
@@ -272,6 +274,19 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
       || plan.runId !== run.id || plan.taskId !== key.taskId) throw denied();
     if (run.inputReceiptId == null && run.resourceOriginRunId == null) return plan;
+    if (run.inputReceiptId == null && run.resourceOriginRunId && run.sequence > 1 && this.controlResourceOrigin) {
+      if (run.actorKind !== 'USER') throw denied();
+      const original = planSchema.parse(await this.controlResourceOrigin({ ...key, runId: run.id,
+        resourceOriginRunId: run.resourceOriginRunId }));
+      const stored = await this.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+        ...key, runId: run.resourceOriginRunId } } });
+      if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== run.resourceOriginRunId
+        || original.taskId !== key.taskId || original.runId !== run.resourceOriginRunId
+        || stored.planHash !== requestFingerprint(stored.payload) || stored.planHash !== requestFingerprint(original)
+        || Object.entries(original.limits).some(([name, ceiling]) => plan.limits[name as keyof typeof plan.limits] > ceiling)) throw denied();
+      await this.held(this.db, lease, access, false, accountingOnly);
+      return original;
+    }
     if (!run.inputReceiptId || !run.resourceOriginRunId || run.sequence < 2) throw denied();
     const receipt = await this.db.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: { ...key, id: run.inputReceiptId } } });
     const request = receipt && await this.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { ...key, id: receipt.requestId } } });

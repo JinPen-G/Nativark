@@ -4,6 +4,26 @@ import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
   ...platformAiEnglish,
+  '解释与排版操作': 'Explanation and layout controls',
+  '重新解释': 'Regenerate explanation',
+  '重新排版': 'Regenerate layout',
+  '重新解释或排版会调用模型，可能消耗额度。修改租赁条件请回原业务入口重新办理。': 'Regenerating an explanation or layout calls the model and may use your allowance. Change rental conditions through the original business workflow.',
+  '当前浏览器无法安全记录模型操作，请使用支持跨标签锁的浏览器。': 'This browser cannot safely record model operations. Use a browser that supports locks across tabs.',
+  '核对当前原结果': 'Check the current original result',
+  '核对本次模型操作': 'Check this model operation',
+  '重读这次原结果': 'Read this original result again',
+  '模型处理中…': 'Model processing…',
+  '当前原结果已核对，请选择操作。': 'The current original result has been checked. Choose an operation.',
+  '本次模型调用已完成，结果仍按当前权限读取。': 'This model call has completed. Results are read using current permissions.',
+  '本次模型调用失败，原操作和用量记录已保留。': 'This model call failed. Its original operation and usage records are retained.',
+  '本次调用已登记，请核对原操作查看进展。': 'This call is registered. Check the original operation for progress.',
+  '已保留上次操作，先核对原结果。': 'The previous operation is retained. Check its original result first.',
+  '当前无法准备模型操作，仍可查看原结果或使用人工入口。': 'This model operation cannot currently be prepared. View the original result or use the manual workflow.',
+  '本次调用结果待核对，请读取原操作。': 'This call needs reconciliation. Read the original operation.',
+  '原操作定位无法核对，请保留原任务记录并核对原操作。': 'The original operation reference cannot be verified. Keep the task record and check the original operation.',
+  '原模型调用已完成，当前结果尚不可展示。可重读这次原结果。': 'The original model call completed, but its result cannot currently be displayed. Read this original result again.',
+  '按已核对的原模型操作定位读取本次结果。': 'This result is read using the verified original model operation reference.',
+  '候选需要重新核对，当前不能继续使用。': 'These candidates need to be checked again before they can be used.',
   '原结果动态展示': 'Original result display',
   '展示内容来自原结果。事实、候选输入和正式确认分别核对。': 'This display comes from the original result. Review facts, candidate input and formal confirmation separately.',
   '读取原展示': 'Read original display',
@@ -541,6 +561,8 @@ const english: Record<string, string> = {
   "紧凑视口": "Compact viewport",
   "宽视口": "Wide viewport",
   "以上为客户端报告，不是经营事实或 SLO 判定；不证明当前内容仍可见。": "These are client reports, not business facts or an SLO verdict. They do not assert that content is still visible.",
+  "采用候选租赁条件": "Apply candidate rental conditions",
+  "将已核对候选填入新条件？已填写的合法输入会保留，关联请求、Core 报价、选单和新批准仍需分别确认。": "Apply the reviewed candidate to the new conditions? Existing valid input will be kept. The linked request, Core quote, selection and new approval each require confirmation.",
 };
 
 /** New feature copy shares the existing language preference and dictionary fallback. */

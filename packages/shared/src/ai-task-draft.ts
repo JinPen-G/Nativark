@@ -208,7 +208,9 @@ export interface AiTaskDecisionQueryDraft extends AiTaskReviewQueryDraft {
 export type AiTaskHumanReviewDraft = AiTaskReviewQueryDraft & {
   taskRevision: number; checkpointRef: string; businessExecution: 'not_attested';
 } & (
-  | { kind: 'order'; review: import('./ai-approval-application-draft').AiApprovalApplicationReviewDraft }
+  | { kind: 'order'; review: import('./ai-approval-application-draft').AiApprovalApplicationReviewDraft;
+      /** Server-derived original selection for the existing linked reprepare flow. */
+      selection?: import('./ai-quote-selection-draft').AiQuoteSelectionProofDraft }
   | { kind: 'settings'; review: import('./ai-approved-settings-draft').AiApprovedSettingsReviewDraft }
 );
 export type AiTaskHumanDecisionReceiptDraft = AiTaskReviewQueryDraft & {

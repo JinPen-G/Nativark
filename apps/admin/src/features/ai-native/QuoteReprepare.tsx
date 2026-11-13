@@ -2,7 +2,7 @@
  * Only server-reviewed quotations are compared; uncertainty reads the original
  * receipt, and the replacement still requires its own approval and execution. */
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { AiApprovalApplicationReferenceDraft, AiQuoteSelectionProofDraft } from '@rental-os/shared';
+import type { AiApprovalApplicationReferenceDraft, AiQuoteSelectionProofDraft, AiWorkbenchFieldMaterialDraft } from '@rental-os/shared';
 import { aiQuoteSelectionsApi } from '@/api/aiQuoteSelections';
 import { aiTaskCenterApi } from '@/api/aiTaskCenter';
 import { ActionButton, Alert, ConfirmAction, Select } from '@/components/ui';
@@ -14,12 +14,19 @@ import { safeDisplayText } from './safe-display';
 import { QuoteCandidateFields } from './QuoteCandidateFields';
 import { useAuthStore } from '@/features/auth/authStore';
 import { currentSessionEpoch } from '@/app/queryClient';
+import type { WorkbenchQuoteParameterReview } from './workbench-input-review-session';
 
-export function QuoteReprepare({ selection, identity, current, onAccessDenied }: {
+export function QuoteReprepare({ selection, identity, current, onAccessDenied, original, showOriginalApproval = true,
+  parameterReview, revalidateParameters, onParameterReviewed }: {
   selection: AiQuoteSelectionProofDraft; identity: string; current: () => boolean; onAccessDenied: () => void;
+  original?: AiApprovalApplicationReferenceDraft | null; showOriginalApproval?: boolean;
+  parameterReview?: WorkbenchQuoteParameterReview | null;
+  revalidateParameters?(review: WorkbenchQuoteParameterReview, signal: AbortSignal): Promise<AiWorkbenchFieldMaterialDraft>;
+  onParameterReviewed?(status: 'adopted' | 'conflict'): void;
 }) {
   const { t } = useAiManagementLocale(), labelId = useId(), auth = useAuthStore();
-  const epoch = currentSessionEpoch(), owner = JSON.stringify([identity, selection, auth.user, auth.currentWorkspaceId, epoch]);
+  const epoch = currentSessionEpoch(), owner = JSON.stringify([identity, selection.draftVersion, selection.taskId,
+    selection.runId, selection.selectionId, selection.originalInputRef, selection.inputHash, auth.user, auth.currentWorkspaceId, epoch]);
   const key = `ai-quote-reprepare:${identity}:${selection.selectionId}`;
   const storage = useMemo(() => {
     try { return window.sessionStorage; } catch { return undefined; }
@@ -28,18 +35,29 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied }:
     try { return readQuoteReprepareOriginal(storage, `${key}:source`, selection); } catch { return null; }
   });
   const [selected, setSelected] = useState<string | null>(null), [message, setMessage] = useState<string | null>(null);
-  const scope = useRef({ owner, reference, current, onAccessDenied });
-  scope.current = { owner, reference, current, onAccessDenied };
+  const effectiveReference = original === undefined ? reference : original;
+  const scope = useRef({ owner, reference: effectiveReference, current, onAccessDenied, parameterReview, revalidateParameters, onParameterReviewed });
+  scope.current = { owner, reference: effectiveReference, current, onAccessDenied, parameterReview, revalidateParameters, onParameterReviewed };
   const active = () => scope.current.owner === owner && epoch === currentSessionEpoch() && !document.hidden && scope.current.current();
   const session = useMemo(() => new QuoteReprepareSession(selection,
     { ...aiQuoteSelectionsApi, list: aiTaskCenterApi.list }, active, () => scope.current.reference, storage, key), [owner]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
-  const materials = useMemo(() => new QuoteRequestReissueSession(selection, aiQuoteSelectionsApi, active,
+  const materials = useMemo(() => new QuoteRequestReissueSession(selection, { ...aiQuoteSelectionsApi,
+    revalidateParameters: async (review, signal) => {
+      if (!scope.current.revalidateParameters) throw Error('AI_RESOURCE_UNAVAILABLE');
+      return scope.current.revalidateParameters(review, signal);
+    } }, active,
     () => scope.current.reference, { tenantId: auth.tenant?.tenantId ?? '', workspaceId: auth.currentWorkspaceId ?? '' }, storage,
     `ai-quote-linked-request:${JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, selection.selectionId])}`), [owner]);
   const materialState = useSyncExternalStore(materials.subscribe, materials.snapshot, materials.snapshot);
   useEffect(() => { session.activate(); return () => session.dispose(); }, [session]);
   useEffect(() => { materials.activate(); return () => materials.dispose(); }, [materials]);
+  const sourceRevision = JSON.stringify(original);
+  useEffect(() => {
+    if (original !== undefined) { session.retract(); materials.retract(true); setSelected(null); setMessage(null); }
+  }, [session, materials, sourceRevision]);
+  const parameterRevision = JSON.stringify(parameterReview);
+  useEffect(() => { materials.clearConditionPreview(); }, [materials, parameterRevision]);
   useEffect(() => {
     const retract = () => { session.retract(); materials.retract(); setSelected(null); setMessage(null); };
     document.addEventListener('visibilitychange', retract);
@@ -63,9 +81,11 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied }:
   const quote = materialState.quote?.result.quote, newSelection = materials.selectionProof();
   const canCreate = auth.hasPermission('rental-os:order:create'), busy = state.busy || materialState.busy;
   return <>
-    <TaskHumanApproval taskId={selection.taskId} runId={selection.runId} identity={identity} current={active}
+    {showOriginalApproval && <TaskHumanApproval taskId={selection.taskId} runId={selection.runId} identity={identity} current={active}
       onAccessDenied={onAccessDenied} onOrderReviewed={value => {
-        if (!active() || value.taskId !== selection.taskId || value.runId !== selection.runId) return;
+        if (!active()) return;
+        if (value === null) { scope.current.reference = null; setReference(null); session.retract(); materials.retract(); return; }
+        if (value.taskId !== selection.taskId || value.runId !== selection.runId) return;
         try {
           const saved = retainQuoteReprepareOriginal(storage, `${key}:source`, selection, value.original);
           scope.current.reference = saved; setReference(saved);
@@ -73,17 +93,29 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied }:
           session.retract(); scope.current.reference = null; setReference(null);
           setMessage(t('原提案定位未能保留，不能重新准备。'));
         }
-      }} />
+      }} />}
     <section aria-label={t('重新准备报价')} aria-busy={state.busy}>
       <h4>{t('重新准备报价')}</h4>
       <p className="muted">{t('旧提案拒绝或失效后，可选择已准备的新报价重新提交审批。')}</p>
       <section aria-label={t('按新条件准备报价')} aria-busy={materialState.busy}>
         <div className="panel-toolbar">
+          {parameterReview?.candidate.binding.taskId === selection.taskId && <ConfirmAction label={t('采用候选租赁条件')}
+            disabled={busy || state.locked || !!materialState.phase || materialState.unknown || materialState.invalid
+              || !effectiveReference || !canCreate || !revalidateParameters || Date.parse(parameterReview.expiresAt) <= Date.now()}
+            prompt={t('将已核对候选填入新条件？已填写的合法输入会保留，关联请求、Core 报价、选单和新批准仍需分别确认。')}
+            onConfirm={() => run(async () => {
+              const review = scope.current.parameterReview;
+              if (!review) throw Error('AI_RESOURCE_UNAVAILABLE');
+              await materials.adoptParameters(review, () => scope.current.parameterReview ?? null);
+              if (active()) scope.current.onParameterReviewed?.(materials.snapshot().parameterFeedback ?? 'conflict');
+            })} />}
           {materialState.phase ? <ActionButton label={t('核对原新材料操作')} disabled={busy || materialState.invalid}
             onAction={() => run(materials.reconcile)} /> : <ActionButton label={t('输入新的租赁条件')}
-            disabled={busy || state.locked || !reference || !canCreate || materialState.invalid} onAction={() => run(materials.prepareConditions)} />}
+            disabled={busy || state.locked || !effectiveReference || !canCreate || materialState.invalid} onAction={() => run(materials.prepareConditions)} />}
         </div>
         {materialState.invalid && <Alert type="warning" title={t('原新材料定位不可读取，不能重新发起。')} />}
+        {materialState.parameterFeedback === 'conflict' && <Alert type="warning"
+          title={t('候选与已填写内容不同；已保留原输入，请逐项核对。')} />}
         {materialState.candidate && !materialState.phase && <>
           <QuoteCandidateFields value={materialState.candidate} preparation={conditions} disabled={busy || state.locked || !canCreate}
             onChange={value => materials.editConditions(value)} />
@@ -137,7 +169,7 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied }:
       </section>
       <div className="panel-toolbar">
         <ActionButton label={t(state.locked ? '核对原重新准备结果' : '读取待审批的新报价')}
-          disabled={state.busy || !state.locked && !reference}
+          disabled={state.busy || !state.locked && !effectiveReference}
           onAction={() => run(state.locked ? session.reconcile : async () => { setSelected(null); await session.list(); })} />
         {!state.locked && state.items.length > 0 && <>
           <label id={labelId}>{t('新报价任务')}</label>
@@ -151,7 +183,7 @@ export function QuoteReprepare({ selection, identity, current, onAccessDenied }:
         {!state.locked && state.nextCursor && <ActionButton label={t('读取下一页新报价')} disabled={state.busy}
           onAction={() => run(async () => { setSelected(null); await session.list(state.nextCursor ?? undefined); })} />}
       </div>
-      {!reference && !state.locked && <p className="muted">{t('请先审阅原等待提案，保留这次报价的审批定位。')}</p>}
+      {!effectiveReference && !state.locked && <p className="muted">{t('请先审阅原等待提案，保留这次报价的审批定位。')}</p>}
       {state.listed && !state.items.length && <p>{t('当前没有可选的新报价，可在上方输入并准备新的租赁条件。')}</p>}
       {preparation && <>
         <section aria-label={t('旧报价材料')}><h4>{t('旧报价材料')}</h4>

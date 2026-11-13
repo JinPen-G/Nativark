@@ -26,6 +26,9 @@ export type TaskModelHostDependencies = Parameters<typeof composePersistedTaskMo
   inputSource: AiTaskInputSource;
   financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   monotonic?: () => number;
+  /** Explicit operator-control composition only; omitted by ordinary/media hosts. */
+  readRunOrigin?: typeof readTaskModelRunOrigin;
+  controlResourceOrigin?: import('./task-run-preparation.ports').AiTaskControlResourceOrigin;
 };
 
 export function composeTaskModelHost(input: TaskModelHostDependencies) {
@@ -76,7 +79,8 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     registrationAuthority: model.planAuthority, transitionAuthority: model.createTransitionAuthority(input.financialEvidence),
     planAuthority: model.planAuthority, commands: model.commands, executors: model.executors,
     invocations: model.invocations, toolCatalog: model.toolCatalog, financialEvidence: input.financialEvidence,
-    inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic }, model.authorization);
+    inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic,
+    controlResourceOrigin: input.controlResourceOrigin }, model.authorization);
   withAiTaskHeldPreparationDefinition(prepare, { taskId: task.taskId, runId: task.runId,
     steps: [{ registrationRef: task.registrationRef, toolCode: tool, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }],
     limits: task.limits, bindingHash: requestFingerprint(task) });
@@ -89,7 +93,7 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
       const runs = await tx.aiRun.findMany({ where: { scopeId: stored.scopeId, taskId: stored.id,
         actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
       if (!runs[0] || runs[1]?.sequence === runs[0].sequence) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      await readTaskModelRunOrigin(tx, access, { scopeId: stored.scopeId, taskId: stored.id, runId: runs[0].id,
+      await (input.readRunOrigin ?? readTaskModelRunOrigin)(tx, access, { scopeId: stored.scopeId, taskId: stored.id, runId: runs[0].id,
         originRunId: task.runId, registrationRef: task.registrationRef });
       return { taskId: task.taskId, runId: runs[0].id, taskRevision: stored.revision, runRevision: runs[0].revision };
     }, { maxWait: 2500, timeout: 5000 }).catch(error => {
@@ -139,7 +143,7 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
             || run.fencingToken.toFixed(0) !== lease.fencingToken || run.status !== 'RUNNING'
             || !run.leaseExpiresAt || run.leaseExpiresAt <= (input.clock?.() ?? new Date()))
             throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-          const origin = await readTaskModelRunOrigin(tx, access, { ...key,
+          const origin = await (input.readRunOrigin ?? readTaskModelRunOrigin)(tx, access, { ...key,
             originRunId: task.runId, registrationRef: task.registrationRef });
           const stored = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
           if (!stored) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

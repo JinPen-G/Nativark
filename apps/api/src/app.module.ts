@@ -159,7 +159,7 @@ import { AiTaskCenterController } from './modules/ai-native/task-center.applicat
 import { AiConversationController } from './modules/ai-native/conversation.application';
 import { AI_NATIVE_CONVERSATION_PROVIDER, AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_CENTER_PROVIDER, AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
-import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER, AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiOriginalOpeningModelExecutionController } from './modules/ai-native/scenes/opening-model-execution.controller';
 import { AI_NATIVE_MODEL_SETTINGS_PROVIDER, AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER, AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER,
   AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER, AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER, AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -321,6 +321,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
     AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
     AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,
+    AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER,
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
