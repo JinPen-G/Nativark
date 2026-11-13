@@ -48,6 +48,8 @@ Core只读合同已固定源码`fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 
 ## 当前QA与展示接续
 
+开业确定性正文`e4a9d577`已按QA两源最小组合收main，模型虚构成功不覆盖原缺项/检测记录，见[正文集成](<AI Native-开发记录.md#ain14-opening-text-main-integration-20261113>)。规则摘要`d0b39e53`及Core日历结构化来源继续独立核验；630/d201/fc808时间P2已获相关复验关闭，完整模型控制/页面组合仍等d201行为结论，原任务全文门槛不变。
+
 AI治理原header补片`23e4cd71`与Core`654a5e35`两源码已按QA三源固定组合收回main，原P2闭合；人工create/patch同一捕获签名、当前权限、CAS/原K及失交付核对保持，见[本片收回](<AI Native-开发记录.md#ain23-category-credential-main-integration-20261113>)。AIN-23完整新类/发布/采用消费者继续原目标。630/d201原模型控制因当前display publication时间窗口P2仍暂缓；AI-RD修固定时间门禁后仅相关QA复验，不以其他片集成替代该阻断。
 
 [P1/P3固定修复及边界](<AI Native-开发记录.md#ain-qa-current-permission-20261112>)已收main`6fce308c4`。P2固定`ef15308df`完成Controller/API/session两个丢应答窗口，PM按本提交两源码差异串行收回，沿[原阶段](<AI Native-开发记录.md#ain-qa-clarified-quote-receipt-20261112>)核证。原`scene-answer:${inputRef}:${receiptId}`仍是澄清报价及选单的唯一读取依据，关闭模型后只读同键、缺失保持unknown，不用普通inputRef/contentHash键替换或恢复新执行。

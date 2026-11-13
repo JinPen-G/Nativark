@@ -14,6 +14,7 @@ import { continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOrigin
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { readOriginalTaskModelProvenance } from '../task-request/prisma-original-request.repository';
 import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools/order-explanation-renderer';
+import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -268,7 +269,8 @@ export class AiOriginalSceneResultService {
         await this.knowledge.revalidate(frozen.knowledge, command.original.inputRef);
       }
       output = fingerprint(current) === fingerprint(frozen.material)
-        ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text : frozen.text,
+        ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text
+            : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current) : frozen.text,
             trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId,
           facts: isOrder ? projectOrderExplanationMaterial(current) : current, sources: isOrder ? orderSources(frozen.material) : [],
