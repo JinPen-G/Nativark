@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="quote-configuration-snapshot-20261113"></a>
+
+## 报价配置副本与提交后缓存（2026-11-13）
+
+沿CAT-GOV-03/04/08核对同源报价和采用并发边界，从已核GitHub的`6993b3c67eae0eb448f2196faf0df2650ce128ac`接续。原[等待反例](../../output/category-governance/quote-configuration-snapshot-before-20261113.json)确认：租金计算后等待服务容量期间，另一请求经实际`refreshWorkspaceContext`队列刷新同一缓存，会使本报价保留价格1.0/base80/租金168，却应用后继优惠`later-discount`/5。反例使用当前TS金额函数与真实进程内刷新队列；配置、履约、容量和保存是明确fixture，没有真实数据库或HTTP。
+
+仅修改[原业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)。版本化报价在原权威配置读取的队列回调内克隆价格、优惠、服务、日历、规则、通知配置及所选券，避免等刷新返回后才复制已经被后继请求覆盖的共享对象。原请求、Core上下文、原键/指纹、地址和ALS来源仍在首次等待前捕获；报价副本按服务实例、租户和原空间隔离，明确无版本的吸收路径保留，不据此自授事务或权限。历史报价、奖励、账户和通知历史仍归原仓储/缓存，不复制整个历史，不改变金额、库存、服务容量或历史消费算法。
+
+刷新始终向本次读取的原空间发布；报价成功保存后只向已经存在的同品类缓存补入原结果，不把旧配置副本写回、不因缓存已换品类或缺失而重新seed。保存失败不发布幽灵报价。原懒补落仅在当前同品类缓存六类配置仍与已保存副本相等时标记已保存，后继未保存编辑保持原值及未保存状态。Shared/DTO/OpenAPI/Schema、Guard/DI、其他专项源码与测试文件未改，没有新增或扩写测试脚本。
+
+原API配置、受管TypeScript5.9.3最终867根/2012源零诊断，仅安装本源码必要emit，六份Shared运行时/Client、Core与前片能力/报价仓储保护哈希一致，见[最终类型与安装](../../output/category-governance/quote-configuration-snapshot-current-compile-20261113.json)。[当前编译十三组限定行为](../../output/category-governance/quote-configuration-snapshot-final-behavior-20261113.json)退出0、audit0：等待中的旧组合、下一新版组合、两并行报价各自配置、另一实例隔离、保存失败、实际空集拒绝、明确无版本路径、原输入捕获，以及提交后换品类/缺缓存、懒补落标记和迟到空间来源均通过。懒补落的保存与SQL端口是声明替身，这些结果不证明真实事务、并发采用或跨实例。
+
+原`node --no-compilation-cache --require <本树preload> --test --test-concurrency=1 --test-reporter=spec tests/category-adoption-context-refresh.test.cjs`七项通过，见[配置读取回归](../../output/category-governance/quote-configuration-snapshot-configuration-context-original-20261113.json)；原`node --no-compilation-cache --require <本树preload> tests/rental-extension-services.test.cjs`十二项通过，见[续租服务回归](../../output/category-governance/quote-configuration-snapshot-extension-services-original-20261113.json)。两命令均退出0/audit0，原断言保留；原父锁/异步/宿主等其他失败仍在此前记录，不扩称全域通过。
+
+全部验证退出，必要单emit在本树自持产物，原唯一暂存只剩空audit。原生PowerShell精确删除被CreateProcess自动审批`blocked by policy`拒绝，整条未执行且无具体理由；已安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-configuration-snapshot-validation/manifest.json)，[退出证据](../../output/category-governance/quote-configuration-snapshot-cleanup-20261113.json)确认原暂存不存在、已归集未删除，旧批继续创建者责任。没有主动跨对话消息、合main或新增环境执行。
+
+本片完成进程内配置副本及缓存发布修复；MySQL不可变价格、能力和检查模板仍有独立读取，完整数据库组合及全部写入口并发尚未闭合。完整CAT-GOV保持0/14、实现百分比待核实；真库容量/锁/回滚/多实例、两个动态新编码不同执行组合的同一冻结构建经营、浏览器/微信及独立Review继续原门槛。CLOSE和企业/AI接点单独核实，不以本片计整项完成。固定提交及GitHub回读沿本章节补记。
+
 <a id="quote-input-capture-20261113"></a>
 
 ## 报价首次等待前的输入与来源捕获（2026-11-13）

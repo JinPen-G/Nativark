@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树为`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。[报价输入捕获](<Rental Core-开发记录.md#quote-input-capture-20261113>)固定`006293fcec07a3a0a5074bd018168e0c9dcc6f48`已上传核GitHub。单源完成类型/六组当前行为及原续租12项回归，原请求/上下文/原键/地址/来源在首次await前固定，原算法与历史消费保持；短调用及安装观察失败留证。前片[能力提交](<Rental Core-开发记录.md#quote-capability-commit-20261113>)`c67281023`、[配置行数前置](<Rental Core-开发记录.md#adoption-configuration-preflight-20261113>)`da06e2463`和[分批读取](<Rental Core-开发记录.md#preparation-bounded-read-20261113>)`7cdd6be5c`已上传。[未知结构门禁](<Rental Core-开发记录.md#adoption-preparation-format-20261113>)、日历`da3002b29`/[1abf补片](<Rental Core-开发记录.md#calendar-r0-main-minimal-20261113>)`3cbc802d7`保留。地点/定价/夹具原QA队列不重复提交；AI消费由PM协调AI-RD。正式ResourcePorts/临近政策/宿主、开业counter/参加者仍缺，当前履约not_captured。
+- 唯一开发树为`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。[报价配置副本/缓存发布](<Rental Core-开发记录.md#quote-configuration-snapshot-20261113>)已完成类型、当前十三组行为、原配置读取七项及续租服务十二项；固定提交/GitHub证据沿该章节登记。报价在原队列内捕获独立配置，保存后只发布原结果，后继配置不回退。前片[输入捕获](<Rental Core-开发记录.md#quote-input-capture-20261113>)`006293fce`、[能力提交](<Rental Core-开发记录.md#quote-capability-commit-20261113>)`c67281023`、[配置行数前置](<Rental Core-开发记录.md#adoption-configuration-preflight-20261113>)`da06e2463`和[分批读取](<Rental Core-开发记录.md#preparation-bounded-read-20261113>)`7cdd6be5c`已上传。[未知结构门禁](<Rental Core-开发记录.md#adoption-preparation-format-20261113>)、日历`da3002b29`/[1abf补片](<Rental Core-开发记录.md#calendar-r0-main-minimal-20261113>)`3cbc802d7`保留。地点/定价/夹具原QA队列不重复提交；AI消费由PM协调AI-RD。正式ResourcePorts/临近政策/宿主、开业counter/参加者仍缺，当前履约not_captured。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行读取修订。分配服务已在原聚合提交前接可选fulfillment参加者，并明确结构化来源生命周期；AI参加者/存储仅按指定两blob接入，ResourcePorts和事件模型算法仍归原作者，宿主/共同装配由PM指定唯一作者。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与原`readTenantReadinessSource`两个只读合同的`fe65ac652076d5bed4c9ca439d50b563c61d17aa`证据保留，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)；九项随后支持同client，履约本片仅对有效结构化原因及正数活动分配授源。ResourcePorts不得重入扫描/新开业务事务，不以独立观察或同client冒充快照；缺正式临近政策/事实/授权保持不捕获。
@@ -22,7 +22,7 @@
 
 ## 3. 下一入口与原缺口
 
-日历固定main闭包与原队列保留，不重复提交。[报价首次等待前输入](<Rental Core-开发记录.md#quote-input-capture-20261113>)已固定，前片完整能力提交、原08行数/候选复核及1000+1累计采用保持。下一核业务缓存等待期间、报价价格/规则/检查完整组合及全部写入口/并发采用，再沿两个动态编码不同组合冻结经营与原真库/多实例/宿主门槛推进。当前四批空audit及旧批归集未删除，原暂存不存在；自动审批拒绝/唯一清单沿记录保留。ResourcePorts/临近政策/开业counter/参加者和保证金缺件继续不可用。固定阶段、实际验证与阻塞留本对话及原资料供PM主动读取，不主动发送消息。
+日历固定main闭包与原队列保留，不重复提交。[报价配置副本及缓存发布](<Rental Core-开发记录.md#quote-configuration-snapshot-20261113>)已完成定向验证，前片请求捕获、完整能力提交、原08行数/候选复核及1000+1累计采用保持。下一核MySQL不可变价格、能力和检查模板的独立读取与完整报价组合，继续全部写入口/并发采用、两个动态编码不同组合冻结经营及原真库/多实例/宿主门槛。新增空audit及旧批归集未删除，原暂存不存在；自动审批拒绝/唯一清单沿记录保留。ResourcePorts/临近政策/开业counter/参加者和保证金缺件继续不可用。固定阶段、实际验证与阻塞留本对话及原资料供PM主动读取，不主动发送消息。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
    写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。
