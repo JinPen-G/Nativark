@@ -1,5 +1,6 @@
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
 import { STAFF_UPLOAD_OBSERVATION_HTTP, STAFF_UPLOAD_OBSERVATION_SCHEMAS } from '@rental-os/shared';
+import { STAFF_FULFILLMENT_RECEIPT_HTTP, STAFF_FULFILLMENT_RECEIPT_CONTRACT } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
@@ -2508,6 +2509,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Human CAS policy management for the original owned inspection candidate task only. Stage authority and current server plan bound every operation. Not approval, Core submission or platform policy management. A current policy read is not an exact historical mutation receipt.',
     requestSchema: contract.request, responseSchema: contract.response
   })),
+  { method: 'post', path: `/api/${STAFF_FULFILLMENT_RECEIPT_HTTP.basePath}/${STAFF_FULFILLMENT_RECEIPT_HTTP.operation}`, tag: 'AI Native',
+    operationId: 'readOriginalStaffFulfillmentReceipt', permissions: ['rental-os:order:view'],
+    summary: 'Read the original Core fulfillment receipt under current staff order and stage location access. Never uploads, submits, reacquires a lock or permits retry after an unknown observation.',
+    requestSchema: STAFF_FULFILLMENT_RECEIPT_CONTRACT.request, responseSchema: STAFF_FULFILLMENT_RECEIPT_CONTRACT.response },
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/receipt-host-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionReceiptHost', permissions: ['rental-os:order:view'],
     summary: 'Open an explicitly selected original historical receipt host. Does not authorize recognition or original inspection submission.',

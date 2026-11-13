@@ -88,7 +88,8 @@ export const AI_STAFF_INSPECTION_HTTP_DRAFT = Object.freeze({
     draftOperation: 'draft-operation', inputPrepare: 'input-prepare', inputReceipt: 'input-receipt', resultRead: 'result-read',
     resultSave: 'result-save', resultSaveReceipt: 'result-save-receipt',
     submissionReview: 'submission-review', submissionPrepare: 'submission-prepare',
-    submissionPreparation: 'submission-preparation', submissionSubmit: 'submission-submit', submissionRead: 'submission-read' }),
+    submissionPreparation: 'submission-preparation', submissionSubmit: 'submission-submit', submissionRead: 'submission-read',
+    fulfillmentReceiptRead: 'fulfillment-receipt-read' }),
 });
 
 export const AI_KNOWLEDGE_POLICY_HTTP_ERRORS = Object.freeze({

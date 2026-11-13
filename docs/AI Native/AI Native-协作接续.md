@@ -4,7 +4,7 @@
 
 ## 当前目标与现场
 
-在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[姓名／通知消费者](<AI Native-开发记录.md#ain16-name-notification-reconfirmation-consumer-20261114>)固定于 `aa0cc9e830fbf75e94a089845ac8d91c919068b2`；[AIN-16原五条全文](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)及07/14前置已核闭，任务文档已推 `3a8b8cbeacede7a7c2af7d227625e8c71beb31dc` 并回读GitHub一致。首推TLS断流，保持证书验证以HTTP/1.1补推成功，未改remote或强推。[原grant恢复三源](<AI Native-开发记录.md#ain18-original-grant-recovery-20261114>)已交权并由Root核同、完成实际API/session／Guard／Controller模拟和类型。当前继续 AIN-17/18 正式资源生产与员工签名／人工值／最终检查提交，不重开已闭的12/13/14/16实现。两助手继续实际施工，不等提交或main。本批14/16为两项正式任务的固定集成节点，由PM按记录串行收；AI未合main，不追活动HEAD或将旧SHA当重置目标。
+在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[AIN-16原五条](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)已核闭，任务文档已推 `3a8b8cbeacede7a7c2af7d227625e8c71beb31dc`；[原grant恢复](<AI Native-开发记录.md#ain18-original-grant-recovery-20261114>)已推 `012517f7bb596b5d9a48294607463a3d35e200ec`，均回读GitHub一致。首推TLS断流，保持证书验证以HTTP/1.1补推成功，未改remote或强推。Root已补[员工原履约收据公共接点](<AI Native-开发记录.md#ain20-original-fulfillment-receipt-20261114>)，标准provider／Guard／Controller／实际微信API模拟及两端类型通过；dev2继续页面签名／人工值／最终检查提交恢复，dev1继续AI资源来源适配。两助手不等提交或main。本批14/16固定集成节点仍由PM按记录串行收，AI未合main，不追活动HEAD或将旧SHA当重置目标。
 
 PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包](<AI Native-开发记录.md#ain12-fixed-main-closure-20261113>)已推 630，5426 十四源的主树页面后继已推 `d201979963e4f4474acd23ff1981ad81930fdfcd`，均在 codex/ai-native-main-closure-20261113 并回读一致。公共 AppModule/index 用精确 hunk，首候选 Guard 保持原 main，后继仅补 createTask 原登记，TaskCenter 保留 main 原展开/权限与旁支。该分支仅作 PM 整合候选，AI 施工仍在原树。PM 串行收每个 QA 通过的可独立阶段，任务进度仍按原全文。
 

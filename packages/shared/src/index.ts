@@ -120,3 +120,4 @@ export * from './ai-task-calendar-draft-preparation';
 export * from './ai-task-order-handoff';
 
 export * from './ai-task-read-policy';
+export * from './staff-fulfillment-receipt';

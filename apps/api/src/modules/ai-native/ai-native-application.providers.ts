@@ -365,7 +365,7 @@ function readStaffManualConfiguration(value: unknown) {
   return parsed.data;
 }
 const staffReceiptOperations = ['history-read', 'receipt-host-read', 'result-save-receipt',
-  'draft-operation', 'submission-preparation', 'submission-read', 'result-read'] as const;
+  'draft-operation', 'submission-preparation', 'submission-read', 'result-read', 'fulfillment-receipt-read'] as const;
 const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'draft-read', 'draft-edit',
   'evidence-bind', 'evidence-fingerprint', 'evidence-replace',
   'submission-review', 'submission-prepare', 'submission-submit'] as const;

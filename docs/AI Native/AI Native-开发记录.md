@@ -6,6 +6,27 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14及本次16已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain20-original-fulfillment-receipt-20261114"></a>
+## AIN-20 员工原履约收据与写请求恢复边界（2026-11-14）
+
+dev2从实际领取／归还页确认两处公共缺口：原检查、交接和分批归还请求允许401刷新后自动重发；页面在Core已提交但丢应答后没有按原键读取最终收据的接点。Root在[原orders API](../../apps/staff-miniprogram/src/api/orders.ts)将这三类写入设为replayAfterRefresh=false，新增只读原履约收据方法；微信只用共享类型，运行时不导入shared。请求和响应检查原orderId／kind／stage／template／operationKey，unknown不允许换键或新提交。
+
+[公共合同](../../packages/shared/src/staff-fulfillment-receipt.ts)及闭合schema从正式shared出口发布，接[原受控检查Controller](../../apps/api/src/modules/ai-native/inspection-assist/staff-inspection-assist.controller.ts)、标准provider、原员工白名单和动态OpenAPI。[原收据reader](../../apps/api/src/modules/ai-native/inspection-assist/original-staff-fulfillment-receipt.reader.ts)只读取原order.inspection/order.handover/order.partial-return收据；当前Auth／Guard／ALS与原订单阶段地点范围独立复验，原tenant/workspace仓储筛选及succeeded状态／请求hash／订单关联均核验。检查还核持久原记录的阶段、模板及版本。返回仅原订单／检查ID与提交观察，不包含订单、资金或客户正文。
+
+原收据不存在、不可读取或绑定不完整保持unknown／拒绝，不用新上传、签名有效期、当前订单终态或新操作锁补证。订单进入completed等后继状态仍可受权读原提交，读取不调用原写Controller、不上传、不持锁、不中途修草稿。每次结果对原收据及当前权限前后复核；缺实际原收据不报告提交成功。
+
+| 必要模拟／类型 | 固定证据与实际结果 |
+| --- | --- |
+| 原四类查询：检查、领取交接、整单归还、分批归还，经Guard→Controller→原仓储 | stdin `c85d4855ff22ce0fefeaff978eb6d423000c8784c3855e33b3643218e0eaa7fe`／退出0；缺记录unknown，原记录后committed，当前订单completed仍可读，重复0写；错订单／模板／状态／额外字段、地点缩权和读取中撤权拒绝。 |
+| 标准默认关闭provider与实际微信API→Controller完整原读组合 | `ce48316a9f00a5061cea11efcfa4b4798c3106b13f56f8bf19e754e900be503d`、`8ecf2f3df9ad6a066a8c1e2a7a7b122b33295bcedb9ab554ad115814dcd57c89`，均退出0；标准receipt操作可达，四类原读无Core写入／新模型／执行Controller读取。业务收据和微信是明确内存夹具，本组不证明首次Core提交。 |
+| 既有微信runtime加载实际orders/http/session，三种写请求401后刷新及原收据读取 | stdin `abe7b11a6b225ed958bbe1adab3e49dfcc6879231d5f724274310aa9448a7fb4`／退出0；三类原业务POST各仅1次，认证刷新不重发原写；原receipt读取committed，微信源码无runtime包导入。 |
+| API、Controller、AppModule、shared／OpenAPI完整类型 | stdin `a9b180039127f3bf38a9b6f773dbe223eab14c5368e2a634d9a4458df53848f7`／退出0；TypeScript5.9.3，4根/1974源零诊断。 |
+| 微信ES2019对本次完整共享声明 | stdin `bbc8f431b2fb4f581b0fcc8927e8ad0a36d282d8d7a5964e0cd00662d3839576`／退出0；1根/204源零诊断，shared声明113份只在内存生成，未写dist。 |
+
+命令均为 `node --no-compilation-cache -`，使用本树原offline preload、不可达DATABASE_URL、内存audit及受管只读依赖。首次原inspection fixture又登记旧编译器，使Auth源码在不同项目配置下产生大量非本片诊断；仅在内存去除fixture的二次加载后行为通过，完整源码类型另核。首次微信运输夹具将原订阅异步读也返回401，导致会话过期和错误计数；改用既有subscriptionFixture并仅计原业务POST，保留实际http/session。直接把shared源码置于微信ES2020编译产生24处shared-only库诊断；按正式构建方式先在内存生成当前完整声明后零诊断，未提高微信lib或强断言补绿。
+
+全部本任务进程已退出、audit0、任务临时目录未创建；无新增／扩写测试脚本、依赖副本或生成物。固定前置 `012517f7bb596b5d9a48294607463a3d35e200ec`，本公共阶段独立提交；dev2继续所属页面、签名／人工值及最终提交恢复，AIN-19/20原全文尚不计100%。真实微信、MySQL、存储／模型与生产放行由负责人后续操作。
+
 <a id="ain18-original-grant-recovery-20261114"></a>
 ## AIN-17/18 政策停用后的原人工授权收据恢复（2026-11-14）
 
