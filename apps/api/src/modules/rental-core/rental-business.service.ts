@@ -5153,14 +5153,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
     original?: RentalQuoteOriginalOperation) {
-    await this.refreshWorkspaceContext(tenantId, context);
+    // Capture one caller intent before the first configuration/identity wait.
+    // Later caller edits cannot change the original key, customer, quantities,
+    // frozen source or calculation context of this quote.
+    input = structuredClone(input);
+    context = structuredClone(context);
+    preResolvedDeliveryAddress = preResolvedDeliveryAddress === undefined ? undefined : structuredClone(preResolvedDeliveryAddress);
+    original = original === undefined ? undefined : Object.freeze({ key: original.key, inputHash: original.inputHash });
     const sourceSnapshot = currentQuoteSource(tenantId);
     if (original) {
-      input = structuredClone(input);
-      original = Object.freeze({ key: original.key, inputHash: original.inputHash });
       if (!/^[a-f0-9]{64}$/u.test(original.key) || original.inputHash !== requestFingerprint(input))
         throw new ConflictException('报价原操作输入绑定无效');
     }
+    await this.refreshWorkspaceContext(tenantId, context);
     let categoryVersionId: string | undefined;
     let categoryAdoptionRevision: number | undefined;
     if (this.categoryResolver) {

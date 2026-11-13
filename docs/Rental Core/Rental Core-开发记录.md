@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="quote-input-capture-20261113"></a>
+
+## 报价首次等待前的输入与来源捕获（2026-11-13）
+
+继续CAT-GOV-03/04/08的报价完整依据核查。从已核GitHub的`410de8d39049261e8a551cf308de47f40357f78d`接续，前片完整能力提交`c67281023`保留。原[报价入口反例](../../output/category-governance/quote-input-capture-before-20261113.json)确认第一次配置刷新等待时改变调用方客户名称/数量，实际报价改用后来输入；不是只读对象污染，原报价/计价方法确实执行。反例使用原吸收式配置与明确履约/库存分页fixture，无真实DB/HTTP或经营写入证据。
+
+仅修改[业务服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)的`createQuote`开头：在首次await前克隆请求、Core上下文与预解析地址，捕获原操作键/指纹及原ALS来源，随后再刷新配置和执行原身份/品类/库存/金额/能力门禁。调用方后来输入继续保留，但不替换本次已捕获意图；原键错误在配置等待前拒绝，原规范化后的指纹检查保持。实际ALS来源在等待后变化仍由原提交前来源比较拒绝，不把捕获的旧身份作为新授权。仅输入生命周期调整，没有改变原价格、规则、计费、营销、保证金或原收据恢复算法，也未改公共合同/DTO/OpenAPI/Schema/Guard/DI及测试文件。
+
+原API配置TypeScript5.9.3检查867根/2012源零诊断，仅安装本源码必要emit；Shared运行时/Client、Core及前片能力提交两产物六份保护哈希一致，见[类型与安装](../../output/category-governance/quote-input-capture-compile-20261113.json)。移动已完成后的PowerShell`Test-Path`表达式括号错误只影响结果登记；随后按源不存在/目标与emit哈希一致核实，没有重复覆盖产物。
+
+[当前产物六组限定行为](../../output/category-governance/quote-input-capture-current-behavior-20261113.json)退出0、audit0：正常报价保留调用方输入，首等待后改数量/客户不改原金额，上下文币种/商品/品类独立、实际ALS迟到变化在保存前拒绝、原键/指纹和预解析地址独立捕获均通过。首次[目录替身失败](../../output/category-governance/quote-input-capture-behavior-20261113.json)把“持久行”直接引用调用方上下文，改名称后正确触发原库存一致性拒绝；[第二次失败](../../output/category-governance/quote-input-capture-final-behavior-20261113.json)在独立TS ALS上修改`runWithRequestIdentity`复制前对象，未触发编译服务的来源检查。只纠正短调用目录行分离和同一编译ALS实际store后，[来源复验](../../output/category-governance/quote-input-capture-source-scope-behavior-20261113.json)及当前产物通过，不改生产库存/身份门禁或旧断言。
+
+原`node --no-compilation-cache --require <本树preload> tests/rental-extension-services.test.cjs`12项全部通过、退出0/audit0，见[原续租回归](../../output/category-governance/quote-input-capture-original-tests-20261113.json)；容量拒绝、独立服务发生、重复去重、历史缺失/明确空快照及补款/企业月结原消费覆盖保持。没有新增/扩写测试脚本；原SQL/配置/容量与等待替身不证明真实库存/资金、并发缓存、HTTP或宿主。
+
+全部验证退出、必要单emit在本树自持产物，唯一暂存剩空audit。原生精确删除被CreateProcess自动审批`blocked by policy`拒绝，整条未执行/无详细理由；已安全同卷归[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-input-capture-validation/manifest.json)，[退出](../../output/category-governance/quote-input-capture-cleanup-20261113.json)确认原暂存不存在、已归集未删除。旧各批继续创建者责任；没有主动跨对话消息、合main或环境新增执行。
+
+完整CAT-GOV仍0/14、实现百分比待核实。本片证明原请求生命周期，不证明完整报价配置一致性；业务缓存等待期间、价格/规则/检查与全部写入口的并发组合继续核查，真库容量/锁/多实例、两个动态编码不同执行组合冻结经营、浏览器/微信及独立Review保持原门槛。CLOSE、企业/AI接点分别沿原任务处理。
+
 <a id="quote-capability-commit-20261113"></a>
 
 ## 新报价提交的完整能力快照复核（2026-11-13）
