@@ -13,6 +13,7 @@ import { isAxiosError } from "axios";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
+import type { ClientChannelBootstrapResponse } from "@rental-os/shared";
 import { clientChannelApi } from "@/api/clientChannel";
 import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, applyAdminFavicon } from "@/app/branding";
 import { apiAssetOrigin } from "@/api/http";
@@ -57,6 +58,7 @@ export function LoginPage() {
   const [loginError, setLoginError] = useState<string | undefined>(undefined);
   const [loginMode, setLoginMode] = useState<"password" | "code" | "reset">("password");
   const [loggingIn, setLoggingIn] = useState(false);
+  const submittedBrand = useRef<{ tenantCode: string; brand?: ClientChannelBootstrapResponse } | undefined>(undefined);
   const [providerPreview, setProviderPreview] = useState<string>();
   const watchedTenantCode = Form.useWatch("tenantCode", form)?.trim().toLowerCase();
   const effectiveTenantCode = isTenantLocked ? lockedTenantCode : watchedTenantCode;
@@ -67,8 +69,12 @@ export function LoginPage() {
     retry: false,
     staleTime: 5 * 60 * 1000
   });
-  const tenantBrand = isTenantLocked && resolveLoginTenantCode(publicBootstrap.data?.tenantCode) === lockedTenantCode
+  const currentTenantBrand = isTenantLocked && resolveLoginTenantCode(publicBootstrap.data?.tenantCode) === lockedTenantCode
     ? publicBootstrap.data : undefined;
+  // 登录成功会清会话查询；只保留本次入口的公开展示，直到旧页面退出，不保留业务缓存。
+  const activeSubmittedBrand = submittedBrand.current;
+  const tenantBrand = isTenantLocked && activeSubmittedBrand && activeSubmittedBrand.tenantCode === lockedTenantCode
+    ? activeSubmittedBrand.brand : currentTenantBrand;
   // 锁定租户但该编码查不到品牌（未开通/已停用）时，不冒充成"平台默认"，明确提示，不让人对着错的品牌登录。
   const tenantLockedButUnresolved = isTenantLocked && publicBootstrap.isFetched && !tenantBrand;
   const loginBrandName = tenantBrand?.merchant.name?.trim() || ADMIN_BRAND_NAME;
@@ -138,6 +144,7 @@ export function LoginPage() {
     setLoginMode(mode);
   };
   const submitPasswordLogin = async (values: LoginValues) => {
+    submittedBrand.current = lockedTenantCode ? { tenantCode: lockedTenantCode, brand: tenantBrand } : undefined;
     setLoggingIn(true);
     setLoginError(undefined);
     try {
@@ -145,6 +152,7 @@ export function LoginPage() {
       toast({ type: "success", title: t("登录成功") });
       navigate(result.needsTenantOnboarding ? "/tenant/readiness" : result.user.isSaasAdmin ? "/platform/tenants" : "/workbench", { replace: true });
     } catch (error) {
+      submittedBrand.current = undefined;
       let errorMessage = t("登录失败，请检查租户、账号和密码");
       if (isAxiosError(error)) {
         if (!error.response) errorMessage = t("无法连接 API，请确认开发服务已启动");
