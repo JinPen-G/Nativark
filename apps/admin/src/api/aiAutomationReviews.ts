@@ -18,6 +18,7 @@ import {
   type AiAutomationPendingCandidatesRequestDraft,
   type AiAutomationPendingCandidatesDraft,
   type AiAutomationPendingBatchReferenceDraft,
+  type AiAutomationPendingBatchContinueDraft,
   type AiAutomationPendingBatchObservationDraft,
   type AiAutomationEventTaskResponseDraft,
   type AiAutomationReviewCloseDraft,
@@ -75,7 +76,7 @@ const paths = Object.freeze({
   ...AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT.operations,
 });
 type Action = keyof typeof paths | 'fromEvent';
-const writes = new Set<Action>(['fromEvent', 'close', 'feedback', 'readCandidate', 'preparePending', 'enableGrant']);
+const writes = new Set<Action>(['fromEvent', 'close', 'feedback', 'readCandidate', 'preparePending', 'continuePendingBatch', 'enableGrant']);
 
 function identity() {
   const auth = useAuthStore.getState();
@@ -120,6 +121,8 @@ export const aiAutomationReviewsApi = Object.freeze({
     post<AiAutomationPendingCandidatesDraft>('preparePending', input, signal),
   readPendingBatch: (input: AiAutomationPendingBatchReferenceDraft, signal: AbortSignal) =>
     post<AiAutomationPendingBatchObservationDraft>('readPendingBatch', input, signal),
+  continuePendingBatch: (input: AiAutomationPendingBatchContinueDraft, signal: AbortSignal) =>
+    post<AiAutomationPendingBatchObservationDraft>('continuePendingBatch', input, signal),
   review: (inputRef: string, signal: AbortSignal) => post<AiAutomationReviewDraft>('read', { inputRef }, signal),
   fromEvent: (eventId: string, signal: AbortSignal) => post<AiAutomationEventTaskResponseDraft>('fromEvent', { eventId }, signal),
   creation: (inputRef: string, signal: AbortSignal) => post<AiAutomationTaskCreationObservationDraft>('readCreation', { inputRef }, signal),

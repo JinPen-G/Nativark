@@ -35,7 +35,7 @@ abstract class HumanAutomationController {
         catch { /* Do not expose raw internal material or validation diagnostics. */ }
         // Candidate reads may expire an outbox marker. Treat their damaged
         // acknowledgements like other metadata writes, without retry permission.
-        throw new AutomationError(['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'close', 'feedback', 'enableGrant'].includes(action)
+        throw new AutomationError(['readCandidate', 'prepareCandidate', 'preparePending', 'continuePendingBatch', 'prepareInput', 'createTask', 'close', 'feedback', 'enableGrant'].includes(action)
           ? 'result_unknown' : 'unavailable');
       }
       if (action !== 'createEventTask') return result;
@@ -53,7 +53,7 @@ abstract class HumanAutomationController {
       // Even a failed batch may already have prepared some original candidates.
       // Never turn this into an empty success, a retry instruction or an approval.
       throw new HttpException({ code, retryable: false, executionPermission: false, businessActionRequested: false,
-        nextAction: action === 'preparePending' || action === 'readPendingBatch' ? 'read_original_batch'
+        nextAction: action === 'preparePending' || action === 'readPendingBatch' || action === 'continuePendingBatch' ? 'read_original_batch'
           : action === 'readQueue' ? 'read_review_queue'
           : action === 'prepareGrant' || action === 'enableGrant' || action === 'readGrant' ? 'read_original_grant'
           : action === 'close' || action === 'feedback' || action === 'operation' ? 'read_original_operation'
@@ -73,6 +73,11 @@ abstract class HumanAutomationController {
 
   @Post(AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT.readPendingBatch) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readPendingBatch(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'readPendingBatch', value); }
+
+  @Post(AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT.continuePendingBatch) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  continuePendingBatch(@Req() request: HumanAutomationHttpRequest & { body?: unknown }, @Body() _value: unknown) {
+    return this.call(request, 'continuePendingBatch', request.body);
+  }
 
   @Post('inputs/prepare') @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareInput(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'prepareInput', value); }

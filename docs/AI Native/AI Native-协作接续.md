@@ -24,7 +24,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 原AUTOMATION模型步骤／CALLS／独立原账及[公开解释阶段](<AI Native-开发记录.md#ain18-original-explanation-public-consumer-20261114>)已接，空政策明确首次准入、COMMIT丢ACK／缺usage原读、平台主体和后台消费者模拟／类型通过，准备固化并按原全文核17→18；未知不重派。独占四册／索引、shared／公共装配；原19／20两项集成节点及PM固定9512闭包保留，AIN-15三叶／旧员工样式待核不夹带。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原两私有叶已交权，Root后继修原历史／首次准入／标准Application。实际Controller→Application→原Gateway／单账从空政策通过正常／缺usage／准入COMMIT丢ACK；平台匹配原金额及错profile／await撤publication已复验，待固定最终交付后转AIN-18全文独立核定。只读公共源，已交源码冻结，不新增测试／业务动作、不等main。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-17故障组已由Root独立核接；发现未确认原批次永久阻断恢复，获单源business-failure-candidate.service.ts写权，显式continuePendingBatch只推进原清单／CAS。Root负责公共合同／Controller／API／session／UI；当前只复验平铺响应及原unknown/租约/重试边界后冻结，继续原五条全文结论。索引／四册归Root，不新增测试、不等main。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-17原故障组及[明确继续原批次](<AI Native-开发记录.md#ain17-explicit-original-batch-continuation-20261114>)单源5257d5f4已由Root核同，实际API/session／Controller及三次重试死信／ACK丢失组合通过。当前单叶冻结交权，继续原五条全文结论；不新增/扩测试，不等提交/main。索引／四册／公共源归Root。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源及独立全文结论已交回，Root核blob和必要实际provider模拟通过。既有Core治理两源来源/类型因果已只读核清，Root按固定提交同步本树；当前无活动写权。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
@@ -36,7 +36,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 负责人已更新持续目标：每次开始任务先主动核两助手的实际回合，未开始或断流后需恢复原任务并确认新工具执行，不能仅发送消息就称已启动。2026-11-13 原两助手分别遇EOF与HTML应答再次失败，已单点发送继续；新回合 `01a1d505-a90a-70e0-8480-8757f2d0d475`、`01a1d505-f566-7fe1-9099-2c525dc96d11` 均已出现实际工具进展。内部开业助手同次断流后也已恢复原范围，不改模型或供应商设置。
 
-当前[失效模型解释撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)已模拟／类型通过，原正文收据保留，stale／unavailable／旧包缺标签不显示成当前建议。原批次继续仍在同键范围施工，禁止另选新事件或把未知准备自动重做；批次独立阶段完毕后再核AIN-17→AIN-18全文。
+当前[失效模型解释撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)已推2f4192c6e并回读；原正文收据保留，stale／unavailable／旧包缺标签不显示成当前建议。[明确继续原批次](<AI Native-开发记录.md#ain17-explicit-original-batch-continuation-20261114>)已完成公开消费者及必要模拟／类型，原key／清单不变，unknown只读。两项阶段固定后核AIN-17→AIN-18全文，任务分数按完整门槛维护。
 
 ## 当前收口入口
 

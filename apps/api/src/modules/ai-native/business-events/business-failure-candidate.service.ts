@@ -1,6 +1,7 @@
 /** Current-source candidate preparation and durable bounded batch recovery.
  * Claiming keeps the original source, lease and fence checks; original batch
- * reads authorize frozen event links without expiring or preparing candidates. */
+ * reads authorize frozen event links without expiring or preparing candidates.
+ * Explicit continuation only advances the stored batch, never selects new events. */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiBusinessFailureOutbox, Prisma, PrismaClient } from '@prisma/client';
@@ -15,6 +16,7 @@ import { PendingCandidateBatchRepository, type PendingCandidateBatchDb, type Pen
 const batchRequest = z.object({ limit: z.number().int().min(1).max(10),
   operationKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u).optional() }).strict();
 const batchReference = batchRequest.required();
+const batchContinuation = batchReference.extend({ decision: z.literal('continue_original_candidate_batch') }).strict();
 const originalHash = (row: AiBusinessFailureOutbox) => requestFingerprint({ id: row.id, tenantId: row.tenantId,
   workspaceId: row.workspaceId, eventType: row.eventType, notificationId: row.notificationId, refundId: row.refundId,
   inspectionId: row.inspectionId ?? null, exceptionId: row.exceptionId ?? null, orderId: row.orderId,
@@ -126,11 +128,7 @@ export class BusinessFailureCandidateService {
 
   private async prepareBatch(input: z.infer<typeof batchReference>) {
     const batches = this.batches(), identity = await this.batchIdentity(input);
-    const response = async () => {
-      const batch = await this.readPendingBatch(input);
-      return { items: batch.state === 'observed' ? batch.events.filter(event => event.preparationState === 'observed')
-        .map(event => event.candidate) : [], coverage: 'bounded_authorized_window' as const, workerStarted: false as const, batch };
-    };
+    const response = () => this.batchResponse(input);
     // Existing keys never enter the current source/claim path.
     let prior: PendingCandidateBatchJournal | null;
     try { prior = await batches.read(identity.reference); } catch { return response(); }
@@ -173,6 +171,73 @@ export class BusinessFailureCandidateService {
       } catch { break; }
     }
     return response();
+  }
+
+  /** A new human decision may continue only the original journal's suffix.
+   * Terminal markers can be confirmed through current original-event read rights;
+   * unfinished markers still require the original prepare/source/lease CAS. */
+  async continuePendingBatch(value: unknown): Promise<AiAutomationPendingBatchObservationDraft> {
+    const { decision: _decision, ...input } = parse(batchContinuation, value);
+    const batches = this.batches(), identity = await this.batchIdentity(input);
+    const response = async () => {
+      await this.sameBatchIdentity(input, identity.principal);
+      const result = await this.readPendingBatch(input);
+      await this.sameBatchIdentity(input, identity.principal);
+      return result;
+    };
+    let journal: PendingCandidateBatchJournal | null;
+    try { journal = await batches.read(identity.reference); }
+    catch { return response(); }
+    if (!journal) return response();
+    // Authorize every frozen event before the first mutation, including the
+    // already confirmed prefix. No pending-window query or journal creation.
+    for (const event of journal.events) {
+      await this.observeBatchEvent(identity.reference, event);
+      await this.sameBatchIdentity(input, identity.principal);
+    }
+    const unchanged = async () => {
+      const current = await batches.read(identity.reference);
+      await this.sameBatchIdentity(input, identity.principal);
+      if (!current || requestFingerprint(current) !== requestFingerprint(journal)) throw new BusinessFailureError('result_unknown');
+    };
+    const terminal = (status: AiAutomationCandidateDraft['status']) => ['ready', 'expired', 'dead_letter', 'closed'].includes(status);
+    for (const event of journal.events.slice(journal.confirmed.length)) {
+      try {
+        await unchanged();
+        const candidate = await this.observeBatchEvent(identity.reference, event);
+        await this.sameBatchIdentity(input, identity.principal);
+        if (!terminal(candidate.status)) {
+          const row = await this.load(identity.reference, event.eventId), now = this.clock();
+          if (originalHash(row) !== event.originalHash || row.status !== candidate.status || row.fence !== candidate.fence
+            || row.attempts !== candidate.attempts || !Number.isSafeInteger(row.attempts) || row.attempts < 0 || row.attempts > 3
+            || !(now instanceof Date) || !Number.isFinite(now.getTime())
+            || !(row.nextAttemptAt instanceof Date) || !Number.isFinite(row.nextAttemptAt.getTime())) throw new BusinessFailureError('unavailable');
+          if (row.status === 'claimed') {
+            if (!(row.leaseUntil instanceof Date) || !Number.isFinite(row.leaseUntil.getTime())) throw new BusinessFailureError('unavailable');
+            if (row.leaseUntil > now) break;
+          }
+          if (row.nextAttemptAt > now) break;
+          await unchanged();
+          // Exactly one original preparation attempt per event in this command.
+          // An uncertain acknowledgement stops the suffix; it is never retried here.
+          await this.prepare({ eventId: event.eventId });
+          await this.sameBatchIdentity(input, identity.principal);
+        }
+        await unchanged();
+        const settled = await this.observeBatchEvent(identity.reference, event);
+        if (!terminal(settled.status)) break;
+        await this.sameBatchIdentity(input, identity.principal);
+        journal = await batches.confirm(journal, event.eventId);
+        await this.sameBatchIdentity(input, identity.principal);
+      } catch { break; }
+    }
+    return response();
+  }
+
+  private async batchResponse(input: z.infer<typeof batchReference>) {
+    const batch = await this.readPendingBatch(input);
+    return { items: batch.state === 'observed' ? batch.events.filter(event => event.preparationState === 'observed')
+      .map(event => event.candidate) : [], coverage: 'bounded_authorized_window' as const, workerStarted: false as const, batch };
   }
 
   private async observeBatchEvent(scope: FailureScope, expected: PendingCandidateEvent, tx?: Prisma.TransactionClient) {

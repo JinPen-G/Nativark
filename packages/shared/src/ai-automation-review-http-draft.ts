@@ -12,10 +12,11 @@ export const AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT = Object.freeze({
   operations: Object.freeze({ prepareGrant: 'reviews/grant/prepare', enableGrant: 'reviews/grant/enable', readGrant: 'reviews/grant/read' }),
 } as const);
 
-/** Pending-batch writes retain the original operation key. Reopening observes
- * the captured event window and never continues or repeats its preparation. */
+/** Reopening observes the original window. Continuing requires an explicit
+ * decision and the same recorded key/list; no replacement batch is selected. */
 export const AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT = Object.freeze({
   preparePending: 'candidates/prepare-pending', readPendingBatch: 'candidates/pending/read',
+  continuePendingBatch: 'candidates/pending/continue',
 } as const);
 
 export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
@@ -23,6 +24,7 @@ export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
   prepareCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
   preparePending: { request: 'AiAutomationPendingCandidatesRequestDraft', response: 'AiAutomationPendingCandidatesDraft' },
   readPendingBatch: { request: 'AiAutomationPendingBatchReferenceDraft', response: 'AiAutomationPendingBatchObservationDraft' },
+  continuePendingBatch: { request: 'AiAutomationPendingBatchContinueDraft', response: 'AiAutomationPendingBatchObservationDraft' },
   prepareInput: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationInputPreparationDraft' },
   readInput: { request: 'AiAutomationReviewReadDraft', response: 'AiAutomationInputObservationDraft' },
   createTask: { request: 'AiAutomationReviewReadDraft', response: 'AiAutomationTaskCreationObservationDraft' },
@@ -40,6 +42,9 @@ export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
 export interface AiAutomationCandidateRequestDraft { eventId: string }
 export interface AiAutomationPendingCandidatesRequestDraft { limit: number; operationKey?: string }
 export interface AiAutomationPendingBatchReferenceDraft { limit: number; operationKey: string }
+export interface AiAutomationPendingBatchContinueDraft extends AiAutomationPendingBatchReferenceDraft {
+  decision: 'continue_original_candidate_batch';
+}
 type CandidateBase = { eventId: string; attempts: number; fence: number; taskCreated: false };
 export type AiAutomationCandidateDraft = CandidateBase & (
   | { status: 'ready'; material: { event: AiBusinessEventDraft; nextAction: 'human_review'; semantics: 'candidate_not_task_or_execution' };
@@ -216,6 +221,7 @@ export const AI_AUTOMATION_REVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft
   AiAutomationCandidateRequestDraft: object({ eventId: uuid }),
   AiAutomationPendingCandidatesRequestDraft: object({ ...pendingBatchReference }, ['limit']),
   AiAutomationPendingBatchReferenceDraft: object(pendingBatchReference),
+  AiAutomationPendingBatchContinueDraft: object({ ...pendingBatchReference, decision: choice('continue_original_candidate_batch') }),
   AiAutomationPendingBatchObservationDraft: pendingBatch,
   AiAutomationCandidateDraft: candidate,
   AiAutomationPendingCandidatesDraft: object({ items: list(candidate, 10), coverage: choice('bounded_authorized_window'), workerStarted: no,

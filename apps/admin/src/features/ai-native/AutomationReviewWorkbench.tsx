@@ -18,6 +18,8 @@ import styles from './AiManagement.module.css';
 
 const english: Record<string, string> = {
   '异常人工复核': 'Human exception review', '原事件': 'Original event', '原事件标识': 'Original event ID',
+  '继续原批次': 'Continue original batch',
+  '只继续本批原事件，保留原操作键；等待有效租约或重试时间，不领取新的事件。': 'Continue only this batch and retain its operation key. Respect active leases and retry times; select no new events.',
   '待处理事件': 'Pending events', '领取待处理事件': 'Prepare pending events',
   '领取当前空间最多10项待处理事件并准备候选？选中后再办理。': 'Prepare candidates for up to 10 pending events in this workspace? Select an event before proceeding.',
   '每次最多10项，候选不会自动创建待办或执行业务。': 'Each request covers up to 10 events. Candidates do not automatically create reviews or execute business actions.',
@@ -283,6 +285,9 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
         doneLabel={t('已读取')} disabled={disabled || !session.canPreparePending()} onConfirm={action(() => session.preparePending(10))} />
       <p className={styles.help}>{t('每次最多10项，候选不会自动创建待办或执行业务。')}</p>
       <p className={styles.help}>{t('候选来自原事件，选中后核对当前情况。')}</p>
+      {session.canContinuePending() && <ConfirmAction label={t('继续原批次')}
+        prompt={t('只继续本批原事件，保留原操作键；等待有效租约或重试时间，不领取新的事件。')}
+        doneLabel={t('已读取')} disabled={busy} onConfirm={action(() => session.continuePendingCandidates())} />}
       {data.batch && (data.batch.status === 'observed' || data.batch.eventIds.length > 0) ? <>
         {data.batch.status === 'observed' && !data.batch.eventIds.length && <p className={styles.help}>{t('本次领取窗口没有返回候选，不代表没有其他事件。')}</p>}
         <ul className={styles.taskList}>{data.batch.eventIds.map(eventId => {

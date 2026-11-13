@@ -25,7 +25,7 @@ export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencie
   reviewGrantPolicy?: HumanAutomationReviewGrantPolicySource;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
-  | 'readPendingBatch'
+  | 'readPendingBatch' | 'continuePendingBatch'
   | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue'
   | 'prepareGrant' | 'enableGrant' | 'readGrant';
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
@@ -68,7 +68,7 @@ export class HumanAutomationRequestFactory {
     if (signal?.aborted) close();
     // A stale candidate read can expire its original outbox marker. Treat
     // interruption conservatively even though it never changes the business.
-    const write = ['readCandidate', 'prepareCandidate', 'preparePending', 'prepareInput', 'createTask', 'createEventTask', 'close', 'feedback', 'enableGrant'].includes(action);
+    const write = ['readCandidate', 'prepareCandidate', 'preparePending', 'continuePendingBatch', 'prepareInput', 'createTask', 'createEventTask', 'close', 'feedback', 'enableGrant'].includes(action);
     let writeReturned = false;
     const credentials = { current: async () => {
       if (!active) throw unavailable();
@@ -147,6 +147,7 @@ export class HumanAutomationRequestFactory {
             // The original bounded algorithm owns partial failures and final re-reads.
             case 'preparePending': return candidates.preparePending(command);
             case 'readPendingBatch': return candidates.readPendingBatch(command);
+            case 'continuePendingBatch': return candidates.continuePendingBatch(command);
             case 'createEventTask': {
               const selected = eventInput.safeParse(command);
               if (!selected.success) throw new AutomationError('invalid_input');

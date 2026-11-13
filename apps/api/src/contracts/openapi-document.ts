@@ -2742,6 +2742,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema: objectOf({}, [], false), responseSchema: 'AiLegacyModelConfigurationDraft' },
   ...(['operator', 'staff'] as const).flatMap(audience => [
     ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
+    ['candidates/pending/continue', 'continuePendingBatch'],
     ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],
     [AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation, 'createEventTask'],
     ['reviews/read', 'read'], ['reviews/queue', 'readQueue'], ['reviews/for-event', 'forEvent'], ['reviews/close', 'close'], ['reviews/feedback', 'feedback'], ['reviews/operation', 'operation'],

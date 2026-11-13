@@ -6,6 +6,25 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain17-explicit-original-batch-continuation-20261114"></a>
+## AIN-17 未确认原批次的明确继续与有界恢复（2026-11-14）
+
+dev2沿正式全文发现：原批次已持久化清单，但某项claim／prepare／confirm丢应答后保持unconfirmed；后台禁止新领取，原read和同key prepare只观察，因此无法收口。八源最小修复保留原批次身份：新增公共`continuePendingBatch`合同及Controller／Factory／OpenAPI／API消费，只接`{limit,operationKey,decision:'continue_original_candidate_batch'}`，不接客户端eventId或新清单。原[候选服务](../../apps/api/src/modules/ai-native/business-events/business-failure-candidate.service.ts)先核当前scope／owner和所有原事件绑定，只推进原journal未确认后缀。ready／expired／dead_letter／closed只补原confirm；未到nextAttemptAt或claimed租约仍有效只读，符合原条件才执行一次原prepare CAS。每事件最多一次，读取／确认／来源应答未知立即停下，仍按原key读取；确认完成前不选新的事件，不派模型、通知、退款或业务操作。
+
+[后台session](../../apps/admin/src/features/ai-native/automation-review-session.ts)恢复先readPendingBatch，只有已核原journal、未确认状态及当前身份才能显示[明确继续按钮](../../apps/admin/src/features/ai-native/AutomationReviewWorkbench.tsx)。发送前核本地原定位未被其他标签改动；原batchId／eventIds／operationKey保持，迟到／错scope／存储损坏拒绝。确认完成后才允许下一批，重开不自动continue，不用新key绕过unknown。员工路由白名单从同一shared映射读取，当前原业务Guard仍独立复验。
+
+| 必要模拟／类型 | 固定证据与实际结果 |
+| --- | --- |
+| 原事务与有界候选故障组，Root独立复验 | stdin `6b9d0541dd61217f23f4693ae2dd27b9e1e641c463ebba4db940164656d90c16`／退出0，九项包含通知原事务回滚／提交丢应答、三次有界重试至死信、接管后旧worker围栏、claim／finish丢ACK、乱序旧资源和当前Auth／Guard撤权，模型／Task／业务副作用0。 |
+| 实际API/session→Guard／Controller／Factory原批次继续 | `a0d6b1fc8132293c94063ecd6386b9761abf17a7ee8dd89e304354d163b4dfeb`，修前／修后分别退出1／0；原journal COMMIT丢ACK后重開只read，明确同key continue后complete，batchId和eventIds不变，新增窗口查询0／Task0，撤权拒绝。 |
+| 同原batch三次显式重试时间、死信与confirm丢ACK | `951e60aeef35b57eac443ae0d51e11b49e21b1c9c44a92a57a7863a6d1fdbaf8`／退出0；retryAt未到不加attempt，三次后dead_letter，确认ACK丢失读原complete，重复0新写／Task。首次驱动缺hash导入、随后在Factory构造后替换时钟导致仍用原时刻，分别退出1；仅修内存原clock绑定，未放宽生产时间或测试断言。 |
+| 原继续闭合合同 | `0980fc57c56e8fcff76cfcb8a3fd406ad41580821a75366102752dd7bf9e9743`／退出0，缺decision及额外eventId拒绝，原read保持无动作语义。 |
+| 最终公开装配与后台类型 | TypeScript5.9.3，API20根／1987源 `bd663db628df46bc4b29090c49406e23a883b6e833232641ca2662b6d3b3982b`、后台7根／1509源 `007a71cc86b8c93d2bace19b4238c5f133dffccf73bbabe487601730d93550b7`，均退出0／零诊断。 |
+
+Root独立公开组合发现作者continue最初返回prepare的wrapper，与正式平铺Observation不符，Controller正确回AI_RESULT_UNKNOWN；single方法改为readPendingBatch平铺响应并加返回类型后同命令通过，原prepare包装保留。后台原key可选类型诊断以实际非空校验修复，不以断言补绿。作者单叶最终blob `5257d5f48fd7fa3e0a83cb9210386301b884875e`，Root核同；八源路径→blob集合SHA-256 `fdefd13aae0cfc36279522a4ad7540d80e673f569c89aaadfd123f85cb9e4e9a`。未将内部源方法存在当公开恢复通过，实际生产者／消费者完整组合已核接。
+
+原事件／业务事务／Auth／Guard和候选算法是实际源码，数据库、故障、运输及时间为合成模拟，不称MySQL原子性或浏览器实测。所有命令`node --no-compilation-cache -`，原offline preload、不可达DATABASE_URL、本树单一任务根及内存audit；Root进程已退出、audit0，任务临时目录未创建，无新增／扩写测试脚本或依赖／client／dist。`docs:check`四处既有缺链／退出1，无新增任务算术或链接错误；diff检查退出0。本阶段独立提交，原17全文按可靠生产、原schema/事务、消费者与全部依赖另核；18全文仍由dev1核定，不把本修复切片另计任务100%。
+
 <a id="ain18-current-review-stale-explanation-20261114"></a>
 ## AIN-18 当前来源复查与失效解释撤回（2026-11-14）
 

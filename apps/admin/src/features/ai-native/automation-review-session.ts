@@ -2,8 +2,8 @@
  * commands only, never resource facts, model text or authority. Unknown writes
  * recover through the original event/creation/operation reads; no replay.
  * Human grants keep a separate original locator, never a cached permission.
- * Pending-candidate batches record their key before calling the server. A lost
- * or partial reply is observed through the original batch, never prepared again. */
+ * Pending batches retain their key after partial replies. Observation is inert;
+ * a separately confirmed continuation uses only that original recorded list. */
 import { z } from 'zod';
 import type {
   AiAutomationCandidateDraft, AiAutomationEventTaskResponseDraft,
@@ -510,8 +510,8 @@ export function createAutomationReviewSession(input: {
       const operationKey = (input.newKey ?? (() => crypto.randomUUID()))();
       const command = validateAutomationReview<AiAutomationPendingCandidatesRequestDraft>('AiAutomationPendingCandidatesRequestDraft', { limit, operationKey });
       const original = batchSchema.parse({ kind: 'automation-pending-candidates-1', scope, status: 'dispatched', limit, eventIds: [], operationKey });
-      // Persist and read back the key before the single write request. Restored
-      // sessions can only call readPendingBatch until this batch is complete.
+      // Persist the key before the write. Restored sessions first observe it;
+      // continuation is a separate human decision over this same recorded list.
       writeBatch(original);
       assert();
       const result = validateAutomationReview<AiAutomationPendingCandidatesDraft>('AiAutomationPendingCandidatesDraft',
@@ -534,6 +534,31 @@ export function createAutomationReviewSession(input: {
       const result = await input.api.readPendingBatch({ limit: original.limit, operationKey: original.operationKey! }, signal); assert();
       if (!same(original, batchRecord) || !same(input.store.batch.read(), original)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
       return acceptBatch(result, original);
+    }),
+    canContinuePending: () => active && input.current() && !view.busy && !damaged && !grantDamaged && !batchDamaged
+      && record?.status !== 'pending' && !grantRecord && batchRecord?.status === 'dispatched'
+      && view.batchObservation?.state === 'observed' && !view.batchObservation.complete,
+    continuePendingCandidates: () => run('pending-continue', async signal => {
+      assert();
+      if (damaged || grantDamaged || batchDamaged || record?.status === 'pending' || grantRecord
+        || !batchRecord?.operationKey || batchRecord.status !== 'dispatched'
+        || view.batchObservation?.state !== 'observed' || view.batchObservation.complete) throw unavailable();
+      const original = structuredClone(batchRecord), stored = input.store.batch.read();
+      if (!original.operationKey) throw unavailable();
+      if (!same(stored, original)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
+      const latest = await input.api.readPendingBatch({ limit: original.limit, operationKey: original.operationKey }, signal); assert();
+      if (!same(original, batchRecord) || !same(input.store.batch.read(), original)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
+      const checked = acceptBatch(latest, original);
+      if (checked.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
+      if (checked.complete) return checked;
+      const current = structuredClone(batchRecord);
+      if (!current || !same(input.store.batch.read(), current)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
+      const command = validateAutomationReview<{ limit: number; operationKey: string; decision: 'continue_original_candidate_batch' }>(
+        'AiAutomationPendingBatchContinueDraft', { limit: original.limit, operationKey: original.operationKey,
+          decision: 'continue_original_candidate_batch' });
+      const result = await input.api.continuePendingBatch(command, signal); assert();
+      if (!same(batchRecord, current) || !same(input.store.batch.read(), current)) throw Error('AI_BATCH_LOCATOR_ALREADY_EXISTS');
+      return acceptBatch(result, current);
     }),
     selectPendingCandidate: (eventId: string) => run('event', async signal => {
       if (batchDamaged || !batchRecord || !batchRecord.eventIds.includes(eventId)) throw unavailable();
