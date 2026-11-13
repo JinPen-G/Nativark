@@ -1,3 +1,4 @@
+import { TaskOpeningProposals } from './TaskOpeningProposals';
 import { TaskReadPolicy } from './TaskReadPolicy';
 import { OrderHumanHandoff } from './OrderHumanHandoff';
 import { TaskCalendarDraft } from './TaskCalendarDraft';
@@ -363,6 +364,11 @@ function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: strin
             && AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS.some(permission => useAuthStore.getState().hasPermission(permission)) ? [{
             key: 'calendar-draft', title: t('日历业务草稿'), content: <TaskCalendarDraft key={`calendar:${selected}`} taskId={selected} identity={identity} current={current}
               onAccessDenied={() => { stopFollowing(); setSelected(null); setOpened(false); }} /> }] : []),
+          ...(data.items.find(row => row.taskId === selected)?.sceneCode === 'opening_diagnosis'
+            && useAuthStore.getState().hasPermission('rental-os:price:manage') ? [{
+            key: 'opening-proposals', title: locale === 'en-US' ? 'Opening section proposals' : '开业分区提案',
+            content: <TaskOpeningProposals key={`opening:${identity}:${selected}`} taskId={selected} identity={identity} current={current} />,
+          }] : []),
         ]} /> : null}
       onPageChange={next => { if (query.isFetching || next < 1 || next > page + 1) return;
         if (next > page) { if (!data?.nextCursor) return; setCursors(old => [...old.slice(0, page), data.nextCursor]); }
