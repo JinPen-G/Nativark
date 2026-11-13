@@ -201,7 +201,12 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
     configurationSource: ConfigService, resources: BusinessFailureResourcePorts, value?: unknown) => {
     const configuration = readFailureConfiguration(value);
     return new HumanAutomationRequestFactory({ db, auth, guard, core, resources, reviewGrantPolicy: new RuntimeAutomationReviewGrantPolicySource(configurationSource),
-      ...(configuration.enabled && configuration.automation ? { automation: { policyId: configuration.automation.policyId, subscriptions } } : {}) });
+      ...(configuration.enabled && configuration.automation ? { automation: { ...configuration.automation, subscriptions,
+        assertCurrent: () => {
+          if (requestFingerprint(configuration) !== requestFingerprint(readFailureConfiguration(readRuntimePublication(configurationSource).configurations.businessFailure))) {
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          }
+        } } } : {}) });
   }
 }, {
   provide: HumanAutomationPolicyRequestFactory, inject: [PrismaService, AuthService, ApiAuthGuard],

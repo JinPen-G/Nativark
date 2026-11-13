@@ -24,7 +24,8 @@ const semantics = { dispatchRequested: false as const, confirmationGranted: fals
 export class AutomationFailureTaskService {
   constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiAutomationInput'>,
     private readonly authority: PrismaAutomationAuthority, private readonly tasks: AiTaskCreationRepository,
-    private readonly clock: () => Date = () => new Date()) {}
+    private readonly clock: () => Date = () => new Date(),
+    private readonly assertPreparationPolicy?: (tx: Prisma.TransactionClient) => Promise<void>) {}
 
   async prepare(value: unknown) {
     const { eventId } = parse(eventCommand, value);
@@ -38,10 +39,14 @@ export class AutomationFailureTaskService {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_business_failure_outbox WHERE id = ${eventId} FOR UPDATE`);
         if (before.event.notificationId) await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_notification_logs WHERE id = ${before.event.notificationId} FOR UPDATE`);
         if (before.event.refundId) await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_payment_refunds WHERE id = ${before.event.refundId} FOR UPDATE`);
+        await this.assertPreparationPolicy?.(tx);
         const current = await this.authority.inspect(eventId, tx);
         if (current.materialHash !== before.materialHash) throw new AutomationError('unavailable');
         const existing = await tx.aiAutomationInput.findFirst({ where: {
-          tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, policyId: before.key.policyId, eventId: before.key.eventId } });
+          tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, eventId: before.key.eventId } });
+        // The locked original event owns a single preparation even if a second
+        // request observed a different policy before the first committed. Never
+        // mint a replacement input for an already attempted event operation.
         if (existing) { this.authority.verifyInput(existing, before); attemptedRef = existing.id; return existing.id; }
         if (before.event.inspectionId && before.event.exceptionId) {
           const sourceKey = { tenantId: before.key.tenantId, workspaceId: before.key.workspaceId,
@@ -72,6 +77,7 @@ export class AutomationFailureTaskService {
           inputHash: before.inputHash, authorityHash: before.authorityHash,
           expiresAt: before.expiresAt, status: 'prepared', taskId: null, runId: null } });
         if ((await this.authority.inspect(eventId, tx)).materialHash !== before.materialHash) throw new AutomationError('unavailable');
+        await this.assertPreparationPolicy?.(tx);
         return inputRef;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {

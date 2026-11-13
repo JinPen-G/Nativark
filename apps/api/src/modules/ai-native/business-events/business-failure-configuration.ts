@@ -8,8 +8,10 @@ import { coreFulfillmentNearPolicySchema, type CoreFulfillmentNearPolicySource }
 
 const configurationSchema = z.discriminatedUnion('enabled', [
   z.object({ enabled: z.literal(false) }).strict(),
-  z.object({ enabled: z.literal(true), automation: z.object({ policyId: z.string().min(1).max(36)
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().optional(),
+  z.object({ enabled: z.literal(true), automation: z.union([
+    z.object({ policyId: z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict(),
+    z.object({ selection: z.literal('current_workspace') }).strict()
+  ]).optional(),
     fulfillmentNear: coreFulfillmentNearPolicySchema.optional() }).strict()
 ]);
 

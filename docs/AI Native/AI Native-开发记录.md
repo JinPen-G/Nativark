@@ -3,8 +3,41 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain18-simulated-whole-closeout-20261114"></a>
+## AIN-18 当前空间原政策消费与七条全文模拟研发收口（2026-11-14）
+
+[政策管理与完整边界](#ain18-original-policy-boundary-manager-20261114)固定 `63f65c2dd2f75c8c0c6c65105574922c89c72af2`，[实际后台五源](#ain18-policy-settings-original-consumer-20261114)固定 `a0d7a0f979c0f25e7c4a16ca9c627d1b60edb25b`，均已提交／普通推送并回读GitHub一致。独立助手按原AIN-18七条复核发现最后接线缺口：标准HumanAutomationRequestFactory只取部署中的一个policyId，其他空间新保存／启用政策没有消费入口。这是当前实现缺口，不能借生产自动白名单未确认或配置保存成功解释为已完成。
+
+五源最小后继在[原配置](../../apps/api/src/modules/ai-native/business-events/business-failure-configuration.ts)保留旧 `{policyId}`，新增显式服务端 `automation:{selection:'current_workspace'}`；缺配置不启用，HTTP不能提交此选择。原[请求工厂](../../apps/api/src/modules/ai-native/automation/human-automation-request.composition.ts)先核当前人类事件读权及来源，只在同空间有效、未撤销、影子／人工确认的最多20政策中取唯一事件类型匹配，零／多／超限拒绝，不尝试其他政策。原输入已存在时固定其policyId，新发现不能重定向已知结果或unknown；多个原输入拒绝。原source仍核主体／边界／计划／权益／预算，不能把发现当授权。
+
+[原prepare事务](../../apps/api/src/modules/ai-native/automation/automation-failure-task.service.ts)锁原事件后、创建input后均在同tx复核所选政策，跨政策同事件已有输入不创建第二份。事务外及最终交付继续核当前发布；原[provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)读取同一ConfigService部署发布，等待中撤回则拒绝新动作。旧history creation／review／operation／batch不调用新执行配置。新空间政策仍由管理者两次明确确认保存，模型解释另确认；未部署该selection或原政策／预算缺失保持unavailable，不自动配默认。
+
+| 最后接线的必要模拟／类型 | 实际结果与stdin SHA-256（命令均 `node --no-compilation-cache -`） |
+| --- | --- |
+| 标准provider→已保存原policy→公开event-task及停用原读 | `51a2131147401babcb1297ee6555ee7e27eaf433441dbc2bc76b4c1460f93232`／退出0；原空间policy revision2进入完整input，1 Task／Run；重叠政策的新事件拒绝，原input不重定向；撤回发布不新建而原creation仍可读。 |
+| 当前空间原policy／公开Task→解释Application→原Gateway／单账 | `19a54eb4d5a702a926f84e38fb9057af7f01a3fc7f961d38b8376c4d178cffe3`／退出0；同1Task／Run，模型1、Invocation1、原CALLS consumed1／reserved0，原账settled，业务写0；停用／到期历史读回、撤权拒绝。 |
+| 已有同event input固定原政策及并发同事件 | `1de4ad1df82280e171742194664b506f204105c66f64bc1d06cb57391346cc38`、`f8d19d3e23d9daa28a7d38c9749150250fd13b8df4a190f79dae07bd20194dad`均退出0；同event明确恢复不换policy/input/Task，两请求只保留1input／Task／Run，新事件多policy拒绝。存储锁／并发为明示原串行事务夹具，不冒称MySQL并发实测。 |
+| await撤回发布与原事务内policy晚变更 | `3f6cb2ac5fb2b4b21924a2d3513876d326a43e117315a3cd9e9a1163b7c0bce0`、`546578f338b8eea38aa58bc2dbee7029d11a984988e11c83747b586faae45a30`均退出0；撤回时新input／Task0，事务内变更回滚、原policy revision2不变，无新模型或业务。 |
+| 完整生产装配最终类型 | `4ea56b4d01b38eaa2b53c3211698e392718826b3a2b98d6cdbfed2e273ac600f`／退出0，TypeScript5.9.3，23根／1988源零诊断；后台与十路正式合同见[原消费者证据](#ain18-policy-settings-original-consumer-20261114)。 |
+
+最终五blob经Root与独立助手逐项核同：configuration `f20039c8aabfa9f149b98ea0f6c8eb307f338cdf`、request composition `36f44bcd2f32aac8d53003ce552e7c2a159c0015`、provider `7f761a76d17a2f2dad06ddfdd3a926a7d2a27164`、automation composition `3d7931a890d614b5004c7517413a5d09ade26746`、原task service `2f49841a0ca8085792a2cfdca50b5e0264d4dd3f`。独立复核仅静态核源／全文／原固定证据，未冒称重跑Root行为。
+
+| 原AIN-18全文条款 | 完整实现／证据 |
+| --- | --- |
+| 限定事件转解释、候选和待办，失效建议撤回／反馈去重 | 原17事务事件／有界批次，[原公开解释](#ain18-original-explanation-public-consumer-20261114)及[当前复查标签](#ain18-current-review-stale-explanation-20261114)；stale／unavailable／旧包不显示旧模型建议，原Artifact／单账不重写。 |
+| 四类限定场景的事实、触发、工具／效果、人工与结果复查 | 履约／归还取原Core／检查，正式通知／退款取原状态和收据，开业取原九项来源；临近条件沿原配置。交付／检查在原订单、通知原治理页、退款独立原GET、开业原检查与配置办理；打开／人工关闭／无法判断／事实解决分别展示，不扩大调度、通知或退款能力。 |
+| 主体、白名单、scope、收件人、上限／冷却／期限／启用人／修订 | 原manager两次确认／CAS及完整boundary同tx；本片当前空间政策消费完整。工具／收件人保持空，maxActions／quantity／causalDepth、每日次数／冷却、当前subject及scope实际限制新input／Task／解释。 |
+| 当前政策／权限／批准，R3人工与退款不重试 | 原AUTOMATION独立主体、当前Auth／Guard、source／动作政策及Gateway；仅文字解释，无资产、资金、通知或发布执行器。人工办理仍原授权和审批链，解释不能批准或重发退款。 |
+| 全局／租户／场景停用、预算和人工接管／通知未知 | 三层预算和当前runtime／policy生效；原历史可读不续权。通知未开放AI发送，原unknown先读原收据；原经营主链不被模型关闭阻断。 |
+| 影子无业务写、撤权、重复／到期／循环及自动白名单关闭 | 原去重／有界三次／因果来源，加本片单事件事务和原input固定；公开解释1模型／原CALLS，COMMIT丢ACK／缺usage保持unknown；当前撤权、policy过期、发布撤回拒绝新动作，自动业务始终关闭。 |
+| 代表过程／人工处理／原结果核对与close-feedback | 原事件→当前核实→解释／待办→原人工入口→明确同来源复查。元数据grant／CAS／close／feedback与原operation恢复已固定，关闭待办不证明业务解决，原unknown不换键。 |
+
+07／08／11／17原完整前置均100%。G1原合同／数据约束，G2原事件／管理／Task／模型服务，G3标准provider／Controller／Guard／后台，G4全文必要模拟／类型／修复复验及独立技术核定均满足；AIN-18由75%更新100%，原28项门槛覆盖率83.0%→83.9%，正式本轮研发验收19／28，ENTRY仍70.8%。AIN-17／18形成新的两项main集成节点，固定前置63f65c2dd→a0d7a0f97→本阶段供PM串行收main，AI不争main索引；助手继续21／25核心开发。
+
+失败保留：新驱动遗漏runWithRequestIdentity、缺原通知／退款read port和误写provider导出，依次仅修内存驱动后同链通过，未改生产权限或测试文件；旧1000ms/4096字节计划失败及旧实时AI_RUN_LIMIT／unknown仍见原政策阶段，不用正向tick模拟核销。自有进程均退出、audit0、任务临时目录未创建；无新增／扩写测试脚本、安装／依赖／client／dist副本。文档检查仍4处既有缺链／退出1，无新增链接／任务算术错误，diff检查退出0。真实MySQL、供应商、微信／浏览器和生产自动启用由负责人后续操作，本项研发100%不代表这些真实测试已通过。
 
 <a id="ain18-policy-settings-original-consumer-20261114"></a>
 ## AIN-18 后台原政策设置、两次明确确认与原键恢复（2026-11-14）

@@ -4,7 +4,7 @@
 
 ## 当前目标与现场
 
-在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[AIN-17原五条全文](<AI Native-开发记录.md#ain17-simulated-whole-closeout-20261114>)已在 `aa9bf5979b1437f45ffb4a275e9c0b8c8e992ba2` 完成本轮研发验收并回读 GitHub。[原政策核心阶段](<AI Native-开发记录.md#ain18-original-policy-boundary-manager-20261114>)已推 `63f65c2dd2f75c8c0c6c65105574922c89c72af2`并回读，完整约束／明确管理事务／冻结输入／过期停用／相同配置／共享主体恢复已核。dev2[后台五源](<AI Native-开发记录.md#ain18-policy-settings-original-consumer-20261114>)已冻结交权，Root逐blob核同、实际API/session／React控件和正式合同必要模拟／类型通过。AIN-18最后按原全文核当前标准装配，未升档；dev1继续AIN-21、dev2转AIN-25原核心缺口只读核查，不等待提交或main。
+在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[AIN-17原五条全文](<AI Native-开发记录.md#ain17-simulated-whole-closeout-20261114>)已在 `aa9bf5979b1437f45ffb4a275e9c0b8c8e992ba2` 完成本轮研发验收并回读 GitHub。[原政策核心](<AI Native-开发记录.md#ain18-original-policy-boundary-manager-20261114>)固定63f65c2dd、[后台五源](<AI Native-开发记录.md#ain18-policy-settings-original-consumer-20261114>)固定a0d7a0f97已推并回读；最后当前空间政策定位／同事件原事务复核已补，[AIN-18七条全文](<AI Native-开发记录.md#ain18-simulated-whole-closeout-20261114>)必要模拟／类型及独立技术核定齐备，完成本轮研发验收。17／18为新两项集成节点供PM串行收main，AI不争main索引。dev1已转AIN-21匿名连续性私有两叶，dev2已转AIN-25末Run完整时延叶，不等提交或main。
 
 [AIN-19整项](<AI Native-开发记录.md#ain19-source-text-simulated-whole-closeout-20261114>)固定 `2ec20f9c81f79d7a172409f619c50f3ec91d55de`、[AIN-20整项](<AI Native-开发记录.md#ain20-signature-reopen-simulated-whole-closeout-20261114>)固定 `7a451591c54decf911560f079e246f021b301ea4`已推并回读一致，19／20原集成节点保留。PM指定main `1cb43939bcc25ed1930563aa19b3d507e9b08965` 的[12／13固定闭包](<AI Native-开发记录.md#ain12-13-current-main-fixed-closure-20261114>)在整合分支 `9512e3a786cced8b32812e5121141187012da001`，105源完整API／后台类型及原订单控制／前端消费模拟通过，未新建树／复制环境／写main。[原事件公开解释](<AI Native-开发记录.md#ain18-original-explanation-public-consumer-20261114>)与[失效建议撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)已上传，当前政策核心复用原AUTOMATION／Gateway／CALLS／独立原账，不扩大业务效果。
 
@@ -24,9 +24,9 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 原政策核心已推63f65c2dd；[后台五源](<AI Native-开发记录.md#ain18-policy-settings-original-consumer-20261114>)已冻结、Root核接／必要模拟／类型通过，立即固化。当前按原AIN-18全文核定标准政策定位及办理/复查，不把保存／解释当执行成功。独占四册／索引、shared／Guard／OpenAPI和生产装配；unknown不重派。原17为下一组节点首项，19／20及PM指定9512闭包保留，未核AIN-15三叶／旧员工样式不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | `automation-policy-boundary.ts`作者稿d4b58262已交权，Root后继修原管理恢复；manager→source新输入、旧历史、过期停用与原收据只读复核保留。现转AIN-21原全文只读核定个人／企业／匿名迁移和原客户调用链，先列真实核心缺口及文件归属，不写公共源／四册／索引，不新增测试。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 政策API/session/component/section/locale五源已冻结交回Root，必要模拟和类型齐备，不再写该片。现转AIN-25原指标／Task时延／取消恢复成功率／积压公平性／告警，先只读沿真实生产者消费者列最小核心缺口及文件归属，Root再分配写权；不新增测试、不写shared／公共接点／四册／索引，不等main。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 原政策核心／后台已推，最后五源政策定位已核原完整链及独立全文，[AIN-18本轮研发收口](<AI Native-开发记录.md#ain18-simulated-whole-closeout-20261114>)即时提交推送。接着补21/22公共匿名公开／明确登录续接，核25固定时延叶。独占四册／索引、shared／Guard／OpenAPI和生产装配；unknown不重派。17／18新两项节点、19／20及PM指定9512闭包保留，未核AIN-15三叶／旧员工样式不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 政策单叶已交权；AIN-21五条已核，匿名公开／明确登录续接和选品前目标澄清为实际后端缺口，个人账号的企业会员关系已有受权链。当前只新增`scenes/client-public-continuity.repository.ts`／`client-public-continuity.service.ts`，复用原公开材料／Auth／Guard／OperationLog；可信匿名签发和公共装配由Root接，缺证据fail closed，不靠taskId迁移。不写公共源／四册／索引，不新增测试，完成固定叶后继续下一片。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 政策五源已冻结／上传，不再写该片。AIN-25核到部分完成Task与failed/cancelled末Run的时延投影漏项，已授权仅修改原性能reader叶，按原终结事件／Run endedAt／释放收据证明，缺证据不补时间；必要模拟和类型后交固定blob。随后只读核取消／恢复成功率及积压公平性／告警下一缺口，不写shared／公共接点／四册／索引、不新增测试、不等main。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源及独立全文结论已交回，Root核blob和必要实际provider模拟通过。既有Core治理两源来源/类型因果已只读核清，Root按固定提交同步本树；当前无活动写权。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
@@ -38,13 +38,13 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 负责人已更新持续目标：每次开始任务先主动核两助手的实际回合，未开始或断流后需恢复原任务并确认新工具执行，不能仅发送消息就称已启动。2026-11-13 原两助手分别遇EOF与HTML应答再次失败，已单点发送继续；新回合 `01a1d505-a90a-70e0-8480-8757f2d0d475`、`01a1d505-f566-7fe1-9099-2c525dc96d11` 均已出现实际工具进展。内部开业助手同次断流后也已恢复原范围，不改模型或供应商设置。
 
-当前[失效模型解释撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)已推2f4192c6e，[明确继续原批次](<AI Native-开发记录.md#ain17-explicit-original-batch-continuation-20261114>)已推d57d8e653，均回读GitHub一致。[AIN-17全文](<AI Native-开发记录.md#ain17-simulated-whole-closeout-20261114>)经dev2独立核定及Root实际生产／消费／故障证据核接，原五条和03／04／06依赖齐备，已完成本轮研发100%。下一组main节点首项为17，PM串行集成；AIN-18原政策持久约束及后台消费均已核必要模拟／类型，当前余项是原全文标准装配最终核定，不能借17或影子解释代替整项验收。
+当前[AIN-17全文](<AI Native-开发记录.md#ain17-simulated-whole-closeout-20261114>)及[AIN-18全文](<AI Native-开发记录.md#ain18-simulated-whole-closeout-20261114>)均完成本轮研发验收，形成新的两项main集成节点；固定后端63f65c2dd→后台a0d7a0f97→最后当前空间政策五源／任务收口，PM按固定成果串行集成。真实环境测试由负责人后续执行，生产自动业务仍关闭，解释和保存不能当业务处理成功。
 
 ## 当前收口入口
 
 1. **AIN-12/13 已完成本轮研发验收。** [全文核定](<AI Native-开发记录.md#ain12-13-simulated-whole-closeout-20261113>)按原门槛对应会话/上下文、可信动态展示、字段/审批、取消/恢复/控制及设置；[最终阶段](<AI Native-开发记录.md#ain12-order-chat-current-result-20261113>)固定 `ade6dd10b`，模型原账与业务效果分别判断，最后报价三问题均已修复复验。后续任务复用这些固定接点，main 集成由 PM 处理；实际环境测试与 AIN-25 旧性能证据另列，不重开已闭的实现缺口。
 2. **AIN-14 已完成本轮研发验收。** [品类/能力全文收口](<AI Native-开发记录.md#ain14-category-capability-whole-closeout-20261113>)补齐原受权版本和能力状态、五处标准装配及后台消费；Root独立provider模拟和固定闭包类型通过。原四分区材料→预览→关联R1→提案/原操作、第三方元数据与人工导航、规则摘要、日历采用和已保存提案差异均有固定证据，依赖06/08/10/12齐备。后续复用其原材料/提案，不把诊断已闭当作AIN-16实际写入、发布或采用完成；真实环境由负责人自测。
-3. **AIN-18 经营待办。** 17前置已完成。[原公开解释](<AI Native-开发记录.md#ain18-original-explanation-public-consumer-20261114>)、[当前失效建议撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)、[原政策约束／管理事务](<AI Native-开发记录.md#ain18-original-policy-boundary-manager-20261114>)及[后台政策消费](<AI Native-开发记录.md#ain18-policy-settings-original-consumer-20261114>)均已通过必要源码模拟／类型，原键和撤权保留。当前按原全文核标准运行发布的固定policyId与当前空间政策创建入口，再决定100%。原grant／close／feedback及办理仍沿原收据：交付／归还走原订单，通知走原治理页，退款只读原GET，opening走原受权配置；打开入口、关闭待办和事实解决分别判断。生产自动白名单未确认仍保持关闭，不借解释／配置保存宣称已办理。
+3. **AIN-18 已完成本轮研发验收。** [七条全文及标准消费](<AI Native-开发记录.md#ain18-simulated-whole-closeout-20261114>)核原事件／当前建议／人工复查／完整政策／独立原账和未知恢复；最后server current_workspace选择只有唯一有效原政策可创建，已有input固定原policy、同event事务只准备一次。后续复用这些固定入口，grant／close／feedback／原办理结果仍独立核对；生产自动业务白名单未确认保持关闭，不用解释、保存或关闭待办冒称业务解决。
 4. **AIN-15 自然语言报价。** 原新材料关联、Core 候选/选单、完整比较、新批准与单次开单已由[关联再准备阶段](<AI Native-开发记录.md#ain-linked-requote-consumer-20261111>)核接，unknown 不换原操作，变更不挪用旧批准。dev2 三份 goal leaf 只让目标原文进入原冻结模型输入并投影受权候选，不能自动选同名客户、商品或付款人。Root 补 SceneRequest/模型/Reader 正式接线；企业本人入口及四品类目标代表过程继续按原范围收口，不让 operator 冒充企业员工。
 5. **员工与客户。** [员工原结果定位](<AI Native-开发记录.md#ain-staff-original-result-reference-20261111>)和显式首次准入已核接。AIN-19已按[原五条及完整前置](<AI Native-开发记录.md#ain19-source-text-simulated-whole-closeout-20261114>)完成本轮模拟研发验收，复用原StaffFactory／Core单分配项／Task／单账，新增原文／置信仅为候选数据。AIN-20的媒体／原上传观察／人工最终值／签名／Core提交及原键恢复，加本片[重开签名和全文复验](<AI Native-开发记录.md#ain20-signature-reopen-simulated-whole-closeout-20261114>)已完成；后续复用这些固定接点，不runtime require shared、不换unknown原键、不借knowledge权限。旧输入不补签，缺依据／证据移除／撤权不授采用。客户[报价两端](<AI Native-开发记录.md#ain-client-quote-consumers-20261111>)和[原订单任务](<AI Native-开发记录.md#ain-client-task-consumer-closeout-20261111>)已固定；其余audience、跨surface、匿名／企业及媒体弱网按原ENTRY范围核定。
 
@@ -70,7 +70,7 @@ Core 只读合同固定源码 `fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 
 ## 其余未完与验证边界
 
-- 原05/06/07/10/11/12/13/14/16/17/19/20已按模拟研发口径核闭；18当前收政策后台与全文，15及21～28继续按[原任务](<AI Native-开发任务.md>)及[实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)核定；不能把旧真实测试要求当研发阻塞，也不取消功能或部署/回退准备。
+- 原05/06/07/10/11/12/13/14/16/17/18/19/20已按模拟研发口径核闭；15及21～28继续按[原任务](<AI Native-开发任务.md>)及[实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)核定；不能把旧真实测试要求当研发阻塞，也不取消功能或部署/回退准备。
 - [原worker取消收口收据](<AI Native-开发记录.md#ain25-original-worker-cancel-receipt-20261114>)已独立修复／复验，原请求与settlement分开，停用原读保留，未知不换键；取消／恢复测量、容量／公平性及告警尚未因此完成。原模型控制首字与读回仍沿[既有观察来源](<AI Native-开发记录.md#ain25-model-control-visible-20261113>)核对。Reader 的缓存时间先于 await 授权已修，原窗口上界保留，推进时钟组合与样本通过；客户端观察沿原诊断标签。QA P1/P3 当前权限和 P2 原澄清同键读取已收口，证据见原记录，不重开已解决问题。
 - [客户小程序类型告警对照](<AI Native-开发记录.md#ain-client-mini-type-evidence-20261112>)已从固定 AI/main 源完成原 107 入口检查：完整共享声明解析后，AI 0 诊断，main 基线仅两处 consumed 标签；不得凭不完整虚拟依赖的 unknown 告警批量改会话或强断言。两标签由 PM 企业后继处理，dev2 核其验证器差异。
 - 新树稀疏检出，不复制依赖、output 或环境。验证只读使用主仓库受管依赖；TypeScript 5.9.3 从 ts-node 解析，Prisma 只读 `apps/api/node_modules/@prisma/client` 的已生成入口，不能误用根未生成壳或旧临时树路径。源码与生成 schema 须按当前检查内容核对，不覆盖共享产物。

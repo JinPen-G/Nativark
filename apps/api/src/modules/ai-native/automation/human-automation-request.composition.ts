@@ -19,8 +19,10 @@ import type { IncomingMessage } from 'node:http';
 
 export type HumanAutomationHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencies, 'db' | 'auth' | 'guard' | 'core' | 'clock' | 'resources'> & {
-  /** Server configuration, never selected by the HTTP body. History reads need no active policy. */
-  automation?: Pick<AutomationDependencies, 'policyId' | 'subscriptions'>;
+  /** Explicit server selection only. A current-workspace selection must resolve
+   * exactly one matching recorded policy; original inputs keep their policy. */
+  automation?: Pick<AutomationDependencies, 'subscriptions'> & ({ policyId: string } | { selection: 'current_workspace' })
+    & { assertCurrent?: () => void };
   /** Separate trusted human metadata policy, never the automation subject's grant. */
   reviewGrantPolicy?: HumanAutomationReviewGrantPolicySource;
 };
@@ -30,6 +32,17 @@ export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' 
   | 'prepareGrant' | 'enableGrant' | 'readGrant';
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const eventInput = z.object({ eventId: z.string().uuid() }).strict();
+const originalInput = z.object({ inputRef: z.string().uuid() }).strict();
+const policyId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u);
+const policySelection = z.union([z.object({ policyId }).strict(), z.object({ selection: z.literal('current_workspace') }).strict()]);
+const eventType = z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception',
+  'fulfillment.resource_shortage', 'opening.missing_configuration']);
+const matchingPolicy = z.object({ id: policyId, tenantId: z.string(), workspaceId: z.string(), subjectId: policyId,
+  revision: z.number().int().min(1).max(4294967294), mode: z.enum(['shadow', 'manual_confirmation']),
+  revokedAt: z.null(), validFrom: z.date(), expiresAt: z.date(), allowedEventTypes: z.array(eventType)
+    .min(1).max(5).refine(values => new Set(values).size === values.length) });
+const policyFields = { id: true, tenantId: true, workspaceId: true, subjectId: true, revision: true, mode: true,
+  revokedAt: true, validFrom: true, expiresAt: true, allowedEventTypes: true } as const;
 const unavailable = () => new AutomationError('unavailable');
 
 export class HumanAutomationRequestFactory {
@@ -45,9 +58,12 @@ export class HumanAutomationRequestFactory {
       if (typeof input.db[name]?.findFirst !== 'function') throw unavailable();
     }
     if (typeof input.db.aiAutomationInput.findMany !== 'function' || typeof input.db.aiBusinessFailureOutbox.findMany !== 'function') throw unavailable();
-    if (input.automation && (Object.keys(input.automation).some(key => !['policyId', 'subscriptions'].includes(key))
-      || !z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u).safeParse(input.automation.policyId).success
-      || typeof input.automation.subscriptions?.readCategoryCommercialContext !== 'function')) throw unavailable();
+    if (input.automation) {
+      const { subscriptions, assertCurrent, ...selection } = input.automation;
+      if (!policySelection.safeParse(selection).success || typeof subscriptions?.readCategoryCommercialContext !== 'function'
+        || assertCurrent !== undefined && typeof assertCurrent !== 'function') throw unavailable();
+      if ('selection' in selection && typeof input.db.aiAutomationPolicy?.findMany !== 'function') throw unavailable();
+    }
     if (input.reviewGrantPolicy !== undefined && typeof input.reviewGrantPolicy?.read !== 'function') throw unavailable();
     this.dependencies = { ...input, ...(input.automation ? { automation: { ...input.automation } } : {}) };
   }
@@ -108,18 +124,92 @@ export class HumanAutomationRequestFactory {
             return grants.assertCurrentGrant(inputRef, kind, tx, original);
           });
         if (server.reviewGrantPolicy) grants = new HumanAutomationReviewGrantService(server.db, reviews, server.reviewGrantPolicy, clock);
-        const automation = () => {
+        const configured = () => {
           if (!server.automation) throw unavailable();
-          // This request path always supplies original human resource authority.
-          return composeAutomationFailureTasks({ db: server.db, clock, ...server.automation }, reads);
+          server.automation.assertCurrent?.();
+          return server.automation;
+        };
+        const eventPolicy = async (eventId: string, db: Pick<HumanAutomationRequestDependencies['db'],
+          'aiBusinessFailureOutbox' | 'aiAutomationInput' | 'aiAutomationPolicy'> = server.db) => {
+          const configuration = configured();
+          if ('policyId' in configuration) return { id: configuration.policyId, fingerprint: hash({ policyId: configuration.policyId }) };
+          const current = await reads.current(), event = await db.aiBusinessFailureOutbox.findFirst({ where: { id: eventId, ...current.scope } });
+          if (!event || event.id !== eventId || event.tenantId !== current.scope.tenantId || event.workspaceId !== current.scope.workspaceId) throw unavailable();
+          return reads.withEvent(event, async source => {
+            if (!source.failed || source.revision !== event.resourceRevision) throw unavailable();
+            const now = clock(), type = eventType.safeParse(event.eventType);
+            if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !type.success) throw unavailable();
+            const originals = await db.aiAutomationInput.findMany({ where: { ...current.scope, eventId },
+              orderBy: { id: 'asc' }, take: 2, select: { id: true, policyId: true } });
+            if (originals.length > 1 || originals.some(row => !z.string().uuid().safeParse(row.id).success || !policyId.safeParse(row.policyId).success)) throw unavailable();
+            // A policy change cannot mint another operation for an event that
+            // already has an input, including a creation/dispatch unknown.
+            const rows = originals.length ? [await db.aiAutomationPolicy.findFirst({
+              where: { ...current.scope, id: originals[0].policyId }, select: policyFields })]
+              : await db.aiAutomationPolicy.findMany({ where: { ...current.scope, mode: { in: ['shadow', 'manual_confirmation'] },
+                revokedAt: null, validFrom: { lte: now }, expiresAt: { gt: now } }, orderBy: { id: 'asc' }, take: 21, select: policyFields });
+            if (rows.length > 20) throw unavailable();
+            const eligible = rows.map(row => {
+              const parsed = matchingPolicy.safeParse(row);
+              if (!parsed.success || parsed.data.tenantId !== current.scope.tenantId || parsed.data.workspaceId !== current.scope.workspaceId
+                || parsed.data.validFrom > now || parsed.data.expiresAt <= now) throw unavailable();
+              return parsed.data;
+            }).filter(row => row.allowedEventTypes.includes(type.data));
+            // Overlapping policies are a configuration conflict, never an excuse
+            // to choose the first or to fall back after a denied/unknown action.
+            if (eligible.length !== 1) throw unavailable();
+            const selected = eligible[0];
+            configured();
+            return { id: selected.id, fingerprint: hash({ ...selected, validFrom: selected.validFrom.toISOString(),
+              expiresAt: selected.expiresAt.toISOString() }) };
+          });
+        };
+        let eventSelection: { eventId: string; id: string; fingerprint: string } | undefined;
+        const verifyEventSelection = async () => {
+          configured();
+          if (eventSelection && hash(await eventPolicy(eventSelection.eventId)) !== hash({ id: eventSelection.id, fingerprint: eventSelection.fingerprint })) {
+            throw new AutomationError('result_unknown');
+          }
+        };
+        const automation = async (value: unknown, origin: 'event' | 'input') => {
+          const configuration = configured();
+          let selectedId: string;
+          if (origin === 'event') {
+            const selected = eventInput.safeParse(value);
+            if (!selected.success) throw new AutomationError('invalid_input');
+            const selectedPolicy = await eventPolicy(selected.data.eventId);
+            if (eventSelection && (eventSelection.eventId !== selected.data.eventId
+              || hash({ id: eventSelection.id, fingerprint: eventSelection.fingerprint }) !== hash(selectedPolicy))) throw new AutomationError('result_unknown');
+            eventSelection = { eventId: selected.data.eventId, ...selectedPolicy };
+            selectedId = selectedPolicy.id;
+          } else {
+            const selected = originalInput.safeParse(value);
+            if (!selected.success) throw new AutomationError('invalid_input');
+            const current = await reads.current(), row = await server.db.aiAutomationInput.findFirst({ where: { id: selected.data.inputRef, ...current.scope },
+              select: { id: true, tenantId: true, workspaceId: true, policyId: true } });
+            if (!row || row.id !== selected.data.inputRef || row.tenantId !== current.scope.tenantId || row.workspaceId !== current.scope.workspaceId
+              || !policyId.safeParse(row.policyId).success || 'policyId' in configuration && configuration.policyId !== row.policyId) throw unavailable();
+            // Policy discovery never redirects an existing input. The original
+            // source verifies its exact subject, revision, material and boundary.
+            selectedId = row.policyId;
+          }
+          configured();
+          const originalSelection = eventSelection;
+          return composeAutomationFailureTasks({ db: server.db, clock, policyId: selectedId, subscriptions: configuration.subscriptions,
+            ...(origin === 'event' && 'selection' in configuration && originalSelection ? { assertPreparationPolicy: async tx => {
+              const selected = await eventPolicy(originalSelection.eventId, tx);
+              if (hash(selected) !== hash({ id: originalSelection.id, fingerprint: originalSelection.fingerprint })) throw unavailable();
+            } } : {}) }, reads);
         };
         const prepareInput = async (value: unknown) => {
           const selected = eventInput.safeParse(value);
           if (!selected.success) throw new AutomationError('invalid_input');
           const candidate = await candidates.read(selected.data);
           if (candidate.status !== 'ready' || !candidate.material) throw unavailable();
-          const result = await automation().prepare(selected.data);
+          const service = await automation(selected.data, 'event');
+          const result = await service.prepare(selected.data);
           writeReturned = true;
+          await verifyEventSelection();
           if (result.state === 'prepared') {
             const view = await reviews.read({ inputRef: result.inputRef });
             if (view.event.eventId !== selected.data.eventId || view.actionResource.creationKey !== result.creationKey
@@ -129,7 +219,7 @@ export class HumanAutomationRequestFactory {
           return result;
         };
         const creation = async (value: unknown, create: boolean) => {
-          const service = automation();
+          const service = await automation(value, 'input');
           const result = await (create ? service.create(value) : service.reconcile(value));
           if (create) writeReturned = true;
           const view = await reviews.read({ inputRef: result.inputRef });
@@ -153,7 +243,7 @@ export class HumanAutomationRequestFactory {
               if (!selected.success) throw new AutomationError('invalid_input');
               // Resolve the explicit server policy dependency before touching
               // the event marker. No fallback subject or execution driver.
-              automation();
+              await automation(selected.data, 'event');
               const candidate = await candidates.prepare(selected.data);
               writeReturned = true;
               if (candidate.status !== 'ready' || !candidate.material) throw unavailable();
@@ -175,7 +265,7 @@ export class HumanAutomationRequestFactory {
             }
             case 'prepareInput': return prepareInput(command);
             case 'readInput': {
-              const service = automation(), result = await service.read(command);
+              const service = await automation(command, 'input'), result = await service.read(command);
               if (hash(result) !== hash(await service.read(command))) throw unavailable();
               return result;
             }
@@ -217,6 +307,7 @@ export class HumanAutomationRequestFactory {
         };
         const result = await execute();
         writeReturned = write;
+        if (eventSelection || action === 'createTask' || action === 'readInput') await verifyEventSelection();
         await identity.resolve();
         return result;
       }), write, signal);
