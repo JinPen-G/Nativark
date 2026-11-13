@@ -1,8 +1,10 @@
 # 平台 Core 接入当前协作接续
 
-更新时间：2026-11-13。
+更新时间：2026-11-14。
 
 > 状态：原实施准备文档及 QA 一致性复核已完成并归并 main，工程待原实施授权。本会话按PM安排核定两轮决定及PCH-01/02开工入口，当前写入仍限文档；不因“恢复”自动启动代码拆分。完整核对及公共文件安排见[准备记录](平台Core接入-开发记录.md#pch-preparation-20261112)。
+
+负责人本轮确认开源品牌为 Nativark，开源主体为公共底座，Rental Core 将作为首个业务 Core 示范。底座视角的 README、MIT 许可及根包许可元数据已完成文档与许可自检，任务分支为 `codex/nativark-mit`，主线归并沿现有流程办理，固定交付与验证见[本阶段记录](平台Core接入-开发记录.md#nativark-mit-20261114)。
 
 > 正式依据：[需求v1.2](平台Core接入-需求.md)、[开发任务v1.2](平台Core接入-开发任务.md)。原PCH编号、依赖、顺序与门槛保留，文档准备不计研发进度，不继承AIN/CAT-GOV完成度。
 
@@ -18,8 +20,8 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 2. 写入归属与固定来源
 
-- 本次文档树：`C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`；分支：`codex/pch-preparation`。固定核查基线 `2a5c56471abb5714f80715e2cfa0aa236f003f51`；实际检出、提交和验证见准备记录。
-- 本会话仅写PCH开发记录和本接续。main索引、他人WIP、既有研发树及公共源码由原作者负责；不切换主树分支，不复制其未提交成果。
+- 本次文档树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，当前任务分支为 `codex/nativark-mit`，许可阶段固定基线为 `9fb20dd236143f9b4c502bf7651b94ecc6bced8f`。原 PCH 准备提交及基线沿准备记录查阅。
+- 本轮写入范围为根 LICENSE、README 产品与开发介绍、根 package.json/package-lock.json 的许可字段及 PCH 开发记录、接续。主树索引及各研发树由原作者负责。
 - 两轮需求和12份前像已随 `d1ae52df6d8207e913d6e49fde1dd28c7c962bc3` 进入当前main历史。本次旧接续以固定基线Git原文保全；此前“未提交”是当时阶段状态，原记录保留历史语境，不再复制归档。
 - PCH源码工作树与公共文件唯一作者窗口尚待PM明确。建议01/02先共用一棵PCH作者树，按固定基线和真实依赖扩展检出；本次创建的文档树本身不授源码施工权。
 
