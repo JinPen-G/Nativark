@@ -252,6 +252,7 @@ Page({
   enterpriseOperation: undefined as { key: string; version: number; quoteId: string; approvalId?: string; kind?: "request" | "submit" | "order"; viewEpoch?: number; customerId: string; serviceCode: string } | undefined,
   enterpriseReading: false,
   enterpriseViewEpoch: 0,
+  enterprisePolicyReadVersion: 0,
   enterpriseStorageKey() { return `${STORAGE_KEYS.enterpriseOperations}:${PUBLIC_CONFIG.tenantCode}:${currentSession()?.customer.customerId ?? ""}:${currentServiceCode()}`; },
   enterpriseCurrent(operation: { version: number; viewEpoch?: number; customerId: string; serviceCode: string }) {
     return this.aiVisible && !this.aiDisposed && (operation.viewEpoch === undefined || operation.viewEpoch === this.enterpriseViewEpoch) && operation.version === contextVersion()
@@ -970,9 +971,39 @@ Page({
 
   /* ---------- 报价 ---------- */
   async loadEnterprisePolicies() {
-    const version = contextVersion();
-    try { const rows = await fetchEnterpriseRentalPolicies(); if (version === contextVersion() && this.aiVisible) this.setData({ enterprisePolicies: rows.filter(row => row.available), enterpriseError: "" }); }
-    catch (error) { if (version === contextVersion() && this.aiVisible) this.setData({ enterprisePolicies: [], enterpriseError: `企业身份不可用：${describeError(error).message}` }); }
+    if (this.aiMode || !this.aiVisible || this.aiDisposed || !currentSession()) return;
+    const owner = { version: contextVersion(), viewEpoch: this.enterpriseViewEpoch,
+      customerId: currentSession()!.customer.customerId, serviceCode: currentServiceCode() };
+    const readVersion = ++this.enterprisePolicyReadVersion;
+    let policies: EnterpriseOwnRentalPolicy[] = [], error = "";
+    try { policies = (await fetchEnterpriseRentalPolicies()).filter(row => row.available); }
+    catch (failure) { error = `企业身份不可用：${describeError(failure).message}`; }
+    if (readVersion !== this.enterprisePolicyReadVersion || !this.enterpriseCurrent(owner)) return;
+
+    // The cart retains the selected company. A refreshed list may reorder or
+    // remove relations, so its numeric picker index cannot carry that identity.
+    const cart = getCart(), booking = cart?.bookingIdentity;
+    const enterprise = booking?.bookingIdentity === "enterprise_employee";
+    const index = enterprise ? policies.findIndex(row => row.corporateCustomerId === booking.corporateCustomerId) : -1;
+    const policy = policies[index];
+    const permitted = Boolean(policy && (booking?.enterpriseContractAndPayer ? policy.enterprisePaymentAllowed : policy.personalPaymentAllowed));
+    const acknowledged = permitted && booking?.enterpriseDisclosure?.acknowledged === true
+      && booking.enterpriseDisclosure.noticeVersion === policy.noticeVersion;
+    this.setData({ enterprisePolicies: policies, enterpriseIndex: index,
+      enterpriseLabel: enterprise ? policy?.corporateName ?? "原企业身份当前不可用" : "个人签约付款",
+      enterprisePayer: enterprise && Boolean(booking?.enterpriseContractAndPayer), enterpriseNotice: policy?.noticeText ?? "",
+      enterpriseAccepted: acknowledged,
+      enterpriseError: error || (enterprise && !permitted ? "当前企业身份或所选付款方式已不可用，请重新核对" : "") });
+    if (enterprise && (!permitted || booking.enterpriseDisclosure?.acknowledged && !acknowledged)
+      && !this.enterpriseOperation && !cart?.submission) {
+      // Unresolved commands keep their exact quote/company/K for original reads.
+      // Only an editable new request loses stale disclosure and quote material.
+      this.requestVersion++;
+      this.setData({ quote: undefined, enterpriseApproval: undefined, agreed: false });
+      this.mutate(draft => { if (draft.bookingIdentity?.bookingIdentity === "enterprise_employee") {
+        draft.bookingIdentity = { ...draft.bookingIdentity, enterpriseDisclosure: undefined };
+      } });
+    }
   },
   onPickEnterprise(event: WechatMiniprogram.PickerChange) {
     if (this.aiMode || this.data.locked || this.data.enterprisePending) return;
