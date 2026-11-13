@@ -12,7 +12,7 @@ import { AI_CONVERSATION_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS,
   type AiWorkbenchModelControlObservation, type AiWorkbenchModelControlPreparation } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { parseOriginalRequest, originalBody } from './task-request/original-request.validation';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiConversationListResponseDraft,
+import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_CONVERSATION_HTTP_DRAFT, validateAiConversationListResponseDraft, validateAiConversationTaskResultDraft,
   type AiConversationOperationObservationDraft, type AiConversationAdmissionResponseDraft,
   type AiConversationObservationDraft, type AiConversationListResponseDraft, type AiConversationTurnPageDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -24,7 +24,7 @@ addFormats(ajv);
 for (const [name, schema] of Object.entries({ ...AI_CONVERSATION_SCHEMAS,
   AiSceneRequestBodyDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestBodyDraft,
   AiSceneRequestReadDraft: AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneRequestReadDraft })) {
-  if (!['AiConversationModelResultResponseDraft', 'AiWorkbenchDisplayMaterialDraft'].includes(name)) ajv.addSchema(schema, `#/components/schemas/${name}`);
+  if (!['AiConversationModelResultResponseDraft', 'AiConversationTaskResultDraft', 'AiWorkbenchDisplayMaterialDraft'].includes(name)) ajv.addSchema(schema, `#/components/schemas/${name}`);
 }
 interface Requests {
   AiConversationCreateDraft: AiConversationCreateDraft; AiConversationReferenceDraft: AiConversationReferenceDraft;
@@ -44,7 +44,10 @@ export function conversationResponse<T>(action: keyof typeof AI_CONVERSATION_HTT
   try {
     const copy = structuredClone(value);
     if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > 131072) throw Error();
-    if (action === 'modelResult') {
+    if (action === 'task-result') {
+      if (!('conversationId' in command) || !('admissionKey' in command)
+        || !validateAiConversationTaskResultDraft(copy, command)) throw Error();
+    } else if (action === 'modelResult') {
       const result = validateAiConversationModelResponse(copy);
       if (!('resultId' in command) || !('conversationId' in command) || !('admissionKey' in command)
         || result.conversationId !== command.conversationId || result.admissionKey !== command.admissionKey

@@ -19,7 +19,7 @@ import { parseTaskModelDisplayWitness, taskModelDisplayWitnessMarker, taskModelD
 import type { AiWorkbenchDisplayOriginalMaterial } from './workbench-display-original.reader';
 import type { AiWorkbenchFieldMaterialService } from './workbench-field-material.service';
 import type { AiQuoteBusinessPreparationService } from './tools/quote-business-preparation.service';
-import { applyOriginalQuoteAnswers } from './scenes/original-quote-input';
+import { applyOriginalQuoteAnswers, ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE } from './scenes/original-quote-input';
 import type { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
 import type { AiConversationContextReader, AiConversationHistoryContext } from './conversation-context.reader';
 import { readOriginalSceneEnvelope } from './scenes/original-scene-knowledge';
@@ -61,7 +61,8 @@ export function readCurrentWorkbenchDisplayConfiguration(value: unknown, clock: 
   return { configuration, now };
 }
 export type AiOriginalSceneDisplayPublication = { currentConfiguration(): unknown };
-type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiConversation' | 'aiConversationTurn'>;
+type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiConversation' | 'aiConversationTurn'>
+  & Partial<Pick<PrismaClient, 'aiTaskQuoteSelection'>>;
 type Input = { db: Db; scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
   originals: Pick<PrismaOriginalRequestRepository, 'readHistorical'>; publication: AiOriginalSceneDisplayPublication;
   /** Same current source reader as the frozen scene envelope; never a new
@@ -126,7 +127,19 @@ export class AiOriginalSceneDisplayGeneration {
     // is a current observation, never a fabricated historical config snapshot.
     // Retaining its timestamp on revalidation does not replace the fresh read.
     if (expected && (expected.sources.length !== 1 || !prior || !same(prior, reference))) throw denied();
-    const input = { context, binding, candidate, fieldRevision, sources: [reference], retention };
+    let initialParameters = expected?.contract?.code === ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE;
+    if (!expected) {
+      // A human answer is not a selected quote. Until a real selection exists,
+      // another explicitly continued model round still returns conditions to
+      // the original input form; it cannot open a selection-only reprepare.
+      if (!this.input.db.aiTaskQuoteSelection) throw unavailable();
+      const current = await this.input.scopes.resolveCurrent();
+      if (originalIdentityHash(current.context) !== originalIdentityHash(context)) throw denied();
+      const selections = await this.input.db.aiTaskQuoteSelection.findMany({ where: { scopeId: current.scope.id,
+        taskId: binding.taskId, originalRequestId: original.inputRef }, take: 1, select: { id: true } });
+      initialParameters = selections.length === 0;
+    }
+    const input = { context, binding, candidate, fieldRevision, sources: [reference], retention, initialParameters };
     return expected ? source.material.revalidate(input, expected) : source.material.prepare(input);
   }
   private async binding(context: AiExecutionContext, original: AiSceneRequestReceiptDraft, taskId: string, runId: string, generation: boolean) {

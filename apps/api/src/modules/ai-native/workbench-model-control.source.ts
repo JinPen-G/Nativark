@@ -3,6 +3,7 @@
  * text remains data; only an opaque display witness and safe fields reach the
  * model. Reformatting never creates a new business or human-input revision. */
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { AI_CONVERSATION_DRAFT_VERSION, type AiConversationModelResultReadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
@@ -14,9 +15,10 @@ import { parseTaskModelDisplayWitness, taskModelDisplayWitnessMarker, taskModelD
 import { taskModelMaterialSchema } from './model-input/task-model-input';
 import { isGatewayResult } from './gateway-contract-validation';
 import type { WorkbenchModelControlRepository } from './workbench-model-control.repository';
-import type { WorkbenchModelControlCommand, WorkbenchModelControlReceipt,
-  WorkbenchModelControlOriginTransaction, WorkbenchModelControlOriginAccess, WorkbenchModelControlOriginKey,
-  WorkbenchModelControlPreparationKey } from './workbench-model-control.contract';
+import { workbenchModelControlOrderAnswerBindingSchema, workbenchModelControlOrderAnswerOriginSchema,
+  type WorkbenchModelControlCommand, type WorkbenchModelControlReceipt,
+  type WorkbenchModelControlOriginTransaction, type WorkbenchModelControlOriginAccess, type WorkbenchModelControlOriginKey,
+  type WorkbenchModelControlPreparationKey, type WorkbenchModelControlOrderAnswerOrigin } from './workbench-model-control.contract';
 
 export interface WorkbenchModelControlPreparedSource {
   original: AiWorkbenchDisplayOriginalMaterial;
@@ -31,10 +33,11 @@ export interface WorkbenchModelControlPreparedSource {
   materialHash: string;
   fieldHash: string;
   semanticHash: string;
+  orderAnswerOrigin?: WorkbenchModelControlOrderAnswerOrigin;
 }
 export interface WorkbenchModelControlSourceDependencies {
   db: Pick<PrismaClient, 'aiConversationTurn'>;
-  repository: Pick<WorkbenchModelControlRepository, 'current' | 'readOrigin' | 'readPreparationOrigin'>;
+  repository: Pick<WorkbenchModelControlRepository, 'current' | 'readOrigin' | 'readPreparationOrigin' | 'readOrderAnswerOrigin'>;
   originals: Pick<AiWorkbenchDisplayOriginalReader, 'read'>;
 }
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -54,7 +57,7 @@ export class WorkbenchModelControlSource {
     return { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId: turns[0].conversationId,
       admissionKey: turns[0].admissionKey, resultId };
   }
-  private snapshot(original: AiWorkbenchDisplayOriginalMaterial): WorkbenchModelControlPreparedSource {
+  private async snapshot(original: AiWorkbenchDisplayOriginalMaterial): Promise<WorkbenchModelControlPreparedSource> {
     const witness = parseTaskModelDisplayWitness(original.witness);
     const result = original.model.result.payload;
     if (original.context.audience !== 'operator' || original.context.actor.kind !== 'user'
@@ -62,21 +65,41 @@ export class WorkbenchModelControlSource {
       || !isGatewayResult(result) || result.status !== 'completed' || result.usage.kind !== 'reported' || result.toolRequests.length
       || witness.binding.taskId !== original.task.taskId || witness.binding.materialHash !== original.envelope.materialHash
       || witness.presentationRevision !== original.generationRevision) throw denied();
+    let orderAnswerOrigin: WorkbenchModelControlOrderAnswerOrigin | undefined;
+    const lineage = z.object({ orderAnswer: workbenchModelControlOrderAnswerBindingSchema.optional(),
+      orderAnswerOrigin: workbenchModelControlOrderAnswerOriginSchema.optional(),
+      control: z.unknown().optional() }).passthrough().parse(original.lineage);
+    const finalAnswer = original.model.registrationRef === `scene-answer:${original.original.inputRef}`;
+    // A scene can also have an older single-model display. Its original
+    // lineage remains sufficient; only the final answer and its recorded
+    // controls carry the fixed three-step order proof.
+    if (finalAnswer || lineage.orderAnswerOrigin !== undefined) {
+      if (original.request.sceneCode !== 'order_explanation') throw denied();
+      const binding = finalAnswer ? lineage.orderAnswer : lineage.orderAnswerOrigin;
+      if (!binding || !finalAnswer && !lineage.control || typeof this.dependencies.repository.readOrderAnswerOrigin !== 'function') throw denied();
+      const rootRunId = finalAnswer ? original.model.step.runId : lineage.orderAnswerOrigin!.rootRunId;
+      orderAnswerOrigin = await this.dependencies.repository.readOrderAnswerOrigin({ taskId: original.task.taskId,
+        runId: rootRunId, inputId: binding.inputId, stepId: binding.stepId, resultId: binding.resultId });
+      const { rootRunId: _root, evidenceHash: _evidence, ...provedBinding } = orderAnswerOrigin;
+      const expected = finalAnswer ? provedBinding : orderAnswerOrigin;
+      if (rootRunId !== original.task.originRunId || requestFingerprint(expected) !== requestFingerprint(binding)) throw denied();
+    }
     // Task lifecycle revisions change during a new model Run. They are not
     // business material/field revisions and do not invalidate this source hash.
     const semanticHash = requestFingerprint({ binding: witness.binding, witness,
       original: original.request, originalInput: original.task.inputFingerprint,
       modelInput: original.model.input, sourceStep: original.model.step, sourceResult: original.model.result,
-      envelope: original.envelope });
+      envelope: original.envelope, ...(orderAnswerOrigin ? { orderAnswerOrigin } : {}) });
     return freezeOriginalInput({ original, scopeId: original.scopeId, identityHash: originalIdentityHash(original.context),
       sourceStepId: original.model.step.id, sourceInputId: original.model.inputRef,
       sourceInputHash: original.model.inputFingerprint, sourceResultHash: original.model.result.contentHash,
       resourceOriginRunId: original.task.originRunId, presentationRevision: witness.presentationRevision,
-      materialHash: witness.binding.materialHash, fieldHash: requestFingerprint(witness.fieldMaterial), semanticHash });
+      materialHash: witness.binding.materialHash, fieldHash: requestFingerprint(witness.fieldMaterial), semanticHash,
+      ...(orderAnswerOrigin ? { orderAnswerOrigin } : {}) });
   }
   async prepare(command: WorkbenchModelControlCommand) {
     const original = await this.dependencies.originals.read(await this.locator(command.taskId, command.sourceResultId));
-    const source = this.snapshot(original);
+    const source = await this.snapshot(original);
     if (original.task.taskId !== command.taskId || original.model.step.runId !== command.sourceRunId
       || original.model.result.id !== command.sourceResultId || source.presentationRevision !== command.expectedPresentationRevision) throw denied();
     return source;
@@ -91,7 +114,8 @@ export class WorkbenchModelControlSource {
     if (receipt.scopeId !== source.scopeId || receipt.identityHash !== source.identityHash
       || receipt.materialHash !== source.materialHash || receipt.fieldHash !== source.fieldHash
       || receipt.sourceInputId !== source.sourceInputId || receipt.sourceInputHash !== source.sourceInputHash
-      || receipt.sourceResultHash !== source.sourceResultHash || receipt.presentationRevision !== source.presentationRevision + 1) throw denied();
+      || receipt.sourceResultHash !== source.sourceResultHash || receipt.presentationRevision !== source.presentationRevision + 1
+      || requestFingerprint(receipt.orderAnswerOrigin ?? null) !== requestFingerprint(source.orderAnswerOrigin ?? null)) throw denied();
     const witness = parseTaskModelDisplayWitness({ ...source.original.witness, presentationRevision: receipt.presentationRevision });
     const prompts = source.original.model.input.intent.messages.filter(message => message.role === 'system')
       .flatMap(message => message.content).filter(part => part.kind === 'text'
@@ -125,10 +149,11 @@ export class WorkbenchModelControlSource {
       maxOutputTokens: source.original.model.input.intent.maxOutputTokens, displayWitness: witness });
   }
   async readResult(receipt: WorkbenchModelControlReceipt, resultId: string) {
-    const current = this.snapshot(await this.dependencies.originals.read(await this.locator(receipt.command.taskId, resultId)));
+    const current = await this.snapshot(await this.dependencies.originals.read(await this.locator(receipt.command.taskId, resultId)));
     if (current.original.model.step.runId !== receipt.runId || current.original.model.result.id !== resultId
       || current.presentationRevision !== receipt.presentationRevision || current.materialHash !== receipt.materialHash
-      || current.fieldHash !== receipt.fieldHash || current.identityHash !== receipt.identityHash) throw denied();
+      || current.fieldHash !== receipt.fieldHash || current.identityHash !== receipt.identityHash
+      || requestFingerprint(current.orderAnswerOrigin ?? null) !== requestFingerprint(receipt.orderAnswerOrigin ?? null)) throw denied();
     return current.original;
   }
   readOrigin(tx: WorkbenchModelControlOriginTransaction, access: WorkbenchModelControlOriginAccess, key: WorkbenchModelControlOriginKey) {

@@ -2,6 +2,7 @@ import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy
 import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
 import { AiTaskCenterRecoveryController } from './modules/ai-native/task-center-recovery.application';
 import { AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiTaskOriginalReadPolicyController } from './modules/ai-native/task-original-read-policy.application';
 import { AI_NATIVE_TASK_ORIGINAL_READ_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -322,6 +323,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_INPUT_COUNTING_PROVIDER,
     AI_NATIVE_PLATFORM_PROBE_PROVIDER,
     AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER,
+    AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER,
     AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER,
     AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER,
     AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER,

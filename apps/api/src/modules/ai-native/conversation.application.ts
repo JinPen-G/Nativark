@@ -16,6 +16,7 @@ import { waitForTaskApplicationDependency } from './runner/prisma-task-applicati
 import type { composeRequestBoundOriginalTaskRecoveryReaders } from './scenes/request-bound-scenes.application';
 import type { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
 import type { composeWorkbenchModelControlRequests } from './workbench-model-control.application';
+import { readConversationTaskResult } from './conversation-task-result.reader';
 
 type Request = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
 type Action = keyof typeof AI_CONVERSATION_HTTP_DRAFT.operations;
@@ -23,7 +24,8 @@ export const AI_CONVERSATION_REQUESTS = Symbol('AI_CONVERSATION_REQUESTS');
 export function composeAiConversationRequests(dependencies: Omit<AiOriginalSceneDependencies, 'credentials'>, enabled = false,
   observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult'>,
   display?: ReturnType<typeof composeAiWorkbenchDisplayRequests>,
-  modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>) {
+  modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>,
+  taskResults?: { read(request: Request, value: { taskId: string; resultId: string }, signal?: AbortSignal): Promise<unknown> }) {
   return { async consume(request: Request, action: Action, value: unknown, signal?: AbortSignal) {
     if ((!enabled && action !== 'model-control-read') || 'credentials' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     if (!Object.hasOwn(AI_CONVERSATION_HTTP_DRAFT.operations, action)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -52,6 +54,14 @@ export function composeAiConversationRequests(dependencies: Omit<AiOriginalScene
           return { authorization: header, audience: 'operator' as const, requestId };
         } } };
         const root = composeAiOriginalScenes(input), app = new AiConversationRepository(input, root.requests), supplied = structuredClone(command);
+        if (action === 'task-result') {
+          if (!taskResults || !modelControls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const result = await readConversationTaskResult(input, conversationCommand('AiConversationTurnReferenceDraft', supplied), {
+            result: query => taskResults.read(request, query, signal),
+            lineage: query => modelControls.readLineage(request, query, signal),
+          });
+          return conversationResponse(action, result, command);
+        }
         const result = action === 'archive' || action === 'delete' ? await app.mutate(supplied, action)
           : action === 'operation' ? await app.readOperation(supplied)
           : action === 'admission' ? await app.readAdmission(supplied)
@@ -106,6 +116,8 @@ export class AiConversationController {
   readModelControl(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'model-control-read', value); }
   @Post('modelResult') @HttpCode(200) @Header('Cache-Control', 'no-store')
   modelResult(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'modelResult', value); }
+  @Post('task-result') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  taskResult(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'task-result', (request as Request & { body?: unknown }).body ?? value); }
   @Post('display') @HttpCode(200) @Header('Cache-Control', 'no-store')
   display(@Req() request: Request, @Body() value: unknown) { return this.call(request, 'display', (request as Request & { body?: unknown }).body ?? value); }
   @Post('display-revalidate') @HttpCode(200) @Header('Cache-Control', 'no-store')

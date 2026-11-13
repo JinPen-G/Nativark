@@ -25,7 +25,8 @@ import { composeAuthorizedPersistentTaskInputRunner,
   type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
 import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
-import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey } from './original-quote-input';
+import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey,
+  originalQuoteInitialParameterContract, ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE } from './original-quote-input';
 import { AiWorkbenchFieldMaterialService } from '../workbench-field-material.service';
 import { AiTaskInputLimitError } from '../task-input/task-input.errors';
 import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
@@ -650,7 +651,8 @@ export function composeOriginalSceneClarificationSource(input: {
         || step.toolVersion !== binding.toolVersion || input.fingerprint !== binding.inputHash) throw denied();
       const parsed = parseTaskModelInput(input.payload, modelPolicy);
       if (taskModelFingerprint(parsed, modelPolicy) !== binding.inputHash) throw denied();
-      return { envelope: readOriginalSceneEnvelope(parsed), limits: aiTaskRunnerLimitsSchema.parse(payload.data.limits) };
+      return { envelope: readOriginalSceneEnvelope(parsed), limits: aiTaskRunnerLimitsSchema.parse(payload.data.limits),
+        fieldMaterial: parsed.displayWitness?.fieldMaterial ?? null };
     });
     // The actual result reader proves invocation, dispatch/usage, original lineage,
     // source freshness and current Guard/owner access. Unknown is never a question basis.
@@ -662,19 +664,36 @@ export function composeOriginalSceneClarificationSource(input: {
       || result.taskId !== binding.taskId || result.runId !== binding.runId) throw unavailable();
     same(before, await current(ref, binding.taskId, binding.runId));
     if ((await tasks.resolveAccess(binding.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
-    return { original: before.original, envelope: stored.envelope, limits: stored.limits, history: before.provenance.history, current: before };
+    return { original: before.original, envelope: stored.envelope, limits: stored.limits, history: before.provenance.history,
+      fieldMaterial: stored.fieldMaterial, current: before };
   };
   const originalInputSource = Object.freeze<AiTaskInputSource>({
     async resolve(binding: Readonly<AiTaskInputBinding>) {
       const command = structuredClone(binding), basis = await readClarificationBasis(command);
       if (basis.original.request.sceneCode !== 'quote_clarification') return { kind: 'not_required' as const };
       const candidate = applyOriginalQuoteAnswers(basis.original.request.input.candidate, basis.history);
-      const prepared = await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
+      const initialParameters = basis.fieldMaterial?.contract?.code === ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE;
+      const projection = initialParameters ? await scenes.tools.quote.candidates.prepareWorkbenchFields(candidate, basis.original.context) : null;
+      const prepared = projection?.preparation ?? await scenes.tools.quote.candidates.prepare(candidate, basis.original.context);
       const parsed = z.object({ status: z.string(),
         missingFields: z.array(z.string()).max(100).optional(), ambiguousFields: z.array(z.string()).max(100).optional()
       }).passthrough().safeParse(prepared);
       if (!parsed.success) throw unavailable();
       const facts = parsed.data;
+      if (initialParameters) {
+        if (basis.history.length + 1 >= basis.limits.maxCalls) throw new AiTaskInputLimitError();
+        if (facts.status !== 'needs_confirmation' || !projection?.editableContract) throw unavailable();
+        const contract = originalQuoteInitialParameterContract(projection.editableContract);
+        if (requestFingerprint(contract) !== requestFingerprint(basis.fieldMaterial!.contract)) throw denied();
+        // The existing afterSucceeded transaction persists this exact question.
+        // Display fields alone are never consumed as a human answer receipt.
+        same(basis.current, await current({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION,
+          inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId));
+        const wait = sourceMode ? await sourceMode.assertCurrent({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION,
+          inputRef: basis.original.receipt.inputRef }, command.taskId, command.runId) : undefined;
+        return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
+          expiresAt: wait?.expiresAt ?? basis.original.receipt.expiresAt, contract };
+      }
       if (!['missing_input', 'ambiguous'].includes(facts.status)) return { kind: 'not_required' as const };
       if (!(facts.missingFields?.length || facts.ambiguousFields?.length)) throw unavailable();
       // A completed model turn is not a completed goal while Core still needs
@@ -704,7 +723,7 @@ export function composeOriginalSceneClarificationSource(input: {
       const expected = await originalInputSource.resolve(command);
       if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
         || !validateAiTaskInputAnswersDraft(expected.contract, submittedAnswers)) throw denied();
-      if (submittedContract.code === 'original_quote_parameters') {
+      if (submittedContract.code === 'original_quote_parameters' || submittedContract.code === ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE) {
         const basis = await readClarificationBasis(command);
         if (basis.original.request.sceneCode !== 'quote_clarification') throw unavailable();
         // The same deterministic consumer used by successor preparation validates

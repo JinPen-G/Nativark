@@ -17,6 +17,7 @@ import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools
 import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
+import { buildQuotePreparationSummary } from '../workbench-authoritative-summary';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -297,7 +298,8 @@ export class AiOriginalSceneResultService {
       }
       output = fingerprint(current) === fingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text
-            : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current) : frozen.text,
+          : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current)
+            : buildQuotePreparationSummary({ request: original.request, material: frozen.material, history: provenance.history }),
             trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId,
           facts: isOrder ? projectOrderExplanationMaterial(current) : current, sources: isOrder ? orderSources(frozen.material) : [],

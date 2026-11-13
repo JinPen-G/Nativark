@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { AI_CONVERSATION_DRAFT_VERSION, AI_TASK_CENTER_ENTRY_PERMISSIONS,
   type AiWorkbenchDisplayReadDraft, type AiWorkbenchDisplayRevalidateDraft,
   type AiWorkbenchDisplaySourceReadDraft, type AiWorkbenchDisplayMaterialDraft,
-  type AiTaskReviewQueryDraft } from '@rental-os/shared';
+  type AiTaskReviewQueryDraft, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composePersistedTaskAuthorization } from './task-authorization.composition';
@@ -29,7 +29,8 @@ import { WorkbenchModelControlRepository } from './workbench-model-control.repos
 import { createWorkbenchDisplayConfirmationReader } from './workbench-display-confirmations.reader';
 
 type Request = { headers: { authorization?: unknown } };
-type Reads = { readModelResult(request: Request, value: unknown): Promise<unknown>; reopenModelSource(request: Request, value: unknown): Promise<unknown> };
+type Reads = { readModelResult(request: Request, value: unknown): Promise<unknown>; reopenModelSource(request: Request, value: unknown): Promise<unknown>;
+  readOrderAnswer?(request: Request, original: AiSceneRequestReadDraft): Promise<unknown> };
 type Action = 'display' | 'display-revalidate' | 'display-source';
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -76,8 +77,22 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
             run: { is: { actorKind: 'USER', actorId: context.actor.userId } } },
             orderBy: [{ run: { sequence: 'desc' } }, { sequence: 'desc' }], take: 2,
             include: { run: true } });
-          if (turns.length !== 1 || !steps.length || steps[1]?.runId === steps[0].runId) throw unavailable();
-          const step = steps[0], run = step.run, turn = turns[0];
+          if (turns.length !== 1 || !steps.length) throw unavailable();
+          let step = steps[0];
+          if (steps[1]?.runId === step.runId) {
+            if (task.sceneCode !== 'order_explanation' || !observations.readOrderAnswer) throw unavailable();
+            const inputs = await input.db.aiTaskActionInput.findMany({ where: { ...key, runId: step.runId,
+              registrationRef: `scene-answer:${task.inputRef}` }, take: 2 });
+            if (inputs.length !== 1 || inputs[0].scopeId !== key.scopeId || inputs[0].taskId !== task.id
+              || inputs[0].runId !== step.runId) throw unavailable();
+            const answer = steps.filter(candidate => candidate.inputRef === inputs[0].id
+              && candidate.requestFingerprint === inputs[0].fingerprint);
+            if (answer.length !== 1) throw unavailable();
+            // This locates only the registered final answer. The original
+            // reader below still verifies all three steps and the Core receipt.
+            step = answer[0];
+          }
+          const run = step.run, turn = turns[0];
           if (run.scopeId !== key.scopeId || run.taskId !== task.id || run.actorKind !== 'USER' || run.actorId !== context.actor.userId
             || turn.scopeId !== key.scopeId || turn.ownerId !== context.actor.userId || turn.originalRequestId !== task.inputRef) throw denied();
           if (!step.resultRef || step.scopeId !== key.scopeId || step.taskId !== task.id || step.runId !== run.id) throw denied();
@@ -98,12 +113,25 @@ export function composeAiWorkbenchDisplayRequests(dependencies: Omit<AiOriginalS
         const financial = new PrismaGatewayAccountingFacts(input.db, bindings, authorization.scopes,
           { quantity: async () => { throw unavailable(); } }, clock);
         const evidence = new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, plans, policy, financial, clock);
+        const rootAnswer = new AiWorkbenchDisplayOriginalReader({ db: input.db, scopes: authorization.scopes,
+          conversations: new AiConversationRepository(input, scenes.requests), originals: scenes.requests,
+          tasks: authorization.tasks, evidence, policy, observations: {
+            readModelResult: query => observations.readModelResult(request, query),
+            ...(observations.readOrderAnswer ? { readOrderAnswer: original => observations.readOrderAnswer!(request, original) } : {}) } });
         const controls = typeof input.db.operationLog?.findFirst === 'function'
-          ? new WorkbenchModelControlRepository(input.db, authorization.authority, clock) : undefined;
+          ? new WorkbenchModelControlRepository(input.db, authorization.authority, clock, undefined,
+            observations.readOrderAnswer ? { async readOriginal(reference) {
+              if (reference.taskId !== before.task.id || !before.task.inputRef) throw denied();
+              const original = await rootAnswer.read({ ...before.reference, resultId: reference.resultId });
+              if (original.task.taskId !== reference.taskId || original.model.step.runId !== reference.runId
+                || original.model.inputRef !== reference.inputId || original.model.step.id !== reference.stepId) throw denied();
+              return original;
+            } } : undefined) : undefined;
         const originals = new AiWorkbenchDisplayOriginalReader({ db: input.db, scopes: authorization.scopes,
           conversations: new AiConversationRepository(input, scenes.requests), originals: scenes.requests,
           tasks: authorization.tasks, evidence, policy, readRunOrigin: controls?.readOrigin.bind(controls),
-          observations: { readModelResult: query => observations.readModelResult(request, query) } });
+          observations: { readModelResult: query => observations.readModelResult(request, query),
+            ...(observations.readOrderAnswer ? { readOrderAnswer: original => observations.readOrderAnswer!(request, original) } : {}) } });
         const producer = new AiOriginalSceneDisplayGeneration({ db: input.db, scopes: authorization.scopes,
           originals: scenes.requests, publication, history: scenes.createHistoryReader(authorization.tasks),
           quoteFields: { material: new AiWorkbenchFieldMaterialService(scenes.tools.quote.candidates, clock),

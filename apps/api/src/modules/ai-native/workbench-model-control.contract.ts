@@ -3,6 +3,7 @@
  * the request composition still supplies current authorization and Gateway. */
 import { z } from 'zod';
 import type { readTaskModelRunOrigin } from './task-input/prisma-task-input.repository';
+import type { AiWorkbenchDisplayOriginalMaterial } from './workbench-display-original.reader';
 import { AiTaskRepositoryError } from './ai-task.repository';
 
 export const WORKBENCH_MODEL_CONTROL_VERSION = 'workbench-model-control-1' as const;
@@ -22,6 +23,29 @@ export const workbenchModelControlPreparationKeySchema = z.object({ scopeId: id.
   runId: id.max(36), resourceOriginRunId: id.max(36) }).strict();
 export type WorkbenchModelControlPreparationKey = z.infer<typeof workbenchModelControlPreparationKeySchema>;
 
+/** The existing fixed three-step order answer, before any model-only control.
+ * Its entire resource plan remains the Task origin. These hashes are evidence,
+ * never permission to execute the order reader or obtain another allowance. */
+export const workbenchModelControlOrderAnswerBindingSchema = z.object({
+  version: z.literal('original-order-answer-display-1'), planHash: hash,
+  inputId: id.max(36), stepId: id.max(36), resultId: id.max(36),
+  originalReadResultId: id.max(36), bindingsHash: hash,
+}).strict();
+export type WorkbenchModelControlOrderAnswerBinding = z.infer<typeof workbenchModelControlOrderAnswerBindingSchema>;
+export const workbenchModelControlOrderAnswerOriginSchema = workbenchModelControlOrderAnswerBindingSchema.extend({
+  rootRunId: id.max(36), evidenceHash: hash,
+}).strict();
+export type WorkbenchModelControlOrderAnswerOrigin = z.infer<typeof workbenchModelControlOrderAnswerOriginSchema>;
+export interface WorkbenchModelControlOrderAnswerReference {
+  taskId: string; runId: string; inputId: string; stepId: string; resultId: string;
+}
+/** Bind to the original current-authorized final-answer reader. It must read
+ * the registered conversation, measured model evidence and original Core
+ * answer. A caller/model cannot provide this adapter or its return value. */
+export interface WorkbenchModelControlOrderAnswerSource {
+  readOriginal(reference: WorkbenchModelControlOrderAnswerReference): Promise<AiWorkbenchDisplayOriginalMaterial>;
+}
+
 /** The original source remains immutable. New presentation and run references
  * are separate from business input, original fields and any prior approval. */
 export const workbenchModelControlReceiptSchema = z.object({
@@ -34,6 +58,7 @@ export const workbenchModelControlReceiptSchema = z.object({
   sourceResultHash: hash, materialHash: hash, fieldHash: hash,
   registrationRef: id, resourceRegistrationRef: id, presentationRevision: revision,
   budgetPolicyVersion: id, budgetPolicyHash: hash,
+  orderAnswerOrigin: workbenchModelControlOrderAnswerOriginSchema.optional(),
   createdAt: z.string().datetime({ offset: true }),
 }).strict();
 export type WorkbenchModelControlReceipt = z.infer<typeof workbenchModelControlReceiptSchema>;
@@ -41,6 +66,8 @@ export type WorkbenchModelControlOriginTransaction = Parameters<typeof readTaskM
 export type WorkbenchModelControlOriginAccess = Parameters<typeof readTaskModelRunOrigin>[1];
 export type WorkbenchModelControlOriginKey = Parameters<typeof readTaskModelRunOrigin>[2];
 export type WorkbenchModelControlOrigin = Awaited<ReturnType<typeof readTaskModelRunOrigin>> & {
+  orderAnswer?: WorkbenchModelControlOrderAnswerBinding;
+  orderAnswerOrigin?: WorkbenchModelControlOrderAnswerOrigin;
   control?: { operationLogId: string; presentationRevision: number; sourceRunId: string; sourceResultId: string; resourceOriginRunId: string };
 };
 export type WorkbenchModelControlOriginReader = (tx: WorkbenchModelControlOriginTransaction,

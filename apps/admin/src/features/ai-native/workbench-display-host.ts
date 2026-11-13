@@ -7,6 +7,7 @@ import {
   type AiWorkbenchContextDraft, type AiWorkbenchDisplayBindingDraft, type AiWorkbenchFieldMaterialDraft,
   type AiWorkbenchHostDraft, type AiWorkbenchMountBindingDraft, type AiWorkbenchPresentationDraft,
   type AiWorkbenchSandboxMessageDraft,
+  type AiWorkbenchAuthoritativeSummaryDraft,
 } from '@rental-os/shared';
 
 export const WORKBENCH_HTML_ISOLATION_VERSION = 'opaque-html-static-1' as const;
@@ -17,6 +18,7 @@ export interface WorkbenchDisplayMaterial {
   fieldMaterial: AiWorkbenchFieldMaterialDraft | null;
   sourceIds: readonly string[];
   proposals: readonly AiApprovalApplicationReferenceDraft[];
+  authoritativeSummary?: AiWorkbenchAuthoritativeSummaryDraft;
 }
 export interface WorkbenchDisplayExpectation { taskId: string; tenantId: string; workspaceId: string; runId?: string; resultId?: string }
 export interface WorkbenchDisplayLease {
@@ -75,7 +77,9 @@ export async function inspectWorkbenchDisplay(value: unknown, expected: Workbenc
   now = Date.now()): Promise<WorkbenchDisplayMaterial> {
   const result = structuredClone(value) as WorkbenchDisplayMaterial;
   const p = result?.presentation, c = result?.context, fields = result?.fieldMaterial;
-  if (!object(result) || Object.keys(result).length !== 5 || !p || !c || !validBinding(p.binding)
+  if (!object(result) || Object.keys(result).length !== (result.authoritativeSummary ? 6 : 5)
+    || Object.keys(result).some(key => !['context', 'presentation', 'fieldMaterial', 'sourceIds', 'proposals', 'authoritativeSummary'].includes(key))
+    || !p || !c || !validBinding(p.binding)
     || p.binding.taskId !== expected.taskId || c.draftVersion !== AI_WORKBENCH_CONTEXT_DRAFT_VERSION
     || c.scope.kind !== 'workspace' || c.scope.tenantId !== expected.tenantId || c.scope.workspaceId !== expected.workspaceId
     || c.purpose !== 'display' || c.authority !== 'none_reauthorize_before_consumption'
@@ -91,6 +95,12 @@ export async function inspectWorkbenchDisplay(value: unknown, expected: Workbenc
     || ['runId', 'stepId', 'resultId', 'promptVersion', 'displayApiVersion'].some(key => !id(p.generation[key as keyof typeof p.generation]))
     || !Array.isArray(result.sourceIds) || result.sourceIds.length > 50 || new Set(result.sourceIds).size !== result.sourceIds.length
     || result.sourceIds.some(source => !id(source)) || !Array.isArray(result.proposals) || result.proposals.length > 20) throw displayUnavailable();
+  const summary = result.authoritativeSummary;
+  if (summary && (!object(summary) || Object.keys(summary).sort().join(',') !== 'binding,observedAt,resultId,runId,source,text,version'
+    || summary.version !== 'ain-workbench-facts-1' || summary.source !== 'current_original_business_facts'
+    || !displaySame(summary.binding, p.binding) || summary.runId !== p.generation.runId || summary.resultId !== p.generation.resultId
+    || !Number.isFinite(Date.parse(summary.observedAt)) || typeof summary.text !== 'string' || !summary.text.trim()
+    || new TextEncoder().encode(summary.text).byteLength > 32768)) throw displayUnavailable();
   const retained = p.retention, sourceExpiry = Date.parse(retained.sourceExpiresAt), expiry = Date.parse(retained.expiresAt);
   if (![sourceExpiry, expiry, Date.parse(c.history.expiresAt)].every(Number.isFinite) || expiry <= now || expiry > sourceExpiry
     || sourceExpiry > Date.parse(c.history.expiresAt) || !id(retained.aclRevision) || !id(retained.policyVersion)

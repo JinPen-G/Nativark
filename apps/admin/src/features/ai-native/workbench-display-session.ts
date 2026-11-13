@@ -10,7 +10,8 @@ import { displayLease, displayMaterialBinding, displayPartialAnswers, displaySam
 
 export interface WorkbenchDisplayState {
   phase: 'idle' | 'loading' | 'ready' | 'rendered' | 'unavailable'; busy: boolean;
-  frame: { document: string; binding: AiWorkbenchMountBindingDraft; runId: string; resultId: string } | null;
+  frame: { document: string; binding: AiWorkbenchMountBindingDraft; runId: string; resultId: string;
+    summary: NonNullable<WorkbenchDisplayMaterial['authoritativeSummary']> } | null;
   candidate: AiWorkbenchHostDraft | null; sourceId: string | null;
   candidateConflict: boolean;
   source: WorkbenchDisplaySource | null; confirmation: AiApprovalApplicationReferenceDraft | null;
@@ -112,6 +113,9 @@ export class WorkbenchDisplaySession {
       const expected = structuredClone(this.expectation());
       const material = await inspectWorkbenchDisplay(await this.port.read(expected.taskId, abort.signal), expected, this.at());
       if (!this.live(generation) || abort.signal.aborted) return;
+      // Isolated code cannot supply its own money/status authority. Without
+      // an exact original summary, leave the existing safe text/manual entry.
+      if (!material.authoritativeSummary) throw displayUnavailable();
       this.material = material; this.lease = displayLease(material); this.checks = 0; this.sequence = 0; this.rate = { started: this.at(), count: 0 };
       const candidate = previous && this.retainedCandidate() === previous && previousLease && material.fieldMaterial
         && material.context.binding.conversationId === previous.binding.conversationId
@@ -131,7 +135,7 @@ export class WorkbenchDisplaySession {
       const doc = buildWorkbenchFrameDocument(material, binding, nonce, window.location.origin, candidateConflict ? [] : candidate?.answers,
         rootStyle ? { color: rootStyle.color, background: rootStyle.backgroundColor, fontFamily: rootStyle.fontFamily, colorScheme: rootStyle.colorScheme } : {});
       this.update({ phase: 'ready', frame: { document: doc, binding, runId: material.presentation.generation.runId,
-        resultId: material.presentation.generation.resultId }, candidate, candidateConflict });
+        resultId: material.presentation.generation.resultId, summary: structuredClone(material.authoritativeSummary) }, candidate, candidateConflict });
       this.expire();
     } catch (error) { if (generation === this.generation && !abort.signal.aborted) this.retract('unavailable', this.recoverableRead(error)); }
     finally { clearTimeout(timeout); if (this.request === abort) this.request = null; if (generation === this.generation) this.update({ busy: false }); }

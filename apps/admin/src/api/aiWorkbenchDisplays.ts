@@ -21,6 +21,7 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
   let active = true, generation = 0, lifecycle = new AbortController(), original: Original | null = null;
   let fieldMaterial: AiWorkbenchFieldMaterialDraft | null = null, lease: WorkbenchDisplayLease | null = null;
   let proposals: WorkbenchDisplayMaterial['proposals'] = [];
+  let summary: WorkbenchDisplayMaterial['authoritativeSummary'];
   const live = (signal: AbortSignal, version = generation) => {
     if (!active || !owner.current() || signal.aborted || lifecycle.signal.aborted || version !== generation) throw unavailable();
   };
@@ -57,6 +58,7 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
     if (!displaySame(current.binding, binding) || current.fieldRevision !== previous.fieldRevision
       || current.aclRevision !== previous.aclRevision || current.policyVersion !== previous.policyVersion
       || result.presentation.generation.runId !== ref.runId || result.presentation.generation.resultId !== ref.resultId
+      || !result.authoritativeSummary || !displaySame(result.authoritativeSummary, summary)
       || Date.parse(current.expiresAt) > Date.parse(previous.expiresAt)) throw unavailable();
     fieldMaterial = result.fieldMaterial ? structuredClone(result.fieldMaterial) : null;
     proposals = structuredClone(result.proposals);
@@ -65,16 +67,18 @@ export function createAiWorkbenchDisplayPort(owner: Owner): Port {
   };
   return {
     activate() { if (active) return; active = true; lifecycle = new AbortController(); },
-    dispose() { active = false; generation++; lifecycle.abort(); original = null; fieldMaterial = null; lease = null; proposals = []; },
+    dispose() { active = false; generation++; lifecycle.abort(); original = null; fieldMaterial = null; lease = null; proposals = []; summary = undefined; },
     async read(taskId, signal): Promise<WorkbenchDisplayMaterial> {
       live(signal);
       generation++; lifecycle.abort(); lifecycle = new AbortController();
-      original = null; fieldMaterial = null; lease = null; proposals = [];
+      original = null; fieldMaterial = null; lease = null; proposals = []; summary = undefined;
       const result = await material(await post('display', { taskId }, signal), taskId, signal);
+      if (!result.authoritativeSummary) throw unavailable();
       original = { binding: structuredClone(result.presentation.binding),
         runId: result.presentation.generation.runId, resultId: result.presentation.generation.resultId };
       fieldMaterial = result.fieldMaterial ? structuredClone(result.fieldMaterial) : null;
       proposals = structuredClone(result.proposals);
+      summary = structuredClone(result.authoritativeSummary);
       lease = displayLease(result);
       return result;
     },

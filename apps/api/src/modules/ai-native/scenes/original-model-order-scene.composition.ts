@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { composePersistedModelOrderTaskRunner } from '../model-input/persisted-model-order-runner.composition';
+import { composeOriginalOrderAnswerReader } from '../model-input/original-order-answer.reader';
 import { parseTaskModelInput, taskModelFingerprint, taskModelMaterialSchema, TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { waitForTaskApplicationDependency, type AiTaskApplicationHost } from '../runner/prisma-task-application';
@@ -17,6 +18,8 @@ import { composePersistedTaskCenter } from '../task-center.composition';
 import { composeAiTaskCenterScene } from '../task-center-scene.composition';
 import type { AiOriginalSceneResultService } from './original-scene-result.service';
 import { snapshotTaskCenterRecoveryFence, type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
+import { AiOriginalSceneDisplayGeneration } from '../workbench-display-generation.service';
+import { readOriginalSceneEnvelope } from './original-scene-knowledge';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Run = Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource?: AiTaskInputSource };
@@ -36,6 +39,10 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       || typeof run.inputSource?.validateAnswers !== 'function')) throw unavailable();
   const serverHost = structuredClone(host);
   const authorization = composePersistedTaskAuthorization(input);
+  const history = scenes.createHistoryReader(authorization.tasks);
+  const answerDisplay = input.displayPublication && answerRoundTrip ? new AiOriginalSceneDisplayGeneration({
+    db: input.db, scopes: authorization.scopes, originals: scenes.requests, publication: input.displayPublication, history
+  }, input.clock) : undefined;
   const taskTransitions = new AiTaskTransitionRepository(input.db, authorization.authority, input.clock);
   const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens, orderExplainTool: true };
   const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
@@ -92,7 +99,11 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const existing = await input.db.aiTaskActionInput.findMany({ where: key, take: 1 });
       if (existing.length) throw unavailable();
       const packet = await scenes.prepareTaskMaterial(ref);
-      const content = JSON.stringify({ original: packet.original, materialHash: packet.materialHash, trust: packet.trust, facts: packet.material });
+      // Only this never-published original collects history. Resuming/reading
+      // an existing input retains exactly its envelope, including no package.
+      const conversationHistory = await history.collect(ref, original.context);
+      const content = JSON.stringify({ original: packet.original, materialHash: packet.materialHash, trust: packet.trust,
+        facts: packet.material, ...(conversationHistory ? { conversationHistory } : {}) });
       if (Buffer.byteLength(content, 'utf8') > 131072) throw unavailable();
       const parts: Array<{ kind: 'text'; text: string }> = [];
       for (let offset = 0; offset < content.length; offset += 16000) parts.push({ kind: 'text', text: content.slice(offset, offset + 16000) });
@@ -136,6 +147,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     }
     await verify(before);
     const runner = composePersistedModelOrderTaskRunner({ ...input, host: serverHost, originalRequests: scenes.requests,
+      history, ...(answerDisplay ? { answerDisplay } : {}),
       inputSource: run.inputSource, financialEvidence: run.financialEvidence, monotonic: run.monotonic,
       task: { taskId: task.taskId, runId: task.runId, orderId: original.request.sceneCode === 'order_explanation' ? original.request.input.orderId : '',
         modelRegistrationRef, orderRegistrationRef, ...(answerRegistrationRef ? { answerRegistrationRef } : {}), material, limits } });
@@ -298,8 +310,13 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const steps = await observe(() => input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
         toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }));
       if (steps.length !== 1 || !steps[0].resultRef || steps[0].requestFingerprint !== frozen.fingerprint) throw unavailable();
+      const parsed = parseTaskModelInput(frozen.payload, policy), envelope = readOriginalSceneEnvelope(parsed);
+      if (envelope.conversationHistory) await observe(() => history.revalidate(envelope.conversationHistory,
+        before.ref, before.original.context, 'observation'));
       const result = await observe(() => results.read({ original: before.ref, resultId: steps[0].resultRef! }));
       await observe(() => verify(before));
+      if (envelope.conversationHistory) await observe(() => history.revalidate(envelope.conversationHistory,
+        before.ref, before.original.context, 'observation'));
       return result;
     },
     async reopenOrderSource(value: unknown) {
@@ -312,16 +329,8 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     },
     async readAnswer(value: unknown) {
       if (!answerRoundTrip) throw unavailable();
-      const { before, runner, key, answerRegistrationRef } = await observe(() => assemble(structuredClone(value), false));
-      const frozen = await observe(() => input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: answerRegistrationRef } }));
-      if (!frozen) throw unavailable();
-      const steps = await observe(() => input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
-        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }));
-      if (steps.length > 1) throw denied();
-      const result = steps[0]?.resultRef ? await observe(() => runner.readAnswerResult({ resultId: steps[0].resultRef! }))
-        : { status: 'not_observed' as const, text: null, automaticRetry: false as const };
-      await observe(() => verify(before));
-      return freezeOriginalInput({ original: before.original.receipt, result });
+      return composeOriginalOrderAnswerReader({ ...input, originals: scenes.requests,
+        tasks: authorization.tasks, history }).read(value);
     },
     async readNextSteps(value: unknown) {
       const before = await observe(() => bound(structuredClone(value)));

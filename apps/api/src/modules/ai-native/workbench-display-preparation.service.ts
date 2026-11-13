@@ -13,6 +13,7 @@ import { inspectAiWorkbenchContext, inspectAiWorkbenchFieldMaterial, inspectAiWo
 import { isGatewayResult } from './gateway-contract-validation';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { freezeOriginalInput } from './task-request/original-request.validation';
+import { buildWorkbenchAuthoritativeSummary } from './workbench-authoritative-summary';
 
 export interface AiWorkbenchDisplayCurrentAuthority {
   /** Same current-authorized producer used before original publication. It
@@ -61,6 +62,10 @@ export class AiWorkbenchDisplayPreparationService {
       || Buffer.byteLength(gateway.text, 'utf8') > AI_WORKBENCH_DISPLAY_LIMITS.codeBytes) throw unavailable();
     if (witness.presentationRevision !== original.generationRevision) throw denied();
     const binding: AiWorkbenchDisplayBindingDraft = { ...witness.binding, presentationRevision: witness.presentationRevision };
+    const business = buildWorkbenchAuthoritativeSummary(original);
+    const authoritativeSummary = { version: 'ain-workbench-facts-1' as const, binding,
+      runId: original.model.step.runId, resultId: original.model.result.id, observedAt: business.observedAt,
+      source: 'current_original_business_facts' as const, text: business.text };
     const expiresAt = new Date(Math.min(Date.parse(witness.sourceExpiresAt), Date.parse(context.history.expiresAt),
       fieldMaterial ? Date.parse(fieldMaterial.retention.expiresAt) : Infinity)).toISOString();
     const presentation: AiWorkbenchPresentationDraft = {
@@ -85,11 +90,12 @@ export class AiWorkbenchDisplayPreparationService {
     const after = await this.originals.revalidate(original.command, original.bindingHash);
     const closing = await this.current(after);
     if (!same(checked.witness, closing.witness) || Date.parse(expiresAt) <= Date.parse(closing.now)) throw denied();
+    if (!same(business, buildWorkbenchAuthoritativeSummary(after))) throw denied();
     if (this.confirmations && !same(proposals, await this.confirmations(after))) throw denied();
     if (Date.parse(expiresAt) <= Date.parse(this.now())) throw unavailable();
     // Only independently read, currently waiting original proposals may be
     // requested by the frame. The host opens its separate fixed review.
-    return freezeOriginalInput({ context, presentation, fieldMaterial, sourceIds, proposals });
+    return freezeOriginalInput({ context, presentation, fieldMaterial, sourceIds, proposals, authoritativeSummary });
   }
   async revalidate(value: AiConversationModelResultReadDraft, expected: AiWorkbenchDisplayBindingDraft) {
     const current = await this.read(value);

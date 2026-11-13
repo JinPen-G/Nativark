@@ -53,7 +53,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies, composeClarifiedQuoteSelectionRequests, composeRequestBoundClarifiedQuoteSelectionPreparation,
   composeRequestBoundOriginalTaskAccounting,
-  composeRequestBoundPersistedOriginalOrderRead, composeRequestBoundPersistedOriginalSceneModel,
+  composeRequestBoundPersistedOriginalOrderRead, composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalOrderAnswerReader,
   type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
   type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
@@ -246,8 +246,17 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       if (typeof original?.resume !== 'function' || typeof original.continueAnswer !== 'function') throw unavailable();
       return { resume: original.resume.bind(original), continueAnswer: original.continueAnswer.bind(original) };
     };
-    return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, performanceDb: db, visibleDb: db, originalResults,
-      originalModelControls: { async readOperation(request, value, signal) {
+    return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, performanceDb: db, visibleDb: db,
+      originalResults: { ...originalResults, async readOrderAnswer(request, reference) {
+        const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
+        if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return order.readAnswer(request, reference);
+      } },
+      originalModelControls: { async readResult(request, value, signal) {
+        const controls = moduleRef?.get<ReturnType<typeof composeWorkbenchModelControlRequests>>(AI_WORKBENCH_MODEL_CONTROL_REQUESTS, { strict: false });
+        if (!controls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return controls.readResult(request, value, signal);
+      }, async readOperation(request, value, signal) {
         let controls: ReturnType<typeof composeWorkbenchModelControlRequests> | undefined;
         try { controls = moduleRef?.get(AI_WORKBENCH_MODEL_CONTROL_REQUESTS, { strict: false }); }
         catch { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }
@@ -428,6 +437,20 @@ function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: 
       { sceneCode: 'opening_diagnosis', sceneVersion: '1', revision: 1,
         audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }] };
 }
+export const AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS = Symbol('AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS');
+/** The existing final-answer contract remains readable after execution is
+ * disabled. This provider has no SecretBox, Gateway, publication or worker. */
+export const AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundOriginalOrderAnswerReader>> = {
+  provide: AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS,
+  inject: [...originalSceneInjection, RentalOrderConfirmationService, RentalBusinessFactRepository],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService,
+    confirmation: RentalOrderConfirmationService, quoteFacts: RentalBusinessFactRepository) =>
+    composeRequestBoundOriginalOrderAnswerReader(originalSceneDependencies(db, auth, guard, subscriptions, core,
+      business, reports, memberships, payments, funding, undefined, { confirmation, quoteFacts, core }),
+      { enabled: true, audience: 'operator' })
+};
 /** Explicit human rule draft save; original reads remain independently guarded. */
 export const AI_NATIVE_TASK_RULE_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_TASK_RULE_DRAFT_CONFIGURATION');
 export const AI_NATIVE_TASK_RULE_DRAFT_PROVIDER: FactoryProvider = {
@@ -485,14 +508,24 @@ export const AI_NATIVE_CONVERSATION_PROVIDER: FactoryProvider = {
       undefined, confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined);
     const display = readWorkbenchDisplayConfiguration(displayValue);
     const reads = display.enabled && observations ? composeAiWorkbenchDisplayRequests(original,
-      { currentConfiguration: () => displayValue }, observations, { async review(request, query, signal) {
+      { currentConfiguration: () => displayValue }, { ...observations, async readOrderAnswer(request, reference) {
+        const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
+        if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return order.readAnswer(request, reference);
+      } }, { async review(request, query, signal) {
         // Resolve the existing request-bound reader lazily to keep the model
         // control/conversation/TaskCenter provider graph acyclic.
         const center = moduleRef?.get<ReturnType<typeof composeRequestBoundTaskCenter>>(AI_NATIVE_TASK_CENTER_REQUESTS, { strict: false });
         if (!center) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         return center.review(request, query, signal);
       } }) : undefined;
-    return composeAiConversationRequests(original, parsed.data.enabled, observations, reads, modelControls);
+    return composeAiConversationRequests(original, parsed.data.enabled, observations, reads, modelControls, {
+      async read(request, query, signal) {
+        const center = moduleRef?.get<ReturnType<typeof composeRequestBoundTaskCenter>>(AI_NATIVE_TASK_CENTER_REQUESTS, { strict: false });
+        if (!center) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return center.result(request, query, signal);
+      }
+    });
   }
 };
 export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
@@ -719,13 +752,13 @@ export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, TenantIntegrationService,
-    RentalOrderConfirmationService, RentalBusinessFactRepository],
+    RentalOrderConfirmationService, RentalBusinessFactRepository, ModuleRef],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
     files: FileStorageRuntimeService, orderValue?: unknown, quoteValue?: unknown, openingValue?: unknown,
     displayValue?: unknown, integrations?: TenantIntegrationService,
-    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository) => {
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository, moduleRef?: Pick<ModuleRef, 'get'>) => {
     const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations,
       confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined);
     const configuration = (scene: string) => {
@@ -735,6 +768,11 @@ export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
     const currentPublication = () => readCurrentWorkbenchDisplayConfiguration(displayValue, original.clock);
     return composeWorkbenchModelControlRequests(original, {
       available: scene => { currentPublication(); return configuration(scene).enabled; },
+      async readOrderAnswer(request, reference) {
+        const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
+        if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return order.readAnswer(request, reference);
+      },
       ...(files ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {}),
       async build(input, control) {
         const selected = configuration(control.receipt.sceneCode);
@@ -1074,22 +1112,27 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
   provide: AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
   inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
     { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
-    RentalOrderConfirmationService, RentalBusinessFactRepository],
+    { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, RentalOrderConfirmationService, RentalBusinessFactRepository,
+    AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
-    files: FileStorageRuntimeService, serverValue?: unknown,
-    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository): OriginalOrderReadHttpRequests => {
+    files: FileStorageRuntimeService, serverValue?: unknown, displayValue?: unknown,
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository,
+    historical?: ReturnType<typeof composeRequestBoundOriginalOrderAnswerReader>): OriginalOrderReadHttpRequests => {
     const configuration = readOrderExecutionConfiguration(serverValue);
-    if (!configuration.enabled) return Object.freeze(Object.fromEntries(originalOrderReadRequestMethods.map(method =>
-      [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }]))) as unknown as OriginalOrderReadHttpRequests;
+    if (!configuration.enabled) return Object.freeze({ ...Object.fromEntries(originalOrderReadRequestMethods.map(method =>
+      [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }])),
+      ...(historical ? { readAnswer: historical.read.bind(historical) } : {}) }) as unknown as OriginalOrderReadHttpRequests;
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding,
       undefined, confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined), db };
+    const display = readWorkbenchDisplayConfiguration(displayValue);
     const admission = createOriginalTaskStartAdmission(original, 'order_explanation');
     const requests = selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
       ...original,
+      ...(display.enabled ? { displayPublication: { currentConfiguration: () => displayValue } } : {}),
       scene: { code: 'order_explanation', version: '1' },
       gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -1102,7 +1145,7 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       await admission(request, value, undefined, signal);
       return requests.start(request, value, signal);
     };
-    return Object.freeze({ ...requests, start });
+    return Object.freeze({ ...requests, start, ...(historical ? { readAnswer: historical.read.bind(historical) } : {}) });
   }
 };
 

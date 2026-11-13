@@ -26,6 +26,7 @@ import { composeClarifiedQuoteSelectionPreparation } from './clarified-quote-sel
 import { composePersistedTaskCenter } from '../task-center.composition';
 import { composeAiTaskCenterScene, readSettingsTaskCenterScene } from '../task-center-scene.composition';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
+import { composeOriginalOrderAnswerReader } from '../model-input/original-order-answer.reader';
 import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
 import { composeTaskSettingsHost, type AiSettingsTask } from '../runner/settings-task-host.composition';
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
@@ -906,6 +907,19 @@ export function composeRequestBoundOriginalTaskActionPolicies(
       });
     },
   });
+}
+
+/** Bind the existing final-order-answer read to this request's credentials.
+ * No execution configuration, Gateway, publication or runner is constructed. */
+export function composeRequestBoundOriginalOrderAnswerReader(dependencies: RequestBoundOriginalSceneDependencies,
+  options: AiSceneRequestOptions) {
+  const call = bindRequests(dependencies, options, input => {
+    const authorization = composePersistedTaskAuthorization(input), scenes = composeAiOriginalScenes(input);
+    return composeOriginalOrderAnswerReader({ ...input, tasks: authorization.tasks, originals: scenes.requests,
+      history: scenes.createHistoryReader(authorization.tasks) });
+  }, { write: false });
+  return { read: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+    call(request, value, (reader, command) => reader.read(command, signal), { write: false, signal }) };
 }
 
 /** Read an original takeover receipt without constructing a model, Gateway,

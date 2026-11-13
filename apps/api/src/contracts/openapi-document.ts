@@ -2454,6 +2454,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     operationId: `aiConversation_${operation}`, authRequired: true, permissions: [...AI_TASK_CENTER_ENTRY_PERMISSIONS],
     summary: operation === 'modelResult'
       ? 'Current owner-authorized conversation turn reads its existing source-revalidated model artifact through the original reader. Erased input exposes only its attested task locator, never recovered text. No model dispatch, task start, approval or business commit. Default-disabled conversation provider requires migration and explicit configuration.'
+      : operation === 'task-result'
+        ? '读取当前受权会话原 Task 的准确结果。原 admission Run 不变；回答或模型控制后继必须由原收据、计划与累计资源来源证明，再经原结果 reader 复核。读取不启动模型、恢复执行或创建业务操作。'
+      : operation === 'model-control'
+        ? '明确为同一当前受权材料登记一次重新解释或排版，沿原 Task、Gateway 与累计预算执行模型。原操作重放只读原收据，不重报价格、重放业务工具或授予业务批准。'
       : 'Current operator-owned conversation metadata and original request admission only. No model start, task cancellation, approval or business commit; unknown uses the original operation/admission. Default-disabled provider requires migration and explicit server configuration.',
     requestSchema: contract.request, responseSchema: contract.response })),
   ...Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) => ({

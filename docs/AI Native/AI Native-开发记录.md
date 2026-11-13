@@ -6,6 +6,39 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-order-chat-current-result-20261113"></a>
+## 原订单最终答复、聊天后继结果与可信业务摘要（2026-11-13）
+
+前置 `fed236f2c805c2e5dcad1ec8ce6bc67aff59f74e` 已普通推送并回读 GitHub 一致。本阶段按 AIN-12 原 §10.1～10.7 补实际聊天消费和展示事实，不新增任务编号或模型 Runtime；main 仍由 PM 串行集成。聊天三叶已冻结，独立核定发现的报价装配问题已修复并经下列实际代码模拟复验；整项门槛结论另行核定。
+
+- **原订单答复与历史读取。** [原三步 runner](../../apps/api/src/modules/ai-native/model-input/persisted-model-order-runner.composition.ts)只给冻结前的新最终 `scene-answer` 发布无 tools 展示 witness，首模型仍是 text/tools；原历史同包进入首/末材料，在准备、派发和读取重新核对。[独立 reader](../../apps/api/src/modules/ai-native/model-input/original-order-answer.reader.ts)不依赖 Gateway、SecretBox、worker 或启用配置，核原三步计划、ActionInput、Core、资源和财务原账。标准 provider 与旧 scene/runner 的 readAnswer 委托同一叶，停用执行不关闭合法原读取。
+- **同 Task 模型控制。** [原控制仓储](../../apps/api/src/modules/ai-native/workbench-model-control.repository.ts)在原操作记录保留三步 `orderAnswerOrigin`，重新解释和排版仅新建有来源的模型 Run，继承原累计预算，不重放 Core 业务步骤。单步骤旧订单、首模型读及通用 `scene-model` 查询保持原证明；只有真实最终答复与带原证明的后继进入三步分支。
+- **当前聊天结果。** [原会话结果 reader](../../apps/api/src/modules/ai-native/conversation-task-result.reader.ts)从 admission 的原 Task 定位，分别证明原 Run、人类回答后继或模型控制后继，再调用原 TaskCenter result，前后核同当前身份、原会话、计划、输入和步骤。新增只读 `task-result` 使用 shared/Controller/Guard/OpenAPI 的同一登记；旧 modelResult 与 `validateAiConversationTaskModelDraft` 仍限定原 Run。新包保留原 turn，lineage 独立携带原 Run、当前 Run、序号和证明指纹，客户端不改写 turn 或猜测结果。
+- **可信摘要与安全降级。** [摘要叶](../../apps/api/src/modules/ai-native/workbench-authoritative-summary.ts)复用原订单/开业确定性正文，报价只展示原准备参数或明确候选、币种金额未核价与未保存/未占库存状态；不取模型声称成功的文字，不复制姓名、电话、地址或自由说明。摘要绑定 exact material/presentation/Run/result，时间取冻结原来源。后台在 iframe 外展示，缺摘要不挂动态 frame，变版/撤权同时撤回。报价原紧凑结果也复用确定性摘要，模型原 Artifact 和计量不改。
+- **聊天实际消费者。** [ConversationResult](../../apps/admin/src/features/ai-native/ConversationResult.tsx)、[ConversationDetail](../../apps/admin/src/features/ai-native/ConversationDetail.tsx)和[共用宿主](../../apps/admin/src/features/ai-native/conversation-workbench-host.ts)分别接原候选采用、可信输入/审批及模型控制结果。报价共用一份 TaskClarification/原回答收据；controlResult 在原 operationId 读取前后核同 Run/结果，保留 admission 原 turn。三叶固定 blob 为 `e715c4c9a2b1549bacc51c298f96b7e5e7bae2f5`、`03aa2200720088ec340b3bd0b7acb986b7cea92b`、`9f7d6ea0890350e3592e6eee057564b4ad06794c`。作者必要模拟 adapter 12、component 6、model 5、detail 3、approval 1 项均退出 0；审批丢应答只读原收据，隐藏/身份切换撤回候选，迟到结果不写新会话。
+- **独立复核后的报价修复。** 最新 Run 为原报价业务待确认时，[专用 reader](../../apps/api/src/modules/ai-native/conversation-quote-result.reader.ts)沿 selection、原 question/answer、plan、checkpoint、approval 和 Core 收据定位准确显示 Run；实际执行 Run 和显示 Run 都纳入前后签名，不任取旧模型。两 reader 固定 blob 为 `7291d4dd50ed8a4941fc29314dea117d87cf57b8`、`e12ab70585b118dd63968d3d02be83ba1708b4ee`。首次完整候选还没有选单时，展示字段采用 `original_quote_initial_parameters`，原 afterSucceeded 从同 Core projection 持久化真实问题；可信核对和提交仍走原输入/回答收据。已选单保持原 linked reprepare，历史字段按原 code 复核，不补签。资源版本缺失或过期时，Core 可能先算默认值再要求重新选择；字段服务现在仅在采用完整 editable/initial 合同时消费这些默认值，原缺项问题与其复核保持相同 unavailable 默认语义。读取不生成问题或报价；只有人类明确继续的新 Run 可以产生新问题，仍受原累计 maxCalls 限制。
+
+助手固定源已独立核同：reader `fb2fa6abf54f70cbc0c4335bc6ce39ba9be844fd`；控制 repository/source/contract 分别为 `4ef2e3d006008740a9c29009be3265a747919892`、`52547955235c4be0cb69fbf6067b83d902d76291`、`281ccf1b4d7c1a9feea3f68f1aa8f9429fbb88d3`；摘要作者版 `eb1133b7d31f6fedbd0d40151323ae891982cbf5`，Root 随后补返回冻结 observedAt 并接包装。作者 reader 20 个原读反例和 18 个普通/展示历史反例通过，控制原三步及旧单步骤→两次控制、撤权通过；摘要 12 项必要实际材料模拟通过（stdin `3c4eb5729d69177bacf921fbadf1fc96f4725ae1bbdd04b00ef2f89f3b2c46b7`，退出 0）。这些模拟不替代下列 Root 实际装配核接。
+
+Root 均用 `node --no-compilation-cache -`、既有 fixture 和本树 offline preload；DB、模型、HTTP 与浏览器宿主为明确内存替身，无新增测试文件：
+
+| 必要核验 | 关键结果 | stdin SHA-256／退出 |
+| --- | --- | --- |
+| 标准历史 provider、停用执行、TaskCenter/display 读取 | 原三步/两模型，确定性正文；读取无写/无新增调用，撤权拒绝 | `1e9ab35702c9c7ddd0fbff8c672df821ee8df84fd3c4866f2122bf0c9a9089ce`／0 |
+| 同一订单原三步→重新解释→排版→TaskCenter/新会话 Controller→实际前端 API/display session | 1 Task、3 Run、4 模型、5 累计步骤；原计划/输入/Artifact/预算上限保持，Core 步骤只一条、业务写入 0；同键/停用读回不增调用，撤权/错摘要结果拒绝，缺摘要不挂 frame | `d0a4044e33a487d833808a702e47662dc38eb1d37e875a07de4dd325d0f35b25`／0 |
+| 报价原回答保存/消费→后继→会话结果/确定性降级 | 2 模型，原 turn 不改，后继与已消费原回答收据一致，模型“保存成功”正文不交付，重复读无写，撤权拒绝 | `df21677de9e8370592a27aba5383a94ac8f04daab0bc593f355cea09e8c51498`／0 |
+| 实际路由与公共合同 | Controller 元数据、OpenAPI task-result/summary 登记存在，闭合输入拒绝调用方 runId，旧校验不放宽 | `2d9049580e087aebfcd1bea38b7d793b56db4f1c331c2744be1262cbe6d7f480`／0 |
+| 原完整候选→真实问题→可信前端核对→人类改数量→原回答→Core 准备 | 1 模型；quantity 1→2；原 receipt 一份，Core ready/quantity 2，报价/选单持久写入 0 | `22ba8e64e55fb68b58a3fbdfcff9e3854bd086bee193afdc18a066e87f9931e8`／0 |
+| 上一组加旧字段/已有选单及缺失、过期资源版本 | 已有选单仍 editable，历史不补签；两种版本反例均生成可复核原问题，不继承完整编辑默认值，随后原输入闭环保持 | `11e9d7b3b31009b8346527cbae9ec1f6ec762cad0acfd0e8591d79ffd3805153`／0 |
+| 原报价业务等待→公共 ConversationController 当前结果 | Root 独立复验准确原 question 的显示结果；原 2 模型不增加，重复读稳定、写入 0；替代选单/提案、错结果、异源 Run、UNKNOWN 资源账、坏 checkpoint、多 step/input 和撤权 9 类拒绝 | `e2dd51425a9ae237547675a080521101ef4e23c547028fb122433b9be89d16bf`／0 |
+| TypeScript 5.9.3/noEmit，最终报价修复后重验 | API 4 根/1965 源、后台 6 根/1620 源，零诊断；沿用已交付 Core 品类治理两源的固定依赖闭包 | `726d2073b1095731b31316c1bc8bdbd79c94a4d28d058bebf2eefcbed2da8a27`／0 |
+
+保留失败与限界：首公开组合用真实 performance.now 时在 finishMs 遇 AI_RUN_LIMIT（`0b8b9794e7c3297755a167020186f7646d0f4acc4387e5aac3c22c5c501ad8c1`／1），没有放宽生产 5000 ms 或核销 UNKNOWN；本片计量正向改用既有 fixture tick，共用 preparation/overhead/工具计时，原超时仍有默认定时器，不能把正向模拟称为真实 SLO。首前端包用错夹具 workspace_001，被当前范围校验拒绝（`5a3dd90d42d2293e6d9346f8c64eb6e1f7c0f051a1986da815eb6d334eff4f4c`／1），改为该原 fixture 的 workspace-a 后通过。首报价驱动把保存收据当已消费 Run 定位，断言失败（`330feec2e8e64b7b1875312a65934ea078ee96ddaef24a687e94a3ad2e2b8d72`／1），后用原 readAnswer 消费收据核同；未改生产合同。客户端 axios 配置的类型错误已按既有独立配置变量修复，禁自动重放标记保持。
+
+待确认链作者首组在驱动状态还原断言失败：内存事务替换了对象，旧引用不能还原；仅改为整快照还原后通过，生产拒绝条件未放宽。首次参数驱动曾使用不合法 pricingUnit，另一次自行新建 Task 不匹配既有 fixture 路由，均修正夹具后通过，不修改生产限制。旧字段/选单分类补充组 `3e9bb87688f4562b8c85a8a945b942b2c40ab6024eb41ba8225061038f89d08c` 退出 0；分类记录是明示 fixture，只验证分类，不作生产授权。
+
+本阶段不新增或扩写测试文件；所有新增验证均是原源码和既有 fixture 的内存命令，进程均已退出、审计为空、任务目录 `output/.tmp/ain12-confirmation-closeout-20261113` 未创建，没有复制依赖、构建或留下临时脚本。`docs:check` 退出 1，仍保留导航历史 3 与稀疏示例 1 处既有缺链，没有新增算术错误；`git diff --check` 退出 0。真实数据库、微信/浏览器及供应商由负责人后续操作；整项 G4 另按原全文及依赖核定，不用切片或模拟数量代替。
+
 <a id="ain12-original-time-limit-cause-20261113"></a>
 ## 耗时窗口耗尽后保留原失败原因（2026-11-13）
 

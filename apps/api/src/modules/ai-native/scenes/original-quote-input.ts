@@ -5,6 +5,19 @@ import { aiQuoteCandidateInputSchema, AI_QUOTE_CANDIDATE_LIMITS } from '../tools
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
+export const ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE = 'original_quote_initial_parameters';
+/** A complete first quote still needs an explicit human parameter receipt.
+ * The original Core projection supplies every field; this renames its purpose,
+ * without creating a question, selecting a resource or approving a quote. */
+export function originalQuoteInitialParameterContract(value: AiTaskInputContractDraft): AiTaskInputContractDraft {
+  const contract = structuredClone(value);
+  if (!isAiTaskInputContractDraft(contract) || contract.code !== 'original_quote_editable_parameters'
+    || !/^[a-f0-9]{64}$/u.test(contract.version) || !contract.fields.length || contract.fields.length > 8
+    || contract.fields.some(field => !['quantity', 'starts_at', 'ends_at', 'pickup_location', 'return_location'].includes(field.fieldId)))
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return { ...contract, code: ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE };
+}
+
 /** Only persisted, server-validated answer lineage may call this adapter.
  * Row targets bind the pre-round candidate, never a label, model choice or grant.
  * No defaults, approval, Core calculation or business execution occurs here. */
@@ -15,7 +28,7 @@ export function applyOriginalQuoteAnswers(value: unknown, rounds: readonly {
   if (rounds.length > 31) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   for (const round of rounds) {
     if (!validateAiTaskInputAnswersDraft(round.contract, round.answers)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    if (round.contract.code !== 'original_quote_parameters') {
+    if (round.contract.code !== 'original_quote_parameters' && round.contract.code !== ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE) {
       if (round.answers.some(answer => answer.fieldId !== 'clarification_text')) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       continue;
     }
