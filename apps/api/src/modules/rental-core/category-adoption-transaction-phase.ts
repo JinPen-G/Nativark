@@ -9,7 +9,7 @@ import { writePreparedCategoryEntities } from "./category-adoption-entity-writer
 import { writePreparedCategoryCapabilities, type CategoryAdoptionCapabilityRuntime } from "./category-adoption-capability-writer";
 import type { SubscriptionService } from "../subscription/subscription.service";
 import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
-import { assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
+import { assertCategoryAdoptionConfigurationRowBounds, assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
 import type { AuthService } from "../auth/auth.service";
 import { lockCategoryAdoptionAccess } from "./category-adoption-access";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
@@ -93,6 +93,10 @@ export async function writePreparedCategoryAdoptionPhase(
   const reason = input.reason ?? envelope.reason.trim();
   if (typeof reason !== "string" || !reason.trim() || reason.length > 512) throw new BadRequestException("必须填写明确采用原因");
   const entityBounds = await assertCategoryAdoptionEntityBounds(tx, tenantId, workspaceId);
+  // Component/member collections and configuration row counts are bounded before
+  // any entity patch or relationship materialization. The final reader repeats
+  // these checks after candidate capability changes in this SAME transaction.
+  await assertCategoryAdoptionConfigurationRowBounds(tx, tenantId, workspaceId);
   const entities = await writePreparedCategoryEntities(tx, tenantId, workspaceId, expected, definition, envelope.items);
   const capabilities = Array.isArray(envelope.capabilityPatches) && envelope.capabilityPatches.length
     ? await writePreparedCategoryCapabilities(tx, tenantId, workspaceId, expected, definition, envelope.capabilityPatches as CategoryCapabilityPreparationPatch[], input.actorId, reason.trim(), capabilityRuntime)

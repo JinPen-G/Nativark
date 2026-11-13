@@ -12,7 +12,7 @@
 
 ## 2. 现场和写入归属
 
-- 唯一开发树为`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`，原08[分批读取切片](<Rental Core-开发记录.md#preparation-bounded-read-20261113>)固定`7cdd6be5c5dd243e9f5c0e3e9b213c016aa7a4b9`已上传核GitHub。两源只读本批实体ID/修订，完整实体扫描的原数量/属性JSON门禁前置；类型、十组当前产物行为及原批次文件定向复验通过，首次失败保留。前片[未知结构门禁](<Rental Core-开发记录.md#adoption-preparation-format-20261113>)、日历`da3002b29`/[1abf补片](<Rental Core-开发记录.md#calendar-r0-main-minimal-20261113>)`3cbc802d7`保留。地点`4bc12d3a6`、定价patch`f3a3d5fa1`及夹具`3037d919d`继续原QA队列；AI消费由PM协调AI-RD。正式ResourcePorts/临近政策/宿主、开业counter/参加者仍缺，当前履约not_captured。
+- 唯一开发树为`D:/工作文件/rental-OS/worktree/rental-core`，分支`codex/rental-core`。[配置行数前置](<Rental Core-开发记录.md#adoption-configuration-preflight-20261113>)三源已完成类型/十三组当前产物行为及原8项回归，前置计数不替代写后候选复核；首查旧先写后回滚反例保留。前片[分批实体读取](<Rental Core-开发记录.md#preparation-bounded-read-20261113>)`7cdd6be5c`与接续`9b21d3e3c`已上传核GitHub。[未知结构门禁](<Rental Core-开发记录.md#adoption-preparation-format-20261113>)、日历`da3002b29`/[1abf补片](<Rental Core-开发记录.md#calendar-r0-main-minimal-20261113>)`3cbc802d7`保留。地点`4bc12d3a6`、定价patch`f3a3d5fa1`及夹具`3037d919d`继续原QA队列；AI消费由PM协调AI-RD。正式ResourcePorts/临近政策/宿主、开业counter/参加者仍缺，当前履约not_captured。
 - Core负责人可写Core专属实现、shared对应领域协议和必要既有接点；共同总入口先报具体字段/路径，由PM指定唯一作者。AI runner和企业政策/审批内部实现归各自研发，企业端消费原Core，不复制账本或计价逻辑。本轮无额外助手。
 - PM已明确三份Core配置/快照/回填文件的配置revision及读取窗口，固定源码`5e8d52325b37cf6b613c103b2e291b25843e35ec`已普通推送核远端，阶段证据见[当前配置行来源](<Rental Core-开发记录.md#configuration-row-revision-core-source-20261112>)。两模型的`configurationRevision Int @default(1)`及DDL由AI作者应用，本树未改Schema或生成Client；Core用原行读取修订。分配服务已在原聚合提交前接可选fulfillment参加者，并明确结构化来源生命周期；AI参加者/存储仅按指定两blob接入，ResourcePorts和事件模型算法仍归原作者，宿主/共同装配由PM指定唯一作者。
 - 分配/业务服务的原事务`readRecordedFulfillmentIssue`与原`readTenantReadinessSource`两个只读合同的`fe65ac652076d5bed4c9ca439d50b563c61d17aa`证据保留，见[只读来源阶段](<Rental Core-开发记录.md#core-failure-read-ports-20261112>)；九项随后支持同client，履约本片仅对有效结构化原因及正数活动分配授源。ResourcePorts不得重入扫描/新开业务事务，不以独立观察或同client冒充快照；缺正式临近政策/事实/授权保持不捕获。
@@ -22,7 +22,7 @@
 
 ## 3. 下一入口与原缺口
 
-日历固定main闭包与原队列保留，不重复提交。本片[分批读取](<Rental Core-开发记录.md#preparation-bounded-read-20261113>)已经只读本批ID/修订，无实体批次不读目录；完整实体扫描超原数量/属性JSON上限在全读前拒绝，1000+1累计正常采用及旧准备修订最终复核保留。下一核08完整候选/配置扫描范围、所有写入口与并发报价组合、准备后新增/修改及两个动态编码不同组合的原冻结经营门槛；原候选合计代码已有配置JSON与实体/兼容结果限制，不预判缺陷。新空audit及旧批均已归集未删除，原暂存不存在；删除自动审批拒绝和唯一清单沿记录保留。真实价格/锁/并发需环境授权，ResourcePorts/临近政策/开业counter/参加者及保证金缺件保持原不可用语义。阶段结果留本对话及原资料供PM主动读取，不主动发送消息。
+日历固定main闭包与原队列保留，不重复提交。[原08行数前置](<Rental Core-开发记录.md#adoption-configuration-preflight-20261113>)已在实体/关系读取及补丁前核配置/成员/组成，写后再次核最终候选；原单批/累计、1000+1正常采用/原键恢复及陈旧准备拒绝保留。下一核全部写入口/并发报价的完整组合、准备后新增/修改、原合计候选规模与两个动态编码不同组合冻结经营。两个新批空audit及旧批均归集未删除，原暂存不存在；自动审批拒绝和唯一清单沿记录保留。真实价格/锁/容量/多实例/宿主需环境授权，ResourcePorts/临近政策/开业counter/参加者及保证金缺件保持原不可用语义。阶段结果留本对话及原资料供PM主动读取，不主动发送消息。
 
 1. 沿[品类治理接续](品类治理/品类治理-协作接续.md)推进治理发布、新编码/新空间及端消费，08存量主链独立必做。当前治理已复用原Auth平台身份/权限，由Core承担Serializable与前后检查，见[当前阶段](品类治理/品类治理-开发记录.md#governance-current-authority-20261111)；真实锁/发布/恢复继续未验。
    写锁`9380d1bab`及读口`forWorkspace`固定源码`cb96a636b61497243d75032e98d0e301ff3d31a0`均已普通推送核远端，拒绝坏采用修订，保留初始0/历史明确版本并先捕获同一次绑定。API类型、原四品类对齐及限定5组通过，见[当前解析阶段](<Rental Core-开发记录.md#workspace-resolver-binding-20261112>)。PM固定main `307abf572`只收前片12行guard，必要unique/草稿context helper及消费片另交；真实并发/恢复待原门槛。

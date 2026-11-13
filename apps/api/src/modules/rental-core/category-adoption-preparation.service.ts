@@ -20,7 +20,7 @@ import { assertCategoryPreparationBatchSize, categoryPreparationBatchEntityRefer
 import type { CategoryPreparationPreview } from "@rental-os/shared";
 import { AuthService } from "../auth/auth.service";
 import { CategoryAdoptionApplication } from "./category-adoption.application";
-import { assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
+import { assertCategoryAdoptionCapabilityRowBounds, assertCategoryAdoptionConfigurationRowBounds, assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
 import { assertCategoryPreparationPermission, lockCategoryAdoptionAccess } from "./category-adoption-access";
 export { CATEGORY_ADOPTION_MANAGE, assertCategoryPreparationPermission } from "./category-adoption-access";
 
@@ -91,11 +91,10 @@ export class CategoryAdoptionPreparationService {
   }
   private async context(tx: Prisma.TransactionClient, user: SystemUserRow, targetId: string, operation: string, legacySave = false) {
     const { workspace, workspaceId, targetPolicyRevision } = await this.authorizedWorkspace(tx, user, targetId, operation);
-    const [target, source, preparation, capabilityRows] = await Promise.all([
+    const [target, source, preparation] = await Promise.all([
       tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
       tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }),
-      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
-      tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
+      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } })
     ]);
     if (preparation) categoryPreparationEnvelopeSource(preparation.patches);
     if (legacySave && (preparation?.patches as PreparationEnvelope | undefined)?.formatVersion === 2) {
@@ -110,9 +109,11 @@ export class CategoryAdoptionPreparationService {
     // reporting the same final-transaction limits. Batch saves read references
     // separately and do not require unrelated records to be complete.
     await assertCategoryAdoptionEntityBounds(tx, user.tenantId, workspaceId);
-    const [groups, assets] = await Promise.all([
+    await assertCategoryAdoptionConfigurationRowBounds(tx, user.tenantId, workspaceId);
+    const [groups, assets, capabilityRows] = await Promise.all([
       tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true, optional: true, substitutionGroup: true } } }, orderBy: { id: "asc" } }),
-      tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } })
+      tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } }),
+      tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
     ]);
     const records = { groups: groups.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })), assets: assets.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })) };
     const capabilityInstances = capabilityRows.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
@@ -121,20 +122,13 @@ export class CategoryAdoptionPreparationService {
 
   private async batchContext(
     tx: Prisma.TransactionClient, user: SystemUserRow, targetId: string, operation: string,
-    references: ReturnType<typeof categoryPreparationBatchEntityReferences>
+    references: ReturnType<typeof categoryPreparationBatchEntityReferences>, capabilityPreparationRequested: boolean
   ) {
     const { workspace, workspaceId } = await this.authorizedWorkspace(tx, user, targetId, operation);
     const where = { tenantId: user.tenantId, workspaceId };
-    const [target, preparation, capabilityRows, groups, assets] = await Promise.all([
+    const [target, preparation] = await Promise.all([
       tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
-      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
-      tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } }),
-      references.itemGroupIds.length
-        ? tx.rentalItemGroup.findMany({ where: { ...where, id: { in: references.itemGroupIds } }, select: { id: true, updatedAt: true } })
-        : Promise.resolve([]),
-      references.assetIds.length
-        ? tx.rentalAsset.findMany({ where: { ...where, id: { in: references.assetIds } }, select: { id: true, updatedAt: true } })
-        : Promise.resolve([])
+      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } })
     ]);
     if (preparation) categoryPreparationEnvelopeSource(preparation.patches);
     const code = readRentalCategoryCode(workspace.categoryCode);
@@ -142,6 +136,22 @@ export class CategoryAdoptionPreparationService {
     // The locked source must still be readable, but unrelated entity attributes
     // are neither needed nor supplied as today's replacement for old batches.
     resolveRentalCategoryVersionBody(await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }), code);
+    // Entity-only batches without retained capability patches need no instance
+    // JSON. Any retained/new capability preparation still validates today's
+    // original instance basis; final adoption always checks the complete set.
+    const readCapabilities = capabilityPreparationRequested || Boolean((preparation?.patches as PreparationEnvelope | undefined)?.capabilityPatches?.length);
+    if (readCapabilities) await assertCategoryAdoptionCapabilityRowBounds(tx, user.tenantId, workspaceId);
+    const [capabilityRows, groups, assets] = await Promise.all([
+      readCapabilities
+        ? tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
+        : Promise.resolve([]),
+      references.itemGroupIds.length
+        ? tx.rentalItemGroup.findMany({ where: { ...where, id: { in: references.itemGroupIds } }, select: { id: true, updatedAt: true } })
+        : Promise.resolve([]),
+      references.assetIds.length
+        ? tx.rentalAsset.findMany({ where: { ...where, id: { in: references.assetIds } }, select: { id: true, updatedAt: true } })
+        : Promise.resolve([])
+    ]);
     const capabilityInstances = capabilityRows.map((row) => ({ ...row, code: row.code as RentalCapability,
       status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
     return { workspace, workspaceId, definition, preparation, records: { groups, assets }, capabilityInstances };
@@ -348,7 +358,7 @@ export class CategoryAdoptionPreparationService {
     return this.transaction(user, async (tx) => {
       // A write-endpoint retry retains its original current eligibility/source
       // checks. Historical receipts are read separately through readBatch.
-      const context = await this.batchContext(tx, user, targetId, body.operation, entityReferences);
+      const context = await this.batchContext(tx, user, targetId, body.operation, entityReferences, Boolean(body.capabilityPatches?.length));
       if (context.workspace.categoryVersionId !== body.expectedSourceVersionId || context.workspace.categoryAdoptionRevision !== body.expectedSourceRevision) {
         throw new ConflictException("来源品类绑定已变化，请核对原准备及当前版本");
       }

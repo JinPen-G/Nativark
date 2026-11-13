@@ -37,21 +37,9 @@ export async function assertCategoryAdoptionEntityBounds(tx: Prisma.TransactionC
   return { entityCount: counts[0] + counts[1], storedEntityBytes };
 }
 
-/** Final scoped configuration gate. Caller holds policy/workspace locks and has
- * applied the candidate entities in this same transaction. Does not authorize
- * people, commit bindings, initialize readiness or change historical snapshots. */
-export async function readFinalCategoryAdoptionCompatibility(
-  tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
-  definition: Parameters<typeof readCategoryAdoptionCompatibility>[3],
-  records: Parameters<typeof readCategoryAdoptionCompatibility>[4],
-  runtime: CategoryAdoptionCapabilityRuntime, now: Date,
-  capabilityPatches: CategoryCapabilityPreparationPatch[] = []
-) {
-  if (records.groups.length + records.assets.length > CATEGORY_ADOPTION_LIMITS.entities) {
-    throw new ConflictException("当前型号与资产合计超过10000条的采用范围，原版与准备资料保留");
-  }
-  if (!runtime.hooks) throw new ConflictException("最终采用缺少实际登记的能力合同执行器");
-  runtime.hooks.assertCategoryComposition(definition);
+/** Same scoped row bounds before materialization and again on the final
+ * transaction view. The early check cannot replace post-patch validation. */
+export async function assertCategoryAdoptionConfigurationRowBounds(tx: Prisma.TransactionClient, tenantId: string, workspaceId: string) {
   const where = { tenantId, workspaceId };
   // These are the reader's unique configuration owners. Counting before reads
   // bounds memory; their writers share the held workspace mutex.
@@ -71,6 +59,11 @@ export async function readFinalCategoryAdoptionCompatibility(
       counts.reduce((sum, count) => sum + count, 0) > CATEGORY_ADOPTION_LIMITS.configurationRows) {
     throw new ConflictException("经营配置超过当前最终事务支持范围，原版与准备资料保留；请核对配置规模");
   }
+  return counts;
+}
+
+async function assertCategoryAdoptionConfigurationBounds(tx: Prisma.TransactionClient, tenantId: string, workspaceId: string) {
+  const counts = await assertCategoryAdoptionConfigurationRowBounds(tx, tenantId, workspaceId);
   // Fixed owning tables/columns only; no identifiers come from HTTP/config data.
   // Measure JSON in MySQL before materializing potentially large configuration.
   const jsonOwners = [
@@ -87,8 +80,37 @@ export async function readFinalCategoryAdoptionCompatibility(
     FROM ${Prisma.raw(`\`${table}\``)} WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId}`)));
   const configurationBytes = byteRows.reduce((sum, rows) => sum + measuredBytes(rows), 0);
   if (!Number.isSafeInteger(configurationBytes) || configurationBytes < 0 || configurationBytes > CATEGORY_ADOPTION_LIMITS.candidateBytes) {
-    throw new ConflictException("经营配置JSON超过16MiB最终采用范围，未应用准备资料");
+    throw new ConflictException("经营配置JSON超过16MiB最终采用范围，原版与准备资料保留");
   }
+  return { configurationCounts: counts, configurationBytes };
+}
+
+/** Partial batches need the current capability basis, not an unrelated complete
+ * catalog. Final JSON bounds apply after explicit candidate configuration. */
+export async function assertCategoryAdoptionCapabilityRowBounds(tx: Prisma.TransactionClient, tenantId: string, workspaceId: string) {
+  const count = await tx.workspaceCapabilityInstance.count({ where: { tenantId, workspaceId } });
+  if (!Number.isSafeInteger(count) || count < 0 || count > CATEGORY_ADOPTION_LIMITS.configurationRowsPerDomain) {
+    throw new ConflictException("能力实例超过当前准备读取范围，原版与准备资料保留");
+  }
+}
+
+/** Final scoped configuration gate. Caller holds policy/workspace locks and has
+ * applied the candidate entities in this same transaction. Does not authorize
+ * people, commit bindings, initialize readiness or change historical snapshots. */
+export async function readFinalCategoryAdoptionCompatibility(
+  tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
+  definition: Parameters<typeof readCategoryAdoptionCompatibility>[3],
+  records: Parameters<typeof readCategoryAdoptionCompatibility>[4],
+  runtime: CategoryAdoptionCapabilityRuntime, now: Date,
+  capabilityPatches: CategoryCapabilityPreparationPatch[] = []
+) {
+  if (records.groups.length + records.assets.length > CATEGORY_ADOPTION_LIMITS.entities) {
+    throw new ConflictException("当前型号与资产合计超过10000条的采用范围，原版与准备资料保留");
+  }
+  if (!runtime.hooks) throw new ConflictException("最终采用缺少实际登记的能力合同执行器");
+  runtime.hooks.assertCategoryComposition(definition);
+  const { configurationCounts: counts, configurationBytes } = await assertCategoryAdoptionConfigurationBounds(tx, tenantId, workspaceId);
+  const where = { tenantId, workspaceId };
   const [settings, rules, prices] = await Promise.all([
     tx.rentalTenantBusinessSettings.findFirst({ where, select: { settings: true } }),
     tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true } }),

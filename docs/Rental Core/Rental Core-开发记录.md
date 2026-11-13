@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="adoption-configuration-preflight-20261113"></a>
+
+## 采用配置行数前置与最终候选复核（2026-11-13）
+
+沿CAT-GOV-08继续原规模及原子采用门槛。从已核GitHub的`9b21d3e3cd7b744c7369831ca6c5e4eec979bd14`接续；原[采用反例](../../output/category-governance/adoption-configuration-preflight-before-20261113.json)确认定价配置或套装组成超过10000条时，会先执行实体补丁、读取组成，再进入原最终检查拒绝并回滚。反例中的回滚为明确串行事务fixture，没有发生真实库写入，不把它表述为已提交半成品。
+
+仅修改[最终配置检查](../../apps/api/src/modules/rental-core/category-adoption-final-compatibility.ts)、[采用事务阶段](../../apps/api/src/modules/rental-core/category-adoption-transaction-phase.ts)和[准备服务](../../apps/api/src/modules/rental-core/category-adoption-preparation.service.ts)。把原17个配置/关系领域计数抽为同事务检查，保留每领域10000条、合计50000条：实际采用在任何实体补丁及套装/定价成员物化前核对；完整预览/旧整份也在全目录/能力JSON读取前核对。最终检查在候选能力应用后重新计数、复核原配置JSON与完整候选16MiB上限，前置结果不作为最终准入证据。
+
+分批实体保存没有新能力补丁且没有此前能力准备时，不读取活动能力JSON；有新/保留能力准备时先按原领域行数限制其来源，再用原实例修订/实现合同校验，当前经营事实不变。没有用全空间配置超限阻止一条无关实体资料暂存；最终采用仍会明确拒绝超限并保留该暂存。配置JSON上限继续在候选修改后检查，避免把前置旧JSON大小当作阻止合法能力准备修复的额外业务规则。本片未改原上限、公共协议/DTO/OpenAPI/Schema、Auth、Application原键机制或报价/库存算法。
+
+原API配置、TypeScript5.9.3最终867根/2012源零诊断，三份必要emit已安装，Shared运行时/Client、采用Application及前片批次辅助六份保护文件哈希一致，见[最终类型/安装](../../output/category-governance/adoption-configuration-preflight-final-compile-20261113.json)。[当前产物十三组限定行为](../../output/category-governance/adoption-configuration-preflight-current-behavior-20261113.json)退出0、audit0：价格/规则/定价组、成员/组成分别超限在实体读取/写入前拒绝；合计50000条、全量预览前置、无关超限不拦单条准备、新/保留能力修订复核、写后计数变化回滚、原候选JSON限制、两批1000+1条正常采用/完整声明和已提交原收据不受后继超限影响均通过。
+
+原`node --no-compilation-cache --require <本树preload> --test --test-concurrency=1 --test-reporter=spec tests/category-preparation-batch-service.test.cjs tests/category-adoption-context-refresh.test.cjs`共8项通过、退出0、audit0，见[原回归](../../output/category-governance/adoption-configuration-preflight-original-tests-20261113.json)。七项配置读取包含两个独立Core对象采用后同源、旧上下文保留、空集合不造样本、后继绑定拒绝及AI读取单一Core配置；这是原fixture实例，不是真实API进程或MySQL多实例。原测试文件/断言未修改，没有新增或扩写脚本；其他旧父锁/异步/宿主失败保留。
+
+全部验证已退出、三emit在本树自持产物；一份零字节audit原生精确删除被自动审批`blocked by policy`拒绝，整条未执行/无详细理由。已安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/adoption-configuration-preflight-validation/manifest.json)，[退出证据](../../output/category-governance/adoption-configuration-preflight-cleanup-20261113.json)确认原任务暂存不存在，已归集未删除；此前各批继续原清单责任。结果仅留本对话及原记录/接续供PM主动读取，没有主动发消息、合main或新环境执行。
+
+本片补齐已知配置读取顺序，不计整项完成；完整CAT-GOV仍0/14、百分比待核实。剩余包括当前配置/历史动作与全部写入口的并发组合、真库总规模/锁/回滚/多实例、两个动态编码不同执行组合的同一冻结构建经营、浏览器/微信及独立Review；原CLOSE和企业/AI接点另按各自门槛核实。
+
 <a id="preparation-bounded-read-20261113"></a>
 
 ## 分批准备的实体读取范围与扫描前门禁（2026-11-13）
