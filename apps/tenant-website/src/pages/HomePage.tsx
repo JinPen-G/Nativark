@@ -19,6 +19,17 @@ export function HomePage() {
     useSite();
   const en = language === "en";
   const catalog = siteRepository.getProducts(tenant);
+  const singleCategory =
+    tenant.categories.length === 1 ? tenant.categories[0] : null;
+  const categoryLinks = singleCategory?.children.length
+    ? singleCategory.children.map((child) => ({
+        ...child,
+        to: `/category/${encodeURIComponent(singleCategory.id)}?sub=${encodeURIComponent(child.id)}`,
+      }))
+    : tenant.categories.map((category) => ({
+        ...category,
+        to: `/category/${encodeURIComponent(category.id)}`,
+      }));
   const categoryPicks = tenant.categories.map((category) =>
     catalog.find((product) => product.categoryId === category.id),
   );
@@ -109,11 +120,8 @@ export function HomePage() {
           </Link>
         </div>
         <div className="category-tiles">
-          {tenant.categories.map((category) => (
-            <Link
-              key={category.id}
-              to={href("/category/" + encodeURIComponent(category.id))}
-            >
+          {categoryLinks.map((category) => (
+            <Link key={category.id} to={href(category.to)}>
               <Img src={category.image} alt="" width="800" height="800" />
               <div>
                 <h3>{category.name}</h3>

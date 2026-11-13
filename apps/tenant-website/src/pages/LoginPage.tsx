@@ -6,7 +6,8 @@ import { Img } from "../components/Img";
 import { useSite } from "../SiteContext";
 import { useAuth } from "../AuthContext";
 import { authApi } from "../data/authClient";
-import { clientApi } from "../data/apiClient";
+import { useToast } from "../components/Toast";
+import { safeDocumentHref } from "@rental-os/shared";
 import {
   parseEnterpriseRoute,
   safeCustomerReturn,
@@ -30,9 +31,11 @@ export function LoginPage() {
     enterpriseDomainBound,
     tenant,
     language,
+    bootstrap,
   } = useSite();
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [params] = useSearchParams();
   const domainBound = enterpriseDomainBound;
   const redirect =
@@ -45,9 +48,7 @@ export function LoginPage() {
   const en = language === "en";
   const [passwordVisible, setPasswordVisible] = useState(false);
 
-  const [view, setView] = useState<View>(
-    params.get("view") === "register" ? "register" : "login",
-  );
+  const view: View = params.get("view") === "register" ? "register" : "login";
   const [loginMode, setLoginMode] = useState<LoginMode>("sms");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -60,12 +61,6 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const timer = useRef<number | null>(null);
-  const [agreements, setAgreements] = useState<{
-    tenantCode: string;
-    user: string;
-    privacy: string;
-  } | null>(null);
-  const [agreementsError, setAgreementsError] = useState(false);
   const registrationKey = useRef<string | null>(null);
   const currentTenant = useRef(tenantCode);
   currentTenant.current = tenantCode;
@@ -82,33 +77,28 @@ export function LoginPage() {
 
   const isRegister = view === "register";
   const needsCode = isRegister || loginMode === "sms";
+  const methods = isRemote
+    ? (bootstrap?.loginMethods ?? [])
+    : ["sms", "password"];
+  const userAgreement = bootstrap?.agreements?.userAgreement;
+  const privacyPolicy = bootstrap?.agreements?.privacyPolicy;
   const canRegister =
-    agreements?.tenantCode === tenantCode &&
-    Boolean(agreements.user && agreements.privacy);
+    bootstrap?.tenantCode === tenantCode &&
+    methods.includes("sms") &&
+    Boolean(userAgreement?.version && privacyPolicy?.version) &&
+    Boolean(
+      userAgreement?.hasBody ||
+      (userAgreement?.url && safeDocumentHref(userAgreement.url)),
+    ) &&
+    Boolean(
+      privacyPolicy?.hasBody ||
+      (privacyPolicy?.url && safeDocumentHref(privacyPolicy.url)),
+    );
+  const canLogin = methods.includes(loginMode);
   useEffect(() => {
-    let cancelled = false;
-    setAgreements(null);
-    setAgreementsError(false);
-    if (!isRegister || !isRemote || !tenantCode) return;
-    clientApi
-      .bootstrap(tenantCode)
-      .then((bootstrap) => {
-        if (cancelled) return;
-        const user = bootstrap.agreements?.userAgreement?.version;
-        const privacy = bootstrap.agreements?.privacyPolicy?.version;
-        if (!user || !privacy) {
-          setAgreementsError(true);
-          return;
-        }
-        setAgreements({ tenantCode, user, privacy });
-      })
-      .catch(() => {
-        if (!cancelled) setAgreementsError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isRegister, isRemote, tenantCode]);
+    if (!methods.includes(loginMode))
+      setLoginMode(methods.includes("sms") ? "sms" : "password");
+  }, [bootstrap, loginMode]);
   useEffect(() => {
     setPhone("");
     setPassword("");
@@ -124,7 +114,10 @@ export function LoginPage() {
     if (timer.current) window.clearInterval(timer.current);
   }, [tenantCode]);
   function switchView(next: View) {
-    setView(next);
+    const query = new URLSearchParams(params);
+    if (next === "register") query.set("view", "register");
+    else query.delete("view");
+    navigate(href("/login?" + query));
     setError("");
     setCode("");
     setChallengeId(null);
@@ -150,7 +143,13 @@ export function LoginPage() {
 
   async function sendCode() {
     setError("");
-    if (!isRemote || !tenantCode || pending || (isRegister && !canRegister))
+    if (
+      !isRemote ||
+      !tenantCode ||
+      pending ||
+      !methods.includes("sms") ||
+      (isRegister && !canRegister)
+    )
       return;
     if (!phoneValid(phone)) {
       setError(t("requiredPhone"));
@@ -169,20 +168,22 @@ export function LoginPage() {
       setDevCode(challenge.developmentCode ?? null);
       startCountdown();
     } catch (e: any) {
-      setError(e?.message || t("loginFailed"));
+      if (currentTenant.current === tenantCode)
+        setError(e?.message || t("loginFailed"));
     } finally {
-      setPending(false);
+      if (currentTenant.current === tenantCode) setPending(false);
     }
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
-    if (!isRemote || !tenantCode || pending) return;
+    if (!isRemote || !tenantCode || pending || (!isRegister && !canLogin))
+      return;
     setPending(true);
     try {
       if (isRegister) {
-        if (!canRegister || !agreements)
+        if (!canRegister || !userAgreement || !privacyPolicy)
           throw new Error(
             en
               ? "The store must provide current terms before registration."
@@ -199,7 +200,7 @@ export function LoginPage() {
         );
         if (currentTenant.current !== tenantCode) return;
         registrationKey.current ??= `reg-${crypto.randomUUID()}`;
-        await authApi.register({
+        const registration = await authApi.register({
           tenantCode,
           name: name.trim(),
           phone: phone.trim(),
@@ -207,18 +208,27 @@ export function LoginPage() {
           verificationToken: verified.verificationToken,
           idempotencyKey: registrationKey.current,
           consent: {
-            userAgreementVersion: agreements.user,
-            privacyPolicyVersion: agreements.privacy,
+            userAgreementVersion: userAgreement.version,
+            privacyPolicyVersion: privacyPolicy.version,
             agreedAt: new Date().toISOString(),
           },
         });
         if (currentTenant.current !== tenantCode) return;
-        // 注册成功后用同一手机号密码直接登录。
-        await authApi.passwordLogin({
-          tenantCode,
-          loginIdentifier: phone.trim(),
-          password,
-        });
+        if (!registration.customerId) throw new Error(t("loginFailed"));
+        if (methods.includes("password")) {
+          await authApi.passwordLogin({
+            tenantCode,
+            loginIdentifier: phone.trim(),
+            password,
+          });
+        } else {
+          switchView("login");
+          toast.success(
+            en
+              ? "Account created. Sign in with a new login code."
+              : "账户已创建，请获取登录验证码继续。",
+          );
+        }
       } else if (loginMode === "password") {
         if (!phoneValid(phone)) throw new Error(t("requiredPhone"));
         await authApi.passwordLogin({
@@ -273,7 +283,7 @@ export function LoginPage() {
               >
                 <button
                   type="button"
-                  disabled={pending}
+                  disabled={pending || !methods.includes("sms")}
                   aria-pressed={loginMode === "sms"}
                   className={loginMode === "sms" ? "active" : ""}
                   onClick={() => {
@@ -285,7 +295,7 @@ export function LoginPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={pending}
+                  disabled={pending || !methods.includes("password")}
                   aria-pressed={loginMode === "password"}
                   className={loginMode === "password" ? "active" : ""}
                   onClick={() => {
@@ -415,21 +425,36 @@ export function LoginPage() {
                   />
                   <span>
                     {t("loginAgreePrefix")}{" "}
-                    <Link to={href("/agreement")}>{t("docUserAgreement")}</Link>{" "}
+                    <Link
+                      to={href("/agreement")}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {t("docUserAgreement")}
+                    </Link>{" "}
                     {t("and")}{" "}
-                    <Link to={href("/privacy")}>{t("docPrivacyPolicy")}</Link>
+                    <Link
+                      to={href("/privacy")}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {t("docPrivacyPolicy")}
+                    </Link>
                   </span>
                 </label>
               )}
               {isRegister && isRemote && !canRegister && (
                 <p className="field-note" role="status">
-                  {agreementsError
-                    ? en
-                      ? "Current terms are unavailable. Please contact the store before registering."
-                      : "当前协议暂不可用，请联系门店后再注册。"
-                    : en
-                      ? "Loading the current terms…"
-                      : "正在读取当前协议…"}
+                  {en
+                    ? "Registration is currently unavailable. Contact the store for account access."
+                    : "当前注册暂不可用，请联系门店了解账户开通方式。"}
+                </p>
+              )}
+              {!isRegister && !canLogin && isRemote && (
+                <p className="field-note" role="status">
+                  {en
+                    ? "Web sign-in is currently unavailable. Contact the store for help."
+                    : "当前网页登录暂不可用，请联系门店。"}
                 </p>
               )}
               {error && (
@@ -443,11 +468,18 @@ export function LoginPage() {
                 disabled={
                   !isRemote ||
                   pending ||
+                  (!isRegister && !canLogin) ||
                   (isRegister && (!canRegister || !agree))
                 }
               >
                 {pending && <Loader />}
-                {isRegister ? t("loginRegisterSubmit") : t("loginSubmit")}
+                {isRegister
+                  ? t(
+                      methods.includes("password")
+                        ? "loginRegisterSubmit"
+                        : "loginRegister",
+                    )
+                  : t("loginSubmit")}
               </button>
             </form>
             <p className="login-switch">

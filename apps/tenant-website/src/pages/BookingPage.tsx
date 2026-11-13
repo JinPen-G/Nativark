@@ -71,11 +71,18 @@ export function BookingPage() {
   const submissionId = useRef<string | null>(null);
   const submittedAt = useRef<string | null>(null);
   const submitting = useRef(false);
+  const mounted = useRef(true);
   const identity = JSON.stringify([tenant.id, productId]);
   const owner = useRef(identity);
   owner.current = identity;
   const en = language === "en";
   const remoteNeedsLogin = isRemote && !isAuthenticated;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     setStartDate(params.get("start") || offsetDaysInput(1));
@@ -249,18 +256,18 @@ export function BookingPage() {
         },
       };
       await siteRepository.saveOrder(order);
-      if (owner.current !== operationOwner) return;
+      if (!mounted.current || owner.current !== operationOwner) return;
       toast.success(t("bookingSaved"));
       navigate(href(`/orders/${encodeURIComponent(order.id)}`));
     } catch {
-      if (owner.current === operationOwner)
+      if (mounted.current && owner.current === operationOwner)
         setError(
           en
             ? "The browser could not confirm saving. Check your rentals, then retry with the same details."
             : "浏览器尚未确认保存。请先查看我的租赁，再按原信息重试。",
         );
     } finally {
-      if (owner.current === operationOwner) {
+      if (mounted.current && owner.current === operationOwner) {
         submitting.current = false;
         setSaving(false);
       }

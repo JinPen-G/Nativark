@@ -1,0 +1,30 @@
+{
+  "reviewer": "impeccable_finish_reviewer",
+  "method": "Fresh independent screenshot and sampled frontend review, followed by a fix-list verdict",
+  "dispositionHistory": ["recapture", "fix", "ship"],
+  "captureIssue": {
+    "file": "desktop-first-viewport.jpg",
+    "result": "Replaced with an unpadded 1280x720 capture, normalized for devicePixelRatio=2"
+  },
+  "fullReview": {
+    "persistence": "PRODUCT.md and the six-block direction contract exist. Seed reference matches the supplied roll.",
+    "fidelity": "Thesis, typography, material, light ground, first viewport, story and form match the contract. The drill identity contradicted its photograph.",
+    "ceiling": "Consistent frame, restrained palette, photographic focal point and quiet transactional hierarchy. Selection, caret, focus and scrollbar treatments are authored.",
+    "materialFixes": [
+      {
+        "finding": "Drill photograph shows DIANA 9.6V but demo text claimed Bosch PSR 14.4",
+        "resolution": "Generic Chinese and English cordless-drill identity, with model and voltage confirmed before booking",
+        "verdict": "resolved",
+        "evidence": ["catalog.jpg", "drill-detail.jpg", "browser-checks.json"]
+      }
+    ],
+    "keep": "Coastal photograph, white/navy/yellow restraint, mobile query priority, direct product presentation and clear demo estimates"
+  },
+  "finalVerdict": {
+    "disposition": "ship",
+    "scope": "The scored drill-identity truth fix only",
+    "remaining": "All required recaptures are valid. No regression attributable to this fix is visible."
+  },
+  "inputLimitations": ["Verified QUALITY BAR card unavailable"],
+  "notCovered": ["Formal project QA", "Real business services", "Production performance", "Deployment"]
+}

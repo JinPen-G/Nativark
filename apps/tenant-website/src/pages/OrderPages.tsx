@@ -21,8 +21,13 @@ import { EnterpriseExtensionApproval } from "../components/EnterpriseExtensionAp
 import { EnterpriseExchangeProgress } from "../components/EnterpriseExchangeProgress";
 import { EnterpriseExchangeRequest } from "../components/EnterpriseExchangeRequest";
 
-const date = (value: unknown) =>
-  typeof value === "string" ? value.slice(0, 16).replace("T", " ") : "—";
+const date = (value: unknown) => {
+  if (typeof value !== "string") return "—";
+  const zone = value.endsWith("Z")
+    ? " UTC"
+    : (value.match(/[+-]\d{2}:\d{2}$/)?.[0] ?? "");
+  return value.slice(0, 16).replace("T", " ") + zone;
+};
 
 const statusKeys = {
   draft: "orderStatus_draft",
@@ -476,7 +481,11 @@ export function OrderDetailPage() {
     snapshot?.cover || currentProduct?.cover || "/media/image-unavailable.svg";
   const currency = remote ? order?.currency : (demo?.currency ?? "CNY");
   const facts = order ? customerOrderFacts(order, orderId ?? "") : null;
-  const title = remote ? order?.orderNo || t("orderNumber") : t("savedTitle");
+  const title = isRemote
+    ? order?.orderNo || (en ? "Rental details" : "订单详情")
+    : demo
+      ? t("savedTitle")
+      : t("missingOrder");
   const businessIdentity = JSON.stringify([
     tenantCode,
     orderId,
@@ -494,7 +503,7 @@ export function OrderDetailPage() {
         ]}
       />
       {isRemote && !isAuthenticated ? (
-        <PageState icon={<Receipt />} title={t("loginRequired")}>
+        <PageState heading="h1" icon={<Receipt />} title={t("loginRequired")}>
           <Link
             className="button button-dark"
             to={href(
@@ -507,7 +516,12 @@ export function OrderDetailPage() {
       ) : loading || (remote && !order && !error) ? (
         <LoadingState label={t("loading")} />
       ) : error ? (
-        <PageState error title={t("loadFailed")} description={error}>
+        <PageState
+          heading="h1"
+          error
+          title={t("loadFailed")}
+          description={error}
+        >
           <button
             type="button"
             className="button button-outline"
@@ -906,7 +920,7 @@ export function OrderDetailPage() {
           </div>
         </>
       ) : (
-        <PageState icon={<Receipt />} title={t("missingOrder")}>
+        <PageState heading="h1" icon={<Receipt />} title={t("missingOrder")}>
           <Link className="button button-dark" to={href("/orders")}>
             {t("returnOrders")}
           </Link>

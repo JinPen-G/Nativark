@@ -208,6 +208,9 @@ export async function loadRemoteBootstrap(
   tenantCode: string,
 ): Promise<{ tenant: Tenant; bootstrap: BootstrapResponse }> {
   const bootstrap = await clientApi.bootstrap(tenantCode);
+  if (bootstrap.tenantCode !== tenantCode || bootstrap.client !== "web") {
+    throw new Error("租户官网数据不匹配");
+  }
   const imageByCode = new Map(
     (bootstrap.website?.categoryImages ?? []).map((item) => [
       item.code,
@@ -227,7 +230,7 @@ export async function loadRemoteBootstrap(
 export async function loadRemoteCatalogs(
   tenantCode: string,
   bootstrap: BootstrapResponse,
-): Promise<{ tenant: Tenant; products: Product[] }> {
+): Promise<{ tenant: Tenant; products: Product[]; catalogsFailed: boolean }> {
   const openServices = openServicesOf(bootstrap);
   const catalogs = await Promise.all(
     openServices.map(async (service) => {
@@ -279,6 +282,7 @@ export async function loadRemoteCatalogs(
   return {
     tenant: buildTenant(bootstrap, categories, [...storeById.values()]),
     products,
+    catalogsFailed: catalogs.some((catalog) => catalog === null),
   };
 }
 

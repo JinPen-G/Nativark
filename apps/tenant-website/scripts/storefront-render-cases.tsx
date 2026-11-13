@@ -19,6 +19,16 @@ import { AboutPage, GuidePage, NotFoundPage } from "../src/pages/InfoPages";
 import { DocumentPage } from "../src/pages/DocumentPage";
 import { demoTenants } from "../src/data/catalog";
 import { applyTenantFavicon } from "../src/theme";
+import { offsetDaysInput, validRentalPeriod } from "../src/data/datetime";
+import { knownMoney } from "../src/data/money";
+import { siteRepository } from "../src/data/siteRepository";
+import type { DemoOrder } from "../src/types";
+import { CLIENT_API_VERSION } from "@rental-os/shared";
+import { clientApi, type BootstrapResponse } from "../src/data/apiClient";
+import {
+  loadRemoteBootstrap,
+  loadRemoteCatalogs,
+} from "../src/data/remoteSite";
 
 export async function verify(root: string) {
   const memory = new Map<string, string>();
@@ -227,6 +237,130 @@ export async function verify(root: string) {
         }
       }
   assert.equal(networkCalls, 0);
+  const tomorrow = offsetDaysInput(1);
+  const later = offsetDaysInput(2);
+  assert.equal(validRentalPeriod(tomorrow, later), true);
+  assert.equal(validRentalPeriod(tomorrow, tomorrow), false);
+  assert.equal(validRentalPeriod(later, tomorrow), false);
+  assert.equal(
+    validRentalPeriod("2030-02-30T10:00", "2030-03-04T10:00", false),
+    false,
+  );
+  assert.equal(validRentalPeriod("bad-date", later), false);
+  assert.equal(validRentalPeriod("2030-01-02", "2030-01-04", false), true);
+  assert.equal(knownMoney(0, "CNY"), "¥0.00");
+  assert.equal(knownMoney(undefined, "CNY"), null);
+  assert.equal(knownMoney(NaN, "CNY"), null);
+  assert.equal(knownMoney(100, undefined), null);
+  const storageKey = "rental-os-tenant-website-demo-orders";
+  const demoOrder: DemoOrder = {
+    id: "CHECK-SAVED-ORDER",
+    tenantId: demoTenants.multiple.id,
+    productId: "camera-a7",
+    startDate: tomorrow,
+    endDate: later,
+    quantity: 1,
+    fulfillment: "pickup",
+    contactName: "Offline fixture",
+    contactPhone: "",
+    note: "",
+    rentalAmount: 120,
+    depositAmount: 2000,
+    createdAt: "2030-01-01T00:00:00Z",
+  };
+  memory.set(storageKey, "[]");
+  await siteRepository.saveOrder(demoOrder);
+  await siteRepository.saveOrder(demoOrder);
+  assert.equal(
+    siteRepository.getOrders(demoTenants.multiple).length,
+    1,
+    "Retry must retain one original demo record",
+  );
+  assert.equal(
+    siteRepository.getOrders(demoTenants.single).length,
+    0,
+    "Demo records must stay in their tenant",
+  );
+  const retained = memory.get(storageKey);
+  const setItem = local.setItem;
+  try {
+    local.setItem = () => {
+      throw new Error("Storage unavailable");
+    };
+    await assert.rejects(
+      siteRepository.saveOrder({ ...demoOrder, id: "CHECK-UNSAVED-ORDER" }),
+      /Storage unavailable/,
+    );
+    assert.equal(
+      memory.get(storageKey),
+      retained,
+      "Failed saving must retain existing records",
+    );
+  } finally {
+    local.setItem = setItem;
+  }
+  const bootstrapFixture: BootstrapResponse = {
+    apiVersion: CLIENT_API_VERSION,
+    tenantCode: "offline-store",
+    client: "web",
+    merchant: { name: "Offline store" },
+    services: [
+      {
+        code: "camera",
+        name: "Camera",
+        categoryCode: "camera",
+        status: "open",
+      },
+    ],
+    categories: [],
+    help: { available: false, faqCount: 0 },
+    loginMethods: [],
+    capabilities: {
+      publicCatalog: true,
+      wechatPay: false,
+      delivery: false,
+      feeResponse: false,
+      accountClosure: false,
+    },
+    source: "channel",
+  };
+  const originalBootstrap = clientApi.bootstrap;
+  const originalCatalog = clientApi.publicCatalog;
+  try {
+    clientApi.bootstrap = async () => bootstrapFixture;
+    assert.equal(
+      (await loadRemoteBootstrap("offline-store")).tenant.name,
+      "Offline store",
+    );
+    await assert.rejects(
+      loadRemoteBootstrap("another-store"),
+      /租户官网数据不匹配/,
+    );
+    clientApi.bootstrap = async () => ({
+      ...bootstrapFixture,
+      client: "wechat_miniprogram",
+    });
+    await assert.rejects(
+      loadRemoteBootstrap("offline-store"),
+      /租户官网数据不匹配/,
+    );
+    clientApi.publicCatalog = async () => {
+      throw new Error("Catalog unavailable");
+    };
+    const failedCatalog = await loadRemoteCatalogs(
+      "offline-store",
+      bootstrapFixture,
+    );
+    assert.equal(failedCatalog.catalogsFailed, true);
+    assert.equal(
+      failedCatalog.products.length,
+      0,
+      "Failed loading must not inject demo products",
+    );
+  } finally {
+    clientApi.bootstrap = originalBootstrap;
+    clientApi.publicCatalog = originalCatalog;
+  }
   const link: any = {
     href: "",
     type: "",
@@ -270,6 +404,7 @@ export async function verify(root: string) {
       componentRenders: rendered,
       networkCalls,
       faviconChecks: 9,
+      targetedBehaviorChecks: 19,
       browserVerified: false,
     }),
   );

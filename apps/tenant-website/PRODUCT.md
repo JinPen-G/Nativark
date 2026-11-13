@@ -37,7 +37,7 @@ web
 
 ## Evidence on Hand
 
-正式产品与安全依据见 `docs/预约网站/` 和 `docs/客户端共用/`。本次设计参考从 Saaspo 筛选，决策记录在本应用设计说明。当前阶段待完成新版构建和内置浏览器验收。
+正式产品与安全依据见 `docs/预约网站/` 和 `docs/客户端共用/`。本次设计参考从实际浏览的 Saaspo 页面筛选，方向记录在本应用 surface brief。构建、离线检查、内置浏览器记录及独立设计复核见 `design-qa.md`，真实业务与发布沿原正式验收门槛核对。
 
 ## Product Principles
 

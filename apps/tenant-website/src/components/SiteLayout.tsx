@@ -29,6 +29,7 @@ export function SiteLayout({ children }: { children: ReactNode }) {
     theme,
     toggleTheme,
     isRemote,
+    productsError,
   } = useSite();
   const { isAuthenticated } = useAuth();
   const location = useLocation();
@@ -201,6 +202,22 @@ export function SiteLayout({ children }: { children: ReactNode }) {
         )}
       </header>
       <main id="main-content" tabIndex={-1}>
+        {productsError && (
+          <div className="shell catalog-load-notice" role="alert">
+            <p>
+              {en
+                ? "Some rentals could not be loaded. Reload to check the full catalog."
+                : "部分商品目录未能加载，请重新加载后查看。"}
+            </p>
+            <button
+              className="button button-outline"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              {en ? "Reload catalog" : "重新加载目录"}
+            </button>
+          </div>
+        )}
         {children}
       </main>
       <footer className="site-footer">

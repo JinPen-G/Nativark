@@ -485,8 +485,8 @@ export const products: Product[] = [
   },
   {
     id: "tool-drill",
-    name: "Bosch 充电电钻",
-    nameEn: "Bosch cordless drill",
+    name: "充电电钻",
+    nameEn: "Cordless drill",
     subtitle: "家装钻孔与家具装配",
     subtitleEn: "Drilling and furniture assembly",
     cover: media("cordless-drill"),
@@ -502,17 +502,17 @@ export const products: Product[] = [
     availableQuantity: 6,
     badges: [],
     description:
-      "用于钻孔和螺钉装配的充电电钻。下单前需说明作业材料，并核对所需钻头与配件。",
+      "用于钻孔和螺钉装配的充电电钻。照片为通用设备示意，具体型号、电压、钻头与配件在预约前确认。",
     descriptionEn:
-      "A cordless drill for drilling and screw assembly. Confirm suitable bits and accessories for your material before booking.",
+      "A cordless drill for drilling and screw assembly. The photograph is illustrative. Confirm the model, voltage, bits and accessories before booking.",
     specs: {
       类型: "充电电钻",
-      型号: "Bosch PSR 14.4",
+      型号与电压: "预约前确认",
       包含: "电钻、电池与充电器",
     },
     specsEn: {
       Type: "Cordless drill",
-      Model: "Bosch PSR 14.4",
+      "Model and voltage": "Confirm before booking",
       Includes: "Drill, battery and charger",
     },
   },

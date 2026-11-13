@@ -2,7 +2,7 @@
 import { build } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { resolve, relative, isAbsolute } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -10,6 +10,9 @@ const temporary = resolve(
   root,
   "../../output/.tmp/tenant-website-redesign/render-check",
 );
+const taskRelative = relative(resolve(root, "../.."), temporary);
+if (taskRelative.startsWith("..") || isAbsolute(taskRelative))
+  throw new Error("Render check temporary path escaped the worktree");
 await mkdir(temporary, { recursive: true });
 try {
   await build({

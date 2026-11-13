@@ -144,6 +144,18 @@ html {
   white-space: nowrap;
   border: 0;
 }
+.catalog-load-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-block: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.catalog-load-notice p {
+  font-size: 14px;
+}
 .skip-link {
   position: fixed;
   left: 16px;
@@ -463,7 +475,7 @@ html {
 }
 .category-tiles {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
   gap: 12px;
 }
 .category-tiles > a {
@@ -864,6 +876,12 @@ html {
   display: grid;
   grid-template-columns: 188px minmax(0, 1fr);
   gap: 36px;
+}
+.catalog-sidebar,
+.member-navigation,
+.doc-navigation,
+.guide-index {
+  min-width: 0;
 }
 .catalog-sidebar h2 {
   font-size: 12px;
@@ -2475,6 +2493,22 @@ input[type="radio"] {
   color: var(--muted);
   font-size: 14px;
 }
+.remote-gate-content {
+  max-width: 540px;
+  text-align: center;
+  padding: 32px;
+}
+.remote-gate-content img {
+  margin: 0 auto 26px;
+}
+.remote-gate-content h1 {
+  color: var(--ink);
+  font-size: 27px;
+  line-height: 1.5;
+}
+.remote-gate-content p {
+  margin-block: 16px 24px;
+}
 .toast-host {
   position: fixed;
   top: 102px;
@@ -2531,7 +2565,7 @@ input[type="radio"] {
     margin-top: 4px;
   }
   .category-tiles {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   }
   .story-inner {
     gap: 55px;

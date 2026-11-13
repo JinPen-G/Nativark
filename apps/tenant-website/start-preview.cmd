@@ -8,9 +8,9 @@ where npm >nul 2>nul
 if errorlevel 1 goto npm_missing
 
 echo Starting the tenant website preview...
-echo Open http://127.0.0.1:4187/?tenant=multiple after Vite is ready.
+echo Open http://127.0.0.1:4194/?tenant=multiple after Vite is ready.
 echo.
-call npm run dev -- --port 4187
+call npm run dev -- --mode ai-offline --port 4194
 set "preview_exit_code=%ERRORLEVEL%"
 
 echo.
