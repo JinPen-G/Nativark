@@ -310,8 +310,11 @@ export function createAutomationReviewSession(input: {
     && verifiedGrant.locator.expectedRevision === view.review.review.revision
     && verifiedGrant.review === reviewStamp(view.review) && Date.parse(verifiedGrant.expiresAt) > clock()
     && (action !== 'close' || view.review.review.status === 'open'));
-  const readGrant = async (query: AiAutomationReviewGrantReadDraft, signal: AbortSignal, preparation?: AiAutomationReviewGrantPreparationDraft) => {
-    const before = await freshReview(query.inputRef, signal);
+  const readGrant = async (query: AiAutomationReviewGrantReadDraft, signal: AbortSignal,
+    preparation?: AiAutomationReviewGrantPreparationDraft, originalOnly = false) => {
+    if (originalOnly && (query.preparedRef === undefined || preparation !== undefined || !grantRecord
+      || !same(grantRecord, query))) throw unavailable();
+    const before = originalOnly ? undefined : await freshReview(query.inputRef, signal);
     const result = validateAutomationReview<AiAutomationReviewGrantObservationDraft>('AiAutomationReviewGrantObservationDraft', await input.api.readGrant(query, signal)); assert();
     assertGrantKey(result.key, query, before);
     if (query.preparedRef !== undefined && result.preparedRef !== query.preparedRef) throw unavailable();
@@ -323,8 +326,20 @@ export function createAutomationReviewSession(input: {
     if (result.state === 'observed' && result.active && (!receipt || !result.grant.enabled
       || receipt.grantRevision !== result.grant.revision || receipt.resourceHash !== result.grant.resourceHash
       || receipt.expiresAt !== result.grant.expiresAt || !same(receipt.requiredPermissions, result.grant.requiredPermissions))) throw unavailable();
+    if (originalOnly) {
+      // A recovered enable receipt resolves delivery. It does not revalidate an
+      // old risk card or grant a new close/feedback without a fresh review.
+      retractGrant();
+      view = { ...view, event: null, candidate: null, review: null, creation: null, recheck: null, openedEntry: null };
+      if (result.state === 'observed' && receipt && grantRecord && same(grantRecord,
+        { inputRef: query.inputRef, action: query.action, expectedRevision: query.expectedRevision, preparedRef: receipt.preparedRef })) {
+        clearGrant(grantRecord);
+      }
+      publish({ eventId: result.key.eventId, inputRef: query.inputRef, grantObservation: result });
+      return result;
+    }
     const after = await freshReview(query.inputRef, signal);
-    if (reviewStamp(before) !== reviewStamp(after)) throw Error('AI_REVISION_CONFLICT');
+    if (!before || reviewStamp(before) !== reviewStamp(after)) throw Error('AI_REVISION_CONFLICT');
     if (!view.event || view.event.event.eventId !== after.event.eventId || view.event.event.fence !== after.event.fence
       || !same(view.event.currentSource, after.currentSource)) {
       view = { ...view, event: null, candidate: null, recheck: null, openedEntry: null };
@@ -614,7 +629,7 @@ export function createAutomationReviewSession(input: {
       // Recover only the grant's own receipt plus the terminal read authority;
       // do not expire an event marker, create work or replay either write log.
       const original = structuredClone(grantRecord);
-      const result = await readGrant(original, signal);
+      const result = await readGrant(original, signal, undefined, true);
       if (result.state !== 'observed' || !result.receipt) throw Error('AI_RESULT_UNKNOWN');
       return result;
     }),

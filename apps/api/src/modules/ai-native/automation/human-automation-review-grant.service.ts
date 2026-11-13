@@ -1,13 +1,15 @@
 /** Explicit current-human metadata grants. The published policy and original
  * review target are mandatory; reads never enable or renew. The existing grant
  * row is current authority, and original OperationLog receipts preserve each
- * admitted policy/permission/expiry snapshot without another table. */
+ * admitted policy/permission/expiry snapshot without another table. Original
+ * receipt reads retain current business read access when a trigger was removed. */
 import { Prisma, type PrismaClient, type OperationLog } from '@prisma/client';
 import { z } from 'zod';
 import { hasEffectivePermission } from '../../../common/permission-match';
 import { requestFingerprint as fingerprint } from '../../rental-core/rental-idempotency.repository';
 import { HumanAutomationReviewError, type HumanAutomationOriginalGrantTarget,
-  type HumanAutomationReviewGrantTarget, type HumanAutomationReviewService } from './human-automation-review.service';
+  type HumanAutomationReviewGrantTarget, type HumanAutomationReviewGrantReadTarget,
+  type HumanAutomationReviewService } from './human-automation-review.service';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const uuid = z.string().uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -85,7 +87,7 @@ const receiptId = (preparedRef: string) => deterministicId({ version: 'human-aut
 const grantId = (key: Key) => deterministicId({ version: 'human-automation-review-grant-key-1', key });
 const storedKey = (key: Key) => ({ scopeId: key.scopeId, actorId: key.actorId, audience: key.audience,
   inputId: key.inputId, action: key.action, expectedRevision: key.expectedRevision });
-function targetKey(target: HumanAutomationReviewGrantTarget, expectedRevision = target.expectedRevision): Key {
+function targetKey(target: HumanAutomationReviewGrantTarget | HumanAutomationReviewGrantReadTarget, expectedRevision = target.expectedRevision): Key {
   return keySchema.parse({ tenantId: target.tenantId, workspaceId: target.workspaceId, scopeId: target.scopeId,
     userId: target.userId, actorKind: target.actorKind, actorId: target.actorId, audience: target.audience,
     inputId: target.inputId, eventId: target.eventId, action: target.action, expectedRevision });
@@ -102,13 +104,14 @@ function grantSnapshot(row: StoredGrant, key: Key) {
 }
 
 export class HumanAutomationReviewGrantService {
-  constructor(private readonly db: Db, private readonly reviews: Pick<HumanAutomationReviewService, 'withGrantTarget'>,
+  constructor(private readonly db: Db, private readonly reviews: Pick<HumanAutomationReviewService, 'withGrantTarget' | 'withOriginalGrantTarget'>,
     private readonly policySource: HumanAutomationReviewGrantPolicySource, private readonly clock: () => Date = () => new Date()) {
     if (typeof db?.$transaction !== 'function' || typeof db.$queryRaw !== 'function'
       || typeof db.aiAutomationReviewGrant?.findFirst !== 'function' || typeof db.aiAutomationReviewGrant.create !== 'function'
       || typeof db.aiAutomationReviewGrant.updateMany !== 'function' || typeof db.operationLog?.findFirst !== 'function'
       || typeof db.operationLog.findMany !== 'function' || typeof db.operationLog.create !== 'function'
-      || typeof reviews?.withGrantTarget !== 'function' || typeof policySource?.read !== 'function') throw unavailable();
+      || typeof reviews?.withGrantTarget !== 'function' || typeof reviews.withOriginalGrantTarget !== 'function'
+      || typeof policySource?.read !== 'function') throw unavailable();
   }
 
   private async policy(target: HumanAutomationReviewGrantTarget) {
@@ -318,8 +321,58 @@ export class HumanAutomationReviewGrantService {
     }, db);
   }
 
+  private async readOriginalGrant(query: z.infer<typeof readSchema> & { preparedRef: string }) {
+    let observed: string | undefined, uncertain = false;
+    const original = async (target: HumanAutomationReviewGrantReadTarget) => {
+      const key = targetKey(target, query.expectedRevision), row = structuredClone(await this.grant(this.db, key));
+      const receipt = structuredClone(await this.originalReceipt(this.db, key, query.preparedRef));
+      if (receipt && (!row || receipt.inputHash !== target.inputHash || receipt.creationKey !== target.creationKey
+        || receipt.grantId !== row.id || receipt.grantRevision > row.revision
+        || receipt.grantRevision === row.revision && !this.matchesRow(row, key, receipt)
+        || Date.parse(receipt.preparedAt) > Date.parse(receipt.recordedAt)
+        || Date.parse(receipt.recordedAt) > this.clock().getTime()
+        || Date.parse(receipt.expiresAt) <= Date.parse(receipt.preparedAt))) throw unavailable();
+      return { key, row, receipt, snapshot: fingerprint(JSON.parse(JSON.stringify({ row, receipt }))) };
+    };
+    return this.reviews.withOriginalGrantTarget(query, async target => {
+      let result: Awaited<ReturnType<typeof original>>;
+      try { result = await original(target); }
+      catch (error) {
+        if (error instanceof HumanAutomationReviewError) throw error;
+        uncertain = true;
+        return { state: 'unknown' as const, key: targetKey(target, query.expectedRevision), preparedRef: query.preparedRef,
+          retryable: false as const, nextAction: 'read_original_grant' as const, active: false, ...semantics };
+      }
+      observed = result.snapshot;
+      const { key, row, receipt } = result;
+      if (!receipt) return { state: 'not_observed' as const, key, preparedRef: query.preparedRef,
+        receipt: null, grant: row ? grantSnapshot(row, key) : null, active: false, ...semantics };
+      let active = false;
+      try {
+        active = await this.reviews.withGrantTarget({ inputRef: query.inputRef, action: query.action }, async current => {
+          const policy = await this.policy(current);
+          const available = Boolean(row && this.matchesRow(row, key, receipt) && row.enabled && row.expiresAt > this.clock()
+            && current.expectedRevision === key.expectedRevision && current.resourceHash === receipt.resourceHash
+            && current.targetFingerprint === receipt.targetFingerprint && current.principalFingerprint === target.principalFingerprint
+            && this.receiptPolicyMatches(receipt, policy.value)
+            && same(receipt.requiredPermissions, policy.value.actions[query.action].requiredPermissions));
+          return available && same((await this.policy(current)).reference, policy.reference);
+        });
+      } catch {
+        // An unavailable current trigger cannot hide an original receipt. The
+        // enclosing historical Guard and final row checks still reject changed
+        // identity, scope or immutable evidence before any result is exposed.
+      }
+      return { state: 'observed' as const, key, preparedRef: query.preparedRef,
+        receipt, grant: grantSnapshot(row!, key), active, ...semantics };
+    }, async target => {
+      if (!uncertain && (await original(target)).snapshot !== observed) throw conflict();
+    });
+  }
+
   async read(value: unknown) {
     const query = parse(readSchema, value);
+    if (query.preparedRef !== undefined) return this.readOriginalGrant({ ...query, preparedRef: query.preparedRef });
     return this.reviews.withGrantTarget({ inputRef: query.inputRef, action: query.action }, async target => {
       const key = targetKey(target, query.expectedRevision);
       let row: StoredGrant | null, receipt: HumanAutomationReviewGrantReceipt | null;

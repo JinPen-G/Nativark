@@ -6,6 +6,24 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14及本次16已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain18-original-grant-recovery-20261114"></a>
+## AIN-17/18 政策停用后的原人工授权收据恢复（2026-11-14）
+
+原人工 metadata grant 启用已提交但应答丢失时，恢复先读当前异常／发布政策，来源已解决或政策停用会连原收据也挡住。本阶段[原 review 服务](../../apps/api/src/modules/ai-native/automation/human-automation-review.service.ts)新增仅完整原定位可用的历史读权接点，复核当前人类 Auth／Guard／ALS、冻结 Input／Event、原 Task创建及 owner／scope；[原 grant 服务](../../apps/api/src/modules/ai-native/automation/human-automation-review-grant.service.ts)从同 preparedRef 的 OperationLog 核原键、授权修订、期限和 grant 关联。来源／政策不可用只使 active=false，不删除收据、不续TTL、不授新关闭／反馈；当前身份与原不可变绑定仍在最终等待后复验。新prepare/enable/close/feedback保持原当前门禁。
+
+[原恢复 session](../../apps/admin/src/features/ai-native/automation-review-session.ts)只请求同一 readGrant；观察到原启用收据后，仅清理匹配定位，撤回过时风险卡和旧 grant 权限。再次办理仍需读当前事实、另行准备并明确启用，不把历史读成功当新动作许可。dev1三源已冻结交权，Root逐blob核同：review `b60d42eb47cb2bb0f6d8ccfe7a8265c4fa3329e0`、grant `6885182b197de961ea413bed8e176cdeedb7f6d2`、session `1f52366a841836b2bb61852c9ae143585a9df7fc`。原 BusinessFailureReadAuthority 未改，未增加第四份权限实现。
+
+| 必要模拟／类型 | 固定证据与实际结果 |
+| --- | --- |
+| dev1 两类资源，原enable COMMIT丢应答后停用来源与发布政策 | stdin `d43598e712e2104b0aa0c94a3d284ea07df0d0b26048e7c43fed391cec3d6aff`／退出0；履约／开业均返回原 observed/inactive、同期限，session仅readGrant，新增写／Task／日志0。 |
+| dev1 错绑定、读取中撤权及正常新办理→close→终结原读 | 负例 `d1bfe838c78bff3b6de28087efef0cd6beb953a70a8454676874486a3236d1af`、正常组 `dca5665794c7035b95d06b05ba0c37874b3c2c74c2fc08ee42b23e91064a0201`，均退出0；旧来源停用不放宽新动作。 |
+| Root 独立实际 API/session→原 Guard/Controller→原授权仓储与日志 | `node --no-compilation-cache -`，stdin `05ee1b403be85b17ca137e8f18a3b5e1690b55e5f85f1a08977813e41518e146`／退出0；明确归还异常→准备／启用→原COMMIT应答丢失→原来源解决／政策移除→原读／恢复，错receipt/grant绑定与撤权拒绝；same expiry，恢复新增写／Task／日志0，session不再允许close/feedback。 |
+| Root 三源及公开消费者类型 | stdin `4cd530cd1997ef4aa740bfd9d981f426bc6f3d1e5284cdc5fd764236b79942c6`／退出0；TypeScript5.9.3，API2根/1311源、后台2根/391源零诊断。作者原两组输入 `5c09940f99e2c99bf619e7b6aed988316d170189cec03b38ae3314c70db8197a`、`b7b863628d7f58b4ac7c907d4028e678ee8814fd3c530c2df6d6387ce1ce1230` 均退出0。 |
+
+保留驱动失败：作者旧日志Map和AND/JSON查询未跟随实际仓储，后台缺原vite声明，补齐内存查询／声明后通过；Root首组遗漏原候选准备、手写复数grant URL，被原准备／Guard拒绝，改用共享正式路由。随后既有fixture的queryRaw恒空，原FOR UPDATE锁拒绝；只在内存实现原事件／输入锁行，原COMMIT丢应答返回unknown而非抛错，按正式响应核对后通过。生产门禁、未知语义和测试文件没有为模拟放宽。文档补片曾因不完整上下文拒绝，未产生部分写入；重用完整原锚点后落入本阶段。
+
+作者／Root进程已退出、audit0，声明的两个任务临时路径未创建，无新增脚本、依赖副本或生成物。固定前置为已推 `3a8b8cbeacede7a7c2af7d227625e8c71beb31dc`；本片独立提交，不夹带员工活动源码。AIN-17/18仍缺正式ResourcePorts／原事务结构化事件生产和完整经营解释／办理复查，不因这一恢复补片升100%。真实MySQL、浏览器、微信和外部服务由负责人后续操作。
+
 <a id="ain16-simulated-whole-closeout-20261114"></a>
 ## AIN-16 按原五条完成模拟研发验收（2026-11-14）
 

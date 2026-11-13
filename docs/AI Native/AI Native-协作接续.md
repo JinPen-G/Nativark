@@ -4,7 +4,7 @@
 
 ## 当前目标与现场
 
-在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[姓名／通知十源消费者](<AI Native-开发记录.md#ain16-name-notification-reconfirmation-consumer-20261114>)已提交 `aa0cc9e830fbf75e94a089845ac8d91c919068b2`，普通推送后回读GitHub同SHA；[AIN-16原五条全文](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)及07/14前置已按本轮模拟口径核闭。当前继续 AIN-17/18 正式资源生产和原 grant 恢复、员工完整履约，不重开已闭的12/13/14/16实现。两助手均已收到继续并出现新工具执行，不等提交或 main 集成。本批14/16构成两项正式任务的固定集成节点，PM按原记录与固定来源串行处理；AI未合main，不追活动HEAD或将旧SHA当重置目标。
+在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原 AIN/ENTRY 核心范围。[姓名／通知消费者](<AI Native-开发记录.md#ain16-name-notification-reconfirmation-consumer-20261114>)固定于 `aa0cc9e830fbf75e94a089845ac8d91c919068b2`；[AIN-16原五条全文](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)及07/14前置已核闭，任务文档已推 `3a8b8cbeacede7a7c2af7d227625e8c71beb31dc` 并回读GitHub一致。首推TLS断流，保持证书验证以HTTP/1.1补推成功，未改remote或强推。[原grant恢复三源](<AI Native-开发记录.md#ain18-original-grant-recovery-20261114>)已交权并由Root核同、完成实际API/session／Guard／Controller模拟和类型。当前继续 AIN-17/18 正式资源生产与员工签名／人工值／最终检查提交，不重开已闭的12/13/14/16实现。两助手继续实际施工，不等提交或main。本批14/16为两项正式任务的固定集成节点，由PM按记录串行收；AI未合main，不追活动HEAD或将旧SHA当重置目标。
 
 PM 指定 main `2a5c56471abb5714f80715e2cfa0aa236f003f51` 的[固定前置闭包](<AI Native-开发记录.md#ain12-fixed-main-closure-20261113>)已推 630，5426 十四源的主树页面后继已推 `d201979963e4f4474acd23ff1981ad81930fdfcd`，均在 codex/ai-native-main-closure-20261113 并回读一致。公共 AppModule/index 用精确 hunk，首候选 Guard 保持原 main，后继仅补 createTask 原登记，TaskCenter 保留 main 原展开/权限与旁支。该分支仅作 PM 整合候选，AI 施工仍在原树。PM 串行收每个 QA 通过的可独立阶段，任务进度仍按原全文。
 
@@ -24,7 +24,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 全专项按原门槛收口；14/16已核闭并登记本批两项集成节点。当前核接dev1原grant三源及正式ResourcePorts／当前资源来源，补员工与其他原核心闭环。独占四册/索引、公共装配/合同，阶段即中文提交并回读GitHub；PM串行main，助手继续。AIN-15三叶和员工样式待核不夹带。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原创建历史及grant恢复三源已冻结交权Root，新prepare/enable/close/feedback门禁保持。当前只读核AIN-17固定Core来源、配置行修订／原tx、正式资源生产与装配缺口，列最小依赖闭包；不写Core/公共provider/Guard/四册或已交源码，不等Root提交。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 规则/日历九源及姓名/通知十源已交权，AIN-16原五条独立结论已交回。当前只读核AIN-20／ENTRY员工核心闭环，重点实际候选采用→原Core检查提交／原收据及丢应答恢复；不等待提交/main，不改已交源码、公共合同、四册或索引。新缺口由Root按文件另分写权。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-16原五条已交回。当前修员工最终提交的签名／人工值消费，独占 ai-inspection-task/index.ts/index.wxml、inspection-task-session.ts、pickup/index.ts/index.wxml、return/index.ts/index.wxml 及必要feature-local新叶；沿原上传／检查提交／原收据，不造署名／批次或新提交链。公共合同/API/Core及四册/索引归Root，未知不换键，不等main。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源及独立全文结论已交回，Root核blob和必要实际provider模拟通过。既有Core治理两源来源/类型因果已只读核清，Root按固定提交同步本树；当前无活动写权。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
@@ -48,7 +48,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 [规则/日历拒绝后端](<AI Native-开发记录.md#ain16-original-draft-rejection-refresh-20261113>)及[九源消费者](<AI Native-开发记录.md#ain16-draft-rejection-consumer-20261113>)已上传。[姓名/通知后端](<AI Native-开发记录.md#ain16-name-notification-reconfirmation-backend-20261113>)、初次CAS及[十源消费者](<AI Native-开发记录.md#ain16-name-notification-reconfirmation-consumer-20261114>)固定核接并推送，原终结、到期原读、新变更／新审核和丢应答恢复通过必要模拟／类型。[AIN-16全文](<AI Native-开发记录.md#ain16-simulated-whole-closeout-20261114>)及原依赖已核闭，后续复用原入口；unknown不当未提交，保存草稿不当发布，不借本项扩大敏感字段或配置权限。
 
-[经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)与[固定事件批次](<AI Native-开发记录.md#ain17-durable-pending-batch-consumer-20261113>)已推 `daef63611b3a65d57eccdc5b930025844098af88`，GitHub回读一致。原operation/batch重开只读，提交或确认未知不继续领取。dev1当前补政策停用后原Task创建收据读取，不改当前触发/创建；正式ResourcePorts、同原事务结构化资源不足/缺项来源及可信临近政策仍未闭。原未知不换键或从自由文本补造事件。
+[经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)、[固定事件批次](<AI Native-开发记录.md#ain17-durable-pending-batch-consumer-20261113>)与原Task创建收据均已上传。[原grant恢复](<AI Native-开发记录.md#ain18-original-grant-recovery-20261114>)三源已完成固定核接，停用来源／政策仍读原preparedRef、但不授新动作。正式ResourcePorts、同原事务结构化不足/缺项来源及可信临近政策仍未闭；dev1只读核固定Core依赖，Root负责公共装配与类型闭包。原unknown不换键，不从issue自由文本、done=false或旧时间推定缺项。
 
 上传观察的幂等键兼容已按[原键兼容与恢复](<AI Native-开发记录.md#ain-staff-upload-key-compatibility-20261112>)修复并推送 `b690e4f3751bcaa1beac30cde88b55ea596ec1de`。[默认识别 Core 依据与保存后复核](<AI Native-开发记录.md#ain-inspection-core-basis-review-20261112>)和[媒体消费](<AI Native-开发记录.md#ain-staff-media-review-consumer-20261112>)已交 PM，55 schema 和原 22 源保留。QA 新发现的历史省略 `candidateBasis` 采用漏洞已按[最小门禁修复](<AI Native-开发记录.md#ain-inspection-legacy-adoption-p2-20261112>)完成模拟与类型验证，独立交 PM 复验。
 
