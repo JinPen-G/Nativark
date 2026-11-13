@@ -1,10 +1,61 @@
-/** Recheck conditional quote evidence under the caller's existing workspace mutex. No independent transaction or authorization source. */
+/** Core capability facts under the caller's existing workspace mutex. New quote
+ * commits recheck the complete enabled snapshot; historical actions retain their
+ * original conditional check. No independent transaction or authorization. */
 import { ConflictException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
-import { RENTAL_CORE_CAPABILITY_CODES, type RentalCapability, type RentalInventoryMode, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { RENTAL_CAPABILITY_CODES, RENTAL_CORE_CAPABILITY_CODES, type RentalCapability, type RentalInventoryMode, type RentalQuoteRequest, type RentalQuoteSnapshotV1, type RentalWorkspaceCapabilitySnapshotEntry } from "@rental-os/shared";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./category-capability-conditions";
+
+/** New quote creation only. A matching category binding does not prove that an
+ * ordinary required or optional enabled instance still matches its earlier Hook
+ * decision. Compare every enabled instance, including newly enabled ones, before
+ * committing. Never apply this current-state gate to saved quotes or old orders. */
+export async function validateNewQuoteCapabilitySnapshot(tx: Prisma.TransactionClient, workspaceId: string,
+  quote: Pick<RentalQuoteSnapshotV1, "tenantId" | "categoryCode" | "categoryVersionId" | "capabilityRequirementsSnapshot" | "capabilitySnapshot">
+) {
+  if (!quote.categoryVersionId && quote.capabilitySnapshot === undefined) return; // Explicit unversioned legacy path.
+  const required = quote.categoryVersionId
+    ? resolveCapabilityRequirements(resolveRentalCategoryVersionBody(
+      await tx.rentalCategoryVersion.findUnique({ where: { id: quote.categoryVersionId } }), quote.categoryCode),
+      quote.capabilityRequirementsSnapshot).required
+    : [];
+  const normalize = (rows: unknown): RentalWorkspaceCapabilitySnapshotEntry[] => {
+    if (!Array.isArray(rows) || rows.length > RENTAL_CAPABILITY_CODES.length) {
+      throw new ConflictException("新报价能力快照缺失或超过已登记范围，请重新报价");
+    }
+    const codes = new Set<string>();
+    return rows.map(row => {
+      if (!row || typeof row !== "object" || Array.isArray(row) ||
+        !RENTAL_CAPABILITY_CODES.includes(row.code) || codes.has(row.code) ||
+        typeof row.implementationVersion !== "string" || !row.implementationVersion.trim() ||
+        typeof row.configVersion !== "string" || !row.configVersion.trim() ||
+        !row.config || typeof row.config !== "object" || Array.isArray(row.config)) {
+        throw new ConflictException("新报价能力版本或配置来源不可读取，请重新报价");
+      }
+      codes.add(row.code);
+      return { code: row.code, implementationVersion: row.implementationVersion,
+        configVersion: row.configVersion, config: row.config };
+    }).sort((left, right) => left.code.localeCompare(right.code));
+  };
+  // A versioned new quote records an explicit empty set when no instances were
+  // enabled. Missing evidence is not that same observation.
+  const quoted = normalize(quote.capabilitySnapshot);
+  const rows = await tx.workspaceCapabilityInstance.findMany({
+    where: { tenantId: quote.tenantId, workspaceId, status: "enabled" },
+    select: { code: true, implementationVersion: true, configVersion: true, config: true },
+    orderBy: { code: "asc" }, take: RENTAL_CAPABILITY_CODES.length + 1
+  });
+  const current = normalize(rows);
+  const core = new Set<RentalCapability>(RENTAL_CORE_CAPABILITY_CODES);
+  if (required.some(code => !core.has(code) && !current.some(row => row.code === code))) {
+    throw new ConflictException("新报价必需能力尚未启用，请核对当前空间后重新报价");
+  }
+  if (!isDeepStrictEqual(quoted, current)) {
+    throw new ConflictException("已启用能力在报价期间已变化，请读取当前配置后重新报价");
+  }
+}
 
 export async function validateQuotedCapabilityRequirements(tx: Prisma.TransactionClient, workspaceId: string,
   quote: Pick<RentalQuoteSnapshotV1, "tenantId" | "categoryCode" | "categoryVersionId" | "capabilityRequirementsSnapshot" | "capabilitySnapshot"> &

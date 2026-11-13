@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="quote-capability-commit-20261113"></a>
+
+## 新报价提交的完整能力快照复核（2026-11-13）
+
+继续CAT-GOV-03/04/08的同源执行及并发采用门槛。从已核GitHub的`8c4311db7239263fe13930dc5bf4f0cf5eb4cea8`接续，工作区/暂存区干净、无merge/cherry-pick或任务进程。原[新报价保存反例](../../output/category-governance/quote-capability-commit-before-20261113.json)调用当前TS仓储及原履约/库存门禁，确认非条件能力已暂停、版本/配置改变以及普通必选实例缺失时，仍可写新报价。SQL/quote行及事务是明确替身；没有真实数据库写入，不把反例当作权限或真库并发验收。
+
+仅修改[Core能力事实接点](../../apps/api/src/modules/rental-core/category-capability-facts.ts)和[原报价事实仓储](../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts)。新建报价在原空间锁与期望品类绑定核对之后，重读同tenant/workspace全部启用实例，按已登记编码数加一哨兵限定行数，仅取原快照的编码、实现版本、配置版本和配置。与报价已冻结名单做结构等价比较，包括新增启用、暂停/停用、实现/配置变化；同一品类绑定不再被当作能力事实未变的证据。重复/未知编码、不可读配置及版本缺失拒绝，数组顺序或JSON键序不造成假冲突；普通必选和已触发条件必选从报价不可变品类及原条件快照求出，必选未启用拒绝。版本化新报价必须携带显式快照，合法空数组不等于缺失。
+
+原条件商品/套装成员与条件能力复验继续调用，未改其历史消费者。新增门禁只在仓储新建分支调用；已有有效报价、普通消费及原操作键回放先读原持久事实，不重新套当前能力启停，不补造或改写历史快照。原无版本且无能力快照的明确legacy路径保留。未改Shared/DTO/OpenAPI/Schema、Guard/DI、报价金额/库存算法、Hook实现或企业/AI源码；生产AppModule已具有原服务，不新增公共接点。
+
+原API配置、TypeScript5.9.3最终867根/2012源零诊断，两份必要emit已安装；Shared运行时/Client、Core/业务服务及采用Application七份保护产物哈希一致，见[类型与安装](../../output/category-governance/quote-capability-commit-final-compile-20261113.json)。[当前产物十六组限定行为](../../output/category-governance/quote-capability-commit-current-behavior-20261113.json)退出0、audit0：正常保存不改输入，启停/实现/配置/新启用变化拒绝，普通必选缺失拒绝，显式空/缺失分开、重复/未知码和坏配置拒绝、锁等待期间变化拒绝、原键/已保存消费保留、同空间哨兵查询以及原条件商品独立复验通过。
+
+限定调用[首次失败](../../output/category-governance/quote-capability-commit-behavior-20261113.json)来自替身保存Prisma.DbNull/JsonNull原值、未模拟数据库null回读，使原来源保护拒绝消费；只纠正该短调用的JSON传输及无take查询返回，[复验](../../output/category-governance/quote-capability-commit-final-behavior-20261113.json)通过，没有调整生产拒绝或旧断言。原`node --no-compilation-cache --require <本树preload> --test --test-concurrency=1 --test-reporter=spec tests/category-capability-conditions.test.cjs tests/capability-hook-runtime.test.cjs tests/rental-category-core-alignment.test.cjs`报告12项通过、退出0/audit0，见[原用例](../../output/category-governance/quote-capability-commit-original-tests-20261113.json)。原Hook脚本内部16组覆盖仍保留；测试文件未改，不新增/扩写脚本。完整四品类经营脚本原库存分页夹具缺口及其他旧失败继续保留，不用对齐脚本替代整条经营验收。
+
+全部验证已退出，唯一暂存只剩空audit。原生PowerShell精确删除再次被自动审批`blocked by policy`拒绝，整条未执行且无详细理由；已安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/quote-capability-commit-validation/manifest.json)，[退出证据](../../output/category-governance/quote-capability-commit-cleanup-20261113.json)确认原暂存不存在、已归集未删除，旧批责任保持。阶段固定版本/验证/未验/阻塞留本对话及原资料供PM主动读取，没有跨对话消息、合main或新增环境执行。
+
+仍未证明MySQL查询/锁/容量、真实并发采用与新报价、服务进程/缓存、多端宿主或独立Review。当前完整CAT-GOV为0/14、实现百分比待核实；后续继续完整报价的配置/价格/规则/检查组合及全部写入口，两个动态编码不同组合的同一冻结构建经营和原22项验收，CLOSE及企业/AI接点分别核实，不混算。
+
 <a id="adoption-configuration-preflight-20261113"></a>
 
 ## 采用配置行数前置与最终候选复核（2026-11-13）

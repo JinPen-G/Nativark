@@ -1,5 +1,5 @@
 import { rentalCategoryStorageCode } from "./category-identity";
-import { validateQuotedCapabilityRequirements } from "./category-capability-facts";
+import { validateNewQuoteCapabilitySnapshot, validateQuotedCapabilityRequirements } from "./category-capability-facts";
 import { ConflictException, ForbiddenException, Inject, Injectable, Optional } from "@nestjs/common";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 import { Prisma, type $Enums } from "@prisma/client";
@@ -674,6 +674,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
             throw new ConflictException("品类版本在报价期间已变化，请重新报价");
           }
         }
+        await validateNewQuoteCapabilitySnapshot(client, workspaceId, quote);
         await validateQuotedCapabilityRequirements(client, workspaceId, quote);
         await assertRentalInventoryBasis(new RentalCoreConfigRepository(this.prisma), quote.tenantId, workspaceId,
           quote.request.lines, quote.inventoryBasis, client);
