@@ -1,15 +1,20 @@
-# Rental OS
+# Nativark
 
-**面向多租户租赁业务的平台工程：共享业务内核、多端客户端，以及受控的 AI Native 接入。**
+**面向 AI Native 应用的开源 SaaS 底座。**
 
-Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具和工程设备共用 Rental Core 的商品、库存、报价、订单、履约和资金模型；租户差异通过配置、品类定义、计费策略和 capability 扩展表达，而不是为每种业务复制一套系统。
+*An open-source SaaS foundation for AI-native applications.*
 
-这个仓库适合研究复杂业务建模、开发租赁应用、接入新客户端，以及参与平台模块化建设。这里既有可运行的业务代码，也有尚未完成的专项；**它不是已经完成生产验收的一键部署产品，也不是可以直接换装任意行业 Core 的通用插件框架。**
+Nativark 为开发者和开发 AI 提供构建业务应用所需的公共基础，包括身份认证、多租户、权限、订阅、管理后台和受控 AI 能力。业务通过独立的 **Core** 接入，拥有自己的领域模型、数据、页面和业务规则。
 
-本文面向第一次接触仓库的开发者：先运行最小开发环境，再找到代码、理解约束、验证改动并提交贡献。项目整体许可与第三方素材范围见[许可证与第三方内容](#许可证与第三方内容)。
+开源主体是 Nativark 底座。**Rental Core 将作为首个开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
 
-- [项目组成](#项目组成)
+当前仓库正在从 Rental OS 组合工程中抽离公共底座。现有开发命令运行底座与 Rental Core 的组合，独立宿主、Core 接入合同和多 Core 授权由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。
+
+- [底座建设范围](#底座建设范围)
 - [理解架构](#理解架构)
+- [业务 Core 接入](#业务-core-接入)
+- [Rental Core 示范](#rental-core-示范)
+- [项目组成](#项目组成)
 - [本地运行](#本地运行)
 - [选择一个开发入口](#选择一个开发入口)
 - [验证改动](#验证改动)
@@ -17,181 +22,166 @@ Rental OS 使用 TypeScript 构建。摄影设备、露营装备、车辆载具�
 - [部署前检查](#部署前检查)
 - [许可证与第三方内容](#许可证与第三方内容)
 
-## 项目组成
+## 底座建设范围
 
-主工程使用 **npm workspaces**。技术栈包括 NestJS 10、Prisma 5 / MySQL、React 19 / Vite、UIArc 适配层，以及原生微信小程序 / TypeScript。精确版本以各包声明和[根锁文件](package-lock.json)为准；不同工作区的 TypeScript 版本并不完全相同。
+Nativark 将可复用的 SaaS 能力与行业业务分开维护，使新业务可以复用公共管理、身份和 AI 接入机制。
 
-| 位置 | 职责 | 开发入口 |
+| 公共能力 | 底座职责 | 业务 Core 职责 |
 | --- | --- | --- |
-| `apps/api` | HTTP API、认证、平台管理、Rental Core、AI Native、外部集成；含 Prisma 模型和迁移 | [应用装配](apps/api/src/app.module.ts)、[启动入口](apps/api/src/main.ts) |
-| `apps/admin` | 商户营运后台与 SaaS 平台管理界面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
-| `apps/miniprogram` | 租赁客户微信小程序：浏览、报价、本人订单、付款及资料 | [开发说明](apps/miniprogram/README.md) |
-| `apps/staff-miniprogram` | 商户员工微信小程序：配货、交接、归还等授权现场操作 | [开发说明](apps/staff-miniprogram/README.md) |
-| `apps/tenant-website` | 商户面向客户的独立 Web 网站与租赁入口 | [开发说明](apps/tenant-website/README.md) |
-| `apps/enterprise-portal` | 企业客户管理 Web 端，复用客户登录并独立核验企业权限；持续开发中 | [开发说明](apps/enterprise-portal/README.md) |
-| `apps/website`、`apps/website-next` | 平台营销网站的静态实现与 Next.js 源码工程，不是租户业务后台 | [静态站说明](apps/website/README.md)、[Next.js 说明](apps/website-next/README.md) |
-| `packages/shared` | 公共类型、枚举、schema 和运行时工具，不是纯类型包 | [包出口](packages/shared/package.json)、[源码出口](packages/shared/src/index.ts) |
-| `packages/ui-arc` | UIArc 来源、许可及保留的组件源码；业务适配位于 admin | [组件与兼容说明](packages/ui-arc/README.md) |
-| `packages/mcp-server` | 受控 MCP 传输与工具适配工程 | [包说明](packages/mcp-server/README.md) |
-| `clients/harness-plugin` | Harness 客户端接入增强，消费标准 MCP | [插件说明](clients/harness-plugin/README.md) |
-| `clients/agent-desktop` | 封存保留的定制客户端、上游 Harness 源码和许可 | [来源与边界](clients/agent-desktop/README.md) |
-| `tests`、`scripts` | 契约、业务、数据库与宿主验证，以及开发和运维脚本 | [命令清单](package.json) |
-| `docs` | 专项需求、任务、开发记录、协作接续与公共技术资料 | [文档导航](docs/文档导航.md) |
+| 身份与多租户 | 账号、会话、租户、组织、角色及可信请求上下文 | 定义业务角色、资源归属和细粒度数据范围 |
+| 授权与订阅 | 租户使用权、成员分配、订阅期限、权限校验与撤销 | 声明业务功能及适用的权益、动作前提 |
+| 公共管理后台 | 登录、导航容器、主题、语言、公共设置和会话缓存隔离 | 提供业务页面、工作台、对象链接及权限声明 |
+| AI Native | 任务编排、模型 Gateway、用量与预算、批准关联、原结果读取与恢复 | 提供可信业务事实、可选工具、业务执行和原操作收据 |
+| 基础服务 | 文件存储、通知、审计及事件、作业的公共接点 | 裁定业务文件 ACL、释放字段、消息内容和事件事实 |
+| Core 生命周期 | 受控注册、兼容检查、租户授权、成员分配、绑定与停用接点 | 维护领域配置、初始化、迁移、历史读取和在途业务收尾 |
 
-**安装范围不等于构建范围。** 根 workspaces 匹配 `apps/*` 和 `packages/*` 下的包，根 `npm run build` 按 shared → MCP → API → admin 构建；MCP 包提供 API 所需的正式类型出口。网站、小程序和 `clients/` 需要各自的构建步骤；`clients/` 不在根工作区中，保留的 Harness 还有独立包管理和锁文件。不要用一个根构建成功来宣布所有端已交付。
-
-### 当前能力应如何理解
-
-- **已有主业务实现：** 多租户后台、客户与企业会员、商品资产、报价订单、分配交接、归还检查、资金及多端消费。具体场景的实现缺口和验收证据见各专项记录，不等于四品类所有组合都已验证。
-- **持续开发中的专项：** AI Native、MCP、Harness 和企业客户后台有独立代码及合同。企业端已有成员、政策、审批和客户入口实现，完整验收仍有缺口；MCP 传输接口存在不等于原身份、授权服务器、业务工具和生产发布已经接通，插件可装配也不等于真实业务联调通过。
-- **已规划但不能当作现成功能：** APP、完整动态品类创建和平台跨行业 Core 接入。品类治理已有部分版本/解析/准备实现，正式采用、动态编码和全端交付仍有未完项。
-- **外部能力另行配置和验证：** 支付、预授权、短信、对象存储、微信身份及模型服务需要相应供应商账号与真实证据。示例、模拟状态和界面成功提示不能代替外部执行结果。
+已有公共实现可从当前组合工程中查阅。Core 注册、成员分配、多 Core 隔离及独立运行的实现范围和验收入口由正式接入文档维护。[Core 接入需求](docs/平台底座/Core接入/平台Core接入-需求.md) · [开发任务](docs/平台底座/Core接入/平台Core接入-开发任务.md)
 
 ## 理解架构
 
-### 一条业务链，多种入口
+下图展示抽离后的目标职责关系，实际模块与构建边界随 Core 接入实施逐步落地。
 
-```text
-管理后台 / 客户小程序 / 员工小程序 / 租户网站
-                         │
-                各自的 API 与会话边界
-                         │
-          身份验证 → 当前权限与数据范围 → 应用服务
-                         │
-       ┌─────────────────┼─────────────────┐
-   平台与会员         Rental Core        公共基础设施
-  租户/角色/企业     报价/订单/库存       文件/通知/审计
-       └─────────────────┼─────────────────┘
-                  仓储 / Prisma / MySQL
-                         │
-                 受控外部服务适配
+```mermaid
+flowchart TD
+    UI[管理后台与业务客户端] --> Identity
+    subgraph Platform[Nativark 公共底座]
+        Identity[身份、租户与权限] --> Access[Core 授权与接入]
+        Console[公共后台与订阅] --> Access
+        AI[AI Native 与 MCP 受控入口] --> Access
+        Services[文件、通知与审计]
+    end
+    Access --> Rental[Rental Core]
+    Access --> Other[其他业务 Core]
+    Rental --> RentalData[租赁领域数据与业务服务]
+    Other --> OtherData[自身领域数据与业务服务]
+    Rental --> Services
+    Other --> Services
 ```
 
-这是职责图，不是所有模块已经独立拆包的声明。当前后端仍由 [AppModule](apps/api/src/app.module.ts)集中装配。AI Native 是另一种受控业务入口：它可以读取获准事实、生成建议、准备草稿并推进批准后的动作，但不能绕过正式权限和业务服务。MCP / Harness 的生产接入也必须满足同样边界。
+底座管理可信身份、租户和公共授权。每个 Core 定义自己的业务分区、资源与动作，后台页面、API、导出和 AI 工具均按当前授权访问。Rental 的经营空间、品类和地点归 Rental Core 管理，其他 Core 可以采用自己的团队、项目或业务资源模型。
 
-阅读一个功能时，建议沿 **页面或调用方 → API 封装 → Controller / Guard → 应用与领域服务 → 仓储 / 外部适配 → 原结果读取** 追踪，而不是只看服务类或 DTO。
+Core 持有业务事实与最终裁定。Agent 通过明确发布的工具读取事实、准备草稿，并在当前权限和必要批准满足后委托 Core 执行。模型调用使用统一 Gateway 和财务预算账，任务累计资源单独记录。结果不明时，通过原操作和原收据核对。
 
-### 三个容易混淆的概念
+开发 AI 通过正式接口、明确的模块边界、示范代码和可复现验证参与开发。运行中的业务 Agent 按业务工具及当前授权工作。
 
-| 概念 | 含义 |
+## 业务 Core 接入
+
+接入设计围绕以下步骤组织，合同与示例代码随实施阶段交付。
+
+1. 开发者声明 Core 标识、实现与合同版本、公共依赖、业务资源、页面和迁移归属。
+2. 宿主通过受控构建入口装配 Core，核对命名空间、必需依赖及数据兼容。
+3. SaaS 管理员为租户授权使用已注册 Core。
+4. 租户管理员从获权集合中给成员分配 Core，再配置适用的业务角色与资源范围。
+5. Core 在约定事务内完成业务绑定和初始化，返回可追溯的操作结果。
+
+| 运行组合 | 目标行为 |
 | --- | --- |
-| 租户 `Tenant` | 使用平台经营业务的商户，不是来租设备的客户 |
-| 经营空间 `BusinessWorkspace` | 租户内的经营范围；每个空间对应一个品类，订单、库存、价格和资金保持空间归属 |
-| 客户 / 企业会员 | 商户的个人或企业客户；客户身份和部分会员事实在同租户共享，不意味着经营数据可跨空间任意访问 |
+| 无 Core | 平台可启动、登录和进入公共后台，提示联系管理员授权业务 Core，业务 Agent 随 Core 工具和授权开放 |
+| 单 Core | 获权成员使用该 Core 的业务页面、API 和自身数据范围 |
+| 多 Core | 同部署、同租户并存多个 Core，各自授权、导航、数据和缓存保持隔离 |
+| Core 停用与重开 | 保留原数据、配置、绑定和收据，按当前权限、订阅及依赖恢复，分别处理历史与在途业务 |
 
-商户营运账号、客户账号、员工端会话和企业客户管理授权不是同一种权限。相同 ID、同一手机号、当前页面参数或隐藏按钮，都不能作为跨租户或跨角色授权依据。
+Core 的 AI 工具为可选贡献。普通业务通过页面和 API 按权限运行，Agent 查询与操作入口在工具发布后按授权开放。工具的开放范围由发布状态、租户授权、成员使用权、角色、资源范围、AI 政策及必要批准共同决定。租户订阅期限统一管理，各 Core 的开通与停用分别控制。
 
-### 扩展有两个层级
+跨 Core 数据协作将在具体场景中设计受控对象引用、接口和事件，数据由所属 Core 维护。[接口与生命周期设计](docs/平台底座/Core接入/平台Core接入-开发任务.md#contract-design) · [接入指南](docs/平台底座/Core接入/平台Core接入-开发任务.md#integration-guide) · [跨 Core 协作规划](docs/平台底座/未来规划/平台底座-通用化与开源方案.md#cross-core-collaboration)
 
-**租赁行业内扩展**沿“品类定义 → 计费策略 → capability → 端侧安全元数据”接入 Rental Core。新增字段不等于新增算法，新增品类也不应复制订单和计价实现。当前动态品类仍按[品类治理专项](<docs/Rental Core/品类治理/品类治理-协作接续.md>)推进，不能仅增加一条配置就宣称任意新品类可经营。
+## Rental Core 示范
 
-**跨行业替换**由[平台 Core 接入专项](docs/平台底座/Core接入/平台Core接入-需求.md)定义：未来让同一平台底座承载 Rental、CRM、TMS 等不同业务 Core。这不是把 CRM 放进租赁枚举，也不是已经发布的 SDK。当前依赖抽离、生命周期和非租赁样例仍需实施。AI Runtime / Provider SDK 的替换则是另一条独立方向。
+Rental Core 是首个业务示范，提供商品、资产、库存、报价、订单、交付、归还、检查和结算等租赁业务。摄影设备、露营装备、车辆载具和工程设备通过品类定义、计费策略及能力扩展共用租赁业务链。
 
-### 业务边界
+这个示范将展示 Core 如何使用公共身份、租户、后台和 AI 接入机制，同时保有业务模型、事务、金额、幂等与历史快照。客户网站、员工与客户小程序、企业客户门户提供该业务的多端消费样例。
 
-开发时请始终保留以下不变量：
+现有实现与业务验收范围沿 Rental 专项维护。开发者可从实际 Controller、领域服务和客户端调用链开始阅读。[Rental Core 需求](<docs/Rental Core/Rental Core-需求.md>) · [品类治理](<docs/Rental Core/品类治理/品类治理-需求.md>) · [业务源码](apps/api/src/modules/rental-core)
 
-1. **当前授权由服务端决定。** 复用 Auth / Guard / ALS、audience、租户、空间、地点及数据范围；查询、写入、导出、附件和原结果回放都要检查。
-2. **业务事实由 Core 或所属正式业务域决定。** 端侧和模型不计算最终价格、不设置支付终态、不直接改变库存。
-3. **历史与当前分开。** 旧报价、订单、规则、价格和检查使用原关联快照；当前资格和安全条件在动作时复验，不能拿当前配置伪造历史。
-4. **阶段与账目分开。** 报价不是预占，批准不是执行，归还不是可租，退款受理不是退款成功；租金、保证金、企业应收、现金到账与回款核销不能混算。
-5. **未知结果不自动重做。** 超时、取消、断线或租约到期都不证明未提交。保留原操作键、事务和收据，先查询核对，不换 ID 或供应商重复执行。
-6. **缺依赖就明确不可用。** 不用恒真权限、默认租户、假金额或模拟成功补齐生产路径。
+## 项目组成
 
-详细业务规则见[管理后台需求](docs/管理后台/管理后台-需求.md)、[Rental Core 需求](<docs/Rental Core/Rental Core-需求.md>)；技术约束见[项目开发指南](docs/公共技术资料/开发指南/项目-开发指南.md)。
+主工程使用 npm workspaces，技术栈为 TypeScript、NestJS 10、React 19 / Vite、UIArc、Prisma 5 和 MySQL。具体依赖版本以包声明和锁文件为准。[根包配置](package.json) · [依赖锁文件](package-lock.json)
+
+| 位置 | 当前内容 | 阅读入口 |
+| --- | --- | --- |
+| `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts) |
+| `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
+| `packages/shared` | 公共类型、schema、常量和运行时工具 | [正式出口](packages/shared/src/index.ts)、[包配置](packages/shared/package.json) |
+| `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |
+| `packages/mcp-server` | 受控 MCP 传输和工具适配 | [包说明](packages/mcp-server/README.md) |
+| `clients/harness-plugin` | Harness 客户端对标准 MCP 的消费 | [插件说明](clients/harness-plugin/README.md) |
+| `apps/api/src/modules/rental-core` | 首个业务 Core 的领域实现 | [Rental 专项](<docs/Rental Core/Rental Core-协作接续.md>) |
+| `apps/tenant-website`、`apps/enterprise-portal` | Rental 客户网站与企业客户门户 | [客户网站](apps/tenant-website/README.md)、[企业门户](apps/enterprise-portal/README.md) |
+| `apps/miniprogram`、`apps/staff-miniprogram` | Rental 客户与员工微信小程序 | [客户小程序](apps/miniprogram/README.md)、[员工小程序](apps/staff-miniprogram/README.md) |
+| `tests`、`scripts` | 契约、业务、宿主验证与开发、运维脚本 | [命令清单](package.json) |
+| `docs` | 正式需求、任务、阶段记录、接续与公共技术资料 | [文档导航](docs/文档导航.md) |
+
+根构建按 shared → MCP server → API → admin 执行。网站、小程序和 `clients/` 使用各自构建入口。平台营销网站位于 `apps/website` 与 `apps/website-next`，原定制客户端及上游来源保留在 `clients/agent-desktop`。[静态网站](apps/website/README.md) · [Next.js 网站](apps/website-next/README.md) · [保留客户端](clients/agent-desktop/README.md)
 
 ## 本地运行
 
-下面面向开发者自己的**独立本地开发环境**，不是生产部署步骤。安装会下载依赖，数据库命令会读取配置并可能写库，Seed 会修改演示账号和配置。不要在共享业务库或生产库照搬执行。
+当前步骤运行底座与 Rental Core 的组合工程。准备独立开发数据库后，可以体验公共后台和首个业务示范。无 Core 独立构建和运行由 Core 接入专项交付。
 
 ### 1. 环境要求
 
-| 依赖 | 建议与用途 |
+| 工具 | 要求 |
 | --- | --- |
-| Node.js | 建议 Node 22 LTS 的 22.12 或更高补丁版本；当前锁定的 Vite 8 要求 `^20.19.0` 或 `>=22.12.0` |
-| npm | 使用支持根 `package-lock.json` v3 的版本；不要在根目录改用另一种包管理器生成锁文件 |
-| MySQL | 开发 Compose 使用 MySQL 8.4；配置独立数据库和账号 |
-| Docker Compose | 可选，用于启动仓库提供的本地数据库服务；也可以使用自行维护的 MySQL |
-| Redis | Compose 提供 Redis 7；当前为部分后续异步/缓存能力预留，不应凭 Compose 条目认定所有业务依赖它 |
-| 微信开发者工具 | 仅开发客户/员工小程序时需要；真实微信登录、付款还需合法 AppID、域名和商户配置 |
+| Node.js | 建议 Node 22 LTS，22.12 或更新补丁，满足当前 Vite 的版本要求 |
+| npm | 使用支持根 `package-lock.json` v3 的版本 |
+| MySQL | 开发 Compose 使用 MySQL 8.4 |
+| Docker Compose | 可选，用于本地 MySQL 和 Redis |
+| 微信开发者工具 | 开发 Rental 微信示范端时使用 |
 
-仓库尚未统一固定 Node/npm 的 `engines` 或跨系统支持矩阵。Windows 可使用 Git Bash 执行本文 shell 命令；PowerShell 专用运维脚本不保证在 Linux/macOS 直接运行。
-
-### 2. 配置独立环境
-
-根目录 [.env.example](.env.example)是基础运行、Web 构建和运维配置的共同模板。实际配置使用根 `.env`，或通过 `RENTAL_ENV_FILE` 指定一份外部环境文件。已有配置需按下面的变量用途核对。
-
-| 配置 | 应当确认的内容 |
-| --- | --- |
-| `DATABASE_URL` | 确实指向自己的开发库，连接用户具备本次迁移所需权限 |
-| `PLATFORM_DATA_SOURCE`、`RENTAL_OS_DATA_SOURCE`、`INFRA_DATA_SOURCE` | 持久化使用 `mysql`，`memory` 用于明确的演示/测试。省略 `INFRA_DATA_SOURCE` 时继承 `RENTAL_OS_DATA_SOURCE`，两者均省略时使用 `mysql` |
-| `AUTH_TOKEN_SECRET`、`INTEGRATION_ENCRYPTION_KEY` | 自行生成独立随机密钥，不使用模板占位值；集成凭据加密密钥不能随意更换，否则旧数据可能无法解密 |
-| `SEED_PLATFORM_PASSWORD`、`SEED_DEMO_PASSWORD` | 仅执行演示 Seed 时填写自选强口令；仓库不提供共享默认管理员密码 |
-| `API_PORT` | API 默认端口 3000 |
-| `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`MYSQL_DATABASE`、`MYSQL_USER` | Compose 初始化 MySQL 所用参数，两项口令必填，库名与应用账号默认 `rental_os`。应用连接串按实际账号与 URL 编码填写 |
-| `MYSQL_BIND_HOST`、`MYSQL_HOST_PORT`、`REDIS_BIND_HOST`、`REDIS_HOST_PORT` | 容器端口默认仅映射 `127.0.0.1`，MySQL 为 3306，Redis 为 6379 |
-| `NODE_ENV` | Node 运行模式，本地为 `development`，正式生产为 `production` |
-| `RENTAL_DEPLOYMENT_PROFILE` | 部署用途，个人演示为 `personal-demo`，正式经营部署为 `production`。发布门禁要求显式填写 |
-| `DATABASE_CONNECT_ON_START` | 是否启动时主动连接；设为 `false` **不是离线模式**，业务请求仍可连接数据库 |
-| `TRUST_PROXY_HOPS`、`CORS_ALLOWED_ORIGINS` | 按真实代理拓扑和允许的浏览器 origin 配置，CORS 不代替业务鉴权 |
-| `VITE_SHOW_ACCOUNT_SHORTCUTS` | 公开布尔开关。个人测试填 `true`，生产构建也可显示账号选择，仍需输入密码 |
-| `LOCAL_DEMO_PASSWORD_RESET_ENABLED` | 个人演示模板填 `true`，保留登录前重置。省略时默认 `false`。普通开发启用后需要当前平台管理员的系统参数管理权限，正式生产用途关闭 |
-
-配置加载与校验由 [config/environment.cjs](config/environment.cjs)统一提供。
-
-- 进程环境的优先级最高。指定 `RENTAL_ENV_FILE` 时，文件路径从项目根解析，绝对路径直接使用，该文件必须存在。
-- 使用默认入口时，各目录的文件优先级由高到低为 `.env.<mode>.local`、`.env.<mode>`、`.env.local`、`.env`。API 与原应用目录配置继续作为根配置的兼容覆盖。API、数据库和运维命令的 mode 取启动进程的 `NODE_ENV`，Web 使用 Vite 的 mode。部署使用显式环境文件可以固定各入口的来源。
-- 根环境文件按标准 dotenv 字面值解析，带引号的多行内容、注释和密码中的 `$` 都由同一解析器处理。原 Web 应用目录的环境文件保留 Vite 插值兼容。API 在导入业务模块前完成加载与关键值校验，Nest 从已准备的进程环境注入配置。
-- Web 构建按各端清单投影公开字段。管理后台接收 API 地址、快选和品类预览开关，租户网站接收 API 地址、基础域名和默认租户，企业端接收公共入口 host。其余服务器配置留在后端。公开构建参数修改后须重新构建，后端环境修改后须重启进程。
-- 开发代理统一使用 `API_PROXY_TARGET`，兼容旧 `VITE_API_TARGET`。管理后台的 `VITE_API_BASE_URL` 在同源部署填 `/api`。租户网站的 `VITE_API_BASE` 表示网关基址，同源部署留空，由客户端追加 `/api/client/v1`。公共数据请求支持 `https://gateway.example.com` 等外部网关及其路由前缀，登录态请求遵循原共享会话的同源及固定接口路径约束。企业端使用原 `/api/client/v1` 与 `/enterprise-assets/` 路径。[后台配置](apps/admin/vite.config.ts)和[企业端配置](apps/enterprise-portal/vite.config.ts)定义各自的宿主约束。
-- 发布构建、启动和门禁应使用同一部署环境文件。发布清单包含 `config/environment.cjs` 与其类型声明，交付时须保留项目的 `apps/api/dist` 和 `config` 相对目录。真实环境文件由部署方托管。
-- 租户支付、短信、存储、品牌、价格等业务配置通过后台及其原数据库服务维护。登录页保留原账号快选、重置弹窗与全部登录操作。个人演示同时配置 `RENTAL_DEPLOYMENT_PROFILE=personal-demo`、`LOCAL_DEMO_PASSWORD_RESET_ENABLED=true` 和 `VITE_SHOW_ACCOUNT_SHORTCUTS=true`，重置入口可在登录前使用，账号快选填写群组与账号并清空密码。
-
-### 3. 安装与数据库初始化
-
-在仓库根目录按锁文件安装：
+克隆仓库并按锁文件安装依赖。
 
 ```bash
+git clone https://github.com/JinPen-G/Nativark.git
+cd Nativark
 npm ci
 ```
 
-可选：用 Compose 启动本地 MySQL。
+下面的复制命令使用 Bash 写法，PowerShell 可使用 `Copy-Item .env.example .env`。
+
+### 2. 配置独立环境
+
+在新克隆的目录中复制配置模板，并填写自己的开发配置。
+
+```bash
+cp .env.example .env
+```
+
+| 配置 | 用途 |
+| --- | --- |
+| `DATABASE_URL` | 独立开发 MySQL 的连接串 |
+| `PLATFORM_DATA_SOURCE`、`RENTAL_OS_DATA_SOURCE`、`INFRA_DATA_SOURCE` | 持久化开发使用 `mysql` |
+| `AUTH_TOKEN_SECRET`、`INTEGRATION_ENCRYPTION_KEY` | 自行生成的认证与集成加密密钥 |
+| `MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` | Compose 初始化 MySQL 所用口令 |
+| `MYSQL_DATABASE`、`MYSQL_USER` | Compose 的库名与应用账号，默认 `rental_os` |
+| `SEED_PLATFORM_PASSWORD`、`SEED_DEMO_PASSWORD` | 执行示范 Seed 时设置的平台和演示租户管理员口令 |
+| `NODE_ENV`、`RENTAL_DEPLOYMENT_PROFILE` | 本地开发均设为 `development` |
+| `API_PORT` | API 端口，默认 3000 |
+| `API_PROXY_TARGET`、`VITE_API_BASE_URL` | 管理后台代理目标与公开 API 基址，同源 API 基址使用 `/api` |
+
+服务端与 Web 配置通过统一环境模块加载。进程变量优先，`RENTAL_ENV_FILE` 可指定外部配置文件，Docker Compose 对应使用 `--env-file`。密钥由服务端配置持有，Web 只接收公开字段，公开字段变化后需重新构建。[配置模板](.env.example) · [环境加载实现](config/environment.cjs)
+
+### 3. 初始化开发数据库
+
+使用 Compose 时启动本地 MySQL。
 
 ```bash
 docker compose up -d mysql
 ```
 
-[Compose 文件](docker-compose.yml)提供 MySQL 与 Redis 基础设施，口令由所选环境文件注入，缺少任一 MySQL 口令时会明确失败。默认只映射本机 `127.0.0.1` 的 3306 和 6379，`OPS_MYSQL_CONTAINER` 同时决定 Compose 的 MySQL 容器名及 OPS 操作目标。服务与应用的部署阶段由现行任务协调。
-
-根 `.env` 由 Compose 原生读取。使用外部文件时，Docker 通过 `docker compose --env-file <环境文件路径> up -d` 选择同一文件，API、Web 和 OPS 通过 `RENTAL_ENV_FILE` 选择该文件。现有 MySQL 数据卷的账号状态由数据库维护，环境中的初始化口令用于新数据卷，已有账号变更须核对原库与恢复步骤。端口被占用时，统一调整 host port 和对应连接串。
-
-构建后端所需的共享运行时，并生成 Prisma Client：
+然后构建共享运行时、生成 Prisma Client 并应用已有迁移。
 
 ```bash
 npm run build -w @rental-os/shared
-```
-
-```bash
 npm run db:generate
-```
-
-确认目标是你的独立开发库后，应用仓库已有迁移：
-
-```bash
 npm run db:migrate:deploy
 ```
 
-生成 Client、应用迁移和填充演示数据是三件不同的事。**首次运行不需要用 `db:migrate` 创建新迁移，也不要用 reset / db push 绕过迁移历史。** 空库与已有库升级都应检查实际迁移结果；详见[数据库指南](docs/公共技术资料/开发指南/数据库-启动指南.md)。
-
-需要演示平台和商户账号时，在配置了两项 Seed 口令后执行：
+配置两项 Seed 口令后，建立平台账号、示范租户及基础配置。
 
 ```bash
 npm run db:seed
 ```
 
-Seed 建立或更新演示租户、空间、角色、账号和基础配置。平台与演示商户均有 `admin` 账号，分别使用你设置的两项口令；选择对应平台/租户登录入口。**重复 Seed 会更新演示账号口令、角色和配置，不是只读检查，也不是生产初始化工具。** 商品和完整经营样本不应假定由基础 Seed 全部建立，可在后台配置空白空间。
-
-`db:seed:demo` 是另一个受本机库名限制的脚本，会调用真实 HTTP 并写入演示业务，不是上述 Seed 的无副作用别名；使用前先读[脚本边界](scripts/seed-demo-tenant.cjs)。
+重复 Seed 会更新示范账号、角色和配置，请在自己的开发库使用。新增迁移、已有库升级与恢复流程见数据库指南。[Compose 配置](docker-compose.yml) · [数据库指南](docs/公共技术资料/开发指南/数据库-启动指南.md)
 
 ### 4. 启动 API 与管理后台
 
@@ -199,181 +189,86 @@ Seed 建立或更新演示租户、空间、角色、账号和基础配置。平
 npm run dev
 ```
 
-这会先构建 shared 与 API 所需的 MCP 包，再并行启动 Nest watch 与 Vite。默认入口：
+该命令先构建 shared 和 MCP server，再启动 API watch 与管理后台 Vite。
 
-| 入口 | 地址 | 说明 |
-| --- | --- | --- |
-| 管理后台 | `http://127.0.0.1:5175` | 本地 Vite，端口占用时会失败，不自动换一个端口 |
-| API | `http://localhost:3000/api` | 业务入口按各自身份鉴权 |
-| 健康响应 | `http://localhost:3000/api/health` | 只返回服务状态，不检查全部数据库、支付或业务就绪 |
-| OpenAPI | `http://localhost:3000/api/openapi.json` | 机器可读合同，不是 Swagger UI |
-
-也可以拆开运行，便于只重启一端：
-
-```bash
-npm run dev:api
-```
-
-```bash
-npm run dev:admin
-```
-
-启动成功后的第一步不是发起真实支付，而是用本地演示账号检查登录、空间切换、空态与基本配置，再按对应专项准备目录、规则、库存和客户样本。
-
-### 5. 开发其他客户端
-
-租户消费者网站独立启动，默认使用 4186 端口：
-
-```bash
-npm run dev:tenant-website
-```
-
-它的演示模式与真实 API 模式不同；本地演示订单不证明服务器已经建单。租户识别、API 地址及数据模式见[网站说明](apps/tenant-website/README.md)。
-
-客户小程序与员工小程序分别构建：
-
-```bash
-npm run build:miniprogram
-```
-
-```bash
-npm run build:staff-miniprogram
-```
-
-按各端 README 导入微信开发者工具。客户端通常按租户配置打包，员工端在登录时选择租户；两端不能共享令牌或假定相同权限。真机中的 `localhost` 指手机自己，不是开发电脑。开发包、合法域名、真实微信认证和发布包需分别核验。
-
-营销网站、MCP 包与 Harness 按自身说明开发，首次运行 Rental Core 不要求先启动它们，也不要求配置模型 Key。
-
-### 常见问题
-
-| 现象 | 优先检查 |
+| 入口 | 默认地址 |
 | --- | --- |
-| Node 不兼容、Vite 无法启动 | 当前 Node 版本是否满足锁定的 Vite/plugin engines；不要先全量升级依赖 |
-| 缺 shared 导出或服务端读到旧类型 | 是否构建了 shared；API 读包产物，而 admin 默认别名指向 shared 源码，一端热更新不代表另一端同步 |
-| Prisma 缺字段 / 表不存在 | 区分 Client 与 schema 不一致、目标库未迁移、代码/迁移版本不匹配；不要编辑已应用迁移消除错误 |
-| Seed 提示缺凭据 | 两个 Seed 口令是否已在自己的环境配置中设置；不要向代码添加默认密码 |
-| 后台 API 地址未变化 | 核对应用目录的 Vite 环境、进程环境、代理目标和构建时 `VITE_*`，不要只修改根 `.env` |
-| Windows 生成 Client 失败 / 文件被占用 | 找出自己启动的 API/Prisma 进程并正常停止；不要删锁、复制另一工作树 Client 或覆盖共享产物 |
-| 演示能运行，但付款/短信/文件失败 | 检查该租户的真实 Provider、渠道与证据门槛；演示成功不代表生产依赖可用 |
+| 管理后台 | `http://127.0.0.1:5175` |
+| API | `http://localhost:3000/api` |
+| 健康响应 | `http://localhost:3000/api/health` |
+| OpenAPI | `http://localhost:3000/api/openapi.json` |
+
+API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动。使用 Seed 中自己设置的账号口令登录对应平台或示范租户。支付、短信、对象存储、微信与模型服务按所需场景配置及验证。
+
+其他示范客户端的运行方式见各自 README，详细架构与环境约束见公共指南。[项目开发指南](docs/公共技术资料/开发指南/项目-开发指南.md)
 
 ## 选择一个开发入口
 
-| 想做的改动 | 从哪里读起 | 同时核对 |
+| 开发内容 | 实际入口 | 需要同时核对 |
 | --- | --- | --- |
-| 增加后台页面或修改交互 | [admin 规则](apps/admin/AGENTS.md)、[路由](apps/admin/src/app/AppRouter.tsx)、[导航](apps/admin/src/app/navigation.tsx) | 原 API、按钮/字段权限、主题与语言、请求取消、空错态；优先使用 `@/components/ui`，不直接修改 UIArc vendor |
-| 新增 API / 调整公共字段 | [OpenAPI 源码](apps/api/src/contracts/openapi-document.ts)、[shared 出口](packages/shared/src/index.ts) | DTO/运行时校验、Guard/audience、服务端生产者、所有客户端消费者以及生成产物 |
-| 修改计价、订单、库存或资金 | [Rental Core](apps/api/src/modules/rental-core)、[业务任务](<docs/Rental Core/Rental Core-开发任务.md>) | 历史快照、原键、事务/锁、并发、费用与实物状态；不要只改 UI 展示 |
-| 修改客户、企业或会员 | [platform 模块](apps/api/src/modules/platform)、[client 模块](apps/api/src/modules/client) | 租户共享身份与空间经营数据的区别、个人/企业主体、资格和财务授权 |
-| 增加租赁品类或专业能力 | [品类治理四册](<docs/Rental Core/品类治理/品类治理-协作接续.md>)、[扩展规则](docs/公共技术资料/开发指南/项目-开发指南.md#21-通用租赁内核) | 真实能力实现、动态编码现状、历史版本与各端投影，不能只补枚举或字段 |
-| 接入支付、通知或对象存储 | [integrations](apps/api/src/modules/integrations)、[客户端共用任务](docs/客户端共用/客户端共用-开发任务.md) | 原商户/对象归属、凭据持有者、签名回调、unknown、幂等和真实沙箱 |
-| 参与 AI Native | [需求与当前入口](<docs/AI Native/AI Native-协作接续.md>)、[应用组合](apps/api/src/modules/ai-native/ai-native-application.providers.ts) | 唯一 Gateway、预算账、累计任务资源、事实投影、批准与恢复；不在场景中另建直连模型通道 |
-| 接入外部 Agent 客户端 | [MCP](docs/MCP服务/MCP服务-协作接续.md)、[Harness 插件](docs/Harness插件/Harness插件-协作接续.md) | 身份授权、工具发布、字段外发与宿主边界；不把可连接等同可调用业务 |
-| 企业客户后台或跨行业 Core | [企业客户后台](docs/企业客户后台/企业客户后台-协作接续.md)、[平台 Core 接入](docs/平台底座/Core接入/平台Core接入-协作接续.md) | 企业端沿已批准任务和现有入口收口；跨行业 Core 仍按规划推进，不视为已发布 SDK |
+| 公共身份、租户与权限 | [Auth](apps/api/src/modules/auth/auth.service.ts)、[Guard](apps/api/src/common/api-auth.guard.ts)、[请求上下文](apps/api/src/common/request-identity.ts)、[平台服务](apps/api/src/modules/platform/platform.service.ts) | 当前身份、角色、租户及业务范围、会话撤销、审计 |
+| Core 接入与底座抽离 | [接入需求](docs/平台底座/Core接入/平台Core接入-需求.md)、[接口设计](docs/平台底座/Core接入/平台Core接入-开发任务.md#contract-design) | 数据所有者、正式出口、版本、构建组合和初始化事务 |
+| 管理后台与页面接入 | [后台规则](apps/admin/AGENTS.md)、[导航](apps/admin/src/app/navigation.tsx)、[路由](apps/admin/src/app/AppRouter.tsx) | 服务端授权、主题与语言、空错态、请求与缓存隔离 |
+| 公共 API 与运行时契约 | [shared 出口](packages/shared/src/index.ts)、[OpenAPI](apps/api/src/contracts/openapi-document.ts) | DTO、schema、生产者、各端消费者及产物版本 |
+| AI Native | [专项入口](<docs/AI Native/AI Native-协作接续.md>)、[应用组合](apps/api/src/modules/ai-native/ai-native-application.providers.ts) | 工具发布、当前权限、Gateway、预算、批准与原收据 |
+| Rental 业务示范 | [Core 源码](apps/api/src/modules/rental-core)、[业务需求](<docs/Rental Core/Rental Core-需求.md>) | 业务规则、历史快照、库存与金额、幂等及事务 |
+| 外部 Agent 客户端 | [MCP](docs/MCP服务/MCP服务-协作接续.md)、[Harness](docs/Harness插件/Harness插件-协作接续.md) | 原身份、目标授权、数据投影和工具可用性 |
 
-### 数据与合同变更
-
-- 公共协议从 `@rental-os/shared` 的正式出口消费。它包含运行时代码，不能只同步 `.d.ts`，也不要从深层源码导入规避包合同。
-- 修改 DTO 时同时核对 OpenAPI、校验 schema、权限路由及客户端。字段缺失、`null` 与零可能有不同业务含义，不为页面方便把缺金额变成零。
-- 已共享/已应用的 Prisma migration 保持不可变；新增结构采用增量迁移。验证空库部署，也验证有旧数据时的升级和恢复。
-- 报价、订单、规则、价格、检查和资金的历史依据要可追溯。修复不能通过覆盖历史对象或清空业务库获得“数据一致”。
-- 根级 `db:migrate` 用于**编写新 migration**，不是日常启动命令。执行前检查脚本和目标库，详见[数据库指南](docs/公共技术资料/开发指南/数据库-启动指南.md)。
+阅读一项功能时，沿页面或调用方 → API 封装 → Controller / Guard → 应用与领域服务 → 仓储 / 外部适配 → 原结果读取追踪。
 
 ## 验证改动
 
-项目没有一个能替代所有场景的“全绿”命令。先选与改动有关的验证，再按需要增加数据库、客户端或供应商组合证据。
+按实际改动选择验证入口，并先查看脚本的读写和环境依赖。
 
-| 改动类型 | 入口 | 能证明什么 / 不能证明什么 |
+| 验证内容 | 入口 | 证据范围 |
 | --- | --- | --- |
-| 文档 | `npm run docs:check` | 白名单文件链接、共用入口与 AI Native 任务算术；不检查全部历史、外网、锚点或业务完成度 |
-| 文档检查器本身 | `npm run test:docs` | 检查规则回归，不启动应用 |
-| 公共接口 | `npm run contract:validate` | Controller/OpenAPI、DTO、路由权限及客户写入归属的静态检查；不替代真实权限行为 |
-| 后台结构 | `npm run test:admin` | 后台结构/约定检查，不是浏览器验收 |
-| 类型 | `npm run lint` | 工作区类型链，期间按顺序构建 shared、MCP；名称是 lint，但不是一次全仓风格检查 |
-| 主工程构建 | `npm run build` | shared、MCP、API、admin 按依赖顺序编译/打包；不含其他全部工作区 |
-| 租赁内核 / 计费策略 | `npm run test:rental-core`、`npm run test:pricing-strategy` | 定向业务/策略验证；仓储替身通过不能证明 MySQL 事务 |
-| 微信客户端 | `npm run test:miniprogram`、`npm run test:staff-miniprogram` | 构建及静态/宿主替身检查；不代替开发者工具、真机或真实微信支付 |
-| 数据库 | `test:*db*` 等对应脚本 | 各脚本的目标库、创建/清理范围和凭据不同，必须先阅读，不能全都当作离线测试 |
-| 底座广域回归 | `npm run test:rental-foundation` | 多步骤综合检查，含构建及环境相关命令；不是每次编辑都运行的快捷冒烟 |
+| 文档 | `npm run docs:check` | 白名单文档链接、共用入口和 AI Native 任务表算术 |
+| 文档检查器 | `npm run test:docs` | 检查规则自身的回归 |
+| 公共接口 | `npm run contract:validate` | Controller、OpenAPI、DTO、路由权限和客户写入归属的静态一致性 |
+| 后台结构 | `npm run test:admin` | 后台约定与结构检查 |
+| 类型与主工程构建 | `npm run lint`、`npm run build` | 按实际包依赖检查类型并编译 shared、MCP、API、admin |
+| Rental 示范业务 | `npm run test:rental-core`、`npm run test:pricing-strategy` | 原 Core 和计费策略的定向行为 |
 
-例如，修改计费策略后，选择已有策略测试，再做必要的类型/构建核对：
-
-```bash
-npm run test:pricing-strategy
-```
-
-```bash
-npm run lint
-```
-
-```bash
-npm run build
-```
-
-脚本实际行为以 [package.json](package.json)及测试源码为准。部分测试会创建临时文件、重建 shared、读取环境或连接数据库；不要根据命令包含 `test` 就认为它无副作用。
-
-AI Native 的隔离验证使用[既有 preload](tests/fixtures/ai-native/prisma-offline-preload.cjs)和 [AGENTS 约定](AGENTS.md)：固定不可用数据库地址、独立 audit/write root、TEMP/TMP 与缓存。它只约束被正确加载的进程，不是全机器沙箱；不要把关闭启动连接当作网络隔离，也不要将隔离配置用于正常业务启动。
-
-报告验证结果时写出**命令、退出码、测试范围及未测部分**。至少区分静态/类型、离线行为、构建、真实数据库、浏览器/微信宿主、供应商、正式验收与发布。保留最小必要失败证据，修复后只复验相关范围，不删断言或用 skip/todo 换绿色。临时环境无论验证成功或失败都须主动清理；删除失败且可安全移动的残留统一归入主仓库 `output/.cleanup-pending/<工作树标识>/<任务标识>/`，移动也受阻则在同一清单登记原位置。归集不等于删除，由创建者继续处理。工作树按需准备文件，不复制整套输出、依赖和缓存，具体执行根 [AGENTS 的强制要求](AGENTS.md#工作树与临时产物)。清理未完成不得宣称交付全部收口。
+类型、静态、离线行为、构建、浏览器或微信宿主、真实数据库、外部服务与发布证据分别记录。数据库及供应商测试按对应专项准备独立环境。一次性验证产物集中管理，退出时完成清理。命令与隔离约束沿公共规则查阅。[脚本清单](package.json) · [验证与临时产物规则](AGENTS.md#修改验证与交付)
 
 ## 贡献代码与文档
 
-每天首次改动前核对当前任务分支的未提交、未推送成果并及时补交补推；每个完整功能或文档阶段验证、更新相关文档后，立即提交并上传 GitHub。日常 Git 操作已有负责人持续授权，远端核验、未完成改动及失败处理统一执行 [AGENTS 的提交与同步规则](AGENTS.md#提交与github同步)。
+欢迎围绕公共底座、Core 接入和示范业务贡献代码。新能力先明确归属、接口与验收范围，再从实际调用链实现一个完整功能阶段。
 
-### 提交改动前
+- 从文档导航阅读对应需求、任务和当前接续，核对工作树与文件归属。
+- 公共协议通过正式包出口复用，接口变更同步生产者、DTO / OpenAPI 和直接消费者。
+- 关键文件用简短说明表达职责与限制，复杂事务、并发和恢复逻辑解释实现原因。
+- 完成必要验证后，记录命令、结果、固定版本和剩余问题，提交范围清晰的改动。
 
-1. **从一个明确的问题开始。** Bug 给出版本/提交、角色、业务场景、最小复现、预期与实际结果。新能力先讨论所属专项、边界和验收；涉及金额、授权、数据迁移或公共协议时，不先写一个平行实现。
-2. **读入口和本地规则。** 根 [AGENTS.md](AGENTS.md)约束共同开发流程；子模块有规则时继续读取。需求决定应该做什么，任务决定切片，协作接续说明当前归属，记录提供证据；当前代码不能自动推翻已批准规则。
-3. **保持改动可审查。** 从自己的分支/工作树提交，不覆盖他人的未提交成果；公共合同指定唯一作者，跨树整合固定成果，不追逐另一作者活动 HEAD。不要顺手重排无关文件或批量升级依赖。
-4. **交付完整的小切片。** 同时处理实际入口、生产者、消费者、错误与恢复路径，补有针对性的正反例；修权限缺口不能只隐藏按钮，修重复写入不能只禁用前端点击。
-5. **说明验证与兼容性。** 提交说明写清问题、方案、受影响端、迁移/兼容影响、实际验证及仍未覆盖的环境；列出需要维护者确认的运营或发布条件。
+每个正式专项的文档按四册维护。
 
-新增代码遵循附近命名、注释和模块组织。复杂事务、历史兼容和并发分支解释“为什么”；不用任务百分比、临时派工或本机环境信息注释源码。
-
-### 文档组织
-
-每个正式专项目录只维护四份现行文档：
-
-| 文档 | 用途 |
+| 文档 | 职责 |
 | --- | --- |
 | `主题-需求.md` | 产品范围、业务规则和验收依据 |
-| `主题-开发任务.md` | 固定任务、依赖、实施要求和有证据的完成度 |
-| `主题-开发记录.md` | 完整阶段的已做/剩余、失败、验证与重要证据 |
-| `主题-协作接续.md` | 当前目标、写入归属、未完项、下一入口和验证边界 |
+| `主题-开发任务.md` | 固定任务、依赖、实施要求与有证据的进度 |
+| `主题-开发记录.md` | 功能阶段的实现、验证、问题及来源 |
+| `主题-协作接续.md` | 当前目标、写入归属、未完成项和下一入口 |
 
-实施设计、部署检查、评审和接手说明按内容归入这四册，不再加第五份平行计划。`历史归档/`、`未来规划/`、公共规范和真正的源码模块 README 按用途保留。文档移动要修现行链接并保全原文，不能用归档表示需求取消或工作完成。
-
-完整专项入口见[文档导航](docs/文档导航.md)。根 README 只做项目与开发入口，不维护某次会话的分工、临时端口、提交流水或实时百分比。
-
-### 使用 AI 辅助开发
-
-欢迎使用 AI 辅助阅读、实现和验证，但贡献者仍需对代码、测试和披露内容负责。让工具先读 [AGENTS.md](AGENTS.md)；[CLAUDE.md](CLAUDE.md)只引用这份共同规则。提前明确文件范围、允许的命令及数据库/网络边界，不让旧文档中的命令成为自动执行许可。
-
-不要将真实客户资料、密钥或未获授权的业务内容交给模型。生成的接口、测试通过声明和许可证信息都应核实；模型输出不能替代人类业务批准或服务端授权。
+开发 AI 与人类贡献者使用相同的项目规则，必要的源码说明与文档随实现更新。历史原文通过固定 Git 版本或专项归档保留。[文档导航](docs/文档导航.md) · [共用开发规则](AGENTS.md) · [Claude 入口](CLAUDE.md)
 
 ## 部署前检查
 
-本地开发步骤和 Docker Compose **不构成生产部署方案**。部署前至少确认：
+正式部署需为选定的底座和 Core 组合核定以下内容。
 
-- 选定提交与可复现构建，分别检查 API、Web、微信包和可选 MCP/Harness 的发布产物；不直接把整个工作目录上传。
-- 生产配置、独立密钥、HTTPS、CORS、可信代理与限流；关闭演示入口，禁止生产 Seed、模拟资金和默认凭据。
-- 正确的数据库目标、迁移前备份、增量升级和恢复演练；回退方案能读取已经产生的新数据与原业务事实。
-- 原角色、租户/空间/地点范围、文件 ACL、客户敏感字段和企业订单权限的真实验证。
-- 支付/退款/预授权、短信、存储等已启用能力的真实渠道证据，以及 unknown、迟到回调、重启和对账恢复。
-- 日志脱敏、监控、异常待办与人工处理责任；没有真实依赖的能力保持关闭，而不是返回空成功。
-- 项目整体许可、第三方代码、图片、字体、动画、品牌及参考素材的分发权利。
+- 可复现构建、运行依赖、Core 与合同版本、当前授权及历史读取兼容。
+- 真实环境配置、数据库迁移与备份、恢复演练、权限与数据范围。
+- 已启用供应商的真实调用、原操作核对、日志脱敏和维护责任。
+- 发行包的第三方许可、来源文件和素材分发范围。
 
-备份、预检、发布门禁与升级演练脚本在 [scripts/ops](scripts/ops)，数据库约束见[数据库指南](docs/公共技术资料/开发指南/数据库-启动指南.md)。执行它们之前阅读目标参数与外部副作用；不要把历史演练记录当成当前环境已就绪。
-
-发现安全问题时，不要在公开 Issue 中附真实凭据、客户记录或可被滥用的生产细节。优先使用托管平台可用的私密漏洞报告通道或维护者确认的私下联系渠道；普通 Bug 报告也应先脱敏。
+部署、备份与恢复操作沿目标环境和既有脚本办理。安全问题通过维护者确认的私密渠道报告，材料先脱敏。[运维脚本](scripts/ops) · [数据库与恢复指南](docs/公共技术资料/开发指南/数据库-启动指南.md)
 
 ## 许可证与第三方内容
 
-**本仓库根目录目前尚未提供项目整体的 `LICENSE`。** 在维护者补齐正式许可之前，请勿将“准备开源”或代码可见解读为已授予整个项目的开源再分发、商用或再许可权利；这里不代替项目所有者选择许可证。
+Nativark 自有源码及相关文档采用 MIT License，允许使用、修改、分发和商业使用。分发时须保留版权与许可证声明。[MIT 许可证](LICENSE)
 
-第三方内容遵守各自许可和来源声明，不能用其中某一份许可证覆盖全部仓库。例如：
+引用的组件、客户端源码和素材按各自许可及来源声明使用，随发行包保留对应版权与许可文件。
 
-- [UIArc 许可](packages/ui-arc/LICENSE)及[来源说明](packages/ui-arc/README.md)；保留版权与许可，Pro 目录元数据不代表获得其源代码授权。
-- [保留 Harness 的上游许可](clients/agent-desktop/harness/LICENSE)、[第三方声明](clients/agent-desktop/harness/THIRD_PARTY_NOTICES.md)及[来源记录](clients/agent-desktop/UPSTREAM.json)。
-- 营销网站中的图片、字体、动画和模板参考另有权利边界，见[网站说明](apps/website/README.md)。品牌原稿、下载参考和历史截图不自动包含在项目代码许可中。
-
-依赖、来源和本地素材会随版本变化。发布源码或发行包前，应核对实际包含的内容，而不是只在 README 添加一个许可证徽章。
+- UIArc 组件按其来源与许可使用。[UIArc 许可](packages/ui-arc/LICENSE) · [来源说明](packages/ui-arc/README.md)
+- Animate UI 等保留组件的许可随对应源码维护。[侧栏许可](apps/admin/src/components/animate-sidebar/LICENSE.md) · [组件来源](apps/admin/src/components/animate-sidebar/README.md)
+- 原定制客户端中的上游 Harness 按原许可和第三方声明使用。[上游许可](clients/agent-desktop/harness/LICENSE) · [第三方声明](clients/agent-desktop/harness/THIRD_PARTY_NOTICES.md) · [来源记录](clients/agent-desktop/UPSTREAM.json)
+- 网站图片、字体、标志与动画的使用范围沿素材来源核定。[网站说明](apps/website/README.md)
