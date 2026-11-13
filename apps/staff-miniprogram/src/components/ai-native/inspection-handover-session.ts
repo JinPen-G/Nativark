@@ -27,7 +27,7 @@ interface HandoverLocator {
 }
 export interface InspectionHandoverView {
   available: boolean; pending: boolean; operation: InspectionHandoverOperation | null;
-  signaturePending: boolean; signatureFileAssetId: string; completed: boolean;
+  signaturePending: boolean; signatureFileAssetId: string; signatureFormCurrent: boolean; completed: boolean;
 }
 export interface InspectionHandoverSession {
   current(): boolean;
@@ -40,6 +40,7 @@ export interface InspectionHandoverSession {
   beginSignature(file: StaffUploadObservationFile, reference: StaffUploadReference): void;
   observeSignature(reference: StaffUploadReference): void;
   completeSignature(fileAssetId: string): void;
+  invalidateForm(): void;
   clearSignature(): void;
   markSubmitted(operation: InspectionHandoverOperation, templateId?: string): void;
   observeSubmitted(key: string, operation: InspectionHandoverOperation): void;
@@ -91,6 +92,10 @@ export function createInspectionHandoverSession(orderId: string, stage: 'pickup'
     } catch { throw Error('原交接定位无法读取，已停止新提交'); }
   };
   let held = read(), locator = held === undefined ? null : parse(held, owner), finished: HandoverLocator | null = null;
+  // A stored upload reference proves only the original upload. A reopened or
+  // rebuilt form cannot inherit the customer's confirmation of its old values.
+  // Keep this witness local; invalidating it never changes an unknown locator.
+  let signatureFormCurrent = false;
   const active = () => {
     const now = currentSession();
     return current() && contextVersion() === version && now?.tenant.tenantId === owner.tenantId
@@ -119,7 +124,9 @@ export function createInspectionHandoverSession(orderId: string, stage: 'pickup'
       const observed = finished ?? locator;
       return { available, pending: observed?.phase === 'unknown', operation: observed?.operation ?? null,
         signaturePending: !!observed?.signature && !observed.signatureFileAssetId,
-        signatureFileAssetId: observed?.signatureFileAssetId ?? '', completed: observed?.phase === 'observed' };
+        signatureFileAssetId: observed?.signatureFileAssetId ?? '',
+        signatureFormCurrent: signatureFormCurrent && !!observed?.signatureFileAssetId,
+        completed: observed?.phase === 'observed' };
     },
     key() { return ensure().key; },
     receiptQuery() {
@@ -139,6 +146,7 @@ export function createInspectionHandoverSession(orderId: string, stage: 'pickup'
       const old = ensure();
       if (old.phase !== 'ready' || old.signature) throw Error('请先核对原签名上传，不能重复上传');
       persist({ ...old, signature: { file: copy(file), reference: copy(reference) } });
+      signatureFormCurrent = true;
     },
     observeSignature(reference) {
       const old = ensure(), previous = old.signature?.reference;
@@ -152,14 +160,20 @@ export function createInspectionHandoverSession(orderId: string, stage: 'pickup'
       if (!old.signature || old.phase !== 'ready' || !id(fileAssetId) || old.signature.reference.fileAssetId !== fileAssetId) throw Error('原签名文件不可核对');
       persist({ ...old, signature: { ...old.signature, reference: { ...old.signature.reference, stage: 'completed' } }, signatureFileAssetId: fileAssetId });
     },
+    invalidateForm() {
+      if (!active()) throw Error('当前交接身份已变化');
+      signatureFormCurrent = false;
+    },
     clearSignature() {
       const old = ensure();
       if (old.phase !== 'ready' || old.signature && !old.signatureFileAssetId) throw Error('原签名或交接结果待核对，不能重签重发');
       persist({ ...old, signature: null, signatureFileAssetId: null });
+      signatureFormCurrent = false;
     },
     markSubmitted(operation, templateId) {
       const old = ensure();
       if (old.phase !== 'ready' || !old.signatureFileAssetId) throw Error('原交接结果待核对或签名未上传');
+      if (!signatureFormCurrent) throw Error('表单已重建，请先清除原签名并重新现场签字');
       persist({ ...old, phase: 'unknown', operation, templateId: templateId ?? null });
     },
     observeSubmitted(key, operation) {

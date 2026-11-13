@@ -66,11 +66,22 @@ export function showInspectionHandover(page: InspectionHandoverPage, session: In
     const view = session.snapshot();
     page.setData({ fulfillmentPending: view.pending || view.completed, fulfillmentUnavailable: !view.available, fulfillmentCanRead: view.pending || view.completed,
     signaturePending: view.signaturePending, signatureCanRecover: view.available && view.signaturePending,
-      signatureFileAssetId: view.signatureFileAssetId,
+      signatureFileAssetId: view.signatureFormCurrent || view.pending || view.completed ? view.signatureFileAssetId : '',
       fulfillmentMessage: !view.available ? '原定位已变化，暂停提交；本页仍可读取已持有的原收据。'
         : view.pending ? '原交接提交结果待核对，只读取原收据。'
-        : view.completed ? '已核对原交接提交收据。' : view.signaturePending ? '原签名上传待核对，不重复上传。' : '' });
+        : view.completed ? '已核对原交接提交收据。' : view.signaturePending ? '原签名上传待核对，不重复上传。'
+        : view.signatureFileAssetId && !view.signatureFormCurrent ? '表单已重建，原签名不能用于当前值；请先清除原签名并重新现场签字。' : '' });
   } catch { page.setData({ fulfillmentUnavailable: true, fulfillmentCanRead: false, fulfillmentMessage: '原交接定位不可用，已停止新提交。' }); }
+}
+
+/** Rebuilding the original form withdraws its local signature witness only.
+ * Upload/commit unknowns and their exact receipt references stay untouched. */
+export function invalidateInspectionHandoverForm(page: InspectionHandoverPage): void {
+  plans.delete(page);
+  const session = bindings.get(page)?.session;
+  if (session?.current()) session.invalidateForm();
+  page.setData({ signatureDrawn: false, humanFormPreview: null });
+  if (session?.current()) showInspectionHandover(page, session);
 }
 
 export function clearInspectionHandoverPage(page: InspectionHandoverPage): void {

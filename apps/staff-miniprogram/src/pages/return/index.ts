@@ -14,7 +14,7 @@ import { uploadStaffImage } from "../../api/uploads";
 import { emptyInspectionHandover, handoverPageSession, showInspectionHandover, clearInspectionHandoverPage,
   hideInspectionHumanForm, recoverInspectionSignature, readInspectionHandoverReceipt, previewInspectionHumanValues,
   adoptInspectionHumanValues, cancelInspectionHumanValues, openInspectionHumanReview, beginInspectionFormEdit,
-  restoreInspectionHandover } from '../../components/ai-native/inspection-handover-page';
+  restoreInspectionHandover, invalidateInspectionHandoverForm } from '../../components/ai-native/inspection-handover-page';
 import { createOriginalHandoverKey, type InspectionHandoverSession } from '../../components/ai-native/inspection-handover-session';
 import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage, openInspectionReceiptHistory } from "../../components/ai-native/inspection-page-binding";
 import type { StaffInspectionHost, InspectionRecognitionReference } from "../../components/ai-native/inspection-host";
@@ -126,6 +126,9 @@ Page({
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       this.restoreHandover();
       if (order.status !== 'renting') { this.setData({ view: blockedState('当前不能办理归还', `订单当前状态：${order.status}`) }); return; }
+      invalidateInspectionHandoverForm(this);
+      this.signatureDrawing = false;
+      this.signatureContext?.clearRect(0, 0, this.data.signatureWidth, this.data.signatureHeight); this.signatureContext?.draw();
       const allRows = inspectionRows(this.template);
       const boolRows = allRows.filter((row) => row.type === "boolean");
       const sharedFields = allRows.filter((row) => row.type !== "boolean");
@@ -186,7 +189,9 @@ Page({
     const point = event.touches[0] as unknown as WechatMiniprogram.TouchCanvasDetail | undefined;
     if (!point || !this.signatureContext || this.data.uploading || this.data.busy || this.data.signaturePending
       || this.data.fulfillmentPending || this.data.fulfillmentUnavailable) return;
-    if (this.data.signatureFileAssetId) { this.setData({ error: '请先清除原签名再重签' }); return; }
+    try {
+      if (this.handoverSession().snapshot().signatureFileAssetId) { this.setData({ error: '请先核对并清除原签名再重签' }); return; }
+    } catch { this.setData({ error: '原签名定位不可用，请核对原操作' }); return; }
     this.signatureDrawing = true;
     this.signatureContext.beginPath();
     this.signatureContext.setStrokeStyle("#20242b");
@@ -221,7 +226,10 @@ Page({
     const work = captureInspectionPageWork(this);
     const session = this.handoverSession(), view = session.snapshot();
     if (session.key() !== batchId || view.pending || view.completed) throw Error('原交接结果待核对，不重复上传');
-    if (view.signatureFileAssetId) return view.signatureFileAssetId;
+    if (view.signatureFileAssetId) {
+      if (!view.signatureFormCurrent) throw new Error('表单已重建，请先清除原签名并重新现场签字');
+      return view.signatureFileAssetId;
+    }
     if (view.signaturePending) throw Error('原签名上传待核对，请读取原上传');
     if (!this.data.signatureDrawn) throw new Error("请让客户在签名框内完成现场签字");
     const filePath = await new Promise<string>((resolve, reject) => wx.canvasToTempFilePath({ canvasId: "returnSignature", fileType: "png", width: this.data.signatureWidth, height: this.data.signatureHeight, destWidth: this.data.signatureWidth, destHeight: this.data.signatureHeight, success: (result) => resolve(result.tempFilePath), fail: () => reject(new Error("导出签字图片失败，请重签")) }, this));

@@ -3,8 +3,35 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain20-signature-reopen-simulated-whole-closeout-20261114"></a>
+## AIN-20 原签名重开修复与整项模拟研发收口（2026-11-14）
+
+AIN-19已提交／推送 `2ec20f9c81f79d7a172409f619c50f3ec91d55de`并回读GitHub一致。dev2按AIN-20全文复核实际页面，发现领取／归还重开或同页reload重建默认表单，却仍可返回旧已上传签名；上传unknown恢复后也可沿用旧签名。该问题不因原批次键相同而安全：上传收据只能证明旧图片，不能证明客户确认了新表单。四源最小修复在[原handover session](../../apps/staff-miniprogram/src/components/ai-native/inspection-handover-session.ts)保留本页 `signatureFormCurrent`，重开默认无证明，原页面load重建字段前撤回；[页面绑定](../../apps/staff-miniprogram/src/components/ai-native/inspection-handover-page.ts)只展示仍有效签名，给出明确清除／重签说明。原[领取](../../apps/staff-miniprogram/src/pages/pickup/index.ts)和[归还](../../apps/staff-miniprogram/src/pages/return/index.ts)的上传复用及markSubmitted都拒绝旧签名，画布同步清空；本地证明不授服务端权限。业务批次键、原上传引用、原业务收据均保留，不清upload／COMMIT unknown，不换键重派。
+
+| 验证及来源 | 实际结果 |
+| --- | --- |
+| dev2原反例与同命令复验 | `node --no-compilation-cache -`，stdin `8ab4a3f39ab2709b8806ee539abea4cb9e8dffb108b6c0a61adf58cbc625ef36`，修前退出1证明旧签名仍可返回，修后同命令退出0。 |
+| dev2最终原组 | stdin `64f5f97689dd9693099d5c9568fe2217b29e4d7a6c3c56d0b5d37fff99710a8b`／退出0，领取／归还重开、同页重载、upload unknown、COMMIT unknown五场景；新提交拒绝不改变原locator，明确重签仍同批次完成一Core提交。4根／235源／115份内存声明类型零诊断，stdin `e05733d4f7c306b5507d9a71ebc85a8168035e7352e46d21727365c3e4d4b7bf`／退出0。 |
+| Root独立原页面重开及最终同页／直接提交复验 | 原四场景stdin `f6592226f519d6dd799525259cb8b00658889bd412e035a253f498e05f5e2b52`退出0；最终五场景 `9fc96ed81e4f3be0c5a2b4b1a258e31eae930211247247f8994bb6f8d3696796`退出0，实际页面load／原Auth／Guard／Controller／Core夹具。拒绝旧签名新增上传及Core写0，提交unknown只读原收据；明确清除重签后新值13、布尔true沿原提交一次。 |
+| Root受影响完整履约链 | stdin `a7501626aa14fd8107fe3d058446f2f1e694c8ebd8575f668fa9ad22c996f7fb`／退出0，原七条领取／归还、两类提交丢ACK、签名丢ACK、多资源、分批归还均通过。每条原Core检查／订单save／submit各1，分批未归资源仍renting，原unknown不换键；监听器／计时器0。 |
+| Root原类型与源码核接 | stdin `5c98558548a2ce0742b943a8c8c59f631b3f0b0eb18d30f98b696c309248f118`／退出0，TS5.9.3，原ES2019，7根／236源／115份内存声明零诊断。四blob与作者冻结一致：session `18fecf9d39c5eab00731a4cae7c76edf14efcbf8`，page `690eff47007c6c1db63f8cc6ccd3743fe730ebfd`，pickup `b84a8b3a4072c344ca5a6fec5eddb55fe8890e99`，return `6734610394b566d1a3be538d44862d1aac145e69`。 |
+
+按原AIN-20五条和06／07／19完整前置核定：
+
+| 原条款 | 全文实现与证据 |
+| --- | --- |
+| 员工身份／范围／订单分配及原入口 | 原staff白名单、Auth／Guard／空间地点和冻结分配／模板绑定；[媒体及当前复核](#ain-staff-media-review-consumer-20261112)、[原结果定位](#ain-staff-original-result-reference-20261111)及本片真实源码组合。领取／归还从原页挂接，不从URL／缓存自授权。 |
+| 来源／候选人工差异、缺项和提交 | [AIN-19完整原文／置信／区域时段](#ain19-source-text-simulated-whole-closeout-20261114)和[保存人工值转原表单](#ain20-original-final-form-consumer-20261114)；当前模板／原Core仍校验，只有员工明确采用、检查、签字和确认才提交。识别／草稿／履约分别展示，本片关闭旧签名反例。 |
+| 相机／相册／录音、上传／弱网／草稿同步 | 原媒体组件接原上传create／PUT／complete与原操作观察，发送前保留读回原键；切scope／隐藏／卸载使旧回调失效，unknown及TTL不换键。既有图片／音频两轮Task累计calls=2、原收据恢复、存储拒绝／授权拒绝及本片实际签名／提交丢ACK路径分别核定。 |
+| 轮询和人工降级 | 复用原受控任务观察／原answer收据和微信轮询，不运行时require shared、不强套SSE；关闭AI／权限拒绝保留原填单入口，当前材料不可核对不采用旧候选。 |
+| 实际小程序源码的必要组合冒烟 | dev2独立按原五条核源／固定证据并发现修复缺口；Root核四blob、原页面／组件→Controller／Core七条和重开五条／类型。没有把模拟源码、合成数据库／运输和真实微信设备混称；真实宿主／供应商由负责人另测。 |
+
+本片使用原offline preload、不可达DATABASE_URL、内存audit和绝对任务根。命令和失败原样在AI-RD／dev2原会话，无新增／扩写测试文件、依赖／client／dist副本。自有进程全部退出，`output/.tmp/ain20-signature-reopen-closeout-20261114`未创建。文档检查仍4处既有缺链，任务算术和本片链接无新增错误；定向diff检查通过。真实微信、相机录音与网络设备、数据库、存储及供应商未宣称通过。
+
+AIN-20原全文、生产装配、前置、必要模拟／类型及独立复核齐备，唯一任务册只更新本项及汇总。19／20为本批两项新达100%，登记新的main集成节点；PM当前指定 `1cb43939bcc25ed1930563aa19b3d507e9b08965`，Root另按Git固定对象重建原AIN-12／13最小闭包，不写main／不复制环境，PM串行集成。dev1继续原AUTOMATION解释／Gateway正向核定，dev2已转AIN-25只读原全文，不等提交或main。
 
 <a id="ain19-source-text-simulated-whole-closeout-20261114"></a>
 ## AIN-19 识别原文、置信展示与整项模拟研发收口（2026-11-14）
