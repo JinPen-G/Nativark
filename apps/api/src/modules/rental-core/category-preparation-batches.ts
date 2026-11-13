@@ -74,6 +74,31 @@ function patchShape(value: unknown): asserts value is CategoryEntityPreparationP
   }
 }
 
+function removalShape(value: unknown): asserts value is CategoryEntityPreparationRemoval {
+  if (!entityReference(value) || Object.keys(value).some((key) => !["entityType", "entityId", "fieldCodes"].includes(key)) ||
+      (value.fieldCodes !== undefined && (!Array.isArray(value.fieldCodes) || !value.fieldCodes.length ||
+        value.fieldCodes.length > 100 || value.fieldCodes.some((code) => typeof code !== "string" || !safeField(code)) ||
+        new Set(value.fieldCodes).size !== value.fieldCodes.length))) {
+    throw new BadRequestException("撤回准备必须明确合法实体及字段范围");
+  }
+}
+
+/** The current revision is needed only for this batch's explicit references.
+ * Earlier staged values keep their original basis; complete catalog/uniqueness
+ * validation belongs to preview and the final adoption transaction. */
+export function categoryPreparationBatchEntityReferences(
+  patches: CategoryEntityPreparationPatch[], removals: CategoryEntityPreparationRemoval[] = []
+) {
+  assertCategoryPreparationBatchSize(patches, removals);
+  patches.forEach(patchShape);
+  removals.forEach(removalShape);
+  const references = [...patches, ...removals];
+  return {
+    itemGroupIds: [...new Set(references.filter(row => row.entityType === "item_group").map(row => row.entityId))].sort(),
+    assetIds: [...new Set(references.filter(row => row.entityType === "asset").map(row => row.entityId))].sort()
+  };
+}
+
 export function assertCategoryPreparationBatchSize(patches: unknown, removals: unknown = []) {
   if (!Array.isArray(patches) || !Array.isArray(removals) ||
       patches.length + removals.length > CATEGORY_PREPARATION_LIMITS.batchEntities ||
@@ -84,7 +109,7 @@ export function assertCategoryPreparationBatchSize(patches: unknown, removals: u
 
 export function mergeCategoryPreparationBatch(
   definition: RentalCategoryDefinition,
-  records: { groups: CategoryPreparationRecord[]; assets: CategoryPreparationRecord[] },
+  records: { groups: Pick<CategoryPreparationRecord, "id" | "updatedAt">[]; assets: Pick<CategoryPreparationRecord, "id" | "updatedAt">[] },
   previous: CategoryEntityPreparationPatch[],
   patches: CategoryEntityPreparationPatch[],
   removals: CategoryEntityPreparationRemoval[] = []
@@ -101,18 +126,13 @@ export function mergeCategoryPreparationBatch(
     if (result.has(key)) throw new ConflictException("已有预备集合包含重复实体，不能覆盖修复");
     result.set(key, structuredClone(patch));
   }
-  const current = new Map<string, CategoryPreparationRecord>([
+  const current = new Map<string, Pick<CategoryPreparationRecord, "id" | "updatedAt">>([
     ...records.groups.map((row) => [`item_group:${row.id}`, row] as const),
     ...records.assets.map((row) => [`asset:${row.id}`, row] as const)
   ]);
   const removed = new Map<string, Set<string> | "all">();
   for (const removal of removals) {
-    if (!entityReference(removal) || Object.keys(removal).some((key) => !["entityType", "entityId", "fieldCodes"].includes(key)) ||
-        (removal.fieldCodes !== undefined && (!Array.isArray(removal.fieldCodes) || !removal.fieldCodes.length ||
-          removal.fieldCodes.length > 100 || removal.fieldCodes.some((code) => typeof code !== "string" || !safeField(code)) ||
-          new Set(removal.fieldCodes).size !== removal.fieldCodes.length))) {
-      throw new BadRequestException("撤回准备必须明确合法实体及字段范围");
-    }
+    removalShape(removal);
     const key = identity(removal);
     if (removed.has(key)) throw new BadRequestException("同批不能重复撤回同一实体");
     if (!current.has(key) && !result.has(key)) throw new BadRequestException("撤回引用了不属于当前空间的实体");

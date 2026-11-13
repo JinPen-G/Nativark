@@ -4,6 +4,24 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="preparation-bounded-read-20261113"></a>
+
+## 分批准备的实体读取范围与扫描前门禁（2026-11-13）
+
+沿CAT-GOV-08及需求§6.2.1继续核累计准备和最终事务。开工工作树与GitHub均为`f3300b9b2a478c6dd96b4274a62475a62ac0d059`，无未提交、暂存或merge/cherry-pick。原服务保存一条型号准备也先读取全空间型号/资产及组成；[原入口反例](../../output/category-governance/preparation-bounded-read-before-20261113.json)显示本批只含`g0`仍读取3个型号。完整预览和旧整份保存也在物化实体后才进入最终规模检查。没有把此反例当作真实容量或并发结论。
+
+仅修改[原批次辅助](../../apps/api/src/modules/rental-core/category-preparation-batches.ts)和[准备服务](../../apps/api/src/modules/rental-core/category-adoption-preparation.service.ts)。本批补丁与撤回复用原结构校验，按租户/空间及去重ID只读取本批涉及实体的`id/updatedAt`；无实体的原因/能力批次不读取型号/资产。后批保留此前字段与原实体修订，不从今天的资料重基准、不要求无关实体已满足目标必填；已删除实体仍能明确撤回其原准备。能力准备继续复验原实例、执行合同和配置，集合修订/原批次指纹与收据同事务保存，当前经营事实不提前生效。
+
+完整预览和旧整份保存先检查准备容器及发布定义，再在原空间锁内复用最终采用的型号/资产合计10000条和已存属性JSON 16MiB门禁，超限在全量实体读取前拒绝、保留原准备。旧整份不能覆盖版本2集合的原拒绝也前置，不读取经营资料后才通知更换客户端。这些是既有上限的读取顺序调整；累计10000条/2MiB、单批1000条/256KiB、配置领域/总行数及最终候选16MiB限制不变。最终采用仍重读全部当前实体、验证准备后新增/修改、声明与配置并同原绑定/审计/收据提交；本片不改Application、采用事务阶段、Shared/DTO/OpenAPI/Schema或报价算法。
+
+原API配置、受管TypeScript5.9.3最终检查867根/2012源零诊断，只安装上述两份必要emit，六份Shared运行时/Client及原采用应用/事务阶段保护文件哈希未变，见[类型与安装](../../output/category-governance/preparation-bounded-read-final-compile-20261113.json)。[当前产物十组限定行为](../../output/category-governance/preparation-bounded-read-current-behavior-20261113.json)退出0、audit0：单型号/资产的ID与修订投影、原因独立保存、后批保留陈旧前批且最终采用拒绝、不可暗中重基准、已删来源撤回与原收据、超条数/属性JSON在全读前拒绝、未知结构保留、首等前输入与读取ID一致，以及两批1000+1条累计正常采用、1001条声明和原键重放不新增写。
+
+原`node --no-compilation-cache --require <本树preload> --test --test-concurrency=1 --test-reporter=spec tests/category-preparation-batches.test.cjs tests/category-preparation-batch-service.test.cjs tests/category-adoption-records.test.cjs tests/category-preparation-permission.test.cjs`首次3文件通过、批次服务1文件失败，见[原运行](../../output/category-governance/preparation-bounded-read-original-tests-20261113.json)：旧整份覆盖分批集合时先触发新规模查询，旧fixture未登记而遮挡应有的客户端错误。将原拒绝前置后只复验该原文件，[最终批次测试](../../output/category-governance/preparation-bounded-read-batch-original-final-20261113.json)退出0、audit0，全部原断言保留。限定调用的[首次失败](../../output/category-governance/preparation-bounded-read-behavior-20261113.json)为独立批次回读查询未登记；仅在短调用补其明确SQL替身后复验通过，未改生产收据或测试文件、没有新建/扩写测试脚本。
+
+SQL、Auth行和串行回滚仍为明确fixture；本片未证明MySQL过滤/锁/容量/多实例、完整报价并发、HTTP或宿主，也未取得独立Review。静态核查确认原采用候选合计含配置JSON与实体/兼容结果，原全部写入口/报价和历史经营门槛继续核实。完整CAT-GOV仍0/14、百分比待核实；两个动态编码不同组合的同一冻结构建真实经营及CAT-A01～A22继续原范围。
+
+全部验证已退出、两emit在本树自持产物，唯一暂存只剩零字节audit。原生PowerShell精确删除被CreateProcess自动审批以`blocked by policy`拒绝，整条未执行且无详细理由；安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/preparation-bounded-read-validation/manifest.json)，[退出证据](../../output/category-governance/preparation-bounded-read-cleanup-20261113.json)确认原暂存不存在、已归集未删除。旧准备结构空audit本轮重试也被拒绝，原清单已更新；旧批保留创建者清理责任。负责人即时消息规则已取代历史主动回报：本阶段版本、验证和阻塞留本对话及原记录/接续，由PM主动读取，本次没有对外发送消息。
+
 <a id="adoption-preparation-format-20261113"></a>
 
 ## 准备结构门禁与原收据保护（2026-11-13）

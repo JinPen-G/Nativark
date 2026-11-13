@@ -16,11 +16,11 @@ import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { SubscriptionService } from "../subscription/subscription.service";
 import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
-import { assertCategoryPreparationBatchSize, categoryPreparationBatchFingerprint, categoryPreparationEnvelopeSource, mergeCategoryPreparationBatch, readCategoryPreparationBatchResult } from "./category-preparation-batches";
+import { assertCategoryPreparationBatchSize, categoryPreparationBatchEntityReferences, categoryPreparationBatchFingerprint, categoryPreparationEnvelopeSource, mergeCategoryPreparationBatch, readCategoryPreparationBatchResult } from "./category-preparation-batches";
 import type { CategoryPreparationPreview } from "@rental-os/shared";
 import { AuthService } from "../auth/auth.service";
 import { CategoryAdoptionApplication } from "./category-adoption.application";
-import { readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
+import { assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
 import { assertCategoryPreparationPermission, lockCategoryAdoptionAccess } from "./category-adoption-access";
 export { CATEGORY_ADOPTION_MANAGE, assertCategoryPreparationPermission } from "./category-adoption-access";
 
@@ -89,23 +89,62 @@ export class CategoryAdoptionPreparationService {
     if (workspace.categoryCode !== identity.categoryCode || workspace.categoryVersionId === targetId) throw new ConflictException("目标版本已采用或品类身份已变化");
     return { workspace: { ...workspace, categoryVersionId: workspace.categoryVersionId }, workspaceId, targetPolicyRevision: policy.versionPolicyRevision };
   }
-  private async context(tx: Prisma.TransactionClient, user: SystemUserRow, targetId: string, operation: string) {
+  private async context(tx: Prisma.TransactionClient, user: SystemUserRow, targetId: string, operation: string, legacySave = false) {
     const { workspace, workspaceId, targetPolicyRevision } = await this.authorizedWorkspace(tx, user, targetId, operation);
-    const [target, source, groups, assets, preparation, capabilityRows] = await Promise.all([
+    const [target, source, preparation, capabilityRows] = await Promise.all([
       tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
       tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }),
-      tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true, optional: true, substitutionGroup: true } } }, orderBy: { id: "asc" } }),
-      tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } }),
       tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
       tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
     ]);
     if (preparation) categoryPreparationEnvelopeSource(preparation.patches);
+    if (legacySave && (preparation?.patches as PreparationEnvelope | undefined)?.formatVersion === 2) {
+      // A legacy overwrite is already inadmissible; do not scan business data
+      // before rejecting it or let catalog size hide the required client action.
+      throw new ConflictException("该准备集合已使用分批保存；旧版整份保存不能覆盖其他批次，请使用支持分批的客户端");
+    }
     const code = readRentalCategoryCode(workspace.categoryCode);
     const definition = resolveRentalCategoryVersionBody(target, code);
     const sourceDefinition = resolveRentalCategoryVersionBody(source, code);
+    // Full preview/legacy saves must not materialize an unbounded catalog before
+    // reporting the same final-transaction limits. Batch saves read references
+    // separately and do not require unrelated records to be complete.
+    await assertCategoryAdoptionEntityBounds(tx, user.tenantId, workspaceId);
+    const [groups, assets] = await Promise.all([
+      tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true, optional: true, substitutionGroup: true } } }, orderBy: { id: "asc" } }),
+      tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } })
+    ]);
     const records = { groups: groups.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })), assets: assets.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })) };
     const capabilityInstances = capabilityRows.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
     return { workspace, workspaceId, targetPolicyRevision, target: target!, definition, sourceDefinition, preparation, records, capabilityInstances };
+  }
+
+  private async batchContext(
+    tx: Prisma.TransactionClient, user: SystemUserRow, targetId: string, operation: string,
+    references: ReturnType<typeof categoryPreparationBatchEntityReferences>
+  ) {
+    const { workspace, workspaceId } = await this.authorizedWorkspace(tx, user, targetId, operation);
+    const where = { tenantId: user.tenantId, workspaceId };
+    const [target, preparation, capabilityRows, groups, assets] = await Promise.all([
+      tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
+      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
+      tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } }),
+      references.itemGroupIds.length
+        ? tx.rentalItemGroup.findMany({ where: { ...where, id: { in: references.itemGroupIds } }, select: { id: true, updatedAt: true } })
+        : Promise.resolve([]),
+      references.assetIds.length
+        ? tx.rentalAsset.findMany({ where: { ...where, id: { in: references.assetIds } }, select: { id: true, updatedAt: true } })
+        : Promise.resolve([])
+    ]);
+    if (preparation) categoryPreparationEnvelopeSource(preparation.patches);
+    const code = readRentalCategoryCode(workspace.categoryCode);
+    const definition = resolveRentalCategoryVersionBody(target, code);
+    // The locked source must still be readable, but unrelated entity attributes
+    // are neither needed nor supplied as today's replacement for old batches.
+    resolveRentalCategoryVersionBody(await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }), code);
+    const capabilityInstances = capabilityRows.map((row) => ({ ...row, code: row.code as RentalCapability,
+      status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
+    return { workspace, workspaceId, definition, preparation, records: { groups, assets }, capabilityInstances };
   }
   async preview(user: SystemUserRow, targetId: string, operation: string, metadataOnly = false): Promise<CategoryPreparationPreview> {
     assertCategoryPreparationPermission(user);
@@ -225,12 +264,9 @@ export class CategoryAdoptionPreparationService {
     // A late caller edit must not replace the staged input while awaiting Auth.
     body = structuredClone(body);
     return this.transaction(user, async (tx) => {
-      const context = await this.context(tx, user, targetId, body.operation);
+      const context = await this.context(tx, user, targetId, body.operation, true);
       if (context.workspace.categoryVersionId !== body.expectedSourceVersionId || context.workspace.categoryAdoptionRevision !== body.expectedSourceRevision) throw new ConflictException("来源品类版本已变化，请刷新后重新准备");
       if ((context.preparation?.revision ?? 0) !== body.expectedPreparationRevision) throw new ConflictException("预备资料修订已变化，输入未应用到活动资料");
-      if ((context.preparation?.patches as PreparationEnvelope | undefined)?.formatVersion === 2) {
-        throw new ConflictException("该准备集合已使用分批保存；旧版整份保存不能覆盖其他批次，请使用支持分批的客户端");
-      }
       prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, body.patches);
       const prior = context.preparation?.patches as { sourceVersionId?: string; operation?: string; capabilityPatches?: CategoryCapabilityPreparationPatch[] } | undefined;
       const retained = prior?.sourceVersionId === body.expectedSourceVersionId && prior.operation === body.operation && context.preparation?.sourceRevision === body.expectedSourceRevision ? prior.capabilityPatches : undefined;
@@ -306,12 +342,13 @@ export class CategoryAdoptionPreparationService {
     // Preserve nested patches/removals as well as the key: a receipt's input
     // fingerprint cannot describe one request while another is staged.
     body = structuredClone(body);
+    const entityReferences = categoryPreparationBatchEntityReferences(body.patches, body.removals ?? []);
     const removeCapabilities = body.removeCapabilityCodes ?? [];
     const fingerprint = categoryPreparationBatchFingerprint(body);
     return this.transaction(user, async (tx) => {
       // A write-endpoint retry retains its original current eligibility/source
       // checks. Historical receipts are read separately through readBatch.
-      const context = await this.context(tx, user, targetId, body.operation);
+      const context = await this.batchContext(tx, user, targetId, body.operation, entityReferences);
       if (context.workspace.categoryVersionId !== body.expectedSourceVersionId || context.workspace.categoryAdoptionRevision !== body.expectedSourceRevision) {
         throw new ConflictException("来源品类绑定已变化，请核对原准备及当前版本");
       }
