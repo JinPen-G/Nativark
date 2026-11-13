@@ -6,6 +6,26 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain12-13-current-main-fixed-closure-20261114"></a>
+## AIN-12／13 已完成源码在当前main的固定整合闭包（2026-11-14）
+
+PM明确指定main `1cb43939bcc25ed1930563aa19b3d507e9b08965`，要求将旧整合候选 `fc808e7af723ae6bca6d9d756d4d7c1b9f78fe71`及已完成12／13更新为最小闭包，不覆盖main的检查保存／原收据、开业renderer和后台顶栏／外观WIP。Root全部使用Git固定对象和内存源码，不新建工作树、不写main或其索引，不复制环境，不恢复Core暂停任务。
+
+已上传整合分支 `codex/ai-native-main-closure-20261113` 的固定候选为 **`9512e3a786cced8b32812e5121141187012da001`**，普通推送后 `git ls-remote`回读一致。它同时包含PM指定main和旧fc808的历史，旧候选前置没有被改写／强推；相对于指定main共105份必要产品源。原12／13最终功能来自 `ade6dd10b00712b82375bc751d4f26708089fc9b`及已归档受控展示、会话上下文、原回答、确认／恢复／取消、明确模型控制、任务筛选与开业材料前置；只对这组差异做三方hunk，不整收AI分支的经营或未知WIP。AppModule／Guard／shared index／Copilot仅必要登记／原订单上下文，TaskCenter保留主线展开、会员／通知及原权限后继。
+
+原首次三方merge只有 `original-scene-result.service.ts`导入冲突，保留main的确定性开业正文及fc808的display witness校验；最终该叶blob `4a3fb1cde12c1f40f5334100385b339a33a34f1b`同时保留开业／日历摘要、可信报价参数和原历史复核。完整闭包检查进一步发现原开业提案消费者依赖缺失：补原TaskOpeningProposals、API／session及后端application／Controller／shared合同，沿原配置token的所属provider、runtime key、OpenAPI和Guard精确登记，不新建办理能力。检查保存／原收据目录与指定main完全一致；组件／app主题／appearance／styles目录也无差异。新收口AIN-19／20仍由本分支固定 `2ec20f9c8`、`7a451591c`单列供PM按节点集成，未夹入本12／13闭包。
+
+| 核接范围 | 固定blob／证据 |
+| --- | --- |
+| 公共装配、Guard与shared正式出口 | AppModule `12e36e6b0d75a774070d4da3dbdc22bd9448397d`；Guard `8febc2a2df58cf2b8c5d66fbc45db737e25382f2`；shared index `8f47d89fc79c5e21dd7b093f51e1ab6fb62a4bb0`。 |
+| 实际后台主线后继 | TaskCenter `40fdd6aad51ea321bb4c346bba2abaa8bb3d767a`；Copilot `965ff83d6ead7db076344cb61c1253c87e4cb32c`，均以指定main为前像接必要hunk，未覆盖主仓库活动WIP。 |
+| 固定候选完整组合类型 | `node --no-compilation-cache -`，stdin `19930ca9d934c06f5b7b68e50e08f980c54eeb4aca06b308d47fb2918c1a8fc8`，退出0；TypeScript5.9.3，API6根／1976源、后台6根／1790源零诊断。2212份候选源码从Git blob只读装载，未以活动文件补齐缺依赖。 |
+| 原三步订单→重新解释／排版→TaskCenter／conversation result→前端API及展示session | 最终固定源码stdin `bf5da7af37f444d556bf8cb0232e7715dd2182838b00f15bece35ada257a8c7a`，退出0；同1Task／3Run／4模型／5步骤，原计划／额度／账保持，重复及停用原读不派发，业务写0，缺摘要／错result／撤权拒绝。运输／账务存储为原合成夹具，不称供应商／数据库实测。 |
+
+保留整合过程的真实失败：首次内存字面量用字符串replace使源码中的 `$`序列改写命令，语法退出1；改为函数返回原字面量后继续。首次组合类型指出14条缺原提案依赖，后继发现token错误归属和runtime key遗漏，已按原固定来源补齐，最终零诊断；没有改任务验收或用类型断言遮盖。首次运行时读取物理模块目录而遗漏固定main新增的企业shared叶，失败只发生在内存loader，补固定对象解析后原场景通过。上述都未改生产文件迁就验证。
+
+自有验证进程已退出，审计为空，`output/.tmp/ain12-current-main-closure-20261114`未创建，未新增／扩写测试脚本、依赖／client／dist或环境副本。固定对象diff检查退出0；当前main后续活动HEAD不替代PM指定基线，继续集成由PM串行处理。四册及原任务进度仍在AI任务分支维护，候选不覆盖main记录／任务；12／13本轮研发100%与真实环境／生产放行分别判断。
+
 <a id="ain20-signature-reopen-simulated-whole-closeout-20261114"></a>
 ## AIN-20 原签名重开修复与整项模拟研发收口（2026-11-14）
 
