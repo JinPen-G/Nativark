@@ -189,29 +189,59 @@ export class EnterprisePolicyService {
   }
 
   async ownRentalPolicies(context: ClientRequestContext): Promise<EnterpriseOwnRentalPolicy[]> {
-    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient);
-    const now = new Date();
-    const relations = await this.prisma.customerCorporateMembership.findMany({ where: { tenantId: context.tenantId, personalCustomerId: context.customerId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }], corporateCustomer: { is: { status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } } } }, include: { corporateCustomer: { select: { name: true } } }, take: 201 });
-    if (relations.length > 200) throw new ConflictException("本人企业关系超过当前读取范围");
-    const results: EnterpriseOwnRentalPolicy[] = [];
-    for (const relation of relations) {
-      const rows = await this.rows(context.tenantId, relation.corporateCustomerId, this.prisma), merchantRow = rows.find(r => r.scopeKey === "merchant");
-      const policy = merchantRow && this.decoded(merchantRow);
-      let personalPaymentAllowed = false, enterprisePaymentAllowed = false, approvalMode: EnterpriseScopePolicy["approvalMode"] = "unconfigured";
-      let unavailableReason = "当前企业尚未配置新业务政策，请联系商户；不自动迁入旧关系";
-      if (policy) {
-        const base: RentalBookingIdentityInput = { bookingIdentity: "enterprise_employee", corporateCustomerId: relation.corporateCustomerId, enterpriseDisclosure: { noticeVersion: policy.noticeVersion, acknowledged: true } };
-        // This read describes current eligibility only, not a user's acknowledgement.
-        // Actual quotes require their own explicit disclosure from the consumer.
-        try { const basis = await this.authorize(context.tenantId, context.workspaceId, context.customerId, base); personalPaymentAllowed = Boolean(basis); if (basis) approvalMode = basis.approvalMode; } catch (error) { if (error instanceof ForbiddenException || error instanceof ConflictException) unavailableReason = error.message; else throw error; }
-        try { const basis = await this.authorize(context.tenantId, context.workspaceId, context.customerId, { ...base, enterpriseContractAndPayer: true }); enterprisePaymentAllowed = Boolean(basis); if (basis) approvalMode = basis.approvalMode; } catch (error) { if (!(error instanceof ForbiddenException || error instanceof ConflictException)) throw error; }
+    context = Object.freeze({ ...context });
+    const assertScope = () => {
+      const identity = getRequestIdentity();
+      if (!identity || identity.audience !== "client" || identity.isSaasAdmin || identity.staffApi || identity.dataScope !== undefined
+        || identity.tenantId !== context.tenantId || identity.userId !== context.customerId || identity.workspaceId !== context.workspaceId
+        || !context.workspaceId || !context.workspaceCode) throw new ForbiddenException("企业租赁政策须当前客户及可信经营空间");
+    };
+    assertScope();
+    // Lifecycle and policy writers take Tenant X. Read every company's relation
+    // and both payment modes under the original shared fence, including lock waits.
+    const snapshot = await this.prisma.$transaction(async tx => {
+      const tenant = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM Tenant WHERE id=${context.tenantId} AND status='ACTIVE' LOCK IN SHARE MODE`;
+      if (!tenant.length) throw new ForbiddenException("商户不可用");
+      await this.commands.customer(context, tx);
+      assertScope();
+      const now = new Date();
+      const relations = await tx.customerCorporateMembership.findMany({ where: { tenantId: context.tenantId, personalCustomerId: context.customerId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }], corporateCustomer: { is: { status: "active", mergedIntoCustomerId: null, membership: { is: { status: "active" } } } } }, include: { corporateCustomer: { select: { name: true } } }, take: 201 });
+      if (relations.length > 200) throw new ConflictException("本人企业关系超过当前读取范围");
+      const items: EnterpriseOwnRentalPolicy[] = [];
+      for (const relation of relations) {
+        const rows = await this.rows(context.tenantId, relation.corporateCustomerId, tx), merchantRow = rows.find(r => r.scopeKey === "merchant");
+        const policy = merchantRow && this.decoded(merchantRow);
+        let personalPaymentAllowed = false, enterprisePaymentAllowed = false, approvalMode: EnterpriseScopePolicy["approvalMode"] = "unconfigured";
+        let unavailableReason = "当前企业尚未配置新业务政策，请联系商户；不自动迁入旧关系";
+        if (policy) {
+          const base: RentalBookingIdentityInput = { bookingIdentity: "enterprise_employee", corporateCustomerId: relation.corporateCustomerId, enterpriseDisclosure: { noticeVersion: policy.noticeVersion, acknowledged: true } };
+          // Eligibility reads do not record acknowledgement. The original quote
+          // still requires the applicant's explicit disclosure and final revalidation.
+          try { const basis = await this.authorize(context.tenantId, context.workspaceId, context.customerId, base, tx); personalPaymentAllowed = Boolean(basis); if (basis) approvalMode = basis.approvalMode; } catch (error) { if (error instanceof ForbiddenException || error instanceof ConflictException) unavailableReason = error.message; else throw error; }
+          try { const basis = await this.authorize(context.tenantId, context.workspaceId, context.customerId, { ...base, enterpriseContractAndPayer: true }, tx); enterprisePaymentAllowed = Boolean(basis); if (basis) approvalMode = basis.approvalMode; } catch (error) { if (!(error instanceof ForbiddenException || error instanceof ConflictException)) throw error; }
+        }
+        items.push({ corporateCustomerId: relation.corporateCustomerId, corporateName: relation.corporateCustomer.name, membershipId: relation.id, workspaceId: context.workspaceId,
+          available: personalPaymentAllowed || enterprisePaymentAllowed, personalPaymentAllowed, enterprisePaymentAllowed, approvalMode,
+          noticeVersion: policy?.noticeVersion, noticeText: policy?.noticeText, unavailableReason: personalPaymentAllowed || enterprisePaymentAllowed ? undefined : unavailableReason });
       }
-      results.push({ corporateCustomerId: relation.corporateCustomerId, corporateName: relation.corporateCustomer.name, membershipId: relation.id, workspaceId: context.workspaceId,
-        available: personalPaymentAllowed || enterprisePaymentAllowed, personalPaymentAllowed, enterprisePaymentAllowed, approvalMode,
-        noticeVersion: policy?.noticeVersion, noticeText: policy?.noticeText, unavailableReason: personalPaymentAllowed || enterprisePaymentAllowed ? undefined : unavailableReason });
-    }
-    await this.commands.customer(context, this.prisma as unknown as Prisma.TransactionClient);
-    return results;
+      await this.commands.customer(context, tx);
+      const sessions = await tx.$queryRaw<Array<{ id: string; expiresAt: Date }>>`SELECT s.id,s.expiresAt FROM client_auth_sessions s
+        JOIN business_workspaces w ON w.tenantId=s.tenantId AND w.id=s.workspaceId AND w.status='ACTIVE'
+        WHERE s.tenantId=${context.tenantId} AND s.customerId=${context.customerId} AND s.id=${context.sessionId}
+          AND s.workspaceId=${context.workspaceId} AND w.code=${context.workspaceCode} AND s.revokedAt IS NULL AND s.expiresAt>NOW(3)
+        LOCK IN SHARE MODE`;
+      assertScope();
+      if (sessions.length !== 1 || sessions[0].id !== context.sessionId) throw new ForbiddenException("企业租赁政策读取期间客户会话或空间已变化");
+      return { items, relations, sessionExpiresAt: sessions[0].expiresAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 2500, timeout: 15000 });
+    assertScope();
+    // Locks serialize changes, but time can pass during a query or commit wait.
+    // Recheck the original periods after every asynchronous read has finished.
+    const returnedAt = new Date();
+    if (!(snapshot.sessionExpiresAt > returnedAt)) throw new ForbiddenException("企业租赁政策读取期间客户会话已到期");
+    const activeMemberships = new Set(snapshot.relations.filter(relation => relation.effectiveFrom <= returnedAt
+      && (!relation.effectiveTo || relation.effectiveTo > returnedAt)).map(relation => relation.id));
+    return snapshot.items.filter(item => activeMemberships.has(item.membershipId));
   }
 
   async authorize(tenantId: string, workspaceId: string, personalId: string, input: RentalBookingIdentityInput, tx?: Prisma.TransactionClient): Promise<EnterpriseBookingBasis | undefined> {
