@@ -2,9 +2,10 @@
  * filtering, implicit retries, prefetch, local persistence or inferred execution. */
 import { AI_CONVERSATION_DRAFT_VERSION, AI_SCENE_CODES,
   validateAiConversationListResponseDraft, validateAiConversationObservationDraft, validateAiConversationTurnPageDraft,
-  validateAiConversationTurnDraft, validateAiConversationTaskModelDraft,
+  validateAiConversationTurnDraft, validateAiConversationTaskModelDraft, validateAiOrderReadAnswerDraft,
   type AiConversationListDraft, type AiConversationReferenceDraft, type AiConversationTurnListDraft, type AiConversationTurnReferenceDraft,
-  type AiConversationTurnObservationDraft, type AiSceneCode, type AiTaskSnapshotDraft, type AiTaskModelObservationDraft } from '@rental-os/shared';
+  type AiConversationTurnObservationDraft, type AiSceneCode, type AiTaskSnapshotDraft, type AiTaskModelObservationDraft,
+  type AiSceneRequestReadDraft, type AiOrderReadAnswerResponseDraft } from '@rental-os/shared';
 import { validateTaskCenterSnapshot } from './task-center-reader';
 
 type Read = (query: AiConversationListDraft, signal: AbortSignal) => Promise<unknown>;
@@ -33,13 +34,14 @@ const turnSignature = (turn: AiConversationTurnObservationDraft) => JSON.stringi
   'creation' in turn ? turn.creation : null, 'closeOperationKey' in turn ? turn.closeOperationKey : null,
 ]);
 
-/** One explicit original-turn result read. Persisted model steps locate a unique
- * result in that Run; neither a caller ID nor another Run is a fallback. Reads
- * revalidate independently, not atomically, and never retry/start execution. */
+/** One explicit original-turn result read. A fixed order chain uses its original
+ * answer receipt to identify the final model; other Runs require one result.
+ * Reads revalidate independently and never retry or start execution. */
 export async function readConversationTaskResult(reads: {
   admission(query: AiConversationTurnReferenceDraft, signal: AbortSignal): Promise<unknown>;
   snapshot(taskId: string, signal: AbortSignal): Promise<AiTaskSnapshotDraft>;
   result(taskId: string, resultId: string, signal: AbortSignal): Promise<unknown>;
+  orderAnswer?(original: AiSceneRequestReadDraft, signal: AbortSignal): Promise<unknown>;
 }, input: AiConversationTurnReferenceDraft, selected: AiConversationTurnObservationDraft, signal: AbortSignal, current: () => boolean) {
   const check = () => { if (signal.aborted || !current()) throw Error('AI_SCOPE_CHANGED'); };
   check(); const query = structuredClone(input), expected = structuredClone(selected);
@@ -69,12 +71,34 @@ export async function readConversationTaskResult(reads: {
   const first = await snapshot();
   const candidates = [...new Set(first.steps.filter(step => step.runId === runId && step.kind === 'model')
     .flatMap(step => step.resultId ? [step.resultId] : []))];
+  const runSteps = first.steps.filter(step => step.runId === runId).sort((a, b) => a.sequence - b.sequence);
+  const orderChain = turn.capabilityCode === 'order_explanation' && candidates.length === 2 && runSteps.length === 3
+    && runSteps.every((step, index) => step.sequence === index + 1 && step.status === 'succeeded')
+    && runSteps[0].kind === 'model' && id(runSteps[0].resultId) && runSteps[1].kind === undefined
+    && runSteps[2].kind === 'model' && id(runSteps[2].resultId);
+  const answer = async (): Promise<AiOrderReadAnswerResponseDraft> => {
+    check(); if (!reads.orderAnswer) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const value = await reads.orderAnswer(structuredClone(turn.original), signal); check();
+    if (!validateAiOrderReadAnswerDraft(value, turn.original, turn) || value.result.status !== 'available'
+      || value.result.resultId !== runSteps[2].resultId || candidates.includes(value.result.originalReadResultId)
+      || runSteps[1].resultId !== undefined && value.result.originalReadResultId !== runSteps[1].resultId)
+      throw Error('AI_RESOURCE_UNAVAILABLE');
+    return structuredClone(value);
+  };
+  // A second model result alone is ambiguous. The dedicated original answer
+  // reader proves the frozen plan, Core source and final result before use.
+  // The ordinary snapshot exposes model result IDs only; it is not the Core
+  // receipt. An optional Core reference must agree with the original reader.
+  const firstAnswer = orderChain && reads.orderAnswer ? await answer() : null;
+  const selectedResultId = firstAnswer?.result.status === 'available' ? firstAnswer.result.resultId
+    : candidates.length === 1 ? candidates[0] : null;
   let result: AiTaskModelObservationDraft | null = null;
-  if (candidates.length === 1) {
-    const value = await reads.result(taskId, candidates[0], signal); check();
-    if (!validateAiConversationTaskModelDraft(value, turn) || value.resultId !== candidates[0]) throw Error('AI_RESOURCE_UNAVAILABLE');
+  if (selectedResultId) {
+    const value = await reads.result(taskId, selectedResultId, signal); check();
+    if (!validateAiConversationTaskModelDraft(value, turn) || value.resultId !== selectedResultId) throw Error('AI_RESOURCE_UNAVAILABLE');
     result = structuredClone(value);
   }
+  if (firstAnswer && JSON.stringify(await answer()) !== JSON.stringify(firstAnswer)) throw Error('AI_REVISION_CONFLICT');
   const latest = await snapshot();
   const steps = (value: AiTaskSnapshotDraft) => JSON.stringify(value.steps.map(step => [step.stepId, step.runId, step.sequence,
     step.revision, step.status, step.kind ?? null, step.resultId ?? null]));

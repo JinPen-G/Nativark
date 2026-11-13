@@ -37,6 +37,10 @@ export function inspectAiWorkbenchDisplayMaterial(value: unknown): AiWorkbenchDi
     if (!validate('AiWorkbenchDisplayMaterialDraft', copy) || Buffer.byteLength(JSON.stringify(copy), 'utf8') > 131072
       || !same(copy.context.binding, Object.fromEntries(Object.entries(copy.presentation.binding).filter(([key]) => key !== 'presentationRevision')))
       || copy.context.purpose !== 'display' || copy.fieldMaterial && !same(copy.fieldMaterial.binding, copy.context.binding)) return fail();
+    const summary = copy.authoritativeSummary;
+    if (summary && (!same(summary.binding, copy.presentation.binding)
+      || summary.runId !== copy.presentation.generation.runId || summary.resultId !== copy.presentation.generation.resultId
+      || !summary.text.trim() || Buffer.byteLength(summary.text, 'utf8') > 32768)) return fail();
     const retained = copy.presentation.retention, structuralTime = new Date(Date.parse(retained.expiresAt) - 1).toISOString();
     inspectAiWorkbenchContext(copy.context, copy.context, structuralTime);
     if (copy.fieldMaterial) inspectAiWorkbenchFieldMaterial(copy.fieldMaterial, copy.fieldMaterial, structuralTime);

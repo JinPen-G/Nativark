@@ -8,6 +8,8 @@ import { createOriginalTaskStartAdmission } from './task-start-admission.composi
 import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration,
   readCurrentWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
 import { composeAiWorkbenchDisplayRequests } from './workbench-display.application';
+import { AI_TASK_CENTER_RECOVERY_REQUESTS, composeTaskCenterRecoveryRequests,
+  type TaskCenterRecoveryDependencies } from './task-center-recovery.application';
 import { AI_WORKBENCH_MODEL_CONTROL_REQUESTS, composeWorkbenchModelControlRequests } from './workbench-model-control.application';
 import { composePersistedTaskModelHost } from './task-model-gateway.composition';
 /**
@@ -50,7 +52,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies, composeClarifiedQuoteSelectionRequests, composeRequestBoundClarifiedQuoteSelectionPreparation,
   composeRequestBoundOriginalTaskAccounting,
-  composeRequestBoundPersistedOriginalOrderRead, composeRequestBoundPersistedOriginalSceneModel,
+  composeRequestBoundPersistedOriginalOrderRead, composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalOrderAnswerReader,
   type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, originalOrderReadRequestMethods,
   type OriginalOrderReadHttpRequests } from './scenes/original-order-read.controller';
@@ -239,8 +241,17 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       if (typeof original?.resume !== 'function' || typeof original.continueAnswer !== 'function') throw unavailable();
       return { resume: original.resume.bind(original), continueAnswer: original.continueAnswer.bind(original) };
     };
-    return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, performanceDb: db, visibleDb: db, originalResults,
-      originalModelControls: { async readOperation(request, value, signal) {
+    return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, performanceDb: db, visibleDb: db,
+      originalResults: { ...originalResults, async readOrderAnswer(request, reference) {
+        const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
+        if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return order.readAnswer(request, reference);
+      } },
+      originalModelControls: { async readResult(request, value, signal) {
+        const controls = moduleRef?.get<ReturnType<typeof composeWorkbenchModelControlRequests>>(AI_WORKBENCH_MODEL_CONTROL_REQUESTS, { strict: false });
+        if (!controls) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return controls.readResult(request, value, signal);
+      }, async readOperation(request, value, signal) {
         let controls: ReturnType<typeof composeWorkbenchModelControlRequests> | undefined;
         try { controls = moduleRef?.get(AI_WORKBENCH_MODEL_CONTROL_REQUESTS, { strict: false }); }
         catch { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }
@@ -409,9 +420,11 @@ const originalSceneInjection = [PrismaService, AuthService, ApiAuthGuard, Subscr
 function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService,
-    integrations?: Pick<TenantIntegrationService, 'observeOpeningConfiguration'>): RequestBoundOriginalSceneDependencies {
+    integrations?: Pick<TenantIntegrationService, 'observeOpeningConfiguration'>,
+    historySelection?: RequestBoundOriginalSceneDependencies['historySelection']): RequestBoundOriginalSceneDependencies {
   return { db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding,
       ...(integrations ? { integrations } : {}),
+      ...(historySelection ? { historySelection } : {}),
       creationRules: [{ sceneCode: 'order_explanation', sceneVersion: '1', revision: 1,
         audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 },
       { sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
@@ -419,6 +432,20 @@ function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: 
       { sceneCode: 'opening_diagnosis', sceneVersion: '1', revision: 1,
         audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }] };
 }
+export const AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS = Symbol('AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS');
+/** The existing final-answer contract remains readable after execution is
+ * disabled. This provider has no SecretBox, Gateway, publication or worker. */
+export const AI_NATIVE_ORIGINAL_ORDER_ANSWER_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundOriginalOrderAnswerReader>> = {
+  provide: AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS,
+  inject: [...originalSceneInjection, RentalOrderConfirmationService, RentalBusinessFactRepository],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
+    memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService,
+    confirmation: RentalOrderConfirmationService, quoteFacts: RentalBusinessFactRepository) =>
+    composeRequestBoundOriginalOrderAnswerReader(originalSceneDependencies(db, auth, guard, subscriptions, core,
+      business, reports, memberships, payments, funding, undefined, { confirmation, quoteFacts, core }),
+      { enabled: true, audience: 'operator' })
+};
 /** Explicit human rule draft save; original reads remain independently guarded. */
 export const AI_NATIVE_TASK_RULE_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_TASK_RULE_DRAFT_CONFIGURATION');
 export const AI_NATIVE_TASK_RULE_DRAFT_PROVIDER: FactoryProvider = {
@@ -462,19 +489,38 @@ export const AI_NATIVE_CONVERSATION_CONFIGURATION = Symbol('AI_NATIVE_CONVERSATI
 export const AI_NATIVE_CONVERSATION_PROVIDER: FactoryProvider = {
   provide: AI_CONVERSATION_REQUESTS, inject: [...originalSceneInjection, { token: AI_NATIVE_CONVERSATION_CONFIGURATION, optional: true },
     { token: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true },
-    { token: AI_WORKBENCH_MODEL_CONTROL_REQUESTS, optional: true }],
+    { token: AI_WORKBENCH_MODEL_CONTROL_REQUESTS, optional: true }, { token: ModuleRef, optional: true },
+    RentalOrderConfirmationService, RentalBusinessFactRepository],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, value?: unknown,
     observations?: Pick<ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, 'readModelResult' | 'reopenModelSource'>,
-    displayValue?: unknown, modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>) => {
+    displayValue?: unknown, modelControls?: ReturnType<typeof composeWorkbenchModelControlRequests>, moduleRef?: Pick<ModuleRef, 'get'>,
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository) => {
     const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding);
+    const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding,
+      undefined, confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined);
     const display = readWorkbenchDisplayConfiguration(displayValue);
     const reads = display.enabled && observations ? composeAiWorkbenchDisplayRequests(original,
-      { currentConfiguration: () => displayValue }, observations) : undefined;
-    return composeAiConversationRequests(original, parsed.data.enabled, observations, reads, modelControls);
+      { currentConfiguration: () => displayValue }, { ...observations, async readOrderAnswer(request, reference) {
+        const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
+        if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return order.readAnswer(request, reference);
+      } }, { async review(request, query, signal) {
+        // Resolve the existing request-bound reader lazily to keep the model
+        // control/conversation/TaskCenter provider graph acyclic.
+        const center = moduleRef?.get<ReturnType<typeof composeRequestBoundTaskCenter>>(AI_NATIVE_TASK_CENTER_REQUESTS, { strict: false });
+        if (!center) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return center.review(request, query, signal);
+      } }) : undefined;
+    return composeAiConversationRequests(original, parsed.data.enabled, observations, reads, modelControls, {
+      async read(request, query, signal) {
+        const center = moduleRef?.get<ReturnType<typeof composeRequestBoundTaskCenter>>(AI_NATIVE_TASK_CENTER_REQUESTS, { strict: false });
+        if (!center) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return center.result(request, query, signal);
+      }
+    });
   }
 };
 export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
@@ -509,15 +555,17 @@ export const AI_NATIVE_ORIGINAL_ACCOUNTING_PROVIDER: FactoryProvider = {
  * this host neither collects new context nor parses/uploads or confirms data. */
 export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
   provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: [...originalSceneInjection, FileStorageRuntimeService,
-    { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true }, { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, TenantIntegrationService],
+    { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true }, { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, TenantIntegrationService,
+    RentalOrderConfirmationService, RentalBusinessFactRepository],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, files?: FileStorageRuntimeService,
     quotes?: { readScene(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown> },
     settings?: { readTaskScene(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown> },
-    integrations?: TenantIntegrationService) => {
+    integrations?: TenantIntegrationService, confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository) => {
     const original = composeRequestBoundOriginalTaskRecoveryReaders(
-      originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations),
+      originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations,
+        confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined),
       { enabled: true, audience: 'operator' }, {
         policy: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 32768, orderExplainTool: true },
         // Direct text-only compositions may omit files. A frozen snapshot with
@@ -571,6 +619,26 @@ function readOrderExecutionConfiguration(value: unknown) {
 export const AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION');
 export const AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION');
 
+export const AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER: FactoryProvider = {
+  provide: AI_TASK_CENTER_RECOVERY_REQUESTS,
+  inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, ModuleRef,
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, original: TaskCenterRecoveryDependencies['original'], moduleRef: Pick<ModuleRef, 'get'>,
+    orderValue?: unknown, openingValue?: unknown, quoteValue?: unknown) =>
+    composeTaskCenterRecoveryRequests({ db, auth, original, host(kind) {
+      const value = kind === 'order_read' ? orderValue : kind === 'opening_model' ? openingValue : quoteValue;
+      if (kind === 'opening_read' || !readOrderExecutionConfiguration(value).enabled) return undefined;
+      const token = kind === 'order_read' ? AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS
+        : kind === 'opening_model' ? AI_ORIGINAL_OPENING_MODEL_REQUESTS : AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS;
+      try {
+        const host = moduleRef.get<ReturnType<TaskCenterRecoveryDependencies['host']>>(token, { strict: false });
+        return typeof host?.recover === 'function' && typeof host.takeover === 'function' ? host : undefined;
+      } catch { return undefined; }
+    } })
+};
+
 const quoteModelRequestMethods = ['start', 'refreshInput', 'submitAnswer', 'resume', 'continueAnswer', 'reconcile', 'recover',
   'takeover', 'requestCancel', 'readQuotePreparation', 'confirmClarifiedQuote', 'readClarifiedQuoteReceipt', 'readExecution'] as const;
 type QuoteModelRequests = Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>, typeof quoteModelRequestMethods[number]>;
@@ -581,11 +649,13 @@ type QuoteModelRequests = Pick<ReturnType<typeof composeRequestBoundPersistedOri
 export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteModelRequests> = {
   provide: AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
   inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
-    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true },
+    RentalOrderConfirmationService, RentalBusinessFactRepository],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
-    files: FileStorageRuntimeService, serverValue?: unknown, displayValue?: unknown) => {
+    files: FileStorageRuntimeService, serverValue?: unknown, displayValue?: unknown,
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository) => {
     const configuration = readOrderExecutionConfiguration(serverValue);
     if (!configuration.enabled) {
       const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
@@ -600,7 +670,8 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding,
+      undefined, confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined), db };
     const admission = createOriginalTaskStartAdmission(original, 'quote_clarification');
     const display = readWorkbenchDisplayConfiguration(displayValue);
     const requests = composeRequestBoundPersistedOriginalSceneModel({
@@ -628,11 +699,13 @@ export const AI_NATIVE_QUOTE_MODEL_EXECUTION_PROVIDER: FactoryProvider<QuoteMode
 export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<OpeningModelRequests> = {
   provide: AI_ORIGINAL_OPENING_MODEL_REQUESTS,
   inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
-    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, TenantIntegrationService],
+    { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true }, { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, TenantIntegrationService,
+    RentalOrderConfirmationService, RentalBusinessFactRepository],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
-    files: FileStorageRuntimeService, serverValue?: unknown, displayValue?: unknown, integrations?: TenantIntegrationService) => {
+    files: FileStorageRuntimeService, serverValue?: unknown, displayValue?: unknown, integrations?: TenantIntegrationService,
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository) => {
     const configuration = readOrderExecutionConfiguration(serverValue);
     if (!configuration.enabled) {
       const unavailable = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
@@ -641,7 +714,8 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_PROVIDER: FactoryProvider<Opening
     }
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations), db };
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations,
+      confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined), db };
     const admission = createOriginalTaskStartAdmission(original, 'opening_diagnosis');
     const display = readWorkbenchDisplayConfiguration(displayValue);
     const requests = composeRequestBoundPersistedOriginalSceneModel({
@@ -672,13 +746,16 @@ export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, TenantIntegrationService],
+    { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, TenantIntegrationService,
+    RentalOrderConfirmationService, RentalBusinessFactRepository, ModuleRef],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
     files: FileStorageRuntimeService, orderValue?: unknown, quoteValue?: unknown, openingValue?: unknown,
-    displayValue?: unknown, integrations?: TenantIntegrationService) => {
-    const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations);
+    displayValue?: unknown, integrations?: TenantIntegrationService,
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository, moduleRef?: Pick<ModuleRef, 'get'>) => {
+    const original = originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding, integrations,
+      confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined);
     const configuration = (scene: string) => {
       if (!['order_explanation', 'quote_clarification', 'opening_diagnosis'].includes(scene)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return readOrderExecutionConfiguration(scene === 'order_explanation' ? orderValue : scene === 'quote_clarification' ? quoteValue : openingValue);
@@ -686,6 +763,11 @@ export const AI_NATIVE_WORKBENCH_MODEL_CONTROL_PROVIDER: FactoryProvider = {
     const currentPublication = () => readCurrentWorkbenchDisplayConfiguration(displayValue, original.clock);
     return composeWorkbenchModelControlRequests(original, {
       available: scene => { currentPublication(); return configuration(scene).enabled; },
+      async readOrderAnswer(request, reference) {
+        const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
+        if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return order.readAnswer(request, reference);
+      },
       ...(files ? { knowledge: { db, policyDb: db, fileRuntime: files, memory: { db }, includePreferences: false } } : {}),
       async build(input, control) {
         const selected = configuration(control.receipt.sceneCode);
@@ -1024,20 +1106,28 @@ export const AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER: FactoryProvider<ReturnType
 export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<OriginalOrderReadHttpRequests> = {
   provide: AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS,
   inject: [...originalSceneInjection, SecretBox, FileStorageRuntimeService,
-    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, optional: true }, RentalOrderConfirmationService, RentalBusinessFactRepository,
+    AI_NATIVE_ORIGINAL_ORDER_ANSWER_REQUESTS],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, secrets: SecretBox,
-    files: FileStorageRuntimeService, serverValue?: unknown): OriginalOrderReadHttpRequests => {
+    files: FileStorageRuntimeService, serverValue?: unknown, displayValue?: unknown,
+    confirmation?: RentalOrderConfirmationService, quoteFacts?: RentalBusinessFactRepository,
+    historical?: ReturnType<typeof composeRequestBoundOriginalOrderAnswerReader>): OriginalOrderReadHttpRequests => {
     const configuration = readOrderExecutionConfiguration(serverValue);
-    if (!configuration.enabled) return Object.freeze(Object.fromEntries(originalOrderReadRequestMethods.map(method =>
-      [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }]))) as unknown as OriginalOrderReadHttpRequests;
+    if (!configuration.enabled) return Object.freeze({ ...Object.fromEntries(originalOrderReadRequestMethods.map(method =>
+      [method, async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); }])),
+      ...(historical ? { readAnswer: historical.read.bind(historical) } : {}) }) as unknown as OriginalOrderReadHttpRequests;
     if (typeof secrets?.encrypt !== 'function' || typeof secrets?.decrypt !== 'function'
       || configuration.includeKnowledge && !files) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding), db };
+    const original = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding,
+      undefined, confirmation && quoteFacts ? { confirmation, quoteFacts, core } : undefined), db };
+    const display = readWorkbenchDisplayConfiguration(displayValue);
     const admission = createOriginalTaskStartAdmission(original, 'order_explanation');
     const requests = selectOriginalOrderReadHttpRequests(composeRequestBoundPersistedOriginalOrderRead({
       ...original,
+      ...(display.enabled ? { displayPublication: { currentConfiguration: () => displayValue } } : {}),
       scene: { code: 'order_explanation', version: '1' },
       gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: configuration.maxOutputTokens, orderExplainTool: true },
       gateway: { secrets, platformProfileId: configuration.platformProfileId, routeScene: 'chat',
@@ -1050,7 +1140,7 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
       await admission(request, value, undefined, signal);
       return requests.start(request, value, signal);
     };
-    return Object.freeze({ ...requests, start });
+    return Object.freeze({ ...requests, start, ...(historical ? { readAnswer: historical.read.bind(historical) } : {}) });
   }
 };
 

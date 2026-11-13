@@ -4,15 +4,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { TaskHumanApproval, type TaskOrderReviewReference } from './TaskHumanApproval';
 import { QuoteReprepare } from './QuoteReprepare';
-import type { AiWorkbenchFieldMaterialDraft } from '@rental-os/shared';
+import type { AiWorkbenchFieldMaterialDraft, AiApprovalApplicationReferenceDraft, AiTaskReviewQueryDraft } from '@rental-os/shared';
 import type { WorkbenchQuoteParameterReview } from './workbench-input-review-session';
 
 export function TaskQuoteReprepare({ taskId, identity, current, onAccessDenied, parameterReview,
-  revalidateParameters, onParameterReviewed }: {
+  revalidateParameters, onParameterReviewed, requestedProposal }: {
   taskId: string; identity: string; current(): boolean; onAccessDenied(): void;
   parameterReview?: WorkbenchQuoteParameterReview | null;
   revalidateParameters?(review: WorkbenchQuoteParameterReview, signal: AbortSignal): Promise<AiWorkbenchFieldMaterialDraft>;
   onParameterReviewed?(status: 'adopted' | 'conflict'): void;
+  requestedProposal?: AiTaskReviewQueryDraft & { proposal: AiApprovalApplicationReferenceDraft };
 }) {
   const [source, setSource] = useState<{ owner: string; value: TaskOrderReviewReference } | null>(null);
   const owner = JSON.stringify([identity, taskId]);
@@ -25,6 +26,7 @@ export function TaskQuoteReprepare({ taskId, identity, current, onAccessDenied, 
   }, [owner]);
   return <>
     <TaskHumanApproval key={owner} taskId={taskId} identity={identity} current={active} onAccessDenied={onAccessDenied}
+      requestedProposal={requestedProposal}
       onOrderReviewed={value => {
         if (!active()) return;
         setSource(value?.taskId === taskId && value.selection ? { owner, value: structuredClone(value) } : null);

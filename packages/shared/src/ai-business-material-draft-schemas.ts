@@ -47,8 +47,18 @@ const sealed = (scenario: string, payload: AiLeafSchemaDraft) => obj({ version: 
   authority: choice('none_reauthorize_before_consumption') });
 const template = obj({ id: id(), code: text(191), stage: choice('pickup', 'return'), version });
 const configurationSource = obj({ scope, resourceType: choice('business_configuration'), version, observedAt: time });
+const calendarText: AiLeafSchemaDraft = { ...text(191), pattern: '\\S' };
+const calendarNullableText: AiLeafSchemaDraft = { anyOf: [calendarText, { type: 'null' }] };
+const calendarNullableTime: AiLeafSchemaDraft = { anyOf: [time, { type: 'null' }] };
+const calendarSource = obj({ version: choice('rental-calendar-read-source-1'), tenantId: calendarText, workspaceId: calendarText,
+  years: list({ oneOf: [obj({ year: integer(1, 9999), status: choice('adopted'), binding: obj({
+    id: calendarText, year: integer(1, 9999), version: calendarText, status: choice('published'), revision: integer(0, 2147483647), publishedAt: time,
+    officialSource: obj({ versionId: calendarNullableText, version: calendarNullableText, publishedAt: calendarNullableTime, importedAt: calendarNullableTime }) }) }),
+    obj({ year: integer(1, 9999), status: choice('not_adopted'), binding: { type: 'null' } })] }, 3, 1), sourceHash: hash,
+  observations: obj({ startedAt: time, completedAt: time, consistency: choice('caller_transaction_reads', 'independent_persisted_reads') }) });
 const section = obj({ key: id(), title: text(200), required: bool,
   status: choice('source_unavailable', 'readiness_check_passed', 'missing_configuration', 'readiness_unsatisfied', 'unclassified'), issue: text(1000, 0),
+  summary: text(1000, 0),
   impact: choice('optional_configuration', 'required_readiness_item'), evidence: obj({ scope, resourceType: choice('readiness_item'),
     resourceId: id(), version, observedAt: time }), manual: { oneOf: [obj({ kind: choice('configuration_section'), section: id(), scope,
       navigation: choice('host_existing_section') }), obj({ status: choice('unavailable') })] },
@@ -103,6 +113,7 @@ export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraf
     orderPayload('fees', { amounts, fulfillment, history: optional('AiOrderHistoryFactsDraft'), inspections: optional('AiOrderInspectionEvidenceDraft') }),
     orderPayload('payments', { amounts, payments: optional('AiOrderLocalPaymentsDraft'), actualReceivedTotal: notLoaded, fundingLedger: notLoaded })] }),
   AiOpeningSectionMaterialDraft: section,
+  AiOpeningCalendarSourceDraft: calendarSource,
   AiOpeningBusinessMaterialDraft: obj({ ...meta, configVersion: version, sections: list(section, 9, 1),
     configuration: obj({
       products: obj({ source: configurationSource, rows: list(obj({ id: id(), code: text(191), status: choice('enabled', 'disabled'),
@@ -113,7 +124,8 @@ export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraf
         locations: list(obj({ id: id(), code: text(191), status: choice('enabled', 'disabled'), capabilities: { ...list(choice(...locationCapabilities), locationCapabilities.length), uniqueItems: true } }), 100), truncated: bool }),
       inventory: obj({ source: configurationSource, coverage: choice('not_loaded'), meaning: choice('item_modes_are_not_stock_balances') })
     }, []), atomicity: choice('independent_sections_not_a_transaction'), externalVerification: choice('not_loaded'),
-    integrationObservation: ref('AiOpeningIntegrationFactsDraft') }, [...Object.keys(meta), 'configVersion', 'sections', 'configuration', 'atomicity', 'externalVerification']),
+    integrationObservation: ref('AiOpeningIntegrationFactsDraft'), calendarSource: ref('AiOpeningCalendarSourceDraft') },
+    [...Object.keys(meta), 'configVersion', 'sections', 'configuration', 'atomicity', 'externalVerification']),
   AiQuoteBusinessFactsDraft: rawQuoteFacts,
   AiQuoteBusinessMaterialDraft: sealed('quote_clarification', obj({ ...meta, facts: rawQuoteFacts, model,
     gaps: list(choice('human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'), 3, 3), execution: choice('not_attempted') })),

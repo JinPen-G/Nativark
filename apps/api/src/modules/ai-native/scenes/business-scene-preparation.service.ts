@@ -110,6 +110,7 @@ export class AiBusinessScenePreparationService {
         request: this.request(context, 'opening_diagnosis', input.requestKey, { sections: [...input.sections].sort() }),
         materials: { scope: current.scope, audience: current.audience, configVersion: current.configVersion,
           ...(current.integrationObservation ? { integrationObservation: current.integrationObservation } : {}),
+          ...(selected.has('business_calendar') && current.calendarSource ? { calendarSource: current.calendarSource } : {}),
           observedAt: current.observedAt, sections: current.sections.filter(row => selected.has(row.key)), configuration,
           atomicity: current.atomicity, externalVerification: 'not_loaded' as const },
         task: { status: 'unavailable' as const, missing: ['original_request_persistence', 'current_scene_creation_policy'] },

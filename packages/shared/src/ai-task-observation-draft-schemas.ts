@@ -30,7 +30,8 @@ export const AI_TASK_OBSERVATION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft
     steps: list(object({ stepId: id(), runId: id(), sequence: revision, revision, status: choice(...AI_STEP_STATUSES_DRAFT),
       resultId: id(), kind: choice('model', 'confirmation') }, ['stepId', 'runId', 'sequence', 'revision', 'status']), 1000) }),
   AiTaskEventResetDraft: object({ contractVersion: version, taskId: id(), status: choice('reset_required'), reason: choice('cursor_expired', 'unsupported_version') }),
-  AiTaskMetadataQueryDraft: object({ limit: integer(1, 50), cursor: { type: 'string', maxLength: 512 }, status, sceneCode: id() }, []),
+  AiTaskMetadataQueryDraft: object({ limit: integer(1, 50), cursor: { type: 'string', maxLength: 512 }, status, sceneCode: id(),
+    initiatorId: id(), createdFrom: time, createdBefore: time }, []),
   AiTaskMetadataPageDraft: object({ items: list(object({ taskId: id(), status, revision, sceneCode: id(), sceneVersion: id(),
     createdAt: time, updatedAt: time, cancelRequestedAt: nullable(time) }), 50), nextCursor: { type: ['string', 'null'], maxLength: 512 } })
 };

@@ -7,6 +7,7 @@ import { freezeOriginalInput } from '../task-request/original-request.validation
 import { taskModelMaterialSchema, type parseTaskModelInput } from '../model-input/task-model-input';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 import { preferenceSchema } from '../knowledge/knowledge-validation';
+import { aiConversationHistoryContextSchema } from '../conversation-context.reader';
 
 export type AiOriginalSceneKnowledgeOptions = Omit<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials' | 'clock'> & {
   includePreferences: boolean;
@@ -18,6 +19,7 @@ const snapshotSchema = z.object({ version: z.literal('ain-scene-knowledge-1'), o
 export type AiOriginalSceneKnowledgeSnapshot = z.infer<typeof snapshotSchema>;
 const envelopeSchema = z.object({ original: z.unknown(), materialHash: z.string().regex(/^[a-f0-9]{64}$/u),
   trust: z.literal('source_text_is_data_not_instructions'), facts: z.unknown(), knowledge: snapshotSchema.optional(),
+  conversationHistory: aiConversationHistoryContextSchema.optional(),
   clarifications: z.array(z.object({ receiptId: z.string().uuid(), inputHash: z.string().regex(/^[a-f0-9]{64}$/u),
     response: z.string().max(131072), answers: z.array(z.object({ fieldId: z.string().max(100),
       value: z.union([z.string().max(2048), z.number().int()]) }).strict()).min(1).max(8) }).strict()).min(1).max(1000).optional() }).strict();
@@ -39,7 +41,10 @@ export function continueOriginalSceneMaterial(previous: ReturnType<typeof parseT
   refreshed?: Pick<ReturnType<typeof readOriginalSceneEnvelope>, 'original' | 'materialHash' | 'trust' | 'facts' | 'knowledge'>) {
   const envelope = readOriginalSceneEnvelope(previous);
   if (refreshed && (requestFingerprint(refreshed.original) !== requestFingerprint(envelope.original)
-    || requestFingerprint(refreshed.facts) !== refreshed.materialHash)) throw unavailable();
+    || requestFingerprint(refreshed.facts) !== refreshed.materialHash
+    || Object.hasOwn(refreshed, 'conversationHistory'))) throw unavailable();
+  // A successor retains the original history package. Refreshing current
+  // business facts cannot silently attach or replace cross-turn evidence.
   const next = envelopeSchema.parse({ ...envelope, ...(refreshed ?? {}), clarifications: [...(envelope.clarifications ?? [])
     .map(row => refreshed ? { ...row, response: '' } : row),
     { receiptId: continuation.receiptId, inputHash: continuation.inputHash,

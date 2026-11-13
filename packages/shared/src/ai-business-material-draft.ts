@@ -6,6 +6,7 @@ import type { AiOrderReadFactsDraft } from './ai-order-facts-draft';
 import type { AiSceneQuotePreparationDraft } from './ai-scene-quote-http-draft';
 import type { AiSceneRequestReceiptDraft, AiSceneTaskReceiptDraft } from './ai-scene-request-draft';
 import type { RentalInventoryMode, RentalFulfillmentLocation, RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES } from './core';
+import { z } from 'zod';
 
 type Unit = typeof RENTAL_PRICING_UNIT_CODES[number];
 type Mode = typeof RENTAL_FULFILLMENT_MODES[number];
@@ -171,9 +172,45 @@ export type AiOrderSourceReadV2 =
       observedAt: string; freshness: 'current_observation_not_frozen_material';
       reauthorization: 'current_order_authority_rechecked'; execution: 'not_attempted' } }[AiOrderEvidenceFieldV2];
 
+const calendarText = z.string().min(1).max(191).refine(value => value.trim().length > 0);
+const calendarTime = z.string().max(40).datetime({ offset: true });
+const calendarYear = z.number().int().min(1).max(9999);
+const calendarBinding = z.object({ id: calendarText, year: calendarYear, version: calendarText,
+  status: z.literal('published'), revision: z.number().int().min(0).max(2147483647), publishedAt: calendarTime,
+  officialSource: z.object({ versionId: calendarText.nullable(), version: calendarText.nullable(),
+    publishedAt: calendarTime.nullable(), importedAt: calendarTime.nullable() }).strict() }).strict();
+/** Original bounded Core calendar metadata. Null references stay null; an
+ * adopted version is not an editable target or an official-registry check. */
+export const aiOpeningCalendarSourceDraft = z.object({ version: z.literal('rental-calendar-read-source-1'),
+  tenantId: calendarText, workspaceId: calendarText,
+  years: z.array(z.discriminatedUnion('status', [
+    z.object({ year: calendarYear, status: z.literal('adopted'), binding: calendarBinding }).strict(),
+    z.object({ year: calendarYear, status: z.literal('not_adopted'), binding: z.null() }).strict()
+  ])).min(1).max(3), sourceHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  observations: z.object({ startedAt: calendarTime, completedAt: calendarTime,
+    consistency: z.enum(['caller_transaction_reads', 'independent_persisted_reads']) }).strict()
+}).strict().superRefine((value, context) => {
+  const startedAt = Date.parse(value.observations.startedAt);
+  if (Date.parse(value.observations.completedAt) < startedAt || new Set(value.years.map(row => row.year)).size !== value.years.length
+    || value.years.some(row => row.status === 'adopted' && (row.binding.year !== row.year
+      || [row.binding.publishedAt, row.binding.officialSource.publishedAt, row.binding.officialSource.importedAt]
+        .some(at => at !== null && Date.parse(at) > startedAt)))) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'AI_RESOURCE_UNAVAILABLE' });
+  }
+});
+export type AiOpeningCalendarSourceDraft = z.infer<typeof aiOpeningCalendarSourceDraft>;
+/** Source identity and business dates remain binding; query clock changes do
+ * not invalidate the same version. Preserve the original consistency claim. */
+export function aiOpeningCalendarSourceBasis(value: AiOpeningCalendarSourceDraft) {
+  const { observations, ...facts } = value;
+  return { ...facts, observations: { consistency: observations.consistency } };
+}
+
 interface ConfigurationSource { scope: AiWorkspaceScope; resourceType: 'business_configuration'; version: string; observedAt: string }
 export interface AiOpeningSectionMaterialDraft { key: string; title: string; required: boolean;
   status: 'source_unavailable' | 'readiness_check_passed' | 'missing_configuration' | 'readiness_unsatisfied' | 'unclassified';
+  /** Original bounded Core text, never parsed to attest a rule/calendar revision. */
+  summary?: string;
   issue?: string; impact: 'optional_configuration' | 'required_readiness_item';
   evidence: { scope: AiWorkspaceScope; resourceType: 'readiness_item'; resourceId: string; version: string; observedAt: string };
   manual: { kind: 'configuration_section'; section: string; scope: AiWorkspaceScope; navigation: 'host_existing_section' } | { status: 'unavailable' };
@@ -184,6 +221,8 @@ export interface AiOpeningSectionMaterialDraft { key: string; title: string; req
 }
 export interface AiOpeningBusinessMaterialDraft { scope: AiWorkspaceScope; audience: ReadAudience; configVersion: string; observedAt: string;
   integrationObservation?: import('./ai-opening-integration-observation').AiOpeningIntegrationFactsDraft;
+  /** Optional for legacy materials and omitted outside the selected calendar partition. */
+  calendarSource?: AiOpeningCalendarSourceDraft;
   sections: AiOpeningSectionMaterialDraft[];
   configuration: {
     products?: { source: ConfigurationSource; rows: Array<{ id: string; code: string; status: 'enabled' | 'disabled'; inventoryMode: RentalInventoryMode; unit: string }>; truncated: boolean };

@@ -6,17 +6,25 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 
 const taskId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const statusSchema = z.enum(AI_TASK_STATUSES_DRAFT);
-const cursorPayload = z.object({ id: taskId, updatedAt: z.string().datetime({ offset: true }), status: statusSchema.optional(), sceneCode: taskId.optional() }).strict();
+const instant = z.string().max(40).datetime({ offset: true }).transform(value => new Date(value).toISOString());
+const cursorPayload = z.union([
+  z.object({ id: taskId, updatedAt: instant, filterHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+  // Old cursors carry their original two filters. They cannot attest the new
+  // initiator/time filters and are accepted only when those remain absent.
+  z.object({ id: taskId, updatedAt: instant, status: statusSchema.optional(), sceneCode: taskId.optional() }).strict()
+]);
 const cursorSchema = z.string().max(512).refine(value => {
   try { return cursorPayload.safeParse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))).success; }
   catch { return false; }
 }, 'invalid cursor');
-const inputSchema = z.object({
+export const aiTaskMetadataQuerySchema = z.object({
   limit: z.number().int().min(1).max(50).default(20),
   cursor: cursorSchema.optional(),
   status: statusSchema.optional(),
-  sceneCode: taskId.optional()
-}).strict();
+  sceneCode: taskId.optional(), initiatorId: taskId.optional(),
+  createdFrom: instant.optional(), createdBefore: instant.optional()
+}).strict().refine(value => !value.createdFrom || !value.createdBefore
+  || Date.parse(value.createdFrom) < Date.parse(value.createdBefore), 'invalid creation time range');
 
 const taskSelect = {
   id: true, status: true, revision: true, sceneCode: true, sceneVersion: true,
@@ -33,8 +41,12 @@ export interface AiTaskListAuthority {
 
 export type AiTaskMetadataPage = AiTaskMetadataPageDraft;
 
-function encodeCursor(updatedAt: Date, id: string, filters: Pick<z.infer<typeof inputSchema>, 'status' | 'sceneCode'>) {
-  return Buffer.from(JSON.stringify({ updatedAt: updatedAt.toISOString(), id, ...filters }), 'utf8').toString('base64url');
+function filters(input: z.infer<typeof aiTaskMetadataQuerySchema>) {
+  return { status: input.status, sceneCode: input.sceneCode, initiatorId: input.initiatorId,
+    createdFrom: input.createdFrom, createdBefore: input.createdBefore };
+}
+function encodeCursor(updatedAt: Date, id: string, filterHash: string) {
+  return Buffer.from(JSON.stringify({ updatedAt: updatedAt.toISOString(), id, filterHash }), 'utf8').toString('base64url');
 }
 
 /** Read-only AIN-12 task-center adapter; it is not an HTTP route or action executor. */
@@ -44,16 +56,19 @@ export class AiTaskListRepository {
   }
 
   async readPage(value: unknown): Promise<AiTaskMetadataPage> {
-    const parsed = inputSchema.safeParse(value);
+    const parsed = aiTaskMetadataQuerySchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const input = parsed.data;
+    const input = parsed.data, filterHash = requestFingerprint(filters(input));
     let cursor: { updatedAt: Date; id: string } | undefined;
     if (input.cursor) {
       try {
         const decoded = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')) as { updatedAt: string; id: string };
         const parsedCursor = cursorPayload.parse(decoded);
         const updatedAt = new Date(parsedCursor.updatedAt);
-        if (!Number.isFinite(updatedAt.getTime()) || parsedCursor.status !== input.status || parsedCursor.sceneCode !== input.sceneCode) throw new Error('cursor_scope_changed');
+        const matches = 'filterHash' in parsedCursor ? parsedCursor.filterHash === filterHash
+          : parsedCursor.status === input.status && parsedCursor.sceneCode === input.sceneCode
+            && input.initiatorId === undefined && input.createdFrom === undefined && input.createdBefore === undefined;
+        if (!Number.isFinite(updatedAt.getTime()) || !matches) throw new Error('cursor_scope_changed');
         cursor = { updatedAt, id: parsedCursor.id };
       } catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
     }
@@ -61,11 +76,15 @@ export class AiTaskListRepository {
     try { context = structuredClone(await this.authority.resolveList({ status: input.status, sceneCode: input.sceneCode })); }
     catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
     const access = aiTaskAccessFromContext(context, 'list-placeholder', this.clock());
+    if (input.initiatorId !== undefined && input.initiatorId !== access.actorId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     const { id: _ignored, ...ownerScopeWhere } = access.where;
     const where: Prisma.AiTaskWhereInput = {
       ...ownerScopeWhere, contractVersion: AI_TASK_DRAFT_VERSION,
       ...(input.status ? { status: input.status.toUpperCase() as Prisma.AiTaskWhereInput['status'] } : {}),
       ...(input.sceneCode ? { sceneCode: input.sceneCode } : {}),
+      ...(input.createdFrom || input.createdBefore ? { createdAt: {
+        ...(input.createdFrom ? { gte: new Date(input.createdFrom) } : {}),
+        ...(input.createdBefore ? { lt: new Date(input.createdBefore) } : {}) } } : {}),
       ...(cursor ? { OR: [{ updatedAt: { lt: cursor.updatedAt } }, { updatedAt: cursor.updatedAt, id: { lt: cursor.id } }] } : {})
     };
     let rows: Array<Prisma.AiTaskGetPayload<{ select: typeof taskSelect }>>;
@@ -96,6 +115,6 @@ export class AiTaskListRepository {
       sceneCode: row.sceneCode, sceneVersion: row.sceneVersion, createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(), cancelRequestedAt: row.cancelRequestedAt?.toISOString() ?? null }));
     return { items, nextCursor: rows.length > input.limit && page.length ? encodeCursor(page[page.length - 1].updatedAt, page[page.length - 1].id,
-      { status: input.status, sceneCode: input.sceneCode }) : null };
+      filterHash) : null };
   }
 }

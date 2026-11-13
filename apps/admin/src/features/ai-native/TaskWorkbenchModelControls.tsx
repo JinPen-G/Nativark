@@ -9,6 +9,7 @@ import { useAuthStore } from '@/features/auth/authStore';
 import { useAiManagementLocale } from './management-locale';
 import { WorkbenchModelControlSession, workbenchModelControlStorageKey, type WorkbenchModelControlState } from './workbench-model-control-session';
 import { useVisibleObservationHost } from './VisibleObservationHost';
+import { TaskCancellation } from './TaskCancellation';
 import styles from './AiManagement.module.css';
 
 interface ControlHost {
@@ -104,5 +105,8 @@ export function TaskWorkbenchModelControls({ identity, taskId, sourceEnabled, so
     </div>
     {statusLabel(state) && <p className={styles.help} role="status">{t(statusLabel(state))}</p>}
     {state.error && <Alert type="warning" title={t(errorLabels[state.error])} />}
+    {state.original && !complete && <TaskCancellation key={`cancel:${identity}:${taskId}`}
+      taskId={taskId} identity={identity} current={() => !document.hidden && scope.current.identity === identity
+        && scope.current.taskId === taskId && scope.current.current()} onAccessDenied={() => session.suspend()} />}
   </section>;
 }

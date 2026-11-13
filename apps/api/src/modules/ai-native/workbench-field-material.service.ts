@@ -7,7 +7,7 @@ import { AI_WORKBENCH_CONTEXT_DRAFT_VERSION,
   type AiTaskInputContractDraft, type AiTaskInputAnswerDraft,
   type AiWorkbenchFieldMaterialDraft, type AiWorkbenchMaterialBindingDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { originalQuoteAnswerContract } from './scenes/original-quote-input';
+import { originalQuoteAnswerContract, originalQuoteInitialParameterContract, ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE } from './scenes/original-quote-input';
 import { aiQuoteCandidateInputSchema } from './tools/quote-candidate-preparation.service';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -21,6 +21,8 @@ export interface WorkbenchQuoteFieldInput {
   /** Original authorized configuration references, never model-selected IDs. */
   sources: readonly AiFactReference[];
   retention: { expiresAt: string; aclRevision: string; policyVersion: string };
+  /** Server-derived first complete-parameter review, never a client switch. */
+  initialParameters?: boolean;
 }
 interface OriginalQuotePreparationSource {
   prepare(candidate: unknown, expectedContext?: AiExecutionContext): Promise<unknown>;
@@ -75,8 +77,12 @@ export class AiWorkbenchFieldMaterialService {
     // Without the original selection revision there is no independently
     // reproducible field basis. A syntactically valid candidate is insufficient.
     if (!hash(result.selectionRevision)) return null;
-    const original = projection?.editableContract ?? originalQuoteAnswerContract(parsed.data, prepared, '请在原输入控件核对其余条件。');
-    if (projection?.editableContract && (original.code !== 'original_quote_editable_parameters'
+    // Missing or ambiguous choices remain the real pending question. A complete
+    // first candidate has a separate original input purpose, before selection.
+    const editableContract = result.status === 'needs_confirmation' ? projection?.editableContract : null;
+    const original = editableContract ? input.initialParameters ? originalQuoteInitialParameterContract(editableContract) : editableContract
+      : originalQuoteAnswerContract(parsed.data, prepared, '请在原输入控件核对其余条件。');
+    if (editableContract && (!['original_quote_editable_parameters', ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE].includes(original.code)
       || original.version !== result.selectionRevision)) throw denied();
     const fields = original.fields.filter(field => editable.has(field.fieldId));
     if (!fields.length) return null;
@@ -88,11 +94,14 @@ export class AiWorkbenchFieldMaterialService {
     const reference = references[0], sourceId = requestFingerprint(reference);
     const material: AiWorkbenchFieldMaterialDraft = {
       draftVersion: AI_WORKBENCH_CONTEXT_DRAFT_VERSION, binding, fieldRevision: input.fieldRevision,
-      // Missing-input fields retain their complete original question. Complete
-      // editable fields belong to linked reprepare and mint no input receipt.
+      // A projection mints no receipt. Initial parameters must match the real
+      // pending input; later complete edits remain separate linked reprepare.
       contract: { ...original, fields },
       fields: fields.map(field => {
-        const current = projection?.defaults.find(value => value.fieldId === field.fieldId);
+        // The Core projection may prepare defaults before requiring resource
+        // reconfirmation. Only its complete editing contract owns those values;
+        // a pending original question keeps the same defaults when revalidated.
+        const current = editableContract ? projection?.defaults.find(value => value.fieldId === field.fieldId) : undefined;
         return { fieldId: field.fieldId, editable: true, sourceId,
           defaultValue: current ? { status: 'provided' as const, value: current.value } : { status: 'unavailable' as const } };
       }),
@@ -109,7 +118,8 @@ export class AiWorkbenchFieldMaterialService {
     // packet by itself would turn historical material into current authority.
     // Retained question witnesses keep their original narrow projection when
     // the server gains a separate complete-condition editing projection.
-    const current = await this.prepare(input, original.contract?.code !== 'original_quote_editable_parameters');
+    const current = await this.prepare(input, !['original_quote_editable_parameters', ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE]
+      .includes(original.contract?.code ?? ''));
     if (!current) throw unavailable();
     // A fresh read has its own observation time. It must prove the same
     // configuration, rules and retention without relabeling the old witness

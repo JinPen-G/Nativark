@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION, type AiOrderExplainRequestDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, aiOpeningCalendarSourceBasis, type AiOrderExplainRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
@@ -16,6 +16,8 @@ import { readOriginalTaskModelProvenance } from '../task-request/prisma-original
 import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools/order-explanation-renderer';
 import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
+import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
+import { buildQuotePreparationSummary } from '../workbench-authoritative-summary';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -98,10 +100,16 @@ function orderFactsFingerprint(material: unknown) {
 }
 
 function openingFactsFingerprint(material: unknown) {
-  const current = z.object({ scope: z.unknown(), audience: z.string(), configVersion: z.string(),
+  const current = z.object({ scope: z.object({ kind: z.literal('workspace'), tenantId: z.string(), workspaceId: z.string() }).strict(),
+    audience: z.string(), configVersion: z.string(),
     observedAt: z.string(), sections: z.array(z.object({ key: z.string().min(1).max(191) }).passthrough()).max(9), configuration: z.unknown() })
     .passthrough().parse(structuredClone(material));
   const { observedAt: _observation, ...facts } = current;
+  if (facts.calendarSource !== undefined) {
+    const calendar = readAiOpeningCalendarSource(facts.calendarSource, facts.scope, current.observedAt);
+    if (!calendar || !facts.sections.some(section => section.key === 'business_calendar')) throw unavailable();
+    facts.calendarSource = aiOpeningCalendarSourceBasis(calendar);
+  }
   // Original readiness keys are unique; their display order is not a business
   // revision. Canonicalize this comparison copy only, keeping every section's
   // content and the immutable materialHash/returned current order unchanged.
@@ -194,6 +202,7 @@ export class AiOriginalSceneResultService {
     const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId,
       runId: result.runId, resultId: result.resultId,
       observedAt: result.observedAt, businessExecution: 'not_inferred_from_model_result' as const };
+    let revalidateHistory: (() => Promise<unknown>) | undefined;
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
       nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown;
@@ -247,16 +256,23 @@ export class AiOriginalSceneResultService {
         }
         if (provenance.continuation) {
           const continuation = provenance.continuation, previous = parseTaskModelInput(continuation.input, this.policy), priorResult = continuation.result;
+          const { conversationHistory: _history, ...refreshed } = envelope;
           if (taskModelFingerprint(previous, this.policy) !== continuation.inputHash || !isGatewayResult(priorResult)
             || priorResult.status !== 'completed' || priorResult.usage.kind !== 'reported' || priorResult.requestId !== previous.intent.requestId
             || requestFingerprint(withoutTaskModelDisplayMessages(input.intent.messages)) !== requestFingerprint(continueOriginalSceneMaterial(previous,
-              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? envelope : undefined).messages)) throw denied();
+              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? refreshed : undefined).messages)) throw denied();
         }
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();
         return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash,
-          callId: invocation.callId, knowledge: envelope.knowledge, toolRequests: structuredClone(gateway.toolRequests) };
+          callId: invocation.callId, knowledge: envelope.knowledge, conversationHistory: envelope.conversationHistory,
+          toolRequests: structuredClone(gateway.toolRequests) };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+      if (frozen.conversationHistory) {
+        const history = this.scenes.createHistoryReader(this.tasks), packet = frozen.conversationHistory;
+        revalidateHistory = () => history.revalidate(packet, command.original, original.context, 'observation');
+        await revalidateHistory();
+      }
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
       // old diagnosis after configuration/coverage or current permissions change.
@@ -282,7 +298,8 @@ export class AiOriginalSceneResultService {
       }
       output = fingerprint(current) === fingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: isOrder ? buildOrderExplanation(current).text
-            : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current) : frozen.text,
+          : original.request.sceneCode === 'opening_diagnosis' ? buildOpeningDiagnosisText(current)
+            : buildQuotePreparationSummary({ request: original.request, material: frozen.material, history: provenance.history }),
             trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId,
           facts: isOrder ? projectOrderExplanationMaterial(current) : current, sources: isOrder ? orderSources(frozen.material) : [],
@@ -308,6 +325,9 @@ export class AiOriginalSceneResultService {
         originalAuthorizationHash: await originalBinding(tx, row) };
     });
     if (requestFingerprint(provenance) !== requestFingerprint(finalProvenance)) throw denied();
+    // The same reader is used by model-only controls. Reopen inherited history
+    // after the final awaits; a readable current result cannot renew old sources.
+    await revalidateHistory?.();
     if ((await this.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== finalAccess.bindingKey) throw denied();
     // A historical read may cross natural expiry while validating its sources.
     // Publish the checked closing receipt, without renewing execution authority.

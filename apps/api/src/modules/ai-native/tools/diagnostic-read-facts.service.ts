@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { HttpException } from '@nestjs/common';
-import { RENTAL_CATEGORY_WORKSPACE_NAMES, RENTAL_CURRENCY_CODES, type AiExecutionContext } from '@rental-os/shared';
+import { RENTAL_CATEGORY_WORKSPACE_NAMES, RENTAL_CURRENCY_CODES, aiOpeningCalendarSourceDraft,
+  type AiExecutionContext, type AiWorkspaceScope } from '@rental-os/shared';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { RentalReportReadLimitError, type RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
@@ -48,9 +49,9 @@ export const aiRiskReadInputSchema = z.object({
 const id = z.string().min(1).max(191);
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const amount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const readiness = z.object({ tenantId: id, workspaceId: id, ready: z.boolean(), items: z.array(z.object({
+const readiness = z.object({ tenantId: id, workspaceId: id, ready: z.boolean(), calendarSource: z.unknown().optional(), items: z.array(z.object({
   key: id, title: z.string().min(1).max(200), done: z.boolean(), missing: z.string().max(1000),
-  unavailable: z.boolean().optional(), optional: z.boolean().optional()
+  summary: z.string().max(1000).optional(), unavailable: z.boolean().optional(), optional: z.boolean().optional()
 })).max(50) });
 const report = z.object({ tenantId: id, workspaceId: id, currency: z.string().regex(/^[A-Z]{3}$/u), generatedAt: instant,
   orderCount: count, rentalRevenue: amount, receivableTotal: amount, exceptionOrderCount: count,
@@ -68,6 +69,18 @@ function observed(clock: () => Date) {
   const value = clock();
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
   return value.toISOString();
+}
+/** Verify the original source without replacing Core's business decision or
+ * minting a settings/calendar revision. Old absent metadata remains absent. */
+export function readAiOpeningCalendarSource(value: unknown, scope: AiWorkspaceScope, observedAt: string) {
+  if (value === undefined) return undefined;
+  const parsed = aiOpeningCalendarSourceDraft.safeParse(value);
+  if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId
+    || !instant.safeParse(observedAt).success || Date.parse(parsed.data.observations.completedAt) > Date.parse(observedAt))
+    throw new ModelGatewayError('INVALID_RESPONSE');
+  const { sourceHash, observations: _observations, ...source } = parsed.data;
+  if (requestFingerprint(source) !== sourceHash) throw new ModelGatewayError('INVALID_RESPONSE');
+  return parsed.data;
 }
 
 /** Internal bounded projection; neither an enabled handler nor an HTTP DTO. */
@@ -90,12 +103,16 @@ export class AiOpeningReadFactsService {
         throw new ModelGatewayError('INVALID_RESPONSE');
       if (input.data.sections?.some(key => !parsed.data.items.some(row => row.key === key))) throw new ModelGatewayError('INVALID_REQUEST');
       const selected = input.data.sections && new Set(input.data.sections);
-      return { requestId: context.requestId, scope: { ...scope }, observedAt: observed(this.clock), ready: parsed.data.ready,
+      const observedAt = observed(this.clock), calendarSource = readAiOpeningCalendarSource(parsed.data.calendarSource, scope, observedAt);
+      if (calendarSource && !parsed.data.items.some(row => row.key === 'business_calendar')) throw new ModelGatewayError('INVALID_RESPONSE');
+      return { requestId: context.requestId, scope: { ...scope }, observedAt, ready: parsed.data.ready,
+        ...(calendarSource && (!selected || selected.has('business_calendar')) ? { calendarSource } : {}),
         // The Core aggregate is not recalculated from a selected subset. This
         // is output minimization only, not a per-section database query.
         readinessBasis: 'core_workspace_aggregate' as const,
         coverage: selected ? 'requested_sections' as const : 'all_readiness_sections' as const,
         items: parsed.data.items.filter(row => !selected || selected.has(row.key)).map(row => ({ key: row.key, title: row.title, missing: row.missing,
+          ...(row.summary !== undefined ? { summary: row.summary } : {}),
           optional: row.optional === true, status: row.unavailable ? 'unavailable' as const : row.done ? 'ready' as const : 'missing' as const })) };
     });
   }

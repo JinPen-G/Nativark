@@ -8,6 +8,7 @@ import { WorkbenchDisplaySession } from './workbench-display-session';
 import type { WorkbenchDisplayExpectation, WorkbenchDisplayPort } from './workbench-display-host';
 import type { AiWorkbenchModelControlObservation } from '@rental-os/shared';
 import { TaskWorkbenchModelControls, useTaskWorkbenchModelControlHost } from './TaskWorkbenchModelControls';
+import { formatTimestamp } from './formatters';
 
 export interface TaskWorkbenchDisplayProps {
   identity: string; expected: WorkbenchDisplayExpectation; port: WorkbenchDisplayPort;
@@ -56,7 +57,16 @@ export function TaskWorkbenchDisplay({ identity, expected, port, current, enable
     {enabled && <section aria-label={t('原结果动态展示')} aria-busy={state.busy}>
     <p>{t('展示内容来自原结果。事实、候选输入和正式确认分别核对。')}</p>
     <ActionButton label={t('读取原展示')} pendingLabel={t('读取中…')} disabled={state.busy} onAction={() => session.read()} />
+    {(state.busy || frame) && <ActionButton variant="secondary" label={t('停止当前展示')}
+      onAction={async () => { session.suspend(); }} />}
+    {(state.busy || frame) && <p>{t('停止展示只撤回本页内容；需要取消任务时，请使用原取消请求。')}</p>}
     {state.reason && <Alert type="warning" title={t('动态展示当前不可用，请使用原事实摘要和人工入口。')} />}
+    {frame && <section aria-label={t('原材料事实摘要')}>
+      <h3>{t('原材料事实摘要')}</h3>
+      <p>{t('来源观察时间')}：{formatTimestamp(frame.summary.observedAt).value}</p>
+      <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>{frame.summary.text}</p>
+      <p>{t('以下为模型生成的展示，业务状态以原材料及正式收据为准。')}</p>
+    </section>}
     {frame && <div inert={state.candidateConflict}><iframe key={frame.binding.instanceId} ref={attach} sandbox="allow-scripts"
       srcDoc={frame.document} title={t('隔离的原结果展示')} referrerPolicy="no-referrer"
       allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; fullscreen 'none'"
