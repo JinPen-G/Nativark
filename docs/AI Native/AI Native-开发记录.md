@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11及本次12、13已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain16-draft-rejection-consumer-20261113"></a>
+## AIN-16 规则/日历原拒绝消费与原页面收尾（2026-11-13）
+
+[后端13源](#ain16-original-draft-rejection-refresh-20261113)已固定为 `75f86be57e772218774080d0d337dde6536b26df` 并普通推送、GitHub回读一致。本消费者阶段由dev2冻结九源，Root逐文件核原SHA-256及Git blob一致，接回实际API/session/组件和日历原入口，不覆盖其他并行成果。
+
+两类session仅在匹配原 Task/Run/Step 的 `rejected_no_commit` 收据后解除本次pending，原定位改为只读拒绝观察而非删除唯一来源；一般409、断流、超时与not_observed保持原未知状态。新准备前重读拒绝，原已完成preparation只在准确关联该拒绝时可被新显式操作替换；新linked提案、业务草稿及发布分别判断。原axios写POST禁止401自动重发，字段/正文/凭据不进入定位存储。隐藏、切身份和卸载撤回缓冲事实与迟到callback。
+
+日历原页面完成时重核入口原Task、原linked操作/新提案及原Core收据，保持target/date/version/baseRevision与Task/Run/Step完全关联；只清理该旅程的精确定位，另一页的更新或未知键保留。读取原提案不会自动准备，点击进入和草稿保存不表示发布。
+
+作者命令均在内存执行并退出0：拒绝/存储40场景、携拒绝重新准备16场景、实际API/axios8场景（写重发0）、组件/语言3场景、日历原页面收尾5场景（完成1次、错误引用/另一页/隐藏/卸载拒绝）。完整实际API/session/Controller/Core两链输入 `13297d590c513a1412d1806e94d80fa5803620b6b24cb0d3d8e4163bce27a2de`，每链原拒绝/新prepare/最终save各丢一次应答，3次写POST、17次读，原业务草稿1写、模型/发布0；页面收尾输入 `44118a28450a6b3d8243f7f64ae5145321bff95d6366a2eaf448533dd462b762`；类型输入 `7ea1bd276a3e1b147f8065940d8d02831ced39fe40b4fb5713908463cb1e3111`，TypeScript5.9.3、10根/1458源0诊断。完整命令、输出与前期类型/权限重复/别名失败保留在dev2原会话，不删除断言或改测试文件。
+
+Root独立沿同一实际消费者，使用已固定后端及主树受管只读依赖再次核接：`node --no-compilation-cache -`，输入 `0713948f752952244c781bd920af4329deb5e3ddbba56cb05695af709fc49cd2`，退出0，规则保留他人修改、日历修订4→5，业务草稿仅1写，三个丢应答只读原键；类型输入 `667d3ce4847a4afab596006a50060e5bd9f7004525c4bff02da82a1a17aee355`，10根/1458源0诊断。首次固定组合未冻结并行的新staff批次合同，使共享导出缺失TypeError，后在内存固定该无关叶到原前置后通过，物理并行WIP不改。
+
+九源固定blob：API规则 `0ed0603c06ca180312e4938881738fdc9093c2ff`、API日历 `0c96dc938b065623e46f549cfaea3a21dea4be35`；两session `ef68c6ed77854205cceea4919f2e87a50fe6ae11`、`3e4aaac3c707a7a587984089f9514bb3d26c3b50`；TaskRuleDraft `452317436359e44fabbb07e15bf12cad286a482f`、View `0ca69a3e81e08169aff9414dfa7ad5fe3d4b6822`；TaskCalendarDraft `0b84b978c56d220adeea3e1d7404719e85142cec`、CalendarDraftPreparation `fc57920c2ecc62d1ddbab1bc5235ed9598905152`、CalendarSourceEntry `e8dbf32a2fe02efedc01ae870f2beafae265107b`。
+
+全部作者和Root验证进程退出、审计0、任务临时目录未创建，无新增脚本/依赖/截图或副本。dev2原五条只读复核留一个明确实现缺口：会员姓名/通知原审核任务终结后的重新确认虽有后台组合方法，尚无公开Controller和消费者；已派继续原姓名/通知前端，Root负责公共接点。故本阶段可提交上传，AIN-16整体仍75%，不因规则日历收口而掩盖资料/通知余项；真实浏览器/MySQL由负责人自测。
+
 <a id="ain16-original-draft-rejection-refresh-20261113"></a>
 ## AIN-16 原规则/日历拒绝收据与重新确认后端（2026-11-13）
 

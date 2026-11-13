@@ -16,8 +16,10 @@ const post = async (action: 'list' | 'review' | 'save' | 'operation' | 'preparat
   if (active.aborted) throw Error('AI_SCOPE_CHANGED');
   const path = action in AI_TASK_RULE_SOURCE_ENTRY_HTTP ? AI_TASK_RULE_SOURCE_ENTRY_HTTP[action as 'source' | 'entry' | 'entryOperation']
     : AI_TASK_RULE_DRAFT_HTTP[action as keyof Omit<typeof AI_TASK_RULE_DRAFT_HTTP, 'basePath'>];
+  const write = ['save', 'prepare', 'entry'].includes(action);
+  // A refreshed credential cannot replay a save whose original ACK was lost.
   const result = await http.post<ApiResult<unknown>>(`/${AI_TASK_RULE_DRAFT_HTTP.basePath}/${path}`, structuredClone(value),
-    { signal: active, timeout: 12000 });
+    { signal: active, timeout: 12000, ...(write ? { _authRetry: true } : {}) });
   if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
   return result.data.data;
 };
@@ -26,7 +28,8 @@ export const aiTaskRuleDraftApi = Object.freeze({
   review: async (value: AiTaskRuleDraftReviewInput, signal: AbortSignal) => aiTaskRuleDraftReviewResponse.parse(await post('review', value, signal)),
   save: async (value: AiTaskRuleDraftSaveInput, signal: AbortSignal) => aiTaskRuleDraftOperationResponse.parse(await post('save', value, signal)),
   operation: async (value: AiTaskRuleDraftReference, signal: AbortSignal) => aiTaskRuleDraftOperationResponse.parse(await post('operation', value, signal)),
-  preparation: async (taskId: string, signal: AbortSignal) => aiTaskRuleDraftPreparationResponse.parse(await post('preparation', aiTaskRuleDraftPreparationInput.parse({ taskId }), signal)),
+  preparation: async (taskId: string, signal: AbortSignal, rejected?: AiTaskRuleDraftReference) => aiTaskRuleDraftPreparationResponse.parse(
+    await post('preparation', aiTaskRuleDraftPreparationInput.parse({ taskId, ...(rejected ? { rejected } : {}) }), signal)),
   previewPreparation: async (value: AiTaskRuleDraftPreparationPreviewInput, signal: AbortSignal) => aiTaskRuleDraftPreparationPreviewResponse.parse(
     await post('previewPreparation', aiTaskRuleDraftPreparationPreviewInput.parse(structuredClone(value)), signal)),
   prepareProposal: async (value: AiTaskRuleDraftPrepareInput, signal: AbortSignal) => aiTaskRuleDraftPreparationOperationResponse.parse(

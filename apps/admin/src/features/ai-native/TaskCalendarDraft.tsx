@@ -1,7 +1,7 @@
 /** Existing Task detail -> original calendar proposal -> reviewed Core draft.
  * Only the original save receipt reports completion; unknown is read only. */
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
-import type { AiTaskCalendarDraftReviewResponse, AiTaskCalendarDraftOperationResponse } from '@rental-os/shared';
+import type { AiTaskCalendarDraftReviewResponse, AiTaskCalendarDraftOperationResponse, AiTaskCalendarDraftPreparationReference } from '@rental-os/shared';
 import { ActionButton, Alert, Button, Checkbox, ConfirmAction, Input } from '@/components/ui';
 import { aiTaskCalendarDraftApi } from '@/api/aiTaskCalendarDraft';
 import { useAuthStore } from '@/features/auth/authStore';
@@ -30,8 +30,11 @@ function CalendarDifferences({ value }: { value: Pick<AiTaskCalendarDraftReviewR
   </dl>;
 }
 
-export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied, allowPreparation = true, onCommitted }: {
+export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied, allowPreparation = true, onCommitted,
+  preparationTaskId = taskId, onPrepared }: {
   taskId: string; identity: string; current(): boolean; onAccessDenied(): void; allowPreparation?: boolean;
+  preparationTaskId?: string;
+  onPrepared?(taskId: string, reference: AiTaskCalendarDraftPreparationReference): void;
   onCommitted?(receipt: AiTaskCalendarDraftOperationResponse): Promise<void>;
 }) {
   const { t } = useCalendarDraftLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
@@ -39,15 +42,16 @@ export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied, a
   const [preparationBinding, setPreparationBinding] = useState<string>(), [prepared, setPrepared] = useState<{ binding: string; taskId: string }>();
   const stableOwner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
   const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, taskId, stableOwner, auth.user, epoch]);
+  const mounted = useRef(true);
   const owner = useRef({ binding, current }); owner.current = { binding, current };
-  const active = () => owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
+  const active = () => mounted.current && owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { if (typeof window !== 'undefined') storage = window.localStorage; } catch { /* Preserve-before-save refuses unavailable storage. */ }
     return createTaskCalendarDraftSession({ taskId, current: active, api: aiTaskCalendarDraftApi,
       store: taskCalendarDraftStore(`rental-os-calendar-draft:${stableOwner}`, storage), changed });
   }, [binding]);
-  useEffect(() => { session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
-    return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
+  useEffect(() => { mounted.current = true; session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
+    return () => { mounted.current = false; document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
   if (!active()) return null;
   const data = session.view, canManage = auth.hasPermission('rental-os:calendar:edit');
   const action = (work: () => Promise<void>) => async () => { try { await work(); } catch (error) {
@@ -55,6 +59,8 @@ export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied, a
     if (active() && (status === 401 || status === 403)) onAccessDenied(); throw error;
   } };
   const committed = data.operation?.operation.state === 'committed' ? data.operation.operation : null;
+  const rejected = data.operation?.operation.state === 'rejected_no_commit'
+    ? { reference: data.operation.reference, operation: data.operation.operation } : null;
   return <section className={styles.stack} aria-label={t('日历业务草稿')}>
     <p className={styles.help}>{t('核对日期与差异后保存原日历草稿。发布需继续原日历流程。')}</p>
     {data.locatorInvalid && <Alert type="warning" title={t('原保存定位不可用，不能再次保存。')} description={t('可读取原提案及原业务收据；定位缺失不证明未保存。')} />}
@@ -62,12 +68,25 @@ export function TaskCalendarDraft({ taskId, identity, current, onAccessDenied, a
     {data.pending ? <ActionButton label={t('核对原保存结果')} disabled={!!data.busy} onAction={action(() => session.operation(data.pending!))} />
       : <ActionButton label={t('读取日历提案')} disabled={!!data.busy} onAction={action(() => session.list())} />}
     {!data.pending && data.loaded && data.items.length === 0 && <p>{t('本任务没有已保存的日历提案。')}</p>}
-    {allowPreparation && canManage && !data.pending && <Button onClick={() => setPreparationBinding(binding)}>{t('准备日历提案')}</Button>}
-    {allowPreparation && preparationBinding === binding && <CalendarDraftPreparation taskId={taskId} identity={binding} current={active}
-      onAccessDenied={onAccessDenied} onPrepared={taskId => { if (active()) setPrepared({ binding, taskId }); }} />}
+    {rejected && !data.pending && <section className={styles.section}>
+      <Alert type="warning" title={t('原草稿保存因版本冲突未提交。')}
+        description={t('请读取当前字段，核对新差异并准备新的 AI 提案。')} />
+      <p>{t('原拒绝记录')} {rejected.operation.receiptId} · {formatTimestamp(rejected.operation.recordedAt).value}</p>
+    </section>}
+    {(allowPreparation || rejected) && canManage && !data.pending && !data.locatorInvalid && <ActionButton
+      label={t('准备日历提案')} disabled={!!data.busy}
+      onAction={action(async () => { if (rejected) await session.list(); if (active()) setPreparationBinding(binding); })} />}
+    {(allowPreparation || rejected) && !data.pending && !data.locatorInvalid && preparationBinding === binding && <CalendarDraftPreparation
+      key={rejected ? JSON.stringify(rejected.reference) : 'preparation'} taskId={preparationTaskId} identity={binding} current={active}
+      rejected={rejected?.reference} date={rejected ? data.items.find(item => item.reference.stepId === rejected.reference.stepId
+        && item.reference.runId === rejected.reference.runId)?.target.date : undefined}
+      onAccessDenied={onAccessDenied} onPrepared={(nextTaskId, reference) => { if (active()) {
+        onPrepared?.(nextTaskId, reference); setPrepared({ binding, taskId: nextTaskId });
+      } }} />}
     {prepared?.binding === binding && <TaskCalendarDraft key={`${binding}:${prepared.taskId}`} taskId={prepared.taskId} identity={binding}
-      current={active} onAccessDenied={onAccessDenied} allowPreparation={false} />}
-    {!data.pending && data.items.length > 0 && <div className={styles.stack}>
+      current={active} onAccessDenied={onAccessDenied} allowPreparation={false} onCommitted={onCommitted}
+      preparationTaskId={preparationTaskId} onPrepared={onPrepared} />}
+    {!data.pending && !rejected && data.items.length > 0 && <div className={styles.stack}>
       <div className={styles.field}><label htmlFor={reasonId}>{t('覆盖原因')}</label>
         <Input.TextArea id={reasonId} value={reason} maxLength={1000} disabled={!!data.busy} onChange={event => { setReason(event.target.value); session.clearReview(); }} /></div>
       {data.items.some(item => item.overrideRequired) && <Checkbox checked={overrideConfirmed} disabled={!!data.busy}

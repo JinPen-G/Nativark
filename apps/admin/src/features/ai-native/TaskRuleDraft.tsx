@@ -6,10 +6,9 @@ import { APP_ROUTES } from '@/app/navigation';
 import { aiTaskRuleDraftApi } from '@/api/aiTaskRuleDraft';
 import { useAuthStore } from '@/features/auth/authStore';
 import { currentSessionEpoch } from '@/app/queryClient';
-import { useAiManagementLocale } from './management-locale';
 import { createTaskRuleDraftSession, taskRuleDraftStore, createTaskRuleDraftPreparationSession, taskRuleDraftPreparationStore } from './task-rule-draft-session';
 import { formatTimestamp } from './formatters';
-import { RuleDraftDifferences } from './TaskRuleDraftView';
+import { RuleDraftDifferences, useRuleDraftLocale } from './TaskRuleDraftView';
 import styles from './AiManagement.module.css';
 
 export type TaskRuleDraftProps = { taskId: string; identity: string; current(): boolean; onAccessDenied(): void;
@@ -18,27 +17,29 @@ export function TaskRuleDraft(props: TaskRuleDraftProps) {
   const [prepared, setPrepared] = useState<{ identity: string; taskId: string } | null>(null);
   const taskId = prepared?.identity === props.identity ? prepared.taskId : props.taskId;
   return <section className={styles.stack}>
-    <RulePreparation {...props} onPrepared={reference => { if (props.current()) {
+    <RuleDraftConsumer {...props} taskId={taskId} preparationTaskId={props.taskId} identity={`${props.identity}:${taskId}`}
+      onPrepared={reference => { if (props.current()) {
       props.onPrepared?.(reference); setPrepared({ identity: props.identity, taskId: reference.taskId });
     } }} />
-    <RuleDraftConsumer {...props} taskId={taskId} identity={`${props.identity}:${taskId}`} />
   </section>;
 }
 
-function RuleDraftConsumer({ taskId, identity, current, onAccessDenied, onCommitted }: TaskRuleDraftProps) {
-  const { t } = useAiManagementLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
+function RuleDraftConsumer({ taskId, preparationTaskId, identity, current, onAccessDenied, onCommitted, onPrepared }:
+  TaskRuleDraftProps & { preparationTaskId: string }) {
+  const { t } = useRuleDraftLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), reasonId = useId();
   const [reason, setReason] = useState('依原提案保存规则草稿');
   const stableOwner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
   const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, taskId, stableOwner, auth.user, epoch]);
+  const mounted = useRef(true);
   const owner = useRef({ binding, current }); owner.current = { binding, current };
-  const active = () => owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
+  const active = () => mounted.current && owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { if (typeof window !== 'undefined') storage = window.localStorage; } catch { /* Reads remain possible; preserve-before-save will refuse dispatch. */ }
     return createTaskRuleDraftSession({ taskId, current: active, api: aiTaskRuleDraftApi,
       store: taskRuleDraftStore(`rental-os-rule-draft:${stableOwner}`, storage), changed });
   }, [binding]);
-  useEffect(() => { session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
-    return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
+  useEffect(() => { mounted.current = true; session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
+    return () => { mounted.current = false; document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
   if (!active()) return null;
   const data = session.view, canManage = auth.hasPermission('rental-os:rules:manage');
   const action = (work: () => Promise<void>) => async () => { try { await work();
@@ -49,7 +50,12 @@ function RuleDraftConsumer({ taskId, identity, current, onAccessDenied, onCommit
   } };
   const inspect = (reference: AiTaskRuleDraftReference) => action(() => session.review(reference, reason));
   const committed = data.operation?.operation.state === 'committed' ? data.operation.operation : null;
+  const rejected = data.operation?.operation.state === 'rejected_no_commit'
+    ? { reference: data.operation.reference, operation: data.operation.operation } : null;
   return <section className={styles.stack} aria-label={t('规则业务草稿')}>
+    {!data.pending && !data.locatorInvalid && onPrepared && <RulePreparation key={rejected ? JSON.stringify(rejected.reference) : 'preparation'}
+      taskId={preparationTaskId} identity={identity} current={active} onAccessDenied={onAccessDenied} onPrepared={onPrepared}
+      rejected={rejected?.reference} />}
     <p className={styles.help}>{t('核对原提案后保存业务草稿。保存不会发布或替换当前生效规则。')}</p>
     {data.locatorInvalid && <Alert type="warning" title={t('原保存定位不可用，不能再次保存。')}
       description={t('可读取原提案及原业务收据；定位缺失不证明未保存。')} />}
@@ -58,7 +64,12 @@ function RuleDraftConsumer({ taskId, identity, current, onAccessDenied, onCommit
     {data.pending ? <ActionButton label={t('核对原保存结果')} disabled={!!data.busy} onAction={action(() => session.operation(data.pending!))} />
       : <ActionButton label={t('读取规则提案')} disabled={!!data.busy} onAction={action(() => session.list())} />}
     {!data.pending && data.loaded && data.items.length === 0 && <p className={styles.help}>{t('本任务没有已保存的规则提案，请继续原开业提案流程。')}</p>}
-    {!data.pending && data.items.length > 0 && <div className={styles.field}>
+    {rejected && !data.pending && <section className={styles.section}>
+      <Alert type="warning" title={t('原草稿保存因版本冲突未提交。')}
+        description={t('请读取当前字段，核对新差异并准备新的 AI 提案。')} />
+      <p>{t('原拒绝记录')} {rejected.operation.receiptId} · {formatTimestamp(rejected.operation.recordedAt).value}</p>
+    </section>}
+    {!data.pending && !rejected && data.items.length > 0 && <div className={styles.field}>
       <label htmlFor={reasonId}>{t('变更原因')}</label><Input.TextArea id={reasonId} value={reason} maxLength={500} disabled={!!data.busy}
         onChange={event => { setReason(event.target.value); session.clearReview(); }} />
       {data.items.map(item => <div key={item.reference.stepId} className={styles.section}>
@@ -94,18 +105,20 @@ const preparationLabels: Record<typeof AI_TASK_RULE_DRAFT_FIELDS[number], string
   'fulfillment.evidenceRequired': '履约凭证', 'fulfillment.allowDifferentReturnLocation': '异地归还',
   'damage.manualReviewRequired': '损坏人工审核', 'cancellation.weatherExceptionEnabled': '天气例外'
 };
-function RulePreparation({ taskId, identity, current, onAccessDenied, onPrepared }: TaskRuleDraftProps & { onPrepared(reference: AiTaskRuleDraftReference): void }) {
-  const auth = useAuthStore(), { t } = useAiManagementLocale(), navigate = useNavigate(), [, changed] = useReducer(n => n + 1, 0);
+function RulePreparation({ taskId, identity, current, onAccessDenied, onPrepared, rejected }:
+  TaskRuleDraftProps & { onPrepared(reference: AiTaskRuleDraftReference): void; rejected?: AiTaskRuleDraftReference }) {
+  const auth = useAuthStore(), { t } = useRuleDraftLocale(), navigate = useNavigate(), [, changed] = useReducer(n => n + 1, 0);
   const epoch = currentSessionEpoch(), stable = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
-  const binding = JSON.stringify([identity, stable, auth.user, epoch]), owner = useRef({ binding, current }); owner.current = { binding, current };
-  const active = () => owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
+  const mounted = useRef(true);
+  const binding = JSON.stringify([identity, stable, auth.user, epoch, rejected]), owner = useRef({ binding, current }); owner.current = { binding, current };
+  const active = () => mounted.current && owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden && owner.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { storage = window.localStorage; } catch { /* Preserve-before-dispatch refuses a preparation without a locator. */ }
     return createTaskRuleDraftPreparationSession({ taskId, tenantId: auth.tenant?.tenantId ?? '', workspaceId: auth.currentWorkspaceId ?? '',
-      current: active, changed, api: aiTaskRuleDraftApi, store: taskRuleDraftPreparationStore(`rental-os-rule-preparation:${stable}`, storage) });
+      current: active, changed, api: aiTaskRuleDraftApi, store: taskRuleDraftPreparationStore(`rental-os-rule-preparation:${stable}`, storage), rejected });
   }, [binding]);
-  useEffect(() => { session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
-    return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
+  useEffect(() => { mounted.current = true; session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
+    return () => { mounted.current = false; document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
   if (!active() || !auth.hasPermission('rental-os:rules:manage')) return null;
   const data = session.view, saved = data.operation?.operation.state === 'ai_proposal_saved' ? data.operation.operation : null;
   const action = (work: () => Promise<void>) => async () => {
@@ -116,8 +129,12 @@ function RulePreparation({ taskId, identity, current, onAccessDenied, onPrepared
   return <section className={styles.stack} aria-label={t('新的规则准备')} aria-busy={!!data.busy}>
     <p>{t('明确发起关联的新规则准备。原诊断保持不变；本步只保存 AI 提案，Core 草稿与发布另行确认。')}</p>
     <div className={styles.toolbar}>
+      {rejected && data.pending && saved && saved.proposal.reference.taskId === rejected.taskId
+        && saved.proposal.reference.runId === rejected.runId && saved.proposal.reference.stepId === rejected.stepId && <ActionButton
+        label={t('读取当前字段并重新准备')} disabled={!!data.busy || data.invalid} onAction={action(() => session.read())} />}
       {data.pending ? <ActionButton label={t('核对原规则准备结果')} disabled={!!data.busy} onAction={action(() => session.operation())} />
-        : <ActionButton label={t('读取原规则字段')} disabled={!!data.busy || data.invalid} onAction={action(() => session.read())} />}
+        : <ActionButton label={t(rejected ? '读取当前字段并重新准备' : '读取原规则字段')}
+          disabled={!!data.busy || data.invalid} onAction={action(() => session.read())} />}
       <Button onClick={() => { if (active() && useAuthStore.getState().hasPermission('rental-os:rules:manage')) navigate(APP_ROUTES.rentalSettings.path); }}>{t('原规则配置页')}</Button>
     </div>
     {data.invalid && <Alert type="warning" title={t('原准备定位不可读取，不能重新发起。')} />}

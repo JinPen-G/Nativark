@@ -17,8 +17,10 @@ const post = async (action: 'list' | 'review' | 'save' | 'operation' | 'preparat
   const path = action in AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP
     ? AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP[action as Exclude<keyof typeof AI_TASK_CALENDAR_DRAFT_PREPARATION_HTTP, 'basePath'>]
     : AI_TASK_CALENDAR_DRAFT_HTTP[action as 'list' | 'review' | 'save' | 'operation'];
+  const write = ['save', 'prepare', 'entry'].includes(action);
+  // Preserve the original write attempt through an authentication failure.
   const result = await http.post<ApiResult<unknown>>(`/${AI_TASK_CALENDAR_DRAFT_HTTP.basePath}/${path}`, structuredClone(value),
-    { signal: active, timeout: 12000 });
+    { signal: active, timeout: 12000, ...(write ? { _authRetry: true } : {}) });
   if (active.aborted || epoch !== currentSessionEpoch()) throw Error('AI_SCOPE_CHANGED');
   return result.data.data;
 };

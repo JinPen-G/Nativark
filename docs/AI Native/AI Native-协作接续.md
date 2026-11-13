@@ -24,8 +24,8 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 持续目标为全专项按原门槛收口；当前先独立核接 AIN-14 全文，再收 AIN-16 原拒绝收据、并发阻断与重新确认，完成一项即同步任务册/记录、中文提交并回读 GitHub。独占四册/索引、公共装配/合同；按固定成果登记 main 集成节点，助手继续施工。AIN-15 三叶和员工样式待核，不能夹带。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 持续目标为 AIN-17/18 事件与经营待办核心链按原全文收口；原历史读取两源已固定上传，当前接显式最多10项领取、原候选选择与原批次恢复。独占 aiAutomationReviews.ts、automation-review-session.ts、AutomationReviewWorkbench.tsx，以及已追加的 pending batch 仓储、candidate service、request factory/controller 和 shared 的 pending 合同区；不改 Core、公共总出口、Guard或四册，不自动重发或新增业务动作。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 持续目标为 AIN-16 普通资料与获准配置消费者按原全文收口；当前规则/日历拒绝收据→刷新现值和差异→新 linked 提案→再次明确保存→原收据与原页面收尾。独占原八份规则/日历 API/session/组件及 CalendarSourceEntry 的新定位/收尾挂接；RuleSourceEntry 仅确有阻断时最小接入，不改公共接点/四册。 |
-| 内部开业助手／`/root/opening_core_closeout` | 接已退出作者的 AIN-14 品类/能力 WIP，核正式能力读权、完整材料/指纹/确定性正文/后台，做必要模拟与类型后固定交权。独占既有开业材料/工具/后台投影及 provider 的开业注入区，保持 Core 九项判定权威；不扩规则/日历、事件或主树范围。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 规则/日历九源已冻结交回并由Root核接。继续AIN-16普通姓名/通知原审核终结后的重新确认消费者，独占aiMemberName.ts、aiNotificationChanges.ts、member-name-session.ts、notification-change-session.ts、MemberNameFlow.tsx、NotificationChangeFlow.tsx及必要feature-local新叶；公开后端/合同归Root，不改已交九源、四册或索引。 |
+| 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源已冻结交权，Root核blob全同。当前仅只读解释其既有Core治理类型前置和定位原成功模拟命令，不新增代码、测试或改四册/索引。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
@@ -46,7 +46,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 日历 24 源及规则 19 源/3 公共注册已分别在[日历核接](<AI Native-开发记录.md#ain-calendar-source-consumer-closeout-20261111>)、[规则核接](<AI Native-开发记录.md#ain-rule-source-intake-20261111>)保留完整证据。会员姓名和通知首次 start/原历史也已接原权限及收据；[通知冲突刷新与作用空间](<AI Native-开发记录.md#ain16-notification-conflict-refresh-20261113>)三源已由 Root 核接必要模拟/类型，原五条全文与 AIN-14 前置继续核定。
 
-[规则/日历拒绝与重新确认后端](<AI Native-开发记录.md#ain16-original-draft-rejection-refresh-20261113>)13源已在固定前置独立通过原页面完整旅程、正常保存与冲突的串行竞态及类型；原拒绝丢应答只读原键，合法拒绝证明才能刷新旧entry sourceHash/revision。新linked提案和Core保存保持独立确认、不发布。dev2继续九源消费者最后收尾；按原AIN-16五条及AIN-14前置再核整项，不用本后端切片提高百分比。
+[规则/日历拒绝与重新确认后端](<AI Native-开发记录.md#ain16-original-draft-rejection-refresh-20261113>)13源已固定上传 `75f86be57e772218774080d0d337dde6536b26df`；[九源消费者与原页面收尾](<AI Native-开发记录.md#ain16-draft-rejection-consumer-20261113>)已由dev2冻结交权，Root独立实际组合和类型通过。原拒绝丢应答只读原键，合法拒绝才能刷新旧entry来源，新提案和Core保存保持独立确认、不发布。AIN-16明确剩余为会员姓名/通知原审核终结后的新差异/新变更公开消费者；不把unknown当未提交，后端沿既有reconfirmation，dev2继续其前端，Root接公开合同。原五条及AIN-14前置齐备后再核整项。
 
 [经营原人工操作恢复](<AI Native-开发记录.md#ain17-original-human-operation-recovery-20261113>)两源已由 dev1 完成固定组合、Root 核 blob 和现稿类型；原 operation/同键恢复与当前触发政策分离，不续权、不派发，新操作仍保留当前来源和授权。dev1 已接新事件有界领取和原批次恢复：现有 limit-only 批次丢应答没有 eventId 清单，必须补原 OperationLog 固定批次/只读查询；已追加其 feature-local 后端和 pending 合同写权，Guard/总出口/四册仍归 Root。AIN-17/18 全文尚有原生产来源/窗口等缺口，不因该修复片提高任务百分比。
 
