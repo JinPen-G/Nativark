@@ -1,26 +1,22 @@
-/** Shared native sidebar primitives with customer-owned slots only. */
-import { useState, type CSSProperties, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+/** Enterprise menu and customer identity for the shared management UI frame. */
+import { useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import type { EnterprisePortalAction } from "@rental-os/shared";
-import { Highlight, HighlightItem } from "@animate-ui/react/primitives/effects/highlight";
-import { Sidebar, SidebarProvider, SidebarHeader, SidebarContent, SidebarFooter, SidebarInset, SidebarTrigger, SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "@/components/animate-sidebar/runtime/sidebar";
-import { TooltipProvider } from "@/components/animate-sidebar/runtime/tooltip";
-import { useAppearance } from "@/app/theme";
 import { useLocale } from "@/app/locale";
-import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
-import { Button } from "@/components/ui/Button";
-import { Select } from "@/components/ui/Select";
-import { Building2, LogOut } from "lucide-react";
-import { TeamOutlined, HistoryOutlined, FileTextOutlined, FormOutlined, IdcardOutlined, GiftOutlined, SafetyCertificateOutlined, ControlOutlined, FileSearchOutlined, InboxOutlined } from "@/components/ui/icons";
+import { BusinessShell } from "@/components/BusinessShell";
+import { NativeContextSwitcher } from "@/components/animate-sidebar/NativeContextSwitcher";
+import { NativeAccountMenuView } from "@/components/animate-sidebar/NativeAccountMenuView";
+import { NativeNavigation } from "@/components/animate-sidebar/NativeNavigation";
+import { WorkspaceClock } from "@/components/WorkspaceClock";
+import { Building2, Store } from "lucide-react";
+import { TeamOutlined, HistoryOutlined, FileTextOutlined, FormOutlined, IdcardOutlined, GiftOutlined, SafetyCertificateOutlined, ControlOutlined, FileSearchOutlined, InboxOutlined, CalculatorOutlined } from "@/components/ui/icons";
 import { useEnterprise } from "./enterprise-session";
-import "@/components/animate-sidebar/animate-sidebar.css";
-import "@/components/animate-sidebar/sidebar-adapter.css";
 export function EnterpriseShell({ children }: { children: ReactNode }) {
-  const { mode } = useAppearance(), { locale, setLocale } = useLocale();
-  const context = useEnterprise(), [logoutError, setLogoutError] = useState("");
+  const { locale } = useLocale(), context = useEnterprise();
+  const [logoutError, setLogoutError] = useState("");
+  const [workspaceError, setWorkspaceError] = useState<{ identity: string; message: string }>();
   const english = locale === "en-US";
-  const memberLabel = english ? "Members" : "企业成员";
-  const corporate = context.entry?.corporates.find(c => c.corporateCustomerId === context.selectedCorporateId);
+  const corporate = context.loading ? undefined : context.entry?.corporates.find(row => row.corporateCustomerId === context.selectedCorporateId);
   const location = useLocation(), activePage = location.pathname.slice(context.basePath.length).replace(/^\//, "") || "members";
   const menus: Array<{ path: string; zh: string; en: string; icon: ReactNode; action?: EnterprisePortalAction }> = [
     { path: "tasks", zh: "企业待办", en: "Tasks", icon: <InboxOutlined /> }, { path: "records", zh: "操作记录", en: "Records", icon: <HistoryOutlined /> },
@@ -31,23 +27,33 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
     { path: "policy", zh: "使用政策", en: "Rental policy", icon: <ControlOutlined />, action: "policy:manage" },
     { path: "approvals", zh: "预约审批", en: "Approvals", icon: <FileSearchOutlined /> },
     { path: "orders", zh: "企业订单", en: "Orders", icon: <FileSearchOutlined />, action: "orders:read" },
+    { path: "finance", zh: "企业财务", en: "Finances", icon: <CalculatorOutlined />, action: "finance:read" },
     { path: "exchange-approvals", zh: "换货审批", en: "Exchange approvals", icon: <FileSearchOutlined /> },
     { path: "extension-approvals", zh: "续租审批", en: "Extension approvals", icon: <FileSearchOutlined /> }
   ];
   const visible = menus.filter(menu => !menu.action || corporate?.actions.includes(menu.action));
-  return <TooltipProvider><div className="app-frame-stage"><div className="app-shell native-admin-shell">
-    <SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
-      <Sidebar variant="inset" collapsible="icon" className="rental-sidebar-colors">
-        <SidebarHeader><div className="enterprise-brand"><Building2 aria-hidden="true" /><span>{context.tenantName || (english ? "Enterprise" : "企业服务")}</span></div></SidebarHeader>
-        <SidebarContent><Highlight mode="parent" controlledItems value={activePage} hover={false} click={false} containerClassName="rental-sidebar-navigation" className="rental-sidebar-route-highlight">
-          <SidebarMenu>{visible.map(menu => <SidebarMenuItem key={menu.path}><HighlightItem value={menu.path} asChild><div className="rental-sidebar-route-target"><SidebarMenuButton render={<Link to={`${context.basePath}/${menu.path}`} />} isActive={activePage === menu.path} tooltip={english ? menu.en : menu.zh}>{menu.icon}<span>{english ? menu.en : menu.zh}</span></SidebarMenuButton></div></HighlightItem></SidebarMenuItem>)}</SidebarMenu>
-        </Highlight></SidebarContent>
-        <SidebarFooter>{context.session && <SidebarMenu><SidebarMenuItem><SidebarMenuButton tooltip={english ? "Sign out" : "退出登录"} onClick={() => void context.logout().catch(e => setLogoutError(e.message))}><LogOut aria-hidden="true" /><span>{context.session.customer.displayName}</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu>}</SidebarFooter>
-      </Sidebar>
-      <SidebarInset className="app-workspace min-h-0"><header className="workspace-context native-workspace-context">
-        <div className="workspace-context-location"><SidebarTrigger aria-label={english ? "Toggle navigation" : "切换导航"} /><span className="enterprise-context">{context.tenantName || memberLabel}</span>{Boolean(context.entry?.corporates.length) && <Select aria-label={english ? "Current enterprise" : "当前企业"} value={context.selectedCorporateId || undefined} placeholder={english ? "Choose enterprise" : "选择企业"} options={context.entry!.corporates.map(row => ({ value: row.corporateCustomerId, label: row.corporateName }))} onChange={context.selectCorporate} />}</div>
-        <div className="workspace-context-actions"><Button type="text" size="small" onClick={() => setLocale(english ? "zh-CN" : "en-US")} aria-label={english ? "切换中文" : "Switch to English"}>{english ? "中" : "EN"}</Button><AppearanceSwitcher iconOnly /></div>
-      </header><main className="app-content" data-admin-content><div className="content-canvas">{logoutError && <p role="alert">{logoutError}</p>}{children}</div></main></SidebarInset>
-    </SidebarProvider>
-  </div></div></TooltipProvider>;
+  const tenantName = context.tenantName || (english ? "Enterprise" : "企业服务");
+  const corporateName = corporate?.corporateName || (english ? "Choose enterprise" : "选择企业");
+  const sections = [{ key: "overview", label: "", routes: visible.map(menu => ({ path: context.basePath + "/" + menu.path,
+    label: english ? menu.en : menu.zh, icon: menu.icon })) }];
+  return <BusinessShell fullWidth identity={JSON.stringify([context.identity, context.loading])} selectedKey={context.basePath + "/" + activePage}
+    brand={<NativeContextSwitcher title={tenantName} subtitle={corporateName} brand={<Building2 aria-hidden="true" />}
+      label={english ? "Current enterprise" : "当前企业"} value={context.selectedCorporateId}
+      options={(context.loading ? [] : context.entry?.corporates ?? []).map(row => ({ id: row.corporateCustomerId, name: row.corporateName, icon: <Building2 aria-hidden="true" /> }))}
+      onChange={context.selectCorporate} />}
+    account={<NativeAccountMenuView name={context.session?.customer.displayName || (english ? "Customer account" : "客户账号")}
+      account={tenantName} onSignOut={context.session ? () => context.logout() : undefined}
+      onError={error => setLogoutError(error instanceof Error ? error.message : (english ? "Sign out failed" : "退出失败"))} />}
+    navigation={({ query, onNavigate }) => <NativeNavigation flat sections={sections} selectedKey={context.basePath + "/" + activePage} query={query} onNavigate={onNavigate} />}
+    headerContext={context.session ? <NativeContextSwitcher title={context.session.workspace?.workspaceName || (english ? "Choose service" : "选择服务")}
+      subtitle={context.session.workspace?.workspaceCode ?? ""} brand={<Store aria-hidden="true" />}
+      label={english ? "Current customer service" : "当前客户服务"} value={context.session.workspace?.workspaceCode ?? ""}
+      options={(context.loading ? [] : context.session.workspaces).map(workspace => ({ id: workspace.workspaceCode, name: `${workspace.workspaceName} · ${workspace.workspaceCode}`, icon: <Store aria-hidden="true" /> }))}
+      onChange={async code => { setWorkspaceError(undefined); await context.selectWorkspace(code); }}
+      onError={() => setWorkspaceError({ identity: context.identity, message: english ? "Service switching could not be verified. Read the current service again." : "服务切换结果未核对，请重新读取当前服务。" })} />
+      : <span className="enterprise-context">{tenantName}</span>}
+    headerActions={<WorkspaceClock />}>
+    {logoutError && <p role="alert">{logoutError}</p>}
+    {workspaceError?.identity === context.identity && <p role="alert">{workspaceError.message}</p>}{children}
+  </BusinessShell>;
 }

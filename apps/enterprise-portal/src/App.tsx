@@ -29,6 +29,7 @@ import type { EnterpriseMembersResponse } from "@rental-os/shared";
 import { customerLogin, parseEnterpriseRoute } from "@rental-os/web-client";
 import { CLIENT_BASE, EnterpriseSessionProvider, useEnterprise } from "./enterprise-session";
 import { EnterpriseShell } from "./EnterpriseShell";
+import { WorkspaceRouteReady } from "@/components/workspace/WorkspaceNavigation";
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 }, mutations: { retry: false } } });
 function EnterprisePage() {
   const context = useEnterprise(), { locale } = useLocale(), english = locale === "en-US", location = useLocation();
@@ -39,10 +40,10 @@ function EnterprisePage() {
   const selected = context.selectedCorporateId, [page, setPage] = useState(1);
   const corporate = context.entry?.corporates.find(c => c.corporateCustomerId === selected);
   useEffect(() => { setPage(1); }, [context.identity]);
-  const members = useQuery({ queryKey: ["enterprise-members", context.identity, selected, page], enabled: Boolean(corporate?.actions.includes("members:read")),
+  const members = useQuery({ queryKey: ["enterprise-members", context.identity, selected, page], enabled: Boolean(!context.loading && !context.error && corporate?.actions.includes("members:read")),
     queryFn: ({ signal }) => context.read<EnterpriseMembersResponse>(`/enterprise/corporates/${encodeURIComponent(selected)}/members?tenantCode=${encodeURIComponent(context.tenantCode)}&page=${page}`, AbortSignal.any([signal, context.signal])) });
   return <><PageHeading title={pageTitle} brandName={context.tenantName || (english ? "Enterprise" : "企业服务")} icon={pageIcons[pagePath] ?? <TeamOutlined />} />
-    {context.loading ? <LoadingState /> : context.error ? <Alert type="error" showIcon title={context.error === "enterprise_offline" ? english ? "Enterprise service is not connected. This view verifies the interface only; sign-in and business data are unavailable." : "未连接企业服务；当前仅检查界面，不提供登录或企业数据" : context.error} action={<Button onClick={context.reload}>{english ? "Retry" : "重新读取"}</Button>} />
+    {context.loading && !context.entry ? <LoadingState /> : context.error ? <Alert type="error" showIcon title={context.error === "enterprise_offline" ? english ? "Enterprise service is not connected. This view verifies the interface only; sign-in and business data are unavailable." : "未连接企业服务；当前仅检查界面，不提供登录或企业数据" : context.error} action={<Button onClick={context.reload}>{english ? "Retry" : "重新读取"}</Button>} />
       : !context.session ? <CustomerLogin /> : workflow ? workflow : context.entry?.state !== "ready" ? <section><EmptyScene scene="empty" title={english ? "No enterprise management access" : "尚无企业管理资格"} description={english ? "Contact this merchant to verify and activate your enterprise access. Personal rentals stay separate." : "请联系当前商户核验并开通企业管理资格；个人租赁不受此入口影响。"} />
         {Boolean(context.entry?.ownRelations.length) && <><h2>{english ? "Your enterprise relationships" : "本人企业关系"}</h2><ul>{context.entry!.ownRelations.map(relation => <li key={relation.corporateCustomerId}>{relation.corporateName} — {relation.role === "admin" ? english ? "Administrator relationship; portal access checked separately" : "管理员关系；门户授权另行核验" : english ? "Employee" : "员工"}</li>)}</ul></>}
         <p><a href={`${context.basePath}/applications`}>{english ? "Apply for enterprise membership" : "申请企业会员"}</a> · <a href={`${context.basePath}/join`}>{english ? "Use an invitation" : "通过邀请加入"}</a></p></section>
@@ -81,10 +82,22 @@ function CustomerLogin() {
 function View() {
   const { mode } = useAppearance(), reduced = usePrefersReducedMotion();
   const context = useEnterprise(); const identity = useRef(context.identity); identity.current = context.identity;
+  const pageHost = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => { applyAdminRadiusTokens(document.documentElement, {}); applyArcThemeTokens(document.documentElement, mode === "dark"); }, [mode]);
   useEffect(() => { void queries.cancelQueries(); queries.clear(); }, [context.identity]);
+  useEffect(() => {
+    if (context.loading) void queries.cancelQueries();
+    else if (!context.error) void queries.invalidateQueries();
+  }, [context.loading]);
   return <ConfigProvider theme={createThemeConfig(mode)}><AntMotionProvider motion={!reduced}><AntApp><FeedbackProvider><BusinessUiScopeProvider value={{ identity: context.identity, currentIdentity: () => identity.current }}>
-    <EnterpriseShell><EnterprisePage /></EnterpriseShell>
+    <EnterpriseShell><WorkspaceRouteReady>
+      {context.loading && context.entry && <LoadingState />}
+      <div key={context.identity} ref={pageHost} hidden={context.loading && Boolean(context.entry)}>
+        <ConfigProvider getPopupContainer={trigger => pageHost.current ?? trigger?.parentElement ?? document.body}>
+          <EnterprisePage />
+        </ConfigProvider>
+      </div>
+    </WorkspaceRouteReady></EnterpriseShell>
   </BusinessUiScopeProvider></FeedbackProvider></AntApp></AntMotionProvider></ConfigProvider>;
 }
 const router = createBrowserRouter([{ path: "*", element: <View />, errorElement: <p role="alert">企业页面无法打开，请重新进入当前商户企业服务。</p> }]);
