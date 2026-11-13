@@ -6,6 +6,28 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13及本次14已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain16-name-notification-reconfirmation-consumer-20261114"></a>
+## AIN-16 姓名／通知重新确认消费者与原键恢复（2026-11-14）
+
+后端固定前置为 `4afb018e8a2343555c090f3206b3b2471cca9552`，包含[公开重新确认](#ain16-name-notification-reconfirmation-backend-20261113)和[通知初次启动](#ain16-notification-original-first-start-20261113)。本阶段接回[姓名页面](../../apps/admin/src/features/ai-native/MemberNameFlow.tsx)、[通知页面](../../apps/admin/src/features/ai-native/NotificationChangeFlow.tsx)、实际 API 与原审核 session。旧审核必须由服务端证明终结且未提交，用户先看当前差异、明确保存新变更，再另行启动新审核及批准；新定位由服务端返回，不由人类填写 Task/Run 或 hash。通知继续由原任务中心审批、继续和 Core 收据读取结果，保存变更不表示配置已更新或发布。
+
+[重新确认 session](../../apps/admin/src/features/ai-native/original-reconfirmation-session.ts)在委托前保存并读回最少原定位与阶段，丢应答后只读原操作；重新打开、附接原变更和读取均不自动新建或启动。原 Task 为无执行痕迹的 queued/revision1 时，再次明确点击才向后端申请原初始 CAS。另一标签写入、损坏定位、失权、切身份、隐藏和卸载阻止新操作并撤回材料；写 POST 禁止认证刷新后自动重发。定位不保存姓名、通知正文、密钥或完整资料。
+
+dev2 已冻结并交回十源，Root 逐文件核 SHA-256 和 Git blob 一致：姓名 API `2da22b3de454755fba315e27e2e369892f9a47aa`、session `abe1efe62b7b3c44982b32e5a85f2b9c842c41b1`、页面 `11adca4f24182d1cf861cb344a9602efdb37491b`；通知 API `424bea096e6afdbf26f2028ead0af9636dc9fb19`、session `f6f72816e742fc5c732e0d8d5d5a48ec19844bbb`、页面 `9baac67c041c7088db9fcb2ab09e278834542094`；journal `579bbf8cd6f65377777a85920ec7f93c15b98c9a`、公共 session `df16c477bbb0ce6a53310decf1716c466c995979`、姓名 adapter `cb713ed0d8eb837c21844d12fc81365baf97a05b`、通知 adapter `5a3182be29873749eaf5667b1d97183511cf05ad`。未夹带 dev1 的原 grant 或未核报价/员工样式。
+
+| 必要模拟／类型 | stdin SHA-256／实际结果 |
+| --- | --- |
+| 作者实际 API、恢复 session、认证与存储边界 | `e6ab138c185b976381604f3ec3cd44c06abfaba974cb5a287437e26a0611c637`／退出0；27个恢复场景，认证自动重发0、刷新0，原键、错绑定、过期差异与并发定位拒绝。 |
+| 作者姓名／通知 API→Controller／Guard→原工作流／Core | 姓名 `d85f6ff46d3a012cebd628d4c840b46a670c3ea2253f9b6b488f3e40eef8c1f4`、通知 `d32d1400ac1e1faebf889077288ee094b9093f40d6d430a6fe9ee2f54ba31d9c`，均退出0；旧 Task 保持、新变更／新批准独立，业务写与批准消费各1，模型0，旧政策到期仍受权原读。 |
+| 作者实际 React 页面有限宿主 | `942efb60fbe4494cd8aa4093db1439bdad8de15abbd04bcd0502874e18c21cb0`／退出0；7个页面操作场景，包含新审核明确启动、queued接续、隐藏重开、旧callback、特定会员隔离与英文文案；监听器0。 |
+| Root 独立姓名实际 API/session→Controller／Guard／Core，三次 HTTP 丢应答 | `0f64e9a5c79d02f39dac767cf72f3f292d094db769f367adc5931837d5d2e4ac`／退出0；prepare/start/commit 后只读恢复，4次写POST、11次读，业务写1、批准消费1，另一标签记录保持。 |
+| Root 独立通知实际 API/session→公开 Controller／原应用，三阶段丢应答 | `683445ed4f8af5549d10a2eb9493c702ad5f1397aa72e718f9c9a5921b75eb0a`／退出0；prepare/create/start 后只读恢复，3次写POST、16次读，等待阶段业务写／批准0；最终批准与单次 Core 写见后端阶段。 |
+| 最终十源及实际依赖类型 | Root `68b5eeefdff475f36fb150d9cf82fc34b04c365c4b85873616b50ccc834eae2a`、作者 `0542ecacdd5e60590c7e2ab58f6ccb77cb5ed4789055cd20e84592e655fc12b4`，均退出0；TypeScript5.9.3、11根/1448源零诊断。 |
+
+上述命令均为 `node --no-compilation-cache -`，使用本树原离线 preload、不可达数据库 URL、内存审计和主仓库受管只读依赖；完整输入与结果保留原作者/Root 会话，不另留脚本或环境。原页面驱动手写 notification journal 的 JSON 顺序不符，被正式 CAS 拒绝；改用原 `notificationChangeStore.write` 构造夹具后同组通过，没有放宽生产比较。REPL 冻结命令误引用未提供的 process 只影响工具驱动，改为 PowerShell 按具体路径固定 blob；Root 核字节一致。本次文档补片首轮因末尾上下文不完整拒绝，实核无部分写入后再补。此前真实 performance.now 窗口耗尽及 UNKNOWN 仍按原记录保留，不以这组正向模拟关闭。
+
+作者及 Root 的验证进程已退出、audit0，本任务临时目录未创建，没有新增／扩写测试文件、依赖副本或构建产物。AIN-16 原五条全文及依赖在下一核定阶段判断，本消费者交付不代替整项验收；真实浏览器、MySQL 和供应商由负责人后续操作。
+
 <a id="ain16-notification-original-first-start-20261113"></a>
 ## AIN-16 通知原Task未启动窗口的明确接续（2026-11-13）
 
