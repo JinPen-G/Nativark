@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10与11已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain14-calendar-and-saved-proposal-20261113"></a>
+## 开业日历采用来源与已保存提案差异（2026-11-13）
+
+本阶段消费 PM 指定 Core `da3002b2942fa31c6a81631d3f438d8e245d2455` 的当前日历采用来源，AI 树不覆盖 Core。原 `calendarSource` 沿[事实读取](../../apps/api/src/modules/ai-native/tools/diagnostic-read-facts.service.ts)、[分区读取](../../apps/api/src/modules/ai-native/tools/opening-action-list.service.ts)、[场景准备](../../apps/api/src/modules/ai-native/scenes/business-scene-preparation.service.ts)、[公共类型](../../packages/shared/src/ai-business-material-draft.ts)/[schema](../../packages/shared/src/ai-business-material-draft-schemas.ts)、[原结果](../../apps/api/src/modules/ai-native/scenes/original-scene-result.service.ts)、[正文](../../apps/api/src/modules/ai-native/scenes/opening-diagnosis-renderer.ts)和[后台投影](../../apps/admin/src/features/ai-native/readiness-diagnostics.ts)/[诊断卡](../../apps/admin/src/features/ai-native/ReadinessDiagnosticsCard.tsx)透传，核范围、哈希、年度唯一性、原发布依据及观察时间；未选择日历分区时不公开，旧材料缺来源不补造版本。比较保留业务字段和一致性声明，排除每次查询的起止时间。
+
+[TaskOpeningProposals](../../apps/admin/src/features/ai-native/TaskOpeningProposals.tsx)另补原提案收据中的原值/新值、原配置版本、观察时间、来源、空间和对象。保存后及刷新后的差异取原收据；当前配置改成 v99 也不把历史提案的 v1 偷换为当前版。准备、业务草稿、批准与发布继续分开，原 unknown 只读取原操作。日历说明补在[既有语言表](../../apps/admin/src/features/ai-native/management-locale.ts)。
+
+前置为 `03631dd902ece2c32896f12400378cbc20a8bc1d`。Root 核同日历九源 Git blob：`e4c6a9bab5414ae1aa2c39c6832318809e99da4d`、`ccc33c70a76c4122e521bf6f5d67da1830083b0a`、`86b81e996d3e61151dcf36a8500e88ec1c31ce96`、`e6082af0e564eba14969ae4e25644a87aef17097`、`f67f4e0598e4f800ec5e7140e969089d285f7a05`、`ab4de81267f80c4f3b7cca51cca33db1b97e0091`、`7fce116f44f16302c79e856dfa68af31128d4e0b`、`745bd7058a4a177dead803a8838e8bd518585439`、`26d39b1c8385844fca204e4d7caaacdd6feb70ce`；分别对应事实、分区、准备、结果、正文、类型、schema、投影、卡片。提案单文件 blob `8d031f1e42b725e63b35d544f2f26fe6f391f952`。
+
+助手固定 Core/模型结果/实际 Card API 三组内存模拟均退出 0，stdin SHA-256 分别为 `b8343e916b288d40de7c6defd8b74512362f1acbec70368b76b499a52dbab586`、`df9726fe322f15b12ef35b69fbe062331b9bf7ca4dc1dff35802b8597c39bb9e`、`fa1a460730f707da0f61820f8f7e7c20904fb75b0188785681fa396bb41412a0`。提案助手实际 API/session→Controller/Guard/ALS→原 R1 收据→组件模拟退出 0，stdin SHA-256 `4b7afe7ff6477e04066145091e408b2cece4f81df37db2fb909e68333ceb119f`，7 次 API、1 次准备/1 份提案、0 模型/业务写入；原命令索引以该助手更正后的 `call_Q5ymoAvNifrxT2uYaLohYRw1`/`call_opSxKMzQvbVxHz2xaC4pMkSA` 为准。
+
+Root 独立固定 Core→原开业服务→Task/Gateway→原结果/Card 组合退出 0，Node stdin SHA-256 `f624cd84b2f4a0a119eb16d770acc095d9271ea3164226e5dd54dadb5f8aa4c4`：settings-73 不变，同年度 v1→v2 导致旧正文 stale/null，原 Artifact 不变；查询时钟变化仍 available 且原 materialHash 不变；错哈希、撤权拒绝，缺来源明确未加载，1 次模型/0 Core 写入。原 R1 收据→实际提案详情独立模拟退出 0，SHA-256 `642598f7464f224f084a927efe9e9531f42dd97342130a12d4aa4fed84db94fd`，验证 v99 当前配置下保留 v1 原差异、中英、文本转义及撤权。当前 AI API 3 根/1818 源、后台 4 根/1512 源 TypeScript 5.9.3 零诊断，退出 0，SHA-256 `ef8c4e648daae022a1c0004aad0fd5988e3df4c54661d2a91a1e9eb688b0ec09`；API 类型只补原治理固定两源前置，不将 Core 全量旧差异带进产品。
+
+保留验证失败：Root 初始未对齐 Core 实时时钟与旧夹具时钟，原资源读取拒绝；Date 子类与 structuredClone 的原生 Date 类型不一致使模型原步骤 unknown，改为返回原生 Date 的有界模拟时钟后通过。其后 BigInt 留证序列化及 UI 导航/CSS 替身缺项均只修内存驱动；未修改生产判断或既有断言。直接把 Core 两整文件叠旧 AI 基线的类型检查出现四条前置诊断，不能称该整文件覆盖已通过；正式整合须含 PM 的 Core 前置闭包。组件来源审计 263 文件、badHashes 为空，docs:check 仍为四处既有缺链。各验证进程退出、审计为空、临时目录未创建；未新增/扩写测试脚本。模拟不等于真实数据库、浏览器、官方来源或发布验收。AIN-14 仍按原五条及 AIN-12 前置核定，本片不单独提高整项进度。
+
 <a id="ain12-unsent-draft-retention-20261113"></a>
 ## 运行中保留未发送草稿并隔离原受理正文（2026-11-13）
 

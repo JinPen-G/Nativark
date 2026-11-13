@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION, type AiOrderExplainRequestDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, aiOpeningCalendarSourceBasis, type AiOrderExplainRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
@@ -16,6 +16,7 @@ import { readOriginalTaskModelProvenance } from '../task-request/prisma-original
 import { buildOrderExplanation, projectOrderExplanationMaterial } from '../tools/order-explanation-renderer';
 import { buildOpeningDiagnosisText } from './opening-diagnosis-renderer';
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
+import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact' | 'aiTaskOriginalRequest'>;
@@ -98,10 +99,16 @@ function orderFactsFingerprint(material: unknown) {
 }
 
 function openingFactsFingerprint(material: unknown) {
-  const current = z.object({ scope: z.unknown(), audience: z.string(), configVersion: z.string(),
+  const current = z.object({ scope: z.object({ kind: z.literal('workspace'), tenantId: z.string(), workspaceId: z.string() }).strict(),
+    audience: z.string(), configVersion: z.string(),
     observedAt: z.string(), sections: z.array(z.object({ key: z.string().min(1).max(191) }).passthrough()).max(9), configuration: z.unknown() })
     .passthrough().parse(structuredClone(material));
   const { observedAt: _observation, ...facts } = current;
+  if (facts.calendarSource !== undefined) {
+    const calendar = readAiOpeningCalendarSource(facts.calendarSource, facts.scope, current.observedAt);
+    if (!calendar || !facts.sections.some(section => section.key === 'business_calendar')) throw unavailable();
+    facts.calendarSource = aiOpeningCalendarSourceBasis(calendar);
+  }
   // Original readiness keys are unique; their display order is not a business
   // revision. Canonicalize this comparison copy only, keeping every section's
   // content and the immutable materialHash/returned current order unchanged.
