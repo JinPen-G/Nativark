@@ -18,7 +18,7 @@
 
 原`node --no-compilation-cache --require <本树preload> --test --test-concurrency=1 --test-reporter=spec tests/category-preparation-batches.test.cjs tests/category-preparation-batch-service.test.cjs tests/category-adoption-records.test.cjs tests/category-preparation-permission.test.cjs`首次3文件通过、批次服务1文件失败，见[原运行](../../output/category-governance/preparation-bounded-read-original-tests-20261113.json)：旧整份覆盖分批集合时先触发新规模查询，旧fixture未登记而遮挡应有的客户端错误。将原拒绝前置后只复验该原文件，[最终批次测试](../../output/category-governance/preparation-bounded-read-batch-original-final-20261113.json)退出0、audit0，全部原断言保留。限定调用的[首次失败](../../output/category-governance/preparation-bounded-read-behavior-20261113.json)为独立批次回读查询未登记；仅在短调用补其明确SQL替身后复验通过，未改生产收据或测试文件、没有新建/扩写测试脚本。
 
-SQL、Auth行和串行回滚仍为明确fixture；本片未证明MySQL过滤/锁/容量/多实例、完整报价并发、HTTP或宿主，也未取得独立Review。静态核查确认原采用候选合计含配置JSON与实体/兼容结果，原全部写入口/报价和历史经营门槛继续核实。完整CAT-GOV仍0/14、百分比待核实；两个动态编码不同组合的同一冻结构建真实经营及CAT-A01～A22继续原范围。
+实现与四份记录/接续已提交为`7cdd6be5c5dd243e9f5c0e3e9b213c016aa7a4b9`，普通推送`codex/rental-core`并[读取GitHub目标分支](../../output/category-governance/preparation-bounded-read-github-20261113.json)确认同SHA、上游0/0和工作树干净；未合main或发送对外消息。SQL、Auth行和串行回滚仍为明确fixture；本片未证明MySQL过滤/锁/容量/多实例、完整报价并发、HTTP或宿主，也未取得独立Review。静态核查确认原采用候选合计含配置JSON与实体/兼容结果，原全部写入口/报价和历史经营门槛继续核实。完整CAT-GOV仍0/14、百分比待核实；两个动态编码不同组合的同一冻结构建真实经营及CAT-A01～A22继续原范围。
 
 全部验证已退出、两emit在本树自持产物，唯一暂存只剩零字节audit。原生PowerShell精确删除被CreateProcess自动审批以`blocked by policy`拒绝，整条未执行且无详细理由；安全同卷归入[唯一责任清单](../../../../output/.cleanup-pending/rental-core/preparation-bounded-read-validation/manifest.json)，[退出证据](../../output/category-governance/preparation-bounded-read-cleanup-20261113.json)确认原暂存不存在、已归集未删除。旧准备结构空audit本轮重试也被拒绝，原清单已更新；旧批保留创建者清理责任。负责人即时消息规则已取代历史主动回报：本阶段版本、验证和阻塞留本对话及原记录/接续，由PM主动读取，本次没有对外发送消息。
 
