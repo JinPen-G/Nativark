@@ -6,6 +6,26 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain18-policy-settings-original-consumer-20261114"></a>
+## AIN-18 后台原政策设置、两次明确确认与原键恢复（2026-11-14）
+
+[政策核心](#ain18-original-policy-boundary-manager-20261114)已在 `63f65c2dd2f75c8c0c6c65105574922c89c72af2` 提交／推送并回读GitHub一致。dev2沿同一原管理合同完成五源消费者：原 TaskCenter 的独立政策设置入口只在当前 `system:params:manage` 下显示，经营待办读权不授政策管理。新[API](../../apps/admin/src/api/aiAutomationPolicies.ts)／[session](../../apps/admin/src/features/ai-native/automation-policy-session.ts)／[设置控件](../../apps/admin/src/features/ai-native/AutomationPolicySettings.tsx)只选择服务端当前记录和场景，不手填UUID；现值／拟改值、主体范围、模式、限定事件、期限、每日次数／冷却和动作／数量／因果深度均展示。新policy先disabled、新subject先停用；已有政策按原修订预览、明确准备后再明确保存，模型运行仍独立确认。
+
+每个发送前在浏览器同名跨标签锁内保存并读回最小scope／operationKey／changeHash／preparationId，不持久化政策正文或token。坏回复、401、超时和丢应答保留原定位，只读取原 preparation／operation，不自动换键或重派。未发送保存的已过期／stale preparation 才可经当前原操作复查后明确结束编辑；commit_sent永不走该路径。无跨标签锁仍可读取原收据，禁止新写。隐藏、关闭、卸载、身份／空间／权限变化清除显示和旧候选，不清未决原操作，不用旧前端状态授权。
+
+Root逐blob核同作者冻结交付：API `8d8345c2eb42bf8e7be7b54a51cc8e80709ea9ae`，session `c96066c8b1c3ec80e13d3046aada2ef9c88deeae`，component `4dc500a2ea33954e412020c8c4b1788f40a3d85b`，section `d6b5518056f8997b155f9f3e36fc78996655cd9b`，locale `ad4c653e939aca8a0135fe80f94402fd754233b1`；五源核同集合摘要 `94bd549fee39365c4b5dfe0de249ee17449aeb89f1d3659d21a45d5737e34bd3`。
+
+| 必要模拟／类型 | 命令与实际结果 |
+| --- | --- |
+| Root实际API/session→原Auth／Guard／Controller／manager | `node --no-compilation-cache -`，stdin `736f9cbeb228d0add6bfde6b42c5fce9afaafad714cdaae304d7a871788f5998`／退出0。正常、准备／保存COMMIT丢ACK、HTTP丢ACK、双标签竞争、等待中身份变化、当前撤权六场景；每正向只1 preparation／1 operation，原新subject停用／policy disabled，Task／模型0，unknown重开不加第二次发送。 |
+| Root实际React控件到同一原管理链 | stdin `1def90988ef2092e08eb0488d803777613ef7c6239edd44c0490cfcba01899ae`／退出0；挂载不读写、原选择／输入／差异、两次ConfirmAction、英文、隐藏清除、只有params权限的政策入口与只有业务读权的待办入口共七场景，policy保存1，Task／模型0。Hooks／UI／DOM／锁／HTTP／存储为明示替身，不称浏览器验收。 |
+| 作者原恢复／存储范围／控件／Axios | 原恢复13项 `31cc8570f8a325012d838e6b6f0ed668b358f6e51ccba421c746bba2593cff44`；存储范围9项 `0135465245dcbcf2e1efc78d59c6f1cfb2d2370d077bdf15490af1c3d8f57c44`；React7项 `98ee5b1b22c54309997c12b9d4ecc850c9adcd94df8fa4751f8efcfbf405d35d`；原Axios6项 `730b0a2507a1f16b0ea4219cd12c22141e990e021fd9bcaecc66861401fe1fc4`，均退出0。401后refresh／replay均0，坏写回复unknown，额外字段在运输前拒绝，无锁原读保留。Root已读取固定结果与源码，不将作者运行表述为Root重跑Axios。 |
+| 最终类型与正式合同 | 作者TypeScript5.9.3，7根／1631源零诊断 `93ef8cb48fbac841da656f2d8b8dfdda5a279d6bcf977c71be4f841c3cd5ff80`；Root当前5根／1512源 `644504054c71692c38f7cc418645ba22bed3aea4073bd2f63dd62f9f5ffe35b2`最终退出0。Controller／Guard／OpenAPI十路正式schema `8c6928b85f197beaa14e13f9add86220283555bd15177e216d04e58608c62c1d`／退出0。 |
+
+失败保留：Root初次内存驱动遗漏ExecutionContextHost导入，stdin `5a9d6581be39166e207160e8bec4e39674901aed0c59d73e7e2919dd367f270b`／退出1；只补驱动导入后同一实际链通过。作者首次存储组错误期望竞争定位可恢复，实际正确拒绝AI_POLICY_LOCATOR_CONFLICT；保留原失败 `882a69e386d2ba7b5d9437592a7f4a72014fb3f5eda1cac0f07343ad2515f142`／退出1，修夹具预期仍核对另一页定位未覆盖。权限／地点集合检查和局部AxiosRequestConfig扩展只修类型，不改公共网络语义或删除断言。
+
+完整后台阶段已核接；AIN-18是否100%仍按原全文和当前标准装配的独立技术核定，不能用政策保存或影子文字当业务办理成功。Root和作者验证均原offline preload、不可达DATABASE_URL、内存audit及本树单一任务根；自有进程退出、audit0，`output/.tmp/ain18-automation-model-closeout-20261114`及作者`output/.tmp/ain18-policy-consumers-20261114`未创建，无新增／扩写测试文件或依赖／client／dist副本。文档检查保留4处既有缺链，未新增本片链接／任务算术错误。中文提交／普通推送后回读任务分支，main仍由PM串行整合；dev2已转AIN-25原指标／取消恢复／队列等核心缺口只读核查，dev1继续AIN-21，不等待main。真实浏览器、数据库、供应商和生产开放由负责人后续操作。
+
 <a id="ain18-original-policy-boundary-manager-20261114"></a>
 ## AIN-18 原政策约束、明确管理事务与冻结输入（2026-11-14）
 
