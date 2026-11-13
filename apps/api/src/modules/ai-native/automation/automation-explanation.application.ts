@@ -20,6 +20,7 @@ import { SubscriptionBudgetEntitlementAdapter } from '../budget/budget-dependenc
 import { gatewayPricingSelectionSchema } from '../budget/gateway-pricing-evidence';
 import { PrismaAutomationAuthority, AutomationError } from './prisma-automation.authority';
 import { OriginalAutomationCreationReader } from './original-automation-creation.reader';
+import { HumanAutomationReviewService } from './human-automation-review.service';
 import { AutomationTaskModelAuthority } from './automation-task-model.authority';
 import { composeAutomationModelExplanation } from './automation-model-explanation.composition';
 import { composeAutomationModelGateway } from './automation-model-gateway.composition';
@@ -86,8 +87,22 @@ export class AutomationExplanationApplication {
         const financial = createOriginalAutomationDispatchReader(this.d.db, authority);
         const reader = composeAutomationModelExplanation({ db: this.d.db, reads, source, original, authority, clock, guard: this.d.guard,
           financialEvidence: financial, gatewayScene: { sceneCode: origin.sceneCode, routeScene: 'chat', maxOutputTokens: 32768 } });
-        const projection = (observation: Awaited<ReturnType<typeof reader.read>>): AiAutomationExplanationObservationDraft => {
-          const base = { original, ...semantics, source: { inputHash: origin.inputHash, event: origin.event, inputMode: origin.mode } };
+        const reviews = new HumanAutomationReviewService(this.d.db, reads, clock);
+        const projection = async (observation: Awaited<ReturnType<typeof reader.read>>): Promise<AiAutomationExplanationObservationDraft> => {
+          live();
+          const first = await reviews.read(selected), latest = await reviews.read(selected);
+          if (requestFingerprint(first) !== requestFingerprint(latest) || latest.inputHash !== origin.inputHash
+            || latest.task.state !== 'observed' || latest.task.taskId !== original.taskId || latest.task.runId !== original.runId
+            || latest.event.eventId !== origin.event.eventId || latest.event.resourceRevision !== origin.event.resource.version
+            || latest.review.status !== 'open' && latest.review.status !== 'closed') {
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          }
+          const currentReview: NonNullable<AiAutomationExplanationObservationDraft['currentReview']> = {
+            suggestion: latest.currentSource.failed === null ? 'unavailable'
+              : latest.nextAction === 'human_review' ? 'current' : 'stale',
+            resourceRevision: latest.currentSource.revision, reviewStatus: latest.review.status, checkedAt: clock().toISOString() };
+          live();
+          const base = { original, ...semantics, source: { inputHash: origin.inputHash, event: origin.event, inputMode: origin.mode }, currentReview };
           if (observation.state === 'completed') return { ...base, state: 'completed', result: {
             resultId: observation.result.resultId, stepId: observation.result.stepId, callId: observation.result.callId,
             text: observation.result.text, semantics: observation.result.semantics } };

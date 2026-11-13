@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16及本次19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain18-current-review-stale-explanation-20261114"></a>
+## AIN-18 当前来源复查与失效解释撤回（2026-11-14）
+
+原公开解释已推 `ac8fdd0866e9d73fd9a5bfa8d435c470cd55b4f9`并回读GitHub一致。dev1全文复核与Root源码对照发现：原待办能标来源已变化／不可读，模型解释却仍只返回原完成正文；独立原结果读取正确，但不能让历史正文成为当前建议。四源最小修复在[公开应用](../../apps/api/src/modules/ai-native/automation/automation-explanation.application.ts)复用已有HumanAutomationReviewService.read，读前后绑定原inputHash／event／Task／Run，返回`currentReview.suggestion=current/stale/unavailable`及当前来源修订、待办状态和核对时间。[公共schema](../../packages/shared/src/ai-automation-explanation-draft.ts)允许旧包缺标签以兼容历史，但不能把缺标签当current；[实际后台](../../apps/admin/src/features/ai-native/AutomationExplanation.tsx)仅current显示正文，stale、unavailable及旧包缺标签都撤下正文并保留原收据说明。原Artifact、原结果text／callId及单账不重写，不重新调用模型，不从待办关闭或无权读取推定业务已解决。
+
+Root原Controller→Application→同库真实源码模拟stdin `724208708422ab14131b524744d049b77197c0c2231e40b20913b31e00bd998f`退出0：原模型1次，原检查异常及修订变化后current→stale，原正文／Artifact保留、读回新增写0；停用／旧政策过期仍受权原读，撤权拒绝。实际API／Controller闭合合同＋有限React宿主 `598dd1b25517cfb28145faca945412cd715d26861533e5a312329a0fb41c2d8e`退出0，current正文可见，stale／unavailable／旧包缺标签不再显示，原键恢复／StrictMode／隐藏／身份隔离仍通过。dev1同库对照另覆盖来源不可读，结果留原对话，不称供应商或浏览器实测。
+
+API完整装配stdin `bd663db628df46bc4b29090c49406e23a883b6e833232641ca2662b6d3b3982b`最终退出0，TypeScript5.9.3，20根／1987源零诊断；后台受影响7根／1509源 `007a71cc86b8c93d2bace19b4238c5f133dffccf73bbabe487601730d93550b7`最终退出0。初次原review.status为宽string，已增加open／closed运行时校验而非断言；中途并行continuePendingBatch未落盘引起装配诊断保留，接点落盘后完整类型零诊断，未弱化正式检查。四源路径→blob集合SHA-256 `0ad3531a93e0de15b65b746af9b849d1a507c07c42078df3a39a546655fb3d63`，只固化本修复，不夹批次助手活动源。原模型解释与业务处理仍分开判断；AIN-17/18整项待全文核定，本修复不新增任务100%。
+
+命令均为`node --no-compilation-cache -`，原offline preload、不可达DATABASE_URL及本树单一任务路径，内存审计；Root进程已退出、audit0，临时目录未创建，无新增／扩写测试脚本、依赖／client／dist。`docs:check`仍四处既有缺链／退出1，无新增任务算术或链接错误；diff检查退出0。真实宿主／外部环境由负责人后续测试，main集成仍归PM。
+
 <a id="ain18-original-explanation-public-consumer-20261114"></a>
 ## AIN-18 原经营事件模型解释、首次准入和后台公开闭环（2026-11-14）
 

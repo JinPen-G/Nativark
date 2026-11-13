@@ -120,10 +120,14 @@ export function AutomationExplanation({ inputRef, eventId, identity, current, cl
         doneLabel={t('原结果已读取')} onConfirm={start} disabled={busy || attempted} />
     </>}
     {result && <>
+      {result.currentReview?.suggestion !== 'current' && <p role="status">{t(result.currentReview?.suggestion === 'unavailable'
+        ? '当前来源不可读取，旧解释已撤回；原收据保留。'
+        : '原建议已失效或尚未复查，旧解释已撤回；请核对原业务记录。')}</p>}
       <p role="status">{result.state === 'completed' ? t('解释已生成，仍需人工核实。')
         : result.state === 'failed' ? t('原解释失败，请沿人工流程处理。')
           : result.state === 'unknown' ? t('原解释待核对，不自动重发。') : t('尚未发起原解释。')}</p>
-      {result.state === 'completed' && <p>{safeDisplayText(result.result.text, 131072)}</p>}
+      {result.state === 'completed' && result.currentReview?.suggestion === 'current'
+        && <p>{safeDisplayText(result.result.text, 131072)}</p>}
     </>}
   </section>;
 }

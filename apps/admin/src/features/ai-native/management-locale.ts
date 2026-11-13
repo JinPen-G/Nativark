@@ -631,6 +631,8 @@ const english: Record<string, string> = {
   "原解释失败，请沿人工流程处理。": "The original explanation failed. Continue through the manual process.",
   "原解释待核对，不自动重发。": "The original explanation needs verification. It is not resubmitted automatically.",
   "尚未发起原解释。": "The original explanation has not started.",
+  "当前来源不可读取，旧解释已撤回；原收据保留。": "The current source is unavailable. The old explanation is withdrawn; its original receipt remains.",
+  "原建议已失效或尚未复查，旧解释已撤回；请核对原业务记录。": "The original suggestion is stale or has not been reviewed. Its text is withdrawn; check the original business record.",
   "将已核对候选填入新条件？已填写的合法输入会保留，关联请求、Core 报价、选单和新批准仍需分别确认。": "Apply the reviewed candidate to the new conditions? Existing valid input will be kept. The linked request, Core quote, selection and new approval each require confirmation.",
 };
 
