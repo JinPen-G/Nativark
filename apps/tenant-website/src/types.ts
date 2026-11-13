@@ -1,5 +1,5 @@
-export type CategoryMode = 'single' | 'double' | 'multiple';
-export type DemoTenantKey = 'single' | 'double' | 'multiple';
+export type CategoryMode = "single" | "double" | "multiple";
+export type DemoTenantKey = "single" | "double" | "multiple";
 
 export interface SubCategory {
   id: string;
@@ -52,7 +52,7 @@ export interface Store {
   businessHours?: string;
   contactPhone?: string;
   /** 该地点支持的能力；用于取货/归还门店筛选。缺省视为可取可还。 */
-  capabilities?: Array<'pickup' | 'return' | 'storage' | 'delivery'>;
+  capabilities?: Array<"pickup" | "return" | "storage" | "delivery">;
 }
 
 export interface Tenant {
@@ -62,7 +62,16 @@ export interface Tenant {
   logo: string;
   logoCompact: string;
   logoDark?: string;
-  campaigns?: Array<{ id: string; title: string; titleEn?: string; description: string; descriptionEn?: string; image: string; categoryId?: string; demo?: boolean }>;
+  campaigns?: Array<{
+    id: string;
+    title: string;
+    titleEn?: string;
+    description: string;
+    descriptionEn?: string;
+    image: string;
+    categoryId?: string;
+    demo?: boolean;
+  }>;
   announcement?: string;
   announcementEn?: string;
   slogan: string;
@@ -115,7 +124,7 @@ export interface Product {
   deposit?: number;
   rating?: number;
   reviewCount?: number;
-  stockStatus: 'available' | 'low' | 'unavailable' | 'unknown';
+  stockStatus: "available" | "low" | "unavailable" | "unknown";
   availableQuantity?: number;
   badges: string[];
   badgesEn?: string[];
@@ -132,10 +141,18 @@ export interface DemoOrder {
   startDate: string;
   endDate: string;
   quantity: number;
-  fulfillment: 'pickup' | 'delivery';
+  fulfillment: "pickup" | "delivery";
   contactName: string;
   contactPhone: string;
   note: string;
+  currency?: string;
+  pickupStoreId?: string;
+  returnStoreId?: string;
+  deliveryAddress?: string;
+  productSnapshot?: Pick<
+    Product,
+    "name" | "nameEn" | "subtitle" | "subtitleEn" | "cover"
+  >;
   rentalAmount: number;
   depositAmount: number;
   createdAt: string;

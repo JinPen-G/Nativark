@@ -1,59 +1,129 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Search, MapPin as EnvironmentOutlined, Store, Calendar, CategoryIcon } from './SiteIcon';
-import { useSite } from '../SiteContext';
-import { useHeroSearch } from '../hooks/useHeroSearch';
-import { useActiveRail } from '../hooks/useActiveRail';
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { useSite } from "../SiteContext";
+import { nowInput, offsetDaysInput, validRentalPeriod } from "../data/datetime";
 
-/** Collects rental intent only. Availability and result rendering belong to the list route. */
+/** 首页查询只收集客户选择，库存与价格通过商品页的正式数据入口确认。 */
 export function RentalFinder() {
   const { tenant, href, language } = useSite();
-  const en = language === 'en';
+  const en = language === "en";
   const navigate = useNavigate();
-  const rental = useHeroSearch();
-  const [selected, setSelected] = useState('');
-  const [city, setCity] = useState('');
-  const category = tenant.categories.find(item => item.id === selected) ?? tenant.categories[0];
-  const categoryRail = useActiveRail<HTMLDivElement>(`${category?.id ?? ''}:${language}`);
-  const stores = (tenant.stores ?? []).filter(store => !store.capabilities || store.capabilities.includes('pickup'));
-  const cities = [...new Set(stores.flatMap(store => store.city ? [store.city] : []))];
-  const visibleStores = stores.filter(store => !city || store.city === city);
-  const activeStore = visibleStores.find(store => store.id === rental.pickupStoreId);
-  // Tenant switches may replace the entire location catalog.
-  useEffect(() => { setCity(''); rental.setPickup(''); }, [tenant.id]);
-
+  const [category, setCategory] = useState(
+    tenant.categories.length === 1 ? tenant.categories[0].id : "all",
+  );
+  const [store, setStore] = useState("");
+  const [start, setStart] = useState(offsetDaysInput(1));
+  const [end, setEnd] = useState(offsetDaysInput(3));
+  const [error, setError] = useState("");
+  const stores =
+    tenant.stores?.filter(
+      (item) => !item.capabilities || item.capabilities.includes("pickup"),
+    ) ?? [];
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!category || rental.invalidRange || (stores.length > 0 && !activeStore)) return;
-    const query = new URLSearchParams(rental.toQuery());
-    if (city) query.set('city', city);
-    navigate(href(`/category/${category.id}?${query.toString()}`));
+    if (!validRentalPeriod(start, end)) {
+      setError(
+        en
+          ? "Choose a future pickup and a later return time."
+          : "请选择未来的取货时间，归还时间需晚于取货时间。",
+      );
+      return;
+    }
+    const query = new URLSearchParams({ start, end });
+    const selectedStore = stores.find((item) => item.id === store);
+    if (selectedStore) {
+      query.set("pickup", selectedStore.id);
+      if (
+        !selectedStore.capabilities ||
+        selectedStore.capabilities.includes("return")
+      )
+        query.set("return", selectedStore.id);
+      if (selectedStore.city) query.set("city", selectedStore.city);
+    }
+    navigate(
+      href(
+        (category === "all"
+          ? "/products"
+          : `/category/${encodeURIComponent(category)}`) +
+          "?" +
+          query,
+      ),
+    );
   }
-
-  return <form className="rental-finder" id="rental-finder" onSubmit={submit} aria-label={en ? 'Find your rental' : '查找租赁商品'}>
-    <div className="finder-top">
-      <div ref={categoryRail} className="finder-categories" aria-label={en ? 'Rental category' : '租赁品类'}>
-        {tenant.categories.map(item => <button key={item.id} type="button" aria-pressed={category?.id === item.id} onClick={() => setSelected(item.id)}><CategoryIcon name={item.icon} />{item.name}</button>)}
+  return (
+    <form
+      className="rental-finder"
+      aria-label={
+        en ? "Find equipment for your rental dates" : "按租期查询商品"
+      }
+      onSubmit={submit}
+    >
+      <div className="finder-fields">
+        <label className="finder-field">
+          <span>{en ? "Equipment" : "商品品类"}</span>
+          <select
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          >
+            <option value="all">{en ? "All equipment" : "全部商品"}</option>
+            {tenant.categories.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {stores.length > 0 && (
+          <label className="finder-field">
+            <span>{en ? "Pickup store" : "取货门店"}</span>
+            <select
+              value={store}
+              onChange={(event) => setStore(event.target.value)}
+            >
+              <option value="">{en ? "Choose later" : "稍后选择"}</option>
+              {stores.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="finder-field">
+          <span>{en ? "Pickup time" : "取货时间"}</span>
+          <input
+            type="datetime-local"
+            value={start}
+            min={nowInput()}
+            required
+            onChange={(event) => {
+              setStart(event.target.value);
+              setError("");
+            }}
+          />
+        </label>
+        <label className="finder-field">
+          <span>{en ? "Return time" : "归还时间"}</span>
+          <input
+            type="datetime-local"
+            value={end}
+            min={start}
+            required
+            onChange={(event) => {
+              setEnd(event.target.value);
+              setError("");
+            }}
+          />
+        </label>
+        <button type="submit" className="button button-dark finder-submit">
+          {en ? "Find rentals" : "查找商品"}
+        </button>
       </div>
-      <span className="finder-price-note">{en ? 'Dates, place, and a plan of your own.' : '先选好时间与门店，看看有哪些选择。'}</span>
-    </div>
-    <div className="finder-fields">
-      <label className="finder-city"><span><EnvironmentOutlined aria-hidden="true" /> {en ? 'City' : '取还城市'}</span>
-        <select aria-label={en ? 'City' : '取还城市'} value={city} required={cities.length > 0} disabled={cities.length === 0} onChange={event => { setCity(event.target.value); rental.setPickup(''); }}>
-          <option value="">{cities.length ? en ? 'Choose a city' : '选择城市' : en ? 'Select a store below' : '请直接选择门店'}</option>
-          {cities.map(value => <option key={value} value={value}>{en ? stores.find(store => store.city === value)?.cityEn || value : value}</option>)}
-        </select>
-      </label>
-      <label className="finder-store"><span><Store />{en ? 'Pickup & return store' : '取还门店'}</span>
-        <select aria-label={en ? 'Pickup & return store' : '取还门店'} value={activeStore?.id ?? ''} required={stores.length > 0} onChange={event => rental.setPickup(event.target.value)} disabled={!stores.length}>
-          <option value="">{stores.length ? en ? 'Choose a store' : '选择门店' : en ? 'Confirm with the store' : '地点预约时确认'}</option>
-          {visibleStores.map(store => <option key={store.id} value={store.id}>{store.name}</option>)}
-        </select>
-      </label>
-      <label><span><Calendar />{en ? 'Pickup date & time' : '取货时间'}</span><input aria-label={en ? 'Pickup date & time' : '取货时间'} type="datetime-local" value={rental.startAt} min={rental.minStart} required onChange={event => rental.setStartAt(event.target.value)} /></label>
-      <label><span><Calendar />{en ? 'Return date & time' : '归还时间'}</span><input aria-label={en ? 'Return date & time' : '归还时间'} type="datetime-local" value={rental.endAt} min={rental.startAt} required onChange={event => rental.setEndAt(event.target.value)} /></label>
-      <button className="finder-submit" type="submit" disabled={!category}><Search />{en ? 'Find my rental' : '查询可租商品'}</button>
-    </div>
-    {rental.invalidRange && <p className="finder-error" role="alert">{en ? 'Return must be later than pickup. Please adjust the dates.' : '归还时间需晚于取货时间，请调整租期。'}</p>}
-  </form>;
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+    </form>
+  );
 }
