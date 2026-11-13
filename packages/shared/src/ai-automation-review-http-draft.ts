@@ -116,7 +116,8 @@ export type AiAutomationReviewFeedbackCodeDraft = 'helpful' | 'not_helpful' | 'i
 export type AiAutomationReviewCloseDraft = Mutation & { reason: AiAutomationReviewCloseReasonDraft };
 export type AiAutomationReviewFeedbackDraft = Mutation & { code: AiAutomationReviewFeedbackCodeDraft };
 type Semantics = { executionPermission: false; businessActionRequested: false };
-type Source = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string; sourceHash?: string };
+type Source = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string; sourceHash?: string }
+  | { state: 'unavailable'; revision: null; failed: null; orderId: string | null };
 type Task = { state: 'observed'; taskId: string; runId: string; status: string; revision: number; archived: boolean }
   | { state: 'not_observed'; taskId: null; runId: null };
 type Event = { eventId: string; type: AiBusinessEventDraft['type'];
@@ -169,7 +170,10 @@ const event = { eventId: uuid, type: eventType, status: choice('pending', 'claim
 const review = object({ revision, status: choice('open', 'closed'), closeReason: nullable(closeReason), feedbackCode: nullable(feedbackCode) });
 const task = { oneOf: [object({ state: choice('observed'), taskId: uuid, runId: uuid, status: choice(...AI_TASK_STATUSES_DRAFT), revision, archived: bool }),
   object({ state: choice('not_observed'), taskId: { type: 'null' }, runId: { type: 'null' } })] };
-const source = object({ revision, failed: bool, orderId: nullable(id()), paymentIntentId: id(), sourceHash: hash }, ['revision', 'failed', 'orderId']);
+const source: AiLeafSchemaDraft = { oneOf: [
+  object({ revision, failed: bool, orderId: nullable(id()), paymentIntentId: id(), sourceHash: hash }, ['revision', 'failed', 'orderId']),
+  object({ state: choice('unavailable'), revision: { type: 'null' }, failed: { type: 'null' }, orderId: nullable(id()) })
+] };
 const resource = { inputRef: uuid, operationKey: key };
 const mutation = { ...resource, expectedRevision: integer(1, 4294967293), expectedEventFence: integer(0, 4294967293), expectedTaskId: nullable(uuid) };
 const originalResource = (kind: string, extra: Record<string, AiLeafSchemaDraft> = {}, optional: string[] = []) => {

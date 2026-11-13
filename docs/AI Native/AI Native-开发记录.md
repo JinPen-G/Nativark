@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14及本次16已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain17-standard-resource-capture-history-20261114"></a>
+## AIN-17 标准资源来源、原事务捕获与停用历史恢复（2026-11-14）
+
+在已推源码接回检查点 `1c44acdac974a0acbbd93555b90a1305c07c2c0f` 后，Root 将原资源端口接入[标准 provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)，Outbox 和人工请求使用同一来源。原 Core 服务／配置仓储自己也消费 Outbox，故通过 ModuleRef 在读取时取得已装配实例，构造时不解析 Core、不启动作业／模型、不产生 DI 环。[当前服务端捕获配置](../../apps/api/src/modules/ai-native/business-events/business-failure-configuration.ts)复用 runtime `businessFailure`，每次复验 enabled；临近政策明确为 `fulfillmentNear: {enabled:true,id,revision,scope,validFrom,expiresAt,lookAheadMs}`，不设默认阈值，不把开启捕获当自动执行授权。停用后拒绝新捕获，原资源 readBinding 继续按原权限／引用读取。
+
+[原 Outbox](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts)增加内部 openingConfiguration，按真实九分区 missing 有界捕获，unavailable 不变成缺项。原 profile/settings/operator/location/item/pricing、日历保存／发布、规则保存／审计及恢复 snapshot 均在原写入后的同一 tx 参加，不另开事务，不在模型等待期间持业务锁。原履约 scan/recordIssue 的结构化不足参加者也通过标准源捕获；自由 issue 文本、缺库存行和没有解决记录均不能作为不足／解决证明。配置保存与事件尝试的一致性失败不能吞掉或另换键；capture disabled 保留原业务保存。
+
+独立只读复核指出两处实现缺口，Root 同阶段处理：其一，原价格初始化先 upsertPlan 再创建初始 v1，过早捕获 price_version missing；现复合价格事务延后捕获到原版本／全部计划／处理记录完成，仍在原 tx，单独保存路径保持。其二，原待办 read/forEvent/session 先走当前失败源，停用捕获或撤回临近政策会挡住合法历史；现独立原事件 Guard／冻结 input/Task 核对仍可读取，当前无法复查明确返回 `state:unavailable, revision:null, failed:null`，不补版本、不解释为已解决。闭合 shared schema、后台 session／页面一并消费；原 grant／close／feedback 新动作仍需当前来源，source unavailable 不授新写入。队列不扩范围、不启动模型／业务；原收据与配置当前检查分别判断。
+
+另经 Root 实际反例确认，Core 的有限地点计数0只能表示当前视图，不能捕获整空间缺项。[原资源来源](../../apps/api/src/modules/ai-native/business-events/core-business-failure-resource.source.ts)的开业捕获／当前复查要求当前 dataScope=all 且无地点限制；否则保持不捕获，未扩大 Core 读取权。scope-only 初始化不造自动／用户主体，不走捕获来源。当前原历史仍受独立访问权限核验。
+
+| 必要模拟／类型 | 固定证据与实际结果 |
+| --- | --- |
+| 标准 resources provider／当前 runtime 与原引用恢复 | stdin `b952177d3bd304577286d9ec583c7dd53b9ba92fd5815779a159e46597352c95`／退出0；构造不解析Core，实际读取时取原实例，两类各1事件；停用后新增写0，原binding仍可读，无新增tx。 |
+| 实际原 Core settings 事务→九项原读→标准来源／Outbox | `25f82e4a405bc11e6928e4e2112223eceaa901a0e265293203a1ac926bed90f0`／退出0；原设置修订与两缺项同事务；外层回滚两者不保留，模拟COMMIT丢应答原事件仍可恢复、同源重放0新事件，停用仍可正常保存。 |
+| 当前行修订、原 snapshot tx、来源解决及scope-only初始化 | `1df2ed0f8c7b7898185c131773a77b82a7751cc775d41010ae1a5a93a76002b3`／退出0；传原tx不嵌套，新行修订对应新事件；已解决不继续报告missing，原binding不丢；scope-only零来源读取／零捕获。 |
+| 实际 Core scan／recordIssue→标准参加者 | `65f0d4f9cf753c0456bc5f271f04b7e436e7147558c2bde0eee8e6228b88ea39`／退出0；原quantity不足1事件，重复原事件／原order写不重复，缺stock仅configuration_unavailable不捕获，恢复保留exception_resolved；回滚无事件。 |
+| 原捕获事件→实际人类Auth／Guard／Controller | `389b45951173bc6a35826a04fec8a3734bf1102d8ee4a8f825ec32e58a6f3522`／退出0；两资源候选可达，重复0新写，已解决开业候选失效、撤权拒绝，新Task／input0。 |
+| 有限视图误记缺项及最小复验 | 原反例 `9c1aa340a3c70ab077f829c53e028c7e1cc56a6d3a2790d89c003b9fb09e6394`／退出0证明缺口；修后 `5a348c72f274e1d618a52ecc593651baac22617918525cc9435f436d33fbb9f2`／退出0，有限视图readOpening无当前源，原Outbox返回source_unavailable，无写入。 |
+| 停用捕获／撤临近政策后的原待办、队列和后台session | `c90932ff01028544b9554b55dd9f789376145c108ab1f9036d3de24e506e9c13`／退出0；两资源原历史与queue可读，session current candidate请求0、原grant不可新办，来源null而非解决，撤权拒绝，新增写0。最终事件行回包围栏沿相同组定向复验。 |
+| 实际原首版价格事务的捕获时点 | `d125f20097bd00f7dd94ec8259abe50ffb164ffdf3351f58d14310f64f66886c`／退出0；原v1已存在时才捕获，price_version missing事件0，同源重放0新事件。 |
+| 公开来源／历史合同及后台依赖类型 | `6bda76b6dc293a7b9747baec54bf7d3e33b76af28f1ea3d1d021798f887e46d9`／退出0；最终固定阶段 `f2302e9890861d3c6156d022c7affbb9a9e1abf87d800230fedc4e9e0674f2ec`／退出0，12产品源冻结快照与落盘一致，TypeScript5.9.3，API6根/1977源、后台3根/1489源零诊断，未纳入助手活动文件。 |
+
+所有命令为 `node --no-compilation-cache -`，本树原offline preload、不可达DATABASE_URL、内存audit和受管只读依赖；SQL、事务、Core原资料和身份存储为明确合成替身，模型／真实数据库／外部服务0。模拟说明同原事务端口和原算法，不称MySQL原子性或生产放行。独立助手仅源码复核，没有替作者声明运行结果。
+
+首轮驱动失败保留：价格版本effectiveFrom每读漂移、事件字段别名、公共fixture时钟早于新捕获，以及跨fixture原DB/工作空间/订单外键未补齐，均修原声明夹具；有限视图反例则为实际生产缺陷并已修。历史前端驱动误加载浏览器import.meta、遗漏changed回调、误用不存在的snapshot方法，只修内存宿主为实际API validator／session接口；首版价格驱动错误使用day单位，改用原品类defaultPricingUnit。未放宽产品校验或修改测试文件。验证子进程退出且任务临时目录未创建，无新增脚本、依赖／client／dist副本。
+
+AIN-17/18仍保持原进度：本阶段补资源生产及当前／历史消费，完整有界触发／经营模型解释和正式任务全文核定继续；dev1私有AUTOMATION解释宿主不夹入本片，不能以该主体当前被Gateway拒绝或本阶段捕获绿色提前记100%。员工完整阶段已推 `5da7c430f95e080377eaa8e2cf59a3b3f147352d` 并回读一致；AIN-19原文／置信消费者另行补齐。main由PM按固定成果串行集成，AI不争索引。
+
 <a id="ain20-original-final-form-consumer-20261114"></a>
 ## AIN-20 原人工值、客户签名与最终履约提交接回（2026-11-14）
 

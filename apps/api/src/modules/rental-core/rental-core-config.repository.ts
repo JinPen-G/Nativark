@@ -1,5 +1,5 @@
 import { readRentalCategoryCode, rentalCategoryStorageCode, rentalDefaultWorkspaceName } from "./category-identity";
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { z } from 'zod';
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
@@ -31,6 +31,7 @@ import { readRentalFulfillmentAdmission, type RentalFulfillmentRequirement } fro
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { requestFingerprint } from "./rental-idempotency.repository";
 import { readRentalConfigurationRevision, RENTAL_CONFIGURATION_REVISION_MAX, writeRentalCoreConfigurationSnapshot } from "./rental-state.repository";
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 const PROFILE_TERMINOLOGY_MAX_LENGTH = 100;
 
 /**
@@ -237,7 +238,15 @@ function workspaceProfileReadSql() {
 /** RC-01 阶段 2：Rental Core 配置的库侧实现。库是事实源，服务层内存副本是写穿缓存。 */
 @Injectable()
 export class RentalCoreConfigRepository implements RentalConfigStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant) {}
+
+  private async captureOpening(tx: RentalConfigTx, tenantId: string, workspaceId: string,
+    kind: 'tenant_profile' | 'core_snapshot' | 'business_settings') {
+    if (!this.failureEvents?.openingConfiguration) return;
+    await this.failureEvents.openingConfiguration(tx, { tenantId, workspaceId },
+      { kind, id: kind === 'tenant_profile' ? tenantId : workspaceId });
+  }
 
   /** One committed definition/configuration combination under adoption's space
    * mutex. Empty collections are facts; this reader never initializes samples. */
@@ -843,6 +852,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     if (isDefaultWorkspaceWrite) {
       await this.persistCompatibilityProfile(profile, data, tx, true);
       if (!expectedBinding) await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx, initialization);
+      if (this.failureEvents?.openingConfiguration) {
+        await this.captureOpening(tx, profile.tenantId, await resolveScopeWorkspaceId(tx, profile.tenantId), 'tenant_profile');
+      }
       return;
     }
     const workspaceId = requestWorkspaceId!;
@@ -868,6 +880,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     await writeRentalCoreConfigurationSnapshot(tx, profile.tenantId, workspaceId,
       { profile: storedProfile, configPersisted: true, profilePersisted: true }, Prisma.sql`JSON_SET(state, '$.profile', ${nextProfile},
         '$.profilePersisted', CAST('true' AS JSON), '$.configPersisted', CAST('true' AS JSON))`);
+    await this.captureOpening(tx, profile.tenantId, workspaceId, 'core_snapshot');
   }
 
   /**
@@ -991,6 +1004,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           data: { ...data, settingsRevision: { increment: 1 } }
         });
         if (changed.count !== 1) throw new ConflictException('经营设置版本已变化，请重新准备');
+        await this.captureOpening(client, settings.tenantId, workspaceId, 'business_settings');
         return expectedSettingsRevision + 1;
       }
       const saved = await client.rentalTenantBusinessSettings.upsert({
@@ -999,6 +1013,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: { ...data, settingsRevision: { increment: 1 } },
         select: { settingsRevision: true }
       });
+      await this.captureOpening(client, settings.tenantId, workspaceId, 'business_settings');
       return saved.settingsRevision;
     };
     // Scope lookup can happen before waiting for the space lock. READ COMMITTED
@@ -1034,6 +1049,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         create: { workspaceId, id: operator.id, ...saved, createdAt: new Date(operator.createdAt) },
         update: saved
       });
+      await this.captureOpening(client, operator.tenantId, workspaceId, 'business_settings');
       return status;
     };
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -1096,6 +1112,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         create: { workspaceId, id: location.id, ...saved },
         update: saved
       });
+      await this.captureOpening(client, location.tenantId, workspaceId, 'business_settings');
       return status;
     };
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -1166,6 +1183,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           }
         });
       }
+      await this.captureOpening(client, group.tenantId, workspaceId, 'business_settings');
     };
     if (tx) {
       await write(tx);
@@ -1232,6 +1250,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           data: group.memberItemGroupIds.map((itemGroupId, sortOrder) => ({ pricingGroupId: group.id, itemGroupId, sortOrder }))
         });
       }
+      await this.captureOpening(client, group.tenantId, workspaceId, 'business_settings');
     };
     if (tx) return void await write(tx);
     await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

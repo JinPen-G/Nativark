@@ -26,12 +26,17 @@ import { SecretBox } from '../../common/secret-box';
 import { PrismaService } from '../database/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { ApiAuthGuard } from '../../common/api-auth.guard';
+import { getRequestIdentity } from '../../common/request-identity';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { RentalCoreService } from '../rental-core/rental-core.service';
 import { WorkspaceCapabilityService } from '../rental-core/workspace-capability.service';
 import { RentalCoreController } from '../rental-core/rental-core.controller';
 import { RentalOrderConfirmationService } from '../rental-core/rental-order-confirmation.service';
 import { RentalBusinessFactRepository } from '../rental-core/rental-business-fact.repository';
+import { RentalCoreFactRepository } from '../rental-core/rental-core-fact.repository';
+import { RentalAllocationService } from '../rental-core/rental-allocation.service';
+import { RentalCoreConfigRepository } from '../rental-core/rental-core-config.repository';
+import { RentalBusinessConfigRepository } from '../rental-core/rental-business-config.repository';
 import { RentalIdempotencyRepository, requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { CategoryGovernanceController } from '../rental-core/category-governance.controller';
 import { AI_CATEGORY_DRAFT_REQUESTS, composeCategoryDraftRequests } from './category-assist/category-draft.application';
@@ -102,7 +107,10 @@ import { HumanAutomationRequestFactory } from './automation/human-automation-req
 import { RuntimeAutomationReviewGrantPolicySource } from './automation/runtime-automation-review-grant.source';
 import { TaskOpeningProposalApplication } from './task-opening-proposal.application';
 import { HumanAutomationPolicyRequestFactory } from './automation/human-automation-policy-request.composition';
-import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './business-events/prisma-business-failure-outbox';
+import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox,
+  type BusinessFailureResourcePorts } from './business-events/prisma-business-failure-outbox';
+import { CoreBusinessFailureResourceSource } from './business-events/core-business-failure-resource.source';
+import { readFailureConfiguration, RuntimeBusinessFailureConfigurationSource } from './business-events/business-failure-configuration';
 import { AI_APPROVED_SETTINGS_TOOL_CODE, AI_CAPABILITY_PROBE_KINDS_DRAFT } from '@rental-os/shared';
 import { AiSettingsTaskHttpModule } from './scenes/settings-task-http.module';
 import { AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS,
@@ -117,25 +125,69 @@ import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
  * writes and no automation input/task producer. Reads keep their current human
  * authority and original persisted grants; no worker or model is started. */
 export const AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION = Symbol('AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION');
+export const AI_NATIVE_BUSINESS_FAILURE_RESOURCES = Symbol('AI_NATIVE_BUSINESS_FAILURE_RESOURCES');
 export const AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION = Symbol('AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION');
-const failureConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: z.literal(false) }).strict(),
-  z.object({ enabled: z.literal(true), automation: z.object({ policyId: z.string().min(1).max(36)
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().optional() }).strict()]);
-function readFailureConfiguration(value: unknown) {
-  const parsed = failureConfiguration.safeParse(structuredClone(value ?? { enabled: false }));
-  if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  return parsed.data;
-}
 export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
-  provide: BUSINESS_FAILURE_OUTBOX, inject: [{ token: AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION, optional: true }],
-  useFactory: (value?: unknown) => readFailureConfiguration(value).enabled ? new PrismaBusinessFailureOutbox() : undefined
+  provide: AI_NATIVE_BUSINESS_FAILURE_RESOURCES, inject: [PrismaService, ConfigService, ModuleRef],
+  useFactory: (db: PrismaService, configurationSource: ConfigService, moduleRef: Pick<ModuleRef, 'get'>): BusinessFailureResourcePorts => {
+    const current = new RuntimeBusinessFailureConfigurationSource(configurationSource);
+    // Core repositories and services themselves consume the Outbox. Resolve
+    // those original instances only during a read, after Nest finishes wiring.
+    const source = new CoreBusinessFailureResourceSource({ db, nearPolicy: current,
+      allocation: { readRecordedFulfillmentIssue: (...args) => moduleRef.get<RentalAllocationService>(RentalAllocationService, { strict: false }).readRecordedFulfillmentIssue(...args) },
+      facts: { findOrder: (...args) => moduleRef.get<RentalCoreFactRepository>(RentalCoreFactRepository, { strict: false }).findOrder(...args) },
+      business: { readTenantReadinessSource: (...args) => moduleRef.get<RentalBusinessService>(RentalBusinessService, { strict: false }).readTenantReadinessSource(...args) },
+      coreConfiguration: { readReadinessCoreFacts: (...args) => moduleRef.get<RentalCoreConfigRepository>(RentalCoreConfigRepository, { strict: false }).readReadinessCoreFacts(...args) },
+      businessConfiguration: { readReadinessBusinessFacts: (...args) => moduleRef.get<RentalBusinessConfigRepository>(RentalBusinessConfigRepository, { strict: false }).readReadinessBusinessFacts(...args) },
+      memberships: { countPlans: (...args) => moduleRef.get<MembershipService>(MembershipService, { strict: false }).countPlans(...args) }
+    });
+    const observe = async <T>(read: () => Promise<T>) => {
+      if (!current.current().enabled) return undefined;
+      const result = await read();
+      return current.current().enabled ? result : undefined;
+    };
+    return {
+      readFulfillment: (...args) => observe(() => source.readFulfillment(...args)),
+      readOpening: (...args) => observe(() => source.readOpening(...args)),
+      // Original immutable references remain readable after capture stops.
+      readBinding: (...args) => source.readBinding(...args),
+      assertStorage: (...args) => source.assertStorage(...args),
+      append: (...args) => source.append(...args)
+    };
+  }
+}, {
+  provide: BUSINESS_FAILURE_OUTBOX, inject: [AI_NATIVE_BUSINESS_FAILURE_RESOURCES, ConfigService,
+    { token: AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION, optional: true }],
+  useFactory: (resources: BusinessFailureResourcePorts, configurationSource: ConfigService, value?: unknown) => {
+    if (!readFailureConfiguration(value).enabled) return undefined;
+    const current = new RuntimeBusinessFailureConfigurationSource(configurationSource), original = new PrismaBusinessFailureOutbox(undefined, resources);
+    const eligibleResourceObservation = (scope: { tenantId: string; workspaceId: string }) => {
+      const identity = getRequestIdentity();
+      // Tenant initialization can have only a target scope. It is not an
+      // authorized event reader; skip capture without inventing a principal.
+      return current.current().enabled && identity?.tenantId === scope.tenantId && identity.workspaceId === scope.workspaceId
+        && typeof identity.userId === 'string' && Boolean(identity.userId) && identity.isSaasAdmin !== true;
+    };
+    return {
+      notification: async (...args: Parameters<PrismaBusinessFailureOutbox['notification']>) => { if (current.current().enabled) await original.notification(...args); },
+      refund: async (...args: Parameters<PrismaBusinessFailureOutbox['refund']>) => { if (current.current().enabled) await original.refund(...args); },
+      inspection: async (...args: Parameters<PrismaBusinessFailureOutbox['inspection']>) => { if (current.current().enabled) await original.inspection(...args); },
+      fulfillment: (...args: Parameters<PrismaBusinessFailureOutbox['fulfillment']>) => eligibleResourceObservation(args[1]) ? original.fulfillment(...args)
+        : Promise.resolve({ state: 'not_captured' as const, reason: 'source_unavailable' as const }),
+      opening: (...args: Parameters<PrismaBusinessFailureOutbox['opening']>) => eligibleResourceObservation(args[1]) ? original.opening(...args)
+        : Promise.resolve({ state: 'not_captured' as const, reason: 'source_unavailable' as const }),
+      openingConfiguration: (...args: Parameters<PrismaBusinessFailureOutbox['openingConfiguration']>) => eligibleResourceObservation(args[1]) ? original.openingConfiguration(...args)
+        : Promise.resolve([{ state: 'not_captured' as const, reason: 'source_unavailable' as const }])
+    };
+  }
 }, {
   provide: HumanAutomationRequestFactory, inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, ConfigService,
+    AI_NATIVE_BUSINESS_FAILURE_RESOURCES,
     { token: AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService,
-    configurationSource: ConfigService, value?: unknown) => {
+    configurationSource: ConfigService, resources: BusinessFailureResourcePorts, value?: unknown) => {
     const configuration = readFailureConfiguration(value);
-    return new HumanAutomationRequestFactory({ db, auth, guard, core, reviewGrantPolicy: new RuntimeAutomationReviewGrantPolicySource(configurationSource),
+    return new HumanAutomationRequestFactory({ db, auth, guard, core, resources, reviewGrantPolicy: new RuntimeAutomationReviewGrantPolicySource(configurationSource),
       ...(configuration.enabled && configuration.automation ? { automation: { policyId: configuration.automation.policyId, subscriptions } } : {}) });
   }
 }, {

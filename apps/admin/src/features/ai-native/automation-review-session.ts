@@ -141,7 +141,7 @@ export function automationReviewStore(name: string, storage?: Pick<Storage, 'get
  * crosses this port. Opening an entry does not attest model/business execution. */
 export type AutomationReviewOriginalTarget = {
   scope: AutomationReviewScope; eventId: string; eventType: AiAutomationReviewDraft['event']['type'];
-  resourceRevision: number; currentRevision: number; sourceHash?: string;
+  resourceRevision: number; currentRevision: number | null; sourceHash?: string;
   resource: AiAutomationReviewsForEventDraft['originalResource']; inputRef: string | null;
 };
 export type AutomationReviewOriginalEntry = (target: AutomationReviewOriginalTarget, signal: AbortSignal) =>
@@ -305,7 +305,7 @@ export function createAutomationReviewSession(input: {
   };
   const usableGrant = (action: GrantAction) => Boolean(active && input.current() && !damaged && !grantDamaged && !batchDamaged
     && batchRecord?.status !== 'dispatched'
-    && record?.status !== 'pending' && !grantRecord && view.review && verifiedGrant
+    && record?.status !== 'pending' && !grantRecord && view.review && view.review.currentSource.failed !== null && verifiedGrant
     && verifiedGrant.locator.action === action && verifiedGrant.locator.inputRef === view.review.inputRef
     && verifiedGrant.locator.expectedRevision === view.review.review.revision
     && verifiedGrant.review === reviewStamp(view.review) && Date.parse(verifiedGrant.expiresAt) > clock()
@@ -363,16 +363,19 @@ export function createAutomationReviewSession(input: {
   const readEvent = async (eventId: string, signal: AbortSignal, after?: string) => {
     retractGrant();
     const query = { eventId: uuid.parse(eventId), limit: 10, ...(after ? { after: uuid.parse(after) } : {}) };
-    // This original candidate read may expire a stale marker. Read the review
-    // window afterwards so that its CAS references use the resulting fence.
-    const candidate = validateAutomationReview<AiAutomationCandidateDraft>('AiAutomationCandidateDraft', await input.api.candidate(eventId, signal)); assert();
-    const first = validateAutomationReview<AiAutomationReviewsForEventDraft>('AiAutomationReviewsForEventDraft', await input.api.forEvent(query, signal)); assert();
+    const initial = validateAutomationReview<AiAutomationReviewsForEventDraft>('AiAutomationReviewsForEventDraft', await input.api.forEvent(query, signal)); assert();
+    if (initial.event.eventId !== eventId) throw unavailable();
+    // Current candidate reads may expire a stale marker. An unavailable source
+    // instead keeps the independent original review and never attempts capture.
+    const candidate = initial.currentSource.failed === null ? null
+      : validateAutomationReview<AiAutomationCandidateDraft>('AiAutomationCandidateDraft', await input.api.candidate(eventId, signal)); assert();
+    const first = candidate ? validateAutomationReview<AiAutomationReviewsForEventDraft>('AiAutomationReviewsForEventDraft', await input.api.forEvent(query, signal)) : initial; assert();
     if (first.event.eventId !== eventId) throw unavailable();
     const latest = validateAutomationReview<AiAutomationReviewsForEventDraft>('AiAutomationReviewsForEventDraft', await input.api.forEvent(query, signal)); assert();
     if (latest.event.eventId !== eventId || !same(first.currentSource, latest.currentSource)
       || !same(first.originalResource, latest.originalResource) || !same(first.inputs, latest.inputs)
-      || candidate.eventId !== eventId || candidate.fence !== latest.event.fence) throw unavailable();
-    if (candidate.material) {
+      || candidate && (candidate.eventId !== eventId || candidate.fence !== latest.event.fence)) throw unavailable();
+    if (candidate?.material) {
       const event = candidate.material.event;
       if (event.eventId !== eventId || event.type !== latest.event.type || event.resource.version !== latest.event.resourceRevision
         || event.scope.kind !== 'workspace' || event.scope.tenantId !== scope.tenantId || event.scope.workspaceId !== scope.workspaceId
@@ -435,7 +438,7 @@ export function createAutomationReviewSession(input: {
     const event = await readEvent(view.eventId, signal);
     return { scope: structuredClone(scope), eventId: event.event.eventId, eventType: event.event.type,
       resourceRevision: event.event.resourceRevision, currentRevision: event.currentSource.revision,
-      ...(event.currentSource.sourceHash ? { sourceHash: event.currentSource.sourceHash } : {}),
+      ...('sourceHash' in event.currentSource && event.currentSource.sourceHash ? { sourceHash: event.currentSource.sourceHash } : {}),
       resource: structuredClone(event.originalResource), inputRef: view.inputRef };
   };
   const candidateForScope = (value: unknown, eventId?: string) => {
@@ -580,7 +583,7 @@ export function createAutomationReviewSession(input: {
     }),
     prepareGrant: (action: GrantAction) => run('grant-prepare', async signal => {
       assertWritable();
-      if (!view.review) throw unavailable();
+      if (!view.review || view.review.currentSource.failed === null) throw unavailable();
       const shown = view.review, before = await freshReview(shown.inputRef, signal);
       if (reviewStamp(before) !== reviewStamp(shown) || action === 'close' && before.review.status === 'closed') throw Error('AI_REVISION_CONFLICT');
       const preparation = preparedGrant(await input.api.prepareGrant({ inputRef: before.inputRef, action }, signal), before, action); assert();

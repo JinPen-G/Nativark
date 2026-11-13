@@ -726,8 +726,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 因而不会被迁移回填。计划行和首个空间整体版本必须在同一事务内出现，
       // 否则应用重启后报价会看到计划、却因没有版本而拒绝。
       await this.prisma!.$transaction(async (tx) => {
-        for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx);
+        for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx, undefined, true);
         await this.ensureInitialSpacePriceVersion(state, tx);
+        await this.configStore.captureOpeningConfiguration?.(state.pricingPlans[0].tenantId, tx);
       });
     } else {
       for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
@@ -1599,7 +1600,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         changeReason: `恢复 v${sequence}：${reason.trim()}`,
         createdBy: operator
       });
-      for (const plan of updatedPlans) await this.configStore.upsertPricingPlan(plan, tx);
+      for (const plan of updatedPlans) await this.configStore.upsertPricingPlan(plan, tx, undefined, true);
+      await this.configStore.captureOpeningConfiguration?.(tenantId, tx);
       return { row, updatedPlans };
     }).catch((error) => {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -1988,12 +1990,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         changeReason: adjustment.changeReason,
         createdBy: operator
       });
-      for (const nextPlan of nextPlans) await this.configStore.upsertPricingPlan(nextPlan, tx);
+      for (const nextPlan of nextPlans) await this.configStore.upsertPricingPlan(nextPlan, tx, undefined, true);
       const applied = await tx.rentalPriceAdjustmentPlan.updateMany({
         where: { id: adjustmentId, tenantId, workspaceId, status: { in: ["draft", "pending"] } },
         data: { status: "applied", resultVersionId: row.id, confirmedBy: operator ?? undefined, confirmedAt: new Date() }
       });
       if (!applied.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
+      await this.configStore.captureOpeningConfiguration?.(tenantId, tx);
       return { row, nextPlans };
     }).catch((error) => {
       // 基础版本被推进 → 409。失败的落库由调用方 runDuePriceAdjustments 统一记

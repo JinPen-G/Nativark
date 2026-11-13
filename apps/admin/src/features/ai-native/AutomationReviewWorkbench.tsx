@@ -45,6 +45,8 @@ const english: Record<string, string> = {
   '原退款操作报告失败。请核对原资金流程，本工作台不会重新退款。': 'The original refund operation reports failure. Check the original financial workflow; this workbench does not retry refunds.',
   '原开业检查报告分区缺项。草稿、保存和发布仍沿原权限与审核流程。': 'The original opening check reports a missing configuration section. Drafting, saving and publication retain their original permissions and approvals.',
   '本次原来源未报告该异常；是否已处理仍须在原业务流程核实。': 'This source read does not report the exception. Verify whether it was addressed through the original business workflow.',
+  '当前来源不可读取；保留原待办记录，不表示异常已解决。': 'The current source cannot be read. The original review remains available; this does not establish resolution.',
+  '不可读取': 'Unavailable',
   '原建议当前不可继续，请核对同一原来源。': 'The original suggestion is no longer current. Check the same original source.',
   '原事件版本': 'Original event revision', '当前来源版本': 'Current source revision',
   '原交付时间': 'Original delivery time', '开业分区': 'Opening section',
@@ -338,11 +340,12 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
     {event && <>
       <section className={styles.section} aria-label={t('原来源与风险')}>
         <h3>{t('原来源与风险')}</h3><p>{t(eventNames[event.event.type])}</p>
-        <p>{t(event.currentSource.failed ? riskCopy[event.event.type] : '本次原来源未报告该异常；是否已处理仍须在原业务流程核实。')}</p>
+        <p>{t(event.currentSource.failed === null ? '当前来源不可读取；保留原待办记录，不表示异常已解决。'
+          : event.currentSource.failed ? riskCopy[event.event.type] : '本次原来源未报告该异常；是否已处理仍须在原业务流程核实。')}</p>
         {event.nextAction === 'read_original_resource' && <Alert type="warning" title={t('原建议当前不可继续，请核对同一原来源。')} />}
         <dl className={styles.facts}>
           <div><dt>{t('原事件版本')}</dt><dd>{event.event.resourceRevision}</dd></div>
-          <div><dt>{t('当前来源版本')}</dt><dd>{event.currentSource.revision}</dd></div>
+          <div><dt>{t('当前来源版本')}</dt><dd>{event.currentSource.revision ?? t('不可读取')}</dd></div>
           {data.candidate?.material?.event.type === 'fulfillment.resource_shortage' && <div><dt>{t('原交付时间')}</dt>
             <dd>{formatTimestamp(data.candidate.material.event.payload.dueAt).value}</dd></div>}
           {event.originalResource.kind === 'configuration' && <div><dt>{t('开业分区')}</dt><dd>{t(sectionNames[event.originalResource.sectionCode] ?? event.originalResource.sectionCode)}</dd></div>}
@@ -364,7 +367,8 @@ export function AutomationReviewWorkbench(props: AutomationReviewWorkbenchProps)
         <h3>{t('复查同一原来源')}</h3>
         <ActionButton intent="review" label={t('明确复查原来源')} successLabel={t('已读取')} disabled={busy}
           onAction={action(() => session.recheck())} />
-        {data.recheck ? <><p>{t(data.recheck.source.failed ? '本次原来源仍报告异常。' : '本次原来源未报告异常。')}</p>
+        {data.recheck ? <><p>{t(data.recheck.source.failed === null ? '当前来源不可读取；保留原待办记录，不表示异常已解决。'
+          : data.recheck.source.failed ? '本次原来源仍报告异常。' : '本次原来源未报告异常。')}</p>
           <p className={styles.help}>{t('本次读取时间')} {formatTimestamp(data.recheck.readAt).value}</p></>
           : <p className={styles.help}>{t('尚未进行明确复查。')}</p>}
         <p className={styles.help}>{t('复查不等于模型判断或待办关闭，实际处理以原业务记录为准。')}</p>

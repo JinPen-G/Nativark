@@ -1,5 +1,5 @@
 import { rentalCategoryStorageCode } from "./category-identity";
-import { ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
 import { RENTAL_CURRENCY_CODES, RENTAL_PRICING_UNIT_CODES } from "@rental-os/shared";
 import { z } from 'zod';
@@ -25,6 +25,7 @@ import { getRequestTenantId, getRequestWorkspaceId } from '../../common/request-
 import { RULE_VERSION_ISSUED_STATUSES, type RuleVersionTimelineEntry } from './rental-rule-version-chain';
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 
 const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => {
   if (!item || typeof item !== "object" || Array.isArray(item)) return item;
@@ -102,7 +103,9 @@ export interface RentalBusinessConfigStore {
   /** Opening metadata only; never loads rule config, calendar days or prices. */
   readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts>;
   loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot>;
-  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, deferOpeningCapture?: boolean): Promise<void>;
+  /** Finish a compound price write before observing the original opening check. */
+  captureOpeningConfiguration?(tenantId: string, tx: RentalConfigTx): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
   /** Current service admission under the same workspace mutex as service writers. */
@@ -188,7 +191,18 @@ function money(value: number | undefined) {
 /** RC-01 阶段 4：Rental Core 业务配置的库侧实现（定价、优惠、增值服务、日历、规则版本、通知模板）。 */
 @Injectable()
 export class RentalBusinessConfigRepository implements RentalBusinessConfigStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant) {}
+
+  private async captureOpening(tx: RentalConfigTx, tenantId: string, workspaceId: string) {
+    if (!this.failureEvents?.openingConfiguration) return;
+    await this.failureEvents.openingConfiguration(tx, { tenantId, workspaceId }, { kind: 'business_settings', id: workspaceId });
+  }
+
+  async captureOpeningConfiguration(tenantId: string, tx: RentalConfigTx): Promise<void> {
+    if (!this.failureEvents?.openingConfiguration) return;
+    await this.captureOpening(tx, tenantId, await resolveScopeWorkspaceId(tx, tenantId));
+  }
 
   /** Current business configuration only. The expected Core binding prevents a
    * second read from joining a different adoption; empty sets remain empty. */
@@ -399,7 +413,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       ruleVersions: rules.map(row => this.toRuleVersion(row)), notificationTemplates: [], hasPersistedConfig: Boolean(pricing.length || services.length || rules.length || calendars.length) };
   }
 
-  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, deferOpeningCapture = false): Promise<void> {
+    if (deferOpeningCapture && !tx) throw new ConflictException('复合价格保存必须保留原事务');
     const data = {
       tenantId: plan.tenantId,
       categoryCode: rentalCategoryStorageCode(plan.categoryCode),
@@ -430,6 +445,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
       update: data
     });
+    if (!deferOpeningCapture) await this.captureOpening(client, plan.tenantId, workspaceId);
     };
     if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
@@ -668,6 +684,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
           }))
         });
       }
+      await this.captureOpening(tx, calendar.tenantId, workspaceId);
     });
     } catch (error) {
       // 并发落库冲突转 409：条件更新前的「先查后写」在并发下必然有窗口——两路恢复/编辑
@@ -782,6 +799,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       if (superseded && supersededData) {
         await conditional(superseded, supersededData, expectedRevisions?.superseded);
       }
+      await this.captureOpening(tx, next.tenantId, workspaceId);
     });
   }
 
@@ -822,6 +840,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
         update: data
       });
+      await this.captureOpening(tx, version.tenantId, workspaceId);
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -898,6 +917,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
             at: new Date(audit.at)
           }
         });
+        await this.captureOpening(tx, version.tenantId, workspaceId);
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

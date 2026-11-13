@@ -6,7 +6,7 @@ import { ConflictException } from '@nestjs/common';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { RentalCoreOrderStatus, type RentalOrder } from '@rental-os/shared';
-import { getRequestIdentity } from '../../../common/request-identity';
+import { getRequestIdentity, getRequestLocationIds } from '../../../common/request-identity';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ACTIVE_ASSIGNMENTS, allocationComplete } from '../../rental-core/rental-allocation-policy';
 import { isIssuedRuleVersion, matchRuleVersionAt } from '../../rental-core/rental-rule-version-chain';
@@ -201,6 +201,10 @@ export class CoreBusinessFailureResourceSource implements BusinessFailureResourc
 
   async readOpening(value: FailureScope, configuration: ConfigurationFailureOrigin, tx?: Prisma.TransactionClient) {
     const { scope, current } = this.binding(value), origin = parse(configurationFailureOriginSchema, configuration), d = this.dependencies;
+    // Core's readiness counters honor the reader's location projection. A zero
+    // in that projection cannot attest to a missing workspace configuration.
+    // Keep original receipt access separate; do not broaden these source reads.
+    if (getRequestIdentity()?.dataScope !== 'all' || getRequestLocationIds() !== undefined) return undefined;
     if (typeof d.business?.readTenantReadinessSource !== 'function' || typeof d.coreConfiguration?.readReadinessCoreFacts !== 'function'
       || typeof d.businessConfiguration?.readReadinessBusinessFacts !== 'function') throw unavailable();
     const observe = async () => {

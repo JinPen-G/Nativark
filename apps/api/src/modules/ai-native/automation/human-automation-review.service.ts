@@ -9,6 +9,7 @@ import { AI_TASK_DRAFT_VERSION, type AiExecutionContext, type AiAutomationReview
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { hasEffectivePermission } from '../../../common/permission-match';
 import { BusinessFailureReadAuthority, type FailureSource } from '../business-events/business-failure-read.authority';
+import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 
 const uuid = z.string().uuid(), revision = z.number().int().min(1).max(4294967293);
@@ -51,6 +52,8 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return result.data;
 };
 type Target = Awaited<ReturnType<HumanAutomationReviewService['load']>>;
+type ReviewSource = FailureSource | { state: 'unavailable'; revision: null; failed: null;
+  orderId: string | null; resourceEvent: NonNullable<FailureSource['resourceEvent']> };
 
 /** Internal current-human target, not a public grant or policy. The publication
  * policy consumer supplies concrete permissions and TTL separately. */
@@ -128,20 +131,25 @@ export class HumanAutomationReviewService {
     });
   }
 
-  private async withStableTarget<T>(inputRef: string, read: (target: Target & { source: FailureSource }) => Promise<T>): Promise<T> {
-    const snapshot = (target: Target) => requestFingerprint({ row: target.row, event: target.event, task: target.task, principal: target.principal });
-    let observed: string | undefined, observedSource: string | undefined;
-    const result = await this.withTarget(inputRef, async target => {
-      observed = snapshot(target);
-      observedSource = requestFingerprint(target.source);
-      return read(target);
-    });
-    // The final row/task read can outlive withTarget's last source authorization.
-    const latest = await this.load(inputRef, this.db);
-    if (snapshot(latest) !== observed) throw conflict();
-    return this.reads.withEvent(latest.event, async source => {
-      if (requestFingerprint(source) !== observedSource) throw conflict();
-      return result;
+  private async observedSource(event: AiBusinessFailureOutbox): Promise<ReviewSource> {
+    try { return await this.reads.withEvent(event, async source => structuredClone(source)); }
+    catch (error) {
+      if (!(error instanceof BusinessFailureError) || error.code !== 'unavailable') throw error;
+      // A missing current source cannot attest to resolution. The independent
+      // original-event Guard still has to authorize the same recorded resource.
+      return this.reads.withOriginalEvent(event, async original => ({ state: 'unavailable', revision: null, failed: null,
+        orderId: event.orderId, resourceEvent: original }));
+    }
+  }
+
+  private async withStableTarget<T>(inputRef: string, read: (target: Target & { source: ReviewSource }) => Promise<T>): Promise<T> {
+    let observedSource: string | undefined;
+    return this.withOriginalTarget(inputRef, async target => {
+      const source = await this.observedSource(target.event);
+      observedSource = requestFingerprint(source);
+      return read({ ...target, source });
+    }, this.db, async target => {
+      if (requestFingerprint(await this.observedSource(target.event)) !== observedSource) throw conflict();
     });
   }
 
@@ -347,20 +355,22 @@ export class HumanAutomationReviewService {
 
   /** Current result fields only. Internal original-event material and its
    * captured binding remain available to authorization, never to the wire. */
-  private sourceView(source: FailureSource): AiAutomationReviewDraft['currentSource'] {
+  private sourceView(source: ReviewSource): AiAutomationReviewDraft['currentSource'] {
+    if (source.failed === null) return { state: 'unavailable', revision: null, failed: null, orderId: source.orderId };
     return { revision: source.revision, failed: source.failed, orderId: source.orderId,
       ...(source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }),
       ...(source.sourceHash === undefined ? {} : { sourceHash: source.sourceHash }) };
   }
 
-  private suggestionCurrent(event: AiBusinessFailureOutbox, source: FailureSource) {
+  private suggestionCurrent(event: AiBusinessFailureOutbox, source: ReviewSource) {
+    if (source.failed === null) return false;
     const originalResource = event.eventType === 'fulfillment.resource_shortage' || event.eventType === 'opening.missing_configuration';
     return source.failed && source.revision === event.resourceRevision && event.expiresAt > this.clock()
       && !['closed', 'expired', 'dead_letter'].includes(event.status)
       && (!originalResource || Boolean(source.sourceHash && source.sourceHash === source.capturedSourceHash));
   }
 
-  private originalResource(event: AiBusinessFailureOutbox, source: FailureSource): AiAutomationReviewsForEventDraft['originalResource'] {
+  private originalResource(event: AiBusinessFailureOutbox, source: ReviewSource): AiAutomationReviewsForEventDraft['originalResource'] {
     if (event.eventType === 'fulfillment.resource_shortage' || event.eventType === 'opening.missing_configuration') {
       const original = source.resourceEvent;
       if (!original || original.type !== event.eventType || original.eventId !== event.id
@@ -380,7 +390,7 @@ export class HumanAutomationReviewService {
       return { kind: 'inspection', id: event.inspectionId, exceptionId: event.exceptionId, orderId: source.orderId };
     if (event.eventType === 'refund.failed' && event.refundId && !event.notificationId && !event.inspectionId)
       return { kind: 'refund', id: event.refundId, orderId: source.orderId,
-        ...(source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }) };
+        ...(!('paymentIntentId' in source) || source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }) };
     throw unavailable();
   }
 
@@ -408,7 +418,10 @@ export class HumanAutomationReviewService {
     const initialPrincipal = principal(context);
     const event = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
     if (!event || event.id !== input.eventId || event.tenantId !== scope.tenantId || event.workspaceId !== scope.workspaceId) throw unavailable();
-    return this.reads.withEvent(event, async source => {
+    let sourceFingerprint: string | undefined;
+    return this.reads.withOriginalEvent(event, async () => {
+      const source = await this.observedSource(event);
+      sourceFingerprint = requestFingerprint(source);
       if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
       const rows = await this.db.aiAutomationInput.findMany({ where: { ...scope, eventId: input.eventId,
         ...(input.after ? { id: { gt: input.after } } : {}) }, orderBy: { id: 'asc' }, take: input.limit + 1, select: { id: true } });
@@ -440,6 +453,10 @@ export class HumanAutomationReviewService {
           nextAfter: hasMore ? items[items.length - 1].inputRef : null, coverage: 'bounded_authorized_event_window' as const },
         nextAction: !this.suggestionCurrent(event, source) ? 'read_original_resource' as const : 'human_business_review' as const,
         ...readSemantics };
+    }, undefined, async () => {
+      if (requestFingerprint(await this.observedSource(event)) !== sourceFingerprint) throw conflict();
+      const latest = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
+      if (!latest || originalFingerprint(latest) !== originalFingerprint(event)) throw conflict();
     });
   }
 
