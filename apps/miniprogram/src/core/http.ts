@@ -74,6 +74,9 @@ export interface RequestOptions {
   timeoutMs?: number;
   /** 刷新成功后是否重放。默认 true。 */
   replayAfterRefresh?: boolean;
+  /** Fixed AI public-material ownership header only, never a customer bearer
+   * or arbitrary caller-selected header. Original continuation still needs Auth. */
+  publicSessionCredential?: string;
 }
 
 interface RawResponse {
@@ -166,6 +169,12 @@ function send(path: string, options: RequestOptions, token: string): Promise<Raw
   };
   if (token) header.Authorization = `Bearer ${token}`;
   if (options.idempotencyKey) header["Idempotency-Key"] = options.idempotencyKey;
+  if (options.publicSessionCredential !== undefined) {
+    if (!/^\/api\/client\/v1\/ai-native\/wechat-entry\/public\/(?:prepare|operation|continue)$/u.test(path)
+      || !/^ain-public-1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(options.publicSessionCredential)
+      || options.publicSessionCredential.length > 2048) throw new ApiError('BAD_REQUEST', '公开浏览归属凭据无效');
+    header['x-ai-public-session'] = options.publicSessionCredential;
+  }
   return new Promise<RawResponse>((resolve, reject) => {
     wx.request({
       url: apiUrl(path, options.query),

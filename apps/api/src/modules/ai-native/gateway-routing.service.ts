@@ -30,8 +30,8 @@ export function gatewayRoutingBinding(value: GatewayRoutingResolution) {
   return requestFingerprint({ ...value, context: identity(value.context) });
 }
 
-// Workspace/user bridge for operator, staff and the explicitly bounded client
-// audience; automation and non-user identities still require another authority.
+// Routing consumes a current server-bound principal. Automation and customer
+// tasks keep their own owner namespace; this bridge never grants execution.
 export class AiGatewayRoutingService {
   constructor(
     private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent' | 'resolveRoutingScopes'>,
@@ -47,9 +47,11 @@ export class AiGatewayRoutingService {
 
   private match(expected: WorkspaceGatewayContext, current: AiExecutionContext) {
     const actorId = current.actor.kind === 'customer' ? current.actor.customerId
-      : 'userId' in current.actor ? current.actor.userId : undefined;
-    if (!['operator', 'staff', 'client'].includes(current.audience)
-      || (current.audience === 'client' ? current.actor.kind !== 'customer' : current.actor.kind !== 'user')
+      : current.actor.kind === 'automation' ? current.actor.subjectId
+        : 'userId' in current.actor ? current.actor.userId : undefined;
+    if (!['operator', 'staff', 'client', 'automation'].includes(current.audience)
+      || (current.audience === 'client' ? current.actor.kind !== 'customer'
+        : current.audience === 'automation' ? current.actor.kind !== 'automation' : current.actor.kind !== 'user')
       || current.scope.kind !== 'workspace'
       || actorId !== expected.actorId
       || current.scope.tenantId !== expected.tenantId || current.scope.workspaceId !== expected.workspaceId) throw new ModelGatewayError('FORBIDDEN');

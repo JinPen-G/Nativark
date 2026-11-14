@@ -34,6 +34,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   /** Current human parameters -> original Core quote. Never order approval. */
   prepareQuoteParameters: 'quotes/parameters/prepare', readQuotePreparationOperation: 'quotes/preparation/read',
+  prepareGoal: 'goals/prepare', readGoalPreparation: 'goals/operation', readGoalCandidates: 'goals/candidates',
+  prepareGoalQuote: 'goals/quote/prepare', readGoalQuotePreparation: 'goals/quote/operation',
   confirmQuoteParameters: 'quotes/parameters/confirm', readPreparedQuoteOriginal: 'quotes/original/read',
   /** Original server-host flow; creates only booking material and its Action. */
   prepareOriginalQuoteBooking: 'quotes/booking/prepare', readOriginalQuoteBookingOperation: 'quotes/booking/operation',
@@ -88,7 +90,8 @@ export const AI_STAFF_INSPECTION_HTTP_DRAFT = Object.freeze({
     draftOperation: 'draft-operation', inputPrepare: 'input-prepare', inputReceipt: 'input-receipt', resultRead: 'result-read',
     resultSave: 'result-save', resultSaveReceipt: 'result-save-receipt',
     submissionReview: 'submission-review', submissionPrepare: 'submission-prepare',
-    submissionPreparation: 'submission-preparation', submissionSubmit: 'submission-submit', submissionRead: 'submission-read' }),
+    submissionPreparation: 'submission-preparation', submissionSubmit: 'submission-submit', submissionRead: 'submission-read',
+    fulfillmentReceiptRead: 'fulfillment-receipt-read' }),
 });
 
 export const AI_KNOWLEDGE_POLICY_HTTP_ERRORS = Object.freeze({

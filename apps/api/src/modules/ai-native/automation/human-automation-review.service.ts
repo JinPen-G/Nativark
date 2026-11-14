@@ -1,9 +1,15 @@
+/** Explicit human review writes and original receipt recovery. New mutations
+ * retain current source/policy/grant checks; original operation reads and
+ * replays use current business access and frozen bindings without renewing any
+ * trigger policy, creating work or claiming that an unavailable risk resolved. */
 import { randomUUID } from 'node:crypto';
-import { Prisma, type PrismaClient, type AiAutomationReviewOperation } from '@prisma/client';
+import { Prisma, type PrismaClient, type AiAutomationReviewOperation, type AiBusinessFailureOutbox } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION, type AiExecutionContext, type AiAutomationReviewDraft, type AiAutomationReviewsForEventDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { hasEffectivePermission } from '../../../common/permission-match';
 import { BusinessFailureReadAuthority, type FailureSource } from '../business-events/business-failure-read.authority';
+import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 
 const uuid = z.string().uuid(), revision = z.number().int().min(1).max(4294967293);
@@ -19,8 +25,11 @@ const operationInput = readInput.extend({ operationKey: key }).strict();
 const mutation = operationInput.extend({ expectedRevision: revision, expectedEventFence: fence, expectedTaskId: uuid.nullable() }).strict();
 const closeInput = mutation.extend({ reason }).strict();
 const feedbackInput = mutation.extend({ code: feedback }).strict();
+const grantTargetInput = readInput.extend({ action: z.enum(['close', 'feedback']) }).strict();
+const originalGrantInput = grantTargetInput.extend({ expectedRevision: revision,
+  preparedRef: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 type Command = (z.infer<typeof closeInput> & { action: 'close' }) | (z.infer<typeof feedbackInput> & { action: 'feedback' });
-type ReadDb = Pick<PrismaClient, 'aiAutomationInput' | 'aiBusinessFailureOutbox' | 'aiScope' | 'aiTask' | 'aiAutomationReviewGrant' | 'aiAutomationReviewOperation'>;
+type ReadDb = Pick<PrismaClient, 'aiAutomationInput' | 'aiBusinessFailureOutbox' | 'aiScope' | 'aiTask' | 'aiAutomationReviewGrant' | 'aiAutomationReviewOperation' | 'operationLog'>;
 const taskSelect = { id: true, scopeId: true, scopeKind: true, audience: true, ownerKind: true, ownerId: true,
   policyId: true, policyRevision: true, sceneCode: true, sceneVersion: true, creationKey: true, inputRef: true, inputHash: true, inputRevision: true,
   contractVersion: true, status: true, revision: true, archivedAt: true,
@@ -28,6 +37,9 @@ const taskSelect = { id: true, scopeId: true, scopeKind: true, audience: true, o
 const readSemantics = { executionPermission: false as const, businessActionRequested: false as const };
 const principal = (context: AiExecutionContext) => requestFingerprint({ actor: context.actor, audience: context.audience,
   scope: context.scope, access: 'access' in context ? context.access : null });
+// Receipt recovery compares recorded instants without changing legacy request
+// hashes or operation keys, whose original Date normalization is preserved.
+const originalFingerprint = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
 export class HumanAutomationReviewError extends Error {
   readonly retryable = false;
   constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict') { super(code); }
@@ -40,10 +52,33 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return result.data;
 };
 type Target = Awaited<ReturnType<HumanAutomationReviewService['load']>>;
+type ReviewSource = FailureSource | { state: 'unavailable'; revision: null; failed: null;
+  orderId: string | null; resourceEvent: NonNullable<FailureSource['resourceEvent']> };
+
+/** Internal current-human target, not a public grant or policy. The publication
+ * policy consumer supplies concrete permissions and TTL separately. */
+export type HumanAutomationReviewGrantTarget = {
+  scopeId: string; tenantId: string; workspaceId: string; userId: string; actorKind: 'user'; actorId: string;
+  audience: 'operator' | 'staff'; inputId: string; eventId: string; action: 'close' | 'feedback';
+  expectedRevision: number; resourceHash: string; inputHash: string; creationKey: string;
+  reviewStatus: 'open' | 'closed'; eventStatus: string; principalFingerprint: string; sourceFingerprint: string;
+  targetFingerprint: string; resource: Target['resource']; context: AiExecutionContext;
+};
+export type HumanAutomationOriginalGrantTarget = Pick<HumanAutomationReviewGrantTarget,
+  'scopeId' | 'tenantId' | 'workspaceId' | 'userId' | 'actorKind' | 'actorId' | 'audience' | 'inputId' | 'eventId'
+  | 'action' | 'expectedRevision' | 'resourceHash' | 'inputHash' | 'creationKey' | 'reviewStatus' | 'eventStatus'
+  | 'principalFingerprint' | 'sourceFingerprint' | 'resource'>;
+/** Current human read access and the frozen input/event owner tuple. No current
+ * anomaly fingerprint or action authority is manufactured for old receipts. */
+export type HumanAutomationReviewGrantReadTarget = Omit<HumanAutomationReviewGrantTarget, 'sourceFingerprint' | 'targetFingerprint'>;
+export type HumanAutomationCurrentGrantPort = (inputRef: string, action: 'close' | 'feedback', db: ReadDb,
+  original: HumanAutomationOriginalGrantTarget) => Promise<{ id: string; revision: number; policyFingerprint: string; preparedRef: string }>;
 
 export class HumanAutomationReviewService {
   constructor(private readonly db: ReadDb & Pick<PrismaClient, '$transaction'>,
-    private readonly reads: BusinessFailureReadAuthority, private readonly clock: () => Date = () => new Date()) {}
+    private readonly reads: BusinessFailureReadAuthority, private readonly clock: () => Date = () => new Date(),
+    /** Required only for new metadata writes. Historical reads use original access. */
+    private readonly currentGrant?: HumanAutomationCurrentGrantPort) {}
 
   private async load(inputRef: string, db: ReadDb) {
     const { context, scope } = await this.reads.current();
@@ -96,19 +131,156 @@ export class HumanAutomationReviewService {
     });
   }
 
-  private async withStableTarget<T>(inputRef: string, read: (target: Target & { source: FailureSource }) => Promise<T>): Promise<T> {
-    const snapshot = (target: Target) => requestFingerprint({ row: target.row, event: target.event, task: target.task, principal: target.principal });
-    let observed: string | undefined, observedSource: string | undefined;
-    const result = await this.withTarget(inputRef, async target => {
-      observed = snapshot(target);
-      observedSource = requestFingerprint(target.source);
-      return read(target);
+  private async observedSource(event: AiBusinessFailureOutbox): Promise<ReviewSource> {
+    try { return await this.reads.withEvent(event, async source => structuredClone(source)); }
+    catch (error) {
+      if (!(error instanceof BusinessFailureError) || error.code !== 'unavailable') throw error;
+      // A missing current source cannot attest to resolution. The independent
+      // original-event Guard still has to authorize the same recorded resource.
+      return this.reads.withOriginalEvent(event, async original => ({ state: 'unavailable', revision: null, failed: null,
+        orderId: event.orderId, resourceEvent: original }));
+    }
+  }
+
+  private async withStableTarget<T>(inputRef: string, read: (target: Target & { source: ReviewSource }) => Promise<T>): Promise<T> {
+    let observedSource: string | undefined;
+    return this.withOriginalTarget(inputRef, async target => {
+      const source = await this.observedSource(target.event);
+      observedSource = requestFingerprint(source);
+      return read({ ...target, source });
+    }, this.db, async target => {
+      if (requestFingerprint(await this.observedSource(target.event)) !== observedSource) throw conflict();
     });
-    // The final row/task read can outlive withTarget's last source authorization.
-    const latest = await this.load(inputRef, this.db);
-    if (snapshot(latest) !== observed) throw conflict();
+  }
+
+  private async withOriginalTarget<T>(inputRef: string, read: (target: Target) => Promise<T>, db: ReadDb = this.db,
+    revalidate?: (target: Target) => Promise<void>): Promise<T> {
+    const snapshot = (target: Target) => originalFingerprint({ row: target.row, event: target.event,
+      task: target.task, principal: target.principal });
+    const before = await this.load(inputRef, db), expected = snapshot(before);
+    const currentTarget = async (original: Parameters<Parameters<BusinessFailureReadAuthority['withOriginalEvent']>[1]>[0]) => {
+      const current = await this.load(inputRef, db);
+      if (snapshot(current) !== expected) throw conflict();
+      // The payload hash alone cannot prove that its event is the current
+      // input's original event. Bind the frozen producer envelope before any
+      // receipt is exposed, even after the trigger policy was removed.
+      const payload = current.row.payload as Record<string, unknown>;
+      if (requestFingerprint(payload.event) !== requestFingerprint(original)
+        || requestFingerprint(payload.subject) !== requestFingerprint({ id: current.row.subjectId,
+          authorizationRevision: current.row.authorizationRevision })
+        || requestFingerprint(payload.policy) !== requestFingerprint({ id: current.row.policyId, revision: current.row.policyRevision,
+          sceneCode: current.row.sceneCode, sceneVersion: current.row.sceneVersion })
+        || payload.authorityHash !== current.row.authorityHash) throw unavailable();
+      return current;
+    };
+    return this.reads.withOriginalEvent(before.event, async original => {
+      const result = await read(await currentTarget(original));
+      await currentTarget(original);
+      return result;
+    }, db === this.db ? undefined : db as Prisma.TransactionClient, async original => {
+      await revalidate?.(await currentTarget(original));
+      await currentTarget(original);
+      if (principal((await this.reads.current()).context) !== before.principal) throw unavailable();
+    });
+  }
+
+  private async originalOperation(inputRef: string, operationKey: string, command?: Command, db: ReadDb = this.db) {
+    const unknown = () => ({ state: 'unknown' as const, inputRef, operationKey, retryable: false as const,
+      nextAction: 'read_operation' as const, ...readSemantics });
+    let observed: AiAutomationReviewOperation | null = null, uncertain = false;
+    const result = await this.withOriginalTarget(inputRef, async target => {
+      const where = this.operationKey(target, operationKey);
+      let row: AiAutomationReviewOperation | null;
+      try { row = structuredClone(await db.aiAutomationReviewOperation.findFirst({ where })); }
+      catch { uncertain = true; return unknown(); }
+      if (row && row.operationKey !== operationKey) throw conflict();
+      observed = row;
+      return row ? this.receipt(target, row, command) : { state: 'not_observed' as const, inputRef, operationKey,
+        retryable: false as const, nextAction: 'read_operation' as const, ...readSemantics };
+    }, db, async target => {
+      if (uncertain) return;
+      // A missing or unreadable original key never authorizes a new write.
+      // Re-read the same operation after validation, preserving Date instants
+      // which the legacy business fingerprint intentionally does not encode.
+      let latest: AiAutomationReviewOperation | null;
+      try { latest = structuredClone(await db.aiAutomationReviewOperation.findFirst({ where: this.operationKey(target, operationKey) })); }
+      catch { uncertain = true; return; }
+      if (observed ? !latest || originalFingerprint(latest) !== originalFingerprint(observed) : latest !== null) throw conflict();
+      if (latest) this.receipt(target, latest, command);
+    });
+    return uncertain ? unknown() : result;
+  }
+
+  /** Only a complete original locator may use historical business read access.
+   * Active grants still use withGrantTarget's current source and publication. */
+  async withOriginalGrantTarget<T>(value: unknown, read: (target: HumanAutomationReviewGrantReadTarget) => Promise<T>,
+    revalidate?: (target: HumanAutomationReviewGrantReadTarget) => Promise<void>): Promise<T> {
+    const query = parse(originalGrantInput, value);
+    if (typeof read !== 'function' || revalidate !== undefined && typeof revalidate !== 'function') throw unavailable();
+    const project = async (target: Target): Promise<HumanAutomationReviewGrantReadTarget> => {
+      const row = target.row, now = this.clock();
+      if (target.context.actor.kind !== 'user' || !['operator', 'staff'].includes(target.context.audience)
+        || query.expectedRevision > row.reviewRevision || !(now instanceof Date) || !Number.isFinite(now.getTime())
+        || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())
+        || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime()) || row.createdAt > now
+        || row.expiresAt <= row.createdAt || row.expiresAt > target.event.expiresAt
+        || !/^[a-f0-9]{64}$/u.test(row.authorityHash)
+        || row.creationKey !== requestFingerprint({ version: 'automation-creation-1', ...target.scope,
+          policyId: row.policyId, policyRevision: row.policyRevision, eventId: row.eventId,
+          sceneCode: row.sceneCode, sceneVersion: row.sceneVersion })) throw unavailable();
+      const task = await this.db.aiTask.findFirst({ where: { creationKey: row.creationKey, scopeId: row.scopeId },
+        select: { ...taskSelect, policyExpiresAt: true, creationFingerprint: true } });
+      if (task) {
+        const scope = aiPersistenceScopeColumns(target.context.scope);
+        const owner = JSON.stringify([scope, 'automation', 'AUTOMATION', row.subjectId,
+          [row.policyId, row.policyRevision, row.expiresAt.toISOString()]]);
+        const { policyExpiresAt, creationFingerprint, ...originalTask } = task;
+        if (!target.task || originalFingerprint(originalTask) !== originalFingerprint(target.task)
+          || !(policyExpiresAt instanceof Date) || policyExpiresAt.getTime() !== row.expiresAt.getTime()
+          || creationFingerprint !== requestFingerprint({ version: 'ai-task-creation-1', scope,
+            audience: 'AUTOMATION', ownerKind: 'AUTOMATION', ownerId: row.subjectId, authorizationBinding: owner,
+            sceneCode: row.sceneCode, sceneVersion: row.sceneVersion, inputRef: row.id,
+            inputRevision: row.inputRevision, inputHash: row.inputHash })) throw unavailable();
+      } else if (target.task) throw unavailable();
+      if (principal((await this.reads.current()).context) !== target.principal) throw unavailable();
+      return { scopeId: row.scopeId, ...target.scope, userId: target.context.actor.userId,
+        ...target.person, audience: target.person.audience as 'operator' | 'staff', inputId: row.id, eventId: target.event.id,
+        action: query.action, expectedRevision: row.reviewRevision, resourceHash: target.resourceHash,
+        inputHash: row.inputHash, creationKey: row.creationKey, reviewStatus: row.reviewStatus as 'open' | 'closed',
+        eventStatus: target.event.status, principalFingerprint: target.principal, resource: structuredClone(target.resource),
+        context: structuredClone(target.context) };
+    };
+    return this.withOriginalTarget(query.inputRef, async target => read(await project(target)), this.db,
+      async target => { const current = await project(target); await revalidate?.(current); });
+  }
+
+  /** Feature-private policy/grant port. Fresh Auth, original Guard/Scope/source,
+   * input and review bindings are checked around the callback, including within
+   * the caller's original DB transaction. No permission or TTL is inferred here. */
+  async withGrantTarget<T>(value: unknown, execute: (target: HumanAutomationReviewGrantTarget) => Promise<T>, db: ReadDb = this.db): Promise<T> {
+    const query = parse(grantTargetInput, value);
+    if (typeof execute !== 'function') throw unavailable();
+    const snapshot = (target: Target) => requestFingerprint({ row: target.row, event: target.event,
+      task: target.task, principal: target.principal });
+    let observed: HumanAutomationReviewGrantTarget | undefined, fingerprint: string | undefined;
+    const result = await this.withTarget(query.inputRef, async target => {
+      if (target.context.actor.kind !== 'user' || !['operator', 'staff'].includes(target.context.audience)) throw unavailable();
+      fingerprint = snapshot(target);
+      const fields = { scopeId: target.row.scopeId, ...target.scope, userId: target.context.actor.userId,
+        ...target.person, audience: target.person.audience as 'operator' | 'staff',
+        inputId: target.row.id, eventId: target.event.id, action: query.action,
+        expectedRevision: target.row.reviewRevision, resourceHash: target.resourceHash,
+        inputHash: target.row.inputHash, creationKey: target.row.creationKey,
+        reviewStatus: target.row.reviewStatus as 'open' | 'closed', eventStatus: target.event.status, principalFingerprint: target.principal,
+        sourceFingerprint: requestFingerprint(target.source), resource: structuredClone(target.resource) };
+      observed = { ...fields, targetFingerprint: requestFingerprint(fields), context: structuredClone(target.context) };
+      return execute(structuredClone(observed));
+    }, db);
+    const latest = await this.load(query.inputRef, db);
+    if (!observed || snapshot(latest) !== fingerprint || latest.principal !== observed.principalFingerprint) throw conflict();
     return this.reads.withEvent(latest.event, async source => {
-      if (requestFingerprint(source) !== observedSource) throw conflict();
+      if (requestFingerprint(source) !== observed!.sourceFingerprint
+        || principal((await this.reads.current()).context) !== observed!.principalFingerprint) throw unavailable();
       return result;
     });
   }
@@ -120,10 +292,20 @@ export class HumanAutomationReviewService {
     return requestFingerprint({ version: 'human-automation-review-1', command, person: target.person, scope: target.scope,
       inputHash: target.row.inputHash, eventId: target.row.eventId, creationKey: target.row.creationKey });
   }
-  private async grant(target: Target, action: Command['action'], db: ReadDb) {
+  private async grant(target: Target & { source: FailureSource }, action: Command['action'], db: ReadDb) {
     const current = (await this.reads.current()).context;
     if (principal(current) !== target.principal || !('access' in current)) throw unavailable();
     const currentPermissions = current.access.permissions;
+    if (!this.currentGrant) throw unavailable();
+    const original: HumanAutomationOriginalGrantTarget = {
+      scopeId: target.row.scopeId, ...target.scope, userId: target.person.actorId, ...target.person,
+      audience: target.person.audience as 'operator' | 'staff', inputId: target.row.id, eventId: target.event.id,
+      action, expectedRevision: target.row.reviewRevision, resourceHash: target.resourceHash,
+      inputHash: target.row.inputHash, creationKey: target.row.creationKey,
+      reviewStatus: target.row.reviewStatus as 'open' | 'closed', eventStatus: target.event.status, principalFingerprint: target.principal,
+      sourceFingerprint: requestFingerprint(target.source), resource: structuredClone(target.resource),
+    };
+    const published = await this.currentGrant(target.row.id, action, db, original);
     const where = { scopeId: target.row.scopeId, actorId: target.person.actorId, audience: target.person.audience,
       inputId: target.row.id, action, expectedRevision: target.row.reviewRevision };
     const row = await db.aiAutomationReviewGrant.findFirst({ where });
@@ -134,9 +316,12 @@ export class HumanAutomationReviewService {
       || !Array.isArray(row.requiredPermissions) || !row.requiredPermissions.length || row.requiredPermissions.length > 64
       || new Set(row.requiredPermissions).size !== row.requiredPermissions.length
       || row.requiredPermissions.some(permission => typeof permission !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(permission)
-        || !currentPermissions.includes(permission))) throw unavailable();
+        || !hasEffectivePermission(currentPermissions, permission))) throw unavailable();
+    if (!published || published.id !== row.id || published.revision !== row.revision
+      || !/^[a-f0-9]{64}$/u.test(published.policyFingerprint) || !/^[a-f0-9]{64}$/u.test(published.preparedRef)) throw unavailable();
     const authorizationHash = requestFingerprint({ principal: target.principal, key: where, id: row.id, revision: row.revision,
-      resourceHash: row.resourceHash, permissions: row.requiredPermissions, expiresAt: row.expiresAt.toISOString() });
+      resourceHash: row.resourceHash, permissions: row.requiredPermissions, expiresAt: row.expiresAt.toISOString(),
+      publication: published.policyFingerprint, preparedRef: published.preparedRef });
     if (principal((await this.reads.current()).context) !== target.principal) throw unavailable();
     return { id: row.id, revision: row.revision, authorizationHash };
   }
@@ -148,7 +333,14 @@ export class HumanAutomationReviewService {
       || row.resultRevision !== row.expectedRevision + 1 || row.resultRevision > target.row.reviewRevision
       || row.eventFenceAfter < row.eventFenceBefore || row.eventFenceAfter > target.event.fence
       || !['prepared', 'creation_unknown', 'linked'].includes(row.inputStatusAtCommit)
-      || !['open', 'closed'].includes(row.resultStatus) || Boolean(row.taskId) !== Boolean(row.runId)) throw conflict();
+      || !['open', 'closed'].includes(row.resultStatus) || Boolean(row.taskId) !== Boolean(row.runId)
+      || !uuid.safeParse(row.id).success || !key.safeParse(row.operationKey).success
+      || !revision.safeParse(row.expectedRevision).success || !revision.safeParse(row.resultRevision).success
+      || !fence.safeParse(row.eventFenceBefore).success || !fence.safeParse(row.eventFenceAfter).success
+      || row.taskId !== null && (row.taskId !== target.task?.id || row.runId !== target.task?.runs[0].id)
+      || !/^[a-f0-9]{64}$/u.test(row.requestHash) || !/^[a-f0-9]{64}$/u.test(row.authorizationHash)
+      || !key.max(36).safeParse(row.grantId).success || !revision.safeParse(row.grantRevision).success
+      || !(row.createdAt instanceof Date) || !Number.isFinite(row.createdAt.getTime()) || row.createdAt > this.clock()) throw conflict();
     const base = { inputRef: row.inputId, operationKey: row.operationKey, expectedRevision: row.expectedRevision,
       expectedEventFence: row.eventFenceBefore, expectedTaskId: row.taskId };
     const original: Command = row.action === 'close'
@@ -161,13 +353,53 @@ export class HumanAutomationReviewService {
       inputStatusAtCommit: row.inputStatusAtCommit, recordedAt: row.createdAt.toISOString(), retryable: false as const, ...readSemantics };
   }
 
+  /** Current result fields only. Internal original-event material and its
+   * captured binding remain available to authorization, never to the wire. */
+  private sourceView(source: ReviewSource): AiAutomationReviewDraft['currentSource'] {
+    if (source.failed === null) return { state: 'unavailable', revision: null, failed: null, orderId: source.orderId };
+    return { revision: source.revision, failed: source.failed, orderId: source.orderId,
+      ...(source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }),
+      ...(source.sourceHash === undefined ? {} : { sourceHash: source.sourceHash }) };
+  }
+
+  private suggestionCurrent(event: AiBusinessFailureOutbox, source: ReviewSource) {
+    if (source.failed === null) return false;
+    const originalResource = event.eventType === 'fulfillment.resource_shortage' || event.eventType === 'opening.missing_configuration';
+    return source.failed && source.revision === event.resourceRevision && event.expiresAt > this.clock()
+      && !['closed', 'expired', 'dead_letter'].includes(event.status)
+      && (!originalResource || Boolean(source.sourceHash && source.sourceHash === source.capturedSourceHash));
+  }
+
+  private originalResource(event: AiBusinessFailureOutbox, source: ReviewSource): AiAutomationReviewsForEventDraft['originalResource'] {
+    if (event.eventType === 'fulfillment.resource_shortage' || event.eventType === 'opening.missing_configuration') {
+      const original = source.resourceEvent;
+      if (!original || original.type !== event.eventType || original.eventId !== event.id
+        || original.resource.version !== event.resourceRevision || original.scope.kind !== 'workspace'
+        || original.scope.tenantId !== event.tenantId || original.scope.workspaceId !== event.workspaceId) throw unavailable();
+      if (original.type === 'fulfillment.resource_shortage') {
+        if (source.orderId !== event.orderId || original.resource.id !== event.orderId) throw unavailable();
+        return { kind: 'order', id: original.resource.id, orderId: original.resource.id, version: original.resource.version };
+      }
+      if (original.type !== 'opening.missing_configuration' || source.orderId !== null || event.orderId !== null) throw unavailable();
+      return { kind: 'configuration', id: original.resource.id, orderId: null, version: original.resource.version,
+        sectionCode: original.payload.sectionCode };
+    }
+    if (event.eventType === 'notification.failed' && event.notificationId && !event.refundId && !event.inspectionId)
+      return { kind: 'notification', id: event.notificationId, orderId: source.orderId };
+    if (event.eventType === 'inspection.return_exception' && event.inspectionId && event.exceptionId && !event.notificationId && !event.refundId)
+      return { kind: 'inspection', id: event.inspectionId, exceptionId: event.exceptionId, orderId: source.orderId };
+    if (event.eventType === 'refund.failed' && event.refundId && !event.notificationId && !event.inspectionId)
+      return { kind: 'refund', id: event.refundId, orderId: source.orderId,
+        ...(!('paymentIntentId' in source) || source.paymentIntentId === undefined ? {} : { paymentIntentId: source.paymentIntentId }) };
+    throw unavailable();
+  }
+
   async read(value: unknown) {
     const { inputRef } = parse(readInput, value);
     return this.withStableTarget(inputRef, async target => ({ inputRef, inputStatus: target.row.status, inputHash: target.row.inputHash,
       inputMode: target.inputMode, policyReference: { policyId: target.row.policyId, revision: target.row.policyRevision },
       nextAction: target.row.reviewStatus === 'closed' ? 'read_review_operation' as const
-        : !target.source.failed || target.source.revision !== target.event.resourceRevision || target.event.expiresAt <= this.clock()
-          || ['closed', 'expired', 'dead_letter'].includes(target.event.status) ? 'read_original_resource' as const
+        : !this.suggestionCurrent(target.event, target.source) ? 'read_original_resource' as const
         : target.row.status === 'creation_unknown' ? 'read_original_creation' as const : 'human_review' as const,
       review: { revision: target.row.reviewRevision, status: target.row.reviewStatus, closeReason: target.row.closeReason, feedbackCode: target.row.feedbackCode },
       event: { eventId: target.event.id, type: target.event.eventType, resourceRevision: target.event.resourceRevision,
@@ -175,7 +407,7 @@ export class HumanAutomationReviewService {
       task: target.task ? { state: 'observed' as const, taskId: target.task.id, runId: target.task.runs[0].id,
         status: target.task.status.toLowerCase(), revision: target.task.revision, archived: Boolean(target.task.archivedAt) }
         : { state: 'not_observed' as const, taskId: null, runId: null },
-      currentSource: target.source, actionResource: target.resource, resourceHash: target.resourceHash, ...readSemantics }));
+      currentSource: this.sourceView(target.source), actionResource: target.resource, resourceHash: target.resourceHash, ...readSemantics }));
   }
 
   /** Read existing work for a business event, never prepare/create/re-dispatch it.
@@ -186,7 +418,10 @@ export class HumanAutomationReviewService {
     const initialPrincipal = principal(context);
     const event = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
     if (!event || event.id !== input.eventId || event.tenantId !== scope.tenantId || event.workspaceId !== scope.workspaceId) throw unavailable();
-    return this.reads.withEvent(event, async source => {
+    let sourceFingerprint: string | undefined;
+    return this.reads.withOriginalEvent(event, async () => {
+      const source = await this.observedSource(event);
+      sourceFingerprint = requestFingerprint(source);
       if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
       const rows = await this.db.aiAutomationInput.findMany({ where: { ...scope, eventId: input.eventId,
         ...(input.after ? { id: { gt: input.after } } : {}) }, orderBy: { id: 'asc' }, take: input.limit + 1, select: { id: true } });
@@ -212,29 +447,22 @@ export class HumanAutomationReviewService {
       if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
       const hasMore = rows.length > input.limit;
       return { event: { eventId: event.id, type: event.eventType, status: event.status, fence: event.fence,
-        resourceRevision: event.resourceRevision }, currentSource: source,
-        originalResource: event.notificationId
-          ? { kind: 'notification' as const, id: event.notificationId, orderId: source.orderId }
-          : event.inspectionId
-            ? { kind: 'inspection' as const, id: event.inspectionId, exceptionId: event.exceptionId, orderId: source.orderId }
-            : { kind: 'refund' as const, id: event.refundId!, orderId: source.orderId, paymentIntentId: source.paymentIntentId },
+        resourceRevision: event.resourceRevision }, currentSource: this.sourceView(source),
+        originalResource: this.originalResource(event, source),
         inputs: { state: items.length ? 'observed' as const : 'not_observed' as const, items, hasMore,
           nextAfter: hasMore ? items[items.length - 1].inputRef : null, coverage: 'bounded_authorized_event_window' as const },
-        nextAction: !source.failed || source.revision !== event.resourceRevision || event.expiresAt <= this.clock()
-          || ['closed', 'expired', 'dead_letter'].includes(event.status) ? 'read_original_resource' as const : 'human_business_review' as const,
+        nextAction: !this.suggestionCurrent(event, source) ? 'read_original_resource' as const : 'human_business_review' as const,
         ...readSemantics };
+    }, undefined, async () => {
+      if (requestFingerprint(await this.observedSource(event)) !== sourceFingerprint) throw conflict();
+      const latest = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
+      if (!latest || originalFingerprint(latest) !== originalFingerprint(event)) throw conflict();
     });
   }
 
   async operation(value: unknown) {
     const { inputRef, operationKey } = parse(operationInput, value);
-    return this.withStableTarget(inputRef, async target => {
-      let row: AiAutomationReviewOperation | null;
-      try { row = await this.db.aiAutomationReviewOperation.findFirst({ where: this.operationKey(target, operationKey) }); }
-      catch { return { state: 'unknown' as const, inputRef, operationKey, retryable: false as const, nextAction: 'read_operation' as const, ...readSemantics }; }
-      return row ? this.receipt(target, row) : { state: 'not_observed' as const, inputRef, operationKey,
-        retryable: false as const, nextAction: 'read_operation' as const, ...readSemantics };
-    });
+    return this.originalOperation(inputRef, operationKey);
   }
 
   close(value: unknown) { return this.apply({ ...parse(closeInput, value), action: 'close' }); }
@@ -243,10 +471,12 @@ export class HumanAutomationReviewService {
   private async apply(command: Command) {
     let attempted = false, acknowledged = false;
     try {
+      const original = await this.originalOperation(command.inputRef, command.operationKey, command);
+      if (original.state !== 'not_observed') return original;
       return await this.withTarget(command.inputRef, async before => {
         const key = this.operationKey(before, command.operationKey);
         const existing = await this.db.aiAutomationReviewOperation.findFirst({ where: key });
-        if (existing) return this.receipt(before, existing, command);
+        if (existing) return this.originalOperation(command.inputRef, command.operationKey, command);
         const result = await this.db.$transaction(async tx => {
           await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_business_failure_outbox WHERE id = ${before.event.id} FOR UPDATE`);
           await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_automation_inputs WHERE id = ${before.row.id} FOR UPDATE`);
@@ -254,7 +484,7 @@ export class HumanAutomationReviewService {
             if (target.principal !== before.principal) throw unavailable();
             if (requestFingerprint(target.task) !== requestFingerprint(before.task)) throw conflict();
             const replay = await tx.aiAutomationReviewOperation.findFirst({ where: key });
-            if (replay) return this.receipt(target, replay, command);
+            if (replay) return this.originalOperation(command.inputRef, command.operationKey, command, tx);
             if (target.row.reviewRevision !== command.expectedRevision || target.event.fence !== command.expectedEventFence
               || (target.task?.id ?? null) !== command.expectedTaskId || command.action === 'close' && target.row.reviewStatus === 'closed') throw conflict();
             const grant = await this.grant(target, command.action, tx);

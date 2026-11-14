@@ -2,7 +2,7 @@
  * visibility and session epoch revoke late responses; original operation keys
  * are persisted before dispatch and uncertain results are read only. */
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
-import { aiTaskCalendarDraftPreparationReference, type AiTaskCalendarDraftPreparationReference } from '@rental-os/shared';
+import { aiTaskCalendarDraftPreparationReference, type AiTaskCalendarDraftPreparationReference, type AiTaskCalendarDraftReference } from '@rental-os/shared';
 import { ActionButton, Alert, Button, ConfirmAction, Input, Select } from '@/components/ui';
 import { aiTaskCalendarDraftApi } from '@/api/aiTaskCalendarDraft';
 import { useAuthStore } from '@/features/auth/authStore';
@@ -37,6 +37,10 @@ const english: Record<string, string> = {
   '原日历草稿': 'Original calendar draft', '正常营业': 'Open', '限时营业': 'Limited hours',
   '停止营业': 'Closed', '自助营业': 'Self-service',
   '完成本次修改': 'Finish this change',
+  '原草稿保存因版本冲突未提交。': 'The original draft save was rejected because its version changed.',
+  '请读取当前字段，核对新差异并准备新的 AI 提案。': 'Read the current fields, review new changes and prepare a new AI proposal.',
+  '读取当前字段并重新准备': 'Read current fields and prepare again',
+  '原拒绝记录': 'Original rejection receipt',
 };
 export function useCalendarDraftLocale() {
   const locale = useAiManagementLocale();
@@ -44,26 +48,28 @@ export function useCalendarDraftLocale() {
   return { ...locale, t };
 }
 
-export function CalendarDraftPreparation({ taskId, identity, current, onAccessDenied, date: originalDate, onPrepared }: {
+export function CalendarDraftPreparation({ taskId, identity, current, onAccessDenied, date: originalDate, onPrepared, rejected }: {
   taskId: string; identity: string; current(): boolean; onAccessDenied(): void; date?: string;
+  rejected?: AiTaskCalendarDraftReference;
   onPrepared(taskId: string, reference: AiTaskCalendarDraftPreparationReference): void;
 }) {
   const { t } = useCalendarDraftLocale(), auth = useAuthStore(), [, changed] = useReducer(n => n + 1, 0), fieldId = useId();
   const [date, setDate] = useState(originalDate ?? '');
   const stableOwner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id, taskId]);
-  const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, stableOwner, auth.user, epoch, originalDate]);
+  const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, stableOwner, auth.user, epoch, originalDate, rejected]);
+  const mounted = useRef(true);
   const owner = useRef({ binding, current }); owner.current = { binding, current };
-  const active = () => owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden
+  const active = () => mounted.current && owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden
     && auth.hasPermission('rental-os:calendar:edit') && owner.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { if (typeof window !== 'undefined') storage = window.localStorage; } catch { /* Fail closed before dispatch. */ }
     return createTaskCalendarDraftPreparationSession({ taskId, tenantId: auth.tenant?.tenantId ?? '', workspaceId: auth.currentWorkspaceId ?? '',
       current: active, changed, api: aiTaskCalendarDraftApi,
       store: calendarPreparationStore(calendarPreparationStorageKey({ tenantId: auth.tenant?.tenantId,
-        workspaceId: auth.currentWorkspaceId, actorId: auth.user?.id, taskId }), value => aiTaskCalendarDraftPreparationReference.parse(value), storage) });
+        workspaceId: auth.currentWorkspaceId, actorId: auth.user?.id, taskId }), value => aiTaskCalendarDraftPreparationReference.parse(value), storage), rejected });
   }, [binding]);
-  useEffect(() => { session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
-    return () => { document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
+  useEffect(() => { mounted.current = true; session.activate(); const clear = () => session.clear(); document.addEventListener('visibilitychange', clear);
+    return () => { mounted.current = false; document.removeEventListener('visibilitychange', clear); session.dispose(); }; }, [session]);
   if (!active()) return null;
   const view = session.view, busy = !!view.busy;
   const action = (work: () => Promise<void>) => async () => { try { await work(); } catch (error) {
@@ -74,6 +80,10 @@ export function CalendarDraftPreparation({ taskId, identity, current, onAccessDe
   const operation = view.operation?.operation;
   return <section className={styles.stack} aria-label={t('准备日历提案')}>
     {view.invalid && <Alert type="warning" title={t('原操作定位不可读取，不能再次发起。')} />}
+    {rejected && view.pending && operation?.state === 'ai_proposal_saved' && operation.proposal.reference.taskId === rejected.taskId
+      && operation.proposal.reference.runId === rejected.runId && operation.proposal.reference.stepId === rejected.stepId
+      && <ActionButton intent="review" label={t('读取当前字段并重新准备')} disabled={busy || view.invalid || !date}
+      onAction={action(async () => { await session.read(date); if (session.view.preparation?.targets.length === 1) session.select(session.view.preparation.targets[0].id); })} />}
     {view.pending ? <>
       {operation?.state !== 'ai_proposal_saved' && <Alert type="warning" title={t('原提案结果待核对，请按原操作读取。')} />}
       <ActionButton intent="review" label={t('核对原日历提案')} disabled={busy} onAction={action(() => session.operation())} />
@@ -81,7 +91,7 @@ export function CalendarDraftPreparation({ taskId, identity, current, onAccessDe
       {!originalDate && <div className={styles.field}><label htmlFor={`${fieldId}-date`}>{t('日期')}</label>
         <Input id={`${fieldId}-date`} type="date" value={date} disabled={busy || view.invalid}
           onChange={event => { session.clear(); setDate(event.target.value); }} /></div>}
-      <ActionButton intent="review" label={t('读取日历草稿')} disabled={busy || view.invalid || !date}
+      <ActionButton intent="review" label={t(rejected ? '读取当前字段并重新准备' : '读取日历草稿')} disabled={busy || view.invalid || !date}
         onAction={action(async () => { await session.read(date); if (session.view.preparation?.targets.length === 1) session.select(session.view.preparation.targets[0].id); })} />
     </>}
     {!view.pending && view.preparation && <>

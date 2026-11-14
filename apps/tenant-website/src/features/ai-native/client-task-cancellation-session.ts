@@ -74,7 +74,7 @@ export function createClientTaskCancellationSession(input: {
   const report = (): ClientTaskCancellationObservation | null => {
     const observed = settled?.state === 'observed' ? settled : requested?.state === 'observed' ? requested : null;
     return observed?.transition ? { taskId: origin.taskId, taskRevision: observed.transition.taskRevision,
-      cursor: observed.transition.cursor, cancellation: observed.transition.status === 'cancelled' ? 'settled' : 'requested' } : null;
+      cursor: observed.transition.cursor, cancellation: observed === settled ? 'settled' : 'requested' } : null;
   };
   const emit = (status: Status) => {
     if (!current()) return;
@@ -101,10 +101,12 @@ export function createClientTaskCancellationSession(input: {
     if (!same(input.storage.read(), checked)) { invalid = true; throw Error('client_cancellation_locator_changed'); }
     held = clone(checked); saved = checked;
   };
-  const accept = (value: unknown, selector: Request, status: 'cancel_requested' | 'cancelled') => {
+  const accept = (value: unknown, selector: Request, status: 'cancel_requested' | 'settlement') => {
     const observation = aiClientTaskCancellationObservationSchema.parse(value);
     if (observation.taskId !== origin.taskId || observation.expectedRevision !== selector.expectedRevision
-      || observation.state === 'observed' && observation.transition?.status !== status) throw Error('client_cancellation_receipt_changed');
+      || observation.state === 'observed' && (status === 'settlement'
+        ? !['cancelled','succeeded','partially_succeeded'].includes(observation.transition!.status)
+        : observation.transition?.status !== status)) throw Error('client_cancellation_receipt_changed');
     return observation;
   };
   const readOriginal = async (): Promise<Status> => {
@@ -124,10 +126,10 @@ export function createClientTaskCancellationSession(input: {
     const settlementRequest = saved.settlement?.request ?? (saved.request.expectedRevision < 4294967294
       ? aiClientTaskCancelRequestSchema.parse({ ...origin.reference, expectedRevision: saved.request.expectedRevision + 1 }) : null);
     if (settlementRequest) {
-      settled = accept(await input.api.readSettlementReceipt(clone(settlementRequest)), settlementRequest, 'cancelled');
+      settled = accept(await input.api.readSettlementReceipt(clone(settlementRequest)), settlementRequest, 'settlement');
       if (!current()) return 'closed';
       if (settled.state === 'observed') {
-        if (task.status !== 'cancelled' || task.revision < settled.transition!.taskRevision) throw Error('client_cancellation_origin_changed');
+        if (task.status !== settled.transition!.status || task.revision < settled.transition!.taskRevision) throw Error('client_cancellation_origin_changed');
         return 'settled';
       }
       if (saved.settlement) return 'unknown';

@@ -6,11 +6,13 @@ import { HumanAutomationPolicyRequestFactory, type HumanAutomationPolicyHttpRequ
 import { withRequestAbort } from '../scenes/request-abort';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS, AI_AUTOMATION_POLICY_HTTP_SCHEMAS } from '@rental-os/shared';
+import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS, AI_AUTOMATION_POLICY_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS,
+  AI_SCOPE_DRAFT_SCHEMAS } from '@rental-os/shared';
 
 const ajv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
 addFormats(ajv);
-const definitions = JSON.parse(JSON.stringify(AI_AUTOMATION_POLICY_HTTP_SCHEMAS).replaceAll('#/components/schemas/', '#/$defs/'));
+const definitions = JSON.parse(JSON.stringify({ ...AI_AUTOMATION_POLICY_HTTP_SCHEMAS, ...AI_EVENTS_DRAFT_SCHEMAS, ...AI_SCOPE_DRAFT_SCHEMAS })
+  .replaceAll('#/components/schemas/', '#/$defs/'));
 const validators = Object.fromEntries(Object.keys(definitions).map(name => [name,
   ajv.compile({ $ref: `#/$defs/${name}`, $defs: definitions })]));
 
@@ -25,7 +27,8 @@ export class HumanAutomationPolicyRequestController {
       const result = await withRequestAbort(request, signal => this.requests.call(request, action, value, signal));
       try { const copy = structuredClone(result); if (validators[contract.response](copy)) return copy; }
       catch { /* Never serialize a damaged internal policy or grant projection. */ }
-      throw new AutomationManagementError(action === 'prepare' || action === 'commit' ? 'result_unknown' : 'unavailable');
+      throw new AutomationManagementError(action === 'prepare' || action === 'commit' || action === 'prepareConfirmed'
+        || action === 'commitConfirmed' ? 'result_unknown' : 'unavailable');
     }
     catch (error) {
       const reason = error instanceof AutomationManagementError ? error.code
@@ -34,10 +37,25 @@ export class HumanAutomationPolicyRequestController {
       const code = reason === 'invalid_input' ? 'AI_INVALID_INPUT' : reason === 'conflict' ? 'AI_REVISION_CONFLICT'
         : reason === 'result_unknown' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE';
       throw new HttpException({ code, retryable: false, executionPermission: false, businessActionRequested: false,
-        nextAction: action === 'commit' || action === 'operation' ? 'read_original_operation'
-          : action === 'read' || action === 'preview' ? 'preview_current_configuration' : 'read_original_preparation' },
+        nextAction: action === 'commit' || action === 'commitConfirmed' || action === 'operation' ? 'read_original_operation'
+          : action === 'discover' || action === 'read' || action === 'preview' ? 'preview_current_configuration' : 'read_original_preparation' },
       reason === 'invalid_input' ? 400 : reason === 'conflict' || reason === 'result_unknown' ? 409 : 503);
     }
+  }
+
+  @Post('discover') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  discover(@Req() request: HumanAutomationPolicyHttpRequest & { body?: unknown }, @Body() _value: unknown) {
+    return this.call(request, 'discover', request.body);
+  }
+
+  @Post('prepare-confirmed') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareConfirmed(@Req() request: HumanAutomationPolicyHttpRequest & { body?: unknown }, @Body() _value: unknown) {
+    return this.call(request, 'prepareConfirmed', request.body);
+  }
+
+  @Post('commit-confirmed') @HttpCode(200) @Header('Cache-Control', 'no-store')
+  commitConfirmed(@Req() request: HumanAutomationPolicyHttpRequest & { body?: unknown }, @Body() _value: unknown) {
+    return this.call(request, 'commitConfirmed', request.body);
   }
 
   @Post('read') @HttpCode(200) @Header('Cache-Control', 'no-store')

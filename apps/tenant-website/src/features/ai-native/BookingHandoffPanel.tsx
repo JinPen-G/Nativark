@@ -2,22 +2,27 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useSite } from '../../SiteContext';
 import type { AiBookingHandoff } from '@rental-os/shared';
-import { createBookingHandoffConsumer, type BookingHandoffHost, type BookingHandoffState, type BookingPageContext } from './booking-handoff';
+import { sessionApi } from '../../data/authClient';
+import { EnterpriseBookingApproval } from '../../components/EnterpriseBookingApproval';
+import { createBookingHandoffConsumer, type BookingHandoffHost, type BookingHandoffState, type BookingPageContext,
+  type OriginalBookingQuoteFacts } from './booking-handoff';
 
 export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue, children, english }: {
   host: BookingHandoffHost; context: BookingPageContext; sessionIdentity: unknown; english: boolean;
   onContinue: (handoff: AiBookingHandoff) => void;
-  children: (handoff: AiBookingHandoff) => ReactNode;
+  children: (handoff: AiBookingHandoff, quote: OriginalBookingQuoteFacts | null) => ReactNode;
 }) {
   const [view, setView] = useState<{ owner: object; state: BookingHandoffState } | null>(null);
   const [consent, setConsent] = useState<{ owner: object; agreed: boolean } | null>(null);
+  const [approvedOrder, setApprovedOrder] = useState<{ owner: object; orderId: string } | null>(null);
   const { href } = useSite();
   const consumer = useMemo(() => {
     const owner = {};
-    return { owner, controller: createBookingHandoffConsumer(host, context, state => setView({ owner, state })) };
+    return { owner, controller: createBookingHandoffConsumer(host, context, state => setView({ owner, state }), Date.now,
+      { quote: sessionApi.getQuote, enterprisePolicies: sessionApi.enterpriseRentalPolicies }) };
   }, [host, sessionIdentity, context.tenantCode, context.workspaceCode, context.customerId, context.authenticated, context.productId]);
   // New context's first render cannot expose the previous instance's reference.
-  const state = view?.owner === consumer.owner ? view.state : { status: 'disabled', handoff: null } as BookingHandoffState;
+  const state = view?.owner === consumer.owner && host.isCurrent?.() !== false ? view.state : { status: 'disabled', handoff: null } as BookingHandoffState;
   const currentOwner = useRef(consumer.owner);
   const agreed = consent?.owner === consumer.owner && consent.agreed;
   currentOwner.current = consumer.owner;
@@ -60,7 +65,7 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
         onClick={() => { void consumer.controller.read(); }}>{text('读取原材料', 'Read original handoff')}</button>}
       {state.status === 'available' && <button type="button" className="button button-dark" onClick={() => { void proceed(); }}>
         {text('人工继续：复验并填入原表单', 'Continue: recheck and fill original form')}</button>}
-      {['continued', 'accepting', 'accepted'].includes(state.status) && <>
+      {['continued', 'accepting', 'accepted'].includes(state.status) && !state.quote?.enterprise?.approvalRequired && <>
         <label><input type="checkbox" checked={Boolean(agreed)} disabled={busy}
           onChange={event => setConsent({ owner: consumer.owner, agreed: event.target.checked })} />
           {text('我已检查原预约条件并明确继续办理', 'I have reviewed the original booking conditions and wish to proceed')}</label>
@@ -70,12 +75,25 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
           : <button type="button" className="button button-dark" disabled={!available || !agreed || busy}
               onClick={() => { if (agreed) void consumer.controller.accept(); }}>{available ? text('受理原预约材料', 'Accept original booking material') : text('提交能力未接通', 'Submission unavailable')}</button>}
       </>}
-      {available && ['disabled', 'unavailable', 'pending_reconcile'].includes(state.status) && <button type="button" className="button button-dark"
+      {state.status === 'continued' && state.quote?.enterprise?.approvalRequired && <EnterpriseBookingApproval
+        quoteId={state.quote.quoteId} identity={JSON.stringify([context.tenantCode, context.workspaceCode, context.customerId,
+          state.quote.quoteId, state.quote.enterprise.corporateCustomerId, state.quote.enterprise.noticeVersion])}
+        english={english} onOrder={orderId => {
+          if (currentOwner.current !== consumer.owner || host.isCurrent?.() === false) return;
+          // The original approval component owns its operation and receipt.
+          // Keep only its observed order ID for navigation, never synthesize
+          // an AI booking receipt or a replacement operation key.
+          setApprovedOrder({ owner: consumer.owner, orderId });
+          setView({ owner: consumer.owner, state: { status: 'order_observed', handoff: state.handoff, quote: state.quote } });
+        }} />}
+      {['disabled', 'unavailable', 'pending_reconcile'].includes(state.status) && <button type="button" className="button button-dark"
         disabled={busy || !consumer.controller.canReconcile()}
         onClick={() => { void consumer.controller.reconcile(); }}>{text('只核对原提交', 'Read original receipt only')}</button>}
       {state.receipt?.state === 'observed' && <Link className="button button-dark" to={href(`/orders/${encodeURIComponent(state.receipt.orderId)}`)}>
         {text('查看原订单', 'View original order')}</Link>}
+      {approvedOrder?.owner === consumer.owner && host.isCurrent?.() !== false && <Link className="button button-dark"
+        to={href(`/orders/${encodeURIComponent(approvedOrder.orderId)}`)}>{text('查看原企业订单', 'View original enterprise order')}</Link>}
     </section>
-    {['continued', 'accepting', 'accepted'].includes(state.status) && state.handoff && children(state.handoff)}
+    {['continued', 'accepting', 'accepted'].includes(state.status) && state.handoff && children(state.handoff, state.quote ?? null)}
   </>;
 }

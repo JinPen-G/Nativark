@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AI_CONVERSATION_DRAFT_VERSION, AI_SCENE_MODEL_HTTP_DRAFT, validateAiConversationAdmissionDraft, validateAiConversationTurnDraft,
-  validateAiSceneRequestReceiptDraft, validateAiSceneRequestReconcileDraft, aiOpeningCalendarSourceBasis,
+  validateAiSceneRequestReceiptDraft, validateAiSceneRequestReconcileDraft, aiOpeningCalendarSourceBasis, aiOpeningCapabilitySourceBasis,
   type AiConversationTurnObservationDraft, type AiTaskSceneReadDraft, type AiTaskSceneObservationDraft, type ApiResult } from '@rental-os/shared';
 import { APP_ROUTES, type AppRouteDefinition } from '@/app/navigation';
 import { currentSessionEpoch } from '@/app/queryClient';
@@ -51,6 +51,8 @@ const basis = (value: OpeningTaskMaterial) => JSON.stringify({
   taskId: value.task.state === 'observed' ? value.task.taskId : null, scope: value.material.scope,
   origin: [value.original.inputRef, value.original.contentHash, value.original.sceneVersion], version: value.material.configVersion,
   integrations: integrationBasis(value),
+  category: value.material.categorySource,
+  capabilities: value.material.capabilityObservation && aiOpeningCapabilitySourceBasis(value.material.capabilityObservation),
   calendarSource: value.material.calendarSource && aiOpeningCalendarSourceBasis(value.material.calendarSource),
   sections: value.material.sections.map(row => ({ key: row.key, title: row.title, status: row.status, issue: row.issue, summary: row.summary,
     required: row.required, impact: row.impact, version: row.evidence.version, manual: row.manual,
@@ -138,6 +140,7 @@ function OriginalOpeningDiagnostics({ conversationId, turn, current, onUnavailab
       || value.task.revision !== original.task.revision || value.material.audience !== 'operator'
       || value.material.scope.tenantId !== auth.tenant?.tenantId || value.material.scope.workspaceId !== auth.currentWorkspaceId) throw Error('AI_REVISION_CONFLICT');
     const calendar = readinessCalendarSource(value.material.calendarSource, value.material.scope, value.material.observedAt);
+    if (!toOpeningReadinessDiagnostics(value.material)) throw Error('AI_RESOURCE_UNAVAILABLE');
     if (calendar) {
       const { sourceHash, observations: _observations, ...source } = calendar;
       if (!value.material.sections.some(section => section.key === 'business_calendar') || await commandHash(source) !== sourceHash)
@@ -171,6 +174,14 @@ function OriginalOpeningDiagnostics({ conversationId, turn, current, onUnavailab
           // access; a cached frontend permission or opening read cannot do so.
           if (latest.material.integrationObservation?.state !== 'observed' || !permitted(APP_ROUTES.tenantIntegrations)) throw Error('AI_ACCESS_DENIED');
           check(); navigate(APP_ROUTES.tenantIntegrations.path);
+        })} />}
+      {frame?.material.capabilityObservation?.state === 'observed' && valid() && permitted(APP_ROUTES.rentalCapabilities) && <ActionButton
+        label={t('经营空间能力')} intent="review" disabled={busy} onAction={() => run(async (signal, check) => {
+          if (!permitted(APP_ROUTES.rentalCapabilities)) throw Error('AI_ACCESS_DENIED');
+          const latest = await read(signal, check); check();
+          if (basis(latest) !== basis(frame)) { setFrame(latest); setChanged(true); onUnavailable?.(); throw Error('AI_RECONFIRM_OPENING'); }
+          if (latest.material.capabilityObservation?.state !== 'observed' || !permitted(APP_ROUTES.rentalCapabilities)) throw Error('AI_ACCESS_DENIED');
+          check(); navigate(APP_ROUTES.rentalCapabilities.path);
         })} />}
     </div>
     {error && <Alert type="warning" title={t('开业事实不可读取，旧事实已撤回；请进入原开业配置页。')} />}
@@ -218,6 +229,11 @@ function ReadinessDisplay({ display, action }: { display: ReadinessDiagnosticsDi
     <h3>{t('开业诊断')}</h3>
     {display.ready !== null && <p>{t(display.ready ? '服务端判定可开业' : '仍有配置缺口')}</p>}
     {display.observedAt && <p>{t('查询时点')}：{formatTimestamp(display.observedAt).value} · {t('配置版本')}：{safeDisplayText(display.configVersion, 191)}</p>}
+    {display.observedAt && <>
+      <p>{display.categorySource ? <>{t('当前采用品类')}：{safeDisplayText(display.categorySource.categoryCode, 191)} · {t('品类版本')}：{safeDisplayText(display.categorySource.categoryVersion, 191)}</>
+        : t('原材料未记录品类版本，不能推定当前采用。')}</p>
+      <OpeningCapabilityDetails facts={display.capabilityObservation} />
+    </>}
     <dl className={styles.facts}>{display.rows.map(row => <div key={row.key} data-readiness-state={row.state}>
       <dt>{t(safeDisplayText(row.title, 200))}</dt><dd>{t(labels[row.state])}</dd>
       {row.state !== 'completed' && <dd>{row.state === 'unavailable' ? t('事实源不可用，不能据此判定完成。') : t(safeDisplayText(row.missing, 1000))}</dd>}
@@ -233,4 +249,30 @@ function ReadinessDisplay({ display, action }: { display: ReadinessDiagnosticsDi
       : '外部凭据、真实连接、发布与采用结果尚未核验。')}</p>}
     <p className={styles.help}>{t('各分区独立读取；保存草稿、审核发布和采用需继续原业务流程。')}</p>
   </section>;
+}
+
+function OpeningCapabilityDetails({ facts }: { facts: ReadinessDiagnosticsDisplay['capabilityObservation'] }) {
+  const { t } = useAiManagementLocale();
+  if (facts?.state !== 'observed') return <p role="status">{t(facts?.reason === 'current_capability_permission_required'
+    ? '当前无权读取经营空间能力状态。' : '原经营空间能力来源未加载。')}</p>;
+  const states = { enabled: '已启用', paused: '已暂停', disabled: '已停用', declared_not_implemented: '尚未实现', not_enabled: '未启用' };
+  const observed = facts.observation;
+  return <>
+    <p>{observed.missingRequired.length ? <>{t('原服务报告缺少必需能力')}：{observed.missingRequired.map(code => safeDisplayText(code, 191)).join('、')}</>
+      : t('原服务本次未报告缺少必需能力。')}</p>
+    <p className={styles.help}>{t('能力门槛不是整体开业或外部连接成功证明。')}</p>
+    <details>
+      <summary>{t('经营空间能力')} · {observed.capabilities.length}</summary>
+      <p>{t('能力来源观察时间')}：{formatTimestamp(observed.observedAt).value}</p>
+      <dl className={styles.facts}>{observed.capabilities.map(row => <div key={row.code}>
+        <dt>{safeDisplayText(row.code, 191)}</dt><dd>{t(states[row.state])} · {t(row.requiredForCategory ? '本品类必需' : '本品类非必需')}</dd>
+        <dd>{t(row.declaredByCategory ? '已声明' : '未声明')} · {t(row.implemented ? '已实现' : '未实现')} · {t(row.applicable ? '适用' : '不适用')}{row.providedByCore && <> · {t('Core 内建')}</>}</dd>
+        <dd>{t('登记实现版本')}：{row.implementationVersion === null ? t('未记录') : safeDisplayText(row.implementationVersion, 191)}</dd>
+        {row.instance ? <>
+          <dd>{t('实例实现版本')}：{safeDisplayText(row.instance.implementationVersion, 191)} · {t('配置版本')}：{safeDisplayText(row.instance.configVersion, 191)} · {t('原修订')}：{row.instance.revision}</dd>
+          <dd>{t('实例更新时间')}：{formatTimestamp(row.instance.updatedAt).value}{row.upgradeAvailable && <> · {t('原服务提示有可用升级')}</>}</dd>
+        </> : <dd>{t('未提供独立能力实例；不据此推断已启用扩展。')}</dd>}
+      </div>)}</dl>
+    </details>
+  </>;
 }

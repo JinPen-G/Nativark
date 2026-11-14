@@ -1,5 +1,20 @@
+import { useCallback } from 'react';
 import type { AiTaskRuleDraftReviewResponse } from '@rental-os/shared';
+import { useAiManagementLocale } from './management-locale';
 import styles from './AiManagement.module.css';
+
+const recoveryEnglish: Record<string, string> = {
+  '原草稿保存因版本冲突未提交。': 'The original draft save was rejected because its version changed.',
+  '请读取当前字段，核对新差异并准备新的 AI 提案。': 'Read the current fields, review new changes and prepare a new AI proposal.',
+  '读取当前字段并重新准备': 'Read current fields and prepare again',
+  '原拒绝记录': 'Original rejection receipt',
+};
+export function useRuleDraftLocale() {
+  const locale = useAiManagementLocale();
+  const t = useCallback((text: string) => locale.locale === 'en-US' && recoveryEnglish[text]
+    ? recoveryEnglish[text] : locale.t(text), [locale.locale, locale.t]);
+  return { ...locale, t };
+}
 
 const labels = {
   'fulfillment.pickupInspectionRequired': ['交付检查', 'Pickup inspection'],

@@ -1,5 +1,5 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Optional, Param, Post, Req } from '@nestjs/common';
-import { AI_STAFF_INSPECTION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_STAFF_INSPECTION_HTTP_DRAFT, staffFulfillmentReceiptRequest, staffFulfillmentReceiptObservation } from '@rental-os/shared';
 import { z } from 'zod';
 import type { StaffInspectionRequestFactory } from './inspection-assist.composition';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema } from './inspection-assist.validation';
@@ -43,11 +43,13 @@ export class StaffInspectionAssistController {
       const manualCommand = manualAction ? inspectionManualRequest(manualAction, body) : undefined;
       const lifecycleAction = isInspectionLifecycleAction(operation) ? operation : undefined;
       const lifecycleCommand = lifecycleAction ? inspectionLifecycleRequest(lifecycleAction, body) : undefined;
-      const input = structuredClone(manualCommand ?? lifecycleCommand ?? body);
+      const fulfillmentCommand = operation === 'fulfillment-receipt-read' ? staffFulfillmentReceiptRequest.parse(body) : undefined;
+      const input = structuredClone(manualCommand ?? lifecycleCommand ?? fulfillmentCommand ?? body);
       const current = { headers: { authorization: request?.headers?.authorization } };
       const result = await withInspectionRequestSignal(request, signal => this.requests.withRequest(current, async services => {
         const absent = () => { throw new InspectionAssistError('STORAGE_UNAVAILABLE'); };
         switch (operation) {
+          case 'fulfillment-receipt-read': return services.readFulfillmentReceipt(input);
           case 'history-read': return services.readHistory(input);
           case 'receipt-host-read': return services.readReceiptHost(input);
           case 'host-read': return services.readHost(input);
@@ -95,6 +97,7 @@ export class StaffInspectionAssistController {
           default: throw new InspectionAssistError('INVALID_INPUT');
         }
       }, signal), 15000);
+      if (fulfillmentCommand) return staffFulfillmentReceiptObservation.parse(result);
       if (manualAction && manualCommand) return inspectionManualResponse(manualAction, result, manualCommand);
       return lifecycleAction && lifecycleCommand ? inspectionLifecycleResponse(lifecycleAction, result, lifecycleCommand) : result;
     }, operation.startsWith('submission-') ? operation === 'submission-submit' || operation === 'submission-read' ? 'submission-read' : 'submission-preparation'

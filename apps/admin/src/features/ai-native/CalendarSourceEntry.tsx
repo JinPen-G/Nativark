@@ -2,6 +2,7 @@
  * existing linked R1/Core consumers. It never asks the user to supply a TaskId. */
 import { useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { aiTaskCalendarDraftEntryReference, aiTaskCalendarDraftPreparationReference, aiTaskCalendarDraftOperationResponse,
+  aiTaskCalendarDraftPreparationOperationResponse,
   type AiTaskCalendarDraftPreparationReference, type AiTaskCalendarDraftOperationResponse } from '@rental-os/shared';
 import { ActionButton, Alert, Button, ConfirmAction, Select } from '@/components/ui';
 import { aiTaskCalendarDraftApi } from '@/api/aiTaskCalendarDraft';
@@ -23,6 +24,7 @@ export function CalendarSourceEntry({ date, identity, current, onAccessDenied, o
   const epoch = currentSessionEpoch(), binding = JSON.stringify([identity, stableOwner, auth.user, epoch]);
   const mounted = useRef(true);
   const owner = useRef({ binding, current }); owner.current = { binding, current };
+  const journey = useRef({ binding, prepared }); journey.current = { binding, prepared };
   const active = () => mounted.current && owner.current.binding === binding && epoch === currentSessionEpoch() && !document.hidden
     && auth.hasPermission('rental-os:calendar:edit') && owner.current.current();
   const session = useMemo(() => {
@@ -39,11 +41,42 @@ export function CalendarSourceEntry({ date, identity, current, onAccessDenied, o
     const status = (error as { response?: { status?: number } }).response?.status;
     if (active() && (status === 401 || status === 403)) onAccessDenied(); throw error;
   } };
+  const recordPrepared = (nextTaskId: string, reference: AiTaskCalendarDraftPreparationReference) => {
+    const original = aiTaskCalendarDraftPreparationReference.parse(structuredClone(reference));
+    if (!active() || !taskId || task?.state !== 'observed' || task.taskId !== taskId
+      || original.taskId !== taskId || nextTaskId === taskId) throw Error('AI_SCOPE_CHANGED');
+    setPrepared({ binding, taskId: nextTaskId, reference: original });
+  };
   const complete = async (receipt: AiTaskCalendarDraftOperationResponse) => {
-    const saved = aiTaskCalendarDraftOperationResponse.parse(receipt), pending = view.pending;
-    if (!active() || !pending || !prepared || prepared.binding !== binding || !taskId
-      || prepared.reference.taskId !== taskId || saved.taskId !== prepared.taskId || saved.reference.taskId !== prepared.taskId
+    const saved = aiTaskCalendarDraftOperationResponse.parse(structuredClone(receipt)), pending = view.pending;
+    const selected = journey.current.prepared;
+    if (!active() || !pending || !selected || selected.binding !== binding || !taskId || journey.current.binding !== binding
+      || selected.reference.taskId !== taskId || saved.taskId !== selected.taskId || saved.reference.taskId !== selected.taskId
       || saved.operation.state !== 'committed' || saved.operation.target.date !== date) throw Error('AI_RESULT_UNKNOWN');
+    const check = () => {
+      if (!active() || journey.current.binding !== binding || journey.current.prepared !== selected) throw Error('AI_SCOPE_CHANGED');
+    };
+    const originalEntry = await aiTaskCalendarDraftApi.entryOperation(pending, new AbortController().signal); check();
+    if (originalEntry.scope.tenantId !== auth.tenant?.tenantId || originalEntry.scope.workspaceId !== auth.currentWorkspaceId
+      || originalEntry.reference.operationKey !== pending.operationKey || originalEntry.operation.state !== 'original_request_recorded'
+      || originalEntry.operation.task.state !== 'observed' || originalEntry.operation.task.taskId !== taskId
+      || originalEntry.operation.target.id !== saved.operation.target.id || originalEntry.operation.target.version !== saved.operation.target.version
+      || originalEntry.operation.target.date !== date) throw Error('AI_RESULT_UNKNOWN');
+    const linked = aiTaskCalendarDraftPreparationOperationResponse.parse(await aiTaskCalendarDraftApi.preparationOperation(
+      selected.reference, new AbortController().signal)); check();
+    if (linked.scope.tenantId !== auth.tenant?.tenantId || linked.scope.workspaceId !== auth.currentWorkspaceId
+      || linked.reference.taskId !== taskId || linked.reference.operationKey !== selected.reference.operationKey
+      || linked.operation.state !== 'ai_proposal_saved' || linked.operation.task.taskId !== saved.taskId
+      || linked.operation.task.runId !== saved.reference.runId || linked.operation.proposal.reference.taskId !== saved.reference.taskId
+      || linked.operation.proposal.reference.runId !== saved.reference.runId || linked.operation.proposal.reference.stepId !== saved.reference.stepId
+      || linked.operation.proposal.target.id !== saved.operation.target.id || linked.operation.proposal.target.date !== date
+      || linked.operation.proposal.target.version !== saved.operation.target.version
+      || linked.operation.proposal.target.baseRevision !== saved.operation.target.baseRevision) throw Error('AI_RESULT_UNKNOWN');
+    const currentReceipt = aiTaskCalendarDraftOperationResponse.parse(await aiTaskCalendarDraftApi.operation(saved.reference, new AbortController().signal)); check();
+    if (currentReceipt.taskId !== saved.taskId || currentReceipt.reference.taskId !== saved.reference.taskId
+      || currentReceipt.reference.runId !== saved.reference.runId || currentReceipt.reference.stepId !== saved.reference.stepId
+      || currentReceipt.operation.state !== 'committed' || JSON.stringify(currentReceipt.operation) !== JSON.stringify(saved.operation))
+      throw Error('AI_RESULT_UNKNOWN');
     let storage: Storage | undefined; try { storage = window.localStorage; } catch { /* Preserve the original keys. */ }
     const originalPreparation = calendarPreparationStore(calendarPreparationStorageKey({ tenantId: auth.tenant?.tenantId,
       workspaceId: auth.currentWorkspaceId, actorId: auth.user?.id, taskId }), value => aiTaskCalendarDraftPreparationReference.parse(value), storage);
@@ -52,9 +85,9 @@ export function CalendarSourceEntry({ date, identity, current, onAccessDenied, o
     // stores compare exact keys and preserve a newer request from another page.
     const entryCurrent = entry.read(), preparationCurrent = originalPreparation.read();
     if (entryCurrent && entryCurrent.operationKey !== pending.operationKey || preparationCurrent
-      && (preparationCurrent.taskId !== prepared.reference.taskId || preparationCurrent.operationKey !== prepared.reference.operationKey))
+      && (preparationCurrent.taskId !== selected.reference.taskId || preparationCurrent.operationKey !== selected.reference.operationKey))
       throw Error('AI_RESULT_UNKNOWN');
-    originalPreparation.clearCompleted(prepared.reference);
+    check(); originalPreparation.clearCompleted(selected.reference);
     entry.clearCompleted(pending);
     if (active()) onComplete();
   };
@@ -79,10 +112,11 @@ export function CalendarSourceEntry({ date, identity, current, onAccessDenied, o
     </>}
     {(task?.state === 'not_observed' || view.result?.operation.state === 'not_observed') && <Alert type="warning" title={t('日历任务尚未观察到，保留原定位继续核对。')} />}
     {view.pending && !view.result && <Alert type="warning" title={t('原任务结果待核对，请按原操作读取。')} />}
-    {taskId && <CalendarDraftPreparation key={`${binding}:${taskId}`} taskId={taskId} identity={binding} date={date} current={active} onAccessDenied={onAccessDenied}
-      onPrepared={(id, reference) => { if (active()) setPrepared({ binding, taskId: id, reference: structuredClone(reference) }); }} />}
+    {taskId && !proposalTaskId && <CalendarDraftPreparation key={`${binding}:${taskId}`} taskId={taskId} identity={binding} date={date} current={active} onAccessDenied={onAccessDenied}
+      onPrepared={recordPrepared} />}
     {proposalTaskId && <TaskCalendarDraft key={`${binding}:${proposalTaskId}`} taskId={proposalTaskId} identity={binding} current={active}
-      onAccessDenied={onAccessDenied} allowPreparation={false} onCommitted={complete} />}
+      onAccessDenied={onAccessDenied} allowPreparation={false} onCommitted={complete}
+      preparationTaskId={taskId} onPrepared={recordPrepared} />}
     {!!view.error && <Alert type="warning" title={t('当前日历操作不可用，请核对原结果或当前权限。')} />}
   </section>;
 }

@@ -18,7 +18,9 @@ export function gatewayBudgetPrincipal(value: AiExecutionContext) {
   const subject = context.audience === 'client' && context.actor.kind === 'customer'
     ? { actorId: context.actor.customerId, actorKind: 'CUSTOMER' as const }
     : ['operator', 'staff'].includes(context.audience) && context.actor.kind === 'user'
-      ? { actorId: context.actor.userId, actorKind: 'USER' as const } : null;
+      ? { actorId: context.actor.userId, actorKind: 'USER' as const }
+      : context.audience === 'automation' && context.actor.kind === 'automation'
+        ? { actorId: context.actor.subjectId, actorKind: 'AUTOMATION' as const } : null;
   if (!subject) throw new BudgetError('FORBIDDEN');
   return { ...subject, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };
 }

@@ -1328,6 +1328,19 @@ model AiBusinessFailureOutbox {
   refundId         String?  @db.VarChar(191)
   inspectionId     String?  @db.VarChar(191)
   exceptionId      String?  @db.VarChar(191)
+  /// Independent original resource links; never reuse notification/refund/inspection identities.
+  fulfillmentOrderId String? @db.VarChar(191)
+  configurationKind String? @db.VarChar(24)
+  configurationId String? @db.VarChar(191)
+  configurationProfileTenantId String? @db.VarChar(191)
+  configurationSnapshotWorkspaceId String? @db.VarChar(191)
+  configurationSettingsWorkspaceId String? @db.VarChar(191)
+  sectionCode String? @db.VarChar(64)
+  dueAt DateTime? @db.DateTime(3)
+  locationId String? @db.VarChar(191)
+  sourceHash String? @db.Char(64)
+  sourcePolicyId String? @db.VarChar(191)
+  sourcePolicyRevision Int? @db.UnsignedInt
   resourceRevision Int      @db.UnsignedInt
   orderId          String?  @db.VarChar(191)
   failureCode      String   @db.VarChar(32)
@@ -1349,12 +1362,19 @@ model AiBusinessFailureOutbox {
   notification     RentalNotificationLog? @relation("AiFailureNotification", fields: [tenantId, workspaceId, notificationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_notification_fk")
   refund           RentalPaymentRefund? @relation("AiFailureRefund", fields: [tenantId, workspaceId, refundId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_refund_fk")
   inspection       RentalInspectionRecord? @relation("AiFailureInspection", fields: [tenantId, workspaceId, inspectionId, orderId], references: [tenantId, workspaceId, id, orderId], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_inspection_fk")
+  fulfillmentOrder RentalOrder? @relation("AiFailureFulfillment", fields: [tenantId, workspaceId, fulfillmentOrderId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_fulfillment_fk")
+  fulfillmentLocation RentalFulfillmentLocation? @relation("AiFailureLocation", fields: [tenantId, workspaceId, locationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_location_fk")
+  configurationProfile TenantRentalProfile? @relation("AiFailureConfigurationProfile", fields: [configurationProfileTenantId], references: [tenantId], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_config_profile_fk")
+  configurationSnapshot RentalCoreStateSnapshot? @relation("AiFailureConfigurationSnapshot", fields: [tenantId, configurationSnapshotWorkspaceId], references: [tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_config_snapshot_fk")
+  configurationSettings RentalTenantBusinessSettings? @relation("AiFailureConfigurationSettings", fields: [tenantId, configurationSettingsWorkspaceId], references: [tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_config_settings_fk")
 
   automationInputs AiAutomationInput[]
   @@unique([tenantId, workspaceId, id], map: "ai_failure_outbox_scope_id_key")
   @@unique([tenantId, workspaceId, deduplicationKey], map: "ai_failure_outbox_dedup_key")
   @@index([tenantId, workspaceId, status, nextAttemptAt], map: "ai_failure_outbox_due_idx")
   @@index([tenantId, workspaceId, inspectionId, exceptionId], map: "ai_failure_outbox_inspection_idx")
+  @@index([tenantId, workspaceId, fulfillmentOrderId], map: "ai_failure_outbox_fulfillment_idx")
+  @@index([tenantId, workspaceId, configurationKind, configurationId, sectionCode], map: "ai_failure_outbox_config_idx")
   @@map("ai_business_failure_outbox")
 }
 
@@ -2098,7 +2118,10 @@ model RentalCoreStateSnapshot {
   tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workspace   BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   state       Json
+  /// Original snapshot row revision, updated by its writer; not a readiness aggregate version.
+  configurationRevision Int @default(1) @db.UnsignedInt
   updatedAt   DateTime          @updatedAt
+  aiFailureConfigurationEvents AiBusinessFailureOutbox[] @relation("AiFailureConfigurationSnapshot")
 
   /// 一个经营空间至多一份快照；同时供 BusinessWorkspace 侧的一对一反向关系使用。
   @@unique([tenantId, workspaceId], map: "core_snapshot_tenant_ws_key")
@@ -4163,8 +4186,11 @@ model TenantRentalProfile {
   capabilities  Json
   terminology   Json
   configVersion String
+  /// Original default-workspace profile row revision; configVersion remains the category reference.
+  configurationRevision Int @default(1) @db.UnsignedInt
   initializedAt DateTime                 @default(now())
   updatedAt     DateTime                 @updatedAt
+  aiFailureConfigurationEvents AiBusinessFailureOutbox[] @relation("AiFailureConfigurationProfile")
 
   @@index([categoryCode])
   @@map("tenant_rental_profiles")
@@ -4362,6 +4388,7 @@ model RentalFulfillmentLocation {
   orders             RentalOrder[]
   reservations       RentalReservation[]
   serviceCapacities  RentalServiceCapacity[]
+  aiFailureLocationEvents AiBusinessFailureOutbox[] @relation("AiFailureLocation")
   createdAt          DateTime                   @default(now())
   updatedAt          DateTime                   @updatedAt
 
@@ -4828,6 +4855,7 @@ model RentalOrder {
   changes                       RentalOrderChange[]
   documentSnapshots             RentalOrderDocumentSnapshot[]
   auditLogs                     OperationLog[]
+  aiFailureFulfillmentEvents AiBusinessFailureOutbox[] @relation("AiFailureFulfillment")
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
 
@@ -5403,7 +5431,9 @@ model RentalTenantBusinessSettings {
   settings      Json
   updatedBy     String
   updatedAt     DateTime           @updatedAt
+  aiFailureConfigurationEvents AiBusinessFailureOutbox[] @relation("AiFailureConfigurationSettings")
 
+  @@unique([tenantId, workspaceId], map: "rental_business_settings_scope_key")
   @@index([tenantId], map: "rental_business_settings_tenant_idx")
   @@map("rental_tenant_business_settings")
 }

@@ -35,6 +35,7 @@ import { aiTaskRecoveryApi } from '@/api/aiTaskRecovery';
 import { TaskClarification } from "./TaskClarification";
 import { VisibleObservationHost } from './VisibleObservationHost';
 import { ConversationHistory } from './ConversationHistory';
+import { AutomationReviewSection, AUTOMATION_REVIEW_ENTRY_PERMISSIONS } from './AutomationReviewSection';
 import { WorkbenchInputReviewSession, type WorkbenchQuoteParameterReview } from './workbench-input-review-session';
 import { displaySame } from './workbench-display-host';
 import { TaskWorkbenchModelControlProvider } from './TaskWorkbenchModelControls';
@@ -57,10 +58,15 @@ export function TaskCenterPage() {
   const auth = useAuthStore();
   const allowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user && !auth.user.isSaasAdmin
     && AI_TASK_CENTER_ENTRY_PERMISSIONS.some(auth.hasPermission);
+  const reviewAllowed = !!auth.token && !!auth.tenant?.tenantId && !!auth.currentWorkspaceId && !!auth.user && !auth.user.isSaasAdmin
+    && AUTOMATION_REVIEW_ENTRY_PERMISSIONS.some(auth.hasPermission);
+  const identity = identityKey();
   return <>
     <PageHeader title={t("AI 任务中心")} />
     {allowed ? <TaskCenterReader key={identityKey()} identity={identityKey()} tenantId={auth.tenant!.tenantId} workspaceId={auth.currentWorkspaceId!} />
       : <Alert type="warning" title={t("当前没有任务中心读取入口权限。")}/>}
+    {reviewAllowed && <AutomationReviewSection key={`review:${identity}`} identity={identity}
+      current={() => identityKey() === identity} />}
   </>;
 }
 function TaskCenterReader({ identity, tenantId, workspaceId }: { identity: string; tenantId: string; workspaceId: string }) {

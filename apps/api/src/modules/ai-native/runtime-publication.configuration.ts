@@ -14,6 +14,9 @@ const configuration = z.record(z.unknown()).optional();
 const configurations = z.object({
   conversations: configuration,
   workbenchDisplay: configuration,
+  businessFailure: configuration,
+  automationExplanation: configuration,
+  automationReviewGrant: configuration,
   orderModel: configuration,
   quoteModel: configuration,
   openingModel: configuration,
@@ -28,6 +31,7 @@ const configurations = z.object({
   inputCounting: configuration,
   budgetManagement: configuration,
   clientModel: configuration,
+  clientPublic: configuration,
   clientTaskPolicy: configuration,
   staffRecognition: configuration,
   staffManual: configuration,

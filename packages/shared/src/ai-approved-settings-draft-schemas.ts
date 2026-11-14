@@ -15,6 +15,9 @@ const base = { draftVersion, taskId: id(36), proposalId: id(36), proposalRevisio
 const reference = { ...base, reviewedPayloadHash: hash };
 const stringArray = { type: 'array', items: { type: 'string', minLength: 1, maxLength: 191 }, maxItems: 64, uniqueItems: true };
 const channels = { type: 'array', items: { enum: ['sms', 'app_push', 'wechat', 'email'] }, minItems: 1, maxItems: 4, uniqueItems: true };
+const notifications = object({ enabledEvents: stringArray, editableChannels: channels });
+const reconfirmationOriginal = object({ creationKey: id(128), changeKey: id(128) });
+const reconfirmationReview = { original: reconfirmationOriginal, notifications, expiresAt: time };
 const snapshot = object({ recordId: id(36), revision: literal(1), contentHash: hash });
 const taskRevision = { type: 'integer', minimum: 1, maximum: 4294967295 };
 const createdTask = object({ taskId: id(36), runId: id(36), status: { enum: AI_TASK_STATUSES_DRAFT },
@@ -29,7 +32,7 @@ const cancelEvent = object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), ta
     to: { enum: ['cancel_requested', 'cancelled'] }, reason: { enum: AI_TASK_TRANSITION_REASONS_DRAFT } }) });
 const cancelObservation = { taskId: id(36), expectedRevision: taskRevision,
   snapshot: object({ revision: taskRevision, cursor, status: { enum: AI_TASK_STATUSES_DRAFT } }),
-  cancellation: { enum: ['request_not_rollback', 'task_cancelled_not_business_rollback'] },
+  cancellation: { enum: ['request_not_rollback', 'task_cancelled_not_business_rollback', 'request_settled_not_business_rollback'] },
   remoteCancellation: literal('not_attested'), automaticRetry: literal(false), admission: literal('not_granted'),
   absenceSemantics: literal('not_observed_is_not_proof_of_uncommitted') };
 
@@ -46,6 +49,22 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
     object({ state: literal('prepared_not_approved'), change: ref('AiApprovedSettingsChangeReviewDraft') }),
     object({ state: literal('not_observed'), nextAction: literal('read_change_receipt') })] },
   AiApprovedSettingsTaskCreationDraft: object({ creationKey: id(128), changeKey: id(128) }),
+  AiSettingsReconfirmationReadDraft: object({ original: reconfirmationOriginal }),
+  AiSettingsReconfirmationReviewDraft: object(reconfirmationReview),
+  AiSettingsReconfirmationPrepareDraft: object({ ...reconfirmationReview, reviewHash: hash,
+    decision: literal('prepare_reconfirmed_notification_change') }),
+  AiSettingsReconfirmationDifferenceDraft: object({ original: reconfirmationOriginal, previous: ref('AiApprovedSettingsChangeReviewDraft'),
+    current: ref('AiApprovedSettingsCurrentDraft'), fields: { type: 'array', minItems: 1, maxItems: 1,
+      items: object({ field: literal('notifications'), before: notifications, after: notifications }) },
+    originalBaseMatches: { type: 'boolean' }, reviewHash: hash, expiresAt: time,
+    persistence: literal('not_attempted'), approval: literal('not_granted'), automaticRetry: literal(false) }),
+  AiSettingsReconfirmationPreparedDraft: object({ original: reconfirmationOriginal,
+    closure: object({ taskId: id(36), runId: id(36), taskRevision: revision, state: literal('closed_no_business_submission') }),
+    change: ref('AiApprovedSettingsChangeReviewDraft'), reference: reconfirmationOriginal,
+    task: literal('not_created_by_preparation'), approval: literal('fresh_proposal_and_approval_required'),
+    oldResources: literal('not_reset_or_reallocated'), automaticRetry: literal(false) }),
+  AiSettingsReconfirmationObservationDraft: object({ original: reconfirmationOriginal, receipt: ref('AiApprovedSettingsChangeReceiptDraft'),
+    reference: reconfirmationOriginal, execution: literal('read_only_no_preparation_or_dispatch'), automaticRetry: literal(false) }),
   AiApprovedSettingsTaskCreatedDraft: object({ ...creationBase, receipt: createdTask }),
   AiApprovedSettingsTaskCreationReadDraft: object({ ...creationBase, receipt: { oneOf: [
     object({ state: literal('observed'), creationKey: id(128), retryable: literal(false), nextAction: literal('read_original_task'), task: createdTask }),
@@ -53,7 +72,13 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
   AiApprovedSettingsTaskCancellationResultDraft: object({ ...cancelBase, receipt: {
     ...object({ event: cancelEvent, runRevision: { anyOf: [taskRevision, { type: 'null' }] } }), required: ['event'] } }),
   AiApprovedSettingsTaskCancellationReadDraft: object({ ...cancelBase, receipt: { oneOf: [
-    object({ ...cancelObservation, status: literal('observed'), event: cancelEvent }),
+    ...(['cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded'] as const).map(to => object({ ...cancelObservation,
+      status: literal('observed'), cancellation: literal(to === 'cancel_requested' ? 'request_not_rollback'
+        : to === 'cancelled' ? 'task_cancelled_not_business_rollback' : 'request_settled_not_business_rollback'),
+      event: { ...cancelEvent, properties: { ...cancelEvent.properties!, data: object({
+        from: to === 'cancel_requested' ? { enum: AI_TASK_STATUSES_DRAFT } : literal('cancel_requested'), to: literal(to),
+        reason: literal(to === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled') }) } },
+      snapshot: object({ revision: taskRevision, cursor, status: to === 'cancel_requested' ? { enum: AI_TASK_STATUSES_DRAFT } : literal(to) }) })),
     object({ ...cancelObservation, status: literal('not_observed'), event: { type: 'null' } })] } }),
   AiApprovedSettingsTaskRunDraft: { oneOf: [
     object({ kind: literal('not_started'), reason: { enum: ['host_aborted', 'plan_unavailable', 'task_not_runnable',

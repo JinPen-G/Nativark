@@ -4,7 +4,7 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCOPE_DRAFT_SCHEMAS,
-  AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS, type AiOpeningBusinessMaterialDraft,
+  AI_OPENING_INTEGRATION_OBSERVATION_SCHEMAS, aiOpeningCategorySourceDraft, aiOpeningCapabilityFactsDraft, type AiOpeningBusinessMaterialDraft,
   type AiOpeningSectionMaterialDraft, type AiOpeningIntegrationState } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { readAiOpeningCalendarSource } from '../tools/diagnostic-read-facts.service';
@@ -42,11 +42,37 @@ export function buildOpeningDiagnosisText(value: unknown): string {
     if (!valid(copy) || new Set(copy.sections.map(section => section.key)).size !== copy.sections.length) throw unavailable();
     readAiOpeningCalendarSource(copy.calendarSource, copy.scope, copy.observedAt);
     if (copy.calendarSource && !copy.sections.some(section => section.key === 'business_calendar')) throw unavailable();
+    if (copy.categorySource) aiOpeningCategorySourceDraft.parse(copy.categorySource);
+    if (copy.capabilityObservation) {
+      const capabilities = aiOpeningCapabilityFactsDraft.parse(copy.capabilityObservation);
+      if (capabilities.state === 'observed' && (!copy.categorySource
+        || capabilities.scope.tenantId !== copy.scope.tenantId || capabilities.scope.workspaceId !== copy.scope.workspaceId
+        || capabilities.observation.categoryCode !== copy.categorySource.categoryCode)) throw unavailable();
+    }
     material = copy;
   } catch { throw unavailable(); }
 
   const lines = ['原开业检查结果', `观察时间 ${material.observedAt}`,
     `经营配置版本 ${quoted(material.configVersion)}`, '以下仅覆盖本次原材料的已读取分区。'];
+  lines.push(material.categorySource ? `当前采用品类 ${quoted(material.categorySource.categoryCode)} · 版本 ${quoted(material.categorySource.categoryVersion)}`
+    : '原材料未记录品类版本，不能推定当前采用。');
+  const capabilities = material.capabilityObservation;
+  if (capabilities?.state === 'observed') {
+    const states = { enabled: '已启用', paused: '已暂停', disabled: '已停用', declared_not_implemented: '尚未实现', not_enabled: '未启用' };
+    lines.push('原经营空间能力状态', `能力来源观察时间 ${capabilities.observation.observedAt}`);
+    for (const row of capabilities.observation.capabilities) {
+      lines.push(`${quoted(row.code)} · ${row.requiredForCategory ? '本品类必需' : '本品类非必需'} · ${row.declaredByCategory ? '已声明' : '未声明'}`
+        + ` · ${row.implemented ? '已实现' : '未实现'} · ${row.applicable ? '适用' : '不适用'} · ${states[row.state]}`
+        + (row.providedByCore ? ' · Core 内建' : ''),
+      `登记实现版本 ${row.implementationVersion === null ? '未记录' : quoted(row.implementationVersion)}`);
+      if (row.instance) lines.push(`实例实现版本 ${quoted(row.instance.implementationVersion)} · 配置版本 ${quoted(row.instance.configVersion)} · 修订 ${row.instance.revision}`,
+        `实例更新时间 ${row.instance.updatedAt}${row.upgradeAvailable ? ' · 原服务提示有可用升级' : ''}`);
+      else lines.push('未提供独立能力实例；不据此推断已启用扩展。');
+    }
+    lines.push(capabilities.observation.missingRequired.length ? `原服务报告缺少必需能力 ${capabilities.observation.missingRequired.map(quoted).join('、')}`
+      : '原服务本次未报告缺少必需能力。', '能力门槛不是整体开业或外部连接成功证明。');
+  } else lines.push(capabilities?.state === 'unavailable' && capabilities.reason === 'current_capability_permission_required'
+    ? '当前无权读取经营空间能力状态。' : '原经营空间能力来源未加载。');
   for (const section of material.sections) {
     lines.push(`${quoted(section.title)}（${section.required ? '必需' : '可选'}） ${sectionStates[section.status]}`);
     if (section.summary !== undefined) lines.push(`原检查摘要 ${quoted(section.summary)}`);

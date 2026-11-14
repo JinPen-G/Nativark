@@ -9,11 +9,11 @@
       <view class="muted small mt-4">{{templateName}}</view>
       <view wx:if="{{!allocations.length}}" class="muted mt-12">暂无可归还的已领取资源，请刷新订单核对。</view>
       <view class="device" wx:for="{{allocations}}" wx:for-item="alloc" wx:for-index="ai" wx:key="id">
-        <view class="device__head"><switch checked="{{alloc.selected}}" data-index="{{ai}}" bindchange="onToggleAllocation" color="#1677FF"/><view class="grow ml-12"><view class="subtitle">{{alloc.title}}</view><view class="muted small">{{alloc.identifier}} · 待还 {{alloc.max}}</view></view><input class="return-quantity" type="number" value="{{alloc.quantity}}" data-index="{{ai}}" bindinput="onQuantity"/></view>
-        <view class="form-row" wx:for="{{alloc.fields}}" wx:for-item="field" wx:for-index="fi" wx:key="code"><view class="form-row__label">{{field.label}}{{field.required ? ' *' : ''}}</view><view class="form-row__control"><switch checked="{{field.checked}}" data-ai="{{ai}}" data-fi="{{fi}}" bindchange="onFieldBool" color="#1677FF"/></view></view>
+        <view class="device__head"><switch disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" checked="{{alloc.selected}}" data-index="{{ai}}" bindchange="onToggleAllocation" color="#1677FF"/><view class="grow ml-12"><view class="subtitle">{{alloc.title}}</view><view class="muted small">{{alloc.identifier}} · 待还 {{alloc.max}}</view></view><input disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" class="return-quantity" type="number" value="{{alloc.quantity}}" data-index="{{ai}}" bindinput="onQuantity"/></view>
+        <view class="form-row" wx:for="{{alloc.fields}}" wx:for-item="field" wx:for-index="fi" wx:key="code"><view class="form-row__label">{{field.label}}{{field.required ? ' *' : ''}}</view><view class="form-row__control"><switch disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" checked="{{field.checked}}" data-ai="{{ai}}" data-fi="{{fi}}" bindchange="onFieldBool" color="#1677FF"/></view></view>
       </view>
       <view wx:if="{{sharedFields.length}}" class="shared-head muted small">整单检查项</view>
-      <view class="form-row" wx:for="{{sharedFields}}" wx:key="code"><view class="form-row__label">{{item.label}}{{item.required ? ' *' : ''}}</view><view class="form-row__control"><picker wx:if="{{item.type === 'select'}}" range="{{item.options}}" data-index="{{index}}" bindchange="onFieldSelect"><text class="form-row__value">{{item.value || '请选择'}}</text></picker><input wx:elif="{{item.type === 'number'}}" class="form-row__input" type="digit" placeholder="填写数值" value="{{item.value}}" data-index="{{index}}" bindinput="onFieldInput"/><input wx:elif="{{item.type === 'text'}}" class="form-row__input" placeholder="填写检查结果" value="{{item.value}}" data-index="{{index}}" bindinput="onFieldInput"/><view wx:elif="{{item.type === 'photo'}}" class="inspection-photos"><view class="photo-grid"><image wx:for="{{item.photos}}" wx:for-item="photo" wx:key="id" src="{{photo.path}}" mode="aspectFill"/></view><button class="btn btn--secondary btn--small" data-index="{{index}}" disabled="{{uploading || item.photos.length >= 5}}" bindtap="onChooseEvidencePhoto">{{uploading ? '正在上传…' : item.photos.length ? '继续添加照片' : '拍摄 / 选择照片'}}</button><text class="muted tiny">最多 5 张，上传成功后才可提交</text></view></view></view>
+      <view class="form-row" wx:for="{{sharedFields}}" wx:key="code"><view class="form-row__label">{{item.label}}{{item.required ? ' *' : ''}}</view><view class="form-row__control"><picker disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" wx:if="{{item.type === 'select'}}" range="{{item.options}}" data-index="{{index}}" bindchange="onFieldSelect"><text class="form-row__value">{{item.value || '请选择'}}</text></picker><input disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" wx:elif="{{item.type === 'number'}}" class="form-row__input" type="digit" placeholder="填写数值" value="{{item.value}}" data-index="{{index}}" bindinput="onFieldInput"/><input disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" wx:elif="{{item.type === 'text'}}" class="form-row__input" placeholder="填写检查结果" value="{{item.value}}" data-index="{{index}}" bindinput="onFieldInput"/><view wx:elif="{{item.type === 'photo'}}" class="inspection-photos"><view class="photo-grid"><image wx:for="{{item.photos}}" wx:for-item="photo" wx:key="id" src="{{photo.path}}" mode="aspectFill"/></view><button class="btn btn--secondary btn--small" data-index="{{index}}" disabled="{{uploading || item.photos.length >= 5}}" bindtap="onChooseEvidencePhoto">{{uploading ? '正在上传…' : item.photos.length ? '继续添加照片' : '拍摄 / 选择照片'}}</button><text class="muted tiny">最多 5 张，上传成功后才可提交</text></view></view></view>
       <view wx:if="{{noTemplate}}" class="muted mt-12">当前品类无启用的{{returnLabel}}检查模板，确认后直接交接。</view>
     </view></view>
     <view class="section section--tight"><view class="card">
@@ -24,11 +24,42 @@
       <view class="kv"><text class="kv__label strong">实付金额</text><money-text amount="{{feeFinal}}" currency="{{currency}}" tone="primary"></money-text></view>
       <view class="muted small mt-4">损坏赔偿等异常费用最终以商户结算为准。</view>
     </view></view>
-    <view class="section section--tight"><view class="card signature-card"><view class="row row--between"><view class="subtitle">客户现场签字 *</view><button class="link small signature-clear" bindtap="onClearSignature">清除重签</button></view><view class="muted small">请客户核对归还物品及检查结果后，在下方签名确认。</view><canvas canvas-id="returnSignature" class="signature-pad" style="width:{{signatureWidth}}px;height:{{signatureHeight}}px" width="{{signatureWidth}}" height="{{signatureHeight}}" disable-scroll="true" bindtouchstart="onSignatureStart" bindtouchmove="onSignatureMove" bindtouchend="onSignatureEnd"></canvas><view class="signature-status muted tiny">{{signatureFileAssetId ? '签字已上传，可提交' : signatureDrawn ? '已签名，提交时会安全上传' : '签字为必填项'}}</view></view></view>
+    <view class="section section--tight"><view class="card signature-card"><view class="row row--between"><view class="subtitle">客户现场签字 *</view><button class="link small signature-clear" disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable}}" bindtap="onClearSignature">清除重签</button></view><view class="muted small">请客户核对归还物品及检查结果后，在下方签名确认。</view><canvas canvas-id="returnSignature" class="signature-pad" style="width:{{signatureWidth}}px;height:{{signatureHeight}}px" width="{{signatureWidth}}" height="{{signatureHeight}}" disable-scroll="true" bindtouchstart="onSignatureStart" bindtouchmove="onSignatureMove" bindtouchend="onSignatureEnd"></canvas><button class="btn btn--secondary btn--small" disabled="{{busy || uploading || fulfillmentPending || fulfillmentUnavailable || signaturePending || !signatureDrawn || signatureFileAssetId}}" bindtap="onUploadSignature">上传现场签名（本步不提交）</button><view class="signature-status muted tiny">{{signaturePending ? '原签名上传待核对' : signatureFileAssetId ? '本批签名已上传' : signatureDrawn ? '已签名，可明确上传或确认提交' : '签字为必填项'}}</view></view></view>
     <view wx:if="{{error}}" class="section small" style="color:var(--danger)">{{error}}</view>
-    <view class="bottom-bar"><button class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy || uploading || !allocations.length}}" bindtap="onSubmit">确认{{returnLabel}}</button></view>
+    <view class="bottom-bar"><button class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy || uploading || fulfillmentPending || fulfillmentUnavailable || !allocations.length}}" bindtap="onSubmit">确认{{returnLabel}}</button></view>
   </block>
   <button class="btn btn--secondary" disabled="{{aiInspectionHistoryLoading || !id}}" bindtap="onInspectionHistory">选择本人检查历史（只读）</button>
   <text wx:if="{{aiInspectionHistoryMessage}}" role="status">{{aiInspectionHistoryMessage}}</text>
+  <view aria-label="本次 AI 检查材料">
+    <text class="muted tiny">AI图片限PNG/JPEG、512KB；WAV录音最长12秒。本次只选一种材料。</text>
+    <button class="btn btn--secondary" disabled="{{aiInspectionMediaBusy || aiInspectionRecording || noTemplate || !id}}" bindtap="onInspectionImage">拍照 / 相册选取AI材料</button>
+    <button class="btn btn--secondary" disabled="{{aiInspectionMediaBusy || aiInspectionRecording || noTemplate || !id}}" bindtap="onInspectionRecord">录制WAV说明</button>
+    <button wx:if="{{aiInspectionRecording}}" bindtap="onInspectionStopRecord">停止本次录音</button>
+    <button disabled="{{!aiInspectionCanUpload}}" loading="{{aiInspectionMediaBusy}}" bindtap="onInspectionUploadMedia">上传选定材料</button>
+    <button wx:if="{{aiInspectionMediaBusy}}" bindtap="onInspectionCancelUpload">停止本端文件上传</button>
+    <button wx:if="{{aiInspectionCanSaveDraft}}" bindtap="onInspectionSaveMediaDraft">明确保存AI检查草稿</button>
+    <button wx:if="{{aiInspectionCanRecoverMedia}}" bindtap="onInspectionRecoverMedia">核对原上传 / 草稿</button>
+    <button wx:if="{{aiInspectionCanVerifyUpload}}" bindtap="onInspectionVerifyUpload">明确核验原上传</button>
+    <text wx:if="{{aiInspectionMediaMessage}}" role="status">{{aiInspectionMediaMessage}}</text>
+  </view>
+  <button class="btn btn--secondary" disabled="{{aiInspectionTaskLoading || noTemplate || !id}}" bindtap="onInspectionTask">选择原检查草稿使用 AI</button>
+  <text wx:if="{{aiInspectionTaskMessage}}" role="status">{{aiInspectionTaskMessage}}</text>
+  <view wx:if="{{humanFormPreview}}" class="section" aria-label="原人工值差异">
+    <text>{{humanFormPreview.draftLabel}} · {{humanFormPreview.resource}}</text>
+    <view wx:for="{{humanFormPreview.changes}}" wx:key="code">
+      <text>{{item.label}} · {{item.scope}}</text>
+      <text>当前：{{item.before}} → 人工值：{{item.after}}</text>
+    </view>
+    <text wx:for="{{humanFormPreview.omitted}}" wx:key="*this">{{item}}</text>
+    <text class="muted tiny">仅填入原检查表单；仍须客户现场签字及另行确认提交。</text>
+    <button disabled="{{busy || uploading || signaturePending || fulfillmentPending || fulfillmentUnavailable || !humanFormPreview.changes.length}}" bindtap="onAdoptInspectionHumanValues">采用所示人工值到原表单</button>
+    <button disabled="{{busy}}" bindtap="onCancelInspectionHumanValues">保留当前表单</button>
+  </view>
+  <view aria-label="原交接恢复">
+    <text wx:if="{{fulfillmentMessage}}" role="status">{{fulfillmentMessage}}</text>
+    <button wx:if="{{fulfillmentCanRead}}" disabled="{{busy || uploading}}" bindtap="onReadHandoverReceipt">读取原交接提交收据</button>
+    <button wx:if="{{signatureCanRecover}}" disabled="{{busy || uploading || fulfillmentPending}}" bindtap="onRecoverSignature">核对原签名上传</button>
+  </view>
+  <ai-inspection-task wx:if="{{aiInspectionTaskVisible}}" id="ai-inspection-task" bind:result="onInspectionTaskResult" bind:humanvalues="onInspectionHumanValues" />
   <ai-inspection-assist id="ai-inspection-assist" hidden="{{!aiInspectionVisible}}" />
 </view>

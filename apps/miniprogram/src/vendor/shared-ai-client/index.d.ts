@@ -1,7 +1,31 @@
 // Build-owned runtime from the canonical public customer-contract entry.
 // No Node/shared package runtime is loaded by the mini-program.
 import type * as Runtime from '@rental-os/shared/miniprogram-client';
+export declare const aiClientGoalPreparationRequestSchema: typeof Runtime.aiClientGoalPreparationRequestSchema;
+export declare const aiClientGoalPreparationReadRequestSchema: typeof Runtime.aiClientGoalPreparationReadRequestSchema;
+export declare const aiClientGoalPreparationResponseSchema: typeof Runtime.aiClientGoalPreparationResponseSchema;
+export declare const aiClientGoalCandidatesRequestSchema: typeof Runtime.aiClientGoalCandidatesRequestSchema;
+export declare const aiClientGoalProjectionSchema: typeof Runtime.aiClientGoalProjectionSchema;
+export declare const aiClientGoalQuoteRequestSchema: typeof Runtime.aiClientGoalQuoteRequestSchema;
+export declare const createClientGoalSession: typeof Runtime.createClientGoalSession;
+export declare const clientGoalStorageKey: typeof Runtime.clientGoalStorageKey;
+export declare const clientGoalSelectedInput: typeof Runtime.clientGoalSelectedInput;
+export declare const clientGoalTimeOptions: typeof Runtime.clientGoalTimeOptions;
+export declare const clientGoalTextHash: typeof Runtime.clientGoalTextHash;
 export declare const AI_CLIENT_ENTRY_HTTP_DRAFT: typeof Runtime.AI_CLIENT_ENTRY_HTTP_DRAFT;
+export declare const AI_CLIENT_PUBLIC_HTTP: typeof Runtime.AI_CLIENT_PUBLIC_HTTP;
+export declare const aiClientPublicSessionRequestSchema: typeof Runtime.aiClientPublicSessionRequestSchema;
+export declare const aiClientPublicReadRequestSchema: typeof Runtime.aiClientPublicReadRequestSchema;
+export declare const aiClientPublicPreparationRequestSchema: typeof Runtime.aiClientPublicPreparationRequestSchema;
+export declare const aiClientPublicOperationRequestSchema: typeof Runtime.aiClientPublicOperationRequestSchema;
+export declare const aiClientPublicContinuationRequestSchema: typeof Runtime.aiClientPublicContinuationRequestSchema;
+export declare const aiClientPublicContinuationReadRequestSchema: typeof Runtime.aiClientPublicContinuationReadRequestSchema;
+export declare const aiClientPublicSessionResponseSchema: typeof Runtime.aiClientPublicSessionResponseSchema;
+export declare const aiClientPublicReadResponseSchema: typeof Runtime.aiClientPublicReadResponseSchema;
+export declare const aiClientPublicPreparationResponseSchema: typeof Runtime.aiClientPublicPreparationResponseSchema;
+export declare const aiClientPublicOperationResponseSchema: typeof Runtime.aiClientPublicOperationResponseSchema;
+export declare const aiClientPublicContinuationResponseSchema: typeof Runtime.aiClientPublicContinuationResponseSchema;
+export declare const createAiClientPublicContinuitySession: typeof Runtime.createAiClientPublicContinuitySession;
 export declare const AI_TASK_DRAFT_VERSION: typeof Runtime.AI_TASK_DRAFT_VERSION;
 export declare const AI_TASK_INPUT_DRAFT_VERSION: typeof Runtime.AI_TASK_INPUT_DRAFT_VERSION;
 export declare const AI_TASK_INPUT_FIELD_IDS_DRAFT: typeof Runtime.AI_TASK_INPUT_FIELD_IDS_DRAFT;

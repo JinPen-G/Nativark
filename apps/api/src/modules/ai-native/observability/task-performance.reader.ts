@@ -1,9 +1,9 @@
 /** Current owner-only task/run/resource observations from original persistence.
  * No telemetry body store, model request, financial recalculation or SLO claim.
  * Missing timestamps and samples remain explicitly unmeasured. */
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { isDeepStrictEqual } from 'node:util';
-import { AI_TASK_STATUSES_DRAFT, AI_TASK_TERMINAL_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TASK_TERMINAL_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
   type AiExecutionContext, type AiTaskPerformanceObservationDraft, type AiTaskOutcomeSampleDraft, type AiTaskStatusDraft, type AiTaskClientVisibleReportDraft, type AiTaskClientVisibleObservationDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
@@ -13,9 +13,12 @@ import { requestFingerprint as hash } from '../../rental-core/rental-idempotency
 import { gatewayBudgetDenialLogId, gatewayDeliveryLogId, gatewayDeliveryTimingSchema } from '../prisma-task-gateway-audit';
 import { CLIENT_VISIBLE_LOG_ACTION, parseClientVisibleLog } from './task-visible-observation.service';
 import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';
+import { evaluateAiTaskTransitionDraft } from '../task-transition-draft';
+import { aiStepActionId } from '../ai-step-registration.repository';
+import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionBudget' | 'aiTaskExecutionCharge'
-  | 'aiGatewayInvocation' | 'operationLog'> & Partial<Pick<PrismaClient, '$transaction'>>;
+  | 'aiGatewayInvocation' | 'operationLog'> & Partial<Pick<PrismaClient, '$transaction' | 'aiTaskEvent' | 'aiTaskRunOverhead' | 'aiTaskRunPlan'>>;
 const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const commandSchema = z.object({ taskId: id, usageLimit: z.number().int().min(1).max(20), usageAfter: id.optional(), includeTaskFinancial: z.boolean().optional() }).strict();
 const sampleSchema = z.object({ taskIds: z.array(id).min(1).max(50)
@@ -24,12 +27,12 @@ const takeoverSampleDetail = z.object({ receiptVersion: z.literal('original-run-
   taskRevision: z.number().int().min(1).max(4294967294), runRevision: z.number().int().min(2).max(4294967294),
   previousFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), purpose: z.literal('recovery_only') }).passthrough();
 const taskSelect = { id: true, scopeId: true, sceneCode: true, sceneVersion: true, status: true, revision: true,
-  eventCursor: true, createdAt: true, updatedAt: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
+  contractVersion: true, eventCursor: true, createdAt: true, updatedAt: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
 const runSelect = { id: true, scopeId: true, taskId: true, actorKind: true, actorId: true, sequence: true,
-  status: true, revision: true, startedAt: true, endedAt: true } satisfies Prisma.AiRunSelect;
+  status: true, revision: true, fencingToken: true, leaseOwnerId: true, leaseExpiresAt: true, startedAt: true, endedAt: true } satisfies Prisma.AiRunSelect;
 const stepSelect = { id: true, scopeId: true, taskId: true, runId: true, sequence: true,
-  toolCode: true, toolVersion: true, status: true, effect: true, revision: true } satisfies Prisma.AiStepSelect;
-const budgetSelect = { scopeId: true, taskId: true, policyVersion: true, revision: true,
+  toolCode: true, toolVersion: true, actionId: true, status: true, effect: true, revision: true } satisfies Prisma.AiStepSelect;
+const budgetSelect = { scopeId: true, taskId: true, policyVersion: true, policyFingerprint: true, revision: true,
   maxSteps: true, reservedSteps: true, consumedSteps: true, maxCalls: true, reservedCalls: true, consumedCalls: true,
   maxActiveMs: true, reservedActiveMs: true, consumedActiveMs: true,
   maxOutputBytes: true, reservedOutputBytes: true, consumedOutputBytes: true } satisfies Prisma.AiTaskExecutionBudgetSelect;
@@ -47,10 +50,162 @@ function elapsed(start: Date | null, end: Date | null): string | null {
   if (!Number.isSafeInteger(duration) || duration < 0) throw unavailable();
   return String(duration);
 }
+function fence(value: Prisma.Decimal) {
+  if (!(value instanceof Prisma.Decimal) || !value.isInteger() || value.isNegative()
+    || value.greaterThan('18446744073709551615')) throw unavailable();
+  return value.toFixed(0);
+}
+// Prisma Decimal carries a constructor that structuredClone cannot copy. Keep
+// immutable read snapshots as decimal strings, including subsequent comparison.
+function fencedSnapshot<T extends { fencingToken: Prisma.Decimal }>(rows: T[]) {
+  return structuredClone(rows.map(row => ({ ...row,
+    fencingToken: row.fencingToken === undefined ? null : fence(row.fencingToken) })));
+}
 
 export class TaskPerformanceReader {
   constructor(private readonly db: Db, private readonly actions: Pick<AiTaskRepositoryAuthority, 'resolve'>,
     private readonly usage: Pick<TaskBudgetUsageReader, 'read'> & Partial<Pick<TaskBudgetUsageReader, 'summary'>>, private readonly clock: () => Date = () => new Date()) {}
+
+  /** A partial aggregate can close a failed/cancelled successor. Its original
+   * Task event and released Run-time receipt attest that closure; status names,
+   * lease expiry and Task.updatedAt cannot replace those persisted witnesses. */
+  private async partialTaskEnd(task: Prisma.AiTaskGetPayload<{ select: typeof taskSelect }>,
+    runs: ReturnType<typeof fencedSnapshot<Prisma.AiRunGetPayload<{ select: typeof runSelect }>>>,
+    steps: Array<Prisma.AiStepGetPayload<{ select: typeof stepSelect }>>,
+    budget: Prisma.AiTaskExecutionBudgetGetPayload<{ select: typeof budgetSelect }> | null,
+    context: AiExecutionContext) {
+    const run = runs.at(-1), db = this.db;
+    if (task.status !== 'PARTIALLY_SUCCEEDED' || runs.length > 50 || steps.length > 200 || !run
+      || !['FAILED', 'CANCELLED'].includes(run.status) || !run.endedAt || !budget
+      || task.contractVersion !== AI_TASK_DRAFT_VERSION || run.leaseOwnerId !== null || run.leaseExpiresAt !== null
+      || typeof db.aiTaskEvent?.findMany !== 'function' || typeof db.aiTaskRunOverhead?.findMany !== 'function'
+      || typeof db.aiTaskRunPlan?.findMany !== 'function'
+      || typeof db.aiTaskExecutionCharge.findMany !== 'function') return null;
+    if (runs.some((row, index) => row.sequence !== index + 1 || !AI_TASK_TERMINAL_STATUSES_DRAFT.includes(row.status.toLowerCase() as AiTaskStatusDraft))) return null;
+    const endedAt = run.endedAt, runFence = run.fencingToken;
+    if (runFence === null || !/^[1-9][0-9]{0,19}$/u.test(runFence)
+      || task.eventCursor < 1n || task.revision < 2 || budget.scopeId !== task.scopeId || budget.taskId !== task.id) return null;
+    if (steps.some(step => !runs.some(row => row.id === step.runId))
+      || runs.some(row => row.endedAt && time(row.endedAt) > time(endedAt))) throw unavailable();
+    const authorize = async () => {
+      for (const operation of ['read_events', 'read_step_terminal'] as const) {
+        const current = await this.actions.resolve(task.id, operation);
+        aiTaskAccessFromContext(current, task.id, this.clock());
+        if (identity(current) !== identity(context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+    };
+    await authorize();
+    const key = { scopeId: task.scopeId, taskId: task.id, runId: run.id };
+    const readPlans = () => db.aiTaskRunPlan!.findMany({ where: key, take: 2 });
+    const plans = structuredClone(await readPlans());
+    if (!plans.length) return null;
+    if (plans.length !== 1) throw unavailable();
+    const saved = plans[0], parsedPlan = aiTaskRunPlanSchema.safeParse(saved.payload);
+    if (!parsedPlan.success || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
+      || saved.planHash !== hash(saved.payload) || parsedPlan.data.taskId !== task.id || parsedPlan.data.runId !== run.id) throw unavailable();
+    const plan = parsedPlan.data, ownSteps = steps.filter(step => step.runId === run.id).sort((a, b) => a.sequence - b.sequence);
+    const scope = aiTaskAccessFromContext(context, task.id, this.clock()).scope;
+    if (ownSteps.some((step, index) => step.sequence !== index + 1 || !plan.steps[index]
+      || step.actionId !== aiStepActionId(scope, task.id, plan.steps[index].registrationRef)
+      || step.toolCode !== plan.steps[index].toolCode || step.toolVersion !== plan.steps[index].toolVersion)) throw unavailable();
+    // With no successful step in this Run the original runner cannot pass its
+    // first planned action. Even at a tied clock, startup is not that action's
+    // interval. Bind the required pre interval to its frozen registration.
+    const first = ownSteps[0], requiredSegment = plan.steps.length ? `pre:${plan.steps[0].registrationRef}` : 'startup';
+    const readRegistrations = () => first ? db.aiTaskEvent!.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId,
+      type: 'step.registered', payload: { path: '$.data.stepId', equals: first.id } }, take: 2 }) : Promise.resolve([]);
+    const registrations = structuredClone(await readRegistrations());
+    if (first) {
+      if (!registrations.length) return null;
+      if (registrations.length !== 1) throw unavailable();
+      const original = registrations[0], payload = z.object({ data: z.object({ stepId: id, runId: id,
+        sequence: z.number().int().positive(), stepRevision: z.literal(1) }).strict(),
+      registration: z.object({ reference: z.string().min(1).max(191), digest: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+      initiator: z.object({ kind: z.literal('worker'), id: z.string().min(1).max(191),
+        actorKind: z.literal('USER'), actorId: id }).strict() }).passthrough().safeParse(original.payload);
+      if (!payload.success || original.scopeId !== key.scopeId || original.taskId !== task.id || original.type !== 'step.registered'
+        || uint(original.cursor) < 1n || original.cursor >= task.eventCursor || !revision(original.taskRevision)
+        || original.taskRevision >= task.revision || time(original.occurredAt) > time(endedAt)
+        || payload.data.data.stepId !== first.id || payload.data.data.runId !== run.id || payload.data.data.sequence !== first.sequence
+        || payload.data.registration.reference !== plan.steps[0].registrationRef || payload.data.initiator.actorId !== run.actorId) throw unavailable();
+    }
+    const readEvents = () => db.aiTaskEvent!.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId,
+      taskRevision: { lte: task.revision }, cursor: { lte: task.eventCursor }, type: 'task.transition', occurredAt: endedAt,
+      payload: { path: '$.data.to', equals: 'partially_succeeded' } }, orderBy: { cursor: 'asc' }, take: 2 });
+    // Rotated intervals and final settlement can share one millisecond. Verify
+    // the whole bounded generation and its original charges, without guessing
+    // the last interval from a segment name, ID order or wall-clock tie.
+    const readOverheads = async () => fencedSnapshot(await db.aiTaskRunOverhead!.findMany({
+      where: { ...key, fencingToken: new Prisma.Decimal(runFence) }, orderBy: { id: 'asc' }, take: 1001 }));
+    const events = structuredClone(await readEvents()), overheads = await readOverheads();
+    if (!events.length || !overheads.length) return null;
+    if (overheads.length > 1000) return null;
+    if (events.length !== 1 || new Set(overheads.map(row => row.id)).size !== overheads.length) throw unavailable();
+    if (overheads.some(row => !row.completedAt || row.activeMs === null)) return null;
+    const event = events[0];
+    const envelope = z.object({ data: z.object({ from: z.enum(['running', 'cancel_requested']), to: z.literal('partially_succeeded'),
+      reason: z.enum(['completed', 'cancel_settled']) }).strict(), initiator: z.object({ kind: z.literal('worker'),
+      id: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u), actorKind: z.literal('USER'), actorId: id }).strict() })
+      .passthrough().safeParse(event.payload);
+    if (!envelope.success || event.scopeId !== task.scopeId || event.taskId !== task.id || event.type !== 'task.transition'
+      || !revision(event.taskRevision) || event.taskRevision < 2 || event.taskRevision > task.revision
+      || uint(event.cursor) < 1n || event.cursor > task.eventCursor || time(event.occurredAt) !== time(endedAt)) throw unavailable();
+    const owner = envelope.data.initiator;
+    if (context.actor.kind !== 'user' || owner.actorId !== context.actor.userId || run.actorKind !== owner.actorKind
+      || run.actorId !== owner.actorId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const decision = evaluateAiTaskTransitionDraft({ contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id,
+      revision: event.taskRevision - 1, status: envelope.data.data.from, steps: steps.map(step => ({ stepId: step.id,
+        runId: step.runId, sequence: step.sequence, revision: step.revision, actionId: step.actionId,
+        outcome: { status: step.status.toLowerCase() as import('@rental-os/shared').AiStepStatusDraft,
+          effect: step.effect.toLowerCase() as import('@rental-os/shared').AiStepStateDraft['outcome']['effect'] } })) },
+    { contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, expectedRevision: event.taskRevision - 1,
+      ...envelope.data.data, occurredAt: endedAt.toISOString(), initiator: { kind: 'worker', id: owner.id } });
+    if (!decision.allowed || decision.nextRevision !== event.taskRevision || ownSteps.some(step => step.status === 'SUCCEEDED')
+      || run.status !== (envelope.data.data.reason === 'cancel_settled' ? 'CANCELLED' : 'FAILED')
+      || envelope.data.data.reason === 'cancel_settled' && (!task.cancelRequestedAt || time(task.cancelRequestedAt) > time(endedAt)
+        || !steps.some(step => step.effect === 'COMMITTED'))) throw unavailable();
+    const readCharges = async () => fencedSnapshot(await db.aiTaskExecutionCharge.findMany({ where: { ...key,
+      OR: [{ chargeId: { in: overheads.map(row => row.id) } }, { resource: 'ACTIVE_MS', stepId: null,
+        fencingToken: new Prisma.Decimal(runFence), evidenceRef: { startsWith: 'overhead:' } }] },
+      orderBy: { chargeId: 'asc' }, take: overheads.length + 1 }));
+    const readPending = () => db.aiTaskExecutionCharge.findMany({ where: { ...key, resource: 'ACTIVE_MS', stepId: null,
+      fencingToken: new Prisma.Decimal(runFence), status: { in: ['RESERVED', 'UNKNOWN'] } }, select: { chargeId: true }, take: 1 });
+    if ((await readPending()).length) return null;
+    const charges = await readCharges();
+    if (charges.length < overheads.length) return null;
+    if (charges.length !== overheads.length || new Set(charges.map(row => row.chargeId)).size !== charges.length) throw unavailable();
+    for (const overhead of overheads) {
+      if (overhead.scopeId !== key.scopeId || overhead.taskId !== key.taskId || overhead.runId !== key.runId
+        || overhead.chargeId !== overhead.id || !id.safeParse(overhead.id).success || !overhead.completedAt || overhead.activeMs === null
+        || !revision(overhead.runRevision) || overhead.runRevision + 1 >= run.revision || overhead.fencingToken !== runFence
+        || overhead.leaseOwnerId !== owner.id || !/^[a-f0-9]{64}$/u.test(overhead.originHash) || overhead.policyHash !== budget.policyFingerprint
+        || !/^[a-f0-9]{64}$/u.test(overhead.requestFingerprint ?? '') || time(overhead.startedAt) > time(overhead.completedAt)
+        || time(overhead.startedAt) > time(endedAt) || time(overhead.completedAt) >= time(overhead.expiresAt)
+        || time(overhead.completedAt) > time(this.clock())) throw unavailable();
+      const measurementHash = hash({ version: 'run-overhead-measurement-1', ...key, id: overhead.id,
+        segment: overhead.segment, originHash: overhead.originHash, policyHash: overhead.policyHash,
+        leaseOwnerId: overhead.leaseOwnerId, fencingToken: overhead.fencingToken, runRevision: overhead.runRevision,
+        expiresAt: overhead.expiresAt.toISOString(), chargeId: overhead.chargeId, requestFingerprint: overhead.requestFingerprint,
+        activeMs: uint(overhead.activeMs).toString(), completedAt: overhead.completedAt.toISOString() });
+      const charge = charges.find(row => row.chargeId === overhead.id)!;
+      if (charge.scopeId !== key.scopeId || charge.taskId !== key.taskId || charge.runId !== key.runId || charge.resource !== 'ACTIVE_MS'
+        || charge.stepId !== null || charge.actionId !== null || charge.stepFingerprint !== null || charge.gatewayInvocationId !== null
+        || charge.leaseOwnerId !== owner.id || charge.fencingToken !== runFence || charge.requestFingerprint !== overhead.requestFingerprint
+        || overhead.measurementHash !== measurementHash || charge.status !== 'RECORDED' || charge.actualAmount !== overhead.activeMs
+        || uint(charge.amount) < overhead.activeMs || charge.outcomeFingerprint !== measurementHash
+        || charge.evidenceRef !== `overhead:${overhead.id}`) throw unavailable();
+    }
+    const closing = overheads.filter(row => row.segment === requiredSegment);
+    if (!closing.length || time(closing[0].completedAt!) < time(endedAt)) return null;
+    if (closing.length !== 1) throw unavailable();
+    return { endedAt, revalidate: async () => {
+      await authorize();
+      if (!isDeepStrictEqual(await readEvents(), events) || !isDeepStrictEqual(await readOverheads(), overheads)
+        || !isDeepStrictEqual(await readCharges(), charges) || !isDeepStrictEqual(await readPlans(), plans)
+        || !isDeepStrictEqual(await readRegistrations(), registrations) || (await readPending()).length) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await authorize();
+    } };
+  }
 
   /** A caller-selected original sample, never a whole-tenant rate inferred
    * from one page. Each task and its independent takeover receipt need current
@@ -282,7 +437,7 @@ export class TaskPerformanceReader {
       const readSteps = () => this.db.aiStep.findMany({ where: related,
         orderBy: [{ runId: 'asc' }, { sequence: 'asc' }, { id: 'asc' }], take: 201, select: stepSelect });
       const readBudget = () => this.db.aiTaskExecutionBudget.findFirst({ where: related, select: budgetSelect });
-      const runs = structuredClone(await readRuns()), steps = structuredClone(await readSteps()), budget = structuredClone(await readBudget());
+      const runs = fencedSnapshot(await readRuns()), steps = structuredClone(await readSteps()), budget = structuredClone(await readBudget());
       if (!Array.isArray(runs) || runs.length > 51 || !Array.isArray(steps) || steps.length > 201
         || new Set(runs.map(row => row.id)).size !== runs.length || new Set(steps.map(row => row.id)).size !== steps.length) throw unavailable();
       for (const run of runs) {
@@ -300,6 +455,7 @@ export class TaskPerformanceReader {
           || !AI_STEP_STATUSES_DRAFT.some(status => status === step.status.toLowerCase())
           || !['NONE', 'POSSIBLE', 'COMMITTED'].includes(step.effect)) throw unavailable();
       }
+      const partialEnd = await this.partialTaskEnd(task, runs, steps, budget, before);
       const visibleSteps = steps.slice(0, 200), stepIds = visibleSteps.map(step => step.id);
       // Group only this bounded, owner-authorized step window in SQL. Do not
       // load every historical charge or label updatedAt-createdAt tool latency.
@@ -366,8 +522,9 @@ export class TaskPerformanceReader {
           ...(command.usageAfter ? { after: command.usageAfter } : {}) });
         if (!isDeepStrictEqual(originalPage, currentPage)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       }
+      await partialEnd?.revalidate();
       const latest = structuredClone(await this.db.aiTask.findFirst({ where: access.where, select: taskSelect }));
-      if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(await readRuns(), runs)
+      if (!latest || !isDeepStrictEqual(latest, task) || !isDeepStrictEqual(fencedSnapshot(await readRuns()), runs)
         || !isDeepStrictEqual(await readSteps(), steps) || !isDeepStrictEqual(await readBudget(), budget)
         || !isDeepStrictEqual(await readActiveTime(), charges) || !isDeepStrictEqual(await readInvocations(), invocations)
         || !isDeepStrictEqual(await readDeliveryLogs(), deliveryLogs) || !isDeepStrictEqual(await readDenials(), denials)
@@ -382,10 +539,11 @@ export class TaskPerformanceReader {
       if (runs.some(run => run.startedAt && time(run.startedAt) > time(now) || run.endedAt && time(run.endedAt) > time(now))) throw unavailable();
       const startTimes = runs.slice(0, 50).flatMap(run => run.startedAt ? [time(run.startedAt)] : []);
       // Terminal task.updatedAt is not a completion clock: later metadata can
-      // change it. Only a complete, matching final run supplies an end timestamp.
+      // change it. A partial Task with a failed/cancelled successor additionally
+      // requires the original terminal event and released interval receipt above.
       const finalRun = runs.length <= 50 ? runs.at(-1) : undefined;
       const end = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'].includes(task.status)
-        && finalRun?.status === task.status ? finalRun.endedAt : null;
+        && finalRun?.status === task.status ? finalRun.endedAt : partialEnd?.endedAt ?? null;
       const result: AiTaskPerformanceObservationDraft = { version: 'task-performance-1', observedAt: now.toISOString(),
         task: { taskId: task.id, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion, status: task.status.toLowerCase(),
           revision: task.revision, createdAt: task.createdAt.toISOString(), lastChangedAt: task.updatedAt.toISOString(),

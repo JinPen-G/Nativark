@@ -3,7 +3,7 @@ import type { ClientHelpFaqItem, ClientPublicDocumentKind } from "@rental-os/sha
 import type { ClientRichTextNode } from "@rental-os/shared";
 import { parseClientRichText } from "../../vendor/shared-rich-text/client-rich-text";
 import { fetchPublicDocument } from "../../api/merchant";
-import { cachedMerchant, loadMerchant, type MerchantInfo } from "../../core/merchant";
+import { cachedMerchant, loadMerchant, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
 import { ROUTES, back, callPhone } from "../../core/ui";
 
 /**
@@ -34,6 +34,7 @@ interface LegalData {
   serviceHours: string;
   ruleVersion: string;
   loading: boolean;
+  publicServiceCode: string;
 }
 
 const TITLES: Record<DocKind, string> = { agreement: "用户服务协议", privacy: "隐私政策", "rental-rules": "租赁规则", help: "帮助与客服" };
@@ -54,7 +55,8 @@ Page({
     servicePhone: "",
     serviceHours: "",
     ruleVersion: "",
-    loading: false
+    loading: false,
+    publicServiceCode: ''
   } as LegalData,
 
   onLoad(options: Record<string, string | undefined>) {
@@ -72,7 +74,8 @@ Page({
       docName: doc?.name ?? TITLES[this.data.kind],
       version: doc?.version ?? this.data.version,
       servicePhone: info.servicePhone ?? "",
-      serviceHours: info.serviceHours ?? ""
+      serviceHours: info.serviceHours ?? "",
+      publicServiceCode: this.data.kind === 'help' ? resolveServiceCode(info) ?? '' : ''
     });
   },
 

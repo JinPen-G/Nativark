@@ -17,7 +17,10 @@ export type AiApprovedSettingsCurrentReadDraft = Readonly<Record<string, never>>
 export const AI_APPROVED_SETTINGS_CHANGE_HTTP_CONTRACTS = Object.freeze({
   readCurrentSettings: { request: 'AiApprovedSettingsCurrentReadDraft', response: 'AiApprovedSettingsCurrentDraft' },
   prepareOriginalSettingsChange: { request: 'AiApprovedSettingsChangePrepareDraft', response: 'AiApprovedSettingsChangePreparationResultDraft' },
-  readOriginalSettingsChange: { request: 'AiApprovedSettingsChangeReceiptReadDraft', response: 'AiApprovedSettingsChangeReceiptDraft' }
+  readOriginalSettingsChange: { request: 'AiApprovedSettingsChangeReceiptReadDraft', response: 'AiApprovedSettingsChangeReceiptDraft' },
+  readSettingsReconfirmationDifference: { request: 'AiSettingsReconfirmationReviewDraft', response: 'AiSettingsReconfirmationDifferenceDraft' },
+  prepareReconfirmedSettingsChange: { request: 'AiSettingsReconfirmationPrepareDraft', response: 'AiSettingsReconfirmationPreparedDraft' },
+  readReconfirmedSettingsChange: { request: 'AiSettingsReconfirmationReadDraft', response: 'AiSettingsReconfirmationObservationDraft' }
 } as const);
 /** Only the current notification projection, never secrets or execution proof. */
 export interface AiApprovedSettingsCurrentDraft {
@@ -37,6 +40,31 @@ export type AiApprovedSettingsChangeReceiptDraft =
 /** References the original Core preparation; never supplies task ownership,
  * a plan, approval or active configuration values. */
 export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }
+/** Original cancelled/rejected-no-submission evidence gates new preparation.
+ * These references are read-only locators, never inherited approval or authority. */
+export interface AiSettingsReconfirmationReadDraft { original: AiApprovedSettingsTaskCreationDraft; }
+export interface AiSettingsReconfirmationReviewDraft extends AiSettingsReconfirmationReadDraft {
+  notifications: AiApprovedSettingsChangePrepareDraft['notifications']; expiresAt: string;
+}
+export interface AiSettingsReconfirmationPrepareDraft extends AiSettingsReconfirmationReviewDraft {
+  reviewHash: string; decision: 'prepare_reconfirmed_notification_change';
+}
+export interface AiSettingsReconfirmationDifferenceDraft {
+  original: AiApprovedSettingsTaskCreationDraft; previous: AiApprovedSettingsChangeReviewDraft; current: AiApprovedSettingsCurrentDraft;
+  fields: [{ field: 'notifications'; before: AiApprovedSettingsChangePrepareDraft['notifications']; after: AiApprovedSettingsChangePrepareDraft['notifications'] }];
+  originalBaseMatches: boolean; reviewHash: string; expiresAt: string;
+  persistence: 'not_attempted'; approval: 'not_granted'; automaticRetry: false;
+}
+export interface AiSettingsReconfirmationPreparedDraft {
+  original: AiApprovedSettingsTaskCreationDraft;
+  closure: { taskId: string; runId: string; taskRevision: number; state: 'closed_no_business_submission' };
+  change: AiApprovedSettingsChangeReviewDraft; reference: AiApprovedSettingsTaskCreationDraft;
+  task: 'not_created_by_preparation'; approval: 'fresh_proposal_and_approval_required'; oldResources: 'not_reset_or_reallocated'; automaticRetry: false;
+}
+export interface AiSettingsReconfirmationObservationDraft {
+  original: AiApprovedSettingsTaskCreationDraft; receipt: AiApprovedSettingsChangeReceiptDraft; reference: AiApprovedSettingsTaskCreationDraft;
+  execution: 'read_only_no_preparation_or_dispatch'; automaticRetry: false;
+}
 /** Metadata acknowledgement only. Neither creation nor history grants execution. */
 export interface AiApprovedSettingsCreatedTaskDraft {
   taskId: string; runId: string; status: AiTaskStatusDraft; revision: number; replayed: boolean;
@@ -59,7 +87,7 @@ export type AiApprovedSettingsTaskCancellationResultDraft = SettingsCancellation
 export type AiApprovedSettingsTaskCancellationReadDraft = SettingsCancellationBase & { receipt: {
   taskId: string; expectedRevision: number; status: 'observed' | 'not_observed'; event: SettingsCancellationEvent | null;
   snapshot: { revision: number; cursor: string; status: AiTaskStatusDraft };
-  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested';
+  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback' | 'request_settled_not_business_rollback'; remoteCancellation: 'not_attested';
   automaticRetry: false; admission: 'not_granted'; absenceSemantics: 'not_observed_is_not_proof_of_uncommitted';
 } };
 /** Same persisted runner outcome, not a model result or proof of a Core commit. */

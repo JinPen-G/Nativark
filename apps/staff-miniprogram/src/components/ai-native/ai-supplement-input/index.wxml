@@ -1,6 +1,17 @@
 <view class="ai-supplement-input" aria-label="补充输入">
-  <view wx:for="{{visibleFields}}" wx:key="key" class="ai-supplement-input__field"><label for="{{instanceId + '-' + item.key}}">{{item.label}}</label><input id="{{instanceId + '-' + item.key}}" disabled="{{disabled || submitting || item.readonly}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" aria-label="{{item.label}}" aria-describedby="{{instanceId + '-' + item.key + '-error'}}"/><text id="{{instanceId + '-' + item.key + '-error'}}" wx:if="{{item.error}}">{{item.error}}</text></view>
+  <view wx:for="{{visibleFields}}" wx:key="key" class="ai-supplement-input__field">
+    <label for="{{instanceId + '-' + item.key}}">{{item.label}}</label>
+    <picker wx:if="{{item.kind === 'choice'}}" id="{{instanceId + '-' + item.key}}" disabled="{{disabled || submitting || item.readonly}}"
+      range="{{item.optionLabels}}" data-key="{{item.key}}" bindchange="onFieldChoice" aria-label="{{item.label}}"><text>{{item.selectedLabel}}</text></picker>
+    <textarea wx:elif="{{item.kind === 'text' && item.maxLength > 140}}" id="{{instanceId + '-' + item.key}}"
+      disabled="{{disabled || submitting || item.readonly}}" maxlength="{{item.maxLength}}" value="{{item.value}}" data-key="{{item.key}}"
+      bindinput="onFieldInput" aria-label="{{item.label}}" aria-describedby="{{instanceId + '-' + item.key + '-error'}}" />
+    <input wx:else id="{{instanceId + '-' + item.key}}" type="{{item.kind === 'integer' ? 'number' : 'text'}}" maxlength="{{item.maxLength}}"
+      disabled="{{disabled || submitting || item.readonly}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput"
+      aria-label="{{item.label}}" aria-describedby="{{instanceId + '-' + item.key + '-error'}}" />
+    <text id="{{instanceId + '-' + item.key + '-error'}}" wx:if="{{item.error}}">{{item.error}}</text>
+  </view>
   <text role="alert" aria-live="polite" wx:if="{{errorLabel}}">{{errorLabel}}</text>
   <text role="status" aria-live="polite" wx:if="{{submitting}}">正在提交补充信息</text>
-  <button disabled="{{disabled || submitting || definitionUnavailable || !hostAvailable}}" bindtap="onSubmit">{{submitting ? '提交中…' : '提交补充信息'}}</button>
+  <button disabled="{{disabled || submitting || definitionUnavailable || !hostAvailable}}" bindtap="onSubmit">{{submitting ? '提交中…' : submitLabel}}</button>
 </view>

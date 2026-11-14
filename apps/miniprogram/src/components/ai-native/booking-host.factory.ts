@@ -1,4 +1,6 @@
-import type { AiClientHostCapabilities, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision } from "@rental-os/shared";
+import type { AiClientHostCapabilities, AiBookingDraft, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision } from "@rental-os/shared";
+import { aiBookingDraftSchema } from '../../vendor/shared-ai-client';
+import { clientQuoteApi } from '../../api/ai-quotes';
 import { normalizeBookingAcceptanceObservation, type CustomerBookingHost } from "./booking-handoff";
 import { readBookingHostCapabilities, readBookingHandoff, readBookingAcceptance, acceptBookingSubmission, submitAcceptedBooking, readBookingSubmission } from "../../api/orders";
 import { PUBLIC_CONFIG } from "../../config/public";
@@ -98,7 +100,7 @@ export function createCustomerBookingHostFactory(publication: CustomerBookingPub
           readBookingAcceptance(input: { handoffRef: string; contactPhone?: string }) {
             if (input.handoffRef !== handoffRef || input.contactPhone !== undefined) throw Error("booking_host_reference_changed");
             return action(async () => {
-              attempted = true;
+              acceptanceAttempted = true;
               const value = normalizeBookingAcceptanceObservation(await readBookingAcceptance({ handoffRef }), handoffRef);
               if (!current()) throw Error("booking_host_unavailable");
               acceptance = value.state === "observed" ? value.acceptance : undefined;
@@ -108,7 +110,22 @@ export function createCustomerBookingHostFactory(publication: CustomerBookingPub
           readBookingSubmission(input: { acceptanceRef: string }) {
             const ref = input.acceptanceRef;
             if (!acceptance || ref !== acceptance.acceptanceRef) throw Error("booking_host_reference_changed");
-            return action(() => readBookingSubmission({ acceptanceRef: ref }));
+            return action(async () => {
+              const value = await readBookingSubmission({ acceptanceRef: ref });
+              if (value.state !== 'not_observed') attempted = true;
+              return value;
+            });
+          },
+          readBookingDraft(input: { bookingDraftId: string }): Promise<AiBookingDraft> {
+            if (!acceptance || input.bookingDraftId !== acceptance.bookingDraftId) throw Error('booking_host_reference_changed');
+            return action(async () => {
+              const draft = aiBookingDraftSchema.parse(await clientQuoteApi.readBookingDraft(input));
+              if (draft.bookingDraftId !== input.bookingDraftId || draft.surface !== 'client_miniprogram'
+                || draft.scope.tenantId !== expected.scope.tenantId || draft.scope.workspaceId !== expected.scope.workspaceId
+                || draft.inputFingerprint !== acceptance!.inputFingerprint || draft.selectionRevision !== acceptance!.selectionRevision
+                || draft.material.selection.quoteId !== acceptance!.quoteId) throw Error('booking_host_reference_changed');
+              return draft;
+            });
           }
         } : {};
         const writes = mode === "interactive" ? {
@@ -125,7 +142,15 @@ export function createCustomerBookingHostFactory(publication: CustomerBookingPub
           submitAcceptedBooking(input: AiBookingSubmissionDecision) {
             const ref = input.acceptanceRef, decision = input.decision;
             if (!acceptance || ref !== acceptance.acceptanceRef || decision !== "submit_original_booking" || attempted) throw Error("booking_submission_unavailable");
-            return action(() => { attempted = true; return submitAcceptedBooking({ acceptanceRef: ref, decision }); });
+            return action(async () => {
+              // A read of acceptance is not a submit. Require the persisted
+              // same Draft's pre-submit state before its first explicit submit.
+              const draft = aiBookingDraftSchema.parse(await clientQuoteApi.readBookingDraft({ bookingDraftId: acceptance!.bookingDraftId }));
+              if (!current() || attempted || draft.state !== 'handed_to_booking_page' || draft.bookingDraftId !== acceptance!.bookingDraftId
+                || draft.inputFingerprint !== acceptance!.inputFingerprint || draft.selectionRevision !== acceptance!.selectionRevision
+                || draft.material.selection.quoteId !== acceptance!.quoteId) throw Error('booking_submission_unavailable');
+              attempted = true; return submitAcceptedBooking({ acceptanceRef: ref, decision });
+            });
           },
           readBookingHandoff(input: { handoffRef: string }) {
             if (input.handoffRef !== handoffRef) throw Error("booking_host_reference_changed");

@@ -21,10 +21,12 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
   AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_CLIENT_PUBLIC_HTTP } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_TASK_CENTER_RECOVERY_HTTP, AI_TASK_CENTER_RECOVERY_CONTRACTS } from '@rental-os/shared';
+import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
@@ -167,6 +169,9 @@ const CLIENT_PUBLIC_ROUTES = new Set([
 ]);
 
 export function isClientPublicRoute(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && AI_CLIENT_PUBLIC_HTTP.basePaths.some(base =>
+    [AI_CLIENT_PUBLIC_HTTP.read, AI_CLIENT_PUBLIC_HTTP.issueSession, AI_CLIENT_PUBLIC_HTTP.prepare, AI_CLIENT_PUBLIC_HTTP.readOriginal]
+      .some(action => path === `/${base}/${action}`))) return true;
   if (CLIENT_PUBLIC_ROUTES.has(path)) return true;
   if (method === "GET" && /^\/client\/v1\/tenants\/[^/]+\/workspaces$/u.test(path)) return true;
   if (method === "GET" && /^\/client\/v1\/public\/catalog\/items\/[^/]+\/images\/[^/]+$/u.test(path)) return true;
@@ -281,6 +286,10 @@ export function requiredPermissions(method: string, path: string) {
     return path.endsWith('/prepare') ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'];
   }
   if (method.toUpperCase() === "POST" && path === "/auth/development/reset-demo-password") return ["system:params:manage"];
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_AUTOMATION_EXPLANATION_CONTRACTS).some(action =>
+    path === `/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`)) {
+    return ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view'];
+  }
   const creditRoute = `${method.toUpperCase()} ${path}`;
   // Entry read rights do not replace original owner/scope or each financial
   // source's independent authority inside the material/source readers.
@@ -291,7 +300,8 @@ export function requiredPermissions(method: string, path: string) {
   if (method.toUpperCase() === 'POST' && (['inspect', 'enable', 'operation'] as const).some(action => path === `/${AI_TASK_READ_POLICY_HTTP.basePath}/${AI_TASK_READ_POLICY_HTTP[action]}`)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST' && path === `/${AI_TASK_ORDER_HANDOFF_HTTP.basePath}/${AI_TASK_ORDER_HANDOFF_HTTP.read}`) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && Object.entries(AI_MEMBER_NAME_HTTP).some(([key, value]) => key !== 'basePath' && path === `/${AI_MEMBER_NAME_HTTP.basePath}/${value}`))
-    return path.endsWith('/prepare') || path.endsWith('/execute') ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'];
+    return path.endsWith('/prepare') || path.endsWith('/execute') || path.endsWith('/review/start')
+      ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'];
   if (creditTenantRoutes.has(creditRoute)) return ['system:params:manage'];
   if (creditPlatformRoutes.has(creditRoute)) return [path.endsWith('/platform-decide') ? 'system:ai-provider:manage' : 'system:ai-provider:view'];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_CONVERSATION_HTTP_DRAFT.operations)
@@ -366,7 +376,7 @@ export function requiredPermissions(method: string, path: string) {
   if (isBudgetPlatformRoute(method, path)) return ['system:ai-provider:manage'];
   if (aiManagementRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
   if (method.toUpperCase() === 'POST'
-    && /^\/ai-native\/automation\/operator\/policies\/(?:read|preview|prepare|preparation|review|operation|commit)$/u.test(path)) {
+    && /^\/ai-native\/automation\/operator\/policies\/(?:discover|read|preview|prepare|prepare-confirmed|preparation|review|operation|commit|commit-confirmed)$/u.test(path)) {
     return ['system:params:manage'];
   }
   if (isHumanAutomationRoute(method, path, 'staff')) return ['rental-os:order:view'];

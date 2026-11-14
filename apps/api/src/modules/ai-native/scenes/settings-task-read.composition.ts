@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { AiTaskEventRepository } from '../ai-task-event.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
-import { AiTaskRepository, AiTaskRepositoryError, aiTaskAccessFromContext,
+import { AiTaskRepository, AiTaskRepositoryError,
   type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
@@ -12,12 +12,12 @@ import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-reco
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
 import { composeApprovedSettingsWaiting } from '../approval-execution/approved-settings-waiting.executor';
 import { ApprovedSettingsResultUnknownError } from '../../rental-core/approved-settings-change.ports';
-import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION,
-  AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { composeRequestBoundSettingsTaskCreation, type AiSceneHttpRequest,
   type AiSceneRequestOptions } from './request-bound-scenes.application';
+import { bindOriginalSettingsRead } from './settings-original-read.authority';
 
 const key = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const reference = z.object({ creationKey: key, changeKey: key }).strict();
@@ -55,46 +55,21 @@ export function composeRequestBoundSettingsTaskReads(
       return await waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
         const identity = new AiTaskCurrentIdentityAuthority(server.auth, credentials, clock);
         const before = await identity.resolve();
-        const initial = structuredClone(await creation.read(boundRequest, original));
-        if (!('state' in initial.receipt)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
-        if (initial.receipt.state === 'unknown') throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN' });
-        if (initial.receipt.state !== 'observed' || !initial.receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const originalTask = initial.receipt.task;
-        const originalReadAuthority: AiTaskRepositoryAuthority = { resolve: async (taskId, operation) => {
-          if (taskId !== originalTask.taskId || !['read_metadata', 'read_events', 'read_step_terminal'].includes(operation))
-            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          const current = await identity.resolve();
-          const receipt = await creation.read(boundRequest, original);
-          if (!('state' in receipt.receipt) || receipt.receipt.state !== 'observed' || !receipt.receipt.task
-            || receipt.receipt.task.taskId !== originalTask.taskId || receipt.receipt.task.runId !== originalTask.runId
-            || receipt.original.changeId !== initial.original.changeId || receipt.original.changeHash !== initial.original.changeHash)
-            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          const access = aiTaskAccessFromContext(current, taskId, clock());
-          const task = await server.db.aiTask.findFirst({ where: access.where, include: { scope: true } });
-          if (!task || current.actor.kind !== 'user' || current.audience !== 'operator' || current.scope.kind !== 'workspace'
-            || task.id !== taskId || task.ownerKind !== 'USER' || task.ownerId !== current.actor.userId
-            || task.audience !== 'OPERATOR' || task.archivedAt !== null || task.contractVersion !== AI_TASK_DRAFT_VERSION
-            || task.sceneCode !== server.scene.code || task.sceneVersion !== server.scene.version
-            || task.inputRef !== initial.original.changeId || task.inputRevision !== 1 || task.inputHash !== initial.original.changeHash
-            || !task.scope || Object.entries(access.scope).some(([name, value]) => task.scope[name as keyof typeof task.scope] !== value))
-            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          const after = await identity.resolve();
-          if (originalIdentityHash(current) !== originalIdentityHash(after)
-            || originalIdentityHash(before) !== originalIdentityHash(after)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          return after;
-        } };
+        const bound = await bindOriginalSettingsRead({ ...server, credentials }, original, value => creation.read(boundRequest, value));
+        const originalReadAuthority = bound.authority;
         // This authority is kept in the request closure and is never returned
         // as a policy, approval, lease or reusable execution credential.
         const center = { tasks: new AiTaskRepository(server.db, originalReadAuthority, clock),
           events: new AiTaskEventRepository(server.db, originalReadAuthority, clock) };
-        const result = structuredClone(await read(center, initial.receipt.task.taskId, initial.receipt.task.runId,
-          initial.original, { ...server, credentials, originalReadAuthority }));
+        const result = structuredClone(await read(center, bound.task.taskId, bound.task.runId,
+          bound.original, { ...server, credentials, originalReadAuthority }));
+        await bound.verify();
         const latest = await creation.read(boundRequest, original);
         const after = await identity.resolve();
         if (originalIdentityHash(before) !== originalIdentityHash(after)
           || !('state' in latest.receipt) || latest.receipt.state !== 'observed' || !latest.receipt.task
-          || latest.receipt.task.taskId !== initial.receipt.task.taskId || latest.receipt.task.runId !== initial.receipt.task.runId
-          || latest.original.changeId !== initial.original.changeId || latest.original.changeHash !== initial.original.changeHash) {
+          || latest.receipt.task.taskId !== bound.task.taskId || latest.receipt.task.runId !== bound.task.runId
+          || latest.original.changeId !== bound.original.changeId || latest.original.changeHash !== bound.original.changeHash) {
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         }
         // Legitimate concurrent task transitions do not invalidate an already

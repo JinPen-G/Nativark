@@ -3,6 +3,7 @@
  * evidence. Preview grants no save; the save consumer binds a human review to
  * Core's exact version operation. Neither path grants publication. */
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { AiOpeningSectionProposalService } from '../tools/opening-section-proposal.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
@@ -19,6 +20,7 @@ import type { AiOriginalSceneDependencies } from './original-scenes.composition'
 import { composeOpeningProposalWorkflow } from './opening-proposal-workflow.composition';
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { BoundRuleDraftService, BoundRuleDraftUnknownError, boundRuleDraftCommandSchema } from '../../rental-core/bound-rule-draft.service';
+import { OriginalDraftRejectionStore, OriginalDraftRejectedError, type OriginalDraftRejectionBinding } from '../original-draft-rejection.store';
 
 const schema = z.object({ original: originalRequestReferenceSchema,
   registrationRef: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
@@ -97,6 +99,7 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
   const originals = composeOpeningProposalWorkflow(input, host), routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, input.clock);
   const fields = new AiOpeningVersionFieldSource(input.db, routes), contexts = new AiGuardedQuoteCoreContextSource(input.core, routes);
   const core = new BoundRuleDraftService(input.db, input.business, input.clock);
+  const rejections = new OriginalDraftRejectionStore(input.db, input.clock);
   const bodySchema = schema.extend({ changeReason: z.string().trim().min(1).max(500) }).strict();
   const operationSchema = bodySchema.extend({ reviewHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
   const resolve = async (value: unknown) => {
@@ -116,7 +119,14 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
     const operation = boundRuleDraftCommandSchema.parse({ targetId: material.targetId, version: material.expectedVersion,
       changes: material.changes, categoryCode: material.categoryCode, categoryVersion: material.categoryVersion,
       changeReason: command.changeReason, operationKey: `rule-draft-${bindingHash}`, bindingHash });
-    return { command, expected, saved, material, section, operation };
+    if (expected.actor.kind !== 'user') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const scope = { tenantId: material.scope.tenantId, workspaceId: material.scope.workspaceId, actorId: expected.actor.userId };
+    const digest = requestFingerprint({ kind: 'rule-bound-draft-1', scope, operationKey: operation.operationKey });
+    const rejection: OriginalDraftRejectionBinding = { kind: 'business_rule', scope, original: command.original,
+      registrationRef: command.registrationRef, materialHash: material.materialHash, payloadHash: saved.receipt.payloadHash,
+      targetId: material.targetId, targetVersion: material.expectedVersion, operationKey: operation.operationKey,
+      operationId: `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}` };
+    return { command, expected, saved, material, section, operation, rejection };
   };
   const verify = async (found: Awaited<ReturnType<typeof resolve>>) => {
     const selected = ruleSource ? await ruleSource.read({ original: found.command.original, registrationRef: found.command.registrationRef }) : undefined;
@@ -129,6 +139,44 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
   const currentFields = async (found: Awaited<ReturnType<typeof resolve>>) => {
     if (hash((await fields.read(found.section, found.expected)).basis) !== found.material.sourceFingerprint) throw conflict();
   };
+  const readRejected = (found: Awaited<ReturnType<typeof resolve>>) => routes.withRead('rule_version',
+    { version: found.material.expectedVersion }, async context => {
+      assertAiReadContextBinding(context, found.expected);
+      const result = await rejections.read(found.rejection); await verify(found); return result;
+    });
+  const assertNotRejected = async (found: Awaited<ReturnType<typeof resolve>>) => {
+    const rejected = await readRejected(found); if (rejected) throw new OriginalDraftRejectedError(rejected);
+  };
+  const rejectChanged = async (found: Awaited<ReturnType<typeof resolve>>, reviewHash: string) =>
+    routes.withRuleDraftPreview(found.material.targetId, async context => {
+      assertAiReadContextBinding(context, found.expected); await verify(found);
+      // A read-only Core review proves the old review no longer describes the
+      // current source. Capture its complete bounded inputs and, under Core's
+      // workspace mutex, require them to remain identical before sealing it.
+      const source = async (db: Pick<Prisma.TransactionClient, 'rentalRuleVersion'>) => {
+        const rows = await db.rentalRuleVersion.findMany({ where: {
+          tenantId: found.rejection.scope.tenantId, workspaceId: found.rejection.scope.workspaceId },
+          orderBy: { id: 'asc' }, take: 1001 });
+        if (rows.length > 1000) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return hash({ rows, context: await currentContext(found) });
+      };
+      const before = await source(input.db);
+      let stale = false;
+      try {
+        await currentFields(found);
+        const context = await currentContext(found);
+        if (context.category.code !== found.material.categoryCode || context.category.version !== found.material.categoryVersion) stale = true;
+        else {
+          const current = await core.review(found.material.scope.tenantId, context, found.operation, () => verify(found));
+          stale = current.reviewHash !== reviewHash;
+        }
+      } catch (error) {
+        if (error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT') stale = true;
+        else throw error;
+      }
+      if (!stale || await source(input.db) !== before) return null;
+      return rejections.record(found.rejection, reviewHash, () => verify(found), async tx => await source(tx) === before);
+    });
   const read = (found: Awaited<ReturnType<typeof resolve>>, reviewHash: string) => routes.withRead('rule_version',
     { version: found.material.expectedVersion }, async context => {
       assertAiReadContextBinding(context, found.expected);
@@ -157,18 +205,36 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
       const parsed = operationSchema.extend({ decision: z.literal('save_original_business_draft') }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { decision: _decision, reviewHash, ...body } = parsed.data, found = await resolve(body);
+      const rejected = await readRejected(found);
+      if (rejected) return freezeOriginalInput({ original: found.command.original, operation: rejected, replayed: true,
+        task: 'original_unchanged' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const });
       const observed = await read(found, reviewHash);
       if (observed.state === 'committed') return freezeOriginalInput({ original: found.command.original, operation: observed, replayed: true,
         task: 'original_unchanged' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const });
+      let result;
+      try {
       await currentFields(found);
-      const result = await routes.withRuleDraftSave(found.material.targetId, async context => {
+      result = await routes.withRuleDraftSave(found.material.targetId, async context => {
         assertAiReadContextBinding(context, found.expected);
         const business = await currentContext(found);
         return core.save(found.material.scope.tenantId, business, { ...found.operation, reviewHash }, async () => {
           await routes.withRuleDraftPreview(found.material.targetId, async current => { assertAiReadContextBinding(current, found.expected); });
           await verify(found);
+          // Core holds its workspace mutex before its last pre-write callback.
+          // A concurrent terminal rejection can never be followed by this save.
+          await assertNotRejected(found);
         });
       });
+      } catch (error) {
+        if (error instanceof OriginalDraftRejectedError) return freezeOriginalInput({ original: found.command.original,
+          operation: error.operation, replayed: true, task: 'original_unchanged' as const,
+          approval: 'not_granted' as const, publication: 'not_attempted' as const });
+        if (!(error instanceof AiTaskRepositoryError && error.code === 'AI_REVISION_CONFLICT')) throw error;
+        const rejection = await rejectChanged(found, reviewHash);
+        if (!rejection) throw error;
+        return freezeOriginalInput({ original: found.command.original, operation: rejection, replayed: false,
+          task: 'original_unchanged' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const });
+      }
       try { await verify(found); } catch { throw new BoundRuleDraftUnknownError(); }
       return freezeOriginalInput({ original: found.command.original, operation: result.receipt, replayed: result.replayed,
         task: 'original_unchanged' as const, approval: 'not_granted' as const, publication: 'not_attempted' as const, automaticRetry: false as const });
@@ -176,7 +242,8 @@ export function composeOpeningRuleDraftSave(input: AiOriginalSceneDependencies &
     async readDraftOperation(value: unknown) {
       const parsed = operationSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { reviewHash, ...body } = parsed.data, found = await resolve(body), operation = await read(found, reviewHash);
+      const { reviewHash, ...body } = parsed.data, found = await resolve(body);
+      const operation = await readRejected(found) ?? await read(found, reviewHash);
       await verify(found);
       return freezeOriginalInput({ original: found.command.original, operation, execution: 'read_only_no_save_or_publish' as const, retryable: false as const });
     }

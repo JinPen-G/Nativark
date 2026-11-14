@@ -22,6 +22,7 @@ export class AiTaskCalendarDraftSaveDto extends AiTaskCalendarDraftReviewDto imp
 }
 export class AiTaskCalendarDraftPreparationDto extends AiTaskCalendarDraftListDto implements AiTaskCalendarDraftPreparationInput {
   @IsString() @Matches(/^(19|20|21|22)\d{2}-\d{2}-\d{2}$/u) date!: string;
+  @IsOptional() @ValidateNested() @Type(() => AiTaskCalendarDraftReferenceDto) rejected?: AiTaskCalendarDraftReferenceDto;
 }
 export class AiTaskCalendarDraftPreparationValuesDto implements AiTaskCalendarDraftPreparationValues {
   @IsString() @IsNotEmpty() @MaxLength(120) name!: string;

@@ -81,7 +81,9 @@ export const APP_ROUTES = {
   appearance: { path: "/settings/appearance", label: "外观与音效", permission: "system:integration:manage", audience: "tenant", icon: <BgColorsOutlined />, menu: true },
   aiSettings: { path: "/settings/ai", label: "AI 服务设置", permission: "system:params:manage", audience: "tenant", icon: <SettingOutlined />, menu: true },
   clientAuthorization: { path: "/settings/client-authorization", label: "客户端授权", permission: "system:params:manage", audience: "tenant", icon: <SafetyCertificateOutlined />, menu: true },
-  aiTasks: { path: "/ai/tasks", label: "AI 任务中心", permission: "rental-os:order:view", legacyPermissions: ["rental-os:order:create", "rental-os:price:manage", "system:params:manage"], audience: "tenant", icon: <FileTextOutlined />, menu: true },
+  // Human review discovery has its own resource authority; these entry roles
+  // do not widen the original owner TaskCenter reader or grant execution.
+  aiTasks: { path: "/ai/tasks", label: "AI 任务中心", permission: "rental-os:order:view", legacyPermissions: ["rental-os:order:create", "rental-os:price:manage", "system:params:manage", "system:integration:manage", "rental-os:finance:view", "rental-os:finance:reconcile"], audience: "tenant", icon: <FileTextOutlined />, menu: true },
   paymentReconciliation: { path: "/rental/payment-reconciliation", label: "支付对账", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined />, menu: true },
   paymentReconciliationDetail: { path: "/rental/payment-reconciliation/:batchId", label: "对账批次详情", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined /> },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },

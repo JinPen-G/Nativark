@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION, aiOpeningCalendarSourceBasis, type AiOrderExplainRequestDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, aiOpeningCalendarSourceBasis, aiOpeningCategorySourceDraft, aiOpeningCapabilityFactsDraft,
+  aiOpeningCapabilitySourceBasis, type AiOrderExplainRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
@@ -105,6 +106,14 @@ function openingFactsFingerprint(material: unknown) {
     observedAt: z.string(), sections: z.array(z.object({ key: z.string().min(1).max(191) }).passthrough()).max(9), configuration: z.unknown() })
     .passthrough().parse(structuredClone(material));
   const { observedAt: _observation, ...facts } = current;
+  if (facts.categorySource !== undefined) facts.categorySource = aiOpeningCategorySourceDraft.parse(facts.categorySource);
+  if (facts.capabilityObservation !== undefined) {
+    const capabilities = aiOpeningCapabilityFactsDraft.parse(facts.capabilityObservation);
+    if (capabilities.state === 'observed' && (!('categorySource' in facts) || capabilities.scope.tenantId !== facts.scope.tenantId
+      || capabilities.scope.workspaceId !== facts.scope.workspaceId
+      || capabilities.observation.categoryCode !== aiOpeningCategorySourceDraft.parse(facts.categorySource).categoryCode)) throw unavailable();
+    facts.capabilityObservation = aiOpeningCapabilitySourceBasis(capabilities);
+  }
   if (facts.calendarSource !== undefined) {
     const calendar = readAiOpeningCalendarSource(facts.calendarSource, facts.scope, current.observedAt);
     if (!calendar || !facts.sections.some(section => section.key === 'business_calendar')) throw unavailable();

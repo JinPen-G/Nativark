@@ -4,6 +4,13 @@
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)
 
+<a id="core-ai-frozen-tx-merge-20261114"></a>
+## AI冻结合并的同事务捕获冲突核定（2026-11-14）
+
+在Core冻结 `30b192764` 已合main `5d07b7de` 后，负责人要求继续合AI冻结 `86d05a78`。原Core作者只处理六冲突和Core服务必要衔接，完整输出/依赖/验证对象为 `2a04ab5c2ff79006442444c07f8b8c20df5fbd8a`，同事务十组、原治理/续租/配置读取及完整类型通过；定价分组旧fixture四项在main同样失败。配置副本、身份/CAS/默认空间/历史依据与AI原事务Outbox同时保留，复合保存末尾捕获，异常一起回滚。全组合、七份blob和实际边界见[AI集成记录](<../AI Native/AI Native-开发记录.md#ain-all-frozen-main-20261114>)。
+
+本次只核固定冲突，不恢复持续研发，不修原报价配置混用反例；原工作树仍在 `30b192764f8f26f792a819b959953a37805beec4` 且干净。5份24960字节本次暂存被自动审批拒删后已同卷归集[唯一责任清单](../../output/.cleanup-pending/rental-core/fixed-main-ai-core-conflict-20261114/manifest.json)，原临时目录已迁出，未声称删除。最终main由本轮明确授权QA review，真实环境和部署未操作。
+
 <a id="core-frozen-main-20261114"></a>
 ## Core 冻结版本完整合并与冲突核定（2026-11-14）
 

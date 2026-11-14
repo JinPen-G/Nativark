@@ -32,13 +32,19 @@ async function settingsCancellationResponse(work: () => Promise<unknown>, body: 
     const result = writing ? settingsContract('AiApprovedSettingsTaskCancellationResultDraft', reply, true)
       : settingsContract('AiApprovedSettingsTaskCancellationReadDraft', reply, true);
     const receipt = result.receipt, event = receipt.event;
+    const originalSettlement = !writing && target === 'cancelled';
+    const meaning = target === 'cancel_requested' ? 'request_not_rollback'
+      : event?.data.to === 'succeeded' || event?.data.to === 'partially_succeeded'
+        ? 'request_settled_not_business_rollback' : 'task_cancelled_not_business_rollback';
     if ('expectedRevision' in receipt && (receipt.expectedRevision !== command.expectedRevision
-      || receipt.cancellation !== (target === 'cancel_requested' ? 'request_not_rollback' : 'task_cancelled_not_business_rollback')))
+      || receipt.cancellation !== meaning))
       return invalidSettingsResponse(writing);
-    if (event && (event.taskRevision !== Number(command.expectedRevision) + 1 || event.data.to !== target
+    if (event && (event.taskRevision !== Number(command.expectedRevision) + 1
+      || (originalSettlement ? event.data.from !== 'cancel_requested' || !['cancelled', 'succeeded', 'partially_succeeded'].includes(event.data.to) : event.data.to !== target)
       || event.data.reason !== (target === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled')
       || ('taskId' in receipt && (event.taskId !== receipt.taskId || event.taskRevision > receipt.snapshot.revision
-        || BigInt(event.cursor) > BigInt(receipt.snapshot.cursor))))) return invalidSettingsResponse(writing);
+        || BigInt(event.cursor) > BigInt(receipt.snapshot.cursor)
+        || originalSettlement && receipt.snapshot.status !== event.data.to)))) return invalidSettingsResponse(writing);
     return result;
   } catch { return invalidSettingsResponse(writing); }
 }
@@ -155,6 +161,29 @@ export class AiSettingsChangeController {
       try { return settingsContract('AiApprovedSettingsChangeReceiptDraft', reply, true); }
       catch { return invalidSettingsResponse(false); }
     });
+  }
+  @Post(routes.readSettingsReconfirmationDifference) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReconfirmationDifference(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = settingsContract('AiSettingsReconfirmationReviewDraft', body);
+      return settingsContract('AiSettingsReconfirmationDifferenceDraft', await this.changes.readUpdatedDifference(request, command, signal), true);
+    }));
+  }
+  @Post(routes.prepareReconfirmedSettingsChange) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareReconfirmation(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const { decision: _decision, ...command } = settingsContract('AiSettingsReconfirmationPrepareDraft', body);
+      const result = await this.changes.prepareReconfirmedChange(request, command, signal);
+      try { return settingsContract('AiSettingsReconfirmationPreparedDraft', result, true); }
+      catch { return invalidSettingsResponse(true); }
+    }));
+  }
+  @Post(routes.readReconfirmedSettingsChange) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReconfirmation(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const command = settingsContract('AiSettingsReconfirmationReadDraft', body);
+      return settingsContract('AiSettingsReconfirmationObservationDraft', await this.changes.readReconfirmedChange(request, command, signal), true);
+    }));
   }
 }
 /** Original receipt selects the owned task; the body cannot supply permissions,

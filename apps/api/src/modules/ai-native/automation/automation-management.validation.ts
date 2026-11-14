@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { AiAutomationSubject, AiAutomationPolicy } from '@prisma/client';
+import { AI_TOOL_CODES, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 
 export const managementId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 export const managementRevision = z.number().int().min(1).max(4294967293);
@@ -11,12 +12,20 @@ export const subjectSettings = z.object({ enabled: z.boolean(), revoked: z.boole
     .refine(value => new Set(value).size === value.length).transform(value => value.sort()),
   locationScope: z.discriminatedUnion('mode', [z.object({ mode: z.literal('all'), locationIds: z.tuple([]) }).strict(),
     z.object({ mode: z.literal('selected'), locationIds: locations }).strict()]), expiresAt: managementTime }).strict();
+export const automationPolicyConstraintsSchema = z.object({
+  allowedTools: z.array(z.object({ toolCode: z.enum(AI_TOOL_CODES), toolVersion: z.literal(AI_TOOL_DRAFT_VERSION),
+    catalogRevision: managementId }).strict()).max(14).refine(rows => new Set(rows.map(row => row.toolCode)).size === rows.length),
+  allowedRecipientIds: z.array(managementId).max(100).refine(rows => new Set(rows).size === rows.length),
+  limits: z.object({ maxActionsPerRun: z.number().int().min(1).max(20), maxQuantity: z.number().int().min(1).max(1000),
+    maxCausalDepth: z.number().int().min(0).max(20) }).strict()
+}).strict();
 export const policySettings = z.object({ mode: z.enum(['disabled', 'shadow', 'manual_confirmation']), revoked: z.boolean(),
   sceneCode: managementId.max(64), sceneVersion: managementId.max(64),
-  allowedEventTypes: z.array(z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception'])).min(1).max(3)
+  allowedEventTypes: z.array(z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception',
+    'fulfillment.resource_shortage', 'opening.missing_configuration'])).min(1).max(5)
     .refine(value => new Set(value).size === value.length).transform(value => value.sort()),
   maxTasksPerDay: z.number().int().min(0).max(10000), cooldownSeconds: z.number().int().min(1).max(86400),
-  validFrom: managementTime, expiresAt: managementTime }).strict();
+  validFrom: managementTime, expiresAt: managementTime, constraints: automationPolicyConstraintsSchema.optional() }).strict();
 export const policyChange = z.object({ operationKey: managementId.max(128), subjectId: managementId.max(36).nullable(),
   policyId: managementId.max(36).nullable(), expectedSubjectRevision: managementRevision.nullable(), expectedPolicyRevision: managementRevision.nullable(),
   subject: subjectSettings, policy: policySettings }).strict().refine(value =>
@@ -46,4 +55,4 @@ export function policyConfiguration(row: AiAutomationPolicy) {
     validFrom: row.validFrom.toISOString(), expiresAt: row.expiresAt.toISOString() });
 }
 export const enabledProvenance = (row: AiAutomationSubject | AiAutomationPolicy) => ({ enabledBy: row.enabledBy,
-  enabledAudience: row.enabledAudience, enabledAt: row.enabledAt?.toISOString() ?? null });
+  enabledAudience: z.literal('operator').nullable().parse(row.enabledAudience), enabledAt: row.enabledAt?.toISOString() ?? null });

@@ -14,12 +14,14 @@ import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionSubmissionService } from './inspection-submission.service';
 import { InspectionRecognitionService, inspectionRecognitionMediaKind } from './inspection-recognition.service';
 import { InspectionRecognitionResultService } from './inspection-recognition-result.service';
+import { inspectionRecognitionMessages } from './inspection-recognition-prompt';
 import { InspectionRecognitionBasisService, type InspectionRecognitionBasisPorts } from './inspection-recognition-basis.service';
 import { createInspectionRecognitionCoreSource } from './inspection-recognition-core.source';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { taskAudioMaterialSchema, taskImageMaterialSchema, type TaskModelPolicy } from '../model-input/task-model-input';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { OriginalInspectionApplication } from './original-inspection.application';
+import { OriginalStaffFulfillmentReceiptReader } from './original-staff-fulfillment-receipt.reader';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
@@ -37,13 +39,8 @@ import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED, StaffInspect
  * inspection input, never a request-provided prompt/hash or an SDK result. */
 function inspectionTaskMaterial(bound: Awaited<ReturnType<InspectionRecognitionService['gatewayMedia']>>, maxOutputTokens: number) {
   const kind = inspectionRecognitionMediaKind(bound.input);
-  const text = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts',
-    draftId: bound.draftId, draftRevision: bound.draftRevision, inputFingerprint: bound.input.inputFingerprint,
-    question: bound.input.question, template: bound.input.template,
-    ...(bound.input.basis ? { basis: bound.input.basis } : {}) });
   return (kind === 'audio' ? taskAudioMaterialSchema : taskImageMaterialSchema).parse({ maxOutputTokens,
-    messages: [{ role: 'user', content: [{ kind: 'text', text }, ...bound.input.media.map(ref => ({ kind,
-      attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }] });
+    messages: inspectionRecognitionMessages(bound, kind) });
 }
 export type PersistedInspectionTaskHostDependencies = Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence' | 'inputSource' | 'kind' | 'task'> & {
   task: Omit<TaskModelHostDependencies['task'], 'material'>;
@@ -65,7 +62,7 @@ export async function composeInspectionRecognitionTaskHost(recognition: Pick<Ins
 
 type TemplateDependencies = ConstructorParameters<typeof InspectionTemplateService>[0];
 type Dependencies = Omit<TemplateDependencies, 'core'> & {
-  core: TemplateDependencies['core'] & Partial<Pick<RentalCoreService, 'readOrderAllocationPickupBasis'>>;
+  core: TemplateDependencies['core'] & Partial<Pick<RentalCoreService, 'readOrderAllocationPickupBasis' | 'listInspections'>>;
   /** Server-only dependencies; credentials are bound by THIS request factory,
    * never independently supplied by an external result caller. */
   recognitionResults?: Omit<PersistedTaskAuthorizationDependencies, 'credentials'> & {
@@ -118,8 +115,15 @@ export class StaffInspectionRequestFactory {
       },
     };
     const services = composeInspectionAssist({ ...this.dependencies, credentials });
+    const fulfillmentReceipts = this.dependencies.originalInspection
+      ? new OriginalStaffFulfillmentReceiptReader({ guard: this.dependencies.guard, credentials,
+        core: this.dependencies.core, receipts: this.dependencies.originalInspection.receipts }) : undefined;
     const authority = new InspectionActionAuthority(this.dependencies.guard, credentials);
     return { ...services,
+      readFulfillmentReceipt: async (value: unknown) => {
+        if (!fulfillmentReceipts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return fulfillmentReceipts.read(value);
+      },
       readHistory: async (value: unknown) => {
         if (!services.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
         return services.drafts.readHistory(value);

@@ -7,6 +7,9 @@ import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSch
   aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
   AI_TASK_DRAFT_VERSION, aiClientTaskModelResultReadResponseSchema, AI_BOOKING_ACCEPTANCE_READ_VERSION,
   aiBookingAcceptanceReadRequestSchema } from '@rental-os/shared';
+import { AI_CLIENT_GOAL_VERSION, aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
+  aiClientGoalPreparationResponseSchema, aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema,
+  aiClientGoalQuoteRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
@@ -55,6 +58,9 @@ import type { ClientApiService } from '../../client/client-api.service';
 import { composeClientOriginalQuotePreparation } from './client-quote-preparation.composition';
 import { BudgetError } from '../budget/budget.ports';
 import type { PrismaClient } from '@prisma/client';
+import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
+  type ClientGoalSources } from './client-goal-material';
+import { projectClientGoal, prepareClientGoalQuoteRequest, type ClientGoalHumanClarification } from './client-goal-projection';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -64,7 +70,8 @@ const commandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('catalog') }).strict(), z.object({ kind: z.literal('help') }).strict(),
   z.object({ kind: z.literal('profile') }).strict(), z.object({ kind: z.literal('order'), orderId: id }).strict(),
   z.object({ kind: z.literal('cancellation_preview'), orderId: id }).strict(),
-  z.object({ kind: z.literal('booking_quote'), selection: bookingSelectionSchema }).strict()
+  z.object({ kind: z.literal('booking_quote'), selection: bookingSelectionSchema }).strict(),
+  clientGoalCommandSchema,
 ]);
 const operationSchema = z.object({ operationKey: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
   command: commandSchema }).strict();
@@ -222,20 +229,43 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (!bound.identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         value = await readClientBookingMaterial(bound.scenes, bound.identity, command.selection, clock);
         break;
+      case 'client_goal': throw new AiClientEntryError('AI_INVALID_INPUT', 'goal_requires_original_preparation');
     }
     const text = JSON.stringify(value);
     if (!text || Buffer.byteLength(text, 'utf8') > maxBytes) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
     return freezeOriginalInput(JSON.parse(text) as unknown);
   };
+  const goalSources = async (bound: Bound): Promise<ClientGoalSources> => {
+    if (!bound.identity || !['web', 'wechat_miniprogram'].includes(server.channel)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    await bound.assertCurrent();
+    const catalog = await bound.scenes.member.catalog();
+    const bookingOptions = await bound.scenes.member.bookingOptions();
+    const bootstrap = await bound.scenes.guest.bootstrap(server.tenantCode, server.channel, server.appId);
+    const help = bootstrap.help.available ? await bound.scenes.guest.help(server.tenantCode) : null;
+    await bound.assertCurrent();
+    return { identity: structuredClone(bound.identity), channel: server.channel as 'web' | 'wechat_miniprogram',
+      ...(server.appId ? { appId: server.appId } : {}), catalog, bookingOptions, help };
+  };
   const verify = async (bound: Bound, row: AiClientSceneMaterial, originalTaskObservation = false) => {
     const parsedCommand = commandSchema.safeParse(row.command);
     // Historical order observation still reloads current owner/visibility;
     // old content and expiry cannot supply permission for a new effect.
-    const historicalOrder = originalTaskObservation && parsedCommand.success && parsedCommand.data.kind === 'order';
+    const historicalOrder = originalTaskObservation && parsedCommand.success
+      && (parsedCommand.data.kind === 'order' || parsedCommand.data.kind === 'client_goal');
     if (!parsedCommand.success || row.inputHash !== requestFingerprint(parsedCommand.data)
       || row.bindingHash !== bound.bindingHash || row.publicationHash !== requestFingerprint(bound.published.value)
       || row.publicationHash !== requestFingerprint(row.publication) || !historicalOrder && row.expiresAt <= clock()
       || row.materialHash !== materialHash(parsedCommand.data, row.material)) return fail('AI_CLIENT_MATERIAL_STALE');
+    if (parsedCommand.data.kind === 'client_goal') {
+      validateClientGoalMaterial(row);
+      // Original result/receipt reads retain the frozen input. New creation,
+      // execution and candidate/selection consumers separately require current
+      // public catalogue and own enterprise relation equality.
+      if (!originalTaskObservation) revalidateClientGoalMaterial(row, await goalSources(bound));
+      const latest = await repository.findSource(scopeOf(bound), row.id);
+      if (!latest || jsonHash(row) !== jsonHash(latest)) return fail('AI_CLIENT_MATERIAL_STALE');
+      await bound.assertCurrent(); return parsedCommand.data;
+    }
     const entryBefore = parsedCommand.data.kind === 'booking_quote' ? await entryGrant(bound, row) : null;
     const current = await readMaterial(bound, parsedCommand.data);
     if (!historicalOrder && materialHash(parsedCommand.data, current) !== row.materialHash) return fail('AI_CLIENT_MATERIAL_STALE');
@@ -565,7 +595,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           // Original recovery and accepted-answer continuation retain the
           // original order facts while reloading current ownership. New start
           // still requires fresh material; the input/runner owns its deadline.
-          await verify(bound, row, control !== undefined || answers !== undefined);
+          const goal = clientGoalCommandSchema.safeParse(row.command).success;
+          // Reconciliation only observes the original invocation/receipts.
+          // Expired goal material or changed public choices cannot authorize a
+          // new model, but must not hide the original unknown operation.
+          await verify(bound, row, goal ? control === 'reconcile' : control !== undefined || answers !== undefined);
           await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
@@ -667,8 +701,118 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const configuredResultSource = dependencies.taskResults
     ?? (dependencies.taskInputs && { db: dependencies.taskInputs.db })
     ?? (dependencies.taskModel && { db: dependencies.taskModel.db });
+  const readOriginalTaskModelObservation = async (request: AiClientApplicationRequest, value: unknown,
+    source = configuredResultSource, includeHumanClarifications = false) => {
+    if (!server.entry || !taskDependencies || !source || !Object.is(source.db, dependencies.db))
+      throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_result_dependencies_missing');
+    const command = parseEntry(clientTaskCommandSchema, structuredClone(value)), db = source.db;
+    return withBinding(structuredClone(request), true, 'order', async bound => {
+      const loadMaterial = async (materialRef: string) => {
+        await bound.assertCurrent();
+        const row = await repository.findSource(scopeOf(bound), materialRef);
+        if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await verify(bound, row, true); await bound.assertCurrent();
+        return { row, identity: structuredClone(bound.identity) };
+      };
+      const authorized = composePersistedClientTaskAuthorization(taskDependencies, command, loadMaterial, clock);
+      const original = await composeClientMaterialTasks(taskDependencies, loadMaterial, clock).readCreation(command);
+      if (!original.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const before = await authorized.execution.readGrant(original.task.taskId, 'read');
+      const access = await authorized.tasks.resolveAccess(before.taskId, 'read_step_terminal');
+      const selected = await db.$transaction(async tx => {
+        const task = await tx.aiTask.findFirst({ where: access.where });
+        if (!task || task.inputRef !== original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const runs = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+          actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
+        const run = runs[0];
+        if (!run || runs[1]?.sequence === run.sequence) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const origin = await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id, runId: run.id,
+          originRunId: original.task!.runId, registrationRef: `client-model:${original.inputRef}`, includeHistory: includeHumanClarifications });
+        const humanClarifications: ClientGoalHumanClarification[] = [];
+        if (includeHumanClarifications) {
+          if (origin.history.length > 2) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          for (const answer of origin.history) {
+            const field = answer.contract.fields[0], text = answer.answers[0];
+            if (answer.contract.version !== '1' || !['client_context_rental_requirements', 'client_context_rental_time',
+              'client_context_rental_preferences'].includes(answer.contract.code) || answer.contract.fields.length !== 1
+              || field.fieldId !== 'clarification_text' || field.kind !== 'text' || !field.required || field.maxLength !== 2048
+              || answer.answers.length !== 1 || text.fieldId !== 'clarification_text' || typeof text.value !== 'string'
+              || !text.value.trim() || text.value.length > field.maxLength) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            humanClarifications.push({ receiptId: answer.receiptId, answerHash: requestFingerprint(answer.answers), text: text.value });
+          }
+        }
+        const steps = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id },
+          orderBy: { sequence: 'desc' }, take: 2 });
+        if (steps.length > 1 || steps.some(step => step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION))
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        if (steps[0]?.resultRef && run.status === 'QUEUED') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return { scopeId: task.scopeId, taskId: task.id, taskRevision: task.revision, taskStatus: task.status,
+          runId: run.id, runRevision: run.revision, step: steps[0] ?? null, humanClarifications };
+      }, { maxWait: 2500, timeout: 5000 });
+      const result = selected.step?.resultRef ? await new AiTaskResultRepository(db, authorized.tasks, clock)
+        .read({ taskId: selected.taskId, resultId: selected.step.resultRef }) : null;
+      if (result && (result.runId !== selected.runId || result.stepId !== selected.step?.id)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      let text: string | null = null;
+      if (result?.status === 'succeeded') {
+        if (!isGatewayResult(result.payload) || result.payload.status !== 'completed' || result.payload.toolRequests.length
+          || typeof result.payload.text !== 'string') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        text = result.payload.text;
+      }
+      const current = await authorized.execution.readGrant(before.taskId, 'read');
+      if (before.proof !== current.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      const latest = await db.$transaction(async tx => ({
+        run: await tx.aiRun.findFirst({ where: { scopeId: selected.scopeId, taskId: selected.taskId, id: selected.runId } }),
+        step: selected.step ? await tx.aiStep.findFirst({ where: { scopeId: selected.scopeId, taskId: selected.taskId, id: selected.step.id } }) : null
+      }), { maxWait: 2500, timeout: 5000 });
+      if (latest.run?.id !== selected.runId || latest.run.scopeId !== selected.scopeId || latest.run.taskId !== selected.taskId
+        || latest.run.revision !== selected.runRevision || latest.step?.revision !== selected.step?.revision
+        || latest.step?.resultRef !== selected.step?.resultRef) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      if (includeHumanClarifications) {
+        // Close the same original answer lineage after the buffered result read.
+        // A changed historical answer cannot authorize today's new selection.
+        const closing = await db.$transaction(tx => readTaskModelRunOrigin(tx, access, {
+          scopeId: selected.scopeId, taskId: selected.taskId, runId: selected.runId, originRunId: original.task!.runId,
+          registrationRef: `client-model:${original.inputRef}`, includeHistory: true }), { maxWait: 2500, timeout: 5000 });
+        const answers = closing.history.map(answer => ({ receiptId: answer.receiptId, answerHash: requestFingerprint(answer.answers),
+          text: answer.answers[0]?.value }));
+        if (jsonHash(answers) !== jsonHash(selected.humanClarifications)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
+      const final = await authorized.execution.readGrant(before.taskId, 'read');
+      if (before.proof !== final.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await bound.assertCurrent();
+      const response = aiClientTaskModelResultReadResponseSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
+        taskId: selected.taskId, taskRevision: selected.taskRevision, state: result ? 'observed' : 'not_observed',
+        workflowStatus: selected.taskStatus.toLowerCase(),
+        resultPurpose: result?.status !== 'succeeded' ? 'not_attested'
+          : selected.taskStatus === 'WAITING_INPUT' ? 'clarification' : selected.taskStatus === 'SUCCEEDED' ? 'answer' : 'not_attested',
+        result: result ? { resultId: result.resultId, status: result.status, observedAt: result.observedAt, text } : null,
+        authority: 'generated_text_not_business_fact', businessExecution: 'not_inferred_from_model_result',
+        retryable: false, nextAction: 'read_original_task' });
+      if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > maxBytes)
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return freezeOriginalInput({ model: response.data, humanClarifications: selected.humanClarifications });
+    });
+  };
+  // The public result retains its exact original envelope. Proved human answers
+  // stay server-private and are consumed only by the goal selection boundary.
+  const readOriginalTaskModelResult = async (request: AiClientApplicationRequest, value: unknown, source = configuredResultSource) =>
+    (await readOriginalTaskModelObservation(request, value, source)).model;
+  const withGoalSource = async <T>(request: AiClientApplicationRequest, value: unknown,
+    consume: (bound: Bound, row: AiClientSceneMaterial, command: z.infer<typeof aiClientGoalCandidatesRequestSchema>) => Promise<T>, signal?: AbortSignal) => {
+    requireEntry();
+    const command = aiClientGoalCandidatesRequestSchema.parse(structuredClone(value));
+    return withBinding(request, true, 'client_goal', async bound => {
+      const row = await repository.findSource(scopeOf(bound), command.materialRef);
+      if (!row || row.materialHash !== command.expectedMaterialHash || !clientGoalCommandSchema.safeParse(row.command).success) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+      await verify(bound, row);
+      const result = await consume(bound, row, command);
+      await verify(bound, row); await bound.assertCurrent(); return result;
+    }, signal);
+  };
   const withQuotePreparation = async <T>(request: AiClientApplicationRequest,
-    consume: (preparation: ReturnType<typeof composeClientOriginalQuotePreparation>, bound: Bound) => Promise<T>) => {
+    consume: (preparation: ReturnType<typeof composeClientOriginalQuotePreparation>, bound: Bound) => Promise<T>, signal?: AbortSignal) => {
     if (!server.entry || !taskDependencies || server.channel === 'app' || !dependencies.quotePreparation)
       return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
     const credential = bearerSchema.safeParse(request?.headers?.authorization);
@@ -677,15 +821,114 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     return withBinding(request, true, 'quotes', async bound => {
       const preparation = composeClientOriginalQuotePreparation({ enabled: true,
         client: dependencies.quotePreparation!, guard: dependencies.guard,
-        credentials: { current: async () => ({ authorization, ip }) }, tasks: taskDependencies,
+        credentials: { current: async () => { if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'request_interrupted'); return { authorization, ip }; } }, tasks: taskDependencies,
         tenantCode: server.tenantCode, serviceCode: server.serviceCode,
         channel: server.channel as 'web' | 'wechat_miniprogram', clock });
       const result = await consume(preparation, bound);
       await bound.assertCurrent();
       return result;
-    });
+    }, signal);
   };
   return Object.freeze({
+    /** Store only explicit customer intent. Original Task, model start and
+     * parameter confirmation remain separately authorized human decisions. */
+    async prepareGoal(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const command = aiClientGoalPreparationRequestSchema.parse(structuredClone(value));
+      requireEntry(); let attempted = false;
+      try {
+        return await withBinding(request, true, 'client_goal', async bound => {
+          if (!bound.identity || !taskDependencies) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const expectedGoalHash = requestFingerprint({ version: 'client-goal-1', goalText: command.goalText });
+          const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+          const subject = { ...scopeOf(bound), identity: structuredClone(bound.identity) };
+          const existing = await repository.findOperation(scopeOf(bound), command.operationKey);
+          const grant = await policy.authorize(subject, existing ? 'read' : 'create');
+          if (existing) {
+            const material = validateClientGoalMaterial(existing);
+            if (material.goalHash !== expectedGoalHash) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+            await verify(bound, existing, true);
+            assertReadPolicyUnchanged(grant, await policy.authorize(subject, 'read'));
+            return freezeOriginalInput(aiClientGoalPreparationResponseSchema.parse({ contractVersion: AI_CLIENT_GOAL_VERSION,
+              operationKey: existing.operationKey, state: 'observed', goalHash: material.goalHash, materialRef: existing.id,
+              materialHash: existing.materialHash, inputHash: existing.inputHash, expiresAt: existing.expiresAt.toISOString(),
+              execution: 'not_attested', retryable: false, nextAction: 'read_original_goal_preparation' }));
+          }
+          const prepared = prepareClientGoalMaterial(command.goalText, await goalSources(bound)), createdAt = clock();
+          const row: AiClientSceneMaterial = { id: randomUUID(), ...scopeOf(bound), bindingHash: bound.bindingHash,
+            publicationHash: requestFingerprint(bound.published.value), operationKey: command.operationKey, ...prepared,
+            publication: bound.published.value, revision: 1, createdAt,
+            expiresAt: new Date(Math.min(createdAt.getTime() + lifetimeMs, grant.policy.expiresAt.getTime())) };
+          revalidateClientGoalMaterial(row, await goalSources(bound)); await bound.assertCurrent();
+          const current = await policy.authorize(subject, 'create');
+          if (grant.policyHash !== current.policyHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          attempted = true; const saved = await repository.save(row);
+          await verify(bound, saved.row);
+          const latest = await policy.authorize(subject, 'create');
+          if (grant.policyHash !== latest.policyHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          return freezeOriginalInput(aiClientGoalPreparationResponseSchema.parse({ contractVersion: AI_CLIENT_GOAL_VERSION,
+            operationKey: saved.row.operationKey, state: 'observed', goalHash: prepared.material.goalHash, materialRef: saved.row.id,
+            materialHash: saved.row.materialHash, inputHash: saved.row.inputHash, expiresAt: saved.row.expiresAt.toISOString(),
+            execution: 'not_attested', retryable: false, nextAction: 'read_original_goal_preparation' }));
+        }, signal);
+      } catch (error) {
+        if (attempted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_goal_preparation_requires_recheck');
+        throw error;
+      }
+    },
+    async readGoalPreparation(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const command = aiClientGoalPreparationReadRequestSchema.parse(structuredClone(value)); requireEntry();
+      return withBinding(request, true, 'client_goal', async bound => {
+        if (!taskDependencies || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+        const subject = { ...scopeOf(bound), identity: structuredClone(bound.identity) }, before = await policy.authorize(subject, 'read');
+        const row = await repository.findOperation(scopeOf(bound), command.operationKey);
+        if (row) {
+          if (validateClientGoalMaterial(row).goalHash !== command.goalHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          await verify(bound, row, true);
+        }
+        assertReadPolicyUnchanged(before, await policy.authorize(subject, 'read')); await bound.assertCurrent();
+        return freezeOriginalInput(aiClientGoalPreparationResponseSchema.parse({ contractVersion: AI_CLIENT_GOAL_VERSION,
+          operationKey: command.operationKey, goalHash: command.goalHash, state: row ? 'observed' : 'unknown',
+          materialRef: row?.id ?? null, materialHash: row?.materialHash ?? null, inputHash: row?.inputHash ?? null,
+          expiresAt: row?.expiresAt.toISOString() ?? null, execution: 'not_attested', retryable: false, nextAction: 'read_original_goal_preparation' }));
+      }, signal);
+    },
+    async readGoalCandidates(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      return withGoalSource(request, value, async (bound, row, command) => {
+        const original = { materialRef: command.materialRef, creationKey: command.creationKey };
+        const observed = await readOriginalTaskModelObservation(request, original, configuredResultSource, true), sources = await goalSources(bound);
+        const projected = projectClientGoal(row, sources, observed.model, { materialRef: row.id, materialHash: row.materialHash,
+          taskId: observed.model.taskId }, clock(), observed.humanClarifications);
+        const latest = await readOriginalTaskModelObservation(request, original, configuredResultSource, true);
+        if (jsonHash(observed) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        return freezeOriginalInput(aiClientGoalProjectionSchema.parse(projected));
+      }, signal);
+    },
+    async prepareGoalQuote(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const command = aiClientGoalQuoteRequestSchema.parse(structuredClone(value));
+      let attempted = false;
+      try {
+        return await withGoalSource(request, { materialRef: command.materialRef, creationKey: command.creationKey,
+          expectedMaterialHash: command.expectedMaterialHash }, async (bound, row) => {
+          const original = { materialRef: command.materialRef, creationKey: command.creationKey };
+          const observed = await readOriginalTaskModelObservation(request, original, configuredResultSource, true), sources = await goalSources(bound);
+          const prepared = prepareClientGoalQuoteRequest(row, sources, observed.model, { materialRef: row.id, materialHash: row.materialHash,
+            taskId: observed.model.taskId }, { operationKey: command.operationKey, expectedProjectionHash: command.expectedProjectionHash,
+            decision: command.decision, input: command.input }, clock(), observed.humanClarifications);
+          const latest = await readOriginalTaskModelObservation(request, original, configuredResultSource, true);
+          if (jsonHash(observed) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          attempted = true;
+          return withQuotePreparation(request, preparation => preparation.prepare(prepared), signal);
+        }, signal);
+      } catch (error) {
+        if (attempted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_quote_preparation_requires_recheck');
+        throw error;
+      }
+    },
+    async readGoalQuotePreparation(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const command = aiClientGoalQuoteRequestSchema.parse(structuredClone(value));
+      return withQuotePreparation(request, preparation => preparation.readPreparationOperation({ operationKey: command.operationKey, input: command.input }), signal);
+    },
     /** Original material INSERT receipt, not refreshed order facts or execution
      * permission. A changed order/expired material must not erase its receipt. */
     async readOrderMaterialReceipt(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
@@ -768,74 +1011,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     /** Discover only this original task's latest proved model run. No caller
      * result/run ID, earlier-run fallback, arbitrary artifact or raw config. */
-    async readOriginalTaskModelResult(request: AiClientApplicationRequest, value: unknown, source = configuredResultSource) {
-      if (!server.entry || !taskDependencies || !source || !Object.is(source.db, dependencies.db))
-        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_result_dependencies_missing');
-      const command = parseEntry(clientTaskCommandSchema, structuredClone(value)), db = source.db;
-      return withBinding(structuredClone(request), true, 'order', async bound => {
-        const loadMaterial = async (materialRef: string) => {
-          await bound.assertCurrent();
-          const row = await repository.findSource(scopeOf(bound), materialRef);
-          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          await verify(bound, row, true); await bound.assertCurrent();
-          return { row, identity: structuredClone(bound.identity) };
-        };
-        const authorized = composePersistedClientTaskAuthorization(taskDependencies, command, loadMaterial, clock);
-        const original = await composeClientMaterialTasks(taskDependencies, loadMaterial, clock).readCreation(command);
-        if (!original.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        const before = await authorized.execution.readGrant(original.task.taskId, 'read');
-        const access = await authorized.tasks.resolveAccess(before.taskId, 'read_step_terminal');
-        const selected = await db.$transaction(async tx => {
-          const task = await tx.aiTask.findFirst({ where: access.where });
-          if (!task || task.inputRef !== original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          const runs = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
-            actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
-          const run = runs[0];
-          if (!run || runs[1]?.sequence === run.sequence) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id, runId: run.id,
-            originRunId: original.task!.runId, registrationRef: `client-model:${original.inputRef}` });
-          const steps = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id },
-            orderBy: { sequence: 'desc' }, take: 2 });
-          if (steps.length > 1 || steps.some(step => step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION))
-            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          if (steps[0]?.resultRef && run.status === 'QUEUED') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          return { scopeId: task.scopeId, taskId: task.id, taskRevision: task.revision, taskStatus: task.status,
-            runId: run.id, runRevision: run.revision, step: steps[0] ?? null };
-        }, { maxWait: 2500, timeout: 5000 });
-        const result = selected.step?.resultRef ? await new AiTaskResultRepository(db, authorized.tasks, clock)
-          .read({ taskId: selected.taskId, resultId: selected.step.resultRef }) : null;
-        if (result && (result.runId !== selected.runId || result.stepId !== selected.step?.id)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        let text: string | null = null;
-        if (result?.status === 'succeeded') {
-          if (!isGatewayResult(result.payload) || result.payload.status !== 'completed' || result.payload.toolRequests.length
-            || typeof result.payload.text !== 'string') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          text = result.payload.text;
-        }
-        const current = await authorized.execution.readGrant(before.taskId, 'read');
-        if (before.proof !== current.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        const latest = await db.$transaction(async tx => ({
-          run: await tx.aiRun.findFirst({ where: { scopeId: selected.scopeId, taskId: selected.taskId, id: selected.runId } }),
-          step: selected.step ? await tx.aiStep.findFirst({ where: { scopeId: selected.scopeId, taskId: selected.taskId, id: selected.step.id } }) : null
-        }), { maxWait: 2500, timeout: 5000 });
-        if (latest.run?.id !== selected.runId || latest.run.scopeId !== selected.scopeId || latest.run.taskId !== selected.taskId
-          || latest.run.revision !== selected.runRevision || latest.step?.revision !== selected.step?.revision
-          || latest.step?.resultRef !== selected.step?.resultRef) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        const final = await authorized.execution.readGrant(before.taskId, 'read');
-        if (before.proof !== final.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        await bound.assertCurrent();
-        const response = aiClientTaskModelResultReadResponseSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
-          taskId: selected.taskId, taskRevision: selected.taskRevision, state: result ? 'observed' : 'not_observed',
-          workflowStatus: selected.taskStatus.toLowerCase(),
-          resultPurpose: result?.status !== 'succeeded' ? 'not_attested'
-            : selected.taskStatus === 'WAITING_INPUT' ? 'clarification' : selected.taskStatus === 'SUCCEEDED' ? 'answer' : 'not_attested',
-          result: result ? { resultId: result.resultId, status: result.status, observedAt: result.observedAt, text } : null,
-          authority: 'generated_text_not_business_fact', businessExecution: 'not_inferred_from_model_result',
-          retryable: false, nextAction: 'read_original_task' });
-        if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > maxBytes)
-          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        return freezeOriginalInput(response.data);
-      });
-    },
+    readOriginalTaskModelResult,
     /** Server-only, original released-input witness; not a generic cancellation
      * finalizer and never a model/provider or budget-dependent operation. */
     reconcileOriginalTaskInputCancellation(request: AiClientApplicationRequest, value: unknown,

@@ -11,7 +11,8 @@ import { waitForTaskApplicationDependency } from '../runner/prisma-task-applicat
 import type { IncomingMessage } from 'node:http';
 
 export type HumanAutomationPolicyHttpRequest = { headers: { authorization?: unknown } } & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
-export type HumanAutomationPolicyRequestAction = 'read' | 'preview' | 'prepare' | 'preparation' | 'review' | 'operation' | 'commit';
+export type HumanAutomationPolicyRequestAction = 'discover' | 'read' | 'preview' | 'prepare' | 'prepareConfirmed'
+  | 'preparation' | 'review' | 'operation' | 'commit' | 'commitConfirmed';
 export type HumanAutomationPolicyRequestDependencies = {
   db: ConstructorParameters<typeof HumanAutomationPolicyManagementService>[0];
   auth: Pick<AuthService, 'resolveAccessContext'>;
@@ -54,7 +55,7 @@ export class HumanAutomationPolicyRequestFactory {
     const close = () => { active = false; };
     signal?.addEventListener('abort', close, { once: true });
     if (signal?.aborted) close();
-    const write = action === 'prepare' || action === 'commit';
+    const write = action === 'prepare' || action === 'commit' || action === 'prepareConfirmed' || action === 'commitConfirmed';
     let writeReturned = false;
     const credentials = { current: async () => {
       if (!active) throw unavailable();
@@ -95,11 +96,24 @@ export class HumanAutomationPolicyRequestFactory {
         };
         const execute = async () => {
           switch (action) {
+            case 'discover': return stable(() => service.discover(command));
             case 'read': return stable(() => service.read(command));
             case 'preview': return stable(() => service.preview(command));
             case 'preparation': return stable(() => service.preparation(command));
             case 'review': return stable(() => service.review(command));
             case 'operation': return stable(() => service.operation(command));
+            case 'prepareConfirmed': {
+              const result = await service.prepareConfirmed(command);
+              writeReturned = true;
+              if (result.state !== 'unknown' && hash(result) !== hash(await service.review({ preparationId: result.preparationId }))) throw conflict();
+              return result;
+            }
+            case 'commitConfirmed': {
+              const result = await service.commitConfirmed(command);
+              writeReturned = true;
+              if (result.state === 'observed' && hash(result) !== hash(await service.operation({ operationKey: result.operationKey }))) throw conflict();
+              return result;
+            }
             case 'prepare': {
               const result = await service.prepare(command);
               writeReturned = true;

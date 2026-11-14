@@ -1,5 +1,5 @@
 import { readRentalCategoryCode, rentalCategoryStorageCode, rentalDefaultWorkspaceName } from "./category-identity";
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { z } from 'zod';
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
@@ -30,6 +30,7 @@ import type { VersionedBusinessSettings } from './approved-settings-change.ports
 import { readRentalFulfillmentAdmission, type RentalFulfillmentRequirement } from './rental-fulfillment-admission';
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { requestFingerprint } from "./rental-idempotency.repository";
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 import { readRentalConfigurationRevision, RENTAL_CONFIGURATION_REVISION_MAX, writeRentalCoreConfigurationSnapshot } from "./rental-state.repository";
 
 // Stored terminology can originate from a published definition, whose accepted
@@ -172,18 +173,20 @@ export interface RentalConfigStore {
   }>;
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
-  upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization, expectedBinding?: CategoryWriteBinding, deferOpeningCapture?: boolean): Promise<void>;
+  /** Compound configuration writes finish before observing the original opening check. */
+  captureOpeningConfiguration?(tenantId: string, tx: RentalConfigTx): Promise<void>;
   readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx): Promise<VersionedBusinessSettings | null>;
-  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number): Promise<number>;
+  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number, deferOpeningCapture?: boolean): Promise<number>;
   /** preserveStatus carries an omitted edit field into the writer's lock; the
    * returned status updates the local cache without reviving a stale flag. */
-  upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus?: boolean): Promise<RentalFulfillmentOperator['status'] | void>;
+  upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus?: boolean, deferOpeningCapture?: boolean): Promise<RentalFulfillmentOperator['status'] | void>;
   /** A name-only legacy request supplies an uncommitted operator draft. The
    * writer must create it with the location in this same transaction. */
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus?: boolean,
-    newOperator?: RentalFulfillmentOperator): Promise<RentalFulfillmentLocation['status'] | void>;
-  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean): Promise<void>;
-  upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
+    newOperator?: RentalFulfillmentOperator, deferOpeningCapture?: boolean): Promise<RentalFulfillmentLocation['status'] | void>;
+  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean, deferOpeningCapture?: boolean): Promise<void>;
+  upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, deferOpeningCapture?: boolean): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
   lockCouponTemplateForClaim(tenantId: string, templateId: string, tx: RentalConfigTx): Promise<RentalCouponTemplate | undefined>;
@@ -249,7 +252,20 @@ function workspaceProfileReadSql() {
 /** RC-01 阶段 2：Rental Core 配置的库侧实现。库是事实源，服务层内存副本是写穿缓存。 */
 @Injectable()
 export class RentalCoreConfigRepository implements RentalConfigStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant) {}
+
+  private async captureOpening(tx: RentalConfigTx, tenantId: string, workspaceId: string,
+    kind: 'tenant_profile' | 'core_snapshot' | 'business_settings') {
+    if (!this.failureEvents?.openingConfiguration) return;
+    await this.failureEvents.openingConfiguration(tx, { tenantId, workspaceId },
+      { kind, id: kind === 'tenant_profile' ? tenantId : workspaceId });
+  }
+
+  async captureOpeningConfiguration(tenantId: string, tx: RentalConfigTx): Promise<void> {
+    if (!this.failureEvents?.openingConfiguration) return;
+    await this.captureOpening(tx, tenantId, await resolveScopeWorkspaceId(tx, tenantId), "business_settings");
+  }
 
   /** One definition/configuration combination under adoption's space mutex.
    * Caller-owned writes read through their original client and retain commit
@@ -902,7 +918,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       locations: locations.map(row => this.toLocation(row)), couponTemplates: coupons.map(row => this.toCouponTemplate(row)), operators: [], inspectionTemplates: [], hasPersistedConfig: Boolean(settings) };
   }
 
-  async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization, expectedBinding?: CategoryWriteBinding, deferOpeningCapture = false): Promise<void> {
+    if (deferOpeningCapture && !tx) throw new ConflictException("复合档案保存必须保留原事务");
     // The opening-policy lock must live through profile and workspace creation.
     // Autocommit SELECT FOR UPDATE would release it before the protected write.
     if (!tx) {
@@ -944,6 +961,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     if (isDefaultWorkspaceWrite) {
       await this.persistCompatibilityProfile(profile, data, tx, true);
       if (!expectedBinding) await this.ensureDefaultWorkspace(profile.tenantId, data.categoryCode, tx, initialization);
+      if (!deferOpeningCapture && this.failureEvents?.openingConfiguration) {
+        await this.captureOpening(tx, profile.tenantId, await resolveScopeWorkspaceId(tx, profile.tenantId), "tenant_profile");
+      }
       return;
     }
     const workspaceId = requestWorkspaceId!;
@@ -969,6 +989,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     await writeRentalCoreConfigurationSnapshot(tx, profile.tenantId, workspaceId,
       { profile: storedProfile, configPersisted: true, profilePersisted: true }, Prisma.sql`JSON_SET(state, '$.profile', ${nextProfile},
         '$.profilePersisted', CAST('true' AS JSON), '$.configPersisted', CAST('true' AS JSON))`);
+    if (!deferOpeningCapture) await this.captureOpening(tx, profile.tenantId, workspaceId, "core_snapshot");
   }
 
   /** The compatibility row belongs to the default workspace. Non-default and
@@ -1144,7 +1165,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return { settings: structuredClone(row.settings) as unknown as TenantRentalBusinessSettings, settingsRevision: row.settingsRevision };
   }
 
-  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number): Promise<number> {
+  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number, deferOpeningCapture = false): Promise<number> {
+    if (deferOpeningCapture && !tx) throw new ConflictException("复合经营设置保存必须保留原事务");
     if (expectedSettingsRevision !== undefined && (!Number.isSafeInteger(expectedSettingsRevision)
       || expectedSettingsRevision < 1 || expectedSettingsRevision >= 4294967295)) throw new BadRequestException('经营设置版本无效');
     const data = {
@@ -1166,6 +1188,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           data: { ...data, settingsRevision: { increment: 1 } }
         });
         if (changed.count !== 1) throw new ConflictException('经营设置版本已变化，请重新准备');
+        if (!deferOpeningCapture) await this.captureOpening(client, settings.tenantId, workspaceId, 'business_settings');
         return expectedSettingsRevision + 1;
       }
       const saved = await client.rentalTenantBusinessSettings.upsert({
@@ -1174,6 +1197,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: { ...data, settingsRevision: { increment: 1 } },
         select: { settingsRevision: true }
       });
+      if (!deferOpeningCapture) await this.captureOpening(client, settings.tenantId, workspaceId, 'business_settings');
       return saved.settingsRevision;
     };
     // Scope lookup can happen before waiting for the space lock. READ COMMITTED
@@ -1181,7 +1205,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus = false): Promise<RentalFulfillmentOperator['status']> {
+  async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx, preserveStatus = false, deferOpeningCapture = false): Promise<RentalFulfillmentOperator['status']> {
+    if (deferOpeningCapture && !tx) throw new ConflictException("复合经营主体保存必须保留原事务");
     const data = {
       tenantId: operator.tenantId,
       code: operator.code,
@@ -1209,6 +1234,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         create: { workspaceId, id: operator.id, ...saved, createdAt: new Date(operator.createdAt) },
         update: saved
       });
+      if (!deferOpeningCapture) await this.captureOpening(client, operator.tenantId, workspaceId, 'business_settings');
       return status;
     };
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -1217,7 +1243,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   /** Location and a legacy operator draft commit together after binding and
    * scope validation. No independent operator transaction or early cache write. */
   async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, preserveStatus = false,
-    newOperator?: RentalFulfillmentOperator): Promise<RentalFulfillmentLocation['status']> {
+    newOperator?: RentalFulfillmentOperator, deferOpeningCapture = false): Promise<RentalFulfillmentLocation['status']> {
+    if (deferOpeningCapture && !tx) throw new ConflictException("复合地点保存必须保留原事务");
     location = structuredClone(location);
     newOperator = newOperator ? structuredClone(newOperator) : undefined;
     expectedBinding = expectedBinding ? { ...expectedBinding } : undefined;
@@ -1279,7 +1306,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         }
         const present = await client.rentalFulfillmentOperator.findUnique({ where: { id: newOperator.id }, select: { id: true } });
         if (present) throw new ConflictException("新增经营主体标识已存在，请重新读取地点配置");
-        await this.upsertOperator(newOperator, client);
+        // The location and its compatibility operator are one original write.
+        await this.upsertOperator(newOperator, client, false, true);
       }
       const saved = { ...data, status };
       await client.rentalFulfillmentLocation.upsert({
@@ -1287,13 +1315,15 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         create: { workspaceId, id: location.id, ...saved },
         update: saved
       });
+      if (!deferOpeningCapture) await this.captureOpening(client, location.tenantId, workspaceId, 'business_settings');
       return status;
     };
     return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
-  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite = false): Promise<void> {
+  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite = false, deferOpeningCapture = false): Promise<void> {
+    if (deferOpeningCapture && !tx) throw new ConflictException("复合型号保存必须保留原事务");
     const data = {
       tenantId: group.tenantId,
       categoryCode: rentalCategoryStorageCode(group.categoryCode),
@@ -1337,6 +1367,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           }
         });
       }
+      if (!deferOpeningCapture) await this.captureOpening(client, group.tenantId, workspaceId, 'business_settings');
     };
     if (tx) {
       await write(tx);
@@ -1354,7 +1385,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
 
   /** Group/member writes share adoption's workspace lock. Recheck current units
    * and member facts after waiting, before replacing the group atomically. */
-  async upsertPricingGroup(group: RentalPricingGroup, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertPricingGroup(group: RentalPricingGroup, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, deferOpeningCapture = false): Promise<void> {
+    if (deferOpeningCapture && !tx) throw new ConflictException("复合定价分组保存必须保留原事务");
     const write = async (client: RentalConfigTx) => {
       const workspaceId = await resolveScopeWorkspaceId(client, group.tenantId);
       const { definition } = await lockActiveCategoryBinding(client, group.tenantId, workspaceId, expectedBinding, group.categoryCode);
@@ -1403,6 +1435,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
           data: group.memberItemGroupIds.map((itemGroupId, sortOrder) => ({ pricingGroupId: group.id, itemGroupId, sortOrder }))
         });
       }
+      if (!deferOpeningCapture) await this.captureOpening(client, group.tenantId, workspaceId, 'business_settings');
     };
     if (tx) return void await write(tx);
     await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -1727,4 +1760,5 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       enabled: row.enabled
     };
   }
+
 }

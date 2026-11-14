@@ -23,6 +23,7 @@ import { formatRentalMoney, RENTAL_FULFILLMENT_MODES } from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import {
   readOriginalBookingQuote,
+  originalBookingUnitLabel,
   type OriginalBookingQuoteFacts,
 } from "../features/ai-native/booking-handoff";
 import { ClientQuotePreparation } from "../features/ai-native/ClientQuotePreparation";
@@ -40,6 +41,7 @@ interface RemoteBookingProps {
   onLocationChange?: (id: string) => void;
   onReturnLocationChange?: (id: string) => void;
   handoff?: AiBookingHandoff;
+  originalFacts?: OriginalBookingQuoteFacts | null;
 }
 
 const modeLabels: Record<RentalFulfillmentMode, { zh: string; en: string }> = {
@@ -55,13 +57,22 @@ const modeLabels: Record<RentalFulfillmentMode, { zh: string; en: string }> = {
 export function RemoteBooking(props: RemoteBookingProps) {
   // Never mount the automatic quote/create-order lifecycle for an original handoff.
   return props.handoff ? (
-    <OriginalHandoffBooking handoff={props.handoff} />
+    <OriginalHandoffBooking
+      handoff={props.handoff}
+      suppliedFacts={props.originalFacts}
+    />
   ) : (
     <ManualRemoteBooking {...props} />
   );
 }
 
-function OriginalHandoffBooking({ handoff }: { handoff: AiBookingHandoff }) {
+export function OriginalHandoffBooking({
+  handoff,
+  suppliedFacts,
+}: {
+  handoff: AiBookingHandoff;
+  suppliedFacts?: OriginalBookingQuoteFacts | null;
+}) {
   const { language } = useSite();
   const { session, currentWorkspace } = useAuth();
   const quoteOwner = useMemo(
@@ -73,27 +84,36 @@ function OriginalHandoffBooking({ handoff }: { handoff: AiBookingHandoff }) {
     facts: OriginalBookingQuoteFacts | null;
   } | null>(null);
   const originalQuote =
-    quoteRead?.owner === quoteOwner ? quoteRead.facts : null;
+    suppliedFacts !== undefined
+      ? suppliedFacts
+      : quoteRead?.owner === quoteOwner
+        ? quoteRead.facts
+        : null;
   useEffect(() => {
     let disposed = false;
     setQuoteRead(null);
+    if (suppliedFacts !== undefined) return;
+    const current = captureEnterpriseHostSession();
+    if (!current) return;
     // Read only after the user's explicit continue. Never create/recalculate a quote.
     void readOriginalBookingQuote(
       handoff,
       session?.customer.customerId,
       sessionApi.getQuote,
+      Date.now,
+      sessionApi.enterpriseRentalPolicies,
     )
       .then((quote) => {
-        if (disposed) return;
+        if (disposed || !current.current()) return;
         setQuoteRead({ owner: quoteOwner, facts: quote });
       })
       .catch(() => {
-        if (!disposed) setQuoteRead(null);
+        if (!disposed && current.current()) setQuoteRead(null);
       });
     return () => {
       disposed = true;
     };
-  }, [handoff, session, quoteOwner]);
+  }, [handoff, session, quoteOwner, suppliedFacts]);
   const en = language === "en";
   return (
     <section className="booking-card booking-total">
@@ -128,6 +148,36 @@ function OriginalHandoffBooking({ handoff }: { handoff: AiBookingHandoff }) {
             ? "Original amounts are not loaded or unavailable; no recalculation."
             : "原金额未加载或不可用，不重算、不覆盖原报价。"}
         </p>
+      )}
+      {originalQuote && (
+        <>
+          <ul>
+            {originalQuote.lines.map((line, index) => (
+              <li key={index + ":" + line.itemGroupId}>
+                {line.itemName ?? line.itemGroupId} · {line.quantity} ·{" "}
+                {originalBookingUnitLabel(line.pricingUnit, en)}
+                {line.usageQuantity !== null && (
+                  <>
+                    {" "}
+                    · {en ? "Usage" : "使用量"} {line.usageQuantity}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          {originalQuote.enterprise && (
+            <p>
+              {originalQuote.enterprise.corporateName} ·{" "}
+              {originalQuote.enterprise.enterpriseContractAndPayer
+                ? en
+                  ? "Enterprise contract and payment"
+                  : "企业签约付款"
+                : en
+                  ? "Personal payment"
+                  : "个人签约付款"}
+            </p>
+          )}
+        </>
       )}
       <p>{en ? "Not submitted / not reserved" : "尚未提交 / 资源未预占"}</p>
       <p role="status">

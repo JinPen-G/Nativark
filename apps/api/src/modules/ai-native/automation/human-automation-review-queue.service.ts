@@ -7,7 +7,8 @@ import { HumanAutomationReviewService } from './human-automation-review.service'
 import { AutomationError } from './prisma-automation.authority';
 
 const uuid = z.string().uuid();
-const eventType = z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception']);
+const eventType = z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception',
+  'fulfillment.resource_shortage', 'opening.missing_configuration']);
 const reviewStatus = z.enum(['open', 'closed']);
 const filters = z.object({ reviewStatus, eventType: eventType.optional() }).strict();
 const limit = z.number().int().min(1).max(10);

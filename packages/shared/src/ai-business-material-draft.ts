@@ -219,7 +219,53 @@ export interface AiOpeningSectionMaterialDraft { key: string; title: string; req
   externalVerification: 'not_loaded'; unresolvedClassification: Array<'missing_configuration' | 'configured_unverified' | 'formal_check_failed'
     | 'not_implemented' | 'external_credentials_pending' | 'owner_decision_pending'>;
 }
+/** Current adopted category from Core's guarded opening configuration, never
+ * inferred from static defaults, pricing units or location capabilities. */
+const openingCode = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const openingScope = z.object({ kind: z.literal('workspace'), tenantId: openingCode, workspaceId: openingCode }).strict();
+const openingInstant = z.string().max(40).datetime({ offset: true });
+const openingState = z.enum(['enabled', 'paused', 'disabled', 'declared_not_implemented', 'not_enabled']);
+export const aiOpeningCategorySourceDraft = z.object({ source: z.literal('current_core_opening_configuration'),
+  categoryCode: openingCode, categoryVersion: z.string().min(1).max(191).refine(value => value.trim().length > 0
+    && !/[\u0000-\u001f\u007f]/u.test(value)) }).strict();
+export type AiOpeningCategorySourceDraft = z.infer<typeof aiOpeningCategorySourceDraft>;
+export const aiOpeningCapabilityObservationDraft = z.object({ tenantId: openingCode, workspaceId: openingCode,
+  categoryCode: openingCode, observedAt: openingInstant, source: z.literal('original_workspace_capability_overview'),
+  capabilities: z.array(z.object({ code: openingCode, providedByCore: z.boolean(), declaredByCategory: z.boolean(),
+    requiredForCategory: z.boolean(), implemented: z.boolean(), applicable: z.boolean(), state: openingState,
+    implementationVersion: openingCode.nullable(), upgradeAvailable: z.boolean(),
+    instance: z.object({ status: z.enum(['enabled', 'paused', 'disabled']), implementationVersion: openingCode,
+      configVersion: openingCode, revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER), updatedAt: openingInstant }).strict().nullable()
+  }).strict()).max(128), missingRequired: z.array(openingCode).max(128), productionReady: z.boolean()
+}).strict().superRefine((value, context) => {
+  const codes = new Set(value.capabilities.map(row => row.code));
+  if (codes.size !== value.capabilities.length || new Set(value.missingRequired).size !== value.missingRequired.length
+    || value.missingRequired.some(code => !codes.has(code)) || value.productionReady !== (value.missingRequired.length === 0))
+    context.addIssue({ code: 'custom', message: 'Invalid original capability observation' });
+});
+export const aiOpeningCapabilityFactsDraft = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('observed'), scope: openingScope, actorId: openingCode, audience: z.literal('operator'),
+    observation: aiOpeningCapabilityObservationDraft }).strict(),
+  z.object({ state: z.literal('unavailable'), reason: z.enum(['current_capability_permission_required', 'capability_observation_unavailable']),
+    observation: z.null() }).strict()
+]).superRefine((value, context) => {
+  if (value.state === 'observed' && (value.scope.tenantId !== value.observation.tenantId || value.scope.workspaceId !== value.observation.workspaceId))
+    context.addIssue({ code: 'custom', message: 'Capability source scope mismatch' });
+});
+export type AiOpeningCapabilityFactsDraft = z.infer<typeof aiOpeningCapabilityFactsDraft>;
+/** Query time is not a source version. Preserve all original capability and
+ * instance states/revisions when comparing repeated authorized observations. */
+export function aiOpeningCapabilitySourceBasis(value: AiOpeningCapabilityFactsDraft) {
+  if (value.state === 'unavailable') return value;
+  const { observedAt: _observedAt, ...observation } = value.observation;
+  return { ...value, observation };
+}
+
 export interface AiOpeningBusinessMaterialDraft { scope: AiWorkspaceScope; audience: ReadAudience; configVersion: string; observedAt: string;
+  /** Optional only for retained older materials; new reads never invent the
+   * missing historical adoption or attach today's capabilities to old input. */
+  categorySource?: AiOpeningCategorySourceDraft;
+  capabilityObservation?: AiOpeningCapabilityFactsDraft;
   integrationObservation?: import('./ai-opening-integration-observation').AiOpeningIntegrationFactsDraft;
   /** Optional for legacy materials and omitted outside the selected calendar partition. */
   calendarSource?: AiOpeningCalendarSourceDraft;

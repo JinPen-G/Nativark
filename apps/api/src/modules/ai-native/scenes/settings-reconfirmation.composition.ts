@@ -14,6 +14,7 @@ import { ApprovedSettingsTaskAuthority, settingsConflict, settingsDenied, settin
 import { aiStepActionId } from '../ai-step-registration.repository';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import { AiTaskRunnerError } from '../runner/ai-task-runner.service';
+import { readSettingsRejectedClosure } from './settings-rejected-closure.reader';
 
 const key = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const settingsReconfirmationOriginalSchema = z.object({ creationKey: key, changeKey: key }).strict();
@@ -64,6 +65,9 @@ export function composeSettingsReconfirmation(d: ApprovedSettingsApplicationDepe
       const inputsForChange = await tx.aiTaskActionInput.findMany({ where: { scopeId,
         fingerprint: inputFingerprint, toolCode: AI_APPROVED_SETTINGS_TOOL_CODE }, take: 2 });
       if (inputsForChange.length > 1 || inputsForChange.some(row => row.taskId !== taskId || row.runId !== runId)) throw settingsUnavailable();
+      if (task?.status === 'FAILED' && task.cancelRequestedAt === null && runs.length === 1 && run?.status === 'FAILED') {
+        return readSettingsRejectedClosure(d, found, tx, task, run);
+      }
       if (!task || task.id !== taskId || task.scopeId !== scopeId || task.status !== 'CANCELLED' || !task.cancelRequestedAt || task.archivedAt !== null
         || runs.length !== 1 || !run || run.id !== runId || run.scopeId !== scopeId || run.taskId !== taskId
         || run.actorKind !== 'USER' || run.actorId !== actor.actorId || run.status !== 'CANCELLED'

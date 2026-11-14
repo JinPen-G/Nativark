@@ -1,6 +1,8 @@
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT, AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
 import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from '@rental-os/shared';
+import { STAFF_UPLOAD_OBSERVATION_HTTP, STAFF_UPLOAD_OBSERVATION_SCHEMAS } from '@rental-os/shared';
+import { STAFF_FULFILLMENT_RECEIPT_HTTP, STAFF_FULFILLMENT_RECEIPT_CONTRACT } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_ORDER_HANDOFF_HTTP, AI_TASK_ORDER_HANDOFF_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CALENDAR_DRAFT_HTTP, AI_TASK_CALENDAR_DRAFT_CONTRACTS, AI_TASK_CALENDAR_DRAFT_SCHEMAS, AI_TASK_CALENDAR_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
@@ -20,9 +22,11 @@ import { CATEGORY_PREPARATION_PREVIEW_SCHEMA, CATEGORY_PREPARATION_BATCH_READ_SC
 import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desktop-business-schemas';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES, FeatureOwnership, FeatureReleaseStatus, SubscriptionRequestType, SubscriptionPlan } from '@rental-os/shared';
-import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_CLIENT_PUBLIC_HTTP, AI_CLIENT_PUBLIC_CONTRACTS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS,
   AI_ORDER_EXPLANATION_HTTP_V2, AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2 } from '@rental-os/shared';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
@@ -238,6 +242,7 @@ function buildPaths(operations: ContractOperation[]) {
 }
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
+  ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
   ...AI_TASK_RULE_SOURCE_ENTRY_SCHEMAS,
@@ -2344,9 +2349,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Current original diagnosis and Core section are revalidated. Preview is read-only; explicit preparation creates one linked original R1 Task and AI proposal. No active configuration, business draft, publication or model dispatch. Unknown uses the same original operation; history never resumes preparation.',
     requestSchema: contract.request, responseSchema: contract.response,
   })),
-  ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute'] as const).map(action => ({ method: 'post' as const,
+  ...Object.entries(AI_AUTOMATION_EXPLANATION_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `automationExplanation_${action}`,
+    permissions: ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view'],
+    summary: 'Current human original-resource access; explicit first model execution retains the independent automation policy and single ledger. Unknowns only read the original input.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
+  ...(['availability', 'discover', 'inspect', 'prepare', 'read', 'execute', 'inspectReconfirmation',
+    'prepareReconfirmation', 'readReconfirmation', 'startReview'] as const).map(action => ({ method: 'post' as const,
     path: `/api/${AI_MEMBER_NAME_HTTP.basePath}/${AI_MEMBER_NAME_HTTP[action]}`, tag: 'AI Native', operationId: `memberName_${action}`,
-    permissions: action === 'prepare' || action === 'execute' ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
+    permissions: ['prepare', 'execute', 'prepareReconfirmation', 'startReview'].includes(action)
+      ? ['rental-os:member:manage'] : ['rental-os:member:view', 'rental-os:member:manage'],
     authRequired: true, summary: 'Explicit original member-name human workflow; current original manager and Core remain authoritative. Unknown is read only.',
     requestSchema: AI_MEMBER_NAME_CONTRACTS[action], responseSchema: 'AiMemberNameResponse' })),
   ...(['list', 'review', 'save', 'operation', 'preparation', 'previewPreparation', 'prepare', 'preparationOperation'] as const).map(action => ({ method: 'post' as const,
@@ -2413,6 +2427,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/privacy/receipts', tag: 'AI Native', operationId: 'listAiRetentionReceipts',
     permissions: ['system:params:manage'], authRequired: true, summary: 'Bounded current-workspace receipt observation after an ambiguous batch reply.',
     requestSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.request, responseSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.response },
+  ...AI_CLIENT_PUBLIC_HTTP.basePaths.flatMap(base => Object.entries(AI_CLIENT_PUBLIC_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${base}/${AI_CLIENT_PUBLIC_HTTP[action as keyof typeof AI_CLIENT_PUBLIC_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `clientPublic_${base.includes('wechat') ? 'wechat' : 'web'}_${action}`, permissions: [],
+    authRequired: action === 'continueOriginal' || action === 'readContinuation', rateLimited: true,
+    summary: 'Public catalog/help only under the current channel publication. Short signed ownership never grants customer data or execution. Explicit login continuation creates one current customer material; receipt recovery uses the original binding. No task, model, quote or payment is initiated.',
+    requestSchema: contract.request, responseSchema: contract.response,
+    ...(['prepare', 'readOriginal', 'continueOriginal'].includes(action) ? { parameters: [{
+      name: AI_CLIENT_PUBLIC_HTTP.credentialHeader, in: 'header' as const, required: action !== 'continueOriginal',
+      description: 'Server-signed public-material ownership only. Required for first preparation/continuation; existing continuation receipts use the original customer session without renewing public ownership.',
+      schema: { type: 'string', minLength: 1, maxLength: 2048, pattern: '^ain-public-1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$' },
+    }] } : {}),
+  }))),
   ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
     .flatMap((base, surface) => ([
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
@@ -2421,6 +2447,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       [AI_CLIENT_ENTRY_HTTP_DRAFT.createTask, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskCreation, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters, 'AiClientQuotePreparationRequest', 'AiClientQuotePreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoal, 'AiClientGoalPreparationRequest', 'AiClientGoalPreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalPreparation, 'AiClientGoalPreparationReadRequest', 'AiClientGoalPreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates, 'AiClientGoalCandidatesRequest', 'AiClientGoalProjection'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote, 'AiClientGoalQuoteRequest', 'AiClientQuotePreparationResponse'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation, 'AiClientGoalQuoteRequest', 'AiClientQuotePreparationReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation, 'AiClientQuotePreparationRequest', 'AiClientQuotePreparationReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal, 'AiClientQuoteConfirmationRequest', 'AiClientQuoteResultReadResponse'],
@@ -2517,6 +2548,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Human CAS policy management for the original owned inspection candidate task only. Stage authority and current server plan bound every operation. Not approval, Core submission or platform policy management. A current policy read is not an exact historical mutation receipt.',
     requestSchema: contract.request, responseSchema: contract.response
   })),
+  { method: 'post', path: `/api/${STAFF_FULFILLMENT_RECEIPT_HTTP.basePath}/${STAFF_FULFILLMENT_RECEIPT_HTTP.operation}`, tag: 'AI Native',
+    operationId: 'readOriginalStaffFulfillmentReceipt', permissions: ['rental-os:order:view'],
+    summary: 'Read the original Core fulfillment receipt under current staff order and stage location access. Never uploads, submits, reacquires a lock or permits retry after an unknown observation.',
+    requestSchema: STAFF_FULFILLMENT_RECEIPT_CONTRACT.request, responseSchema: STAFF_FULFILLMENT_RECEIPT_CONTRACT.response },
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/receipt-host-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionReceiptHost', permissions: ['rental-os:order:view'],
     summary: 'Open an explicitly selected original historical receipt host. Does not authorize recognition or original inspection submission.',
@@ -2738,9 +2773,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     requestSchema: objectOf({}, [], false), responseSchema: 'AiLegacyModelConfigurationDraft' },
   ...(['operator', 'staff'] as const).flatMap(audience => [
     ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
+    ['candidates/pending/continue', 'continuePendingBatch'],
     ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],
     [AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT.operation, 'createEventTask'],
-    ['reviews/read', 'read'], ['reviews/queue', 'readQueue'], ['reviews/for-event', 'forEvent'], ['reviews/close', 'close'], ['reviews/feedback', 'feedback'], ['reviews/operation', 'operation']
+    ['reviews/read', 'read'], ['reviews/queue', 'readQueue'], ['reviews/for-event', 'forEvent'], ['reviews/close', 'close'], ['reviews/feedback', 'feedback'], ['reviews/operation', 'operation'],
+    ...Object.entries(AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT.operations).map(([action, suffix]) => [suffix, action])
   ].map(([suffix, action]) => ({ method: 'post' as const, path: `/api/ai-native/automation/${audience}/${suffix}`, tag: 'AI Native',
     operationId: `humanAutomation_${audience}_${action}`,
     permissions: audience === 'staff' ? ['rental-os:order:view']
@@ -2752,8 +2789,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS]?.request ?? 'GenericObject',
     responseSchema: action === 'createEventTask' ? 'AiAutomationEventTaskResponseDraft'
       : AI_AUTOMATION_REVIEW_HTTP_CONTRACTS[action as keyof typeof AI_AUTOMATION_REVIEW_HTTP_CONTRACTS]?.response ?? 'GenericObject' }))),
-  ...(['read', 'preview', 'prepare', 'preparation', 'review', 'operation', 'commit'] as const).map(action => ({
-    method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action}`, tag: 'AI Native',
+  ...Object.entries(AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native',
+    operationId: `taskOpeningProposal_${action}`, permissions: action === 'prepare' ? ['rental-os:price:manage'] : ['rental-os:order:view', 'rental-os:price:manage'],
+    summary: 'Current original diagnosis and Core section are revalidated. Preview is read-only; explicit preparation creates one linked original R1 Task and AI proposal. No active configuration, business draft, publication or model dispatch. Unknown uses the same original operation; history never resumes preparation.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
+  ...(['discover', 'read', 'preview', 'prepare', 'prepareConfirmed', 'preparation', 'review', 'operation', 'commit', 'commitConfirmed'] as const).map(action => ({
+    method: 'post' as const, path: `/api/ai-native/automation/operator/policies/${action === 'prepareConfirmed' ? 'prepare-confirmed'
+      : action === 'commitConfirmed' ? 'commit-confirmed' : action}`, tag: 'AI Native',
     operationId: `humanAutomationPolicy_${action}`, permissions: ['system:params:manage'],
     summary: 'Current operator settings permission plus original scoped management grant. Prepare/commit use persisted CAS and original receipts. Only disabled/shadow/manual_confirmation; no default grants, real automatic execution, model or business write. Unknown must use the original preparation/operation. Named closed contracts distinguish current configuration, preview, prepared/stale/expired metadata and the original commit receipt.',
     requestSchema: AI_AUTOMATION_POLICY_HTTP_CONTRACTS[action].request,
@@ -3191,6 +3235,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/staff/v1/auth/change-password", "Auth", "changeStaffPassword", "Change a staff password and revoke other sessions", [], true, "ChangePasswordRequest", "LoginResponse"),
   backlogOperation("post", "/api/staff/v1/auth/switch-workspace", "Auth", "switchStaffWorkspace", "Switch the current staff workspace", [], true, "SwitchWorkspaceRequest", "LoginResponse"),
   backlogOperation("post", "/api/staff/v1/uploads/sessions", "Files", "createStaffUploadSession", "Create a staff-scoped upload session bound to an order or work order", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
+  backlogOperation('post', `/api/${STAFF_UPLOAD_OBSERVATION_HTTP.basePath}/${STAFF_UPLOAD_OBSERVATION_HTTP.observe}`, 'Files', 'observeStaffUploadSession',
+    'Observe one original employee upload by key or id; metadata only, no upload grant or storage request',
+    ['rental-os:order:pickup', 'rental-os:order:return', 'rental-os:order:offline-payment', 'rental-core:maintenance:manage'], true,
+    'StaffUploadObservationRequest', 'StaffUploadObservationResponse'),
   backlogOperation("post", "/api/staff/v1/uploads/sessions/{id}/complete", "Files", "completeStaffUpload", "Complete a staff upload after verifying its actor, scope and business owner", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
   backlogOperation("get", "/api/staff/v1/uploads/{fileAssetId}/download-url", "Files", "getStaffFileDownloadUrl", "Create a staff-scoped short-lived file URL", ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/staff/v1/offline-payments", "RentalCore", "listStaffOfflinePaymentRegistrations", "List pending and confirmed offline payment registrations for an order", ["rental-os:order:view"], true, undefined, "GenericObject", [{ name: "orderId", in: "query", required: true, schema: stringSchema }]),

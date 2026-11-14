@@ -137,7 +137,7 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
     retryable: literal(false), nextAction: literal('read_original_task') }),
   AiClientTaskCancellationObservation: { oneOf: [
     object({ ...cancelObservation, state: literal('observed'),
-      transition: object({ ...cancelTransition, status: { enum: ['cancel_requested', 'cancelled'] } }) }),
+      transition: object({ ...cancelTransition, status: { enum: ['cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded'] } }) }),
     object({ ...cancelObservation, state: literal('unknown'), transition: { type: 'null' } })] },
   AiClientTaskAccountingRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid, callId: { ...id, maxLength: 128 } }),
   AiStaffTaskAccountingRequest: object({ taskId: { ...id, maxLength: 36 }, callId: { ...id, maxLength: 128 } }),

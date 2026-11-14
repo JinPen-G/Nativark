@@ -39,7 +39,9 @@ import { z } from 'zod';
 import { AiOpeningSectionDifferenceService } from './opening-section-difference.service';
 import { AiOpeningSectionProposalService } from './opening-section-proposal.service';
 import { AiOpeningIntegrationFactsService } from './opening-integration-facts.service';
+import { AiOpeningCapabilityFactsService } from './opening-capability-facts.service';
 import type { TenantIntegrationService } from '../../integrations/tenant-integration.service';
+import type { WorkspaceCapabilityService } from '../../rental-core/workspace-capability.service';
 import { AiOpeningVersionFieldSource, type OpeningVersionFieldDb } from './opening-version-fields.source';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { MembershipService } from '../../platform/membership.service';
@@ -77,6 +79,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   /** Real version-row reader only; missing storage is unavailable, not cache. */
   openingVersionFields?: OpeningVersionFieldDb;
   integrations?: Pick<TenantIntegrationService, 'observeOpeningConfiguration'>;
+  capabilities?: Pick<WorkspaceCapabilityService, 'overview'>;
   clock?: () => Date;
 }) {
   for (const [port, method] of [[input?.business, 'loadQuote'], [input?.reports, 'getBoundedOperationReport']] as const) {
@@ -126,7 +129,9 @@ export function composeAiAuthorizedBusinessTools(input: {
   const openingSource = new AiGuardedOpeningConfigurationSource(input.core, routes);
   const openingIntegration = input.integrations ? new AiOpeningIntegrationFactsService({ integrations: input.integrations,
     guard: input.guard, credentials: input.credentials, clock: input.clock }) : undefined;
-  const openingActions = new AiOpeningActionListService(opening, risks, openingSource, diagnostics, input.clock, openingIntegration);
+  const openingCapabilities = input.capabilities ? new AiOpeningCapabilityFactsService({ capabilities: input.capabilities,
+    guard: input.guard, credentials: input.credentials, clock: input.clock }) : undefined;
+  const openingActions = new AiOpeningActionListService(opening, risks, openingSource, diagnostics, input.clock, openingIntegration, openingCapabilities);
   const openingFields = new AiOpeningSectionDifferenceService(openingSource, routes, input.clock,
     input.openingVersionFields ? new AiOpeningVersionFieldSource(input.openingVersionFields, routes) : undefined);
   const sectionProposals = input.openingProposals ? new AiOpeningSectionProposalService({ ...input.openingProposals,

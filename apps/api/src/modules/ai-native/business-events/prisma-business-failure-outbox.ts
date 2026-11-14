@@ -13,6 +13,7 @@ export interface BusinessFailureOutboxParticipant {
   inspection?(tx: Prisma.TransactionClient, scope: FailureScope, id: string): Promise<void>;
   fulfillment?(tx: Prisma.TransactionClient, scope: FailureScope, orderId: string): Promise<ResourceFailureCapture>;
   opening?(tx: Prisma.TransactionClient, scope: FailureScope, configuration: ConfigurationFailureOrigin, sectionCode: string): Promise<ResourceFailureCapture>;
+  openingConfiguration?(tx: Prisma.TransactionClient, scope: FailureScope, configuration: ConfigurationFailureOrigin): Promise<ResourceFailureCapture[]>;
 }
 export class BusinessFailureError extends Error {
   constructor(readonly code: 'unavailable' | 'conflict' | 'not_ready' | 'result_unknown' | 'invalid_input') { super(code); }
@@ -56,7 +57,8 @@ export type ResourceFailureCapture = { state: 'captured'; eventId: string } | {
  * Readers return persisted references and current deterministic evidence, never
  * model/browser claims. The storage implementation must verify the forward
  * schema and use the supplied business transaction; no legacy-column fallback.
- * Opening's nine-source read is revalidated, not claimed to be one transaction. */
+ * Opening reads revalidate the source; when capturing they retain the caller's
+ * transaction, while ordinary current reads remain independent observations. */
 export interface BusinessFailureResourcePorts {
   readFulfillment(scope: FailureScope, orderId: string, tx?: Prisma.TransactionClient): Promise<unknown>;
   readOpening(scope: FailureScope, configuration: ConfigurationFailureOrigin, tx?: Prisma.TransactionClient): Promise<unknown>;
@@ -165,6 +167,27 @@ export class PrismaBusinessFailureOutbox implements BusinessFailureOutboxPartici
     if (requestFingerprint(source.scope) !== requestFingerprint(scope) || source.configuration.kind !== origin.kind
       || source.configuration.id !== origin.id) throw new BusinessFailureError('unavailable');
     return this.captureResource(tx, scope, { ...source.configuration, sourceHash: source.sourceHash, sectionCode: section });
+  }
+
+  /** A configuration save observes the existing nine-section check once to
+   * select actual missing sections. Every append still rechecks its same source
+   * in the caller's transaction; unavailable sections never become failures. */
+  async openingConfiguration(tx: Prisma.TransactionClient, scope: FailureScope,
+    configuration: ConfigurationFailureOrigin): Promise<ResourceFailureCapture[]> {
+    if (!this.resources) return [{ state: 'not_captured', reason: 'source_unavailable' }];
+    const origin = parseResource(configurationFailureOriginSchema, configuration);
+    const raw = await this.resources.readOpening(scope, origin, tx);
+    if (raw === null || raw === undefined) return [{ state: 'not_captured', reason: 'source_unavailable' }];
+    const source = parseResource(openingObservation, raw);
+    if (requestFingerprint(source.scope) !== requestFingerprint(scope) || source.configuration.kind !== origin.kind
+      || source.configuration.id !== origin.id) throw new BusinessFailureError('unavailable');
+    const results: ResourceFailureCapture[] = [];
+    for (const section of source.sections) {
+      if (section.state !== 'missing') continue;
+      results.push(await this.captureResource(tx, scope, { ...source.configuration,
+        sourceHash: source.sourceHash, sectionCode: section.key }));
+    }
+    return results;
   }
 
   private async captureResource(tx: Prisma.TransactionClient, scope: FailureScope, reference: ResourceFailureReference): Promise<ResourceFailureCapture> {

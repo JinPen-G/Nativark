@@ -1,6 +1,7 @@
-import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
+import type { AiBookingDraft, AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse,
   RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { aiBookingDraftSchema, aiBookingHandoffSchema } from '../../vendor/shared-ai-client';
 
 export function normalizeBookingAcceptanceObservation(value: AiBookingAcceptanceReadResponse, handoffRef: string): AiBookingAcceptanceReadResponse {
   const id = (x: unknown) => typeof x === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(x);
@@ -35,6 +36,7 @@ export interface CustomerBookingHost {
   acceptBookingSubmission?(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance>;
   submitAcceptedBooking?(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt>;
   readBookingSubmission?(input: { acceptanceRef: string }): Promise<AiBookingSubmissionReceipt>;
+  readBookingDraft?(input: { bookingDraftId: string }): Promise<AiBookingDraft>;
   isCurrent?(): boolean;
   dispose?(): void;
 }
@@ -59,6 +61,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
   let acceptance: AiBookingSubmissionAcceptance | undefined = originalAcceptance
     ? JSON.parse(JSON.stringify(originalAcceptance)) : undefined;
   let attempted = Boolean(acceptance);
+  let submitAttempted = false;
   const sameContext = () => JSON.stringify(current()) === JSON.stringify(identity);
   const eligible = () => bound.enabled === true
     && ((bound.mode === "interactive" && typeof bound.readBookingHandoff === "function")
@@ -93,35 +96,40 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
       retryable: false, payment: "not_inferred", fulfillment: "not_inferred" } as AiBookingSubmissionReceipt;
   };
   const validate = (input: AiBookingHandoff): AiBookingHandoff => {
-    const value = JSON.parse(JSON.stringify(input)) as AiBookingHandoff;
-    const ref = (x: unknown) => typeof x === "string" && x.length > 0 && x.length <= 512;
+    const value = aiBookingHandoffSchema.parse(JSON.parse(JSON.stringify(input)));
     if (!value || JSON.stringify(value).length > 32768 || value.contractVersion !== "ain-booking-draft-1"
       || value.surface !== "client_miniprogram" || value.audience !== "customer" || value.handoffRef !== bound.handoffRef
-      || !ref(value.bookingDraftId) || !ref(value.handoffRef) || !Number.isSafeInteger(value.revision) || value.revision < 1
       || value.scope?.kind !== "workspace" || value.scope.tenantId !== bound.capability.tenantId || value.scope.workspaceId !== bound.capability.workspaceId
       || value.actionCode !== "OPEN_BOOKING" || value.submission !== "original_booking_page_required" || value.inventory !== "not_reserved"
       || !Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= clock()) throw Error("unavailable");
     const f = value.fields;
-    if (!f || !ref(f.quoteId) || !ref(f.timeZone) || !ref(f.fulfillmentLocationId)
-      || !Array.isArray(f.lines) || !f.lines.length || f.lines.length > 20
-      || f.lines.some(l => !ref(l.itemGroupId) || !Number.isInteger(l.quantity) || l.quantity < 1 || l.quantity > 999)
-      || new Set(f.lines.map(l => l.itemGroupId)).size !== f.lines.length
-      || f.bookingIdentity?.bookingIdentity !== "personal" || f.bookingIdentity.enterpriseContractAndPayer || f.bookingIdentity.corporateCustomerId
-      || f.services?.length || !["store_pickup_return", "delivery"].includes(f.fulfillmentMode)
-      || (f.returnLocationId !== undefined && !ref(f.returnLocationId))
-      || (f.fulfillmentMode === "delivery" && !ref(f.deliveryAddressId))
-      || !Number.isFinite(Date.parse(f.startAt)) || Date.parse(f.startAt) <= clock()
-      || !Number.isFinite(Date.parse(f.endAt)) || Date.parse(f.endAt) <= Date.parse(f.startAt)) throw Error("unsupported");
+    if (Date.parse(f.startAt) <= clock()) throw Error("unsupported");
     new Intl.DateTimeFormat("en", { timeZone: f.timeZone }).format(new Date(f.startAt));
-    return { contractVersion: value.contractVersion, handoffRef: value.handoffRef, bookingDraftId: value.bookingDraftId,
-      revision: value.revision, audience: value.audience, surface: value.surface,
-      scope: { kind: "workspace", tenantId: value.scope.tenantId, workspaceId: value.scope.workspaceId }, expiresAt: value.expiresAt,
-      actionCode: value.actionCode, submission: value.submission, inventory: value.inventory,
-      fields: { quoteId: f.quoteId, timeZone: f.timeZone, startAt: f.startAt, endAt: f.endAt, fulfillmentMode: f.fulfillmentMode,
-        fulfillmentLocationId: f.fulfillmentLocationId, ...(f.returnLocationId ? { returnLocationId: f.returnLocationId } : {}),
-        ...(f.deliveryAddressId ? { deliveryAddressId: f.deliveryAddressId } : {}),
-        bookingIdentity: { bookingIdentity: "personal", enterpriseContractAndPayer: false },
-        lines: f.lines.map(l => ({ itemGroupId: l.itemGroupId, quantity: l.quantity })) } };
+    return value;
+  };
+  const readBoundQuote = async (handoff: AiBookingHandoff, valid: () => boolean) => {
+    const quote = JSON.parse(JSON.stringify(await readQuote(handoff.fields.quoteId))) as RentalQuoteSnapshotV1;
+    if (!valid()) throw Error('booking_host_changed');
+    const q = quote.request, f = handoff.fields, membership = quote.membershipSnapshot;
+    const bookingIdentity = membership && { bookingIdentity: membership.bookingIdentity,
+      ...(membership.corporateCustomerId ? { corporateCustomerId: membership.corporateCustomerId } : {}),
+      enterpriseContractAndPayer: membership.enterpriseContractAndPayer };
+    if (quote.id !== f.quoteId || quote.tenantId !== bound.capability.tenantId || q.customerId !== identity.customerId
+      || q.customerType !== 'personal' || !membership || membership.personalCustomerId !== identity.customerId
+      || quote.pricingContext?.timeZone !== f.timeZone
+      || JSON.stringify(bookingIdentity) !== JSON.stringify(f.bookingIdentity)
+      || q.startAt !== f.startAt || q.endAt !== f.endAt || q.fulfillmentMode !== f.fulfillmentMode
+      || q.fulfillmentLocationId !== f.fulfillmentLocationId || (q.returnLocationId ?? q.fulfillmentLocationId) !== f.returnLocationId
+      || q.deliveryAddressId !== f.deliveryAddressId
+      || JSON.stringify((quote.serviceSnapshots ?? q.services ?? []).map(service => ({ serviceId: service.serviceId, quantity: service.quantity,
+        scheduledStartAt: service.scheduledStartAt ?? q.startAt, scheduledEndAt: service.scheduledEndAt ?? q.endAt,
+        serviceLocationId: service.serviceLocationId ?? q.fulfillmentLocationId }))) !== JSON.stringify(f.services ?? [])
+      || JSON.stringify(q.lines.map(line => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))) !== JSON.stringify(f.lines)
+      || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= clock()
+      || ![quote.payableAmount, quote.depositAmount, quote.preAuthAmount].every(amount => Number.isFinite(amount) && amount >= 0)
+      || typeof quote.currency !== 'string' || !/^[A-Z]{3}$/u.test(quote.currency)) throw Error('quote_unavailable');
+    validate(handoff);
+    return quote;
   };
   const read = async (continuing: boolean) => {
     if (!active || pending) return;
@@ -136,20 +144,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
       if (continuing && (!before || JSON.stringify(before) !== JSON.stringify(handoff))) throw Error("changed");
       let quote: RentalQuoteSnapshotV1 | null = null;
       if (continuing) {
-        quote = JSON.parse(JSON.stringify(await readQuote(handoff.fields.quoteId))) as RentalQuoteSnapshotV1;
-        if (!active || epoch !== generation || !sameContext() || !(bound.isCurrent?.() ?? true)) return;
-        const q = quote.request, f = handoff.fields;
-        if (quote.id !== f.quoteId || quote.tenantId !== bound.capability.tenantId || q.customerId !== identity.customerId
-          || q.customerType !== "personal" || q.bookingIdentity?.bookingIdentity === "enterprise_employee"
-          || q.startAt !== f.startAt || q.endAt !== f.endAt || q.fulfillmentMode !== f.fulfillmentMode
-          || q.fulfillmentLocationId !== f.fulfillmentLocationId || q.returnLocationId !== f.returnLocationId
-          || q.deliveryAddressId !== f.deliveryAddressId || q.services?.length
-          || JSON.stringify(q.lines.map(l => ({ itemGroupId: l.itemGroupId, quantity: l.quantity }))) !== JSON.stringify(f.lines)
-          || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= clock()
-          || ![quote.payableAmount, quote.depositAmount, quote.preAuthAmount].every(n => Number.isFinite(n) && n >= 0)
-          || !quote.currency) throw Error("quote_unavailable");
-        // The handoff might expire while the original quote read was pending.
-        validate(handoff);
+        quote = await readBoundQuote(handoff, () => active && epoch === generation && sameContext() && (bound.isCurrent?.() ?? true));
       }
       emit({ status: continuing ? "continued" : "available", handoff, quote });
     } catch { if (active && epoch === generation && sameContext()) emit({ status: "unavailable", handoff: null, quote: null }); }
@@ -184,13 +179,33 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
       if (acceptance) acceptance = validateAcceptance(acceptance);
       if (kind === "accept") { attempted = false; emit({ ...view, status: "accepted" }); return; }
       const original = acceptance!;
-      // Once a business call was attempted, never call it again. Reconcile only.
-      if (kind === "submit") attempted = true;
-      const receipt = validateReceipt(kind === "submit"
-        ? await bound.submitAcceptedBooking!({ acceptanceRef: original.acceptanceRef, decision: "submit_original_booking" })
+      if (kind === 'submit') { attempted = true; submitAttempted = true; }
+      const receipt = validateReceipt(kind === 'submit'
+        ? await bound.submitAcceptedBooking!({ acceptanceRef: original.acceptanceRef, decision: 'submit_original_booking' })
         : await bound.readBookingSubmission!({ acceptanceRef: original.acceptanceRef }));
       if (!valid()) return;
-      emit({ ...view, status: receipt.state === "observed" ? "order_observed" : "pending_reconcile", receipt });
+      if (receipt.state === 'observed') { submitAttempted = true; emit({ ...view, status: 'order_observed', receipt }); return; }
+      if (kind === 'reconcile' && receipt.state === 'not_observed' && !submitAttempted
+        && bound.mode === 'interactive' && bound.readBookingDraft && bound.readBookingHandoff && acceptance) {
+        const draft = aiBookingDraftSchema.parse(await bound.readBookingDraft({ bookingDraftId: acceptance.bookingDraftId }));
+        if (!valid()) return;
+        if (draft.state === 'handed_to_booking_page' && draft.bookingDraftId === acceptance.bookingDraftId
+          && draft.surface === 'client_miniprogram' && draft.scope.tenantId === bound.capability.tenantId
+          && draft.scope.workspaceId === bound.capability.workspaceId && Date.parse(draft.expiresAt) > clock()
+          && draft.inputFingerprint === acceptance.inputFingerprint && draft.selectionRevision === acceptance.selectionRevision
+          && draft.material.selection.quoteId === acceptance.quoteId) {
+          const handoff = validate(await bound.readBookingHandoff!({ handoffRef: bound.handoffRef }));
+          if (!valid()) return;
+          if (handoff.bookingDraftId !== draft.bookingDraftId || JSON.stringify(handoff.fields) !== JSON.stringify(draft.material.selection)) throw Error('booking_origin_changed');
+          const quote = await readBoundQuote(handoff, valid);
+          if (!valid()) return;
+          const closing = aiBookingDraftSchema.parse(await bound.readBookingDraft({ bookingDraftId: acceptance.bookingDraftId }));
+          if (!valid() || JSON.stringify(closing) !== JSON.stringify(draft)) throw Error('booking_origin_changed');
+          attempted = false; emit({ status: 'accepted', handoff, quote, receipt: null }); return;
+        }
+      }
+      if (receipt.state === 'unknown') submitAttempted = true;
+      emit({ ...view, status: 'pending_reconcile', receipt });
     } catch { if (valid()) emit({ status: "pending_reconcile",
       handoff: null, quote: null, receipt: null }); }
     finally { if (epoch === generation) pending = false; }

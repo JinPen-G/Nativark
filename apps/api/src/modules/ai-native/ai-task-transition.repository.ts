@@ -5,13 +5,14 @@ import {
   type AiTaskEventDraft, type AiTaskTransitionRequestDraft, type AiStepStatusDraft, type AiStepStateDraft, type AiProposalPayloadDraft
 } from "@rental-os/shared";
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from "./ai-task.repository";
-import { evaluateAiTaskTransitionDraft, evaluateAiTaskAdmissionTransitionDraft, evaluateAiTaskConfirmationTransitionDraft, type AiTaskTransitionStateDraft } from "./task-transition-draft";
+import { AI_TASK_TRANSITIONS_DRAFT, evaluateAiTaskTransitionDraft, evaluateAiTaskAdmissionTransitionDraft, evaluateAiTaskConfirmationTransitionDraft, type AiTaskTransitionStateDraft } from "./task-transition-draft";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { fingerprintAiProposalDraft } from "./proposal-binding-draft";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 import { aiTaskRunPlanSchema } from "./runner/prisma-task-run-evidence.repository";
 import { settingsChangeReferenceSchema } from "../rental-core/approved-settings-change.validation";
 import { profileChangeInputSchema } from './runner/prisma-task-plan-input.source';
+import { isDeepStrictEqual } from 'node:util';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -80,6 +81,8 @@ export class AiTaskTransitionRepository {
   /** Observe the exact cancel request at its original revision, never infer
    * success from today's task status or replay a potentially committed write. */
   readCancellationReceipt(value: unknown) { return this.readCancelTransitionReceipt(value, 'cancel_requested'); }
+  /** Cancellation settlement preserves any already committed work. Only its
+   * original cancel_settled event and owner request attest the settled intent. */
   readCancellationSettlementReceipt(value: unknown) { return this.readCancelTransitionReceipt(value, 'cancelled'); }
   private async readCancelTransitionReceipt(value: unknown, target: 'cancel_requested' | 'cancelled') {
     const parsed = z.object({ taskId: id, expectedRevision: revision }).strict().safeParse(structuredClone(value));
@@ -87,67 +90,120 @@ export class AiTaskTransitionRepository {
     const input = parsed.data, initial = await this.access.resolveAccess(input.taskId, 'read_metadata');
     const eventsAccess = await this.access.resolveAccess(input.taskId, 'read_events');
     if (eventsAccess.bindingKey !== initial.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    let observed;
-    try {
-      observed = await this.db.$transaction(async tx => {
-        const task = await tx.aiTask.findFirst({ where: initial.where, select: taskSelect });
+    const settled = target === 'cancelled';
+    const read = () => this.db.$transaction(async tx => {
+        const task = structuredClone(await tx.aiTask.findFirst({ where: initial.where, select: taskSelect }));
         if (!task || task.id !== input.taskId) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (task.contractVersion !== AI_TASK_DRAFT_VERSION || task.eventCursor < 0n || task.eventCursor > maxCursor) {
           throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         }
         const status = z.enum(AI_TASK_STATUSES_DRAFT).safeParse(task.status.toLowerCase());
         if (!status.success) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
-        const rows = await tx.aiTaskEvent.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+        const rows = structuredClone(await tx.aiTaskEvent.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
           taskRevision: input.expectedRevision + 1, type: 'task.transition' }, take: 2,
           orderBy: { cursor: 'asc' }, select: { scopeId: true, taskId: true, taskRevision: true,
-            cursor: true, type: true, payload: true, occurredAt: true } });
+            cursor: true, type: true, payload: true, occurredAt: true } }));
         if (rows.length > 1) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         const row = rows[0];
         let event: AiTaskEventDraft | null = null;
+        const envelopeSchema = z.object({ data: z.object({ from: z.enum(AI_TASK_STATUSES_DRAFT),
+          to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.enum(AI_TASK_TRANSITION_REASONS_DRAFT) }).strict(),
+          initiator: z.object({ kind: z.enum(['user', 'worker', 'system']), id,
+            actorKind: z.string(), actorId: id }).strict() }).passthrough();
+        let requestRows: typeof rows = [];
         if (row) {
-          const envelope = z.object({ data: z.object({ from: z.enum(AI_TASK_STATUSES_DRAFT),
-            to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.enum(AI_TASK_TRANSITION_REASONS_DRAFT) }).strict(),
-            initiator: z.object({ kind: z.enum(['user', 'worker', 'system']), id,
-              actorKind: z.string(), actorId: id }).strict() }).passthrough().safeParse(row.payload);
+          const envelope = envelopeSchema.safeParse(row.payload);
           if (!envelope.success || row.scopeId !== task.scopeId || row.taskId !== task.id
             || row.taskRevision !== input.expectedRevision + 1 || row.type !== 'task.transition'
             || row.cursor < 1n || row.cursor > task.eventCursor || row.taskRevision > task.revision
             || !(row.occurredAt instanceof Date) || !Number.isFinite(row.occurredAt.getTime())) {
             throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
           }
-          if (envelope.data.data.to === target) {
+          const data = envelope.data.data;
+          // A normal completed event at the requested revision is not evidence
+          // of cancellation, even if a later snapshot happens to be terminal.
+          if (data.to === target || settled && AI_TASK_TRANSITIONS_DRAFT.cancel_requested.includes(data.to)
+            && data.reason === 'cancel_settled') {
             if (!(task.cancelRequestedAt instanceof Date) || !Number.isFinite(task.cancelRequestedAt.getTime())) {
               throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
             }
             const initiator = envelope.data.initiator;
-            if (envelope.data.data.reason !== (target === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled')
-              || initiator.kind !== (initial.actorKind === 'AUTOMATION' ? 'system' : 'user')
-              || initiator.id !== initial.actorId || initiator.actorId !== initial.actorId || initiator.actorKind !== initial.actorKind) {
+            const ownerInitiated = initiator.kind === (initial.actorKind === 'AUTOMATION' ? 'system' : 'user')
+              && initiator.id === initial.actorId;
+            // The original task transaction fences the worker before storing
+            // this owner-attributed settlement event. A current lease is not
+            // historical proof; no caller-supplied worker/lease is accepted.
+            const workerSettled = settled && initiator.kind === 'worker'
+              && data.from === 'cancel_requested' && row.occurredAt >= task.cancelRequestedAt;
+            if (data.reason !== (settled ? 'cancel_settled' : 'cancel_requested')
+              || (!ownerInitiated && !workerSettled)
+              || initiator.actorId !== initial.actorId || initiator.actorKind !== initial.actorKind) {
               throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            }
+            if (settled) {
+              if (data.from !== 'cancel_requested' || row.occurredAt < task.cancelRequestedAt) {
+                throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+              }
+              if (status.data !== data.to || row.occurredAt > this.clock()) {
+                throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+              }
+              // The task records the original request time once. Pair the
+              // immutable owner request with this later worker/owner settlement;
+              // today's lease, status or browser fields cannot supply that proof.
+              requestRows = structuredClone(await tx.aiTaskEvent.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+                type: 'task.transition', occurredAt: task.cancelRequestedAt, taskRevision: { lte: input.expectedRevision },
+                payload: { path: '$.data.to', equals: 'cancel_requested' } }, take: 2, orderBy: { cursor: 'asc' },
+                select: { scopeId: true, taskId: true, taskRevision: true, cursor: true, type: true, payload: true, occurredAt: true } }));
+              if (!requestRows.length) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+              if (requestRows.length !== 1) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+              const original = requestRows[0], request = envelopeSchema.safeParse(original.payload);
+              if (!request.success || original.scopeId !== task.scopeId || original.taskId !== task.id
+                || original.type !== 'task.transition' || !revision.safeParse(original.taskRevision).success
+                || original.taskRevision > input.expectedRevision || original.cursor < 1n || original.cursor >= row.cursor
+                || !(original.occurredAt instanceof Date) || original.occurredAt.getTime() !== task.cancelRequestedAt.getTime()) {
+                throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+              }
+              const requested = request.data;
+              if (requested.data.to !== 'cancel_requested' || requested.data.reason !== 'cancel_requested'
+                || !AI_TASK_TRANSITIONS_DRAFT[requested.data.from].includes('cancel_requested')
+                || requested.initiator.kind !== (initial.actorKind === 'AUTOMATION' ? 'system' : 'user')
+                || requested.initiator.id !== initial.actorId || requested.initiator.actorId !== initial.actorId
+                || requested.initiator.actorKind !== initial.actorKind) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             }
             event = { contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, type: 'task.transition',
               taskRevision: row.taskRevision, cursor: row.cursor.toString(), occurredAt: row.occurredAt.toISOString(),
               data: envelope.data.data };
           }
         }
-        return { taskId: task.id, expectedRevision: input.expectedRevision,
+        const observation = { taskId: task.id, expectedRevision: input.expectedRevision,
           status: event ? 'observed' as const : 'not_observed' as const, event,
           snapshot: { revision: task.revision, cursor: task.eventCursor.toString(), status: status.data },
-          cancellation: target === 'cancel_requested' ? 'request_not_rollback' as const : 'task_cancelled_not_business_rollback' as const,
+          cancellation: !settled ? 'request_not_rollback' as const : event?.data.to === 'succeeded' || event?.data.to === 'partially_succeeded'
+            ? 'request_settled_not_business_rollback' as const : 'task_cancelled_not_business_rollback' as const,
           remoteCancellation: 'not_attested' as const,
           automaticRetry: false as const, admission: 'not_granted' as const,
           absenceSemantics: 'not_observed_is_not_proof_of_uncommitted' as const };
+        return { observation, task, rows, requestRows };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    const authorize = async () => {
+      for (const action of ['read_metadata', 'read_events'] as const) {
+        if ((await this.access.resolveAccess(input.taskId, action)).bindingKey !== initial.bindingKey) {
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        }
+      }
+    };
+    try {
+      const original = await read();
+      await authorize();
+      if (settled) {
+        if (!isDeepStrictEqual(await read(), original)) throw conflict();
+        await authorize();
+      }
+      return Object.freeze(original.observation);
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
-    for (const action of ['read_metadata', 'read_events'] as const) {
-      if ((await this.access.resolveAccess(input.taskId, action)).bindingKey !== initial.bindingKey) {
-        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      }
-    }
-    return Object.freeze(observed);
   }
 
   settleCancellation(value: unknown) { return this.transitionState(value, true); }

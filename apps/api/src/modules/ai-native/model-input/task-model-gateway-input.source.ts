@@ -74,10 +74,12 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
 
   private narrow(context: AiExecutionContext) {
     if (context.scope.kind !== 'workspace'
-      || (context.audience === 'client' ? context.actor.kind !== 'customer' : context.actor.kind !== 'user')
-      || !['operator', 'staff', 'client'].includes(context.audience)) throw denied();
+      || (context.audience === 'client' ? context.actor.kind !== 'customer'
+        : context.audience === 'automation' ? context.actor.kind !== 'automation' : context.actor.kind !== 'user')
+      || !['operator', 'staff', 'client', 'automation'].includes(context.audience)) throw denied();
     const actorId = context.actor.kind === 'customer' ? context.actor.customerId
-      : 'userId' in context.actor ? context.actor.userId : undefined;
+      : context.actor.kind === 'automation' ? context.actor.subjectId
+        : 'userId' in context.actor ? context.actor.userId : undefined;
     if (!actorId) throw denied();
     return { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId };
   }

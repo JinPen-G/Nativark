@@ -100,7 +100,7 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
         const website = channel === 'web' ? structuredClone(await input.db.websiteChannelProfile.findUnique({
           where: { tenantId: identity.tenantId }, select: { tenantId: true, revision: true, enabled: true } })) : null;
         if (!policy || Object.entries(key).some(([k, v]) => policy[k as keyof typeof policy] !== v)
-          || !policy.enabled || !policy.allowRead || (name === 'prepare' || name === 'createTask') && !policy.allowCreate
+          || !policy.enabled || !policy.allowRead || (name === 'prepare' || name === 'createTask' || name === 'prepareGoal') && !policy.allowCreate
           || !(policy.expiresAt instanceof Date) || !Number.isFinite(policy.expiresAt.getTime())
           || policy.expiresAt <= now || !Number.isSafeInteger(policy.revision) || policy.revision < 1
           || !profile || profile.tenantId !== identity.tenantId || !Number.isSafeInteger(profile.revision) || profile.revision < 1
@@ -136,6 +136,8 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
   return {
     readHostCapabilities: bind('readHostCapabilities'), issueAction: bind('issueAction'),
     prepare: bind('prepare'), readOrderMaterialReceipt: bind('readOrderMaterialReceipt'),
+    prepareGoal: bind('prepareGoal'), readGoalPreparation: bind('readGoalPreparation'), readGoalCandidates: bind('readGoalCandidates'),
+    prepareGoalQuote: bind('prepareGoalQuote'), readGoalQuotePreparation: bind('readGoalQuotePreparation'),
     createTask: bind('createTask'), readTaskCreation: bind('readTaskCreation'),
     readOriginalTaskAccounting: bind('readOriginalTaskAccounting'), reconcileOriginalTaskAccounting: bind('reconcileOriginalTaskAccounting'),
     createBookingDraft: bind('createBookingDraft'), chooseBookingDraft: bind('chooseBookingDraft'), readBookingDraft: bind('readBookingDraft'),

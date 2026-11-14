@@ -133,7 +133,8 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
   private async modelEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
     charges: AiTaskExecutionCharge[], context: AiExecutionContext, originalAuthorizationHash?: string) {
     const actorId = context.audience === 'client' && context.actor.kind === 'customer' ? context.actor.customerId
-      : ['operator', 'staff'].includes(context.audience) && context.actor.kind === 'user' ? context.actor.userId : null;
+      : ['operator', 'staff'].includes(context.audience) && context.actor.kind === 'user' ? context.actor.userId
+        : context.audience === 'automation' && context.actor.kind === 'automation' ? context.actor.subjectId : null;
     if (!actorId || context.scope.kind !== 'workspace' || !step.inputRef) throw denied();
     const key = { scopeId: step.scopeId, taskId: step.taskId, runId: step.runId };
     const saved = await this.modelDb.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } });

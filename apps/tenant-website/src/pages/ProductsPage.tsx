@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { Search as SearchOutlined } from "../components/SiteIcon";
 import { useSite } from "../SiteContext";
 import { ProductCard } from "../components/ProductCard";
@@ -9,6 +14,10 @@ import { toIsoDateTime, validRentalPeriod } from "../data/datetime";
 import { Breadcrumbs, PageHeading } from "../components/PageHeader";
 import { CatalogConditions } from "../components/CatalogConditions";
 import { useActiveRail } from "../hooks/useActiveRail";
+import { ClientPublicBrowse } from "../features/ai-native/ClientPublicBrowse";
+import { ClientGoalPicker } from "../features/ai-native/ClientGoalPicker";
+import { useAuth } from "../AuthContext";
+import { captureEnterpriseHostSession } from "../data/authClient";
 
 export function ProductsPage() {
   const {
@@ -22,6 +31,11 @@ export function ProductsPage() {
     localizeProduct,
     t,
   } = useSite();
+  const { session, currentWorkspace, switchWorkspace } = useAuth();
+  const navigate = useNavigate();
+  const [goalOpen, setGoalOpen] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState(false);
   const { categoryId } = useParams();
   const [params, setParams] = useSearchParams();
   const category = tenant.categories.find((item) => item.id === categoryId);
@@ -176,6 +190,17 @@ export function ProductsPage() {
   const activeCategory = tenant.categories.find(
     (item) => item.id === selectedCategory,
   );
+  const goalCategory =
+    activeCategory ??
+    (tenant.categories.length === 1 ? tenant.categories[0] : null);
+  const goalScope = JSON.stringify([
+    tenantCode,
+    goalCategory?.id,
+    session?.customer.customerId,
+    currentWorkspace?.workspaceCode,
+  ]);
+  const currentGoalScope = useRef(goalScope);
+  currentGoalScope.current = goalScope;
   const conditionNote = availabilityChecking
     ? t("checkingAvailability")
     : availableIds
@@ -220,6 +245,84 @@ export function ProductsPage() {
         onApply={setParams}
         note={conditionNote}
       />
+      {isRemote && tenantCode && activeCategory && (
+        <ClientPublicBrowse
+          tenantCode={tenantCode}
+          serviceCode={activeCategory.id}
+          kind="catalog"
+          english={language === "en"}
+          loginHref={href(
+            "/login?redirect=" +
+              encodeURIComponent("/category/" + activeCategory.id),
+          )}
+        />
+      )}
+      {isRemote && tenantCode && goalCategory && (
+        <>
+          {session?.customer.customerType === "personal" &&
+          currentWorkspace?.workspaceCode !== goalCategory.id ? (
+            <button
+              type="button"
+              className="button button-outline"
+              disabled={switching}
+              onClick={() => {
+                if (switching) return;
+                setSwitching(true);
+                setSwitchError(false);
+                void switchWorkspace(goalCategory.id)
+                  .catch(() => setSwitchError(true))
+                  .finally(() => setSwitching(false));
+              }}
+            >
+              {language === "en"
+                ? "Switch to this service for goal selection"
+                : "切换到此服务后按目标选品"}
+            </button>
+          ) : goalOpen === goalScope ? (
+            <ClientGoalPicker
+              scopeKey={goalScope}
+              tenantCode={tenantCode}
+              serviceCode={goalCategory.id}
+              english={language === "en"}
+              onHandoff={(handoff) => {
+                const current = captureEnterpriseHostSession();
+                const productId = handoff.fields.lines[0]?.itemGroupId;
+                if (
+                  !current?.current() ||
+                  current.tenantCode !== tenantCode ||
+                  current.workspaceCode !== goalCategory.id ||
+                  currentGoalScope.current !== goalScope ||
+                  handoff.surface !== "tenant_website" ||
+                  !productId ||
+                  document.hidden
+                )
+                  return;
+                navigate(href("/booking/" + encodeURIComponent(productId)), {
+                  state: { aiBookingHandoffRef: handoff.handoffRef },
+                });
+              }}
+              onOrdinary={() => setGoalOpen(null)}
+            />
+          ) : (
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => setGoalOpen(goalScope)}
+            >
+              {language === "en"
+                ? "Choose rental items from a goal"
+                : "按使用目标选品"}
+            </button>
+          )}
+          {switchError && (
+            <p role="status">
+              {language === "en"
+                ? "This service could not be selected. Check your current membership and try again."
+                : "暂时无法切换服务，请核对当前会员关系后重试。"}
+            </p>
+          )}
+        </>
+      )}
       <div className="catalog-layout">
         <aside className="catalog-sidebar">
           <h2>{t("productCategory")}</h2>

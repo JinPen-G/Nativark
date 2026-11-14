@@ -1,13 +1,15 @@
 /** Fixed human member-name host. Resolves original change/Task/approval/Core
  * records from an id-only locator; no human/model registration or hash input.
- * Ordinary-name writes use the original member Guard; preparation is not
- * approval, and unknown mutations are observed only. */
+ * Ordinary-name writes use the original member Guard. Reconfirmation prepares
+ * a new immutable change only; start and approval remain explicit. Unknown is
+ * observed by its original locator; a new start needs untouched original proof. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { AI_MEMBER_NAME_HTTP, AI_MEMBER_NAME_VERSION, aiMemberNameAvailabilityInput, aiMemberNameDiscoverInput,
   aiMemberNameSelection, aiMemberNamePrepareInput, aiMemberNameReadInput, aiMemberNameExecuteInput, aiMemberNameResponse,
+  aiMemberNameReconfirmationInspectInput, aiMemberNameReconfirmationPrepareInput, aiMemberNameStartReviewInput,
   type AiMemberNameLocator, type AiMemberNameResponse } from '@rental-os/shared';
 import type { MembershipService } from '../platform/membership.service';
 import { ApprovedProfileRouteAuthority, type ApprovedProfileActor } from '../platform/approved-profile-route.authority';
@@ -23,11 +25,13 @@ import { respondAiScene } from './scenes/original-scenes.controller';
 import { withRequestAbort } from './scenes/request-abort';
 import { AiMemberNameAvailabilityDto, AiMemberNameDiscoverDto, AiMemberNameSelectionDto,
   AiMemberNamePrepareDto, AiMemberNameReadDto, AiMemberNameExecuteDto } from './member-name.dto';
+import { AiMemberNameReconfirmationInspectDto, AiMemberNameReconfirmationPrepareDto, AiMemberNameStartReviewDto } from './member-name.dto';
 
 export const AI_MEMBER_NAME_REQUESTS = Symbol('AI_MEMBER_NAME_REQUESTS');
 export type MemberNameDependencies = Omit<ApprovedProfileApplicationDependencies, 'credentials'> & {
   memberships: Pick<MembershipService, 'listPersonalProfileCandidatesPage'> };
-type Action = 'availability' | 'discover' | 'inspect' | 'prepare' | 'read' | 'execute';
+type Action = 'availability' | 'discover' | 'inspect' | 'prepare' | 'read' | 'execute'
+  | 'inspectReconfirmation' | 'prepareReconfirmation' | 'readReconfirmation' | 'startReview';
 const parse = <S extends z.ZodTypeAny>(schema: S, value: unknown): z.infer<S> => {
   const found = schema.safeParse(structuredClone(value)); if (!found.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   return freezeOriginalInput(found.data);
@@ -42,6 +46,9 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
     const command = action === 'availability' ? parse(aiMemberNameAvailabilityInput, value)
       : action === 'discover' ? parse(aiMemberNameDiscoverInput, value) : action === 'inspect' ? parse(aiMemberNameSelection, value)
         : action === 'prepare' ? parse(aiMemberNamePrepareInput, value) : action === 'execute' ? parse(aiMemberNameExecuteInput, value)
+          : action === 'inspectReconfirmation' ? parse(aiMemberNameReconfirmationInspectInput, value)
+            : action === 'prepareReconfirmation' ? parse(aiMemberNameReconfirmationPrepareInput, value)
+              : action === 'startReview' ? parse(aiMemberNameStartReviewInput, value)
           : parse(aiMemberNameReadInput, value);
     const authorization = z.string().max(8192).regex(/^Bearer \S+$/u).safeParse(request?.headers?.authorization);
     if (!authorization.success) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -94,7 +101,8 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
         const created = await profiles.readCreation(bound, found.reference, signal);
         if (!('state' in created.receipt) || created.receipt.state !== 'observed' || !('task' in created.receipt) || !created.receipt.task)
           return { frame, reference: found.reference };
-        frame.task = { taskId: created.receipt.task.taskId, runId: created.receipt.task.runId, status: null, revision: null,
+        frame.task = { taskId: created.receipt.task.taskId, runId: created.receipt.task.runId,
+          status: created.receipt.task.status as NonNullable<AiMemberNameResponse['task']>['status'], revision: created.receipt.task.revision,
           approval: 'not_observed', businessOutcome: 'not_observed', confirmationHash: null }; frame.phase = 'task_created';
         const admission = await profiles.readTaskActionAdmission(bound, found.reference, signal);
         if (admission.state !== 'recorded') return { frame, reference: found.reference };
@@ -126,7 +134,79 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
       };
       if (action === 'availability') return aiMemberNameResponse.parse(base());
       if (action === 'read') return aiMemberNameResponse.parse((await read(parse(aiMemberNameReadInput, command).locator)).frame);
+      const reconfirmed = async (locator: AiMemberNameLocator) => {
+        const found = await locate(locator);
+        if (!found) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const observed = await profiles.readReconfirmedChange(bound, { original: found.reference }, signal);
+        if (observed.state !== 'prepared') return aiMemberNameResponse.parse({ ...base(), phase: 'not_observed', locator,
+          reconfirmation: { originalLocator: locator, newLocator: null, review: null, closure: null, preparation: 'not_observed',
+            approval: 'fresh_proposal_and_approval_required', automaticRetry: false } });
+        const next: AiMemberNameLocator = { customerId: observed.change.customerId, requestKey: found.reference.changeId, kind: 'reconfirmed' };
+        const originalChange = await locate(next);
+        if (!originalChange || hash(originalChange.reference) !== hash(observed.reference)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const nextFrame = (await read(next)).frame;
+        assert();
+        return aiMemberNameResponse.parse({ ...nextFrame, reconfirmation: { originalLocator: locator, newLocator: next,
+          review: null, closure: null, preparation: 'prepared', approval: 'fresh_proposal_and_approval_required', automaticRetry: false } });
+      };
+      if (action === 'readReconfirmation') return reconfirmed(parse(aiMemberNameReadInput, command).locator);
       if (!enabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (action === 'inspectReconfirmation') {
+        const input = parse(aiMemberNameReconfirmationInspectInput, command), found = await locate(input.locator);
+        if (!found) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const expiresAt = new Date(clock().getTime() + 120000).toISOString();
+        const review = await profiles.readUpdatedDifference(bound, { original: found.reference, name: input.name, expiresAt }, signal);
+        const updated = change({ baseRevision: review.current.ordinaryRevision, expiresAt,
+          fields: [{ before: review.current.name, after: input.name }] });
+        const candidates = await recipient(input.locator.customerId);
+        if (candidates[0].name !== review.current.name || (await profiles.readUpdatedDifference(bound,
+          { original: found.reference, name: input.name, expiresAt }, signal)).reviewHash !== review.reviewHash)
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        assert();
+        return aiMemberNameResponse.parse({ ...base(), locator: input.locator, candidates, change: updated,
+          phase: input.name === review.current.name ? 'no_change' : 'reconfirmation_difference_ready',
+          reconfirmation: { originalLocator: input.locator, newLocator: null, preparation: 'not_attempted', closure: null,
+            review: { name: input.name, expiresAt, reviewHash: review.reviewHash, previous: change(review.previous), current: updated,
+              originalBaseMatches: review.originalBaseMatches }, approval: 'fresh_proposal_and_approval_required', automaticRetry: false } });
+      }
+      if (action === 'prepareReconfirmation') {
+        const input = parse(aiMemberNameReconfirmationPrepareInput, command), found = await locate(input.locator);
+        if (!found || Date.parse(input.expiresAt) - clock().getTime() > 120000) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        await authorizeMemberWrite(input.locator.customerId);
+        const result = await profiles.prepareReconfirmedChange(bound, { original: found.reference, name: input.name,
+          expiresAt: input.expiresAt, reviewHash: input.reviewHash }, signal);
+        const nextFrame = await reconfirmed(input.locator);
+        if (!nextFrame.change || nextFrame.change.after !== input.name || nextFrame.change.expiresAt !== input.expiresAt
+          || nextFrame.reconfirmation?.newLocator?.customerId !== result.reference.customerId) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        return aiMemberNameResponse.parse({ ...nextFrame, reconfirmation: { ...nextFrame.reconfirmation!, closure: result.closure } });
+      }
+      if (action === 'startReview') {
+        const input = parse(aiMemberNameStartReviewInput, command), found = await locate(input.locator);
+        if (!found) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        await authorizeMemberWrite(input.locator.customerId);
+        const previous = await profiles.readCreation(bound, found.reference, signal);
+        if (!('state' in previous.receipt) || previous.receipt.state === 'unknown') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+        if (previous.receipt.state === 'observed') {
+          if (!previous.receipt.task || previous.receipt.task.status !== 'queued' || previous.receipt.task.revision !== 1)
+            return aiMemberNameResponse.parse((await read(input.locator)).frame);
+          // A queued creation receipt is not enough by itself. Only an untouched
+          // original can resume its first explicit admission/start. No recovered
+          // lease, started preparation or UNKNOWN charge may authorize a replay.
+          try {
+            await profiles.configureTaskActions(bound, { ...found.reference, decision: 'allow_original_member_name_task' }, signal);
+            assert(); await profiles.startUnstarted(bound, found.reference, signal);
+            return aiMemberNameResponse.parse((await read(input.locator)).frame);
+          } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+        }
+        try {
+          const created = await profiles.createTask(bound, found.reference, signal);
+          if (!('replayed' in created.receipt)) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+          if (created.receipt.replayed) return aiMemberNameResponse.parse((await read(input.locator)).frame);
+          assert(); await profiles.configureTaskActions(bound, { ...found.reference, decision: 'allow_original_member_name_task' }, signal);
+          assert(); await profiles.startUnstarted(bound, found.reference, signal);
+          return aiMemberNameResponse.parse((await read(input.locator)).frame);
+        } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
+      }
       if (action === 'discover') {
         const found = await flow.discover(bound, parse(aiMemberNameDiscoverInput, command).query);
         return aiMemberNameResponse.parse({ ...base(), phase: 'candidates', candidates: found.page.candidates,
@@ -164,7 +244,7 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
           if (prepared.state !== 'prepared') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
           assert(); await profiles.createTask(bound, prepared.reference, signal);
           assert(); await profiles.configureTaskActions(bound, { ...prepared.reference, decision: 'allow_original_member_name_task' }, signal);
-          assert(); await profiles.start(bound, prepared.reference, signal);
+          assert(); await profiles.startUnstarted(bound, prepared.reference, signal);
           return aiMemberNameResponse.parse((await read(locator)).frame);
         } catch (error) { if (entered) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); throw error; }
       }
@@ -180,14 +260,18 @@ export function composeMemberNameRequests(d: MemberNameDependencies, configurati
         assert(); await profiles.continueConfirmation(bound, current.reference, signal);
         return aiMemberNameResponse.parse((await read(input.locator)).frame);
       } catch { throw new AiTaskRunnerError('AI_RESULT_UNKNOWN'); }
-    }, action === 'prepare' || action === 'execute', signal).finally(() => { active = false; });
+    }, ['prepare', 'execute', 'prepareReconfirmation', 'startReview'].includes(action), signal).finally(() => { active = false; });
   };
   return Object.freeze({ availability: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'availability', s),
     discover: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'discover', s),
     inspect: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'inspect', s),
     prepare: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'prepare', s),
     read: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'read', s),
-    execute: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'execute', s) });
+    execute: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'execute', s),
+    inspectReconfirmation: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'inspectReconfirmation', s),
+    prepareReconfirmation: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'prepareReconfirmation', s),
+    readReconfirmation: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'readReconfirmation', s),
+    startReview: (r: AiSceneHttpRequest, v: unknown, s?: AbortSignal) => call(r, v, 'startReview', s) });
 }
 
 @Controller(AI_MEMBER_NAME_HTTP.basePath)
@@ -211,4 +295,12 @@ export class AiMemberNameController {
   read(@Req() r: IncomingMessage, @Body() v: AiMemberNameReadDto) { return this.respond(r, v, 'read'); }
   @Post('execute') @HttpCode(200) @Header('Cache-Control', 'no-store')
   execute(@Req() r: IncomingMessage, @Body() v: AiMemberNameExecuteDto) { return this.respond(r, v, 'execute'); }
+  @Post(AI_MEMBER_NAME_HTTP.inspectReconfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  inspectReconfirmation(@Req() r: IncomingMessage, @Body() v: AiMemberNameReconfirmationInspectDto) { return this.respond(r, v, 'inspectReconfirmation'); }
+  @Post(AI_MEMBER_NAME_HTTP.prepareReconfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareReconfirmation(@Req() r: IncomingMessage, @Body() v: AiMemberNameReconfirmationPrepareDto) { return this.respond(r, v, 'prepareReconfirmation'); }
+  @Post(AI_MEMBER_NAME_HTTP.readReconfirmation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readReconfirmation(@Req() r: IncomingMessage, @Body() v: AiMemberNameReadDto) { return this.respond(r, v, 'readReconfirmation'); }
+  @Post(AI_MEMBER_NAME_HTTP.startReview) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  startReview(@Req() r: IncomingMessage, @Body() v: AiMemberNameStartReviewDto) { return this.respond(r, v, 'startReview'); }
 }

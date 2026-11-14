@@ -908,17 +908,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 套装必须排在其组成项之后写入——组成项是独立表的外键，先写套装会违反约束。
    */
   private async persistConfig(state: TenantRentalState, tx?: RentalConfigTx, initialization?: RentalDefaultWorkspaceInitialization) {
-    await this.configStore.upsertProfile(state.profile, tx, initialization);
-    await this.configStore.upsertBusinessSettings(state.businessSettings, state.businessSettings.updatedBy, tx);
-    for (const operator of state.operators) await this.configStore.upsertOperator(operator, tx);
-    for (const location of state.locations) await this.configStore.upsertLocation(location, tx);
+    await this.configStore.upsertProfile(state.profile, tx, initialization, undefined, Boolean(tx));
+    await this.configStore.upsertBusinessSettings(state.businessSettings, state.businessSettings.updatedBy, tx, undefined, undefined, Boolean(tx));
+    for (const operator of state.operators) await this.configStore.upsertOperator(operator, tx, false, Boolean(tx));
+    for (const location of state.locations) await this.configStore.upsertLocation(location, tx, undefined, false, undefined, Boolean(tx));
     const ordered = [...state.itemGroups].sort(
       (left, right) => Number(left.inventoryMode === RentalInventoryMode.Bundle) - Number(right.inventoryMode === RentalInventoryMode.Bundle)
     );
-    for (const group of ordered) await this.configStore.upsertItemGroup(group, tx);
-    for (const pricingGroup of state.pricingGroups) await this.configStore.upsertPricingGroup?.(pricingGroup, tx);
+    for (const group of ordered) await this.configStore.upsertItemGroup(group, tx, undefined, undefined, false, Boolean(tx));
+    for (const pricingGroup of state.pricingGroups) await this.configStore.upsertPricingGroup?.(pricingGroup, tx, undefined, Boolean(tx));
     for (const template of state.couponTemplates) await this.configStore.upsertCouponTemplate(template, tx);
     for (const template of state.inspectionTemplates) await this.configStore.upsertInspectionTemplate(template, tx);
+    // Initialization is already owned by the caller transaction. Capture only
+    // after the full Core configuration, without publishing its cache early.
+    if (tx) await this.configStore.captureOpeningConfiguration?.(state.profile.tenantId, tx);
   }
   async getProfile(tenantId: string) {
     const current = await this.refreshCommittedWorkspace(tenantId);
@@ -1515,7 +1518,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       createdAt: existing?.createdAt ?? timestamp,
       updatedAt: timestamp
     };
-    await this.configStore.upsertPricingGroup?.(result, tx, writeContext.binding);
+    // A deferred group is followed by its original price write in this same tx.
+    // The price owner captures opening after both facts have been saved.
+    await this.configStore.upsertPricingGroup?.(result, tx, writeContext.binding, Boolean(tx && deferCache));
     if (!deferCache) this.commitPricingGroup(result);
     return result;
   }

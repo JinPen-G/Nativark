@@ -4,7 +4,7 @@ import { switchService } from "../../core/flow";
 import { isApiError } from "../../core/http";
 import { cachedMerchant, loadMerchant, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
 import { emptyState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
-import { contextVersion, isSignedIn, sessionEvents } from "../../core/session";
+import { contextVersion, currentSession, isSignedIn, sessionEvents } from "../../core/session";
 import { ROUTES, buildUrl, navigate, toast } from "../../core/ui";
 
 /**
@@ -19,11 +19,13 @@ interface CatalogData {
   cards: ItemCard[];
   view: ViewState;
   total: number;
+  publicServiceCode: string;
+  goalOpen: boolean;
 }
 
 Page({
   behaviors: [themeBehavior],
-  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0 } as CatalogData,
+  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0, publicServiceCode: '', goalOpen: false } as CatalogData,
   serviceCode: "" as string,
   loadVersion: 0,
   unsubscribe: undefined as (() => void) | undefined,
@@ -32,14 +34,18 @@ Page({
     this.setData({ query: (options.q ?? "").slice(0, 50), activeFacet: options.facet ?? "" });
     this.unsubscribe = sessionEvents.on((event) => {
       if (event.type === "refreshed") return;
+      this.setData({ goalOpen: false });
       this.serviceCode = "";
       void this.load(false);
     });
   },
 
   onUnload() {
+    this.setData({ goalOpen: false });
     this.unsubscribe?.();
   },
+
+  onHide() { this.setData({ goalOpen: false }); },
 
   onShow() {
     const pending = takePendingSearch();
@@ -53,7 +59,9 @@ Page({
 
   applyMerchant(info: MerchantInfo) {
     const resolved = resolveServiceCode(info);
-    this.setData({ services: info.services.map((row) => ({ code: row.code, name: row.name, active: row.code === resolved, paused: row.status === "paused" })) });
+    this.setData({ services: info.services.map((row) => ({ code: row.code, name: row.name, active: row.code === resolved, paused: row.status === "paused" })),
+      ...(this.data.publicServiceCode !== resolved ? { goalOpen: false } : {}),
+      publicServiceCode: info.services.some(row => row.code === resolved && row.status === 'open') ? resolved ?? '' : '' });
     return resolved;
   },
 
@@ -143,6 +151,23 @@ Page({
   onItemTap(event: WechatMiniprogram.TouchEvent) {
     navigate(buildUrl(ROUTES.item, { id: String(event.currentTarget.dataset.id ?? ""), service: this.serviceCode }));
   },
+
+  onGoalHandoff(event: WechatMiniprogram.CustomEvent<{ handoffRef?: unknown }>) {
+    const reference = event.detail?.handoffRef, session = currentSession(), version = contextVersion(), serviceCode = this.serviceCode;
+    if (!session || session.serviceCode !== serviceCode || serviceCode !== this.data.publicServiceCode
+      || typeof reference !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(reference)) return;
+    // Offer only a server-issued locator. Checkout remains inert until its
+    // human explicitly opens and rechecks the original Booking host.
+    wx.navigateTo({ url: buildUrl(ROUTES.checkout, { entry: 'original_booking_handoff' }), success: result => {
+      if (contextVersion() === version && currentSession() === session && this.serviceCode === serviceCode)
+        result.eventChannel.emit('ai-booking-handoff', { handoffRef: reference });
+    } });
+  },
+
+  onOpenGoal() {
+    if (this.data.publicServiceCode) this.setData({ goalOpen: true });
+  },
+  onCloseGoal() { this.setData({ goalOpen: false }); },
 
   onViewAction() {
     if (handleCommonViewAction(this.data.view, { redirect: ROUTES.catalog })) return;

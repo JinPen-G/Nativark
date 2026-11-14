@@ -725,7 +725,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** Complete initial workspace configuration joins one Core transaction.
    * Captured rows cannot change while locks are pending. The caller updates its
-   * persisted flag only after this transaction commits; no AI event is implied. */
+   * persisted flag only after this transaction commits. An optional opening
+   * participant observes the complete write through this same transaction. */
   private async persistBusinessConfig(tenantId: string, state: RentalBusinessState) {
     const mysql = this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql";
     const workspaceId = mysql ? this.workspaceOf(tenantId) : undefined;
@@ -739,17 +740,21 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     const write = async (tx?: Prisma.TransactionClient) => {
       const binding = tx ? (await lockActiveCategoryBinding(tx, tenantId, workspaceId!, undefined, config.categoryCode)).binding : undefined;
-      for (const plan of config.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx, binding);
+      for (const plan of config.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx, binding, Boolean(tx));
       // PRICE-03: plans and their initial immutable version must be committed
       // with the remaining defaults, never as a separately visible prefix.
       if (tx) await this.ensureInitialSpacePriceVersion(config, tx);
       for (const plan of config.discountPlans) await this.configStore.upsertDiscountPlan(plan, binding, tx);
       for (const service of config.services) await this.configStore.upsertService(service, binding, tx);
-      for (const calendar of config.calendars) await this.configStore.upsertCalendar(calendar, undefined, [], tx);
-      for (const version of config.ruleVersions) await this.configStore.upsertRuleVersion(version, binding, tx);
+      for (const calendar of config.calendars) await this.configStore.upsertCalendar(calendar, undefined, [], tx, Boolean(tx));
+      for (const version of config.ruleVersions) await this.configStore.upsertRuleVersion(version, binding, tx, Boolean(tx));
       for (const template of config.notificationTemplates) await this.configStore.upsertNotificationTemplate(template, tx);
       // A later cache edit is still unsaved input. Do not mark it persisted when
       // only our earlier captured rows were written; roll back the whole batch.
+      if (!isDeepStrictEqual(config, readConfig())) throw new ConflictException("补落业务配置期间输入已变化，请重新保存");
+      if (tx) await this.configStore.captureOpeningConfiguration?.(tenantId, tx);
+      // Capture also awaits persisted sources. A caller edit during that wait
+      // must roll back the configuration and its outbox rows together.
       if (!isDeepStrictEqual(config, readConfig())) throw new ConflictException("补落业务配置期间输入已变化，请重新保存");
     };
     if (mysql) await this.prisma!.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -1274,7 +1279,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       // 计划当前值与版本写入同一事务。失败时两者一起回滚，不能留下编辑行与
       // 生效事实分叉的半成品。
-      await this.configStore.upsertPricingPlan(result, client, binding);
+      await this.configStore.upsertPricingPlan(result, client, binding, true);
+      await this.configStore.captureOpeningConfiguration?.(tenantId, client);
     };
     const writePromise = tx ? write(tx) : prisma.$transaction(write);
     await writePromise.catch((error) => {
@@ -1647,7 +1653,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         changeReason: `恢复 v${sequence}：${reason.trim()}`,
         createdBy: operator
       });
-      for (const plan of updatedPlans) await this.configStore.upsertPricingPlan(plan, tx);
+      for (const plan of updatedPlans) await this.configStore.upsertPricingPlan(plan, tx, undefined, true);
+      await this.configStore.captureOpeningConfiguration?.(tenantId, tx);
       return { row, updatedPlans };
     }).catch((error) => {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -2036,12 +2043,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         changeReason: adjustment.changeReason,
         createdBy: operator
       });
-      for (const nextPlan of nextPlans) await this.configStore.upsertPricingPlan(nextPlan, tx);
+      for (const nextPlan of nextPlans) await this.configStore.upsertPricingPlan(nextPlan, tx, undefined, true);
       const applied = await tx.rentalPriceAdjustmentPlan.updateMany({
         where: { id: adjustmentId, tenantId, workspaceId, status: { in: ["draft", "pending"] } },
         data: { status: "applied", resultVersionId: row.id, confirmedBy: operator ?? undefined, confirmedAt: new Date() }
       });
       if (!applied.count) throw new ConflictException("调价计划已被其他人处理，请刷新后重试");
+      await this.configStore.captureOpeningConfiguration?.(tenantId, tx);
       return { row, nextPlans };
     }).catch((error) => {
       // 基础版本被推进 → 409。失败的落库由调用方 runDuePriceAdjustments 统一记

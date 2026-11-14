@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   Link,
+  useLocation,
   useNavigate,
   useParams,
   useSearchParams,
@@ -20,7 +21,11 @@ import { rentalQuery } from "../data/rentalQuery";
 import type { DemoOrder } from "../types";
 import { useBookingHandoffHost } from "../features/ai-native/BookingHandoffHost";
 import { BookingHandoffPanel } from "../features/ai-native/BookingHandoffPanel";
-import { handoffLocalInput } from "../features/ai-native/booking-handoff";
+import {
+  handoffLocalInput,
+  originalBookingModeLabel,
+  originalBookingUnitLabel,
+} from "../features/ai-native/booking-handoff";
 
 /** 预约选择交给原服务端报价与建单入口，本地演示单独标记并保存。 */
 export function BookingPage() {
@@ -36,6 +41,12 @@ export function BookingPage() {
   } = useSite();
   const { isAuthenticated, session, currentWorkspace } = useAuth();
   const handoffHost = useBookingHandoffHost();
+  const location = useLocation();
+  const hasHandoffReference = Boolean(
+    location.state &&
+    typeof location.state === "object" &&
+    "aiBookingHandoffRef" in location.state,
+  );
   const toast = useToast();
   const { productId } = useParams();
   const [params] = useSearchParams();
@@ -139,6 +150,23 @@ export function BookingPage() {
     );
 
   const remoteMode = isRemote && isAuthenticated;
+  if (remoteMode && hasHandoffReference && !handoffHost?.enabled) {
+    return (
+      <div className="shell booking-page">
+        <PageHeading
+          title={en ? "Continue the original reservation" : "继续原预约"}
+          description={
+            en
+              ? "Use the original draft controls to check this reservation. No new quote is requested."
+              : "请通过原草稿入口核对本次预约，不重新请求报价。"
+          }
+        />
+        <Link className="button button-outline" to={href("/products")}>
+          {en ? "Return to rental items" : "返回商品目录"}
+        </Link>
+      </div>
+    );
+  }
   const days = rentalDays(startDate, endDate);
   const validTerm = validRentalPeriod(startDate, endDate);
   const validQuantity =
@@ -609,12 +637,110 @@ export function BookingPage() {
               );
             }}
           >
-            {(handoff) => (
+            {(handoff, original) => (
               <div className="booking-layout">
-                <fieldset className="booking-form" disabled>
-                  {productSection}
-                  {termSection}
-                  {fulfillmentSection}
+                <div className="booking-form">
+                  <section className="booking-card" id="booking-product">
+                    <h2>{en ? "Original rental items" : "原预约商品"}</h2>
+                    <ul>
+                      {handoff.fields.lines.map((line, index) => {
+                        const basis = original?.lines[index];
+                        return (
+                          <li key={index + ":" + line.itemGroupId}>
+                            {basis?.itemName ?? line.itemGroupId} ·{" "}
+                            {line.quantity} ·{" "}
+                            {originalBookingUnitLabel(
+                              basis?.pricingUnit ?? null,
+                              en,
+                            )}
+                            {basis?.usageQuantity !== null &&
+                              basis?.usageQuantity !== undefined && (
+                                <>
+                                  {" "}
+                                  · {en ? "Usage" : "使用量"}{" "}
+                                  {basis.usageQuantity}
+                                </>
+                              )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                  <section className="booking-card" id="booking-term">
+                    <h2>{en ? "Original rental interval" : "原租赁区间"}</h2>
+                    <p>
+                      {handoffLocalInput(
+                        handoff.fields.startAt,
+                        handoff.fields.timeZone,
+                      )}
+                      {" — "}
+                      {handoffLocalInput(
+                        handoff.fields.endAt,
+                        handoff.fields.timeZone,
+                      )}
+                      {" ("}
+                      {handoff.fields.timeZone}
+                      {")"}
+                    </p>
+                  </section>
+                  <section className="booking-card" id="booking-fulfillment">
+                    <h2>{en ? "Original fulfillment" : "原取还安排"}</h2>
+                    <dl>
+                      <dt>{en ? "Fulfillment mode" : "取还方式"}</dt>
+                      <dd>
+                        {originalBookingModeLabel(
+                          handoff.fields.fulfillmentMode,
+                          en,
+                        )}
+                      </dd>
+                      <dt>{en ? "Fulfillment location" : "取用／配送地点"}</dt>
+                      <dd>{handoff.fields.fulfillmentLocationId}</dd>
+                      <dt>{en ? "Return location" : "归还地点"}</dt>
+                      <dd>
+                        {handoff.fields.returnLocationId ??
+                          handoff.fields.fulfillmentLocationId}
+                      </dd>
+                      <dt>{en ? "Booking identity" : "预约身份"}</dt>
+                      <dd>
+                        {original?.enterprise?.corporateName ??
+                          (en ? "Personal" : "个人")}
+                        {original?.enterprise && (
+                          <>
+                            {" "}
+                            ·{" "}
+                            {original.enterprise.enterpriseContractAndPayer
+                              ? en
+                                ? "Enterprise payment"
+                                : "企业付款"
+                              : en
+                                ? "Personal payment"
+                                : "个人付款"}
+                          </>
+                        )}
+                      </dd>
+                    </dl>
+                    {Boolean(handoff.fields.services?.length) && (
+                      <ul>
+                        {handoff.fields.services?.map((service) => (
+                          <li key={service.serviceId}>
+                            {service.serviceId} · {service.quantity} ·{" "}
+                            {service.scheduledStartAt} —{" "}
+                            {service.scheduledEndAt}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {original?.enterprise && (
+                      <p
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        {original.enterprise.noticeText}
+                      </p>
+                    )}
+                  </section>
                   <p className="field-note">
                     {en
                       ? "To change the original material, prepare a new selection."
@@ -626,10 +752,10 @@ export function BookingPage() {
                   >
                     {handoff.fields.fulfillmentLocationId}
                     {handoff.fields.deliveryAddressId
-                      ? ` / ${handoff.fields.deliveryAddressId}`
+                      ? " / " + handoff.fields.deliveryAddressId
                       : ""}
                   </p>
-                </fieldset>
+                </div>
                 <aside className="booking-aside" id="booking-quote">
                   <RemoteBooking
                     product={product}
@@ -638,6 +764,7 @@ export function BookingPage() {
                     quantity={quantity}
                     fulfillment={fulfillment}
                     handoff={handoff}
+                    originalFacts={original}
                   />
                 </aside>
               </div>

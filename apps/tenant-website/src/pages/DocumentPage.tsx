@@ -19,6 +19,7 @@ import {
   safeDocumentHref,
   type ClientRichTextNode,
 } from "@rental-os/shared";
+import { ClientPublicBrowse } from "../features/ai-native/ClientPublicBrowse";
 
 function DocumentBody({ body }: { body: string }) {
   const nodes = parseClientRichText(body);
@@ -158,6 +159,15 @@ export function DocumentPage({ kind }: { kind: Kind }) {
           </Link>
         </nav>
         <div className="doc-reading">
+          {kind === "help" && isRemote && tenantCode && tenant.categories[0] && (
+            <ClientPublicBrowse
+              tenantCode={tenantCode}
+              serviceCode={tenant.categories[0].id}
+              kind="help"
+              english={en}
+              loginHref={href("/login?redirect=%2Fhelp")}
+            />
+          )}
           {loading ? (
             <LoadingState label={t("loading")} />
           ) : (

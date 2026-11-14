@@ -1,7 +1,8 @@
 /** One human calendar-draft interaction. Only original ids persist before save;
  * unknown saves can only be observed, never retried or cleared by absence.
  * Scope/hide/unmount drops buffered facts and interrupts late delivery. */
-import { aiTaskCalendarDraftReference, type AiTaskCalendarDraftReference, type AiTaskCalendarDraftReviewInput, type AiTaskCalendarDraftSaveInput,
+import { aiTaskCalendarDraftReference, aiTaskCalendarDraftOperationResponse, aiTaskCalendarDraftPreparationOperationResponse,
+  type AiTaskCalendarDraftReference, type AiTaskCalendarDraftReviewInput, type AiTaskCalendarDraftSaveInput,
   type AiTaskCalendarDraftListResponse, type AiTaskCalendarDraftReviewResponse, type AiTaskCalendarDraftOperationResponse } from '@rental-os/shared';
 
 export interface TaskCalendarDraftApi {
@@ -10,20 +11,42 @@ export interface TaskCalendarDraftApi {
   save(value: AiTaskCalendarDraftSaveInput, signal: AbortSignal): Promise<AiTaskCalendarDraftOperationResponse>;
   operation(value: AiTaskCalendarDraftReference, signal: AbortSignal): Promise<AiTaskCalendarDraftOperationResponse>;
 }
-export interface TaskCalendarDraftStore { read(): AiTaskCalendarDraftReference | null; write(value: AiTaskCalendarDraftReference): void; clear(expected: AiTaskCalendarDraftReference): void; }
+export interface TaskCalendarDraftStore { read(): AiTaskCalendarDraftReference | null; write(value: AiTaskCalendarDraftReference): void;
+  clear(expected: AiTaskCalendarDraftReference): void; markRejected?(expected: AiTaskCalendarDraftReference): void; }
+function readCalendarDraftLocator(raw: string) {
+  if (!raw || raw.length > 512) throw Error('AI_RESULT_UNKNOWN');
+  const value: unknown = JSON.parse(raw);
+  if (value && typeof value === 'object' && !Array.isArray(value) && 'phase' in value) {
+    if (Object.keys(value).length !== 2 || value.phase !== 'read_rejected_operation' || !('reference' in value)) throw Error('AI_RESULT_UNKNOWN');
+    return { reference: aiTaskCalendarDraftReference.parse(value.reference), rejected: true };
+  }
+  return { reference: aiTaskCalendarDraftReference.parse(value), rejected: false };
+}
 export function taskCalendarDraftStore(key: string, storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): TaskCalendarDraftStore {
   return { read() {
     if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
     const text = storage.getItem(key); if (text === null) return null;
-    if (!text || text.length > 512) throw Error('AI_RESULT_UNKNOWN');
-    const parsed = aiTaskCalendarDraftReference.safeParse(JSON.parse(text)); if (!parsed.success) throw Error('AI_RESULT_UNKNOWN');
-    return parsed.data; },
+    return readCalendarDraftLocator(text).reference; },
     write(value) { if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE'); const checked = aiTaskCalendarDraftReference.parse(value);
       if (storage.getItem(key) !== null) throw Error('AI_RESULT_UNKNOWN');
       const raw = JSON.stringify(checked); storage.setItem(key, raw);
-      if (storage.getItem(key) !== raw) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE'); }, clear(expected) {
-      if (!storage || storage.getItem(key) !== JSON.stringify(aiTaskCalendarDraftReference.parse(expected))) throw Error('AI_RESULT_UNKNOWN');
-      storage.removeItem(key); if (storage.getItem(key) !== null) throw Error('AI_RESULT_UNKNOWN'); } };
+    if (storage.getItem(key) !== raw) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE'); }, clear(expected) {
+      if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+      const raw = storage.getItem(key);
+      // A terminal original receipt can finish a partial cleanup. A different
+      // page's locator must survive both successful saves and rejected saves.
+      if (raw === null) return;
+      const found = readCalendarDraftLocator(raw);
+      if (found.rejected || !same(found.reference, aiTaskCalendarDraftReference.parse(expected))) throw Error('AI_RESULT_UNKNOWN');
+      storage.removeItem(key); if (storage.getItem(key) !== null) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE'); },
+    markRejected(expected) {
+      if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+      const raw = storage.getItem(key);
+      if (raw === null || !same(readCalendarDraftLocator(raw).reference, aiTaskCalendarDraftReference.parse(expected))) throw Error('AI_RESULT_UNKNOWN');
+      const next = JSON.stringify({ phase: 'read_rejected_operation', reference: expected });
+      if (storage.getItem(key) !== raw) throw Error('AI_RESULT_UNKNOWN');
+      storage.setItem(key, next); if (storage.getItem(key) !== next) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+    } };
 }
 export interface TaskCalendarDraftView {
   items: AiTaskCalendarDraftListResponse['items']; loaded: boolean; saveEnabled: boolean; review: AiTaskCalendarDraftReviewResponse | null;
@@ -43,57 +66,90 @@ export function createTaskCalendarDraftSession(input: { taskId: string; current(
   const assert = (signal?: AbortSignal) => { if (!active || !input.current() || signal?.aborted) throw Error('AI_SCOPE_CHANGED'); };
   const reset = () => { request?.abort(); request = null; view = { ...view, items: [], loaded: false, saveEnabled: false,
     review: null, operation: null, busy: null, error: null }; };
-  const assertReference = (value: AiTaskCalendarDraftReference) => { assert(); aiTaskCalendarDraftReference.parse(value);
-    if (value.taskId !== input.taskId) throw Error('AI_SCOPE_CHANGED'); };
+  const restore = () => {
+    if (view.locatorInvalid) return;
+    try {
+      const stored = input.store.read();
+      if (stored && stored.taskId !== input.taskId || view.pending && (!stored || !same(stored, view.pending))) {
+        publish({ locatorInvalid: true, saveEnabled: false, review: null }); return;
+      }
+      const rejected = stored && view.operation?.operation.state === 'rejected_no_commit' && same(view.operation.reference, stored);
+      if (stored && !view.pending && !rejected) publish({ pending: stored, saveEnabled: false, review: null, operation: null });
+    } catch { publish({ locatorInvalid: true, saveEnabled: false, review: null }); }
+  };
+  const reference = (value: AiTaskCalendarDraftReference) => { assert(); const checked = aiTaskCalendarDraftReference.parse(structuredClone(value));
+    if (checked.taskId !== input.taskId) throw Error('AI_SCOPE_CHANGED'); return checked; };
   const run = async <T>(kind: NonNullable<TaskCalendarDraftView['busy']>, action: (signal: AbortSignal) => Promise<T>): Promise<T> => {
-    assert(); if (view.busy) throw Error('AI_OPERATION_BUSY'); const owner = new AbortController(); request = owner;
+    assert(); if (request || view.busy) throw Error('AI_OPERATION_BUSY'); const owner = new AbortController(); request = owner;
     publish({ busy: kind, error: null });
     try { const result = await action(owner.signal); assert(owner.signal); return result; }
     catch (error) { if (request === owner && !owner.signal.aborted) publish({ error }); throw error; }
     finally { if (request === owner) { request = null; publish({ busy: null }); } }
   };
+  const observe = (value: AiTaskCalendarDraftOperationResponse, original: AiTaskCalendarDraftReference, reviewedHash?: string) => {
+    if (value.taskId !== input.taskId || !same(value.reference, original)) throw Error('AI_SCOPE_CHANGED');
+    if (view.operation?.operation.state === 'rejected_no_commit' && same(view.operation.reference, original)
+      && JSON.stringify(view.operation.operation) !== JSON.stringify(value.operation)) throw Error('AI_RESULT_UNKNOWN');
+    if (value.operation.state === 'rejected_no_commit') {
+      if (reviewedHash && value.operation.reviewHash !== reviewedHash) throw Error('AI_RESULT_UNKNOWN');
+      if (view.pending && same(view.pending, original)) {
+        if (!input.store.markRejected) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+        input.store.markRejected(original); publish({ pending: null });
+      }
+      publish({ operation: value, saveEnabled: false, review: null }); return;
+    }
+    if (value.operation.state === 'committed' && view.pending && same(view.pending, original)) {
+      input.store.clear(original); publish({ pending: null });
+    }
+    publish({ operation: value, review: null });
+  };
   return Object.freeze({ get view() { return view; },
-    async list() { return run('list', async signal => { const value = await input.api.list(input.taskId, signal);
+    async list() { assert(); restore(); return run('list', async signal => { const value = await input.api.list(input.taskId, signal);
       assert(signal); if (value.taskId !== input.taskId || value.items.some(item => item.reference.taskId !== input.taskId)) throw Error('AI_SCOPE_CHANGED');
-      publish({ items: value.items, loaded: true, saveEnabled: value.saveEnabled && !view.locatorInvalid, review: null }); }); },
-    async review(reference: AiTaskCalendarDraftReference, overrideReason: string, overrideConfirmed: boolean) {
-      assertReference(reference);
+      restore(); publish({ items: value.items, loaded: true,
+        saveEnabled: value.saveEnabled && !view.locatorInvalid && !view.pending && view.operation?.operation.state !== 'rejected_no_commit', review: null }); }); },
+    async review(value: AiTaskCalendarDraftReference, overrideReason: string, overrideConfirmed: boolean) {
+      const original = reference(value); restore();
       if (view.pending) throw Error('AI_RESULT_UNKNOWN');
-      return run('review', async signal => { const value = await input.api.review({ ...reference, overrideReason, overrideConfirmed }, signal);
-        assert(signal); if (!same(value.reference, reference)) throw Error('AI_SCOPE_CHANGED'); publish({ review: value, operation: null }); });
+      if (view.operation?.operation.state === 'rejected_no_commit' && same(view.operation.reference, original)) throw Error('AI_RESOURCE_UNAVAILABLE');
+      return run('review', async signal => { publish({ review: null });
+        const operation = aiTaskCalendarDraftOperationResponse.parse(structuredClone(await input.api.operation(original, signal)));
+        assert(signal); observe(operation, original);
+        if (operation.operation.state !== 'not_observed') throw Error('AI_RESOURCE_UNAVAILABLE');
+        const reviewed = await input.api.review({ ...original, overrideReason, overrideConfirmed }, signal);
+        assert(signal); restore(); if (!same(reviewed.reference, original) || reviewed.taskId !== input.taskId) throw Error('AI_SCOPE_CHANGED');
+        if (view.pending || view.locatorInvalid) throw Error('AI_RESULT_UNKNOWN'); publish({ review: reviewed, operation: null }); });
     },
     async save() {
-      assert(); const reviewed = view.review;
+      assert(); restore(); const reviewed = view.review && structuredClone(view.review);
       if (!reviewed || !view.saveEnabled || view.pending || view.locatorInvalid) throw Error('AI_RESOURCE_UNAVAILABLE');
       return run('save', async signal => {
         // Refuse dispatch if the original locator cannot be preserved. No
         // fields, reason, hash, raw settings or token are written to storage.
-        input.store.write(reviewed.reference);
-        const persisted = input.store.read();
-        if (!persisted || !same(persisted, reviewed.reference)) {
-          publish({ locatorInvalid: true, saveEnabled: false }); throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
-        }
-        assert(signal);
         publish({ pending: reviewed.reference, review: null });
-        try { const value = await input.api.save({ ...reviewed.reference, overrideReason: reviewed.overrideReason, overrideConfirmed: reviewed.overrideConfirmed,
-          reviewHash: reviewed.reviewHash, decision: 'save_original_business_draft' }, signal);
-          assert(signal); if (!same(value.reference, reviewed.reference) || value.operation.state !== 'committed') throw Error('AI_RESULT_UNKNOWN');
-          input.store.clear(reviewed.reference); publish({ operation: value, pending: null });
+        assert(signal);
+        try { input.store.write(reviewed.reference);
+          const persisted = input.store.read();
+          if (!persisted || !same(persisted, reviewed.reference)) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+        } catch (error) { publish({ locatorInvalid: true, saveEnabled: false }); throw error; }
+        assert(signal);
+        try { const value = aiTaskCalendarDraftOperationResponse.parse(structuredClone(await input.api.save({ ...reviewed.reference, overrideReason: reviewed.overrideReason, overrideConfirmed: reviewed.overrideConfirmed,
+          reviewHash: reviewed.reviewHash, decision: 'save_original_business_draft' }, signal)));
+          assert(signal); if (value.operation.state === 'not_observed') throw Error('AI_RESULT_UNKNOWN');
+          observe(value, reviewed.reference, reviewed.reviewHash);
         } catch (error) { if (!signal.aborted) publish({ review: null }); throw error; }
       });
     },
-    async operation(reference: AiTaskCalendarDraftReference) {
-      assertReference(reference);
-      return run('operation', async signal => { const value = await input.api.operation(reference, signal);
-        assert(signal); if (!same(value.reference, reference)) throw Error('AI_SCOPE_CHANGED');
-        if (value.operation.state === 'committed' && view.pending && same(view.pending, reference)) { input.store.clear(reference); publish({ pending: null }); }
+    async operation(value: AiTaskCalendarDraftReference) {
+      const original = reference(value);
+      return run('operation', async signal => { const value = aiTaskCalendarDraftOperationResponse.parse(structuredClone(await input.api.operation(original, signal)));
+        assert(signal); observe(value, original);
         // not_observed does not clear unknown or permit another save.
-        publish({ operation: value, review: null });
       });
     },
     clearReview() { publish({ review: null }); },
-    activate() { reset(); active = true; publish({}); },
-    clear() { reset(); publish({}); },
+    activate() { reset(); active = true; restore(); publish({}); },
+    clear() { reset(); restore(); publish({}); },
     dispose() { active = false; reset(); }
   });
 }
@@ -115,8 +171,10 @@ export function calendarPreparationStore<T>(key: string, parse: (value: unknown)
     if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE'); const raw = storage.getItem(key);
     if (raw === null) return null; if (!raw || raw.length > 512) throw Error('AI_RESULT_UNKNOWN');
     return parse(JSON.parse(raw));
-  }, write(value: T) {
-    if (!storage || storage.getItem(key) !== null) throw Error('AI_RESULT_UNKNOWN');
+  }, write(value: T, completed?: T) {
+    if (!storage) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+    const expected = completed ? JSON.stringify(parse(completed)) : null;
+    if (storage.getItem(key) !== expected) throw Error('AI_RESULT_UNKNOWN');
     const encoded = JSON.stringify(parse(value)); storage.setItem(key, encoded);
     if (storage.getItem(key) !== encoded) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
   }, clearCompleted(expected: T) {
@@ -132,13 +190,19 @@ export function calendarPreparationStore<T>(key: string, parse: (value: unknown)
 }
 type CalendarPreparationApi = {
   preparation(value: { taskId: string; date: string }, signal: AbortSignal): Promise<AiTaskCalendarDraftPreparationResponse>;
+  operation?(reference: AiTaskCalendarDraftReference, signal: AbortSignal): Promise<AiTaskCalendarDraftOperationResponse>;
   previewPreparation(value: AiTaskCalendarDraftPreparationPreviewInput, signal: AbortSignal): Promise<AiTaskCalendarDraftPreparationPreviewResponse>;
   prepareProposal(value: AiTaskCalendarDraftPrepareInput, signal: AbortSignal): Promise<AiTaskCalendarDraftPreparationOperationResponse>;
   preparationOperation(value: AiTaskCalendarDraftPreparationReference, signal: AbortSignal): Promise<AiTaskCalendarDraftPreparationOperationResponse>;
 };
 export function createTaskCalendarDraftPreparationSession(input: { taskId: string; tenantId: string; workspaceId: string;
   current(): boolean; changed(): void; api: CalendarPreparationApi;
-  store: ReturnType<typeof calendarPreparationStore<AiTaskCalendarDraftPreparationReference>> }) {
+  store: ReturnType<typeof calendarPreparationStore<AiTaskCalendarDraftPreparationReference>>;
+  rejected?: AiTaskCalendarDraftReference }) {
+  const rejected = input.rejected && aiTaskCalendarDraftReference.parse(structuredClone(input.rejected));
+  const rejectedInput = () => rejected ? { rejected: structuredClone(rejected) } : {};
+  let rejectionHash: string | undefined;
+  let completedPreparation: AiTaskCalendarDraftPreparationReference | null = null;
   let active = true, request: AbortController | null = null;
   let view: { preparation: AiTaskCalendarDraftPreparationResponse | null; targetId: string | null;
     values: AiTaskCalendarDraftPreparationPreviewInput['values'] | null; preview: AiTaskCalendarDraftPreparationPreviewResponse | null;
@@ -151,7 +215,8 @@ export function createTaskCalendarDraftPreparationSession(input: { taskId: strin
     if (view.invalid) return;
     try { const pending = input.store.read();
       if (pending && pending.taskId !== input.taskId || view.pending && (!pending || pending.operationKey !== view.pending.operationKey)) { view = { ...view, invalid: true }; return; }
-      view = { ...view, pending, invalid: false };
+      view = { ...view, pending: pending && completedPreparation && pending.operationKey === completedPreparation.operationKey
+        ? null : pending, invalid: false };
     } catch { view = { ...view, invalid: true }; }
   };
   restore();
@@ -165,14 +230,39 @@ export function createTaskCalendarDraftPreparationSession(input: { taskId: strin
     catch (error) { if (!controller.signal.aborted) publish({ preview: null, error }); throw error; }
     finally { if (request === controller) { request = null; publish({ busy: null }); } }
   };
+  const verifyRejected = async (signal: AbortSignal) => {
+    if (!rejected) return;
+    if (!input.api.operation) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const value = aiTaskCalendarDraftOperationResponse.parse(structuredClone(await input.api.operation(rejected, signal)));
+    check(signal);
+    if (value.taskId !== rejected.taskId || !same(value.reference, rejected) || value.operation.state !== 'rejected_no_commit')
+      throw Error('AI_RESULT_UNKNOWN');
+    const hash = JSON.stringify(value.operation);
+    if (rejectionHash && hash !== rejectionHash) throw Error('AI_RESULT_UNKNOWN');
+    rejectionHash = hash;
+  };
+  const retireCompletedPreparation = async (signal: AbortSignal) => {
+    const reference = view.pending;
+    if (!reference) return;
+    if (!rejected) throw Error('AI_RESULT_UNKNOWN');
+    const value = aiTaskCalendarDraftPreparationOperationResponse.parse(structuredClone(await input.api.preparationOperation(reference, signal)));
+    check(signal); scope(value.scope);
+    if (value.reference.taskId !== reference.taskId || value.reference.operationKey !== reference.operationKey
+      || value.operation.state !== 'ai_proposal_saved' || !same(value.operation.proposal.reference, rejected)) throw Error('AI_RESULT_UNKNOWN');
+    // Preserve discovery of the original rejected child until the new
+    // preparation locator replaces this completed one by exact comparison.
+    completedPreparation = structuredClone(reference);
+    publish({ pending: null, operation: null, preparation: null, targetId: null, values: null, preview: null });
+  };
   const observe = (value: AiTaskCalendarDraftPreparationOperationResponse, reference: AiTaskCalendarDraftPreparationReference) => {
     scope(value.scope); if (value.reference.taskId !== input.taskId || value.reference.operationKey !== reference.operationKey) throw Error('AI_SCOPE_CHANGED');
     publish({ operation: value, preview: null });
   };
   return Object.freeze({ get view() { return view; },
-    async read(date: string) { check(); restore(); if (view.pending || view.invalid) throw Error('AI_RESULT_UNKNOWN');
+    async read(date: string) { check(); restore(); if (view.invalid || view.pending && !rejected) throw Error('AI_RESULT_UNKNOWN');
       return run('read', async signal => { publish({ preparation: null, targetId: null, values: null, preview: null });
-        const value = await input.api.preparation({ taskId: input.taskId, date }, signal); check(signal); scope(value.scope);
+        await verifyRejected(signal); await retireCompletedPreparation(signal); check(signal);
+        const value = await input.api.preparation({ taskId: input.taskId, date, ...rejectedInput() }, signal); check(signal); scope(value.scope);
         if (value.taskId !== input.taskId || value.date !== date) throw Error('AI_SCOPE_CHANGED'); restore();
         if (view.pending || view.invalid) throw Error('AI_RESULT_UNKNOWN'); publish({ preparation: value }); });
     },
@@ -186,19 +276,23 @@ export function createTaskCalendarDraftPreparationSession(input: { taskId: strin
     },
     async preview() { check(); const target = view.preparation?.targets.find(row => row.id === view.targetId), values = view.values && structuredClone(view.values);
       if (!target || !values || view.pending || view.invalid) throw Error('AI_RESOURCE_UNAVAILABLE');
-      return run('preview', async signal => { const value = await input.api.previewPreparation({ taskId: input.taskId, date: target.date,
-        targetId: target.id, version: target.version, revision: target.revision, values }, signal); check(signal); scope(value.scope);
+      return run('preview', async signal => { await verifyRejected(signal);
+        const value = await input.api.previewPreparation({ taskId: input.taskId, date: target.date,
+        targetId: target.id, version: target.version, revision: target.revision, values, ...rejectedInput() }, signal); check(signal); scope(value.scope);
         if (value.taskId !== input.taskId || value.target.id !== target.id || value.target.version !== target.version
           || value.target.revision !== target.revision || value.target.date !== target.date || JSON.stringify(value.values) !== JSON.stringify(values)) throw Error('AI_REVISION_CONFLICT');
         publish({ preview: value }); });
     },
     async prepare(operationKey: string) { check(); const preview = view.preview; restore(); if (!preview || preview.status !== 'difference_ready' || view.pending || view.invalid) throw Error('AI_RESOURCE_UNAVAILABLE');
-      return run('prepare', async signal => { const reference = aiTaskCalendarDraftPreparationReference.parse({ taskId: input.taskId, operationKey });
-        view = { ...view, pending: reference, preview: null }; input.changed(); input.store.write(reference);
+      return run('prepare', async signal => { await verifyRejected(signal); check(signal);
+        const reference = aiTaskCalendarDraftPreparationReference.parse({ taskId: input.taskId, operationKey });
+        if (completedPreparation?.operationKey === operationKey) throw Error('AI_RESULT_UNKNOWN');
+        view = { ...view, pending: reference, preview: null }; input.changed(); input.store.write(reference, completedPreparation ?? undefined);
         const saved = input.store.read(); if (!saved || saved.taskId !== reference.taskId || saved.operationKey !== operationKey) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');
+        completedPreparation = null;
         check(signal); const value = await input.api.prepareProposal({ taskId: input.taskId, date: preview.target.date, targetId: preview.target.id,
           version: preview.target.version, revision: preview.target.revision, values: preview.values, operationKey,
-          reviewHash: preview.reviewHash, expiresAt: preview.expiresAt, decision: 'prepare_new_calendar_ai_proposal' }, signal);
+          reviewHash: preview.reviewHash, expiresAt: preview.expiresAt, decision: 'prepare_new_calendar_ai_proposal', ...rejectedInput() }, signal);
         check(signal); observe(value, reference); });
     },
     async operation() { check(); const reference = view.pending; if (!reference) throw Error('AI_OPERATION_LOCATOR_UNAVAILABLE');

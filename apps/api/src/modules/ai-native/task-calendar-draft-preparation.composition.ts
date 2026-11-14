@@ -35,6 +35,8 @@ import { runWithRequestIdentity } from '../../common/request-identity';
 type Request = { headers: { authorization?: unknown } };
 type Dependencies = TaskCalendarDraftDependencies & {
   saved(request: Request, taskId: string, signal?: AbortSignal): Promise<AiTaskCalendarDraftListResponse>;
+  rejected?(request: Request, taskId: string, reference: import('@rental-os/shared').AiTaskCalendarDraftReference, signal?: AbortSignal): Promise<{
+    targetId: string; version: string; date: string; receipt: import('@rental-os/shared').AiTaskDraftRejectedOperation; verify(): Promise<void> }>;
 };
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -76,7 +78,7 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
     const key = requestFingerprint({ kind: 'calendar-linked-preparation-1', scope: context.scope, actor: context.actor, reference });
     return `${key.slice(0, 8)}-${key.slice(8, 12)}-${key.slice(12, 16)}-${key.slice(16, 20)}-${key.slice(20, 32)}`;
   };
-  const bind = async (selected: Owner, date: string) => {
+  const bind = async (selected: Owner, date: string, rejection?: Awaited<ReturnType<NonNullable<Dependencies['rejected']>>>) => {
     const target = { year: Number(date.slice(0, 4)), date }, input = { ...d.original, credentials: selected.credentials };
     const requests = createCalendarOriginalRequests(input, target), original = { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: selected.task.inputRef! };
     const first = await requests.readHistorical(original), created = await requests.readTaskReceipt(original.inputRef);
@@ -94,12 +96,14 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
         || entry.target.year !== target.year) throw denied();
     }
     const verify = async () => {
-      await selected.verify(); const latest = await requests.readHistorical(original), receipt = await requests.readTaskReceipt(original.inputRef);
+      await selected.verify(); await rejection?.verify();
+      const latest = await requests.readHistorical(original), receipt = await requests.readTaskReceipt(original.inputRef);
       if (latest.receipt.state === 'revoked' || latest.receipt.contentHash !== first.receipt.contentHash
         || originalIdentityHash(latest.context) !== originalIdentityHash(first.context) || receipt.state !== 'observed'
         || receipt.taskId !== created.taskId || receipt.runId !== created.runId) throw denied();
     };
-    return { ...selected, input, requests, original: first, created, target, entry, verify,
+    if (rejection && (rejection.date !== date || entry && (rejection.targetId !== entry.target.id || rejection.version !== entry.target.version))) throw denied();
+    return { ...selected, input, requests, original: first, created, target, entry, rejection, verify,
       fields: new AiOpeningVersionFieldSource(db, selected.routes), differences: new AiOpeningSectionDifferenceService(
         new AiGuardedOpeningConfigurationSource(d.original.core, selected.routes), selected.routes, clock,
         new AiOpeningVersionFieldSource(db, selected.routes), true) };
@@ -111,8 +115,10 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
     runId: root.created.runId, scope: root.context.scope, original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION,
       inputRef: root.original.receipt.inputRef, contentHash: root.original.receipt.contentHash, sceneVersion: root.original.receipt.sceneVersion }, observedAt: now().toISOString() });
   const targetRow = async (root: Bound, command: AiTaskCalendarDraftPreparationPreviewInput) => {
+    if (root.rejection && (root.rejection.targetId !== command.targetId || root.rejection.version !== command.version
+      || root.rejection.date !== command.date)) throw denied();
     if (root.entry && (root.entry.target.id !== command.targetId || root.entry.target.version !== command.version
-      || root.entry.target.revision !== command.revision || root.entry.target.date !== command.date)) throw changed();
+      || !root.rejection && root.entry.target.revision !== command.revision || root.entry.target.date !== command.date)) throw changed();
     const row = await root.routes.withCalendarSourceRead(root.target, async context => {
       assertAiReadContextBinding(context, root.context);
       if (context.scope.kind !== 'workspace') throw denied();
@@ -123,7 +129,7 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
       || row.status !== 'draft' || row.revision !== command.revision || !Array.isArray(row.days)) throw changed();
     const fields = await root.fields.read({ key: 'business_calendar', targetId: row.id, expectedVersion: row.version,
       expectedRevision: row.revision, date: command.date }, root.context);
-    if (root.entry && root.entry.sourceHash !== requestFingerprint(fields.basis)) throw changed();
+    if (root.entry && !root.rejection && root.entry.sourceHash !== requestFingerprint(fields.basis)) throw changed();
     return { row, fields };
   };
   const preview = async (root: Bound, command: AiTaskCalendarDraftPreparationPreviewInput, deadline?: string) => {
@@ -180,7 +186,9 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
     return waitForTaskApplicationDependency(() => runWithRequestIdentity({}, async () => {
       const selected = await owner(body, command.taskId, signal);
       if (action === 'preparationOperation') return observe(body, selected, aiTaskCalendarDraftPreparationReference.parse(command));
-      const date = 'date' in command ? command.date : ''; const root = await bind(selected, date);
+      const rejected = 'rejected' in command ? command.rejected : undefined;
+      const rejection = rejected ? await (d.rejected ? d.rejected(body, command.taskId, rejected, signal) : Promise.reject(denied())) : undefined;
+      const date = 'date' in command ? command.date : ''; const root = await bind(selected, date, rejection);
       if (action === 'preparation') {
         const rows = await root.routes.withCalendarSourceRead(root.target, async context => {
           assertAiReadContextBinding(context, root.context); if (context.scope.kind !== 'workspace') throw denied();
@@ -189,11 +197,12 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
         });
         const targets = [];
         for (const row of rows.slice(0, 20)) {
+          if (root.rejection && (root.rejection.targetId !== row.id || root.rejection.version !== row.version)) continue;
           if (root.entry && (root.entry.target.id !== row.id || root.entry.target.version !== row.version
-            || root.entry.target.revision !== row.revision)) continue;
+            || !root.rejection && root.entry.target.revision !== row.revision)) continue;
           if (!Array.isArray(row.days) || row.days.filter(day => day && typeof day === 'object' && !Array.isArray(day) && day.date === date).length !== 1) continue;
           const fields = await root.fields.read({ key: 'business_calendar', targetId: row.id, expectedVersion: row.version, expectedRevision: row.revision, date }, root.context);
-          if (root.entry && root.entry.sourceHash !== requestFingerprint(fields.basis)) throw changed();
+          if (root.entry && !root.rejection && root.entry.sourceHash !== requestFingerprint(fields.basis)) throw changed();
           targets.push({ id: row.id, year: row.year, version: row.version, revision: row.revision, date, status: 'draft' as const,
             values: values(fields.fields), sourceHash: requestFingerprint(fields.basis) });
         }
@@ -202,7 +211,8 @@ export function composeTaskCalendarDraftPreparation(d: Dependencies) {
       }
       const previewInput = aiTaskCalendarDraftPreparationPreviewInput.parse({ taskId: command.taskId, date,
         targetId: 'targetId' in command ? command.targetId : undefined, version: 'version' in command ? command.version : undefined,
-        revision: 'revision' in command ? command.revision : undefined, values: 'values' in command ? command.values : undefined });
+        revision: 'revision' in command ? command.revision : undefined, values: 'values' in command ? command.values : undefined,
+        ...('rejected' in command && command.rejected ? { rejected: command.rejected } : {}) });
       if (action === 'prepare') {
         const prepare = aiTaskCalendarDraftPrepareInput.parse(command), reference = { taskId: prepare.taskId, operationKey: prepare.operationKey };
         const existing = await db.operationLog.findUnique({ where: { id: operationId(root.context, reference) } });

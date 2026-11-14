@@ -784,7 +784,8 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         : task.scopeKind !== 'WORKSPACE' || !task.scope.tenantId || !task.scope.workspaceId
           || !('tenantId' in configuration) || configuration.tenantId !== task.scope.tenantId
           || !((task.ownerKind === 'USER' && ['OPERATOR', 'STAFF'].includes(task.audience))
-            || (task.ownerKind === 'CUSTOMER' && task.audience === 'CLIENT'))) throw denied();
+            || (task.ownerKind === 'CUSTOMER' && task.audience === 'CLIENT')
+            || (task.ownerKind === 'AUTOMATION' && task.audience === 'AUTOMATION'))) throw denied();
       if (artifact.outcome === 'FAILED' && !platform) {
         if (!task.scope.tenantId || !task.scope.workspaceId) throw unavailable();
         const unsent = await readModelNonDispatchEvidence(this.db, { scopeId: task.scopeId,

@@ -4,6 +4,8 @@
     "nav-bar": "/components/nav-bar/index",
     "ui-icon": "/components/ui-icon/index",
     "state-view": "/components/state-view/index",
-    "lazy-image": "/components/lazy-image/index"
+    "lazy-image": "/components/lazy-image/index",
+    "ai-public-browse": "/components/ai-native/ai-public-browse/index",
+    "ai-goal-picker": "/components/ai-native/ai-goal-picker/index"
   }
 }

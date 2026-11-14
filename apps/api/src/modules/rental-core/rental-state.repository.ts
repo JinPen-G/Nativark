@@ -1,11 +1,12 @@
 /** Workspace recovery snapshots and their stored row revisions. Callers retain
  * the original tenant/workspace fence; revisions never replace category or
  * business-settings versions, nor authorize reading or replaying business facts. */
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { lockActiveCategoryBinding } from "./category-active-write";
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 
 export const RENTAL_CONFIGURATION_REVISION_MAX = 2_147_483_647;
 
@@ -59,7 +60,8 @@ export async function writeRentalCoreConfigurationSnapshot(tx: Prisma.Transactio
 export class RentalStateRepository {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService
+    private readonly config: ConfigService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant
   ) {}
 
   enabled() {
@@ -114,6 +116,9 @@ export class RentalStateRepository {
             '$.categoryVersionId', ${binding.categoryVersionId}, '$.categoryAdoptionRevision', ${binding.adoptionRevision}),
             '$.profilePersisted', CAST('true' AS JSON), '$.configPersisted', CAST('true' AS JSON))
           ELSE CAST(${encoded} AS JSON) END`);
+      if (this.failureEvents?.openingConfiguration) {
+        await this.failureEvents.openingConfiguration(tx, { tenantId, workspaceId }, { kind: "core_snapshot", id: workspaceId });
+      }
     };
     if (existingTx) await write(existingTx);
     else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

@@ -77,6 +77,7 @@ import { composeOpeningProposalWorkflow } from './opening-proposal-workflow.comp
 import { composeOpeningRuleDraftSave } from './opening-rule-draft.composition';
 import type { ApprovedProfileApplicationDependencies } from '../approval-execution/approved-profile-task.authority';
 import { snapshotTaskCenterRecoveryFence, type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
+import { bindOriginalSettingsRead } from './settings-original-read.authority';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -98,6 +99,7 @@ export function composeRequestBoundSettingsChanges(
   dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
   if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   const call = bindRequests(dependencies, options, composeApprovedSettingsApplication);
+  const reconfirmation = composeRequestBoundSettingsReconfirmation(dependencies, options);
   const read = prepareSettingsChangeSchema.pick({ changeKey: true });
   return Object.freeze({
     readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.readCurrent(), { write: false }),
@@ -114,7 +116,10 @@ export function composeRequestBoundSettingsChanges(
       const parsed = read.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return call(request, freezeOriginalInput(parsed.data), (app, command) => app.readChangeReceipt(command), { write: false });
-    }
+    },
+    readUpdatedDifference: reconfirmation.readUpdatedDifference,
+    prepareReconfirmedChange: reconfirmation.prepareReconfirmedChange,
+    readReconfirmedChange: reconfirmation.readReconfirmedChange
   });
 }
 export type AiSceneModelRequestOptions = AiSceneRequestOptions & {
@@ -225,22 +230,24 @@ export function composeRequestBoundProfileWorkflow(
     readTaskActionAdmission: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (app, command) => app.readTaskActionAdmission(command), { write: false, signal }),
     prepareChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.prepareChange(command), { write: true, signal }),
-    readUpdatedDifference: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
-      (app, command) => app.readUpdatedDifference(command), { write: false }),
+    readUpdatedDifference: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readUpdatedDifference(command), { write: false, signal }),
     readTaskObservation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (app, command) => app.readTaskObservation(command), { write: false, signal }),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       (app, command) => app.readTaskEvents(command), { write: false }),
-    prepareReconfirmedChange: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
-      (app, command) => app.prepareReconfirmedChange(command), { write: true }),
-    readReconfirmedChange: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
-      (app, command) => app.readReconfirmedChange(command), { write: false }),
+    prepareReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.prepareReconfirmedChange(command), { write: true, signal }),
+    readReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReconfirmedChange(command), { write: false, signal }),
     readCurrent: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readCurrent(command), { write: false, signal }),
     readChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readChange(command), { write: false, signal }),
     createTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.createTask(command), { write: true, signal }),
     readCreation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.readCreation(command), { write: false, signal }),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
       (app, command) => app.start(command, signal), { write: true, signal, preflightOnly: true }),
+    startUnstarted: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.startUnstarted(command, signal), { write: true, signal, preflightOnly: true }),
     read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command), { write: false }),
     humanHandoff: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.humanHandoff(command), { write: false }),
     requestCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
@@ -288,19 +295,23 @@ export function composeRequestBoundOpeningCalendarDraftSave(
   });
 }
 
-/** Server-only changed-notification re-confirmation. Canonical Task/Run are
- * read through the original creation receipt; no Controller, approval or
- * execution is registered, and old cancelled resources are never reallocated. */
+/** Canonical notification re-confirmation behind the existing human HTTP host.
+ * Original creation and current business read authority locate Task/Run;
+ * preparation grants no approval/execution and never reallocates old resources. */
 export function composeRequestBoundSettingsReconfirmation(
   dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
   if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   const creation = composeRequestBoundSettingsTaskCreation(dependencies, options);
-  const call = bindRequests(dependencies, options, input => {
-    const app = composeApprovedSettingsApplication(input), authority = new ApprovedSettingsTaskAuthority(input);
-    return composeSettingsReconfirmation(input, async value => {
+  const call = bindRequests(dependencies, options, async (input, command) => {
+    const reference = settingsReconfirmationOriginalSchema.parse((command as { original?: unknown })?.original);
+    const credential = await input.credentials.current(), request = { headers: { authorization: credential.authorization } };
+    const bound = await bindOriginalSettingsRead(input, reference, value => creation.read(request, value));
+    const source = { ...input, originalReadAuthority: bound.authority };
+    const app = composeApprovedSettingsApplication(source), authority = new ApprovedSettingsTaskAuthority(source);
+    return composeSettingsReconfirmation(source, async value => {
       const reference = settingsReconfirmationOriginalSchema.parse(structuredClone(value));
-      const credential = await input.credentials.current();
-      const request = { headers: { authorization: credential.authorization } };
+      if (requestFingerprint(reference) !== requestFingerprint(settingsReconfirmationOriginalSchema.parse((command as { original?: unknown }).original)))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const original = await creation.read(request, reference);
       if (!('task' in original.receipt) || original.receipt.state !== 'observed' || !original.receipt.task)
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -310,6 +321,7 @@ export function composeRequestBoundSettingsReconfirmation(
         || change.change.changeHash !== original.original.changeHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const before = await authority.resolve(task.taskId, 'read');
       const verify = async () => {
+        await bound.verify();
         const latest = await creation.read(request, reference), after = await authority.resolve(task.taskId, 'read');
         if (!('task' in latest.receipt) || latest.receipt.state !== 'observed' || !latest.receipt.task
           || latest.receipt.task.taskId !== task.taskId || latest.receipt.task.runId !== task.runId
@@ -321,12 +333,12 @@ export function composeRequestBoundSettingsReconfirmation(
     });
   });
   return Object.freeze({
-    readUpdatedDifference: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
-      (app, command) => app.readUpdatedDifference(command), { write: false }),
-    prepareReconfirmedChange: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
-      (app, command) => app.prepareReconfirmedChange(command), { write: true }),
-    readReconfirmedChange: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
-      (app, command) => app.readReconfirmedChange(command), { write: false })
+    readUpdatedDifference: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readUpdatedDifference(command), { write: false, signal }),
+    prepareReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.prepareReconfirmedChange(command), { write: true, signal }),
+    readReconfirmedChange: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value,
+      (app, command) => app.readReconfirmedChange(command), { write: false, signal })
   });
 }
 
@@ -577,7 +589,7 @@ export function composeRequestBoundSettingsTaskControls(
             limits: limits.data } });
           return { found, hostRoot };
         }, false, signal);
-        const result = await hostRoot.application.start({ taskId: found.task.taskId, runId: found.task.runId }, signal);
+        const result = await hostRoot.application.startUnstarted(signal);
         try { await waitForTaskApplicationDependency(found.verify, false, signal); }
         catch { throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false }); }
         return freezeOriginalInput(result);
