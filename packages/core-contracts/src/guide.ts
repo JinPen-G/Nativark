@@ -25,7 +25,7 @@ export function renderCoreGuide(
     `本指南来自[固定底座任务册](${taskUrl})和[正式契约](${base}packages/core-contracts/README.md)。Core来源为[固定提交](${manifest.source.repository.replace(/\.git$/, "")}/commit/${manifest.source.commit})。`,
     "## 当前可执行入口",
     "在已准备依赖的底座源码根目录构建合同包，然后检查解包目录。检查只读取文件和合同，不代表授权或业务已运行。",
-    "```sh\nnpm run build -w @rental-os/core-contracts\nnode packages/core-contracts/dist/check.js <Core目录> --host <宿主版本JSON> --json\nnode packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JSON> <数据观察JSON> --json\n```",
+    "```sh\nnpm run build -w @rental-os/core-contracts\nnode packages/core-contracts/dist/capabilities.js --query CorePage --json\nnode packages/core-contracts/dist/check.js <Core目录> --host <宿主版本JSON> --json\nnode packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JSON> <数据观察JSON> --json\n```",
     "当前发行仍在拆分公共宿主；下列五步保留对应版本任务册的支持状态。注册/授权/真实业务尚未接线的步骤，不能按已有完整SDK执行。",
     quick,
     agent,

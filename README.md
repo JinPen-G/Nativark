@@ -204,6 +204,8 @@ API 与后台也可分别通过 `npm run dev:api`、`npm run dev:admin` 启动�
 
 ## 选择一个开发入口
 
+开发 Agent 可以从统一能力索引查找组件、公共导出、页面和 API，再沿结果中的源码与资料链接继续阅读。准备依赖并构建 `@rental-os/core-contracts` 后，运行 `node packages/core-contracts/dist/capabilities.js --query SaveButton --json` 查询现有保存按钮，替换关键词可查其他能力。扫描读取当前检出的正式声明，支持分类和分页。[能力查询用法](packages/core-contracts/README.md#找到平台已有的功能)
+
 | 开发内容 | 实际入口 | 需要同时核对 |
 | --- | --- | --- |
 | 公共身份、租户与权限 | [Auth](apps/api/src/modules/auth/auth.service.ts)、[Guard](apps/api/src/common/api-auth.guard.ts)、[请求上下文](apps/api/src/common/request-identity.ts)、[平台服务](apps/api/src/modules/platform/platform.service.ts) | 当前身份、角色、租户及业务范围、会话撤销、审计 |

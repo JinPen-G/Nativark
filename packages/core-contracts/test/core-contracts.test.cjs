@@ -32,7 +32,7 @@ before(() => {
   const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, packageRoot);
   const program = ts.createProgram(parsed.fileNames, {
     ...parsed.options, outDir: dist, incremental: false, baseUrl: packageRoot,
-    paths: { zod: [path.dirname(require.resolve("zod/package.json"))] },
+    paths: { zod: [path.dirname(require.resolve("zod/package.json"))], typescript: [path.dirname(require.resolve("typescript/package.json"))] },
     typeRoots: [path.resolve(path.dirname(require.resolve("@types/node/package.json")), "..")]
   });
   const diagnostics = [...parsed.errors, ...ts.getPreEmitDiagnostics(program)];

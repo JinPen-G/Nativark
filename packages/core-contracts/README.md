@@ -4,6 +4,25 @@
 
 **目前已实现清单/页面/服务端合同、静态包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。** 普通业务宿主、授权持久化、页面呈现和业务样例仍在拆分中。下面的检查可以运行；检查通过不代表 Core 已安装或业务可用。完整接入手册在[五步快速接入](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)随实现维护。
 
+## 找到平台已有的功能
+
+开发 Agent 可以先按任务查询，再打开结果给出的源码和接入资料。在已准备依赖的源码根目录构建本包后运行以下命令，PowerShell 与 Bash 使用相同参数。
+
+```sh
+npm run build -w @rental-os/core-contracts
+node packages/core-contracts/dist/capabilities.js --query SaveButton --json
+node packages/core-contracts/dist/capabilities.js --query 工单 --kind page --json
+node packages/core-contracts/dist/capabilities.js --id "api:GET:/api/auth/me" --json
+```
+
+每项结果包含名称、类型、归属、版本、源码路径和行号、正式导入或 HTTP/页面入口，以及可用的文档链接和原声明元数据。查询默认返回20项，使用 `--limit`（最多100项）和 `--offset` 分页，`nextOffset` 给出下一页位置。`--owner` 按输出中的准确归属筛选，`--kind` 支持 `module`、`export`、`ui`、`page`、`api`、`extension`。`--repo` 可显式指定本次源码根目录。
+
+索引从 workspace 包出口、TypeScript 导出与源码说明、Controller 路由、后台 `APP_ROUTES`、Core 页面贡献和 UIArc 来源清单读取。源码新增或迁移后再次查询即可反映变化。新增 Core 使用自己的正式包出口、清单、页面和 API 贡献登记能力，宿主可通过 `@rental-os/core-contracts/development` 的 `describeCoreDevelopmentCapabilities` 取得同源目录，查询合同由该出口提供。完整接入路径见[开发能力索引设计](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#capability-index)。
+
+输出固定 `audience=development`，`source.snapshot=working-tree` 和当前 Git 修订说明本次读取位置。`coverage` 列出实际扫描的来源，稀疏检出和静态解析缺口通过状态与 `issues` 表达。源码声明、宿主登记和运行验证分别核定，API 的 `registration` 标记源码或明确宿主登记，UIArc 条目标记为保留源码。用途/约束优先读取准确的源码注释和模块 README，缺少说明的条目保留准确入口供后续整改。
+
+扫描只解析仓库内的声明资料，动态函数和自定义表达式保持待核对。已使用的 `Object.freeze` 通过语法读取参数，扫描过程调用原注册函数的次数为零。普通查询退出0，`--check` 遇到解析或来源缺口退出1，用法/读取失败退出2。`--json` 的标准输出为一份 JSON。源码索引的TypeScript工具是开发依赖，使用包含开发依赖的源码环境运行。
+
 ## 先检查一个 Core 包
 
 在已按仓库锁文件准备依赖的工程根目录运行，PowerShell 与 Bash 用法相同。

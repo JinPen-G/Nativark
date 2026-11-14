@@ -26,13 +26,18 @@
     "./github": {
       "types": "./dist/github.d.ts",
       "default": "./dist/github.js"
+    },
+    "./development": {
+      "types": "./dist/development.d.ts",
+      "default": "./dist/development.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/core-contracts.test.cjs",
-    "check": "node dist/check.js"
+    "check": "node dist/check.js",
+    "capabilities": "node dist/capabilities.js"
   },
   "dependencies": {
     "zod": "3.25.76"
