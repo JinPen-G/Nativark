@@ -298,6 +298,7 @@ export class AuthService {
         tenantId: tenant.tenantId,
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
+        operatorShortName: tenant.operatorShortName,
         tenantStatus: tenant.tenantStatus,
         ...branding,
         categoryCode: scope.categoryCode,
@@ -711,6 +712,7 @@ export class AuthService {
         tenantId: tenant.tenantId,
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
+        operatorShortName: tenant.operatorShortName,
         tenantStatus: tenant.tenantStatus,
         ...branding,
         // 与 session-context 同口径：品类和能力取当前经营空间，不取租户级档案。

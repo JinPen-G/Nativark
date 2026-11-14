@@ -121,13 +121,18 @@ export class PlatformRepository {
       const current = await tx.tenant.findUnique({ where: { id } });
       if (!current) throw new NotFoundException("租户不存在");
       if (current.code === "platform") throw new BadRequestException("SaaS 平台主体不能通过租户接口修改");
-      await tx.tenant.update({ where: { id }, data: { name } });
+      const changed = { name, ...(input.operatorShortName !== undefined ? { operatorShortName: input.operatorShortName } : {}) };
+      await tx.tenant.update({ where: { id }, data: changed });
       await tx.operationLog.create({
         data: {
           tenantId: id,
           userId: operator.id,
           action: "tenant.update",
-          detail: { before: { name: current.name }, after: { name }, operator: operator.displayName }
+          detail: {
+            before: { name: current.name, operatorShortName: current.operatorShortName },
+            after: { name, operatorShortName: input.operatorShortName === undefined ? current.operatorShortName : input.operatorShortName },
+            operator: operator.displayName
+          }
         }
       });
     });
@@ -186,6 +191,7 @@ export class PlatformRepository {
       tenantId: tenant.id,
       tenantCode: tenant.code,
       tenantName: tenant.name,
+      operatorShortName: tenant.operatorShortName ?? undefined,
       tenantStatus: this.toTenantStatus(tenant.status),
       enabledBusinessLines: ["rental_core"],
       categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
@@ -229,6 +235,7 @@ export class PlatformRepository {
         tenantId: tenant.id,
         tenantCode: tenant.code,
         tenantName: tenant.name,
+        operatorShortName: tenant.operatorShortName ?? undefined,
         tenantStatus: this.toTenantStatus(tenant.status),
         enabledBusinessLines: ["rental_core"],
         categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),
@@ -1916,7 +1923,7 @@ export class PlatformRepository {
       const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
       if (!category) throw new BadRequestException("经营品类不存在");
       const tenant = await tx.tenant.create({
-        data: { code: tenantCode, name: tenantName, status: PrismaTenantStatus.ACTIVE }
+        data: { code: tenantCode, name: tenantName, operatorShortName: input.operatorShortName, status: PrismaTenantStatus.ACTIVE }
       });
       const operatorOrg = await tx.organizationUnit.create({
         data: {
@@ -2040,6 +2047,7 @@ export class PlatformRepository {
           action: "tenant.bootstrap",
           detail: {
             categoryCode: input.categoryCode,
+            operatorShortName: tenant.operatorShortName,
             operator: input.operator || "SaaS 平台管理员",
             templates: templateExecution.items.map((item) => item.code)
           }
@@ -2054,6 +2062,7 @@ export class PlatformRepository {
         tenantId: created.tenant.id,
         tenantCode: created.tenant.code,
         tenantName: created.tenant.name,
+        operatorShortName: created.tenant.operatorShortName ?? undefined,
         tenantStatus: this.toTenantStatus(created.tenant.status),
         enabledBusinessLines: ["rental_core"],
         categoryCode: input.categoryCode,
@@ -2451,6 +2460,7 @@ export class PlatformRepository {
     id: string;
     code: string;
     name: string;
+    operatorShortName: string | null;
     status: PrismaTenantStatus;
     statusReason: string | null;
     createdAt: Date;
@@ -2467,6 +2477,7 @@ export class PlatformRepository {
       tenantId: tenant.id,
       tenantCode: tenant.code,
       tenantName: tenant.name,
+      operatorShortName: tenant.operatorShortName ?? undefined,
       tenantStatus: this.toTenantStatus(tenant.status),
       enabledBusinessLines: ["rental_core"],
       categoryCode: this.toDomainCategoryCode(tenant.rentalProfile?.categoryCode),

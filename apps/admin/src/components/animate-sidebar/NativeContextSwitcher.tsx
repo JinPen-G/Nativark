@@ -8,21 +8,21 @@ import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "./r
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem } from "./runtime/dropdown-menu";
 
 export interface ShellContextOption { id: string; name: string; icon?: ReactNode }
-export function NativeContextSwitcher({ title, subtitle, brand, brandUnframed, compact = true, options, value, label, onChange, onError }: {
-  title: string; subtitle: string; brand: ReactNode; brandUnframed?: boolean; compact?: boolean;
+export function NativeContextSwitcher({ title, fullTitle = title, subtitle, brand, brandUnframed, compact = true, options, value, label, onChange, onError }: {
+  title: string; fullTitle?: string; subtitle: string; brand: ReactNode; brandUnframed?: boolean; compact?: boolean;
   options: ShellContextOption[]; value: string; label: string;
   onChange: (id: string) => void | Promise<void>; onError?: () => void;
 }) {
   const { isMobile, setOpenMobile } = useSidebar();
   const [switching, setSwitching] = useState(false), switchingNow = useRef(false);
-  const fullName = `${title} · ${subtitle}`;
+  const fullName = `${title === fullTitle ? title : `${title} · ${fullTitle}`} · ${subtitle}`;
   const triggerClass = compact ? "rental-workspace-trigger" : "";
   const identity = <><div data-sidebar="brand-mark" data-brand-unframed={brandUnframed || undefined}
     className={`flex aspect-square size-8 items-center justify-center${brandUnframed ? "" : " rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"}`}>{brand}</div>
     {compact ? <span className="rental-workspace-identity">
-      <span className="rental-workspace-tenant-name" title={title}>{title}</span>
+      <span className="rental-workspace-tenant-name" title={fullTitle}>{title}</span>
       <span className="rental-workspace-name" title={subtitle}>{subtitle}</span>
-    </span> : <div className="grid flex-1 text-left text-sm leading-tight"><span className="truncate font-medium">{title}</span><span className="truncate text-xs">{subtitle}</span></div>}</>;
+    </span> : <div className="grid flex-1 text-left text-sm leading-tight"><span className="truncate font-medium" title={fullTitle}>{title}</span><span className="truncate text-xs">{subtitle}</span></div>}</>;
   const change = async (id: string) => {
     if (id === value || switchingNow.current || !options.some(option => option.id === id)) return;
     switchingNow.current = true; setSwitching(true);

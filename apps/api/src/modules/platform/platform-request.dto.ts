@@ -29,6 +29,7 @@ const RESET_CYCLES = ["daily", "monthly", "yearly", "never"] as const;
 
 export class UpdateTenantDto implements UpdateTenantRequest {
   @IsString() @IsNotEmpty() tenantName!: string;
+  @IsOptional() @IsString() @MaxLength(64) operatorShortName?: string | null;
 }
 
 export class UpdateTenantStatusDto implements UpdateTenantStatusRequest {
@@ -120,6 +121,7 @@ export class GeneratePlatformNumberDto implements GeneratePlatformNumberRequest 
 export class TenantBootstrapDto implements TenantBootstrapRequest {
   @IsString() @IsNotEmpty() tenantCode!: string;
   @IsString() @IsNotEmpty() tenantName!: string;
+  @IsOptional() @IsString() @MaxLength(64) operatorShortName?: string | null;
   @IsString() @Matches(RENTAL_CATEGORY_CODE_PATTERN) categoryCode!: RentalCategoryCode;
   @IsOptional() @IsString() @Matches(/\S/u) @MaxLength(191) categoryVersionId?: string;
   // 结算币种（需求 §948）。只收登记过的两位小数币种；省略按人民币。

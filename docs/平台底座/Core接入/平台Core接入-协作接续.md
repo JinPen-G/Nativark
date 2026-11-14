@@ -2,7 +2,7 @@
 
 更新时间：2026-11-14。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02。清单/包检查、公共指纹、OpenAPI及服务端注册/生命周期合同已推送至 `953fccad0ad538d0dc27aad8df717ba52297baa7` 并核定远端，继续准备真实宿主接线。源码与验证见[开工记录](平台Core接入-开发记录.md#core-contract-first-20261114)、[API合同](平台Core接入-开发记录.md#core-openapi-contract-20261114)、[服务端合同](平台Core接入-开发记录.md#core-server-contract-20261114)及[全模型归属/公共候选](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02。合同/包检查、公共指纹、API/服务端/升级预检、指南/归档原语及页面声明需求已固定推送至 `18a9500e29578610722758121f2f697aaf01ff68`，后续继续真实宿主接线。源码与验证见[开工记录](平台Core接入-开发记录.md#core-contract-first-20261114)、[服务端合同](平台Core接入-开发记录.md#core-server-contract-20261114)、[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)、[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)及[指南归档](平台Core接入-开发记录.md#core-guide-archive-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -30,8 +30,9 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 2. 写入归属与固定来源
 
-- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，已通过 `d01561912cc6644776cbceea4971508eeb4c99ba` 合入实际远端main `ee281955161ffcf9b9d166be45972d48fbe0191f`，本片五个WIP哈希保持。后续每阶段获取最新已提交main并核对差异和WIP后整合，保护既有作者成果。
+- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，按PM指定已通过 `5d416cf9026a25db6ce66dec0ac48a384f5b6773` 合入main `275064d40a3977542a530158974070e8b6c337ca` 并推送回读。恢复记录与营运商简称正式需求已同步；本树共享源码更新后须重建本树产物，不复制main dist/Client或启动服务。后续每阶段核最新main及WIP后整合。
 - 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
+- PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。源码检查点和剩余实际宽度/真库验收唯一见[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)，不计PCH新任务，不扩为平台抽离公共窗口。
 - shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
 - 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
 

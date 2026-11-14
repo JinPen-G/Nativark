@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { getRequestDataScope, getRequestLocationIds, getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
+  normalizeOperatorShortName,
   RENTAL_CATEGORY_DEFINITIONS,
   isRentalCategoryCode,
   CreateBusinessWorkspaceRequest,
@@ -1308,6 +1309,7 @@ export class PlatformService {
 
   async bootstrapTenant(input: TenantBootstrapRequest, currentUser?: SystemUserRow): Promise<TenantBootstrapResult> {
     this.assertSaasAdmin(currentUser);
+    input = { ...input, operatorShortName: this.operatorShortName(input.operatorShortName) };
     const tenantCode = input.tenantCode.trim().toLowerCase();
     const tenantName = input.tenantName.trim();
     const adminAccount = input.adminAccount.trim();
@@ -1368,6 +1370,7 @@ export class PlatformService {
       tenantId,
       tenantCode,
       tenantName,
+      operatorShortName: input.operatorShortName ?? undefined,
       tenantStatus: TenantStatus.Active,
       enabledBusinessLines: ["rental_core"],
       categoryCode: input.categoryCode,
@@ -1435,7 +1438,7 @@ export class PlatformService {
       operator: currentUser?.displayName || input.operator || "SaaS 平台管理员",
       targetType: "tenant",
       targetId: tenantId,
-      detail: `初始化租户：${tenantName}`
+      detail: `初始化租户：${tenantName}${input.operatorShortName ? `；营运商简称：${input.operatorShortName}` : ""}`
     });
 
     await this.rentalCoreService?.initializeTenant(tenantId, input.categoryCode, undefined, input.currency);
@@ -1482,14 +1485,29 @@ export class PlatformService {
 
   updateTenant(id: string, input: UpdateTenantRequest, currentUser?: SystemUserRow) {
     this.assertSaasAdmin(currentUser);
+    input = { ...input, operatorShortName: this.operatorShortName(input.operatorShortName) };
     if (this.useMysqlDataSource()) return this.platformRepository.updateTenant(id, input, currentUser!);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     if (tenant.tenantCode === "platform") throw new BadRequestException("SaaS 平台主体不能通过租户接口修改");
     const tenantName = input.tenantName.trim();
     if (!tenantName) throw new BadRequestException("租户名称不能为空");
+    const before = { tenantName: tenant.tenantName, operatorShortName: tenant.operatorShortName };
     tenant.tenantName = tenantName;
+    if (input.operatorShortName !== undefined) tenant.operatorShortName = input.operatorShortName ?? undefined;
+    this.recordMemoryAudit({
+      tenantId: id, action: "tenant.update", operator: currentUser!.displayName, targetType: "tenant", targetId: id,
+      detail: JSON.stringify({ before, after: { tenantName, operatorShortName: tenant.operatorShortName } })
+    });
     return tenant;
+  }
+
+  private operatorShortName(value: unknown) {
+    try { return normalizeOperatorShortName(value); }
+    catch (error) {
+      if (!(error instanceof Error)) throw error;
+      throw new BadRequestException(error.message);
+    }
   }
 
   updateTenantStatus(id: string, input: UpdateTenantStatusRequest, currentUser?: SystemUserRow) {

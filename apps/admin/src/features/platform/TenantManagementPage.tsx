@@ -6,8 +6,8 @@ import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { useModalDismissal } from "@/components/ui/useModalDismissal";
 import { Building2, KeyRound, Pencil, ShieldCheck } from "lucide-react";
 import { PlusOutlined } from "@/components/ui/icons";
-import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
-import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
+import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
+import { normalizeOperatorShortName, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
 import { Col, Descriptions, Row, Space, Tag, Typography } from "antd";
 import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
@@ -48,6 +48,8 @@ export function TenantManagementPage() {
   const editorDialog = useModalDismissal(Boolean(editor), () => { setEditor(undefined); form.resetFields(); });
   const workspaceDialog = useModalDismissal(Boolean(workspaceEditor), () => { setWorkspaceEditor(undefined); workspaceForm.resetFields(); });
   const selectedTenantCategory = Form.useWatch("categoryCode", form);
+  const shortName = Form.useWatch("operatorShortName", form);
+  const fullTenantName = Form.useWatch("tenantName", form);
   const selectedWorkspaceCategory = Form.useWatch("categoryCode", workspaceForm);
   const categoryTarget = editor?.type === "create" ? undefined : workspaceTenant?.tenantId;
   const categoryDirectory = useQuery({ queryKey: ["saas-category-opening-options", categoryTarget, deferredCategorySearch],
@@ -101,7 +103,7 @@ export function TenantManagementPage() {
     onError: () => message.error(t("未能确认初始化结果，请刷新租户列表核对后再操作。"))
   });
   const saveTenant = useMutation({
-    mutationFn: ({ id, tenantName }: { id: string; tenantName: string }) => api.updateTenant(id, { tenantName }),
+    mutationFn: ({ id, payload }: { id: string; payload: UpdateTenantRequest }) => api.updateTenant(id, payload),
     onSuccess: async () => { await refresh(); closeEditor(); message.success(t("租户资料已更新")); },
     onError: () => message.error(t("租户资料更新失败"))
   });
@@ -137,13 +139,13 @@ export function TenantManagementPage() {
     setCategorySearch("");
     form.resetFields();
     createTenant.reset();
-    form.setFieldsValue({ tenantCode: "", tenantName: "", categoryCode: undefined, currency: "CNY", adminAccount: "admin", adminDisplayName: "租户管理员", storeName: "", storeCode: "" });
+    form.setFieldsValue({ tenantCode: "", tenantName: "", operatorShortName: "", categoryCode: undefined, currency: "CNY", adminAccount: "admin", adminDisplayName: "租户管理员", storeName: "", storeCode: "" });
     setEditor({ type: "create" });
   }
 
   function openEdit(tenant: TenantSummary) {
     form.resetFields();
-    form.setFieldsValue({ tenantName: tenant.tenantName });
+    form.setFieldsValue({ tenantName: tenant.tenantName, operatorShortName: tenant.operatorShortName ?? "" });
     setEditor({ type: "edit", tenant });
   }
 
@@ -185,7 +187,8 @@ export function TenantManagementPage() {
 
   async function submit(values: Record<string, unknown>) {
     if (editor?.type === "create") return createTenant.mutateAsync(values as unknown as TenantBootstrapRequest);
-    if (editor?.type === "edit") return saveTenant.mutateAsync({ id: editor.tenant.tenantId, tenantName: String(values.tenantName ?? "") });
+    if (editor?.type === "edit") return saveTenant.mutateAsync({ id: editor.tenant.tenantId,
+      payload: { tenantName: String(values.tenantName ?? ""), operatorShortName: normalizeOperatorShortName(values.operatorShortName) } });
     if (editor?.type === "status") return changeStatus.mutateAsync({ id: editor.tenant.tenantId, payload: values as unknown as UpdateTenantStatusRequest });
     throw new Error("Tenant editor unavailable");
   }
@@ -213,6 +216,10 @@ export function TenantManagementPage() {
   };
   const saving = createTenant.isPending || saveTenant.isPending || changeStatus.isPending;
   const workspaceSaving = createWorkspace.isPending || saveWorkspace.isPending;
+  const shortNameField = <Form.Item name="operatorShortName" label={locale === "en-US" ? "Operator short name" : "营运商简称"}
+    extra={<><span>{locale === "en-US" ? "Used in the admin sidebar. Leave blank to use the full company name." : "用于后台左上身份显示；留空使用公司全称。"}</span><br />
+      <span>{locale === "en-US" ? "Preview: " : "预览："}<strong title={String(fullTenantName ?? "")}>{String(shortName ?? "").trim() || String(fullTenantName ?? "") || "—"}</strong></span></>}
+    rules={[{ validator: async (_rule, value) => { normalizeOperatorShortName(value); } }]}><Input autoComplete="off" /></Form.Item>;
 
   return (
     <>
@@ -277,6 +284,7 @@ export function TenantManagementPage() {
             <SettingsWorkspace sections={[
               { key: "tenant", label: t("租户资料"), content: <FormSection title={t("租户资料")}>
               <Form.Item name="tenantName" label={t("租户名称")} rules={[{ required: true }]}><Input /></Form.Item>
+              {shortNameField}
               <Form.Item name="tenantCode" label={t("租户编码")} extra={t("创建后不可修改，用于登录和数据隔离。")} rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: t("以小写字母开头，仅支持小写字母、数字、_ 和 -") }]}><Input /></Form.Item>
               <QueryState loading={categoryDirectory.isLoading} error={categoryDirectory.error} onRetry={() => categoryDirectory.refetch({ throwOnError: true })}>
               <Row gutter={16}><Col span={12}><Form.Item name="categoryCode" label={t("默认空间品类")} extra={t("用于创建首个默认经营空间；该空间创建后品类固定。")} rules={[{ required: true }]}><Select showSearch filterOption={false}
@@ -298,7 +306,7 @@ export function TenantManagementPage() {
               </FormSection> },
             ]} />
           )}
-          {editor?.type === "edit" && <Form.Item name="tenantName" label={t("租户名称")} rules={[{ required: true }]}><Input /></Form.Item>}
+          {editor?.type === "edit" && <><Form.Item name="tenantName" label={t("租户名称")} rules={[{ required: true }]}><Input /></Form.Item>{shortNameField}</>}
           {editor?.type === "status" && (
             <>
               <Form.Item name="status" label={t("目标状态")} rules={[{ required: true }]}><Select options={Object.entries(statusMeta).map(([value, meta]) => ({ value, label: t(meta.label) }))} /></Form.Item>

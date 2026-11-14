@@ -152,6 +152,8 @@ export interface TenantContext {
   tenantId: string;
   tenantCode: string;
   tenantName: string;
+  /** SaaS管理员设置的后台营运商简称；省略时继续使用tenantName，不替代对客brandName。 */
+  operatorShortName?: string;
   tenantStatus: TenantStatus;
   /** 租户客户端渠道配置的品牌展示名；未设置时回退 tenantName。 */
   brandName?: string;
@@ -291,6 +293,7 @@ export interface TenantSummary {
   tenantId: string;
   tenantCode: string;
   tenantName: string;
+  operatorShortName?: string;
   tenantStatus: TenantStatus;
   enabledBusinessLines: string[];
   categoryCode?: RentalCategoryCode;
@@ -316,6 +319,16 @@ export interface ResetUserPasswordResult {
 
 export interface UpdateTenantRequest {
   tenantName: string;
+  /** 省略保持原值，null或空字符串清空并回到全称展示。 */
+  operatorShortName?: string | null;
+}
+
+/** 后台简称的输入边界；省略保留、空值清除，前后端使用同一归一规则。 */
+export function normalizeOperatorShortName(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  if (typeof value !== "string" || value.length > 64 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value))
+    throw new Error("营运商简称必须是单行文字");
+  return value.trim().normalize("NFC") || null;
 }
 
 export interface UpdateTenantStatusRequest {
@@ -725,6 +738,8 @@ export interface DeletePlatformFilterPresetResult {
 export interface TenantBootstrapRequest {
   tenantCode: string;
   tenantName: string;
+  /** 独立后台简称；省略/null/空字符串表示未设置。 */
+  operatorShortName?: string | null;
   categoryCode: RentalCategoryCode;
   /** Rental's first space may explicitly select any currently eligible published version. */
   categoryVersionId?: string;
