@@ -10,6 +10,7 @@
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
     "./contracts": { "types": "./dist/contracts.d.ts", "default": "./dist/contracts.js" },
     "./http": { "types": "./dist/http.d.ts", "default": "./dist/http.js" },
+    "./admin": "./admin/index.tsx",
     "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" },
     "./nest": { "types": "./dist/nest.d.ts", "default": "./dist/nest.js" }
   },
@@ -17,7 +18,9 @@
     "prebuild": "npm run build -w @rental-os/core-contracts",
     "build": "tsc -p tsconfig.json",
     "prelint": "npm run build -w @rental-os/core-contracts",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prelint:admin": "npm run build",
+    "lint:admin": "tsc -p admin/tsconfig.json"
   },
   "dependencies": {
     "@rental-os/core-contracts": "0.1.0",
@@ -29,10 +32,16 @@
   },
   "peerDependencies": {
     "@prisma/client": "^5.22.0",
-    "@nestjs/common": "^10.4.15"
+    "@nestjs/common": "^10.4.15",
+    "@rental-os/admin": "0.1.0",
+    "react": "19.2.8",
+    "@tanstack/react-query": "5.101.4"
   },
   "peerDependenciesMeta": {
     "@prisma/client": { "optional": true },
-    "@nestjs/common": { "optional": true }
+    "@nestjs/common": { "optional": true },
+    "@rental-os/admin": { "optional": true },
+    "react": { "optional": true },
+    "@tanstack/react-query": { "optional": true }
   }
 }

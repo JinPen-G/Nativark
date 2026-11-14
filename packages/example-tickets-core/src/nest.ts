@@ -30,6 +30,11 @@ export class TicketsController {
     return this.invoke(who => this.service.get(who, TICKETS_HTTP.get.params.parse(params).ticketId));
   }
 
+  @Get(TICKETS_HTTP.receipt.path)
+  receipt(@Param() params: unknown) {
+    return this.invoke(who => this.service.receipt(who, TICKETS_HTTP.receipt.params.parse(params).operationId));
+  }
+
   @Post(TICKETS_HTTP.create.path) @HttpCode(200)
   create(@Body() body: unknown) {
     return this.invoke(who => this.service.create(who, TICKETS_HTTP.create.body.parse(body)));

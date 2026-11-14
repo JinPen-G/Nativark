@@ -1,13 +1,13 @@
 # Core 页面适配
 
-这个入口把 `@rental-os/core-contracts` 的页面与操作声明接到当前 React 后台的原组件。Core作者提供正文、路由信息和业务方法，框架呈现标题、按钮、加载及确认反馈。正式源码入口为[本目录index](index.ts)，当前工程内从 `@/core` 导入；以后独立前端包沿此边界抽取。
+这个入口把 `@rental-os/core-contracts` 的页面与操作声明接到当前 React 后台的原组件。Core作者提供正文、路由信息和业务方法，框架呈现标题、按钮、加载及确认反馈。正式源码入口为[本目录index](index.ts)，Core从 `@rental-os/admin/core` 导入，当前后台内部也可使用 `@/core`；这是现有React构建的源码包出口，独立前端发行仍待宿主拆分。
 
 ## 页面只声明当前操作
 
 下面是页面代码的最小形态。`openEditor`由业务打开自己的编辑器，不会在打开时创建记录。
 
 ```tsx
-import { CorePage } from "@/core";
+import { CorePage } from "@rental-os/admin/core";
 
 export function TicketsPage() {
   return <CorePage actions={[{
@@ -41,8 +41,7 @@ export function TicketsPage() {
 将 `CorePage`放在表单内部，让原页头portal能关联实际Form和回车提交。业务只保留一个保存方法，按钮和Form沿同一值转换/请求。
 
 ```tsx
-import { CorePage } from "@/core";
-import { Form, Input } from "@/components/ui";
+import { CorePage, Form, Input } from "@rental-os/admin/core";
 
 type Values = { subject: string };
 
@@ -62,6 +61,14 @@ export function TicketEditor() {
 ```
 
 以上`saveTicket`/`openEditor`需要本Core自己的实现，例子不是已接通的工单业务。SaveButton复用原同步防重复、校验、原Form关联和保存快照，异步失败不标为已保存；等待中的新输入不被旧保存回执抹除。
+
+## 请求和缓存沿用公共边界
+
+`useCoreRequest()`返回原HTTP封装的`request`与当前Core/会话/页面代次的`queryKey`。请求只传Core内路径如`/tickets`，它补 `/cores/<id>`，查询参数单独传`params`；不允许外部URL、上级路径或借其他Core前缀。返回值是原平台`{ data, requestId }`中的data，调用方用业务schema核对响应。
+
+请求仍经原Axios身份/刷新/信封，不另建客户端；离页、宿主代次变化会中止原请求，响应返回后再核会话代次和当前页面权限。React严格模式清理再挂载会建立新的中止信号，不把旧已中止信号带入新页面。该前端限制不授予服务端权限，也不能判断中止的业务写入是否已经提交。
+
+Core使用`queryKey`作为自己的查询前缀。正常列表、表单与详情复用本出口的原Table、QueryState、Form及UnsavedChangesGuard；已装配的业务需要取消/核对时由自身原操作收据负责，不在通用请求层重做。实际使用示例见[工单三页面](../../../../packages/example-tickets-core/admin/index.tsx)，没有另建壳或按钮样式。
 
 ## 宿主只装配一次
 

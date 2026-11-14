@@ -15,7 +15,7 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
     license: "MIT",
     compatibility: { platform: compatible, contract: compatible },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },
-    entries: { server: "dist/index.js", openapi: "openapi.json" },
+    entries: { server: "dist/index.js", openapi: "openapi.json", admin: "admin/index.tsx" },
     permissions: [
       { resource: "ticket", action: "read", name: "读取本人可见工单" },
       { resource: "ticket", action: "read.all", name: "读取本租户全部工单" },

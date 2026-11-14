@@ -1,6 +1,6 @@
 # 轻量工单 Core 示范
 
-`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL和Nest适配；真实宿主授权、路由装配/页面及部署尚未接线，当前不能直接作为完整工单应用安装使用。
+`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配和三页面贡献；真实宿主授权、路由装配及部署尚未接线，当前不能直接作为完整工单应用安装使用。
 
 ## 业务范围
 
@@ -15,6 +15,10 @@
 | `close` | in_progress变为closed；当前受派者或获权管理者执行，首版不提供重开 |
 
 每次写入携带原`operationId`，更新再携带`expectedRevision`。同键同输入在复核当前授权和对象可见性后返回历史收据，不重新执行；同键不同输入拒绝。当前工单可能已前进，原收据中的状态仍是原操作时结果，不能当作最新对象。修订冲突重新读取，不自动换键重做。
+
+`receipt(principal, operationId)`提供只读核对。只开放本人原操作且当前仍可见的对象，返回recorded及原收据，或unavailable；unavailable不表示未执行。结果未知后的页面只调用该读取，不自动重发写入。
+
+执行请求的`purpose`由服务端方法固定为business或original_receipt，不能从HTTP body选择。宿主分别办理普通准入与原收据善后，Core停用/到期后的必要核对仍复用当前身份和原操作范围，不能借此开放普通工单查询或写入。
 
 ## 接入已有宿主
 
@@ -45,7 +49,7 @@ node packages/example-tickets-core/dist/metadata.js manifest <仓库HTTPS地址>
 node packages/example-tickets-core/dist/metadata.js openapi
 ```
 
-打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。清单没有假页面或AI工具；真实业务页完成时才增加后台贡献，不把本包领域/适配通过称为已独立安装完成。
+打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移、`admin/index.tsx`及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。后台TSX由受控宿主组合构建，不在运行时从包路径热加载；AI工具仍未提供，不把本包领域/适配通过称为已独立安装完成。
 
 ## HTTP 与 API 文档
 
@@ -55,14 +59,25 @@ node packages/example-tickets-core/dist/metadata.js openapi
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |
+| `GET /api/cores/example-tickets/operations/{operationId}` | 同上 | 本人的原操作键；recorded原收据或unavailable |
 | `POST /api/cores/example-tickets/tickets` | `example-tickets:ticket:create` | operationId/subject/description；原操作收据 |
 | `POST .../tickets/{ticketId}/assign` | `example-tickets:ticket:assign` | operationId/expectedRevision/assigneeId；原操作收据 |
 | `POST .../tickets/{ticketId}/start` | `example-tickets:ticket:start` | operationId/expectedRevision；原操作收据 |
 | `POST .../tickets/{ticketId}/close` | `example-tickets:ticket:close` | operationId/expectedRevision；原操作收据 |
 
-全部成功返回200，输入不符400、当前授权不足403、对象不在可读范围404、修订/状态/原操作冲突409；会话失败和未处理存储异常仍走原宿主401/500。请求不接tenantId、创建者和body里的ticketId，路径标识与body分别校验。HTTP200只说明本次请求返回，收据中的工单状态是原操作时状态；当前状态另读详情。
+全部成功返回200，沿原平台`{ data, requestId }`信封；输入不符400、当前授权不足403、对象不在可读范围404、修订/状态/原操作冲突409；会话失败和未处理存储异常仍走原宿主401/500。请求不接tenantId、创建者和body里的ticketId，路径标识与body分别校验。HTTP200只说明本次请求返回，收据中的工单状态是原操作时状态；当前状态另读详情。
 
 [生成器](src/openapi.ts)从相同Zod/HTTP合同生成OpenAPI贡献，复用公共`coreOpenApiSchema`，不手工维护另一套字段。输出可给平台`composeCoreOpenApi`组合，也可随包离线阅读；标准包检查会核路径/schema命名空间和本地引用。Controller装配与真实HTTP权限仍待宿主验证。
+
+## 后台三页面
+
+`@rental-os/example-tickets-core/admin`提供[列表、新建和详情](admin/index.tsx)，只从`@rental-os/admin/core`取得公共呈现、原组件和请求。`createTicketsAdmin(detailComponent)`返回同一页面注册贡献；detailComponent由受控宿主解析路由参数并传给`TicketDetailPage({ ticketId })`，宿主仍须包裹真实`CorePageHostProvider`。
+
+列表支持状态筛选和显式分页，新建用声明式保存主操作，详情按当前状态声明处理/关闭，分派使用原Form/SaveButton。没有新CSS或外壳，页面标题从路由声明读取；普通成员仍经服务端数据范围。首次示范的分派填写已授权成员ID，后续原成员目录适配接通后可改为实名选择，当前不创建假人员列表。
+
+网络/未知结果保留原输入、键和常显提示，只提供GET原收据核对；已知本Core提交前拒绝允许核正输入/状态再发起新操作。输入未保存、写入中或未知结果沿原UnsavedChangesGuard保护。查询缓存包含Core/会话/页面代次，原HTTP负责凭据与信封，通用Core请求适配负责离页中止及迟到响应拒绝。
+
+在已经具备对应React后台peer与原锁文件依赖的源码组合中，可运行`npm run lint:admin -w @rental-os/example-tickets-core`，先构建服务端合同/产物，再按当前后台tsconfig检查页面。它不是完整独立前端发行构建；实际AppRouter/导航、后端授权、持久化和实页仍待公共宿主片。
 
 ## 源码与验证入口
 

@@ -1,0 +1,8 @@
+{
+  "extends": "../../../apps/admin/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": ["index.tsx", "../../../apps/admin/src/**/*.d.ts"]
+}

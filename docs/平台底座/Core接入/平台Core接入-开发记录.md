@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-tickets-admin-20261114"></a>
+
+## 工单页面消费公共壳与原收据读取（2026-11-14）
+
+期限复核片 `093458c448a27c8aa1591ed44d3dc8f990fcbcbc` 已推送并回读，继续独占 `apps/admin/src/core`/工单包及必要包元数据。原后台壳、AppRouter/导航、Auth/Guard/主OpenAPI仍未修改；main原后台作者的顶栏/样式与PM原本机迁移恢复继续独立，本片不访问其业务服务或共享库。
+
+[工单后台](../../../packages/example-tickets-core/admin/index.tsx)提供列表、创建和详情三个真实页面组件/注册贡献，通过正式 `@rental-os/admin/core` 源码出口消费CorePage、原Table/Form/SaveButton/QueryState/离页保护，不加样式或复制壳。原admin包只新增该出口，现有企业读取经固定Git核无包深层导入，不扩大成UI重构；工单按所需peer使用React/React Query，包清单增加实际后台TSX入口，仍由受控宿主构建。
+
+通用[Core请求适配](../../../apps/admin/src/core/useCoreRequest.ts)复用原HTTP认证/信封，限定本Core内路径和参数，生成Core/宿主身份/页面代次查询键。离页/代次变更中止原请求，返回后核当前会话/页面权限，StrictMode清理再挂载重新建信号，不继续使用已中止信号。它不是服务端授权，也不能以请求取消判断写入未发生。
+
+工单列表用原表格/筛选与显式分页，新建/处理/关闭由CorePage声明当前主操作，分派用原Form/SaveButton。首次示范受派者填写正式成员ID，真实成员选择目录尚待公共适配。写入中保留表单和单次Promise，已知本Core提交前拒绝允许核正输入；网络/未知结果保留原操作键并常显提示，不能自动换键重做。
+
+新增原操作只读入口 `GET operations/{operationId}` 与 `TicketsService.receipt`，只返回当前本人及对象范围允许的recorded原收据或unavailable；未查到不能推断未执行。页面核对只走GET，不再调用原写入。服务端固定purpose=original_receipt与普通business分开供宿主处理停用/到期善后，客户端不能选择；真实授权适配仍须实现。API同源映射现有7操作/6路径，文档同步原RequestIdInterceptor的 `{data,requestId}` 信封；判别联合导出复用唯一schema。
+
+验证范围：后台和工单合并650根/3994源类型0诊断，独立页面tsconfig 11根/1490源0诊断，服务端10根0诊断；原合同8组通过含新增联合schema类型。AntD6.6原Table API/示例已查，新页面与CorePage lint均零问题。stdin核实际hook的Core前缀/路径拒绝、离页/会话/权限迟到响应、StrictMode/旧generation拒绝；实际页面JSX核未知创建转只读GET、unavailable不重发、已记录进入原对象、已知拒绝保持可编辑及3页注册；实际服务/Controller核原收据零写入、当前主体/对象可见性、7操作及信封文档，均退出0。上述为hook/HTTP/事务facade和静态类型，未冒充真实React挂载、Form回车、浏览器样式、原Guard或数据库通过。没有新增测试脚本、依赖副本、服务或临时文件，原合同测试产物已清理。
+
+[平台接入说明](../../../apps/admin/src/core/README.md)及[样例手册](../../../packages/example-tickets-core/README.md)同片给出正式出口、三页面、缓存/请求、只读核对和原业务限制。实际主应用装配/数据迁移/当前授权、无Core及双Core界面/持久化、停用恢复和独立接手仍未完成；两个空目录原位审批阻塞继续按原责任清单维护。
+
+5份文档380条链接定向核对新错误0，包peer/正式出口与lock一致，需求/原任务未变，`git -c core.whitespace=cr-at-eol diff --check`退出0。最终补齐分派草稿和核对中离页保护后，页面独立tsconfig复验仍11根/1490源0诊断；原收据/普通访问purpose分开也经最终服务端类型与短命令核对，退出0。
+
 <a id="core-tickets-package-20261114"></a>
 
 ## 工单编译包闭包与提交前期限复核（2026-11-14）

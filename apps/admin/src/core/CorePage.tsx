@@ -24,6 +24,11 @@ export interface CorePageHost {
 }
 
 const Host = createContext<CorePageHost | null>(null);
+export function useCorePageHost(): CorePageHost {
+  const host = useContext(Host);
+  if (!host) throw new Error("Core页面须位于已注册且受权的CorePageHostProvider内");
+  return host;
+}
 const access = (host: CorePageHost, permissions: CorePageDescriptor["permissions"] = []) =>
   host.canAccess(host.page.coreId, [...host.page.definition.permissions, ...permissions]);
 
@@ -116,8 +121,7 @@ export function CorePage<Values = Record<string, unknown>>({ actions = [], descr
   note?: { title: string; description: ReactNode };
   children: ReactNode;
 }) {
-  const host = useContext(Host), { locale } = useLocale();
-  if (!host) throw new Error("CorePage须位于已注册且受权的CorePageHostProvider内");
+  const host = useCorePageHost(), { locale } = useLocale();
   const ids = new Set<string>();
   let primary = 0;
   for (const action of actions) {

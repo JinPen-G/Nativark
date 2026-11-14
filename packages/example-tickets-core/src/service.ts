@@ -24,7 +24,12 @@ export interface TicketAccess {
   /** 宿主在Core锁之前已核对并锁定的本租户、可使用本Core的受派成员。 */
   readonly authorizedAssigneeId?: string;
 }
-export interface TicketExecutionRequest { principal: CorePrincipal; permission: TicketPermission; assigneeId?: string }
+export interface TicketExecutionRequest {
+  principal: CorePrincipal;
+  permission: TicketPermission;
+  purpose: "business" | "original_receipt";
+  assigneeId?: string;
+}
 export interface TicketExecution {
   /**
    * 由原身份/权限所有者实现：核租户Core授权、成员分配和当前业务权限，先锁人员/授权，
@@ -45,6 +50,17 @@ export class TicketsService {
   get(principal: CorePrincipal, ticketId: string): Promise<Ticket> {
     TicketIdSchema.parse(ticketId);
     return this.withAccess(principal, "read", async (store, access) => this.visible(await store.find(ticketId), access));
+  }
+
+  receipt(principal: CorePrincipal, operationId: string): Promise<{ status: "recorded"; receipt: TicketReceipt } | { status: "unavailable" }> {
+    TicketIdSchema.parse(operationId);
+    return this.withAccess(principal, "read", async (store, access) => {
+      const receipt = await store.receipt(operationId);
+      if (!receipt || receipt.actorId !== access.userId) return { status: "unavailable" };
+      this.visible(await store.find(receipt.ticket.id), access);
+      if (receipt.ticket.tenantId !== access.tenantId) throw new TicketError("denied", "原工单收据不属于当前租户");
+      return { status: "recorded", receipt: { operationId, ticket: receipt.ticket } };
+    }, undefined, "original_receipt");
   }
 
   create(principal: CorePrincipal, input: unknown): Promise<TicketReceipt> {
@@ -94,9 +110,10 @@ export class TicketsService {
   }
 
   private withAccess<T>(principal: CorePrincipal, permission: TicketPermission,
-    work: (repository: TicketRepository, access: TicketAccess) => Promise<T>, assigneeId?: string): Promise<T> {
+    work: (repository: TicketRepository, access: TicketAccess) => Promise<T>, assigneeId?: string,
+    purpose: TicketExecutionRequest["purpose"] = "business"): Promise<T> {
     if (principal.audience !== "operator") return Promise.reject(new TicketError("denied", "示范Core仅面向获权租户后台成员"));
-    return this.execution.run({ principal, permission, ...(assigneeId ? { assigneeId } : {}) }, (store, access) => {
+    return this.execution.run({ principal, permission, purpose, ...(assigneeId ? { assigneeId } : {}) }, (store, access) => {
       if (access.tenantId !== principal.tenantId || access.userId !== principal.subjectId)
         throw new TicketError("denied", "工单事务身份与当前主体不一致");
       return work(store, access);

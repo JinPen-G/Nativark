@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./core": "./src/core/index.ts"
+  },
   "scripts": {
     "predev": "npm run build -w @rental-os/core-contracts",
     "dev": "vite --host 127.0.0.1 --strictPort",

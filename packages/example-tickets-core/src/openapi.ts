@@ -9,11 +9,13 @@ export function createTicketsOpenApi(): CoreOpenApiContribution {
   for (const [action, definition] of Object.entries(TICKETS_HTTP)) {
     const name = `example-tickets.${action}`, parameters: unknown[] = [];
     const path = `/api/${TICKETS_HTTP_BASE}/${definition.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`;
-    schemas[`${name}.Response`] = coreOpenApiSchema(definition.response);
+    schemas[`${name}.Response`] = { type: "object", required: ["data", "requestId"], properties: {
+      data: coreOpenApiSchema(definition.response), requestId: { type: "string" }
+    } };
     const operation: Record<string, unknown> = {
       operationId: name, summary: definition.summary, security: [{ bearerAuth: [] }],
       "x-core-permissions": [`example-tickets:ticket:${definition.permission}`],
-      description: "需要原operator会话、当前租户Core授权、成员分配及本动作权限。租户不从请求读取；读取范围由当前角色决定。",
+      description: "需要原operator会话、当前租户Core授权、成员分配及本动作权限。租户不从请求读取；读取范围由当前角色决定。响应沿原平台{data,requestId}信封，正文schema放在data内。",
       responses: {
         200: { description: "当前读取结果或原操作收据", content: json(`${name}.Response`) },
         400: { description: "输入不符合业务schema", content: json("example-tickets.Error") },

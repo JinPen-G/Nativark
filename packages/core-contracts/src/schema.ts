@@ -54,6 +54,8 @@ export function coreOpenApiSchema(schema: z.ZodTypeAny): Record<string, unknown>
       }
       else if (check.kind !== "finite") throw new Error("OpenAPI未支持数字约束");
     }
+  } else if (schema instanceof z.ZodDiscriminatedUnion) {
+    result = { oneOf: schema.options.map((option: z.ZodTypeAny) => coreOpenApiSchema(option)), discriminator: { propertyName: schema.discriminator } };
   } else if (schema instanceof z.ZodBoolean) result = { type: "boolean" };
   else if (schema instanceof z.ZodEnum) result = { type: "string", enum: schema.options };
   else if (schema instanceof z.ZodLiteral) {
