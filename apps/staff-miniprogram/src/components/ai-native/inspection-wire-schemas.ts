@@ -2256,6 +2256,87 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
           "reviewRequired"
         ],
         "additionalProperties": false
+      },
+      "bodyRetention": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "erased"
+            ]
+          },
+          "receiptId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "candidateRefs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "candidateId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "fieldCode": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "required": [
+                "candidateId",
+                "fieldCode"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "inputRefs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "inputId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "inputFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "inputId",
+                "inputFingerprint"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 0,
+            "maxItems": 8
+          }
+        },
+        "required": [
+          "state",
+          "receiptId",
+          "policyVersion",
+          "candidateRefs",
+          "inputRefs"
+        ],
+        "additionalProperties": false
       }
     },
     "required": [
@@ -5615,6 +5696,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
                 "fieldId": {
                   "type": "string",
                   "enum": [
+                    "customer_type_selection",
                     "customer_selection",
                     "item_selection",
                     "pickup_location",
@@ -6104,6 +6186,7 @@ export const schemas: Record<string, AiLeafSchemaDraft> = {
             "fieldId": {
               "type": "string",
               "enum": [
+                "customer_type_selection",
                 "customer_selection",
                 "item_selection",
                 "pickup_location",

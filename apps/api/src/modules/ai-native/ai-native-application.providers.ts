@@ -70,7 +70,10 @@ import { AI_NATIVE_CLIENT_TASK_POLICIES, AI_NATIVE_CLIENT_POLICY_CONFIGURATION }
 import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.service';
 import { TenantIntegrationService } from '../integrations/tenant-integration.service';
 import { AiRetentionService } from './privacy/retention.service';
-import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
+import { AiPlatformRetentionService } from './privacy/platform-retention.service';
+import { AI_RETENTION_REQUESTS, AI_PLATFORM_RETENTION_REQUESTS,
+  type AiRetentionRequestFactory, type AiPlatformRetentionRequestFactory } from './privacy/retention.controller';
+import { PlatformModelConfigurationAuthority } from './platform-model-config.authority';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies, composeClarifiedQuoteSelectionRequests, composeRequestBoundClarifiedQuoteSelectionPreparation,
@@ -473,6 +476,40 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
     return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
       receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
       close: () => { authorization = undefined; } };
+  },
+};
+
+/** Current platform directory Guard, independent of enabled generation or a
+ * particular model Profile. Cleanup still checks manage, receipt reads view;
+ * no workspace credentials or tenant-default scope are supplied. Restore key
+ * hash is a trusted host setting, never an HTTP field or decoded secret. */
+export const AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH = Symbol('AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH');
+export const AI_NATIVE_PLATFORM_RETENTION_PROVIDER: FactoryProvider = {
+  provide: AI_PLATFORM_RETENTION_REQUESTS,
+  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, { token: AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, keyHash?: unknown): AiPlatformRetentionRequestFactory => {
+    if (keyHash !== undefined && (typeof keyHash !== 'string' || !/^[a-f0-9]{64}$/u.test(keyHash)))
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return request => {
+      const header = request?.headers?.authorization;
+      if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      let authorization: string | undefined = header;
+      const requestId = randomUUID(), credentials = { current: async () => {
+        if (!authorization) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { authorization, requestId, audience: 'operator' as const };
+      } };
+      const platform = new PlatformModelConfigurationAuthority(guard, credentials, undefined,
+        { resolve: async () => { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); } });
+      const service = new AiPlatformRetentionService(db, { resolve: async () => {
+        try { return await platform.resolveDirectoryRead(); }
+        catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
+      } }, () => new Date(), keyHash as string | undefined);
+      return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
+        receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
+        exportRestoreManifest: service.exportRestoreManifest.bind(service), reapplyRestore: service.reapplyRestore.bind(service),
+        close: () => { authorization = undefined; } };
+    };
   },
 };
 

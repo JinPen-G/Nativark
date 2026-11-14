@@ -2,7 +2,7 @@ import { createHash, createPublicKey, sign, verify, type KeyObject } from 'node:
 import { z } from 'zod';
 import { AI_RETENTION_POLICY } from './retention-policy';
 
-export const retentionKinds = ['task', 'request', 'knowledge', 'memory', 'material', 'attachment'] as const;
+export const retentionKinds = ['task', 'request', 'knowledge', 'memory', 'material', 'attachment', 'inspection_draft'] as const;
 const hash = z.string().regex(/^[a-f0-9]{64}$/u), id = z.string().min(1).max(191);
 const tombstone = z.object({ kind: z.enum(retentionKinds), resourceId: id, targetHash: hash,
   mode: z.enum(['erase', 'withdraw']).default('erase') }).strict();

@@ -39,7 +39,7 @@ export function composeStaffInspectionTaskReceiptReader(dependencies: StaffInspe
   const selected = freezeOriginalInput(z.object({ enabled: z.literal(true),
     scenes: z.array(scene).min(1).max(2).refine(rows => new Set(rows.map(row => row.kind)).size === rows.length) })
     .strict().parse(structuredClone(options)));
-  if (dependencies.db !== dependencies.inspection.db || typeof dependencies.auth?.resolveAccessContext !== 'function') throw unavailable();
+  if (Object.is(dependencies.db, dependencies.inspection.db) !== true || typeof dependencies.auth?.resolveAccessContext !== 'function') throw unavailable();
   const server = { ...dependencies, inspection: { ...dependencies.inspection } }, clock = server.clock ?? (() => new Date());
   return Object.freeze({
     async readCreation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) {

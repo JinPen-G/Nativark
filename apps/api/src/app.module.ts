@@ -180,7 +180,8 @@ import { AiSettingsChangeController, AiSettingsTaskCreationController, AiSetting
   AiSettingsTaskController, AiSettingsTaskReadController } from './modules/ai-native/scenes/settings-task.controller';
 import { OperatorAutomationController, StaffAutomationController } from './modules/ai-native/automation/human-automation-request.controller';
 import { HumanAutomationPolicyRequestController } from './modules/ai-native/automation/human-automation-policy-request.controller';
-import { AiRetentionController } from "./modules/ai-native/privacy/retention.controller";
+import { AiRetentionController, AiPlatformRetentionController } from "./modules/ai-native/privacy/retention.controller";
+import { AI_NATIVE_PLATFORM_RETENTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
 import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_STAFF_RECOGNITION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
@@ -256,6 +257,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     WebsiteClientPublicController,
     WechatClientPublicController,
     AiRetentionController,
+    AiPlatformRetentionController,
     AiOriginalSceneObservationController,
     AiOriginalQuoteModelExecutionController,
     AiOriginalOpeningModelExecutionController,
@@ -346,6 +348,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
     ...AI_NATIVE_CLIENT_PUBLIC_PROVIDERS,
     AI_NATIVE_RETENTION_PROVIDER,
+    AI_NATIVE_PLATFORM_RETENTION_PROVIDER,
     AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER,
     AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER,
     AuthService,

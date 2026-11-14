@@ -266,21 +266,24 @@ export type AiBodyStorageCursor = { id: string } | { taskId: string; cursor: str
   | { recordId: string; revision: number };
 
 /** Host-only bounded upgrade. The original retention authority supplies the
- * current full-workspace scope/check; no body leaves this port, no hash or
+ * current workspace or independent platform scope/check; no body leaves this port, no hash or
  * lifecycle is rewritten, and already protected cells are never encrypted
  * again. A lost COMMIT is unknown; the same cursor page can be observed again. */
 export async function protectAiBodyStorageRows(db: PrismaClient, input: {
-  model: AiBodyStorageKind; scopeId: string; tenantId: string; workspaceId: string;
+  model: AiBodyStorageKind; scopeId: string; tenantId: string | null; workspaceId: string | null;
   limit: number; after?: AiBodyStorageCursor; check(): Promise<void>;
 }) {
   const stored = nativeClients.get(db), definition = definitions[input.model];
   if (!stored || !definition || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 10) throw unavailable();
   const native = stored.native as PrismaClient, event = input.model === 'aiTaskEvent', snapshot = input.model === 'aiApprovedOrderSnapshot';
+  const platform = input.tenantId === null && input.workspaceId === null;
+  const scopeModels = ['aiTaskActionInput', 'aiTaskResultArtifact', 'aiTaskOriginalRequest', 'aiTaskQuoteSelection', 'aiApprovedOrderSnapshot',
+    'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiTaskEvent'];
+  if (platform ? !scopeModels.includes(input.model) : input.tenantId === null || input.workspaceId === null) throw unavailable();
   if (input.after && (event ? !('taskId' in input.after) || !/^[1-9][0-9]{0,19}$/u.test(input.after.cursor)
     || BigInt(input.after.cursor) > 18446744073709551615n : snapshot ? !('recordId' in input.after)
       || !Number.isSafeInteger(input.after.revision) || input.after.revision < 1 : !('id' in input.after))) throw unavailable();
-  const scope = ['aiTaskActionInput', 'aiTaskResultArtifact', 'aiTaskOriginalRequest', 'aiTaskQuoteSelection', 'aiApprovedOrderSnapshot',
-    'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiTaskEvent'].includes(input.model)
+  const scope = scopeModels.includes(input.model)
     ? { scopeId: input.scopeId } : input.model === 'aiKnowledgeChunk'
       ? { version: { document: { tenantId: input.tenantId, workspaceId: input.workspaceId } } }
       : { tenantId: input.tenantId, workspaceId: input.workspaceId };
@@ -292,10 +295,10 @@ export async function protectAiBodyStorageRows(db: PrismaClient, input: {
   try {
     const result = await native.$transaction(async tx => {
       await input.check();
-      const owner = await tx.aiScope.findFirst({ where: { id: input.scopeId, kind: 'WORKSPACE',
-        tenantId: input.tenantId, workspaceId: input.workspaceId } });
-      if (!owner || (await tx.aiScope.updateMany({ where: { id: owner.id, kind: 'WORKSPACE',
-        tenantId: input.tenantId, workspaceId: input.workspaceId }, data: { id: owner.id } })).count !== 1) throw unavailable();
+      const ownerWhere = { id: input.scopeId, kind: platform ? 'PLATFORM' as const : 'WORKSPACE' as const,
+        tenantId: input.tenantId, workspaceId: input.workspaceId, ...(platform ? { scopeKey: 'platform' } : {}) };
+      const owner = await tx.aiScope.findFirst({ where: ownerWhere });
+      if (!owner || (await tx.aiScope.updateMany({ where: ownerWhere, data: { id: owner.id } })).count !== 1) throw unavailable();
       const delegate = Reflect.get(tx, input.model) as {
         findMany(value: unknown): Promise<Value[]>; updateMany(value: unknown): Promise<{ count: number }>;
       };

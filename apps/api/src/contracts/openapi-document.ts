@@ -46,6 +46,7 @@ import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_ORDER_READ_HTTP_CONTRACTS, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_SCENE_REQUEST_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT, AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS, AI_INSPECTION_TASK_HTTP_CONTRACTS, AI_INSPECTION_TASK_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_RETENTION_HTTP_CONTRACTS, AI_ORIGINAL_POLICY_HTTP_CONTRACTS, AI_CLIENT_TASK_POLICY_HTTP_DRAFT, AI_CLIENT_POLICY_HTTP_CONTRACTS, AI_INSPECTION_MANUAL_HTTP_CONTRACTS, AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS, AI_CATEGORY_DRAFT_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_PLATFORM_RETENTION_HTTP, AI_PLATFORM_RETENTION_HTTP_CONTRACTS } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2415,6 +2416,14 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/privacy/receipts', tag: 'AI Native', operationId: 'listAiRetentionReceipts',
     permissions: ['system:params:manage'], authRequired: true, summary: 'Bounded current-workspace receipt observation after an ambiguous batch reply.',
     requestSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.request, responseSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.response },
+  ...Object.entries(AI_PLATFORM_RETENTION_HTTP_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const,
+    path: `/api/${AI_PLATFORM_RETENTION_HTTP.basePath}/${AI_PLATFORM_RETENTION_HTTP[action as keyof typeof AI_PLATFORM_RETENTION_HTTP_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `platformAiRetention_${action}`, authRequired: true,
+    permissions: [contract.write ? 'system:ai-provider:manage' : 'system:ai-provider:view'],
+    summary: 'Bounded platform-only AI body maintenance and original receipts. Current SaaS authority, null business attribution, original accounting holds and deletion journals remain mandatory. No model, Core execution or unsigned restore.',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
   ...AI_CLIENT_PUBLIC_HTTP.basePaths.flatMap(base => Object.entries(AI_CLIENT_PUBLIC_CONTRACTS).map(([action, contract]) => ({
     method: 'post' as const, path: `/api/${base}/${AI_CLIENT_PUBLIC_HTTP[action as keyof typeof AI_CLIENT_PUBLIC_CONTRACTS]}`,
     tag: 'AI Native', operationId: `clientPublic_${base.includes('wechat') ? 'wechat' : 'web'}_${action}`, permissions: [],

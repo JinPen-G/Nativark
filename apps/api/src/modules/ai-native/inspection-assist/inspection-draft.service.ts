@@ -10,6 +10,8 @@ import { PrismaInspectionDraftRepository } from './prisma-inspection-draft.repos
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import { recognitionSaveAssociationSchema, recognitionSaveReferenceSchema, type RecognitionSaveAssociation } from './inspection-recognition-save.association';
 import { inspectionRecognitionBasisReferenceSchema, unrecordedInspectionRecognitionBasis } from './inspection-recognition-basis.service';
+import { inspectionDraftBodyErasureSchema, type InspectionDraftBodyErasure,
+  type InspectionDraftBodyRetentionReader } from '../privacy/retention-inspection-draft';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const targetSchema = inspectionTargetSchema.extend({ templateId: inspectionId }).strict();
@@ -37,7 +39,8 @@ const stateSchema = z.object({ version: z.literal(1), fields: z.record(inspectio
   decision: z.enum(['manual', 'accepted', 'modified', 'rejected']), candidateId: inspectionId.optional(), actorId: inspectionId }).strict()),
   candidates: z.array(z.unknown()).max(100), evidence: z.array(evidenceRef).max(100), missingFields: z.array(inspectionId).max(100), reviewRequired: z.boolean(), submission: inspectionSubmissionMaterialSchema.optional(),
   recognitionInputs: z.array(inspectionRecognitionInputSchema).max(8).optional(),
-  candidateBasis: z.record(inspectionId, inspectionRecognitionBasisReferenceSchema).refine(value => Object.keys(value).length <= 100).optional() }).strict();
+  candidateBasis: z.record(inspectionId, inspectionRecognitionBasisReferenceSchema).refine(value => Object.keys(value).length <= 100).optional(),
+  bodyErasure: inspectionDraftBodyErasureSchema.optional() }).strict();
 export interface InspectionDraftEvidence {
   fingerprint(target: AiInspectionTarget, refs: Array<z.infer<typeof evidenceRef>>): Promise<string>;
 }
@@ -46,7 +49,8 @@ const targetOf = (input: AiInspectionTarget): AiInspectionTarget => ({ orderId: 
 export class InspectionDraftService {
   constructor(private readonly repository: PrismaInspectionDraftRepository, private readonly authority: InspectionActionAuthority,
     private readonly templates: InspectionTemplateService, private readonly manual: InspectionManualPreparationService,
-    private readonly candidates: InspectionCandidateService, private readonly evidence?: InspectionDraftEvidence) {}
+    private readonly candidates: InspectionCandidateService, private readonly evidence?: InspectionDraftEvidence,
+    private readonly bodyRetention?: InspectionDraftBodyRetentionReader) {}
 
   async create(value: unknown) {
     const input = parseInspectionInput(createSchema, value), target = targetOf(input);
@@ -221,7 +225,12 @@ export class InspectionDraftService {
   async read(value: unknown) {
     const input = parseInspectionInput(targetSchema.extend({ draftId: inspectionId }).strict(), value), target = targetOf(input);
     return this.authority.withAction(target, 'read', async scope => {
-      const row = await this.load(scope, input.draftId, target), state = this.state(row.state);
+      const row = await this.load(scope, input.draftId, target), stored = this.state(row.state);
+      const { bodyErasure, ...state } = stored;
+      // Empty candidates alone never prove intentional deletion. The same
+      // current-authorized reader must verify the original scoped tombstone.
+      if (bodyErasure && (!this.bodyRetention
+        || !isDeepStrictEqual(await this.bodyRetention.readErasure(row), bodyErasure))) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
       let reviewRequired = state.reviewRequired || row.expiresAt.getTime() <= Date.now();
       let bindingCurrent = true;
       try {
@@ -262,10 +271,14 @@ export class InspectionDraftService {
       }
       const current = await this.load(scope, input.draftId, target);
       if (!isDeepStrictEqual(row, current)) throw new InspectionAssistError('REVISION_CONFLICT');
+      if (bodyErasure && !isDeepStrictEqual(await this.bodyRetention!.readErasure(current), bodyErasure)) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
       reviewRequired ||= !bindingCurrent || candidateReviews.some(review => review.basisIssues.length > 0);
       return { draftId: row.id, revision: row.revision, status: row.status, target, assetId: row.assetId,
         templateVersion: row.templateVersion, bindingFingerprint: row.bindingFingerprint, state: { ...state, reviewRequired },
         candidateReviews,
+        ...(bodyErasure ? { bodyRetention: { state: 'erased' as const, receiptId: bodyErasure.receiptId,
+          policyVersion: bodyErasure.policyVersion, candidateRefs: structuredClone(bodyErasure.candidateRefs),
+          inputRefs: structuredClone(bodyErasure.inputRefs) } } : {}),
         recognitionEvidence: 'caller_supplied_not_model_execution_proof' as const, inspectionId: row.inspectionId };
     });
   }
@@ -299,14 +312,17 @@ export class InspectionDraftService {
       const bindingCurrent = template?.bindingFingerprint === current.bindingFingerprint;
       const definitions = bindingCurrent ? template!.template.fields : [];
       const codes = [...new Set([...definitions.map(field => field.code), ...Object.keys(current.state.fields),
-        ...current.state.candidates.map(candidate => candidate.fieldCode)])];
+        ...current.state.candidates.map(candidate => candidate.fieldCode),
+        ...(current.bodyRetention?.candidateRefs.map(candidate => candidate.fieldCode) ?? [])])];
       if (codes.length > 100) throw new InspectionAssistError('INVALID_INPUT');
       const fields = codes.map(code => {
         const definition = definitions.find(field => field.code === code);
         const human = current.state.fields[code];
         const candidates = current.state.candidates.filter(candidate => candidate.fieldCode === code);
         const chosen = human?.candidateId ? candidates.find(candidate => candidate.candidateId === human.candidateId) : undefined;
-        if (human?.candidateId && !chosen) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        const erasedSource = Boolean(human?.candidateId && current.bodyRetention?.candidateRefs
+          .some(candidate => candidate.candidateId === human.candidateId && candidate.fieldCode === code));
+        if (human?.candidateId && !chosen && !erasedSource) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
         return { fieldCode: code, ...(definition ? { label: definition.label, type: definition.type,
           required: definition.required, ...(definition.unit ? { unit: definition.unit } : {}) } : {}),
           human: human ? structuredClone(human) : null,
@@ -315,6 +331,7 @@ export class InspectionDraftService {
             sourcesMatchDraftEvidence: bindingCurrent && this.sourcesIncluded(candidate, current.state.evidence),
             requiresCurrentEvidenceValidation: true as const })),
           selectedSource: chosen ? structuredClone(chosen.sources) : [],
+          ...(erasedSource ? { selectedSourceState: 'erased' as const } : {}),
           missing: current.state.missingFields.includes(code),
           reviewRequired: current.state.reviewRequired || !bindingCurrent || candidates.some(candidate => candidate.candidateId !== human?.candidateId),
         };
@@ -324,6 +341,7 @@ export class InspectionDraftService {
         status: current.status, inspectionId: current.inspectionId,
         binding: bindingCurrent ? 'current' as const : 'changed' as const,
         fields, evidence: structuredClone(current.state.evidence),
+        ...(current.bodyRetention ? { bodyRetention: structuredClone(current.bodyRetention) } : {}),
         reviewRequired: current.state.reviewRequired || !bindingCurrent,
         next: current.status === 'submitted' ? 'read_original_inspection' as const
           : current.status === 'submission_unknown' ? 'reconcile_original_submission' as const
@@ -412,7 +430,7 @@ export class InspectionDraftService {
     if (!['draft_saved', 'prepared'].includes(row.status) || row.expiresAt.getTime() <= Date.now()) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
   }
 
-  private state(value: unknown): AiInspectionDraftState {
+  private state(value: unknown): AiInspectionDraftState & { bodyErasure?: InspectionDraftBodyErasure } {
     const state = parseInspectionInput(stateSchema, value);
     return { ...state, candidates: snapshotInspectionCandidates(state.candidates) };
   }

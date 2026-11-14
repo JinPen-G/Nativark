@@ -3,7 +3,7 @@
  * remain mandatory. Unknown object deletion can only be observed, never resent. */
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafTime as time, leafList as list, leafRef as ref, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
-export const AI_RETENTION_KINDS_DRAFT = ['task', 'request', 'knowledge', 'memory', 'material', 'attachment'] as const;
+export const AI_RETENTION_KINDS_DRAFT = ['task', 'request', 'knowledge', 'memory', 'material', 'attachment', 'inspection_draft'] as const;
 export type AiRetentionKindDraft = typeof AI_RETENTION_KINDS_DRAFT[number];
 export interface AiRetentionCleanupDraft { kind: AiRetentionKindDraft; limit?: number; after?: string }
 export interface AiRetentionReceiptReadDraft { id: string }
@@ -27,6 +27,19 @@ export interface AiRetentionCleanupResponseDraft { policyVersion: string; scanne
 export interface AiRetentionReceiptListResponseDraft { rows: AiRetentionReceiptDraft[]; coverage: 'bounded_page'; retryable: false }
 export interface AiRetentionHttpRequestsDraft { cleanup: AiRetentionCleanupDraft; receipt: AiRetentionReceiptReadDraft; receipts: AiRetentionReceiptListDraft }
 export interface AiRetentionHttpResponsesDraft { cleanup: AiRetentionCleanupResponseDraft; receipt: AiRetentionReceiptDraft; receipts: AiRetentionReceiptListResponseDraft }
+export const AI_PLATFORM_RETENTION_HTTP = Object.freeze({ basePath: 'ai-native/platform-privacy',
+  cleanup: 'cleanup', receipt: 'receipt', receipts: 'receipts' } as const);
+export interface AiPlatformRetentionCleanupDraft extends Omit<AiRetentionCleanupDraft, 'kind'> { kind: 'task' | 'request' }
+export interface AiPlatformRetentionReceiptDraft extends Omit<AiRetentionReceiptDraft, 'tenantId' | 'workspaceId' | 'kind'> {
+  scopeKind: 'PLATFORM'; scopeId: string; tenantId: null; workspaceId: null; kind: 'task' | 'request';
+}
+export interface AiPlatformRetentionReceiptListResponseDraft { rows: AiPlatformRetentionReceiptDraft[];
+  coverage: 'bounded_page'; retryable: false }
+export const AI_PLATFORM_RETENTION_HTTP_CONTRACTS = Object.freeze({
+  cleanup: { request: 'AiPlatformRetentionCleanupDraft', response: 'AiRetentionCleanupResponseDraft', write: true },
+  receipt: { request: 'AiRetentionReceiptReadDraft', response: 'AiPlatformRetentionReceiptDraft', write: false },
+  receipts: { request: 'AiRetentionReceiptListDraft', response: 'AiPlatformRetentionReceiptListResponseDraft', write: false },
+} as const);
 export const AI_RETENTION_HTTP_CONTRACTS = Object.freeze({
   cleanup: { request: 'AiRetentionCleanupDraft', response: 'AiRetentionCleanupResponseDraft', write: true },
   receipt: { request: 'AiRetentionReceiptReadDraft', response: 'AiRetentionReceiptDraft', write: false },
@@ -55,4 +68,9 @@ export const AI_RETENTION_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
     results: list(ref('AiRetentionCleanupResultDraft'), 10), nextAfter: { oneOf: [id(), nil] }, coverage: choice('bounded_candidate_page'),
     businessRecords: choice('preserved'), backupErasure: choice('not_attested') }),
   AiRetentionReceiptListResponseDraft: object({ rows: list(ref('AiRetentionReceiptDraft'), 50), coverage: choice('bounded_page'), retryable: no }),
+  AiPlatformRetentionCleanupDraft: object({ kind: choice('task', 'request'), limit: integer(1, 10), after: id() }, ['kind']),
+  AiPlatformRetentionReceiptDraft: object({ id: hash, scopeKind: choice('PLATFORM'), scopeId: { ...id(), maxLength: 36 }, tenantId: nil, workspaceId: nil,
+    kind: choice('task', 'request'), resourceId: id(), policyVersion: id(), targetHash: hash, state: choice('erased'),
+    revision: integer(1, 4294967294), createdAt: time, erasedAt: time }),
+  AiPlatformRetentionReceiptListResponseDraft: object({ rows: list(ref('AiPlatformRetentionReceiptDraft'), 50), coverage: choice('bounded_page'), retryable: no }),
 };

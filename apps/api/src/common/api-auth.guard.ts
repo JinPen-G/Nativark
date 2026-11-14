@@ -43,7 +43,7 @@ import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
 import { resolveUserBusinessLocationScope } from "./business-location-scope";
-import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
+import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, platformRetentionPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
 
 const countingRouteAccess = new Map<string, typeof AI_COUNTING_HTTP_OPERATIONS[number][3]>(AI_COUNTING_HTTP_OPERATIONS.map(([action, _request, _response, access]) =>
   [`${AI_COUNTING_HTTP_DRAFT.method} /${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`, access] as const));
@@ -391,6 +391,8 @@ export function requiredPermissions(method: string, path: string) {
   }
   const aiProviderPermission = platformAiProviderPermission(method, path);
   if (aiProviderPermission) return [aiProviderPermission];
+  const retentionPermission = platformRetentionPermission(method, path);
+  if (retentionPermission) return [retentionPermission];
   if (path === "/platform/rental-categories" || path.startsWith("/platform/rental-categories/")) {
     if (path.startsWith("/platform/rental-categories/creation-requests/")) return ["system:rental-category:edit"];
     if (path.endsWith("/audits")) return ["system:rental-category:audit"];
@@ -1185,6 +1187,11 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
     const platformProbePermission = platformCapabilityProbePermission(request.method, path);
+    const platformPrivacyPermission = platformRetentionPermission(request.method, path);
+    if ((path === '/ai-native/platform-privacy' || path.startsWith('/ai-native/platform-privacy/'))
+      && (!platformPrivacyPermission || !user.isSaasAdmin)) {
+      throw new ForbiddenException('平台AI正文维护仅向当前获权SaaS管理员开放已登记操作');
+    }
     if (registeredCategoryDraftPermission(request.method, path) && !user.isSaasAdmin) {
       throw new ForbiddenException('AI 品类草稿仅向当前获权的 SaaS 平台管理员开放');
     }
@@ -1223,6 +1230,7 @@ export class ApiAuthGuard implements CanActivate {
       !isPlatformAiProviderPath(path) &&
       !isBudgetPlatformRoute(request.method, path) &&
       !platformProbePermission &&
+      !platformPrivacyPermission &&
       !registeredCategoryDraftPermission(request.method, path) &&
       path !== "/platform/demo-requests"
     ) {

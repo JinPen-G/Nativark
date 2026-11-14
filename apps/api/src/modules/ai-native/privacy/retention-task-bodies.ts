@@ -17,19 +17,30 @@ const terminal = ['SUCCEEDED', 'PARTIALLY_SUCCEEDED', 'FAILED', 'CANCELLED'] as 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 type Scope = { scopeId: string; owner: { tenantId: string; workspaceId: string } };
-type TaskBodies = Scope & { taskId: string; now: Date; check(): Promise<void> };
+type TaskBodies = { scopeId: string; owner: { tenantId: string | null; workspaceId: string | null };
+  taskId: string; now: Date; check(): Promise<void>; platformReceipt?: {
+    id: string;
+    read(): Promise<{ id: string; tenantId: null; workspaceId: null; kind: 'task'; resourceId: string;
+      targetHash: string; policyVersion: string; state: 'erased' } | null>;
+    record(targetHash: string): Promise<void>;
+  } };
 
 async function eraseTaskBodies(tx: Prisma.TransactionClient, input: TaskBodies,
   ordinaryExpiry: boolean, expectedHash?: string) {
   const { scopeId, owner, taskId, now, check } = input;
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw unavailable();
   const task = await tx.aiTask.findFirst({ where: { id: taskId, scopeId } });
+  const platform = owner.tenantId === null && owner.workspaceId === null;
   if (!task || !terminal.includes(task.status as typeof terminal[number])
-    || !(task.createdAt instanceof Date) || !Number.isFinite(task.createdAt.getTime())) throw unavailable();
+    || !(task.createdAt instanceof Date) || !Number.isFinite(task.createdAt.getTime())
+    || platform !== Boolean(input.platformReceipt)
+    || platform && (task.scopeKind !== 'PLATFORM' || task.ownerKind !== 'SAAS_ADMIN' || task.audience !== 'OPERATOR')
+    || !platform && (owner.tenantId === null || owner.workspaceId === null)) throw unavailable();
   if (await aiTaskHasUnresolvedEffects(tx, scopeId, taskId, owner)) throw unavailable();
-  const key = fingerprint([AI_RETENTION_POLICY.version, owner.tenantId, owner.workspaceId, 'task', taskId]);
+  const key = input.platformReceipt?.id ?? fingerprint([AI_RETENTION_POLICY.version, owner.tenantId, owner.workspaceId, 'task', taskId]);
   const targetHash = fingerprint(['task', task.id, task.inputRef, task.inputHash, task.createdAt.toISOString()]);
-  const receipt = await tx.aiDataErasure.findUnique({ where: { id: key } });
+  const workspaceReceipt = input.platformReceipt ? null : await tx.aiDataErasure.findUnique({ where: { id: key } });
+  const receipt = input.platformReceipt ? await input.platformReceipt.read() : workspaceReceipt;
   if (expectedHash && expectedHash !== targetHash || receipt && (receipt.id !== key
     || receipt.tenantId !== owner.tenantId || receipt.workspaceId !== owner.workspaceId
     || receipt.kind !== 'task' || receipt.resourceId !== task.id || receipt.targetHash !== targetHash
@@ -93,16 +104,19 @@ async function eraseTaskBodies(tx: Prisma.TransactionClient, input: TaskBodies,
       if (changedEvent.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     }
   }
-  if (task.inputRef && !await tx.aiTask.findFirst({ where: { scopeId, inputRef: task.inputRef,
+  if (!platform && task.inputRef && !await tx.aiTask.findFirst({ where: { scopeId, inputRef: task.inputRef,
     id: { not: taskId }, archivedAt: null }, select: { id: true } })) {
     await tx.aiTaskOriginalRequest.updateMany({ where: { id: task.inputRef, scopeId },
       data: { payload: mark, erasedAt: now } });
   }
   await check();
-  if (!receipt) await tx.aiDataErasure.create({ data: { id: key, ...owner, kind: 'task', resourceId: taskId,
+  const businessOwner = { tenantId: owner.tenantId!, workspaceId: owner.workspaceId! };
+  if (input.platformReceipt) await input.platformReceipt.record(targetHash);
+  else if (!receipt) await tx.aiDataErasure.create({ data: { id: key, ...businessOwner, kind: 'task', resourceId: taskId,
     targetHash, policyVersion: AI_RETENTION_POLICY.version, state: 'erased', erasedAt: now } });
   else {
-    const changed = await tx.aiDataErasure.updateMany({ where: { id: key, ...owner, revision: receipt.revision },
+    if (!workspaceReceipt) throw unavailable();
+    const changed = await tx.aiDataErasure.updateMany({ where: { id: key, ...businessOwner, revision: workspaceReceipt.revision },
       data: { state: 'erased', erasedAt: now, revision: { increment: 1 } } });
     if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
   }
@@ -114,6 +128,23 @@ async function eraseTaskBodies(tx: Prisma.TransactionClient, input: TaskBodies,
  * supplies this entry. A receipt ID alone does not bypass its expiry checks. */
 export function eraseExpiredTaskBodies(tx: Prisma.TransactionClient, input: TaskBodies, expectedHash?: string) {
   return eraseTaskBodies(tx, input, true, expectedHash);
+}
+
+/** The source owner has already proved a settled original association inside
+ * the canonical scope lock. Used for due source copies, never arbitrary Task
+ * discovery or bypassing the original unresolved-effect check. */
+export function eraseWorkspaceSourceTaskBodies(tx: Prisma.TransactionClient,
+  input: Scope & { taskId: string; now: Date; check(): Promise<void> }) {
+  return eraseTaskBodies(tx, input, false);
+}
+
+/** The platform maintenance owner supplies its original journal receipt and
+ * canonical PLATFORM lock. No fabricated workspace ledger or tenant authority
+ * is used; source deletion can erase settled copies before their own expiry. */
+export function erasePlatformTaskBodies(tx: Prisma.TransactionClient,
+  input: TaskBodies & { owner: { tenantId: null; workspaceId: null };
+    platformReceipt: NonNullable<TaskBodies['platformReceipt']> }, expectedHash?: string, sourceDeletion = false) {
+  return eraseTaskBodies(tx, input, !sourceDeletion, expectedHash);
 }
 
 /** Caller has already authorized this original source mutation and holds the

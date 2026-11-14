@@ -34,6 +34,7 @@ import { inspectionTargetSchema, inspectionId } from './inspection-assist.valida
 import { composeTaskModelHost, type TaskModelHostDependencies } from '../runner/model-task-host.composition';
 import { composePersistedTaskCallGateway, type PersistedTaskCallGatewayDependencies } from '../task-model-gateway.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED, StaffInspectionAssistController } from './staff-inspection-assist.controller';
+import { createInspectionDraftBodyRetentionReader } from '../privacy/retention-inspection-draft';
 
 /** Server composition only: material comes from the original authorized frozen
  * inspection input, never a request-provided prompt/hash or an SDK result. */
@@ -76,7 +77,8 @@ type Dependencies = Omit<TemplateDependencies, 'core'> & {
   recognitionBasis?: (credentials: ConstructorParameters<typeof InspectionTemplateService>[0]['credentials']) => InspectionRecognitionBasisPorts;
   storage?: Pick<FileStorageRuntimeService, 'readInspectionBytes'>;
   originalInspection?: { controller: Pick<RentalCoreController, 'createInspection'>; receipts: Pick<RentalIdempotencyRepository, 'find'> };
-  db?: Pick<PrismaClient, '$transaction' | 'aiInspectionDraft' | 'aiInspectionOperation' | 'aiInspectionEvidenceBinding' | 'fileAsset'>;
+  db?: Pick<PrismaClient, '$transaction' | 'aiInspectionDraft' | 'aiInspectionOperation' | 'aiInspectionEvidenceBinding' | 'fileAsset'>
+    & Partial<Pick<PrismaClient, 'aiDataErasure'>>;
 };
 
 /** Server-side request binding only. Neither this factory nor the credentials
@@ -254,7 +256,9 @@ export function composeInspectionAssist(dependencies: Dependencies) {
     dependencies.recognitionBasis?.(dependencies.credentials) ?? createInspectionRecognitionCoreSource(dependencies));
   const candidates = new InspectionCandidateService(templates, evidence ?? dependencies.evidence, basis);
   const repository = dependencies.db ? new PrismaInspectionDraftRepository(dependencies.db) : undefined;
-  const drafts = repository ? new InspectionDraftService(repository, authority, templates, manual, candidates, evidence) : undefined;
+  const bodyRetention = dependencies.db?.aiDataErasure
+    ? createInspectionDraftBodyRetentionReader({ aiDataErasure: dependencies.db.aiDataErasure }) : undefined;
+  const drafts = repository ? new InspectionDraftService(repository, authority, templates, manual, candidates, evidence, bodyRetention) : undefined;
   const original = dependencies.originalInspection ? new OriginalInspectionApplication(dependencies.guard, dependencies.credentials,
     dependencies.originalInspection.controller, dependencies.originalInspection.receipts) : undefined;
   const submission = repository && drafts && evidence ? new InspectionSubmissionService(repository, drafts, authority, templates, manual, evidence, dependencies.core, original) : undefined;

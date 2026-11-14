@@ -58,6 +58,11 @@ export async function readInspectionHumanHandoff(context: StaffInspectionTaskCon
       omitted.push(`${display(definition.label)}：请在原人工检查中填写`); continue;
     }
     if (human.decision === 'accepted') {
+      if (draft.bodyRetention?.state === 'erased' && draft.bodyRetention.candidateRefs.some(ref =>
+        ref.candidateId === human.candidateId && ref.fieldCode === definition.code)) {
+        omitted.push(`${display(definition.label)}：原AI来源已按留存政策删除，人工值仍保留，请在原检查表核对`);
+        continue;
+      }
       const candidates = draft.state.candidates.filter(candidate => candidate.candidateId === human.candidateId && candidate.fieldCode === definition.code);
       const reviews = draft.candidateReviews.filter(review => review.candidateId === human.candidateId);
       const candidate = candidates.length === 1 ? candidates[0] : undefined, review = reviews.length === 1 ? reviews[0] : undefined;

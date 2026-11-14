@@ -3,8 +3,48 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain24-platform-inspection-expiry-whole-closeout-20261115"></a>
+## AIN-24 平台与员工正文到期删除、恢复屏障及全文研发收口（2026-11-15）
+
+固定前置`99b939a07739430c3b07b2020b8cce900640cb59`。沿[七条独立核定](<#ain24-expiry-gaps-whole-review-20261115>)只补第4条两处实际缺口；此前原加密、敏感读审计、知识／memory传播、威胁模型、独立语言与确定性业务断言、六类展示攻击及两轨负例证据保持，不重复无变化绿色集合，不把模拟当真实浏览器／数据库或供应商测试。
+
+员工[原维护](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)新增`inspection_draft`，在原workspace管理授权、30天／草稿期限、scope／草稿锁及revision CAS下调用[删除叶](../../apps/api/src/modules/ai-native/privacy/retention-inspection-draft.ts)。仅用原recognitionInputs、原操作导出的inputId、保存收据及Task创建键推导最多50关联Task；不明关联、unknown或未结效果保持hold。同一原事务／codec删除普通候选、识别问题及已结清模型Task的输入／结果／回答／事件／计划副本；人工fields值／决定／candidateId、提交／检查／文件／账及原操作收据保留。revision1000按原上限作锁内正文CAS，不改公共上限。
+
+[草稿reader](../../apps/api/src/modules/ai-native/inspection-assist/inspection-draft.service.ts)两次核同草稿和真实删除收据，公共合同返回可选闭合`bodyRetention`及已删除来源；空候选不作为删除证明、不补签旧候选。原composition与员工人工表单消费同一事实，保留人工值并提示回原检查表核对，不能继续采用已消失的候选。正式员工runtime用原生成器在内存生成，只同步[受管源码](../../apps/staff-miniprogram/src/components/ai-native/inspection-wire-schemas.ts)：21原合同／9Task合同／55schema；除`bodyRetention`外仅同步两个原回答schema已批准的`customer_type_selection`，生成器未改，文件SHA-256 `cc6657ef4fe1c95cd1ccf2884f647f2b900162357593e9a3b62eb7749d3d00c4`。
+
+平台[独立服务](../../apps/api/src/modules/ai-native/privacy/platform-retention.service.ts)接`POST /ai-native/platform-privacy/cleanup|receipt|receipts`，请求只接受task／request及有界分页字段。标准provider、AppModule、Guard及OpenAPI同片登记；当前SaaS平台身份、manage清理／view原收据权限分开，不依赖模型执行开关或某个Profile，不启动定时器。原PLATFORM scope及业务tenant／workspace为null；OperationLog必需tenant FK只取当前SaaS账户真实归属，detail仍PLATFORM／null，不造工作空间、不新建迁移。
+
+原scope锁内按30天、原字段CAS清理请求和相关结清Task。[未决检查](../../apps/api/src/modules/ai-native/task-unresolved-effects.ts)核原Run终态／无lease、admission／Gateway／reservation关联、原usageHash及终态ledger数量／evidenceHash；错归属／错hash／unknown保持hold，不重定价、不核销账。host-only旧正文保护沿原SecretBox／codec、有界page及JSON CAS，保持原hash／时间／修订，已加密不重写，workspace-only模型拒绝。
+
+平台[独立Ed25519恢复许可](../../apps/api/src/modules/ai-native/privacy/platform-retention-restore.ts)使用固定服务端`AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH`，完整至多500项清单绑定原scope／PLATFORM／null／快照／期限；签名和恢复方法不暴露HTTP。原[惰性恢复helper](../../scripts/ops/ai-retention.cjs)同时要求所有workspace和真实平台scope的重放证书；少证书、错快照、过期或unknown均不放行。本轮未执行迁移、GRANT、数据库恢复、备份物理删除或真实运维。
+
+独立助手发现并复核关闭恢复P2：已标删除的员工草稿头与恢复的Task正文同在，但本地AiDataErasure缺失／旧状态时，旧分支在消费可信外部恢复许可前先读旧收据，导致受权恢复被阻断。现仅原`reapplyRestore`核签名及expectedHash的分支可重建：叶内核targetHash／marker key／revision、关联hold后同事务重删Task副本，按原key创建缺收据或revision＋state CAS推进，再重读同草稿并严格核收据。普通读／清理仍要求旧真实收据；unknown、撤权、CAS及收据写失败不出成功证书。独立最终复核仅静态读取，没有冒称运行行为组。
+
+Root另核原Nest DTO可能剥离未知字段，两个[原Controller](../../apps/api/src/modules/ai-native/privacy/retention.controller.ts)均以原`request.body`做闭合校验；DTO已去掉额外workspace字段也必须400、factory调用0，不授维护权。
+
+固定25源／模块README最小清单SHA-256 `c648bf7ca69470306c4dc54d101099a79412abb1051b0daf240698c2d822fdeb`；关键Git blob：平台服务`1db954b5830b8c2fa27c58b229310be48a33a1a3`、平台恢复`603a6e175446ceaf1c50e95daa46c9d33541b458`、员工删除最终`07772983fb3af37b6680248cedea5f0800a15184`、员工reader`d402e7019ba3932cd020f9e03b9ed04979962b3c`、Controller`f97d4aa9d4a91a18021b75551530f5074b58271d`、标准provider`36395f8eadc1befa0204bb38b71cbeef25dcc3dc`。dev1原交付及必要完整命令／输出固定JSON blob `c7220cade998e836b14c24f2334187482209de64`；作者删除叶`ea081639…`只作为恢复P2前像，不覆盖Root最终源码。并行Booking8源和ENTRY目录两叶不纳入此固定片。
+
+| 必要模拟／类型 | 固定stdin SHA-256及实际结果 |
+| --- | --- |
+| 标准平台provider／实际Guard／Controller／原codec／journal／恢复 | `e7fc0023b2f105e257ae11ea4ce4b0c79bc04cc4be2eb44166605eb13ae6af45`，退出0；4普通正文删除、2原journal、workspace删除行0；当前view／manage／撤会话拒绝和rollback、同键unknown只观察、原签名恢复屏障通过 |
+| 原平台财务关联／usageHash／终态ledger证据 | `2aada4fad9da677cb9f14fe65aec2a3af835620ff6ee823df6e58829c649d674`，退出0；合法原settlement可清理，错hash、未知和错tenant保持hold，账务不改 |
+| 平台旧正文保护／原JSON CAS | `89203da2cc3a8299d579a4f1ef9a5aebebf402d9f1cf9151e5ebfdf939e76d4f`，退出0；原hash／时间保持、同page不重加密、workspace-only模型拒绝 |
+| Root员工公共cleanup／receipt／原composition／native wire／原Verifier | `081b2b0c3d6791a6f006c425c35e3b09e120d3fe869c2175ad2f134665decea3`，退出0；人工值和业务收据保留、普通候选及Task副本清除、unknown无重派，模型／业务写入0 |
+| Root可信签名恢复缺失／旧本地收据 | `7245a82a79b68705e42f7ea6f1c8e9d942c1d3d325bcbedcf95beedc2b4d691f`，退出0；缺收据重建、旧prepared推进、关联Task副本重删；普通读／清理仍拒无收据、关联unknown hold、收据写失败全回滚 |
+| 两原Controller原始请求闭合校验 | `9810791b89fa6ba5a12cc3f2f727e89009d095fda060122acbb26437f961667a`，退出0；2 Controller／6操作，DTO剥字段后仍拒额外原字段，factory调用0 |
+| 最后恢复及Controller修改后API类型 | `8e405364a83d87024d02febcfa84e4443cf5ac276874d2e559a9b4ae824a0c6c`，TypeScript5.9.3，13根／2026源零诊断，退出0 |
+| 仅本片25源＋固定前置、排除并行Booking8源的API组合 | `5dda4a19c4e6e6e650e46311ae4888f83d5c5b134bd07f1b26453f6be2dd50f5`，退出0；TypeScript5.9.3，13根／2026源零诊断，不依赖助手活动WIP补齐类型 |
+| 员工正式shared声明／真实ES2019类型 | `cb4a2dccba2da51c15c44035fd83a60d52879a43014bf5264057efb7a9198217`，退出0；内存122正式声明，员工4根／212源零诊断，不拉shared源码更改本端target |
+| dev1原关联／错创建键／revision1000／恢复副本／CAS | `50ec2444d8282f86d0e22054865a6119dd290cb5ba657318b0797b0efd8dd3b1`，退出0；4根／1628源类型`066ea0ace0367e9073cb8b7ead7965bcb5a1a4087ab3c9d1dac7cfcda61ce0c3`退出0，完整原固定输出见交付blob |
+
+保留失败：dev1原顺序组退出1停在加密state下未触发的CAS注入，前六项已执行不能称整组绿，后仅修内存注入复验；Root错误事件reason `complete`被原validator拒绝后按原`completed`修驱动，生产未放宽；关联ledger表在fixture初始化后才添加致delegate缺失，改为初始原table；内存fixture不支持原JSON equals，仅shim映射真实equals语义；员工类型首次误拉ES2022 shared源码及遗漏原小程序typings而失败，改用正式shared声明内存构建后通过，工程target未改。
+
+原七条中1／2／3／5／6沿既有固定独立证据保持，第4条两处删除缺口及新恢复P2已修复复验，第7条全专项负例／修复证据归档满足；02依赖及G1～G4齐备，本片将AIN-24登记本轮研发100%。外部对象／供应商副本、混合业务备份淘汰、真实MySQL锁／浏览器／微信和生产隐私放行仍由负责人按原责任与实测清单操作，模拟不代表这些操作已执行。原慢读timeDebt／UNKNOWN历史不核销，治理文档既有四处缺链不伪造恢复；ENTRY隐私范围不随本项自动升档。
+
+所有命令`node --no-compilation-cache -`，沿原offline preload／不可达DATABASE_URL，audit／写根／TEMP指本树`output/.tmp/ain24-expiry-closeout-20261115`，运行与证据均纯内存；不新增或扩写测试文件，不安装／复制依赖或Client／dist。自有验证进程已退出，任务目录未创建，无新增临时残留。`git diff --check`对应本片源码／三册退出0；`node scripts/validate-docs.cjs`退出1，仍为导航历史3处及稀疏示例1处既有缺链，11/11文档，无新增链接／任务算术错误。关闭阶段立即中文提交／普通推送AI分支并回读GitHub，main由PM按固定成果串行集成。
 
 <a id="ain26-selected-task-center-recovery-20261115"></a>
 ## AIN-26 原选单建单运行的任务中心恢复与接管（2026-11-15）
@@ -2587,7 +2627,7 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 | AIN-21 客户安全场景 | 原客户身份／政策／Booking／任务／单账／独立历史原读，公开续接及Goal材料／人类回答来源／Core参数准备；`ff7bb06a`补本人保存地址双标准provider，[原五条核定](<#ain21-simulated-whole-closeout-20261114>)已完成 | 本轮模拟研发已收口，复用原匿名／本人／企业授权、Guard、费用与取消收据；历史读取不授重派，模型文本不批准预订。真实环境与生产开放另由负责人执行 |
 | AIN-22 客户两端入口 | 原公开续接／报价／本人订单与两端Goal共用场景合同，完整商品／单位／用量／身份投影到原Booking页面；[两端目标及收据恢复](<#ain22-goal-booking-original-consumers-20261114>)修旧cart自动报价、迟到写回、受理丢应答及成功Goal过期后明确新目标，五条与依赖已核齐 | 本轮模拟研发已收口；ENTRY跨端transfer等增量另核，支付成功仍只认原回调，真实浏览器／微信／数据库／供应商和生产开放由负责人执行 |
 | AIN-23 品类助手 | 原动态草稿合同／Core条件能力、平台Guard／审计及原Task／Gateway／PLATFORM calls预算已固定；[原两页消费者全文](#ain23-category-human-model-consumers-20261114)完成候选本地采用、人工保存／发布／资格／开通／空间采用及原key恢复，最后原影响报告确认已修复复验 | 原五条、07／10／16依赖及G1～G4已按模拟口径核闭，登记本轮研发100%；平台仅支持calls限额，真实供应商费用和原Core生产开放仍单列，由负责人实测／决定，不借本项重建内核或开放经营 |
-| AIN-24 安全/隐私 | 既有威胁/负例/审计、内容保留及删除收据/恢复屏障；本轮已从实际标准Controller/provider和会话/知识消费者补核G3，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全开放端/工具攻击、动态代码隔离、外部副本及真实保留删除传播与整项验收仍缺；本轮没有独立二次审查 |
+| AIN-24 安全/隐私 | 原正文加密／敏感访问审计／知识及memory传播、原威胁与两轨负例、独立语言和六类展示攻击固定证据齐备；[平台／员工到期删除与恢复](<#ain24-platform-inspection-expiry-whole-closeout-20261115>)补两个删除P2及受权恢复缺／旧收据P2，接标准provider／Guard／Controller／员工runtime | 原七条、02依赖及本轮G1～G4已核闭；必要模拟／类型和独立静态复核支持本轮研发100%。unknown不核销，人工／业务／账与原收据保留；真实DB锁／浏览器／微信／供应商副本／混合备份及生产隐私放行仍由负责人后续操作，模拟不冒称真实完成 |
 | AIN-25 性能/SLO | `40b29e8a`原Controller/标准provider/请求组合→TaskPerformanceReader已接；`0392aa01`消费原Gateway计时审计，时长/资源/单账有界观察；2026-10-28纠正漏记G3，75% | 首卡/工具完整采样、成功/接管率、获批SLO/容量/成本参数及真实环境、限流/背压/公平性/告警和降级演练仍为G4；不把观测装配当指标已达标；本次[原计数成本消费者核验](<#ain-three-tree-consolidation-20261109>)已覆盖原page/计数receipt/summary关闭重验；旧总数断言已在[合并后复核](<#ain-post-consolidation-review-20261109>)按原Step/Run计量分开校正；平台计数和BYOK直接用量按正式两轨验证，不称真实SLO通过。 |
 | AIN-26 组合验收 | 各片离线证据保留，未当作本项整体通过 | 冻结构建/迁移/政策/素材，另授权真库、四品类及多端实际组合验收 |
 | AIN-27 真实供应商/试点 | 当前不宣称真实供应商或生产试点验收 | 供应商/地区/凭据/额度及试点授权、两轨真实能力/用量、部署和回退 |

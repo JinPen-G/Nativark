@@ -4,20 +4,20 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天首次修改前本地／GitHub均核为3401e8be77693f85a1dc0e66778896708ceecb69，索引空、无merge／cherry-pick；main远端为62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。旧接续完整字节保存在上述AI固定前像的同路径，关闭阶段与历史前像从原[开发记录](<AI Native-开发记录.md>)导航，不另复制附件。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天首次核对已执行；本片固定前置及提交前GitHub均为99b939a07739430c3b07b2020b8cce900640cb59，索引空、无merge／cherry-pick；main远端为62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。旧接续完整字节保存在上述AI固定前像的同路径，关闭阶段与历史前像从原[开发记录](<AI Native-开发记录.md>)导航，不另复制附件。
 
-1. **AIN-24正文加密与到期删除。** [正文加密](<AI Native-开发记录.md#ain24-encrypted-original-bodies-native-tx-20261115>)已提交上传fe064f63fc96bd982b52847fef83b7cf7dfa4e2b，原codec／Native事务／知识与memory传播、敏感读审计及独立语言／展示攻击固定证据保持。[七条独立核定](<AI Native-开发记录.md#ain24-expiry-gaps-whole-review-20261115>)找到员工草稿普通AI副本和PLATFORM正文两处30天到期删除缺口，不能升整项100%。dev1补员工有界清理叶／原读取兼容，Root接原维护及平台SaaS独立范围，保留人工业务选择／检查提交／账／unknown／删除恢复证据。原加密最终10根／2023源零诊断；新删除片另做必要模拟及类型，不重复无变化绿色组，不新增测试文件。本地旧保护未真实运行，不宣称真实库／外部对象／供应商／备份已完成加密或删除。
+1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
-3. **AIN-26～28和ENTRY。** dev2的[固定四品类8例](<AI Native-开发记录.md#ain26-four-category-fixed-evidence-style-20261115>)已交回，Root核原证据与限制；同Core路径、正常批准／单次订单／丢ACK恢复和锁内缺货通过，只补对应矩阵切片，不替代全部并发／取消／接管／多端全文。15／24前置齐备后继续26，随后27／28原部署／灰度／停用／升级回退准备、独立复核和可操作交付；真实生产开放仍独立授权。全部18项ENTRY保持原范围，跨audience／surface、匿名／企业、媒体弱网及隐私等按原条款逐项核定，不因原28项完成而遗忘。
+3. **AIN-26～28和ENTRY。** dev2的[固定四品类8例](<AI Native-开发记录.md#ain26-four-category-fixed-evidence-style-20261115>)已交回，Root核原证据与限制；同Core路径、正常批准／单次订单／丢ACK恢复和锁内缺货通过，只补对应矩阵切片，不替代全部并发／取消／接管／多端全文。24已核闭，15企业正向依赖仍待原授权接点；26继续按原依赖计分，随后27／28原部署／灰度／停用／升级回退准备、独立复核和可操作交付。dev1实现ENTRY-01唯一场景metadata叶；dev2正在冻结ENTRY-13原Booking规范化来源与两端比较8源，Root读取固定交付后核正式合同／生产者／消费者及原四条。全部18项ENTRY保持原范围，不因原28项完成而遗忘，真实生产开放仍独立授权。
 
 ## 写入归属与协作
 
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
-| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider；AIN-24完整正文加密和原检索／SQL／删除／hold适配，AIN-15选单TaskCenter公共恢复reader／application／provider／shared。仅暂存已核成果。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 先固定ENTRY-01／13的场景metadata缺口、Booking规范化来源及后续比较、transport/runtime差异；两端运行时拒绝surface/channel错配，尚未证明该差异造成越权。已转AIN-24，独占新增privacy/retention-inspection-draft.ts及inspection-assist/inspection-draft.service.ts原读取兼容最小hunk；原维护／restore／shared／provider由Root接，不抢四册／索引，不新增测试文件。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 原选单公共恢复／接管正常与丢ACK组已固定交权，Root核8源及实际组合证据。已转ENTRY-13客户Booking规范化来源与后续session比较的具体阻塞，只读确认原client-original-booking-flow／client-booking-material及两端booking-handoff必要叶，待Root分窗口后实现；不重建Booking或改变Core默认／企业告知授权，不扩大取消全文盘点。 |
-| 内部/root/opening_core_closeout | 已完成固定fe064七条独立全文核定，两个到期清理P2交Root／dev1，原加密／Native／展示攻击结论保持。无活动产品／四册／索引写权；本次只读未运行测试或创建环境。 |
+| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider；提交AIN-24核闭片，独立核接ENTRY-13冻结成果，接ENTRY-01公共合同／实际provider。AIN-15企业告知与付款授权保持原依赖，不覆盖企业窗口。仅暂存已核成果。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 员工删除两源已固定交权，最终恢复P2由Root修复；当前仅独占scenes/entry-scene-catalog.ts及entry-scene-catalog.application.ts，完成ENTRY-01唯一metadata目录／可信当前availability。shared／路由／provider／四册仍Root，不造权限或新Runtime。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | ENTRY-13独占client-original-booking-flow、client-booking-material、client-request.application的Booking receipt，Web／客户小程序两个client-quote-session，以及shared ai-booking-draft／ai-booking-validation／ai-entry-management-draft-schemas共8源；Core6例与两端6场景已报告通过，最后固定blob／类型由Root读取核接。不得夹入AIN-24提交，不重建Booking／Core默认或企业告知授权。 |
+| 内部/root/opening_core_closeout | 已完成原七条、两个清理P2及最后受权恢复缺／旧收据P2静态复核，问题关闭；Root签名恢复行为组退出0。无活动产品／四册／索引写权，不重复绿色模拟。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
 | main／PM | main串行集成、真实数据库／迁移／Client／服务恢复的唯一负责人。每两项原任务新达100%形成main节点；AI不争main索引或夹其他专项WIP，助手不等待集成。 |
 
