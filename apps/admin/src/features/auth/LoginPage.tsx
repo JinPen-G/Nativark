@@ -168,7 +168,7 @@ export function LoginPage() {
     <div className="login-stage" ref={stageRef}>
       {/* A single page scroller carries the showcase and the unframed login form. */}
       <div className="login-frame">
-        <div className="login-appearance"><LanguageSwitcher /><AppearanceSwitcher iconOnly /></div>
+        <div className="login-appearance"><LanguageSwitcher iconOnly /><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
           {/* The showcase is illustrative; authentication remains in the original form. */}
           <div className="login-card">

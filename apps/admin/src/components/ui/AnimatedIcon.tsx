@@ -14,6 +14,9 @@ import { Layers } from "./animated-icons/layers";
 import { RefreshCw } from "./animated-icons/refresh-cw";
 import { Download } from "./animated-icons/download";
 import { Upload } from "./animated-icons/upload";
+import { Globe } from "./animated-icons/globe";
+import { Sun } from "./animated-icons/sun";
+import { Moon } from "./animated-icons/moon";
 import { LayoutDashboard } from "./animated-icons/hugeicons/layout-dashboard";
 import { ChartColumn as HugeChart } from "./animated-icons/hugeicons/chart-column";
 import { ClipboardList } from "./animated-icons/hugeicons/clipboard-list";
@@ -32,7 +35,7 @@ import { WorkspaceCamera, WorkspaceVehicle, WorkspaceCamping, WorkspaceConstruct
 const icons = { house: House, messages: MessageSquare, blocks: Blocks, chart: ChartColumn,
   file: FileText, tag: Tag, users: Users, settings: Settings,
   shield: ShieldCheck, wallet: Wallet, layers: Layers, refresh: RefreshCw,
-  download: Download, upload: Upload, dashboard: LayoutDashboard, report: HugeChart,
+  download: Download, upload: Upload, globe: Globe, sun: Sun, moon: Moon, dashboard: LayoutDashboard, report: HugeChart,
   orders: ClipboardList, pricing: CreditCard, inventory: Layers01, customers: HugeUsers,
   rules: Settings02, access: HugeShield, plugins: PlugZap, finance: HugeWallet,
   folder: FolderOpen, schedule: Clock01, ai: Sparkles,
@@ -54,6 +57,9 @@ export function AnimatedIcon({ name, busy = false, className, style, ...props }:
     const leave = () => setHovered(false);
     const focus = () => { if (!target.matches(":disabled, [aria-disabled=true]")) setFocused(true); };
     const blur = (event: FocusEvent) => { if (!target.contains(event.relatedTarget as Node | null)) setFocused(false); };
+    // A theme icon can mount while its original button is already hovered or focused.
+    setHovered(target.matches(":hover") && !target.matches(":disabled, [aria-disabled=true]"));
+    setFocused(target.matches(":focus-within") && !target.matches(":disabled, [aria-disabled=true]"));
     target.addEventListener("mouseenter", enter); target.addEventListener("mouseleave", leave);
     target.addEventListener("focusin", focus); target.addEventListener("focusout", blur);
     return () => { target.removeEventListener("mouseenter", enter); target.removeEventListener("mouseleave", leave);

@@ -2,7 +2,7 @@
   "repository": "https://github.com/imskyleen/animate-ui",
   "revision": "7fffde3e56e804bcf5e580e1c13ca5bd565ef588",
   "license": "LICENSE.md",
-  "adaptations": "Import paths only; cn uses the installed clsx utility as upstream expects, including conditional classes. V1 engine and V2 variants share one pinned revision. Host controls interaction and reduced motion.",
+  "adaptations": "Existing icons keep their import adapters and original pinned revision; cn uses the installed clsx utility as upstream expects, including conditional classes. Globe, Sun and Moon are unchanged public registry files, each pinned to its own recorded revision, using the installed Animate UI v2 core. Host controls full-button hover/focus, current interaction after a theme swap and shared reduced motion.",
   "files": [
     {
       "file": "runtime.tsx",
@@ -93,6 +93,33 @@
       "source": "apps/v2/registry/icons/upload/index.tsx",
       "upstreamSha256": "c22b63a90c60e424bb862167747f496b982385424cebd4a89952fe2f790821e2",
       "adaptedSha256": "fec8b5afe3f02d3b0f79a566674f8a543ac9e48e75bfac3f23a6434af62c43b3"
+    },
+    {
+      "file": "globe.tsx",
+      "source": "apps/v2/registry/icons/globe/index.tsx",
+      "revision": "22a9236ae107328f8564edb7e3299375da3247af",
+      "registry": "https://animate-ui.com/r/icons-lucide-globe.json",
+      "upstreamSha256": "43b664db061ec64b7f369a955f70b98779c73920ffdad53a7ce0555ae543140c",
+      "adaptedSha256": "43b664db061ec64b7f369a955f70b98779c73920ffdad53a7ce0555ae543140c",
+      "sourceScope": "Official public icon registry; copied unchanged, same installed Animate UI v2 core."
+    },
+    {
+      "file": "sun.tsx",
+      "source": "apps/v2/registry/icons/sun/index.tsx",
+      "revision": "22a9236ae107328f8564edb7e3299375da3247af",
+      "registry": "https://animate-ui.com/r/icons-lucide-sun.json",
+      "upstreamSha256": "3a9ea066bbb212c34f8a92ac7e2eb9bf488a5cc850e123c4066580cc909bd14a",
+      "adaptedSha256": "3a9ea066bbb212c34f8a92ac7e2eb9bf488a5cc850e123c4066580cc909bd14a",
+      "sourceScope": "Official public icon registry; copied unchanged, same installed Animate UI v2 core."
+    },
+    {
+      "file": "moon.tsx",
+      "source": "apps/v2/registry/icons/moon/index.tsx",
+      "revision": "22a9236ae107328f8564edb7e3299375da3247af",
+      "registry": "https://animate-ui.com/r/icons-lucide-moon.json",
+      "upstreamSha256": "e65404ce95d06ae144ee16ccb59a5913ce4a8b215eef523b5cab7552e3132fb0",
+      "adaptedSha256": "e65404ce95d06ae144ee16ccb59a5913ce4a8b215eef523b5cab7552e3132fb0",
+      "sourceScope": "Official public icon registry; copied unchanged, same installed Animate UI v2 core."
     }
   ]
 }
