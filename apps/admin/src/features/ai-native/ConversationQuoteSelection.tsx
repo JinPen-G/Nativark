@@ -1,7 +1,7 @@
 /** Human-selected original Core quotation. Separate original host start,
  * frozen approval and business-result reads retain their server boundaries. */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { AiConversationTurnObservationDraft } from '@rental-os/shared';
+import { validateAiQuoteSelectionHttpValue, type AiConversationTurnObservationDraft } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { aiQuoteSelectionsApi } from '@/api/aiQuoteSelections';
 import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
@@ -9,6 +9,7 @@ import { ConversationQuoteSelectionSession } from './conversation-quote-selectio
 import type { ConfirmedQuoteSource } from './conversation-quote-confirmation-session';
 import { TaskOrderMaterialDetails } from './TaskHumanApproval';
 import { QuoteReprepare } from './QuoteReprepare';
+import { OriginalOrderReceiptLink } from './OriginalOrderReceiptLink';
 import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
 import { formatTimestamp } from './formatters';
@@ -31,7 +32,7 @@ export function ConversationQuoteSelection({ identity, conversationId, turn, sou
   useEffect(() => { session.retract(); }, [session, JSON.stringify(source)]);
   useEffect(() => { const retract = () => session.retract(); document.addEventListener('visibilitychange', retract);
     return () => { document.removeEventListener('visibilitychange', retract); session.retract(); }; }, [session]);
-  const run = async (action: () => Promise<unknown>) => {
+  const run = async <T,>(action: () => Promise<T>): Promise<T> => {
     try { return await action(); } catch (error) {
       if ([401, 403].includes((error as { response?: { status?: number } }).response?.status ?? 0)) { session.retract(); onAccessDenied(); }
       throw error;
@@ -66,7 +67,22 @@ export function ConversationQuoteSelection({ identity, conversationId, turn, sou
       ? <Alert type="success" title={t('原 Core 订单已确认提交')}
           description={`${safeDisplayText(result.order.id, 191)} · ${safeDisplayText(result.order.status, 80)}`} />
       : <Alert type="warning" title={t('原订单结果待核对，未观察到不代表未创建；不会重新开单。')} />)}
-    {result?.status === 'committed' && <p className="muted">{t('订单收据不代表付款或履约已完成。')}</p>}
+    {result?.status === 'committed' && <>
+      <p className="muted">{t('订单收据不代表付款或履约已完成。')}</p>
+      <OriginalOrderReceiptLink key={`${owner}:${result.order.id}`} orderId={result.order.id} identity={identity}
+        current={active} onAccessDenied={onAccessDenied} readOriginal={async signal => {
+          if (!receipt || signal.aborted || !active()) return null;
+          const selection = { draftVersion: receipt.draftVersion, originalInputRef: receipt.originalInputRef,
+            selectionId: receipt.selectionId, taskId: receipt.taskId, runId: receipt.runId, inputHash: receipt.inputHash };
+          // Read without clearing the displayed result: clearing it would
+          // unmount this navigation request before the same receipt returns.
+          const original = await run(() => aiQuoteSelectionsApi.result({ selection }, signal));
+          if (!validateAiQuoteSelectionHttpValue('AiSelectedQuoteTaskResultDraft', original)
+            || original.status === 'committed' && (original.order.quoteId !== receipt.quoteId
+              || original.source.resourceId !== original.order.id)) throw Error('AI_RESULT_UNKNOWN');
+          return !signal.aborted && active() && original.status === 'committed' ? original.order.id : null;
+        }} />
+    </>}
     {state.feedback === 'unknown' && <Alert type="warning" title={t('原选单或执行应答待核对。保留原定位，只读取原收据，不换键重发。')} />}
   </section>;
 }

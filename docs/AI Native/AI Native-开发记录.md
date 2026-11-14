@@ -6,6 +6,28 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-original-order-link-consumers-20261114"></a>
+## AIN-15 身份选择与原订单办理消费者（2026-11-14）
+
+前置 `58ce709382f5c604cfc73d022f29336e8345d481` 已普通推送并回读GitHub。本阶段收 dev1 四份固定消费者，Root逐blob核同、独立助手只读源码复核及Root必要模拟／类型通过；不夹 AIN-25 故障观测及未知员工样式。原报价日期／地点重答及同名地点误撤回P2沿[前阶段](<AI Native-开发记录.md#ain15-date-location-original-confirmation-20261114>)复用，不重复施工。企业正向委托接点仍缺，AIN-15保持75%，本片不代表整项100%。
+
+[报价条件](../../apps/admin/src/features/ai-native/QuoteCandidateFields.tsx)补原使用人身份选择，企业员工仍是个人使用人；企业及个人付款必须分别明确选择。更换客户撤回关系／付款，更换企业撤回付款，不携带旧关系或默认签约／授信。页面明确显示原Core商户代客企业告知／付款403限制，原人工建单页保持同一授权约束；能打开页面不表示可以代使用人确认企业告知。
+
+[聊天选单](../../apps/admin/src/features/ai-native/ConversationQuoteSelection.tsx)及[任务原动作结果](../../apps/admin/src/features/ai-native/TaskHumanApproval.tsx)仅在独立原订单收据 `committed` 时消费[原订单链接](../../apps/admin/src/features/ai-native/OriginalOrderReceiptLink.tsx)。点击先重读同一原selection或Task／Run／Step业务收据，核原quote／resource及相同orderId，再进入已注册订单详情。链接读前后核当前身份、session epoch、原宿主和页面权限；隐藏／卸载中止，隐藏后旧观察不自动恢复，撤权／错误收据／unknown撤回。仅调用原读接口和路由，不调用模型、继续动作或新建订单。详情页原费用与资金、履约与待办入口可达，资金仍沿原独立权限及Core依据；建单／导航不代表付款／交付成功。
+
+| 固定消费者 | Git blob |
+| --- | --- |
+| QuoteCandidateFields.tsx | `373c242782e6399e15eb83a7c486983fa2c9b0fe` |
+| ConversationQuoteSelection.tsx | `122830aaccf3d8a7ee8c0ad826b310f8a5852a07` |
+| TaskHumanApproval.tsx | `de0b5ca110c1abc4b5cc2efc5b70ae58f63cc552` |
+| OriginalOrderReceiptLink.tsx | `a29041b2438699a04d37b0dcbfcd8486f29947ac` |
+
+作者必要模拟 `d0ec69fd9d9612453da7217f7466108253ff5f9294c4925c1a135f9ca3c370ac` 退出0，覆盖身份不默认企业／付款、换对象清理、原订单读回／导航、撤权／隐藏／缺收据及两消费者实际API（原quote结果读3次、Task业务读2次）。实际人类表单→原booking-options→Core授权组 `1726cdf34d4d3c24c69e9677c2b6828de8bd52eb7034e5a5dfcd1fe3162d7b0f` 退出0，原企业403保留，订单／占用0，撤权不再查询。实际原目标→报价→批准→Core订单→公开原收据→实际API→链接组 `010e016b739baa9718accbab89c94df4d99e00daacdfbb0eebf4eccbaad526c0` 退出0：模型2次、报价／订单／审批消费／幂等记录各1，链接增加原读取1次、业务副作用0。
+
+Root独立运行同一固定四源的有限React宿主 `3c600bb4d1def7388ff081ffd1b7d73ebcbc9cd2463ad474ab2fd8f4529be0ba` 退出0：原身份选择、受权路由、同收据及session撤回／隐藏／缺收据／无权限通过；未冒称重新运行作者完整Core组。Root类型 `a9a5c797d20c39820daf2141e820e32fee99f3fafcc997bcaa5b6503d109dccb` 退出0，TypeScript5.9.3、后台5根／1526源零诊断；首驱动漏原vite-env.d.ts导致CSS声明诊断，补原声明后通过，没有改tsconfig、源码或压低检查。作者四根类型 `56e29c072c6190229c8fe87bb66fb691643d30c94c3980820f35a2c62a4fce58` 退出0／1535源，范围和虚拟声明方案不同，源数不等同覆盖率。
+
+独立助手核固定四源的原回调、授权／身份、错误／unknown、隐藏、原导航与资金权限，未发现本片新增P2；其证据为静态独立复核，不冒称独立行为重跑或真实浏览器／支付验收。Root及作者模拟为 `node --no-compilation-cache -`、原offline preload、不可达DATABASE_URL，audit0，无新增／扩写测试脚本，验证进程退出、任务临时目录未创建。`git diff --check`退出0；docs检查仍原四处缺链，不伪造附件。真实数据库／浏览器／供应商／支付由负责人后续实际操作。dev1已交回四源写权，继续AIN-24原hold、删除传播与业务收据保留核定。
+
 <a id="ain15-date-location-original-confirmation-20261114"></a>
 ## AIN-15 日期地点变更、原确认和企业授权边界（2026-11-14）
 
