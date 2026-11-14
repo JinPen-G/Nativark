@@ -29,6 +29,7 @@ import { AuthService } from '../auth/auth.service';
 import { ApiAuthGuard } from '../../common/api-auth.guard';
 import { getRequestIdentity } from '../../common/request-identity';
 import { SubscriptionService } from '../subscription/subscription.service';
+import { ClientDeliveryAddressService } from '../client/client-delivery-address.service';
 import { RentalCoreService } from '../rental-core/rental-core.service';
 import { WorkspaceCapabilityService } from '../rental-core/workspace-capability.service';
 import { RentalCoreController } from '../rental-core/rental-core.controller';
@@ -262,11 +263,11 @@ export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = setting
 export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_ENTRY, 'web'], [AI_WECHAT_ENTRY, 'wechat_miniprogram'],
 ] as const).map(([provide, channel]) => ({
-  provide, inject: [PrismaService, ApiAuthGuard, SubscriptionService, ClientApiService, SecretBox,
+  provide, inject: [PrismaService, ApiAuthGuard, SubscriptionService, ClientApiService, SecretBox, ClientDeliveryAddressService,
     { token: AI_NATIVE_CLIENT_MODEL_CONFIGURATION, optional: true }, { token: AI_NATIVE_CLIENT_MODEL_ADAPTERS, optional: true }],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, subscriptions: SubscriptionService, client: ClientApiService,
-    secrets: SecretBox, value?: unknown, adapters?: readonly ModelAdapter[]) =>
-    composeStandardClientBookingEntry({ db, guard, client,
+    secrets: SecretBox, addresses: ClientDeliveryAddressService, value?: unknown, adapters?: readonly ModelAdapter[]) =>
+    composeStandardClientBookingEntry({ db, guard, client, addresses,
       ...standardClientModelDependencies(db, secrets, value, adapters),
       tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
       quotePreparation: client, bookingSubmission: client }, channel),

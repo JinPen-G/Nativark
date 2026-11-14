@@ -6,6 +6,29 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain21-simulated-whole-closeout-20261114"></a>
+## AIN-21 保存地址正式装配与原五条模拟研发收口（2026-11-14）
+
+目标原后端 `378498aefc08a5735902411bdeea39700c0b9064`、原澄清／人类回答来源 `16fa0f029854bb50b0032447aad09cf72eb095bb` 已推并回读GitHub一致。独立助手按原AIN-21五条／G1～G4复核找到唯一剩余装配P2：标准Web／微信入口没有传入AppModule已有的本人配送地址服务。用户明确选择保存地址后，原Core报价可以成功，但转Booking材料必被缺地址源拒绝；旧正向用例显式补addressPort，不能证明标准provider已齐。
+
+[原provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)现在注入 `ClientDeliveryAddressService` 并沿原factory传 `addresses`。两个provider的注入顺序／factory参数一致，继续由原ClientAuth／Guard核本人租户／空间／客户，再从原 `list/requireOwnAddress` 核地址修订／正文／手机号／服务区，原报价快照与等待后当前地址必须一致。没有新增地址业务、自动选地址或新订单授权。单源blob `b58daf08da13735415d9b750594f2fa89801fb4e`经Root与独立助手核同。
+
+Root必要 `node --no-compilation-cache -` 双标准provider实际调用→原ClientAuth／Guard／Core参数准备→原报价确认→保存地址Booking材料，stdin SHA `44590c44c11d2b56981bfabc6b353a3be0f5ab442f0f8bca095cd7c39deb5741`／退出0：Web和微信分别产生自己的原参数／报价引用，两次材料prepared，地址list累计24／49次，地址变更及撤权拒绝，订单0、模型0。不是跨渠道复用原稿，也未把保存地址缺源改为恒真。固定提交shared基线的类型 `cbd59be4c7b71fe557c12633e4cd87157dcda161669ab58984bbd99c89044ea8`／退出0，TypeScript5.9.3、7根／1998源零诊断；不夹在做的AIN-22共享会话／微信UI后继。
+
+失败保留：首次原Core夹具没有business.prisma地址源，Core正确拒绝；补原内存仓储后，微信夹具缺miniProgramChannel委托被拒绝，仅补null渠道能力。早期把Web原参数稿送微信，原binding拒绝AI_REVISION_CONFLICT；改为每渠道各自正式参数／报价／原引用后双端通过，不放宽隔离。以上都是驱动缺漏或不合法复用，未以重跑关闭unknown／权限问题。
+
+| 原AIN-21五条 | 最终实现／证据核定 |
+| --- | --- |
+| 公开选品／报价、本人订单解释与正式办理 | [Goal当前候选／明确Core准备](#ain21-goal-original-model-core-prepare-20261114)、[原人类后继](#ain21-goal-original-clarification-lineage-20261114)、本人订单Task／结果及原quote→Booking→原页accept／submit链齐备；保存地址标准装配由本片补齐。 |
+| 匿名公开、明确登录续接、限流及预算 | [公开续接](#ain21-public-continuity-http-20261114)标准provider／Controller／Guard／ClientAuth、原短签名归属／一次续接、当前发布、地址限流和原Gateway／单账齐备。 |
+| 内部资料、引用、事件与任务隔离 | 原客户投影、本人材料／Task／事件／下载拒绝边界；原客户与企业关系必须当前可用，未知ID、内部成本／库存／审批和后台工具不授权。 |
+| 原确认与正式页面承接、办理状态 | 原报价确认→Draft→明确选择／handoff→原页accept／submit→Core原收据，既有必要组合 `f235dcad… / f753c915…` 与[完整消费者记录](#ain-client-quote-consumers-20261111)及[原Booking HTTP阶段](#ain-client-original-quote-booking-http-20261111)可追溯；结果不推定支付或履约成功。 |
+| 枚举、跨客户／企业、越权、伪支付、迁移与身份变化负例 | 原客户/公开/Booking阶段及目标防伪／撤权证据齐备，补本片地址变化／撤权，未发现余下实现或生产装配缺口。 |
+
+独立助手核 `16fa0f029`＋本provider单源、原五条及04／06／07／08／09／10完整依赖，确认G1原合同／事实，G2原持久化／授权／场景实现，G3标准provider／Controller／Guard及正式办理装配，G4全文必要模拟／类型／修复复验／证据与独立技术核定均满足。AIN-21由75%更新100%；原28项研发门槛2350→2375／28，即83.9%→84.8%，本轮正式研发验收20／28（71.4%），ENTRY仍70.8%。AIN-21是此前17／18节点后的第一项新100%，下一第二项按固定成果交PM串行main，助手持续施工不等待。
+
+本阶段只固化provider和三册有据更新，AIN-22目标Web／微信消费者仍在继续，不能把本项100%转移给22或称两端实测完成。Root与独立助手均未读.env／启服务／连真实库／供应商；模拟原DB存储／渠道能力为明确fixture。自有进程退出、audit0、任务临时目录未创建，无新增测试脚本／依赖／client／dist副本。diff0，docs仍4处既有缺链／退出1，无新增算术错误；真实浏览器／微信／数据库／供应商与生产放行由负责人后续执行。
+
 <a id="ain21-goal-original-clarification-lineage-20261114"></a>
 ## AIN-21 原目标澄清指令与已消费回答来源（2026-11-14）
 
