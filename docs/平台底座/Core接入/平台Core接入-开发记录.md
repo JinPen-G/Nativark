@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-tickets-removal-data-20261115"></a>
+
+## 工单移除依赖读取与原宿主消费（2026-11-15）
+
+原账/物理观察阶段已普通推送并回读 `f877570796a4a586a30c825cb0f9c0fb0d289506`，main仍62ca。本片在独占工单MySQL/服务端贡献、原core-host工单适配及已有模块说明中接通实际移除阻碍，不修改公共窗口或原平台/Core业务规则。
+
+[readTicketsRemoval](../../../packages/example-tickets-core/src/mysql.ts)先复用真实3表结构检查，再以一条参数化SELECT EXISTS读取未关闭工单、保留工单和原操作收据的存在性，部署检查全Core，可选租户只限定观察。未关闭返回in_flight，历史/收据返回history；缺结构unknown，不完整存在性或驱动失败明确报错。没有明细数据输出、业务写入、关闭/取消/清表或停用操作，保留历史不阻止停用。
+
+[服务端贡献](../../../packages/example-tickets-core/src/server.ts)允许真实authority提供assessRemoval，缺少时仍保持原缺检查器拒绝。[原工单工厂](../../../apps/api/src/modules/core-host/original-tickets-host.ts)绑定本MySQL读取，组合时不查询或建立业务事务。[CoreRemovalService](../../../packages/core-host/src/removal.ts)继续汇合平台实际停新/完整依赖；空Core数据仍不能绕过平台未停新或依赖不完整，原历史存在时不可移除代码。
+
+`node --no-compilation-cache -`按真实tsconfig内存编译合同35根、宿主8根、工单11根，0诊断；从唯一工单迁移SQL解析3表/17列/2CHECK/复合键作为离线结构输入，实际SQL读取→服务端贡献→CoreRemovalService及原工厂消费验证退出0。空/未关闭/历史/收据、指定租户三处参数、非法租户读前拒绝、缺结构unknown、不完整结果拒绝、平台accepting和complete=false均通过。原工厂实际转译源码在只读依赖替身下提供检查，组合和检查没有业务事务；这不是全API类型或真实授权/DB证据。
+
+首次离线输入解析漏列COLLATE，命令退出1，修验证解析后复验退出0，产品规则和原断言未放宽。必要源码备注和工单/原适配说明同步；本片无新增测试脚本、临时目录、依赖、Client生成或后台进程。前片原8组合同行为证据沿f877固定版本复用，未扩大回归。七份文档599个本地链接/144个锚点、旧阶段正文及正式需求/任务保全核对退出0，差异格式检查退出0。阶段中文提交普通推送任务分支、回读远端；正式任务门槛不变，真实移除流程/原平台Source/主应用运行仍未验。
+
 <a id="core-mysql-data-observation-20261115"></a>
 
 ## 原Prisma迁移账、工单物理观察与部署准入（2026-11-15）

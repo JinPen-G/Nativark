@@ -4,8 +4,8 @@
  */
 import { createHash } from "node:crypto";
 import { empty, join, sqltag as sql, type Sql } from "@prisma/client/runtime/library";
-import type { CorePhysicalDataObservation } from "@rental-os/core-contracts";
-import { TicketError, TicketSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket } from "./contracts";
+import type { CorePhysicalDataObservation, CoreRemovalAssessment } from "@rental-os/core-contracts";
+import { TicketError, TicketIdSchema, TicketSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket } from "./contracts";
 import type { TicketAccess, TicketExecution, TicketExecutionRequest, TicketRepository, TicketStoredReceipt } from "./service";
 
 interface TicketRow {
@@ -239,4 +239,26 @@ export async function readTicketsPhysicalData(reader: Pick<TicketsSqlTransaction
     // MySQL元数据整型可能由Prisma返回bigint；摘要编码保留原整数而不经有损浮点转换。
     sha256: createHash("sha256").update(JSON.stringify({ tables, columns, indexes, checks, foreignKeys },
       (_key, value) => typeof value === "bigint" ? value.toString() : value)).digest("hex") };
+}
+
+/** 部署移除读取全Core，可选租户仅限定依赖观察；停用不要求历史排空，也不删除数据。 */
+export async function readTicketsRemoval(reader: Pick<TicketsSqlTransaction, "$queryRaw">,
+  tenantId?: string): Promise<CoreRemovalAssessment> {
+  const tenant = tenantId === undefined ? undefined : TicketIdSchema.parse(tenantId);
+  if (!await readTicketsPhysicalData(reader)) return { blockers: [{ kind: "unknown", code: "tickets_data_unavailable",
+    message: "工单实际数据结构未核定，不能证明业务和历史依赖已排空" }] };
+  const where = tenant === undefined ? empty : sql`WHERE tenant_id = ${tenant}`;
+  const scope = tenant === undefined ? empty : sql`AND tenant_id = ${tenant}`;
+  const rows = await reader.$queryRaw<Array<{ unfinished: number | bigint | boolean; history: number | bigint | boolean; receipts: number | bigint | boolean }>>(sql`
+    SELECT EXISTS(SELECT 1 FROM example_tickets WHERE state <> 'closed' ${scope}) AS unfinished,
+      EXISTS(SELECT 1 FROM example_tickets ${where}) AS history,
+      EXISTS(SELECT 1 FROM example_ticket_operations ${where}) AS receipts`);
+  const flag = (value: number | bigint | boolean) => value === true || value === 1 || value === 1n;
+  if (rows.length !== 1 || [rows[0].unfinished, rows[0].history, rows[0].receipts].some(value => ![true, false, 0, 1, 0n, 1n].includes(value)))
+    throw new Error("工单移除依赖读取未返回完整存在性证据");
+  const blockers: CoreRemovalAssessment["blockers"] = [];
+  if (flag(rows[0].unfinished)) blockers.push({ kind: "in_flight", code: "tickets_unfinished", message: "存在未关闭工单，须保留其原业务处理者" });
+  if (flag(rows[0].history)) blockers.push({ kind: "history", code: "tickets_history_retained", message: "存在历史工单，须保留受权历史读取实现" });
+  if (flag(rows[0].receipts)) blockers.push({ kind: "history", code: "tickets_receipts_retained", message: "存在工单原操作收据，须保留原结果核对实现" });
+  return { blockers };
 }

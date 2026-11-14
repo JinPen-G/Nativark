@@ -4,6 +4,8 @@ import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_VERSION } from "./c
 
 export interface TicketsScopeAuthority {
   resolveAuthorizedBinding(request: CoreScopeRequest): Promise<CoreBinding | undefined>;
+  /** 原业务数据所有者读取移除依赖；未提供时保持宿主的缺检查器拒绝。 */
+  assessRemoval?: CoreServerContribution["assessRemoval"];
 }
 
 export function createTicketsServer(authority: TicketsScopeAuthority): CoreServerContribution {
@@ -23,7 +25,7 @@ export function createTicketsServer(authority: TicketsScopeAuthority): CoreServe
       return binding.coreId === TICKETS_CORE_ID && !binding.container && binding.dataVersion === TICKETS_DATA_VERSION
         ? { status: "ready" }
         : { status: "unavailable", code: "tickets_data_version", message: "工单绑定或数据版本不符合当前实现" };
-    }
-    // 没有移除检查器时宿主继续阻止移除代码，保留历史工单/操作收据读取者。
+    },
+    ...(authority.assessRemoval ? { assessRemoval: authority.assessRemoval.bind(authority) } : {})
   };
 }

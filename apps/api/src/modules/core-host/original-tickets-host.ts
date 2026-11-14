@@ -6,7 +6,7 @@ import type { Prisma } from "@prisma/client";
 import type { CoreScopeRequest } from "@rental-os/core-contracts";
 import type { CoreDeploymentAvailability } from "@rental-os/core-host";
 import { TicketsService, TicketError, TICKETS_CORE_ID, TICKETS_DATA_VERSION, createTicketsServer } from "@rental-os/example-tickets-core";
-import { createMysqlTicketsExecution } from "@rental-os/example-tickets-core/mysql";
+import { createMysqlTicketsExecution, readTicketsRemoval } from "@rental-os/example-tickets-core/mysql";
 import type { SystemUserRow } from "@rental-os/shared";
 import type { OperationLogService } from "../../common/operation-log.service";
 import type { PlatformRepository } from "../platform/platform.repository";
@@ -75,5 +75,6 @@ export function composeOriginalTicketsHost(input: {
     await lease.revalidate();
     return binding;
   }, { isolationLevel: "ReadCommitted" });
-  return { service: new TicketsService(execution), principals, server: createTicketsServer({ resolveAuthorizedBinding }) };
+  return { service: new TicketsService(execution), principals, server: createTicketsServer({ resolveAuthorizedBinding,
+    assessRemoval: tenantId => readTicketsRemoval(input.database, tenantId) }) };
 }
