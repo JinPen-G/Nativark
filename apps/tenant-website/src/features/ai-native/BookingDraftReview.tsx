@@ -1,9 +1,25 @@
 /** Read-only original Draft details before the existing human choice. */
-import type { AiBookingDraft } from '@rental-os/shared';
-import { handoffLocalInput } from './booking-handoff';
+import type { AiBookingDraft, AiClientQuoteParameterReview } from '@rental-os/shared';
+import { handoffLocalInput, originalBookingUnitLabel } from './booking-handoff';
 import { projectBookingDraftReview, type BookingReviewField, type BookingReviewLabel } from './booking-draft-review';
 
 const wrap = { overflowWrap: 'anywhere' as const, minWidth: 0 };
+export function QuoteParameterReview(props: { review: AiClientQuoteParameterReview | null; english: boolean }) {
+  if (!props.review) return null;
+  const en = props.english;
+  return <section aria-label={en ? 'Review pricing units' : '核对计费单位'} style={wrap}>
+    <h4>{en ? 'Review pricing units' : '核对计费单位'}</h4>
+    <p>{en ? 'Review the pricing units, then confirm the parameters to obtain the original quote.'
+      : '请核对计费单位，然后确认参数取得原报价。'}</p>
+    <ul>{props.review.lines.map(line => <li key={line.lineIndex} style={wrap}>
+      {line.itemGroupId} · {line.quantity} · {originalBookingUnitLabel(line.pricingUnit, en)}
+      <small style={{ display: 'block' }}>{line.source === 'user_explicit'
+        ? (en ? 'Selected by you' : '用户明确选择')
+        : line.basis === 'pricing_group_default' ? (en ? 'Official pricing-group default' : '服务端正式定价组默认')
+          : (en ? 'Official business default' : '服务端正式经营默认')}</small>
+    </li>)}</ul>
+  </section>;
+}
 function ReviewField(props: { label: string; field: BookingReviewField; time?: boolean }) {
   const { label, field } = props;
   return <div style={wrap}><dt>{label}</dt><dd style={{ marginInlineStart: 0 }}>
@@ -33,6 +49,9 @@ export function BookingDraftReview(props: {
       <ReviewField label={text('取用／配送地点', 'Fulfillment location')} field={review.fulfillmentLocation} />
       <ReviewField label={text('归还地点', 'Return location')} field={review.returnLocation} />
     </dl>
+    <h4>{text('原报价计费单位', 'Original quote pricing units')}</h4>
+    <ul>{review.pricingLines.map(line => <li key={line.id} style={wrap}>{line.id} · {line.quantity} · {line.unit}
+      <small style={{ display: 'block' }}>{line.source}</small></li>)}</ul>
     {review.services.length > 0 && <><h4>{text('原预约服务', 'Original booking services')}</h4>
       <ol>{review.services.map(service => <li key={service.id} style={wrap}>
         <dl style={{ display: 'grid', gap: 'var(--s12)' }}>

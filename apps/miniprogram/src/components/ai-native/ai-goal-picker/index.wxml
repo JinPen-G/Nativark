@@ -54,6 +54,13 @@
     <view wx:if="{{view.selection.deliveryAddressId}}">本人地址引用：{{view.selection.deliveryAddressId}}</view>
     <view>预约身份：{{view.selection.bookingIdentity.bookingIdentity === 'personal' ? '个人' : view.selection.bookingIdentity.corporateCustomerId}}；{{view.selection.bookingIdentity.enterpriseContractAndPayer ? '企业付款' : '个人付款'}}</view>
   </view>
+  <view wx:if="{{parameterReview}}" class="body mt-16" aria-label="核对计费单位" style="overflow-wrap:anywhere;word-break:break-word;">
+    <view class="subtitle">核对计费单位</view>
+    <view class="mt-8">请核对计费单位，然后确认参数取得原报价。</view>
+    <view wx:for="{{parameterReview}}" wx:key="lineIndex" class="mt-8">{{item.itemGroupId}} · {{item.quantity}} · {{item.unitLabel}}
+      <view>{{item.sourceLabel}}</view>
+    </view>
+  </view>
   <button wx:if="{{view.canConfirmQuote}}" class="btn btn--primary btn--block mt-16" bindtap="onConfirmQuote" disabled="{{working}}">确认参数并取得原报价</button>
   <view wx:if="{{view.quote}}" class="goal-picker__field"><view>原应付</view><money-text amount="{{view.quote.payableAmount}}" currency="{{view.quote.currency}}"></money-text><view class="mt-8">押金</view><money-text amount="{{view.quote.depositAmount}}" currency="{{view.quote.currency}}"></money-text><view class="body mt-8">报价不代表订单、付款或资源已预占。</view></view>
   <button wx:if="{{view.canSelect && (!booking || booking.canPrepare || booking.canSave)}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerateDraft" disabled="{{working}}">使用原报价生成预约草稿</button>
@@ -68,6 +75,8 @@
     <view wx:if="{{bookingReview.end.original !== bookingReview.end.value}}">原时间：{{bookingReview.end.original}}</view>
     <view class="mt-8">取用／配送地点：{{bookingReview.fulfillmentLocation.value}} · {{bookingReview.fulfillmentLocation.source}}</view>
     <view class="mt-8">归还地点：{{bookingReview.returnLocation.value}} · {{bookingReview.returnLocation.source}}</view>
+    <view class="subtitle mt-16">原报价计费单位</view>
+    <view wx:for="{{bookingReview.pricingLines}}" wx:key="id" class="mt-8">{{item.id}} · {{item.quantity}} · {{item.unit}} · {{item.source}}</view>
     <view wx:for="{{bookingReview.services}}" wx:key="id" class="mt-16">
       <view>服务引用：{{item.name.value}} · {{item.name.source}}</view>
       <view class="mt-8">数量：{{item.quantity.value}} · {{item.quantity.source}}</view>

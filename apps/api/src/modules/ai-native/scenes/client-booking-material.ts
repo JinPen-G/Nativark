@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { aiBookingSelectionSchema, AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from '@rental-os/shared';
+import { aiBookingSelectionSchema, AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
 import type { AiBookingMaterial, AiBookingSelection, AiBookingServiceFieldSources, RentalDeliveryAddressSnapshot } from '@rental-os/shared';
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import type { composeAiClientScenes } from '../client-scene.composition';
@@ -216,12 +216,21 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   const completedAt = currentTime();
   if (Date.parse(quote.expiresAt) <= completedAt.getTime()) return stale('quote_expired_during_preparation');
   if (Date.parse(confirmed.startAt) <= completedAt.getTime()) return stale('rental_start_elapsed_during_preparation');
+  // Preserve old quote/material reads without borrowing today's unit. Missing
+  // historical units omit the additive projection; invalid recorded values fail.
+  const recordedUnits = quote.request.lines.map(line => z.enum(RENTAL_PRICING_UNIT_CODES).safeParse(line.pricingUnit));
+  if (quote.request.lines.some((line, index) => line.pricingUnit !== undefined && !recordedUnits[index].success))
+    return unavailable('original_quote_unit_invalid');
+  const unitLines = recordedUnits.every(result => result.success) ? quote.request.lines.map((line, index) => ({
+    itemGroupId: entryId.parse(line.itemGroupId), quantity: line.quantity,
+    pricingUnit: recordedUnits[index].data!, source: 'original_core_quote' as const })) : undefined;
   const quoteFacts = { quoteId: quote.id, quoteVersion: hashJson(quote), pricingPlanVersion: quote.pricingPlanVersion,
     ruleVersion: quote.ruleVersion, priceVersionId: quote.priceVersionId ?? null, calendarVersion: quote.calendarVersion ?? null,
     categoryVersionId: quote.categoryVersionId ?? null, currency: quote.currency!, payableAmount: amount.parse(quote.payableAmount),
     depositAmount: amount.parse(quote.depositAmount), preAuthAmount: amount.parse(quote.preAuthAmount),
     chargeLines: z.array(z.object({ type: entryId, amount: z.number().finite(), sourceId: entryId.nullable(), sourceVersion: z.string().min(1).max(191).regex(new RegExp(AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS.AiBookingSourceVersion.pattern)).nullable() }).strict()).max(100)
       .parse(quote.chargeLines.map(line => ({ type: line.type, amount: line.amount, sourceId: line.sourceId ?? null, sourceVersion: line.sourceVersion ?? null }))),
+    ...(unitLines ? { lines: unitLines } : {}),
     expiresAt: quote.expiresAt, createdAt: quote.createdAt };
   const result: AiBookingMaterial = { selection: confirmed, sources: {
     quoteId: 'user_explicit', timeZone: 'user_explicit', startAt: 'user_explicit', endAt: 'user_explicit',

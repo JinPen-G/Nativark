@@ -1,8 +1,17 @@
 <view class="quote-preparation">
   <view class="subtitle">预约草稿</view>
   <view class="mt-16">按所选条件生成报价和草稿，订单需在原预约页确认提交。</view>
-  <button wx:if="{{!booking.draft && !booking.handoff}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerate"
+  <button wx:if="{{!booking.draft && !booking.handoff && !canConfirm}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerate"
     loading="{{working}}" disabled="{{working || paused || !selection || readOnly || booking.readOnly}}">生成预约草稿</button>
+  <view wx:if="{{parameterReview}}" class="body mt-16" aria-label="核对计费单位" style="overflow-wrap:anywhere;word-break:break-word;">
+    <view class="subtitle">核对计费单位</view>
+    <view class="mt-8">请核对计费单位，然后确认参数取得原报价。</view>
+    <view wx:for="{{parameterReview}}" wx:key="lineIndex" class="mt-8">{{item.itemGroupId}} · {{item.quantity}} · {{item.unitLabel}}
+      <view>{{item.sourceLabel}}</view>
+    </view>
+  </view>
+  <button wx:if="{{canConfirm}}" class="btn btn--primary btn--block mt-16" bindtap="onConfirmParameters"
+    loading="{{working}}" disabled="{{working || paused}}">确认计费单位并生成草稿</button>
   <view wx:if="{{bookingReview}}" class="body mt-16" style="overflow-wrap:anywhere;word-break:break-word;" aria-label="核对原预约条件">
     <view class="subtitle">核对原预约条件</view>
     <view class="mt-8">请核对后再继续，标注“Core 补齐”的时间或地点来自原报价。</view>
@@ -13,6 +22,8 @@
     <view wx:if="{{bookingReview.end.original !== bookingReview.end.value}}">原时间：{{bookingReview.end.original}}</view>
     <view class="mt-8">取用／配送地点：{{bookingReview.fulfillmentLocation.value}} · {{bookingReview.fulfillmentLocation.source}}</view>
     <view class="mt-8">归还地点：{{bookingReview.returnLocation.value}} · {{bookingReview.returnLocation.source}}</view>
+    <view class="subtitle mt-16">原报价计费单位</view>
+    <view wx:for="{{bookingReview.pricingLines}}" wx:key="id" class="mt-8">{{item.id}} · {{item.quantity}} · {{item.unit}} · {{item.source}}</view>
     <view wx:for="{{bookingReview.services}}" wx:key="id" class="mt-16">
       <view>服务引用：{{item.name.value}} · {{item.name.source}}</view>
       <view class="mt-8">数量：{{item.quantity.value}} · {{item.quantity.source}}</view>
@@ -38,5 +49,5 @@
     <view class="kv mt-8"><view>预授权</view><view wx:if="{{quote.preAuthAmount !== null && quote.currency}}"><money-text amount="{{quote.preAuthAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
   </block>
   <view wx:if="{{error || status === 'unavailable' || booking.status === 'unavailable'}}" class="notice notice--warning mt-16">当前暂不可用，请保留已有引用并核对原结果。</view>
-  <button wx:if="{{status === 'unavailable' && !material}}" class="btn btn--block mt-16" bindtap="onOrdinary" disabled="{{working}}">继续普通预约</button>
+  <button wx:if="{{canOrdinary}}" class="btn btn--block mt-16" bindtap="onOrdinary" disabled="{{working}}">继续普通预约</button>
 </view>

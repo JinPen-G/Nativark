@@ -13,7 +13,7 @@ import { createClientGoalSession, clientGoalStorageKey, clientGoalTimeOptions, c
 import { createClientTaskCancellationApi } from './client-task-cancellation-api';
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
   type ClientTaskCancellationOrigin, type ClientTaskCancellationView } from './client-task-cancellation-session';
-import { BookingDraftReview } from './BookingDraftReview';
+import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
 
 const initial = (): ClientGoalView => ({ status: 'closed', hasLocator: false, task: null, question: null, receipt: null,
   projection: null, sources: null, selection: null, quote: null, canExtract: false, canRead: false, canSubmit: false,
@@ -324,6 +324,7 @@ export function ClientGoalPicker(props: {
         <dt>{en ? 'Booking identity' : '预约身份'}</dt><dd>{view.selection.bookingIdentity?.bookingIdentity === 'personal' ? (en ? 'Personal' : '个人')
           : `${selectedLabel('bookingIdentity', view.selection.bookingIdentity?.corporateCustomerId)} · ${view.selection.bookingIdentity?.enterpriseContractAndPayer ? (en ? 'Enterprise payment' : '企业付款') : (en ? 'Personal payment' : '个人付款')}`}</dd></dl>
     </>}
+    {view.status === 'prepared' && <QuoteParameterReview review={view.parameterReview ?? null} english={en} />}
     {view.canConfirmQuote && <><p>{en ? 'Parameters are prepared. Confirm separately to obtain the original quote.' : '参数已准备，请另行确认取得原报价。'}</p>
       <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void work(instance => instance.confirmQuote())}>{en ? 'Confirm parameters and get quote' : '确认参数并取得报价'}</button></>}
     {view.quote && <><h4>{en ? 'Original quote' : '原报价'}</h4><dl><dt>{en ? 'Payable' : '应付'}</dt><dd>{money(view.quote.payableAmount)}</dd>

@@ -2,7 +2,8 @@
  * the caller receives only explicitly selected inputs after reading the original
  * quote. Hidden, detached or changed customer hosts withdraw buffered results. */
 import type { AiClientGoalProjection, AiBookingSelection, ClientCreateQuoteRequest, ClientGoalBookingSource, ClientGoalView } from '@rental-os/shared';
-import { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions } from '../../../vendor/shared-ai-client';
+import { RENTAL_PRICING_UNIT_LABELS, createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput,
+  clientGoalTimeOptions } from '../../../vendor/shared-ai-client';
 import { createClientGoalApi } from '../../../api/ai-goals';
 import { clientQuoteApi } from '../../../api/ai-quotes';
 import { readBookingHandoff, readBookingHostCapabilities } from '../../../api/orders';
@@ -16,7 +17,7 @@ import { contextVersion, currentSession, sessionEvents } from '../../../core/ses
 import { writeRequiredStorage } from '../../../core/storage';
 import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { ROUTES, buildUrl, navigate } from '../../../core/ui';
-import { projectBookingDraftReview, type BookingDraftReview } from '../booking-draft-review';
+import { projectBookingDraftReview, projectQuoteParameterReview, type BookingDraftReview } from '../booking-draft-review';
 
 type Session = ReturnType<typeof createClientGoalSession>;
 type Choice = { id: string; label: string };
@@ -43,8 +44,7 @@ const readGoalStorage = (key: string): unknown => {
 const options = (projection: AiClientGoalProjection | null, field: string): Choice[] => projection?.choices.find(group => group.field === field)?.choices ?? [];
 const namedChoices = (values: Choice[]) => values.map(choice => ({ ...choice,
   label: values.some(other => other.id !== choice.id && other.label === choice.label) ? `${choice.label} (${choice.id})` : choice.label }));
-const unitName = (id: string) => ({ hour: '小时', shift: '班次', day_24h: '24小时', calendar_day: '自然日', night: '晚',
-  week: '周', month: '月', usage: '使用量', package: '套餐' } as Record<string, string>)[id] ?? id;
+const unitName = (id: string) => (RENTAL_PRICING_UNIT_LABELS as Record<string, string>)[id] ?? id;
 const modeName = (id: string) => ({ store_pickup_return: '门店自取', partner_pickup_return: '合作点自取', warehouse_pickup_return: '仓库自取',
   locker_pickup_return: '柜机自取', delivery: '配送', onsite_delivery: '送达现场', carrier_shipping: '承运寄送' } as Record<string, string>)[id] ?? id;
 
@@ -53,7 +53,7 @@ Component({
   properties: { serviceCode: { type: String, value: '' } },
   data: { view: blank(), form: form(), goal: '', answer: '', working: false, loggedIn: false, message: '', projectionHash: '', questionId: '',
     booking: null as ClientQuoteBookingView | null, bookingReview: null as BookingDraftReview | null,
-    cancellation: null as ClientTaskCancellationView | null,
+    cancellation: null as ClientTaskCancellationView | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>,
     answerMaxLength: 2048, canCancel: false, selectedRows: [] as { label: string; quantity: number; pricingUnit: string; usage: string }[],
     modes: [] as Choice[], locations: [] as Choice[], returns: [] as Choice[], identities: [] as Choice[], addresses: [] as Choice[],
     timeZone: '', startAt: '', endAt: '', delivery: false, policyNotice: '', canPersonalPay: false, canEnterprisePay: false },
@@ -69,7 +69,7 @@ Component({
       bookings.get(this)?.dispose(); bookings.delete(this); cancellationSessions.get(this)?.dispose(); cancellationSessions.delete(this);
       sources.delete(this); currentBindings.delete(this);
       this.setData({ view: blank(), form: form(), goal: '', answer: '', working: false, message: '', projectionHash: '', questionId: '',
-        booking: null, bookingReview: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
+        booking: null, bookingReview: null, parameterReview: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
         modes: [], locations: [], returns: [], identities: [], addresses: [], timeZone: '', startAt: '', endAt: '', delivery: false,
         policyNotice: '', canPersonalPay: false, canEnterprisePay: false });
     },
@@ -80,6 +80,7 @@ Component({
       const field = view.question?.contract.fields.length === 1 && view.question.contract.fields[0].kind === 'text'
         && view.question.contract.fields[0].fieldId === 'clarification_text' ? view.question.contract.fields[0] : null;
       this.setData({ view, ...(questionId !== this.data.questionId ? { answer: '' } : {}), questionId,
+        parameterReview: view.status === 'prepared' ? projectQuoteParameterReview(view.parameterReview ?? null) : null,
         answerMaxLength: field?.maxLength ?? 2048, canCancel: Boolean(sessions.get(this)?.cancellationOrigin()),
         selectedRows: view.selection?.lines.map((line, index) => ({ label: options(projection, `items.${index}.itemGroupId`).find(row => row.id === line.itemGroupId)?.label ?? line.itemGroupId ?? '未提供商品',
           quantity: line.quantity, pricingUnit: unitName(line.pricingUnit ?? ''), usage: line.usageQuantity === undefined ? '' : String(line.usageQuantity) })) ?? [],
@@ -122,7 +123,9 @@ Component({
       catch { if (epochs.get(this) === epoch) this.setData({ message: '当前步骤暂不可用，请保留原记录并核对结果。' }); }
       finally { if (epochs.get(this) === epoch) { busy.delete(this); this.setData({ working: false }); } }
     },
-    open() { return this.run(async owner => { if (owner.snapshot().hasLocator) await owner.refresh(); }); },
+    // Mount/show/session changes restore no AI host or history. The separate
+    // human controls open or read the current original session explicitly.
+    open() { if (shown.has(this)) this.setData({ loggedIn: Boolean(currentSession()?.accessToken) }); },
     onGoal(event: WechatMiniprogram.Input) { this.setData({ goal: String(event.detail.value ?? '').slice(0, 4096) }); },
     onAnswer(event: WechatMiniprogram.Input) { this.setData({ answer: String(event.detail.value ?? '').slice(0, this.data.answerMaxLength) }); },
     onExtract() { return this.run(owner => owner.extract(this.data.goal)); },

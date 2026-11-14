@@ -267,7 +267,17 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       await bound.assertCurrent(); return parsedCommand.data;
     }
     const entryBefore = parsedCommand.data.kind === 'booking_quote' ? await entryGrant(bound, row) : null;
-    const current = await readMaterial(bound, parsedCommand.data);
+    let current = await readMaterial(bound, parsedCommand.data);
+    if (parsedCommand.data.kind === 'booking_quote' && row.material && typeof row.material === 'object'
+      && 'quote' in row.material && row.material.quote && typeof row.material.quote === 'object'
+      && !('lines' in row.material.quote) && current && typeof current === 'object' && 'quote' in current
+      && current.quote && typeof current.quote === 'object' && 'lines' in current.quote) {
+      // Additive unit display must not rewrite a legacy frozen material/hash.
+      // The unchanged quoteVersion still binds all original Core pricing facts;
+      // only this newly exposed projection is omitted for old-shape comparison.
+      const { lines: _newUnitProjection, ...quote } = current.quote;
+      current = { ...current, quote };
+    }
     if (!historicalOrder && materialHash(parsedCommand.data, current) !== row.materialHash) return fail('AI_CLIENT_MATERIAL_STALE');
     if (entryBefore && (await entryGrant(bound, row)).policyFingerprint !== entryBefore.policyFingerprint) {
       throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');

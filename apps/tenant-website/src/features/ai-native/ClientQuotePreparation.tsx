@@ -6,7 +6,7 @@ import type { AiClientQuoteFacts, AiBookingSelection, AiBookingHandoff, ClientCr
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
 import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
   type ClientQuoteView, type ClientQuoteBookingView } from './client-quote-session';
-import { BookingDraftReview } from './BookingDraftReview';
+import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
 
 const initial: ClientQuoteView = { status: 'closed', canPrepare: false, canConfirm: false, canRead: false,
   pendingCore: false, matchesInput: true, material: null, quote: null };
@@ -17,8 +17,10 @@ export function ClientQuotePreparation(props: {
   onHandoff?: (handoff: AiBookingHandoff) => void;
 }) {
   const [record, setRecord] = useState({ scopeKey: props.scopeKey, quote: initial, booking: null as ClientQuoteBookingView | null });
-  const [working, setWorking] = useState(false), [error, setError] = useState(false);
+  const [working, setWorking] = useState(false), [error, setError] = useState(false), [canOrdinary, setCanOrdinary] = useState(false);
   const scope = useRef(props.scopeKey), selected = useRef(props.selection), callbacks = useRef(props), generation = useRef(0), busy = useRef(false);
+  const activeIntent = useRef(false);
+  const ordinaryReference = useRef<string | null>(null);
   scope.current = props.scopeKey; selected.current = props.selection; callbacks.current = props;
   const quoteRef = useRef<ReturnType<typeof createClientQuoteSession> | null>(null), bookingRef = useRef<ReturnType<typeof createClientQuoteBookingSession> | null>(null);
   const quoteOwner = useRef<{ key: string; current(): boolean } | null>(null);
@@ -26,11 +28,11 @@ export function ClientQuotePreparation(props: {
   const setQuote = (quote: ClientQuoteView) => setRecord(old => ({ scopeKey: props.scopeKey, quote, booking: old.scopeKey === props.scopeKey ? old.booking : null }));
   const setBooking = (booking: ClientQuoteBookingView | null) => setRecord(old => ({ scopeKey: props.scopeKey, quote: old.scopeKey === props.scopeKey ? old.quote : initial, booking }));
   useEffect(() => {
-    generation.current++; busy.current = false;
+    generation.current++; busy.current = false; activeIntent.current = false; ordinaryReference.current = null; setCanOrdinary(false);
     quoteRef.current?.dispose(); bookingRef.current?.dispose(); quoteRef.current = null; bookingRef.current = null; quoteOwner.current = null;
     setRecord({ scopeKey: props.scopeKey, quote: initial, booking: null }); setWorking(false); setError(false);
     const close = () => {
-      generation.current++; busy.current = false;
+      generation.current++; busy.current = false; activeIntent.current = false; ordinaryReference.current = null; setCanOrdinary(false);
       quoteRef.current?.dispose(); bookingRef.current?.dispose(); quoteRef.current = null; bookingRef.current = null; quoteOwner.current = null;
       setRecord({ scopeKey: props.scopeKey, quote: { ...initial, status: 'invalidated' }, booking: null }); setWorking(false);
     };
@@ -40,19 +42,39 @@ export function ClientQuotePreparation(props: {
     return () => { generation.current++; quoteRef.current?.dispose(); bookingRef.current?.dispose(); quoteRef.current = null; bookingRef.current = null;
       quoteOwner.current = null; unsubscribe(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', close); };
   }, [props.scopeKey]);
-  const ensureQuote = async () => {
+  const reportMode = (nextQuote?: ClientQuoteView, nextBooking?: ClientQuoteBookingView | null) => {
+    const owner = quoteOwner.current; if (!owner?.current()) return;
+    const quote = nextQuote ?? quoteRef.current?.snapshot(), booking = nextBooking ?? bookingRef.current?.snapshot();
+    const retained = localStorage.getItem(owner.key), retainedBooking = localStorage.getItem(`${owner.key}:booking`);
+    let pending = quote?.pendingCore === true;
+    // A retained unknown/confirmed reference is conservative until this SAME
+    // instance has observed it. Merely having a cache never selects AI mode.
+    if (retained) {
+      try { const phase = (JSON.parse(retained) as { phase?: unknown }).phase;
+        pending ||= phase === 'quote_observed' ? quote?.status !== 'quoted' || !quote.quote
+          : phase !== 'prepared' || quote?.status !== 'prepared'; }
+      catch { pending = true; }
+    }
+    if (retainedBooking) pending ||= !booking?.observed || booking.pendingCore !== false;
+    ordinaryReference.current = !pending ? JSON.stringify([owner.key, retained, retainedBooking]) : null;
+    setCanOrdinary(!pending);
+    callbacks.current.onMode(activeIntent.current, retained !== null, pending);
+  };
+  const ensureQuote = async (purpose: 'read' | 'write') => {
     if (scope.current !== props.scopeKey || document.hidden) return null;
-    if (quoteRef.current && quoteOwner.current?.current()) return quoteRef.current;
+    if (purpose === 'write') activeIntent.current = true;
+    if (quoteRef.current && quoteOwner.current?.current()) { reportMode(); return quoteRef.current; }
     const session = captureEnterpriseHostSession(); if (!session) throw Error('quote_session_unavailable');
     const epoch = generation.current, current = () => epoch === generation.current && scope.current === props.scopeKey && session.current() && !document.hidden;
     const context = { tenantCode: session.tenantCode, serviceCode: session.workspaceCode, customerId: session.customerId,
       surface: 'tenant_website' as const, current }, key = clientQuoteStorageKey(context);
-    callbacks.current.onMode(true, localStorage.getItem(key) !== null, false);
+    quoteOwner.current = { key, current };
+    reportMode();
     const instance = createClientQuoteSession({ context, api: { prepare: sessionApi.prepareClientQuote, readPreparation: sessionApi.readClientQuotePreparation,
       confirm: sessionApi.confirmClientQuote, readOriginal: sessionApi.readClientQuoteOriginal }, readHost: sessionApi.readBookingHostCapabilities,
       now: Date.now, newKey: () => `client-quote-${crypto.randomUUID()}`, selection: () => { if (!selected.current) throw Error('quote_selection_unavailable'); return selected.current; },
       storage: { read: () => { const value = localStorage.getItem(key); return value === null ? undefined : JSON.parse(value); }, write: value => localStorage.setItem(key, JSON.stringify(value)) },
-      changed: next => { if (current()) { setQuote(next); callbacks.current.onMode(true, localStorage.getItem(key) !== null, next.pendingCore); } } });
+      changed: next => { if (current()) { setQuote(next); reportMode(next); } } });
     quoteRef.current = instance; quoteOwner.current = { key, current }; await instance.open(); return current() ? instance : null;
   };
   const ensureBooking = async (purpose: 'read' | 'write') => {
@@ -73,7 +95,7 @@ export function ClientQuotePreparation(props: {
         issueBookingAction: sessionApi.issueBookingAction, createBookingDraft: sessionApi.createBookingDraft, readBookingDraft: sessionApi.readBookingDraft,
         chooseBookingDraft: sessionApi.chooseBookingDraft, handoffBookingDraft: sessionApi.handoffBookingDraft, readBookingOperation: sessionApi.readBookingOperation, readHandoff: sessionApi.readBookingHandoff },
       storage: { read: () => { const value = localStorage.getItem(key); return value === null ? undefined : JSON.parse(value); }, write: value => localStorage.setItem(key, JSON.stringify(value)) },
-      changed: next => { if (owner.current()) setBooking(next); } });
+      changed: next => { if (owner.current()) { setBooking(next); reportMode(undefined, next); } } });
     bookingRef.current = instance; await instance.open(); if (cached !== null) await instance.recover(); return instance;
   };
   const work = async (action: () => Promise<void>) => {
@@ -83,14 +105,20 @@ export function ClientQuotePreparation(props: {
     finally { if (epoch === generation.current) { busy.current = false; setWorking(false); } }
   };
   const generate = () => work(async () => {
-    const instance = await ensureQuote(); if (!instance) return;
+    const instance = await ensureQuote('write'); if (!instance) return;
     if (instance.originalInput()) await instance.recover(); else await instance.prepare();
-    if (instance.snapshot().canConfirm) await instance.confirm();
     const next = instance.snapshot(); if (next.status !== 'quoted' || !next.matchesInput || next.readOnly) return;
     const booking = await ensureBooking('write'); await booking?.generateDraft();
   });
+  const confirmParameters = () => work(async () => {
+    const instance = quoteRef.current; if (!instance?.snapshot().canConfirm || !quoteOwner.current?.current()) return;
+    activeIntent.current = true; reportMode();
+    await instance.confirm();
+    const next = instance.snapshot(); if (next.status !== 'quoted' || !next.matchesInput || next.readOnly) return;
+    await (await ensureBooking('write'))?.generateDraft();
+  });
   const recover = () => work(async () => {
-    const instance = await ensureQuote(); if (!instance) return;
+    const instance = await ensureQuote('read'); if (!instance) return;
     if (instance.snapshot().canRead) await instance.recover();
     await ensureBooking('read'); // No prepare, confirm, Action issue, draft write or successor here.
   });
@@ -100,9 +128,14 @@ export function ClientQuotePreparation(props: {
     if (result?.status === 'handoff_ready' && result.handoff && !result.readOnly && quoteOwner.current?.current()) callbacks.current.onHandoff?.(result.handoff);
   });
   const ordinary = () => {
-    const owner = quoteOwner.current; if (!owner?.current() || localStorage.getItem(owner.key) !== null || busy.current) return;
+    const owner = quoteOwner.current; if (!owner?.current() || !canOrdinary || busy.current) return;
+    if (ordinaryReference.current !== JSON.stringify([owner.key, localStorage.getItem(owner.key), localStorage.getItem(`${owner.key}:booking`)])) {
+      ordinaryReference.current = null; setCanOrdinary(false); return;
+    }
+    const retained = localStorage.getItem(owner.key) !== null;
+    activeIntent.current = false;
     quoteRef.current?.dispose(); bookingRef.current?.dispose(); quoteRef.current = null; bookingRef.current = null;
-    callbacks.current.onMode(false, false, false); setQuote(initial); setBooking(null);
+    callbacks.current.onMode(false, retained, false); setQuote(initial); setBooking(null); ordinaryReference.current = null; setCanOrdinary(false);
   };
   const en = props.english, quote = state.quote, booking = state.booking;
   const money = (amount: number | null) => amount === null || !quote.quote?.currency ? (en ? 'Unavailable' : '未加载') : `${amount} ${quote.quote.currency}`;
@@ -110,8 +143,11 @@ export function ClientQuotePreparation(props: {
   return <section aria-label={en ? 'Reservation draft' : '预约草稿'} aria-busy={working}>
     <h3>{en ? 'Reservation draft' : '预约草稿'}</h3>
     <p>{en ? 'Generate a quote and draft for your selection. Submit the order on the original booking page.' : '按所选条件生成报价和草稿，订单需在原预约页确认提交。'}</p>
-    {!booking?.draft && !booking?.handoff && <button type="button" className="button button-dark button-block" disabled={working || !props.selection || quote.readOnly === true || booking?.readOnly === true}
+    {!booking?.draft && !booking?.handoff && !quote.canConfirm && <button type="button" className="button button-dark button-block" disabled={working || !props.selection || quote.readOnly === true || booking?.readOnly === true}
       onClick={() => void generate()}>{working ? (en ? 'Processing…' : '正在处理…') : (en ? 'Generate reservation draft' : '生成预约草稿')}</button>}
+    {quote.status === 'prepared' && <QuoteParameterReview review={quote.material?.parameterReview ?? null} english={en} />}
+    {quote.canConfirm && <button type="button" className="button button-dark button-block" disabled={working}
+      onClick={() => void confirmParameters()}>{en ? 'Confirm pricing units and generate draft' : '确认计费单位并生成草稿'}</button>}
     <BookingDraftReview draft={booking?.draft ?? null} english={en} />
     {canContinue && quote.matchesInput && <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void proceed()}>
       {en ? 'Confirm draft and continue booking' : '确认草稿并继续预约'}</button>}
@@ -126,6 +162,6 @@ export function ClientQuotePreparation(props: {
       <dt>{en ? 'Deposit' : '押金'}</dt><dd>{money(quote.quote.depositAmount)}</dd>
       <dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{money(quote.quote.preAuthAmount)}</dd></dl>}
     {(error || quote.status === 'unavailable' || booking?.status === 'unavailable') && <p role="status">{en ? 'Currently unavailable. Keep any original reference and check its result.' : '当前暂不可用，请保留已有引用并核对原结果。'}</p>}
-    {quote.status === 'unavailable' && !quote.material && <button type="button" className="button button-outline button-block" disabled={working} onClick={ordinary}>{en ? 'Use ordinary booking' : '继续普通预约'}</button>}
+    {canOrdinary && <button type="button" className="button button-outline button-block" disabled={working} onClick={ordinary}>{en ? 'Use ordinary booking' : '继续普通预约'}</button>}
   </section>;
 }

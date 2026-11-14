@@ -10,11 +10,57 @@ import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
 import type { AiBookingHandoff, AiBookingSelection, AiClientQuoteFacts, ClientCreateQuoteRequest, EnterpriseOwnRentalPolicy, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
-import { formatRentalMoney } from "@rental-os/shared";
+import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema, formatRentalMoney } from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import { readOriginalBookingQuote, originalBookingUnitLabel, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
 import { ClientQuotePreparation } from '../features/ai-native/ClientQuotePreparation';
-import { clientQuoteStorageKey } from '../features/ai-native/client-quote-session';
+import { clientQuoteBookingStoredRequest, clientQuoteOwner, clientQuoteSelectedInput, clientQuoteStorageKey } from '../features/ai-native/client-quote-session';
+
+/** Local phase checks only prevent another ordinary operation while an original
+ * confirmation or booking needs checking. They never open an AI host or read it. */
+function retainedQuoteState(context: Parameters<typeof clientQuoteOwner>[0] | null) {
+  const empty = { hasLocator: false, pendingCore: false, preparationOnly: true, reference: null as string | null, readable: true };
+  if (!context) return empty;
+  try {
+    const key = clientQuoteStorageKey(context), quoteRaw = localStorage.getItem(key), bookingRaw = localStorage.getItem(`${key}:booking`);
+    const hasLocator = quoteRaw !== null || bookingRaw !== null;
+    if (!hasLocator) return empty;
+    const reference = JSON.stringify([key, quoteRaw, bookingRaw]), owner = clientQuoteOwner(context);
+    let pendingCore = false, preparationOnly = true;
+    if (quoteRaw !== null) {
+      let row: Record<string, unknown> | null = null;
+      try {
+        const value: unknown = JSON.parse(quoteRaw);
+        if (value && typeof value === 'object' && !Array.isArray(value)) row = value as Record<string, unknown>;
+        if (!row || row.version !== 'client-quote-operation-1' || row.owner !== owner
+          || Object.keys(row).length !== 5 || Object.keys(row).some(field => !['version', 'owner', 'request', 'material', 'phase'].includes(field))) throw Error();
+        const request = aiClientQuotePreparationRequestSchema.parse(row.request);
+        if (JSON.stringify(request.input) !== JSON.stringify(clientQuoteSelectedInput(request.input as ClientCreateQuoteRequest))) throw Error();
+        const material = row.material === null ? null : aiClientQuotePreparationResponseSchema.parse(row.material);
+        if (row.phase === 'preparation_pending' && material === null || row.phase === 'prepared' && material !== null) preparationOnly = true;
+        else if (row.phase === 'confirmation_pending' || row.phase === 'quote_observed') { pendingCore = true; preparationOnly = false; }
+        else throw Error();
+      } catch {
+        // A damaged identifiable original may already have crossed confirmation;
+        // an arbitrary cache value is not evidence that the business is pending.
+        pendingCore = row?.version === 'client-quote-operation-1' && row.owner === owner;
+        preparationOnly = !pendingCore;
+      }
+    }
+    if (bookingRaw !== null) {
+      let row: Record<string, unknown> | null = null;
+      try {
+        const value: unknown = JSON.parse(bookingRaw);
+        if (value && typeof value === 'object' && !Array.isArray(value)) row = value as Record<string, unknown>;
+        clientQuoteBookingStoredRequest(value);
+        if (row?.owner === owner) { pendingCore = true; preparationOnly = false; }
+      } catch {
+        if (row?.version === 'client-quote-booking-operation-1' && row.owner === owner) { pendingCore = true; preparationOnly = false; }
+      }
+    }
+    return { hasLocator, pendingCore, preparationOnly, reference, readable: true };
+  } catch { return { ...empty, preparationOnly: false, readable: false }; }
+}
 
 /** 真实租户 + 已登录：走后端 可用性 → 报价 → 下单。金额与库存全部以服务端为准。 */
 interface RemoteBookingProps {
@@ -83,21 +129,19 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   const policy = policies.find(row => row.corporateCustomerId === enterprise);
   const quoteVersion = useRef(0), host = captureEnterpriseHostSession();
   const hostIdentity = host?.identity;
-  const quoteModeRef = useRef(false), [quoteMode, setQuoteMode] = useState(false);
+  const quoteModeRef = useRef(false);
+  const [quoteIntent, setQuoteIntent] = useState({ scope: '', active: false, pendingCore: false,
+    observedOwner: '' as string | undefined, observedReference: null as string | null });
+  const quoteIntentRef = useRef(quoteIntent);
   const personalScope = host && { tenantCode: host.tenantCode, serviceCode: host.workspaceCode, customerId: host.customerId,
     surface: 'tenant_website' as const };
+  const originalQuote = retainedQuoteState(personalScope);
+  quoteIntentRef.current = quoteIntent;
   const identity = JSON.stringify([hostIdentity, enterprise, paymentMode]);
   const enterpriseOrder = useEnterpriseOrderSubmission(id => navigate(href(`/orders/${encodeURIComponent(id)}`)));
   useEffect(() => { let cancelled = false; setPolicies([]); setPolicyError(''); setEnterprise(''); setPaymentMode('personal'); setNoticeAccepted(false); setQuote(null); quoteVersion.current++;
     void sessionApi.enterpriseRentalPolicies().then(rows => { if (!cancelled) setPolicies(rows); }).catch(e => { if (!cancelled) setPolicyError(e instanceof Error ? e.message : '企业身份不可用'); });
     return () => { cancelled = true; quoteVersion.current++; };
-  }, [hostIdentity]);
-  useEffect(() => {
-    let retained = false;
-    try { retained = Boolean(personalScope && localStorage.getItem(clientQuoteStorageKey(personalScope)) !== null); }
-    catch { retained = quoteModeRef.current; }
-    quoteModeRef.current = retained; setQuoteMode(retained);
-    return () => { quoteVersion.current++; };
   }, [hostIdentity]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -148,10 +192,53 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       ...(couponId ? { customerCouponId: couponId } : {}) }; } catch { return null; }
   }, [ready, enterprise, locationId, days, currentWorkspace?.workspaceCode, product.categoryId, product.id,
     isDelivery, addressId, fulfillmentMode, startDate, endDate, quantity, couponId]);
-  const onQuoteMode = useCallback((active: boolean, hasLocator: boolean) => {
-    quoteVersion.current++; quoteModeRef.current = active || hasLocator;
-    setQuoteMode(quoteModeRef.current); setQuote(null); setBusy(false); setError('');
-  }, []);
+  const quoteScope = JSON.stringify([hostIdentity, personalSelection]), quoteScopeRef = useRef(quoteScope);
+  quoteScopeRef.current = quoteScope;
+  const quoteLifetime = useMemo(() => ({ active: false, epoch: 0 }), [quoteScope]), quoteEpoch = quoteLifetime.epoch;
+  const currentIntent = quoteIntent.scope === quoteScope ? quoteIntent : { active: false, pendingCore: false };
+  const observedReference = quoteIntent.observedOwner === hostIdentity ? quoteIntent.observedReference : null;
+  const quotePending = currentIntent.pendingCore || originalQuote.pendingCore && originalQuote.reference !== observedReference;
+  const quoteMode = currentIntent.active || quotePending;
+  quoteModeRef.current = quoteMode;
+  useEffect(() => {
+    quoteLifetime.active = true;
+    const invalidate = () => {
+      quoteLifetime.epoch++;
+      quoteVersion.current++;
+      const next = { scope: quoteScope, active: false, pendingCore: false, observedOwner: hostIdentity, observedReference: null };
+      quoteIntentRef.current = next; setQuoteIntent(next); setQuote(null); setBusy(false);
+    };
+    const visibility = () => { if (document.hidden) invalidate(); };
+    const storage = (event: StorageEvent) => {
+      if (!personalScope) return;
+      const key = clientQuoteStorageKey(personalScope);
+      if (event.key === null || event.key === key || event.key === `${key}:booking`) invalidate();
+    };
+    document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', invalidate); window.addEventListener('storage', storage);
+    return () => { quoteLifetime.active = false; quoteVersion.current++; document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', invalidate); window.removeEventListener('storage', storage); };
+  }, [quoteScope, quoteLifetime]);
+  const onQuoteMode = useCallback((active: boolean, _hasLocator: boolean, pendingCore: boolean) => {
+    if (!quoteLifetime.active || quoteEpoch !== quoteLifetime.epoch || document.hidden || quoteScopeRef.current !== quoteScope || !host?.current()) return;
+    const original = retainedQuoteState(personalScope);
+    // The original consumer may release this exact locator after an explicit,
+    // trusted read/ordinary choice. A different locator immediately holds again.
+    // Checking parameter preparation can report an unknown observation without
+    // crossing Core confirmation. Only an explicit active intent pauses it.
+    const next = { scope: quoteScope, active: active === true, pendingCore: pendingCore === true && !original.preparationOnly, observedOwner: hostIdentity,
+      observedReference: !active && !pendingCore && original.readable ? original.reference : null };
+    if (JSON.stringify(next) === JSON.stringify(quoteIntentRef.current)) return;
+    const previous = quoteModeRef.current;
+    quoteIntentRef.current = next; setQuoteIntent(next);
+    quoteModeRef.current = next.active || next.pendingCore || original.pendingCore && original.reference !== next.observedReference;
+    if (previous === quoteModeRef.current) return;
+    quoteVersion.current++; setQuote(null); setBusy(false); setError('');
+  }, [quoteScope, quoteLifetime, quoteEpoch]);
+  const ordinaryHeld = () => {
+    if (enterprise) return false;
+    const original = retainedQuoteState(personalScope), intent = quoteIntentRef.current;
+    return quoteModeRef.current || original.pendingCore && (intent.observedOwner !== hostIdentity || original.reference !== intent.observedReference);
+  };
   const bookingSelection = useCallback(async (original: AiClientQuoteFacts, selected: ClientCreateQuoteRequest): Promise<AiBookingSelection> => {
     const current = captureEnterpriseHostSession();
     if (!current || enterprise || !personalSelection || JSON.stringify(selected) !== JSON.stringify(personalSelection)) throw Error('booking_selection_changed');
@@ -167,7 +254,7 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   }, [enterprise, personalSelection]);
 
   const getQuote = useCallback(async () => {
-    if (!enterprise && quoteModeRef.current) return;
+    if (document.hidden || !host?.current() || quoteScopeRef.current !== quoteScope || ordinaryHeld()) return;
     if (!locationId || days < 1) { setError(t('invalidDate')); return; }
     if (isDelivery && !addressId) { setError(t('deliveryNeedsAddress')); return; }
     if (enterprise && (!noticeAccepted || !policy?.available || (paymentMode === 'enterprise' ? !policy.enterprisePaymentAllowed : !policy.personalPaymentAllowed))) { setError(language === 'en' ? 'Review current enterprise authority and explicitly accept the notice.' : '请核对当前企业授权并明确同意企业订单告知。'); return; }
@@ -181,21 +268,25 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
         ...(isDelivery && addressId ? { deliveryAddressId: addressId } : {}),
         ...(couponId ? { customerCouponId: couponId } : {}),
       });
-      if (version === quoteVersion.current && host?.current()) setQuote(q as unknown as RentalQuoteSnapshotV1);
+      if (version === quoteVersion.current && host?.current() && !document.hidden && !ordinaryHeld()) setQuote(q as unknown as RentalQuoteSnapshotV1);
     } catch (e: any) { if (version === quoteVersion.current && host?.current()) setError(e?.message || t('quoteFailed')); }
     finally { if (version === quoteVersion.current && host?.current()) setBusy(false); }
-  }, [locationId, fulfillmentMode, isDelivery, addressId, couponId, startDate, endDate, quantity, product.id, days, enterprise, paymentMode, noticeAccepted, policy, language, hostIdentity]);
+  }, [locationId, fulfillmentMode, isDelivery, addressId, couponId, startDate, endDate, quantity, product.id, days, enterprise, paymentMode, noticeAccepted, policy, language, hostIdentity, quoteScope]);
 
   // 自动报价：就绪且参数有效时，输入变化后自动重新计价（防抖），无需手动点按钮。
   useEffect(() => {
     if (!ready || !locationId || days < 1 || enterpriseOrder.blocked || (!enterprise && quoteMode)) return;
+    // A retained confirmation/booking (or unclassified cache) is never an
+    // instruction to create another quote when a read returns or a page opens.
+    if (!enterprise && (!originalQuote.readable || originalQuote.hasLocator && !originalQuote.preparationOnly)) return;
+    if (!enterprise && quoteIntent.scope === quoteScope) return;
     if (isDelivery && !addressId) return;
     const timer = window.setTimeout(() => { getQuote(); }, 450);
     return () => window.clearTimeout(timer);
-  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote, enterpriseOrder.blocked, quoteMode, enterprise]);
+  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote, enterpriseOrder.blocked, quoteMode, enterprise, quoteIntent.scope, quoteScope]);
 
   const submitOrder = useCallback(async () => {
-    if (!quote?.id || enterpriseOrder.blocked || (!enterprise && quoteModeRef.current)) return;
+    if (document.hidden || !host?.current() || quoteScopeRef.current !== quoteScope || !quote?.id || enterpriseOrder.blocked || ordinaryHeld()) return;
     if (quote.membershipSnapshot?.bookingIdentity === 'enterprise_employee') {
       await enterpriseOrder.submit(quote.id).catch(() => undefined); return;
     }
@@ -208,7 +299,7 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       else { setError(t('orderFailed')); toast.error(t('orderFailed')); }
     } catch (e: any) { const msg = e?.message || t('orderFailed'); setError(msg); toast.error(msg); }
     finally { setBusy(false); }
-  }, [quote, href, enterpriseOrder]);
+  }, [quote, href, enterpriseOrder, enterprise, hostIdentity, quoteScope]);
 
   if (!ready) {
     return <div className="booking-card"><p className="mock-note">{error ? error : <><LoadingOutlined /> {t('loading')}</>}</p></div>;
@@ -231,10 +322,13 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       ? <label className="booking-field">{t('selectAddress')}<select value={addressId} onChange={e => { setAddressId(e.target.value); setQuote(null); }}>{addresses.map(a => <option key={a.id} value={a.id}>{addrLabel(a)}</option>)}</select></label>
       : <p className="mock-note">{t('noAddress')} <Link to={href('/account')}>{t('addAddress')}</Link></p>)}
     {coupons.length > 0 && <label className="booking-field">{t('useCoupon')}<select value={couponId} onChange={e => { setCouponId(e.target.value); setQuote(null); }}><option value="">{t('couponNone')}</option>{coupons.map((c, i) => <option key={c.id ?? i} value={c.id}>{c.name || c.templateName || c.title || t('coupon')}</option>)}</select></label>}
-    {!enterprise && <ClientQuotePreparation selection={personalSelection} scopeKey={JSON.stringify([hostIdentity, personalSelection])}
+    {!enterprise && <ClientQuotePreparation selection={personalSelection} scopeKey={quoteScope}
       english={language === 'en'} onMode={onQuoteMode} bookingSelection={bookingSelection}
       onHandoff={handoff => navigate(href(`/booking/${encodeURIComponent(product.id)}`), { state: { aiBookingHandoffRef: handoff.handoffRef } })} />}
     {busy && !quote ? <p className="mock-note"><LoadingOutlined /> {t('quoting')}</p> : null}
+    {!enterprise && quotePending && <p role="status">{language === 'en' ? 'The original confirmation or reservation needs checking. Check its original result or use the manual service; no second operation is sent.' : '原确认或预约结果待核对，请核对原结果或联系人工办理；不派发第二操作。'}</p>}
+    {!enterprise && !quoteMode && !quote && <button type="button" className="button button-outline button-block" disabled={busy}
+      onClick={() => void getQuote()}>{language === 'en' ? 'Request ordinary quote' : '获取普通预约报价'}</button>}
     {quote && (!quoteMode || enterprise) && <>
       <div><span>{t('rentAmount')}</span><strong>{money(quote.rentalAmount)}</strong></div>
       {quote.discountAmount !== 0 ? <div><span>{t('discount')}</span><strong>{money(quote.discountAmount, true)}</strong></div> : null}

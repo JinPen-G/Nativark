@@ -2,6 +2,7 @@
  * are optional presentation inputs; this projection never reads, persists,
  * changes a selection or derives a missing field source. */
 import type { AiBookingDraft, AiBookingInputSource } from '@rental-os/shared';
+import { originalBookingUnitLabel } from './booking-handoff';
 
 export interface BookingReviewLabel { id: string; label: string }
 export interface BookingReviewField {
@@ -16,6 +17,7 @@ export interface BookingDraftReview {
   end: BookingReviewField;
   fulfillmentLocation: BookingReviewField;
   returnLocation: BookingReviewField;
+  pricingLines: { id: string; quantity: string; unit: string; source: string }[];
   services: {
     id: string;
     name: BookingReviewField;
@@ -71,6 +73,13 @@ export function projectBookingDraftReview(draft: AiBookingDraft | null, options:
       named(selection.fulfillmentLocationId, options.locations)),
     returnLocation: field(selection.returnLocationId, material.sources.returnLocationId,
       selection.returnLocationId ? named(selection.returnLocationId, options.locations) : undefined),
+    pricingLines: selection.lines.map((line, index) => {
+      const original = material.quote.lines?.[index];
+      const bound = original?.itemGroupId === line.itemGroupId && original.quantity === line.quantity;
+      return { id: line.itemGroupId, quantity: String(line.quantity),
+        unit: originalBookingUnitLabel(bound && original ? original.pricingUnit : null, english),
+        source: bound ? (english ? 'Original Core quote' : '原 Core 报价') : (english ? 'Source not recorded' : '来源未记录') };
+    }),
     services: (selection.services ?? []).map(service => {
       const matches = material.serviceSources?.filter(row => row.serviceId === service.serviceId) ?? [];
       // A legacy aggregate services label cannot stand in for any of these fields.

@@ -1,8 +1,9 @@
 import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from './ai-knowledge-policy-management-draft';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES,
-  AI_BOOKING_ACCEPTANCE_READ_VERSION, AI_BOOKING_OPERATION_OBSERVATION_VERSION } from './ai-booking-draft';
-import { RENTAL_FULFILLMENT_MODES } from './core';
+  AI_BOOKING_ACCEPTANCE_READ_VERSION, AI_BOOKING_OPERATION_OBSERVATION_VERSION,
+  AI_BOOKING_SOURCE_VERSION_PATTERN } from './ai-booking-draft';
+import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, AI_CLIENT_MATERIAL_RECEIPT_VERSION } from './ai-client-entry-draft-schemas';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
 import { AI_TASK_INPUT_DRAFT_VERSION } from './ai-task-input-draft';
@@ -52,7 +53,7 @@ const nullableId = { anyOf: [id, { type: 'null' }] };
 // A Core service charge binds serviceVersion/termsVersion. This is historical
 // version data, not a resource ID or a URL; preserve bounded non-empty segments.
 const bookingSourceVersion = { type: 'string', minLength: 1, maxLength: 191,
-  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*(?:/[A-Za-z0-9][A-Za-z0-9._:-]*)*$' };
+  pattern: AI_BOOKING_SOURCE_VERSION_PATTERN };
 const nullableSourceVersion = { anyOf: [bookingSourceVersion, { type: 'null' }] };
 const { taskId: _submissionTaskId, ...clientAnswerProperties } = AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft.properties!;
 const clientAnswer = object(clientAnswerProperties);
@@ -67,7 +68,10 @@ const quote = object({ quoteId: id, quoteVersion: hash, pricingPlanVersion: id, 
   priceVersionId: nullableId, calendarVersion: nullableId, categoryVersionId: nullableId,
   currency: { type: 'string', pattern: '^[A-Z]{3}$' }, payableAmount: amount, depositAmount: amount, preAuthAmount: amount,
   chargeLines: { type: 'array', maxItems: 100, items: object({ type: id, amount: { type: 'number' }, sourceId: nullableId, sourceVersion: nullableSourceVersion }) },
-  expiresAt: date, createdAt: date });
+  lines: { type: 'array', minItems: 1, maxItems: 20, items: object({ itemGroupId: id, quantity: { type: 'integer', minimum: 1, maximum: 999 },
+    pricingUnit: { enum: RENTAL_PRICING_UNIT_CODES }, source: literal('original_core_quote') }) },
+  expiresAt: date, createdAt: date }, ['quoteId', 'quoteVersion', 'pricingPlanVersion', 'ruleVersion', 'priceVersionId',
+    'calendarVersion', 'categoryVersionId', 'currency', 'payableAmount', 'depositAmount', 'preAuthAmount', 'chargeLines', 'expiresAt', 'createdAt']);
 const source = { enum: [...AI_BOOKING_INPUT_SOURCES] };
 const sources = object(Object.fromEntries(Object.keys(selection.properties).map(key => [key, source])),
   Object.keys(selection.properties).filter(key => !['deliveryAddressId', 'deliveryAddressConfirmation'].includes(key)));

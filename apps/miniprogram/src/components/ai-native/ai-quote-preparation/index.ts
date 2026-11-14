@@ -1,6 +1,6 @@
-/** Two bounded human intents: generate a reservation draft, then confirm and
- * continue on the original page. Original-result reads never advance either
- * intent or restore cached Actions. Instance bindings are never serialized. */
+/** Prepare parameters, explicitly confirm their units, then choose the original
+ * draft. Receipt reads never advance these intents or restore cached Actions.
+ * Instance bindings are never serialized; ordinary mode preserves the journal. */
 import type { AiBookingSelection, ClientCreateQuoteRequest } from '@rental-os/shared';
 import { clientQuoteApi } from '../../../api/ai-quotes';
 import { readBookingHostCapabilities, readBookingHandoff } from '../../../api/orders';
@@ -12,13 +12,14 @@ import { writeRequiredStorage } from '../../../core/storage';
 import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
   type ClientQuoteContext, type ClientQuoteView, type ClientQuoteBookingView } from '../client-quote-session';
-import { projectBookingDraftReview, type BookingDraftReview } from '../booking-draft-review';
+import { projectBookingDraftReview, projectQuoteParameterReview, type BookingDraftReview } from '../booking-draft-review';
 
 type Quote = ReturnType<typeof createClientQuoteSession>;
 type Booking = ReturnType<typeof createClientQuoteBookingSession>;
 const quotes = new WeakMap<object, Quote>(), bookings = new WeakMap<object, Booking>(), generations = new WeakMap<object, number>();
 const bindings = new WeakMap<object, { key: string; context: ClientQuoteContext }>(), releases = new WeakMap<object, () => void>();
-const visible = new WeakSet<object>(), busy = new WeakSet<object>();
+const visible = new WeakSet<object>(), busy = new WeakSet<object>(), activeIntents = new WeakSet<object>();
+const ordinaryReferences = new WeakMap<object, string>();
 const initial: ClientQuoteView = { status: 'closed', canPrepare: false, canConfirm: false, canRead: false,
   pendingCore: false, matchesInput: true, material: null, quote: null };
 const read = (key: string): unknown => { const value: unknown = wx.getStorageSync(key); return value === '' || value === null || value === undefined ? undefined : value; };
@@ -26,31 +27,50 @@ Component({
   options: { styleIsolation: 'apply-shared' },
   properties: { selection: { type: Object, value: null }, scopeKey: { type: String, value: '' }, timeZone: { type: String, value: '' }, paused: { type: Boolean, value: false } },
   data: { ...initial, working: false, error: false, booking: null as ClientQuoteBookingView | null,
-    bookingReview: null as BookingDraftReview | null },
+    bookingReview: null as BookingDraftReview | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>, canOrdinary: false },
   lifetimes: { attached() { visible.add(this); generations.set(this, 1); }, detached() { visible.delete(this); this.invalidateQuote(); } },
   pageLifetimes: { show() { visible.add(this); }, hide() { visible.delete(this); this.invalidateQuote(); } },
   observers: { 'scopeKey, paused'() { this.invalidateQuote(); } },
   methods: {
     invalidateQuote() {
-      generations.set(this, (generations.get(this) ?? 0) + 1); busy.delete(this);
+      generations.set(this, (generations.get(this) ?? 0) + 1); busy.delete(this); activeIntents.delete(this); ordinaryReferences.delete(this);
       quotes.get(this)?.dispose(); bookings.get(this)?.dispose(); quotes.delete(this); bookings.delete(this); bindings.delete(this);
       releases.get(this)?.(); releases.delete(this);
-      this.setData({ ...initial, working: false, error: false, booking: null, bookingReview: null });
+      this.setData({ ...initial, working: false, error: false, booking: null, bookingReview: null, parameterReview: null, canOrdinary: false });
     },
-    async ensureQuote(): Promise<Quote | null> {
+    reportMode(nextQuote?: ClientQuoteView, nextBooking?: ClientQuoteBookingView | null) {
+      const binding = bindings.get(this); if (!binding?.context.current()) return;
+      const quote = nextQuote ?? quotes.get(this)?.snapshot(), booking = nextBooking ?? bookings.get(this)?.snapshot();
+      const retained = read(binding.key), retainedBooking = read(`${binding.key}:booking`);
+      let pending = quote?.pendingCore === true;
+      if (retained !== undefined) {
+        const phase = retained && typeof retained === 'object' && 'phase' in retained ? retained.phase : undefined;
+        pending ||= phase === 'quote_observed' ? quote?.status !== 'quoted' || !quote.quote
+          : phase !== 'prepared' || quote?.status !== 'prepared';
+      }
+      if (retainedBooking !== undefined) pending ||= !booking?.observed || booking.pendingCore !== false;
+      if (!pending) ordinaryReferences.set(this, JSON.stringify([binding.key, retained, retainedBooking]));
+      else ordinaryReferences.delete(this);
+      this.setData({ canOrdinary: !pending });
+      this.triggerEvent('mode', { active: activeIntents.has(this), hasLocator: retained !== undefined, pendingCore: pending });
+    },
+    async ensureQuote(purpose: 'read' | 'write'): Promise<Quote | null> {
       if (!visible.has(this) || this.data.paused) return null;
-      if (bindings.get(this)?.context.current()) return quotes.get(this) ?? null;
+      if (purpose === 'write') activeIntents.add(this);
+      if (bindings.get(this)?.context.current()) { this.reportMode(); return quotes.get(this) ?? null; }
       const session = currentSession(), version = contextVersion(), epoch = generations.get(this), scopeKey = this.data.scopeKey;
       if (!session?.accessToken || session.customer.customerType !== 'personal') throw Error('quote_session_unavailable');
       const context: ClientQuoteContext = { tenantCode: PUBLIC_CONFIG.tenantCode, serviceCode: session.serviceCode, customerId: session.customer.customerId,
         surface: 'client_miniprogram', current: () => visible.has(this) && !this.data.paused && this.data.scopeKey === scopeKey
           && epoch === generations.get(this) && contextVersion() === version && currentSession() === session };
       const key = clientQuoteStorageKey(context);
-      this.triggerEvent('mode', { active: true, hasLocator: read(key) !== undefined, pendingCore: false });
+      bindings.set(this, { key, context }); this.reportMode();
       const instance = createClientQuoteSession({ context, api: clientQuoteApi, now: serverNow, newKey: () => newKey('client-quote'),
         readHost: readBookingHostCapabilities, selection: () => { if (!this.data.selection) throw Error('quote_selection_unavailable'); return this.data.selection as ClientCreateQuoteRequest; },
         storage: { read: () => read(key), write: value => writeRequiredStorage(key, value) },
-        changed: state => { if (context.current()) { this.setData({ ...state }); this.triggerEvent('mode', { active: true, hasLocator: read(key) !== undefined, pendingCore: state.pendingCore }); } } });
+        changed: state => { if (context.current()) { this.setData({ ...state,
+          parameterReview: state.status === 'prepared' ? projectQuoteParameterReview(state.material?.parameterReview ?? null) : null });
+          this.reportMode(state); } } });
       quotes.set(this, instance); bindings.set(this, { key, context }); releases.set(this, sessionEvents.on(() => this.invalidateQuote()));
       await instance.open(); return context.current() ? instance : null;
     },
@@ -81,6 +101,7 @@ Component({
               if (!zoneSupported(timeZone)) throw Error('booking_time_zone_unavailable');
               return formatBusinessDateTime(original, timeZone);
             } }) });
+          if (binding.context.current()) this.reportMode(undefined, state);
         } });
       bookings.set(this, instance); await instance.open(); if (cached !== undefined) await instance.recover(); return instance;
     },
@@ -91,14 +112,20 @@ Component({
       finally { if (epoch === generations.get(this)) { busy.delete(this); this.setData({ working: false }); } }
     },
     onGenerate() { return this.runIntent(async () => {
-      const quote = await this.ensureQuote(); if (!quote) return;
+      const quote = await this.ensureQuote('write'); if (!quote) return;
       if (quote.originalInput()) await quote.recover(); else await quote.prepare();
-      if (quote.snapshot().canConfirm) await quote.confirm();
+      const state = quote.snapshot(); if (state.status !== 'quoted' || !state.matchesInput || state.readOnly) return;
+      await (await this.ensureBooking('write'))?.generateDraft();
+    }); },
+    onConfirmParameters() { return this.runIntent(async () => {
+      const quote = quotes.get(this); if (!quote?.snapshot().canConfirm || !bindings.get(this)?.context.current()) return;
+      activeIntents.add(this); this.reportMode();
+      await quote.confirm();
       const state = quote.snapshot(); if (state.status !== 'quoted' || !state.matchesInput || state.readOnly) return;
       await (await this.ensureBooking('write'))?.generateDraft();
     }); },
     onRead() { return this.runIntent(async () => {
-      const quote = await this.ensureQuote(); if (!quote) return;
+      const quote = await this.ensureQuote('read'); if (!quote) return;
       if (quote.snapshot().canRead) await quote.recover(); await this.ensureBooking('read');
     }); },
     onContinue() { return this.runIntent(async () => {
@@ -108,8 +135,12 @@ Component({
         this.triggerEvent('handoff', { handoffRef: result.handoff.handoffRef });
     }); },
     onOrdinary() {
-      const binding = bindings.get(this); if (!binding?.context.current() || read(binding.key) !== undefined || busy.has(this)) return;
-      this.invalidateQuote(); this.triggerEvent('mode', { active: false, hasLocator: false, pendingCore: false });
+      const binding = bindings.get(this); if (!binding?.context.current() || !this.data.canOrdinary || busy.has(this)) return;
+      if (ordinaryReferences.get(this) !== JSON.stringify([binding.key, read(binding.key), read(`${binding.key}:booking`)])) {
+        ordinaryReferences.delete(this); this.setData({ canOrdinary: false }); return;
+      }
+      const retained = read(binding.key) !== undefined;
+      this.invalidateQuote(); this.triggerEvent('mode', { active: false, hasLocator: retained, pendingCore: false });
     },
   },
 });

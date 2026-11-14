@@ -23,7 +23,9 @@ export { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSch
   aiClientTaskCancelRequestSchema, aiClientTaskCancelReceiptSchema, aiClientTaskCancellationObservationSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskUnstartedCancellationReceiptSchema } from './ai-client-entry-draft-schemas';
 export { AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
-  aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema, aiClientQuoteResultReadResponseSchema } from './ai-client-quote-draft';
+  aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema, aiClientQuoteResultReadResponseSchema,
+  aiClientQuoteParameterReviewSchema } from './ai-client-quote-draft';
+export { RENTAL_PRICING_UNIT_LABELS } from './core';
 export { AI_CLIENT_QUOTE_BOOKING_VERSION, aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema } from './ai-client-quote-booking-draft';
 export { aiBookingSelectionSchema } from './ai-booking-draft';

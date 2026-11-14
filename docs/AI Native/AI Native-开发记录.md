@@ -6,6 +6,50 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry13-unit-provenance-simulated-whole-closeout-20261115"></a>
+## ENTRY-13 原默认计费单位、明确确认及事实来源整项收口（2026-11-15）
+
+本阶段基于已上传并回读一致的`8e6e261582550b9bf3d9e68eaf3d73ec97ad4026`，承接[原预约来源与收据](<#ain-entry13-booking-original-provenance-20261115>)及[确认前条件展示](<#ain-entry13-booking-confirmation-display-20261115>)，补齐默认计费单位的实际消费者。Root读取两助手最终交付、逐blob核同并独立核接生产者／公共合同／页面；独立AI复核原四条未发现剩余确证实现缺口，最后冻结与必要模拟／类型由Root核定。仅本阶段25源和三册提交，ENTRY-01目录公共接线不夹带；本节所在提交即阶段固定版本，不另留成果包。
+
+[原报价准备](../../apps/api/src/modules/ai-native/scenes/client-quote-preparation.composition.ts)从同一已保存input／normalized／configurationHash投影商品行单位、数量及来源：人类明确单位、经营正式默认、定价组正式默认分别登记。新prepare和新confirm必须有完整review，不改原input、operationKey和hash，不读今日配置补签历史。[公共runtime](../../packages/shared/src/ai-client-quote-draft.ts)和[HTTP schema](../../packages/shared/src/ai-client-entry-http-draft-schemas.ts)同步三种闭合来源／依据；OpenAPI的数组items保持单schema，索引／商品／数量与原输入的对应继续由生产者和当前绑定核验。
+
+[Web入口](../../apps/tenant-website/src/features/ai-native/ClientQuotePreparation.tsx)与[小程序入口](../../apps/miniprogram/src/components/ai-native/ai-quote-preparation/index.ts)准备后先展示单位及其正式来源，再由独立按钮明确确认；Goal入口消费同一review。[共享Goal会话](../../packages/shared/src/ai-client-goal-session.ts)确认前重读原材料和完整review，最终权限等待后再核同份review及有效期，等待期间到期拒绝确认。review只在当前内存，不写新增客户正文；单次本地到期撤回不发请求、不写journal，dispose释放定时器。
+
+[Booking材料](../../apps/api/src/modules/ai-native/scenes/client-booking-material.ts)可增加同一原Core报价的商品／数量／单位事实，显示`original_core_quote`来源；旧Core报价缺单位时省略新增lines，已记录但非法单位仍拒绝。旧准备缺单位时省略review，原收据可读但不能新confirm；原已经保存报价仍先读取原结果。旧冻结Booking材料比较只排除新增lines投影，完整原quoteVersion及materialHash继续核对，不用今日默认改写历史。
+
+本次实际Core服务费用返回`sourceVersion=1/1`，旧Quote公共schema误把版本当资源ID，导致报价已保存后HTTP拒绝交付。现[唯一服务版本规则](../../packages/shared/src/ai-booking-draft.ts)由Quote／Booking runtime及两个公开schema共用原有界非空分段格式，191上限；原ID约束不变，URL、空段、尾斜杠和超长仍拒绝。实际原Core／Controller正向及原读零写通过，未改原服务版本或Core计价。
+
+两端报价会话同时补原Draft／Action到期撤回和继续前复核，沿已有handoffKey读原操作，等待后再核当前服务器材料；unknown不换键。[Web人工宿主](../../apps/tenant-website/src/components/RemoteBooking.tsx)及[小程序Checkout](../../apps/miniprogram/src/pages/checkout/index.ts)只用原缓存定位未决阶段，不由缓存自动进入AI或恢复请求。参数未确认可普通办理；确认／Booking／handoff未知时防止并行重复办理，当前原读解除只绑定同owner与同份缓存引用，人工按钮明确核价，迟到／隐藏／换身份结果撤回。此部分只关闭已定位的ENTRY-14／15反例，不代替跨端引用和全端发布全文验收。
+
+冻结交付核同：dev2 Web会话`105d4edcaeb52bd7843f6da9817a94f3d46918b7`、小程序会话`1e5b29497fe1df0c031fa750a0a240c3dcc2685e`；dev1 Web宿主`52eaecf3e1f13a5101471886044464fec2f902b1`、Checkout`bbbcc58c4e3f26c75cfd40615df887f0cc2031f0`。Root最后准备blob为`dca0a02512be2b524151e3701be15bff6a217960`、Booking材料`33223f5cd198b85559db491185d60a65b52a33d6`、Goal会话`94f27953003116688e112c0b3dd2ac7fa21c55d8`；不是按作者报告直接计分。
+
+| 原ENTRY-13条款 | 本次G4核定依据 |
+| --- | --- |
+| 稳定契约及生产者／消费者 | shared runtime、公开schema、原准备／Booking生产者、Web／原生小程序消费者同步；缺新增字段兼容旧收据，缺完整来源拒绝新确认。 |
+| 输入来源 | 人类选择、经营／定价组默认来自同份原准备；Core规范化、受权事实及模型候选沿原来源合同分开，缓存不提供确认或授权。 |
+| Core权威与重确认 | 准备后明确核对并独立确认；重新读取及最终等待后核同材料／review，金额、库存、资格、付款和提交仍由原Core／业务收据决定。 |
+| 可替换边界 | Task／Proposal、Core收据、预算单账、Action／Draft不增加框架／供应商类型；Runtime／SDK仍在原适配边界，未演练迁移不称兼容。 |
+
+所有模拟命令均为`node --no-compilation-cache -`，只复用原fixture、实际源码及内存驱动，不新增或扩写测试文件。以下为stdin SHA-256和实际退出结果，完整命令／输出保留本会话及原助手日志，不复制整套环境：
+
+| 必要验证 | 命令SHA-256及实际结果 |
+| --- | --- |
+| 原准备正式默认／明确单位／原读 | `b45b319d2f1f7a7c6bb2f6474859f9f01dce8e30a8c561928f0cb855690f86d7`，退出0，原input不变、读取0写、0订单／提交。 |
+| Controller／Core→两端会话及正式native runtime | `75c4cc000d2bf8783f4b93de3c4cb2f366271eccf39409d8e0c2e83b29031926`，退出0，旧材料单位不补签、0订单／提交。 |
+| 实际React／mini组件→原Controller／Core | `992ac30b52dabdd9ad868c5ddcc6966507012858d795a49728892539396739fc`，退出0，两端prepare／confirm／read各1、挂载0AI请求、准备不自动确认、核读不自动进入AI、普通回退留原引用。 |
+| 旧单位与闭合来源／依据 | `4cc84f2063f081b7d1eb1a3b16368f22f0f4e7b5e85b633ddf0a900eedd83be8`，退出0，旧准备／Core quote可读、缺单位拒绝新confirm、7种合同核验。 |
+| 原Core服务版本1/1与公共交付 | `0fb20f886b03de30d15b6a78b943fe52d16fa894aed07e7bb85a2152ee519f03`，退出0，新增1张原quote、原读0写、5种非法版本拒绝。 |
+| Goal当前review及最终等待中到期 | `d12694413db1f4a9d66173b84e7c513649132bc0ae5924ca8ab323d217ca34c3`，退出0，明确确认1次、缺review／等待中到期拒绝、缓存review写0、到期0请求／journal写、定时器0。 |
+| dev2完整两端会话组 | `9711a6bce2b51216ac3282043fbbb5782ce706ca01ac816dc6c69c9bd194ee6b`，退出0，30场景；包含原Auth／Guard／Controller／Core及SQL内存、lost ACK／竞争journal／旧review／到期／重复继续。 |
+| dev1两人工宿主及原会话 | Web `40ab8691656c23bc404445d8f419c036f08fc038d49179c2161a6f184e292b74`、mini `e8846594910c7503cce1e4f333ab63f4eda4ecf3f63f96245305e94ed069d2a3`，均退出0，各5场景；宿主及当前真实组件／会话，业务响应为内存替身。 |
+| Root当前API／Web最终类型 | `2847b40083200e6b96cc8c6c4d72acfbfe30a02641d4f95a10953db2a185997e`，退出0；TS5.9.3，API3根／1400源、Web3根／224源，0诊断。 |
+| Root仅25源固定交付类型 | `bdf0641f5070159058bb1a19196ca87a75b6d47f665b106da0b195190d6834a4`，退出0；从HEAD对象排除ENTRY-01活动公共接点，API1399源／Web223源，0诊断，证明本片不依赖未提交目录接线。 |
+| Root正式mini最终类型 | `9ca64b5994d43cc3adc34c13db36edd700936e401f11b2c1a57a29a0c4c4b005`，退出0；3根／223源、124声明内存、ES2019，0诊断。dev1两宿主最终类型`1faf356893fd44383c74401c364647b3762be86fc9909c6f350563665201b21d`也退出0。 |
+
+首轮失败保留：类型驱动误把整个node_modules作为implicit types，修驱动；渠道／旧简化Core行／缺mini发布DAO／不稳定加密key／缺原API端口的夹具被生产闭合校验拒绝，修内存夹具后通过，不放宽生产授权。Goal驱动首次重复声明shared语法失败，第二次未模拟单次定时器触发后自动移除并未推进时钟，修驱动后到期及dispose通过。一次组件驱动失败遗留的自有Node PID19780经核明后停止，退出4294967295，后继finally完整释放。查找独立静态复核中的未写入Git blob返回bad object，未据此虚称固定对象可读；当前冻结来源以本节实际blob和提交为准。
+
+本轮任务目录`output/.tmp/ain-entry13-root-closeout-20261115`及先前逻辑验证目录均未创建，audit0、自有验证进程全部退出；没有新增测试脚本、安装、生成共享Client／dist或临时副本。28个交付文件的`git diff --check`退出0，新增阶段源码链接及记录锚点均存在；`node scripts/validate-docs.cjs`退出1，11/11文档仍四处既有缺链（导航历史三处、稀疏站点示例一处），无新增链接或任务算术错误。Root核原四条G1～G4齐备后，ENTRY-13由75%更新100%，ENTRY等权覆盖率72.2%（1/18达到100%）；原AIN保持88.4%及24/28，46项等权参考82.1%。ENTRY-14跨端短期／一次性原引用仍缺，ENTRY-15全端原四条未整收，百分比不变。真实浏览器／微信／数据库／供应商由负责人后续操作，模拟不是生产验收或开放授权；main仍由PM按固定成果串行核定。
+
 <a id="ain-entry13-booking-confirmation-display-20261115"></a>
 ## ENTRY-13 原预约条件与逐字段来源的确认前展示（2026-11-15）
 

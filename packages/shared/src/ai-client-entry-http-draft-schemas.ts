@@ -2,6 +2,7 @@ import { AI_CLIENT_QUOTE_PREPARATION_VERSION } from './ai-client-quote-draft';
 import { AI_CLIENT_QUOTE_BOOKING_VERSION } from './ai-client-quote-booking-draft';
 import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 import { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from './ai-entry-management-draft-schemas';
+import { RENTAL_PRICING_UNIT_CODES } from './core';
 
 /** Customer HTTP publication only, not authorization or execution. Business
  * materials/input reuse CLIENT-01; internal persistence is not a wire DTO. */
@@ -19,6 +20,19 @@ const revision = { type: 'integer', minimum: 1, maximum: 4294967295 };
 // All customer cancellation variants share the original receipt's wire bound.
 const cancelTransition = { taskRevision: revision,
   cursor: AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS.AiClientTaskUnstartedCancellationReceipt.properties.cursor, observedAt: date };
+const quoteParameterLine = { lineIndex: { type: 'integer', minimum: 0, maximum: 99 }, itemGroupId: id,
+  quantity: { type: 'number', exclusiveMinimum: 0 }, pricingUnit: { enum: RENTAL_PRICING_UNIT_CODES } };
+const quoteParameterLineSchema = { oneOf: [
+  object({ ...quoteParameterLine, pricingGroupId: id, source: literal('user_explicit'), basis: literal('user_input') },
+    [...Object.keys(quoteParameterLine), 'source', 'basis']),
+  object({ ...quoteParameterLine, source: literal('server_default'), basis: literal('business_settings_default') }),
+  object({ ...quoteParameterLine, pricingGroupId: id, source: literal('server_default'), basis: literal('pricing_group_default') })
+] };
+const quoteParameterReview = object({ configurationHash: hash, lines: { type: 'array', minItems: 1, maxItems: 100,
+  // The current original-input binding verifies each index against its line.
+  // Keep OpenAPI's array items as one schema, never a JSON-Schema tuple array.
+  items: quoteParameterLineSchema
+} });
 const quotePreparation = { contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), materialRef: uuid,
   materialHash: hash, inputHash: hash, revision: literal(1), expiresAt: date,
   preparation: literal('normalized_parameters'), eligibility: literal('not_attested'),
@@ -30,7 +44,7 @@ const originalQuoteFacts = object({ quoteId: id, currency: { anyOf: [{ type: 'st
   priceVersionId: nullableId, calendarVersion: nullableId, categoryVersionId: nullableId,
   createdAt: { anyOf: [date, { type: 'null' }] }, expiresAt: { anyOf: [date, { type: 'null' }] },
   chargeLines: { anyOf: [{ type: 'array', maxItems: 100, items: object({ type: id, amount: { type: 'number' },
-    sourceId: nullableId, sourceVersion: nullableId }) }, { type: 'null' }] } });
+    sourceId: nullableId, sourceVersion: { anyOf: [AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS.AiBookingSourceVersion, { type: 'null' }] } }) }, { type: 'null' }] } });
 const quoteResult = { contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSION),
   source: object({ materialRef: uuid, materialHash: hash }), inventoryReservation: literal('not_attempted'),
   orderExecution: literal('not_attempted'), confirmation: literal('parameters_only_not_order_approval'),
@@ -77,9 +91,12 @@ export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
   // Keep the nested input on the original CLIENT-01 DTO, not an AI quote DSL.
   AiClientQuotePreparationRequest: object({ operationKey: { ...id, maxLength: 128 }, input: ref('ClientQuoteRequest') }),
   AiClientQuoteConfirmationRequest: object({ materialRef: uuid, expectedMaterialHash: hash }),
-  AiClientQuotePreparationResponse: object({ ...quotePreparation, replayed: { type: 'boolean' } }),
+  AiClientQuoteParameterReview: quoteParameterReview,
+  AiClientQuotePreparationResponse: object({ ...quotePreparation, replayed: { type: 'boolean' }, parameterReview: quoteParameterReview },
+    [...Object.keys(quotePreparation), 'replayed']),
   AiClientQuotePreparationReadResponse: { oneOf: [
-    object({ ...quotePreparation, state: literal('observed'), retryable: literal(false), execution: literal('read_only') }),
+    object({ ...quotePreparation, state: literal('observed'), retryable: literal(false), execution: literal('read_only'), parameterReview: quoteParameterReview },
+      [...Object.keys(quotePreparation), 'state', 'retryable', 'execution']),
     object({ contractVersion: literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), state: literal('unknown'),
       operationKey: id, retryable: literal(false), execution: literal('read_only') })] },
   AiClientQuoteFacts: originalQuoteFacts,

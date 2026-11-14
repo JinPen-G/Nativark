@@ -1,7 +1,14 @@
 /** Present an already validated original Draft. Labels and time formatting
  * are optional presentation inputs; this projection never reads, persists,
  * changes a selection or derives a missing field source. */
-import type { AiBookingDraft, AiBookingInputSource } from '@rental-os/shared';
+import type { AiBookingDraft, AiBookingInputSource, AiClientQuoteParameterReview } from '@rental-os/shared';
+import { RENTAL_PRICING_UNIT_LABELS } from '../../vendor/shared-ai-client';
+
+export function projectQuoteParameterReview(review: AiClientQuoteParameterReview | null) {
+  return review?.lines.map(line => ({ ...line, unitLabel: RENTAL_PRICING_UNIT_LABELS[line.pricingUnit],
+    sourceLabel: line.source === 'user_explicit' ? '用户明确选择'
+      : line.basis === 'pricing_group_default' ? '服务端正式定价组默认' : '服务端正式经营默认' })) ?? null;
+}
 
 export interface BookingReviewLabel { id: string; label: string }
 export interface BookingReviewField {
@@ -16,6 +23,7 @@ export interface BookingDraftReview {
   end: BookingReviewField;
   fulfillmentLocation: BookingReviewField;
   returnLocation: BookingReviewField;
+  pricingLines: { id: string; quantity: string; unit: string; source: string }[];
   services: {
     id: string;
     name: BookingReviewField;
@@ -71,6 +79,13 @@ export function projectBookingDraftReview(draft: AiBookingDraft | null, options:
       named(selection.fulfillmentLocationId, options.locations)),
     returnLocation: field(selection.returnLocationId, material.sources.returnLocationId,
       selection.returnLocationId ? named(selection.returnLocationId, options.locations) : undefined),
+    pricingLines: selection.lines.map((line, index) => {
+      const original = material.quote.lines?.[index];
+      const bound = original?.itemGroupId === line.itemGroupId && original.quantity === line.quantity;
+      return { id: line.itemGroupId, quantity: String(line.quantity),
+        unit: bound && original ? RENTAL_PRICING_UNIT_LABELS[original.pricingUnit] : (english ? 'Unit not recorded' : '计费单位未记录'),
+        source: bound ? (english ? 'Original Core quote' : '原 Core 报价') : (english ? 'Source not recorded' : '来源未记录') };
+    }),
     services: (selection.services ?? []).map(service => {
       const matches = material.serviceSources?.filter(row => row.serviceId === service.serviceId) ?? [];
       // A legacy aggregate services label cannot stand in for any of these fields.
