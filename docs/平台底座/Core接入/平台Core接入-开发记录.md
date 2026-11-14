@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-github-discovery-20261114"></a>
+
+## Topic 发现与离线查询状态（2026-11-14）
+
+固定Release片已提交并上传 `96ce79dac0211bec335e46ea0d9f0ba223e82dda`，实际远端回读一致、工作树干净、main `275064d40`仍已包含。继续原包独占窗口，为后续PCH-07发现面提供[Topic查询](../../../packages/core-contracts/src/github-discovery.ts)；[只读传输](../../../packages/core-contracts/src/github-http.ts)从原Release实现移出后两者共用，没有第二套下载或本机凭据通道。
+
+查询仅在公开未归档仓库的 `nativark-core` Topic中按名称/简介检索，拒绝原始查询表达式；每页20、上限1000符合GitHub官方[仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。返回查询时间、来源/许可、下一页和不完整标记，候选明确为unreviewed/unchecked，不从标签推断Core身份或可安装性。单实例保存最近50页、5分钟缓存，并发同查询复用读取；手动刷新可跳过缓存。失败返回unavailable和准确原因，若有旧页只附stale原时间，不伪造成功空列表、不影响已安装组合；调用者不能通过修改返回对象污染缓存。
+
+原GitHub命令新增discover，实际实现/命令/缓存生命周期及展示要求同步[接入说明](../../../packages/core-contracts/README.md#发现公开-core-仓库)。原单一合同入口8组/完整类型通过；stdin核固定Topic/分页、上限/查询拒绝、fresh/cache/stale/离线/限流/格式错误、并发去重/返回隔离和原Release解析均退出0。全部HTTP为离线响应，不把搜索逻辑验证当作真实GitHub结果或后台界面通过；没有新增测试脚本、依赖、网络业务访问或后台进程，原测试临时目录已删除。
+
+CLI失败JSON/退出1、缓存容量淘汰和时钟回拨刷新另以stdin核对，退出0。3份文档324条链接定向核对新错误0，需求/任务原文不变；原白名单仍仅总导航3个既有历史缺失，`git -c core.whitespace=cr-at-eol diff --check`退出0。
+
+独占范围的目录发现和固定包准备继续分开。仓库根清单/同仓索引到发行的核对、安装状态/授权/版本管理界面及真实部署仍待宿主公共窗口；不得用本片替代完整PCH-03/07/10/12。再次尝试只读浏览器仍在初始化返回kernel assets路径缺失，未获得实页；营运商简称实际宽度仍由原后台记录承接，不以离线字宽代替。
+
 <a id="core-github-release-20261114"></a>
 
 ## 固定 GitHub Release 与本地准备共链（2026-11-14）

@@ -184,11 +184,25 @@ node packages/core-contracts/dist/github-release.js prepare <固定Release JSON>
 
 Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRelease`、`prepareGitHubCoreRelease` 及两份输入 schema。两条命令成功退出0，失败退出1；成功stdout只有JSON，失败stderr不包含响应正文、签名下载URL或凭据。下载有时间/大小上限，仅跟随GitHub受支持的HTTPS资产地址，失败没有落地半包。固定内容的检查不证明发布者或代码已经审核。
 
-仓库可添加 `nativark-core` Topic供后续发现界面检索；**Topic本身不发布版本、不安装也不授权**。当前已实现固定Release读取和准备，Topic搜索/分页/缓存、后台安装状态与实际部署注册仍待宿主片。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。本阶段使用离线HTTP响应验证，真实标准包发行下载尚未验收。
+仓库可添加 `nativark-core` Topic供发现入口检索；**Topic本身不发布版本、不安装也不授权**。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。本阶段使用离线HTTP响应验证，真实标准包发行下载尚未验收。
+
+## 发现公开 Core 仓库
+
+```sh
+node packages/core-contracts/dist/github-release.js discover [关键词] [页码]
+```
+
+命令只搜索公开、未归档且带 `nativark-core` Topic的仓库。关键词用于名称/简介，不接受其他GitHub查询表达式；每页20条、最多读取GitHub搜索允许的1000个结果。返回来源、许可信息、更新时间、查询时间、下一页和不完整结果标记；描述仅作为普通文本显示，不能渲染成HTML。候选的`review=unreviewed`与`package=unchecked`不能替代平台确认和包检查。
+
+宿主从同一 `@rental-os/core-contracts/github` 出口创建一个 `createGitHubCoreDiscovery()` 实例并复用它，再调用 `discover({ text, page }, refresh)`。实例缓存最近50页，每页5分钟；并发相同查询共用一次读取，`refresh=true`跳过缓存。缓存只含公开元数据，进程退出可以丢弃，命令每次运行不会保存磁盘缓存。
+
+返回状态为`fresh`、`cached`或`unavailable`。远端不可达/限流/格式错误时，`unavailable.error`保留原因；有原缓存时附带`stale`及其原始查询时间，没有缓存时不伪造空结果。`discover`命令始终将这个结构写stdout，unavailable退出1，成功退出0；用法错误写stderr并退出1。实际已安装Core继续由宿主独立维护，发现失败不触碰它们。
+
+发现的数据还没有证明仓库根清单、同仓Core索引或可安装版本。宿主下一步须核对这些元数据，再通过上面的固定Release入口准备包；发现/版本/安装管理界面和实际部署注册尚未接线。检索规则依据[GitHub仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。
 
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts)及[GitHub命令](src/github-release.ts) → [固定Release获取](src/github.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)，仅走Node出口；这些入口不加载Core业务代码。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts)及[GitHub命令](src/github-release.ts) → [Topic发现](src/github-discovery.ts)/[固定Release获取](src/github.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)。发现与发行共用[只读传输](src/github-http.ts)，仅走Node出口；这些入口不加载Core业务代码。
 
 ```sh
 npm test -w @rental-os/core-contracts
