@@ -26,7 +26,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 | --- | --- |
 | AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 18全文／21匿名HTTP已上传；[22实际公开页消费者](<AI Native-开发记录.md#ain22-public-original-consumers-20261114>)已做完整原服务／两端有限组件／API／类型及窄runtime模拟后及时固化。下一接dev1目标两叶到原client-request／model-host／Controller和21全文，核dev2固定时延。独占四册／索引、shared／Guard／OpenAPI及生产组合，unknown不重派；未核goal三叶／旧员工样式不夹带。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原匿名两叶已交权／上传。当前已明确授新增 `scenes/client-goal-material.ts`／`client-goal-projection.ts`两私有叶，目标原文放material JSON、command仅版本／hash，候选只原当前客户公开目录／地点／本人企业关系，明确选择回原prepareQuoteParameters。Root补公共合同／client-request／model-host及HTTP；不得内部会员候选、自动选中、Core重算／另建执行器。仅必要模拟／类型，完成固定交权，不改原已交叶／公共文件／四册／索引、不新增测试。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 政策五源已冻结／上传，不再写该片。AIN-25核到部分完成Task与failed/cancelled末Run的时延投影漏项，已授权仅修改原性能reader叶，按原终结事件／Run endedAt／释放收据证明，缺证据不补时间；必要模拟和类型后交固定blob。随后只读核取消／恢复成功率及积压公平性／告警下一缺口，不写shared／公共接点／四册／索引、不新增测试、不等main。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | [部分完成末Run时延](<AI Native-开发记录.md#ain25-partial-final-run-completion-time-20261114>)reader `c3c84cf88b10385b2206c012445e54fb8f124829`已交权，Root核固定blob／原双缺反例通过，55场景与原类型齐备后独立固化。继续仅 `ai-task-transition.repository.ts` 的readCancellationSettlementReceipt及其直接私有帮助：原cancel_settled可合法success／partial／cancelled，普通completed不得冒称取消成功；原expectedRevision／当前权限／event读回复核不放宽。公共response／Controller由Root接，不写shared／Guard／provider／四册／索引、不新测试，队列／公平性余项保留。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-14品类/能力12源及独立全文结论已交回，Root核blob和必要实际provider模拟通过。既有Core治理两源来源/类型因果已只读核清，Root按固定提交同步本树；当前无活动写权。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |

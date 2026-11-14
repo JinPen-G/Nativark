@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-partial-final-run-completion-time-20261114"></a>
+## AIN-25 部分完成任务的末Run终结时延与原收尾证据（2026-11-14）
+
+原[性能Reader](../../apps/api/src/modules/ai-native/observability/task-performance.reader.ts)要求Task与末Run终态名称相同，漏掉原运行器合法PARTIALLY_SUCCEEDED／FAILED或CANCELLED后继的endedAt。dev2单叶按原终结event、冻结Run计划、实际步骤登记、原围栏已释放及该代完整计量／ACTIVE_MS原账联结返回任务终结时间；不使用Task.updatedAt、TTL、枚举名称映射、startup同毫秒或字典序猜最后时段。缺event／plan／registration／末段或原charge、unknown／未释放继续null，坏hash／错身份／await变化拒绝，不新增模型、业务或释放。
+
+固定blob `c3c84cf88b10385b2206c012445e54fb8f124829`，物理SHA-256 `3f3e8c23a8fb9ffa58af012a35e58d441eaf754e3b58e84182bd9aca7af3cc50`，Root核同。Prisma Decimal转原字符串快照用于前后复核，不深拷贝丢方法。原partial及cancel_settled必须满足原task transition判断；同毫秒允许有真实0ms，但只有末段与完整原证据齐备才能展示。
+
+dev2 `node --no-compilation-cache -` 最终55场景 stdin SHA `5f0f4c95537d2bde11868720c678f0d803cd3601cadf4b7d1ff03eb1f50a7eca`／退出0：原失败／取消后继、同毫秒、缺两项／错hash／错policy／未释放／unknown／读取期间撤权或变化；原模型4、累计预算1，同Task未重置，缺末段计量与账同时成立时不从startup补时间。最终类型SHA `5e980e4163a1315bdb0143e92278e3783b726dea3a6b0f246589c61a1d8a6e11`／退出0，TS5.9.3，1根／1309源／119内存声明零诊断。原驱动取消时取旧Task对象revision、每次读取tick过量、空字符串写检查均保留失败，仅修内存驱动，不放宽原预算或unknown。
+
+Root独立 `node --no-compilation-cache -` 原运行器连续原回答→PARTIALLY_SUCCEEDED／FAILED末Run→同毫秒Reader→删除末段计量＋账对反例，SHA `3197676fa066da2fbd673da3cd21e03efd7a0894dc674dd942b19fe49154f028`／退出0；4模型、1累计账户、Reader无写，真原末Run0ms可读，末段双缺返回null。Root必要类型 `939959780e5607960a52316d85a2c3b16ccaf8c3375c05ce2f8c1ecf5dff886a`／退出0，TS5.9.3，1根／1310源零诊断。早期补片曾仅核该代已有records，双缺的末段可用startup补0ms；已修为原plan第一registration的pre段和真实step.registered共同证明，不能沿早期46绿结论交付。
+
+单产品源及原记录／接续独立提交推送，不夹客户目标公共WIP。AIN-25全文仍有取消善后成功／部分完成的专用收据漏读、队列积压／多租户公平性与告警等核心缺口，保持75%，不称SLO达标或真实耗时；dev2已获最小readCancellationSettlementReceipt写权继续原缺陷，shared／Controller由Root维护，不等main。原离线preload、不可达DB、audit0／进程退出，任务临时目录未创建，无新增测试脚本、依赖或构建副本。真实运行与生产指标留负责人后续验证。
+
 <a id="ain22-public-source-unavailable-no-renewal-20261114"></a>
 ## AIN-22 原公开请求不可核实时禁新键与当前服务明确切换（2026-11-14）
 
