@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry16-simulated-whole-closeout-20261115"></a>
+## ENTRY-16 多端事实状态、空间时区及可访问性整项收口（2026-11-15）
+
+本阶段前置`74d2d06728f8972520285dbc11089e7555d53f2b`已普通推送并回读GitHub一致，包含[后台双语四源](<#ain-entry16-admin-language-consumers-20261115>)；此前`02bd7223b05e48dd6cb0507f277d55db6545cbe8`包含[两端时间／提交状态九源](<#ain-entry16-current-zone-and-submitted-state-20261115>)。Root按原ENTRY-16三条复核生产者／公共事实／直接消费者，独立只读复核未发现剩余确证P1／P2。将最后原预约受理状态四源与跨端活动接线按精确源码差异分开，固定候选只继承上述已提交前置，不夹transfer新组件、桥或Checkout活动TS；本节所在提交为最终功能与进度来源。
+
+最后[原预约金额区](../../apps/tenant-website/src/components/RemoteBooking.tsx)移除固定“尚未提交／资源未预占”推断，经[原面板](../../apps/tenant-website/src/features/ai-native/BookingHandoffPanel.tsx)和[BookingPage](../../apps/tenant-website/src/pages/BookingPage.tsx)传实际状态；accepted只显示原材料已受理，订单、付款及资源继续依原业务收据。小程序[Checkout正文](../../apps/miniprogram/src/pages/checkout/index.wxml)同样分原accepted状态，不拿旧quote／handoff的not_reserved声明充当当前业务结果。原金额格式、报价／订单精度、人类确认和未知结果规则保持。
+
+| 原ENTRY-16全文 | 最终G4证据与消费者 |
+| --- | --- |
+| 事实／错误／待核对／未提交／已提交请求／业务成功 | 两端Quote／Goal消费真实Draft state/execution，原Booking／Checkout使用accepted及原订单收据；后台timeline／原确认／模型标签独立显示、模型正文不覆盖金额与结果。原订单人工入口及资金读取保持Core所有权。 |
+| 租户／预约空间时区及无法唯一解析的时间 | 02bd固定九源，Web current catalog tenant／workspace／timeZone前后复验、跨设备同绝对时间；Goal偏移选择与原mini zoneSupported，缺失／非法／DST歧义拒绝，不用设备或当前时间补值，不在AI换算金额。 |
+| 既有语言、安全呈现、键盘／读屏／字号／长文本及人工接续 | 74d固定后台四源和原两端语言分支，关键状态文字、原语义控件／status／label保持；模型转义／有界／折叠，原确认失败清旧内容、挂载0模型请求。人工订单、预约、受理／明确提交和原收据入口可达；真实宿主另由负责人测试。 |
+
+最终独立固定状态候选TypeScript5.9.3三根／297源零诊断，stdin SHA-256`723438f067fc9fcef851456fde4f93487f6372410802832fb426a32f2f945e89`，退出0；只读Git前置并内存覆盖状态四源，证明不依赖transfer活动WIP。真实React双语、4状态正文、原面板state.status→页面→金额区及小程序accepted分支模拟`3cb1d67c4406ae757c2c3d4a06522b312cbf8af0ec2f5419d66a71006e46da13`退出0、0请求／业务写入；既有当前时区`804d16ee769204fbf87c81265dbefca1d2a054f93a707c2cf500cabab435047e`、原submitted状态`646e505a4e43fd27f459e01cc399f34a9479ae86bf043fb0c324cb378bcaa017`，后台Root真实React`1c5430accfbad9a329a96eaae296759bbf9c2046a29dc825bcfb7435974334b3`及五根类型`bc0278c1a29411aa7664c7b25240e0570df062e40073fd762e582a20bd0e4dc5`均已退出0，不重复全仓或新增测试文件。固定四源blob为RemoteBooking`05611629900b1ef6692c6a72913fbdc8eea30ded`、Panel`d75836e3bde3723867493a03bc5fe99b19b480a8`、BookingPage`6df96037ee65ebd50b64f3442980a31526e0c2b3`、小程序WXML`253227063018b601f2efa30e12f44f973b15c61c`，按固定内容进索引而不覆盖活动转接页面。
+
+Root核原G1～G4及独立复核后，ENTRY-16由75%更新100%，ENTRY等权覆盖率73.6%（2/18达到100%）；原AIN保持88.4%／24/28，46项等权参考82.6%。ENTRY-14／04跨端原引用的后端已固定，活动两端消费恢复出口尚待核定，不因本次状态修复升档。所有验证使用原offline preload／不可达DATABASE_URL、内存audit0、任务目录未创建、自有进程退出；真实数据库／浏览器／微信／供应商由负责人后续操作，不称生产放行。main由PM按固定来源串行整合，未争main索引。
+
 <a id="ain-entry16-admin-language-consumers-20261115"></a>
 ## ENTRY-16 后台步骤、模型标签及原确认历史双语消费者（2026-11-15）
 

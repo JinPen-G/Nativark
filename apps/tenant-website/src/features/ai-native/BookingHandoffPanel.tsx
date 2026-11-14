@@ -10,7 +10,7 @@ import { createBookingHandoffConsumer, type BookingHandoffHost, type BookingHand
 export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue, children, english }: {
   host: BookingHandoffHost; context: BookingPageContext; sessionIdentity: unknown; english: boolean;
   onContinue: (handoff: AiBookingHandoff) => void;
-  children: (handoff: AiBookingHandoff, quote: OriginalBookingQuoteFacts | null) => ReactNode;
+  children: (handoff: AiBookingHandoff, quote: OriginalBookingQuoteFacts | null, status: BookingHandoffState['status']) => ReactNode;
 }) {
   const [view, setView] = useState<{ owner: object; state: BookingHandoffState } | null>(null);
   const [consent, setConsent] = useState<{ owner: object; agreed: boolean } | null>(null);
@@ -94,6 +94,6 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
       {approvedOrder?.owner === consumer.owner && host.isCurrent?.() !== false && <Link className="button button-dark"
         to={href(`/orders/${encodeURIComponent(approvedOrder.orderId)}`)}>{text('查看原企业订单', 'View original enterprise order')}</Link>}
     </section>
-    {['continued', 'accepting', 'accepted'].includes(state.status) && state.handoff && children(state.handoff, state.quote ?? null)}
+    {['continued', 'accepting', 'accepted'].includes(state.status) && state.handoff && children(state.handoff, state.quote ?? null, state.status)}
   </>;
 }

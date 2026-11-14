@@ -99,7 +99,7 @@ export function BookingPage() {
               setQuantity(handoff.fields.lines[0].quantity);
               setFulfillment(handoff.fields.fulfillmentMode === 'delivery' ? 'delivery' : 'pickup');
             }}>
-            {(handoff, original) => <div className="booking-layout"><div className="booking-form">
+            {(handoff, original, originalStatus) => <div className="booking-layout"><div className="booking-form">
               <section className="booking-card" id="booking-product"><h2>{language === 'en' ? 'Original rental items' : '原预约商品'}</h2>
                 <ul>{handoff.fields.lines.map((line, index) => { const basis = original?.lines[index];
                   return <li key={`${index}:${line.itemGroupId}`}>{basis?.itemName ?? line.itemGroupId} · {line.quantity}
@@ -121,7 +121,7 @@ export function BookingPage() {
               <p>{language === 'en' ? 'Original material is read-only. Changes require a new preparation.' : '原材料只读；修改需求须重新准备，不沿用旧确认。'}</p>
               <p style={{ overflowWrap: 'anywhere' }}>{handoff.fields.fulfillmentLocationId}{handoff.fields.deliveryAddressId ? ` / ${handoff.fields.deliveryAddressId}` : ''}</p>
             </div><aside className="booking-aside" id="booking-quote"><RemoteBooking product={product} startDate={startDate} endDate={endDate} quantity={quantity}
-              fulfillment={fulfillment} handoff={handoff} originalFacts={original} /></aside></div>}
+              fulfillment={fulfillment} handoff={handoff} originalFacts={original} originalStatus={originalStatus} /></aside></div>}
           </BookingHandoffPanel>
         : <div className="booking-layout"><div className="booking-form">{productSection}{termSection}{fulfillmentSection}</div><aside className="booking-aside" id="booking-quote"><RemoteBooking product={product} startDate={startDate} endDate={endDate} quantity={quantity} fulfillment={fulfillment} preferredLocationId={pickupStoreId} /></aside></div>
       : <form className="booking-layout" onSubmit={submit}><div className="booking-form">{productSection}{termSection}{fulfillmentSection}

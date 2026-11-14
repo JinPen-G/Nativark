@@ -45,7 +45,7 @@
         <view>原应付：<money-text amount="{{payable}}" currency="{{currency}}"></money-text></view>
         <view>押金：<money-text amount="{{deposit}}" currency="{{currency}}"></money-text></view>
         <view>预授权：<money-text amount="{{preAuth}}" currency="{{currency}}"></money-text></view>
-        <view class="muted mt-16">原报价已保存，尚未预占资源；修改需求须重新准备。</view>
+        <view class="muted mt-16">{{aiStatus === 'accepted' ? '原材料已受理；建单、付款和资源状态仍须核对原业务结果。' : '原报价已保存；提交和资源状态以原业务收据为准，修改需求须重新准备。'}}</view>
         <checkbox-group bindchange="onAgreeChange"><label><checkbox value="agree" checked="{{agreed}}" disabled="{{aiStatus === 'accepting'}}"/>我已阅读并同意原租赁规则</label></checkbox-group>
         <button class="btn btn--block mt-16" bindtap="onOpenRules">查看原租赁规则</button>
         <view wx:if="{{formError}}" class="notice notice--warning mt-16">{{formError}}</view>

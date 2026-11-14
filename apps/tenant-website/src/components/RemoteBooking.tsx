@@ -12,7 +12,7 @@ import type { Product } from '../types';
 import type { AiBookingHandoff, AiBookingSelection, AiClientQuoteFacts, ClientCreateQuoteRequest, EnterpriseOwnRentalPolicy, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema, formatRentalMoney } from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
-import { readOriginalBookingQuote, originalBookingUnitLabel, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
+import { readOriginalBookingQuote, originalBookingUnitLabel, type OriginalBookingQuoteFacts, type BookingHandoffState } from '../features/ai-native/booking-handoff';
 import { ClientQuotePreparation } from '../features/ai-native/ClientQuotePreparation';
 import { clientQuoteBookingStoredRequest, clientQuoteOwner, clientQuoteSelectedInput, clientQuoteStorageKey } from '../features/ai-native/client-quote-session';
 import { clientQuoteCatalogTimeZone, clientQuoteTimeRange } from '../features/ai-native/client-quote-time';
@@ -68,14 +68,17 @@ interface RemoteBookingProps {
   product: Product; startDate: string; endDate: string; quantity: number; fulfillment: 'pickup' | 'delivery'; preferredLocationId?: string;
   handoff?: AiBookingHandoff;
   originalFacts?: OriginalBookingQuoteFacts | null;
+  originalStatus?: BookingHandoffState['status'];
 }
 
 export function RemoteBooking(props: RemoteBookingProps) {
   // Never mount the automatic quote/create-order lifecycle for an original handoff.
-  return props.handoff ? <OriginalHandoffBooking handoff={props.handoff} suppliedFacts={props.originalFacts} /> : <ManualRemoteBooking {...props} />;
+  return props.handoff ? <OriginalHandoffBooking handoff={props.handoff} suppliedFacts={props.originalFacts} originalStatus={props.originalStatus} /> : <ManualRemoteBooking {...props} />;
 }
 
-export function OriginalHandoffBooking({ handoff, suppliedFacts }: { handoff: AiBookingHandoff; suppliedFacts?: OriginalBookingQuoteFacts | null }) {
+export function OriginalHandoffBooking({ handoff, suppliedFacts, originalStatus }: {
+  handoff: AiBookingHandoff; suppliedFacts?: OriginalBookingQuoteFacts | null; originalStatus?: BookingHandoffState['status'];
+}) {
   const { language } = useSite();
   const { session, currentWorkspace } = useAuth();
   const quoteOwner = useMemo(() => ({}), [handoff, session, currentWorkspace?.workspaceCode]);
@@ -107,7 +110,11 @@ export function OriginalHandoffBooking({ handoff, suppliedFacts }: { handoff: Ai
       {line.itemName ?? line.itemGroupId} · {line.quantity} · {originalBookingUnitLabel(line.pricingUnit, en)}
       {line.usageQuantity !== null && <> · {en ? 'Usage' : '使用量'}：{line.usageQuantity}</>}</li>)}</ul>
       {originalQuote.enterprise && <p>{originalQuote.enterprise.corporateName} · {originalQuote.enterprise.enterpriseContractAndPayer ? (en ? 'Enterprise contract and payment' : '企业签约付款') : (en ? 'Personal payment' : '个人签约付款')}</p>}</>}
-    <p>{en ? 'Not submitted / not reserved' : '尚未提交 / 资源未预占'}</p>
+    <p role="status">{originalStatus === 'accepted'
+      ? (en ? 'The original material was accepted. Order creation, payment and resource status still require the original business result.'
+        : '原材料已受理；建单、付款和资源状态仍须核对原业务结果。')
+      : (en ? 'This shows the original material. Submission, order creation and resource status come from the original receipts.'
+        : '这里只展示原材料；提交、建单和资源状态以原收据为准。')}</p>
     <p role="status">{en ? 'Use the explicit acceptance and submission controls above when the server host provides them. No new quote is created here.' : '宿主提供正式能力时，使用上方受理与明确提交入口；这里不创建新报价。'}</p>
   </section>;
 }
