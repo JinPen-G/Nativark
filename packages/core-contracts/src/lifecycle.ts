@@ -96,3 +96,14 @@ export const ChangeMemberCoreAssignmentSchema = z.object({
   operationId: id
 }).strict();
 export type ChangeMemberCoreAssignment = z.infer<typeof ChangeMemberCoreAssignmentSchema>;
+
+/** 初始化目标租户由原主体确定，配置交所属Core的唯一schema解析。 */
+export const BindCoreScopeSchema = CoreScopeReferenceSchema.omit({ tenantId: true }).extend({
+  operationId: id,
+  expectedRevision,
+  configuration: z.unknown().optional()
+}).strict();
+export type BindCoreScope = z.infer<typeof BindCoreScopeSchema>;
+
+export const CoreBindingOperationQuerySchema = BindCoreScopeSchema.pick({ coreId: true, container: true, operationId: true });
+export type CoreBindingOperationQuery = z.infer<typeof CoreBindingOperationQuerySchema>;

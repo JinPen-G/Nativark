@@ -8,7 +8,8 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" }
+    "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" },
+    "./mysql-bindings": { "types": "./dist/mysql-bindings.d.ts", "default": "./dist/mysql-bindings.js" }
   },
   "scripts": {
     "prebuild": "npm run build -w @rental-os/core-contracts",
