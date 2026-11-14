@@ -146,8 +146,8 @@ export class AiQuoteGoalProjectionService {
         const answer = round.answers.find(row => row.fieldId === 'customer_type_selection');
         if (!answer) continue;
         const field = round.contract.fields.find(row => row.fieldId === answer.fieldId);
-        if (field?.kind !== 'choice' || answer.value !== 'personal' && answer.value !== 'corporate') throw denied();
-        selectedCustomerType = answer.value;
+        if (field?.kind !== 'choice' || !['personal', 'corporate', 'enterprise_employee'].includes(String(answer.value))) throw denied();
+        selectedCustomerType = answer.value === 'enterprise_employee' ? 'personal' : answer.value as 'personal' | 'corporate';
       }
       const artifact = await tx.aiTaskResultArtifact.findUnique({ where: { scopeId_taskId_id: {
         scopeId: task.scopeId, taskId: task.id, id: model.resultId } } });

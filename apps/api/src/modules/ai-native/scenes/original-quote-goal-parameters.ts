@@ -3,7 +3,7 @@
  * their real human question receipts. No quote, authority or approval is made. */
 import { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION, validateAiTaskInputAnswersDraft,
   parseAiTaskUsageQuantityDraft,
-  type AiQuoteGoalConditionsDraft, type AiQuoteGoalProjectionDraft, type AiSceneRequestBody,
+  type AiQuoteGoalConditionsDraft, type AiQuoteGoalProjectionDraft, type AiSceneRequestBody, type AiSceneQuoteCandidate,
   type AiTaskInputAnswerDraft, type AiTaskInputContractDraft, type AiTaskInputFieldDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
@@ -17,7 +17,7 @@ type Round = { contract: AiTaskInputContractDraft; answers: readonly AiTaskInput
 type PartialCandidate = Omit<AiQuoteGoalConditionsDraft, 'items' | 'customerType'> & {
   customerType?: 'personal' | 'corporate'; customerId?: string; locationId?: string; returnLocationId?: string;
   deliveryAddressId?: string; selectionRevision?: string;
-  bookingIdentity?: { bookingIdentity: 'enterprise_employee'; corporateCustomerId?: string; enterpriseContractAndPayer?: boolean };
+  bookingIdentity?: AiSceneQuoteCandidate['bookingIdentity'];
   items?: Array<NonNullable<AiQuoteGoalConditionsDraft['items']>[number] & { itemGroupId?: string }>;
 };
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -56,6 +56,8 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
   const selected: PartialCandidate = {}, anchors = new Map<string, string | undefined>();
   const quantityAnchors = new Map<number, number | undefined>();
   const quantityAnswerEpochs = new Map<number, number>();
+  const globalHintAnchors = new Map<string, string | undefined>(), globalAnswerEpochs = new Map<string, number>();
+  const locationLabels = new Map<string, string>(), withdrawn = new Set<'start' | 'end' | 'fulfillmentMode'>();
   let clarificationEpoch = 0;
   let hints: AiQuoteGoalConditionsDraft = {};
   const merged = (words: AiQuoteGoalConditionsDraft): PartialCandidate => {
@@ -63,7 +65,23 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
     const next: PartialCandidate = structuredClone(hints);
     // Model-inferred identity/quantity cannot enter the original Core request.
     delete next.customerType;
+    for (const property of ['start', 'end', 'fulfillmentMode'] as const) {
+      if (selected[property] !== undefined && hints[property] !== undefined && selected[property] !== hints[property]
+        && (globalHintAnchors.get(property) !== hints[property] || globalAnswerEpochs.get(property) !== clarificationEpoch)) {
+        delete selected[property]; withdrawn.add(property);
+        if (property === 'fulfillmentMode') delete selected.deliveryAddressId;
+      }
+    }
+    for (const [property, name] of [['locationId', 'locationName'], ['returnLocationId', 'returnLocationName']] as const) {
+      if (selected[property] && hints[name] !== undefined && (globalHintAnchors.get(property) !== hints[name]
+        || globalAnswerEpochs.get(property) !== clarificationEpoch && locationLabels.get(property) !== hints[name])) {
+        delete selected[property]; delete selected.deliveryAddressId;
+      }
+    }
     for (const [property, value] of Object.entries(selected)) if (property !== 'items') (next as Record<string, unknown>)[property] = structuredClone(value);
+    // New model dates/modes are not renewed confirmation of withdrawn fields.
+    // Keep them out of Core parameters until another original human answer.
+    for (const property of withdrawn) if (selected[property] === undefined) delete next[property];
     const count = Math.max(next.items?.length ?? 0, selected.items?.length ?? 0);
     if (count) next.items = Array.from({ length: count }, (_, index) => {
       const item = hints.items?.[index] ?? {};
@@ -97,6 +115,23 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
     if (round.answers.some(answer => answer.fieldId === 'clarification_text'
       && typeof answer.value === 'string' && answer.value.trim())) clarificationEpoch++;
   };
+  const recordGlobalAnswers = (round: Round) => {
+    for (const [fieldId, property, hint] of [['starts_at', 'start', 'start'], ['ends_at', 'end', 'end'],
+      ['fulfillment_selection', 'fulfillmentMode', 'fulfillmentMode'], ['pickup_location', 'locationId', 'locationName'],
+      ['return_location', 'returnLocationId', 'returnLocationName']] as const) {
+      const answer = round.answers.find(value => value.fieldId === fieldId);
+      if (!answer) continue;
+      globalHintAnchors.set(property, hints[hint]); globalAnswerEpochs.set(property, clarificationEpoch);
+      if (property === 'start' || property === 'end' || property === 'fulfillmentMode') withdrawn.delete(property);
+      if (property === 'locationId' || property === 'returnLocationId') {
+        const field = round.contract.fields.find(value => value.fieldId === fieldId);
+        if (field?.kind === 'choice') {
+          const label = field.options.find(option => option.value === answer.value)?.label;
+          if (label) locationLabels.set(property, label);
+        }
+      }
+    }
+  };
   for (const round of rounds) {
     if (!validateAiTaskInputAnswersDraft(round.contract, round.answers)) throw denied();
     const originalWords = conditions(round.result), before = merged(originalWords);
@@ -104,6 +139,11 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
       if (round.contract.code === 'original_quote_context') { recordClarification(round); continue; }
       const changed = applyOriginalQuoteAnswers(aiQuoteCandidateInputSchema.parse(before), [round]);
       Object.assign(selected, changed);
+      // The ordinary adapter returns a complete candidate, including untouched
+      // model hints. Only explicitly answered dates/mode become confirmations.
+      for (const [property, fieldId] of [['start', 'starts_at'], ['end', 'ends_at'], ['fulfillmentMode', 'fulfillment_selection']] as const) {
+        if (!round.answers.some(answer => answer.fieldId === fieldId) && !globalAnswerEpochs.has(property)) delete selected[property];
+      }
       if (round.answers.some(answer => answer.fieldId === 'customer_selection')) anchors.set('customer', hints.customerName ?? anchors.get('customer'));
       for (const field of round.contract.fields) if (field.fieldId === 'item_selection'
         && round.answers.some(answer => answer.fieldId === field.fieldId)) {
@@ -118,6 +158,7 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
         quantityAnchors.set(index, hints.items?.[index]?.quantity);
         quantityAnswerEpochs.set(index, clarificationEpoch);
       }
+      recordGlobalAnswers(round);
       recordClarification(round);
       continue;
     }
@@ -127,8 +168,10 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
         || !before.items || field.target.rowIndex >= before.items.length)) throw denied();
       if (answer.fieldId === 'clarification_text') continue;
       if (answer.fieldId === 'customer_type_selection') {
-        if (answer.value !== 'personal' && answer.value !== 'corporate') throw denied();
-        selected.customerType = answer.value;
+        if (!['personal', 'corporate', 'enterprise_employee'].includes(String(answer.value))) throw denied();
+        selected.customerType = answer.value === 'enterprise_employee' ? 'personal' : answer.value as 'personal' | 'corporate';
+        if (answer.value === 'enterprise_employee') selected.bookingIdentity = { bookingIdentity: 'enterprise_employee' };
+        else delete selected.bookingIdentity;
       } else if (['item_selection', 'quantity', 'pricing_unit_selection', 'usage_quantity'].includes(answer.fieldId)) {
         const index = field.target?.rowIndex ?? (before.items?.length === 1 ? 0 : -1);
         if (index < 0 || !before.items?.[index]) throw denied();
@@ -153,6 +196,7 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
         if (property === 'customerId') anchors.set('customer', before.customerName);
       }
     }
+    recordGlobalAnswers(round);
     recordClarification(round);
   }
   return merged(current);
@@ -184,7 +228,8 @@ export function originalQuoteGoalContract(projection: AiQuoteGoalProjectionDraft
       ...(target ? { target } : {}) } as AiTaskInputFieldDraft);
   };
   if (!candidate.customerType) fields.push({ fieldId: 'customer_type_selection', kind: 'choice', required: true,
-    label: '明确使用人身份（不授企业签约或付款权）', options: [{ value: 'personal', label: '个人使用人；企业权益须原资格流程' }] });
+    label: '明确使用人身份（不授企业签约或付款权）', options: [{ value: 'personal', label: '个人使用人' },
+      { value: 'enterprise_employee', label: '企业员工使用人；企业关系与自付需另行核对' }] });
   if (!candidate.customerId) choice('customer_selection', 'customerId', '明确选择当前受权客户');
   for (const [index, item] of (candidate.items ?? []).entries()) {
     const target = { bindingVersion: AI_TASK_INPUT_QUOTE_ROW_TARGET_VERSION, kind: 'quote_item' as const, rowIndex: index,
@@ -195,6 +240,9 @@ export function originalQuoteGoalContract(projection: AiQuoteGoalProjectionDraft
   }
   if (!candidate.start) fields.push({ fieldId: 'starts_at', kind: 'text', required: true, maxLength: 80, label: '明确开始时间（带时区的绝对时间）' });
   if (!candidate.end) fields.push({ fieldId: 'ends_at', kind: 'text', required: true, maxLength: 80, label: '明确结束时间（带时区的绝对时间）' });
+  if (!candidate.fulfillmentMode) choice('fulfillment_selection', 'fulfillmentMode', '明确选择当前履约方式');
+  if (!candidate.locationId) choice('pickup_location', 'locationId', '明确选择当前领取地点');
+  if (!candidate.returnLocationId) choice('return_location', 'returnLocationId', '明确选择当前归还地点');
   const unique = fields.filter((field, index) => fields.findIndex(row => row.fieldId === field.fieldId) === index).slice(0, 7);
   return { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: ORIGINAL_QUOTE_GOAL_PARAMETER_CODE,
     version: requestFingerprint({ goalHash: projection.goalHash, original: projection.original, model: { ...projection.model, observedAt: undefined },
