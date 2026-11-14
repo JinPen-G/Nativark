@@ -33,6 +33,58 @@ Root先按QA同一真实RentalBusinessConfigRepository读取复现原conflict，
 
 两补片仅为PM固定对象交付，当前主线是否已集成由PM核；不新增测试文件、不联系QA、不群发。本片所有验证audit0、进程退出，任务临时目录未创建，无main工作区／索引写入，无依赖／client／dist／数据库／服务产物，未访问真实业务或供应商。Git对象是最小补片，不是又一份output环境。
 
+<a id="qa-merged-main-final-review-20261114"></a>
+## 合并增量 QA 最终报告与两项 P1 复验（2026-11-14）
+
+PM 本次明确授权接续原合并审查收尾。固定基线 `de9458d0470ee5deace40b7211d0c7ec3f868e00`，合并目标 `1e45ade7930e006e9d033abed0c196a1388b743c`，目标 tree `97a8eb0aebcc0e0670dbd2873d107f469b174236`，增量共349文件、23392行插入、2220行删除。原六棵冻结源已核为目标祖先。重复登记复验固定 `e80c6afedbfb5da8d46cb03b11f01bc5e1e95018`，日历复验按PM后续明确指令固定 `637d9d93f4e098f704adccc500369e735a2ca81d`。两次开工均核对本地及GitHub main一致，最终两合同修复blob继续与e80相同。
+
+### 缺陷清单与处理建议
+
+| 优先级 | 已确认问题 | 当前结论 | 处理建议 |
+| --- | --- | --- | --- |
+| P1 | 公共schema重复登记使OpenAPI模块导入抛错，AppModule导入链受阻。同组四个开业操作还重复登记operationId | e80c6afe经QA原反例、固定OpenAPI与实际AppModule离线导入复验，关闭该P1 | AI原负责人两源最小删除已由PM集成。后续同类合并保留显式重名保护，并执行模块导入和操作唯一检查 |
+| P1 | Core新增日历observations被AI纳入稳定指纹，业务事实相同的两次合法读取被误判conflict | 637d9d93经QA原反例、19组读取/拒绝及6组实际保存/Outbox限定场景复验，关闭该P1 | 单源修复已由PM集成。继续保留稳定依据投影、观察窗口校验、当前身份、同事务捕获、原去重和unknown语义 |
+
+第一P1定位于合并目标[ai-leaf-components](../../apps/api/src/contracts/ai-leaf-components.ts)第32～34及53～55行，前面的组合登记与末尾受保护登记重复。实际抛错为 `Duplicate AI component: AiTaskOpeningProposalQueryDraft`。[openapi-document](../../apps/api/src/contracts/openapi-document.ts)在目标第2346～2351及2792～2797行重复登记list、preview、prepare、operation。[client-public.controller](../../apps/api/src/modules/ai-native/scenes/client-public.controller.ts)第10行导入OpenAPI，[main](../../apps/api/src/main.ts)第22行在创建Nest应用前导入AppModule，因此模块求值失败阻断新进程启动。QA在原基线成功加载1208个schema，在合并目标复现异常，前后对照命令退出1。
+
+修复两blob分别为 `7d440f35978b97924723e6d08c2794ca20d2aa08` 和 `1db9006c120209ed5df8230a2a496f651c06f457`，QA逐blob和diff核同。e80c6afe固定OpenAPI加载成功，1258个schema、1234个操作，operationId及方法/路径均唯一，四个开业操作各一份。prepare权限为 `rental-os:price:manage`，其余三个保留 `rental-os:order:view` 与 `rental-os:price:manage`，原请求和返回schema逐项核对。随后实际AppModule模块导入成功，共979个固定源码模块、92个控制器和175个provider条目，控制器登记唯一。两个复验命令均退出0。
+
+第二P1定位于原1e45/e80版本[core-business-failure-resource.source](../../apps/api/src/modules/ai-native/business-events/core-business-failure-resource.source.ts)第256～260行。[Core业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)第413～414行新增calendarSource.observations，AI的passthrough对象将其整体纳入sourceHash，随后双读比较。实际Core仓储、AI来源与原request identity ALS的离线对照中，AI冻结父源旧仓储连续读取成功，合并仓储返回 `BusinessFailureError('conflict')`。只剔除两份读取结果的observations后，其余业务事实深比较完全相同，写入数为0。SQL/ORM、九项readiness和计数使用明示夹具，scope查询的3ms等待模拟普通异步耗时。
+
+该问题的触发范围是businessFailure运行配置启用、当前operator/staff具有完整空间数据范围且进入原开业来源读取。[PrismaBusinessFailureOutbox](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox.ts)第175～179行首先调用readOpening，九项全部ready也会经过该读取。[业务配置仓储](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)第523～537行在原事务内await捕获，异常沿事务传播。本次补充实际upsertPricingPlan、原品类绑定校验、Core读取、AI来源、Outbox及resource store的连续执行，旧源码在写入计划后因误conflict触发调用方夹具回滚，计划与事件最终均为0，补齐此前仅有调用链分析的回滚影响证据。
+
+日历修复blob `623bb554845e50ae17c2b1e46796f3b1fbff6c5e` 已精确核对。19组限定读取包括原反例、空日历与已采用日历的跨观察时点稳定指纹、调用方事务及独立读取一致、旧端口缺calendarSource兼容。非法版本/空间/hash/时间格式/逆序窗口/未来窗口/错误consistency均返回unavailable。原日历revision、version、publishedAt、officialSource、额外未来Core事实及配置rowRevision变化仍conflict，实际ALS读取中撤权拒绝，受限地点范围在读取前返回source_unavailable。生产者返回对象中的observations仍完整保留。
+
+6组事务场景覆盖旧源码误冲突回滚、修复后保存与重复捕获、append后来源变化/ALS撤权/应答丢失，以及append前来源变化。正常保存提交一份计划和六条实际缺项事件，再次捕获得到相同原eventId集合，事件总数仍为6。append后变化继续返回result_unknown，调用方事务夹具回滚计划和事件；append前变化为conflict且事件写入0。所有场景原tx透传、事务内访问根client次数0、嵌套事务0。SQL/ORM行、schema见证、九项readiness与commit/rollback使用明示内存夹具，原Core/Outbox/resource store代码实际执行，真实MySQL锁与回滚仍待环境验证。
+
+### 本轮实际命令与证据
+
+下列Node命令均以PowerShell单引号here-string送入 `node --no-compilation-cache -`，源码来自固定Git对象并在内存转译。使用原 `tests/fixtures/ai-native/prisma-offline-preload.cjs`，DATABASE_URL固定为 `mysql://offline:offline@127.0.0.1:1/rental_os_offline`，TEMP/TMP、缓存、write root和audit定位在本树 `output/.tmp/qa-merged-main-20261114`。audit收集于内存，各命令结束时均为空，任务目录均不存在。下面SHA-256对应保存于QA对话工具调用中的stdin正文，按UTF-8、LF和一个结尾换行计算。
+
+| 验证 | 固定版本 | 实际退出码 | stdin SHA-256 / 结果 |
+| --- | --- | --- | --- |
+| 原OpenAPI前后对照 | de945 → 1e45 | 1 | `ad6c5c174ddab09e8a886704b614c71994c8c44e03382702d9f71fd6b5ac959c`，目标命中重复schema异常 |
+| 日历观察时间反例 | AI父源86d05 → 1e45 | 0 | `845d1e82a39a2d46aa42ae630b39c996cc8e6bc991db4345c57f613073b465c2`，退出0表示反例断言成立 |
+| 原branding与auth-preview正文 | 1e45 | 0 | `5fcc7b281be333f664c4a7e51838c6207b406fe781fdeb82986df92bf9ab1c0e`，原两个测试正文和断言通过 |
+| 重复登记修复前后对照 | 1e45 → e80c6afe | 0 | `1518ab6391c5318966c0c5f11797cb0e58248186e11ef30f01e3b7723bf16d7b`，原异常仍可复现、修复后1258/1234/4及唯一性断言通过 |
+| 实际AppModule离线导入 | e80c6afe | 0 | `e7d6bceeef727f0304636add36962e9890192c40ca0f2cc3bf0d8ca3a2942c62`，979固定模块导入完成，Nest应用实例化和生命周期待环境验证 |
+| 日历原反例及读取/拒绝复验 | e80c6afe → 637d9d93 | 0 | `fc5fa0c5107f2ea09b5c075956277bfc6a1db4cd1e4888be9267acf23cd4929c`，19组限定场景通过 |
+| 实际保存与Outbox同事务复验 | e80c6afe → 637d9d93 | 0 | `8f7c42976c2708965f61526ac06c599a5a90e030b2e235c18200275da3bcf19f`，6组限定场景通过，子进程退出0 |
+
+原增量执行 `git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check de9458d0470ee5deace40b7211d0c7ec3f868e00 1e45ade7930e006e9d033abed0c196a1388b743c -- apps packages scripts tests`，退出0。两源修复执行同口径的 `diff --check 1e45ade7930e006e9d033abed0c196a1388b743c e80c6afedbfb5da8d46cb03b11f01bc5e1e95018 -- apps/api/src/contracts`，退出0。日历片执行同口径的 `diff --check e80c6afedbfb5da8d46cb03b11f01bc5e1e95018 637d9d93f4e098f704adccc500369e735a2ca81d -- apps/api/src/modules/ai-native/business-events/core-business-failure-resource.source.ts`，退出0。首次未声明cr-at-eol的检查产生CRLF假告警，已按原换行口径校正。
+
+### 覆盖范围、既有缺口与结论
+
+本轮已做AppModule/providers/Guard/shared/OpenAPI增量及直接消费者静态追踪，覆盖公开入口与登录续接、当前身份和租户/空间范围、自动解释的原AUTOMATION主体及唯一Gateway/预算账、Core配置/CAS/历史报价/同事务Outbox、企业原授权和恢复接点、官网四冲突及Goal到原Booking/handoff、员工上传元数据ACL、Nativark品牌与Preview原图。品牌和预览另有上表原测试通过。新增合并缺陷清单共两项，代码格式检查见上表。
+
+PM和作者已有的Shared/API/后台/企业/官网/两小程序类型、Core十组捕获/回滚、治理、续租12项、配置7项、官网216渲染/9favicon/19行为沿用[原冻结集成阶段](#ain-all-frozen-main-20261114)证据。重复登记片的三根/2016源、日历片的两根/1205源零诊断，以及完整contract原脚本退出1及565条动态/常量路由识别等失败、失败集合新增0，属于[作者补片阶段](#ain-main-contract-calendar-p1-fixed-20261114)证据。本次QA额外复跑的范围列在上表。
+
+既有Core报价新旧配置混用问题、定价分组4项旧fixture失败、官网resolve的3过2失败及三份历史附件缺失继续按原专项记录处理。验证入口的这些未闭合项应由PM按原归属排程，保留正式断言和原业务门槛。
+
+本轮为PM限定的单人增量审查，新增双人独立复核证据为空。真实HTTP/完整DI生命周期、MySQL事务并发和多实例、浏览器/微信宿主、模型供应商、支付及部署仍待环境验证。最终结论为本轮确认的两个新增P1均已定向复验关闭，本轮已审范围内遗留新增阻断为0。既有报价配置混用及原验证缺口继续原归属，整体发布判断由PM结合这些未完项与环境验证决定。本轮合并增量审查至此收尾。
+
+QA写入仅为本记录这一阶段摘要，产品源码、原测试、runner和Git索引写入数均为0。原WIP及后台语言/主题活动成果沿原归属。全部验证进程已退出，本任务临时目录未创建，新增临时产物为0。结果保留于本QA对话及此处，由PM主动读取。
+
 <a id="ain-merged-review-openapi-p1-20261114"></a>
 ## 合后review：重复合同登记启动阻断修复（2026-11-14）
 
