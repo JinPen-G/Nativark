@@ -175,6 +175,8 @@ Core合同/宿主/示范包补正式typesVersions，Node10/CommonJS和NodeNext�
 
 原8组合同测试退出0、skip/todo为0；六份相关文档591个链接/142个章节锚点定向核对退出0，新增问题0，原需求/任务及百分比保持。差异格式检查退出0。固定成果随中文提交普通推送，真实远端回读后继续按该提交准备正式发行，当前没有真实GitHub Release或运行安装验收。
 
+后续实际隔离构建核对准备中，将metadata包命令的仓库根定位改为git rev-parse --show-toplevel，避免自定义编译目录依赖两级父路径假设。stdin命令facade核固定Git原文和根定位退出0；不改打包/授权语义，源码根变更随本阶段补充提交上传，真实子进程验证在该固定提交后进行。
+
 <a id="core-removal-preflight-20261115"></a>
 
 ## Core移除依赖预检与原SaaS身份复核（2026-11-15）

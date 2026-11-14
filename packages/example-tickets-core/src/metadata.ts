@@ -14,7 +14,8 @@ try {
     process.stdout.write(`${JSON.stringify(createTicketsManifest({ repository: args[0], commit: args[1] }), null, 2)}\n`);
   else if (command === "package" && args.length === 4) {
     const directory = resolve(__dirname, ".."), source = CoreSourceSchema.parse({ repository: args[0], commit: args[1] });
-    const repository = resolve(directory, "../..");
+    const repository = execFileSync("git", ["rev-parse", "--show-toplevel"],
+      { cwd: directory, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
     // 清单来源固定到真实Git源码；未提交业务/合同差异不能被包装成该提交的发行。
     const paths = ["packages/example-tickets-core", "packages/core-contracts"];
     const sameSource = spawnSync("git", ["diff", "--quiet", source.commit, "--", ...paths],
