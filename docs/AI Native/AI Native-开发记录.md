@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-merged-review-openapi-p1-20261114"></a>
+## 合后review：重复合同登记启动阻断修复（2026-11-14）
+
+负责人明确要求全部冻结树合后review，QA对 `de9458d0470ee5deace40b7211d0c7ec3f868e00 → 1e45ade7930e006e9d033abed0c196a1388b743c` 的349文件增量审查，确认两处P1。本片先处理公共schema/操作重复登记，日历稳定指纹仍待原作者修复及QA复验。
+
+QA用固定源码与正式Shared内存加载：原基线openapi-document导入成功，1208个schema且无重复operationId；合并后抛 `Duplicate AI component: AiTaskOpeningProposalQueryDraft`，由AppModule控制器导入链触发，类型检查不能证明此模块加载成功。AI原负责人按固定main核定两源：ai-leaf-components `7d440f35978b97924723e6d08c2794ca20d2aa08` 仅删除前面重复组，保留显式重名保护；openapi-document `1db9006c120209ed5df8230a2a496f651c06f457` 仅删除第二组四个相同开业操作，原请求/返回schema、权限和其余新增入口不变。
+
+作者实际OpenAPI/AppModule模块导入退出0：1258个schema、1234个操作、四个开业操作，schema/operationId/方法路径均无重复；三根/2016源类型零诊断。原contract脚本退出1，保留565条既有动态路由识别缺项，新增0，重复operationId四项已消除；不删除原断言或改校验器。命令为原offline preload加固定不可达DATABASE_URL的 `node --no-compilation-cache -`，源码只读Git对象、输出内存，audit为空，未启动HTTP/真实数据库/模型。PM比对确认仅上述两项删除，精确接入，不写AI活动树，两个助手继续研发。
+
+第二P1为Core日历来源的观察时间进入AI稳定指纹，事实未变也conflict并可导致启用Outbox的配置事务回滚；由AI负责人限定在原resource source处理，不去除真实版本/内容/范围校验。QA最终报告与两处复验另接本记录，本片不宣称review通过或运行环境启动通过。原六项WIP、后台语言/主题按钮新任务保留，本片无新增临时文件。
+
 <a id="ain-all-frozen-main-20261114"></a>
 ## 全部工作树冻结后继与AI消费者合入main（2026-11-14）
 
