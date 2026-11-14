@@ -20,6 +20,29 @@
 
 Core有HTTP入口时，组合向 `createCoreDeployedCatalogue`额外传 `http: [coreHttpContribution]`。贡献必须属于当前已登记的Core/版本并通过[公共HTTP政策检查](../core-contracts/README.md#登记core的http政策)，失败不能创建可用目录。目录的 `http.resolve`只返回当前受控政策，输出元数据为隔离副本；目录/可用性/政策方法在组合后固定，后续升级重新建立组合。Core可无HTTP贡献，但未登记路径不能据此开放。Controller实际装配、原Guard和业务提交复验仍由宿主完成。
 
+## 读取原迁移账与实际结构
+
+从 `@rental-os/core-host/mysql-deployment`导入 `createMysqlCoreDeploymentObservation({ database, platform, cores })`，将返回值直接作为部署目录的 `observations`。每个模块提供自己的正式 `data`合同、与迁移ID逐项对应的原Prisma `migrationNames`，以及读取实际表/列/约束的 `readPhysical`。平台与Core均由原数据所有者提供真实检查；不能用清单版本、文件存在或刚执行过迁移代替检查结果。[只读适配](src/mysql-deployment.ts)
+
+部署准入调用 `observations.read(coreId)`，只读取平台和目标Core的原账及物理结构，避免每次业务请求扫描无关Core。升级预检调用 `read()`读取全组合。读取器一次参数化读取 `_prisma_migrations`，保留原完成收据的checksum和执行顺序。已回退收据不算已应用；未结束收据按原logs标为failed或unknown，不据此声称仍running或推断完成了几条DDL。缺迁移继续保留不完整链，由部署目录和升级预检拒绝。重复未回退收据、损坏摘要或缺物理观察只省略所属Core，其他已就绪Core仍可用；平台缺观察使新Core准入不可用。驱动读取失败向上报告，不吞错变成成功。
+
+工单已提供 `readTicketsPhysicalData`，可以在受控宿主组合中直接传入。示例中的平台数据检查和原迁移名称必须来自目标部署已核定的真实来源；这里只建立只读观察，不登记或执行迁移。[工单检查](../example-tickets-core/src/mysql.ts)
+
+```ts
+import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
+import { readTicketsPhysicalData } from "@rental-os/example-tickets-core/mysql";
+
+const observations = createMysqlCoreDeploymentObservation({
+  database,
+  platform: { data: lock.platform.data, migrationNames: platformMigrationNames, readPhysical: readPlatformPhysicalData },
+  cores: [{ coreId: tickets.manifest.id, data: tickets.manifest.data,
+    migrationNames: ticketsMigrationNames, readPhysical: readTicketsPhysicalData }]
+});
+const catalogue = createCoreDeployedCatalogue({ lock, registrations: [tickets], observations });
+```
+
+当前已验证真实SQL适配与目录/升级预检的离线正常和拒绝路径。原公共平台的完整结构检查、迁移归属及主应用组合仍待PCH对应窗口；没有真实数据库就绪或独立宿主运行证据。
+
 ## 接原身份与事务
 
 [管理服务](src/access.ts)依赖`CoreManagementExecution`和`CoreDeploymentAvailability`。前者由当前宿主提供原管理权限、目标租户/成员核验和事务；后者读取真实部署/注册，不从本地源码目录推断已经安装。没有实现这两个适配不能将页面开放为可办理状态。
@@ -56,6 +79,6 @@ npm run build -w @rental-os/core-host
 
 构建先编译本树core-contracts，再编译本包。已有锁文件中的Prisma5是mysql适配的可选peer，只复用驱动SQL接口，无需生成行业模型。当前源码包不等于已发布npm发行。
 
-[正式出口](src/index.ts) → [部署目录](src/deployment.ts) / [授权服务](src/access.ts) / [绑定服务](src/binding.ts) → [授权MySQL](src/mysql.ts) / [绑定MySQL](src/mysql-bindings.ts) → 本包迁移。输入/输出复用[公共生命周期合同](../core-contracts/src/lifecycle.ts)，实际原身份/部署接线沿当前宿主推进。
+[正式出口](src/index.ts) → [部署目录](src/deployment.ts) / [授权服务](src/access.ts) / [绑定服务](src/binding.ts) → [原账与结构观察](src/mysql-deployment.ts) / [授权MySQL](src/mysql.ts) / [绑定MySQL](src/mysql-bindings.ts) → 本包迁移。输入/输出复用[公共生命周期合同](../core-contracts/src/lifecycle.ts)，实际原身份/部署接线沿当前宿主推进。
 
 当前类型及离线正常/拒绝/重复行为通过，MySQL参数/调用顺序经实际适配与事务替身核对；真实数据库锁、原权限生产者、管理HTTP/UI、绑定初始化和缓存通知尚未验收。固定证据和下一接口见[PCH记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-host-access-20261114)，不把离线授权替身当生产授权。

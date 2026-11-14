@@ -10,8 +10,8 @@ import {
 import { CoreAccessError, type CoreDeploymentAvailability } from "./access";
 
 export interface CoreDeploymentObservationSource {
-  /** 读取当前实际迁移账、未完成执行及物理数据版本，不从包清单推导应用状态。 */
-  read(): Promise<CoreDataObservation>;
+  /** 准入读取平台与目标Core，省略目标时供升级预检读取全组合；不从包清单推导应用状态。 */
+  read(coreId?: string): Promise<CoreDataObservation>;
 }
 export interface CoreDeployedCatalogue {
   readonly registrations: ReadonlyMap<string, CoreServerRegistration>;
@@ -82,7 +82,7 @@ export function createCoreDeployedCatalogue(input: {
       requireRegistered,
       async requireAvailable(coreId) {
         await requireRegistered(coreId);
-        const observed = CoreDataObservationSchema.parse(await input.observations.read());
+        const observed = CoreDataObservationSchema.parse(await input.observations.read(coreId));
         if (!dataAvailable(lock.platform.data, observed.platform))
           throw new CoreAccessError("core_unavailable", "平台实际数据或迁移执行状态尚未就绪");
         const pin = pins.get(coreId)!;

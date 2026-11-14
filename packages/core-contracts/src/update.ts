@@ -59,6 +59,14 @@ export const CoreMigrationExecutionSchema = z.discriminatedUnion("state", [
 });
 export type CoreMigrationExecution = z.infer<typeof CoreMigrationExecutionSchema>;
 
+/** 数据所有者读取真实物理状态后给出的版本证据；迁移/包清单本身不能生成该观察。 */
+export const CorePhysicalDataObservationSchema = z.object({
+  version: CoreReleaseVersionSchema,
+  observedAt: z.string().datetime(),
+  sha256: CoreArtifactHashSchema
+}).strict();
+export type CorePhysicalDataObservation = z.infer<typeof CorePhysicalDataObservationSchema>;
+
 const observation = z.object({
   version: CoreReleaseVersionSchema,
   appliedMigrations: z.array(CoreMigrationSchema.pick({ id: true, sha256: true })),

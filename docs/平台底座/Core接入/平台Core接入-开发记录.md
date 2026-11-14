@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-mysql-data-observation-20261115"></a>
+
+## 原Prisma迁移账、工单物理观察与部署准入（2026-11-15）
+
+起点为已推送并回读的 `fbbb3babeb8d36fd7f37f7d05d15c104263d4ece`，main仍 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`且已在本树祖先。本片完成前像WIP的真实读取与消费者验证，只改独占Core合同/宿主/工单模块及本记录/接续；公共Auth/Platform/shared总出口/Guard/AppModule窗口仍未取得，不将自动目标续接当其授权。
+
+[物理观察合同](../../../packages/core-contracts/src/update.ts)仅增加数据所有者读取实际结构后返回的版本/时间/SHA-256，不泄漏Prisma。[MySQL观察](../../../packages/core-host/src/mysql-deployment.ts)通过正式Node子出口读取原 `_prisma_migrations`，按模块对应原migration_name，保留原checksum与执行顺序、不按清单重排。rolled-back不算应用，未结束按原logs为failed或unknown，未读取applied_steps_count去猜DDL进度。缺/损坏/重复Core证据只使所属观察不可用，公共平台缺观察拒绝新Core准入；驱动错误向上传递。没有新迁移账、DDL、Client生成或默认成功。
+
+[部署目录](../../../packages/core-host/src/deployment.ts)传入目标Core给Source，普通准入只读平台与目标Core，省略目标时读取全组合供升级预检。原无参数Source仍可供给完整观察，既有消费者保持兼容；实际MySQLSource减少无关结构查询，目标Core可用性不必读取另一Core的故障元数据。
+
+[工单MySQL](../../../packages/example-tickets-core/src/mysql.ts)已有 `readTicketsPhysicalData`实际生产者，读取三表、17列、关键复合索引、2个受执行CHECK和2列原操作FK。核类型/空值/排序规则/事务引擎及键顺序，允许非唯一调优索引，额外唯一/业务约束不冒充同版。简单CHECK按有限表达式结构解析，支持冗余括号、MySQL `_utf8mb4`及本版字符包装，拒绝把 `revision >= (1 and revision) <= ...`误当正确上下限。元数据bigint摘要保留原整数。物理结构满足后才返回本数据版本；仍需原完整迁移账匹配才能放行。
+
+`node --no-compilation-cache -`经stdin按各包真实tsconfig内存编译：合同35根、宿主8根、工单11根，0诊断。实际产物消费原SQL Runtime→工单结构读取→原账Source→部署目录requireAvailable及planCoreUpdate，正常组合通过；14种结构拒绝、原摘要不匹配、缺收据、unknown/failed、rolled-back、重复、损坏、原账顺序、平台缺观察/未完及双Core隔离通过。缺表/坏收据的工单不影响另一已就绪Core；没有业务方法、真实HTTP/DB或供应商调用。
+
+首次类型命令遗漏工单原装饰器与正式子出口，退出1；修验证配置后0诊断，后续行为命令误写升级函数名退出1，核正式 `planCoreUpdate` 后完整复验退出0。产品校验和原断言未放宽。必要源码说明和两包简明接入例子同步，主公共物理检查/迁移映射与运行组合仍按后续唯一作者窗口；本片不证明全平台代码可理解性或独立宿主已完成，原任务门槛未跨档。
+
+目标读取优化后再次按真实tsconfig内存编译三包，仍35/8/11根、0诊断；实际目录准入仅查询平台和目标Core的原账及结构，另一Core结构读取抛错不影响目标准入，全组合升级检查仍报告该错误。原checksum/缺收据/unknown/failed/rolled-back/重复、平台未完和目标缺观察的相关路径复验退出0。
+
+原 `node --no-compilation-cache --test packages/core-contracts/test/core-contracts.test.cjs`退出0，8组通过，skip/todo为0，临时编译/夹具由原after删除并核实不存在。七份相关文档的本地链接/锚点/表格和旧阶段正文保全检查退出0，格式检查退出0；正式需求/任务未改，门槛仍8.33%。本片新增测试脚本、常驻临时目录、依赖安装、生成客户端和后台进程为0。阶段中文提交普通推送当前任务分支并读取真实远端，固定版本由包含本阶段记录的提交定位；实际数据库/宿主运行及主线集成未验。
+
 <a id="core-tickets-first-setup-20261115"></a>
 
 ## 工单首次设置与标准绑定页面消费（2026-11-15）

@@ -2,8 +2,10 @@
  * 工单Core的MySQL私有适配；执行器开启宿主事务，仓储不另开事务或读取默认租户。
  * 授权和人员锁由原宿主先取得，再用本租户Core锁保护原操作、工单和平台审计同事务。
  */
-import { empty, sqltag as sql, type Sql } from "@prisma/client/runtime/library";
-import { TicketError, TicketSchema, type ListTickets, type Ticket } from "./contracts";
+import { createHash } from "node:crypto";
+import { empty, join, sqltag as sql, type Sql } from "@prisma/client/runtime/library";
+import type { CorePhysicalDataObservation } from "@rental-os/core-contracts";
+import { TicketError, TicketSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket } from "./contracts";
 import type { TicketAccess, TicketExecution, TicketExecutionRequest, TicketRepository, TicketStoredReceipt } from "./service";
 
 interface TicketRow {
@@ -115,4 +117,126 @@ export function createMysqlTicketsExecution<TTransaction extends TicketsSqlTrans
       }, { isolationLevel: "ReadCommitted" });
     }
   };
+}
+
+/** 只解析本版CHECK所需的IN/BETWEEN/比较/AND；括号保留表达式归属，不能把布尔子式当数值。 */
+function ticketCheck(clause: string): string | undefined {
+  if (clause.length > 4096) return;
+  const matches = [...clause.matchAll(/\s+|_utf8mb4(?:'[a-z_]+'|\\'[a-z_]+\\')|'[a-z_]+'|`(?:state|revision)`|[a-z_]+|[0-9]+|>=|<=|[(),]/gi)];
+  if (matches.map(token => token[0]).join("") !== clause) return;
+  const tokens = matches.map(([token]) => token.includes("'")
+    ? token.replace(/^_utf8mb4/i, "").replace(/\\'/g, "'") : token.replace(/`/g, "").toLowerCase()).filter(token => !/^\s+$/.test(token));
+  type Node = string | Node[];
+  let offset = 0, depth = 0;
+  const take = (expected: string) => { if (tokens[offset++] !== expected) throw new Error("unsupported check"); };
+  const operand = (): Node => {
+    if (tokens[offset] === "(") {
+      if (++depth > 32) throw new Error("unsupported check");
+      take("("); const result = expression(); take(")"); depth--; return result;
+    }
+    const token = tokens[offset++];
+    if (!token || !/^(?:state|revision|[0-9]+|'[a-z_]+')$/.test(token)) throw new Error("unsupported check");
+    return token;
+  };
+  const comparison = (): Node => {
+    const left = operand(), operator = tokens[offset];
+    if (operator === "in") {
+      take("in"); take("("); const values = [operand()];
+      while (tokens[offset] === ",") { take(","); values.push(operand()); }
+      take(")"); return ["in", left, values];
+    }
+    if (operator === "between") {
+      take("between"); const lower = operand(); take("and"); const upper = operand();
+      return ["and", [">=", left, lower], ["<=", left, upper]];
+    }
+    if (operator === ">=" || operator === "<=") { offset++; return [operator, left, operand()]; }
+    return left;
+  };
+  const expression = (): Node => {
+    let result = comparison();
+    while (tokens[offset] === "and") { take("and"); result = ["and", result, comparison()]; }
+    return result;
+  };
+  try { const result = expression(); return offset === tokens.length ? JSON.stringify(result) : undefined; }
+  catch { return; }
+}
+
+/** 读取工单三表的真实列、事务引擎、键和受执行约束；缺项返回未就绪，零DDL/业务数据读写。 */
+export async function readTicketsPhysicalData(reader: Pick<TicketsSqlTransaction, "$queryRaw">,
+  clock: () => Date = () => new Date()): Promise<CorePhysicalDataObservation | undefined> {
+  const tableNames = ["example_tickets_tenant_locks", "example_tickets", "example_ticket_operations"];
+  const [tables, columns, indexes, checks, foreignKeys] = await Promise.all([
+    reader.$queryRaw<Array<{ tableName: string; engine: string; collation: string }>>(sql`
+      SELECT TABLE_NAME AS tableName, ENGINE AS engine, TABLE_COLLATION AS collation FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${join(tableNames)}) ORDER BY TABLE_NAME`),
+    reader.$queryRaw<Array<{ tableName: string; name: string; type: string; nullable: string; collation: string | null; extra: string }>>(sql`
+      SELECT TABLE_NAME AS tableName, COLUMN_NAME AS name, COLUMN_TYPE AS type, IS_NULLABLE AS nullable, COLLATION_NAME AS collation, EXTRA AS extra
+      FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${join(tableNames)})
+      ORDER BY TABLE_NAME, ORDINAL_POSITION`),
+    reader.$queryRaw<Array<{ tableName: string; name: string; position: number | bigint; columnName: string; nonUnique: number | bigint; prefix: number | bigint | null; direction: string }>>(sql`
+      SELECT TABLE_NAME AS tableName, INDEX_NAME AS name, SEQ_IN_INDEX AS position, COLUMN_NAME AS columnName,
+        NON_UNIQUE AS nonUnique, SUB_PART AS prefix, COLLATION AS direction FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${join(tableNames)}) ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX`),
+    reader.$queryRaw<Array<{ tableName: string; name: string; enforced: string; clause: string }>>(sql`
+      SELECT t.TABLE_NAME AS tableName, t.CONSTRAINT_NAME AS name, t.ENFORCED AS enforced, c.CHECK_CLAUSE AS clause
+      FROM information_schema.TABLE_CONSTRAINTS t JOIN information_schema.CHECK_CONSTRAINTS c
+        ON c.CONSTRAINT_SCHEMA = t.CONSTRAINT_SCHEMA AND c.CONSTRAINT_NAME = t.CONSTRAINT_NAME
+      WHERE t.CONSTRAINT_SCHEMA = DATABASE() AND t.TABLE_NAME IN (${join(tableNames)}) AND t.CONSTRAINT_TYPE = 'CHECK'
+      ORDER BY t.TABLE_NAME, t.CONSTRAINT_NAME`),
+    reader.$queryRaw<Array<{ tableName: string; name: string; position: number | bigint; columnName: string; targetTable: string; targetColumn: string; sameSchema: number | bigint; deleteRule: string; updateRule: string }>>(sql`
+      SELECT k.TABLE_NAME AS tableName, k.CONSTRAINT_NAME AS name, k.ORDINAL_POSITION AS position, k.COLUMN_NAME AS columnName,
+        k.REFERENCED_TABLE_NAME AS targetTable, k.REFERENCED_COLUMN_NAME AS targetColumn,
+        (k.REFERENCED_TABLE_SCHEMA = DATABASE()) AS sameSchema, r.DELETE_RULE AS deleteRule, r.UPDATE_RULE AS updateRule
+      FROM information_schema.KEY_COLUMN_USAGE k JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+        ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+      WHERE k.CONSTRAINT_SCHEMA = DATABASE() AND k.TABLE_NAME IN (${join(tableNames)}) AND k.REFERENCED_TABLE_NAME IS NOT NULL
+      ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION`)
+  ]);
+  if (tables.length !== tableNames.length || tableNames.some(name => !tables.some(table => table.tableName === name))
+    || tables.some(table => table.engine !== "InnoDB" || table.collation !== "utf8mb4_bin")) return;
+  const expectedColumns: Record<string, Array<[string, string, boolean?]>> = {
+    example_tickets_tenant_locks: [["tenant_id", "varchar(36)"]],
+    example_tickets: [["tenant_id", "varchar(36)"], ["id", "varchar(36)"], ["subject", "varchar(160)"], ["description", "text"],
+      ["created_by", "varchar(36)"], ["assignee_id", "varchar(36)", true], ["state", "varchar(20)"], ["revision", "bigint unsigned"],
+      ["created_at", "datetime(3)"], ["updated_at", "datetime(3)"]],
+    example_ticket_operations: [["tenant_id", "varchar(36)"], ["operation_id", "varchar(36)"], ["actor_id", "varchar(36)"],
+      ["fingerprint", "char(64)"], ["ticket_id", "varchar(36)"], ["result", "json"]]
+  };
+  for (const [table, expected] of Object.entries(expectedColumns)) {
+    const actual = columns.filter(column => column.tableName === table);
+    if (actual.length !== expected.length || expected.some(([name, type, nullable], index) => {
+      const column = actual[index], text = /^(?:varchar|char)\(|^text$/.test(type);
+      return column.name !== name || column.type !== type || column.nullable !== (nullable ? "YES" : "NO") || column.extra !== ""
+        || column.collation !== (text ? "utf8mb4_bin" : null);
+    })) return;
+  }
+  const expectedIndexes: Array<[string, string, string[], number]> = [
+    ["example_tickets_tenant_locks", "PRIMARY", ["tenant_id"], 0],
+    ["example_tickets", "PRIMARY", ["tenant_id", "id"], 0],
+    ["example_tickets", "example_tickets_creator", ["tenant_id", "created_by", "created_at", "id"], 1],
+    ["example_tickets", "example_tickets_assignee", ["tenant_id", "assignee_id", "created_at", "id"], 1],
+    ["example_tickets", "example_tickets_state", ["tenant_id", "state", "created_at", "id"], 1],
+    ["example_ticket_operations", "PRIMARY", ["tenant_id", "operation_id"], 0],
+    ["example_ticket_operations", "example_ticket_operations_object", ["tenant_id", "ticket_id"], 1]
+  ];
+  for (const [table, name, expected, nonUnique] of expectedIndexes) {
+    const actual = indexes.filter(index => index.tableName === table && index.name === name);
+    if (actual.length !== expected.length || actual.some((index, position) => Number(index.position) !== position + 1
+      || index.columnName !== expected[position] || Number(index.nonUnique) !== nonUnique || index.prefix !== null || index.direction !== "A")) return;
+  }
+  // 可加非唯一索引调优；额外唯一约束会改变本版允许的业务写入，须按数据版本处理。
+  if (indexes.some(index => Number(index.nonUnique) === 0 && !expectedIndexes.some(([table, name]) => index.tableName === table && index.name === name))) return;
+  if (checks.length !== 2 || checks.some(check => check.tableName !== "example_tickets" || check.enforced !== "YES")) return;
+  const state = checks.find(check => check.name === "example_tickets_state_valid"), revision = checks.find(check => check.name === "example_tickets_revision_valid");
+  if (!state || !revision || ticketCheck(state.clause) !== JSON.stringify(["in", "state", ["'open'", "'in_progress'", "'closed'"]])
+    || ticketCheck(revision.clause) !== JSON.stringify(["and", [">=", "revision", "1"], ["<=", "revision", "9007199254740991"]])) return;
+  if (foreignKeys.length !== 2 || foreignKeys.some((key, index) => key.tableName !== "example_ticket_operations"
+    || key.name !== "example_ticket_operations_ticket" || Number(key.position) !== index + 1
+    || key.columnName !== ["tenant_id", "ticket_id"][index] || key.targetTable !== "example_tickets"
+    || key.targetColumn !== ["tenant_id", "id"][index] || Number(key.sameSchema) !== 1
+    || !["RESTRICT", "NO ACTION"].includes(key.deleteRule) || !["RESTRICT", "NO ACTION"].includes(key.updateRule))) return;
+  return { version: TICKETS_DATA_VERSION, observedAt: clock().toISOString(),
+    // MySQL元数据整型可能由Prisma返回bigint；摘要编码保留原整数而不经有损浮点转换。
+    sha256: createHash("sha256").update(JSON.stringify({ tables, columns, indexes, checks, foreignKeys },
+      (_key, value) => typeof value === "bigint" ? value.toString() : value)).digest("hex") };
 }
