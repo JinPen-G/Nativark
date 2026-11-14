@@ -13,6 +13,7 @@ const initial: ClientQuoteView = { status: 'closed', canPrepare: false, canConfi
 export function ClientQuotePreparation(props: {
   selection: ClientCreateQuoteRequest | null; scopeKey: string; english: boolean;
   onMode(active: boolean, hasLocator: boolean, pendingCore: boolean): void;
+  validateSelection(input: ClientCreateQuoteRequest): Promise<void>;
   bookingSelection?: (quote: AiClientQuoteFacts, selected: ClientCreateQuoteRequest) => Promise<AiBookingSelection>;
   onHandoff?: (handoff: AiBookingHandoff) => void;
 }) {
@@ -106,12 +107,23 @@ export function ClientQuotePreparation(props: {
   };
   const generate = () => work(async () => {
     const instance = await ensureQuote('write'); if (!instance) return;
-    if (instance.originalInput()) await instance.recover(); else await instance.prepare();
+    if (instance.originalInput()) await instance.recover();
+    else {
+      const owner = quoteOwner.current, input = selected.current;
+      if (!input || !owner?.current()) return;
+      await callbacks.current.validateSelection(input);
+      if (quoteOwner.current !== owner || !owner.current() || quoteRef.current !== instance) return;
+      await instance.prepare();
+    }
     const next = instance.snapshot(); if (next.status !== 'quoted' || !next.matchesInput || next.readOnly) return;
     const booking = await ensureBooking('write'); await booking?.generateDraft();
   });
   const confirmParameters = () => work(async () => {
     const instance = quoteRef.current; if (!instance?.snapshot().canConfirm || !quoteOwner.current?.current()) return;
+    const owner = quoteOwner.current, input = instance.originalInput();
+    if (!input) return;
+    await callbacks.current.validateSelection(input);
+    if (quoteOwner.current !== owner || !owner.current() || quoteRef.current !== instance || !instance.snapshot().canConfirm) return;
     activeIntent.current = true; reportMode();
     await instance.confirm();
     const next = instance.snapshot(); if (next.status !== 'quoted' || !next.matchesInput || next.readOnly) return;
@@ -138,30 +150,40 @@ export function ClientQuotePreparation(props: {
     callbacks.current.onMode(false, retained, false); setQuote(initial); setBooking(null); ordinaryReference.current = null; setCanOrdinary(false);
   };
   const en = props.english, quote = state.quote, booking = state.booking;
+  // Request submission comes from the original Draft, never quote freshness,
+  // an Action or a create/handoff receipt. Business results use their own reads.
+  const submitted = booking?.draft?.state === 'submitted'
+    && booking.draft.execution === 'submitted_request_not_business_success';
+  const checkingBooking = booking?.status === 'unknown' || booking?.status === 'checking';
+  const notSubmitted = !checkingBooking && booking?.observed === true && booking.draft?.execution === 'not_submitted'
+    && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(booking.draft.state);
   const money = (amount: number | null) => amount === null || !quote.quote?.currency ? (en ? 'Unavailable' : '未加载') : `${amount} ${quote.quote.currency}`;
-  const canContinue = Boolean(booking && !booking.readOnly && (booking.canChoose || booking.canHandoff || booking.handoff));
+  const canContinue = Boolean(!submitted && booking && !booking.readOnly && (booking.canChoose || booking.canHandoff || booking.handoff));
   return <section aria-label={en ? 'Reservation draft' : '预约草稿'} aria-busy={working}>
     <h3>{en ? 'Reservation draft' : '预约草稿'}</h3>
     <p>{en ? 'Generate a quote and draft for your selection. Submit the order on the original booking page.' : '按所选条件生成报价和草稿，订单需在原预约页确认提交。'}</p>
-    {!booking?.draft && !booking?.handoff && !quote.canConfirm && <button type="button" className="button button-dark button-block" disabled={working || !props.selection || quote.readOnly === true || booking?.readOnly === true}
+    {!submitted && !booking?.draft && !booking?.handoff && !quote.canConfirm && <button type="button" className="button button-dark button-block" disabled={working || !props.selection || quote.readOnly === true || booking?.readOnly === true}
       onClick={() => void generate()}>{working ? (en ? 'Processing…' : '正在处理…') : (en ? 'Generate reservation draft' : '生成预约草稿')}</button>}
-    {quote.status === 'prepared' && <QuoteParameterReview review={quote.material?.parameterReview ?? null} english={en} />}
-    {quote.canConfirm && <button type="button" className="button button-dark button-block" disabled={working}
+    {!submitted && quote.status === 'prepared' && <QuoteParameterReview review={quote.material?.parameterReview ?? null} english={en} />}
+    {!submitted && quote.canConfirm && <button type="button" className="button button-dark button-block" disabled={working}
       onClick={() => void confirmParameters()}>{en ? 'Confirm pricing units and generate draft' : '确认计费单位并生成草稿'}</button>}
     <BookingDraftReview draft={booking?.draft ?? null} english={en} />
     {canContinue && quote.matchesInput && <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void proceed()}>
       {en ? 'Confirm draft and continue booking' : '确认草稿并继续预约'}</button>}
     <button type="button" className="button button-outline button-block" disabled={working} onClick={() => void recover()}>{en ? 'Check original result' : '核对原结果'}</button>
     {working && <p role="status">{en ? 'Processing the selected reservation…' : '正在处理所选预约…'}</p>}
-    {(quote.status === 'unknown' || booking?.status === 'unknown') && <p role="status">{en ? 'The original result needs checking. No request is sent again.' : '原结果待核对，不重复派发。'}</p>}
+    {submitted && <p role="status" aria-live="polite">{en ? 'The original booking request was submitted. Check the original business result; payment, fulfillment and resource status require their original receipts.' : '原预约请求已提交，业务结果待核对；付款、履约和资源状态以原业务收据为准。'}</p>}
+    {!submitted && (quote.status === 'unknown' || checkingBooking) && <p role="status" aria-live="polite">{en ? 'The original result needs checking. No request is sent again.' : '原结果待核对，不重复派发。'}</p>}
     {((quote.readOnly && quote.material) || booking?.readOnly && booking.observed) && <p role="status">{en ? 'Original record found. Current access is read only; you cannot continue.' : '已找到原记录；当前仅可查看，不能继续办理。'}</p>}
     {!quote.matchesInput && <p role="status">{en ? 'The selection changed. The original record is available only for checking.' : '所选条件已变化，原记录仅供核对。'}</p>}
-    {booking?.draft && <p>{en ? 'Reservation draft saved. No order submitted or inventory reserved.' : '预约草稿已保存，尚未建单或预占资源。'}</p>}
-    {booking?.observed && !booking.draft && !booking.handoff && <p>{en ? 'Original reservation operation recorded.' : '原预约操作已记录。'}</p>}
+    {notSubmitted && <p role="status">{en ? 'The original reservation draft has not submitted a booking request. Order and resource status come from the original business receipts.' : '原预约草稿尚未提交预约请求；订单和资源状态以原业务收据为准。'}</p>}
+    {booking?.draft && !submitted && !notSubmitted && !checkingBooking && <p role="status">{en ? 'The original draft cannot currently be submitted. Check its original record or contact the merchant.' : '原草稿当前不可用于提交，请核对原记录或联系商户。'}</p>}
+    {booking?.draft && <p style={{ overflowWrap: 'anywhere' }}>{en ? 'Original draft / revision' : '原草稿／修订'}：{booking.draft.bookingDraftId} / {booking.draft.revision}</p>}
+    {booking?.observed && !booking.draft && !booking.handoff && <p>{en ? 'The original draft or handoff operation was recorded. Booking acceptance, submission and business results still require their original receipts.' : '原草稿或交接操作已记录；预约受理、提交和业务结果仍须核对原收据。'}</p>}
     {quote.quote && <dl><dt>{en ? 'Payable' : '应付'}</dt><dd>{money(quote.quote.payableAmount)}</dd>
       <dt>{en ? 'Deposit' : '押金'}</dt><dd>{money(quote.quote.depositAmount)}</dd>
       <dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{money(quote.quote.preAuthAmount)}</dd></dl>}
     {(error || quote.status === 'unavailable' || booking?.status === 'unavailable') && <p role="status">{en ? 'Currently unavailable. Keep any original reference and check its result.' : '当前暂不可用，请保留已有引用并核对原结果。'}</p>}
-    {canOrdinary && <button type="button" className="button button-outline button-block" disabled={working} onClick={ordinary}>{en ? 'Use ordinary booking' : '继续普通预约'}</button>}
+    {!submitted && canOrdinary && <button type="button" className="button button-outline button-block" disabled={working} onClick={ordinary}>{en ? 'Use ordinary booking' : '继续普通预约'}</button>}
   </section>;
 }

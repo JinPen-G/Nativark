@@ -15,6 +15,7 @@ import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import { readOriginalBookingQuote, originalBookingUnitLabel, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
 import { ClientQuotePreparation } from '../features/ai-native/ClientQuotePreparation';
 import { clientQuoteBookingStoredRequest, clientQuoteOwner, clientQuoteSelectedInput, clientQuoteStorageKey } from '../features/ai-native/client-quote-session';
+import { clientQuoteCatalogTimeZone, clientQuoteTimeRange } from '../features/ai-native/client-quote-time';
 
 /** Local phase checks only prevent another ordinary operation while an original
  * confirmation or booking needs checking. They never open an AI host or read it. */
@@ -123,6 +124,7 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   const [coupons, setCoupons] = useState<any[]>([]);
   const [couponId, setCouponId] = useState<string>('');
   const [ready, setReady] = useState(false);
+  const [catalogTime, setCatalogTime] = useState<{ identity: string; timeZone: string } | null>(null);
   const [quote, setQuote] = useState<RentalQuoteSnapshotV1 | null>(null);
   const [policies, setPolicies] = useState<EnterpriseOwnRentalPolicy[]>([]), [policyError, setPolicyError] = useState('');
   const [enterprise, setEnterprise] = useState(''), [paymentMode, setPaymentMode] = useState('personal'), [noticeAccepted, setNoticeAccepted] = useState(false);
@@ -151,17 +153,23 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setReady(false); setError(''); setQuote(null);
+      setReady(false); setError(''); setQuote(null); setCatalogTime(null);
       try {
         if (!currentWorkspace || currentWorkspace.workspaceCode !== product.categoryId) {
           await switchWorkspace(product.categoryId);
         }
+        const timeOwner = captureEnterpriseHostSession();
         const [cat, addressRes, couponRes] = await Promise.all([
           sessionApi.catalog(),
           sessionApi.addresses().catch(() => ({ items: [] })),
           sessionApi.coupons().catch(() => []),
         ]);
         if (cancelled) return;
+        if (timeOwner?.current() && timeOwner.workspaceCode === product.categoryId) {
+          try { setCatalogTime({ identity: timeOwner.identity, timeZone: clientQuoteCatalogTimeZone(cat,
+            { tenantCode: timeOwner.tenantCode, serviceCode: timeOwner.workspaceCode }) }); }
+          catch { setCatalogTime(null); }
+        }
         // 优先用首页搜索选定的取货门店（若该门店在本空间履约地点内），否则取第一个。
         const locs = (cat.locations || []) as Array<{ id: string }>;
         const preferred = preferredLocationId && locs.some(loc => loc.id === preferredLocationId) ? preferredLocationId : null;
@@ -177,22 +185,27 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       }
     })();
     return () => { cancelled = true; };
-  }, [product.categoryId, preferredLocationId]);
+  }, [product.categoryId, preferredLocationId, hostIdentity]);
 
   const fulfillmentMode = useMemo(() => {
     if (fulfillment === 'delivery' && enabledModes.includes('delivery')) return 'delivery';
     return enabledModes.find(m => m.endsWith('pickup_return')) || enabledModes[0] || 'store_pickup_return';
   }, [fulfillment, enabledModes]);
   const isDelivery = fulfillmentMode === 'delivery';
+  const quoteTimes = useMemo(() => {
+    if (!hostIdentity || catalogTime?.identity !== hostIdentity) return null;
+    try { return clientQuoteTimeRange(startDate, endDate, catalogTime.timeZone); }
+    catch { return null; }
+  }, [hostIdentity, catalogTime, startDate, endDate]);
   const personalSelection = useMemo<ClientCreateQuoteRequest | null>(() => {
-    if (!ready || enterprise || !locationId || days < 1 || currentWorkspace?.workspaceCode !== product.categoryId || (isDelivery && !addressId)) return null;
+    if (!ready || enterprise || !quoteTimes || !locationId || days < 1 || currentWorkspace?.workspaceCode !== product.categoryId || (isDelivery && !addressId)) return null;
     try { return { bookingIdentity: { bookingIdentity: 'personal' }, fulfillmentMode: fulfillmentMode as RentalFulfillmentMode,
-      fulfillmentLocationId: locationId, startAt: toIsoDateTime(startDate), endAt: toIsoDateTime(endDate),
+      fulfillmentLocationId: locationId, startAt: quoteTimes.startAt, endAt: quoteTimes.endAt,
       lines: [{ itemGroupId: product.id, quantity }], ...(isDelivery ? { deliveryAddressId: addressId } : {}),
       ...(couponId ? { customerCouponId: couponId } : {}) }; } catch { return null; }
-  }, [ready, enterprise, locationId, days, currentWorkspace?.workspaceCode, product.categoryId, product.id,
+  }, [ready, enterprise, quoteTimes, locationId, days, currentWorkspace?.workspaceCode, product.categoryId, product.id,
     isDelivery, addressId, fulfillmentMode, startDate, endDate, quantity, couponId]);
-  const quoteScope = JSON.stringify([hostIdentity, personalSelection]), quoteScopeRef = useRef(quoteScope);
+  const quoteScope = JSON.stringify([hostIdentity, personalSelection, quoteTimes?.timeZone]), quoteScopeRef = useRef(quoteScope);
   quoteScopeRef.current = quoteScope;
   const quoteLifetime = useMemo(() => ({ active: false, epoch: 0 }), [quoteScope]), quoteEpoch = quoteLifetime.epoch;
   const currentIntent = quoteIntent.scope === quoteScope ? quoteIntent : { active: false, pendingCore: false };
@@ -239,19 +252,28 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     const original = retainedQuoteState(personalScope), intent = quoteIntentRef.current;
     return quoteModeRef.current || original.pendingCore && (intent.observedOwner !== hostIdentity || original.reference !== intent.observedReference);
   };
-  const bookingSelection = useCallback(async (original: AiClientQuoteFacts, selected: ClientCreateQuoteRequest): Promise<AiBookingSelection> => {
+  const recheckQuoteSelection = useCallback(async (selected: ClientCreateQuoteRequest) => {
     const current = captureEnterpriseHostSession();
-    if (!current || enterprise || !personalSelection || JSON.stringify(selected) !== JSON.stringify(personalSelection)) throw Error('booking_selection_changed');
+    if (!current?.current() || current.identity !== hostIdentity || document.hidden || quoteScopeRef.current !== quoteScope
+      || enterprise || !quoteTimes || !personalSelection || JSON.stringify(selected) !== JSON.stringify(personalSelection)) throw Error('booking_selection_changed');
     const catalog = await sessionApi.catalog();
-    if (!current.current() || typeof catalog.timeZone !== 'string' || !catalog.timeZone || catalog.timeZone.length > 100) throw Error('booking_catalog_unavailable');
-    return { quoteId: original.quoteId, timeZone: catalog.timeZone, startAt: selected.startAt, endAt: selected.endAt,
+    if (!current.current() || document.hidden || quoteScopeRef.current !== quoteScope) throw Error('booking_catalog_unavailable');
+    const zone = clientQuoteCatalogTimeZone(catalog, { tenantCode: current.tenantCode, serviceCode: current.workspaceCode });
+    const times = clientQuoteTimeRange(startDate, endDate, zone);
+    if (times.timeZone !== quoteTimes.timeZone || times.startAt !== selected.startAt || times.endAt !== selected.endAt) throw Error('booking_time_zone_changed');
+    return times;
+  }, [hostIdentity, enterprise, personalSelection, quoteTimes, quoteScope, startDate, endDate]);
+  const validateQuoteSelection = useCallback(async (selected: ClientCreateQuoteRequest) => { await recheckQuoteSelection(selected); }, [recheckQuoteSelection]);
+  const bookingSelection = useCallback(async (original: AiClientQuoteFacts, selected: ClientCreateQuoteRequest): Promise<AiBookingSelection> => {
+    const times = await recheckQuoteSelection(selected);
+    return { quoteId: original.quoteId, timeZone: times.timeZone, startAt: selected.startAt, endAt: selected.endAt,
       fulfillmentMode: selected.fulfillmentMode, fulfillmentLocationId: selected.fulfillmentLocationId,
       ...(selected.returnLocationId ? { returnLocationId: selected.returnLocationId } : {}),
       ...(selected.deliveryAddressId ? { deliveryAddressId: selected.deliveryAddressId } : {}),
       bookingIdentity: { bookingIdentity: 'personal', enterpriseContractAndPayer: false },
       lines: selected.lines.map(line => { if (!line.itemGroupId) throw Error('booking_item_unavailable'); return { itemGroupId: line.itemGroupId, quantity: line.quantity }; }),
       ...(selected.services ? { services: selected.services } : {}) };
-  }, [enterprise, personalSelection]);
+  }, [recheckQuoteSelection]);
 
   const getQuote = useCallback(async () => {
     if (document.hidden || !host?.current() || quoteScopeRef.current !== quoteScope || ordinaryHeld()) return;
@@ -323,8 +345,10 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
       : <p className="mock-note">{t('noAddress')} <Link to={href('/account')}>{t('addAddress')}</Link></p>)}
     {coupons.length > 0 && <label className="booking-field">{t('useCoupon')}<select value={couponId} onChange={e => { setCouponId(e.target.value); setQuote(null); }}><option value="">{t('couponNone')}</option>{coupons.map((c, i) => <option key={c.id ?? i} value={c.id}>{c.name || c.templateName || c.title || t('coupon')}</option>)}</select></label>}
     {!enterprise && <ClientQuotePreparation selection={personalSelection} scopeKey={quoteScope}
-      english={language === 'en'} onMode={onQuoteMode} bookingSelection={bookingSelection}
+      english={language === 'en'} onMode={onQuoteMode} bookingSelection={bookingSelection} validateSelection={validateQuoteSelection}
       onHandoff={handoff => navigate(href(`/booking/${encodeURIComponent(product.id)}`), { state: { aiBookingHandoffRef: handoff.handoffRef } })} />}
+    {!enterprise && quoteTimes && <p>{language === 'en' ? 'Reservation draft times' : '预约草稿时间'} ({quoteTimes.timeZone})：<time dateTime={quoteTimes.startAt}>{quoteTimes.startAt}</time> — <time dateTime={quoteTimes.endAt}>{quoteTimes.endAt}</time></p>}
+    {!enterprise && !quoteTimes && <p role="status">{language === 'en' ? 'The reservation draft needs valid, unambiguous times in the current business time zone. Check the dates or contact the merchant; no time is guessed.' : '预约草稿需要当前营业时区下明确、有效的取还时间。请核对日期和时间或联系商户，不自动猜测时间。'}</p>}
     {busy && !quote ? <p className="mock-note"><LoadingOutlined /> {t('quoting')}</p> : null}
     {!enterprise && quotePending && <p role="status">{language === 'en' ? 'The original confirmation or reservation needs checking. Check its original result or use the manual service; no second operation is sent.' : '原确认或预约结果待核对，请核对原结果或联系人工办理；不派发第二操作。'}</p>}
     {!enterprise && !quoteMode && !quote && <button type="button" className="button button-outline button-block" disabled={busy}

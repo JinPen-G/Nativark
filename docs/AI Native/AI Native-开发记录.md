@@ -6,6 +6,27 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry16-current-zone-and-submitted-state-20261115"></a>
+## ENTRY-16 客户入口按空间时区准备与原请求提交状态修复（2026-11-15）
+
+前置`57f06f311bcefac7e32d634c952cd21f3952e016`已普通推送并回读一致。本片Root读取dev1九源完整固定交付，逐blob／SHA核同后独立复核页面、原输入和必要类型／模拟。原反例证明同一`2026-11-16T10:00`在上海设备和洛杉矶设备分别得到02:00Z／18:00Z；非法输入还回退当前时刻。另原Draft已`submitted`／`submitted_request_not_business_success`，页面仍写“尚未提交”。这两类问题属于实际输入和状态含义缺口，不能用报价有效或旧Action覆盖。
+
+[Web原AI参数入口](../../apps/tenant-website/src/components/RemoteBooking.tsx)改从当前受权catalog绑定tenant／workspace／timeZone，沿已有[共享时间选项](../../packages/shared/src/ai-client-goal-session.ts)经[窄时间叶](../../apps/tenant-website/src/features/ai-native/client-quote-time.ts)解析明确墙上时间。准备及确认前复读当前catalog，时区／时间／所选输入变化拒绝新准备；夏令时空洞／重叠、非法输入和未知时区保持不可用，不用设备时区或当前时刻补值。原传统页面及通用时间工具没有被重写；小程序AI准备和Checkout的AI参数增加同样的时区可用检查。
+
+[Web报价](../../apps/tenant-website/src/features/ai-native/ClientQuotePreparation.tsx)、[Goal](../../apps/tenant-website/src/features/ai-native/ClientGoalPicker.tsx)与小程序对应quote／goal组件依据原Draft的state及execution显示“原预约请求已提交，业务结果待核对”；unknown不写未提交，明确当前未提交草稿另显原状态。旧材料／报价／Action不能提供建单、付款、履约或资源结果。准备、确认、继续及普通回退按钮在已提交观察下收紧；原收据核读、隐藏／scope撤回和最少journal保持。
+
+固定九源：Web RemoteBooking`9191e4b9be9157072e7acb2890d1b0feea47877e`、时间叶`037f984786882450adfa6f3bd659f1ad5848ac8f`、报价`7a62337d2d186282a040b3741bc82dcc1680cd85`、Goal`13fccc58efda96575d592ee0da9778624f77d45e`；mini报价TS`a39495ade12c2f95a4d24a1c9f82ecc21bb98de9`／WXML`d95b5ae3ac7ad26f4f599e3a3a4f765da25ecac8`、Goal TS`0881cd219de44cfd2a9624859e34fb023f1eb68b`／WXML`4b23d79b91ff3916b12f0a0c9acdcc135abc0a6a`、Checkout`428128992f18ae5d14450be1a58115add3e0ec35`。本节所在提交为完整阶段固定版本，Root原跨端后端活动源码不夹带。
+
+| 必要验证 | stdin SHA-256及实际结果 |
+| --- | --- |
+| 作者原时间／状态、Goal和实际准备复核 | 原组`151678fbb0a6e10b9b81e8fd4d4f7a668b2d47c39c751506fbb53e47566876b6`，Goal`b4d40bde0b2c107d95be4c760fa6409a5849a6f733c2d97ab974e482e7d22503`，实际时间宿主`73449038be234122a9c6d9dc0046ca51b775821a56513f420ab6310e1b044849`，准备前拒绝`f75f658b033a7c5f01fdb26548a8e7e9a0f3ab5ff06de78b639e2f5df4d9e039`，确认前绑定`bb1be7a10593f7bdbf919914bd0efe3b01d6f2830828752687c3ceafcb3c8822`；同份固定源码的必要补充均退出0，业务／宿主依赖为明确模拟。 |
+| Root当前时区输入 | `804d16ee769204fbf87c81265dbefca1d2a054f93a707c2cf500cabab435047e`，退出0；两设备时区结果同02:00Z，4种非法／歧义／缺时区和错workspace拒绝，0请求。首次驱动未声明Web模块导致ERR_REQUIRE_ESM，修内存加载声明后通过，不改包配置。 |
+| Root实际React状态正文 | `646e505a4e43fd27f459e01cc399f34a9479ae86bf043fb0c324cb378bcaa017`，退出0；submitted、unknown、draft_created三种原观察显示区分，submitted无未提交或继续按钮，0派发。宿主hooks为有限内存替身，未做浏览器实测。 |
+| Root九源Web类型 | `8f76aa567b47784a9569950a0ea4b8bb46ccbea2027195bbd2ea620c97a2b0e9`，退出0；TS5.9.3四根／298源，0诊断。 |
+| Root九源mini类型 | `0425891f81e8622ed5a1528857e9484af03040d3ed874626a4da9f781476b99f`，退出0；三根／246源、125声明内存、ES2019，0诊断。作者最终九源类型`8e9af04839d1eefa9dc0566c1aefe1149ef39c172eb10318486751df13522b57`也退出0。 |
+
+所有命令为`node --no-compilation-cache -`，原offline preload和不可达DATABASE_URL；Root任务目录`output/.tmp/ain-entry16-state-time-20261115`未创建，audit0，验证进程退出，无新增测试文件、依赖或临时副本。11份阶段文件`git diff --check`退出0；`node scripts/validate-docs.cjs`退出1，仍为四处既有缺链，未新增任务算术或链接错误。ENTRY-16全端原三条仍由dev1按既有固定证据核定，本片只关闭上述实际P2，任务百分比保持75%，不以九文件或多组通过数加分。真实浏览器／微信／数据库／供应商仍由负责人后续操作。
+
 <a id="ain-entry01-directory-checkpoint-20261115"></a>
 ## ENTRY-01 唯一场景目录公共装配的未完检查点（2026-11-15）
 

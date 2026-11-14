@@ -27,7 +27,8 @@ Component({
   options: { styleIsolation: 'apply-shared' },
   properties: { selection: { type: Object, value: null }, scopeKey: { type: String, value: '' }, timeZone: { type: String, value: '' }, paused: { type: Boolean, value: false } },
   data: { ...initial, working: false, error: false, booking: null as ClientQuoteBookingView | null,
-    bookingReview: null as BookingDraftReview | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>, canOrdinary: false },
+    bookingReview: null as BookingDraftReview | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>, canOrdinary: false,
+    bookingSubmitted: false, bookingNotSubmitted: false },
   lifetimes: { attached() { visible.add(this); generations.set(this, 1); }, detached() { visible.delete(this); this.invalidateQuote(); } },
   pageLifetimes: { show() { visible.add(this); }, hide() { visible.delete(this); this.invalidateQuote(); } },
   observers: { 'scopeKey, paused'() { this.invalidateQuote(); } },
@@ -36,7 +37,8 @@ Component({
       generations.set(this, (generations.get(this) ?? 0) + 1); busy.delete(this); activeIntents.delete(this); ordinaryReferences.delete(this);
       quotes.get(this)?.dispose(); bookings.get(this)?.dispose(); quotes.delete(this); bookings.delete(this); bindings.delete(this);
       releases.get(this)?.(); releases.delete(this);
-      this.setData({ ...initial, working: false, error: false, booking: null, bookingReview: null, parameterReview: null, canOrdinary: false });
+      this.setData({ ...initial, working: false, error: false, booking: null, bookingReview: null, parameterReview: null, canOrdinary: false,
+        bookingSubmitted: false, bookingNotSubmitted: false });
     },
     reportMode(nextQuote?: ClientQuoteView, nextBooking?: ClientQuoteBookingView | null) {
       const binding = bindings.get(this); if (!binding?.context.current()) return;
@@ -56,6 +58,7 @@ Component({
     },
     async ensureQuote(purpose: 'read' | 'write'): Promise<Quote | null> {
       if (!visible.has(this) || this.data.paused) return null;
+      if (purpose === 'write' && (!this.data.timeZone || !zoneSupported(this.data.timeZone))) throw Error('quote_time_zone_unavailable');
       if (purpose === 'write') activeIntents.add(this);
       if (bindings.get(this)?.context.current()) { this.reportMode(); return quotes.get(this) ?? null; }
       const session = currentSession(), version = contextVersion(), epoch = generations.get(this), scopeKey = this.data.scopeKey;
@@ -82,7 +85,7 @@ Component({
       let selection: AiBookingSelection;
       if (purpose === 'read') selection = clientQuoteBookingStoredRequest(cached).selection;
       else {
-        if (!this.data.timeZone || !quote.matchesInput) return null;
+        if (!this.data.timeZone || !zoneSupported(this.data.timeZone) || !quote.matchesInput) return null;
         selection = { quoteId: quote.quote.quoteId, timeZone: this.data.timeZone, startAt: selected.startAt, endAt: selected.endAt,
           fulfillmentMode: selected.fulfillmentMode, fulfillmentLocationId: selected.fulfillmentLocationId,
           ...(selected.returnLocationId ? { returnLocationId: selected.returnLocationId } : {}), ...(selected.deliveryAddressId ? { deliveryAddressId: selected.deliveryAddressId } : {}),
@@ -97,6 +100,11 @@ Component({
         storage: { read: () => read(key), write: value => writeRequiredStorage(key, value) },
         changed: state => {
           if (binding.context.current()) this.setData({ booking: state,
+            // The original Draft attests a page request, never Core order/payment.
+            bookingSubmitted: state.draft?.state === 'submitted' && state.draft.execution === 'submitted_request_not_business_success',
+            bookingNotSubmitted: state.observed === true && !['unknown', 'checking'].includes(state.status)
+              && state.draft?.execution === 'not_submitted'
+              && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(state.draft.state),
             bookingReview: projectBookingDraftReview(state.draft, { formatTime: (original, timeZone) => {
               if (!zoneSupported(timeZone)) throw Error('booking_time_zone_unavailable');
               return formatBusinessDateTime(original, timeZone);
@@ -119,6 +127,7 @@ Component({
     }); },
     onConfirmParameters() { return this.runIntent(async () => {
       const quote = quotes.get(this); if (!quote?.snapshot().canConfirm || !bindings.get(this)?.context.current()) return;
+      if (!this.data.timeZone || !zoneSupported(this.data.timeZone)) throw Error('quote_time_zone_unavailable');
       activeIntents.add(this); this.reportMode();
       await quote.confirm();
       const state = quote.snapshot(); if (state.status !== 'quoted' || !state.matchesInput || state.readOnly) return;

@@ -20,7 +20,7 @@ import { PUBLIC_CONFIG } from "../../config/public";
 import { createCustomerBookingConsumer, type CustomerBookingHost, type CustomerHandoffView } from "../../components/ai-native/booking-handoff";
 import { createCustomerBookingHostFactory, type CustomerBookingPublication } from "../../components/ai-native/booking-host.factory";
 import { cachedMerchant } from "../../core/merchant";
-import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
+import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zoneLabel, zoneSupported, zonedToInstant } from "../../core/time";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../../core/ui";
 import { rememberZone, zoneOf } from "../../core/zones";
@@ -338,7 +338,12 @@ Page({
       this.setData({ aiQuoteActive: false, aiQuoteSelection: null }); return;
     }
     const personal = cart?.bookingIdentity?.bookingIdentity !== 'enterprise_employee' && currentSession()?.customer.customerType === 'personal';
-    const scope = JSON.stringify([contextVersion(), currentServiceCode(), cart?.revision, personal]);
+    const timeZone = this.catalog?.timeZone;
+    let aiTimeAvailable = false;
+    try { aiTimeAvailable = Boolean(timeZone && this.catalog?.tenantCode === PUBLIC_CONFIG.tenantCode
+      && this.catalog.workspace.workspaceCode === currentServiceCode() && zoneSupported(timeZone)); }
+    catch { /* An unavailable native zone cannot grant AI parameters. */ }
+    const scope = JSON.stringify([contextVersion(), currentServiceCode(), cart?.revision, personal, timeZone, aiTimeAvailable]);
     const originalScope = JSON.stringify([contextVersion(), currentServiceCode(), currentSession()?.customer.customerId, personal]);
     if (this.aiQuoteOriginalScope !== originalScope || !personal) {
       this.aiQuoteObservedReference = null; this.aiQuoteOriginalScope = originalScope;
@@ -349,7 +354,9 @@ Page({
     const original = retainedQuoteState();
     const pendingCore = personal && (this.aiQuotePending || original.pendingCore && original.reference !== this.aiQuoteObservedReference);
     this.aiQuoteMode = personal && (this.aiQuoteIntent || pendingCore);
-    const selection = personal && cart && cartMissing(cart).length === 0 && !cart.submission ? this.buildRequest(cart) : null;
+    // Ordinary date handling retains its existing policy. AI parameters require
+    // the original published business zone rather than its device fallback.
+    const selection = personal && aiTimeAvailable && cart && cartMissing(cart).length === 0 && !cart.submission ? this.buildRequest(cart) : null;
     this.setData({ aiQuoteActive: this.aiQuoteMode, aiQuotePendingCore: pendingCore, aiQuoteSelection: selection,
       aiQuoteTimeZone: this.catalog?.timeZone ?? '',
       aiQuoteScopeKey: scope });

@@ -8,7 +8,7 @@
   <button wx:if="{{!view.hasLocator || view.canExtract}}" class="btn btn--primary btn--block mt-16" bindtap="onExtract" disabled="{{working || !loggedIn || (!view.hasLocator && !goal)}}">{{view.hasLocator ? '继续提取原目标' : '提取建议条件'}}</button>
   <button class="btn btn--block mt-16" bindtap="onRead" disabled="{{working || !loggedIn}}">核对原结果</button>
   <button wx:if="{{!loggedIn}}" class="btn btn--block mt-16" bindtap="onLogin">登录后提取目标</button>
-  <view wx:if="{{view.status === 'unknown'}}" class="notice mt-8" role="status">原结果待核对，不能重复派发。</view>
+  <view wx:if="{{!bookingSubmitted && view.status === 'unknown'}}" class="notice mt-8" role="status">原结果待核对，不能重复派发。</view>
   <view wx:if="{{view.status === 'running'}}" class="body mt-8" role="status">原任务仍在处理，请稍后核对结果。</view>
   <view wx:if="{{view.question}}" class="goal-picker__field">
     <label for="goal-answer">{{view.question.contract.fields[0].label}}</label>
@@ -48,23 +48,26 @@
     <view wx:if="{{startAt && endAt}}" class="body mt-16">已选绝对区间：{{startAt}} 至 {{endAt}}</view>
     <button class="btn btn--primary btn--block mt-16" bindtap="onPrepareQuote" disabled="{{working}}">确认所选条件并准备报价参数</button>
   </view>
-  <view wx:if="{{view.selection}}" class="body mt-16">已选 {{view.selection.lines.length}} 项，{{view.selection.startAt}} 至 {{view.selection.endAt}}；尚未提交订单。
+  <view wx:if="{{view.selection}}" class="body mt-16">已选 {{view.selection.lines.length}} 项，{{view.selection.startAt}} 至 {{view.selection.endAt}}；所选条件不代表提交或业务成功。
     <view wx:for="{{selectedRows}}" wx:key="index">{{item.label}} · {{item.quantity}} · {{item.pricingUnit}}{{item.usage ? ' · 用量 ' + item.usage : ''}}</view>
     <view>领取地点：{{view.selection.fulfillmentLocationId}}；归还地点：{{view.selection.returnLocationId}}</view>
     <view wx:if="{{view.selection.deliveryAddressId}}">本人地址引用：{{view.selection.deliveryAddressId}}</view>
     <view>预约身份：{{view.selection.bookingIdentity.bookingIdentity === 'personal' ? '个人' : view.selection.bookingIdentity.corporateCustomerId}}；{{view.selection.bookingIdentity.enterpriseContractAndPayer ? '企业付款' : '个人付款'}}</view>
   </view>
-  <view wx:if="{{parameterReview}}" class="body mt-16" aria-label="核对计费单位" style="overflow-wrap:anywhere;word-break:break-word;">
+  <view wx:if="{{!bookingSubmitted && parameterReview}}" class="body mt-16" aria-label="核对计费单位" style="overflow-wrap:anywhere;word-break:break-word;">
     <view class="subtitle">核对计费单位</view>
     <view class="mt-8">请核对计费单位，然后确认参数取得原报价。</view>
     <view wx:for="{{parameterReview}}" wx:key="lineIndex" class="mt-8">{{item.itemGroupId}} · {{item.quantity}} · {{item.unitLabel}}
       <view>{{item.sourceLabel}}</view>
     </view>
   </view>
-  <button wx:if="{{view.canConfirmQuote}}" class="btn btn--primary btn--block mt-16" bindtap="onConfirmQuote" disabled="{{working}}">确认参数并取得原报价</button>
+  <button wx:if="{{!bookingSubmitted && view.canConfirmQuote}}" class="btn btn--primary btn--block mt-16" bindtap="onConfirmQuote" disabled="{{working}}">确认参数并取得原报价</button>
   <view wx:if="{{view.quote}}" class="goal-picker__field"><view>原应付</view><money-text amount="{{view.quote.payableAmount}}" currency="{{view.quote.currency}}"></money-text><view class="mt-8">押金</view><money-text amount="{{view.quote.depositAmount}}" currency="{{view.quote.currency}}"></money-text><view class="body mt-8">报价不代表订单、付款或资源已预占。</view></view>
-  <button wx:if="{{view.canSelect && (!booking || booking.canPrepare || booking.canSave)}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerateDraft" disabled="{{working}}">使用原报价生成预约草稿</button>
-  <view wx:if="{{booking && booking.status === 'draft_ready'}}" class="body mt-16">原预约草稿已保存。请明确继续，再到原预约页确认；尚未提交订单。</view>
+  <button wx:if="{{!bookingSubmitted && view.canSelect && (!booking || booking.canPrepare || booking.canSave)}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerateDraft" disabled="{{working}}">使用原报价生成预约草稿</button>
+  <view wx:if="{{bookingSubmitted}}" class="notice mt-16" role="status" aria-live="polite">原预约请求已提交，业务结果待核对；付款、履约和资源状态以原业务收据为准。</view>
+  <view wx:if="{{bookingNotSubmitted}}" class="body mt-16" role="status">原预约草稿尚未提交预约请求；订单和资源状态以原业务收据为准。</view>
+  <view wx:if="{{booking.draft && !bookingSubmitted && !bookingNotSubmitted && booking.status !== 'unknown' && booking.status !== 'checking'}}" class="notice mt-16" role="status">原草稿当前不可用于提交，请核对原记录或联系商户。</view>
+  <view wx:if="{{booking.draft}}" class="body mt-8" style="overflow-wrap:anywhere;word-break:break-word;">原草稿／修订：{{booking.draft.bookingDraftId}} / {{booking.draft.revision}}</view>
   <view wx:if="{{bookingReview}}" class="body mt-16" style="overflow-wrap:anywhere;word-break:break-word;" aria-label="核对原预约条件">
     <view class="subtitle">核对原预约条件</view>
     <view class="mt-8">请核对后再继续，标注“Core 补齐”的时间或地点来自原报价。</view>
@@ -87,8 +90,8 @@
       <view class="mt-8">服务地点：{{item.location.value}} · {{item.location.source}}</view>
     </view>
   </view>
-  <button wx:if="{{booking && (booking.canChoose || booking.canHandoff || booking.status === 'handoff_ready')}}" class="btn btn--primary btn--block mt-16" bindtap="onSelect" disabled="{{working}}">明确继续到原预约页</button>
-  <view wx:if="{{booking && booking.status === 'unknown'}}" class="notice mt-16" role="status">草稿或交接结果待核对，请读取原结果，不重新派发。</view>
+  <button wx:if="{{!bookingSubmitted && booking && (booking.canChoose || booking.canHandoff || booking.status === 'handoff_ready')}}" class="btn btn--primary btn--block mt-16" bindtap="onSelect" disabled="{{working}}">明确继续到原预约页</button>
+  <view wx:if="{{!bookingSubmitted && booking && (booking.status === 'unknown' || booking.status === 'checking')}}" class="notice mt-16" role="status" aria-live="polite">草稿或交接结果待核对，请读取原结果，不重新派发。</view>
   <button wx:if="{{view.canStartNew && (!booking || (booking.status !== 'unknown' && booking.status !== 'checking'))}}" class="btn btn--block mt-16" bindtap="onBeginNew" disabled="{{working}}">保留原记录并开始新的选品目标</button>
   <view wx:if="{{canCancel}}" class="goal-picker__field" aria-label="停止本次选品任务">
     <button wx:if="{{!cancellation || (cancellation.status !== 'settled' && cancellation.status !== 'finished')}}" class="btn btn--block mt-16" bindtap="onCancelRequest" disabled="{{working || (cancellation && !cancellation.canRequest)}}">申请停止本次任务</button>

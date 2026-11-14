@@ -53,6 +53,7 @@ Component({
   properties: { serviceCode: { type: String, value: '' } },
   data: { view: blank(), form: form(), goal: '', answer: '', working: false, loggedIn: false, message: '', projectionHash: '', questionId: '',
     booking: null as ClientQuoteBookingView | null, bookingReview: null as BookingDraftReview | null,
+    bookingSubmitted: false, bookingNotSubmitted: false,
     cancellation: null as ClientTaskCancellationView | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>,
     answerMaxLength: 2048, canCancel: false, selectedRows: [] as { label: string; quantity: number; pricingUnit: string; usage: string }[],
     modes: [] as Choice[], locations: [] as Choice[], returns: [] as Choice[], identities: [] as Choice[], addresses: [] as Choice[],
@@ -69,7 +70,8 @@ Component({
       bookings.get(this)?.dispose(); bookings.delete(this); cancellationSessions.get(this)?.dispose(); cancellationSessions.delete(this);
       sources.delete(this); currentBindings.delete(this);
       this.setData({ view: blank(), form: form(), goal: '', answer: '', working: false, message: '', projectionHash: '', questionId: '',
-        booking: null, bookingReview: null, parameterReview: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
+        booking: null, bookingReview: null, bookingSubmitted: false, bookingNotSubmitted: false,
+        parameterReview: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
         modes: [], locations: [], returns: [], identities: [], addresses: [], timeZone: '', startAt: '', endAt: '', delivery: false,
         policyNotice: '', canPersonalPay: false, canEnterprisePay: false });
     },
@@ -224,6 +226,10 @@ Component({
               && original.selection?.fulfillmentLocationId === material.selection.fulfillmentLocationId
               && original.selection?.returnLocationId === material.selection.returnLocationId;
             this.setData({ booking: view,
+            bookingSubmitted: view.draft?.state === 'submitted' && view.draft.execution === 'submitted_request_not_business_success',
+            bookingNotSubmitted: view.observed === true && !['unknown', 'checking'].includes(view.status)
+              && view.draft?.execution === 'not_submitted'
+              && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(view.draft.state),
             bookingReview: projectBookingDraftReview(view.draft, {
               locations: sameQuote ? [...options(original.projection, 'fulfillmentLocationId'),
                 ...options(original.projection, 'returnLocationId')] : undefined,
@@ -258,7 +264,7 @@ Component({
       if (!owner.snapshot().hasLocator) {
         booking?.dispose(); bookings.delete(this); sources.delete(this);
         cancellationSessions.get(this)?.dispose(); cancellationSessions.delete(this);
-        this.setData({ goal: '', answer: '', booking: null, bookingReview: null, cancellation: null });
+        this.setData({ goal: '', answer: '', booking: null, bookingReview: null, bookingSubmitted: false, bookingNotSubmitted: false, cancellation: null });
       }
     }); },
     onCancelRead() { return this.stopGoal('read'); },

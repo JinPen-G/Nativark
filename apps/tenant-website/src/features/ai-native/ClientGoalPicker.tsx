@@ -63,6 +63,11 @@ export function ClientGoalPicker(props: {
   const items = projection?.candidates?.conditions.items ?? [], form = draft.reference === projectionRef ? draft.form : emptyForm(items.length);
   const goalText = goal.scopeKey === scopeKey ? goal.text : '', loggedIn = Boolean(captureEnterpriseHostSession());
   const bookingView = bookingRecord?.scopeKey === scopeKey && ownerCurrent.current?.() ? bookingRecord.view : null;
+  const submitted = bookingView?.draft?.state === 'submitted'
+    && bookingView.draft.execution === 'submitted_request_not_business_success';
+  const checkingBooking = bookingView?.status === 'unknown' || bookingView?.status === 'checking';
+  const notSubmitted = !checkingBooking && bookingView?.observed === true && bookingView.draft?.execution === 'not_submitted'
+    && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(bookingView.draft.state);
   const reviewLocations = bookingView?.draft && view.quote?.quoteId === bookingView.draft.material.quote.quoteId
     && view.selection && projection?.context.timeZone === bookingView.draft.material.selection.timeZone
     && view.selection.fulfillmentLocationId === bookingView.draft.material.selection.fulfillmentLocationId
@@ -248,7 +253,7 @@ export function ClientGoalPicker(props: {
       onClick={() => void refresh()}>{en ? 'Check original result' : '核对原结果'}</button>
     {!loggedIn && <p role="status">{en ? 'Sign in to extract a goal. You can browse and book through the ordinary pages.' : '登录后可提取目标；浏览商品和普通预约仍可继续。'}</p>}
     {working && <p role="status">{en ? 'Processing this request…' : '正在处理本次请求…'}</p>}
-    {view.status === 'unknown' && <p role="status">{en ? 'The original result needs checking. Use the original result button to continue checking.' : '原结果待核对，请使用“核对原结果”继续读取。'}</p>}
+    {!submitted && view.status === 'unknown' && <p role="status">{en ? 'The original result needs checking. Use the original result button to continue checking.' : '原结果待核对，请使用“核对原结果”继续读取。'}</p>}
     {view.status === 'running' && <p role="status">{en ? 'The original task is still running. Check its result later.' : '原任务仍在处理，可稍后核对结果。'}</p>}
     {textField && question && <><label className="full-field">{textField.label}<textarea rows={3} maxLength={textField.maxLength} value={answerText}
       disabled={working || !view.canSubmit} onChange={event => setAnswer({ reference: answerRef, text: event.target.value })} /></label>
@@ -324,20 +329,23 @@ export function ClientGoalPicker(props: {
         <dt>{en ? 'Booking identity' : '预约身份'}</dt><dd>{view.selection.bookingIdentity?.bookingIdentity === 'personal' ? (en ? 'Personal' : '个人')
           : `${selectedLabel('bookingIdentity', view.selection.bookingIdentity?.corporateCustomerId)} · ${view.selection.bookingIdentity?.enterpriseContractAndPayer ? (en ? 'Enterprise payment' : '企业付款') : (en ? 'Personal payment' : '个人付款')}`}</dd></dl>
     </>}
-    {view.status === 'prepared' && <QuoteParameterReview review={view.parameterReview ?? null} english={en} />}
-    {view.canConfirmQuote && <><p>{en ? 'Parameters are prepared. Confirm separately to obtain the original quote.' : '参数已准备，请另行确认取得原报价。'}</p>
+    {!submitted && view.status === 'prepared' && <QuoteParameterReview review={view.parameterReview ?? null} english={en} />}
+    {!submitted && view.canConfirmQuote && <><p>{en ? 'Parameters are prepared. Confirm separately to obtain the original quote.' : '参数已准备，请另行确认取得原报价。'}</p>
       <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void work(instance => instance.confirmQuote())}>{en ? 'Confirm parameters and get quote' : '确认参数并取得报价'}</button></>}
     {view.quote && <><h4>{en ? 'Original quote' : '原报价'}</h4><dl><dt>{en ? 'Payable' : '应付'}</dt><dd>{money(view.quote.payableAmount)}</dd>
       <dt>{en ? 'Deposit' : '押金'}</dt><dd>{money(view.quote.depositAmount)}</dd><dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{money(view.quote.preAuthAmount)}</dd></dl>
-      <p>{en ? 'No order has been submitted. Continue on the original booking page.' : '尚未提交订单，请在原预约页继续办理。'}</p></>}
-    {view.canSelect && (!bookingView || bookingView.canPrepare || bookingView.canSave) && <button type="button" className="button button-dark button-block"
+      <p>{en ? 'The original quote does not attest order creation, payment or resource reservation. Check booking submission through its original receipt.' : '原报价不代表建单、付款或资源预占；预约提交请核对原收据。'}</p></>}
+    {!submitted && view.canSelect && (!bookingView || bookingView.canPrepare || bookingView.canSave) && <button type="button" className="button button-dark button-block"
       disabled={working || Boolean(bookingView?.readOnly)} onClick={() => void generateBooking()}>{en ? 'Generate reservation draft from this quote' : '按原报价生成预约草稿'}</button>}
-    {bookingView?.draft && <p>{en ? 'Reservation draft saved. Review it before continuing.' : '预约草稿已保存，请核对后明确继续。'}</p>}
+    {submitted && <p role="status" aria-live="polite">{en ? 'The original booking request was submitted. Check the original business result; payment, fulfillment and resource status require their original receipts.' : '原预约请求已提交，业务结果待核对；付款、履约和资源状态以原业务收据为准。'}</p>}
+    {notSubmitted && <p role="status">{en ? 'The original reservation draft has not submitted a booking request. Order and resource status come from the original business receipts.' : '原预约草稿尚未提交预约请求；订单和资源状态以原业务收据为准。'}</p>}
+    {bookingView?.draft && !submitted && !notSubmitted && !checkingBooking && <p role="status">{en ? 'The original draft cannot currently be submitted. Check its original record or contact the merchant.' : '原草稿当前不可用于提交，请核对原记录或联系商户。'}</p>}
+    {bookingView?.draft && <p style={{ overflowWrap: 'anywhere' }}>{en ? 'Original draft / revision' : '原草稿／修订'}：{bookingView.draft.bookingDraftId} / {bookingView.draft.revision}</p>}
     <BookingDraftReview draft={bookingView?.draft ?? null} english={en}
       locations={reviewLocations} />
-    {bookingView && !bookingView.readOnly && (bookingView.canChoose || bookingView.canHandoff || bookingView.handoff) && <button type="button" className="button button-dark button-block"
+    {!submitted && bookingView && !bookingView.readOnly && (bookingView.canChoose || bookingView.canHandoff || bookingView.handoff) && <button type="button" className="button button-dark button-block"
       disabled={working} onClick={() => void continueBooking()}>{en ? 'Confirm draft and continue to original booking' : '确认草稿并前往原预约页'}</button>}
-    {bookingView?.status === 'unknown' && <p role="status">{en ? 'The original reservation operation needs checking. No draft is created again.' : '原预约操作待核对，请读取原结果，不重复生成草稿。'}</p>}
+    {!submitted && checkingBooking && <p role="status" aria-live="polite">{en ? 'The original reservation operation needs checking. No draft is created again.' : '原预约操作待核对，请读取原结果，不重复生成草稿。'}</p>}
     {bookingView?.readOnly && bookingView.observed && <p role="status">{en ? 'Original reservation recorded; it is available only for checking.' : '原预约操作已记录，当前仅供核对。'}</p>}
     {view.canStartNew && <button type="button" className="button button-outline button-block" disabled={working || Boolean(bookingView && !bookingView.observed)}
       onClick={() => void newGoal()}>{en ? 'Start a new rental goal' : '填写新的使用目标'}</button>}

@@ -4,7 +4,7 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天Git核对已执行；本次前置本地／GitHub均为8a4bb60912cdc6225384bd13ffabcd7b3e627297，[ENTRY-13原单位与来源整项](<AI Native-开发记录.md#ain-entry13-unit-provenance-simulated-whole-closeout-20261115>)25源及任务册已提交上传回读一致。main远端回读62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。[ENTRY-01目录检查点](<AI Native-开发记录.md#ain-entry01-directory-checkpoint-20261115>)只固化已核14源，实际source及四端消费者未齐，不升档、不整收main。旧接续完整前像在8a4固定提交同路径，不复制附件。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天Git核对已执行；本次前置本地／GitHub均为57f06f311bcefac7e32d634c952cd21f3952e016，[ENTRY-13原单位与来源整项](<AI Native-开发记录.md#ain-entry13-unit-provenance-simulated-whole-closeout-20261115>)和[ENTRY-01未完检查点](<AI Native-开发记录.md#ain-entry01-directory-checkpoint-20261115>)均已上传。main远端回读62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。当前[客户时区／提交状态九源](<AI Native-开发记录.md#ain-entry16-current-zone-and-submitted-state-20261115>)已冻结核接、必要验证通过，独立阶段提交；跨端原引用公共后端为另一个活动片，不夹提交或升档。旧接续完整前像在57f固定提交同路径，不复制附件。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
@@ -16,8 +16,8 @@
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider。ENTRY-13整项25源固定交付后继续ENTRY-01准确场景host和四端实际消费者；接dev2跨端原引用最小接口依赖。AIN-15企业告知与付款授权保持原依赖，不覆盖企业窗口。仅暂存已核成果。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 已证实Web时间依赖设备时区及submitted草稿误显示未提交。当前独占RemoteBooking.tsx的原AI参数时区转换及feature-local client-quote-time.ts；Web ClientQuotePreparation／ClientGoalPicker、小程序对应quote／goal的index.ts／WXML仅修状态；必要Checkout只加AI zoneSupported闭合检查。shared／通用core/time／会话／公共接点不改；修复后做必要一组模拟与类型、固定交权并继续ENTRY-16。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 当前独占scenes/client-booking-transfer.repository.ts及client-booking-transfer.contract.ts私有server metadata两叶；复用原OperationLog唯一ID／Serializable与同Draft锁实现短期签发／一次性绑定／原收据，正文留原材料。Root负责公共wire、目标Auth来源桥及原提交key／事务互斥；不新增表／迁移或新状态机，不改两端冻结会话。完成固定blob后继续，不等待main。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 时间／提交状态九源已冻结全部交权，Root逐blob及必要模拟／类型核接；当前只读核ENTRY-16原三条余端状态／时间／人工可访问性，复用原固定证据。无活动产品／四册／索引写权，不继续扩大已绿模拟。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 私有transfer合同e55a96f1／仓储b1530c1b已冻结交权，19场景／类型证据已读。当前独占新增Web transfer API／session／ClientBookingTransfer及mini transfer API／session／ai-booking-transfer组件，接显式issue／consume／原receipt。不改旧报价／Goal／Checkout／公共接点；Root挂原host和公共runtime。只存最少引用／原key／owner，unknown只读收据，不复制正文或自授权。 |
 | 内部/root/opening_core_closeout | ENTRY-13原四条最终独立静态复核未发现剩余确证实现缺口，Root已完成最终冻结及模拟／类型核接。无活动产品／四册／索引写权，不重复绿色模拟。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
 | main／PM | main串行集成、真实数据库／迁移／Client／服务恢复的唯一负责人。每两项原任务新达100%形成main节点；AI不争main索引或夹其他专项WIP，助手不等待集成。 |
