@@ -11,7 +11,7 @@ import { rentalDays, siteRepository } from '../data/siteRepository';
 import { nowInput, offsetDaysInput } from '../data/datetime';
 import { rentalQuery } from '../data/rentalQuery';
 import type { DemoOrder } from '../types';
-import { useBookingHandoffHost } from '../features/ai-native/BookingHandoffHost';
+import { useBookingHandoffHost, useBookingHandoffPending } from '../features/ai-native/BookingHandoffHost';
 import { BookingHandoffPanel } from '../features/ai-native/BookingHandoffPanel';
 import { handoffLocalInput, originalBookingModeLabel, originalBookingUnitLabel } from '../features/ai-native/booking-handoff';
 
@@ -24,6 +24,7 @@ export function BookingPage() {
   const { tenant, tenantCode, href, isRemote, localizeProduct, language, t } = useSite();
   const { isAuthenticated, session, currentWorkspace } = useAuth();
   const handoffHost = useBookingHandoffHost();
+  const handoffPending = useBookingHandoffPending();
   const location = useLocation(), hasHandoffReference = Boolean(location.state && typeof location.state === 'object' && 'aiBookingHandoffRef' in location.state);
   const toast = useToast();
   const { productId } = useParams();
@@ -56,7 +57,7 @@ export function BookingPage() {
   const depositAmount = !remoteMode && product.deposit !== undefined ? product.deposit * quantity : undefined;
   const priceUnit = product.priceUnit === '天' && language === 'en' ? 'day' : product.priceUnit;
 
-  if (remoteMode && hasHandoffReference && !handoffHost?.enabled) return <div className="shell booking-page">
+  if (remoteMode && (hasHandoffReference || handoffPending) && !handoffHost?.enabled) return <div className="shell booking-page">
     <PageHeading title={language === 'en' ? 'Continue the original reservation' : '继续原预约'}
       description={language === 'en' ? 'Use the original draft controls to check this reservation. No new quote is requested.' : '请通过原草稿入口核对本次预约，不重新请求报价。'} />
     <Link className="button button-outline" to={href('/products')}>{language === 'en' ? 'Return to rental items' : '返回商品目录'}</Link>

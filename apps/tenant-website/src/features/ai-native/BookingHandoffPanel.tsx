@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useSite } from '../../SiteContext';
 import type { AiBookingHandoff } from '@rental-os/shared';
-import { sessionApi } from '../../data/authClient';
+import { captureEnterpriseHostSession, sessionApi } from '../../data/authClient';
 import { EnterpriseBookingApproval } from '../../components/EnterpriseBookingApproval';
 import { createBookingHandoffConsumer, type BookingHandoffHost, type BookingHandoffState, type BookingPageContext,
   type OriginalBookingQuoteFacts } from './booking-handoff';
+import { ClientBookingTransfer } from './ClientBookingTransfer';
+import { clientBookingTransferOwner, clientBookingTransferStorageKey } from './client-booking-transfer-session';
 
 export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue, children, english }: {
   host: BookingHandoffHost; context: BookingPageContext; sessionIdentity: unknown; english: boolean;
@@ -15,6 +17,7 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
   const [view, setView] = useState<{ owner: object; state: BookingHandoffState } | null>(null);
   const [consent, setConsent] = useState<{ owner: object; agreed: boolean } | null>(null);
   const [approvedOrder, setApprovedOrder] = useState<{ owner: object; orderId: string } | null>(null);
+  const [transfer, setTransfer] = useState<{ owner: object; active: boolean; attempted: boolean } | null>(null);
   const { href } = useSite();
   const consumer = useMemo(() => {
     const owner = {};
@@ -45,6 +48,22 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
   };
   const busy = ['loading', 'accepting', 'submitting', 'checking'].includes(state.status);
   const available = consumer.controller.submissionsAvailable();
+  const captured = captureEnterpriseHostSession();
+  let retainedTransfer = false;
+  if (captured && captured.customerId === context.customerId && captured.workspaceCode === context.workspaceCode) {
+    const transferContext = { tenantCode: captured.tenantCode, serviceCode: captured.workspaceCode,
+      customerId: captured.customerId, surface: 'tenant_website' as const };
+    try {
+      const value = localStorage.getItem(clientBookingTransferStorageKey(transferContext, 'issue', host.handoffRef));
+      const row = value === null ? null : JSON.parse(value);
+      retainedTransfer = row?.version === 'booking-transfer-operation-1' && row.owner === clientBookingTransferOwner(transferContext)
+        && row.kind === 'issue' && row.attempted === true && row.command?.handoffRef === host.handoffRef;
+    } catch { /* Only identifiable original metadata may hold this operation. */ }
+  }
+  const transferActive = transfer?.owner === consumer.owner && transfer.active;
+  const transferAttempted = retainedTransfer || transfer?.owner === consumer.owner && transfer.attempted;
+  const sourceHeld = transferActive || transferAttempted;
+  const transferScope = JSON.stringify([context.tenantCode, context.workspaceCode, context.customerId, host.handoffRef]);
   return <>
     <section className="booking-card" aria-busy={busy}>
       <h2>{text('原预约材料交接', 'Original booking handoff')}</h2>
@@ -63,9 +82,9 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
       </dl>}
       {['disabled', 'loading', 'available', 'unavailable'].includes(state.status) && <button type="button" className="button button-dark" disabled={busy}
         onClick={() => { void consumer.controller.read(); }}>{text('读取原材料', 'Read original handoff')}</button>}
-      {state.status === 'available' && <button type="button" className="button button-dark" onClick={() => { void proceed(); }}>
+      {state.status === 'available' && !sourceHeld && <button type="button" className="button button-dark" onClick={() => { void proceed(); }}>
         {text('人工继续：复验并填入原表单', 'Continue: recheck and fill original form')}</button>}
-      {['continued', 'accepting', 'accepted'].includes(state.status) && !state.quote?.enterprise?.approvalRequired && <>
+      {['continued', 'accepting', 'accepted'].includes(state.status) && !state.quote?.enterprise?.approvalRequired && !sourceHeld && <>
         <label><input type="checkbox" checked={Boolean(agreed)} disabled={busy}
           onChange={event => setConsent({ owner: consumer.owner, agreed: event.target.checked })} />
           {text('我已检查原预约条件并明确继续办理', 'I have reviewed the original booking conditions and wish to proceed')}</label>
@@ -86,7 +105,20 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
           setApprovedOrder({ owner: consumer.owner, orderId });
           setView({ owner: consumer.owner, state: { status: 'order_observed', handoff: state.handoff, quote: state.quote } });
         }} />}
-      {['disabled', 'unavailable', 'pending_reconcile'].includes(state.status) && <button type="button" className="button button-dark"
+      {(state.status === 'continued' && !state.quote?.enterprise && host.mode === 'interactive' || transferAttempted || transferActive) && <>
+        {!transferActive && <button type="button" className="button button-outline" onClick={() => {
+          setTransfer({ owner: consumer.owner, active: true, attempted: transferAttempted }); setConsent(null);
+        }}>{text('在小程序接续原预约', 'Continue the original booking in the mini program')}</button>}
+        {transferActive && <ClientBookingTransfer enabled={host.isCurrent?.() !== false} scopeKey={transferScope}
+          kind="issue" handoffRef={host.handoffRef} english={english} onHandoff={() => undefined}
+          onHold={value => setTransfer(previous => ({ owner: consumer.owner, active: true,
+            attempted: value.attempted || previous?.owner === consumer.owner && previous.attempted === true }))} />}
+        {transferActive && !transferAttempted && <button type="button" className="button button-outline"
+          onClick={() => setTransfer(null)}>{text('返回本端原预约', 'Return to the original booking on this device')}</button>}
+      </>}
+      {transferAttempted && <p role="status">{text('原转接已尝试，请在目标端接续或核对原收据，本端不重复提交。',
+        'The original transfer was attempted. Continue on the target device or check its receipt; this device does not submit again.')}</p>}
+      {(sourceHeld || ['disabled', 'unavailable', 'pending_reconcile'].includes(state.status)) && <button type="button" className="button button-dark"
         disabled={busy || !consumer.controller.canReconcile()}
         onClick={() => { void consumer.controller.reconcile(); }}>{text('只核对原提交', 'Read original receipt only')}</button>}
       {state.receipt?.state === 'observed' && <Link className="button button-dark" to={href(`/orders/${encodeURIComponent(state.receipt.orderId)}`)}>

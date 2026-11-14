@@ -4,21 +4,21 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天Git核对已执行；本次产品阶段本地／GitHub均为37f384be0a6c3b314323d70318ebcf4f5b15cc2e，[ENTRY-13原单位与来源整项](<AI Native-开发记录.md#ain-entry13-unit-provenance-simulated-whole-closeout-20261115>)、[ENTRY-01未完检查点](<AI Native-开发记录.md#ain-entry01-directory-checkpoint-20261115>)及[客户时区／提交状态九源](<AI Native-开发记录.md#ain-entry16-current-zone-and-submitted-state-20261115>)均已上传并回读。main远端回读62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。当前[跨端原引用后端](<AI Native-开发记录.md#ain-entry14-original-cross-surface-backend-20261115>)20源及最后Core等待P2已核接、模拟／类型和独立静态复核通过，已按独立后端阶段上传；两端transfer消费者仍由dev2施工，不夹提交或升档。旧接续完整前像在02bd固定提交同路径，不复制附件。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天Git核对已执行；本次前置本地／GitHub均为89cec8f5caa1ad21791d703f5cefe07355660148，[ENTRY-16原状态／时区／双语](<AI Native-开发记录.md#ain-entry16-simulated-whole-closeout-20261115>)已整项提交上传并回读，原13及跨端后端前置保持。当前[ENTRY-04／14双向原转接](<AI Native-开发记录.md#ain-entry04-14-cross-surface-whole-closeout-20261115>)16源已全部冻结核接、双向原Core和原收据／页面／类型通过，最后旧A切B并发P2完成定向模拟及独立复核，按完整阶段同步任务表并提交。main远端回读62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继整合节点由PM按固定原记录核定；助手不等待集成。旧接续完整前像在89cec固定提交，不复制附件。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
-3. **AIN-26～28和ENTRY。** dev2的[固定四品类8例](<AI Native-开发记录.md#ain26-four-category-fixed-evidence-style-20261115>)已交回，Root核原证据与限制；同Core路径、正常批准／单次订单／丢ACK恢复和锁内缺货通过，只补对应矩阵切片，不替代全部并发／取消／接管／多端全文。15企业正向依赖仍待原授权接点；26继续按原依赖计分，随后27／28原部署／灰度／停用／升级回退准备、独立复核和可操作交付。ENTRY-13原默认单位、来源、明确确认、旧收据及公共服务版本P2已核闭。[ENTRY-14／04后端](<AI Native-开发记录.md#ain-entry14-original-cross-surface-backend-20261115>)已核短期／一次性引用、双端当前身份／发布政策、同Draft锁／原提交键及三COMMIT丢ACK；最后内部Core准备撤权／改版／到期拒writer，原attempt保留不重派。接dev2两端新增消费者后由Root挂原Booking页／Checkout，核完整确认与原收据；ENTRY-15继续全端原四条，ENTRY-16核原状态／时区／语言和人工可用性。全部18项保持原范围，不能以局部修复计整项完成。
+3. **AIN-26～28和ENTRY。** dev2的[固定四品类8例](<AI Native-开发记录.md#ain26-four-category-fixed-evidence-style-20261115>)已交回，Root核原证据与限制；同Core路径、正常批准／单次订单／丢ACK恢复和锁内缺货通过，只补矩阵切片，不替代全部并发／取消／接管／多端全文。15企业正向依赖仍待原授权接点；26继续按原依赖计分，随后27／28原部署／灰度／停用／升级回退准备、独立复核和可操作交付。ENTRY-13、16及[04／14](<AI Native-开发记录.md#ain-entry04-14-cross-surface-whole-closeout-20261115>)原全文已核闭；跨端只原ref、当前身份／发布／政策、同Draft锁／原键，最后Core准备拒权／到期及三ACK／到期原读保持。下一步集中ENTRY-01原source和四端目录、ENTRY-15默认关闭／执行停用但原读与人工出口，再沿剩余ENTRY全文收口，不缩分母或以接口登记加分。
 4. **ENTRY-01目录公共生产接线仍未整项核闭。** dev1唯一22项metadata／application两叶已交权，shared、四端Controller、原Auth／Guard／原权限与stage sources及正式provider已固定未完检查点。原声明stage端口模拟不证明全部标准生产adapter；本阶段另补客户本人订单解释准确`order_explanation`宿主／政策定位，必要闭合合同及当前场景发布模拟通过。继续核全部原source、能力／订阅／scope、捕获装配与当前publication一致性，以及四端实际消费者；未验证部分保持关闭，不据目录入口或局部类型判整项完成。
 
 ## 写入归属与协作
 
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
-| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider。跨端原引用后端20源与最后准备P2核闭，接dev2固定消费者后挂原Booking／Checkout并核ENTRY-14／04全文；继续ENTRY-01全部原source和四端实际消费者。AIN-15企业告知与付款授权保持原依赖，不覆盖企业窗口。仅暂存已核成果。 |
+| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider。ENTRY-04／14双向消费者16源及最后父收据epoch核闭，固化完整阶段；继续ENTRY-01原source／四端实际消费者与ENTRY-15全端停用原读接点。AIN-15企业告知与付款授权保持原依赖，不覆盖企业窗口。仅暂存已核成果。 |
 | AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 时间／提交状态九源和后台双语四源已交权，Root核[ENTRY-16全文](<AI Native-开发记录.md#ain-entry16-simulated-whole-closeout-20261115>)后同步唯一任务表；当前只读定位ENTRY-01目录的原source／权限能力订阅／四端消费者缺口，不重复13／14已核闭阶段，不写Root跨端宿主。无活动产品／四册／索引写权。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 私有transfer合同e55a96f1／仓储b1530c1b已冻结交权，19场景／类型证据已读。当前独占新增Web transfer API／session／ClientBookingTransfer及mini transfer API／session／ai-booking-transfer组件，接显式issue／consume／原receipt。不改旧报价／Goal／Checkout／公共接点；Root挂原host和公共runtime。只存最少引用／原key／owner，unknown只读收据，不复制正文或自授权。 |
-| 内部/root/opening_core_closeout | ENTRY-13原四条已核闭，ENTRY-14原后端最终准备P2独立复核已关闭，三接点未发现新增确证P1／P2。只读结论不代表完整前端通过；无活动产品／四册／索引写权，不重复绿色模拟。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | transfer私有两叶及最终两端九源完全冻结交权，Root逐blob核同，最后receiptOnly及分引用／到期原读已模拟／类型通过。当前只读核ENTRY-15全四端默认关闭、执行停用后的独立原收据读及人工路径，具体缺口交Root分配，不改已交权consumer／shared／Root宿主。 |
+| 内部/root/opening_core_closeout | ENTRY-16全文独立复核及ENTRY-04／14原三P2最后关闭，父selectionEpoch等待／收据发布／展示核同，未发现修复新增确证P1／P2。无活动产品／四册／索引写权，不重复绿色模拟。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
 | main／PM | main串行集成、真实数据库／迁移／Client／服务恢复的唯一负责人。每两项原任务新达100%形成main节点；AI不争main索引或夹其他专项WIP，助手不等待集成。 |
 

@@ -6,6 +6,43 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry04-14-cross-surface-whole-closeout-20261115"></a>
+## ENTRY-04／14 双向原预约转接、原收据恢复与状态全文收口（2026-11-15）
+
+前置`89cec8f5caa1ad21791d703f5cefe07355660148`已普通推送并回读一致，包含[ENTRY-16状态全文](<#ain-entry16-simulated-whole-closeout-20261115>)；本片继承`37f384be0a6c3b314323d70318ebcf4f5b15cc2e`的[跨端后端及最后Core派发复核](<#ain-entry14-original-cross-surface-backend-20261115>)，只固定7个原页面接点、dev2九源消费者及三册。Root逐blob／SHA核接最终九源，最后两个session的receiptOnly追加也完成必要复验；完整阶段固定版本即本节所在提交，不再以修改片数加进度。
+
+[网页转接组件](../../apps/tenant-website/src/features/ai-native/ClientBookingTransfer.tsx)及[原生组件](../../apps/miniprogram/src/components/ai-native/ai-booking-transfer/index.ts)只有明确打开后挂入，挂载／显示只恢复本地定位、不请求AI、签发、消费或导航。[两端](../../apps/tenant-website/src/features/ai-native/client-booking-transfer-session.ts)[会话](../../apps/miniprogram/src/components/ai-native/client-booking-transfer-session.ts)复用闭合公共合同及正式native runtime，journal只存owner、原ref／key和attempted；分transferRef保存原操作，最近引用索引只含owner／ref，不覆盖未知旧记录。同引用不换键消费，写前及写后读回失败拒派发；issue／consume丢回复只读原收据。当前Auth／发布政策仍逐次由后端复核，缓存、URL和调用方ID不恢复权限。
+
+[Web原Booking桥](../../apps/tenant-website/src/features/ai-native/BookingHandoffBridge.tsx)消费目标已重新读取的handoffRef，再沿原独立host核capabilities及原材料，取服务端原商品作为路由锚点，不按当前URL重建材料。[原面板](../../apps/tenant-website/src/features/ai-native/BookingHandoffPanel.tsx)、[页面](../../apps/tenant-website/src/pages/BookingPage.tsx)及[小程序Checkout](../../apps/miniprogram/src/pages/checkout/index.ts)保持原核对→受理→明确提交→原订单收据，转接本身没有创建第二Draft／quote／订单。源页显式issue后保持原attempt hold并禁止并行提交，同时可读取原转接及原订单收据。目标引用到期撤回可执行显示，但显式读同transfer／key可交独立receipt_only宿主；该只读动作不启用继续，缺收据或not_observed不能证明未执行。只有当前原订单observed可结束本次核对返回普通预约，原键与历史记录保留。
+
+本片独立复核先定位两个恢复P2：历史target journal锁住同服务所有普通预约、sourceHeld隐藏原订单收据入口。现只本页明确转接意图暂停，历史journal不自动挂消费者或锁无关页面；sourceHeld也提供原canReconcile只读入口，两端隐藏／身份变化撤回host、正文和迟到交付。后继独立反例“旧A收据解除新B暂停”用selectionEpoch覆盖父级等待、发布及最终展示，onHold核当前session／scope再取消旧consumer／host；旧finally不能释放新busy。小程序选择变化同时推进selection／binding／opening并dispose原factory，原收据等待后再核selection。最后定向模拟和独立静态复核确认这些P2已关闭，未发现修复新增的确证P1／P2。
+
+| 原全文门槛 | 本轮G4依据 |
+| --- | --- |
+| ENTRY-04：版本化原引用、短期／一次性、独立身份及scope | 服务端签发与消费双端publication／policyHash、同客户但独立session／channel，原密文及source principal过滤；两端实际转接消费者和原host核读。匿名及企业切换不自动并入普通客户；只有原Auth签发的绑定可恢复原引用。 |
+| ENTRY-04：登录／身份／tenant／workspace／登出／异步隔离 | 原generation／当前Auth与发布双读，Web effect owner／session／selection、mini contextVersion／epoch／sessionEvents及隐藏／卸载；旧scope、另session、撤权、旧引用与迟到收据拒绝，最少journal不含凭据／正文。 |
+| ENTRY-14：状态、终态、选择修订、指纹、过期及提交 | 复用原Draft create→select→handoff→submitted及stale／expired／abandoned，原CAS／同Draft锁；原测试的状态／并发／撤回／scope负例保留，提交与attempt同事务。submitted仍只表示原请求已提交，订单／付款／履约依原业务结果。 |
+| ENTRY-14：Action三个复核点与原幂等 | 原issue／read／执行assertEntryAction，版本／scope／surface／期限／资源hash及原read政策；同Draft锁、原booking-order键和当前prepared全文最后复核。三COMMIT丢ACK／Core丢回复、源目标并行、材料／授权／期限变化拒绝，读取不新派。 |
+| ENTRY-14：跨端引用消费与业务连续性 | 两方向实际会话→Auth／Guard／Controller→原Core，同原quote／Draft／handoff／订单；短期一次消费、目标当前身份重绑定、原收据独立读，不用URL或本机缓存启用业务。 |
+
+dev2最终九源：Web API`59883f91b5b54e046ed2e8025b03497ef39bfcb2`、session`aa30abaf66df5d3605fdee31893835f750c781e4`、React`430af19ca3612d221c0119b98d9102fb0998c15b`；mini API`d4a3c2a528357ac8718d0f0b1b6923629a0d97e0`、session`720b529b56bf05f8623275dbd882d94f09e235a9`、TS`6937c18a9fb6c8e3f2d2af27f81efd3b7216e69c`、JSON`a89ef4dbeefa01f5cd7971973aa4db6498d139f7`、WXML`985f5f5f217eb41344ea5cefb08cde8410bf8acf`、WXSS`eb924e10989c8e2c2060b31105311547178bca5c`。Root最后selection边界Bridge`453a4fc41b81cf054aa033934022c6bac77438cd`／Checkout`f9d31f95dce2d5c3600164c4dee6b178344ac20c`经独立读取核同；其余7个页面固定源码及差异见本阶段提交。
+
+| 必要模拟／类型 | stdin SHA-256及实际结果 |
+| --- | --- |
+| Root双向实际会话／Controller／原Core | 正向`2f9bc914cdaf698f272635eff47f16e4bb3eacf268e7f135d541f3472b34286f`，反向`323b3e620475567d266c363368ab5178d2fa22d13f74855508a6742833ce5bc7`，均退出0；issue／consume各1，丢回复原read，同Draft／quote、1订单／1提交。 |
+| Root正式分引用存储／到期原收据／原Core | `027e15c9d47b215e9971c4d0fc34c9eb4b16254abe67ba97ce93be80bac3a346`，退出0；最少索引、过期原ref仅receipt_only，订单仍一张；最后只读不启continue`7d4d8fc92cbe13775de11b8a95be8266a8bd8148da0faa0cd274169a5590599f`退出0。 |
+| Root按引用保存及同键恢复 | `769e9daf54fdc8c72ad87c80820f17aed38ba1d79ac8bd47d95222df8ba918af`，退出0；另ref显式选择、旧记录保留、同ref原键恢复且不能reconsume，scope撤回。 |
+| Root Web实际Bridge有限Hook宿主 | 原导航／隐藏／身份`c0ec1c55ea4b82c29ac0044476ee89d6b35e7ee16ea71410063c1ac51c4a73a9`、到期只读宿主`bdfce59e399a223ee81b2c032dd2dd875be0e7cf5278baa35c7c3e260ea566e6`均退出0；挂载0请求，服务端原商品路由，仅原ref跨页，0订单／模型。 |
+| Root Web旧A等待切B拒交付 | `036c96913997489f3a3c591626271a799bdd7d958a540bb4b90500fd6e04f9e5`，退出0；旧A observed不回显、不开放返回普通，隐藏和新身份仍撤回。 |
+| Root原生实际Checkout方法及原runtime | `f3f232a6bd60b5b0f1781554f4beddb6570c89cee81a2e098393399f8c4d441e`、最后旧A切B`e1263e807cc9ab6897a288ebb52ceba55b49c3e56f017c8c3be4669f8f359024`均退出0；挂载0请求／writer、source提交阻断、目标原ref、换身份／hidden撤回，只有observed order才finish。 |
+| Root最终两端生产类型 | Web`5b12afce1277897a8d5140b8dd6023676707aba02c78e638c2897979185e7cd0`四根／302源，mini`14a87e86ad0d07c85e80daf8c5fb965858c0322ea64297990ed2d7af30fbfda6`两根／241源／125正式声明，TS5.9.3、ES2019及原lib保持，最终复验均0诊断／退出0。 |
+| dev2原38场景与新增恢复16场景 | 原HTTP`f565ddba92f57ff7f8c5e99d26d59636e376e92654bfce96cfc00b89e6a66b75`、Controller／Core`8ac6a6ea7e0e53e4ce91eee383cf4b83ea0daf920f9441ae017ba11d3de1b457`退出0；恢复session`92913aaef63001edd05da2a0636e6813c20cb469c1480ecb75852a5dc716a2b4`／组件`d2cf30dff3a6a78f7f4674588546f1b7bfc79d4089ef8ba3e0c46c277c77a0a0`／原Core`0e04116887f06bcdf4afa773eca9610235c4d95edb3215e3b434d2bf56be80d8`均退出0。 |
+| dev2最后receiptOnly追加 | `a0e8152aa3c475b8e9cb360c7181948b043ab9850419c0fd1b0a45d9055312a1`两端各1场景，`aa1dbc3257cd371701068d6b6c3304fac384371c67076bee56c7c26cb8fb840b`两session／207和205传递源类型，均退出0、0诊断。 |
+
+命令均`node --no-compilation-cache -`，无新增或扩写测试文件，完整stdin、失败及固定来源留本会话和原助手日志。Root初驱动误用h.now而非原clock，修夹具；后错误要求source对已提交原attempt拒读，生产正确返回同一原订单收据，修断言为只读／不重派，并补finally释放Session。该失败自有Node PID1316已核归属后停止，退出4294967295，无临时文件；后继均正常退出。原生有限宿主漏destroy先失败，仅补夹具真实方法；未放宽生产授权或删除原测试断言。UI上下文加载器本机缺失，未下载，沿原PRODUCT／DESIGN／样式和craft-floor，不声称浏览器渲染通过。
+
+按原全文、固定来源、必要验证及独立复核，ENTRY-04／14均由75%更新100%，ENTRY覆盖率76.4%（4/18达到100%），原AIN仍88.4%／24/28；46项等权参考83.7%。本轮ENTRY-16与本片04／14形成新的固定整合节点，main仍由PM按原记录串行整合，不争main索引或自动广播。全部自有验证进程已退出，原offline preload、不可达DATABASE_URL、内存audit0；本树`output/.tmp/ain-entry14-cross-surface-20261115`和助手任务目录未创建，无新增依赖、Client／dist或临时副本。真实浏览器／微信／MySQL事务／供应商仍由负责人后续操作，不以模拟或上传代表生产放行。
+
 <a id="ain-entry16-simulated-whole-closeout-20261115"></a>
 ## ENTRY-16 多端事实状态、空间时区及可访问性整项收口（2026-11-15）
 

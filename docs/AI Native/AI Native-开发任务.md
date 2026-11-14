@@ -35,7 +35,7 @@
 | 指标 | 已确认门槛覆盖率 |
 | --- | --- |
 | 原28项研发里程碑覆盖率 | 88.4% |
-| ENTRY增量研发里程碑覆盖率（单独分母） | 73.6% |
+| ENTRY增量研发里程碑覆盖率（单独分母） | 76.4% |
 | 原28项正式验收 | 85.7%（24/28） |
 
 本文件保留既有 `Pending`、`In Progress`、`Blocked`、`Reserved` 状态及原任务安排。`Blocked`仅用于确有外部阻碍且不能继续的部分；依赖尚未完成的未开工任务保持`Pending`。缺模型凭据、真机或某个治理能力，不阻止无关任务的合法开发。
@@ -101,7 +101,7 @@
 | AIN-ENTRY-01 | 75% |
 | AIN-ENTRY-02 | 75% |
 | AIN-ENTRY-03 | 75% |
-| AIN-ENTRY-04 | 75% |
+| AIN-ENTRY-04 | 100% |
 | AIN-ENTRY-05 | 75% |
 | AIN-ENTRY-06 | 75% |
 | AIN-ENTRY-07 | 75% |
@@ -111,7 +111,7 @@
 | AIN-ENTRY-11 | 50% |
 | AIN-ENTRY-12 | 50% |
 | AIN-ENTRY-13 | 100% |
-| AIN-ENTRY-14 | 75% |
+| AIN-ENTRY-14 | 100% |
 | AIN-ENTRY-15 | 75% |
 | AIN-ENTRY-16 | 100% |
 | AIN-ENTRY-17 | 75% |

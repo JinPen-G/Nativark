@@ -26,6 +26,7 @@ import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../.
 import { rememberZone, zoneOf } from "../../core/zones";
 import { clientQuoteBookingStoredRequest, clientQuoteOwner, clientQuoteSelectedInput, clientQuoteStorageKey } from "../../components/ai-native/client-quote-session";
 import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema } from "../../vendor/shared-ai-client";
+import { clientBookingTransferOwner, clientBookingTransferStorageKey } from "../../components/ai-native/client-booking-transfer-session";
 
 /** Inspect original local phases only. Retaining parameters never enables AI
  * or blocks ordinary booking; possible confirmation/booking needs original reads. */
@@ -95,6 +96,11 @@ interface CouponRow {
 }
 
 interface CheckoutData {
+  aiTransferActive: boolean;
+  aiTransferHeld: boolean;
+  aiTransferSourceActive: boolean;
+  aiTransferSourceAttempted: boolean;
+  aiTransferScopeKey: string;
   aiQuoteActive: boolean;
   aiQuotePendingCore: boolean;
   aiQuoteSelection: ClientCreateQuoteRequest | null;
@@ -209,6 +215,7 @@ const DEFAULT_ZONE = "Asia/Shanghai";
 Page({
   behaviors: [themeBehavior],
   data: {
+    aiTransferActive: false, aiTransferHeld: false, aiTransferSourceActive: false, aiTransferSourceAttempted: false, aiTransferScopeKey: '',
     aiQuoteActive: false, aiQuotePendingCore: false, aiQuoteSelection: null, aiQuoteScopeKey: '', aiQuoteTimeZone: '',
     aiOriginalLines: [], aiIdentityLabel: '', aiFulfillmentLabel: '', aiEnterpriseNotice: '', aiEnterpriseApprovalRequired: false,
     enterprisePolicies: [], enterpriseIndex: -1, enterpriseLabel: "个人签约付款", enterprisePayer: false,
@@ -330,6 +337,87 @@ Page({
   aiQuoteObservedReference: null as string | null,
   aiQuoteScope: '',
   aiQuoteOriginalScope: '',
+  aiTransferIntent: false,
+  aiTransferIntentScope: '',
+  aiTransferSelectionEpoch: 0,
+  syncTransferLocators() {
+    const session = currentSession(), personal = session?.customer.customerType === 'personal';
+    const context = personal && session ? { tenantCode: PUBLIC_CONFIG.tenantCode, serviceCode: session.serviceCode,
+      customerId: session.customer.customerId, surface: 'client_miniprogram' as const } : null;
+    let retained = false, sourceAttempted = false;
+    if (context) {
+      const own = (kind: 'issue' | 'consume', ref?: string) => {
+        try {
+          const row = readStorage<Record<string, unknown>>(clientBookingTransferStorageKey(context, kind, ref));
+          return row?.version === 'booking-transfer-operation-1' && row.owner === clientBookingTransferOwner(context)
+            && row.kind === kind && (kind !== 'issue' || row.attempted === true) ? row : null;
+        } catch { return null; }
+      };
+      // Past target references are recovered by the explicit transfer component.
+      // Their existence cannot pause another ordinary reservation on this page.
+      retained = this.aiTransferIntent && this.data.aiTransferHeld
+        && this.aiTransferIntentScope === JSON.stringify([PUBLIC_CONFIG.tenantCode, contextVersion(), context.serviceCode, context.customerId]);
+      if (this.aiHost?.handoffRef || this.aiPendingHandoffRef) sourceAttempted = Boolean(own('issue', this.aiHost?.handoffRef ?? this.aiPendingHandoffRef));
+    }
+    const scope = JSON.stringify([PUBLIC_CONFIG.tenantCode, contextVersion(), context?.serviceCode, context?.customerId]);
+    this.setData({ aiTransferScopeKey: scope, aiTransferHeld: retained || this.data.aiTransferHeld && this.data.aiTransferScopeKey === scope,
+      aiTransferSourceAttempted: sourceAttempted || this.data.aiTransferSourceAttempted && this.data.aiTransferScopeKey === scope,
+      ...(!personal ? { aiTransferActive: false, aiTransferSourceActive: false, aiTransferSourceAttempted: false } : {}) });
+  },
+  onOpenBookingTransfer() {
+    if (!this.aiVisible || this.aiDisposed || this.aiMode || this.data.locked || getCart()?.submission
+      || currentSession()?.customer.customerType !== 'personal') return;
+    this.requestVersion++; this.stopTicker(); this.syncTransferLocators();
+    this.aiTransferIntent = true; this.aiTransferIntentScope = this.data.aiTransferScopeKey;
+    this.setData({ aiTransferActive: true, aiHandoffPending: true, quote: undefined, charges: [], benefits: [],
+      quoteLoading: false, view: readyState() });
+  },
+  onBookingTransferHold(event: WechatMiniprogram.CustomEvent<{ hasLocator: boolean; attempted: boolean }>) {
+    if (!this.aiVisible || this.aiDisposed || !this.data.aiTransferActive || this.aiMode) return;
+    this.aiTransferSelectionEpoch++; this.aiOpeningGeneration++; this.aiBindingEpoch++;
+    this.aiFactory?.dispose(); this.aiFactory = undefined;
+    this.setData({ aiReceiptOpening: false, aiReceiptLookup: '', aiReceiptError: '' });
+    this.setData({ aiTransferHeld: event.detail.attempted, aiHandoffPending: true });
+  },
+  onOpenSourceTransfer() {
+    if (!this.aiVisible || this.aiDisposed || !this.aiMode || !this.aiHost) return;
+    this.syncTransferLocators();
+    if (!this.data.aiTransferSourceAttempted && (this.aiHost.mode !== 'interactive' || this.data.aiStatus !== 'continued'
+      || this.data.aiEnterpriseApprovalRequired || this.data.aiIdentityLabel !== '个人签约付款')) return;
+    this.setData({ aiTransferSourceActive: true, agreed: false });
+  },
+  onCloseSourceTransfer() {
+    if (!this.aiVisible || this.aiDisposed || !this.aiMode) return;
+    this.syncTransferLocators();
+    if (!this.data.aiTransferSourceAttempted) this.setData({ aiTransferSourceActive: false });
+  },
+  onSourceTransferHold(event: WechatMiniprogram.CustomEvent<{ hasLocator: boolean; attempted: boolean }>) {
+    if (!this.aiVisible || this.aiDisposed || !this.data.aiTransferSourceActive) return;
+    this.setData({ aiTransferSourceAttempted: this.data.aiTransferSourceAttempted || event.detail.attempted });
+  },
+  async onTransferredBookingHandoff(event: WechatMiniprogram.CustomEvent<{ handoffRef: string }>) {
+    if (!this.aiVisible || this.aiDisposed || !this.data.aiTransferActive || this.aiMode
+      || currentSession()?.customer.customerType !== 'personal') return;
+    await this.onQuoteBookingHandoff(event);
+    if (this.aiVisible && !this.aiDisposed && this.aiMode) this.setData({ aiTransferActive: false });
+  },
+  async onTransferredBookingReceipt(event: WechatMiniprogram.CustomEvent<{ handoffRef: string }>) {
+    if (!this.aiVisible || this.aiDisposed || !this.data.aiTransferActive || this.aiMode
+      || !/^[a-f0-9-]{36}$/iu.test(event.detail.handoffRef)) return;
+    const reference = event.detail.handoffRef, version = contextVersion(), selectionEpoch = this.aiTransferSelectionEpoch;
+    this.setData({ aiReceiptLookup: reference });
+    await this.onOpenOriginalReceipt();
+    if (this.aiVisible && !this.aiDisposed && version === contextVersion() && selectionEpoch === this.aiTransferSelectionEpoch && this.aiMode
+      && this.aiHost?.mode === 'receipt_only' && this.aiHost.handoffRef === reference) await this.aiConsumer?.reconcile();
+  },
+  onFinishOriginalBooking() {
+    if (!this.aiVisible || this.aiDisposed || !this.aiMode || this.data.aiStatus !== 'order_observed'
+      || !this.data.aiOrderId || this.aiHost?.isCurrent?.() === false) return;
+    this.detachHost(); this.aiTransferIntent = false;
+    this.setData({ aiTransferActive: false, aiTransferSourceActive: false, aiHandoffPending: false });
+    this.aiPendingHandoffRef = undefined;
+    void this.prepare(); void this.loadEnterprisePolicies(); this.startTicker();
+  },
   hasOriginalQuotePreparation() {
     return retainedQuoteState().hasLocator;
   },
@@ -401,8 +489,11 @@ Page({
 
   onContinueOrdinaryBooking() {
     if (this.aiDisposed || !this.aiVisible || this.aiMode || this.data.aiHandoffOpening) return;
+    this.syncTransferLocators();
+    if (this.aiTransferIntent && this.data.aiTransferHeld) { toast('原转接结果仍需核对，不能派发第二预约'); return; }
+    this.aiTransferIntent = false;
     this.aiOpeningGeneration++; this.aiPendingHandoffRef = undefined;
-    this.setData({ aiHandoffPending: false, aiHandoffInput: '', aiHandoffOffered: false });
+    this.setData({ aiTransferActive: false, aiHandoffPending: false, aiHandoffInput: '', aiHandoffOffered: false });
     // Explicit return to the ordinary cart. No original AI quote, Draft,
     // handoff, acceptance or unknown receipt is overwritten or redispatched.
     void this.prepare(); void this.loadEnterprisePolicies(); this.startTicker();
@@ -486,6 +577,7 @@ Page({
     this.aiAcceptance = undefined;
     this.aiHost = host ? { ...host, capability: { ...host.capability } } : undefined;
     this.aiMode = host?.enabled === true;
+    this.setData({ aiTransferActive: false, aiTransferSourceActive: false });
     this.requestVersion++;
     this.stopTicker();
     this.clearBookingHandoff();
@@ -522,6 +614,7 @@ Page({
       aiSubmissionAvailable: this.aiHost.mode === "interactive"
         && [this.aiHost.acceptBookingSubmission, this.aiHost.submitAcceptedBooking, this.aiHost.readBookingSubmission]
           .every(method => typeof method === "function"), view: readyState() });
+    this.syncTransferLocators();
   },
 
   applyBookingHandoff(view: CustomerHandoffView) {
@@ -552,8 +645,13 @@ Page({
   },
 
   onReadBookingHandoff() { return this.aiVisible && this.aiMode ? this.aiConsumer?.read() : undefined; },
-  onContinueBookingHandoff() { return this.aiVisible && this.aiMode ? this.aiConsumer?.continue() : undefined; },
+  onContinueBookingHandoff() {
+    this.syncTransferLocators();
+    return this.aiVisible && this.aiMode && !this.data.aiTransferSourceAttempted ? this.aiConsumer?.continue() : undefined;
+  },
   async onAcceptBookingSubmission() {
+    this.syncTransferLocators();
+    if (this.data.aiTransferSourceAttempted || this.data.aiTransferSourceActive) return;
     if (!this.aiVisible || !this.aiMode || !this.data.agreed || this.data.aiEnterpriseApprovalRequired) {
       if (this.aiVisible && this.aiMode) this.setData({ formError: "请先阅读并同意原租赁规则" });
       return;
@@ -562,6 +660,8 @@ Page({
     if (this.aiVisible && !this.aiDisposed) this.aiAcceptance = this.aiConsumer?.snapshotAcceptance();
   },
   onSubmitAcceptedBooking() {
+    this.syncTransferLocators();
+    if (this.data.aiTransferSourceAttempted || this.data.aiTransferSourceActive) return;
     return this.aiVisible && this.aiMode && this.data.agreed && !this.data.aiEnterpriseApprovalRequired ? this.aiConsumer?.submit() : undefined;
   },
   onReadBookingSubmission() { return this.aiVisible && this.aiMode ? this.aiConsumer?.reconcile() : undefined; },
@@ -601,18 +701,21 @@ Page({
       this.aiQuoteMode = false; this.aiQuoteIntent = false; this.aiQuotePending = false;
       this.aiQuoteObservedReference = null; this.aiQuoteScope = ''; this.aiQuoteOriginalScope = '';
       this.aiOpeningGeneration++; this.aiPendingHandoffRef = undefined;
-      this.setData({ aiHandoffOpening: false, aiHandoffInput: '', aiHandoffOffered: false });
+      this.setData({ aiHandoffOpening: false, aiHandoffInput: '', aiHandoffOffered: false, aiHandoffPending: false });
+      this.setData({ aiTransferActive: false, aiTransferSourceActive: false, aiTransferSourceAttempted: false, aiTransferHeld: false });
+      this.aiTransferIntent = false; this.aiTransferIntentScope = '';
+      this.syncTransferLocators();
       if (!this.aiMode) {
         this.requestVersion++; this.enterpriseOperation = undefined;
         this.setData({ enterprisePolicies: [], enterpriseIndex: -1, enterpriseLabel: "个人签约付款", enterpriseAccepted: false, enterpriseApproval: undefined,
           enterprisePending: false, enterpriseBusy: false, enterpriseError: "客户身份已变化，请重新读取企业授权", quote: undefined });
         return;
       }
+      this.aiMode = false;
       this.aiBindingEpoch++; this.aiFactory?.dispose(); this.aiFactory = undefined;
       this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
       this.aiAcceptance = undefined;
       this.setData({ aiReceiptLookup: "", aiReceiptOpening: false, aiReceiptError: "" });
-      if (!this.aiMode) return;
       this.requestVersion++; this.stopTicker(); this.clearBookingHandoff();
     });
     if (!requireSignIn(ROUTES.checkout)) return;
@@ -621,6 +724,8 @@ Page({
   onShow() {
     this.enterpriseViewEpoch++;
     this.aiVisible = true;
+    this.syncTransferLocators();
+    if (!this.aiMode && this.aiTransferIntent && this.aiTransferIntentScope === this.data.aiTransferScopeKey) this.setData({ aiHandoffPending: true });
     this.syncQuotePreparation(getCart());
     if (this.aiMode) {
       this.clearBookingHandoff(); this.bindBookingHandoff();
@@ -649,11 +754,14 @@ Page({
     this.aiOpeningGeneration++; this.setData({ aiHandoffOpening: false });
     this.aiBindingEpoch++; this.aiFactory?.hide(); this.aiFactory = undefined;
     this.aiVisible = false;
+    this.setData({ aiTransferActive: false, aiTransferSourceActive: false });
     if (this.aiHost) this.setData({ aiHandoffInput: this.aiHost.handoffRef, aiHandoffOffered: true });
     if (this.aiHost) this.aiPendingHandoffRef = this.aiHost.handoffRef;
+    if (this.aiHost) this.setData({ aiHandoffPending: true });
     this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined; this.aiAcceptance = undefined;
     this.setData({ aiReceiptLookup: "", aiReceiptOpening: false, aiReceiptError: "" });
     if (this.aiMode) this.clearBookingHandoff();
+    this.aiMode = false;
     this.stopTicker();
   },
 
