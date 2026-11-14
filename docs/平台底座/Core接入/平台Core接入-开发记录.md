@@ -155,6 +155,18 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-principal-sql-runtime-20261115"></a>
+
+## Core原身份SQL模板依赖解耦（2026-11-15）
+
+本片起点为已推送并回读的 `2ec5e40f82ab36b65c5cbb8420943d317f7f9bc5`，main仍62ca且已在本树祖先。工作区/索引干净、无合并/拣选；PM当前任务已结束且没有新公共文件授权，未把自动目标续接当Auth/Platform/shared总出口/Guard/AppModule窗口。
+
+[OriginalCorePrincipalAuthority](../../../apps/api/src/modules/core-host/original-core-principal.ts)为5处参数化模板运行时import顶层Prisma，从而加载组合库生成Client。此次仅改为type-import事务模型与现有 `@prisma/client/runtime/library` 的sqltag。原Prisma5生成器源码将Prisma.sql再导出为runtime.sqltag，已有MySQL适配也使用相同Runtime；不更换ORM、生成器或驱动，不改变SQL/值、人员/租户/角色锁顺序及返回前的会话期限复核。
+
+`node --no-compilation-cache -`经stdin对固定前像和本片真实转译代码运行同一实际ALS/SQL Runtime输入，15条正常/拒绝/恢复对照完全相同，包括角色/权限固定顺序、签名主体不符、跨分面、过期/锁后到期、撤销/切换会话、账号失效、目标不存在/冻结以及停用成员撤回。实际转译输出5处模板使用sqltag、顶层Client加载计数0，查询/返回/异常状态和消息均与前像一致，退出0。测试事务输入是离线替身，无数据库/HTTP/生产授权证据。
+
+函数业务正文按原前像仅替换Prisma.sql引用后核同；原RequestIdentity、平台仓储/服务/会话、公共合同和主装配未改。本片没有生成客户端或安装/运行环境，完整API新版本类型仍沿原被拒绝项保持未验，不用转译/SQL等价证据替代。必要源码说明和原模块导读同步，无新增测试脚本、临时目录、依赖或后台进程。五份相关文档565个本地链接/139个锚点、正式需求/任务及旧阶段正文保全核对退出0，差异格式退出0。原PCH门槛不变；中文提交普通推送任务分支并回读远端，固定版本由包含本节的提交定位。
+
 <a id="core-list-pagination-20261115"></a>
 
 ## Core标准列表与工单同范围分页（2026-11-15）

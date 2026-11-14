@@ -1,9 +1,10 @@
 /**
  * Core管理使用原Guard/ALS签名会话和原平台账号/角色映射，锁当前身份后再进入Core事务。
- * 本适配只验证租户级主体，具体Core/成员/业务范围由下游当前授权裁定。
+ * 本适配只验证租户级主体，具体Core/成员/业务范围由下游当前授权裁定；SQL模板不加载生成客户端。
  */
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { sqltag as sql } from "@prisma/client/runtime/library";
 import type { CorePrincipal } from "@rental-os/core-contracts";
 import type { SystemUserRow } from "@rental-os/shared";
 import { getRequestIdentity } from "../../common/request-identity";
@@ -54,7 +55,7 @@ export class OriginalCorePrincipalAuthority {
     for (const target of targets) {
       if (lockedUsers.has(target.userId)) continue;
       lockedUsers.add(target.userId);
-      const rows = await transaction.$queryRaw<Array<{ roleId: string | null }>>(Prisma.sql`
+      const rows = await transaction.$queryRaw<Array<{ roleId: string | null }>>(sql`
         SELECT roleId FROM \`User\` WHERE id = ${target.userId} AND tenantId = ${target.tenantId} FOR UPDATE`);
       if (rows.length !== 1) throw new ForbiddenException("Core管理账号或目标成员不存在");
       if (target.userId === principal.subjectId) {
@@ -67,20 +68,20 @@ export class OriginalCorePrincipalAuthority {
       }
     }
     await transaction.$queryRaw`SELECT id FROM auth_sessions WHERE id = ${sessionId} AND userId = ${principal.subjectId} FOR UPDATE`;
-    const assignments = await transaction.$queryRaw<Array<{ roleId: string }>>(Prisma.sql`
+    const assignments = await transaction.$queryRaw<Array<{ roleId: string }>>(sql`
       SELECT roleId FROM \`UserRole\` WHERE userId = ${principal.subjectId} ORDER BY roleId FOR UPDATE`);
     assignments.forEach(assignment => roleIds.add(assignment.roleId));
     const permissionIds = new Set<string>();
     for (const roleId of [...roleIds].sort()) {
-      const roles = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      const roles = await transaction.$queryRaw<Array<{ id: string }>>(sql`
         SELECT id FROM \`Role\` WHERE id = ${roleId} AND tenantId = ${principal.tenantId} FOR UPDATE`);
       if (roles.length !== 1) throw new ForbiddenException("Core管理角色归属已变化");
-      const permissions = await transaction.$queryRaw<Array<{ permissionId: string }>>(Prisma.sql`
+      const permissions = await transaction.$queryRaw<Array<{ permissionId: string }>>(sql`
         SELECT permissionId FROM \`RolePermission\` WHERE roleId = ${roleId} ORDER BY permissionId FOR UPDATE`);
       permissions.forEach(permission => permissionIds.add(permission.permissionId));
     }
     for (const permissionId of [...permissionIds].sort())
-      await transaction.$queryRaw(Prisma.sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
+      await transaction.$queryRaw(sql`SELECT id FROM \`Permission\` WHERE id = ${permissionId} FOR UPDATE`);
 
     const read = async () => {
       validTime();
