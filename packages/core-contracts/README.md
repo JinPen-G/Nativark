@@ -56,6 +56,8 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 宿主从正式出口调用 `CoreOpenApiContributionSchema.parse` 和 `composeCoreOpenApi(platformDocument, selectedCores)`。只有所有贡献无冲突时才返回 `document`；失败返回定位明确的 `issues`，不修改原文档。结果可用于原 `/api/openapi.json` 入口与同版本离线输出，现有主应用的实际接线尚待宿主阶段。
 
+简单Zod3请求/响应可用正式出口 `coreOpenApiSchema(schema)`生成OpenAPI 3.0字段。当前支持普通对象、字符串/数字/布尔、枚举/基础字面量、数组、可选/可空/默认值和已列明的基础校验；未知类型、refine/transform等额外逻辑明确拒绝，不静默丢规则。字段默认值须是可序列化纯值；业务前提仍在操作说明中表达。实际消费者见[工单HTTP合同及生成器](../example-tickets-core/src/openapi.ts)，Controller同片核对路径、输入与输出，生成成功不代表接口已经部署。
+
 保留 Rental 旧路径时，受控宿主可给检查器/组合器传入属于该 Core 的精确 `METHOD /path` 白名单；这个例外由宿主维护，不在 Core 清单中提供，也不会创建或放宽任何路由授权。静态检查命令默认使用新 Core 命名空间。原 operationId/schema 名称的兼容映射尚待实际迁移片核定，目前没有替换原主应用文档。
 
 ## 提供服务端贡献

@@ -2,7 +2,7 @@
 
 更新时间：2026-11-14。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。合同、包检查/准备、API/升级/页面规范、Topic查询及React页面适配已固定推送至 `595edf963e992530b19a8a56f49c80cc14757844`；[工单领域及MySQL适配](平台Core接入-开发记录.md#core-tickets-domain-20261114)已有源码，真实授权/HTTP/页面组合仍待接。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。合同、包检查/准备、API/升级/页面规范、Topic查询、React适配与工单领域/MySQL已固定推送至 `f4e43b7e6849748118ef5a7c07666f4d91491740`；[工单HTTP及同源API文档](平台Core接入-开发记录.md#core-tickets-http-20261114)已有实现，真实授权/主应用/页面组合仍待接。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -41,7 +41,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 ## 3. 下一入口与待交付
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。完整逐模块整改、行为基线、独立schema/迁移账和最终前后运行对照继续待交付，不把静态盘点作为运行证据。
-2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)补齐独立版本锁/实际数据观察和单对象候选。下一步接真实权限、授权/绑定持久化及受限事务，核对Rental与非租赁消费者、旧API身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)已有领域/原收据/MySQL适配和独立迁移，未接真实宿主authority/HTTP/UI；沿当前锁顺序接原授权，不用恒真回调或内存替身补成生产。
+2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)补齐独立版本锁/实际数据观察和单对象候选。下一步接真实权限、授权/绑定持久化及受限事务，核对Rental与非租赁消费者、旧API身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)已有领域/原收据/MySQL、独立迁移、6操作Nest适配与同源OpenAPI，未接真实宿主authority/主应用/UI；沿当前锁顺序接原授权，不用恒真回调或内存替身补成生产。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已提供`registerCoreServers`、授权/绑定schema及`composeCoreOpenApi`；旧API身份和Rental权限映射保持。各片由PM核定唯一作者；shared总出口暂不增加重复定义。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.4核收。

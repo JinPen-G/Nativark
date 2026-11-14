@@ -155,6 +155,22 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-tickets-http-20261114"></a>
+
+## 工单 HTTP 与同源 API 文档（2026-11-14）
+
+工单领域片固定 `f4e43b7e6849748118ef5a7c07666f4d91491740` 已提交推送并回读GitHub，main仍 `275064d40`。本片仅继续独占合同包、工单包与根lock必要peer项，未修改原AppModule/Guard/OpenAPI总组合、schema或后台壳。新增[HTTP合同](../../../packages/example-tickets-core/src/http.ts)、[Nest适配](../../../packages/example-tickets-core/src/nest.ts)、[OpenAPI生成](../../../packages/example-tickets-core/src/openapi.ts)和[元数据命令](../../../packages/example-tickets-core/src/metadata.ts)。
+
+同一HTTP映射供给6个Controller方法的路径和生成文档，数据字段仍来自原工单Zod schema；公共[简单schema转换](../../../packages/core-contracts/src/schema.ts)只支持已明确的Zod3基础字段，未知refine/transform等拒绝，不静默漏约束。OpenAPI包含实际权限码、参数/请求/响应、原操作/修订及400/401/403/404/409/500语义；源码入口与构建后命令可导出同版本离线JSON，未将文档生成视为HTTP已上线。
+
+Nest模块显式接业务service和原可信principal accessor，租户/创建者不取body。路径ticketId与body分开严格校验，重复/数组/空数字等查询不隐式变成合法值。已知输入/领域冲突映射明确状态，未知数据库/宿主错误保持抛出；原全局Guard默认拒绝仍有效，未经正式注册不放行新路由。私有nestjs peer入口与领域公共出口分离，未创建另一套认证或业务事务。
+
+必要验证：新增10根Core源码类型0诊断；原单一合同入口8组通过含全部合同类型。首次schema转换器的穷尽分支读取never字段触发TS2339，修复后复验通过；离线边界核对又把正整数的语义从minimum0/exclusive转换成明确minimum1并保留严格性，再验通过。stdin读取真实Nest装饰器元数据，对照6方法/5路径、HTTP200、权限码/文档schema及当前主体/路径/body、400/409和未知异常传播；同时核文档默认值/可空、窄数字约束与不支持schema拒绝，退出0。元数据命令纯JSON与0/1退出也经实际源码核对，退出0。未新增测试脚本、启动Nest、查询数据库或执行模型；原合同验证临时目录已删除。
+
+包说明与合同手册同步更新准确命令、输入/错误及未接线范围；工单清单现声明实际OpenAPI文件，打包前须由命令生成，不使用手写空文档。实际宿主权限适配、原主应用注册/文档组合、工单页面/持久化和无Core/双Core验证继续待交付。原MCP未验和两个空目录审批拒绝仍分别见原记录，不借本片类型通过关闭。
+
+4份文档361条链接定向核对新错误0，工单peer依赖与lock一致，正式需求/任务正文未变；`git -c core.whitespace=cr-at-eol diff --check`退出0。
+
 <a id="core-tickets-domain-20261114"></a>
 
 ## 非租赁工单领域与 MySQL 适配（2026-11-14）

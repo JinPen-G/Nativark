@@ -15,7 +15,7 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
     license: "MIT",
     compatibility: { platform: compatible, contract: compatible },
     runtime: { node: { minInclusive: "22.12.0", maxExclusive: "25.0.0" } },
-    entries: { server: "dist/index.js" },
+    entries: { server: "dist/index.js", openapi: "openapi.json" },
     permissions: [
       { resource: "ticket", action: "read", name: "读取本人可见工单" },
       { resource: "ticket", action: "read.all", name: "读取本租户全部工单" },
@@ -29,7 +29,7 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
       { id: "tickets.initial", file: "migrations/001-tickets.sql", sha256: "d9abd89fed3f18c3c6c6690062b15bc30de53e04eae6f69cf049d310a24e3330" }
     ] },
     requires: [],
-    assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql"].map(name => `dist/${name}.js`),
-      ...["index", "contracts", "service", "server", "manifest", "mysql"].map(name => `dist/${name}.d.ts`)]
+    assets: ["package.json", ...["contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata"].map(name => `dist/${name}.js`),
+      ...["index", "contracts", "service", "server", "manifest", "mysql", "http", "nest", "openapi", "metadata"].map(name => `dist/${name}.d.ts`)]
   });
 }
