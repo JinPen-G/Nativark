@@ -12,6 +12,8 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema,
   aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema,
   aiClientQuoteBookingOperationResponseSchema } from '@rental-os/shared';
+import { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
+  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -34,7 +36,8 @@ export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoun
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
   'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
   'readQuotePreparationOperation' | 'readPreparedQuoteOriginal' | 'prepare' | 'readOrderMaterialReceipt' | 'createTask' | 'readTaskCreation' |
-  'readOriginalTaskAccounting' | 'reconcileOriginalTaskAccounting'> & ReturnType<typeof composeClientOriginalBookingHttp>;
+  'readOriginalTaskAccounting' | 'reconcileOriginalTaskAccounting' | 'prepareGoal' | 'readGoalPreparation'
+  | 'readGoalCandidates' | 'prepareGoalQuote' | 'readGoalQuotePreparation'> & ReturnType<typeof composeClientOriginalBookingHttp>;
 type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
@@ -159,6 +162,45 @@ export class AiClientEntryController {
       if (!response.success) throw new AiClientQuoteResultUnknownError();
       return response.data;
     }, 'read_quote_preparation_operation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoal) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareGoal(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
+    const body = structuredClone(request.body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const value = await this.application.prepareGoal(request, aiClientGoalPreparationRequestSchema.parse(body), signal);
+      const response = aiClientGoalPreparationResponseSchema.safeParse(value);
+      if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_goal_preparation_requires_recheck');
+      return response.data;
+    }, { maxWaitMs: 15000 }), 'read_original_goal_preparation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalPreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readGoalPreparation(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
+    const body = structuredClone(request.body);
+    return this.respond(() => withRequestAbort(request, async signal => aiClientGoalPreparationResponseSchema.parse(
+      await this.application.readGoalPreparation(request, aiClientGoalPreparationReadRequestSchema.parse(body), signal)), { maxWaitMs: 15000 }), 'read_original_goal_preparation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readGoalCandidates(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
+    const body = structuredClone(request.body);
+    return this.respond(() => withRequestAbort(request, async signal => aiClientGoalProjectionSchema.parse(
+      await this.application.readGoalCandidates(request, aiClientGoalCandidatesRequestSchema.parse(body), signal)), { maxWaitMs: 15000 }), 'read_original_task');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareGoalQuote(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
+    const body = structuredClone(request.body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const value = await this.application.prepareGoalQuote(request, aiClientGoalQuoteRequestSchema.parse(body), signal);
+      const response = aiClientQuotePreparationResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
+      if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_quote_preparation_requires_recheck');
+      return response.data;
+    }, { maxWaitMs: 15000 }), 'read_quote_preparation_operation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readGoalQuotePreparation(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
+    const body = structuredClone(request.body);
+    return this.respond(() => withRequestAbort(request, async signal => aiClientQuotePreparationReadResponseSchema.parse({
+      ...await this.application.readGoalQuotePreparation(request, aiClientGoalQuoteRequestSchema.parse(body), signal), contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION }),
+    { maxWaitMs: 15000 }), 'read_quote_preparation_operation');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readQuotePreparationOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {

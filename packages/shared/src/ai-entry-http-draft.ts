@@ -34,6 +34,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   /** Current human parameters -> original Core quote. Never order approval. */
   prepareQuoteParameters: 'quotes/parameters/prepare', readQuotePreparationOperation: 'quotes/preparation/read',
+  prepareGoal: 'goals/prepare', readGoalPreparation: 'goals/operation', readGoalCandidates: 'goals/candidates',
+  prepareGoalQuote: 'goals/quote/prepare', readGoalQuotePreparation: 'goals/quote/operation',
   confirmQuoteParameters: 'quotes/parameters/confirm', readPreparedQuoteOriginal: 'quotes/original/read',
   /** Original server-host flow; creates only booking material and its Action. */
   prepareOriginalQuoteBooking: 'quotes/booking/prepare', readOriginalQuoteBookingOperation: 'quotes/booking/operation',

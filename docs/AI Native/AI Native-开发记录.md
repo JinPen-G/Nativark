@@ -6,6 +6,31 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain21-goal-original-model-core-prepare-20261114"></a>
+## AIN-21 客户目标、原模型候选与明确选品到 Core 参数准备（2026-11-14）
+
+从本地／GitHub已核同的 `eed9259ad85abbbd56690b78b0ff317dc4ccd01b` 接本阶段。客户[目标材料](../../apps/api/src/modules/ai-native/scenes/client-goal-material.ts)保留用户原文、原渠道／本人归属、公开目录／帮助及本人预约身份来源指纹；原命令只带版本／goalHash，沿用原2KiB命令上限，不把目标原文当模型指令或批准。[候选投影](../../apps/api/src/modules/ai-native/scenes/client-goal-projection.ts)只解析闭合文字条件，商品／单位／地点／本人企业身份由当前原公开来源提供且必须明确选择；不推算价格、库存、付款或资格，相同候选的读取时间变化不改变确认hash。
+
+[原客户Application](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)接原键目标准备／收据、原 CUSTOMER Task／模型结果、当前候选及明确 `prepare_original_quote`。选单必须匹配完整 projectionHash、当前材料及本人预约选项，再进入原 `prepareQuoteParameters`／Core，未保存报价、未预留库存、未提交订单。原结果读取函数仅原样抽到局部复用，不复制另一套Reader；[模型宿主](../../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition.ts)追加可信目标提取指令，仍用同一 Task／Runner／Gateway／财务账和累计资源。HTTP五方法、两个渠道的标准入口、shared运行时合同和OpenAPI同片接齐；请求原始body闭合校验、15秒有界等待，写后坏回复或来源变更保持unknown，只沿原键读回。
+
+独立只读复核发现原 Goal reconcile 仍按新材料校验，过期或目录变化会在进入运行器前阻断原操作核对。现仅 `control==='reconcile'` 使用原冻结材料和当前读权；新start／recover／真正continue、候选与报价参数准备仍核当前来源。独立助手复核当前 application blob `944af7bd222d23a4e617a828e635739c36a282b3`，确认该反例闭合及标准生产接线；其为静态复核，没有冒称重跑Root模拟或真实环境。
+
+| 必要模拟／类型（Root命令均为 `node --no-compilation-cache -`） | 实际结果与stdin SHA-256 |
+| --- | --- |
+| 实际ClientAuth／Guard／Controller→原Core目录→目标材料／原收据 | `74ddde8619dc81352fa4d1ca4053047384fd6828df638fde477bae0ee2720d97`／退出0；同键1材料，无Task／模型／业务写；额外taskId、撤权拒绝。 |
+| 原目标→客户ModelHost／Runner／Gateway／单账 | `3967c956afed075786de453973197ea41ebecdcdf17076d56b0163cdf6675807`／退出0；1Task／Run／模型／Invocation，累计CALLS1、reserved0，业务0。 |
+| 同一原模型结果→正式受权候选 | `5e8389b568e80d733ce45c6e15d3058ef50e698c2ae95d73e5f9a1cc3007aa44`／退出0；6候选组保持未选，读不增派发，撤权拒绝。 |
+| 同一原Core夹具→目标／Task／模型／候选→明确选择→原参数准备 | `aa5763cc542fbfae2a083cc4a9523d36458778fc8049d2cd39a5bb038af65f22`／退出0；1Task／Run／模型／Invocation，Core返回normalized_parameters，新增报价／订单0；同键prepare及operation读回同材料，错projection、非公开商品、撤权拒绝。 |
+| 过期＋目录变化后的原reconcile／收据与新执行分离 | `ba51abc19bcb29982234b313a652166f75f7470dc3096b9d3b4ad1e22ee705a6`／退出0；原模型1次后推进360001ms并改目录，reconcile只返回recovery_lease_unavailable、原收据可读，全部存储逐值不变；新start／候选拒绝，不借TTL换键重派。 |
+| 五handler／Web微信十路OpenAPI／闭合引用 | `016674353ec199cdf168912a864fa122f7bb33a3be50ad489e605b8ca7c9d330`／退出0；原quote请求响应复用，没有私有同名DTO或客户端身份授权。 |
+| 最终生产装配类型 | `f653f5b7c92e7d2a329aaeb29435c09098d550c9ebcf3f33f96bc9aafccedd62`／退出0；TypeScript5.9.3，7根／1998源零诊断，含shared／AppModule／OpenAPI／Controller及两私有叶。 |
+
+dev1两叶固定blob `3bc14ced8cffa33ab3fad3aeca0b7f5485aee747`／`a2f22020636330cf0ff2825ad1a691bdf12ff38b` 已交权并由Root逐字节核同；作者实际Core／Auth／Guard私有组合 `ada56d004c9a2f0f1e87f345d5611841d4764c3ae3e9d667619a1f126923c225`、类型 `04596bf4c68ffd0f537bc28d6971abb0c21716eaf5b6b7a9d06a9dbb123e0417` 均退出0。4096字、同名不自动选、换客户／session／企业关系撤回、篡改／unknown拒绝；作者模型结果为声明夹具，实际Gateway持续执行由Root上一表验证。公共shared最终blob `77c1a1dce5c6cd097bd4a745ab39066726527823`，其余11源码以本阶段提交为准。
+
+失败保留：持续候选驱动首次把原transport字符串当content数组，SHA `e9f8304c03bba5697942158bd847dbf8fa4c7510cbb4e3a7ea7f48eba9d61806`／退出1；只修驱动按真实消息结构断言，生产未放宽。同库Core＋模型驱动首版漏原aiTaskEvent委托，启动事务保持AI_RESULT_UNKNOWN，SHA `3eefec984476e62612e9e258b384e3a3915caa832224dc5d7415930efe37f9f6`／退出1；诊断发现events未配置，补全原内存存储后同链通过，不吞unknown或伪造运行事件。早期驱动在Task创建后改绑定／缺operationKey及Gateway缺kind均被原校验拒绝，未据此改授权。全部为模拟，不称真实模型调用、费用、MySQL事务或浏览器／微信通过。
+
+本阶段仅11源码＋原记录／接续独立固化，不夹dev1活动网站三叶、dev2取消收据或未核旧goal／员工样式。AIN-21／22仍75%：后端目标到明确Core参数准备已齐，两端目标消费者和其原完整办理／身份变体待接核；21／22全文满足后才升100%。dev1继续网站三叶，Root补小程序目标消费者，dev2继续取消收据，助手不等提交／main。全程原离线preload／不可达DB、内存audit0，进程退出，单任务 `output/.tmp/ain21-public-continuity-20261114` 未创建；无新增／扩写测试脚本、临时环境、生成包或依赖副本。`git diff --check`退出0；`node scripts/validate-docs.cjs`退出1，仍4处既有缺链，无新增链接或任务算术错误，不补造附件。
+
 <a id="ain25-partial-final-run-completion-time-20261114"></a>
 ## AIN-25 部分完成任务的末Run终结时延与原收尾证据（2026-11-14）
 

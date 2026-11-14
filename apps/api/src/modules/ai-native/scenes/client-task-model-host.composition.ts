@@ -16,6 +16,8 @@ import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repos
 import { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { clientCompletedModelInputSource, CLIENT_CONTEXT_QUESTION_INSTRUCTION } from './client-completed-model-input.source';
+import { clientGoalCommandSchema, validateClientGoalMaterial } from './client-goal-material';
+import { CLIENT_GOAL_MODEL_INSTRUCTIONS } from './client-goal-projection';
 
 type Dependencies = Omit<TaskModelHostDependencies, 'auth' | 'credentials' | 'task' | 'scene' | 'planTools' | 'kind' | 'inputSource'> & {
   db: PrismaClient;
@@ -92,7 +94,7 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   input = { ...input, clientScene: structuredClone(input.clientScene), gatewayScene: structuredClone(input.gatewayScene),
     limits: structuredClone(input.limits), host: structuredClone(input.host) };
   const command = clientTaskCommandSchema.parse(structuredClone(value));
-  const prompt = z.string().min(1).max(8000).parse(input.systemPrompt
+  let prompt = z.string().min(1).max(8000).parse(input.systemPrompt
     + (input.inputSource === 'original_client_clarification' ? `\n${CLIENT_CONTEXT_QUESTION_INSTRUCTION}` : ''));
   const clientDependencies = { db: input.db, subscriptions: input.subscriptions, ...structuredClone(input.clientScene) };
   const clock = input.clock ?? (() => new Date());
@@ -131,6 +133,11 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
     || before.row.workspaceId !== context.scope.workspaceId) throw denied();
   // Keep precisely the persisted original business facts, references and their
   // coverage. Never replace them with a later quote, order, URL or model output.
+  const goal = clientGoalCommandSchema.safeParse(before.row.command);
+  if (goal.success) {
+    validateClientGoalMaterial(before.row);
+    prompt = z.string().min(1).max(8000).parse(input.systemPrompt + `\n${CLIENT_GOAL_MODEL_INSTRUCTIONS}`);
+  }
   const text = JSON.stringify({ materialRef: before.row.id, materialHash: before.row.materialHash,
     observedAt: before.row.createdAt.toISOString(), material: before.row.material });
   if (Buffer.byteLength(text, 'utf8') > 24000) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
