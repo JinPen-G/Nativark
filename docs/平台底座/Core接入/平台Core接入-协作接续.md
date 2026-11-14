@@ -2,7 +2,7 @@
 
 更新时间：2026-11-14。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配片。合同/包检查、公共指纹、API/服务端/升级预检、指南/归档、本地/固定GitHub Release准备及Topic查询已固定推送至 `0ea168622c90301a4e431220acc68ead74d037c2`；[React页面适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)已新增并复用原页头/按钮，尚未装配真实路由。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。合同、包检查/准备、API/升级/页面规范、Topic查询及React页面适配已固定推送至 `595edf963e992530b19a8a56f49c80cc14757844`；[工单领域及MySQL适配](平台Core接入-开发记录.md#core-tickets-domain-20261114)已有源码，真实授权/HTTP/页面组合仍待接。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -33,6 +33,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 - 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，按PM指定已通过 `5d416cf9026a25db6ce66dec0ac48a384f5b6773` 合入main `275064d40a3977542a530158974070e8b6c337ca` 并推送回读。恢复记录与营运商简称正式需求已同步；本树共享源码更新后须重建本树产物，不复制main dist/Client或启动服务。后续每阶段核最新main及WIP后整合。
 - 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
 - 原派工同时允许PCH非冲突源继续；已新增 `apps/admin/src/core` 的独占React适配及必要admin依赖/构建前置，原壳/页头/按钮仅消费，不修改main后台作者的顶栏/样式WIP。真实路由/授权/缓存消费仍等待下一公共片，不据此扩大共享窗口。
+- 轻量非租赁实现独占 `packages/example-tickets-core`，独立迁移只在该包内声明，没有加入公共原schema/迁移链；真实宿主authority与主应用装配仍须原公共窗口。
 - PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。源码检查点和剩余实际宽度/真库验收唯一见[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)，不计PCH新任务，不扩为平台抽离公共窗口。
 - shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
 - 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
@@ -40,7 +41,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 ## 3. 下一入口与待交付
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。完整逐模块整改、行为基线、独立schema/迁移账和最终前后运行对照继续待交付，不把静态盘点作为运行证据。
-2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)补齐独立版本锁/实际数据观察和单对象候选。当前仅合同与纯组合/预检可用；下一步接真实权限、授权/绑定持久化及受限事务，核对Rental与非租赁消费者、旧API身份兼容。样例已冻结为租户范围轻量工单创建→分派→处理→关闭，字段/角色/修订见开工记录。
+2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)补齐独立版本锁/实际数据观察和单对象候选。下一步接真实权限、授权/绑定持久化及受限事务，核对Rental与非租赁消费者、旧API身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)已有领域/原收据/MySQL适配和独立迁移，未接真实宿主authority/HTTP/UI；沿当前锁顺序接原授权，不用恒真回调或内存替身补成生产。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已提供`registerCoreServers`、授权/绑定schema及`composeCoreOpenApi`；旧API身份和Rental权限映射保持。各片由PM核定唯一作者；shared总出口暂不增加重复定义。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.4核收。
@@ -59,6 +60,8 @@ API贡献的空/双Core、命名/路径冲突、缺失/外部引用与包读取�
 服务端注册的空/双Core、错误贡献、版本与schema拒绝、初始化输入边界已离线核对；没有真实授权持久化或事务适配，原Auth/Guard/AppModule未接新合同。持续目标已生效，后续仍按原门槛逐片交付，必要公共文件窗口由PM协调。
 
 原MCP审计的额外隔离执行/清理命令被自动审批在启动前拒绝，返回`blocked by policy`，对应目录未创建；该项保持未验，没有替换脚本或换壳绕过。已完成的纯指纹对照和旧路径导入不能替代原MCP整体审计回归。
+
+工单MySQL文件移动后两个空目录的原生删除也在启动前被自动审批拒绝，零文件/字节仍在原位。唯一责任清单在主树 `output/.cleanup-pending/pch-preparation/tickets-core-empty-dirs/manifest.json`，原路径/恢复条件与证据见[工单记录](平台Core接入-开发记录.md#core-tickets-domain-20261114)。未换工具绕过，后续工具允许时优先清理；不将空目录保留冒称全部清理完成。
 
 原PCH准备、标准化与品牌固定证据继续见[准备记录](平台Core接入-开发记录.md#pch-preparation-20261112)、[标准化记录](平台Core接入-开发记录.md#core-standardization-20261114)及[main归并复核](平台Core接入-开发记录.md#pch-preparation-main-integration-20261113)。此前总导航三份历史附件及AI接续output缺失仍保留原归属；旧失败/未验项不由本次清单测试关闭。
 

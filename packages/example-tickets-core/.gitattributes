@@ -1,0 +1,2 @@
+# 已发布迁移按原始字节锁定摘要，各平台检出均保持LF。
+migrations/*.sql text eol=lf

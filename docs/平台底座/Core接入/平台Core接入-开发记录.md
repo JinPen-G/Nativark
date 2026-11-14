@@ -155,6 +155,24 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-tickets-domain-20261114"></a>
+
+## 非租赁工单领域与 MySQL 适配（2026-11-14）
+
+前片React适配已中文提交并上传 `595edf963e992530b19a8a56f49c80cc14757844`，GitHub真实远端回读一致、起点干净，main仍为已包含的 `275064d40`。沿原PCH独占模块/非冲突源授权新增 [example-tickets-core](../../../packages/example-tickets-core/README.md) 和根lock必要workspace条目；没有改公共Auth/Guard/AppModule/schema/迁移链或活动后台壳，原PCH任务身份/百分比不按代码数量变更。
+
+这是原已冻结的非租赁工单样例实现，不再只是包格式夹具。[领域合同](../../../packages/example-tickets-core/src/contracts.ts)/[服务](../../../packages/example-tickets-core/src/service.ts)提供创建、分派、开始处理、关闭、读取及原操作回执。租户为唯一业务范围、普通成员只读创建/受派对象，管理者仍须具体业务权限；状态只open/in_progress/closed，更新核修订。同键同输入复核当前授权/可见范围后读原结果，同键变化拒绝；原收据不被当前状态替换。
+
+[MySQL适配](../../../packages/example-tickets-core/src/mysql.ts)提供实际参数化SQL和Prisma兼容窄事务入口，[独立迁移](../../../packages/example-tickets-core/migrations/001-tickets.sql)只归该Core，不进入原公共组合迁移链。执行器先由真实宿主authority锁人员/授权及受派者，再取本租户Core写锁，业务/原回执/原平台审计同一事务；异常抛出回滚。领域出口不泄漏Prisma，私有mysql仅用已有驱动Runtime/SQL模板、不依赖生成的Rental模型。首次类型检查暴露主依赖目录未生成Prisma组合client，因而收窄为实际用到的驱动接口，不生成/复制另树Client或补假模型。
+
+[服务端贡献](../../../packages/example-tickets-core/src/server.ts)消费正式CorePrincipal/Binding，拒绝错误Core/租户/容器，读取当前绑定数据版本；[清单生成](../../../packages/example-tickets-core/src/manifest.ts)注入真实固定来源、声明权限和不可变迁移摘要，独立实现/数据常量分别维护。没有业务初始化、AI或伪HTTP/页面贡献。没有移除检查器时不能据此移除历史执行者。包说明随片记录实际方法/权限/锁顺序/迁移/构建和待接线范围。
+
+必要验证为6根新源码完整类型0诊断、反向行业/宿主导入0；stdin运行真实领域、MySQL适配与标准注册器，离线事务/权限替身覆盖完整创建→分派→处理→关闭、原收据、状态/修订/成员/租户/audience拒绝、撤权先于业务查询、审计失败回滚、参数化SQL及迁移摘要，退出0。替身不证明真实DB锁/原授权或持久化恢复，也不证明HTTP/UI已接通；真实宿主authority、迁移应用、Controller/页面、双Core组合及独立接手继续待交付。没有新增测试脚本、安装依赖、启动服务或连接业务库。
+
+3份文档306条链接定向核对新错误0；root lock原所有条目逐项保持，只增本Core workspace和链接两项，包依赖一致；需求/任务原文未变，`git -c core.whitespace=cr-at-eol diff --check`退出0。构建产物未复制或落地，无新增测试/诊断文件。
+
+临时残留：新增MySQL文件最初放在独占API适配目录，随后用apply_patch移入本Core，留下两个空目录。安全核定后原生PowerShell删除命令在执行前被自动审批拒绝（`blocked by policy`），没有退出码；未换工具/壳或移动以绕过。零文件/零字节的两目录仍在原位，唯一责任清单为主树 `output/.cleanup-pending/pch-preparation/tickets-core-empty-dirs/manifest.json`，记录原路径、归属和恢复条件，未提交Git。其余本任务验证临时目录仍已删除，不能把本片空目录说成已清理。
+
 <a id="core-react-page-adapter-20261114"></a>
 
 ## Core 页面声明复用原 React 组件（2026-11-14）
