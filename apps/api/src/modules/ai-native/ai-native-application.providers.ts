@@ -756,10 +756,40 @@ export const AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER: FactoryProvider = {
   inject: [AI_NATIVE_BODY_DATABASE, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, ModuleRef,
     { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
-    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true },
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, original: TaskCenterRecoveryDependencies['original'], moduleRef: Pick<ModuleRef, 'get'>,
-    orderValue?: unknown, openingValue?: unknown, quoteValue?: unknown) =>
-    composeTaskCenterRecoveryRequests({ db, auth, original, host(kind) {
+    orderValue?: unknown, openingValue?: unknown, quoteValue?: unknown, selectedValue?: unknown) => {
+    const selected = (): TaskCenterRecoveryDependencies['selectedOrder'] => {
+      try {
+        const host = moduleRef.get<TaskCenterRecoveryDependencies['selectedOrder']>(AI_SELECTED_QUOTE_TASK_REQUESTS, { strict: false });
+        return host && ['readRecoverySnapshot', 'readTakeoverReceipt', 'recover', 'takeover']
+          .every(method => typeof host[method as keyof typeof host] === 'function') ? host : undefined;
+      } catch { return undefined; }
+    };
+    // Resolve lazily like the other original hosts: Nest can instantiate this
+    // factory before the selected-task provider is ready. Assembly order must
+    // not permanently turn a registered reader into unavailable.
+    const selectedOrder: NonNullable<TaskCenterRecoveryDependencies['selectedOrder']> = {
+      readRecoverySnapshot: (request, value, signal) => {
+        const host = selected(); if (!host) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return host.readRecoverySnapshot(request, value, signal);
+      },
+      readTakeoverReceipt: (request, value, signal) => {
+        const host = selected(); if (!host) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return host.readTakeoverReceipt(request, value, signal);
+      },
+      recover: (request, value, signal) => {
+        const host = selected(); if (!host) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return host.recover(request, value, signal);
+      },
+      takeover: (request, value, signal) => {
+        const host = selected(); if (!host) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return host.takeover(request, value, signal);
+      },
+    };
+    return composeTaskCenterRecoveryRequests({ db, auth, original, selectedOrder, host(kind) {
+      if (kind === 'selected_quote_order') return readQuoteOrderConfiguration(selectedValue).enabled && selected() ? selectedOrder : undefined;
       const value = kind === 'order_read' ? orderValue : kind === 'opening_model' ? openingValue : quoteValue;
       if (kind === 'opening_read' || !readOrderExecutionConfiguration(value).enabled) return undefined;
       const token = kind === 'order_read' ? AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS
@@ -768,7 +798,8 @@ export const AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER: FactoryProvider = {
         const host = moduleRef.get<ReturnType<TaskCenterRecoveryDependencies['host']>>(token, { strict: false });
         return typeof host?.recover === 'function' && typeof host.takeover === 'function' ? host : undefined;
       } catch { return undefined; }
-    } })
+    } });
+  }
 };
 
 const quoteModelRequestMethods = ['start', 'refreshInput', 'submitAnswer', 'resume', 'continueAnswer', 'reconcile', 'recover',
@@ -1123,7 +1154,7 @@ export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOT
     const entry = module.providers?.find(item => typeof item === 'object' && 'provide' in item && item.provide === provide) as FactoryProvider | undefined;
     if (!entry || typeof entry.useFactory !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const requests = entry.useFactory() as Record<string, unknown>;
-    const closedMethods = provide === AI_SELECTED_QUOTE_TASK_REQUESTS ? ['start', 'continueConfirmation', 'reconcile']
+    const closedMethods = provide === AI_SELECTED_QUOTE_TASK_REQUESTS ? ['start', 'continueConfirmation', 'reconcile', 'recover', 'takeover']
       : provide === AI_HUMAN_QUOTE_SELECTION_REQUESTS ? ['select'] : ['decideSelectedProposal', 'reprepareSelectedProposal',
         'reissueSelectedRequest', 'selectReissuedQuote', 'prepareTaskCenterApproval'];
     return Object.freeze(Object.fromEntries(Object.entries(requests).map(([method, call]) => [method,

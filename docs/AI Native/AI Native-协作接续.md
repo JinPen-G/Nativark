@@ -6,8 +6,8 @@
 
 施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天首次修改前本地／GitHub均核为3401e8be77693f85a1dc0e66778896708ceecb69，索引空、无merge／cherry-pick；main远端为62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。旧接续完整字节保存在上述AI固定前像的同路径，关闭阶段与历史前像从原[开发记录](<AI Native-开发记录.md>)导航，不另复制附件。
 
-1. **AIN-24正文加密与安全全文。** 原保护／传播／审计已上传。[本阶段正文加密](<AI Native-开发记录.md#ain24-encrypted-original-bodies-native-tx-20261115>)11源已完成原SecretBox、实际AI provider、原知识有界检索／嵌套chunks、客户端两条SQL、记忆／Task删除传播和旧page受权保护的必要模拟／类型。独立复核指出的Core native tx旁路已在原批准prepare／commit及三原请求Native入口补同一codec视图，原Core事务／hash／批准／账不改；原选单及批准快照重复body也保护。10根／2023源零诊断，Dev2最后原生Core选单接管组合及原hash／原账／一次订单已通过，Root核证据，接管公共消费仍下一片。独立语言与[六类展示攻击](<AI Native-开发记录.md#ain24-independent-language-display-attacks-20261115>)已核固定证据；Root最后逐核AIN-24七条／全部开放端和工具，齐备才计100%。本地旧保护入口未真实运行，不冒称真实库／外部对象／供应商／备份加密或删除完成。
-2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。dev2接selectedOrderSource → composeSelectedQuoteTaskHost → rental.order.commit的原接管／收据；TaskCenter目前对该Run返回specialized_host_required，Root接最小公共恢复装配。保留原selection／Task／Run／planHash／inputHash／fencing、独立takeover和claim_recovery权限；旧worker迟到拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。
+1. **AIN-24正文加密与到期删除。** [正文加密](<AI Native-开发记录.md#ain24-encrypted-original-bodies-native-tx-20261115>)已提交上传fe064f63fc96bd982b52847fef83b7cf7dfa4e2b，原codec／Native事务／知识与memory传播、敏感读审计及独立语言／展示攻击固定证据保持。[七条独立核定](<AI Native-开发记录.md#ain24-expiry-gaps-whole-review-20261115>)找到员工草稿普通AI副本和PLATFORM正文两处30天到期删除缺口，不能升整项100%。dev1补员工有界清理叶／原读取兼容，Root接原维护及平台SaaS独立范围，保留人工业务选择／检查提交／账／unknown／删除恢复证据。原加密最终10根／2023源零诊断；新删除片另做必要模拟及类型，不重复无变化绿色组，不新增测试文件。本地旧保护未真实运行，不宣称真实库／外部对象／供应商／备份已完成加密或删除。
+2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
 3. **AIN-26～28和ENTRY。** dev2的[固定四品类8例](<AI Native-开发记录.md#ain26-four-category-fixed-evidence-style-20261115>)已交回，Root核原证据与限制；同Core路径、正常批准／单次订单／丢ACK恢复和锁内缺货通过，只补对应矩阵切片，不替代全部并发／取消／接管／多端全文。15／24前置齐备后继续26，随后27／28原部署／灰度／停用／升级回退准备、独立复核和可操作交付；真实生产开放仍独立授权。全部18项ENTRY保持原范围，跨audience／surface、匿名／企业、媒体弱网及隐私等按原条款逐项核定，不因原28项完成而遗忘。
 
 ## 写入归属与协作
@@ -15,9 +15,9 @@
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider；AIN-24完整正文加密和原检索／SQL／删除／hold适配，AIN-15选单TaskCenter公共恢复reader／application／provider／shared。仅暂存已核成果。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 独立语言／六类攻击／迟到来源补证已交权，当前只读核原AIN-ENTRY-01／13完整合同和实际消费者；已发现Booking补齐服务窗口被标为用户输入的疑点，沿原fixture核实后给Root最小修片建议。确定性业务断言另列，不自评分，不新增测试脚本，不改Root加密／公共源。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 独占runner/order-task-host.composition.ts、scenes/human-quote-order.composition.ts和scenes/request-bound-scenes.application.ts中的选单恢复／接管hunk，其余场景不改。四品类固定证据和287字节员工原WXSS已冻结交权，Root补交；公共恢复与客户端改动先给必要接点建议，不抢shared／四册／索引。 |
-| 内部/root/opening_core_closeout | 已交回原阶段独立复核及正文加密静态接点清单，无产品／四册／索引写权；没有运行测试或核定尚未落盘codec。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 先固定ENTRY-01／13的场景metadata缺口、Booking规范化来源及后续比较、transport/runtime差异；两端运行时拒绝surface/channel错配，尚未证明该差异造成越权。已转AIN-24，独占新增privacy/retention-inspection-draft.ts及inspection-assist/inspection-draft.service.ts原读取兼容最小hunk；原维护／restore／shared／provider由Root接，不抢四册／索引，不新增测试文件。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 原选单公共恢复／接管正常与丢ACK组已固定交权，Root核8源及实际组合证据。已转ENTRY-13客户Booking规范化来源与后续session比较的具体阻塞，只读确认原client-original-booking-flow／client-booking-material及两端booking-handoff必要叶，待Root分窗口后实现；不重建Booking或改变Core默认／企业告知授权，不扩大取消全文盘点。 |
+| 内部/root/opening_core_closeout | 已完成固定fe064七条独立全文核定，两个到期清理P2交Root／dev1，原加密／Native／展示攻击结论保持。无活动产品／四册／索引写权；本次只读未运行测试或创建环境。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
 | main／PM | main串行集成、真实数据库／迁移／Client／服务恢复的唯一负责人。每两项原任务新达100%形成main节点；AI不争main索引或夹其他专项WIP，助手不等待集成。 |
 

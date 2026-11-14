@@ -6,6 +6,41 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain26-selected-task-center-recovery-20261115"></a>
+## AIN-26 原选单建单运行的任务中心恢复与接管（2026-11-15）
+
+固定前置`fe064f63fc96bd982b52847fef83b7cf7dfa4e2b`，Root核接dev2三个原宿主源，补TaskCenter恢复reader／application／标准provider、shared host枚举及后台session共8源。[恢复目标](../../apps/api/src/modules/ai-native/task-center-recovery-target.reader.ts)从原受权Task／Run定位唯一选单，验证原quote-selection注册、单步rental.order.commit计划、原ActionInput／Step／actionId／planHash／inputHash和前后来源签名，不能由客户端selection正文或模型内容指定宿主。既有公共Task／Run／fence请求保持闭合，仅新增selected_quote_order宿主，不新建办理路由、批准或资源计划。
+
+[专属原运行](../../apps/api/src/modules/ai-native/scenes/human-quote-order.composition.ts)分别暴露原快照／原接管收据／精确恢复／精确接管，经原selection／报价／当前Task动作政策复核。同一原Task／Run的恢复沿原资源累计账及财务收据；接管在[原lease仓储](../../apps/api/src/modules/ai-native/runner/order-task-host.composition.ts)提交后只接受正向ACK的fence，再核原材料后转原runner。后续失败保留unknown；未转runner的已确认lease按同一代释放，不能从receipt／holder查询重建执行许可。原worker迟到拒绝、业务操作不重发。
+
+[公共应用](../../apps/api/src/modules/ai-native/task-center-recovery.application.ts)按原selection路由专属四ports；历史快照和收据不以新执行target可用为前置。Root复核修了Nest装配先后：标准provider每次懒解析已登记selected宿主，晚注册不会使factory永久unavailable；新recover／takeover仍核当前执行配置和原claim_recovery／takeover权限。关闭新执行保留独立受权原读，无可信宿主仍拒绝。[后台原session](../../apps/admin/src/features/ai-native/task-recovery-session.ts)仅接受新宿主enum，仍保存最少原Task／Run／planHash／fence；写前原键读回，丢应答重开只读原操作和快照，不自动重派。
+
+Root逐文件核Git blob：原order宿主`bc00e00eb4c89df1c86023f43cd99aa7d7d5e866`、selected组合`043189f1924f176674fea69bb1c912532271edfe`、request-bound`0d93d13d207592cd9f092c14de3ad43f1f85cef0`、provider`40b1dab9470f2aaa2a7d101732a95c3da167862a`、target`c910430e51c0c99840f360a63a9bb292d22c24b7`、公共应用`f608a8b9806c816e4cb667dc4c69e21ba2fb55d7`、shared`7f31ea40b3af1d961e3eee382c89bda2b4ee4fe1`、session`0c5d012f959c100dbb6aa44971c28a45ccb2a661`。dev2实际组合固定8源最小清单SHA-256 `a519f302a19276a8bb746c365b12b8d73db81112c5ee1d1e2eeb182592ce15fb`与现稿一致。
+
+| 必要模拟／类型 | 固定命令与结果 |
+| --- | --- |
+| Root公共合同／API和后台加载 | stdin SHA-256 `868ec58cca9d01518385adc95bfb0254b8702caeb24878e27795eee90c45062f`，退出0；旧请求不扩字段，伪造selection及零fence拒绝，生产消费者加载 |
+| Root最后生产类型 | stdin SHA-256 `4bb0dde6660dd7421b0a14afcdbdc39752907b4f9d47c93a6822a8d65bab22a4`，TypeScript5.9.3；API5根／1883源、shared与后台4根／1499源零诊断，最后两处原快照和懒解析修改后退出0 |
+| dev2标准provider／Guard／Controller实际recover | stdin SHA-256 `8562b32fead8445b731bbd6d494e9a8293100a11a6d19506722794a7610f4fcf`中的recover分支通过；2模型／1Core订单／1批准消费、0接管，原Generic宿主调用0。该整组随后因接管驱动错误session方法名退出1，未将整组记绿 |
+| dev2公共接管丢ACK／后台session重开 | stdin SHA-256 `b26d1903c97963f98768b2ca5f6ffa125bd1565163e1932ba8753fd9edd01ca9`，退出0；标准selected与recovery provider、实际Guard／Controller／TaskRecoverySession，2模型／1订单／1消费／1接管；同原fence收据与原快照读不增加写，重开不重派，停用后合法原读，旧worker拒绝 |
+| dev2公共接管正常ACK | stdin SHA-256 `987cc52763b859e3675b1548aa23bb97a7c8bf939303f3190673bc1584ba8a65`，退出0；公开结果合同返回原succeeded、同代释放、停用后原receipt只读、旧worker拒绝，原订单与两财务收据保持 |
+
+dev2三路径均核宿主晚注册和关闭配置、原正文codec及哈希不变；只接管丢ACK组消费实际后台session，其余未冒称浏览器宿主通过。Root独立读实现／固定blob／最后输出并做公共合同与两端类型，未冒称重跑作者完整Core链。保留原失败：nullable originalRequestId诊断修为原found.original.inputRef；关闭宿主的初次接管预期码忽略了更先发生的无takeover权限拒绝，驱动改为原AI_ACCESS_DENIED且零写断言保留；随后接管驱动getSnapshot不存在，改用原session.snapshot，仅复验受影响分支。生产拒绝边界未放宽，无新增／扩写测试文件。
+
+此片补原AIN-26／15接管矩阵和公共消费者，不替代企业正向授权、取消／并发／全部多端全文，也不提前跨AIN-26原前置。AIN-24两个到期删除缺口见[独立核定](<#ain24-expiry-gaps-whole-review-20261115>)；任务表无新整项升档。命令均node --no-compilation-cache -、原offline preload／不可达数据库、纯内存audit0，所有本组进程退出、任务目录未创建，无新增临时残留。docs:check仍原四处缺链，未新增任务算术或本片引用错误。真实数据库／浏览器／微信／供应商交负责人实测，main由PM按固定成果串行集成。
+
+<a id="ain24-expiry-gaps-whole-review-20261115"></a>
+## AIN-24 七条独立核定与两处到期删除缺口（2026-11-15）
+
+独立助手/root/opening_core_closeout只读固定`fe064f63fc96bd982b52847fef83b7cf7dfa4e2b`、原七条任务及需求§17／18，未把并行选单恢复WIP计入。威胁模型与版本、独立语言和确定性业务断言分开、实际授权／注入／出网／附件／预算恢复负例、六类展示攻击及迟到撤回、双模式负例均沿原固定记录核定；没有把描述集当攻击执行、模型自评当业务正确性或模拟当真实环境结果。原加密、敏感读取审计、同键unknown、Native事务与知识／memory副本传播结论保持。
+
+第4条分类留存／删除传播仍有两个确定生产缺口，因此第7条全专项闭合及G4未满足，AIN-24继续原75%，不以加密替代删除：
+
+- [员工草稿](../../apps/api/src/modules/ai-native/inspection-assist/inspection-draft.service.ts)创建有30天期限，但过期读取仅标reviewRequired，仍返回候选及recognitionInputs.question；[维护服务](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)没有AiInspectionDraft到期擦除分支。未提交且没有未决副作用的普通AI副本到期仍留存。下一片仅擦除这些副本，核原scope管理权、关联未决hold、revision CAS和原tombstone；保留人工业务值、决定／原候选引用、提交／检查收据及unknown依据，读取明确来源已删除，不整体删除业务草稿。
+- [平台原材料](../../apps/api/src/modules/ai-native/category-assist/category-model-original.repository.ts)持久化PLATFORM目标和模型正文，现维护入口只接受完整workspace用户。平台到期原请求／已结清终态模型正文没有原SaaS平台授权下的维护入口。下一片使用独立平台范围，保持PLATFORM／null归属、原账／政策／Core收据及删除标记和恢复屏障，不能放宽workspace读取权或借虚构租户承载平台正文。
+
+dev1已获员工清理新叶及原读取兼容最小范围，Root负责原维护／合同／provider和平台范围；不新增测试文件或自动启动维护。独立核定没有运行测试、创建临时环境或写产品源；原模拟绿色组未重复。真实数据库／浏览器／微信／供应商及备份运行交负责人实测，不能用未提供真实环境解释上述本地缺实现。
+
 <a id="ain24-encrypted-original-bodies-native-tx-20261115"></a>
 ## AIN-24 原正文加密、旧存储保护和原生事务兼容（2026-11-15）
 

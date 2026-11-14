@@ -2098,12 +2098,14 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
     const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business,
       scenes: { requests: originals, readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
-    // No creation, quote preparation, start, continuation or recovery escapes.
-    // Task observations and original Core receipts keep independent current read
-    // rights; losing create permission does not re-authorize either execution.
+    // Exact original recovery never publishes or continues new business work.
+    // Its current read/takeover/recovery policies are separate from creation;
+    // observing an old receipt cannot grant another lease or order execution.
     return Object.freeze({ requestCancel: tasks.requestCancel,
       settleUnstartedCancellation: tasks.settleUnstartedCancellation,
       readCancellation: tasks.readCancellation, readCancellationSettlement: tasks.readCancellationSettlement,
+      recover: tasks.recover, takeover: tasks.takeover, readTakeoverReceipt: tasks.readTakeoverReceipt,
+      readRecoverySnapshot: tasks.readRecoverySnapshot,
       readResult: tasks.readResult, readScene: center.readScene,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value) });
@@ -2132,6 +2134,16 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command), { write: false }),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command), { write: false }),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readTaskSnapshot(command), { write: false }),
+    // Server-only TaskCenter ports reuse its existing closed Task/Run/fence
+    // commands. Public route and contract registration stay with that owner.
+    readRecoverySnapshot: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.readRecoverySnapshot(command, signal), { write: false, signal }),
+    readTakeoverReceipt: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.readTakeoverReceipt(command, signal), { write: false, signal }),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.recover(command, signal), { write: true, signal, preflightOnly: true }),
+    takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.takeover(command, signal), { write: true, signal, preflightOnly: true }),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command), { write: false }),
     readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskReconnect(command), { write: false }),
     readScene: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readScene(command), { write: false }),

@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT,
-  AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, AI_APPROVAL_APPLICATION_DRAFT_VERSION,
+  AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, AI_APPROVAL_APPLICATION_DRAFT_VERSION, AI_TASK_RECOVERY_READ_VERSION,
+  validateAiTaskCenterRecoveryValue,
   type AiHumanQuoteOrderRepreparePreparationInputDraft, type AiHumanQuoteOrderRepreparePreparationDraft,
-  type AiQuoteRequestReissuePreparationInputDraft } from '@rental-os/shared';
+  type AiQuoteRequestReissuePreparationInputDraft, type AiTaskRecoveryRunQueryDraft } from '@rental-os/shared';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -25,6 +26,10 @@ import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { applyOriginalQuoteAnswers } from './original-quote-input';
 import { originalQuoteCandidateFromAnswers } from './original-quote-goal-parameters';
+import { composePersistedTaskAuthorization } from '../task-authorization.composition';
+import { AiTaskTakeoverCommitUnknownError } from '../runner/prisma-task-takeover.repository';
+import { assertTaskCenterRecoveryFence, snapshotTaskCenterRecoveryFence,
+  type TaskCenterRecoveryFence } from '../task-center-recovery-target.reader';
 
 export type HumanQuoteOrderDependencies = ControlledApprovedOrderDependencies &
   Pick<HumanQuoteSelectionDependencies, 'originals'>;
@@ -372,6 +377,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
   const host = z.object({ holderId: id, leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
   const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(configuration.limits));
   const selections = new PrismaQuoteSelectionRepository(dependencies), orders = composeHumanQuoteOrder(dependencies);
+  const recoveryTasks = composePersistedTaskAuthorization(dependencies).tasks;
   const observe = <T>(operation: () => Promise<T>, signal?: AbortSignal, afterMutation = false) =>
     waitForTaskApplicationDependency(operation, afterMutation, signal, configuration.runnerClock);
   const resolve = async (selection: unknown, active: boolean, requirePlan: boolean) => {
@@ -410,13 +416,46 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     return parsed.data;
   };
-  const recover = async (value: unknown, continuing: boolean, signal?: AbortSignal) => {
+  const recoveryTarget = async (query: AiTaskRecoveryRunQueryDraft, signal?: AbortSignal) => {
+    const access = await observe(() => recoveryTasks.resolveAccess(query.taskId, 'read_step_terminal'), signal);
+    if (access.actorKind !== 'USER' || access.audience !== 'OPERATOR' || access.scope.kind !== 'WORKSPACE') throw denied();
+    const task = await observe(() => dependencies.db.aiTask.findFirst({ where: access.where }), signal);
+    if (!task || task.id !== query.taskId || !task.inputRef) throw denied();
+    const originalInputRef = task.inputRef;
+    const selected = await observe(() => dependencies.db.aiTaskQuoteSelection.findMany({ where: {
+      scopeId: task.scopeId, taskId: task.id, runId: query.runId, originalRequestId: originalInputRef,
+      ownerKind: access.actorKind, ownerId: access.actorId, audience: access.audience }, take: 2 }), signal);
+    if (selected.length !== 1 || selected[0].scopeId !== task.scopeId || selected[0].taskId !== task.id
+      || selected[0].runId !== query.runId || selected[0].originalRequestId !== originalInputRef
+      || selected[0].ownerKind !== access.actorKind || selected[0].ownerId !== access.actorId
+      || selected[0].audience !== access.audience) throw denied();
+    // The browser names only an existing Task/Run. Its original selection and
+    // body hash are reconstructed from the current owner's durable row, then
+    // verified by the original selection/quote authority rather than trusted.
+    const proof = parseQuoteSelectionProof({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
+      originalInputRef, selectionId: selected[0].id, taskId: task.id,
+      runId: query.runId, inputHash: selected[0].inputHash });
+    const resolved = await observe(() => resolve(proof, false, true), signal);
+    const verify = async () => {
+      const current = await recoveryTasks.resolveAccess(query.taskId, 'read_step_terminal');
+      const latest = await resolve(proof, false, true);
+      if (current.bindingKey !== access.bindingKey || latest.key.scopeId !== resolved.key.scopeId
+        || latest.planHash !== resolved.planHash) throw denied();
+    };
+    await observe(verify, signal);
+    return { ...resolved, verify, bindingKey: access.bindingKey };
+  };
+  const recover = async (value: unknown, continuing: boolean, signal?: AbortSignal,
+    exact?: Readonly<TaskCenterRecoveryFence>) => {
     const command = continuing ? parse(selectedTaskContinue, value) : parse(selectedTaskRequest, value);
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     const resolved = await observe(() => resolve(command.selection, continuing, true), signal), { root, proof, key } = resolved;
+    if (exact && (proof.taskId !== exact.taskId || proof.runId !== exact.runId || resolved.planHash !== exact.planHash))
+      throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     if (!continuing) {
       const snapshot = await root.application.inspect({ taskId: proof.taskId, runId: proof.runId });
+      if (exact) assertTaskCenterRecoveryFence(exact, snapshot);
       if (AI_TASK_TERMINAL_STATUSES_DRAFT.includes(snapshot.task.status)) {
         // Finished aggregates confer no execution lease. Reuse the existing
         // original Core/approval-consumption reader, including its unknown and
@@ -442,10 +481,14 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     const task = await observe(() => dependencies.db.aiTask.findFirst({ where: access.where }), signal);
     const run = await observe(() => dependencies.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } }), signal);
     if (!task || !run || run.actorKind !== access.actorKind || run.actorId !== access.actorId) throw denied();
+    if (exact && (task.revision !== exact.expectedTaskRevision || run.revision !== exact.expectedRunRevision
+      || !run.fencingToken.equals(exact.expectedFencingToken))) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     await observe(resolved.verify, signal);
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
     const claim = { taskId: proof.taskId, runId: proof.runId, ...host,
-      expectedTaskRevision: task.revision, expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) };
+      expectedTaskRevision: exact?.expectedTaskRevision ?? task.revision,
+      expectedRunRevision: exact?.expectedRunRevision ?? run.revision,
+      expectedFencingToken: exact?.expectedFencingToken ?? run.fencingToken.toFixed(0) };
     const received = await observe(() => root.authorization.tasks.claimRecoveryRun(structuredClone(claim)), signal, true).catch(error => {
       // The CAS may already be durable. A failed response cannot authorize a
       // holder lookup, another claim, release, dispatch or resource refund.
@@ -587,6 +630,80 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
       automaticRetry: false as const, execution: 'no_lease_claim_or_business_dispatch' as const });
   };
   return Object.freeze({
+    /** Server consumers of the existing recovery contracts. No new action,
+     * approval, plan, quota or public route is registered by this composition. */
+    async readRecoverySnapshot(value: unknown, signal?: AbortSignal) {
+      const query = structuredClone(value);
+      if (!validateAiTaskCenterRecoveryValue('AiTaskRecoveryRunQueryDraft', query))
+        throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const target = await recoveryTarget(query, signal);
+      const snapshot = await observe(() => target.root.application.inspect(query), signal);
+      await observe(target.verify, signal);
+      const latest = await observe(() => target.root.application.inspect(query), signal);
+      if (requestFingerprint(snapshot) !== requestFingerprint(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await observe(target.verify, signal);
+      return freezeOriginalInput({ contractVersion: AI_TASK_RECOVERY_READ_VERSION,
+        original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: target.proof.originalInputRef },
+        snapshot, execution: 'read_only_no_lease_or_dispatch' as const,
+        resources: 'task_cumulative_not_new_allowance' as const });
+    },
+    async recover(value: unknown, signal?: AbortSignal) {
+      const fence = snapshotTaskCenterRecoveryFence(value);
+      if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+      const target = await recoveryTarget({ taskId: fence.taskId, runId: fence.runId }, signal);
+      const snapshot = await observe(() => target.root.application.inspect({ taskId: fence.taskId, runId: fence.runId }), signal);
+      assertTaskCenterRecoveryFence(fence, snapshot);
+      if (AI_TASK_TERMINAL_STATUSES_DRAFT.includes(snapshot.task.status)) {
+        await observe(target.verify, signal);
+        return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
+      }
+      await observe(target.verify, signal);
+      return recover({ selection: target.proof }, false, signal, fence);
+    },
+    async takeover(value: unknown, signal?: AbortSignal) {
+      const fence = snapshotTaskCenterRecoveryFence(value);
+      if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+      const target = await recoveryTarget({ taskId: fence.taskId, runId: fence.runId }, signal);
+      const snapshot = await observe(() => target.root.application.inspect({ taskId: fence.taskId, runId: fence.runId }), signal);
+      assertTaskCenterRecoveryFence(fence, snapshot);
+      const access = await observe(() => target.root.authorization.tasks.resolveAccess(fence.taskId, 'takeover_run'), signal);
+      const recovery = await observe(() => target.root.authorization.tasks.resolveAccess(fence.taskId, 'claim_recovery_run'), signal);
+      if (access.bindingKey !== target.bindingKey || recovery.bindingKey !== target.bindingKey) throw denied();
+      const run = await observe(() => dependencies.db.aiRun.findFirst({ where: { scopeId: target.key.scopeId,
+        taskId: fence.taskId, id: fence.runId,
+        actorKind: access.actorKind, actorId: access.actorId } }), signal);
+      if (!run || !run.leaseOwnerId || run.leaseOwnerId === host.holderId
+        || run.revision !== fence.expectedRunRevision || !run.fencingToken.equals(fence.expectedFencingToken))
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      const previousHolderId = run.leaseOwnerId;
+      await observe(target.verify, signal);
+      assertTaskCenterRecoveryFence(fence,
+        await observe(() => target.root.application.inspect({ taskId: fence.taskId, runId: fence.runId }), signal));
+      if (typeof target.root.takeoverAndRecover !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const outcome = await target.root.takeoverAndRecover({ taskId: fence.taskId, runId: fence.runId,
+        previousHolderId, holderId: host.holderId, leaseMs: host.leaseMs,
+        expectedTaskRevision: fence.expectedTaskRevision, expectedRunRevision: fence.expectedRunRevision,
+        expectedFencingToken: fence.expectedFencingToken }, signal, async () => {
+          await target.verify();
+          if ((await target.root.authorization.tasks.resolveAccess(fence.taskId, 'claim_recovery_run')).bindingKey !== target.bindingKey)
+            throw denied();
+        });
+      try { await observe(target.verify); }
+      catch { throw new AiTaskTakeoverCommitUnknownError(); }
+      return freezeOriginalInput({ kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
+        businessExecution: 'not_inferred_from_model_result' as const });
+    },
+    async readTakeoverReceipt(value: unknown, signal?: AbortSignal) {
+      const query = structuredClone(value);
+      if (!validateAiTaskCenterRecoveryValue('AiTaskRecoveryReceiptQueryDraft', query))
+        throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const target = await recoveryTarget({ taskId: query.taskId, runId: query.runId }, signal);
+      if (typeof target.root.readTakeoverReceipt !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const receipt = await target.root.readTakeoverReceipt(query, signal);
+      await observe(target.verify, signal);
+      return freezeOriginalInput({ original: { draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: target.proof.originalInputRef },
+        receipt, execution: 'read_only_no_lease_or_dispatch' as const });
+    },
     // Server-only consumers of the existing cancellation command/receipts.
     // This composition registers no public transport or new cancellation grant.
     settleUnstartedCancellation: (value: unknown) => cancellationReceipt(value, 'settle_unstarted'),
