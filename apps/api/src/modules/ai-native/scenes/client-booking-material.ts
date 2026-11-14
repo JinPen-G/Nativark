@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { aiBookingSelectionSchema, AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from '@rental-os/shared';
-import type { AiBookingMaterial, AiBookingSelection, RentalDeliveryAddressSnapshot } from '@rental-os/shared';
+import type { AiBookingMaterial, AiBookingSelection, AiBookingServiceFieldSources, RentalDeliveryAddressSnapshot } from '@rental-os/shared';
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import type { composeAiClientScenes } from '../client-scene.composition';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -47,18 +47,36 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   if (!entryDate.safeParse(quote.createdAt).success || !entryId.safeParse(quote.pricingPlanVersion).success
     || !entryId.safeParse(quote.ruleVersion).success || !/^[A-Z]{3}$/u.test(quote.currency ?? '')) return unavailable('quote_basis_missing');
   if (quote.pricingContext?.timeZone && quote.pricingContext.timeZone !== catalog.timeZone) return stale('quote_time_zone_changed');
-  // Quote snapshots, not model/caller service amounts, are the historical
-  // service authority. Every occurrence needs explicit human selection of the
-  // original service/quantity/window/location before a current Core observation.
+  // Only the original quote supplies service occurrences. Service/quantity
+  // stay human-selected; omitted optional fields retain Core's original
+  // normalization separately and never acquire a human-input source label.
   const serviceSnapshots = z.array(serviceSchema.extend({ scheduledStartAt: entryDate, scheduledEndAt: entryDate,
     serviceLocationId: entryId }).passthrough()).max(20).parse(quote.serviceSnapshots ?? []);
   const hasServices = Boolean(serviceSnapshots.length || quote.request.services?.length || selection.services?.length);
   const serviceSelection = serviceSnapshots.map(row => ({ serviceId: row.serviceId, quantity: row.quantity,
     scheduledStartAt: row.scheduledStartAt, scheduledEndAt: row.scheduledEndAt, serviceLocationId: row.serviceLocationId }));
   let serviceObservation: Awaited<ReturnType<typeof scenes.member.serviceAvailability>> | null = null;
+  const serviceSources: AiBookingServiceFieldSources[] = [];
   if (hasServices) {
     if (!serviceSnapshots.length) return unavailable('quote_service_snapshot_missing');
     if (!selection.services?.length) throw new AiClientEntryError('AI_INVALID_INPUT', 'confirm_original_quote_services', 'clarify');
+    if (new Set(selection.services.map(row => row.serviceId)).size !== selection.services.length
+      || new Set(serviceSelection.map(row => row.serviceId)).size !== serviceSelection.length) return stale('quote_service_selection_mismatch');
+    for (const row of selection.services) {
+      const original = (quote.request.services ?? []).filter(value => value.serviceId === row.serviceId);
+      if (original.length !== 1 || original[0].quantity !== row.quantity) return stale('quote_service_selection_mismatch');
+      // Core rejected missing capacity/hourly fields at quote creation. A
+      // later booking selection cannot relabel that explicit original choice
+      // as a default; only fields omitted by the original quote can be filled.
+      for (const field of ['scheduledStartAt', 'scheduledEndAt', 'serviceLocationId'] as const) {
+        if (row[field] === undefined && original[0][field] !== undefined)
+          throw new AiClientEntryError('AI_INVALID_INPUT', 'confirm_original_quote_services', 'clarify');
+      }
+      serviceSources.push({ serviceId: row.serviceId, fields: { serviceId: 'user_explicit', quantity: 'user_explicit',
+        scheduledStartAt: row.scheduledStartAt === undefined ? 'core_normalized' : 'user_explicit',
+        scheduledEndAt: row.scheduledEndAt === undefined ? 'core_normalized' : 'user_explicit',
+        serviceLocationId: row.serviceLocationId === undefined ? 'core_normalized' : 'user_explicit' } });
+    }
     const selectedServices = selection.services.map(row => ({ ...row, scheduledStartAt: row.scheduledStartAt ?? quote.request.startAt,
       scheduledEndAt: row.scheduledEndAt ?? quote.request.endAt, serviceLocationId: row.serviceLocationId ?? quote.request.fulfillmentLocationId }));
     const serviceKeys = (rows: typeof serviceSelection) => rows.map(row => hashJson(row)).sort();
@@ -208,10 +226,12 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   const result: AiBookingMaterial = { selection: confirmed, sources: {
     quoteId: 'user_explicit', timeZone: 'user_explicit', startAt: 'user_explicit', endAt: 'user_explicit',
     fulfillmentMode: 'user_explicit', fulfillmentLocationId: 'user_explicit', lines: 'user_explicit', bookingIdentity: 'user_explicit',
-    returnLocationId: selection.returnLocationId ? 'user_explicit' : 'core_normalized', services: selection.services ? 'user_explicit' : 'core_normalized',
+    returnLocationId: selection.returnLocationId ? 'user_explicit' : 'core_normalized',
+    services: serviceSources.some(row => Object.values(row.fields).includes('core_normalized'))
+      ? 'core_normalized' : selection.services ? 'user_explicit' : 'core_normalized',
     ...(selection.deliveryAddressId ? { deliveryAddressId: 'user_explicit' as const } : {}),
     ...(selection.deliveryAddressConfirmation ? { deliveryAddressConfirmation: 'user_explicit' as const } : {})
-  }, ...(deliveryAddress ? { deliveryAddress } : {}), quote: quoteFacts, catalogVersion: hashJson({ items, locations, timeZone: catalog.timeZone, fulfillment: catalog.fulfillment }),
+  }, ...(hasServices ? { serviceSources } : {}), ...(deliveryAddress ? { deliveryAddress } : {}), quote: quoteFacts, catalogVersion: hashJson({ items, locations, timeZone: catalog.timeZone, fulfillment: catalog.fulfillment }),
     availabilityVersion: serviceObservation ? hashJson({ inventory: availability, services: serviceObservation }) : hashJson(availability), identityVersion: qualificationObservation ? hashJson({ membershipOption: matching[0], qualification: qualificationObservation }) : hashJson(matching[0]), availability: 'available_at_observation_not_reserved' };
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 32768) return unavailable('booking_material_too_large');
   return freezeOriginalInput(result);

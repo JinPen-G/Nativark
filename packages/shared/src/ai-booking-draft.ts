@@ -94,10 +94,26 @@ export interface AiBookingOneTimeAddressEvidence {
 
 export type AiBookingAddressEvidence = AiBookingSavedAddressEvidence | AiBookingOneTimeAddressEvidence;
 
+/** A service stays human-selected. Omitted optional occurrence fields can
+ * retain the same original Core quote's normalization, never become human input. */
+export interface AiBookingServiceFieldSources {
+  serviceId: string;
+  fields: {
+    serviceId: 'user_explicit';
+    quantity: 'user_explicit';
+    scheduledStartAt: 'user_explicit' | 'core_normalized';
+    scheduledEndAt: 'user_explicit' | 'core_normalized';
+    serviceLocationId: 'user_explicit' | 'core_normalized';
+  };
+}
+
 export interface AiBookingMaterial {
   selection: AiBookingSelection;
   sources: Record<Exclude<keyof AiBookingSelection, 'deliveryAddressId' | 'deliveryAddressConfirmation'>, AiBookingInputSource>
     & { deliveryAddressId?: AiBookingInputSource; deliveryAddressConfirmation?: AiBookingInputSource };
+  /** Missing only on legacy materials. It cannot authorize filling omitted
+   * service fields from an old aggregate 'user_explicit' label. */
+  serviceSources?: AiBookingServiceFieldSources[];
   deliveryAddress?: AiBookingAddressEvidence;
   quote: AiBookingQuoteFacts;
   catalogVersion: string;

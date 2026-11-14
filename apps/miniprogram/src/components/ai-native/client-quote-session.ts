@@ -353,13 +353,34 @@ export function createClientQuoteBookingSession(input: {
   };
   const checkDraft = (value: AiBookingDraft, writing = false) => {
     const result = aiBookingDraftSchema.parse(value);
-    // This bridge first resolves the original Core choice, then persists that
-    // normalized choice as its input. Only an omitted return location may take
-    // the bound material value; every explicit choice must remain unchanged.
+    // The journal retains human input; the bound material retains Core facts.
+    // Only an omitted field with its original Core source can be filled. An
+    // aggregate legacy label cannot confer missing service-field provenance.
+    const suppliedServices = initialSelection.services ?? [], actualServices = result.material.selection.services ?? [];
+    if (suppliedServices.length !== actualServices.length
+      || new Set(suppliedServices.map(row => row.serviceId)).size !== suppliedServices.length
+      || new Set(actualServices.map(row => row.serviceId)).size !== actualServices.length) throw Error('booking_draft_changed');
+    const expectedServices = result.material.selection.services?.map(actual => {
+      const matches = suppliedServices.filter(row => row.serviceId === actual.serviceId);
+      if (matches.length !== 1 || matches[0].quantity !== actual.quantity) throw Error('booking_draft_changed');
+      const chosen = matches[0], sources = result.material.serviceSources?.filter(row => row.serviceId === actual.serviceId);
+      if (sources && sources.length !== 1) throw Error('booking_draft_changed');
+      const fields = sources?.[0].fields;
+      const expected = { ...chosen };
+      for (const field of ['scheduledStartAt', 'scheduledEndAt', 'serviceLocationId'] as const) {
+        if (chosen[field] === undefined && actual[field] !== undefined) {
+          if (fields?.[field] !== 'core_normalized') throw Error('booking_draft_changed');
+          expected[field] = actual[field];
+        } else if (fields && fields[field] !== 'user_explicit') throw Error('booking_draft_changed');
+      }
+      return expected;
+    });
+    const originalReturn = initialSelection.returnLocationId === undefined
+      && (result.material.sources.returnLocationId === 'core_normalized'
+        || !writing && result.material.serviceSources === undefined && result.material.sources.returnLocationId === 'user_explicit');
     const expectedSelection = aiBookingSelectionSchema.parse({ ...initialSelection,
-      ...(initialSelection.returnLocationId === undefined
-        && ['user_explicit', 'core_normalized'].includes(result.material.sources.returnLocationId)
-        ? { returnLocationId: result.material.selection.returnLocationId } : {}) });
+      ...(originalReturn ? { returnLocationId: result.material.selection.returnLocationId } : {}),
+      ...(initialSelection.services !== undefined && expectedServices !== undefined ? { services: expectedServices } : {}) });
     if (!saved?.material || !host || result.surface !== input.context.surface || !same(result.scope, host.scope)
       || result.materialRef !== saved.material.materialRef || result.inputFingerprint !== saved.material.inputHash
       || !same(aiBookingSelectionSchema.parse(result.material.selection), expectedSelection)

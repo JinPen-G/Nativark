@@ -71,7 +71,11 @@ const quote = object({ quoteId: id, quoteVersion: hash, pricingPlanVersion: id, 
 const source = { enum: [...AI_BOOKING_INPUT_SOURCES] };
 const sources = object(Object.fromEntries(Object.keys(selection.properties).map(key => [key, source])),
   Object.keys(selection.properties).filter(key => !['deliveryAddressId', 'deliveryAddressConfirmation'].includes(key)));
-const material = object({ selection, sources, deliveryAddress: { oneOf: [savedAddressEvidence, oneTimeAddressEvidence] },
+const serviceFieldSource = { enum: ['user_explicit', 'core_normalized'] };
+const serviceSources = { type: 'array', maxItems: 20, uniqueItems: true,
+  items: object({ serviceId: id, fields: object({ serviceId: literal('user_explicit'), quantity: literal('user_explicit'),
+    scheduledStartAt: serviceFieldSource, scheduledEndAt: serviceFieldSource, serviceLocationId: serviceFieldSource }) }) };
+const material = object({ selection, sources, serviceSources, deliveryAddress: { oneOf: [savedAddressEvidence, oneTimeAddressEvidence] },
   quote, catalogVersion: hash, availabilityVersion: hash, identityVersion: hash,
   availability: literal('available_at_observation_not_reserved') },
   ['selection', 'sources', 'quote', 'catalogVersion', 'availabilityVersion', 'identityVersion', 'availability']);

@@ -19,7 +19,9 @@ export function composeClientOriginalBookingFlow(application: Application) {
     const read = await application.readPreparedQuoteBookingMaterial(request, command.original, command.selection);
     if (read.state !== 'observed') return { read, operation: null };
     return { read, operation: { operationKey: command.operationKey,
-      command: { kind: 'booking_quote' as const, selection: read.material.selection } } };
+      // Persist the human command unchanged. Core-normalized occurrences and
+      // their field sources belong to material, not to a second human input.
+      command: { kind: 'booking_quote' as const, selection: command.selection } } };
   };
   return Object.freeze({
     async prepare(request: AiClientApplicationRequest, value: unknown) {
@@ -65,10 +67,10 @@ export function composeClientOriginalBookingFlow(application: Application) {
         source: 'original_quote_one_time_address' as const, snapshotFingerprint: oneTimeQuoteSnapshotFingerprint(snapshot), confirmed: true as const
       } : undefined;
       // Begin original Core service history normalization.
-      // Preparation persisted Core-normalized occurrences, not the caller's
-      // omitted optional fields. Rebuild only from the SAME immutable quote;
-      // service/quantity remain explicit, and no current capacity/config is read.
-      let originalServices = quote.request.services ?? [], expectedServices = selection.services ?? [], receiptSelection = selection;
+      // Compare normalization with the SAME immutable quote only. Receipt
+      // lookup retains the human command; legacy normalized commands are
+      // checked against their own saved material by the receipt reader.
+      let originalServices = quote.request.services ?? [], expectedServices = selection.services ?? [];
       const hasServices = Boolean(quote.serviceSnapshots?.length || quote.request.services?.length || selection.services?.length);
       if (hasServices) {
         if (!Array.isArray(quote.serviceSnapshots) || !quote.serviceSnapshots.length || quote.serviceSnapshots.length > 20
@@ -84,8 +86,6 @@ export function composeClientOriginalBookingFlow(application: Application) {
         if (requestFingerprint(serviceKeys(supplied)) !== requestFingerprint(serviceKeys(originalServices)))
           throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_service_selection_mismatch');
         expectedServices = originalServices;
-        receiptSelection = parseEntry(bookingSelectionSchema, { ...selection, services: originalServices,
-          returnLocationId: selection.returnLocationId ?? quote.request.returnLocationId ?? quote.request.fulfillmentLocationId });
       }
       // End original Core service history normalization.
       const recorded = bookingSelectionSchema.safeParse({ quoteId: quote.id, timeZone: quote.pricingContext?.timeZone,
@@ -105,7 +105,7 @@ export function composeClientOriginalBookingFlow(application: Application) {
       const hash = (value: unknown) => requestFingerprint(JSON.parse(JSON.stringify(value)));
       if (hash(recorded.data) !== hash(expected)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_selection_mismatch');
       const receipt = await application.readBookingMaterialReceipt(currentRequest, { operationKey: command.operationKey,
-        command: { kind: 'booking_quote', selection: receiptSelection } });
+        command: { kind: 'booking_quote', selection } });
       const latest = await application.readPreparedQuoteOriginal(currentRequest, command.original);
       if (latest.state !== 'observed' || hash(latest) !== hash(original)) {
         throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_changed');

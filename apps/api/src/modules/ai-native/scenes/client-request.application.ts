@@ -1608,14 +1608,37 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           || row.inputHash !== requestFingerprint(saved.data) || row.materialHash !== materialHash(saved.data, row.material)
           || row.bindingHash !== bound.bindingHash || row.publicationHash !== requestFingerprint(bound.published.value)
           || row.publicationHash !== requestFingerprint(row.publication)) return fail('AI_CLIENT_MATERIAL_STALE');
-        // The original quote may have supplied its recorded default return
-        // location. Only that omitted optional field may be reconstructed from
-        // the immutable saved command; no current configuration is consulted.
-        const originalCommand = { kind: 'booking_quote' as const, selection: {
-          ...selected, ...(selected.returnLocationId === undefined && saved.data.selection.returnLocationId !== undefined
-            ? { returnLocationId: saved.data.selection.returnLocationId } : {})
-        } };
-        if (row.inputHash !== requestFingerprint(originalCommand)) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+        // New records retain the exact human command. Older bridge records
+        // stored a normalized command: observe that SAME key/hash only from
+        // its immutable material, never from current service capacity/config.
+        if (row.inputHash !== requestFingerprint(input.command)) {
+          const material = row.material as Partial<AiBookingMaterial>, prior = saved.data.selection;
+          const persistedSelection = bookingSelectionSchema.safeParse(material.selection);
+          if (material.serviceSources !== undefined || !persistedSelection.success
+            || jsonHash(persistedSelection.data) !== jsonHash(prior))
+            throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+          const originalServices = prior.services ?? [], suppliedServices = selected.services ?? [];
+          if (originalServices.length !== suppliedServices.length
+            || new Set(originalServices.map(value => value.serviceId)).size !== originalServices.length
+            || new Set(suppliedServices.map(value => value.serviceId)).size !== suppliedServices.length)
+            throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+          const services = selected.services?.map(value => {
+            const matches = originalServices.filter(original => original.serviceId === value.serviceId);
+            if (matches.length !== 1 || matches[0].quantity !== value.quantity)
+              throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+            const original = matches[0];
+            return { ...value, scheduledStartAt: value.scheduledStartAt ?? original.scheduledStartAt,
+              scheduledEndAt: value.scheduledEndAt ?? original.scheduledEndAt,
+              serviceLocationId: value.serviceLocationId ?? original.serviceLocationId };
+          });
+          const originalCommand = { kind: 'booking_quote' as const, selection: {
+            ...selected, ...(selected.returnLocationId === undefined && prior.returnLocationId !== undefined
+              ? { returnLocationId: prior.returnLocationId } : {}),
+            ...(services === undefined ? {} : { services })
+          } };
+          if (row.inputHash !== requestFingerprint(originalCommand))
+            throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+        }
         const latest = await repository.findOperation(scope, input.operationKey);
         if (!latest || jsonHash(latest) !== jsonHash(row)) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
         await bound.assertCurrent();
