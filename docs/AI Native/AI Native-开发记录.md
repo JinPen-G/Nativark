@@ -3,8 +3,27 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain24-original-source-hold-transaction-20261114"></a>
+## AIN-24 原材料保留、撤同意与删除事务保护（2026-11-14）
+
+前置 `ac4395c93a7e62f6562c7ace8719d273a98b37b4` 已普通推送并回读 GitHub 一致。本阶段只固定 dev1 已交回写权的三源：[原模型来源及 hold](../../apps/api/src/modules/ai-native/privacy/retention-model-sources.ts)、[人工确认记忆](../../apps/api/src/modules/ai-native/knowledge/persistent-memory-consent.service.ts)、[原知识文档生命周期](../../apps/api/src/modules/ai-native/knowledge/knowledge-document.service.ts)。Root逐 blob 核同 `aa43123e77897d2d4382d4f76bd1cafd9a8c3805`、`68b1bbe880a96796b8fc4e3309d569b3437bb74b`、`56ab9de623e2cd06853ee3f02dcfd63a23b40cd8`，并独立运行下列必要组；不夹未知员工样式或助手仍在施工的审计源。
+
+保留检查从原 hash-bound 模型输入取得知识／记忆来源，并核原 Task、scope、原请求及材料哈希；完整关联的未终结 Task、未决审批消费、`POSSIBLE` 效果和原资源／财务占用保持 hold，无关来源可 clear，缺失、损坏或超过有界集合保持 unavailable。已经擦除的 Task 输入只有同 Task、同政策及 targetHash 的原删除收据才可认作已清理，不信调用方标记。显式记忆修改／删除在原 scope 锁和 CAS 同事务复核，撤同意仍立即停止复用并保留待核对正文；未知 COMMIT 不重发，新请求不能用原同键收据授权另一修改。
+
+知识删除新增服务端 `KnowledgeDocumentRetention.withTransaction` 端口，在原仓储事务、scope 锁及当前读权下检查 hold；缺生产装配或仍有未清理 Task 正文副本时拒绝，保留原材料。撤回和 ACL 变化仍立即阻止当前读取，不因 hold 延迟撤权。该端口及明确拒绝是本阶段保护，**不是完整删除传播**；Root下一步负责把原 Prisma 仓储事务与终态正文清理消费者接入，不能把 `source_copy_erasure_not_assembled` 当成删除成功。
+
+| Root 独立必要验证 | 原 stdin／输出及结果 |
+| --- | --- |
+| 原记忆修改／删除、撤同意、hold 和 COMMIT 丢应答 | `node --no-compilation-cache -`；stdin blob `7dad58ed697a642251a9bc96df0141af74c51ab3`、SHA-256 `7f564cb6c15a81ecb0de37e83eccfa2e4a4f6730f6e9b3ce174b1f689956cee9`；退出0。clear修改／删除、未决任务／审批／POSSIBLE保留、同键只读恢复、确认正文清理均通过；输出 blob `59a930d590a18564a91adbc8ff4028719ce84dae` |
+| 原知识删除事务端口与缺装配／原收据恢复 | 同命令；stdin blob `d3367d1990b9310fab459e640ce3e345e210e9fc`、SHA-256 `b6d4661d29a9141765528cab5c9baecb69736cbbc704b14b2c1be87e2221f62b`；退出0。clear删除、关联保留、缺装配拒绝且原文不变、COMMIT丢应答后同键无新增写均通过；输出 blob `46794f5f4dcd0bc32efc10c983db986d2a59679e` |
+| 三源及生产闭包类型 | 同命令；stdin blob `53f1bdf500218890b5fea93448554c9e47253ebf`、SHA-256 `2989650abdc9dd28b94e5e816f0769c9691a4c1423a4b297c491146b7472d31a`；TypeScript5.9.3、3根／1591源、0诊断、退出0；输出 blob `3c581202fe8e005fcad764f6bf2cf5c7811c9b23` |
+
+AIN-24原全文仍未齐，任务百分比不提高。Root继续最少会员业务收据、终态 Task 正文副本传播及标准事务／provider装配；dev1转敏感访问审计两个消费工厂，dev2按原AIN-26准备固定版本／四品类／多端／AIN-A01～A29矩阵。审计明确失败时四入口仍返回正文／偏好的反例 `f9f3237da0c388aef3fb7c970225486e5145070c5ace64afb113ca7d5a7d38cb` 是当前缺口证据，不能当修复通过；通用日志掩码会保留 snippet／preference，因此须从消费端只传最少引用／哈希，并持久审计成功、重核当前授权后才返回敏感内容。
+
+本阶段全部采用原 offline preload、不可达 DATABASE_URL 和内存 audit，三组 audit0、自有进程退出、单任务 `output/.tmp/ain24-retention-read-review` 未创建，无新增／扩写测试脚本、依赖／环境副本或临时产物。原 Git 对象和上述摘要保留最少证据，不创建第五册。`git diff --check`退出0，`node scripts/validate-docs.cjs`退出1，仍为导航历史3处及稀疏站点示例1处既有缺链，无新增算术或链接错误。真实数据库、浏览器／微信、供应商及备份淘汰由负责人后续验证；本阶段不访问这些环境、不宣称生产隐私验收或删除闭环通过。
 
 <a id="ain25-measurement-cost-rollback-whole-20261114"></a>
 ## AIN-25 测量、成本包络与版本回退全文核定（2026-11-14）

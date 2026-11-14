@@ -1,11 +1,23 @@
 import { createHash } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
-import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction, KnowledgeAuthorizationRequest } from './knowledge.ports';
+import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction, KnowledgeAuthorizationRequest, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
 import { assertRecord, authorize, draftInput, fingerprint, mutationInput, operationFingerprint, parse, validateChunks, queueIndex } from './knowledge-validation';
+import { inspectRetentionSource, lockRetentionSourceScope, retentionSourceCopies } from '../privacy/retention-model-sources';
 
+/** Server-only binding to the ORIGINAL repository transaction. The caller
+ * supplies its transaction-bound repository, not another storage/runtime chain.
+ * The server composition owns this port; HTTP and model input never supply it. */
+export interface KnowledgeDocumentRetention {
+  withTransaction<T>(work: (tx: Prisma.TransactionClient, repository: KnowledgeRepositoryPort) => Promise<T>): Promise<T>;
+}
+
+/** Original document lifecycle/CAS and read authorization. Explicit deletion
+ * checks retained source evidence in the same scope-locked transaction. Logical
+ * withdrawal/ACL changes still stop reads immediately without erasing bodies. */
 export class KnowledgeDocumentService {
-  constructor(readonly ports: KnowledgeDocumentPorts) {
+  constructor(readonly ports: KnowledgeDocumentPorts, private readonly retention?: KnowledgeDocumentRetention) {
     requiredPort(ports?.repository, ['read', 'operation', 'commit']);
     requiredPort(ports?.authorization, ['authorize']); requiredPort(ports?.clock, ['now']);
     requiredPort(ports?.files, ['read']); requiredPort(ports?.parser, ['parse']);
@@ -41,6 +53,64 @@ export class KnowledgeDocumentService {
     return true;
   }
 
+  private async commitDeletion(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord,
+    input: Parameters<KnowledgeRepositoryPort['commit']>[0], binding: Pick<KnowledgeAuthorizationRequest, 'lifecycle'>) {
+    // Replay observes the same immutable operation even after holds/dependencies
+    // change. It cannot authorize another deletion or erase a pending parse.
+    const receipt = await this.ports.repository.operation(input.scope, input.documentId, input.operation.id);
+    if (receipt) {
+      if (receipt.fingerprint !== input.operation.fingerprint) throw new KnowledgeError('conflict');
+      return 'committed' as const;
+    }
+    if (before.parseOperationId) throw new KnowledgeCommitUnknownError();
+    if (typeof this.retention?.withTransaction !== 'function') {
+      throw Object.assign(new KnowledgeError('unavailable'), { reason: 'source_retention_not_assembled' });
+    }
+    const contextHash = fingerprint(context), beforeHash = fingerprint(before);
+    let attempted = false, completed = false;
+    try {
+      return await this.retention.withTransaction(async (tx, repository) => {
+        const { scopeId, owner } = await lockRetentionSourceScope(tx, context.scope);
+        const original = await repository.operation(input.scope, input.documentId, input.operation.id);
+        if (original) {
+          if (original.fingerprint !== input.operation.fingerprint) throw new KnowledgeError('conflict');
+          await authorize(this.ports.authorization, context, { action, scope: context.scope, document: before.document, ...binding });
+          if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+          completed = true;
+          return 'committed' as const;
+        }
+        const current = await repository.read(input.scope, input.documentId);
+        if (!current || fingerprint(current) !== beforeHash) throw new KnowledgeError('conflict');
+        const state = await inspectRetentionSource(tx, scopeId, 'knowledge', input.documentId, owner);
+        if (state !== 'clear') throw Object.assign(new KnowledgeError(state === 'held' ? 'not_ready' : 'unavailable'), {
+          reason: state === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable',
+        });
+        // Logical source CAS cannot rewrite immutable Task input/result bodies.
+        // Keep the original source until that existing copy consumer is wired;
+        // neither a terminal Task nor a queued index remove is deletion proof.
+        if ((await retentionSourceCopies(tx, scopeId, 'knowledge', input.documentId, owner)).length) {
+          throw Object.assign(new KnowledgeError('unavailable'), { reason: 'source_copy_erasure_not_assembled' });
+        }
+        await authorize(this.ports.authorization, context, { action, scope: context.scope, document: current.document, ...binding });
+        if (fingerprint(context) !== contextHash || fingerprint(await repository.read(input.scope, input.documentId)) !== beforeHash) {
+          throw new KnowledgeError('conflict');
+        }
+        attempted = true;
+        const result = await repository.commit(input);
+        if (result !== 'committed') throw new KnowledgeError('conflict');
+        await authorize(this.ports.authorization, context, { action, scope: context.scope, document: current.document, ...binding });
+        if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+        completed = true;
+        return result;
+      });
+    } catch (error) {
+      if (completed) throw new KnowledgeCommitUnknownError();
+      if (error instanceof KnowledgeError) throw error;
+      if (attempted) throw new KnowledgeCommitUnknownError();
+      throw new KnowledgeError('unavailable');
+    }
+  }
+
   private async assertAttachmentBound(context: AiExecutionContext, documentId: string, attachmentId: string, selection?: { documentVersion: string; expectedRevision: number }) {
     if (typeof this.ports.files.assertBound !== 'function') throw new KnowledgeError('unavailable');
     if (context.scope.kind !== 'workspace') throw new KnowledgeError('unavailable');
@@ -66,7 +136,13 @@ export class KnowledgeDocumentService {
         document: structuredClone(before.document), ...binding });
     }
     assertStableContext();
-    const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) }, next: structuredClone(next), newVersion });
+    const input = { scope: structuredClone(stableContext.scope), documentId: next.document.documentId,
+      expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) },
+      next: structuredClone(next), newVersion };
+    // Withdrawal, ACL updates and version selection invalidate current reads
+    // while keeping historical chunks. Holds cannot defer that revocation.
+    const result = action === 'delete' ? await this.commitDeletion(stableContext, action, before, input, binding)
+      : await this.ports.repository.commit(input);
     assertStableContext();
     if (result !== 'committed') throw new KnowledgeError('conflict');
     this.ports.cache?.invalidate(structuredClone(stableContext.scope), next.document.documentId);

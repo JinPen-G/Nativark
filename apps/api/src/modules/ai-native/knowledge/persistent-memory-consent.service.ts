@@ -11,6 +11,7 @@ import type { KnowledgeClock, MemoryAuthorizationPort, MemoryConfirmation } from
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { actor, fingerprint, id, memoryConfirmationHash, operationFingerprint, parse, preferenceSchema, sameScope } from './knowledge-validation';
 import { preferenceAmbiguities } from './preference-ambiguities';
+import { inspectRetentionSource, lockRetentionSourceScope, retentionSourceCopies } from '../privacy/retention-model-sources';
 
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
@@ -31,9 +32,9 @@ const preferenceSelectionSnapshot = preferenceSelectionInput.extend({
   ambiguityCoverage: z.literal('returned_items_only'), businessCompatibility: z.literal('unavailable')
 }).strict();
 
-/** Explicit human action, not an AI tool or HTTP endpoint. Reuses the existing
- * identity resolver, consent table, confirmation hash and memory consumer.
- * Authorization is mandatory: current membership alone grants no memory action.
+/** Explicit human action using original consent/CAS receipts and current
+ * authority. Delete/modify share scheduled source holds under the scope lock.
+ * Consent revocation stops reuse immediately and retains held body evidence.
  */
 export class PersistentMemoryConsentService {
   private readonly identities: AiTaskCurrentIdentityAuthority;
@@ -72,6 +73,73 @@ export class PersistentMemoryConsentService {
 
   private async authorize(context: AiExecutionContext, memory?: AiMemoryDraft): Promise<void> {
     await this.authorizeRequest(context, { action: 'confirm', scope: context.scope, owner: actor(context), ...(memory ? { memory } : {}) });
+  }
+
+  private transactionRepository(tx: Prisma.TransactionClient) {
+    // Repository callback transactions must stay on the already locked source
+    // transaction. Opening another Prisma transaction would lose that boundary.
+    const bound = new Proxy(this.ports.db, { get(_target, key) {
+      if (key === '$transaction') return (work: unknown) => {
+        if (typeof work !== 'function') return unavailable();
+        return work(tx);
+      };
+      return Reflect.get(tx, key);
+    } });
+    return new PrismaStructuredMemoryRepository(bound, () => new Date(this.ports.clock.now()));
+  }
+
+  private async sourceChangeReady(tx: Prisma.TransactionClient, memoryId: string,
+    locked: Awaited<ReturnType<typeof lockRetentionSourceScope>>) {
+    const { scopeId, owner } = locked;
+    const state = await inspectRetentionSource(tx, scopeId, 'memory', memoryId, owner);
+    if (state !== 'clear') throw Object.assign(new KnowledgeError(state === 'held' ? 'not_ready' : 'unavailable'), {
+      reason: state === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable',
+    });
+    // The source CAS can erase its own head/confirmation copies, but it cannot
+    // rewrite immutable Task prompts/results or claim they were propagated.
+    // The original Task erasure consumer owns that remaining commit point.
+    if ((await retentionSourceCopies(tx, scopeId, 'memory', memoryId, owner)).length) {
+      throw Object.assign(new KnowledgeError('unavailable'), { reason: 'source_copy_erasure_not_assembled' });
+    }
+  }
+
+  private async commitSourceChange(context: AiExecutionContext,
+    input: Parameters<PrismaStructuredMemoryRepository['commit']>[0]) {
+    const action = input.next.status === 'deleted' ? 'delete' as const : 'modify' as const;
+    const request = { action, scope: input.scope, owner: input.owner };
+    await this.authorizeRequest(context, request);
+    let attempted = false, completed = false;
+    try {
+      return await this.ports.db.$transaction(async tx => {
+        const locked = await lockRetentionSourceScope(tx, context.scope);
+        const repository = this.transactionRepository(tx);
+        // Same-key recovery precedes new hold/copy checks. It observes the old
+        // committed CAS; new tasks cannot turn that receipt into a new mutation.
+        const receipt = await repository.operation(input.scope, input.owner, input.memoryId, input.operation.id);
+        if (receipt) {
+          if (receipt.fingerprint !== input.operation.fingerprint) throw new KnowledgeError('conflict');
+          await this.authorizeRequest(context, request);
+          completed = true;
+          return 'committed' as const;
+        }
+        await this.sourceChangeReady(tx, input.memoryId, locked);
+        const before = await repository.read(input.scope, input.owner, input.memoryId);
+        if (!before || before.status === 'deleted' || before.revision !== input.expectedRevision) throw new KnowledgeError('conflict');
+        const grant = await this.authorizeRequest(context, { ...request, memory: before });
+        if (fingerprint(await this.authorizeRequest(context, { ...request, memory: before })) !== fingerprint(grant)) return unavailable();
+        attempted = true;
+        const result = await repository.commit(input);
+        if (result !== 'committed') throw new KnowledgeError('conflict');
+        await this.authorizeRequest(context, { ...request, memory: before });
+        completed = true;
+        return result;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (completed) throw new KnowledgeCommitUnknownError();
+      if (error instanceof KnowledgeError) throw error;
+      if (attempted) throw new KnowledgeCommitUnknownError();
+      return unavailable();
+    }
   }
 
   async read(memoryId: string): Promise<AiMemoryDraft> {
@@ -340,7 +408,14 @@ export class PersistentMemoryConsentService {
       || !['modify', 'delete'].includes(String(input.operation))) throw new KnowledgeError('invalid_input');
     // Identity resolution may wait. Never allow the caller to replace this
     // explicit human edit/delete with another operation or confirmation ID.
-    return this.memory.change(await this.current(), operationId, input);
+    const context = await this.current();
+    const memory = new StructuredMemoryService({
+      repository: { read: this.repository.read.bind(this.repository), operation: this.repository.operation.bind(this.repository),
+        commit: command => this.commitSourceChange(context, command) },
+      confirmations: this.repository, authorization: { authorize: (current, request) => this.authorizeRequest(current, request) },
+      clock: this.ports.clock,
+    });
+    return memory.change(context, operationId, input);
   }
 
   /** Withdraw one's consent using the existing delete action gate. The record
@@ -355,10 +430,8 @@ export class PersistentMemoryConsentService {
     let attempted = false, callbackCompleted = false;
     try {
       return await this.ports.db.$transaction(async tx => {
-        const repository = new PrismaStructuredMemoryRepository({ $transaction: this.ports.db.$transaction.bind(this.ports.db),
-          aiStructuredMemory: tx.aiStructuredMemory, aiMemoryOperation: tx.aiMemoryOperation, aiHumanConfirmation: tx.aiHumanConfirmation,
-          aiDataErasure: tx.aiDataErasure },
-        () => new Date(this.ports.clock.now()));
+        await lockRetentionSourceScope(tx, context.scope);
+        const repository = this.transactionRepository(tx);
         const memory = await repository.read(scope, owner, input.memoryId);
         if (!memory || memory.status !== 'confirmed') return unavailable();
         if (memory.revision !== input.expectedRevision) throw new KnowledgeError('conflict');
@@ -372,6 +445,9 @@ export class PersistentMemoryConsentService {
           callbackCompleted = true;
           return proof;
         }
+        // Revocation retains the preference and confirmation text. It stops
+        // current reuse immediately even when an original effect needs its
+        // body as evidence; physical delete/modify use sourceChangeReady.
         attempted = true;
         const lock = await tx.aiStructuredMemory.updateMany({ where: { id: input.memoryId, tenantId: scope.tenantId,
           workspaceId: scope.workspaceId, ownerKind: owner.actorKind, ownerId: owner.actorId,
@@ -388,6 +464,7 @@ export class PersistentMemoryConsentService {
         return revoked;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
+      if (callbackCompleted) throw new KnowledgeCommitUnknownError();
       if (error instanceof KnowledgeError) throw error;
       if (!callbackCompleted && error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new KnowledgeError('conflict');
       if (attempted) throw new KnowledgeCommitUnknownError();

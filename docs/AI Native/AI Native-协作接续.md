@@ -6,7 +6,7 @@
 
 PM的本机MySQL8.4.11已按[最小SQL／恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)补完第四Outbox ALTER，列／FK／索引及ENFORCED回读保持；其真实CHECK元数据的5C27引号包装导致旧parser拒绝。Root已交[单源受限metadata兼容与实际字符串回放](<AI Native-开发记录.md#ain-main-mysql-check-metadata-quotes-20261114>)，只支持相邻_utf8mb4的ASCII包装，完整AST／ENFORCED／FK不放宽。PM独占真实assertStorage再核、resolve／前向迁移及Client／服务恢复；AI不争数据库／main索引，不能用回放声称已恢复服务或提高任务进度。
 
-AIN-25 [原五条全文收口](<AI Native-开发记录.md#ain25-measurement-cost-rollback-whole-20261114>)已完成本轮研发验收：故障22源固定2cfbcee8，50样本、成本／SLO候选与原版本回退均已核入，必要模拟／类型和最后独立全文核定齐备；与AIN-23形成新main集成节点，由PM串行整合。原unknown不重派或清占用，生产SLO／D05采用及真实环境由负责人后续决定／测试，不重跑已绿色集合。dev2接原AIN-26固定版本及矩阵准备，未齐15／24前置不提前计分。AIN-24 dev1独占原hold／memory／knowledge三叶，Root负责最少会员业务收据、原复制正文清理与公共装配；仍缺新知识事务／删除传播完整消费者，不能把依赖拒绝当删除闭环，助手不等待本机迁移或Root提交。
+AIN-25 [原五条全文收口](<AI Native-开发记录.md#ain25-measurement-cost-rollback-whole-20261114>)已完成本轮研发验收：故障22源固定2cfbcee8，50样本、成本／SLO候选与原版本回退均已核入，必要模拟／类型和最后独立全文核定齐备；与AIN-23形成新main集成节点，由PM串行整合。原unknown不重派或清占用，生产SLO／D05采用及真实环境由负责人后续决定／测试，不重跑已绿色集合。dev2接原AIN-26固定版本及矩阵准备，未齐15／24前置不提前计分。AIN-24 [原hold／memory／knowledge三源保护阶段](<AI Native-开发记录.md#ain24-original-source-hold-transaction-20261114>)已由dev1冻结交回并经Root独立必要模拟／类型核接；Root接最少会员业务收据、原复制正文清理与标准事务／provider装配，dev1转敏感访问审计。仍有Task副本或缺生产事务时的拒绝不能当删除闭环，助手不等待本机迁移或Root提交。
 
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 
@@ -34,8 +34,8 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | MySQL最小三源0b1e1ad及AIN-25故障／事件观察22源2cfbcee已上传；PM独占main／DDL／Client，Root只留固定依据。独占四册／索引和公共接点；下一接AIN-24最少会员业务收据／已撤知识记忆副本清理与新事务端口，AIN-15保留Core企业正向依赖，AIN-25按全文与SLO／成本／回退资料核计分。未知原操作不重派，费用占用不因诊断或槽释放核销；未知员工样式不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-15四源已交权并推0ea63；当前独占AIN-24 privacy/retention-model-sources.ts、knowledge/persistent-memory-consent.service.ts、knowledge/knowledge-document.service.ts。修原未决审批／POSSIBLE的hold枚举、撤同意立即停止读取与物理删除的区别、原CAS／同键收据及知识事务端口；新复制清理依赖须交Root接线，缺依赖拒绝不能称删除完成。不改Root retention.service／公共源／四册／索引或Core权限。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-25全文已上传ac4395c93；PM独占main／DDL／Client，Root只留固定依据。独占四册／索引和公共接点；已收回AIN-24原保护三源写权并独立核接，继续最少会员业务收据、已撤知识记忆的终态副本清理及标准事务／provider。AIN-15保留Core企业正向依赖。未知原操作不重派，费用占用不因诊断或槽释放核销；未知员工样式不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-15四源及AIN-24保护三源已交回写权。当前独占knowledge/human-knowledge-consumption.composition.ts、knowledge/human-memory-management.composition.ts及确需的feature-local审计叶；修readDocument／openSource／readMemory／readPreferences和collectInput／selectPreferences／confirmationDetail敏感出口，沿当前授权→原投影→最少ID／hash审计持久成功→重核→返回。审计失败不返正文，不传snippet／preference／凭据；Root负责正式provider接线。不改Root保护三源、retention.service、human-knowledge.service、persistent-knowledge.composition、通用日志服务／Interceptor、公共源／四册／索引或Core权限。 |
 | AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-25两UI／两源、完整测量／成本／回退资料及最终记录确认已交权并核闭。接原AIN-26：只读核固定source／契约／迁移／原场景、四品类及多端矩阵，按AIN-A01～A29定位既有证据和实际组合缺口，交Root分配最小修复；15／24前置未齐不提前验收。不建第五册／新测试脚本或环境，不写shared／provider／四册／索引，不争用main／PM数据库。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-15两阶段和AIN-25限定范围复核均已交回；发现的最后政策等待P2经Root复验后再次静态核闭，无活动写权。不写源码／索引／四册／main、不重复作者模拟，不外推AIN-25全文或真实运行。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
@@ -80,7 +80,7 @@ Core 只读合同固定源码 `fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 
 ## 其余未完与验证边界
 
-- 原05/06/07/10/11/12/13/14/16/17/18/19/20/21/22／23已按模拟研发口径核闭；15及24～28继续按[原任务](<AI Native-开发任务.md>)及[实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)核定；不能把旧真实测试要求当研发阻塞，也不取消功能或部署/回退准备。
+- 原05/06/07/10/11/12/13/14/16/17/18/19/20/21/22／23／25已按模拟研发口径核闭；15、24及26～28继续按[原任务](<AI Native-开发任务.md>)及[实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)核定；不能把旧真实测试要求当研发阻塞，也不取消功能或部署/回退准备。
 - [原worker取消收口收据](<AI Native-开发记录.md#ain25-original-worker-cancel-receipt-20261114>)已独立修复／复验，原请求与settlement分开，停用原读保留，未知不换键；[共享容量阶段](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)已补公平队列／原count／聚合告警，取消／恢复和工具完整测量、SLO／故障／回退仍按25全文核定。原模型控制首字与读回沿[既有观察来源](<AI Native-开发记录.md#ain25-model-control-visible-20261113>)，原日志窗口上界与当前权限校验保留；QA已闭权限及原澄清同键问题不重复施工。
 - [客户小程序类型告警对照](<AI Native-开发记录.md#ain-client-mini-type-evidence-20261112>)已从固定 AI/main 源完成原 107 入口检查：完整共享声明解析后，AI 0 诊断，main 基线仅两处 consumed 标签；不得凭不完整虚拟依赖的 unknown 告警批量改会话或强断言。两标签由 PM 企业后继处理，dev2 核其验证器差异。
 - 新树稀疏检出，不复制依赖、output 或环境。验证只读使用主仓库受管依赖；TypeScript 5.9.3 从 ts-node 解析，Prisma 只读 `apps/api/node_modules/@prisma/client` 的已生成入口，不能误用根未生成壳或旧临时树路径。源码与生成 schema 须按当前检查内容核对，不覆盖共享产物。
