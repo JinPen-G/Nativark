@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="nativark-white-title nativark-white-description">
+  <title id="nativark-white-title">Nativark 白色标志</title>
+  <desc id="nativark-white-description">透明背景的白色圆角模块线框，前景为 N 字母，下方托座承载各模块。</desc>
+  <defs>
+    <mask id="nativark-left-visible" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#FFFFFF"/>
+      <g fill="#000000" stroke="#000000" stroke-width="18">
+        <rect x="235" y="64" width="142" height="240" rx="30" transform="rotate(4 306 184)"/>
+        <rect x="170" y="157" width="206" height="218" rx="38" transform="rotate(-4 273 266)"/>
+        <path d="M105 350H407C419 350 428 361 424 373L413 407C409 421 396 430 381 430H131C116 430 103 421 99 407L88 373C84 361 93 350 105 350Z"/>
+      </g>
+    </mask>
+    <mask id="nativark-back-visible" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#FFFFFF"/>
+      <g fill="#000000" stroke="#000000" stroke-width="18">
+        <rect x="170" y="157" width="206" height="218" rx="38" transform="rotate(-4 273 266)"/>
+        <path d="M105 350H407C419 350 428 361 424 373L413 407C409 421 396 430 381 430H131C116 430 103 421 99 407L88 373C84 361 93 350 105 350Z"/>
+      </g>
+    </mask>
+    <mask id="nativark-front-visible" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#FFFFFF"/>
+      <path d="M105 350H407C419 350 428 361 424 373L413 407C409 421 396 430 381 430H131C116 430 103 421 99 407L88 373C84 361 93 350 105 350Z" fill="#000000" stroke="#000000" stroke-width="18"/>
+    </mask>
+  </defs>
+  <g stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <g mask="url(#nativark-left-visible)">
+      <rect id="nativark-module-left" x="105" y="110" width="156" height="216" rx="33" transform="rotate(-8 183 218)"/>
+    </g>
+    <g mask="url(#nativark-back-visible)">
+      <rect id="nativark-module-back" x="235" y="64" width="142" height="240" rx="30" transform="rotate(4 306 184)"/>
+    </g>
+    <g mask="url(#nativark-front-visible)">
+      <g id="nativark-module-front" transform="rotate(-4 273 266)">
+        <rect x="170" y="157" width="206" height="218" rx="38"/>
+        <path d="M232 308V222L311 308V222" stroke-width="20"/>
+      </g>
+    </g>
+    <path id="nativark-platform" d="M105 350H407C419 350 428 361 424 373L413 407C409 421 396 430 381 430H131C116 430 103 421 99 407L88 373C84 361 93 350 105 350Z"/>
+    <path d="M181 389H331" stroke-width="12"/>
+  </g>
+</svg>
