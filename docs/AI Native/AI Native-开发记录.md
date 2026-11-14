@@ -3,8 +3,32 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain-main-20e33-five-public-integration-20261114"></a>
+## PM 固定 main 与已上传 AI 成果的五个公共接点（2026-11-14）
+
+PM 指定 main `6ca19ac34a3260405ba24388a4aa2a933450e70b` 与已上传 AI `20e33f3d933c337335f3b352d6e306d4ab83c88b`（前置 `86d05a78733ce82336ec2138c1a919eabecd1540`），只核这批固定成果，不收 AIN-15／25 活动修改。Root 只读 Git 对象，在内存核 merge-tree 候选 `a76529c0ecf2d015405faa8ac1342ea23961d73d`；58份增量中53份与20e33同blob，五份公共组合逐项核验，没有写 main 工作区、索引或切换分支。
+
+唯一产品文本冲突在 OpenAPI 顶部圆角常量和品类提案导入：保留两组导入，仅去冲突标记。main 的企业／演示重置权限、圆角、原重复 schema 保护及既有登记均保留；日历 P1 单源仍为 `623bb554845e50ae17c2b1e46796f3b1fbff6c5e`。以下最终对象已用 `git hash-object -w --stdin` 固定，供 PM 按指定前像串行整合，不取活动 HEAD。
+
+| 路径 | 固定 main 前像 blob | 最终组合 blob |
+| --- | --- | --- |
+| apps/api/src/app.module.ts | `faee84f43be998c402b1e8cfcfc4b98b689ca11b` | `bebdecd9a65397fabed339b09d9d7a64f83bb566` |
+| apps/api/src/common/api-auth.guard.ts | `591105f03fd23ff4ef82c1ca433212e80925ae16` | `b154d038036e5b41a1a68df5b4fbaec3237b373d` |
+| apps/api/src/contracts/ai-leaf-components.ts | `7d440f35978b97924723e6d08c2794ca20d2aa08` | `0787d1f9457fecc24fd3398cf03ab5f1e99de109` |
+| apps/api/src/contracts/openapi-document.ts | `1db9006c120209ed5df8230a2a496f651c06f457` | `2a95e8b41d8080e9535b9041d37c98a7e59c882e` |
+| packages/shared/src/index.ts | `907079fe7750660e795e263bb72dc0f862ffc4e2` | `963c7a2119fafabda6ae4ea625445b3c1e8515c7` |
+
+必要验证采用 `node --no-compilation-cache -`、固定源码内存加载器、本树离线 preload 和不可达 DATABASE_URL；加载器只允许1164份已列出的本项目固定源码，ConfigModule 明确 `ignoreEnvFile:true`，不读取环境文件。
+
+| 验证 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| 固定 AppModule／OpenAPI 原模块加载与登记唯一性 | `ef8187c9a62ceaed9465f5ac86181876fb774aef20defea3903e337f3e71be70`，退出0；1277 schema、1242 operation 唯一，原开业4操作、品类8操作、容量 provider 和品类 controller 各1个。 |
+| 五个公共根及固定依赖类型 | `d9a03fbe6db5dc2f65a5568d09a999c65e75a5093cbfed93cc0d0532204e41d8`，TypeScript5.9.3、5根／2026源、零诊断，退出0。 |
+
+初始模块驱动误用 `aiTaskOpeningProposal_` 前缀导致断言0≠4；按源码实际 `taskOpeningProposal_` 修驱动后通过，未放宽生产登记或删除业务断言。两组 audit0、进程退出，`output/.tmp/ain-main-20e33-fixed-20261114` 未创建，没有临时脚本、依赖、生成 client／dist 或环境副本。本片是固定公共整合自检，不代表 main 已合入、全部业务重验或真实环境通过；任务进度不变。PM 从本记录读取固定对象，Root 不主动跨对话通知。
 
 <a id="ain-main-contract-calendar-p1-fixed-20261114"></a>
 ## PM 固定 main 合后两处 P1 的最小对象补片（2026-11-14）
