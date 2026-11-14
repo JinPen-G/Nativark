@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-session-directory-20261115"></a>
+
+## 登录成员的Core目录与管理候选（2026-11-15）
+
+授权管理片固定 `f97bb4c220100bf9c22c76428170077c116706c6` 已推送并读取实际远端一致，main仍62ca。本片继续在原独占Core合同、API适配和admin/core提供登录后目录消费，不修改原Auth/Guard、主装配、schema和后台作者WIP。
+
+[会话目录合同](../../../packages/core-contracts/src/session-http.ts)通过正式出口提供当前租户/成员、已开通且本人获分配Core、原授权修订、精确业务权限及租户管理分配候选。只读GET不接收客户端主体字段；空Core目录合法。新增`canUseCorePage`只判断成员使用权与精确页面权限，数据范围/绑定/业务就绪仍由自身宿主接点核验。OpenAPI从同源schema生成，现有十个管理操作保持。
+
+[原会话读取](../../../apps/api/src/modules/core-host/original-core-session.ts)复用OriginalCorePrincipalAuthority及原人员/角色锁，本租户授权和本人分配按复合条件读取；只登记获权Core，不返回平台通配符或其他Core权限。当前租户管理者另外读取已开通Core的分配候选，候选不是本人业务权。返回前复核同一会话及权限，等待期间撤回管理/业务权限会收窄输出。空受控组合不查询Core授权表、写入为0。[独立Controller](../../../apps/api/src/modules/core-host/core-session.controller.ts)由CoreSessionHttpModule.register(reader)装配。
+
+[useCoreSession](../../../apps/admin/src/core/useCoreSession.ts)和[原HTTP消费](../../../apps/admin/src/core/management-client.ts)把当前目录接到原认证/查询缓存；tenant/member/session代次进入查询键，未验证会话和失败读取不暴露旧目录供页面授权。后台可据准确目录提示联系SaaS开通或联系租户管理者分配，Core配置/就绪另核。原AppShell/AppRouter仍需按公共窗口消费，目录源码存在不表示无Core后台已经实际运行。
+
+stdin内存编译/实际函数调用退出0，合同32根0诊断；本人Core/精确页面权限、管理候选隔离、返回前撤权、成员撤回隐藏、空组合不查询Core表均通过，8次授权SQL读取、5次原lease返回前复核、写入0。OpenAPI生成及严格错误范围核对通过。原会话authority沿已验证实现复用，当前新reader验证使用离线事务输入，没有真实DB或新API全量类型证据。
+
+前端正式Core入口2根/1,482源类型0诊断；单源GET路径与Hook核对退出0，未验证/失败读取均隐藏目录，精确权限判定成立。实际开发索引重新读取4,451条，issues0，5条动态元数据及3,604条无直接用途说明继续待整理；新GET明确标记为source，未冒称主应用登记。现有测试脚本未新增，验证经stdin内存运行，没有创建临时环境或进程。
+
+下一公共接点为原Guard显式登记当前GET自助政策、AppModule提供原reader、OpenAPI总组合消费同源生成器、后台主路由/菜单消费当前Core目录及实际绑定/就绪。完整API离线生成仍沿前片审批拒绝边界保持未验，真实数据库/浏览器/无Core运行、完整Rental兼容和独立接手仍未完成，原PCH进度未跨下一档。
+
+原8组合同测试退出0、skip/todo为0；七份相关文档559个链接和118个章节锚点定向核对退出0，新增错误0，正式需求/任务正文保持原值。差异格式检查退出0，原合同临时编译/夹具由原after删除并核实，本片无新增临时目录或进程。固定提交由包含本节的中文Git提交定位，普通推送后读取真实远端确认。
+
 <a id="core-access-panels-receipts-20261115"></a>
 
 ## Core授权管理面与原操作只读核对（2026-11-15）

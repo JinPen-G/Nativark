@@ -1,5 +1,5 @@
 /** Core管理复用原认证HTTP和单源schema；读取原结果不重发变更，不从客户端字段授权。 */
-import { CORE_MANAGEMENT_HTTP as routes, CORE_MANAGEMENT_HTTP_BASE,
+import { CORE_MANAGEMENT_HTTP as routes, CORE_MANAGEMENT_HTTP_BASE, CORE_SESSION_HTTP,
   type BindCoreScope, type ChangeMemberCoreAssignment, type ChangeTenantCoreGrant } from "@rental-os/core-contracts";
 import { request } from "@/api/http";
 import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
@@ -8,11 +8,12 @@ type Query<K extends keyof typeof routes> = (typeof routes)[K] extends { request
   ? Value : never;
 
 async function send<Output>(declaration: { path: string; method: "GET" | "POST";
-  request?: { parse(value: unknown): unknown }; response: { parse(value: unknown): Output } }, input: unknown, signal: AbortSignal): Promise<Output> {
+  request?: { parse(value: unknown): unknown }; response: { parse(value: unknown): Output } }, input: unknown,
+  signal: AbortSignal, prefix = `/${CORE_MANAGEMENT_HTTP_BASE}`): Promise<Output> {
   const epoch = currentSessionEpoch(), active = AbortSignal.any([signal, currentSessionSignal()]);
   if (active.aborted) throw new DOMException("原Core管理请求已失效", "AbortError");
   const data = declaration.request?.parse(input);
-  const response = await request<unknown>(`/${CORE_MANAGEMENT_HTTP_BASE}/${declaration.path}`, {
+  const response = await request<unknown>(`${prefix}/${declaration.path}`, {
     method: declaration.method === "GET" ? "get" : "post", data, signal: active });
   if (active.aborted || currentSessionEpoch() !== epoch) throw new DOMException("原Core管理响应不能写入新会话", "AbortError");
   return declaration.response.parse(response);
@@ -28,7 +29,8 @@ export const coreManagementApi = {
   memberAssignment: (input: Query<"readMemberAssignment">, signal: AbortSignal) => send(routes.readMemberAssignment, input, signal),
   binding: (input: Query<"readBinding">, signal: AbortSignal) => send(routes.readBinding, input, signal),
   tenantGrantOperation: (input: Query<"readTenantGrantOperation">, signal: AbortSignal) => send(routes.readTenantGrantOperation, input, signal),
-  memberAssignmentOperation: (input: Query<"readMemberAssignmentOperation">, signal: AbortSignal) => send(routes.readMemberAssignmentOperation, input, signal)
+  memberAssignmentOperation: (input: Query<"readMemberAssignmentOperation">, signal: AbortSignal) => send(routes.readMemberAssignmentOperation, input, signal),
+  sessionContext: (signal: AbortSignal) => send(CORE_SESSION_HTTP, undefined, signal, "")
 };
 
 /** 仅已知在提交前拒绝的原管理错误可解除本次未知锁；网络/5xx及未知响应保留原键。 */

@@ -87,6 +87,12 @@ import { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "@rental-os/admi
 
 `coreManagementApi`提供登记目录、变更、绑定、当前事实和原收据的十个类型化方法，使用 `@rental-os/core-contracts` 唯一路径/schema和原HTTP信封。请求与迟到响应受当前会话代次和中止信号限制。可单独在自己的管理页使用这些方法，但不得根据本地缓存或清单开放服务端权限。当前面板和Controller已有真实代码，原主路由/Guard/部署链尚未挂接，浏览器与真实数据库验收仍待完成。
 
+## 读取登录成员的Core目录
+
+`useCoreSession()`从 `coreManagementApi.sessionContext(signal)`读取原服务端的本人Core目录，复用认证会话与原查询缓存，identity/tenant/session代次进入查询键。未验证会话或读取失败时不返回旧目录供页面授权；当前精确权限通过 `canAccess(coreId, permissions)`查询。[Hook](useCoreSession.ts) · [合同](../../../../packages/core-contracts/src/session-http.ts)
+
+`data.cores`用于过滤受控注册的业务入口；`data.assignable`仅是当前租户管理者可给成员分配的Core候选，可供上面的成员面板选择。`tenantHasRegisteredGrant`区分联系SaaS管理员开通与联系租户管理员分配。业务配置、范围及真实就绪仍由宿主/所属Core核定，不能只把这个Hook赋给恒真可用性。原主壳/路由未接线时，这些源码不表示无Core后台已经运行。
+
 ## 宿主只装配一次
 
 `CorePageHostProvider`接收[CorePageHost](CorePage.tsx)并包裹对应业务路由。`page`须直接来自`registerCoreAdminPages`返回的`pages`；宿主提供平台品牌、原路由导航、当前授权判定和`lifetimeKey`。key取原会话/租户/Core范围及当前业务对象代次，变化时释放旧页面；权限变更仍需原宿主订阅当前事实。不要用自己填写的恒真函数或清单权限数组实现`canAccess`。

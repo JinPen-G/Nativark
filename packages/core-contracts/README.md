@@ -125,6 +125,14 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 变更结果未知时，保存原operationId并调用对应的原操作只读入口。`recorded`返回原操作结果，之后另读当前事实；`unavailable`只表示暂未取得收据，不证明旧操作未提交，不能自动重发。原结果读取不创建锁行、事实或审计。[后台管理适配](../../apps/admin/src/core/README.md#管理core开通与成员分配)提供相同流程。
 
+## 读取当前成员可用的Core
+
+`GET /api/platform/core-host/session-context`返回当前operator会话的Core目录，合同为 `CORE_SESSION_HTTP` 和 `CoreSessionContextSchema`。只投影本人获分配且租户已开通的已登记Core、原授权/成员修订及当前角色持有的本Core精确权限；租户管理者另得到可分配候选，候选不授予本人业务使用权。[会话目录合同](src/session-http.ts)
+
+`cores=[]`是合法结果。`tenantHasRegisteredGrant=false`表示当前租户没有已登记Core的开通授权，可提示联系SaaS管理员；为true且本人集合为空时可提示联系租户管理员分配。部署、绑定、业务就绪与对象范围由各自真实接点继续核验，目录不声称所有业务已经可执行。`canUseCorePage(context, coreId, permissions)`只检查当前目录中的成员使用权和精确页面权限，宿主还须核定其余准入条件。
+
+接口资料由 `createCoreSessionOpenApi()` 同源生成。实际原会话读取与独立Controller已提供，原Guard须将这一条GET明确登记为已登录operator的自助入口，主AppModule和OpenAPI总组合仍沿宿主公共窗口办理。SaaS全部登记目录与租户成员自助目录分别使用各自入口。
+
 ## 声明页面与操作
 
 [页面合同](src/admin.ts)已提供 `CorePageDescriptorSchema`、`CoreAdminContribution`、`CorePageAction` 和 `registerCoreAdminPages`。路由描述中的ID/局部路径、名称、可选父级与菜单、权限是同一份数据；组件由Core代码直接绑定。统一注册后路径位于 `/cores/<id>/...`，重复页面、同形路径、缺上级/循环或清单未声明的权限会拒绝，失败不返回部分注册表。

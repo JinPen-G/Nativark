@@ -31,3 +31,9 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 目录读取在原SaaS会话与角色锁下完成，返回前复核当前权限。租户授权和成员分配分别通过其原服务验证。Controller将已知schema/权限/冲突/不可用映射到对应状态码，未知错误沿原异常链抛出。原主Guard需要消费同源 `coreManagementHttpPolicy`，原AppModule明确登记本模块，接口组合消费 [同源OpenAPI](../../../../../packages/core-contracts/src/management-openapi.ts)，这些公共入口由原窗口核定。
 
 租户授权与成员分配各有原operationId只读入口，直接消费原管理服务的收据读取方法。读取复用同一原主体、人员/角色锁和返回前复核，MySQL不新建锁行、不写事实或审计。结果未知不能用当前状态代替原操作证据；停用后仍可在当前管理权下核对本人原收据。后台实际消费位于[CoreAccessPanel](../../../../admin/src/core/CoreAccessPanel.tsx)，主路由挂载仍沿公共窗口办理。
+
+## 当前成员的Core目录
+
+[原会话读取](original-core-session.ts)从原主体/人员/角色锁取得当前登录成员，查询本租户开通授权和本人Core分配，只返回已登记且获权的Core，以及当前角色的本Core精确权限码。原租户管理者另得到获开通Core的分配候选；SaaS管理目录继续使用自己的入口。读取结束后再次复核原身份和管理/业务权限；没有Core的组合不查询Core授权表，仍返回合法空目录。
+
+[CoreSessionHttpModule](core-session.controller.ts)显式登记 `CORE_SESSION_HTTP` 的一条GET，输入不接收tenantId/userId，文档由 `createCoreSessionOpenApi()`生成。原Guard需明确加入已登录operator自助政策，主组合提供真实reader并登记模块；尚未修改这些公共入口。目录只说明注册/授权/成员/角色投影，当前部署、绑定、业务就绪和对象范围仍由自身服务核验。[前端消费者](../../../../admin/src/core/useCoreSession.ts)
