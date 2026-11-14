@@ -2,7 +2,7 @@ import { CalendarOutlined, NotificationOutlined, SafetyCertificateOutlined, Team
 import type { SaveTenantRentalBusinessSettingsRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "@/components/ui";
-import { Tabs } from "@/components/ui";
+import { Button, Tabs } from "@/components/ui";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -16,6 +16,9 @@ import { NotificationsTab } from "./governance/NotificationsTab";
 import { RulesTab } from "./governance/RulesTab";
 import { useLocation } from "react-router-dom";
 import { navigationTarget } from "@/features/copilot/destinations";
+import { CategoryAssistFlow } from "@/features/ai-native/CategoryAssistFlow";
+import { useAuthStore } from "@/features/auth/authStore";
+import { currentSessionEpoch } from "@/app/queryClient";
 import {
   useGovernancePermissions,
   type GovernancePermissions,
@@ -96,6 +99,11 @@ export function RentalGovernancePage() {
   const { message } = App.useApp();
   const { t } = useLocale();
   const scope = useListQueryIdentity();
+  const auth = useAuthStore();
+  const assistIdentity = JSON.stringify([scope, currentSessionEpoch()]);
+  const [assistScope, setAssistScope] = useState<string>();
+  const assistAllowed = auth.sessionVerified && !!auth.token && !!auth.tenant?.tenantId && !!auth.user
+    && !auth.user.isSaasAdmin && !!auth.currentWorkspaceId && auth.hasPermission("rental-os:category:adopt");
   const queryClient = useQueryClient();
   const permissions = useGovernancePermissions();
   const permittedTabs = useMemo(() => TABS.filter((definition) => definition.permitted(permissions)), [permissions]);
@@ -178,6 +186,8 @@ export function RentalGovernancePage() {
     <>
       <PageHeader
         title={t("品类与业务规则")}
+        extra={tab === "category" && assistAllowed ? <Button aria-expanded={assistScope === assistIdentity}
+          onClick={() => setAssistScope(assistIdentity)}>{t("品类版本助手")}</Button> : undefined}
       />
       <div data-copilot-anchor="governance-view"><Tabs
         key={scope}
@@ -193,13 +203,23 @@ export function RentalGovernancePage() {
           error={settings.error || profile.error || categories.error}
           onRetry={() => Promise.all([settings.refetch({ throwOnError: true }), profile.refetch({ throwOnError: true }), categories.refetch({ throwOnError: true })])}
         >
-        {settings.data && category && render({
+        {settings.data && category && <>{render({
             permissions,
             category,
             settings: settings.data,
             saveTab,
             saving: saveSettings.isPending,
           })}
+          {key === "category" && tab === "category" && assistAllowed && assistScope === assistIdentity
+            && <CategoryAssistFlow key={assistIdentity} mode="workspace" code={category.code} identity={assistIdentity}
+              current={() => tab === "category" && assistScope === assistIdentity}
+              onChanged={async () => {
+                await queryClient.invalidateQueries({ queryKey: ["category-adoption"] });
+                await queryClient.invalidateQueries({ queryKey: ["rental-core", "profile"] });
+                await queryClient.invalidateQueries({ queryKey: ["rental-core", "business-settings"] });
+                await queryClient.invalidateQueries({ queryKey: ["rental-core", "categories"] });
+              }} />}
+        </>}
         </QueryState> }))}
       /></div>
     </>

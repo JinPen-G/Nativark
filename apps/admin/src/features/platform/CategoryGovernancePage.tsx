@@ -16,11 +16,19 @@ import { CategoryDraftEditor } from "./CategoryDraftEditor";
 import { CategoryPolicyDialog } from "./CategoryPolicyDialog";
 import { CategoryTemplateIcon } from "./CategoryTemplateIcon";
 import { CategoryCreationDialog } from "./CategoryCreationDialog";
+import { CategoryAssistFlow } from "@/features/ai-native/CategoryAssistFlow";
+import { currentSessionEpoch } from "@/app/queryClient";
+import { useListQueryIdentity } from "@/components/ui/LiveRefresh";
 
 export function CategoryGovernancePage() {
   const { t, locale } = useLocale();
   const { message } = App.useApp();
   const hasPermission = useAuthStore((state) => state.hasPermission);
+  const auth = useAuthStore();
+  const assistIdentity = JSON.stringify([useListQueryIdentity(), currentSessionEpoch()]);
+  const [assistScope, setAssistScope] = useState<string>();
+  const assistAllowed = auth.sessionVerified && !!auth.token && !!auth.tenant?.tenantId
+    && !!auth.user?.isSaasAdmin && hasPermission(P.view);
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<string>();
   const [viewer, setViewer] = useState<string>();
@@ -45,7 +53,17 @@ export function CategoryGovernancePage() {
   const scope = (value: string) => t(({ all: "全部租户", pilot: "试点租户", unopened: "尚未开放", stopped: "停止新开通", none: "不允许采用" } as Record<string, string>)[value] ?? value);
   return <>
     <PageHeader title="租赁品类" description={t("发布品类版本不会自动升级经营空间。")}
-      extra={hasPermission(P.edit) && catalog.data?.dynamicCreationEnabled ? <Button type="primary" onClick={() => setCreator({})}>{t("新建租赁品类")}</Button> : undefined}/>
+      extra={<Space>
+        {assistAllowed && <Button aria-expanded={assistScope === assistIdentity}
+          onClick={() => setAssistScope(assistIdentity)}>{t("品类助手")}</Button>}
+        {hasPermission(P.edit) && catalog.data?.dynamicCreationEnabled && <Button type="primary" onClick={() => setCreator({})}>{t("新建租赁品类")}</Button>}
+      </Space>}/>
+
+    {assistAllowed && assistScope === assistIdentity && <CategoryAssistFlow key={assistIdentity} mode="platform"
+      identity={assistIdentity} current={() => assistScope === assistIdentity} onChanged={async () => {
+        await queryClient.invalidateQueries({ queryKey: ["platform-category-governance"] });
+        await queryClient.invalidateQueries({ queryKey: ["platform-category-governance-audits"] });
+      }} />}
 
     <QueryState loading={list.isLoading} error={list.error}>
       <ListSection controls={<ListFilters filter={categoryFilter} placeholder="品类名称或编码" />}>

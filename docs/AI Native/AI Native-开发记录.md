@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain23-category-human-model-consumers-20261114"></a>
+## AIN-23 原平台与空间页面、模型候选和人工治理消费者（2026-11-14）
+
+[平台提案后端](#ain23-platform-proposal-task-gateway-20261114)固定 `41493765c386095cc900228ba09272a3416dd5a2` 已普通推送，GitHub 回读一致。本片接 dev1 冻结的四份后台源码与 Root 两处原页面，不夹 AIN-25 观测或旧 goal／员工样式。API blob `9d3c337647024dc60a1bf0d7c64e2d076f39fd69`、原治理API `38630f83035f5c7b59e0e5232608fdb147ee956a`、session `0d766dcf5886537917e01cbb99f08e112d15f766`、flow `bb675a3e336986b2eed06d879f502d2e0b0a49d3` 经 Root 实读与作者最后 SHA-256 一致，作者已交回写权。Root 的两页保留前置原手工草稿／版本政策和经营设置，不替换 Core 规则。
+
+[CategoryGovernancePage](../../apps/admin/src/features/platform/CategoryGovernancePage.tsx)提供明确“品类助手”，只有当前已核 SaaS 会话与原治理查看权可进入；[RentalGovernancePage](../../apps/admin/src/features/settings/RentalGovernancePage.tsx)在原品类页签提供“品类版本助手”，要求原当前空间和 category:adopt。两者用户点击后才挂接 [CategoryAssistFlow](../../apps/admin/src/features/ai-native/CategoryAssistFlow.tsx)，不自动生成、不占经营设置表单。身份／会话／空间变化要求重新进入，离开品类页签卸载对应消费者；原组件隐藏／卸载撤回正文及候选，原未知操作最小定位保持可恢复。操作后仅失效对应原查询，保存、发布、采用资格与空间切换各有独立原结果。
+
+[API](../../apps/admin/src/api/aiCategoryDraft.ts)使用 shared 原闭合合同与原 http；写入关闭认证刷新后的自动重派。平台／空间身份与原来源分别绑定，原材料、版本、修订、字段和操作响应验证后才送页面。[session](../../apps/admin/src/features/ai-native/category-assist-session.ts)只在写前保存最小原键／引用／输入指纹；同主体的 Storage 键按固定数组生成，对象属性顺序不能产生另一个恢复槽。丢应答只读取原 creation／audit／batch／adoption／policy-operation 收据，查不到不换键；缺审计权与原证据保持待核，当前可变政策不能清未知。原模型准入收据与当前政策分开显示，读到旧修订原收据后须重新读取当前政策。
+
+平台流从原目录选择品类／版本或正式模板，展示真实字段、库存／计价／履约及条件能力，复用 Core 草稿页签和校验／影响预览。模型输入准备和实际生成分别确认；原候选只填本地字段，随后人类独立保存／发布。发布不会升级原空间，采用资格与新开通政策继续独立确认。空间流读取获准目标与真实差异／历史影响，按原20条页准备字段／兼容关系／能力并保存有界批次；最终采用再读同版本／修订／完整兼容与商业准入，原 Core 决定生效，历史订单不改写。
+
+| 必要模拟与类型 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| dev1实际component／API／session→原Auth／Guard／Controller／Core人工治理连续链 | `9e919b9171b72c047d89c0f535437ae2a93db15eefa0107c8d25a9504bde29b3`，退出0；copy／patch／publish／采用资格／开通政策／新类分别1写，原source不变；空间原batch／adopt／audit／receipt各1，revision1→2，历史不变，49次明确HTTP运输，全部丢ACK仅原读，模型0。该组flow为随后增加政策原收据展示前像aa0f7a9d，实际人工办理分支未改；最终flow已由后两组类型／模型消费覆盖。Root核了原驱动结果和固定字节，未把作者行为称为Root重跑。 |
+| dev1实际候选／政策原收据／原平台Task与Gateway→本地字段→人类Core保存 | `084605dfbeaf73482168485817318cd2543d1a481b55ea0adfb10e14acae40ec`，退出0；policy CAS1、revision2；缺原收据保留journal，匹配原收据才解除；1 Task／Run／Step／模型调用／PLATFORM预留settled，生成请求1；候选采用先无Core写，人类明确保存1，revision1，旧候选stale，丢ACK不重派。使用最终四叶，模拟协议与能力证据明确标mock。 |
+| dev1最终四叶类型 | `5a420e75cb9c43fc13b95da136fa575362a18e9ace8d98e01c57b96da1781138`，TypeScript5.9.3、五根含原vite声明／1514源、零诊断、退出0。 |
+| Root原两页有限React宿主 | `341412030d2ddf4f4313366fb55d672737717fcaf571a0ead598a5200f3233ec`，退出0；明确点击前不挂接，SaaS／workspace权限隔离，切页／切身份撤回，业务和模型写入0。实际原页源码加子组件端口替身，不称浏览器视觉检查。 |
+| Root冻结六源及原vite声明完整类型 | `87f88961357ac8730c2b6d54ae76f01b262a44fba114a337890617331f18b95d`，TypeScript5.9.3、七根／1569源、零诊断、退出0；四叶和两原页固定字节。 |
+| Root标准公开模板模型候选→原Core creation-preview | `241454dfdc2011ba89758346c25d4d13d1dd54f8759cca355bdeca480383bb85`，退出0；从正式kit模板／实现能力构造event_kits方案，标准provider／Guard／Controller→原单模型Task／Gateway／平台calls账→真正Core预览有效，1模型／1账、品类写入0；停用可原读，动态能力关闭则候选stale、撤权拒绝。不是新增一套品类或计价算法。 |
+| Root最后影响报告与发布确认 | `7a6d15bf73c8d4fcd61012d9b32a479033d012fe793a13d30553c61b4700adc8`，退出0；实际flow展示原修订／影响空间数2，确认消费同份报告。原Core新报告变3时，第一次发布0写、无原key或journal；显示新报告后明确重新确认才原发布1写。 |
+
+失败与修复保留：dev1人工宿主初控件替身丢动作回调、原Storage键依赖对象属性顺序、采用fixture只接FOR UPDATE而漏Core共享读锁，按实际原回调／固定数组键／精确共享锁响应修复后通过；不是放宽生产锁或权限。Root首次后台类型驱动误用不存在的tsconfig.app，继而未包含原vite CSS声明，修为本树tsconfig＋原声明后零诊断；没有为补绿新增类型壳。作者检测器初误传浏览器target参数，随后源码扫描通过；Root按源码路径检测四处实际UI，返回空发现数组，原组件清单263文件badHashes0；没有真实浏览器实看。
+
+独立全文复核最后发现助手发布路径只展示differences／valid，漏原Core report的affectedSpaces。Root在flow展示本次修订及数量，确认传同份report；session在首次await前克隆已确认报告，发布前重新读原Core并比较完整报告指纹／修订／有效性。变化先更新可见report并拒绝，原key与write预留在一致性检查之后，不计算另一套影响数。上表定向模拟与最后七根类型通过；内部独立助手复核两源blob `453864741a04f97fb8949388cb9a1ae3fbe91dae`／`2327f3ca1befad0b44a11bee9d8924ccdfd6416e`，确认唯一P2闭合，未发现新的安全或兼容缺口。该复核只读源码和固定证据，没有把作者模拟称独立行为重跑。
+
+原AIN-23五条及前置07／10／16复核齐备：真实Core策略／能力／模板目录及内置／正式新类候选已接；原字段校验、差异／影响报告、必填／唯一及库存计价收窄的兼容阻塞／准备已消费；发布、采用资格、新开通政策和空间采用各沿原权限、明确确认、CAS及独立结果；未支持组合保持CAT-GOV依赖且不重建内核；原source／历史订单不变，旧候选失效、并发／撤权／原key丢应答恢复与必要类型／独立复核齐备。G1合同与事实、G2持久实现、G3标准公开装配和原页消费、G4全文模拟／类型／最后缺陷复验与独立技术核定均满足，本阶段AIN-23登记本轮研发100%。原28项门槛2400→2425／28，85.7%→86.6%，正式研发收口21→22／28（78.6%）；ENTRY仍70.8%，23是21／22节点之后首个新100%，下一第二项仍由PM按固定阶段串行main，助手不等待。
+
+平台只按支持的calls限额计量，真实供应商费用和Core生产启用另由负责人执行；不放宽治理关闭门禁。全部本片验证audit0、Node进程退出，Root和dev1单任务临时目录均未创建，无测试脚本、环境镜像、依赖、client／dist或重复证据附件。Root报告宿主首次漏CSS替身、遗漏publish权限而未渲染确认控件，修正有限宿主后验证真实报告分支，生产权限未放宽。真实浏览器、数据库、供应商与经营／生产放行不属于本轮结果。
+
 <a id="ain23-platform-proposal-task-gateway-20261114"></a>
 ## AIN-23 平台品类提案原 Task、唯一 Gateway 与政策收据（2026-11-14）
 
@@ -2099,7 +2128,7 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 | AIN-20 员工宿主 | 原pickup/return、manual gate与原检查提交；独立原账、失效草稿元数据及回答收据、取消请求/收敛/原修订观察接标准根，原G1/G2/G3合计75% | 原fork4同页重挂/切原收据/清除后旧引用不可复活增量已核接，pickup/return既有相关1/1及限定根strict/noEmit零诊断；标准传输/冷启动、相机录音上传、微信设备/弱网、完整履约与其他失效/历史载荷窗口仍缺，不称全部履约验收 |
 | AIN-21 客户安全场景 | 原客户身份／政策／Booking／任务／单账／独立历史原读，公开续接及Goal材料／人类回答来源／Core参数准备；`ff7bb06a`补本人保存地址双标准provider，[原五条核定](<#ain21-simulated-whole-closeout-20261114>)已完成 | 本轮模拟研发已收口，复用原匿名／本人／企业授权、Guard、费用与取消收据；历史读取不授重派，模型文本不批准预订。真实环境与生产开放另由负责人执行 |
 | AIN-22 客户两端入口 | 原公开续接／报价／本人订单与两端Goal共用场景合同，完整商品／单位／用量／身份投影到原Booking页面；[两端目标及收据恢复](<#ain22-goal-booking-original-consumers-20261114>)修旧cart自动报价、迟到写回、受理丢应答及成功Goal过期后明确新目标，五条与依赖已核齐 | 本轮模拟研发已收口；ENTRY跨端transfer等增量另核，支付成功仍只认原回调，真实浏览器／微信／数据库／供应商和生产开放由负责人执行 |
-| AIN-23 品类助手 | 原动态草稿合同／Core条件能力、平台五操作Guard及审计已固定；[平台提案后端](#ain23-platform-proposal-task-gateway-20261114)接原Task／Run／单模型runner／唯一Gateway、PLATFORM calls预算、公开合同及当前publication，正常政策响应与丢ACK原CAS收据已核 | 保持75%；平台／空间原页入口、人工草稿／发布／资格／采用完整消费者仍待核接，平台tokens／money费用配置未支持；原Core治理内核／生产开放不由本项重建或授权，模拟不能称真实能力及费用验证 |
+| AIN-23 品类助手 | 原动态草稿合同／Core条件能力、平台Guard／审计及原Task／Gateway／PLATFORM calls预算已固定；[原两页消费者全文](#ain23-category-human-model-consumers-20261114)完成候选本地采用、人工保存／发布／资格／开通／空间采用及原key恢复，最后原影响报告确认已修复复验 | 原五条、07／10／16依赖及G1～G4已按模拟口径核闭，登记本轮研发100%；平台仅支持calls限额，真实供应商费用和原Core生产开放仍单列，由负责人实测／决定，不借本项重建内核或开放经营 |
 | AIN-24 安全/隐私 | 既有威胁/负例/审计、内容保留及删除收据/恢复屏障；本轮已从实际标准Controller/provider和会话/知识消费者补核G3，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全开放端/工具攻击、动态代码隔离、外部副本及真实保留删除传播与整项验收仍缺；本轮没有独立二次审查 |
 | AIN-25 性能/SLO | `40b29e8a`原Controller/标准provider/请求组合→TaskPerformanceReader已接；`0392aa01`消费原Gateway计时审计，时长/资源/单账有界观察；2026-10-28纠正漏记G3，75% | 首卡/工具完整采样、成功/接管率、获批SLO/容量/成本参数及真实环境、限流/背压/公平性/告警和降级演练仍为G4；不把观测装配当指标已达标；本次[原计数成本消费者核验](<#ain-three-tree-consolidation-20261109>)已覆盖原page/计数receipt/summary关闭重验；旧总数断言已在[合并后复核](<#ain-post-consolidation-review-20261109>)按原Step/Run计量分开校正；平台计数和BYOK直接用量按正式两轨验证，不称真实SLO通过。 |
 | AIN-26 组合验收 | 各片离线证据保留，未当作本项整体通过 | 冻结构建/迁移/政策/素材，另授权真库、四品类及多端实际组合验收 |
