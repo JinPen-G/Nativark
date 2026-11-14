@@ -136,7 +136,9 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   const goal = clientGoalCommandSchema.safeParse(before.row.command);
   if (goal.success) {
     validateClientGoalMaterial(before.row);
-    prompt = z.string().min(1).max(8000).parse(input.systemPrompt + `\n${CLIENT_GOAL_MODEL_INSTRUCTIONS}`);
+    // Keep the original explicit clarification opt-in alongside goal output.
+    // Replacing the prompt here would hide the only real human-input contract.
+    prompt = z.string().min(1).max(8000).parse(prompt + `\n${CLIENT_GOAL_MODEL_INSTRUCTIONS}`);
   }
   const text = JSON.stringify({ materialRef: before.row.id, materialHash: before.row.materialHash,
     observedAt: before.row.createdAt.toISOString(), material: before.row.material });

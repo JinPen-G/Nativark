@@ -60,7 +60,7 @@ import { BudgetError } from '../budget/budget.ports';
 import type { PrismaClient } from '@prisma/client';
 import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
   type ClientGoalSources } from './client-goal-material';
-import { projectClientGoal, prepareClientGoalQuoteRequest } from './client-goal-projection';
+import { projectClientGoal, prepareClientGoalQuoteRequest, type ClientGoalHumanClarification } from './client-goal-projection';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -701,7 +701,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const configuredResultSource = dependencies.taskResults
     ?? (dependencies.taskInputs && { db: dependencies.taskInputs.db })
     ?? (dependencies.taskModel && { db: dependencies.taskModel.db });
-  const readOriginalTaskModelResult = async (request: AiClientApplicationRequest, value: unknown, source = configuredResultSource) => {
+  const readOriginalTaskModelObservation = async (request: AiClientApplicationRequest, value: unknown,
+    source = configuredResultSource, includeHumanClarifications = false) => {
     if (!server.entry || !taskDependencies || !source || !Object.is(source.db, dependencies.db))
       throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_result_dependencies_missing');
     const command = parseEntry(clientTaskCommandSchema, structuredClone(value)), db = source.db;
@@ -725,15 +726,28 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
         const run = runs[0];
         if (!run || runs[1]?.sequence === run.sequence) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id, runId: run.id,
-          originRunId: original.task!.runId, registrationRef: `client-model:${original.inputRef}` });
+        const origin = await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id, runId: run.id,
+          originRunId: original.task!.runId, registrationRef: `client-model:${original.inputRef}`, includeHistory: includeHumanClarifications });
+        const humanClarifications: ClientGoalHumanClarification[] = [];
+        if (includeHumanClarifications) {
+          if (origin.history.length > 2) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          for (const answer of origin.history) {
+            const field = answer.contract.fields[0], text = answer.answers[0];
+            if (answer.contract.version !== '1' || !['client_context_rental_requirements', 'client_context_rental_time',
+              'client_context_rental_preferences'].includes(answer.contract.code) || answer.contract.fields.length !== 1
+              || field.fieldId !== 'clarification_text' || field.kind !== 'text' || !field.required || field.maxLength !== 2048
+              || answer.answers.length !== 1 || text.fieldId !== 'clarification_text' || typeof text.value !== 'string'
+              || !text.value.trim() || text.value.length > field.maxLength) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            humanClarifications.push({ receiptId: answer.receiptId, answerHash: requestFingerprint(answer.answers), text: text.value });
+          }
+        }
         const steps = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id },
           orderBy: { sequence: 'desc' }, take: 2 });
         if (steps.length > 1 || steps.some(step => step.toolCode !== TASK_TEXT_MODEL_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION))
           throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (steps[0]?.resultRef && run.status === 'QUEUED') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         return { scopeId: task.scopeId, taskId: task.id, taskRevision: task.revision, taskStatus: task.status,
-          runId: run.id, runRevision: run.revision, step: steps[0] ?? null };
+          runId: run.id, runRevision: run.revision, step: steps[0] ?? null, humanClarifications };
       }, { maxWait: 2500, timeout: 5000 });
       const result = selected.step?.resultRef ? await new AiTaskResultRepository(db, authorized.tasks, clock)
         .read({ taskId: selected.taskId, resultId: selected.step.resultRef }) : null;
@@ -753,6 +767,16 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (latest.run?.id !== selected.runId || latest.run.scopeId !== selected.scopeId || latest.run.taskId !== selected.taskId
         || latest.run.revision !== selected.runRevision || latest.step?.revision !== selected.step?.revision
         || latest.step?.resultRef !== selected.step?.resultRef) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      if (includeHumanClarifications) {
+        // Close the same original answer lineage after the buffered result read.
+        // A changed historical answer cannot authorize today's new selection.
+        const closing = await db.$transaction(tx => readTaskModelRunOrigin(tx, access, {
+          scopeId: selected.scopeId, taskId: selected.taskId, runId: selected.runId, originRunId: original.task!.runId,
+          registrationRef: `client-model:${original.inputRef}`, includeHistory: true }), { maxWait: 2500, timeout: 5000 });
+        const answers = closing.history.map(answer => ({ receiptId: answer.receiptId, answerHash: requestFingerprint(answer.answers),
+          text: answer.answers[0]?.value }));
+        if (jsonHash(answers) !== jsonHash(selected.humanClarifications)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
       const final = await authorized.execution.readGrant(before.taskId, 'read');
       if (before.proof !== final.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       await bound.assertCurrent();
@@ -766,9 +790,13 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         retryable: false, nextAction: 'read_original_task' });
       if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > maxBytes)
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      return freezeOriginalInput(response.data);
+      return freezeOriginalInput({ model: response.data, humanClarifications: selected.humanClarifications });
     });
   };
+  // The public result retains its exact original envelope. Proved human answers
+  // stay server-private and are consumed only by the goal selection boundary.
+  const readOriginalTaskModelResult = async (request: AiClientApplicationRequest, value: unknown, source = configuredResultSource) =>
+    (await readOriginalTaskModelObservation(request, value, source)).model;
   const withGoalSource = async <T>(request: AiClientApplicationRequest, value: unknown,
     consume: (bound: Bound, row: AiClientSceneMaterial, command: z.infer<typeof aiClientGoalCandidatesRequestSchema>) => Promise<T>, signal?: AbortSignal) => {
     requireEntry();
@@ -868,11 +896,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     async readGoalCandidates(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
       return withGoalSource(request, value, async (bound, row, command) => {
         const original = { materialRef: command.materialRef, creationKey: command.creationKey };
-        const model = await readOriginalTaskModelResult(request, original), sources = await goalSources(bound);
-        const projected = projectClientGoal(row, sources, model, { materialRef: row.id, materialHash: row.materialHash,
-          taskId: model.taskId }, clock());
-        const latest = await readOriginalTaskModelResult(request, original);
-        if (jsonHash(model) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const observed = await readOriginalTaskModelObservation(request, original, configuredResultSource, true), sources = await goalSources(bound);
+        const projected = projectClientGoal(row, sources, observed.model, { materialRef: row.id, materialHash: row.materialHash,
+          taskId: observed.model.taskId }, clock(), observed.humanClarifications);
+        const latest = await readOriginalTaskModelObservation(request, original, configuredResultSource, true);
+        if (jsonHash(observed) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         return freezeOriginalInput(aiClientGoalProjectionSchema.parse(projected));
       }, signal);
     },
@@ -883,12 +911,12 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return await withGoalSource(request, { materialRef: command.materialRef, creationKey: command.creationKey,
           expectedMaterialHash: command.expectedMaterialHash }, async (bound, row) => {
           const original = { materialRef: command.materialRef, creationKey: command.creationKey };
-          const model = await readOriginalTaskModelResult(request, original), sources = await goalSources(bound);
-          const prepared = prepareClientGoalQuoteRequest(row, sources, model, { materialRef: row.id, materialHash: row.materialHash,
-            taskId: model.taskId }, { operationKey: command.operationKey, expectedProjectionHash: command.expectedProjectionHash,
-            decision: command.decision, input: command.input }, clock());
-          const latest = await readOriginalTaskModelResult(request, original);
-          if (jsonHash(model) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          const observed = await readOriginalTaskModelObservation(request, original, configuredResultSource, true), sources = await goalSources(bound);
+          const prepared = prepareClientGoalQuoteRequest(row, sources, observed.model, { materialRef: row.id, materialHash: row.materialHash,
+            taskId: observed.model.taskId }, { operationKey: command.operationKey, expectedProjectionHash: command.expectedProjectionHash,
+            decision: command.decision, input: command.input }, clock(), observed.humanClarifications);
+          const latest = await readOriginalTaskModelObservation(request, original, configuredResultSource, true);
+          if (jsonHash(observed) !== jsonHash(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
           attempted = true;
           return withQuotePreparation(request, preparation => preparation.prepare(prepared), signal);
         }, signal);

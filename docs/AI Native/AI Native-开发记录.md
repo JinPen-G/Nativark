@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain21-goal-original-clarification-lineage-20261114"></a>
+## AIN-21 原目标澄清指令与已消费回答来源（2026-11-14）
+
+目标11源固定 `378498aefc08a5735902411bdeea39700c0b9064`，取消善后15源固定 `11a60a88ad7f1fc88935cf83a953fdb9f092a334`，均已普通推送并回读GitHub一致。接网站消费者时Root发现两处后端缺口：Goal宿主重设prompt会覆盖原服务端澄清指令；候选名字／时间词校验只认首次goalText，用户后续真实补充无法采用。两者是实现缺口，不能把模型一次输出或参数准备通过当完整多轮场景。
+
+三个原接点的最小修复：[模型宿主](../../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition.ts)保留原 `CLIENT_CONTEXT_QUESTION_INSTRUCTION`，追加Goal指令；只有原服务端明确澄清opt-in才可发原 `client-context-question-1`，不新增问题DSL。[Application](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)把原结果读取抽成私有observation，共用原Reader及当前Auth／Guard；Goal读取同Run lineage时从 `readTaskModelRunOrigin(..., includeHistory:true)` 取得已消费答案，只接受原三code／单个clarification_text／2048字符／最多两次，前后重核原完整问题、原回答哈希、计划、Artifact及人类消费收据。公共model响应仍原 `.model`，私有答案不外发，也不从HTTP／模型内容／前端缓存补签。
+
+[原projection](../../apps/api/src/modules/ai-native/scenes/client-goal-projection.ts)允许名字／时间词来自首次目标或上述已证明人类答案；有答案时将原receiptId／内容hash绑定projectionHash，无答案时算法保持原字节兼容。unknown／失败／未成answer仍不能进入选择，补充说明不是批准；明确selection、当前本人企业关系及Core规范化继续独立校验，原材料不重写、Task累计资源不重置。
+
+必要 `node --no-compilation-cache -` 模拟：`ba643e929b3e091ef1b7c8f5f74f2fc47dea920ace27023d904a137e6d9b0a9e`／退出0，实际Core／CUSTOMER ModelHost／Runner／Gateway→原问题→人类新增商品／绝对时间→同Task后继→公共Controller候选→原Core参数准备。1Task／2Run／2模型／2Invocation、1累计账，QUOTE／ORDER新增0；没有已消费答案的直接projection拒绝同候选，篡改原答案拒绝，读取无写，错projection／非公开商品／撤权拒绝。前置同链 `76464568e3997ddc815717e219e5ed2b6c8c29cbc70fcabefb40ddcade83e0d2`／退出0。无回答兼容 `b77f597ec1b205f3837cad3e29c63e644211a1a5662217beb4f4e017e76fb93c`／退出0，实际原Core链上当前projectionHash与上一固定源码严格相同，不靠新键掩盖原确认失效。
+
+最终TypeScript5.9.3生产7根／1998源零诊断，stdin SHA `f653f5b7c92e7d2a329aaeb29435c09098d550c9ebcf3f33f96bc9aafccedd62`／退出0。独立助手只读复核三个固定blob host `bb9144dc01c68889d96c01eaa3057893812ad523`、application `ad36d6b5545c3df2cdd4b3725692751e773081f9`、projection `2eb3707762894648beaf14068a9e4e88b9c3ab53`，未见该窄范围安全／旧包兼容缺口；其未重跑Root模拟，不冒称独立行为实测。
+
+失败保留：首组合沿Core夹具当前11月clock、原通用store固定10月Artifact时间，问题deadline被正确拒绝（`1f8813be7161278fabfed80b83417b90aa6ad6c2c6178b15135280dcbe9e73c6`／退出1）；只对齐内存fixture原wall，未放宽生产期限。dev1同时运行的旧组合受公共依赖WIP变化，虽业务片有结果仍退出1，不能作为固定版本通过；三源固化后沿新固定依赖复验。本片不夹网站活动三叶，不新建测试脚本，原15／21／22任务仍待各自全文核定，未增加整项100%。单任务临时目录未创建，audit0，自有进程退出，无依赖／构建副本；diff0，docs仍4处既有缺链／退出1，无新增算术或链接错误。真实环境由负责人后续测试。
+
 <a id="ain25-cancellation-all-terminal-public-consumers-20261114"></a>
 ## AIN-25 原取消善后三种终态、公共合同与两端恢复（2026-11-14）
 
