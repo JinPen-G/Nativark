@@ -143,6 +143,8 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 [页面合同](src/admin.ts)已提供 `CorePageDescriptorSchema`、`CoreAdminContribution`、`CorePageAction` 和 `registerCoreAdminPages`。路由描述中的ID/局部路径、名称、可选父级与菜单、权限是同一份数据；组件由Core代码直接绑定。统一注册后路径位于 `/cores/<id>/...`，重复页面、同形路径、缺上级/循环或清单未声明的权限会拒绝，失败不返回部分注册表。
 
+`purpose: "configuration"`仅用于Core自己的配置页面，获权且范围读取成功后可在未绑定/未就绪时进入；默认页面要求真实ready。`coreNavigationEntries`从当前本人Core/页面权限过滤菜单，`coreBreadcrumbEntries`沿同一父级链生成名称与允许的链接，无权父级不带可访问链接。[导航生成](src/navigation.ts) · [React路由适配](../../apps/admin/src/core/README.md#宿主只装配一次)
+
 例如，工单的路由元数据可以写成下面这样；这里只演示已实现schema的描述，不是完整可运行页面。
 
 ```ts

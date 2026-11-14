@@ -55,6 +55,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。
    [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)消费原PageHeading/SaveButton/ConfirmAction，`@rental-os/admin/core`为正式源码包出口；[工单页面和Core请求](平台Core接入-开发记录.md#core-tickets-admin-20261114)已有实际源码消费者。真实注册/授权与主应用路由仍未接，下片消费这些适配，不复制通用壳或改变业务方法。
+   [声明路由/导航消费](平台Core接入-开发记录.md#core-declarative-routes-20261115)新增createCoreRouteElements及同源菜单/面包屑生成，主Router展开原Route元素，主壳消费同源名称/链接。工单默认详情读取框架登记参数；配置页声明purpose=configuration，当前获权但未绑定/缺项时可配置。公共总入口仍未改，实际浏览器/Portal/回车及无Core壳待验。
 5. [本地打包/安装准备](平台Core接入-开发记录.md#core-local-package-install-20261114)、[固定Release获取](平台Core接入-开发记录.md#core-github-release-20261114)及[Topic查询](平台Core接入-开发记录.md#core-github-discovery-20261114)已有共用候选链。[固定仓库根清单/多Core索引](平台Core接入-开发记录.md#core-github-repository-20261115)已提供真实读取器和作者指南，下一步接宿主发现/安装管理界面与实际部署，以非租赁持久化业务验证完整安装。10/11由独立开发者或Agent只凭简明指南和业务要求接手，在干净宿主重现安装→授权→业务；12核收全功能前后对照、源码/API可理解性、底座跟随上游与Core单独升级、配置/定制/数据保留、回退/分发失败及原独立审查门槛。真实GitHub测试发行和实际远端安装仍待核验。
 6. 不同租户/成员、撤权、停用重开、统一期限、有/无工具、迟到响应与unknown验证组合继续保留；部署移除、停用、订阅到期和成员撤权分别判定。
 

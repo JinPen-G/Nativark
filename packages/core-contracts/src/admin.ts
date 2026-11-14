@@ -25,6 +25,8 @@ export const CorePageDescriptorSchema = z.object({
   path: pagePath,
   title: CorePageTextSchema,
   parent: localId.optional(),
+  /** 配置页面在Core已获权但尚未绑定/就绪时仍可进入，自己的动作权限照常核验。 */
+  purpose: z.literal("configuration").optional(),
   /** 空集合仍须租户Core授权与成员分配；这里仅声明附加业务权限。 */
   permissions: z.array(z.object({ resource: localId, action: localId }).strict()),
   menu: z.object({ group: CorePageTextSchema.optional(), order: z.number().int().optional() }).strict().optional()

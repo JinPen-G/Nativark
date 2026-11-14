@@ -14,3 +14,4 @@ export * from "./management-http";
 export * from "./management-openapi";
 export * from "./session-http";
 export * from "./scope-http";
+export * from "./navigation";

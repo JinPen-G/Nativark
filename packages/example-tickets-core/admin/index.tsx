@@ -191,8 +191,14 @@ export function TicketDetailPage({ ticketId }: { ticketId: string }) {
   </CorePage>;
 }
 
-/** detail组件由宿主路由映射注入ticketId，避免Core私用主应用的路由解析实现。 */
-export function createTicketsAdmin(detail: ComponentType): CoreAdminContribution<ComponentType> {
+function RegisteredTicketDetailPage() {
+  const ticketId = useCorePageHost().params?.ticketId;
+  if (!ticketId) throw new Error("工单详情需要当前已登记路由的ticketId");
+  return <TicketDetailPage ticketId={ticketId} />;
+}
+
+/** 默认详情消费框架的登记参数；已有受控宿主可以沿原参数继续提供自己的详情组件。 */
+export function createTicketsAdmin(detail: ComponentType = RegisteredTicketDetailPage): CoreAdminContribution<ComponentType> {
   return { coreId: TICKETS_CORE_ID, implementationVersion: TICKETS_CORE_VERSION, pages: [
     { id: "tickets", path: "/tickets", title: "工单", menu: {}, permissions: permission("read"), component: TicketsPage },
     { id: "create", path: "/tickets/new", title: "新建工单", parent: "tickets", permissions: [...permission("read"), ...permission("create")], component: CreateTicketPage },

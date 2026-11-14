@@ -6,7 +6,7 @@ import { createContext, useContext, useLayoutEffect, useRef, type ReactNode } fr
 import type { FormInstance } from "antd";
 import {
   corePageKey, corePageText, resolveCorePageLocation,
-  type CorePageAction, type CorePageDescriptor, type CoreRegisteredPage
+  type CoreBinding, type CorePageAction, type CorePageDescriptor, type CoreRegisteredPage
 } from "@rental-os/core-contracts";
 import { useLocale } from "@/app/locale";
 import { PageHeading } from "@/components/PageHeading";
@@ -18,6 +18,9 @@ export interface CorePageHost {
   brandName: string;
   /** 原会话/租户/Core范围或路由对象变化时更换，释放旧页动作和表单。不是授权凭据。 */
   lifetimeKey: string;
+  /** 仅由已匹配的登记路由和真实范围读取提供，定位信息不是业务授权。 */
+  params?: Readonly<Record<string, string>>;
+  binding?: CoreBinding;
   /** 原宿主依据当前Core授权/成员分配及业务权限计算；不能使用清单直接作准入。 */
   canAccess: (coreId: string, permissions: CorePageDescriptor["permissions"]) => boolean;
   navigate: (registeredPath: string) => void;

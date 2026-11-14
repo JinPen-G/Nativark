@@ -95,6 +95,20 @@ import { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "@rental-os/admi
 
 ## 宿主只装配一次
 
+受控组合先用 `registerCoreAdminPages`登记各Core贡献，再在原Routes中展开 `createCoreRouteElements(pages, { brandName, containers? })`。原RequireAuth、AppShell和WorkspaceHeader仍是唯一外壳；新Core只加自身贡献到组合，不给每个Core复制菜单或路由实现。[路由适配](CoreRoutes.tsx)
+
+```tsx
+// pages是受控registerCoreAdminPages的成功结果；放在原已认证Routes内部。
+<Routes>
+  {existingRoutes}
+  {createCoreRouteElements(pages, { brandName })}
+</Routes>;
+```
+
+路由先读本人Core/页面权，再读实际Core范围和就绪；未获权或失败读取不挂载业务正文。Core页面通过 `routeParams` 可选prop或 `useCorePageHost().params`取得当前已匹配的登记参数，绑定通过同一host读取。成员授权、角色/范围/绑定或对象变化使业务页代次变化，清理旧动作与表单。配置页面可在元数据声明 `purpose: "configuration"`，在获权且范围读取成功的未绑定/配置缺项状态仍能进入；它自己的动作继续核原权限及服务端校验。
+
+菜单使用 `coreNavigationEntries(pages, context, locale)`，面包屑使用 `coreBreadcrumbEntries(pages, page, params, context, locale)`，均由同一份页面描述生成，当前无权父页只显示名称不带链接。主壳/路由/面包屑总消费尚未接线，需原公共窗口一次性装配；这些源码验证不替代实际浏览器验收。
+
 宿主可用 `useCoreScope(coreId, container?)`读取当前Core自己的绑定及就绪。结果按原租户/成员/Core/容器和会话代次隔离，未验证或失败读取不返回旧准入结果；`ready`仅在当前真实bound/ready结果成立。先以 `useCoreSession`核成员/页面权，再将Core范围结果用于业务页面准入。配置缺项/未绑定分别给出正式配置入口，不能补空成功；最终API仍重新授权。[范围Hook](useCoreScope.ts)
 
 `CorePageHostProvider`接收[CorePageHost](CorePage.tsx)并包裹对应业务路由。`page`须直接来自`registerCoreAdminPages`返回的`pages`；宿主提供平台品牌、原路由导航、当前授权判定和`lifetimeKey`。key取原会话/租户/Core范围及当前业务对象代次，变化时释放旧页面；权限变更仍需原宿主订阅当前事实。不要用自己填写的恒真函数或清单权限数组实现`canAccess`。

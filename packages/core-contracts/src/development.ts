@@ -107,6 +107,7 @@ export function describeCoreDevelopmentCapabilities(input: {
       documentation,
       entry: { kind: "page", path: `/cores/${manifest.id}${page.path === "/" ? "" : page.path}` },
       details: { permissions: page.permissions.map(permission => corePermissionCode(manifest.id, permission)),
+        ...(page.purpose ? { purpose: page.purpose } : {}),
         ...(page.parent ? { parent: page.parent } : {}), ...(page.menu ? { menu: page.menu } : {}) }
     });
   }
