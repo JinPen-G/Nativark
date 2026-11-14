@@ -145,6 +145,22 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
 
+<a id="core-update-preflight-20261114"></a>
+
+## 底座与单 Core 独立升级预检（2026-11-14）
+
+归属基线及公共候选已固定于 `b8ffed04f3baec2d7592631765ca3d5e037fa97d`，普通推送及真实远端回读一致。本片继续独占合同包，落实PCH-02/03的独立版本锁定和候选预检，不接管当前Auth/Guard/AppModule等公共窗口。
+
+[升级合同](../../../packages/core-contracts/src/update.ts)提供底座发行、Core包固定资料、部署锁、单对象更新请求及实际数据观察schema。提交/摘要/来源/data定义复用[唯一清单](../../../packages/core-contracts/src/manifest.ts)，迁移schema从原清单抽出复用，保持原字段与错误定位。锁记录不接受用户配置/Key/授权，不设隐式更新全部模块；同版本来源/摘要/元数据变化、来源替换、降版和重复Core明确拒绝。
+
+`planCoreUpdate`复制当前锁，只替换所选底座或一个Core；检查全组合所需合同/运行/能力、实际数据版本和已应用迁移摘要。已发布迁移必须是新链不变的前缀。新迁移只在实际状态等于当前完整基线、数据版本前进时列为migration_required；其他Core待迁移、历史矛盾/缺失或缺观察时拒绝。已应用新链且数据目标一致可继续准备程序候选；不重做迁移。owner显式区分platform与core:id，Core恰好名为platform也不混用。
+
+[只读命令](../../../packages/core-contracts/src/plan-update.ts)接三份JSON并输出人读/机器读结果，退出0/1/2区分预检通过、业务兼容拒绝与用法/输入读取错误。没有下载、解压、加载Core、读取业务环境、写锁/配置、应用迁移或切换运行；`candidate`与`migration_required`均不表示升级已执行。真实数据观察生产者、安装准备、用户文件冲突、历史执行者及迁移/回退仍待03/06/12接线。
+
+实际验证：首次原合同入口类型检查发现`checkCoreCombination`返回对象误作迭代器（TS2488），before hook失败、业务8组未执行；改为迭代issues后复验8组通过/退出0，最终一次包含全部新源码类型。stdin短命令核对底座/单Core分别更新、其他模块与原输入不变、版本/来源/重复发行/缺数据拒绝、前进迁移、已应用读回、错误摘要/版本及platform同名隔离（退出0）；CLI用真实schema/计划器与内存只读文件facade核对三输入、纯JSON、0/1/2退出（退出0），这不是外部文件安装或真实迁移证明。未新增/扩写测试脚本，无临时独立运行器。
+
+[接入说明](../../../packages/core-contracts/README.md)同片给出可执行预检命令、输入唯一来源、结果/错误处理及下一执行边界。原任务仍需真实生产者、独立宿主、授权/生命周期、完整消费者及独立升级结果，不因纯预检跨档；持续目标继续推进。
+
 <a id="core-ownership-baseline-20261114"></a>
 
 ## 原组合的数据归属与下一公共片（2026-11-14）

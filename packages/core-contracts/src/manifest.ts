@@ -23,7 +23,31 @@ const repositoryUrl = z.string().url().max(500).refine(value => {
   return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash;
 }, "来源使用不含凭据、查询和片段的 HTTPS 仓库地址");
 const localId = z.string().min(1).max(80).regex(/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$(?![\s\S])/);
-const hash = z.string().length(64).regex(/^[a-f0-9]{64}$/, "使用小写 SHA-256 摘要");
+export const CoreArtifactHashSchema = z.string().length(64).regex(/^[a-f0-9]{64}$/, "使用小写 SHA-256 摘要");
+export const CoreSourceSchema = z.object({
+  repository: repositoryUrl,
+  commit: z.string().length(40).regex(/^[a-f0-9]{40}$/)
+}).strict();
+export const CoreMigrationSchema = z.object({
+  id: localId, file: CorePackagePathSchema, sha256: CoreArtifactHashSchema
+}).strict();
+export const CoreDataContractSchema = z.object({
+  version: CoreReleaseVersionSchema,
+  readable: CoreVersionRangeSchema,
+  migrations: z.array(CoreMigrationSchema).max(1000)
+}).strict().superRefine((data, context) => {
+  const ids = new Set<string>(), files = new Set<string>();
+  data.migrations.forEach((migration, index) => {
+    if (ids.has(migration.id)) context.addIssue({ code: "custom", path: ["migrations", index, "id"], message: "迁移标识重复" });
+    if (files.has(migration.file)) context.addIssue({ code: "custom", path: ["migrations", index, "file"], message: "迁移文件重复" });
+    ids.add(migration.id); files.add(migration.file);
+  });
+  if (CoreReleaseVersionSchema.safeParse(data.version).success
+    && CoreVersionRangeSchema.safeParse(data.readable).success
+    && !isCoreVersionSupported(data.version, data.readable))
+    context.addIssue({ code: "custom", path: ["readable"], message: "实现必须能够读取自己声明的数据版本" });
+});
+export type CoreDataContract = z.infer<typeof CoreDataContractSchema>;
 
 export const CoreManifestSchema = z.object({
   manifestVersion: z.literal(1),
@@ -32,7 +56,7 @@ export const CoreManifestSchema = z.object({
   description: z.string().trim().min(1).max(500),
   author: z.string().trim().min(1).max(100),
   version: CoreReleaseVersionSchema,
-  source: z.object({ repository: repositoryUrl, commit: z.string().length(40).regex(/^[a-f0-9]{40}$/) }).strict(),
+  source: CoreSourceSchema,
   license: z.string().trim().min(1).max(100),
   compatibility: z.object({
     platform: CoreVersionRangeSchema,
@@ -56,13 +80,7 @@ export const CoreManifestSchema = z.object({
     z.object({ kind: z.literal("tenant") }).strict(),
     z.object({ kind: z.literal("container"), containerType: localId }).strict()
   ]),
-  data: z.object({
-    version: CoreReleaseVersionSchema,
-    readable: CoreVersionRangeSchema,
-    migrations: z.array(z.object({
-      id: localId, file: CorePackagePathSchema, sha256: hash
-    }).strict()).max(1000)
-  }).strict(),
+  data: CoreDataContractSchema,
   requires: z.array(z.object({
     capability: localId,
     version: CoreVersionRangeSchema
@@ -78,18 +96,6 @@ export const CoreManifestSchema = z.object({
   };
   unique(manifest.permissions.map(p => `${p.resource}:${p.action}`), "permissions");
   unique(manifest.requires.map(item => item.capability), "requires");
-  const migrationIds = new Set<string>();
-  const migrationFiles = new Set<string>();
-  manifest.data.migrations.forEach((migration, index) => {
-    if (migrationIds.has(migration.id)) context.addIssue({ code: "custom", path: ["data", "migrations", index, "id"], message: "迁移标识重复" });
-    if (migrationFiles.has(migration.file)) context.addIssue({ code: "custom", path: ["data", "migrations", index, "file"], message: "迁移文件重复" });
-    migrationIds.add(migration.id);
-    migrationFiles.add(migration.file);
-  });
-  if (CoreReleaseVersionSchema.safeParse(manifest.data.version).success
-    && CoreVersionRangeSchema.safeParse(manifest.data.readable).success
-    && !isCoreVersionSupported(manifest.data.version, manifest.data.readable))
-    context.addIssue({ code: "custom", path: ["data", "readable"], message: "实现必须能够读取自己声明的数据版本" });
 });
 
 export type CoreManifest = z.infer<typeof CoreManifestSchema>;
