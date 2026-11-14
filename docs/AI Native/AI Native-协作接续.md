@@ -6,7 +6,7 @@
 
 PM 的本机 MySQL 8.4.11 迁移阻塞已交[最小 SQL／witness 与恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)：固定 main 275064d40，保留 112200 历史字节，仅完整 CHECK 外层增加 `= TRUE`，新前向迁移加仅补第四 ALTER 的恢复 SQL。原 parser／存储门禁模拟及类型通过，真实 DDL、CHECK_CLAUSE 回读、Prisma resolve 与 Client 由 PM 串行执行；AI 不争本机数据库／main 索引，不能以本片声称已恢复服务或提高任务进度。
 
-AIN-25 [原故障／业务Outbox及最终政策阶段](<AI Native-开发记录.md#ain25-original-fault-outbox-policy-close-20261114>)22源已完成必要模拟／类型和限定范围独立源码核定，正固定提交。最后身份／生命周期等待的旧告警政策P2、窗口查询后资源撤权及矛盾租约均已修复，原policy句柄只留服务端，unknown不重派或清占用。dev2继续核原五条SLO／成本／回退与最终依据，不重跑50样本；尚未按整项100%计分。AIN-24 dev1独占原hold／memory／knowledge三叶，Root负责最少会员业务收据、原复制正文清理与公共装配；仍缺新知识事务／删除传播完整消费者，不能把依赖拒绝当删除闭环，助手不等待本机迁移或Root提交。
+AIN-25 [原故障／业务Outbox及最终政策阶段](<AI Native-开发记录.md#ain25-original-fault-outbox-policy-close-20261114>)22源固定 `2cfbcee8bcc4dcc37f2548b56798d9dcf84445f1` 已普通推送并回读，必要模拟／类型和限定范围独立源码核定齐备。最后身份／生命周期等待的旧告警政策P2、窗口查询后资源撤权及矛盾租约均已修复，原policy句柄只留服务端，unknown不重派或清占用。dev2继续核原五条SLO／成本／回退与最终依据，不重跑50样本；尚未按整项100%计分。AIN-24 dev1独占原hold／memory／knowledge三叶，Root负责最少会员业务收据、原复制正文清理与公共装配；仍缺新知识事务／删除传播完整消费者，不能把依赖拒绝当删除闭环，助手不等待本机迁移或Root提交。
 
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 
@@ -34,10 +34,10 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-23、25生命周期及AIN-15目标检查点／432dc六源、2250ff两叶已上传；PM固定main公共对象留原记录，不写main。独占四册／索引、shared／Guard／OpenAPI／provider及已交权后端／页面；同名地点误撤回P2已完成最小修复、必要模拟／类型及独立源码核定，保留Core商户代客企业403首因，核dev1最终消费者及原全文后计分，再接25故障合同／页面／可信装配。未知原操作不重派，原账不因网络槽释放核销；未核员工样式不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原四品类证据和[四源消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已交Root并逐blob核同，原订单链接／身份及Core403边界的必要模拟／类型／独立静态核定齐备，写权交回。继续AIN-24原hold、删除传播和业务收据保留只读核定；已发现仅未决审批／POSSIBLE时材料hold枚举遗漏及归档后原业务观察拒绝，待按原接点分配修复。不改Root四册／索引、公共源码或Core权限，不将operator企业报价拒绝记正向。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-25故障Reader和performance挂接两叶已冻结；继续SLO参数／原版本回退与故障证据，Root补公共合同和原页面。空业务Outbox关联不推定已过Guard或积压0；不新建日志／表／worker，缺证据pending／not_recorded，unknown不计成功，取消善后不代表业务回滚。不写shared／provider／四册／索引，不新增测试。 |
-| 内部开业助手／`/root/opening_core_closeout` | 原AIN-22／容量阶段核定已交回；当前只读复核AIN-15日期／地点两叶的原确认、历史兼容及授权边界，不写源码／索引／四册／main，不独立重跑作者整套行为。结论不外推AIN-25整项或真实运行。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | MySQL最小三源0b1e1ad及AIN-25故障／事件观察22源2cfbcee已上传；PM独占main／DDL／Client，Root只留固定依据。独占四册／索引和公共接点；下一接AIN-24最少会员业务收据／已撤知识记忆副本清理与新事务端口，AIN-15保留Core企业正向依赖，AIN-25按全文与SLO／成本／回退资料核计分。未知原操作不重派，费用占用不因诊断或槽释放核销；未知员工样式不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-15四源已交权并推0ea63；当前独占AIN-24 privacy/retention-model-sources.ts、knowledge/persistent-memory-consent.service.ts、knowledge/knowledge-document.service.ts。修原未决审批／POSSIBLE的hold枚举、撤同意立即停止读取与物理删除的区别、原CAS／同键收据及知识事务端口；新复制清理依赖须交Root接线，缺依赖拒绝不能称删除完成。不改Root retention.service／公共源／四册／索引或Core权限。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 两UI及窗口资源撤权／矛盾租约两源已交Root，固定清单4ae6与patch5998保留对照，当前源已含Root政策后继不可整覆盖。继续只读核AIN-25五条、50原链样本／SLO／容量／每任务成本口径及原版本回退，既有绿色不重跑；D05建议和已采用值分别判断。缺证据pending／not_recorded，unknown不计成功；不写shared／provider／四册／索引，不新增测试。 |
+| 内部开业助手／`/root/opening_core_closeout` | AIN-15两阶段和AIN-25限定范围复核均已交回；发现的最后政策等待P2经Root复验后再次静态核闭，无活动写权。不写源码／索引／四册／main、不重复作者模拟，不外推AIN-25全文或真实运行。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |

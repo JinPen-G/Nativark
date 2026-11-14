@@ -9,7 +9,7 @@
 <a id="ain25-original-fault-outbox-policy-close-20261114"></a>
 ## AIN-25 原故障、事件窗口与最终政策复核（2026-11-14）
 
-前置 `0b1e1ad4280d2416603d9d18d8893b971876cf58` 已推并回读 GitHub。本阶段固定22份原生产者／合同／公开装配／后台消费者，不夹 dev1 的 retention-model-sources、memory／knowledge 三源和未知员工样式。完整原任务仍保持75%：本片关闭故障观察及政策撤回缺口，首发测量／SLO／成本参数、版本回退依据仍须全文核定；模拟成本／耗时不能称真实供应商费用或live SLO。
+前置 `0b1e1ad4280d2416603d9d18d8893b971876cf58` 已推并回读 GitHub。本阶段22份原生产者／合同／公开装配／后台消费者固定 `2cfbcee8bcc4dcc37f2548b56798d9dcf84445f1`，已普通推送 codex/ai-native 并回读一致，不夹 dev1 的 retention-model-sources、memory／knowledge 三源和未知员工样式。完整原任务仍保持75%：本片关闭故障观察及政策撤回缺口，首发测量／SLO／成本参数、版本回退依据仍须全文核定；模拟成本／耗时不能称真实供应商费用或live SLO。
 
 [TaskFaultObservationReader](../../apps/api/src/modules/ai-native/observability/task-fault-observation.reader.ts)只读原 USER Task／Run、当前租约／栅栏、未决资源占用、失败步骤／原事件与取消恢复收据；DB等待仅表示本Reader直接查询，缺worker心跳不推定死亡。101项探测窗口只交100项，并保留公开“过期租约＋原未决资源”的真实见证；无见证不能生成该告警。事件时间线不当业务投递积压，AUTOMATION Task不可借本人Task权读取。原[TaskPerformanceReader](../../apps/api/src/modules/ai-native/observability/task-performance.reader.ts)接此投影，原字段兼容；[shared合同](../../packages/shared/src/ai-task-performance-draft.ts)及[实际服务端校验](../../apps/api/src/modules/ai-native/task-contract-validation.ts)闭合字段／期限／年龄／原见证，旧包无faults仍接受。
 
