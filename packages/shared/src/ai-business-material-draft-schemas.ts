@@ -7,6 +7,7 @@ import { RentalCoreOrderStatus, RentalInventoryMode, RENTAL_PRICING_UNIT_CODES, 
 import { AI_ORDER_FACTS_DRAFT_SCHEMAS } from './ai-order-facts-draft-schemas';
 import { AI_SCENE_QUOTE_HTTP_SCHEMAS } from './ai-scene-quote-http-draft';
 import { AI_SCENE_REQUEST_DRAFT_SCHEMAS } from './ai-scene-request-draft-schemas';
+import { AI_QUOTE_GOAL_SCHEMAS } from './ai-quote-goal-draft';
 import type { RentalFulfillmentLocation } from './core';
 import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafId as id, leafList as list,
   leafText as text, leafTime as time, leafInt as integer, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
@@ -143,8 +144,11 @@ export const AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraf
   AiQuoteBusinessFactsDraft: rawQuoteFacts,
   AiQuoteBusinessMaterialDraft: sealed('quote_clarification', obj({ ...meta, facts: rawQuoteFacts, model,
     gaps: list(choice('human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'), 3, 3), execution: choice('not_attempted') })),
+  AiQuoteGoalBusinessMaterialDraft: sealed('quote_clarification', obj({ ...meta, facts: AI_QUOTE_GOAL_SCHEMAS.AiQuoteGoalContextDraft, model,
+    gaps: list(choice('human_selection_evidence_owned_by_mainline', 'no_stock_reservation', 'no_order_approval'), 3, 3), execution: choice('not_attempted') })),
   AiSceneTaskMaterialResponseDraft: { oneOf: [sceneMaterial('order_explanation', 'AiOrderExplanationMaterialDraft'),
-    sceneMaterial('opening_diagnosis', 'AiOpeningBusinessMaterialDraft'), sceneMaterial('quote_clarification', 'AiQuoteBusinessMaterialDraft')] }
+    sceneMaterial('opening_diagnosis', 'AiOpeningBusinessMaterialDraft'), sceneMaterial('quote_clarification', 'AiQuoteBusinessMaterialDraft'),
+    sceneMaterial('quote_clarification', 'AiQuoteGoalBusinessMaterialDraft')] }
 };
 
 // New orders-only components. Never mutate a legacy component or widen the

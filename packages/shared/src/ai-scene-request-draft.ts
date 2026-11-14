@@ -5,6 +5,7 @@ import type { AiWorkspaceScope } from './ai-native';
 import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 import type { AiTaskInputSubmissionDraft, AiTaskInputReceiptReferenceDraft } from './ai-task-input-draft';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES as pricingUnits } from './core';
+import type { AiQuoteGoalInputDraft } from './ai-quote-goal-draft';
 
 /** Reopen an existing answer by payload or exact receipt key, never both.
  * Reference recovery reads the stored binding; it cannot submit a new answer. */
@@ -78,7 +79,8 @@ export function validateAiSceneQuoteCandidateDraft(value: unknown): value is AiS
 export type AiSceneRequestBody =
   | { sceneCode: 'order_explanation'; input: { orderId: string; question: 'status' | 'fees' | 'payments' | 'next_steps' } }
   | { sceneCode: 'opening_diagnosis'; input: { sections: string[] } }
-  | { sceneCode: 'quote_clarification'; input: { candidate: AiSceneQuoteCandidate } };
+  | { sceneCode: 'quote_clarification'; input: { candidate: AiSceneQuoteCandidate; kind?: never; draftVersion?: never; goalText?: never }
+      | (AiQuoteGoalInputDraft & { candidate?: never }) };
 export type AiSceneRequestCreateDraft = AiSceneRequestBody & {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   requestKey: string;
@@ -398,7 +400,7 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   requestCancel: 'cancel', requestCancellationIntent: 'cancel/intent', readCancellationReceipt: 'cancel/receipt',
   settleUnstartedCancellation: 'cancel/settle-unstarted',
   settleReleasedInputCancellation: 'cancel/settle-input-wait',
-  readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
+  readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', readQuoteGoalCandidates: 'quote-goal/candidates', reopenModelSource: 'source',
   reopenOpeningModelSource: 'source/opening-section',
   readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskPerformance: 'performance', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
@@ -427,6 +429,7 @@ export const AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS = Object.freeze({
   readTaskPage: { request: 'AiTaskMetadataQueryDraft', response: 'AiTaskMetadataPageDraft', successStatus: 200 },
   readTaskEvents: { request: 'AiOriginalTaskEventsReadDraft', response: 'AiTaskEventsObservationDraft', successStatus: 200 },
   readModelResult: { request: 'AiSceneModelResultReadDraft', response: 'AiSceneModelResultObservationDraft', successStatus: 200 },
+  readQuoteGoalCandidates: { request: 'AiSceneModelResultReadDraft', response: 'AiQuoteGoalProjectionDraft', successStatus: 200 },
   readTaskScene: { request: 'AiSceneModelTaskSceneDraft', response: 'AiTaskSceneObservationDraft', successStatus: 200 },
   reopenModelSource: { request: 'AiSceneModelSourceReadDraft', response: 'AiSceneModelSourceReadResponseDraft', successStatus: 200 },
   reopenOpeningModelSource: { request: 'AiSceneOpeningModelSourceReadDraft', response: 'AiSceneOpeningModelSourceReadResponseDraft', successStatus: 200 }

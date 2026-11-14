@@ -6,6 +6,29 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-goal-original-chain-checkpoint-20261114"></a>
+## AIN-15 原目标受理、模型澄清和 Core 报价未完检查点（2026-11-14）
+
+前置 `11811553d821ed73659ab5ad28453700fb9ee6b6` 已普通推送并回读 GitHub。本片固化30份已核归属的报价源码，明确为未完检查点，不作为完整 AIN-15 或 main 可整收阶段；AIN-25 故障观测两叶与未核员工样式均排除。dev1 四叶已交权并逐 blob 核同：quote-goal-input `c10eac3e624b3a1c474d1ac170c660bc810a508b`、projection `6b624917b56b7779b66b6d53f0647187598fb0d5`、ConversationAdmission `dc716a393cee829020d2800479e6135f97e648f9`、admission-session `ef35260d5021a75d34e88a25342478734d79cbf6`。后续修复由 Root 在此固定前像上继续，不覆盖回作者旧稿。
+
+[原 SceneRequest](../../packages/shared/src/ai-scene-request-draft.ts)严格互斥接原 candidate 与新 quote_goal 原文；[业务准备](../../apps/api/src/modules/ai-native/tools/quote-business-preparation.service.ts)仅从受权配置生成独立 goal_context，不默认客户、数量、商品、企业或付款人。[原模型宿主](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)将原文和真实人类回答冻结在原 Task／Gateway／累计账，afterSucceeded沿原输入仓储持久化真实问题，回答和后继仍走原收据。公共摘要保持确定性，不向调用方泄漏私有候选原文；[原候选 Reader](../../apps/api/src/modules/ai-native/scenes/quote-goal-projection.ts)沿当前 Guard／身份、原计划／Artifact／调用／账与受权目录输出闭合投影，新增观察路由和 OpenAPI 登记共用 shared。目标提取不签不存在的动态字段材料，原 TaskClarification 消费真实问题；旧结构化路径保留。
+
+[后台受理](../../apps/admin/src/features/ai-native/ConversationAdmission.tsx)支持原文与结构化条件，明确核对后才受理。正文只保留内存，journal仅原键／hash；丢 ACK 只读原 operation，隐藏／身份变化清除，受理不建 Task、不调用模型或创建报价。Root 未把额外候选展示、企业本人和四品类完整过程假称已闭。
+
+| 已执行范围 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| 原目标→标准原模型输入→真实持久问题 | `f62cd367fe96d4f06dc989683a6d1bdc8959a7106e0192f5c414285d50712fce`，退出0；1模型、Task等待人类回答，报价／订单写入0。 |
+| 两次原人类选择→后继→真实 Core 核价与原操作收据 | `b45ec093204582214491c9aee8246cd372f5e02fcaeaa43ccbeaf104834eaa94`，退出0；3模型、Core报价1张，数量及原参数保持，未证明批准／开单。 |
+| 正式 Controller／Guard→候选投影／原回答→Core报价 | `87938c08c4227a91b5df0c6cc820c592b1a46bbe47f196d27231f84fce70a194`，退出0；读不增调用或业务写，伪造字段拒绝，公共摘要无模型JSON。 |
+| 当前生产及原后台兼容类型 | `af3fb54344492c9fa67b1d6344ea2d602a74a6a8a4d417b3df66585c492d5d24`，TypeScript5.9.3；API4根／1875源、后台3根／1567源零诊断，退出0。 |
+| dev1实际受理组件／API／session／Controller／Guard／ALS／原仓储 | `3e75ea20d1d1ad6acecf6eafbf71528d21c13398cf88f939c80dd6918aaa10af`，退出0；原受理1次，丢ACK只读同键，Task／模型／报价写入0。作者类型 `17aaa3e46c832a32f5ee29a7eb531dd5dcb2bb7c8fa7f0f2b52f2b6f70df9e66` 退出0；Root核源码与固定证据，不冒称独立行为重跑。 |
+
+以上采用 `node --no-compilation-cache -`、原 offline preload、不可达 DATABASE_URL、内存夹具及审计；不是新增测试文件或真实数据库／浏览器。原夹具仅在内存将 goal 输入传原仓储，补明示的会话表、真实库存和原报价操作存储，未改生产权限。曾误把 routeScene 传严格 taskModelPolicy、原操作存储未声明等导致失败，按实际合同修接点／夹具后复验；真实库存缺失仍正确 unavailable。
+
+独立源码核定发现三个尚未修复的 P2：模型省略／缩短 items 会丢人类已选行；当前新问题的回答却按已回答父 Run 旧结果校验，变更商品后行指纹不一致；已确认数量2会覆盖后续提取3且不再要求新确认。原参数叶 `0679f26069993ee881466530fb9f6c81085814cd`、模型组合 `614c633709dbc557c2164411ce71be38c21ec8ee` 固定为反例前像。原目标→选单→批准→一次订单组 `8883ab3fe3043b83155016da1731b683524bc1110fa0343c5ae05beabada25f0` 退出1，prepareSelection 返回 `AI_REVISION_CONFLICT`，没有证明开单；需定位首因，不能放宽报价／库存／原收据比较。
+
+AIN-15保持75%。Root下一修这三个参数问题及选单冲突，dev1继续四品类／单位／用量和原企业本人只读核定；完整成功、条件变化重确认、批准与原订单收据及全文复核齐备后再计100%。本片原 Node 进程已退出、audit0，`output/.tmp/ain15-goal-closeout-20261114` 未创建，无临时脚本、client／dist或依赖副本。真实数据库、浏览器、模型供应商与生产放行由负责人后续实测。
+
 <a id="ain-main-20e33-five-public-integration-20261114"></a>
 ## PM 固定 main 与已上传 AI 成果的五个公共接点（2026-11-14）
 

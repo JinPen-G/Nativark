@@ -4,6 +4,7 @@ import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
 import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from './ai-quote-selection-draft-schemas';
 import { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from './ai-approved-settings-draft-schemas';
+import { AI_QUOTE_GOAL_SCHEMAS } from './ai-quote-goal-draft';
 import { leafClosed as object, leafEnum as choice, leafId as id, leafText as text, leafInt as integer, leafList as list, leafTime, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 const uuid = { type: 'string', format: 'uuid' };
@@ -19,7 +20,7 @@ const candidate = object({ customerType: choice('personal', 'corporate'), custom
 const inputs = [
   { sceneCode: choice('order_explanation'), input: object({ orderId: id(), question: choice('status', 'fees', 'payments', 'next_steps') }) },
   { sceneCode: choice('opening_diagnosis'), input: object({ sections: { ...list(id(), 9, 1), uniqueItems: true } }) },
-  { sceneCode: choice('quote_clarification'), input: object({ candidate }) }
+  { sceneCode: choice('quote_clarification'), input: { oneOf: [object({ candidate }), AI_QUOTE_GOAL_SCHEMAS.AiQuoteGoalInputDraft] } }
 ];
 const base = { draftVersion: choice(AI_SCENE_REQUEST_DRAFT_VERSION), requestKey: { ...id(), maxLength: 128 } };
 const originalReference = object({ draftVersion: base.draftVersion, inputRef: uuid });

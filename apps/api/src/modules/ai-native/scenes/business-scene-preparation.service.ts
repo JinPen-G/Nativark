@@ -11,6 +11,7 @@ import { sealBusinessScenario } from '../tools/business-scenario-input';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from '../tools/read-context-binding';
+import { originalQuoteGoalInputSchema } from '../task-request/original-request.validation';
 
 const key = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const resourceId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -19,7 +20,8 @@ const orderRequest = z.object({ requestKey: key, orderId: resourceId,
 const openingRequest = z.object({ requestKey: key,
   sections: z.array(z.string().min(1).max(191)).min(1).max(9)
 }).strict().refine(value => new Set(value.sections).size === value.sections.length);
-const quoteRequest = z.object({ requestKey: key, candidate: aiQuoteCandidateInputSchema }).strict();
+const quoteRequest = z.union([z.object({ requestKey: key, candidate: aiQuoteCandidateInputSchema }).strict(),
+  originalQuoteGoalInputSchema.extend({ requestKey: key })]);
 
 /** Internal application preflight, NOT a public DTO or creation authority.
  * Original persistence/policy belong to the original-scenes composition. This
@@ -36,7 +38,7 @@ export class AiBusinessScenePreparationService {
     openingAuthority: AiDiagnosticReadAuthority;
     opening: Pick<AiOpeningActionListService, 'read'>;
     quoteAuthority: AiBusinessReadAuthority;
-    quote: Pick<AiQuoteBusinessPreparationService, 'prepareInput'>;
+    quote: Pick<AiQuoteBusinessPreparationService, 'prepareInput'> & Partial<Pick<AiQuoteBusinessPreparationService, 'prepareGoalInput'>>;
   }) {}
 
   private request(context: AiExecutionContext, scene: 'order_explanation' | 'opening_diagnosis' | 'quote_clarification', requestKey: string, body: unknown) {
@@ -55,11 +57,14 @@ export class AiBusinessScenePreparationService {
     const input = parsed.data, expected = expectedContext && structuredClone(expectedContext);
     return this.dependencies.quoteAuthority.withRead('quote_context', {}, async context => {
       assertAiReadContextBinding(context, expected);
-      const materials = await this.dependencies.quote.prepareInput(input.candidate, 'not_requested', context);
+      const goal = 'kind' in input ? { kind: input.kind, draftVersion: input.draftVersion, goalText: input.goalText } : undefined;
+      if (goal && !this.dependencies.quote.prepareGoalInput) throw new ModelGatewayError('CONFIG_INVALID');
+      const materials = goal ? await this.dependencies.quote.prepareGoalInput!(goal, context)
+        : await this.dependencies.quote.prepareInput('candidate' in input ? input.candidate : undefined, 'not_requested', context);
       if (materials.payload.audience !== context.audience || requestFingerprint(materials.payload.scope) !== requestFingerprint(context.scope)) throw new ModelGatewayError('FORBIDDEN');
       return sealBusinessScenario('quote_clarification', {
         status: 'prepared_not_persisted' as const,
-        request: this.request(context, 'quote_clarification', input.requestKey, input.candidate),
+        request: this.request(context, 'quote_clarification', input.requestKey, goal ?? ('candidate' in input ? input.candidate : undefined)),
         materials, humanSelection: 'not_attested' as const,
         task: { status: 'unavailable' as const, missing: ['original_request_persistence', 'current_scene_creation_policy'] },
         quotation: 'not_created' as const, orderApproval: 'not_granted' as const,

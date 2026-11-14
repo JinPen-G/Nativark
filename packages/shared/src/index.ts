@@ -128,3 +128,4 @@ export * from './ai-client-public-session';
 export * from './ai-client-goal-draft';
 export * from './ai-client-goal-session';
 export * from './ai-client-goal-fingerprint';
+export * from './ai-quote-goal-draft';

@@ -1,9 +1,9 @@
-/** Typed order/setup request admission and a separate unsent local draft.
+/** Typed order/setup/quote request admission and a separate unsent local draft.
  * Editing never prepares or sends; the original journal keeps only keys/hashes.
  * Task metadata/execution stay explicit. Scope/hide/unmount discards local text;
  * Copilot's current order is a locator for original Guard checks, not facts. */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { AiConversationObservationDraft, AiSceneCode, AiSceneQuoteCandidate } from '@rental-os/shared';
+import { AI_QUOTE_GOAL_LIMITS, type AiConversationObservationDraft, type AiSceneCode, type AiSceneQuoteCandidate } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
 import { ActionButton, Alert, ConfirmAction, Input, Select } from '@/components/ui';
@@ -15,15 +15,26 @@ import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
 
 type Question = 'status' | 'fees' | 'payments' | 'next_steps';
-type InputDraft = { orderId: string; question: Question; sections: string[]; quoteCandidate: AiSceneQuoteCandidate };
+type InputDraft = { orderId: string; question: Question; sections: string[];
+  quoteMode: 'goal' | 'conditions'; quoteGoalText: string; quoteCandidate: AiSceneQuoteCandidate };
 type LocalDraft = { owner: string; revision: number; value: InputDraft };
 const emptyDraft = (owner: string, revision = 0): LocalDraft => ({ owner, revision, value: {
-  orderId: '', question: 'status', sections: [], quoteCandidate: { customerType: 'personal', items: [{ quantity: 1 }] }
+  orderId: '', question: 'status', sections: [], quoteMode: 'conditions', quoteGoalText: '',
+  quoteCandidate: { customerType: 'personal', items: [{ quantity: 1 }] }
 } });
 const localEnglish: Record<string, string> = {
   '未发送草稿': 'Unsent draft',
   '当前输入仅保留在本页；核对并完成原轮次后，再明确发送。': 'This input stays on this page. Check and complete the current turn before explicitly sending it.',
-  '已核对的原发送内容': 'Reviewed original request'
+  '已核对的原发送内容': 'Reviewed original request',
+  '报价输入方式': 'Quote input',
+  '描述租赁目标': 'Describe rental goal',
+  '填写结构化条件': 'Enter rental conditions',
+  '租赁目标': 'Rental goal',
+  '例如：周五晚上租两套摄影设备，客户和取还地点待确认。': 'For example: rent two camera kits on Friday evening; the customer and pickup/return locations need confirmation.',
+  '目标受理后还需核对客户、商品、数量和时间；不会自动选择或批准建单。': 'After admission, the customer, products, quantities and times still need review. No choices or order approval are made automatically.',
+  '核对租赁目标': 'Review rental goal',
+  '已核对的租赁目标': 'Reviewed rental goal',
+  '将这份租赁目标交原场景受理？不会创建报价、订单或支付。': 'Submit this rental goal to the original scene? This does not create a quote, order or payment.'
 };
 export const ConversationOrderContext = createContext<{ orderId: string; current(): boolean } | null>(null);
 // Existing tenantReadiness section keys, not checks, routes or write authority.
@@ -115,14 +126,16 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
       || latest.currentTurn !== null || localDraft.current.owner !== owner) throw Error('AI_SCOPE_CHANGED');
     const captured = structuredClone(localDraft.current);
     if (opening && captured.value.sections.some(section => !openingSections.some(([key]) => key === section))) throw Error('AI_INVALID_INPUT');
-    await (quote ? session.prepareQuote(latest, captured.value.quoteCandidate) : opening ? session.prepareOpening(latest, captured.value.sections)
+    await (quote ? captured.value.quoteMode === 'goal'
+      ? session.prepareQuoteGoal(latest, captured.value.quoteGoalText) : session.prepareQuote(latest, captured.value.quoteCandidate)
+      : opening ? session.prepareOpening(latest, captured.value.sections)
       : session.prepare(latest, sourceOrderId ?? captured.value.orderId, captured.value.question));
     check();
     // The reviewed command is now held separately. Hashing/storage can await;
     // clear only its exact draft revision, preserving edits made in that gap.
     if (session.snapshot().prepared && localDraft.current.owner === captured.owner && localDraft.current.revision === captured.revision) clearDraft();
   };
-  const { orderId, question, sections, quoteCandidate } = draft.owner === owner && canEdit ? draft.value : emptyDraft(owner).value;
+  const { orderId, question, sections, quoteMode, quoteGoalText, quoteCandidate } = draft.owner === owner && canEdit ? draft.value : emptyDraft(owner).value;
   if (!active()) return null;
   return <section aria-label={t(quote ? '报价条件受理' : opening ? '开业诊断原轮次受理' : '订单解读原轮次受理')} aria-busy={state.busy}>
     <p>{t(quote ? '先核对租赁条件并受理原请求；报价、建单和支付仍需各自正式确认。' : opening ? '仅保存选定分区的开业诊断原请求；受理不创建任务、不调用模型、不修改或发布配置。'
@@ -130,7 +143,18 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
     <div role="group" aria-label={t('未发送草稿')}>
       <p>{t('未发送草稿')}</p>
       {(state.locked || observation?.currentTurn) && <p>{t('当前输入仅保留在本页；核对并完成原轮次后，再明确发送。')}</p>}
-      {quote ? <QuoteCandidateFields value={quoteCandidate} onChange={value => edit({ quoteCandidate: value })} disabled={!canEdit} /> : opening ? <Select<string[]> mode="multiple" showSearch={false} aria-label={t('诊断分区')} value={sections}
+      {quote ? <>
+        <label>{t('报价输入方式')}<Select<'goal' | 'conditions'> aria-label={t('报价输入方式')} value={quoteMode} disabled={!canEdit}
+          options={[{ value: 'goal', label: t('描述租赁目标') }, { value: 'conditions', label: t('填写结构化条件') }]}
+          onChange={value => edit({ quoteMode: value })} /></label>
+        {quoteMode === 'goal' ? <>
+          <label>{t('租赁目标')}<Input.TextArea aria-label={t('租赁目标')} value={quoteGoalText} disabled={!canEdit}
+            rows={4} maxLength={AI_QUOTE_GOAL_LIMITS.goalCharacters}
+            placeholder={t('例如：周五晚上租两套摄影设备，客户和取还地点待确认。')}
+            onChange={event => edit({ quoteGoalText: event.currentTarget.value })} /></label>
+          <p>{t('目标受理后还需核对客户、商品、数量和时间；不会自动选择或批准建单。')}</p>
+        </> : <QuoteCandidateFields value={quoteCandidate} onChange={value => edit({ quoteCandidate: value })} disabled={!canEdit} />}
+      </> : opening ? <Select<string[]> mode="multiple" showSearch={false} aria-label={t('诊断分区')} value={sections}
         disabled={!canEdit} options={openingSections.map(([value, label]) => ({ value, label: t(label) }))}
         onChange={value => edit({ sections: value })} /> : <>
         <Input aria-label={t('订单标识')} value={sourceOrderId ?? orderId} readOnly={!!source} maxLength={191} disabled={!canEdit}
@@ -139,7 +163,9 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
           options={(['status', 'fees', 'payments', 'next_steps'] as const).map(value => ({ value, label: t(value === 'status' ? '订单状态'
             : value === 'fees' ? '费用依据' : value === 'payments' ? '收付款记录' : '下一步指引') }))} onChange={value => edit({ question: value as Question })} />
       </>}
-      <ActionButton label={t(quote ? '核对租赁条件' : '保留本轮发送定位')} disabled={!canPrepare || opening && !sections.length} onAction={prepare} />
+      <ActionButton label={t(quote ? quoteMode === 'goal' ? '核对租赁目标' : '核对租赁条件' : '保留本轮发送定位')}
+        disabled={!canPrepare || opening && !sections.length || quote && quoteMode === 'goal'
+          && (!quoteGoalText.trim() || quoteGoalText.length > AI_QUOTE_GOAL_LIMITS.goalCharacters)} onAction={prepare} />
     </div>
     {canEdit && state.prepared && <p>{t('已核对的原发送内容')}</p>}
     {canEdit && state.reviewedInput && <p>{t('订单标识')}: {safeDisplayText(state.reviewedInput.orderId, 191)} · {t('订单问题')}: {t(state.reviewedInput.question === 'status' ? '订单状态'
@@ -147,8 +173,11 @@ export function ConversationAdmission({ conversationId, identity, capabilityCode
     {canEdit && state.reviewedSections && <p>{t('诊断分区')}: {state.reviewedSections.map(section => t(openingSections.find(([key]) => key === section)?.[1]
       ?? safeDisplayText(section, 191))).join('、')}</p>}
     {canEdit && state.reviewedQuote && <QuoteCandidateFields value={state.reviewedQuote} />}
+    {canEdit && state.reviewedGoal && <label>{t('已核对的租赁目标')}<Input.TextArea aria-label={t('已核对的租赁目标')}
+      value={state.reviewedGoal.goalText} readOnly rows={4} maxLength={AI_QUOTE_GOAL_LIMITS.goalCharacters} /></label>}
     {canEdit && state.prepared && <ConfirmAction label={t('明确受理本轮请求')} disabled={state.busy}
-      prompt={t(quote ? '发送这些租赁条件交原场景受理？不会创建报价、订单或支付。' : opening ? '将这份已定位的开业诊断请求交服务端受理？不会开始任务、模型或配置写入。'
+      prompt={t(quote ? state.reviewedGoal ? '将这份租赁目标交原场景受理？不会创建报价、订单或支付。'
+        : '发送这些租赁条件交原场景受理？不会创建报价、订单或支付。' : opening ? '将这份已定位的开业诊断请求交服务端受理？不会开始任务、模型或配置写入。'
         : '将这份已定位的订单解读请求交服务端受理？不会开始任务或模型。')} onConfirm={() => run(true)} />}
     {state.rotationPending && <ActionButton label={t('核对并完成中断的轮换')} disabled={state.busy} onAction={() => run('rotation')} />}
     {state.locked && !state.prepared && <ActionButton label={t('核对原轮次受理')} disabled={state.busy} onAction={() => run(false)} />}

@@ -112,6 +112,9 @@ export class AiOriginalSceneDisplayGeneration {
     if (retained.receipt.state === 'revoked' || retained.receipt.contentHash !== original.contentHash
       || retained.receipt.revision !== original.revision || originalIdentityHash(retained.context) !== originalIdentityHash(context)
       || retained.request.sceneCode !== 'quote_clarification') throw denied();
+    // Intent extraction has its own candidate and persisted-question consumer;
+    // no complete Core candidate exists from which to sign editable fields.
+    if (retained.request.input.kind === 'quote_goal') return null;
     // The enclosing publisher/reader has already verified the persisted answer
     // chain. Rebuild its candidate rather than borrowing the initial fields.
     const candidate = applyOriginalQuoteAnswers(retained.request.input.candidate, history);

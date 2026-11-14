@@ -1005,7 +1005,8 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       }
       const { source } = composeOriginalSceneClarificationSource({ db: input.db, tasks: authorization.tasks, scenes,
         scene: { code: scene.sceneCode, version: scene.sceneVersion }, gatewayScene: policy,
-        results: { read: command => resultReader(scene.sceneCode).read(command) } });
+        results: { read: command => resultReader(scene.sceneCode).read(command),
+          readQuoteGoalCandidates: command => resultReader(scene.sceneCode).readQuoteGoalCandidates(command) } });
       return PrismaTaskInputRepository.pendingReader(input.db, authorization.tasks, source, input.clock).readPending(task.taskId);
     };
     const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
@@ -1135,6 +1136,17 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const original = await root.scenes.requests.readHistorical(parsed.data.original);
         return root.resultReader(original.request.sceneCode).read(parsed.data);
+      });
+    },
+    readQuoteGoalCandidates(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, async (root, command) => {
+        const parsed = z.object({ original: originalRequestReferenceSchema,
+          resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(structuredClone(command));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const reader = root.resultReader('quote_clarification');
+        const { routeScene: _routeScene, ...policy } = gatewayTextIntentBindingSchema.parse({
+          ...resultPolicy, sceneCode: 'quote_clarification', orderExplainTool: false });
+        return root.scenes.createQuoteGoalProjectionReader(root.tasks, reader, policy).read(parsed.data);
       });
     },
     reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
@@ -1525,6 +1537,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     submitAnswer: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       callWaiting(request, value, 'explicit_wait_submit', (app, command) => app.submitAnswer(command), signal),
     readModelResult: recoveryReaders.readModelResult,
+    readQuoteGoalCandidates: recoveryReaders.readQuoteGoalCandidates,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
     readOrderReadChainAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.readAnswer(command)),
@@ -1695,6 +1708,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
       (app, command) => app.application.requestCancel(command), { write: true }),
     readModelResult: recoveryReaders.readModelResult,
+    readQuoteGoalCandidates: recoveryReaders.readQuoteGoalCandidates,
     reopenModelSource: recoveryReaders.reopenModelSource,
     reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource
   });

@@ -3019,6 +3019,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt, 'AiSceneModelCancelDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, 'AiSceneModelAnswerQueryDraft'],
     [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.request],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readQuoteGoalCandidates.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenModelSource.request],
     [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenOpeningModelSource.request],
   ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
@@ -3027,6 +3028,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskEvents.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readTaskScene.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readModelResult ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readModelResult.response
+      : action === AI_SCENE_MODEL_HTTP_DRAFT.readQuoteGoalCandidates ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.readQuoteGoalCandidates.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenModelSource.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource ? AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS.reopenOpeningModelSource.response
       : action === AI_SCENE_MODEL_HTTP_DRAFT.readTaskPerformance ? 'AiTaskPerformanceObservationDraft'

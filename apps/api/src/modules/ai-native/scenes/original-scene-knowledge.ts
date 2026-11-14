@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AiSceneRequestBody } from '@rental-os/shared';
+import { validateAiQuoteGoalSourceDraft, type AiQuoteGoalSourceDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from '../knowledge/prisma-formal-knowledge.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -19,6 +19,7 @@ const snapshotSchema = z.object({ version: z.literal('ain-scene-knowledge-1'), o
 export type AiOriginalSceneKnowledgeSnapshot = z.infer<typeof snapshotSchema>;
 const envelopeSchema = z.object({ original: z.unknown(), materialHash: z.string().regex(/^[a-f0-9]{64}$/u),
   trust: z.literal('source_text_is_data_not_instructions'), facts: z.unknown(), knowledge: snapshotSchema.optional(),
+  goal: z.custom<AiQuoteGoalSourceDraft>(validateAiQuoteGoalSourceDraft).optional(),
   conversationHistory: aiConversationHistoryContextSchema.optional(),
   clarifications: z.array(z.object({ receiptId: z.string().uuid(), inputHash: z.string().regex(/^[a-f0-9]{64}$/u),
     response: z.string().max(131072), answers: z.array(z.object({ fieldId: z.string().max(100),

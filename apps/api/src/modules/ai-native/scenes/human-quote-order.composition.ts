@@ -24,6 +24,7 @@ import { AiTaskRunnerError, callAiTaskRunnerDependency, snapshotAiTaskRunnerClai
 import type { AiTaskRunnerClock } from '../runner/ai-task-runner.ports';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { applyOriginalQuoteAnswers } from './original-quote-input';
+import { originalQuoteCandidateFromAnswers } from './original-quote-goal-parameters';
 
 export type HumanQuoteOrderDependencies = ControlledApprovedOrderDependencies &
   Pick<HumanQuoteSelectionDependencies, 'originals'>;
@@ -148,7 +149,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         const lineage = await readHistory();
         // New preparation uses the selected Run's verified human answers.
         // Original-operation observation retains its existing historical reader.
-        candidate = applyOriginalQuoteAnswers(original.request.input.candidate, lineage.history);
+        candidate = originalQuoteCandidateFromAnswers(original.request, lineage.history);
         if (!isDeepStrictEqual(await readHistory(), lineage)) throw denied();
         await selectedReview(old.ref, input.original);
       }

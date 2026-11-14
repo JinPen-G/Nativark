@@ -6,7 +6,8 @@ import type { AiWorkspaceScope, AiOrderExplainRequestDraft } from './ai-native';
 import type { AiOrderReadFactsDraft } from './ai-order-facts-draft';
 import type { AiSceneRequestReceiptDraft } from './ai-scene-request-draft';
 import type { AiOrderHistoryFactsDraft, AiOrderLocalPaymentsDraft, AiOrderInspectionEvidenceDraft, AiOpeningSectionMaterialDraft,
-  AiOrderEvidenceReferenceDraft, AiOrderExplanationMaterialDraft, AiOpeningBusinessMaterialDraft, AiQuoteBusinessMaterialDraft } from './ai-business-material-draft';
+  AiOrderEvidenceReferenceDraft, AiOrderExplanationMaterialDraft, AiOpeningBusinessMaterialDraft, AiQuoteBusinessMaterialDraft,
+  AiQuoteGoalBusinessMaterialDraft } from './ai-business-material-draft';
 
 type PreferenceKind = AiPreferenceValueDraft['kind'];
 export interface AiSceneKnowledgeSnapshotDraft {
@@ -40,7 +41,7 @@ type AvailableOrder = ModelObservation<'order_explanation'> & Available<AiOrderE
   toolCandidates?: { requests: AiOrderExplainRequestDraft[]; execution: 'not_attempted'; authorization: 'not_granted' };
 };
 type AvailableOpening = ModelObservation<'opening_diagnosis'> & Available<AiOpeningBusinessMaterialDraft> & { sources: [] };
-type AvailableQuote = ModelObservation<'quote_clarification'> & Available<AiQuoteBusinessMaterialDraft> & { sources: [] };
+type AvailableQuote = ModelObservation<'quote_clarification'> & Available<AiQuoteBusinessMaterialDraft | AiQuoteGoalBusinessMaterialDraft> & { sources: [] };
 type Unavailable<S extends AiSceneRequestReceiptDraft['sceneCode']> = ModelObservation<S> & { text: null; automaticRetry: false } & (
   | { status: 'unknown'; nextAction: 'reconcile' }
   | { status: 'failed'; nextAction: 'manual_review' }
