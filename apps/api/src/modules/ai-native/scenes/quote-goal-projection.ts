@@ -24,6 +24,7 @@ import type { AiQuotePreparationContextSource } from '../tools/quote-candidate-p
 import { assertAiReadContextBinding } from '../tools/read-context-binding';
 import type { AiOriginalSceneResultService } from './original-scene-result.service';
 import { bindQuoteGoalOriginal, parseQuoteGoalModelOutput, readQuoteGoalFromModelInput, readQuoteGoalHumanIntent } from './quote-goal-input';
+import { originalQuoteGoalHints } from './original-quote-goal-parameters';
 
 type Original = Awaited<ReturnType<PrismaOriginalRequestRepository['readHistorical']>>;
 type OriginalModelObservation = Awaited<ReturnType<AiOriginalSceneResultService['read']>>;
@@ -159,7 +160,8 @@ export class AiQuoteGoalProjectionService {
       if (!isGatewayResult(gateway) || gateway.status !== 'completed' || gateway.usage.kind !== 'reported'
         || gateway.requestId !== model.callId || gateway.text !== model.candidateText || gateway.toolRequests.length
         || requestFingerprint(gateway.actual) !== requestFingerprint(input.configuration)) throw denied();
-      return { intent: { ...intent, selectedCustomerType }, proof: requestFingerprint({ taskId: task.id, scopeId: task.scopeId, revision: task.revision,
+      return { intent: { ...intent, selectedCustomerType }, history: lineage.history,
+        proof: requestFingerprint({ taskId: task.id, scopeId: task.scopeId, revision: task.revision,
         inputRef: task.inputRef, inputRevision: task.inputRevision, inputHash: task.inputHash,
         runId: step.runId, stepId: step.id, actionId: step.actionId, resultId: step.resultRef, fingerprint,
         lineage, artifactHash: artifact.contentHash }) };
@@ -220,7 +222,8 @@ export class AiQuoteGoalProjectionService {
   }
 
   private project(source: AiQuoteGoalSourceDraft, model: Model, candidates: AiQuoteGoalModelOutputDraft,
-    sources: Awaited<ReturnType<AiQuoteGoalProjectionService['sources']>>): AiQuoteGoalProjectionDraft {
+    sources: Awaited<ReturnType<AiQuoteGoalProjectionService['sources']>>,
+    effectiveConditions: AiQuoteGoalModelOutputDraft['conditions']): AiQuoteGoalProjectionDraft {
     const missing = new Map<string, AiQuoteGoalProjectionDraft['missingFields'][number]['reason']>();
     const choices: AiQuoteGoalChoiceGroupDraft[] = [];
     const priority = { model_unresolved: 0, not_supplied: 1, human_choice_required: 2,
@@ -236,7 +239,7 @@ export class AiQuoteGoalProjectionService {
     };
     const configurationSource = { kind: 'workspace_configuration' as const, version: sources.configuration.version,
       observedAt: sources.observedAt, truncated: false };
-    const conditions = candidates.conditions;
+    const conditions = effectiveConditions;
     for (const field of candidates.unresolvedFields) {
       if (field !== 'customerType' || !sources.selectedCustomerType) add(field, 'model_unresolved');
     }
@@ -315,15 +318,16 @@ export class AiQuoteGoalProjectionService {
     }
     if (typeof model.candidateText !== 'string' || !model.callId || !model.materialHash) throw unavailable();
     const candidates = parseQuoteGoalModelOutput(model.candidateText), before = await this.savedGoal(model, source);
+    const lookupCandidates = { ...candidates, conditions: originalQuoteGoalHints(candidates.conditions, before.history) };
     // Preserve the human's actual names/time words. Resolving a date or choosing
     // another product belongs to the existing Core/human clarification path.
-    const words = [candidates.conditions.customerName, candidates.conditions.start, candidates.conditions.end,
-      candidates.conditions.locationName, candidates.conditions.returnLocationName,
-      ...(candidates.conditions.items ?? []).map(item => item.productName)].filter((word): word is string => word !== undefined);
+    const words = [lookupCandidates.conditions.customerName, lookupCandidates.conditions.start, lookupCandidates.conditions.end,
+      lookupCandidates.conditions.locationName, lookupCandidates.conditions.returnLocationName,
+      ...(lookupCandidates.conditions.items ?? []).map(item => item.productName)].filter((word): word is string => word !== undefined);
     if (words.some(word => !before.intent.texts.some(text => text.includes(word)))) throw unavailable();
     return this.dependencies.authority.withRead('quote_context', {}, async context => {
       assertAiReadContextBinding(context, original.context);
-      const first = await this.sources(candidates, context, before.intent.selectedCustomerType);
+      const first = await this.sources(lookupCandidates, context, before.intent.selectedCustomerType);
       const afterOriginal = await this.dependencies.requests.readHistorical(command.original);
       assertAiReadContextBinding(afterOriginal.context, context);
       if (!same(bindQuoteGoalOriginal(afterOriginal), source)) throw denied();
@@ -334,13 +338,13 @@ export class AiQuoteGoalProjectionService {
         || before.bindingKey !== after.bindingKey) throw denied();
       // The result/provenance reads can outlast the candidate window. Finish
       // with the actual current sources, rather than publish the pre-await list.
-      const second = await this.sources(candidates, context, after.intent.selectedCustomerType);
+      const second = await this.sources(lookupCandidates, context, after.intent.selectedCustomerType);
       if (first.fingerprint !== second.fingerprint) throw denied();
       const closingOriginal = await this.dependencies.requests.readHistorical(command.original);
       assertAiReadContextBinding(closingOriginal.context, context);
       if (!same(bindQuoteGoalOriginal(closingOriginal), source)) throw denied();
       if ((await this.dependencies.tasks.resolveAccess(model.taskId, 'read_step_terminal')).bindingKey !== after.bindingKey) throw denied();
-      return this.project(source, afterModel, candidates, second);
+      return this.project(source, afterModel, candidates, second, lookupCandidates.conditions);
     });
   }
 }

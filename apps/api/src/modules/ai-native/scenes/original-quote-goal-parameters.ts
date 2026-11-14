@@ -27,48 +27,98 @@ const conditions = (value: unknown) => {
   return structuredClone(parseQuoteGoalModelOutput(value.text).conditions);
 };
 
+const mergeHints = (previous: AiQuoteGoalConditionsDraft, current: AiQuoteGoalConditionsDraft) => {
+  const next = { ...structuredClone(previous), ...structuredClone(current) };
+  const count = Math.max(previous.items?.length ?? 0, current.items?.length ?? 0);
+  // An extraction omission is not a human deletion. Retained words remain
+  // unconfirmed hints; only the original answer receipts supply IDs/quantities.
+  if (count) next.items = Array.from({ length: count }, (_, index) => ({
+    ...previous.items?.[index], ...current.items?.[index]
+  }));
+  return next;
+};
+
+/** Current bounded lookups use the same original result history as questions.
+ * This preserves omitted names for clarification, without selecting an object
+ * or changing the publicly returned, exact current model candidate. */
+export function originalQuoteGoalHints(current: AiQuoteGoalConditionsDraft, rounds: readonly Round[]) {
+  if (rounds.length > 31) throw unavailable();
+  let hints: AiQuoteGoalConditionsDraft = {};
+  for (const round of rounds) hints = mergeHints(hints, conditions(round.result));
+  return mergeHints(hints, current);
+}
+
 /** Only server-verified original Run histories reach this function. Human
  * fields persist across later extraction; a changed name withdraws its old ID
  * and requires a fresh choice, rather than silently selecting a replacement. */
 export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft, rounds: readonly Round[]): PartialCandidate {
   if (rounds.length > 31) throw unavailable();
   const selected: PartialCandidate = {}, anchors = new Map<string, string | undefined>();
+  const quantityAnchors = new Map<number, number | undefined>();
+  const quantityAnswerEpochs = new Map<number, number>();
+  let clarificationEpoch = 0;
+  let hints: AiQuoteGoalConditionsDraft = {};
   const merged = (words: AiQuoteGoalConditionsDraft): PartialCandidate => {
-    const next: PartialCandidate = structuredClone(words);
+    hints = mergeHints(hints, words);
+    const next: PartialCandidate = structuredClone(hints);
     // Model-inferred identity/quantity cannot enter the original Core request.
     delete next.customerType;
     for (const [property, value] of Object.entries(selected)) if (property !== 'items') (next as Record<string, unknown>)[property] = structuredClone(value);
-    if (next.items) next.items = next.items.map((item, index) => {
+    const count = Math.max(next.items?.length ?? 0, selected.items?.length ?? 0);
+    if (count) next.items = Array.from({ length: count }, (_, index) => {
+      const item = hints.items?.[index] ?? {};
       const kept = selected.items?.[index];
-      const line = { ...item, ...kept };
       if (kept?.itemGroupId && item.productName !== undefined && anchors.get(`item:${index}`) !== item.productName) {
-        delete line.itemGroupId; delete line.pricingUnit; delete line.usageQuantity;
+        delete kept.itemGroupId; delete kept.pricingUnit; delete kept.usageQuantity;
       }
+      // A repeated model suggestion may differ from an explicit human choice.
+      // A NEW conflicting suggestion withdraws the old quantity until another
+      // real integer answer; neither the model nor the old value can confirm it.
+      if (kept?.quantity !== undefined && item.quantity !== undefined && kept.quantity !== item.quantity
+        && (quantityAnchors.get(index) !== item.quantity || quantityAnswerEpochs.get(index) !== clarificationEpoch)) delete kept.quantity;
+      const line = { ...item, ...kept };
       if (line.itemGroupId) delete line.productName;
       else line.productName = item.productName;
       if (kept?.quantity === undefined) delete line.quantity;
       return line;
     });
-    if (next.customerId && words.customerName !== undefined && anchors.get('customer') !== words.customerName) delete next.customerId;
-    if (next.customerId) delete next.customerName; else next.customerName = words.customerName;
+    if (next.customerId && hints.customerName !== undefined && anchors.get('customer') !== hints.customerName) {
+      delete selected.customerId; delete selected.deliveryAddressId;
+      delete next.customerId; delete next.deliveryAddressId;
+    }
+    if (next.customerId) delete next.customerName; else next.customerName = hints.customerName;
     if (next.locationId) delete next.locationName;
     if (next.returnLocationId) delete next.returnLocationName;
     return next;
+  };
+  const recordClarification = (round: Round) => {
+    // Returning to a previously suggested number is still a NEW human change.
+    // The old model hint alone cannot distinguish it from harmless repetition.
+    if (round.answers.some(answer => answer.fieldId === 'clarification_text'
+      && typeof answer.value === 'string' && answer.value.trim())) clarificationEpoch++;
   };
   for (const round of rounds) {
     if (!validateAiTaskInputAnswersDraft(round.contract, round.answers)) throw denied();
     const originalWords = conditions(round.result), before = merged(originalWords);
     if (round.contract.code !== ORIGINAL_QUOTE_GOAL_PARAMETER_CODE) {
-      if (round.contract.code === 'original_quote_context') continue;
+      if (round.contract.code === 'original_quote_context') { recordClarification(round); continue; }
       const changed = applyOriginalQuoteAnswers(aiQuoteCandidateInputSchema.parse(before), [round]);
       Object.assign(selected, changed);
-      if (round.answers.some(answer => answer.fieldId === 'customer_selection')) anchors.set('customer', originalWords.customerName ?? anchors.get('customer'));
+      if (round.answers.some(answer => answer.fieldId === 'customer_selection')) anchors.set('customer', hints.customerName ?? anchors.get('customer'));
       for (const field of round.contract.fields) if (field.fieldId === 'item_selection'
         && round.answers.some(answer => answer.fieldId === field.fieldId)) {
         const index = field.target?.rowIndex ?? (before.items?.length === 1 ? 0 : -1);
         if (index < 0 || !before.items?.[index]) throw denied();
-        anchors.set(`item:${index}`, originalWords.items?.[index].productName ?? anchors.get(`item:${index}`));
+        anchors.set(`item:${index}`, hints.items?.[index]?.productName ?? anchors.get(`item:${index}`));
       }
+      for (const field of round.contract.fields) if (field.fieldId === 'quantity'
+        && round.answers.some(answer => answer.fieldId === 'quantity')) {
+        const index = field.target?.rowIndex ?? (before.items?.length === 1 ? 0 : -1);
+        if (index < 0 || !before.items?.[index]) throw denied();
+        quantityAnchors.set(index, hints.items?.[index]?.quantity);
+        quantityAnswerEpochs.set(index, clarificationEpoch);
+      }
+      recordClarification(round);
       continue;
     }
     for (const answer of round.answers) {
@@ -84,8 +134,9 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
         if (index < 0 || !before.items?.[index]) throw denied();
         selected.items ??= before.items.map(() => ({}));
         const line = selected.items[index] ??= {};
-        if (answer.fieldId === 'item_selection') { line.itemGroupId = String(answer.value); anchors.set(`item:${index}`, originalWords.items?.[index].productName); }
-        else if (answer.fieldId === 'quantity') line.quantity = Number(answer.value);
+        if (answer.fieldId === 'item_selection') { line.itemGroupId = String(answer.value); anchors.set(`item:${index}`, hints.items?.[index]?.productName); }
+        else if (answer.fieldId === 'quantity') { line.quantity = Number(answer.value); quantityAnchors.set(index, hints.items?.[index]?.quantity);
+          quantityAnswerEpochs.set(index, clarificationEpoch); }
         else if (answer.fieldId === 'pricing_unit_selection') line.pricingUnit = answer.value as typeof line.pricingUnit;
         else {
           const quantity = parseAiTaskUsageQuantityDraft(answer.value);
@@ -102,18 +153,19 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
         if (property === 'customerId') anchors.set('customer', before.customerName);
       }
     }
+    recordClarification(round);
   }
   return merged(current);
 }
 
 /** The caller supplies an original source plus its verified consumed answer
  * history. A missing goal answer remains unavailable, never a default candidate. */
-export function originalQuoteCandidateFromAnswers(request: AiSceneRequestBody, rounds: readonly Round[]) {
+export function originalQuoteCandidateFromAnswers(request: AiSceneRequestBody, rounds: readonly Round[], currentResult?: unknown) {
   if (request.sceneCode !== 'quote_clarification') throw denied();
   if (request.input.kind !== 'quote_goal') return applyOriginalQuoteAnswers(request.input.candidate, rounds);
   const last = rounds.at(-1);
   if (!last) throw unavailable();
-  const parsed = aiQuoteCandidateInputSchema.safeParse(originalQuoteGoalParameters(conditions(last.result), rounds));
+  const parsed = aiQuoteCandidateInputSchema.safeParse(originalQuoteGoalParameters(conditions(currentResult ?? last.result), rounds));
   if (!parsed.success) throw unavailable();
   return parsed.data;
 }

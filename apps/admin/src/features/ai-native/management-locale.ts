@@ -529,6 +529,7 @@ const english: Record<string, string> = {
   '门店自取还': 'Store pickup & return', '合作点取还': 'Partner pickup & return', '仓库取还': 'Warehouse pickup & return',
   '自助柜取还': 'Locker pickup & return', '配送': 'Delivery', '上门交付': 'On-site delivery', '承运寄送': 'Carrier shipping',
   '提交回答会尝试继续原任务，可能产生模型用量。': 'Submitting a response may resume this task and incur model usage.',
+  '报价参数已齐备，请核对原参数并明确生成报价；尚未批准或创建订单。': 'Quote parameters are ready. Review them and explicitly generate the quote; no order has been approved or created.',
   '仅显示本页用量，不代表任务总费用或供应商账单。': 'Usage on this page is not the task total or your provider bill.',
   '停止后不再启动新步骤；已发生的操作不会自动撤销或退款。': 'Stopping prevents new steps. Previous actions are not automatically reversed or refunded.',
   '订单解读': 'Order insights',

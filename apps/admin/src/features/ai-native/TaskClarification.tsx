@@ -204,7 +204,8 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         disabled={busy || locked || candidateReview.status !== 'ready' || Date.parse(candidateReview.expiresAt) <= Date.now()}
         onAction={() => run('candidate')} />}
       {(original || saved && saved !== 'invalid') && <ActionButton label={t('核对原回答收据')} pendingLabel={t('核对中…')} disabled={busy} onAction={() => run('receipt')} />}
-      {(original || saved && saved !== 'invalid') && receipt?.receipt.state === 'observed' && <ConfirmAction label={t('明确继续原任务')}
+      {(original || saved && saved !== 'invalid') && receipt?.receipt.state === 'observed'
+        && !(receipt.continuation.kind === 'not_started' && receipt.continuation.reason === 'quote_parameters_ready') && <ConfirmAction label={t('明确继续原任务')}
         prompt={t('按这份已保存的回答继续？仍须当前权限、原计划和累计限额；不会自动批准业务。')}
         doneLabel={t('已获得继续结果')} disabled={busy} onConfirm={() => run('continue')} />}
     </div>
@@ -242,6 +243,8 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
       ? '尚未观察到原回答收据，不代表未提交；请勿另建操作重发。'
       : receipt.continuation.kind === 'run_outcome' && receipt.continuation.status === 'unknown'
         ? '原回答已记录，继续结果仍待核对；不代表业务成功。'
-        : '原回答已记录；请读取当前问题或任务状态。回答不等于业务批准或执行成功。')}</p>}
+        : receipt.continuation.kind === 'not_started' && receipt.continuation.reason === 'quote_parameters_ready'
+          ? '报价参数已齐备，请核对原参数并明确生成报价；尚未批准或创建订单。'
+          : '原回答已记录；请读取当前问题或任务状态。回答不等于业务批准或执行成功。')}</p>}
   </section>;
 }

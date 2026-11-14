@@ -11,7 +11,7 @@ import { readTaskModelRunOrigin, taskInputReceiptReferenceSchema, PrismaTaskInpu
 import { isGatewayResult } from '../gateway-contract-validation';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
-import { withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
+import { AiTaskRunnerError, withAiTaskHeldPreparationDefinition, type AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskPreparationDefinition } from '../runner/task-run-preparation.ports';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -23,7 +23,8 @@ import { AiOriginalSceneResultService, quoteFactsFingerprint } from './original-
 import type { PrismaClient } from '@prisma/client';
 import { composeAuthorizedPersistentTaskInputRunner,
   type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
-import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { waitForTaskApplicationDependency, snapshotAiTaskInputSavedReceipt, type AiTaskApplicationHost,
+  type AiTaskApplicationResumeResult } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
 import { applyOriginalQuoteAnswers, originalQuoteAnswerContract, originalQuoteFieldOfferKey,
   originalQuoteInitialParameterContract, ORIGINAL_QUOTE_INITIAL_PARAMETER_CODE } from './original-quote-input';
@@ -361,6 +362,54 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         await verify(before);
         return { before, receipt };
       };
+      const readyQuoteParameters = async (before: Awaited<ReturnType<typeof bound>>, runId: string) => {
+        if (before.original.request.sceneCode !== 'quote_clarification') return false;
+        const basis = await current(before.reference, before.task.taskId, runId);
+        // Newly saved prose has not yet been extracted by this successor.
+        // Even complete old parameters cannot conceal a requested change.
+        if (basis.provenance.history.at(-1)?.answers.some(answer => answer.fieldId === 'clarification_text'
+          && typeof answer.value === 'string' && answer.value.trim())) return false;
+        let candidate;
+        if (before.original.request.input.kind === 'quote_goal') {
+          const latest = basis.provenance.history.at(-1);
+          if (!latest || !isGatewayResult(latest.result) || latest.result.status !== 'completed') throw denied();
+          const { parseQuoteGoalModelOutput } = await import('./quote-goal-input');
+          const partial = originalQuoteGoalParameters(parseQuoteGoalModelOutput(latest.result.text).conditions, basis.provenance.history);
+          const parsed = aiQuoteCandidateInputSchema.safeParse(partial);
+          if (!parsed.success) return false;
+          candidate = parsed.data;
+        } else candidate = applyOriginalQuoteAnswers(before.original.request.input.candidate, basis.provenance.history);
+        const { preparation } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate, basis.original.context);
+        same(basis, await current(before.reference, before.task.taskId, runId));
+        await verify(before);
+        return preparation.status === 'ready';
+      };
+      const currentQuoteAnswer = async (before: Awaited<ReturnType<typeof bound>>,
+        receipt: Extract<Awaited<ReturnType<typeof root.inputs.readSubmission>>, { state: 'observed' }>) => {
+        const basis = await current(before.reference, before.task.taskId, receipt.runId);
+        if (basis.provenance.history.at(-1)?.answers.some(answer => answer.fieldId === 'clarification_text'
+          && typeof answer.value === 'string' && answer.value.trim())) throw unavailable();
+        const access = await model.tasks.resolveAccess(before.task.taskId, 'read_metadata');
+        const fence = await dependencies.db.$transaction(async tx => {
+          const task = await tx.aiTask.findFirst({ where: access.where });
+          const key = { scopeId: task?.scopeId, taskId: before.task.taskId, runId: receipt.runId };
+          const run = task && await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: receipt.runId } });
+          // A prior answer is still readable history, but cannot prepare a new
+          // quotation after a later question/Run or model plan has superseded it.
+          if (!task || task.inputRef !== before.reference.inputRef || task.status !== 'RUNNING' || task.cancelRequestedAt !== null
+            || task.revision !== receipt.taskRevision || !run || run.status !== 'RUNNING' || run.inputReceiptId !== receipt.receiptId
+            || run.resourceOriginRunId !== before.task.runId || run.actorId !== access.actorId || run.actorKind !== access.actorKind
+            || run.leaseOwnerId !== null || run.leaseExpiresAt !== null
+            || await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, sequence: { gt: run.sequence } } })
+            || await tx.aiTaskRunPlan.findFirst({ where: key }) || await tx.aiTaskActionInput.findFirst({ where: key })
+            || await tx.aiStep.findFirst({ where: key })) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          return requestFingerprint({ taskId: task.id, revision: task.revision, eventCursor: task.eventCursor.toString(),
+            runId: run.id, runRevision: run.revision, fencingToken: run.fencingToken.toFixed(0), inputReceiptId: run.inputReceiptId });
+        });
+        if ((await model.tasks.resolveAccess(before.task.taskId, 'read_metadata')).bindingKey !== access.bindingKey) throw denied();
+        same(basis, await current(before.reference, before.task.taskId, receipt.runId));
+        return { basis, fence };
+      };
       return Object.freeze({ async start(value: unknown, signal?: AbortSignal) {
         const original = structuredClone(value);
         const alreadyAborted = signal?.aborted;
@@ -401,6 +450,29 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         // The answer successor has no published plan yet. Supply the original
         // preparation proof before the runner meters its held publication.
         const definition = await observe(() => preparationDefinition(before), signal);
+        if (before.original.request.sceneCode === 'quote_clarification' && run.inputSource === 'original_scene') {
+          const receipt = snapshotAiTaskInputSavedReceipt(await observe(() => root.inputs.submit(submission), undefined, true), submission);
+          await observe(() => verify(before), undefined, true);
+          if (receipt.replayed || signal?.aborted) return freezeOriginalInput({ receipt,
+            continuation: { kind: 'not_started' as const, reason: receipt.replayed ? 'receipt_replayed' as const : 'host_aborted' as const } });
+          let continuation: AiTaskApplicationResumeResult['continuation'] | { kind: 'not_started'; reason: 'quote_parameters_ready' };
+          try {
+            const observed = await observe(() => root.inputs.readSubmission(submission), undefined, true);
+            if (observed.state !== 'observed' || observed.receiptId !== receipt.receiptId || observed.taskId !== receipt.taskId
+              || observed.requestId !== receipt.requestId || observed.taskRevision !== receipt.taskRevision) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            // The durable human successor is still unplanned. Complete Core
+            // parameters hand it to explicit quotation/selection; starting a
+            // redundant model here would occupy the Run needed by that host.
+            continuation = await observe(() => readyQuoteParameters(before, observed.runId), signal)
+              ? { kind: 'not_started', reason: 'quote_parameters_ready' }
+              : await application(before.reference, definition).start({ taskId: receipt.taskId, runId: observed.runId }, signal);
+          } catch (error) {
+            continuation = { kind: 'unavailable', errorCode: error instanceof AiTaskRepositoryError || error instanceof AiTaskRunnerError
+              ? error.code : 'AI_STORAGE_UNAVAILABLE' };
+          }
+          await observe(() => verify(before), undefined, true);
+          return freezeOriginalInput({ receipt, continuation });
+        }
         const receipt = await application(before.reference, definition).resume(submission, signal);
         await observe(() => verify(before), undefined, true);
         return freezeOriginalInput(receipt); // The original app keeps receipt and continuation distinct.
@@ -424,11 +496,13 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const { before, receipt } = await answer(value);
         if (before.original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, preparation: 'unavailable' as const });
-        const basis = await current(before.reference, before.task.taskId, receipt.runId);
+        const { basis, fence } = await currentQuoteAnswer(before, receipt);
         const candidate = originalQuoteCandidateFromAnswers(before.original.request, basis.provenance.history);
         const { preparation, sources } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate, basis.original.context);
         const first = preparation as unknown as Record<string, unknown>;
-        same(basis, await current(before.reference, before.task.taskId, receipt.runId));
+        const closing = await currentQuoteAnswer(before, receipt);
+        same(basis, closing.basis);
+        if (fence !== closing.fence) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         await verify(before);
         return freezeOriginalInput({ original: before.original.receipt, receipt, candidate, preparation, sources,
           inputFingerprint: requestFingerprint(candidate), quotation: 'not_attempted' as const,
@@ -443,7 +517,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const { before, receipt } = await answer(query);
         if (receipt.state !== 'observed') throw unavailable();
         if (before.original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        const basis = await current(before.reference, before.task.taskId, receipt.runId);
+        const { basis, fence } = await currentQuoteAnswer(before, receipt);
         const candidate = originalQuoteCandidateFromAnswers(before.original.request, basis.provenance.history);
         const { preparation } = await scenes.tools.quote.businessPreparation.reviewAnsweredParameters(candidate, basis.original.context);
         if (preparation.status !== 'ready') return freezeOriginalInput({ receipt, preparation, quotation: 'not_attempted' as const });
@@ -451,12 +525,21 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         // candidates offered before these human answers changed its fingerprint.
         if (preparation.selectionRevision !== parsed.data.selectionRevision
           || requestFingerprint(preparation.request) !== parsed.data.inputFingerprint) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        same(basis, await current(before.reference, before.task.taskId, receipt.runId));
+        const closing = await currentQuoteAnswer(before, receipt);
+        same(basis, closing.basis);
+        if (fence !== closing.fence) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         await verify(before);
         const result = await scenes.tools.quote.preview.previewOriginal(preparation.request, {
           reference: `scene-answer:${before.reference.inputRef}:${receipt.receiptId}`,
           expectedIdentityHash: originalIdentityHash(before.original.context)
-        }, preparation.configurationFingerprint, false, preparation.addressFingerprint);
+        }, preparation.configurationFingerprint, false, preparation.addressFingerprint, async () => {
+          const dispatch = await currentQuoteAnswer(before, receipt);
+          same(basis, dispatch.basis);
+          if (fence !== dispatch.fence) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        });
+        const completed = await currentQuoteAnswer(before, receipt);
+        same(basis, completed.basis);
+        if (fence !== completed.fence) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         await verify(before);
         return freezeOriginalInput({ original: before.original.receipt, receipt, result,
           observation: 'explicit_clarified_quote_request' as const, inventoryReservation: 'not_attempted' as const,
@@ -476,6 +559,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       }, async continueAnswer(value: unknown, signal?: AbortSignal) {
         const { before, receipt } = await answer(value);
         if (receipt.state !== 'observed') return freezeOriginalInput({ receipt, continuation: 'unavailable' as const });
+        if (before.original.request.sceneCode === 'quote_clarification' && run.inputSource === 'original_scene'
+          && await observe(() => readyQuoteParameters(before, receipt.runId), signal)) return freezeOriginalInput({ receipt,
+            execution: { kind: 'not_started' as const, reason: 'quote_parameters_ready' as const },
+            businessExecution: 'not_inferred_from_model_result' as const });
         // Exact original successor only: start retains current claim/lease,
         // plan, unknown and original cumulative-resource checks. No resubmit.
         const definition = await observe(() => preparationDefinition(before), signal);
@@ -771,7 +858,7 @@ export function composeOriginalSceneClarificationSource(input: {
         if (basis.original.request.sceneCode !== 'quote_clarification') throw unavailable();
         // The same deterministic consumer used by successor preparation validates
         // human parameters. It does not quote, approve or create an order here.
-        const candidate = originalQuoteCandidateFromAnswers(basis.original.request, basis.history);
+        const candidate = originalQuoteCandidateFromAnswers(basis.original.request, basis.history, basis.resultPayload);
         applyOriginalQuoteAnswers(candidate, [{ contract: submittedContract, answers: submittedAnswers }]);
         return { disposition: 'business_parameters' as const, planHash: command.planHash,
           inputRef: command.inputRef, inputHash: command.inputHash,

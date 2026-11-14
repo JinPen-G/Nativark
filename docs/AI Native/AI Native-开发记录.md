@@ -6,6 +6,42 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-current-human-parameters-order-handoff-20261114"></a>
+## AIN-15 当前人类参数、报价后继和一次批准开单（2026-11-14）
+
+原目标未完检查点 `fce0526dc45790ff838153734fd3981e83aca866` 已普通推送并回读 GitHub。Root 在该固定前像上修后继参数，不修改 Core 计价、库存、原选单／批准／幂等比较。AIN-25 两叶、未知员工样式继续排除；本片不代表 AIN-15 四品类全文收口，任务仍保持75%。
+
+[原参数重建](../../apps/api/src/modules/ai-native/scenes/original-quote-goal-parameters.ts)保留原历史的遗漏名称和全部已选行；模型省略／缩短数组不表示人类删行。新提取名称变化撤回旧ID，普通回答校验使用当前绑定的真实 Artifact 结果，行指纹仍严格匹配。数量以原整数回答为确认依据，新的冲突清除旧数量并要求再次回答；原模型建议3、人类选2后重复建议3可以保留2，但新的非空人类补充“改3”推进原轮次，不能因建议等于旧anchor继续保2。[候选 Reader](../../apps/api/src/modules/ai-native/scenes/quote-goal-projection.ts)仅内部受权查询消费这些原历史名称，公开 current candidates 保持原模型输出，不把历史词语变成新选择或授权。
+
+[原模型应用](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)的公开 resume 先持久化原人类回答并核精确收据；当前 Core 参数 ready 时保留未发布计划的原后继，返回 `not_started/quote_parameters_ready`，由既有报价／选单入口明确继续。缺项或最新非空补充仍沿原模型后继澄清；replay、abort、unknown 不重派。原 continue 在 ready 时只观察，不发布模型计划。原选单冲突实际发生在 select 保存阶段：旧驱动先 resume 启动模型，原仓储正确拒绝已有 plan/input 的Run。沿该路由修复后，普通 resume 的最后回答即可进入原报价／批准／订单链，不另建执行器或放宽选单。
+
+独立复核又发现旧回答能在新 quantity 问题待答时准备旧数量2；Root用实际链复现后，给新 preparation／confirm 增当前回答围栏：同原收据、当前Task修订、最新 RUNNING 后继、没有plan/input/step、没有持有租约及未处理新补充；当前权限和行快照在读取前后重核。旧 readAnswer 与已发生的 readClarifiedQuoteReceipt 保持历史观察，不续权或重报。[原 QuotePreview](../../apps/api/src/modules/ai-native/quote-preview.service.ts)只新增可选服务端复核回调，在最后原 Guard／配置／地址等待后、R1调用前核同一回答围栏；函数不进入 HTTP／模型输入，不给调用方执行许可。
+
+[原澄清组件](../../apps/admin/src/features/ai-native/TaskClarification.tsx)按明确ready状态显示“核对原参数并生成报价，尚未批准或建单”，隐藏该状态下的冗余模型continue，原回答收据仍单独读取；其它问题／unknown／撤权行为保持。英文文案同步原 locale，未新增页面或视觉体系。
+
+| 必要验证 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| 原行保留、当前结果／旧结果／伪造行指纹及相同旧建议的新数量冲突 | `4831ef450a4c9124407e2cb908a901a2e1bf8014bf0fb5eff1c5d0bfd12755b4`，退出0；两行保留，新冲突须原整数回答，旧／伪造基线拒绝。该组直接消费实际参数叶，分类夹具不是生产授权。 |
+| 正式 resume→ready→原键重复／明确continue→选单→批准→Core订单及原结果 | `15b97036d16a67877acd434b501759b501f18b87231b2d6e3ff5920d8647fc16`，退出0；原Task三Run，模型2次、原报价1张、订单1张、审批消费1次，Core原结果 committed。同键重读不增模型，选单／批准前订单0。 |
+| 数量2→人类补充3→原模型／持久quantity问题→明确整数3→Core报价 | `99505a3b6ccae156992bd9e8ee148de0d546d511a8105fca17a8afe352309272`，退出0；3模型、1报价，Core原line数量3；未将模型提取3当确认。 |
+| 旧回答与新的未处理／待答问题 | 反例 `fd76ab5fd56892891331fb9c9cb8b0a05920233d6c3aa8dcf60a268f21046130` 退出1，原Task WAITING_INPUT却旧准备ready／数量2；修复组 `9d8467585b938fb061607d0854aa5ec6a54a04a8415c465c56d4d45aaa28a250` 退出0，新prepare／confirm拒绝，原history observed，报价0。 |
+| 最后原报价Guard等待期间当前回答修订改变 | `9f3d7dbb8ece9087ac29ad99e8c6ecda6c84d719698eb255c1da97295b72cf63`，退出0；第3个原Guard等待变更Task，实际服务端回调拒绝R1，报价0、模型仍2。 |
+| 实际 TaskClarification 有限React宿主 | `5d2c8b03105c64228c28d39284e2551f192ad73e4cde175c5d4754e1578c1b34`，退出0；问题读2、回答提交1、模型continue0，ready提示可见，独立原收据返回后继，切身份撤回。未称浏览器实测。 |
+| 最终公共生产及后台类型 | `49f3d30e97cb959dd9f03199e8deb6f82f2e69d8c59a9920c4d648b9083ff420`，TypeScript5.9.3，API4根／1875源、后台5根／1567源零诊断，退出0。 |
+
+保留原失败：驱动误认为prepareSelection失败，按原应用和位置核实是select保存被已有模型计划拒绝；明确声明原 order.commit 工具政策后实际开单1次，末断言误expect observed而正式返回committed，修驱动后通过。直接参数反例曾漏必答客户字段，有限UI宿主曾把draft写成values、漏嵌套数组、每读重造expiry、把resume的runId null误当原收据后继；均按真实契约修内存驱动，不放宽生产字段或断言。独立源码复核第一轮提出旧回答及同anchor反例，Root分别实证／修复。最终独立助手只读六源，确认两个新增P2及最后R1回调闭合，未发现本片新增明确安全／兼容缺口；没有重跑行为测试，不冒称独立行为重跑或AIN-15全文通过。
+
+| 最终源码 | 独立复核与Root核同的Git blob |
+| --- | --- |
+| original-quote-goal-parameters.ts | `c416a7bceaefed4cd127f4a2eba74f8435d348d6` |
+| quote-goal-projection.ts | `3f6709c900035924b58a413a967c421b397cf2a2` |
+| original-scene-model.composition.ts | `9a32952f9f6afdc0f95a1ead92553897478e2381` |
+| quote-preview.service.ts | `5b27ebbc45ad08e471afff5bafbaecdc9d856e2a` |
+| TaskClarification.tsx | `dabcd06d6ef1dbd9ffdfc5832842831c649e11e6` |
+| management-locale.ts | `885750f758c62480f908af31b682c68141c958ee` |
+
+所有本片验证为 `node --no-compilation-cache -`、原offline preload、不可达DATABASE_URL及内存audit，没有新增／扩写测试脚本。Root进程退出、audit0，单任务临时目录未创建，没有client／dist、依赖副本、数据库或后台服务残留。原组件清单badHashes0，Impeccable仅检查改动组件／locale输出空；这不是视觉或浏览器验收。AIN-15仍需四品类正常与条件变更完整组合、原全文及独立最终核定，真实数据库、浏览器、供应商由负责人实测；ENTRY和本轮原任务百分比不变。
+
 <a id="ain15-goal-original-chain-checkpoint-20261114"></a>
 ## AIN-15 原目标受理、模型澄清和 Core 报价未完检查点（2026-11-14）
 
