@@ -1,4 +1,4 @@
-import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { requestFingerprint } from '../../common/request-fingerprint';
 import type { TenantIntegrationRuntimeConfig } from './tenant-integration.service';
 
 /** Checks the server's original freeze evidence, not current object existence or

@@ -1,8 +1,10 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { createHash } from "node:crypto";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+
+// 旧消费者保留此出口；公共指纹已独立，避免平台工具为了计算摘要加载租赁仓储。
+export { requestFingerprint } from "../../common/request-fingerprint";
 
 export type RentalIdempotencyTx = Prisma.TransactionClient;
 
@@ -29,23 +31,6 @@ export interface RentalIdempotencyStore {
   ): Promise<void>;
   /** 兼容旧维护端口；没有永久操作墓碑及获批保留依据时拒绝按时间批量删除。 */
   deleteOlderThan(cutoff: Date): Promise<number>;
-}
-
-/** 请求体指纹：键名排序后再序列化，避免字段顺序不同被判成不同请求。 */
-export function requestFingerprint(payload: unknown): string {
-  const normalize = (value: unknown): unknown => {
-    if (Array.isArray(value)) return value.map(normalize);
-    if (value && typeof value === "object") {
-      return Object.keys(value as Record<string, unknown>)
-        .sort()
-        .reduce<Record<string, unknown>>((acc, key) => {
-          acc[key] = normalize((value as Record<string, unknown>)[key]);
-          return acc;
-        }, {});
-    }
-    return value;
-  };
-  return createHash("sha256").update(JSON.stringify(normalize(payload) ?? null)).digest("hex");
 }
 
 /**

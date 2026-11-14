@@ -2,13 +2,13 @@
 
 建立日期：2026-10-31。
 
-> 本册只记录阶段成果、缺口和证据，不修改需求/任务。工程尚未启动，文档不计研发完成；百分比只见[开发任务](平台Core接入-开发任务.md)。最新写入范围和下一入口见[协作接续](平台Core接入-协作接续.md)。
+> 本册记录阶段成果、缺口和证据。负责人已授权开始拆分，当前为 PCH-01/02 的依赖核定、独立清单合同与兼容抽取阶段；百分比只见[开发任务](平台Core接入-开发任务.md)。最新写入范围和下一入口见[协作接续](平台Core接入-协作接续.md)。
 
 ## 1. 依据与来源
 
-- [需求v1.2](平台Core接入-需求.md)、[开发任务v1.2](平台Core接入-开发任务.md)。
+- [需求v1.3](平台Core接入-需求.md)、[开发任务v1.3](平台Core接入-开发任务.md)。
 - [接口与生命周期设计](平台Core接入-开发任务.md#contract-design)、[接入指南](平台Core接入-开发任务.md#integration-guide)：随本次需求澄清更新，仍为实施准备，非已发布SDK/API。
-- 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.2正文。
+- 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.3正文。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
 ## 2. 文档定界与接手准备阶段（2026-10-31）
@@ -77,6 +77,71 @@
 ## 3. 后续记录规则
 
 每个完整阶段记录任务ID、固定源码/合同、真实入口和直接消费者、数据/权限/事务边界、已做/剩余、实际命令与退出码、验证层级和残留。近期保留最近一个月，超期先移入本专项`历史归档/开发过程/YYYY-MM.md`再移出近期区，未解决事项保留摘要；不另建“最新总计划”或逐次修复流水。
+
+<a id="core-contract-first-20261114"></a>
+
+## 底座拆分开工：独立清单合同与兼容指纹抽取（2026-11-14）
+
+### 授权、主线与写入范围
+
+负责人明确“开始拆吧”，并要求持续维护接入手册、使用最新 main、只做必要测试且写入规则。复用 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，从当时实际远端/main `4720db2a8aa1d4c82e3cdabe62ef062dc06c3768` 新建 `codex/platform-core-extraction`。原准备树干净、暂存区为空、无合并/拣选状态，原 `1663171c1` 已在主线，未复制环境或旧工作目录。
+
+负责人提醒后再次 `git fetch origin main` 并核对 `ls-remote`。主线后继 `6ca19ac34a3260405ba24388a4aa2a933450e70b` 只涉及后台语言/主题图标及原记录，执行 `git merge --ff-only` 前进到该版本，17 个本片已有修改/新增文件的 SHA-256 前后相同。源码与 schema 清单按该新基线核定；后续阶段开始前继续读取实际 main，只整合已提交固定增量，保护本片 WIP。
+
+PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock 条目、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 及 Rental 幂等仓储的等价兼容再导出。shared 总 index、OpenAPI、AuthGuard、AppModule/AI providers 与 AI 任务目录仍归 AI/PM 既有窗口。AI 不需停工或同步改旧出口；下一片的公共接点先列于原接续，由 PM 主动核定。当前消息未要求回复，没有跨对话通报。
+
+### 01：实际依赖、数据与消费者基线
+
+以新基线 Git 文件集检索源码类文件，得到 9,789 项，其中保留的上游 Harness 为 6,133 项，剩余 3,656 项是自有/引入组件/原型/测试的待归属集合，不能全部当自有代码。API 964、shared 144、后台 665、客户小程序 202、员工小程序 205、客户网站 71、企业门户 44、MCP 59、Harness 插件 12、脚本 46、测试/fixture 793；其他组件、营销站和原型沿原目录保留。此为全文件集合与模块定位，尚非逐文件逻辑、注释和接口全覆盖验收。schema 有 238 个模型、259 份历史 SQL 迁移，未执行或改写。
+
+用 TypeScript AST 读取固定 API/shared 源码的 import 和可静态识别的仓储调用。指向 `rental-core/` 的 import 声明包括组合 AppModule 41、common 2、OpenAPI 1、Auth 8、平台域 16、订阅 1、文件 3、集成 9、客户 API 16、企业 41、AI 474。数量含类型引用，不代表全部都是错误依赖；AppModule 的显式组合、Core 业务适配和公共内部依赖须分别判断。没有依靠该计数删除文件或改业务。
+
+| 实际链路 | 原行为、数据所有者与第一处要拆的连接 | 本片结果及后续验证 |
+| --- | --- | --- |
+| [启动](../../../apps/api/src/main.ts) → [AppModule](../../../apps/api/src/app.module.ts) → 各服务 | 当前启动执行环境加载与监听，组合直接注册 Rental/AI/企业及公共服务；不适合作为离线导入入口 | 本片不加载启动。03 后续拆受控宿主，保留原组合及单一作业执行者 |
+| [Auth](../../../apps/api/src/modules/auth/auth.service.ts) → [平台仓储](../../../apps/api/src/modules/platform/platform.repository.ts) → 会话/ALS | `findUserForLogin` 查询 tenant 时带 rentalProfile；Auth 注入 WorkspaceCapabilityService；可信主体、会话与当前角色来源必须保留 | 登录/租户普通设置仍依赖 Rental。下一片先固定公共身份与 Rental 业务范围适配，不删原 Guard 条件 |
+| [平台服务](../../../apps/api/src/modules/platform/platform.service.ts) → `bootstrapTenant/createTenantBusinessWorkspace` | 创建租赁租户/空间使用同事务 Rental 初始化回调；缺回调明确拒绝，提交后才刷新缓存 | 原行为保持。将公共租户初始化与 Rental 绑定分开需独立入口和同事务合同，不能直接把回调改成可选成功 |
+| [订阅](../../../apps/api/src/modules/subscription/subscription.service.ts) → 租户统一期限/权益 | Subscription/FeatureGrant/Event 属平台商业事实；品类可用性另引用 Rental category-identity | 保留统一期限、善后及撤权。行业可用性后续经已登记适配供给，不复制收费模型 |
+| 平台仓储 → 用户/角色/组织；会员与企业结算 → Rental 事实 | Tenant/User/AuthSession/Role/Permission/OperationLog 等是公共候选；BusinessWorkspace/WorkspaceMember、租赁客户会员/企业资格/授信与订单仍有业务约束 | 核出平台目录还写 RentalOrder、品类采用与会员业务。后续逐所有者分离，不能整目录搬成通用层 |
+| [审计](../../../apps/api/src/common/operation-log.service.ts) / [文件绑定](../../../apps/api/src/modules/integrations/file-content-binding.ts) → 请求指纹 | 两者为计算摘要反向 import Rental 幂等仓储，加载了无关 ORM/业务依赖 | 本片改到纯公共函数；原仓储保留相同路径导出，已存指纹不变 |
+| [文件 ACL](../../../apps/api/src/modules/files/file-business-access.service.ts) / [支付运行时](../../../apps/api/src/modules/integrations/payment.runtime.service.ts) | 存储运输与业务归属相邻；Rental 金额、原订单/文件授权、回调账由原业务裁定 | 本片仅抽指纹，不改 payment/file-storage 的企业/AI 活动区域。后续逐业务回调与 ACL 接点拆分 |
+| [Rental](../../../apps/api/src/modules/rental-core/rental-core.service.ts) / [业务服务](../../../apps/api/src/modules/rental-core/rental-business.service.ts) → 原仓储/快照/作业 | 配置、报价/库存/资金、历史版本与原幂等归 Rental；[到期调度](../../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts)在原事务/锁中执行 | 仅保留幂等函数旧出口；算法、事务和原标识未变。原报价配置混用及 fixture 问题仍在 Rental 原接续 |
+| [后台导航](../../../apps/admin/src/app/navigation.tsx) / [路由](../../../apps/admin/src/app/AppRouter.tsx) → [会话](../../../apps/admin/src/features/auth/authStore.ts) / [缓存](../../../apps/admin/src/app/queryClient.ts) | 当前壳识别 Rental 品类/能力，Vite/tsconfig 仍指 shared 源码；会话/租户/空间变化清理并隔离迟到响应 | 本片未改 UI。07 需扩 Core 命名空间并保留旧深链接、主题/语言和未保存保护 |
+| [客户 API](../../../apps/api/src/modules/client/client-api.service.ts) / [企业](../../../apps/api/src/modules/enterprise/enterprise-read.controller.ts) → 网站/门户/小程序 | 现有客户端继续通过原 audience、会员/企业授权和受权订单投影使用 Rental；不能改成租户员工授权 | 作为后续兼容消费者，源码基线已定位，本片未做宿主/浏览器复验 |
+| [AI 组合](../../../apps/api/src/modules/ai-native/ai-native-application.providers.ts) → 原工具/批准/执行/恢复；MCP/Harness消费 | 现有大量指纹引用仍走旧 Rental 出口；它们包含原任务/账/收据语义 | 本片兼容再导出足以保持引用；AI原15/25继续其窗口，不对其批量改 import 或扩大测试 |
+| [shared](../../../packages/shared/src/index.ts) → DTO/[OpenAPI](../../../apps/api/src/contracts/openapi-document.ts)/各端 | shared 同时包含运行时和 Rental/AI 合同，platform.ts 仍引用 Core 类型；不能视为纯平台包 | 新跨业务清单归独立正式包，不复制旧 DTO；新包不反向依赖 shared。原HTTP语义/操作保持 |
+
+上述原功能状态一律区分来源和层级：未运行当前场景记未验，原专项记录中的成功只作固定证据入口；已知失败仍由原专项维护。本片不声称“现有所有功能已验证正常”。后续登录、租户/角色/订阅、Core授权、业务/各端、AI/回调/作业每个受影响切片必须取得前后对照。
+
+最小非租赁样例冻结为简单工单：以租户为范围，不引入经营空间/资金/库存；对象包含标题、说明、创建者、受派成员、`open/in_progress/closed` 状态和修订。基本流程为创建→分派→开始处理→关闭，管理者按角色查看/分派本租户工单，普通成员只读本人创建或获分派对象，正式状态更新需当前授权及修订；同键提交读原收据。样例实际持久化、UI、同租户多 Core 授权与停用恢复待10，当前测试中的 `example-tickets` 仅为清单夹具，不冒充该业务样例。
+
+### 02：已落地的正式契约与兼容抽取
+
+- 新建 [core-contracts](../../../packages/core-contracts/README.md)，正式包名 `@rental-os/core-contracts`，`0.1.0`，唯一字段来源为 [manifest schema](../../../packages/core-contracts/src/manifest.ts)，类型由 Zod 推导。独立包只依赖既有固定 Zod，不引用 shared/Rental/Nest/Prisma；根 lock 只增该 workspace 及其链接，既有依赖记录逐项相同。技术命名沿现有 scope，品牌讨论不触发本片全量改名。
+- [版本与组合检查](../../../packages/core-contracts/src/compatibility.ts)区分底座、合同、Core、数据和 Node；首版兼容范围为确定三段数字版本的闭开区间，支持空/单/多 Core 组合，拒绝重复标识、未知必需能力和不兼容版本。Core 单独升级不修改其他版本，实际迁移/部署仍待后续实现。
+- 清单包含包内入口、可选后台/AI/OpenAPI/作业/事件、权限资源/动作、自有 tenant/container 范围、来源和迁移摘要。[对象引用](../../../packages/core-contracts/src/reference.ts)用元组表示 Core/租户/容器/对象边界，只作定位，不授予权限或替换历史幂等键。
+- [只读目录检查](../../../packages/core-contracts/src/package.ts)及[命令](../../../packages/core-contracts/src/check.ts)检查声明和文件、迁移摘要及指定宿主兼容，输出可读/JSON 与稳定退出码；不加载 Core 代码。下载/安全解压、完整包摘要锁定、实际模块合同/装配、权限/生命周期/事务及 HTTP 贡献尚未交付，不能称可安装业务 SDK。
+- [请求指纹](../../../apps/api/src/common/request-fingerprint.ts)从原 Rental 仓储等价移出，函数正文与新基线逐字符（只归一换行）相同；审计和文件绑定改消费公共入口，Rental 原路径再导出。既有 JSON/排序/异常语义全部保留，不借抽离修历史指纹算法。
+- [接入说明](../../../packages/core-contracts/README.md)与命令同片交付，明确当前可执行的清单/目录检查、错误定位、版本与源码路线。完整五步手册仍在原任务内维护，后续依据实际可运行宿主/样例生成随包指南；不另建手写第五册，不让 Agent 将待开发步骤当成已可执行命令。
+- 根 [AGENTS](../../../AGENTS.md#修改验证与交付)按负责人要求强化“只做必要测试，不编写大量测试脚本”。本片清除自己新写的单独运行器，保留一个合同测试文件及全部有效断言；该检查没有已有入口可替代。原业务测试不新增/扩写；指纹对照通过 stdin 短命令完成。
+
+### 实际验证、缺口与交付边界
+
+| 验证 | 实际结果 | 证明范围 |
+| --- | --- | --- |
+| `node --no-compilation-cache --test packages/core-contracts/test/core-contracts.test.cjs` | 8组通过，退出0 | 使用本树实际 TS 编译产物，类型/反向行业依赖、版本/范围/对象隔离、目录/链接/摘要和CLI；没有租户/持久化/业务成功假设 |
+| `node --no-compilation-cache -` 指纹前后对照 | 退出0，22个输入/异常对照与原函数正文相同，文件绑定实际消费者结果相同 | 新旧摘要字节、边界输入、异常类型与原出口；未执行资金或任务 |
+| `node --no-compilation-cache -` 公共指纹类型检查 | 退出0 | 新公共文件完整类型；不等同全API/客户端组合构建 |
+| `node --no-compilation-cache -` 原仓储出口导入 | 退出0，新旧出口为同一个函数，未加载Prisma | 通过既有ts-node只读编译、不启用测试装饰器元数据；验证原导入路径兼容，不等同Nest生产装配 |
+| lock JSON逐项对照 | 退出0，只增两个workspace记录 | 既有依赖/锁定未改变；本片未安装依赖 |
+| Git状态与更新 | 远端main核定为`6ca19ac34`，本树从4720快进且WIP哈希保持 | 只更改独占分支；main索引和其他树未写 |
+| `node --no-compilation-cache -` 文档定向核对 | 退出0，4份改动文档191本地链接/26锚点无新增问题；任务正文与进度原文未变 | 复用原检查器API，稀疏树外目标以同一固定Git树只读核定；不改检查规则 |
+| 原 `validate-docs.cjs` 白名单逻辑，固定Git补足稀疏目标 | 11份可读，3个既有历史附件缺失 | 缺失仍为总导航第54行原三附件；未删引用、伪造历史或称全库文档通过 |
+| 原 `mcp-original-audit.test.cjs` 的隔离执行/退出清理 | 执行前被自动审批拒绝，返回 `blocked by policy`，无进程退出码 | 命令未启动，`output/.tmp/pch-fingerprint`不存在；本片原MCP审计回归未验，没有换壳/绕过拒绝 |
+
+测试只读使用主树已有且与锁文件匹配的 TypeScript 5.9.3、Zod 3.25.76、@types/node 22.20.1，经本轮命令的 `NODE_PATH` 定位，无跨树 junction 或复制 node_modules，产品/测试代码不硬编码其他树路径。正式声明仍使用 npm workspace 和锁文件。全部测试编译与夹具集中在本树 `output/.tmp/core-contracts`，测试 `after` 清理并确认移除；stdin核对不落脚本。不读取 `.env`、不连接数据库/供应商/模型、不启动服务，没有新后台进程。
+
+本片是01/02的首个独立实现阶段。完整数据所有者/迁移链、所有消费者逐项核验和业务基线尚未完成，02的运行模块/当前授权/生命周期/受限事务及真实双Core消费者也未齐；因此不凭新增文件或8组测试提高原任务百分比，仍由原门槛核收。完整API构建、真实持久化/浏览器、独立接手、迁移/恢复和独立审查未实施。后续公共窗口与具体下游入口见现行接续。
 
 
 ## 四册归并（2026-10-31）

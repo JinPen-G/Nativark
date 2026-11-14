@@ -1,0 +1,32 @@
+{
+  "name": "@rental-os/core-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "平台与业务 Core 共用的清单、版本和对象引用契约",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package": {
+      "types": "./dist/package.d.ts",
+      "default": "./dist/package.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/core-contracts.test.cjs",
+    "check": "node dist/check.js"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

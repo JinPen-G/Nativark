@@ -9,7 +9,7 @@ import { getRequestWorkspaceId } from "./request-identity";
 import { isDeepStrictEqual } from 'node:util';
 import type { OriginalCatalogGoalIntentAudit } from '@rental-os/mcp-server/prisma-mcp-catalog-goal-intents' with { 'resolution-mode': 'import' };
 import { AI_SCENE_CODES } from '@rental-os/shared';
-import { requestFingerprint } from '../modules/rental-core/rental-idempotency.repository';
+import { requestFingerprint } from './request-fingerprint';
 
 export interface OperationLogInput {
   tenantId?: string;
