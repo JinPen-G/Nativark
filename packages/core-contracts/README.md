@@ -2,7 +2,7 @@
 
 这个包让底座和业务 Core 使用同一份清单、版本规则和对象引用。正式入口为 `@rental-os/core-contracts`；目录检查使用 Node 专用出口 `@rental-os/core-contracts/package`。包不导入 Rental、Nest、Prisma 或模型 SDK。
 
-**目前已实现清单、静态包检查与 OpenAPI 贡献组合。** 普通业务宿主、注册授权、页面和持久化样例仍在拆分中。下面的检查可以运行；检查通过不代表 Core 已安装或业务可用。完整接入手册在[五步快速接入](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)随实现维护。
+**目前已实现清单、静态包检查、OpenAPI 贡献组合及服务端注册合同。** 普通业务宿主、授权持久化、页面和业务样例仍在拆分中。下面的检查可以运行；检查通过不代表 Core 已安装或业务可用。完整接入手册在[五步快速接入](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)随实现维护。
 
 ## 先检查一个 Core 包
 
@@ -58,9 +58,30 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 保留 Rental 旧路径时，受控宿主可给检查器/组合器传入属于该 Core 的精确 `METHOD /path` 白名单；这个例外由宿主维护，不在 Core 清单中提供，也不会创建或放宽任何路由授权。静态检查命令默认使用新 Core 命名空间。原 operationId/schema 名称的兼容映射尚待实际迁移片核定，目前没有替换原主应用文档。
 
+## 提供服务端贡献
+
+包的 `entries.server` 指向本 Core 的服务端入口。受控宿主从该入口直接导入真实实现，并把实例作为 `CoreServerRegistration.server` 传给 `registerCoreServers(registrations, hostVersions)`。检查器没有 `load(path)`，不会拿清单中的字符串直接执行代码。
+
+[服务端合同](src/server.ts)要求贡献的 `coreId`、`implementationVersion` 与清单一致。它只承担公共生命周期需要的窄接点，订单、工单等业务 API 继续使用各自的类型化 Controller/应用服务。
+
+| 接点 | Core 提供什么 | 宿主负责什么 |
+| --- | --- | --- |
+| `resolveScope` | 根据当前主体验证本 Core 的租户/容器范围，返回绑定、拒绝或未建立绑定 | 原认证、租户 Core 授权、适用成员分配；不能把客户端提交的标识视为可信身份 |
+| `readReadiness` | 读取当前业务配置，返回就绪、明确缺项或不可用 | 分别表达授权、绑定和业务就绪，不因注册成功就显示业务可用 |
+| `initialization`，可选 | 仅需要初始业务事实时提供；用 `defineCoreInitializer` 按自己的 schema 解析输入一次 | 锁定原操作、当前权限和候选绑定，在同一事务内写绑定、业务初始事实及审计；提交后发布可见变化 |
+| `assessRemoval`，可选 | 返回在途、unknown、回调、作业和历史读取阻碍 | 汇合平台自身依赖；缺少检查器或存在阻碍时不能移除代码 |
+
+`registerCoreServers` 支持空组合和多个不同 Core，检查失败返回 `issues`，不会返回部分注册表；成功返回 `registrations`。注册不会调用上述业务方法，也不会创建数据库记录、路由、定时任务或 AI 工具。现有 Nest 组合与持久化服务接线仍待宿主切片；当前函数通过不表示主应用已完成拆分。
+
+[授权与生命周期 schema](src/lifecycle.ts)分别定义租户 Core 授权、成员分配、绑定、就绪和原操作引用。已保存事实的修订从 1 开始；变更请求的 `expectedRevision=0` 只表示记录尚不存在。成员分配请求不包含 `tenantId`，由当前租户身份确定管理边界。合同不定义 Core 独立到期日，统一期限继续由原订阅服务维护。
+
+`CorePrincipal` 仅是原认证服务解析后的主体定位，不携带可自报的权限数组。`CoreTransaction` 是宿主事务回调内的临时句柄，适配器只解析成当前 Core 的受限仓储，回调结束后失效；类型标记不能替代运行时校验。目前只定义该合同，尚无可供业务调用的通用事务执行器。
+
+停用只关闭对应普通业务和新 Agent 任务；数据、绑定、成员撤权及原收据继续保留。恢复先读取原绑定并复核当前条件，不调用首次初始化。`CoreOperationReference` 只定位原操作，不能根据超时、程序重启或再次开通认定旧操作未执行。
+
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts)。[命令入口](src/check.ts) → [目录检查](src/package.ts) → 同一清单与 OpenAPI schema。目录检查不会解释或执行模块入口。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts)。[命令入口](src/check.ts) → [目录检查](src/package.ts) → 同一清单与 OpenAPI schema。目录检查不会解释或执行模块入口。
 
 ```sh
 npm test -w @rental-os/core-contracts

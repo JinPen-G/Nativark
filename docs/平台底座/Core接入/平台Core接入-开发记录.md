@@ -145,6 +145,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
 
+<a id="core-server-contract-20261114"></a>
+
+## Core 服务端注册与生命周期合同（2026-11-14）
+
+负责人要求设定持续目标并完成原 PCH-01～12 拆分。目标已建立，工程继续同一独占树和 `codex/platform-core-extraction`，本片基线为已推送 `8d0abba954a31f8aee36cdcd97eb710466e783dc`；当日 `git fetch origin main` 与 `git ls-remote --heads origin main codex/platform-core-extraction` 核定 main 仍为 `6ca19ac34a3260405ba24388a4aa2a933450e70b`，本树已包含该版本，工作区/索引起点干净且无合并/拣选状态。目标不扩大既有公共文件写入窗口或真实环境权限。
+
+[生命周期合同](../../../packages/core-contracts/src/lifecycle.ts)将平台持有的租户Core授权、成员分配、业务绑定和原操作引用分别定义为唯一schema/推导类型。保存记录修订从1开始，变更请求0表示不存在；成员分配请求不接受租户字段，管理范围由原认证确定。Core就绪明确为ready、configuration_required（非空缺项）或unavailable，授权/注册不替代就绪；无Core独立期限、收费或自动恢复成员权限字段。初始化、持久化、当前撤权与同事务审计尚待真实宿主供给，schema不是认证凭证。
+
+[服务端合同](../../../packages/core-contracts/src/server.ts)定义受控组合传入的真实服务实例和最小范围/生命周期接点。`registerCoreServers`核对唯一ID、宿主兼容、清单/实现版本及必需函数；空组合合法，错误不返回部分注册表，注册过程中不执行Core函数、不加载路径、不授予使用权。业务命令和HTTP/AI/作业仍经所属Core原正式入口，不引入万能`execute(action, JSON)`。
+
+`defineCoreInitializer`将Core自己的schema解析集中在初始化输入边界，下游取得已验证类型。可选初始化只表示Core是否需要初始领域事实，宿主仍须真实写入绑定与审计。`CoreTransaction`仅为受限、回调内句柄合同；后续适配须在运行时核对所属Core/当前事务与有效期，不把类型标记或完整Prisma client当安全隔离。缺少`assessRemoval`时不能批准代码移除；unknown/在途/回调/作业/历史依赖均显式表达，重新开通不重放原操作。
+
+实际复核原[Auth/可信主体](../../../apps/api/src/modules/auth/auth.service.ts)、[请求身份](../../../apps/api/src/common/request-identity.ts)、[平台仓储](../../../apps/api/src/modules/platform/platform.repository.ts)及[订阅](../../../apps/api/src/modules/subscription/subscription.service.ts)：登录仍加载Rental档案，Auth仍注入空间能力，初始化仍在原事务内调用Rental，期限仍由原SubscriptionService计算。新合同没有替换这些生产路径。后续候选须保留原Auth/Guard/ALS、原租户和角色映射，并将Rental范围/品类逻辑收在适配器中；不能用当前schema通过称无Core已可登录。
+
+必要验证使用原单一合同入口（8组、退出0，含新增源码类型与反向依赖检查），以及一次stdin运行时核对（退出0）：空/双Core、同ID、身份/实现版本冲突、缺必需函数/错误可选贡献、不执行生命周期函数；授权禁额外到期日、持久修订不能为0、成员请求禁自报租户；缺项非空；初始化错误输入不进领域回调且每次只解析一次。此为离线合同证据，不是真实授权、初始化事务或服务器组合验收。未新增测试脚本，原单一入口退出时清理本树临时产物；stdin不落文件。
+
+[模块接入说明](../../../packages/core-contracts/README.md)与源码同片维护函数、职责、调用顺序和未接线范围。完整数据/消费者基线及真实双Core消费者尚未齐，02的身份/公共服务/事件与正式运行接点继续待交付，原任务门槛本片不跨档。公共文件候选与待授权接线见现行接续；首段原MCP审计的自动审批拒绝继续保留，未以本片合同核对替代该回归。
+
+本片3份文档定向本地链接检查退出0，原需求/任务正文对照未变，原白名单仍只有总导航第54行3个历史附件缺失。首次临时核对因全库`ls-tree`输出超过Node默认缓冲而退出1，未改源码；只调整stdin读取缓冲后复核退出0，没有新增脚本或落地清单。`git diff --check`退出0，`output/.tmp/core-contracts`确认已删除，无新服务或其他一次性产物。
+
 <a id="core-openapi-contract-20261114"></a>
 
 ## Core API 文档贡献与独立组合（2026-11-14）
