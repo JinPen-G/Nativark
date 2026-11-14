@@ -6,6 +6,33 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain21-public-continuity-http-20261114"></a>
+## AIN-21 匿名公开材料、明确登录续接与正式HTTP装配（2026-11-14）
+
+从本地／GitHub已核同的 `b6cfd373e05abf49cd1652fee0786555fb380734` 接本阶段。原客户Application已有 `readPublic(catalog/help)`，但标准入口强制Bearer，不能把私有叶存在当匿名可用。dev1原五条安全核查的行为 `e2eed4efe7078abfc04b0177c5d278e31d71536465e54eb6a499331910655740`、类型 `df0ec3a9da2bcbe9bb4c27bccf15df5d826e3c8c20ca4e90ea4522a570401539`、限流 `a878f177e5a99f401f540d33e1f542da8629aedcc9eb7abd7191d0232d7a035e` 均为模拟／退出0；没有新建客户、模型或业务授权。
+
+[匿名凭据](../../apps/api/src/modules/ai-native/scenes/client-public-session.credential.ts)由既有ConfigService的认证密钥作域分离签名，固定5分钟、原tenant／workspace和Web／微信channel；数据库只存不可逆归属hash，不存令牌。write要求当前有效，read仅允许原元数据观察，不续权。[原仓储](../../apps/api/src/modules/ai-native/scenes/client-public-continuity.repository.ts)复用原客户材料表和OperationLog；原公开引用、输入／材料hash、期限与作者绑定均重核，同原材料锁内只允许一次客户续接。登录只经原ClientAuth／Guard绑定当前客户session，并在明确 `continue_public_request` 后创建当前客户的新公开材料；匿名原稿不改，不创建Task、Action、报价或支付。
+
+[私有service](../../apps/api/src/modules/ai-native/scenes/client-public-continuity.service.ts)先核同键原收据；停用／到期后只回元数据，不投递撤回的公开正文。首次续接重读当前公开目录／帮助；原请求hash仍对应原目标，当前材料hash和publication独立保存。原 `readContinuation` 不要求匿名凭据、当前新发布或原材料仍有效，但必须原客户／session／渠道／scope、原操作键、原公开材料hash和完整收据一致。unknown只能沿原operation查询；COMMIT或交付后权限／发布变化不能推定可重做。
+
+[标准host](../../apps/api/src/modules/ai-native/scenes/client-public.application.ts)通过原渠道发布和当前空间查实公开code；独立 `clientPublic:{enabled:true}` 必须由部署显式提供，缺省关闭，不跟随模型或后台开关。新写事务前后由service回调同一当前发布检查，await撤回则回滚／unknown；原元数据读不依赖新发布。[HTTP控制器](../../apps/api/src/modules/ai-native/scenes/client-public.controller.ts)在固定Web和微信路径各登记6个POST，原始body闭合验证，15秒有界等待，响应复用原ClientCatalog／help结构并严格校验，无未知字段或私有材料替换。[Guard](../../apps/api/src/common/api-auth.guard.ts)只将read／session／prepare／operation四路列为匿名且保留原地址限流；continue／continuation仍原客户认证，不放宽本人／企业／营运接口。shared总出口、OpenAPI和AppModule／标准provider同片登记，登录读权及匿名header分别声明。
+
+| 必要模拟／类型 | 实际结果（Root命令均为 `node --no-compilation-cache -`） |
+| --- | --- |
+| 原签名、TTL与过期元数据读 | stdin SHA `10a4359c3732e691a6e12a5b87fc1d9aa840dac90d6802cb40a075b2d1b2aca4`／退出0；空间、渠道、改payload、换key、未来时间、过期write拒绝，原过期read同hash不续期。 |
+| 标准provider→实际Controller／Guard／ClientAuth／原公开Core投影→原材料／续接 | `eb124463499317a7cccde7d2c4d27dcb2d6e09f453bd1eedf9629474cf3fc466`／退出0；Web目录／帮助与微信帮助，26次正式Guard入口；1匿名原稿＋1当前客户材料、2原log，Task／Run／模型／业务0。COMMIT丢ACK读回，原稿字节不变；停用／TTL／换客户／scope／channel／恶意额外字段／新键重复拒绝；事务中撤回发布回滚。公开packet增加私有字段或换tenant／workspace均拒绝。 |
+| AppModule／12路注册与原OpenAPI认证 | `ac2ca6801d7cc6145f02092722debf701d9539c9d7d987baf6d243d955d31f05`／退出0；仅4匿名动作、2Bearer动作，GET／任意后缀拒绝。内存ConfigModule仅关闭环境文件加载，无HTTP监听／实际库。 |
+| dev1私有两叶完整生命周期和类型 | 命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，冒烟 `596cc02b9e0f036b636a7fb264cafcdd85a25a91660d3a323db1deed0b06cf57`、类型 `c439b535bdf6ff4b45edec014207658d0c7388963bdf56c537e7404c0d85f18b`，均退出0；2原公开＋2客户材料、4收据，Task／模型／业务0；2根／1400依赖源零诊断。Root逐blob核同，并独立执行上一行完整正式入口组。 |
+| Root完整生产类型 | `cf9457b4b3685f8b43ba3a3ae758f0d8ed95fbde366589ff301b46012c864949`／退出0，TypeScript5.9.3，8根／1994源零诊断，含shared／AppModule／Guard／OpenAPI及全部客户两叶。 |
+
+私有固定blob：repository `6082aa4d5103ba805b6e8ddad0ca239b66ab61b5`，service `26fa5a8a48aca67a84e78e9d9f8f9eccb851301c`；Root逐字节核同后接回写权。公共叶最终blob：credential `227df7d60647b102c0f9db3a5fcd15ea80d161f7`、application `361d74e74d2159498459ce31991355ce32af82f1`、controller `13879fa10cc891edc674e7d715f2366abefea329`、shared `ca7c30b4dc5362144c0ae9d248271281dc1d9e00`、OpenAPI `f5701e987372c1a396b88279843b320d00c64b15`。其余装配以本阶段固定提交为准，不复制整树依赖或输出。
+
+失败保留：首版unknown构造误用Repository错误枚举，实际类型检查拒绝，改原continuity unknown错误。首次全文入口最后微信组缺原 `miniProgramChannel.findFirst`，直接诊断确定旧夹具缺端口，只补内存null来源后复验。严格响应初稿使用错误客户端版本／漏必需membershipStatus，并有`satisfies`换行语法错误，实际类型拒绝后复用原 `CLIENT_API_VERSION` 和完整字段；旧目录夹具的`day`也被拒绝，补成原`day_24h`，不放宽生产校验。AppModule首导入曾触发环境文件读取守卫，audit非零／退出1；后仅在模拟ConfigModule使用ignoreEnvFile，守卫不改，重验audit0。没有删除旧断言、修改测试脚本或把驱动错误称生产成功。
+
+本阶段13源码＋原两册立即提交／普通推送AI任务分支，按原固定提交供PM串行整合。**AIN-21仍75%**：匿名后端片完整，但选品前目标描述→真实客户候选→明确选择→Core报价尚未接完，客户公开页面消费留AIN-22。当前原28项83.9%／19项研发验收、ENTRY70.8%均不因本片上调。dev1已继续核目标入口最小接点，dev2继续原时延叶，不等提交／main。
+
+本轮全在内存验证，固定不可达DB、本树offline preload、写根／TEMP／cache集中 `output/.tmp/ain21-public-continuity-20261114`，audit0，验证进程退出，目录未创建，无临时脚本／生成包／依赖副本。`git diff --check`退出0；`node scripts/validate-docs.cjs`退出1，仍仅导航3处历史附件＋稀疏网站示例1处缺链，无新增链接或任务算术错误，不为补绿伪造附件。真实HTTP、MySQL事务并发、微信／浏览器与外部模型仍由负责人后续实测，未称生产启用。
+
 <a id="ain18-simulated-whole-closeout-20261114"></a>
 ## AIN-18 当前空间原政策消费与七条全文模拟研发收口（2026-11-14）
 

@@ -108,6 +108,9 @@ import { HumanAutomationRequestFactory } from './automation/human-automation-req
 import { RuntimeAutomationReviewGrantPolicySource } from './automation/runtime-automation-review-grant.source';
 import { TaskOpeningProposalApplication } from './task-opening-proposal.application';
 import { HumanAutomationPolicyRequestFactory } from './automation/human-automation-policy-request.composition';
+import { AiClientPublicApplication } from './scenes/client-public.application';
+import { AiClientPublicSessionCredential } from './scenes/client-public-session.credential';
+import { AI_WEBSITE_PUBLIC_ENTRY, AI_WECHAT_PUBLIC_ENTRY } from './scenes/client-public.controller';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox,
   type BusinessFailureResourcePorts } from './business-events/prisma-business-failure-outbox';
 import { CoreBusinessFailureResourceSource } from './business-events/core-business-failure-resource.source';
@@ -279,6 +282,15 @@ export const AI_NATIVE_CLIENT_POLICY_PROVIDER: FactoryProvider = {
       scene: { sceneCode: 'quote_clarification', sceneVersion: '1' }, enabled: selected.data.enabled });
   }
 };
+
+export const AI_NATIVE_CLIENT_PUBLIC_PROVIDERS: FactoryProvider[] = ([
+  [AI_WEBSITE_PUBLIC_ENTRY, 'web'], [AI_WECHAT_PUBLIC_ENTRY, 'wechat_miniprogram'],
+] as const).map(([provide, channel]) => ({
+  provide, inject: [PrismaService, ApiAuthGuard, ClientApiService, ConfigService],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, client: ClientApiService, configuration: ConfigService) =>
+    new AiClientPublicApplication({ db, guard, client, ownership: new AiClientPublicSessionCredential(configuration),
+      currentConfiguration: () => readRuntimePublication(configuration).configurations.clientPublic }, channel),
+}));
 
 export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox],

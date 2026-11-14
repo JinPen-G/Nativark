@@ -20,6 +20,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
   AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_CLIENT_PUBLIC_HTTP } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
@@ -169,6 +170,9 @@ const CLIENT_PUBLIC_ROUTES = new Set([
 ]);
 
 export function isClientPublicRoute(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && AI_CLIENT_PUBLIC_HTTP.basePaths.some(base =>
+    [AI_CLIENT_PUBLIC_HTTP.read, AI_CLIENT_PUBLIC_HTTP.issueSession, AI_CLIENT_PUBLIC_HTTP.prepare, AI_CLIENT_PUBLIC_HTTP.readOriginal]
+      .some(action => path === `/${base}/${action}`))) return true;
   if (CLIENT_PUBLIC_ROUTES.has(path)) return true;
   if (method === "GET" && /^\/client\/v1\/tenants\/[^/]+\/workspaces$/u.test(path)) return true;
   if (method === "GET" && /^\/client\/v1\/public\/catalog\/items\/[^/]+\/images\/[^/]+$/u.test(path)) return true;

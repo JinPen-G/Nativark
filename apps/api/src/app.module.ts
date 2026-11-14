@@ -187,6 +187,8 @@ import { ClientTaskPolicyController } from './modules/ai-native/scenes/client-ta
 import { AI_NATIVE_CLIENT_POLICY_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
 import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
+import { WebsiteClientPublicController, WechatClientPublicController } from './modules/ai-native/scenes/client-public.controller';
+import { AI_NATIVE_CLIENT_PUBLIC_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { AiCreditController } from './modules/ai-native/budget/ai-credit.controller';
 import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
 
@@ -247,6 +249,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     StaffInspectionAssistController,
     WebsiteClientEntryController,
     WechatClientEntryController,
+    WebsiteClientPublicController,
+    WechatClientPublicController,
     AiRetentionController,
     AiOriginalSceneObservationController,
     AiOriginalQuoteModelExecutionController,
@@ -334,6 +338,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_ORIGINAL_PLAN_POLICY_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
     ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
+    ...AI_NATIVE_CLIENT_PUBLIC_PROVIDERS,
     AI_NATIVE_RETENTION_PROVIDER,
     AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER,
     AI_NATIVE_ORIGINAL_READ_POLICY_PROVIDER,

@@ -122,3 +122,4 @@ export * from './ai-task-order-handoff';
 
 export * from './ai-task-read-policy';
 export * from './staff-fulfillment-receipt';
+export * from './ai-client-public-draft';

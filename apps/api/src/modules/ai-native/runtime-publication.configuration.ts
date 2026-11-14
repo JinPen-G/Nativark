@@ -31,6 +31,7 @@ const configurations = z.object({
   inputCounting: configuration,
   budgetManagement: configuration,
   clientModel: configuration,
+  clientPublic: configuration,
   clientTaskPolicy: configuration,
   staffRecognition: configuration,
   staffManual: configuration,

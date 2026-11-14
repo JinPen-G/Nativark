@@ -24,6 +24,7 @@ import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } f
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT, AI_TASK_OPENING_PROPOSAL_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_AUTOMATION_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_SCENE_MODEL_OBSERVATION_HTTP_CONTRACTS, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_CLIENT_PUBLIC_HTTP, AI_CLIENT_PUBLIC_CONTRACTS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_CONTRACTS, AI_ORIGINAL_SCENE_QUOTE_HTTP_CONTRACTS,
   AI_ORDER_EXPLANATION_HTTP_V2, AI_ORDER_EXPLANATION_HTTP_CONTRACTS_V2 } from '@rental-os/shared';
 import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_OPENING_MODEL_EXECUTION_HTTP_DRAFT } from "@rental-os/shared";
@@ -2413,6 +2414,18 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/privacy/receipts', tag: 'AI Native', operationId: 'listAiRetentionReceipts',
     permissions: ['system:params:manage'], authRequired: true, summary: 'Bounded current-workspace receipt observation after an ambiguous batch reply.',
     requestSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.request, responseSchema: AI_RETENTION_HTTP_CONTRACTS.receipts.response },
+  ...AI_CLIENT_PUBLIC_HTTP.basePaths.flatMap(base => Object.entries(AI_CLIENT_PUBLIC_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${base}/${AI_CLIENT_PUBLIC_HTTP[action as keyof typeof AI_CLIENT_PUBLIC_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `clientPublic_${base.includes('wechat') ? 'wechat' : 'web'}_${action}`, permissions: [],
+    authRequired: action === 'continueOriginal' || action === 'readContinuation', rateLimited: true,
+    summary: 'Public catalog/help only under the current channel publication. Short signed ownership never grants customer data or execution. Explicit login continuation creates one current customer material; receipt recovery uses the original binding. No task, model, quote or payment is initiated.',
+    requestSchema: contract.request, responseSchema: contract.response,
+    ...(['prepare', 'readOriginal', 'continueOriginal'].includes(action) ? { parameters: [{
+      name: AI_CLIENT_PUBLIC_HTTP.credentialHeader, in: 'header' as const, required: action !== 'continueOriginal',
+      description: 'Server-signed public-material ownership only. Required for first preparation/continuation; existing continuation receipts use the original customer session without renewing public ownership.',
+      schema: { type: 'string', minLength: 1, maxLength: 2048, pattern: '^ain-public-1\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$' },
+    }] } : {}),
+  }))),
   ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
     .flatMap((base, surface) => ([
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],

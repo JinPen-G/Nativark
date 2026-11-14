@@ -17,6 +17,7 @@ import { AI_TASK_OPENING_PROPOSAL_HTTP_SCHEMAS } from '@rental-os/shared';
 import { AI_TASK_CENTER_RECOVERY_SCHEMAS } from '@rental-os/shared';
 import { STAFF_FULFILLMENT_RECEIPT_SCHEMAS } from '@rental-os/shared';
 import { AI_ORDER_EXPLANATION_HTTP_SCHEMAS_V2 } from '@rental-os/shared';
+import { AI_CLIENT_PUBLIC_SCHEMAS } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS, AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCENE_MODEL_OBSERVATION_SCHEMAS, AI_TASK_SCENE_OBSERVATION_SCHEMAS, AI_ORDER_READ_HTTP_SCHEMAS } from '@rental-os/shared';
 
 /** Draft components only. Publication is not route registration, authorization or activation. */
@@ -34,7 +35,8 @@ for (const [name, schema] of Object.entries({ ...STAFF_FULFILLMENT_RECEIPT_SCHEM
 for (const [name, schema] of Object.entries({ ...AI_ORDER_EXPLANATION_HTTP_SCHEMAS_V2, ...AI_SCENE_QUOTE_HTTP_SCHEMAS, ...AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, ...AI_SCENE_MODEL_OBSERVATION_SCHEMAS, ...AI_TASK_SCENE_OBSERVATION_SCHEMAS, ...AI_ORDER_READ_HTTP_SCHEMAS })) {
   AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
 }
-for (const [name, schema] of Object.entries({ ...AI_TASK_RECOVERY_HTTP_SCHEMAS, ...AI_TASK_CENTER_RECOVERY_SCHEMAS, ...AI_CLIENT_ENTRY_HTTP_SCHEMAS })) {
+for (const [name, schema] of Object.entries({ ...AI_TASK_RECOVERY_HTTP_SCHEMAS, ...AI_TASK_CENTER_RECOVERY_SCHEMAS, ...AI_CLIENT_ENTRY_HTTP_SCHEMAS,
+  ...AI_CLIENT_PUBLIC_SCHEMAS })) {
   AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
 }
 for (const [name, schema] of Object.entries(AI_TASK_CONFIRMATION_HISTORY_SCHEMAS)) {
