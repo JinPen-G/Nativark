@@ -1,6 +1,7 @@
 /** Persisted observations, not an SLO verdict, provider bill or execution grant. */
 import type { AiTaskBudgetUsagePageDraft, AiTaskBudgetUsageSummaryDraft } from './ai-scene-request-draft';
 import { AI_TASK_STATUSES_DRAFT, type AiTaskStatusDraft } from './ai-task-draft';
+import { validateAiLeafSchemaValue } from './ai-leaf-schema-validation';
 import { leafClosed as object, leafEnum as choice, leafId as identifier, leafInt as integer, leafList as list,
   leafText as text, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
@@ -27,6 +28,7 @@ export type AiTaskPerformanceObservationDraft = {
     observedAt: string; code: 'budget_unavailable'; observation: 'gate_rejected_not_release_evidence' }>;
     truncated: boolean; coverage: 'recorded_rejections_only' };
   clientVisible?: AiTaskClientVisibleObservationDraft;
+  lifecycle?: AiTaskLifecycleObservationDraft;
   measurements: { firstToken: 'not_recorded' | 'client_reported'; firstCard: 'not_recorded' | 'client_reported'; toolLatency: 'not_recorded' | 'resource_active_time_only';
     modelLatency: 'not_recorded' | 'gateway_transport_wall_time_only';
     rates: 'not_computed'; slo: 'not_evaluated' };
@@ -41,8 +43,35 @@ export interface AiTaskOutcomeSampleDraft {
   taskIds: string[]; sampleSize: number; statusCounts: Record<AiTaskStatusDraft, number>;
   successRate: { state: 'recorded' | 'pending'; succeeded: number; terminal: number; total: number; percent: string | null };
   takeoverRate: { tasksWithReceipt: number; total: number; percent: string; basis: 'original_same_owner_takeover_receipts' };
+  lifecycleRates?: AiTaskLifecycleSampleRatesDraft;
   coverage: 'requested_authorized_one_owner_workspace_scene_version';
   consistency: 'revalidated_reads_not_atomic_snapshot'; slo: 'not_evaluated'; execution: 'read_only_no_lease_or_model';
+}
+
+/** Original requested cancellation and fenced recovery evidence. Completion
+ * means only the recorded lifecycle; it cannot grant a refund or retry. */
+export interface AiTaskLifecycleObservationDraft {
+  version: 'task-lifecycle-1';
+  cancellation: { state: 'not_recorded' | 'pending' | 'recorded'; requestRevision: number | null;
+    settlementRevision: number | null; requestedAt: string | null; settledAt: string | null; elapsedMs: string | null;
+    outcome: 'succeeded' | 'partially_succeeded' | 'cancelled' | null; semantics: 'request_settlement_not_business_rollback' };
+  recovery: { state: 'not_recorded' | 'observed'; items: Array<{ runId: string; fencingToken: string;
+    origin: 'takeover_receipt' | 'recovery_run_interval'; referenceId: string; state: 'pending' | 'recorded';
+    startedAt: string | null; completedAt: string | null; elapsedMs: string | null;
+    outcome: 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | null }>;
+    truncated: boolean; coverage: 'original_fenced_recovery_generations' };
+  consistency: 'revalidated_reads_not_atomic_snapshot'; execution: 'read_only_no_lease_model_dispatch_or_release';
+}
+/** A selected authorized sample only, never a tenant-wide or SLO result.
+ * Pending or truncated evidence keeps the affected percentage null. */
+export interface AiTaskLifecycleSampleRatesDraft {
+  version: 'task-lifecycle-rates-1';
+  cancellation: { state: 'not_recorded' | 'pending' | 'recorded'; requested: number; recorded: number;
+    pending: number; notRecordedTasks: number; percent: string | null;
+    basis: 'original_request_settlement_not_business_rollback' };
+  recovery: { state: 'not_recorded' | 'pending' | 'recorded'; attempts: number; recorded: number;
+    pending: number; succeeded: number; notRecordedTasks: number; truncated: boolean; percent: string | null;
+    basis: 'original_fenced_recovery_terminal_evidence' };
 }
 
 /** Browser-reported original host observations only. They grant no business,
@@ -72,6 +101,25 @@ export type AiTaskClientVisibleObservationDraft = { state: 'not_recorded' } | {
 const id = text(36), revision = integer(1, 4294967295), flag: AiLeafSchemaDraft = { type: 'boolean' };
 const count: AiLeafSchemaDraft = { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' };
 const nullable = (schema: AiLeafSchemaDraft): AiLeafSchemaDraft => ({ oneOf: [schema, { type: 'null' }] });
+const percentage = nullable({ type: 'string', pattern: '^(100|[0-9]{1,2})\\.[0-9]{2}$' });
+const lifecycle = object({ version: choice('task-lifecycle-1'),
+  cancellation: object({ state: choice('not_recorded', 'pending', 'recorded'), requestRevision: nullable(revision),
+    settlementRevision: nullable(revision), requestedAt: nullable(time), settledAt: nullable(time), elapsedMs: nullable(count),
+    outcome: nullable(choice('succeeded', 'partially_succeeded', 'cancelled')),
+    semantics: choice('request_settlement_not_business_rollback') }),
+  recovery: object({ state: choice('not_recorded', 'observed'), items: list(object({ runId: id,
+    fencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' }, origin: choice('takeover_receipt', 'recovery_run_interval'),
+    referenceId: { ...identifier(), maxLength: 191 }, state: choice('pending', 'recorded'), startedAt: nullable(time),
+    completedAt: nullable(time), elapsedMs: nullable(count), outcome: nullable(choice('succeeded', 'partially_succeeded', 'failed', 'cancelled')) }), 20),
+    truncated: flag, coverage: choice('original_fenced_recovery_generations') }),
+  consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_lease_model_dispatch_or_release') });
+const lifecycleRates = object({ version: choice('task-lifecycle-rates-1'),
+  cancellation: object({ state: choice('not_recorded', 'pending', 'recorded'), requested: integer(0, 50), recorded: integer(0, 50),
+    pending: integer(0, 50), notRecordedTasks: integer(0, 50), percent: percentage,
+    basis: choice('original_request_settlement_not_business_rollback') }),
+  recovery: object({ state: choice('not_recorded', 'pending', 'recorded'), attempts: integer(0, 1000), recorded: integer(0, 1000),
+    pending: integer(0, 1000), succeeded: integer(0, 1000), notRecordedTasks: integer(0, 50), truncated: flag, percent: percentage,
+    basis: choice('original_fenced_recovery_terminal_evidence') }) });
 const visibleSource = { oneOf: [object({ kind: choice('model_result'), resultId: id }),
   object({ kind: choice('approval_card'), stepId: id, proposalId: id, proposalRevision: revision })] };
 const visibleFields = { version: choice('client-visible-1'), observationId: { type: 'string', format: 'uuid' },
@@ -90,6 +138,8 @@ const visibleReport = (extra: Record<string, AiLeafSchemaDraft> = {}): AiLeafSch
     originKey: { ...identifier(), maxLength: 128 }, ...extra }),
 ] });
 export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiTaskLifecycleObservationDraft: lifecycle,
+  AiTaskLifecycleSampleRatesDraft: lifecycleRates,
   AiTaskClientVisibleReportDraft: visibleReport(),
   AiTaskClientVisibleReceiptDraft: object({ version: choice('client-visible-1'), observationId: { type: 'string', format: 'uuid' },
     taskId: id, runId: id, kind: choice('text', 'card'), status: choice('recorded'), recordedAt: time,
@@ -106,8 +156,10 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
       total: integer(1, 50), percent: nullable({ type: 'string', pattern: '^(100|[0-9]{1,2})\\.[0-9]{2}$' }) }),
     takeoverRate: object({ tasksWithReceipt: integer(0, 50), total: integer(1, 50),
       percent: { type: 'string', pattern: '^(100|[0-9]{1,2})\\.[0-9]{2}$' }, basis: choice('original_same_owner_takeover_receipts') }),
+    lifecycleRates,
     coverage: choice('requested_authorized_one_owner_workspace_scene_version'), consistency: choice('revalidated_reads_not_atomic_snapshot'),
-    slo: choice('not_evaluated'), execution: choice('read_only_no_lease_or_model') }),
+    slo: choice('not_evaluated'), execution: choice('read_only_no_lease_or_model') },
+    ['version', 'observedAt', 'sceneCode', 'sceneVersion', 'taskIds', 'sampleSize', 'statusCounts', 'successRate', 'takeoverRate', 'coverage', 'consistency', 'slo', 'execution']),
   AiSceneTaskPerformanceReadDraft: object({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
     taskId: id, usageLimit: integer(1, 20), usageAfter: id, includeTaskFinancial: flag }, ['original', 'usageLimit']),
   AiTaskPerformanceObservationDraft: object({ version: choice('task-performance-1'), observedAt: time,
@@ -134,9 +186,19 @@ export const AI_TASK_PERFORMANCE_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
       observedAt: time, code: choice('budget_unavailable'), observation: choice('gate_rejected_not_release_evidence') }), 50),
       truncated: flag, coverage: choice('recorded_rejections_only') }),
     clientVisible: { $ref: '#/components/schemas/AiTaskClientVisibleObservationDraft' },
+    lifecycle,
     measurements: object({ firstToken: choice('not_recorded', 'client_reported'), firstCard: choice('not_recorded', 'client_reported'), toolLatency: choice('not_recorded', 'resource_active_time_only'),
       modelLatency: choice('not_recorded', 'gateway_transport_wall_time_only'),
       rates: choice('not_computed'), slo: choice('not_evaluated') }),
     consistency: choice('revalidated_reads_not_atomic_snapshot'), execution: choice('read_only_no_dispatch_or_release') },
     ['version', 'observedAt', 'task', 'timing', 'resources', 'runs', 'steps', 'financial', 'modelDelivery', 'measurements', 'consistency', 'execution']),
 };
+
+/** Validate only the original observation transport; a valid packet grants no
+ * retry, model call, budget release or SLO verdict. Legacy packets may omit it. */
+export function validateAiTaskLifecycleObservationDraft(value: unknown): value is AiTaskLifecycleObservationDraft {
+  return validateAiLeafSchemaValue(AI_TASK_PERFORMANCE_SCHEMAS.AiTaskLifecycleObservationDraft, value, AI_TASK_PERFORMANCE_SCHEMAS);
+}
+export function validateAiTaskLifecycleSampleRatesDraft(value: unknown): value is AiTaskLifecycleSampleRatesDraft {
+  return validateAiLeafSchemaValue(AI_TASK_PERFORMANCE_SCHEMAS.AiTaskLifecycleSampleRatesDraft, value, AI_TASK_PERFORMANCE_SCHEMAS);
+}

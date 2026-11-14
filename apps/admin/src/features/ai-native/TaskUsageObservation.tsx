@@ -1,7 +1,7 @@
 /** Explicit original-ledger page and task summary consumption. Quantities keep
  * their original units/currencies; a page or sample never becomes a bill. */
 import { useEffect, useRef, useState } from "react";
-import { AI_TASK_STATUSES_DRAFT, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageSummaryDraft,
+import { AI_TASK_STATUSES_DRAFT, validateAiTaskLifecycleObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageSummaryDraft,
   type AiTaskPerformanceObservationDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
@@ -92,6 +92,27 @@ export function validateTaskRuntimeObservation(value: AiTaskPerformanceObservati
     || !Array.isArray(value.budgetAdmission.denials) || value.budgetAdmission.denials.length > 50
     || value.budgetAdmission.denials.some(row => row.code !== 'budget_unavailable' || row.observation !== 'gate_rejected_not_release_evidence')))
     throw Error('AI_RESOURCE_UNAVAILABLE');
+  if (value.lifecycle !== undefined) {
+    if (!validateAiTaskLifecycleObservationDraft(value.lifecycle)) throw Error('AI_RESOURCE_UNAVAILABLE');
+    const cancellation = value.lifecycle.cancellation;
+    if (cancellation.state === 'not_recorded' ? value.task.cancelRequestedAt !== null || cancellation.requestedAt !== null || cancellation.requestRevision !== null
+      || cancellation.settlementRevision !== null || cancellation.settledAt !== null || cancellation.elapsedMs !== null || cancellation.outcome !== null
+      : !value.task.cancelRequestedAt || !cancellation.requestedAt
+        || Date.parse(cancellation.requestedAt) !== Date.parse(value.task.cancelRequestedAt)) throw Error('AI_RESOURCE_UNAVAILABLE');
+    if (cancellation.requestRevision !== null && cancellation.requestRevision > value.task.revision) throw Error('AI_RESOURCE_UNAVAILABLE');
+    if (cancellation.state === 'recorded') {
+      if (cancellation.requestRevision === null || cancellation.settlementRevision === null || !cancellation.settledAt
+        || cancellation.requestRevision >= cancellation.settlementRevision || cancellation.settlementRevision > value.task.revision
+        || cancellation.elapsedMs === null || cancellation.outcome === null
+        || BigInt(cancellation.elapsedMs) !== BigInt(Date.parse(cancellation.settledAt) - Date.parse(cancellation.requestedAt!))) throw Error('AI_RESOURCE_UNAVAILABLE');
+    } else if (cancellation.settlementRevision !== null || cancellation.settledAt !== null
+      || cancellation.elapsedMs !== null || cancellation.outcome !== null) throw Error('AI_RESOURCE_UNAVAILABLE');
+    for (const item of value.lifecycle.recovery.items) {
+      if (item.state === 'recorded' ? !item.startedAt || !item.completedAt || item.elapsedMs === null || item.outcome === null
+        || BigInt(item.elapsedMs) !== BigInt(Date.parse(item.completedAt) - Date.parse(item.startedAt))
+        : item.completedAt !== null || item.elapsedMs !== null || item.outcome !== null) throw Error('AI_RESOURCE_UNAVAILABLE');
+    }
+  }
   return value;
 }
 export function TaskUsageObservation({ taskId, current, onAccessDenied }: { taskId: string; current: () => boolean; onAccessDenied: () => void }) {
@@ -166,6 +187,23 @@ export function TaskUsageObservation({ taskId, current, onAccessDenied }: { task
         {' · '}{t('观察时间')}: {formatTimestamp(shownRuntime.observedAt).value}</p>
       {shownRuntime.task.cancelRequestedAt && <p>{t('取消请求时间')}: {formatTimestamp(shownRuntime.task.cancelRequestedAt).value}
         {' · '}{t('取消请求不证明已回滚或退额。')}</p>}
+      {shownRuntime.lifecycle && <>
+        <p>{t('取消善后观察')}: {t(shownRuntime.lifecycle.cancellation.state === 'recorded' ? '已核对原善后收据'
+          : shownRuntime.lifecycle.cancellation.state === 'pending' ? '等待原善后证据' : '未记录取消请求')}
+          {shownRuntime.lifecycle.cancellation.elapsedMs !== null && <> · {shownRuntime.lifecycle.cancellation.elapsedMs} ms</>}
+          {shownRuntime.lifecycle.cancellation.outcome && <> · {t(shownRuntime.lifecycle.cancellation.outcome === 'succeeded' ? '原任务完成'
+            : shownRuntime.lifecycle.cancellation.outcome === 'partially_succeeded' ? '原任务部分完成' : '原任务已取消')}</>}
+        </p>
+        <dl>{shownRuntime.lifecycle.recovery.items.map(item => <div key={`${item.runId}:${item.fencingToken}`}>
+          <dt>{t('原恢复运行')}: {safeDisplayText(item.runId, 36)}</dt>
+          <dd>{t(item.state === 'pending' ? '等待原恢复终结证据' : item.outcome === 'succeeded' ? '已核对完整恢复'
+            : item.outcome === 'partially_succeeded' ? '恢复后部分完成' : item.outcome === 'failed' ? '恢复后失败' : '恢复后已取消')}
+            {item.elapsedMs !== null && <> · {item.elapsedMs} ms</>}</dd>
+        </div>)}</dl>
+        {shownRuntime.lifecycle.recovery.state === 'not_recorded' && <p>{t('未记录原恢复运行。')}</p>}
+        {shownRuntime.lifecycle.recovery.truncated && <p>{t('恢复观察窗口不完整，不推算全部恢复结果。')}</p>}
+        <p className="muted">{t('以上仅核对原取消与恢复生命周期，不表示业务回滚或额度已退。')}</p>
+      </>}
       <dl>{shownRuntime.runs.items.map(run => <div key={run.runId}>
         <dt>{t('原运行')}: {safeDisplayText(run.runId, 36)}</dt><dd>{t('运行耗时')}: {run.elapsedMs === null ? t('尚未核实') : `${run.elapsedMs} ms`}</dd>
       </div>)}</dl>

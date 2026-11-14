@@ -4,6 +4,17 @@ import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
   ...platformAiEnglish,
+  '取消善后观察': 'Cancellation settlement observation', '已核对原善后收据': 'Original settlement receipt verified',
+  '等待原善后证据': 'Awaiting original settlement evidence', '未记录取消请求': 'No cancellation request recorded',
+  '原任务完成': 'Original task completed', '原任务部分完成': 'Original task partly completed', '原任务已取消': 'Original task cancelled',
+  '原恢复运行': 'Original recovery run', '等待原恢复终结证据': 'Awaiting original recovery terminal evidence',
+  '已核对完整恢复': 'Complete recovery verified', '恢复后部分完成': 'Partly completed after recovery',
+  '恢复后失败': 'Failed after recovery', '恢复后已取消': 'Cancelled after recovery', '未记录原恢复运行。': 'No original recovery run recorded.',
+  '恢复观察窗口不完整，不推算全部恢复结果。': 'The recovery observation window is incomplete. No overall result is inferred.',
+  '以上仅核对原取消与恢复生命周期，不表示业务回滚或额度已退。': 'These observations verify original cancellation and recovery only. They do not establish business rollback or a budget refund.',
+  '取消善后收据比例': 'Cancellation settlement receipt ratio', '原恢复完整成功比例': 'Complete original recovery success ratio',
+  '证据未齐，未计算': 'Evidence incomplete; not calculated',
+  '取消善后不表示业务回滚；恢复比例仅包含已核对的原恢复运行，不代表全租户或 SLO。': 'Cancellation settlement does not establish business rollback. Recovery ratios cover verified original runs only, not the tenant or an SLO.',
   '经营事件政策设置': 'Business event policy settings',
   '交付资源不足': 'Delivery resource shortage', '待处理归还异常': 'Return exception awaiting review',
   '通知明确失败': 'Confirmed notification failure', '退款明确失败': 'Confirmed refund failure', '开业缺项': 'Missing opening configuration',
