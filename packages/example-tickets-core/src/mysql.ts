@@ -87,7 +87,10 @@ class MysqlTicketRepository implements TicketRepository {
 
 export interface MysqlTicketsAuthority<TTransaction extends TicketsSqlTransaction> {
   /** 原Auth适配按固定顺序锁主体、受派成员及Core权限；不得到Core锁之后再补人员锁。 */
-  authorize(tx: TTransaction, request: TicketExecutionRequest): Promise<TicketAccess>;
+  authorize(tx: TTransaction, request: TicketExecutionRequest): Promise<TicketAccess & {
+    /** 复核同一原主体/租约的有效期；行锁不能冻结时间，也不授权改用另一主体。 */
+    revalidate(): Promise<void>;
+  }>;
   /** 通过原平台审计入口使用同一事务；失败向上抛出，不返回空成功。 */
   audit(tx: TTransaction, receipt: TicketStoredReceipt): Promise<void>;
 }
@@ -105,7 +108,10 @@ export function createMysqlTicketsExecution<TTransaction extends TicketsSqlTrans
           throw new TicketError("denied", "受派成员尚未通过当前事务授权");
         const store = new MysqlTicketRepository(tx, access.tenantId, receipt => authority.audit(tx, receipt));
         if (permission !== "read" && permission !== "read.all") await store.lock();
-        return work(store, access);
+        const result = await work(store, access);
+        // 人员/授权行锁保留当前修订，提交前另复核会自然流逝的会话/订阅期限。
+        await access.revalidate();
+        return result;
       }, { isolationLevel: "ReadCommitted" });
     }
   };
