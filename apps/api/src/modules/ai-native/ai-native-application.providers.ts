@@ -29,6 +29,15 @@ import { z } from 'zod';
 import { NATIVE_MODEL_PROTOCOLS } from './native-model-protocols';
 import { SecretBox } from '../../common/secret-box';
 import { PrismaService } from '../database/prisma.service';
+import { createAiBodyStorageDatabase } from './privacy/prisma-ai-body-storage';
+
+/** AI私有正文仓储视图。业务域保留原PrismaService，正文解密不授权限，
+ * 原事务和收据不变；缺密钥时新正文写入／密文读取保持不可用。 */
+export const AI_NATIVE_BODY_DATABASE = Symbol('AI_NATIVE_BODY_DATABASE');
+export const AI_NATIVE_BODY_DATABASE_PROVIDER: FactoryProvider = {
+  provide: AI_NATIVE_BODY_DATABASE, inject: [PrismaService, SecretBox],
+  useFactory: (db: PrismaService, secrets: SecretBox) => createAiBodyStorageDatabase(db, secrets),
+};
 import { AuthService } from '../auth/auth.service';
 import { ApiAuthGuard } from '../../common/api-auth.guard';
 import { getRequestIdentity } from '../../common/request-identity';
@@ -142,7 +151,7 @@ export const AI_NATIVE_AUTOMATION_EXPLANATION_CONFIGURATION = Symbol('AI_NATIVE_
  * access. A missing policy or budget is never initialized by this provider. */
 export const AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER: FactoryProvider = {
   provide: AutomationExplanationApplication,
-  inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox,
     AI_NATIVE_BUSINESS_FAILURE_RESOURCES, ConfigService, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService,
     subscriptions: SubscriptionService, secrets: SecretBox, resources: BusinessFailureResourcePorts, configuration: ConfigService, capacity: GatewayCapacityPort) =>
@@ -150,7 +159,7 @@ export const AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER: FactoryProvider = {
       currentConfiguration: () => readRuntimePublication(configuration).configurations.automationExplanation }),
 };
 export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
-  provide: AI_NATIVE_BUSINESS_FAILURE_RESOURCES, inject: [PrismaService, ConfigService, ModuleRef],
+  provide: AI_NATIVE_BUSINESS_FAILURE_RESOURCES, inject: [AI_NATIVE_BODY_DATABASE, ConfigService, ModuleRef],
   useFactory: (db: PrismaService, configurationSource: ConfigService, moduleRef: Pick<ModuleRef, 'get'>): BusinessFailureResourcePorts => {
     const current = new RuntimeBusinessFailureConfigurationSource(configurationSource);
     // Core repositories and services themselves consume the Outbox. Resolve
@@ -203,7 +212,7 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
     };
   }
 }, {
-  provide: HumanAutomationRequestFactory, inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, ConfigService,
+  provide: HumanAutomationRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, ConfigService,
     AI_NATIVE_BUSINESS_FAILURE_RESOURCES,
     { token: AI_NATIVE_BUSINESS_FAILURE_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService,
@@ -219,7 +228,7 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
         } } } : {}) });
   }
 }, {
-  provide: HumanAutomationPolicyRequestFactory, inject: [PrismaService, AuthService, ApiAuthGuard],
+  provide: HumanAutomationPolicyRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard) => new HumanAutomationPolicyRequestFactory({ db, auth, guard })
 }];
 
@@ -244,7 +253,7 @@ const settingsEntries = [
   [AI_SETTINGS_TASK_READ_REQUESTS, []]
 ] as const;
 export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = settingsEntries.map(([provide, executionMethods]) => ({
-  provide, inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService,
+  provide, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService,
     { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService, value?: unknown) => {
     const configuration = readSettingsExecutionConfiguration(value);
@@ -269,7 +278,7 @@ export const AI_NATIVE_SETTINGS_LIFECYCLE_PROVIDERS: FactoryProvider[] = setting
 export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_ENTRY, 'web'], [AI_WECHAT_ENTRY, 'wechat_miniprogram'],
 ] as const).map(([provide, channel]) => ({
-  provide, inject: [PrismaService, ApiAuthGuard, SubscriptionService, ClientApiService, SecretBox, ClientDeliveryAddressService,
+  provide, inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, SubscriptionService, ClientApiService, SecretBox, ClientDeliveryAddressService,
     { token: AI_NATIVE_CLIENT_MODEL_CONFIGURATION, optional: true }, { token: AI_NATIVE_CLIENT_MODEL_ADAPTERS, optional: true }, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, subscriptions: SubscriptionService, client: ClientApiService,
     secrets: SecretBox, addresses: ClientDeliveryAddressService, value?: unknown, adapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort) =>
@@ -281,7 +290,7 @@ export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
 
 export const AI_NATIVE_CLIENT_POLICY_PROVIDER: FactoryProvider = {
   provide: AI_NATIVE_CLIENT_TASK_POLICIES,
-  inject: [PrismaService, ApiAuthGuard, AuthService, { token: AI_NATIVE_CLIENT_POLICY_CONFIGURATION, optional: true }],
+  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, AuthService, { token: AI_NATIVE_CLIENT_POLICY_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, auth: AuthService, value?: unknown) => {
     const selected = z.object({ enabled: z.boolean() }).strict().safeParse(structuredClone(value ?? { enabled: false }));
     if (!selected.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -293,20 +302,20 @@ export const AI_NATIVE_CLIENT_POLICY_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_CLIENT_PUBLIC_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_PUBLIC_ENTRY, 'web'], [AI_WECHAT_PUBLIC_ENTRY, 'wechat_miniprogram'],
 ] as const).map(([provide, channel]) => ({
-  provide, inject: [PrismaService, ApiAuthGuard, ClientApiService, ConfigService],
+  provide, inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, ClientApiService, ConfigService],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, client: ClientApiService, configuration: ConfigService) =>
     new AiClientPublicApplication({ db, guard, client, ownership: new AiClientPublicSessionCredential(configuration),
       currentConfiguration: () => readRuntimePublication(configuration).configurations.clientPublic }, channel),
 }));
 
 export const AI_NATIVE_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
-  provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox],
+  provide: AI_NATIVE_MODEL_SETTINGS_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox) =>
     composeRequestBoundModelSettings({ db, auth, guard, secrets, discovery: createNativeModelEgressTransport(5000) })
 };
 export const AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION');
 export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
-  provide: AI_NATIVE_TASK_CENTER_REQUESTS, inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
+  provide: AI_NATIVE_TASK_CENTER_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
     ApiAuthGuard, SubscriptionService, RentalCoreService, RentalOrderConfirmationService, RentalBusinessFactRepository,
     { token: AI_NATIVE_SETTINGS_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
@@ -375,14 +384,14 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
   }
 };
 export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
-  provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [PrismaService, ApiAuthGuard, SecretBox],
+  provide: AI_NATIVE_PLATFORM_MODEL_SETTINGS_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, SecretBox],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox) =>
     composeRequestBoundPlatformModelSettings({ db, capabilityDb: db, guard, secrets })
 };
 export const AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION');
 export const AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER: FactoryProvider = {
   provide: AI_CATEGORY_PROPOSAL_REQUESTS,
-  inject: [PrismaService, ApiAuthGuard, SecretBox, ModuleRef, ConfigService, AI_NATIVE_GATEWAY_CAPACITY],
+  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, SecretBox, ModuleRef, ConfigService, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox, moduleRef: ModuleRef,
     config: ConfigService, capacity: GatewayCapacityPort) => {
     // Resolve the existing controller lazily; construction reads no business
@@ -420,31 +429,31 @@ export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
 /** Human management only. No action policy/authority is seeded by assembly;
  * absent persisted grants still refuse every memory/governance operation. */
 export const AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER: FactoryProvider = {
-  provide: HumanMemoryManagementRequestFactory, inject: [PrismaService, AuthService, OperationLogService],
+  provide: HumanMemoryManagementRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, OperationLogService],
   useFactory: (db: PrismaService, auth: AuthService, operationLogs: OperationLogService) =>
     new HumanMemoryManagementRequestFactory({ db, auth, operationLogs, clock: { now: () => Date.now() } })
 };
 export const AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER: FactoryProvider = {
-  provide: HumanKnowledgeManagementRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService, OperationLogService],
+  provide: HumanKnowledgeManagementRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, TenantIntegrationService, OperationLogService],
   useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService, operationLogs: OperationLogService) =>
     new HumanKnowledgeManagementRequestFactory({ db, auth, integrations, operationLogs, clock: { now: () => Date.now() } })
 };
 /** Current human reads only. No policy seed, task creation or model dispatch;
  * file and memory access use their original request-bound authority sources. */
 export const AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER: FactoryProvider = {
-  provide: HumanKnowledgeConsumptionRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService, OperationLogService],
+  provide: HumanKnowledgeConsumptionRequestFactory, inject: [AI_NATIVE_BODY_DATABASE, AuthService, TenantIntegrationService, OperationLogService],
   useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService, operationLogs: OperationLogService) =>
     new HumanKnowledgeConsumptionRequestFactory({ db, auth, integrations, operationLogs,
       memory: { db }, clock: { now: () => Date.now() } })
 };
 export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
-  provide: KNOWLEDGE_POLICY_MANAGEMENT, inject: [PrismaService, AuthService, ApiAuthGuard],
+  provide: KNOWLEDGE_POLICY_MANAGEMENT, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard) =>
     createKnowledgePolicyManagementFactory({ db, auth, guard, enabled: true, clock: () => new Date() })
 };
 
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
-  provide: AI_RETENTION_REQUESTS, inject: [PrismaService, AuthService, FileStorageRuntimeService],
+  provide: AI_RETENTION_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, FileStorageRuntimeService],
   useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService): AiRetentionRequestFactory => request => {
     const header = request?.headers?.authorization, requestId = randomUUID();
     if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
@@ -462,7 +471,8 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
     } };
     const service = new AiRetentionService(db, requestAuth, { current }, files);
     return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
-      receipts: value => service.receipts(value), close: () => { authorization = undefined; } };
+      receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
+      close: () => { authorization = undefined; } };
   },
 };
 
@@ -482,18 +492,18 @@ const staffManualOperations = ['host-read', 'template-read', 'draft-create', 'dr
   'evidence-bind', 'evidence-fingerprint', 'evidence-replace',
   'submission-review', 'submission-prepare', 'submission-submit'] as const;
 export const AI_NATIVE_STAFF_RECOGNITION_PROVIDERS: FactoryProvider[] = [{
-  provide: AI_STAFF_INSPECTION_ACCOUNTING, inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService],
+  provide: AI_STAFF_INSPECTION_ACCOUNTING, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService) =>
     composeStaffInspectionAccounting({ db, auth, guard, subscriptions }, [
       { code: STAFF_RECOGNITION_SCENES.image, version: '1' }, { code: STAFF_RECOGNITION_SCENES.audio, version: '1' }])
 }, {
   provide: INSPECTION_OBJECT_READER,
-  inject: [PrismaService, TenantIntegrationService, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
+  inject: [AI_NATIVE_BODY_DATABASE, TenantIntegrationService, { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, integrations: TenantIntegrationService, value?: unknown) =>
     readStaffRecognitionConfiguration(value).enabled ? new TenantInspectionObjectReader(db, integrations) : undefined
 }, {
   provide: AI_NATIVE_STAFF_RECOGNITION_RUNTIME,
-  inject: [PrismaService, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox, FileStorageRuntimeService, ModuleRef,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, RentalCoreService, SubscriptionService, SecretBox, FileStorageRuntimeService, ModuleRef,
     { token: AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_ADAPTERS, optional: true }, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, core: RentalCoreService, subscriptions: SubscriptionService,
     secrets: SecretBox, files: FileStorageRuntimeService, moduleRef: ModuleRef, value?: unknown, adapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort) =>
@@ -504,7 +514,7 @@ export const AI_NATIVE_STAFF_RECOGNITION_PROVIDERS: FactoryProvider[] = [{
 }))];
 export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
   provide: AI_STAFF_INSPECTION_REQUESTS,
-  inject: [PrismaService, ApiAuthGuard, RentalCoreService, ModuleRef,
+  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, RentalCoreService, ModuleRef,
     { token: AI_NATIVE_STAFF_MANUAL_CONFIGURATION, optional: true }, { token: AI_NATIVE_STAFF_RECOGNITION_RUNTIME, optional: true }],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, core: RentalCoreService, moduleRef: ModuleRef, value?: unknown,
     runtime?: ReturnType<typeof composeStandardStaffRecognition>) => {
@@ -533,7 +543,7 @@ export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
  * It never constructs a model host; quote persistence requires its separate
  * explicit human-confirm endpoint and original Core permission.
  */
-const originalSceneInjection = [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService,
+const originalSceneInjection = [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService,
   RentalBusinessService, RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService, RentalFundingService];
 function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
@@ -743,7 +753,7 @@ export const AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION = Symbol('AI_NATIVE
 
 export const AI_NATIVE_TASK_CENTER_RECOVERY_PROVIDER: FactoryProvider = {
   provide: AI_TASK_CENTER_RECOVERY_REQUESTS,
-  inject: [PrismaService, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, ModuleRef,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, ModuleRef,
     { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_OPENING_MODEL_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_QUOTE_MODEL_EXECUTION_CONFIGURATION, optional: true }],
@@ -963,7 +973,7 @@ const originalProbeReadMethods: readonly (keyof TextCapabilityRequest)[] = ['rea
  * No transport or authority can be provided in a request/configuration body. */
 export const AI_NATIVE_CAPABILITY_PROBE_PROVIDER: FactoryProvider<Pick<TextCapabilityProbeRequestFactory, 'open'>> = {
   provide: TEXT_CAPABILITY_PROBE_REQUESTS,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
     { token: AI_NATIVE_CAPABILITY_PROBE_CONFIGURATION, optional: true }, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     secrets: SecretBox, serverValue?: unknown, capacity?: GatewayCapacityPort) => {
@@ -1021,7 +1031,7 @@ function readBudgetManagementConfiguration(value: unknown, legacy: unknown) {
  * Platform writes retain their distinct platform Guard and authority. */
 export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<typeof composeRequestBoundBudgetManagement>> = {
   provide: AI_BUDGET_MANAGEMENT,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
     { token: AI_NATIVE_ORIGINAL_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_NATIVE_BUDGET_MANAGEMENT_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
@@ -1051,7 +1061,7 @@ export const AI_NATIVE_BUDGET_MANAGEMENT_PROVIDER: FactoryProvider<ReturnType<ty
  * this provider has no publication source, connection resolver or model driver. */
 export const AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER: FactoryProvider<Pick<GatewayPricingRequestFactory, 'call'>> = {
   provide: AI_GATEWAY_PRICING_HISTORY,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService],
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService) => {
     const history = GatewayPricingRequestFactory.history({ db, auth, guard, subscriptions });
     return Object.freeze({ call: history.call.bind(history) });
@@ -1059,14 +1069,14 @@ export const AI_NATIVE_GATEWAY_PRICING_HISTORY_PROVIDER: FactoryProvider<Pick<Ga
 };
 export const AI_NATIVE_PLATFORM_PROBE_PROVIDER: FactoryProvider<ReturnType<typeof composeStandardPlatformProbe>> = {
   provide: PLATFORM_CAPABILITY_PROBE_REQUESTS,
-  inject: [PrismaService, ApiAuthGuard, SecretBox, { token: AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, optional: true },
+  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, SecretBox, { token: AI_NATIVE_PLATFORM_PROBE_CONFIGURATION, optional: true },
     { token: AI_NATIVE_PLATFORM_PROBE_AUDIT, optional: true }, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox, configuration?: unknown, audit?: UnifiedGatewayAudit, capacity?: GatewayCapacityPort) =>
     composeStandardPlatformProbe({ db, guard, secrets, audit, capacity }, configuration)
 };
 export const AI_NATIVE_INPUT_COUNTING_PROVIDER: FactoryProvider<ReturnType<typeof composeStandardInputCounting>> = {
   provide: AI_COUNTING_REQUESTS,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, SecretBox,
     { token: AI_NATIVE_INPUT_COUNTING_CONFIGURATION, optional: true }, RentalCoreService, AI_NATIVE_GATEWAY_CAPACITY],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     secrets: SecretBox, configuration?: unknown, core?: RentalCoreService, capacity?: GatewayCapacityPort) =>
@@ -1275,7 +1285,7 @@ export const AI_NATIVE_ORIGINAL_ORDER_EXECUTION_PROVIDER: FactoryProvider<Origin
 export const AI_NATIVE_MEMBER_NAME_CONFIGURATION = Symbol('AI_NATIVE_MEMBER_NAME_CONFIGURATION');
 export const AI_NATIVE_MEMBER_NAME_PROVIDER: FactoryProvider = {
   provide: AI_MEMBER_NAME_REQUESTS,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, MembershipService,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, MembershipService,
     { token: AI_NATIVE_MEMBER_NAME_CONFIGURATION, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     memberships: MembershipService, value?: unknown) => {
@@ -1293,7 +1303,7 @@ export const AI_NATIVE_MEMBER_NAME_PROVIDER: FactoryProvider = {
  * initial admission and R1 receipts remain mandatory; no Core save or publish. */
 export const AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER: FactoryProvider = {
   provide: TaskOpeningProposalApplication,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService, RentalBusinessService,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService, RentalBusinessService,
     RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService, RentalFundingService,
     { token: AI_NATIVE_TASK_OPENING_PROPOSAL_CONFIGURATION, optional: true }, TenantIntegrationService, WorkspaceCapabilityService],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,

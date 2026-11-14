@@ -6,7 +6,7 @@
 
 施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当天首次修改前本地／GitHub均核为3401e8be77693f85a1dc0e66778896708ceecb69，索引空、无merge／cherry-pick；main远端为62ca183f10b7c316ab63c28ef6d04ee88d06488b，后继集成由PM核定。旧接续完整字节保存在上述AI固定前像的同路径，关闭阶段与历史前像从原[开发记录](<AI Native-开发记录.md>)导航，不另复制附件。
 
-1. **AIN-24正文加密与安全全文。** 原hold／知识／记忆同事务保护10e1c81、[正文传播／会员收据／HTTP审计](<AI Native-开发记录.md#ain24-original-body-propagation-audit-20261114>)e346a2417及[原场景／bytes审计](<AI Native-开发记录.md#ain24-original-scene-bytes-read-audit-20261114>)3401e8be7已上传并核接必要模拟／类型。当前缺原敏感正文加密存储、独立语言质量和展示攻击类别证据。Root补AI私有存储适配及实际provider，不改通用PrismaService／SecretBox，不新增schema／DDL；覆盖模型输入输出、原请求、人类回答／问题副本、知识／记忆／确认副本、员工草稿和客户端材料。知识检索须沿当前受权版本有界解密匹配；两条客户端材料raw SQL显式编解码，嵌套chunk写读及原JSON_PATH元数据不能漏。原hash／预算／批准／业务收据、空正文／tombstone／DbNull及unknown保持。当前AiConversation无title或正文列，不为名单造schema。dev1补固定结果的独立语言与实际模拟沙箱攻击证据；不因默认关闭或缺实测而跳过实际实现，也不把已装配operator审计外推成旧staff／未注册Gateway接口开放。
+1. **AIN-24正文加密与安全全文。** 原保护／传播／审计已上传。[本阶段正文加密](<AI Native-开发记录.md#ain24-encrypted-original-bodies-native-tx-20261115>)11源已完成原SecretBox、实际AI provider、原知识有界检索／嵌套chunks、客户端两条SQL、记忆／Task删除传播和旧page受权保护的必要模拟／类型。独立复核指出的Core native tx旁路已在原批准prepare／commit及三原请求Native入口补同一codec视图，原Core事务／hash／批准／账不改；原选单及批准快照重复body也保护。10根／2023源零诊断，Dev2最后原生Core选单接管组合及原hash／原账／一次订单已通过，Root核证据，接管公共消费仍下一片。独立语言与[六类展示攻击](<AI Native-开发记录.md#ain24-independent-language-display-attacks-20261115>)已核固定证据；Root最后逐核AIN-24七条／全部开放端和工具，齐备才计100%。本地旧保护入口未真实运行，不冒称真实库／外部对象／供应商／备份加密或删除完成。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。dev2接selectedOrderSource → composeSelectedQuoteTaskHost → rental.order.commit的原接管／收据；TaskCenter目前对该Run返回specialized_host_required，Root接最小公共恢复装配。保留原selection／Task／Run／planHash／inputHash／fencing、独立takeover和claim_recovery权限；旧worker迟到拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。
 3. **AIN-26～28和ENTRY。** dev2的[固定四品类8例](<AI Native-开发记录.md#ain26-four-category-fixed-evidence-style-20261115>)已交回，Root核原证据与限制；同Core路径、正常批准／单次订单／丢ACK恢复和锁内缺货通过，只补对应矩阵切片，不替代全部并发／取消／接管／多端全文。15／24前置齐备后继续26，随后27／28原部署／灰度／停用／升级回退准备、独立复核和可操作交付；真实生产开放仍独立授权。全部18项ENTRY保持原范围，跨audience／surface、匿名／企业、媒体弱网及隐私等按原条款逐项核定，不因原28项完成而遗忘。
 
@@ -15,7 +15,7 @@
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider；AIN-24完整正文加密和原检索／SQL／删除／hold适配，AIN-15选单TaskCenter公共恢复reader／application／provider／shared。仅暂存已核成果。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 已交回原报价及全部审计源，当前只读固定原结果的独立语言质量与展示攻击模拟；确定性业务断言另列，不自评分，不新增测试脚本，不改Root加密／公共源。实际回合已核有工具进展。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 独立语言／六类攻击／迟到来源补证已交权，当前只读核原AIN-ENTRY-01／13完整合同和实际消费者；已发现Booking补齐服务窗口被标为用户输入的疑点，沿原fixture核实后给Root最小修片建议。确定性业务断言另列，不自评分，不新增测试脚本，不改Root加密／公共源。 |
 | AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 独占runner/order-task-host.composition.ts、scenes/human-quote-order.composition.ts和scenes/request-bound-scenes.application.ts中的选单恢复／接管hunk，其余场景不改。四品类固定证据和287字节员工原WXSS已冻结交权，Root补交；公共恢复与客户端改动先给必要接点建议，不抢shared／四册／索引。 |
 | 内部/root/opening_core_closeout | 已交回原阶段独立复核及正文加密静态接点清单，无产品／四册／索引写权；没有运行测试或核定尚未落盘codec。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |

@@ -7,6 +7,7 @@ import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-ta
 import { originalIdentityHash, type AiOriginalRequestAuthority, type AiOriginalRequestNativeAuthority, type AiOriginalRequestAccess } from './original-request.authority';
 import { freezeOriginalInput, originalBody, originalRequestReferenceSchema, parseOriginalRequest } from './original-request.validation';
 import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
+import { bindAiBodyStorageTransaction } from '../privacy/prisma-ai-body-storage';
 
 type Row = Prisma.AiTaskOriginalRequestGetPayload<{}>;
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -133,6 +134,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       request: AiSceneRequestBody; context: import('@rental-os/shared').AiExecutionContext;
       policyRevision: number; policyHash: string }) => Promise<T>, signal: AbortSignal,
     nativeAuthority?: AiOriginalRequestNativeAuthority): Promise<T> {
+    native = bindAiBodyStorageTransaction(this.db, native);
     let bound: ReturnType<AiOriginalRequestNativeAuthority['bindIn']> | undefined;
     const live = () => { if (signal.aborted) throw denied(); bound?.assertCurrent(); };
     live();
@@ -296,6 +298,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
   async saveIn(native: Prisma.TransactionClient, value: unknown, nativeAuthority: AiOriginalRequestNativeAuthority,
     signal: AbortSignal, isReissue = false,
     associate?: (tx: Prisma.TransactionClient, receipt: AiSceneRequestReceiptDraft) => Promise<void>) {
+    native = bindAiBodyStorageTransaction(this.db, native);
     if (!native || '$transaction' in native || typeof native.aiTaskOriginalRequest?.findFirst !== 'function'
       || typeof native.aiTaskOriginalRequest?.create !== 'function' || typeof nativeAuthority?.bindIn !== 'function') throw unavailable();
     const bound = nativeAuthority.bindIn(native, signal);
@@ -376,6 +379,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
    * transaction. Do not nest this resource observer under a budget/grant lock. */
   async reconcileIn(native: Prisma.TransactionClient, value: unknown, nativeAuthority: AiOriginalRequestNativeAuthority,
     signal: AbortSignal, isReissue = false) {
+    native = bindAiBodyStorageTransaction(this.db, native);
     if (!native || '$transaction' in native || typeof native.aiTaskOriginalRequest?.findFirst !== 'function'
       || typeof nativeAuthority?.bindIn !== 'function') throw unavailable();
     const bound = nativeAuthority.bindIn(native, signal);

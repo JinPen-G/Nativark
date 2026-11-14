@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
+import { decodeAiClientMaterialBodies, encodeAiClientMaterialBodies } from '../privacy/ai-body-storage.codec';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -53,7 +54,7 @@ export class PrismaClientSceneMaterialRepository {
     try {
       const rows = await reader.$queryRaw<unknown[]>(query);
       if (!Array.isArray(rows) || rows.length > 1) throw new AiClientMaterialError('AI_CLIENT_STORAGE_UNAVAILABLE');
-      return rows.length ? this.decode(rows[0], scope) : null;
+      return rows.length ? this.decode(decodeAiClientMaterialBodies(this.db, rows[0]), scope) : null;
     } catch (error) {
       if (error instanceof AiClientMaterialError) throw error;
       throw new AiClientMaterialError('AI_CLIENT_STORAGE_UNAVAILABLE');
@@ -90,13 +91,14 @@ export class PrismaClientSceneMaterialRepository {
           if (existing.inputHash !== row.inputHash) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
           return { row: existing, replayed: true };
         }
+        const protectedBodies = encodeAiClientMaterialBodies(this.db, row);
         attempted = true;
         await tx.$executeRaw(Prisma.sql`INSERT INTO ai_client_scene_materials
           (id, tenantId, workspaceId, channel, principalKind, principalHash, bindingHash, publicationHash, operationKey,
            inputHash, materialHash, command, material, publication, revision, createdAt, expiresAt)
           VALUES (${row.id}, ${row.tenantId}, ${row.workspaceId}, ${row.channel}, ${row.principalKind}, ${row.principalHash},
             ${row.bindingHash}, ${row.publicationHash}, ${row.operationKey}, ${row.inputHash}, ${row.materialHash},
-            ${JSON.stringify(row.command)}, ${JSON.stringify(row.material)}, ${JSON.stringify(row.publication)},
+            ${JSON.stringify(protectedBodies.command)}, ${JSON.stringify(protectedBodies.material)}, ${JSON.stringify(protectedBodies.publication)},
             ${row.revision}, ${row.createdAt}, ${row.expiresAt})`);
         return { row, replayed: false };
       };

@@ -10,7 +10,7 @@ import { retentionHttpRequest, retentionHttpResponse } from './retention-http.co
 export const AI_RETENTION_REQUESTS = Symbol('AI_RETENTION_REQUESTS');
 export const AI_RETENTION_HTTP = Object.freeze({ basePath: 'ai-native/privacy', cleanup: 'cleanup', receipt: 'receipt', receipts: 'receipts' });
 type Request = { headers: { authorization?: unknown } } & AiRequestAbortSource;
-export type AiRetentionRequestFactory = (request: Request) => Pick<AiRetentionService, 'cleanup' | 'receipt' | 'receipts'> & { close(): void };
+export type AiRetentionRequestFactory = (request: Request) => Pick<AiRetentionService, 'cleanup' | 'receipt' | 'receipts' | 'protectStoredBodies'> & { close(): void };
 
 /** No timer, unsigned restore or arbitrary file/table deletion endpoint. */
 @Controller(AI_RETENTION_HTTP.basePath)

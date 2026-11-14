@@ -6,6 +6,53 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain24-encrypted-original-bodies-native-tx-20261115"></a>
+## AIN-24 原正文加密、旧存储保护和原生事务兼容（2026-11-15）
+
+前置`20797d41877d61a29a904a42427fb02d5113cba4`已普通推送并回读GitHub。Root沿需求§17补正式AI私有正文存储，不改通用PrismaService、SecretBox或Core，不新建schema／迁移／第二套授权。[codec](../../apps/api/src/modules/ai-native/privacy/ai-body-storage.codec.ts)复用原AES-256-GCM及有限历史密钥环，密文绑定原模型／列／行及主体；原请求、模型输入输出、回答／问题历史、知识标题／chunks、偏好／确认、员工草稿、客户材料、选单和批准INPUT／PREVIEW正文由[AI专属视图](../../apps/api/src/modules/ai-native/privacy/prisma-ai-body-storage.ts)编解码。JSON_PATH所需scope／owner／chunkId／attachmentId、事件data／confirmation、原内容哈希／资源／财务账／批准／业务收据保持；读取原明文兼容不补签或改变hash，新标准provider写正文必须具备原密钥，损坏密文／缺密钥不降级。AiConversation本无正文／title列，未为名单造字段。
+
+知识文档title列为VARCHAR，原完整标题密文保存于原state.document.title，关系列只留固定无敏感标识；旧标题按原记录校验。chunk TEXT及state重复正文均密文，原version.chunks.create和include.chunks覆盖同一原事务；[检索](../../apps/api/src/modules/ai-native/knowledge/prisma-knowledge-read.adapter.ts)改为在原受权scope／version／当前来源中有界读取解密后作原literal匹配，累计200条／200000字符预算含不匹配正文，不留可检索明文副本。两个原[本人材料SQL](../../apps/api/src/modules/ai-native/scenes/prisma-client-scene-material.repository.ts)／[公开续接SQL](../../apps/api/src/modules/ai-native/scenes/client-public-continuity.repository.ts)在原参数及返回处显式编解码，原hash／长度／scope校验和提交丢应答规则不变，不按SQL字符串泛化拦截。
+
+独立复核找到并已修P2：Core原生PrismaService事务传给AI审批参加者时曾绕过codec，导致新密文开单输入与原指纹不符。[原批准消费](../../apps/api/src/modules/ai-native/prisma-approval-consumption.repository.ts)在prepare／commit均将同一native事务绑定原AI视图和codec，再交原verify／source／Input reader；不重开事务或排除业务正文加密。原[请求仓储](../../apps/api/src/modules/ai-native/task-request/prisma-original-request.repository.ts)的withCurrentInputIn／saveIn／reconcileIn也在原Native授权及行锁前绑定同一视图，原MCP资源参加者不丢正文保护。独立助手已再次静态核关闭原因，未冒称重跑行为。dev2选单接管三源仍在最终实际组合复验，未夹本阶段提交或声称接管已公开闭合。
+
+旧明文升级由原[维护服务](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)的protectStoredBodies提供受权、host-only入口，经现有request factory绑定当前完整空间管理身份；HTTP Controller未增加新业务路由。每次原scope锁、最多10条、原复合游标与正文CAS，只改变存储表示；更新保留原updatedAt／期限／修订／hash，已经密文不重加密。COMMIT丢ACK返回unknown，只观察同一page，不能换原操作或推定回滚；撤权前后重核。严格erased mark、空回答／空正文／DbNull保留原擦除语义，已删除标题无敏感内容不重新加密。该入口未在真实库运行。
+
+操作资料：负责人在自己的环境固定本阶段源码和原密钥配置／历史密钥ID；取得原system:params:manage及完整空间管理权限后，打开原AI_RETENTION_REQUESTS工厂，通过同一request-bound protectStoredBodies逐model／limit／after处理。模型名单由AI_BODY_STORAGE_KINDS返回，event用taskId／cursor、批准快照用recordId／revision、其他列用id；每页读回原对象／hash并保留无正文的结果。unknown保持同page定位和原密文状态，失败／撤权停止；不要启动时自动跑、清业务数据、变原hash或无密钥回退。恢复备份仍须原删除标记屏障，外部对象／供应商副本及备份责任沿原保留政策，不将本地加密称作外部副本已删除。
+
+固定11源最小清单SHA-256 `d10749daa3a7f2aaa55363a03b0fad62418543dc49335b0ffa50493dc1cb22fb`；关键Git blob：codec `60c64c539de3d36a10dbc843d6ad44ea725a9618`、存储`bd6bfd6e45127e4ccdfc6995b132716399845715`、原消费`b7d051787f4fb0ced5f52470325daebb18ef9b9b`、原请求`966849b1c30f5efe4063b5fe150c22f68a370c24`、维护`4de9f043c5a26a9842e5341c30bcfc9adac81085`、provider `feae5d5b0bb06d566fd9ff3f746540a186e56cfd`。Root每份核当前blob及字节；正式provider唯一装配AI_NATIVE_BODY_DATABASE，Core／Auth／logger继续原PrismaService。
+
+| 必要实际源码模拟／类型 | stdin SHA-256及结果 |
+| --- | --- |
+| 原SecretBox／轮换／坏密文／跨行列绑定 | `78aa5b15f89ab605558321fb749747f8a1c2c12ea58dee6790d77f3a75271def`，退出0；原正文hash保持，密钥轮换可读，错绑定／损坏／缺密钥拒绝 |
+| 原正文delegate／局部select／关系metadata／回滚 | `8a9254d5d30189446189e8ee0111023c8f6d5d72a8324bcb28cdc6764c227335`，退出0；10个正文模型返原对象，持久正文密文，空占位保持 |
+| 原知识CAS／nested chunks／历史／literal检索 | `f8fa4466cb918bb4df118d0e6bdae8bdbc5609fae79547538429c66272740cc3`，退出0；1文档／2chunks，原scope／版本／hash校验、错密文拒绝 |
+| 本人材料SQL／COMMIT丢ACK | `bf744fbeab81ecb78834b95b8bd15af7301d0d4adae86a32d188a115ab54d8d4`，退出0；仅1次INSERT，原键读取／重放不再插入，错主体拒绝 |
+| 公开材料SQL／原审计 | `8a625092a3fd743ff5c24d84e7340e1e7f2ae2825d8c06b571b3403fc2887d59`，退出0；1次INSERT／1审计，日志无正文，原hash及同键读回 |
+| 原memory确认／delete | `a5e781f20f916741adc019d6cf590a872c0aa8e0a76e2fc85402e9c1c86f2645`，退出0；1偏好／1确认／3操作，密文及原JSON_PATH清理、DbNull不漏副本 |
+| 实际StaffController／人工草稿／更正／撤权 | `8d07ebc523d444577a3ff67c8658b102e58c982e701643738bd94da465101363`，退出0；1草稿／2原操作，revision2，原值解密可读，0模型／0Core提交 |
+| 原旧正文page保护／原hash／时间／unknown | `e9d71994495f7c2327f66d1f6df5ff01b47db4c36e5d29b8d654c11ed036acbd`，退出0；2行，重复page不新密文，COMMIT丢ACK同page观察，撤权回滚 |
+| 原知识及两Task副本同事务删除／hold | `cf74ef4e253bac83d419a8808ae3372ff1d8df0a5a48332329940844151819bc`，退出0；两终态Task和chunks清除、未决批准hold／撤权全回滚／同键unknown／坏原hash拒绝 |
+| Core原生事务参加者及错codec | `d41764ef207c4fabffc4eeb9fbd233c8e5ef787ec48afc0f11c9970a616a42d1`，退出0；同原tx读取解密，新事务0，prepare／commit双入口核定；不是完整Core建单行为 |
+| 原selection及INPUT／PREVIEW复制body | `fe3ce826b8bfd258b53d5781cac2c4c3245a8f4e2f31efbbabad1081029644f3`，退出0；2副本持久密文、原tx解码，3Native入口登记 |
+| 最终生产闭包类型 | `785193023a604853dec8431b4a30dec615329676c9962843b0e5230933515396`，TypeScript5.9.3、10根／2023源、零诊断、退出0；仅格式规范化后未再扩大回归 |
+
+命令均`node --no-compilation-cache -`、原offline preload／不可达DATABASE_URL／纯内存audit0。原驱动失败保留：BigInt无replacer导致最后状态串行化失败；fixture再次register ts-node重复编译导致错误；最后base64字符非规范编码可能仍解码同字节，现codec校验规范编码并用真正改变tag的原反例；旧保护误用AiScope.revision及AiTaskRepositoryError不支持unknown的实际类型缺口已修原scope锁／专用unknown。未改原测试文件或断言，受影响组复验通过。定向原请求四处CRLF行尾空白已规范化，代码逻辑不变。
+
+dev2最后实际原生Core→批准消费→原选单接管组合已通过，stdin SHA-256 `73957f7573cd76f2df4152ace0e93d7324741c3bafa9f13b02909698a4af1bd1`、输出SHA-256 `a2a14b6113db1b54d04b38c762dfc05d3b30baea5c15ffa3083af8298a53ef9f`、退出0。固定基线20797d418及7源精确overlay整体SHA-256 `06d06648f53e603c70eb90c9297023a5ec04a785ea0e0296dd37ce83b0ed7443`；3模型input／2模型Artifact／2问题／2回答／1原请求／1选单／2批准快照均密文，唯一无正文Artifact仍原RUNNING空占位。原hash逐项重算一致，原单账2收据、模型2调用、Core订单／批准消费／接管各1，旧worker围栏拒绝、终态租约释放，读取不新增模型或订单。Root核最后输出与实际codec／Native接点，未冒称独立重跑作者完整Core链；原请求最后仅规范化换行，不改执行字节。接管丢ACK／竞争／撤权原三例stdin `86ee931eec1a654a73d10069db7217d8760fa53b8879322eba14d049b85a69a5`／输出`71a562108ca99950cde1fdcaf228e0e2bc37e324ee1456224b67e9f8a3cb7c89`退出0；本阶段仅借该组合证明加密不阻正式Core，接管公共消费者仍下一片。
+
+dev1[独立语言／六类攻击证据](<#ain24-independent-language-display-attacks-20261115>)已核入，Root继续AIN-24原七条／全部开放工具与端的最后覆盖核定；本阶段不直接升整项100%，不以本地保护入口代替真实库加密完成。所有自有进程已退出、output/.tmp/ain24-body-encryption-20261115未创建，无新增／扩写测试脚本、下载、Client／dist、重复环境或第五册；真实DB／浏览器／微信／模型／对象存储仍由负责人实测。
+
+<a id="ain24-independent-language-display-attacks-20261115"></a>
+## AIN-24 固定原结果独立语言及展示攻击核定（2026-11-15）
+
+dev1完整索引Git blob `0c6e2437c93784b9f457c9aaeb3a373e5afd1f6d`，Root逐读取原报告／完整原样本／原输出及hash：语言`09b2fb08c317fe5282ba66edbc9161f556d82fee`、补充`8cfe7c969d965edcd3598bfc45559e886d25f05c`；5份代表样本中3份完整合成模型、2份Core／人类提示，由未生成原文本的独立助手评价。状态措辞、可读性、原来源、候选／批准区分及下一人类动作可核，误报完成0；业务金额／权限／状态／幂等沿原确定性断言另列，未用语言自评分替代。有限合成样本不是live模型语言质量／全部场景统计。
+
+六类展示攻击固定stdin `03742c430af74ee767f97f22476b747056c44dca`／SHA-256 `34f4d8b4fe76c6a64c930736c7270360b027a7d8190f83091227896697da61bd`，输出`af49bd2cef991c04c08215cabc984a12f137559d`／SHA-256 `27fb43c808db24faf26410e993631da49238487375113b5c5ad039646031400c`，14例／退出0。实际bootstrap／display session／组件使用有限DOM／MessagePort模拟，覆盖消息伪造、跨实例、自动提交／遮挡、金额事实篡改、消息／树／时间资源耗尽和撤权／隐藏清理，原固定确认控件和frame外权威摘要保持。缺摘要原包仅固定fallback，不开dynamic frame。
+
+迟到来源补证stdin `f7e61bf1baa4938c910dfd1653ee1177667dddd1`／SHA-256 `670187d6468465c068ce1c7b2302a0e139aa91b7a9710ac1009c893abb35a895`、输出`5ea60c2c1bd45713f8dc1b4b5b2b19620f2e8a09`／SHA-256 `2b0c3dc030768ba9a228ffb58b037a2d9fdc47c98d8ddaefae5ceb532c44c98c`，退出0；明确source read进入等待1次后撤回，request abort、srcdoc／port清除，迟到body交付false，不拿从未进入读取的取消假证明。命令`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，新增模型／对象／业务写均0，原4个host源码blob与当前核同。Root读取证据和窄源边界，未独立重新运行作者攻击或宣称浏览器解析／CSP／硬内存隔离已实测；负责人后续真实环境清单保持。
+
+本片未修改product或测试文件，原进程退出、临时目录未创建，原重复内存副本已释放；合成附加字段／摘要明确为攻击fixture，非业务授权。dev1转原ENTRY-01／13的完整契约及实际消费者核定，Root继续加密和AIN-24全文；任务百分比仍按正式册更新。
+
 <a id="ain26-four-category-fixed-evidence-style-20261115"></a>
 ## AIN-26 四品类固定组合证据与员工原样式补交（2026-11-15）
 

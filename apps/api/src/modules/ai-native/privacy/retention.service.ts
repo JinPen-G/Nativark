@@ -17,6 +17,7 @@ import { sign, type KeyObject } from 'node:crypto';
 import { knowledgeRecordSchema, parsePersisted, queueIndex } from '../knowledge/knowledge-validation';
 import { inspectRetentionSource } from './retention-model-sources';
 import { eraseExpiredTaskBodies, eraseRetainedSourceTaskBodies } from './retention-task-bodies';
+import { AI_BODY_STORAGE_KINDS, protectAiBodyStorageRows } from './prisma-ai-body-storage';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -55,6 +56,21 @@ export class AiRetentionService {
     return { context, hash: fingerprint(stable), tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };
   }
   async check(before: Session) { if ((await this.current()).hash !== before.hash) throw refused(); }
+  /** Explicit host maintenance for legacy plaintext. Existing retention
+   * management authority is mandatory; importing/starting never runs it.
+   * It changes storage representation only, not original hashes or consent. */
+  async protectStoredBodies(value: unknown) {
+    const command = z.object({ model: z.string().refine(value => AI_BODY_STORAGE_KINDS.includes(value)),
+      limit: z.number().int().min(1).max(10).default(5), after: z.union([
+        z.object({ id: z.string().min(1).max(191) }).strict(),
+        z.object({ taskId: z.string().min(1).max(36), cursor: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict(),
+        z.object({ recordId: z.string().min(1).max(191), revision: z.number().int().min(1).max(4294967294) }).strict()
+      ]).optional() }).strict().parse(structuredClone(value));
+    const current = await this.current(), scope = await this.db.aiScope.findFirst({ where: aiPersistenceScopeColumns(current.context.scope) });
+    if (!scope) throw unavailable();
+    return protectAiBodyStorageRows(this.db, { ...command, scopeId: scope.id,
+      tenantId: current.tenantId, workspaceId: current.workspaceId, check: () => this.check(current) });
+  }
   private now() { const value = this.clock(); if (!Number.isFinite(value.getTime())) throw unavailable(); return value; }
   private cutoff(days: number) { return new Date(this.now().getTime() - days * 86400000); }
   private readonly unresolvedTask = aiTaskHasUnresolvedEffects;

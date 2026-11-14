@@ -38,7 +38,10 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     return record;
   }
 
-  private async rows(document: AiKnowledgeDocumentDraft, query?: string, published = true, chunkId?: string) {
+  private async rows(document: AiKnowledgeDocumentDraft, published = true, chunkId?: string,
+    budget = { chunks: 200, chars: 200000 }) {
+    if (!Number.isInteger(budget.chunks) || budget.chunks < 1 || budget.chunks > 200
+      || !Number.isInteger(budget.chars) || budget.chars < 1 || budget.chars > 200000) return unavailable();
     const head = await this.repository.read(document.scope, document.documentId);
     if (!head?.contentHash || fingerprint(head.document) !== fingerprint(document)) return unavailable();
     const sourceHash = await this.repository.sourceContentHash?.(document.scope, document.documentId, document.documentVersion);
@@ -46,10 +49,9 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     // Logical chunk IDs live in persisted state, not the random database row ID.
     // Keep the scope/version relation and probe for duplicate logical IDs.
     const rows = await this.db.aiKnowledgeChunk.findMany({ where: { ...this.where(document, published),
-      ...(query === undefined ? {} : { text: { contains: query } }),
       ...(chunkId === undefined ? {} : { state: { path: '$.chunk.chunkId', equals: chunkId } }) },
-      take: chunkId === undefined ? 201 : 2, orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }] });
-    if (!Array.isArray(rows) || rows.length > (chunkId === undefined ? 200 : 1)) return unavailable();
+      take: chunkId === undefined ? budget.chunks + 1 : 2, orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }] });
+    if (!Array.isArray(rows) || rows.length > (chunkId === undefined ? budget.chunks : 1)) return unavailable();
     let chars = 0;
     const chunks = rows.map(row => {
       const chunk = readKnowledgeChunkEvidence(row.state, head.contentHash).chunk;
@@ -58,7 +60,7 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       chars += chunk.text.length;
       return chunk;
     });
-    if (chars > 200000) return unavailable();
+    if (chars > budget.chars) return unavailable();
     if (chunks.length) validateChunks(document, chunks);
     return chunks;
   }
@@ -72,7 +74,7 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       const before = await this.head(source.scope, source.documentId), d = before.document;
       if (d.documentVersion !== source.documentVersion || d.aclRevision !== source.aclRevision) return unavailable();
       const grant = await authorize(this.authorization, context, { action: 'read_body', scope: source.scope, document: d });
-      const chunks = await this.rows(d, undefined, true, source.chunkId);
+      const chunks = await this.rows(d, true, source.chunkId);
       const chunk = chunks.find(c => c.chunkId === source.chunkId);
       if (!chunk) return null;
       if (chunk.text.length > maxChars || fingerprint(chunk.locator) !== fingerprint(source.locator)) return unavailable();
@@ -92,7 +94,7 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       const record = await this.head(document.scope, document.documentId);
       if (fingerprint(record.document) !== fingerprint(document)) return unavailable();
       const grant = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
-      const chunks = await this.rows(document, undefined, false);
+      const chunks = await this.rows(document, false);
       const after = await this.head(document.scope, document.documentId);
       const current = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document: after.document });
       if (fingerprint(record) !== fingerprint(after) || fingerprint(grant) !== fingerprint(current)) return unavailable();
@@ -112,7 +114,7 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       if (!record || fingerprint(record.document) !== fingerprint(document) || document.parsing !== 'parsed'
         || document.publication === 'deleted' || document.publication === 'withdrawn') return unavailable();
       const grant = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
-      const chunks = await this.rows(document, undefined, false);
+      const chunks = await this.rows(document, false);
       const after = await this.repository.read(document.scope, document.documentId);
       if (!after || fingerprint(record) !== fingerprint(after)) return unavailable();
       const current = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document: after.document });
@@ -126,17 +128,22 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     try {
       if (input.grant.scope.kind !== 'workspace') return unavailable();
       const result: Source[] = [], seen = new Set<string>();
-      let chars = 0;
+      let chars = 0, examined = 0;
       for (const ref of input.documents) {
         if (seen.has(ref.documentId)) return unavailable();
         seen.add(ref.documentId);
         const before = await this.head(input.grant.scope, ref.documentId), d = before.document;
         if (d.documentVersion !== ref.documentVersion || d.aclRevision !== ref.aclRevision) return unavailable();
-        const chunks = await this.rows(d, input.query);
+        // Ciphertext cannot support SQL contains. Read only the original
+        // authorized scope/version, then match verified decrypted chunks;
+        // enforce the shared read budget even for non-matching text.
+        const chunks = await this.rows(d, true, undefined, { chunks: 200 - examined, chars: 200000 - chars });
+        examined += chunks.length;
+        if (examined > 200) return unavailable();
         for (const c of chunks) {
           chars += c.text.length;
           if (chars > 200000) return unavailable();
-          // SQL collation may be case-insensitive. No natural-language instruction
+          // Preserve the original literal match. No natural-language instruction
           // is interpreted; only reference metadata leaves this port.
           if (c.text.includes(input.query) && result.length < input.limit) result.push({ kind: 'document', documentId: c.documentId, documentVersion: c.documentVersion,
             chunkId: c.chunkId, scope: c.scope, aclRevision: c.aclRevision, locator: c.locator });

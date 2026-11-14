@@ -9,6 +9,7 @@ import { requestFingerprint as hash } from '../../rental-core/rental-idempotency
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
 import { PrismaClientSceneMaterialRepository, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import { decodeAiClientMaterialBodies, encodeAiClientMaterialBodies } from '../privacy/ai-body-storage.codec';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -97,7 +98,7 @@ export class ClientPublicContinuityRepository {
     try {
       const { erasedAt, ...value } = z.object({ erasedAt: instant.nullable().optional() }).passthrough().parse(rows[0]);
       if (erasedAt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const row = publicRowSchema.parse(value);
+      const row = publicRowSchema.parse(decodeAiClientMaterialBodies(this.db, value));
       if (row.id !== publicRef || row.tenantId !== owner.tenantId || row.workspaceId !== owner.workspaceId
         || row.channel !== owner.channel || row.principalHash !== owner.principalHash || row.expiresAt <= row.createdAt
         || row.inputHash !== hash(row.command) || row.materialHash !== boundedHash(row.material, 65536)
@@ -167,6 +168,7 @@ export class ClientPublicContinuityRepository {
           if (existing.inputHash !== row.inputHash) throw conflict();
           return { row: existing, replayed: true };
         }
+        const protectedBodies = encodeAiClientMaterialBodies(this.db, row);
         await check(); attempted = true;
         // The original table's binding/operation unique keys remain the only
         // persistence boundary. A failed INSERT/COMMIT is never retried here.
@@ -175,7 +177,7 @@ export class ClientPublicContinuityRepository {
            inputHash, materialHash, command, material, publication, revision, createdAt, expiresAt)
           VALUES (${row.id}, ${row.tenantId}, ${row.workspaceId}, ${row.channel}, ${row.principalKind}, ${row.principalHash},
             ${row.bindingHash}, ${row.publicationHash}, ${row.operationKey}, ${row.inputHash}, ${row.materialHash},
-            ${JSON.stringify(row.command)}, ${JSON.stringify(row.material)}, ${JSON.stringify(row.publication)},
+            ${JSON.stringify(protectedBodies.command)}, ${JSON.stringify(protectedBodies.material)}, ${JSON.stringify(protectedBodies.publication)},
             ${row.revision}, ${row.createdAt}, ${row.expiresAt})`);
         await tx.operationLog.create({ data: { id: originKey(owner, row.operationKey), tenantId: owner.tenantId,
           workspaceId: owner.workspaceId, userId: null, rentalOrderId: null, action: originAction,
