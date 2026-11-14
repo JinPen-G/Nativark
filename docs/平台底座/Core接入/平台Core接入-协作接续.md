@@ -1,8 +1,8 @@
 # 平台 Core 接入当前协作接续
 
-更新时间：2026-11-14。
+更新时间：2026-11-15。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。合同、包准备、Topic查询、React适配、工单领域/MySQL/HTTP/三页面及Core授权/成员分配应用层已推送至 `c72d1718df470e73f48ef657d469fc2e4fdd9037`。开发能力索引已有[统一查询与同源Core目录](平台Core接入-开发记录.md#core-capability-index-20261114)，原身份/部署/主应用组合继续待接。公共宿主接线按原候选和唯一作者窗口推进，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。开发能力索引固定于 `df10b7b972c954b8fff9903b48c06f73ec1e1400`，最新main运行修复62ca已由 `854b2990dcf089b0e14c0517404400447270c17f` 纳入并推送回读。当前[统一查询与同源Core目录](平台Core接入-开发记录.md#core-capability-index-20261114)、授权/成员分配与工单示范均有独立源码，原身份/部署/主应用组合继续待接。公共宿主接线按原候选和唯一作者窗口推进，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -32,8 +32,8 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 2. 写入归属与固定来源
 
-- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，按PM指定已通过 `5d416cf9026a25db6ce66dec0ac48a384f5b6773` 合入main `275064d40a3977542a530158974070e8b6c337ca` 并推送回读。恢复记录与营运商简称正式需求已同步；本树共享源码更新后须重建本树产物，不复制main dist/Client或启动服务。后续每阶段核最新main及WIP后整合。
-- PM指定本片固定交付后纳入main修复 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，父为上述275基线；最小8文件固定成果只含4产品文件和4原记录。原迁移部分失败/恢复物理状态、CHECK witness及bigint修订读取证据沿[主线运行恢复](../../管理后台/管理后台-开发记录.md#main-database-runtime-upgrade-20261114)引用，后续升级预检需承接前向修复条件。
+- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，最新main `62ca183f10b7c316ab63c28ef6d04ee88d06488b` 已纳入并上传。固定合并与双方记录保全见[同步阶段](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)，本树共享源码变化后按本树版本准备运行产物，后续每阶段核最新main及WIP再整合。
+- 本次固定main修复8文件包含4产品文件和4原记录，源码逐项核同。迁移部分失败/恢复物理状态、CHECK witness及bigint修订读取证据沿[主线运行恢复](../../管理后台/管理后台-开发记录.md#main-database-runtime-upgrade-20261114)引用，升级观察增加未完成迁移拒绝及原恢复资料接点。
 - 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
 - 原派工同时允许PCH非冲突源继续；已新增 `apps/admin/src/core` 的独占React适配及必要admin依赖/构建前置，原壳/页头/按钮仅消费，不修改main后台作者的顶栏/样式WIP。真实路由/授权/缓存消费仍等待下一公共片，不据此扩大共享窗口。
 - 轻量非租赁实现独占 `packages/example-tickets-core`，独立迁移只在该包内声明，没有加入公共原schema/迁移链；真实宿主authority与主应用装配仍须原公共窗口。

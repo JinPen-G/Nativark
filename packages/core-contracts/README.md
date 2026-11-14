@@ -142,6 +142,8 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 
 检查依次核对来源与不可变发行、全部选中模块的版本兼容、数据可读性和迁移历史。已发布迁移只追加，不能改原文件、顺序或摘要。若有新迁移，实际数据须先处于当前发行的完整基线，数据版本必须前进；中断或记录矛盾时先核对原迁移，不自动重做。
 
+新宿主的迁移观察还提供 `execution`。原迁移账和物理结构核同后使用 `state: "ready"`，执行中、失败和未知分别使用 `running`、`failed`、`unknown`，携带原迁移标识/摘要，以及已知的语句进度、物理观察摘要和固定恢复SQL。出现未完成状态时预检返回 `migration_incomplete`，原DDL部分提交必须先根据真实结构与原执行收据处理。恢复SQL来源和摘要须核定后按目标环境授权执行，完成物理回读和原迁移账登记后重新观察。旧调用方的缺省字段沿原完整基线约束兼容，新宿主始终显式提供状态。[迁移观察合同](src/update.ts)
+
 成功结果的 `status` 分为 `unchanged`、`candidate`、`migration_required`。`candidate` 是返回值中的新锁，原输入文件及未选择更新的 Core 保持；`migrations` 指出所属模块和待执行链，不表示已经应用。`owner=platform` 表示底座，`owner=core:<id>` 表示业务 Core，二者即使名称相同也不混用。
 
 | 拒绝结果 | 需要处理的内容 |
@@ -151,6 +153,7 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 | `platform_version` / `contract_version` / `missing_capability` | 核对整个候选组合的兼容范围与必要公共能力 |
 | `data_unavailable` / `data_observation_conflict` | 从真实迁移账取得完整一致的版本与摘要 |
 | `migration_changed` / `migration_history` / `migration_baseline` | 原迁移链须不可变；先核对历史或未完成迁移 |
+| `migration_incomplete` | 原迁移仍在执行、失败或未知，先核物理状态及固定恢复条件，完成后重新读取迁移账 |
 | `other_module_not_ready` | 当前其他模块的迁移未完成，不能借此次更新一并隐式升级 |
 | `release_rollback` / `data_rollback` | 使用已有验证的程序/数据恢复方案；这个命令只准备前进升级 |
 

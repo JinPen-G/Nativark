@@ -41,9 +41,29 @@ export const CoreUpdateRequestSchema = z.discriminatedUnion("kind", [
 ]);
 export type CoreUpdateRequest = z.infer<typeof CoreUpdateRequestSchema>;
 
+/** 迁移账的执行状态由原所有者提供，部分DDL已提交时须先核真实物理状态并恢复。 */
+export const CoreMigrationExecutionSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("ready") }).strict(),
+  z.object({
+    state: z.enum(["running", "failed", "unknown"]),
+    migration: CoreMigrationSchema.pick({ id: true, sha256: true }),
+    completedStatements: z.number().int().nonnegative().optional(),
+    expectedStatements: z.number().int().positive().optional(),
+    physicalState: z.object({ observedAt: z.string().datetime(), sha256: CoreArtifactHashSchema }).strict().optional(),
+    recovery: CoreMigrationSchema.pick({ file: true, sha256: true }).optional()
+  }).strict()
+]).superRefine((execution, context) => {
+  if (execution.state !== "ready" && execution.completedStatements !== undefined && execution.expectedStatements !== undefined
+    && execution.completedStatements > execution.expectedStatements)
+    context.addIssue({ code: "custom", path: ["completedStatements"], message: "已完成语句数不能超过原迁移总数" });
+});
+export type CoreMigrationExecution = z.infer<typeof CoreMigrationExecutionSchema>;
+
 const observation = z.object({
   version: CoreReleaseVersionSchema,
-  appliedMigrations: z.array(CoreMigrationSchema.pick({ id: true, sha256: true }))
+  appliedMigrations: z.array(CoreMigrationSchema.pick({ id: true, sha256: true })),
+  /** 旧调用方沿原完整物理基线保证；新增宿主读取迁移执行收据后明确提供当前状态。 */
+  execution: CoreMigrationExecutionSchema.optional()
 }).strict();
 export const CoreDataObservationSchema = z.object({
   platform: observation,
@@ -131,6 +151,13 @@ export function planCoreUpdate(
   const checkData = (owner: string, previous: CoreDataContract, next: CoreDataContract,
     actual: z.infer<typeof observation> | undefined) => {
     if (!actual) { add(owner, "data_unavailable", "data", "缺少所属模块当前数据版本和迁移账，不能用清单代替"); return; }
+    if (actual.execution && actual.execution.state !== "ready") {
+      const execution = actual.execution;
+      const statements = execution.completedStatements !== undefined && execution.expectedStatements !== undefined
+        ? `，已完成${execution.completedStatements}/${execution.expectedStatements}条语句` : "";
+      add(owner, "migration_incomplete", "execution", `原迁移${execution.migration.id}处于${execution.state}${statements}，先按原收据、物理状态和恢复条件核对`);
+      return;
+    }
     if (compareCoreReleaseVersions(next.version, previous.version) < 0)
       add(owner, "data_rollback", "data.version", "升级候选不能降低所属模块的数据版本");
     // 已发布迁移只追加；即便尚未应用，也不能改同名历史文件来适配新版本。
