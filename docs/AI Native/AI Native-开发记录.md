@@ -9,7 +9,7 @@
 <a id="ain-entry14-original-cross-surface-backend-20261115"></a>
 ## ENTRY-14／04 原预约跨端引用、同键提交与派发前复核（2026-11-15）
 
-前置`02bd7223b05e48dd6cb0507f277d55db6545cbe8`已普通推送且GitHub回读一致。本阶段只固定20个公共／后端源及本记录／接续；dev2新增Web／小程序API、会话和组件继续独占施工，不夹带或据此判两个原任务100%。本节所在提交为本阶段固定来源，不复制成果包或另建测试脚本。
+前置`02bd7223b05e48dd6cb0507f277d55db6545cbe8`已普通推送且GitHub回读一致。本阶段只固定20个公共／后端源及本记录／接续；dev2新增Web／小程序API、会话和组件继续独占施工，不夹带或据此判两个原任务100%。固定提交`37f384be0a6c3b314323d70318ebcf4f5b15cc2e`已普通推送`codex/ai-native`，GitHub重新回读同SHA；main仍为`62ca183f10b7c316ab63c28ef6d04ee88d06488b`，不将任务分支上传称为已合main。不复制成果包或另建测试脚本。
 
 [公共合同](../../packages/shared/src/ai-client-booking-transfer-draft.ts)为原handoff签发短期引用、读原签发、目标消费和读原消费四操作；runtime／OpenAPI及[客户Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)同步闭合校验，拒绝客户身份、scope、凭据及材料正文注入，使用原始body、no-store和有界等待。正式小程序窄runtime白名单及声明同步五个出口，不生成或复制依赖环境。[标准客户入口](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)共用当前发布读取，目录中的本人订单解释额外定位准确`order_explanation`宿主，不借报价政策判断订单能力；此项仍不代表ENTRY-01全部source／四端目录消费者齐备。
 
@@ -37,7 +37,7 @@ dev2[私有合同](../../apps/api/src/modules/ai-native/scenes/client-booking-tr
 
 失败保留：初夹具误用未持久旧quote、字段`quoteId`代替真实`quote.id`、陈旧内存policy对象及Web ESM声明，修原夹具／loader后通过，不放宽生产。材料变化组试图恢复后继续的旧断言仍失败，最终仅核原拒绝和0写，不掩盖旧失败。目标最后等待改版反例首次已正确拒绝writer，但驱动仍拿旧捕获release宿主读原receipt而退出1；补断言旧宿主拒绝，再捕获当前独立只读宿主，原attempt可读且无重派，未改生产校验。
 
-所有验证只用原offline preload、不可达DATABASE_URL、内存audit和本树单一逻辑任务目录`output/.tmp/ain-entry14-cross-surface-20261115`；该目录未创建，自有验证进程已退出，无新增测试文件、依赖、Client／dist或临时副本。本片关闭后端P2和原引用／提交边界；ENTRY-14／04仍待两端实际页面挂接、当前输入／身份撤回及原确认／收据消费的完整核定，百分比保持75%。ENTRY-01全目录和AIN-15企业正向依赖保留，真实测试仍由负责人后续操作。
+所有验证只用原offline preload、不可达DATABASE_URL、内存audit和本树单一逻辑任务目录`output/.tmp/ain-entry14-cross-surface-20261115`；该目录未创建，自有验证进程已退出，无新增测试文件、依赖、Client／dist或临时副本。22份交付的`git diff --cached --check`退出0，新增阶段9条源码链接均存在；`node scripts/validate-docs.cjs`退出1，仍为导航历史三处和稀疏站点示例一处既有缺链，无新增任务算术或链接错误。本片关闭后端P2和原引用／提交边界；ENTRY-14／04仍待两端实际页面挂接、当前输入／身份撤回及原确认／收据消费的完整核定，百分比保持75%。ENTRY-01全目录和AIN-15企业正向依赖保留，真实测试仍由负责人后续操作。
 
 <a id="ain-entry16-current-zone-and-submitted-state-20261115"></a>
 ## ENTRY-16 客户入口按空间时区准备与原请求提交状态修复（2026-11-15）
