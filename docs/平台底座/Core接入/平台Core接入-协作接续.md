@@ -2,7 +2,7 @@
 
 更新时间：2026-11-14。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及独立包准备片。合同/包检查、公共指纹、API/服务端/升级预检、指南/归档、本地准备、页面声明与固定GitHub Release获取已固定推送至 `96ce79dac0211bec335e46ea0d9f0ba223e82dda`；Topic发现/缓存已沿同一只读传输实现，证据见[发现记录](平台Core接入-开发记录.md#core-github-discovery-20261114)。真实宿主接线继续待公共窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配片。合同/包检查、公共指纹、API/服务端/升级预检、指南/归档、本地/固定GitHub Release准备及Topic查询已固定推送至 `0ea168622c90301a4e431220acc68ead74d037c2`；[React页面适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)已新增并复用原页头/按钮，尚未装配真实路由。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -32,6 +32,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 - 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，按PM指定已通过 `5d416cf9026a25db6ce66dec0ac48a384f5b6773` 合入main `275064d40a3977542a530158974070e8b6c337ca` 并推送回读。恢复记录与营运商简称正式需求已同步；本树共享源码更新后须重建本树产物，不复制main dist/Client或启动服务。后续每阶段核最新main及WIP后整合。
 - 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
+- 原派工同时允许PCH非冲突源继续；已新增 `apps/admin/src/core` 的独占React适配及必要admin依赖/构建前置，原壳/页头/按钮仅消费，不修改main后台作者的顶栏/样式WIP。真实路由/授权/缓存消费仍等待下一公共片，不据此扩大共享窗口。
 - PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。源码检查点和剩余实际宽度/真库验收唯一见[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)，不计PCH新任务，不扩为平台抽离公共窗口。
 - shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
 - 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
@@ -43,11 +44,11 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已提供`registerCoreServers`、授权/绑定schema及`composeCoreOpenApi`；旧API身份和Rental权限映射保持。各片由PM核定唯一作者；shared总出口暂不增加重复定义。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.4核收。
-   [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，尚无React呈现接线；用于上述原组件适配，不复制通用壳或改变业务方法。
+   [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)现已消费原PageHeading/SaveButton/ConfirmAction并提供 `@/core` 源码入口；真实注册/授权与路由消费者未接。下片消费这个适配，不复制通用壳或改变业务方法。
 5. [本地打包/安装准备](平台Core接入-开发记录.md#core-local-package-install-20261114)与[固定Release获取](平台Core接入-开发记录.md#core-github-release-20261114)已有共用检查/候选目录链，结果仅pending；[Topic搜索/缓存](平台Core接入-开发记录.md#core-github-discovery-20261114)只返回未审核、包未检查的仓库候选。下一步核仓库根清单/同仓索引并接实际宿主界面及部署注册，以非租赁持久化业务验证完整安装。10/11由独立开发者或Agent只凭简明指南和业务要求接手，在干净宿主重现安装→授权→业务；12核收全功能前后对照、源码/API可理解性、底座跟随上游与Core单独升级、配置/定制/数据保留、回退/分发失败及原独立审查门槛。真实GitHub测试发行尚未取得，不将离线响应/fixture准备当远端下载或非租赁样例。
 6. 不同租户/成员、撤权、停用重开、统一期限、有/无工具、迟到响应与unknown验证组合继续保留；部署移除、停用、订阅到期和成员撤权分别判定。
 
-独立包已有清单/目录静态检查、API组合、服务端/页面注册合同、独立升级预检、指南生成、本地/固定Release包准备及Topic查询/缓存；它尚非完整运行SDK。完整功能/源码基线、API离线资料、真实独立宿主、多Core授权/生命周期与UI/AI适配、工单持久化样例、发现管理界面/实际部署及独立更新、独立接手和兼容回退继续待交付。后续只补必要测试，现有用例/短命令优先，不增加成批测试脚本。
+独立包已有清单/目录静态检查、API组合、服务端/页面合同、独立升级预检、指南生成、本地/固定Release准备及Topic查询，后台有原组件的CorePage适配；尚非完整运行SDK。完整功能/源码基线、API离线资料、真实独立宿主、多Core授权/生命周期与UI/AI接线、工单持久化样例、发现管理界面/实际部署及独立更新、独立接手和兼容回退继续待交付。后续只补必要测试，现有用例/短命令优先，不增加成批测试脚本。
 
 ## 4. 验证边界与保留事项
 

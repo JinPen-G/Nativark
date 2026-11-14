@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build -w @rental-os/core-contracts",
     "dev": "vite --host 127.0.0.1 --strictPort",
+    "prebuild": "npm run build -w @rental-os/core-contracts",
     "build": "tsc -b && vite build",
+    "prelint": "npm run build -w @rental-os/core-contracts",
     "lint": "tsc -b --noEmit",
     "preview": "vite preview --host 127.0.0.1 --port 4175"
   },
@@ -30,6 +33,7 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@rc-component/motion": "1.3.3",
     "@rental-os/shared": "0.1.0",
+    "@rental-os/core-contracts": "0.1.0",
     "@tanstack/react-query": "5.101.4",
     "@tanstack/react-table": "8.21.3",
     "antd": "6.6.0",

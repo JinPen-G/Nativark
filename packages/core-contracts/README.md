@@ -107,7 +107,7 @@ const route = CorePageDescriptorSchema.parse({
 
 例如“新建工单”是 `kind: "open"`，由本页提供 `open`，`emphasis: "primary"` 表达主操作；无需自行指定CSS。动作可声明附加权限和当前不可用原因。`resolveCorePageLocation`只按已登记目标编码参数，不能导航任意外部URL；注册或路径存在均不授予当前用户访问权。
 
-**当前已实现描述/注册与路径解析，React页面呈现适配尚未接入。** 后续07通过原BusinessShell/WorkspaceHeader和按钮适配消费这些类型，保留完整左栏、面包屑行、铃铛、休息、收展与统一页面模式；不能把类型声明存在当主按钮已自动显示。字段类型、动态动作和既有表单Promise都保留在Core/React代码中，不执行JSON表达式。
+**当前已实现描述/注册与路径解析，并提供[React页面适配](../../apps/admin/src/core/README.md)。** 适配消费原PageHeading/WorkspaceHeader及Button/SaveButton/ConfirmAction，只需提供页面正文与动作；标题读取单源路由。原AppRouter/导航和真实Core授权尚未装配，后续07接完整左栏、面包屑行、铃铛、休息、收展与统一页面模式；不能把适配源码存在当无Core/多Core后台已实际运行。字段类型、动态动作和既有表单Promise保留在Core/React代码中，不执行JSON表达式。
 
 ## 分别更新底座或一个 Core
 

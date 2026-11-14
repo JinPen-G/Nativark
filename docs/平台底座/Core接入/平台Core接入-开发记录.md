@@ -155,6 +155,24 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-react-page-adapter-20261114"></a>
+
+## Core 页面声明复用原 React 组件（2026-11-14）
+
+Topic片已提交上传 `0ea168622c90301a4e431220acc68ead74d037c2`，真实远端回读一致。复核PM原当前派工的“PCH独占清单、模块合同及非冲突源继续”，本片仅新增[CorePage适配](../../../apps/admin/src/core/CorePage.tsx)/[正式出口](../../../apps/admin/src/core/index.ts)/[源码说明](../../../apps/admin/src/core/README.md)，以及未有活动WIP的admin包配置和根lock单一依赖项；原AppShell/BusinessShell/PageHeader/顶栏/样式正由main后台作者修改，均只读，不覆盖。shared总index、Auth/Guard/原AppModule及AI目录没有扩大修改。
+
+CorePage消费原 `@rental-os/core-contracts` 的页面和动作类型，标题从当前注册项取得；按钮按navigate/open/command/save选择原Button、ActionButton、ConfirmAction和SaveButton，经原PageHeading/WorkspaceHeader呈现。没有新样式、vendor修改、UI框架或页面JSON解释器。动态权限由宿主当前回调供给，执行前重验、无权正文不挂载；路由对象/身份代次变化释放旧页，确认等待/离页回调不持有旧授权，最多一个主操作、操作ID唯一。真正授权/缓存失效仍由后端和原宿主负责，不能使用恒真回调装配生产。
+
+表单保留真实Form、validateFields及mutateAsync，原SaveButton继续同步防重复、关联原Form与保存快照；非保存动作不假显示保存成功。普通错误走原反馈，字段错误留原Form，确认走原原位状态；业务拒绝/unknown由各Core类型化API抛错与原收据处理，不猜测任意响应或自动重发。接入指南给出路由单源、打开编辑器和保存的短例子，未实现的业务方法明确标注。
+
+admin增加对本仓合同包的正式依赖，predev/prebuild/prelint先构建本树合同产物，不增加Vite深层源码别名；安装依赖、应用启动和本树dist构建本片未执行。最终完整类型使用TypeScript CompilerHost只读依赖映射，648根/3989源、0诊断；首轮验证映射重复识别React产生21条ref类型错误，统一只读真实路径后通过，未改产品类型约束或原组件。AntD6.6 Form/Button API与Form例子已查，新组件lint0问题，原263 vendor哈希异常0。
+
+stdin核对实际CorePage JSX的四类组件选择、受控导航、打开不提交、确认同一Promise、当前撤权、原Form/值传递、离页拒绝、无权页和单主按钮，退出0。另直接核对原SaveButton/ActionButton的校验顺序、真实Promise、防重复、原form ID/native submit防双发及失败不记保存，退出0。这些使用hook/宿主facade，是离线行为证据，未证明真实React挂载、portal/回车、浏览器样式或服务端授权。没有新增测试脚本或临时文件，原已清理目录保持不存在。
+
+4份文档的326个本地链接/44个锚点定向通过，admin包与root lock依赖一致，原需求/任务正文未改；`git -c core.whitespace=cr-at-eol diff --check`退出0。最终反馈回调补齐后，完整648根类型复验仍0诊断，新组件AntD lint仍零问题。
+
+**剩余接线：** 原AppRouter/导航须在公共窗口供给真实Core注册/授权/成员分配、lifetimeKey、可访问目标和缓存代次，再以轻量工单真实业务页核对原壳。当前新增适配尚未有已装配路由消费者，仍不能称无Core/多Core后台完成或独立前端包已发布；列表/详情模式继续复用原组件，后续按实际重复需求补最短接入面。PCH-07原前置/完整门槛保留，本片不以类型通过计整项完成。
+
 <a id="core-github-discovery-20261114"></a>
 
 ## Topic 发现与离线查询状态（2026-11-14）
