@@ -1,0 +1,7 @@
+.goal-picker { padding: 24rpx; color: var(--text); }
+.goal-picker__input { box-sizing: border-box; width: 100%; min-height: 88rpx; margin-top: 12rpx; padding: 18rpx; font-size: 32rpx; background: var(--surface); color: var(--text); }
+.goal-picker__choices { display: flex; flex-wrap: wrap; gap: 12rpx; margin-top: 12rpx; }
+.goal-picker__choice { min-height: 88rpx; margin: 0; padding: 12rpx 18rpx; white-space: normal; font-size: 28rpx; }
+.goal-picker__choice--selected { color: var(--on-primary); background: var(--primary); }
+.goal-picker__field { margin-top: 24rpx; }
+.goal-picker__date { min-height: 88rpx; padding: 18rpx; font-size: 32rpx; background: var(--surface); }

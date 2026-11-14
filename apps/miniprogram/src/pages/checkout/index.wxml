@@ -3,7 +3,7 @@
   <nav-bar title="确认订单"></nav-bar>
   <view wx:if="{{!aiEnabled}}" class="section"><view class="card">
     <ai-quote-preparation id="client-quote-preparation" selection="{{aiQuoteSelection}}" scope-key="{{aiQuoteScopeKey}}"
-      time-zone="{{aiQuoteTimeZone}}" paused="{{locked || enterprisePending || enterpriseIndex >= 0}}"
+      time-zone="{{aiQuoteTimeZone}}" paused="{{locked || aiHandoffPending || enterprisePending || enterpriseIndex >= 0}}"
       bind:mode="onQuotePreparationMode" bind:handoff="onQuoteBookingHandoff"></ai-quote-preparation>
   </view></view>
   <view wx:if="{{!aiEnabled}}" class="card mt-16">
@@ -11,6 +11,7 @@
     <label for="ai-original-handoff">原预约草稿交接编号</label>
     <input id="ai-original-handoff" value="{{aiHandoffInput}}" maxlength="191" disabled="{{aiHandoffOpening || locked}}" bindinput="onHandoffReferenceInput" />
     <button class="btn btn--block" loading="{{aiHandoffOpening}}" disabled="{{!aiHandoffOffered || aiHandoffOpening || locked}}" bindtap="onOpenPublishedBooking">核对AI预约草稿</button>
+    <block wx:if="{{aiHandoffPending}}"><view class="body mt-16">当前等待核对原AI交接，普通购物车尚未重新报价或提交。</view><button class="btn btn--block mt-16" bindtap="onContinueOrdinaryBooking" disabled="{{aiHandoffOpening}}">保留原AI记录，继续普通预约</button></block>
   </view>
 
   <view class="section">
@@ -37,9 +38,10 @@
       <button wx:if="{{!aiReadOnly && (aiStatus === 'idle' || aiStatus === 'available' || aiStatus === 'unavailable' || aiStatus === 'loading')}}" class="btn btn--primary btn--block mt-16" bindtap="onReadBookingHandoff" disabled="{{aiStatus === 'loading'}}" loading="{{aiStatus === 'loading'}}">读取原材料</button>
       <button wx:if="{{!aiReadOnly && aiStatus === 'available'}}" class="btn btn--primary btn--block mt-16" bindtap="onContinueBookingHandoff">人工继续：复验原报价</button>
       <block wx:if="{{!aiReadOnly && (aiStatus === 'continued' || aiStatus === 'accepting' || aiStatus === 'accepted')}}">
-        <view class="line" wx:for="{{aiSelection}}" wx:key="itemGroupId"><view style="overflow-wrap:anywhere;word-break:break-all;">商品引用：{{item.itemGroupId}}</view><view>数量：{{item.quantity}}</view></view>
-        <view>履约：{{method === 'delivery' ? '配送' : '自取'}}；地点引用：{{aiLocationId}}</view>
+        <view class="line" wx:for="{{aiOriginalLines}}" wx:key="itemGroupId"><view style="overflow-wrap:anywhere;word-break:break-all;">商品引用：{{item.itemGroupId}}</view><view>数量：{{item.quantity}} · 原计费单位：{{item.pricingUnit || '未记录'}}{{item.usageQuantity !== '' ? ' · 用量 ' + item.usageQuantity : ''}}</view></view>
+        <view>履约：{{aiFulfillmentLabel}}；地点引用：{{aiLocationId}}</view>
         <view>归还地点：{{returnLabel}}</view><view wx:if="{{addressLabel}}">本人地址引用：{{addressLabel}}</view>
+        <view>原预约身份：{{aiIdentityLabel}}</view><view wx:if="{{aiEnterpriseNotice}}" class="body mt-8">{{aiEnterpriseNotice}}</view>
         <view>原应付：<money-text amount="{{payable}}" currency="{{currency}}"></money-text></view>
         <view>押金：<money-text amount="{{deposit}}" currency="{{currency}}"></money-text></view>
         <view>预授权：<money-text amount="{{preAuth}}" currency="{{currency}}"></money-text></view>
@@ -47,8 +49,19 @@
         <checkbox-group bindchange="onAgreeChange"><label><checkbox value="agree" checked="{{agreed}}" disabled="{{aiStatus === 'accepting'}}"/>我已阅读并同意原租赁规则</label></checkbox-group>
         <button class="btn btn--block mt-16" bindtap="onOpenRules">查看原租赁规则</button>
         <view wx:if="{{formError}}" class="notice notice--warning mt-16">{{formError}}</view>
-        <button wx:if="{{aiStatus !== 'accepted'}}" class="btn btn--primary btn--block mt-16" bindtap="onAcceptBookingSubmission" disabled="{{!aiSubmissionAvailable || !agreed || aiStatus === 'accepting'}}" loading="{{aiStatus === 'accepting'}}">{{aiSubmissionAvailable ? '受理原预约材料' : '提交能力未接通'}}</button>
-        <button wx:else class="btn btn--primary btn--block mt-16" bindtap="onSubmitAcceptedBooking" disabled="{{!aiSubmissionAvailable || !agreed}}">明确提交原预约</button>
+        <block wx:if="{{!aiEnterpriseApprovalRequired}}">
+          <button wx:if="{{aiStatus !== 'accepted'}}" class="btn btn--primary btn--block mt-16" bindtap="onAcceptBookingSubmission" disabled="{{!aiSubmissionAvailable || !agreed || aiStatus === 'accepting'}}" loading="{{aiStatus === 'accepting'}}">{{aiSubmissionAvailable ? '受理原预约材料' : '提交能力未接通'}}</button>
+          <button wx:else class="btn btn--primary btn--block mt-16" bindtap="onSubmitAcceptedBooking" disabled="{{!aiSubmissionAvailable || !agreed}}">明确提交原预约</button>
+        </block>
+        <block wx:else>
+          <view class="body mt-16">原企业政策要求逐单批准。沿本人原报价申请，批准后还须明确提交；未知结果只读原操作。</view>
+          <input class="input-box mt-16" value="{{enterprisePurpose}}" maxlength="500" placeholder="本次租赁用途" disabled="{{enterpriseBusy || enterprisePending}}" bindinput="onEnterprisePurpose" />
+          <button class="btn btn--block mt-16" bindtap="onEnterpriseApproval" disabled="{{!enterprisePurpose || enterpriseBusy || enterprisePending || enterpriseApproval}}">申请原企业批准</button>
+          <view wx:if="{{enterpriseApproval}}">原批准：{{enterpriseApproval.state}} · 有效期 {{enterpriseApproval.expiresAt}}</view>
+          <button class="btn btn--block mt-16" bindtap="onReadEnterpriseApproval" disabled="{{enterpriseBusy}}">只核对原企业操作及批准</button>
+          <button wx:if="{{enterpriseApproval.state === 'approved'}}" class="btn btn--primary btn--block mt-16" bindtap="onSubmitEnterpriseApproval" disabled="{{!agreed || enterpriseBusy || enterprisePending}}">明确提交获批原预约</button>
+          <view wx:if="{{enterpriseError}}" class="notice notice--warning mt-8" role="status">{{enterpriseError}}</view>
+        </block>
       </block>
       <view wx:if="{{aiStatus === 'submitting' || aiStatus === 'checking'}}" class="muted mt-16">{{aiStatus === 'checking' ? '正在核对原操作收据…' : '正在提交原预约…'}}</view>
       <block wx:if="{{aiStatus === 'pending_reconcile'}}"><view class="notice notice--warning mt-16">结果仍待核对；没有找到收据也不代表未执行，不会自动再次下单。</view><button class="btn btn--primary btn--block mt-16" bindtap="onReadBookingSubmission" disabled="{{!aiReceiptAvailable}}">核对原提交结果</button></block>
@@ -59,7 +72,7 @@
 
   <state-view wx:elif="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" secondaryText="{{view.secondaryText}}" bind:action="onViewAction" bind:secondary="onViewSecondary"></state-view>
 
-  <block wx:elif="{{cart}}">
+  <block wx:elif="{{cart && !aiHandoffPending}}">
     <view wx:if="{{locked}}" class="section">
       <view class="notice notice--warning">上一次提交的结果尚未确认。系统会用同一提交凭证向商户查询，不会重复下单；在结果明确前请不要修改租赁内容。</view>
       <button class="btn btn--primary btn--block mt-16" hover-class="btn-hover" bindtap="onRecover" disabled="{{submitting}}">{{submitting ? '查询中…' : '查询提交结果'}}</button>

@@ -6,6 +6,10 @@ export { AI_CLIENT_PUBLIC_HTTP, aiClientPublicSessionRequestSchema, aiClientPubl
   aiClientPublicContinuationReadRequestSchema, aiClientPublicSessionResponseSchema, aiClientPublicReadResponseSchema,
   aiClientPublicPreparationResponseSchema, aiClientPublicOperationResponseSchema, aiClientPublicContinuationResponseSchema } from './ai-client-public-draft';
 export { createAiClientPublicContinuitySession } from './ai-client-public-session';
+export { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
+  aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema } from './ai-client-goal-draft';
+export { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions } from './ai-client-goal-session';
+export { clientGoalTextHash } from './ai-client-goal-fingerprint';
 export { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 export { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_FIELD_IDS_DRAFT,
   isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft } from './ai-task-input-draft';

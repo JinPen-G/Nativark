@@ -42,4 +42,8 @@
     <view class="muted small center mt-16">共 {{cards.length}} 件 · 参考价以租期报价为准</view>
   </view>
   <view wx:if="{{publicServiceCode}}" class="section"><ai-public-browse service-code="{{publicServiceCode}}" kind="catalog"></ai-public-browse></view>
+  <view wx:if="{{publicServiceCode}}" class="section">
+    <block wx:if="{{goalOpen}}"><ai-goal-picker service-code="{{publicServiceCode}}" bind:handoff="onGoalHandoff"></ai-goal-picker><button class="btn btn--block mt-16" bindtap="onCloseGoal">返回普通选品</button></block>
+    <button wx:else class="btn btn--block" bindtap="onOpenGoal">按使用目标选品</button>
+  </view>
 </view>

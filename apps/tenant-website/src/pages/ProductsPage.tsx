@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Search as SearchOutlined } from '../components/SiteIcon';
 import { useSite } from '../SiteContext';
 import { ProductCard } from '../components/ProductCard';
@@ -10,9 +10,15 @@ import { Breadcrumbs, PageHeading } from '../components/PageHeader';
 import { CatalogConditions } from '../components/CatalogConditions';
 import { useActiveRail } from '../hooks/useActiveRail';
 import { ClientPublicBrowse } from '../features/ai-native/ClientPublicBrowse';
+import { ClientGoalPicker } from '../features/ai-native/ClientGoalPicker';
+import { useAuth } from '../AuthContext';
+import { captureEnterpriseHostSession } from '../data/authClient';
 
 export function ProductsPage() {
   const { tenant, tenantKey, tenantCode, isRemote, productsReady, href, language, localizeProduct, t } = useSite();
+  const { session, currentWorkspace, switchWorkspace } = useAuth(), navigate = useNavigate();
+  const [goalOpen, setGoalOpen] = useState<string | null>(null), [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState(false);
   const { categoryId } = useParams();
   const [params, setParams] = useSearchParams();
   const category = tenant.categories.find(item => item.id === categoryId);
@@ -82,6 +88,9 @@ export function ProductsPage() {
     [baseFiltered, availableIds],
   );
   const activeCategory = tenant.categories.find(item => item.id === selectedCategory);
+  const goalCategory = activeCategory ?? (tenant.categories.length === 1 ? tenant.categories[0] : null);
+  const goalScope = JSON.stringify([tenantCode, goalCategory?.id, session?.customer.customerId, currentWorkspace?.workspaceCode]);
+  const currentGoalScope = useRef(goalScope); currentGoalScope.current = goalScope;
   const conditionNote = availabilityChecking ? t('checkingAvailability') : availableIds ? t('filteredByCondition') : t('availabilityAtOrder');
   const allProducts = siteRepository.getProducts(tenant);
 
@@ -107,6 +116,22 @@ export function ProductsPage() {
     <CatalogConditions params={params} onApply={setParams} note={conditionNote} />
     {isRemote && tenantCode && activeCategory && <ClientPublicBrowse tenantCode={tenantCode} serviceCode={activeCategory.id}
       kind="catalog" english={language === 'en'} loginHref={href(`/login?redirect=${encodeURIComponent(`/category/${activeCategory.id}`)}`)} />}
+    {isRemote && tenantCode && goalCategory && <>
+      {session?.customer.customerType === 'personal' && currentWorkspace?.workspaceCode !== goalCategory.id
+        ? <button type="button" className="button button-outline" disabled={switching} onClick={() => {
+          if (switching) return; setSwitching(true); setSwitchError(false);
+          void switchWorkspace(goalCategory.id).catch(() => setSwitchError(true)).finally(() => setSwitching(false));
+        }}>{language === 'en' ? 'Switch to this service for goal selection' : '切换到此服务后按目标选品'}</button>
+        : goalOpen === goalScope ? <ClientGoalPicker scopeKey={goalScope} tenantCode={tenantCode} serviceCode={goalCategory.id} english={language === 'en'}
+          onHandoff={handoff => {
+            const current = captureEnterpriseHostSession(), productId = handoff.fields.lines[0]?.itemGroupId;
+            if (!current?.current() || current.tenantCode !== tenantCode || current.workspaceCode !== goalCategory.id || currentGoalScope.current !== goalScope
+              || handoff.surface !== 'tenant_website' || !productId || document.hidden) return;
+            navigate(href(`/booking/${encodeURIComponent(productId)}`), { state: { aiBookingHandoffRef: handoff.handoffRef } });
+          }} onOrdinary={() => setGoalOpen(null)} />
+          : <button type="button" className="button button-outline" onClick={() => setGoalOpen(goalScope)}>{language === 'en' ? 'Choose rental items from a goal' : '按使用目标选品'}</button>}
+      {switchError && <p role="status">{language === 'en' ? 'This service could not be selected. Check your current membership and try again.' : '暂时无法切换服务，请核对当前会员关系后重试。'}</p>}
+    </>}
     <div className="catalog-layout"><aside className="catalog-sidebar"><h2>{t('productCategory')}</h2><nav ref={categoryRail} aria-label={t('productCategory')}><Link className={selectedCategory === 'all' ? 'active' : ''} aria-current={selectedCategory === 'all' ? 'page' : undefined} to={categoryTo()}>{t('allProducts')} <span>{allProducts.length}</span></Link>{tenant.categories.map(item => <Link className={selectedCategory === item.id ? 'active' : ''} aria-current={selectedCategory === item.id ? 'page' : undefined} key={item.id} to={categoryTo(item.id)}>{item.name}<span>{allProducts.filter(product => product.categoryId === item.id).length}</span></Link>)}</nav></aside>
       <div className="catalog-main"><div className="catalog-toolbar"><form onSubmit={event => { event.preventDefault(); updateParam('search', searchInput.trim()); }}><SearchOutlined /><input value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder={t('searchProducts')} aria-label={t('searchAria')} /><button type="submit">{t('search')}</button></form><span>{t('itemCount', { count: filtered.length })}</span><select value={sort} onChange={event => setSort(event.target.value)} aria-label={t('sortLabel')}><option value="recommended">{t('recommendedSort')}</option><option value="price-low">{t('priceLow')}</option><option value="price-high">{t('priceHigh')}</option><option value="rating">{t('ratingSort')}</option></select></div>
         {activeCategory && activeCategory.children.length > 1 && <div className="filter-chips" aria-label={t('subcategory')}><button className={selectedSub === 'all' ? 'active' : ''} onClick={() => updateParam('sub', 'all')}>{t('categoryAll')}</button>{activeCategory.children.map(child => <button key={child.id} className={selectedSub === child.id ? 'active' : ''} onClick={() => updateParam('sub', child.id)}>{child.name}</button>)}</div>}

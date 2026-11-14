@@ -125,3 +125,5 @@ export * from './staff-fulfillment-receipt';
 export * from './ai-client-public-draft';
 export * from './ai-client-public-session';
 export * from './ai-client-goal-draft';
+export * from './ai-client-goal-session';
+export * from './ai-client-goal-fingerprint';

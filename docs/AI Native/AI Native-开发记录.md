@@ -3,8 +3,37 @@
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
 > 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain22-goal-booking-original-consumers-20261114"></a>
+## AIN-22 两端目标选品到原预约与收据恢复（2026-11-14）
+
+本阶段以前置 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 的AIN-21正式装配为基础，收27份必要生产源码：共享Goal会话／有界原输入指纹、正式总出口和微信窄runtime；网站Goal/API/宿主、商品入口及原Booking页面；微信Goal/API/目录、原Checkout与受理宿主。原Goal后端、Task、唯一Gateway、单账、Core参数准备、报价确认和Booking服务继续复用，不新建计价、库存或执行链。源码集合固定在本阶段Git对象，未核旧goal三叶及员工样式保持原位，不夹带AIN-25活动成果。
+
+[共享Goal](../../packages/shared/src/ai-client-goal-session.ts)把未选候选、人类明确商品／计费单位／数量／用量／绝对时间／地点／本人企业身份分别送原Core准备，保存的是原键、材料哈希和选择，不缓存目标正文、模型回答或Action。`selectedQuote`在原报价读取、当前目录时区读取之后，再读同一原报价及材料并全文比较；目录等待中变化、权限撤回和过期拒绝新办理，`quoteRecoveryReference`仅提供原收据定位。`beginNewGoal`只接受已观察最终答案和已成功原Task，先保留唯一旧journal再清本宿主活动指针，unknown不能换键或自动开始新模型。两端共用该会话，AbortController/微信取消信号各由原宿主承担；本机存储读取失败不能被当作无原操作。
+
+[网站入口](../../apps/tenant-website/src/features/ai-native/ClientGoalPicker.tsx)和[微信入口](../../apps/miniprogram/src/components/ai-native/ai-goal-picker/index.ts)复用原品牌／语言／主题及固定表单，所有候选初始未选，重复名称附原标识；时间以商户时区转为绝对值，有歧义要求明确选择或转原页面。网站商品页与微信目录只在用户明确打开目标入口后挂载，普通目录不自动读取AI、轮询或派发。原Task停止沿原创建定位、当前读权、取消请求和善后收据，不把隐藏或取消本地请求当Task已停止。
+
+原报价通过既有Booking材料→Draft生成→明确选择→handoff，网站router state和微信eventChannel都只带服务端原引用。[原网站预约页](../../apps/tenant-website/src/pages/BookingPage.tsx)与[原微信Checkout](../../apps/miniprogram/src/pages/checkout/index.ts)完整显示原商品行、计费单位／用量、取还地点、时区和本人企业身份；原Core仍决定可租性、资格、费用及订单。逐单企业付款使用原批准申请／明确提交组件，普通订单沿原accept／submit和原业务收据；既有支付页和回调保持，AI文字不确认支付。
+
+本片发现并修复四类实际反例：微信空／空白用量转换为0现于转换前拒绝，明确输入0保留；Goal交接进入旧购物车的自动报价现由固定`original_booking_handoff`路由标记与pending门禁禁止，该标记只禁止普通写入、不授AI权限；输入原交接引用使已有普通报价请求版本失效，await后再核pending，迟到报价不绑定旧cart；受理丢应答原读不再当作已提交，必须原受理已观察、原提交收据未观察、同Draft仍`handed_to_booking_page / not_submitted`、当前材料及closing Draft一致且本宿主未尝试submit，才显示首次明确提交。已submitted／unknown或原已尝试继续只读，`not_observed`本身不授重派。Core省略归还地点时仅按其原领取地点规范化，明确异地选择仍逐项比较。
+
+Root必要模拟命令为`node --no-compilation-cache -`，使用原offline preload、不可达DATABASE_URL和纯内存audit。实际原ClientAuth／Guard／Controller／Core／Task／Gateway→微信API／组件／目录→标准Booking factory／Checkout：1Task／1Run／1模型／1Invocation、1张报价、1次建单；Draft丢应答重开只读原createKey，明确选择／handoff各一次；受理和提交各丢应答后按原收据恢复，最终一张订单，付款／履约未据此确认。最终同组stdin SHA `074bb00120f77c408697b1eefe5d088ff1f7000ed3bc764f62113ce1114c43ed`，原在途报价撤回／空用量／明确0反例包含于该组；原连续阶段 `aa45478eecb8375d8be65ea3032564d83c460f44d5c8a3b59953f779c9362226`退出0。
+
+dev1网站九源已冻结并经Root逐blob核同，原有限React／API／Controller／Guard／Core连续组stdin `be56a34d91dce72dfa92130ec656b1d114f92e70b30c6adb13c553eb405f6f66`退出0，1模型／1报价／1Draft／1订单，Draft／handoff／accept／submit丢应答均读原键。多商品／用量显示采用声明的原报价快照，不冒称实库品类组合已验。其九根303源TypeScript5.9.3零诊断，stdin `59857766082d4ee75ff9584d54be36c7e5551f45e47e55d413abbc2ab67fc555`。Root两端原tsconfig＋shared内存声明类型8根302源／微信4根242源零诊断，stdin `a74baf4915186522f74871b3d76ecd53550729a9cf29ffda8834f01c2c4b1f52`；微信固定末稿独立类型`bb43c4183cd832cfef7965701f3882fa39875e91e730394ad9f5e86ea67864b4`退出0。
+
+正式微信runtime只用canonical shared和原Zod，最终恢复修复后内存构建69出口／34源／150567字节，产物SHA `ecb77116e71af1b5157c814d9e1589f7c8096c7898f61aa96f76f6836f013fec`；构建命令stdin `8ecfa5b4b1530ca8524164f1cd28b9decbf07c4c6970e93ee427180b5b7a00e1`退出0。没有runtime require shared、Web Crypto／Buffer／TextEncoder shim或跨树dist依赖。Impeccable源码检测返回`[]`，差异格式通过；没有真实浏览器截图或微信真机验证。
+
+失败保留：首Root消费夹具漏原TaskInput源，被实际Controller拒绝；随后Node宿主未声明网站ESM载入，验证未运行，补原moduleTypes后执行。原HTTP桥最初遗漏与冻结application直接Object.assign均为夹具装配错误，改用标准`{...application,...composeClientOriginalBookingHttp(application)}`后通过。微信声明fixture最初缺Behavior、把尚未赋值tenantCode捕获为常量、误用Web原材料／缺微信channel仓储，均只修内存宿主，生产surface隔离不放宽。反例首次错误读取quote.snapshot列，改实际持久列与原response投影；在途企业cart驱动缺原告知未派发，补完整已确认原cart后迟到写回被拒。dev1首连续组10月夹具时钟与当前网站时钟不一致，后使用当前原clock；末同步异常断言更正为对应同步断言，生产参数校验不改。
+
+最后独立复核又发现成功Goal材料过期后的明确新目标P2：原`beginNewGoal`先读当前候选，五分钟材料到期后即使Task与最终answer已成功，也在归档前失败，刷新unavailable后按钮不可达。共享会话现只按原candidates／quoted阶段提供核对入口，不依赖当前候选或待答有效性；有报价先核原报价收据，再核原creation、成功Task、原answer及closing snapshot一致，当前读／创建权和旧journal仍相同且原稿归档成功后才清活动指针。unknown阶段不能进入，不重建Task或模型；微信明确新目标前同时恢复并核潜在旧Booking缓存，未决草稿不会被遗落。最终共享blob `c319875ef703d2ecc23eb9b02c95ee59e9f85477`、微信blob `2e12384b64db1ab6a785229ec4ca9187ade2acc0`。
+
+Root最后必要反例stdin `490ac8ed3638efe74587056d4e0ac8f02a59ccc062887d765b372e1a2ab95207`／退出0：实际原Core／ClientAuth／Guard／Controller／Task／Gateway成功目标，时钟推进六分钟、当前input不可用且刷新unavailable后，原历史证明允许明确归档旧journal并清active；没有新key、Task、模型、报价或订单写入。对照model_pending保留原定位且不归档。该组原链仍1Task／1Run／1模型／1Invocation、QUOTE／ORDER新增0，错projection／非公开商品／撤权拒绝。最后双端类型同命令`a74baf…`再次执行，网站8根302源／微信4根242源零诊断，120份shared声明仅存内存。
+
+独立助手按当前固定源及原五条完成最终技术复核：同一场景契约与无重复业务计算、澄清／多行／单位／用量／Core报价／订单解释和正式办理、身份／空间／断线／取消／重开／失败／人工出口、独立APP仅合同与身份示例、公开／本人隔离和原收银台消费均齐；最后过期P2无余项。其静态复核及blob检查不冒称独立行为重跑。依赖AIN-12／21已完成，G1合同事实、G2主要功能、G3两端实际消费、G4必要模拟／类型、缺陷复验及独立技术核定齐备，本阶段将原AIN-22登记研发100%。AIN-21／22形成新的两整项main集成节点，PM按固定成果串行整合，助手不等待。
+
+本阶段所有验证进程退出，audit0，任务临时目录未创建，没有新增／扩写测试脚本、隔离依赖、生成client、磁盘构建或重复附件。最后修复后同一微信连续命令`074bb0…`再次执行退出0，原quote／order／model仍各一次。`node --no-compilation-cache scripts/validate-docs.cjs`退出1，仅原导航历史三处和稀疏站点示例一处缺链；任务算术、当前接续链接与`git diff --check`通过，未伪造历史附件补绿。ENTRY03／04／14的跨端transfer和其他增量边界另核，不因本片接口或导航升档。真实数据库、浏览器／微信、模型供应商与支付由负责人后续实测，本片不代表部署／生产放行。
 
 <a id="ain21-simulated-whole-closeout-20261114"></a>
 ## AIN-21 保存地址正式装配与原五条模拟研发收口（2026-11-14）
@@ -1978,8 +2007,8 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 | AIN-18 主动经营 | 364eca2a将独立automation政策、影子输入/任务、人工review/close/feedback和原键核对接回标准根；按G3登记75% | 全来源/冷却/方案与办理复查及限定获准自动化仍缺；管理grant、原主体/预算/政策必须真实存在，关闭待办不证明异常已解决 |
 | AIN-19 媒体草稿 | PNG/JPEG/PCM、原附件/冻结输入及ObjectReader；标准创建/原runner/Gateway至持久calls单账、结果已有PNG/WAV离线消费，停新识别仍可受权复查原结果 | G3登记75%；真实HTTP路由/媒体能力/存储、其他格式、草稿失效后的历史载荷及数据处理/G4未验，未自动应用识别或提交检查 |
 | AIN-20 员工宿主 | 原pickup/return、manual gate与原检查提交；独立原账、失效草稿元数据及回答收据、取消请求/收敛/原修订观察接标准根，原G1/G2/G3合计75% | 原fork4同页重挂/切原收据/清除后旧引用不可复活增量已核接，pickup/return既有相关1/1及限定根strict/noEmit零诊断；标准传输/冷启动、相机录音上传、微信设备/弱网、完整履约与其他失效/历史载荷窗口仍缺，不称全部履约验收 |
-| AIN-21 客户安全场景 | 原客户身份/政策/Booking/任务；72c6183c接正式原材料/创建/原键收据，cbaffdda分离历史观察，a99fc5a2接原账，ce7deb92限制内部账务暴露 | 原G1/G2加标准web/微信root及实际单账/结果消费核实G3，登记75%；可信token/money计价生产、企业身份、完整澄清/取消/真实HTTP及G4未完成；历史读取不授重派，模型文本不批准预订 |
-| AIN-22 客户两端入口 | `79bf62bb`原小程序checkout显式能力查询/Booking factory及网站App→BookingHandoffBridge→sessionApi已接实际页面，历史材料/受理及人工回退保留；2026-10-28补记G3，75% | 全选品/澄清/身份场景与真实HTTP/浏览器/微信/支付回调验证；75%只代表主链源码装配，不推定发布或真实运行通过 |
+| AIN-21 客户安全场景 | 原客户身份／政策／Booking／任务／单账／独立历史原读，公开续接及Goal材料／人类回答来源／Core参数准备；`ff7bb06a`补本人保存地址双标准provider，[原五条核定](<#ain21-simulated-whole-closeout-20261114>)已完成 | 本轮模拟研发已收口，复用原匿名／本人／企业授权、Guard、费用与取消收据；历史读取不授重派，模型文本不批准预订。真实环境与生产开放另由负责人执行 |
+| AIN-22 客户两端入口 | 原公开续接／报价／本人订单与两端Goal共用场景合同，完整商品／单位／用量／身份投影到原Booking页面；[两端目标及收据恢复](<#ain22-goal-booking-original-consumers-20261114>)修旧cart自动报价、迟到写回、受理丢应答及成功Goal过期后明确新目标，五条与依赖已核齐 | 本轮模拟研发已收口；ENTRY跨端transfer等增量另核，支付成功仍只认原回调，真实浏览器／微信／数据库／供应商和生产开放由负责人执行 |
 | AIN-23 品类助手 | 413f0a99、30f7c1ce将原CategoryDraftApplication读取/建草稿/修改/校验/review接回标准HTTP、平台Guard与原预览门，原DTO/CAS不变；原G1/G2与本片G3合计75% | 发布/资格/采用的高风险确认及模型场景消费仍缺；动态能力依赖CAT-GOV，公开草稿入口不证明整项/动态品类已验收 |
 | AIN-24 安全/隐私 | 既有威胁/负例/审计、内容保留及删除收据/恢复屏障；本轮已从实际标准Controller/provider和会话/知识消费者补核G3，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全开放端/工具攻击、动态代码隔离、外部副本及真实保留删除传播与整项验收仍缺；本轮没有独立二次审查 |
 | AIN-25 性能/SLO | `40b29e8a`原Controller/标准provider/请求组合→TaskPerformanceReader已接；`0392aa01`消费原Gateway计时审计，时长/资源/单账有界观察；2026-10-28纠正漏记G3，75% | 首卡/工具完整采样、成功/接管率、获批SLO/容量/成本参数及真实环境、限流/背压/公平性/告警和降级演练仍为G4；不把观测装配当指标已达标；本次[原计数成本消费者核验](<#ain-three-tree-consolidation-20261109>)已覆盖原page/计数receipt/summary关闭重验；旧总数断言已在[合并后复核](<#ain-post-consolidation-review-20261109>)按原Step/Run计量分开校正；平台计数和BYOK直接用量按正式两轨验证，不称真实SLO通过。 |

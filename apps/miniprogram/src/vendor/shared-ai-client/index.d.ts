@@ -1,6 +1,17 @@
 // Build-owned runtime from the canonical public customer-contract entry.
 // No Node/shared package runtime is loaded by the mini-program.
 import type * as Runtime from '@rental-os/shared/miniprogram-client';
+export declare const aiClientGoalPreparationRequestSchema: typeof Runtime.aiClientGoalPreparationRequestSchema;
+export declare const aiClientGoalPreparationReadRequestSchema: typeof Runtime.aiClientGoalPreparationReadRequestSchema;
+export declare const aiClientGoalPreparationResponseSchema: typeof Runtime.aiClientGoalPreparationResponseSchema;
+export declare const aiClientGoalCandidatesRequestSchema: typeof Runtime.aiClientGoalCandidatesRequestSchema;
+export declare const aiClientGoalProjectionSchema: typeof Runtime.aiClientGoalProjectionSchema;
+export declare const aiClientGoalQuoteRequestSchema: typeof Runtime.aiClientGoalQuoteRequestSchema;
+export declare const createClientGoalSession: typeof Runtime.createClientGoalSession;
+export declare const clientGoalStorageKey: typeof Runtime.clientGoalStorageKey;
+export declare const clientGoalSelectedInput: typeof Runtime.clientGoalSelectedInput;
+export declare const clientGoalTimeOptions: typeof Runtime.clientGoalTimeOptions;
+export declare const clientGoalTextHash: typeof Runtime.clientGoalTextHash;
 export declare const AI_CLIENT_ENTRY_HTTP_DRAFT: typeof Runtime.AI_CLIENT_ENTRY_HTTP_DRAFT;
 export declare const AI_CLIENT_PUBLIC_HTTP: typeof Runtime.AI_CLIENT_PUBLIC_HTTP;
 export declare const aiClientPublicSessionRequestSchema: typeof Runtime.aiClientPublicSessionRequestSchema;

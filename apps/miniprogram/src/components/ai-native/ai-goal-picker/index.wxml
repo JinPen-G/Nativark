@@ -1,0 +1,74 @@
+<view class="goal-picker" aria-busy="{{working}}">
+  <view class="subtitle">这次想租什么？</view>
+  <view class="body mt-8">描述使用计划，提取建议后逐项选择，再确认原报价。</view>
+  <view wx:if="{{!view.hasLocator}}" class="goal-picker__field">
+    <label for="goal-input">使用目标</label>
+    <textarea id="goal-input" class="goal-picker__input" value="{{goal}}" maxlength="4096" disabled="{{working || !loggedIn}}" bindinput="onGoal"></textarea>
+  </view>
+  <button wx:if="{{!view.hasLocator || view.canExtract}}" class="btn btn--primary btn--block mt-16" bindtap="onExtract" disabled="{{working || !loggedIn || (!view.hasLocator && !goal)}}">{{view.hasLocator ? '继续提取原目标' : '提取建议条件'}}</button>
+  <button class="btn btn--block mt-16" bindtap="onRead" disabled="{{working || !loggedIn}}">核对原结果</button>
+  <button wx:if="{{!loggedIn}}" class="btn btn--block mt-16" bindtap="onLogin">登录后提取目标</button>
+  <view wx:if="{{view.status === 'unknown'}}" class="notice mt-8" role="status">原结果待核对，不能重复派发。</view>
+  <view wx:if="{{view.status === 'running'}}" class="body mt-8" role="status">原任务仍在处理，请稍后核对结果。</view>
+  <view wx:if="{{view.question}}" class="goal-picker__field">
+    <label for="goal-answer">{{view.question.contract.fields[0].label}}</label>
+    <textarea id="goal-answer" class="goal-picker__input" value="{{answer}}" maxlength="{{answerMaxLength}}" disabled="{{working || !view.canSubmit}}" bindinput="onAnswer"></textarea>
+    <button class="btn btn--block mt-16" bindtap="onSubmitAnswer" disabled="{{working || !view.canSubmit || !answer}}">保存补充说明</button>
+  </view>
+  <button wx:if="{{view.canContinue}}" class="btn btn--primary btn--block mt-16" bindtap="onContinueAnswer" disabled="{{working}}">使用原回答继续提取</button>
+  <view wx:if="{{view.canPrepareQuote}}">
+    <view class="body mt-16">候选均未选择，请核对商户时区 {{timeZone}} 和租赁安排。</view>
+    <view wx:for="{{form.lines}}" wx:key="index" wx:for-item="line" wx:for-index="row" class="goal-picker__field">
+      <view>选择商品</view><view class="goal-picker__choices">
+        <button wx:for="{{line.options}}" wx:key="id" class="goal-picker__choice {{line.item === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="item" data-row="{{row}}" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button>
+      </view><view wx:if="{{!line.options.length}}" class="notice">没有匹配的公开商品，可继续普通选品。</view>
+      <view class="mt-16">数量</view><input class="goal-picker__input" type="number" value="{{line.quantity}}" data-row="{{row}}" data-field="quantity" bindinput="onLineInput" />
+      <view class="mt-16">计价单位</view><view class="goal-picker__choices">
+        <button wx:for="{{line.units}}" wx:key="id" class="goal-picker__choice {{line.unit === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="unit" data-row="{{row}}" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button>
+      </view><view wx:if="{{line.unit === 'usage'}}"><view class="mt-16">用量</view><input class="goal-picker__input" type="digit" value="{{line.usage}}" data-row="{{row}}" data-field="usage" bindinput="onLineInput" /></view>
+    </view>
+    <view class="goal-picker__field">领取日期与时间（{{timeZone}}）
+      <picker class="goal-picker__date" mode="date" data-field="startDate" value="{{form.startDate}}" bindchange="onDateTime">{{form.startDate || '请选择领取日期'}}</picker>
+      <picker class="goal-picker__date" mode="time" data-field="startTime" value="{{form.startTime}}" bindchange="onDateTime">{{form.startTime || '请选择领取时间'}}</picker>
+    </view>
+    <view class="goal-picker__field">归还日期与时间（{{timeZone}}）
+      <picker class="goal-picker__date" mode="date" data-field="endDate" value="{{form.endDate}}" bindchange="onDateTime">{{form.endDate || '请选择归还日期'}}</picker>
+      <picker class="goal-picker__date" mode="time" data-field="endTime" value="{{form.endTime}}" bindchange="onDateTime">{{form.endTime || '请选择归还时间'}}</picker>
+    </view>
+    <view class="goal-picker__field">取还方式</view><view class="goal-picker__choices"><button wx:for="{{modes}}" wx:key="id" class="goal-picker__choice {{form.mode === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="mode" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button></view>
+    <view class="goal-picker__field">领取／发货地点</view><view class="goal-picker__choices"><button wx:for="{{locations}}" wx:key="id" class="goal-picker__choice {{form.location === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="location" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button></view>
+    <view class="goal-picker__field">归还地点</view><view class="goal-picker__choices"><button wx:for="{{returns}}" wx:key="id" class="goal-picker__choice {{form.returnLocation === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="returnLocation" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button></view>
+    <view wx:if="{{delivery}}"><view class="goal-picker__field">本人已保存收货地址</view><view class="goal-picker__choices"><button wx:for="{{addresses}}" wx:key="id" class="goal-picker__choice {{form.address === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="address" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button></view></view>
+    <view class="goal-picker__field">预约身份</view><view class="goal-picker__choices"><button wx:for="{{identities}}" wx:key="id" class="goal-picker__choice {{form.identity === item.id ? 'goal-picker__choice--selected' : ''}}" data-field="identity" data-id="{{item.id}}" bindtap="onChoice">{{item.label}}</button></view>
+    <view wx:if="{{form.identity && form.identity !== 'personal'}}">
+      <view class="body mt-16">{{policyNotice || '当前企业告知或政策不可用，请选择其他身份。'}}</view>
+      <view class="goal-picker__choices"><button wx:if="{{canPersonalPay}}" class="goal-picker__choice {{form.payer === 'personal' ? 'goal-picker__choice--selected' : ''}}" data-field="payer" data-id="personal" bindtap="onChoice">个人付款</button><button wx:if="{{canEnterprisePay}}" class="goal-picker__choice {{form.payer === 'enterprise' ? 'goal-picker__choice--selected' : ''}}" data-field="payer" data-id="enterprise" bindtap="onChoice">企业付款</button></view>
+      <checkbox-group bindchange="onNotice"><label class="body mt-16"><checkbox value="accepted" checked="{{form.notice}}" />我已阅读并接受当前企业订单告知。</label></checkbox-group>
+    </view>
+    <view wx:if="{{startAt && endAt}}" class="body mt-16">已选绝对区间：{{startAt}} 至 {{endAt}}</view>
+    <button class="btn btn--primary btn--block mt-16" bindtap="onPrepareQuote" disabled="{{working}}">确认所选条件并准备报价参数</button>
+  </view>
+  <view wx:if="{{view.selection}}" class="body mt-16">已选 {{view.selection.lines.length}} 项，{{view.selection.startAt}} 至 {{view.selection.endAt}}；尚未提交订单。
+    <view wx:for="{{selectedRows}}" wx:key="index">{{item.label}} · {{item.quantity}} · {{item.pricingUnit}}{{item.usage ? ' · 用量 ' + item.usage : ''}}</view>
+    <view>领取地点：{{view.selection.fulfillmentLocationId}}；归还地点：{{view.selection.returnLocationId}}</view>
+    <view wx:if="{{view.selection.deliveryAddressId}}">本人地址引用：{{view.selection.deliveryAddressId}}</view>
+    <view>预约身份：{{view.selection.bookingIdentity.bookingIdentity === 'personal' ? '个人' : view.selection.bookingIdentity.corporateCustomerId}}；{{view.selection.bookingIdentity.enterpriseContractAndPayer ? '企业付款' : '个人付款'}}</view>
+  </view>
+  <button wx:if="{{view.canConfirmQuote}}" class="btn btn--primary btn--block mt-16" bindtap="onConfirmQuote" disabled="{{working}}">确认参数并取得原报价</button>
+  <view wx:if="{{view.quote}}" class="goal-picker__field"><view>原应付</view><money-text amount="{{view.quote.payableAmount}}" currency="{{view.quote.currency}}"></money-text><view class="mt-8">押金</view><money-text amount="{{view.quote.depositAmount}}" currency="{{view.quote.currency}}"></money-text><view class="body mt-8">报价不代表订单、付款或资源已预占。</view></view>
+  <button wx:if="{{view.canSelect && (!booking || booking.canPrepare || booking.canSave)}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerateDraft" disabled="{{working}}">使用原报价生成预约草稿</button>
+  <view wx:if="{{booking && booking.status === 'draft_ready'}}" class="body mt-16">原预约草稿已保存。请明确继续，再到原预约页确认；尚未提交订单。</view>
+  <button wx:if="{{booking && (booking.canChoose || booking.canHandoff || booking.status === 'handoff_ready')}}" class="btn btn--primary btn--block mt-16" bindtap="onSelect" disabled="{{working}}">明确继续到原预约页</button>
+  <view wx:if="{{booking && booking.status === 'unknown'}}" class="notice mt-16" role="status">草稿或交接结果待核对，请读取原结果，不重新派发。</view>
+  <button wx:if="{{view.canStartNew && (!booking || (booking.status !== 'unknown' && booking.status !== 'checking'))}}" class="btn btn--block mt-16" bindtap="onBeginNew" disabled="{{working}}">保留原记录并开始新的选品目标</button>
+  <view wx:if="{{canCancel}}" class="goal-picker__field" aria-label="停止本次选品任务">
+    <button wx:if="{{!cancellation || (cancellation.status !== 'settled' && cancellation.status !== 'finished')}}" class="btn btn--block mt-16" bindtap="onCancelRequest" disabled="{{working || (cancellation && !cancellation.canRequest)}}">申请停止本次任务</button>
+    <button class="btn btn--block mt-16" bindtap="onCancelRead" disabled="{{working}}">核对原停止结果</button>
+    <button wx:if="{{cancellation.canSettle}}" class="btn btn--block mt-16" bindtap="onCancelFinish" disabled="{{working}}">核对并完成停止</button>
+    <view wx:if="{{cancellation.status === 'unknown'}}" class="notice mt-8" role="status">停止结果待核对，原操作及已发生的结果保留。</view>
+    <view wx:if="{{cancellation.status === 'requested'}}" class="body mt-8" role="status">停止申请已记录，尚未确认完成。</view>
+    <view wx:if="{{cancellation.status === 'settled' || cancellation.status === 'finished'}}" class="body mt-8" role="status">原任务停止已核对；原结果保留，订单或付款状态不据此改变。</view>
+  </view>
+  <view class="body mt-16">AI暂不可用时，仍可在上方商品目录继续普通选品、预约，或到原帮助页联系商户。</view>
+  <view wx:if="{{message || view.status === 'unavailable'}}" class="notice mt-16" role="status">{{message || '当前步骤暂不可用，可继续普通预约并核对原记录。'}}</view>
+</view>
