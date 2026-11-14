@@ -3,9 +3,9 @@
  * 发行锁和真实观察由宿主所有者提供，业务授权继续由原租户与成员服务管理。
  */
 import {
-  CoreDataObservationSchema, CoreDeploymentLockSchema, registerCoreServers,
+  CoreDataObservationSchema, CoreDeploymentLockSchema, registerCoreServers, registerCoreHttpRoutes,
   CoreManifestSchema, isCoreVersionSupported, type CoreDeploymentLock, type CoreDataObservation,
-  type CoreServerRegistration, type CoreDataContract
+  type CoreServerRegistration, type CoreDataContract, type CoreHttpContribution, type CoreHttpRegistry
 } from "@rental-os/core-contracts";
 import { CoreAccessError, type CoreDeploymentAvailability } from "./access";
 
@@ -16,6 +16,7 @@ export interface CoreDeploymentObservationSource {
 export interface CoreDeployedCatalogue {
   readonly registrations: ReadonlyMap<string, CoreServerRegistration>;
   readonly availability: CoreDeploymentAvailability;
+  readonly http: CoreHttpRegistry;
 }
 
 /** 保存受控组合的方法引用；绑定原服务实例，保留其仓储及运行状态。 */
@@ -46,6 +47,8 @@ export function createCoreDeployedCatalogue(input: {
   lock: CoreDeploymentLock;
   registrations: readonly CoreServerRegistration[];
   observations: CoreDeploymentObservationSource;
+  /** 当前已装配Controller的同源政策；未提供HTTP的Core可以省略，缺政策的路由仍默认拒绝。 */
+  http?: readonly CoreHttpContribution[];
 }): CoreDeployedCatalogue {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
   const manifests = input.registrations.map(registration => ({ ...registration, manifest: CoreManifestSchema.parse(registration.manifest) }));
@@ -59,10 +62,17 @@ export function createCoreDeployedCatalogue(input: {
       throw new CoreAccessError("core_unavailable", `Core ${coreId} 的受控实现清单与部署锁不一致`);
   }
   const registrations = new Map([...registered.registrations].map(([id, registration]) => [id, fixedRegistration(registration)]));
+  const policies = registerCoreHttpRoutes((input.http ?? []).map(contribution => {
+    const registration = registrations.get(contribution.coreId);
+    if (!registration) throw new CoreAccessError("core_unavailable", "HTTP贡献不属于当前部署登记的Core");
+    return { manifest: registration.manifest, contribution };
+  }));
+  if (!policies.ok) throw new CoreAccessError("core_unavailable", policies.issues.map(issue => `${issue.coreId}:${issue.field} ${issue.message}`).join("\n"));
   const requireRegistered = async (coreId: string) => {
     if (!registrations.has(coreId)) throw new CoreAccessError("core_unavailable", "该Core尚未在当前部署注册");
   };
-  return {
+  const catalogue: CoreDeployedCatalogue = {
+    http: policies.registry,
     get registrations() {
       // ReadonlyMap只约束类型；返回隔离清单，调用方改副本不能改本次部署。
       return new Map([...registrations].map(([id, registration]) => [id,
@@ -82,4 +92,6 @@ export function createCoreDeployedCatalogue(input: {
       }
     }
   };
+  Object.freeze(catalogue.availability);
+  return Object.freeze(catalogue);
 }

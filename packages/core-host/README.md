@@ -18,6 +18,8 @@
 
 `requireRegistered`核当前受控服务组合，授权撤回可在业务数据不可用时办理。`requireAvailable`要求平台和目标Core的实际数据/完整迁移账与部署锁匹配、执行状态为ready。一个Core未就绪只影响它自己的新准入，平台公共迁移未就绪则影响所有Core。空Core组合合法。该目录保存组合时的清单快照和绑定原服务实例的方法引用；`registrations` 每次返回隔离清单，调用方修改目录副本或原输入不会替换当前登记的方法。仓储与业务状态仍由原服务实时维护，后续部署变更重新创建核定组合。
 
+Core有HTTP入口时，组合向 `createCoreDeployedCatalogue`额外传 `http: [coreHttpContribution]`。贡献必须属于当前已登记的Core/版本并通过[公共HTTP政策检查](../core-contracts/README.md#登记core的http政策)，失败不能创建可用目录。目录的 `http.resolve`只返回当前受控政策，输出元数据为隔离副本；目录/可用性/政策方法在组合后固定，后续升级重新建立组合。Core可无HTTP贡献，但未登记路径不能据此开放。Controller实际装配、原Guard和业务提交复验仍由宿主完成。
+
 ## 接原身份与事务
 
 [管理服务](src/access.ts)依赖`CoreManagementExecution`和`CoreDeploymentAvailability`。前者由当前宿主提供原管理权限、目标租户/成员核验和事务；后者读取真实部署/注册，不从本地源码目录推断已经安装。没有实现这两个适配不能将页面开放为可办理状态。

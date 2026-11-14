@@ -1,6 +1,6 @@
 /** 原Nest容器中的单一Core应用工厂；复用已导出的原服务，禁止在子模块重复构建认证/数据库。 */
 import { Module, type DynamicModule, type FactoryProvider, type ModuleMetadata } from "@nestjs/common";
-import type { CoreSessionContext, CoreScopeObservation } from "@rental-os/core-contracts";
+import type { CoreSessionContext, CoreScopeObservation, CoreHttpRegistry, CoreHttpPolicy } from "@rental-os/core-contracts";
 import { CORE_MANAGEMENT_APPLICATION, CoreManagementController } from "./core-management.controller";
 import type { CoreManagementHttpApplication } from "./core-management.controller";
 import { CORE_SESSION_READER, CoreSessionController } from "./core-session.controller";
@@ -11,6 +11,8 @@ export interface CoreHostHttpApplication {
   management: CoreManagementHttpApplication;
   session(): Promise<CoreSessionContext>;
   scope(value: unknown): Promise<CoreScopeObservation>;
+  http: CoreHttpRegistry;
+  authorizeHttp(method: string, url: string): Promise<CoreHttpPolicy>;
 }
 type ApplicationFactory = Pick<FactoryProvider<CoreHostHttpApplication>, "inject" | "useFactory">;
 

@@ -59,3 +59,9 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 [原范围读取](original-core-scope.ts)先核当前会话与Core成员使用权，调用受控登记Core的resolveScope/readReadiness，再核原会话、授权和实际绑定修订。Core自行定义容器，返回的绑定和数据版本必须属于原范围及当前可读版本；读期间绑定变化返回冲突。Core返回结构沿唯一schema核验，错误贡献准确标记不可用，不视为可执行业务。
 
 范围服务可持有自己的授权事务，宿主不在外层跨该调用持有人员/Core锁；前后核对各自使用短事务，避免工单原范围适配的嵌套锁等待。读取不创建绑定、执行初始化或业务写入。[CoreScopeHttpModule](core-scope.controller.ts)显式装配对应POST只读入口，文档由createCoreScopeOpenApi生成，主Guard/组合仍由公共窗口消费。[前端Hook](../../../../admin/src/core/useCoreScope.ts)
+
+## Core业务HTTP准入
+
+[原HTTP准入](original-core-http-access.ts)读取同一受控部署目录的 `http`，沿原normalizeRequestPath处理路径，未知方法/路径/当前分面在访问数据库前拒绝。原会话/租户主体和精确业务权限在原锁下核验；business还核当前租户Core授权、成员分配/部署和所需新业务订阅期限。原收据入口只做当前身份/动作粗准入，最终本人操作/对象可见性沿Core收据服务，不能借收尾开放普通业务。
+
+`composeOriginalCoreApplication`返回 `http`及 `authorizeHttp(method, url)`，主Guard在原签名会话和ALS建立后统一消费。当前适配只处理operator；staff/client继续原专用身份和受控适配，不因Core清单声明自动变成员或开放路由。旧Rental仍沿原路径/空间权限，不用这份新政策替代旧链。主Guard实际调用尚待公共窗口；没有调用或未装配Controller时，声明不是可用接口。

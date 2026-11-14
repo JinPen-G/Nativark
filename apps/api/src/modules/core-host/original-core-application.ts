@@ -7,6 +7,7 @@ import { composeOriginalCoreManagementReads } from "./original-core-management-r
 import { createOriginalCoreCatalogueReader } from "./original-core-catalogue";
 import { composeOriginalCoreSessionReader } from "./original-core-session";
 import { composeOriginalCoreScopeReader } from "./original-core-scope";
+import { composeOriginalCoreHttpAccess } from "./original-core-http-access";
 
 type BindingsInput = Parameters<typeof composeOriginalCoreBindings>[0];
 export type OriginalCoreApplicationInput = Pick<BindingsInput, "database" | "users" | "subscription" | "authorizeContainer"> & {
@@ -27,6 +28,8 @@ export function composeOriginalCoreApplication(input: OriginalCoreApplicationInp
       reads: composeOriginalCoreManagementReads(shared)
     },
     session: composeOriginalCoreSessionReader(input),
-    scope: composeOriginalCoreScopeReader({ ...shared, catalogue: input.catalogue })
+    scope: composeOriginalCoreScopeReader({ ...shared, catalogue: input.catalogue }),
+    http: input.catalogue.http,
+    authorizeHttp: composeOriginalCoreHttpAccess(input)
   };
 }

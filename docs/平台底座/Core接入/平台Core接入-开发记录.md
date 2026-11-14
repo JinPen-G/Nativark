@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-http-policy-registration-20261115"></a>
+
+## Core HTTP政策标准登记与原身份准入（2026-11-15）
+
+统一应用工厂固定 `d32735f01dabf5a148c29b281285e596c837d480` 已推送并真实回读，main仍62ca。本片沿独占Core合同/宿主、工单样例及API Core适配，将新Core HTTP方法/权限政策留在Core自身合同，避免每次业务开发修改底座Guard判断。
+
+[HTTP政策合同](../../../packages/core-contracts/src/http.ts)定义Core/版本及自身路由、audiences、精确权限、business/original_receipt和新业务标记。registerCoreHttpRoutes只登记当前贡献，未知路由/分面不返回政策；重复、版本不符、权限未声明和同形/静态参数重叠拒绝。匹配沿原Express大小写与隐式HEAD，GET/HEAD重叠禁止；返回目录隔离副本、方法在组合后固定。旧Rental例外继续原兼容政策，不能由新Core自行占用。
+
+[工单TICKETS_HTTP](../../../packages/example-tickets-core/src/http.ts)同时生成七条HTTP政策和[同源OpenAPI](../../../packages/example-tickets-core/src/openapi.ts)扩展，创建为新业务，收据为原结果读取，其余沿原业务。Nest方法/参数/schema及工单领域行为保持，没有额外手写权限表。
+
+[实际部署目录](../../../packages/core-host/src/deployment.ts)接受可选HTTP贡献并核当前Core/版本/声明集合；没HTTP的Core可以省略，未登记路径仍拒绝。原应用工厂供给该同一目录及[authorizeHttp](../../../apps/api/src/modules/core-host/original-core-http-access.ts)，主Guard在原签名/ALS后消费当前租户主体、精确角色权、Core/成员授权及原订阅停新。原结果粗准入不要求重开业务，最终本人操作和对象可见性仍交原Core收据服务。当前只实现operator，staff/client需自身固定身份适配，清单不自授权。
+
+stdin内存类型与实际合同/原主体调用退出0：合同35根、宿主6根、工单10根和HTTP4根均0诊断。7条工单HTTP/OpenAPI权限/分面/用途/新业务元数据一致，空目录/错误Core/版本/未知权限/路径/分面、重叠GET/HEAD及目录外部修改拒绝通过。末尾控制字符不匹配，GET的HEAD沿同一权限。
+
+沿实际原ALS/主体/授权/订阅适配的离线SQL驱动，正常新建、过期新建403、旧只读、停用仅原收据、角色撤回和未知路由在SQL前拒绝均通过；31次SQL读取、2次新业务期限读取、SQL/审计写入0。原收据最终范围由工单原服务继续核定，当前没有真实Guard调用或DB/HTTP运行证据。
+
+模块说明同步最短Core贡献和宿主接入步骤。主Auth/Guard、AppModule、数据迁移账及后台壳仍待已登记公共窗口；不以政策存在替代已接线接口，不改原业务、AI专项或原任务范围，当前PCH进度未跨下一档。验证经stdin/内存，没有新测试脚本、临时目录、服务或模型调用。
+
+原8组合同测试退出0、skip/todo为0；八份相关文档621个链接/139个章节锚点定向核对退出0，新增问题0，正式需求/任务和已登记进度不变。差异格式检查退出0，原测试临时编译/夹具已删除确认，未新增生成Client或后台进程。中文提交/任务分支普通推送后读取真实远端固定版本。
+
 <a id="core-application-assembly-20261115"></a>
 
 ## 原Core应用统一装配与Nest依赖可见性（2026-11-15）

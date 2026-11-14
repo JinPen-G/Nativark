@@ -15,6 +15,7 @@ export function createTicketsOpenApi(): CoreOpenApiContribution {
     const operation: Record<string, unknown> = {
       operationId: name, summary: definition.summary, security: [{ bearerAuth: [] }],
       "x-core-permissions": [`example-tickets:ticket:${definition.permission}`],
+      "x-core-audiences": ["operator"], "x-core-purpose": definition.purpose, "x-core-starts-new-business": definition.startsNewBusiness,
       description: "需要原operator会话、当前租户Core授权、成员分配及本动作权限。租户不从请求读取；读取范围由当前角色决定。响应沿原平台{data,requestId}信封，正文schema放在data内。",
       responses: {
         200: { description: "当前读取结果或原操作收据", content: json(`${name}.Response`) },

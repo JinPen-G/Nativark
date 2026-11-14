@@ -100,6 +100,14 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 停用只关闭对应普通业务和新 Agent 任务；数据、绑定、成员撤权及原收据继续保留。恢复先读取原绑定并复核当前条件，不调用首次初始化。`CoreOperationReference` 只定位原操作，不能根据超时、程序重启或再次开通认定旧操作未执行。
 
+## 登记Core的HTTP政策
+
+Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，宿主调用 `registerCoreHttpRoutes([{ manifest, contribution }])`。每条声明本Core相对路径、精确动作权限、原认证audiences、business/original_receipt及是否新增业务；注册不调用Controller、授权角色或执行业务。[HTTP政策合同](src/http.ts)
+
+结果成功时提供 `registry.resolve(method, path, audience)`，path为原宿主归一、剥离 `/api`后的路径。未知方法/路径/分面不返回政策；同一路径参数与静态段重叠、重复标识、未声明权限或错误Core/版本拒绝，失败不返回部分目录。大小写匹配和GET的隐式HEAD沿原Express语义，GET/HEAD政策不得重叠；参数值仍由所属Controller/schema校验。旧Rental路径沿原兼容政策，新Core不声明旧路由例外。
+
+[工单示范](../example-tickets-core/src/http.ts)的 `createTicketsHttpContribution()`直接从TICKETS_HTTP生成七条政策，Nest和OpenAPI仍消费同一声明。实际部署目录在创建时通过可选 `http`接收贡献，主应用Guard统一消费目录及当前原身份准入；新增Core无需修改Guard内的逐业务判断。未知政策或无贡献的路径保持原默认拒绝。[宿主接线](../../apps/api/src/modules/core-host/README.md#core业务http准入)
+
 ## Core 管理 HTTP 合同
 
 `CORE_MANAGEMENT_HTTP`给出当前平台管理面的十个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实及原操作收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
