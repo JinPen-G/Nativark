@@ -6,6 +6,7 @@ import type { AiClientQuoteFacts, AiBookingSelection, AiBookingHandoff, ClientCr
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
 import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
   type ClientQuoteView, type ClientQuoteBookingView } from './client-quote-session';
+import { BookingDraftReview } from './BookingDraftReview';
 
 const initial: ClientQuoteView = { status: 'closed', canPrepare: false, canConfirm: false, canRead: false,
   pendingCore: false, matchesInput: true, material: null, quote: null };
@@ -111,6 +112,7 @@ export function ClientQuotePreparation(props: {
     <p>{en ? 'Generate a quote and draft for your selection. Submit the order on the original booking page.' : '按所选条件生成报价和草稿，订单需在原预约页确认提交。'}</p>
     {!booking?.draft && !booking?.handoff && <button type="button" className="button button-dark button-block" disabled={working || !props.selection || quote.readOnly === true || booking?.readOnly === true}
       onClick={() => void generate()}>{working ? (en ? 'Processing…' : '正在处理…') : (en ? 'Generate reservation draft' : '生成预约草稿')}</button>}
+    <BookingDraftReview draft={booking?.draft ?? null} english={en} />
     {canContinue && quote.matchesInput && <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void proceed()}>
       {en ? 'Confirm draft and continue booking' : '确认草稿并继续预约'}</button>}
     <button type="button" className="button button-outline button-block" disabled={working} onClick={() => void recover()}>{en ? 'Check original result' : '核对原结果'}</button>

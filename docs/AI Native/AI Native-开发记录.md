@@ -6,6 +6,29 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry13-booking-confirmation-display-20261115"></a>
+## ENTRY-13 原预约条件与逐字段来源的确认前展示（2026-11-15）
+
+固定前置`79ff2ba1d219ac0ed844ec329ae64caaf63b28ea`已普通推送并回读GitHub一致。Root读取dev2九源完整交付，逐Git blob核同后独立检查原Core Draft到两端纯投影及React正文；本片只完成既有草稿的确认前展示，不夹ENTRY-01目录公共接线，不将展示切片计为完整ENTRY-13。
+
+Web的[预约草稿入口](../../apps/tenant-website/src/features/ai-native/ClientQuotePreparation.tsx)和[目标入口](../../apps/tenant-website/src/features/ai-native/ClientGoalPicker.tsx)复用[原草稿明细](../../apps/tenant-website/src/features/ai-native/BookingDraftReview.tsx)；客户小程序的[预约草稿](../../apps/miniprogram/src/components/ai-native/ai-quote-preparation/index.ts)与[目标入口](../../apps/miniprogram/src/components/ai-native/ai-goal-picker/index.ts)消费同字节[纯投影](../../apps/miniprogram/src/components/ai-native/booking-draft-review.ts)。展示同一已验证material中的服务ID／数量、服务窗口／地点、取用／归还时间、时区及归还地点，逐字段标明人类选择、Core补齐或已记录来源；历史缺`serviceSources`明确未记录，不用旧聚合services来源补签。时间保留原instant与原时区，格式化失败退回原值。目录名称只作显示标签，目标入口仅在原报价、时区和地点匹配时使用；展示不产生请求、缓存、选择或业务动作。
+
+隐藏、卸载、切scope、撤销或原session返回null时，沿原generation与context.current撤回对应明细；本片不改变原明确继续、原审批、Core提交及unknown同键只读语义。作者九源清单SHA-256 `6dc67a73c19d8933565df94a24d6605880ab0af449d118a3200cc955c201caf1`。Root实核blob：Web预约`2e770efbfd7dcaaa41cc32778fd3d4afd395042b`、Web目标`d4349763c7edc63ae16670076a0b6f401abaa687`、小程序预约TS`f214c3bc2287008b5c3f8053cb3be00194e8b095`／WXML`486899f1a9b5f49bf80e64a3c4c9ead79e54be84`、小程序目标TS`ec30bf38d222407ecb12715bbff25998558b0469`／WXML`959c4790344285550dd3d556334ab6742e1fca92`、两端投影同blob`b66bfac2b054439cce7f9e3523ec02801cc68735`、Web明细`5191a7c32ac593aaba3860f6ebf19e8b912abb48`。
+
+| 必要模拟／类型 | 固定stdin SHA-256与实际结果 |
+| --- | --- |
+| Root原Core Draft／两端纯投影／React正文 | `b6239c31152c6e24c61f6f9d429a86ce2802d86593b039f2fa20516509f8c23e`，退出0；原服务来源不改，旧来源不升级、null撤回，中英文及原instant保持；1Draft、0订单／预占／提交 |
+| Root Web四根 | `d221ba77730a768abb2eca194eba5353b89052dad0f890203795ac247bdfd08c`，TypeScript5.9.3，4根／224源零诊断，退出0 |
+| Root小程序三根及正式shared两出口 | `5a6238319dd890b13b4afee01a3190dd7051f9c0a578392c647bd74615f0aec6`，124声明内存生成，原ES2019／ES2020配置，3根／223源零诊断，退出0 |
+| 作者四实际组件／WXML模拟 | `0882210e7e2c526fb1a82ed80aaf7badb607317276115782ea60107ea35a8f5a`，退出0；实际会话、展示、撤回与原继续消费，未称浏览器／微信实测 |
+| 作者两端类型 | `61bcb2ed2fb4df58e09fe2a11cfecef06021e89ccc7382a1f9975395410db3df`，Web4根／222源、小程序3根／222源零诊断，退出0 |
+
+保留失败：Root首次展示组`0bcaeae9074547557b78f8f4f1e7713710715434d2e2f542286fabf896563c17`因Web ESM装配退出1；在首次ts-node注册时声明该Web验证宿主的moduleTypes后复验，未改变生产模块配置。作者内存驱动语法、旧services聚合来源断言范围与microtask等待错误均先失败，再仅修夹具；生产来源、撤回和原测试断言没有放宽。本轮记录输出时一次REPL对象误写未声明变量，退出且未写文件，修正输出后九源及任务算术核同。
+
+独立全文复核发现ENTRY-13第2／3条仍缺默认计费单位的确认前消费者。原普通预约输入没有`pricingUnit`时，Core合法使用`businessSettings.pricing.defaultUnit`；AI保存原input／normalized／configurationHash，但准备公共response未展示这份原材料的单位来源，普通两端仍prepare后直接confirm，新Draft明细也未显示商品行计费单位。下一片从原保存材料和正式默认依据补必要公共投影／schema及两端明确确认，不从当前目录、缓存或模型补签，不改Core计费算法、人类原输入、hash、operationKey或旧收据。本项在原四条全部齐备前保持75%。
+
+所有验证为`node --no-compilation-cache -`，原offline preload、不可达DATABASE_URL，Root audit／写根／TEMP为本树`output/.tmp/ain-entry13-root-closeout-20261115`；运行、声明和audit纯内存，audit0，进程已退出、任务目录未创建，无新增临时脚本或依赖产物。`git diff --check`本片退出0，新增源码链接逐项存在；`node scripts/validate-docs.cjs`退出1，仍为导航历史3处及稀疏示例1处既有缺链，11/11文档，无新增任务算术错误。真实浏览器／微信／数据库／供应商由负责人后续操作；阶段只提交九源及本记录／接续，main仍由PM按固定成果串行核定。
+
 <a id="ain-entry13-booking-original-provenance-20261115"></a>
 ## ENTRY-13 原预约输入与Core规范化来源、两端原收据恢复（2026-11-15）
 

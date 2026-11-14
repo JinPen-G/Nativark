@@ -9,8 +9,10 @@ import { serverNow } from '../../../core/clock';
 import { newKey } from '../../../core/keys';
 import { contextVersion, currentSession, sessionEvents } from '../../../core/session';
 import { writeRequiredStorage } from '../../../core/storage';
+import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
   type ClientQuoteContext, type ClientQuoteView, type ClientQuoteBookingView } from '../client-quote-session';
+import { projectBookingDraftReview, type BookingDraftReview } from '../booking-draft-review';
 
 type Quote = ReturnType<typeof createClientQuoteSession>;
 type Booking = ReturnType<typeof createClientQuoteBookingSession>;
@@ -23,7 +25,8 @@ const read = (key: string): unknown => { const value: unknown = wx.getStorageSyn
 Component({
   options: { styleIsolation: 'apply-shared' },
   properties: { selection: { type: Object, value: null }, scopeKey: { type: String, value: '' }, timeZone: { type: String, value: '' }, paused: { type: Boolean, value: false } },
-  data: { ...initial, working: false, error: false, booking: null as ClientQuoteBookingView | null },
+  data: { ...initial, working: false, error: false, booking: null as ClientQuoteBookingView | null,
+    bookingReview: null as BookingDraftReview | null },
   lifetimes: { attached() { visible.add(this); generations.set(this, 1); }, detached() { visible.delete(this); this.invalidateQuote(); } },
   pageLifetimes: { show() { visible.add(this); }, hide() { visible.delete(this); this.invalidateQuote(); } },
   observers: { 'scopeKey, paused'() { this.invalidateQuote(); } },
@@ -31,7 +34,8 @@ Component({
     invalidateQuote() {
       generations.set(this, (generations.get(this) ?? 0) + 1); busy.delete(this);
       quotes.get(this)?.dispose(); bookings.get(this)?.dispose(); quotes.delete(this); bookings.delete(this); bindings.delete(this);
-      releases.get(this)?.(); releases.delete(this); this.setData({ ...initial, working: false, error: false, booking: null });
+      releases.get(this)?.(); releases.delete(this);
+      this.setData({ ...initial, working: false, error: false, booking: null, bookingReview: null });
     },
     async ensureQuote(): Promise<Quote | null> {
       if (!visible.has(this) || this.data.paused) return null;
@@ -71,7 +75,13 @@ Component({
         original: { materialRef: quote.material.materialRef, expectedMaterialHash: quote.material.materialHash }, selection: () => selection,
         api: { ...clientQuoteApi, readHandoff: readBookingHandoff }, readHost: readBookingHostCapabilities, now: serverNow, newKey: () => newKey('booking'),
         storage: { read: () => read(key), write: value => writeRequiredStorage(key, value) },
-        changed: state => { if (binding.context.current()) this.setData({ booking: state }); } });
+        changed: state => {
+          if (binding.context.current()) this.setData({ booking: state,
+            bookingReview: projectBookingDraftReview(state.draft, { formatTime: (original, timeZone) => {
+              if (!zoneSupported(timeZone)) throw Error('booking_time_zone_unavailable');
+              return formatBusinessDateTime(original, timeZone);
+            } }) });
+        } });
       bookings.set(this, instance); await instance.open(); if (cached !== undefined) await instance.recover(); return instance;
     },
     async runIntent(action: () => Promise<void>) {

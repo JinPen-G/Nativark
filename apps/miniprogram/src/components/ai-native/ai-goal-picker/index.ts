@@ -14,7 +14,9 @@ import { serverNow } from '../../../core/clock';
 import { newKey } from '../../../core/keys';
 import { contextVersion, currentSession, sessionEvents } from '../../../core/session';
 import { writeRequiredStorage } from '../../../core/storage';
+import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { ROUTES, buildUrl, navigate } from '../../../core/ui';
+import { projectBookingDraftReview, type BookingDraftReview } from '../booking-draft-review';
 
 type Session = ReturnType<typeof createClientGoalSession>;
 type Choice = { id: string; label: string };
@@ -50,7 +52,8 @@ Component({
   options: { styleIsolation: 'apply-shared' },
   properties: { serviceCode: { type: String, value: '' } },
   data: { view: blank(), form: form(), goal: '', answer: '', working: false, loggedIn: false, message: '', projectionHash: '', questionId: '',
-    booking: null as ClientQuoteBookingView | null, cancellation: null as ClientTaskCancellationView | null,
+    booking: null as ClientQuoteBookingView | null, bookingReview: null as BookingDraftReview | null,
+    cancellation: null as ClientTaskCancellationView | null,
     answerMaxLength: 2048, canCancel: false, selectedRows: [] as { label: string; quantity: number; pricingUnit: string; usage: string }[],
     modes: [] as Choice[], locations: [] as Choice[], returns: [] as Choice[], identities: [] as Choice[], addresses: [] as Choice[],
     timeZone: '', startAt: '', endAt: '', delivery: false, policyNotice: '', canPersonalPay: false, canEnterprisePay: false },
@@ -66,7 +69,7 @@ Component({
       bookings.get(this)?.dispose(); bookings.delete(this); cancellationSessions.get(this)?.dispose(); cancellationSessions.delete(this);
       sources.delete(this); currentBindings.delete(this);
       this.setData({ view: blank(), form: form(), goal: '', answer: '', working: false, message: '', projectionHash: '', questionId: '',
-        booking: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
+        booking: null, bookingReview: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
         modes: [], locations: [], returns: [], identities: [], addresses: [], timeZone: '', startAt: '', endAt: '', delivery: false,
         policyNotice: '', canPersonalPay: false, canEnterprisePay: false });
     },
@@ -210,7 +213,24 @@ Component({
       const booking = createClientQuoteBookingSession({ context: binding.context, original: reference, selection: () => selection,
         readHost: readBookingHostCapabilities, api: { ...clientQuoteApi, readHandoff: readBookingHandoff }, now: serverNow,
         newKey: () => newKey('goal-booking'), storage: { read: () => readGoalStorage(key), write: value => writeRequiredStorage(key, value) },
-        changed: view => { if (binding.context.current()) this.setData({ booking: view }); } });
+        changed: view => {
+          if (binding.context.current()) {
+            const original = this.data.view, material = view.draft?.material;
+            const sameQuote = material && original.quote?.quoteId === material.quote.quoteId
+              && original.projection?.context.timeZone === material.selection.timeZone
+              && original.selection?.fulfillmentLocationId === material.selection.fulfillmentLocationId
+              && original.selection?.returnLocationId === material.selection.returnLocationId;
+            this.setData({ booking: view,
+            bookingReview: projectBookingDraftReview(view.draft, {
+              locations: sameQuote ? [...options(original.projection, 'fulfillmentLocationId'),
+                ...options(original.projection, 'returnLocationId')] : undefined,
+              formatTime: (original, timeZone) => {
+                if (!zoneSupported(timeZone)) throw Error('booking_time_zone_unavailable');
+                return formatBusinessDateTime(original, timeZone);
+              }
+            }) });
+          }
+        } });
       bookings.set(this, booking); await booking.open(); return binding.context.current() ? booking : null;
     },
     onGenerateDraft() { return this.run(async owner => {
@@ -235,7 +255,7 @@ Component({
       if (!owner.snapshot().hasLocator) {
         booking?.dispose(); bookings.delete(this); sources.delete(this);
         cancellationSessions.get(this)?.dispose(); cancellationSessions.delete(this);
-        this.setData({ goal: '', answer: '', booking: null, cancellation: null });
+        this.setData({ goal: '', answer: '', booking: null, bookingReview: null, cancellation: null });
       }
     }); },
     onCancelRead() { return this.stopGoal('read'); },

@@ -58,6 +58,26 @@
   <view wx:if="{{view.quote}}" class="goal-picker__field"><view>原应付</view><money-text amount="{{view.quote.payableAmount}}" currency="{{view.quote.currency}}"></money-text><view class="mt-8">押金</view><money-text amount="{{view.quote.depositAmount}}" currency="{{view.quote.currency}}"></money-text><view class="body mt-8">报价不代表订单、付款或资源已预占。</view></view>
   <button wx:if="{{view.canSelect && (!booking || booking.canPrepare || booking.canSave)}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerateDraft" disabled="{{working}}">使用原报价生成预约草稿</button>
   <view wx:if="{{booking && booking.status === 'draft_ready'}}" class="body mt-16">原预约草稿已保存。请明确继续，再到原预约页确认；尚未提交订单。</view>
+  <view wx:if="{{bookingReview}}" class="body mt-16" style="overflow-wrap:anywhere;word-break:break-word;" aria-label="核对原预约条件">
+    <view class="subtitle">核对原预约条件</view>
+    <view class="mt-8">请核对后再继续，标注“Core 补齐”的时间或地点来自原报价。</view>
+    <view class="mt-16">时区：{{bookingReview.timeZone.value}} · {{bookingReview.timeZone.source}}</view>
+    <view class="mt-8">取用时间：{{bookingReview.start.value}} · {{bookingReview.start.source}}</view>
+    <view wx:if="{{bookingReview.start.original !== bookingReview.start.value}}">原时间：{{bookingReview.start.original}}</view>
+    <view class="mt-8">归还时间：{{bookingReview.end.value}} · {{bookingReview.end.source}}</view>
+    <view wx:if="{{bookingReview.end.original !== bookingReview.end.value}}">原时间：{{bookingReview.end.original}}</view>
+    <view class="mt-8">取用／配送地点：{{bookingReview.fulfillmentLocation.value}} · {{bookingReview.fulfillmentLocation.source}}</view>
+    <view class="mt-8">归还地点：{{bookingReview.returnLocation.value}} · {{bookingReview.returnLocation.source}}</view>
+    <view wx:for="{{bookingReview.services}}" wx:key="id" class="mt-16">
+      <view>服务引用：{{item.name.value}} · {{item.name.source}}</view>
+      <view class="mt-8">数量：{{item.quantity.value}} · {{item.quantity.source}}</view>
+      <view class="mt-8">服务开始：{{item.start.value}} · {{item.start.source}}</view>
+      <view wx:if="{{item.start.original !== item.start.value}}">原时间：{{item.start.original}}</view>
+      <view class="mt-8">服务结束：{{item.end.value}} · {{item.end.source}}</view>
+      <view wx:if="{{item.end.original !== item.end.value}}">原时间：{{item.end.original}}</view>
+      <view class="mt-8">服务地点：{{item.location.value}} · {{item.location.source}}</view>
+    </view>
+  </view>
   <button wx:if="{{booking && (booking.canChoose || booking.canHandoff || booking.status === 'handoff_ready')}}" class="btn btn--primary btn--block mt-16" bindtap="onSelect" disabled="{{working}}">明确继续到原预约页</button>
   <view wx:if="{{booking && booking.status === 'unknown'}}" class="notice mt-16" role="status">草稿或交接结果待核对，请读取原结果，不重新派发。</view>
   <button wx:if="{{view.canStartNew && (!booking || (booking.status !== 'unknown' && booking.status !== 'checking'))}}" class="btn btn--block mt-16" bindtap="onBeginNew" disabled="{{working}}">保留原记录并开始新的选品目标</button>

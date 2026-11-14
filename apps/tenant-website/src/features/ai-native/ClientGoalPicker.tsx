@@ -13,6 +13,7 @@ import { createClientGoalSession, clientGoalStorageKey, clientGoalTimeOptions, c
 import { createClientTaskCancellationApi } from './client-task-cancellation-api';
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
   type ClientTaskCancellationOrigin, type ClientTaskCancellationView } from './client-task-cancellation-session';
+import { BookingDraftReview } from './BookingDraftReview';
 
 const initial = (): ClientGoalView => ({ status: 'closed', hasLocator: false, task: null, question: null, receipt: null,
   projection: null, sources: null, selection: null, quote: null, canExtract: false, canRead: false, canSubmit: false,
@@ -62,6 +63,12 @@ export function ClientGoalPicker(props: {
   const items = projection?.candidates?.conditions.items ?? [], form = draft.reference === projectionRef ? draft.form : emptyForm(items.length);
   const goalText = goal.scopeKey === scopeKey ? goal.text : '', loggedIn = Boolean(captureEnterpriseHostSession());
   const bookingView = bookingRecord?.scopeKey === scopeKey && ownerCurrent.current?.() ? bookingRecord.view : null;
+  const reviewLocations = bookingView?.draft && view.quote?.quoteId === bookingView.draft.material.quote.quoteId
+    && view.selection && projection?.context.timeZone === bookingView.draft.material.selection.timeZone
+    && view.selection.fulfillmentLocationId === bookingView.draft.material.selection.fulfillmentLocationId
+    && view.selection.returnLocationId === bookingView.draft.material.selection.returnLocationId
+    ? projection.choices.filter(group => ['fulfillmentLocationId', 'returnLocationId'].includes(group.field))
+      .flatMap(group => group.choices) : undefined;
   const cancellationOrigin = (() => { try { return ownerCurrent.current?.() ? owner.current?.cancellationOrigin() ?? null : null; } catch { return null; } })();
   const question = view.question, textField = question?.contract.fields.length === 1 && question.contract.fields[0].kind === 'text'
     && question.contract.fields[0].fieldId === 'clarification_text' ? question.contract.fields[0] : null;
@@ -325,6 +332,8 @@ export function ClientGoalPicker(props: {
     {view.canSelect && (!bookingView || bookingView.canPrepare || bookingView.canSave) && <button type="button" className="button button-dark button-block"
       disabled={working || Boolean(bookingView?.readOnly)} onClick={() => void generateBooking()}>{en ? 'Generate reservation draft from this quote' : '按原报价生成预约草稿'}</button>}
     {bookingView?.draft && <p>{en ? 'Reservation draft saved. Review it before continuing.' : '预约草稿已保存，请核对后明确继续。'}</p>}
+    <BookingDraftReview draft={bookingView?.draft ?? null} english={en}
+      locations={reviewLocations} />
     {bookingView && !bookingView.readOnly && (bookingView.canChoose || bookingView.canHandoff || bookingView.handoff) && <button type="button" className="button button-dark button-block"
       disabled={working} onClick={() => void continueBooking()}>{en ? 'Confirm draft and continue to original booking' : '确认草稿并前往原预约页'}</button>}
     {bookingView?.status === 'unknown' && <p role="status">{en ? 'The original reservation operation needs checking. No draft is created again.' : '原预约操作待核对，请读取原结果，不重复生成草稿。'}</p>}
