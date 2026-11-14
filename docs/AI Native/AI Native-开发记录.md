@@ -6,6 +6,33 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain23-dynamic-draft-public-contract-20261114"></a>
+## AIN-23 动态品类草稿公共合同、平台门禁与审计响应（2026-11-14）
+
+前置 `aaef122e9e02e97f0a6d9e4cf2886b04e6ec0ae1` 已普通推送并回读GitHub一致。本片只固化五个公共接点和dev1已验证、冻结交回的两个草稿服务叶，不夹正在施工的提案、后台会话／界面或AIN-25观测。application blob `a9f68284b3af670998cb3b0427dc0bcd390c2c69`、contract blob `b0b4f990fb7ac061cf5873c4f3cd6c14600f7b70`经Root与作者输出核同，Root已收回这两叶写权。
+
+[shared原草稿合同](../../packages/shared/src/ai-category-draft-http.ts)使用原 `RENTAL_CATEGORY_CODE_PATTERN` 取代四个内置编码枚举，格式通过仍须由Core判定存在、当前权限和实际可用性；历史全大写version编码继续兼容。definition与capabilities页签保留原可选 `conditionalCapabilities`，未知字段和其他页签所有权不放宽。新增原审计wire及最多100行数组schema，[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)将既有audits响应从GenericObject改为该数组，不增加审计业务或读取权限。
+
+[GlobalGuard](../../apps/api/src/common/api-auth.guard.ts)从shared五个已登记操作生成精确方法／路径表，原view与edit分开。SaaS可在没有当前经营空间时进入原平台核验，非SaaS明确拒绝；未知操作、GET／PUT／PATCH及无edit的写入仍拒绝，入口通过不等于Core或Task授权。[草稿应用](../../apps/api/src/modules/ai-native/category-assist/category-draft.application.ts)按当前签名凭据调用原Guard、预览门、DTO、Core事务／CAS及审计，未借用租户ALS；目录与creation-preview仅增加原只读委托。响应仍校验原category／version／source／revision，允许真实草稿暂不满足业务校验，发布和采用结果保持独立。
+
+[runtime publication](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)增加显式 `categoryDraft` 段，[原provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)仅登记该原人工草稿配置并懒委托catalog。缺段默认不开放新草稿写入；提供 `categoryDraft:{enabled:true}` 不启任何模型、count、probe或其他业务配置。原治理预览开关及生产限制继续由Core决定，本片不修改Core治理内核、不声称动态品类已经生产开放。
+
+必要验证均为 `node --no-compilation-cache -`、本树offline preload、不可达DATABASE_URL和内存audit；无新增／扩写测试脚本。
+
+| 范围 | 固定stdin SHA-256及实际结果 |
+| --- | --- |
+| Root实际Auth／GlobalGuard平台五操作及拒绝边界 | `a9ee063e84c8985d7247f01e15cc08911c754823e5f491cc12cf0dd53f37b6c2`，退出0；SaaS无经营空间可核验，非SaaS／未知操作和方法／缺edit拒绝，模型及业务写入0。 |
+| Root动态wire／原Core页签／旧uppercase／审计数组 | `9a545d103d3b48604f91a7390e21581e659cd056e2b7587866f79bf7e21f96bf`，退出0；条件能力保留，非法编码及额外字段拒绝，原definition未改。 |
+| Root公共六根生产类型闭包 | `73d39c8a9c2a6ac2922bf82e3d60c53f3a2cf7e7a3c81edf8500ada165ebe0ed`，TypeScript5.9.3、1863源、零诊断、退出0。 |
+| dev1实际Guard／Controller／Core动态草稿连续链 | `06af25f94e1f08c380d4295238064df38ec3d1294cfe67372f8cf9a8b9f0a22f`，退出0；原创建和patch共2写，条件能力保留，review修订1，原source不变，陈旧CAS拒绝；发布／采用保持unavailable。Root已读取最终结果与两源哈希，未把作者模拟称为Root独立重跑。 |
+| dev1冻结两叶类型 | `d946ed95a52a634982cdefdc8ceda1e3a14735c6193a23845c620e6d170570a4`，TypeScript5.9.3、1208源、零诊断、退出0。 |
+| Root标准runtime配置及默认关闭 | `9134242505e9c68383bbe746853b9a000d78d40f09d87cd5b789460a6b6a6edf`，退出0；仅category段可配置，未知段拒绝，停用写入不解析原Controller，模型及业务写入0。 |
+| Root独立核接冻结两叶与原Core连续链 | `eea7d1a9d84ead31ffab3d4db3eed8d2ab6a2a13aa5e51945962667b61f6ea16`，退出0；读取原作者固定内存驱动、补同一iat及source.findUnique夹具，独立运行实际Auth／Guard／Controller／Core。原创建／patch共2写、source不变、条件能力／历史uppercase保持，陈旧CAS拒绝，发布／采用unavailable。不是新测试文件或真实数据库。 |
+
+失败保留：Root初驱动未定义taskTemp；原fixture带有有效角色权限使无edit负例不成立，去除fixture角色后才验证真实拒绝。非SaaS持category:view最初可过GlobalGuard，本片已补实际SaaS门禁并复验。Map窄key的TS2345已修为明确Map类型；动态wire驱动误读不存在模块，删除无用import后通过。dev1首次写入fixture签名缺iat，Core拒绝；补原签名字段后review仍因fixture缺rentalCategoryVersion.findUnique失败，补唯一原source读取后连续链通过。生产权限、Core事务、原断言未放宽。原陈旧CAS在HTTP保持409 `AI_RESULT_UNKNOWN` 和人工核原稿出口，不能据该拒绝推定所有未知写入均未发生或授权自动重发。
+
+本片只关闭动态公共合同／平台Guard／原草稿消费的具体缺口。AIN-23仍75%：实际平台提案Task／唯一Gateway／单账、公共提案合同与标准provider、平台／空间人工消费者及原发布／资格／采用的完整组合尚在施工；不把私有模型端口、格式支持或草稿保存当整项完成。AIN-25取消／恢复观测两叶仍由dev2施工，公共schema与消费者由Root核接。真实数据库、浏览器、模型供应商及生产启用由负责人后续实测。本片各完成验证audit0、任务临时目录未创建，没有依赖、client、dist或重复附件留存。`node --no-compilation-cache scripts/validate-docs.cjs`退出1，只保留导航历史三处和稀疏站点示例一处原缺链，任务算术与当前接续无新增错误；`git diff --check`退出0，未为补绿伪造原附件。
+
 <a id="ain25-standard-shared-capacity-dispatch-20261114"></a>
 ## AIN-25 标准共享容量、原计数恢复与最终派发复核（2026-11-14）
 

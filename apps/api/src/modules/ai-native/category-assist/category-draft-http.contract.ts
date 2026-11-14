@@ -3,7 +3,7 @@
  * Preserve JSON and original Date serialization, reject hidden extra fields. */
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_CATEGORY_DRAFT_HTTP_CONTRACTS, AI_CATEGORY_DRAFT_HTTP_SCHEMAS,
+import { AI_CATEGORY_DRAFT_HTTP_CONTRACTS, AI_CATEGORY_DRAFT_HTTP_SCHEMAS, isRentalCategoryCode,
   type AiCategoryDraftHttpRequests, type AiCategoryDraftHttpResponses, type AiCategoryVersionWire } from '@rental-os/shared';
 
 type Action = keyof typeof AI_CATEGORY_DRAFT_HTTP_CONTRACTS;
@@ -32,7 +32,8 @@ function wire(value: unknown, dates: boolean, depth = 0): unknown {
 }
 export function categoryDraftRequest<A extends Action>(action: A, value: unknown): AiCategoryDraftHttpRequests[A] {
   const copy = wire(structuredClone(value), false);
-  if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > 262144 || !contracts[action].request(copy)) throw Error('category request');
+  if (!Object.hasOwn(contracts, action) || Buffer.byteLength(JSON.stringify(copy), 'utf8') > 262144
+    || !contracts[action].request(copy)) throw Error('category request');
   return copy as AiCategoryDraftHttpRequests[A];
 }
 export function categoryDraftResponse<A extends Action>(action: A, value: unknown,
@@ -40,9 +41,10 @@ export function categoryDraftResponse<A extends Action>(action: A, value: unknow
   const copy = wire(structuredClone(value), true) as AiCategoryDraftHttpResponses[Action];
   // detail returns up to 100 original 256 KiB definitions; do not truncate them
   // or use a single-draft cap that would make a legitimate history unreadable.
-  if (Buffer.byteLength(JSON.stringify(copy), 'utf8') > 67108864 || !contracts[action].response(copy)) throw Error('category response');
+  if (!Object.hasOwn(contracts, action) || Buffer.byteLength(JSON.stringify(copy), 'utf8') > 67108864
+    || !contracts[action].response(copy)) throw Error('category response');
   const versionMatches = (row: AiCategoryVersionWire) => {
-    if (row.categoryCode.toLowerCase() !== command.code || row.definition.code !== command.code
+    if (!isRentalCategoryCode(command.code) || row.categoryCode.toLowerCase() !== command.code || row.definition.code !== command.code
       || row.policy && row.policy.versionId !== row.id) throw Error('category binding');
   };
   if (action === 'detail') {

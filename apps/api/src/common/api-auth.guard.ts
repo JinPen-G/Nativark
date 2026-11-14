@@ -29,6 +29,7 @@ import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } f
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
+import { AI_CATEGORY_DRAFT_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
@@ -46,6 +47,9 @@ import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabil
 
 const countingRouteAccess = new Map<string, typeof AI_COUNTING_HTTP_OPERATIONS[number][3]>(AI_COUNTING_HTTP_OPERATIONS.map(([action, _request, _response, access]) =>
   [`${AI_COUNTING_HTTP_DRAFT.method} /${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`, access] as const));
+const categoryDraftRoutes = new Map<string, string>(Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) =>
+  [`POST /ai-native/category-drafts/${operation}`, contract.write ? 'system:rental-category:edit' : 'system:rental-category:view'] as const));
+const registeredCategoryDraftPermission = (method: string, path: string) => categoryDraftRoutes.get(`${method.toUpperCase()} ${path}`);
 
 interface RequestLike {
   method: string;
@@ -335,9 +339,8 @@ export function requiredPermissions(method: string, path: string) {
   if (method.toUpperCase() === 'POST' && (['read', 'change', 'operation', 'readModelPlan', 'changeModelPlan'] as const)
     .some(operation => path === `/${AI_CLIENT_TASK_POLICY_HTTP_DRAFT.basePath}/${AI_CLIENT_TASK_POLICY_HTTP_DRAFT[operation]}`))
     return ['system:params:manage'];
-  if (method.toUpperCase() === 'POST' && /^\/ai-native\/category-drafts\/(?:detail|create|patch|validate|review)$/u.test(path)) {
-    return [path.endsWith('/create') || path.endsWith('/patch') ? 'system:rental-category:edit' : 'system:rental-category:view'];
-  }
+  const categoryDraftPermission = registeredCategoryDraftPermission(method, path);
+  if (categoryDraftPermission) return [categoryDraftPermission];
   if (method.toUpperCase() === 'POST' && path === `/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene}`) {
     // Entry alternatives only. The selected original reader separately checks
     // THIS task's owner, scene, current action policy and business authority.
@@ -1130,7 +1133,8 @@ export class ApiAuthGuard implements CanActivate {
     const original = trusted ? this.authService.consumeTrustedWorkspaceAccess(await trusted()) : undefined;
     const accessContext = original ? original.context : await this.authService.resolveAccessContext(token, {
       allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/")
-        || platformCapabilityProbePermission(request.method, path) !== undefined,
+        || platformCapabilityProbePermission(request.method, path) !== undefined
+        || registeredCategoryDraftPermission(request.method, path) !== undefined,
       audience: staffApiRequest ? "staff" : "operator"
     });
     const scopedDatabase = original?.transaction ?? this.prisma;
@@ -1177,6 +1181,9 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
     const platformProbePermission = platformCapabilityProbePermission(request.method, path);
+    if (registeredCategoryDraftPermission(request.method, path) && !user.isSaasAdmin) {
+      throw new ForbiddenException('AI 品类草稿仅向当前获权的 SaaS 平台管理员开放');
+    }
     if ((path === '/ai-native/credits' || path.startsWith('/ai-native/credits/'))
       && !creditTenantRoutes.has(`${request.method.toUpperCase()} ${path}`)
       && !creditPlatformRoutes.has(`${request.method.toUpperCase()} ${path}`)) {
@@ -1212,6 +1219,7 @@ export class ApiAuthGuard implements CanActivate {
       !isPlatformAiProviderPath(path) &&
       !isBudgetPlatformRoute(request.method, path) &&
       !platformProbePermission &&
+      !registeredCategoryDraftPermission(request.method, path) &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");

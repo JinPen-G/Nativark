@@ -383,6 +383,7 @@ export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
     // Controllers are not injectable providers. Resolve the already registered
     // original instance lazily, after Nest has constructed its controller map.
     const controller = {
+      catalog: (...args: Parameters<CategoryGovernanceController['catalog']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).catalog(...args),
       detail: (...args: Parameters<CategoryGovernanceController['detail']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).detail(...args),
       create: (...args: Parameters<CategoryGovernanceController['create']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).create(...args),
       patch: (...args: Parameters<CategoryGovernanceController['patch']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).patch(...args),
@@ -1305,6 +1306,7 @@ export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
   runtimeConfigurationProvider(AI_NATIVE_CLIENT_POLICY_CONFIGURATION, 'clientTaskPolicy'),
   runtimeConfigurationProvider(AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, 'staffRecognition'),
   runtimeConfigurationProvider(AI_NATIVE_STAFF_MANUAL_CONFIGURATION, 'staffManual'),
+  runtimeConfigurationProvider(AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, 'categoryDraft'),
 ];
 
 /** Current original-resource reads remain available independently of new-model

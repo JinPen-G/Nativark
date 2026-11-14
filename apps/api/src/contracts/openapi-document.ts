@@ -3062,7 +3062,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     ["get", "/{code}/audits", "rentalCategoryGovernanceAudits", "Read platform configuration audit records, not tenant business data", "audit"]
   ] as Array<[HttpMethod, string, string, string, string, SchemaObject?]>).map(([method, suffix, operationId, summary, permission, requestSchema]): ContractOperation => ({
     method, path: `/api/platform/rental-categories${suffix}`, tag: "Platform Rental Core",
-    operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema, responseSchema: "GenericObject"
+    operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema,
+    responseSchema: suffix === '/{code}/audits' ? 'AiCategoryGovernanceAuditPage' : "GenericObject"
   })),
   { method: "post", path: "/api/platform/rental-categories", tag: "Platform Rental Core", operationId: "createRentalCategory",
     summary: "Create an independent unopened identity and draft from a verified template or immutable source; original request and audit commit together. Dynamic creation is closed by default.",

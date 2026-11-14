@@ -6,7 +6,7 @@
 
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 
-当前[AIN-25标准共享容量与最终派发](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)23源已接全部标准模型／count／probe实例，修Task wrapper底层终结信号和凭据等待后的late派发窗口；原52项、dev2 count31项、Root独立count／九窗及固定闭包类型通过，独立技术复核未见该阶段余下P2。继续核AIN-25原五条的工具／取消恢复测量、SLO决定、故障／回退和交付资料，不能把保守容量默认值当指标通过。dev1已开始AIN-23七叶核心消费者；Root下一接动态公共合同、原Guard漏登记、审计OpenAPI及实际页面入口，不改Core治理内核。
+当前[AIN-25标准共享容量与最终派发](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)23源固定 `aaef122e9e02e97f0a6d9e4cf2886b04e6ec0ae1` 已推并回读，全部标准模型／count／probe实例、底层终结及最后派发窗口已核接。dev2继续原取消／恢复观测两叶，缺证据保持pending／not_recorded，不拿保守容量默认值当SLO通过。[AIN-23动态公共合同／平台Guard／审计阶段](<AI Native-开发记录.md#ain23-dynamic-draft-public-contract-20261114>)五公共接点和两个草稿服务叶已验证并固化；Root持后端两叶写权，下一接真正平台提案Task／Gateway、公共协议、标准provider及两个页面挂点。dev1继续其余五叶的候选、会话和人工发布／资格／空间采用消费者，不改Core治理内核。原提案端口已形成但实际平台模型宿主未接，不能称全链完成。
 
 [AIN-19整项](<AI Native-开发记录.md#ain19-source-text-simulated-whole-closeout-20261114>)固定 `2ec20f9c81f79d7a172409f619c50f3ec91d55de`、[AIN-20整项](<AI Native-开发记录.md#ain20-signature-reopen-simulated-whole-closeout-20261114>)固定 `7a451591c54decf911560f079e246f021b301ea4`已推并回读一致，19／20原集成节点保留。PM指定main `1cb43939bcc25ed1930563aa19b3d507e9b08965` 的[12／13固定闭包](<AI Native-开发记录.md#ain12-13-current-main-fixed-closure-20261114>)在整合分支 `9512e3a786cced8b32812e5121141187012da001`，105源完整API／后台类型及原订单控制／前端消费模拟通过，未新建树／复制环境／写main。[原事件公开解释](<AI Native-开发记录.md#ain18-original-explanation-public-consumer-20261114>)与[失效建议撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)已上传，当前政策核心复用原AUTOMATION／Gateway／CALLS／独立原账，不扩大业务效果。
 
@@ -26,9 +26,9 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 21／22已固定上传，23份容量标准装配／原count／底层终结／late派发复核齐备并独立固化。独占四册／索引、shared／Guard／OpenAPI／provider及两个品类页面挂点，下一按原25／23核心缺口收口；未知原操作不重派，原账不因网络槽释放核销。未核旧goal三叶／员工样式不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-23已授权七叶：API category-draft application／contract、新category-proposal application；后台新aiCategoryDraft API、category-assist-session、CategoryAssistFlow，以及原categoryGovernance API仅审计字段声明／校验。先闭原人工草稿／发布／资格／空间采用消费者，再接原Task／Gateway候选提案，Core／shared／Guard／provider／两个页面／四册／索引归Root。unknown仅原收据／audit，查不到不重派，不新增测试。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 容量原五源及count service `91e6e5b2…`／composition `83bc0abc…`均冻结交权，Root核同。31项及两源类型通过，原claim／reserve／原键和POST真实终结保持；下一只读核AIN-25原五条剩余实施／SLO决定／故障回退，给最小可直接完成阶段。统计Logger告警已由Root接，原取消与末Run时延不重复施工，不写shared／Guard／provider／四册／索引、不新增测试。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 21／22及共享容量已固定上传；AIN-23五公共接点和两草稿叶已核接。独占四册／索引、shared／Guard／OpenAPI／provider、category-draft application／contract及两个品类页面挂点；下一补平台提案原Task／Gateway／单账与AIN-25观测公共消费。未知原操作不重派，原账不因网络槽释放核销；未核旧goal三叶／员工样式不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-23草稿application `a9f68284…`及contract `b0b4f990…`已冻结交回Root，继续五叶：category-proposal application；后台aiCategoryDraft API、category-assist-session、CategoryAssistFlow，以及原categoryGovernance API仅审计声明／校验。候选来源、目录与能力核验保持，原发布／资格／空间采用分别确认；Root接标准平台模型宿主及页面。unknown仅原收据／audit，查不到不重派，不新增测试。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 独占TaskPerformanceReader及新TaskLifecycleObservationReader两叶，沿原取消修订／时间／settlement、原恢复围栏／Run／事件／资源与原账读取，补有界观测和样本比例，不新建日志／表／worker。公共最小响应形状已交Root，继续实际实现不等shared；缺证据pending／not_recorded，unknown不计成功，取消善后不代表业务回滚。不写shared／Guard／provider／四册／索引，不新增测试。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-22原五条及最后恢复P2、AIN-25容量阶段和三adapter最后派发窗口独立核定均已交回，无活动源码／索引／main写权。结论不外推AIN-25整项或真实运行，不重复派验。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
