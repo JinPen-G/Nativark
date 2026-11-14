@@ -66,8 +66,9 @@ const foreignKeys: Record<string, { table: string; columns: Array<[string, strin
   ai_failure_outbox_config_settings_fk: { table: 'rental_tenant_business_settings', columns: [['tenantId', 'tenantId'], ['configurationSettingsWorkspaceId', 'workspaceId']] }
 };
 
-// The complete approved CHECK from 20261111220000_ai_failure_resource_sources.
-// This is a schema witness, not a second resource rule or SQL to execute.
+// The original resource conditions, with an explicit boolean comparison for
+// MySQL CHECK typing. The forward repair preserves FALSE for a NULL predicate;
+// this schema witness is not a second resource rule or SQL to execute.
 const approvedResourceCheck = `COALESCE((
   (
     fulfillmentOrderId IS NULL AND configurationKind IS NULL AND configurationId IS NULL
@@ -119,7 +120,7 @@ const approvedResourceCheck = `COALESCE((
         AND configurationProfileTenantId IS NULL AND configurationSnapshotWorkspaceId IS NULL)
     )
   )
-), FALSE)`;
+), FALSE) = TRUE`;
 
 type CheckToken = { kind: 'word' | 'identifier' | 'string' | 'integer' | 'symbol'; value: string };
 type CheckNode = string | readonly CheckNode[];

@@ -4,6 +4,10 @@
 
 ## 当前目标与现场
 
+PM 的本机 MySQL 8.4.11 迁移阻塞已交[最小 SQL／witness 与恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)：固定 main 275064d40，保留 112200 历史字节，仅完整 CHECK 外层增加 `= TRUE`，新前向迁移加仅补第四 ALTER 的恢复 SQL。原 parser／存储门禁模拟及类型通过，真实 DDL、CHECK_CLAUSE 回读、Prisma resolve 与 Client 由 PM 串行执行；AI 不争本机数据库／main 索引，不能以本片声称已恢复服务或提高任务进度。
+
+AIN-25 故障 Task／业务 Outbox 的原公开消费者模拟与定向类型已通过，仍为独立未提交阶段。独立复核发现最后身份／生命周期等待后可能交付旧告警政策；Root 将原政策指纹／当前有效期检查保留到公开返回前，dev2 继续核资源撤权及 closed 租约一致性。AIN-24 dev1 独占原 hold／memory／knowledge 三叶，Root 负责保留最少会员业务收据与公共装配，助手继续不等待本机迁移或 Root 提交。
+
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 
 当前[AIN-25标准共享容量与最终派发](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)23源固定 `aaef122e9e02e97f0a6d9e4cf2886b04e6ec0ae1` 已推并回读；[原取消／恢复及公共消费](<AI Native-开发记录.md#ain25-original-lifecycle-public-consumer-20261114>)六源已在 `20e33f3d933c337335f3b352d6e306d4ab83c88b` 固化并回读 GitHub。缺证据保持pending／not_recorded，SLO／DB／worker／事件积压告警与回退演练仍核原门槛，不拿容量默认值或经营HTTP基线当AI SLO。[AIN-23原两页消费者全文](<AI Native-开发记录.md#ain23-category-human-model-consumers-20261114>)固定 `dfc144cc8eeb5df0e1675f69018d6e63cf9a77c0` 已推并回读，原任务已按模拟口径核闭。AIN-15目标检查点fce0526dc及[后继参数与开单转接](<AI Native-开发记录.md#ain15-current-human-parameters-order-handoff-20261114>)六源 `432dc375d9e34da10519498576cbb8afc661822c` 已上传，四品类正常／锁内缺货证据已由Root核接。独立全文复核的三个缺口及[日期地点变更阶段](<AI Native-开发记录.md#ain15-date-location-original-confirmation-20261114>)保留当前入口：原日期／地点重答至新Core报价模拟已通过，dev1补企业员工选择及原订单办理链接；原Core明确禁止operator代人声明企业告知／付款，不能把准备ready当企业报价正向。AIN-25故障两叶及shared合同仍为独立WIP，Root待接实际消费者和可信装配；dev2继续SLO／版本回退及故障一致性最小候选，不等待Root提交。

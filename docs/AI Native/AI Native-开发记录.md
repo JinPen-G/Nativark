@@ -6,6 +6,25 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-main-mysql-boolean-check-recovery-20261114"></a>
+## MySQL 8.4 原资源 CHECK 与部分迁移恢复（2026-11-14）
+
+PM 明确委派固定 main `275064d40a3977542a530158974070e8b6c337ca` 的最小修复。其实际 MySQL 8.4.11 收据显示：110020、110021 两迁移成功；112200 的两个 configurationRevision ALTER 和 settings 空间唯一键成功，第四个 Outbox ALTER 原子回滚，原 CHECK／旧列结构仍在。失败为 Prisma P3018／MySQL 3812，完整 `CHECK(COALESCE((条件), FALSE))` 被判为非布尔表达式。本片只交 SQL、严格 schema witness 与恢复依据，PM 独占本机 DDL／Client 更新；AI 未读环境文件或连接数据库。
+
+[历史迁移](../../apps/api/prisma/migrations/20261111220000_ai_failure_resource_sources/migration.sql)保持原字节，固定 Git 文本 SHA-256 `3c9497cb22648d0c9c336208ab5ea4b209dd2b3f4d2253fe8fadddf83e5b9142`。[前向修复](../../apps/api/prisma/migrations/20261114210000_ai_failure_resource_boolean_check/migration.sql)仅在同一 ALTER 中替换原同名 CHECK，将完整条件外层改为 `COALESCE((条件), FALSE) = TRUE`；五类资源互斥、原来源／关联／期限／政策和 NULL 拒绝均保留。[存储 witness](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-resource-store.ts)同步这一显式比较，原 parser、列/FK检查和 assertShape 不放宽。source 前像 blob `1a06a119dd798d1dfa8b43beeb826ff2e5a63f40`，后像 `9e9a31d1dfa1c9977b6ef3e41c0e2d5d829a3624`；SQL blob 分别 `70cee5d93c220692ddba21773e7e7e030ba065a1`、恢复 SQL `8193ea59a1aef3937b42789e3685b7561c58ca03`。
+
+恢复步骤只适用于上述已核物理状态，不能把“resolve”当作跳过缺失结构：
+
+1. PM 保持本机 API／相关 worker 停止，核原失败迁移名称、checksum、失败日志及三个已成功 ALTER；确认 Outbox 全部新增列／索引／FK 缺失、旧 CHECK 仍 ENFORCED，且不存在第二个并行 DDL。状态不同立即停止，不能重跑前三 ALTER、抹历史成功收据或手改 checksum。
+2. 沿 PM 已获授权的原连接执行[恢复 SQL](../../scripts/ops/ai-native-failure-resource-check-recovery.sql)。它只完成第四个 Outbox ALTER，原新增列／索引／FK 与历史定义逐字一致，仅 CHECK 增加外层 `= TRUE`；不改 `_prisma_migrations`。
+3. PM 回读完整列、索引、FK、ENFORCED CHECK_CLAUSE，运行原 createPrismaBusinessFailureResourceStorage.assertStorage 和合法／缺来源拒绝。原 parser 已支持 TRUE／1、FALSE／0、反引号和 MySQL ASCII 字符串 introducer；必须核真实规范化文本，不能只比较关键字或删条件。
+4. 物理结构与原迁移目标加布尔修复全部齐备后，沿现有 Prisma／环境装配执行 `prisma migrate resolve --applied 20261111220000_ai_failure_resource_sources --schema apps/api/prisma/schema.prisma`，保留历史文件、原 checksum 与已成功收据，再执行正常 migrate deploy 应用前向修复。不要使用 --rolled-back 重放已提交前三 ALTER，也不直接 UPDATE 迁移表。全新数据库遇原迁移同一失败时同样先核实际状态并完成此恢复，单独新增后置迁移不会使 Prisma 自动越过前置失败。
+5. PM 回读迁移状态及 schema／Client 归属，按既有受管生成入口更新 Client，复核原配置与 Outbox 读取后再恢复本人服务；不将 AI 的 AIN-15／25 活动文件整收进 main。
+
+Root 必要模拟 `node --no-compilation-cache -`，stdin SHA-256 `defe0c6463a516a5d150018028d574e27670e39280aa61e5e134fd9b4c2adc3b`／退出0：实际原 parser／assertStorage、两 SQL 完整 AST 与 witness 一致，7种合法资源形态和13种缺来源／混合资源拒绝，SQL 三值逻辑不变；TRUE／1、FALSE／0及字符串 introducer 正常形式接受，条件变更、未强制CHECK和缺FK拒绝，查询10／写入0。TypeScript5.9.3单根／686源零诊断，stdin `7ce287e99b7a29f6cbd6381fe95776f48add896049f6c79dad5c67d468da8dcc`／退出0。首内存驱动因 regexp 内换行生成失败（`d0f121c0a8d32c8f6d50d0c648795d1b5848d7ce241ccf0082ee642b3c063915`／退出1），改用字符常量后复验，未改生产 parser 或删除断言。
+
+上述只证明模拟语义、实际源码和类型，不证明 MySQL 已执行修复；真实 CHECK_CLAUSE、DDL／Client／服务结果由 PM 单独回读。Root 全部 audit0，自有验证进程退出，任务临时目录未创建，无新增／扩写测试脚本、生成客户端或环境副本。本修复不增加整项100%，AIN-15／24／25与最终验收仍按原全文推进。
+
 <a id="ain15-original-order-link-consumers-20261114"></a>
 ## AIN-15 身份选择与原订单办理消费者（2026-11-14）
 
