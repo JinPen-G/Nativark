@@ -28,6 +28,9 @@ try {
   if (json) process.stdout.write(JSON.stringify(result) + "\n");
   else {
     console.log(`开发能力索引，共 ${result.total} 项，当前条件匹配 ${result.matched} 项。`);
+    if (result.source.workingTreeChanged) console.log("本次读取包含未提交修改。");
+    for (const source of result.coverage.notPresent) console.log(`${source.source} [not_present] 未检出，尚未读取`);
+    for (const source of result.coverage.partial) console.log(`${source.source} [partial] 尚有未读取或未解析范围`);
     for (const capability of result.capabilities) {
       console.log(`\n${capability.name} (${capability.kind})\n${capability.id}`);
       if (capability.description) console.log(capability.description);
@@ -39,7 +42,7 @@ try {
     if (result.nextOffset !== null) console.log(`\n下一页使用 --offset ${result.nextOffset}`);
     for (const issue of result.issues) console.log(`${issue.path} [${issue.code}] ${issue.message}`);
   }
-  process.exitCode = check && result.issues.length ? 1 : 0;
+  process.exitCode = check && (result.issues.length || result.coverage.partial.length || result.coverage.notPresent.length) ? 1 : 0;
 } catch (error) {
   const message = error instanceof Error ? error.message : "能力索引读取失败";
   if (json) process.stdout.write(JSON.stringify({ audience: "development", error: message }) + "\n");

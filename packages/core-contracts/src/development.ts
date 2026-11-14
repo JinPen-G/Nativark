@@ -46,6 +46,7 @@ export const DevelopmentCapabilityIndexSchema = z.object({
   schemaVersion: z.literal(1),
   audience: z.literal("development"),
   source: z.object({ snapshot: z.literal("working-tree"), revision: z.string().regex(/^[a-f0-9]{40}$/).optional(),
+    workingTreeChanged: z.boolean().optional(),
     version: z.string().min(1) }).strict(),
   coverage: z.array(z.object({ source: CorePackagePathSchema, count: z.number().int().nonnegative(),
     state: z.enum(["indexed", "partial", "not_present"]) }).strict()),

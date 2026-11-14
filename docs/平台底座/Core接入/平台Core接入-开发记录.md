@@ -155,6 +155,29 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-index-deployment-snapshot-20261115"></a>
+
+## 开发索引覆盖范围与部署目录快照（2026-11-15）
+
+当前事实读取固定 `de60b689910847e0680a74e7bc77c410394b058c` 已推送并读取真实远端一致，main仍为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`。本片只改独占Core合同/宿主和对应说明，原公共文件窗口继续按接续办理。
+
+[源码索引](../../../packages/core-contracts/src/repository-index.ts)将Git跟踪的workspace和独立客户端包清单与实际检出范围核对。未检出的包列为notPresent，已检出但未进入workspace扫描的独立包列为partial，不能以当前目录存在就认定全平台已覆盖。Git检出同时提供workingTreeChanged，明确当前源码可能包含未提交修改；`--check`发现issues、partial或notPresent时退出1，普通查询仍可取得已读取能力。实际用法同步到[契约包说明](../../../packages/core-contracts/README.md#找到平台已有的功能)。
+
+[部署目录](../../../packages/core-host/src/deployment.ts)在组合时解析清单快照、保存绑定原服务实例的方法引用，并为目录调用方返回隔离清单。原输入、返回Map及其中的清单被修改时，不改变当前部署登记；Core仓储与业务状态仍由原服务实时读取。此处固定登记版本和方法，实际升级通过重新核定组合完成。用途及限制同步到[宿主说明](../../../packages/core-host/README.md#当前部署注册)。
+
+| 必要核对 | 实际结果及边界 |
+| --- | --- |
+| `node --no-compilation-cache --test packages/core-contracts/test/core-contracts.test.cjs`，NODE_PATH只读定位已锁定依赖 | 退出0，原8组全部通过，skip/todo为0；临时编译/夹具由原after删除并确认 |
+| `node --no-compilation-cache -`内存编译与实际源码查询 | 退出0，CoreContracts31根/CoreHost6根均0类型诊断；4,435条，issues为0，5条动态元数据和3,589条无直接用途说明仍待整理，SaveButton单项JSON为1,690字节 |
+| 同一查询覆盖与CLI核对 | 六个未检出包分别为enterprise-portal、miniprogram、staff-miniprogram、tenant-website、website-next及harness-plugin；全部明确标记，workingTreeChanged=true；精确Auth接口查询的检查模式退出1且JSON可解析 |
+| 同一部署目录反例 | 修改原输入/返回Map/嵌套清单后登记保持；替换原方法后仍调用组合时方法，原实例的实时状态仍可变化；初始化一次，空组合及目标Core独立拒绝通过 |
+
+最初内存类型核对缺少稀疏树的Prisma运行时声明映射，退出1；随后只读引用已锁定的library.d.ts完成0诊断。CLI内存运行器一度把Node内置模块误当编译文件，退出1；仅修核对加载器的内置模块分支后复验通过。没有修改产品校验或已有断言来隐藏失败。persistent Node工具在初始化内核前返回路径不存在，本片最终经stdin完成验证，未依赖该工具建立环境。
+
+本片未新增测试脚本、依赖安装、Prisma生成、服务进程或数据库调用；stdin编译和目录核对只保留内存结果。未检出及动态元数据不等于已完成全平台说明。真实主应用装配、无Core运行、浏览器、数据库、独立接手及原后续任务验收继续列为缺口，原PCH进度未跨下一档。
+
+六份相关文档定向核对522个本地链接和113个章节锚点，退出0，新增错误为0，正式需求/任务正文及12项进度保持原值。原`docs:check`退出1，稀疏树17处缺链中的14处在固定Git中存在，另外3处仍是总导航第54行既有历史附件缺失；固定Git补足范围后白名单核查只余原3处。定向核对曾因全仓文件列表超过Node默认缓冲区而退出1，改为按链接查固定Git对象后通过，未修改检查器。差异格式检查退出0，原测试临时目录已删除核实，本片无新增临时残留。
+
 <a id="core-management-current-reads-20261115"></a>
 
 ## Core管理当前事实与修订读取（2026-11-15）

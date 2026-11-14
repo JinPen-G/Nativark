@@ -81,6 +81,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const rootPackage = readRepositoryJson(root, "package.json");
   const capabilities: DevelopmentCapability[] = [], issues: DevelopmentCapabilityIndex["issues"] = [], coverage: DevelopmentCapabilityIndex["coverage"] = [];
   const packages: PackageInfo[] = [];
+  const hasGit = Boolean(lstatSync(join(root, ".git"), { throwIfNoEntry: false }));
   const addIssue = (code: string, path: string, message: string) => issues.push({ code, path, message });
   const workspaces = Array.isArray(rootPackage.workspaces) ? rootPackage.workspaces : [];
   for (const workspace of workspaces) {
@@ -124,6 +125,24 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         sources: [{ path: `${packageDirectory}/package.json` }, ...info.entries.map(item => ({ path: repositoryPath(root, item.file) }))],
         documentation: sourceDocuments(root, packageDirectory),
         details: { publicImports: info.entries.map(item => item.module), dependencies: dependencyList } });
+    }
+  }
+  if (hasGit) {
+    // 独立客户端不一定属于npm workspace，稀疏检出时也须明确它们的未读范围。
+    const packagePatterns = new Set(["clients/*", ...workspaces.filter((workspace): workspace is string =>
+      typeof workspace === "string" && workspace.endsWith("/*"))]);
+    const patterns = [...packagePatterns].map(workspace => `:(glob)${workspace}/package.json`);
+    if (patterns.length) {
+      const trackedPackages = execFileSync("git", ["ls-files", "-z", "--cached", "--", ...patterns],
+        { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).split("\0").filter(Boolean);
+      for (const file of trackedPackages) {
+        if (!isRepositorySourcePath(root, resolve(root, file)) || !lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile())
+          coverage.push({ source: file, count: 0, state: "not_present" });
+        else if (!packages.some(info => info.directory === dirname(file))) {
+          coverage.push({ source: file, count: 0, state: "partial" });
+          addIssue("package_scope", file, "该独立包未进入当前workspace源码扫描范围");
+        }
+      }
     }
   }
   const entries = packages.flatMap(info => info.entries);
@@ -373,10 +392,13 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   }
 
   let revision: string | undefined;
-  if (lstatSync(join(root, ".git"), { throwIfNoEntry: false })) {
+  let workingTreeChanged: boolean | undefined;
+  if (hasGit) {
     revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    workingTreeChanged = execFileSync("git", ["status", "--porcelain", "-z", "--untracked-files=normal"],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).length > 0;
   }
   return DevelopmentCapabilityIndexSchema.parse({ schemaVersion: 1, audience: "development",
-    source: { snapshot: "working-tree", revision, version: rootPackage.version },
+    source: { snapshot: "working-tree", revision, workingTreeChanged, version: rootPackage.version },
     coverage, issues, capabilities: capabilities.sort((a, b) => a.id.localeCompare(b.id, "en")) });
 }

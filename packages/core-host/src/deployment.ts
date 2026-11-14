@@ -18,6 +18,20 @@ export interface CoreDeployedCatalogue {
   readonly availability: CoreDeploymentAvailability;
 }
 
+/** 保存受控组合的方法引用；绑定原服务实例，保留其仓储及运行状态。 */
+function fixedRegistration(registration: CoreServerRegistration): CoreServerRegistration {
+  const { server } = registration;
+  const contribution = Object.freeze({
+    coreId: server.coreId,
+    implementationVersion: server.implementationVersion,
+    resolveScope: server.resolveScope.bind(server),
+    readReadiness: server.readReadiness.bind(server),
+    ...(server.initialization ? { initialization: Object.freeze({ initialize: server.initialization.initialize.bind(server.initialization) }) } : {}),
+    ...(server.assessRemoval ? { assessRemoval: server.assessRemoval.bind(server) } : {})
+  });
+  return { manifest: registration.manifest, server: contribution };
+}
+
 function dataAvailable(data: CoreDataContract, observation: CoreDataObservation["platform"] | undefined): boolean {
   return Boolean(observation && observation.execution?.state === "ready"
     && observation.version === data.version
@@ -34,20 +48,26 @@ export function createCoreDeployedCatalogue(input: {
   observations: CoreDeploymentObservationSource;
 }): CoreDeployedCatalogue {
   const lock = CoreDeploymentLockSchema.parse(input.lock);
-  const registered = registerCoreServers(input.registrations, lock.platform.versions);
+  const manifests = input.registrations.map(registration => ({ ...registration, manifest: CoreManifestSchema.parse(registration.manifest) }));
+  const registered = registerCoreServers(manifests, lock.platform.versions);
   if (!registered.ok) throw new CoreAccessError("core_unavailable", registered.issues.map(issue => `${issue.coreId}:${issue.field} ${issue.message}`).join("\n"));
   const pins = new Map(lock.cores.map(pin => [pin.manifest.id, pin]));
   if (registered.registrations.size !== pins.size) throw new CoreAccessError("core_unavailable", "实际Core组合与部署锁的集合不一致");
   for (const [coreId, registration] of registered.registrations) {
     const pin = pins.get(coreId);
-    if (!pin || JSON.stringify(pin.manifest) !== JSON.stringify(CoreManifestSchema.parse(registration.manifest)))
+    if (!pin || JSON.stringify(pin.manifest) !== JSON.stringify(registration.manifest))
       throw new CoreAccessError("core_unavailable", `Core ${coreId} 的受控实现清单与部署锁不一致`);
   }
+  const registrations = new Map([...registered.registrations].map(([id, registration]) => [id, fixedRegistration(registration)]));
   const requireRegistered = async (coreId: string) => {
-    if (!registered.registrations.has(coreId)) throw new CoreAccessError("core_unavailable", "该Core尚未在当前部署注册");
+    if (!registrations.has(coreId)) throw new CoreAccessError("core_unavailable", "该Core尚未在当前部署注册");
   };
   return {
-    registrations: registered.registrations,
+    get registrations() {
+      // ReadonlyMap只约束类型；返回隔离清单，调用方改副本不能改本次部署。
+      return new Map([...registrations].map(([id, registration]) => [id,
+        { manifest: CoreManifestSchema.parse(registration.manifest), server: registration.server }]));
+    },
     availability: {
       requireRegistered,
       async requireAvailable(coreId) {

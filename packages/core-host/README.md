@@ -14,7 +14,7 @@
 
 `createCoreDeployedCatalogue({ lock, registrations, observations })`将真实部署锁与直接导入的Core服务端贡献核对。清单、版本、源码和所选Core集合与锁一致后提供 `registrations` 及授权服务使用的 `availability`。原迁移所有者通过 `observations.read()`返回当前实际数据版本、不可变迁移摘要和执行状态。[部署目录](src/deployment.ts)
 
-`requireRegistered`核当前受控服务组合，授权撤回可在业务数据不可用时办理。`requireAvailable`要求平台和目标Core的实际数据/完整迁移账与部署锁匹配、执行状态为ready。一个Core未就绪只影响它自己的新准入，平台公共迁移未就绪则影响所有Core。空Core组合合法。该目录在服务组合时持有固定实现，后续部署变更重新创建核定组合。
+`requireRegistered`核当前受控服务组合，授权撤回可在业务数据不可用时办理。`requireAvailable`要求平台和目标Core的实际数据/完整迁移账与部署锁匹配、执行状态为ready。一个Core未就绪只影响它自己的新准入，平台公共迁移未就绪则影响所有Core。空Core组合合法。该目录保存组合时的清单快照和绑定原服务实例的方法引用；`registrations` 每次返回隔离清单，调用方修改目录副本或原输入不会替换当前登记的方法。仓储与业务状态仍由原服务实时维护，后续部署变更重新创建核定组合。
 
 ## 接原身份与事务
 
