@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-main-mysql-check-metadata-quotes-20261114"></a>
+## MySQL CHECK 元数据引号包装兼容（2026-11-14）
+
+PM 在main按0b1e1ad固定三源补完原Outbox ALTER，真实12列／5新增FK／索引可见、CHECK ENFORCED=YES，Client生成和API完整类型通过，但原assertStorage在CHECK查询后返回not_ready，尚未进入FK检查。PM定向交付[只读元数据原证据](../../output/runtime/main-dev-recovery/mysql-resource-check-shape.json)：MySQL8.4.11的CHECK_CLAUSE含字面 `_utf8mb4\'…\'`，HEX证实5C27而非JSON显示转义，改变sql_mode仍相同。本片未连接数据库或执行DDL，原Prisma失败迁移尚未由AIresolve。
+
+[原严格parser](../../apps/api/src/modules/ai-native/business-events/prisma-business-failure-resource-store.ts)单源前像 `9e9a31d1dfa1c9977b6ef3e41c0e2d5d829a3624`，后像 `1dce1a9b38f67140abf85d7041e32e37e9962249`。新增metadata默认false标志，仅information_schema CHECK_CLAUSE的调用传true；只在相邻_utf8mb4后识别两个字面5C27分隔符，内部ASCII值必须无反斜杠、裸引号或非ASCII。不全局删除反斜杠，不解析SQL任意转义，普通SQL调用仍拒绝该包装。原完整AST等价、ENFORCED和全部原FK逐列验证不变；不吞not_ready或改历史迁移。
+
+原证据SHA-256 `4c936c2b21f2acecddca9704fa908f879b2de969f5abc2cf0d2fdfc0b66b029c`，保存26个包装／23行FK，原clause UTF8与HEX逐字相同。Root纯内存`node --no-compilation-cache -`直接加载生产parser／assertStorage并回放该证据，stdin `0ff7ca3adb18d977237364c76bb59367ec7db48c03d2f32930e35020f1584a21`退出0：前像在两查询后拒绝、未到FK；后像完成三查询和完整FK，完整AST与approved witness一致。4种条件变更、12种注入／坏引号／未知或错introducer／空格分隔／内部escape／非ASCII／不闭合均拒绝；ENFORCED=NO、缺FK或引用列变化拒绝，业务写0。TypeScript5.9.3单根／686源零诊断，stdin `c96b818e7ee450f211c117eb94f33b41bb28ade4c9c56094bebc2e3e4368eda7`退出0，audit0／进程退出／任务临时目录未创建，无新增测试脚本或Client／依赖副本。
+
+PM仅接本产品单源，使用保存同一CHECK及当前真实元数据再运行原assertStorage，成功后才沿[原恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)继续resolve／前向迁移／配置和服务复核。本片是保存真实元数据的模拟回放及类型，不冒称AI已连接真实库或服务已恢复；四册证据由PM读取，AIN-15／24／25任务仍独立核定。
+
 <a id="ain25-original-fault-outbox-policy-close-20261114"></a>
 ## AIN-25 原故障、事件窗口与最终政策复核（2026-11-14）
 

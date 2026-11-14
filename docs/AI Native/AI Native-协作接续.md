@@ -4,7 +4,7 @@
 
 ## 当前目标与现场
 
-PM 的本机 MySQL 8.4.11 迁移阻塞已交[最小 SQL／witness 与恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)：固定 main 275064d40，保留 112200 历史字节，仅完整 CHECK 外层增加 `= TRUE`，新前向迁移加仅补第四 ALTER 的恢复 SQL。原 parser／存储门禁模拟及类型通过，真实 DDL、CHECK_CLAUSE 回读、Prisma resolve 与 Client 由 PM 串行执行；AI 不争本机数据库／main 索引，不能以本片声称已恢复服务或提高任务进度。
+PM的本机MySQL8.4.11已按[最小SQL／恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)补完第四Outbox ALTER，列／FK／索引及ENFORCED回读保持；其真实CHECK元数据的5C27引号包装导致旧parser拒绝。Root已交[单源受限metadata兼容与实际字符串回放](<AI Native-开发记录.md#ain-main-mysql-check-metadata-quotes-20261114>)，只支持相邻_utf8mb4的ASCII包装，完整AST／ENFORCED／FK不放宽。PM独占真实assertStorage再核、resolve／前向迁移及Client／服务恢复；AI不争数据库／main索引，不能用回放声称已恢复服务或提高任务进度。
 
 AIN-25 [原故障／业务Outbox及最终政策阶段](<AI Native-开发记录.md#ain25-original-fault-outbox-policy-close-20261114>)22源固定 `2cfbcee8bcc4dcc37f2548b56798d9dcf84445f1` 已普通推送并回读，必要模拟／类型和限定范围独立源码核定齐备。最后身份／生命周期等待的旧告警政策P2、窗口查询后资源撤权及矛盾租约均已修复，原policy句柄只留服务端，unknown不重派或清占用。dev2继续核原五条SLO／成本／回退与最终依据，不重跑50样本；尚未按整项100%计分。AIN-24 dev1独占原hold／memory／knowledge三叶，Root负责最少会员业务收据、原复制正文清理与公共装配；仍缺新知识事务／删除传播完整消费者，不能把依赖拒绝当删除闭环，助手不等待本机迁移或Root提交。
 
