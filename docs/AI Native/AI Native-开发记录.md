@@ -6,6 +6,61 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-measurement-cost-rollback-whole-20261114"></a>
+## AIN-25 测量、成本包络与版本回退全文核定（2026-11-14）
+
+生产故障／公开消费者固定 `2cfbcee8bcc4dcc37f2548b56798d9dcf84445f1` 已推并回读；MySQL元数据单源后继 `b038642a779d4e68d594029dfdb295728bbc3b9d` 也已上传，原规则未放宽。本阶段核入 dev2 的既有50样本、原配置／prompt／policy回退与可审查参数，不重复运行已绿色集合。完整固定清单blob `054863987bf1d9ac2e3d2a14185f3301858d01cd`、全文结论 `fb9fc0e44537d0a65ad7c3fd573bef5d1a1f6f8a`、测量摘要 `655c213019046309866f4629182f09f26f342f73`、参数与成本 `55a8cf6ad54074d479c1a75023ee75c59842e676`、回退报告 `7ae50a2164b1bc007638d1b606be9a21b00b14f0`。Root已用git cat-file逐字核12个必要对象的SHA-256／字节数，并读取实际生产接点；它们是唯一原证据，不复制依赖、运行目录或另建第五册。
+
+### 参考流程及测量口径
+
+沿AIN-01已批准的原业务参考与程序化基线，测量同一原订单的“model → 当前授权Core只读 → final model”，真实业务状态与费用仍取Core／单账，不由模型判断。固定50次的工作区HEAD为 `432dc375d9e34da10519498576cbb8afc661822c`，执行前以1223份实际源码／fixture建立内存快照，manifest SHA-256 `633c923377a030f1a995f864adcee995a6d2f0aa5261474a5547543ffb7dcdd1`；原输出还保留560份实际加载source哈希，不能把HEAD单独当无WIP的全部快照。未复制工作目录，DB／模型／财务持久层均为明确替身，Auth／原场景组合／Runner／资源仓储按实际源码运行。
+
+驱动 `node --no-compilation-cache -`，stdin `fd0ad6ced22d404c9ed93e8de0d9eb4402fac876889ca2aa7ae79bd4a2511eb6`（blob `d68ceae8a3f1476737428f6ab7874d2479ce461a`）／退出0。原输出blob `58847326c6eab9a12b49373e74a6c6158fb86ba8`，rawSamples SHA-256 `23924f466f9e02e6ed69013a6cfc563f84b8a16de822d3eae3711ca9f78ff4d6`。Windows／Node、参考Task并发1、单Task步骤并发1，计时用真实Node performance.now，fixture准备、任务执行及最终只读分别计时，用户等待不含在任务工作耗时。没有浏览器／微信设备／真实供应商成本样本。
+
+| 指标及分母 | 实际模拟测量 |
+| --- | --- |
+| 正常参考Task | 50次尝试／50次完成／失败0；仅这一正常集合，不外推全场景成功率、生产可用性或真人接管率 |
+| 原任务工作时间 | min2615.29ms、p50 2896.16ms、p95 3833.15ms、max4226.03ms，nearest-rank；Root从原50值重排核p95一致 |
+| 原最终答案读取 | min46.34ms、p50 50.76ms、p95 78.77ms、max116.01ms，独立于任务工作耗时 |
+| 原模型／资源 | 100次生成、800条原资源记录，各Task3步骤／2生成调用，资源全部原记录；最终read不增调用或写入 |
+| 首字／首卡 | 原客户端source、可见callback、闭合报告和原日志读取已按[原阶段](<AI Native-开发记录.md#ain25-model-control-visible-20261113>)模拟通过；本50样本不测DOM可见分布，真实分布为未记录 |
+| 原成本、预算拒绝、取消／恢复、接管 | 沿[原生命周期阶段](<AI Native-开发记录.md#ain25-original-lifecycle-public-consumer-20261114>)和[故障公开阶段](<AI Native-开发记录.md#ain25-original-fault-outbox-policy-close-20261114>)核独立财务账／资源账、原拒绝及善后／恢复收据。原选择样本缺终结、截断或unknown时百分比null，不用正常50样本补造异常恢复率 |
+
+### 可审查首发候选与成本限制
+
+下列参数由现有服务端配置／原政策接口承接，属于本轮研发交付候选；AIN-D05的生产规模／采用及负责人实测仍待决定。本片不发布配置、不修改原Task限额、不声称这些是live SLO或获批收费。
+
+| 范围 | 可审查候选及应用限制 |
+| --- | --- |
+| 延迟 | 原参考执行链p95≤5000ms，原最终read p95≤250ms；首字／首卡和包含人工等待的完整Task目标无样本，保持未记录，不外推并发4吞吐 |
+| 容量 | 原共享Gateway进程并发4、总队列32、单租户等待队列4、等待最多15000ms；Task步骤仍串行1。通过gatewayCapacity服务端发布装配，坏配置关闭新工作且不阻Core／历史 |
+| 参考Task资源 | 3步骤／2生成；启用2次原计数时Task总CALLS4，不启用计数为2；活动30000ms、单步5000ms、输出65536bytes。模型输出取原冻结maxOutputTokens且不超过32768，其他场景沿原服务端限额 |
+| 故障阈值 | DB直接查询等待1000ms、租约逾期15000ms、未决资源年龄60000ms、原恢复等待30000ms、原关联Outbox窗口至少10个且最老等待60000ms。须显式当前taskFaultDiagnostics scope／actor／audience政策；仅诊断，不发通知、不重派或释放账 |
+
+每Task的**准入成本包络**由原调用的可信输入上界、输出上限和固定价格得出，复用[priceGatewayTokenBound](../../apps/api/src/modules/ai-native/budget/gateway-pricing-evidence.ts)及[原价格／绑定核对](../../apps/api/src/modules/ai-native/budget/prisma-gateway-recorded-pricing.ts)。对每个原币种c分别有 `B_task(c) = Σ priceGatewayTokenBound(P_i, U_i, O_i)`；当前参考Task最多2次生成，P_i包含原configuration／priceVersion／hash／币种，U_i取可信计数或认证分词上界，O_i取原冻结输出上限。以六位微单位表示费率，单调用 `q_i = ceil((U_i × r_input_max + O_i × r_output) / 1000000)`；缓存可能性未知时r_input_max取原输入／读缓存／写缓存费率最大值。逐调用原舍入后求和，不合并不同币种或另造汇率。
+
+两个可选计数调用保持calls单位与独立原预留，同时进入Task CALLS总量，不换算猜测金额。BYOK只记原calls／tokens，不造平台供应商账单。每次新调用仍须原权限／能力、有限资源余额及[原单账预算预留事务](../../apps/api/src/modules/ai-native/budget/prisma-budget.repository.ts)满足平台／租户／空间交集，缺价格／上界／政策保持unavailable，RESERVED／UNKNOWN继续占用、恢复不重置。此包络及有限总调用构成本候选的准入约束；当前没有另一个可配置的独立Task金额counter，本片不承诺供应商账单硬截断。实际供应商超出派发前上界时，原账如实保留超额结算或待核对债务，不能剪金额、伪造缺usage或当零费用。原Task成本Reader可以查询真实原账，模拟计数或平均用量不能当真实invoice。
+
+### 版本恢复与人工降级
+
+沿现有模型设置CAS、runtime publication、原计划／政策和冻结prompt/scene装配恢复，不新建回退执行器。操作资料按以下顺序交负责人：先固定API/shared/客户端source、当前publication／模型配置及能力收据、scene／prompt／模板／tool版本、Task计划与批准／资源、价格与预算；通过原设置save enabled=false及新版本服务端发布阻止新模型／相应动作，保留当前独立读权下原收据和人工经营页。恢复时读原操作收据，把原值作为**新合法修订**保存／发布，获取该新修订的当前能力证明；旧unknown／在途原Task、callId、input、plan、费用和批准保持原绑定，不能通过reset revision／fence或恢复同名版本重发。
+
+| 既有必要回退模拟 | stdin SHA-256／退出及原结果 |
+| --- | --- |
+| 原模型设置A2→停用B3→值恢复A4 | `c7094be3ae4a5cdd929aa2736a1a89ccb0e6b99fa05b5e4fe554dec8a6470c99`／0；模型1次、原预留revision2／当前4，旧能力和路由拒绝，原WAITING_EXTERNAL／unknown不重做 |
+| 原publication／计划政策 | `89dbc1709b0e648afb2bf612915cdf46b835d40362831c98e7b89d75200a4442`／0；A1→disabled B2→restored A3、policy1→2→3，原冻结发布／planHash和独立政策收据保持，原Task／账户不变 |
+| prompt／scene冻结来源 | `24fe97dc2fabab3a9aa34372d75d524a31ae3fed950ea476ed4dfcec7738f1d2`／0；新prompt可重开原读取，原input／plan／模型调用1和unknown占用保持，旧Task不因新scene配置重派 |
+
+上述是独立原接点的组合模拟，未实际部署、未连接供应商，也不代表所有配置同时改变的整套生产回退已演练。真实运行须按固定版本由负责人分别观察，已提交Core事实、资金和审批始终沿原收据核对。发生政策／能力／预算／模型不可用时降为原人工页及合法历史，不自动换模型或数据范围重做。旧timeDebt／慢读UNKNOWN作为原未决收据保留，正常50结果不核销它或改原上限。
+
+### 原五条研发核定
+
+原条款1的指标／消费者与必要模拟已接通，固定正常样本、分母和未记录范围齐备；条款2已形成上述延迟／容量／成本候选及明确当前限额／价格／币种／未知约束；条款3沿[共享容量与当前派发](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)及最终故障阶段核限流／超时、DB／worker失效见证、事件窗口、租户轮转与配额突发，最后P2均复验；条款4有原人工降级、独立历史和新合法版本回退；条款5的测量、故障、预算及回退固定证据和操作资料已纳入本记录。06／11／17依赖均已按本轮研发口径完成。独立助手已逐条核本节、实际源码与12份固定Git证据，重算50样本p95与原输出一致，确认无剩余实现或标准装配缺口；其为独立静态／证据核定，没有冒称重跑作者50样本或真实供应商。dev2的记录一致性最终确认固定blob `5f47733bf5241899f2351835cb002598afcb61d2`，核前节SHA-256 `ccc543845359e86ae57ad9d5f495646ea466b81f0340429759daffcaa3555e26`，本次仅追加最终结论与计分。
+
+G1～G4及原五条齐备，AIN-25由75%登记本轮研发100%。原28项门槛2425→2450／28，86.6%→87.5%，研发完整收口22→23／28（82.1%）；ENTRY仍70.8%。与此前AIN-23形成新的两整项main集成节点，固定功能前置为共享容量aaef122、生命周期20e33f3、故障2cfbcee8及本节证据，PM按实际main和必要前置串行整合，不能整收三份隐私WIP。D05未生产采用、真实环境和供应商费用／SLO继续单列，原unknown及未决账不因本项100%核销，功能及权限门槛不变。
+
+Root对本节做原源码／合同／预算边界和证据核接、重算原统计，不冒称重新运行作者50样本或三回退；作者原退出码／命令与失败全部固定。全部本节过程只读Git证据及维护原四册，验证进程已退出、任务临时目录未创建，无新增测试脚本、安装、服务、数据库或环境副本。main由PM按固定成果串行集成，不在AI树抢main索引。
+
 <a id="ain-main-mysql-check-metadata-quotes-20261114"></a>
 ## MySQL CHECK 元数据引号包装兼容（2026-11-14）
 
