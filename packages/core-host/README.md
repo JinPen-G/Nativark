@@ -10,6 +10,8 @@
 
 两类写入都使用原operationId/expectedRevision。不存在记录的expectedRevision是0，保存后从1递增；同键同输入复核当前管理权限后读原收据，不回写旧状态。同键不同输入拒绝，原收据与当前状态分开。停用重开不会恢复主动撤回的成员权限，也不延长原租户统一订阅期限。
 
+结果未知时使用 `readTenantGrantOperation(actor, { tenantId, coreId, operationId })` 或 `readMemberAssignmentOperation(actor, { coreId, userId, operationId })`。两者只读本人原结果，仍核当前管理权、租户/Core及成员；缺收据返回unavailable，不能视为可重发。已停用的部署不要求先恢复才能核对原结果。MySQL读取只锁已有锁行，零事实/收据/审计写入；取得旧收据后另读当前状态，避免把旧开通结果当当前授权。
+
 ## 当前部署注册
 
 `createCoreDeployedCatalogue({ lock, registrations, observations })`将真实部署锁与直接导入的Core服务端贡献核对。清单、版本、源码和所选Core集合与锁一致后提供 `registrations` 及授权服务使用的 `availability`。原迁移所有者通过 `observations.read()`返回当前实际数据版本、不可变迁移摘要和执行状态。[部署目录](src/deployment.ts)

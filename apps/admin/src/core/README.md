@@ -70,6 +70,23 @@ export function TicketEditor() {
 
 Core使用`queryKey`作为自己的查询前缀。正常列表、表单与详情复用本出口的原Table、QueryState、Form及UnsavedChangesGuard；已装配的业务需要取消/核对时由自身原操作收据负责，不在通用请求层重做。实际使用示例见[工单三页面](../../../../packages/example-tickets-core/admin/index.tsx)，没有另建壳或按钮样式。
 
+## 管理Core开通与成员分配
+
+SaaS租户资料中使用 `CoreTenantGrantPanel`，租户成员资料中使用 `CoreMemberAssignmentPanel`。传入当前已读取的对象与Core的id/name，面板从原会话判断可见管理面，再通过服务端读取当前授权及修订。两个管理动作分别保存，新Core不会自动分配全员。[管理面](CoreAccessPanel.tsx) · [同源HTTP消费](management-client.ts)
+
+```tsx
+import { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "@rental-os/admin/core";
+
+// 平台租户资料页，tenant和core来自实际读取。
+<CoreTenantGrantPanel tenant={tenant} core={core} />;
+// 本租户成员资料页，member来自原成员目录。
+<CoreMemberAssignmentPanel member={member} core={core} />;
+```
+
+开通/分配先读当前修订，停用/撤回显示对象和后果并确认。界面未保存业务表单，不另挂一个路由离开拦截器。发送前将原请求定位写入当前标签的sessionStorage，按原操作者、租户、对象和Core隔离；它只用于刷新或重新进入后核对，不能自授权、自动重发或证明已提交。明确的提交前拒绝解除本次核对引用；网络失败/未知结果只提供“核对原操作”。原收据暂缺时继续保留引用，取得收据后再读取当前状态。
+
+`coreManagementApi`提供登记目录、变更、绑定、当前事实和原收据的十个类型化方法，使用 `@rental-os/core-contracts` 唯一路径/schema和原HTTP信封。请求与迟到响应受当前会话代次和中止信号限制。可单独在自己的管理页使用这些方法，但不得根据本地缓存或清单开放服务端权限。当前面板和Controller已有真实代码，原主路由/Guard/部署链尚未挂接，浏览器与真实数据库验收仍待完成。
+
 ## 宿主只装配一次
 
 `CorePageHostProvider`接收[CorePageHost](CorePage.tsx)并包裹对应业务路由。`page`须直接来自`registerCoreAdminPages`返回的`pages`；宿主提供平台品牌、原路由导航、当前授权判定和`lifetimeKey`。key取原会话/租户/Core范围及当前业务对象代次，变化时释放旧页面；权限变更仍需原宿主订阅当前事实。不要用自己填写的恒真函数或清单权限数组实现`canAccess`。

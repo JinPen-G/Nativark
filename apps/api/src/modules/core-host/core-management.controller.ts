@@ -65,6 +65,16 @@ export class CoreManagementController {
     return this.respond(() => this.application.reads.binding(body));
   }
 
+  @Post(CORE_MANAGEMENT_HTTP.readTenantGrantOperation.path) @HttpCode(200)
+  readTenantGrantOperation(@Body() body: unknown) {
+    return this.respond(() => this.application.management.service.readTenantGrantOperation(this.application.management.principals.current(), body));
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.readMemberAssignmentOperation.path) @HttpCode(200)
+  readMemberAssignmentOperation(@Body() body: unknown) {
+    return this.respond(() => this.application.management.service.readMemberAssignmentOperation(this.application.management.principals.current(), body));
+  }
+
   private async respond<T>(work: () => Promise<T>): Promise<T> {
     try {
       return await work();

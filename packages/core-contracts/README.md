@@ -96,13 +96,13 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 [授权与生命周期 schema](src/lifecycle.ts)分别定义租户 Core 授权、成员分配、绑定、就绪和原操作引用。已保存事实的修订从 1 开始；变更请求的 `expectedRevision=0` 只表示记录尚不存在。成员分配请求不包含 `tenantId`，由当前租户身份确定管理边界。合同不定义 Core 独立到期日，统一期限继续由原订阅服务维护。
 
-`CorePrincipal` 仅是原认证服务解析后的主体定位，不携带可自报的权限数组。`CoreTransaction` 是宿主事务回调内的临时句柄，适配器只解析成当前 Core 的受限仓储，回调结束后失效；类型标记不能替代运行时校验。目前只定义该合同，尚无可供业务调用的通用事务执行器。
+`CorePrincipal` 仅是原认证服务解析后的主体定位，不携带可自报的权限数组。`CoreTransaction` 是宿主事务回调内的临时句柄，适配器只解析成当前 Core 的受限仓储，回调结束后失效；类型标记不能替代运行时校验。[平台绑定适配](../core-host/README.md#首次绑定与原结果)已有同事务初始化及私有句柄解析，主应用宿主仍需供给原身份与实际部署。
 
 停用只关闭对应普通业务和新 Agent 任务；数据、绑定、成员撤权及原收据继续保留。恢复先读取原绑定并复核当前条件，不调用首次初始化。`CoreOperationReference` 只定位原操作，不能根据超时、程序重启或再次开通认定旧操作未执行。
 
 ## Core 管理 HTTP 合同
 
-`CORE_MANAGEMENT_HTTP`给出当前平台管理面的八个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实及原初始化收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
+`CORE_MANAGEMENT_HTTP`给出当前平台管理面的十个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实及原操作收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
 
 | 操作 | 方法与相对路径 | 原管理要求 |
 | --- | --- | --- |
@@ -114,12 +114,16 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 | 当前租户Core授权及修订 | POST `tenant-grants/read` | SaaS管理员与租户管理权 |
 | 当前成员Core分配及修订 | POST `member-assignments/read` | 本租户账号管理权 |
 | 当前Core范围绑定及修订 | POST `bindings/read` | 本租户管理权 |
+| 原租户Core授权操作只读核对 | POST `tenant-grant-operations/read` | 当前SaaS管理权与本人原操作 |
+| 原成员Core分配操作只读核对 | POST `member-assignment-operations/read` | 当前租户管理权与本人对该成员的原操作 |
 
 `coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](../../apps/api/src/modules/core-host/README.md)
 
 成功响应沿原 `{ data, requestId }` 信封，原键冲突与对象修订冲突返回409，当前权限不足403，部署/数据未就绪503，输入400和会话401分别表达。初始化配置由所选Core自己的schema解析，接口资料链接该Core配置说明。目录投影只给正式显示字段，完整清单沿受控注册维护。
 
 提交管理变更前，页面先使用对应只读入口取得当前修订。返回 `recorded` 时使用事实中的 `revision`，尚未建立记录返回 `unavailable`，初次变更使用0。读取始终核当前主体和管理权限，停用/撤回状态及旧收据仍各自保留。绑定读取按租户/Core/容器定位，原操作核对继续使用单独的原收据入口。
+
+变更结果未知时，保存原operationId并调用对应的原操作只读入口。`recorded`返回原操作结果，之后另读当前事实；`unavailable`只表示暂未取得收据，不证明旧操作未提交，不能自动重发。原结果读取不创建锁行、事实或审计。[后台管理适配](../../apps/admin/src/core/README.md#管理core开通与成员分配)提供相同流程。
 
 ## 声明页面与操作
 

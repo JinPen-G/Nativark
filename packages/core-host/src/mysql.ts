@@ -22,8 +22,8 @@ class MysqlCoreAccessRepository implements CoreAccessRepository {
   constructor(private readonly tx: CoreHostSqlTransaction, private readonly tenantId: string, private readonly coreId: string,
     private readonly audit: (receipt: CoreAccessReceipt) => Promise<void>) {}
 
-  async lock(): Promise<void> {
-    await this.tx.$executeRaw`INSERT INTO platform_core_access_locks (tenant_id, core_id) VALUES (${this.tenantId}, ${this.coreId})
+  async lock(writing: boolean): Promise<void> {
+    if (writing) await this.tx.$executeRaw`INSERT INTO platform_core_access_locks (tenant_id, core_id) VALUES (${this.tenantId}, ${this.coreId})
       ON DUPLICATE KEY UPDATE core_id = VALUES(core_id)`;
     await this.tx.$queryRaw`SELECT tenant_id FROM platform_core_access_locks WHERE tenant_id = ${this.tenantId} AND core_id = ${this.coreId} FOR UPDATE`;
   }
@@ -89,7 +89,7 @@ export function createMysqlCoreManagement<Tx extends CoreHostSqlTransaction>(cli
           || request.kind === "member_assignment" && (!lease.canAssign || lease.targetMemberId !== request.targetMemberId))
           throw new CoreAccessError("denied", "Core管理权限未通过当前原主体核验");
         const store = new MysqlCoreAccessRepository(tx, request.tenantId, request.coreId, receipt => authority.audit(tx, receipt));
-        await store.lock();
+        await store.lock(request.purpose !== "original_receipt");
         const result = await work(store, lease);
         await lease.revalidate();
         return result;

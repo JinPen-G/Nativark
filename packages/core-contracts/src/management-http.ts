@@ -27,6 +27,8 @@ export const CoreBindingObservationSchema = z.discriminatedUnion("status", [
 ]);
 export const CoreTenantAccessQuerySchema = ChangeTenantCoreGrantSchema.pick({ tenantId: true, coreId: true });
 export const CoreMemberAccessQuerySchema = ChangeMemberCoreAssignmentSchema.pick({ coreId: true, userId: true });
+export const CoreTenantGrantOperationQuerySchema = ChangeTenantCoreGrantSchema.pick({ tenantId: true, coreId: true, operationId: true });
+export const CoreMemberAssignmentOperationQuerySchema = ChangeMemberCoreAssignmentSchema.pick({ coreId: true, userId: true, operationId: true });
 export const CoreScopeBindingQuerySchema = BindCoreScopeSchema.pick({ coreId: true, container: true });
 export const CoreTenantGrantObservationSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("recorded"), grant: TenantCoreGrantSchema }).strict(),
@@ -57,7 +59,11 @@ export const CORE_MANAGEMENT_HTTP = {
   readMemberAssignment: { method: "POST", path: "member-assignments/read", summary: "读取本租户成员的当前Core分配及修订", permission: "system:user:manage",
     audience: "tenant", request: CoreMemberAccessQuerySchema, response: CoreMemberAssignmentObservationSchema },
   readBinding: { method: "POST", path: "bindings/read", summary: "读取本租户Core范围的当前绑定及修订", permission: "system:user:manage",
-    audience: "tenant", request: CoreScopeBindingQuerySchema, response: CoreScopeBindingObservationSchema }
+    audience: "tenant", request: CoreScopeBindingQuerySchema, response: CoreScopeBindingObservationSchema },
+  readTenantGrantOperation: { method: "POST", path: "tenant-grant-operations/read", summary: "只读核对本人的原租户Core授权操作", permission: "system:tenant:manage",
+    audience: "saas", request: CoreTenantGrantOperationQuerySchema, response: CoreTenantGrantObservationSchema },
+  readMemberAssignmentOperation: { method: "POST", path: "member-assignment-operations/read", summary: "只读核对本人的原成员Core分配操作", permission: "system:user:manage",
+    audience: "tenant", request: CoreMemberAssignmentOperationQuerySchema, response: CoreMemberAssignmentObservationSchema }
 } as const;
 
 export type CoreManagementHttpOperation = keyof typeof CORE_MANAGEMENT_HTTP;

@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，01/02已跨原G1，证据与缺口见[门槛复核](平台Core接入-开发记录.md#pch-first-gate-20261115)。最新main62ca已纳入并上传，Core管理HTTP和同源API资料固定于 `3e8843239ca243bdf8eed87fac1309c63fea2a73`。当前[统一查询](平台Core接入-开发记录.md#core-capability-index-20261114)、授权/绑定和[工单原宿主组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已有实际源码，真实部署及原AppModule/Guard/UI仍按公共窗口接线。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，01/02已跨原G1，证据与缺口见[门槛复核](平台Core接入-开发记录.md#pch-first-gate-20261115)。最新main62ca已纳入并上传，索引覆盖/部署快照片固定 `6ccf30ab8ef52df83db4a49e17af17330f3ef885`，当前[Core授权管理面及原结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)消费十条同源HTTP合同。授权/绑定和[工单原宿主组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已有实际源码，真实部署及原AppModule/Guard/UI仍按公共窗口接线。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -49,6 +49,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、7操作Nest与同源OpenAPI/原收据只读、3页面贡献，主Guard/HTTP/后台仍按公共窗口接线。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。公共片由PM核定唯一作者，具体消费者入口已可定位。
    [当前事实读取](平台Core接入-开发记录.md#core-management-current-reads-20261115)已提供页面变更所需的授权/成员/绑定修订，主应用组合时将 `reads` 与原服务一起供给Controller，页面先读当前事实再提交。
+   [原授权结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)增加两条只读收据路径，主Guard/OpenAPI应直接消费当前十条单源声明。租户资料和成员资料可分别挂载admin/core正式出口的CoreTenantGrantPanel/CoreMemberAssignmentPanel，原操作及当前状态分别读取；面板不自造目录或身份。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。
    [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)消费原PageHeading/SaveButton/ConfirmAction，`@rental-os/admin/core`为正式源码包出口；[工单页面和Core请求](平台Core接入-开发记录.md#core-tickets-admin-20261114)已有实际源码消费者。真实注册/授权与主应用路由仍未接，下片消费这些适配，不复制通用壳或改变业务方法。
@@ -68,6 +69,8 @@ API贡献的空/双Core、命名/路径冲突、缺失/外部引用与包读取�
 服务端注册的空/双Core、错误贡献、版本与schema拒绝、初始化输入边界已离线核对；没有真实授权持久化或事务适配，原Auth/Guard/AppModule未接新合同。持续目标已生效，后续仍按原门槛逐片交付，必要公共文件窗口由PM协调。
 
 原MCP审计的额外隔离执行/清理命令被自动审批在启动前拒绝，返回`blocked by policy`，对应目录未创建；该项保持未验，没有替换脚本或换壳绕过。已完成的纯指纹对照和旧路径导入不能替代原MCP整体审计回归。
+
+授权管理片的完整API离线Prisma生成/类型和退出清理命令也在启动前被自动审批拒绝，返回`blocked by policy`；core-management-receipt临时目录未创建。独立合同/宿主、admin/Core真实消费者、同源HTTP及离线原结果行为已验证，完整API新版本类型和实际浏览器/数据库保持未验。[本片证据](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)
 
 工单MySQL文件移动后两个空目录的原生删除曾在启动前被自动审批拒绝。本片恢复原操作后核定独占路径、链接与空目录并删除，原路径及唯一责任清单的任务子目录均已移除。失败历史与恢复证据分别见[工单记录](平台Core接入-开发记录.md#core-tickets-domain-20261114)和[索引阶段收尾](平台Core接入-开发记录.md#core-capability-index-20261114)。
 

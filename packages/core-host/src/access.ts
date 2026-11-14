@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import {
   ChangeMemberCoreAssignmentSchema, ChangeTenantCoreGrantSchema,
+  CoreMemberAssignmentOperationQuerySchema, CoreTenantGrantOperationQuerySchema,
   MemberCoreAssignmentSchema, TenantCoreGrantSchema,
   type CorePrincipal, type MemberCoreAssignment, type TenantCoreGrant
 } from "@rental-os/core-contracts";
@@ -33,6 +34,8 @@ export interface CoreManagementRequest {
   targetMemberId?: string;
   /** 关闭/撤回允许在部署停用或租户到期时办理，不要求先恢复业务。 */
   enabling: boolean;
+  /** 原收据读取不创建锁行、不写事实或审计；缺收据不能证明旧操作未提交。 */
+  purpose?: "change" | "original_receipt";
 }
 export interface CoreManagementLease {
   actor: CorePrincipal;
@@ -112,6 +115,46 @@ export class CoreAccessService {
     });
   }
 
+  readTenantGrantOperation(actor: CorePrincipal, input: unknown): Promise<
+    { status: "recorded"; grant: TenantCoreGrant } | { status: "unavailable" }
+  > {
+    this.operator(actor);
+    const parsed = CoreTenantGrantOperationQuerySchema.parse(input);
+    return this.execution.run({ actor, tenantId: parsed.tenantId, coreId: parsed.coreId, kind: "tenant_grant",
+      enabling: false, purpose: "original_receipt" }, async (store, lease) => {
+      this.authorized(lease, actor, parsed.tenantId);
+      if (!lease.canGrant) throw new CoreAccessError("denied", "当前主体不能读取原租户Core授权操作");
+      const original = await store.receipt(parsed.operationId);
+      if (!original) return { status: "unavailable" as const };
+      this.originalActor(original, actor);
+      if (original.kind !== "tenant_grant" || original.result.tenantId !== parsed.tenantId
+        || original.result.coreId !== parsed.coreId || original.result.operationId !== parsed.operationId)
+        throw new CoreAccessError("operation_conflict", "原操作不属于所选租户Core授权");
+      return { status: "recorded" as const, grant: original.result };
+    });
+  }
+
+  readMemberAssignmentOperation(actor: CorePrincipal, input: unknown): Promise<
+    { status: "recorded"; assignment: MemberCoreAssignment } | { status: "unavailable" }
+  > {
+    this.operator(actor);
+    const parsed = CoreMemberAssignmentOperationQuerySchema.parse(input);
+    return this.execution.run({ actor, tenantId: actor.tenantId, coreId: parsed.coreId, kind: "member_assignment",
+      targetMemberId: parsed.userId, enabling: false, purpose: "original_receipt" }, async (store, lease) => {
+      this.authorized(lease, actor, actor.tenantId);
+      if (!lease.canAssign || lease.targetMemberId !== parsed.userId)
+        throw new CoreAccessError("denied", "当前主体不能读取该成员的原Core分配操作");
+      const original = await store.receipt(parsed.operationId);
+      if (!original) return { status: "unavailable" as const };
+      this.originalActor(original, actor);
+      if (original.kind !== "member_assignment" || original.result.userId !== parsed.userId
+        || original.result.tenantId !== actor.tenantId || original.result.coreId !== parsed.coreId
+        || original.result.operationId !== parsed.operationId)
+        throw new CoreAccessError("operation_conflict", "原操作不属于所选成员Core分配");
+      return { status: "recorded" as const, assignment: original.result };
+    });
+  }
+
   private authorized(lease: CoreManagementLease, actor: CorePrincipal, tenantId: string): void {
     if (actor.audience !== "operator" || lease.actor.tenantId !== actor.tenantId || lease.actor.subjectId !== actor.subjectId
       || lease.actor.audience !== actor.audience || lease.tenantId !== tenantId)
@@ -128,8 +171,13 @@ export class CoreAccessService {
     return createHash("sha256").update(JSON.stringify([actor.tenantId, actor.subjectId, actor.audience, kind, input])).digest("hex");
   }
   private sameOperation(receipt: CoreAccessReceipt, actor: CorePrincipal, kind: CoreAccessReceipt["kind"], fingerprint: string): void {
-    if (receipt.kind !== kind || receipt.fingerprint !== fingerprint || receipt.actor.tenantId !== actor.tenantId
-      || receipt.actor.subjectId !== actor.subjectId || receipt.actor.audience !== actor.audience)
+    this.originalActor(receipt, actor);
+    if (receipt.kind !== kind || receipt.fingerprint !== fingerprint)
       throw new CoreAccessError("operation_conflict", "原操作键已用于其他Core授权请求");
+  }
+  private originalActor(receipt: CoreAccessReceipt, actor: CorePrincipal): void {
+    if (receipt.actor.tenantId !== actor.tenantId
+      || receipt.actor.subjectId !== actor.subjectId || receipt.actor.audience !== actor.audience)
+      throw new CoreAccessError("operation_conflict", "原Core授权操作不属于当前主体");
   }
 }
