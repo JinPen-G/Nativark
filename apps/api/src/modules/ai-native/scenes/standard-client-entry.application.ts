@@ -13,6 +13,7 @@ import { createNativeModelAdapters } from '../native-model-adapters';
 import { gatewayPricingSelectionSchema } from '../budget/gateway-pricing-evidence';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { composeClientOriginalBookingHttp } from './client-original-booking-http.composition';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 
 export const AI_WEBSITE_ENTRY = Symbol('AI_WEBSITE_ENTRY');
 export const AI_WECHAT_ENTRY = Symbol('AI_WECHAT_ENTRY');
@@ -29,7 +30,7 @@ const modelConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: 
  * records are not seeded here. Clarification needs separate server opt-in;
  * explicit booking parameter selection and approval stay in the original flow. */
 export function standardClientModelDependencies(db: PrismaClient, secrets: SecretBox, value?: unknown,
-  suppliedAdapters?: readonly ModelAdapter[]): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults' | 'taskAccounting'> {
+  suppliedAdapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults' | 'taskAccounting'> {
   let config: z.infer<typeof modelConfiguration>;
   try { config = modelConfiguration.parse(structuredClone(value ?? { enabled: false })); }
   catch { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_configuration'); }
@@ -50,7 +51,8 @@ export function standardClientModelDependencies(db: PrismaClient, secrets: Secre
   const inputSource = config.clarification ? 'original_client_clarification' as const : 'original_client' as const;
   return { taskModel: { db, host: config.host, systemPrompt: config.systemPrompt, limits: config.limits,
     inputSource, gatewayScene,
-    gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters } },
+    gateway: { db, secrets, routeScene: 'chat', pricing: config.pricing, adapters,
+      ...(capacity ? { capacity } : {}) } },
     // Turning off NEW questions must not hide an original persisted wait.
     // This reader/submission surface cannot publish questions or invoke a model.
     taskInputs: { db, inputSource: 'original_client_clarification', gatewayScene },

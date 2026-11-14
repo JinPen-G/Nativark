@@ -37,6 +37,7 @@ import { waitForTaskApplicationDependency } from '../runner/prisma-task-applicat
 import type { AiRequestAbortSource } from '../scenes/request-abort';
 import { InputCountTokensAuthorizationSource, InputCountTokensCallPricing, InputCountTokensEvidence } from './input-count-tokens.admission';
 import { InputCountTokensService, type CountTokensServiceDb } from './input-count-tokens.service';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import { InputCountingFrozenInputReader, type InputCountingFrozenReaderDb } from './input-counting-frozen.reader';
 import type { SecretBox } from '../../../common/secret-box';
 import { AiScopeRepository } from '../ai-scope.repository';
@@ -97,6 +98,7 @@ export interface InputCountingRequestDependencies {
    * compositions; never request-supplied. */
   resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport?: ModelJsonTransport;
+  capacity?: GatewayCapacityPort;
   /** Standard host: construct the existing encrypted connection resolvers only
    * inside this request, after the frozen invocation selects its original task.
    * Mutually exclusive with explicit resolver ports. Never HTTP body data. */
@@ -346,6 +348,7 @@ export class InputCountingRequestFactory {
         const service = new InputCountTokensService({ db: server.db, scopes: countingAuthorization.scopes,
           authorization: countingAuthorization, budget, frozen, nativeToolResults,
           resolvers, transport: server.transport ?? (resolvers ? createNativeModelEgressTransport() : undefined),
+          ...(server.capacity ? { capacity: server.capacity } : {}),
           policyOptions: configuration?.toolPolicy,
           sceneCode: configuration?.sceneCode, countingPriceVersion: configuration?.countingPriceVersion,
           ...(configuration?.timeoutMs !== undefined ? { timeoutMs: configuration.timeoutMs } : {}), clock });

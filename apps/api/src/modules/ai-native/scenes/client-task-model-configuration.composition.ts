@@ -27,6 +27,7 @@ import type { UnifiedGatewayAudit } from '../unified-ai-gateway.ports';
 import type { AiRouteScene } from '../provider-router.ports';
 import { PrismaPlatformModelConnection } from '../platform-model-connection';
 import { PrismaTaskGatewayAudit } from '../prisma-task-gateway-audit';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 
 export type ClientCallGatewayDependencies = {
   db: PrismaClient;
@@ -36,6 +37,7 @@ export type ClientCallGatewayDependencies = {
   adapters: readonly ModelAdapter[];
   platformConnection: GatewayConnectionResolver;
   audit?: UnifiedGatewayAudit;
+  capacity?: GatewayCapacityPort;
 };
 /** Formal platform Vault producer; no caller-provided connection or grant. */
 export type ClientPersistedCallGatewayDependencies = Omit<ClientCallGatewayDependencies, 'platformConnection'>;
@@ -155,7 +157,8 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
         evidence: 'live',
         ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
           dispatch: new InvocationDispatchService(admissions), budget: accounting.budget, audit, observation: deliveryObservation,
-          transport: new RoutedModelTransport({ platform: platformConnection, tenant: connection }, adapters) },
+          transport: new RoutedModelTransport({ platform: platformConnection, tenant: connection }, adapters),
+          ...(server.capacity ? { capacity: server.capacity } : {}) },
         verifyEvidence: async (resolution, mode) => {
           if (mode !== 'live' || resolution.scene !== routeScene) return false;
           const adapter = adapters.find(value => value.provider === resolution.route.profile.protocol);

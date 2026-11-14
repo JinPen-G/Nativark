@@ -5,24 +5,29 @@ import type { InvocationAdmissionService } from './invocation-admission.service'
 import type { UnifiedGatewayBudget } from './gateway-accounting.ports';
 import type { GatewayMediaAttachmentResolver } from './gateway-intent';
 import type { NativeToolResultResolver, ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
+import type { GatewayCapacityPort } from './gateway-capacity.ports';
 
 export interface GatewayInvocationResult { text: string; usage?: ModelUsage; usageState?: 'reported' | 'reconciliation_required'; [key: string]: unknown; }
 export type GatewayStreamEvent = { kind: 'text_delta'; delta: string } | { kind: 'result'; result: GatewayInvocationResult };
 /** Bound by the Gateway to one admitted call. Never supplied by an HTTP caller
  * or carried in provider messages; only validated terminal counters enter it. */
 export type GatewayUsageRecorder = (usage: ModelUsage) => Promise<void>;
+/** Gateway-owned synchronous check after transport credentials/permissions
+ * await, immediately before the adapter is called. Never wire/model data and
+ * never forwarded into provider inputs or treated as authorization. */
+export type GatewayTransportDispatchCheck = () => void;
 export interface UnifiedGatewayTransport {
   /** Separate private codec operation, still exactly one admitted invocation.
    * Absence must reject before admission; never replay the ordinary prompt. */
   invokeNativeToolResult?(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision,
     signal: AbortSignal, value: ResolvedNativeToolResult, recordUsage?: GatewayUsageRecorder,
-    expectedInputBoundHash?: string): Promise<GatewayInvocationResult>;
+    expectedInputBoundHash?: string, beforeDispatch?: GatewayTransportDispatchCheck): Promise<GatewayInvocationResult>;
   /** Certified input binding for the actual native wire material. Plain text
    * counting is not a fallback for original call/result envelopes. */
   nativeInputBoundHash?(request: ModelProtocolRequest, route: ProviderRouteDecision, value: ResolvedNativeToolResult): string | undefined;
   inputBoundHash?(request: ModelProtocolRequest, route: ProviderRouteDecision, streaming: boolean): string | undefined;
-  invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string): Promise<GatewayInvocationResult>;
-  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string): AsyncIterable<GatewayStreamEvent>;
+  invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string, beforeDispatch?: GatewayTransportDispatchCheck): Promise<GatewayInvocationResult>;
+  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string, beforeDispatch?: GatewayTransportDispatchCheck): AsyncIterable<GatewayStreamEvent>;
 }
 export interface GatewayInvocationObservation {
   call: import('./gateway-accounting.ports').GatewayAccountingCall;
@@ -57,4 +62,8 @@ export interface UnifiedGatewayRoutingPort {
   resolve(context: Readonly<GatewayContext>, requested: readonly import('./provider-profile.ports').AiProfileCapability[]): Promise<import('./gateway-routing.service').GatewayRoutingResolution>;
   assertCurrent(context: Readonly<GatewayContext>, resolution: import('./gateway-routing.service').GatewayRoutingResolution): Promise<void>;
 }
-export interface UnifiedGatewayPorts { routing: UnifiedGatewayRoutingPort; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; media?: GatewayMediaAttachmentResolver; nativeToolResults?: NativeToolResultResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void>; budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void> }; }
+export interface UnifiedGatewayPorts { routing: UnifiedGatewayRoutingPort; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit;
+  /** Server factories inject one shared process gate; absence preserves legacy
+   * callers but supplies no fairness/capacity claim. This is never a grant. */
+  capacity?: GatewayCapacityPort;
+  media?: GatewayMediaAttachmentResolver; nativeToolResults?: NativeToolResultResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void>; budgetDenied?(value: GatewayBudgetDenialObservation, signal?: AbortSignal): Promise<void> }; }

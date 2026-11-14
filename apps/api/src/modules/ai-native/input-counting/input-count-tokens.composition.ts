@@ -25,6 +25,7 @@ import { PrismaCountTokensReceipts, countTokensReceiptDocumentHash, type CountTo
 import { countTokensSupport } from './count-tokens.protocol';
 import type { AiTaskModelInvocationPreparation } from '../runner/prisma-task-runner-resource.source';
 import type { NativeToolResultResolver } from '../model-input/native-tool-result.ports';
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 
 /** Trusted source behind publishInputBound: reads the persisted provider count
  * receipt and binds it to the exact invocation/price the caller presents. The
@@ -79,6 +80,8 @@ export interface InputCountTokensCompositionDependencies extends PersistedTaskAu
   frozen?: CountTokensFrozenInputSource;
   resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport?: ModelJsonTransport;
+  /** Same process gate as generation/probes; never required by receipt reads. */
+  capacity?: GatewayCapacityPort;
   /** Must match the original task gateway adapter registration so a counted
    * tool schema is the schema the dispatch will send. */
   policyOptions?: ChatProtocolOptions;
@@ -94,6 +97,7 @@ export interface InputCountTokensCompositionDependencies extends PersistedTaskAu
 }
 export function composeInputCountTokensService(input: InputCountTokensCompositionDependencies) {
   if (!input || input.frozen !== undefined && typeof input.frozen.readFrozenCountingInput !== 'function'
+    || input.capacity !== undefined && typeof input.capacity?.acquire !== 'function'
     || input.resolvers !== undefined && (typeof input.resolvers.platform?.resolve !== 'function'
       || typeof input.resolvers.tenant?.resolve !== 'function')) throw new BudgetError('UNAVAILABLE');
   const clock = input.clock ?? (() => new Date());
@@ -103,7 +107,7 @@ export function composeInputCountTokensService(input: InputCountTokensCompositio
   const budget = createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions,
     authorization, quotes, evidence, clock });
   const service = new InputCountTokensService({ db: input.db, scopes: authorization.scopes, authorization, budget,
-    frozen: input.frozen, resolvers: input.resolvers,
+    frozen: input.frozen, resolvers: input.resolvers, capacity: input.capacity,
     // Receipt-only hosts need no connection/codec/price for a new call.
     // Missing execution dependencies are validated only after no receipt exists.
     transport: input.transport ?? (input.resolvers ? createNativeModelEgressTransport() : undefined),

@@ -26,6 +26,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
 import { PrismaTaskGatewayAudit } from './prisma-task-gateway-audit';
+import type { GatewayCapacityPort } from './gateway-capacity.ports';
 
 export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'scopes' | 'db'> & {
   db: Parameters<typeof createPersistedGatewayBudget>[0]['db'] & TextProbeReceiptDb
@@ -35,6 +36,7 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
   management: Pick<TenantModelConfigurationAuthority, 'authorize'>;
   configuration: Pick<TenantModelConfigService, 'selectionForInvocation' | 'profile' | 'credential'>;
   audit?: UnifiedGatewayAudit;
+  capacity?: GatewayCapacityPort;
   /** Server-only assembly after the original task charge is resolved. The
    * producer shares this application's accounting facts, never another ledger. */
   auditForTask?: (taskId: string, facts: ReturnType<typeof createPersistedGatewayBudget>['facts']) => UnifiedGatewayAudit;
@@ -82,6 +84,7 @@ export class TextCapabilityProbeApplication {
       input.authorization?.resolveContext, input.authorization?.authorize, input.subscriptions?.readCategoryCommercialContext,
       input.pricing?.quote, input.pricing?.quantity].some(method => typeof method !== 'function')
       || input.audit !== undefined && typeof input.audit?.append !== 'function'
+      || input.capacity !== undefined && typeof input.capacity?.acquire !== 'function'
       || input.auditForTask !== undefined && typeof input.auditForTask !== 'function'
       || input.audit === undefined && input.auditForTask === undefined && (typeof input.db.operationLog?.create !== 'function'
         || typeof input.db.operationLog.findUnique !== 'function')) {
@@ -339,6 +342,7 @@ export class TextCapabilityProbeApplication {
         // The audit independently checks its invocation/task/ledger association.
         ?? new PrismaTaskGatewayAudit(this.input.db, this.input.scopes, this.accounting.facts, charges[0].taskId, this.input.clock),
       ...(authority.media ? { media: authority.media } : {}),
+      ...(this.input.capacity ? { capacity: this.input.capacity } : {}),
       observation: { record: observation => this.receipts.observe(started.receipt.id, observation,
         adapter.evidenceMode === 'live' ? 'node_https' : 'mock') }
     }, evidence: adapter.evidenceMode, verifyEvidence: async (route, mode) => {

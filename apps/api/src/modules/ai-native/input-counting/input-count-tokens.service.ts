@@ -5,7 +5,8 @@
  * per original call id: a replay re-reads the receipt and the reservation by
  * their original keys, and a dispatched-but-unanswered operation stays unknown
  * instead of being re-sent. Nothing here starts the text dispatch, publishes a
- * bound or refunds admission. */
+ * bound or refunds admission. Optional process capacity is acquired only by
+ * the acknowledged original claim winner; it never releases that account. */
 import { z } from 'zod';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiGatewayIntentDraft, AiUsageAssociationDraft } from '@rental-os/shared';
@@ -17,6 +18,8 @@ import { ChatProtocolPolicy, type ChatProtocolOptions, type ModelJsonTransport }
 import { ModelAdapterError, ModelGatewayError } from '../model-gateway.ports';
 import { MODEL_RESPONSE_BYTES } from '../model-response-limits';
 import { GatewayDeadline } from '../gateway-deadline';
+import { gatewayCapacityRequest, type GatewayCapacityLease, type GatewayCapacityPort } from '../gateway-capacity.ports';
+import { retainGatewayCapacityPromise } from '../gateway-capacity.service';
 import type { GatewayConnection, GatewayConnectionResolver } from '../routed-model-transport';
 import type { AiProviderProfileRecord } from '../provider-profile.ports';
 import { capabilityProfileFingerprint } from '../capability-verification';
@@ -69,6 +72,9 @@ export interface InputCountTokensDependencies {
   frozen?: CountTokensFrozenInputSource;
   resolvers?: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver };
   transport?: ModelJsonTransport;
+  /** Shared server network gate, after the original reservation/claim. Receipt
+   * reads do not acquire it; it grants neither dispatch nor budget release. */
+  capacity?: GatewayCapacityPort;
   policyOptions?: ChatProtocolOptions;
   /** Server-only original Task/Core resolver; never accepted in a count command.
    * Absent keeps native counting unavailable without affecting old receipt reads. */
@@ -133,6 +139,7 @@ export class InputCountTokensService {
       || input.resolvers !== undefined && (typeof input.resolvers.platform?.resolve !== 'function'
         || typeof input.resolvers.tenant?.resolve !== 'function')
       || input.transport !== undefined && typeof input.transport.post !== 'function'
+      || input.capacity !== undefined && typeof input.capacity?.acquire !== 'function'
       || input.policyOptions !== undefined && (typeof input.policyOptions !== 'object' || Array.isArray(input.policyOptions))
       || input.nativeToolResults !== undefined && (typeof input.nativeToolResults.resolve !== 'function'
         || typeof input.nativeToolResults.assertCurrent !== 'function')
@@ -329,8 +336,8 @@ export class InputCountTokensService {
       if (!frozenSource || !resolvers || !transport || !this.policy || !countingPriceVersion
         || requireManagementScene && this.dependencies.sceneCode === undefined) throw new BudgetError('UNAVAILABLE');
       const opened = await life.wait(gate);
-      const frozen = await life.wait(() => frozenSource.readFrozenCountingInput(
-        { ...command, scopeId: opened.scopeId, actorId: opened.actorId }));
+      const frozen = structuredClone(await life.wait(() => frozenSource.readFrozenCountingInput(
+        { ...command, scopeId: opened.scopeId, actorId: opened.actorId })));
       if (frozen.scopeId !== opened.scopeId || frozen.actorId !== opened.actorId
         || requireManagementScene && frozen.invocation.sceneCode !== this.dependencies.sceneCode
         || frozen.context.actor.kind !== 'user' || frozen.context.actor.userId !== opened.actorId
@@ -654,54 +661,125 @@ export class InputCountTokensService {
       maxOutputTokens: frozen.invocation.maxOutputTokens, features }, this.policy) };
   }
 
+  /** Reopen the exact original payload, not just its saved hash columns. A
+   * queue wait cannot retain authority over a replaced input or identity. */
+  private async assertFrozenCurrent(frozen: CountTokensFrozenInvocation, life: GatewayDeadline) {
+    const source = this.dependencies.frozen;
+    if (!source) throw new BudgetError('UNAVAILABLE');
+    const latest = structuredClone(await life.wait(() => source.readFrozenCountingInput({
+      callId: frozen.invocation.callId, scopeId: frozen.scopeId, actorId: frozen.actorId
+    })));
+    const { context: beforeContext, ...before } = frozen;
+    const { context: afterContext, ...after } = latest;
+    const beforeExpiry = before.invocation.expiresAt, afterExpiry = after.invocation.expiresAt;
+    const now = this.clock().getTime();
+    if (identity(afterContext) !== identity(beforeContext)
+      || requestFingerprint(after) !== requestFingerprint(before)
+      // The original fingerprint helper treats Dates as objects. Compare the
+      // immutable expiry explicitly instead of letting two Dates hash alike.
+      || !(beforeExpiry instanceof Date) || !(afterExpiry instanceof Date)
+      || !Number.isFinite(now) || !Number.isFinite(beforeExpiry.getTime())
+      || afterExpiry.getTime() !== beforeExpiry.getTime() || afterExpiry.getTime() <= now) throw new BudgetError('FORBIDDEN');
+  }
+
   private async performCount(frozen: CountTokensFrozenInvocation, gate: CountingGate,
     life: GatewayDeadline, material: Readonly<CountTokensMaterial>, dispatch: () => PromiseLike<unknown>,
     recordReceipt: (outcome: CountTokensOutcome) => Promise<CountTokensReceipt>, nativeCurrent?: () => Promise<void>): Promise<CountTokensOutcome> {
-    const configuration = frozen.configuration, { resolvers, transport } = this.dependencies;
+    const configuration = frozen.configuration, { resolvers, transport, capacity } = this.dependencies;
     if (!resolvers || !transport) throw new BudgetError('UNAVAILABLE');
-    const profile = await life.wait(() => this.profile(configuration, gate.tenantId));
-    const resolver = configuration.serviceMode === 'platform_managed' ? resolvers.platform : resolvers.tenant;
-    const context = { actorId: gate.actorId, tenantId: gate.tenantId, workspaceId: gate.workspaceId };
-    const connection: GatewayConnection = structuredClone(await life.wait(() => resolver.resolve(context, profile)));
-    if (connection.profileFingerprint !== capabilityProfileFingerprint(profile)) throw new BudgetError('FORBIDDEN');
-    const assertCurrent = resolver.assertCurrent?.bind(resolver);
-    if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
-    const request = anthropicCountTokensRequest(material, connection.baseUrl);
-    // Resolve the connection first; then re-authorize the original task/run/
-    // step and lease through the existing dispatch boundary immediately before
-    // POST. A cancellation while credentials resolve cannot inherit an old grant.
-    await life.wait(() => gate.recheck());
-    if (nativeCurrent) await life.wait(nativeCurrent);
-    await life.wait(dispatch);
-    // Accounting may itself await storage. A changed original Core result after
-    // that wait cannot be sent, nor does it prove the claimed count was harmless.
-    if (nativeCurrent) await life.wait(nativeCurrent);
+    let capacityLease: GatewayCapacityLease | undefined, capacityTransferred = false;
     try {
-      return await life.wait(() => postCountTokens(transport, request,
-        connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES).then(async response => {
-        const outcome: CountTokensOutcome = response.status === 401 || response.status === 403
-          ? { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash }
-          : response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429
-            ? { state: 'failed', failureCode: 'PROVIDER_REJECTED', requestHash: request.requestHash }
-            : response.status !== 200 ? { state: 'unknown', requestHash: request.requestHash }
-              : { state: 'observed', inputTokens: parseCountTokensResponse(response.body, connection.credential), requestHash: request.requestHash };
-        // This original response can arrive after caller cancellation. Retain
-        // only its count/association before current delivery checks; this does
-        // not settle admission, publish a bound or authorize new generation.
-        await recordReceipt(outcome);
-        return outcome;
-      }));
-    } catch (error) {
-      if (error instanceof ModelGatewayError && ['TIMEOUT', 'CANCELLED', 'PROVIDER_FAILED', 'INVALID_RESPONSE'].includes(error.code))
-        return { state: 'unknown', requestHash: request.requestHash };
-      if (error instanceof ModelAdapterError) return error.code === 'AUTHENTICATION_FAILED'
-        ? { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash }
-        : { state: 'unknown', requestHash: request.requestHash };
-      throw error;
-    } finally {
+      const profile = await life.wait(() => this.profile(configuration, gate.tenantId));
+      const resolver = configuration.serviceMode === 'platform_managed' ? resolvers.platform : resolvers.tenant;
+      const context = { actorId: gate.actorId, tenantId: gate.tenantId, workspaceId: gate.workspaceId };
+      const connection: GatewayConnection = structuredClone(await life.wait(() => resolver.resolve(context, profile)));
+      if (connection.profileFingerprint !== capabilityProfileFingerprint(profile)) throw new BudgetError('FORBIDDEN');
+      const assertCurrent = resolver.assertCurrent?.bind(resolver);
       if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
-      if (nativeCurrent) await life.wait(nativeCurrent);
+      const request = anthropicCountTokensRequest(material, connection.baseUrl);
+      // Resolve the connection first; then re-authorize the original task/run/
+      // step and lease through the existing dispatch boundary immediately before
+      // POST. A cancellation while credentials resolve cannot inherit an old grant.
       await life.wait(() => gate.recheck());
+      if (nativeCurrent) await life.wait(nativeCurrent);
+      if (capacity) {
+        await this.assertFrozenCurrent(frozen, life);
+        // Reserve and the unique persisted claim remain in their original order.
+        // A lost claim ACK never reaches this wait. Its timeout buys no new call
+        // id, deadline, usage receipt or permission to refund the reservation.
+        await life.wait(() => capacity.acquire(gatewayCapacityRequest(context, profile,
+          countTokensCallId(frozen.invocation.callId),
+          new Date(Math.min(life.expiresAt.getTime(), frozen.invocation.expiresAt.getTime()))), life.controller.signal)
+          .then(lease => {
+            if (!lease || typeof lease.release !== 'function') throw new BudgetError('UNAVAILABLE');
+            if (life.controller.signal.aborted) {
+              lease.release(); throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
+            }
+            capacityLease = lease;
+          }));
+      }
+      const recheckAfterWait = async () => {
+        await life.wait(() => gate.recheck());
+        await this.assertFrozenCurrent(frozen, life);
+        const latestProfile = await life.wait(() => this.profile(configuration, gate.tenantId));
+        if (requestFingerprint(latestProfile) !== requestFingerprint(profile)) throw new BudgetError('FORBIDDEN');
+        // Resolve the same connection again even without an assertCurrent method.
+        // A stable profile id cannot certify changed endpoint or vault contents.
+        const latestConnection = structuredClone(await life.wait(() => resolver.resolve(context, profile)));
+        if (requestFingerprint(latestConnection) !== requestFingerprint(connection)) throw new BudgetError('FORBIDDEN');
+        if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
+        if (nativeCurrent) await life.wait(nativeCurrent);
+        // Configuration/vault reads can themselves wait. Reopen the original
+        // input and profile again before using their earlier snapshots to send.
+        await this.assertFrozenCurrent(frozen, life);
+        const finalProfile = await life.wait(() => this.profile(configuration, gate.tenantId));
+        if (requestFingerprint(finalProfile) !== requestFingerprint(profile)) throw new BudgetError('FORBIDDEN');
+        await life.wait(() => gate.recheck());
+      };
+      if (capacityLease) await recheckAfterWait();
+      await life.wait(dispatch);
+      // Accounting may itself await storage. A changed original Core result after
+      // that wait cannot be sent, nor does it prove the claimed count was harmless.
+      if (capacityLease) await recheckAfterWait();
+      else if (nativeCurrent) await life.wait(nativeCurrent);
+      try {
+        return await life.wait(() => retainGatewayCapacityPromise(capacityLease, () => {
+          // This checks only the current capacity publication. The original
+          // task/configuration/claim/budget checks above still authorize send.
+          capacityLease?.assertCurrent?.();
+          capacityTransferred = true;
+          return postCountTokens(transport, request,
+            connection.credential, life.controller.signal, MODEL_RESPONSE_BYTES);
+        }).then(async response => {
+          const outcome: CountTokensOutcome = response.status === 401 || response.status === 403
+            ? { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash }
+            : response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429
+              ? { state: 'failed', failureCode: 'PROVIDER_REJECTED', requestHash: request.requestHash }
+              : response.status !== 200 ? { state: 'unknown', requestHash: request.requestHash }
+                : { state: 'observed', inputTokens: parseCountTokensResponse(response.body, connection.credential), requestHash: request.requestHash };
+          // This original response can arrive after caller cancellation. Retain
+          // only its count/association before current delivery checks; this does
+          // not settle admission, publish a bound or authorize new generation.
+          await recordReceipt(outcome);
+          return outcome;
+        }));
+      } catch (error) {
+        if (error instanceof ModelGatewayError && ['TIMEOUT', 'CANCELLED', 'PROVIDER_FAILED', 'INVALID_RESPONSE'].includes(error.code))
+          return { state: 'unknown', requestHash: request.requestHash };
+        if (error instanceof ModelAdapterError) return error.code === 'AUTHENTICATION_FAILED'
+          ? { state: 'failed', failureCode: 'AUTHENTICATION_FAILED', requestHash: request.requestHash }
+          : { state: 'unknown', requestHash: request.requestHash };
+        throw error;
+      } finally {
+        if (assertCurrent) await life.wait(() => assertCurrent(context, profile));
+        if (nativeCurrent) await life.wait(nativeCurrent);
+        await life.wait(() => gate.recheck());
+      }
+    } finally {
+      // Sent work retains its slot through the underlying POST promise, even
+      // after the caller stopped waiting. Unsent network capacity is separate
+      // from the original financial reservation, which stays authoritative.
+      if (!capacityTransferred) capacityLease?.release();
     }
   }
   private receiptRecorder(value: CountTokensFrozenInvocation, valueAssociation: AiUsageAssociationDraft, reservationId: string) {

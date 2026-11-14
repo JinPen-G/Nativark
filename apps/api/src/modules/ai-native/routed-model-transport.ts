@@ -4,10 +4,12 @@ import { capabilityProfileFingerprint } from './capability-verification';
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
-import type { GatewayUsageRecorder, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
+import type { GatewayStreamEvent, GatewayUsageRecorder, GatewayTransportDispatchCheck, UnifiedGatewayTransport } from './unified-ai-gateway.ports';
 import { normalizeTenantModelBaseUrl, type TenantModelConfigService } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { resolvedNativeToolResultSchema, type ResolvedNativeToolResult } from './model-input/native-tool-result.ports';
+import { gatewayTransportTermination, type GatewayTransportIterator } from './gateway-capacity.ports';
+import { retainGatewayCapacityIterator } from './gateway-capacity.service';
 
 export interface GatewayConnection {
   profileFingerprint: string;
@@ -139,9 +141,12 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   private rejectSecret(value: unknown, secrets: ModelResponseSecretGuard) {
     if (secrets.contains(value)) throw new ModelGatewayError('INVALID_RESPONSE');
   }
-  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
+  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string, beforeDispatch?: GatewayTransportDispatchCheck) {
     try {
       const prepared = await this.prepare(context, request, route, signal, false);
+      // Preparing the connection includes awaited Vault/authorization reads.
+      // Recheck the held server capacity at the actual adapter boundary.
+      this.cancelled(signal); beforeDispatch?.();
       // Adapter-owned objects must not change while accounting or authorization awaits.
       const result = structuredClone(await prepared.adapter.generate({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl }));
       if (result.usage) await recordUsage?.(structuredClone(result.usage));
@@ -153,13 +158,14 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   /** One admitted native request, using the same vault/current-config/usage and
    * delivery checks as ordinary invoke. The caller Gateway owns the second call. */
   async invokeNativeToolResult(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision,
-    signal: AbortSignal, value: ResolvedNativeToolResult, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
+    signal: AbortSignal, value: ResolvedNativeToolResult, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string, beforeDispatch?: GatewayTransportDispatchCheck) {
     try {
       const parsed = resolvedNativeToolResultSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
       const native = parsed.data;
       const prepared = await this.prepare(context, request, route, signal, false, true);
       this.cancelled(signal); this.rejectSecret(native, prepared.secrets);
+      beforeDispatch?.();
       const result = structuredClone(await prepared.adapter.generateNativeToolResult!({ ...structuredClone(prepared.request),
         signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, native, { baseUrl: prepared.connection.baseUrl }));
       if (result.usage) await recordUsage?.(structuredClone(result.usage));
@@ -168,32 +174,64 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       return { ...structuredClone(result) };
     } catch (error) { throw this.safeError(error); }
   }
-  async *stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string) {
+  stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal, recordUsage?: GatewayUsageRecorder, expectedInputBoundHash?: string, beforeDispatch?: GatewayTransportDispatchCheck) {
+    let started = false, acknowledgeTermination!: () => void;
+    const termination = new Promise<void>(resolve => { acknowledgeTermination = resolve; });
+    const work = this.streamSource(context, request, route, signal, recordUsage, expectedInputBoundHash, acknowledgeTermination, beforeDispatch);
+    const iterator: AsyncIterableIterator<GatewayStreamEvent> & GatewayTransportIterator<GatewayStreamEvent> = {
+      [gatewayTransportTermination]: termination,
+      next: value => { started = true; return work.next(value); },
+      return: value => { if (!started) acknowledgeTermination(); return work.return(value); },
+      throw: error => { if (!started) acknowledgeTermination(); return work.throw(error); },
+      [Symbol.asyncIterator]() { return this; }
+    };
+    return iterator;
+  }
+  private async *streamSource(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision,
+    signal: AbortSignal, recordUsage: GatewayUsageRecorder | undefined, expectedInputBoundHash: string | undefined,
+    acknowledgeTermination: () => void, beforeDispatch?: GatewayTransportDispatchCheck) {
+    let sourceCreated = false;
     try {
       const prepared = await this.prepare(context, request, route, signal, true);
       let pending = '', terminal = false;
-      for await (const value of prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })) {
-        const event = structuredClone(value);
-        if (event.kind === 'result' && !terminal && event.result.usage) await recordUsage?.(structuredClone(event.result.usage));
-        this.cancelled(signal);
-        if (terminal) throw new ModelGatewayError('INVALID_RESPONSE');
-        this.rejectSecret(event, prepared.secrets);
-        await prepared.recheck();
-        if (event.kind === 'text_delta') {
-          pending += event.delta;
-          // Raw and encoded credentials have different lengths. Hold only a
-          // possible prefix, but never publish it before the next fragment proves safe.
-          const safeLength = prepared.secrets.releaseLength(pending);
-          if (safeLength === null) throw new ModelGatewayError('INVALID_RESPONSE');
-          if (safeLength) { const delta = pending.slice(0, safeLength); pending = pending.slice(safeLength); yield { kind: 'text_delta' as const, delta }; }
-        } else {
-          terminal = true;
-          if (pending) { yield { kind: 'text_delta' as const, delta: pending }; pending = ''; await prepared.recheck(); }
-          yield { kind: 'result' as const, result: { ...structuredClone(event.result) } };
+      this.cancelled(signal); beforeDispatch?.();
+      const source = retainGatewayCapacityIterator(prepared.adapter.stream!({ ...structuredClone(prepared.request), signal, recordUsage, expectedInputBoundHash },
+        prepared.connection.credential, { baseUrl: prepared.connection.baseUrl })[Symbol.asyncIterator](), { release: acknowledgeTermination });
+      sourceCreated = true;
+      let sourceDone = false;
+      try {
+        for (;;) {
+          const next = await source.next();
+          if (next.done) { sourceDone = true; break; }
+          const event = structuredClone(next.value);
+          if (event.kind === 'result' && !terminal && event.result.usage) await recordUsage?.(structuredClone(event.result.usage));
+          this.cancelled(signal);
+          if (terminal) throw new ModelGatewayError('INVALID_RESPONSE');
+          this.rejectSecret(event, prepared.secrets);
+          await prepared.recheck();
+          if (event.kind === 'text_delta') {
+            pending += event.delta;
+            // Raw and encoded credentials have different lengths. Hold only a
+            // possible prefix, but never publish it before the next fragment proves safe.
+            const safeLength = prepared.secrets.releaseLength(pending);
+            if (safeLength === null) throw new ModelGatewayError('INVALID_RESPONSE');
+            if (safeLength) { const delta = pending.slice(0, safeLength); pending = pending.slice(safeLength); yield { kind: 'text_delta' as const, delta }; }
+          } else {
+            terminal = true;
+            if (pending) { yield { kind: 'text_delta' as const, delta: pending }; pending = ''; await prepared.recheck(); }
+            yield { kind: 'result' as const, result: { ...structuredClone(event.result) } };
+          }
         }
+      } finally {
+        // The Gateway tracks this iterator's real lifetime. Keep its next/return
+        // pending until the adapter has finished cleanup, including a rejected
+        // next. Incomplete/failed cleanup never resolves the source signal even
+        // if this outer generator has already finished.
+        if (!sourceDone && source.return) await source.return();
       }
       if (!terminal) throw new ModelGatewayError('INVALID_RESPONSE');
       await prepared.recheck();
     } catch (error) { throw this.safeError(error); }
+    finally { if (!sourceCreated) acknowledgeTermination(); }
   }
 }

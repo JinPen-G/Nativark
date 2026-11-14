@@ -4,9 +4,9 @@
 
 ## 当前目标与现场
 
-在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最后核定完成：旧cart自动报价、迟到写回、受理丢应答及成功Goal过期后的明确新目标均已修复，必要模拟／双端类型／独立原五条复核通过；与21形成新的两整项main节点，按本阶段固定提交整合，不夹容量活动文件。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 的同路径。
+在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 
-下一优先AIN-25：dev2容量五源已冻结交权，有界总队列／租户队列、等权轮转和底层transport真实终结的52项必要模拟及类型通过，但还没有标准生产装配。Root接同一实例、Task transport iterator终结信号、原count／probe容量及已有统计／告警消费；不能把网络槽释放当原unknown账核销，也不能给整个Task套容量造成嵌套死锁。dev1继续AIN-23原五条只读核，按正式治理能力报告具体实现缺口，由Root分配最小写入范围。
+当前[AIN-25标准共享容量与最终派发](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)23源已接全部标准模型／count／probe实例，修Task wrapper底层终结信号和凭据等待后的late派发窗口；原52项、dev2 count31项、Root独立count／九窗及固定闭包类型通过，独立技术复核未见该阶段余下P2。继续核AIN-25原五条的工具／取消恢复测量、SLO决定、故障／回退和交付资料，不能把保守容量默认值当指标通过。dev1已开始AIN-23七叶核心消费者；Root下一接动态公共合同、原Guard漏登记、审计OpenAPI及实际页面入口，不改Core治理内核。
 
 [AIN-19整项](<AI Native-开发记录.md#ain19-source-text-simulated-whole-closeout-20261114>)固定 `2ec20f9c81f79d7a172409f619c50f3ec91d55de`、[AIN-20整项](<AI Native-开发记录.md#ain20-signature-reopen-simulated-whole-closeout-20261114>)固定 `7a451591c54decf911560f079e246f021b301ea4`已推并回读一致，19／20原集成节点保留。PM指定main `1cb43939bcc25ed1930563aa19b3d507e9b08965` 的[12／13固定闭包](<AI Native-开发记录.md#ain12-13-current-main-fixed-closure-20261114>)在整合分支 `9512e3a786cced8b32812e5121141187012da001`，105源完整API／后台类型及原订单控制／前端消费模拟通过，未新建树／复制环境／写main。[原事件公开解释](<AI Native-开发记录.md#ain18-original-explanation-public-consumer-20261114>)与[失效建议撤回](<AI Native-开发记录.md#ain18-current-review-stale-explanation-20261114>)已上传，当前政策核心复用原AUTOMATION／Gateway／CALLS／独立原账，不扩大业务效果。
 
@@ -26,10 +26,10 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 21已固定上传，22共享／网站九源／微信消费者及runtime已逐blob核接并完成原五条收口。立即固化22并接AIN-25生产容量，独占Task wrapper、count／probe、provider和四册／索引、shared／Guard／OpenAPI；未知原操作不重派，原账不因网络槽释放核销。未核旧goal三叶／员工样式不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 网站Goal/API／会话、Products／Booking／RemoteBooking／handoff／标准factory九源已冻结交权，Root逐blob核同。当前只读核AIN-23原五条、实际正式治理入口和依赖，不改已交叶／公共源／页面／四册／索引；有具体缺口先由Root核定文件归属，不新增测试或过程通知。 |
-| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-25容量ports／service、Gateway ports／service和routed transport五源已冻结交权，Root核同。继续准备原count／probe claim恢复、统计／告警的最小生产接点及必要验证；Task wrapper丢底层终结信号已给出实际反例，由Root修。原取消与末Run时延已固定，不重复宽扫，不写shared／Guard／provider／四册／索引、不新增测试。 |
-| 内部开业助手／`/root/opening_core_closeout` | AIN-22原五条、最后成功Goal过期P2及两个后继blob最终独立核定完成，G4无余项。只读结论已交回，无活动源码／索引／main写权，不重复派验。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | 21／22已固定上传，23份容量标准装配／原count／底层终结／late派发复核齐备并独立固化。独占四册／索引、shared／Guard／OpenAPI／provider及两个品类页面挂点，下一按原25／23核心缺口收口；未知原操作不重派，原账不因网络槽释放核销。未核旧goal三叶／员工样式不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-23已授权七叶：API category-draft application／contract、新category-proposal application；后台新aiCategoryDraft API、category-assist-session、CategoryAssistFlow，以及原categoryGovernance API仅审计字段声明／校验。先闭原人工草稿／发布／资格／空间采用消费者，再接原Task／Gateway候选提案，Core／shared／Guard／provider／两个页面／四册／索引归Root。unknown仅原收据／audit，查不到不重派，不新增测试。 |
+| AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | 容量原五源及count service `91e6e5b2…`／composition `83bc0abc…`均冻结交权，Root核同。31项及两源类型通过，原claim／reserve／原键和POST真实终结保持；下一只读核AIN-25原五条剩余实施／SLO决定／故障回退，给最小可直接完成阶段。统计Logger告警已由Root接，原取消与末Run时延不重复施工，不写shared／Guard／provider／四册／索引、不新增测试。 |
+| 内部开业助手／`/root/opening_core_closeout` | AIN-22原五条及最后恢复P2、AIN-25容量阶段和三adapter最后派发窗口独立核定均已交回，无活动源码／索引／main写权。结论不外推AIN-25整项或真实运行，不重复派验。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |
 | 内部对话助手 | 原订单最终 display/history 已交回，确定性摘要单叶已交权；Root 补冻结 observedAt、公共 packet 与可信宿主。当前无活动写入范围。 |
 | main／PM | 主仓库串行集成的唯一作者。可独立验证且固定提交已推送的阶段由 PM 按依赖串行收 main；完整任务仍按原门槛，不以切片提高完成度。AI 不争 main 索引或覆盖 PM/企业/Core WIP，检查点不整树回收，助手继续施工。 |
@@ -73,7 +73,7 @@ Core 只读合同固定源码 `fe65ac652076d5bed4c9ca439d50b563c61d17aa`、记�
 ## 其余未完与验证边界
 
 - 原05/06/07/10/11/12/13/14/16/17/18/19/20/21/22已按模拟研发口径核闭；15及23～28继续按[原任务](<AI Native-开发任务.md>)及[实施摘要](<AI Native-开发记录.md#原28项当前实施摘要>)核定；不能把旧真实测试要求当研发阻塞，也不取消功能或部署/回退准备。
-- [原worker取消收口收据](<AI Native-开发记录.md#ain25-original-worker-cancel-receipt-20261114>)已独立修复／复验，原请求与settlement分开，停用原读保留，未知不换键；取消／恢复测量、容量／公平性及告警尚未因此完成。原模型控制首字与读回仍沿[既有观察来源](<AI Native-开发记录.md#ain25-model-control-visible-20261113>)核对。Reader 的缓存时间先于 await 授权已修，原窗口上界保留，推进时钟组合与样本通过；客户端观察沿原诊断标签。QA P1/P3 当前权限和 P2 原澄清同键读取已收口，证据见原记录，不重开已解决问题。
+- [原worker取消收口收据](<AI Native-开发记录.md#ain25-original-worker-cancel-receipt-20261114>)已独立修复／复验，原请求与settlement分开，停用原读保留，未知不换键；[共享容量阶段](<AI Native-开发记录.md#ain25-standard-shared-capacity-dispatch-20261114>)已补公平队列／原count／聚合告警，取消／恢复和工具完整测量、SLO／故障／回退仍按25全文核定。原模型控制首字与读回沿[既有观察来源](<AI Native-开发记录.md#ain25-model-control-visible-20261113>)，原日志窗口上界与当前权限校验保留；QA已闭权限及原澄清同键问题不重复施工。
 - [客户小程序类型告警对照](<AI Native-开发记录.md#ain-client-mini-type-evidence-20261112>)已从固定 AI/main 源完成原 107 入口检查：完整共享声明解析后，AI 0 诊断，main 基线仅两处 consumed 标签；不得凭不完整虚拟依赖的 unknown 告警批量改会话或强断言。两标签由 PM 企业后继处理，dev2 核其验证器差异。
 - 新树稀疏检出，不复制依赖、output 或环境。验证只读使用主仓库受管依赖；TypeScript 5.9.3 从 ts-node 解析，Prisma 只读 `apps/api/node_modules/@prisma/client` 的已生成入口，不能误用根未生成壳或旧临时树路径。源码与生成 schema 须按当前检查内容核对，不覆盖共享产物。
 - 离线使用本树原 prisma-offline-preload、固定不可达 DATABASE_URL；审计/写根/TEMP/TMP 指向本树单一任务目录，能纯内存就不创建目录。创建者负责 finally 清理，不遗留脚本、生成 client/dist 或后台资源。

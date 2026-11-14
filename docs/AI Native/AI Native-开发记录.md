@@ -6,6 +6,40 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-standard-shared-capacity-dispatch-20261114"></a>
+## AIN-25 标准共享容量、原计数恢复与最终派发复核（2026-11-14）
+
+AIN-22整项成果固定 `86d05a78733ce82336ec2138c1a919eabecd1540` 已普通推送，GitHub原任务分支回读一致；与AIN-21的`ff7bb06a`构成新两整项main节点，由PM按固定前置串行整合。后续23份容量生产源码独立成片，不夹dev1正在施工的品类七叶或旧goal／员工样式。
+
+dev2原五容量源的有界总队列／租户上限、等权轮转／租户内FIFO及底层传输终结已核接。普通Gateway仅在原唯一claim获胜后排队，financial reserve之前取得网络槽；丢claim应答不入队，不清别人的token，等待取消／超时／满队仅关闭原未发送claim。等待后仍重核当前routing、原媒体及原工具材料，容量只管网络并发，不替代当前授权、Task累计资源、单账费用或原业务批准。
+
+[标准容量Runtime](../../apps/api/src/modules/ai-native/gateway-capacity.runtime.ts)通过原ConfigService／runtime publication的`gatewayCapacity`读闭合四限额，并由AppModule原provider集合登记唯一实例。同一引用进入原订单／报价／开业／模型控制、客户Web／微信、员工图片／音频、AUTOMATION解释、租户及平台probe、原count入口。缺该部署段使用4并发／32总等待／每租户4等待／最长15秒的保守夹紧值，只是运行上限，不能当AIN-D05已批准SLO或测得容量。配置变化不替换占用实例，排队获槽后及实际派发前拒绝旧配置；坏容量配置不使Core或独立原历史reader无法启动，新网络工作保持关闭。实例消费自身真实聚合统计向原Nest Logger发饱和／限流／超时／配置变化告警，各原因30秒最多一次，不含tenant、actor、正文、URL或凭据，没有新增业务端点或轮询进程。
+
+[Task工厂](../../apps/api/src/modules/ai-native/task-model-gateway.composition.ts)的`async *stream → yield*`原包装会丢私有底层终结信号，令未结束cleanup的槽提前1→0；现直接返回原Routed iterator，native stream原拒绝门禁保留。invoke/native只在真实Promise终结后释放，stream需要原next／return与底层终止信号全部完成；缺return、done=false、失败或取消不证明底层结束，原占用继续保留。网络槽释放不核销原unknown准入或财务账。
+
+最后独立复核发现更晚的P2：Gateway容量校验后，Routed仍await凭据resolve／权限，容量publication此时变化会漏过。公共内部ports新增仅服务端`beforeDispatch`同步回调，Gateway捕获同一lease及abort，Public／Task wrapper原样透传；[Routed](../../apps/api/src/modules/ai-native/routed-model-transport.ts)在prepare及全部凭据／权限等待后、实际generate／generateNativeToolResult／stream前调用，中间没有新await，回调不进入模型输入或wire。独立助手实核ports `e3b02c7d50be87c11f87302bd3d4920cd008c948`、Gateway `3cbdcfad639ad48e2bdca2ad56b557636881dcfe`、Routed `b0920675663f18960b9c1ffc2d04ceb1291c26b2`确认该P2闭合，本容量阶段未见其他明确P2；其复核为静态及blob／diff，不冒称独立行为重跑。
+
+原count的reserve→claim绑定reservationId，不复制普通Gateway的顺序。dev2两源service `91e6e5b2e4589f3a1f574767eef7846ddb614122`、composition `83bc0abccd2e1dc55efa73afbf360b36bded186c`已冻结交回，Root核同并接原请求factory及标准provider；同countCallId、原deadline及当前租户投影获槽，原冻结输入／expiry／profile／连接／当前权在等待和budget.dispatch后重读，真实POST前核同lease当前配置。队列拒绝、取消及丢应答不退额、不造结果收据、不重发；原收据reader不申请新槽。Task内部count和模型分别取得网络容量，不给整个Task包容量造成嵌套死锁。
+
+本片仅必要`node --no-compilation-cache -`，原offline preload、不可达DATABASE_URL、内存audit／fixture：
+
+| 范围 | 固定命令stdin SHA-256及实际结果 |
+| --- | --- |
+| Root原容量／Gateway／准入／dispatch／Routed同组 | `3856ee2d52118bca84d6e6808d7b37f9a8fb628c2eaa7fc939e19aef6e3d026d`，52／52、退出0；覆盖轮转、每租户界限、claim丢应答、取消／超时、媒体／native撤权、迟到Promise及未结束iterator，原unknown不核销。 |
+| 实际Task工厂stream原反例后继 | `ba0f1227006fed727e0a931828fa47b882b5deeeb5bcaffba6d36281c55eabdd`，退出0；direct和真实生产wrapper在底层cleanup未结束时active均1，原准入／reservation均unknown。原作者修前`ca5b5a8…`的提前释放证据保留。 |
+| 同实例标准provider和实际客户依赖 | `c783d3af10d9f65465993d6a9938406c01d067a04fd2db498d7feb6f62dabee1`，退出0；10个标准provider声明／注入同引用，客户原source、staff、两probe、count和automation factory核同，0模型／业务。部分消费者为明确装配替身，不当完整模型链。 |
+| 实际持久Task工厂构造及原iterator | `2eca1e01a208ec6891e9f81402e096fe4d0c699a980d2b868fe1d66ad3c3f6c8`，退出0；同capacity对象、原终结信号和惰性return保持，0模型／reserve。 |
+| Runtime公平／当前配置／告警／坏配置原启动 | `7687eb5455664d786a780c39838eacbd44632dac14e09f04d6062a0ac62ac665`，退出0；A持槽后B先于A下一等待，配置变化拒绝／无重复实例，聚合警告无身份，坏配置构造可用但新acquire拒绝。 |
+| budget.dispatch等待中容量变化 | `bf1698b31382e88f7030ad4ffe9f7d0ab40f062d1507d74471572f32449c7567`，退出0；invoke／stream新增模型0，原两预留unknown，网络槽释放不核销。 |
+| 更晚凭据／权限等待与三adapter边界 | `a6792787347f01fb6002c529a0758a8efde4c0c7e729787200043c6bf4bc4d38`，退出0；invoke／native／stream各resolve和assertCurrent两窗修改容量后0adapter，原unknown保留；三种配置未变对照各一次调用并结清。 |
+| dev2原count完整定向组及两源类型 | `3bd7648db979c064400932068297e6bf6e643ea39f8ce3fc692c1ed4e2c95987`，31／31、退出0；`54d7fb9adb1bdcd3b9c439e30b28975c794cc58b703c75416a877463ccade6a4`，TS5.9.3两根1331源、121内存声明、零诊断、退出0。原服务／Auth／Guard／ALS／Budget与收据真实源码，DB／model／capacity为明确fixture。 |
+| Root原请求count工厂／独立原收据 | `ec1a05bfe13a9c3eeca6bc229d59d794fdad7e6b2d19029e3979e90865b7213d`，退出0；同capacity一次count／一次预留／一次模型POST，readCountReceipt不加容量grant、不换原预留或重发。 |
+| 固定本阶段最终生产类型闭包 | `5ccf27b19f53d2069433be4bc5ee428742937bd3624230510a6347150832ea80`，TS5.9.3七根2003源零诊断、退出0。23源以当前字节固定，仅两个并行category叶按前置`86d05a787`在内存读取，验证本片实际可独立提交闭包，不覆盖助手工作区。 |
+
+失败保留：Root首probe装配夹具未提供原Auth／Guard／$transaction方法，被原构造拒绝；只补明确禁止执行的methods后通过。实际Task夹具先漏systemParameterSet，再漏能力证据仓储，分别被原构造拒绝；补原空表委托后通过，不造能力证据。Root原count第一次共用10月fixture与已捕获当前Date.now的默认容量clock，被期限正确拒绝，原reservation reserved／claim存在／POST0；诊断`373daac…`保留，仅向fixture gate显式传其原clock后同链通过，生产不改TTL。并行dev1目录同步返回不符合其活动async签名造成最后全树类型一条TS2739，已单点交原作者处理；本片固定闭包明确取未包含品类WIP的提交前置，不借替身消除本片错误。
+
+本阶段关闭容量与实际派发窗口，不宣称AIN-25全文100%。原完整工具／取消恢复测量、AIN-D05可审查参数与决定、DB／worker／事件积压／模型限流故障、版本回退及交付说明继续按原五条核定，真实SLO／成本／设备与生产放行仍由负责人后续验证。AIN-25保持原75%，其余任务百分比不因本片检查数变更。所有自有验证进程退出，audit0，本任务及dev2任务临时目录未创建，无新增测试脚本、依赖、生成client、磁盘构建或重复附件。`node --no-compilation-cache scripts/validate-docs.cjs`退出1仅原四处缺链，当前任务算术／接续链接／本阶段源码链接无新增错误，`git diff --check`退出0；没有伪造历史或稀疏示例补绿。
+
 <a id="ain22-goal-booking-original-consumers-20261114"></a>
 ## AIN-22 两端目标选品到原预约与收据恢复（2026-11-14）
 

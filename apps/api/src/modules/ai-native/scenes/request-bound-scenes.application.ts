@@ -1367,9 +1367,9 @@ export type RequestBoundPersistedOriginalSceneModelDependencies =
   Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind' | 'inputCounting'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
     gateway: Pick<PersistedTaskCallGatewayDependencies,
-      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit'>
+      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'nativeProtocol' | 'audit' | 'capacity'>
       | Pick<PersistedTaskGatewayDependencies,
-        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit' | 'inputCounting'>;
+        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'nativeProtocol' | 'audit' | 'inputCounting' | 'capacity'>;
   };
 
 /** Formal original-reference model actions. Resolve the current original task

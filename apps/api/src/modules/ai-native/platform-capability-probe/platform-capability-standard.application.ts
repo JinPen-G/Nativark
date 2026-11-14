@@ -16,7 +16,7 @@ const configurationSchema = z.object({ enabled: z.boolean(), platformProfileId: 
 const unavailable = (): never => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
 
 export function composeStandardPlatformProbe(
-  input: Pick<PlatformCapabilityProbeRequestDependencies, 'db' | 'guard' | 'secrets' | 'clock' | 'audit'>,
+  input: Pick<PlatformCapabilityProbeRequestDependencies, 'db' | 'guard' | 'secrets' | 'clock' | 'audit' | 'capacity'>,
   value?: unknown
 ): Pick<PlatformCapabilityProbeRequestFactory, 'open'> {
   if (value === undefined) return Object.freeze({ open: unavailable });

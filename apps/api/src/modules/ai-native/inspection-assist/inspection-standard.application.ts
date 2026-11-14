@@ -34,6 +34,8 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 
+import type { GatewayCapacityPort } from '../gateway-capacity.ports';
+
 export const AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION = Symbol('AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION');
 export const AI_NATIVE_STAFF_RECOGNITION_RUNTIME = Symbol('AI_NATIVE_STAFF_RECOGNITION_RUNTIME');
 /** Optional server adapter injection for a controlled transport; never body,
@@ -56,7 +58,7 @@ export function readStaffRecognitionConfiguration(value?: unknown) {
 }
 type Dependencies = { db: PrismaService; auth: AuthService; guard: ApiAuthGuard; core: RentalCoreService;
   subscriptions: SubscriptionService; secrets: SecretBox; files: FileStorageRuntimeService; moduleRef: ModuleRef;
-  adapters?: readonly ModelAdapter[]; clock?: () => Date };
+  adapters?: readonly ModelAdapter[]; clock?: () => Date; capacity?: GatewayCapacityPort };
 type InspectionTaskHttpApplication = ConstructorParameters<typeof InspectionRecognitionTaskController>[0];
 export function composeStandardStaffRecognition(d: Dependencies, value?: unknown) {
   const selected = readStaffRecognitionConfiguration(value);
@@ -215,7 +217,8 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
     scene: { code: STAFF_RECOGNITION_SCENES[kind], version: '1' },
     gatewayScene: { sceneCode: STAFF_RECOGNITION_SCENES[kind], routeScene: 'vision' as const, maxOutputTokens: config.maxOutputTokens },
     gateway: { secrets: d.secrets, platformProfileId: config.platformProfileId, callPriceVersion: config.callPriceVersion,
-      routeScene: 'vision' as const, ...(d.adapters ? { adapters: [...d.adapters] } : { nativeProtocol: NATIVE_MODEL_PROTOCOLS }) } });
+      routeScene: 'vision' as const, ...(d.capacity ? { capacity: d.capacity } : {}),
+      ...(d.adapters ? { adapters: [...d.adapters] } : { nativeProtocol: NATIVE_MODEL_PROTOCOLS }) } });
   const dependencies: InspectionRecognitionTaskDependencies = { enabled: true, inspection, limits: selected.limits,
     model: select('image', selected.image), ...(selected.audio ? { audioModel: select('audio', selected.audio) } : {}) };
   const application = new InspectionRecognitionTaskApplication(dependencies);
