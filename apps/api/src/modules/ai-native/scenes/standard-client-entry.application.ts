@@ -25,15 +25,22 @@ const modelConfiguration = z.discriminatedUnion('enabled', [z.object({ enabled: 
     clarification: z.boolean().optional().default(false),
     host: z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
       leaseMs: z.number().int().min(1).max(120000) }).strict() }).strict()]);
+/** The same closed server publication for execution and metadata observation.
+ * Parsing neither assembles a transport nor authorizes a model invocation. */
+export function readStandardClientModelConfiguration(value?: unknown) {
+  try {
+    const config = modelConfiguration.parse(structuredClone(value ?? { enabled: false }));
+    if (config.enabled && config.limits.maxStepMs > config.limits.maxTotalMs) throw Error();
+    return config;
+  } catch { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_configuration'); }
+}
 
 /** Inert standard dependency producer. Model/configuration/entitlement/price
  * records are not seeded here. Clarification needs separate server opt-in;
  * explicit booking parameter selection and approval stay in the original flow. */
 export function standardClientModelDependencies(db: PrismaClient, secrets: SecretBox, value?: unknown,
   suppliedAdapters?: readonly ModelAdapter[], capacity?: GatewayCapacityPort): Pick<AiClientRequestDependencies, 'taskModel' | 'taskInputs' | 'taskResults' | 'taskAccounting'> {
-  let config: z.infer<typeof modelConfiguration>;
-  try { config = modelConfiguration.parse(structuredClone(value ?? { enabled: false })); }
-  catch { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'invalid_server_model_configuration'); }
+  const config = readStandardClientModelConfiguration(value);
   // Original result observation needs neither an enabled model nor a Provider.
   if (!config.enabled) return {
     taskResults: { db }, taskAccounting: { db },

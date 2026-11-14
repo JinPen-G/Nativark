@@ -31,6 +31,7 @@ export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencie
   outboxObservationPolicy?: Pick<RuntimeTaskFaultAlertPolicySource, 'readForScope' | 'readCurrentForScope'>;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
+  | 'directoryMetadata'
   | 'outboxObservation'
   | 'readPendingBatch' | 'continuePendingBatch'
   | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue'
@@ -240,6 +241,19 @@ export class HumanAutomationRequestFactory {
         let assertOutboxPolicy: (() => void) | undefined;
         const execute = async () => {
           switch (action) {
+            case 'directoryMetadata': {
+              if (!z.object({}).strict().safeParse(command).success) throw new AutomationError('invalid_input');
+              const current = await reads.current(), context = current.context;
+              const scopes = new AiScopeRepository(server.db, identity, clock), scope = await scopes.resolveCurrent();
+              if (scope.scope.kind !== 'WORKSPACE' || context.actor.kind !== 'user'
+                || hash(context.scope) !== hash(scope.context.scope)) throw unavailable();
+              // Original queue/read facade metadata only: no event/body query,
+              // candidate preparation, grant renewal or business operation.
+              return { state: 'available' as const, scopeId: scope.scope.id,
+                principalHash: hash({ actor: context.actor, audience: context.audience,
+                  scope: context.scope, access: 'access' in context ? context.access : null }),
+                executionPermission: false as const, businessActionRequested: false as const };
+            }
             case 'outboxObservation': {
               const captured = await new BusinessOutboxObservationReader({ db: server.db, reads, clock,
               policy: server.outboxObservationPolicy, scopeId: async context => {

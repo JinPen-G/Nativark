@@ -20,10 +20,14 @@ import { AI_ORDER_EXPLANATION_HTTP_SCHEMAS_V2 } from '@rental-os/shared';
 import { AI_CLIENT_PUBLIC_SCHEMAS } from '@rental-os/shared';
 import { AI_CLIENT_GOAL_SCHEMAS } from '@rental-os/shared';
 import { AI_CATEGORY_PROPOSAL_SCHEMAS } from '@rental-os/shared';
+import { AI_ENTRY_SCENE_CATALOG_SCHEMAS } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS, AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCENE_MODEL_OBSERVATION_SCHEMAS, AI_TASK_SCENE_OBSERVATION_SCHEMAS, AI_ORDER_READ_HTTP_SCHEMAS } from '@rental-os/shared';
 
 /** Draft components only. Publication is not route registration, authorization or activation. */
 export const AI_LEAF_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {};
+for (const [name, schema] of Object.entries(AI_ENTRY_SCENE_CATALOG_SCHEMAS)) {
+  AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
+}
 const countingRefs = (value: unknown): unknown => Array.isArray(value) ? value.map(countingRefs)
   : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) =>
     [key, key === '$ref' && typeof child === 'string' ? child.replace(/^urn:rental:counting:/u, '#/components/schemas/') : countingRefs(child)])) : value;

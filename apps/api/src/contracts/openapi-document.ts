@@ -47,6 +47,7 @@ import { AI_SCENE_ORDER_READ_HTTP_DRAFT, AI_ORDER_READ_HTTP_CONTRACTS, AI_SCENE_
 import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT, AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS, AI_INSPECTION_TASK_HTTP_CONTRACTS, AI_INSPECTION_TASK_POLICY_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_RETENTION_HTTP_CONTRACTS, AI_ORIGINAL_POLICY_HTTP_CONTRACTS, AI_CLIENT_TASK_POLICY_HTTP_DRAFT, AI_CLIENT_POLICY_HTTP_CONTRACTS, AI_INSPECTION_MANUAL_HTTP_CONTRACTS, AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS, AI_CATEGORY_DRAFT_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_PLATFORM_RETENTION_HTTP, AI_PLATFORM_RETENTION_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_ENTRY_SCENE_CATALOG_HTTP, AI_ENTRY_SCENE_CATALOG_CONTRACTS } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2338,6 +2339,13 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...(['operatorBasePath', 'staffBasePath', 'websiteBasePath', 'wechatBasePath'] as const).map(surface => ({
+    method: 'post' as const, path: `/api/${AI_ENTRY_SCENE_CATALOG_HTTP[surface]}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`,
+    tag: 'AI Native', operationId: `readAiSceneCatalog_${surface}`, authRequired: true,
+    permissions: surface === 'staffBasePath' ? ['rental-os:order:view'] : [],
+    summary: 'Current server-bound scene metadata. Audience, scope and surface are never supplied by the caller. Directory observation does not authorize Task, model or Core execution.',
+    requestSchema: AI_ENTRY_SCENE_CATALOG_CONTRACTS.read.request, responseSchema: AI_ENTRY_SCENE_CATALOG_CONTRACTS.read.response,
+  })),
   ...Object.entries(AI_AUTOMATION_EXPLANATION_CONTRACTS).map(([action, contract]) => ({
     method: 'post' as const, path: `/api/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`,
     tag: 'AI Native', operationId: `automationExplanation_${action}`,

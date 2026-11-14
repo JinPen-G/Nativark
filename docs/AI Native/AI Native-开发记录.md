@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry01-directory-checkpoint-20261115"></a>
+## ENTRY-01 唯一场景目录公共装配的未完检查点（2026-11-15）
+
+前置`8a4bb60912cdc6225384bd13ffabcd7b3e627297`已普通推送，GitHub回读一致。本片只固化归属明确的14个目录源及本记录／接续，保留未完标记，ENTRY-01百分比不变。由[唯一metadata](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.ts)、[应用](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.application.ts)、[请求装配](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.requests.ts)及[四端Controller](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.controller.ts)沿原Auth／scope、发布、政策、权益与能力元数据读取；shared、AppModule／Guard／OpenAPI和公共provider登记同片固定，不启动Task／模型或业务。缺原host／权限／政策／依赖保持关闭，目录不提供具体对象的执行授权。
+
+当前TS5.9.3六根／2016源零诊断，stdin SHA-256 `00b43333da2a856cdb3dd163733f20579e981715126305e91b9c724bb10d5d5d`、退出0。沿用当前来源未变化的原Auth／Guard／Controller与声明stage端口模拟`6fdb6282ce467cf8796bf7a920e34b179415657b9fb7abbdf08039b5881f2df9`、退出0，0Task／模型／业务写入；该模拟没有证明全部标准source、四端消费者或目录可用场景已完整，不能升级为整项验收。
+
+仍须补客户订单解释准确的`order_explanation`政策宿主观察（现目录默认readHostCapabilities沿报价宿主），核当前发布／捕获装配一致性、所有原source和四端实际消费者。跨端原引用由dev2独占`client-booking-transfer.repository.ts`及私有metadata合同叶；Root负责shared／HTTP／Guard／provider、受限原材料来源桥、原提交key及同Draft锁互斥，不去掉source principal过滤、不复制Task／Draft／quote或保存凭据。dev1独占已证实的Web租户时区输入与submitted显示最小前端修复；不改通用设备时区工具或Core。两助手继续施工，不等待检查点上传或main。
+
+本次Node验证纯内存，原offline preload／不可达DATABASE_URL，任务目录`output/.tmp/ain-entry01-catalog-closeout-20261115`未创建、audit0、进程已退出，无新增测试文件／依赖／Client／dist。未完检查点只上传任务分支，不整收main或提高进度；真实环境仍由负责人后续操作。
+
 <a id="ain-entry13-unit-provenance-simulated-whole-closeout-20261115"></a>
 ## ENTRY-13 原默认计费单位、明确确认及事实来源整项收口（2026-11-15）
 

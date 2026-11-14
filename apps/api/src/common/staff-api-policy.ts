@@ -2,6 +2,8 @@ import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRA
 import { AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT, AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT } from '@rental-os/shared';
 import { STAFF_UPLOAD_OBSERVATION_HTTP } from '@rental-os/shared';
 import { AI_BUSINESS_OUTBOX_OBSERVATION_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_ENTRY_SCENE_CATALOG_HTTP } from '@rental-os/shared';
+const staffSceneCatalogPath = `/${AI_ENTRY_SCENE_CATALOG_HTTP.staffBasePath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`;
 const staffUploadObservationPath = `/${STAFF_UPLOAD_OBSERVATION_HTTP.basePath}/${STAFF_UPLOAD_OBSERVATION_HTTP.observe}`;
 const inspectionPolicyPaths = new Set([AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.read,
   AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.configure, AI_STAFF_INSPECTION_TASK_POLICY_HTTP_DRAFT.clear]
@@ -42,6 +44,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
   const verb = method.toUpperCase();
   if (path.startsWith("/staff/v1/auth/")) return isStaffAuthPath(path);
   if (isHumanAutomationRoute(verb, path, 'staff')) return true;
+  if (path === staffSceneCatalogPath) return verb === 'POST';
   if (inspectionAssistPaths.has(path)) return verb === "POST";
   if (inspectionPolicyPaths.has(path)) return verb === 'POST';
   // Exact opt-in AI recognition task routes. Original order/attachment/action
@@ -101,6 +104,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
 }
 
 export function staffRoutePermissions(method: string, path: string, body?: unknown) {
+  if (method.toUpperCase() === 'POST' && path === staffSceneCatalogPath) return ['rental-os:order:view'];
   if (path === staffUploadObservationPath) {
     const file = body && typeof body === 'object' ? (body as { file?: unknown }).file : undefined;
     const scene = file && typeof file === 'object' ? (file as { uploadScene?: unknown }).uploadScene : undefined;

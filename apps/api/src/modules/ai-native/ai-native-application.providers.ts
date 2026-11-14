@@ -3,7 +3,8 @@ import { AI_TASK_ORIGINAL_READ_POLICY_REQUESTS, composeTaskOriginalReadPolicyReq
 import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } from './task-order-handoff.application';
 import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft } from './task-calendar-draft.application';
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
-import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider, readRuntimePublication } from './runtime-publication.configuration';
+import { AI_NATIVE_RUNTIME_PUBLICATION, AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider,
+  readRuntimePublication, type RuntimePublication } from './runtime-publication.configuration';
 import { AI_CATEGORY_PROPOSAL_REQUESTS, AI_NATIVE_CATEGORY_PROPOSAL_CONFIGURATION, composeCategoryProposalRequests } from './category-assist/category-proposal-http.application';
 import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
 import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration,
@@ -142,6 +143,14 @@ import { AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS, AI_SE
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
+import { AI_OPERATOR_SCENE_CATALOG, AI_STAFF_SCENE_CATALOG, AI_WEBSITE_SCENE_CATALOG, AI_WECHAT_SCENE_CATALOG } from './scenes/entry-scene-catalog.controller';
+import { composeEntrySceneCatalogRequests } from './scenes/entry-scene-catalog.requests';
+import type { EntrySceneDefinition, EntrySceneSurface } from './scenes/entry-scene-catalog';
+import { readStandardClientModelConfiguration } from './scenes/standard-client-entry.application';
+import { categoryModelConfigurationSchema } from './category-assist/category-model-host.composition';
+import { readAutomationExplanationConfiguration } from './automation/automation-explanation.application';
+import { ApprovedSettingsRouteAuthority } from '../rental-core/approved-settings-route.authority';
+import { hasEffectivePermission } from '../../common/permission-match';
 
 /** Server-only capture/metadata configuration. Absent means no business outbox
  * writes and no automation input/task producer. Reads keep their current human
@@ -1389,6 +1398,145 @@ export const AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER: FactoryProvider = {
 
 /** Deployment publication supplies existing independent gates. None of these
  * bindings initializes task policy, approves an action or dispatches a model. */
+/** Existing server host metadata only. No provider, credential, Action or Task
+ * is created by reading this directory; every source keeps its own Guard and
+ * independent policy/capability checks. Missing host registrations stay closed. */
+export const AI_NATIVE_SCENE_CATALOG_PROVIDERS: FactoryProvider[] = ([
+  [AI_OPERATOR_SCENE_CATALOG, 'tenant_admin'], [AI_STAFF_SCENE_CATALOG, 'staff_miniprogram'],
+  [AI_WEBSITE_SCENE_CATALOG, 'tenant_website'], [AI_WECHAT_SCENE_CATALOG, 'client_miniprogram'],
+] as const).map(([provide, surface]) => ({
+  provide, inject: [AI_NATIVE_BODY_DATABASE, AuthService, ApiAuthGuard, SubscriptionService, ConfigService, ModuleRef, AI_NATIVE_RUNTIME_PUBLICATION],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+    publication: ConfigService, moduleRef: Pick<ModuleRef, 'get'>, assembledPublication: RuntimePublication) => {
+    const registered = (token: symbol | Function, methods: readonly string[]) => {
+      try {
+        const host = moduleRef.get<Record<string, unknown>>(token, { strict: false });
+        return host && methods.every(method => typeof host[method] === 'function') ? host : null;
+      } catch { return null; }
+    };
+    const configured = (entry: EntrySceneDefinition, current: ReturnType<typeof readRuntimePublication>) => {
+      if (!entry.disable.configurationSections.length) return true;
+      try {
+        return entry.disable.configurationSections.every(name => {
+          const value = current.configurations[name];
+          // Original hosts capture their server sections when Nest builds
+          // them. A later publication cannot claim that those same hosts were
+          // rebuilt; observe unavailable until the actual assembly matches.
+          if (requestFingerprint(value ?? null) !== requestFingerprint(assembledPublication.configurations[name] ?? null)) return false;
+          if (name === 'orderModel' || name === 'quoteModel' || name === 'openingModel') return readOrderExecutionConfiguration(value).enabled;
+          if (name === 'staffRecognition') { const c = readStaffRecognitionConfiguration(value); return c.enabled
+            && (entry.policy.modelCapability === 'image' || entry.policy.modelCapability === 'audio' && !!c.audio); }
+          if (name === 'staffManual') return readStaffManualConfiguration(value).enabled;
+          if (name === 'clientModel') return readStandardClientModelConfiguration(value).enabled;
+          if (name === 'settingsExecution') return readSettingsExecutionConfiguration(value).enabled;
+          if (name === 'businessFailure') return readFailureConfiguration(value).enabled;
+          if (name === 'automationExplanation') return readAutomationExplanationConfiguration(value).enabled;
+          if (name === 'categoryProposal') { const c = categoryModelConfigurationSchema.parse(value), now = Date.now();
+            return c.enabled && Date.parse(c.validFrom) <= now && Date.parse(c.expiresAt) > now; }
+          if (name === 'memberName') return z.object({ enabled: z.boolean(), sceneCode: z.literal('ordinary_profile_change'),
+            sceneVersion: z.string().min(1).max(64) }).strict().parse(value).enabled;
+          if (name === 'businessRuleDraft' || name === 'calendarDraft') return z.object({ saveEnabled: z.boolean() }).strict().parse(value).saveEnabled;
+          if (name === 'openingProposals') return z.object({ enabled: z.boolean(), host: z.object({
+            holderId: z.string().min(1).max(191), leaseMs: z.number().int().min(1).max(120000) }).strict() }).strict().parse(value).enabled;
+          return false;
+        });
+      } catch { return false; }
+    };
+    return composeEntrySceneCatalogRequests({ db, auth, guard, subscriptions, publication, configured,
+      async host(entry, request, principal, signal) {
+        const current = readRuntimePublication(publication), now = new Date();
+        const stage = (revision: unknown, available: boolean) => ({ available, reference: `original:${entry.entryId}`,
+          revision: requestFingerprint(revision), expiresAt: new Date(now.getTime() + 30000).toISOString() });
+        if (entry.audience === 'customer') {
+          const host = registered(surface === 'tenant_website' ? AI_WEBSITE_ENTRY : AI_WECHAT_ENTRY, ['readHostCapabilities']);
+          if (!host) return { registered: false };
+          try {
+            const result = await (host.readHostCapabilities as (r: unknown, v: unknown) => Promise<import('@rental-os/shared').AiClientHostCapabilities>)(request, {});
+            return { registered: true, clientHost: result, stage: stage({ release: result.releaseRevision,
+              policy: result.policy }, result.enabled && result.policy.allowRead) };
+          } catch { return { registered: true }; }
+        }
+        if (entry.entryId === 'operations.member_profile') {
+          const host = registered(AI_MEMBER_NAME_REQUESTS, ['availability']);
+          if (!host) return { registered: false };
+          const result = await (host.availability as (r: unknown, v: unknown, s?: AbortSignal) => Promise<unknown>)(request, {}, signal);
+          const summary = result as { contractVersion?: unknown; newWorkEnabled?: unknown; scope?: unknown; observedAt?: unknown };
+          return { registered: true, stage: stage({ contractVersion: summary.contractVersion, scope: summary.scope,
+            newWorkEnabled: summary.newWorkEnabled }, configured(entry, current) && summary.newWorkEnabled === true) };
+        }
+        const credentials = { current: async () => {
+          if (signal?.aborted || typeof request.headers.authorization !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          return { authorization: request.headers.authorization, requestId: principal.context.requestId, audience: 'operator' as const };
+        } };
+        if (entry.entryId === 'operations.notification_settings') {
+          if (!registered(AI_SETTINGS_CHANGE_REQUESTS, ['prepare', 'readCurrent'])) return { registered: false };
+          await new ApprovedSettingsRouteAuthority(guard, credentials).withAuthorization('read', async (_actor, revalidate) => { await revalidate(); });
+          return { registered: true, stage: stage(current.configurations.settingsExecution ?? null, configured(entry, current)) };
+        }
+        if (entry.entryId === 'operations.rule_draft' || entry.entryId === 'operations.calendar_draft') {
+          const calendar = entry.entryId === 'operations.calendar_draft';
+          if (!registered(calendar ? AI_TASK_CALENDAR_DRAFT_REQUESTS : AI_TASK_RULE_DRAFT_REQUESTS, ['list', 'review', 'save'])) return { registered: false };
+          const permission = calendar ? 'rental-os:calendar:edit' : 'rental-os:rules:manage';
+          const c = principal.context;
+          const allowed = 'access' in c && hasEffectivePermission(c.access.permissions, permission);
+          return { registered: true, stage: stage(current.configurations[calendar ? 'calendarDraft' : 'businessRuleDraft'] ?? null,
+            configured(entry, current) && allowed) };
+        }
+        if (entry.entryId === 'operations.opening_proposals') return { registered: !!registered(TaskOpeningProposalApplication, ['call']) };
+        if (entry.entryId === 'operations.order_explanation') return { registered: !!registered(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, ['start', 'readAnswer']) };
+        if (entry.entryId === 'operations.opening_diagnosis') return { registered: !!registered(AI_ORIGINAL_OPENING_MODEL_REQUESTS, ['start']) };
+        if (entry.entryId === 'operations.quote_clarification') return { registered: !!registered(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, ['start']) };
+        if (entry.entryId === 'platform.category_propose') return { registered: !!registered(AI_CATEGORY_PROPOSAL_REQUESTS, ['consume']) };
+        if (entry.audience === 'staff') {
+          if (entry.entryId === 'staff.business_events' || entry.entryId === 'staff.automation_review') {
+            const host = registered(HumanAutomationRequestFactory, ['call']);
+            if (!host) return { registered: false };
+            const observed = await (host.call as HumanAutomationRequestFactory['call'])(request, 'staff', 'directoryMetadata', {}, signal);
+            return { registered: true, stage: stage(observed, configured(entry, current)) };
+          }
+          if (entry.policy.modelCapability) return { registered: !!registered(INSPECTION_RECOGNITION_TASKS, ['start']) };
+          const host = registered(AI_STAFF_INSPECTION_REQUESTS, ['withRequest']);
+          return { registered: !!host, stage: host ? stage(current.configurations.staffManual ?? null, configured(entry, current)) : undefined };
+        }
+        // Event/automation catalog observations use their original current
+        // manager/discovery or grant metadata, never a fabricated business row.
+        if (entry.entryId === 'operations.automation_policy') {
+          const host = registered(HumanAutomationPolicyRequestFactory, ['call']);
+          if (!host) return { registered: false };
+          const c = principal.context;
+          if (!('access' in c) || c.access.dataScope !== 'all' || !hasEffectivePermission(c.access.permissions, 'system:params:manage')) return { registered: true };
+          const observed = await (host.call as HumanAutomationPolicyRequestFactory['call'])(request, 'discover', {}, signal);
+          return { registered: true, stage: stage(observed, true) };
+        }
+        if (entry.entryId === 'operations.business_events' || entry.entryId === 'operations.automation_review') {
+          const host = registered(HumanAutomationRequestFactory, ['call']);
+          if (!host) return { registered: false };
+          const observed = await (host.call as HumanAutomationRequestFactory['call'])(request, 'operator', 'directoryMetadata', {}, signal);
+          return { registered: true, stage: stage(observed, configured(entry, current)) };
+        }
+        if (entry.entryId === 'operations.automation_explanation') {
+          const host = registered(HumanAutomationPolicyRequestFactory, ['call']);
+          if (!host || !registered(AutomationExplanationApplication, ['call'])) return { registered: false };
+          const config = readAutomationExplanationConfiguration(current.configurations.automationExplanation), c = principal.context;
+          if (!config.enabled || !('access' in c) || c.access.dataScope !== 'all'
+            || !hasEffectivePermission(c.access.permissions, 'system:params:manage')) return { registered: true };
+          const discovered = await (host.call as HumanAutomationPolicyRequestFactory['call'])(request, 'discover', {}, signal) as
+            import('@rental-os/shared').AiAutomationPolicyDiscoveryDraft;
+          const policies = discovered.policies.filter(p => p.sceneCode === config.sceneCode && p.sceneVersion === config.sceneVersion
+            && p.mode !== 'disabled' && !p.revoked && Date.parse(p.validFrom) <= now.getTime() && Date.parse(p.expiresAt) > now.getTime());
+          if (policies.length !== 1) return { registered: true };
+          const policy = policies[0], subject = discovered.subjects.find(s => s.id === policy.subjectId);
+          if (!subject) return { registered: true };
+          const source = await (host.call as HumanAutomationPolicyRequestFactory['call'])(request, 'read', { subjectId: subject.id, policyId: policy.id }, signal) as
+            import('@rental-os/shared').AiAutomationPolicyCurrentDraft;
+          return { registered: true, automationPolicy: source };
+        }
+        return { registered: false };
+      },
+    }, surface as EntrySceneSurface);
+  },
+}));
+
 export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
   AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER,
   AI_NATIVE_GATEWAY_CAPACITY_PROVIDER,

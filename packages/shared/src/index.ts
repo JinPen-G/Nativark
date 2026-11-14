@@ -130,3 +130,4 @@ export * from './ai-client-goal-draft';
 export * from './ai-client-goal-session';
 export * from './ai-client-goal-fingerprint';
 export * from './ai-quote-goal-draft';
+export * from './ai-entry-scene-catalog-draft';

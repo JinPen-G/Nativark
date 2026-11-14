@@ -21,6 +21,7 @@ import { AI_ORIGINAL_TASK_ACCOUNTING_HTTP_DRAFT, AI_SCENE_ORDER_READ_HTTP_DRAFT,
 import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT, AI_CLARIFIED_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_TASK_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_CLIENT_PUBLIC_HTTP } from '@rental-os/shared';
+import { AI_ENTRY_SCENE_CATALOG_HTTP } from '@rental-os/shared';
 import { AI_TASK_RULE_DRAFT_HTTP, AI_TASK_RULE_DRAFT_READ_PERMISSIONS } from "@rental-os/shared";
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_CONVERSATION_HTTP_DRAFT } from '@rental-os/shared';
@@ -288,6 +289,7 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && path === `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`) return [];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_AUTOMATION_EXPLANATION_CONTRACTS).some(action =>
     path === `/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`)) {
     return ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view'];
@@ -1140,6 +1142,7 @@ export class ApiAuthGuard implements CanActivate {
     const accessContext = original ? original.context : await this.authService.resolveAccessContext(token, {
       allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/")
         || platformCapabilityProbePermission(request.method, path) !== undefined
+        || request.method.toUpperCase() === 'POST' && path === `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`
         || registeredCategoryDraftPermission(request.method, path) !== undefined,
       audience: staffApiRequest ? "staff" : "operator"
     });
@@ -1186,6 +1189,10 @@ export class ApiAuthGuard implements CanActivate {
     if (isBudgetPlatformRoute(request.method, path) && !user.isSaasAdmin) {
       throw new ForbiddenException('仅 SaaS 平台管理员可以管理平台 AI 预算');
     }
+    const operatorCatalogPath = `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}`;
+    const operatorCatalogRead = request.method.toUpperCase() === 'POST' && path === `${operatorCatalogPath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`;
+    if ((path === operatorCatalogPath || path.startsWith(`${operatorCatalogPath}/`)) && !operatorCatalogRead)
+      throw new ForbiddenException('场景目录只开放已登记的当前受权读取');
     const platformProbePermission = platformCapabilityProbePermission(request.method, path);
     const platformPrivacyPermission = platformRetentionPermission(request.method, path);
     if ((path === '/ai-native/platform-privacy' || path.startsWith('/ai-native/platform-privacy/'))
@@ -1232,6 +1239,7 @@ export class ApiAuthGuard implements CanActivate {
       !platformProbePermission &&
       !platformPrivacyPermission &&
       !registeredCategoryDraftPermission(request.method, path) &&
+      !operatorCatalogRead &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
