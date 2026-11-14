@@ -46,8 +46,15 @@ function packageSource(root: string, directory: string, target: string): string 
 }
 
 function sourceDocuments(root: string, directory: string): DevelopmentSourceReference[] {
-  return ["README.md", "AGENTS.md"].filter(file => lstatSync(resolve(root, directory, file), { throwIfNoEntry: false })?.isFile())
-    .map(file => ({ path: `${directory}/${file}` }));
+  let current = directory;
+  while (current !== ".") {
+    const documents = ["README.md", "AGENTS.md"]
+      .filter(file => lstatSync(resolve(root, current, file), { throwIfNoEntry: false })?.isFile())
+      .map(file => ({ path: `${current}/${file}` }));
+    if (documents.length) return documents;
+    current = dirname(current);
+  }
+  return [];
 }
 
 function unwrap(node: ts.Expression): ts.Expression {
@@ -139,7 +146,26 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
   const paths = Object.fromEntries(entries.map(entry => [entry.module, [entry.file]]));
   paths["@/*"] = [resolve(root, "apps/admin/src/*")];
   paths["@/registry/*"] = [resolve(root, "packages/ui-arc/vendor/registry/*")];
-  const source = new RepositorySource(root, [...new Set([...entries.map(entry => entry.file), ...controllers, ...extraSources])], paths);
+  const consumers = ["apps/api/src", "apps/admin/src"].flatMap(directory =>
+    repositoryFiles(root, directory, file => /\.tsx?$/u.test(file) && !file.endsWith(".d.ts")));
+  const source = new RepositorySource(root, [...new Set([...entries.map(entry => entry.file), ...controllers, ...extraSources, ...consumers])], paths);
+  const importConsumers = new Map<ts.Symbol, DevelopmentSourceReference[]>();
+  for (const file of source.program.getSourceFiles()) {
+    if (file.isDeclarationFile || repositoryPath(root, file.fileName).includes("/vendor/")) continue;
+    for (const node of file.statements) {
+      if (!ts.isImportDeclaration(node)) continue;
+      const bindings = node.importClause?.namedBindings;
+      if (!bindings || !ts.isNamedImports(bindings)) continue;
+      for (const binding of bindings.elements) {
+        const symbol = source.checker.getSymbolAtLocation(binding.name);
+        if (!symbol) continue;
+        const target = source.target(symbol);
+        const callers = importConsumers.get(target) ?? [];
+        callers.push(sourceReference(binding, root));
+        importConsumers.set(target, callers);
+      }
+    }
+  }
 
   for (const entry of entries) {
     const before = capabilities.length;
@@ -151,6 +177,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         continue;
       }
       const documentation = ts.displayPartsToString(target.getDocumentationComment(source.checker)).trim();
+      const callers = importConsumers.get(target) ?? [];
+      const sourceDoc = sourceDocuments(root, repositoryPath(root, dirname(declaration.getSourceFile().fileName)));
       const documents = sourceDocuments(root, entry.owner);
       if (entry.owner === "apps/admin") {
         if (entry.visibility === "public") documents.push({ path: "apps/admin/src/core/README.md" });
@@ -158,8 +186,10 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
       }
       capabilities.push({ id: `export:${entry.module}:${symbol.name}`, name: symbol.name, kind: entry.ui ? "ui" : "export",
         owner: entry.owner, version: entry.version, description: documentation || undefined,
-        sources: [{ ...sourceReference(declaration, root), symbol: target.name }], documentation: documents,
-        entry: { kind: "import", module: entry.module, symbol: symbol.name, typeOnly: !(target.flags & ts.SymbolFlags.Value), visibility: entry.visibility } });
+        sources: [{ ...sourceReference(declaration, root), symbol: target.name }],
+        documentation: [...documents, ...sourceDoc.filter(doc => !documents.some(item => item.path === doc.path))],
+        entry: { kind: "import", module: entry.module, symbol: symbol.name, typeOnly: !(target.flags & ts.SymbolFlags.Value), visibility: entry.visibility },
+        details: { directImportCount: callers.length, directImports: callers.slice(0, 5) } });
     }
     const file = repositoryPath(root, entry.file);
     coverage.push({ source: file, count: capabilities.length - before, state: issues.some(issue => issue.path === file) ? "partial" : "indexed" });
@@ -197,7 +227,7 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
 
   for (const moduleDirectory of moduleDirectories) {
     const files = repositoryFiles(root, moduleDirectory, file => dirname(file) === resolve(root, moduleDirectory)
-      && /(?:\.controller|\.service|\.repository|\.providers|\.ports)\.ts$/u.test(file));
+      && /(?:\.controller|\.service|\.repository|\.providers|\.ports|original-core-[a-z-]+)\.ts$/u.test(file));
     const references = files.map(file => ({ path: repositoryPath(root, file) }));
     if (!references.length) continue;
     const moduleName = moduleDirectory.split("/").at(-1)!;
@@ -285,7 +315,8 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
                 }
                 const capability: DevelopmentCapability = { id, name: api?.summary || httpSummary || `${method} ${path}`, kind: "api", owner,
                   description: nodeDocumentation(member), sources: [declaration, ...(assemblyReference ? [assemblyReference] : [])],
-                  documentation: packageInfo ? sourceDocuments(root, packageInfo.directory) : [{ path: "apps/api/src/contracts/openapi-document.ts", ...(api?.reference ?? {}) }],
+                  documentation: packageInfo ? sourceDocuments(root, packageInfo.directory)
+                    : [...sourceDocuments(root, owner), { path: "apps/api/src/contracts/openapi-document.ts", ...(api?.reference ?? {}) }],
                   entry: { kind: "http", method: method as "GET", path },
                   details: { controller: node.name?.text ?? "Controller", controllerMethod: member.name?.getText() ?? "",
                     registration: assemblyReference ? "declared-in-host" : "source",
