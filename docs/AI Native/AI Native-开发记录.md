@@ -6,6 +6,33 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-merged-review-calendar-p1-20261114"></a>
+## 合后review：日历观察窗口与稳定指纹修复接入（2026-11-14）
+
+本片在 `e80c6afedbfb5da8d46cb03b11f01bc5e1e95018` 基线上仅收回AI作者固定单源 `623bb554845e50ae17c2b1e46796f3b1fbff6c5e`，两合同P1已在e80并经QA原加载复验通过。日历补片严格校验原Core版本/范围/sourceHash/观察窗口，只将observations排除出稳定指纹，保留years、revision、发布/officialSource及未来额外原事实；真实事实变化仍conflict，不吞异常或移除整份来源。原作者实际Core仓储和Outbox限定模拟、原事务回滚及两根/1205源类型通过，必要命令/哈希和失败边界完整引用下方来源阶段。
+
+PM核对单文件前像与作者固定main一致，没有写AI活动树、修改其后继成果或重启服务。精确提交单源与现有记录，普通推送后交QA按原反例复验；此处待QA结论，不提前关闭。全部六棵冻结源仍在main祖先链，原报价配置混用/历史fixture失败继续保留。验证无新增临时目录/业务写入，main其他作者WIP完整保留。
+
+<a id="ain-main-contract-calendar-p1-fixed-20261114"></a>
+## PM 固定 main 合后两处 P1 的最小对象补片（2026-11-14）
+
+PM 明确指定 main `1e45ade7930e006e9d033abed0c196a1388b743c`，Root只读该固定提交及必要Core合同、在Git对象中输出两份独立补片，没有写main／其索引／记录或回退企业、UI与演示reset后继。原AI树和两个助手持续施工，以下修复不要求整取AI活动HEAD，也不以GitHub main历史已推进推定补片已集成；PM负责串行写入、验证及上传。
+
+第一处：`AI_TASK_OPENING_PROPOSAL_HTTP_SCHEMAS`在[ai-leaf-components](../../apps/api/src/contracts/ai-leaf-components.ts)重复列入，OpenAPI及AppModule导入抛`Duplicate AI component: AiTaskOpeningProposalQueryDraft`；[openapi-document](../../apps/api/src/contracts/openapi-document.ts)原开业操作同组出现两次。补片只从前面的合并登记列表移除重复的opening schema，保留末尾原显式重复检查；只删除第二份逐字节相同opening operations，不吞重名错误、不删Guard／字段／新入口。
+
+| 固定main路径 | 前像blob | 最终修复blob |
+| --- | --- | --- |
+| apps/api/src/contracts/ai-leaf-components.ts | `36afc984997a75e457612027ba5eed71ca0c78a5` | `7d440f35978b97924723e6d08c2794ca20d2aa08` |
+| apps/api/src/contracts/openapi-document.ts | `d877300741622ef409a2c88f6bbcd8e5b9c7ceab` | `1db9006c120209ed5df8230a2a496f651c06f457` |
+
+实际固定TS／shared内存加载先复现原异常，最小补片后OpenAPI／AppModule真实导入通过：1258 schema、1234操作、4原开业操作，operationId与方法／路径均唯一，原合同字段引用存在。命令`node --no-compilation-cache -`，SHA-256 `45502a1924178f9702bca254a3a6d54dafd2e159476a06670bfd93cc00b1b802`，退出0。固定三根／2016源TS5.9.3零诊断，命令SHA `ee32f7f26012cdf70527caca5ec6bc1dfa58ae2356b79e8257fea217c34a6fb2`，退出0。原`validate-api-contracts.cjs`在只解schema阻断与完整两源补片上均真实执行，完整补片退出1，动态／常量controller识别等565条既有失败保留；失败集合无新增、四个重复operationId消除，重复操作的四行“无controller”自然少一次，命令SHA `6aaf17715846470881bccba01332271b924bc5782277aa3d0d1db06af7f042d5`退出0表示比较完成，不表示原contract脚本全绿。首次驱动误读不存在的task-center.controller路径、重复声明ts和直接比较重复消息数组均保留，不放宽原检查器。
+
+第二处：[CoreBusinessFailureResourceSource](../../apps/api/src/modules/ai-native/business-events/core-business-failure-resource.source.ts)将新Core日历calendarSource的observations计入稳定sourceHash，配置完全未变却两读conflict；启用Outbox后可沿原保存事务回滚。固定单源前像blob `34a89b5303a493460aecd37ef2a2a53914742f73`，修复blob `623bb554845e50ae17c2b1e46796f3b1fbff6c5e`，SHA-256 `5943ec23a70b41d1c91bd099f37bcfa51c7492356dc60567e8cd76a073d208d7`。补片核原calendarSource版本／scope／sourceHash和观察窗口合法性，只去除observations；所有日历years／binding／revision／原发布及officialSource、未来额外Core事实、配置／categoryBinding／身份及其它业务字段保持指纹，不删除整份calendarSource、不吞conflict或重算业务。
+
+Root先按QA同一真实RentalBusinessConfigRepository读取复现原conflict，再在固定单源补片下核相同事实不同观察时点连续读sourceHash一致；真实calendar revision／version／officialSource与configuration row变化拒绝，实际ALS撤权拒绝。原PrismaBusinessFailureOutbox的openingConfiguration／captureResource保持调用方同一tx，捕获6条真实缺项、重复捕获不增事件，append后来源改变返回原result_unknown并由调用方回滚；存储与DB为明示内存fixture，原仓储与Outbox代码实际调用。命令SHA `66a03fb67885452f450697619047bb10c865ed10da4780ca56d68d7f602a3078`，退出0；两根／1205源TS5.9.3零诊断，命令SHA `bbc812d298d8ee73dec2981e373ae0640d4ebbdf663fb08155280b45bcbc9231`，退出0。首次负例错改ALS传入对象而非实际当前上下文、按calendar查询次数定位突变、readBindingfixture漏原信封字段均保留；修明示fixture后复验通过，生产权限／事务／冲突未放宽。
+
+两补片仅为PM固定对象交付，当前主线是否已集成由PM核；不新增测试文件、不联系QA、不群发。本片所有验证audit0、进程退出，任务临时目录未创建，无main工作区／索引写入，无依赖／client／dist／数据库／服务产物，未访问真实业务或供应商。Git对象是最小补片，不是又一份output环境。
+
 <a id="ain-merged-review-openapi-p1-20261114"></a>
 ## 合后review：重复合同登记启动阻断修复（2026-11-14）
 

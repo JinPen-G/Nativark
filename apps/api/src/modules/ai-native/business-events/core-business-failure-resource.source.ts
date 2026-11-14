@@ -74,6 +74,14 @@ export interface CoreBusinessFailureResourceDependencies {
   nearPolicy?: CoreFulfillmentNearPolicySource;
   clock?: () => Date;
 }
+
+// Core's stable calendar projection is versioned data. The observation window
+// describes this read only and cannot invalidate unchanged configuration facts.
+const calendarSourceSchema = scopeSchema.extend({ version: z.literal('rental-calendar-read-source-1'),
+  years: z.array(z.unknown()).min(1).max(3), sourceHash: hash,
+  observations: z.object({ startedAt: instant, completedAt: instant,
+    consistency: z.enum(['caller_transaction_reads', 'independent_persisted_reads']) }).strict()
+}).passthrough();
 const unavailable = () => new BusinessFailureError('unavailable');
 const conflict = () => new BusinessFailureError('conflict');
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
@@ -253,8 +261,22 @@ export class CoreBusinessFailureResourceSource implements BusinessFailureResourc
       });
       const latest = await this.wait(current, () => this.configuration(scope, origin, tx ?? d.db));
       if (!same(stored, latest)) throw conflict();
+      const businessBasis = { ...business };
+      if (business.calendarSource !== undefined) {
+        const calendar = parse(calendarSourceSchema, business.calendarSource);
+        if (!same({ tenantId: calendar.tenantId, workspaceId: calendar.workspaceId }, scope)
+          || calendar.observations.consistency !== (tx ? 'caller_transaction_reads' : 'independent_persisted_reads')
+          || Date.parse(calendar.observations.startedAt) > Date.parse(calendar.observations.completedAt)
+          || Date.parse(calendar.observations.completedAt) > this.now().getTime()
+          || calendar.sourceHash !== requestFingerprint({ version: calendar.version, tenantId: calendar.tenantId,
+            workspaceId: calendar.workspaceId, years: calendar.years })) throw unavailable();
+        const { observations: _window, ...calendarBasis } = calendar;
+        // Retain every version/content/reference field, including unknown future
+        // Core facts; exclude only this producer's declared read observation.
+        businessBasis.calendarSource = calendarBasis;
+      }
       return { scope, ...stored, sections, sourceHash: requestFingerprint({ scope, ...stored, sections,
-        categoryBinding: envelope.categoryBinding, core, business, ...(memberCount === undefined ? {} : { memberCount }) }) };
+        categoryBinding: envelope.categoryBinding, core, business: businessBasis, ...(memberCount === undefined ? {} : { memberCount }) }) };
     };
     const before = await observe(), after = await observe();
     if (!same(before, after)) throw conflict();
