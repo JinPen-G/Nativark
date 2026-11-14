@@ -6,6 +6,16 @@
   "description": "平台与业务 Core 共用的清单、版本和对象引用契约",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "package": ["dist/package.d.ts"],
+      "archive": ["dist/archive.d.ts"],
+      "install": ["dist/install.d.ts"],
+      "github": ["dist/github.d.ts"],
+      "development": ["dist/development.d.ts"],
+      "github-repository": ["dist/github-repository.d.ts"]
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

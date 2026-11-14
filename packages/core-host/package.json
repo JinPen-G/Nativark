@@ -6,6 +6,7 @@
   "description": "平台 Core 授权、成员分配和生命周期的应用服务",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "typesVersions": { "*": { "mysql": ["dist/mysql.d.ts"], "mysql-bindings": ["dist/mysql-bindings.d.ts"] } },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
     "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" },

@@ -55,6 +55,16 @@ node packages/example-tickets-core/dist/metadata.js openapi
 
 打包方分别保存为`core.manifest.json`、`openapi.json`，将当前README、LICENSE、所声明dist/迁移、`admin/index.tsx`及按[公共命令](../core-contracts/README.md#生成随包指南与归档)生成的CORE_GUIDE.md放到交付目录，再用同一pack/prepare链准备候选。成功stdout只有JSON且退出0，错误stderr说明并退出1。后台TSX由受控宿主组合构建，不在运行时从包路径热加载；AI工具仍未提供，不把本包领域/适配通过称为已独立安装完成。
 
+本示范可直接用一个命令生成完整包。先提交本Core/接入合同源码，准备含 `repository` 和40位 `commit`的底座来源JSON；输出父目录预先存在，输出文件必须是新文件。
+
+```sh
+npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> <固定Core提交> <底座来源JSON> <新包.tgz>
+```
+
+命令先构建当前Core和合同，再核所选提交与当前Core/合同源码一致，生成清单、同源OpenAPI和固定版本CORE_GUIDE.md，按清单收集编译入口/后台TSX/迁移/许可。包内README链接转换为固定源码引用，根源码原文不另维护副本。输出packed/sha256/files的JSON，之后使用平台prepare-install命令核版本并准备待部署目录。重复输出拒绝覆盖；失败不安装、执行迁移或授权Core。[打包实现](src/package.ts) · [命令入口](src/metadata.ts)
+
+独立发行目录可从Node专用 `@rental-os/example-tickets-core/package` 使用packTicketsPackage，显式提供自己的编译目录、Core/底座来源及固定任务原文。它只读声明文件并返回标准包字节，调用者负责在该来源版本构建后写一个新文件；标准包格式、检查和安装仍复用公共出口，不做第二套解压/安装器。
+
 ## HTTP 与 API 文档
 
 宿主从 `@rental-os/example-tickets-core/nest`导入`TicketsHttpModule.register(service, principalAccessor)`，放入受控组合；`principalAccessor.current()`仅从原Guard/ALS当前身份取值。这里不加公开路由豁免、不替换全局Guard或读取请求体的tenantId。原全局路由政策还没有登记工单接口，当前默认拒绝应保留，待公共窗口按[HTTP合同](src/http.ts)逐项注册。

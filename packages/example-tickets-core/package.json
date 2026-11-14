@@ -6,10 +6,21 @@
   "description": "租户范围的轻量工单 Core 接入示范",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "contracts": ["dist/contracts.d.ts"],
+      "http": ["dist/http.d.ts"],
+      "package": ["dist/package.d.ts"],
+      "admin": ["admin/index.tsx"],
+      "mysql": ["dist/mysql.d.ts"],
+      "nest": ["dist/nest.d.ts"]
+    }
+  },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
     "./contracts": { "types": "./dist/contracts.d.ts", "default": "./dist/contracts.js" },
     "./http": { "types": "./dist/http.d.ts", "default": "./dist/http.js" },
+    "./package": { "types": "./dist/package.d.ts", "default": "./dist/package.js" },
     "./admin": "./admin/index.tsx",
     "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" },
     "./nest": { "types": "./dist/nest.d.ts", "default": "./dist/nest.js" }
@@ -19,6 +30,8 @@
     "build": "tsc -p tsconfig.json",
     "prelint": "npm run build -w @rental-os/core-contracts",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "prepack:core": "npm run build",
+    "pack:core": "node dist/metadata.js package",
     "prelint:admin": "npm run build",
     "lint:admin": "tsc -p admin/tsconfig.json"
   },

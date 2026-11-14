@@ -234,9 +234,13 @@ node packages/core-contracts/dist/prepare-install.js <Core包.tgz> <SHA256> <既
 
 输出包的父目录和待部署根目录须由部署者预先选定并存在，均使用不经过链接的普通目录。第一条命令拒绝覆盖已有包，输出JSON中的`sha256`用于第二条命令；第二条先检查整个压缩包、同一清单/文件/API规范及宿主兼容，全部通过后才写待部署目录。包不允许夹带未声明文件，不执行包内源码或安装脚本。
 
+正式包的子路径类型同时通过exports/typesVersions提供，当前Node/CommonJS构建和NodeNext消费都从发布元数据定位，不使用深层源码别名。Node文件系统/归档接点仅从对应子路径导入，公共运行入口仍不加载这些开发工具。
+
 准备结果为`prepared`或`already_prepared`，`deployment`始终为`pending`，并给出实际目录、Core ID、版本与摘要。目录使用该发行的完整摘要区分；重复操作核对原文件字节后复用，已有目录被用户修改、缺文件或出现链接时明确拒绝覆盖。失败只清理这次创建的暂存目录，不改活动组合或其他已准备版本。两个命令成功退出0，输入/兼容/文件失败退出1并在stderr说明原因；成功stdout只包含JSON。
 
 程序调用使用Node专用`@rental-os/core-contracts/install`出口的`packCoreDirectory`和`prepareCoreInstall`。解包文件检查与原目录检查共用[包检查实现](src/package.ts)。此阶段已具备本地文件准备，后续仍需受控组合构建、迁移/数据核对、实际部署注册，再办理租户授权与成员分配；包完整性不能证明代码已经审核。
+
+[工单示范](../example-tickets-core/README.md#构建与打包)提供pack:core命令，将固定源码构建、清单/API/手册生成及声明文件收集合成一个包。作者从同一标准复用所需步骤，平台安装仍只读检查标准文件，不执行包内打包命令或脚本。
 
 ## 从 GitHub 固定发行准备
 

@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-tickets-package-20261115"></a>
+
+## 实际工单标准包、同源资料与待部署准备（2026-11-15）
+
+移除预检片固定 `7f7ea9634574683757d88c662324ed234da63ee5` 已普通推送并真实回读，main仍62ca。本片以实际工单编译产物验证标准包，不使用原格式夹具代替业务样例。源码/合同独占范围及现有版本/迁移保持，未发布正式发行。
+
+[packTicketsPackage](../../../packages/example-tickets-core/src/package.ts)按唯一清单收集实际编译入口、后台TSX、迁移和许可，生成固定来源清单、同源OpenAPI和CORE_GUIDE.md。包README的源码/底座相对链接转换为固定源码引用，原README不另写一份。Node专用出口与CLI不进入领域运行入口，Core业务不因打包加载Node文件系统/归档依赖。
+
+[metadata package](../../../packages/example-tickets-core/src/metadata.ts)增加同源标准包命令，pack:core前置构建当前Core/合同并检查固定提交与当前源码差异，拒绝未提交源码冒充发行。新.tgz使用wx写入、输出父目录无链接，失败不覆盖原包；准备仍沿平台同一inspect/archive/prepare链，结果准确为deployment=pending。最短命令及独立发行调用说明写[示范README](../../../packages/example-tickets-core/README.md#构建与打包)。
+
+stdin内存类型退出0，Core合同35根/宿主7根/工单11根0诊断。实际编译集合形成30份声明文件，最终35,617字节标准归档，相同输入两次SHA-256相同；全部正式exports入口存在，迁移摘要一致，标准包静态检查通过。固定任务册生成的模板实际正文存在，包README无失效本地相对源码链接。最初额外断言误要求生成指南保留任务册内部core-agent-template锚点而退出1，核原生成器明确只抽正文后按真实模板正文复验通过，没有修改产品规则或已有测试掩盖失败。
+
+实际packTicketsPackage→标准archive读回→prepareCoreInstall在本树单一 `output/.tmp/example-tickets-package`完成，prepared→同包already_prepared核字节复用；篡改已准备README拒绝覆盖，缺dist/http.js拒绝打包。没有网络、业务模块执行、迁移或运行安装，包完整性不等于干净宿主已授权可用。本次仅测编译包及待部署文件准备，真实GitHub发行/下载、主宿主/Guard、实际数据库/浏览器和独立接手继续待验。
+
+临时目录只含本次stage/pending文件，finally核真实绝对路径/普通文件/无链接后删除并确认不存在，未保存重复整包、依赖或环境。打包节点源码纳入现有样例正式出口，不新增测试运行器/脚本；代码/API/简单手册随片更新。当前PCH门槛未跨下一档，固定来源字节为本次工作区核对输入而非正式发布包，最后提交后需按该固定来源再构建。
+
+Core合同/宿主/示范包补正式typesVersions，Node10/CommonJS和NodeNext从实际包exports元数据解析；35/7/11根编译以发布元数据定位，私有Core别名为0。CLI通过stdin文件facade核单份JSON、源码差异先拒绝、wx新包写入及写失败清理，退出0，facade与真实包/prepare证据分别记录。最后一次包验证的57份临时文件294,913字节已删除并确认；未复制依赖或安装工具，package-lock的依赖元数据不变。
+
+原8组合同测试退出0、skip/todo为0；六份相关文档591个链接/142个章节锚点定向核对退出0，新增问题0，原需求/任务及百分比保持。差异格式检查退出0。固定成果随中文提交普通推送，真实远端回读后继续按该提交准备正式发行，当前没有真实GitHub Release或运行安装验收。
+
 <a id="core-removal-preflight-20261115"></a>
 
 ## Core移除依赖预检与原SaaS身份复核（2026-11-15）
