@@ -155,6 +155,27 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="pch-identity-page-gate-20261115"></a>
+
+## 身份与后台页面原G1门槛复核（2026-11-15）
+
+声明路由片固定 `3cc35e9050dd58381d54ec0d1708e85e58faa613` 已普通推送并实际回读一致，main62ca已在本树。按原G1“获准实施后完成该项真实接点/消费者及可实施合同复核”核收04/07各25%。这不是G2主实现或G3正式装配完成，原A03/A07和完整专项验收仍未收口。01/02原G1保持，12项等权覆盖率从4.17%更新为8.33%；任务ID/范围/依赖/顺序和每档25%不改。
+
+| 原任务 | G1固定证据与真实消费者 | 未跨下一档的缺口 |
+| --- | --- | --- |
+| PCH-04 | [原Auth/Guard/ALS及数据连接](#core-ownership-baseline-20261114)、[原主体/当前管理权](#core-original-management-20261115)、租户授权/成员分配及原收据的唯一合同与MySQL应用服务、[当前成员目录](#core-session-directory-20261115)、[Core范围读取](#core-scope-readiness-20261115)和工单真实主体消费已可定位；原audience/租户/会话/角色、目标成员、Core命名空间及返前复验均有正式接点 | 原Auth/Guard消费租户公共主体与新Core路由、Rental存量映射、实际迁移/部署、API/客户端/作业/AI直接URL的完整正常/拒绝链和所需真实环境未完成；G2/G3/G4不凭独立适配通过提前判定 |
+| PCH-07 | [原后台壳/导航/缓存消费者](#core-ownership-baseline-20261114)已定位；独占CorePage/Route消费原PageHeading/WorkspaceHeader和ActionButton/SaveButton/ConfirmAction，授权面、会话/范围Hook、[单源菜单/面包屑及详情参数](#core-declarative-routes-20261115)和工单三页面按同一正式合同核对；普通业务/配置purpose及来源/授权/就绪分别表达 | 原壳/Rental/AI静态依赖抽离、主Router/菜单/面包屑/租户账号页挂载、发现安装与版本界面、无Core真实登录和公共设置保存、中英文/窄屏/Portal/回车/异步动作实页及完整验收未完成；不把局部React消费者当全后台主实现 |
+
+03尚缺实际无Core公共宿主及选中Core构建配置的完整合同/消费者复核；05/06尚缺排空/移除、事件作业/回调、文件ACL等公共接点消费；08/09尚缺Rental真实重新装配和可选AI隔离；10/11/12的样例/资料虽随片准备，其干净组合、独立接手/更新/完整兼容和原审查仍有直接缺口。本次不按新增代码/测试数提高这些任务。
+
+当前Guard精确缺口已核源码：`requiredPermissions`未消费十条Core管理合同，SaaS允许路径也未登记；Core会话GET和范围POST须作为原已登录operator自助政策精确登记。`canActivate`当前普通请求选择accessContext.user（Rental空间角色），Core公共管理应使用同一已签名上下文的tenantUser并保留accessSession/wid一致性、撤权与未知路径拒绝。旧Rental仍沿原空间和locationScope，不借Core接口放宽。所需Auth/Guard窗口和下面装配表由PM核定唯一作者，当前没有抢改共享文件。
+
+主装配需把Core管理、会话、范围三个DynamicModule与真实原服务/部署锁组合；工单HTTP另按其七条操作登记，OpenAPI总组合消费对应单源生成器。DB最小片仅登记平台Core授权/绑定独立迁移账和选中工单迁移，不重放原历史SQL或执行Seed。前端最小片为原Routes展开createCoreRouteElements、原壳消费coreNavigationEntries/coreBreadcrumbEntries、原租户/账号页挂载授权面；原AppShell/BusinessShell/PageHeader/designTokens等在main仍有后台作者WIP，需先固定作者交接。
+
+本次仅门槛复核及原三册当前现场同步，没有新业务源码、生成环境或服务操作。固定记录提供证据与缺口，不扩大共享文件授权。正式任务日常仅更改有据百分比及汇总。
+
+四册485个链接及121个章节锚点定向核对退出0，新增错误0；12任务的ID/交付/前置/需求/验收列与前一固定版本一致，仅04/07百分比及算术汇总更新。12项等权 `(25+25+25+25)/12=8.33%`，正式验收仍0/12。差异格式检查退出0，无新增临时文件/进程，文档阶段中文提交及任务分支普通推送并回读真实远端。
+
 <a id="core-declarative-routes-20261115"></a>
 
 ## Core路由、导航与详情参数的声明消费（2026-11-15）
