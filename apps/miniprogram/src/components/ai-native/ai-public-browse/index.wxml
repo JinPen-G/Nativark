@@ -1,0 +1,12 @@
+<view class="public-browse">
+  <view class="subtitle">继续本次浏览</view>
+  <view class="body mt-8">保留本次公开浏览，登录后可自行选择继续。</view>
+  <button wx:if="{{canPrepare}}" class="btn btn--block mt-16" bindtap="onPrepare" loading="{{working}}" disabled="{{working}}">保留本次浏览</button>
+  <button wx:if="{{canRead}}" class="btn btn--block mt-16" bindtap="onRead" disabled="{{working}}">核对原浏览记录</button>
+  <button wx:if="{{loginRequired}}" class="btn btn--block mt-16" bindtap="onLogin" disabled="{{working}}">登录后继续</button>
+  <button wx:if="{{canContinue}}" class="btn btn--primary btn--block mt-16" bindtap="onContinue" loading="{{working}}" disabled="{{working}}">以当前账号继续本次浏览</button>
+  <view wx:if="{{status === 'continued'}}" class="body mt-8">本次公开浏览已续接到当前账号，请继续选择租赁条件后核价。</view>
+  <view wx:if="{{status === 'unknown'}}" class="notice mt-8">原结果待核对，请保留本次记录。</view>
+  <view wx:if="{{status === 'identity_changed'}}" class="notice mt-8">该记录属于另一账号会话，请继续普通浏览。</view>
+  <view wx:if="{{status === 'unavailable'}}" class="notice mt-8">续接暂不可用，可继续普通浏览和预约。</view>
+</view>

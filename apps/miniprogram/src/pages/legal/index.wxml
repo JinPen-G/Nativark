@@ -3,6 +3,7 @@
   <nav-bar title="{{title}}"></nav-bar>
 
   <block wx:if="{{kind === 'help'}}">
+    <view wx:if="{{publicServiceCode}}" class="section"><ai-public-browse service-code="{{publicServiceCode}}" kind="help"></ai-public-browse></view>
     <view class="section">
       <view class="card">
         <view class="subtitle">联系客服</view>

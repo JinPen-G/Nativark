@@ -41,4 +41,5 @@
     </view>
     <view class="muted small center mt-16">共 {{cards.length}} 件 · 参考价以租期报价为准</view>
   </view>
+  <view wx:if="{{publicServiceCode}}" class="section"><ai-public-browse service-code="{{publicServiceCode}}" kind="catalog"></ai-public-browse></view>
 </view>

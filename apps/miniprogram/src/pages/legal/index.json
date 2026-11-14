@@ -1,6 +1,7 @@
 {
   "usingComponents": {
     "nav-bar": "/components/nav-bar/index",
-    "ui-icon": "/components/ui-icon/index"
+    "ui-icon": "/components/ui-icon/index",
+    "ai-public-browse": "/components/ai-native/ai-public-browse/index"
   }
 }

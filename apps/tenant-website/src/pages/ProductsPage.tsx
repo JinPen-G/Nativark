@@ -9,6 +9,7 @@ import { toIsoDateTime } from '../data/datetime';
 import { Breadcrumbs, PageHeading } from '../components/PageHeader';
 import { CatalogConditions } from '../components/CatalogConditions';
 import { useActiveRail } from '../hooks/useActiveRail';
+import { ClientPublicBrowse } from '../features/ai-native/ClientPublicBrowse';
 
 export function ProductsPage() {
   const { tenant, tenantKey, tenantCode, isRemote, productsReady, href, language, localizeProduct, t } = useSite();
@@ -104,6 +105,8 @@ export function ProductsPage() {
     <Breadcrumbs items={[{ label: t('home'), to: href('/') }, { label: category?.name || t('allProducts') }]} />
     <PageHeading title={categoryTitle} description={categoryDescription} />
     <CatalogConditions params={params} onApply={setParams} note={conditionNote} />
+    {isRemote && tenantCode && activeCategory && <ClientPublicBrowse tenantCode={tenantCode} serviceCode={activeCategory.id}
+      kind="catalog" english={language === 'en'} loginHref={href(`/login?redirect=${encodeURIComponent(`/category/${activeCategory.id}`)}`)} />}
     <div className="catalog-layout"><aside className="catalog-sidebar"><h2>{t('productCategory')}</h2><nav ref={categoryRail} aria-label={t('productCategory')}><Link className={selectedCategory === 'all' ? 'active' : ''} aria-current={selectedCategory === 'all' ? 'page' : undefined} to={categoryTo()}>{t('allProducts')} <span>{allProducts.length}</span></Link>{tenant.categories.map(item => <Link className={selectedCategory === item.id ? 'active' : ''} aria-current={selectedCategory === item.id ? 'page' : undefined} key={item.id} to={categoryTo(item.id)}>{item.name}<span>{allProducts.filter(product => product.categoryId === item.id).length}</span></Link>)}</nav></aside>
       <div className="catalog-main"><div className="catalog-toolbar"><form onSubmit={event => { event.preventDefault(); updateParam('search', searchInput.trim()); }}><SearchOutlined /><input value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder={t('searchProducts')} aria-label={t('searchAria')} /><button type="submit">{t('search')}</button></form><span>{t('itemCount', { count: filtered.length })}</span><select value={sort} onChange={event => setSort(event.target.value)} aria-label={t('sortLabel')}><option value="recommended">{t('recommendedSort')}</option><option value="price-low">{t('priceLow')}</option><option value="price-high">{t('priceHigh')}</option><option value="rating">{t('ratingSort')}</option></select></div>
         {activeCategory && activeCategory.children.length > 1 && <div className="filter-chips" aria-label={t('subcategory')}><button className={selectedSub === 'all' ? 'active' : ''} onClick={() => updateParam('sub', 'all')}>{t('categoryAll')}</button>{activeCategory.children.map(child => <button key={child.id} className={selectedSub === child.id ? 'active' : ''} onClick={() => updateParam('sub', child.id)}>{child.name}</button>)}</div>}

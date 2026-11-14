@@ -19,11 +19,12 @@ interface CatalogData {
   cards: ItemCard[];
   view: ViewState;
   total: number;
+  publicServiceCode: string;
 }
 
 Page({
   behaviors: [themeBehavior],
-  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0 } as CatalogData,
+  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0, publicServiceCode: '' } as CatalogData,
   serviceCode: "" as string,
   loadVersion: 0,
   unsubscribe: undefined as (() => void) | undefined,
@@ -53,7 +54,8 @@ Page({
 
   applyMerchant(info: MerchantInfo) {
     const resolved = resolveServiceCode(info);
-    this.setData({ services: info.services.map((row) => ({ code: row.code, name: row.name, active: row.code === resolved, paused: row.status === "paused" })) });
+    this.setData({ services: info.services.map((row) => ({ code: row.code, name: row.name, active: row.code === resolved, paused: row.status === "paused" })),
+      publicServiceCode: info.services.some(row => row.code === resolved && row.status === 'open') ? resolved ?? '' : '' });
     return resolved;
   },
 

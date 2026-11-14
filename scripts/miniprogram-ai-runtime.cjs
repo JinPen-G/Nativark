@@ -8,6 +8,11 @@ const crypto = require('node:crypto');
 const vm = require('node:vm');
 
 const exportsAllowed = Object.freeze([
+  'AI_CLIENT_PUBLIC_HTTP', 'aiClientPublicSessionRequestSchema', 'aiClientPublicReadRequestSchema',
+  'aiClientPublicPreparationRequestSchema', 'aiClientPublicOperationRequestSchema', 'aiClientPublicContinuationRequestSchema',
+  'aiClientPublicContinuationReadRequestSchema', 'aiClientPublicSessionResponseSchema', 'aiClientPublicReadResponseSchema',
+  'aiClientPublicPreparationResponseSchema', 'aiClientPublicOperationResponseSchema', 'aiClientPublicContinuationResponseSchema',
+  'createAiClientPublicContinuitySession',
   'AI_CLIENT_ENTRY_HTTP_DRAFT', 'AI_CLIENT_HOST_CAPABILITIES_VERSION', 'AI_CLIENT_QUOTE_PREPARATION_VERSION',
   'AI_CLIENT_QUOTE_BOOKING_VERSION', 'aiClientHostCapabilitiesRequestSchema', 'aiClientHostCapabilitiesSchema',
   'aiClientQuotePreparationRequestSchema', 'aiClientQuoteConfirmationRequestSchema', 'aiClientQuotePreparationResponseSchema',

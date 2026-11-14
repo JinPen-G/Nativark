@@ -6,6 +6,28 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain22-public-original-consumers-20261114"></a>
+## AIN-22 网站与客户小程序的公开浏览、登录续接消费者（2026-11-14）
+
+前置[匿名HTTP阶段](#ain21-public-continuity-http-20261114)固定 `6a6dc3c5897033264a12a9ad2f5677d8c14724b0` 已推并回读GitHub。本阶段21源码将既有网站商品／帮助页和微信目录／帮助页接回同一原合同，不创建另一套预约或客户认证。shared[原请求生命周期](../../packages/shared/src/ai-client-public-session.ts)仅缓存tenant／service／kind、短公开归属、原operationKey、原引用hash／期限及明确续接的owner marker／原receipt；公开正文、客户Bearer、模型输入和批准均不保存。写前落原键并读回；写应答丢失、页面重开或重点击只读原操作，不重新prepare／continue。原续接receipt独立当前客户身份读取，不先依赖匿名令牌或新发布。
+
+[网站API](../../apps/tenant-website/src/features/ai-native/client-public-api.ts)固定当前tenant／service和公开路由，无客户令牌的公开POST与原customerFetch的明确续接分开，POST不refresh／replay，超时有界。实际[React消费者](../../apps/tenant-website/src/features/ai-native/ClientPublicBrowse.tsx)挂在现有ProductsPage／DocumentPage，仅真实发布空间展示；sessionStorage按页面／空间隔离，当前账号／generation改变撤回旧视图，登录不自动续接。保留浏览→登录→明确“以当前账号继续”→核对原记录，传统选品／报价页面始终独立。英文与现有主题／按钮复用，不新增视觉框架。
+
+[微信API](../../apps/miniprogram/src/api/ai-public.ts)只走原http和受控vendor运行时；http只允许原wechat public prepare／operation／continue传递签名归属头，不开放任意自定义header。[组件](../../apps/miniprogram/src/components/ai-native/ai-public-browse/index.ts)绑定原service／kind、当前客户session与contextVersion，隐藏／卸载／切空间／身份事件立即撤回；重开只读原locators，跨重开owner marker由原签名客户端token中的sid作本地相等比较，服务端仍原Auth校验，不用本地解析授予权限。catalog／legal原JSON和WXML登记；微信没有runtime require shared／zod。窄shared出口及原[内存打包入口](../../scripts/miniprogram-ai-runtime.cjs)只增加这组合法合同与生命周期，沿原来源／许可／无外部依赖门禁，不新增测试或临时脚本。
+
+| 必要冒烟／类型（均 `node --no-compilation-cache -`） | 实际结果与stdin SHA-256 |
+| --- | --- |
+| shared端侧生命周期→标准provider／Controller／Guard／原ClientAuth／材料 | `8d02e366e8e5850507c00b86c8d52f3ab33c787b2186be1aca6494580f224bf7`／退出0；prepare1、明确continue1；响应丢失重开只readContinuation2，2原材料／2log、Task／Run／模型／业务0；停用和过期独立原读，换客户session拒绝，存储无公开正文／客户Bearer。 |
+| 原键unknown、持久化失败、错存储和隐藏迟到响应 | `4857d11e263fb7d76aba854cdbb8fa5d11c4e4ae038b6a6734f522d4264d4f6e`／退出0；5场景，prepare仅1次；无法写回原locator不派发，隐藏晚响应不写新状态或换键。 |
+| 实际React控件和微信Component有限宿主 | `fd2aa2121bd73fcc52497fdb197d8ad53b23288ee8a769a9f710511ebda27550`、`58315267ccb1404bdfa7edc3d7d24e4a7db8902c3be0db352bb7e202576201df`均退出0；分别4／5场景，登录／hide-show不自动续接，明确按钮只prepare1／continue1，换账号旧控制撤回。有限hooks／Component模拟，不冒称浏览器或微信真机。 |
+| 网站实际API传输及原微信HTTP窄header | `c847b2804287f3833cd5001ba9425af3ab19fb539ed1d2a4ca386eaf96fe99d7`、`e3fd36777f287da2a21100cf61a2a0cbefe53463f9f63107958e4f4206733246`均退出0；公开不附客户Bearer，续接才原Auth，401不重放，错空间及非登记header路径拒绝。 |
+| 本树shared内存声明→实际Web／微信两页面最终类型 | `23caef98b8d81d0ccdb4856f38f3899bf393780a7956f94a20c8269e8ba1e24d`／退出0；TS5.9.3，Web4根／281源、微信4根／226源零诊断，117份声明只在内存。 |
+| 窄客户运行时内存bundle／无Node或浏览器全局 | `90a8b2c3a0d4e437a722754dd829c9c22ce3b4176b0301cfd0d7fcd960baae80`／退出0，116474字节、58出口、31必要来源，bundle SHA `d49d686b55cdc22ab15c45eee69207b7b420c897a3938c3fb68181661c47f71b`；无structuredClone／window／document等全局仍可创建idle生命周期，未保存dist或依赖副本。 |
+
+关键固定blob：shared session `a7c2789423d6fcc344ba13abd52e874fdaaae9f8`、Web API `73cb6b98db1e4e3e831b11156ba1a48dec7a993c`／React `76d4e162d7a4bb7cf93d03224c25c2fca9dba013`、微信API `e88427b50d6187bc16c2c84c56fe135c6256418a`／Component `8b1ee88637a6114375c07576ff8daf861043833e`，全部来源按本阶段固定提交。初次API参数因Object.freeze失去上下文类型出现implicit-any，补正式共享类型；直接把ES2022 shared源码当微信ES2020入口出现URL／TextEncoder等诊断，验证改为本树纯内存声明，不给生产加浏览器shim或改语言目标。两次Root驱动重复声明client／顶层await混CommonJS失败均保留，改内存驱动后同组通过，没有修改测试文件。impeccable本机可用上下文binary缺失，没有安装，直接读取本树PRODUCT／DESIGN和craft-floor，沿原视觉系统实现；未运行浏览器。
+
+21源码与原记录／接续及时提交普通推送，本项仍受AIN-21目标选品及企业真实消费者缺口约束，AIN-22仍75%、原28项83.9%／19项研发验收、ENTRY70.8%不变。dev1持续目标两叶，dev2持续原时延叶，不等本片或main。验证只用本树offline preload／不可达DB、内存audit和单任务 `output/.tmp/ain21-public-continuity-20261114`，进程退出、audit0，目录未创建；没有测试脚本／文件／生成包残留。`git diff --check`退出0；docs检查仍4处既有缺链，不补造附件。真实浏览器／微信／DB／业务或外部模型实测仍由负责人执行，未声明生产启用。
+
 <a id="ain21-public-continuity-http-20261114"></a>
 ## AIN-21 匿名公开材料、明确登录续接与正式HTTP装配（2026-11-14）
 
@@ -29,7 +51,7 @@
 
 失败保留：首版unknown构造误用Repository错误枚举，实际类型检查拒绝，改原continuity unknown错误。首次全文入口最后微信组缺原 `miniProgramChannel.findFirst`，直接诊断确定旧夹具缺端口，只补内存null来源后复验。严格响应初稿使用错误客户端版本／漏必需membershipStatus，并有`satisfies`换行语法错误，实际类型拒绝后复用原 `CLIENT_API_VERSION` 和完整字段；旧目录夹具的`day`也被拒绝，补成原`day_24h`，不放宽生产校验。AppModule首导入曾触发环境文件读取守卫，audit非零／退出1；后仅在模拟ConfigModule使用ignoreEnvFile，守卫不改，重验audit0。没有删除旧断言、修改测试脚本或把驱动错误称生产成功。
 
-本阶段13源码＋原两册立即提交／普通推送AI任务分支，按原固定提交供PM串行整合。**AIN-21仍75%**：匿名后端片完整，但选品前目标描述→真实客户候选→明确选择→Core报价尚未接完，客户公开页面消费留AIN-22。当前原28项83.9%／19项研发验收、ENTRY70.8%均不因本片上调。dev1已继续核目标入口最小接点，dev2继续原时延叶，不等提交／main。
+本阶段13源码＋原两册提交 `6a6dc3c5897033264a12a9ad2f5677d8c14724b0` 并普通推送AI任务分支，GitHub已回读同SHA，供PM按固定提交串行整合。**AIN-21仍75%**：匿名后端片完整，但选品前目标描述→真实客户候选→明确选择→Core报价尚未接完，客户公开页面消费见后继[AIN-22](#ain22-public-original-consumers-20261114)。当前原28项83.9%／19项研发验收、ENTRY70.8%均不因本片上调。dev1已继续目标入口两叶，dev2继续原时延叶，不等提交／main。
 
 本轮全在内存验证，固定不可达DB、本树offline preload、写根／TEMP／cache集中 `output/.tmp/ain21-public-continuity-20261114`，audit0，验证进程退出，目录未创建，无临时脚本／生成包／依赖副本。`git diff --check`退出0；`node scripts/validate-docs.cjs`退出1，仍仅导航3处历史附件＋稀疏网站示例1处缺链，无新增链接或任务算术错误，不为补绿伪造附件。真实HTTP、MySQL事务并发、微信／浏览器与外部模型仍由负责人后续实测，未称生产启用。
 

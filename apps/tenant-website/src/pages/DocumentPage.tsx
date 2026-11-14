@@ -7,6 +7,7 @@ import { clientApi, type PublicDocumentResponse } from '../data/apiClient';
 import { createElement, type ReactNode } from 'react';
 import { PageHeading } from '../components/PageHeader';
 import { parseClientRichText, type ClientRichTextNode } from '@rental-os/shared';
+import { ClientPublicBrowse } from '../features/ai-native/ClientPublicBrowse';
 
 function DocumentBody({ body }: { body: string }) {
   const nodes = parseClientRichText(body);
@@ -60,6 +61,8 @@ export function DocumentPage({ kind }: { kind: Kind }) {
         <Link to={href('/privacy')} aria-current={kind === 'privacy_policy' ? 'page' : undefined}><ShieldCheck />{t('docPrivacyPolicy')}</Link>
       </nav>
       <div className="doc-reading">
+        {kind === 'help' && isRemote && tenantCode && tenant.categories[0] && <ClientPublicBrowse tenantCode={tenantCode}
+          serviceCode={tenant.categories[0].id} kind="help" english={en} loginHref={href('/login?redirect=%2Fhelp')} />}
         {loading ? <LoadingState label={t('loading')} /> : <>
           {doc && <div className="doc-body">{doc.intro && <p className="doc-intro">{doc.intro}</p>}{doc.body && <DocumentBody body={doc.body} />}{doc.url && <p><a className="external-document-link" href={doc.url} target="_blank" rel="noreferrer">{t('docExternalLink')}<ExternalLink /></a></p>}{!doc.body && !doc.url && !doc.intro && !doc.faq?.length && <PageState icon={<Document />} title={t('docNotProvided')} />}</div>}
           {faq.length > 0 && <><label className="help-search"><Search /><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder={en ? 'Search rental questions' : '搜索租赁问题'} aria-label={en ? 'Search rental questions' : '搜索租赁问题'} /></label>
