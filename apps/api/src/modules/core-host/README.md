@@ -24,6 +24,8 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 
 ## 平台管理 HTTP
 
-[CoreManagementController](core-management.controller.ts)消费上面的原管理/绑定组合以及[当前受控目录读取](original-core-catalogue.ts)，五条路径、输入/输出和接口资料共用 [CORE_MANAGEMENT_HTTP](../../../../../packages/core-contracts/src/management-http.ts)。模块由 `CoreManagementHttpModule.register(application)` 显式登记，application由原服务组合提供。
+[CoreManagementController](core-management.controller.ts)消费上面的原管理/绑定组合以及[当前受控目录读取](original-core-catalogue.ts)，八条路径、输入/输出和接口资料共用 [CORE_MANAGEMENT_HTTP](../../../../../packages/core-contracts/src/management-http.ts)。模块由 `CoreManagementHttpModule.register(application)` 显式登记，application由原服务组合提供。
+
+[当前管理事实读取](original-core-management-reads.ts)提供授权、成员分配和绑定的修订，页面取得当前事实后再提交变更。三个只读操作沿同一HTTP声明和Controller消费，SaaS管理者才能读指定租户授权，租户管理者读取本租户成员及绑定。缺记录明确返回unavailable，停用成员的撤回事实仍可核对。所有读取在原权限锁下完成并在返回前复核会话。
 
 目录读取在原SaaS会话与角色锁下完成，返回前复核当前权限。租户授权和成员分配分别通过其原服务验证。Controller将已知schema/权限/冲突/不可用映射到对应状态码，未知错误沿原异常链抛出。原主Guard需要消费同源 `coreManagementHttpPolicy`，原AppModule明确登记本模块，接口组合消费 [同源OpenAPI](../../../../../packages/core-contracts/src/management-openapi.ts)，这些公共入口由原窗口核定。

@@ -13,6 +13,11 @@ export interface CoreManagementHttpApplication {
   management: ReturnType<typeof composeOriginalCoreManagement>;
   bindings: ReturnType<typeof composeOriginalCoreBindings>;
   registered(): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.registered.response>>;
+  reads: {
+    tenantGrant(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readTenantGrant.response>>;
+    memberAssignment(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readMemberAssignment.response>>;
+    binding(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readBinding.response>>;
+  };
 }
 const applicationToken = Symbol("platform.core-management.http");
 
@@ -43,6 +48,21 @@ export class CoreManagementController {
   @Post(CORE_MANAGEMENT_HTTP.bindingOperation.path) @HttpCode(200)
   bindingOperation(@Body() body: unknown) {
     return this.respond(() => this.application.bindings.service.readOperation(this.application.bindings.principals.current(), body));
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.readTenantGrant.path) @HttpCode(200)
+  readTenantGrant(@Body() body: unknown) {
+    return this.respond(() => this.application.reads.tenantGrant(body));
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.readMemberAssignment.path) @HttpCode(200)
+  readMemberAssignment(@Body() body: unknown) {
+    return this.respond(() => this.application.reads.memberAssignment(body));
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.readBinding.path) @HttpCode(200)
+  readBinding(@Body() body: unknown) {
+    return this.respond(() => this.application.reads.binding(body));
   }
 
   private async respond<T>(work: () => Promise<T>): Promise<T> {

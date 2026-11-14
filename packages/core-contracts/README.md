@@ -102,7 +102,7 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 ## Core 管理 HTTP 合同
 
-`CORE_MANAGEMENT_HTTP`给出当前平台管理面的五个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，读目录、租户授权、成员分配、绑定和原初始化收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
+`CORE_MANAGEMENT_HTTP`给出当前平台管理面的八个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实及原初始化收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
 
 | 操作 | 方法与相对路径 | 原管理要求 |
 | --- | --- | --- |
@@ -111,10 +111,15 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 | 成员Core分配/撤回 | POST `member-assignments` | 本租户账号管理权 |
 | 首次绑定/复用绑定 | POST `bindings` | 本租户管理权、当前Core/成员使用权和初始化范围 |
 | 原初始化操作只读核对 | POST `binding-operations/read` | 当前租户管理权与本人原操作 |
+| 当前租户Core授权及修订 | POST `tenant-grants/read` | SaaS管理员与租户管理权 |
+| 当前成员Core分配及修订 | POST `member-assignments/read` | 本租户账号管理权 |
+| 当前Core范围绑定及修订 | POST `bindings/read` | 本租户管理权 |
 
 `coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](../../apps/api/src/modules/core-host/README.md)
 
 成功响应沿原 `{ data, requestId }` 信封，原键冲突与对象修订冲突返回409，当前权限不足403，部署/数据未就绪503，输入400和会话401分别表达。初始化配置由所选Core自己的schema解析，接口资料链接该Core配置说明。目录投影只给正式显示字段，完整清单沿受控注册维护。
+
+提交管理变更前，页面先使用对应只读入口取得当前修订。返回 `recorded` 时使用事实中的 `revision`，尚未建立记录返回 `unavailable`，初次变更使用0。读取始终核当前主体和管理权限，停用/撤回状态及旧收据仍各自保留。绑定读取按租户/Core/容器定位，原操作核对继续使用单独的原收据入口。
 
 ## 声明页面与操作
 
