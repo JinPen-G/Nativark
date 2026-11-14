@@ -145,6 +145,66 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
 
+<a id="core-ownership-baseline-20261114"></a>
+
+## 原组合的数据归属与下一公共片（2026-11-14）
+
+服务端合同固定于 `953fccad0ad538d0dc27aad8df717ba52297baa7`，普通推送成功并由`ls-remote`回读一致。本阶段继续以已包含的main `6ca19ac34a3260405ba24388a4aa2a933450e70b`为原行为基线，源代码读取来自本树已核定文件及该固定Git对象，不读取其他研发活动WIP。以下为待实现连接的范围冻结；每片的实际运行结果仍须另取，不能将静态归属盘点当作全功能通过。
+
+### 数据所有者及独立构建的最小范围
+
+核读[Prisma模型](../../../apps/api/prisma/schema.prisma)、原仓储调用、原生SQL和实际服务。当前238个模型分为公共候选29、AI86、Rental及客户端110、企业Rental扩展12、营销申请1；这是所有模型的排查分组，部分通用运输和业务政策共处的表须继续拆字段/适配，不能按前缀自动搬表。AST扫描找到了12个企业模型没有delegate调用，随后确认企业大量使用原生SQL；这不是未使用代码或可删表证据。
+
+| 数据集合与唯一所有者 | 生产者、直接消费者及拆分方式 |
+| --- | --- |
+| 平台身份：Tenant、OrganizationUnit、User、AuthSession、AuthLoginFailure、Role、Permission、UserRole、RolePermission | [平台仓储](../../../apps/api/src/modules/platform/platform.repository.ts)与[Auth](../../../apps/api/src/modules/auth/auth.service.ts)拥有登录/角色/会话写入；Guard、AI可信主体及所有业务调用方消费。公共查询只投影账户/租户/角色；当前Tenant/User/Organization反向Rental关系、会话currentWorkspaceId等由组合schema/适配维护。不能复制另一套用户或令牌服务来做无Core登录 |
+| 公共设置：UserAppearancePreference、TenantAppearanceProfile、SystemParameterSet、FilterPreset | [账号外观](../../../apps/api/src/modules/client/account-appearance.service.ts)、[租户外观](../../../apps/api/src/modules/client/tenant-appearance-profile.service.ts)及平台仓储。外观虽在client目录仍属公共面；租户外观首次保存会读旧ClientChannelProfile补旧值，需将此历史读取交Rental兼容适配；不能在无Core宿主上查询不存在的渠道表。参数/筛选模板保留原用户与租户范围，业务参数由所属Core管理 |
+| 平台订阅：TenantSubscription、TenantSubscriptionSegment、SubscriptionFeatureCatalog、TenantFeatureGrant、SubscriptionRequest、SubscriptionEvent、SubscriptionStandardPrice | [SubscriptionService](../../../apps/api/src/modules/subscription/subscription.service.ts)唯一计算统一期限及办理事实；Core消费当前期限/权益，品类身份由Rental适配供给。新Core授权不改这些期限或恢复主动撤权 |
+| 公共运输与审计：OperationLog、FileAsset、FileUploadSession、NotificationTemplate、NotificationSendLog、ExternalAdapterLog、TenantIntegrationConfig、AsyncJob、DocumentPrintJob | [审计](../../../apps/api/src/common/operation-log.service.ts)、[集成目录](../../../apps/api/src/modules/integrations)、[文件ACL](../../../apps/api/src/modules/files/file-business-access.service.ts)、jobs/notifications原入口。存储/发送/排队机制公共；businessType、模板内容、上传场景及业务文件ACL仍归Core，需登记处理器。FileAsset等字段含workspace/业务关联，不能仅搬类就视为无Rental依赖。原收据与任务引用、延迟回调执行者保持 |
+| Rental配置与经营范围：全部Rental模型、BusinessWorkspace、WorkspaceMember、TenantRentalProfile、WorkspaceCapabilityInstance/AuditEntry、CapabilityHookAuditEntry、OfficialCalendarSource/Version | 原[Rental服务](../../../apps/api/src/modules/rental-core/rental-core.service.ts)、[能力服务](../../../apps/api/src/modules/rental-core/workspace-capability.service.ts)及品类解析/治理所有。经营空间单品类、成员角色覆盖/地点过滤保留，包装成Core范围适配；工单不继承这组表。日历来源及原历史快照继续按Rental原所有者维护 |
+| Rental客户/企业事实：Customer开头全部模型、企业12模型 | 平台目录内[会员](../../../apps/api/src/modules/platform/membership.service.ts)、[客户仓储](../../../apps/api/src/modules/platform/shared-customer.repository.ts)、[企业结算](../../../apps/api/src/modules/platform/customer-corporate-settlement.service.ts)及[企业扩展](../../../apps/api/src/modules/enterprise)真实读写；保持租户级会员与企业关系、空间级订单/资金范围的区别。其他Core不得因同名customer复用其表；当前企业审批/收据端口仍归ECP/Core原作者 |
+| Rental客户端渠道：ClientChannelProfile/Workspace、WebsiteChannelProfile/Asset、MiniProgramChannel、ClientWechatIdentity、ClientRegistrationChallenge、ClientAuthSession、ClientApiRateBucket、ClientOrderDeliverySnapshot及CustomerDeliveryAddress | [client目录](../../../apps/api/src/modules/client)维护现有客户身份、发布空间、网站/小程序和本人订单链。渠道配置有租赁发布空间及默认空间，保留在Rental接入；WebsiteAsset存在公共品牌使用候选，提取其字节运输需沿当前上传/公开读取契约核查，不能让公共Logo强依赖Rental表 |
+| Rental设备及支付事实：TBoxDevice、PaymentWebhookEvent、PaymentReconciliationBatch/Line及Rental支付/资金模型 | 设备/支付运输可通过窄端口复用，当前命令与资金引用属于Rental；回调须定位原订单/支付操作，不能由请求自报coreId路由。支付/退款/对账unknown保留原审计和恢复，不能换Core重复执行 |
+| AI：Ai开头86模型 | 原[AI组合](../../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)与领域仓储/原生SQL所有；通用任务、Gateway/预算与行业动作适配逐片分离。当前表广泛包含workspace/原业务引用，不能先重命名或重建；无AI宿主不依赖其模型/初始化。有AI时保留历史任务、工具/批准版本、账及原收据 |
+| 营销：DemoRequest | [演示申请模块](../../../apps/api/src/modules/demo-requests)及营销网站所有；属于可选营销能力，无Core公共登录不以申请模块为必需依赖 |
+
+259份现有迁移中，多份同一SQL同时涉及公共表、Rental外键/业务表或AI关系；例如[初始迁移](../../../apps/api/prisma/migrations/20260608000100_init_store_rental_schema/migration.sql)与[Rental初版](../../../apps/api/prisma/migrations/20260813000100_add_rental_core_v1/migration.sql)。对旧表的创建/移除和重命名保持历史原文，不能按文件名前缀裁剪后在已有库重放。索引型SQL也须登记归属，已补核[AI检查索引](../../../apps/api/prisma/migrations/20261007211000_ai_inspection_submission_index/migration.sql)与[资产锁查询索引](../../../apps/api/prisma/migrations/20261101010000_asset_hold_current_read_indexes/migration.sql)。
+
+实施方向为分别生成公共及所选Core的受限数据适配/构建，再由同进程组合明确持有实际事务。公共schema不声明未选Core的导航关系；旧组合保留原表名/ID/FK和历史迁移链。新空库的公共基线与既有组合的增量演进是两条明确入口，不能以旧完整链先建全部Rental表再隐藏来证明无Core。实际schema拆分/组合生成、迁移账归属和真库演练待06/12固定窗口，当前未产生或执行SQL。
+
+### 原功能与所有直接消费面的去向
+
+| 基线功能、角色与实际入口 | 固定合同/数据及必要验证入口 | 当前证据与下一切片 |
+| --- | --- | --- |
+| SaaS/租户登录、退出、本人安全、当前会话：[Auth](../../../apps/api/src/modules/auth/auth.controller.ts)与[Guard](../../../apps/api/src/common/api-auth.guard.ts) | 原AuthUser/LoginResponse、用户/角色/AuthSession；[登录锁定](../../../tests/auth-login-lockout.test.cjs)、[租户权限](../../../tests/tenant-admin-privilege-write.test.cjs)、[租户成员政策](../../../tests/tenant-membership-policy.test.cjs) | 当前未运行这些整链；04拆基础身份/业务范围，保留签名、audience、撤权、空间修订及原可信票据 |
+| SaaS租户管理、租户账号/角色/组织和公共参数：[平台Controller](../../../apps/api/src/modules/platform/platform.controller.ts) | 原TenantSummary/SystemUser/Role、参数和操作日志；[租户访问原子性](../../../tests/tenant-access-atomic.test.cjs)、[公共SaaS](../../../tests/saas-foundation.test.cjs) | 当前listTenants带Rental订单/空间统计，bootstrap要求品类并写门店角色。03/04新公共创建入口只建原平台事实；旧租赁bootstrap继续原同事务编排，不能把回调改为可选成功 |
+| 租户与账号外观/语言、公共后台框架：[租户外观](../../../apps/api/src/modules/client/tenant-appearance-profile.controller.ts)、[会话状态](../../../apps/admin/src/features/auth/authStore.ts) | 原appearance合同/乐观锁、公共外观表；[外观检查](../../../tests/admin-appearance-settings.test.cjs)、[品牌检查](../../../tests/admin-branding.test.cjs) | main语言/主题已集成固定原作者成果，当前不重复宣称实页验收。07保留React/UIArc、声音、主题/语言，拆旧渠道补值与新Core可见性 |
+| 订阅/续费申请/期限/额外权益：[订阅目录](../../../apps/api/src/modules/subscription) | [共享订阅合同](../../../packages/shared/src/subscription.ts)与统一期限表；[订阅服务](../../../tests/saas-subscription-service.test.cjs)、[日历](../../../tests/saas-subscription-calendar.test.cjs) | 原SubscriptionService读取品类身份；06经登记适配消费，期限/未知历史政策保持，不新增收费模型 |
+| Rental配置/品类/商品/资产/报价/订单/履约/检查/资金：[原业务](../../../apps/api/src/modules/rental-core/rental-business.service.ts) | 原core运行时、不可变版本/快照与仓储；[Core](../../../tests/rental-core-v01.test.cjs)、[业务](../../../tests/rental-business-v1.test.cjs)、[定价](../../../tests/rental-pricing-strategy.test.cjs)、原各业务专用用例 | 08按受影响功能取前后对照；原接续明确库存/恢复fixture、续租脚本历史改写及真库缺口，保留归属。当前新合同未触及业务算法，不能关闭这些问题 |
+| 租赁企业后台、本人客户网站/小程序、员工端：[企业](../../../apps/api/src/modules/enterprise)、[Client API](../../../apps/api/src/modules/client/client-api.service.ts) | 原企业grant/审批/财务投影、客户/员工audience；[企业政策](../../../tests/enterprise-policy.test.cjs)、[企业消费](../../../tests/enterprise-consumers.test.cjs)、[客户渠道](../../../tests/client-channel.test.cjs)、[员工小程序](../../../tests/staff-miniprogram-static.test.cjs) | ECP原固定接线证据可追溯；真实历史空间/账单/保证金及小程序基线类型失败仍未验/未解。本片不把普通客户改成租户员工权限 |
+| AI任务/工具、MCP/Harness：[AI组合](../../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)、[MCP包](../../../packages/mcp-server)、[Harness插件](../../../clients/harness-plugin/README.md) | 原工具目录/批准/任务/账/收据；[原审计](../../../tests/mcp-original-audit.test.cjs)、原AI定向入口 | 09只改已固定Core接点；AI15/25活动成果由原作者完成。本片原MCP运行回归曾被自动审批拒绝，仍未验；现有AI默认关闭不能替代正向验收 |
+| 文件/通知/支付回调/作业/打印：[集成目录](../../../apps/api/src/modules/integrations)、[ACL](../../../apps/api/src/modules/files/file-business-access.service.ts)、[到期作业](../../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) | 原上传/运输/支付引用、租户/空间权限和幂等；[文件生命周期](../../../tests/file-storage-lifecycle.test.cjs)、[支付回调](../../../tests/payment-callback-integrity.test.cjs)、[通知租约](../../../tests/rental-notification-lease.test.cjs)、[作业调度](../../../tests/rental-due-job-scheduler.test.cjs) | 原运输与业务解释混合；06/08登记原执行者，保留迟到/重复/unknown，不因停用统一丢弃原收尾 |
+| 页面、API、shared、构建/离线资料：[原OpenAPI](../../../apps/api/src/contracts/openapi-document.ts)、[后台路由](../../../apps/admin/src/app/AppRouter.tsx)、[shared](../../../packages/shared/src/index.ts) | 原API/DTO/权限静态脚本、各包tsconfig和构建。后台shared源码别名及查询epoch见[queryClient](../../../apps/admin/src/app/queryClient.ts) | 现有API语义/operationId/schema/深链接保留；新Core贡献走独立合同。07增加Core/容器缓存隔离；03组合构建不能继续通过shared总出口把Rental带入无Core宿主 |
+
+全Git源码集合还包括`packages/ui-arc/ui-motiq/ui-tablecn/web-client`、营销站及克隆参考工程、保留Harness上游、测试/fixture和脚本。按已有来源/许可识别vendor/原型/生成物，保留唯一原稿；不能把源码扩展名总数当自有文件数，也不按“无delegate引用”删SQL消费者。实际逐模块注释/死分支/错误处理整改随所属切片进行，本表是覆盖清单，不是整库代码质量已经验收。
+
+### 可交接的公共文件最小候选
+
+以下候选基于本节main和服务端合同固定提交，供PM为具体片指定唯一作者；在取得窗口前不写公共入口。每片先保持Rental旧消费者，然后接新Core，合并时仍取最新main并核增量。
+
+| 顺序 | 精确文件/方法 | 所需改动与退出条件 |
+| --- | --- | --- |
+| 1 | `platform.repository.ts` 的 `listTenants/findTenantByCode/findUserForLogin/toTenantSummary`；对应PlatformService薄转发 | 基础租户与用户投影不查询rentalProfile/业务计数；Rental提供已注册可选投影。既有租赁响应字段和值保持，无Core返回真实公共身份而非虚构品类 |
+| 2 | `platform.repository.ts` 的 `bootstrapTenant` / `platform.service.ts` 同方法及原DTO/Controller局部 | 独立公共创建入口复用原密码、用户/组织/角色/参数/审计；旧带品类bootstrap保留完整同事务Rental初始化。公共创建不种门店/业务模板；当前旧模板回执还描述演示车辆/订单，须与实际写入核同再整理，不能复制进公共入口 |
+| 3 | `auth.service.ts` 的 `resolveAccessContext/issueSession/buildLoginResponse/getSessionContext/getCategoryContext`，`api-auth.guard.ts` 对应范围/策略；原ALS最小附加Core范围 | 拆公共认证和每Core范围提供者，保留原签名/租户/成员/撤权/并发时点；采用独立合同的CorePrincipal/Scope/Binding，客户端自报coreId不授权。原workspace兼容字段和可信票据留Rental映射；新Core不继承默认经营空间 |
+| 4 | 原schema/迁移与原人员角色服务局部 | 新增部署/Core授权/成员分配/绑定/原操作记录，使用复合唯一键及当前修订；授权不扩成全员。初始化先锁当前授权，再锁绑定/原操作，写Core与审计，同事务提交后才发布缓存；完整Prisma只留私有组合适配 |
+| 5 | `app.module.ts` 最小受控装配；独立平台/选中Core数据及包配置 | 消费`registerCoreServers`和显式模块引用，只有通过兼容/数据检查才允许新准入；空组合不加载Rental/AI代码/作业/表。原组合保持唯一执行者；只建另一个能登录的旁路服务不能代替原公共代码抽离 |
+| 6 | `openapi-document.ts`、shared正式出口及后台Auth/路由/导航局部 | 原接口身份归属先分组，再消费新`composeCoreOpenApi`；旧Rental例外逐项固定。公共后台消费真实授权/成员分配/就绪，不把前端可见性当鉴权；旧缓存epoch与未保存保护保留 |
+
+现有技术指南§4.1/4.2将经营workspace/品类/capability写为所有经营API前提，§4.3只指shared总出口；与已批准PCH多行业合同存在适用范围差异。Rental原边界继续有效，新增Core采用自己的范围与独立正式合同。待相关实现片同步公共指南时明确将旧条款限定到Rental，不暗中按新源码改锁定规范。
+
+本阶段AST/SQL短命令退出0，覆盖模型和原API Controller/方法及跨模块调用定位；AST不覆盖动态SQL/字符串拼接/运行分支，已用实际企业SQL和索引SQL补核其局限。没有新增测试脚本、完整环境副本、SQL执行、业务网络或后台进程。本片仍需在实际公共窗口内取行为基线、完成迁移/构建决策及真实消费者验证；原任务不按盘点数量跨档。
+
 <a id="core-server-contract-20261114"></a>
 
 ## Core 服务端注册与生命周期合同（2026-11-14）
