@@ -10,9 +10,13 @@ import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "
 
 export const RENTAL_CONFIGURATION_REVISION_MAX = 2_147_483_647;
 
-/** A database row revision is a number, never a parsed category version or JSON
- * value. Missing rollout columns and malformed values remain unavailable. */
+/** MySQL raw unsigned integers may be bigint while model reads are number.
+ * Normalize only bounded positive integers; missing or malformed rows remain
+ * unavailable, without parsing strings or assuming an initial revision. */
 export function readRentalConfigurationRevision(value: unknown, source: string): number {
+  if (typeof value === "bigint" && value >= 1n && value <= BigInt(RENTAL_CONFIGURATION_REVISION_MAX)) {
+    return Number(value);
+  }
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > RENTAL_CONFIGURATION_REVISION_MAX) {
     throw new ConflictException(`${source}缺少合法的配置行修订`);
   }

@@ -1,5 +1,14 @@
 # Rental Core 开发记录
 
+<a id="configuration-revision-bigint-main-runtime-20261114"></a>
+## 本机MySQL配置修订bigint兼容补片（2026-11-14）
+
+负责人要求优先修复main运行报错并授权本机数据库升级。PM应用配置行迁移并刷新Client后，实际MySQL8.4.11/Prisma5.22的raw unsigned INT返回bigint1n，生成模型读取返回number1；原 `readRentalConfigurationRevision` 只接受number，使定时任务和启动回填拒绝合法配置修订。
+
+Core作者在原暂停状态下仅接受本次故障最小委派，固定main275064d40、[rental-state.repository](../../apps/api/src/modules/rental-core/rental-state.repository.ts)前像 `8cb656fdb860602bd3f30e1c1e1671d502189c14`、最终 `a59306345a7ef1df5e334ed7d5559430debd9630`。仅把原上限内的正bigint转换为number，缺字段/空值/字符串/浮点/零/负/超界继续拒绝，其他CAS/Outbox/声明未变。证据清单Git blob `74491d0330c6cc49bf1eb021bab70c5b5c2cacf5`，原9组边界/CAS核对和Shared121根/API961根类型0诊断，临时归集清单继续原作者负责。
+
+PM核当前前像后只接该单源，14条实际配置行均转换正确，完整API类型检查退出0。原dev重载后配置缺字段/修订类型错误0、多个60秒周期的定时任务错误0；正式开业只读配置10空间9正常，demo2既有版本/持久配置缺口保留。启动回填1个演示空间businessSettings=1，跳过8，demo2旧快照冲突1。实际命令/数据库/运行证据见[本机收口](../管理后台/管理后台-开发记录.md#main-database-runtime-upgrade-20261114)。Core持续开发仍按负责人暂停，原报价配置混用及其余CLOSE/CAT-GOV门槛不由本片关闭。
+
 建立日期：2026-10-31。来源：原2026-10-18 CLOSE任务、平台正式需求及平台开发记录。本册补齐专项证据入口，不把历史状态重新判定为当前完成度。
 
 [需求](<Rental Core-需求.md>) · [开发任务](<Rental Core-开发任务.md>) · [协作接续](<Rental Core-协作接续.md>)

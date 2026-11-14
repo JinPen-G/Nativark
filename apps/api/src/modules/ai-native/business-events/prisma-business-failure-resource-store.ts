@@ -66,8 +66,9 @@ const foreignKeys: Record<string, { table: string; columns: Array<[string, strin
   ai_failure_outbox_config_settings_fk: { table: 'rental_tenant_business_settings', columns: [['tenantId', 'tenantId'], ['configurationSettingsWorkspaceId', 'workspaceId']] }
 };
 
-// The complete approved CHECK from 20261111220000_ai_failure_resource_sources.
-// This is a schema witness, not a second resource rule or SQL to execute.
+// The original resource conditions, with an explicit boolean comparison for
+// MySQL CHECK typing. The forward repair preserves FALSE for a NULL predicate;
+// this schema witness is not a second resource rule or SQL to execute.
 const approvedResourceCheck = `COALESCE((
   (
     fulfillmentOrderId IS NULL AND configurationKind IS NULL AND configurationId IS NULL
@@ -119,7 +120,7 @@ const approvedResourceCheck = `COALESCE((
         AND configurationProfileTenantId IS NULL AND configurationSnapshotWorkspaceId IS NULL)
     )
   )
-), FALSE)`;
+), FALSE) = TRUE`;
 
 type CheckToken = { kind: 'word' | 'identifier' | 'string' | 'integer' | 'symbol'; value: string };
 type CheckNode = string | readonly CheckNode[];
@@ -127,8 +128,10 @@ type CheckNode = string | readonly CheckNode[];
 /** Parse only this CHECK's SQL expression grammar. MySQL's redundant brackets,
  * identifier quoting, Unicode string introducers and FALSE/0 may differ; AND/OR
  * precedence, null tests, operands and every literal must retain their meaning.
+ * Only the information_schema read may contain MySQL's escaped quote wrapper
+ * around an adjacent _utf8mb4 ASCII literal. It is not general SQL unescaping.
  * Unknown syntax, comments, collations and executable constructs fail closed. */
-function resourceCheckStructure(clause: string): string {
+function resourceCheckStructure(clause: string, metadata = false): string {
   if (!clause || clause.length > 65536) throw unavailable();
   const tokens: CheckToken[] = [];
   let offset = 0;
@@ -151,7 +154,28 @@ function resourceCheckStructure(clause: string): string {
     } else {
       const word = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(clause.slice(offset));
       const integer = /^[0-9]+/u.exec(clause.slice(offset));
-      if (word) { tokens.push({ kind: 'word', value: word[0].toLowerCase() }); offset += word[0].length; }
+      if (word) {
+        const value = word[0].toLowerCase();
+        tokens.push({ kind: 'word', value }); offset += word[0].length;
+        if (metadata && value === '_utf8mb4' && clause.slice(offset, offset + 2) === "\\'") {
+          // MySQL 8.4 CHECK_CLAUSE can wrap these literals with literal 5C27
+          // bytes, regardless of sql_mode. Decode only the two delimiters;
+          // an interior escape, quote or non-ASCII byte remains invalid.
+          offset += 2;
+          let literal = '', closed = false;
+          while (offset < clause.length) {
+            const next = clause[offset++];
+            if (next === '\\') {
+              if (clause[offset] !== "'") throw unavailable();
+              offset++; closed = true; break;
+            }
+            if (next === "'" || next < ' ' || next > '~') throw unavailable();
+            literal += next;
+          }
+          if (!closed) throw unavailable();
+          tokens.push({ kind: 'string', value: literal });
+        }
+      }
       else if (integer) { tokens.push({ kind: 'integer', value: integer[0].replace(/^0+(?=[0-9])/u, '') }); offset += integer[0].length; }
       else if ('(),=>'.includes(character)) { tokens.push({ kind: 'symbol', value: character }); offset++; }
       else throw unavailable();
@@ -271,7 +295,7 @@ export function createPrismaBusinessFailureResourceStorage(db: QueryDb, clock: (
         WHERE t.CONSTRAINT_SCHEMA = DATABASE() AND t.TABLE_NAME = 'ai_business_failure_outbox'
           AND t.CONSTRAINT_NAME = 'ai_failure_outbox_resource_check' AND t.CONSTRAINT_TYPE = 'CHECK'`);
       if (!Array.isArray(checks) || checks.length !== 1 || checks[0].enforced !== 'YES' || typeof checks[0].clause !== 'string') throw unavailable();
-      if (resourceCheckStructure(checks[0].clause) !== approvedResourceCheckStructure) throw unavailable();
+      if (resourceCheckStructure(checks[0].clause, true) !== approvedResourceCheckStructure) throw unavailable();
       const keys = await reader.$queryRaw<Array<{ name: string; position: number; columnName: string; targetTable: string; targetColumn: string }>>(Prisma.sql`
         SELECT CONSTRAINT_NAME AS name, ORDINAL_POSITION AS position, COLUMN_NAME AS columnName,
           REFERENCED_TABLE_NAME AS targetTable, REFERENCED_COLUMN_NAME AS targetColumn
