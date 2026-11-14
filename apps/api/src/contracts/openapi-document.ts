@@ -2765,6 +2765,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: 'Current authorized tenant review only. Returns a keyed original source/version reference, never old keys, masks, prompts or logs. Explicit save with legacySource requires revision zero, a replacement credential, operationKey and disabled BYOK; original settings remain unchanged and current capability/budget is not granted.',
     requestSchema: objectOf({}, [], false), responseSchema: 'AiLegacyModelConfigurationDraft' },
   ...(['operator', 'staff'] as const).flatMap(audience => [
+    ['candidates/observation', 'outboxObservation'],
     ['candidates/read', 'readCandidate'], ['candidates/prepare', 'prepareCandidate'], ['candidates/prepare-pending', 'preparePending'],
     ['candidates/pending/continue', 'continuePendingBatch'],
     ['inputs/prepare', 'prepareInput'], ['inputs/read', 'readInput'], ['tasks/create', 'createTask'], ['tasks/read-creation', 'readCreation'],

@@ -7,6 +7,7 @@ import { Accordion } from '@/components/ui';
 import { useAuthStore } from '@/features/auth/authStore';
 import { useAiManagementLocale } from './management-locale';
 import { AutomationReviewWorkbench } from './AutomationReviewWorkbench';
+import { BusinessOutboxObservation } from './BusinessOutboxObservation';
 import { createAutomationOriginalNavigation } from './automation-original-navigation';
 import { AutomationRefundRecords } from './AutomationRefundRecords';
 import { AutomationExplanation } from './AutomationExplanation';
@@ -53,6 +54,10 @@ export function AutomationReviewSection({ identity, current }: { identity: strin
           || target.scope.workspaceId !== workspaceId || target.scope.actorId !== useAuthStore.getState().user?.id) return { state: 'unavailable' };
         setExplanation({ inputRef: target.inputRef, eventId: target.eventId }); return { state: 'opened' };
       }} onAccessDenied={() => { setRefund(null); setExplanation(null); setOpened([]); }} /> : null,
+  }, {
+    key: 'business-event-observation', title: locale === 'en-US' ? 'Event delivery observation' : '事件投递观察',
+    content: opened.includes('business-event-observation') ? <BusinessOutboxObservation key={identity} identity={identity}
+      current={() => permitted() && !document.hidden} onAccessDenied={() => setOpened([])} /> : null,
   }] : []), ...(policyPermitted() ? [{ key: 'automation-policy-settings', title: locale === 'en-US' ? 'Event policies' : '经营事件政策',
     content: opened.includes('automation-policy-settings') ? <AutomationPolicySettings identity={identity} current={() => policyPermitted() && !document.hidden} /> : null,
   }] : [])]} />{refund && permitted() && <AutomationRefundRecords key={JSON.stringify(refund)} target={refund} current={() => permitted()}

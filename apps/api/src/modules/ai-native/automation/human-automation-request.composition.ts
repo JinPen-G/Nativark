@@ -6,6 +6,9 @@ import { getRequestIdentity, runWithRequestIdentity } from '../../../common/requ
 import type { BusinessFailureDependencies } from '../business-events/business-failure.composition';
 import { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import { BusinessFailureCandidateService } from '../business-events/business-failure-candidate.service';
+import { BusinessOutboxObservationReader } from '../business-events/business-outbox-observation.reader';
+import type { RuntimeTaskFaultAlertPolicySource } from '../observability/task-fault-policy.configuration';
+import { AiScopeRepository } from '../ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import { composeAutomationFailureTasks, type AutomationDependencies } from './automation.composition';
@@ -25,8 +28,10 @@ export type HumanAutomationRequestDependencies = Pick<BusinessFailureDependencie
     & { assertCurrent?: () => void };
   /** Separate trusted human metadata policy, never the automation subject's grant. */
   reviewGrantPolicy?: HumanAutomationReviewGrantPolicySource;
+  outboxObservationPolicy?: Pick<RuntimeTaskFaultAlertPolicySource, 'readForScope' | 'readCurrentForScope'>;
 };
 export type HumanAutomationRequestAction = 'readCandidate' | 'prepareCandidate' | 'preparePending'
+  | 'outboxObservation'
   | 'readPendingBatch' | 'continuePendingBatch'
   | 'prepareInput' | 'readInput' | 'createTask' | 'createEventTask' | 'readCreation' | 'read' | 'forEvent' | 'close' | 'feedback' | 'operation' | 'readQueue'
   | 'prepareGrant' | 'enableGrant' | 'readGrant';
@@ -48,7 +53,7 @@ const unavailable = () => new AutomationError('unavailable');
 export class HumanAutomationRequestFactory {
   private readonly dependencies: HumanAutomationRequestDependencies;
   constructor(input: HumanAutomationRequestDependencies) {
-    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'core', 'clock', 'automation', 'resources', 'reviewGrantPolicy'].includes(key))
+    if (!input || Object.keys(input).some(key => !['db', 'auth', 'guard', 'core', 'clock', 'automation', 'resources', 'reviewGrantPolicy', 'outboxObservationPolicy'].includes(key))
       || typeof input.db?.$transaction !== 'function' || typeof input.db.aiBusinessFailureOutbox?.findFirst !== 'function'
       || typeof input.db.aiAutomationInput?.findFirst !== 'function' || typeof input.db.aiTask?.findFirst !== 'function'
       || typeof input.auth?.resolveAccessContext !== 'function' || typeof input.guard?.canActivate !== 'function'
@@ -65,6 +70,8 @@ export class HumanAutomationRequestFactory {
       if ('selection' in selection && typeof input.db.aiAutomationPolicy?.findMany !== 'function') throw unavailable();
     }
     if (input.reviewGrantPolicy !== undefined && typeof input.reviewGrantPolicy?.read !== 'function') throw unavailable();
+    if (input.outboxObservationPolicy !== undefined && (typeof input.outboxObservationPolicy?.readForScope !== 'function'
+      || typeof input.outboxObservationPolicy.readCurrentForScope !== 'function')) throw unavailable();
     this.dependencies = { ...input, ...(input.automation ? { automation: { ...input.automation } } : {}) };
   }
 
@@ -230,8 +237,21 @@ export class HumanAutomationRequestFactory {
             || result.state === 'not_observed' && view.task.state !== 'not_observed') throw new AutomationError('result_unknown');
           return result;
         };
+        let assertOutboxPolicy: (() => void) | undefined;
         const execute = async () => {
           switch (action) {
+            case 'outboxObservation': {
+              const captured = await new BusinessOutboxObservationReader({ db: server.db, reads, clock,
+              policy: server.outboxObservationPolicy, scopeId: async context => {
+                const resolved = await new AiScopeRepository(server.db, identity, clock).resolveCurrent();
+                const { authorizedAt: _at, requestId: _request, ...expected } = context;
+                const { authorizedAt: _currentAt, requestId: _currentRequest, ...current } = resolved.context;
+                if (hash(current) !== hash(expected)) throw unavailable();
+                return resolved.scope.id;
+              } }).capture(command);
+              assertOutboxPolicy = captured.assertCurrentPolicy;
+              return captured.value;
+            }
             case 'readCandidate': return candidates.read(command);
             case 'prepareCandidate': return candidates.prepare(command);
             // The original bounded algorithm owns partial failures and final re-reads.
@@ -309,6 +329,7 @@ export class HumanAutomationRequestFactory {
         writeReturned = write;
         if (eventSelection || action === 'createTask' || action === 'readInput') await verifyEventSelection();
         await identity.resolve();
+        assertOutboxPolicy?.();
         return result;
       }), write, signal);
     } catch (error) {

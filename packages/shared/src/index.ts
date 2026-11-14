@@ -107,6 +107,7 @@ export * from "./ai-opening-integration-observation";
 export * from "./ai-automation-policy-http-draft";
 export * from "./ai-automation-event-task-http-draft";
 export * from "./ai-task-performance-draft";
+export * from "./ai-business-outbox-observation-draft";
 export * from "./ai-task-confirmation-history-draft";
 export * from "./ai-counting-http-draft";
 export * from "./ai-credit";

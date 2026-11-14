@@ -1,7 +1,8 @@
-/** Explicit original-ledger page and task summary consumption. Quantities keep
- * their original units/currencies; a page or sample never becomes a bill. */
+/** Explicit original-ledger, runtime and fault-evidence consumption. Quantities
+ * keep their original units/currencies; observations never authorize execution. */
 import { useEffect, useRef, useState } from "react";
-import { AI_TASK_STATUSES_DRAFT, validateAiTaskLifecycleObservationDraft, type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageSummaryDraft,
+import { AI_TASK_STATUSES_DRAFT, validateAiTaskLifecycleObservationDraft, validateAiTaskFaultObservationDraft,
+  type AiTaskBudgetUsagePageDraft, type AiTaskBudgetUsageSummaryDraft,
   type AiTaskPerformanceObservationDraft } from "@rental-os/shared";
 import { aiTaskCenterApi } from "@/api/aiTaskCenter";
 import { currentSessionEpoch, currentSessionSignal } from '@/app/queryClient';
@@ -10,6 +11,7 @@ import { useAiManagementLocale as useLocale } from './management-locale';
 import { safeDisplayText } from "./safe-display";
 import { formatTimestamp } from "./formatters";
 import { TaskOutcomeObservation } from './TaskOutcomeObservation';
+import { TaskFaultObservation } from './TaskFaultObservation';
 
 import { formatUsageQuantity as quantity } from './usage-quantity';
 
@@ -113,6 +115,8 @@ export function validateTaskRuntimeObservation(value: AiTaskPerformanceObservati
         : item.completedAt !== null || item.elapsedMs !== null || item.outcome !== null) throw Error('AI_RESOURCE_UNAVAILABLE');
     }
   }
+  if (value.faults !== undefined && (!validateAiTaskFaultObservationDraft(value.faults)
+    || Date.parse(value.faults.observedAt) !== Date.parse(value.observedAt))) throw Error('AI_RESOURCE_UNAVAILABLE');
   return value;
 }
 export function TaskUsageObservation({ taskId, current, onAccessDenied }: { taskId: string; current: () => boolean; onAccessDenied: () => void }) {
@@ -218,6 +222,7 @@ export function TaskUsageObservation({ taskId, current, onAccessDenied }: { task
       {shownRuntime.budgetAdmission && <p>{t('预算拒绝记录')}: {shownRuntime.budgetAdmission.denials.length}
         {' · '}{t('仅为原窗口记录，不证明已释放额度。')}</p>}
       <p className="muted">{t('模型耗时包含用量与交付等待；步骤计时仅为已登记资源时间。')}</p>
+      <TaskFaultObservation observation={shownRuntime.faults} />
       {shownRuntime.clientVisible?.state === 'client_reported' ? <>
         <dl>{shownRuntime.clientVisible.observations.map(row => <div key={row.observationId}>
           <dt>{t(row.kind === 'text' ? '客户端可见文字报告' : '客户端可见审批卡片报告')}</dt>

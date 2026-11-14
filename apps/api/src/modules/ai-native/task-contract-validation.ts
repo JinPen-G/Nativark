@@ -2,7 +2,8 @@ import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import type { AiExecutionContext, AiStepStateDraft, AiTaskMetadataPageDraft,
   AiTaskSnapshotDraft, AiTaskEventPageDraft, AiTaskEventResetDraft, AiTaskOutcomeSampleDraft, AiTaskBudgetUsageSummaryDraft, AiTaskPerformanceObservationDraft, AiTaskClientVisibleReportDraft, AiTaskClientVisibleReceiptDraft, AiTaskClientVisibleObservationDraft } from "@rental-os/shared";
-import { AI_TASK_PERFORMANCE_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_USAGE_DRAFT_SCHEMAS } from '@rental-os/shared';
+import { AI_TASK_PERFORMANCE_SCHEMAS, AI_SCENE_REQUEST_DRAFT_SCHEMAS, AI_USAGE_DRAFT_SCHEMAS,
+  validateAiTaskFaultObservationDraft } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "../../contracts/ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "../../contracts/ai-task-draft-schemas";
 
@@ -37,7 +38,14 @@ type Observations = { AiTaskMetadataPageDraft: AiTaskMetadataPageDraft; AiTaskSn
 export function validateAiTaskObservation<K extends keyof Observations>(name: K, value: unknown): Observations[K] {
   try {
     const copy = structuredClone(value), validate = ajv.getSchema(`urn:rental:step:${name}`);
-    if (validate?.(copy)) return copy as Observations[K];
+    if (validate?.(copy)) {
+      if (name === 'AiTaskPerformanceObservationDraft') {
+        const observation = copy as AiTaskPerformanceObservationDraft;
+        if (observation.faults !== undefined && (!validateAiTaskFaultObservationDraft(observation.faults)
+          || observation.faults.observedAt !== observation.observedAt)) throw new Error();
+      }
+      return copy as Observations[K];
+    }
   } catch { /* malformed producer content and parser details stay internal */ }
   throw Object.assign(new Error('AI_STORAGE_UNAVAILABLE'), { code: 'AI_STORAGE_UNAVAILABLE', retryable: false });
 }

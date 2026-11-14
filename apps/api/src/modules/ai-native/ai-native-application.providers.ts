@@ -15,6 +15,7 @@ import { AI_WORKBENCH_MODEL_CONTROL_REQUESTS, composeWorkbenchModelControlReques
 import { composePersistedTaskModelHost } from './task-model-gateway.composition';
 import { AutomationExplanationApplication } from './automation/automation-explanation.application';
 import { AI_NATIVE_GATEWAY_CAPACITY, AI_NATIVE_GATEWAY_CAPACITY_PROVIDER } from './gateway-capacity.runtime';
+import { RuntimeTaskFaultAlertPolicySource } from './observability/task-fault-policy.configuration';
 import type { GatewayCapacityPort } from './gateway-capacity.ports';
 /**
  * 职责：将正式业务服务、当前身份和持久仓储接到 AI Native 的 Nest provider 入口。
@@ -208,6 +209,7 @@ export const AI_NATIVE_BUSINESS_FAILURE_PROVIDERS: FactoryProvider[] = [{
     configurationSource: ConfigService, resources: BusinessFailureResourcePorts, value?: unknown) => {
     const configuration = readFailureConfiguration(value);
     return new HumanAutomationRequestFactory({ db, auth, guard, core, resources, reviewGrantPolicy: new RuntimeAutomationReviewGrantPolicySource(configurationSource),
+      outboxObservationPolicy: new RuntimeTaskFaultAlertPolicySource(configurationSource),
       ...(configuration.enabled && configuration.automation ? { automation: { ...configuration.automation, subscriptions,
         assertCurrent: () => {
           if (requestFingerprint(configuration) !== requestFingerprint(readFailureConfiguration(readRuntimePublication(configurationSource).configurations.businessFailure))) {
@@ -309,7 +311,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true },
     { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true },
-    { token: AI_HUMAN_QUOTE_ORDER_REQUESTS, optional: true }],
+    { token: AI_HUMAN_QUOTE_ORDER_REQUESTS, optional: true }, ConfigService],
   useFactory: (db: PrismaService, auth: AuthService,
     originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
     subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
@@ -322,7 +324,8 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     moduleRef?: Pick<ModuleRef, 'get'>,
     selectedOrderDecision?: { decideSelectedProposal(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
-        intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> }) => {
+        intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> },
+    configurationSource?: Pick<ConfigService, 'get'>) => {
     const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
     const clarification = () => {
       type Call = (request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) => Promise<unknown>;
@@ -334,6 +337,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
       return { resume: original.resume.bind(original), continueAnswer: original.continueAnswer.bind(original) };
     };
     return composeRequestBoundTaskCenter({ db, auth, originalDb: db, usageDb: db, performanceDb: db, visibleDb: db,
+      ...(configurationSource ? { faultOptions: { alertPolicy: new RuntimeTaskFaultAlertPolicySource(configurationSource) } } : {}),
       originalResults: { ...originalResults, async readOrderAnswer(request, reference) {
         const order = moduleRef?.get<OriginalOrderReadHttpRequests>(AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, { strict: false });
         if (!order) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

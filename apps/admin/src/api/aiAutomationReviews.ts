@@ -4,6 +4,8 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import {
+  AI_BUSINESS_OUTBOX_OBSERVATION_HTTP_DRAFT, validateAiBusinessOutboxObservationDraft,
+  type AiBusinessOutboxObservationDraft, type AiBusinessOutboxObservationRequestDraft,
   AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT,
   AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS,
   AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT,
@@ -67,6 +69,7 @@ export function validateAutomationReview<T>(name: string, value: unknown, maximu
 }
 
 const paths = Object.freeze({
+  outboxObservation: AI_BUSINESS_OUTBOX_OBSERVATION_HTTP_DRAFT.operation,
   readCandidate: 'candidates/read',
   ...AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT,
   readQueue: AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT.operation,
@@ -112,6 +115,11 @@ async function post<T>(action: Action, body: unknown, signal: AbortSignal): Prom
 }
 
 export const aiAutomationReviewsApi = Object.freeze({
+  outboxObservation: async (input: AiBusinessOutboxObservationRequestDraft, signal: AbortSignal) => {
+    const value = await post<AiBusinessOutboxObservationDraft>('outboxObservation', input, signal);
+    if (!validateAiBusinessOutboxObservationDraft(value)) throw new AutomationReviewApiError('AI_RESOURCE_UNAVAILABLE');
+    return value;
+  },
   queue: (input: AiAutomationReviewQueueRequestDraft, signal: AbortSignal) =>
     post<AiAutomationReviewQueueResponseDraft>('readQueue', input, signal),
   forEvent: (input: AiAutomationReviewsForEventRequestDraft, signal: AbortSignal) =>

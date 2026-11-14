@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-original-fault-outbox-policy-close-20261114"></a>
+## AIN-25 原故障、事件窗口与最终政策复核（2026-11-14）
+
+前置 `0b1e1ad4280d2416603d9d18d8893b971876cf58` 已推并回读 GitHub。本阶段固定22份原生产者／合同／公开装配／后台消费者，不夹 dev1 的 retention-model-sources、memory／knowledge 三源和未知员工样式。完整原任务仍保持75%：本片关闭故障观察及政策撤回缺口，首发测量／SLO／成本参数、版本回退依据仍须全文核定；模拟成本／耗时不能称真实供应商费用或live SLO。
+
+[TaskFaultObservationReader](../../apps/api/src/modules/ai-native/observability/task-fault-observation.reader.ts)只读原 USER Task／Run、当前租约／栅栏、未决资源占用、失败步骤／原事件与取消恢复收据；DB等待仅表示本Reader直接查询，缺worker心跳不推定死亡。101项探测窗口只交100项，并保留公开“过期租约＋原未决资源”的真实见证；无见证不能生成该告警。事件时间线不当业务投递积压，AUTOMATION Task不可借本人Task权读取。原[TaskPerformanceReader](../../apps/api/src/modules/ai-native/observability/task-performance.reader.ts)接此投影，原字段兼容；[shared合同](../../packages/shared/src/ai-task-performance-draft.ts)及[实际服务端校验](../../apps/api/src/modules/ai-native/task-contract-validation.ts)闭合字段／期限／年龄／原见证，旧包无faults仍接受。
+
+[RuntimeTaskFaultAlertPolicySource](../../apps/api/src/modules/ai-native/observability/task-fault-policy.configuration.ts)沿[原发布配置](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)读取显式 taskFaultDiagnostics，只按scope／actor／audience、修订、有效窗口和阈值评估；缺省／停用／未来／到期不评估，不自动种政策或发送通知。标准[provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)向TaskCenter和原HumanAutomationRequestFactory传相同可信来源，本片仅接代码、不发布配置或启服务。
+
+独立[BusinessOutboxObservationReader](../../apps/api/src/modules/ai-native/business-events/business-outbox-observation.reader.ts)沿原 BusinessFailureReadAuthority／Guard 逐事件核原业务对象，包括limit+1的分页哨兵；只读pending／claimed／retry_scheduled／dead_letter，不领任务／重试／扫描填满窗口。空窗口为not_recorded，计数只指这份受权窗口。[公共合同](../../packages/shared/src/ai-business-outbox-observation-draft.ts)经原automation合同／OpenAPI／staff政策登记，原operator／staff Controller使用原请求body并不借Task执行权。后台[实际API](../../apps/admin/src/api/aiAutomationReviews.ts)与[事件观察面板](../../apps/admin/src/features/ai-native/BusinessOutboxObservation.tsx)在原经营待办下明确读取；[TaskUsageObservation](../../apps/admin/src/features/ai-native/TaskUsageObservation.tsx)挂[TaskFaultObservation](../../apps/admin/src/features/ai-native/TaskFaultObservation.tsx)。隐藏、卸载、身份／session变化或失败清除旧观察，迟到结果不回写，原unknown／费用占用不释放。
+
+独立复核和dev2最小反例找出两类缺口并已修复：原窗口查询后的Core资源撤权仍返回旧事件，且shared接受过期年龄不符、未来标过期、过期标current；Root按完整前后像接入dev2两源，保留factory最终identity检查。另两条标准公开链在最后身份／生命周期await中撤回诊断政策会交付旧告警；当前capture保留私有assertCurrentPolicy，原read继续只返wire，TaskCenter／Outbox factory在最后身份等待后同步读取当前服务端发布值并比对。变更或到期拒绝旧诊断，不串入客户端合同，不追加新的policy await，不放宽原业务权／账／unknown。
+
+dev2两源固定清单blob `4ae6bc80475e3eba8a398b2751389f5154824ac7`、patch `5998fe102577383e5388d16e2b1fb3b1c49875b3`；其中Reader作者after为0c16，Root追加policy句柄后的最终 `2aba01cb52c25db13e83045a7ce030a1251ca43b`，不可用旧候选整覆盖。shared最终 `d87eef37730f0c7fc4c9a3fcdde1da938ccb5a22`。主要最终source：policy `fd1fde9c9dc8f768a4159872f0e4eaadc778a97a`，fault `4e4c8ef837f7dd400f51ae7eae79efe999087218`，performance `a54887164a19441555114afd1fad1ed08b253820`，TaskCenter `f2fb36fcfdd2e21af2e1dfb397f241f680fd2629`，factory `30b6e14762be91f06ec3b85fc953ab41f3052f36`。dev2两UI原稿Root核同：TaskUsage `1f7a12e84cf628abdaea880c816c6369bcd2ba5e`、TaskFault `303ecbb804dede6752fd4d8f14077b92def7000f`。
+
+| 必要模拟／类型 | stdin SHA-256及实际结果 |
+| --- | --- |
+| 实际TaskCenter／Performance／closed原合同与缺省、停用、未来、到期、重复政策 | `60d58e6bd45926622eae63f75f81d8deaf711bf6705d7966e57afb25b1d49031`，退出0；旧包兼容、未知字段拒绝、无派发／写入。 |
+| 101／100原占用窗口及撤权 | `ee6c7ce7d40d397bd4064d079f1cc0063702591dc253c838f228ef32ce2bff7a`，退出0；原租约见证保留、伪造删见证拒绝、policy撤回及Task撤权拒绝。 |
+| TaskCenter最后身份await政策反例→修复 | `4afb5513d4fe642e6907985dd1bb5353c898fab02485f36eac0cda09b414982f`→`877eea1636f862d89df91b764ec4381ffb2cb8acf5f36babfd5810d7ac6ce281`，均退出0；前者证明去掉公开末尾见证时停用／改修订／到期仍返回，后者沿实际Controller／原Runner拒绝三类，正常读取保持。 |
+| 原Guard／Controller事件最后身份await政策反例→修复 | `a8ce2891077c2636060a67963710f4766a63acc9dc2fad4e076ba51bfe74f4f2`→`af46f1a310d594a1ec7df160c8ecedb5d4d1ddd72c52deedc4e79f5185ded6de`，均退出0；保留原业务事件和身份，只在最终等待改policy，修复后三类拒绝／原正常保持，业务写0。 |
+| Root独立运行已接入的Core／session撤权和租约一致性 | `55482acdac371a49505dfbed68424206b8d91605f73a1e9554f67823603de030`及`dbd3c68cb58bd3dfd92ffe2acd5437c9cfb476cc4f5ed01c4c1cc3f8dff12bd8`，退出0；去掉作者内存覆盖、直接读取当前source，正常＋三撤权窗口和正常租约＋三矛盾包均符合。驱动结果标签沿原作者，但本次未使用候选overlay。 |
+| 原业务Outbox API及有限React宿主 | `ee4223d52e2a78969d278be1d548e59fdfce69093236d7c956fa2ef0beb8a2f5`，退出0；原Controller投影→实际API1读→面板、2pending／1dead与隐藏撤回、业务写0。 |
+| 当前公共生产闭包类型 | `968d2b7def0bd3a4633a8e1bf83fe609b621bd76c70abc4598752c0b222a1179`，TS5.9.3、API3根／1878源零诊断，退出0；后台4根／1527源 `3bb604b27557d3903524656a146a72efd62c58c2e31eedeeee726c6410a101bd`退出0。 |
+
+dev2两UI必要18项模拟`f43d5f6d0e6545b14c45e53639b10cb37d0d91dedbd89886951545764f09bb05`、3根／1454源类型`f5af4f2a5f42d963cfc8ca2295b740d1b50847879e25096a5ec413e32d7c37d6`退出0，Root逐blob核同。固定22源的最终闭包另将三份并行隐私WIP替换为前置Git对象，`faa705eb7fc137b48a736d5032f75f42bf7dde30e20245e055a88de723abfdaf`／TS5.9.3、3根／1878源零诊断／退出0，证明本阶段不依赖助手未完稿。独立助手最后只读源码／调用方／hash复核确认上述policy P2在两条标准链闭合，无新限定范围缺口；该结论不冒称独立运行Root行为或AIN-25全文100%。
+
+失败保留：首Outbox驱动用错Controller构造名退出1；撤权误改非当前permission，原拒绝断言失败，改为真正原权限投影后原链通过；页面驱动多余真实http导入触发未配置的@/app/queryClient，删该不必要驱动导入后通过，未改生产alias。dev2两次stdin替换展开导致语法失败，改回调后复验；一版候选删factory最后identity，在最后原row回读关闭session仍返回，已撤回该候选且未集成。所有本片验证沿原offline preload／不可达DB，audit0，Node进程退出，单任务临时目录未创建，无新增／扩写测试、依赖或Client／dist副本。真实DB／浏览器／微信／worker／供应商／生产指标由负责人后续测试，既有4处文档缺链保留，不伪造补绿。
+
 <a id="ain-main-mysql-boolean-check-recovery-20261114"></a>
 ## MySQL 8.4 原资源 CHECK 与部分迁移恢复（2026-11-14）
 

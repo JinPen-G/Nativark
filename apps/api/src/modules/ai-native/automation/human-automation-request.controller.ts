@@ -1,5 +1,6 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_BUSINESS_OUTBOX_OBSERVATION_HTTP_DRAFT, validateAiBusinessOutboxObservationDraft } from '@rental-os/shared';
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT, AI_AUTOMATION_EVENT_TASK_HTTP_SCHEMAS } from '@rental-os/shared';
 import { AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT, AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_HTTP_SCHEMAS, AI_EVENTS_DRAFT_SCHEMAS,
   AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
@@ -31,7 +32,8 @@ abstract class HumanAutomationController {
       if (contract && !reviewValidators[contract.request](value)) throw new AutomationError('invalid_input');
       const result = await withRequestAbort(request, signal => this.requests.call(request, this.audience, action, value, signal));
       if (contract) {
-        try { const copy = structuredClone(result); if (reviewValidators[contract.response](copy)) return copy; }
+        try { const copy = structuredClone(result); if (reviewValidators[contract.response](copy)
+          && (action !== 'outboxObservation' || validateAiBusinessOutboxObservationDraft(copy))) return copy; }
         catch { /* Do not expose raw internal material or validation diagnostics. */ }
         // Candidate reads may expire an outbox marker. Treat their damaged
         // acknowledgements like other metadata writes, without retry permission.
@@ -64,6 +66,11 @@ abstract class HumanAutomationController {
 
   @Post('candidates/read') @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCandidate(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'readCandidate', value); }
+
+  @Post(AI_BUSINESS_OUTBOX_OBSERVATION_HTTP_DRAFT.operation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  outboxObservation(@Req() request: HumanAutomationHttpRequest & { body?: unknown }, @Body() _value: unknown) {
+    return this.call(request, 'outboxObservation', request.body);
+  }
 
   @Post('candidates/prepare') @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareCandidate(@Req() request: HumanAutomationHttpRequest, @Body() value: unknown) { return this.call(request, 'prepareCandidate', value); }

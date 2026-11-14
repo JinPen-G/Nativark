@@ -6,7 +6,7 @@
 
 PM 的本机 MySQL 8.4.11 迁移阻塞已交[最小 SQL／witness 与恢复步骤](<AI Native-开发记录.md#ain-main-mysql-boolean-check-recovery-20261114>)：固定 main 275064d40，保留 112200 历史字节，仅完整 CHECK 外层增加 `= TRUE`，新前向迁移加仅补第四 ALTER 的恢复 SQL。原 parser／存储门禁模拟及类型通过，真实 DDL、CHECK_CLAUSE 回读、Prisma resolve 与 Client 由 PM 串行执行；AI 不争本机数据库／main 索引，不能以本片声称已恢复服务或提高任务进度。
 
-AIN-25 故障 Task／业务 Outbox 的原公开消费者模拟与定向类型已通过，仍为独立未提交阶段。独立复核发现最后身份／生命周期等待后可能交付旧告警政策；Root 将原政策指纹／当前有效期检查保留到公开返回前，dev2 继续核资源撤权及 closed 租约一致性。AIN-24 dev1 独占原 hold／memory／knowledge 三叶，Root 负责保留最少会员业务收据与公共装配，助手继续不等待本机迁移或 Root 提交。
+AIN-25 [原故障／业务Outbox及最终政策阶段](<AI Native-开发记录.md#ain25-original-fault-outbox-policy-close-20261114>)22源已完成必要模拟／类型和限定范围独立源码核定，正固定提交。最后身份／生命周期等待的旧告警政策P2、窗口查询后资源撤权及矛盾租约均已修复，原policy句柄只留服务端，unknown不重派或清占用。dev2继续核原五条SLO／成本／回退与最终依据，不重跑50样本；尚未按整项100%计分。AIN-24 dev1独占原hold／memory／knowledge三叶，Root负责最少会员业务收据、原复制正文清理与公共装配；仍缺新知识事务／删除传播完整消费者，不能把依赖拒绝当删除闭环，助手不等待本机迁移或Root提交。
 
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 

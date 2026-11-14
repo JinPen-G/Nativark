@@ -107,6 +107,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           || !AI_TASK_CENTER_ENTRY_PERMISSIONS.some(permission => hasEffectivePermission(before.access.permissions, permission)))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const root = composePersistedTaskCenter({ ...input, credentials, includeCancellation: action === 'stop' || action === 'stopReceipt' });
+        let assertPerformancePolicy: (() => void) | undefined;
         const originalResult = async (query = schemas.result.parse(command)): Promise<AiTaskModelObservationDraft> => {
           if (!input.originalDb || !readOriginalResult) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           const access = await root.tasks.resolveAccess(query.taskId, 'read_step_terminal');
@@ -295,7 +296,9 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           }, command, activeSignal);
         })() : action === 'performance'  ? await (async () => {
           if (!root.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-          return root.performance.read(schemas.performance.parse(command), clientVisibleSource);
+          const captured = await root.performance.capture(schemas.performance.parse(command), clientVisibleSource);
+          assertPerformancePolicy = captured.assertCurrentPolicy;
+          return captured.value;
         })() : action === 'outcomes' ? await (async () => {
           if (!root.performance) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           return root.performance.sample(schemas.outcomes.parse(command));
@@ -314,6 +317,7 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
             })();
         if (!active || originalIdentityHash(await identity.resolve()) !== originalIdentityHash(before))
           throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        assertPerformancePolicy?.();
         return structuredClone(result);
       });
       if (action === 'decision') {

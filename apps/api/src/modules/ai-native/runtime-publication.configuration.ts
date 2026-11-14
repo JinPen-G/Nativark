@@ -30,6 +30,7 @@ const configurations = z.object({
   platformCapabilityProbe: configuration,
   inputCounting: configuration,
   gatewayCapacity: configuration,
+  taskFaultDiagnostics: configuration,
   budgetManagement: configuration,
   clientModel: configuration,
   clientPublic: configuration,

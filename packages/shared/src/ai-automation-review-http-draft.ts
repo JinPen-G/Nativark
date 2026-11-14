@@ -4,6 +4,7 @@ import { leafClosed as object, leafEnum as choice, leafInt as integer, leafList 
   leafRef as ref, leafId as id, leafTime as time, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 import { AI_TASK_STATUSES_DRAFT } from './ai-task-draft';
 import type { AiBusinessEventDraft } from './ai-events-draft';
+import { AI_BUSINESS_OUTBOX_OBSERVATION_SCHEMAS } from './ai-business-outbox-observation-draft';
 
 /** Human metadata authority is prepared, explicitly enabled and read back by
  * its original reference; it never grants model or Core execution. */
@@ -20,6 +21,7 @@ export const AI_AUTOMATION_PENDING_BATCH_HTTP_DRAFT = Object.freeze({
 } as const);
 
 export const AI_AUTOMATION_REVIEW_HTTP_CONTRACTS = Object.freeze({
+  outboxObservation: { request: 'AiBusinessOutboxObservationRequestDraft', response: 'AiBusinessOutboxObservationDraft' },
   readCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
   prepareCandidate: { request: 'AiAutomationCandidateRequestDraft', response: 'AiAutomationCandidateDraft' },
   preparePending: { request: 'AiAutomationPendingCandidatesRequestDraft', response: 'AiAutomationPendingCandidatesDraft' },
@@ -218,6 +220,7 @@ const pendingBatch = { oneOf: [
   object({ ...pendingBatchReference, ...pendingBatchSemantics, state: choice('unknown', 'not_observed') })] };
 
 export const AI_AUTOMATION_REVIEW_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  ...AI_BUSINESS_OUTBOX_OBSERVATION_SCHEMAS,
   AiAutomationCandidateRequestDraft: object({ eventId: uuid }),
   AiAutomationPendingCandidatesRequestDraft: object({ ...pendingBatchReference }, ['limit']),
   AiAutomationPendingBatchReferenceDraft: object(pendingBatchReference),
