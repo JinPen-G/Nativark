@@ -145,6 +145,24 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
 
+<a id="core-openapi-contract-20261114"></a>
+
+## Core API 文档贡献与独立组合（2026-11-14）
+
+继续同一 PCH-02 独占包窗口，基线为已推送的 `bb850efcd5b614efe2379137ecd0ae4791e08231`；实际远端 main 仍为 `6ca19ac34`。本片不修改原 `openapi-document.ts`、Guard、AppModule 或 AI 工作目录，先交付可供宿主消费的独立接口文档接点。
+
+[OpenAPI 合同](../../../packages/core-contracts/src/openapi.ts)导出 `CoreOpenApiContributionSchema`、`checkCoreOpenApi`、`composeCoreOpenApi`。Core 声明包内 JSON，使用 OpenAPI 3.0 的 paths 和 schemas；新路径为 `/api/cores/<id>/...`，operationId/schema 采用 `<id>.` 命名空间。每项操作要求用途、响应和显式security；其余字段按标准文档语义保留。这里只验证归属、最小文档约束与组合冲突，不自建一套完整OpenAPI验证器，也不替代Controller/DTO验证。
+
+组合器创建原平台文档的副本，按所选Core组合；重复Core、同形路径（包含只改参数名）、operationId/schema冲突、缺失或隐式跨Core schema引用均返回具体问题，失败不发布部分文档。引用只在本Core或平台公共schema解析，不自动请求外部URL。例子/default/enum中的业务值以及名为`$ref`的业务属性不会被误当作外部文档引用。
+
+[目录检查](../../../packages/core-contracts/src/package.ts)已实际消费该合同：若清单声明OpenAPI，则只读取JSON并校验，不执行Core入口。迁移/OpenAPI单文件读取上限为32MiB，其他业务入口只查文件元信息。原Rental路径可以由受控宿主提供精确METHOD/path白名单，Core本身不能新增豁免；原operationId/schema兼容映射、主应用JSON入口和离线导出仍待正式迁移片核定，不宣称现有API已解耦。
+
+[接入说明](../../../packages/core-contracts/README.md)同片加入“给Core附上API说明”，解释文件、命名、鉴权声明、引用、组合器与失败结果。当前完整业务手册仍从原任务五步入口展开，运行SDK/授权/样例未实现的步骤继续明确标注。
+
+必要验证只复用原单一合同测试及stdin短命令：`node --no-compilation-cache --test packages/core-contracts/test/core-contracts.test.cjs`（退出0、8组，包含新增文件完整类型与独立导入）；`node --no-compilation-cache -`内存核对空/双Core、冲突、宿主旧路由白名单、跨Core/外部引用和原文不变（退出0）；另以文件读取facade确认包检查实际读取API JSON、拒绝损坏/错误归属且不读取服务器代码（退出0）；修正文档例子引用后短命令复验业务`$ref`与真实嵌套引用（退出0）。本片没有新增或扩写测试脚本、依赖安装、网络/业务调用或后台进程；已有合同测试临时目录清理确认不存在。
+
+这些结果为合同/类型/离线组合证据。真实平台生产者、Rental与非租赁API完整迁移、当前权限和公开文档覆盖待公共窗口；02尚未完成全部必需合同，原任务百分比本片不变。首段原MCP审计被自动审批拒绝的未验项继续保留，不用本片API检查关闭。
+
 
 ## 四册归并（2026-10-31）
 

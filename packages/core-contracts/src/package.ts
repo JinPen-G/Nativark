@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { CORE_MANIFEST_FILE, CoreManifestSchema, type CoreManifest } from "./manifest";
 import { checkCoreCombination, CoreHostVersionsSchema, type CoreHostVersions } from "./compatibility";
+import { CoreOpenApiContributionSchema, checkCoreOpenApi } from "./openapi";
 
 export interface CorePackageIssue {
   code: string;
@@ -22,7 +23,8 @@ export interface CorePackageInspection {
   issues: CorePackageIssue[];
 }
 
-export function inspectCorePackage(directory: string, hostInput?: CoreHostVersions): CorePackageInspection {
+export function inspectCorePackage(directory: string, hostInput?: CoreHostVersions,
+  legacyApiRoutes: readonly string[] = []): CorePackageInspection {
   const root = resolve(directory);
   const issues: CorePackageIssue[] = [];
   const result: CorePackageInspection = {
@@ -80,9 +82,19 @@ export function inspectCorePackage(directory: string, hostInput?: CoreHostVersio
     if (previous && previous !== file) { add("path_collision", file, `路径与 ${previous} 仅大小写不同，不能跨平台安装`); continue; }
     names.set(normalized, file);
     const migration = migrations.get(file);
-    const target = checkedFile(file, migration ? 32 * 1024 * 1024 : undefined);
+    const target = checkedFile(file, migration || file === manifest.entries.openapi ? 32 * 1024 * 1024 : undefined);
     if (target && migration && createHash("sha256").update(readFileSync(target)).digest("hex") !== migration.sha256)
       add("checksum_mismatch", file, "迁移文件 SHA-256 与清单不同，请重新核对不可变迁移及发布包");
+    if (target && file === manifest.entries.openapi) {
+      try {
+        const parsedApi = CoreOpenApiContributionSchema.safeParse(JSON.parse(readFileSync(target, "utf8")));
+        if (!parsedApi.success) for (const issue of parsedApi.error.issues) add("openapi_invalid", file, issue.message, issue.path.join("."));
+        else for (const issue of checkCoreOpenApi(manifest, parsedApi.data, legacyApiRoutes)) add(issue.code, file, issue.message, issue.field);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        add("invalid_json", file, "OpenAPI 贡献须为 JSON 文件，不加载代码生成文档");
+      }
+    }
   }
   if (hostInput !== undefined) {
     const host = CoreHostVersionsSchema.safeParse(hostInput);

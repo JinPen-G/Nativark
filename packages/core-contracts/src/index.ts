@@ -3,3 +3,4 @@ export * from "./manifest";
 export * from "./version";
 export * from "./compatibility";
 export * from "./reference";
+export * from "./openapi";
