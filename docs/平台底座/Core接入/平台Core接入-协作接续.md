@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。最新main62ca已纳入并上传，原Core管理身份/角色/审计固定于 `05700e055763b36b9e66c713dd67bce048fd1ecc`。当前[统一查询](平台Core接入-开发记录.md#core-capability-index-20261114)、授权/绑定和[工单原宿主组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已有实际源码，真实部署及原AppModule/Guard/UI仍按公共窗口接线。核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，01/02已跨原G1，证据与缺口见[门槛复核](平台Core接入-开发记录.md#pch-first-gate-20261115)。最新main62ca已纳入并上传，Core管理HTTP和同源API资料固定于 `3e8843239ca243bdf8eed87fac1309c63fea2a73`。当前[统一查询](平台Core接入-开发记录.md#core-capability-index-20261114)、授权/绑定和[工单原宿主组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已有实际源码，真实部署及原AppModule/Guard/UI仍按公共窗口接线。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 

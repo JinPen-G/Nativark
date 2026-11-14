@@ -47,6 +47,7 @@ export function composeOriginalCoreBindings(input: {
           }
           await access.requireNewBusiness(transaction, request.scope.tenantId);
         }
+        await lease.revalidate();
         return user;
       };
       return async () => {

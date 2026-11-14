@@ -85,11 +85,14 @@ export class OriginalCorePrincipalAuthority {
     const read = async () => {
       validTime();
       const session = await transaction.authSession.findFirst({ where: { id: sessionId, userId: principal.subjectId,
-        audience: "operator", revokedAt: null, expiresAt: { gt: new Date(this.clock()) } }, select: { currentWorkspaceId: true } });
+        audience: "operator", revokedAt: null, expiresAt: { gt: new Date(this.clock()) } },
+        select: { currentWorkspaceId: true, expiresAt: true } });
       if (!session || session.currentWorkspaceId !== workspaceId) throw new UnauthorizedException("原Core管理会话已经撤销或切换");
       const user = await this.users.findUserById(principal.subjectId, transaction);
       if (!user || user.id !== principal.subjectId || user.tenantId !== principal.tenantId || !user.isActive || user.mustChangePassword)
         throw new ForbiddenException("当前Core管理账号已不可用");
+      validTime();
+      if (session.expiresAt.getTime() <= this.clock()) throw new UnauthorizedException("原Core管理会话已到期");
       return user;
     };
     return { principal, user: await read(), revalidate: read };

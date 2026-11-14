@@ -40,6 +40,7 @@ export function composeOriginalTicketsHost(input: {
         } else if (request.permission !== "read") throw new TicketError("denied", "原操作查询只允许工单读取权限");
         const binding = await access.binding(transaction, scope);
         if (!binding || binding.dataVersion !== TICKETS_DATA_VERSION) throw new TicketError("denied", "工单Core尚未完成当前数据版本绑定");
+        await lease.revalidate();
         return user;
       };
       const user = await authorize();
