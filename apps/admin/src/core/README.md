@@ -36,6 +36,20 @@ export function TicketsPage() {
 
 `disabled`和`disabledReason`表达当前不可用状态，附加`permissions`交给宿主判断显示；最终动作仍由服务端授权。动态命令标签可传原 `ActionButtonIntent` 的 `intent`，不自行写图标规则或CSS。危险命令显式声明确认文案和 `confirmTone: "danger"`。
 
+## 列表只提供业务列和读取结果
+
+`CoreList`复用原Table、筛选工具栏、分页、加载和QueryState。提供稳定rowKey、业务列、当前查询结果与分页状态，Core仍负责自己的schema、可见范围和实际请求。服务端返回 `{ rows, total }`，total与正文使用相同筛选和授权范围；只有数组的接口可继续用原Table，不把数组长度当作总数。[列表适配](CoreList.tsx)
+
+```tsx
+import { CoreList } from "@rental-os/admin/core";
+
+<CoreList query={query} queryKey={queryKey} rowKey="id" columns={columns}
+  pagination={{ offset, limit, onChange: (next, size) => { setOffset(next); setLimit(size); } }}
+  controls={filters} />;
+```
+
+`query`来自本Core原useQuery，包含data/isPending/isFetching/error/refetch；分页默认条数由本Core明确选择，条数变化沿原分页回首页，筛选变化也应重置offset。服务端的一页不再本地截取/排序，未提供服务端排序合同默认关闭；导出/批量按自己的正式接口另接。首次加载只显示Table数据区骨架，首次读取失败显式提示；刷新失败或读取中暂停旧行操作。总数缩小后只读回有效页，不重发业务动作。宿主仍负责当前身份与Core页面权限。[实际工单分页](../../../../packages/example-tickets-core/admin/index.tsx)
+
 ## 保存保留原 Form
 
 将 `CorePage`放在表单内部，让原页头portal能关联实际Form和回车提交。`useCoreForm`接业务唯一保存方法，按钮用 `editor.submit`，Form展开 `editor.formProps`，无需分别维护提交状态和错误事件。[表单Hook](useCoreForm.ts)

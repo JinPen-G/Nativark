@@ -24,6 +24,11 @@ export const ListTicketsSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20)
 }).strict();
 export type ListTickets = z.infer<typeof ListTicketsSchema>;
+/** 新分页入口单独接受安全整数偏移；旧数组入口的10万偏移限制继续保留。 */
+export const TicketPageQuerySchema = ListTicketsSchema.extend({ offset: z.number().int().safe().nonnegative().default(0) });
+/** 当前页和总数使用同一可读范围；旧数组列表合同保持。 */
+export const TicketPageSchema = z.object({ rows: z.array(TicketSchema).max(100), total: z.number().int().safe().nonnegative() }).strict();
+export type TicketPage = z.infer<typeof TicketPageSchema>;
 export type TicketPermission = "read" | "read.all" | "create" | "assign" | "start" | "close";
 export interface TicketReceipt { operationId: string; ticket: Ticket }
 

@@ -4,12 +4,14 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { CorePrincipal } from "@rental-os/core-contracts";
-import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketError, TicketIdSchema,
-  type ListTickets, type Ticket, type TicketPermission, type TicketReceipt } from "./contracts";
+import { AssignTicketSchema, ChangeTicketStateSchema, CreateTicketSchema, ListTicketsSchema, TicketPageQuerySchema, TicketError, TicketIdSchema,
+  type ListTickets, type Ticket, type TicketPage, type TicketPermission, type TicketReceipt } from "./contracts";
 
 export interface TicketStoredReceipt extends TicketReceipt { actorId: string; fingerprint: string }
 export interface TicketRepository {
   list(query: ListTickets, viewerId?: string): Promise<Ticket[]>;
+  /** 正文与总数来自同一次数据库观察，不能统计当前成员无权读取的工单。 */
+  page(query: ListTickets, viewerId?: string): Promise<TicketPage>;
   find(id: string): Promise<Ticket | undefined>;
   create(ticket: Ticket): Promise<void>;
   update(ticket: Ticket, expectedRevision: number): Promise<void>;
@@ -45,6 +47,11 @@ export class TicketsService {
   list(principal: CorePrincipal, input: unknown = {}): Promise<Ticket[]> {
     const query = ListTicketsSchema.parse(input);
     return this.withAccess(principal, "read", (store, access) => store.list(query, access.readAll ? undefined : access.userId));
+  }
+
+  page(principal: CorePrincipal, input: unknown = {}): Promise<TicketPage> {
+    const query = TicketPageQuerySchema.parse(input);
+    return this.withAccess(principal, "read", (store, access) => store.page(query, access.readAll ? undefined : access.userId));
   }
 
   get(principal: CorePrincipal, ticketId: string): Promise<Ticket> {

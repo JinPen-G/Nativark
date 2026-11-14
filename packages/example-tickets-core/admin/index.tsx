@@ -6,7 +6,7 @@ import { useRef, useState, type ComponentType } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { corePageKey, resolveCorePageLocation, type CoreAdminContribution } from "@rental-os/core-contracts";
 import {
-  Alert, Button, CorePage, DataTableText, Form, Input, ListSection, QueryState, SaveButton, Select, Table, UnsavedChangesGuard,
+  Alert, Button, CoreList, CorePage, DataTableText, Form, Input, ListSection, QueryState, SaveButton, Select, UnsavedChangesGuard,
   useCorePageHost, useCoreRequest, useCoreForm, useCoreBinding, useLocale, type CoreAdminPageAction
 } from "@rental-os/admin/core";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket } from "@rental-os/example-tickets-core/contracts";
@@ -36,27 +36,21 @@ function useTicketNavigation() {
 
 export function TicketsPage() {
   const { request, queryKey } = useCoreRequest(), navigate = useTicketNavigation(), { t } = useLocale();
-  const [offset, setOffset] = useState(0), [state, setState] = useState<string>();
-  const query = useQuery({ queryKey: [...queryKey, "list", offset, state], queryFn: async ({ signal }) =>
-    TICKETS_HTTP.list.response.parse(await request(pathFor(TICKETS_HTTP.list.path), { params: { offset, limit: 20, state }, signal })), meta: { liveRefresh: false } });
+  const [offset, setOffset] = useState(0), [limit, setLimit] = useState(20), [state, setState] = useState<string>();
+  const listKey = [...queryKey, "list", offset, limit, state];
+  const query = useQuery({ queryKey: listKey, queryFn: async ({ signal }) =>
+    TICKETS_HTTP.page.response.parse(await request(pathFor(TICKETS_HTTP.page.path), { params: { offset, limit, state }, signal })), meta: { liveRefresh: false } });
   return <CorePage actions={[{ id: "create", kind: "navigate", label: "新建工单", emphasis: "primary", permissions: permission("create"), to: page("create") }]}>
-    <ListSection controls={<Select allowClear aria-label={t("工单状态")} placeholder={t("全部状态")} value={state}
-      options={Object.entries(stateNames).map(([value, label]) => ({ value, label: t(label) }))}
-      onChange={value => { setState(value); setOffset(0); }} />}>
-      <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
-        <Table<Ticket> rowKey="id" dataSource={query.data ?? []} pagination={false} sorting={false}
-          loading={query.isPending} refreshing={query.isFetching} onRefresh={query.refetch} columns={[
-            { title: t("标题"), key: "subject", render: (_, row) => <DataTableText primary={row.subject} secondary={row.description || undefined} /> },
-            { title: t("状态"), dataIndex: "state", render: (value: Ticket["state"]) => t(stateNames[value]) },
-            { title: t("受派成员"), dataIndex: "assigneeId", render: value => value ?? t("尚未分派") },
-            { title: t("操作"), key: "actions", render: (_, row) => <Button onClick={() => navigate("detail", row.id)}>{t("查看")}</Button> }
-          ]} />
-      </QueryState>
-    </ListSection>
-    <div role="group" aria-label={t("工单分页")}>
-      <Button disabled={offset === 0 || query.isFetching} onClick={() => setOffset(value => Math.max(0, value - 20))}>{t("上一页")}</Button>
-      <Button disabled={offset >= 100_000 || query.isFetching || !query.data || query.data.length < 20} onClick={() => setOffset(value => value + 20)}>{t("下一页")}</Button>
-    </div>
+    <CoreList<Ticket> query={query} queryKey={listKey} rowKey="id"
+      pagination={{ offset, limit, onChange: (next, size) => { setOffset(next); setLimit(size); } }}
+      controls={<Select allowClear aria-label={t("工单状态")} placeholder={t("全部状态")} value={state}
+        options={Object.entries(stateNames).map(([value, label]) => ({ value, label: t(label) }))}
+        onChange={value => { setState(value); setOffset(0); }} />} columns={[
+          { title: t("标题"), key: "subject", render: (_, row) => <DataTableText primary={row.subject} secondary={row.description || undefined} /> },
+          { title: t("状态"), dataIndex: "state", render: (value: Ticket["state"]) => t(stateNames[value]) },
+          { title: t("受派成员"), dataIndex: "assigneeId", render: value => value ?? t("尚未分派") },
+          { title: t("操作"), key: "actions", render: (_, row) => <Button onClick={() => navigate("detail", row.id)}>{t("查看")}</Button> }
+        ]} />
   </CorePage>;
 }
 

@@ -3,6 +3,8 @@ export { CorePage, CorePageHostProvider, useCorePageHost } from "./CorePage";
 export type { CoreAdminPageAction, CorePageHost } from "./CorePage";
 export { useCoreRequest } from "./useCoreRequest";
 export { useCoreForm } from "./useCoreForm";
+export { CoreList } from "./CoreList";
+export type { CoreListQuery } from "./CoreList";
 export { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "./CoreAccessPanel";
 export { coreManagementApi } from "./management-client";
 export { useCoreSession } from "./useCoreSession";

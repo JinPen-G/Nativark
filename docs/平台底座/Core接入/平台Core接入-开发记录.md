@@ -155,6 +155,24 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-list-pagination-20261115"></a>
+
+## Core标准列表与工单同范围分页（2026-11-15）
+
+从已普通推送并回读的 `0990e14c1195ec3cdc325f83e7ab51c3cc49770b`继续，main仍62ca且已在本树祖先。原后台规则、现有Table/QueryState/分页及工单权限链核定后，沿独占admin/core和工单样例实现本片；未进入Auth/平台/shared总出口/Guard/主装配或主树WIP。复用已装antd离线CLI核Table6.6.0 API与基本例子，无安装/网络。
+
+[CoreList](../../../apps/admin/src/core/CoreList.tsx)通过正式admin/core出口组合原ListSection、Table和QueryState，只收业务列/rowKey、同范围rows/total、查询键和分页状态。服务端一页不二次本地截取或排序；首次加载保留表头/筛选及原数据区骨架，首次读取失败不冒充刷新，旧行读取中/失败暂停操作。空末页根据真实total只读回有效页，条数变化沿原Table回首页。没有新Table/分页样式或通用业务查询引擎。
+
+[工单唯一合同](../../../packages/example-tickets-core/src/contracts.ts)增加TicketPageQuerySchema/TicketPageSchema及类型；原ListTickets数组和10万offset限制保留，新分页入口独立接受安全整数offset。[MySQL](../../../packages/example-tickets-core/src/mysql.ts)用同一个visibleWhere供旧列表与新分页，单条CTE的可见集合被正文和COUNT共同使用，租户/成员创建者或受派者/状态条件一致；LEFT JOIN保留空末页总数，严格工单对象不带total。read.all仍只读本租户，读取不写业务/收据/审计。
+
+[领域服务](../../../packages/example-tickets-core/src/service.ts)→[Nest](../../../packages/example-tickets-core/src/nest.ts)新增page，复用当前read准入；[HTTP/OpenAPI](../../../packages/example-tickets-core/src/http.ts)从同源声明生成8政策/7路径8操作。未知audience和参数沿原拒绝，旧GET tickets及正式原收据不改。[工单页面](../../../packages/example-tickets-core/admin/index.tsx)实际改用CoreList和/ticket-pages，默认20、状态筛选回首页、offset/limit进入同一Core会话查询键，移除本页私拼分页按钮。
+
+必要验证经stdin/内存。合同35根、工单11根0诊断；前端14指定根/1,498源0诊断。实际SQL适配→领域→Nest核同范围总数/正文、bigint、空末页/零总数、缺总数/超精度拒绝、旧offset兼容、非法参数/客户分面拒绝以及同源政策/OpenAPI通过。CoreList→原QueryState/Table核首次骨架/首次网络失败、已读后刷新失败、分页/总数/末页只读纠正及零总数通过；工单TicketsPage→CoreList另核正式路径、页码/条数、筛选回首页、查询键与新建导航通过。均退出0，没有真实HTTP/数据库/浏览器证据。
+
+早期验证把8操作与7路径混算退出1，修计数后通过。收口复核发现总数仍可能带入严格工单解析，分离后非空/空末页定向复验退出0，未放宽schema。原 `audit-admin-components.cjs --json`只读核263个来源文件，badHashes为0。源码说明、最小列表例子与API表同步；没有新增测试脚本、临时环境、依赖、Client生成或服务。公共主接线和实际持久化/浏览器/无Core宿主仍未验，原任务门槛不变。
+
+最终合同35根/工单11根类型复验退出0；七份相关文档652个本地链接/155个锚点/58个表格、旧阶段及正式需求/任务原文保全检查退出0，差异格式退出0。实际能力索引4,503条、issues为0，CoreList用途、正式导入及工单admin直接消费者可定位，新增GET ticket-pages指到实际Nest page方法；索引是源码发现证据，不是接口已部署。阶段中文提交普通推送任务分支并回读真实远端，固定版本由包含本节的提交定位；工作树只保留正式成果，任务临时目录为空。
+
 <a id="core-package-document-links-20261115"></a>
 
 ## 随包指南入口与固定源码链接（2026-11-15）

@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { empty, join, sqltag as sql, type Sql } from "@prisma/client/runtime/library";
 import type { CorePhysicalDataObservation, CoreRemovalAssessment } from "@rental-os/core-contracts";
-import { TicketError, TicketIdSchema, TicketSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket } from "./contracts";
+import { TicketError, TicketIdSchema, TicketSchema, TicketPageSchema, TICKETS_DATA_VERSION, type ListTickets, type Ticket, type TicketPage } from "./contracts";
 import type { TicketAccess, TicketExecution, TicketExecutionRequest, TicketRepository, TicketStoredReceipt } from "./service";
 
 interface TicketRow {
@@ -36,11 +36,30 @@ class MysqlTicketRepository implements TicketRepository {
   }
 
   async list(query: ListTickets, viewerId?: string): Promise<Ticket[]> {
-    const scope = viewerId === undefined ? empty : sql`AND (created_by = ${viewerId} OR assignee_id = ${viewerId})`;
-    const state = query.state ? sql`AND state = ${query.state}` : empty;
     const rows = await this.tx.$queryRaw<TicketRow[]>(sql`SELECT ${columns} FROM example_tickets
-      WHERE tenant_id = ${this.tenantId} ${scope} ${state} ORDER BY created_at DESC, id DESC LIMIT ${query.limit} OFFSET ${query.offset}`);
+      ${this.visibleWhere(query, viewerId)} ORDER BY created_at DESC, id DESC LIMIT ${query.limit} OFFSET ${query.offset}`);
     return rows.map(ticket);
+  }
+
+  async page(query: ListTickets, viewerId?: string): Promise<TicketPage> {
+    // 一个CTE固定正文和总数的同一范围/语句快照；末页为空仍返回真实total，供页面重读有效页。
+    const rows = await this.tx.$queryRaw<Array<(TicketRow | { id: null }) & { total: bigint | number }>>(sql`
+      WITH visible_tickets AS (SELECT ${columns} FROM example_tickets ${this.visibleWhere(query, viewerId)})
+      SELECT page.*, totals.total FROM (SELECT COUNT(*) AS total FROM visible_tickets) totals
+      LEFT JOIN (SELECT * FROM visible_tickets ORDER BY createdAt DESC, id DESC LIMIT ${query.limit} OFFSET ${query.offset}) page ON TRUE
+      ORDER BY page.createdAt DESC, page.id DESC`);
+    if (!rows.length) throw new Error("工单分页查询缺少总数观察");
+    return TicketPageSchema.parse({ total: Number(rows[0].total), rows: rows.flatMap(row => {
+      if (row.id === null) return [];
+      const { total: _total, ...value } = row;
+      return [ticket(value)];
+    }) });
+  }
+
+  private visibleWhere(query: ListTickets, viewerId?: string): Sql {
+    return sql`WHERE tenant_id = ${this.tenantId}
+      ${viewerId === undefined ? empty : sql`AND (created_by = ${viewerId} OR assignee_id = ${viewerId})`}
+      ${query.state ? sql`AND state = ${query.state}` : empty}`;
   }
 
   async find(id: string): Promise<Ticket | undefined> {

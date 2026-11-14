@@ -12,6 +12,9 @@ import { TicketsService } from "./service";
 export interface TicketsPrincipalAccessor { current(): CorePrincipal }
 const principalToken = Symbol("example-tickets.current-principal");
 const queryNumber = (value: unknown) => typeof value === "string" && /^\d+$(?![\s\S])/.test(value) ? Number(value) : value;
+const listInput = (query: Record<string, unknown>) => ({ ...query,
+  ...(query.offset !== undefined ? { offset: queryNumber(query.offset) } : {}),
+  ...(query.limit !== undefined ? { limit: queryNumber(query.limit) } : {}) });
 
 @Controller(TICKETS_HTTP_BASE)
 export class TicketsController {
@@ -20,9 +23,12 @@ export class TicketsController {
 
   @Get(TICKETS_HTTP.list.path)
   list(@Query() query: Record<string, unknown>) {
-    return this.invoke(who => this.service.list(who, { ...query,
-      ...(query.offset !== undefined ? { offset: queryNumber(query.offset) } : {}),
-      ...(query.limit !== undefined ? { limit: queryNumber(query.limit) } : {}) }));
+    return this.invoke(who => this.service.list(who, listInput(query)));
+  }
+
+  @Get(TICKETS_HTTP.page.path)
+  page(@Query() query: Record<string, unknown>) {
+    return this.invoke(who => this.service.page(who, listInput(query)));
   }
 
   @Get(TICKETS_HTTP.get.path)

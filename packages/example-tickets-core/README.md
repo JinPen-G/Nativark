@@ -8,7 +8,7 @@
 
 | 方法 | 当前规则 |
 | --- | --- |
-| `list/get` | 当前权限下读取；普通成员限定创建者/受派者范围，不可见对象与不存在同样处理 |
+| `list/page/get` | 当前权限下读取；普通成员限定创建者/受派者范围，不可见对象与不存在同样处理；page正文和总数同范围 |
 | `create` | 标题必填、说明可空；初始open、修订1、创建者取可信主体 |
 | `assign` | 管理者分派open工单；受派者须已是本租户可使用Core的成员 |
 | `start` | 已分派的open工单变为in_progress；当前受派者或获权管理者执行 |
@@ -30,7 +30,9 @@
 
 新建页通过 `useCoreForm`共用原Form、顶部SaveButton和回车提交，框架维护等待、防重、失败及未保存提醒，Core只保留业务输入转换和原操作核对。同步成功后禁止重复创建，unknown未重新渲染也不重发；原收据暂缺继续保留同键，取得可信结果后解除这次草稿。没有另写按钮/表单样式或第二套请求。[简明表单写法](../../apps/admin/src/core/README.md#保存保留原-form)
 
-`createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的七条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)
+列表页使用 `CoreList`及本Core的 `GET ticket-pages`，返回rows/total。默认20条，条数变化沿原分页回首页，状态筛选只改变本查询；总数与正文共用同一个租户/当前成员/状态条件。空末页仍保留真实total，框架只读回有效页。原GET tickets数组合同及10万offset限制继续保留；新分页入口的安全整数offset独立声明。[简明列表写法](../../apps/admin/src/core/README.md#列表只提供业务列和读取结果)
+
+`createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的八条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)
 
 业务创建 `new TicketsService(execution)`。`TicketExecution.run`在每次调用时使用原认证、当前租户/Core/成员及业务权限，并将只有本Core方法的仓储交给业务服务。不能用恒真权限或内存演示数据代替真实宿主。
 
@@ -82,6 +84,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
 | `GET /api/cores/example-tickets/tickets` | `example-tickets:ticket:read` | 可选state/offset/limit；当前可见工单数组 |
+| `GET /api/cores/example-tickets/ticket-pages` | 同上 | 可选state/offset/limit；同一次读取的rows/total，总数只计当前可见范围 |
 | `GET /api/cores/example-tickets/tickets/{ticketId}` | 同上 | 已登记工单ID；当前可见详情 |
 | `GET /api/cores/example-tickets/operations/{operationId}` | 同上 | 本人的原操作键；recorded原收据或unavailable |
 | `POST /api/cores/example-tickets/tickets` | `example-tickets:ticket:create` | operationId/subject/description；原操作收据 |
@@ -92,6 +95,8 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 全部成功返回200，沿原平台`{ data, requestId }`信封；输入不符400、当前授权不足403、对象不在可读范围404、修订/状态/原操作冲突409；会话失败和未处理存储异常仍走原宿主401/500。请求不接tenantId、创建者和body里的ticketId，路径标识与body分别校验。HTTP200只说明本次请求返回，收据中的工单状态是原操作时状态；当前状态另读详情。
 
 [生成器](src/openapi.ts)从相同Zod/HTTP合同生成OpenAPI贡献，复用公共`coreOpenApiSchema`，不手工维护另一套字段。输出可给平台`composeCoreOpenApi`组合，也可随包离线阅读；标准包检查会核路径/schema命名空间和本地引用。Controller装配与真实HTTP权限仍待宿主验证。
+
+分页实现使用单条MySQL8 CTE，正文和COUNT共用可见集合及语句快照；成员读取和总数均限定创建者/受派者，read.all只扩大到本租户。LEFT JOIN保留空末页的真实总数，total单独解析，不混入严格工单对象。读取不创建Core锁行、工单、收据或审计。[分页合同](src/contracts.ts) · [仓储](src/mysql.ts)
 
 <a id="后台三页面"></a>
 
