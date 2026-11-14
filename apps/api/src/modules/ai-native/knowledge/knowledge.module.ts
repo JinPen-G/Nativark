@@ -1,7 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import type { AiGatewayPortDraft } from '@rental-os/shared';
 import type { KnowledgeDocumentPorts, KnowledgeContentPort, KnowledgeSearchAuthorizationPort, KnowledgeSearchPort, KnowledgeIndexPort, StructuredMemoryPorts } from './knowledge.ports';
-import { KnowledgeDocumentService } from './knowledge-document.service';
+import { KnowledgeDocumentService, type KnowledgeDocumentRetention } from './knowledge-document.service';
 import { KnowledgePublicationService } from './knowledge-publication.service';
 import { KnowledgeRetrievalService } from './knowledge-retrieval.service';
 import { KnowledgeSourceService } from './knowledge-source.service';
@@ -14,6 +14,8 @@ import { requiredPort } from './knowledge-errors';
 
 export interface KnowledgeModulePorts {
   documents: Omit<KnowledgeDocumentPorts, 'parser' | 'cache'>;
+  /** Original persisted deletion transaction; absent hosts cannot delete. */
+  retention?: KnowledgeDocumentRetention;
   content: KnowledgeContentPort; selection: KnowledgeSearchAuthorizationPort; search: KnowledgeSearchPort;
   index: KnowledgeIndexPort; memory: StructuredMemoryPorts; gateway: AiGatewayPortDraft;
   cache: { maxEntries: number; maxBytes: number; ttlMs: number };
@@ -24,7 +26,7 @@ type Bundle = ReturnType<typeof composeKnowledgeServices>;
 export function composeKnowledgeServices(ports: KnowledgeModulePorts) {
   validatePorts(ports);
   const cache = new KnowledgeCache(ports.documents.clock, ports.cache);
-  const documents = new KnowledgeDocumentService({ ...ports.documents, cache, parser: new KnowledgeTextParser() });
+  const documents = new KnowledgeDocumentService({ ...ports.documents, cache, parser: new KnowledgeTextParser() }, ports.retention);
   const publication = new KnowledgePublicationService(documents), sources = new KnowledgeSourceService(documents, ports.content, cache);
   const retrieval = new KnowledgeRetrievalService(documents, sources, ports.selection, ports.search);
   const index = new KnowledgeIndexCoordinator(documents, ports.index), memory = new StructuredMemoryService(ports.memory);

@@ -16,9 +16,7 @@ import { retentionKinds, requireRestorePermit, signRetentionManifest, retentionP
 import { sign, type KeyObject } from 'node:crypto';
 import { knowledgeRecordSchema, parsePersisted, queueIndex } from '../knowledge/knowledge-validation';
 import { inspectRetentionSource } from './retention-model-sources';
-import { projectAiTaskWireEvent } from '../ai-task-event.repository';
-import { aiTaskConfirmationEventSchema } from '../runner/prisma-task-confirmation-history.reader';
-import { aiTaskResumedConfirmationSchema } from '../runner/prisma-task-run-evidence.repository';
+import { eraseExpiredTaskBodies, eraseRetainedSourceTaskBodies } from './retention-task-bodies';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -203,80 +201,9 @@ export class AiRetentionService {
         }
         let targetHash: string;
         if (kind === 'task') {
-          const task = await tx.aiTask.findFirst({ where: { id: resourceId, scopeId: scope.id } });
-          if (!task || !terminal.includes(task.status as typeof terminal[number])
-            || task.updatedAt > this.cutoff(30) && !expectedHash && receipt?.state !== 'erased') throw unavailable();
-          // Required proposal/approval/Core receipts outlive ordinary dialogue.
-          // Their existence is not a permanent hold on every model body/input.
-          // unresolvedTask already refuses live effects and uncertain consumption.
-          const businessTools = ['rental.order.commit', 'tenant.notifications.commit'];
-          const businessStep = await tx.aiStep.findFirst({ where: { taskId: task.id, scopeId: scope.id,
-            toolCode: { in: businessTools } }, select: { id: true } });
-          targetHash = fingerprint([kind, task.id, task.inputRef, task.inputHash, task.createdAt.toISOString()]);
-          if (expectedHash && targetHash !== expectedHash || receipt && receipt.targetHash !== targetHash) throw refused();
           await this.check(current); attempted = true;
-          if (receipt?.state !== 'erased') {
-            const changed = await tx.aiTask.updateMany({ where: { id: task.id, scopeId: scope.id, revision: task.revision,
-              status: task.status }, data: { archivedAt: businessStep ? task.archivedAt : now, revision: { increment: 1 } } });
-            if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-          }
-          const taskWhere = { taskId: task.id, scopeId: scope.id };
-          await tx.aiTaskResultArtifact.updateMany({ where: { ...taskWhere, step: { toolCode: { notIn: businessTools } } }, data: { payload: mark } });
-          await tx.aiTaskInputReceipt.updateMany({ where: taskWhere, data: { answers: [] } });
-          await tx.aiTaskInputRequest.updateMany({ where: taskWhere, data: { allowedFields: [] } });
-          await tx.aiTaskActionInput.updateMany({ where: { ...taskWhere, toolCode: { notIn: businessTools } }, data: { payload: mark } });
-          // Plans hold IDs/limits, not prompts. Retain the original plan hash
-          // where a business phase needs it to reopen approval/Core receipts.
-          if (!businessStep)
-            await tx.aiTaskRunPlan.updateMany({ where: taskWhere, data: { payload: mark } });
-          // Business receipt readers use current task authority. Erasing the
-          // dialogue does not archive that authority or permit a new execution.
-          // Event data/cursor remain useful, but refresh history and internal
-          // inputs can contain the same customer/address labels as the head.
-          if (task.eventCursor < 0n || task.eventCursor > 18446744073709551615n
-            || await tx.aiTaskEvent.findFirst({ where: { ...taskWhere,
-              OR: [{ cursor: { lte: 0n } }, { cursor: { gt: task.eventCursor } }] }, select: { cursor: true } })) throw unavailable();
-          let afterCursor = 0n, eventCount = 0;
-          while (afterCursor < task.eventCursor) {
-            const events = await tx.aiTaskEvent.findMany({ where: { ...taskWhere,
-              cursor: { gt: afterCursor, lte: task.eventCursor } }, orderBy: { cursor: 'asc' }, take: 200 });
-            eventCount += events.length;
-            // Bounded pages under the same transaction/watermark. Overflow or
-            // missing history rolls back instead of leaving a plaintext suffix.
-            if (!events.length || eventCount > 10000) throw unavailable();
-            for (const event of events) {
-              if (event.scopeId !== scope.id || event.taskId !== task.id || event.cursor <= afterCursor
-                || event.cursor > task.eventCursor) throw unavailable();
-              afterCursor = event.cursor;
-              const raw = event.payload;
-              if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw unavailable();
-              const data = projectAiTaskWireEvent(event).data;
-              let confirmation;
-              if (businessStep && event.type === 'task.transition' && raw.confirmation !== undefined) {
-                const envelope = aiTaskConfirmationEventSchema.parse(raw), initiator = envelope.initiator;
-                if (initiator.actorKind !== task.ownerKind || initiator.actorId !== task.ownerId) throw refused();
-                const paused = envelope.data.from === 'running' && envelope.data.to === 'waiting_confirmation'
-                  && envelope.data.reason === 'confirmation_required';
-                const resumed = envelope.data.from === 'waiting_confirmation' && envelope.data.to === 'running'
-                  && envelope.data.reason === 'resume';
-                if (!paused && !resumed) throw unavailable();
-                confirmation = { initiator, confirmation: resumed ? aiTaskResumedConfirmationSchema.parse(raw).confirmation
-                  : { checkpointRef: envelope.confirmation.checkpointRef, phaseId: envelope.confirmation.phaseId } };
-              }
-              // Reconstruct only validated wire data and minimal business proof.
-              // Never carry previousRequest, extra audit fields or prompt copies.
-              const safe = { data, ...confirmation, retention: mark };
-              const changedEvent = await tx.aiTaskEvent.updateMany({ where: { ...taskWhere, cursor: event.cursor,
-                taskRevision: event.taskRevision, type: event.type }, data: { payload: safe } });
-              if (changedEvent.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-            }
-          }
-          // Preserve the minimal business phase/approval/receipt association;
-          // it is independent from ordinary inputs and generated response text.
-          if (task.inputRef && !await tx.aiTask.findFirst({ where: { scopeId: scope.id, inputRef: task.inputRef,
-            id: { not: task.id }, archivedAt: null }, select: { id: true } })) {
-            await tx.aiTaskOriginalRequest.updateMany({ where: { id: task.inputRef, scopeId: scope.id }, data: { payload: mark, erasedAt: now } });
-          }
+          return eraseExpiredTaskBodies(tx, { scopeId: scope.id, owner, taskId: resourceId, now,
+            check: () => this.check(current) }, expectedHash);
         } else if (kind === 'request') {
           const row = await tx.aiTaskOriginalRequest.findFirst({ where: { id: resourceId, scopeId: scope.id } });
           if (!row || row.createdAt > this.cutoff(30) && !expectedHash) throw unavailable();
@@ -301,6 +228,8 @@ export class AiRetentionService {
           if (!state || typeof state !== 'object' || Array.isArray(state)) throw unavailable();
           const { preference: _body, confirmationRecordId: _confirmation, ...safe } = state;
           await this.check(current); attempted = true;
+          await eraseRetainedSourceTaskBodies(tx, { scopeId: scope.id, owner, kind: 'memory', resourceId: row.id,
+            now, check: () => this.check(current) });
           const changed = await tx.aiStructuredMemory.updateMany({ where: { id: row.id, ...owner,
             revision: row.revision, ownerKind: row.ownerKind, ownerId: row.ownerId }, data: { content: {},
               contentHash: fingerprint({}), status: 'deleted', confirmationRecordId: null, deletedAt: now,
@@ -318,6 +247,8 @@ export class AiRetentionService {
           targetHash = fingerprint([kind, doc.id, doc.createdAt.toISOString()]);
           if (expectedHash && targetHash !== expectedHash) throw refused();
           await this.check(current); attempted = true;
+          if (!withdrawing) await eraseRetainedSourceTaskBodies(tx, { scopeId: scope.id, owner,
+            kind: 'knowledge', resourceId: doc.id, now, check: () => this.check(current) });
           const parsed = parsePersisted(knowledgeRecordSchema, doc.state);
           const next = queueIndex({ ...parsed, document: { ...parsed.document,
             title: withdrawing ? parsed.document.title : '[已删除]', publication: withdrawing ? 'withdrawn' : 'deleted',

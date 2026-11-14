@@ -6,6 +6,36 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain24-original-body-propagation-audit-20261114"></a>
+## AIN-24 原正文传播、会员收据保留与敏感读取审计（2026-11-14）
+
+前置保护阶段 `10e1c81f6621ae2491da0689366c3a4a6ba1d8a7` 已普通推送并回读 GitHub 一致。本阶段固定12份必要源码，沿原Task清理、知识／记忆CAS、当前授权和原OperationLogService接线，不另建删除状态机、业务收据或日志系统。AIN-24仍待原全文核定；生产者中直接读知识／文件正文的审计缺口已交dev1后继，不能凭本阶段HTTP工厂闭环判整项100%。
+
+[原Task正文清理叶](../../apps/api/src/modules/ai-native/privacy/retention-task-bodies.ts)从[原维护事务](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)抽出同一清理实现；维护调用仍须原30天期限或已验证restore许可，显式源删除只从原hash-bound模型输入定位该知识／记忆的关联终态Task。当前scope锁、未决审批／POSSIBLE／原账hold、CAS和有界来源复核保留；不覆盖输入／结果哈希，不补签输入，不重置预算或重执行。清理模型ActionInput／Artifact、原人类回答和事件重复正文，原Task tombstone与source CAS同事务提交；部分失败整体回滚，COMMIT丢应答只观察原操作键。
+
+原清理的businessTools遗漏`membership.profile.commit`，会归档已完成姓名Task并清掉原计划／业务ActionInput／Artifact／确认事件，虽原业务表保留却无法读取原收据。现与原订单／通知一起保留其最少Task／计划／action／phase／批准关联；原会员变更中的必要姓名差异遵守原业务留存，不清掉后伪称原changeHash仍有效。独立助手已核出该P2，Root以真实姓名宿主的原批准／一次CAS／31天后清理／原确认历史及业务收据复验通过，原模型正文不因业务收据保留而永久留存。
+
+[知识事务适配](../../apps/api/src/modules/ai-native/knowledge/prisma-knowledge-retention.ts)把原仓储回调绑定到已持有scope锁的同一个Prisma事务，接入[人工知识服务](../../apps/api/src/modules/ai-native/knowledge/human-knowledge.service.ts)和[原持久组合](../../apps/api/src/modules/ai-native/knowledge/persistent-knowledge.composition.ts)／[模块](../../apps/api/src/modules/ai-native/knowledge/knowledge.module.ts)，不另开嵌套事务。明确知识删除在同事务清除所有历史版本chunks及关联Task正文，原删除标记只有这些步骤均完成才设erased；关系词法索引使用同一chunks，当前出版／ACL撤回仍立即阻止检索，外部附件／备份删除不被该标记冒称已验证。[记忆变更](../../apps/api/src/modules/ai-native/knowledge/persistent-memory-consent.service.ts)沿原确认／同键收据清理关联Task副本，确认记录重复正文仍原位撤销清除。
+
+dev1冻结交回[知识消费工厂](../../apps/api/src/modules/ai-native/knowledge/human-knowledge-consumption.composition.ts)、[记忆管理工厂](../../apps/api/src/modules/ai-native/knowledge/human-memory-management.composition.ts)和[敏感读取审计](../../apps/api/src/modules/ai-native/knowledge/knowledge-sensitive-read.audit.ts)，blob分别为`ae880a4c5345aca6c176c528f70159fc4e0cfa87`、`5e1c6ee5d1450f94202f19be4b847edd7215d7b6`、`1c195314a40c71e93c77b1424d398ccd6ccddf51`，Root逐字核同并独立运行其原HTTP／内部组合。[正式Nest两个provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)已注入原OperationLogService。四个公开读取和内部collect／revalidate／偏好选择／确认明细在返回前等待持久审计成功，再核当前权限与同一来源；日志仅含scope、ID／修订和哈希，不含snippet、preference、正文或凭据。审计失败、缺logger或丢应答不交付敏感内容，不自动重记／重派，当前授权ALS绑定后恢复父上下文。
+
+| Root 必要模拟／类型 | stdin SHA-256、固定blob及结果 |
+| --- | --- |
+| 原知识源及两份终态Task同事务传播 | `5b719c1b72d61204547e9ba189d235e750303787ebb4a399995ddcb8d15d08a9`；stdin `466c4e7b84d89bd7f8d13597b3c2c6d170459031`／输出`d0b445a48e2e7e7cf56f8c40474e21f6ff369314`，退出0。两Task／历史chunks清理、未决审批拒绝、撤权全回滚、COMMIT丢应答同键只读、损坏原来源拒绝均通过 |
+| 原记忆确认与Task正文副本 | `e532c47a9d01ef004d896429a1d4654d6dd9aa3ed0f8f75d9115dd423890f1c9`；stdin `d98be12bede83bba89862e5e4b7be80cabdffed8`／输出`4618a484bf8c4fd95d6e75fe9f174f14ece5074e`，退出0。确认及模型重复正文清理、原哈希保持、同键恢复0写入 |
+| 原姓名业务收据清理后可读 | `5498c27c3ee7101324212bcd5c08ac74e653926008e41c2c37c87b8cced07e0c`；stdin `583e28ca694a7529138776c9937fb317bbf7b26f`／输出`20e1906df61ff712b6f41dad4420506e0e5b88a1`，退出0。原host批准后Core姓名CAS1次，31天清理仍读原确认历史／结果revision2，plan／input／phase／账保持，不新增派发 |
+| 公开及内部敏感审计 | `f6d41b236016d57e9be693b7b22957e25d8d651e2fec87629ca72738bdcb3b38`；stdin `95eb4e44b7573ef1adadf48f9d0d6074cd3e7b6d`／输出`ea653b76a1602b793fedee50a3fe65f59004e610`，退出0。17条原审计／业务0写；失败／缺logger／丢应答、撤权／切scope／来源或同意撤回／close均拒绝，父ALS恢复，正文不进日志 |
+| 生产闭包类型 | `3b581f93b21846dcb60e244a7cabf49dc25a2142e6bcf71f435b5363353f9b0e`；stdin `bbf246478beef56b6d35bd0db908a79f40560ddb`／输出`ea89eb568f7961f9e3e1c4a0f94a665fd8939336`；TypeScript5.9.3，11根／1881源、0诊断、退出0 |
+| 原Nest审计登记 | `07059ae094c4fd77dd21a9cafffaf0bea8e9053dbcf40156fe0d32223f2c5249`；stdin `e6edd5ab34eb78f49c05f38834f023174ee965db`／输出`2eb8aace3434db4f19e66f15b6ebd5db20762e45`，退出0。两个provider引用原logger、AppModule既有注册保持 |
+
+均为`node --no-compilation-cache -`、原offline preload及不可达数据库，内存audit0。原失败保留：初版传播驱动缺原请求表及原fixture的deleteMany能力，事务正确回滚且返unknown；随后只在内存补真实删除／upsert语义及必要表，不改生产校验或测试文件。后续驱动漏引入retentionSourceCopies，读后断言报ReferenceError；修驱动引用后整组通过。正向结果不取消这些原错误记录。
+
+独立助手静态核对最终原擦除叶／来源解析／维护service／知识事务桥／知识delete／记忆delete六源，与Root固定blob逐项一致；确认30天／恢复／原hash-bound来源边界、未决hold、业务收据保护、同事务及同键unknown均保持，当前受支持持久正文载体未发现新增漏清，允许本阶段独立交付。该复核不重跑Root行为／类型，不代表AIN-24全文、所有进程缓存原子清零或外部副本删除完成；进程缓存仍按原失效与最长五分钟淘汰。
+
+仍缺完整AIN-24收口：原场景直接`services.preparation.collect/revalidate`、`context.open`和正式bytes读取尚绕过工厂审计，dev1独占`original-scene-knowledge.ts`、`knowledge-file.composition.ts`、`prisma-knowledge-file-access.ts`及`prisma-formal-knowledge.composition.ts`补同一原审计，Root接必要公共provider。未生产注册的旧KnowledgeGatewayContext不拿接口存在当已开放入口。供应商副本／外部附件／备份责任与原攻击覆盖继续按全文核定，不因缺负责人实测卡研发，也不以未装配依赖冒称完成。dev2继续AIN-26原四品类／多端组合，15企业正向链仍原Core授权依赖。
+
+本阶段自有验证进程已退出、两个原任务临时目录均未创建，未新增／扩写测试脚本、依赖／构建副本或第五册。`git diff --check`退出0；文档检查仍为四处既有缺链，无新增算术或链接错误。实际DB、浏览器／微信、外部存储／供应商及备份环境由负责人后续验证，不称生产删除验收通过。
+
 <a id="ain24-original-source-hold-transaction-20261114"></a>
 ## AIN-24 原材料保留、撤同意与删除事务保护（2026-11-14）
 

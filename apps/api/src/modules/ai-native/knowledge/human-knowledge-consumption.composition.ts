@@ -8,9 +8,14 @@ import { documentSourceSchema, id, parse } from './knowledge-validation';
 import type { HumanKnowledgeConsumptionService } from './human-knowledge-consumption.service';
 import { composeKnowledgeFileApplication, type KnowledgeFileApplicationDependencies } from './knowledge-file.composition';
 import type { AiRequestAbortSource } from '../scenes/request-abort';
+import { KnowledgeSensitiveReadAudit, knowledgeReadHash, type KnowledgeReadAuditReference,
+  type KnowledgeReadOperationLogs } from './knowledge-sensitive-read.audit';
 
-export type HumanKnowledgeConsumptionDependencies = Omit<PrismaFormalKnowledgeDependencies, 'credentials' | 'policyManagement'>
-  | Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'policyManagement'>;
+export type HumanKnowledgeConsumptionDependencies = (Omit<PrismaFormalKnowledgeDependencies, 'credentials' | 'policyManagement'>
+  | Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'policyManagement'>) & {
+    /** Original durable logger; absence refuses sensitive delivery, not authority. */
+    operationLogs?: KnowledgeReadOperationLogs;
+  };
 export type HumanKnowledgeConsumptionHttpRequest = { headers: { authorization?: unknown } } & AiRequestAbortSource;
 export type HumanKnowledgeConsumptionRequest = {
   [K in keyof AiKnowledgeConsumptionHttpResponsesDraft]: (value: unknown) => Promise<AiKnowledgeConsumptionHttpResponsesDraft[K]>;
@@ -45,6 +50,21 @@ function publicMemory(item: AiKnowledgeConsumptionHttpResponsesDraft['readPrefer
   return { memoryId: item.memoryId, revision: item.revision, aclRevision: item.aclRevision,
     expiresAt: item.expiresAt, preference: publicPreference(item.preference), confirmationRecordId: item.confirmationRecordId };
 }
+
+const comparableObservation = <T extends { observedAt?: string }>(value: T) => {
+  const { observedAt: _time, ...content } = value;
+  return content;
+};
+const sourceAuditReference = (source: ReturnType<typeof documentSourceSchema.parse>, content: unknown): KnowledgeReadAuditReference => ({
+  kind: 'document', documentId: source.documentId, documentVersion: source.documentVersion,
+  aclRevision: source.aclRevision, chunkId: source.chunkId, contentHash: knowledgeReadHash(content),
+});
+const memoryAuditReference = (item: Parameters<typeof publicMemory>[0]): KnowledgeReadAuditReference => ({ kind: 'memory',
+  memoryId: item.memoryId, revision: item.revision, aclRevision: item.aclRevision,
+  confirmationRecordId: item.confirmationRecordId, contentHash: knowledgeReadHash(item.preference) });
+
+/** Request-owned current reads and final durable audit gate. The logger stores
+ * references only; neither caller scope nor a previous body grants disclosure. */
 export class HumanKnowledgeConsumptionRequestFactory {
   constructor(private readonly dependencies: HumanKnowledgeConsumptionDependencies) {
     requiredPort(dependencies?.auth, ['resolveAccessContext']);
@@ -74,13 +94,13 @@ export class HumanKnowledgeConsumptionRequestFactory {
       await credentials.current();
       return access;
     } };
-    const services = 'integrations' in this.dependencies
-      ? composeKnowledgeFileApplication({ ...this.dependencies, auth: requestAuth, credentials })
-      : composePrismaFormalHumanKnowledge({ ...this.dependencies, auth: requestAuth, credentials });
-    return {
-      collectInput: (value, options) => services.consumption.collectInput(value, options),
-      revalidateInput: value => services.consumption.revalidateInput(value),
-      readDocument: async value => {
+    const { operationLogs, ...dependencies } = this.dependencies;
+    const services = 'integrations' in dependencies
+      ? composeKnowledgeFileApplication({ ...dependencies, auth: requestAuth, credentials })
+      : composePrismaFormalHumanKnowledge({ ...dependencies, auth: requestAuth, credentials });
+    const audit = new KnowledgeSensitiveReadAudit(operationLogs, context => services.management.session.check(context));
+    const reads = {
+      readDocument: async (value: unknown) => {
         const input = parse(documentInput, value);
         return services.management.session.run(async context => {
           const before = await services.management.documents.read(context, input.documentId);
@@ -111,14 +131,14 @@ export class HumanKnowledgeConsumptionRequestFactory {
           };
         });
       },
-      openSource: async value => {
+      openSource: async (value: unknown) => {
         const source = parse(sourceInput, value);
         const result = await services.management.session.run(context => services.consumption.openSource({ ...source, scope: context.scope }));
         return { draftVersion: result.draftVersion, documentId: result.documentId, documentVersion: result.documentVersion,
           chunkId: result.chunkId, aclRevision: result.aclRevision, scope: publicScope(result.scope),
           locator: publicLocator(result.locator), text: result.text, trust: result.trust };
       },
-      readMemory: async value => {
+      readMemory: async (value: unknown) => {
         const result = await services.consumption.readMemory(parse(memoryInput, value));
         if (result.status !== 'ready') return {
           status: result.status,
@@ -134,12 +154,87 @@ export class HumanKnowledgeConsumptionRequestFactory {
             scope: publicScope(proof.scope), audience: 'operator' as const, confirmedAt: proof.confirmedAt, expiresAt: proof.expiresAt },
           semantics: result.semantics };
       },
-      readPreferences: async value => {
+      readPreferences: async (value: unknown) => {
         const result = await services.consumption.readPreferences(parse(preferencesInput, value));
         return { items: result.items.map(publicMemory),
           ambiguities: result.ambiguities.map(item => ({ kind: item.kind, memoryIds: [...item.memoryIds], nextStep: item.nextStep })),
           ambiguityCoverage: result.ambiguityCoverage, businessCompatibility: result.businessCompatibility,
           truncated: result.truncated, coverage: result.coverage, pagination: result.pagination, semantics: result.semantics };
+      },
+    };
+    type CollectedInput = Awaited<ReturnType<HumanKnowledgeConsumptionService['collectInput']>>;
+    type VerifiedInput = Awaited<ReturnType<HumanKnowledgeConsumptionService['revalidateInput']>>;
+    type Collected = CollectedInput | VerifiedInput;
+    const collectedReferences = (value: Collected): KnowledgeReadAuditReference[] => [
+      ...value.sources.map(entry => sourceAuditReference(entry.source, entry.snippet)),
+      ...(value.preferences.status === 'ready' ? value.preferences.items.map(memoryAuditReference) : []),
+    ];
+    const verifyCollected = async <T extends Collected>(value: T): Promise<T> => {
+      if (value.status === 'ready' || value.status === 'partial') {
+        const verified = await services.consumption.revalidateInput(value);
+        if (knowledgeReadHash(verified) !== knowledgeReadHash(value)) throw new KnowledgeError('conflict');
+        return value;
+      }
+      // A no-results observation is not recollected into a new query/result.
+      // Any optional preferences still need their original current consent.
+      if (value.sources.length) return unavailable();
+      if (value.preferences.status === 'ready') for (const item of value.preferences.items) {
+        const current = await services.memory?.read(item.memoryId);
+        if (!current || current.status !== 'confirmed' || current.revision !== item.revision
+          || current.aclRevision !== item.aclRevision || current.confirmationRecordId !== item.confirmationRecordId
+          || current.expiresAt !== item.expiresAt || knowledgeReadHash(current.preference) !== knowledgeReadHash(item.preference)) return unavailable();
+      }
+      return value;
+    };
+    return {
+      collectInput: (value, options) => {
+        const command = structuredClone(value), settings = structuredClone(options);
+        return services.management.session.run(context => audit.read<CollectedInput>(context, 'collect', {
+          read: () => services.consumption.collectInput(command, settings), revalidate: verifyCollected,
+          references: collectedReferences, comparable: collected => collected,
+        }));
+      },
+      revalidateInput: value => {
+        const command = structuredClone(value);
+        return services.management.session.run(context => audit.read<VerifiedInput>(context, 'revalidateInput', {
+          read: () => services.consumption.revalidateInput(command), revalidate: verifyCollected,
+          references: collectedReferences, comparable: collected => collected,
+        }));
+      },
+      readDocument: value => {
+        const command = parse(documentInput, value);
+        return services.management.session.run(context => audit.read(context, 'document', {
+          read: () => reads.readDocument(command), revalidate: () => reads.readDocument(command),
+          comparable: comparableObservation,
+          references: result => [{ kind: 'document', documentId: result.metadata.documentId,
+            documentVersion: result.metadata.documentVersion, revision: result.metadata.revision,
+            aclRevision: result.metadata.aclRevision, contentHash: knowledgeReadHash(comparableObservation(result)) },
+          ...(result.preview.status === 'ready' ? result.preview.sources.map(item => sourceAuditReference(item.source, item.snippet)) : [])],
+        }));
+      },
+      openSource: value => {
+        const command = parse(sourceInput, value);
+        return services.management.session.run(context => audit.read(context, 'source', {
+          read: () => reads.openSource(command), revalidate: () => reads.openSource(command),
+          comparable: result => result, references: result => [sourceAuditReference({ ...command, scope: result.scope }, result.text)],
+        }));
+      },
+      readMemory: value => {
+        const command = parse(memoryInput, value);
+        return services.management.session.run(context => audit.read(context, 'memory', {
+          read: () => reads.readMemory(command), revalidate: () => reads.readMemory(command),
+          comparable: comparableObservation,
+          references: result => [result.status === 'ready' ? memoryAuditReference(result.memory) : { kind: 'memory',
+            memoryId: result.memory.memoryId, revision: result.memory.revision, aclRevision: result.memory.aclRevision,
+            contentHash: knowledgeReadHash(result.memory) }],
+        }));
+      },
+      readPreferences: value => {
+        const command = parse(preferencesInput, value);
+        return services.management.session.run(context => audit.read(context, 'preferences', {
+          read: () => reads.readPreferences(command), revalidate: () => reads.readPreferences(command),
+          comparable: result => result, references: result => result.items.map(memoryAuditReference),
+        }));
       },
       close() { authorization = undefined; },
     };

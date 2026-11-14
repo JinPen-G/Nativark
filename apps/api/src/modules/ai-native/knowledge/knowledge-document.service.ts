@@ -4,7 +4,10 @@ import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/
 import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction, KnowledgeAuthorizationRequest, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
 import { assertRecord, authorize, draftInput, fingerprint, mutationInput, operationFingerprint, parse, validateChunks, queueIndex } from './knowledge-validation';
-import { inspectRetentionSource, lockRetentionSourceScope, retentionSourceCopies } from '../privacy/retention-model-sources';
+import { inspectRetentionSource, lockRetentionSourceScope } from '../privacy/retention-model-sources';
+import { eraseRetainedSourceTaskBodies } from '../privacy/retention-task-bodies';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
 /** Server-only binding to the ORIGINAL repository transaction. The caller
  * supplies its transaction-bound repository, not another storage/runtime chain.
@@ -85,19 +88,43 @@ export class KnowledgeDocumentService {
         if (state !== 'clear') throw Object.assign(new KnowledgeError(state === 'held' ? 'not_ready' : 'unavailable'), {
           reason: state === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable',
         });
-        // Logical source CAS cannot rewrite immutable Task input/result bodies.
-        // Keep the original source until that existing copy consumer is wired;
-        // neither a terminal Task nor a queued index remove is deletion proof.
-        if ((await retentionSourceCopies(tx, scopeId, 'knowledge', input.documentId, owner)).length) {
-          throw Object.assign(new KnowledgeError('unavailable'), { reason: 'source_copy_erasure_not_assembled' });
-        }
         await authorize(this.ports.authorization, context, { action, scope: context.scope, document: current.document, ...binding });
         if (fingerprint(context) !== contextHash || fingerprint(await repository.read(input.scope, input.documentId)) !== beforeHash) {
           throw new KnowledgeError('conflict');
         }
         attempted = true;
+        const check = async () => {
+          await authorize(this.ports.authorization, context, { action, scope: context.scope, document: current.document, ...binding });
+          if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+        };
+        // Source CAS and original Task-body erasure share one transaction. Keep
+        // original IDs/hashes, financial evidence and business phases; never
+        // sign a replacement prompt or acknowledge partial propagation.
+        await eraseRetainedSourceTaskBodies(tx, { scopeId, owner, kind: 'knowledge', resourceId: input.documentId,
+          now: new Date(this.ports.clock.now()), check });
         const result = await repository.commit(input);
         if (result !== 'committed') throw new KnowledgeError('conflict');
+        await check();
+        // The current relational index uses these same chunks. Removing every
+        // version here completes local body/index propagation within the
+        // original deletion transaction, rather than waiting for a disconnected
+        // optional consumer while reporting a successful logical delete.
+        await tx.aiKnowledgeChunk.deleteMany({ where: { version: { documentId: input.documentId,
+          document: owner } } });
+        const stored = await tx.aiKnowledgeDocument.findFirst({ where: { id: input.documentId, ...owner } });
+        const erasureId = fingerprint([AI_RETENTION_POLICY.version, owner.tenantId, owner.workspaceId, 'knowledge', input.documentId]);
+        const erasure = await tx.aiDataErasure.findUnique({ where: { id: erasureId } });
+        if (!stored || !(stored.createdAt instanceof Date) || !Number.isFinite(stored.createdAt.getTime())
+          || !erasure || erasure.tenantId !== owner.tenantId || erasure.workspaceId !== owner.workspaceId
+          || erasure.kind !== 'knowledge' || erasure.resourceId !== input.documentId
+          || erasure.policyVersion !== AI_RETENTION_POLICY.version || erasure.state !== 'prepared'
+          || erasure.targetHash !== fingerprint(['knowledge', input.documentId, stored.createdAt.toISOString()])) {
+          throw new KnowledgeError('unavailable');
+        }
+        const erased = await tx.aiDataErasure.updateMany({ where: { id: erasureId, ...owner,
+          revision: erasure.revision, state: 'prepared' }, data: { state: 'erased',
+          erasedAt: new Date(this.ports.clock.now()), revision: { increment: 1 } } });
+        if (erased.count !== 1) throw new KnowledgeError('conflict');
         await authorize(this.ports.authorization, context, { action, scope: context.scope, document: current.document, ...binding });
         if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
         completed = true;
@@ -106,6 +133,7 @@ export class KnowledgeDocumentService {
     } catch (error) {
       if (completed) throw new KnowledgeCommitUnknownError();
       if (error instanceof KnowledgeError) throw error;
+      if (error instanceof AiTaskRepositoryError) throw new KnowledgeError('unavailable');
       if (attempted) throw new KnowledgeCommitUnknownError();
       throw new KnowledgeError('unavailable');
     }

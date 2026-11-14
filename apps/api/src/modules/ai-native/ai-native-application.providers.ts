@@ -32,6 +32,7 @@ import { PrismaService } from '../database/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { ApiAuthGuard } from '../../common/api-auth.guard';
 import { getRequestIdentity } from '../../common/request-identity';
+import { OperationLogService } from '../../common/operation-log.service';
 import { SubscriptionService } from '../subscription/subscription.service';
 import { ClientDeliveryAddressService } from '../client/client-delivery-address.service';
 import { RentalCoreService } from '../rental-core/rental-core.service';
@@ -419,8 +420,9 @@ export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
 /** Human management only. No action policy/authority is seeded by assembly;
  * absent persisted grants still refuse every memory/governance operation. */
 export const AI_NATIVE_MEMORY_MANAGEMENT_PROVIDER: FactoryProvider = {
-  provide: HumanMemoryManagementRequestFactory, inject: [PrismaService, AuthService],
-  useFactory: (db: PrismaService, auth: AuthService) => new HumanMemoryManagementRequestFactory({ db, auth, clock: { now: () => Date.now() } })
+  provide: HumanMemoryManagementRequestFactory, inject: [PrismaService, AuthService, OperationLogService],
+  useFactory: (db: PrismaService, auth: AuthService, operationLogs: OperationLogService) =>
+    new HumanMemoryManagementRequestFactory({ db, auth, operationLogs, clock: { now: () => Date.now() } })
 };
 export const AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER: FactoryProvider = {
   provide: HumanKnowledgeManagementRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService],
@@ -430,9 +432,10 @@ export const AI_NATIVE_KNOWLEDGE_MANAGEMENT_PROVIDER: FactoryProvider = {
 /** Current human reads only. No policy seed, task creation or model dispatch;
  * file and memory access use their original request-bound authority sources. */
 export const AI_NATIVE_KNOWLEDGE_CONSUMPTION_PROVIDER: FactoryProvider = {
-  provide: HumanKnowledgeConsumptionRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService],
-  useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService) =>
-    new HumanKnowledgeConsumptionRequestFactory({ db, auth, integrations, memory: { db }, clock: { now: () => Date.now() } })
+  provide: HumanKnowledgeConsumptionRequestFactory, inject: [PrismaService, AuthService, TenantIntegrationService, OperationLogService],
+  useFactory: (db: PrismaService, auth: AuthService, integrations: TenantIntegrationService, operationLogs: OperationLogService) =>
+    new HumanKnowledgeConsumptionRequestFactory({ db, auth, integrations, operationLogs,
+      memory: { db }, clock: { now: () => Date.now() } })
 };
 export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
   provide: KNOWLEDGE_POLICY_MANAGEMENT, inject: [PrismaService, AuthService, ApiAuthGuard],

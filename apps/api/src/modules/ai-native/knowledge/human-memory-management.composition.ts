@@ -11,9 +11,14 @@ import { FormalMemoryAuthorizationAdapter } from './formal-knowledge-authorizati
 import { PersistentMemoryConsentService } from './persistent-memory-consent.service';
 import { id, parse, preferenceSchema, memoryDraftSchema } from './knowledge-validation';
 import { requiredPort, unavailable } from './knowledge-errors';
+import { KnowledgeCurrentSession } from './knowledge-current-session';
+import { KnowledgeSensitiveReadAudit, knowledgeReadHash, type KnowledgeReadAuditReference,
+  type KnowledgeReadOperationLogs } from './knowledge-sensitive-read.audit';
 
 export type HumanMemoryManagementDependencies = { db: MemoryPrismaClient & KnowledgePolicyReadDb;
-  auth: Pick<AuthService, 'resolveAccessContext'>; clock: KnowledgeClock };
+  auth: Pick<AuthService, 'resolveAccessContext'>; clock: KnowledgeClock;
+  /** Original durable logger; missing dependency refuses sensitive read delivery. */
+  operationLogs?: KnowledgeReadOperationLogs };
 export type HumanMemoryManagementRequest = { [K in keyof AiMemoryManagementResponsesDraft]:
   (value: unknown) => Promise<AiMemoryManagementResponsesDraft[K]> } & {
     /** Server consumers only; these do not register new public routes. */
@@ -32,8 +37,9 @@ const changeInput = z.object({ confirmation: z.literal('change_memory_preference
       expectedRevision: z.number().int().min(1).max(4294967293), operation: z.literal('delete') }).strict(),
   ]) }).strict();
 
-/** One current human request; no file platform, model, task, approval or worker
- * dependency. All actions use the original persisted memory policy/consent. */
+/** One current human request using original memory policy/consent. Sensitive
+ * reads await durable reference-only audit and recheck the same source. This
+ * does not grant a model, business approval, worker or additional write action. */
 export class HumanMemoryManagementRequestFactory {
   constructor(private readonly dependencies: HumanMemoryManagementDependencies) {
     requiredPort(dependencies?.auth, ['resolveAccessContext']); requiredPort(dependencies?.clock, ['now']);
@@ -45,7 +51,7 @@ export class HumanMemoryManagementRequestFactory {
     const header = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u).safeParse(request?.headers?.authorization);
     if (!header.success) return unavailable();
     let authorization: string | undefined = header.data;
-    const requestId = randomUUID(), { db, auth, clock } = this.dependencies;
+    const requestId = randomUUID(), { db, auth, clock, operationLogs } = this.dependencies;
     const credentials = { current: async () => {
       if (authorization === undefined) return unavailable();
       return { authorization, requestId, audience: 'operator' as const };
@@ -59,15 +65,51 @@ export class HumanMemoryManagementRequestFactory {
     const source = new PrismaKnowledgeActionPolicySource(db, () => new Date(clock.now()));
     const memory = new PersistentMemoryConsentService({ db, auth: requestAuth, clock, credentials,
       authorization: new FormalMemoryAuthorizationAdapter(requestAuth, credentials, source.memory, () => new Date(clock.now())) });
+    const session = new KnowledgeCurrentSession(requestAuth, credentials, clock);
+    const audit = new KnowledgeSensitiveReadAudit(operationLogs, context => session.check(context));
     const mutation = (value: AiMemoryDraft) => ({ memory: parse(memoryDraftSchema, value),
       semantics: 'human_preference_not_business_approval' as const });
+    const preferenceReference = (item: Awaited<ReturnType<PersistentMemoryConsentService['selectPreferences']>>['items'][number]): KnowledgeReadAuditReference => ({
+      kind: 'memory', memoryId: item.memoryId, revision: item.revision, aclRevision: item.aclRevision,
+      confirmationRecordId: item.confirmationRecordId, contentHash: knowledgeReadHash(item.preference),
+    });
     return {
-      selectPreferences: value => memory.selectPreferences(value),
-      revalidatePreferences: value => memory.revalidateSelection(value),
-      confirmationDetail: value => memory.confirmationDetail(parse(z.object({ memoryId: id }).strict(), value).memoryId),
+      selectPreferences: value => {
+        const command = structuredClone(value);
+        return session.run(context => audit.read(context, 'selectPreferences', {
+          read: () => memory.selectPreferences(command), revalidate: observed => memory.revalidateSelection(observed),
+          comparable: observed => observed, references: observed => observed.items.map(preferenceReference),
+        }));
+      },
+      revalidatePreferences: value => {
+        const command = structuredClone(value);
+        return session.run(context => audit.read(context, 'revalidatePreferences', {
+          read: () => memory.revalidateSelection(command), revalidate: observed => memory.revalidateSelection(observed),
+          comparable: observed => observed, references: observed => observed.items.map(preferenceReference),
+        }));
+      },
+      confirmationDetail: value => {
+        const command = parse(z.object({ memoryId: id }).strict(), value);
+        return session.run(context => audit.read(context, 'confirmation', {
+          read: () => memory.confirmationDetail(command.memoryId), revalidate: () => memory.confirmationDetail(command.memoryId),
+          comparable: observed => observed, references: observed => [{ kind: 'confirmation', memoryId: observed.memoryId,
+            confirmationRecordId: observed.confirmationRecordId, revision: observed.revision,
+            aclRevision: observed.aclRevision, contentHash: knowledgeReadHash(observed.preference) }],
+        }));
+      },
       list: value => memory.list(value),
       state: async value => memory.state(parse(z.object({ memoryId: id }).strict(), value).memoryId),
-      read: async value => mutation(await memory.read(parse(z.object({ memoryId: id }).strict(), value).memoryId)),
+      read: value => {
+        const command = parse(z.object({ memoryId: id }).strict(), value);
+        return session.run(context => audit.read(context, 'memory', {
+          read: async () => mutation(await memory.read(command.memoryId)),
+          revalidate: async () => mutation(await memory.read(command.memoryId)), comparable: observed => observed,
+          references: observed => [{ kind: 'memory', memoryId: observed.memory.memoryId, revision: observed.memory.revision,
+            aclRevision: observed.memory.aclRevision,
+            ...(observed.memory.status === 'confirmed' ? { confirmationRecordId: observed.memory.confirmationRecordId } : {}),
+            contentHash: knowledgeReadHash(observed.memory.status === 'deleted' ? observed.memory : observed.memory.preference) }],
+        }));
+      },
       propose: async value => {
         const input = parse(z.object({ confirmation: z.literal('propose_memory_preference'), command: z.object({ memoryId: id,
           operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }), preference: preferenceSchema }).strict() }).strict(), value);

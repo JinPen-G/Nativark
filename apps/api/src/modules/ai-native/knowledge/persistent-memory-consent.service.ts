@@ -11,7 +11,9 @@ import type { KnowledgeClock, MemoryAuthorizationPort, MemoryConfirmation } from
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { actor, fingerprint, id, memoryConfirmationHash, operationFingerprint, parse, preferenceSchema, sameScope } from './knowledge-validation';
 import { preferenceAmbiguities } from './preference-ambiguities';
-import { inspectRetentionSource, lockRetentionSourceScope, retentionSourceCopies } from '../privacy/retention-model-sources';
+import { inspectRetentionSource, lockRetentionSourceScope } from '../privacy/retention-model-sources';
+import { eraseRetainedSourceTaskBodies } from '../privacy/retention-task-bodies';
+import { AiTaskRepositoryError } from '../ai-task.repository';
 
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
@@ -95,12 +97,6 @@ export class PersistentMemoryConsentService {
     if (state !== 'clear') throw Object.assign(new KnowledgeError(state === 'held' ? 'not_ready' : 'unavailable'), {
       reason: state === 'held' ? 'referenced_by_unresolved_task' : 'source_task_binding_unavailable',
     });
-    // The source CAS can erase its own head/confirmation copies, but it cannot
-    // rewrite immutable Task prompts/results or claim they were propagated.
-    // The original Task erasure consumer owns that remaining commit point.
-    if ((await retentionSourceCopies(tx, scopeId, 'memory', memoryId, owner)).length) {
-      throw Object.assign(new KnowledgeError('unavailable'), { reason: 'source_copy_erasure_not_assembled' });
-    }
   }
 
   private async commitSourceChange(context: AiExecutionContext,
@@ -128,6 +124,10 @@ export class PersistentMemoryConsentService {
         const grant = await this.authorizeRequest(context, { ...request, memory: before });
         if (fingerprint(await this.authorizeRequest(context, { ...request, memory: before })) !== fingerprint(grant)) return unavailable();
         attempted = true;
+        await eraseRetainedSourceTaskBodies(tx, { ...locked, kind: 'memory', resourceId: input.memoryId,
+          now: new Date(this.ports.clock.now()), check: async () => {
+            if (fingerprint(await this.authorizeRequest(context, { ...request, memory: before })) !== fingerprint(grant)) return unavailable();
+          } });
         const result = await repository.commit(input);
         if (result !== 'committed') throw new KnowledgeError('conflict');
         await this.authorizeRequest(context, { ...request, memory: before });
@@ -137,6 +137,7 @@ export class PersistentMemoryConsentService {
     } catch (error) {
       if (completed) throw new KnowledgeCommitUnknownError();
       if (error instanceof KnowledgeError) throw error;
+      if (error instanceof AiTaskRepositoryError) throw new KnowledgeError('unavailable');
       if (attempted) throw new KnowledgeCommitUnknownError();
       return unavailable();
     }
