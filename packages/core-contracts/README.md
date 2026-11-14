@@ -133,6 +133,12 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 接口资料由 `createCoreSessionOpenApi()` 同源生成。实际原会话读取与独立Controller已提供，原Guard须将这一条GET明确登记为已登录operator的自助入口，主AppModule和OpenAPI总组合仍沿宿主公共窗口办理。SaaS全部登记目录与租户成员自助目录分别使用各自入口。
 
+## 读取Core范围与业务就绪
+
+`POST /api/platform/core-host/scope/read`接收 `coreId` 与Core需要时的 `container`，主体由原会话确定。返回unbound或bound；bound包含当前绑定及Core真实返回的ready/configuration_required/unavailable。读取不会首次初始化、补默认配置或执行业务。[范围HTTP合同](src/scope-http.ts) · [服务端范围合同](src/server.ts)
+
+宿主先核当前成员使用权，再调用已登记Core的 `resolveScope` 和 `readReadiness`，返回前重新核原身份/授权和绑定修订、数据版本。Core返回绑定必须属于原租户和所选范围。范围服务拥有自己的事务，宿主不在调用它时跨事务持有人员锁；最终业务请求仍须原Guard/服务端再次授权。`createCoreScopeOpenApi()`提供同源接口资料，主组合/Guard接线沿公共窗口办理。[API适配](../../apps/api/src/modules/core-host/README.md#当前core范围与就绪)
+
 ## 声明页面与操作
 
 [页面合同](src/admin.ts)已提供 `CorePageDescriptorSchema`、`CoreAdminContribution`、`CorePageAction` 和 `registerCoreAdminPages`。路由描述中的ID/局部路径、名称、可选父级与菜单、权限是同一份数据；组件由Core代码直接绑定。统一注册后路径位于 `/cores/<id>/...`，重复页面、同形路径、缺上级/循环或清单未声明的权限会拒绝，失败不返回部分注册表。

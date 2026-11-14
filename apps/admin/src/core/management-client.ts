@@ -1,5 +1,5 @@
 /** Core管理复用原认证HTTP和单源schema；读取原结果不重发变更，不从客户端字段授权。 */
-import { CORE_MANAGEMENT_HTTP as routes, CORE_MANAGEMENT_HTTP_BASE, CORE_SESSION_HTTP,
+import { CORE_MANAGEMENT_HTTP as routes, CORE_MANAGEMENT_HTTP_BASE, CORE_SESSION_HTTP, CORE_SCOPE_HTTP,
   type BindCoreScope, type ChangeMemberCoreAssignment, type ChangeTenantCoreGrant } from "@rental-os/core-contracts";
 import { request } from "@/api/http";
 import { currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
@@ -30,7 +30,8 @@ export const coreManagementApi = {
   binding: (input: Query<"readBinding">, signal: AbortSignal) => send(routes.readBinding, input, signal),
   tenantGrantOperation: (input: Query<"readTenantGrantOperation">, signal: AbortSignal) => send(routes.readTenantGrantOperation, input, signal),
   memberAssignmentOperation: (input: Query<"readMemberAssignmentOperation">, signal: AbortSignal) => send(routes.readMemberAssignmentOperation, input, signal),
-  sessionContext: (signal: AbortSignal) => send(CORE_SESSION_HTTP, undefined, signal, "")
+  sessionContext: (signal: AbortSignal) => send(CORE_SESSION_HTTP, undefined, signal, ""),
+  scope: (input: ReturnType<typeof CORE_SCOPE_HTTP.request.parse>, signal: AbortSignal) => send(CORE_SCOPE_HTTP, input, signal, "")
 };
 
 /** 仅已知在提交前拒绝的原管理错误可解除本次未知锁；网络/5xx及未知响应保留原键。 */

@@ -2,11 +2,12 @@
  * 已受控装配的 Core 服务端贡献；只暴露范围和生命周期接点，不统一业务命令。
  * 宿主负责身份、Core/成员授权和事务，Core 保留对象权限、业务规则及原收据。
  */
+import { z } from "zod";
 import type { CoreManifest } from "./manifest";
 import type { CoreHostVersions, CoreCompatibilityIssue } from "./compatibility";
 import { checkCoreCombination } from "./compatibility";
-import type {
-  CoreBinding, CoreOperationReference, CoreReadiness, CoreRemovalAssessment, CoreScopeReference
+import {
+  CoreBindingSchema, type CoreBinding, type CoreOperationReference, type CoreReadiness, type CoreRemovalAssessment, type CoreScopeReference
 } from "./lifecycle";
 
 /** 原认证服务给出的身份定位；这里没有权限数组，也不接受客户端自行构造作为认证。 */
@@ -21,10 +22,12 @@ export interface CoreScopeRequest {
   readonly principal: CorePrincipal;
   readonly scope: CoreScopeReference;
 }
-export type CoreScopeResolution =
-  | { status: "resolved"; binding: CoreBinding }
-  | { status: "denied" }
-  | { status: "unbound" };
+export const CoreScopeResolutionSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("resolved"), binding: CoreBindingSchema }).strict(),
+  z.object({ status: z.literal("denied") }).strict(),
+  z.object({ status: z.literal("unbound") }).strict()
+]);
+export type CoreScopeResolution = z.infer<typeof CoreScopeResolutionSchema>;
 
 /**
  * 由宿主事务适配器在一次回调内发放，并在结束时作废的不可序列化句柄。

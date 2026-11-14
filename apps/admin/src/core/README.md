@@ -95,6 +95,8 @@ import { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "@rental-os/admi
 
 ## 宿主只装配一次
 
+宿主可用 `useCoreScope(coreId, container?)`读取当前Core自己的绑定及就绪。结果按原租户/成员/Core/容器和会话代次隔离，未验证或失败读取不返回旧准入结果；`ready`仅在当前真实bound/ready结果成立。先以 `useCoreSession`核成员/页面权，再将Core范围结果用于业务页面准入。配置缺项/未绑定分别给出正式配置入口，不能补空成功；最终API仍重新授权。[范围Hook](useCoreScope.ts)
+
 `CorePageHostProvider`接收[CorePageHost](CorePage.tsx)并包裹对应业务路由。`page`须直接来自`registerCoreAdminPages`返回的`pages`；宿主提供平台品牌、原路由导航、当前授权判定和`lifetimeKey`。key取原会话/租户/Core范围及当前业务对象代次，变化时释放旧页面；权限变更仍需原宿主订阅当前事实。不要用自己填写的恒真函数或清单权限数组实现`canAccess`。
 
 `canAccess(coreId, permissions)`必须同时核对租户Core授权、适用成员分配及额外业务权限。当前页无权时只呈现原Result，不渲染业务正文；动作执行前再次读当前判定，确认等待和已离页回调不能沿旧授权继续。这个前端判断不能代替服务端Guard，也不建立新的身份或查询缓存。

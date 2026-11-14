@@ -37,3 +37,9 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 [原会话读取](original-core-session.ts)从原主体/人员/角色锁取得当前登录成员，查询本租户开通授权和本人Core分配，只返回已登记且获权的Core，以及当前角色的本Core精确权限码。原租户管理者另得到获开通Core的分配候选；SaaS管理目录继续使用自己的入口。读取结束后再次复核原身份和管理/业务权限；没有Core的组合不查询Core授权表，仍返回合法空目录。
 
 [CoreSessionHttpModule](core-session.controller.ts)显式登记 `CORE_SESSION_HTTP` 的一条GET，输入不接收tenantId/userId，文档由 `createCoreSessionOpenApi()`生成。原Guard需明确加入已登录operator自助政策，主组合提供真实reader并登记模块；尚未修改这些公共入口。目录只说明注册/授权/成员/角色投影，当前部署、绑定、业务就绪和对象范围仍由自身服务核验。[前端消费者](../../../../admin/src/core/useCoreSession.ts)
+
+## 当前Core范围与就绪
+
+[原范围读取](original-core-scope.ts)先核当前会话与Core成员使用权，调用受控登记Core的resolveScope/readReadiness，再核原会话、授权和实际绑定修订。Core自行定义容器，返回的绑定和数据版本必须属于原范围及当前可读版本；读期间绑定变化返回冲突。Core返回结构沿唯一schema核验，错误贡献准确标记不可用，不视为可执行业务。
+
+范围服务可持有自己的授权事务，宿主不在外层跨该调用持有人员/Core锁；前后核对各自使用短事务，避免工单原范围适配的嵌套锁等待。读取不创建绑定、执行初始化或业务写入。[CoreScopeHttpModule](core-scope.controller.ts)显式装配对应POST只读入口，文档由createCoreScopeOpenApi生成，主Guard/组合仍由公共窗口消费。[前端Hook](../../../../admin/src/core/useCoreScope.ts)

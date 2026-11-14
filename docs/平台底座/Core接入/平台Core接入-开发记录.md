@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-scope-readiness-20261115"></a>
+
+## Core自身范围与真实就绪读取（2026-11-15）
+
+会话目录片固定 `e127cef166395c6bdfa6ffb3a9142ac518208ffe` 已普通推送并回读一致，main仍62ca。本片按原02/04/05/07接点，在原独占合同/API Core适配/admin/core交付范围/就绪读取，公共入口窗口未扩大。
+
+[范围合同](../../../packages/core-contracts/src/scope-http.ts)和服务端CoreScopeResolutionSchema提供唯一输入/输出及同源OpenAPI。当前operator只传Core及可选自身容器，原租户来自会话；unbound与真实bound/readiness分开。Core范围结构、历史绑定数据版本和就绪结果均沿正式合同验证，不使用静态清单或恒真适配证明业务可用。
+
+[原范围组合](../../../apps/api/src/modules/core-host/original-core-scope.ts)在短事务先核原会话和当前Core/成员使用权，结束锁事务后调用Core自有resolveScope/readReadiness，再复核当前身份、授权和绑定。Core的绑定必须属于当前租户/范围，读取期间绑定修订/数据版本变化返回冲突。Core可能自持事务，跨该调用不持外层人员/授权锁，避免现有工单范围适配嵌套死锁；最终业务调用仍独立复验。对应[Controller](../../../apps/api/src/modules/core-host/core-scope.controller.ts)和OpenAPI只提供读取，不执行初始化。
+
+[useCoreScope](../../../apps/admin/src/core/useCoreScope.ts)与原HTTP复用原认证/会话代次及范围查询键；响应不符当前租户/Core/容器明确拒绝。未验证或失败读取不返回旧绑定/ready，真实绑定且Core声明ready时才给出ready；页面角色仍由useCoreSession判定。相关模块说明和短接入用法同片维护。
+
+stdin内存编译/实际组合定向验证退出0，合同33根/宿主6根类型0诊断；ready/配置缺项/未绑定、缺成员在调用Core前拒绝、跨租户/错误容器/异范围绑定拒绝、绑定并发变更冲突、未知范围结构及错误就绪贡献拒绝通过。Core调用均在父锁事务之外，11次绑定读取/11次lease复核；补充历史绑定0.2.0超出当前可读范围的拒绝通过，没有真实DB或业务写入。
+
+前端正式Core入口2根/1,484源0类型诊断，Hook实际调用的ready、未验证/失败隐藏及异租户响应拒绝通过。开发索引当前4,458条、issues0，3,611条无直接用途和5条动态元数据缺口保留；新范围POST标记source。原完整API离线生成被审批拒绝的前片边界继续保留，当前Controller只做语法/登记定向核对，没有新完整API类型或浏览器证据。
+
+下一公共入口为CoreScopeHttpModule.register(reader)、原Guard对应精确只读政策、OpenAPI总组合及主后台壳/路由消费当前目录、范围和就绪。无Core真实独立构建/登录/保存、完整Rental兼容、生命周期及独立接手仍未完成，不以新包和离线结果提升原后续任务门槛。
+
+原唯一8组合同测试退出0、skip/todo为0；七份相关文档571个链接及120个章节锚点定向核对退出0，新增错误0，正式需求/任务正文保留。差异格式检查退出0，合同临时编译/夹具已由原after删除并核实；没有新增一次性脚本、进程或生成环境。本片固定版本由包含本节的中文Git提交定位，普通推送后读取实际远端确认。
+
 <a id="core-session-directory-20261115"></a>
 
 ## 登录成员的Core目录与管理候选（2026-11-15）
