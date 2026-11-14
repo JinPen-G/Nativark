@@ -18,7 +18,7 @@ function label(status: ClientTaskCancellationView['status'], english: boolean) {
   switch (status) {
     case 'checking': return english ? 'Checking the original task…' : '正在核对原任务…';
     case 'requested': return english ? 'Stop requested; completion still needs checking.' : '停止申请已记录，尚未确认完成。';
-    case 'settled': return english ? 'This explanation task has stopped.' : '本次解释任务已停止。';
+    case 'settled': return english ? 'Stop request settled; existing results remain.' : '停止请求已收口，已发生的结果保留。';
     case 'finished': return english ? 'This explanation task has ended.' : '解释任务已结束。';
     case 'unknown': return english ? 'The stop result needs checking against the original record.' : '停止结果待核对，请读取原记录。';
     case 'unavailable': return english ? 'The stop record is unavailable. Check the original record later.' : '暂时无法核对停止状态，请稍后读取原记录。';

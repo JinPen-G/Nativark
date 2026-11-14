@@ -32,13 +32,19 @@ async function settingsCancellationResponse(work: () => Promise<unknown>, body: 
     const result = writing ? settingsContract('AiApprovedSettingsTaskCancellationResultDraft', reply, true)
       : settingsContract('AiApprovedSettingsTaskCancellationReadDraft', reply, true);
     const receipt = result.receipt, event = receipt.event;
+    const originalSettlement = !writing && target === 'cancelled';
+    const meaning = target === 'cancel_requested' ? 'request_not_rollback'
+      : event?.data.to === 'succeeded' || event?.data.to === 'partially_succeeded'
+        ? 'request_settled_not_business_rollback' : 'task_cancelled_not_business_rollback';
     if ('expectedRevision' in receipt && (receipt.expectedRevision !== command.expectedRevision
-      || receipt.cancellation !== (target === 'cancel_requested' ? 'request_not_rollback' : 'task_cancelled_not_business_rollback')))
+      || receipt.cancellation !== meaning))
       return invalidSettingsResponse(writing);
-    if (event && (event.taskRevision !== Number(command.expectedRevision) + 1 || event.data.to !== target
+    if (event && (event.taskRevision !== Number(command.expectedRevision) + 1
+      || (originalSettlement ? event.data.from !== 'cancel_requested' || !['cancelled', 'succeeded', 'partially_succeeded'].includes(event.data.to) : event.data.to !== target)
       || event.data.reason !== (target === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled')
       || ('taskId' in receipt && (event.taskId !== receipt.taskId || event.taskRevision > receipt.snapshot.revision
-        || BigInt(event.cursor) > BigInt(receipt.snapshot.cursor))))) return invalidSettingsResponse(writing);
+        || BigInt(event.cursor) > BigInt(receipt.snapshot.cursor)
+        || originalSettlement && receipt.snapshot.status !== event.data.to)))) return invalidSettingsResponse(writing);
     return result;
   } catch { return invalidSettingsResponse(writing); }
 }

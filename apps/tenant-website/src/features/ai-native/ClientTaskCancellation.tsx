@@ -85,7 +85,7 @@ export function ClientTaskCancellation({ orderId, scopeKey, origin, english, onO
       {!online ? english ? 'You are offline. Reconnect to check the original stop record.' : '当前离线，联网后可读取原停止记录。'
         : working ? english ? 'Checking the original task…' : '正在核对原任务…'
         : view.status === 'requested' ? english ? 'Stop requested; completion still needs checking.' : '停止申请已记录，尚未确认完成。'
-          : view.status === 'settled' ? english ? 'This explanation task has stopped.' : '本次解释任务已停止。'
+          : view.status === 'settled' ? english ? 'Stop request settled; existing results remain.' : '停止请求已收口，已发生的结果保留。'
             : view.status === 'finished' ? english ? 'This explanation task has ended.' : '解释任务已结束。'
               : view.status === 'unknown' ? english ? 'The stop result needs checking against the original record.' : '停止结果待核对，请读取原记录。'
                 : view.status === 'unavailable' ? english ? 'The stop record is unavailable. Check the original record later.' : '暂时无法核对停止状态，请稍后读取原记录。'

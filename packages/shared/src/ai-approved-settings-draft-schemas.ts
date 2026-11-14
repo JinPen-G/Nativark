@@ -32,7 +32,7 @@ const cancelEvent = object({ contractVersion: literal(AI_TASK_DRAFT_VERSION), ta
     to: { enum: ['cancel_requested', 'cancelled'] }, reason: { enum: AI_TASK_TRANSITION_REASONS_DRAFT } }) });
 const cancelObservation = { taskId: id(36), expectedRevision: taskRevision,
   snapshot: object({ revision: taskRevision, cursor, status: { enum: AI_TASK_STATUSES_DRAFT } }),
-  cancellation: { enum: ['request_not_rollback', 'task_cancelled_not_business_rollback'] },
+  cancellation: { enum: ['request_not_rollback', 'task_cancelled_not_business_rollback', 'request_settled_not_business_rollback'] },
   remoteCancellation: literal('not_attested'), automaticRetry: literal(false), admission: literal('not_granted'),
   absenceSemantics: literal('not_observed_is_not_proof_of_uncommitted') };
 
@@ -72,7 +72,13 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
   AiApprovedSettingsTaskCancellationResultDraft: object({ ...cancelBase, receipt: {
     ...object({ event: cancelEvent, runRevision: { anyOf: [taskRevision, { type: 'null' }] } }), required: ['event'] } }),
   AiApprovedSettingsTaskCancellationReadDraft: object({ ...cancelBase, receipt: { oneOf: [
-    object({ ...cancelObservation, status: literal('observed'), event: cancelEvent }),
+    ...(['cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded'] as const).map(to => object({ ...cancelObservation,
+      status: literal('observed'), cancellation: literal(to === 'cancel_requested' ? 'request_not_rollback'
+        : to === 'cancelled' ? 'task_cancelled_not_business_rollback' : 'request_settled_not_business_rollback'),
+      event: { ...cancelEvent, properties: { ...cancelEvent.properties!, data: object({
+        from: to === 'cancel_requested' ? { enum: AI_TASK_STATUSES_DRAFT } : literal('cancel_requested'), to: literal(to),
+        reason: literal(to === 'cancel_requested' ? 'cancel_requested' : 'cancel_settled') }) } },
+      snapshot: object({ revision: taskRevision, cursor, status: to === 'cancel_requested' ? { enum: AI_TASK_STATUSES_DRAFT } : literal(to) }) })),
     object({ ...cancelObservation, status: literal('not_observed'), event: { type: 'null' } })] } }),
   AiApprovedSettingsTaskRunDraft: { oneOf: [
     object({ kind: literal('not_started'), reason: { enum: ['host_aborted', 'plan_unavailable', 'task_not_runnable',

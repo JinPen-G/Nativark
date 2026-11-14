@@ -328,7 +328,11 @@ export class AiClientEntryController {
       const result = await (settled ? this.application.readOriginalTaskCancellationSettlementReceipt(current, input, signal)
         : this.application.readOriginalTaskCancellationReceipt(current, input, signal));
       const event = result.event;
-      if (event && event.data.to !== (settled ? 'cancelled' : 'cancel_requested'))
+      if (event && (settled
+        ? event.data.from !== 'cancel_requested' || !['cancelled', 'succeeded', 'partially_succeeded'].includes(event.data.to)
+          || event.data.reason !== 'cancel_settled' || result.cancellation !== (event.data.to === 'cancelled'
+            ? 'task_cancelled_not_business_rollback' : 'request_settled_not_business_rollback')
+        : event.data.to !== 'cancel_requested' || event.data.reason !== 'cancel_requested' || result.cancellation !== 'request_not_rollback'))
         throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
       const response = aiClientTaskCancellationObservationSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
         taskId: result.taskId, expectedRevision: result.expectedRevision, state: event ? 'observed' : 'unknown',

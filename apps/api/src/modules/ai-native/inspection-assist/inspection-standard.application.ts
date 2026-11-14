@@ -140,7 +140,8 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
         : mode === 'unstarted' ? await repository.settleUnstartedCancellation(command, originalRunId)
           : await repository.settleInputCancellation(command,
             PrismaTaskInputRepository.releasedCancellationWitness(d.db, current.tasks, d.clock));
-      return { receipt, cancellation: 'task_cancelled_not_business_rollback' as const,
+      return { receipt, cancellation: receipt.event.data.to === 'cancelled' ? 'task_cancelled_not_business_rollback' as const
+        : 'request_settled_not_business_rollback' as const,
         remoteCancellation: 'not_attested' as const, automaticRetry: false as const, admission: 'not_granted' as const };
     });
   };

@@ -77,12 +77,13 @@ export const AI_INSPECTION_CANCELLATION_HTTP_CONTRACTS = {
 type InspectionCancellationTransition = Omit<AiModelCancellationTransitionReceiptDraft, 'runRevision'> & { runRevision?: null };
 export type AiInspectionTaskCancelResponse = { receipt: InspectionCancellationTransition; cancellation: 'requested_not_rollback' };
 export type AiInspectionTaskSettlementResponse = { receipt: InspectionCancellationTransition;
-  cancellation: 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested'; automaticRetry: false; admission: 'not_granted' };
+  cancellation: 'task_cancelled_not_business_rollback' | 'request_settled_not_business_rollback';
+  remoteCancellation: 'not_attested'; automaticRetry: false; admission: 'not_granted' };
 /** The original task owns this receipt; the inspection reference grants neither
  * task execution nor remote cancellation. A missing event is not a rollback. */
 export type AiInspectionTaskCancellationObservation = {
   taskId: string; expectedRevision: number; snapshot: { revision: number; cursor: string; status: AiTaskStatusDraft };
-  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested';
+  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback' | 'request_settled_not_business_rollback'; remoteCancellation: 'not_attested';
   automaticRetry: false; admission: 'not_granted'; absenceSemantics: 'not_observed_is_not_proof_of_uncommitted';
 } & ({ status: 'observed'; event: Extract<AiTaskEventDraft, { type: 'task.transition' }> }
   | { status: 'not_observed'; event: null });

@@ -21,19 +21,25 @@ const policy = obj({ taskId: id(), operation: policyRequest.operation, revision:
 const taskExecution: AiLeafSchemaDraft = { oneOf: AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelExecutionDraft.oneOf!.slice(0, 2) };
 const continuation = AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelResumeResponseDraft.properties!.continuation.oneOf!;
 const receipt = AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelCancelResponseDraft.properties!.receipt;
-const transition = (settled: boolean) => ({ ...receipt, required: ['event'], properties: { ...receipt.properties!,
+const transition = (settled: boolean, terminal: 'cancelled' | 'succeeded' | 'partially_succeeded' = 'cancelled') => ({ ...receipt, required: ['event'], properties: { ...receipt.properties!,
   event: { ...receipt.properties!.event, properties: { ...receipt.properties!.event.properties!,
     cursor: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
-    data: obj({ from: choice(...AI_TASK_STATUSES_DRAFT), to: choice(settled ? 'cancelled' : 'cancel_requested'),
+    data: obj({ from: settled ? choice('cancel_requested') : choice(...AI_TASK_STATUSES_DRAFT), to: choice(settled ? terminal : 'cancel_requested'),
       reason: choice(settled ? 'cancel_settled' : 'cancel_requested') }) } } } });
-const cancellationObservation = (settled: boolean): AiLeafSchemaDraft => ({ oneOf: ['observed', 'not_observed'].map(status => obj({
-  taskId: id(), expectedRevision: int(1, 4294967294), status: choice(status),
-  event: status === 'observed' ? transition(settled).properties.event : { type: 'null' },
-  snapshot: obj({ revision: int(1, 4294967295), cursor: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, status: choice(...AI_TASK_STATUSES_DRAFT) }),
-  cancellation: choice(settled ? 'task_cancelled_not_business_rollback' : 'request_not_rollback'),
-  remoteCancellation: choice('not_attested'), automaticRetry: no, admission: choice('not_granted'),
-  absenceSemantics: choice('not_observed_is_not_proof_of_uncommitted')
-})) });
+const settlementTargets = ['cancelled', 'succeeded', 'partially_succeeded'] as const;
+const cancellationMeaning = (terminal: typeof settlementTargets[number]) => terminal === 'cancelled'
+  ? 'task_cancelled_not_business_rollback' : 'request_settled_not_business_rollback';
+const cancellationObservation = (settled: boolean): AiLeafSchemaDraft => ({ oneOf:
+  (settled ? settlementTargets : ['cancelled'] as const).flatMap((terminal, index) =>
+    (index === 0 ? ['observed', 'not_observed'] : ['observed']).map(status => obj({
+      taskId: id(), expectedRevision: int(1, 4294967294), status: choice(status),
+      event: status === 'observed' ? transition(settled, terminal).properties.event : { type: 'null' },
+      snapshot: obj({ revision: int(1, 4294967295), cursor: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' },
+        status: settled && status === 'observed' ? choice(terminal) : choice(...AI_TASK_STATUSES_DRAFT) }),
+      cancellation: choice(settled ? cancellationMeaning(terminal) : 'request_not_rollback'),
+      remoteCancellation: choice('not_attested'), automaticRetry: no, admission: choice('not_granted'),
+      absenceSemantics: choice('not_observed_is_not_proof_of_uncommitted')
+    }))) });
 export const AI_INSPECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiInspectionTaskResultReferenceObservation: { oneOf: [
     obj({ contractVersion: choice(AI_TASK_DRAFT_VERSION), task: taskSummary, state: choice('observed'),
@@ -66,8 +72,8 @@ export const AI_INSPECTION_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
     templateId: taskId, draftId: taskId, inputId: taskId, expectedRevision: int(1, 999) }),
   AiInspectionRecognitionTaskCancelRequest: obj({ reference: ref("AiInspectionRecognitionTaskReference"), expectedRevision: int(1, 4294967294) }),
   AiInspectionTaskCancelResponse: obj({ receipt: transition(false), cancellation: choice('requested_not_rollback') }),
-  AiInspectionTaskSettlementResponse: obj({ receipt: transition(true), cancellation: choice('task_cancelled_not_business_rollback'),
-    remoteCancellation: choice('not_attested'), automaticRetry: no, admission: choice('not_granted') }),
+  AiInspectionTaskSettlementResponse: { oneOf: settlementTargets.map(terminal => obj({ receipt: transition(true, terminal),
+    cancellation: choice(cancellationMeaning(terminal)), remoteCancellation: choice('not_attested'), automaticRetry: no, admission: choice('not_granted') })) },
   AiInspectionTaskCancelObservation: cancellationObservation(false),
   AiInspectionTaskSettlementObservation: cancellationObservation(true),
   AiInspectionRecognitionTaskResumeRequest: obj({ reference: ref("AiInspectionRecognitionTaskReference"), submission: ref("AiTaskInputSubmissionDraft") }),

@@ -72,7 +72,7 @@ export const aiClientTaskCancellationObservationSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   expectedRevision: z.number().int().min(1).max(4294967294), state: z.enum(['observed', 'unknown']),
   transition: aiClientTaskCancelReceiptSchema.pick({ taskRevision: true, cursor: true, observedAt: true })
-    .extend({ status: z.enum(['cancel_requested', 'cancelled']) }).strict().nullable(),
+    .extend({ status: z.enum(['cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded']) }).strict().nullable(),
   execution: z.literal('not_authorized_by_observation'), externalRollback: z.literal('not_claimed'),
   retryable: z.literal(false), nextAction: z.literal('read_original_task')
 }).strict().refine(value => value.state === 'observed'

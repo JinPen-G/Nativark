@@ -63,7 +63,7 @@ export type AiOrderReadSceneResponseDraft = Extract<AiTaskSceneObservationDraft,
 };
 export type AiOrderReadCancellationObservationDraft = {
   taskId: string; expectedRevision: number; snapshot: { revision: number; cursor: string; status: AiTaskStatusDraft };
-  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested';
+  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback' | 'request_settled_not_business_rollback'; remoteCancellation: 'not_attested';
   automaticRetry: false; admission: 'not_granted'; absenceSemantics: 'not_observed_is_not_proof_of_uncommitted';
 } & ({ status: 'observed'; event: Extract<AiTaskEventDraft, { type: 'task.transition' }> }
   | { status: 'not_observed'; event: null });
@@ -107,10 +107,10 @@ const answerBase = { resultId: id(), automaticRetry: no, businessExecution: read
 const wrapped = (properties: Record<string, AiLeafSchemaDraft>) => obj({ original, ...properties });
 const cancellationReceipt = AI_TASK_RECOVERY_HTTP_SCHEMAS.AiSceneModelCancelResponseDraft.properties!.receipt;
 const cancellationEvent = cancellationReceipt.properties!.event;
-const cancellationTransition = (settled: boolean) => ({ ...cancellationReceipt,
+const cancellationTransition = (settled: boolean, terminal: 'cancelled' | 'succeeded' | 'partially_succeeded' = 'cancelled') => ({ ...cancellationReceipt,
   properties: { ...cancellationReceipt.properties!, event: { ...cancellationEvent,
-    properties: { ...cancellationEvent.properties!, data: obj({ from: choice(...AI_TASK_STATUSES_DRAFT),
-      to: choice(settled ? 'cancelled' : 'cancel_requested'), reason: choice(settled ? 'cancel_settled' : 'cancel_requested') }) } } } });
+    properties: { ...cancellationEvent.properties!, data: obj({ from: settled ? choice('cancel_requested') : choice(...AI_TASK_STATUSES_DRAFT),
+      to: choice(settled ? terminal : 'cancel_requested'), reason: choice(settled ? 'cancel_settled' : 'cancel_requested') }) } } } });
 export const AI_ORDER_READ_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiOrderReadModelResponseDraft: { oneOf: AI_SCENE_MODEL_OBSERVATION_SCHEMAS.AiSceneModelResultObservationDraft.oneOf!
     .filter(branch => (branch.properties!.sceneCode.enum as readonly string[]).includes('order_explanation')) },
@@ -157,13 +157,18 @@ export const AI_ORDER_READ_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
       remoteCancellation: choice('not_attested'), absenceSemantics: choice('not_observed_is_not_proof_of_rollback') }))
   ] }, automaticRetry: no })
 };
-const cancelObservation = (settled: boolean) => wrapped({ receipt: { oneOf: ['observed', 'not_observed'].map(status => obj({
-  taskId: id(), expectedRevision: integer(1, 4294967294), status: choice(status),
-  event: status === 'observed' ? cancellationTransition(settled).properties.event : nil,
-  snapshot: obj({ revision: integer(1, 4294967295), cursor: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, status: choice(...AI_TASK_STATUSES_DRAFT) }),
-  cancellation: choice(settled ? 'task_cancelled_not_business_rollback' : 'request_not_rollback'), remoteCancellation: choice('not_attested'),
-  automaticRetry: no, admission: choice('not_granted'), absenceSemantics: choice('not_observed_is_not_proof_of_uncommitted')
-})) }, automaticRetry: no });
+const settlementTargets = ['cancelled', 'succeeded', 'partially_succeeded'] as const;
+const cancelObservation = (settled: boolean) => wrapped({ receipt: { oneOf:
+  (settled ? settlementTargets : ['cancelled'] as const).flatMap((terminal, index) =>
+    (index === 0 ? ['observed', 'not_observed'] : ['observed']).map(status => obj({
+      taskId: id(), expectedRevision: integer(1, 4294967294), status: choice(status),
+      event: status === 'observed' ? cancellationTransition(settled, terminal).properties.event : nil,
+      snapshot: obj({ revision: integer(1, 4294967295), cursor: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' },
+        status: settled && status === 'observed' ? choice(terminal) : choice(...AI_TASK_STATUSES_DRAFT) }),
+      cancellation: choice(!settled ? 'request_not_rollback' : terminal === 'cancelled'
+        ? 'task_cancelled_not_business_rollback' : 'request_settled_not_business_rollback'), remoteCancellation: choice('not_attested'),
+      automaticRetry: no, admission: choice('not_granted'), absenceSemantics: choice('not_observed_is_not_proof_of_uncommitted')
+    }))) }, automaticRetry: no });
 AI_ORDER_READ_HTTP_SCHEMAS.AiOrderReadCancelReceiptResponseDraft = cancelObservation(false);
 AI_ORDER_READ_HTTP_SCHEMAS.AiOrderReadSettlementReceiptResponseDraft = cancelObservation(true);
 const originalScene = AI_TASK_SCENE_OBSERVATION_SCHEMAS.AiTaskSceneObservationDraft.oneOf![0];

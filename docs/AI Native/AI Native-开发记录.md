@@ -6,6 +6,31 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain25-cancellation-all-terminal-public-consumers-20261114"></a>
+## AIN-25 原取消善后三种终态、公共合同与两端恢复（2026-11-14）
+
+目标后端已在 `378498aefc08a5735902411bdeea39700c0b9064` 提交／普通推送并回读GitHub同SHA。dev2沿原[transition仓储](../../apps/api/src/modules/ai-native/ai-task-transition.repository.ts)发现 `cancel_settled` 可合法保留 succeeded／partially_succeeded，但旧专用Reader只读cancelled。单叶固定blob `6e192cec0e01cb0fe23ab58f54655332df9ac20f`、SHA-256 `7d8ed335f1127251f3e6ea08360dc9735a4c4319ef428dc50861c7d6df6986cf` 已交权，Root核同；从 `settleCancellation` 起的全部状态写入、预算及释放尾部与原稿逐字一致。
+
+Reader只接受原revision的 `cancel_requested → cancelled / succeeded / partially_succeeded`、`reason=cancel_settled`；配对原时间／游标／修订和原发起人取消事件，当前metadata与event读权均复核。worker不能冒充原人类／system请求，普通completed和今日终态不能补签取消；返回前重读Task及两事件，await变化或撤权不投递缓冲结果，unknown不重派。
+
+Root补[inspection合同](../../packages/shared/src/ai-inspection-draft-schemas.ts)、[原订单合同](../../packages/shared/src/ai-order-read-http-draft.ts)、[通知配置合同](../../packages/shared/src/ai-approved-settings-draft-schemas.ts)及客户runtime／OpenAPI：三种终态逐分支绑定原前驱、cancel_settled、当前snapshot和准确语义，成功／部分完成为 `request_settled_not_business_rollback`，cancelled保留旧标签。新写取消及未启动善后仍原窄边界，不因历史Reader扩展获得执行权。实际[客户Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)和[settings Controller](../../apps/api/src/modules/ai-native/scenes/settings-task.controller.ts)核同revision／前驱／原因／状态；inspection原操作回读不再把成功／部分完成标为已取消。
+
+[Web停止session](../../apps/tenant-website/src/features/ai-native/client-task-cancellation-session.ts)及[微信停止session](../../apps/miniprogram/src/components/ai-native/client-task-cancellation-session.ts)均可在重开后读取三种善后事件，必须匹配原任务及当前snapshot，不能用普通完成态推定停止成功。确认原停止收据后只刷新原解释结果，不再次finish／启动模型；文案为“停止请求已收口，已发生的结果保留”，不把先前已提交结果说成已撤销。
+
+| 必要模拟／类型（均 `node --no-compilation-cache -`） | 实际结果与stdin SHA-256 |
+| --- | --- |
+| 作者原状态机／运行器／资源／释放／Reader一组 | `7544cf15e95481778f407bff37b36d0341d4351ac38eb1a20493d82d8ff1985f`／退出0，35场景；三终态、COMMIT丢回复、缺／重复原请求、错发起人、当前撤权／scope变化、两读间event／Task变化、普通completed和unknown拒绝；readWrites0。作者1根／1287源类型 `ac670097a6872df7273b7d407bd8d35bf795497270acc095db20ccd3fa5be79f`／退出0，119内存声明零诊断。 |
+| Root独立重跑同原运行器35场景 | `b721b4ea0dd2a2074d2b60825773e069c7700747ce1420f5f344adc2cc8cdffe`／退出0；原状态机与运行器实际源码，数据库／已提交祖先／只读工具为明确夹具，未改变生产判断；无读写。 |
+| 同原事件→四类实际Controller／shared／OpenAPI校验 | `7e6253ba66fdb37a5805015bc0982296ff59a4dad429bd411d7f5b1a57830406`／退出0；客户、原订单、settings、inspection三终态可读；普通completed、错前驱／语义／snapshot拒绝，追加读不增加写入。Controller装配使用已核原事件方法，不冒称所有场景业务身份的端到端实测。 |
+| 两端原session请求1次→重开→读取三种原善后 | `8b3a323ab5c13cc03f096b0514257b6ba0b3f2e97f9faf52298e1fc28c3f24df`／退出0；Web／微信共6组合，原存储写1次、停止request1次、重开及刷新只读5次，不finish／重发；dispose后内部snapshot清除。 |
+| 公共生产组合类型 | `98ca82e4dd92ae9367ccbd762d69f874b0a9aa581b1092bce37ec94eaedf78b3`／退出0，TypeScript5.9.3，8根／1998源零诊断。 |
+| 两端停止消费者类型 | `dac3194db52197db4e8786d6180d3c744a6e6782c9f18523556ac99315bb3cc5`／退出0；Web2根／210源、微信2根／208源零诊断，118内存shared声明，不给微信补浏览器shim。 |
+| 微信受控runtime纯内存构建／行为 | `fbe9734f4c059192a062e6ca811a3bf478dedf814fc67447a84c75380758aba2`／退出0；58出口、31源、116705字节，bundle SHA `5656c83b83bb76e786af186eb432738b63af32de20cfeb2747f548871547f15a`；无浏览器全局可加载，三个善后状态及原request验证通过，无运行时外部依赖。 |
+
+原驱动失败保留：HTTP驱动两次猜错客户方法名和一次inspection类名而退出1；后只修为实际 `readTaskCancellationSettlementReceipt`／`InspectionRecognitionTaskController`，不新增接口。两端夹具首版inputRef不是UUID，原schema正确拒绝；换合法原UUID后恢复通过。最后断言误以为纯session.dispose负责外部组件setData，改核它实际负责的内部snapshot；组件自身的hide／detach仍清显示，没有放宽生产语义。没有新增／扩写测试脚本或删除断言。
+
+本阶段15源码＋原两册独立固化，dev1目标网站三叶和未知旧goal／员工样式不夹带；dev2继续AIN-25队列／背压／公平性／告警原核心缺口。AIN-25仍75%，不凭取消叶提高整项或称真实SLO。全部审计0、原不可达DB与offline preload，原任务临时目录未创建，自有验证进程退出，无依赖／构建／数据库副本；真实浏览器／微信／DB／供应商及生产验收由负责人后续执行。diff检查退出0，文档检查退出1，仍4处既有缺链，无新增链接或任务算术错误。
+
 <a id="ain21-goal-original-model-core-prepare-20261114"></a>
 ## AIN-21 客户目标、原模型候选与明确选品到 Core 参数准备（2026-11-14）
 

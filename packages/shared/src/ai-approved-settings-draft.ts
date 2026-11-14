@@ -87,7 +87,7 @@ export type AiApprovedSettingsTaskCancellationResultDraft = SettingsCancellation
 export type AiApprovedSettingsTaskCancellationReadDraft = SettingsCancellationBase & { receipt: {
   taskId: string; expectedRevision: number; status: 'observed' | 'not_observed'; event: SettingsCancellationEvent | null;
   snapshot: { revision: number; cursor: string; status: AiTaskStatusDraft };
-  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback'; remoteCancellation: 'not_attested';
+  cancellation: 'request_not_rollback' | 'task_cancelled_not_business_rollback' | 'request_settled_not_business_rollback'; remoteCancellation: 'not_attested';
   automaticRetry: false; admission: 'not_granted'; absenceSemantics: 'not_observed_is_not_proof_of_uncommitted';
 } };
 /** Same persisted runner outcome, not a model result or proof of a Core commit. */
