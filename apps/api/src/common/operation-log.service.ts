@@ -3,6 +3,7 @@
  * Logging grants no permission or business/commit outcome; callers own the transaction. */
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { Prisma, AiAudience } from "@prisma/client";
+import type { CoreAccessReceipt } from "@rental-os/core-host";
 import type { SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../modules/database/prisma.service";
 import { getRequestWorkspaceId } from "./request-identity";
@@ -76,6 +77,25 @@ export interface HttpMutationAuditInput {
 @Injectable()
 export class OperationLogService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** 当前受权Core管理事实的同事务审计。输入来自Core管理原收据，写失败沿原事务抛出。 */
+  async recordCoreAccessReceipt(transaction: Prisma.TransactionClient, receipt: CoreAccessReceipt): Promise<void> {
+    await transaction.operationLog.create({ data: {
+      tenantId: receipt.result.tenantId,
+      userId: receipt.actor.subjectId,
+      workspaceId: null,
+      rentalOrderId: null,
+      action: `core.${receipt.kind}.changed`,
+      detail: {
+        operator: receipt.actor.subjectId,
+        targetType: receipt.kind === "tenant_grant" ? "tenant-core-grant" : "member-core-assignment",
+        targetId: receipt.result.coreId,
+        metadata: { operationId: receipt.result.operationId, revision: receipt.result.revision,
+          fingerprint: receipt.fingerprint, actorTenantId: receipt.actor.tenantId, state: receipt.result.state,
+          ...(receipt.kind === "member_assignment" ? { memberId: receipt.result.userId } : {}) }
+      }
+    } });
+  }
 
   async record(input: OperationLogInput) {
     const tenantId = input.tenantId ?? input.user?.tenantId;

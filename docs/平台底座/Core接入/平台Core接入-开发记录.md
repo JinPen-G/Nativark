@@ -155,6 +155,22 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-original-management-20261115"></a>
+
+## Core管理接原身份、角色与同事务审计（2026-11-15）
+
+绑定服务及私有事务句柄固定 `80cc539cccd80d81a6c6767a29133308bb90473c` 已推送回读。本片继续非冲突源码，在API新增[原Core管理模块](../../../apps/api/src/modules/core-host/README.md)，只读消费原ALS和 `PlatformRepository.findUserById`，原OperationLog唯一窗口增加同事务Core管理收据方法。API包声明及root lock增加既有独立Core包依赖，dev/build/lint前置构建这些正式包。
+
+原主体适配锁当前租户/人员/会话/角色与权限，复用原平台租户角色映射；提交前复核相同会话、令牌期限及管理权。租户授权要求当前SaaS管理者，成员分配要求原全租户管理权及本租户成员。目标成员已停用时允许撤回，目标租户冻结后SaaS仍可关闭Core，当前操作者不可停用或越权。Core权/业务范围继续由实际注册、授予、成员和部署来源决定。
+
+`composeOriginalCoreManagement`连接实际CoreAccessService/MySQL适配，原审计使用本事务OperationLog写入，失败回滚Core授权与原收据。stdin运行实际原ALS/主体/管理组合与审计方法，核会话撤销/自然到期、锁顺序、停用成员撤回、冻结目标关闭、租户管理员不可授租户Core、SaaS授权及审计失败回滚，退出0。驱动和数据库为离线事务替身，真实Guard路由与DB锁仍待公共装配。
+
+验证使用本树schema生成独占Prisma5.22无引擎Client，生成器必要文件/缓存全部位于 `output/.tmp/core-original-authority`。前两次缺包解析/Runtime声明均已退出清理，第三次用户缓存写入尝试被守卫阻止；显式APPDATA/LOCALAPPDATA后最终生成退出0、守卫0违规。先内存生成Shared/合同/宿主/MCP正式声明再核API，避免将MCP源码穿进API的rootDir。所有生成/临时验证资料随finally清理，未改产品类型配置或共享Client。
+
+原AppModule/Guard、平台基础投影/创建和主schema仍待原公共窗口；本片交付真实原身份适配源码及消费者组合，尚未将其开放成可办理HTTP/后台入口。当前运行与数据库恢复的证据沿main62ca原阶段引用。
+
+收口类型检查Shared121根、合同28根、宿主5根、MCP59根及API964根/2,145个源文件均0诊断，全部声明在内存生成。Prisma独占无引擎生成退出0/守卫0违规，finally删除35文件38,375,949字节并确认目录不存在。3份文档340条链接新错0，API依赖与lock一致，diff检查退出0；主线/独占树原输出和Client没有改写。
+
 <a id="core-binding-runtime-20261115"></a>
 
 ## Core首次绑定、初始化和原操作事务（2026-11-15）
