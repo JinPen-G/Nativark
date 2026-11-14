@@ -117,11 +117,24 @@ node packages/core-contracts/dist/generate-guide.js <Core清单JSON> <底座来�
 
 Node专用出口 `@rental-os/core-contracts/archive` 提供 `createCoreArchive(files)` 与 `readCoreArchive(bytes, expectedSha256)`，采用USTAR+gzip。相同文件按固定排序、权限和时间打包；校验整个压缩包SHA-256后返回内存文件。首版最多5000文件、单文件32MiB、解压总量128MiB，只接普通文件，不接PAX/软硬链接、目录条目、重复或越界路径。包内禁止实际 `.env`、Git元数据和node_modules；保留 `.env.example` 模板入口。
 
-当前归档接口只接受内存文件集合，尚无目录打包、下载安装或解包写入命令。它不加载Core代码；包完整性不能证明代码经过审核。使用生成器与归档不等于五步接入已完成，实际宿主、授权和独立接手仍按对应任务验证。
+## 打包与本地安装准备
+
+将清单中的入口、迁移和资源，以及README/LICENSE/CORE_GUIDE.md放在一个固定的Core交付目录。源文件、依赖声明及其他构建材料需要随包交付时，在清单`assets`显式列出；打包只读取声明集合，不扫描整个工作区。
+
+```sh
+node packages/core-contracts/dist/pack.js <Core交付目录> <新包路径.tgz> [宿主版本JSON]
+node packages/core-contracts/dist/prepare-install.js <Core包.tgz> <SHA256> <既有独占待部署根目录> <宿主版本JSON>
+```
+
+输出包的父目录和待部署根目录须由部署者预先选定并存在，均使用不经过链接的普通目录。第一条命令拒绝覆盖已有包，输出JSON中的`sha256`用于第二条命令；第二条先检查整个压缩包、同一清单/文件/API规范及宿主兼容，全部通过后才写待部署目录。包不允许夹带未声明文件，不执行包内源码或安装脚本。
+
+准备结果为`prepared`或`already_prepared`，`deployment`始终为`pending`，并给出实际目录、Core ID、版本与摘要。目录使用该发行的完整摘要区分；重复操作核对原文件字节后复用，已有目录被用户修改、缺文件或出现链接时明确拒绝覆盖。失败只清理这次创建的暂存目录，不改活动组合或其他已准备版本。两个命令成功退出0，输入/兼容/文件失败退出1并在stderr说明原因；成功stdout只包含JSON。
+
+程序调用使用Node专用`@rental-os/core-contracts/install`出口的`packCoreDirectory`和`prepareCoreInstall`。解包文件检查与原目录检查共用[包检查实现](src/package.ts)。此阶段已具备本地文件准备，后续仍需受控组合构建、迁移/数据核对、实际部署注册，再办理租户授权与成员分配；远端Release获取和Topic发现尚未连接。包完整性不能证明代码已经审核。
 
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[归档](src/archive.ts)单独走Node出口；这些入口不加载Core业务代码。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)，仅走Node出口；这些入口不加载Core业务代码。
 
 ```sh
 npm test -w @rental-os/core-contracts

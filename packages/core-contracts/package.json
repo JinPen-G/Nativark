@@ -18,6 +18,10 @@
     "./archive": {
       "types": "./dist/archive.d.ts",
       "default": "./dist/archive.js"
+    },
+    "./install": {
+      "types": "./dist/install.d.ts",
+      "default": "./dist/install.js"
     }
   },
   "scripts": {

@@ -145,6 +145,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
 
+<a id="core-local-package-install-20261114"></a>
+
+## Core 本地打包与安装准备（2026-11-14）
+
+沿原独占合同包完成PCH-03可独立的文件准备切片。此前新增营运商简称最小窗口的检查点已固定于 `982043aba913745c6d0e258b2d74ca1efb9a98d4` 并推送/回读一致，其类型/数据/源码证据与剩余实测宽度只见[后台原记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)，不挪作PCH研发完成。
+
+[包检查](../../../packages/core-contracts/src/package.ts)将目录读取和内存文件快照接到同一清单/文件/迁移/OpenAPI检查，保留原入口/错误/CLI语义。新打包只读取清单明确声明的入口、资源、迁移及文档；额外源码/构建材料须显式声明，禁止读取实际环境/Git元数据/依赖目录。[安装准备](../../../packages/core-contracts/src/install.ts)与[打包命令](../../../packages/core-contracts/src/pack.ts)/[准备命令](../../../packages/core-contracts/src/prepare-install.ts)使用原USTAR+gzip格式和整包摘要；不下载安装依赖、不执行Core源码或修改活动组合。
+
+安装先完成摘要/格式/兼容/包内容检查，再在部署者指定的既有独占根创建暂存，完整写入后发布以Core/版本/完整摘要确定的候选目录。成功只为prepared/deployment=pending；重复请求逐文件对照原字节后返回already_prepared，原目录被修改、缺件或带链接时拒绝覆盖。失败经finally核定路径后清理本次暂存，当前运行目录、授权/绑定、数据库和其他候选保持。精确的单文件输出采用wx，失败删除自己刚创建的半包，已有输出文件从不覆盖。
+
+必要验证复用原单一合同测试（8组与新增完整类型通过，退出0）；stdin在 `output/.tmp/core-package-install` 编译并创建最小格式fixture，实际运行目录打包、待部署写入、重复导入、已有用户改动保留、坏摘要/缺兼容/未声明文件拒绝，以及pack/prepare两条CLI（退出0）。包内服务代码为抛错哨兵，验证未被执行。其余未声明文件未被纳入，原包重复输出被拒绝且字节保持。该临时目录含源码产物/包/解包文件，finally已全部删除并核实；没有新增测试脚本或后台进程。
+
+当前属于本地可复现文件准备；宿主装配、注册/租户授权/成员分配、Core持久化业务、远端Release/Topic、实际升级/迁移、独立接手仍未验。接入说明同片给出路径、命令、输入、JSON状态、退出码和下一步，不把准备成功显示为业务已启用；PCH原门槛不凭文件操作通过提高。
+
 <a id="core-declarative-pages-20261114"></a>
 
 ## 完整后台外壳与声明式业务页面澄清（2026-11-14）
