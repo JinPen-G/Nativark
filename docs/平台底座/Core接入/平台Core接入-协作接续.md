@@ -2,7 +2,7 @@
 
 更新时间：2026-11-14。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。合同、包准备、Topic查询、React适配、工单领域/MySQL/HTTP及期限复核已固定推送至 `093458c448a27c8aa1591ed44d3dc8f990fcbcbc`；[工单三页面/公共请求与原收据](平台Core接入-开发记录.md#core-tickets-admin-20261114)已实现，真实授权/主应用/页面组合仍待接。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。合同、包准备、Topic查询、React适配和工单领域/MySQL/HTTP/三页面已固定推送至 `45714bb998bb13d64c62f9a7cbd515c42e1e338d`；[平台Core授权/成员分配应用层](平台Core接入-开发记录.md#core-host-access-20261114)已有独立实现，真实原身份/部署/主应用组合仍待接。公共宿主接线继续待窗口，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -34,6 +34,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 - 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
 - 原派工同时允许PCH非冲突源继续；已新增 `apps/admin/src/core` 的独占React适配及必要admin依赖/构建前置，原壳/页头/按钮仅消费，不修改main后台作者的顶栏/样式WIP。真实路由/授权/缓存消费仍等待下一公共片，不据此扩大共享窗口。
 - 轻量非租赁实现独占 `packages/example-tickets-core`，独立迁移只在该包内声明，没有加入公共原schema/迁移链；真实宿主authority与主应用装配仍须原公共窗口。
+- 平台Core管理应用层独占 `packages/core-host`，输入/输出复用原core-contracts；独立MySQL表和迁移源码尚未接原schema/部署链，真实原身份/部署管理生产者不在本包伪造。
 - PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。源码检查点和剩余实际宽度/真库验收唯一见[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)，不计PCH新任务，不扩为平台抽离公共窗口。
 - shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
 - 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
@@ -42,7 +43,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。完整逐模块整改、行为基线、独立schema/迁移账和最终前后运行对照继续待交付，不把静态盘点作为运行证据。
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)补齐独立版本锁/实际数据观察和单对象候选。下一步接真实权限、授权/绑定持久化及受限事务，核对Rental与非租赁消费者、旧API身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)已有领域/MySQL、独立迁移、7操作Nest与同源OpenAPI/原收据只读、3页面贡献，未接真实宿主authority/主应用；沿当前锁顺序接原授权，不用恒真回调或内存替身补成生产。
-3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已提供`registerCoreServers`、授权/绑定schema及`composeCoreOpenApi`；旧API身份和Rental权限映射保持。各片由PM核定唯一作者；shared总出口暂不增加重复定义。
+3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已有`registerCoreServers`、授权/绑定schema、`composeCoreOpenApi`及[CoreAccessService/MySQL管理事务](../../../packages/core-host/README.md)，后者仍须接原权限/实际部署生产者；旧API身份和Rental权限映射保持。各公共片由PM核定唯一作者，shared总出口暂不增加重复定义。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.4核收。
    [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)消费原PageHeading/SaveButton/ConfirmAction，`@rental-os/admin/core`为正式源码包出口；[工单页面和Core请求](平台Core接入-开发记录.md#core-tickets-admin-20261114)已有实际源码消费者。真实注册/授权与主应用路由仍未接，下片消费这些适配，不复制通用壳或改变业务方法。

@@ -1,0 +1,23 @@
+{
+  "name": "@rental-os/core-host",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "平台 Core 授权、成员分配和生命周期的应用服务",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/core-contracts",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/core-contracts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": { "@rental-os/core-contracts": "0.1.0" },
+  "devDependencies": { "@types/node": "22.20.1", "typescript": "5.9.3" },
+  "peerDependencies": { "@prisma/client": "^5.22.0" },
+  "peerDependenciesMeta": { "@prisma/client": { "optional": true } }
+}
