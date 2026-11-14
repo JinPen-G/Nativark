@@ -102,7 +102,7 @@ export function createAiClientPublicContinuitySession(input: Dependencies) {
     check(); if (busy || !usable) return snapshot();
     busy = true; emit();
     try { await action(); }
-    catch { if (current()) status = record ? 'unknown' : 'unavailable'; }
+    catch { if (current()) { knownOriginal = false; status = record ? 'unknown' : 'unavailable'; } }
     finally { busy = false; emit(); }
     return snapshot();
   };

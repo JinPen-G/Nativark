@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain22-public-source-unavailable-no-renewal-20261114"></a>
+## AIN-22 原公开请求不可核实时禁新键与当前服务明确切换（2026-11-14）
+
+[两端消费者](#ain22-public-original-consumers-20261114)已提交／推送 `2ca9f8247ae824c3d2c40bd519f08181f200295f` 并回读GitHub。后续源码自检发现shared生命周期在已核原请求过期后，若一次read发生不可用仍保留knownOriginal，可能展示新prepare；这不能拿旧观察证明可以重做。现[原session](../../packages/shared/src/ai-client-public-session.ts)在任何失败后清除当前knownOriginal，原键保留、状态unknown，下一操作只读原请求，不新建。没有自动续权、续接或丢弃旧收据。
+
+现有[Web控件](../../apps/tenant-website/src/features/ai-native/ClientPublicBrowse.tsx)对已登录但处于其他服务的账号此前仍显示登录链接，原登录页会返回却不能续接。改为明确“切换到此服务再继续”，调用既有sessionApi.switchWorkspace；切换只更新原会话，不消费公开引用，不开始Task／报价。迟到成功／失败先核当前scope和epoch，隐藏／卸载／身份变化不回写旧控件。不同客户仍不能读取或消费另一会话的续接。
+
+必要纯内存命令 `node --no-compilation-cache -`：unknown／过期／不可用不renew反例 `3c11560b9b625cfba49b24146353d9e2b5fa7aa905c05b75cc8edeb357e677ce`、实际React明确切服务并随后明确续接 `eb272937cfd12278dd2376f4ea6386e404fbb2bb7d9a1a53ce13a904a5eea3a0`、相关两端类型 `23caef98b8d81d0ccdb4856f38f3899bf393780a7956f94a20c8269e8ba1e24d` 均退出0；Web4根／281源、微信4根／226源零诊断。没有新增／扩写测试文件，原离线守卫audit0、进程退出、任务临时目录未创建；docs仍4处既有缺链，不改任务进度，不冒称浏览器或微信实测。两产品源与原两册及时固化上传。
+
 <a id="ain22-public-original-consumers-20261114"></a>
 ## AIN-22 网站与客户小程序的公开浏览、登录续接消费者（2026-11-14）
 
@@ -26,7 +35,7 @@
 
 关键固定blob：shared session `a7c2789423d6fcc344ba13abd52e874fdaaae9f8`、Web API `73cb6b98db1e4e3e831b11156ba1a48dec7a993c`／React `76d4e162d7a4bb7cf93d03224c25c2fca9dba013`、微信API `e88427b50d6187bc16c2c84c56fe135c6256418a`／Component `8b1ee88637a6114375c07576ff8daf861043833e`，全部来源按本阶段固定提交。初次API参数因Object.freeze失去上下文类型出现implicit-any，补正式共享类型；直接把ES2022 shared源码当微信ES2020入口出现URL／TextEncoder等诊断，验证改为本树纯内存声明，不给生产加浏览器shim或改语言目标。两次Root驱动重复声明client／顶层await混CommonJS失败均保留，改内存驱动后同组通过，没有修改测试文件。impeccable本机可用上下文binary缺失，没有安装，直接读取本树PRODUCT／DESIGN和craft-floor，沿原视觉系统实现；未运行浏览器。
 
-21源码与原记录／接续及时提交普通推送，本项仍受AIN-21目标选品及企业真实消费者缺口约束，AIN-22仍75%、原28项83.9%／19项研发验收、ENTRY70.8%不变。dev1持续目标两叶，dev2持续原时延叶，不等本片或main。验证只用本树offline preload／不可达DB、内存audit和单任务 `output/.tmp/ain21-public-continuity-20261114`，进程退出、audit0，目录未创建；没有测试脚本／文件／生成包残留。`git diff --check`退出0；docs检查仍4处既有缺链，不补造附件。真实浏览器／微信／DB／业务或外部模型实测仍由负责人执行，未声明生产启用。
+21源码与原记录／接续已提交普通推送 `2ca9f8247ae824c3d2c40bd519f08181f200295f` 并回读GitHub，本项仍受AIN-21目标选品及企业真实消费者缺口约束，AIN-22仍75%、原28项83.9%／19项研发验收、ENTRY70.8%不变。dev1持续目标两叶，dev2持续原时延叶，不等本片或main。验证只用本树offline preload／不可达DB、内存audit和单任务 `output/.tmp/ain21-public-continuity-20261114`，进程退出、audit0，目录未创建；没有测试脚本／文件／生成包残留。`git diff --check`退出0；docs检查仍4处既有缺链，不补造附件。真实浏览器／微信／DB／业务或外部模型实测仍由负责人执行，未声明生产启用。
 
 <a id="ain21-public-continuity-http-20261114"></a>
 ## AIN-21 匿名公开材料、明确登录续接与正式HTTP装配（2026-11-14）

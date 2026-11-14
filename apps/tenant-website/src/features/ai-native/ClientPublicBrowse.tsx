@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createAiClientPublicContinuitySession, type AiClientPublicContinuityView } from '@rental-os/shared';
 import { customerSessionGeneration } from '@rental-os/web-client';
-import { loadSession, subscribeCustomerSession } from '../../data/authClient';
+import { loadSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
 import { createClientPublicApi } from './client-public-api';
 
 const empty: AiClientPublicContinuityView = { status: 'idle', expiresAt: null, canPrepare: true, canContinue: false,
@@ -19,6 +19,8 @@ export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, log
   const [state, setState] = useState({ scope, view: empty }), [working, setWorking] = useState(false);
   scopeRef.current = scope;
   const view = state.scope === scope ? state.view : empty;
+  const signedIn = loadSession(tenantCode);
+  const needsServiceSwitch = view.loginRequired && !!signedIn?.accessToken && signedIn.workspace?.workspaceCode !== serviceCode;
   useEffect(() => {
     const close = () => { epoch.current++; busy.current = false; owner.current?.dispose(); owner.current = null;
       setState({ scope, view: empty }); setWorking(false); };
@@ -68,7 +70,15 @@ export function ClientPublicBrowse({ tenantCode, serviceCode, kind, english, log
       onClick={() => void run('prepare')}>{english ? 'Keep this request' : '保留本次浏览'}</button>}
     {view.canRead && <button type="button" className="button button-outline" disabled={working}
       onClick={() => void run('refresh')}>{english ? 'Check original request' : '核对原浏览记录'}</button>}
-    {view.loginRequired && <Link className="button button-outline" to={loginHref}>{english ? 'Log in to continue' : '登录后继续'}</Link>}
+    {view.loginRequired && !needsServiceSwitch && <Link className="button button-outline" to={loginHref}>{english ? 'Log in to continue' : '登录后继续'}</Link>}
+    {needsServiceSwitch && <button type="button" className="button button-outline" disabled={working} onClick={() => {
+      if (busy.current || document.hidden) return;
+      const captured = epoch.current;
+      busy.current = true; setWorking(true);
+      void sessionApi.switchWorkspace(serviceCode).catch(() => {
+        if (captured === epoch.current && scopeRef.current === scope) setState({ scope, view: { ...empty, status: 'unavailable', canPrepare: false } });
+      }).finally(() => { if (captured === epoch.current) { busy.current = false; setWorking(false); } });
+    }}>{english ? 'Switch to this service' : '切换到此服务再继续'}</button>}
     {view.canContinue && <button type="button" className="button button-dark" disabled={working}
       onClick={() => void run('continueOriginal')}>{english ? 'Continue with this account' : '以当前账号继续本次浏览'}</button>}
     {view.status === 'continued' && <p role="status">{english ? 'This account is linked to the public request. Select rental details before requesting a quote.' : '本次公开浏览已续接到当前账号，请继续选择租赁条件后核价。'}</p>}
