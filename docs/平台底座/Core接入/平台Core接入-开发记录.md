@@ -155,6 +155,35 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-package-cli-public-entry-20261115"></a>
+
+## 固定工单包命令实测与下一公共服务端入口（2026-11-15）
+
+工单包及Git根定位固定于 `9a31c9c08c6b9478f491c6b18d173a02d2015568`、`b7e95bd13562f752ff48dd6f2983061c7c2a5c2b`，均已普通推送并读取真实远端确认。当前main仍 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`。按固定b7e版本对实际编译文件和正式包元数据完成独立Node子进程核对，没有用facade成功替代本次命令结果。
+
+在本树唯一 `output/.tmp/example-tickets-package`编译合同35根和工单11根，0类型诊断；临时contract包保留原package.json/相对exports，不复制依赖。实际执行metadata package、prepare-install、重复prepare-install及check --host --json均退出0，重复输出同一包退出1/EEXIST且原包保留。完整工单包30文件、35,640字节，SHA-256为 `785ff9c6e7a87f07df5c68ef0ef6301295dc39f58b4eeca8b4067f023ae895cd`，Core/底座来源固定b7e，README/手册引用固定源码。准备状态仍为pending，不是运行安装、租户授权或真实业务验收。
+
+第一轮子进程核对的临时包布局误将exports改成绝对路径，Node返回ERR_INVALID_PACKAGE_TARGET，退出1；只修临时布局为真实包内相对出口后复验通过，产品包元数据未改。失败的101文件694,348字节、成功的131文件903,322字节均在同一任务目录finally核绝对归属/无链接后删除，并确认目录不存在；没有累计环境、重复压缩包、node_modules或进程。
+
+### 需要核定的公共服务端窗口
+
+当前非冲突实现已提供统一原应用/Nest装配、HTTP政策、授权/绑定/原结果、本人Core目录/真实范围和页面接入；继续创建脱离原主应用的入口不能完成PCH-03。正式依据和当前接续均要求公共文件由唯一作者持有，当前未收到新的窗口授权。下列范围是根据main62ca源码核出的下一实施入口，不是已经修改或取得写入权。
+
+| 公共文件与原方法 | 已核实际依赖及应交付的行为 |
+| --- | --- |
+| [PlatformRepository](../../../apps/api/src/modules/platform/platform.repository.ts)：findUserForLogin/findTenantByCode/getTenant及原账号/会话映射 | 登录和公共租户读取仍include rentalProfile/category，租户摘要还统计Rental订单。先抽公共身份/租户投影及人员/会话仓储，Rental档案/空间/订单由显式业务适配补充，保留原password/账号状态/角色/撤权/审计和旧调用者行为 |
+| [PlatformService](../../../apps/api/src/modules/platform/platform.service.ts)：findUserForLogin/findTenantByIdForAuth/listUserWorkspaces/resolveSessionWorkspaceId及bootstrapTenant | 原通用服务仍注入Rental、持有演示品类/权限并在初始化中调用Rental。公共身份和租户创建须可不加载行业表/Seed；原Rental初始化走显式Core绑定与同事务适配，不能把原回调改可选成功或用合成空间补运行 |
+| [AuthService](../../../apps/api/src/modules/auth/auth.service.ts)：login/issueSession/buildLoginResponse/getSessionContext/resolveAccessContext | 原签名/会话/轮换继续复用。品类、空间和capability组装拆为Rental贡献；无Core operator会话合法且公共设置可用，staff/client仍按原专用身份，旧wid/会话切换、撤权及旧Rental角色映射不放宽 |
+| [ApiAuthGuard](../../../apps/api/src/common/api-auth.guard.ts)及[请求身份](../../../apps/api/src/common/request-identity.ts) | 当前普通请求默认用Rental空间user，新Core公共管理/业务须使用原同一签名上下文的tenantUser，并保留原accessSession/wid一致性。精确消费Core管理政策、会话GET、范围POST及http注册目录；未知路径/分面拒绝，原Rental/locationScope政策继续原位 |
+| [共享平台合同](../../../packages/shared/src/platform.ts)/[包出口](../../../packages/shared/package.json)/[shared总出口](../../../packages/shared/src/index.ts) | 平台文件仍含行业枚举并type-import core。独立平台身份/租户/人员合同从唯一原声明抽取，旧出口兼容再导出，独立构建用正式中性出口，不复制DTO或按类型检查使用私有路径 |
+| [AppModule](../../../apps/api/src/app.module.ts)/[OpenAPI总组合](../../../apps/api/src/contracts/openapi-document.ts) | 原根模块仍直接登记行业Controller/作业及原服务。以原实例的明确模块出口装配CoreHostModule和选中业务HTTP，统一消费同源OpenAPI，无Core不加载未选Core或行业作业；避免子模块重复创建Auth/DB或循环引用 |
+
+主schema/迁移/Seed的全量抽离、前端AppShell/AppRouter/navigation及主品牌/UI活动WIP属于后续单独窗口，当前不抢改。上述服务端窗口取得后，先交公共投影/接口与Rental兼容转接，再推进独立模块/构建，随后原Guard/装配接线；真实数据库/服务/浏览器、迁移执行及合main仍按目标环境另行授权。原任务、前置和验收不因窗口准备而改变。
+
+此处仅补本片实际命令证据与公共依赖，需求/任务百分比保持8.33%的原G1登记。本轮未主动跨对话发消息，完整范围留原记录和接续供负责人/PM读取；没有把PM的历史窗口或他人活动HEAD当新授权。
+
+四册516个本地链接/130个章节锚点定向核对退出0，新增错误0；正式需求/任务正文和8.33%门槛登记不变，差异格式检查退出0。当前任务树新增验证临时目录已全部删除、无新增服务进程，未触碰main索引或后台作者WIP。证据/接续随本阶段中文提交普通推送并读取真实远端确认；共享服务端作者窗口仍需负责人或PM对当前具体范围核定。
+
 <a id="core-tickets-package-20261115"></a>
 
 ## 实际工单标准包、同源资料与待部署准备（2026-11-15）

@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权持续完成PCH-01～12。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，门槛复核固定 `a64aa357ac72bb62085558fe58816dea79260a44`，当前[统一Core应用工厂/Nest装配](平台Core接入-开发记录.md#core-application-assembly-20261115)消费原身份、审计和一个部署目录；主公共接线与实际无Core/多Core运行仍按公共窗口办理。
+> 状态：负责人已授权持续完成PCH-01～12。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，实际工单包命令固定 `b7e95bd13562f752ff48dd6f2983061c7c2a5c2b`，当前[真实打包链及公共服务端入口](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)已核；主公共接线与实际无Core/多Core运行仍待唯一作者窗口。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -48,6 +48,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[开发能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)和[模块导读/直接消费者](平台Core接入-开发记录.md#core-source-reading-20261115)已有实际入口及覆盖状态，源码用途/文档缺口继续按模块整改。完整行为基线、独立schema/迁移账和最终前后运行对照仍按原门槛交付。
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、7操作Nest与同源OpenAPI/原收据只读、3页面贡献，主Guard/HTTP/后台仍按公共窗口接线。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。公共片由PM核定唯一作者，具体消费者入口已可定位。
+   当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI尚未取得本对话的新写入窗口，不继续用独占接口数量代替独立宿主。
    [当前事实读取](平台Core接入-开发记录.md#core-management-current-reads-20261115)已提供页面变更所需的授权/成员/绑定修订，主应用组合时将 `reads` 与原服务一起供给Controller，页面先读当前事实再提交。
    [原授权结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)增加两条只读收据路径，主Guard/OpenAPI应直接消费当前十条单源声明。租户资料和成员资料可分别挂载admin/core正式出口的CoreTenantGrantPanel/CoreMemberAssignmentPanel，原操作及当前状态分别读取；面板不自造目录或身份。
    [当前成员Core目录](平台Core接入-开发记录.md#core-session-directory-20261115)另提供已登录operator的一条GET及CoreSessionHttpModule/register(reader)。原Guard需明确登记自助政策、OpenAPI总组合消费createCoreSessionOpenApi，主壳/路由可消费useCoreSession的本人集合/管理候选；Core绑定、范围和就绪另核。
@@ -61,6 +62,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    [声明路由/导航消费](平台Core接入-开发记录.md#core-declarative-routes-20261115)新增createCoreRouteElements及同源菜单/面包屑生成，主Router展开原Route元素，主壳消费同源名称/链接。工单默认详情读取框架登记参数；配置页声明purpose=configuration，当前获权但未绑定/缺项时可配置。公共总入口仍未改，实际浏览器/Portal/回车及无Core壳待验。
 5. [本地打包/安装准备](平台Core接入-开发记录.md#core-local-package-install-20261114)、[固定Release获取](平台Core接入-开发记录.md#core-github-release-20261114)及[Topic查询](平台Core接入-开发记录.md#core-github-discovery-20261114)已有共用候选链。[固定仓库根清单/多Core索引](平台Core接入-开发记录.md#core-github-repository-20261115)已提供真实读取器和作者指南，下一步接宿主发现/安装管理界面与实际部署，以非租赁持久化业务验证完整安装。10/11由独立开发者或Agent只凭简明指南和业务要求接手，在干净宿主重现安装→授权→业务；12核收全功能前后对照、源码/API可理解性、底座跟随上游与Core单独升级、配置/定制/数据保留、回退/分发失败及原独立审查门槛。真实GitHub测试发行和实际远端安装仍待核验。
    [实际工单打包](平台Core接入-开发记录.md#core-tickets-package-20261115)已用真实编译文件形成30文件标准包并核待部署复用/篡改拒绝；pack:core统一构建与清单/API/手册生成，来源须固定提交且无源码差异。prepare成功仍pending，没有干净宿主业务/真实发行验收；源码说明及Node正式出口可供下一实际安装片消费。
+   [固定来源子进程链](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)实测metadata打包、标准check、prepare/重复prepare退出0，重复覆盖退出1；相对包exports和Git根定位按真实Node行为核对。临时目录全部清理，实际运行安装/数据库/远端Release与独立接手未验。
 6. 不同租户/成员、撤权、停用重开、统一期限、有/无工具、迟到响应与unknown验证组合继续保留；部署移除、停用、订阅到期和成员撤权分别判定。
 
 独立包已有清单/目录静态检查、API组合、服务端/页面合同、独立升级预检、指南生成、本地/固定Release准备及Topic查询，后台有原组件的CorePage适配；尚非完整运行SDK。完整功能/源码基线、API离线资料、真实独立宿主、多Core授权/生命周期与UI/AI接线、工单持久化样例、发现管理界面/实际部署及独立更新、独立接手和兼容回退继续待交付。后续只补必要测试，现有用例/短命令优先，不增加成批测试脚本。
