@@ -4,10 +4,10 @@ import { CORE_SCOPE_HTTP, type CoreScopeObservation } from "@rental-os/core-cont
 import { CoreAccessError } from "@rental-os/core-host";
 import { z } from "zod";
 
-const readerToken = Symbol("platform.core-scope.reader");
+export const CORE_SCOPE_READER = Symbol("platform.core-scope.reader");
 @Controller()
 export class CoreScopeController {
-  constructor(@Inject(readerToken) private readonly readScope: (value: unknown) => Promise<CoreScopeObservation>) {}
+  constructor(@Inject(CORE_SCOPE_READER) private readonly readScope: (value: unknown) => Promise<CoreScopeObservation>) {}
   @Post(CORE_SCOPE_HTTP.path) @HttpCode(200)
   async read(@Body() body: unknown) {
     try { return await this.readScope(body); }
@@ -22,6 +22,6 @@ export class CoreScopeController {
 @Module({})
 export class CoreScopeHttpModule {
   static register(readScope: (value: unknown) => Promise<CoreScopeObservation>): DynamicModule {
-    return { module: CoreScopeHttpModule, controllers: [CoreScopeController], providers: [{ provide: readerToken, useValue: readScope }] };
+    return { module: CoreScopeHttpModule, controllers: [CoreScopeController], providers: [{ provide: CORE_SCOPE_READER, useValue: readScope }] };
   }
 }

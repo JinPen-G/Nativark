@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权持续完成PCH-01～12。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，声明路由片固定 `3cc35e9050dd58381d54ec0d1708e85e58faa613`，已有当前授权面/目录/范围、CoreRoute及工单真实源码消费者，主公共装配和实际无Core/多Core运行仍按公共窗口接线。
+> 状态：负责人已授权持续完成PCH-01～12。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，门槛复核固定 `a64aa357ac72bb62085558fe58816dea79260a44`，当前[统一Core应用工厂/Nest装配](平台Core接入-开发记录.md#core-application-assembly-20261115)消费原身份、审计和一个部署目录；主公共接线与实际无Core/多Core运行仍按公共窗口办理。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -52,6 +52,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    [原授权结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)增加两条只读收据路径，主Guard/OpenAPI应直接消费当前十条单源声明。租户资料和成员资料可分别挂载admin/core正式出口的CoreTenantGrantPanel/CoreMemberAssignmentPanel，原操作及当前状态分别读取；面板不自造目录或身份。
    [当前成员Core目录](平台Core接入-开发记录.md#core-session-directory-20261115)另提供已登录operator的一条GET及CoreSessionHttpModule/register(reader)。原Guard需明确登记自助政策、OpenAPI总组合消费createCoreSessionOpenApi，主壳/路由可消费useCoreSession的本人集合/管理候选；Core绑定、范围和就绪另核。
    [真实范围/就绪读取](平台Core接入-开发记录.md#core-scope-readiness-20261115)提供CoreScopeHttpModule/register(reader)及同源只读POST/OpenAPI/useCoreScope；后台先核本人Core/页面权，再读Core范围与实际ready。Core自持事务的调用不跨父事务持锁，返回前复核当前绑定，主Guard/组合仍待公共片。
+   [统一应用装配](平台Core接入-开发记录.md#core-application-assembly-20261115)已提供composeOriginalCoreApplication及CoreHostModule/register({imports, inject, useFactory})；主应用须先由唯一原服务模块导出真实数据库/人员/订阅/审计及部署目录，再给单一工厂消费。总模块与原单独模块只选一种装配，避免重复Controller；核心业务HTTP另由所选Core登记。主provider不自动对子模块可见，当前实际Nest离线容器已核该拒绝边界。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。
    [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)消费原PageHeading/SaveButton/ConfirmAction，`@rental-os/admin/core`为正式源码包出口；[工单页面和Core请求](平台Core接入-开发记录.md#core-tickets-admin-20261114)已有实际源码消费者。真实注册/授权与主应用路由仍未接，下片消费这些适配，不复制通用壳或改变业务方法。

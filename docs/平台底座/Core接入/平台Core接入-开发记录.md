@@ -155,6 +155,28 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-application-assembly-20261115"></a>
+
+## 原Core应用统一装配与Nest依赖可见性（2026-11-15）
+
+原G1复核固定 `a64aa357ac72bb62085558fe58816dea79260a44` 已上传并回读，当前main仍 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`。本片沿原API Core适配独占范围实现真实应用组合；原AppModule、Auth/Guard、主schema及后台壳公共窗口未扩大，其他作者WIP保留。
+
+[composeOriginalCoreApplication](../../../apps/api/src/modules/core-host/original-core-application.ts)组合已有原管理、绑定、当前事实、SaaS目录、成员目录与范围读取，统一使用原数据库、人员仓储、订阅、审计和一个受控部署目录。组合期间无数据库查询、初始化或作业启动。行业业务仍在所属Core组合，通用装配不自动引入工单/Rental。
+
+[CoreHostModule](../../../apps/api/src/modules/core-host/core-host.module.ts)将三个Controller装配到原Nest容器，单一工厂提供同一应用实例；子provider从该实例取得管理、成员目录和范围reader。CoreManagementHttpApplication改为公共Core应用服务的必要方法集合，HTTP层不依赖原ORM适配的ReturnType。原三个单独DynamicModule入口仍可用，不与总模块重复挂相同Controller。
+
+实际核出Nest模块可见性要求：父AppModule的本地provider不会自动供给子模块。主窗口须将既有原实例通过导出模块提供给CoreHostModule的imports/inject，不能另建Auth/数据库/审计，不能把原类名存在视为已装配。实际短接入例子及边界已写[本模块说明](../../../apps/api/src/modules/core-host/README.md#从一个应用工厂装配)。
+
+| 必要验证 | 实际结果及边界 |
+| --- | --- |
+| `node --no-compilation-cache -`内存类型 | 退出0；Core合同34根/宿主6根/HTTP模块4根580源0诊断，HTTP闭包不读取原Prisma模型；全API类型仍沿此前审批拒绝保持未验 |
+| 实际Nest TestingModule容器与三Controller | 退出0；应用工厂1次，Controller3个解析到同一实例；管理/会话/范围调用传递正确，缺原依赖导出时明确解析失败；容器close完成，没有监听HTTP端口或启动服务 |
+| 实际原应用工厂/原ALS/主体与离线事务输入 | 退出0；组合时数据库/用户读取0、写入0；实际原主体链9次账号读取、25次SQL读取、SQL/审计写入0；空Core会话、SaaS目录、当前事实和原收据缺失准确，租户访问SaaS目录403 |
+
+上述运行只读复用已锁定依赖，Prisma仅使用原runtime SQL模板，没有生成/读取别树Client、连接真实库、读取环境文件或启动服务。测试/核对经stdin和内存编译，未新增测试脚本和一次性磁盘目录。原全API离线生成审批拒绝、主Guard接线、主模块服务导出、原授权/绑定迁移账、完整无Core运行、Rental兼容和实际浏览器仍待后续公共片，当前原PCH进度未跨下一档。
+
+五份相关文档514个链接/124个章节锚点定向核对退出0，新问题0；正式需求/任务与原进度不变，差异格式检查退出0。没有临时目录、进程或生成客户端产物。本片固定版本由包含本节的中文Git提交定位，任务分支普通推送后读取真实远端确认。
+
 <a id="pch-identity-page-gate-20261115"></a>
 
 ## 身份与后台页面原G1门槛复核（2026-11-15）

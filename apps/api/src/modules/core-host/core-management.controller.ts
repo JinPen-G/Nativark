@@ -3,15 +3,19 @@
  * 模块由受控AppModule组合登记，路径和接口资料复用同一公共合同。
  */
 import { Body, Controller, Get, HttpCode, HttpException, Inject, Module, Post, type DynamicModule } from "@nestjs/common";
-import { CORE_MANAGEMENT_HTTP, CORE_MANAGEMENT_HTTP_BASE } from "@rental-os/core-contracts";
-import { CoreAccessError } from "@rental-os/core-host";
+import { CORE_MANAGEMENT_HTTP, CORE_MANAGEMENT_HTTP_BASE, type CorePrincipal } from "@rental-os/core-contracts";
+import { CoreAccessError, type CoreAccessService, type CoreBindingService } from "@rental-os/core-host";
 import { z } from "zod";
-import type { composeOriginalCoreBindings } from "./original-core-bindings";
-import type { composeOriginalCoreManagement } from "./original-core-management";
 
 export interface CoreManagementHttpApplication {
-  management: ReturnType<typeof composeOriginalCoreManagement>;
-  bindings: ReturnType<typeof composeOriginalCoreBindings>;
+  management: {
+    service: Pick<CoreAccessService, "changeTenantGrant" | "changeMemberAssignment" | "readTenantGrantOperation" | "readMemberAssignmentOperation">;
+    principals: { current(): CorePrincipal };
+  };
+  bindings: {
+    service: Pick<CoreBindingService, "bind" | "readOperation">;
+    principals: { current(): CorePrincipal };
+  };
   registered(): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.registered.response>>;
   reads: {
     tenantGrant(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readTenantGrant.response>>;
@@ -19,11 +23,11 @@ export interface CoreManagementHttpApplication {
     binding(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readBinding.response>>;
   };
 }
-const applicationToken = Symbol("platform.core-management.http");
+export const CORE_MANAGEMENT_APPLICATION = Symbol("platform.core-management.http");
 
 @Controller(CORE_MANAGEMENT_HTTP_BASE)
 export class CoreManagementController {
-  constructor(@Inject(applicationToken) private readonly application: CoreManagementHttpApplication) {}
+  constructor(@Inject(CORE_MANAGEMENT_APPLICATION) private readonly application: CoreManagementHttpApplication) {}
 
   @Get(CORE_MANAGEMENT_HTTP.registered.path)
   registered() {
@@ -93,6 +97,6 @@ export class CoreManagementController {
 export class CoreManagementHttpModule {
   static register(application: CoreManagementHttpApplication): DynamicModule {
     return { module: CoreManagementHttpModule, controllers: [CoreManagementController],
-      providers: [{ provide: applicationToken, useValue: application }] };
+      providers: [{ provide: CORE_MANAGEMENT_APPLICATION, useValue: application }] };
   }
 }

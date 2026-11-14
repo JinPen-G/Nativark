@@ -2,6 +2,22 @@
 
 本模块把 `@rental-os/core-host` 的授权/成员分配服务接到当前平台的真实账号、会话、角色与审计。宿主从已冻结的组合注册提供Core部署可用性，原HTTP/后台装配消费此模块。[宿主合同](../../../../../packages/core-host/README.md)
 
+## 从一个应用工厂装配
+
+[composeOriginalCoreApplication](original-core-application.ts)接收原数据库、账号仓储、订阅、同事务审计和单一受控Core部署目录，组合管理/绑定/当前事实、SaaS目录、本人会话目录及范围读取。组合时只创建应用实例，不读取数据库或初始化Core；行业业务HTTP、AI与作业由选中Core另行装配。
+
+主Nest组合通过 [CoreHostModule.register](core-host.module.ts) 使用一个应用工厂，三个Controller从同一个工厂取得对应服务。`imports`必须导出 `inject` 中使用的真实原服务或宿主依赖provider，父AppModule本地provider不会自动对子模块可见。不要在子模块重建数据库、Auth或审计实例。
+
+```ts
+CoreHostModule.register({
+  imports: [originalHostDependenciesModule],
+  inject: [originalHostDependenciesToken],
+  useFactory: (dependencies: OriginalCoreApplicationInput) => composeOriginalCoreApplication(dependencies)
+});
+```
+
+例子中的模块/token由主宿主提供并导出原实例，输入类型与函数从本目录实际源码读取。`CoreHostHttpApplication`只依赖公共Core服务和HTTP合同，原Prisma装配留在original适配中。已提供的三个单独DynamicModule入口继续兼容；主组合选择整体或单独入口，不能重复挂相同Controller。原Guard仍须消费精确管理政策、会话GET和范围POST政策；这里没有替换全局Guard或给路由自动授权。
+
 [原主体适配](original-core-principal.ts) → [管理组合](original-core-management.ts) → [独立Core管理服务](../../../../../packages/core-host/src/access.ts) → [私有MySQL](../../../../../packages/core-host/src/mysql.ts) → [原审计](../../common/operation-log.service.ts)。
 
 主体来自原Guard的ALS身份及签名会话。适配依次锁原租户、账号、会话、角色分配/权限，再进入Core授权锁。账号和租户的当前状态、会话撤销/切换、令牌自然期限都核对。成员撤回允许其已经停用，SaaS对被冻结目标租户也可关闭Core，当前操作者仍须有效。

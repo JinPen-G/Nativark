@@ -2,10 +2,10 @@
 import { Controller, Get, Inject, Module, type DynamicModule } from "@nestjs/common";
 import { CORE_SESSION_HTTP, type CoreSessionContext } from "@rental-os/core-contracts";
 
-const readerToken = Symbol("platform.core-session.reader");
+export const CORE_SESSION_READER = Symbol("platform.core-session.reader");
 @Controller()
 export class CoreSessionController {
-  constructor(@Inject(readerToken) private readonly readContext: () => Promise<CoreSessionContext>) {}
+  constructor(@Inject(CORE_SESSION_READER) private readonly readContext: () => Promise<CoreSessionContext>) {}
   @Get(CORE_SESSION_HTTP.path)
   context() { return this.readContext(); }
 }
@@ -13,6 +13,6 @@ export class CoreSessionController {
 @Module({})
 export class CoreSessionHttpModule {
   static register(readContext: () => Promise<CoreSessionContext>): DynamicModule {
-    return { module: CoreSessionHttpModule, controllers: [CoreSessionController], providers: [{ provide: readerToken, useValue: readContext }] };
+    return { module: CoreSessionHttpModule, controllers: [CoreSessionController], providers: [{ provide: CORE_SESSION_READER, useValue: readContext }] };
   }
 }
