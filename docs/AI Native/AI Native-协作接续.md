@@ -8,7 +8,9 @@ PM的本机MySQL8.4.11已按[最小SQL／恢复步骤](<AI Native-开发记录.m
 
 AIN-25 [原五条全文收口](<AI Native-开发记录.md#ain25-measurement-cost-rollback-whole-20261114>)已完成本轮研发验收：故障22源固定2cfbcee8，50样本、成本／SLO候选与原版本回退均已核入，必要模拟／类型和最后独立全文核定齐备；与AIN-23形成新main集成节点，由PM串行整合。原unknown不重派或清占用，生产SLO／D05采用及真实环境由负责人后续决定／测试，不重跑已绿色集合。dev2接原AIN-26固定版本及矩阵准备，未齐15／24前置不提前计分。AIN-24 [原hold／memory／knowledge三源保护阶段](<AI Native-开发记录.md#ain24-original-source-hold-transaction-20261114>)已由dev1冻结交回并经Root独立必要模拟／类型核接；Root接最少会员业务收据、原复制正文清理与标准事务／provider装配，dev1转敏感访问审计。仍有Task副本或缺生产事务时的拒绝不能当删除闭环，助手不等待本机迁移或Root提交。
 
-当前[正文传播／原会员收据／HTTP审计阶段](<AI Native-开发记录.md#ain24-original-body-propagation-audit-20261114>)已补知识／记忆的原终态Task副本清理、知识原同事务装配及全部历史chunks删除，原业务计划／批准／财务证据保持；两个正式provider已接OperationLogService，Root必要模拟／类型与独立窄源码复核齐备。dev1后继处理直接原场景和正式bytes的审计绕过，dev2继续四品类及多端组合与原选单建单接管入口核定。AIN-24全文仍未齐，不把阶段或未知原收据恢复算新增整项100%。
+当前[正文传播／原会员收据／HTTP审计阶段](<AI Native-开发记录.md#ain24-original-body-propagation-audit-20261114>)12源固定e346a2417已普通推送并回读GitHub一致，知识／记忆的原终态Task副本清理、知识原同事务装配及全部历史chunks删除已接通，原业务计划／批准／财务证据保持；两个正式provider已接OperationLogService，Root必要模拟／类型与独立窄源码复核齐备。dev1后继处理直接原场景和正式bytes的审计绕过，dev2继续四品类及多端组合与原选单建单接管入口核定。AIN-24全文仍未齐，不把阶段或未知原收据恢复算新增整项100%。
+
+[原场景／文件正文审计后继](<AI Native-开发记录.md#ain24-original-scene-bytes-read-audit-20261114>)七源已固定核接：collect／revalidate／open及bytes交付等待原持久审计后重核同来源／当前授权，原上传不造ACL，重核不重复对象GET／提交副本。Root两组实际源码模拟、7根／1881源类型与七provider原logger登记均通过，作者四源已交权。dev1转AIN-24原七条全文只读核定，Root继续完整实现／装配缺口及公开进度核计分；旧staff／Gateway接口未核成已开放能力，真实环境由负责人自测。
 
 在 `D:/工作文件/rental-OS/worktree/ai-native`、`codex/ai-native` 完成原AIN／ENTRY核心范围。[AIN-21原五条收口](<AI Native-开发记录.md#ain21-simulated-whole-closeout-20261114>)固定 `ff7bb06a987d6c6d717d0911a7822b7e16023414` 已推并回读，保存地址双标准provider、目标／人类回答／原模型／Core参数准备及原历史齐备。[AIN-22两端目标、原预约及收据恢复](<AI Native-开发记录.md#ain22-goal-booking-original-consumers-20261114>)27源最终 `86d05a78733ce82336ec2138c1a919eabecd1540` 已推并回读，原五条／双端必要模拟／类型／最后缺陷独立核定齐备；与21形成新的两整项main节点，PM按固定前置串行整合，不夹容量或品类WIP。原公开续接／匿名HTTP、服务切换、本人订单和取消来源沿既有记录复用，不重复施工；旧接续完整字节保存在本阶段前置 `86d05a78733ce82336ec2138c1a919eabecd1540` 的同路径。
 
@@ -36,8 +38,8 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-25全文已上传ac4395c93；PM独占main／DDL／Client，Root只留固定依据。独占四册／索引和公共接点；AIN-24原保护三源10e1c81及[正文传播／会员收据／HTTP审计12源](<AI Native-开发记录.md#ain24-original-body-propagation-audit-20261114>)均已独立必要模拟／类型核接，正固化。继续直接场景／bytes审计的公共provider及AIN-24全文缺口核定；AIN-15保留Core企业正向依赖。未知原操作不重派，费用占用不因诊断或槽释放核销；未知员工样式不夹带。 |
-| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-15四源、AIN-24保护及HTTP审计三源均已交权。当前独占scenes/original-scene-knowledge.ts、knowledge/knowledge-file.composition.ts、knowledge/prisma-knowledge-file-access.ts、knowledge/prisma-formal-knowledge.composition.ts：接原场景collect／revalidate／open和正式bytes的原敏感审计，持久日志成功后重核来源／授权再交付，失败不返正文；日志只存最少ID／hash及真实scope。未注册旧GatewayContext只核范围，不重建。不改Root保护／传播／HTTP审计源、provider、human／persistent服务、通用logger／Interceptor、shared／四册／索引或Core权限。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-25全文已上传ac4395c93；PM独占main／DDL／Client，Root只留固定依据。独占四册／索引和公共接点；AIN-24原保护三源10e1c81及[正文传播／会员收据／HTTP审计12源](<AI Native-开发记录.md#ain24-original-body-propagation-audit-20261114>)e346a2417已独立必要模拟／类型核接并推送回读。继续直接场景／bytes审计的公共provider及AIN-24全文缺口核定；AIN-15保留Core企业正向依赖。未知原操作不重派，费用占用不因诊断或槽释放核销；未知员工样式不夹带。 |
+| AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | AIN-15四源、AIN-24保护、HTTP审计及直接原场景／bytes四源均已交权。当前只读核AIN-24原七条全文及正式生产者／消费者，区分仍缺本地实现／标准装配、现有行为证据和外部经营决定；不以描述性语料或缺真实环境替代／卡住研发验收。留真实阻塞和完整核定供Root读，不主动跨聊天。不改Root已收源、通用logger／Interceptor、shared／四册／索引、main或Core权限；确需新增写范围由Root分配。 |
 | AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-25两UI／两源、完整测量／成本／回退资料及最终记录确认已交权并核闭。接原AIN-26：只读核固定source／契约／迁移／原场景、四品类及多端矩阵，按AIN-A01～A29定位既有证据和实际组合缺口，交Root分配最小修复；15／24前置未齐不提前验收。不建第五册／新测试脚本或环境，不写shared／provider／四册／索引，不争用main／PM数据库。 |
 | 内部开业助手／`/root/opening_core_closeout` | AIN-15两阶段和AIN-25限定范围复核均已交回；发现的最后政策等待P2经Root复验后再次静态核闭，无活动写权。不写源码／索引／四册／main、不重复作者模拟，不外推AIN-25全文或真实运行。 |
 | 内部日历/上下文助手 | 原时间耗尽收口单源已推；报价待确认 reader 两源已冻结交回并由 Root 独立复验，原 AIN-12 全文结论已交回，无活动写权。原慢读证据与 UNKNOWN 不被正向模拟关闭。 |

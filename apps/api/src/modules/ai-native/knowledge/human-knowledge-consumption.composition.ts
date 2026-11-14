@@ -96,8 +96,8 @@ export class HumanKnowledgeConsumptionRequestFactory {
     } };
     const { operationLogs, ...dependencies } = this.dependencies;
     const services = 'integrations' in dependencies
-      ? composeKnowledgeFileApplication({ ...dependencies, auth: requestAuth, credentials })
-      : composePrismaFormalHumanKnowledge({ ...dependencies, auth: requestAuth, credentials });
+      ? composeKnowledgeFileApplication({ ...dependencies, operationLogs, auth: requestAuth, credentials })
+      : composePrismaFormalHumanKnowledge({ ...dependencies, operationLogs, auth: requestAuth, credentials });
     const audit = new KnowledgeSensitiveReadAudit(operationLogs, context => services.management.session.check(context));
     const reads = {
       readDocument: async (value: unknown) => {

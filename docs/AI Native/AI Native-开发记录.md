@@ -6,10 +6,32 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain24-original-scene-bytes-read-audit-20261114"></a>
+## AIN-24 原场景与文件正文的持久读取审计（2026-11-14）
+
+前置 `e346a241733a66f229aa8a037c62172c875a64af` 已普通推送并回读 GitHub。原HTTP／内部消费审计不能覆盖直接原场景及正式bytes读取，本阶段在原调用链补齐这两个实际入口。dev1已冻结交回四源：[原场景知识](../../apps/api/src/modules/ai-native/scenes/original-scene-knowledge.ts) `ccdc6a366ecf4e42e90e5e4ba253e5195399c6c0`、[文件组合](../../apps/api/src/modules/ai-native/knowledge/knowledge-file.composition.ts) `04adc61d50807896db19f7ca264da1b5415ed26f`、[原文件授权读取](../../apps/api/src/modules/ai-native/knowledge/prisma-knowledge-file-access.ts) `7a8ee9ddc08296fc572cb8d1f7d1a3fd00e9960c`、[正式知识组合](../../apps/api/src/modules/ai-native/knowledge/prisma-formal-knowledge.composition.ts) `e914117841771965dab83143279a81f2b785537b`。Root逐Git blob核同，工作文件CRLF／Git LF差异已分开核对；不因换行重复运行模型或文件读取验证。
+
+原场景collect／revalidate／open等待原OperationLogService持久记录成功后重核同一原来源、当前权限、同意及作用空间，原inputRef与有限document／memory引用、修订和正文哈希进入审计，正文／偏好／凭据不进日志。旧冻结材料不能被重新收集替换，也不产生新的Task、模型调用或签名。原文件上传完成和解析bytes走同一敏感审计：原上传尚无文档版本／ACL时仅记录已有uploadSession／command与字节哈希，不造document grant；实际读取后的审计重核检查原附件、配置、授权及字节哈希，保持同一份bytes，不重复对象GET或创建提交副本。
+
+Root在[正式provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)为知识管理、消费、原观察、报价、开业、模型控制和订单执行七个现有组合注入原OperationLogService，并在[知识管理工厂](../../apps/api/src/modules/ai-native/knowledge/human-knowledge-management.composition.ts)／[消费工厂](../../apps/api/src/modules/ai-native/knowledge/human-knowledge-consumption.composition.ts)透传。现有AppModule原logger注册保持，不新建审计表或日志服务。缺logger、审计失败／丢应答和等待期间撤权／切scope／来源撤回均拒绝正文交付，不用默认成功或重派补证。
+
+| 必要验证 | 固定原证据及真实边界 |
+| --- | --- |
+| Root独立原Controller／场景组合模拟 | `node --no-compilation-cache -`，stdin `66be05da35b1ad23600041d5e624f225abcd372f`／SHA-256 `5f7763e2498a53351f3eb42f80c0913c8194871c15dbabfbbe34755706499e8c`；输出`6097bb671a86342e4d421a9b9a2697db848413f4`，退出0。1模型／23条原审计，失败／丢应答／缺logger、政策撤回、workspace切换、来源撤回拒绝，原Task／Run／call不新增，父ALS恢复，原inputRef及引用哈希一致 |
+| Root独立原Controller／FileRuntime／ObjectReader模拟 | 同命令，stdin `83a1173d6e9823d5e6b4937844e9b6c9b271b39c`／SHA-256 `83d4450a7a52d8452f857e4c636e072e7f7a110ef2017426fd0baca279cda2c5`；输出`783e5c2cff5fdb9a07630cf06e4eb248fada9876`，退出0。15个原正反例、12条审计／14个对象读／提交副本1；正常上传和解析各只读一次对象，失败不交付／不创建副本，reconcile不增加对象读；存储／HTTP为明确合成替身 |
+| Root生产闭包类型 | 同命令，stdin `beb9bbe1b71a4c62171f39818ed8f0ef479f50cf`／SHA-256 `53d9420eaa456ceded79ed57bf17252680f8f8f6330936f29394951a8903d1c0`；输出`e44f71a0d5c6e5c5e4a124c61642f67dac6a5343`，TypeScript5.9.3、7根／1881源／0诊断、退出0；作者最终4根／1599源0诊断，原stdin／输出`b4ba9efc5bd537a9523731fdd366a47a8bae9389`／`08993db218d3df3cd05e376f59172dc36de3868a` |
+| Root正式七provider登记 | 同命令，stdin `18a64141576f44d973468d238f856df9fd3e0032`／SHA-256 `2dd26ff38764e9e232c44af4d0d6fa06b8e75431674f6434a8d8e16b755acbd8`；输出`30cc495a1586cf7171e33b4bf164ff33e9cf20a3`，退出0，七组合引用原logger和原消费者，登记检查不冒称真实服务请求通过 |
+
+独立助手对最终七源逐blob核同并静态追实际provider／factory／原场景／文件读取接点，未发现阻止本阶段交付的新增P1／P2；确认持久审计后只重核原来源、同份bytes和当前授权，无新GET或副本，日志不含正文／凭据，原AppModule登记和七provider透传保持。该复核未重复Root／作者行为或类型，不外推全staff／Gateway兼容或AIN-24全文。
+
+早期驱动时钟、缺对话表及确认字符串误用失败保留，只修内存fixture／原命令，不放宽生产规则或测试断言；作者冻结时误以CRLF原字节比较Git LF对象，已核仅换行差异，未据此改实现或重复模型／对象冒烟。原staff文件接口存在但当前正式知识生产调用者使用operator，审计叶仍只支持operator，未核成全staff开放能力；旧KnowledgeGatewayContext未生产注册，不以其接口预留证明正向交付。本阶段闭合当前原场景／bytes审计，AIN-24原全工具攻击、分类留存及外部责任仍逐条核定，不提前增加任务100%。
+
+本阶段全部原offline preload、不可达DATABASE_URL、内存audit0；Root和作者自有验证进程已退出，任务临时目录未创建，无新增／扩写测试脚本、下载／依赖／构建副本或第五册。真实DB／浏览器／微信／供应商／外部存储由负责人后续测试。原diff检查退出0，docs仍四处既有缺链，无新增任务算术错误；不伪造附件补绿。
+
 <a id="ain24-original-body-propagation-audit-20261114"></a>
 ## AIN-24 原正文传播、会员收据保留与敏感读取审计（2026-11-14）
 
-前置保护阶段 `10e1c81f6621ae2491da0689366c3a4a6ba1d8a7` 已普通推送并回读 GitHub 一致。本阶段固定12份必要源码，沿原Task清理、知识／记忆CAS、当前授权和原OperationLogService接线，不另建删除状态机、业务收据或日志系统。AIN-24仍待原全文核定；生产者中直接读知识／文件正文的审计缺口已交dev1后继，不能凭本阶段HTTP工厂闭环判整项100%。
+前置保护阶段 `10e1c81f6621ae2491da0689366c3a4a6ba1d8a7` 已普通推送并回读 GitHub 一致。本阶段12份必要源码固定 `e346a241733a66f229aa8a037c62172c875a64af`，已普通推送codex/ai-native并回读一致；沿原Task清理、知识／记忆CAS、当前授权和原OperationLogService接线，不另建删除状态机、业务收据或日志系统。AIN-24仍待原全文核定；生产者中直接读知识／文件正文的审计缺口已交dev1后继，不能凭本阶段HTTP工厂闭环判整项100%。
 
 [原Task正文清理叶](../../apps/api/src/modules/ai-native/privacy/retention-task-bodies.ts)从[原维护事务](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)抽出同一清理实现；维护调用仍须原30天期限或已验证restore许可，显式源删除只从原hash-bound模型输入定位该知识／记忆的关联终态Task。当前scope锁、未决审批／POSSIBLE／原账hold、CAS和有界来源复核保留；不覆盖输入／结果哈希，不补签输入，不重置预算或重执行。清理模型ActionInput／Artifact、原人类回答和事件重复正文，原Task tombstone与source CAS同事务提交；部分失败整体回滚，COMMIT丢应答只观察原操作键。
 

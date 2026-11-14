@@ -8,6 +8,7 @@ import { taskModelMaterialSchema, type parseTaskModelInput } from '../model-inpu
 import { withoutTaskModelDisplayMessages } from '../model-input/task-model-display-witness';
 import { preferenceSchema } from '../knowledge/knowledge-validation';
 import { aiConversationHistoryContextSchema } from '../conversation-context.reader';
+import { KnowledgeSensitiveReadAudit, knowledgeReadHash, type KnowledgeReadAuditReference } from '../knowledge/knowledge-sensitive-read.audit';
 
 export type AiOriginalSceneKnowledgeOptions = Omit<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials' | 'clock'> & {
   includePreferences: boolean;
@@ -59,9 +60,12 @@ export function continueOriginalSceneMaterial(previous: ReturnType<typeof parseT
       .map(message => message.role === 'user' ? { role: 'user', content } : structuredClone(message)) });
 }
 
+/** Original scene input and source delivery share the current knowledge ACL
+ * and durable read audit. Frozen snapshots are data, never enduring grants;
+ * audit waits cannot replace their sources or trigger fresh collection. */
 export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeOptions,
   identity: Pick<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials'>, clock: () => Date) {
-  const { includePreferences, preferenceKinds: selectedKinds, ...infrastructure } = options;
+  const { includePreferences, preferenceKinds: selectedKinds, operationLogs, ...infrastructure } = options;
   if (typeof includePreferences !== 'boolean') throw unavailable();
   const preferenceKinds = selectedKinds === undefined ? undefined : Object.freeze([...selectedKinds]);
   const allowedKinds = preferenceSchema.options.map(schema => schema.shape.kind.value);
@@ -70,14 +74,33 @@ export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeO
     || preferenceKinds.some(kind => !allowedKinds.includes(kind)))) throw unavailable();
   const services = composePrismaFormalHumanKnowledge({ ...infrastructure, auth: identity.auth,
     credentials: identity.credentials, clock: { now: () => clock().getTime() } });
+  const auditFor = (originalInputRef: string) => new KnowledgeSensitiveReadAudit(typeof operationLogs?.record === 'function' ? {
+    record: record => operationLogs.record({ ...record, metadata: { ...record.metadata, originalInputRef } }),
+  } : undefined, context => services.management.session.check(context));
+  type Material = Awaited<ReturnType<typeof services.preparation.revalidate>>;
+  const references = (material: Material): KnowledgeReadAuditReference[] => [
+    ...material.sources.map(entry => ({ kind: 'document' as const, documentId: entry.source.documentId,
+      documentVersion: entry.source.documentVersion, aclRevision: entry.source.aclRevision,
+      chunkId: entry.source.chunkId, contentHash: entry.contentFingerprint })),
+    ...(material.preferences.status === 'ready' ? material.preferences.items.map(item => ({ kind: 'memory' as const,
+      memoryId: item.memoryId, revision: item.revision, aclRevision: item.aclRevision,
+      confirmationRecordId: item.confirmationRecordId, contentHash: knowledgeReadHash(item.preference) })) : []),
+  ];
+  const verifyMaterial = async (value: unknown): Promise<Material> => {
+    const material = await services.preparation.revalidate(value);
+    if (requestFingerprint(material) !== requestFingerprint(value)) throw unavailable();
+    return material;
+  };
   const revalidate = async (value: unknown, originalInputRef: string) => {
     const parsed = snapshotSchema.safeParse(structuredClone(value));
     if (!parsed.success || parsed.data.originalInputRef !== originalInputRef
       || requestFingerprint(parsed.data.material) !== parsed.data.contentHash
       || Buffer.byteLength(JSON.stringify(parsed.data.material), 'utf8') > maxTotalBytes) throw unavailable();
     try {
-      const material = await services.preparation.revalidate(parsed.data.material);
-      if (requestFingerprint(material) !== parsed.data.contentHash) throw unavailable();
+      const material = await services.management.session.run(context => auditFor(originalInputRef).read<Material>(context, 'revalidateInput', {
+        read: () => verifyMaterial(parsed.data.material), revalidate: verifyMaterial,
+        references, comparable: observed => observed,
+      }));
       return freezeOriginalInput({ ...parsed.data, material });
     } catch { throw unavailable(); }
   };
@@ -86,12 +109,20 @@ export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeO
       const query = request.sceneCode === 'order_explanation' ? request.input.question
         : request.sceneCode === 'opening_diagnosis' ? request.input.sections.join(' ') : 'quote';
       try {
-        const material = await services.preparation.collect({ requestId: `scene_knowledge_${originalInputRef}`, query,
-          maxSources: 4, maxSnippetChars: 1000, maxTotalBytes }, { includePreferences, maxPreferences: 4,
-          ...(preferenceKinds ? { preferenceKinds } : {}) });
-        if (material.status !== 'ready' && material.status !== 'partial') throw unavailable();
-        return await revalidate({ version: 'ain-scene-knowledge-1', originalInputRef,
-          contentHash: requestFingerprint(material), material }, originalInputRef);
+        if (!z.string().uuid().safeParse(originalInputRef).success) throw unavailable();
+        const material = await services.management.session.run(context => auditFor(originalInputRef).read<Material>(context, 'collect', {
+          read: async () => {
+            const collected = await services.preparation.collect({ requestId: `scene_knowledge_${originalInputRef}`, query,
+              maxSources: 4, maxSnippetChars: 1000, maxTotalBytes }, { includePreferences, maxPreferences: 4,
+              ...(preferenceKinds ? { preferenceKinds } : {}) });
+            if (collected.status !== 'ready' && collected.status !== 'partial') throw unavailable();
+            return verifyMaterial(collected);
+          },
+          revalidate: verifyMaterial, references, comparable: observed => observed,
+        }));
+        if (Buffer.byteLength(JSON.stringify(material), 'utf8') > maxTotalBytes) throw unavailable();
+        return freezeOriginalInput({ version: 'ain-scene-knowledge-1' as const, originalInputRef,
+          contentHash: requestFingerprint(material), material });
       } catch { throw unavailable(); }
     },
     revalidate,
@@ -99,8 +130,18 @@ export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeO
       const snapshot = await revalidate(value, originalInputRef), entry = snapshot.material.sources[sourceIndex];
       if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || !entry) throw unavailable();
       try {
-        const content = await services.context.open(entry.source);
-        await revalidate(snapshot, originalInputRef);
+        const openSame = async () => {
+          const content = await services.context.open(entry.source);
+          if (requestFingerprint(content.text) !== entry.contentFingerprint) throw unavailable();
+          await verifyMaterial(snapshot.material);
+          return content;
+        };
+        const content = await services.management.session.run(context => auditFor(originalInputRef).read(context, 'source', {
+          read: openSame, revalidate: openSame, comparable: observed => observed,
+          references: observed => [{ kind: 'document', documentId: entry.source.documentId,
+            documentVersion: entry.source.documentVersion, aclRevision: entry.source.aclRevision,
+            chunkId: entry.source.chunkId, contentHash: knowledgeReadHash(observed) }],
+        }));
         return freezeOriginalInput({ reference: entry.source, content });
       } catch { throw unavailable(); }
     }

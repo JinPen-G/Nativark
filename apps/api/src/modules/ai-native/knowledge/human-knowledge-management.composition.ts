@@ -72,7 +72,7 @@ export class HumanKnowledgeManagementRequestFactory {
       if (authorization === undefined) return unavailable();
       return { authorization, requestId, audience: 'operator' as const };
     } };
-    const { db, auth, clock, integrations, objectIO, policyManagement: policyOptions } = this.dependencies;
+    const { db, auth, clock, integrations, objectIO, operationLogs, policyManagement: policyOptions } = this.dependencies;
     // The policy factory owns a short-lived copy of credentials. Keep its Auth
     // reads bound to the parent request too, including close() during an await.
     const requestAuth: typeof auth = { resolveAccessContext: async (...args) => {
@@ -82,7 +82,8 @@ export class HumanKnowledgeManagementRequestFactory {
       return current;
     } };
     // File access carries a session too; never reuse a runtime bound to another request.
-    const { management, uploads, index, policyManagement } = composeKnowledgeFileApplication({ db, auth: requestAuth, clock, integrations, objectIO, credentials,
+    const { management, uploads, index, policyManagement } = composeKnowledgeFileApplication({ db, auth: requestAuth, clock,
+      integrations, objectIO, operationLogs, credentials,
       ...(policyOptions?.enabled === true ? { policyManagement: policyOptions } : {}) });
     const uploadSession = (result: FileUploadSessionSummary & { documentId: string }) => ({
       sessionId: result.sessionId, fileAssetId: result.fileAssetId, provider: result.provider,

@@ -31,7 +31,7 @@ export function composeKnowledgeFileApplication(input: KnowledgeFileApplicationD
   const authorization = session.bind(new FormalKnowledgeAuthorizationAdapter(input.auth, input.credentials, policies.knowledge,
     () => new Date(input.clock.now())));
   const objects = new TenantKnowledgeObjectReader(input.db, input.integrations, input.objectIO?.transport ?? createNativeModelEgressTransport(), input.objectIO?.egress);
-  const access = new PrismaKnowledgeFileAccess(input.db, session, authorization, objects);
+  const access = new PrismaKnowledgeFileAccess(input.db, session, authorization, objects, input.operationLogs, input.integrations);
   const fileRuntime = new FileStorageRuntimeService(input.db, input.integrations, undefined, undefined, access);
   const { integrations: _integrations, objectIO: _objectIO, ...base } = input;
   // Feed the original scene consumer the SAME file runtime and exact policy
