@@ -6,6 +6,26 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry16-admin-language-consumers-20261115"></a>
+## ENTRY-16 后台步骤、模型标签及原确认历史双语消费者（2026-11-15）
+
+前置`f2449644a98809af511f84eeba11186f123d8991`已普通推送，GitHub回读一致。本片Root从dev1原对话读取四源完整交付，逐Git blob及SHA核同：[步骤时间线](../../apps/admin/src/features/ai-native/TaskTimeline.tsx)`b80e6a8dc2d430ae80cb79c4b0c3f70e17b5547c`、[模型文本](../../apps/admin/src/features/ai-native/ModelText.tsx)`51139b2ee887ffddaab39bffd33ab7f3338a752f`、[原工作台](../../apps/admin/src/features/ai-native/AiTaskWorkbench.tsx)`c4e65ecd0e851486af57a222b69c7f005d2a9aa8`、[词典](../../apps/admin/src/features/ai-native/management-locale.ts)`0fc0ef5065d3145f3cebc4dac5b45605836b8411`。只提交这四源与本记录／接续，不夹Root活动跨端页面。原TaskCenterPage及TaskWorkbenchModelControls字节保持，后者原翻译接线已齐，不重复施工。
+
+原英文后台会在步骤状态、未知／空步骤、模型／候选标签、长文本展开、确认历史及读取失败中回落中文。现均复用原LocaleContext及management词典，64个新词条按原顺序追加，原值不改；步骤action／时间、租户录入与业务材料不翻译、不重新计算。确认历史仍原显式读收据、失败撤回旧内容；模型仍转义、有界和折叠，不执行Markdown、工具或脚本，业务生命周期与授权不变。
+
+| 必要验证 | 命令stdin SHA-256及实际结果 |
+| --- | --- |
+| dev1真实React／Locale双语、10步骤及原三断言 | `f7de026a29f5b4a0b7d689468400e5b0cce53a9565e45cf66f1402cbd8de1c78`，退出0；文本转义／上限、未知与空状态、原action及绝对时间保留。 |
+| dev1原确认／未修改模型控制有限宿主 | `0d7b0f04c96862d64d2207830c8c028f11cc9a42d755bf260cf2698bcfacaf2a`，退出0；原确认读取2次，失败清旧历史，模型控制挂载0请求。 |
+| dev1最终读取状态与139键 | `5c537a1a9568383ee0d1bc4f925431e9b3e02325c56ec78a5c4d8ad12f5f3d17`，退出0；7种读取状态、原详情／重同步各1次，无英文缺键。 |
+| dev1六根及追加词典类型 | `b6a8d7a242622297bdd626581f0cf01368dd58537529fe598801dbfe633397be`，六根／1654源；后继词典`09177281f853fd2f0180cd10e69e622907ba4ea10ccfbd6da73b7a7253b5ced4`，一根／212源，均TS5.9.3零诊断、退出0。 |
+| Root真实React／原Locale双语独立核接 | `1c5430accfbad9a329a96eaae296759bbf9c2046a29dc825bcfb7435974334b3`，退出0；2语言／10步骤、原action／time、文本转义／折叠／上限，词典前像顺序和值全部相同、追加64键。 |
+| Root四源及原Vite声明类型 | `bc0278c1a29411aa7664c7b25240e0570df062e40073fd762e582a20bd0e4dc5`，退出0；TS5.9.3五根／1507源零诊断。 |
+
+作者完整必要证据为Git blob`339605c92612300034d5ab22efcb37e3bd72a2d3`，含固定源、命令、实际输出与初轮驱动失败；Root已实际读取，不仅沿作者完成声明。命令均stdin运行、不新建或扩写测试文件。Root首类型命令漏原vite-env.d.ts，诊断只指原CSS／ImportMeta声明，补原声明后通过；首双语驱动自造英文候选标签，与原词典不符，改用实际已登记标签复验，不修改生产文案补绿。作者原AJV导入与稳定reader夹具失败保留在原证据。
+
+本片最终`git diff --check`退出0；全部4源码链接实存。`node scripts/validate-docs.cjs`仍退出1，11/11文档的四处既有缺链，未新增任务算术或现行链接错误。原offline preload及不可达DATABASE_URL、内存audit0，任务临时目录未创建、自有验证进程全部退出，无新增依赖／Client／dist／临时副本。本阶段关闭后台语言缺口；ENTRY-16的Root原预约受理状态及当前多端消费继续核定，不按四个文件直接升100%。真实浏览器／微信／数据库／供应商由负责人后续实际操作。
+
 <a id="ain-entry14-original-cross-surface-backend-20261115"></a>
 ## ENTRY-14／04 原预约跨端引用、同键提交与派发前复核（2026-11-15）
 

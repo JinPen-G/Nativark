@@ -16,7 +16,7 @@
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared总出口／Guard／AppModule／OpenAPI及公共provider。跨端原引用后端20源与最后准备P2核闭，接dev2固定消费者后挂原Booking／Checkout并核ENTRY-14／04全文；继续ENTRY-01全部原source和四端实际消费者。AIN-15企业告知与付款授权保持原依赖，不覆盖企业窗口。仅暂存已核成果。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 时间／提交状态九源已冻结全部交权，Root逐blob及必要模拟／类型核接；当前只读核ENTRY-16原三条余端状态／时间／人工可访问性，复用原固定证据。无活动产品／四册／索引写权，不继续扩大已绿模拟。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 时间／提交状态九源与[后台双语四源](<AI Native-开发记录.md#ain-entry16-admin-language-consumers-20261115>)已冻结交权，Root逐blob、实际React双语／原绝对时间和类型核接；当前只读核ENTRY-16原三条余端及其他未完ENTRY核心接点，复用固定证据，不写Root跨端宿主。无活动产品／四册／索引写权。 |
 | AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 私有transfer合同e55a96f1／仓储b1530c1b已冻结交权，19场景／类型证据已读。当前独占新增Web transfer API／session／ClientBookingTransfer及mini transfer API／session／ai-booking-transfer组件，接显式issue／consume／原receipt。不改旧报价／Goal／Checkout／公共接点；Root挂原host和公共runtime。只存最少引用／原key／owner，unknown只读收据，不复制正文或自授权。 |
 | 内部/root/opening_core_closeout | ENTRY-13原四条已核闭，ENTRY-14原后端最终准备P2独立复核已关闭，三接点未发现新增确证P1／P2。只读结论不代表完整前端通过；无活动产品／四册／索引写权，不重复绿色模拟。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
