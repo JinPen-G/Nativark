@@ -3,6 +3,7 @@
  * 小程序构建：
  *   1. tsc 编译 src → dist（严格模式，任何类型错误都中止）；
  *   2. 复制 .wxml/.wxss/.json 与 assets 静态资源；
+ *      正文解析器及原收据匹配函数按既有声明适配生成受管运行文件；
  *   3. 计算公开配置：以 src/config/public.ts 里的常量为默认值（换租户只改那个文件），
  *      环境变量 MINIPROGRAM_TENANT_CODE / MINIPROGRAM_API_ORIGIN / MINIPROGRAM_APP_ID 只在非空时覆盖；
  *   4. 校验并写入 dist/config/public.js：
@@ -15,16 +16,20 @@
  *   node scripts/build.cjs              # 本机联调构建
  *   node scripts/build.cjs --release    # 发布构建（拒绝 http）
  *   node scripts/build.cjs --check      # 只做类型检查
+ *   node scripts/build.cjs --out-dir <本树 output/.tmp/任务/客户端> # 隔离构建
  * 兼容旧开关：MINIPROGRAM_ALLOW_LOCAL_API=1 在发布模式下**不再**放行回环地址。
  */
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { prepareMiniprogramSharedTypes, releaseMiniprogramSharedTypes, clearMiniprogramBuildOutput, emitMiniprogramSharedReceiptRuntime } = require('../../../scripts/miniprogram-shared-types.cjs');
 
 const root = path.resolve(__dirname, "..");
 const src = path.join(root, "src");
-const dist = path.join(root, "dist");
+let dist;
+let outputPrepared = false;
+let buildCompleted = false;
 const checkOnly = process.argv.includes("--check");
 const releaseMode = process.argv.includes("--release");
 
@@ -51,7 +56,7 @@ function resolveTsc() {
 let privateTypeConfig;
 function runTsc(args) {
   if (args[0] === '-p' && args[1] === 'tsconfig.json') {
-    privateTypeConfig ??= require('../../../scripts/miniprogram-shared-types.cjs').prepareMiniprogramSharedTypes(root);
+    privateTypeConfig ??= prepareMiniprogramSharedTypes(root);
     args = ['-p', privateTypeConfig, ...args.slice(2)];
   }
   const result = spawnSync(process.execPath, [resolveTsc(), ...args], { cwd: root, stdio: "inherit" });
@@ -89,11 +94,9 @@ async function main() {
     process.stdout.write("[miniprogram build] 类型检查通过\n");
     return;
   }
-  if (path.dirname(path.resolve(dist)) !== path.resolve(root)
-    || fs.existsSync(dist) && (fs.lstatSync(dist).isSymbolicLink()
-      || path.dirname(fs.realpathSync(dist)) !== fs.realpathSync(root))) fail('dist 不是本应用独占的构建目录');
-  fs.rmSync(dist, { recursive: true, force: true });
-  runTsc(["-p", "tsconfig.json"]);
+  dist = clearMiniprogramBuildOutput(root, process.argv.slice(2));
+  outputPrepared = true;
+  runTsc(["-p", "tsconfig.json", "--outDir", dist]);
 
   // 复制非 TS 资源（wxml/wxss/json/png）
   for (const file of walk(src)) {
@@ -143,6 +146,7 @@ async function main() {
     const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
     runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
   }
+  emitMiniprogramSharedReceiptRuntime(root, dist);
 
   // Only the canonical named customer validators and their necessary existing
   // validation code enter this single native bundle. No package runtime import,
@@ -197,16 +201,18 @@ async function main() {
   fs.writeFileSync(path.join(dist, "project.config.json"), `${JSON.stringify(projectConfig, null, 2)}\n`);
 
   const mode = releaseMode ? "发布构建" : "本机联调构建（产物只能在开发者工具本地预览，不可上传）";
-  process.stdout.write(`[miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → dist/（商户：${config.tenantCode}，API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
+  process.stdout.write(`[miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → ${path.relative(root, dist)}/（商户：${config.tenantCode}，API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
 }
 
 (async () => {
-  try { await main(); }
+  try { await main(); buildCompleted = true; }
   catch (error) { process.stderr.write(`[miniprogram build] ${error.message}\n`); process.exitCode = 1; }
   finally {
-    if (privateTypeConfig) {
-      try { require('../../../scripts/miniprogram-shared-types.cjs').disposeMiniprogramSharedTypes(privateTypeConfig); }
-      catch (error) { process.stderr.write(`[miniprogram build] 临时声明清理失败：${error.message}\n`); process.exitCode = 1; }
+    try { releaseMiniprogramSharedTypes(privateTypeConfig); }
+    catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
+    if (outputPrepared && !buildCompleted) {
+      try { clearMiniprogramBuildOutput(root, process.argv.slice(2)); }
+      catch (error) { process.stderr.write(`[miniprogram cleanup] ${error.message}\n`); process.exitCode = 1; }
     }
   }
 })();

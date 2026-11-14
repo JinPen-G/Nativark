@@ -13,6 +13,7 @@ import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import { RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES } from "@rental-os/shared";
+import { readRentalCategoryCode } from "./category-identity";
 
 /**
  * CORE-EXT-02A：经营空间 capability 实例与生命周期审计的持久化。
@@ -74,7 +75,7 @@ export class WorkspaceCapabilityRepository {
       );
     }
     return {
-      categoryCode: workspace.categoryCode.toLowerCase() as RentalCategoryCode,
+      categoryCode: readRentalCategoryCode(workspace.categoryCode),
       declaredCodes: (workspace.category.defaultCapabilities ?? []) as RentalCapability[]
     };
   }

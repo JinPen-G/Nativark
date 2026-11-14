@@ -1,6 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
+import { CORPORATE_CREDIT_MATURITY_ACTION, CORPORATE_CREDIT_MATURITY_AUDIT_BINDING_VERSION,
+  corporateCreditMaturityAuditId, readCorporateCreditMaturityEvidence,
+  type CorporateCreditMaturityAudit, type CorporateCreditMaturityDebt } from "../rental-core/rental-corporate-maturity-receipt";
 import { lockRentalBusinessTenant } from "../rental-core/rental-business-fence";
 import type {
   CustomerCorporateCreditAccountSummary,
@@ -57,7 +60,7 @@ export class CustomerCorporateSettlementService {
     @Optional() private readonly principals?: PlatformRepository
   ) {}
 
-  private readonly maturityAction = "corporate.credit.maturity";
+  private readonly maturityAction = CORPORATE_CREDIT_MATURITY_ACTION;
 
   private db(tx?: Prisma.TransactionClient): CreditDb {
     return tx ?? this.prisma;
@@ -671,25 +674,11 @@ export class CustomerCorporateSettlementService {
   }
 
   private maturityId(tenantId: string, customerId: string, ledgerId: string) {
-    return createHash("sha256").update(JSON.stringify([this.maturityAction, tenantId, customerId, ledgerId])).digest("hex");
+    return corporateCreditMaturityAuditId(tenantId, customerId, ledgerId);
   }
 
-  private maturityReceipt(log: { tenantId: string; workspaceId: string | null; rentalOrderId: string | null; action: string; detail: unknown },
-    ledger: { id: string; tenantId: string; customerId: string; workspaceId: string | null; orderId: string | null; currency: string; receivableDelta: Prisma.Decimal }): CustomerCorporateCreditMaturityReceipt {
-    const detail = log.detail as Record<string, unknown> | null;
-    if (log.action !== this.maturityAction || log.tenantId !== ledger.tenantId || log.workspaceId !== ledger.workspaceId
-      || log.rentalOrderId !== ledger.orderId || detail?.ledgerId !== ledger.id || detail.customerId !== ledger.customerId
-      || detail.currency !== ledger.currency || detail.amount !== ledger.receivableDelta.toFixed(2)
-      || typeof detail.dueAt !== "string" || !Number.isFinite(Date.parse(detail.dueAt))
-      || typeof detail.basisRef !== "string" || !detail.basisRef || typeof detail.reason !== "string" || !detail.reason
-      || typeof detail.idempotencyKey !== "string" || !detail.idempotencyKey
-      || typeof detail.recordedBy !== "string" || !detail.recordedBy || typeof detail.recordedAt !== "string"
-      || !Number.isFinite(Date.parse(detail.recordedAt)) || !ledger.orderId) {
-      throw new ConflictException("债权到期依据与原账不匹配，须财务核对");
-    }
-    return { ledgerId: ledger.id, orderId: ledger.orderId, currency: ledger.currency, dueAt: detail.dueAt,
-      basisRef: detail.basisRef, reason: detail.reason, idempotencyKey: detail.idempotencyKey,
-      recordedBy: detail.recordedBy, recordedAt: detail.recordedAt };
+  private maturityReceipt(log: CorporateCreditMaturityAudit, ledger: CorporateCreditMaturityDebt): CustomerCorporateCreditMaturityReceipt {
+    return readCorporateCreditMaturityEvidence(log, ledger).receipt;
   }
 
   /** Explicit financial decision, stored in the original audit table under the credit row lock.
@@ -729,11 +718,13 @@ export class CustomerCorporateSettlementService {
         AND: [{ detail: { path: "$.customerId", equals: customerId } },
           { detail: { path: "$.idempotencyKey", equals: input.idempotencyKey.trim() } }] }, select: { id: true } });
       if (reused) throw new ConflictException("到期登记原操作键已用于另一笔债权");
+      const recordedAt = new Date();
       const receipt: CustomerCorporateCreditMaturityReceipt = { ledgerId: ledger.id, orderId: ledger.orderId,
         currency: ledger.currency, dueAt: dueAt.toISOString(), basisRef: input.basisRef, reason: input.reason.trim(),
-        idempotencyKey: input.idempotencyKey.trim(), recordedBy: actorId, recordedAt: new Date().toISOString() };
+        idempotencyKey: input.idempotencyKey.trim(), recordedBy: actorId, recordedAt: recordedAt.toISOString() };
       await tx.operationLog.create({ data: { id, tenantId, workspaceId, rentalOrderId: ledger.orderId, userId: actorId,
-        action: this.maturityAction, detail: { ...receipt, customerId, amount: ledger.receivableDelta.toFixed(2) } } });
+        action: this.maturityAction, createdAt: recordedAt, detail: { ...receipt, customerId, amount: ledger.receivableDelta.toFixed(2),
+          auditBindingVersion: CORPORATE_CREDIT_MATURITY_AUDIT_BINDING_VERSION } } });
       await this.assertFinancialAccess(tenantId, customerId, "write", tx);
       return receipt;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

@@ -16,6 +16,10 @@ const { rewriteBackupForTarget } = require("../scripts/ops/restore-core.cjs");
 const { runMysql, sql, CONTAINER } = require("../scripts/ops/runtime.cjs");
 
 const root = path.resolve(__dirname, "..");
+// Worktrees reuse managed tools read-only; resolve them before any DB resource
+// exists. The schema, cwd and generated client still belong to this worktree.
+const cli = require.resolve("prisma/build/index.js", { paths: [root] });
+const seedCli = path.join(path.dirname(require.resolve("ts-node/package.json", { paths: [root] })), "dist", "bin.js");
 const envFile = process.env.CAT_GOV_ENV_FILE || path.join(root, ".env");
 const env = Object.fromEntries(fs.readFileSync(envFile, "utf8").split(/\r?\n/u)
   .filter((line) => /^[A-Z][A-Z_0-9]*=/u.test(line))
@@ -76,7 +80,6 @@ try {
   }
   const beforeMigrations = Number(sql(admin, `SELECT COUNT(*) FROM \`${clone}\`.\`_prisma_migrations\``));
   const url = buildDatabaseUrl(sourceUrl, { user: source.user, password: source.password, database: clone });
-  const cli = path.join(root, "node_modules", "prisma", "build", "index.js");
   const prismaEnv = { ...process.env, DATABASE_URL: url };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const deploy = spawnSync(process.execPath, [cli, "migrate", "deploy", "--schema", "apps/api/prisma/schema.prisma"], {
@@ -139,7 +142,7 @@ try {
   };
   if (!seedEnv.E2E_DEMO_PASSWORD || !seedEnv.E2E_PLATFORM_PASSWORD) throw new Error("缺少 Seed 演练凭据");
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const seed = spawnSync(process.execPath, [path.join(root, "node_modules", "ts-node", "dist", "bin.js"), "prisma/seed.ts"], {
+    const seed = spawnSync(process.execPath, [seedCli, "prisma/seed.ts"], {
       cwd: path.join(root, "apps", "api"), encoding: "utf8", env: seedEnv,
       maxBuffer: 16 * 1024 * 1024
     });
@@ -159,8 +162,12 @@ try {
   }));
 } finally {
   if (created && isOwnedCloneDatabase(clone)) {
-    if (granted) sql(admin, `REVOKE ALL PRIVILEGES ON \`${clone}\`.* FROM ${account}`);
-    sql(admin, `DROP DATABASE \`${clone}\``);
-    console.log(`已清理专用克隆库 ${clone}`);
+    try {
+      if (granted) sql(admin, `REVOKE ALL PRIVILEGES ON \`${clone}\`.* FROM ${account}`);
+    } finally {
+      // A revoke failure must not skip cleanup of the exclusively owned DB.
+      sql(admin, `DROP DATABASE \`${clone}\``);
+      console.log(`已清理专用克隆库 ${clone}`);
+    }
   }
 }

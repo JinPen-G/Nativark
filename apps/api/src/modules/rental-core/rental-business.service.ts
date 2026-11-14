@@ -12,8 +12,9 @@ import type { RentalQuoteOriginalOperation } from './rental-business-fact.reposi
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import { capabilityRequirementRoots, captureCapabilityRequirements, resolveCapabilityRequirements } from "./category-capability-conditions";
+import { readRentalCategoryCode } from "./category-identity";
 import { readRentalInventoryBasis, assertInventoryBasisContext } from "./rental-quote-inventory-basis";
-import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
+import { assertCapabilityHookRuntimeAvailable, CapabilityBlockedException, CapabilityHookRuntime, requiresCapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
@@ -237,6 +238,9 @@ interface TenantReadinessFacts {
   priceVersionAvailable: boolean;
 }
 const extensionPricingContext = new AsyncLocalStorage<{ tenantId: string; workspaceId: string; tx: Prisma.TransactionClient; state: RentalBusinessState }>();
+/** One quote's detached business configuration. No transaction or authority is
+ * supplied here; every persisted fact and commit gate keeps its original owner. */
+const quoteConfigurationContext = new AsyncLocalStorage<{ owner: RentalBusinessService; tenantId: string; workspaceId: string; state: RentalBusinessState }>();
 
 interface BusinessContext {
   categoryVersionId?: string;
@@ -649,8 +653,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async persist(tenantId: string) {
-    // 默认配置分批写入时，运行期刷新不得把中间态（已有价格、尚无规则）
-    // 覆盖回同一内存对象，否则后续规则写入会读到被清空的数组。
+    // 默认配置准备和写入期间，运行期刷新不得把未完成的保存结果
+    // 覆盖回同一内存对象，否则后续配置写入会读到被清空的数组。
     // 与提交后刷新共用队列；失败不阻断后续任务，不改变库缺失时的 fail-closed 行为。
     const next = this.refreshQueue.catch(() => undefined).then(() => this.persistScope(tenantId));
     this.refreshQueue = next;
@@ -669,7 +673,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 从未被显式保存过的租户在库中就是空的——阶段 4b 的通知记录外键指向通知模板，
     // 那时才发现就晚了。
     if (!state.configPersisted) {
-      await this.persistBusinessConfig(state);
+      await this.persistBusinessConfig(tenantId, state);
       state.configPersisted = true;
     }
     await this.stateRepository?.saveBusinessState(tenantId, workspaceId, state);
@@ -719,24 +723,41 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
   }
 
-  private async persistBusinessConfig(state: RentalBusinessState) {
+  /** Complete initial workspace configuration joins one Core transaction.
+   * Captured rows cannot change while locks are pending. The caller updates its
+   * persisted flag only after this transaction commits; no AI event is implied. */
+  private async persistBusinessConfig(tenantId: string, state: RentalBusinessState) {
     const mysql = this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql";
-    if (mysql && state.pricingPlans.length) {
-      // 懒加载演示/新空间的价格计划是在 PRICE-03 迁移之后才第一次落库，
-      // 因而不会被迁移回填。计划行和首个空间整体版本必须在同一事务内出现，
-      // 否则应用重启后报价会看到计划、却因没有版本而拒绝。
-      await this.prisma!.$transaction(async (tx) => {
-        for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx);
-        await this.ensureInitialSpacePriceVersion(state, tx);
-      });
-    } else {
-      for (const plan of state.pricingPlans) await this.configStore.upsertPricingPlan(plan);
+    const workspaceId = mysql ? this.workspaceOf(tenantId) : undefined;
+    const readConfig = () => ({ categoryCode: state.categoryCode, pricingPlans: state.pricingPlans,
+      discountPlans: state.discountPlans, services: state.services, calendars: state.calendars,
+      ruleVersions: state.ruleVersions, notificationTemplates: state.notificationTemplates });
+    const config = structuredClone(readConfig());
+    if ([...config.pricingPlans, ...config.discountPlans, ...config.services, ...config.calendars,
+      ...config.ruleVersions, ...config.notificationTemplates].some(row => row.tenantId !== tenantId)) {
+      throw new ConflictException("补落业务配置包含其他商户资料");
     }
-    for (const plan of state.discountPlans) await this.configStore.upsertDiscountPlan(plan);
-    for (const service of state.services) await this.configStore.upsertService(service);
-    for (const calendar of state.calendars) await this.configStore.upsertCalendar(calendar);
-    for (const version of state.ruleVersions) await this.configStore.upsertRuleVersion(version);
-    for (const template of state.notificationTemplates) await this.configStore.upsertNotificationTemplate(template);
+    const write = async (tx?: Prisma.TransactionClient) => {
+      const binding = tx ? (await lockActiveCategoryBinding(tx, tenantId, workspaceId!, undefined, config.categoryCode)).binding : undefined;
+      for (const plan of config.pricingPlans) await this.configStore.upsertPricingPlan(plan, tx, binding);
+      // PRICE-03: plans and their initial immutable version must be committed
+      // with the remaining defaults, never as a separately visible prefix.
+      if (tx) await this.ensureInitialSpacePriceVersion(config, tx);
+      for (const plan of config.discountPlans) await this.configStore.upsertDiscountPlan(plan, binding, tx);
+      for (const service of config.services) await this.configStore.upsertService(service, binding, tx);
+      for (const calendar of config.calendars) await this.configStore.upsertCalendar(calendar, undefined, [], tx);
+      for (const version of config.ruleVersions) await this.configStore.upsertRuleVersion(version, binding, tx);
+      for (const template of config.notificationTemplates) await this.configStore.upsertNotificationTemplate(template, tx);
+      // A later cache edit is still unsaved input. Do not mark it persisted when
+      // only our earlier captured rows were written; roll back the whole batch.
+      if (!isDeepStrictEqual(config, readConfig())) throw new ConflictException("补落业务配置期间输入已变化，请重新保存");
+    };
+    if (mysql) await this.prisma!.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    else await write();
+    // The transaction may commit before its response reaches this caller.
+    // Preserve later input and leave its persisted flag unset; this conflict
+    // describes a completed save, not a rollback of the captured configuration.
+    if (!isDeepStrictEqual(config, readConfig())) throw new ConflictException("业务配置保存后输入已变化，请重新保存");
   }
 
   /**
@@ -746,7 +767,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 才写入计划行，因此必须在同一事务中补建首版。首版只包含其最早生效时刻实际
    * 有效的计划，避免把未来才生效的计划提前写入当前价格事实。
    */
-  private async ensureInitialSpacePriceVersion(state: RentalBusinessState, tx: Prisma.TransactionClient) {
+  private async ensureInitialSpacePriceVersion(state: Pick<RentalBusinessState, "pricingPlans">, tx: Prisma.TransactionClient) {
     const plans = state.pricingPlans.filter((plan) => plan.status === "enabled");
     if (!plans.length) return;
     const tenantId = plans[0].tenantId;
@@ -857,9 +878,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         throw new ConflictException('开业检查期间采用版本已变化，请重新读取');
     }
     if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId) throw new ConflictException('开业事实来源变化');
-    return this.renderTenantReadiness({ ...business, ...membership, nowAt: now.getTime(), priceVersionAvailable: true,
+    const readiness = this.renderTenantReadiness({ ...business, ...membership, nowAt: now.getTime(), priceVersionAvailable: true,
       profileCategoryCode: core.categoryCode, categoryName: published?.definition.name, enabledGroups: core.pricingGroups,
       enabledItemGroupCount: core.enabledItemGroupCount, serviceableLocationCount: core.serviceableLocationCount });
+    // Keep the original nine-item decision and attach its persisted calendar
+    // source. Legacy stores without metadata cannot manufacture version proof.
+    return { ...readiness, ...(business.calendarSource ? { calendarSource: structuredClone(business.calendarSource) } : {}) };
+  }
+
+  /** Original nine-item observation through the supplied caller transaction or
+   * the default independent reads. It captures no event, takes no new lock and
+   * never claims a total readiness revision or a caller-owned snapshot fence. */
+  async readTenantReadinessSource(tenantId: string, tx?: RentalConfigTx) {
+    const workspaceId = getRequestWorkspaceId(), identity = requestFingerprint(getRequestIdentity());
+    if (!workspaceId || getRequestTenantId() !== tenantId) throw new ForbiddenException("开业来源缺少当前租户或经营空间");
+    const startedAt = new Date().toISOString();
+    const binding = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx) : undefined;
+    const readiness = await this.readTenantReadiness(tenantId, tx);
+    if (binding) {
+      const current = await this.categoryResolver!.forWorkspace(tenantId, workspaceId, tx);
+      if (current.categoryVersionId !== binding.categoryVersionId || current.adoptionRevision !== binding.adoptionRevision) {
+        throw new ConflictException("开业来源读取期间品类绑定变化");
+      }
+    }
+    if (readiness.tenantId !== tenantId || readiness.workspaceId !== workspaceId
+      || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
+      || requestFingerprint(getRequestIdentity()) !== identity) throw new ForbiddenException("开业来源读取期间授权范围变化");
+    return { tenantId, workspaceId, readiness: structuredClone(readiness), observations: { startedAt, completedAt: new Date().toISOString(),
+      consistency: tx ? "caller_transaction_reads" as const : "independent_persisted_reads" as const }, ...(binding ? { categoryBinding: {
+        categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision } } : {}) };
   }
 
   private async readReadinessMembershipFacts(tenantId: string, tx?: RentalConfigTx) {
@@ -3440,7 +3487,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!identity?.userId || !workspaceId || identity.tenantId !== tenantId || identity.isSaasAdmin || identity.staffApi
       || identity.audience === 'client' || source.tenantId !== tenantId || source.workspaceId !== workspaceId
       || context.profile.tenantId !== tenantId || context.settings.tenantId !== tenantId
-      || source.categoryCode.toLowerCase() !== context.category.code)
+      || readRentalCategoryCode(source.categoryCode) !== context.category.code)
       throw new ForbiddenException('规则预览缺少原经营空间授权');
     const allowed = ['fulfillment.pickupInspectionRequired', 'fulfillment.returnInspectionRequired', 'fulfillment.evidenceRequired',
       'fulfillment.allowDifferentReturnLocation', 'damage.manualReviewRequired', 'cancellation.weatherExceptionEnabled'];
@@ -4203,18 +4250,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * quotes/order changes stay in their original stores and are never re-seeded. */
   async refreshWorkspaceContext(tenantId: string, context: BusinessContext) {
     if (!context.categoryVersionId || context.categoryAdoptionRevision === undefined) return context;
+    return this.refreshWorkspaceConfiguration(tenantId, context, () => context);
+  }
+
+  /** Capture before the queue releases this read. Copying the shared cache after
+   * awaiting refresh could already observe another reader's configuration. */
+  private async refreshWorkspaceConfiguration<T>(tenantId: string, context: BusinessContext,
+    consume: (state: RentalBusinessState) => T): Promise<T> {
     if (!this.configStore.loadWorkspaceSnapshot) throw new ServiceUnavailableException("缺少已版本化空间的业务配置权威读取器");
     const workspaceId = this.workspaceOf(tenantId);
-    const snapshot = await this.configStore.loadWorkspaceSnapshot(tenantId, workspaceId,
-      { categoryVersionId: context.categoryVersionId, adoptionRevision: context.categoryAdoptionRevision });
-    if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.categoryCode !== context.category.code) {
-      throw new ConflictException("业务配置快照的作用域或品类不一致");
-    }
-    const state = this.state(tenantId, context);
-    Object.assign(state, { pricingPlans: structuredClone(snapshot.pricingPlans), discountPlans: structuredClone(snapshot.discountPlans),
-      services: structuredClone(snapshot.services), calendars: structuredClone(snapshot.calendars), ruleVersions: structuredClone(snapshot.ruleVersions),
-      notificationTemplates: structuredClone(snapshot.notificationTemplates), configPersisted: true });
-    return context;
+    const binding = { categoryVersionId: context.categoryVersionId!, adoptionRevision: context.categoryAdoptionRevision! };
+    // 与启动刷新、默认配置补落共用原队列；失败不阻断后续读取，也不发布旧配置。
+    const reading = this.refreshQueue.catch(() => undefined).then(async () => {
+      const snapshot = await this.configStore.loadWorkspaceSnapshot!(tenantId, workspaceId, binding);
+      if (snapshot.tenantId !== tenantId || snapshot.workspaceId !== workspaceId || snapshot.categoryCode !== context.category.code) {
+        throw new ConflictException("业务配置快照的作用域或品类不一致");
+      }
+      const state = this.cachedState(tenantId, context, workspaceId);
+      Object.assign(state, { pricingPlans: structuredClone(snapshot.pricingPlans), discountPlans: structuredClone(snapshot.discountPlans),
+        services: structuredClone(snapshot.services), calendars: structuredClone(snapshot.calendars), ruleVersions: structuredClone(snapshot.ruleVersions),
+        notificationTemplates: structuredClone(snapshot.notificationTemplates), configPersisted: true });
+      return consume(state);
+    });
+    this.refreshQueue = reading.then(() => undefined, () => undefined);
+    return reading;
   }
 
   async reverseReward(tenantId: string, context: BusinessContext, id: string, reason: string) {
@@ -5102,16 +5161,48 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.factStore.findQuoteForOriginalReference(tenantId, key);
   }
 
+  /** Clone the mutable calculation inputs only. Existing quotes, reward and
+   * notification histories keep their original store/cache ownership; copying
+   * an entire history is neither a configuration read nor a new quote basis. */
+  private captureQuoteConfiguration(state: RentalBusinessState, couponId?: string): RentalBusinessState {
+    return { ...state, ...structuredClone({ pricingPlans: state.pricingPlans,
+      discountPlans: state.discountPlans, services: state.services, calendars: state.calendars,
+      ruleVersions: state.ruleVersions, notificationTemplates: state.notificationTemplates,
+      customerCoupons: state.customerCoupons.filter(row => row.id === couponId) }) };
+  }
+
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
     original?: RentalQuoteOriginalOperation) {
-    await this.refreshWorkspaceContext(tenantId, context);
+    // Capture one caller intent before the first configuration/identity wait.
+    // Later caller edits cannot change the original key, customer, quantities,
+    // frozen source or calculation context of this quote.
+    input = structuredClone(input);
+    context = structuredClone(context);
+    preResolvedDeliveryAddress = preResolvedDeliveryAddress === undefined ? undefined : structuredClone(preResolvedDeliveryAddress);
+    original = original === undefined ? undefined : Object.freeze({ key: original.key, inputHash: original.inputHash });
     const sourceSnapshot = currentQuoteSource(tenantId);
     if (original) {
-      input = structuredClone(input);
-      original = Object.freeze({ key: original.key, inputHash: original.inputHash });
       if (!/^[a-f0-9]{64}$/u.test(original.key) || original.inputHash !== requestFingerprint(input))
         throw new ConflictException('报价原操作输入绑定无效');
     }
+    const workspaceId = this.workspaceOf(tenantId);
+    const state = context.categoryVersionId && context.categoryAdoptionRevision !== undefined
+      ? await this.refreshWorkspaceConfiguration(tenantId, context, state => this.captureQuoteConfiguration(state, input.customerCouponId))
+      : this.captureQuoteConfiguration(this.state(tenantId, context), input.customerCouponId);
+    const persisted = await quoteConfigurationContext.run({ owner: this, tenantId, workspaceId, state }, () =>
+      this.createQuoteFromConfiguration(tenantId, context, input, sourceSnapshot, preResolvedDeliveryAddress, original));
+    // The calculation copy never becomes the current configuration cache.
+    // A later refresh may have replaced it while this quote awaited persistence.
+    const current = this.states.get(workspaceId);
+    if (current?.categoryCode === persisted.categoryCode && !current.quotes.some(row => row.id === persisted.id)) {
+      current.quotes.unshift(persisted);
+    }
+    return persisted;
+  }
+
+  private async createQuoteFromConfiguration(tenantId: string, context: BusinessContext, input: RentalQuoteRequest,
+    sourceSnapshot: ReturnType<typeof currentQuoteSource>, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
+    original?: RentalQuoteOriginalOperation) {
     let categoryVersionId: string | undefined;
     let categoryAdoptionRevision: number | undefined;
     if (this.categoryResolver) {
@@ -5138,8 +5229,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 再等一个无关的保存动作来触发持久化。MySQL 路径在报价前补落计划与首版，
     // 仍由 resolveSpaceRates 对所有后续报价执行不可变版本校验。
     if (this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql" && !state.configPersisted) {
-      await this.persistBusinessConfig(state);
+      await this.persistBusinessConfig(tenantId, state);
       state.configPersisted = true;
+      // Preserve the original lazy-save marker only for the same configuration;
+      // a later editor/refresh must not be marked saved by this earlier copy.
+      const scope = quoteConfigurationContext.getStore();
+      const current = scope?.owner === this ? this.states.get(scope.workspaceId) : this.cachedState(tenantId, context);
+      if (current?.categoryCode === state.categoryCode && ["pricingPlans", "discountPlans", "services", "calendars", "ruleVersions", "notificationTemplates"]
+        .every(key => isDeepStrictEqual(state[key as keyof RentalBusinessState], current[key as keyof RentalBusinessState]))) {
+        current.configPersisted = true;
+      }
     }
     // 正式经营门禁：缺品类必选能力的 production 空间不得出新报价（Review P1-4）。
     if (this.capabilities) await this.capabilities.assertWorkspaceOperable(tenantId, this.workspaceOf(tenantId));
@@ -5888,8 +5987,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!this.factStore.saveQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作持久化不可用');
       persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding);
     } else await this.factStore.upsertQuote(quote, expectedBinding);
-    // 缓存只在成功提交之后发布；并发采用新版造成拒绝时不能留下幽灵报价。
-    if (!state.quotes.some(row => row.id === persisted.id)) state.quotes.unshift(persisted);
     return persisted;
   }
 
@@ -5913,11 +6010,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     quote: RentalQuoteSnapshotV1
   ): Promise<RentalCapabilityDecisionSnapshot[] | undefined> {
-    if (!this.hooks) {
-      if (context.category.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
-      return undefined;
-    }
+    if (!this.hooks && context.category.conditionalCapabilities?.length) throw new ServiceUnavailableException("条件能力执行模块不可用");
     const requirements = resolveCapabilityRequirements(context.category, quote.capabilityRequirementsSnapshot);
+    assertCapabilityHookRuntimeAvailable(this.hooks, requirements.required, quote.capabilitySnapshot ?? []);
+    if (!this.hooks) return undefined;
     const workspaceId = this.workspaceOf(tenantId);
     // 富化走与订单、配货**同一份**公共实现（P2-1）：早前这里另写一遍，
     // 找不到商品时用 id 冒充名称、`inventoryMode as never`，与订单侧对同一条脏数据
@@ -6233,8 +6329,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   private state(tenantId: string, context: BusinessContext) {
     const workspaceId = this.workspaceOf(tenantId);
+    const quote = quoteConfigurationContext.getStore();
+    if (quote?.owner === this && quote.tenantId === tenantId && quote.workspaceId === workspaceId) return quote.state;
     const scoped = extensionPricingContext.getStore();
     if (scoped?.tenantId === tenantId && scoped.workspaceId === workspaceId) return scoped.state;
+    return this.cachedState(tenantId, context);
+  }
+
+  private cachedState(tenantId: string, context: BusinessContext, workspaceId = this.workspaceOf(tenantId)) {
     let state = this.states.get(workspaceId);
     if (!state || state.categoryCode !== context.profile.categoryCode) {
       state = this.seedState(tenantId, context, this.seedPrefix(tenantId, workspaceId));
@@ -7725,12 +7827,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   private async captureActionCapabilityBasis(tenantId: string, context: BusinessContext,
     lines: Parameters<typeof capabilityRequirementRoots>[0], fulfillmentMode: RentalFulfillmentMode, categoryVersionId?: string) {
     const conditional = Boolean(context.category.conditionalCapabilities?.length);
-    if (conditional && (!categoryVersionId || !this.hooks || !this.capabilities)) throw new ServiceUnavailableException("条件业务需要发布版本、能力实例及真实执行模块");
-    if (conditional) this.hooks!.assertCategoryComposition(context.category);
+    const requiredHooks = requiresCapabilityHookRuntime(context.category.requiredCapabilities);
+    assertCapabilityHookRuntimeAvailable(this.hooks, context.category.requiredCapabilities);
+    if ((conditional || requiredHooks) && (!categoryVersionId || !this.hooks || !this.capabilities)) throw new ServiceUnavailableException("能力业务需要发布版本、能力实例及真实执行模块");
+    if (conditional || requiredHooks) this.hooks!.assertCategoryComposition(context.category);
     const capabilityRequirementsSnapshot = conditional
       ? captureCapabilityRequirements(context.category, context.groups, capabilityRequirementRoots(lines), fulfillmentMode) : undefined;
     const capabilitySnapshot = this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined;
-    if (conditional) {
+    if (conditional || requiredHooks) {
       const requirements = resolveCapabilityRequirements(context.category, capabilityRequirementsSnapshot);
       const equipment = buildCapabilityEquipment(new Map(context.groups.map(group => [group.id, group])),
         capabilityRequirementRoots(lines).map(itemGroupId => ({ itemGroupId, quantity: 1 })), context.category.businessModel.assetFields);
@@ -7994,9 +8098,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
 
-  /** Transaction-scoped original pricing, used only to verify an approved expense.
-   * Reads persisted configuration into an isolated async scope; never mutates the
-   * process cache or recomputes a second price outside the original algorithm. */
+  /** Original enterprise extension preparation and approved-price revalidation.
+   * Caller owns ReadCommitted, current authority and original order locks.
+   * Reads persisted configuration into an isolated async scope, retains original
+   * quote facts, and delegates money only to the original extension algorithm. */
   async quoteEnterpriseExtension(tenantId: string, order: RentalOrder, previousExtensions: RentalOrderExtension[],
     input: RentalOrderExtensionRequest, settlementMode: "immediate" | "monthly", tx: Prisma.TransactionClient): Promise<EnterpriseExtensionPrice> {
     const workspaceId = this.workspaceOf(tenantId);
@@ -8006,13 +8111,23 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await tx.$queryRaw`SELECT id FROM business_workspaces WHERE tenantId=${tenantId} AND id=${workspaceId} AND status='ACTIVE' LOCK IN SHARE MODE`;
     const workspace = await tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId }, select: { categoryCode: true, categoryVersionId: true, categoryAdoptionRevision: true, status: true } });
     if (!workspace || workspace.status !== "ACTIVE") throw new ConflictException("原订单经营空间不可用");
-    const [config, core, category, quote] = await Promise.all([
+    const [config, core, category, quote, originalOrder] = await Promise.all([
       this.configStore.loadWorkspace(tenantId, workspaceId, tx), this.coreConfigStore.loadWorkspace(tenantId, workspaceId, tx),
       this.categoryResolver.forWorkspace(tenantId, workspaceId, tx), this.factStore.findQuote(tenantId, order.quoteId, tx),
+      tx.rentalOrder.findFirst({ where: { id: order.id, tenantId, workspaceId }, select: { id: true, quoteId: true, categoryCode: true } }),
     ]);
-    if (!quote || !core.profile || !core.businessSettings || !config.hasPersistedConfig || category.categoryVersionId !== workspace.categoryVersionId
+    if (!quote || !originalOrder || !core.profile || !core.businessSettings || !config.hasPersistedConfig || category.categoryVersionId !== workspace.categoryVersionId
       || category.adoptionRevision !== workspace.categoryAdoptionRevision) throw new ConflictException("原报价或续租配置/品类依据缺失或已变化");
-    const context: BusinessContext = { profile: { ...core.profile, categoryCode: core.workspaceCategoryCode }, category: category.definition, settings: core.businessSettings,
+    if (core.tenantId !== tenantId || core.workspaceId !== workspaceId || config.tenantId !== tenantId || config.workspaceId !== workspaceId
+      || order.tenantId !== tenantId || order.categoryCode !== category.definition.code
+      || originalOrder.id !== order.id || originalOrder.quoteId !== order.quoteId || readRentalCategoryCode(originalOrder.categoryCode) !== category.definition.code
+      || quote.id !== order.quoteId || quote.tenantId !== tenantId || quote.categoryCode !== category.definition.code
+      || core.workspaceCategoryCode !== category.definition.code || config.categoryCode !== category.definition.code
+      || core.profile.tenantId !== tenantId || core.profile.categoryCode !== category.definition.code
+      || core.businessSettings.tenantId !== tenantId || core.businessSettings.categoryCode !== category.definition.code)
+      throw new ConflictException("原订单、报价及续租配置的租户/空间/品类来源不一致");
+    const context: BusinessContext = { profile: { ...core.profile, categoryVersionId: category.categoryVersionId, categoryAdoptionRevision: category.adoptionRevision },
+      category: category.definition, settings: core.businessSettings, categoryVersionId: category.categoryVersionId, categoryAdoptionRevision: category.adoptionRevision,
       groups: core.itemGroups, pricingGroups: core.pricingGroups, couponTemplates: core.couponTemplates, locations: core.locations, operators: core.operators };
     const state: RentalBusinessState = { categoryCode: core.workspaceCategoryCode, pricingPlans: config.pricingPlans, discountPlans: config.discountPlans, services: config.services,
       calendars: config.calendars, ruleVersions: config.ruleVersions, quotes: [quote], customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates: [], notificationLogs: [], configPersisted: true };
@@ -9774,30 +9889,6 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       values.push(calendar?.days.find((item) => item.date === date)?.dayType ?? "workday");
     }
     return values;
-  }
-
-
-  /** Original nine-item observation through the supplied caller transaction or
-   * the default independent reads. It captures no event, takes no new lock and
-   * never claims a total readiness revision or a caller-owned snapshot fence. */
-  async readTenantReadinessSource(tenantId: string, tx?: RentalConfigTx) {
-    const workspaceId = getRequestWorkspaceId(), identity = requestFingerprint(getRequestIdentity());
-    if (!workspaceId || getRequestTenantId() !== tenantId) throw new ForbiddenException("开业来源缺少当前租户或经营空间");
-    const startedAt = new Date().toISOString();
-    const binding = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx) : undefined;
-    const readiness = await this.readTenantReadiness(tenantId, tx);
-    if (binding) {
-      const current = await this.categoryResolver!.forWorkspace(tenantId, workspaceId, tx);
-      if (current.categoryVersionId !== binding.categoryVersionId || current.adoptionRevision !== binding.adoptionRevision) {
-        throw new ConflictException("开业来源读取期间品类绑定变化");
-      }
-    }
-    if (readiness.tenantId !== tenantId || readiness.workspaceId !== workspaceId
-      || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
-      || requestFingerprint(getRequestIdentity()) !== identity) throw new ForbiddenException("开业来源读取期间授权范围变化");
-    return { tenantId, workspaceId, readiness: structuredClone(readiness), observations: { startedAt, completedAt: new Date().toISOString(),
-      consistency: tx ? "caller_transaction_reads" as const : "independent_persisted_reads" as const }, ...(binding ? { categoryBinding: {
-        categoryVersionId: binding.categoryVersionId, categoryAdoptionRevision: binding.adoptionRevision } } : {}) };
   }
 }
 

@@ -1,4 +1,4 @@
-import { rentalCategoryStorageCode } from "./category-identity";
+import { readRentalCategoryCode, rentalCategoryStorageCode } from "./category-identity";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
@@ -47,7 +47,7 @@ import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from '
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { readOrderInspectionBasisInput } from "./rental-order-inspection-basis.read";
 import { readAllocationPickupInput } from "./rental-order-allocation-pickup.read";
-import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
+import { replaceCategoryUniqueClaims, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { rentalOrderListSort } from "./rental-order-list-sort";
@@ -278,6 +278,7 @@ export interface RentalCoreFactStore {
   readOrderExplanationState?: RentalCoreFactRepository['readOrderExplanationState'];
   readOrderInspectionBasis?: RentalCoreFactRepository['readOrderInspectionBasis'];
   readOrderAllocationPickupBasis?: RentalCoreFactRepository['readOrderAllocationPickupBasis'];
+  readQuotedInspectionTemplates?: RentalCoreFactRepository['readQuotedInspectionTemplates'];
   /**
    * 对订单行加排他锁，供状态推进动作在读取聚合前调用。
    * 不加锁时确认、配货、取消会各读一份聚合副本、各跑状态机、各整体写回，
@@ -541,6 +542,43 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async readOrderAllocationPickupBasis(tenantId: string, workspaceId: string, orderId: string, allocationId: string) {
     return readAllocationPickupInput(this.prisma, tenantId, workspaceId, orderId, allocationId,
       () => this.requestOrderVisibilityWhere(), assetId => this.assetVisibilityWhere(this.prisma, tenantId, workspaceId, assetId));
+  }
+
+  /** Recover only the original linked quote's frozen checks, under the original
+   * order visibility. Never read current tenant templates or create history. */
+  async readQuotedInspectionTemplates(tenantId: string, orderId: string, tx?: RentalFactTx) {
+    const client = tx ?? this.prisma, workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const parent = await client.rentalOrder.findFirst({
+      where: { id: orderId, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() },
+      select: { id: true, tenantId: true, workspaceId: true, quoteId: true, categoryCode: true, categoryVersionId: true, updatedAt: true }
+    });
+    if (!parent) throw new NotFoundException("订单不存在或不可读取原检查依据");
+    if (parent.id !== orderId || parent.tenantId !== tenantId || parent.workspaceId !== workspaceId)
+      throw new ForbiddenException("原检查依据订单不属于当前读取范围");
+    if (!(parent.updatedAt instanceof Date) || !Number.isFinite(parent.updatedAt.getTime()))
+      throw new ConflictException("原检查依据订单修订不可核对");
+    if (!parent.quoteId) return undefined;
+    const rows = await client.$queryRaw<Array<{ orderId: string; tenantId: string; workspaceId: string; quoteId: string;
+      categoryCode: string; categoryVersionId: string | null; templates: unknown }>>(Prisma.sql`
+      SELECT o.id AS orderId, o.tenantId, o.workspaceId, q.id AS quoteId, q.categoryCode, q.categoryVersionId,
+        CASE WHEN JSON_TYPE(q.inspectionTemplateSnapshots) IS NULL OR JSON_TYPE(q.inspectionTemplateSnapshots) = 'NULL' THEN NULL
+          WHEN JSON_TYPE(q.inspectionTemplateSnapshots) = 'ARRAY' AND JSON_LENGTH(q.inspectionTemplateSnapshots) <= 200
+            AND OCTET_LENGTH(CAST(q.inspectionTemplateSnapshots AS CHAR)) <= 1048576 THEN q.inspectionTemplateSnapshots
+          ELSE JSON_OBJECT('readLimitExceeded', TRUE) END AS templates
+      FROM rental_orders AS o JOIN rental_quotes AS q ON q.id = o.quoteId AND q.tenantId = o.tenantId AND q.workspaceId = o.workspaceId
+        AND q.categoryCode = o.categoryCode AND q.categoryVersionId <=> o.categoryVersionId
+      WHERE o.id = ${orderId} AND o.tenantId = ${tenantId} AND o.workspaceId = ${workspaceId}
+        AND o.quoteId = ${parent.quoteId} AND o.updatedAt = ${parent.updatedAt} LIMIT 1`);
+    const row = rows[0];
+    if (rows.length !== 1 || row.orderId !== parent.id || row.tenantId !== tenantId || row.workspaceId !== workspaceId
+      || row.quoteId !== parent.quoteId || readRentalCategoryCode(row.categoryCode) !== readRentalCategoryCode(parent.categoryCode)
+      || row.categoryVersionId !== parent.categoryVersionId) throw new ConflictException("原报价检查依据关联缺失或读取期间变化");
+    if (row.templates === null || row.templates === undefined) return undefined;
+    let templates = row.templates;
+    if (typeof templates === "string") {
+      try { templates = JSON.parse(templates); } catch { throw new ConflictException("原报价检查快照JSON不可读"); }
+    }
+    return { quoteId: row.quoteId, categoryCode: readRentalCategoryCode(row.categoryCode), categoryVersionId: row.categoryVersionId ?? undefined, templates };
   }
 
   /** Bounded explanation metadata only; no allocations' asset/contact JSON,
@@ -1655,30 +1693,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         const activeWrite = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
           id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
         }, expectedBinding);
-        await tx.rentalAttributeUniqueValue.deleteMany({
-          where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
-        });
-        for (const claim of activeWrite.claims) {
-          try {
-            await tx.rentalAttributeUniqueValue.create({
-              data: {
-                id: `attruniq_${createHash("sha256").update(`${workspaceId}|asset|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
-                tenantId: asset.tenantId,
-                workspaceId,
-                entityType: "asset",
-                fieldCode: claim.fieldCode,
-                normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
-                normalizedValue: claim.normalizedValue,
-                entityId: asset.id
-              }
-            });
-          } catch (error) {
-            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-              throw new ConflictException(`${claim.label}已存在`);
-            }
-            throw error;
-          }
-        }
+        await replaceCategoryUniqueClaims(tx, asset.tenantId, workspaceId, "asset", asset.id, activeWrite.claims);
         const existing = await tx.rentalAsset.findUnique({
           where: { id: asset.id },
           select: { tenantId: true, workspaceId: true, status: true, assetNo: true }

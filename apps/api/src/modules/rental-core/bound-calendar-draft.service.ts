@@ -6,11 +6,11 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Prisma, type PrismaClient, type RentalCalendarOverrideAuditEntry } from '@prisma/client';
 import { z } from 'zod';
-import type { RentalCalendarDay, RentalCalendarYear } from '@rental-os/shared';
+import { isRentalCategoryCode, type RentalCalendarDay, type RentalCalendarYear } from '@rental-os/shared';
 import { getRequestIdentity } from '../../common/request-identity';
 import type { BusinessContext, RentalBusinessService } from './rental-business.service';
 import { requestFingerprint } from './rental-idempotency.repository';
-import { lockActiveCategoryBinding } from './category-active-write';
+import { lockCategoryContext } from './category-active-write';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -20,7 +20,7 @@ export const boundCalendarDraftCommandSchema = z.object({ targetId: id, year: z.
   expectedRevision: z.number().int().min(0).max(4294967294), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u), fields,
   before: z.object({ name: z.string().min(1).max(120).optional(), businessStatus: z.enum(['open', 'limited', 'closed', 'self_service']).optional(), closed: z.boolean().optional() }).strict().refine(value => Object.keys(value).length > 0),
   overrideReason: z.string().trim().min(1).max(1000), overrideConfirmed: z.boolean(), operationKey: id.max(128), bindingHash: hash,
-  categoryCode: z.enum(['camera', 'camping', 'vehicle', 'construction']), categoryVersion: id,
+  categoryCode: z.string().refine(isRentalCategoryCode), categoryVersion: id,
   reviewHash: hash.optional() }).strict();
 export type BoundCalendarDraftCommand = z.infer<typeof boundCalendarDraftCommandSchema>;
 const marker = '__rentalBoundDraftOperation';
@@ -59,10 +59,9 @@ export class BoundCalendarDraftService {
   }
   private async candidate(context: BusinessContext, target: ReturnType<BoundCalendarDraftService['target']>, tx: Prisma.TransactionClient) {
     const { command, scope } = target;
-    const category = await lockActiveCategoryBinding(tx, scope.tenantId, scope.workspaceId, undefined, command.categoryCode);
+    const category = await lockCategoryContext(tx, scope.tenantId, scope.workspaceId, context);
     const canonical = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown;
-    if (category.definition.version !== command.categoryVersion
-      || requestFingerprint(canonical(context.category)) !== requestFingerprint(canonical(category.definition)))
+    if (category.definition.code !== command.categoryCode || category.definition.version !== command.categoryVersion)
       throw new ConflictException('原品类采用或 Core 上下文已变化');
     await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_business_calendars WHERE tenantId = ${scope.tenantId} AND workspaceId = ${scope.workspaceId} AND year = ${command.year} FOR UPDATE`);
     const versions = await tx.rentalBusinessCalendar.findMany({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId, year: command.year },

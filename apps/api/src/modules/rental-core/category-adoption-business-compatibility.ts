@@ -2,6 +2,7 @@ import type { RentalCategoryDefinition, RentalPricingRate, RentalRuleConfig, Ten
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
 import { categoryAdoptionRuleParameterErrors } from "./category-adoption-rule-parameters";
 import { categoryAdoptionRuleStructureErrors } from "./category-adoption-rule-structure";
+import { matchesRentalCategoryCode } from "./category-identity";
 
 export interface CategoryTimedConfiguration<T> { id: string; effectiveFrom: Date | null; sequence: number; value: T }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -86,7 +87,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   // inspection mandatory. A different valid template cannot hide a broken one.
   // Empty optional templates remain legal; mandatory stages still need fields.
   for (const template of input.inspections ?? []) {
-    if (template.enabled && ((template.categoryCode !== undefined && template.categoryCode.toLowerCase() !== target.code) || !["pickup", "return"].includes(template.stage) || !categoryAdoptionInspectionFieldsValid(template.fields, true))) {
+    if (template.enabled && ((template.categoryCode !== undefined && !matchesRentalCategoryCode(template.categoryCode, target.code)) || !["pickup", "return"].includes(template.stage) || !categoryAdoptionInspectionFieldsValid(template.fields, true))) {
       add("inspection", template.id, "启用检查模板的品类、阶段或字段结构不可执行，请在检查配置中修复或停用；不会改写旧单快照");
     }
   }
@@ -152,7 +153,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
       const codes = rule.value.qualification.documentTypes;
       if (!Array.isArray(codes) || codes.length === 0) add("rule", rule.id, "要求资质审核的规则未指定有效证件类型");
       else for (const code of codes) {
-        const type = input.qualificationTypes.find((row) => row.code === code && row.status === "enabled" && row.categoryCode.toLowerCase() === target.code);
+        const type = input.qualificationTypes.find((row) => row.code === code && row.status === "enabled" && matchesRentalCategoryCode(row.categoryCode, target.code));
         if (!type || (type.capabilityCode && ![...target.defaultCapabilities, ...target.requiredCapabilities].some((capability) => capability === type.capabilityCode))) add("rule", `${rule.id}:qualification:${code}`, "当前或未来规则要求的证件类型未在本空间启用，或依赖目标品类未声明的能力");
       }
     }

@@ -58,6 +58,7 @@ import {
   type AiBookingOneTimeAddressEvidence
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { parseRentalOfflinePaymentMethod } from "../rental-core/rental-offline-payment-method";
 import { MembershipService } from "../platform/membership.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
 import { RentalCoreFactRepository } from "../rental-core/rental-core-fact.repository";
@@ -1853,7 +1854,7 @@ export class ClientApiService {
     const key = idempotencyKeyOf(requestContext);
     if (!key) throw new BadRequestException("资金操作必须提供 Idempotency-Key");
     const needsMethod = ["initiate", "append", "refund", "fail"].includes(input.action);
-    const paymentMethod = needsMethod ? this.core.resolveOfflinePaymentMethod(context.tenantId, input.paymentMethod) : undefined;
+    const paymentMethod = needsMethod ? parseRentalOfflinePaymentMethod(input.paymentMethod) : undefined;
     // 模拟请求逐字段投影，不能把调用方附带的 Provider/已核验标志带入内部入账口。
     return this.fundingService.recordEvent(context.tenantId, context.workspaceId, orderId, {
       instrument: input.instrument, action: input.action, amount: input.amount, reason: input.reason,

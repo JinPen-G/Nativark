@@ -4,14 +4,16 @@ import type { CategoryCapabilityPreparationPatch, CategoryEntityPreparationPatch
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
+import { readRentalCategoryCode } from "./category-identity";
 import { writePreparedCategoryEntities } from "./category-adoption-entity-writer";
 import { writePreparedCategoryCapabilities, type CategoryAdoptionCapabilityRuntime } from "./category-adoption-capability-writer";
 import type { SubscriptionService } from "../subscription/subscription.service";
 import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
-import { assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
+import { assertCategoryAdoptionConfigurationRowBounds, assertCategoryAdoptionEntityBounds, readFinalCategoryAdoptionCompatibility } from "./category-adoption-final-compatibility";
 import type { AuthService } from "../auth/auth.service";
 import { lockCategoryAdoptionAccess } from "./category-adoption-access";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
+import { assertCategoryPreparationBatchSize, categoryPreparationEnvelopeSource } from "./category-preparation-batches";
 
 /** Applies staged entities/configuration and checks the final scoped combination.
  * Caller owns the original-key receipt and commit in this SAME ReadCommitted
@@ -49,7 +51,8 @@ export async function writePreparedCategoryAdoptionPhase(
   // Plan only chooses code-owned lock dependencies. It is NOT authorization.
   // Re-read the complete dependency set after policy/space locks below.
   const plannedTarget = await tx.rentalCategoryVersion.findUnique({ where: { id: targetVersionId } });
-  const plannedDefinition = resolveRentalCategoryVersionBody(plannedTarget, identity.categoryCode.toLowerCase());
+  const categoryCode = readRentalCategoryCode(identity.categoryCode);
+  const plannedDefinition = resolveRentalCategoryVersionBody(plannedTarget, categoryCode);
   const plannedInstances = await tx.workspaceCapabilityInstance.findMany({ where: { tenantId, workspaceId }, select: { code: true, status: true } });
   // Lock the potential dependency superset before policy/space. Actual grants
   // are checked against the final candidate facts; an unmatched condition does
@@ -62,7 +65,7 @@ export async function writePreparedCategoryAdoptionPhase(
   if (input.expectedTargetPolicyRevision !== undefined && policy.versionPolicyRevision !== input.expectedTargetPolicyRevision) {
     throw new ConflictException("目标采用政策修订已变化，请核对原请求和当前政策");
   }
-  await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected, identity.categoryCode.toLowerCase());
+  await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected, categoryCode);
   if (targetVersionId === expected.categoryVersionId) throw new ConflictException("目标版本已经采用");
   const [target, preparation] = await Promise.all([
     tx.rentalCategoryVersion.findUnique({ where: { id: targetVersionId } }),
@@ -73,19 +76,27 @@ export async function writePreparedCategoryAdoptionPhase(
       envelope?.sourceVersionId !== expected.categoryVersionId || envelope.operation !== operation) {
     throw new ConflictException("预备资料或来源版本修订已变化，请重新准备");
   }
+  const preparationSource = categoryPreparationEnvelopeSource(envelope);
   if (typeof envelope.reason !== "string" || !envelope.reason.trim() || envelope.reason.length > 512 || !Array.isArray(envelope.items)) {
     throw new ConflictException("预备资料格式或采用原因无效，请重新准备");
   }
+  // Legacy single-save data retains its original smaller request limit. A
+  // missing format version cannot silently authorize a larger collection.
+  if (preparationSource === "batch") assertCategoryPreparationBatchSize(envelope.items);
   if (envelope.capabilityPatches !== undefined && !Array.isArray(envelope.capabilityPatches)) {
     throw new ConflictException("能力预备配置格式无效，采用未完成；预备输入已保留");
   }
   if (!capabilityRuntime) {
     throw new ConflictException("未提供可信能力执行器，采用未完成；预备输入已保留");
   }
-  const definition = resolveRentalCategoryVersionBody(target, identity.categoryCode.toLowerCase());
+  const definition = resolveRentalCategoryVersionBody(target, categoryCode);
   const reason = input.reason ?? envelope.reason.trim();
   if (typeof reason !== "string" || !reason.trim() || reason.length > 512) throw new BadRequestException("必须填写明确采用原因");
   const entityBounds = await assertCategoryAdoptionEntityBounds(tx, tenantId, workspaceId);
+  // Component/member collections and configuration row counts are bounded before
+  // any entity patch or relationship materialization. The final reader repeats
+  // these checks after candidate capability changes in this SAME transaction.
+  await assertCategoryAdoptionConfigurationRowBounds(tx, tenantId, workspaceId);
   const entities = await writePreparedCategoryEntities(tx, tenantId, workspaceId, expected, definition, envelope.items);
   const capabilities = Array.isArray(envelope.capabilityPatches) && envelope.capabilityPatches.length
     ? await writePreparedCategoryCapabilities(tx, tenantId, workspaceId, expected, definition, envelope.capabilityPatches as CategoryCapabilityPreparationPatch[], input.actorId, reason.trim(), capabilityRuntime)

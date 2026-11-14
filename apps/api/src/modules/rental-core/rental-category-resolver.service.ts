@@ -15,7 +15,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { validateConditionalCapabilities } from "./category-capability-conditions";
-import { rentalDefaultWorkspaceName } from "./category-identity";
+import { readRentalCategoryCode, rentalDefaultWorkspaceName } from "./category-identity";
 
 export interface ResolvedRentalCategory {
   workspaceId: string;
@@ -232,7 +232,9 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
 
 /** One decoder for historical reads and transaction-local active writes. */
 export function resolveRentalCategoryVersionBody(version: { categoryCode: string; structureVersion: number; status: string; definition: unknown } | null, categoryCode: string): RentalCategoryDefinition {
-  if (!version || String(version.categoryCode).toLowerCase() !== categoryCode) throw new ConflictException("业务引用的品类版本不存在或编码不匹配");
+  // Only the four recorded Prisma enum aliases have a legacy interpretation.
+  // Lowercasing any stored value would invent aliases for dynamic identities.
+  if (!version || readRentalCategoryCode(version.categoryCode) !== categoryCode) throw new ConflictException("业务引用的品类版本不存在或编码不匹配");
   if (version.structureVersion !== 1) throw new ConflictException("当前程序不支持该品类结构版本，请升级兼容程序");
   if (version.status === "legacy_baseline") {
     const runtime = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === categoryCode);
@@ -277,7 +279,7 @@ export class RentalCategoryResolver {
       orderBy: [{ categoryCode: "asc" }, { publishedAt: "desc" }, { id: "asc" }], take: 101
     });
     return { structureVersion: 1, source: "published", truncated: rows.length > 100, options: rows.slice(0, 100).map(row => {
-      const definition = resolveRentalCategoryVersionBody(row, String(row.categoryCode).toLowerCase());
+      const definition = resolveRentalCategoryVersionBody(row, readRentalCategoryCode(row.categoryCode));
       return { categoryCode: definition.code, name: definition.name, nameEn: definition.display?.nameEn,
         versionId: row.id, versionLabel: row.versionLabel, recommended: row.category.recommendedVersionId === row.id,
         defaultWorkspaceName: rentalDefaultWorkspaceName(definition) };
@@ -297,7 +299,7 @@ export class RentalCategoryResolver {
     // stored revisions cannot be emitted as metadata or initial/legacy context;
     // a concurrent adoption is checked by each action's existing commit fence.
     const categoryVersionId = workspace.categoryVersionId, adoptionRevision = workspace.categoryAdoptionRevision;
-    const definition = await this.forVersion(workspace.categoryCode.toLowerCase(), categoryVersionId, tx);
+    const definition = await this.forVersion(readRentalCategoryCode(workspace.categoryCode), categoryVersionId, tx);
     return {
       workspaceId, categoryVersionId, adoptionRevision,
       definition

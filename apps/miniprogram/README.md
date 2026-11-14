@@ -80,6 +80,7 @@ npm run build:miniprogram:release
 
 - `src/config/public.ts` 是包内唯一配置，且全部公开：`{ apiOrigin, tenantCode, appId, allowLocalApi, builtAt }`。API 前缀 `/api/client/v1` 在 `core/http.ts` 拼接。
 - 密钥不进包：AppSecret、商户私钥、`session_key`、口令等只在服务端加密保存。构建期硬门禁会拒绝以下情况：编译产物在运行时 `require("@rental-os/shared")`（只允许 `import type`）、出现密钥形态字符串、页面缺少 js/json/wxml/wxss、tabBar 图标缺失。
+- 正文解析器和企业原申请/结束收据匹配函数使用受管声明适配；构建从Shared正式出口核对原函数并生成小程序运行文件。声明复用公共类型，不复制业务判断；收据函数来源缺失、歧义或引入未审核运行依赖时停止构建。
 
 ## 测试
 

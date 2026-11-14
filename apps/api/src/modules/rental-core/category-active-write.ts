@@ -1,11 +1,37 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Prisma } from "@prisma/client";
-import type { RentalInventoryMode } from "@rental-os/shared";
+import { RentalCategoryCode, type RentalCategoryDefinition, type RentalInventoryMode } from "@rental-os/shared";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
+import { readRentalCategoryCode } from "./category-identity";
 import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
 
 export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevision: number }
+
+/** Caller holds the active space lock and owns this transaction. A collision
+ * rolls back the entity and its declarations; it must never become a skipped
+ * backfill row or release the previous value in a separate transaction. */
+export async function replaceCategoryUniqueClaims(
+  tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
+  entityType: "item_group" | "asset", entityId: string,
+  claims: readonly { fieldCode: string; label: string; normalizedValue: string }[]
+) {
+  await tx.rentalAttributeUniqueValue.deleteMany({ where: { tenantId, workspaceId, entityType, entityId } });
+  for (const claim of claims) {
+    try {
+      await tx.rentalAttributeUniqueValue.create({ data: {
+        id: `attruniq_${createHash("sha256").update(`${workspaceId}|${entityType}|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
+        tenantId, workspaceId, entityType, entityId, fieldCode: claim.fieldCode,
+        normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"), normalizedValue: claim.normalizedValue
+      } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException(`${claim.label}已存在`);
+      throw error;
+    }
+  }
+}
 
 /** Every configuration participating in adoption must share this transaction lock. */
 export async function lockActiveCategoryBinding(
@@ -31,11 +57,34 @@ export async function lockActiveCategoryBinding(
   if (expected && (workspace.categoryVersionId !== expected.categoryVersionId || workspace.categoryAdoptionRevision !== expected.adoptionRevision)) {
     throw new ConflictException("经营空间品类版本已变化，请刷新后重新保存");
   }
-  const code = workspace.categoryCode.toLowerCase();
+  const code = readRentalCategoryCode(workspace.categoryCode);
   if (categoryCode && code !== categoryCode) throw new ConflictException("经营配置与经营空间品类不一致");
   const version = await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } });
   const definition = resolveRentalCategoryVersionBody(version, code);
   return { definition, binding: { categoryVersionId: workspace.categoryVersionId, adoptionRevision: workspace.categoryAdoptionRevision } };
+}
+
+/** Draft callers still supply their original Guard and revalidation. This only
+ * locks and checks the Core context they observed; matching version text alone
+ * cannot prove the immutable binding or its adoption revision stayed current. */
+export async function lockCategoryContext(
+  tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
+  context: { category: RentalCategoryDefinition; categoryVersionId?: string; categoryAdoptionRevision?: number }
+) {
+  const marked = context.categoryVersionId !== undefined || context.categoryAdoptionRevision !== undefined;
+  if (marked && (typeof context.categoryVersionId !== "string" || !context.categoryVersionId
+    || !Number.isSafeInteger(context.categoryAdoptionRevision) || context.categoryAdoptionRevision! < 0))
+    throw new ConflictException("Core品类上下文的绑定来源不完整");
+  const expected = marked ? { categoryVersionId: context.categoryVersionId!, adoptionRevision: context.categoryAdoptionRevision! } : undefined;
+  const current = await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected, context.category.code);
+  // Only the explicit initial four-category compatibility path lacks markers.
+  // New categories and adopted spaces require the actual Core binding evidence.
+  if (!expected && (current.binding.adoptionRevision > 0 || !Object.values(RentalCategoryCode).some(code => code === current.definition.code)))
+    throw new ConflictException("Core品类上下文缺少当前绑定来源");
+  const canonical = (value: unknown) => JSON.parse(JSON.stringify(value)) as unknown;
+  if (!isDeepStrictEqual(canonical(context.category), canonical(current.definition)))
+    throw new ConflictException("Core品类上下文与当前发布定义不一致");
+  return current;
 }
 
 /** Shares the space lock with adoption. Never trust claims computed before the transaction. */

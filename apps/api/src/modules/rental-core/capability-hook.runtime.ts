@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger, Optional } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import {
   RENTAL_CAPABILITY_MODULES,
@@ -20,6 +20,30 @@ import {
 import { CapabilityHookRepository, type CapabilityHookSubjectType } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { validateConditionalCapabilities } from "./category-capability-conditions";
+
+/** Core-provided and integration-only capabilities do not need this executor.
+ * Unknown independent codes cannot acquire an implicit no-Hook interpretation. */
+export function requiresCapabilityHookRuntime(codes: readonly RentalCapability[]): boolean {
+  const core = new Set<RentalCapability>(RENTAL_CORE_CAPABILITY_CODES);
+  return codes.some(code => {
+    if (core.has(code)) return false;
+    const definition = RENTAL_CAPABILITY_MODULES.find(module => module.code === code);
+    return !definition || definition.extensionPoints.some(point => point === "order_validation" || point === "fulfillment");
+  });
+}
+
+/** Missing DI is not permission to omit a required or already enabled Hook.
+ * Callers still own current authorization, scoped instance reads and execution. */
+export function assertCapabilityHookRuntimeAvailable(
+  runtime: CapabilityHookRuntime | undefined,
+  required: readonly RentalCapability[],
+  instances: readonly { code: RentalCapability; status?: WorkspaceCapabilityInstance["status"] }[] = []
+) {
+  if (!runtime && (requiresCapabilityHookRuntime(required) ||
+    requiresCapabilityHookRuntime(instances.filter(instance => instance.status === undefined || instance.status === "enabled").map(instance => instance.code)))) {
+    throw new ServiceUnavailableException("必需或已启用的能力执行模块不可用，不能略过业务判定");
+  }
+}
 
 /**
  * 传给 Hook 的业务对象必须是**克隆后冻结**的，不能冻结活对象。
@@ -327,28 +351,30 @@ export class CapabilityHookRuntime {
         continue;
       }
 
-      // 2) 该能力有没有 Hook 实现。完全没有登记过任何版本 = 这个能力不参与 Hook
-      //    （四种库存、取还等由 Core 主流程实现的能力就是这一类），静默跳过是正确的。
+      // 2) Core自身和明确仅走集成的能力不参与Hook。独立扩展声明了业务节点却
+      //    没有任何登记版本，是执行依赖缺失，不能据此推断它原本不参与判定。
       const versions = this.versionsByCode.get(instance.code);
-      if (!versions?.size) continue;
+      if (!versions?.size && (providedByCore.has(instance.code) || (definition &&
+        !definition.extensionPoints.some(point => point === "order_validation" || point === "fulfillment")))) continue;
 
-      // 3) 有实现，但缺**快照固化的那个版本**。这是发布事故（旧版本被删、新版本没发），
+      // 3) 缺**快照固化的那个版本**，包括整个执行模块缺失。这是发布/装配缺口，
       //    不是「能力不存在」。退回最新版会悄悄用新规则重放历史订单，正是本轮要消除的问题；
       //    吞成"跳过"则把基础设施异常伪装成业务事实。因此一律 fail-closed。
       const module = this.modules.get(CapabilityHookRuntime.key(instance.code, instance.implementationVersion));
       if (!module) {
+        const registered = [...(versions ?? [])].sort();
         outcome.blocked = true;
         outcome.blockReasons.push({
           capability: instance.code,
           code: "capability_implementation_version_missing",
           message:
             `能力 ${instance.code} 需要 ${instance.implementationVersion} 版实现，` +
-            `但当前只登记了 ${[...versions].sort().join("、")}；` +
+            `但当前只登记了 ${registered.join("、") || "无"}；` +
             `为避免用其他版本改写该业务的判定，已拒绝本次操作`,
           evidence: {
             point: input.point,
             requested: instance.implementationVersion,
-            registered: [...versions].sort().join("、"),
+            registered: registered.join("、"),
             required
           }
         });

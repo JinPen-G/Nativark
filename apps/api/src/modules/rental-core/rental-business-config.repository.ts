@@ -21,7 +21,8 @@ import type {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { RENTAL_READINESS_FACT_LIMIT, type RentalConfigTx } from "./rental-core-config.repository";
-import { getRequestTenantId, getRequestWorkspaceId } from '../../common/request-identity';
+import { getRequestIdentity, getRequestTenantId, getRequestWorkspaceId } from '../../common/request-identity';
+import { requestFingerprint } from './rental-idempotency.repository';
 import { RULE_VERSION_ISSUED_STATUSES, type RuleVersionTimelineEntry } from './rental-rule-version-chain';
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
@@ -57,10 +58,6 @@ export interface TenantBusinessConfigSnapshot {
   hasPersistedConfig: boolean;
 }
 
-/**
- * 业务配置的库侧接口。与核心配置仓储同构：库是事实源，服务层内存副本是写穿缓存，
- * 不连库的单元测试注入吸收式 stub，持久化语义只在 MySQL E2E 验证。
- */
 export interface RentalReadinessBusinessFacts {
   tenantId: string;
   workspaceId: string;
@@ -70,6 +67,42 @@ export interface RentalReadinessBusinessFacts {
   operationsAccounts: number;
   hasActiveRole: boolean;
   priceVersion: { sequence: number; effectiveFrom: string } | null;
+  /** Present only when the persisted producer supplied this bounded source.
+   * Legacy/test stores without it cannot attest an adopted calendar version. */
+  calendarSource?: RentalReadinessCalendarSource;
+}
+
+/** Read-only current annual adoption metadata, never calendar days, prices or
+ * an editable target. Publication/source references describe stored facts;
+ * they do not attest the official registry or grant a calendar write. */
+export interface RentalReadinessCalendarSource {
+  readonly version: 'rental-calendar-read-source-1';
+  readonly tenantId: string;
+  readonly workspaceId: string;
+  readonly years: ReadonlyArray<{
+    readonly year: number;
+    readonly status: 'adopted' | 'not_adopted';
+    readonly binding: {
+      readonly id: string;
+      readonly year: number;
+      readonly version: string;
+      readonly status: 'published';
+      readonly revision: number;
+      readonly publishedAt: string;
+      readonly officialSource: {
+        readonly versionId: string | null;
+        readonly version: string | null;
+        readonly publishedAt: string | null;
+        readonly importedAt: string | null;
+      };
+    } | null;
+  }>;
+  readonly sourceHash: string;
+  readonly observations: {
+    readonly startedAt: string;
+    readonly completedAt: string;
+    readonly consistency: 'caller_transaction_reads' | 'independent_persisted_reads';
+  };
 }
 
 /** Preserve the original role override semantics without materializing members
@@ -95,6 +128,11 @@ export async function readRentalReadinessAccountFacts(prisma: Pick<PrismaService
 export type RentalQuoteRateTarget = Pick<RentalPricingRate, 'itemGroupId' | 'pricingGroupId' | 'unit'> & {
   priceVersionId: string; priceVersion: string;
 };
+/**
+ * 业务配置的库侧接口。库是事实源，服务层内存副本是写穿缓存。
+ * 各写入口可复用调用者原事务；范围读取和写入均参加该事务，提交/回滚仍归调用者。
+ * 不连库的测试可注入吸收式store，但不能证明MySQL持久化与锁语义。
+ */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
   loadWorkspaceSnapshot?(tenantId: string, workspaceId: string, expected: CategoryWriteBinding): Promise<TenantBusinessConfigSnapshot>;
@@ -103,14 +141,15 @@ export interface RentalBusinessConfigStore {
   readReadinessBusinessFacts?(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts>;
   loadWorkspace?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<TenantBusinessConfigSnapshot>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
-  upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
-  upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding, tx?: RentalConfigTx): Promise<void>;
+  upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding, tx?: RentalConfigTx): Promise<void>;
   /** Current service admission under the same workspace mutex as service writers. */
   readServicesForExchange?(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<RentalValueAddedService[]>;
   upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
-    audits?: RentalCalendarOverrideAudit[]
+    audits?: RentalCalendarOverrideAudit[],
+    tx?: RentalConfigTx
   ): Promise<void>;
   /**
    * 重新读取某年度的全部版本。乐观锁冲突后必须用它刷新进程内缓存：
@@ -134,7 +173,7 @@ export interface RentalBusinessConfigStore {
     superseded?: RentalCalendarYear,
     expectedRevisions?: { next: number; superseded: number }
   ): Promise<void>;
-  upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding, tx?: RentalConfigTx): Promise<void>;
   /** Exact original target for refreshing a confirmed bound draft operation. */
   loadRuleVersionById?(tenantId: string, workspaceId: string, id: string): Promise<RentalRuleVersion | null>;
   /**
@@ -150,7 +189,7 @@ export interface RentalBusinessConfigStore {
     expectedBinding?: CategoryWriteBinding
   ): Promise<void>;
   loadRuleVersionAudits(tenantId: string, workspaceId: string, ruleVersionId?: string): Promise<RentalRuleVersionAudit[]>;
-  upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
+  upsertNotificationTemplate(template: RentalNotificationTemplateV1, tx?: RentalConfigTx): Promise<void>;
   replaceNotificationTemplateVersion(
     previous: RentalNotificationTemplateV1,
     next: RentalNotificationTemplateV1
@@ -266,27 +305,32 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
    * no new transaction, lock or readiness algorithm is introduced. */
   async readReadinessBusinessFacts(tenantId: string, workspaceId: string, at: Date, calendarYears: readonly number[], tx?: RentalConfigTx): Promise<RentalReadinessBusinessFacts> {
     const client = tx ?? this.prisma;
-    const now = new Date(at), years = [...calendarYears];
+    const now = new Date(at), years = [...calendarYears], identity = requestFingerprint(getRequestIdentity());
     if (!Number.isFinite(now.getTime()) || years.length < 1 || years.length > 3
       || years.some(year => !Number.isInteger(year) || year < 1 || year > 9999)
       || new Set(years).size !== years.length) throw new ConflictException('开业查询时点或营业年度无效');
     const assertScope = async () => {
       if (getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
-        || await resolveScopeWorkspaceId(client, tenantId) !== workspaceId)
+        || requestFingerprint(getRequestIdentity()) !== identity)
+        throw new ForbiddenException('开业读取缺少当前租户或经营空间');
+      const resolved = await resolveScopeWorkspaceId(client, tenantId);
+      if (resolved !== workspaceId || getRequestTenantId() !== tenantId || getRequestWorkspaceId() !== workspaceId
+        || requestFingerprint(getRequestIdentity()) !== identity)
         throw new ForbiddenException('开业读取缺少当前租户或经营空间');
     };
     await assertScope();
+    const startedAt = new Date().toISOString();
     const where = { tenantId, workspaceId };
     type RateReference = { tenantId: string; workspaceId: string; planId: string; ratesType: string;
       rateIndex: number | null; pricingGroupId: string | null; pricingGroupIdType: string | null;
       itemGroupId: string | null; itemGroupIdType: string | null };
-    const [rules, calendarCounts, refs, accounts, priceVersion] = await Promise.all([
+    const [rules, calendarBindings, refs, accounts, priceVersion] = await Promise.all([
       // Two latest issued rows are enough to preserve the original same-time
       // conflict test. Older rule contents/history are not opening facts.
       client.rentalRuleVersion.findMany({ where: { ...where, status: { in: [...RULE_VERSION_ISSUED_STATUSES] }, effectiveFrom: { lte: now } },
         select: { id: true, tenantId: true, workspaceId: true, version: true, status: true, effectiveFrom: true },
         orderBy: [{ effectiveFrom: 'desc' }, { id: 'asc' }], take: 2 }),
-      Promise.all(years.map(year => client.rentalBusinessCalendar.count({ where: { ...where, year, status: 'published' } }))),
+      this.readReadinessCalendarBindings(client, tenantId, workspaceId, now, years),
       // JSON_TABLE supplies only ordinality; extract target identifiers, not
       // monetary fields or full rates JSON. Empty plans still get a sentinel
       // row, and the global LIMIT bounds both plans and rate references.
@@ -313,7 +357,6 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       || !(RULE_VERSION_ISSUED_STATUSES as readonly string[]).includes(row.status)
       || !(row.effectiveFrom instanceof Date) || !Number.isFinite(row.effectiveFrom.getTime()) || row.effectiveFrom > now)
       || new Set(rules.map(row => row.id)).size !== rules.length
-      || calendarCounts.some(value => !Number.isSafeInteger(value) || value < 0)
       || priceVersion && (!owns(priceVersion) || !Number.isSafeInteger(priceVersion.sequence) || priceVersion.sequence < 1
         || !(priceVersion.effectiveFrom instanceof Date) || !Number.isFinite(priceVersion.effectiveFrom.getTime()) || priceVersion.effectiveFrom > now))
       throw new ConflictException('开业业务元数据来源或内容无效');
@@ -340,12 +383,53 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       if (!target) throw new ConflictException('开业价格引用缺少目标');
       identifiers.add(target);
     }
+    // A same-year replacement must not disappear behind an unchanged annual
+    // count or summary. Re-read metadata through this original client; this is
+    // an observation fence, not a new transaction or a total readiness version.
+    const currentCalendars = await this.readReadinessCalendarBindings(client, tenantId, workspaceId, now, years);
+    const calendarBasis = { version: 'rental-calendar-read-source-1' as const, tenantId, workspaceId, years: calendarBindings };
+    const sourceHash = requestFingerprint(calendarBasis);
+    if (requestFingerprint({ ...calendarBasis, years: currentCalendars }) !== sourceHash)
+      throw new ConflictException('开业读取期间营业日历采用版本已变化，请重新读取');
     await assertScope();
     return { tenantId, workspaceId, ruleVersions: rules.map(row => ({ id: row.id, version: row.version,
       status: row.status as RentalRuleVersion['status'], effectiveFrom: row.effectiveFrom!.toISOString() })),
-      publishedCalendarYears: years.filter((_year, index) => calendarCounts[index] > 0),
+      publishedCalendarYears: calendarBindings.filter(row => row.status === 'adopted').map(row => row.year),
+      calendarSource: { ...calendarBasis, sourceHash, observations: { startedAt, completedAt: new Date().toISOString(),
+        consistency: tx ? 'caller_transaction_reads' : 'independent_persisted_reads' } },
       pricedGroupIds: [...identifiers], ...accounts,
       priceVersion: priceVersion ? { sequence: priceVersion.sequence, effectiveFrom: priceVersion.effectiveFrom.toISOString() } : null };
+  }
+
+  /** At most two current rows per requested year: the second proves a conflict,
+   * never a reason to pick the largest version. Missing publication facts are
+   * unavailable; zero rows explicitly mean no adopted version, not a default. */
+  private async readReadinessCalendarBindings(client: RentalConfigTx, tenantId: string, workspaceId: string,
+    at: Date, years: readonly number[]): Promise<RentalReadinessCalendarSource['years']> {
+    if (typeof client.rentalBusinessCalendar?.findMany !== 'function')
+      throw new ServiceUnavailableException('营业日历绑定来源不可用');
+    return Promise.all(years.map(async year => {
+      const rows = await client.rentalBusinessCalendar.findMany({ where: { tenantId, workspaceId, year, status: 'published' },
+        select: { id: true, tenantId: true, workspaceId: true, year: true, version: true, status: true, revision: true,
+          publishedAt: true, sourceVersionId: true, sourceVersion: true, sourcePublishedAt: true, importedAt: true },
+        orderBy: { id: 'asc' }, take: 2 });
+      if (rows.length > 1) throw new ConflictException(`${year} 年度存在多个已发布营业日历，无法唯一确定采用版本`);
+      const row = rows[0];
+      if (!row) return { year, status: 'not_adopted' as const, binding: null };
+      const identifier = (value: unknown) => typeof value === 'string' && Boolean(value.trim()) && value.length <= 191;
+      const instant = (value: unknown) => value instanceof Date && Number.isFinite(value.getTime()) && value <= at;
+      if (row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.year !== year || row.status !== 'published'
+        || !identifier(row.id) || !identifier(row.version) || !Number.isSafeInteger(row.revision) || row.revision < 0 || row.revision > 2147483647)
+        throw new ConflictException('营业日历绑定范围或原修订无效');
+      if (!instant(row.publishedAt)) throw new ServiceUnavailableException('营业日历缺少可核对的原发布依据');
+      if (row.sourceVersionId !== null && !identifier(row.sourceVersionId) || row.sourceVersion !== null && !identifier(row.sourceVersion)
+        || row.sourcePublishedAt !== null && !instant(row.sourcePublishedAt) || row.importedAt !== null && !instant(row.importedAt))
+        throw new ConflictException('营业日历原来源引用或时点无效');
+      return { year, status: 'adopted' as const, binding: { id: row.id, year: row.year, version: row.version,
+        status: 'published' as const, revision: row.revision, publishedAt: row.publishedAt!.toISOString(),
+        officialSource: { versionId: row.sourceVersionId, version: row.sourceVersion,
+          publishedAt: row.sourcePublishedAt?.toISOString() ?? null, importedAt: row.importedAt?.toISOString() ?? null } } };
+    }));
   }
 
   async loadAll(): Promise<TenantBusinessConfigSnapshot[]> {
@@ -417,10 +501,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       // 与"配了一个空清单"在语义上同义，但省掉一次无意义的 JSON 解析。
       fulfillmentFees: (plan.fulfillmentFees ?? null) as unknown as Prisma.InputJsonValue
     };
-    // Resolve outside our transaction so the workspace lock is its first read:
-    // a normal scope SELECT before waiting for the lock would establish an old
-    // MySQL repeatable-read snapshot of the price rows.
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
+    // Standalone scope resolution precedes our transaction so the workspace
+    // lock is its first read. A caller-owned transaction retains its own fence
+    // and must also own the scope read; never escape through the root client.
+    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, plan.tenantId);
     const write = async (client: RentalConfigTx) => {
     const { definition } = await lockActiveCategoryBinding(client, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
     const existing = await client.rentalPricingPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
@@ -436,7 +520,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
-  async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: rentalCategoryStorageCode(plan.categoryCode),
@@ -461,8 +545,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       effectiveTo: plan.effectiveTo ? new Date(plan.effectiveTo) : null,
       version: plan.version
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
-    await this.prisma.$transaction(async (tx) => {
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, plan.tenantId);
+    const write = async (tx: RentalConfigTx) => {
       await lockActiveCategoryBinding(tx, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
       const existing = await tx.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
       assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
@@ -471,7 +555,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
         update: data
       });
-    });
+    };
+    if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
   }
 
   async readServicesForExchange(tenantId: string, workspaceId: string, tx: RentalConfigTx): Promise<RentalValueAddedService[]> {
@@ -489,7 +574,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: service.tenantId,
       categoryCode: rentalCategoryStorageCode(service.categoryCode),
@@ -516,9 +601,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       status: service.status,
       version: service.version
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, service.tenantId);
     const snapshot = JSON.parse(JSON.stringify({ ...service, workspaceId })) as Prisma.InputJsonValue;
-    await this.prisma.$transaction(async (tx) => {
+    const write = async (tx: RentalConfigTx) => {
       const { definition } = await lockActiveCategoryBinding(tx, service.tenantId, workspaceId, expectedBinding, service.categoryCode);
       const modes = [...service.applicableFulfillmentModes, ...(service.mandatoryRule?.fulfillmentModes ?? [])];
       if (modes.some((mode) => !definition.businessModel.fulfillmentModes.includes(mode))) throw new ConflictException("增值服务包含当前品类不支持的履约方式");
@@ -560,7 +645,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
           createdAt: new Date(service.updatedAt)
         }
       });
-    });
+    };
+    if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
   }
 
   /** 日历按 (租户, 年份, 版本) 唯一；整年按日明细随该行一起写。 */
@@ -612,12 +698,13 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
-    audits: RentalCalendarOverrideAudit[] = []
+    audits: RentalCalendarOverrideAudit[] = [],
+    existingTx?: RentalConfigTx
   ): Promise<void> {
     const data = this.calendarData(calendar);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, calendar.tenantId);
     try {
-      await this.prisma.$transaction(async (tx) => {
+      const write = async (tx: RentalConfigTx) => {
       // Calendar changes participate in adoption preflight. Hold the same space
       // lock until both the calendar and its override audit have committed.
       await lockActiveCategoryBinding(tx, calendar.tenantId, workspaceId);
@@ -670,7 +757,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
           }))
         });
       }
-    });
+      };
+      if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
     } catch (error) {
       // 并发落库冲突转 409：条件更新前的「先查后写」在并发下必然有窗口——两路恢复/编辑
       // 可能都查到无该版本号、算出同一个新版本号并进入 create，唯一键 (ws,year,version)
@@ -810,11 +898,11 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
   }
 
-  async upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding, existingTx?: RentalConfigTx): Promise<void> {
     const data = this.ruleVersionData(version);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
+    const workspaceId = await resolveScopeWorkspaceId(existingTx ?? this.prisma, version.tenantId);
     try {
-      await this.prisma.$transaction(async (tx) => {
+      const write = async (tx: RentalConfigTx) => {
       await lockActiveCategoryBinding(tx, version.tenantId, workspaceId, expectedBinding, version.categoryCode);
       const existing = await tx.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true, status: true, config: true } });
       assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
@@ -824,7 +912,8 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
         update: data
       });
-      });
+      };
+      if (existingTx) await write(existingTx); else await this.prisma.$transaction(write);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("规则版本号已被其他操作占用，请刷新后重试");
@@ -948,9 +1037,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
   }
 
-  async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
+  async upsertNotificationTemplate(template: RentalNotificationTemplateV1, existingTx?: RentalConfigTx): Promise<void> {
     const data = this.notificationTemplateData(template);
-    await this.prisma.$transaction(async (tx) => {
+    const write = async (tx: RentalConfigTx) => {
       const workspaceId = await resolveScopeWorkspaceId(tx, template.tenantId);
       // MySQL 的 Prisma upsert 可能拆成读取和创建；并发首次补落默认配置
       // 不能同时观察到“模板不存在”。与品类采用共用空间锁，并在锁后检查范围。
@@ -962,7 +1051,9 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         create: { workspaceId, id: template.id, ...data },
         update: data
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    };
+    if (existingTx) await write(existingTx);
+    else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async replaceNotificationTemplateVersion(
