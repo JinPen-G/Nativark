@@ -155,6 +155,22 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-form-submission-20261115"></a>
+
+## Core表单提交与工单新建页消费（2026-11-15）
+
+本片起点为已推送并回读 `5d8baee8c256b6fd34b06c0fe3213f6d6ddfc233`，main仍62ca。沿独占admin/core和工单样例落实最少页面声明，不改原壳/顶栏/组件vendor或公共服务端窗口。写前复核原后台规则、界面规范及Form/SaveButton/保存快照的实际链；复用antd技能的已装离线CLI核Form6.6.0 API及基础示例，没有安装或更新依赖。
+
+[useCoreForm](../../../apps/admin/src/core/useCoreForm.ts)消费原FormInstance、CorePageHost、保存快照和原反馈，新增正式admin/core出口。原Form/SaveButton校验后共用submit，同输入重入返回同Promise，不同输入等待；提交前和结果返回核当前页面/权限，成功只清本次对应草稿，异步校验和等待期间新输入继续dirty。原onFinish不等待Promise，Hook事件出口负责失败反馈，submit仍真实拒绝；dirty/busy/error及markClean供页面使用，后者仅由业务可信原结果确认时调用。没有通用JSON执行或业务错误猜测/自动重试。
+
+[工单新建页](../../../packages/example-tickets-core/admin/index.tsx)实际消费该出口与formProps，移除本页重复提交Promise/等待和dirty管理。工单保留唯一schema转换、原operationId、明确提交前拒绝及unknown核对；成功/unknown同步引用分别阻止未重渲染时重复创建或重发，同一原收据取得后才清草稿和进入原工单。顶部仍使用CorePage原SaveButton，不复制样式。
+
+必要类型经stdin/内存读取本树源码与已有只读依赖，14指定前端根/1,497源、0诊断；合同35根内存声明同时通过。实际Hook和原ServerFormSnapshot离线核对同Promise/按钮回车一请求、不同输入等待、失败保留、恢复原值、校验/等待中新输入、撤权/离页、一次失败反馈及可信结果清稿通过。真实工单新建页→Hook→原schema/请求替身另核一POST、同步完成拒重复、unknown重渲染前拒重发、缺收据保持阻断、两次原键只读及草稿解除，退出0。离线Hook/组件输入不是React DOM、原portal或实际浏览器验收。
+
+最初类型映射误读React运行文件并漏Vite/Animate UI正式类型，验证退出1；只修读取映射后0诊断。工单组件输入漏Input.TextArea替身退出1，补验证输入后通过；产品类型、业务拒绝和原断言未放宽。现有接入手册补实际最小Hook/表单例子及unknown边界，能力索引沿正式出口发现，无新逐文件台账。新增测试脚本、临时目录、依赖、Client生成及后台进程为0；完整主Router/Guard、浏览器回车/portal/无Core运行仍待原窗口和验收，任务门槛未跨档。
+
+收口复核避免订阅原SaveButton通知误清校验中新字段：Hook按本次已校验输入自行维护草稿，继续调用原通知；顶部动作明确关联editor.busy。改后相关Hook反例和前端类型复验退出0，仍1,497源/0诊断。实际开发索引4,493条/0 issues，useCoreForm唯一正式导入为 `@rental-os/admin/core`，直接消费者定位工单admin；用途说明附于函数。七份相关文档633个链接/152个锚点/58个表格、旧阶段及需求/任务保全检查退出0，差异格式退出0。阶段中文提交普通推送任务分支并回读远端，原测试成果按固定版本复用，无新增环境或残留。
+
 <a id="core-tickets-removal-data-20261115"></a>
 
 ## 工单移除依赖读取与原宿主消费（2026-11-15）

@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { corePageKey, resolveCorePageLocation, type CoreAdminContribution } from "@rental-os/core-contracts";
 import {
   Alert, Button, CorePage, DataTableText, Form, Input, ListSection, QueryState, SaveButton, Select, Table, UnsavedChangesGuard,
-  useCorePageHost, useCoreRequest, useCoreBinding, useLocale, type CoreAdminPageAction
+  useCorePageHost, useCoreRequest, useCoreForm, useCoreBinding, useLocale, type CoreAdminPageAction
 } from "@rental-os/admin/core";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket } from "@rental-os/example-tickets-core/contracts";
 import { TICKETS_HTTP } from "@rental-os/example-tickets-core/http";
@@ -66,50 +66,54 @@ export function CreateTicketPage() {
   const client = useQueryClient();
   const [form] = Form.useForm<CreateValues>();
   const original = useRef<{ operationId: string; subject: string; description: string } | undefined>(undefined);
-  const pending = useRef<Promise<unknown> | null>(null);
-  const [unknown, setUnknown] = useState(false), [sending, setSending] = useState(false), [dirty, setDirty] = useState(false);
+  const completed = useRef<string | undefined>(undefined);
+  const uncertain = useRef(false);
+  const [unknown, setUnknown] = useState(false), [reconciling, setReconciling] = useState(false);
   const [rejected, setRejected] = useState(false);
   const [createdId, setCreatedId] = useState<string>();
   const reconcile = async () => {
     if (!original.current) throw new Error("没有原操作可核对");
-    setSending(true);
+    setReconciling(true);
     try {
       const result = TICKETS_HTTP.receipt.response.parse(await request(`/operations/${original.current.operationId}`));
       if (result.status !== "recorded") throw new Error("原收据暂不可用，请保留此页稍后再核对");
       if (result.receipt.operationId !== original.current.operationId) throw new Error("工单回执与原操作不一致");
-      setUnknown(false); setDirty(false); setCreatedId(result.receipt.ticket.id);
+      completed.current = result.receipt.ticket.id;
+      uncertain.current = false;
+      setUnknown(false); editor.markClean(); setCreatedId(completed.current);
       void client.invalidateQueries({ queryKey: ["core", TICKETS_CORE_ID] });
       return result.receipt;
-    } finally { setSending(false); }
+    } finally { setReconciling(false); }
   };
   const save = (values: CreateValues) => {
-    if (pending.current) return pending.current;
-    if (unknown) return reconcile();
-    if (createdId) return Promise.reject(new Error("工单已经创建，请查看原工单"));
+    if (uncertain.current) return Promise.reject(new Error("请先核对原提交结果"));
+    if (completed.current) return Promise.reject(new Error("工单已经创建，请查看原工单"));
     const input = TICKETS_HTTP.create.body.parse({ ...values, operationId: original.current?.operationId ?? crypto.randomUUID() });
     if (original.current && JSON.stringify(input) !== JSON.stringify(original.current)) return Promise.reject(new Error("请先核对原提交结果"));
     original.current = input;
-    setSending(true); setRejected(false);
-    const job = request(pathFor(TICKETS_HTTP.create.path), { method: "post", data: input }).then(result => {
+    setRejected(false);
+    return request(pathFor(TICKETS_HTTP.create.path), { method: "post", data: input }).then(result => {
       const receipt = TICKETS_HTTP.create.response.parse(result);
       if (receipt.operationId !== input.operationId) throw new Error("工单回执与原操作不一致");
-      setUnknown(false); setDirty(false); setCreatedId(receipt.ticket.id);
+      completed.current = receipt.ticket.id;
+      setUnknown(false); setCreatedId(completed.current);
       void client.invalidateQueries({ queryKey: ["core", TICKETS_CORE_ID] });
       return receipt;
     }).catch(error => {
       if (rejectedBeforeCommit(error)) { original.current = undefined; setRejected(true); }
-      else setUnknown(true);
+      else { uncertain.current = true; setUnknown(true); }
       throw error;
-    }).finally(() => { pending.current = null; setSending(false); });
-    pending.current = job;
-    return job;
+    });
   };
+  const editor = useCoreForm({ form, onSave: save, permissions: permission("create"), disabled: unknown || Boolean(createdId) });
+  const sending = editor.busy || reconciling;
   const actions: CoreAdminPageAction<CreateValues>[] = [{ id: "back", kind: "navigate", label: "返回工单", to: page("tickets") }];
   if (createdId) actions.push({ id: "detail", kind: "navigate", label: "查看工单", emphasis: "primary", to: page("detail", createdId) });
-  else if (unknown) actions.push({ id: "reconcile", kind: "command", label: "核对原提交", intent: "review", emphasis: "primary", permissions: permission("read"), execute: reconcile });
-  else actions.push({ id: "save", kind: "save", label: "创建工单", intent: "create", emphasis: "primary", form, onSave: save, permissions: permission("create") });
-  return <Form form={form} layout="vertical" initialValues={{ subject: "", description: "" }} onValuesChange={() => setDirty(true)} onFinish={save}>
-    <UnsavedChangesGuard dirty={dirty || unknown} busy={sending} />
+  else if (unknown) actions.push({ id: "reconcile", kind: "command", label: "核对原提交", intent: "review", emphasis: "primary", permissions: permission("read"), disabled: sending, execute: reconcile });
+  else actions.push({ id: "save", kind: "save", label: "创建工单", intent: "create", emphasis: "primary", form, onSave: editor.submit,
+    disabled: editor.busy, permissions: permission("create") });
+  return <Form form={form} layout="vertical" initialValues={{ subject: "", description: "" }} {...editor.formProps}>
+    <UnsavedChangesGuard dirty={editor.dirty || unknown} busy={sending} />
     <CorePage<CreateValues> actions={actions}>
       {createdId && <Alert type="success" title={t("工单已创建")} />}
       {rejected && <Alert type="error" title={t("创建被拒绝，请核对输入和当前权限后再提交")} />}

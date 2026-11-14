@@ -38,19 +38,22 @@ export function TicketsPage() {
 
 ## 保存保留原 Form
 
-将 `CorePage`放在表单内部，让原页头portal能关联实际Form和回车提交。业务只保留一个保存方法，按钮和Form沿同一值转换/请求。
+将 `CorePage`放在表单内部，让原页头portal能关联实际Form和回车提交。`useCoreForm`接业务唯一保存方法，按钮用 `editor.submit`，Form展开 `editor.formProps`，无需分别维护提交状态和错误事件。[表单Hook](useCoreForm.ts)
 
 ```tsx
-import { CorePage, Form, Input } from "@rental-os/admin/core";
+import { CorePage, Form, Input, UnsavedChangesGuard, useCoreForm } from "@rental-os/admin/core";
 
 type Values = { subject: string };
 
 export function TicketEditor() {
   const [form] = Form.useForm<Values>();
-  return <Form form={form} layout="vertical" onFinish={saveTicket}>
+  const permissions = [{ resource: "ticket", action: "create" }];
+  const editor = useCoreForm({ form, onSave: saveTicket, permissions });
+  return <Form form={form} layout="vertical" {...editor.formProps}>
+    <UnsavedChangesGuard dirty={editor.dirty} busy={editor.busy} />
     <CorePage<Values> actions={[{
       id: "save", label: "保存", kind: "save", emphasis: "primary",
-      form, onSave: saveTicket
+      form, onSave: editor.submit, disabled: editor.busy, permissions
     }]}>
       <Form.Item name="subject" label="标题" rules={[{ required: true }]}>
         <Input />
@@ -60,7 +63,9 @@ export function TicketEditor() {
 }
 ```
 
-以上`saveTicket`/`openEditor`需要本Core自己的实现，例子不是已接通的工单业务。SaveButton复用原同步防重复、校验、原Form关联和保存快照，异步失败不标为已保存；等待中的新输入不被旧保存回执抹除。
+以上`saveTicket`/`openEditor`需要本Core自己的实现，例子不是已接通的工单业务。SaveButton及Form先校验，`submit`等待真实保存Promise；同一输入同步重入共用一次请求，等待中换输入不能另发。Form事件中的异步失败使用原反馈，直接调用submit仍向调用者拒绝。`dirty/busy/error`供业务呈现，恢复初始值可解除未保存状态；校验或保存等待中的新输入保留为草稿，离页/身份变更或撤权后的旧结果不标为已保存。主动调用submit前须自行使用 `form.validateFields()`，它接收的是已校验值。
+
+业务转换、冲突和unknown继续由Core解释，不在Hook猜测响应或重试。已可信读取原收据且当前草稿对应原操作时，才调用 `markClean()`，不能以按钮点击或超时清稿。工单新建页已有实际消费，unknown后保留原键只读核对，原结果暂缺不会重新创建。[工单表单](../../../../packages/example-tickets-core/admin/index.tsx)
 
 ## 请求和缓存沿用公共边界
 
