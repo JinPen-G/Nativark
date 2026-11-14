@@ -30,6 +30,8 @@
 
 新建页通过 `useCoreForm`共用原Form、顶部SaveButton和回车提交，框架维护等待、防重、失败及未保存提醒，Core只保留业务输入转换和原操作核对。同步成功后禁止重复创建，unknown未重新渲染也不重发；原收据暂缺继续保留同键，取得可信结果后解除这次草稿。没有另写按钮/表单样式或第二套请求。[简明表单写法](../../apps/admin/src/core/README.md#保存保留原-form)
 
+详情页的分派表单也使用 `useCoreForm`，保存与回车共用一次请求。处理/关闭和分派共享等待边界，但不同动作或输入不会复用另一操作的成功结果；unknown只核对原键。处理/关闭的成功或原结果核对保留未保存的分派草稿，只有当前输入仍对应已确认的原分派才清稿。操作收据与详情刷新分别处理，已记录的操作不会因刷新失败变成unknown；读取失败显示重新读取入口，最新工单尚未读到时不继续提交。对象切换释放原表单和操作状态。[详情源码](admin/index.tsx)
+
 列表页使用 `CoreList`及本Core的 `GET ticket-pages`，返回rows/total。默认20条，条数变化沿原分页回首页，状态筛选只改变本查询；总数与正文共用同一个租户/当前成员/状态条件。空末页仍保留真实total，框架只读回有效页。原GET tickets数组合同及10万offset限制继续保留；新分页入口的安全整数offset独立声明。[简明列表写法](../../apps/admin/src/core/README.md#列表只提供业务列和读取结果)
 
 `createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的八条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)

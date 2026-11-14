@@ -121,69 +121,114 @@ export function CreateTicketPage() {
 
 /** 路由适配显式传入已解析ticketId；不读取并执行任意URL、页面表达式或模型目标。 */
 export function TicketDetailPage({ ticketId }: { ticketId: string }) {
-  const { request, queryKey } = useCoreRequest(), client = useQueryClient(), host = useCorePageHost(), { t } = useLocale();
+  return <TicketDetailContent key={ticketId} ticketId={ticketId} />;
+}
+
+type TicketAction = "assign" | "start" | "close";
+type TicketOperation = { action: TicketAction; data: Record<string, unknown> };
+
+function TicketDetailContent({ ticketId }: { ticketId: string }) {
+  const { request, queryKey } = useCoreRequest(), client = useQueryClient(), host = useCorePageHost(), { t, locale } = useLocale();
   const [form] = Form.useForm<{ assigneeId: string }>();
-  const [failed, setFailed] = useState<{ action: "assign" | "start" | "close"; data: Record<string, unknown> }>();
+  const [failed, setFailed] = useState<TicketOperation>();
+  const original = useRef<TicketOperation | undefined>(undefined);
+  const confirmedRevision = useRef(0);
   const [rejected, setRejected] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [refreshFailure, setRefreshFailure] = useState<unknown>();
   const [sending, setSending] = useState(false);
-  const pending = useRef<Promise<unknown> | null>(null);
+  const pending = useRef<{ operation: TicketOperation; request: Promise<unknown> } | null>(null);
   const query = useQuery({ queryKey: [...queryKey, "detail", ticketId], queryFn: async ({ signal }) =>
     TicketSchema.parse(await request(pathFor(TICKETS_HTTP.get.path, ticketId), { signal })), meta: { liveRefresh: false } });
+  const latest = useRef({ query, host, refreshFailure }); latest.current = { query, host, refreshFailure };
+  const retry = async () => {
+    const result = await latest.current.query.refetch();
+    if (result.isError) throw result.error;
+    setRefreshFailure(undefined);
+    return result;
+  };
+  const refresh = async () => {
+    try {
+      await client.invalidateQueries({ queryKey: ["core", TICKETS_CORE_ID], refetchType: "none" });
+      await retry();
+    } catch (error) { setRefreshFailure(error); } // 原业务已确认，单独保留可重读的资料错误。
+  };
   const reconcile = async () => {
-    if (!failed) throw new Error("没有原操作可核对");
+    const operation = original.current;
+    if (!operation) throw new Error("没有原操作可核对");
     setSending(true);
     try {
-      const result = TICKETS_HTTP.receipt.response.parse(await request(`/operations/${String(failed.data.operationId)}`));
+      const result = TICKETS_HTTP.receipt.response.parse(await request(`/operations/${String(operation.data.operationId)}`));
       if (result.status !== "recorded") throw new Error("原收据暂不可用，请保留此页稍后再核对");
-      if (result.receipt.ticket.id !== ticketId || result.receipt.operationId !== failed.data.operationId) throw new Error("原收据对应另一工单或操作");
-      setFailed(undefined); setDirty(false); await client.invalidateQueries({ queryKey: ["core", TICKETS_CORE_ID] });
+      if (result.receipt.ticket.id !== ticketId || result.receipt.operationId !== operation.data.operationId) throw new Error("原收据对应另一工单或操作");
+      confirmedRevision.current = Math.max(confirmedRevision.current, result.receipt.ticket.revision);
+      // 核对处理/关闭不保存分派草稿；分派原结果也不能清掉等待中换成的另一成员。
+      if (operation.action === "assign" && form.getFieldValue("assigneeId") === operation.data.assigneeId) editor.markClean();
+      original.current = undefined; setFailed(undefined);
+      await refresh();
       return result.receipt;
     } finally { setSending(false); }
   };
-  const mutate = (action: "assign" | "start" | "close", extra: Record<string, unknown> = {}) => {
-    if (pending.current) return pending.current;
-    if (!query.data || query.error || query.isFetching) return Promise.reject(new Error("请先读取当前工单"));
-    if (failed && (failed.action !== action || Object.entries(extra).some(([key, value]) => failed.data[key] !== value)))
-      return Promise.reject(new Error("请先核对原操作"));
-    const data = failed?.data ?? { operationId: crypto.randomUUID(), expectedRevision: query.data.revision, ...extra };
-    const op = TICKETS_HTTP[action], input = op.body.parse(data);
+  const mutate = (action: TicketAction, extra: Record<string, unknown> = {}) => {
+    const current = latest.current.query;
+    if (!latest.current.host.canAccess(TICKETS_CORE_ID, permission(action))) return Promise.reject(new Error("当前工单操作不可用"));
+    const op = TICKETS_HTTP[action], waiting = pending.current;
+    if (waiting) {
+      if (waiting.operation.action !== action) return Promise.reject(new Error("正在处理另一工单操作，请等待完成"));
+      const input = op.body.parse({ ...extra, operationId: waiting.operation.data.operationId, expectedRevision: waiting.operation.data.expectedRevision });
+      return JSON.stringify(waiting.operation.data) === JSON.stringify(input)
+        ? waiting.request : Promise.reject(new Error("正在处理另一工单操作，请等待完成"));
+    }
+    if (original.current) return Promise.reject(new Error("请先核对原操作"));
+    if (!current.data || current.error || current.isFetching || latest.current.refreshFailure || current.data.revision < confirmedRevision.current)
+      return Promise.reject(new Error("请先读取当前工单"));
+    const input = op.body.parse({ ...extra, operationId: crypto.randomUUID(), expectedRevision: current.data.revision });
     setSending(true); setRejected(false);
-    const job = request(pathFor(op.path, ticketId), { method: "post", data: input }).then(async result => {
+    const response = request(pathFor(op.path, ticketId), { method: "post", data: input }).then(result => {
       const receipt = op.response.parse(result);
       if (receipt.operationId !== input.operationId || receipt.ticket.id !== ticketId) throw new Error("工单回执与原操作不一致");
-      setFailed(undefined); setDirty(false); await client.invalidateQueries({ queryKey: ["core", TICKETS_CORE_ID] });
+      confirmedRevision.current = Math.max(confirmedRevision.current, receipt.ticket.revision);
       return receipt;
     }).catch(error => {
       if (rejectedBeforeCommit(error)) { setRejected(true); void client.invalidateQueries({ queryKey }); }
-      else setFailed({ action, data: input });
+      else { original.current = { action, data: input }; setFailed(original.current); }
       throw error;
+    });
+    // 收据已可信确认后，刷新失败只是当前资料未更新，不能重新判定原业务为unknown。
+    const job = response.then(async receipt => {
+      await refresh();
+      return receipt;
     }).finally(() => { pending.current = null; setSending(false); });
-    pending.current = job;
+    pending.current = { operation: { action, data: input }, request: job };
     return job;
   };
+  const editor = useCoreForm({ form, onSave: values => mutate("assign", values), permissions: permission("assign"),
+    disabled: sending || Boolean(failed) || query.isFetching || Boolean(query.error || refreshFailure) || query.data?.state !== "open" });
+  const busy = sending || editor.busy;
   const actions: CoreAdminPageAction<Record<string, unknown>>[] = [{ id: "back", kind: "navigate", label: "返回工单", to: page("tickets") }];
   const current = query.data;
   if (failed) actions.push({ id: "reconcile", kind: "command", label: "核对原操作", intent: "review", emphasis: "primary",
-    permissions: permission("read"), disabled: query.isFetching || sending, execute: reconcile });
+    permissions: permission("read"), disabled: query.isFetching || busy, execute: reconcile });
   else if (current && !query.error) {
     const action = current.state === "open" ? "start" : current.state === "in_progress" ? "close" : undefined;
     if (action) actions.push({ id: action, kind: "command", label: action === "start" ? "开始处理" : "关闭工单", emphasis: "primary",
-      permissions: permission(action), disabled: query.isFetching || sending || !current.assigneeId,
+      permissions: permission(action), disabled: query.isFetching || busy || Boolean(refreshFailure) || !current.assigneeId || current.revision < confirmedRevision.current,
       confirmation: action === "close" ? "确认关闭这张工单？" : undefined, execute: () => mutate(action) });
   }
   const canAssign = host.canAccess(TICKETS_CORE_ID, permission("assign"));
   return <CorePage actions={actions}>
-    <UnsavedChangesGuard dirty={dirty || Boolean(failed)} busy={sending} />
-    <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
+    <UnsavedChangesGuard dirty={editor.dirty || Boolean(failed)} busy={busy} />
+    {Boolean(refreshFailure) && <Alert type="warning" title={locale === "en-US"
+      ? "The ticket operation was recorded. Reload the current details." : "工单操作已记录，当前资料未更新，请重新读取。"}
+      action={<Button onClick={() => { void retry().catch(setRefreshFailure); }}>{locale === "en-US" ? "Reload details" : "重新读取"}</Button>} />}
+    <QueryState loading={query.isPending} error={query.error} onRetry={retry}>
       {current && <><ListSection title={current.subject}><p>{t(stateNames[current.state])}</p><p>{current.description || t("未填写说明")}</p>
         <dl><dt>{t("创建者")}</dt><dd>{current.createdBy}</dd><dt>{t("受派成员")}</dt><dd>{current.assigneeId ?? t("尚未分派")}</dd></dl>
       </ListSection>
       {failed && <Alert type="warning" title={t("未能确认操作结果")} description={`${t("使用同一原操作核对，不要换键重做。")} ${String(failed.data.operationId)}`} />}
       {rejected && <Alert type="error" title={t("操作被拒绝，请读取当前状态并核对权限后再处理")} />}
-      {canAssign && current.state === "open" && !failed && <Form form={form} layout="vertical" onValuesChange={() => setDirty(true)} onFinish={values => mutate("assign", values)}>
-        <Form.Item name="assigneeId" label={t("受派成员ID")} rules={[{ required: true }]}><Input disabled={sending} /></Form.Item>
-        <SaveButton variant="secondary" label={t("分派工单")} disabled={query.isFetching || sending} form={form} onSave={values => mutate("assign", values)} />
+      {canAssign && current.state === "open" && !failed && <Form form={form} layout="vertical" {...editor.formProps}>
+        <Form.Item name="assigneeId" label={t("受派成员ID")} rules={[{ required: true }]}><Input disabled={busy} /></Form.Item>
+        <SaveButton variant="secondary" label={t("分派工单")} disabled={query.isFetching || busy || Boolean(refreshFailure)} form={form} onSave={editor.submit} />
       </Form>}</>}
     </QueryState>
   </CorePage>;

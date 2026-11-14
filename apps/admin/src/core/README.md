@@ -79,7 +79,7 @@ export function TicketEditor() {
 
 以上`saveTicket`/`openEditor`需要本Core自己的实现，例子不是已接通的工单业务。SaveButton及Form先校验，`submit`等待真实保存Promise；同一输入同步重入共用一次请求，等待中换输入不能另发。Form事件中的异步失败使用原反馈，直接调用submit仍向调用者拒绝。`dirty/busy/error`供业务呈现，恢复初始值可解除未保存状态；校验或保存等待中的新输入保留为草稿，离页/身份变更或撤权后的旧结果不标为已保存。主动调用submit前须自行使用 `form.validateFields()`，它接收的是已校验值。
 
-业务转换、冲突和unknown继续由Core解释，不在Hook猜测响应或重试。已可信读取原收据且当前草稿对应原操作时，才调用 `markClean()`，不能以按钮点击或超时清稿。工单新建页已有实际消费，unknown后保留原键只读核对，原结果暂缺不会重新创建。[工单表单](../../../../packages/example-tickets-core/admin/index.tsx)
+业务转换、冲突和unknown继续由Core解释，不在Hook猜测响应或重试。已可信读取原收据且当前草稿对应原操作时，才调用 `markClean()`，不能以按钮点击或超时清稿。工单新建和详情分派页已有实际消费，unknown后保留原键只读核对，原结果暂缺不会重发；同页另一业务动作的成功不代表这份表单已保存。已确认的业务收据与后续查询刷新分别处理，刷新失败沿只读查询恢复。[工单表单](../../../../packages/example-tickets-core/admin/index.tsx)
 
 ## 请求和缓存沿用公共边界
 
