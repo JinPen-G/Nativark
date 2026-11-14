@@ -30,7 +30,7 @@ AI 树按文件分工。AI-RD 独占 Git 索引、提交、推送、四册、sha
 
 | 负责人 | 当前范围 |
 | --- | --- |
-| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-23、25生命周期及AIN-15目标检查点／432dc六源已上传；PM固定main公共对象留原记录，不写main。独占四册／索引、shared／Guard／OpenAPI／provider及已交权后端／页面；固化15日期地点原重答两叶，保留Core商户代客企业403首因，核dev1最终消费者及原全文后计分，再接25故障合同／页面／可信装配。未知原操作不重派，原账不因网络槽释放核销；未核员工样式不夹带。 |
+| AI-RD／`01a1be68-da55-7f13-9536-79be07cb2093` | AIN-23、25生命周期及AIN-15目标检查点／432dc六源、2250ff两叶已上传；PM固定main公共对象留原记录，不写main。独占四册／索引、shared／Guard／OpenAPI／provider及已交权后端／页面；同名地点误撤回P2已完成最小修复、必要模拟／类型及独立源码核定，保留Core商户代客企业403首因，核dev1最终消费者及原全文后计分，再接25故障合同／页面／可信装配。未知原操作不重派，原账不因网络槽释放核销；未核员工样式不夹带。 |
 | AI-dev1／`01a1bf34-f061-74c2-b588-3e21385c4b49` | 原四品类正常／锁内缺货证据已交Root核接。当前独占 QuoteCandidateFields、ConversationQuoteSelection、TaskHumanApproval 及必要 feature-local OriginalOrderReceiptLink，补明确身份选择、Core受阻说明与原订单读回导航；完成必要模拟／类型后冻结交权，再转AIN-24留存／关联删除只读核定。不改Root公共参数叶／locale、四册、索引或Core权限，不将operator企业报价拒绝记正向。 |
 | AI-dev2／`01a1bf35-1ee5-7400-a97d-c0ebf5f9482c` | AIN-25故障Reader和performance挂接两叶已冻结；继续SLO参数／原版本回退与故障证据，Root补公共合同和原页面。空业务Outbox关联不推定已过Guard或积压0；不新建日志／表／worker，缺证据pending／not_recorded，unknown不计成功，取消善后不代表业务回滚。不写shared／provider／四册／索引，不新增测试。 |
 | 内部开业助手／`/root/opening_core_closeout` | 原AIN-22／容量阶段核定已交回；当前只读复核AIN-15日期／地点两叶的原确认、历史兼容及授权边界，不写源码／索引／四册／main，不独立重跑作者整套行为。结论不外推AIN-25整项或真实运行。 |

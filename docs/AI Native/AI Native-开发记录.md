@@ -30,7 +30,9 @@ dev1 已交的四品类原过程由 Root 读取原日志核接：`5f1d180357e538
 
 直接兼容组首次 `dd8de6ef1fdc767b195fe0105bffd04e69504b93a418ce24dc5379f6d834e826` 退出1，旧驱动只答客户／商品，漏新增必答地点，被原 `AI_INVALID_INPUT` 拒绝；仅调整内存驱动按原 contract 填全部 choice，再执行上述 `ff6fa…` 正反例通过，未删除断言或放宽输入。
 
-两叶 Git blob 分别为 `c964b313c11ae25e1af5a0ba19bd5653b8b4af62` 和 `62fbea9ef8aa579ec56a3a172810a4d9afbd27c0`。本片验证均为 `node --no-compilation-cache -`、本树原 offline preload、不可达 DATABASE_URL、内存 audit 与单一任务临时目录约束，无新增或扩写测试脚本。所有本片 Root job 已退出、audit0、临时目录未创建，无新增依赖／构建／数据库／后台服务残留。`node --no-compilation-cache scripts/validate-docs.cjs` 实际退出1，仅原导航历史三处及稀疏站点示例一处缺链；任务算术与本片链接无新增错误，`git diff --check`退出0。独立源码复核仍核这两叶，未将其未完结论当通过；真实数据库、浏览器／微信、模型供应商与支付由负责人后续实测。
+两叶原 Git blob 分别为 `c964b313c11ae25e1af5a0ba19bd5653b8b4af62` 和 `62fbea9ef8aa579ec56a3a172810a4d9afbd27c0`，连两册于 `2250ff927784225d0a71f9b94e78c38f21238eb6` 以未完整 AIN-15 的阶段提交上传，GitHub已回读一致。本片验证均为 `node --no-compilation-cache -`、本树原 offline preload、不可达 DATABASE_URL、内存 audit 与单一任务临时目录约束，无新增或扩写测试脚本。原阶段 Root job 已退出、audit0、临时目录未创建，无新增依赖／构建／数据库／后台服务残留。`node --no-compilation-cache scripts/validate-docs.cjs` 实际退出1，仅原导航历史三处及稀疏站点示例一处缺链；任务算术与本片链接无新增错误，`git diff --check`退出0。真实数据库、浏览器／微信、模型供应商与支付由负责人后续实测。
+
+独立只读复核随后找到同名地点误撤回P2：首模型漏地点名称，人类原选项选择B，后继仅补数量却首次提取同名B，旧hint anchor为undefined，原条件直接删除B的ID。Root实际叶反例 `1090da4c4e47dd74d6a2767116f98684507c0022f8eb863c21e9be40b5cc2392` 退出1，领取／归还地点均从B变undefined。后继最小修改使“新名称不同于原所选label”约束整个撤回条件；同名保留原ID，真正异名仍撤回ID／地址并重新明确选择。相同 stdin 在修复后退出0，覆盖领取／归还同名B保留、异名C撤回，以及原日期／数量／行指纹正反例，原正向模型2次、报价1张，audit0。单根／1236源 TypeScript5.9.3 类型命令 `61ff14d561f9307688932724b5b2fbc5c96a3ae6eded6fa7a8eea0e5ef6901d7` 退出0／零诊断。独立助手只读最终 `def2ad1202ca66ae2f82f4a4cc390e456f806237`，确认该P2闭合、原授权边界未改；未独立重跑行为。该反例和修复不授模型选择权，也不改变新日期或数量的原确认门槛；Root复验进程退出、临时目录未创建、无新增残留。本片仍不是AIN-15整项100%，企业委托和最后消费者另续。
 
 <a id="ain15-current-human-parameters-order-handoff-20261114"></a>
 ## AIN-15 当前人类参数、报价后继和一次批准开单（2026-11-14）

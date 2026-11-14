@@ -73,8 +73,10 @@ export function originalQuoteGoalParameters(current: AiQuoteGoalConditionsDraft,
       }
     }
     for (const [property, name] of [['locationId', 'locationName'], ['returnLocationId', 'returnLocationName']] as const) {
-      if (selected[property] && hints[name] !== undefined && (globalHintAnchors.get(property) !== hints[name]
-        || globalAnswerEpochs.get(property) !== clarificationEpoch && locationLabels.get(property) !== hints[name])) {
+      // A later extraction may name the already selected option for the first
+      // time. Only different words can withdraw that real human selection.
+      if (selected[property] && hints[name] !== undefined && locationLabels.get(property) !== hints[name]
+        && (globalHintAnchors.get(property) !== hints[name] || globalAnswerEpochs.get(property) !== clarificationEpoch)) {
         delete selected[property]; delete selected.deliveryAddressId;
       }
     }
