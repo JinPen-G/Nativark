@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { corePageKey, resolveCorePageLocation, type CoreAdminContribution } from "@rental-os/core-contracts";
 import {
   Alert, Button, CorePage, DataTableText, Form, Input, ListSection, QueryState, SaveButton, Select, Table, UnsavedChangesGuard,
-  useCorePageHost, useCoreRequest, useLocale, type CoreAdminPageAction
+  useCorePageHost, useCoreRequest, useCoreBinding, useLocale, type CoreAdminPageAction
 } from "@rental-os/admin/core";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket } from "@rental-os/example-tickets-core/contracts";
 import { TICKETS_HTTP } from "@rental-os/example-tickets-core/http";
@@ -197,10 +197,36 @@ function RegisteredTicketDetailPage() {
   return <TicketDetailPage ticketId={ticketId} />;
 }
 
+/** 工单没有额外初始化配置；首次设置使用平台绑定服务，重新进入只读取原绑定。 */
+export function TicketsSetupPage() {
+  const setting = useCoreBinding(TICKETS_CORE_ID), { locale } = useLocale();
+  const text = (zh: string, en: string) => locale === "en-US" ? en : zh;
+  const actions: CoreAdminPageAction<Record<string, unknown>>[] = [];
+  if (setting.original && setting.canManage) actions.push({ id: "reconcile", kind: "command", intent: "review", emphasis: "primary",
+    label: text("核对原设置", "Read original setup"), disabled: setting.busy, execute: setting.reconcile });
+  else if (setting.binding) actions.push({ id: "tickets", kind: "navigate", label: text("进入工单", "Open tickets"),
+    emphasis: "primary", to: page("tickets") });
+  else if (setting.canInitialize) actions.push({ id: "initialize", kind: "command", intent: "confirm", emphasis: "primary",
+    label: text("完成工单设置", "Complete ticket setup"), disabled: setting.busy || setting.loading || Boolean(setting.error),
+    execute: () => setting.initialize() });
+  return <CorePage actions={actions}>
+    <QueryState loading={setting.loading} error={setting.error} onRetry={setting.refetch}>
+      {!setting.canManage ? <Alert type="info" title={text("请联系租户管理员完成工单设置", "Ask your tenant administrator to complete ticket setup")} />
+        : setting.binding ? <p>{text("工单设置已完成，已有工单与操作记录继续保留。", "Ticket setup is complete. Existing tickets and operation records are retained.")}</p>
+          : <p>{text("工单不需要额外配置，完成设置后即可按当前权限使用。", "No additional configuration is needed. Complete setup to use tickets with your current access.")}</p>}
+    </QueryState>
+    {setting.original && <Alert type="warning" title={text("原设置结果待核对", "The original setup needs confirmation")}
+      description={`${text("请先核对原操作，暂未取得收据不表示可以重新提交。核对编号", "Read the original operation first. A missing receipt does not permit resubmission. Reference")} ${setting.original.operationId}`} />}
+    {!setting.original && setting.failure === "rejected" && <Alert type="error" title={text("设置被拒绝，请核对当前权限和状态", "Setup was rejected. Check your current access and state")} />}
+  </CorePage>;
+}
+
 /** 默认详情消费框架的登记参数；已有受控宿主可以沿原参数继续提供自己的详情组件。 */
 export function createTicketsAdmin(detail: ComponentType = RegisteredTicketDetailPage): CoreAdminContribution<ComponentType> {
   return { coreId: TICKETS_CORE_ID, implementationVersion: TICKETS_CORE_VERSION, pages: [
     { id: "tickets", path: "/tickets", title: "工单", menu: {}, permissions: permission("read"), component: TicketsPage },
+    { id: "setup", path: "/setup", title: { default: "工单设置", translations: { "en-US": "Ticket setup" } },
+      purpose: "configuration", menu: { order: 10 }, permissions: [], component: TicketsSetupPage },
     { id: "create", path: "/tickets/new", title: "新建工单", parent: "tickets", permissions: [...permission("read"), ...permission("create")], component: CreateTicketPage },
     { id: "detail", path: "/tickets/:ticketId", title: "工单详情", parent: "tickets", permissions: permission("read"), component: detail }
   ] };

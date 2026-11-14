@@ -68,7 +68,7 @@ export function TicketEditor() {
 
 请求仍经原Axios身份/刷新/信封，不另建客户端；离页、宿主代次变化会中止原请求，响应返回后再核会话代次和当前页面权限。React严格模式清理再挂载会建立新的中止信号，不把旧已中止信号带入新页面。该前端限制不授予服务端权限，也不能判断中止的业务写入是否已经提交。
 
-Core使用`queryKey`作为自己的查询前缀。正常列表、表单与详情复用本出口的原Table、QueryState、Form及UnsavedChangesGuard；已装配的业务需要取消/核对时由自身原操作收据负责，不在通用请求层重做。实际使用示例见[工单三页面](../../../../packages/example-tickets-core/admin/index.tsx)，没有另建壳或按钮样式。
+Core使用`queryKey`作为自己的查询前缀。正常列表、表单与详情复用本出口的原Table、QueryState、Form及UnsavedChangesGuard；已装配的业务需要取消/核对时由自身原操作收据负责，不在通用请求层重做。实际使用示例见[工单页面与首次设置](../../../../packages/example-tickets-core/admin/index.tsx)，没有另建壳或按钮样式。
 
 ## 管理Core开通与成员分配
 
@@ -85,7 +85,22 @@ import { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "@rental-os/admi
 
 开通/分配先读当前修订，停用/撤回显示对象和后果并确认。界面未保存业务表单，不另挂一个路由离开拦截器。发送前将原请求定位写入当前标签的sessionStorage，按原操作者、租户、对象和Core隔离；它只用于刷新或重新进入后核对，不能自授权、自动重发或证明已提交。明确的提交前拒绝解除本次核对引用；网络失败/未知结果只提供“核对原操作”。原收据暂缺时继续保留引用，取得收据后再读取当前状态。
 
-`coreManagementApi`提供登记目录、变更、绑定、当前事实和原收据的十个类型化方法，使用 `@rental-os/core-contracts` 唯一路径/schema和原HTTP信封。请求与迟到响应受当前会话代次和中止信号限制。可单独在自己的管理页使用这些方法，但不得根据本地缓存或清单开放服务端权限。当前面板和Controller已有真实代码，原主路由/Guard/部署链尚未挂接，浏览器与真实数据库验收仍待完成。
+`coreManagementApi`提供登记目录、变更、绑定、当前事实、原收据及会话/范围的类型化方法，使用 `@rental-os/core-contracts` 唯一路径/schema和原HTTP信封。请求与迟到响应受当前会话代次和中止信号限制。可单独在自己的管理页使用这些方法，但不得根据本地缓存或清单开放服务端权限。当前面板和Controller已有真实代码，原主路由/Guard/部署链尚未挂接，浏览器与真实数据库验收仍待完成。
+
+## Core首次设置
+
+Core在自己的配置页使用 `useCoreBinding(coreId, container?)`。Hook先读原绑定，当前租户管理权与成员Core使用权满足后调用 `initialize(configuration?)`；没有初始业务配置的Core省略参数。已有绑定直接复用，业务配置更新仍走Core自己的接口。[绑定Hook](useCoreBinding.ts)
+
+```tsx
+const setup = useCoreBinding("my-core");
+// 初始化动作返回原Promise；未取得当前状态或存在未知操作时不可提交。
+const completeSetup = () => setup.initialize();
+const readOriginal = () => setup.reconcile();
+```
+
+`busy`、`original`与当前读取/管理权限决定动作。网络或未知结果保留原operationId，只调用reconcile；缺原收据继续保留引用，不能换键重做。本标签sessionStorage只保存Core/容器及原键，不保存初始化配置或权限；刷新/重入仍读服务端收据。身份/Core范围变化中止旧请求，已有修订不被当成新的初始化。成功先刷新原绑定、标记范围查询失效，下次访问重新读取实际就绪。
+
+配置页面声明 `purpose: "configuration"`，用原CorePage呈现动作；公共壳与服务端授权仍沿原宿主。实际示例是工单设置页，它没有业务初始化配置，完成绑定后再进入工单。当前主AppRouter/Guard尚未接线，这些源码和离线验证不能称为已运行的完整接入。
 
 ## 读取登录成员的Core目录
 

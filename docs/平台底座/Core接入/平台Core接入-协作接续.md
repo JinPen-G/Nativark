@@ -60,6 +60,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。
    [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)消费原PageHeading/SaveButton/ConfirmAction，`@rental-os/admin/core`为正式源码包出口；[工单页面和Core请求](平台Core接入-开发记录.md#core-tickets-admin-20261114)已有实际源码消费者。真实注册/授权与主应用路由仍未接，下片消费这些适配，不复制通用壳或改变业务方法。
    [声明路由/导航消费](平台Core接入-开发记录.md#core-declarative-routes-20261115)新增createCoreRouteElements及同源菜单/面包屑生成，主Router展开原Route元素，主壳消费同源名称/链接。工单默认详情读取框架登记参数；配置页声明purpose=configuration，当前获权但未绑定/缺项时可配置。公共总入口仍未改，实际浏览器/Portal/回车及无Core壳待验。
+   [首次设置消费](平台Core接入-开发记录.md#core-tickets-first-setup-20261115)新增标准useCoreBinding及工单第四页setup，先读原绑定，当前管理权和成员分配满足后办理，未知只读原操作。双语配置页名称和purpose进入同源能力索引，原Auth/Guard/AppRouter接线仍待公共窗口；当前源码/离线调用不表示实际后台已运行。
 5. [本地打包/安装准备](平台Core接入-开发记录.md#core-local-package-install-20261114)、[固定Release获取](平台Core接入-开发记录.md#core-github-release-20261114)及[Topic查询](平台Core接入-开发记录.md#core-github-discovery-20261114)已有共用候选链。[固定仓库根清单/多Core索引](平台Core接入-开发记录.md#core-github-repository-20261115)已提供真实读取器和作者指南，下一步接宿主发现/安装管理界面与实际部署，以非租赁持久化业务验证完整安装。10/11由独立开发者或Agent只凭简明指南和业务要求接手，在干净宿主重现安装→授权→业务；12核收全功能前后对照、源码/API可理解性、底座跟随上游与Core单独升级、配置/定制/数据保留、回退/分发失败及原独立审查门槛。真实GitHub测试发行和实际远端安装仍待核验。
    [实际工单打包](平台Core接入-开发记录.md#core-tickets-package-20261115)已用真实编译文件形成30文件标准包并核待部署复用/篡改拒绝；pack:core统一构建与清单/API/手册生成，来源须固定提交且无源码差异。prepare成功仍pending，没有干净宿主业务/真实发行验收；源码说明及Node正式出口可供下一实际安装片消费。
    [固定来源子进程链](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)实测metadata打包、标准check、prepare/重复prepare退出0，重复覆盖退出1；相对包exports和Git根定位按真实Node行为核对。临时目录全部清理，实际运行安装/数据库/远端Release与独立接手未验。
@@ -73,7 +74,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 API贡献的空/双Core、命名/路径冲突、缺失/外部引用与包读取使用短命令验证，新增类型通过原合同检查；没有新增测试脚本。现有主应用OpenAPI仍未迁移，不能把独立组合器通过当作API整体可运行或接口文档已全部完备。
 
-能力目录4,458条唯一条目、查询分页、SaveButton正式导入、工单3页/7接口、同源清单/OpenAPI目录及随包指南生成经实际内存编译验证，原8组合同通过。当前3,611条缺少直接用途说明及5条动态元数据标记继续待整理；六个未检出应用/客户端包已按Git清单标明，检查模式会报告覆盖缺口。复杂动态注册/完整API字段和当前运行工具消费仍未完成。[范围就绪阶段](平台Core接入-开发记录.md#core-scope-readiness-20261115)给出当前扫描，[会话目录阶段](平台Core接入-开发记录.md#core-session-directory-20261115)和[索引覆盖与部署快照](平台Core接入-开发记录.md#core-index-deployment-snapshot-20261115)保留历史验证。
+能力目录4,486条唯一条目、查询分页、SaveButton正式导入、工单4页/7接口、同源清单/OpenAPI目录及随包指南生成经实际内存编译验证，原8组合同通过。当前3,632条缺少直接用途说明及5条动态元数据标记继续待整理；六个未检出应用/客户端包已按Git清单标明，检查模式会报告覆盖缺口。复杂动态注册/完整API字段和当前运行工具消费仍未完成。[首次设置阶段](平台Core接入-开发记录.md#core-tickets-first-setup-20261115)给出当前扫描，原[范围就绪阶段](平台Core接入-开发记录.md#core-scope-readiness-20261115)和[索引覆盖/部署快照](平台Core接入-开发记录.md#core-index-deployment-snapshot-20261115)保留历史验证。
 
 服务端注册的空/双Core、错误贡献、版本与schema拒绝、初始化输入边界已离线核对；授权/绑定MySQL事务源码和原身份适配已提供，实际部署迁移、主Auth/Guard/AppModule仍未接新合同。持续目标已生效，后续仍按原门槛逐片交付，必要公共文件窗口由PM协调。
 

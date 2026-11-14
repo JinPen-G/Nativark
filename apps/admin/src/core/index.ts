@@ -6,6 +6,7 @@ export { CoreTenantGrantPanel, CoreMemberAssignmentPanel } from "./CoreAccessPan
 export { coreManagementApi } from "./management-client";
 export { useCoreSession } from "./useCoreSession";
 export { useCoreScope } from "./useCoreScope";
+export { useCoreBinding } from "./useCoreBinding";
 export { createCoreRouteElements } from "./CoreRoutes";
 export type { CoreRouteOptions, CoreRouteComponent } from "./CoreRoutes";
 // 复用当前公共组件入口，Core无需导入宿主内部路径或复制交互实现。

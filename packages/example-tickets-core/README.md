@@ -1,6 +1,6 @@
 # 轻量工单 Core 示范
 
-`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配和三页面贡献；真实宿主授权、路由装配及部署尚未接线，当前不能直接作为完整工单应用安装使用。
+`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配及首次设置/列表/新建/详情四页贡献；真实宿主授权、路由装配及部署尚未接线，当前不能直接作为完整工单应用安装使用。
 
 ## 业务范围
 
@@ -24,7 +24,7 @@
 
 使用[服务端贡献](src/server.ts)的`createTicketsServer(authority)`供给Core注册表。它采用公共`CorePrincipal/CoreBinding`，拒绝其他Core、跨租户和业务容器；授权绑定由原宿主供给，省略业务初始化和AI工具。没有提供移除检查器时，宿主继续保留代码和历史收据读取者。
 
-后台直接调用 `createTicketsAdmin()`取得三页面贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，主组合通过[公共路由适配](../../apps/admin/src/core/README.md#宿主只装配一次)挂接，当前主应用实际接线仍待完成。[三页面](admin/index.tsx)
+后台直接调用 `createTicketsAdmin()`取得四页贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，主组合通过[公共路由适配](../../apps/admin/src/core/README.md#宿主只装配一次)挂接，当前主应用实际接线仍待完成。[页面源码](admin/index.tsx)
 
 `createTicketsHttpContribution()`从TICKETS_HTTP生成原Guard所需的七条政策，登记到当前部署目录的 `http`。创建工单标记startsNewBusiness，原操作收据标记original_receipt，其他查询/处理继续business；权限、分面和OpenAPI扩展来自同一合同。宿主按标准目录接入，Core作者不向原Guard追加工单专用分支。最终对象、幂等、停用/期限和本人原收据仍由工单服务核验。[HTTP合同](src/http.ts) · [平台标准](../core-contracts/README.md#登记core的http政策)
 
@@ -83,9 +83,13 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 [生成器](src/openapi.ts)从相同Zod/HTTP合同生成OpenAPI贡献，复用公共`coreOpenApiSchema`，不手工维护另一套字段。输出可给平台`composeCoreOpenApi`组合，也可随包离线阅读；标准包检查会核路径/schema命名空间和本地引用。Controller装配与真实HTTP权限仍待宿主验证。
 
-## 后台三页面
+<a id="后台三页面"></a>
 
-`@rental-os/example-tickets-core/admin`提供[列表、新建和详情](admin/index.tsx)，只从`@rental-os/admin/core`取得公共呈现、原组件和请求。`createTicketsAdmin(detailComponent)`返回同一页面注册贡献；detailComponent由受控宿主解析路由参数并传给`TicketDetailPage({ ticketId })`，宿主仍须包裹真实`CorePageHostProvider`。
+## 后台页面与首次设置
+
+`@rental-os/example-tickets-core/admin`提供[首次设置、列表、新建和详情](admin/index.tsx)，只从`@rental-os/admin/core`取得公共呈现、原组件和请求。`createTicketsAdmin()`返回同一页面注册贡献，默认详情使用框架登记参数；已有宿主可继续提供受控detailComponent，宿主仍须包裹真实`CorePageHostProvider`。
+
+测试宿主接通后，按“受控注册 → SaaS开通租户 → 租户管理者给成员分配Core → 工单设置 → 创建/分派/处理/关闭”使用。`/cores/example-tickets/setup`是已登记配置页，不要求工单业务先就绪；管理者需已获Core成员分配才能办理首次绑定。工单没有额外初始化配置，设置动作调用平台原绑定服务，已有绑定复用。结果未知只核对原设置收据，刷新或重入保留原键；设置成功后再进入实际工单列表。[平台绑定用法](../../apps/admin/src/core/README.md#core首次设置)
 
 列表支持状态筛选和显式分页，新建用声明式保存主操作，详情按当前状态声明处理/关闭，分派使用原Form/SaveButton。没有新CSS或外壳，页面标题从路由声明读取；普通成员仍经服务端数据范围。首次示范的分派填写已授权成员ID，后续原成员目录适配接通后可改为实名选择，当前不创建假人员列表。
 

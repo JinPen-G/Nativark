@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import ts from "typescript";
 import { DevelopmentCapabilityIndexSchema, type DevelopmentCapability, type DevelopmentCapabilityIndex,
   type DevelopmentSourceReference } from "./development";
+import { CorePageTextSchema, corePageText } from "./admin";
 import { RepositorySource, UNRESOLVED, isRepositorySourcePath, nodeDocumentation, readRepositoryJson, readRepositoryText,
   repositoryFiles, repositoryPath, sourceReference } from "./repository-source";
 
@@ -226,14 +227,16 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
             const id = source.value(objectProperty(page, "id"));
             const path = source.value(objectProperty(page, "path"));
             const title = source.value(objectProperty(page, "title"));
-            if (typeof id !== "string" || typeof path !== "string" || typeof title !== "string") {
+            const label = CorePageTextSchema.safeParse(title);
+            if (typeof id !== "string" || typeof path !== "string" || !label.success) {
               addIssue("page_metadata", repositoryPath(root, entry.file), "Core 页面需要可解析的标识、路径和名称");
               continue;
             }
-            capabilities.push({ id: `page:${coreId}:${id}`, name: title, kind: "page", owner: coreId, version: entry.version,
+            capabilities.push({ id: `page:${coreId}:${id}`, name: corePageText(label.data, "zh-CN"), kind: "page", owner: coreId, version: entry.version,
               sources: [{ ...sourceReference(page, root), symbol: id }], documentation: sourceDocuments(root, entry.owner),
               entry: { kind: "page", path: `/cores/${coreId}${path === "/" ? "" : path}` },
-              details: { registration: "source", unresolvedMetadata: source.unresolvedProperties(page, ["component"]) } });
+              details: { registration: "source", title: label.data, purpose: source.value(objectProperty(page, "purpose")) === "configuration" ? "configuration" : "business",
+                unresolvedMetadata: source.unresolvedProperties(page, ["component"]) } });
           }
         }
       }
