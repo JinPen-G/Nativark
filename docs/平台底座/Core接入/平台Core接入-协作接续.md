@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。开发能力索引固定于 `df10b7b972c954b8fff9903b48c06f73ec1e1400`，最新main运行修复62ca已由 `854b2990dcf089b0e14c0517404400447270c17f` 纳入并推送回读。当前[统一查询与同源Core目录](平台Core接入-开发记录.md#core-capability-index-20261114)、授权/成员分配与工单示范均有独立源码，原身份/部署/主应用组合继续待接。公共宿主接线按原候选和唯一作者窗口推进，核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+> 状态：负责人已授权开工并设定持续完成 PCH-01～12 的目标，当前推进01/02及不冲突的适配/样例片。最新main62ca已纳入并上传，原Core管理身份/角色/审计固定于 `05700e055763b36b9e66c713dd67bce048fd1ecc`。当前[统一查询](平台Core接入-开发记录.md#core-capability-index-20261114)、授权/绑定和[工单原宿主组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已有实际源码，真实部署及原AppModule/Guard/UI仍按公共窗口接线。核心基线见[全模型归属](平台Core接入-开发记录.md#core-ownership-baseline-20261114)与[页面声明](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -46,7 +46,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 ## 3. 下一入口与待交付
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[开发能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)已有实际入口和覆盖状态，源码用途/文档缺口继续按模块整改。完整行为基线、独立schema/迁移账和最终前后运行对照仍按原门槛交付。
-2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)提供初始化服务、原收据与MySQL句柄适配，下一步接真实权限及授权/范围/部署生产者，核对Rental和非租赁消费者、旧API身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)已有领域/MySQL、独立迁移、7操作Nest与同源OpenAPI/原收据只读、3页面贡献，真实宿主authority和主应用继续按公共窗口接线。
+2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、7操作Nest与同源OpenAPI/原收据只读、3页面贡献，主Guard/HTTP/后台仍按公共窗口接线。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已有`registerCoreServers`、授权/绑定schema、`composeCoreOpenApi`及[CoreAccessService/MySQL管理事务](../../../packages/core-host/README.md)。[原身份管理组合](平台Core接入-开发记录.md#core-original-management-20261115)已提供ALS/会话/租户角色和同事务审计适配，下一步接实际部署、HTTP和后台消费；旧API身份与Rental权限映射按各自合同保持。各公共片由PM核定唯一作者。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
    07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。

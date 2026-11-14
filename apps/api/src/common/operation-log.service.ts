@@ -3,7 +3,7 @@
  * Logging grants no permission or business/commit outcome; callers own the transaction. */
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { Prisma, AiAudience } from "@prisma/client";
-import type { CoreAccessReceipt } from "@rental-os/core-host";
+import type { CoreAccessReceipt, CoreBindingReceipt } from "@rental-os/core-host";
 import type { SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../modules/database/prisma.service";
 import { getRequestWorkspaceId } from "./request-identity";
@@ -74,6 +74,19 @@ export interface HttpMutationAuditInput {
   errorMessage?: string;
 }
 
+/** 已受权Core执行者提供的原操作关联，业务正文留在所属Core。 */
+export interface CoreBusinessAuditInput {
+  tenantId: string;
+  userId: string;
+  coreId: string;
+  targetType: string;
+  targetId: string;
+  operationId: string;
+  revision: number;
+  fingerprint: string;
+  state: string;
+}
+
 @Injectable()
 export class OperationLogService {
   constructor(private readonly prisma: PrismaService) {}
@@ -94,6 +107,28 @@ export class OperationLogService {
           fingerprint: receipt.fingerprint, actorTenantId: receipt.actor.tenantId, state: receipt.result.state,
           ...(receipt.kind === "member_assignment" ? { memberId: receipt.result.userId } : {}) }
       }
+    } });
+  }
+
+  /** 原初始化回执与绑定同事务，审计仅记录关联与修订，配置正文留所属Core。 */
+  async recordCoreBindingReceipt(transaction: Prisma.TransactionClient, receipt: CoreBindingReceipt): Promise<void> {
+    await transaction.operationLog.create({ data: {
+      tenantId: receipt.binding.tenantId, userId: receipt.actor.subjectId, workspaceId: null, rentalOrderId: null,
+      action: "core.binding.initialized",
+      detail: { operator: receipt.actor.subjectId, targetType: "core-binding", targetId: receipt.binding.bindingId,
+        metadata: { coreId: receipt.binding.coreId, operationId: receipt.operation.operationId, revision: receipt.binding.revision,
+          dataVersion: receipt.binding.dataVersion, fingerprint: receipt.fingerprint } }
+    } });
+  }
+
+  /** 原Core执行者的同事务审计，公共服务只消费关联与修订。 */
+  async recordCoreBusinessReceipt(transaction: Prisma.TransactionClient, receipt: CoreBusinessAuditInput): Promise<void> {
+    await transaction.operationLog.create({ data: {
+      tenantId: receipt.tenantId, userId: receipt.userId, workspaceId: null, rentalOrderId: null,
+      action: `core.${receipt.coreId}.changed`,
+      detail: { operator: receipt.userId, targetType: receipt.targetType, targetId: receipt.targetId,
+        metadata: { coreId: receipt.coreId, operationId: receipt.operationId, revision: receipt.revision,
+          fingerprint: receipt.fingerprint, state: receipt.state } }
     } });
   }
 
