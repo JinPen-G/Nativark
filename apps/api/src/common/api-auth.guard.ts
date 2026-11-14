@@ -29,7 +29,7 @@ import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } f
 import { AI_ORDER_EXPLANATION_HTTP_V2 } from '@rental-os/shared';
 import { AI_TASK_OPENING_PROPOSAL_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_DRAFT, AI_COUNTING_HTTP_OPERATIONS } from '@rental-os/shared';
-import { AI_CATEGORY_DRAFT_HTTP_CONTRACTS } from '@rental-os/shared';
+import { AI_CATEGORY_DRAFT_HTTP_CONTRACTS, AI_CATEGORY_PROPOSAL_HTTP, AI_CATEGORY_PROPOSAL_CONTRACTS } from '@rental-os/shared';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
@@ -47,8 +47,12 @@ import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabil
 
 const countingRouteAccess = new Map<string, typeof AI_COUNTING_HTTP_OPERATIONS[number][3]>(AI_COUNTING_HTTP_OPERATIONS.map(([action, _request, _response, access]) =>
   [`${AI_COUNTING_HTTP_DRAFT.method} /${AI_COUNTING_HTTP_DRAFT.basePath}/${AI_COUNTING_HTTP_DRAFT[action]}`, access] as const));
-const categoryDraftRoutes = new Map<string, string>(Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) =>
-  [`POST /ai-native/category-drafts/${operation}`, contract.write ? 'system:rental-category:edit' : 'system:rental-category:view'] as const));
+const categoryDraftRoutes = new Map<string, string>([
+  ...Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) =>
+    [`POST /ai-native/category-drafts/${operation}`, contract.write ? 'system:rental-category:edit' : 'system:rental-category:view'] as const),
+  ...Object.entries(AI_CATEGORY_PROPOSAL_CONTRACTS).map(([operation, contract]) =>
+    [`POST /${AI_CATEGORY_PROPOSAL_HTTP.basePath}/${AI_CATEGORY_PROPOSAL_HTTP[operation as keyof typeof AI_CATEGORY_PROPOSAL_CONTRACTS]}`, contract.permission] as const)
+]);
 const registeredCategoryDraftPermission = (method: string, path: string) => categoryDraftRoutes.get(`${method.toUpperCase()} ${path}`);
 
 interface RequestLike {

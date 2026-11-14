@@ -1,4 +1,6 @@
 import { AiTaskReadPolicyController } from './modules/ai-native/task-read-policy.application';
+import { AiCategoryProposalController } from './modules/ai-native/category-assist/category-proposal-http.application';
+import { AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AutomationExplanationController } from './modules/ai-native/automation/automation-explanation.controller';
 import { AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { TaskOpeningProposalController } from './modules/ai-native/task-opening-proposal.controller';
@@ -211,6 +213,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     StaffInspectionTaskPolicyController,
     ClientTaskPolicyController,
     AiCategoryDraftController,
+    AiCategoryProposalController,
     AiConversationController,
     TextCapabilityProbeController,
     AiInputCountingController,
@@ -302,6 +305,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     ...AI_NATIVE_STAFF_RECOGNITION_PROVIDERS,
     AI_NATIVE_CLIENT_POLICY_PROVIDER,
     AI_NATIVE_CATEGORY_DRAFT_PROVIDER,
+    AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER,
     ...AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS,
     AI_NATIVE_CONVERSATION_PROVIDER,
     AI_NATIVE_MEMBER_NAME_PROVIDER,

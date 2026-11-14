@@ -4,6 +4,7 @@ import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } f
 import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft } from './task-calendar-draft.application';
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
 import { AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider, readRuntimePublication } from './runtime-publication.configuration';
+import { AI_CATEGORY_PROPOSAL_REQUESTS, AI_NATIVE_CATEGORY_PROPOSAL_CONFIGURATION, composeCategoryProposalRequests } from './category-assist/category-proposal-http.application';
 import { createOriginalTaskStartAdmission } from './task-start-admission.composition';
 import { AI_NATIVE_WORKBENCH_DISPLAY_CONFIGURATION, readWorkbenchDisplayConfiguration,
   readCurrentWorkbenchDisplayConfiguration } from './workbench-display-generation.service';
@@ -374,6 +375,23 @@ export const AI_NATIVE_PLATFORM_MODEL_SETTINGS_PROVIDER: FactoryProvider = {
     composeRequestBoundPlatformModelSettings({ db, capabilityDb: db, guard, secrets })
 };
 export const AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION = Symbol('AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION');
+export const AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER: FactoryProvider = {
+  provide: AI_CATEGORY_PROPOSAL_REQUESTS,
+  inject: [PrismaService, ApiAuthGuard, SecretBox, ModuleRef, ConfigService, AI_NATIVE_GATEWAY_CAPACITY],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, secrets: SecretBox, moduleRef: ModuleRef,
+    config: ConfigService, capacity: GatewayCapacityPort) => {
+    // Resolve the existing controller lazily; construction reads no business
+    // data and does not activate a model or create any policy.
+    const controller = new Proxy({} as CategoryGovernanceController, { get: (_target, method) => (...args: unknown[]) => {
+      const original = moduleRef.get(CategoryGovernanceController, { strict: false });
+      const work = Reflect.get(original, method); if (typeof work !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return work.apply(original, args);
+    } });
+    return composeCategoryProposalRequests({ db, guard, secrets, controller, capacity,
+      // Removing a deployment section cannot revive the startup snapshot.
+      configuration: () => readRuntimePublication(config).configurations.categoryProposal });
+  }
+};
 export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
   provide: AI_CATEGORY_DRAFT_REQUESTS,
   inject: [ApiAuthGuard, ModuleRef, { token: AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, optional: true }],
@@ -384,6 +402,7 @@ export const AI_NATIVE_CATEGORY_DRAFT_PROVIDER: FactoryProvider = {
     // original instance lazily, after Nest has constructed its controller map.
     const controller = {
       catalog: (...args: Parameters<CategoryGovernanceController['catalog']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).catalog(...args),
+      previewCreation: (...args: Parameters<CategoryGovernanceController['previewCreation']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).previewCreation(...args),
       detail: (...args: Parameters<CategoryGovernanceController['detail']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).detail(...args),
       create: (...args: Parameters<CategoryGovernanceController['create']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).create(...args),
       patch: (...args: Parameters<CategoryGovernanceController['patch']>) => moduleRef.get(CategoryGovernanceController, { strict: false }).patch(...args),
@@ -1307,6 +1326,7 @@ export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
   runtimeConfigurationProvider(AI_NATIVE_STAFF_RECOGNITION_CONFIGURATION, 'staffRecognition'),
   runtimeConfigurationProvider(AI_NATIVE_STAFF_MANUAL_CONFIGURATION, 'staffManual'),
   runtimeConfigurationProvider(AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, 'categoryDraft'),
+  runtimeConfigurationProvider(AI_NATIVE_CATEGORY_PROPOSAL_CONFIGURATION, 'categoryProposal'),
 ];
 
 /** Current original-resource reads remain available independently of new-model

@@ -12,7 +12,7 @@ import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelPolicy, type TaskModelKind } from './task-model-input';
 import { TaskModelGatewayInputSource, type TaskModelMaterialRevalidation } from './task-model-gateway-input.source';
-import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.authority';
+import { PrismaModelStepEvidenceAuthority, type TaskModelOriginalProvenance } from './prisma-model-step-evidence.authority';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import type { AiTaskRunnerRepositoryCommandFactory } from '../runner/ai-task-runner.repository-adapter';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -32,6 +32,7 @@ type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'd
   /** Server-selected tool policy; never an Agent-controlled feature switch. */
   kind?: TaskModelKind;
   revalidateMaterial?: TaskModelMaterialRevalidation;
+  originalProvenance?: TaskModelOriginalProvenance;
   /** Explicit server scene assembly; policy management still requires its Guard and CAS. */
   planTools?: readonly PersistedTaskInputTool[];
   /** Recorded hosts only: the in-task counting chain (count the registered
@@ -104,7 +105,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
     }
   } : plainInvocations;
   const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
-    new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock);
+    new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock, input.originalProvenance);
   const commands: AiTaskRunnerRepositoryCommandFactory = {
     async register(plan, lease) {
       if (plan.toolCode !== tool || plan.toolVersion !== AI_TOOL_DRAFT_VERSION || plan.operation !== 'external_unknown') {

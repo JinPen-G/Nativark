@@ -90,6 +90,7 @@ export * from "./ai-client-policy-http-draft";
 export * from "./ai-original-policy-http-draft";
 export * from "./ai-retention-http-draft";
 export * from "./ai-category-draft-http";
+export * from "./ai-category-proposal-draft";
 export * from "./ai-client-quote-draft";
 export * from "./ai-client-quote-booking-draft";
 export * from "./ai-client-entry-draft-schemas";

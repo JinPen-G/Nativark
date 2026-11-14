@@ -73,6 +73,13 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   }
 
   private narrow(context: AiExecutionContext) {
+    if (context.scope.kind === 'platform') {
+      if (context.audience !== 'operator' || context.actor.kind !== 'saas_admin'
+        || this.kind || this.scene.orderExplainTool || this.scene.nativeToolResults) throw denied();
+      // An explicit platform authority supplied by the composition owns this
+      // Task. No absent workspace field is interpreted as a platform grant.
+      return { actorId: context.actor.userId };
+    }
     if (context.scope.kind !== 'workspace'
       || (context.audience === 'client' ? context.actor.kind !== 'customer'
         : context.audience === 'automation' ? context.actor.kind !== 'automation' : context.actor.kind !== 'user')
@@ -292,10 +299,13 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     const payload = JSON.parse(JSON.stringify(result));
     if (result.status === 'completed' && result.usage.kind === 'reported') return { kind: 'succeeded' as const, payload };
     if (result.status === 'failed') {
-      if (context.scope.kind !== 'workspace') throw denied();
-      const unsent = await readModelNonDispatchEvidence(this.db, {
-        scopeId: task.scopeId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
-        actorId: narrow.actorId }, invocation);
+      const owner = context.scope.kind === 'platform'
+        ? { scopeId: task.scopeId, scopeKind: 'PLATFORM' as const, actorId: narrow.actorId }
+        : context.scope.kind === 'workspace'
+          ? { scopeId: task.scopeId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: narrow.actorId }
+          : null;
+      if (!owner) throw denied();
+      const unsent = await readModelNonDispatchEvidence(this.db, owner, invocation);
       if (taskModelIdentity(await this.execution.authorize(binding.taskId)) !== input.identityHash) throw denied();
       // Step outcomes use the shared tool-error contract, not an internal
       // repository error code (which the transition authority must reject).

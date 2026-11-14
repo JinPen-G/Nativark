@@ -1,4 +1,5 @@
 import { AI_TASK_READ_POLICY_HTTP, AI_TASK_READ_POLICY_SCHEMAS } from '@rental-os/shared';
+import { AI_CATEGORY_PROPOSAL_HTTP, AI_CATEGORY_PROPOSAL_CONTRACTS } from '@rental-os/shared';
 import { STAFF_UPLOAD_OBSERVATION_HTTP, STAFF_UPLOAD_OBSERVATION_SCHEMAS } from '@rental-os/shared';
 import { STAFF_FULFILLMENT_RECEIPT_HTTP, STAFF_FULFILLMENT_RECEIPT_CONTRACT } from '@rental-os/shared';
 import { AI_TASK_ORIGINAL_READ_POLICY_HTTP, AI_TASK_ORIGINAL_READ_POLICY_ENTRY_PERMISSIONS } from '@rental-os/shared';
@@ -2488,6 +2489,11 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
       : operation === 'model-control'
         ? '明确为同一当前受权材料登记一次重新解释或排版，沿原 Task、Gateway 与累计预算执行模型。原操作重放只读原收据，不重报价格、重放业务工具或授予业务批准。'
       : 'Current operator-owned conversation metadata and original request admission only. No model start, task cancellation, approval or business commit; unknown uses the original operation/admission. Default-disabled provider requires migration and explicit server configuration.',
+    requestSchema: contract.request, responseSchema: contract.response })),
+  ...Object.entries(AI_CATEGORY_PROPOSAL_CONTRACTS).map(([operation, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_CATEGORY_PROPOSAL_HTTP.basePath}/${AI_CATEGORY_PROPOSAL_HTTP[operation as keyof typeof AI_CATEGORY_PROPOSAL_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `aiCategoryProposal_${operation}`, permissions: [contract.permission],
+    summary: 'Current SaaS category proposal over original platform Task/Gateway/ledger. Explicit generation only; candidates are not draft saves, publication or adoption. Unknown observes its original operation.',
     requestSchema: contract.request, responseSchema: contract.response })),
   ...Object.entries(AI_CATEGORY_DRAFT_HTTP_CONTRACTS).map(([operation, contract]) => ({
     method: 'post' as const, path: `/api/ai-native/category-drafts/${operation}`, tag: 'AI Native',

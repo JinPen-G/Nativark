@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain23-platform-proposal-task-gateway-20261114"></a>
+## AIN-23 平台品类提案原 Task、唯一 Gateway 与政策收据（2026-11-14）
+
+前置 `5bb65923f359ea41fe0803d82e86be47f0e65657` 已普通推送并回读 GitHub 一致。本片固定22份后端／公共源码，不夹 dev1 仍在验证的四份后台消费者、dev2 的生命周期观测、旧 goal 三叶或员工样式。dev1 的 [CategoryProposalApplication](../../apps/api/src/modules/ai-native/category-assist/category-proposal.application.ts) 已交回写权，blob `11783e64814d27dd0e40ceae5f8263a37c31a43a`、SHA-256 `4a27966b70ec4c13439d6283953e81facbabf69800cb89edb1daec5246854aef` 经 Root 实读一致；实际公开链路由 Root 独立模拟，作者类型结论不代替该组行为证据。
+
+[平台模型宿主](../../apps/api/src/modules/ai-native/category-assist/category-model-host.composition.ts)沿原 `platform.category.propose`、PLATFORM／SAAS_ADMIN／OPERATOR 归属创建不可变材料与原 Task／Run。prepare 不创建 Step、不签动作政策、不调用模型；明确 generate 才对原未动 QUEUED Task／首 Run 进行原事务和8项政策 CAS，持原租约登记／运行。应用使用原单模型持久运行器，未将 workspace／client 人类输入仓储挂到平台执行，也没有公开 resume 或从未知结果新建后继。原 request、registrationRef、材料、计划、原预算和当前权限共同绑定，unknown 只能读原 operation／reference，不换键重做。
+
+[平台 Gateway 组合](../../apps/api/src/modules/ai-native/category-assist/category-platform-gateway.composition.ts)复用原 router、Vault、能力证据、公共容量与唯一 PLATFORM 财务预算。调用与财务 tenant／workspace 为 null；OperationLog 的必需 tenant FK 仅取当前 SaaS 用户真实所属租户，不用于业务授权。模型仅返回受控 `category-proposal-1` JSON 文本；原持久 result.text 经严格解析后，候选再核 Core 原字段、策略／能力目录、required／conditional 能力及 creation-preview，不读取 adapter 私有输出，不保存／发布／采用业务事实。当前平台额度按 calls 计量；平台 tokens／money 配置仍不支持，不能声称已验证真实供应商费用。
+
+[公共请求应用](../../apps/api/src/modules/ai-native/category-assist/category-proposal-http.application.ts)登记 material／prepare／generate／read／operation／policy-read／policy-change／policy-operation，shared、OpenAPI、Guard、AppModule 与标准 provider 共用闭合合同。原 request.body 防止 DTO whitelist 隐藏伪造字段；原平台 Guard 与预览门保持。provider 每次读取当前 runtime publication 的 categoryProposal 段，移除该段不能复活启动快照。发布、Gateway 路由和 Vault 等待前后重核配置窗口、材料和当前权限。原历史有独立当前读权及完整 Task／Step／Invocation／dispatch／财务证明，不受旧执行政策超期或停止新生成影响，读取不续权或派发。
+
+独立技术复核发现 policy-change 正常成功缺少 `state`，会被 HTTP 响应 schema 拒绝而误报 unknown；本片将原保存结果明确包装为 configured，并保留原 CAS。原政策事务审计保存 savedPolicy 与 savedPolicyHash；policy-operation 只读取同管理人／scope／scene、原前修订及输入指纹匹配的历史审计，重核前后读权和行快照。当前可变政策不能替代原保存收据；旧审计无 savedPolicy 时保持 not_observed，不能自动解除未知状态。
+
+必要验证均使用本树原 offline preload、不可达 DATABASE_URL、内存审计和 `node --no-compilation-cache -`，没有新增或扩写测试文件。
+
+| 范围 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| 原平台 Task／Gateway／候选／停用原读 | `6a41ddbdf9f6ce6b3e0f1cfdb3557556e27daf563bf486059142911ce8f0f330`，退出0；1 Task／Run／Step、1模型、1 PLATFORM reservation settled，Core 写入0；停用保留合法原读，材料变化 stale、撤权拒绝。该组来源为明确端口 fixture。 |
+| 当前 publication 与原键未知 | `fdeba9da66534d75c7a5efc09b73a1f86f2075aa86ea20deb013030e886e04e6`，退出0；future／expired／disabled 拒新 prepare，原创建丢应答保持原 operation unknown，重复 prepare 不增 Task，成功后重复 execute 模型仍1。 |
+| Vault 最后等待期间 publication 过期 | `efe73d1c91c2aec7044bb637860b36be4e9f9a63ed1d27ce53905f61e4ed85c6`，退出0；第二 Run 新增模型0，第二原预留／Run 保持 unknown；恢复配置后同键 generate 仍不能重新执行。 |
+| 标准 provider／GlobalGuard／Controller／原 Core 材料至原 Task／Gateway | `661792838892a978c14adadbc1a0cac19f109377cfee8d864be4616701b50512`，退出0；调用正式 provider 工厂、懒委托原 CategoryGovernanceController／Service 目录和版本；1 Task／Run／Step、1模型、1 settled 平台账，Core 写入0，伪造 prepare 字段／撤权拒绝，材料改变 stale。只在内存宿主构造时注入模拟协议和 clock，未替换生产授权／材料应用。 |
+| 标准公开政策正常保存及丢 ACK 原收据 | `02492d7e5ef96397d7e4af002a41e569d030eda0b93160cb82360dbf0ce3c76d`，退出0；真实 provider／Guard／Controller→原政策 CAS：revision1→configured2→丢应答3，原 audit 可读回3，也可读原2；缺原收据 not_observed，伪造 hash 拒绝，读取不增审计、Task 或模型。 |
+| 最终当前公共生产类型 | `18b265417ddf1c19f09ca0ef099953e071c56d703a11cd6bcceb40167df5c005`，TypeScript5.9.3、16根／2010源、零诊断、退出0；包含最后 state／policy-operation／savedPolicyHash 修复。 |
+| 本片独立提交类型闭包 | `d8a9c10f6f8138fc69663f842a1bee2bb5e75e3cdf3c284a2315206d3e37dcf4`，TypeScript5.9.3、16根／2009源、零诊断、退出0；仅将并行的performance reader／shared lifecycle合同按前置5bb在内存读取，本片22源保持当前固定字节，不覆盖助手工作区。 |
+
+模拟能力通过原 ProviderCapabilityService／仓储显式记录 allowMock 的三项能力；默认要求 live 证据时曾正确拒绝。这不是标准 live 能力认证、真实 HTTP 模型或数据库测量。保留失败：初始驱动语法／SecretBox 字段／缺 profile 与 budget 表；旧通用 input 仓储拒 PLATFORM 后生产改用原单模型 runner；fixture 将 Prisma undefined 覆盖 null 引发财务拒绝，仅补原 schema 空归属语义；reader 原先误读私有 structuredOutput 已改为持久 result.text。政策原收据第一组用未规范化时间生成 inputHash，原严格比较拒绝；按真实页面 ISO 时间重核后通过，生产未放宽哈希。标准公开组先误断言 Core 目录全部能力均已实现、再误传 Controller 的 user 参数；改为原 Controller 请求和真实目录等价核对后通过。隔离类型驱动首次把源码直接插入字符串导致语法失败，保留失败并以内存编码修正，不创建临时脚本。旧 unknown 与时间债务没有因正向模拟被核销。
+
+AIN-23 保持75%：平台／空间原页入口、dev1 四叶实际消费者和原发布／资格／采用的完整组合仍待最终核接，不能把这组后端 stage 判成整项 G4。AIN-25 观测仍独立施工。原任务百分比及分母不变；main 仍由 PM 按固定阶段串行整合。所有本片验证进程已退出，audit0，单任务 `output/.tmp/ain21-public-continuity-20261114` 未创建，无依赖、生成 client／dist、过程附件或环境副本残留。`git diff --check`退出0；`node --no-compilation-cache scripts/validate-docs.cjs`退出1，保留导航历史三处及稀疏BusinessPreview一处既有缺链，无新增链接或任务算术错误，不伪造缺失附件。真实浏览器、微信、数据库、供应商与生产放行由负责人后续执行。
+
 <a id="ain23-dynamic-draft-public-contract-20261114"></a>
 ## AIN-23 动态品类草稿公共合同、平台门禁与审计响应（2026-11-14）
 
@@ -2070,7 +2099,7 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 | AIN-20 员工宿主 | 原pickup/return、manual gate与原检查提交；独立原账、失效草稿元数据及回答收据、取消请求/收敛/原修订观察接标准根，原G1/G2/G3合计75% | 原fork4同页重挂/切原收据/清除后旧引用不可复活增量已核接，pickup/return既有相关1/1及限定根strict/noEmit零诊断；标准传输/冷启动、相机录音上传、微信设备/弱网、完整履约与其他失效/历史载荷窗口仍缺，不称全部履约验收 |
 | AIN-21 客户安全场景 | 原客户身份／政策／Booking／任务／单账／独立历史原读，公开续接及Goal材料／人类回答来源／Core参数准备；`ff7bb06a`补本人保存地址双标准provider，[原五条核定](<#ain21-simulated-whole-closeout-20261114>)已完成 | 本轮模拟研发已收口，复用原匿名／本人／企业授权、Guard、费用与取消收据；历史读取不授重派，模型文本不批准预订。真实环境与生产开放另由负责人执行 |
 | AIN-22 客户两端入口 | 原公开续接／报价／本人订单与两端Goal共用场景合同，完整商品／单位／用量／身份投影到原Booking页面；[两端目标及收据恢复](<#ain22-goal-booking-original-consumers-20261114>)修旧cart自动报价、迟到写回、受理丢应答及成功Goal过期后明确新目标，五条与依赖已核齐 | 本轮模拟研发已收口；ENTRY跨端transfer等增量另核，支付成功仍只认原回调，真实浏览器／微信／数据库／供应商和生产开放由负责人执行 |
-| AIN-23 品类助手 | 413f0a99、30f7c1ce将原CategoryDraftApplication读取/建草稿/修改/校验/review接回标准HTTP、平台Guard与原预览门，原DTO/CAS不变；原G1/G2与本片G3合计75% | 发布/资格/采用的高风险确认及模型场景消费仍缺；动态能力依赖CAT-GOV，公开草稿入口不证明整项/动态品类已验收 |
+| AIN-23 品类助手 | 原动态草稿合同／Core条件能力、平台五操作Guard及审计已固定；[平台提案后端](#ain23-platform-proposal-task-gateway-20261114)接原Task／Run／单模型runner／唯一Gateway、PLATFORM calls预算、公开合同及当前publication，正常政策响应与丢ACK原CAS收据已核 | 保持75%；平台／空间原页入口、人工草稿／发布／资格／采用完整消费者仍待核接，平台tokens／money费用配置未支持；原Core治理内核／生产开放不由本项重建或授权，模拟不能称真实能力及费用验证 |
 | AIN-24 安全/隐私 | 既有威胁/负例/审计、内容保留及删除收据/恢复屏障；本轮已从实际标准Controller/provider和会话/知识消费者补核G3，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全开放端/工具攻击、动态代码隔离、外部副本及真实保留删除传播与整项验收仍缺；本轮没有独立二次审查 |
 | AIN-25 性能/SLO | `40b29e8a`原Controller/标准provider/请求组合→TaskPerformanceReader已接；`0392aa01`消费原Gateway计时审计，时长/资源/单账有界观察；2026-10-28纠正漏记G3，75% | 首卡/工具完整采样、成功/接管率、获批SLO/容量/成本参数及真实环境、限流/背压/公平性/告警和降级演练仍为G4；不把观测装配当指标已达标；本次[原计数成本消费者核验](<#ain-three-tree-consolidation-20261109>)已覆盖原page/计数receipt/summary关闭重验；旧总数断言已在[合并后复核](<#ain-post-consolidation-review-20261109>)按原Step/Run计量分开校正；平台计数和BYOK直接用量按正式两轨验证，不称真实SLO通过。 |
 | AIN-26 组合验收 | 各片离线证据保留，未当作本项整体通过 | 冻结构建/迁移/政策/素材，另授权真库、四品类及多端实际组合验收 |

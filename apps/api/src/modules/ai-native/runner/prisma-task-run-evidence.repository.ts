@@ -786,10 +786,11 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
           || !((task.ownerKind === 'USER' && ['OPERATOR', 'STAFF'].includes(task.audience))
             || (task.ownerKind === 'CUSTOMER' && task.audience === 'CLIENT')
             || (task.ownerKind === 'AUTOMATION' && task.audience === 'AUTOMATION'))) throw denied();
-      if (artifact.outcome === 'FAILED' && !platform) {
-        if (!task.scope.tenantId || !task.scope.workspaceId) throw unavailable();
-        const unsent = await readModelNonDispatchEvidence(this.db, { scopeId: task.scopeId,
-          tenantId: task.scope.tenantId, workspaceId: task.scope.workspaceId, actorId: task.ownerId }, invocation);
+      if (artifact.outcome === 'FAILED') {
+        if (!platform && (!task.scope.tenantId || !task.scope.workspaceId)) throw unavailable();
+        const owner = platform ? { scopeId: task.scopeId, scopeKind: 'PLATFORM' as const, actorId: task.ownerId }
+          : { scopeId: task.scopeId, tenantId: task.scope.tenantId!, workspaceId: task.scope.workspaceId!, actorId: task.ownerId };
+        const unsent = await readModelNonDispatchEvidence(this.db, owner, invocation);
         if (!unsent) throw unavailable();
         dispatchToken = unsent.dispatchToken;
         nonDispatchProof = unsent.proofHash;

@@ -37,6 +37,7 @@ const configurations = z.object({
   staffRecognition: configuration,
   staffManual: configuration,
   categoryDraft: configuration,
+  categoryProposal: configuration,
 }).strict();
 const publicationSchema = z.object({
   version: z.literal('ain-runtime-publication-1'),
