@@ -110,7 +110,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 
 ## Core 管理 HTTP 合同
 
-`CORE_MANAGEMENT_HTTP`给出当前平台管理面的十个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实及原操作收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
+`CORE_MANAGEMENT_HTTP`给出当前平台管理面的十一个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，目录、授权/成员/绑定变更、当前事实、原操作收据及移除预检分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
 
 | 操作 | 方法与相对路径 | 原管理要求 |
 | --- | --- | --- |
@@ -124,6 +124,7 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 | 当前Core范围绑定及修订 | POST `bindings/read` | 本租户管理权 |
 | 原租户Core授权操作只读核对 | POST `tenant-grant-operations/read` | 当前SaaS管理权与本人原操作 |
 | 原成员Core分配操作只读核对 | POST `member-assignment-operations/read` | 当前租户管理权与本人对该成员的原操作 |
+| Core移除阻碍只读预检 | POST `removal/read` | 当前SaaS管理员与租户管理权限 |
 
 `coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](../../apps/api/src/modules/core-host/README.md)
 
@@ -132,6 +133,8 @@ Core从实际接口方法/路径及权限声明生成 `CoreHttpContribution`，�
 提交管理变更前，页面先使用对应只读入口取得当前修订。返回 `recorded` 时使用事实中的 `revision`，尚未建立记录返回 `unavailable`，初次变更使用0。读取始终核当前主体和管理权限，停用/撤回状态及旧收据仍各自保留。绑定读取按租户/Core/容器定位，原操作核对继续使用单独的原收据入口。
 
 变更结果未知时，保存原operationId并调用对应的原操作只读入口。`recorded`返回原操作结果，之后另读当前事实；`unavailable`只表示暂未取得收据，不证明旧操作未提交，不能自动重发。原结果读取不创建锁行、事实或审计。[后台管理适配](../../apps/admin/src/core/README.md#管理core开通与成员分配)提供相同流程。
+
+移除预检读取 `CoreRemovalObservation`，状态为blocked或clear。Core的assessRemoval与平台实际准入/任务/回调/作业/历史依赖共同核对；缺检查器、未确认停新或依赖不完整均blocked。clear只说明当前只读观察无阻碍，实际部署须复核并执行停新/排空，不是删除/迁移许可，也不删除业务数据。[宿主检查](../core-host/README.md#移除代码前读取依赖)
 
 ## 读取当前成员可用的Core
 

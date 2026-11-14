@@ -68,15 +68,39 @@ export const CoreOperationReferenceSchema = CoreScopeReferenceSchema.extend({
 }).strict();
 export type CoreOperationReference = z.infer<typeof CoreOperationReferenceSchema>;
 
+export const CoreRemovalBlockerSchema = z.object({
+  kind: z.enum(["in_flight", "unknown", "callback", "job", "history"]),
+  code: id,
+  message: z.string().min(1).max(500),
+  operation: CoreOperationReferenceSchema.optional()
+}).strict();
 export const CoreRemovalAssessmentSchema = z.object({
-  blockers: z.array(z.object({
-    kind: z.enum(["in_flight", "unknown", "callback", "job", "history"]),
-    code: id,
-    message: z.string().min(1).max(500),
-    operation: CoreOperationReferenceSchema.optional()
-  }).strict())
+  blockers: z.array(CoreRemovalBlockerSchema)
 }).strict();
 export type CoreRemovalAssessment = z.infer<typeof CoreRemovalAssessmentSchema>;
+
+/** 完整平台依赖读取由原任务/回调/历史所有者供给；缺证据不能视为排空完成。 */
+export const CorePlatformRemovalObservationSchema = z.object({
+  admission: z.enum(["stopped", "accepting", "unknown"]),
+  complete: z.boolean(),
+  blockers: z.array(CoreRemovalBlockerSchema)
+}).strict();
+export type CorePlatformRemovalObservation = z.infer<typeof CorePlatformRemovalObservationSchema>;
+export const CoreRemovalQuerySchema = z.object({ coreId: CoreIdSchema }).strict();
+export const CoreRemovalObservationSchema = z.object({
+  scope: z.literal("removal-preflight"),
+  coreId: CoreIdSchema,
+  implementationVersion: CoreReleaseVersionSchema,
+  checkedAt: z.string().datetime(),
+  status: z.enum(["blocked", "clear"]),
+  blockers: z.array(CoreRemovalBlockerSchema)
+}).strict().superRefine((result, context) => {
+  if ((result.status === "clear") !== (result.blockers.length === 0))
+    context.addIssue({ code: "custom", path: ["status"], message: "移除预检状态须与依赖阻碍一致" });
+  if (result.blockers.some(blocker => blocker.operation && blocker.operation.coreId !== result.coreId))
+    context.addIssue({ code: "custom", path: ["blockers"], message: "移除阻碍的原操作须属于当前Core" });
+});
+export type CoreRemovalObservation = z.infer<typeof CoreRemovalObservationSchema>;
 
 /** 授权入口使用原操作键和当前修订；0 仅表示当前记录尚不存在。 */
 export const ChangeTenantCoreGrantSchema = z.object({

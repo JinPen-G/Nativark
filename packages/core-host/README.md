@@ -42,6 +42,12 @@ MySQL私有入口 `@rental-os/core-host/mysql-bindings` 导出 `createMysqlCoreB
 
 迁移按 [001授权锁与事实](migrations/001-core-access.sql) → [002绑定与原操作](migrations/002-core-bindings.sql) 登记，两条独立平台迁移只提供源码。范围键含Core/租户/容器类型与ID，原绑定和收据保存后持续保留。原收据读取只锁已存在的Core锁行并读事实，实际适配验证为零写入。
 
+## 移除代码前读取依赖
+
+`CoreRemovalService(catalogue, platformSource).inspect({ coreId })`只读汇合Core的assessRemoval与平台实际依赖观察，返回当前时间、实现版本和blockers。平台Source读取真实新准入状态、任务、回调/作业及历史读取依赖，并说明是否完整；不从租户停用、超时或无活动进程推断已排空。[检查服务](src/removal.ts)
+
+缺Core检查器、平台准入accepting/unknown或依赖不完整都会blocked；Core返回错误结构/错误Core的原操作则明确不可用。两个检查都完成、准入stopped且无阻碍时返回clear。clear不执行删除、迁移、业务取消或停用，实际部署仍需复核当前状态；在途/unknown只按原操作收尾。未提供平台Source时管理入口不可用，普通Core使用不因此增加空成功依赖。
+
 ## 构建和源码路线
 
 ```sh

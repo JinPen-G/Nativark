@@ -7,7 +7,7 @@ import { CoreManifestSchema } from "./manifest";
 import {
   BindCoreScopeSchema, ChangeMemberCoreAssignmentSchema, ChangeTenantCoreGrantSchema,
   CoreBindingOperationQuerySchema, CoreBindingSchema, CoreOperationReferenceSchema,
-  MemberCoreAssignmentSchema, TenantCoreGrantSchema
+  MemberCoreAssignmentSchema, TenantCoreGrantSchema, CoreRemovalQuerySchema, CoreRemovalObservationSchema
 } from "./lifecycle";
 
 export const CORE_MANAGEMENT_HTTP_BASE = "platform/core-host";
@@ -63,7 +63,9 @@ export const CORE_MANAGEMENT_HTTP = {
   readTenantGrantOperation: { method: "POST", path: "tenant-grant-operations/read", summary: "只读核对本人的原租户Core授权操作", permission: "system:tenant:manage",
     audience: "saas", request: CoreTenantGrantOperationQuerySchema, response: CoreTenantGrantObservationSchema },
   readMemberAssignmentOperation: { method: "POST", path: "member-assignment-operations/read", summary: "只读核对本人的原成员Core分配操作", permission: "system:user:manage",
-    audience: "tenant", request: CoreMemberAssignmentOperationQuerySchema, response: CoreMemberAssignmentObservationSchema }
+    audience: "tenant", request: CoreMemberAssignmentOperationQuerySchema, response: CoreMemberAssignmentObservationSchema },
+  assessRemoval: { method: "POST", path: "removal/read", summary: "只读核对当前Core移除阻碍", permission: "system:tenant:manage",
+    audience: "saas", request: CoreRemovalQuerySchema, response: CoreRemovalObservationSchema }
 } as const;
 
 export type CoreManagementHttpOperation = keyof typeof CORE_MANAGEMENT_HTTP;

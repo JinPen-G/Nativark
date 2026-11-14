@@ -40,7 +40,7 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 
 ## 平台管理 HTTP
 
-[CoreManagementController](core-management.controller.ts)消费上面的原管理/绑定组合以及[当前受控目录读取](original-core-catalogue.ts)，十条路径、输入/输出和接口资料共用 [CORE_MANAGEMENT_HTTP](../../../../../packages/core-contracts/src/management-http.ts)。模块由 `CoreManagementHttpModule.register(application)` 显式登记，application由原服务组合提供。
+[CoreManagementController](core-management.controller.ts)消费上面的原管理/绑定组合以及[当前受控目录读取](original-core-catalogue.ts)，十一条路径、输入/输出和接口资料共用 [CORE_MANAGEMENT_HTTP](../../../../../packages/core-contracts/src/management-http.ts)。模块由 `CoreManagementHttpModule.register(application)` 显式登记，application由原服务组合提供。
 
 [当前管理事实读取](original-core-management-reads.ts)提供授权、成员分配和绑定的修订，页面取得当前事实后再提交变更。三个只读操作沿同一HTTP声明和Controller消费，SaaS管理者才能读指定租户授权，租户管理者读取本租户成员及绑定。缺记录明确返回unavailable，停用成员的撤回事实仍可核对。所有读取在原权限锁下完成并在返回前复核会话。
 
@@ -65,3 +65,9 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 [原HTTP准入](original-core-http-access.ts)读取同一受控部署目录的 `http`，沿原normalizeRequestPath处理路径，未知方法/路径/当前分面在访问数据库前拒绝。原会话/租户主体和精确业务权限在原锁下核验；business还核当前租户Core授权、成员分配/部署和所需新业务订阅期限。原收据入口只做当前身份/动作粗准入，最终本人操作/对象可见性沿Core收据服务，不能借收尾开放普通业务。
 
 `composeOriginalCoreApplication`返回 `http`及 `authorizeHttp(method, url)`，主Guard在原签名会话和ALS建立后统一消费。当前适配只处理operator；staff/client继续原专用身份和受控适配，不因Core清单声明自动变成员或开放路由。旧Rental仍沿原路径/空间权限，不用这份新政策替代旧链。主Guard实际调用尚待公共窗口；没有调用或未装配Controller时，声明不是可用接口。
+
+## Core移除预检
+
+组合可以提供真实 `platformRemoval` Source，应用工厂将[原移除reader](original-core-removal.ts)接到 `POST removal/read`。当前SaaS签名主体及租户管理权在检查前后分别复核，调用Core/平台依赖检查时不跨事务持原人员锁。没有Source时返回503，不能提供恒真依赖读取；Core缺检查器或未停新/未完整核依赖时blocked。
+
+预检只返回阻碍和当前观察，clear也不删除代码或业务数据。实际停新、排空、原操作善后和移除由部署流程再次核定，主Guard/AppModule/OpenAPI消费沿原公共窗口办理。[宿主服务](../../../../../packages/core-host/README.md#移除代码前读取依赖)

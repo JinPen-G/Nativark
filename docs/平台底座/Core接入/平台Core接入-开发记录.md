@@ -155,6 +155,22 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-removal-preflight-20261115"></a>
+
+## Core移除依赖预检与原SaaS身份复核（2026-11-15）
+
+HTTP政策片固定 `d34db2491f140e54bd7e9c0fa52183459642feb2` 已上传并真实回读，main仍62ca。本片按原05生命周期范围实现只读移除检查，沿独占合同/宿主/API Core适配提供实际消费者；不把部署级移除与租户停用、成员撤权或订阅到期混同。
+
+[CoreRemovalService](../../../packages/core-host/src/removal.ts)汇合Core自有assessRemoval和平台准入/任务/回调/作业/历史依赖观察。缺Core检查器、准入accepting/unknown及平台依赖未完整核对都blocked，原结果不得借超时/无活动进程推断未执行。错误结构/错误Core原操作拒绝。只有stopped、完整及零阻碍时clear；clear是当前只读预检，不执行停新/排空/删除/迁移或授权部署。
+
+[正式观察合同](../../../packages/core-contracts/src/lifecycle.ts)复用原blockers并增加平台观察及预检投影，HTTP/OpenAPI增加十一管理操作中的removal/read。[原reader](../../../apps/api/src/modules/core-host/original-core-removal.ts)在检查前后复核原SaaS主体及租户管理权，跨Core检查不持人员锁；应用工厂只在真实platformRemoval Source提供时组合，缺依赖Controller503，普通业务不被迫安装空适配。
+
+stdin内存类型/实际服务与原主体核对退出0，合同35根、宿主7根、HTTP4根0诊断。缺检查器blocked、完整停新无阻碍clear、unknown/未停新/不完整多阻碍、错误贡献/异Core原操作拒绝通过；平台当前观察在Core检查后读取。原SaaS ALS/主体检查前后8次原账号读取、SQL/审计写入0，检查中角色撤回拒绝，缺平台reader503通过。OpenAPI十一操作同源生成，返回clear的限制明确写入资料。
+
+真实平台排空、停止新准入、AI/回调/作业/历史各所有者的完整依赖Source、实际数据库/HTTP和部署移除尚未完成。工单未提供移除检查器时准确blocked，不写恒真检查。原完整API类型仍沿前片审批拒绝边界，当前PCH进度未跨下一档，主共享入口授权未扩大。代码及短说明同片维护，验证经stdin/内存无新增测试脚本或运行环境。
+
+原8组合同测试退出0、skip/todo为0；七份相关文档607个链接/138个锚点定向核对退出0，新增问题0，正式需求/任务及百分比不变。差异格式检查退出0，原测试临时编译/夹具已清理核实，无新增进程或生成环境。固定成果随包含本节的中文Git提交上传，并以真实远端回读确认。
+
 <a id="core-http-policy-registration-20261115"></a>
 
 ## Core HTTP政策标准登记与原身份准入（2026-11-15）

@@ -1,5 +1,5 @@
 /** 原身份/审计/存储与单一部署目录的公共Core应用组合；行业HTTP、AI及作业由选中Core另行装配。 */
-import type { CoreDeployedCatalogue } from "@rental-os/core-host";
+import type { CoreDeployedCatalogue, CorePlatformRemovalSource } from "@rental-os/core-host";
 import type { CoreHostHttpApplication } from "./core-host.module";
 import { composeOriginalCoreManagement } from "./original-core-management";
 import { composeOriginalCoreBindings } from "./original-core-bindings";
@@ -8,11 +8,13 @@ import { createOriginalCoreCatalogueReader } from "./original-core-catalogue";
 import { composeOriginalCoreSessionReader } from "./original-core-session";
 import { composeOriginalCoreScopeReader } from "./original-core-scope";
 import { composeOriginalCoreHttpAccess } from "./original-core-http-access";
+import { composeOriginalCoreRemovalReader } from "./original-core-removal";
 
 type BindingsInput = Parameters<typeof composeOriginalCoreBindings>[0];
 export type OriginalCoreApplicationInput = Pick<BindingsInput, "database" | "users" | "subscription" | "authorizeContainer"> & {
   audit: BindingsInput["audit"] & Parameters<typeof composeOriginalCoreManagement>[0]["audit"];
   catalogue: CoreDeployedCatalogue;
+  platformRemoval?: CorePlatformRemovalSource;
 };
 
 /** 组合期间只创建适配实例，不读环境、连接数据库、启动作业或初始化租户/Core。 */
@@ -25,6 +27,7 @@ export function composeOriginalCoreApplication(input: OriginalCoreApplicationInp
       bindings: composeOriginalCoreBindings({ ...shared, registrations: input.catalogue.registrations,
         ...(input.authorizeContainer ? { authorizeContainer: input.authorizeContainer } : {}) }),
       registered: createOriginalCoreCatalogueReader(input),
+      ...(input.platformRemoval ? { removal: composeOriginalCoreRemovalReader({ ...input, platform: input.platformRemoval }) } : {}),
       reads: composeOriginalCoreManagementReads(shared)
     },
     session: composeOriginalCoreSessionReader(input),

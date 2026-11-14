@@ -1,5 +1,5 @@
 /** 平台Core管理的接口资料从正式HTTP输入输出生成，动态初始化配置由所属Core补充。 */
-import { BindCoreScopeSchema } from "./lifecycle";
+import { BindCoreScopeSchema, CoreRemovalObservationSchema } from "./lifecycle";
 import { CORE_MANAGEMENT_HTTP, CORE_MANAGEMENT_HTTP_BASE, CoreRegisteredSummarySchema } from "./management-http";
 import { CoreSourceSchema } from "./manifest";
 import { CoreVersionRangeSchema } from "./version";
@@ -22,7 +22,9 @@ export function createCoreManagementOpenApi(): CoreOpenApiContribution {
   for (const [key, declaration] of Object.entries(CORE_MANAGEMENT_HTTP)) {
     const name = `PlatformCore.${key}`;
     schemas[`${name}.Response`] = { type: "object", required: ["data", "requestId"], properties: {
-      data: key === "registered" ? { type: "array", items: registered } : coreOpenApiSchema(declaration.response), requestId: { type: "string" }
+      data: key === "registered" ? { type: "array", items: registered }
+        : declaration.response === CoreRemovalObservationSchema ? coreOpenApiSchema(CoreRemovalObservationSchema.innerType())
+          : coreOpenApiSchema(declaration.response), requestId: { type: "string" }
     } };
     const operation: Record<string, unknown> = {
       operationId: `platformCore_${key}`, summary: declaration.summary, tags: ["Platform Core"], security: [{ bearerAuth: [] }],
@@ -40,6 +42,7 @@ export function createCoreManagementOpenApi(): CoreOpenApiContribution {
         500: { description: "存储或提交失败，结果未知时按原操作查询" }
       }
     };
+    if (key === "assessRemoval") operation.description += " 返回的clear仅是当前只读预检，实际停止准入、排空和移除需部署流程复核；不执行删除或迁移。";
     if ("request" in declaration) {
       const schema = declaration.request === BindCoreScopeSchema
         ? coreOpenApiSchema(BindCoreScopeSchema.omit({ configuration: true })) : coreOpenApiSchema(declaration.request);

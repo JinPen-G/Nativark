@@ -3,7 +3,7 @@
  * 模块由受控AppModule组合登记，路径和接口资料复用同一公共合同。
  */
 import { Body, Controller, Get, HttpCode, HttpException, Inject, Module, Post, type DynamicModule } from "@nestjs/common";
-import { CORE_MANAGEMENT_HTTP, CORE_MANAGEMENT_HTTP_BASE, type CorePrincipal } from "@rental-os/core-contracts";
+import { CORE_MANAGEMENT_HTTP, CORE_MANAGEMENT_HTTP_BASE, type CorePrincipal, type CoreRemovalObservation } from "@rental-os/core-contracts";
 import { CoreAccessError, type CoreAccessService, type CoreBindingService } from "@rental-os/core-host";
 import { z } from "zod";
 
@@ -17,6 +17,8 @@ export interface CoreManagementHttpApplication {
     principals: { current(): CorePrincipal };
   };
   registered(): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.registered.response>>;
+  /** 只有实际平台依赖读取已提供时装配；缺依赖明确不可用，不补空成功。 */
+  removal?(input: unknown): Promise<CoreRemovalObservation>;
   reads: {
     tenantGrant(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readTenantGrant.response>>;
     memberAssignment(input: unknown): Promise<z.infer<typeof CORE_MANAGEMENT_HTTP.readMemberAssignment.response>>;
@@ -77,6 +79,14 @@ export class CoreManagementController {
   @Post(CORE_MANAGEMENT_HTTP.readMemberAssignmentOperation.path) @HttpCode(200)
   readMemberAssignmentOperation(@Body() body: unknown) {
     return this.respond(() => this.application.management.service.readMemberAssignmentOperation(this.application.management.principals.current(), body));
+  }
+
+  @Post(CORE_MANAGEMENT_HTTP.assessRemoval.path) @HttpCode(200)
+  assessRemoval(@Body() body: unknown) {
+    return this.respond(() => {
+      if (!this.application.removal) throw new CoreAccessError("core_unavailable", "平台移除依赖读取尚未装配");
+      return this.application.removal(body);
+    });
   }
 
   private async respond<T>(work: () => Promise<T>): Promise<T> {
