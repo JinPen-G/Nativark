@@ -100,6 +100,22 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 停用只关闭对应普通业务和新 Agent 任务；数据、绑定、成员撤权及原收据继续保留。恢复先读取原绑定并复核当前条件，不调用首次初始化。`CoreOperationReference` 只定位原操作，不能根据超时、程序重启或再次开通认定旧操作未执行。
 
+## Core 管理 HTTP 合同
+
+`CORE_MANAGEMENT_HTTP`给出当前平台管理面的五个操作，Controller和 `createCoreManagementOpenApi()` 共用同一份方法/路径与schema。前缀为 `/api/platform/core-host`，读目录、租户授权、成员分配、绑定和原初始化收据分别有自己的入口。[HTTP合同](src/management-http.ts) · [接口资料生成器](src/management-openapi.ts)
+
+| 操作 | 方法与相对路径 | 原管理要求 |
+| --- | --- | --- |
+| 当前Core登记目录 | GET `registered` | SaaS管理员与租户管理权 |
+| 租户Core开通/停用 | POST `tenant-grants` | SaaS管理员与租户管理权 |
+| 成员Core分配/撤回 | POST `member-assignments` | 本租户账号管理权 |
+| 首次绑定/复用绑定 | POST `bindings` | 本租户管理权、当前Core/成员使用权和初始化范围 |
+| 原初始化操作只读核对 | POST `binding-operations/read` | 当前租户管理权与本人原操作 |
+
+`coreManagementHttpPolicy`用于原Guard消费准确方法/路径的管理政策。当前API有对应Controller/原主体服务组合，实际主Guard/AppModule接线沿PCH宿主片办理。[API适配](../../apps/api/src/modules/core-host/README.md)
+
+成功响应沿原 `{ data, requestId }` 信封，原键冲突与对象修订冲突返回409，当前权限不足403，部署/数据未就绪503，输入400和会话401分别表达。初始化配置由所选Core自己的schema解析，接口资料链接该Core配置说明。目录投影只给正式显示字段，完整清单沿受控注册维护。
+
 ## 声明页面与操作
 
 [页面合同](src/admin.ts)已提供 `CorePageDescriptorSchema`、`CoreAdminContribution`、`CorePageAction` 和 `registerCoreAdminPages`。路由描述中的ID/局部路径、名称、可选父级与菜单、权限是同一份数据；组件由Core代码直接绑定。统一注册后路径位于 `/cores/<id>/...`，重复页面、同形路径、缺上级/循环或清单未声明的权限会拒绝，失败不返回部分注册表。

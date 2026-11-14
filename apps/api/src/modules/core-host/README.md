@@ -21,3 +21,9 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 [工单组合](original-tickets-host.ts)消费 `@rental-os/example-tickets-core` 正式服务端及MySQL出口，注册的业务权限、原主体/成员使用权、当前绑定和本租户受派者分别核验。创建工单沿原订阅期限，新建暂停后已获权工单的处理/关闭仍由自身业务状态与权限决定。停用后的原收据只读核对本人操作和当前对象可见性。普通业务审计消费Core提供的原操作关联，公共OperationLog继续使用通用输入。
 
 新增Core可复用原主体和Core使用权适配，并提供自己的业务权限、范围、初始化和原收据语义。API组合构建先编译本树Core合同/宿主和选中示范模块，实际无Core独立构建由PCH宿主片落实。
+
+## 平台管理 HTTP
+
+[CoreManagementController](core-management.controller.ts)消费上面的原管理/绑定组合以及[当前受控目录读取](original-core-catalogue.ts)，五条路径、输入/输出和接口资料共用 [CORE_MANAGEMENT_HTTP](../../../../../packages/core-contracts/src/management-http.ts)。模块由 `CoreManagementHttpModule.register(application)` 显式登记，application由原服务组合提供。
+
+目录读取在原SaaS会话与角色锁下完成，返回前复核当前权限。租户授权和成员分配分别通过其原服务验证。Controller将已知schema/权限/冲突/不可用映射到对应状态码，未知错误沿原异常链抛出。原主Guard需要消费同源 `coreManagementHttpPolicy`，原AppModule明确登记本模块，接口组合消费 [同源OpenAPI](../../../../../packages/core-contracts/src/management-openapi.ts)，这些公共入口由原窗口核定。

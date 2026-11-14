@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-management-http-20261115"></a>
+
+## Core管理单源HTTP与接口资料（2026-11-15）
+
+部署目录固定 `416fb603dcc85da6b41b4a3a12693f3b254e23de` 已推送并实际远端回读一致。本片新增[管理HTTP合同](../../../packages/core-contracts/src/management-http.ts)及[同源OpenAPI生成](../../../packages/core-contracts/src/management-openapi.ts)，提供当前注册目录、租户授权、成员分配、初始化绑定、原收据只读五个操作。方法/路径、请求/响应、管理分面和权限来自同一正式声明，Controller与资料共用，成功信封沿原data/requestId。
+
+独占API模块新增[Controller/受控模块](../../../apps/api/src/modules/core-host/core-management.controller.ts)消费原管理/绑定服务，以及[原目录读取](../../../apps/api/src/modules/core-host/original-core-catalogue.ts)锁当前SaaS主体/角色并投影正式显示字段。schema/权限/冲突/不可用分别有已知状态，未知错误沿原链抛出。原AppModule/Guard/OpenAPI总组合尚未取得新窗口，此片只提供其正式消费者；主Guard准确方法/路径政策可直接消费 `coreManagementHttpPolicy`。
+
+30根合同类型0诊断，5路径/9schema及政策映射同源核对通过，绑定配置由Core唯一schema处理。stdin实际Controller与Nest元数据核5条登记路径、服务主体传递、schema400/权限403/冲突409/不可用503及模块绑定，退出0。目录读取实际原ALS/主体链核SaaS可读、租户管理员拒绝和显示投影，退出0；首读严格summary收到完整manifest报未知字段，修为明确选字段投影后通过，原严格schema保持。
+
+API969根/2,162个源文件、Shared121/合同30/宿主6/工单10/MCP59根均0诊断，Prisma独占无引擎生成0/守卫0违规。所有生成器/Client临时文件35个38,375,949字节finally删除并确认不存在。真实主路由/服务/数据库/页面验收继续待宿主接线，原测试数量保持必要范围。
+
+原8组合同退出0，4份文档407条链接新错0，diff空白检查退出0。目录投影修正后复核真实原主体读取，新增函数仅使用正式清单类型及同一summary schema。暂存范围为本片正式合同、Controller/原读取和模块说明及原记录/接续。
+
 <a id="core-deployed-catalogue-20261115"></a>
 
 ## 受控部署注册与实际迁移可用性（2026-11-15）

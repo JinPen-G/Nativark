@@ -10,3 +10,5 @@ export * from "./update";
 export * from "./guide";
 export * from "./admin";
 export * from "./schema";
+export * from "./management-http";
+export * from "./management-openapi";
