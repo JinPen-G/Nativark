@@ -14,6 +14,10 @@
     "./package": {
       "types": "./dist/package.d.ts",
       "default": "./dist/package.js"
+    },
+    "./archive": {
+      "types": "./dist/archive.d.ts",
+      "default": "./dist/archive.js"
     }
   },
   "scripts": {

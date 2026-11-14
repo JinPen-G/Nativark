@@ -7,3 +7,4 @@ export * from "./openapi";
 export * from "./lifecycle";
 export * from "./server";
 export * from "./update";
+export * from "./guide";

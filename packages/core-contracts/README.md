@@ -105,9 +105,23 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 
 退出码 `0` 表示预检通过，`1` 表示候选被拒绝，`2` 表示输入/用法或读取失败。这个阶段只输出候选，后续还须核对包摘要、用户改动、在途/历史执行依赖，按授权执行迁移、组合构建与切换并取得实际验证。锁文件不存用户配置、Key 或租户授权；本工具不自动写文件或部署，也不能据此宣称更新已经成功。
 
+## 生成随包指南与归档
+
+`CORE_GUIDE.md` 从任务册的快速入口和Agent模板生成。传入Core清单与含 `repository`/`commit` 的底座来源JSON，底座提交必须已在当前本地Git中存在；来源不含凭据。
+
+```sh
+node packages/core-contracts/dist/generate-guide.js <Core清单JSON> <底座来源JSON>
+```
+
+命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, taskDocument, platformSource)`；所有引用指向指定提交。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。完整页面接入要求见[页面声明](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#declarative-page-contract)，目前既有页面原语仍待正式Core适配接线。
+
+Node专用出口 `@rental-os/core-contracts/archive` 提供 `createCoreArchive(files)` 与 `readCoreArchive(bytes, expectedSha256)`，采用USTAR+gzip。相同文件按固定排序、权限和时间打包；校验整个压缩包SHA-256后返回内存文件。首版最多5000文件、单文件32MiB、解压总量128MiB，只接普通文件，不接PAX/软硬链接、目录条目、重复或越界路径。包内禁止实际 `.env`、Git元数据和node_modules；保留 `.env.example` 模板入口。
+
+当前归档接口只接受内存文件集合，尚无目录打包、下载安装或解包写入命令。它不加载Core代码；包完整性不能证明代码经过审核。使用生成器与归档不等于五步接入已完成，实际宿主、授权和独立接手仍按对应任务验证。
+
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [升级预检](src/update.ts)。[包检查命令](src/check.ts) → [目录检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检。两个命令均不加载Core业务代码。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[归档](src/archive.ts)单独走Node出口；这些入口不加载Core业务代码。
 
 ```sh
 npm test -w @rental-os/core-contracts

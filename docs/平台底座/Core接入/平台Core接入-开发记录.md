@@ -6,9 +6,9 @@
 
 ## 1. 依据与来源
 
-- [需求v1.3](平台Core接入-需求.md)、[开发任务v1.3](平台Core接入-开发任务.md)。
+- [需求v1.4](平台Core接入-需求.md)、[开发任务v1.4](平台Core接入-开发任务.md)。
 - [接口与生命周期设计](平台Core接入-开发任务.md#contract-design)、[接入指南](平台Core接入-开发任务.md#integration-guide)：随本次需求澄清更新，仍为实施准备，非已发布SDK/API。
-- 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.3正文。
+- 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.4正文；v1.3前像引用本次固定Git，不另复制。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
 ## 2. 文档定界与接手准备阶段（2026-10-31）
@@ -144,6 +144,32 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 本片是01/02的首个独立实现阶段。完整数据所有者/迁移链、所有消费者逐项核验和业务基线尚未完成，02的运行模块/当前授权/生命周期/受限事务及真实双Core消费者也未齐；因此不凭新增文件或8组测试提高原任务百分比，仍由原门槛核收。完整API构建、真实持久化/浏览器、独立接手、迁移/恢复和独立审查未实施。后续公共窗口与具体下游入口见现行接续。
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
+
+<a id="core-declarative-pages-20261114"></a>
+
+## 完整后台外壳与声明式业务页面澄清（2026-11-14）
+
+负责人在持续拆分过程中明确：左侧菜单区域、右侧内容面包屑整行、铃铛/休息/收展都属于底座，无业务Core时保留；Core只提供业务菜单、正文和业务主按钮。随后要求开发者在对应路由页面声明主操作，即使用已设计好的按钮与交互，并将减少重复工作的原则推广到其他常见页面能力。以上为本次修订依据，无需重问已确认产品意图。
+
+需求/任务升为v1.4，新增需求1.9、扩充原R07/R11/A07/A11，以及原02/07/11、任务[页面声明合同](平台Core接入-开发任务.md#declarative-page-contract)、五步入口和Agent模板；原12项任务行、编号、依赖、顺序和百分比不变。要求覆盖单源路由/菜单/面包屑/标题、页面主次动作、原保存/确认语义、标准列表/详情/表单、请求/错误/权限状态与可选通知文件接点；特殊业务可提供正文，仍复用公共壳。公共设置自身的保存仍可用，“无业务主按钮”不删除公共设置操作。无Core保留辅助面板收展及未开通信息，不开放通用业务Agent。
+
+只读追踪固定main源码：[BusinessShell](../../../apps/admin/src/components/BusinessShell.tsx)拥有侧栏/页头/内容/动作插槽，[AppShell](../../../apps/admin/src/components/AppShell.tsx)传入实际面包屑与休息/铃铛/右面板；[PageHeader](../../../apps/admin/src/components/PageHeader.tsx)→[WorkspaceHeader](../../../apps/admin/src/components/workspace/WorkspaceHeader.tsx)已将页面标题/操作送入顶部，[ActionButton/SaveButton](../../../apps/admin/src/components/ui/ActionButton.tsx)有原异步状态、表单校验与回车关联。继续封装这些真实入口，不复制按钮或另建框架。当前PageHeader仍导入固定导航/认证，通知Provider直接读取Rental待办与AI演示，Copilot可用性依workspace，故尚无跨Core独立页面SDK；前端源码本片只读。
+
+待07的具体文件补充到原公共候选：BusinessShell/WorkspaceHeader/PageHeader及按钮的正式出口、AppShell中的注册组合、navigation/AppRouter与认证缓存、NotificationProvider业务来源和RestProvider公共身份边界、CopilotLayout外壳/业务内容分离。原后台作者的主题/布局/表单/动效源保留，由PM协调唯一改动窗口；不向其他对话主动发消息，也不通过新页面旁路宣称完成。
+
+修订前两册及接续原文保存于 `d01561912cc6644776cbceea4971508eeb4c99ba`。该提交已合入最新main `ee281955161ffcf9b9d166be45972d48fbe0191f` 的两份服务恢复记录，合入前后本片五个包/指南WIP的SHA-256全部相同，随后普通推送并回读远端为d01561912。原main运行/数据库待迁移问题沿管理后台原记录保留；本片没有代执行真实迁移。
+
+本阶段5份现行文档/模块说明定向检查371个本地/外链声明、66个本地锚点和45张表，新增问题0；外链仅核语法，未访问网络。原12项任务行逐字对照相同，依赖/百分比不变；`git diff --check`退出0。没有页面运行、独立接手或真实授权验证，不以文档确认记07完成。
+
+<a id="core-guide-archive-20261114"></a>
+
+## 随包指南生成与标准归档原语（2026-11-14）
+
+上一阶段独立升级预检固定于 `6ba45c0bb59c454bf261a757912344dfbc4626f3`，已推并核定实际远端。本片[指南生成](../../../packages/core-contracts/src/guide.ts)从原任务快速入口与Agent模板取文、补Core实际入口和固定版本链接；[命令](../../../packages/core-contracts/src/generate-guide.ts)使用本地指定提交的任务原文，将生成内容输出到stdout，不覆盖已有Core文档。缺锚点拒绝，不手写第二份长期指南；正式宿主未接线仍明确标记，不把五步设计称现成SDK。
+
+[归档原语](../../../packages/core-contracts/src/archive.ts)采用USTAR+gzip、固定顺序/权限/时间，整个包SHA-256固定。通过Node专用`@rental-os/core-contracts/archive`出口使用；只支持普通文件、UTF-8及有界包大小，不收PAX/软硬链接/目录记录、重复/越界路径、实际环境配置或node_modules。先校验整包摘要和解压上限，解析只返回内存文件；不写解包目录、不下载、不安装或执行Core。实际打包目录入口及待安装区写入继续后续交付。未增加压缩依赖或安装包，使用Node原生gzip。
+
+原单一合同入口包含新增源码完整类型，8组通过/退出0。stdin核对相同输入包字节一致、UTF-8/空文件往返、错误摘要/越界/链接/大小写/父子路径冲突/截断拒绝，以及固定任务原文生成指南、元数据转义、缺锚点拒绝和固定链接（退出0）。未新增测试脚本或落地压缩包；本树合同临时目录已删除。此为归档原语/资料生成证据，完整安装、干净宿主及独立接手未验。
 
 <a id="core-update-preflight-20261114"></a>
 

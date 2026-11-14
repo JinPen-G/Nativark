@@ -8,7 +8,7 @@
 
 N/A/B 原稿完整保留在 `8f4c45b3a5f637256afac9363ca13a4cd2232a5c` 及当前资产目录，[N保留记录](平台Core接入-开发记录.md#nativark-logo-n-retained-20261114)与[两版设计记录](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)保留来源及验证。运行Logo的Preview黑白适配归原后台作者，本片不接管品牌设计。
 
-> 正式依据：[需求v1.3](平台Core接入-需求.md)、[开发任务v1.3](平台Core接入-开发任务.md)。原PCH编号、依赖、顺序及G1～G4计分保留，新增标准化/兼容/源码/API/分发与独立更新要求已映射到原任务和验收；文档准备不计研发进度，不继承AIN/CAT-GOV完成度。
+> 正式依据：[需求v1.4](平台Core接入-需求.md)、[开发任务v1.4](平台Core接入-开发任务.md)。原PCH编号、依赖、顺序及G1～G4计分保留；完整外壳归属与声明式页面/操作已补入原任务。文档准备不计研发进度，不继承AIN/CAT-GOV完成度。
 
 负责人要求接入手册与每片代码同步，实际文件/命令/预期结果/错误处理应能直接交给开发Agent。当前可执行的清单/包检查见[契约包说明](../../../packages/core-contracts/README.md)，完整五步业务接入仍按原任务逐片落地。只做必要测试的规则已补入根[AGENTS](../../../AGENTS.md#修改验证与交付)。
 
@@ -20,6 +20,8 @@ N/A/B 原稿完整保留在 `8f4c45b3a5f637256afac9363ca13a4cd2232a5c` 及当前
 
 Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内部；AI工具可选，缺少时普通后台可用，Agent不能查询/操作该Core。多Core导航可切换或分组，权限、状态与缓存须隔离。首期同仓独立模块和受控组合构建，可同进程同库；跨Core互通本期只固定接点，具体场景留未来。
 
+整个管理后台外壳归底座，包括左栏、内容容器、顶部面包屑/页名整行及铃铛/休息/面板收展；无Core只缺业务贡献，公共设置及自身保存可用。Core作者在自己的路由/页面声明操作，框架使用既有主按钮、表单/列表/详情和请求反馈；不要求复制样式或修改底座内部。实现与验收见[页面合同](平台Core接入-开发任务.md#declarative-page-contract)，实际源码边界见[本次澄清](平台Core接入-开发记录.md#core-declarative-pages-20261114)。
+
 拆分按[功能对照与切片门槛](平台Core接入-开发任务.md#compatibility-slices)保护所有已支持功能；旧失败/未验项保留原归属。先做[标准包及本地安装](平台Core接入-开发任务.md#core-package-standard)，再接GitHub Release下载和 `nativark-core` Topic发现。开发者从[五步指南](平台Core接入-开发任务.md#core-quick-start)和[Agent任务模板](平台Core接入-开发任务.md#core-agent-template)开始。AI Native未完成不阻止无关切片，其最小固定接点按[并行边界](平台Core接入-开发任务.md#ai-parallel-boundary)办理。
 
 按[源码整理](平台Core接入-开发任务.md#source-organization)核收整个平台的可读性和简洁实现，API与源码/例子同版本。无Core租户登录和公共设置须真实可用，轻量工单/工作流由Core承载。底座和各Core按[独立更新](平台Core接入-开发任务.md#independent-upgrades)分别升级，保留下游Core、配置、授权与数据；不将源码合并成功当部署升级通过。
@@ -28,7 +30,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 2. 写入归属与固定来源
 
-- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，开工后已从4720前进到实际远端main `6ca19ac34a3260405ba24388a4aa2a933450e70b`。后续每个阶段先获取最新已提交main、核对差异和WIP后整合，保护既有作者成果。
+- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，已通过 `d01561912cc6644776cbceea4971508eeb4c99ba` 合入实际远端main `ee281955161ffcf9b9d166be45972d48fbe0191f`，本片五个WIP哈希保持。后续每阶段获取最新已提交main并核对差异和WIP后整合，保护既有作者成果。
 - 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
 - shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
 - 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
@@ -39,6 +41,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)补齐独立版本锁/实际数据观察和单对象候选。当前仅合同与纯组合/预检可用；下一步接真实权限、授权/绑定持久化及受限事务，核对Rental与非租赁消费者、旧API身份兼容。样例已冻结为租户范围轻量工单创建→分派→处理→关闭，字段/角色/修订见开工记录。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。独立包已提供`registerCoreServers`、授权/绑定schema及`composeCoreOpenApi`；旧API身份和Rental权限映射保持。各片由PM核定唯一作者；shared总出口暂不增加重复定义。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
+   07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.4核收。
 5. 先验证本地标准包与非租赁真实持久化，再接Release固定包下载安装及Topic发现。10/11由独立开发者或Agent只凭简明指南和业务要求接手，在干净宿主重现安装→授权→业务；12核收全功能前后对照、源码/API可理解性、底座跟随上游与Core单独升级、配置/定制/数据保留、回退/分发失败及原独立审查门槛。
 6. 不同租户/成员、撤权、停用重开、统一期限、有/无工具、迟到响应与unknown验证组合继续保留；部署移除、停用、订阅到期和成员撤权分别判定。
 
