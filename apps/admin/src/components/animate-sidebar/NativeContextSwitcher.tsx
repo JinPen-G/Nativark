@@ -8,8 +8,8 @@ import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from "./r
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem } from "./runtime/dropdown-menu";
 
 export interface ShellContextOption { id: string; name: string; icon?: ReactNode }
-export function NativeContextSwitcher({ title, subtitle, brand, brandInverted, compact = true, options, value, label, onChange, onError }: {
-  title: string; subtitle: string; brand: ReactNode; brandInverted?: boolean; compact?: boolean;
+export function NativeContextSwitcher({ title, subtitle, brand, brandUnframed, compact = true, options, value, label, onChange, onError }: {
+  title: string; subtitle: string; brand: ReactNode; brandUnframed?: boolean; compact?: boolean;
   options: ShellContextOption[]; value: string; label: string;
   onChange: (id: string) => void | Promise<void>; onError?: () => void;
 }) {
@@ -17,8 +17,8 @@ export function NativeContextSwitcher({ title, subtitle, brand, brandInverted, c
   const [switching, setSwitching] = useState(false), switchingNow = useRef(false);
   const fullName = `${title} · ${subtitle}`;
   const triggerClass = compact ? "rental-workspace-trigger" : "";
-  const identity = <><div data-sidebar="brand-mark" data-brand-inverted={brandInverted || undefined}
-    className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">{brand}</div>
+  const identity = <><div data-sidebar="brand-mark" data-brand-unframed={brandUnframed || undefined}
+    className={`flex aspect-square size-8 items-center justify-center${brandUnframed ? "" : " rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"}`}>{brand}</div>
     {compact ? <span className="rental-workspace-identity">
       <span className="rental-workspace-tenant-name" title={title}>{title}</span>
       <span className="rental-workspace-name" title={subtitle}>{subtitle}</span>

@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { useAdminBrandIcon } from "@/app/BrandIconProvider";
+import { ADMIN_BRAND_NAME } from "@/app/branding";
 import cameraImage from "../../../website/assets/images/industry-camera-neutral.png";
 import campingImage from "../../../website/assets/images/industry-camping-neutral.png";
 import constructionImage from "../../../website/assets/images/industry-equipment-neutral.png";
@@ -57,7 +58,7 @@ export function WorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }
   const displayName = (name: string) => t(name);
 
   const current = workspaces.find((row) => row.id === currentWorkspaceId);
-  const tenantName = isSaasAdmin ? "Rental OS" : tenant?.tenantName || t("租户");
+  const tenantName = isSaasAdmin ? ADMIN_BRAND_NAME : tenant?.tenantName || t("租户");
 
   const box = (title: string, interactive: boolean) => (
     <button

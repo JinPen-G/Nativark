@@ -1,0 +1,36 @@
+{
+  "brand": "Nativark",
+  "source": {
+    "project": "Preview",
+    "component": "packages/preview-ui/src/BrandIcon.tsx",
+    "asset": "packages/preview-ui/src/brand-icon.svg",
+    "sha256": "357829b492aa343cd66b74adc036cb1357dd5158fae0435037cc64bf09ade411",
+    "originalReference": "resources/brand/02_icon/svg/icon-symbol-dark.svg",
+    "authorisation": "负责人明确要求平台默认品牌临时复用此黑白图形；保留旧品牌原稿。"
+  },
+  "adaptations": [
+    "nativark-icon.svg原字节复制；叠页mask与点/线保持。",
+    "favicon只增加浏览器明暗媒体查询，mask黑白不重写。",
+    "登录横版Logo嵌入同图形并添加Nativark文字，继续原24px品牌高度和原平台主题过滤。",
+    "未复制Preview启动动画、CSS模块或应用运行代码。"
+  ],
+  "retainedOriginals": [
+    "assets/01_Logo/rentalOS-icon.svg",
+    "apps/admin/public/brand/rentalos-icon.svg",
+    "apps/admin/public/brand/rentalos-logo-mono.svg"
+  ],
+  "files": [
+    {
+      "file": "nativark-icon.svg",
+      "sha256": "357829b492aa343cd66b74adc036cb1357dd5158fae0435037cc64bf09ade411"
+    },
+    {
+      "file": "nativark-favicon.svg",
+      "sha256": "3993df0515774fb8f02a5e75224bab5f1b02715131152e144b7f293a777ca92e"
+    },
+    {
+      "file": "nativark-logo-mono.svg",
+      "sha256": "1d2e196e03e14948d305b287ec0bb27a9a1c0296571c9219a33754c39fb12a14"
+    }
+  ]
+}

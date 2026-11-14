@@ -11,9 +11,9 @@ function load(file, overrides = {}) {
   new Function('require', 'module', 'exports', code)(id => Object.hasOwn(overrides, id) ? overrides[id] : require(id), module, module.exports);
   return module.exports;
 }
-const canonical = read('assets/01_Logo/rentalOS-icon.svg');
+const canonical = read('apps/admin/public/brand/nativark-icon.svg');
 const icons = load('apps/admin/src/app/brandIcon.ts', {
-  '../../../../assets/01_Logo/rentalOS-icon.svg?raw': canonical,
+  '../../public/brand/nativark-icon.svg?raw': canonical,
 });
 const brand = load('apps/admin/src/app/branding.ts');
 const tenant = { brandLogoUrl: '/uploads/tenant.svg', faviconUrl: '/uploads/not-the-logo.png' };
@@ -25,16 +25,31 @@ for (const resolve of [brand.resolveAdminMark, brand.resolveAdminFavicon]) {
   assert.equal(resolve(tenant, undefined), brand.ADMIN_DEFAULT_MARK);
 }
 const decode = value => decodeURIComponent(value.split(',').slice(1).join(','));
-const geometry = svg => [...svg.matchAll(/<path\s+d="([^"]+)"/g)].map(match => match[1]);
-const bootstrap = read('apps/admin/public/brand/rentalos-icon.svg');
+// The approved mark uses masked rectangles and dots, so path-only comparison
+// would accept two empty arrays and miss a changed overlap or missing page.
+const geometry = svg => [...svg.matchAll(/<(path|rect|circle|ellipse|line|polyline|polygon|g|mask)\b([^>]*)>/g)].map(match => [
+  match[1],
+  [...match[2].matchAll(/\b(id|d|x|y|cx|cy|width|height|rx|ry|r|points|transform|mask|maskUnits|maskContentUnits|stroke-width|stroke-linejoin)="([^"]*)"/g)].map(attribute => [attribute[1], attribute[2]]),
+]);
+const masks = svg => svg.match(/<defs>[\s\S]*?<\/defs>/)?.[0];
+assert.ok(geometry(canonical).length > 0, 'the default artwork comparison must include actual shapes');
+assert.equal((canonical.match(/<mask\b/g) ?? []).length, 3);
+assert.equal((canonical.match(/<circle\b/g) ?? []).length, 2);
+const bootstrap = read('apps/admin/public/brand/nativark-favicon.svg');
 assert.deepEqual(geometry(bootstrap), geometry(canonical), 'bootstrap must use the provided icon artwork, not a redraw');
+assert.equal(masks(bootstrap), masks(canonical), 'favicon recoloring cannot change the page masks');
 assert.match(bootstrap, /prefers-color-scheme:dark/);
-assert.match(bootstrap, /fill="currentColor"/);
-assert.match(read('apps/admin/index.html'), /href="\/brand\/rentalos-icon.svg"/);
+assert.match(bootstrap, /(?:fill|stroke)="currentColor"/);
+assert.match(read('apps/admin/index.html'), /href="\/brand\/nativark-favicon.svg"/);
+const wordmark = read('apps/admin/public/brand/nativark-logo-mono.svg');
+assert.deepEqual(geometry(wordmark), geometry(canonical), 'the login wordmark must embed the same mark');
+assert.equal(masks(wordmark), masks(canonical));
+assert.match(wordmark, />Nativark<\/text>/);
 for (const dark of [false, true]) {
   const svg = decode(icons.defaultAdminBrandIcon(dark));
   assert.deepEqual(geometry(svg), geometry(canonical));
-  assert.match(svg, new RegExp(`fill="${dark ? '#ffffff' : '#000000'}"`));
+  assert.equal(masks(svg), masks(canonical), 'root contrast cannot invert or flatten the black/white masks');
+  assert.match(svg, new RegExp(`color="${dark ? '#ffffff' : '#000000'}"`));
 }
 for (const url of ['/uploads/logo.svg?signature=x', 'https://brand.invalid/logo.png', 'data:image/svg+xml,%3Csvg%3E', 'data:image/png;base64,AA==']) assert.equal(icons.safeBrandIconUrl(url), url);
 for (const url of ['javascript:alert(1)', 'data:text/html,<svg>', 'file:///C:/logo.svg', 'vbscript:a', 'https://a\n.invalid/logo.png', '']) assert.equal(icons.safeBrandIconUrl(url), undefined);

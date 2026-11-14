@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useLocale } from "@/app/locale";
+import { ADMIN_BRAND_NAME } from "@/app/branding";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { BusinessPreview } from "./source/components/demos/BusinessPreview.jsx";
 import { ReturnReminderDemo } from "./source/components/demos/ReturnReminderDemo.jsx";
@@ -86,7 +87,7 @@ export function LoginShowcase({ title, description, footer, showTitle = true, sh
   const slideTitle = slide.key === "agent" ? text("说出目标，Agent 推进工作", "Describe your goal. Agent moves work forward.") : labels(`${slide.key}.title`);
   const slideDescription = slide.key === "agent" ? text("从需求、报价到确认预约，看看一项工作如何完成。", "See a request become a quote and a booking ready for confirmation.") : labels(`${slide.key}.description`);
 
-  return <aside ref={root} className="login-showcase" aria-label={text("Rental OS 工作演示", "Rental OS in action")}
+  return <aside ref={root} className="login-showcase" aria-label={text(`${ADMIN_BRAND_NAME} 工作演示`, `${ADMIN_BRAND_NAME} in action`)}
     data-running={demoRunning} data-reduced-motion={reduced}
     onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
     onFocusCapture={() => setFocusWithin(true)}

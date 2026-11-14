@@ -4,7 +4,9 @@
     {
       "source": "apps/website-next/components/demos/BusinessPreview.jsx",
       "sourceSha256": "74b775976b840e721253fbb0430fcfba793e21e02820dd11fba2239484f3d623",
-      "copiedSha256": "d8adb2a1483753653f6d79c040f1c397d555c6700ad44e0f072a4086c506f9d4"
+      "copiedSha256": "d8adb2a1483753653f6d79c040f1c397d555c6700ad44e0f072a4086c506f9d4",
+      "adaptedSha256": "1a5000f4c388916ce5fc4917a07e2550852bd4d44c9e8e20a075a760f451f683",
+      "adaptedHashEncoding": "UTF-8, CRLF normalised to LF"
     },
     {
       "source": "apps/website-next/components/demos/ReturnReminderDemo.jsx",
@@ -94,6 +96,7 @@
     "Admin locale and local assets",
     "Agent typed request, staged workspace, automatic local confirmation and receipt within 7 seconds",
     "Source animation duration/delay proportional scaling to 6.4 seconds",
-    "UIArc 7-second CSS carousel, hover/focus pause with preserved progress and directional transitions"
+    "UIArc 7-second CSS carousel, hover/focus pause with preserved progress and directional transitions",
+    "Login-only default platform name/logo/aria labels reuse ADMIN_BRAND_NAME and ADMIN_DEFAULT_LOGO; technical classes, Rental Core terms, source interactions/motion/theme/crop remain unchanged."
   ]
 }

@@ -1,12 +1,13 @@
 /** Shared image-only branding. Never inject uploaded SVG into the document DOM.
  * Simple neutral artwork can be recolored; complex/multicolor SVG stays original.
  * This is a conservative paint classifier, not a general-purpose SVG sanitizer. */
-import defaultIcon from "../../../../assets/01_Logo/rentalOS-icon.svg?raw";
+import defaultIcon from "../../public/brand/nativark-icon.svg?raw";
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
 const ink = (dark: boolean) => dark ? "#ffffff" : "#000000";
 export function defaultAdminBrandIcon(dark: boolean) {
-  return svgDataUrl(defaultIcon.replace('fill="#000000"', `fill="${ink(dark)}"`));
+  // Only the root currentColor changes: the black/white page masks must stay intact.
+  return svgDataUrl(defaultIcon.replace(/<svg\b/iu, `<svg color="${ink(dark)}"`));
 }
 
 /** Reject active/non-image URLs; relative and signed image URLs keep their exact source. */

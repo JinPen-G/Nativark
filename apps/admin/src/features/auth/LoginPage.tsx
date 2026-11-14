@@ -104,8 +104,8 @@ export function LoginPage() {
 
   useEffect(() => {
     document.title = locale === "en-US"
-      ? loginBrandName === ADMIN_BRAND_NAME ? "Admin Console · Rental OS" : `${loginBrandName} Admin Console`
-      : loginBrandName === ADMIN_BRAND_NAME ? "登录运营台 · Rental OS" : `登录${loginBrandName}运营台`;
+      ? loginBrandName === ADMIN_BRAND_NAME ? `Admin Console · ${ADMIN_BRAND_NAME}` : `${loginBrandName} Admin Console`
+      : loginBrandName === ADMIN_BRAND_NAME ? `登录运营台 · ${ADMIN_BRAND_NAME}` : `登录${loginBrandName}运营台`;
     applyAdminFavicon();
   }, [locale, loginBrandName]);
 

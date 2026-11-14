@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { getBusinessStyles } from '../shared/styleNames.js';
 import { useLocale } from '../../../locale';
-import { assetPath } from '../../lib/site.js';
+import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO } from '@/app/branding';
 import { usePrefersReducedMotion } from '@/lib/usePrefersReducedMotion';
 export function BusinessPreview({ paused = false, initialScene = 'booking' } = {}) {
   const h = React.createElement;
@@ -123,14 +123,14 @@ export function BusinessPreview({ paused = false, initialScene = 'booking' } = {
     );
   const scenes = {
     overview: {
-      title: text('认识 Rental OS', 'Meet Rental OS'),
+      title: text(`认识 ${ADMIN_BRAND_NAME}`, `Meet ${ADMIN_BRAND_NAME}`),
       question: text(
         '我能怎样通过对话经营租赁业务？',
         'How can I run my rental business through conversation?',
       ),
       intro: text(
-        'Rental OS 是 AI Native 的租赁业务平台。说出你的经营目标，AI 将理解业务上下文，协调不同任务，并通过 Rental Core 连接预约、库存、履约与结算。',
-        'Rental OS is an AI Native rental platform. Describe your goal: AI understands the business context, coordinates work, and connects bookings, inventory, fulfillment and settlement through Rental Core.',
+        `${ADMIN_BRAND_NAME} 是 AI Native 的租赁业务平台。说出你的经营目标，AI 将理解业务上下文，协调不同任务，并通过 Rental Core 连接预约、库存、履约与结算。`,
+        `${ADMIN_BRAND_NAME} is an AI Native rental platform. Describe your goal: AI understands the business context, coordinates work, and connects bookings, inventory, fulfillment and settlement through Rental Core.`,
       ),
       lead: text(
         '不同业务，可以交给不同的对话：',
@@ -1627,8 +1627,8 @@ export function BusinessPreview({ paused = false, initialScene = 'booking' } = {
       className: css.viewport,
       role: 'region',
       'aria-label': text(
-        'Rental OS AI Native 业务平台交互演示',
-        'Rental OS AI Native business platform demo',
+        `${ADMIN_BRAND_NAME} AI Native 业务平台交互演示`,
+        `${ADMIN_BRAND_NAME} AI Native business platform demo`,
       ),
       'data-rentalos-preview': true,
       'data-demo-stage': actionView ? sequenceStage : undefined,
@@ -1664,8 +1664,8 @@ export function BusinessPreview({ paused = false, initialScene = 'booking' } = {
             className: css.brand,
           },
           h('img', {
-            src: assetPath('/icons/rentalos-logo.svg'),
-            alt: 'Rental OS',
+            src: ADMIN_DEFAULT_LOGO,
+            alt: ADMIN_BRAND_NAME,
             className: 'rentalos-preview-logo',
             width: 107,
             height: 24,

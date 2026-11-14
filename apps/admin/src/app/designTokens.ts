@@ -90,7 +90,7 @@ export const ADMIN_LOGIN_METRICS = { titleSize: 40, titleLineHeight: 44, titleWe
 /** App sidebar geometry for Chinese menus; source primitives retain their original defaults. */
 export const ADMIN_SIDEBAR_METRICS = { expandedWidth: 240, collapsedWidth: 48, mobileWidth: 288, menuHeight: 32, submenuHeight: 32, menuGap: 2, groupLabelHeight: 24, iconSize: 18, triggerSize: 28, avatarSize: 32, submenuMinWidth: 160 } as const;
 /** Match the breadcrumb centre from the sidebar's outer inset, including the panel border. */
-export const ADMIN_SHELL_METRICS = { panelInset: 8, sidebarWidth: 248, sidebarCollapsedWidth: 56, topRowHeight: ADMIN_LAYOUT_SPACING.contextHeight + 2, workspaceHeight: 48, workspaceMarkSize: 22, triggerSize: 32, accountHeight: 44, tenantNameSize: 13, tenantNameLineHeight: 18, workspaceNameSize: 12, workspaceNameLineHeight: 14 } as const;
+export const ADMIN_SHELL_METRICS = { panelInset: 8, sidebarWidth: 248, sidebarCollapsedWidth: 56, topRowHeight: ADMIN_LAYOUT_SPACING.contextHeight + 2, workspaceHeight: 48, workspaceMarkSize: 22, platformMarkSize: 24, triggerSize: 32, accountHeight: 44, tenantNameSize: 13, tenantNameLineHeight: 18, workspaceNameSize: 12, workspaceNameLineHeight: 14 } as const;
 /** UIArc screen-shell: width and submenu height share the same non-overshooting spring. */
 export const ADMIN_SIDEBAR_REFERENCE_MOTION = {
   layout: { type: "spring", visualDuration: 0.3, bounce: 0 },
