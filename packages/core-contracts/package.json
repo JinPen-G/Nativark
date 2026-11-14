@@ -22,6 +22,10 @@
     "./install": {
       "types": "./dist/install.d.ts",
       "default": "./dist/install.js"
+    },
+    "./github": {
+      "types": "./dist/github.d.ts",
+      "default": "./dist/github.js"
     }
   },
   "scripts": {

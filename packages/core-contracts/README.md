@@ -2,7 +2,7 @@
 
 这个包让底座和业务 Core 使用同一份清单、版本规则和对象引用。正式入口为 `@rental-os/core-contracts`；目录检查使用 Node 专用出口 `@rental-os/core-contracts/package`。包不导入 Rental、Nest、Prisma 或模型 SDK。
 
-**目前已实现清单、静态包检查、OpenAPI 贡献组合、服务端注册合同及独立升级预检。** 普通业务宿主、授权持久化、页面和业务样例仍在拆分中。下面的检查可以运行；检查通过不代表 Core 已安装或业务可用。完整接入手册在[五步快速接入](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)随实现维护。
+**目前已实现清单/页面/服务端合同、静态包检查、OpenAPI 贡献组合、独立升级预检及本地/固定 GitHub Release 包准备。** 普通业务宿主、授权持久化、页面呈现和业务样例仍在拆分中。下面的检查可以运行；检查通过不代表 Core 已安装或业务可用。完整接入手册在[五步快速接入](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)随实现维护。
 
 ## 先检查一个 Core 包
 
@@ -160,11 +160,35 @@ node packages/core-contracts/dist/prepare-install.js <Core包.tgz> <SHA256> <既
 
 准备结果为`prepared`或`already_prepared`，`deployment`始终为`pending`，并给出实际目录、Core ID、版本与摘要。目录使用该发行的完整摘要区分；重复操作核对原文件字节后复用，已有目录被用户修改、缺文件或出现链接时明确拒绝覆盖。失败只清理这次创建的暂存目录，不改活动组合或其他已准备版本。两个命令成功退出0，输入/兼容/文件失败退出1并在stderr说明原因；成功stdout只包含JSON。
 
-程序调用使用Node专用`@rental-os/core-contracts/install`出口的`packCoreDirectory`和`prepareCoreInstall`。解包文件检查与原目录检查共用[包检查实现](src/package.ts)。此阶段已具备本地文件准备，后续仍需受控组合构建、迁移/数据核对、实际部署注册，再办理租户授权与成员分配；远端Release获取和Topic发现尚未连接。包完整性不能证明代码已经审核。
+程序调用使用Node专用`@rental-os/core-contracts/install`出口的`packCoreDirectory`和`prepareCoreInstall`。解包文件检查与原目录检查共用[包检查实现](src/package.ts)。此阶段已具备本地文件准备，后续仍需受控组合构建、迁移/数据核对、实际部署注册，再办理租户授权与成员分配；包完整性不能证明代码已经审核。
+
+## 从 GitHub 固定发行准备
+
+Core 作者先按前面的命令生成标准包，文件命名为 `<Core ID>-<版本>.tgz`，例如 `example-tickets-0.1.0.tgz`。在公开仓库创建 `v0.1.0` Tag 和非预发行 Release，将这个包作为 Release 资产上传。同仓多个 Core 使用 `example-tickets/v0.1.0` 形式的独立 Tag；清单中的 `source.repository` 和 `source.commit` 对应该仓库和 Tag 实际指向的提交。包内清单可在构建阶段注入固定来源，避免用未提交工作区或 `target_commitish` 的分支名替代提交。
+
+部署者先读取选定发行，将输出 JSON 保存为一份固定来源记录。下面的命令显式访问公开 GitHub，无需本机 Key；首版不读取环境变量或 Git 凭据来访问私有仓库。
+
+```sh
+node packages/core-contracts/dist/github-release.js inspect <owner/repo> <Core ID> <版本> [Tag]
+node packages/core-contracts/dist/github-release.js prepare <固定Release JSON> <既有独占待部署根目录> <宿主版本JSON>
+```
+
+未传 Tag 时使用 `v<版本>`。`inspect` 输出源仓库、Core/版本/Tag、实际提交、Release/资产 ID、字节数及 GitHub 的 SHA-256 摘要。`prepare` 在下载前后分别回读固定资料，核对同一 Tag、Release 和资产，再将包传给原 `prepareCoreInstall`；包内 ID、版本、源仓库和提交必须完全相符。所有检查完成才写候选目录，结果仍为 `deployment=pending`，不会自动启动业务或覆盖当前组合。
+
+| 获取结果 | 处理方式 |
+| --- | --- |
+| 缺固定资产/摘要、草稿或预发行 | 上传上述命名的完整标准包并发布正式版本；旧资产没有 GitHub 摘要时，可改用已核定 SHA-256 的本地包入口 |
+| `release_changed` | Tag提交、Release/资产ID或包资料已改变，停止当前准备；核对来源并选择新版本，不覆盖旧固定记录 |
+| `rate_limited` / `network` / HTTP失败 | 按提示稍后手动重试，已准备版本与当前业务保持可用 |
+| 包来源不符/摘要不符/不兼容 | 回到作者发行与宿主版本资料检查，不能直接绕过本地包检查 |
+
+Node专用出口 `@rental-os/core-contracts/github` 提供 `inspectGitHubCoreRelease`、`prepareGitHubCoreRelease` 及两份输入 schema。两条命令成功退出0，失败退出1；成功stdout只有JSON，失败stderr不包含响应正文、签名下载URL或凭据。下载有时间/大小上限，仅跟随GitHub受支持的HTTPS资产地址，失败没有落地半包。固定内容的检查不证明发布者或代码已经审核。
+
+仓库可添加 `nativark-core` Topic供后续发现界面检索；**Topic本身不发布版本、不安装也不授权**。当前已实现固定Release读取和准备，Topic搜索/分页/缓存、后台安装状态与实际部署注册仍待宿主片。GitHub行为依据[按Tag读取Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产与摘要](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[读取引用](https://docs.github.com/en/rest/git/refs#get-a-reference)和[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。本阶段使用离线HTTP响应验证，真实标准包发行下载尚未验收。
 
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)，仅走Node出口；这些入口不加载Core业务代码。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts)及[GitHub命令](src/github-release.ts) → [固定Release获取](src/github.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)，仅走Node出口；这些入口不加载Core业务代码。
 
 ```sh
 npm test -w @rental-os/core-contracts

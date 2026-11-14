@@ -7,6 +7,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "./archive";
 import type { CoreHostVersions } from "./compatibility";
+import type { CoreManifest } from "./manifest";
 import { corePackageFiles, inspectCorePackageFiles, readCorePackageFiles } from "./package";
 
 const digest = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
@@ -63,7 +64,8 @@ function assertExisting(directory: string, files: ReadonlyMap<string, Uint8Array
   if (found.size !== files.size) throw new Error("待部署目录不完整，停止覆盖");
 }
 
-export function prepareCoreInstall(bytes: Uint8Array, sha256: string, directory: string, host: CoreHostVersions): {
+export function prepareCoreInstall(bytes: Uint8Array, sha256: string, directory: string, host: CoreHostVersions,
+  expected?: Pick<CoreManifest, "id" | "version" | "source">): {
   status: "prepared" | "already_prepared";
   deployment: "pending";
   coreId: string;
@@ -75,6 +77,9 @@ export function prepareCoreInstall(bytes: Uint8Array, sha256: string, directory:
   const inspected = inspectCorePackageFiles(archive.files, host);
   if (!inspected.ok) throw new Error(inspected.issues.map(issue => `${issue.file}:${issue.field ?? ""} [${issue.code}] ${issue.message}`).join("\n"));
   const manifest = inspected.manifest!;
+  if (expected && (manifest.id !== expected.id || manifest.version !== expected.version
+    || manifest.source.repository !== expected.source.repository || manifest.source.commit !== expected.source.commit))
+    throw new Error("Core包ID、版本或来源与选定发行不一致");
   const declared = new Set(corePackageFiles(manifest));
   if ([...archive.files.keys()].some(file => !declared.has(file))) throw new Error("Core包含清单未声明的额外文件");
   const root = ordinaryDirectory(directory);

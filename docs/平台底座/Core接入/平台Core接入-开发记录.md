@@ -155,6 +155,27 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-github-release-20261114"></a>
+
+## 固定 GitHub Release 与本地准备共链（2026-11-14）
+
+阶段基线为已上传并回读的 `2cf775ce9664c7666666d32622c311466bb9777d`，当日再次读取实际远端main仍为 `275064d40a3977542a530158974070e8b6c337ca`，本树已包含该提交。修改仅限独占 `packages/core-contracts` 和原PCH记录/接续；无合并、拣选或他人WIP，完整宿主/后台公共窗口继续沿原候选表。
+
+[GitHub入口](../../../packages/core-contracts/src/github.ts)与[命令](../../../packages/core-contracts/src/github-release.ts)为公开仓库提供显式inspect/prepare。Tag固定为 `v<版本>`，同仓多Core为 `<Core ID>/v<版本>`；资产固定 `<Core ID>-<版本>.tgz`。inspect解析真正的Tag引用和附注对象，锁定仓库、提交、Core/实现版本、Release/资产ID、字节数与GitHub SHA-256；不将活动分支target_commitish当提交，不读本机环境/凭据。
+
+prepare在下载前后复核固定资料，限制时间、字节数和GitHub HTTPS下载跳转，然后复用原[安装准备](../../../packages/core-contracts/src/install.ts)。新增可选预期来源输入在任何候选写入前核对清单ID/版本/仓库/提交；未传时旧本地入口语义不变。重复仍核原字节、被用户修改仍拒绝，结果仅deployment=pending。网络、限流、Tag移动、替换资产、未知摘要、错误来源和包检查失败均不改变活动组合；响应体/签名URL不写错误日志。
+
+必要验证和边界：
+
+- 原单一合同测试退出0，8组通过；包含全部新增源码类型及反向依赖检查，没有新增或扩写测试脚本。
+- stdin离线HTTP响应＋实际文件准备退出0，覆盖轻量/附注Tag、同仓Tag、200/302下载、重复、移动Tag/替换资产/来源不符、无摘要、限流/离线、非GitHub/非HTTPS跳转、用户修改拒绝；没有对外下载Core。夹具入口抛错，用于确认检查/准备没有加载包代码，不是非租赁业务实现。
+- 读取中断、取消已失败的响应、过大JSON和CLI实际schema/分支/纯JSON/退出码用stdin定向复验，退出0；取消错误不覆盖原HTTP/网络诊断。CLI文件读取facade只证明参数和调用映射，不能代替真实GitHub发行运行。
+- 查阅GitHub官方[Release](https://docs.github.com/en/rest/releases/releases#get-a-release-by-tag-name)、[资产](https://docs.github.com/en/rest/releases/assets#get-a-release-asset)、[引用](https://docs.github.com/en/rest/git/refs#get-a-reference)及[附注Tag](https://docs.github.com/en/rest/git/tags#get-a-tag)。Tavily搜索/提取均因额度返回432，改为直接读取官方公开文档；refs首次连接EOF后重试200。这是文档研究，不是标准Core发行下载验收。
+- `output/.tmp/core-contracts` 与 `output/.tmp/core-github-release` 均经finally清理并核实不存在，无新服务、依赖副本、数据库/模型或发布操作。
+- 定向5份文档核对388个本地链接、71个锚点、47个表格，新错误0；需求/任务原文及12行原任务不变。原白名单的3个总导航历史附件缺失仍在，未以删引用或改检查器处理。`git -c core.whitespace=cr-at-eol diff --check`退出0。
+
+[接入说明](../../../packages/core-contracts/README.md#从-github-固定发行准备)同片加入作者包名/Tag/发布步骤及部署者两条命令、来源锁、结果和错误处理。Topic搜索/缓存/界面、受控组合构建、真实部署注册、非租赁持久化和独立安装/更新验收仍待交付；没有用下载或格式夹具关闭PCH-03/10/12。原PCH完整G1接点/消费者尚未齐，本片不以源码或用例数量计分。
+
 <a id="core-local-package-install-20261114"></a>
 
 ## Core 本地打包与安装准备（2026-11-14）
