@@ -101,6 +101,6 @@ export const CoreManifestSchema = z.object({
 export type CoreManifest = z.infer<typeof CoreManifestSchema>;
 
 /** 新贡献使用统一命名空间；旧 Rental 权限码在其兼容适配中保留原语义。 */
-export function corePermissionCode(coreId: string, permission: CoreManifest["permissions"][number]): string {
+export function corePermissionCode(coreId: string, permission: Pick<CoreManifest["permissions"][number], "resource" | "action">): string {
   return `${coreId}:${permission.resource}:${permission.action}`;
 }

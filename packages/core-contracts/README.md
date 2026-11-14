@@ -79,6 +79,36 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 停用只关闭对应普通业务和新 Agent 任务；数据、绑定、成员撤权及原收据继续保留。恢复先读取原绑定并复核当前条件，不调用首次初始化。`CoreOperationReference` 只定位原操作，不能根据超时、程序重启或再次开通认定旧操作未执行。
 
+## 声明页面与操作
+
+[页面合同](src/admin.ts)已提供 `CorePageDescriptorSchema`、`CoreAdminContribution`、`CorePageAction` 和 `registerCoreAdminPages`。路由描述中的ID/局部路径、名称、可选父级与菜单、权限是同一份数据；组件由Core代码直接绑定。统一注册后路径位于 `/cores/<id>/...`，重复页面、同形路径、缺上级/循环或清单未声明的权限会拒绝，失败不返回部分注册表。
+
+例如，工单的路由元数据可以写成下面这样；这里只演示已实现schema的描述，不是完整可运行页面。
+
+```ts
+const route = CorePageDescriptorSchema.parse({
+  id: "tickets",
+  path: "/tickets",
+  title: { default: "工单", translations: { "en-US": "Tickets" } },
+  menu: {},
+  permissions: [{ resource: "ticket", action: "read" }]
+});
+// 在本Core中绑定实际组件：{ ...route, component: TicketsPage }
+```
+
+每个页面只声明自己的操作，`CorePageAction`区分四类。
+
+| kind | Core提供 | 框架适配应采用的既有行为 |
+| --- | --- | --- |
+| `navigate` | 已登记页面目标及参数 | 导航，不显示业务写入成功 |
+| `open` | 打开本页表单/弹窗的方法 | 只打开，不提前提交 |
+| `command` | 返回真实Promise的业务方法，可选确认内容 | 既有动作/确认按钮、加载/结果反馈及重复点击保护 |
+| `save` | 本页Form及有明确字段类型的onSave | 原SaveButton先校验再单次保存，与回车提交共用 |
+
+例如“新建工单”是 `kind: "open"`，由本页提供 `open`，`emphasis: "primary"` 表达主操作；无需自行指定CSS。动作可声明附加权限和当前不可用原因。`resolveCorePageLocation`只按已登记目标编码参数，不能导航任意外部URL；注册或路径存在均不授予当前用户访问权。
+
+**当前已实现描述/注册与路径解析，React页面呈现适配尚未接入。** 后续07通过原BusinessShell/WorkspaceHeader和按钮适配消费这些类型，保留完整左栏、面包屑行、铃铛、休息、收展与统一页面模式；不能把类型声明存在当主按钮已自动显示。字段类型、动态动作和既有表单Promise都保留在Core/React代码中，不执行JSON表达式。
+
 ## 分别更新底座或一个 Core
 
 先构建本包，再用实际发行元数据和迁移账快照执行只读预检。
@@ -134,7 +164,7 @@ node packages/core-contracts/dist/prepare-install.js <Core包.tgz> <SHA256> <既
 
 ## 源码路线与验证
 
-[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)，仅走Node出口；这些入口不加载Core业务代码。
+[公共出口](src/index.ts) → [清单](src/manifest.ts) / [版本](src/version.ts) / [组合预检](src/compatibility.ts) / [对象引用](src/reference.ts) / [OpenAPI贡献](src/openapi.ts) / [授权与生命周期](src/lifecycle.ts) / [服务端注册](src/server.ts) / [页面声明](src/admin.ts) / [升级预检](src/update.ts) / [指南生成](src/guide.ts)。[包检查命令](src/check.ts) → [目录/文件检查](src/package.ts) → 同一清单与 OpenAPI schema；[升级命令](src/plan-update.ts) → 升级输入schema与纯预检；[指南命令](src/generate-guide.ts)读取固定Git任务原文。[打包](src/pack.ts)/[安装准备命令](src/prepare-install.ts) → [文件准备](src/install.ts) → [归档](src/archive.ts)，仅走Node出口；这些入口不加载Core业务代码。
 
 ```sh
 npm test -w @rental-os/core-contracts

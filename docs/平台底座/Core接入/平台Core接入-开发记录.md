@@ -145,6 +145,16 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 阶段代码、根规则与接入说明固定于 `a8da7ae1e47b289e9b8cc72f607b74e14cbdf4b6`，包含19份明确归属文件；`git push -u origin codex/platform-core-extraction` 成功，随后 `git ls-remote --heads origin codex/platform-core-extraction` 回读为同一SHA。提交时主线基线为`6ca19ac34`，本树工作区/索引干净。没有合入main或通知其他对话；当前记录/接续的固定证据补记另随文档提交上传。
 
+<a id="core-admin-contract-20261114"></a>
+
+## Core页面单源声明合同（2026-11-14）
+
+本地打包/待部署准备固定于 `25c713a5b8a5d217bb0a6213c4f5978163d6a5d3` 并已推送回读。本片沿v1.4最少声明要求，在独占[admin合同](../../../packages/core-contracts/src/admin.ts)增加路由/名称/菜单/父级/权限的唯一schema和类型，以及组件引用、页面操作类型、注册与本地路径解析。操作分为navigate/open/command/save，真实处理方法和Form仍由Core代码提供；没有通用表达式执行器或第二套按钮实现。
+
+`registerCoreAdminPages`在清单后台贡献存在且Core/版本相符时注册，检查本Core页面ID/同形路径/权限目录、父级缺失与循环；跨Core同名页面使用各自命名空间。组件引用不调用，错误不返回部分表。`resolveCorePageLocation`只解析已登记目标和完整参数，并编码对象ID，未知/额外参数、路径控制值明确拒绝。注册表不授予权限；原路由/Guard/页面生命周期仍须按07接线。
+
+原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
+
 <a id="core-local-package-install-20261114"></a>
 
 ## Core 本地打包与安装准备（2026-11-14）
