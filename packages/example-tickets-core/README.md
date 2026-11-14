@@ -73,6 +73,8 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 独立发行目录可从Node专用 `@rental-os/example-tickets-core/package` 使用packTicketsPackage，显式提供自己的编译目录、Core/底座来源及固定任务原文。它只读声明文件并返回标准包字节，调用者负责在该来源版本构建后写一个新文件；标准包格式、检查和安装仍复用公共出口，不做第二套解压/安装器。
 
+生成的CORE_GUIDE直接链接本包API、服务端/后台入口和README/LICENSE。任务册和源码资料固定到各自来源提交，README保留本页锚点和代码示例；两份资料复用同一链接规则，Core作者维护原README即可。[资料生成](../core-contracts/src/guide.ts)
+
 ## HTTP 与 API 文档
 
 宿主从 `@rental-os/example-tickets-core/nest`导入`TicketsHttpModule.register(service, principalAccessor)`，放入受控组合；`principalAccessor.current()`仅从原Guard/ALS当前身份取值。这里不加公开路由豁免、不替换全局Guard或读取请求体的tenantId。原全局路由政策还没有登记工单接口，当前默认拒绝应保留，待公共窗口按[HTTP合同](src/http.ts)逐项注册。

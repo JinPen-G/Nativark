@@ -1,23 +1,11 @@
 /** 工单示范的Node打包入口，按唯一清单收集实际编译文件并生成同源资料；不安装或执行业务代码。 */
 import { lstatSync, readFileSync } from "node:fs";
-import { dirname, posix, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createCoreArchive, CORE_ARCHIVE_LIMITS } from "@rental-os/core-contracts/archive";
 import { corePackageFiles, inspectCorePackageFiles } from "@rental-os/core-contracts/package";
-import { CorePackagePathSchema, renderCoreGuide, type CoreHostVersions, type CoreManifest } from "@rental-os/core-contracts";
+import { CorePackagePathSchema, pinCoreDocumentationLinks, renderCoreGuide, type CoreHostVersions, type CoreManifest } from "@rental-os/core-contracts";
 import { createTicketsManifest } from "./manifest";
 import { createTicketsOpenApi } from "./openapi";
-
-/** 模块README中的源码/底座相对链接在独立包中改为固定源码链接，正文仍维护唯一原稿。 */
-function packageReadme(text: string, source: CoreManifest["source"], sourceDirectory: string): string {
-  const base = `${source.repository.replace(/\.git$/, "")}/blob/${source.commit}/`;
-  return text.replace(/\]\((?:<([^>\n]+)>|([^\s)]+))\)/g, (link, angled: string | undefined, plain: string | undefined) => {
-    const target = angled ?? plain!;
-    if (/^[a-z][a-z0-9+.-]*:|^#/i.test(target)) return link;
-    const [file, hash] = target.split("#"), path = posix.normalize(posix.join(sourceDirectory, file));
-    if (path === ".." || path.startsWith("../") || posix.isAbsolute(path)) throw new Error("工单说明链接越出固定源码仓库");
-    return `](${base}${encodeURI(path)}${hash ? `#${hash}` : ""})`;
-  });
-}
 
 export function packTicketsPackage(input: {
   directory: string;
@@ -56,7 +44,8 @@ export function packTicketsPackage(input: {
       const stat = lstatSync(path);
       if (!stat.isFile() || stat.size > CORE_ARCHIVE_LIMITS.fileBytes) throw new Error("工单声明文件不可读或超过包上限");
       bytes = readFileSync(path);
-      if (file === "README.md") bytes = Buffer.from(packageReadme(Buffer.from(bytes).toString("utf8"), input.source, sourceDirectory));
+      if (file === "README.md") bytes = Buffer.from(pinCoreDocumentationLinks(Buffer.from(bytes).toString("utf8"),
+        `${sourceDirectory}/README.md`, input.source, true));
     }
     total += bytes.length;
     if (bytes.length > CORE_ARCHIVE_LIMITS.fileBytes || total > CORE_ARCHIVE_LIMITS.totalBytes) throw new Error("工单包超过声明大小上限");

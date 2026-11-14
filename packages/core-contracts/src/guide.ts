@@ -6,6 +6,30 @@ const taskFile = "docs/平台底座/Core接入/平台Core接入-开发任务.md"
 const plain = (text: string) => text.replace(/[<>&]/g, value => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[value]!)
   .replace(/([\\`*_[\]{}|])/g, "\\$1").replace(/[\r\n]+/g, " ");
 
+/** 随包文档的相对链接按原源码文件定位到固定提交；保留外链与代码块，README可保留本页锚点。 */
+export function pinCoreDocumentationLinks(text: string, sourceFile: string, source: z.infer<typeof CoreSourceSchema>,
+  retainLocalFragments = false): string {
+  const base = new URL(`${source.repository.replace(/\.git$/, "")}/blob/${source.commit}/`);
+  const original = new URL(sourceFile, base);
+  let fence: string | undefined;
+  return text.split("\n").map(line => {
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = undefined;
+      return line;
+    }
+    if (marker) { fence = marker[1]; return line; }
+    return line.replace(/(`+).*?\1|\]\((?:<([^>\n]+)>|([^\s)]+))\)/g, (link, code: string | undefined, angled: string | undefined, plain: string | undefined) => {
+      if (code) return link;
+      const target = angled ?? plain!;
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || retainLocalFragments && target.startsWith("#")) return link;
+      const resolved = new URL(target, original);
+      if (!resolved.href.startsWith(base.href)) throw new Error("文档链接越出固定源码仓库");
+      return `](<${resolved.href}>)`;
+    });
+  }).join("\n");
+}
+
 export function renderCoreGuide(
   manifest: CoreManifest, taskDocument: string, platformSource: z.infer<typeof CoreSourceSchema>
 ): string {
@@ -14,7 +38,7 @@ export function renderCoreGuide(
   const section = (start: string, end: string) => {
     const from = taskDocument.indexOf(start), to = taskDocument.indexOf(end, from + start.length);
     if (from < 0 || to < 0) throw new Error("接入任务册缺少快速指南或Agent模板锚点，不能生成不完整指南");
-    return taskDocument.slice(from + start.length, to).trim().replace(/\]\(#([^)]*)\)/g, `](${taskUrl}#$1)`);
+    return pinCoreDocumentationLinks(taskDocument.slice(from + start.length, to).trim(), taskFile, platformSource);
   };
   const quick = section('<a id="core-quick-start"></a>', '<a id="core-agent-template"></a>');
   const agent = section('<a id="core-agent-template"></a>', "### 快速路径之外按需查阅");
@@ -29,8 +53,8 @@ export function renderCoreGuide(
     "当前发行仍在拆分公共宿主；下列五步保留对应版本任务册的支持状态。注册/授权/真实业务尚未接线的步骤，不能按已有完整SDK执行。",
     quick,
     agent,
-    `## 本 Core 的必需与可选入口\n\n服务端入口为 \`${manifest.entries.server}\`。${manifest.entries.admin ? `后台入口为 \`${manifest.entries.admin}\`。` : "本包没有声明后台入口。"}${manifest.entries.ai ? `本包声明AI贡献 \`${manifest.entries.ai}\`，使用仍需发布与当前授权。` : "本包没有AI贡献，Agent不能查询或操作其业务。"}`,
-    `对象范围为${manifest.scope.kind === "tenant" ? "租户" : `本Core的 ${plain(manifest.scope.containerType)} 容器`}。业务字段、状态与操作说明见本包README；许可见LICENSE。`,
+    `## 本 Core 的必需与可选入口\n\n[服务端入口](<${manifest.entries.server}>)。${manifest.entries.admin ? `[后台入口](<${manifest.entries.admin}>)。` : "本包没有声明后台入口。"}${manifest.entries.openapi ? `[同版本 API 文档](<${manifest.entries.openapi}>)。` : "本包没有声明 API 文档。"}${manifest.entries.ai ? `[AI贡献](<${manifest.entries.ai}>)，使用仍需发布与当前授权。` : "本包没有AI贡献，Agent不能查询或操作其业务。"}${manifest.entries.jobs ? `[作业入口](<${manifest.entries.jobs}>)，仅由宿主按登记范围启动。` : ""}${manifest.entries.events ? `[事件入口](<${manifest.entries.events}>)，由所属Core处理原事件与重复投递。` : ""}`,
+    `对象范围为${manifest.scope.kind === "tenant" ? "租户" : `本Core的 ${plain(manifest.scope.containerType)} 容器`}。业务字段、状态与操作说明见[本包README](README.md)；许可见[LICENSE](LICENSE)。`,
     "安装、部署注册、租户授权、成员分配和业务就绪分别成立。停用保留数据与原收据；重开复用绑定、核对当前权限，不能重放未知原操作。"
   ].join("\n\n") + "\n";
 }

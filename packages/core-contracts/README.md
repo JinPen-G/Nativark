@@ -219,7 +219,9 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 node packages/core-contracts/dist/generate-guide.js <Core清单JSON> <底座来源JSON>
 ```
 
-命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, taskDocument, platformSource)`；所有引用指向指定提交。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。完整页面接入要求见[页面声明](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#declarative-page-contract)，目前既有页面原语仍待正式Core适配接线。
+命令只向标准输出写Markdown，不覆盖包内已有指南。程序内可从正式出口调用 `renderCoreGuide(manifest, taskDocument, platformSource)`；任务册/源码引用固定到指定提交，服务端、后台、API及已声明可选贡献链接到包内入口。README/LICENSE也可从生成指南直接打开。缺少原文锚点会拒绝生成，指南保留对应版本的支持状态。完整页面接入要求见[页面声明](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#declarative-page-contract)，实际React适配与样例已提供，主宿主接线仍待实施。
+
+打包时复用正式出口 `pinCoreDocumentationLinks(text, sourceFile, source)`，以原源码文件路径解释相对链接并固定到本次提交，保留外链、围栏及行内代码示例。从任务册抽出的章节锚点指回原任务册；完整README可传第四参数true保留本页锚点。链接越出固定源码仓库时拒绝，生成过程不访问网络或执行文档命令。[生成源码](src/guide.ts) · [工单打包消费者](../example-tickets-core/src/package.ts)
 
 Node专用出口 `@rental-os/core-contracts/archive` 提供 `createCoreArchive(files)` 与 `readCoreArchive(bytes, expectedSha256)`，采用USTAR+gzip。相同文件按固定排序、权限和时间打包；校验整个压缩包SHA-256后返回内存文件。首版最多5000文件、单文件32MiB、解压总量128MiB，只接普通文件，不接PAX/软硬链接、目录条目、重复或越界路径。包内禁止实际 `.env`、Git元数据和node_modules；保留 `.env.example` 模板入口。
 
