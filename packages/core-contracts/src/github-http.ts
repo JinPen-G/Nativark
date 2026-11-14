@@ -1,7 +1,7 @@
 /** 公开GitHub只读传输；地址由适配器生成，正文有界，异常不输出响应体或签名URL。 */
 export class GitHubCoreReadError extends Error {
   constructor(readonly code: "network" | "rate_limited" | "http" | "response_invalid" | "release_changed", message: string,
-    readonly retryAfterSeconds?: number) { super(message); this.name = "GitHubCoreReadError"; }
+    readonly retryAfterSeconds?: number, readonly status?: number) { super(message); this.name = "GitHubCoreReadError"; }
 }
 
 export type GitHubFetcher = typeof fetch;
@@ -40,7 +40,7 @@ export async function readGitHubResponse(url: string, binary: boolean, limit: nu
         throw new GitHubCoreReadError("rate_limited", "GitHub请求已限流；保留当前组合，稍后手动重试",
           retry && /^\d+$/.test(retry) ? Number(retry) : undefined);
       }
-      throw new GitHubCoreReadError("http", `GitHub返回HTTP ${response.status}；请核对公开仓库、Tag和Release资产`);
+      throw new GitHubCoreReadError("http", `GitHub返回HTTP ${response.status}；请核对公开仓库、Tag和Release资产`, undefined, response.status);
     }
     if (!response.body) throw new GitHubCoreReadError("response_invalid", "GitHub响应缺少内容");
     const reader = response.body.getReader(), chunks: Uint8Array[] = [];

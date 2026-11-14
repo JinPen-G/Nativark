@@ -30,6 +30,10 @@
     "./development": {
       "types": "./dist/development.d.ts",
       "default": "./dist/development.js"
+    },
+    "./github-repository": {
+      "types": "./dist/github-repository.d.ts",
+      "default": "./dist/github-repository.js"
     }
   },
   "scripts": {

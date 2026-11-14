@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-github-repository-20261115"></a>
+
+## 固定GitHub仓库清单与多Core索引（2026-11-15）
+
+门槛/提交前期限片固定 `df7aaa0f270ed72164defaf93b8263b81a847b38` 已普通推送并真实远端核同，当前main仍62ca。按原02/03/07/11发现范围补 [GitHub仓库读取](../../../packages/core-contracts/src/github-repository.ts)，单Core读取根core.manifest.json，多Core根core.index.json使用唯一id/相对路径清单，schema在该正式Node出口维护，最多20Core。
+
+读取公开仓库元数据→固定默认分支当前commit→带ref读取根索引及Core清单，核Contents普通文件/路径/大小/编码及Git Blob摘要。所有清单解析沿CoreManifestSchema，ID/来源与仓库索引匹配；默认只取元数据，显式--releases时复用原固定Release接口核Tag/提交/资产，仍标记未审核/包未检查。源码发行可早于目录维护提交，manifest.source.commit与所选Release一致后取得发行候选。
+
+整仓状态与单Core状态分别表达，某个清单坏Blob或限流保留其他Core的有效资料。读取器支持no_manifest/invalid/partial、metadata_only/source_only/release_available/unavailable和原retryAfter。GitHubHTTP错误增加可判定status，404表示确实缺文件或发行，其余失败准确保留。CLI和简明手册同步作者根索引格式、单/多CoreTag及按需查看发行步骤。
+
+31根合同类型0诊断，stdin内存编译运行实际读取器核单/多Core固定commit、Contents摘要/路径、缺清单/未发行、固定发行资料、429限流及坏Blob/越界拒绝，退出0。追加部分清单失败核其他结果保留，退出0。真实公开测试发行下载/安装仍未执行，当前验证使用受控HTTP响应输入。
+
+原8组合同退出0，4份文档475条本地链接定向新错0，原12任务行/进度一致，diff检查退出0。新增正式Node出口与CLI一起维护，验证只在stdin/内存及原测试临时目录，原after清理已核实，新增测试脚本/服务/依赖为0。
+
 <a id="pch-first-gate-20261115"></a>
 
 ## 首批工程门槛与提交前会话期限复核（2026-11-15）

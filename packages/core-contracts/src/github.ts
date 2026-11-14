@@ -13,10 +13,10 @@ export { GitHubCoreReadError } from "./github-http";
 export { GitHubCoreDiscoveryQuerySchema, createGitHubCoreDiscovery } from "./github-discovery";
 export type { GitHubCoreDiscoveryPage, GitHubCoreDiscoveryResult } from "./github-discovery";
 
-const repository = z.string().regex(/^https:\/\/github\.com\/[a-zA-Z0-9][a-zA-Z0-9-]*\/[a-zA-Z0-9_.-]+$(?![\s\S])/)
+export const GitHubCoreRepositorySchema = z.string().regex(/^https:\/\/github\.com\/[a-zA-Z0-9][a-zA-Z0-9-]*\/[a-zA-Z0-9_.-]+$(?![\s\S])/)
   .refine(value => !value.endsWith(".git") && ![".", ".."].includes(value.split("/").at(-1)!), "使用https://github.com/owner/repo仓库地址，不带.git后缀");
 const selectionFields = {
-  repository, coreId: CoreIdSchema, version: CoreReleaseVersionSchema, tag: z.string().min(1).max(160)
+  repository: GitHubCoreRepositorySchema, coreId: CoreIdSchema, version: CoreReleaseVersionSchema, tag: z.string().min(1).max(160)
 };
 const validTag = (value: { coreId: string; version: string; tag: string }) =>
   value.tag === `v${value.version}` || value.tag === `${value.coreId}/v${value.version}`;

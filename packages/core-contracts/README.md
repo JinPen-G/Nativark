@@ -238,7 +238,34 @@ node packages/core-contracts/dist/github-release.js discover [关键词] [页码
 
 返回状态为`fresh`、`cached`或`unavailable`。远端不可达/限流/格式错误时，`unavailable.error`保留原因；有原缓存时附带`stale`及其原始查询时间，没有缓存时不伪造空结果。`discover`命令始终将这个结构写stdout，unavailable退出1，成功退出0；用法错误写stderr并退出1。实际已安装Core继续由宿主独立维护，发现失败不触碰它们。
 
-发现的数据还没有证明仓库根清单、同仓Core索引或可安装版本。宿主下一步须核对这些元数据，再通过上面的固定Release入口准备包；发现/版本/安装管理界面和实际部署注册尚未接线。检索规则依据[GitHub仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。
+候选仓库通过下面的固定根清单/索引读取核定Core元数据，再由固定Release入口准备包。实际发现/版本/安装管理界面及部署注册按PCH宿主片接线。检索规则依据[GitHub仓库搜索](https://docs.github.com/en/rest/search/search#search-repositories)。
+
+## 从仓库确认 Core 清单
+
+选择候选仓库后，运行下面命令读取固定提交里的清单。只有需要查看发行状态时附 `--releases`，可减少发现请求。
+
+```sh
+node packages/core-contracts/dist/github-release.js repository owner/repo
+node packages/core-contracts/dist/github-release.js repository owner/repo --releases
+```
+
+单Core仓库在根目录公开 `core.manifest.json`。同仓多个Core的根目录使用 `core.index.json`，内容如下，`manifest`使用本仓相对文件路径，每个Core标识与其清单一致。
+
+```json
+{
+  "indexVersion": 1,
+  "cores": [
+    { "id": "example-tickets", "manifest": "cores/tickets/core.manifest.json" },
+    { "id": "workflow", "manifest": "cores/workflow/core.manifest.json" }
+  ]
+}
+```
+
+清单中的来源提交是实际Core发行源码，仓库索引本身可以在后续提交维护。读取器先固定默认分支当时的提交，再用该commit读取全部索引/清单，核Contents文件路径、Base64长度和Git Blob摘要。根索引schema和Core清单沿唯一合同解析，重复标识/路径及越界拒绝，每个仓库最多20个Core。[仓库读取](src/github-repository.ts)
+
+结果中的Core状态为 `metadata_only`、`release_available`、`source_only`、`invalid` 或 `unavailable`。仓库整体可为完整identified、部分partial、无清单或不合法。Release元数据使用单Core `v版本` 或多Core `Core ID/v版本` Tag核对，状态仍保留 `review=unreviewed`、`package=unchecked`，下载安装和包检查按前述固定Release入口执行。某个清单读取失败保留其他Core已取得的结果，限流输出原retryAfter秒数，已装配Core继续自己的运行链。
+
+程序调用使用 `@rental-os/core-contracts/github-repository` 的 `inspectGitHubCoreRepository`。读取器只解析公开资料，源码与发行目录的真实安装/运行验证沿PCH宿主交付。
 
 ## 源码路线与验证
 
