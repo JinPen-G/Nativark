@@ -153,7 +153,8 @@ export class PrismaClientBookingRepository {
   /** Original page acceptance only: its exact attempt and terminal are committed
    * together. A lost commit reply never permits Core dispatch or a new key. */
   async acceptSubmission(expected: ClientBookingRow, handoffRef: string,
-    persistAttempt: (tx: Prisma.TransactionClient, replayOnly: boolean) => Promise<{ row: AiClientSceneMaterial; replayed: boolean }>) {
+    persistAttempt: (tx: Prisma.TransactionClient, replayOnly: boolean) => Promise<{ row: AiClientSceneMaterial; replayed: boolean }>,
+    authorize?: (row: ClientBookingRow, tx: Prisma.TransactionClient) => Promise<void>) {
     let attempted = false;
     try {
       return await this.db.$transaction(async tx => {
@@ -165,6 +166,9 @@ export class PrismaClientBookingRepository {
           if (!attempt.replayed) throw conflict();
           return { row, attempt, replayed: true };
         }
+        // A transfer and the original page compete for this same Draft lock.
+        // A check before acquiring it cannot prevent a late source submission.
+        if (authorize) await authorize(row, tx);
         const now = this.clock(), handoff = await this.handoff(expected, handoffRef, tx);
         if (row.revision !== expected.revision || row.state !== 'handed_to_booking_page' || row.expiresAt <= now
           || !handoff || handoff.draftId !== row.id || handoff.inputHash !== row.inputHash
@@ -185,6 +189,25 @@ export class PrismaClientBookingRepository {
       if (attempted || error instanceof AiClientMaterialError && error.code === 'AI_CLIENT_RESULT_UNKNOWN')
         throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_submission_acceptance_unacknowledged', 'read_original_submission');
       if (error instanceof AiClientEntryError) throw error;
+      throw unavailable();
+    }
+  }
+  /** Share the original Draft lock with acceptance/transfer metadata writes.
+   * The caller still owns current Auth, material and idempotency validation. */
+  async withDraftLock<T>(scope: AiClientMaterialScope, draftId: string,
+    consume: (row: ClientBookingRow, transaction: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    let returned = false;
+    try {
+      return await this.db.$transaction(async tx => {
+        const row = await this.find(scope, draftId, tx, true);
+        if (!row) throw unavailable();
+        const result = await consume(row, tx);
+        returned = true;
+        return result;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (returned) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_acceptance_commit_unacknowledged', 'read_booking_operation');
+      if (error instanceof AiClientEntryError || error instanceof AiClientMaterialError) throw error;
       throw unavailable();
     }
   }

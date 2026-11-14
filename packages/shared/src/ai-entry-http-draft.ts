@@ -43,6 +43,9 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',
   handoffBookingDraft: 'booking-drafts/handoff', readBookingHandoff: 'booking-handoffs/read',
   readBookingOperation: 'booking-operations/read',
+  /** Original operation readers cannot mint another reference or consume it. */
+  issueBookingTransfer: 'booking-transfers/issue', readBookingTransferIssue: 'booking-transfers/issue/read',
+  consumeBookingTransfer: 'booking-transfers/consume', readBookingTransferReceipt: 'booking-transfers/receipt/read',
   acceptBookingSubmission: 'booking-submissions/accept',
   readBookingAcceptance: 'booking-submissions/acceptance/read',
   submitAcceptedBooking: 'booking-submissions/submit',

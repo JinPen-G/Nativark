@@ -50,6 +50,8 @@ const material = z.object({ selection: aiBookingSelectionSchema,
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Original service field sources must bind each normalized occurrence' });
   }
 });
+/** Exact original material parsing is separate from current permission/use. */
+export const aiBookingMaterialSchema = material;
 export const aiBookingDraftSchema: z.ZodType<AiBookingDraft> = z.object({
   contractVersion: z.literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), bookingDraftId: z.string().uuid(),
   audience: z.literal('customer'), surface: z.enum(AI_CUSTOMER_ENTRY_SURFACES), scope,

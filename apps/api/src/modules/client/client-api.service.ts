@@ -1384,8 +1384,16 @@ export class ClientApiService {
     return { orderId: created.order.id, replayed: created.replayed };
   }
 
-  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
+  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext,
+    beforeDispatch?: (prepared: Awaited<ReturnType<ClientApiService['prepareOrderSubmission']>>) => Promise<void>) {
+    context = structuredClone(context);
     const { business, orderInput } = await this.prepareClientOrder(context, structuredClone(input));
+    // Request-bound hosts may lose their independent use grant while the
+    // original Core preparation awaits. Recheck after that final preparation,
+    // immediately before calling the writer; never accept this hook from HTTP.
+    if (beforeDispatch) await beforeDispatch({ tenantId: context.tenantId, workspaceId: context.workspaceId,
+      customerId: context.customerId, request: structuredClone(orderInput),
+      requestHash: this.orders.fingerprintOrderRequest(orderInput), execution: 'not_submitted', inventory: 'not_reserved' });
     // 收货地址在报价阶段已由核心解析并固化进报价/订单快照；下单直接消费报价即可，无需再查客户端旁表。
     const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
     const order = await this.assertClientOrder(context, created.order.id);

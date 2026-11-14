@@ -14,6 +14,8 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientQuoteBookingOperationResponseSchema } from '@rental-os/shared';
 import { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema, aiClientGoalPreparationResponseSchema,
   aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema } from '@rental-os/shared';
+import { aiClientBookingTransferIssueRequestSchema, aiClientBookingTransferIssueResponseSchema,
+  aiClientBookingTransferRequestSchema, aiClientBookingTransferReceiptSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -29,6 +31,7 @@ export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION')
 export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
+  'issueBookingTransfer' | 'readBookingTransferIssue' | 'consumeBookingTransfer' | 'readBookingTransferReceipt' |
   'acceptBookingSubmission' | 'readBookingAcceptance' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
   'readOriginalTaskCancellationReceipt' | 'readOriginalTaskCancellationSettlementReceipt' | 'settleOriginalTaskUnstartedCancellation' |
@@ -456,6 +459,40 @@ export class AiClientEntryController {
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingOperation(request, body));
+  }
+
+  private bookingTransfer(request: ClientModelHttpRequest & { body?: unknown }, value: unknown,
+    method: 'issueBookingTransfer' | 'readBookingTransferIssue' | 'consumeBookingTransfer' | 'readBookingTransferReceipt') {
+    const command = structuredClone(request.body ?? value), current = {
+      headers: { authorization: request?.headers?.authorization }, ip: request.ip };
+    const source = method === 'issueBookingTransfer' || method === 'readBookingTransferIssue';
+    const read = method === 'readBookingTransferIssue' || method === 'readBookingTransferReceipt';
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const input = source ? aiClientBookingTransferIssueRequestSchema.parse(command) : aiClientBookingTransferRequestSchema.parse(command);
+      if (signal.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const result = await this.application[method](current, input);
+      if (signal.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_transfer_interrupted');
+      const parsed = source ? aiClientBookingTransferIssueResponseSchema.safeParse(result) : aiClientBookingTransferReceiptSchema.safeParse(result);
+      if (!parsed.success || Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 8192)
+        throw new AiClientEntryError(read ? 'AI_RESOURCE_UNAVAILABLE' : 'AI_RESULT_UNKNOWN', 'booking_transfer_delivery_unknown');
+      return parsed.data;
+    }, { maxWaitMs: 15000 }), source ? 'read_original_transfer_issue' : 'read_original_transfer_receipt');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueBookingTransfer) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  issueBookingTransfer(@Req() request: ClientModelHttpRequest & { body?: unknown }, @Body() body: unknown) {
+    return this.bookingTransfer(request, body, 'issueBookingTransfer');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingTransferIssue) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readBookingTransferIssue(@Req() request: ClientModelHttpRequest & { body?: unknown }, @Body() body: unknown) {
+    return this.bookingTransfer(request, body, 'readBookingTransferIssue');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.consumeBookingTransfer) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  consumeBookingTransfer(@Req() request: ClientModelHttpRequest & { body?: unknown }, @Body() body: unknown) {
+    return this.bookingTransfer(request, body, 'consumeBookingTransfer');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingTransferReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readBookingTransferReceipt(@Req() request: ClientModelHttpRequest & { body?: unknown }, @Body() body: unknown) {
+    return this.bookingTransfer(request, body, 'readBookingTransferReceipt');
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance) @HttpCode(200) @Header('Cache-Control', 'no-store')

@@ -61,6 +61,12 @@ import type { PrismaClient } from '@prisma/client';
 import { clientGoalCommandSchema, prepareClientGoalMaterial, validateClientGoalMaterial, revalidateClientGoalMaterial,
   type ClientGoalSources } from './client-goal-material';
 import { projectClientGoal, prepareClientGoalQuoteRequest, type ClientGoalHumanClarification } from './client-goal-projection';
+import { composeClientBookingTransferHost, type ClientBookingOriginalBinding,
+  type ClientBookingTransferPublication } from './client-booking-transfer-host';
+import { AI_CLIENT_BOOKING_TRANSFER_VERSION, aiClientBookingTransferIssueRequestSchema,
+  aiClientBookingTransferIssueResponseSchema, aiClientBookingTransferRequestSchema,
+  aiClientBookingTransferReceiptSchema } from '@rental-os/shared';
+import type { ClientBookingTransferReceipt } from './client-booking-transfer.contract';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -105,6 +111,10 @@ export type AiClientRequestDependencies = {
   /** Same authorized client service; explicit human parameter confirmation,
    * never an automatically selected model tool or order approval. */
   quotePreparation?: Pick<ClientApiService, 'prepareQuoteForOriginalOperation' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
+  /** Server-only independent channel publication lookup for one original
+   * Booking transfer. A customer body cannot provide this authority. */
+  bookingTransfer?: { db: PrismaClient;
+    publication(identity: ClientRequestContext, channel: 'web' | 'wechat_miniprogram', create: boolean): Promise<ClientBookingTransferPublication> };
 };
 type Command = z.infer<typeof commandSchema>;
 const fail = (code: 'AI_CLIENT_INVALID_INPUT' | 'AI_CLIENT_CONTEXT_UNAVAILABLE' | 'AI_CLIENT_CAPABILITY_UNAVAILABLE' | 'AI_CLIENT_MATERIAL_STALE'): never => { throw new Error(code); };
@@ -151,7 +161,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   type Published = Awaited<ReturnType<typeof publication>>;
   type Bound = { published: Published; identity: ClientRequestContext | null; bindingHash: string;
-    scenes: ReturnType<typeof composeAiClientScenes>; assertCurrent(): Promise<void> };
+    scenes: ReturnType<typeof composeAiClientScenes>; assertCurrent(): Promise<void>;
+    originalBooking?: ClientBookingOriginalBinding };
   const withBinding = async <T>(request: AiClientApplicationRequest, member: boolean, kind: string, consume: (bound: Bound) => Promise<T>, signal?: AbortSignal,
     accountingWrite?: boolean): Promise<T> => {
     const header = member ? bearerSchema.safeParse(request?.headers?.authorization) : undefined;
@@ -382,6 +393,37 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     return materialEntryAction(row, requireEntry(), grant.policyFingerprint, grant.expiresAt, command.orderId, 'OPEN_ORDER');
   };
   const bookingRepository = new PrismaClientBookingRepository(dependencies.db, clock);
+  const transferHost = (bound: Bound) => {
+    const transfer = dependencies.bookingTransfer;
+    if (!transfer || transfer.db !== dependencies.db || !taskDependencies || !bound.identity || !server.entry
+      || !['web', 'wechat_miniprogram'].includes(server.channel)) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_transfer_not_assembled');
+    return composeClientBookingTransferHost({ db: transfer.db, bound: { ...bound, identity: bound.identity },
+      channel: server.channel as 'web' | 'wechat_miniprogram', appId: server.appId ?? null,
+      tasks: taskDependencies, releaseRevision: server.entry.releaseRevision, clock, publication: transfer.publication });
+  };
+  const bookingScope = (bound: Bound) => bound.originalBooking?.scope ?? scopeOf(bound);
+  const bookingBindingHash = (bound: Bound) => bound.originalBooking?.bindingHash ?? bound.bindingHash;
+  const bindOriginalBooking = async (bound: Bound, value: unknown, historical: boolean) => {
+    if (!dependencies.bookingTransfer) return bound;
+    const command = value as { handoffRef?: unknown; bookingDraftId?: unknown; acceptanceRef?: unknown; action?: unknown };
+    let locator: { handoffRef?: string; draftId?: string; acceptanceRef?: string } | undefined;
+    if (typeof command?.handoffRef === 'string') locator = { handoffRef: command.handoffRef };
+    else if (typeof command?.bookingDraftId === 'string') locator = { draftId: command.bookingDraftId };
+    else if (typeof command?.acceptanceRef === 'string') locator = { acceptanceRef: command.acceptanceRef };
+    else if (command?.action && typeof command.action === 'object' && 'associations' in command.action) {
+      const associations = command.action.associations as { bookingDraftId?: unknown };
+      if (typeof associations?.bookingDraftId === 'string') locator = { draftId: associations.bookingDraftId };
+    }
+    if (!locator) return bound;
+    const originalBooking = await transferHost(bound).binding(locator, historical);
+    return originalBooking ? { ...bound, originalBooking } : bound;
+  };
+  const assertBookingUse = async (bound: Bound, row: import('./prisma-client-booking.repository').ClientBookingRow,
+    transaction?: import('@prisma/client').Prisma.TransactionClient) => {
+    if (bound.originalBooking) await transferHost(bound).validate(bound.originalBooking, false, transaction);
+    else if (dependencies.bookingTransfer) await transferHost(bound).assertSourceUse(scopeOf(bound), row, transaction);
+    await bound.assertCurrent();
+  };
   const requireBooking = () => {
     requireEntry();
     if (typeof dependencies.client.getQuote !== 'function' || typeof dependencies.client.bookingOptions !== 'function') {
@@ -390,6 +432,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const loadBookingMaterial = async (bound: Bound, materialRef: string) => {
     requireBooking();
+    if (bound.originalBooking) {
+      if (materialRef !== bound.originalBooking.receipt.issue.original.materialRef) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transfer_material_mismatch');
+      return transferHost(bound).loadMaterial(bound.originalBooking, false);
+    }
     const row = await repository.findSource(scopeOf(bound), materialRef);
     if (!row) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_material_unavailable');
     const { command, grant } = await verifyEntryMaterial(bound, row);
@@ -398,6 +444,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const loadHistoricalBookingMaterial = async (bound: Bound, ref: string) => {
     requireBooking();
+    if (bound.originalBooking) {
+      if (ref !== bound.originalBooking.receipt.issue.original.materialRef) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transfer_material_mismatch');
+      return transferHost(bound).loadMaterial(bound.originalBooking, true);
+    }
     const row = await repository.findSource(scopeOf(bound), ref);
     if (!row || row.bindingHash !== bound.bindingHash) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_material_unavailable');
     const command = commandSchema.safeParse(row.command);
@@ -412,8 +462,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     await bound.assertCurrent();
     return { row, material: row.material as AiBookingMaterial, policyFingerprint: after.policyFingerprint, policyExpiresAt: after.expiresAt };
   };
-  const booking = (bound: Bound) => composeClientBooking({ repository: bookingRepository, scope: scopeOf(bound),
-    bindingHash: bound.bindingHash, surface: requireEntry(), clock, assertCurrent: bound.assertCurrent,
+  const booking = (bound: Bound) => composeClientBooking({ repository: bookingRepository, scope: bookingScope(bound),
+    bindingHash: bookingBindingHash(bound), surface: requireEntry(), clock, assertCurrent: bound.assertCurrent,
+    assertUse: row => assertBookingUse(bound, row),
     loadMaterial: ref => loadBookingMaterial(bound, ref), loadHistoricalMaterial: ref => loadHistoricalBookingMaterial(bound, ref),
     withReceiptRead: async read => {
       if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
@@ -432,7 +483,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     let returned = false;
     try {
       return await withBinding(request, true, 'order', async bound => {
-        const result = await consume(booking(bound), frozen);
+        const current = await bindOriginalBooking(bound, frozen, !writes);
+        const result = await consume(booking(current), frozen);
         returned = true;
         return result;
       });
@@ -473,15 +525,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     selectionRevision: material.selectionRevision, inputFingerprint: material.inputFingerprint,
     quoteId: material.quoteId, operationKey: material.operationKey, execution: 'not_attested' as const });
   const loadAcceptance = async (bound: Bound, ref: string) => {
-    const row = await repository.findSource(scopeOf(bound), ref);
-    if (!row || row.bindingHash !== bound.bindingHash || row.materialHash !== jsonHash(row.material)
+    const row = await repository.findSource(bookingScope(bound), ref);
+    if (!row || row.bindingHash !== bookingBindingHash(bound) || row.materialHash !== jsonHash(row.material)
       || row.inputHash !== jsonHash(row.command) || !row.material || typeof row.material !== 'object') {
       throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_acceptance_unavailable');
     }
     const material = row.material as Acceptance;
     const original = parseEntry(submissionDraft, row.command);
     if (material.version !== 'client-booking-acceptance-1' || material.operationKey !== row.operationKey
-      || material.operationKey !== `booking-order:${jsonHash({ scope: scopeOf(bound), handoffRef: original.handoffRef })}`
+      || material.operationKey !== `booking-order:${jsonHash({ scope: bookingScope(bound), handoffRef: original.handoffRef })}`
       || material.handoffRef !== original.handoffRef || !z.string().uuid().safeParse(material.bookingDraftId).success
       || !Number.isInteger(material.selectionRevision) || material.selectionRevision < 1
       || !z.string().regex(/^[a-f0-9]{64}$/u).safeParse(material.inputFingerprint).success
@@ -490,13 +542,49 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       || material.accepted.workspaceId !== bound.identity?.workspaceId
       || material.accepted.customerId !== bound.identity?.customerId) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_acceptance_invalid');
     // Reauthorize historical receipt access without re-consuming an already used quote.
-    const grant = await entryGrant(bound, row, 'read');
-    const latest = await repository.findSource(scopeOf(bound), ref);
+    const grant = bound.originalBooking ? (await transferHost(bound).validate(bound.originalBooking, true),
+      { policyFingerprint: bound.originalBooking.policyHash }) : await entryGrant(bound, row, 'read');
+    if (bound.originalBooking && (material.handoffRef !== bound.originalBooking.receipt.issue.original.handoffRef
+      || material.bookingDraftId !== bound.originalBooking.receipt.issue.original.draftId
+      || material.operationKey !== bound.originalBooking.receipt.issue.original.bookingOperationKey))
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_transfer_acceptance_mismatch');
+    const latest = await repository.findSource(bookingScope(bound), ref);
     if (!latest || jsonHash(latest) !== jsonHash(row)) {
       throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_changed');
     }
     await bound.assertCurrent();
     return { row, material, policyFingerprint: grant.policyFingerprint };
+  };
+  const transferPacket = (command: { transferRef: string; operationKey: string }, value: ClientBookingTransferReceipt | null) =>
+    aiClientBookingTransferReceiptSchema.parse({ contractVersion: AI_CLIENT_BOOKING_TRANSFER_VERSION,
+      operationKey: command.operationKey, transferRef: command.transferRef,
+      state: value?.consumption ? 'consumed' : 'unknown',
+      handoffRef: value?.consumption ? value.issue.original.handoffRef : null,
+      bookingDraftId: value?.consumption ? value.issue.original.draftId : null,
+      expiresAt: value?.consumption?.expiresAt ?? null, currentUse: 'not_authorized_by_receipt',
+      execution: 'not_attempted', retryable: false,
+      nextAction: value?.consumption ? 'revalidate_original_handoff' : 'read_original_transfer_receipt' });
+  const originalTransfer = async (request: AiClientApplicationRequest, value: unknown,
+    operation: 'issue' | 'readIssue' | 'consume' | 'readReceipt') => {
+    requireBooking();
+    const command = operation === 'issue' || operation === 'readIssue'
+      ? aiClientBookingTransferIssueRequestSchema.parse(structuredClone(value))
+      : aiClientBookingTransferRequestSchema.parse(structuredClone(value));
+    const currentRequest = structuredClone(request);
+    return withBinding(currentRequest, true, 'order', async bound => {
+      const host = transferHost(bound);
+      if ('handoffRef' in command) {
+        const original = { handoffRef: command.handoffRef, operationKey: command.operationKey,
+          targetChannel: command.targetSurface === 'tenant_website' ? 'web' as const : 'wechat_miniprogram' as const };
+        const result = operation === 'issue' ? await host.repository.issue(original) : await host.repository.readSourceReceipt(original);
+        return aiClientBookingTransferIssueResponseSchema.parse({ contractVersion: AI_CLIENT_BOOKING_TRANSFER_VERSION,
+          state: result ? 'issued' : 'unknown', handoffRef: command.handoffRef, operationKey: command.operationKey,
+          targetSurface: command.targetSurface, transferRef: result?.issue.transferRef ?? null, expiresAt: result?.issue.expiresAt ?? null,
+          currentUse: 'not_authorized_by_receipt', execution: 'not_attempted', retryable: false,
+          nextAction: result ? 'target_reauthenticate_and_consume' : 'read_original_transfer_issue' });
+      }
+      return transferPacket(command, operation === 'consume' ? await host.repository.consume(command) : await host.repository.readReceipt(command));
+    });
   };
   const originalBookingCall = async <T>(request: AiClientApplicationRequest, bound: Bound, body: { quoteId: string; contactPhone?: string },
     write: boolean, consume: (identity: ClientRequestContext) => Promise<T>) => runWithRequestIdentity({}, async () => {
@@ -1155,10 +1243,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       requireEntry();
       const command = parseEntry(aiBookingAcceptanceReadRequestSchema, structuredClone(value));
       return withBinding(structuredClone(request), true, 'order', async bound => {
+        bound = await bindOriginalBooking(bound, command, true);
         if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
-        const scope = scopeOf(bound), operationKey = `booking-order:${jsonHash({ scope, handoffRef: command.handoffRef })}`;
+        const scope = bookingScope(bound), operationKey = `booking-order:${jsonHash({ scope, handoffRef: command.handoffRef })}`;
         const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
-        const subject = { ...scope, identity: structuredClone(bound.identity) };
+        const subject = { ...scopeOf(bound), identity: structuredClone(bound.identity) };
         const before = await policy.authorize(subject, 'read');
         const row = await repository.findOperation(scope, operationKey);
         let acceptance: ReturnType<typeof acceptedView> | null = null;
@@ -1183,7 +1272,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       request = structuredClone(request);
       const port = submissionPort(), command = parseEntry(submissionDraft, structuredClone(value));
       return withBinding(request, true, 'order', async bound => {
-        const scope = scopeOf(bound), operationKey = `booking-order:${jsonHash({ scope, handoffRef: command.handoffRef })}`;
+        bound = await bindOriginalBooking(bound, command, false);
+        const scope = bookingScope(bound), operationKey = `booking-order:${jsonHash({ scope, handoffRef: command.handoffRef })}`;
         const prior = await repository.findOperation(scope, operationKey);
         if (prior) {
           if (prior.inputHash !== jsonHash(command)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_input_changed');
@@ -1199,10 +1289,20 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         const material: Acceptance = { version: 'client-booking-acceptance-1', handoffRef: command.handoffRef,
           bookingDraftId: handoff.bookingDraftId, selectionRevision: draft.selectionRevision,
           inputFingerprint: draft.inputFingerprint, quoteId: handoff.fields.quoteId, operationKey, accepted };
-        const row = await repository.save({ id: randomUUID(), ...scope, bindingHash: bound.bindingHash,
-          publicationHash: jsonHash(bound.published.value), publication: bound.published.value, operationKey,
-          command, inputHash: jsonHash(command), material, materialHash: jsonHash(material), revision: 1,
-          createdAt: clock(), expiresAt: new Date(handoff.expiresAt) });
+        const row = await bookingRepository.withDraftLock(scope, handoff.bookingDraftId, async (locked, transaction) => {
+          await assertBookingUse(bound, locked, transaction);
+          if (locked.state !== 'handed_to_booking_page' || locked.revision !== draft.revision || locked.inputHash !== draft.inputFingerprint)
+            throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_draft_changed');
+          const storedMaterial = bound.originalBooking
+            ? await transferHost(bound).loadMaterial(bound.originalBooking, false, transaction) : null;
+          const saved = await repository.save({ id: randomUUID(), ...scope, bindingHash: bookingBindingHash(bound),
+            publicationHash: bound.originalBooking?.publicationHash ?? jsonHash(bound.published.value),
+            publication: storedMaterial?.row.publication ?? bound.published.value, operationKey,
+            command, inputHash: jsonHash(command), material, materialHash: jsonHash(material), revision: 1,
+            createdAt: clock(), expiresAt: new Date(handoff.expiresAt) }, transaction);
+          if (bound.originalBooking) await transferHost(bound).repository.bindAcceptance(bound.originalBooking.receipt, saved.row.id, transaction);
+          return saved;
+        });
         await bound.assertCurrent();
         const saved = await loadAcceptance(bound, row.row.id);
         return acceptedView(saved.row, saved.material);
@@ -1211,23 +1311,27 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     async readBookingSubmission(request: AiClientApplicationRequest, value: unknown) {
       request = structuredClone(request);
       receiptPort(); const command = parseEntry(acceptedRef, structuredClone(value));
-      return withBinding(request, true, 'order', async bound => readSubmission(request, bound,
-        await loadAcceptance(bound, command.acceptanceRef)));
+      return withBinding(request, true, 'order', async bound => {
+        bound = await bindOriginalBooking(bound, command, true);
+        return readSubmission(request, bound, await loadAcceptance(bound, command.acceptanceRef));
+      });
     },
     async submitAcceptedBooking(request: AiClientApplicationRequest, value: unknown) {
       request = structuredClone(request);
       const port = submissionPort(), command = parseEntry(confirmedAcceptance, structuredClone(value));
       return withBinding(request, true, 'order', async bound => {
+        bound = await bindOriginalBooking(bound, command, true);
         const acceptance = await loadAcceptance(bound, command.acceptanceRef);
         const { row, material } = acceptance;
         const attemptKey = `booking-attempt:${row.id}`;
-        if (await repository.findOperation(scopeOf(bound), attemptKey)) return readSubmission(request, bound, acceptance);
+        if (await repository.findOperation(bookingScope(bound), attemptKey)) return readSubmission(request, bound, acceptance);
+        if (bound.originalBooking) await transferHost(bound).validate(bound.originalBooking, false);
         if (row.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_acceptance_expired');
         // Accept this explicit page request atomically with the original attempt.
         // submitted is not a Core receipt; failed/unknown attempts are never resent.
         await booking(bound).readHandoff({ handoffRef: material.handoffRef });
-        const expected = await bookingRepository.find(scopeOf(bound), material.bookingDraftId);
-        if (!expected || expected.bindingHash !== bound.bindingHash || expected.inputHash !== material.inputFingerprint
+        const expected = await bookingRepository.find(bookingScope(bound), material.bookingDraftId);
+        if (!expected || expected.bindingHash !== bookingBindingHash(bound) || expected.inputHash !== material.inputFingerprint
           || expected.selectionRevision !== material.selectionRevision) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_accepted_draft_changed');
         const original = parseEntry(submissionDraft, row.command);
         const body = { quoteId: material.quoteId, ...(original.contactPhone !== undefined ? { contactPhone: original.contactPhone } : {}) };
@@ -1237,9 +1341,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         });
         await bound.assertCurrent();
         const attempt = await bookingRepository.acceptSubmission(expected, material.handoffRef, async (tx, replayOnly) => {
-          const current = await repository.findOperation(scopeOf(bound), row.operationKey, tx);
+          const current = await repository.findOperation(bookingScope(bound), row.operationKey, tx);
           if (!current || jsonHash(current) !== jsonHash(row)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_changed');
-          const prior = await repository.findOperation(scopeOf(bound), attemptKey, tx);
+          const prior = await repository.findOperation(bookingScope(bound), attemptKey, tx);
           if (prior) {
             if (jsonHash(prior) !== jsonHash({ ...row, id: prior.id, operationKey: attemptKey }))
               throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_attempt_changed');
@@ -1247,7 +1351,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           }
           if (replayOnly) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_submission_attempt_missing');
           return repository.save({ ...row, id: randomUUID(), operationKey: attemptKey }, tx);
-        });
+        }, (locked, transaction) => assertBookingUse(bound, locked, transaction));
         if (attempt.replayed) return readSubmission(request, bound, acceptance);
         let called = false;
         try {
@@ -1255,8 +1359,20 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
             const current = await port.prepareOrderSubmission(identity, body);
             if (jsonHash(current) !== jsonHash(material.accepted)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_request_changed');
             await bound.assertCurrent();
-            called = true;
-            return port.createOrder(identity, body, { headers: { 'idempotency-key': material.operationKey } });
+            return port.createOrder(identity, body, { headers: { 'idempotency-key': material.operationKey } }, async prepared => {
+              if (jsonHash(prepared) !== jsonHash(material.accepted))
+                throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_request_changed');
+              await bound.assertCurrent();
+              if (bound.originalBooking) await transferHost(bound).validate(bound.originalBooking, false);
+              else {
+                if (dependencies.bookingTransfer) await transferHost(bound).assertSourceUse(bookingScope(bound), expected);
+                const grant = await entryGrant(bound, row);
+                if (grant.policyFingerprint !== expected.policyHash || grant.expiresAt <= clock())
+                  throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_current_grant_changed');
+              }
+              if (row.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_acceptance_expired');
+              called = true;
+            });
           });
         } catch (error) {
           if (!called) throw error;
@@ -1385,6 +1501,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     chooseBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.choose(command)),
     handoffBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.handoff(command)),
     readBookingHandoff: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readHandoff(command)),
+    issueBookingTransfer: (request: AiClientApplicationRequest, value: unknown) => originalTransfer(request, value, 'issue'),
+    readBookingTransferIssue: (request: AiClientApplicationRequest, value: unknown) => originalTransfer(request, value, 'readIssue'),
+    consumeBookingTransfer: (request: AiClientApplicationRequest, value: unknown) => originalTransfer(request, value, 'consume'),
+    readBookingTransferReceipt: (request: AiClientApplicationRequest, value: unknown) => originalTransfer(request, value, 'readReceipt'),
     readBookingPreparation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, async (app, command) => {
       const preparation = await app.readPreparation(command);
       // This is current dependency availability, not an accepted request or a

@@ -70,8 +70,8 @@ export class PrismaClientSceneMaterialRepository {
     return row;
   }
 
-  async findSource(scope: AiClientMaterialScope, materialRef: string) {
-    const row = await this.load(this.db, Prisma.sql`SELECT * FROM ai_client_scene_materials WHERE tenantId = ${scope.tenantId}
+  async findSource(scope: AiClientMaterialScope, materialRef: string, reader: Reader = this.db) {
+    const row = await this.load(reader, Prisma.sql`SELECT * FROM ai_client_scene_materials WHERE tenantId = ${scope.tenantId}
       AND workspaceId = ${scope.workspaceId} AND channel = ${scope.channel} AND principalHash = ${scope.principalHash}
       AND id = ${materialRef} LIMIT 1`, scope);
     if (!row) return null;

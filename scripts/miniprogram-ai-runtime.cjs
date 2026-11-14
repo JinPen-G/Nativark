@@ -21,6 +21,8 @@ const exportsAllowed = Object.freeze([
   'aiClientQuotePreparationRequestSchema', 'aiClientQuoteConfirmationRequestSchema', 'aiClientQuotePreparationResponseSchema',
   'aiClientQuotePreparationReadResponseSchema', 'aiClientQuoteResultReadResponseSchema', 'aiClientQuoteBookingRequestSchema',
   'aiClientQuoteParameterReviewSchema', 'RENTAL_PRICING_UNIT_LABELS',
+  'AI_CLIENT_BOOKING_TRANSFER_VERSION', 'aiClientBookingTransferIssueRequestSchema', 'aiClientBookingTransferRequestSchema',
+  'aiClientBookingTransferIssueResponseSchema', 'aiClientBookingTransferReceiptSchema',
   'aiClientQuoteBookingPreparationResponseSchema', 'aiClientQuoteBookingOperationResponseSchema',
   'aiBookingSelectionSchema', 'aiEntryActionSchema', 'aiBookingDraftSchema', 'aiBookingHandoffSchema',
   'aiBookingCreateResponseSchema', 'aiBookingChoiceResponseSchema', 'aiBookingHandoffResponseSchema', 'aiBookingOperationReadResponseSchema',

@@ -6,6 +6,39 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry14-original-cross-surface-backend-20261115"></a>
+## ENTRY-14／04 原预约跨端引用、同键提交与派发前复核（2026-11-15）
+
+前置`02bd7223b05e48dd6cb0507f277d55db6545cbe8`已普通推送且GitHub回读一致。本阶段只固定20个公共／后端源及本记录／接续；dev2新增Web／小程序API、会话和组件继续独占施工，不夹带或据此判两个原任务100%。本节所在提交为本阶段固定来源，不复制成果包或另建测试脚本。
+
+[公共合同](../../packages/shared/src/ai-client-booking-transfer-draft.ts)为原handoff签发短期引用、读原签发、目标消费和读原消费四操作；runtime／OpenAPI及[客户Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)同步闭合校验，拒绝客户身份、scope、凭据及材料正文注入，使用原始body、no-store和有界等待。正式小程序窄runtime白名单及声明同步五个出口，不生成或复制依赖环境。[标准客户入口](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)共用当前发布读取，目录中的本人订单解释额外定位准确`order_explanation`宿主，不借报价政策判断订单能力；此项仍不代表ENTRY-01全部source／四端目录消费者齐备。
+
+[请求绑定桥](../../apps/api/src/modules/ai-native/scenes/client-booking-transfer-host.ts)从当前独立Auth核同客户、tenant／workspace、会话及渠道绑定，原材料保持原channel／principal过滤和密文／hash，不复制Task、Draft、quote或客户正文。签发和消费核原Core材料、双端发布／政策与目标policyHash；目标改版、撤权、过期或当前材料变化拒绝新使用。引用有效期最多60秒，一次消费后只恢复原handoff定位，不授执行权。历史签发／消费／acceptance及订单收据仍分别核当前独立读权，不能借原收据续期或重派。
+
+dev2[私有合同](../../apps/api/src/modules/ai-native/scenes/client-booking-transfer.contract.ts)及[仓储](../../apps/api/src/modules/ai-native/scenes/client-booking-transfer.repository.ts)已冻结交权，Root逐blob核同`e55a96f1f4decc39b56299aa00aa0dff68452786`／`b1530c1b17321dc4de3c6d6ecd7935e53f16555a`。[原Draft仓储](../../apps/api/src/modules/ai-native/scenes/prisma-client-booking.repository.ts)在同Draft锁内互斥签发、源页提交和目标acceptance索引；pending／consumed到期不自动还原源执行权。原提交继续使用source scope＋handoffRef推导的`booking-order`键，原attempt与submitted同事务保存；submitted只表示请求已提交，COMMIT丢ACK只读原操作，不换键再办。
+
+独立复核发现后端P2：原attempt已保存后，应用准备以及[ClientApiService.createOrder](../../apps/api/src/modules/client/client-api.service.ts)内部最后准备等待仍可能撤销source执行、改变target政策或到期，旧代码会继续调用writer。现服务端私有`beforeDispatch`放在原`prepareClientOrder`完成后、原`orders.createOrder`前，HTTP Controller仍只传原三个参数。[应用回调](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)核prepared全文与原accepted一致、当前身份、双端transfer使用或原source政策hash及期限；transfer最后身份等待结束后同步核source／target／consumption期限，随后同步核acceptance期限才标记已派发。拒绝保留原attempt与submitted，重复submit沿原收据核读，不能推定回滚或重派。内部独立只读复核最终三源未发现新增确证P1／P2，只关闭该后端窗口，完整前端转接仍待核。
+
+最终关键blob：Client API`cb646bf297c842acda9a04a18e99083512095c0b`，application`4f875ddf355cdda272046d9972873fb267d5121a`，transfer host`544211a055f635905819122255f3319df488bc26`，公共合同`37e17f9a03e47647e9216a8e85f23c0bafd60cd4`。以下命令均为`node --no-compilation-cache -`，stdin与完整输出留原会话／助手日志；实际生产源码复用原Auth／Guard／Controller／Core和明示内存SQL夹具，不称真实数据库或浏览器通过。
+
+| 必要验证 | stdin SHA-256与实际结果 |
+| --- | --- |
+| 原双端绑定及同原Core正向 | `f862be85ae32ef6583cfcf938307463ff7dc2fdadb3cf0c441f206f64470928b`，退出0；同quote／Draft／handoff、目标独立会话、source阻断，1订单／1提交。 |
+| 当前target政策／会话、丢Core回复及原历史读 | `3894358946507a9b9f8ccf580ed8f1eb5b3a4fd2047b2d57ed5c6d791f4aa138`，退出0；当前使用拒绝、执行关闭／期限后仅原独立读，不重派。 |
+| 最终私有派发钩子与三种COMMIT丢ACK | `837f9fc972a67a3d46c3b0e0a94ccc0e9b18e94cfa73609d953388d930da09fd`，最终复验退出0；issue／consume／acceptance各丢ACK后原读，同源正文不改，最终仅1订单／1提交。 |
+| 最后内部Core准备中source撤权 | `95bc32bafd1d2d667216e293503fbe914178e38c174798976e580a53fe040b9d`，退出0；第三次prepare后撤allowCreate，0订单、1attempt、submitted保留，重复submit不重派。 |
+| 最后内部Core准备中transfer到期 | `5ea9e7c7552457f99e02727af7fcef8d94524d79dc1e0a634a25c95665a331a7`，退出0；0订单、1attempt，原读不授新执行。 |
+| 最后内部Core准备中target改版及当前宿主原读 | `cd93334e7cc914d4f2f1b543ef2dfd2ad8aeff02608e3111d8d97eb6be00309d`，退出0；旧捕获宿主拒绝，重新捕获当前只读宿主读取原attempt，0订单／不重派。 |
+| 原source未转接提交兼容 | `b82e88218cdd37107ea26aa53538b8f6cf3aee9ae79516aaa11376a514b98642`，退出0；当前原政策hash一致，1订单／1attempt，原读同orderId。 |
+| 消费等待中原报价变化 | `bd0d3c653c0fa8bc63b656981c7641092cd4e3539afe9f47c96098d99f1b1f7c`，退出0；原availability等待中材料变化拒消费，业务0写。 |
+| 闭合wire及准确原场景发布 | `02d7eb8ad002ad1bc8c6fc17161db2e82bf84e250432c7e9504ad7ffdb67b61f`，退出0；公共schema／路由与真实场景政策定位。 |
+| 公共最终类型 | `d939aff4e9df470324f6eb9d121c6d006955d55d01d9c40f2d67c1957c46ab9b`，最终复验退出0；TS5.9.3六根／1880源，0诊断、audit0。 |
+| dev2私有两叶 | 19场景`9760ce4ee56ca38c91e3efc76ebe344dcdc6b37352b6f4ddb94df3e8d72c89e6`，两根／710源类型`b0b5062871f34d134801826a2a0427945d054fbe5603c9c9678d32a8fa70d296`，均退出0。 |
+
+失败保留：初夹具误用未持久旧quote、字段`quoteId`代替真实`quote.id`、陈旧内存policy对象及Web ESM声明，修原夹具／loader后通过，不放宽生产。材料变化组试图恢复后继续的旧断言仍失败，最终仅核原拒绝和0写，不掩盖旧失败。目标最后等待改版反例首次已正确拒绝writer，但驱动仍拿旧捕获release宿主读原receipt而退出1；补断言旧宿主拒绝，再捕获当前独立只读宿主，原attempt可读且无重派，未改生产校验。
+
+所有验证只用原offline preload、不可达DATABASE_URL、内存audit和本树单一逻辑任务目录`output/.tmp/ain-entry14-cross-surface-20261115`；该目录未创建，自有验证进程已退出，无新增测试文件、依赖、Client／dist或临时副本。本片关闭后端P2和原引用／提交边界；ENTRY-14／04仍待两端实际页面挂接、当前输入／身份撤回及原确认／收据消费的完整核定，百分比保持75%。ENTRY-01全目录和AIN-15企业正向依赖保留，真实测试仍由负责人后续操作。
+
 <a id="ain-entry16-current-zone-and-submitted-state-20261115"></a>
 ## ENTRY-16 客户入口按空间时区准备与原请求提交状态修复（2026-11-15）
 

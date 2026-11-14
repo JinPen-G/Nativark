@@ -1448,10 +1448,11 @@ export const AI_NATIVE_SCENE_CATALOG_PROVIDERS: FactoryProvider[] = ([
         const stage = (revision: unknown, available: boolean) => ({ available, reference: `original:${entry.entryId}`,
           revision: requestFingerprint(revision), expiresAt: new Date(now.getTime() + 30000).toISOString() });
         if (entry.audience === 'customer') {
-          const host = registered(surface === 'tenant_website' ? AI_WEBSITE_ENTRY : AI_WECHAT_ENTRY, ['readHostCapabilities']);
+          const method = entry.entryId === 'customer.order_explanation' ? 'readOrderHostCapabilities' : 'readHostCapabilities';
+          const host = registered(surface === 'tenant_website' ? AI_WEBSITE_ENTRY : AI_WECHAT_ENTRY, [method]);
           if (!host) return { registered: false };
           try {
-            const result = await (host.readHostCapabilities as (r: unknown, v: unknown) => Promise<import('@rental-os/shared').AiClientHostCapabilities>)(request, {});
+            const result = await (host[method] as (r: unknown, v: unknown) => Promise<import('@rental-os/shared').AiClientHostCapabilities>)(request, {});
             return { registered: true, clientHost: result, stage: stage({ release: result.releaseRevision,
               policy: result.policy }, result.enabled && result.policy.allowRead) };
           } catch { return { registered: true }; }

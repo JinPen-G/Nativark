@@ -32,3 +32,6 @@ export { aiBookingSelectionSchema } from './ai-booking-draft';
 export { aiEntryActionSchema } from './ai-entry-action-draft';
 export { aiBookingDraftSchema, aiBookingHandoffSchema, aiBookingCreateResponseSchema, aiBookingChoiceResponseSchema,
   aiBookingHandoffResponseSchema, aiBookingOperationReadResponseSchema } from './ai-booking-validation';
+export { AI_CLIENT_BOOKING_TRANSFER_VERSION, aiClientBookingTransferIssueRequestSchema,
+  aiClientBookingTransferRequestSchema, aiClientBookingTransferIssueResponseSchema,
+  aiClientBookingTransferReceiptSchema } from './ai-client-booking-transfer-draft';
