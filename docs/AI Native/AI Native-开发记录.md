@@ -6,6 +6,29 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry06-current-permission-whole-closeout-20261115"></a>
+## ENTRY-06 同账号权限刷新修复与员工履约入口全文收口（2026-11-15）
+
+前置 `3fcb18094717813f8bd6e0f1102b1c01f13646fc` 已上传且本轮回读 GitHub 一致。dev2 的实际领取／归还 Page → 原 session.applySessionContext 反例证明：同租户、空间、账号撤销权限或缩小 dataScope 后，原 contextVersion 和 scope key 不变，页面提前返回，仍显示旧订单、客户和人工差异。这是当前显示许可失效，不能沿原 AIN-20 或 ENTRY-15 绿色掩盖。
+
+本阶段只修员工[领取页](../../apps/staff-miniprogram/src/pages/pickup/index.ts)和[归还页](../../apps/staff-miniprogram/src/pages/return/index.ts)。本地显示依据比较原会话身份、去重排序后的空间／租户权限、dataScope、租户管理员及改密状态；token 轮换和相同权限顺序变化不清编辑。依据变化立即复用 clearInspectionContext 撤回订单、客户、模板、签名、人工差异及宿主，推进 page epoch；仍有权限时等待明确“重新读取”，撤权时 blocked。每个原 load 的 current 同时核该次权限依据，迟到 GET／图片不能恢复旧资料；loadContext 内的 refreshed 只撤回、不递归请求。原服务器 Auth／Guard／地点范围和业务提交不变，独立原订单 view 的 receipt_only 入口仍可使用，未取得 stage 写权不能办理新履约。
+
+dev2 冻结两 blob 为 pickup `aa0b1cf62450f881d942a5ef28d02bce8e6c2a62`、return `99a71b188c63c08196e5e82473f3b2a835d72af6`，Root逐一核同并独立读实际入口和恢复边界。作者原反例 stdin `ee1a528b1f7668ac1cc558b4974856aa4e5725b26b5ceda746f60290679ea9c1` 退出0证明旧资料残留；同反例修后 `29ee1ff4633379318a76d3c58a1ed82e5727c765c5fc94887e43aaefa40bc641` 退出0证明撤回。作者必要11场景 `7b698ea510e59bdbe50d7724401891c98f70d166a3ddb13bd274aabc2c096b72` 退出0；原ES2019两根／247源、125份内存shared声明、TS5.9.3零诊断，stdin `f79743719a77b0659ab6d67ada0d182a9cb37331636427f302cad5089ae8267b` 退出0。
+
+Root独立实际 Page／session → 同账号撤权两阶段模拟 stdin `5bd630c04943bce004ee77c730cb07cbb2262249025bda0b0b36224b61c5e112` 退出0，order/template/customer/preview均撤回、epoch推进、撤权后新增请求0。原无变化、缩权、授回明确再读、等待中撤权、loadContext刷新和迟到图片11场景 `220d99b7e01859cca50ab39c06a9bcd86f187179ea2e974d936a9f6d17b3a7a2` 退出0；无新增模型／业务写。Root最终原ES2019两根／247源、125份内存声明、shared和员工零诊断，stdin `8409bf2b5871b3fee9a6a58dd18b73147b3eacc2b73bdff31fdb179cb723a29a` 退出0。
+
+| ENTRY-06原条款 | 全文实现与核定依据 |
+| --- | --- |
+| 当前tenant／workspace／location／role白名单读取 | 原staff Auth／Guard／履约地点白名单、分配／模板绑定和最少事实沿 [AIN-20全文](#ain20-signature-reopen-simulated-whole-closeout-20261114)；本片补同身份权限／dataScope变化的立即撤回与迟到响应拒绝，客户端显示依据不能自授权。 |
+| AI引导和人工上传／审批／正式提交分离 | [AIN-19原文／置信来源](#ain19-source-text-simulated-whole-closeout-20261114)、[当前人类值转原表单](#ain20-original-final-form-consumer-20261114)、原上传和签名／检查提交／Core七条履约证据；只有人工明确采用、检查、签字和确认才沿原提交，不由模型判责、改费或完成履约。 |
+| 弱网、卸载、切空间、撤权、unknown与更正 | [原签名重开与七条履约](#ain20-signature-reopen-simulated-whole-closeout-20261114)、[ENTRY-15严格存储／原键与删除确认](#ain-entry15-original-storage-recovery-20261115)以及本片刷新11场景；内存撤回不删除磁盘未决原操作，原K／原收据继续核对，不换键、不显示假成功。 |
+
+原AIN-20完整前置及上述三个条款、生产消费者、必要模拟／类型和Root独立核接齐备，本片将 ENTRY-06 从75%登记本轮研发100%。ENTRY门槛1425→1450／18，79.2%→80.6%，完整收口6→7／18；原AIN仍2475／28、88.4%及24／28，46项等权为85.3%及31／46。进度只维护唯一任务册，本节数字为本阶段证据，不建立第二任务表。此前ENTRY-01／15的main节点仍由PM按固定来源串行整合；本项是下一批第一项，不抢main索引、不让助手等待。dev2已转ENTRY-09正文安全呈现，dev1继续客户报价四卡，Root处理报价最后落库前政策／材料复核，未验证后继不提前计分。
+
+失败保留：作者首次行为驱动把正常会话刷新也当作原业务locator不变，改为比较原操作定位后通过。Root初驱动漏assert、把已完全撤回的null预览当空数组，均按实际合同修驱动；内存声明首次误保留composite并禁incremental、随后未提供虚拟声明目录而回落旧产物，修复内存TypeScript宿主后零诊断，未改生产类型或删断言。额外独立助手因供应商token速率限制断流，没有有效结论，不称其复核通过；本阶段采用作者交付与Root独立源码／行为核接及原完整固定证据。
+
+本阶段全部 `node --no-compilation-cache -`、本树原offline preload／不可达DB／内存audit0；Root验证进程均退出，`output/.tmp/ain-entry06-root-permission-refresh-20261115` 未创建，作者任务目录亦未创建，无新增／扩写测试脚本、环境／依赖／构建副本。真实微信、弱网设备、数据库、相机录音和供应商未测试，由负责人后续操作，研发100%不表示生产放行。文档检查沿既有四处缺链，不伪造附件；只提交两源及本阶段原任务／记录／接续，报价与正文活动成果不夹带。
+
 <a id="ain-entry15-original-storage-recovery-20261115"></a>
 ## ENTRY-15 员工原操作定位的严格存储读取与恢复（2026-11-15）
 
