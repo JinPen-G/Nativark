@@ -2,7 +2,7 @@ import { PermissionEditor, PermissionMatrix } from "./PermissionMatrix";
 import { isFixedRole, permissionDraftChanges, rolePermissionBaseline, type PermissionDraft, type RoleEditorTarget } from "./permission-matrix-model";
 import { SettingsWorkspace } from "@/components/settings/SettingsWorkspace";
 import { InsightMetrics } from "@/components/BusinessInsights";
-import accessStyles from "./TenantAccess.module.css";
+import accessStyles from "@rental-os/platform-admin/source/features/access/TenantAccess.module.css";
 import { DataTableText, Empty, Segmented, ListFilterBar, ListFilters, useListFilter } from "@/components/ui";
 import { EditOutlined, PlusOutlined } from "@/components/ui/icons";
 import type {

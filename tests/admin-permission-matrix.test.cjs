@@ -5,7 +5,7 @@ const path = require('node:path');
 const ts = require('typescript');
 const React = require('react');
 
-const source = fs.readFileSync(path.join(__dirname, '../apps/admin/src/features/tenant-access/permission-matrix-model.ts'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../packages/platform-admin/src/features/access/permission-matrix-model.ts'), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const loaded = { exports: {} };
 new Function('exports', 'module', compiled)(loaded.exports, loaded);
@@ -76,19 +76,19 @@ function matrixHarness() {
     react: { ...React, useId: () => 'matrix-test', useEffect: () => {}, useLayoutEffect: () => {}, useRef: () => ({ current: null }),
       useState: initial => { const index = cursor++; if (!(index in values)) values[index] = typeof initial === 'function' ? initial() : initial;
         return [values[index], update => { values[index] = typeof update === 'function' ? update(values[index]) : update; }]; } },
-    '@/components/ui': Object.fromEntries(['ActionButton', 'Alert', 'Button', 'SearchField', 'AnimatedNumber', 'EmptyScene', 'ListFilterBar', 'ListFilterItem', 'Select', 'Tooltip'].map(name => [name, name])),
+    '../../components/ui': Object.fromEntries(['ActionButton', 'Alert', 'Button', 'SearchField', 'AnimatedNumber', 'EmptyScene', 'ListFilterBar', 'ListFilterItem', 'Select', 'Tooltip'].map(name => [name, name])),
     '@/registry/components/checkbox/checkbox': { Checkbox: 'Checkbox' },
     '@/registry/components/popover/popover': { Popover: 'Popover', PopoverContent: 'PopoverContent', PopoverTrigger: 'PopoverTrigger' },
     'motion/react': { AnimatePresence: 'AnimatePresence', motion: { span: 'motion-span', div: 'motion-div' } },
     '@/lib/motion-tokens': { motionTokens: { stagger: { line: .08 }, spring: { smooth: {}, snappy: {} }, duration: { fast: .16 }, ease: { standard: [0, 0, 1, 1] } } },
-    '@/lib/usePrefersReducedMotion': { usePrefersReducedMotion: () => true },
-    '@/app/locale': { useLocale: () => ({ t: text => text }) },
-    '@/app/designTokens': { ADMIN_PERMISSION_MATRIX_METRICS: { labelWidth: 288, roleWidth: 184, compactLabelWidth: 164, compactRoleWidth: 172 } },
+    '../../lib/usePrefersReducedMotion': { usePrefersReducedMotion: () => true },
+    '../../app/locale': { useLocale: () => ({ t: text => text }) },
+    '../../app/designTokens': { ADMIN_PERMISSION_MATRIX_METRICS: { labelWidth: 288, roleWidth: 184, compactLabelWidth: 164, compactRoleWidth: 172 } },
     './PermissionMatrixControls': { PermissionToggle: 'PermissionToggle', PermissionGroupRows: 'PermissionGroupRows' },
     './permission-matrix-model': model,
     './roles-source/classes.json': {}, './roles-source/original.css': {}, './TenantAccess.module.css': {},
   };
-  const filename = path.join(__dirname, '../apps/admin/src/features/tenant-access/PermissionMatrix.tsx');
+  const filename = path.join(__dirname, '../packages/platform-admin/src/features/access/PermissionMatrix.tsx');
   const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exported = { exports: {} };
   new Function('require', 'module', 'exports', code)(name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name), exported, exported.exports);

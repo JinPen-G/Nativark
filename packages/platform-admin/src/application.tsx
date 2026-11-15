@@ -15,6 +15,7 @@ import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantPro
 import { CoreAccessPage } from "./CoreAccessPage";
 import { canManagePublicResource } from "./application-access";
 import { useAdminSession } from "./runtime";
+import { PublicManagementPage } from "./features/access/PublicManagementPages";
 
 function ProtectedLayout() {
   const { session, brandName, brand, pages } = usePlatformApplication();
@@ -33,6 +34,8 @@ function ProtectedLayout() {
     ...(can("system:tenant:manage") ? [{ path: "/settings/tenant", label: en ? "Tenant details" : "租户资料" }] : []),
     ...(can("system:integration:manage") ? [{ path: "/settings/tenant-appearance", label: en ? "Tenant appearance" : "租户外观" }] : []),
     ...(can("system:user:manage") ? [{ path: "/settings/member-cores", label: en ? "Member Core access" : "成员 Core 分配" }] : []),
+    ...(can("system:user:manage") ? [{ path: "/settings/users", label: en ? "Members" : "人员管理" }] : []),
+    ...(can("system:role:manage") ? [{ path: "/settings/roles", label: en ? "Roles" : "角色权限" }] : []),
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
       ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : [])
   ];
@@ -78,6 +81,11 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: "/platform/core-access", element: <CoreAccessPage audience="saas" /> },
     { path: "/settings/member-cores", element: <CoreAccessPage audience="tenant" /> },
+    ...(["users", "roles"] as const).flatMap(kind => [
+      { path: `/settings/${kind}`, element: <PublicManagementPage kind={kind} /> },
+      { path: `/settings/${kind}/new`, element: <PublicManagementPage kind={kind} edit /> },
+      { path: `/settings/${kind}/:id`, element: <PublicManagementPage kind={kind} edit /> }
+    ]),
     ...createRoutesFromElements(createCoreRouteElements(options.pages ?? new Map(), { brandName: options.brandName })),
     { path: "*", element: <Result status="404" title="404" /> }
   ] }

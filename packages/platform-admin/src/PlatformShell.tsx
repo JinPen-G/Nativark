@@ -71,7 +71,9 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
   }, [publicSections, cores.data, pages, locale]);
   const registered = [...pages.values()].find(page => matchPath(page.path, location.pathname));
   const matched = registered ? matchPath(registered.path, location.pathname) : undefined;
-  const publicRoute = publicSections.flatMap(section => section.routes).find(route => route.path === location.pathname);
+  const publicRoute = publicSections.flatMap(section => section.routes)
+    .filter(route => route.path === location.pathname || location.pathname.startsWith(`${route.path}/`))
+    .sort((left, right) => right.path.length - left.path.length)[0];
   const breadcrumbs = registered && cores.data ? coreBreadcrumbEntries(pages, registered,
     Object.fromEntries(Object.entries(matched?.params ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === "string")), cores.data, locale) : [];
   const current = sections.flatMap(section => section.routes).filter(route => location.pathname === route.path || location.pathname.startsWith(`${route.path}/`))

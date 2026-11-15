@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { LocaleContext } from "./localeContext";
+import { accessMessages } from "../features/access/messages";
 
 export type AdminLocale = "zh-CN" | "en-US";
 
@@ -14,6 +15,7 @@ const EMPTY_MESSAGES: AdminMessages = {};
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Readonly<Record<string, string>> = {
+  ...accessMessages,
   "本地音频": "Local audio",
   "选择本地音频": "Choose local audio",
   "更换本地音频": "Change local audio",
