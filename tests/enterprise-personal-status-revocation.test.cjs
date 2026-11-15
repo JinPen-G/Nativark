@@ -34,6 +34,8 @@ function load(relative, deps = {}) {
   assert.equal(result.diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error).length, 0, relative);
   vm.runInNewContext(result.outputText, { exports, require: name => {
     if (name in deps) return deps[name];
+    if (name === '@rental-os/rental-core') return load('packages/rental-core/src/contracts.ts');
+    if (name === './rental-category-code' && relative === 'packages/rental-core/src/contracts.ts') return load('packages/rental-core/src/rental-category-code.ts');
     if (name.startsWith('node:')) return require(name);
     if (name === '@nestjs/common') return common;
     if (name === '@prisma/client') return { Prisma }; // No generated client or engine.

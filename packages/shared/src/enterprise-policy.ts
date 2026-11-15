@@ -1,12 +1,13 @@
 /** Explicit enterprise scope and payment policy; never pricing, credit or inventory facts. */
-import type { RentalCategoryCode } from "./core";
+import type { RentalCategoryCode, EnterpriseBookingApprovalMode, EnterpriseDisclosure, EnterpriseBookingBasis } from "@rental-os/rental-core";
+export type { EnterpriseDisclosure, EnterpriseBookingBasis } from "@rental-os/rental-core";
 import type { EnterpriseChangeRequest } from "./enterprise-workflows";
 export interface EnterpriseScopePolicy {
   workspaceIds: string[];
   categoryCodes: RentalCategoryCode[];
   personalPaymentAllowed: boolean;
   enterprisePaymentAllowed: boolean;
-  approvalMode: "per_order" | "without_per_order" | "unconfigured";
+  approvalMode: EnterpriseBookingApprovalMode;
   /** Merchant-approved plain-text notice; company/member policies cannot replace it. */
   noticeVersion: string;
   noticeText: string;
@@ -53,13 +54,6 @@ export interface EnterpriseOwnRentalPolicy {
   noticeVersion?: string;
   noticeText?: string;
   unavailableReason?: string;
-}
-export interface EnterpriseDisclosure { noticeVersion: string; acknowledged: boolean }
-export interface EnterpriseBookingBasis {
-  merchantRevision: number; companyRevision: number; employeeRevision: number;
-  membershipUpdatedAt: string; noticeVersion: string; acknowledgedAt: string;
-  /** Contractual default only; does not claim a deposit payment or freeze. */
-  guaranteePayer: "enterprise"; approvalMode: EnterpriseScopePolicy["approvalMode"];
 }
 export interface RequestEnterpriseBookingApproval extends EnterpriseChangeRequest { quoteId: string; purpose: string }
 export interface DecideEnterpriseBookingApproval extends EnterpriseChangeRequest { decision: "approve" | "reject" | "withdraw" }

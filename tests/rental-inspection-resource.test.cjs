@@ -5,7 +5,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8");
 
-const shared = read("packages/shared/src/core.ts");
+const shared = read("packages/rental-core/src/contracts.ts");
 const dto = read("apps/api/src/modules/rental-core/rental-order-request.dto.ts");
 const service = read("apps/api/src/modules/rental-core/rental-core.service.ts");
 const page = read("apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx");

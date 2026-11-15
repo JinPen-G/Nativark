@@ -4,6 +4,7 @@
  * 调用方使用 `@rental-os/shared`；模块内部按职责组织，不用深层源码路径绕过出口。
  *
  * 本包同时导出类型、schema、常量与运行时工具，并非纯类型包；只需类型时用 import type。
+ * 公共声明归platform-contracts，租赁领域声明归rental-core；此兼容总出口不持有第二份定义。
  * 新增或调整导出须核对生产者、DTO/OpenAPI、各端消费者和构建边界，不把源码与 dist 一致视为当然。
  */
 export * from "./agent-desktop";

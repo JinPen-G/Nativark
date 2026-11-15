@@ -1,0 +1,35 @@
+{
+  "name": "@rental-os/rental-core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Rental业务Core的独立领域合同与运行时，原组合通过兼容出口消费",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./business-day": {
+      "types": "./dist/business-day.d.ts",
+      "default": "./dist/business-day.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "business-day": [
+        "dist/business-day.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-contracts",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/platform-contracts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0"
+  }
+}

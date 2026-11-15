@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+领域合同、品类标识与营业日算法已实际移入[独立Rental包](../../../../../packages/rental-core/README.md)，原shared/API路径转接同一实现。本目录继续承接尚未迁出的服务、事务、数据和任务；独立包尚不是完整可安装Core，不能仅移除本目录就运行原租赁业务。
+
 [RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。[RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)
 
 持久事实经[业务事实仓储](rental-business-fact.repository.ts)、[状态仓储](rental-state.repository.ts)和[原幂等](rental-idempotency.repository.ts)读写。报价、价格、规则、检查和履约依据从原关联快照读取，修订与幂等键保护并发/重复操作，结果未知通过原操作核对。主事务和外部支付/通知执行点分别由原领域实现持有。

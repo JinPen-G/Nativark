@@ -39,6 +39,8 @@ function load(relative, dependencies, globals = {}) {
   const exports = {}, module = { exports };
   vm.runInNewContext(source.code, {
     exports, module, require(name) {
+      if (name === '@rental-os/rental-core') return load('packages/rental-core/src/contracts.ts', {}, globals);
+      if (relative === 'packages/rental-core/src/contracts.ts' && name === './rental-category-code') return load('packages/rental-core/src/rental-category-code.ts', {}, globals);
       if (relative === 'packages/shared/src/enterprise-workflows.ts' && name === './enterprise') return enterpriseContracts;
       if (relative === 'packages/shared/src/enterprise-workflows.ts' && name === './core') return load('packages/shared/src/core.ts', {}, globals);
       if (name === '@rental-os/shared') return { ...enterpriseContracts, ...enterpriseWorkflowContracts, ...transferDecisionContracts, ...extensionContracts, ...(dependencies[name] ?? {}) };
