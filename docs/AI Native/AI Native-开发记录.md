@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry17-observation-attempt-fixed-20261116"></a>
+## ENTRY-17 原观察丢 ACK 后重复追加修复（2026-11-16）
+
+固定前置 `7976416a28c42030ae5bdfa3ac7018d85899bafe` 与 GitHub 实际分支一致。内部 entry_closeout_fallback 完成[原 Action 应用](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.application.ts)的 `audited()` 修复并交回写权，Root 核同前像、差异及冻结候选。前像 blob 为 `01d6b68af8d516152da9b75db0140211de1d4136`，候选为 `d836d5c96a9a7e600235d5737aa3f2618a051b4f`，文件 SHA-256 为 `40a1d8807f8154502e4312f52a7601082e4aeb2c9eb0eae15e7595d78e16a977`，仅9行新增、2行删除。
+
+成功和拒绝观察在等待原日志之前设置 `observationAttempted`。日志写前失败、提交后丢 ACK 或后续等待撤权进入外层错误边界时，同一请求不再第二次追加。原 `savedObserved`、已保存草稿、错误映射和 unknown 读取指令保持原语义，并发请求各自观察。观察没有增加模型、Core 或通知投递调用。
+
+| 必要验证 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| 原 Auth／Guard／ALS／SecretBox／审计叶及前像对照 | `8ba031ca72cb2ea9fc75cabfd1231a610b187b29460ad15e393c5c75e47666d1`，退出1。前像丢 ACK 确实追加2次，候选正常、写前失败、提交丢 ACK、等待撤权、原拒绝、拒绝审计丢 ACK、并发独立请求及已保存通知观察共9个分支执行通过。最后 unknown 夹具跨 VM 对象原型比较失败，整组未记通过。 |
+| 仅受影响通知观察复验 | `a17de0bfb6c0652444bc0d0048476f06a4a96f3e9fb42a010ee32c344ccedffa`，退出0。只修内存夹具的结构化比较，已保存通知保留原 draft、日志只尝试1次、返回 `AI_RESULT_UNKNOWN`；原 unknown 收据仍为 unknown、只观察1次。 |
+| API 类型 | `79b8c45467372f7ef642615c3f3af4d5a7c1a6b095fdd51dd80dd21e294ed092`，退出0。TypeScript 5.9.3，1根／1640源、128份内存 shared 声明，noEmit 零诊断。 |
+
+作者命令为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -e <固定 stdin 引导器>`，沿本树原 offline preload、不可达数据库地址和纯内存 audit。导航使用真实原权限链及有限事实／存储替身，通知使用源码中原 initializer、真实 Auth／审计叶及明确收据替身。原 Task／Run、累计资源、预算、charge、reservation 和通知事实均保留。自有验证进程已退出，任务根 `output/.tmp/entry-audit-attempt-20261116` 未创建，Root 验证作业也均已退出，未新增测试脚本或临时残留。
+
+该片关闭 ENTRY-17 的重复观察缺口。客户 unknown 原操作定位和终止 Booking Draft 材料保留边界继续修复，ENTRY-17 仍75%，正式任务表不因局部修复升档。真实数据库、浏览器、微信和供应商由负责人后续操作。
+
 <a id="ain-entry08-whole-closeout-20261116"></a>
 ## ENTRY-08 原风险、权限及生命周期全文核闭（2026-11-16）
 

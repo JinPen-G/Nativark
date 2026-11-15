@@ -533,6 +533,7 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
       catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
       const started = now().getTime(), actor = await principal(signal);
       let savedObserved = false;
+      let observationAttempted = false;
       const event: EntryActionAuditEvent = { requestId, surface, contractVersion: name.includes('Notification')
         ? AI_ENTRY_NOTIFICATION_DRAFT_VERSION : AI_REGISTERED_ENTRY_ACTION_VERSION, operation: name,
         state: 'observed', durationMs: 0 };
@@ -593,6 +594,9 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
           actionCode: row.action.actionCode, resourceId: row.action.resource.id }));
         if ('source' in result && 'taskId' in result.source) { event.taskId = result.source.taskId; event.runId = result.source.runId; }
         event.durationMs = Math.max(0, now().getTime() - started);
+        // A lost log acknowledgement cannot authorize another append when the
+        // same operation or delivery failure reaches the outer error boundary.
+        observationAttempted = true;
         try { await recordEntryActionObservation(d.db, actor.context, event); }
         catch { throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE'); }
         // The audit is another awaited dependency. It cannot keep old authority,
@@ -621,8 +625,11 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
         event.state = code === 'AI_RESULT_UNKNOWN' ? 'unknown' : 'refused'; event.refusalCode = code;
         if (code === 'AI_RESULT_UNKNOWN' && notificationKey) event.resultState = 'unknown';
         event.durationMs = Math.max(0, now().getTime() - started);
-        try { await recordEntryActionObservation(d.db, actor.context, event); }
-        catch { throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE'); }
+        if (!observationAttempted) {
+          observationAttempted = true;
+          try { await recordEntryActionObservation(d.db, actor.context, event); }
+          catch { throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE'); }
+        }
         if (code !== rawCode) throw new EntryNotificationDraftError('AI_RESULT_UNKNOWN');
         throw error;
       }
