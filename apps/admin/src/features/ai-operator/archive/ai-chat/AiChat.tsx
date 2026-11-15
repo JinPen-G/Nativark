@@ -20,6 +20,10 @@ export type AiChatProps = {
   className?: string; style?: CSSProperties;
   store?: { chats: ChatConversation[]; setChats: Dispatch<SetStateAction<ChatConversation[]>>; activeId: string; objectUrls?: { current: string[] }; setActiveId: (id: string) => void };
   headerActions?: ReactNode; disabled?: boolean;
+  /** Business hosts supply real transport labels and keep unsupported uploads/model choice closed. */
+  host?: { scope: string; notice: string; modelMenu: string; attachments?: boolean; modelLocked?: boolean;
+    canSend?(text: string): boolean; onHistory?(): void; onStop?(): void; onRetry?(nodeId: string): void;
+    onReplyStarted?(chatId: string, nodeId: string): void };
   historyConversationIds?: readonly string[];
   queuedPrompt?: { id: string; text: string; chatId: string } | null;
   onQueuedPromptUsed?: () => void;
@@ -82,7 +86,7 @@ const MessageTurn = memo(function MessageTurn({ message, siblings, onVersion, on
   </article>;
 });
 
-export function AiChat({ respond, initialMessages, history, models = demoModels, defaultModel, title, autoPlay = !respond && !initialMessages && !history, suggestions = defaultSuggestions, greeting = 'What are we working on?', placeholder = 'Ask anything', onFeedback, onModelChange, onNewChat, className = '', style, store, headerActions, disabled = false, queuedPrompt, onQueuedPromptUsed, historyConversationIds }: AiChatProps) {
+export function AiChat({ respond, initialMessages, history, models = demoModels, defaultModel, title, autoPlay = !respond && !initialMessages && !history, suggestions = defaultSuggestions, greeting = 'What are we working on?', placeholder = 'Ask anything', onFeedback, onModelChange, onNewChat, className = '', style, store, headerActions, disabled = false, queuedPrompt, onQueuedPromptUsed, historyConversationIds, host }: AiChatProps) {
   const availableModels = models.length ? models : demoModels;
   const [localChats, setLocalChats] = useState<ChatConversation[]>(() => {
     if (initialMessages) return [fromMessages('initial', title ?? 'Conversation', initialMessages), ...(history ?? []).map(item => fromMessages(item.id, item.title, item.messages, item.group))];
@@ -101,7 +105,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
   const [model, setModel] = useState(availableModels.find(item => item.id === defaultModel) ?? availableModels[0]);
   useEffect(() => { setModel(previous => availableModels.find(item => item.id === previous.id) ?? availableModels.find(item => item.id === defaultModel) ?? availableModels[0]); }, [models, defaultModel]);
   const [draft, setDraft] = useState(''), [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-  const [menu, setMenu] = useState<'chats' | 'models' | null>(null), [announcement, setAnnouncement] = useState('Local demo · sample responses');
+  const [menu, setMenu] = useState<'chats' | 'models' | null>(null), [announcement, setAnnouncement] = useState(host?.notice ?? 'Local demo · sample responses');
   const [request, setRequest] = useState<{ chat: string; node: string } | null>(null), [atBottom, setAtBottom] = useState(true);
   const controller = useRef<AbortController | null>(null), root = useRef<HTMLElement>(null), thread = useRef<HTMLDivElement>(null), composer = useRef<HTMLTextAreaElement>(null), files = useRef<HTMLInputElement>(null);
   const chatsButton = useRef<HTMLButtonElement>(null), modelsButton = useRef<HTMLButtonElement>(null);
@@ -167,6 +171,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
     controller.current?.abort();
     const abort = new AbortController(); controller.current = abort;
     const id = uid();
+    host?.onReplyStarted?.(targetChat.id, id);
     mutate(targetChat.id, value => appendNode(value, { id, parent, role: 'assistant', content: '', model: chosenModel, status: 'thinking', tools: [], sources: [] }));
     setRequest({ chat: targetChat.id, node: id });
     setAnnouncement(`${chosenModel.name} is replying${respond ? '' : ' (simulated)'}`);
@@ -225,7 +230,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const send = (text = draft) => {
-    if (disabled || (!text.trim() && !attachments.length)) return;
+    if (disabled || (!text.trim() && !attachments.length) || host?.canSend && !host.canSend(text)) return;
     stop();
     let target = chat;
     if (!target) { target = fromMessages(uid(), text.trim().slice(0, 42) || 'Attachments', []); setChats(previous => [target!, ...previous]); setActiveId(target.id); }
@@ -253,6 +258,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
   }, []);
   const editMessage = (message: ChatNode, text: string) => {
     if (!chat) return;
+    if (host?.canSend && !host.canSend(text)) { setDraft(text); return; }
     stop();
     const edited: ChatNode = { ...message, id: uid(), content: text };
     const updated = appendNode(chat, edited);
@@ -262,6 +268,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
     composer.current?.focus();
   };
   const retry = (message: ChatNode) => {
+    if (host?.onRetry) { host.onRetry(message.id); return; }
     playback.current = false;
     if (!chat) return;
     const path = visibleMessages(chat), index = path.findIndex(item => item.id === message.id);
@@ -290,7 +297,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
     if (event.key === 'Escape') { event.stopPropagation(); if (menu) closeMenu(); else if (busy) stop(); }
   }}>
     <header className="chat-header">
-      <div className="chat-menu-anchor" data-chat-menu="chats"><button ref={chatsButton} className="chat-title-button" aria-label={`最近对话，当前：${chat?.title ?? '新对话'}`} aria-expanded={menu === 'chats'} aria-haspopup="menu" aria-controls={menu === 'chats' ? menuId : undefined} onClick={() => setMenu(menu === 'chats' ? null : 'chats')}><span>{chat?.title ?? '新对话'}</span><ChevronDown size={13} /></button>
+      <div className="chat-menu-anchor" data-chat-menu="chats"><button ref={chatsButton} className="chat-title-button" aria-label={`最近对话，当前：${chat?.title ?? '新对话'}`} aria-expanded={menu === 'chats'} aria-haspopup="menu" aria-controls={menu === 'chats' ? menuId : undefined} onClick={() => { if (menu !== 'chats') host?.onHistory?.(); setMenu(menu === 'chats' ? null : 'chats'); }}><span>{chat?.title ?? '新对话'}</span><ChevronDown size={13} /></button>
         {menu === 'chats' && <div id={menuId} className="chat-menu chat-history-menu" role="menu" aria-label="最近对话" onKeyDown={menuKeys}><button role="menuitem" onClick={() => switchChat(null)}><SquarePen size={16} />新对话</button><div className="chat-menu-divider" role="separator" />{[...new Set(historyChats.map(item => item.group ?? '今天'))].map(group => <div role="group" aria-label={group} key={group}><span className="chat-menu-label">{group}</span>{historyChats.filter(item => (item.group ?? '今天') === group).map(item => <button type="button" key={item.id} role="menuitemradio" aria-checked={item.id === activeId} onClick={() => switchChat(item.id)}><span>{item.title}</span>{item.id === activeId && <Check size={14} />}</button>)}</div>)}</div>}
       </div>
       <div className="chat-header-end">{headerActions}<button className="chat-icon" aria-label="新对话" title="新对话" onClick={() => switchChat(null)}><SquarePen size={18} /></button></div>
@@ -307,9 +314,9 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
       {!!attachments.length && <div className="chat-attachments">{attachments.map(file => <span key={file.id} className="chat-file">{file.preview ? <img src={file.preview} alt="" /> : <FileText size={16} />}<span>{file.name}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments(previous => previous.filter(item => item.id !== file.id))}><X size={13} /></button></span>)}</div>}
       <div className="chat-input-row"><textarea ref={composer} rows={2} disabled={disabled} aria-label="消息" placeholder={placeholder} value={draft} onChange={event => { playback.current = false; setDraft(event.target.value); }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
-      }} /></div><div className="chat-composer-toolbar"><button type="button" className="chat-icon" aria-label="添加附件" title="附件仅保存在本地" disabled={disabled} onClick={() => files.current?.click()}><Plus size={20} /></button><span className="chat-composer-scope">本地演示</span><div className="chat-composer-end"><div className="chat-menu-anchor" data-chat-menu="models"><button type="button" ref={modelsButton} className="chat-model-button" aria-label={`模型：${model.name}`} aria-expanded={menu === 'models'} aria-haspopup="menu" aria-controls={menu === 'models' ? menuId : undefined} onClick={() => setMenu(menu === 'models' ? null : 'models')}><ModelMark model={model} /><span>{model.name}</span><ChevronDown size={12} /></button>
-        {menu === 'models' && <div id={menuId} className="chat-menu chat-model-menu" role="menu" aria-label="模型" onKeyDown={menuKeys}><span className="chat-menu-label">选择模型 · 本地演示</span>{availableModels.map(item => <button type="button" key={item.id} role="menuitemradio" aria-checked={item.id === model.id} onClick={() => { setModel(item); setMenu(null); onModelChange?.(item); setAnnouncement(`${item.name} selected`); modelsButton.current?.focus(); }}><ModelMark model={item} /><span><strong>{item.name}</strong><small>{item.note}</small></span>{item.id === model.id && <Check size={14} />}</button>)}</div>}
-      </div><button className="chat-send" type={busy ? 'button' : 'submit'} aria-label={busy ? '停止回复' : '发送消息'} disabled={disabled || (!busy && !draft.trim() && !attachments.length)} onClick={busy ? stop : undefined}>{busy ? <Square size={13} fill="currentColor" /> : <ArrowUp size={18} />}</button></div></div>
+      }} /></div><div className="chat-composer-toolbar"><button type="button" className="chat-icon" aria-label="添加附件" title="附件仅保存在本地" disabled={disabled || host?.attachments === false} onClick={() => files.current?.click()}><Plus size={20} /></button><span className="chat-composer-scope">{host?.scope ?? '本地演示'}</span><div className="chat-composer-end"><div className="chat-menu-anchor" data-chat-menu="models"><button type="button" ref={modelsButton} className="chat-model-button" aria-label={`模型：${model.name}`} aria-expanded={menu === 'models'} aria-haspopup="menu" aria-controls={menu === 'models' ? menuId : undefined} onClick={() => setMenu(menu === 'models' ? null : 'models')}><ModelMark model={model} /><span>{model.name}</span><ChevronDown size={12} /></button>
+        {menu === 'models' && <div id={menuId} className="chat-menu chat-model-menu" role="menu" aria-label="模型" onKeyDown={menuKeys}><span className="chat-menu-label">{host?.modelMenu ?? '选择模型 · 本地演示'}</span>{availableModels.map(item => <button type="button" key={item.id} role="menuitemradio" disabled={host?.modelLocked} aria-checked={item.id === model.id} onClick={() => { setModel(item); setMenu(null); onModelChange?.(item); setAnnouncement(`${item.name} selected`); modelsButton.current?.focus(); }}><ModelMark model={item} /><span><strong>{item.name}</strong><small>{item.note}</small></span>{item.id === model.id && <Check size={14} />}</button>)}</div>}
+      </div><button className="chat-send" type={busy ? 'button' : 'submit'} aria-label={busy ? '停止回复' : '发送消息'} disabled={disabled || (!busy && !draft.trim() && !attachments.length)} onClick={busy ? () => { host?.onStop?.(); stop(); } : undefined}>{busy ? <Square size={13} fill="currentColor" /> : <ArrowUp size={18} />}</button></div></div>
       <input ref={files} type="file" multiple className="sr-only" tabIndex={-1} aria-label="Choose attachments" onChange={event => {
         const picked = [...(event.target.files ?? [])].map(file => {
           const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
@@ -318,7 +325,7 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
         });
         setAttachments(previous => [...previous, ...picked]); event.target.value = ''; setAnnouncement('Files attached locally. Nothing uploaded.');
       }} />
-    </form><div className="chat-notice">{disabled ? '请先在插件页启用此能力' : '本地演示 · 未连接模型与业务数据，附件不会上传'}</div></div>
+    </form><div className="chat-notice">{host?.notice ?? (disabled ? '请先在插件页启用此能力' : '本地演示 · 未连接模型与业务数据，附件不会上传')}</div></div>
     <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
   </section>;
 }

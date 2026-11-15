@@ -17,7 +17,9 @@
 
 保留验证失败：首轮内存装载受admin ESM包边界拒绝，修验证器moduleTypes；钩子替身曾把useCallback当作立即调用，修替身语义。首轮类型遗漏原vite-env.d.ts导致环境声明缺失，补原声明；随后类型发现本片JSX缺少闭合花括号，产品已修并复验。没有删除断言或放宽生产权限。所有自有验证进程已退出，output/.tmp/ain-native-console-20261115未创建，无新增测试脚本、依赖或落盘验证产物。
 
-本片只固定公共嵌入接点，不能宣称原聊天已接通或新增任务100%。dev1继续原AiChat／OperatorContext／原右工作区接入，dev2继续原Copilot输入／原订单上下文接入；其固定源码、正向调用链及样式保持证据另在本锚点续实核。原演示源码和许可留作归档，业务宿主不得再调用演示回应。真实浏览器、微信、数据库与供应商由负责人后续测试。
+公共接点已在 `336692c8ef20cff773ca4fb6ac36af12dced8920` 提交并普通推送，GitHub回读一致。2026-11-16首次改动前再次核实该分支、索引和远端。Root接手dev1落盘的[原控制台](../../apps/admin/src/features/ai-operator/AiOperatorPage.tsx)、[上下文](../../apps/admin/src/features/ai-operator/OperatorContext.tsx)、[原聊天](../../apps/admin/src/features/ai-operator/archive/ai-chat/AiChat.tsx)、[原工作区](../../apps/admin/src/features/ai-operator/NativeOperatorWorkspace.tsx)及[native session](../../apps/admin/src/features/ai-operator/native-session.ts)，先作未完检查点同步。检查点TypeScript 5.9.3五根／1624源、126份内存shared声明零诊断，stdin SHA-256 `ceea02fb95abdaa03f3741f946629cec900528c4f8d7e2adee0e979884f1d46e`，exit 0，审计为空、任务临时目录未创建。该组验证类型，实际三场景连续操作、main现有页头／开关／抽屉结构、同账号切能力／对话迟到隔离及完整输入链仍待本阶段最后模拟和核接。
+
+Root独占上述控制台源及公共结果宿主，dev1继续只读核AIN-27原全文。dev2继续独占Copilot四源，完成当前订单会话、原控制台转接及末次Auth等待后的完整owner核验，随后核ENTRY-08／17。两助手新回合已实核有工具执行。原演示源码和许可原位保留。阶段完整验证后在本锚点更新结果，真实浏览器、微信、数据库与供应商由负责人后续测试，原任务百分比按全文核定。
 
 <a id="ain15-enterprise-personal-authority-gap-20261115"></a>
 ## AIN-15 企业本人路径与后台代客授权依赖定位（2026-11-15）

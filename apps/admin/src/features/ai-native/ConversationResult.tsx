@@ -32,13 +32,13 @@ const emptyReview = { busy: false, review: null, parameters: null, unavailable: 
 const noSubscribe = () => () => {};
 const emptyReviewSnapshot = () => emptyReview;
 export function ConversationResult({ identity, conversationId, turn, current, onAccessDenied, onAnswerReceipt,
-  embedded = false, autoRead = false }: {
+  embedded = false, autoRead = false, readOnly = false }: {
   identity?: string; conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean;
   onAccessDenied?: () => void;
   onAnswerReceipt?: (receipt: QuoteAnswerReference | null) => void;
   /** The native console owns the chat text and layout. This only reads its
    * original result and supplies the existing sandbox/review consumers. */
-  embedded?: boolean; autoRead?: boolean;
+  embedded?: boolean; autoRead?: boolean; readOnly?: boolean;
 }) {
   const visible = useVisibleObservationHost();
   const { t } = useAiManagementLocale(), auth = useAuthStore();
@@ -74,11 +74,11 @@ export function ConversationResult({ identity, conversationId, turn, current, on
     const scoped = createConversationWorkbenchHost({ conversationId, turn, tenantId, workspaceId,
       source: originalResult, current: () => liveHost.current === scoped && active(),
       admission: aiConversationsApi.admission, tasks: aiTaskCenterApi,
-      onReview: section => { setRequestedProposal(null); setReviewSection(section); },
-      onConfirmation: reference => { setRequestedProposal(reference); setReviewSection('approval'); },
+      onReview: section => { if (readOnly) throw Error('AI_RESOURCE_UNAVAILABLE'); setRequestedProposal(null); setReviewSection(section); },
+      onConfirmation: reference => { if (readOnly) throw Error('AI_RESOURCE_UNAVAILABLE'); setRequestedProposal(reference); setReviewSection('approval'); },
     });
     return scoped;
-  }, [owner, displayEpoch]);
+  }, [owner, displayEpoch, readOnly]);
   const reviewState = useSyncExternalStore(host?.inputReview.subscribe ?? noSubscribe,
     host?.inputReview.snapshot ?? emptyReviewSnapshot, host?.inputReview.snapshot ?? emptyReviewSnapshot);
   const clear = () => {
@@ -163,17 +163,17 @@ export function ConversationResult({ identity, conversationId, turn, current, on
     {host && turn.task && tenantId && workspaceId && <TaskWorkbenchModelControlProvider value={controlHost}>
       <TaskWorkbenchDisplay identity={owner} expected={{ tenantId, workspaceId, taskId: turn.task.taskId,
         runId: display?.runId ?? turn.task.runId, ...(display ? { resultId: display.resultId } : {}) }}
-        embedded={embedded} autoRead={autoRead}
+        embedded={embedded} autoRead={autoRead} readOnly={readOnly}
         port={host.port} enabled={!busy && originalResult() !== null}
         current={() => active() && generation.current === renderGeneration} />
-      {(reviewSection === 'input' || onAnswerReceipt) && <section aria-label={t('补充信息')} hidden={busy} inert={busy}>
+      {!readOnly && (reviewSection === 'input' || onAnswerReceipt) && <section aria-label={t('补充信息')} hidden={busy} inert={busy}>
         <TaskClarification key={`input:${owner}`} taskId={turn.task.taskId} identity={reviewIdentity}
           current={() => active() && !latest.current.busy && (!reviewState.review || host.reviewCurrent())} onAccessDenied={deny}
           onReceiptChange={onAnswerReceipt}
           candidateReview={host.reviewCurrent() ? reviewState.review : null}
           onCandidateReviewed={status => { if (status === 'adopted') host.inputReview.clear(); }} />
       </section>}
-      {reviewSection === 'approval' && <section aria-label={t('人工确认')} hidden={busy} inert={busy}>
+      {!readOnly && reviewSection === 'approval' && <section aria-label={t('人工确认')} hidden={busy} inert={busy}>
         {turn.capabilityCode === 'quote_clarification' ? <TaskQuoteReprepare key={`approval:${owner}`}
             taskId={turn.task.taskId} identity={reviewIdentity} current={() => active() && !latest.current.busy} onAccessDenied={deny}
             requestedProposal={requestedProposal ?? undefined} parameterReview={host.reviewCurrent() ? reviewState.parameters : null}

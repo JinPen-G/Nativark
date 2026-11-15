@@ -1,10 +1,10 @@
 # AI Native：当前协作接续
 
-更新：2026-11-15。继续原AIN-01～28及全部AIN-ENTRY核心范围，以[需求v1.15](<AI Native-需求.md>)、[任务v1.19](<AI Native-开发任务.md>)为正式依据。负责人已批准必要模拟冒烟、类型及独立复核作为本轮研发验收，真实数据库／浏览器／微信／供应商由负责人后续测试；实现、生产装配、业务确认和权限门槛不变。任务百分比只维护任务册。
+更新：2026-11-16。继续原AIN-01～28及全部AIN-ENTRY核心范围，以[需求v1.15](<AI Native-需求.md>)、[任务v1.19](<AI Native-开发任务.md>)为正式依据。负责人已批准必要模拟冒烟、类型及独立复核作为本轮研发验收，真实数据库／浏览器／微信／供应商由负责人后续测试；实现、生产装配、业务确认和权限门槛不变。任务百分比只维护任务册。
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当前固定前置 `90f528b6a0981047ace8bf206ca767dc29fd7e39` 已普通推送并回读GitHub，索引为空。ENTRY-02／10全文核定见[原阶段](<AI Native-开发记录.md#ain-entry02-10-registered-human-whole-closeout-20261115>)。负责人现明确纠正前端接入方式：直接接已有 Agent 控制台和 Copilot，保留已完成的布局、组件、样式与动效，移除业务页面的“本地演示／服务端对话”双模式。此前独立服务端面板和后端证据继续保留，不能冒充原聊天输入已接通。dev1独占 ai-operator 原宿主及必要 native session，dev2独占 copilot 原宿主及必要 session；Root核公共依赖、原会话／Task／收据链、样式前像、四册和Git。main已有未提交控制台视觉调整，仅只读核差异，不能整文件覆盖或抢main索引；PM继续按固定成果串行整合。新接线必须使原输入、历史、真实步骤、结果、必要澄清／确认及原收据直接在原界面消费；unknown仅核原键。未实现的候选能力不映射为已开放能力，不预置虚假业务历史。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当前固定前置 `336692c8ef20cff773ca4fb6ac36af12dced8920` 已普通推送并回读GitHub，索引为空。ENTRY-02／10全文核定见[原阶段](<AI Native-开发记录.md#ain-entry02-10-registered-human-whole-closeout-20261115>)。负责人要求直接接已有 Agent 控制台和 Copilot，保留已完成的布局、组件、样式与动效。公共结果嵌入接点已固定，原聊天输入和原工作区接线仍待完整验证。Root接手ai-operator六源及公共结果宿主，先补交归属明确的未完检查点，再核main现有页头／开关／抽屉结构、三场景原链和迟到隔离。dev1只读核AIN-27，dev2独占Copilot四源并完成当前订单会话及原控制台转接。main现有视觉源仅按核定前像读取和最小接线，PM继续独占其索引。原输入、历史、真实步骤、结果、必要澄清／确认及原收据在原界面消费，unknown仅核原键，未接能力沿原业务入口办理。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。

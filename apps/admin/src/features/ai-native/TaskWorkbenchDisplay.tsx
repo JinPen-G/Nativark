@@ -13,10 +13,10 @@ import { formatTimestamp } from './formatters';
 export interface TaskWorkbenchDisplayProps {
   identity: string; expected: WorkbenchDisplayExpectation; port: WorkbenchDisplayPort;
   current(): boolean; enabled?: boolean;
-  embedded?: boolean; autoRead?: boolean;
+  embedded?: boolean; autoRead?: boolean; readOnly?: boolean;
 }
 export function TaskWorkbenchDisplay({ identity, expected, port, current, enabled = true,
-  embedded = false, autoRead = false }: TaskWorkbenchDisplayProps) {
+  embedded = false, autoRead = false, readOnly = false }: TaskWorkbenchDisplayProps) {
   const { t } = useAiManagementLocale();
   const controlHost = useTaskWorkbenchModelControlHost(), controls = useRef(controlHost); controls.current = controlHost;
   const controlResult = useRef<AiWorkbenchModelControlObservation | null>(null);
@@ -65,7 +65,7 @@ export function TaskWorkbenchDisplay({ identity, expected, port, current, enable
   const frame = state.frame && (expected.runId === undefined || state.frame.runId === expected.runId)
     && (expected.resultId === undefined || state.frame.resultId === expected.resultId) ? state.frame : null;
   return <>
-    {controlHost?.identity === identity && controlHost.taskId === expected.taskId && <TaskWorkbenchModelControls
+    {!readOnly && controlHost?.identity === identity && controlHost.taskId === expected.taskId && <TaskWorkbenchModelControls
       identity={identity} taskId={expected.taskId} current={current} sourceEnabled={enabled}
       sourceRunId={expected.runId} sourceResultId={expected.resultId} onAvailable={refreshControl} />}
     {enabled && <section aria-label={t('原结果动态展示')} aria-busy={state.busy}>
@@ -85,7 +85,7 @@ export function TaskWorkbenchDisplay({ identity, expected, port, current, enable
       srcDoc={frame.document} title={t('隔离的原结果展示')} referrerPolicy="no-referrer"
       allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; fullscreen 'none'"
       style={{ display: 'block', width: '100%', height: 'min(65vh, 40rem)', minHeight: '20rem', border: 0, marginBlock: 'var(--space-3, 12px)' }} /></div>}
-    {state.candidate && <div>
+    {!readOnly && state.candidate && <div>
       <p>{t('以下仅是未提交候选，尚未重新准备或批准。')}</p>
       {state.candidateConflict && <Alert type="warning" title={t('候选需要重新核对，当前不能继续使用。')} />}
       <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{safeDisplayText(JSON.stringify(state.candidate.answers), 4096)}</pre>
@@ -95,7 +95,7 @@ export function TaskWorkbenchDisplay({ identity, expected, port, current, enable
     </div>}
     {state.sourceId && <ActionButton label={t('读取原来源')} disabled={state.busy || !port.readSource} onAction={() => session.openSource()} />}
     {state.source && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{safeDisplayText(state.source.text, 20000)}</pre>}
-    {state.confirmation && <ActionButton label={t('打开原确认材料')} disabled={state.busy || !port.openConfirmation} onAction={() => session.openConfirmation()} />}
+    {!readOnly && state.confirmation && <ActionButton label={t('打开原确认材料')} disabled={state.busy || !port.openConfirmation} onAction={() => session.openConfirmation()} />}
     </section>}
   </>;
 }
