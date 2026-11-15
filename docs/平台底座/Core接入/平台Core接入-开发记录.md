@@ -175,6 +175,32 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 本片尚未装配独立公共AppModule/Guard或独立schema/迁移/Seed，未取得真实无CoreHTTP/数据库/浏览器、完整多Core/原Rental业务、安装更新/回退/独立接手/审查证据；原任务未跨下一档。下一片继续真实公共宿主、正式Core主应用及其同源OpenAPI/前端消费者。临时生成工具/Client/声明/运行共享产物与缓存共527文件、73349425字节，核绝对归属/无链接后全部删除，任务目录不存在，output/.tmp条目为0。仅留本节最小证据，没有新增服务进程或重复环境。
 
+<a id="core-tickets-independent-host-20261115"></a>
+
+## 工单标准平台适配与独立示范宿主（2026-11-15）
+
+公共期限/物理计划已提交并远端回读df06578b2c8b79c7e8aef8ac91d3de819a9860a2，订阅声明末尾格式收尾f78e5bb3fe866743f7ec96f33283888e82651ef8同样上传。工作区/索引干净后开启本片，独占树和既有main62ca保持。
+
+[工单platform-host](../../../packages/example-tickets-core/src/platform-host.ts)从原行业API组合抽为实际标准包子出口。消费公共身份、有限SQL、当前Core/成员/角色、原绑定、统一期限和同事务审计；原original-tickets-host仅转接同一实现和原订阅政策，领域状态/金额/权限及原收据规则不变。示范Core源码和清单新增实际适配文件/声明，领域总出口仍不导入Nest/Prisma/平台适配。公共业务审计只记Core原操作引用，在调用方同事务保存；业务正文留Core。
+
+[公共依赖工厂](../../../apps/platform-api/src/core-dependencies.ts)、数据库和数据计划提供宿主正式子出口，不让新Core深层导入或复制公共源码。新增[工单独立示范宿主](../../../apps/example-tickets-api/README.md)及3个主源码入口，公共无Core构建不引用本应用或工单包。Nest应用公共/Core/工单共享唯一数据库provider与生命周期，标准Core和8条工单HTTP由同一实际工厂装配，不让父本地provider自动进入子模块。[工单Factory](../../../packages/example-tickets-core/src/nest.ts)从导出的实际依赖消费同一业务实例。
+
+[严格包核验](../../../apps/example-tickets-api/src/deployment-package.ts)要求当前依赖中的Core是所选标准包：ID/版本/来源和重建归档摘要必须与固定锁一致。没有清单的作者源码树或来源/字节变化拒绝启动，不伪装成已安装。示范组合按真实公共物理计划与工单物理reader读取原Prisma账/执行状态，新业务期限来自公共reader；实际锁的包发行/数据库尚未验。
+
+[迁移组合](../../../packages/core-contracts/src/deployment.ts)提供正式Core Prisma迁移名称和版本锁/包字节校验，只返回新文件Map；[示范准备命令](../../../apps/example-tickets-api/src/prepare-deployment.ts)将实际平台发行+已准备工单包生成新独占目录，成功显示pending。公共4份+Core1份SQL原字节保留，Core原账名固定core.example-tickets.tickets.initial且运行观察消费同源函数，目录排序和声明顺序不一致拒绝。命令不安装/执行迁移，不覆盖用户目录/活动组合；失败只清自己刚创建的候选。根构建/类型入口与lock/可选peer元数据同片维护。
+
+| 验证 | 证据与边界 |
+| --- | --- |
+| 当前公共/工单/原API类型，实际Prisma内存声明 | 8包零诊断；公共7根/757源、工单宿主5根/772源、原API988根/2,204源零诊断，退出0，内存编译无磁盘产物/守卫违规。首次验证转接声明的相对Client位置没给内存同源映射，补验证解析后通过，未造产品shim |
+| 实际工单Nest组合（严格包校验加入前） | 唯一公共DB供公共和业务、8政策/Controller和51同源API操作，组合零DB读取；固定来源/锁为显式offline fixture。严格包门禁加入后的干净标准包容器尚待实际包阶段，不沿用成已验 |
+| 工单实际平台适配/MySQL/领域服务 | 创建和同键原结果、Core停用拒绝普通get但原收据按本人/对象受控可读、成员撤权、统一期限到期拒绝新建、审计失败回滚通过，退出0；SQL/availability为明确fixture，未连库 |
+| 部署组合短命令 | 公共4+Core1准确SQL、确定原账名称/排序和坏包摘要拒绝通过，退出0；包内入口是明确静态fixture，不当可运行发行 |
+| Root lock和3workspace | 新示范应用依赖、原工单新增可选peer以及公共宿主元数据匹配；未安装/网络获取包 |
+
+首次新工单适配缺类型import/全局只读SQL接口，修真实端口后类型通过；不存在CorePackagePin类型按正式部署锁元素类型引用；实际部署组合的source索引/摘要检查保持原标准。没有新增测试脚本或删除原断言。独立包运行、真实DB/HTTP/完整四页后台、标准包安装/迁移/独立接手、双真实Core及升级回退/审查仍未验。
+
+下一入口先从固定提交真实编译工单标准包，严格门禁后组合/授权/业务与迁移准备有限验证，再接公共后台壳和原Rental可取出包。当前原任务未因示范目录或51接口自动跨档；PCH-03/04/10完整门槛仍有上述缺口。旧唯一待清理环境自动删除拒绝继续保留，本片验证仅内存，没有新增临时环境/进程。源码/README/接口与原四册按同一切片提交普通推送，main未集成。
+
 <a id="core-public-data-term-20261115"></a>
 
 ## 公共统一期限与真实物理数据观察（2026-11-15）

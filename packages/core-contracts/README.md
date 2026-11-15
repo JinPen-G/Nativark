@@ -42,6 +42,8 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 宿主 JSON 的结构为 `platform`、`contract`、`node` 三个实际发行版本和 `capabilities` 能力版本表。没有实现对应公共能力时，能力表不填该项。字段定义分别见[宿主资料](src/compatibility.ts)、[唯一清单 schema](src/manifest.ts)；类型由 schema 推导，不另维护一份字段定义。
 
+`@rental-os/core-contracts/deployment` 提供 `createCoreMigrationDeployment`，将固定底座原迁移与锁中Core标准包组为一份新的Prisma迁移目录。它核包摘要、版本、全部声明文件和原SQL，Core原账名称由 `corePrismaMigrationName` 单源生成，排序不符合原链会拒绝。结果仅内存文件，由明确部署准备命令写入独占新目录；不执行SQL、不补账、不覆盖活动组合。[源码](src/deployment.ts) · [工单准备命令](../../apps/example-tickets-api/src/prepare-deployment.ts)
+
 输出中的 `scope` 固定为 `package-static`。`compatibilityChecked=false` 表示未指定宿主资料。退出码 `0` 表示所选静态检查通过，`1` 表示包不合格，`2` 表示命令用法或读取失败。机器读取时使用上面的 `node ... --json`，标准输出只有一份 JSON。
 
 | 常见结果 | 处理方式 |

@@ -1,6 +1,6 @@
 # 轻量工单 Core 示范
 
-`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配及首次设置/列表/新建/详情四页贡献；真实宿主授权、路由装配及部署尚未接线，当前不能直接作为完整工单应用安装使用。
+`@rental-os/example-tickets-core`示范一条非租赁业务链，使用租户范围，不需要经营空间、品类、金额或库存。它已有业务服务、清单/API文档生成、MySQL/Nest适配、标准平台宿主及首次设置/列表/新建/详情四页贡献；[独立示范宿主](../../apps/example-tickets-api/README.md)已接授权/HTTP与部署准备，真实包安装 / 数据库 / 完整后台仍待验证。
 
 ## 业务范围
 
@@ -40,6 +40,8 @@
 
 业务创建 `new TicketsService(execution)`。`TicketExecution.run`在每次调用时使用原认证、当前租户/Core/成员及业务权限，并将只有本Core方法的仓储交给业务服务。不能用恒真权限或内存演示数据代替真实宿主。
 
+使用平台公共身份的宿主可从 `@rental-os/example-tickets-core/platform-host` 导入 `composeTicketsPlatformHost`，传真实数据库、当前公共账号、Core部署可用性、统一订阅和同事务审计。原Rental组合也消费这个单源适配。它保留当前角色 / Core / 成员 / 对象 / 原收据核验，Core作者不复制原API源码。[实际标准适配](src/platform-host.ts)
+
 MySQL入口单独从 `@rental-os/example-tickets-core/mysql` 导入 `createMysqlTicketsExecution(client, authority)`，接受实际Prisma交互事务的窄接口。适配只依赖Prisma5的SQL模板/Runtime，不要求生成Rental模型；SQL值全部参数化，查询和写入都含租户条件。`authority.authorize`和`authority.audit`是必须由宿主提供的真实适配，前者取得人员/授权锁并返回受权范围，后者沿原平台审计写同一事务。
 
 锁顺序为人员/当前Core授权与受派成员 → 本租户工单锁行 → 原操作回执/工单变更 → 平台审计。受派成员必须在工单锁之前核定，不能由Core在领域回调中倒序申请人员锁。小样例使用每租户一条工单写锁，保证原操作幂等与收据一起提交；审计、回执或业务失败均抛错回滚。ReadCommitted加原修订条件避免覆盖别人的更新，领域服务不取得整个Prisma client。
@@ -60,7 +62,7 @@ authority返回的`revalidate()`在提交前复核同一原会话/订阅等期�
 npm run build -w @rental-os/example-tickets-core
 ```
 
-构建先生成本树core-contracts，然后编译本Core，不构建Rental或后台。已在组合工程中的Prisma5/Nest10是可选适配peer；领域入口不导入它们，使用对应适配时才需要准备。`createTicketsManifest({ repository, commit })`返回可由标准检查器读取的清单；source必须是此次真实固定发行来源，不在源码内填写占位提交。可用下列命令向stdout输出包清单和API文档。
+构建准备公共platform-core-host及其合同依赖，然后编译本Core，不构建Rental或后台。Prisma5/Nest10和平台宿主是可选适配peer；领域入口不导入它们，使用对应适配时才需要准备。`createTicketsManifest({ repository, commit })`返回可由标准检查器读取的清单；source必须是此次真实固定发行来源，不在源码内填写占位提交。可用下列命令向stdout输出包清单和API文档。
 
 ```sh
 node packages/example-tickets-core/dist/metadata.js manifest <仓库HTTPS地址> <固定提交>

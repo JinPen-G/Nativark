@@ -1,0 +1,34 @@
+/** 示例宿主只选择工单Core，公共实现通过正式出口复用；实际版本/来源由显式部署锁提供。 */
+import { CoreDeploymentLockSchema, type CoreDeploymentLock } from "@rental-os/core-contracts";
+import { createCoreDeployedCatalogue } from "@rental-os/core-host";
+import { createMysqlCoreDeploymentObservation } from "@rental-os/core-host/mysql-deployment";
+import { composePlatformCoreApplication } from "@rental-os/platform-core-host";
+import type { PlatformDatabaseClient, PublicDatabaseTransaction } from "@rental-os/platform-api/database";
+import { createPublicCoreDependencies } from "@rental-os/platform-api/core-dependencies";
+import { createPublicPlatformDataPlan } from "@rental-os/platform-api/data-plan";
+import { createTicketsHttpContribution } from "@rental-os/example-tickets-core";
+import { composeTicketsPlatformHost } from "@rental-os/example-tickets-core/platform-host";
+import { readTicketsPhysicalData } from "@rental-os/example-tickets-core/mysql";
+import { isDeepStrictEqual } from "node:util";
+import { requireTicketsDeploymentPackage } from "./deployment-package";
+import { corePrismaMigrationName } from "@rental-os/core-contracts/deployment";
+
+export function composeTicketsApplication(database: PlatformDatabaseClient, input: CoreDeploymentLock) {
+  const lock = CoreDeploymentLockSchema.parse(input);
+  const pin = lock.cores.find(core => core.manifest.id === "example-tickets");
+  if (!pin || lock.cores.length !== 1) throw new Error("本示范宿主须选择且仅选择example-tickets Core");
+  const dependencies = createPublicCoreDependencies(database), platformPlan = createPublicPlatformDataPlan();
+  if (!isDeepStrictEqual(lock.platform.data, platformPlan.data)) throw new Error("部署锁的公共数据基线与当前宿主不一致");
+  const { manifest } = requireTicketsDeploymentPackage(pin, lock.platform.versions);
+  let catalogue: ReturnType<typeof createCoreDeployedCatalogue>;
+  const tickets = composeTicketsPlatformHost<PublicDatabaseTransaction>({ ...dependencies, deployment: {
+    requireRegistered: coreId => catalogue.availability.requireRegistered(coreId),
+    requireAvailable: (coreId, tenantId) => catalogue.availability.requireAvailable(coreId, tenantId)
+  } });
+  const observations = createMysqlCoreDeploymentObservation({ database, platform: platformPlan,
+    cores: [{ coreId: manifest.id, data: manifest.data,
+      migrationNames: manifest.data.migrations.map(migration => corePrismaMigrationName(manifest.id, migration.id)), readPhysical: readTicketsPhysicalData }] });
+  catalogue = createCoreDeployedCatalogue({ lock, registrations: [{ manifest, server: tickets.server }],
+    http: [createTicketsHttpContribution()], observations });
+  return { tickets, application: composePlatformCoreApplication<PublicDatabaseTransaction>({ ...dependencies, catalogue }) };
+}

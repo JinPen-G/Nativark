@@ -1,8 +1,8 @@
 /** Core授权/绑定的公共审计。只写已受权原收据引用，同一调用方事务失败即回滚，不记录配置正文。 */
-import type { PlatformCoreAudit, PlatformCoreTransaction } from "./ports";
+import type { PlatformCoreAudit, PlatformCoreBusinessAudit, PlatformCoreTransaction } from "./ports";
 import type { PlatformManagementTransaction } from "@rental-os/platform-server";
 
-export function createPlatformCoreAudit<Tx extends PlatformCoreTransaction & Pick<PlatformManagementTransaction, "operationLog">>(): PlatformCoreAudit<Tx> {
+export function createPlatformCoreAudit<Tx extends PlatformCoreTransaction & Pick<PlatformManagementTransaction, "operationLog">>(): PlatformCoreAudit<Tx> & PlatformCoreBusinessAudit<Tx> {
   return {
     async recordCoreAccessReceipt(transaction, receipt) {
       await transaction.operationLog.create({ data: { tenantId: receipt.result.tenantId, userId: receipt.actor.subjectId,
@@ -18,6 +18,13 @@ export function createPlatformCoreAudit<Tx extends PlatformCoreTransaction & Pic
         action: "core.binding.initialized", detail: { operator: receipt.actor.subjectId, targetType: "core-binding",
           targetId: receipt.binding.bindingId, metadata: { coreId: receipt.binding.coreId, operationId: receipt.operation.operationId,
             revision: receipt.binding.revision, dataVersion: receipt.binding.dataVersion, fingerprint: receipt.fingerprint }
+        } } });
+    },
+    async recordCoreBusinessReceipt(transaction, receipt) {
+      await transaction.operationLog.create({ data: { tenantId: receipt.tenantId, userId: receipt.userId,
+        action: `core.${receipt.coreId}.changed`, detail: { operator: receipt.userId, targetType: receipt.targetType,
+          targetId: receipt.targetId, metadata: { coreId: receipt.coreId, operationId: receipt.operationId,
+            revision: receipt.revision, fingerprint: receipt.fingerprint, state: receipt.state }
         } } });
     }
   };

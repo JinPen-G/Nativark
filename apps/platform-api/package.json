@@ -4,6 +4,14 @@
   "private": true,
   "license": "MIT",
   "description": "无业务Core可独立运行的公共SaaS API宿主",
+  "exports": {
+    "./database": { "types": "./dist/database.d.ts", "default": "./dist/database.js" },
+    "./core-dependencies": { "types": "./dist/core-dependencies.d.ts", "default": "./dist/core-dependencies.js" },
+    "./data-plan": { "types": "./dist/platform-data.d.ts", "default": "./dist/platform-data.js" }
+  },
+  "typesVersions": { "*": {
+    "database": ["dist/database.d.ts"], "core-dependencies": ["dist/core-dependencies.d.ts"], "data-plan": ["dist/platform-data.d.ts"]
+  } },
   "scripts": {
     "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",

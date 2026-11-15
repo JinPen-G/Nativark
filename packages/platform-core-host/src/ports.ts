@@ -16,6 +16,13 @@ export interface PlatformCoreAudit<Tx extends PlatformCoreTransaction> {
   recordCoreAccessReceipt(transaction: Tx, receipt: CoreAccessReceipt): Promise<void>;
   recordCoreBindingReceipt(transaction: Tx, receipt: CoreBindingReceipt): Promise<void>;
 }
+export interface CoreBusinessAuditInput {
+  tenantId: string; userId: string; coreId: string; targetType: string; targetId: string;
+  operationId: string; revision: number; fingerprint: string; state: string;
+}
+export interface PlatformCoreBusinessAudit<Tx extends PlatformCoreTransaction> {
+  recordCoreBusinessReceipt(transaction: Tx, receipt: CoreBusinessAuditInput): Promise<void>;
+}
 export interface PlatformCoreHostDependencies<Tx extends PlatformCoreTransaction> {
   database: CoreHostSqlClient<Tx>;
   users: PlatformCoreUsers<Tx>;

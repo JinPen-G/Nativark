@@ -11,6 +11,7 @@
       "package": ["dist/package.d.ts"],
       "archive": ["dist/archive.d.ts"],
       "install": ["dist/install.d.ts"],
+      "deployment": ["dist/deployment.d.ts"],
       "github": ["dist/github.d.ts"],
       "development": ["dist/development.d.ts"],
       "github-repository": ["dist/github-repository.d.ts"]
@@ -32,6 +33,10 @@
     "./install": {
       "types": "./dist/install.d.ts",
       "default": "./dist/install.js"
+    },
+    "./deployment": {
+      "types": "./dist/deployment.d.ts",
+      "default": "./dist/deployment.js"
     },
     "./github": {
       "types": "./dist/github.d.ts",

@@ -8,27 +8,64 @@
   "types": "dist/index.d.ts",
   "typesVersions": {
     "*": {
-      "contracts": ["dist/contracts.d.ts"],
-      "http": ["dist/http.d.ts"],
-      "package": ["dist/package.d.ts"],
-      "admin": ["admin/index.tsx"],
-      "mysql": ["dist/mysql.d.ts"],
-      "nest": ["dist/nest.d.ts"]
+      "contracts": [
+        "dist/contracts.d.ts"
+      ],
+      "http": [
+        "dist/http.d.ts"
+      ],
+      "package": [
+        "dist/package.d.ts"
+      ],
+      "admin": [
+        "admin/index.tsx"
+      ],
+      "mysql": [
+        "dist/mysql.d.ts"
+      ],
+      "nest": [
+        "dist/nest.d.ts"
+      ],
+      "platform-host": [
+        "dist/platform-host.d.ts"
+      ]
     }
   },
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./contracts": { "types": "./dist/contracts.d.ts", "default": "./dist/contracts.js" },
-    "./http": { "types": "./dist/http.d.ts", "default": "./dist/http.js" },
-    "./package": { "types": "./dist/package.d.ts", "default": "./dist/package.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "default": "./dist/http.js"
+    },
+    "./package": {
+      "types": "./dist/package.d.ts",
+      "default": "./dist/package.js"
+    },
     "./admin": "./admin/index.tsx",
-    "./mysql": { "types": "./dist/mysql.d.ts", "default": "./dist/mysql.js" },
-    "./nest": { "types": "./dist/nest.d.ts", "default": "./dist/nest.js" }
+    "./mysql": {
+      "types": "./dist/mysql.d.ts",
+      "default": "./dist/mysql.js"
+    },
+    "./nest": {
+      "types": "./dist/nest.d.ts",
+      "default": "./dist/nest.js"
+    },
+    "./platform-host": {
+      "types": "./dist/platform-host.d.ts",
+      "default": "./dist/platform-host.js"
+    }
   },
   "scripts": {
-    "prebuild": "npm run build -w @rental-os/core-contracts",
+    "prebuild": "npm run build -w @rental-os/platform-core-host",
     "build": "tsc -p tsconfig.json",
-    "prelint": "npm run build -w @rental-os/core-contracts",
+    "prelint": "npm run build -w @rental-os/platform-core-host",
     "lint": "tsc -p tsconfig.json --noEmit",
     "prepack:core": "npm run build",
     "pack:core": "node dist/metadata.js package",
@@ -48,13 +85,39 @@
     "@nestjs/common": "^10.4.15",
     "@rental-os/admin": "0.1.0",
     "react": "19.2.8",
-    "@tanstack/react-query": "5.101.4"
+    "@tanstack/react-query": "5.101.4",
+    "@rental-os/platform-core-host": "0.1.0",
+    "@rental-os/platform-server": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/core-host": "0.1.0"
   },
   "peerDependenciesMeta": {
-    "@prisma/client": { "optional": true },
-    "@nestjs/common": { "optional": true },
-    "@rental-os/admin": { "optional": true },
-    "react": { "optional": true },
-    "@tanstack/react-query": { "optional": true }
+    "@prisma/client": {
+      "optional": true
+    },
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@rental-os/admin": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "@rental-os/platform-core-host": {
+      "optional": true
+    },
+    "@rental-os/platform-server": {
+      "optional": true
+    },
+    "@rental-os/platform-contracts": {
+      "optional": true
+    },
+    "@rental-os/core-host": {
+      "optional": true
+    }
   }
 }
