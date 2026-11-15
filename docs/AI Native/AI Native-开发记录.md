@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry05-operations-human-whole-closeout-20261115"></a>
+## ENTRY-05 后台结果与人工操作按原三条完成研发收口（2026-11-15）
+
+固定前置 `77feaf3e1e290c8774aa7eeaf06202488622d475`、原K审计修复 `31b2ba201767ff86512f262f0c4421315eb51819` 均已普通推送并回读GitHub同SHA。本项仅按[原ENTRY-05三条](<AI Native-开发任务.md#ain-entry-05运营后台结果与人工操作>)核定，不以其他入口、企业付款或组合验收未完作为新增前置，亦不替它们计分。
+
+| 原条款 | 当前实现及固定依据 | 核定 |
+| --- | --- | --- |
+| 事实、来源、观察时间、风险／阻碍与已登记下一步 | [原结果reader](../../apps/api/src/modules/ai-native/scenes/original-scene-result.service.ts)、[OrderHumanHandoff](../../apps/admin/src/features/ai-native/OrderHumanHandoff.tsx)、[ReadinessDiagnosticsCard](../../apps/admin/src/features/ai-native/ReadinessDiagnosticsCard.tsx)分别消费原订单／资金／历史／开业事实及版本和观察时点；模型结果不覆盖Core事实，不可用／缺来源／业务unknown有实际状态。 | 原AIN-12／13、14全文固定组合及消费者证据满足。 |
+| 只读、预览、确认、正式业务写入分别消费原权限／批准／预算／幂等及Core | [原审批组件](../../apps/admin/src/features/ai-native/TaskHumanApproval.tsx)区分批准、明确继续与原收据；建单沿原持久批准事务，姓名／通知设置各有原Task／批准／Core。规则／日历草稿不发布，通知草稿仅R1未发送保存，支付／配货导航不执行业务，unknown只查原键。 | 原AIN-07／12／16及本轮通知消费者必要模拟／类型、两通知P2限定复核满足。 |
+| 没有allowed-actions仅可信人工入口或candidates_only | [下一步服务](../../apps/api/src/modules/ai-native/tools/order-next-steps.service.ts)返回candidates_only／allowedActions unavailable／executable false，实际原读取工具与原订单人工入口受权；点击原导航重核当前资源及目标权限，缺正式动作不把权限码当业务许可。 | 原服务和消费者已接回，限定检查未发现其他可执行旁路。 |
+
+dev1只读逐条复核及内部 `/root/opening_core_closeout` 独立全文复核均支持本轮G1～G4，无阻断本项的确证P1／P2。内部复核实核原K应用blob `30b969f572ac2060fd363c68f02ca6fd53c7cc09`，仅关联日志、不授Action／保存／执行或恢复权；其结论是独立静态读取与既有行为证据核接，未冒称独立重跑。Root按上表复核源码与[AIN-12／13全文](#ain12-13-simulated-whole-closeout-20261113)、[AIN-14全文](#ain14-category-capability-whole-closeout-20261113)、[AIN-16全文](#ain16-simulated-whole-closeout-20261114)及[通知消费者](#ain-entry02-notification-customer-consumer-stage-20261115)固定证据，必要模拟、API／后台类型及相关拒绝复验齐备。未扩跑已绿集合、无新增测试脚本。
+
+唯一任务册ENTRY-05由75%更新100%，ENTRY18项等权94.4%、14项达到100%；原AIN28项保持88.4%和24项，46项等权参考90.8%、38项完成。此前ENTRY-18为一个后继完成项，与本次05形成两项main集成节点；固定前置及本条进度提交留此，PM按当前main独占范围串行整合，AI不抢main索引，助手继续。原任务范围／依赖／正文不改，通知缓存传播及小程序本人资料后继仍归ENTRY-02／08／10／17核定，不由05覆盖。
+
+本片仅任务百分比、记录及接续文档更新，定向链接／格式及原任务算术核对，无新环境、后台进程、临时目录或副本。真实DB、浏览器／微信、供应商及上线放行由负责人后续操作；本项100%为已批准的模拟研发验收，不宣称真实环境或生产通过。
+
 <a id="ain-entry17-original-key-audit-closeout-20261115"></a>
 ## ENTRY-17 通知拒绝与unknown审计保留原操作关联（2026-11-15）
 
