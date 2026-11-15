@@ -171,6 +171,7 @@ export function ConversationResult({ identity, conversationId, turn, current, on
         current={() => active() && generation.current === renderGeneration} />
       {!readOnly && (reviewSection === 'input' || onAnswerReceipt) && <section aria-label={t('补充信息')} hidden={busy} inert={busy}>
         <TaskClarification key={`input:${owner}`} taskId={turn.task.taskId} identity={reviewIdentity}
+          visibleConversation={{ conversationId, turnId: turn.turnId }}
           current={() => active() && !latest.current.busy && (!reviewState.review || host.reviewCurrent())} onAccessDenied={deny}
           onReceiptChange={onAnswerReceipt}
           candidateReview={host.reviewCurrent() ? reviewState.review : null}

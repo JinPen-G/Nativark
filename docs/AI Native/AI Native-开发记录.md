@@ -11,6 +11,8 @@
 
 固定前置 `4da7ce6d78bbc2123472ad7bd1bfc93212250550` 已普通推送并回读GitHub。原经营空间维护工厂没有传restoreKeyHash，也没有导出原host-only方法；平台独立token有读取接点，但标准部署发布没有共同可信来源。本片将 `configurations.retentionRestore.publicKeyHash` 接入[原部署发布](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)和[标准provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)。两个工厂共同固定Ed25519公钥SPKI DER的SHA-256，并从原[工厂类型](../../apps/api/src/modules/ai-native/privacy/retention.controller.ts)提供exportRestoreManifest／reapplyRestore。平台旧独立token仍兼容，同时存在时须一致。原HTTP继续只消费cleanup／receipt／receipts合同，私钥和原Verifier产生的许可来自可信备份宿主。
 
+该阶段已在 `80c432f5aab39140fea8ed865879f579cbf2c923` 中文提交并普通推送，GitHub回读一致。
+
 一组必要内存模拟调用标准发布provider、两个原请求工厂、Auth／Guard、原Verifier及原全scope证书屏障。经营空间和真实PLATFORM／null形状的源行由夹具提供，合成Ed25519密钥仅驻内存，删除账本样本明确为空。原签名导出、许可核定、隔离目标重放后两个范围证书通过原屏障；缺配置、错误／额外字段、平台冲突hash、伪造许可和close后访问拒绝。没有导入库、迁移、启动服务、接模型或删除业务数据。命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin SHA-256 `4c1fdae48de731006c9498c4e0a00e667e03ad0527c000ad7aa2f0c8ff0abb99`，exit 0。非空材料的擦除及恢复沿原固定维护证据，本片证明标准可信装配和许可传递。
 
 最终TypeScript5.9.3四根／1907源、126份内存shared声明零诊断，stdin `d99fe61f45a9749ad1bc29de53d3dc85877f082bf28dc0677e9db369c178fcc9`，exit 0。初次类型验证读到未生成的根Client声明，产生3923条派生诊断，改为只读main已生成Client；随后新增配置的具体对象类型影响目录共用record索引，出现5条诊断。现闭合配置与共用record类型求交，严格运行时schema仍拒绝额外私钥字段，模拟和类型均复验通过。自有进程全部退出，原任务临时目录未创建，无新增测试文件、依赖或过程产物。
@@ -65,7 +67,24 @@ main已做好页头、工作区开关和抽屉结构，本片按其既有class�
 | 原Markdown两帧可见边界 | 启动marker读回后开窗，准确原引用，首帧零报告、第二帧一次，重读不再开窗。`06f638b222f86381e0f1378fc0c7c49ad1877ed37290fb1fdbd762353362f49a`。 |
 | 最终完整宿主类型 | TypeScript5.9.3，8根／2352源、126份内存shared声明、0诊断。`ee42fe10987da49d23f32a2a31a7c6f195d6837d90140388179884c7a19303f8`。 |
 
-独立提交的固定依赖另以Git中原TaskClarification及Copilot底稿、Root完整产品源检查，8根／2373源、0诊断，stdin `1b98026f6c5d624fe7ef02f24c220c9a1ab691d1d593cb5846391d5628cc3232`，exit 0。当前工作区已接visibleConversation父参数，待dev2六源首字／补答来源固定后同片提交该最小登记，控制台阶段先不夹带其活动源。dev1拒绝审计四源已在 `97fe87a434cca5d2b6c242ab86dc31f46a67d545` 上传并回读，继续原AIN-27升级恢复屏障；dev2继续原六源收尾及08／17全文。
+独立提交的固定依赖另以Git中原TaskClarification及Copilot底稿、Root完整产品源检查，8根／2373源、0诊断，stdin `1b98026f6c5d624fe7ef02f24c220c9a1ab691d1d593cb5846391d5628cc3232`，exit 0。原控制台阶段已在 `4da7ce6d78bbc2123472ad7bd1bfc93212250550` 上传并回读。dev1拒绝审计四源已在 `97fe87a434cca5d2b6c242ab86dc31f46a67d545` 上传并回读。
+
+dev2末回合因模型服务资源不匹配而terminal failed，恢复尝试再次以相同错误结束，原最后验证job没有取回终态。Root据实际失败状态收回六源写权，核对[原侧栏](../../apps/admin/src/features/copilot/CopilotLayout.tsx)、[状态入口](../../apps/admin/src/features/copilot/CopilotProvider.tsx)、[订单session](../../apps/admin/src/features/copilot/copilot-order-session.ts)、[浏览器生命周期](../../apps/admin/src/features/copilot/useCopilotOrder.ts)、[原补答](../../apps/admin/src/features/ai-native/TaskClarification.tsx)及[原观测服务](../../apps/api/src/modules/ai-native/observability/task-visible-observation.service.ts)。六份blob依上述顺序为 `56b3a630788aa33cf9ed97eb49f98d21b393fc37`、`b02677f1367230571f994249fb25010c82d01b0c`、`fa510dbd22f65ead110e667e3179010afd463a91`、`2ae1387ba752fbba53cfd063e4a1d2cb274c11c4`、`c775b2379b704a909972c77d9394df09d084734c`、`e8d549fcb8352348b23bccd37c36223bd92bf9f4`，核定期间逐字节稳定。原ConversationResult的visibleConversation父登记随这六源固定。
+
+侧栏在原确认弹窗选择订单问题后调用实际会话、受理、Task、模型准备及首次启动。上下文仅作订单定位，正文、事实和步骤读原受权接口；原样式、停靠／窄屏结构、来源、输入和确认控件保留。首次启动marker读回后开启可见窗口，绑定原conversation／turn／Task／Run／resultId。原resumeInput已知继续应答的runId为空时，原补答控件只读inputReceipt，核同receiptId及taskRevision后绑定续跑Run。服务端沿已消费问题、原收据、源Run、续跑Run和父Task原输入核对会话来源；问题requestId与原Task inputRef分别使用。观测仅写原OperationLog，不重置累计资源或改动模型原账。金额沿原finalPayable和currency使用formatRentalMoney，不在AI层换算。
+
+Root按同一离线边界独立完成两组必要模拟及对应类型，所有命令均为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，exit 0。
+
+| 范围 | 固定结果与stdin SHA-256 |
+| --- | --- |
+| 原侧栏订单API→Controller→Task／Core／模型及重开 | 创建和启动各一次，模型两次；重读／重开零新模型及业务写入，保留原journal，未知状态禁止清除原定位。`fd33350e9130322357bc86002e9a601c9482c87476c88f48baaa274c737d7890`。 |
+| 六源实际函数与原可见边界七个正反分支 | 正常首启、遮挡与连续两帧、Core金额显示、丢启动ACK后原读、原补答收据定位及原报告重放通过；缺已消费收据、异主体、错误续跑Run及错误父Task原输入均403拒绝。观测重放保持一条，原预算／Run／charge／reservation不变，补答累计模型calls仍2。`7a3aa0e7b614249eb54be0d4c527cf3d9cf8d7717695b5a1733f1cf8bb5232fa`。 |
+| 当前后台完整宿主类型 | TypeScript5.9.3，8根／2352源、126份内存shared声明、0诊断。`ee42fe10987da49d23f32a2a31a7c6f195d6837d90140388179884c7a19303f8`。 |
+| 原补答可见观测API类型 | TypeScript5.9.3，1根／1602源、126份内存shared声明、0诊断，只读main受管生成Client。`7f275df161ee352675ecb9a98ca65d0fa49da82ea442da927dd7052fb4680ac4`。 |
+
+七分支调用真实源码函数、原API／Auth／Guard／Core／模型runner／累计资源及观测服务。数据库执行、嵌套关系投影、运输、DOM几何、时钟及钩子调度为明确夹具，未作真实浏览器、数据库或供应商验收。Root最初运输替身漏原task-center/result路由，补原Controller映射后复验；首次清除断言忽略了拒绝重复发送后需要原只读复核，按实际门禁修正夹具而未放宽产品。作者的模块替身结构、原启动方法及sessionStorage宿主缺口也按原源码修正。Impeccable对四份实际改动TSX定点detect结果为[]；任务临时目录未创建，自有验证进程全部退出，未新增测试文件或依赖。ENTRY-08／17全文及AIN-26～28按原条款继续核定，本控制台／侧栏接线不另计整项100%。
+
+原文档check入口检查11／11份白名单，exit 1，仍是导航54的三份历史附件和后台界面规范272的稀疏示例四项缺链；本阶段15个变更行链接逐一存在，任务算术无新错误。必要内存命令stdin SHA-256 `54c40c9f988602795d24785b0736fadb340696f8240f591a8d51092716f304a1`。首轮只require检查器而未调用main，不能作为检查通过证据，已改调用其原check函数取得上述真实结果。原作者末次及三个前序模拟PID均已不在运行，原结果终态仍未取回；本次Root完整复验独立取得exit 0。
 
 保留新验证失败，首轮运输替身给报价返回普通句子，原候选JSON解析正确拒绝，修正夹具为原合法合同；首轮HTTP驱动把task-result路径直当Controller方法名，修为原taskResult方法；跨VM数组直接deepStrictEqual曾因原型差异失败，比较原节点／choices时仅作结构化复制。源类型的文本事件字面量丢失已补准确辨识，零诊断。没有删断言或放宽生产边界。所有Root验证进程已退出，原任务临时目录未创建，未新增测试文件、依赖或落盘过程产物。本片修正现有AIN-12消费者，任务百分比仍按原全文和依赖维护。
 

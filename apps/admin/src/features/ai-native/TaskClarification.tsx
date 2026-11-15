@@ -62,11 +62,13 @@ export function validateTaskClarificationProgress(value: AiTaskClarificationProg
     throw Error('AI_RESULT_UNKNOWN');
   return structuredClone(value);
 }
-export function TaskClarification({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed }: {
+export function TaskClarification({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed,
+  visibleConversation }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void;
   onReceiptChange?: (value: { reference: ReceiptReference; receiptId: string } | null) => void;
   candidateReview?: WorkbenchInputCandidateReview | null;
   onCandidateReviewed?: (status: 'adopted' | 'conflict') => void;
+  visibleConversation?: Readonly<{ conversationId: string; turnId: string }>;
 }) {
   const visible = useVisibleObservationHost();
   const { t } = useLocale(), label = useId(), key = `ai-task-input:${identity}:${taskId}`;
@@ -81,8 +83,8 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
   const [error, setError] = useState(false), [busy, setBusy] = useState(false);
   const flight = useRef<AbortController | null>(null), mounted = useRef(true), owner = useRef({ taskId, identity });
   const draftBasis = useRef<Question | null>(null);
-  const active = useRef({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed });
-  active.current = { taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed };
+  const active = useRef({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed, visibleConversation });
+  active.current = { taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed, visibleConversation };
   useEffect(() => {
     owner.current = { taskId, identity }; mounted.current = true;
     draftBasis.current = null;
@@ -96,9 +98,12 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
     document.addEventListener('visibilitychange', hidden);
     return () => { mounted.current = false; flight.current?.abort(); flight.current = null; draftBasis.current = null;
       document.removeEventListener('visibilitychange', hidden); };
-  }, [taskId, identity, key]);
+  }, [taskId, identity, key, visibleConversation?.conversationId, visibleConversation?.turnId]);
   const same = (signal?: AbortSignal) => mounted.current && active.current.taskId === taskId && active.current.identity === identity
-    && owner.current.taskId === taskId && owner.current.identity === identity && !document.hidden && active.current.current() && !signal?.aborted;
+    && owner.current.taskId === taskId && owner.current.identity === identity
+    && active.current.visibleConversation?.conversationId === visibleConversation?.conversationId
+    && active.current.visibleConversation?.turnId === visibleConversation?.turnId
+    && !document.hidden && active.current.current() && !signal?.aborted;
   const retainQuestion = (value: Question | null, offered: Parameters<typeof preserveWorkbenchQuestionDraft>[2] = []) => {
     // Absence of a successor question is not a replacement field contract.
     // Keep still-legal local input under its previous basis, with no submission
@@ -164,12 +169,29 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
       }
       const reference = submission ?? (saved !== 'invalid' ? saved : null);
       if (!reference || operation === 'submit' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
-      if (operation === 'submit' && submission) visibleKey = visible?.begin({ taskId, trigger: 'original_input_resume', originKey: submission.requestId }) ?? null;
+      if (operation === 'submit' && submission) visibleKey = visible?.begin({ taskId, trigger: 'original_input_resume',
+        originKey: submission.requestId, ...visibleConversation }) ?? null;
       dispatched = true;
-      const result = validateTaskClarificationProgress(await (operation === 'receipt'
+      let result = validateTaskClarificationProgress(await (operation === 'receipt'
         ? aiTaskCenterApi.inputReceipt(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)
         : operation === 'submit' ? aiTaskCenterApi.resumeInput({ submission: structuredClone(submission!) }, controller.signal)
           : aiTaskCenterApi.continueInput(submission ? { submission: structuredClone(submission) } : { reference: structuredClone(reference) }, controller.signal)), reference);
+      if (operation === 'submit' && visibleKey && same(controller.signal) && result.receipt.state === 'observed' && !result.receipt.runId
+        && result.continuation.kind === 'run_outcome' && ['succeeded', 'partially_succeeded', 'paused'].includes(result.continuation.status)) {
+        // The submit acknowledgement carries the original receipt, while its
+        // separate read attests the exact resumed Run for this live window.
+        try {
+          const observed = validateTaskClarificationProgress(await aiTaskCenterApi.inputReceipt({
+            submission: structuredClone(submission!) }, controller.signal), reference);
+          if (same(controller.signal) && observed.receipt.state === 'observed' && observed.receipt.runId
+            && observed.receipt.receiptId === result.receipt.receiptId && observed.receipt.taskRevision === result.receipt.taskRevision)
+            result = { ...result, receipt: { ...result.receipt, runId: observed.receipt.runId } };
+          else visible?.cancel(visibleKey);
+        } catch (failure) {
+          visible?.cancel(visibleKey);
+          if ([401, 403].includes((failure as { response?: { status?: number } }).response?.status ?? 0)) throw failure;
+        }
+      }
       if (same(controller.signal) && result.receipt.state === 'observed' && result.receipt.runId
         && result.continuation.kind === 'run_outcome' && ['succeeded', 'partially_succeeded', 'paused'].includes(result.continuation.status))
         visible?.bindRun(visibleKey, result.receipt.runId);
