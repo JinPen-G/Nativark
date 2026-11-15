@@ -536,6 +536,29 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
       const event: EntryActionAuditEvent = { requestId, surface, contractVersion: name.includes('Notification')
         ? AI_ENTRY_NOTIFICATION_DRAFT_VERSION : AI_REGISTERED_ENTRY_ACTION_VERSION, operation: name,
         state: 'observed', durationMs: 0 };
+      // A lost save response still needs its original locator in the audit.
+      // This is scoped request correlation, never evidence of a saved draft or
+      // a valid Action; only the original operation/receipt supplies that fact.
+      const notificationKey = (() => {
+        if (name === 'prepareNotificationDraft') {
+          const input = aiEntryNotificationDraftPrepareSchema.safeParse(frozen);
+          return input.success ? input.data.operationKey : undefined;
+        }
+        if (name === 'saveNotificationDraft') {
+          const input = aiEntryNotificationDraftSaveSchema.safeParse(frozen);
+          return input.success ? input.data.command.operationKey : undefined;
+        }
+        if (name === 'readNotificationDraft') {
+          const input = aiEntryNotificationDraftReadSchema.safeParse(frozen);
+          return input.success ? input.data.operationKey : undefined;
+        }
+        return undefined;
+      })();
+      if (notificationKey && actor.context.actor.kind === 'user' && actor.context.scope.kind === 'workspace') {
+        event.operationKeyHash = requestFingerprint({ version: AI_ENTRY_NOTIFICATION_DRAFT_VERSION,
+          actorId: actor.context.actor.userId, tenantId: actor.context.scope.tenantId,
+          workspaceId: actor.context.scope.workspaceId, operationKey: notificationKey });
+      }
       try {
         const result = await methods[name](frozen, signal);
         savedObserved = name === 'saveNotificationDraft' && 'state' in result && result.state === 'saved';
@@ -548,7 +571,7 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
             workspaceId: actor.context.scope.workspaceId, operationKey: result.operationKey });
         if ('material' in result) { event.draftId = result.material.id; event.resultState = result.state; }
         if ('draft' in result && result.draft) { event.draftId = result.draft.id; event.resultState = result.state; }
-        if ('state' in result && result.state === 'unknown') event.state = 'unknown';
+        if ('state' in result && result.state === 'unknown') { event.state = 'unknown'; event.resultState = 'unknown'; }
         if ('actions' in result) event.actions = result.actions.map(row => ({ actionId: row.action.actionId,
           actionCode: row.action.actionCode, resourceId: row.action.resource.id }));
         if ('source' in result && 'taskId' in result.source) { event.taskId = result.source.taskId; event.runId = result.source.runId; }
@@ -579,6 +602,7 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
         const rawCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'AI_RESOURCE_UNAVAILABLE';
         const code = savedObserved && !['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(rawCode) ? 'AI_RESULT_UNKNOWN' : rawCode;
         event.state = code === 'AI_RESULT_UNKNOWN' ? 'unknown' : 'refused'; event.refusalCode = code;
+        if (code === 'AI_RESULT_UNKNOWN' && notificationKey) event.resultState = 'unknown';
         event.durationMs = Math.max(0, now().getTime() - started);
         try { await recordEntryActionObservation(d.db, actor.context, event); }
         catch { throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE'); }

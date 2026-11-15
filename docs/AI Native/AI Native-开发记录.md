@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry17-original-key-audit-closeout-20261115"></a>
+## ENTRY-17 通知拒绝与unknown审计保留原操作关联（2026-11-15）
+
+前置 `a8311d8b5c2bd6032eb225d1ca91a72d0563eaec` 和回执 `77feaf3e1e290c8774aa7eeaf06202488622d475` 已普通推送并核同GitHub。原通知保存丢COMMIT应答时，[请求应用](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.application.ts)只从成功返回包采集K，导致unknown日志没有原键关联。Root沿现有闭合请求及服务端当前actor／tenant／workspace，执行前捕获原operationKeyHash供拒绝／unknown记录使用；其哈希与原草稿键派生相同。该字段仅为关联，不声明原草稿已存在、Action已授权或业务成功，draftId仍须来自真实原结果。unknown读取及保存事件分别标resultState，未知结果不换K、不重发。
+
+原反例stdin `962e2c82cefbdda7df7cadf291ac262bf48cc0098bff0484fa2919fb8afef8fd`退出0，证明一份原草稿已存在但原unknown审计漏K。修后复用原Auth／Guard／Controller／Core及原事务fixture，拒绝篡改、丢应答、同K原读和缺原行unknown均保留同一scope哈希；唯一保存审计仍一次，日志不含原明文K、正文变量、收件人或proof，provider调用为0。最终轻量内存命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=2304 -`，stdin `9a0f89f139189599d08e8e0c939e58724a5ff919b3e965c769a259a5c38448e9`退出0；TS5.9.3一根／1639源必要类型 `dfe0fdbde54a059913873bd8ace289ead896c428328470604f753b8dd2fe113b`退出0、零诊断。无新增测试脚本或依赖。
+
+失败与资源边界：原长驻验证REPL因累积历史数据触发内存上限退出134，已发出的两个进程句柄实核均缺失，未取回的结果不计通过。重新提取原fixture时字符串结束定位一次失败，仅修内存提取；最终命令使用同一原业务fixture，没有复制产品实现或新建脚本。新轻量验证进程均退出、audit为空、原任务临时目录未创建。真实DB／HTTP／浏览器／微信／供应商未运行；通知缓存／快照传播与客户profile页生命周期仍由两助手处理，ENTRY-17全文不由该审计切片提前计100%。
+
 <a id="ain-entry02-customer-original-links-fixed-20261115"></a>
 ## ENTRY-02 客户两端原资源导航及本人资料目标固定阶段（2026-11-15）
 
