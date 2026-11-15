@@ -19,6 +19,7 @@
       <view class="row row--between"><view class="title">#{{orderNo}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
       <view class="order-heading__meta">下单时间：{{createdAt}}<text class="link small" bindtap="onCopy">复制订单号</text></view>
     </view>
+    <view wx:if="{{aiEntryActionsAvailable}}" class="section section--tight"><ai-entry-actions id="ai-entry-actions" order-id="{{id}}" context-key="{{aiEntryActionsContext}}" available="{{aiEntryActionsAvailable}}"></ai-entry-actions></view>
     <view wx:if="{{canReadInspectionTasks || aiInspectionTaskVisible}}" class="section section--tight"><view class="card order-info-card">
       <view class="subtitle">原检查任务</view>
       <view class="muted small mt-8">选择{{pickupLabel}}或{{returnLabel}}阶段，核对已保存的任务与结果。</view>

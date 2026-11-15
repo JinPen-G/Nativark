@@ -19,6 +19,7 @@
     "pages/scan-result/index",
     "pages/scan-manual/index",
     "pages/assets/index",
+    "pages/product/index",
     "pages/asset/index",
     "pages/asset-ledger/index",
     "pages/asset-new/index",

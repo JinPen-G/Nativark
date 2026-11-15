@@ -42,6 +42,7 @@ import { enterRequestIdentity, getRequestIdentity, runWithRequestIdentity, type 
 import type { TrustedWorkspaceAccess } from '../modules/auth/trusted-workspace-principal';
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
+import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_REGISTERED_ENTRY_ACTION_CONTRACTS } from '@rental-os/shared';
 import { PrismaService } from "../modules/database/prisma.service";
 import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, platformRetentionPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
@@ -289,6 +290,13 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_REGISTERED_ENTRY_ACTION_CONTRACTS).some(action =>
+    path === `/${AI_REGISTERED_ENTRY_ACTION_HTTP.operatorBasePath}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`
+    || path === `/${AI_REGISTERED_ENTRY_ACTION_HTTP.staffBasePath}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`)) {
+    // Entry is authenticated; each resource's original route is independently
+    // checked inside the reader. This does not grant business permission.
+    return [];
+  }
   if (method.toUpperCase() === 'POST' && path === `/${AI_ENTRY_SCENE_CATALOG_HTTP.operatorBasePath}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`) return [];
   if (method.toUpperCase() === 'POST' && Object.keys(AI_AUTOMATION_EXPLANATION_CONTRACTS).some(action =>
     path === `/${AI_AUTOMATION_EXPLANATION_HTTP.basePath}/${AI_AUTOMATION_EXPLANATION_HTTP[action as keyof typeof AI_AUTOMATION_EXPLANATION_CONTRACTS]}`)) {
@@ -973,7 +981,7 @@ export class ApiAuthGuard implements CanActivate {
   async revalidateClientRead(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<RequestLike>();
     const path = matchableRequestPath(request.url), method = request.method.toUpperCase();
-    const get = /^\/client\/v1\/(?:auth\/me|catalog|my\/orders|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}(?:\/fee-items)?|quotes\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}|membership\/(?:corporates|booking-options)|profile(?:\/addresses)?)$/u;
+    const get = /^\/client\/v1\/(?:auth\/me|catalog|my\/orders|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}(?:\/fee-items|\/payment-intents\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190})?|quotes\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}|membership\/(?:corporates|booking-options)|profile(?:\/addresses)?)$/u;
     const post = /^\/client\/v1\/(?:availability|orders\/[A-Za-z0-9][A-Za-z0-9._:-]{0,190}\/cancel\/preview)$/u;
     if (!(method === 'GET' && get.test(path) || method === 'POST' && post.test(path))) {
       throw new ForbiddenException('该接口不是已注册的客户端只读复验入口');

@@ -77,6 +77,7 @@ export * from './ai-task-scene-observation-draft';
 export { AI_TASK_SCENE_OBSERVATION_SCHEMAS } from './ai-task-scene-observation-draft-schemas';
 export * from './ai-order-read-http-draft';
 export * from "./ai-entry-action-draft";
+export * from "./ai-registered-entry-action";
 export * from "./ai-booking-draft";
 export * from "./ai-booking-validation";
 export * from "./ai-knowledge-policy-management-draft";

@@ -184,6 +184,9 @@ import { AiRetentionController, AiPlatformRetentionController } from "./modules/
 import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController,
   WebsiteEntrySceneCatalogController, WechatEntrySceneCatalogController } from './modules/ai-native/scenes/entry-scene-catalog.controller';
 import { AI_NATIVE_SCENE_CATALOG_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+import { AI_NATIVE_ENTRY_ACTION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
+import { OperatorRegisteredEntryActionController, StaffRegisteredEntryActionController,
+  WebsiteRegisteredEntryActionController, WechatRegisteredEntryActionController } from './modules/ai-native/scenes/registered-entry-action.controller';
 import { AI_NATIVE_PLATFORM_RETENTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
 import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -265,6 +268,10 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     StaffEntrySceneCatalogController,
     WebsiteEntrySceneCatalogController,
     WechatEntrySceneCatalogController,
+    OperatorRegisteredEntryActionController,
+    StaffRegisteredEntryActionController,
+    WebsiteRegisteredEntryActionController,
+    WechatRegisteredEntryActionController,
     AiOriginalSceneObservationController,
     AiOriginalQuoteModelExecutionController,
     AiOriginalOpeningModelExecutionController,
@@ -319,6 +326,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     AI_NATIVE_CATEGORY_PROPOSAL_PROVIDER,
     ...AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS,
     ...AI_NATIVE_SCENE_CATALOG_PROVIDERS,
+    ...AI_NATIVE_ENTRY_ACTION_PROVIDERS,
     AI_NATIVE_CONVERSATION_PROVIDER,
     AI_NATIVE_MEMBER_NAME_PROVIDER,
     ApiAuthGuard,

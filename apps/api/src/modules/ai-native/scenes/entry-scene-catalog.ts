@@ -81,7 +81,8 @@ type DefinitionInput = Pick<EntrySceneDefinition, 'entryId' | 'sceneCode' | 'aud
 function define(input: DefinitionInput): EntrySceneDefinition {
   const client = input.audience === 'customer', staff = input.audience === 'staff', platform = input.audience === 'platform';
   const actions = input.actions ?? [];
-  if (actions.some(code => AI_ENTRY_ACTION_REGISTRY[code].availability === 'unavailable')) throw new TypeError('Unavailable Action in scene metadata');
+  if (actions.some(code => !(AI_ENTRY_ACTION_REGISTRY[code].audiences as readonly string[]).includes(input.audience)))
+    throw new TypeError('Action audience is not registered in scene metadata');
   return { entryId: input.entryId, sceneCode: input.sceneCode, sceneVersion: '1', audience: input.audience,
     runtimeAudience: platform ? 'operator' : AI_ENTRY_AUDIENCE_MAP[input.audience] as 'operator' | 'staff' | 'client',
     surfaces: client ? AI_CUSTOMER_ENTRY_SURFACES : staff ? ['staff_miniprogram'] : ['tenant_admin'],

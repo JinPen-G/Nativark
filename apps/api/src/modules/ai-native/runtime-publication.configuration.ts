@@ -12,6 +12,7 @@ export const AI_NATIVE_RUNTIME_PUBLICATION_KEY = 'AI_NATIVE_RUNTIME_PUBLICATION'
 
 const configuration = z.record(z.unknown()).optional();
 const configurations = z.object({
+  entryActions: configuration,
   conversations: configuration,
   workbenchDisplay: configuration,
   businessFailure: configuration,

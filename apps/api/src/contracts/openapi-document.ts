@@ -48,6 +48,7 @@ import { AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT, AI_STAFF_INSPECTION_TASK_POL
 import { AI_RETENTION_HTTP_CONTRACTS, AI_ORIGINAL_POLICY_HTTP_CONTRACTS, AI_CLIENT_TASK_POLICY_HTTP_DRAFT, AI_CLIENT_POLICY_HTTP_CONTRACTS, AI_INSPECTION_MANUAL_HTTP_CONTRACTS, AI_INSPECTION_LIFECYCLE_HTTP_CONTRACTS, AI_CATEGORY_DRAFT_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_PLATFORM_RETENTION_HTTP, AI_PLATFORM_RETENTION_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_ENTRY_SCENE_CATALOG_HTTP, AI_ENTRY_SCENE_CATALOG_CONTRACTS } from '@rental-os/shared';
+import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_REGISTERED_ENTRY_ACTION_CONTRACTS } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2339,6 +2340,13 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...(['operatorBasePath', 'staffBasePath', 'websiteBasePath', 'wechatBasePath'] as const).flatMap(surface =>
+    Object.entries(AI_REGISTERED_ENTRY_ACTION_CONTRACTS).map(([action, contract]) => ({
+      method: 'post' as const, path: `/api/${AI_REGISTERED_ENTRY_ACTION_HTTP[surface]}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`,
+      tag: 'AI Native', operationId: `registeredEntryAction_${surface}_${action}`, authRequired: true, permissions: [],
+      summary: 'Current server-issued fixed Action; original resource authorization, version and expiry rechecked. No business dispatch.',
+      requestSchema: contract.request, responseSchema: contract.response,
+    }))),
   ...(['operatorBasePath', 'staffBasePath', 'websiteBasePath', 'wechatBasePath'] as const).map(surface => ({
     method: 'post' as const, path: `/api/${AI_ENTRY_SCENE_CATALOG_HTTP[surface]}/${AI_ENTRY_SCENE_CATALOG_HTTP.read}`,
     tag: 'AI Native', operationId: `readAiSceneCatalog_${surface}`, authRequired: true,

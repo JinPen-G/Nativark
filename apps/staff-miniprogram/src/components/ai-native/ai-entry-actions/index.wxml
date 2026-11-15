@@ -1,0 +1,12 @@
+<view class="entry-actions card">
+  <view class="subtitle">原资料入口</view>
+  <view class="muted small mt-8">核对当前资料与权限，再打开原页面。各项办理仍在原页面确认。</view>
+  <button class="btn btn--outline btn--block mt-12" loading="{{busy}}" disabled="{{!available || busy}}" bindtap="onRead">读取当前原入口</button>
+  <view wx:if="{{observedAt}}" class="muted tiny mt-8">查询时间：{{observedAt}}</view>
+  <view wx:for="{{rows}}" wx:key="actionId" class="entry-actions__row">
+    <view class="entry-actions__label">{{item.label}}</view>
+    <view class="muted small mt-4">{{item.destination}}</view>
+    <button class="btn btn--secondary btn--block mt-8" data-action-id="{{item.actionId}}" disabled="{{busy || !available}}" bindtap="onOpen">{{item.title}}</button>
+  </view>
+  <view wx:if="{{message}}" class="entry-actions__message small mt-12" role="status" aria-live="polite">{{message}}</view>
+</view>

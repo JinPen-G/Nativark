@@ -42,7 +42,7 @@ function fundingChannelLabel(provider: string): string {
 
 Page({
   behaviors: [themeBehavior],
-  data: { canReadInspectionTasks: false, aiInspectionTaskChoosing: false, aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: "",
+  data: { aiEntryActionsAvailable: false, aiEntryActionsContext: "", canReadInspectionTasks: false, aiInspectionTaskChoosing: false, aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: "",
     aiNativeEntryVisible: false, aiNativeTasks: [], aiNativePreviewTask: null, aiNativeSteps: [], aiNativeFields: [], aiNativeProposal: null, aiNativeSources: [], aiNativeMemories: [], aiNativeInspection: [], aiNativeOrderProjection: null, view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryPhoneCallable: "", deliveryAddressText: "", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, onlineCollections: [] as Array<{ id: string; methodLabel: string; directionLabel: string; amountLabel: string; refund: boolean }>, hasOnlineCollections: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
   order: undefined as RentalOrder | undefined,
   extensions: [] as RentalOrderExtension[],
@@ -58,8 +58,9 @@ Page({
     this.inspectionPageEpoch++;
     this.inspectionLoadedScope = "";
     this.order = undefined;
+    this.selectComponent?.("#ai-entry-actions")?.withdraw?.();
     clearInspectionTaskPage(this);
-    this.setData({ canReadInspectionTasks: false, aiInspectionTaskChoosing: false, view: loadingState() });
+    this.setData({ aiEntryActionsAvailable: false, aiEntryActionsContext: "", canReadInspectionTasks: false, aiInspectionTaskChoosing: false, view: loadingState() });
   },
   onLoad(query: Record<string, string>) {
     this.inspectionPageShown = false;
@@ -78,7 +79,8 @@ Page({
   },
   onHide() {
     this.inspectionPageShown = false; this.inspectionPageEpoch++;
-    this.setData({ aiInspectionTaskChoosing: false });
+    this.selectComponent?.("#ai-entry-actions")?.withdraw?.();
+    this.setData({ aiEntryActionsAvailable: false, aiEntryActionsContext: "", aiInspectionTaskChoosing: false });
     hideInspectionTaskPage(this); this.selectComponent?.("#ai-native-workbench")?.hostHide?.();
   },
   onShow() {
@@ -100,8 +102,9 @@ Page({
     let work: InspectionPageWorkContext;
     this.inspectionPageEpoch++;
     try { work = captureInspectionPageWork(this, true); } catch { return; }
+    this.selectComponent?.("#ai-entry-actions")?.withdraw?.();
     hideInspectionTaskPage(this);
-    this.setData({ canReadInspectionTasks: false, aiInspectionTaskChoosing: false });
+    this.setData({ aiEntryActionsAvailable: false, aiEntryActionsContext: "", canReadInspectionTasks: false, aiInspectionTaskChoosing: false });
     if (!can("rental-os:order:view")) {
       this.clearInspectionReadContext();
       this.setData({ view: blockedState("无订单查看权限", "请联系管理员授权") }); return;
@@ -162,6 +165,8 @@ Page({
       const delivery = order.deliveryAddressSnapshot;
       const deliveryPhonePlain = delivery?.phone ?? "";
       this.setData({
+        aiEntryActionsAvailable: true,
+        aiEntryActionsContext: JSON.stringify([work.scopeKey, order.id, order.updatedAt, this.inspectionPageEpoch]),
         view: readyState(), canReadInspectionTasks: true, orderNo: order.orderNo, status: orderStatusLabel(order.status), tone: orderStatusTone(order.status), createdAt: formatBusinessDateTime(order.createdAt, timeZone), customer: order.customerName, customerCompany: "", customerRegion: "",
         phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone),
         pickupLocation: order.fulfillmentLocationName, returnLocation: order.returnLocationName ?? order.fulfillmentLocationName, mode: fulfillmentModeLabel(order.fulfillmentMode),

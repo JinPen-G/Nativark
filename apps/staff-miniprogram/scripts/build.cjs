@@ -29,8 +29,7 @@ const checkOnly = process.argv.includes("--check");
 const releaseMode = process.argv.includes("--release");
 
 function fail(message) {
-  process.stderr.write(`[staff-miniprogram build] ${message}\n`);
-  process.exit(1);
+  throw new Error(message);
 }
 
 function walk(dir) {
@@ -77,7 +76,7 @@ function publicConfig(defaults) {
   return { apiOrigin, appId, allowLocalApi, builtAt: new Date().toISOString() };
 }
 
-function main() {
+async function main() {
   if (checkOnly) {
     runTsc(["-p", "tsconfig.json", "--noEmit"]);
     process.stdout.write("[staff-miniprogram build] 类型检查通过\n");
@@ -92,6 +91,10 @@ function main() {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(file, target);
   }
+  const actionRuntime = await require('../../../scripts/miniprogram-ai-runtime.cjs').buildEntryActionRuntime(root);
+  const actionRuntimeFile = path.join(dist, 'components', 'ai-native', 'entry-action-runtime.js');
+  fs.mkdirSync(path.dirname(actionRuntimeFile), { recursive: true });
+  fs.writeFileSync(actionRuntimeFile, actionRuntime.code);
 
   const configFile = path.join(dist, "config", "public.js");
   if (!fs.existsSync(configFile)) fail("缺少编译产物 config/public.js");
@@ -135,4 +138,13 @@ function main() {
   process.stdout.write(`[staff-miniprogram build] 完成：${mode}，${appJson.pages.length} 个页面 → dist/（API：${config.apiOrigin}${config.appId ? `，AppID：${config.appId}` : ""}）\n`);
 }
 
-main();
+(async () => {
+  try { await main(); }
+  catch (error) { process.stderr.write(`[staff-miniprogram build] ${error.message}\n`); process.exitCode = 1; }
+  finally {
+    if (privateTypeConfig) {
+      try { require('../../../scripts/miniprogram-shared-types.cjs').disposeMiniprogramSharedTypes(privateTypeConfig); }
+      catch (error) { process.stderr.write(`[staff-miniprogram build] 临时声明清理失败：${error.message}\n`); process.exitCode = 1; }
+    }
+  }
+})();

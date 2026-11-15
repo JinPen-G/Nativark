@@ -3,6 +3,9 @@ import { useLocale } from '@/app/locale';
 import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
+  '当前允许的下一步': 'Currently available next steps', '读取当前允许的下一步': 'Read current next steps',
+  '查看客户': 'View customer', '查看商品': 'View product', '查看配货': 'View allocation', '查看支付记录': 'View payment records',
+  '当前入口不可用，可继续原人工页面。': 'This entry is unavailable. Continue through the original manual page.',
   ...platformAiEnglish,
   '取消善后观察': 'Cancellation settlement observation', '已核对原善后收据': 'Original settlement receipt verified',
   '等待原善后证据': 'Awaiting original settlement evidence', '未记录取消请求': 'No cancellation request recorded',

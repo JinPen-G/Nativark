@@ -6,6 +6,42 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry02-registered-navigation-stage-20261115"></a>
+## ENTRY-02 原资源Action签发、正式装配与员工／后台导航阶段（2026-11-15）
+
+前置 `345f1576ad4cf57ddc9f1f5c51dd5700943856b4` 已普通推送并独立回读GitHub，包含ENTRY-09／11／12／18全文核定。本阶段沿原九Action补正式签发与消费；ENTRY-02仍75%，通知草稿公共签发／保存消费者、客户两端最后消费者及原九Action全文独立核定未完，不按新增文件或局部冒烟升档。
+
+[唯一注册表](../../packages/shared/src/ai-entry-action-draft.ts)补齐九Action的资源种类、R0／R1及适用audience；[新版公共合同](../../packages/shared/src/ai-registered-entry-action.ts)使用ain-entry-action-2，原客户v1仍只接受原三项。Action绑定固定surface／scope、原资源版本、当前身份／权限／发布hash、适用Task／Run／order引用和120000ms内有效期；服务端SecretBox封装完整bodyHash，客户端不能借形状合法签发权限。未知URL、audience、资源种类及多余字段拒绝；客户个人／企业类型从原profile取，不能按ID猜路由。
+
+[请求应用](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.application.ts)经[四端Controller](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.controller.ts)及原provider／AppModule／Guard／OpenAPI正式装配。entryActions发布必须显式enabled、当前validFrom／expiresAt及ttlMs；读取不创建Task、审批、额度或模型。后台从原TaskOrderHandoff收据定位订单，员工／客户从受权原orderId发现有界关联，再分别复核原member／catalog／operate／finance权限。原订单view不授客户、配货或资金权限；会员按原tenant权读取，workspace只是当前宿主绑定。签发、消费和组合返回末端重核各资源版本及当前身份，source与目标分别签名；原读不自动重派。
+
+dev1[原资源reader](../../apps/api/src/modules/ai-native/scenes/entry-action-resource.reader.ts)／[私有contract](../../apps/api/src/modules/ai-native/scenes/entry-action-resource.contract.ts)固定blob `b5837fa3a04a41e7cf3f26ec21796268b81bb0fa`／`530834fd980758bcbf23dacde681d1b429f513a4`经Root核同。作者实际Auth／Guard／Core仓储模拟 `f3eea7a9cde0771241a31db47b8c6bfced03d7d6a2ff5337cd052d100a396941`、客户类型／范围补验 `0b77a32f79a5aeb33419deeb032a2eabf27fda3ca14a1d06459eacd1949cdf50`退出0；TypeScript5.9.3两根／1218源零诊断，stdin `5ab879128d6dc1846048ef93125efd5b1730bb48558aa54b1c14e197be460926`。三组命令为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，底层数据库为有限夹具。
+
+[后台原订单入口](../../apps/admin/src/features/ai-native/OrderHumanHandoff.tsx)挂接[固定Action消费者](../../apps/admin/src/features/ai-native/RegisteredOrderActions.tsx)和[原axios API](../../apps/admin/src/api/aiEntryActions.ts)，明确读取后才显示当前入口，点击再复核相同action／resource／scope／associations；隐藏、当前身份变化及期限撤回，Action仅内存。商品原CatalogPage只用itemGroupId筛选已受权原列表，客户使用原个人／企业详情，支付／配货进入原订单人工页不自动办理。[员工订单页](../../apps/staff-miniprogram/src/pages/order/index.ts)及九源组件／session／API同样仅明确点击，Root逐blob核同dev1冻结交付；作者实际Page→组件→session→原HTTP／Auth／Guard／Controller／Core模拟 `5e3683ab569acaebd4f521b578b673b55b5200f4177df766e1ab36f8b2359aa1`退出0，20次读取／4导航，模型／Task／业务／供应商写0。员工四根／251源原ES2019类型零诊断，stdin `df3634b8a6a57faef31ffdb52a715e64765fd050ca9f494832c6225179ce4cb5`退出0。
+
+[员工商品只读页](../../apps/staff-miniprogram/src/pages/product/index.ts)经原app.json／ROUTES.product登记，仅消费原catalog权限和商品id／code／name／unit／status；不借资产页扩展库存权限。[原受控builder](../../scripts/miniprogram-ai-runtime.cjs)只打包canonical共享Action叶和原Zod，13源／6出口、63621字节，双端runtime同字节SHA-256 `f6cc1bd3548db95ee2071d02e783b9b550e77e811c31967172378545eb762dff`。客户／员工build.cjs实际重建该固定运行时，不依赖另一临时树；员工原临时声明补finally清理。未运行两端完整构建，不宣称真实微信发布。
+
+| Root必要验证（均为node --no-compilation-cache -） | stdin SHA-256与实际结果 |
+| --- | --- |
+| 新旧闭合Action合同、跨端／kind／风险／超期拒绝 | `f5f159760673a6e35de34680d6b6cc81c80451a7615ffa27d01faf81bc525179`，退出0。 |
+| 实际Guard／Controller五导航签发／复核、伪造／撤权／发布／期限 | `14fcaa7649e077c44f071f9003b975ed9ae447a988267f33333fae9fc750b2a7`，退出0；原handoff为明确合同夹具，写／模型0。 |
+| 原真实Task创建／收据→公共发现，原orderId独立来源 | `f14788ba797faca587f7f4deced48b6fbea911294870bbe03220fe213288a6f7`，最终当前组退出0；Core／Auth／Task为实际组合、SQL关联行是有限fixture，无新增Task／Run／审批／订单／模型。 |
+| 客户ClientAuth／当前原发布与本人四导航、原order关联发现 | `0faf4d2b172e706f86c8eca3e64ab7fa5b358f430f6ad7f67ac5702b15f7431d`，退出0；当前本人revision／scope／原发布、错本人及撤权拒绝，支付刷新0；161次原会话lastUsed写不算业务写。 |
+| 实际后台组件／API→Guard／Controller→固定导航／隐藏／到期 | `a7b9a863eada96c0cb5a1a1612577b753ba21929efc53c74857eecb91b622a21`，退出0；React／DOM／Router为有限宿主，原API／服务运行，无真实浏览器。 |
+| 员工原商品Page正常／撤权／隐藏迟到／监听清理 | `049b7a5cee10e04218103bf054a9e1327d1ebf244a44e3364d0899f9fd8438d4`，退出0；只原目录，资产／库存／模型0。 |
+| 原标准API与后台类型 | `f4c9f239e7741210af8ca1313ddcc79d7c08cb2bf92f53b57cd51cf62f05ef42`，API四根／1900源、后台四根／1493源零诊断，退出0；后继最终检查按本节补记。 |
+| 员工商品原ES2019类型 | `8c9cdcea1ff4180357d160e7a58f6ae6a78276d4470f265e382c1d2f785f01ca`，最终事件修后退出0，一根／216源／127份内存声明零诊断。 |
+
+最后完整生产装配TypeScript5.9.3四根／2040源零诊断、退出0，stdin `8ade22efd62e2ad88c685111877ae6694818cbbbdb7be9f9b359db0d739d6535`；后台最终生命周期四根／1464源零诊断、退出0，stdin `b82d81a09a76af3f41b317644b7aee4a198bc534f98a74913353c6209f6efa97`。文档检查仍11/11文件、4处既有缺链／退出1；本阶段新增文件链接和原任务算术定向核对，差异格式检查退出0，不伪造附件。
+
+限定独立静态复核发现两个P2：RegisteredOrderActions把原租户会员路由误用空间hasPermission，最后来源await又可能跨过Action期限。Root复用原canAccessRoute／hasTenantMembershipPermission与兼容权限，不改Auth或Guard；返回前用同一returnedAt再次核全部Action.expiresAt。租户会员与空间读权分离的实际后台API／组件／Guard／Controller反例修后stdin `62aae526327dc06686adad0f65778cbc5d58dcfaeceed7769885ef43a0ef795d`退出0，隐藏／到期撤回保持；最后来源等待跨期限的反例修后stdin `09fd5379e1aeb6e4ca67f84b10d87bea0598182fd12a43b56cc172eb8eb44116`退出0，拒绝返回过期Action，模型／业务写入0。第一次诊断 `d1581cc1d50ee638977183916f0b8cfd63b3e2a4c9c8dec13ed29367eca94ffc`误计来源调用14次，实际为13次，退出1；仅修内存驱动按实际末次等待复验，原消费的独立过期拒绝保持。
+
+本导航片单独固定46个产品／构建文件和既有记录／接续；ClientApiService暂存版排除Root后继未发送通知草稿过滤，packages/shared/src/core.ts与RentalBusinessService继续使用本片前置HEAD，不夹dev2通知增量。按这三份固定前像构造内存源码进行最终类型，stdin `2a4cac2efc63c16e0ae8b14dabf23a68c0ed9349f59ae4e338fd4fe552973ad4`退出0：TypeScript5.9.3，API两根／2040源、后台三根／1464源均零诊断。仅固定core／Client的上一组遗漏仍活动的RentalBusinessService，产生三条通知类型诊断，退出1；补齐固定原业务域前像后通过，未改写或覆盖助手源码。两个导航P2的最小生产修复已完成作者复验，限定独立检查为静态，不冒称独立重跑、真实宿主或九Action全文通过。固定阶段与远端SHA沿本节所在提交核对。
+
+失败保留：初签发类型引用私有未导出类型、registry unavailable字面量及已收窄platform分支已修；draft公共类型后Client通知观察必须排除未发送草稿，已按真实状态收紧。后台类型驱动漏原Vite／CSS声明及axios扩展flag写法，分别补原声明与局部config变量。原Task驱动删掉Core其他依赖导致CONFIG_INVALID，保留完整Core后通过；客户fixture遗漏AUTH_TOKEN_SECRET仅补合成值，不读.env。后台有限宿主漏structuredClone、使用与原fixture不同的Date.now导致有效Action过期，修宿主／同源时钟后原断言通过；员工商品事件签名按原Emitter单参修复。两次文档patch包装不合法未执行，修工具输入后写入。生产权限／原合同和已有测试文件未放宽。
+
+本片原API／Auth／Core／Task与客户端代码真实运行，数据库、能力记录、React／微信宿主和业务数据为明确模拟，真实数据库／浏览器／微信／供应商由负责人后续测试。所有Root验证沿本树原offline preload／不可达DATABASE_URL／内存audit，`output/.tmp/ain-entry02-registered-actions-20261115`未创建；没有新增验证脚本、依赖／共享Client／dist副本。正式两端runtime是生产消费者交付物，不作为临时残留删除。通知三源及客户活动页面暂不夹入本导航阶段，主线和ENTRY百分比不变；固定阶段普通推送后再接余项。
+
 <a id="ain-entry09-safe-display-whole-closeout-20261115"></a>
 ## ENTRY-09 四端候选、原报价与动态展示安全呈现全文收口（2026-11-15）
 

@@ -5,6 +5,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./miniprogram-entry-actions": {
+      "types": "./dist/miniprogram-entry-actions.d.ts",
+      "import": "./dist/miniprogram-entry-actions.js",
+      "require": "./dist/miniprogram-entry-actions.js"
+    },
     "./miniprogram-client": {
       "types": "./dist/miniprogram-client.d.ts",
       "import": "./dist/miniprogram-client.js",

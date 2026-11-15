@@ -1,6 +1,9 @@
 import { AI_TASK_READ_POLICY_REQUESTS, composeTaskReadPolicyRequests } from './task-read-policy.application';
 import { AI_TASK_ORIGINAL_READ_POLICY_REQUESTS, composeTaskOriginalReadPolicyRequests } from './task-original-read-policy.application';
 import { AI_TASK_ORDER_HANDOFF_REQUESTS, composeRequestBoundTaskOrderHandoff } from './task-order-handoff.application';
+import { composeRegisteredEntryActionRequests } from './scenes/registered-entry-action.application';
+import { AI_OPERATOR_ENTRY_ACTIONS, AI_STAFF_ENTRY_ACTIONS, AI_WEBSITE_ENTRY_ACTIONS,
+  AI_WECHAT_ENTRY_ACTIONS } from './scenes/registered-entry-action.controller';
 import { AI_TASK_CALENDAR_DRAFT_REQUESTS, composeRequestBoundTaskCalendarDraft } from './task-calendar-draft.application';
 import { AI_MEMBER_NAME_REQUESTS, composeMemberNameRequests } from './member-name.application';
 import { AI_NATIVE_RUNTIME_PUBLICATION, AI_NATIVE_RUNTIME_PUBLICATION_PROVIDER, runtimeConfigurationProvider,
@@ -1398,6 +1401,19 @@ export const AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER: FactoryProvider = {
 
 /** Deployment publication supplies existing independent gates. None of these
  * bindings initializes task policy, approves an action or dispatches a model. */
+/** Registered navigation stays independent of model/execute budgets. Missing
+ * entryActions publication is closed; each leaf keeps original read authority. */
+export const AI_NATIVE_ENTRY_ACTION_PROVIDERS: FactoryProvider[] = ([
+  [AI_OPERATOR_ENTRY_ACTIONS, 'tenant_admin'], [AI_STAFF_ENTRY_ACTIONS, 'staff_miniprogram'],
+  [AI_WEBSITE_ENTRY_ACTIONS, 'tenant_website'], [AI_WECHAT_ENTRY_ACTIONS, 'client_miniprogram'],
+] as const).map(([provide, surface]) => ({
+  provide, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox, ConfigService, RentalCoreService, ClientApiService,
+    AI_TASK_ORDER_HANDOFF_REQUESTS],
+  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox, publication: ConfigService,
+    core: RentalCoreService, client: ClientApiService, orderHandoff: ReturnType<typeof composeRequestBoundTaskOrderHandoff>) =>
+    composeRegisteredEntryActionRequests({ db, auth, guard, secrets, publication, core, client, orderHandoff }, surface),
+}));
+
 /** Existing server host metadata only. No provider, credential, Action or Task
  * is created by reading this directory; every source keeps its own Guard and
  * independent policy/capability checks. Missing host registrations stay closed. */
