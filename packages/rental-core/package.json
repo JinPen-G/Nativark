@@ -35,6 +35,14 @@
       "types": "./dist/mysql-idempotency.d.ts",
       "default": "./dist/mysql-idempotency.js"
     },
+    "./mysql-idempotent-actions": {
+      "types": "./dist/mysql-idempotent-actions.d.ts",
+      "default": "./dist/mysql-idempotent-actions.js"
+    },
+    "./mysql-business-fence": {
+      "types": "./dist/mysql-business-fence.d.ts",
+      "default": "./dist/mysql-business-fence.js"
+    },
     "./category-governance": {
       "types": "./dist/category-governance.d.ts",
       "default": "./dist/category-governance.js"
@@ -115,6 +123,12 @@
       ],
       "mysql-idempotency": [
         "dist/mysql-idempotency.d.ts"
+      ],
+      "mysql-idempotent-actions": [
+        "dist/mysql-idempotent-actions.d.ts"
+      ],
+      "mysql-business-fence": [
+        "dist/mysql-business-fence.d.ts"
       ],
       "category-governance": [
         "dist/category-governance.d.ts"

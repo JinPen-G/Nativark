@@ -10,6 +10,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 报价、价格、规则、检查和履约依据从原关联快照读取，修订与幂等键保护并发/重复操作，结果未知通过原操作核对。主事务和外部支付/通知执行点分别由原领域实现持有。
 
+[原动作执行器](rental-idempotent-action.service.ts)供给同一Prisma事务与幂等仓储，实际执行逻辑在Rental包。原 [Tenant共享父锁](rental-business-fence.ts)也转接同一实现；普通业务、企业及在途收尾继续沿当前授权与原业务入口调用。原收据只读、同键竞争、已证实写冲突重试和外部副作用边界保持。[动作实现](../../../../../packages/rental-core/src/mysql-idempotent-actions.ts) · [共享父锁实现](../../../../../packages/rental-core/src/mysql-business-fence.ts)
+
 品类解析、身份、空间能力服务及实例/审计仓储由 Rental 包持有。原 Nest provider 提供当前绑定、版本、范围和同一数据源接线，历史动作沿原版本引用，提交点继续传入原事务。采用业务和租赁领域链继续按原四册迁移及验收。[品类 provider](rental-category-resolver.service.ts) · [能力Hook](capability-hook.runtime.ts) · [空间能力](workspace-capability.service.ts) · [实例仓储](workspace-capability.repository.ts) · [Rental当前入口](../../../../../docs/Rental%20Core/Rental%20Core-协作接续.md) · [品类治理](../../../../../docs/Rental%20Core/品类治理/品类治理-协作接续.md)
 
 商品保存流程调用 Rental 包登记的专业属性校验，露营容量与工程载荷限制沿原规则执行。通用流程只传当前品类及已校验属性，专业规则从本模块的正式出口维护。[专业商品属性](../../../../../packages/rental-core/src/item-group-validation.ts)

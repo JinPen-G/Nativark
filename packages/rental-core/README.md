@@ -17,6 +17,7 @@
 | [空间能力仓储](src/workspace-capability-repository.ts)、[存储视图](src/workspace-capability-storage.ts) | `/workspace-capability-repository` 持有实例与生命周期审计读写，保留修订冲突、同事务初始化及原重试分类。宿主供给原空间解析、品类锁和同一数据源 |
 | [恢复快照](src/mysql-state.ts)、[快照存储视图](src/state-storage.ts) | `/mysql-state` 保存原空间恢复副本及行修订，保留参数化 SQL、当前品类绑定锁和调用方事务；恢复副本不替代正式业务事实或授权 |
 | [原操作收据](src/mysql-idempotency.ts)、[收据存储视图](src/idempotency-storage.ts) | `/mysql-idempotency` 按租户/空间/动作/原键读取结果，收据写入参与原业务事务；同键异输入冲突，未获安全保留依据时拒绝按年龄删除 |
+| [业务动作执行器](src/mysql-idempotent-actions.ts)、[事务端口](src/idempotent-action-storage.ts)、[共享父锁](src/mysql-business-fence.ts) | `/mysql-idempotent-actions` 协调原事务外预检/事务内重查与回放；`/mysql-business-fence` 保留Tenant共享锁，业务当前授权及副作用仍由原调用方处理 |
 | [审计仓储](src/capability-audit.ts)、[内置能力组合](src/capabilities/index.ts) | `/capability-audit` 通过本表窄端口写放行/拒绝审计和读历史，`/capabilities` 显式登记当前及兼容实现。原 Nest provider 供给同一数据源和调用方事务 |
 | [品类治理合同](src/category-governance.ts) | `/category-governance` 持有原发布、采用、准备和收据声明，原 shared 出口再导出同一对象 |
 | [品类解析](src/category-runtime.ts)、[只读存储端口](src/category-storage.ts) | `/category-runtime` 提供原发布正文校验、历史引用、推荐版本、当前空间绑定和开通选项。各方法只要求自己使用的事务读取项，绑定与采用权限由原调用者核验 |
@@ -42,5 +43,7 @@ npm run lint -w @rental-os/rental-core
 空间能力服务通过仓储的正式方法读当前实例、保存变更和初始化。保存继续核当前品类绑定、依赖、互斥及预期修订，实例和审计由同一事务提交。重复初始化只补缺项，保留管理员后来暂停或停用的状态。原 API 的服务与仓储 provider 供给同一实现。[原服务接线](../../apps/api/src/modules/rental-core/workspace-capability.service.ts) · [原持久适配](../../apps/api/src/modules/rental-core/workspace-capability.repository.ts)
 
 MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON runtime，不加载生成模型或实例化数据库客户端；领域总出口不加载这些适配。宿主提供本表的窄存储视图、真实范围解析及原事务。保存 Core 快照时传入已有事务，品类锁、行修订和原事件捕获一起提交；未传入时才由仓储按原 ReadCommitted 方式开事务。收据 `record` 必须传入业务事务，重试先读原键，缺收据保持未知。[原快照接线](../../apps/api/src/modules/rental-core/rental-state.repository.ts) · [原收据接线](../../apps/api/src/modules/rental-core/rental-idempotency.repository.ts)
+
+业务动作执行器接收原事务端口和幂等仓储。`executeInTransaction` 参与调用方已有事务，`readReceipt` 只读原操作；`executeWithReplayFlag` 区分首次提交与回放，通知等外部副作用由原调用者处理。唯一约束竞争读原赢家，已证实写冲突按原键有限重试，未分类错误原样抛出。Tenant共享锁保留原企业政策的并发围栏，不替代当前角色、Core准入或业务对象授权。[原动作接线](../../apps/api/src/modules/rental-core/rental-idempotent-action.service.ts)
 
 必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。拆前合同与运行时导出按固定 Git 对照，实际证据和剩余边界沿 PCH 记录维护。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs) · [PCH 记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-rental-domain-package-20261115)

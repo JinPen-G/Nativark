@@ -11,6 +11,24 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-action-transactions-20261116"></a>
+
+## Rental 业务动作事务执行器与共享父锁迁移（2026-11-16）
+
+固定父版 `e99dc2e5d3711ca31d082c12fa2df7b5ef64855a` 已普通推送并真实远端回读，main仍为62ca并在任务分支祖先。本片将原业务动作执行器及Tenant共享父锁实际移入Rental包，旧API路径保留窄Nest provider和正式再导出。原API供给同一Prisma事务与幂等仓储，Nest继续只登记一个执行者。[动作实现](../../../packages/rental-core/src/mysql-idempotent-actions.ts) · [私有事务端口](../../../packages/rental-core/src/idempotent-action-storage.ts) · [共享父锁](../../../packages/rental-core/src/mysql-business-fence.ts) · [原provider](../../../apps/api/src/modules/rental-core/rental-idempotent-action.service.ts)
+
+`/mysql-idempotent-actions` 保留事务外预检、事务内重查、原收据只读、回放与首次提交区分，以及唯一约束/写冲突/业务冲突的原处理；`executeInTransaction` 只参与调用者现有事务。`/mysql-business-fence` 保留原Tenant共享父锁与企业政策写入围栏，当前身份、Core准入、角色及业务对象授权仍由原链裁定。原事务端口仅声明实际使用的ReadCommitted能力，生成模型及全库客户端不进入公共Core合同。原5个执行方法与1个父锁函数的编译后正文对照父版一致，仅变更私有事务接点和原runtime别名。原重试次数3/退避25ms保持，修正与现实现不一致的“一轮”和mock通知注释。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 正式配置与当前schema的内存编译 | 公共合同5根/199源/10输出，Rental34根/580源/68输出，shared122根/340源/245输出，完整API988根/2274源/1976输出，均0诊断。共十项配置通过，当前238模型仍由锁定Prisma5.22官方WASM/generator在内存供给 |
+| 原履约/收据直接消费者 | `node --no-compilation-cache - api-actions tests/rental-service-execution.test.cjs` 退出0，原17项全部通过，stderr为空；原同键事务窗口、丢响应、后继状态、当前范围、原段/篡改/unknown和客户端操作定位断言保持 |
+| 未覆盖错误与事务边界 | 短stdin使用本版实际JS与原runtime错误类，7项通过、退出0。P2002读取原赢家并核指纹，异输入不回放；P2034最多4次事务尝试且保留原键，已提交赢家不二次执行；未分类unknown保留原错误并只尝试一次；现有事务无嵌套提交，收据失败抛给原调用者；缺Tenant拒绝。存储/事务是明确fixture |
+
+实际包出口、源码职责头、Rental/原业务导读和根README同片维护。7份定向文档872个本地链接/198个锚点/76个表格核对通过，0个问题，未检出目标以固定Git定位。当前两份旧企业组合用例有自己的离线preload/写入围栏及封闭源码加载器，本片没有运行或冒称其通过；完整企业/AI及历史消费者仍按最终功能对照核收。原需求/任务及进度保持，完整Rental初始化/配置/事实仓储、数据/迁移/Seed、页面/作业/AI标准装配及公共组织/订阅/集成继续交付，未跨下一档。
+
+本片没有新增测试脚本、依赖环境、临时文件或后台业务服务，全部编译/直接检查产物留内存。真实MySQL/HTTP/浏览器、干净标准包安装、独立更新/回退、独立接手及独立审查仍未验。旧统一临时环境删除仍由[快照阶段](#core-rental-recovery-receipts-20261116)的责任清单和审批拒绝处理，旧外观静态失败及历史附件缺失保留。下一入口为持久配置/事实仓储及完整业务装配，继续同步简明接入资料。
+
 <a id="core-rental-recovery-receipts-20261116"></a>
 
 ## Rental 恢复快照与原操作收据迁移（2026-11-16）
