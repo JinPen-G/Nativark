@@ -29,7 +29,7 @@ import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-reco
 import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
   type AiClientHostCapabilities } from '@rental-os/shared';
-import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
+import { AiClientEntryError, assertEntryAction, clientEntrySurface, clientMaterialSnapshotHash, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
 import { composeClientMaterialTasks, clientTaskEventsCommandSchema } from './client-task.composition';
 import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
 import { composeClientOriginalTaskModelHost, composeClientOriginalTaskInputReader } from './client-task-model-host.composition';
@@ -221,14 +221,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (!identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
     return originalClientMaterialScope(identity, server.channel, server.appId);
   };
-  const materialHash = (command: Command, value: unknown) => {
-    if (command.kind === 'cancellation_preview' && value && typeof value === 'object' && 'calculatedAt' in value) {
-      // A new observation time alone does not change the estimated cancellation fee.
-      const { calculatedAt: _observation, ...facts } = value;
-      return requestFingerprint(facts);
-    }
-    return requestFingerprint(value);
-  };
+  const materialHash = (command: Command, value: unknown) => clientMaterialSnapshotHash(command.kind, value);
   const readMaterial = async (bound: Bound, command: Command) => {
     let value: unknown;
     switch (command.kind) {

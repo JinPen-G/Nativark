@@ -6,6 +6,36 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry17-material-retention-whole-closeout-20261116"></a>
+## ENTRY-17 原材料保留、取消预览兼容及全文核定（2026-11-16）
+
+固定前置 `736c0787528c6777d91b7952e6d30588f2b2e3fa` 已普通推送并回读GitHub，包含[客户原定位与合法unknown观察](#ain-entry17-client-original-locator-fixed-20261116)。本片核入dev1已交回的原材料维护实现，并修复Root发现的取消预览哈希回归。当前三份冻结源码依次为[原维护服务](../../apps/api/src/modules/ai-native/privacy/retention.service.ts) `dd9678e87f652b4ac269ac50a9467ab891a7f2f5`、[客户共用工具](../../apps/api/src/modules/ai-native/scenes/client-entry-action.ts) `4a63966120ebbe7defb2d83cccf0a08d3bbe0d09`、[原客户reader](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts) `33cc3dcd059cc6c23f08ddf7471257d31447ebaf`。原维护前像 `6a2f83cee2bfe4cb2523a172674336488b10d923`、两处独立反例前像 `d1d45ec509f148a81551eaae044601f5baddd64d` 和作者修后 `f6a4db6306c526ea52249a495b8f885e7fbd3bf5` 在Git保留。
+
+维护在原材料及Draft受理／提交锁内核当前owner、原命令／材料／派生键和连续revision。普通Goal／prepare的调用方自选前缀与终止Draft不再单独形成永久hold；真实acceptance／attempt、submitted、转接未决、关联Task／财务未决继续保留。缺select2、handoff提前、selectionRevision／selectedAt矛盾或失效CAS不连续时拒绝清正文。正文CAS、原删除收据、scope／targetHash和可信恢复许可沿原事务；可信删除标记可重放到较旧活跃Draft备份，原业务收据、ID、hash及账目保留。
+
+Root发现作者f6a候选以完整material计算hash，而原取消预览排除calculatedAt。合法30天旧材料因此被误判为hold。现将原规则原样提取为clientMaterialSnapshotHash，原生产／验证与维护共同复用；只排除该类材料的查询时点，费用事实、其他材料种类及原输入hash保持原规则。
+
+| 必要验证 | 固定stdin SHA-256及实际结果 |
+| --- | --- |
+| 作者原材料维护／恢复及两处P2 | `51844ed0a493a04cde5cf7af803d780936435833a2c3b2bd87131933357831af`，退出0。原13组加普通前缀／缺历史反例与合法终止序列，共16组；原维护、材料／Booking仓储、SecretBox及可信恢复实现实际执行，SQL／发布事实为原有界夹具。author f6a范围，不升级为真实数据库删除或恢复。 |
+| 作者材料两根类型 | `3bf9532080c939140c5007ffd2036d415c14e92fcb82ae90acb3877c7ed837ab`，退出0，TypeScript5.9.3、2根／1609源零诊断。 |
+| 取消预览合法旧hash兼容 | `89d78a26df4463906ec6ebf8ca89c09917dcd14c50515932353bc38392e5f0ce`，退出0。从736固定生产者提取实际ArrowFunction计算旧hash；f6a完整维护helper拒绝合法旧材料，当前helper允许。仅calculatedAt变化允许，estimatedFee变化继续hold，其他材料hash与原规则一致。实际原材料仓储／SecretBox执行，6次有限scope绑定SQL读、业务／模型写入0。仅受影响资格helper复验，全维护Auth／CAS／恢复沿上一行固定证据。 |
+| 整合后六源类型 | `2b09a60ac446b2e36e6f00baf932149bf70eb6a527a9ba5f759925c8d62f2cad`，退出0。registered入口、客户标准宿主／审计叶、维护服务及本片客户两源，6根／1644源、126份内存shared声明，noEmit零诊断。修hash前四根类型 `7cab9c79f03eebade8b945d2d26d8c37c7c5c81d881455b2d166d817896104c9` 同为退出0，未用其证明后继改动。 |
+
+首次接续按LF段落定位时遇原CRLF而停止，记录已写、接续未写；按原换行核定后仅更新当前目标及归属。作者命令为 `node --no-compilation-cache -`；Root两组命令为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`。均沿本树原offline preload、固定不可达DB和纯内存audit；原测试文件未新增或扩写。作者前像反例stdin `2f312bb542dbbe97f9ec73c745f7cd6e8f8d9b286949031fb2ce890a4d51cff2` 已记录普通前缀被hold及缺select2仍被擦除，实际退出码待读取原执行证据。Root hash前像反例与修后结论在同一已退出0驱动中核对。
+
+entry_closeout_fallback独立只读核同三叶散列，逐分支核原736生产者规则与本片共用hash一致；生产、验证及维护统一，30天／owner／锁／合法历史／受理及未决hold／恢复许可／targetHash均保留，本片无新增P1／P2。原注册Action观察、客户原操作关联和材料完整生命周期的独立核定也已交回。
+
+| ENTRY-17原条款 | 全文核定及原依据 |
+| --- | --- |
+| 入口证据分级 | 各端契约、离线服务、仓储／事务替身、宿主、类型及未实测环境沿原阶段分别留证；本片明确作者完整维护与Root资格helper的验证范围。真实数据库、浏览器、微信及供应商仍交负责人。 |
+| 原审计及操作关联 | [原Action及拒绝观察](#ain-entry17-refusal-observation-fixed-20261116)、[丢ACK修复](#ain-entry17-observation-attempt-fixed-20261116)与[客户原收据](#ain-entry17-client-original-locator-fixed-20261116)共用原租户OperationLog，记录audience／surface／契约／原Task、Action、Draft及拒绝／unknown定位；原[测量与成本](#ain25-measurement-cost-rollback-whole-20261114)核延迟、资源及单账，未采集指标明确为空。 |
+| 隐私生命周期 | [原24平台／员工删除恢复](#ain24-platform-inspection-expiry-whole-closeout-20261115)、[严格客户端存储](#ain-entry15-original-storage-recovery-20261115)、通知／profile固定传播及本片客户材料边界，普通到期正文可清、原业务与未决证据hold、当前读取撤回和可信备份重放成立。 |
+
+G1原证据／审计／隐私基线、G2原服务实现、G3实际四端／标准宿主及维护工厂、G4原三条全文、必要模拟／类型、修复复验和独立核定已齐，Root将ENTRY-17从75%更新100%。ENTRY增量18／18完成，与原08形成两项固定main节点；原AIN-15／26／27／28继续原范围及依赖核定。该节点由本节三源、任务册和原两册同片提交组成，包含736客户与be96观察固定前置，main由PM按原索引写权串行整合。自有Root作业5124／3216／40572均退出0，作者自有进程已退出；audit为空，两任务临时根未创建，无新增客户端缓存、统计账本或临时残留。真实数据库、浏览器、微信及供应商由负责人后续操作。
+
+原文档检查实际调用validate-docs.check，修后stdin `9d6f9f17af9d8a72ea28c79f0377658d9bf5d0c481cb10d5dedc3f720b19709d` 退出1，仅原导航三处缺历史附件与稀疏界面示例一处缺链；本节新增链接0错误、7个同文锚点实核存在、任务算术0错误。初次内存驱动字符串转义损坏，stdin `11995f04cd113dbc6749b42deec8924ba0e85bdd90af2e201675f8c7df023034` 退出3221226505，在校验器执行前停止；改为原样字符串后得到上述实核结果，未改检查规则或伪造附件。git diff --check退出0。
+
 <a id="ain-entry17-client-original-locator-fixed-20261116"></a>
 ## ENTRY-17 客户 unknown 原操作关联及正常返回观察（2026-11-16）
 
