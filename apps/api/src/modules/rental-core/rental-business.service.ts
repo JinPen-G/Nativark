@@ -5077,7 +5077,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async createQuoteForOriginalOperation(tenantId: string, context: BusinessContext, value: RentalQuoteRequest,
-    proof: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1> {
+    proof: RentalQuoteOriginalOperation, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>): Promise<RentalQuoteSnapshotV1> {
     const input = structuredClone(value), currentContext = structuredClone(context),
       original = Object.freeze({ key: proof?.key, inputHash: proof?.inputHash });
     if (!/^[a-f0-9]{64}$/u.test(original.key ?? '') || original.inputHash !== requestFingerprint(input))
@@ -5090,7 +5090,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (!state.quotes.some(row => row.id === stored.id)) state.quotes.unshift(stored);
       return stored;
     }
-    return this.createQuote(tenantId, currentContext, input, undefined, original);
+    return this.createQuote(tenantId, currentContext, input, undefined, original, beforePersist);
   }
 
   async readQuoteForOriginalOperation(tenantId: string, proof: RentalQuoteOriginalOperation) {
@@ -5105,7 +5105,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
-    original?: RentalQuoteOriginalOperation) {
+    original?: RentalQuoteOriginalOperation, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>) {
     await this.refreshWorkspaceContext(tenantId, context);
     const sourceSnapshot = currentQuoteSource(tenantId);
     if (original) {
@@ -5888,7 +5888,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     let persisted = quote;
     if (original) {
       if (!this.factStore.saveQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作持久化不可用');
-      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding);
+      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding, beforePersist);
     } else await this.factStore.upsertQuote(quote, expectedBinding);
     // 缓存只在成功提交之后发布；并发采用新版造成拒绝时不能留下幽灵报价。
     if (!state.quotes.some(row => row.id === persisted.id)) state.quotes.unshift(persisted);

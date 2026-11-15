@@ -15,6 +15,7 @@ import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
   type ClientTaskCancellationOrigin, type ClientTaskCancellationView } from './client-task-cancellation-session';
 import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
 import { ClientSceneCatalog } from './ClientSceneCatalog';
+import { ClientOriginalQuoteFacts } from './ClientOriginalQuoteFacts';
 
 const initial = (): ClientGoalView => ({ status: 'closed', hasLocator: false, task: null, question: null, receipt: null,
   projection: null, sources: null, selection: null, quote: null, canExtract: false, canRead: false, canSubmit: false,
@@ -231,7 +232,6 @@ export function ClientGoalPicker(props: {
     setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
   });
   const selectedLabel = (field: string, id?: string) => optionsFor(projection, field).find(option => option.id === id)?.label ?? id ?? (en ? 'Not selected' : '未选择');
-  const money = (amount: number | null) => amount === null || !view.quote?.currency ? (en ? 'Unavailable' : '未提供') : `${amount} ${view.quote.currency}`;
   const choose = (field: string, value: string, label: string, change: (value: string) => void, kind?: 'unit' | 'mode') => {
     const options = optionsFor(projection, field), group = projection?.choices.find(row => row.field === field);
     return <label className="booking-field">{label}<select value={value} disabled={working || !view.canPrepareQuote || options.length === 0}
@@ -334,9 +334,7 @@ export function ClientGoalPicker(props: {
     {!submitted && view.status === 'prepared' && <QuoteParameterReview review={view.parameterReview ?? null} english={en} />}
     {!submitted && view.canConfirmQuote && <><p>{en ? 'Parameters are prepared. Confirm separately to obtain the original quote.' : '参数已准备，请另行确认取得原报价。'}</p>
       <button type="button" className="button button-dark button-block" disabled={working} onClick={() => void work(instance => instance.confirmQuote())}>{en ? 'Confirm parameters and get quote' : '确认参数并取得报价'}</button></>}
-    {view.quote && <><h4>{en ? 'Original quote' : '原报价'}</h4><dl><dt>{en ? 'Payable' : '应付'}</dt><dd>{money(view.quote.payableAmount)}</dd>
-      <dt>{en ? 'Deposit' : '押金'}</dt><dd>{money(view.quote.depositAmount)}</dd><dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{money(view.quote.preAuthAmount)}</dd></dl>
-      <p>{en ? 'The original quote does not attest order creation, payment or resource reservation. Check booking submission through its original receipt.' : '原报价不代表建单、付款或资源预占；预约提交请核对原收据。'}</p></>}
+    <ClientOriginalQuoteFacts quote={view.quote} observedAt={view.quoteObservedAt} english={en} />
     {!submitted && view.canSelect && (!bookingView || bookingView.canPrepare || bookingView.canSave) && <button type="button" className="button button-dark button-block"
       disabled={working || Boolean(bookingView?.readOnly)} onClick={() => void generateBooking()}>{en ? 'Generate reservation draft from this quote' : '按原报价生成预约草稿'}</button>}
     {submitted && <p role="status" aria-live="polite">{en ? 'The original booking request was submitted. Check the original business result; payment, fulfillment and resource status require their original receipts.' : '原预约请求已提交，业务结果待核对；付款、履约和资源状态以原业务收据为准。'}</p>}

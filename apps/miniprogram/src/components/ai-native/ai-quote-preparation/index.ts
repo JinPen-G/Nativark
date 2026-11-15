@@ -13,6 +13,7 @@ import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
   type ClientQuoteContext, type ClientQuoteView, type ClientQuoteBookingView } from '../client-quote-session';
 import { projectBookingDraftReview, projectQuoteParameterReview, type BookingDraftReview } from '../booking-draft-review';
+import { projectClientOriginalQuoteFacts } from '../client-original-quote-facts';
 
 type Quote = ReturnType<typeof createClientQuoteSession>;
 type Booking = ReturnType<typeof createClientQuoteBookingSession>;
@@ -28,7 +29,7 @@ Component({
   properties: { selection: { type: Object, value: null }, scopeKey: { type: String, value: '' }, timeZone: { type: String, value: '' }, paused: { type: Boolean, value: false } },
   data: { ...initial, working: false, error: false, booking: null as ClientQuoteBookingView | null,
     bookingReview: null as BookingDraftReview | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>, canOrdinary: false,
-    bookingSubmitted: false, bookingNotSubmitted: false },
+    bookingSubmitted: false, bookingNotSubmitted: false, originalQuote: null as ReturnType<typeof projectClientOriginalQuoteFacts> },
   lifetimes: { attached() { visible.add(this); generations.set(this, 1); }, detached() { visible.delete(this); this.invalidateQuote(); } },
   pageLifetimes: { show() { visible.add(this); }, hide() { visible.delete(this); this.invalidateQuote(); } },
   observers: { 'scopeKey, paused'() { this.invalidateQuote(); } },
@@ -38,7 +39,7 @@ Component({
       quotes.get(this)?.dispose(); bookings.get(this)?.dispose(); quotes.delete(this); bookings.delete(this); bindings.delete(this);
       releases.get(this)?.(); releases.delete(this);
       this.setData({ ...initial, working: false, error: false, booking: null, bookingReview: null, parameterReview: null, canOrdinary: false,
-        bookingSubmitted: false, bookingNotSubmitted: false });
+        bookingSubmitted: false, bookingNotSubmitted: false, originalQuote: null });
     },
     reportMode(nextQuote?: ClientQuoteView, nextBooking?: ClientQuoteBookingView | null) {
       const binding = bindings.get(this); if (!binding?.context.current()) return;
@@ -72,6 +73,7 @@ Component({
         readHost: readBookingHostCapabilities, selection: () => { if (!this.data.selection) throw Error('quote_selection_unavailable'); return this.data.selection as ClientCreateQuoteRequest; },
         storage: { read: () => read(key), write: value => writeRequiredStorage(key, value) },
         changed: state => { if (context.current()) { this.setData({ ...state,
+          originalQuote: projectClientOriginalQuoteFacts(state.quote, state.quoteObservedAt),
           parameterReview: state.status === 'prepared' ? projectQuoteParameterReview(state.material?.parameterReview ?? null) : null });
           this.reportMode(state); } } });
       quotes.set(this, instance); bindings.set(this, { key, context }); releases.set(this, sessionEvents.on(() => this.invalidateQuote()));

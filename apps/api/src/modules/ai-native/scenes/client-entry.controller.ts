@@ -140,19 +140,33 @@ export class AiClientEntryController {
       const facts = raw as Record<string, unknown>;
       const lines = facts.chargeLines;
       if (lines !== undefined && lines !== null && (!Array.isArray(lines) || lines.length > 100)) throw new AiClientQuoteResultUnknownError();
+      const request = facts.request && typeof facts.request === 'object' && !Array.isArray(facts.request)
+        ? facts.request as Record<string, unknown> : null;
+      const originalLines = request?.lines;
+      if (originalLines !== undefined && originalLines !== null && (!Array.isArray(originalLines) || originalLines.length > 100))
+        throw new AiClientQuoteResultUnknownError();
+      const pricingContext = facts.pricingContext && typeof facts.pricingContext === 'object' && !Array.isArray(facts.pricingContext)
+        ? facts.pricingContext as Record<string, unknown> : null;
       quote = { quoteId: facts.id, currency: facts.currency ?? null, payableAmount: facts.payableAmount ?? null,
         depositAmount: facts.depositAmount ?? null, preAuthAmount: facts.preAuthAmount ?? null,
         pricingPlanVersion: facts.pricingPlanVersion ?? null, ruleVersion: facts.ruleVersion ?? null,
         priceVersionId: facts.priceVersionId ?? null, calendarVersion: facts.calendarVersion ?? null,
         categoryVersionId: facts.categoryVersionId ?? null, createdAt: facts.createdAt ?? null, expiresAt: facts.expiresAt ?? null,
+        timeZone: pricingContext?.timeZone ?? null,
+        lineUnits: Array.isArray(originalLines) ? originalLines.map((line, lineIndex) => {
+          if (!line || typeof line !== 'object' || Array.isArray(line)) throw new AiClientQuoteResultUnknownError();
+          const item = line as Record<string, unknown>;
+          return { lineIndex, itemGroupId: item.itemGroupId ?? null, pricingUnit: item.pricingUnit ?? null,
+            quantity: item.quantity ?? null, usageQuantity: item.usageQuantity ?? null };
+        }) : null,
         chargeLines: Array.isArray(lines) ? lines.map(line => {
           if (!line || typeof line !== 'object' || Array.isArray(line)) throw new AiClientQuoteResultUnknownError();
           const item = line as Record<string, unknown>;
-          return { type: item.type, amount: item.amount, sourceId: item.sourceId ?? null, sourceVersion: item.sourceVersion ?? null };
+          return { type: item.type, name: item.name ?? null, amount: item.amount, sourceId: item.sourceId ?? null, sourceVersion: item.sourceVersion ?? null };
         }) : null };
     }
     const response = aiClientQuoteResultReadResponseSchema.safeParse({ contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION,
-      state: quote === null ? 'unknown' : 'observed', source: result?.source, quote,
+      state: quote === null ? 'unknown' : 'observed', source: result?.source, quote, observedAt: new Date().toISOString(),
       quotePersistence: quote === null ? 'unknown' : 'saved', inventoryReservation: 'not_attempted',
       orderExecution: 'not_attempted', confirmation: 'parameters_only_not_order_approval', retryable: false,
       nextAction: 'read_original_quote' });

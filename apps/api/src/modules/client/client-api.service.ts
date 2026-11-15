@@ -1030,7 +1030,7 @@ export class ClientApiService {
    * HTTP route. The caller must use current ClientGuard and prove the originating
    * request/explicit selection; the reference itself grants no authority. */
   async createQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest, reference: string,
-    prepared?: { inputHash: string; configurationHash: string }) {
+    prepared?: { inputHash: string; configurationHash: string }, beforePersist?: (native: Prisma.TransactionClient) => Promise<void>) {
     context = structuredClone(context); input = structuredClone(input);
     prepared = prepared && structuredClone(prepared);
     const key = this.clientQuoteOriginalKey(context, reference);
@@ -1044,7 +1044,13 @@ export class ClientApiService {
       || prepared.configurationHash !== requestFingerprint(business))) throw new ConflictException('报价准备依据已变化，请重新确认');
     this.clientQuoteOriginalKey(context, reference);
     const quote = await this.business.createQuoteForOriginalOperation(context.tenantId, business, normalized,
-      { key, inputHash: requestFingerprint(normalized) });
+      { key, inputHash: requestFingerprint(normalized) }, beforePersist ? async native => {
+        // This callback is supplied only by an internal server host. HTTP input
+        // cannot provide it; original receipt reads never invoke it.
+        this.clientQuoteOriginalKey(context, reference);
+        await beforePersist(native);
+        this.clientQuoteOriginalKey(context, reference);
+      } : undefined);
     this.clientQuoteOriginalKey(context, reference);
     if (quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId
       || requestFingerprint(quote.request) !== requestFingerprint(normalized)) throw new ConflictException('报价原操作依据不一致');

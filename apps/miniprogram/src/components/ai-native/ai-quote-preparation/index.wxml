@@ -46,11 +46,29 @@
   <view wx:if="{{booking.draft && !bookingSubmitted && !bookingNotSubmitted && booking.status !== 'unknown' && booking.status !== 'checking'}}" class="mt-16" role="status">原草稿当前不可用于提交，请核对原记录或联系商户。</view>
   <view wx:if="{{booking.draft}}" class="mt-8" style="overflow-wrap:anywhere;word-break:break-word;">原草稿／修订：{{booking.draft.bookingDraftId}} / {{booking.draft.revision}}</view>
   <view wx:if="{{booking.observed && !booking.draft && !booking.handoff}}" class="mt-16">原草稿或交接操作已记录；预约受理、提交和业务结果仍须核对原收据。</view>
-  <block wx:if="{{quote}}">
-    <view class="kv mt-16"><view>应付</view><view wx:if="{{quote.payableAmount !== null && quote.currency}}"><money-text amount="{{quote.payableAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
-    <view class="kv mt-8"><view>押金</view><view wx:if="{{quote.depositAmount !== null && quote.currency}}"><money-text amount="{{quote.depositAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
-    <view class="kv mt-8"><view>预授权</view><view wx:if="{{quote.preAuthAmount !== null && quote.currency}}"><money-text amount="{{quote.preAuthAmount}}" currency="{{quote.currency}}"></money-text></view><view wx:else>未加载</view></view>
-  </block>
+  <view wx:if="{{originalQuote}}" class="body mt-16" aria-label="原报价事实与来源" style="overflow-wrap:anywhere;word-break:break-word;">
+    <view class="subtitle">{{originalQuote.title}}</view>
+    <view class="kv mt-8"><view>报价编号</view><text selectable="true">{{originalQuote.quoteId}}</text></view>
+    <view class="kv mt-8"><view>币种</view><view>{{originalQuote.currency}}</view></view>
+    <view class="kv mt-8"><view>原报价时区</view><view>{{originalQuote.timeZone}}</view></view>
+    <view wx:for="{{originalQuote.amounts}}" wx:key="key" class="kv mt-8"><view>{{item.label}}</view><view>{{item.value}}</view></view>
+    <view wx:for="{{originalQuote.references}}" wx:key="key" class="kv mt-8"><view>{{item.label}}</view><view>{{item.value}}</view></view>
+    <view wx:for="{{originalQuote.times}}" wx:key="key" class="kv mt-8"><view>{{item.label}}</view><view>{{item.value}}</view></view>
+    <view class="subtitle mt-16">{{originalQuote.pricingTitle}}</view>
+    <view wx:if="{{!originalQuote.pricingLines.length}}" class="mt-8">{{originalQuote.pricingMissing}}</view>
+    <view wx:for="{{originalQuote.pricingLines}}" wx:key="key" class="mt-16">
+      <view>商品引用：{{item.itemGroupId}}</view><view>数量：{{item.quantity}} · 计费单位：{{item.unit}}</view>
+      <view>使用量：{{item.usageQuantity}}</view>
+    </view>
+    <view class="subtitle mt-16">{{originalQuote.chargesTitle}}</view>
+    <view wx:if="{{!originalQuote.charges.length}}" class="mt-8">{{originalQuote.chargesMissing}}</view>
+    <view wx:for="{{originalQuote.charges}}" wx:key="key" class="mt-16">
+      <view class="kv"><view>{{item.label}}</view><view>{{item.amount}}</view></view>
+      <view>分项类型：{{item.type}}</view>
+      <view class="mt-8">来源引用：{{item.sourceId}}</view><view>来源版本：{{item.sourceVersion}}</view>
+    </view>
+    <view class="mt-16">{{originalQuote.note}}</view>
+  </view>
   <view wx:if="{{error || status === 'unavailable' || booking.status === 'unavailable'}}" class="notice notice--warning mt-16">当前暂不可用，请保留已有引用并核对原结果。</view>
   <button wx:if="{{!bookingSubmitted && canOrdinary}}" class="btn btn--block mt-16" bindtap="onOrdinary" disabled="{{working}}">继续普通预约</button>
 </view>

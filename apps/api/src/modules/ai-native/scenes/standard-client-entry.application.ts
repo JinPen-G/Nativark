@@ -155,7 +155,20 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
       };
       const before = await select();
       check();
+      const revalidateQuotePublication = async () => {
+        check();
+        const current = await select();
+        check();
+        // Bootstrap's public service summary is narrower than the standard
+        // channel/profile/website publication. Carry this exact request's full
+        // revision to the original quote INSERT, after Core preparation waits.
+        if (current.releaseRevision !== before.releaseRevision
+          || requestFingerprint(current.identity) !== requestFingerprint(before.identity)) {
+          throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_publication_changed');
+        }
+      };
       const application = composeRequestBoundClientApplication({ ...input,
+        revalidateQuotePublication,
         tasks: { db: input.db, subscriptions: input.tasks!.subscriptions, sceneCode, sceneVersion },
         bookingTransfer: { db: input.db, publication: (identity, originalChannel, create) =>
           readStandardClientEntryPublication(input.db, identity, originalChannel,

@@ -21,5 +21,6 @@ export function displayTime(value: unknown): string {
   const date = new Date(value); return Number.isNaN(date.getTime()) ? "时间不可用" : date.toISOString();
 }
 export function boundedText(value: unknown, limit = 4000): string {
-  return typeof value === "string" ? Array.from(value).slice(0, Math.min(10000, Math.max(0, limit))).join("").replace(/[\u202A-\u202E\u2066-\u2069]/g, "") : "内容不可用";
+  // Preserve the original character bound, whitespace and literal input text.
+  return typeof value === "string" ? Array.from(value).slice(0, Math.min(10000, Math.max(0, limit))).join("").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, "") : "内容不可用";
 }

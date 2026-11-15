@@ -33,6 +33,8 @@ export function composeClientOriginalQuotePreparation(input: {
   client: Pick<ClientApiService, 'prepareQuoteForOriginalOperation' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
   tasks: AiClientTaskDependencies; channel: 'web' | 'wechat_miniprogram'; tenantCode: string; serviceCode: string;
   clock?: () => Date;
+  /** Request-local publication/lifecycle check, never a wire or model grant. */
+  assertCurrent?(): Promise<void>;
 }) {
   const enabled = input.enabled === true, clock = input.clock ?? (() => new Date());
   const scene = clientTaskSceneSchema.parse({ sceneCode: input.tasks.sceneCode, sceneVersion: input.tasks.sceneVersion });
@@ -242,7 +244,25 @@ export function composeClientOriginalQuotePreparation(input: {
       await check(bound);
       if ((await grant(bound, 'execute')).policyHash !== permission.policyHash || row.expiresAt <= clock()) throw stale();
       const result = await quotes.create({ reference: `${row.id}:${row.materialHash}`, input: material.input,
-        prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } });
+        prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } }, async native => {
+        // The same original quote transaction calls after all internal Core
+        // waits. Pin this material, attempt and policy, then close current Auth,
+        // publication and execution admission; an old attempt never re-dispatches.
+        const source = await repository.findOperation(bound.scope, row.operationKey, native, true);
+        const attempt = await repository.findOperation(bound.scope, operationKey, native, true);
+        const subject = { ...bound.scope, identity: bound.identity };
+        const lockedPolicy = await authority.policy(subject, 'execute', native, true);
+        if (!source || !attempt || requestFingerprint(canonical(source)) !== requestFingerprint(canonical(row))) throw stale();
+        assertAttempt(attempt, row, material);
+        await check(bound); await input.assertCurrent?.();
+        const final = await grant(bound, 'execute');
+        await check(bound); await input.assertCurrent?.();
+        // No awaited Guard or publication read follows this deadline check
+        // before the originating Core transaction initiates its INSERT.
+        if (final.policyHash !== permission.policyHash
+          || requestFingerprint(canonical(final.policy)) !== requestFingerprint(canonical(lockedPolicy))
+          || row.expiresAt <= clock() || final.policy.expiresAt <= clock()) throw stale();
+      });
       await check(bound);
       if ((await grant(bound, 'execute')).policyHash !== permission.policyHash) throw denied();
       return { ...result, source: { materialRef: row.id, materialHash: row.materialHash },

@@ -63,7 +63,29 @@
     </view>
   </view>
   <button wx:if="{{!bookingSubmitted && view.canConfirmQuote}}" class="btn btn--primary btn--block mt-16" bindtap="onConfirmQuote" disabled="{{working}}">确认参数并取得原报价</button>
-  <view wx:if="{{view.quote}}" class="goal-picker__field"><view>原应付</view><money-text amount="{{view.quote.payableAmount}}" currency="{{view.quote.currency}}"></money-text><view class="mt-8">押金</view><money-text amount="{{view.quote.depositAmount}}" currency="{{view.quote.currency}}"></money-text><view class="body mt-8">报价不代表订单、付款或资源已预占。</view></view>
+  <view wx:if="{{originalQuote}}" class="goal-picker__field" aria-label="原报价事实与来源" style="overflow-wrap:anywhere;word-break:break-word;">
+    <view class="subtitle">{{originalQuote.title}}</view>
+    <view class="kv mt-8"><view>报价编号</view><text selectable="true">{{originalQuote.quoteId}}</text></view>
+    <view class="kv mt-8"><view>币种</view><view>{{originalQuote.currency}}</view></view>
+    <view class="kv mt-8"><view>原报价时区</view><view>{{originalQuote.timeZone}}</view></view>
+    <view wx:for="{{originalQuote.amounts}}" wx:key="key" class="kv mt-8"><view>{{item.label}}</view><view>{{item.value}}</view></view>
+    <view wx:for="{{originalQuote.references}}" wx:key="key" class="kv mt-8"><view>{{item.label}}</view><view>{{item.value}}</view></view>
+    <view wx:for="{{originalQuote.times}}" wx:key="key" class="kv mt-8"><view>{{item.label}}</view><view>{{item.value}}</view></view>
+    <view class="subtitle mt-16">{{originalQuote.pricingTitle}}</view>
+    <view wx:if="{{!originalQuote.pricingLines.length}}" class="mt-8">{{originalQuote.pricingMissing}}</view>
+    <view wx:for="{{originalQuote.pricingLines}}" wx:key="key" class="mt-16">
+      <view>商品引用：{{item.itemGroupId}}</view><view>数量：{{item.quantity}} · 计费单位：{{item.unit}}</view>
+      <view>使用量：{{item.usageQuantity}}</view>
+    </view>
+    <view class="subtitle mt-16">{{originalQuote.chargesTitle}}</view>
+    <view wx:if="{{!originalQuote.charges.length}}" class="mt-8">{{originalQuote.chargesMissing}}</view>
+    <view wx:for="{{originalQuote.charges}}" wx:key="key" class="mt-16">
+      <view class="kv"><view>{{item.label}}</view><view>{{item.amount}}</view></view>
+      <view>分项类型：{{item.type}}</view>
+      <view class="mt-8">来源引用：{{item.sourceId}}</view><view>来源版本：{{item.sourceVersion}}</view>
+    </view>
+    <view class="mt-16">{{originalQuote.note}}</view>
+  </view>
   <button wx:if="{{!bookingSubmitted && view.canSelect && (!booking || booking.canPrepare || booking.canSave)}}" class="btn btn--primary btn--block mt-16" bindtap="onGenerateDraft" disabled="{{working}}">使用原报价生成预约草稿</button>
   <view wx:if="{{bookingSubmitted}}" class="notice mt-16" role="status" aria-live="polite">原预约请求已提交，业务结果待核对；付款、履约和资源状态以原业务收据为准。</view>
   <view wx:if="{{bookingNotSubmitted}}" class="body mt-16" role="status">原预约草稿尚未提交预约请求；订单和资源状态以原业务收据为准。</view>

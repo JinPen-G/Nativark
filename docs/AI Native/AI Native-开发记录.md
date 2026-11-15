@@ -6,6 +6,44 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry03-07-quote-publication-whole-closeout-20261115"></a>
+## ENTRY-03／07 原报价保存前发布复核与完整事实消费收口（2026-11-15）
+
+前置员工阶段 `8801570df63d7af54c183ba838766e9a8819038a` 已普通推送，GitHub独立回读一致。原 ENTRY-03／07 完整目标到 Booking 主链已经装配，独立全文复核发现两个P2：参数确认最后一次校验之后，Client与Core还有配置、资格、能力／库存和锁等待，期间原AI政策撤销或材料到期仍可保存报价；公开报价观察丢单位／查询时间，四个客户报价卡未消费分项和原版本。本片只补原链，不新增模型、预约办理或计价系统。
+
+保存屏障是仅服务端的可选 beforePersist 闭包，从[原Client适配](../../apps/api/src/modules/ai-native/client-quote-original.composition.ts)经[ClientApi](../../apps/api/src/modules/client/client-api.service.ts)、[Core报价服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)传到[真实报价仓储](../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts)同native事务的新报价INSERT前；所有原Core准备／能力／库存锁等待已经结束。AI在该事务锁原source、原confirmation attempt和原execute政策，比较完整原hash及期限，再复核当前Auth／发布／预算／权益；最后期限检查之后没有新的Guard／publication等待。拒绝回滚报价，原attempt仍保存；同K重放和原quote读取提前走原收据，不调用新写屏障、不因未知换键。Core新增参数只有服务器代码可以传入，不属于HTTP／模型合同；仅本AI树接最小原源，不写Core工作树或企业窗口。
+
+独立复核又确认标准官网发布P2：request-bound bootstrap只比较服务摘要，漏掉 standard select 捕获的 website.enabled／revision、渠道profile及published workspace。现[标准宿主](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)把本请求完整 releaseRevision和当前身份封为私有 revalidateQuotePublication，经[Application](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)传入同一保存前检查，所有等待后仍执行最后期限检查。原read／replay不进入该闭包；新增闭包不制造当前或历史授权。
+
+[shared原报价合同](../../packages/shared/src/ai-client-quote-draft.ts)与[HTTP schema](../../packages/shared/src/ai-client-entry-http-draft-schemas.ts)兼容增加 timeZone、lineUnits、chargeLines.name及顶层observedAt。[Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)仅从同一原Core request／pricingContext／chargeLines投影单位、数量／使用量、费用来源和版本，本次查询时间取服务器，createdAt仍为创建时间；旧包缺字段合法，缺原事实显示未记录，新非法单位拒绝。两个普通Quote session及[共享Goal view](../../packages/shared/src/ai-client-goal-session.ts)只保留当前读取的观察时间，不写journal，不拿设备时间或创建时间代替。Web[普通卡](../../apps/tenant-website/src/features/ai-native/ClientQuotePreparation.tsx)／[Goal卡](../../apps/tenant-website/src/features/ai-native/ClientGoalPicker.tsx)复用[原事实组件](../../apps/tenant-website/src/features/ai-native/ClientOriginalQuoteFacts.tsx)，微信[普通卡](../../apps/miniprogram/src/components/ai-native/ai-quote-preparation/index.ts)／[Goal卡](../../apps/miniprogram/src/components/ai-native/ai-goal-picker/index.ts)复用[投影](../../apps/miniprogram/src/components/ai-native/client-original-quote-facts.ts)及既有安全文本格式。两端展示原金额／币种、分项／优惠来源、单位／使用量、五类版本与查询／创建／失效时间；缺原时区保留带偏移时间，unknown、隐藏或身份变化撤回，不借显示授予预约、付款或库存锁。
+
+| 必要验证与固定来源 | 实际结果 |
+| --- | --- |
+| Root原Core同事务最后等待8边界 | stdin `305179eeec44c488628615f216d6f9d7b2c17986d4e6579a6f412a78e125ddde`，退出0：正常唯一报价，最终库存锁后撤execute／到期／撤权益／停用空间／改材料／最后Guard等待到期均0报价写；丢COMMIT回复仍只读同原报价。模型／订单写0。 |
+| Root标准Website Controller／Guard完整发布7边界 | stdin `243f3f28823d05aed2403e15a3cf486b38981fca2b0291613dbdd8f19f5c42be`，退出0：同Core最后等待中website停用、website／profile修订变化、渠道撤发布及最后publication等待到期均拒绝新报价；正常与丢ACK各一原报价，关闭create／execute且材料到期后原读0写。 |
+| Root原Core→Controller→公共facts合同 | stdin `0e9069db5c7b585ebcfe5875f96e455fd63389a8bcee13a59c0580797f2f7e76`，退出0；1行原单位／数量／使用量、3分项、时区和金额逐项一致，服务器observedAt与创建时间分开，旧缺optional包合法、伪单位拒绝、重复read0写。 |
+| Root冻结Web／微信原事实呈现 | stdin `6256dc364c643ece39d91ac6a29edd5b5a082d59bde3a20dcab49a59cda136c1`，退出0；真实Core／Controller输出到TSX和原生投影，原引用、分项、单位／查询时间可见，缺事实不填零或当前默认，null撤回，HTML不执行。 |
+| dev1四个实际组件→API／session→原Controller | 原Core组 `cee453e9aad9562b7aaeae70c43a34dfa7d9ca323b63ef745e645a3e413b878c`；最终四卡组 `3fb8112f8e3d802d8489dea3fa6cd67b43469638dea93436a93e1670f0e44629` 均退出0，查询时间透传、旧包兼容、unknown／隐藏／身份变化撤回。原生timer、响应封装和Goal合同均按真实源码。 |
+| 最终类型与正式runtime | Root API5根／1423源，TS5.9.3零诊断，stdin `10fdfbef9fb998a72ffabafeb13f659ce1d42eb651f0a8436536c0b0a7edb2b9`退出0；dev1 Web／微信各4根零诊断，`c8b2d6f3b26c83c816eccfb9a6fb78927f8bf8cc11e90c286a10d308d9633da9`退出0。既有[窄runtime构建](../../scripts/miniprogram-ai-runtime.cjs)纯内存157855字节／79出口／35源，产物SHA-256 `a5fe47881b21f08f46892f31d726014e6c8aef31b880bb5d5156b580b5e996b1`，命令 `d5888029468be6f96fa0135ff7f3acd3188e23ddf69c499e4064c85222017048`退出0。 |
+
+dev1十个客户端blob已冻结交权并由Root全部核同；固定来源见作者同阶段原会话，四卡最终组引用上述十源、原shared及Controller SHA，不复制包或环境。独立助手先给出完整standard发布反例，再于修后核同 application `5d1e7a1da790cff06ffca8980b23feec90c4112c`／standard `277effa83b49bfa079572aaeaed2696ae2407632`，确认两P2及新增发布P2关闭，未发现阻断原两项全文的剩余确证P1／P2；其证据是独立静态／hash核定，未冒称运行Root模拟或QA实测。
+
+| 原条款 | 全文核定依据 |
+| --- | --- |
+| ENTRY-03① 描述→条件→正式商品／可用性／报价→Draft→明确继续→原页确认 | [AIN-21原目标／澄清](#ain21-goal-original-clarification-lineage-20261114)、[AIN-22两端消费者](#ain22-goal-booking-original-consumers-20261114)的连续真实生产装配证据保持，本片关闭Core最后保存及完整发布窗口。 |
+| ENTRY-03② 明确输入、正式默认、Core规范化 | [ENTRY-13单位／来源](#ain-entry13-unit-provenance-simulated-whole-closeout-20261115)的原parameterReview、人类确认和Booking逐字段材料不变；模型不替选、不计价、不锁库存。 |
+| ENTRY-03③ 持久归属、指纹、选择和观察版本 | 原principal/session/渠道/空间、材料与输入hash、Draft选择修订、报价／规则／可用性版本和期限沿原仓储；无支付令牌或未授权正文，当前read不补签历史。 |
+| ENTRY-03④ 变化失效并重新准备 | [ENTRY-04／14跨端](#ain-entry04-14-cross-surface-whole-closeout-20261115)及原商品／时间／地点／资格／库存变化复核保持；本片补发布／材料／执行权变化的保存前拒绝，不自动替换或合并身份。 |
+| ENTRY-07① 正式Core事实权威 | 原库存／计价／资格／优惠／订单／付款／退款服务，新增回调只收紧准入，无另算金额或状态；缺证据保持缺失。 |
+| ENTRY-07② 完整报价准备事实 | 本片同原Core投影与四卡逐字段消费、查询／创建／失效时间、原金额单位版本、保存副作用和未预占语义；旧包缺字段兼容及非法新字段拒绝已验。 |
+| ENTRY-07③ 确认、批准、原提交与收据分离 | 原参数确认不是建单批准，Booking accept／submit／handoff与后台正式提案批准仍沿原链；[两端原收据与丢ACK恢复](#ain-entry04-14-cross-surface-whole-closeout-20261115)及原AIN-07批准／Core单次提交证据不变。 |
+
+原两项全文、生产消费者、前置、必要模拟／类型及独立核定齐备，ENTRY-03／07分别由75%登记本轮研发100%。ENTRY门槛1450→1500／18，80.6%→83.3%，完整收口7→9／18；AIN仍88.4%及24／28，46项等权86.4%及33／46。此前ENTRY-06与本次03形成后继两项main节点，07为下一批第一项；原01／15未整合节点保留，PM按本阶段固定提交及必要前置串行合main，不争其索引、不让助手等待。本片只固定原报价23源和任务／记录／接续，客户Task正文另两源仍冻结待ENTRY-09核接，不夹为报价验收。
+
+失败保留：Root最初发布反例改未被Auth采用的fixture字段、source已被schema拒绝时仍要求后续policy锁、把Controller拒绝当普通响应、修改已被内存事务替换的旧profile闭包，均修驱动／准确原行后保留拒绝断言通过。Root双端展示先缺原生vendor模拟、后ESM require装配失败，仅修内存loader而不改模块类型／生产代码。作者四卡首驱动缺Goal必需材料字段、响应包装和原timer，按正式合同修fixture后通过；未扩测试或删除断言补绿。原Core CRLF字节保持，格式检查用 cr-at-eol 识别原换行，非全文件重写。
+
+所有本阶段验证为本树原offline preload、不可达DATABASE_URL、纯内存audit／声明／runtime；Root进程均退出，`output/.tmp/ain-entry03-quote-precommit-20261115`及作者任务目录未创建，无新增测试脚本、依赖／引擎／构建副本或残留。命令和失败原文只保留原会话日志及Git固定对象，本记录链接不指向临时文件。真实MySQL事务、浏览器／微信和供应商均未测试，由负责人后续实际操作；本阶段不宣称生产启用。文档检查仍仅4处既有缺链、无新增算术错误，不伪造附件。
+
 <a id="ain-entry06-current-permission-whole-closeout-20261115"></a>
 ## ENTRY-06 同账号权限刷新修复与员工履约入口全文收口（2026-11-15）
 

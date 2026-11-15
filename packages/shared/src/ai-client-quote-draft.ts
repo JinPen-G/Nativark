@@ -59,13 +59,22 @@ export const aiClientQuoteFactsSchema = z.object({
   pricingPlanVersion: id.nullable(), ruleVersion: id.nullable(), priceVersionId: id.nullable(),
   calendarVersion: id.nullable(), categoryVersionId: id.nullable(),
   createdAt: date.nullable(), expiresAt: date.nullable(),
+  /** Optional for already published packets. New observations project only
+   * the original Core request; missing legacy units remain null. */
+  timeZone: z.string().min(1).max(64).nullable().optional(),
+  lineUnits: z.array(z.object({ lineIndex: z.number().int().min(0).max(99), itemGroupId: id.nullable(),
+    pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).nullable(), quantity: z.number().finite().positive().nullable(),
+    usageQuantity: z.number().finite().nonnegative().nullable() }).strict()).max(100).nullable().optional(),
   chargeLines: z.array(z.object({ type: id, amount: z.number().finite(),
+    name: z.string().min(1).max(256).nullable().optional(),
     sourceId: id.nullable(), sourceVersion: aiBookingSourceVersionSchema.nullable() }).strict()).max(100).nullable()
 }).strict();
 export const aiClientQuoteResultReadResponseSchema = z.object({
   contractVersion: z.literal(AI_CLIENT_QUOTE_PREPARATION_VERSION), state: z.enum(['observed', 'unknown']),
   source: z.object({ materialRef: z.string().uuid(), materialHash: digest }).strict(),
   quote: aiClientQuoteFactsSchema.nullable(), quotePersistence: z.enum(['saved', 'unknown']),
+  /** This read's server observation time, separate from quote.createdAt. */
+  observedAt: date.optional(),
   inventoryReservation: z.literal('not_attempted'), orderExecution: z.literal('not_attempted'),
   confirmation: z.literal('parameters_only_not_order_approval'), retryable: z.literal(false),
   nextAction: z.literal('read_original_quote')

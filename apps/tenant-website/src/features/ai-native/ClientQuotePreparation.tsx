@@ -7,6 +7,7 @@ import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } fr
 import { createClientQuoteSession, createClientQuoteBookingSession, clientQuoteStorageKey, clientQuoteBookingStoredRequest,
   type ClientQuoteView, type ClientQuoteBookingView } from './client-quote-session';
 import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
+import { ClientOriginalQuoteFacts } from './ClientOriginalQuoteFacts';
 
 const initial: ClientQuoteView = { status: 'closed', canPrepare: false, canConfirm: false, canRead: false,
   pendingCore: false, matchesInput: true, material: null, quote: null };
@@ -157,7 +158,6 @@ export function ClientQuotePreparation(props: {
   const checkingBooking = booking?.status === 'unknown' || booking?.status === 'checking';
   const notSubmitted = !checkingBooking && booking?.observed === true && booking.draft?.execution === 'not_submitted'
     && ['draft_created', 'user_selected', 'handed_to_booking_page'].includes(booking.draft.state);
-  const money = (amount: number | null) => amount === null || !quote.quote?.currency ? (en ? 'Unavailable' : '未加载') : `${amount} ${quote.quote.currency}`;
   const canContinue = Boolean(!submitted && booking && !booking.readOnly && (booking.canChoose || booking.canHandoff || booking.handoff));
   return <section aria-label={en ? 'Reservation draft' : '预约草稿'} aria-busy={working}>
     <h3>{en ? 'Reservation draft' : '预约草稿'}</h3>
@@ -180,9 +180,7 @@ export function ClientQuotePreparation(props: {
     {booking?.draft && !submitted && !notSubmitted && !checkingBooking && <p role="status">{en ? 'The original draft cannot currently be submitted. Check its original record or contact the merchant.' : '原草稿当前不可用于提交，请核对原记录或联系商户。'}</p>}
     {booking?.draft && <p style={{ overflowWrap: 'anywhere' }}>{en ? 'Original draft / revision' : '原草稿／修订'}：{booking.draft.bookingDraftId} / {booking.draft.revision}</p>}
     {booking?.observed && !booking.draft && !booking.handoff && <p>{en ? 'The original draft or handoff operation was recorded. Booking acceptance, submission and business results still require their original receipts.' : '原草稿或交接操作已记录；预约受理、提交和业务结果仍须核对原收据。'}</p>}
-    {quote.quote && <dl><dt>{en ? 'Payable' : '应付'}</dt><dd>{money(quote.quote.payableAmount)}</dd>
-      <dt>{en ? 'Deposit' : '押金'}</dt><dd>{money(quote.quote.depositAmount)}</dd>
-      <dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{money(quote.quote.preAuthAmount)}</dd></dl>}
+    <ClientOriginalQuoteFacts quote={quote.quote} observedAt={quote.quoteObservedAt} english={en} />
     {(error || quote.status === 'unavailable' || booking?.status === 'unavailable') && <p role="status">{en ? 'Currently unavailable. Keep any original reference and check its result.' : '当前暂不可用，请保留已有引用并核对原结果。'}</p>}
     {!submitted && canOrdinary && <button type="button" className="button button-outline button-block" disabled={working} onClick={ordinary}>{en ? 'Use ordinary booking' : '继续普通预约'}</button>}
   </section>;

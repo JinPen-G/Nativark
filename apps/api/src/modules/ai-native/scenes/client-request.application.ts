@@ -112,6 +112,9 @@ export type AiClientRequestDependencies = {
   /** Same authorized client service; explicit human parameter confirmation,
    * never an automatically selected model tool or order approval. */
   quotePreparation?: Pick<ClientApiService, 'prepareQuoteForOriginalOperation' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
+  /** Standard server host's full request-captured channel publication. Only a
+   * genuinely new original quote calls it; receipt reads never revive a write. */
+  revalidateQuotePublication?(): Promise<void>;
   /** Server-only independent channel publication lookup for one original
    * Booking transfer. A customer body cannot provide this authority. */
   bookingTransfer?: { db: PrismaClient;
@@ -960,7 +963,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         client: dependencies.quotePreparation!, guard: dependencies.guard,
         credentials: { current: async () => { if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'request_interrupted'); return { authorization, ip }; } }, tasks: taskDependencies,
         tenantCode: server.tenantCode, serviceCode: server.serviceCode,
-        channel: server.channel as 'web' | 'wechat_miniprogram', clock });
+        channel: server.channel as 'web' | 'wechat_miniprogram', clock, assertCurrent: async () => {
+          await bound.assertCurrent(); await dependencies.revalidateQuotePublication?.();
+        } });
       const result = await consume(preparation, bound);
       await bound.assertCurrent();
       return result;

@@ -28,6 +28,8 @@ export interface ClientQuoteView {
   status: 'closed' | 'opening' | 'ready' | 'preparing' | 'prepared' | 'confirming' | 'checking' | 'quoted' | 'unknown' | 'unavailable' | 'invalidated';
   canPrepare: boolean; canConfirm: boolean; canRead: boolean; pendingCore: boolean; matchesInput: boolean;
   material: AiClientQuotePreparationResponse | null; quote: AiClientQuoteFacts | null;
+  /** This original response's server time; display only, never persisted. */
+  quoteObservedAt?: string | null;
   readOnly?: boolean;
 }
 interface Locator {
@@ -133,6 +135,7 @@ export function createClientQuoteSession(input: {
   const owner = clientQuoteOwner(input.context);
   let closed = false, busy = false, locator: Locator | null = null, host: AiClientHostCapabilities | null = null;
   let serverMaterial: AiClientQuotePreparationResponse | null = null, locallyExpired = false;
+  let quoteObservedAt: string | null = null;
   let view = emptyView();
   const current = () => { try { return !closed && input.context.current(); } catch { return false; } };
   const matches = () => {
@@ -185,7 +188,8 @@ export function createClientQuoteSession(input: {
     const reviewed = Boolean(serverMaterial?.parameterReview);
     const matchesInput = matches();
     const pendingCore = locator?.phase === 'confirmation_pending' || (locator?.phase === 'quote_observed' && status !== 'quoted');
-    view = { status, material, quote, matchesInput, pendingCore, readOnly: !writable || locator?.phase === 'prepared' && !reviewed,
+    view = { status, material, quote, quoteObservedAt: quote ? quoteObservedAt : null, matchesInput, pendingCore,
+      readOnly: !writable || locator?.phase === 'prepared' && !reviewed,
       canPrepare: writable && !busy && ((!locator && status === 'ready') || (!matchesInput && status === 'prepared') || status === 'quoted'),
       canConfirm: writable && !busy && matchesInput && status === 'prepared' && locator?.phase === 'prepared'
         && reviewed && Boolean(material && Date.parse(material.expiresAt) > input.now()),
@@ -220,19 +224,22 @@ export function createClientQuoteSession(input: {
     const result = aiClientQuoteResultReadResponseSchema.parse(value), material = locator?.material;
     if (!material || result.source.materialRef !== material.materialRef || result.source.materialHash !== material.materialHash) throw Error('quote_source_changed');
     if (result.state === 'observed') {
+      quoteObservedAt = result.observedAt ?? null;
       persist({ ...locator!, phase: 'quote_observed' });
       return result.quote;
     }
+    quoteObservedAt = null;
     return null;
   };
   const reference = () => aiClientQuoteConfirmationRequestSchema.parse({ materialRef: locator?.material?.materialRef,
     expectedMaterialHash: locator?.material?.materialHash });
   const operate = async (status: ClientQuoteView['status'], action: () => Promise<{ status: ClientQuoteView['status']; quote?: AiClientQuoteFacts | null }>, purpose: 'read' | 'write' = 'read') => {
     if (busy || !current()) return;
-    busy = true; emit(status);
+    quoteObservedAt = null; busy = true; emit(status);
     let result: { status: ClientQuoteView['status']; quote?: AiClientQuoteFacts | null } = { status: 'unavailable' };
     try { await recheck(purpose); result = await action(); await recheck('read'); assertReference(); }
-    catch { serverMaterial = null; result = { status: locator && ['preparation_pending', 'confirmation_pending'].includes(locator.phase) ? 'unknown' : 'unavailable' }; }
+    catch { serverMaterial = null; quoteObservedAt = null;
+      result = { status: locator && ['preparation_pending', 'confirmation_pending'].includes(locator.phase) ? 'unknown' : 'unavailable' }; }
     finally { busy = false; emit(result.status, result.quote ?? null); }
   };
   return Object.freeze({
@@ -245,7 +252,7 @@ export function createClientQuoteSession(input: {
     originalInput: () => locator ? copy(locator.request.input) : null,
     async open() {
       if (closed || busy || !current()) return;
-      serverMaterial = null;
+      serverMaterial = null; quoteObservedAt = null;
       busy = true; emit('opening');
       let status: ClientQuoteView['status'] = 'unavailable';
       try {
@@ -312,7 +319,8 @@ export function createClientQuoteSession(input: {
       });
     },
     dispose() {
-      closed = true; expiry.clear(); host = null; locator = null; serverMaterial = null; view = { ...emptyView(), status: 'invalidated' };
+      closed = true; expiry.clear(); host = null; locator = null; serverMaterial = null; quoteObservedAt = null;
+      view = { ...emptyView(), status: 'invalidated' };
       input.changed(copy(view));
     },
   });

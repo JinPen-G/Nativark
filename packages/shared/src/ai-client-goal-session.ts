@@ -83,6 +83,8 @@ export interface ClientGoalView {
   hasLocator: boolean; task: Creation['task']; question: Question; receipt: Receipt;
   projection: AiClientGoalProjection | null; sources: ClientGoalFormSources | null;
   selection: ClientCreateQuoteRequest | null; quote: AiClientQuoteFacts | null;
+  /** Server observation of this exact original quote; display only, not journaled. */
+  quoteObservedAt?: string | null;
   /** Only the current authorized preparation read, never the local journal. */
   parameterReview?: AiClientQuoteParameterReview | null;
   canExtract: boolean; canRead: boolean; canSubmit: boolean; canContinue: boolean;
@@ -216,6 +218,7 @@ export function createClientGoalSession(input: {
   let originalTaskId: string | null = null;
   let question: Question = null, receipt: Receipt = null, projection: AiClientGoalProjection | null = null;
   let sources: ClientGoalFormSources | null = null, quote: AiClientQuoteFacts | null = null, view = blank();
+  let quoteObservedAt: string | null = null;
   let parameterReview: AiClientQuoteParameterReview | null = null;
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   const clearExpiry = () => { if (expiryTimer !== undefined) clearTimeout(expiryTimer); expiryTimer = undefined; };
@@ -247,7 +250,7 @@ export function createClientGoalSession(input: {
     const active = !busy && !invalid, write = writable(), task = creation?.task
       ? { ...creation.task, ...(snapshot ? { revision: snapshot.revision, status: snapshot.status } : {}) } : null;
     view = { status, hasLocator: Boolean(saved), task, question, receipt, projection, sources,
-      selection: saved?.quote ? copy(saved.quote.request.input) : null, quote, parameterReview,
+      selection: saved?.quote ? copy(saved.quote.request.input) : null, quote, quoteObservedAt: quote ? quoteObservedAt : null, parameterReview,
       canExtract: active && write && status === 'ready' && (!saved || saved.phase === 'goal_ready' && fresh(saved.material?.expiresAt)
         || saved.phase === 'task_ready' && task?.status === 'queued'),
       canRead: active && Boolean(saved && host?.policy.allowRead),
@@ -360,6 +363,7 @@ export function createClientGoalSession(input: {
     if (result.source.materialRef !== reference.materialRef || result.source.materialHash !== reference.expectedMaterialHash
       || quote && result.quote && quote.quoteId !== result.quote.quoteId) throw Error('client_goal_quote_changed');
     quote = result.quote;
+    quoteObservedAt = result.state === 'observed' ? result.observedAt ?? null : null;
     if (result.state === 'observed') persist({ ...saved!, phase: 'quoted' });
     return result.state === 'observed' ? 'quoted' as const : 'unknown' as const;
   };
@@ -440,7 +444,7 @@ export function createClientGoalSession(input: {
     if (busy || !opened || !current() || invalid) return;
     busy = true; emit('working'); let status: ClientGoalView['status'] = 'unavailable';
     try { await recheck(purpose); status = await action(); await recheck('read'); }
-    catch { creation = null; snapshot = null; question = null; receipt = null; projection = null; sources = null; quote = null; parameterReview = null;
+    catch { creation = null; snapshot = null; question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null;
       status = saved && unresolved(saved.phase) ? 'unknown' : 'unavailable'; }
     finally { busy = false; emit(status); }
   };
@@ -633,12 +637,12 @@ export function createClientGoalSession(input: {
         input.storage.write(null);
         if ((input.storage.read() ?? null) !== null) { invalid = true; throw Error('client_goal_reference_not_retained'); }
         held = null; saved = null; creation = null; snapshot = null; originalTaskId = null;
-        question = null; receipt = null; projection = null; sources = null; quote = null; parameterReview = null;
+        question = null; receipt = null; projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null;
         return 'ready';
       });
     },
     dispose() { closed = true; clearExpiry(); abort.cancel(); creation = null; snapshot = null; originalTaskId = null; question = null; receipt = null;
-      projection = null; sources = null; quote = null; parameterReview = null; host = null; view = blank(); },
+      projection = null; sources = null; quote = null; quoteObservedAt = null; parameterReview = null; host = null; view = blank(); },
   };
   return Object.freeze(session);
 }

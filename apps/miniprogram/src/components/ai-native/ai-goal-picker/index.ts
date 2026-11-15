@@ -18,6 +18,7 @@ import { writeRequiredStorage } from '../../../core/storage';
 import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { ROUTES, buildUrl, navigate } from '../../../core/ui';
 import { projectBookingDraftReview, projectQuoteParameterReview, type BookingDraftReview } from '../booking-draft-review';
+import { projectClientOriginalQuoteFacts } from '../client-original-quote-facts';
 
 type Session = ReturnType<typeof createClientGoalSession>;
 type Choice = { id: string; label: string };
@@ -53,7 +54,7 @@ Component({
   properties: { serviceCode: { type: String, value: '' } },
   data: { view: blank(), form: form(), goal: '', answer: '', working: false, loggedIn: false, message: '', projectionHash: '', questionId: '',
     booking: null as ClientQuoteBookingView | null, bookingReview: null as BookingDraftReview | null,
-    bookingSubmitted: false, bookingNotSubmitted: false,
+    bookingSubmitted: false, bookingNotSubmitted: false, originalQuote: null as ReturnType<typeof projectClientOriginalQuoteFacts>,
     cancellation: null as ClientTaskCancellationView | null, parameterReview: null as ReturnType<typeof projectQuoteParameterReview>,
     answerMaxLength: 2048, canCancel: false, selectedRows: [] as { label: string; quantity: number; pricingUnit: string; usage: string }[],
     modes: [] as Choice[], locations: [] as Choice[], returns: [] as Choice[], identities: [] as Choice[], addresses: [] as Choice[],
@@ -70,7 +71,7 @@ Component({
       bookings.get(this)?.dispose(); bookings.delete(this); cancellationSessions.get(this)?.dispose(); cancellationSessions.delete(this);
       sources.delete(this); currentBindings.delete(this);
       this.setData({ view: blank(), form: form(), goal: '', answer: '', working: false, message: '', projectionHash: '', questionId: '',
-        booking: null, bookingReview: null, bookingSubmitted: false, bookingNotSubmitted: false,
+        booking: null, bookingReview: null, bookingSubmitted: false, bookingNotSubmitted: false, originalQuote: null,
         parameterReview: null, cancellation: null, answerMaxLength: 2048, canCancel: false, selectedRows: [],
         modes: [], locations: [], returns: [], identities: [], addresses: [], timeZone: '', startAt: '', endAt: '', delivery: false,
         policyNotice: '', canPersonalPay: false, canEnterprisePay: false });
@@ -82,6 +83,7 @@ Component({
       const field = view.question?.contract.fields.length === 1 && view.question.contract.fields[0].kind === 'text'
         && view.question.contract.fields[0].fieldId === 'clarification_text' ? view.question.contract.fields[0] : null;
       this.setData({ view, ...(questionId !== this.data.questionId ? { answer: '' } : {}), questionId,
+        originalQuote: projectClientOriginalQuoteFacts(view.quote, view.quoteObservedAt),
         parameterReview: view.status === 'prepared' ? projectQuoteParameterReview(view.parameterReview ?? null) : null,
         answerMaxLength: field?.maxLength ?? 2048, canCancel: Boolean(sessions.get(this)?.cancellationOrigin()),
         selectedRows: view.selection?.lines.map((line, index) => ({ label: options(projection, `items.${index}.itemGroupId`).find(row => row.id === line.itemGroupId)?.label ?? line.itemGroupId ?? '未提供商品',
