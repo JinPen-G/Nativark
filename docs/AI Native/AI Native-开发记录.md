@@ -6,6 +6,43 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry15-original-storage-recovery-20261115"></a>
+## ENTRY-15 员工原操作定位的严格存储读取与恢复（2026-11-15）
+
+前置`123381fc5ad0a1981345a447984b0c8232c65dd2`已普通推送GitHub并回读一致。原[原订单只读入口](<#ain-entry15-order-view-original-task-entry-20261115>)P2已经关闭；本阶段处理其后独立发现的两个恢复P2：执行Task及媒体intake使用通用`readStorage`吞I/O异常，把原unknown误当无记录，可覆盖原引用并生成新上传键。只改员工端四源，不改通用storage、父业务页或任何后端授权，不新增测试文件。
+
+新增feature-local[原定位存储端口](../../apps/staff-miniprogram/src/components/ai-native/inspection-original-storage.ts)，缺记录和I/O失败明确区分；写／删除保留原宿主异常。[Session](../../apps/staff-miniprogram/src/components/ai-native/inspection-task-session.ts)只有首次成功严格读取和原locator校验才能标记opened／storageReady。开始、继续、提交前比较同一held原记录；读取失败撤回新动作、保留原引用。写前记录尝试的原K，保存或回读不确定时不派发下一请求，只有原键成功读取及原收据核对恢复观察；并行替换拒绝，不把尚未确认的保存当空记录。[实际组件](../../apps/staff-miniprogram/src/components/ai-native/ai-inspection-task/index.ts)使用同一窄存储端口；首次读取失败不会解锁canBegin，读权／执行权和只读宿主限制保持。
+
+[媒体Page绑定](../../apps/staff-miniprogram/src/components/ai-native/inspection-task-page-binding.ts)仅在成功读取并校验locator后设置loaded key；失败清掉本机媒体与执行按钮，不让重复点击跳过失败加载。模板等待后、选材后、newKey前及每次保存／派发前重新比较原记录，写后回读失败保留尝试原upload／draft K，不自动新建。只有原已保存草稿的同一create收据已观察、当前locator仍准确时才删除；删除应答或回读丢失保持retirementPending，成功严格原读才确认完成，不覆盖或删除另一页新locator。原人工检查、明确再次选材、受权原upload／draft收据恢复继续可用，未把模型识别当Core提交。
+
+dev2固定四源blob依次为page-binding`b8104d2a1a43be1ad806d70045df558414bc4a72`、component`c03e17c237d11771783c7d7257d016390a1c9ba2`、session`a2bb39e646d9a1bcbe184acc008caa6c45cefc78`、新storage`77be6c91fe4d2a91c4936456c9efae72e46a689c`，已交回写权，Root逐字节核同。作者两个原反例串行复验stdin SHA-256`fc7eafda113232dea7f4a7a8aa2d0391f63e3e8e5458a33bb03b21459259b1b7`、`ab849d7fb71385808a70034f7a279c045879b9cf670a680508194339006eb59b`均退出0；实际Component／Session、原pickup／return Page事件、上传API／wire的19个存储恢复／写回／CAS／删除确认场景`c84e7e2e0eaf8fdec49a3acc0130f97dc4b641304432eb42c6b5d3e73d61392c`退出0。最终依赖HEAD123381fc5、TS5.9.3原ES2019／ES2020 lib、四根／229源／125内存shared声明零诊断，`00172d8c996d17a286bedcb3d6e7024030e99b6b081fa2fb86b120b9dae3aad9`退出0；初始类型同样通过，不重复扩大测试。
+
+Root独立复用原fixture接点，仅针对两个P2及其恢复边界做7项必要模拟：可执行／只读Task首次读失败无newKey／请求、恢复仍同原input；Task保存回读丢失无prepare／create／start，恢复只查尝试原K；pickup／return媒体首次失败阻断选材和新upload，恢复原upload observation；原完成草稿删除回读确认；并行locator变动不删除／覆盖。命令`node --no-compilation-cache -`，stdin`a2bc5c59c105b7f5856c1f9b8795a62418f147f749843b4f8d09eb68b7530a6e`退出0。实际Session／Component／Page事件／API／wire为源码，storage／native／业务响应为明确合成夹具，不证明微信或MySQL行为。作者初同时运行两异步反例共用微信全局替身相互干扰，保留失败并改串行隔离；原两个产品反例及断言未删除。全部本树offline preload、不可达DB、内存audit0、自有进程退出；`output/.tmp/ain-entry06-original-storage-20261115`及`output/.tmp/ain-entry15-original-storage-20261115`未创建，无新增脚本／临时环境／副本。
+
+原独立助手按HEAD123381fc5加上述冻结四blob完成ENTRY-15四条全文核定，Root结合实际源码及必要模拟确认两个P2关闭、原G1～G4齐备，唯一任务册同步100%。本轮没有重复跑原绿色组，没有把尚未提交的blob误说成已在前置HEAD；本阶段提交固定该后继。全文依据如下。
+
+| ENTRY-15原条款 | 当前实现及完整证据 |
+| --- | --- |
+| 各端／租户／场景默认关闭、能力发现、停用及人工回退 | 唯一entry-scene-catalog关联当前发布、权限和能力；四端目录／公开浏览及普通页面只由明确点击读取，挂载／show无自动AI调用或轮询。原四端生命周期与正式provider／Auth／Guard来源证据沿用，执行停用不把原操作改为未发生。 |
+| 独立受权、显式有界历史读取及原操作善后 | 标准员工receipt／original_pending沿原冻结input／Run／Invocation／账与问题期限读取，Task／订单／文件当前读权独立；原订单view明确stage选择进入receipt_only，不需要新识别写权／当前模板。客户四读保留15000ms及signal，operator／平台历史和原账读取沿原reader。停用新执行不授重派，撤权／伪造／删除仍拒绝。 |
+| 客户端不能启用、unknown只按原K核对 | 本片严格storage读取／CAS／回读、原upload／draft尝试定位及删除确认完整；只有成功严格原读才恢复观察或可写就绪，URL／缓存／模型内容均不授权，未知不换K／重传。当前保存与读政策仍由服务端决定。 |
+| 传统订单／预约／履约／支付和人工路径独立 | storageReady／只读／busy只门控AI；原业务权限、Core、订单／Booking／支付／领取归还页和人工检查保持独立。原订单view新读入口不改变正式pickup／return执行；AI失败提示继续人工，导航和原收据不表示业务成功。 |
+
+独立复核仅静态及固定blob核对，未声称重跑Root／作者模拟；没有剩余确证阻断原四条的P1／P2。收尾`git diff --check`退出0，`node scripts/validate-docs.cjs`退出1仍仅四处既有缺链（导航54行历史三处、界面规范272行稀疏示例一处），无新增链接或任务算术错误。ENTRY-01与15构成当前累计两项新整项100%的main节点，固定候选为本阶段提交及其必要前置，PM沿原记录串行集成，AI不争main索引、不让助手等待。dev2继续ENTRY-06三条及ENTRY-09源码投影；真实微信／浏览器／数据库／模型由负责人另测，100%仅本轮完整研发验收，不表示生产放行。
+
+<a id="ain-entry02-original-order-navigation-consumers-20261115"></a>
+## ENTRY-02 客户Web与小程序原订单导航消费者（2026-11-15）
+
+公共前置[123381fc5](<#ain-entry02-original-order-navigation-public-stage-20261115>)已上传、远端回读一致。dev1冻结八源并交回写权，Root逐blob核同：网站[API](../../apps/tenant-website/src/features/ai-native/client-task-api.ts)`a310c427def12b707e29b1d36c05e943ca38da25`、[Session](../../apps/tenant-website/src/features/ai-native/client-task-session.ts)`f6c1b4dc7b7a5f3a6eaa4b248619d7ae24edcea5`、[工作台](../../apps/tenant-website/src/features/ai-native/ClientTaskWorkbench.tsx)`c60356a8bc6f4ff3e074ee9cf110f6ca88a04acf`；客户小程序[API](../../apps/miniprogram/src/api/ai-tasks.ts)`bf8879dd7252008288644a97c12c485ea9154135`、[Session](../../apps/miniprogram/src/components/ai-native/client-task-session.ts)`a8d7e023ba4445cc8c6bb58730f70f75127b54ee`、[工作台TS](../../apps/miniprogram/src/components/ai-native/ai-task-workbench/index.ts)`d3d1e4dd03acdd6e8fcd90ee4dcc861c42ca1f5d`／[WXML](../../apps/miniprogram/src/components/ai-native/ai-task-workbench/index.wxml)`a010a8eb70cb1aafea9f4caf9fd4f5d7d991280c`、[原订单页](../../apps/miniprogram/src/pages/order/index.ts)`9ca6fbb60f6e1fed63909f4bb5502febf523938c`。仅消费三个正式公共read出口及原材料／Task创建收据，不新增路由系统、模型或业务执行。
+
+明确点击“核对并打开原订单”才进入导航：原Session先读同一材料、creation、当前read host和Action，再关闭源及发布双读并调用正式Action最终复核；客户端仅接受固定的当前orderId及本端注册页面。unknown保留原journal，错scope／surface／版本、撤权、到期、存储替换或隐藏迟到均拒绝，不换K。初次显式open只恢复原引用并受权读，普通挂载不请求AI；模型／events观察不可用撤答案，通过独立原材料／creation及当前read复核的导航可以保留，不能凭缓存Task ID或模型文本恢复权限。两端POST均保持原无重放行为，小程序15000ms及服务端有界读取保持；网站复用customerFetch，不引入任意URL／脚本或敏感缓存。
+
+作者实际双端API／session→Controller 18场景，stdin`0ea5edf2887adfd6cc0a9f68bb44c5a7272300e8160f1f42f4597cad97ff7ed7`退出0；实际Web组件／小程序Page与工作台有限宿主`59fe93e27b43d6980999ad6c8eac0da76251a6cde0d90c3ef06285de22b2f3d9`退出0：固定路由、挂载零导航、隐藏迟到零导航。TS5.9.3网站三根／237源、小程序四根／249源零诊断，原native ES2019及lib保持、125正式shared声明仅内存，stdin`1ed328f38bb48b460d6c30a4936b75b98c21ce3a3ed8bff8b2f23462503a1281`退出0；原窄runtime157355字节及79出口同公共固定SHA。作者证据Git blob`ee1a4b5e8e8ecb785bfa33097c6c9e6988f11b2d`／SHA-256`41d7b7b8bf3e4d0796a60481cba00e1321dd0a8d3bca6d4d13c6fa0ce6df6301`只保留最少版本／命令／结果，不复制环境。
+
+Root独立读取作者八源及证据，最小组合沿实际网站Session→正式AI_NATIVE_CLIENT_ENTRY_PROVIDERS停用model→Auth／Guard／Controller→原材料、input和Task创建收据：原model_pending journal不变；关闭create／execute／预算仍显式导航一次；原模型／event不可读答案撤回、独立导航保留；最终Action await失去当前宿主拒绝第二次导航，新增Task／Run／model／材料／账0。`node --no-compilation-cache -`、stdin`448de1c6239085d386a3fa8f2dd4a08fbdf71e02b7103e4dbf0de17d000f23b2`退出0；原Web组件与native端另沿作者实际API／Controller及组件证据，不用有限模拟冒充浏览器／微信。Root首次夹具CJS加载type:module网站源触发ERR_REQUIRE_ESM，仅修内存loader后通过，生产包未改；作者缺fixture依赖、驱动转义／lifetime断言及模型失败连带撤导航的问题及复验保留，不用正常重跑抹掉失败。
+
+全部自有进程退出、audit0，`output/.tmp/ain-entry02-order-navigation-20261115`及作者导航任务目录未创建，未新增测试或构建副本。ENTRY-02原其他六Action及multi-audience完整签发／消费仍缺，保持75%，不把原订单切片算整项100%；dev1已继续准确原接点的只读核定，通知草稿不能拿通知设置或发送表单冒充。仅已核八源及两册固定，main由PM按必要前置串行整合。
+
 <a id="ain-entry02-original-order-navigation-public-stage-20261115"></a>
 ## ENTRY-02 本人原订单Task的只读导航公共装配（2026-11-15）
 

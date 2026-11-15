@@ -4,7 +4,7 @@
  * to the original form; this component never submits a Core inspection. */
 import { createStaffInspectionTaskApi } from '../../../api/ai-inspection-tasks';
 import { serverNow } from '../../../core/clock';
-import { readStorage, writeStorage } from '../../../core/storage';
+import { readInspectionOriginalStorage, writeInspectionOriginalStorage } from '../inspection-original-storage';
 import { AiPollingController, AiPollingLoop } from '../polling-controller';
 import { createStaffInspectionTaskSession, staffInspectionTaskStorageKey,
   type StaffInspectionTaskContext, type StaffInspectionTaskView } from '../inspection-task-session';
@@ -82,13 +82,9 @@ Component({
       const context = { ...host.context, current }, key = staffInspectionTaskStorageKey(context);
       r.owner = createStaffInspectionTaskSession({ context, api: createStaffInspectionTaskApi({ current }), now: serverNow,
         newKey: () => `staff-inspection-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-        storage: { read: () => {
-          if (!host.context.readOnly) return readStorage(key);
-          const value: unknown = wx.getStorageSync(key);
-          return value === '' || value === null || value === undefined ? undefined : value;
-        }, write: value => {
+        storage: { read: () => readInspectionOriginalStorage(key), write: value => {
           if (host.context.readOnly) throw Error('原任务只读宿主不能写入定位');
-          writeStorage(key, value);
+          writeInspectionOriginalStorage(key, value);
         } }, changed: view => { if (current()) this.receiveView(view); } });
       const owner = r.owner; await owner.open();
       return current() && r.owner === owner ? owner : null;
@@ -103,6 +99,9 @@ Component({
       try {
         if (!await this.openSession() || !current() || !r.owner) return;
         if (kind === 'read' && r.pending) { await r.owner.observe(); return; }
+        const view = r.owner.snapshot();
+        if (kind === 'begin' && !view.canBegin || kind === 'start' && !view.canStart
+          || kind === 'continue' && !view.canContinue) return;
         ownsPending = true; r.pending = true; this.setData({ pending: true, errorLabel: '' });
         if (kind === 'begin') {
           let inputId: string | undefined;
@@ -120,7 +119,7 @@ Component({
         else await r.owner.refresh();
         if (current()) this.startReads();
       } catch { if (current()) { r.loop?.pause(); this.selectComponent?.('#task-input')?.detachHost?.(); r.inputSignature = '';
-        this.setData({ errorLabel: '原任务暂不可核对，请使用原人工检查', currentTask: null, fields: [], canSubmit: false, canContinue: false, canStart: false, resultAvailable: false }); } }
+        this.setData({ errorLabel: '原任务暂不可核对，请使用原人工检查', currentTask: null, fields: [], canBegin: false, canSubmit: false, canContinue: false, canStart: false, resultAvailable: false }); } }
       finally { if (current() && ownsPending) { r.pending = false; this.setData({ pending: false }); } }
     },
     receiveView(view: StaffInspectionTaskView): void {

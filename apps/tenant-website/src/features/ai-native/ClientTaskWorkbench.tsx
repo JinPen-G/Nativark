@@ -2,6 +2,8 @@
  * remain separate from model starts and answer continuation; model prose is
  * displayed as generated context, never an order/payment/price observation. */
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useSite } from '../../SiteContext';
 import { captureEnterpriseHostSession, sessionApi, subscribeCustomerSession } from '../../data/authClient';
 import { createClientTaskApi } from './client-task-api';
 import { createClientTaskSession, clientTaskStorageKey, type ClientTaskView } from './client-task-session';
@@ -11,6 +13,7 @@ const initial: ClientTaskView = { status: 'closed', task: null, modelText: null,
   canExplain: false, canRead: false, canSubmit: false, canContinue: false, readOnly: true, modelUnavailable: false,
   observation: null, observationGeneration: 0 };
 export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: string; scopeKey: string; english: boolean }) {
+  const navigate = useNavigate(), { href } = useSite();
   const [record,setRecord] = useState({ scopeKey, view: initial }), [working,setWorking] = useState(false), [error,setError] = useState(false);
   const [draft,setDraft] = useState({ reference: '', value: '' });
   const currentScope = useRef(scopeKey), generation = useRef(0), busy = useRef(false), session = useRef<ReturnType<typeof createClientTaskSession> | null>(null);
@@ -58,6 +61,14 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
       onClick={() => void work(owner => owner.explain())}>{english ? 'Request an explanation' : '请求解释'}</button>}
     <button type="button" className="button button-outline" disabled={working} onClick={() => void work(owner => owner.refresh())}>
       {english ? 'Check original answer' : '核对原回答'}</button>
+    {(view.canOpenOrder || view.task || cancellation) && <button type="button" className="button button-outline" disabled={working || !view.canOpenOrder}
+      onClick={() => void work(async owner => {
+        const opened = await owner.openOrder(id => {
+          if (id !== orderId || document.hidden || currentScope.current !== scopeKey) throw Error('client_order_navigation_changed');
+          navigate(href(`/orders/${encodeURIComponent(id)}`));
+        });
+        if (!opened) throw Error('client_order_navigation_unavailable');
+      })}>{english ? 'Check and open original order' : '核对并打开原订单'}</button>}
     {working && <p role="status">{english ? 'Processing your request…' : '正在处理本次请求…'}</p>}
     {view.status === 'unknown' && <p role="status">{english ? 'The original result needs checking. No model call is repeated.' : '原结果待核对，不重复调用模型。'}</p>}
     {field && question && <><label className="booking-field">{field.label}<textarea maxLength={field.maxLength} value={inputValue}

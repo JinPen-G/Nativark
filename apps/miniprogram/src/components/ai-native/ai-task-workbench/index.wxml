@@ -10,6 +10,7 @@
   <ai-status-panel state="{{actionState}}" manual-text="核对" manual-available="{{ready && manualEnabled}}" disabled="{{pending}}" bind:manual="onManual" />
   <ai-order-explanation wx:if="{{!clientModel}}" id="result" order="{{order}}" available="{{ready}}" />
   <button wx:if="{{clientModel && continueAvailable}}" bindtap="onContinue" disabled="{{pending}}">继续回答</button>
+  <button wx:if="{{clientModel}}" bindtap="onOpenOrder" disabled="{{pending || !openOrderAvailable}}">核对并打开原订单</button>
   <view wx:if="{{clientModel && modelText}}"><text selectable="true">{{modelText}}</text><view>模型生成说明；金额、订单和付款状态以原订单信息为准。</view></view>
   <ai-task-cancellation wx:if="{{clientModel && cancellationAvailable}}" id="cancellation" bind:observed="onCancellationObserved" />
   <slot name="task-card"></slot>

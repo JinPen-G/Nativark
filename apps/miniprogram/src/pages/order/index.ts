@@ -206,6 +206,7 @@ Page({
       input_saved: '补充说明已保存，请明确继续取得回答', running: '正在取得回答', complete: '回答已取得', unknown: '原结果待核对，不重复调用模型', unavailable: '解释暂不可用，可继续使用原订单页面' };
     const question = view.question, field = question?.contract.fields.length === 1 ? question.contract.fields[0] : null;
     return { modelText: view.modelText, modelStatus: labels[view.status], continueAvailable: view.canContinue,
+      openOrderAvailable: view.canOpenOrder === true,
       observationGeneration: view.observationGeneration,
       ...(view.observation ? { cursorState: { taskId: view.observation.taskId, version: view.observation.contractVersion,
         cursor: view.observation.cursor, events: [], sync: 'synced' as const, reason: 'none' as const },
@@ -257,6 +258,15 @@ Page({
           await controller.submitClarification(input.draft.clarification_text); requireContext(requested);
         },
         continueInput: async requested => { requireContext(requested); await controller.continueAnswer(); requireContext(requested); },
+        openOrder: async requested => {
+          requireContext(requested);
+          const opened = await controller.openOrder(id => {
+            requireContext(requested);
+            if (id !== this.orderId) throw Error('client_order_navigation_changed');
+            navigate(buildUrl(ROUTES.order, { id }));
+          });
+          if (!opened) throw Error('client_order_navigation_unavailable');
+        },
         reconcile: async requested => { requireContext(requested); await controller.refresh(); requireContext(requested); },
       };
         widget?.attachHost?.(host); widget?.hostShow?.(true); this.clientTaskHostKey = key;

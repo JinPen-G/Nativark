@@ -10,7 +10,7 @@ import { chooseInspectionHistoryItem, attachRemoteInspectionPage } from './inspe
 import { validateInspectionWire, isStaffUploadObservationRequest } from './inspection-wire';
 import { createStaffInspectionTaskApi } from '../../api/ai-inspection-tasks';
 import { uploadStaffImage, observeOriginalStaffUpload, completeObservedStaffUpload, type StaffUploadReference } from '../../api/uploads';
-import { readStorage, writeStorage, removeStorage } from '../../core/storage';
+import { readInspectionOriginalStorage, writeInspectionOriginalStorage, removeInspectionOriginalStorage } from './inspection-original-storage';
 import { newKey } from '../../core/keys';
 import { staffInspectionTaskStorageKey } from './inspection-task-session';
 
@@ -54,6 +54,7 @@ interface IntakeRuntime {
   busy: boolean; recording: boolean; discardRecording: boolean; recorder?: WechatMiniprogram.RecorderManager;
   stopListener?: Parameters<WechatMiniprogram.RecorderManager['onStop']>[0]; errorListener?: () => void;
   local: LocalMedia | null; target: AiInspectionTarget | null; locator: IntakeLocator | null; key: string; held: unknown;
+  storageReady: boolean; retirementPending: boolean;
   work: InspectionPageWorkContext | null;
   observation?: StaffUploadObservationResponse; message?: string;
   abortUpload?: () => void;
@@ -78,7 +79,7 @@ const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.s
 function intakeState(page: Page): IntakeRuntime {
   let state = intakeStates.get(page);
   if (!state) { state = { busy: false, recording: false, discardRecording: false, local: null, target: null,
-    locator: null, key: '', held: undefined, work: null }; intakeStates.set(page, state); }
+    locator: null, key: '', held: undefined, storageReady: false, retirementPending: false, work: null }; intakeStates.set(page, state); }
   return state;
 }
 function intakeKey(page: Page, stage: 'pickup' | 'return') {
@@ -87,12 +88,37 @@ function intakeKey(page: Page, stage: 'pickup' | 'return') {
   return `rental-os-staff:inspection-intake:${encodeURIComponent(JSON.stringify([session.tenant.tenantId,
     session.currentWorkspaceId, session.user.id, page.data.id, page.template.id, stage]))}`;
 }
+function withdrawIntakeStorage(state: IntakeRuntime) {
+  state.storageReady = false; state.local = null; state.target = null; state.observation = undefined;
+}
+function readIntakeStorage(state: IntakeRuntime, key: string) {
+  try { return readInspectionOriginalStorage(key); }
+  catch { withdrawIntakeStorage(state); throw Error('原媒体引用无法读取，请保留原键并核对'); }
+}
+function assertIntakeRetained(state: IntakeRuntime) {
+  if (!state.work?.current() || !state.key) throw Error('原媒体引用不可核对');
+  const raw = readIntakeStorage(state, state.key);
+  // Only a previously observed completed draft can reach retirement. A lost
+  // delete/readback ACK is resolved by a strict read of this same original key.
+  if (state.retirementPending && raw === undefined) {
+    state.held = undefined; state.locator = null; state.target = null;
+    state.retirementPending = false; state.observation = undefined;
+  } else if (!equal(raw, state.held)) {
+    withdrawIntakeStorage(state); throw Error('原媒体引用已改变，请保留原记录');
+  }
+  state.storageReady = true;
+}
 function loadIntake(page: Page, stage: 'pickup' | 'return', state: IntakeRuntime) {
   const key = intakeKey(page, stage);
-  if (state.key === key) return;
-  state.local = null; state.target = null; state.locator = null; state.key = key;
-  const raw = readStorage<unknown>(key); state.held = raw === undefined ? undefined : copy(raw);
-  if (raw === undefined) return;
+  if (state.key === key) {
+    assertIntakeRetained(state);
+    if (state.locator) state.target = state.locator.target;
+    return;
+  }
+  withdrawIntakeStorage(state);
+  state.locator = null; state.key = ''; state.held = undefined; state.retirementPending = false;
+  const raw = readIntakeStorage(state, key);
+  if (raw === undefined) { state.key = key; state.storageReady = true; return; }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('原媒体草稿引用不可用');
   const row = raw as Record<string, unknown>;
   const keys = ['version','target','templateVersion','bindingFingerprint','kind','upload','file','evidence','create','draftId','phase'];
@@ -120,13 +146,19 @@ function loadIntake(page: Page, stage: 'pickup' | 'return', state: IntakeRuntime
   if (parsed.create && (!equal(parsed.target, { orderId: parsed.create.orderId, allocationId: parsed.create.allocationId,
     templateId: parsed.create.templateId, stage: parsed.create.stage }) || parsed.create.bindingFingerprint !== parsed.bindingFingerprint
     || !parsed.evidence || !equal(parsed.create.evidence, [parsed.evidence]))) throw Error('原检查草稿请求不可用');
-  state.locator = parsed; state.target = parsed.target;
+  // The key is a successful-load witness, not a request to skip a failed read.
+  state.locator = parsed; state.target = parsed.target; state.held = copy(raw);
+  state.key = key; state.storageReady = true;
 }
 function retainIntake(state: IntakeRuntime, next: IntakeLocator) {
-  if (!state.work?.current() || !state.key || !equal(readStorage(state.key), state.held)) throw Error('原媒体引用已改变');
-  const snapshot = copy(next); writeStorage(state.key, snapshot);
-  if (!equal(readStorage(state.key), snapshot)) throw Error('未保留原媒体引用，不发起下一操作');
+  assertIntakeRetained(state);
+  const snapshot = copy(next);
+  // Preserve this attempted original operation if persistence or its readback
+  // is uncertain. Do not return to an empty locator and mint another key.
   state.held = snapshot; state.locator = snapshot;
+  state.storageReady = false;
+  try { writeInspectionOriginalStorage(state.key, snapshot); assertIntakeRetained(state); }
+  catch { withdrawIntakeStorage(state); throw Error('原媒体引用保存待核对，不发起下一操作'); }
 }
 function requiredIntake(state: IntakeRuntime): IntakeLocator {
   if (!state.locator) throw Error('原媒体引用丢失');
@@ -137,10 +169,10 @@ function showIntake(page: Page, state: IntakeRuntime, message?: string) {
   if (message !== undefined) state.message = message;
   const locator = state.locator;
   page.setData({ aiInspectionRecording: state.recording, aiInspectionMediaBusy: state.busy,
-    aiInspectionMediaReady: Boolean(state.local), aiInspectionCanUpload: Boolean(state.local && !locator && !state.busy && !state.recording),
-    aiInspectionCanSaveDraft: locator?.phase === 'evidence_ready' && !state.busy,
-    aiInspectionCanRecoverMedia: Boolean(locator && !state.busy),
-    aiInspectionCanVerifyUpload: Boolean(!state.busy && state.observation?.state === 'observed' && locator?.phase === 'upload_pending'),
+    aiInspectionMediaReady: Boolean(state.local), aiInspectionCanUpload: Boolean(state.storageReady && state.local && !locator && !state.busy && !state.recording),
+    aiInspectionCanSaveDraft: state.storageReady && locator?.phase === 'evidence_ready' && !state.busy,
+    aiInspectionCanRecoverMedia: Boolean((locator || !state.storageReady && state.work) && !state.busy),
+    aiInspectionCanVerifyUpload: Boolean(state.storageReady && !state.busy && state.observation?.state === 'observed' && locator?.phase === 'upload_pending'),
     aiInspectionMediaMessage: state.message || (locator?.phase === 'draft_saved' ? '原 AI 检查草稿已保存；识别仍须明确启动'
       : locator?.phase === 'evidence_ready' ? '原附件已核对，请明确保存 AI 检查草稿'
       : locator ? '原上传或草稿待核对，不重新上传或换键提交'
@@ -155,16 +187,21 @@ async function selectIntakeTarget(page: Page, stage: 'pickup' | 'return', state:
     // whose original create receipt is observed; an unknown is never replaced.
     const receipt = await createStaffInspectionTaskApi(work).readDraftOperation({ kind: 'create', request: original.create });
     if (!work.current() || receipt.status !== 'found' || receipt.result.status !== 'draft_saved'
-      || receipt.result.draftId !== original.draftId || receipt.result.inspectionId !== null
-      || !equal(readStorage(state.key), state.held)) throw Error('原草稿保存尚不可核对，保留原材料引用');
-    removeStorage(state.key);
-    if (readStorage(state.key) !== undefined) throw Error('原材料引用尚未更新，请稍后再选取');
-    state.locator = null; state.held = undefined; state.observation = undefined;
+      || receipt.result.draftId !== original.draftId || receipt.result.inspectionId !== null) throw Error('原草稿保存尚不可核对，保留原材料引用');
+    assertIntakeRetained(state);
+    if (state.locator) {
+      state.retirementPending = true;
+      try { removeInspectionOriginalStorage(state.key); }
+      catch { withdrawIntakeStorage(state); throw Error('原材料清理待核对，保留原引用'); }
+    }
+    assertIntakeRetained(state);
+    if (state.retirementPending) { withdrawIntakeStorage(state); throw Error('原材料引用尚未更新，请稍后核对'); }
   }
   state.message = ''; state.local = null;
   const rows = stage === 'pickup' ? (page.data.groups ?? []).map(row => row.allocationId) : (page.data.allocations ?? []).map(row => row.id);
   const index = await chooseInspectionHistoryItem(rows.map(id => `本次${stage === 'pickup' ? '交付' : '归还'}资源 ${id.slice(-12)}`), work.current);
   if (index === null || !work.current() || !rows[index] || !page.template) throw Error('未选择当前分配资源');
+  assertIntakeRetained(state);
   const target = { orderId: work.orderId, allocationId: rows[index], templateId: page.template.id, stage };
   state.target = target; return work;
 }
@@ -173,13 +210,16 @@ export async function chooseInspectionPageImage(page: Page, stage: 'pickup' | 'r
   state.busy = true;
   try {
     const work = await selectIntakeTarget(page, stage, state);
+    assertIntakeRetained(state);
     const file = await new Promise<{ path: string; size: number }>((resolve, reject) => wx.chooseImage({ count: 1,
       sourceType: ['camera','album'], sizeType: ['compressed'], success: value => {
         const selected = value.tempFiles[0]; if (!selected) reject(Error('未选择图片')); else resolve({ path: selected.path, size: selected.size });
       }, fail: () => reject(Error('相机或相册不可用，可继续人工检查')) }));
     if (!work.current()) return;
+    assertIntakeRetained(state);
     const image = await new Promise<WechatMiniprogram.GetImageInfoSuccessCallbackResult>((resolve, reject) => wx.getImageInfo({ src: file.path, success: resolve, fail: () => reject(Error('图片格式无法核对')) }));
     if (!work.current()) return;
+    assertIntakeRetained(state);
     const mimeType = image.type === 'png' ? 'image/png' : image.type === 'jpeg' ? 'image/jpeg' : null;
     if (!mimeType || !Number.isSafeInteger(file.size) || file.size < 1 || file.size > mediaLimit) throw Error('AI 图片只接 PNG/JPEG，单文件不超过512KB；其他材料可走原人工检查');
     state.local = { ...file, kind: 'image', mimeType, fileName: `${stage}-ai-evidence.${mimeType === 'image/png' ? 'png' : 'jpg'}` };
@@ -190,23 +230,30 @@ export async function startInspectionPageRecording(page: Page, stage: 'pickup' |
   const state = intakeState(page); if (state.busy || state.recording) return;
   state.busy = true;
   try {
-    const work = await selectIntakeTarget(page, stage, state), recorder = wx.getRecorderManager();
+    const work = await selectIntakeTarget(page, stage, state);
+    assertIntakeRetained(state);
+    const recorder = wx.getRecorderManager();
     const route = recorderOwner(recorder);
     if (route.owner) throw Error('原录音尚未停止，请稍后再录制');
     state.recorder = recorder; state.discardRecording = false;
     state.stopListener = result => {
       state.recording = false;
       if (!work.current() || state.discardRecording) return;
-      if (!Number.isSafeInteger(result.duration) || !Number.isSafeInteger(result.fileSize)
-        || result.duration < 1 || result.duration > 12000 || result.fileSize < 1 || result.fileSize > mediaLimit) {
-        showIntake(page, state, 'WAV录音不超过12秒/512KB；无法核对时继续人工检查'); return;
+      try {
+        assertIntakeRetained(state);
+        if (!Number.isSafeInteger(result.duration) || !Number.isSafeInteger(result.fileSize)
+          || result.duration < 1 || result.duration > 12000 || result.fileSize < 1 || result.fileSize > mediaLimit) {
+          showIntake(page, state, 'WAV录音不超过12秒/512KB；无法核对时继续人工检查'); return;
+        }
+        state.local = { path: result.tempFilePath, size: result.fileSize, kind: 'audio', mimeType: 'audio/wav', fileName: `${stage}-ai-evidence.wav` };
+        showIntake(page, state);
+      } catch (error) {
+        showIntake(page, state, error instanceof Error ? error.message : '原录音材料待核对');
       }
-      state.local = { path: result.tempFilePath, size: result.fileSize, kind: 'audio', mimeType: 'audio/wav', fileName: `${stage}-ai-evidence.wav` };
-      showIntake(page, state);
     };
     state.errorListener = () => { state.recording = false; if (work.current()) showIntake(page, state, '录音权限或设备不可用，可继续人工检查'); };
     route.owner = state; state.recording = true;
-    try { recorder.start({ format: 'wav', sampleRate: 16000, numberOfChannels: 1, duration: 12000 }); }
+    try { assertIntakeRetained(state); recorder.start({ format: 'wav', sampleRate: 16000, numberOfChannels: 1, duration: 12000 }); }
     catch (error) { route.owner = null; state.recording = false; throw error; }
   } catch (error) { showIntake(page, state, error instanceof Error ? error.message : '录音暂不可用'); }
   finally { state.busy = false; showIntake(page, state); }
@@ -228,8 +275,11 @@ export function clearInspectionPageMedia(page: Page) {
   state.local = null; intakeStates.delete(page);
 }
 async function readIntakeTemplate(page: Page, state: IntakeRuntime) {
+  assertIntakeRetained(state);
   if (!state.work?.current() || !state.target || !page.template) throw Error('当前检查对象已改变');
   const api = createStaffInspectionTaskApi(state.work), value = await api.readTemplate(state.target), session = currentSession();
+  assertIntakeRetained(state);
+  if (!state.target) throw Error('原检查对象已改变');
   if (!state.work.current() || !session || value.template.id !== state.target.templateId || value.template.version !== page.template.version
     || value.orderId !== state.target.orderId || value.allocationId !== state.target.allocationId || value.stage !== state.target.stage
     || value.owner.actorId !== session.user.id || value.scope.kind !== 'workspace' || value.scope.tenantId !== session.tenant.tenantId
@@ -241,6 +291,8 @@ export async function uploadInspectionPageMedia(page: Page, stage: 'pickup' | 'r
   state.work = captureInspectionPageWork(page); state.busy = true; showIntake(page, state, '核对原模板和上传范围');
   try {
     const template = await readIntakeTemplate(page, state), local = state.local, target = state.target;
+    assertIntakeRetained(state);
+    if (!local || !target || !state.storageReady) throw Error('原媒体引用不可核对');
     const operationKey = newKey('inspection-upload'), handoverBatchId = page.currentHandoverKey?.();
     if (!handoverBatchId) throw Error('原交接批次不可用');
     const file: StaffUploadObservationRequest['file'] = { businessModule: 'rental-core', businessType: 'rental_order',
@@ -270,7 +322,10 @@ export async function saveInspectionPageMediaDraft(page: Page, stage: 'pickup' |
   const state = intakeState(page); if (state.busy || state.locator?.phase !== 'evidence_ready' || !state.locator.evidence) return;
   state.work = captureInspectionPageWork(page); state.busy = true;
   try {
+    loadIntake(page, stage, state);
     const template = await readIntakeTemplate(page, state), locator = state.locator;
+    assertIntakeRetained(state);
+    if (!locator || locator.phase !== 'evidence_ready' || !locator.evidence) throw Error('原附件待核对');
     if (template.bindingFingerprint !== locator.bindingFingerprint || template.template.version !== locator.templateVersion) throw Error('原模板已改变，不能保存旧材料');
     const request: AiInspectionDraftCreateRequest = { ...locator.target, operationId: newKey('inspection-draft'),
       bindingFingerprint: locator.bindingFingerprint, results: {}, evidence: [locator.evidence!] };
@@ -290,6 +345,7 @@ export async function recoverInspectionPageMedia(page: Page, stage: 'pickup' | '
     const api = createStaffInspectionTaskApi(state.work);
     if (locator.phase === 'upload_pending') {
       const observation = await observeOriginalStaffUpload({ reference: { idempotencyKey: locator.upload.operationKey }, file: locator.file }, state.work);
+      assertIntakeRetained(state);
       state.observation = observation;
       if (observation.state !== 'observed') throw Error('未观察到原上传，不代表未登记；保留原键继续核对');
       if (locator.upload.sessionId && locator.upload.sessionId !== observation.session.sessionId
@@ -303,17 +359,21 @@ export async function recoverInspectionPageMedia(page: Page, stage: 'pickup' | '
     if (state.locator?.phase === 'evidence_pending') {
       const original = state.locator;
       if (!original.upload.fileAssetId) throw Error('原附件引用缺失');
+      assertIntakeRetained(state);
       const evidence = await api.bindEvidence({ ...original.target, attachmentId: original.upload.fileAssetId });
       retainIntake(state, { ...original, evidence, phase: 'evidence_ready' }); state.message = ''; return;
     }
     if (locator.phase === 'draft_pending') {
       if (!locator.create) throw Error('原草稿操作缺失');
       const receipt = await api.readDraftOperation({ kind: 'create', request: locator.create });
+      assertIntakeRetained(state);
       if (receipt.status !== 'found' || receipt.result.status !== 'draft_saved' || receipt.result.inspectionId !== null) throw Error('原草稿结果尚未证实，不重新保存');
       retainIntake(state, { ...locator, draftId: receipt.result.draftId, phase: 'draft_saved' });
     }
     if (state.locator?.draftId) {
       const draft = await api.readDraft({ ...state.locator.target, draftId: state.locator.draftId });
+      assertIntakeRetained(state);
+      if (!state.locator) throw Error('原草稿引用不可核对');
       if (draft.templateVersion !== state.locator.templateVersion || draft.bindingFingerprint !== state.locator.bindingFingerprint) throw Error('原草稿材料已改变');
       await openInspectionTaskPage(page, stage, 'execute');
     }
@@ -325,10 +385,12 @@ export async function verifyInspectionPageUpload(page: Page, stage: 'pickup' | '
   state.work = captureInspectionPageWork(page); state.busy = true;
   try {
     loadIntake(page, stage, state);
-    const locator = state.locator;
+    const locator = state.locator, expected = state.observation;
+    if (!locator || locator.phase !== 'upload_pending' || expected?.state !== 'observed') throw Error('原上传核验待核对');
     // Re-read immediately before the explicitly requested original completion.
     const observation = await observeOriginalStaffUpload({ reference: { idempotencyKey: locator.upload.operationKey }, file: locator.file }, state.work);
-    if (observation.state !== 'observed' || observation.descriptionHash !== state.observation.descriptionHash) throw Error('原上传描述已改变');
+    assertIntakeRetained(state);
+    if (observation.state !== 'observed' || observation.descriptionHash !== expected.descriptionHash) throw Error('原上传描述已改变');
     const asset = await completeObservedStaffUpload(observation, state.work);
     retainIntake(state, { ...locator, upload: { ...locator.upload, sessionId: observation.session.sessionId,
       fileAssetId: asset.id, stage: 'completed' }, phase: 'evidence_pending' }); state.message = '';
@@ -407,8 +469,8 @@ export async function openInspectionTaskPage(page: Page, stage: 'pickup' | 'retu
       if (binding.readOnly) {
         const key = staffInspectionTaskStorageKey({ tenantId: session.tenant.tenantId, workspaceId: session.currentWorkspaceId,
           ownerId: session.user.id, source });
-        const cached: unknown = wx.getStorageSync(key);
-        if (cached === '' || cached === null || cached === undefined) {
+        const cached = readInspectionOriginalStorage(key);
+        if (cached === undefined) {
           if (!item.recognitionSaves.length) {
             page.setData({ aiInspectionTaskMessage: '没有可恢复的原任务定位；请在本人检查历史核对原提交收据。' }); return;
           }

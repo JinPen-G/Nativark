@@ -81,7 +81,7 @@ export function createStaffInspectionTaskSession(input: {
     throw Error('staff_inspection_source_unavailable');
   }
   if (!validateInspectionWire('draft-read','request',source)) throw Error('staff_inspection_source_unavailable');
-  let closed = false, busy = false, invalid = false, opened = false, held: unknown, saved: Locator | null = null;
+  let closed = false, busy = false, invalid = false, opened = false, storageReady = false, held: unknown, saved: Locator | null = null;
   let task: StaffInspectionTaskView['task'] = null, question: StaffInspectionTaskView['question'] = null;
   let result: StaffInspectionTaskView['result'] = null, originalTaskId: string | null = null, view = empty();
   let resultState: 'observed' | 'not_observed' | null = null;
@@ -93,19 +93,34 @@ export function createStaffInspectionTaskSession(input: {
     && answerReceipt.requestId === saved.submission.submission.requestId);
   const emit = (status: StaffInspectionTaskView['status']) => {
     if (!current()) return;
+    const retained = opened && storageReady && !invalid;
+    if (!busy && !storageReady) status = saved && ['input_pending','task_pending','model_pending','answer_pending','continue_pending'].includes(saved.phase) ? 'unknown' : 'unavailable';
     view = { status, task, question, result,
-      canBegin: !readOnly && !busy && !invalid && (!saved || saved.phase === 'input_prepared' && creationState === 'not_observed'),
-      canRead: !busy && !invalid && Boolean(saved),
-      canStart: !readOnly && !busy && !invalid && saved?.phase === 'task_created' && !saved.modelAttempted && task?.status === 'queued',
-      canContinue: !busy && !invalid && canContinueOriginal(),
-      canSubmit: !readOnly && !busy && !invalid && task?.status === 'waiting_input' && Boolean(saved?.reference && question
+      canBegin: !readOnly && !busy && retained && (!saved || saved.phase === 'input_prepared' && creationState === 'not_observed'),
+      canRead: !busy && !invalid && (Boolean(saved) || !opened || !storageReady),
+      canStart: !readOnly && !busy && retained && saved?.phase === 'task_created' && !saved.modelAttempted && task?.status === 'queued',
+      canContinue: !busy && retained && canContinueOriginal(),
+      canSubmit: !readOnly && !busy && retained && task?.status === 'waiting_input' && Boolean(saved?.reference && question
         && Date.parse(question.expiresAt) > input.now() && (!saved.submission || saved.submission.submission.requestId !== question.requestId)) };
     input.changed(clone(view));
   };
+  const readRetained = () => {
+    try { return input.storage.read(); }
+    catch {
+      storageReady = false; task = null; question = null; result = null; resultState = null; answerReceipt = null;
+      throw Error('staff_inspection_locator_unavailable');
+    }
+  };
+  const assertRetained = () => {
+    if (!opened || !same(readRetained(), held)) {
+      storageReady = false; invalid = true; throw Error('staff_inspection_original_replaced');
+    }
+    storageReady = true;
+  };
   const load = () => {
-    if (opened) return;
-    const raw = input.storage.read(); held = raw === undefined || raw === null ? undefined : clone(raw);
-    if (held !== undefined) { try { saved = parseLocator(held,owner,source); } catch { invalid = true; throw Error('staff_inspection_locator_unavailable'); } }
+    if (opened) { assertRetained(); return; }
+    const raw = readRetained(), next = raw === undefined || raw === null ? undefined : clone(raw);
+    if (next !== undefined) { try { saved = parseLocator(next,owner,source); } catch { invalid = true; throw Error('staff_inspection_locator_unavailable'); } }
     else if (selectedReference) {
       // A current history reference is only an in-memory original read selector.
       // It does not replace a cached unknown operation or write a new journal.
@@ -113,15 +128,19 @@ export function createStaffInspectionTaskSession(input: {
         reference: selectedReference, submission: null, phase: 'model_active', modelAttempted: true, continueAttempted: false }, owner, source);
       originalTaskId = input.context.originalTaskId ?? null;
     }
-    opened = true;
+    held = next; opened = true; storageReady = true;
   };
   const persist = (value: Locator) => {
-    if (!current() || !same(input.storage.read(),held)) { invalid = true; throw Error('staff_inspection_original_replaced'); }
+    if (!current()) { invalid = true; throw Error('staff_inspection_original_replaced'); }
+    assertRetained();
     const checked = parseLocator(value,owner,source);
     if (readOnly) { saved = checked; return; }
-    input.storage.write(clone(checked));
-    if (!same(input.storage.read(),checked)) { invalid = true; throw Error('staff_inspection_locator_not_retained'); }
-    held = clone(checked); saved = checked;
+    // Once persistence is attempted, keep this exact command even if its ACK
+    // or readback is lost. Only a matching strict read restores write readiness.
+    held = clone(checked); saved = checked; storageReady = false;
+    try { input.storage.write(clone(checked)); }
+    catch { throw Error('staff_inspection_locator_not_retained'); }
+    assertRetained();
   };
   const acceptTask = (value: NonNullable<StaffInspectionTaskView['task']>) => {
     if (!current() || originalTaskId && value.taskId !== originalTaskId) throw Error('staff_inspection_task_changed');
@@ -191,9 +210,8 @@ export function createStaffInspectionTaskSession(input: {
     busy = true; emit('working'); let status: StaffInspectionTaskView['status'] = 'unavailable';
     try {
       load();
-      if (readOnly && !same(input.storage.read(), held)) throw Error('staff_inspection_original_replaced');
       status = await work();
-      if (readOnly && !same(input.storage.read(), held)) throw Error('staff_inspection_original_replaced');
+      assertRetained();
     }
     catch { task = null; question = null; result = null;
       resultState = null; answerReceipt = null;
@@ -212,14 +230,15 @@ export function createStaffInspectionTaskSession(input: {
       try {
         load();
         return await readInspectionHumanHandoff({ ...input.context, source: clone(source),
-          current: () => current() && !invalid && same(input.storage.read(), held) }, input.api);
+          current: () => current() && !invalid && same(readRetained(), held) }, input.api);
       } finally { busy = false; emit(status); }
     },
     async observe(): Promise<void> {
       if (!current() || invalid || !saved?.reference) return;
       const reference = clone(saved.reference);
       const receipt = await input.api.readCreation(reference);
-      if (!current() || !same(reference,saved?.reference) || !same(input.storage.read(),held)) throw Error('staff_inspection_context_changed');
+      if (!current() || !same(reference,saved?.reference)) throw Error('staff_inspection_context_changed');
+      assertRetained();
       if (receipt.state !== 'observed') throw Error('staff_inspection_task_unavailable');
       if (!busy && (!task || receipt.task.revision !== task.revision || receipt.task.status !== task.status
         || ['succeeded','partially_succeeded','failed','cancelled'].includes(receipt.task.status) && !result)) return session.refresh();
@@ -228,8 +247,9 @@ export function createStaffInspectionTaskSession(input: {
       // terminal result reference is also read-only and cannot change a key.
       if (['succeeded','partially_succeeded','failed','cancelled'].includes(receipt.task.status)) {
         const lookup = await input.api.readResultReference(reference);
-        if (!current() || !same(reference,saved?.reference) || !same(input.storage.read(),held)
+        if (!current() || !same(reference,saved?.reference)
           || lookup.task?.taskId !== originalTaskId) throw Error('staff_inspection_result_changed');
+        assertRetained();
         if (lookup.state === 'observed') {
           if (lookup.reference.taskId !== originalTaskId || Object.entries(reference)
             .some(([key, expected]) => lookup.reference[key as keyof AiInspectionResultReadRequest] !== expected)) throw Error('staff_inspection_result_changed');
@@ -239,7 +259,7 @@ export function createStaffInspectionTaskSession(input: {
       emit(busy ? 'working' : view.status);
     },
     async begin(inputId?: string) {
-      if (readOnly) return;
+      if (readOnly || !storageReady) return;
       return run(async () => {
         if (saved && saved.phase !== 'input_prepared') return readOriginal();
         if (!saved) {
@@ -254,6 +274,7 @@ export function createStaffInspectionTaskSession(input: {
           persist({ version: 'staff-inspection-task-1', owner, source, input: null, reference, submission: null, phase: 'input_prepared', modelAttempted: false, continueAttempted: false });
         } else {
           if (!draft.state.evidence.length || draft.state.evidence.length > 8) throw Error('staff_inspection_evidence_unavailable');
+          assertRetained();
           const command = { ...source, operationId: input.newKey(), expectedRevision: draft.revision,
             question: '识别当前检查证据中的原模板字段；缺项留空，候选由员工逐项核实。' };
           persist({ version: 'staff-inspection-task-1', owner, source, input: command, reference: null, submission: null, phase: 'input_pending', modelAttempted: false, continueAttempted: false });
@@ -272,7 +293,7 @@ export function createStaffInspectionTaskSession(input: {
         acceptTask(created.task); persist({ ...saved!, phase: 'task_created' }); return readOriginal();
       });
     },
-    start: () => readOnly ? Promise.resolve() : run(async () => {
+    start: () => readOnly || !storageReady ? Promise.resolve() : run(async () => {
       const status = await readOriginal();
       if (!saved?.reference || saved.modelAttempted || saved.phase !== 'task_created' || task?.status !== 'queued') return status;
       persist({ ...saved, phase: 'model_pending', modelAttempted: true }); emit('working');
@@ -291,6 +312,7 @@ export function createStaffInspectionTaskSession(input: {
         if (!current() || !pending || !same(pending,original) || Date.parse(original.expiresAt) <= input.now()) throw Error('staff_inspection_question_changed');
         const fields = original.contract.fields;
         if (!values || typeof values !== 'object' || Object.keys(values).some(key => !fields.some(field => field.fieldId === key))) throw Error('staff_inspection_answer_invalid');
+        assertRetained();
         const submission: AiInspectionRecognitionTaskResumeRequest = { reference: clone(saved!.reference!), submission: {
           draftVersion: original.contract.draftVersion, taskId, requestId: original.requestId,
           expectedRevision: original.revision, submissionKey: input.newKey(),
@@ -302,7 +324,7 @@ export function createStaffInspectionTaskSession(input: {
         persist({ ...saved!, phase: 'model_active' }); return readOriginal();
       });
     },
-    continueAnswer: () => readOnly ? Promise.resolve() : run(async () => {
+    continueAnswer: () => readOnly || !storageReady ? Promise.resolve() : run(async () => {
       const status = await readOriginal();
       if (!canContinueOriginal() || !saved?.submission || !answerReceipt) return status;
       const submission = clone(saved.submission), receipt = clone(answerReceipt);
