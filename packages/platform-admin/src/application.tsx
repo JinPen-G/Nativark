@@ -87,6 +87,8 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/platform/tenants/new", element: <PublicManagementPage kind="tenants" edit /> },
     { path: "/platform/tenants/:id", element: <PublicManagementPage kind="tenants" edit /> },
     { path: "/platform/tenants/:id/status", element: <PublicManagementPage kind="tenants" edit status /> },
+    { path: "/settings/users/:id/reset-password", element: <PublicManagementPage kind="users" action /> },
+    { path: "/settings/roles/:id/delete", element: <PublicManagementPage kind="roles" action /> },
     ...(["users", "roles"] as const).flatMap(kind => [
       { path: `/settings/${kind}`, element: <PublicManagementPage kind={kind} /> },
       { path: `/settings/${kind}/new`, element: <PublicManagementPage kind={kind} edit /> },

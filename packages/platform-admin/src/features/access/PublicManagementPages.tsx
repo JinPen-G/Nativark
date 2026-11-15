@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { RoleScope, TenantStatus, type CreatePlatformTenantRequest, type CreatePlatformTenantResult,
-  type PermissionModule, type PlatformTenantSummary, type SaveSystemRoleRequest, type SaveSystemUserRequest,
+  type PermissionModule, type PlatformTenantSummary, type ResetUserPasswordResult, type SaveSystemRoleRequest, type SaveSystemUserRequest,
   type SystemRoleRow, type SystemUserRow, type UpdateTenantRequest, type UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
 import { Alert, Button, ConfirmAction, CopyButton, DataTableStatus, DataTableText, Form, FormSection, Input,
   ListFilters, ListSection, Result, SaveButton, Select, Switch, Table, useListFilter } from "../../components/ui";
@@ -63,6 +63,10 @@ function Directory({ kind }: { kind: Kind }) {
             { title: en ? "Actions" : "操作", key: "actions", render: (_, row) => <>
               <Button onClick={() => navigate(`${base[kind]}/${encodeURIComponent(rowId(row))}`)}>{en ? "Details / edit" : "查看与编辑"}</Button>
               {kind === "tenants" && <Button onClick={() => navigate(`${base.tenants}/${encodeURIComponent(rowId(row))}/status`)}>{en ? "Change status" : "变更状态"}</Button>}
+              {"account" in row && row.id !== user?.id && (!row.isPlatformAdmin || user?.isPlatformAdmin) && <Button
+                onClick={() => navigate(`${base.users}/${encodeURIComponent(row.id)}/reset-password`)}>{en ? "Reset password" : "重置密码"}</Button>}
+              {"code" in row && !isFixedRole(row) && <Button onClick={() => navigate(`${base.roles}/${encodeURIComponent(row.id)}/delete`)}>
+                {en ? "Delete" : "删除"}</Button>}
             </> }
           ]} />
       </ListSection>
@@ -94,8 +98,8 @@ function Editor<Values extends object>({ kind, initial, status = false, readOnly
       setSaved(result); setDirty(false); notifyFormSaved(form, submitted);
       // 人员创建响应可能含一次性口令，仅放当前编辑器，不写查询缓存或浏览器存储。
       try {
-        await session.queryClient.invalidateQueries({ queryKey: ["public-management", session.currentSessionEpoch(), kind] });
-        await session.queryClient.invalidateQueries({ queryKey: ["public-core-access-directory", session.currentSessionEpoch()] });
+        await session.queryClient.invalidateQueries({ queryKey: ["public-management", session.currentSessionEpoch(), kind] }, { throwOnError: true });
+        await session.queryClient.invalidateQueries({ queryKey: ["public-core-access-directory", session.currentSessionEpoch()] }, { throwOnError: true });
         await session.bootstrap();
       } catch { setRefreshFailed(true); }
       return result;
@@ -104,7 +108,7 @@ function Editor<Values extends object>({ kind, initial, status = false, readOnly
   };
   const title = { users: en ? "Member details" : "人员资料", roles: en ? "Role details" : "角色资料",
     tenants: status ? en ? "Tenant status" : "租户状态" : en ? "Tenant details" : "租户资料" }[kind];
-  return <Form form={form} layout="vertical" disabled={busy || readOnly || Boolean(saved)} requiredMark={false}
+  return <Form form={form} layout="vertical" disabled={busy || readOnly} requiredMark={false}
     onValuesChange={() => setDirty(formSnapshotFingerprint(form.getFieldsValue(true)) !== baseline.current)}
     onFinish={values => { void save(values).catch(() => undefined); }}>
     <PageHeading title={title} brandName={brandName} extra={<>
@@ -115,19 +119,19 @@ function Editor<Values extends object>({ kind, initial, status = false, readOnly
       {!readOnly && !saved && <SaveButton form={form} label={en ? "Save" : "保存"} onSave={save} pending={busy}
         disabled={unavailable || failed || !query.data || Boolean(query.error) || Boolean(id && !row)} />}
     </>} />
-    <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
+    {saved && <Alert type="success" title={en ? "The change is recorded." : "变更已记录。"}
+      description={"temporaryPassword" in saved && saved.temporaryPassword
+        ? <>{en ? "Temporary password (shown once)" : "一次性临时密码"} <code>{saved.temporaryPassword}</code><CopyButton disabled={false} value={saved.temporaryPassword} /></>
+        : en ? "Use the latest directory for the current state." : "当前状态以最新目录读取为准。"} />}
+    {refreshFailed && <Alert type="warning" title={en ? "The change is recorded, but the latest directory could not be read. Return to the directory to reload it." : "变更已记录，最新目录未能读到。请返回目录重新读取。"} />}
+    {!saved && <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
       {id && !row ? <Result status="404" title="404" /> : <>
         {readOnly && <Alert type="info" title={kind === "roles" ? en ? "Fixed administrator roles are read-only." : "固定管理员角色只读。"
           : en ? "Only a tenant administrator can edit this administrator account." : "只有租户管理员可以修改此管理员账号。"} />}
         {failed && !saved && <Alert type="warning" title={en ? "Save is unconfirmed. Read the original directory before trying again." : "保存未确认，请重新读取原目录核对后再操作。"} />}
-        {saved && <Alert type="success" title={en ? "The change is recorded." : "变更已记录。"}
-          description={"temporaryPassword" in saved && saved.temporaryPassword
-            ? <>{en ? "Temporary password (shown once)" : "一次性临时密码"} <code>{saved.temporaryPassword}</code><CopyButton value={saved.temporaryPassword} /></>
-            : en ? "Use the latest directory for the current state." : "当前状态以最新目录读取为准。"} />}
-        {refreshFailed && <Alert type="warning" title={en ? "The change is recorded, but the latest directory could not be read. Return to the directory to reload it." : "变更已记录，最新目录未能读到。请返回目录重新读取。"} />}
         {fields}
       </>}
-    </QueryState><UnsavedChangesGuard dirty={dirty} busy={busy} />
+    </QueryState>}<UnsavedChangesGuard dirty={dirty} busy={busy} />
   </Form>;
 }
 
@@ -210,9 +214,60 @@ function TenantEditor({ status }: { status: boolean }) {
       </FormSection>}</>} />;
 }
 
-export function PublicManagementPage({ kind, edit = false, status = false }: { kind: Kind; edit?: boolean; status?: boolean }) {
+/** 重置/删除是单次明确确认；原响应和随后目录读取分开，口令不进入查询缓存。 */
+function AccessAction({ kind }: { kind: "users" | "roles" }) {
+  const { id } = useParams(), { user } = useAdminSession(), { session, brandName } = usePlatformApplication();
+  const { locale } = useLocale(), en = locale === "en-US", navigate = useNavigate();
+  const query = useDirectory<Array<SystemUserRow | SystemRoleRow>>(kind), row = query.data?.find(item => item.id === id);
+  const pending = useRef<Promise<unknown> | null>(null);
+  const [busy, setBusy] = useState(false), [failed, setFailed] = useState(false), [refreshFailed, setRefreshFailed] = useState(false);
+  const [saved, setSaved] = useState<ResetUserPasswordResult | { id: string; deleted: true }>();
+  const allowed = row && ("account" in row ? row.id !== user?.id && (!row.isPlatformAdmin || user?.isPlatformAdmin) : !isFixedRole(row));
+  const submit = () => {
+    if (pending.current) return pending.current;
+    if (!allowed || query.error || failed || saved) return Promise.reject(new Error(en ? "Read and check the current account or role first." : "请先读取并核对当前账号或角色。"));
+    setBusy(true);
+    const operation = session.runtime.request<ResetUserPasswordResult | { id: string; deleted: true }>(
+      `/platform/${kind}/${encodeURIComponent(row.id)}${kind === "users" ? "/reset-password" : ""}`,
+      { method: kind === "users" ? "post" : "delete" }).then(async result => {
+      setSaved(result);
+      try {
+        await session.queryClient.invalidateQueries({ queryKey: ["public-management", session.currentSessionEpoch(), kind] }, { throwOnError: true });
+        await session.queryClient.invalidateQueries({ queryKey: ["public-core-access-directory", session.currentSessionEpoch()] }, { throwOnError: true });
+        await session.bootstrap();
+      } catch { setRefreshFailed(true); }
+      return result;
+    }).catch(error => { setFailed(true); throw error; }).finally(() => { pending.current = null; setBusy(false); });
+    pending.current = operation; return operation;
+  };
+  return <><PageHeading brandName={brandName} title={kind === "users" ? en ? "Reset member password" : "重置成员密码" : en ? "Delete role" : "删除角色"}
+    extra={<Button disabled={busy} onClick={() => navigate(base[kind])}>{en ? "Back" : "返回"}</Button>} />
+      {saved ? <Alert type="success" title={en ? "The change is recorded." : "变更已记录。"}
+        description={"temporaryPassword" in saved ? <>{en ? "Temporary password (shown once)" : "一次性临时密码"} <code>{saved.temporaryPassword}</code>
+          <CopyButton value={saved.temporaryPassword} /></> : en ? "The role is deleted." : "角色已删除。"} />
+        : <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
+          {!row ? <Result status="404" title="404" /> : !allowed ? <Result status="403" title="403" /> : <>
+          <Alert type="info" title={"account" in row ? `${row.displayName} · ${row.account}` : `${row.name} · ${row.code}`}
+            description={kind === "users" ? en ? "This revokes existing sessions. The member must change the temporary password at next sign-in." : "重置将撤销旧会话，成员下次登录必须修改临时密码。"
+              : en ? "Fixed or assigned roles cannot be deleted. The server checks the current assignments when you confirm." : "固定角色或已分配角色不能删除，确认时由服务端核对当前关联。"} />
+          {failed && <><Alert type="warning" title={en ? "The result is unconfirmed. Check the current directory before confirming a new operation." : "结果未确认，请先核对当前目录，再明确发起新操作。"}
+            description={kind === "users" ? en ? "A new reset replaces any previously issued password; the old password cannot be retrieved." : "再次重置会替换此前的密码，旧临时密码不能重新读取。" : undefined} />
+            <ConfirmAction label={en ? "Read current directory" : "读取当前目录"} disabled={busy}
+              prompt={en ? "Read the current state before starting a new operation?" : "读取当前状态后，再决定是否发起新操作？"}
+              onConfirm={async () => { const latest = await query.refetch(); if (latest.isError) throw latest.error; setFailed(false); }} /></>}
+          <ConfirmAction label={kind === "users" ? en ? "Reset password" : "重置密码" : en ? "Delete role" : "删除角色"} disabled={busy || failed}
+            prompt={kind === "users" ? en ? "Revoke old sessions and issue a new temporary password?" : "撤销旧会话并签发新的临时密码？" : en ? "Delete this unassigned role?" : "确认删除此未分配角色？"}
+            onConfirm={submit} />
+        </>}
+      </QueryState>}
+      {refreshFailed && <Alert type="warning" title={en ? "The change is recorded. Return to the directory to read its current state." : "变更已记录，请返回目录重新读取当前状态。"} />}
+    <UnsavedChangesGuard dirty={false} busy={busy} /></>;
+}
+
+export function PublicManagementPage({ kind, edit = false, status = false, action = false }: { kind: Kind; edit?: boolean; status?: boolean; action?: boolean }) {
   const { id } = useParams();
-  return <ManagementGate kind={kind} creating={edit && !id}>{edit ? kind === "tenants" ? <TenantEditor key={`${id ?? "new"}:${status}`} status={status} />
+  return <ManagementGate kind={kind} creating={edit && !id}>{action && kind !== "tenants" ? <AccessAction key={id} kind={kind} />
+    : edit ? kind === "tenants" ? <TenantEditor key={`${id ?? "new"}:${status}`} status={status} />
     : kind === "roles" ? <RoleEditor key={id ?? "new"} /> : <UserEditor key={id ?? "new"} />
     : <Directory kind={kind} />}</ManagementGate>;
 }
