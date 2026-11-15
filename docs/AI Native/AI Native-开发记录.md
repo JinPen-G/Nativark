@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry09-model-text-control-projection-20261115"></a>
+## ENTRY-09 客户与后台原模型正文的安全显示阶段（2026-11-15）
+
+前置报价阶段 `3ff68f6ce38cb7def93ac44d93d143dc97229d80` 已普通推送，GitHub回读一致，ENTRY-03／07全文已固定。本阶段核接dev2冻结的客户Web[原Task正文](../../apps/tenant-website/src/features/ai-native/ClientTaskWorkbench.tsx)与[原生Task组件](../../apps/miniprogram/src/components/ai-native/ai-task-workbench/index.ts)，另修后台[既有安全文本助手](../../apps/admin/src/features/ai-native/safe-display.ts)。正式模型结果允许文字作为数据，不代表控制字符可以直接显示；原NUL／BEL／ESC／DEL／C1及双向控制字符反例成立，HTML已按纯文字显示，没有将模型URL当导航。
+
+三个入口仅过滤显示投影的C0／C1（保留TAB、LF、CR）及双向控制字符，保留正常文字、ZWNJ／ZWJ组合字、换行和原长度上限。Web正文使用原纯文本及方向隔离；原生组件保留完整原snapshot，只把setData中的modelText换为安全显示文字；后台ModelText沿原safeDisplayText，不新增富文本、Markdown执行或URL行为。原Artifact／结果hash、财务与资源账、原Task／Run及恢复操作不改写，模型说明仍不能证明金额或业务状态。
+
+dev2客户两blob `1e9e9ffa5c4a2b8bddad3ace0c435d20301f9ef4`／`24e86f58686bdc00646744d6b0235ac27019f9be`已由Root核同。作者正式合同→实际TSX／Component反例stdin `a1fe07d7f388b4aa93267eafb2a0359a786c941adaa485345381aa0072885d98`退出0证明旧缺陷；修后原组 `ac293314bc91a266b720342d2bc9238827d97f86a93300a49971bbc5bf412773`退出0，人工文字和原模型合同不变。作者Web2根／236源、原ES2019微信2根／221源、125份内存声明零诊断，stdin `32f729a609aa47a6cffa614be37e4acdb772deffde55da90abe40143ecfe2e00`退出0；共享原生boundedText的显示修复已随前置报价片固定，其字节不在本片重复提交。
+
+Root独立正式结果合同→真实客户TSX／Component／setData模拟 `ac79f617cd723407bb6f6a3b24e64dd60cf414d06337817c23505ae345307493`退出0，两端控制字符残留0、原packet.text未变、模型HTML／导航不执行。后台safeDisplayText→真实ModelText及label／长度／换行／组合字组 `68c24f36ba78a0109bc4f9916a0a3d3758c092ee3bf4135cee6fee8f516b9026`退出0；后台TS5.9.3三根／204源、125内存声明、shared／后台零诊断，stdin `94d73742e215e388c2ef1a9aada2062a1f638f7923d92d5316bcff1e7a7af644`退出0。首类型驱动没有保留原@/app/locale绝对映射，出现1条别名诊断，仅修内存路径配置后通过，未改生产locale或类型断言。
+
+ENTRY-09仍75%，全文还有员工候选／人工值显示和客户结构化候选名称的同类P2，客户正文三源绿色不能替代它们；员工及客户两位助手已按互不冲突范围推进。原读权／最少字段／Task来源和查询版本证据保持，未将其他入口的已闭进度借给09。原四处文档缺链不伪造附件；本片只提交上述三源和既有记录／接续，不夹助手活动候选文件。
+
+原正文、后台ModelText和原生消费者均为实际源码，HTTP／存储／React／微信宿主及数据为明确模拟，不称实页或真实微信通过。本阶段使用本树原offline preload／不可达DB／内存audit0，Root进程全部退出，`output/.tmp/ain-entry09-root-text-display-20261115`未创建，无新增／扩写测试脚本、依赖、声明／构建副本或残留。必要组件清单只读审计退出0、badHashes为空；未改后台vendor或视觉体系。阶段立即中文提交／普通推送，原main节点继续由PM串行处理。
+
 <a id="ain-entry03-07-quote-publication-whole-closeout-20261115"></a>
 ## ENTRY-03／07 原报价保存前发布复核与完整事实消费收口（2026-11-15）
 

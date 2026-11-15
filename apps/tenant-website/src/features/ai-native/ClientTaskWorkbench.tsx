@@ -19,6 +19,8 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
   const currentScope = useRef(scopeKey), generation = useRef(0), busy = useRef(false), session = useRef<ReturnType<typeof createClientTaskSession> | null>(null);
   currentScope.current = scopeKey;
   const view = record.scopeKey === scopeKey ? record.view : initial;
+  // Presentation only: keep the original result and recovery references intact.
+  const modelText = view.modelText?.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '') ?? '';
   const cancellation = record.scopeKey === scopeKey ? session.current?.cancellationHost() : null;
   const question = view.question, field = question?.contract.fields.length === 1 && question.contract.fields[0].kind === 'text'
     && question.contract.fields[0].fieldId === 'clarification_text' ? question.contract.fields[0] : null;
@@ -78,7 +80,7 @@ export function ClientTaskWorkbench({ orderId, scopeKey, english }: { orderId: s
     {view.canContinue && <><p>{english ? 'Context saved. Continue explicitly to obtain an answer.' : '补充说明已保存，请明确继续取得回答。'}</p>
       <button type="button" className="button button-outline" disabled={working} onClick={() => void work(owner => owner.continueAnswer())}>
         {english ? 'Continue answering' : '继续回答'}</button></>}
-    {view.modelText && <><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{view.modelText}</p>
+    {modelText && <><p dir="auto" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', unicodeBidi: 'plaintext' }}>{modelText}</p>
       <p>{english ? 'Generated explanation. Amounts and order/payment status remain in the original order details.' : '模型生成说明；金额、订单和付款状态以原订单信息为准。'}</p></>}
     {(error || view.status === 'unavailable' || view.modelUnavailable) && <p role="status">{english ? 'The explanation is unavailable. You can still use the original order page.' : '解释暂不可用，可继续使用原订单页面。'}</p>}
     {cancellation && <ClientTaskCancellation orderId={orderId} scopeKey={scopeKey} origin={cancellation.origin} english={english}
