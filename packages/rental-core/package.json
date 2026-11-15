@@ -39,6 +39,14 @@
       "types": "./dist/capability-runtime.d.ts",
       "default": "./dist/capability-runtime.js"
     },
+    "./workspace-capabilities": {
+      "types": "./dist/workspace-capabilities.d.ts",
+      "default": "./dist/workspace-capabilities.js"
+    },
+    "./workspace-capability-repository": {
+      "types": "./dist/workspace-capability-repository.d.ts",
+      "default": "./dist/workspace-capability-repository.js"
+    },
     "./capability-audit": {
       "types": "./dist/capability-audit.d.ts",
       "default": "./dist/capability-audit.js"
@@ -102,6 +110,12 @@
       ],
       "capability-runtime": [
         "dist/capability-runtime.d.ts"
+      ],
+      "workspace-capabilities": [
+        "dist/workspace-capabilities.d.ts"
+      ],
+      "workspace-capability-repository": [
+        "dist/workspace-capability-repository.d.ts"
       ],
       "capability-audit": [
         "dist/capability-audit.d.ts"

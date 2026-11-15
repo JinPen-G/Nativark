@@ -7,7 +7,14 @@ const calls = [];
 let rows = [];
 const client = {
   $transaction: async (write) => { calls.push("transaction"); return write(client); },
-  $queryRaw: async () => { calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }]; },
+  $queryRaw: async (query) => {
+    if (query.sql === "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE") {
+      assert.deepEqual(query.values, ["t"]);
+      return [{ id: "t" }];
+    }
+    calls.push("lock");
+    return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }];
+  },
   rentalCategoryVersion: { findUnique: async () => { calls.push("version"); return { categoryCode: "CAMERA", structureVersion: 1, status: "published", definition }; } },
   workspaceCapabilityInstance: {
     findMany: async () => { calls.push("instances"); return rows; },

@@ -11,6 +11,20 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-workspace-capability-20261116"></a>
+
+## Rental 空间能力服务与实例仓储迁移（2026-11-16）
+
+固定父版 `139432c3d3c3722704c69dfa0fc99e299630b6d8` 已普通推送并真实远端回读，远端main仍为62ca且已包含在本树。本片将原空间能力服务及实例/生命周期审计仓储实际移入Rental包，API的Nest provider供给原数据源、Auth/ALS空间解析、品类绑定锁和调用方事务。[服务](../../../packages/rental-core/src/workspace-capabilities.ts) · [仓储](../../../packages/rental-core/src/workspace-capability-repository.ts) · [原适配](../../../apps/api/src/modules/rental-core/workspace-capability.repository.ts)
+
+服务只消费10个明确仓储方法，事务作为原调用方上下文转交。18个服务方法的可执行正文对照父版一致。仓储11个方法中，当前空间、范围和运行模式3项读取改由原宿主查询接点供给，其余实例/审计、配置/修订、初始化、重试和行投影正文一致。当前范围和绑定仍从原服务端来源读取。[服务端口](../../../packages/rental-core/src/workspace-capability-port.ts) · [存储视图](../../../packages/rental-core/src/workspace-capability-storage.ts)
+
+Rental27根/572源/54输出，公共合同5根/199源/10输出，shared122根/340源/245输出及完整API988根/2267源/1976输出均0诊断，其他Core/公共宿主和MCP声明闭包同步通过。共十项真实tsconfig在内存编译，当前238模型仍由官方Prisma 5.22声明供给，产物全部留内存。
+
+`node --no-compilation-cache - api ...` 使用本版编译JS执行原空间能力、品类能力写入、预备配置、采用能力writer和Hook执行器五份用例，最终全部通过，stderr为空，进程退出0。覆盖启用/暂停/停用、未实现及无默认配置拒绝、基础能力与扩展分离、配置/实现版本、修订冲突、重复初始化、原事务审计、快照冻结和缺执行版本拒绝。首次写入用例将原Tenant父锁和空间锁统一记为同一个标签而失败，夹具分别核验真实父锁参数后恢复原空间锁断言，原断言保持。另有本版16个专业属性边界通过。
+
+空间能力和仓储的正式子出口、原业务入口与Rental模块导读同片更新。6份定向文档753个本地链接/178个锚点检查退出0，正式需求/任务保持，`git diff --check`退出0。没有新增测试脚本、依赖环境或后台业务服务。SQL/事务与存储仍为明确fixture，真实MySQL、HTTP、浏览器、标准包安装和独立更新待验。完整Rental业务/数据/页面/作业/AI及公共组织/订阅/集成继续交付，原任务未跨下一档，旧外观/历史附件和统一待清理问题继续沿当前摘要处理。下一入口为租赁持久业务与初始化/配置提交接点。
+
 <a id="core-rental-category-runtime-20261116"></a>
 
 ## Rental 品类解析、身份投影与专业属性规则（2026-11-16）
