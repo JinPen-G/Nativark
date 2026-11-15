@@ -56,6 +56,8 @@ dev2交回通知生命周期五源，Root逐blob核同：删除叶 `1a08d7ee5c8c
 
 固定检查点暂存28份产品／导读源及本记录／接续，未夹带助手后继；两份历史CRLF文件保留原换行，正文与已验证固定blob仅换行等价，避免整文件伪差异。固定index源码再次以API两根／2045源、后台五根／1492源执行必要类型，stdin `37e1029d0ba2a095c1e6a940cdc2f10afd5a2def45d2a871e6d5264b4eb343ec`退出0、零诊断。`node scripts/validate-docs.cjs`仍退出1且仅原4处历史／稀疏缺链；任务算术及当前接续链接无新增错误。检查点明确保留以下未完项，不当作整项完成候选。
 
+上传回执：上述30文件已随 `a8311d8b5c2bd6032eb225d1ca91a72d0563eaec` 在codex/ai-native中文检查点提交，普通push退出0，重新ls-remote回读同SHA；main仍 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，本对话未操作main索引或合并。原唯一任务册未变化，两个已明确的后继问题由dev1／dev2继续并行修复，提交不作为ENTRY全文验收证据。
+
 剩余确证问题留当前接续：`RentalBusinessService.listNotificationLogs`仍返回启动／恢复预热的通知缓存，正文清理只更新原持久行，缓存及saveBusinessState可能继续带旧预览；需沿原缓存／快照读取接点消除已删除副本。小程序原profile页load尚未隔离登出／切scope／隐藏后的迟到响应，dev1继续原页面反例核定。两个问题不能被以上服务模拟覆盖，ENTRY-02／08／10／17未据此提前加分。
 
 自有验证全部使用本树原offline preload、不可达DATABASE_URL及内存audit；audit为空，`output/.tmp/ain-entry02-registered-actions-20261115`未创建，进程退出，没有新依赖、脚本／dist／Prisma client副本。dev2任务目录同样未创建，原始命令与失败保留各原会话。真实数据库、浏览器、微信和供应商由负责人后续操作；当前固定片只证明原服务和明确内存DB／宿主行为，不宣称外部副本、缓存传播或混合备份已全部删除。
