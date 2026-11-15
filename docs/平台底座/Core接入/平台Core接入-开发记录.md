@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-api-types-current-schema-20261115"></a>
+
+## 当前schema与服务端接入适配的完整类型核对（2026-11-15）
+
+固定任务源码 `57a6e673779cec3969a4ba1321f8fcce8f94ff53` 已普通推送并真实回读，main仍62ca且在本树祖先；工作区/索引干净，无合并/拣选。上一包/CLI阶段完成交付，当前目标轮继续补 [原授权管理阶段](#core-access-panels-receipts-20261115) 曾因自动审批拒绝而未取得的完整API类型证据。只做验证及原记录/接续维护，不修改主Auth/平台/Guard/shared总出口/AppModule或其他作者WIP。
+
+`node --no-compilation-cache -` 在本树唯一 `output/.tmp/core-management-receipt` 中准备锁定Prisma5.22.0的最小生成工具链，没有复制整个node_modules、创建junction或读取其他树生成Client。按当前schema只给临时generator添加本目录output，datasource保持原MySQL定义；固定无业务连接DSN、原 [离线preload](../../../tests/fixtures/ai-native/prisma-offline-preload.cjs)、AI_OFFLINE_WRITE_ROOT/audit与TEMP/TMP/缓存均指本目录。实际Prisma generate子进程退出0，238模型的schema归一换行SHA-256为 `848c44e6a12091b85013c4babf9aae52ad8fa1697e2de1031626c57ac50d6f6f`，守卫违规0、没有环境文件加载。
+
+使用这次生成的声明与实际Runtime类型，在内存按各包真实tsconfig依次编译shared121根、core-contracts35根、core-host8根、example-tickets-core11根、mcp-server59根，均0诊断。正式包出口/子出口及NodeNext类型条件由原包元数据解析，编译声明在内存，不依赖别树dist。随后按API真实tsconfig检查978根/2,176源，0诊断；命令退出0。当前CoreHost模块/原主体/绑定/工单适配与主工程schema的类型兼容因此已有证据，不把它称为主应用已登记、无Core构建或运行验收。
+
+生成前后核受管Prisma引擎和包元数据摘要相同，原源码及schema未修改。生成工具、Client、缓存、临时schema/audit及所有一次性文件在finally核绝对路径、归属/无链接后删除，核目录不存在及任务临时根条目数0。没有新增测试脚本、依赖安装、服务、真实DB/HTTP/模型/供应商调用或迁移执行；内存API检查不读取环境或实例化业务服务。独立审查、完整业务行为和浏览器不在本片证据内。
+
+原PCH门槛未跨档，主公共接线、平台独立schema/迁移/Seed、Rental兼容、无Core登录/设置和完整双Core运行仍需原窗口交付。4份文档573个链接/152个锚点/49个表格、全部旧阶段与正式需求/任务保全核对退出0，差异格式退出0；中文提交普通推送任务分支后回读固定版本，记录提交由包含本节的Git对象定位。原拒绝历史保持，当次当前API类型缺口由本节补齐，原MCP业务审计拒绝项和真实环境未验继续保留。
+
 <a id="core-package-current-cli-20261115"></a>
 
 ## 当前工单标准包与随包资料的实际命令复验（2026-11-15）

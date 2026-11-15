@@ -48,11 +48,11 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[开发能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)和[模块导读/直接消费者](平台Core接入-开发记录.md#core-source-reading-20261115)已有实际入口及覆盖状态，源码用途/文档缺口继续按模块整改。完整行为基线、独立schema/迁移账和最终前后运行对照仍按原门槛交付。
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、8操作Nest与同源OpenAPI/原收据只读、4页面贡献，主Guard/HTTP/后台仍按公共窗口接线。
    [原账/工单物理观察](平台Core接入-开发记录.md#core-mysql-data-observation-20261115)已提供正式mysql-deployment子出口及readTicketsPhysicalData。原迁移checksum/顺序与实际3表关键结构共同由目录/升级预检消费，坏Core证据不关闭无关Core；下一步公共平台数据所有者提供自身完整结构检查及已核定原迁移名称映射，受控主组合消费同一Source。真实数据库/原schema拆分仍未验，不从包清单推导就绪。
-   [工单原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115)已使清单、server和原业务组合共用可读范围，保留原绑定/初始化版；普通准入仍核当前物理库及完整迁移。三包类型及原工厂/ALS/授权/迁移/收据离线链通过，实际升级、真实数据库及全API未验。
+   [工单原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115)已使清单、server和原业务组合共用可读范围，保留原绑定/初始化版；普通准入仍核当前物理库及完整迁移。三包类型及原工厂/ALS/授权/迁移/收据离线链通过，实际升级与真实数据库未验，当前API类型证据见下条。
    [更新范围兼容](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)已使普通单Core预检拒绝租户/容器转换及容器类型改名，返回scope_changed，避免候选切换后原绑定失效。同范围修复、前进迁移与底座更新保持原规则；改变范围仍须专门迁移，实际更新/部署未验。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。公共片由PM核定唯一作者，具体消费者入口已可定位。
    当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI尚未取得本对话的新写入窗口，不继续用独占接口数量代替独立宿主。
-   [原身份SQL模板](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115)已移除模板所需的顶层生成Client运行依赖，15条实际ALS/SQL新旧等价路径通过；原身份仓储及行业投影仍待上述公共窗口。完整API类型、主Guard和真实无Core登录未验，不把模板解耦视为主应用拆分完成。
+   [原身份SQL模板](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115)已移除模板所需的顶层生成Client运行依赖，15条实际ALS/SQL新旧等价路径通过；原身份仓储及行业投影仍待上述公共窗口。[当前API类型](平台Core接入-开发记录.md#core-api-types-current-schema-20261115)已使用本树实际离线生成Client声明核978根/2,176源零诊断并清理产物；主Guard接线和真实无Core登录未验，不把类型/模板解耦视为主应用拆分完成。
    [当前事实读取](平台Core接入-开发记录.md#core-management-current-reads-20261115)已提供页面变更所需的授权/成员/绑定修订，主应用组合时将 `reads` 与原服务一起供给Controller，页面先读当前事实再提交。
    [原授权结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)增加两条只读收据路径，主Guard/OpenAPI应直接消费现行单源声明。租户资料和成员资料可分别挂载admin/core正式出口的CoreTenantGrantPanel/CoreMemberAssignmentPanel，原操作及当前状态分别读取；面板不自造目录或身份。[授权刷新与缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115)已把确认结果与随后读取失败分开，只读恢复不重发；本人变化先取消旧目录请求，撤去目标Core条目并清理其缓存，其他Core缓存保留。类型/实际查询库离线通过，主壳/服务端和实页仍待接线。
    [当前成员Core目录](平台Core接入-开发记录.md#core-session-directory-20261115)另提供已登录operator的一条GET及CoreSessionHttpModule/register(reader)。原Guard需明确登记自助政策、OpenAPI总组合消费createCoreSessionOpenApi，主壳/路由可消费useCoreSession的本人集合/管理候选；Core绑定、范围和就绪另核。
@@ -88,7 +88,7 @@ API贡献的空/双Core、命名/路径冲突、缺失/外部引用与包读取�
 
 原MCP审计的额外隔离执行/清理命令被自动审批在启动前拒绝，返回`blocked by policy`，对应目录未创建；该项保持未验，没有替换脚本或换壳绕过。已完成的纯指纹对照和旧路径导入不能替代原MCP整体审计回归。
 
-授权管理片的完整API离线Prisma生成/类型和退出清理命令也在启动前被自动审批拒绝，返回`blocked by policy`；core-management-receipt临时目录未创建。独立合同/宿主、admin/Core真实消费者、同源HTTP及离线原结果行为已验证，完整API新版本类型和实际浏览器/数据库保持未验。[本片证据](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)
+授权管理片的完整API离线Prisma生成/类型和退出清理曾在启动前被自动审批拒绝，原 [拒绝证据](平台Core接入-开发记录.md#core-access-panels-receipts-20261115) 保留。[当前schema类型核对](平台Core接入-开发记录.md#core-api-types-current-schema-20261115) 已沿原离线守卫/生成及finally清理完成，五包和完整API零诊断，本任务生成产物全部删除。实际主装配、浏览器/数据库、业务权限与全功能仍未验，不由类型通过代替。
 
 工单MySQL文件移动后两个空目录的原生删除曾在启动前被自动审批拒绝。本片恢复原操作后核定独占路径、链接与空目录并删除，原路径及唯一责任清单的任务子目录均已移除。失败历史与恢复证据分别见[工单记录](平台Core接入-开发记录.md#core-tickets-domain-20261114)和[索引阶段收尾](平台Core接入-开发记录.md#core-capability-index-20261114)。
 
