@@ -25,6 +25,8 @@
 
 `AiRetentionRestoreVerifier` 的 Ed25519 公钥hash必须由服务器固定。签名键不可来自HTTP；没有配置时恢复拒绝。由可信备份宿主调用 `exportRestoreManifest({id, sha256, createdAt}, privateKey)`，从**恢复快照以外的当前删除账本**导出完整清单（最多500项；超限拒绝，不能把分页冒充完整）。清单绑定原快照SHA256、租户/空间、期限和删除/撤回，签名后60秒内有效。
 
+标准宿主在 `AI_NATIVE_RUNTIME_PUBLICATION` 的 `configurations.retentionRestore.publicKeyHash` 固定这个公钥hash，值为Ed25519公钥SPKI DER的SHA-256。原 `AI_RETENTION_REQUESTS` 与 `AI_PLATFORM_RETENTION_REQUESTS` 同时消费该部署配置并暴露上述host-only导出／重放方法，关闭请求工厂后原凭证撤回。既有平台独立token仍兼容；同时提供时必须与公共部署hash一致。配置仅保存公钥hash，私钥来自可信备份宿主，许可由原Verifier在可信进程中验签产生。原HTTP仅接cleanup／receipt／receipts及原字段。
+
 对仍隔离的目标库调用 `reapplyRestore(permit, {database, privateKey})`，重新擦除/撤回并生成范围证书；未知、越权、缺证据均不出放行证书。恢复旧库须先具备追加迁移结构，本模块不代执行迁移。
 
 原 `scripts/ops/restore-source.cjs` 在GRANT之前校验全部恢复空间的证书、原dump摘要和准确目标库。首次导入后未满足隐私门会保留隔离库与output接续记录；重放完成后使用同一 `--file`、`--finalize-ai <接续记录>`、`--ai-retention-certificates <证书数组JSON>` 接续，**不重复导入、不覆盖旧库**。公钥来自服务器 `OPS_AI_RETENTION_PUBLIC_KEY`，不接受证书自带公钥。恢复演练同样不将缺证据当作验收通过。

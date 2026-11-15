@@ -40,6 +40,9 @@ const configurations = z.object({
   staffManual: configuration,
   categoryDraft: configuration,
   categoryProposal: configuration,
+  // Keep the catalog's common record type while the restore section stays closed at runtime.
+  retentionRestore: z.object({ publicKeyHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict()
+    .and(z.record(z.unknown())).optional(),
 }).strict();
 const publicationSchema = z.object({
   version: z.literal('ain-runtime-publication-1'),

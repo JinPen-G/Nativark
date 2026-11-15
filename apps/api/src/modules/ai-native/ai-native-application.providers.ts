@@ -468,27 +468,45 @@ export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
     createKnowledgePolicyManagementFactory({ db, auth, guard, enabled: true, clock: () => new Date() })
 };
 
+/** One pinned host key binds workspace and platform restore attestations.
+ * The private signing key and verified permits are supplied only by the backup
+ * host. Missing configuration leaves original maintenance readable but cannot
+ * authorize restore, change a ledger or start a service. */
+export const AI_NATIVE_RETENTION_RESTORE_CONFIGURATION = Symbol('AI_NATIVE_RETENTION_RESTORE_CONFIGURATION');
+function readRetentionRestoreKeyHash(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = z.object({ publicKeyHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().safeParse(structuredClone(value));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return parsed.data.publicKeyHash;
+}
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
-  provide: AI_RETENTION_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, FileStorageRuntimeService, SecretBox],
-  useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService, secrets: SecretBox): AiRetentionRequestFactory => request => {
-    const header = request?.headers?.authorization, requestId = randomUUID();
-    if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
-      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    let authorization: string | undefined = header;
-    const current = async () => {
-      if (!authorization) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      return { authorization, requestId, audience: 'operator' as const };
+  provide: AI_RETENTION_REQUESTS,
+  inject: [AI_NATIVE_BODY_DATABASE, AuthService, FileStorageRuntimeService, SecretBox,
+    { token: AI_NATIVE_RETENTION_RESTORE_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService, secrets: SecretBox,
+    value?: unknown): AiRetentionRequestFactory => {
+    const restoreKeyHash = readRetentionRestoreKeyHash(value);
+    return request => {
+      const header = request?.headers?.authorization, requestId = randomUUID();
+      if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      let authorization: string | undefined = header;
+      const current = async () => {
+        if (!authorization) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { authorization, requestId, audience: 'operator' as const };
+      };
+      const requestAuth: Pick<AuthService, 'resolveAccessContext'> = { resolveAccessContext: async (...args) => {
+        await current();
+        const result = await auth.resolveAccessContext(...args);
+        await current();
+        return result;
+      } };
+      const service = new AiRetentionService(db, requestAuth, { current }, files, undefined, restoreKeyHash, secrets);
+      return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
+        receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
+        exportRestoreManifest: service.exportRestoreManifest.bind(service), reapplyRestore: service.reapplyRestore.bind(service),
+        close: () => { authorization = undefined; } };
     };
-    const requestAuth: Pick<AuthService, 'resolveAccessContext'> = { resolveAccessContext: async (...args) => {
-      await current();
-      const result = await auth.resolveAccessContext(...args);
-      await current();
-      return result;
-    } };
-    const service = new AiRetentionService(db, requestAuth, { current }, files, undefined, undefined, secrets);
-    return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
-      receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
-      close: () => { authorization = undefined; } };
   },
 };
 
@@ -499,10 +517,15 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
 export const AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH = Symbol('AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH');
 export const AI_NATIVE_PLATFORM_RETENTION_PROVIDER: FactoryProvider = {
   provide: AI_PLATFORM_RETENTION_REQUESTS,
-  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, { token: AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH, optional: true }],
-  useFactory: (db: PrismaService, guard: ApiAuthGuard, keyHash?: unknown): AiPlatformRetentionRequestFactory => {
+  inject: [AI_NATIVE_BODY_DATABASE, ApiAuthGuard, { token: AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH, optional: true },
+    { token: AI_NATIVE_RETENTION_RESTORE_CONFIGURATION, optional: true }],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, keyHash?: unknown, value?: unknown): AiPlatformRetentionRequestFactory => {
     if (keyHash !== undefined && (typeof keyHash !== 'string' || !/^[a-f0-9]{64}$/u.test(keyHash)))
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const configuredHash = readRetentionRestoreKeyHash(value);
+    if (configuredHash !== undefined && keyHash !== undefined && configuredHash !== keyHash)
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const restoreKeyHash = configuredHash ?? (keyHash as string | undefined);
     return request => {
       const header = request?.headers?.authorization;
       if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
@@ -517,7 +540,7 @@ export const AI_NATIVE_PLATFORM_RETENTION_PROVIDER: FactoryProvider = {
       const service = new AiPlatformRetentionService(db, { resolve: async () => {
         try { return await platform.resolveDirectoryRead(); }
         catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
-      } }, () => new Date(), keyHash as string | undefined);
+      } }, () => new Date(), restoreKeyHash);
       return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
         receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
         exportRestoreManifest: service.exportRestoreManifest.bind(service), reapplyRestore: service.reapplyRestore.bind(service),
@@ -1585,6 +1608,7 @@ export const AI_NATIVE_RUNTIME_CONFIGURATION_PROVIDERS = [
   runtimeConfigurationProvider(AI_NATIVE_STAFF_MANUAL_CONFIGURATION, 'staffManual'),
   runtimeConfigurationProvider(AI_NATIVE_CATEGORY_DRAFT_CONFIGURATION, 'categoryDraft'),
   runtimeConfigurationProvider(AI_NATIVE_CATEGORY_PROPOSAL_CONFIGURATION, 'categoryProposal'),
+  runtimeConfigurationProvider(AI_NATIVE_RETENTION_RESTORE_CONFIGURATION, 'retentionRestore'),
 ];
 
 /** Current original-resource reads remain available independently of new-model

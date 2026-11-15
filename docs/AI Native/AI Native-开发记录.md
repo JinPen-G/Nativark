@@ -6,6 +6,24 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain27-retention-restore-host-config-20261116"></a>
+## AIN-27 原恢复工厂可信签名配置接通（2026-11-16）
+
+固定前置 `4da7ce6d78bbc2123472ad7bd1bfc93212250550` 已普通推送并回读GitHub。原经营空间维护工厂没有传restoreKeyHash，也没有导出原host-only方法；平台独立token有读取接点，但标准部署发布没有共同可信来源。本片将 `configurations.retentionRestore.publicKeyHash` 接入[原部署发布](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)和[标准provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)。两个工厂共同固定Ed25519公钥SPKI DER的SHA-256，并从原[工厂类型](../../apps/api/src/modules/ai-native/privacy/retention.controller.ts)提供exportRestoreManifest／reapplyRestore。平台旧独立token仍兼容，同时存在时须一致。原HTTP继续只消费cleanup／receipt／receipts合同，私钥和原Verifier产生的许可来自可信备份宿主。
+
+一组必要内存模拟调用标准发布provider、两个原请求工厂、Auth／Guard、原Verifier及原全scope证书屏障。经营空间和真实PLATFORM／null形状的源行由夹具提供，合成Ed25519密钥仅驻内存，删除账本样本明确为空。原签名导出、许可核定、隔离目标重放后两个范围证书通过原屏障；缺配置、错误／额外字段、平台冲突hash、伪造许可和close后访问拒绝。没有导入库、迁移、启动服务、接模型或删除业务数据。命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin SHA-256 `4c1fdae48de731006c9498c4e0a00e667e03ad0527c000ad7aa2f0c8ff0abb99`，exit 0。非空材料的擦除及恢复沿原固定维护证据，本片证明标准可信装配和许可传递。
+
+最终TypeScript5.9.3四根／1907源、126份内存shared声明零诊断，stdin `d99fe61f45a9749ad1bc29de53d3dc85877f082bf28dc0677e9db369c178fcc9`，exit 0。初次类型验证读到未生成的根Client声明，产生3923条派生诊断，改为只读main已生成Client；随后新增配置的具体对象类型影响目录共用record索引，出现5条诊断。现闭合配置与共用record类型求交，严格运行时schema仍拒绝额外私钥字段，模拟和类型均复验通过。自有进程全部退出，原任务临时目录未创建，无新增测试文件、依赖或过程产物。
+
+dev1继续原upgrade-drill唯一窗口，将兼容迁移、删除标记重放及每个目标库独立范围证书核验置于应用授权／API启动之前。AIN-26原完整组合及AIN-15企业变体仍按原依赖核定，AIN-27源码装配和模拟阶段没有替代全文G4或生产恢复。G1～G3逐档证据由原任务核定后更新，当前任务册仍保留原值。
+
+<a id="ain15-existing-enterprise-delegation-source-20261116"></a>
+## AIN-15 企业原委托源的固定成果重新核实（2026-11-16）
+
+独立只读核到企业固定分支 `beca3cb1941769b72d0e23d2d2f20f441621c8c4` 已有EnterpriseMerchantDelegationService、EnterpriseMerchantOrderSubmissionService和RentalMerchantDelegatedOrderPort。其原面板及服务证据在企业记录ecp-merchant-delegation-execution-ui-20261112：本人签D后，商户明确提交、原Source／Policy／Approval／Core封存端口和同D恢复。原企业policy仍拒绝没有委托证明的operator代本人确认，同时存在原报价委托的封存校验分支。
+
+本AI固定前置未含上述委托服务及Core封存端口。因此旧“原企业接点没有形成”的泛化结论需要按固定来源收紧。当前缺口是固定成果尚未接到AI树，以及原选单／提案／批准／Core提交与D、报价及企业审批的绑定仍待核接；不能把普通本人权限放宽，也不能由AI补造告知或调用方声明。跨专项原写入窗口保持，必要来源由PM按固定成果协调整合，原记录供其读取。当前只核固定源码及原证据，没有重跑企业作者模拟，AIN-15仍75%。
+
 <a id="ain-entry17-refusal-observation-fixed-20261116"></a>
 ## ENTRY-17 原Action和客户准入拒绝审计修复（2026-11-16）
 
