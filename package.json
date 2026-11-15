@@ -205,7 +205,10 @@
     "test:return-charge-parity": "npm run build -w @rental-os/shared && node tests/rental-return-charge-parity.test.cjs",
     "test:rental-document-renderer": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/rental-document-renderer.test.cjs",
     "test:rental-document-snapshot": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/rental-document-snapshot.test.cjs",
-    "test:access-page-mutations": "node tests/access-page-mutations.test.cjs"
+    "test:access-page-mutations": "node tests/access-page-mutations.test.cjs",
+    "dev:platform-admin": "npm run dev -w @rental-os/platform-admin-app",
+    "build:platform-admin": "npm run build -w @rental-os/platform-admin-app",
+    "lint:platform-admin": "npm run lint -w @rental-os/platform-admin-app"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

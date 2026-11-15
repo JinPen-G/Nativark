@@ -45,3 +45,7 @@ export function useAdminSession(): AdminSessionSnapshot {
 
 export { createAdminSessionQueries } from "./session-queries";
 export { isTransientRefreshError } from "./query-errors";
+
+export { createAdminHttpClient } from "./browser-http";
+export type { BrowserSessionPort } from "./browser-http";
+export { createBrowserAdminSession } from "./browser-session";

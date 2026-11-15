@@ -1,28 +1,14 @@
-/**
- * 统一 axios 实例与 `request<T>()`：挂鉴权头 / 租户头 / 会话中止信号，401 时轮换令牌并重试，
- * 并把 `{ data, requestId }` 信封解开只返回业务数据。所有 api 文件都应经由这里发请求。
- */
-import axios from "axios";
-import type { ApiResult, LoginResponse } from "@rental-os/shared";
-import type { InternalAxiosRequestConfig } from "axios";
+/** 原 Rental 宿主的凭据/空间投影，HTTP 刷新与取消由公共实现单源维护。 */
+import type { LoginResponse } from "@rental-os/shared";
+import { createAdminHttpClient } from "@rental-os/platform-admin/runtime";
 import { clearSessionQueryCache, currentSessionEpoch, currentSessionSignal } from "@/app/queryClient";
-
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? "/api";
-
-export const http = axios.create({ baseURL, timeout: 12_000 });
-
-/** 图片等静态资源的同源前缀：baseURL 为绝对地址时取其 origin，相对时为空串（同源）。 */
 export const apiAssetOrigin = /^https?:\/\//.test(baseURL) ? new URL(baseURL).origin : "";
-
-let refreshPromise: Promise<LoginResponse | undefined> | undefined;
 const refreshListeners = new Set<(session: LoginResponse) => void>();
-
-/** Subscribe to original refresh responses in this application realm; DOM/storage events cannot supply this receipt. */
 export function onSessionRefreshed(listener: (session: LoginResponse) => void) {
   refreshListeners.add(listener);
   return () => { refreshListeners.delete(listener); };
 }
-
 function storeRefreshedSession(session: LoginResponse) {
   const previousWorkspaceId = window.localStorage.getItem("rental_current_workspace");
   window.localStorage.setItem("rental_access_token", session.accessToken);
@@ -38,152 +24,20 @@ function storeRefreshedSession(session: LoginResponse) {
   window.dispatchEvent(new CustomEvent("rental-session-updated"));
 }
 
-function refreshSession(refreshToken: string): Promise<LoginResponse | undefined> {
-  if (!refreshPromise) {
-    const rotate = async () => {
-      // 等到跨标签锁后再次检查：若 token 已变化，说明另一个标签已经完成轮换，
-      // 本页直接采用其会话，不再用已撤销的旧 token 发第二次请求。
-      if (window.localStorage.getItem("rental_refresh_token") !== refreshToken) return undefined;
-      const epoch = currentSessionEpoch();
-      const response = await axios.post<ApiResult<LoginResponse>>(`${baseURL}/auth/refresh`, { refreshToken });
-      const session = response.data.data;
-      // Logout or a completed space/account switch owns newer credentials even while this locked request is in flight.
-      if (currentSessionEpoch() !== epoch || window.localStorage.getItem("rental_refresh_token") !== refreshToken) return undefined;
-      // 写 storage 必须在锁内完成；否则锁一释放，下一标签仍可能读到旧 token。
-      storeRefreshedSession(session);
-      return session;
-    };
-    const locks = navigator.locks;
-    // 用 async 包一层让类型收敛：`LockManager.request` 的 DOM 类型不会解开回调返回的
-    // Promise，直接赋值得到的是 `Promise<Promise<T>>`；await 一次即折叠为 T。
-    const pending: Promise<LoginResponse | undefined> = (async () =>
-      locks ? await locks.request("rental-auth-refresh", rotate) : await rotate())();
-    // 先存局部再赋值：`.finally` 的回调会把 refreshPromise 置回 undefined，
-    // 直接 `return refreshPromise` 会被 TS 判为可能 undefined。
-    refreshPromise = pending.finally(() => {
-      refreshPromise = undefined;
-    });
-    return refreshPromise;
+export const { http, request, requestText } = createAdminHttpClient<LoginResponse>({ baseURL, refreshLockName: "rental-auth-refresh", session: {
+  accessToken: () => window.localStorage.getItem("rental_access_token") ?? undefined,
+  refreshToken: () => window.localStorage.getItem("rental_refresh_token") ?? undefined,
+  tenant: () => {
+    const raw = window.localStorage.getItem("rental_tenant");
+    if (!raw) return undefined;
+    try { return JSON.parse(raw) as { tenantId: string; tenantCode: string }; }
+    catch { window.localStorage.removeItem("rental_tenant"); return undefined; }
+  },
+  currentSessionEpoch, currentSessionSignal, commitRefresh: storeRefreshedSession,
+  expire: () => {
+    ["rental_access_token", "rental_refresh_token", "rental_tenant", "rental_user", "rental_workspaces", "rental_current_workspace"]
+      .forEach(key => window.localStorage.removeItem(key));
+    clearSessionQueryCache(); window.dispatchEvent(new CustomEvent("rental-session-updated"));
+    if (window.location.pathname !== "/login") window.location.assign("/login");
   }
-  return refreshPromise;
-}
-
-http.interceptors.request.use((config) => {
-  const token = window.localStorage.getItem("rental_access_token");
-  const tenantRaw = window.localStorage.getItem("rental_tenant");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  // SPACE-05：给每个请求挂上当前会话的中止信号。
-  //
-  // 切换经营空间时会中止上一代信号，于是那一刻仍在飞行中的请求当场失败，
-  // 不会在新空间落地。只靠 queryClient.cancelQueries() 不够——它管不到
-  // 直接走 axios 的调用（表单提交、命令式拉取）。
-  //
-  // 调用方已显式传 signal 时不覆盖：那是更精细的控制，不该被这里夺走。
-  if (!config.signal) config.signal = currentSessionSignal();
-  (config as InternalAxiosRequestConfig & { _sessionEpoch?: number })._sessionEpoch = currentSessionEpoch();
-  if (tenantRaw) {
-    try {
-      const tenant = JSON.parse(tenantRaw) as { tenantId?: string; tenantCode?: string };
-      if (tenant.tenantId) config.headers["x-tenant-id"] = tenant.tenantId;
-      if (tenant.tenantCode) config.headers["x-tenant-code"] = tenant.tenantCode;
-    } catch {
-      window.localStorage.removeItem("rental_tenant");
-    }
-  }
-  return config;
-});
-
-http.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const original = error?.config as (InternalAxiosRequestConfig & { _authRetry?: boolean; _authRefreshToken?: string; _sessionEpoch?: number }) | undefined;
-    // Cancellation belongs to the original caller even while authentication
-    // waits. A refreshed credential cannot authorize a cancelled redispatch.
-    const callerSignal = original?.signal;
-    if (callerSignal?.aborted || original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
-    const isAuthEndpoint = original?.url?.includes("/auth/login") || original?.url?.includes("/auth/refresh");
-    if (error?.response?.status === 401 && original && !original._authRetry && !isAuthEndpoint) {
-      const refreshToken = window.localStorage.getItem("rental_refresh_token");
-      if (refreshToken) {
-        original._authRetry = true;
-        original._authRefreshToken = refreshToken;
-        try {
-          const session = await refreshSession(refreshToken);
-          if (callerSignal?.aborted || original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
-          const accessToken = session?.accessToken ?? window.localStorage.getItem("rental_access_token");
-          if (!accessToken) throw error;
-          // Retain caller cancellation and the current session boundary for
-          // the entire replay, including cancellation after it is dispatched.
-          const retrySignal = callerSignal
-            ? AbortSignal.any([callerSignal as AbortSignal, currentSessionSignal()])
-            : currentSessionSignal();
-          if (retrySignal.aborted) return Promise.reject(error);
-          original.signal = retrySignal;
-          original.headers.Authorization = `Bearer ${accessToken}`;
-          return http.request(original);
-        } catch {
-          // 真正的刷新失败交给下面的 canonical cleanup；跨标签落败不会进入这里，
-          // 因为它会在锁内观察到已轮换 token 并直接采用。
-        }
-      }
-    }
-    if (callerSignal?.aborted || original?._sessionEpoch !== undefined && original._sessionEpoch !== currentSessionEpoch()) return Promise.reject(error);
-    if (error?.response?.status === 401) {
-      // 仅当失败时使用的 refresh token 仍是当前 token 才能清理。另一个标签页
-      // 可能已先完成轮换并写入新会话，盲删会把成功标签页一起登出。
-      const failedRefreshToken = original?._authRefreshToken;
-      if (!failedRefreshToken || failedRefreshToken === window.localStorage.getItem("rental_refresh_token")) {
-        ["rental_access_token", "rental_refresh_token", "rental_tenant", "rental_user", "rental_workspaces", "rental_current_workspace"]
-        .forEach((key) => window.localStorage.removeItem(key));
-        clearSessionQueryCache();
-        window.dispatchEvent(new CustomEvent("rental-session-updated"));
-        if (window.location.pathname !== "/login") window.location.assign("/login");
-      }
-    }
-    return Promise.reject(error);
-  }
-);
-
-export async function request<T>(path: string, options: { method?: "get" | "post" | "put" | "patch" | "delete"; data?: unknown; params?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {}) {
-  // Query cancellation is additional to session cancellation. Capturing the
-  // session signal now also covers a switch before Axios runs its interceptor.
-  const signals = options.signal ? [options.signal, currentSessionSignal()] : [];
-  const controller = options.signal ? new AbortController() : undefined;
-  const abort = () => controller?.abort();
-  for (const signal of signals) signal.addEventListener("abort", abort, { once: true });
-  if (signals.some((signal) => signal.aborted)) abort();
-  try {
-    const response = await http.request<ApiResult<T>>({
-      url: path,
-      method: options.method ?? "get",
-      data: options.data,
-      params: options.params,
-      headers: options.headers,
-      signal: controller?.signal
-    });
-    return response.data.data;
-  } finally {
-    for (const signal of signals) signal.removeEventListener("abort", abort);
-  }
-}
-
-/**
- * REPORT-01B：取原始文本响应（CSV 导出）。
- *
- * 与 `request()` 分开而不是加一个 flag：`request()` 的契约是「返回 `{ data }`
- * 信封里的业务对象」，而导出返回的就是文件正文本身。混在一个函数里会让
- * 返回类型变成 `T | string`，每个调用点都要再判一次。
- *
- * 走同一个 `http` 实例，因此鉴权头、令牌刷新与错误处理与其他接口完全一致。
- */
-export async function requestText(path: string, params?: unknown) {
-  const response = await http.request<string>({
-    url: path,
-    method: "get",
-    params,
-    responseType: "text",
-    // 拦截器默认按 JSON 解析；导出必须原样拿到文本，否则 CSV 会被解析坏。
-    transformResponse: [(body: unknown) => String(body ?? "")]
-  });
-  return response.data;
-}
+}});

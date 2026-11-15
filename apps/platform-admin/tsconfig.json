@@ -1,0 +1,14 @@
+{
+  "extends": "../../packages/platform-admin/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/registry/*": ["../../packages/ui-arc/vendor/registry/*"],
+      "@/lib/motion-tokens": ["../../packages/ui-arc/vendor/lib/motion-tokens.ts"],
+      "@/lib/media": ["../../packages/ui-arc/vendor/lib/media.ts"],
+      "@/lib/use-copy-feedback": ["../../packages/ui-arc/vendor/lib/use-copy-feedback.ts"],
+      "@/lib/use-today": ["../../packages/ui-arc/vendor/lib/use-today.ts"],
+      "@/lib/usePrefersReducedMotion": ["../../packages/platform-admin/src/lib/usePrefersReducedMotion.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

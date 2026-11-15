@@ -176,10 +176,11 @@ void (async () => {
   await assert.rejects(changed.hook.start("v2", request(), async () => undefined), /会话或经营空间/);
   console.log("category-preparation-save: frozen original key/body, unknown outcomes, scoped retries and saved-but-unread recovery passed (hook boundary substitute)");
 
-  const httpSource = fs.readFileSync("apps/admin/src/api/http.ts", "utf8");
+  const httpSource = fs.readFileSync("packages/platform-admin/src/runtime/browser-http.ts", "utf8");
   const httpAst = ts.createSourceFile("http.ts", httpSource, ts.ScriptTarget.Latest, true);
-  const requestFunction = httpAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "request");
-  const requestJs = ts.transpileModule(requestFunction.getText(httpAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const factory = httpAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "createAdminHttpClient");
+  const requestFunction = factory.body.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "request");
+  const requestJs = ts.transpileModule("export " + requestFunction.getText(httpAst), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   function transportHarness() {
     const session = new AbortController(), calls = [], result = {};
     const http = { request: config => new Promise((resolve, reject) => {
@@ -187,7 +188,7 @@ void (async () => {
       if (config.signal?.aborted) reject(new Error("cancelled"));
       else config.signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
     }) };
-    new Function("exports", "http", "currentSessionSignal", requestJs)(result, http, () => session.signal);
+    new Function("exports", "http", "session", requestJs)(result, http, { currentSessionSignal: () => session.signal, currentSessionEpoch: () => 0 });
     return { request: result.request, session, calls };
   }
   const sessionCancellation = transportHarness(), query = new AbortController();
