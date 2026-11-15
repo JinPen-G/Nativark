@@ -10,6 +10,7 @@
 | 当前读取 | [目录](src/platform-core-session.ts)、[范围](src/platform-core-scope.ts)、[管理事实](src/platform-core-management-reads.ts)；当前角色和修订在返回前复验 |
 | HTTP和资料 | [准入与OpenAPI组合](src/platform-core-http.ts)、[业务粗准入](src/platform-core-http-access.ts)、[Controller](src/core-management.controller.ts)；政策/字段沿唯一合同，具体对象和提交点仍由所属Core核验 |
 | 移除与审计 | [移除预检](src/platform-core-removal.ts)、[审计](src/platform-core-audit.ts)；缺平台依赖读取拒绝移除，原收据的引用同事务保存 |
+| MySQL结构观察 | [不可变SQL预期](src/mysql-structure.ts)、[实际物理读取](src/mysql-physical.ts)；核表/列/默认值/键/CHECK/外键，缺数据保持不可用 |
 | 直接消费者 | [公共宿主](../../apps/platform-api/src/core-assembly.ts)、[原组合兼容适配](../../apps/api/src/modules/core-host/README.md) |
 
 ```ts
@@ -31,6 +32,8 @@ const access = createPlatformCoreHttpAccess(application);
 身份围栏复用 [公共原会话](../platform-server/src/modules/platform/platform-principal.authority.ts)，锁原账号 / 角色 / 租户后进入Core锁。旧签名wid只作为原会话一致性证据；公共workspace为空，业务容器仍由Core自身解析。租户和成员撤权、角色变化、令牌到期及提交条件分别复验。原收据只读核对原主体/原键，不用当前状态代替原结果。
 
 公共平台的授权与绑定迁移单份归 [公共宿主迁移链](../../apps/platform-api/README.md)，原SQL字节保留。这里不自动应用迁移；原组合库须按固定数据版本和部署顺序引入相同增量，不能使用新公共基线覆盖已有库。Core自身迁移继续归Core。[授权SQL](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql) · [绑定SQL](../../apps/platform-api/prisma/migrations/20261115020000_core_bindings/migration.sql)
+
+公共宿主的 [数据计划](../../apps/platform-api/src/platform-data.ts) 核固定迁移摘要后提供 `readPhysical`，用于 `createMysqlCoreDeploymentObservation` 读取原Prisma账与实际结构。预期从已登记SQL构造，未知DDL明确报错；实际MySQL元数据须匹配，不能直接返回清单版本。CHECK保留布尔优先级/NULL/范围含义，额外唯一键或未执行约束不会被当成当前数据版本。构造计划只读源码，真正的物理读取需要数据库许可。
 
 `createPlatformCoreOpenApi` 先组合标准平台管理 / 目录 / 范围资料，再调用原Core贡献检查；业务路径/schema保留各Core命名空间，缺引用或冲突拒绝。公共宿主通过同一 `/api/openapi.json` 返回组合资料；原Rental文档与客户端路径继续由其兼容装配维护。
 

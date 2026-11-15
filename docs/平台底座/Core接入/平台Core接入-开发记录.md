@@ -175,6 +175,34 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 本片尚未装配独立公共AppModule/Guard或独立schema/迁移/Seed，未取得真实无CoreHTTP/数据库/浏览器、完整多Core/原Rental业务、安装更新/回退/独立接手/审查证据；原任务未跨下一档。下一片继续真实公共宿主、正式Core主应用及其同源OpenAPI/前端消费者。临时生成工具/Client/声明/运行共享产物与缓存共527文件、73349425字节，核绝对归属/无链接后全部删除，任务目录不存在，output/.tmp条目为0。仅留本节最小证据，没有新增服务进程或重复环境。
 
+<a id="core-public-data-term-20261115"></a>
+
+## 公共统一期限与真实物理数据观察（2026-11-15）
+
+公共Core主装配提交3d306de05b861dd90c0465c4da9161c8b7351f09，首次push因schannel TLS handshake失败，远端仍8ea；原普通push重试成功，真实远端回读3d306de05、main62ca，工作区/索引收口后再开启本片。没有换远端/关闭TLS或强推。
+
+[订阅公共合同](../../../packages/platform-contracts/src/subscription.ts)从原shared订阅声明移为单源，原shared继续再导出，原基础版/PRO、金额可空、期限和请求字段不变。[状态/排期投影](../../../packages/platform-server/src/modules/subscription/subscription-state.ts)与[周年/服务时区](../../../packages/platform-server/src/modules/subscription/subscription-term.ts)抽原算法，原SubscriptionService消费同一函数。订阅办理、专业功能/品类与收费政策仍在原服务，未重建收费机制。原正式SUB四册及进度保持。
+
+[公共期限reader](../../../packages/platform-server/src/modules/subscription/subscription-reader.ts)在调用方原事务读取租户当前订阅和已到期排期，返回原revision与newBusinessAllowed；明确到期停止新业务，历史未登记保持原“待确认”兼容，不批量停業、不伪装永久、不自动创建期限或物化排期。公共Core装配消费该真实reader，替换此前零Core拒绝占位；零Core目录仍不开放业务。参数/提醒阈值与原SubscriptionService沿同一解析，原排期/未登记政策保留。
+
+公共schema增加两个原订阅期限模型及三个原enum，当前22公共模型/9enum；字段、表名、精度/可空、期限与关系来自原schema。公共独立迁移引用原SUB两份不可变SQL的期限表/外键和追加列，新库链不覆盖旧组合库，也不创建收费/期限数据。新SQL SHA-256为ff2ca9614628d7b5282c22293bb81b8c6e70ce0d3d69be2da301fc0a89e7449b。
+
+[平台数据计划](../../../apps/platform-api/src/platform-data.ts)明确0.1.0基线和4份迁移原文/Prisma名称，读取源码时逐份验证固定SHA-256，不从文件存在推导就绪。[结构预期](../../../packages/platform-core-host/src/mysql-structure.ts)只解析本链实际使用的CREATE/ADD COLUMN/FK，未知DDL拒绝；[物理reader](../../../packages/platform-core-host/src/mysql-physical.ts)读取information_schema实际表/引擎/排序/195列/53索引/7CHECK/18外键，核类型、可空、默认值、键和受执行约束。CHECK保留NULL/范围与and/or括号优先级，不能通过去括号改变语义。原Prisma账/迁移状态仍由既有mysql-deployment提供，真实查询失败不变成空成功。计划已提供，选中Core总组合消费及真实DB未验。
+
+| 验证 | 结果与边界 |
+| --- | --- |
+| 状态算法原固定3d306/当前对照与公共reader | 正常/过期/待生效/未登记同原投影；排期接续/revision、明确到期拒绝及缺租户拒绝通过，不写订阅 |
+| 原saas-subscription-service.test.cjs有效断言 | 20例全通过，fail/skip/todo/cancelled0，退出0；通过stdin实际载入原用例与当前服务/DTO，ts-node仅外部装载钩子，原声明/生成enum沿锁定来源。未新增脚本/改断言，未执行DB |
+| 平台结构/实际metadata读取 | 固定4SQL解析22表/195列/53索引/7CHECK/18FK；正常和缺表/列型/键/CHECK停执/错约束/FK/默认值7类拒绝，BETWEEN等价且括号优先级差异拒绝，退出0；metadata为明确fixture，不称真库就绪 |
+| 实际平台数据计划 | 4份源码摘要/版本/原Prisma名称核定，计划调用退出0，只读文件，没有物理库访问 |
+| 原离线守卫下Prisma schema/WASM+官方生成类型与8包/两宿主 | 公共22/原238模型实际解析；8包零诊断；公共6根/756源、原988根/2,209源零诊断，命令退出0，守卫违规0，无新磁盘Client/dist/缓存/进程。仅在内存生成，不复制旧环境 |
+
+首次结构解析漏掉原SQL索引名与括号间空格，修解析器接受原已使用语法后通过；原订阅测试装载第一轮漏新公共包映射，在唯一已有产物加只读解析后复验通过，没有新安装或产物。源代码期限/申请/订阅业务规则未改变，原失败/未验仍归原专项。
+
+下一入口继续完整公共订阅管理/基础集成、所选工单Core实际受控锁/物理观察/授权业务HTTP与后台，再处理Rental可取出的包、多Core/AI、安装更新/回退与独立接手。本片不是全部订阅或全部平台完成；真实DB/HTTP/浏览器、旧库迁移/回退、独立审查/发布未验。原任务没有因22模型或20测试数自动升档。
+
+本片只有内存验证，output/.tmp无新增文件，唯一既有91,808,304字节待清理环境及责任清单继续受自动审批blocked by policy；没有重复副本或绕过删除限制。资料与源码同片提交普通推送，固定结果在本对话/本记录承接。
+
 <a id="core-public-assembly-20261115"></a>
 
 ## 公共Core宿主包与独立主装配（2026-11-15）

@@ -7,10 +7,24 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./subscription": {
+      "types": "./dist/subscription.d.ts",
+      "default": "./dist/subscription.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "typesVersions": {
+    "*": {
+      "subscription": [
+        "dist/subscription.d.ts"
+      ]
+    }
   }
 }

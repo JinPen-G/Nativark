@@ -20,6 +20,7 @@ import { Prisma, type TenantSubscription, type TenantSubscriptionSegment, type S
 import { PrismaService } from "../database/prisma.service";
 import { anniversaryFromAnchor, calendarYear, endFromServiceYears, exclusiveEndFromDate, isValidTimeZone } from "./subscription-term";
 import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions } from "../rental-core/category-identity";
+import { deriveSubscriptionStatus, projectSubscriptionState, subscriptionReminderDays } from "@rental-os/platform-server/subscription-state";
 
 const DAY_MS = 86400000;
 const DEFAULT_ZONE = "Asia/Shanghai";
@@ -37,34 +38,15 @@ export class SubscriptionService {
   constructor(private readonly prisma: PrismaService) {}
 
   private reminderDays() {
-    const read = (name: string, fallback: number) => {
-      const value = process.env[name] === undefined ? fallback : Number(process.env[name]);
-      if (!Number.isInteger(value) || value < 1 || value > 365) throw new Error(`${name} must be an integer from 1 to 365`);
-      return value;
-    };
-    const normal = read("SUBSCRIPTION_REMINDER_NORMAL_DAYS", 30);
-    const urgent = read("SUBSCRIPTION_REMINDER_URGENT_DAYS", 7);
-    if (urgent > normal) throw new Error("SUBSCRIPTION_REMINDER_URGENT_DAYS must not exceed normal days");
-    return { normal, urgent };
+    return subscriptionReminderDays();
   }
 
   private deriveStatus(sub: Pick<TenantSubscription, "startAt" | "endAt"> | null, now: Date): SubscriptionServiceStatus {
-    if (!sub?.startAt || !sub.endAt) return SubscriptionServiceStatus.Unconfigured;
-    if (now < sub.startAt) return SubscriptionServiceStatus.PendingActivation;
-    if (now >= sub.endAt) return SubscriptionServiceStatus.Expired;
-    return sub.endAt.getTime() - now.getTime() <= this.reminderDays().normal * DAY_MS
-      ? SubscriptionServiceStatus.Expiring : SubscriptionServiceStatus.Active;
+    return deriveSubscriptionStatus(sub, now, () => this.reminderDays().normal);
   }
 
   private project(sub: TenantSubscription | null, segments: TenantSubscriptionSegment[], now: Date): SubscriptionState {
-    const scheduled = segments.filter((s) => s.status === "SCHEDULED").sort((a, b) => (a.startAt?.getTime() ?? 0) - (b.startAt?.getTime() ?? 0));
-    const due = scheduled.filter((s) => s.startAt && s.endAt && s.startAt <= now);
-    const latest = due.at(-1);
-    return {
-      current: sub && latest ? { ...sub, ...this.segmentData(latest, sub), revision: sub.revision + due.length } : sub,
-      next: scheduled.find((s) => s.startAt && s.startAt > now) ?? null,
-      due
-    };
+    return projectSubscriptionState(sub, segments, now, (segment, current) => this.segmentData(segment, current));
   }
 
   private segmentData(segment: TenantSubscriptionSegment, current: TenantSubscription) {

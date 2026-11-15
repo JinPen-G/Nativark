@@ -94,6 +94,18 @@
     "./account-appearance-dto": {
       "types": "./dist/modules/client/account-appearance.dto.d.ts",
       "default": "./dist/modules/client/account-appearance.dto.js"
+    },
+    "./subscription-state": {
+      "types": "./dist/modules/subscription/subscription-state.d.ts",
+      "default": "./dist/modules/subscription/subscription-state.js"
+    },
+    "./subscription-term": {
+      "types": "./dist/modules/subscription/subscription-term.d.ts",
+      "default": "./dist/modules/subscription/subscription-term.js"
+    },
+    "./subscription-reader": {
+      "types": "./dist/modules/subscription/subscription-reader.d.ts",
+      "default": "./dist/modules/subscription/subscription-reader.js"
     }
   },
   "scripts": {
@@ -178,6 +190,15 @@
       ],
       "account-appearance-dto": [
         "dist/modules/client/account-appearance.dto.d.ts"
+      ],
+      "subscription-state": [
+        "dist/modules/subscription/subscription-state.d.ts"
+      ],
+      "subscription-term": [
+        "dist/modules/subscription/subscription-term.d.ts"
+      ],
+      "subscription-reader": [
+        "dist/modules/subscription/subscription-reader.d.ts"
       ]
     }
   }

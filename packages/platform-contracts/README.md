@@ -1,12 +1,14 @@
 # 公共 SaaS 契约
 
-`@rental-os/platform-contracts` 提供租户、账号、角色、认证与公共设置的正式类型和运行时常量。此包没有运行依赖，不加载 Core、ORM 或 Web 框架。[唯一源码](src/index.ts) · [包出口](package.json)
+`@rental-os/platform-contracts` 提供租户、账号、角色、认证、公共设置及原SaaS订阅的正式类型和运行时常量。此包没有运行依赖，不加载 Core、ORM 或 Web 框架。[唯一源码](src/index.ts) · [订阅合同](src/subscription.ts) · [包出口](package.json)
 
 ```ts
 import { TenantStatus, type PlatformSessionContextResponse } from "@rental-os/platform-contracts";
 ```
 
 原 `@rental-os/shared` 和 `@rental-os/shared/platform` 再导出同一声明，保留 Rental 与各端既有导入。新增公共消费者使用本包，行业字段继续由所属 Core 契约扩展。[原兼容出口](../shared/src/platform-identity.ts)
+
+订阅可从 `@rental-os/platform-contracts/subscription` 单独导入。原 `@rental-os/shared` 继续再导出同一枚举和字段，基础版/PRO、统一期限、金额可空及原请求语义沿SUB专项。Core开通、成员分配和业务权限不由套餐字段代替。
 
 阅读时从正式类型到 [公共服务](../platform-server/README.md)，再到 [公共宿主](../../apps/platform-api/README.md)。`PlatformTenantSummary.enabledBusinessLines` 是兼容字段，公共身份返回空集合；实际 Core 使用权从当前部署、租户授权及成员分配读取。租户、角色或公共文档存在不会赋予业务工具权限。
 

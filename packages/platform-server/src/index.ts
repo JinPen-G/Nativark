@@ -29,3 +29,6 @@ export * from "./platform-http-policy";
 export * from "./platform-auth.guard";
 export * from "./platform-server.module";
 export * from "./platform-openapi";
+export * from "./modules/subscription/subscription-state";
+export * from "./modules/subscription/subscription-term";
+export * from "./modules/subscription/subscription-reader";

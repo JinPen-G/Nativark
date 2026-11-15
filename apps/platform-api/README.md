@@ -7,6 +7,7 @@
 | [启动](src/main.ts) | 消费进程 `DATABASE_URL`、`AUTH_TOKEN_SECRET`、可选 `API_PORT`；不自动加载环境文件 |
 | [装配](src/app.module.ts) | 默认空 Core，只选择公共服务和唯一公共数据库 |
 | [Core装配](src/core-assembly.ts) | 同一实际工厂供给标准Core管理、本人目录、范围和Guard；默认零Core，未知业务拒绝 |
+| [数据计划](src/platform-data.ts) | 固定迁移摘要、唯一数据版本、实际物理结构读取；清单和真实已应用账分别核验 |
 | [初始化](src/initialize.ts) | 显式命令创建公共SaaS账号，口令来自进程；重复执行不重置已有账号，失败不补默认账号 |
 | [数据库](src/database.ts) | 由本宿主 schema 生成的单一 Client；导入不连接，实际请求按 Prisma 建立连接 |
 | [公共 schema](prisma/schema.prisma) | 公共账号、角色、会话、外观与设置表；保留原表名和身份标识，行业关联仅为可空历史引用 |
@@ -22,7 +23,7 @@ npm run lint:platform-api
 npm run api:document:platform
 ```
 
-Client 输出在本宿主 `generated/client`，不写原组合 Client，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`，不构建具体业务Core。当前schema20个模型均属平台，其中6个是Core授权/绑定及原收据表。命令是否可执行取决于当前环境许可，编译不会代执行迁移。
+Client 输出在本宿主 `generated/client`，不写原组合 Client，运行产物从同一宿主目录读取。公共构建消费 `platform-contracts`、`platform-server` 和标准 `core-contracts` / `core-host` / `platform-core-host`，不构建具体业务Core。当前schema22个模型均属平台，包含6个Core授权/绑定及原收据表与2个统一订阅期限表。命令是否可执行取决于当前环境许可，编译不会代执行迁移。
 
 新公共库按 `npm run db:platform:migrate:deploy` 应用本链。**不能把本基线套在已有 Rental 组合库**；已有库切换须先按原迁移来源和数据所有权演练兼容迁移。
 
