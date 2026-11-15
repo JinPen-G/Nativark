@@ -3,39 +3,27 @@ import {
   RentalCategoryCode,
   RENTAL_CATEGORY_CODE_PATTERN,
   RoleScope,
-  TenantStatus,
   type GeneratePlatformNumberRequest,
   type PlatformDictionaryItem,
   type RentalCurrency,
   type SaveOrganizationRequest,
   type SavePlatformFilterPresetRequest,
-  type SaveSystemRoleRequest,
   type SystemRulesConfig,
   type SystemSecurityBaselineConfig,
   type SaveSystemUserAccessRequest,
-  type SaveSystemUserRequest,
   type SaveWorkspaceAccessRequest,
   type TenantBootstrapRequest,
-  type RentalCategoryOpeningOptionsQuery,
-  type UpdateTenantRequest,
-  type UpdateTenantStatusRequest
+  type RentalCategoryOpeningOptionsQuery
 } from "@rental-os/shared";
 import { Type } from "class-transformer";
 import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Matches, MaxLength, Min, ValidateNested } from "class-validator";
+// 公共账号/角色/租户字段由平台包单源维护，行业初始化和业务字段继续保留在本适配。
+export { UpdatePlatformTenantDto as UpdateTenantDto, PlatformTenantStatusDto as UpdateTenantStatusDto,
+  SavePlatformRoleDto as SaveSystemRoleDto, SavePlatformUserDto as SaveSystemUserDto } from "@rental-os/platform-server/management-dto";
 
 const DATA_SCOPES = ["all", "organization", "store", "own"] as const;
 const DICTIONARY_DATE_PATTERNS = ["yyyyMMdd", "yyyyMM", "yyMMdd", "none"] as const;
 const RESET_CYCLES = ["daily", "monthly", "yearly", "never"] as const;
-
-export class UpdateTenantDto implements UpdateTenantRequest {
-  @IsString() @IsNotEmpty() tenantName!: string;
-  @IsOptional() @IsString() @MaxLength(64) operatorShortName?: string | null;
-}
-
-export class UpdateTenantStatusDto implements UpdateTenantStatusRequest {
-  @IsEnum(TenantStatus) status!: TenantStatus;
-  @IsString() @IsNotEmpty() reason!: string;
-}
 
 export class SaveOrganizationDto implements SaveOrganizationRequest {
   @IsOptional() @IsString() @IsNotEmpty() id?: string;
@@ -139,36 +127,9 @@ export class RentalCategoryOpeningOptionsQueryDto implements RentalCategoryOpeni
   @IsOptional() @IsString() @MaxLength(100) search?: string;
 }
 
-export class SaveSystemRoleDto implements SaveSystemRoleRequest {
-  @IsOptional() @IsString() @IsNotEmpty() id?: string;
-  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
-  @IsString() @IsNotEmpty() code!: string;
-  @IsString() @IsNotEmpty() name!: string;
-  @IsOptional() @IsString() description?: string;
-  @IsEnum(RoleScope) scope!: RoleScope;
-  @IsArray() @IsString({ each: true }) enabledBusinessScopes!: string[];
-  @IsArray() @IsString({ each: true }) permissions!: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) buttonPermissions?: string[];
-  @IsOptional() @IsIn(DATA_SCOPES) dataScope?: SaveSystemRoleRequest["dataScope"];
-  @IsBoolean() isActive!: boolean;
-}
-
 export class SaveRolePermissionsInputDto {
   @IsOptional() @IsArray() @IsString({ each: true }) permissions?: string[];
   @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
-}
-
-export class SaveSystemUserDto implements SaveSystemUserRequest {
-  @IsOptional() @IsString() @IsNotEmpty() id?: string;
-  @IsOptional() @IsString() @IsNotEmpty() tenantId?: string;
-  @IsString() @IsNotEmpty() account!: string;
-  @IsString() @IsNotEmpty() displayName!: string;
-  @IsOptional() @IsString() @IsNotEmpty() phone?: string;
-  @IsOptional() @IsString() @IsNotEmpty() organizationId?: string;
-  @IsArray() @IsString({ each: true }) roleIds!: string[];
-  @IsOptional() @IsBoolean() isPlatformAdmin?: boolean;
-  @IsOptional() @IsBoolean() isSaasAdmin?: boolean;
-  @IsBoolean() isActive!: boolean;
 }
 
 export class SaveWorkspaceAccessDto implements SaveWorkspaceAccessRequest {

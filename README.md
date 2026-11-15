@@ -8,7 +8,7 @@ Nativark 为开发者和开发 AI 提供构建业务应用所需的公共基础�
 
 开源主体是 Nativark 底座。**Rental Core 将作为首个开源业务 Core 示范**，展示如何在公共底座上构建完整业务、接入客户端并向 Agent 提供受控工具。后续可按同一接入边界扩展 CRM、TMS 等业务 Core。
 
-当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 已有认证、外观和公共 schema / 构建入口，完整公共后台、Core 主装配和多 Core 授权继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md)
+当前仓库正在从 Rental OS 组合工程中抽离公共底座。原开发命令运行底座与 Rental Core 的组合；独立公共 API 已有初始化、认证、租户 / 人员角色管理、外观和公共 schema / 构建入口，完整公共后台、Core 主装配和多 Core 授权继续由平台接入专项推进。源码目录、npm 包名及配置变量目前沿用原工程标识。[独立公共 API](apps/platform-api/README.md)
 
 - [底座建设范围](#底座建设范围)
 - [理解架构](#理解架构)
@@ -100,7 +100,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | 位置 | 当前内容 | 阅读入口 |
 | --- | --- | --- |
 | `apps/api` | 身份、公共平台、AI Native、基础服务与现有 Core 的 API 组合 | [启动](apps/api/src/main.ts)、[装配](apps/api/src/app.module.ts) |
-| `apps/platform-api` | 默认无 Core 的独立公共 API，认证 / 外观切片已提供，完整公共管理与运行验收继续交付 | [宿主导读](apps/platform-api/README.md) |
+| `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 租户与人员角色 / 外观已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
 | `packages/platform-server` | 原认证、会话、外观及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |

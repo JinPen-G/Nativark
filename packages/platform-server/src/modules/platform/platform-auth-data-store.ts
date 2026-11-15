@@ -38,7 +38,7 @@ export interface PlatformUserStore {
 }
 export interface PlatformSessionStore {
   create(query: { data: NewPlatformAuthenticationSession }): PromiseLike<PlatformAuthenticationSession>;
-  findFirst(query: { where: { id?: string; refreshTokenHash?: string; revokedAt: null; expiresAt: { gt: Date } };
+  findFirst(query: { where: { id?: string; userId?: string; audience?: string; refreshTokenHash?: string; revokedAt: null; expiresAt: { gt: Date } };
     include?: { user: { include: { tenant: true } } } }): PromiseLike<PlatformAuthenticationSession | null>;
   updateMany(query: { where: { id?: string; userId?: string; revokedAt: null; expiresAt?: { gt: Date } };
     data: { revokedAt: Date } }): PromiseLike<{ count: number }>;

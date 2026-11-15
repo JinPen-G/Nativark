@@ -175,6 +175,33 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 本片尚未装配独立公共AppModule/Guard或独立schema/迁移/Seed，未取得真实无CoreHTTP/数据库/浏览器、完整多Core/原Rental业务、安装更新/回退/独立接手/审查证据；原任务未跨下一档。下一片继续真实公共宿主、正式Core主应用及其同源OpenAPI/前端消费者。临时生成工具/Client/声明/运行共享产物与缓存共527文件、73349425字节，核绝对归属/无链接后全部删除，任务目录不存在，output/.tmp条目为0。仅留本节最小证据，没有新增服务进程或重复环境。
 
+<a id="core-public-management-20261115"></a>
+
+## 无Core公共初始化、租户及人员角色管理（2026-11-15）
+
+上阶段独立公共包/宿主已由1da9d90c10a19818991e5e9119398773435897ef提交，普通push成功，ls-remote真实回读为同一SHA；工作区/索引收口干净。main62ca仍在祖先且远端未前进。本阶段只在相同独占树推进，原schema/迁移与业务算法未改。
+
+[公共初始化](../../../packages/platform-server/src/modules/platform/platform-initialization.ts)及[显式命令](../../../apps/platform-api/src/initialize.ts)提供实际SaaS主体、公共权限/角色和账号；口令由SEED_PLATFORM_PASSWORD进程输入，至少8位并含字母/数字，首次登录必须改密。重复执行只核原管理员可用，不重设口令/角色或恢复停用账号。缺账号明确冲突，不用已有租户当初始化成功。命令不输出口令/连接串，只公布已知输入约束或稳定驱动错误码；没有实际连接或执行该命令。
+
+[公共管理Controller](../../../packages/platform-server/src/modules/platform/platform-management.controller.ts)→[应用服务](../../../packages/platform-server/src/modules/platform/platform-management.service.ts)→[仓储](../../../packages/platform-server/src/modules/platform/platform-management.repository.ts)→[窄存储](../../../packages/platform-server/src/modules/platform/platform-management.store.ts)已进独立模块。提供公共租户创建/资料/启停、本租户资料、本人资料、成员创建编辑/启停/重置、角色编辑/删除和已登记权限树。租户创建同事务建根组织、固定管理员角色、账号和审计，不建Rental空间/品类或给成员分配Core；临时密码只在对应创建/重置响应返回，不进审计。
+
+当前SaaS管理与tenant管理保持分面；人员角色写入要求原租户管理员或明确全租户权限，固定全权角色不能普通编辑/删除，普通角色不能保存通配或未登记权限码，角色/组织/账号必须同租户。租户停用撤销该租户会话；成员停用/改密撤销原会话，历史与角色/Core事实不删除。与原行业人员入口并存，未把原空间覆盖角色变成公共授权。[原DTO](../../../apps/api/src/modules/platform/platform-request.dto.ts)将四项公共输入再导出同一类，业务DTO留原位。
+
+[公共身份围栏](../../../packages/platform-server/src/modules/platform/platform-principal.authority.ts)从原Core适配抽出且无Prisma/行业依赖，锁序仍为租户/账号/会话/角色/权限，当前状态与自然期限在原事务中复验；OriginalCorePrincipalAuthority仅保留正式子出口别名。原SQLTenant.status明确处理小写存储枚举。公共Auth返回内部签名wid证据，公共Guard的workspace仍为空；围栏比较原会话签名证据，而非把旧wid当业务范围，原Rental Guard继续其原workspace证据。staff/client或请求主体不一致拒绝。下游Core管理/工单真实消费者通过完整API类型核定。
+
+| 验证 | 结果和边界 |
+| --- | --- |
+| 当前公共合同、服务、宿主类型/编译 | 1根/195源、33根/815源、4根/690源，零诊断；编译JS/声明只留内存，无新dist/临时目录。宿主消费本树既有14模型真实Client声明，主Client只读复用上阶段唯一已归集成果，不复制回工作树 |
+| 原完整API类型 | 987根/2,175源零诊断；原Core管理/绑定/工单消费新的公共身份围栏及同源DTO。首轮CorePrincipal的三audience类型不兼容，修为输入可表达三分面并在原身份检查拒绝非operator，未改权限规则 |
+| 实际Nest公共模块+真实服务/Controller，明确离线平台表fixture | 初始化不重置、零Core租户创建、审计失败整笔回滚、成员/角色创建读写和固定/未登记/跨租户拒绝、本人资料保存读回、签名旧wid与公共workspace隔离、重置不记密码、租户冻结通过；未启动HTTP/真库 |
+| 原身份/初始化拒绝定向检查 | 已存在但停用的SaaS账号拒绝初始化，不重置；当前主体撤权、staff输入及旧会话wid不符拒绝。首次fixture忽略isActive查询使拒绝断言失败，修fixture查询语义后通过，无产品放宽 |
+| 同源HTTP/接口资料/DTO | Controller实际Nest元数据与政策/OpenAPI30操作/22路径一一对应，operationId及路径参数唯一、所有schema引用可解析；原DTO有效枚举正常/未知拒绝。初次metadata包含Nest默认尾斜杠，改验证路径归一后通过，未变路由 |
+| 事务端口对真实14模型Client | 直接赋值类型零诊断；首轮create输入误含update专用tokenVersion.increment，改窄create输入，未造Prisma shim或绕过公共出口 |
+
+验收仍缺独立HTTP/真库/完整后台、公共组织设置/安全和订阅/基础集成、Core主组合和安装、多Core/停用恢复、Rental可取出包、AI适配及全功能/迁移回退/独立接手/审查。本阶段没有把局部30接口和fixture当全部公共需求完成，原任务无新增跨档。所有正常路径及拒绝证据如上，仅做必要短命令和原类型，没有新增测试脚本或删除旧断言。
+
+上阶段91,808,304字节的唯一临时环境仍在统一待清理根，删除自动审批拒绝历史与manifest见前阶段；本阶段复用声明只读，不新增/复制环境或后台进程。后续工具恢复先处理既有残留。当前源码/导读/接口资料随本阶段中文提交普通推送，真实远端回读后在本对话登记，main未集成。
+
 <a id="core-public-host-packages-20261115"></a>
 
 ## 独立公共契约、服务包与无Core API宿主（2026-11-15）

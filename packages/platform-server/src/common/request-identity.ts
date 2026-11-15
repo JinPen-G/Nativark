@@ -7,7 +7,9 @@ export interface RequestIdentity {
   /** 原认证分面，区分运营账号与客户；不由请求体/模型推断。 */
   audience?: 'operator' | 'staff' | 'client';
   /** Signed access-token evidence captured by Auth / Guard; never read from a body or URL. */
-  accessSession?: { sessionId: string; expiresAt: number };
+  accessSession?: { sessionId: string; expiresAt: number;
+    /** 签名wid与原会话已核一致的证据；不作为公共业务workspace或跨Core授权。 */
+    workspaceId?: string | null };
   /** 当前有效操作权限，仅由 Auth / Guard 解析；调用方的 owner 不是授权。 */
   permissions?: readonly string[];
   isPlatformAdmin?: boolean;

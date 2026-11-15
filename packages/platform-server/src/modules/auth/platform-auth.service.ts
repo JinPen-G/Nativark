@@ -55,7 +55,7 @@ export class PlatformAuthService extends AuthSessionService<
       tenantUser: user,
       hasWorkspaces: false,
       workspaceValid: false,
-      accessSession: { sessionId: payload.sid, expiresAt: payload.exp },
+      accessSession: { sessionId: payload.sid, expiresAt: payload.exp, workspaceId: session.currentWorkspaceId ?? null },
     };
   }
 

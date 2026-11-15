@@ -35,6 +35,9 @@ export class PlatformAuthGuard implements CanActivate {
     if (policy?.access === "tenant" && (user.isSaasAdmin || !user.isPlatformAdmin
       && !user.permissions.includes("*") && !user.permissions.includes(policy.permission)))
       throw new ForbiddenException("当前账号缺少本租户设置权限");
+    if (policy?.access === "saas" && (!user.isSaasAdmin
+      || !user.permissions.includes("*") && !user.permissions.includes(policy.permission)))
+      throw new ForbiddenException("当前接口需要SaaS管理身份和权限");
     enterRequestIdentity({ tenantId: user.tenantId, userId: user.id, audience: "operator", accessSession: current.accessSession,
       permissions: [...user.permissions], isPlatformAdmin: user.isPlatformAdmin, isSaasAdmin: Boolean(user.isSaasAdmin),
       workspaceId: undefined, dataScope: user.dataScope, organizationId: user.organizationId, locationScope: undefined,

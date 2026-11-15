@@ -47,7 +47,7 @@ export interface PlatformAuthAccessContext {
   workspaceId?: string;
   hasWorkspaces: boolean;
   workspaceValid: boolean;
-  accessSession: { sessionId: string; expiresAt: number };
+  accessSession: { sessionId: string; expiresAt: number; workspaceId?: string | null };
 }
 export interface PlatformAuthenticationSession {
   id: string;

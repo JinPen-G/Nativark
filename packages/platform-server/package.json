@@ -47,6 +47,14 @@
       "types": "./dist/modules/platform/platform-identity.repository.d.ts",
       "default": "./dist/modules/platform/platform-identity.repository.js"
     },
+    "./principal": {
+      "types": "./dist/modules/platform/platform-principal.authority.d.ts",
+      "default": "./dist/modules/platform/platform-principal.authority.js"
+    },
+    "./management-dto": {
+      "types": "./dist/modules/platform/platform-management.dto.d.ts",
+      "default": "./dist/modules/platform/platform-management.dto.js"
+    },
     "./authentication": {
       "types": "./dist/modules/platform/platform-authentication.source.d.ts",
       "default": "./dist/modules/platform/platform-authentication.source.js"
@@ -134,6 +142,12 @@
       ],
       "identity": [
         "dist/modules/platform/platform-identity.repository.d.ts"
+      ],
+      "principal": [
+        "dist/modules/platform/platform-principal.authority.d.ts"
+      ],
+      "management-dto": [
+        "dist/modules/platform/platform-management.dto.d.ts"
       ],
       "authentication": [
         "dist/modules/platform/platform-authentication.source.d.ts"

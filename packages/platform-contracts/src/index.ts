@@ -496,3 +496,33 @@ export interface PlatformSessionContextResponse {
   tenant: TenantIdentity;
   user: AuthUser;
 }
+
+/** 无业务前置的公共租户初始化；Rental初始化继续使用其原category/空间合同。 */
+export interface CreatePlatformTenantRequest {
+  tenantCode: string;
+  tenantName: string;
+  operatorShortName?: string | null;
+  adminAccount: string;
+  adminDisplayName: string;
+  adminPhone?: string;
+}
+
+export interface CreatePlatformTenantResult {
+  tenant: PlatformTenantSummary;
+  admin: SystemUserRow;
+  temporaryPassword: string;
+  message: string;
+}
+
+/** 本人资料只允许编辑展示姓名与联系方式，身份、角色和Core范围不在此输入。 */
+export interface SavePlatformSelfProfileRequest {
+  displayName: string;
+  phone?: string;
+}
+
+/** 由原签名会话生成的公共operator主体；CorePrincipal保持结构兼容。 */
+export interface PlatformPrincipal {
+  tenantId: string;
+  subjectId: string;
+  audience: "operator";
+}

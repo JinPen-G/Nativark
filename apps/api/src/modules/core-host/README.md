@@ -22,7 +22,7 @@ CoreHostModule.register({
 
 主体来自原Guard的ALS身份及签名会话。适配依次锁原租户、账号、会话、角色分配/权限，再进入Core授权锁。账号和租户的当前状态、会话撤销/切换、令牌自然期限都核对。成员撤回允许其已经停用，SaaS对被冻结目标租户也可关闭Core，当前操作者仍须有效。
 
-原主体适配的SQL模板直接使用Prisma5现有Runtime的sqltag，事务模型仅为类型引用；它不为模板加载顶层生成客户端。查询值、原账号/角色映射、锁顺序和当前期限/撤权核验沿同一实现。原实际数据库实例仍由宿主唯一提供，当前PlatformRepository/身份合同的行业依赖需在公共窗口继续抽离，不能据这一处模板解耦宣称无Core宿主完成。
+原主体路径现在是 `@rental-os/platform-server/principal` 的兼容出口，实际 [公共身份围栏](../../../../../packages/platform-server/src/modules/platform/platform-principal.authority.ts) 不导入Prisma或行业API。查询值、原账号/角色映射、锁顺序和当前期限/撤权复验沿同一实现。原Guard的业务workspace与公共Guard的签名wid证据分别传入；签名证据必须和原会话一致，但不能据它授予Core范围。真实数据库仍由宿主唯一提供。[公共服务导读](../../../../../packages/platform-server/README.md)
 
 `composeOriginalCoreManagement`复用 `PlatformRepository.findUserById` 的原租户角色映射。租户Core授权要求当前SaaS管理员及租户管理权限，成员分配要求原租户管理员或明确的全租户账号管理权。请求的租户或Core标识只用于选择待管理对象，授权来自当前服务端事实。
 
