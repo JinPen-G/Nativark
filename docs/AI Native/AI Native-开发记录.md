@@ -40,7 +40,9 @@ dev1[原资源reader](../../apps/api/src/modules/ai-native/scenes/entry-action-r
 
 失败保留：初签发类型引用私有未导出类型、registry unavailable字面量及已收窄platform分支已修；draft公共类型后Client通知观察必须排除未发送草稿，已按真实状态收紧。后台类型驱动漏原Vite／CSS声明及axios扩展flag写法，分别补原声明与局部config变量。原Task驱动删掉Core其他依赖导致CONFIG_INVALID，保留完整Core后通过；客户fixture遗漏AUTH_TOKEN_SECRET仅补合成值，不读.env。后台有限宿主漏structuredClone、使用与原fixture不同的Date.now导致有效Action过期，修宿主／同源时钟后原断言通过；员工商品事件签名按原Emitter单参修复。两次文档patch包装不合法未执行，修工具输入后写入。生产权限／原合同和已有测试文件未放宽。
 
-本片原API／Auth／Core／Task与客户端代码真实运行，数据库、能力记录、React／微信宿主和业务数据为明确模拟，真实数据库／浏览器／微信／供应商由负责人后续测试。所有Root验证沿本树原offline preload／不可达DATABASE_URL／内存audit，`output/.tmp/ain-entry02-registered-actions-20261115`未创建；没有新增验证脚本、依赖／共享Client／dist副本。正式两端runtime是生产消费者交付物，不作为临时残留删除。通知三源及客户活动页面暂不夹入本导航阶段，主线和ENTRY百分比不变；固定阶段普通推送后再接余项。
+本片原API／Auth／Core／Task与客户端代码真实运行，数据库、能力记录、React／微信宿主和业务数据为明确模拟，真实数据库／浏览器／微信／供应商由负责人后续测试。所有Root验证沿本树原offline preload／不可达DATABASE_URL／内存audit，`output/.tmp/ain-entry02-registered-actions-20261115`未创建；没有新增验证脚本、依赖／共享Client／dist副本。正式两端runtime是生产消费者交付物，不作为临时残留删除。通知三源及客户活动页面暂不夹入本导航阶段，主线和ENTRY百分比不变。
+
+固定阶段提交 `ff613889674a0105da0d550e66ffdb30afbf03ca`（48文件）已普通推送origin/codex/ai-native，退出0；重新执行 `git -c http.sslBackend=openssl ls-remote origin refs/heads/codex/ai-native refs/heads/main`，目标分支与本地HEAD同SHA，main仍 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`。未改remote、未关闭证书验证、未合main。Git暂存最终核对同字节及固定blob；默认diff把既有CRLF当尾空格，按原换行cr-at-eol定向／暂存检查退出0，不重写整份页面。Catalog的首次hash-object受Git当前索引换行判断影响，直接核原文件与暂存对象逐字节完全相同后固定；Client暂存仅CRLF规范化、通知过滤仍完整保留工作区。后继继续通知公共合同／HTTP／后台与客户冻结消费者，不把本导航片提前计为九Action整项收口。
 
 <a id="ain-entry09-safe-display-whole-closeout-20261115"></a>
 ## ENTRY-09 四端候选、原报价与动态展示安全呈现全文收口（2026-11-15）
