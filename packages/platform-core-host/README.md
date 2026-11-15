@@ -7,6 +7,7 @@
 | 受控组合 | [应用工厂](src/platform-core-application.ts)、[Nest模块](src/core-host.module.ts)；一个实际工厂供给管理、本人目录和范围读取 |
 | 真实依赖 | [窄端口](src/ports.ts)；公共主体仓储、同一SQL事务、新业务订阅政策及同事务审计 |
 | 授权与绑定 | [授权](src/platform-core-management.ts)、[绑定](src/platform-core-bindings.ts)、[使用权](src/platform-core-access.ts)；复用当前主体、租户Core授权、成员分配与原绑定 |
+| 部署权限登记 | [登记函数](src/platform-core-permissions.ts)只消费所选Core清单及窄Permission事务；登记业务角色可选择的精确权限，保留原ID/关联，冲突先拒绝 |
 | 当前读取 | [目录](src/platform-core-session.ts)、[范围](src/platform-core-scope.ts)、[管理事实](src/platform-core-management-reads.ts)；当前角色和修订在返回前复验 |
 | HTTP和资料 | [准入与OpenAPI组合](src/platform-core-http.ts)、[业务粗准入](src/platform-core-http-access.ts)、[Controller](src/core-management.controller.ts)；政策/字段沿唯一合同，具体对象和提交点仍由所属Core核验 |
 | 移除与审计 | [移除预检](src/platform-core-removal.ts)、[审计](src/platform-core-audit.ts)；缺平台依赖读取拒绝移除，原收据的引用同事务保存 |
@@ -28,6 +29,8 @@ const access = createPlatformCoreHttpAccess(application);
 `createEmptyCoreCatalogue()` 表示宿主明确选择零Core，返回空目录并拒绝所有Core准入。它不生成业务表、默认授权或可用数据。当前公共宿主已使用此组合，本人目录无需查询Core授权表即可返回合法空集合。选中Core须改用 `createCoreDeployedCatalogue` 并提供真实数据观察，不能继续用空目录或默认成功适配。[部署目录](../core-host/README.md)
 
 标准管理流为注册 → SaaS授权租户 → 租户管理员分配成员 → 绑定 / 配置 → 普通业务。新Core不自动分配给所有成员，Core开通与业务角色分别核验。单Core停用保留成员记录、绑定、配置及原收据；重新开通按当前条件恢复，不重放初始化或业务。已撤回的成员分配不会随重开自动恢复。
+
+部署者在核定标准包并应用所选迁移后，显式调用 `registerPlatformCorePermissions(tx, manifests)`，`tx`须来自同一公共库的Serializable事务。它先核全部清单、重复Core与现存权限归属/类型，再登记 `${coreId}:${resource}:${action}`，供原权限树和角色接口消费；不会创建角色、授予成员、初始化Core或删除历史权限。兼容升级可更新声明名称并保留原权限ID/角色关系。不同模块或原BUTTON占用同码时停止，先核清来源。[工单部署命令](../../apps/example-tickets-api/src/register-permissions.ts)展示实际调用。
 
 身份围栏复用 [公共原会话](../platform-server/src/modules/platform/platform-principal.authority.ts)，锁原账号 / 角色 / 租户后进入Core锁。旧签名wid只作为原会话一致性证据；公共workspace为空，业务容器仍由Core自身解析。租户和成员撤权、角色变化、令牌到期及提交条件分别复验。原收据只读核对原主体/原键，不用当前状态代替原结果。
 

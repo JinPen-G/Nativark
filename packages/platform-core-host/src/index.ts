@@ -17,5 +17,6 @@ export * from "./platform-core-application";
 export * from "./platform-core-http";
 export * from "./empty-catalogue";
 export * from "./platform-core-audit";
+export * from "./platform-core-permissions";
 export * from "./mysql-structure";
 export * from "./mysql-physical";

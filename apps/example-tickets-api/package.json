@@ -10,7 +10,8 @@
     "prelint": "npm run build -w @rental-os/platform-api && npm run build -w @rental-os/example-tickets-core",
     "lint": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/main.js",
-    "prepare:deployment": "node dist/prepare-deployment.js"
+    "prepare:deployment": "node dist/prepare-deployment.js",
+    "register:permissions": "node dist/register-permissions.js"
   },
   "dependencies": {
     "@rental-os/platform-api": "0.1.0",

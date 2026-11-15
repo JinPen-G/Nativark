@@ -42,6 +42,8 @@
 
 使用平台公共身份的宿主可从 `@rental-os/example-tickets-core/platform-host` 导入 `composeTicketsPlatformHost`，传真实数据库、当前公共账号、Core部署可用性、统一订阅和同事务审计。原Rental组合也消费这个单源适配。它保留当前角色 / Core / 成员 / 对象 / 原收据核验，Core作者不复制原API源码。[实际标准适配](src/platform-host.ts)
 
+本Core的六项业务权限由同一清单生成。部署者通过[显式权限登记命令](../../apps/example-tickets-api/README.md)写入公共权限目录，原角色接口即可选择这些精确权限；登记不分配角色或Core。Core作者只维护清单，不另外手写Permission Seed或让页面自行注册权限。
+
 MySQL入口单独从 `@rental-os/example-tickets-core/mysql` 导入 `createMysqlTicketsExecution(client, authority)`，接受实际Prisma交互事务的窄接口。适配只依赖Prisma5的SQL模板/Runtime，不要求生成Rental模型；SQL值全部参数化，查询和写入都含租户条件。`authority.authorize`和`authority.audit`是必须由宿主提供的真实适配，前者取得人员/授权锁并返回受权范围，后者沿原平台审计写同一事务。
 
 锁顺序为人员/当前Core授权与受派成员 → 本租户工单锁行 → 原操作回执/工单变更 → 平台审计。受派成员必须在工单锁之前核定，不能由Core在领域回调中倒序申请人员锁。小样例使用每租户一条工单写锁，保证原操作幂等与收据一起提交；审计、回执或业务失败均抛错回滚。ReadCommitted加原修订条件避免覆盖别人的更新，领域服务不取得整个Prisma client。

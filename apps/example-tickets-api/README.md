@@ -5,6 +5,7 @@
 | 阅读路线 | 入口 |
 | --- | --- |
 | 固定包和部署准备 | [准备命令](src/prepare-deployment.ts)、[包核验](src/deployment-package.ts)；不安装或执行DDL，成功只显示pending |
+| Core权限登记 | [显式命令](src/register-permissions.ts)核相同包/锁后，在同一公共库事务登记六项工单权限；不自动授权或改角色 |
 | 受控组合 | [装配](src/assembly.ts)、[Nest模块](src/app.module.ts)；只选择一个Core，版本与包摘要固定，公共与业务使用一个数据库实例 |
 | 当前准入 | [公共Core宿主](../../packages/platform-core-host/README.md)、[工单标准宿主](../../packages/example-tickets-core/src/platform-host.ts)；当前账号 / Core授权 / 成员分配 / 订阅 / 绑定与业务权限 |
 | 实际数据 | [平台数据计划](../platform-api/src/platform-data.ts)、[工单物理检查](../../packages/example-tickets-core/src/mysql.ts)；原Prisma账和实际结构分别核验 |
@@ -29,6 +30,14 @@ node apps/example-tickets-api/dist/prepare-deployment.js <固定底座发行JSON
 在获准独立数据库部署环境，使用同一组合的 schema 路径执行 `prisma migrate deploy --schema <新部署目录>/schema.prisma`，然后按公共宿主命令创建SaaS主体。Core迁移原账名称固定为 `core.example-tickets.tickets.initial`，与运行观察相同；不能手工补“迁移成功”收据。配置 `CORE_DEPLOYMENT_LOCK` 指向同一固定锁、`DATABASE_URL` / `AUTH_TOKEN_SECRET` 后运行 `npm run start -w @rental-os/example-tickets-api`。
 
 运行依赖中的 `@rental-os/example-tickets-core` 必须是这份已准备包的相同字节。宿主启动前重新核包与锁的ID / 版本 / 来源 / 摘要，实际公共和工单表 / 迁移状态还须通过准入检查。源码目录只有TS或缺清单时拒绝运行，不将作者的源码测试称为包已安装。
+
+同一部署环境完成公共库初始化后，显式登记标准包声明的工单权限。命令读取当前进程的 `DATABASE_URL` 和 `CORE_DEPLOYMENT_LOCK`，不会加载环境文件。它会写公共Permission目录，须在获准的部署环境执行；重复执行保留原ID和角色关联，冲突整笔回滚。
+
+```sh
+npm run register:permissions -w @rental-os/example-tickets-api
+```
+
+成功输出 `status=registered`、所选Core版本与 `permissions=6`，随后权限树可读到精确工单权限。登记失败时核包摘要、权限归属/类型及数据库，不能跳过门禁或用通配角色补成功。该命令不应用迁移、创建业务数据或授予租户/成员Core。
 
 SaaS管理员先创建测试租户，再使用 `/api/platform/core-host/tenant-grants` 开通工单；租户管理员给本人及需要的成员分配Core与工单角色，再办理首次绑定。业务入口是 `/api/cores/example-tickets/...`，支持创建 / 分派 / 开始 / 关闭及分页 / 原收据。包 / 注册、租户授权、成员分配、绑定 / 数据就绪分别成立。[同源接口资料](../../packages/example-tickets-core/src/openapi.ts) · [快速指南](../../docs/平台底座/Core接入/平台Core接入-开发任务.md#core-quick-start)
 
