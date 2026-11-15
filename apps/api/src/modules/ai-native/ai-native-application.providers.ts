@@ -1419,10 +1419,12 @@ export const AI_NATIVE_SCENE_CATALOG_PROVIDERS: FactoryProvider[] = ([
       try {
         return entry.disable.configurationSections.every(name => {
           const value = current.configurations[name];
-          // Original hosts capture their server sections when Nest builds
-          // them. A later publication cannot claim that those same hosts were
-          // rebuilt; observe unavailable until the actual assembly matches.
-          if (requestFingerprint(value ?? null) !== requestFingerprint(assembledPublication.configurations[name] ?? null)) return false;
+          // Most hosts capture these sections during assembly. Category and
+          // automatic explanations instead read the current publication per
+          // request; applying the startup snapshot would hide their legal
+          // updates. Both still use the original parser and current policies.
+          if (name !== 'categoryProposal' && name !== 'automationExplanation'
+            && requestFingerprint(value ?? null) !== requestFingerprint(assembledPublication.configurations[name] ?? null)) return false;
           if (name === 'orderModel' || name === 'quoteModel' || name === 'openingModel') return readOrderExecutionConfiguration(value).enabled;
           if (name === 'staffRecognition') { const c = readStaffRecognitionConfiguration(value); return c.enabled
             && (entry.policy.modelCapability === 'image' || entry.policy.modelCapability === 'audio' && !!c.audio); }

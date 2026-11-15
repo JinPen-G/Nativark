@@ -15,6 +15,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { readRuntimePublication, type RuntimePublication } from '../runtime-publication.configuration';
 import { ENTRY_SCENE_CATALOG, ENTRY_SCENE_CATALOG_VERSION, ENTRY_SCENE_SURFACES,
   type EntrySceneDefinition, type EntrySceneSurface } from './entry-scene-catalog';
+import { categoryModelConfigurationSchema } from '../category-assist/category-model-host.composition';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revisionId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*(?:\/[A-Za-z0-9][A-Za-z0-9._:-]*)*$/u);
@@ -199,6 +200,14 @@ export function createEntrySceneCatalogApplication(ports: EntrySceneCatalogReadP
     if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const before = await current(signal), publication = parsePublication(structuredClone(await ports.publication()));
     const all = ENTRY_SCENE_CATALOG.filter(entry => entry.audience === before.selectedAudience && entry.surfaces.includes(surface))
+      .map(entry => {
+        if (entry.entryId !== 'platform.category_propose') return entry;
+        // The category host selects its plan by the current server version.
+        // Keep the same captured publication for metadata, source lookup and
+        // the final publication recheck; an old v1 plan cannot authorize v2.
+        const configured = categoryModelConfigurationSchema.safeParse(publication.configurations.categoryProposal);
+        return configured.success ? { ...entry, sceneVersion: configured.data.sceneVersion } : entry;
+      })
       .slice().sort((left, right) => left.entryId < right.entryId ? -1 : left.entryId > right.entryId ? 1 : 0);
     if (command.data.after && !all.some(entry => entry.entryId === command.data.after)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const candidates = all.filter(entry => !command.data.after || entry.entryId > command.data.after).slice(0, command.data.limit + 1);

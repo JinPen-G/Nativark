@@ -6,6 +6,26 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry01-formal-source-simulated-whole-closeout-20261115"></a>
+## ENTRY-01 原发布／版本来源修复与四端目录全文研发收口（2026-11-15）
+
+前置`e95d1b8a0f24f65e577a1fb39f332a2679240fc8`本地及GitHub独立回读一致，包含[四端22消费者](<#ain-entry01-four-surface-catalog-consumers-20261115>)与原员工只读阶段。Root按ENTRY-01原四条重新核正式provider／Auth／Guard、原scope／权限、订阅／政策与能力收据，不以既有声明metadata组代替生产装配。独立复核发现并确认两处P2：[目录provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)对动态`categoryProposal／automationExplanation`也要求启动快照一致，误挡合法更新；[目录application](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.application.ts)固定v1登记，可能与原品类宿主当前`sceneVersion`错配。
+
+修复仅两源。provider只对上述两个真实按请求读ConfigService的宿主沿当前配置判断，其余捕获宿主仍必须与启动装配一致；原闭合parser／enabled／时间／政策不变。application从本请求捕获publication经原`categoryModelConfigurationSchema`投影实际品类版本，同一entry贯穿首次来源／readPlan／第二次来源及输出，末端继续比较publication全文。无效配置保持关闭，旧v1政策不能授权v2，也不产生新的版本政策或执行。当前application／provider blob为`98e4d99023f5a977c6e5c765bb2027fa2bfed6c3`／`9d025cfaf30d503971992e00b8f8f4042b12b4d2`，Root与独立复核分别核同。
+
+| 原条款与G4证据 | 当前结论 |
+| --- | --- |
+| operations／staff／customer与专用platform | 当前Auth／ClientAuth signer／authenticate、Guard／ALS、规范scope及当前权限实际组合通过；平台不借租户身份，员工错audience拒绝。 |
+| 后台／员工／客户微信／预约网站 | 四端正式目录合同、原入口／API／组件已固定在e95d1b8a0；明确读取、分页、hidden／身份／到期／非法响应与人工回退的必要模拟及原编译配置类型通过。 |
+| 当前tenant／workspace／location／role／本人关系／dataScope／能力及订阅 | 正式目录provider读取原宿主、scope／持久plan／SubscriptionService／ProviderRouter和原能力、Invocation／原财务收据关联；缺能力、原owner篡改、停用、读取中权限地点变化和撤会话均拒绝。目录不读取业务正文、密钥或执行动作。 |
+| 每场景工具／权限／返回量／脱敏／查询时点／成熟度／风险／人工出口／停用 | 唯一22项登记完整，五类身份共26项端投影全部在合法原来源下通过。当前publication／版本真实性两P2已修，目录仍只为有界观察，不签Action或Task权限。 |
+
+Root完整模拟stdin SHA-256`b88c8894b44f74f6f5de29af3683a09c6fbacf34f3ad6ad2b0a6e95181b125b2`退出0：正式provider／Auth／ClientAuth／Guard／Controller及生产仓储reader，operations12、staff5、客户两端各4、platform1；动态自动化更新、闭合原始请求、外端游标、分页、缺能力、原调用owner矛盾、停用、await身份变化及撤会话均通过，新增write／model／Task／ledger=0。原能力及单账行是明确合成历史事实，沿生产reader验证，不称真实供应商能力或费用。动态品类更新、v2仅有v1拒绝、v2政策通过、未来／过期配置拒绝五项stdin`25677533716995f83eb3933f752ad5f4d27a76479f4fc1b79587b5cf012c0292`退出0。最终TypeScript5.9.3、API四根／2035源零诊断，stdin`46be75dd92022a20fe1bc9b922d4b40d4a963484e90aef9ce10f9d101e77ea92`退出0。
+
+独立AI静态复核两P2关闭，新版本从捕获发布贯穿双读及末端复核；原四条未发现剩余确证实现缺口，本片两源未发现新增确证P1／P2。其证据仅静态层，不冒充Root行为模拟或真实环境。G1正式合同／权威来源、G2原服务实现、G3四端生产消费者及G4全文装配／模拟／类型／修复复验／独立核定齐备，ENTRY-01更新100%，ENTRY等权覆盖率更新77.8%（5／18项研发100%）；原28项分母与进度不变。新完成整项累计为1，后继main节点按PM串行窗口处理，不用本片抢main索引。
+
+失败保留：初期原fixture删除bootstrap Run使held读取失败，保留原fixture基线；规则宿主遗漏原CalendarAudit delegate，补真实形状端口；用场景静态描述工具代替原plan注册工具被严格schema拒绝，改原注册合法集合；平台成员fixture错误回运营人，按原无空间用户返回平台人；客户bootstrap最初禁止调用导致原host unavailable，补原渠道最少发布观察；撤权钩子曾设在外层control而非实际store，原断言未触发，改实际delegate await钩子且验证触发后拒绝。上述均驱动修复，未放宽生产校验。全部`node --no-compilation-cache -`、原offline preload／不可达DATABASE_URL／内存audit0；`output/.tmp/ain-entry01-formal-source-20261115`未创建、自有job全部退出，无新增测试脚本、依赖或共享Client／dist。真实微信／浏览器／MySQL／供应商留负责人后续操作。文档检查仍四处既有缺链，任务算术无新增错误。
+
 <a id="ain-entry15-staff-receipt-only-consumer-20261115"></a>
 ## ENTRY-15 员工原Task只读页面、原键恢复及人工出口（2026-11-15）
 
