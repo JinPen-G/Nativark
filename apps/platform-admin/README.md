@@ -10,6 +10,7 @@
 - [Vite配置](vite.config.ts)复用公共适配与原环境白名单。开发端口5176，API代理使用原配置，Core代码不决定代理或读取秘密。
 - 公共应用内置[Core管理目录](../../packages/platform-admin/src/CoreAccessPage.tsx)。SaaS管理员选择租户开通Core，租户管理员选择真实成员分配已开通Core；两层授权分别保存。无Core部署保留目录入口和准确空态。
 - [人员/角色页面](../../packages/platform-admin/src/features/access/PublicManagementPages.tsx)读取公共目录并创建/编辑，角色权限复用原搜索编辑器。无Core也可维护公共角色；Core业务权限需先由部署入口按清单登记。
+- SaaS“租户管理”可创建无Core租户、修改资料及单独变更状态；创建需租户初始化权限，冻结/停用沿原服务端撤销会话，恢复保留Core及成员设置。创建临时密码只在当前保存结果显示。
 
 ## 本地使用
 

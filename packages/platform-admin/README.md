@@ -8,7 +8,7 @@
 | --- | --- |
 | [公共应用工厂](src/application.tsx)、[组合参数](src/application-context.ts) | `/application` 为零Core及工单宿主提供同一登录/设置/受保护路由，宿主只传品牌、唯一会话和已登记页面 |
 | [Core授权目录](src/CoreAccessPage.tsx)、[可见性口径](src/application-access.ts) | SaaS选择真实租户和已登记Core；租户选择真实成员和服务端可分配Core，复用同一授权面板与原操作核对 |
-| [公共人员/角色](src/features/access/PublicManagementPages.tsx)、[权限编辑器](src/features/access/PermissionMatrix.tsx) | 当前租户真实目录、创建/编辑与精确角色选择；原权限对照/搜索呈现和来源单源迁入，旧Rental入口转接 |
+| [公共租户/人员/角色](src/features/access/PublicManagementPages.tsx)、[权限编辑器](src/features/access/PermissionMatrix.tsx) | SaaS租户创建/资料/状态与本租户人员角色管理；共用原目录、保存、草稿与权限组件，旧Rental入口转接 |
 | [正式出口](src/index.ts)、[壳组合](src/PlatformShell.tsx) | Provider、完整侧栏、面包屑/页名、通知、休息和面板，导航由获权 Core 页面声明生成 |
 | [运行时端口](src/runtime/index.ts)、[查询边界](src/runtime/session-queries.ts) | 宿主提供当前服务端会话、请求、订阅及代次；切身份先中止旧请求再清缓存，不推断业务回滚 |
 | [公共浏览器会话](src/runtime/browser-session.ts)、[HTTP](src/runtime/browser-http.ts)、[登录/改密](src/session-pages.tsx) | 独立公共Web宿主使用同一认证执行者；原Rental只适配原存储、空间与刷新收据 |
@@ -41,5 +41,7 @@
 真实零Core消费者见[公共Web宿主](../../apps/platform-admin/README.md)。新宿主使用 `/forms` 的草稿同步/离页保护及 `/motion` 启动入口；`/source/*` 仅为既有源码兼容转接，新业务页面使用正式 `/core`、`/ui` 等出口。
 
 公共应用按当前身份显示“租户 Core 授权”或“成员 Core 分配”。前者只由 SaaS 管理员读取当前部署目录并为租户开通/停用；后者从服务端 `assignable` 选择本租户已获权 Core，不要求管理者先分配给自己。地址参数只定位真实目录对象，缺失对象不挂载命令。提交中的路由/对象切换被阻止，未知结果保留原核对编号；分配与业务角色各自管理，界面可见性不代替服务端权限。
+
+SaaS“租户管理”读取公共租户目录；创建还须有 `system:tenant:bootstrap` 权限。填写租户编码、名称和管理员资料即可创建，无需Core/品类/空间。保存返回的临时密码只在当前页显示，管理员首次登录改密；之后再按上段开通Core。租户详情只修改名称与简称，状态页单独选择启用/冻结/停用并填写原因，分别调用原接口；恢复租户保留原Core授权及成员分配。
 
 “人员管理”和“角色权限”复用公共目录/保存接口；角色权限从实际已登记目录选择，默认新角色为本人数据范围，不采用Rental经营空间默认值。固定管理员角色只读，人员资料保留原角色/组织/管理员字段；一次性创建口令只在当前页显示，不进入缓存或存储。保存与回车共用同一Promise，失败先重读核对，后台刷新保留草稿。权限搜索/对照组件和草稿模型通过 `/access` 正式导出，数据和保存由宿主提供。账号重置口令、角色删除、组织及完整安全/订阅管理仍沿后续交付。

@@ -37,6 +37,8 @@ function ProtectedLayout() {
     ...(can("system:user:manage") ? [{ path: "/settings/users", label: en ? "Members" : "人员管理" }] : []),
     ...(can("system:role:manage") ? [{ path: "/settings/roles", label: en ? "Roles" : "角色权限" }] : []),
     ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
+      ? [{ path: "/platform/tenants", label: en ? "Tenants" : "租户管理" }] : []),
+    ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
       ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : [])
   ];
   return <PlatformShell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
@@ -81,6 +83,10 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: "/platform/core-access", element: <CoreAccessPage audience="saas" /> },
     { path: "/settings/member-cores", element: <CoreAccessPage audience="tenant" /> },
+    { path: "/platform/tenants", element: <PublicManagementPage kind="tenants" /> },
+    { path: "/platform/tenants/new", element: <PublicManagementPage kind="tenants" edit /> },
+    { path: "/platform/tenants/:id", element: <PublicManagementPage kind="tenants" edit /> },
+    { path: "/platform/tenants/:id/status", element: <PublicManagementPage kind="tenants" edit status /> },
     ...(["users", "roles"] as const).flatMap(kind => [
       { path: `/settings/${kind}`, element: <PublicManagementPage kind={kind} /> },
       { path: `/settings/${kind}/new`, element: <PublicManagementPage kind={kind} edit /> },

@@ -1,9 +1,10 @@
-/** 公共人员/角色页面使用原目录和保存接口；页面权限不替代服务端，Core使用权另外分配。 */
+/** 公共租户/人员/角色页面使用原目录和保存接口；页面权限不替代服务端，Core使用权另外分配。 */
 import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { RoleScope, type PermissionModule, type SaveSystemRoleRequest, type SaveSystemUserRequest,
-  type SystemRoleRow, type SystemUserRow } from "@rental-os/platform-contracts";
+import { RoleScope, TenantStatus, type CreatePlatformTenantRequest, type CreatePlatformTenantResult,
+  type PermissionModule, type PlatformTenantSummary, type SaveSystemRoleRequest, type SaveSystemUserRequest,
+  type SystemRoleRow, type SystemUserRow, type UpdateTenantRequest, type UpdateTenantStatusRequest } from "@rental-os/platform-contracts";
 import { Alert, Button, ConfirmAction, CopyButton, DataTableStatus, DataTableText, Form, FormSection, Input,
   ListFilters, ListSection, Result, SaveButton, Select, Switch, Table, useListFilter } from "../../components/ui";
 import { PageHeading, QueryState, SettingsWorkspace, useServerFormSync } from "../../shell";
@@ -16,67 +17,79 @@ import { useLocale } from "../../app/locale";
 import { PermissionEditor } from "./PermissionMatrix";
 import { isFixedRole } from "./permission-matrix-model";
 
-const base = { users: "/settings/users", roles: "/settings/roles" } as const;
+const base = { users: "/settings/users", roles: "/settings/roles", tenants: "/platform/tenants" } as const;
 type Kind = keyof typeof base;
+type DirectoryRow = SystemUserRow | SystemRoleRow | PlatformTenantSummary;
+const rowId = (row: DirectoryRow) => "tenantCode" in row ? row.tenantId : row.id;
+const rowStatus = (row: DirectoryRow) => "tenantCode" in row ? row.tenantStatus : row.isActive ? "active" : "disabled";
 function useDirectory<T>(kind: string, path = `/platform/${kind}`) {
   const { session } = usePlatformApplication();
   return useQuery({ queryKey: ["public-management", session.currentSessionEpoch(), kind],
     queryFn: ({ signal }) => session.runtime.request<T>(path, { signal }), meta: { liveRefresh: false } });
 }
 
-function ManagementGate({ kind, children }: { kind: Kind; children: ReactNode }) {
+function ManagementGate({ kind, creating, children }: { kind: Kind; creating: boolean; children: ReactNode }) {
   const { user, sessionVerified } = useAdminSession();
-  return sessionVerified && canManagePublicResource(user, "tenant", kind === "users" ? "system:user:manage" : "system:role:manage")
+  const allowed = kind === "tenants" ? canManagePublicResource(user, "saas", "system:tenant:manage")
+    && (!creating || canManagePublicResource(user, "saas", "system:tenant:bootstrap"))
+    : canManagePublicResource(user, "tenant", kind === "users" ? "system:user:manage" : "system:role:manage");
+  return sessionVerified && allowed
     ? children : <Result status="403" title="403" />;
 }
 
 function Directory({ kind }: { kind: Kind }) {
   const { brandName } = usePlatformApplication(), { locale } = useLocale(), en = locale === "en-US", navigate = useNavigate();
-  const query = useDirectory<Array<SystemUserRow | SystemRoleRow>>(kind);
-  const filter = useListFilter(query.data, { fields: row => "account" in row ? [row.account, row.displayName] : [row.code, row.name],
-    status: row => row.isActive ? "active" : "disabled" });
-  const title = kind === "users" ? en ? "Members" : "人员管理" : en ? "Roles" : "角色权限";
-  return <><PageHeading title={title} brandName={brandName} extra={<Button onClick={() => navigate(`${base[kind]}/new`)}>
+  const { user } = useAdminSession(), query = useDirectory<DirectoryRow[]>(kind);
+  const filter = useListFilter(query.data, { fields: row => "tenantCode" in row ? [row.tenantCode, row.tenantName]
+    : "account" in row ? [row.account, row.displayName] : [row.code, row.name], status: rowStatus });
+  const title = { users: en ? "Members" : "人员管理", roles: en ? "Roles" : "角色权限", tenants: en ? "Tenants" : "租户管理" }[kind];
+  const canCreate = kind !== "tenants" || canManagePublicResource(user, "saas", "system:tenant:bootstrap");
+  return <><PageHeading title={title} brandName={brandName} extra={canCreate && <Button onClick={() => navigate(`${base[kind]}/new`)}>
     {en ? "Create" : "新增"}</Button>} />
     <QueryState loading={query.isPending} error={query.error} onRetry={query.refetch}>
       <ListSection controls={<ListFilters filter={filter} placeholder={en ? "Search name or code" : "搜索姓名或编码"}
-        options={[{ value: "active", label: en ? "Enabled" : "已启用" }, { value: "disabled", label: en ? "Disabled" : "已停用" }]} />}>
-        <Table<SystemUserRow | SystemRoleRow> rowKey="id" dataSource={filter.rows} pagination={filter.pagination}
+        options={[{ value: "active", label: en ? "Enabled" : "已启用" }, { value: "disabled", label: en ? "Disabled" : "已停用" },
+          ...(kind === "tenants" ? [{ value: "frozen", label: en ? "Frozen" : "已冻结" }] : [])]} />}>
+        <Table<DirectoryRow> rowKey={rowId} dataSource={filter.rows} pagination={filter.pagination}
           refreshing={query.isFetching} onRefresh={query.refetch} columns={[
             { title: en ? "Name" : "名称", key: "name", render: (_, row) => <DataTableText
-              primary={"account" in row ? row.displayName : row.name} secondary={"account" in row ? row.account : row.code} /> },
-            { title: en ? "Access" : "授权", key: "access", render: (_, row) => "roleNames" in row ? row.roleNames.join("、")
+              primary={"tenantCode" in row ? row.tenantName : "account" in row ? row.displayName : row.name}
+              secondary={"tenantCode" in row ? row.tenantCode : "account" in row ? row.account : row.code} /> },
+            { title: en ? "Access" : "授权", key: "access", render: (_, row) => "tenantCode" in row ? row.operatorShortName ?? "—"
+              : "roleNames" in row ? row.roleNames.join("、")
               : isFixedRole(row) ? en ? "Fixed administrator" : "固定管理员" : `${row.permissions.length} ${en ? "permissions" : "项权限"}` },
-            { title: en ? "Status" : "状态", key: "status", render: (_, row) => <DataTableStatus tone={row.isActive ? "success" : "neutral"}>
-              {row.isActive ? en ? "Enabled" : "已启用" : en ? "Disabled" : "已停用"}</DataTableStatus> },
-            { title: en ? "Actions" : "操作", key: "actions", render: (_, row) => <Button onClick={() => navigate(`${base[kind]}/${encodeURIComponent(row.id)}`)}>
-              {en ? "Details / edit" : "查看与编辑"}</Button> }
+            { title: en ? "Status" : "状态", key: "status", render: (_, row) => <DataTableStatus tone={rowStatus(row) === "active" ? "success" : "neutral"}>
+              {rowStatus(row) === "active" ? en ? "Enabled" : "已启用" : rowStatus(row) === "frozen" ? en ? "Frozen" : "已冻结" : en ? "Disabled" : "已停用"}</DataTableStatus> },
+            { title: en ? "Actions" : "操作", key: "actions", render: (_, row) => <>
+              <Button onClick={() => navigate(`${base[kind]}/${encodeURIComponent(rowId(row))}`)}>{en ? "Details / edit" : "查看与编辑"}</Button>
+              {kind === "tenants" && <Button onClick={() => navigate(`${base.tenants}/${encodeURIComponent(rowId(row))}/status`)}>{en ? "Change status" : "变更状态"}</Button>}
+            </> }
           ]} />
       </ListSection>
     </QueryState></>;
 }
 
 /** 保存按钮和回车共用一个Promise；失败锁住重发，先明确重新读取，创建口令只留当前页面。 */
-function Editor<Values extends object>({ kind, initial, readOnly = false, unavailable = false, fields, payload }: {
-  kind: Kind; initial: Values; readOnly?: boolean; unavailable?: boolean; fields: ReactNode; payload: (values: Values) => Values;
+function Editor<Values extends object>({ kind, initial, status = false, readOnly = false, unavailable = false, fields, payload }: {
+  kind: Kind; initial: Values; status?: boolean; readOnly?: boolean; unavailable?: boolean; fields: ReactNode; payload: (values: Values) => unknown;
 }) {
   const { id } = useParams(), { session, brandName } = usePlatformApplication(), { locale } = useLocale(), en = locale === "en-US";
-  const query = useDirectory<Array<SystemUserRow | SystemRoleRow>>(kind), navigate = useNavigate();
-  const row = id ? query.data?.find(item => item.id === id) : undefined;
+  const query = useDirectory<DirectoryRow[]>(kind), navigate = useNavigate();
+  const row = id ? query.data?.find(item => rowId(item) === id) : undefined;
   const [form] = Form.useForm<Values>(), pending = useRef<Promise<unknown> | null>(null), baseline = useRef("");
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [failed, setFailed] = useState(false);
-  const [saved, setSaved] = useState<SystemUserRow | SystemRoleRow>(), [reload, setReload] = useState(0);
+  const [saved, setSaved] = useState<DirectoryRow | CreatePlatformTenantResult>(), [reload, setReload] = useState(0);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const newSource = useRef(initial).current;
   const current = useServerFormSync(form, row ?? (!id && query.data ? newSource : undefined), () => {
     form.setFieldsValue(initial); baseline.current = formSnapshotFingerprint(form.getFieldsValue(true)); setDirty(false);
-  }, `${kind}:${id ?? "new"}:${reload}`);
+  }, `${kind}:${id ?? "new"}:${status}:${reload}`);
   const save = (values: Values) => {
     if (pending.current) return pending.current;
     if (readOnly || unavailable || failed || saved || !current() || query.error || id && !row) return Promise.reject(new Error(en ? "Read and check current data before saving." : "请先读取并核对当前资料。"));
     const submitted = formSnapshotFingerprint(form.getFieldsValue(true));
     setBusy(true);
-    const operation = session.runtime.request<SystemUserRow | SystemRoleRow>(`/platform/${kind}${id ? `/${encodeURIComponent(id)}` : ""}`,
+    const operation = session.runtime.request<DirectoryRow | CreatePlatformTenantResult>(`/platform/${kind}${id ? `/${encodeURIComponent(id)}` : ""}${status ? "/status" : ""}`,
       { method: id ? "put" : "post", data: payload({ ...initial, ...values }) }).then(async result => {
       setSaved(result); setDirty(false); notifyFormSaved(form, submitted);
       // 人员创建响应可能含一次性口令，仅放当前编辑器，不写查询缓存或浏览器存储。
@@ -89,7 +102,8 @@ function Editor<Values extends object>({ kind, initial, readOnly = false, unavai
     }).catch(error => { setFailed(true); throw error; }).finally(() => { pending.current = null; setBusy(false); });
     pending.current = operation; return operation;
   };
-  const title = kind === "users" ? en ? "Member details" : "人员资料" : en ? "Role details" : "角色资料";
+  const title = { users: en ? "Member details" : "人员资料", roles: en ? "Role details" : "角色资料",
+    tenants: status ? en ? "Tenant status" : "租户状态" : en ? "Tenant details" : "租户资料" }[kind];
   return <Form form={form} layout="vertical" disabled={busy || readOnly || Boolean(saved)} requiredMark={false}
     onValuesChange={() => setDirty(formSnapshotFingerprint(form.getFieldsValue(true)) !== baseline.current)}
     onFinish={values => { void save(values).catch(() => undefined); }}>
@@ -168,8 +182,37 @@ function UserEditor() {
     </>} />;
 }
 
-export function PublicManagementPage({ kind, edit = false }: { kind: Kind; edit?: boolean }) {
+function TenantEditor({ status }: { status: boolean }) {
+  const { id } = useParams(), query = useDirectory<PlatformTenantSummary[]>("tenants"), { locale } = useLocale(), en = locale === "en-US";
+  const tenant = query.data?.find(row => row.tenantId === id);
+  if (status) return <Editor<UpdateTenantStatusRequest> kind="tenants" status
+    initial={{ status: tenant?.tenantStatus ?? TenantStatus.Active, reason: "" }}
+    payload={values => ({ status: values.status, reason: values.reason.trim() } satisfies UpdateTenantStatusRequest)} fields={<>
+      <Alert type="info" title={tenant?.tenantName ?? ""} description={en ? "Freezing or disabling revokes tenant sessions. Restoring the tenant keeps existing Core and member access settings." : "冻结或停用将撤销租户会话。恢复租户保留原 Core 和成员授权设置。"} />
+      <Form.Item name="status" label={en ? "Status" : "状态"} rules={[{ required: true }]}><Select options={[
+        { value: TenantStatus.Active, label: en ? "Enabled" : "已启用" }, { value: TenantStatus.Frozen, label: en ? "Frozen" : "已冻结" },
+        { value: TenantStatus.Disabled, label: en ? "Disabled" : "已停用" }]} /></Form.Item>
+      <Form.Item name="reason" label={en ? "Reason" : "变更原因"} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={3} /></Form.Item>
+    </>} />;
+  return <Editor<CreatePlatformTenantRequest> kind="tenants" initial={{ tenantCode: tenant?.tenantCode ?? "", tenantName: tenant?.tenantName ?? "",
+    operatorShortName: tenant?.operatorShortName ?? "", adminAccount: "", adminDisplayName: "", adminPhone: "" }}
+    payload={values => id ? { tenantName: values.tenantName, operatorShortName: values.operatorShortName } satisfies UpdateTenantRequest
+      : { tenantCode: values.tenantCode, tenantName: values.tenantName, operatorShortName: values.operatorShortName,
+        adminAccount: values.adminAccount, adminDisplayName: values.adminDisplayName, adminPhone: values.adminPhone?.trim() || undefined } satisfies CreatePlatformTenantRequest}
+    fields={<><Form.Item name="tenantCode" label={en ? "Tenant code" : "租户编码"} rules={[{ required: true, whitespace: true }]}><Input disabled={Boolean(id)} /></Form.Item>
+      <Form.Item name="tenantName" label={en ? "Tenant name" : "租户名称"} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
+      <Form.Item name="operatorShortName" label={en ? "Short name" : "后台简称"} rules={[{ max: 64 }]}><Input maxLength={64} /></Form.Item>
+      {!id && <FormSection title={en ? "Tenant administrator" : "租户管理员"}>
+        <Form.Item name="adminAccount" label={en ? "Account" : "管理员账号"} rules={[{ required: true, whitespace: true }]}><Input autoComplete="off" /></Form.Item>
+        <Form.Item name="adminDisplayName" label={en ? "Name" : "管理员姓名"} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
+        <Form.Item name="adminPhone" label={en ? "Phone" : "电话"}><Input autoComplete="tel" /></Form.Item>
+        <Alert type="info" title={en ? "The tenant starts without a business Core. Save the temporary password and enable Core access separately." : "租户创建后不含业务 Core。请保存返回的临时密码，再单独授权 Core。"} />
+      </FormSection>}</>} />;
+}
+
+export function PublicManagementPage({ kind, edit = false, status = false }: { kind: Kind; edit?: boolean; status?: boolean }) {
   const { id } = useParams();
-  return <ManagementGate kind={kind}>{edit ? kind === "roles" ? <RoleEditor key={id ?? "new"} /> : <UserEditor key={id ?? "new"} />
+  return <ManagementGate kind={kind} creating={edit && !id}>{edit ? kind === "tenants" ? <TenantEditor key={`${id ?? "new"}:${status}`} status={status} />
+    : kind === "roles" ? <RoleEditor key={id ?? "new"} /> : <UserEditor key={id ?? "new"} />
     : <Directory kind={kind} />}</ManagementGate>;
 }
