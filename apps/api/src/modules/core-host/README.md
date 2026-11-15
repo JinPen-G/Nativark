@@ -38,6 +38,8 @@ API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输�
 
 [工单组合](original-tickets-host.ts)消费 `@rental-os/example-tickets-core` 正式服务端及MySQL出口，注册的业务权限、原主体/成员使用权、当前绑定和本租户受派者分别核验。创建工单沿原订阅期限，新建暂停后已获权工单的处理/关闭仍由自身业务状态与权限决定。停用后的原收据只读核对本人操作和当前对象可见性。普通业务审计消费Core提供的原操作关联，公共OperationLog继续使用通用输入。
 
+原绑定的数据版本按工单正式出口 `TICKETS_DATA_READABLE` 核验，与清单及服务端就绪读取同源；兼容更新保留原绑定，不以当前版覆盖其初始化记录。普通业务仍先核当前部署的物理数据/迁移就绪以及租户授权、成员分配和业务权限。必要原收据继续走原只读范围，不能借兼容版本或善后入口恢复普通业务。[工单接入说明](../../../../../packages/example-tickets-core/README.md#接入已有宿主)
+
 工单组合还将 `readTicketsRemoval(database, tenantId)`绑定到服务端贡献的assessRemoval，读取未关闭工单及保留的历史/原收据，缺物理结构明确unknown。组合时不执行该读取，只有受权移除预检才调用；平台仍须提供实际停新/在途/历史依赖Source，空工单数据不能替代平台排空证据。[Core检查](../../../../../packages/example-tickets-core/README.md#接入已有宿主)
 
 新增Core可复用原主体和Core使用权适配，并提供自己的业务权限、范围、初始化和原收据语义。API组合构建先编译本树Core合同/宿主和选中示范模块，实际无Core独立构建由PCH宿主片落实。

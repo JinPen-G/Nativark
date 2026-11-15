@@ -1,6 +1,6 @@
 /** 构建时注入真实固定来源；不在源码里假造发布提交或声明尚未提供的页面/AI入口。 */
 import { CoreManifestSchema, type CoreManifest } from "@rental-os/core-contracts";
-import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_VERSION } from "./contracts";
+import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_VERSION, TICKETS_DATA_READABLE } from "./contracts";
 
 export function createTicketsManifest(source: CoreManifest["source"]): CoreManifest {
   const compatible = { minInclusive: "0.1.0", maxExclusive: "0.2.0" };
@@ -25,7 +25,7 @@ export function createTicketsManifest(source: CoreManifest["source"]): CoreManif
       { resource: "ticket", action: "close", name: "关闭工单" }
     ],
     scope: { kind: "tenant" },
-    data: { version: TICKETS_DATA_VERSION, readable: compatible, migrations: [
+    data: { version: TICKETS_DATA_VERSION, readable: TICKETS_DATA_READABLE, migrations: [
       { id: "tickets.initial", file: "migrations/001-tickets.sql", sha256: "d9abd89fed3f18c3c6c6690062b15bc30de53e04eae6f69cf049d310a24e3330" }
     ] },
     requires: [],

@@ -24,6 +24,8 @@
 
 使用[服务端贡献](src/server.ts)的`createTicketsServer(authority)`供给Core注册表。它采用公共`CorePrincipal/CoreBinding`，拒绝其他Core、跨租户和业务容器；授权绑定由原宿主供给，省略业务初始化和AI工具。没有提供移除检查器时，宿主继续保留代码和历史收据读取者。
 
+兼容更新保留原绑定的 `bindingId/revision/dataVersion`。清单、服务端就绪读取和原业务适配共用 [TICKETS_DATA_READABLE](src/contracts.ts) 核对原绑定版本，不要求它等于当前实现的数据版本。当前物理数据仍须符合所选发行的版本和完整迁移账；可读范围不替代这一检查。重新开通或设置已有绑定不会再次初始化，原操作收据继续保留当时的绑定和执行版本。
+
 需要移除检查时，向 `authority.assessRemoval`传入MySQL正式出口 `readTicketsRemoval`的只读绑定。它先核真实结构，再查询未关闭工单、历史工单和原操作收据是否存在；部署移除检查全Core，可选tenantId仅缩小观察范围。未关闭返回in_flight，保留历史/收据返回history，缺结构返回unknown。全部不存在也只表示Core数据没有阻碍，平台仍须确认已停止新准入、没有在途任务/回调和完整历史依赖。停用不要求清空历史，检查不关闭工单、不删数据，也不批准删除代码。[实际检查](src/mysql.ts) · [平台汇合](../core-host/README.md#移除代码前读取依赖)
 
 后台直接调用 `createTicketsAdmin()`取得四页贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，主组合通过[公共路由适配](../../apps/admin/src/core/README.md#宿主只装配一次)挂接，当前主应用实际接线仍待完成。[页面源码](admin/index.tsx)

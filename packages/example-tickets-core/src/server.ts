@@ -1,6 +1,6 @@
 /** 样例使用租户范围；绑定和权限来源须由原宿主提供，注册成功不创造绑定或业务数据。 */
-import type { CoreBinding, CoreScopeRequest, CoreServerContribution } from "@rental-os/core-contracts";
-import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_VERSION } from "./contracts";
+import { isCoreVersionSupported, type CoreBinding, type CoreScopeRequest, type CoreServerContribution } from "@rental-os/core-contracts";
+import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TICKETS_DATA_READABLE } from "./contracts";
 
 export interface TicketsScopeAuthority {
   resolveAuthorizedBinding(request: CoreScopeRequest): Promise<CoreBinding | undefined>;
@@ -22,7 +22,8 @@ export function createTicketsServer(authority: TicketsScopeAuthority): CoreServe
       return { status: "resolved", binding };
     },
     async readReadiness(binding) {
-      return binding.coreId === TICKETS_CORE_ID && !binding.container && binding.dataVersion === TICKETS_DATA_VERSION
+      // 兼容更新保留原绑定；它的初始化版本不替代宿主对当前物理库/迁移账的就绪检查。
+      return binding.coreId === TICKETS_CORE_ID && !binding.container && isCoreVersionSupported(binding.dataVersion, TICKETS_DATA_READABLE)
         ? { status: "ready" }
         : { status: "unavailable", code: "tickets_data_version", message: "工单绑定或数据版本不符合当前实现" };
     },

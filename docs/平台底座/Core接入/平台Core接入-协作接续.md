@@ -46,8 +46,9 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 ## 3. 下一入口与待交付
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[开发能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)和[模块导读/直接消费者](平台Core接入-开发记录.md#core-source-reading-20261115)已有实际入口及覆盖状态，源码用途/文档缺口继续按模块整改。完整行为基线、独立schema/迁移账和最终前后运行对照仍按原门槛交付。
-2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、7操作Nest与同源OpenAPI/原收据只读、4页面贡献，主Guard/HTTP/后台仍按公共窗口接线。
+2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、8操作Nest与同源OpenAPI/原收据只读、4页面贡献，主Guard/HTTP/后台仍按公共窗口接线。
    [原账/工单物理观察](平台Core接入-开发记录.md#core-mysql-data-observation-20261115)已提供正式mysql-deployment子出口及readTicketsPhysicalData。原迁移checksum/顺序与实际3表关键结构共同由目录/升级预检消费，坏Core证据不关闭无关Core；下一步公共平台数据所有者提供自身完整结构检查及已核定原迁移名称映射，受控主组合消费同一Source。真实数据库/原schema拆分仍未验，不从包清单推导就绪。
+   [工单原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115)已使清单、server和原业务组合共用可读范围，保留原绑定/初始化版；普通准入仍核当前物理库及完整迁移。三包类型及原工厂/ALS/授权/迁移/收据离线链通过，实际升级、真实数据库及全API未验。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。公共片由PM核定唯一作者，具体消费者入口已可定位。
    当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI尚未取得本对话的新写入窗口，不继续用独占接口数量代替独立宿主。
    [原身份SQL模板](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115)已移除模板所需的顶层生成Client运行依赖，15条实际ALS/SQL新旧等价路径通过；原身份仓储及行业投影仍待上述公共窗口。完整API类型、主Guard和真实无Core登录未验，不把模板解耦视为主应用拆分完成。
@@ -80,7 +81,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 API贡献的空/双Core、命名/路径冲突、缺失/外部引用与包读取使用短命令验证，新增类型通过原合同检查；没有新增测试脚本。现有主应用OpenAPI仍未迁移，不能把独立组合器通过当作API整体可运行或接口文档已全部完备。
 
-能力目录4,486条唯一条目、查询分页、SaveButton正式导入、工单4页/7接口、同源清单/OpenAPI目录及随包指南生成经实际内存编译验证，原8组合同通过。当前3,632条缺少直接用途说明及5条动态元数据标记继续待整理；六个未检出应用/客户端包已按Git清单标明，检查模式会报告覆盖缺口。复杂动态注册/完整API字段和当前运行工具消费仍未完成。[首次设置阶段](平台Core接入-开发记录.md#core-tickets-first-setup-20261115)给出当前扫描，原[范围就绪阶段](平台Core接入-开发记录.md#core-scope-readiness-20261115)和[索引覆盖/部署快照](平台Core接入-开发记录.md#core-index-deployment-snapshot-20261115)保留历史验证。
+能力索引、查询分页、SaveButton正式导入、工单4页/8接口、同源清单/OpenAPI及随包指南已有内存编译和离线消费证据，原8组合同通过。[列表阶段](平台Core接入-开发记录.md#core-list-pagination-20261115)记录最近固定源码的索引；直接用途说明、动态元数据和六个未检出应用/客户端的覆盖缺口仍需逐模块处理，不能把索引issues=0当全源码整理完成。复杂动态注册/完整API字段和当前运行工具消费仍未完成，原[首次设置](平台Core接入-开发记录.md#core-tickets-first-setup-20261115)、[范围就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115)和[索引覆盖/部署快照](平台Core接入-开发记录.md#core-index-deployment-snapshot-20261115)保留各自历史验证。
 
 服务端注册的空/双Core、错误贡献、版本与schema拒绝、初始化输入边界已离线核对；授权/绑定MySQL事务源码和原身份适配已提供，实际部署迁移、主Auth/Guard/AppModule仍未接新合同。持续目标已生效，后续仍按原门槛逐片交付，必要公共文件窗口由PM协调。
 

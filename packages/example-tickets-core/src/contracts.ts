@@ -4,6 +4,8 @@ import { z } from "zod";
 export const TICKETS_CORE_ID = "example-tickets";
 export const TICKETS_CORE_VERSION = "0.1.0";
 export const TICKETS_DATA_VERSION = "0.1.0";
+/** 当前工单实现可读取的原绑定版本范围；物理数据版本和迁移账由宿主另行核验。 */
+export const TICKETS_DATA_READABLE = Object.freeze({ minInclusive: "0.1.0", maxExclusive: "0.2.0" });
 export const TicketIdSchema = z.string().min(1).max(36).regex(/^[a-zA-Z0-9_-]+$(?![\s\S])/);
 const id = TicketIdSchema;
 const revision = z.number().int().safe().positive();

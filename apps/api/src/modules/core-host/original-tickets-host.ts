@@ -1,11 +1,12 @@
 /**
  * 非租赁工单示范使用原平台身份、Core授权/成员分配及注册的业务权限。
  * 新工单沿原订阅期限准入，旧工单处理和原收据按当前对象权限读取与执行。
+ * 原绑定版本按工单清单的同源可读范围保留，当前物理库与迁移仍须宿主核定。
  */
 import type { Prisma } from "@prisma/client";
-import type { CoreScopeRequest } from "@rental-os/core-contracts";
+import { isCoreVersionSupported, type CoreScopeRequest } from "@rental-os/core-contracts";
 import type { CoreDeploymentAvailability } from "@rental-os/core-host";
-import { TicketsService, TicketError, TICKETS_CORE_ID, TICKETS_DATA_VERSION, createTicketsServer } from "@rental-os/example-tickets-core";
+import { TicketsService, TicketError, TICKETS_CORE_ID, TICKETS_DATA_READABLE, createTicketsServer } from "@rental-os/example-tickets-core";
 import { createMysqlTicketsExecution, readTicketsRemoval } from "@rental-os/example-tickets-core/mysql";
 import type { SystemUserRow } from "@rental-os/shared";
 import type { OperationLogService } from "../../common/operation-log.service";
@@ -39,7 +40,8 @@ export function composeOriginalTicketsHost(input: {
           if (request.permission === "create") await access.requireNewBusiness(transaction, user.tenantId);
         } else if (request.permission !== "read") throw new TicketError("denied", "原操作查询只允许工单读取权限");
         const binding = await access.binding(transaction, scope);
-        if (!binding || binding.dataVersion !== TICKETS_DATA_VERSION) throw new TicketError("denied", "工单Core尚未完成当前数据版本绑定");
+        if (!binding || !isCoreVersionSupported(binding.dataVersion, TICKETS_DATA_READABLE))
+          throw new TicketError("denied", "工单Core原绑定数据版本不在当前实现可读范围");
         await lease.revalidate();
         return user;
       };
