@@ -6,6 +6,31 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-enterprise-personal-authority-gap-20261115"></a>
+## AIN-15 企业本人路径与后台代客授权依赖定位（2026-11-15）
+
+dev1在固定前置 `8dc0dc75993e472d68341d53708e5cfb77f4e346` 完成只读核定。原[Web预约](../../apps/tenant-website/src/components/RemoteBooking.tsx)和小程序Checkout已有本人选择企业、付款方、当前告知版本、企业免逐单或逐单审批及本人明确提交链。原[企业政策](../../apps/api/src/modules/enterprise/enterprise-policy.service.ts)要求调用者就是使用人，明确拒绝operator／staff代本人声明告知或付款；[企业审批](../../apps/api/src/modules/enterprise/enterprise-approval.service.ts)的submit也限原申请本人消费批准。Core正式提交再次解析企业身份，不能把一份本人报价交后台就跳过该门禁。当前两端AI报价选择只开放个人模式，企业人工流程不证明后台企业AI链已接通。
+
+最少跨专项接点为原企业域提供可核验的本人告知、企业付款原授权与代办者／本次输入绑定的可信解析或原收据读取；公共RentalBookingIdentityInput及AI严格schema目前没有委托引用；企业逐单批准须与原AI批准在同一Core提交及恢复事务内各自合法消费；实际AI消费者仅可传服务端核定引用。入企join_request_only告知和内部revalidateQuote都不能替代交易告知或代客授权。上述原企业RD窗口保留，Root登记依赖供PM读取，不在AI树自造授权或改原本人权限。AIN-15仍75%，原26～28依赖继续按全文处理。该核定只有源码／合同／装配读取，无新测试或外部执行。
+
+<a id="ain-entry02-10-registered-human-whole-closeout-20261115"></a>
+## ENTRY-02／10 九Action与固定人工入口完成研发收口（2026-11-15）
+
+原导航及客户消费者、公共通知接线、本人资料页、原键审计和通知快照阶段已分别固定。最新通知阶段 `307264975c82d4ce979d2392f01e95264854ba43` 已普通推送并独立回读GitHub。dev1在 `8dc0dc75993e472d68341d53708e5cfb77f4e346` 对ENTRY-02／10原三条分别独立只读核定，保留通知两P2为最后缺口；Root随后修复并通过原保存／列表／仓储／维护组合，最后普通模板变量兼容问题同片补齐。范围和依赖继续按原任务，AIN-15企业代客授权和ENTRY-17全部审计不追加为这两项的前置。
+
+| 原条款 | 当前实现与证据 |
+| --- | --- |
+| ENTRY-02九类注册 | [唯一注册表](../../packages/shared/src/ai-entry-action-draft.ts)保留全部九类及资源、audience、风险和确认语义。原订单、客户、商品、预约、本人资料、付款、配货导航分别接原四端目标，Booking Draft和通知草稿均有实际明确保存消费者。 |
+| ENTRY-02完整校验 | [新版请求应用](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.application.ts)及公共闭合schema绑定版本、资源修订、surface、scope、确认／风险、期限、指纹和原引用；原Booking兼容合同从实际材料重建后完整比较。篡改、撤权、过期和最后等待跨期限沿原固定拒绝模拟。 |
+| ENTRY-02固定映射 | 后台、员工、客户Web／小程序使用各端固定目标映射，不执行模型路径。客户profile的登出／切服务／隐藏／卸载／迟到和unknown已在[资料页阶段](#ain-entry02-client-profile-lifecycle-fixed-20261115)核接，通知使用原模板、原草稿及同K恢复。 |
+| ENTRY-10原装配 | [原Controller](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.controller.ts)、原provider／AppModule／Guard／OpenAPI和页面宿主显式组合，没有新增执行引擎或客户端路由体系。 |
+| ENTRY-10停用及人工兼容 | 新导航和通知保存要求有效entryActions.enabled发布，客户Booking另核原渠道enabled／allowCreate／allowRead／allowExecute及持久政策，缺配置默认关闭。传统订单、预约、履约、支付、配置入口各自消费原权限。通知停用后按独立当前读权查原K，坏草稿不阻断普通列表／预热／快照。 |
+| ENTRY-10可操作交付 | [原资源阶段](#ain-entry02-registered-navigation-stage-20261115)、[客户目标](#ain-entry02-customer-original-links-fixed-20261115)、[通知公共消费者](#ain-entry02-notification-customer-consumer-stage-20261115)和[快照修复](#ain-entry0817-notification-cache-snapshot-fixed-20261115)已列入口、开关、映射、工具、人工出口和未验环境，原任务表不重复维护这些流水。 |
+
+dev2独立复核新增P2证明原普通通知模板可以合法使用notificationDraft／bodyErasure变量名，旧检测会隐藏记录并清空其快照。其实际模板／发送／列表／仓储反例stdin `0959377a1b92efa025de5b13538ceefde0dc149832e7363502ba2a589ecca2ac`退出0，代表缺陷成立。Root仅改草稿识别和清理目标定位，只依据原服务端状态、Provider及ID；模板变量名及内容不提供草稿身份。两个原变量名沿真实模板保存、原开发邮件模拟、列表、预热和快照保存复验通过，stdin `695e1bd8da90078a384491046d744fff08234f91a6d403e4a282891dcf7f491e`退出0，原正文与变量逐值保留，Provider／短信额度占用0。最终同一五根／1606源类型命令 `fc233ca91fb90b83acfcf3e44047a02f1d47c0a5999f008096556849764fb0a3` 对修后源码退出0、零诊断。修复作者为Root，独立结论来自dev1原全文核查及dev2原反例，未称其独立重跑Root修后模拟。
+
+Root按上表核齐原G1～G4，将ENTRY-02／10由75%更新100%。ENTRY18项为97.2%、16项完成，原AIN28项仍88.4%、24项完成；46项等权参考91.8%、40项完成。本次两项形成新的main集成节点，PM按已固定前置和本条提交串行整合，助手继续AIN-15／27及ENTRY-08／17。没有新测试文件、临时目录、依赖或后台进程。真实数据库、浏览器、微信和供应商由负责人后续操作。
+
 <a id="ain-entry0817-notification-cache-snapshot-fixed-20261115"></a>
 ## ENTRY-08／17 通知草稿降级与原恢复快照删除传播修复（2026-11-15）
 

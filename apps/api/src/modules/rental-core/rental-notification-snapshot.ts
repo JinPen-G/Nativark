@@ -4,9 +4,10 @@
 import type { RentalNotificationSendLogV1 } from '@rental-os/shared';
 
 export function isNotificationDraftCacheLog(log: RentalNotificationSendLogV1) {
+  // Template variable names are customer input and cannot identify a draft.
+  // These fields are assigned by the original notification-domain writer.
   return log.status === 'draft' || log.provider === 'not_dispatched'
-    || typeof log.id === 'string' && log.id.startsWith('notification-draft-')
-    || !!log.variables && (Object.hasOwn(log.variables, 'notificationDraft') || Object.hasOwn(log.variables, 'bodyErasure'));
+    || typeof log.id === 'string' && log.id.startsWith('notification-draft-');
 }
 
 /** Use only known receipt fields so legacy ciphertext or extra preview fields

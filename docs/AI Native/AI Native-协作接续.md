@@ -4,7 +4,7 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当前固定前置 `8dc0dc75993e472d68341d53708e5cfb77f4e346` 已普通推送并回读GitHub；当天Git现场、空索引及远端核对已完成。原资源导航、通知公共接线及客户14源见[原阶段](<AI Native-开发记录.md#ain-entry02-notification-customer-consumer-stage-20261115>)，资料页两源见[已上传修复](<AI Native-开发记录.md#ain-entry02-client-profile-lifecycle-fixed-20261115>)。Root当前核接[通知缓存降级与原快照传播](<AI Native-开发记录.md#ain-entry0817-notification-cache-snapshot-fixed-20261115>)，产品六源的一组必要模拟、恢复／撤权定点及类型通过，继续固定阶段并核剩余ENTRY原全文。dev1已完成ENTRY-02／10只读核定，转AIN-15企业正向的原授权依赖；dev2有限独立核接通知六源及ENTRY-08／17。两助手已恢复实际工具执行。main回读 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，既有原任务两项节点保留由PM串行整合，助手继续各自任务。接续前像在固定Git提交内保留。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当前固定前置 `307264975c82d4ce979d2392f01e95264854ba43` 已普通推送并回读GitHub；当天Git现场、空索引及远端核对已完成。原资源导航、通知公共接线及客户14源见[原阶段](<AI Native-开发记录.md#ain-entry02-notification-customer-consumer-stage-20261115>)，资料页两源见[已上传修复](<AI Native-开发记录.md#ain-entry02-client-profile-lifecycle-fixed-20261115>)。Root当前核接[通知缓存降级与原快照传播](<AI Native-开发记录.md#ain-entry0817-notification-cache-snapshot-fixed-20261115>)，产品六源的一组必要模拟、恢复／撤权定点及类型通过，普通模板变量兼容P2已修并复验，Root完成[ENTRY-02／10原全文收口](<AI Native-开发记录.md#ain-entry02-10-registered-human-whole-closeout-20261115>)并同步唯一任务册。dev1完成AIN-15具体依赖定位后转只读核AIN-27研发准备；dev2继续ENTRY-08／17原风险及审计全文。两助手已恢复实际工具执行。main回读 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，既有原任务两项节点保留由PM串行整合，助手继续各自任务。接续前像在固定Git提交内保留。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
@@ -12,14 +12,14 @@
 4. **ENTRY-01原四条已核闭，继续ENTRY-02全文。** 原目录和旧OPEN_ORDER消费者保持；新版ain-entry-action-2已接实际四端签发／当前原资源复核，独立entryActions发布、原Task／order来源及各目标权限／版本完整。员工四导航和Root后台消费者已冻结核接，商品原catalog页不借资产库存权。客户新增fromOrder只从本人原订单发现PROFILE／PRODUCT／本地PAYMENT，当前allowRead和发布独立核，lastUsed为原认证写；支付只读不POST refresh、不新支付。通知status=draft为真实unsent原日志，queued／failed不能冒充；当前原域三源由dev2核完，公共合同／签发／同K保存恢复及后台消费者由Root接。九Action全文仍未核闭，不以registry或unavailable升档。
 5. **ENTRY-05／09／11／12／18已全文核闭，继续02／08／10／17。** [后台结果与人工操作](<AI Native-开发记录.md#ain-entry05-operations-human-whole-closeout-20261115>)经原三条、固定生产者／消费者及独立复核核闭；确定性事实／来源、准备／批准／执行／原收据和candidates_only人工出口分别成立，不增加其他任务前置。原九后端／四端显式浏览、客户四读15000ms及员工receipt_only／原订单view入口保持；[严格存储](<AI Native-开发记录.md#ain-entry15-original-storage-recovery-20261115>)与[同账号权限刷新](<AI Native-开发记录.md#ain-entry06-current-permission-whole-closeout-20261115>)原规则不变。当前九Action生产者／实际消费已接，通知真正draft／not_dispatched不进入投递器；剩余02／08／10／17只补通知缓存／快照传播、profile页生命周期及原风险／审计全文核定，不重复已过集合。原两项main节点由PM固定来源串行整合，助手不等待。
 
-当前通知两处反例已修复。单份草稿缺证据仅撤回原缓存投影，原草稿读取继续拒绝，普通通知可读取、预热及保存。原正文删除、同一删除账本与原恢复快照共享事务回滚；原快照写入器始终只留草稿定位，已删除重放和可信恢复源行缺失也清副本。六项原fixture及恢复／等待撤权两项模拟退出0，TS5.9.3五根1606源零诊断；最终独立核接与剩余ENTRY全文由原助手继续核定，任务表暂不提前计分。先前403／502是历史失败，本次两助手新回合均已出现实际工具执行。
+当前通知两处反例已修复。单份草稿缺证据仅撤回原缓存投影，原草稿读取继续拒绝，普通通知可读取、预热及保存。原正文删除、同一删除账本与原恢复快照共享事务回滚；原快照写入器始终只留草稿定位，已删除重放和可信恢复源行缺失也清副本。六项原fixture及恢复／等待撤权两项模拟退出0，TS5.9.3五根1606源零诊断；普通模板合法变量notificationDraft／bodyErasure误识别P2已改为只用服务端状态、Provider和ID识别，两个原保存／发送／列表／快照反例及最终类型通过。ENTRY-02／10已按原全文收口，ENTRY-08／17余项由原助手继续核定。先前403／502是历史失败，本次两助手新回合均已出现实际工具执行。
 
 ## 写入归属与协作
 
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared／Guard／AppModule／OpenAPI／provider、registered-entry-action签发和后台原OrderHumanHandoff／Catalog消费者、双端runtime／builder及员工product页。当前导航阶段核接后固定，继续通知公共签发／HTTP／后台同K保存恢复；不覆盖企业窗口或助手活动客户页／通知源。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 原资源、客户十四源及资料页两源均已冻结交回。已完成ENTRY-02／10全文只读核定；当前只读定位AIN-15企业本人告知／付款授权的原正向及最少缺失接点，不碰企业RD窗口、公共文件／四册／索引，不新增测试脚本。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 原资源、客户十四源及资料页两源均已冻结交回。已完成ENTRY-02／10全文只读核定；AIN-15原企业本人路径和最少委托接点已登记；当前只读核AIN-27双轨／部署／灰度／停用／升级回退研发准备，不碰企业RD窗口、公共文件／四册／索引，不新增测试脚本。 |
 | AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 通知正文删除五源、缓存两源已冻结交回。当前只读核ENTRY-08／17原全文及Root通知六源修复的有限独立接续，普通通知、原键、删除传播及可信恢复重点核对；无活动源码写权，不扩跑绿色，不改四册／索引。 |
 | 内部/root/opening_core_closeout | 原11／12／18及限定ENTRY-02导航复核已交回；通知最后tenant敏感读权及原K损坏两P2的最小修复再次独立静态核闭。正文删除／缓存及小程序profile不在该结论范围，不递归派审／重复绿色，无写权。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |

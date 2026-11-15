@@ -243,10 +243,7 @@ export async function eraseNotificationDraftSnapshotCopies(tx: Prisma.Transactio
   if (!Array.isArray(snapshot.notifications)) throw unavailable();
   const notifications = snapshot.notifications.map(log => {
     if (!log || typeof log !== 'object' || Array.isArray(log)) throw unavailable();
-    const original = log.variables && typeof log.variables === 'object' && !Array.isArray(log.variables)
-      ? log.variables.notificationDraft : undefined;
-    const sameOriginal = original && typeof original === 'object' && !Array.isArray(original) && original.id === draftId;
-    if (log.id !== draftId && !sameOriginal) return log;
+    if (log.id !== draftId) return log;
     return JSON.parse(JSON.stringify(stripNotificationDraftCacheBody(log as unknown as RentalNotificationSendLogV1))) as Prisma.JsonValue;
   });
   if (isDeepStrictEqual(notifications, snapshot.notifications)) return;
