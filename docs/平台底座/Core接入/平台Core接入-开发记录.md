@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-recovery-receipts-20261116"></a>
+
+## Rental 恢复快照与原操作收据迁移（2026-11-16）
+
+固定父版 `5a11747214560c0b52368bdd112cf4bcc1dfbf95` 已普通推送并真实远端回读，当天实际 main 为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，已在任务分支祖先。本片承接父版后的快照/幂等仓储差异，旧原文直接由固定 Git 保存，原 API 保留窄 Nest provider 和正式再导出。
+
+Rental 包实际持有 `/mysql-state` 和 `/mysql-idempotency` 的唯一实现。私有 MySQL 适配使用可选 `@prisma/client` peer 的原 SQL/JSON runtime，不加载生成模型或实例化客户端；公开平台/Core合同和 Rental 领域根出口不加载它。宿主供给本表存储、真实范围解析、当前品类锁、原事件捕获与同一数据库事务。[快照实现](../../../packages/rental-core/src/mysql-state.ts) · [快照端口](../../../packages/rental-core/src/state-storage.ts) · [收据实现](../../../packages/rental-core/src/mysql-idempotency.ts) · [收据端口](../../../packages/rental-core/src/idempotency-storage.ts)
+
+快照保留初建修订1、不变不写、变更CAS、影响行数及修订上限检查，已持久档案沿原配置仓储保留。锁前分离快照载荷，等待锁时缓存变化不能改写本次输入；业务事务调用者仍拥有提交/回滚，原事件捕获沿同一事务。收据按租户/空间/动作/原键定位，写入必须使用业务事务，同键异输入拒绝，缺安全保留依据时不按年龄删除。恢复副本不替代正式业务事实、原授权或重放依据。[原快照适配](../../../apps/api/src/modules/rental-core/rental-state.repository.ts) · [原收据适配](../../../apps/api/src/modules/rental-core/rental-idempotency.repository.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版方法正文对照 | 快照8个、收据4个方法/函数的编译后正文一致，仅更换存储、范围、品类锁、事件接点及原SQL runtime别名；Git换行差异按JS模板实际换行语义核对 |
+| 真实tsconfig与当前schema的内存编译 | 公共合同5根/199源/10输出，Rental31根/577源/62输出，shared122根/340源/245输出，完整API988根/2271源/1976输出，均0诊断；Core/公共宿主、工单及MCP声明闭包共十项配置通过，当前238模型由锁定Prisma5.22官方WASM/generator在内存供给 |
+| 快照与收据直接边界 | `node --no-compilation-cache -` 退出0；快照14个边界通过，覆盖初建/不变/递增、非法修订/结构/变更依据、跨租户/重复行、修订上限、影响行数错误、载荷分离、调用方事务及事件失败。收据两空间同键各自独立、跨租户不命中、原事务写入、异输入冲突及按年龄删除拒绝通过。SQL/存储/回滚为明确fixture |
+| 原采用上下文与初始化刷新 | 原 `category-adoption-context-refresh.test.cjs` 的7例pass/0 fail/skip/todo/cancelled；`rental-business-initialization-refresh.test.cjs` 原断言通过，覆盖提交后重读、冻结旧上下文、当前地点投影、权威缺规则拒绝及排队保存的空间身份 |
+| 原实际服务履约/收据消费者 | `node --no-compilation-cache - api-snapshot tests/rental-service-execution.test.cjs` 最终退出0，原17项全部通过，stderr为空。覆盖分次履约、退款审核/原金额、事务窗口回滚、丢响应/后继状态/关单后的原段收据、unknown/篡改不重做、当前范围及客户端原操作定位 |
+
+首次完整类型检查定位原事件捕获会返回结果集合，新接点却要求void；仓储只等待完成，改为不解释返回值的 `PromiseLike<unknown>`。原消费者首次被离线Prisma fixture缺事务隔离枚举阻止，按当前schema的官方生成声明补齐后，上下文与初始化用例通过。履约收据夹具随后缺原Tenant共享父锁查询，使用固定父版两仓储复现相同失败；仅补真实查询与参数断言，原业务/收据/撤权/回滚断言均保留后17项通过。没有增加测试脚本或改产品授权。一次性直接检查因REPL不允许字符串代码生成而未执行，转为标准输入实际完成。
+
+源码职责头、Rental包/原业务导读和根入口同片维护，包出口与lock一致。7份定向文档858个本地链接/196个锚点/75个表格核对通过，0个问题；未检出链接以固定Git核定，不能当成当前运行文件。原 `node scripts/validate-docs.cjs` 退出1，17项中14项是稀疏未检出目标，固定Git定位后仅剩总导航第54行三份既有历史附件缺失；检查器及引用未改。`git diff --check` 退出0。原需求/任务正文及进度保持，完整Rental注册/授权映射、持久业务与配置、数据/迁移/Seed、页面/作业/AI及公共组织/订阅/集成仍未交付，不以本片方法数或局部用例升档。固定提交和普通推送由包含本节的提交定位，远端回读结果留本对话。
+
+本片所有新验证均在stdin/内存完成，无新依赖环境、临时文件或后台业务服务。2026-11-16再次核定旧统一待清理环境的绝对路径、840文件/91,808,304字节、无链接及无使用进程后，原生PowerShell删除仍在启动前被自动审批以 `blocked by policy` 拒绝；原责任manifest更新最近尝试，环境仍在原归集目录。真实数据库/HTTP/浏览器、干净标准包安装、独立更新/回退、独立接手和审查继续待验；旧外观静态失败及历史附件缺失沿原摘要保留。下一入口为原业务动作事务执行器和持久配置/事实仓储，同时补完整公共能力。
+
 <a id="core-rental-workspace-capability-20261116"></a>
 
 ## Rental 空间能力服务与实例仓储迁移（2026-11-16）

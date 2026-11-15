@@ -27,6 +27,14 @@
       "types": "./dist/item-group-validation.d.ts",
       "default": "./dist/item-group-validation.js"
     },
+    "./mysql-state": {
+      "types": "./dist/mysql-state.d.ts",
+      "default": "./dist/mysql-state.js"
+    },
+    "./mysql-idempotency": {
+      "types": "./dist/mysql-idempotency.d.ts",
+      "default": "./dist/mysql-idempotency.js"
+    },
     "./category-governance": {
       "types": "./dist/category-governance.d.ts",
       "default": "./dist/category-governance.js"
@@ -102,6 +110,12 @@
       "item-group-validation": [
         "dist/item-group-validation.d.ts"
       ],
+      "mysql-state": [
+        "dist/mysql-state.d.ts"
+      ],
+      "mysql-idempotency": [
+        "dist/mysql-idempotency.d.ts"
+      ],
       "category-governance": [
         "dist/category-governance.d.ts"
       ],
@@ -159,10 +173,14 @@
     "@rental-os/platform-contracts": "0.1.0"
   },
   "peerDependencies": {
-    "@nestjs/common": "^10.4.15"
+    "@nestjs/common": "^10.4.15",
+    "@prisma/client": "^5.22.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
+      "optional": true
+    },
+    "@prisma/client": {
       "optional": true
     }
   }

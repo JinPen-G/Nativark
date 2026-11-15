@@ -94,6 +94,12 @@ function receiptFixture() {
   service.state = () => ({});
   service.persist = async () => { if (failPersistence) { failPersistence = false; throw Error("post-commit projection failed"); } };
   const rows = {
+    // 原动作事务先取Tenant共享父锁，收据夹具也须核验这条真实查询。
+    $queryRaw: async query => {
+      assert.equal(query.sql, "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE");
+      assert.deepEqual(query.values, ["tenant_1"]);
+      return [{ id: "tenant_1" }];
+    },
     businessWorkspace: { findFirst: async ({ where }) => where.tenantId === "tenant_1" && where.id === "ws_1" ? { id: "ws_1" } : null },
     rentalOrderIdempotencyRecord: {
       findFirst: async ({ where }) => {
