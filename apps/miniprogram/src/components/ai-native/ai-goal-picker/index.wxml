@@ -1,5 +1,6 @@
 <view class="goal-picker" aria-busy="{{working}}">
   <view class="subtitle">这次想租什么？</view>
+  <ai-scene-catalog service-code="{{serviceCode}}"></ai-scene-catalog>
   <view class="body mt-8">描述使用计划，提取建议后逐项选择，再确认原报价。</view>
   <view wx:if="{{!view.hasLocator}}" class="goal-picker__field">
     <label for="goal-input">使用目标</label>

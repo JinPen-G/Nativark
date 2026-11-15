@@ -2,16 +2,17 @@
  * original inspection draft. Original host reads decide scope; no task,
  * candidate or client field grants permission to submit a Core inspection. */
 import type { AiInspectionResultReadRequest, RentalOrder, RentalInspectionTemplate, AiInspectionTarget,
-  AiInspectionEvidenceRef, AiInspectionDraftCreateRequest, StaffUploadObservationRequest,
+  AiInspectionEvidenceRef, AiInspectionDraftCreateRequest, AiInspectionRecognitionTaskReference, StaffUploadObservationRequest,
   StaffUploadObservationResponse } from '@rental-os/shared';
 import { currentSession, contextVersion, sessionEvents } from '../../core/session';
-import { readStaffInspectionHistory, createStaffInspectionTransportHost } from './inspection-transport';
+import { readStaffInspectionHistory, createStaffInspectionTransportHost, createStaffInspectionReceiptHost } from './inspection-transport';
 import { chooseInspectionHistoryItem, attachRemoteInspectionPage } from './inspection-page-binding';
 import { validateInspectionWire, isStaffUploadObservationRequest } from './inspection-wire';
 import { createStaffInspectionTaskApi } from '../../api/ai-inspection-tasks';
 import { uploadStaffImage, observeOriginalStaffUpload, completeObservedStaffUpload, type StaffUploadReference } from '../../api/uploads';
 import { readStorage, writeStorage, removeStorage } from '../../core/storage';
 import { newKey } from '../../core/keys';
+import { staffInspectionTaskStorageKey } from './inspection-task-session';
 
 interface Page {
   data: { id: string; signatureFileAssetId?: string; groups?: Array<{ allocationId: string }>;
@@ -277,7 +278,7 @@ export async function saveInspectionPageMediaDraft(page: Page, stage: 'pickup' |
     const saved = await createStaffInspectionTaskApi(state.work).createDraft(request);
     if (!state.work.current() || !state.locator || saved.status !== 'draft_saved' || saved.inspectionId !== null) throw Error('原草稿保存待核对');
     retainIntake(state, { ...state.locator, draftId: saved.draftId, phase: 'draft_saved' });
-    await openInspectionTaskPage(page, stage);
+    await openInspectionTaskPage(page, stage, 'execute');
   } catch (error) { showIntake(page, state, error instanceof Error ? error.message : '原草稿待核对，不换键保存'); }
   finally { state.busy = false; showIntake(page, state); }
 }
@@ -314,7 +315,7 @@ export async function recoverInspectionPageMedia(page: Page, stage: 'pickup' | '
     if (state.locator?.draftId) {
       const draft = await api.readDraft({ ...state.locator.target, draftId: state.locator.draftId });
       if (draft.templateVersion !== state.locator.templateVersion || draft.bindingFingerprint !== state.locator.bindingFingerprint) throw Error('原草稿材料已改变');
-      await openInspectionTaskPage(page, stage);
+      await openInspectionTaskPage(page, stage, 'execute');
     }
   } catch (error) { showIntake(page, state, error instanceof Error ? error.message : '原材料待核对'); }
   finally { state.busy = false; showIntake(page, state); }
@@ -336,6 +337,7 @@ export async function verifyInspectionPageUpload(page: Page, stage: 'pickup' | '
 }
 interface Binding {
   ticket: object; shown: boolean; current(): boolean; unsubscribe?: () => void;
+  readOnly: boolean; viewEpoch: number;
   source?: { orderId: string; allocationId: string; templateId: string; stage: 'pickup' | 'return'; draftId: string };
 }
 const bindings = new WeakMap<object, Binding>();
@@ -345,7 +347,11 @@ export function clearInspectionTaskPage(page: Page): void {
   page.setData({ aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: '' });
 }
 export function hideInspectionTaskPage(page: Page): void {
-  const binding = bindings.get(page); if (binding) binding.shown = false;
+  const binding = bindings.get(page);
+  if (binding) {
+    binding.shown = false; binding.viewEpoch++;
+    if (!binding.source) { clearInspectionTaskPage(page); return; }
+  }
   page.selectComponent('#ai-inspection-task')?.hostHide?.();
 }
 export function showInspectionTaskPage(page: Page): void {
@@ -354,24 +360,30 @@ export function showInspectionTaskPage(page: Page): void {
   if (!binding.current()) { clearInspectionTaskPage(page); return; }
   void page.selectComponent('#ai-inspection-task')?.hostShow?.();
 }
-export async function openInspectionTaskPage(page: Page, stage: 'pickup' | 'return'): Promise<void> {
+export async function openInspectionTaskPage(page: Page, stage: 'pickup' | 'return', intent?: 'read' | 'execute'): Promise<void> {
   if (bindings.get(page)?.source === undefined && bindings.has(page)) return;
   clearInspectionTaskPage(page);
   const session = currentSession(), version = contextVersion(), orderId = page.data.id,
     templateId = page.template?.id, templateVersion = page.template?.version;
-  if (!session || !orderId || !templateId || page.order?.id !== orderId) {
+  if (!session || !orderId || page.order?.id !== orderId) {
     page.setData({ aiInspectionTaskMessage: '当前检查对象不可用，请继续原人工检查' }); return;
   }
   const ticket = {}, current = () => { const now = currentSession(), binding = bindings.get(page);
-    return binding?.ticket === ticket && binding.shown && page.data.id === orderId && page.template?.id === templateId
-      && page.template?.version === templateVersion
+    return binding?.ticket === ticket && binding.shown && page.data.id === orderId
+      && (binding.readOnly || page.template?.id === templateId && page.template?.version === templateVersion)
       && contextVersion() === version && now?.user.id === session.user.id && now?.tenant.tenantId === session.tenant.tenantId
       && now?.currentWorkspaceId === session.currentWorkspaceId;
   };
-  const binding: Binding = { ticket, shown: true, current }; bindings.set(page,binding);
+  const binding: Binding = { ticket, shown: true, current, readOnly: intent !== 'execute', viewEpoch: 0 }; bindings.set(page,binding);
   binding.unsubscribe = sessionEvents.on(() => clearInspectionTaskPage(page));
   page.setData({ aiInspectionTaskLoading: true });
   try {
+    if (intent === undefined) {
+      const choice = await chooseInspectionHistoryItem(['只核对原任务与结果', '准备或继续原识别任务'], current);
+      if (choice === null || !current()) return;
+      binding.readOnly = choice === 0;
+    }
+    if (!current() || !binding.readOnly && !templateId) return;
     let after: string | undefined;
     while (current()) {
       const history = await readStaffInspectionHistory({ orderId, stage, limit: 5, ...(after ? { after } : {}) });
@@ -380,7 +392,7 @@ export async function openInspectionTaskPage(page: Page, stage: 'pickup' | 'retu
       // Keep that mapping here; the server still checks the selected resource.
       const allocations = new Set(stage === 'pickup' ? (page.data.groups ?? []).map(row => row.allocationId)
         : (page.data.allocations ?? []).map(row => row.id));
-      const items = history.items.filter(item => ['draft_saved','prepared'].includes(item.status)
+      const items = binding.readOnly ? history.items : history.items.filter(item => ['draft_saved','prepared'].includes(item.status)
         && item.target.templateId === templateId && allocations.has(item.target.allocationId));
       const labels = items.map(item => `原检查草稿 ${item.draftId.slice(-12)} · 版本 ${item.revision}`);
       if (history.nextAfter) labels.push('更多原检查草稿');
@@ -390,18 +402,49 @@ export async function openInspectionTaskPage(page: Page, stage: 'pickup' | 'retu
       if (index === items.length && history.nextAfter) { after = history.nextAfter; continue; }
       const item = items[index]; if (!item) return;
       const source = { ...item.target, draftId: item.draftId };
-      const original = await createStaffInspectionTransportHost(source,page.data.signatureFileAssetId || undefined);
+      let selectedOriginal: { originalReference: AiInspectionRecognitionTaskReference; originalTaskId: string } | undefined;
+      let recognitionSave: typeof item.recognitionSaves[number] | undefined;
+      if (binding.readOnly) {
+        const key = staffInspectionTaskStorageKey({ tenantId: session.tenant.tenantId, workspaceId: session.currentWorkspaceId,
+          ownerId: session.user.id, source });
+        const cached: unknown = wx.getStorageSync(key);
+        if (cached === '' || cached === null || cached === undefined) {
+          if (!item.recognitionSaves.length) {
+            page.setData({ aiInspectionTaskMessage: '没有可恢复的原任务定位；请在本人检查历史核对原提交收据。' }); return;
+          }
+          const chosen = await chooseInspectionHistoryItem(item.recognitionSaves.map(ref => `原结果 ${ref.resultId.slice(-12)} · 输入 ${ref.inputId.slice(-12)}`), current);
+          if (chosen === null || !current()) return;
+          recognitionSave = item.recognitionSaves[chosen]; if (!recognitionSave) return;
+        }
+      }
+      const original = binding.readOnly
+        ? await createStaffInspectionReceiptHost({ ...source, mode: 'receipt_only', ...(recognitionSave ? { recognitionSave } : {}) })
+        : await createStaffInspectionTransportHost(source,page.data.signatureFileAssetId || undefined);
       if (!current() || original.context.ownerId !== session.user.id || original.context.tenantId !== session.tenant.tenantId
         || original.context.workspaceId !== session.currentWorkspaceId || original.serverEnabled !== true) return;
+      if (binding.readOnly && recognitionSave) {
+        const retained = original.recognition?.reference;
+        if (!retained || Object.entries(recognitionSave).some(([key, expected]) => retained[key as keyof typeof retained] !== expected)) return;
+        selectedOriginal = { originalReference: { ...source, inputId: retained.inputId, expectedRevision: retained.expectedRevision },
+          originalTaskId: retained.taskId };
+      }
       binding.source = source;
-      const active = () => current() && original.current();
+      const active = () => current() && original.current(), viewEpoch = binding.viewEpoch;
       page.setData({ aiInspectionTaskVisible: true, aiInspectionTaskMessage: '' }, () => {
-        if (!active()) return;
+        if (!active() || binding.viewEpoch !== viewEpoch) return;
         const component = page.selectComponent('#ai-inspection-task');
         if (typeof component?.attachHost !== 'function') return;
         component.attachHost({ context: { tenantId: original.context.tenantId, workspaceId: original.context.workspaceId,
-          ownerId: original.context.ownerId, source, current: active } });
-        void component.hostShow?.();
+          ownerId: original.context.ownerId, source, current: active, readOnly: binding.readOnly,
+          ...(selectedOriginal ?? {}) } });
+        const shown = component.hostShow?.();
+        // The original history selection is the explicit read intent. Later
+        // page show calls only restore local state in this restricted host.
+        if (binding.readOnly) void Promise.resolve(shown).then(() => {
+          if (active() && binding.viewEpoch === viewEpoch) return component.onRead?.();
+        }).catch(() => {
+          if (active() && binding.viewEpoch === viewEpoch) page.setData({ aiInspectionTaskMessage: '原任务暂不可核对，请保留定位并继续人工检查。' });
+        });
       });
       return;
     }
@@ -413,7 +456,7 @@ export async function openInspectionTaskPage(page: Page, stage: 'pickup' | 'retu
 }
 export async function openInspectionTaskResult(page: Page, stage: 'pickup' | 'return', value: unknown): Promise<void> {
   const binding = bindings.get(page), expected = page.selectComponent('#ai-inspection-task')?.originalResultReference?.();
-  if (!binding?.source || !binding.current() || !expected || JSON.stringify(value) !== JSON.stringify(expected)
+  if (!binding?.source || binding.readOnly || !binding.current() || !expected || JSON.stringify(value) !== JSON.stringify(expected)
     || !validateInspectionWire('result-read','request',value)) return;
   const reference = value as AiInspectionResultReadRequest;
   if (Object.entries(binding.source).some(([key, expected]) => reference[key as keyof AiInspectionResultReadRequest] !== expected)) return;

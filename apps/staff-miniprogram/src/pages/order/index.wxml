@@ -14,6 +14,7 @@
   </ai-task-workbench>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <block wx:else>
+    <view class="section section--tight"><ai-scene-catalog context-key="{{id}}"></ai-scene-catalog></view>
     <view class="section order-heading">
       <view class="row row--between"><view class="title">#{{orderNo}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
       <view class="order-heading__meta">下单时间：{{createdAt}}<text class="link small" bindtap="onCopy">复制订单号</text></view>

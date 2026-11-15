@@ -14,6 +14,7 @@ import { createClientTaskCancellationApi } from './client-task-cancellation-api'
 import { createClientTaskCancellationSession, clientTaskCancellationStorageKey,
   type ClientTaskCancellationOrigin, type ClientTaskCancellationView } from './client-task-cancellation-session';
 import { BookingDraftReview, QuoteParameterReview } from './BookingDraftReview';
+import { ClientSceneCatalog } from './ClientSceneCatalog';
 
 const initial = (): ClientGoalView => ({ status: 'closed', hasLocator: false, task: null, question: null, receipt: null,
   projection: null, sources: null, selection: null, quote: null, canExtract: false, canRead: false, canSubmit: false,
@@ -243,6 +244,7 @@ export function ClientGoalPicker(props: {
   };
   return <section className="booking-card" aria-label={en ? 'Find rental items from your goal' : '按使用目标选品'} aria-busy={working}>
     <h3>{en ? 'What do you need to rent?' : '这次想租什么？'}</h3>
+    <ClientSceneCatalog scopeKey={scopeKey} tenantCode={props.tenantCode} serviceCode={props.serviceCode} english={en} />
     <p>{en ? 'Describe your plan, extract suggested conditions, then choose the rental details before requesting a quote.' : '说说使用计划，提取建议条件，再逐项选择租赁安排并确认报价。'}</p>
     {!view.hasLocator && <label className="full-field">{en ? 'Your rental goal' : '使用目标'}<textarea value={goalText} maxLength={4096} rows={3}
       disabled={working || !loggedIn} onChange={event => setGoal({ scopeKey, text: event.target.value })} /></label>}

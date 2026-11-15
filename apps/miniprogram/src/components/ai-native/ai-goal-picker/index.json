@@ -1,4 +1,4 @@
 {
   "component": true,
-  "usingComponents": { "money-text": "/components/money-text/index" }
+  "usingComponents": { "money-text": "/components/money-text/index", "ai-scene-catalog": "/components/ai-native/ai-scene-catalog/index" }
 }
