@@ -6,6 +6,27 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry17-client-original-locator-fixed-20261116"></a>
+## ENTRY-17 客户 unknown 原操作关联及正常返回观察（2026-11-16）
+
+固定前置 `be96c6d66e88033f34fe49f25f42c81887578dc8` 已普通推送并回读GitHub。Root在[客户标准宿主](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)和[原审计叶](../../apps/api/src/modules/ai-native/scenes/client-entry.audit.ts)接入原只读收据预核。冻结blob依次为 `135754b405730f3a3532c36ef7ecedda0fb9e480`、`beb4de8c748ebec5dfa6708d3d318a7ad31e9b7b`。
+
+原宿主在动作或模型控制前，用同一已认证身份和当前渠道读取原 Goal、材料、报价、Task 创建、Booking 操作、正式提交或转接收据。预核受原五秒只读等待约束，读取失败撤下关联，不调用recover、continue、取消善后、confirm、issue或consume。原行尚未观察到时只记该受权读取的scope及定位哈希；materialRef、inputRef、Task、原创建Run、Draft和转接等实体关联只取已核验原读。原创建Run标为originRunId，未冒充续跑Run。源绑定当前tenant、workspace、渠道、客户及原会话，客户body和原会话凭据不进入日志。
+
+普通异常与合法返回的unknown／not_observed、Task／Run unknown及模型run_outcome unknown共用原一次观察尝试。正常unknown在日志等待后再次核交付身份、发布和取消；丢ACK或等待撤权不再追加，也不授重派权。返回中的unknown继续沿原读取指令，原账和业务事实保持原职责。
+
+| 必要验证 | 固定 stdin SHA-256 与实际结果 |
+| --- | --- |
+| 原Web客户／Core组合十个分支 | `a6817a5fa49451f74fb59a7a3a58219adcc2236b9f8d8e871347eb080056fd3c`，退出0。原Auth／Guard／ALS／Core、材料和审计实现实际执行，发布事实和SQL为有限原夹具端口。覆盖正常材料、提交丢ACK、原保护正文重读、合法unknown、非法来源字段、审计丢ACK、并发、异owner／额外正文撤下关联、取消及日志等待撤权。日志10次、材料2份，新增Core订单／报价／预占／客户提交均0。 |
+| 微信服务端原宿主及渠道隔离 | `6a1770e4c5e70a666da27484ea1b4ec0f8ab81e431995e63d991ba7bbb109fda`，退出0。WechatClientEntryController及同原权限／Core夹具执行，unknown按client_miniprogram观察，跨渠道源哈希撤下，订单和预占写入0；未运行微信宿主或真机。 |
+| 原收据投影及拒绝 | `1c4d8cc2d2b510ce13b5e012310577350c44ce7e5dad051bf6ebd12c7c41d41f`，退出0。当前完整标准模块和公共运行时schema，14类投影、3个拒绝、11种unknown分类；收据传输及可信身份为明确投影替身，只调用原read方法。完整Auth／Core行为由上两行单列。 |
+| 独立发现的Goal原读定位复验 | `70594cee068af5ee27b69ef29e0098d10a5c8fc0d24d99c5e58320c6f1c030e7`，退出0。沿原request.body入口，Web和微信正常unknown都保留同原K的scope／定位哈希，实体为空；非法实体字段拒绝，材料／Task／模型／订单写入0。 |
+| 客户两源API类型 | `da24e1015e636c17c87ecaa95c3b86da768c486f068857ed6c97c5fbc58278f1`，退出0。TypeScript5.9.3，2根／1631源、126份内存shared声明，noEmit零诊断；修映射及Goal分派后分别复验。 |
+
+命令均为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，沿本树原offline preload、不可达DB、纯内存audit和同一未创建任务根。原夹具函数从既有测试源码只读提取，在内存补齐渠道发布和原AiBodyStorageCodec／SecretBox配置，未改测试文件。初始类型有14条实际字段映射诊断，已按原Controller／公共schema修复。初始夹具未接channelBootstrap和正文保护而被原服务拒绝；Goal驱动误将第二实参当request.body，修驱动后复验通过。失败未改记绿色，未放宽产品配置或权限。
+
+内部entry_closeout_fallback独立只读复核三个冻结源码，确认客户原读关联、unknown观察、日志等待后核权及原恢复边界，并发现材料前缀永久hold、缺中间Draft历史、Goal原读漏定位三个P2。Root已修Goal分派并完成上表原入口复验；材料两P2由原作者继续修复，未把类型或局部绿色当17全文完成。自有验证作业均退出，audit为空，任务临时目录未创建，无新增测试脚本、客户端缓存或统计账本。真实数据库、浏览器、微信及供应商由负责人后续操作，ENTRY-17保持75%。
+
 <a id="ain-entry17-observation-attempt-fixed-20261116"></a>
 ## ENTRY-17 原观察丢 ACK 后重复追加修复（2026-11-16）
 

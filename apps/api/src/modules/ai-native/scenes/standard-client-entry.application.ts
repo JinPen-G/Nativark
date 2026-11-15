@@ -1,7 +1,10 @@
 import { Controller, Inject } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema } from '@rental-os/shared';
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema,
+  AI_TASK_DRAFT_VERSION, aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
+  aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadRequestSchema,
+  aiClientGoalQuoteRequestSchema, aiClientQuotePreparationRequestSchema } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiClientEntryError } from './client-entry-action';
@@ -17,7 +20,8 @@ import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import { originalClientMaterialScope } from './prisma-client-scene-material.repository';
 import { PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
-import { recordClientEntryRefusal, withClientEntryRefusalAudit } from './client-entry.audit';
+import { recordClientEntryRefusal, withClientEntryRefusalAudit, type ClientEntryAuditOrigin } from './client-entry.audit';
+import { waitForTaskApplicationDependency } from '../runner/prisma-task-application';
 
 export const AI_WEBSITE_ENTRY = Symbol('AI_WEBSITE_ENTRY');
 export const AI_WECHAT_ENTRY = Symbol('AI_WECHAT_ENTRY');
@@ -73,6 +77,118 @@ type Dependencies = AiClientRequestDependencies & {
   db: PrismaClient;
 };
 
+/** Correlate with one original read before the write/control can lose its reply.
+ * Reader failure removes the association. It never retries or invokes a model,
+ * and submitted IDs supply no facts until that original reader accepts them. */
+async function readClientEntryAuditOrigin(application: ReturnType<typeof composeRequestBoundClientApplication> & ReturnType<typeof composeClientOriginalBookingHttp>, request: AiClientApplicationRequest,
+  identity: ClientRequestContext, channel: 'web' | 'wechat_miniprogram', name: string, value: unknown): Promise<ClientEntryAuditOrigin | undefined> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const command = value as Record<string, unknown>;
+  const ownerHash = requestFingerprint(originalClientMaterialScope(identity, channel));
+  const origin = (kind: ClientEntryAuditOrigin['kind'], locator: string, state: ClientEntryAuditOrigin['state'],
+    references: Omit<ClientEntryAuditOrigin, 'ownerHash' | 'kind' | 'locatorHash' | 'state'> = {}): ClientEntryAuditOrigin => Object.freeze({
+      ownerHash, kind, locatorHash: requestFingerprint({ version: 'client-entry-original-locator-1', ownerHash, kind, locator }), state, ...references
+    });
+  try {
+    if (name === 'prepareGoal' || name === 'readGoalPreparation') {
+      const query = name === 'prepareGoal' ? (() => {
+        const goal = aiClientGoalPreparationRequestSchema.parse(value);
+        return { operationKey: goal.operationKey, goalHash: requestFingerprint({ version: 'client-goal-1', goalText: goal.goalText }) };
+      })() : aiClientGoalPreparationReadRequestSchema.parse(value);
+      const receipt = await application.readGoalPreparation(request, query);
+      return origin('material', receipt.operationKey, receipt.state,
+        receipt.state === 'observed' ? { materialRef: receipt.materialRef } : {});
+    }
+    if (name === 'prepareGoalQuote' || name === 'readGoalQuotePreparation') {
+      const quote = aiClientGoalQuoteRequestSchema.parse(value);
+      const receipt = await application.readGoalQuotePreparation(request, value);
+      return origin('material', quote.operationKey, receipt.state,
+        receipt.state === 'observed' ? { materialRef: receipt.materialRef } : {});
+    }
+    if (name === 'prepare') {
+      const receipt = await application.readOperation(request, value);
+      return origin('material', receipt.operationKey, receipt.state === 'saved' ? 'observed' : 'unknown',
+        receipt.state === 'saved' ? { materialRef: receipt.materialRef } : {});
+    }
+    if (name === 'readOrderMaterialReceipt') {
+      const receipt = await application.readOrderMaterialReceipt(request, value);
+      return origin('material', receipt.operationKey, receipt.state,
+        receipt.state === 'observed' ? { materialRef: receipt.materialRef! } : {});
+    }
+    if (name === 'prepareQuoteParameters' || name === 'readQuotePreparationOperation') {
+      const quote = aiClientQuotePreparationRequestSchema.parse(value);
+      const receipt = await application.readQuotePreparationOperation(request, value);
+      return origin('material', quote.operationKey, receipt.state,
+        receipt.state === 'observed' ? { materialRef: receipt.materialRef } : {});
+    }
+    if (name === 'confirmQuoteParameters' || name === 'readPreparedQuoteOriginal') {
+      const receipt = await application.readPreparedQuoteOriginal(request, value);
+      return origin('material', receipt.source.materialRef, receipt.state,
+        receipt.state === 'observed' ? { materialRef: receipt.source.materialRef } : {});
+    }
+    if (name === 'prepareOriginalQuoteBooking' || name === 'readOriginalQuoteBookingOperation') {
+      const receipt = await application.readOriginalQuoteBookingOperation(request, value);
+      return origin('material', receipt.operationKey, receipt.state,
+        receipt.state === 'observed' ? { materialRef: receipt.material.materialRef } : {});
+    }
+    if (name === 'issueBookingTransfer' || name === 'readBookingTransferIssue') {
+      const receipt = await application.readBookingTransferIssue(request, value);
+      return origin('transfer', receipt.operationKey, receipt.state === 'issued' ? 'observed' : 'unknown',
+        receipt.state === 'issued' ? { handoffRef: receipt.handoffRef, transferRef: receipt.transferRef } : {});
+    }
+    if (name === 'consumeBookingTransfer' || name === 'readBookingTransferReceipt') {
+      const receipt = await application.readBookingTransferReceipt(request, value);
+      return origin('transfer', receipt.operationKey, receipt.state === 'consumed' ? 'observed' : 'unknown',
+        receipt.state === 'consumed' ? { handoffRef: receipt.handoffRef, transferRef: receipt.transferRef, draftId: receipt.bookingDraftId } : {});
+    }
+    if (name === 'acceptBookingSubmission' || name === 'readBookingAcceptance') {
+      const receipt = await application.readBookingAcceptance(request, { handoffRef: command.handoffRef,
+        ...(command.contactPhone === undefined ? {} : { contactPhone: command.contactPhone }) });
+      return origin('submission', receipt.operationKey, receipt.state,
+        receipt.acceptance ? { draftId: receipt.acceptance.bookingDraftId, handoffRef: receipt.acceptance.handoffRef,
+          acceptanceRef: receipt.acceptance.acceptanceRef } : {});
+    }
+    if (name === 'submitAcceptedBooking' || name === 'readBookingSubmission') {
+      const receipt = await application.readBookingSubmission(request, { acceptanceRef: command.acceptanceRef });
+      return origin('submission', receipt.operationKey, receipt.state === 'observed' ? 'observed' : 'unknown');
+    }
+    if (name === 'createBookingDraft' || name === 'chooseBookingDraft' || name === 'handoffBookingDraft' || name === 'readBookingOperation') {
+      const operation = await application.readBookingOperation(request, { operationKey: command.operationKey });
+      return origin('booking', operation.operationKey, operation.state,
+        operation.state === 'observed' ? { draftId: operation.bookingDraftId,
+          ...(operation.handoffRef ? { handoffRef: operation.handoffRef } : {}) } : {});
+    }
+    const task = aiClientTaskReadRequestSchema.safeParse({ creationKey: command.creationKey, materialRef: command.materialRef });
+    if (task.success) {
+      const result = await application.readTaskCreation(request, task.data);
+      if (!('state' in result) || !('task' in result)) return;
+      const receipt = aiClientTaskCreationReceiptSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION, ...task.data,
+        state: result.state, task: result.task, inputRef: 'inputRef' in result ? result.inputRef : null,
+        inputHash: 'inputHash' in result ? result.inputHash : null, execution: 'not_attested', retryable: false,
+        nextAction: 'read_original_task_creation' });
+      return origin('task_creation', receipt.creationKey, receipt.state, { materialRef: receipt.materialRef,
+        ...(receipt.inputRef ? { inputRef: receipt.inputRef } : {}),
+        ...(receipt.task ? { taskId: receipt.task.taskId, originRunId: receipt.task.runId } : {}) });
+    }
+  } catch { /* Missing or withdrawn original authority cannot identify a resource. */ }
+}
+
+function clientEntryResultUnknown(result: unknown) {
+  if (!result || typeof result !== 'object') return false;
+  if ('state' in result && (result.state === 'unknown' || result.state === 'not_observed')) return true;
+  if ('task' in result && result.task && typeof result.task === 'object'
+    && 'status' in result.task && result.task.status === 'unknown') return true;
+  if ('run' in result && result.run && typeof result.run === 'object'
+    && 'status' in result.run && result.run.status === 'unknown') return true;
+  if ('operation' in result && result.operation && typeof result.operation === 'object'
+    && 'state' in result.operation && result.operation.state === 'unknown') return true;
+  if ('execution' in result && result.execution && typeof result.execution === 'object'
+    && 'kind' in result.execution && result.execution.kind === 'run_outcome'
+    && 'outcome' in result.execution && result.execution.outcome && typeof result.execution.outcome === 'object'
+    && 'status' in result.execution.outcome) return result.execution.outcome.status === 'unknown';
+  return false;
+}
+
 /** Same publication witness used by the request-bound entry and by an
  * independently authenticated target viewing one original Booking reference.
  * The supplied identity is an internal Auth result, never a wire customer ID. */
@@ -116,7 +232,7 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
   const clock = input.clock ?? (() => new Date());
   const unavailable = (): never => { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_entry_not_published'); };
   const observeEntryRefusal = async (request: AiClientApplicationRequest, error: unknown,
-    observation: { durationMs: number; operation?: string }, originalIdentity?: ClientRequestContext) => {
+    observation: { durationMs: number; operation?: string; origin?: ClientEntryAuditOrigin }, originalIdentity?: ClientRequestContext) => {
     let identity = originalIdentity;
     if (!identity) {
       const authorization = request?.headers?.authorization, ip = request?.ip;
@@ -126,13 +242,15 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
       catch { return; }
     }
     await recordClientEntryRefusal(input.db, identity, { channel,
-      operation: observation.operation ?? 'admission', code: clientEntryRefusalCode(error), durationMs: observation.durationMs });
+      operation: observation.operation ?? 'admission', code: clientEntryRefusalCode(error), durationMs: observation.durationMs,
+      ...(observation.origin ? { origin: observation.origin } : {}) });
   };
   const bind = <K extends Exclude<keyof AiClientEntryApplication, 'observeEntryRefusal'>>(name: K,
     originalScene?: 'order_explanation'): AiClientEntryApplication[K] => {
     const method = async (request: AiClientApplicationRequest, ...args: unknown[]) => withClientEntryRefusalAudit(async () => {
       const started = Date.now(), auditRequest = { headers: { authorization: request?.headers?.authorization }, ip: request?.ip };
       let originalIdentity: ClientRequestContext | undefined;
+      let original: ClientEntryAuditOrigin | undefined;
       try {
         // Snapshot JSON commands before current-identity/storage awaits. A signal
         // is deliberately the original cancellation channel, not serialized data.
@@ -196,17 +314,32 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
         }, { enabled: true, tenantCode: before.identity.tenantCode, serviceCode: before.identity.workspaceCode, channel,
           entry: { enabled: true, releaseRevision: before.releaseRevision } });
         const consumer = { ...application, ...composeClientOriginalBookingHttp(application) };
+        try {
+          original = await waitForTaskApplicationDependency(() => readClientEntryAuditOrigin(consumer, boundRequest,
+            before.identity, channel, name, args[0]), false, signal);
+        } catch { /* This bounded read cannot authorize a write or an audit association. */ }
+        check();
         const result = await Reflect.apply(consumer[name], consumer, [boundRequest, ...args]);
-        let after;
-        try { after = await select(); } catch { throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_operation_requires_recheck'); }
-        if (after.releaseRevision !== before.releaseRevision || requestFingerprint(after.identity) !== requestFingerprint(before.identity)) {
-          throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_publication_changed');
+        const revalidateDelivery = async () => {
+          let after;
+          try { after = await select(); } catch { throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_operation_requires_recheck'); }
+          if (after.releaseRevision !== before.releaseRevision || requestFingerprint(after.identity) !== requestFingerprint(before.identity))
+            throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_publication_changed');
+          check();
+        };
+        await revalidateDelivery();
+        if (clientEntryResultUnknown(result)) {
+          const unknown = new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_result_unknown');
+          try { await observeEntryRefusal(auditRequest, unknown,
+            { operation: name, durationMs: Math.max(0, Date.now() - started), origin: original }, originalIdentity); }
+          catch { throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_entry_refusal_audit_unavailable'); }
+          await revalidateDelivery();
         }
         check(); return result;
       } catch (error) {
         const failure = error !== null && typeof error === 'object' ? error
           : new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_entry_refused');
-        try { await observeEntryRefusal(auditRequest, failure, { operation: name, durationMs: Math.max(0, Date.now() - started) }, originalIdentity); }
+        try { await observeEntryRefusal(auditRequest, failure, { operation: name, durationMs: Math.max(0, Date.now() - started), origin: original }, originalIdentity); }
         catch {
           const unavailableAudit = new AiClientEntryError(clientEntryRefusalCode(failure) === 'AI_RESULT_UNKNOWN'
             ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE', 'client_entry_refusal_audit_unavailable');
