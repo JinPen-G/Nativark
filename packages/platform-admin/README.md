@@ -7,6 +7,7 @@
 | 入口 | 职责与直接消费者 |
 | --- | --- |
 | [公共应用工厂](src/application.tsx)、[组合参数](src/application-context.ts) | `/application` 为零Core及工单宿主提供同一登录/设置/受保护路由，宿主只传品牌、唯一会话和已登记页面 |
+| [Core授权目录](src/CoreAccessPage.tsx)、[可见性口径](src/application-access.ts) | SaaS选择真实租户和已登记Core；租户选择真实成员和服务端可分配Core，复用同一授权面板与原操作核对 |
 | [正式出口](src/index.ts)、[壳组合](src/PlatformShell.tsx) | Provider、完整侧栏、面包屑/页名、通知、休息和面板，导航由获权 Core 页面声明生成 |
 | [运行时端口](src/runtime/index.ts)、[查询边界](src/runtime/session-queries.ts) | 宿主提供当前服务端会话、请求、订阅及代次；切身份先中止旧请求再清缓存，不推断业务回滚 |
 | [公共浏览器会话](src/runtime/browser-session.ts)、[HTTP](src/runtime/browser-http.ts)、[登录/改密](src/session-pages.tsx) | 独立公共Web宿主使用同一认证执行者；原Rental只适配原存储、空间与刷新收据 |
@@ -37,3 +38,5 @@
 `npm run lint -w @rental-os/platform-admin` 检查源码类型，宿主负责 Vite 产物。只读组件来源核验为 `node scripts/audit-admin-components.cjs --json`。这些命令不证明浏览器、真实 HTTP、数据库保存或独立安装通过。
 
 真实零Core消费者见[公共Web宿主](../../apps/platform-admin/README.md)。新宿主使用 `/forms` 的草稿同步/离页保护及 `/motion` 启动入口；`/source/*` 仅为既有源码兼容转接，新业务页面使用正式 `/core`、`/ui` 等出口。
+
+公共应用按当前身份显示“租户 Core 授权”或“成员 Core 分配”。前者只由 SaaS 管理员读取当前部署目录并为租户开通/停用；后者从服务端 `assignable` 选择本租户已获权 Core，不要求管理者先分配给自己。地址参数只定位真实目录对象，缺失对象不挂载命令。提交中的路由/对象切换被阻止，未知结果保留原核对编号；分配与业务角色各自管理，界面可见性不代替服务端权限。

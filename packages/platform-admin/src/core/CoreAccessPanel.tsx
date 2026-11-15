@@ -8,6 +8,8 @@ import { useLocale } from "../app/locale";
 import { QueryState } from "../components/QueryState";
 import { ActionButton, Alert, ConfirmAction, DataTableStatus, ListSection, Result } from "../components/ui";
 import { useCoreManagementApi, coreManagementRejectedBeforeCommit } from "./management-client";
+import { UnsavedChangesGuard } from "../components/UnsavedChangesGuard";
+import { canManagePublicResource } from "../application-access";
 
 type CoreLabel = { id: string; name: string };
 type Target = { id: string; name: string };
@@ -58,11 +60,8 @@ function CoreAccessEditor(props: Panel) {
   const client = useQueryClient();
   const epoch = useRef(currentSessionEpoch()).current;
   const target = props.kind === "tenant" ? props.tenant : props.member;
-  const permissions = user?.permissions ?? [];
-  const canManage = sessionVerified && (props.kind === "tenant"
-    ? user?.isSaasAdmin === true && (permissions.includes("*") || permissions.includes("system:tenant:manage"))
-    : user?.isSaasAdmin !== true && (user?.isPlatformAdmin === true
-      || user?.dataScope === "all" && permissions.includes("system:user:manage")));
+  const canManage = sessionVerified && canManagePublicResource(user, props.kind === "tenant" ? "saas" : "tenant",
+    props.kind === "tenant" ? "system:tenant:manage" : "system:user:manage");
   const live = useRef(canManage); live.current = canManage;
   const lifetime = useRef<AbortController | null>(null);
   useLayoutEffect(() => { const controller = new AbortController(); lifetime.current = controller; return () => controller.abort(); }, []);
@@ -199,6 +198,7 @@ function CoreAccessEditor(props: Panel) {
       ? text("尚未读到原操作收据，请保留核对编号并稍后再次核对。", "The original receipt is unavailable. Keep the reference and read it again later.")
       : failure === "unknown" ? text("未能确认本次操作结果，请核对原操作。", "The result is unconfirmed. Read the original operation.") : undefined;
   return <ListSection title={`${props.core.name} · ${target.name}`}>
+    <UnsavedChangesGuard busy={busy} dirty={Boolean(original)} />
     <QueryState loading={query.isPending} error={query.error} onRetry={retryRead}>
       <DataTableStatus tone={enabled ? "success" : "neutral"}>{state}</DataTableStatus>
       {enabled

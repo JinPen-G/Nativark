@@ -23,6 +23,8 @@ const shellMessages = {
   "面包屑": "Breadcrumb", "收起面板": "Collapse panel", "展开面板": "Expand panel",
   "暂时无法读取业务 Core，请重试。": "Business Core could not be loaded. Try again.",
   "从左侧选择已获授权的业务 Core。": "Choose an authorized business Core from the sidebar.",
+  "请联系租户管理员分配业务 Core。": "Ask your tenant administrator to assign a business Core.",
+  "从平台管理入口维护租户的 Core 使用权。": "Use platform administration to manage tenant Core access.",
   "请联系管理员授权业务 Core。": "Contact your administrator to enable a business Core."
 };
 
@@ -78,8 +80,10 @@ function ShellContents({ children, brandName, brand, publicSections, pages = noP
     ? <button type="button" className="breadcrumb-link" onClick={() => navigate(crumb.path!)}>{crumb.label}</button>
     : index === breadcrumbs.length - 1 ? <WorkspaceBreadcrumbCurrent>{crumb.label}</WorkspaceBreadcrumbCurrent> : crumb.label }))
     : [{ key: "current", title: <WorkspaceBreadcrumbCurrent>{t(publicRoute?.label ?? "管理后台")}</WorkspaceBreadcrumbCurrent> }];
-  const defaultPanel = <p>{cores.error ? t("暂时无法读取业务 Core，请重试。") : cores.data?.cores.length
-    ? t("从左侧选择已获授权的业务 Core。") : t("请联系管理员授权业务 Core。")}</p>;
+  const defaultPanel = <p>{cores.error ? t("暂时无法读取业务 Core，请重试。") : session.user?.isSaasAdmin
+    ? t("从平台管理入口维护租户的 Core 使用权。") : cores.data?.cores.length
+      ? t("从左侧选择已获授权的业务 Core。") : cores.data?.tenantHasRegisteredGrant
+        ? t("请联系租户管理员分配业务 Core。") : t("请联系管理员授权业务 Core。")}</p>;
   return <BusinessShell fullWidth={!session.user?.isSaasAdmin} identity={identity} selectedKey={current?.path ?? location.pathname}
     brand={<NativeContextSwitcher title={session.tenant?.operatorShortName || session.tenant?.tenantName || brandName}
       fullTitle={session.tenant?.tenantName || brandName} subtitle={t(session.user?.isSaasAdmin ? "平台管理" : "管理后台")}

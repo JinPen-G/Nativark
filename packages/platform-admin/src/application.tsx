@@ -12,6 +12,9 @@ import { useLocale } from "./app/locale";
 import { createCoreRouteElements, useCoreSession } from "./core";
 import { PlatformApplicationContext, usePlatformApplication, type PlatformAdminApplicationOptions } from "./application-context";
 import { AccountAppearancePage, SelfProfilePage, TenantAppearancePage, TenantProfilePage } from "./SettingsPage";
+import { CoreAccessPage } from "./CoreAccessPage";
+import { canManagePublicResource } from "./application-access";
+import { useAdminSession } from "./runtime";
 
 function ProtectedLayout() {
   const { session, brandName, brand, pages } = usePlatformApplication();
@@ -22,14 +25,16 @@ function ProtectedLayout() {
     <Button onClick={() => { void session.signOut().catch(() => undefined); }}>{en ? "Return to sign in" : "返回登录"}</Button></>;
   if (!state.sessionVerified || !state.user) return <Navigate to="/login" replace />;
   if (state.user.mustChangePassword) return <AdminPasswordPage onChange={session.changePassword} />;
-  const can = (permission: string) => !state.user!.isSaasAdmin && (state.user!.isPlatformAdmin
-    || state.user!.dataScope === "all" && state.user!.permissions?.includes(permission));
+  const can = (permission: string) => canManagePublicResource(state.user, "tenant", permission);
   const routes = [
     { path: "/", label: en ? "Overview" : "平台概览", icon: <Blocks size={18} /> },
     { path: "/settings/profile", label: en ? "My profile" : "本人资料", icon: <UserRound size={18} /> },
     { path: "/settings/appearance", label: en ? "Appearance" : "账户外观", icon: <Settings size={18} /> },
     ...(can("system:tenant:manage") ? [{ path: "/settings/tenant", label: en ? "Tenant details" : "租户资料" }] : []),
-    ...(can("system:integration:manage") ? [{ path: "/settings/tenant-appearance", label: en ? "Tenant appearance" : "租户外观" }] : [])
+    ...(can("system:integration:manage") ? [{ path: "/settings/tenant-appearance", label: en ? "Tenant appearance" : "租户外观" }] : []),
+    ...(can("system:user:manage") ? [{ path: "/settings/member-cores", label: en ? "Member Core access" : "成员 Core 分配" }] : []),
+    ...(canManagePublicResource(state.user, "saas", "system:tenant:manage")
+      ? [{ path: "/platform/core-access", label: en ? "Tenant Core access" : "租户 Core 授权" }] : [])
   ];
   return <PlatformShell brandName={brandName} brand={brand} pages={pages} onSignOut={session.signOut}
     publicSections={[{ key: "overview", label: "", routes }]}><Outlet key={session.currentSessionEpoch()} /></PlatformShell>;
@@ -44,11 +49,14 @@ function SignIn() {
 function Home() {
   const { brandName } = usePlatformApplication();
   const cores = useCoreSession(), { locale } = useLocale(), en = locale === "en-US";
+  const { user } = useAdminSession();
   return <><PageHeading title={en ? "Overview" : "平台概览"} brandName={brandName} />
     <QueryState loading={cores.isPending} error={cores.error} onRetry={cores.refetch}>
       <Alert type="info" showIcon title={en ? `Welcome to ${brandName}` : `欢迎使用 ${brandName}`}
-        description={cores.data?.cores.length ? en ? "Choose an authorized business Core from the sidebar." : "从左侧选择已获授权的业务 Core。"
-          : en ? "Contact your administrator to enable a business Core." : "请联系管理员授权业务 Core。"} />
+        description={user?.isSaasAdmin ? en ? "Use platform administration to manage tenant Core access." : "从平台管理入口维护租户的 Core 使用权。"
+          : cores.data?.cores.length ? en ? "Choose an authorized business Core from the sidebar." : "从左侧选择已获授权的业务 Core。"
+          : cores.data?.tenantHasRegisteredGrant ? en ? "Ask your tenant administrator to assign a business Core." : "请联系租户管理员分配业务 Core。"
+          : en ? "Contact your SaaS administrator to enable a business Core." : "请联系 SaaS 管理员授权业务 Core。"} />
     </QueryState></>;
 }
 
@@ -56,7 +64,7 @@ function TenantSetting({ appearance = false }: { appearance?: boolean }) {
   const { session } = usePlatformApplication();
   const { user } = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const permission = appearance ? "system:integration:manage" : "system:tenant:manage";
-  const allowed = user && !user.isSaasAdmin && (user.isPlatformAdmin || user.dataScope === "all" && user.permissions?.includes(permission));
+  const allowed = canManagePublicResource(user, "tenant", permission);
   return allowed ? appearance ? <TenantAppearancePage /> : <TenantProfilePage /> : <Result status="403" title="403" />;
 }
 
@@ -68,6 +76,8 @@ export function createPlatformAdminApplication(options: PlatformAdminApplication
     { path: "/", element: <Home /> }, { path: "/settings/profile", element: <SelfProfilePage /> },
     { path: "/settings/appearance", element: <AccountAppearancePage /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
+    { path: "/platform/core-access", element: <CoreAccessPage audience="saas" /> },
+    { path: "/settings/member-cores", element: <CoreAccessPage audience="tenant" /> },
     ...createRoutesFromElements(createCoreRouteElements(options.pages ?? new Map(), { brandName: options.brandName })),
     { path: "*", element: <Result status="404" title="404" /> }
   ] }

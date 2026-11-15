@@ -11,6 +11,25 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-access-directory-ui-20261115"></a>
+
+## 公共后台租户 Core 授权与成员目录接线（2026-11-15）
+
+父版本 `8cdb4b397296b088ed270e6a09f707c915732b67` 已普通推送，实际远端同版；main仍为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`。本片在同一独占树将既有授权面板接到[公共应用](../../../packages/platform-admin/src/application.tsx)，未改原业务授权政策。
+
+[Core管理页面](../../../packages/platform-admin/src/CoreAccessPage.tsx)分别提供 SaaS“租户 Core 授权”和租户“成员 Core 分配”。前者从公共租户目录及受控注册目录选择，后者从本租户真实成员及当前服务端assignable选择；管理者未分配给自己时仍可管理其他成员。地址参数只定位这些已读对象，目录之外的对象不挂载授权命令；查询失败关闭操作。菜单和直接URL共用[当前身份口径](../../../packages/platform-admin/src/application-access.ts)，非管理者/错误audience/本人范围不发起管理查询。
+
+授权变更继续复用原面板、修订、同键收据和unknown只读核对，增加原离页保护；同一路由切换对象也经Router阻止提交中离开，未知结果的原编号仍存sessionStorage。本人分配变更沿原目录与Core缓存失效；不会自动给其他成员分配或改变角色。首页和默认侧面板分别提示租户未开通、成员未分配及SaaS管理入口，零Core保持准确空态。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| stdin TS5.9.3/noEmit，只读既有依赖 | 公共后台229根/2,488源、原后台642根/4,206源、工单Web3根/2,494源0诊断。初次误引用不存在的CoreSessionSummary类型，已改为正式CoreSessionContext推导，不新增同名私有合同 |
+| 实际页面组合、目录queryFn与可见性函数，显式hook/UI/API fixture | SaaS读真实路径tenants及registered；租户读users和assignable，自己无业务分配仍可管理；目录外URL不挂命令；未验证/错误audience/own范围不读目录；服务端canManageMembers=false不查询成员。无React DOM、浏览器或网络 |
+| Vite8.2.1/Rolldown + Tailwind内存构建 | 零Core4产物/2,309模块/6,721,805字节；工单4产物/2,311模块/6,786,395字节；均不含原apps/admin或packages/shared。配置/环境关闭、write:false；工单清单明确fixture，非实际包安装/磁盘门禁验收 |
+| antd6.6.0 Select API/demo核对及定向lint | Core管理页、原授权面板、公共壳均0问题；首次lint误传两文件，分别运行后退出0。无新测试脚本 |
+
+8份文档777链接/163锚点、锁文件一致性及正式需求/任务未改核对通过。完整人员/角色UI、Core权限登记的部署入口、公共订阅/组织/安全/集成、Rental独立包以及原任务真实环境/更新回退/接手仍待交付；没有将本片当PCH完整主实现或提升原百分比。真实HTTP/数据库授权提交、浏览器搜索/Portal/切换保护和持久化重读均未验。所有验证内存完成，无新增临时目录或进程；本片再次尝试核定原待清理环境归属/范围/链接/进程后用原生PowerShell删除，命令仍在启动前被自动审批拒绝blocked by policy，环境存在性另行只读确认，不称已删除。旧外观断言失败继续保留。
+
 <a id="core-tickets-admin-host-20261115"></a>
 
 ## 工单 Web 声明接入同一公共应用（2026-11-15）
