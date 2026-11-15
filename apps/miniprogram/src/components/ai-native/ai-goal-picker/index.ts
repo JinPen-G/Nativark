@@ -19,6 +19,7 @@ import { formatBusinessDateTime, zoneSupported } from '../../../core/time';
 import { ROUTES, buildUrl, navigate } from '../../../core/ui';
 import { projectBookingDraftReview, projectQuoteParameterReview, type BookingDraftReview } from '../booking-draft-review';
 import { projectClientOriginalQuoteFacts } from '../client-original-quote-facts';
+import { boundedText } from '../display-format';
 
 type Session = ReturnType<typeof createClientGoalSession>;
 type Choice = { id: string; label: string };
@@ -43,8 +44,17 @@ const readGoalStorage = (key: string): unknown => {
   return value === '' || value === null || value === undefined ? undefined : value;
 };
 const options = (projection: AiClientGoalProjection | null, field: string): Choice[] => projection?.choices.find(group => group.field === field)?.choices ?? [];
-const namedChoices = (values: Choice[]) => values.map(choice => ({ ...choice,
-  label: values.some(other => other.id !== choice.id && other.label === choice.label) ? `${choice.label} (${choice.id})` : choice.label }));
+/** Display copies only; original candidates, field paths and IDs stay in the
+ * session. Filtering can merge visible names, so keep their original IDs apart. */
+const namedChoices = (values: Choice[], limit = 191) => values.map(choice => {
+  const label = boundedText(choice.label, limit);
+  return { ...choice, label: values.some(other => other.id !== choice.id && boundedText(other.label, limit) === label)
+    ? `${label} (${choice.id})` : label };
+});
+// The original consent source permits 20,000 characters. Filter both halves
+// within boundedText's 10,000-character cap without clipping the consent text.
+const displayNotice = (value: string) => [value.slice(0, 10000), value.slice(10000)]
+  .map(part => boundedText(part, 10000)).join('');
 const unitName = (id: string) => (RENTAL_PRICING_UNIT_LABELS as Record<string, string>)[id] ?? id;
 const modeName = (id: string) => ({ store_pickup_return: '门店自取', partner_pickup_return: '合作点自取', warehouse_pickup_return: '仓库自取',
   locker_pickup_return: '柜机自取', delivery: '配送', onsite_delivery: '送达现场', carrier_shipping: '承运寄送' } as Record<string, string>)[id] ?? id;
@@ -82,18 +92,22 @@ Component({
       const questionId = view.question ? `${view.question.requestId}:${view.question.revision}` : '';
       const field = view.question?.contract.fields.length === 1 && view.question.contract.fields[0].kind === 'text'
         && view.question.contract.fields[0].fieldId === 'clarification_text' ? view.question.contract.fields[0] : null;
-      this.setData({ view, ...(questionId !== this.data.questionId ? { answer: '' } : {}), questionId,
+      // The native template reads the question label from `view`. Clone only
+      // that display field; the session retains the original question/input.
+      const displayView = view.question ? { ...view, question: { ...view.question, contract: { ...view.question.contract,
+        fields: view.question.contract.fields.map(field => ({ ...field, label: boundedText(field.label) })) } } } : view;
+      this.setData({ view: displayView, ...(questionId !== this.data.questionId ? { answer: '' } : {}), questionId,
         originalQuote: projectClientOriginalQuoteFacts(view.quote, view.quoteObservedAt),
         parameterReview: view.status === 'prepared' ? projectQuoteParameterReview(view.parameterReview ?? null) : null,
         answerMaxLength: field?.maxLength ?? 2048, canCancel: Boolean(sessions.get(this)?.cancellationOrigin()),
-        selectedRows: view.selection?.lines.map((line, index) => ({ label: options(projection, `items.${index}.itemGroupId`).find(row => row.id === line.itemGroupId)?.label ?? line.itemGroupId ?? '未提供商品',
+        selectedRows: view.selection?.lines.map((line, index) => ({ label: namedChoices(options(projection, `items.${index}.itemGroupId`)).find(row => row.id === line.itemGroupId)?.label ?? line.itemGroupId ?? '未提供商品',
           quantity: line.quantity, pricingUnit: unitName(line.pricingUnit ?? ''), usage: line.usageQuantity === undefined ? '' : String(line.usageQuantity) })) ?? [],
         ...(changed ? { form: { ...form(), lines: (projection?.candidates?.conditions.items ?? []).map((_item, index) => ({ item: '', quantity: '', unit: '', usage: '',
           options: namedChoices(options(projection, `items.${index}.itemGroupId`)), units: options(projection, `items.${index}.pricingUnit`).map(choice => ({ ...choice, label: unitName(choice.id) })) })) }, startAt: '', endAt: '' } : {}),
         projectionHash: projection?.projectionHash ?? '', timeZone: projection?.context.timeZone ?? '',
         modes: options(projection, 'fulfillmentMode').map(choice => ({ ...choice, label: modeName(choice.id) })),
         locations: namedChoices(options(projection, 'fulfillmentLocationId')), returns: namedChoices(options(projection, 'returnLocationId')),
-        identities: namedChoices(options(projection, 'bookingIdentity')), addresses: namedChoices(view.sources?.addresses ?? []) });
+        identities: namedChoices(options(projection, 'bookingIdentity')), addresses: namedChoices(view.sources?.addresses ?? [], 4000) });
       this.updatePolicy();
     },
     async ensure(): Promise<Session | null> {
@@ -175,7 +189,7 @@ Component({
       const identity = this.data.form.identity, policy = this.data.view.sources?.enterprises?.find(row => row.corporateCustomerId === identity);
       this.setData({ delivery: ['delivery','onsite_delivery'].includes(this.data.form.mode)
         && this.data.view.sources?.fulfillment.deliveryDestination === 'customer_address',
-        policyNotice: policy?.noticeText ?? '', canPersonalPay: policy?.available === true && policy.personalPaymentAllowed,
+        policyNotice: policy?.noticeText ? displayNotice(policy.noticeText) : '', canPersonalPay: policy?.available === true && policy.personalPaymentAllowed,
         canEnterprisePay: policy?.available === true && policy.enterprisePaymentAllowed });
     },
     onPrepareQuote() { return this.run(async owner => {

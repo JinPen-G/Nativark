@@ -39,8 +39,14 @@ const modeLabel = (mode: string, en: boolean) => {
     carrier_shipping: ['承运寄送', 'Carrier shipping'] };
   return labels[mode as RentalFulfillmentMode]?.[en ? 1 : 0] ?? mode;
 };
-const candidateLabel = (choice: { id: string; label: string }, choices: { id: string; label: string }[]) =>
-  choices.some(other => other.id !== choice.id && other.label === choice.label) ? `${choice.label} (${choice.id})` : choice.label;
+/** Display only, using the native plain-text filter. Original IDs, source hashes,
+ * field paths, human input and submission values never pass through this helper. */
+const displayText = (value: string, limit = 4000) => Array.from(value).slice(0, limit).join('')
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '');
+const candidateLabel = (choice: { id: string; label: string }, choices: { id: string; label: string }[]) => {
+  const label = displayText(choice.label, 191);
+  return choices.some(other => other.id !== choice.id && displayText(other.label, 191) === label) ? `${label} (${choice.id})` : label;
+};
 const optionsFor = (projection: AiClientGoalProjection | null, field: string) => projection?.choices.find(group => group.field === field)?.choices ?? [];
 
 export function ClientGoalPicker(props: {
@@ -231,7 +237,10 @@ export function ClientGoalPicker(props: {
     bookingAbort.current?.abort(); bookingAbort.current = null; setBookingRecord(null);
     setGoal({ scopeKey, text: '' }); setAnswer({ reference: '', text: '' }); setDraft({ reference: '', form: emptyForm(0) });
   });
-  const selectedLabel = (field: string, id?: string) => optionsFor(projection, field).find(option => option.id === id)?.label ?? id ?? (en ? 'Not selected' : '未选择');
+  const selectedLabel = (field: string, id?: string) => {
+    const choices = optionsFor(projection, field), selected = choices.find(option => option.id === id);
+    return selected ? candidateLabel(selected, choices) : id ?? (en ? 'Not selected' : '未选择');
+  };
   const choose = (field: string, value: string, label: string, change: (value: string) => void, kind?: 'unit' | 'mode') => {
     const options = optionsFor(projection, field), group = projection?.choices.find(row => row.field === field);
     return <label className="booking-field">{label}<select value={value} disabled={working || !view.canPrepareQuote || options.length === 0}
@@ -257,7 +266,7 @@ export function ClientGoalPicker(props: {
     {working && <p role="status">{en ? 'Processing this request…' : '正在处理本次请求…'}</p>}
     {!submitted && view.status === 'unknown' && <p role="status">{en ? 'The original result needs checking. Use the original result button to continue checking.' : '原结果待核对，请使用“核对原结果”继续读取。'}</p>}
     {view.status === 'running' && <p role="status">{en ? 'The original task is still running. Check its result later.' : '原任务仍在处理，可稍后核对结果。'}</p>}
-    {textField && question && <><label className="full-field">{textField.label}<textarea rows={3} maxLength={textField.maxLength} value={answerText}
+    {textField && question && <><label className="full-field">{displayText(textField.label)}<textarea rows={3} maxLength={textField.maxLength} value={answerText}
       disabled={working || !view.canSubmit} onChange={event => setAnswer({ reference: answerRef, text: event.target.value })} /></label>
       <button type="button" className="button button-outline button-block" disabled={working || !view.canSubmit || !answerText.trim()}
         onClick={() => void work(instance => instance.submitClarification(answerText))}>{en ? 'Save additional details' : '提交补充说明'}</button></>}
@@ -267,15 +276,15 @@ export function ClientGoalPicker(props: {
     {projection?.state === 'requires_input' && !view.selection && <>
       <h4>{en ? 'Suggested conditions' : '建议条件'}</h4>
       <p>{en ? 'These are unconfirmed suggestions. Product availability and charges are checked when you request the original quote.' : '以下为未确认的建议；可租性与费用在原报价流程核定。'}</p>
-      <dl>{projection.candidates?.conditions.start && <><dt>{en ? 'Suggested start' : '建议开始'}</dt><dd>{projection.candidates.conditions.start}</dd></>}
-        {projection.candidates?.conditions.end && <><dt>{en ? 'Suggested end' : '建议结束'}</dt><dd>{projection.candidates.conditions.end}</dd></>}
-        {projection.candidates?.conditions.locationName && <><dt>{en ? 'Suggested location' : '建议地点'}</dt><dd>{projection.candidates.conditions.locationName}</dd></>}
+      <dl>{projection.candidates?.conditions.start && <><dt>{en ? 'Suggested start' : '建议开始'}</dt><dd>{displayText(projection.candidates.conditions.start, 80)}</dd></>}
+        {projection.candidates?.conditions.end && <><dt>{en ? 'Suggested end' : '建议结束'}</dt><dd>{displayText(projection.candidates.conditions.end, 80)}</dd></>}
+        {projection.candidates?.conditions.locationName && <><dt>{en ? 'Suggested location' : '建议地点'}</dt><dd>{displayText(projection.candidates.conditions.locationName, 191)}</dd></>}
       </dl>
       {!items.length && <p role="status">{en ? 'No product condition was extracted. Continue through the ordinary catalog.' : '未提取到商品条件，请继续使用普通商品目录。'}</p>}
       {items.length > 0 && <form className="booking-form" onSubmit={event => { event.preventDefault(); prepare(); }}>
         <h4>{en ? 'Choose rental details' : '选择租赁条件'}</h4>
         {items.map((item, index) => <fieldset key={index} className="booking-form" disabled={working || !view.canPrepareQuote}>
-          <legend>{item.productName ?? (en ? `Item ${index + 1}` : `商品 ${index + 1}`)}</legend>
+          <legend>{displayText(item.productName ?? (en ? `Item ${index + 1}` : `商品 ${index + 1}`), 191)}</legend>
           {(item.quantity !== undefined || item.pricingUnit) && <p>{en ? 'Suggested' : '建议'}：{item.quantity ?? '—'} {item.pricingUnit ? unitLabel(item.pricingUnit, en) : ''}</p>}
           <div className="form-grid">{choose(`items.${index}.itemGroupId`, form.lines[index]?.item ?? '', en ? 'Product' : '商品', value => editLine(index, { item: value }))}
             {choose(`items.${index}.pricingUnit`, form.lines[index]?.unit ?? '', en ? 'Pricing unit' : '计费单位', value => editLine(index, { unit: value, usage: '' }), 'unit')}
@@ -285,7 +294,7 @@ export function ClientGoalPicker(props: {
               value={form.lines[index].usage} onChange={event => editLine(index, { usage: event.target.value })} /></label>}
           </div>
         </fieldset>)}
-        <p>{en ? 'Dates below use the merchant time zone' : '以下时间均按商户时区填写'}：{projection.context.timeZone}</p>
+        <p>{en ? 'Dates below use the merchant time zone' : '以下时间均按商户时区填写'}：{displayText(projection.context.timeZone, 128)}</p>
         <div className="form-grid">
           <label className="booking-field">{en ? 'Rental start' : '取用时间'}<input type="datetime-local" step={60} required value={form.start}
             disabled={working || !view.canPrepareQuote} onChange={event => edit({ start: event.target.value, startInstant: '' })} /></label>
@@ -302,7 +311,7 @@ export function ClientGoalPicker(props: {
           <label className="booking-field">{en ? 'Return location' : '归还地点'}<select required value={form.returnLocation}
             disabled={working || !view.canPrepareQuote || !form.location} onChange={event => edit({ returnLocation: event.target.value })}><option value="">{en ? 'Choose explicitly' : '请选择'}</option>
             {optionsFor(projection, 'returnLocationId').filter(option => view.sources?.fulfillment.allowDifferentReturnLocation || option.id === form.location)
-              .map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+              .map(option => <option key={option.id} value={option.id}>{candidateLabel(option, optionsFor(projection, 'returnLocationId'))}</option>)}</select></label>
           {choose('bookingIdentity', form.identity, en ? 'Booking identity' : '预约身份', value => edit({ identity: value, payer: '', notice: false }))}
           {form.identity && form.identity !== 'personal' && <label className="booking-field">{en ? 'Contract and payer' : '签约与付款主体'}<select required value={form.payer}
             disabled={working || !view.canPrepareQuote || !policy?.available} onChange={event => edit({ payer: event.target.value, notice: false })}>
@@ -310,11 +319,11 @@ export function ClientGoalPicker(props: {
             <option value="enterprise" disabled={!policy?.enterprisePaymentAllowed}>{en ? 'Enterprise contract and payment' : '企业签约付款'}</option></select></label>}
           {delivery && <label className="booking-field">{en ? 'Your saved delivery address' : '本人配送地址'}<select value={form.address} required
             disabled={working || !view.canPrepareQuote || !view.sources?.addresses?.length} onChange={event => edit({ address: event.target.value })}>
-            <option value="">{en ? 'Choose an address' : '请选择地址'}</option>{view.sources?.addresses?.map(address => <option key={address.id} value={address.id}>{address.label}</option>)}</select>
+            <option value="">{en ? 'Choose an address' : '请选择地址'}</option>{view.sources?.addresses?.map(address => <option key={address.id} value={address.id}>{displayText(address.label)}</option>)}</select>
             {!view.sources?.addresses?.length && <small>{en ? 'No address is available. Manage addresses through the ordinary account page.' : '暂无可用地址，请到原账户页面管理地址。'}</small>}</label>}
         </div>
         {form.identity && form.identity !== 'personal' && <>
-          {policy?.noticeText && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{policy.noticeText}</p>}
+          {policy?.noticeText && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{displayText(policy.noticeText, 20000)}</p>}
           <label className="login-agree"><input type="checkbox" checked={form.notice} disabled={working || !view.canPrepareQuote || !policy?.available || !policy.noticeVersion || !policy.noticeText}
             onChange={event => edit({ notice: event.target.checked })} />{en ? 'I have reviewed and accept the current enterprise notice.' : '我已阅读并接受当前企业订单告知。'}</label>
           {(!policy?.available || !policy.noticeVersion || !policy.noticeText) && <p role="status">{en ? 'This enterprise option is currently unavailable. Choose a different available identity.' : '当前企业身份不可用，请选择其他可用预约身份。'}</p>}

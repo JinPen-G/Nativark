@@ -61,6 +61,9 @@ function workbenchFrameBootstrap() {
   let sentAt = performance.now(), sent = 0;
   const controls = new Map<string, HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>();
   const fields = new Map(seed.fields.map(field => [field.fieldId as string, field]));
+  // Visible text is a separate projection. Never pass field values, choice IDs
+  // or submitted answers through this filter: they retain their original hash.
+  const displayText = (value: string) => value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '');
   const tags = new Set(('div section article header footer main aside nav p h1 h2 h3 h4 h5 h6 span strong em b i u s small mark '
     + 'code pre blockquote ul ol li dl dt dd table caption colgroup col thead tbody tfoot tr th td hr br details summary '
     + 'form label input select option optgroup textarea button fieldset legend a').split(' '));
@@ -176,7 +179,7 @@ function workbenchFrameBootstrap() {
     }
     const rebuild = (node: Node, depth: number): Node | null => {
       budget(); if (depth > seed.limits.componentDepth) throw Error('resource_limit');
-      if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.textContent ?? '');
+      if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(displayText(node.textContent ?? ''));
       if (node.nodeType === Node.COMMENT_NODE) return null;
       if (!(node instanceof HTMLElement) || node.namespaceURI !== 'http://www.w3.org/1999/xhtml') throw Error('invalid_code');
       const tag = node.localName;
@@ -194,12 +197,13 @@ function workbenchFrameBootstrap() {
         else if (name === 'id' && /^[a-zA-Z_][a-zA-Z0-9_-]{0,100}$/u.test(value)) output.id = `model-${value}`;
         else if (name === 'for') output.setAttribute(name, `model-${value}`);
         else if (['aria-labelledby', 'aria-describedby'].includes(name)) output.setAttribute(name, value.split(/\s+/u).map(id => `model-${id}`).join(' '));
-        else if (['title', 'aria-label', 'aria-expanded', 'aria-hidden', 'aria-live', 'role'].includes(name)) output.setAttribute(name, value);
+        else if (['title', 'aria-label'].includes(name)) output.setAttribute(name, displayText(value));
+        else if (['aria-expanded', 'aria-hidden', 'aria-live', 'role'].includes(name)) output.setAttribute(name, value);
         else if (['colspan', 'rowspan', 'span'].includes(name) && /^[1-9][0-9]?$/u.test(value) && Number(value) <= 20) output.setAttribute(name, value);
         else if (['data-field-id', 'data-source-id', 'data-confirmation-index'].includes(name)) output.setAttribute(name, value);
         else if (['type', 'value', 'placeholder', 'name', 'min', 'max', 'maxlength', 'required', 'disabled', 'readonly', 'selected'].includes(name)) {
           if (!['input', 'select', 'option', 'textarea', 'button'].includes(tag)) throw Error('invalid_code');
-          if (name === 'placeholder') output.setAttribute(name, value);
+          if (name === 'placeholder') output.setAttribute(name, displayText(value));
           else if (name === 'value' && tag === 'option') output.setAttribute(name, value);
         } else if (name === 'open' && tag === 'details') output.setAttribute(name, '');
         else throw Error('invalid_code');
@@ -208,9 +212,9 @@ function workbenchFrameBootstrap() {
       if (field) {
         const control = output as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
         control.disabled = !field.editable;
-        control.setAttribute('aria-label', field.label); control.setAttribute('data-field-id', field.fieldId);
+        control.setAttribute('aria-label', displayText(field.label)); control.setAttribute('data-field-id', field.fieldId);
         if (field.kind === 'choice') for (const option of [{ value: '', label: '' }, ...field.options]) {
-          const item = document.createElement('option'); item.value = option.value; item.textContent = option.label; control.append(item);
+          const item = document.createElement('option'); item.value = option.value; item.textContent = displayText(option.label); control.append(item);
         }
         if (field.kind === 'integer') { control.setAttribute('type', 'number'); control.setAttribute('min', String(field.minimum)); control.setAttribute('max', String(field.maximum)); }
         if (field.kind === 'text') control.setAttribute('maxlength', String(Math.min(field.maxLength, 2048)));

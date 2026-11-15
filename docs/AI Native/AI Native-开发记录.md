@@ -6,6 +6,66 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry09-safe-display-whole-closeout-20261115"></a>
+## ENTRY-09 四端候选、原报价与动态展示安全呈现全文收口（2026-11-15）
+
+前置 `d107a8b8e0d2200db5e3e70dcd2b5f4922d433a0` 已普通推送并独立回读 GitHub，包含[客户与后台原模型正文](<#ain-entry09-model-text-control-projection-20261115>)。本片核接两助手冻结的四份候选／员工源码，并补官网原费用名称、实际 iframe bootstrap 和 frame 外完整权威摘要三个显示接点；仅八个产品文件，原业务合同、Artifact、hash、财务与资源账不改。Root逐文件核同固定blob，必要模拟与类型结果均已读取终态；dev2在本对话完成原三条及最后动态呈现P2的独立只读核定，未发现该任务范围内剩余确证缺口。
+
+| 固定来源 | Git blob |
+| --- | --- |
+| [后台完整权威摘要消费者](../../apps/admin/src/features/ai-native/TaskWorkbenchDisplay.tsx) | `2df495d571e49831a51596493d79367f0d11ba3f` |
+| [后台既有安全文本助手](../../apps/admin/src/features/ai-native/safe-display.ts) | `7519ecea049a0defabd1c64518c7511fc91048bb` |
+| [实际沙箱bootstrap](../../apps/admin/src/features/ai-native/workbench-display-frame.ts) | `1943aed940579c838368711b80c821461c253479` |
+| [客户小程序候选组件](../../apps/miniprogram/src/components/ai-native/ai-goal-picker/index.ts) | `3b8d2bd16259a7dcf79c87abc0ed8c2608131c12` |
+| [员工候选与人工输入组件](../../apps/staff-miniprogram/src/components/ai-native/ai-inspection-draft/index.ts) | `b46fe790e1aba80cfd615aad43746e654025b575` |
+| [员工显示投影](../../apps/staff-miniprogram/src/components/ai-native/display-format.ts) | `afb3bcca49af0ce104f57e22947a894f754cba33` |
+| [网站候选组件](../../apps/tenant-website/src/features/ai-native/ClientGoalPicker.tsx) | `112d0af3ce6e3db2a8972681b72b8bd69f525fd7` |
+| [网站原报价事实卡](../../apps/tenant-website/src/features/ai-native/ClientOriginalQuoteFacts.tsx) | `9be49451527f4743d8088bcc37ecf4b03f5641e8` |
+
+显示投影过滤C0／C1（保留TAB、LF、CR）及双向控制字符，保留ZWNJ／ZWJ组合字。客户候选过滤后重名仍以原ID区分；原choice.id、choice.value、projectionHash和提交命令保持。员工人工输入按原4000字符上限截取，不再走显示过滤；服务端原2000长度、当前权限及提交验证保持。官网只过滤费用名称，不改原报价金额、来源或版本。实际bootstrap分别处理文字节点、title／aria-label／placeholder及字段／选项label，原control.value、option.value、source消息和seed不改写；frame外摘要使用新增displayTextContent，只去控制符，完整已验证摘要不截断。HTML仍按原纯文本或受限重建呈现，导航只走既有注册映射。
+
+| ENTRY-09原条款 | G4核定依据 |
+| --- | --- |
+| 当前授权与最少字段 | 沿[四端正式身份／发布来源](<#ain-entry01-formal-source-simulated-whole-closeout-20261115>)、[员工同账号权限刷新](<#ain-entry06-current-permission-whole-closeout-20261115>)、原TaskCenter／客户本人事实／员工Action authority的既有生产组合；撤权、切scope及迟到显示均拒绝，显示过滤不能授权读取。 |
+| 原事实、查询时间／版本及unknown | 沿[原报价完整事实](<#ain-entry03-07-quote-publication-whole-closeout-20261115>)、[原订单与会话结果](<#ain12-order-chat-current-result-20261113>)及[原键恢复](<#ain-entry15-original-storage-recovery-20261115>)；模型文字不替代金额、资格、订单状态及原收据，缺值保持未记录／待核对。 |
+| 安全呈现及固定导航 | 前置正文修复与本片候选、原费用名称、沙箱bootstrap、完整摘要五类实际消费者齐备；原输入／ID／hash不变，控制字符残留拒绝，模型HTML／URL不取得执行权。dev2逐blob独立复核最后三源及原三条，支持本轮模拟研发收口；不冒充真实浏览器测试。 |
+
+所有必要命令为 `node --no-compilation-cache -`，沿本树原offline preload、不可达DATABASE_URL、内存audit和明确有限宿主；未新增或扩写测试文件。Root的原生产逻辑／直接消费者模拟与最后类型如下，退出码均0：
+
+| 实际验证范围 | stdin SHA-256及结果 |
+| --- | --- |
+| 原员工Host／Component→人工事件→原edit、长度／权限 | `5cabf99c619f01bd13a5eef0a9f4887f2d7307724466bcb1275d0496d64a8f64`；原值保留、显示控制符清除，新增模型及业务写入0。 |
+| 原客户材料→projectClientGoal→Web／小程序候选 | `0ada9e147da599de522f0564751cb93a9953a79fd716a2b5086ce0c147a16497`；原ID／hash不变、过滤后重名可区分，API／模型／业务写入0。 |
+| 原报价费用名称消费者 | `599e8f651554f95377b7ed43708630219906ba3d5401259e4a64610f3d0bdb1e`；原名称／金额不改写，HTML纯文本。 |
+| 实际serialized bootstrap→有限DOM／MessagePort | `a788b3847296868c2c6bcb937af5de515fa07541e0b35dce9c48012268218b55`；文字及无障碍标签安全投影，原人工／选项值、source消息与seed保持。 |
+| 实际TaskWorkbenchDisplay完整长摘要 | `0b86045048c3087993995e4dc5b5cb29150bd96d5f0328c127bdf63d75a59f7f`；安全显示、不截断、原summary未改。 |
+| 员工原ES2019三根／214源类型 | `d882aafb9eb8f280ec595e8b8ce7822eaf8b37be7972644c148122ebd2272e50`；TypeScript5.9.3、125份内存声明、零诊断。 |
+| Web三根／227源类型 | `de44a451f41a6d5cb1330da5eec74d07368092a0ac7230d5d2625ae3b23256da`；TypeScript5.9.3、零诊断。 |
+| 客户小程序原ES2019一根／226源类型 | `b025477d0e5c97a52a09696e912883289958e397aea1c4dca73160552bf8e702`；TypeScript5.9.3、零诊断。 |
+| 后台四根／1508源类型 | `e6193c2971420c3b99d3f1197bbea4a7c9b770b97fc04725dc9e59e87158ebc9`；TypeScript5.9.3、零诊断。 |
+
+作者必要候选模拟、原提交不变及类型分别为 `840d0019aadc195610c41d15802f0cded3c7f19612c653778dfb8397959a64c0`、`eac1d9e6948a88220d0f2e0bfee8a1917a54e38556a9c0f40fa9314325745a08`、`6fdfd85f97b2519ad15d942fbd842181d84a61dd06ea5ce0a464341e6a71ca5c`；员工最终模拟／类型为 `421e5132b5f94afec3e31c34bdfa9d24bea1d20861ce4404b5787274fc686bfb`／`f7a90e767df50b23a2a570aa642caa7f9a6f91366d347e079f4086621fef26e7`，均退出0。Root未把作者命令称为自己的模拟。首轮驱动失败保留：String.raw提取边界错误、误以为原sourceText不替空格、缺membershipId／mini vendor和API映射、重名fixture不满足原匹配；类型初组漏web-client真实源码及shared/miniprogram-client原runtime映射。仅修内存驱动后复验，生产授权／合同不放宽。
+
+G1原显示／事实／导航合同、G2实际服务和显示实现、G3四端直接消费者、G4原三条及必要模拟／类型／缺陷复验／独立核定齐备，ENTRY-09更新100%。本片与此前ENTRY-07形成两项main节点，由PM读取固定来源串行整合；Root不争main索引。八源及对应任务／记录／接续以本节所在提交固定。自有验证进程已退出、audit为空，`output/.tmp/ain-entry09-root-text-display-20261115`未创建，无新增依赖、临时脚本、构建副本或残留；真实浏览器／微信／数据库／供应商由负责人后续测试。
+
+<a id="ain-entry11-12-18-evidence-handoff-whole-closeout-20261115"></a>
+## ENTRY-11／12／18 原组合证据与交接资料全文核定（2026-11-15）
+
+固定候选 `d107a8b8e0d2200db5e3e70dcd2b5f4922d433a0` 的独立只读复核由内部 `/root/opening_core_closeout` 完成，Root已核原任务三项各三条及原记录／源码／未来方案引用。结论仅覆盖这三项的组合快检、证据分层和交接要求；当前ENTRY-09八源不借用该结论，已在上节另行独立核定。本次未重复运行无变化绿色集合、写产品源码或新建资料册／验证产物。
+
+| 原条款 | 固定证据与当前核定 |
+| --- | --- |
+| 11：按audience复用真实服务及关键正常／拒绝／恢复 | [四端正式来源](<#ain-entry01-formal-source-simulated-whole-closeout-20261115>)、[原订单连续组合](<#ain12-order-chat-current-result-20261113>)、[员工原签名与履约](<#ain20-signature-reopen-simulated-whole-closeout-20261114>)、[客户原目标／Booking](<#ain22-goal-booking-original-consumers-20261114>)、[平台品类原政策／Task／Gateway](<#ain23-platform-proposal-task-gateway-20261114>)均可定位正常、缺依赖、撤权、过期／unknown、重复及迟到案例；夹具调用原Auth／Guard／应用／仓储，不复制产品算法。 |
+| 11：证据分层及定向修复复验 | 各完整阶段明确静态／类型、服务行为、事务／仓储替身、有限React／微信宿主和真实环境边界；保留首轮SHA／退出码／失败及受影响复验。原报价发布、员工权限／存储、平台发布确认P2均有闭环，不把模拟称为MySQL、供应商或实页验证。 |
+| 12：稳定合同、生产者／消费者、状态和依赖 | [原报价交付](<#ain-entry03-07-quote-publication-whole-closeout-20261115>)、[双向转接](<#ain-entry04-14-cross-surface-whole-closeout-20261115>)、[品类消费者](<#ain23-category-human-model-consumers-20261114>)等阶段记录列出shared／Controller／provider／API／页面／session、原键／收据、持久事实、当前授权、预算、批准和Core提交点。 |
+| 12：Runtime／SDK边界与未验证迁移 | [唯一未来方案§4～6、8～9、13](<未来规划/AI Native-Runtime替换方案.md>)对应当前runner／应用／输入／批准／Gateway端口；[实际EffectPort](../../apps/api/src/modules/ai-native/runner/ai-task-runner.ports.ts)保持独立，框架专用对象不进入公共Task／Action／Proposal。单驱动、lease／fence／CAS、unknown、checkpoint及SDK退出条件明确；现有线性计划与Prisma耦合、未实施迁移如实保留。 |
+| 18：每片必要冒烟／类型与固定交接出口 | 原报价、员工、客户、平台等完整阶段有固定入口、状态转移、默认关闭、人工／原收据恢复、命令及未验项；重验对应实际缺陷，不以脚本／提交数量计分。唯一场景目录关联实际来源、权限、限额及manualExit，接续保留文件／方法级精确缺口。 |
+| 12／18：原主线与真实证据另验 | AIN-15企业告知／付款原授权、六Action及multi-audience公共签发、AIN-26～28仍在原任务和接续明确保留；[四品类8例](<#ain26-four-category-fixed-evidence-style-20261115>)仅是组合切片，未据此宣称矩阵全文或生产完成。真实环境与生产放行不由资料核定代替。 |
+
+三项G1由原条款／稳定合同／验证交接基线形成，G2由实际服务组合和固定阶段落实，G3由标准入口／直接消费者／可追溯交接出口落实，G4由全文资料、原必要验证、缺陷复验及本次独立核定支持。ENTRY-11／12／18分别更新100%；这不是因文档整理或新增测试数加分，也不以整个专项结项倒用作这三项的前置。两项ENTRY-11／12形成下一main节点，ENTRY-18为后继一项；固定证据留原四册供PM读取，助手继续ENTRY-02／08。
+
+本轮只读核查没有创建进程、脚本或临时目录。任务册仅更新上述三项及ENTRY汇总，原28项范围／分母／依赖和进度不变；没有实际跨Runtime迁移、真实供应商测试或生产启用授权。阶段新增文件链接、接续／新阶段锚点和任务表算术定向核对均无错误；`git -c core.whitespace=cr-at-eol diff --check`退出0。`node scripts/validate-docs.cjs`检查11/11文档、退出1，仅原四处缺链：文档导航54行三个历史附件及界面规范272行稀疏站点示例，不伪造附件补绿。一次文档核对驱动引用未定义ainRequire而未运行，改用Node createRequire读取原检查模块后完成上述核对，无产品或检查脚本改动。
+
 <a id="ain-entry09-model-text-control-projection-20261115"></a>
 ## ENTRY-09 客户与后台原模型正文的安全显示阶段（2026-11-15）
 

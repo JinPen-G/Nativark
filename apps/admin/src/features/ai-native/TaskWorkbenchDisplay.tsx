@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { ActionButton, Alert } from '@/components/ui';
 import { useAiManagementLocale } from './management-locale';
-import { safeDisplayText } from './safe-display';
+import { displayTextContent, safeDisplayText } from './safe-display';
 import { WorkbenchDisplaySession } from './workbench-display-session';
 import type { WorkbenchDisplayExpectation, WorkbenchDisplayPort } from './workbench-display-host';
 import type { AiWorkbenchModelControlObservation } from '@rental-os/shared';
@@ -64,7 +64,7 @@ export function TaskWorkbenchDisplay({ identity, expected, port, current, enable
     {frame && <section aria-label={t('原材料事实摘要')}>
       <h3>{t('原材料事实摘要')}</h3>
       <p>{t('来源观察时间')}：{formatTimestamp(frame.summary.observedAt).value}</p>
-      <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>{frame.summary.text}</p>
+      <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>{displayTextContent(frame.summary.text)}</p>
       <p>{t('以下为模型生成的展示，业务状态以原材料及正式收据为准。')}</p>
     </section>}
     {frame && <div inert={state.candidateConflict}><iframe key={frame.binding.instanceId} ref={attach} sandbox="allow-scripts"
