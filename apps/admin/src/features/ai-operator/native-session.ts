@@ -1,7 +1,7 @@
 /** Headless bridge from an explicit console send to the original conversation,
  * admission, Task and model sessions. Stores locators only. Recovery/history
  * never replay a write; approvals and Core mutations remain in their own hosts. */
-import { AI_CONVERSATION_DRAFT_VERSION, validateAiConversationObservationDraft,
+import { AI_CONVERSATION_DRAFT_VERSION, AI_QUOTE_GOAL_DRAFT_VERSION, validateAiQuoteGoalInputDraft, validateAiConversationObservationDraft,
   type AiConversationTurnObservationDraft, type AiConversationTaskResultDraft, type AiTaskSnapshotDraft,
   type AiConversationObservationDraft } from '@rental-os/shared';
 import type { aiConversationsApi } from '@/api/aiConversations';
@@ -13,6 +13,7 @@ import { ConversationAdmissionSession } from '../ai-native/conversation-admissio
 import { ConversationTaskCreationSession } from '../ai-native/conversation-task-creation-session';
 import { ConversationOrderExecutionSession } from '../ai-native/conversation-order-execution-session';
 import { ConversationSceneExecutionSession } from '../ai-native/conversation-opening-execution-session';
+import type { LiveVisibleObservationSession } from '../ai-native/visible-observation-session';
 
 export type NativeScene = 'quote_clarification' | 'order_explanation' | 'opening_diagnosis';
 export type NativeFrame = { conversationId: string; scene: NativeScene;
@@ -77,34 +78,20 @@ export class NativeOperatorSession {
   async open(chatId: string, conversationId: string, scene: NativeScene, signal: AbortSignal) {
     if (!id(chatId) || !id(conversationId)) throw Error('AI_INVALID_INPUT');
     this.check(signal);
+    this.frames.delete(chatId);
     const detail = await this.d.api.detail({ draftVersion: version, conversationId, limit: 20 }, scene, signal);
-    this.check(signal); this.save({ chatId, conversationId, scene, pending: false });
-    const turn = detail.conversation.currentTurn ?? detail.turns.items[0] ?? null;
-    const frame: NativeFrame = { conversationId, scene, turn, result: null, phase: 'result', historical: true, observation: detail.conversation };
-    if (turn?.task) frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId, admissionKey: turn.admissionKey }, turn, signal);
-    if (turn?.task) frame.snapshot = validateTaskCenterSnapshot(await this.d.tasks.snapshot(turn.task.taskId, signal), turn.task.taskId);
-    this.publish(chatId, frame, signal); return frame;
-  }
-  async read(chatId: string, signal: AbortSignal) {
     this.check(signal);
-    const locator = this.locators().find(row => row.chatId === chatId); if (!locator) throw Error('AI_ORIGINAL_LOCATOR_MISSING');
-    if (!locator.conversationId) {
-      const lifecycle = new ConversationLifecycleSession(this.d.api, () => !signal.aborted && this.d.current(), this.d.storage,
-        this.key(`create:${chatId}`), undefined, true);
-      try {
-        const receipt = await lifecycle.reconcile(); this.check(signal);
-        if (receipt.status !== 'observed') throw Error('AI_RESULT_UNKNOWN');
-        locator.conversationId = receipt.conversationId; this.save(locator);
-      } finally { lifecycle.dispose(); }
-    }
-    const observed = await this.metadata(locator, signal), turn = observed.currentTurn;
-    const previous = this.frames.get(chatId);
-    const frame: NativeFrame = { conversationId: locator.conversationId!, scene: locator.scene, turn: turn ?? previous?.turn ?? null,
-      result: null, phase: 'unknown', historical: previous?.historical ?? true, observation: observed };
-    if (frame.turn?.task) {
-      const selected = frame.turn;
-      frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId: frame.conversationId, admissionKey: selected.admissionKey }, selected, signal);
-      frame.snapshot = validateTaskCenterSnapshot(await this.d.tasks.snapshot(selected.task!.taskId, signal), selected.task!.taskId);
+    const previous = this.locators().find(row => row.chatId === chatId);
+    const locator = { chatId, conversationId, scene, pending: previous?.pending ?? false };
+    this.save(locator);
+    const turn = detail.conversation.currentTurn ?? detail.turns.items[0] ?? null;
+    const frame: NativeFrame = { conversationId, scene, turn, result: null, phase: 'unknown',
+      historical: detail.conversation.status !== 'active' || detail.conversation.currentTurn === null,
+      observation: detail.conversation };
+    if (turn?.task) {
+      frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId, admissionKey: turn.admissionKey }, turn, signal);
+      this.check(signal);
+      frame.snapshot = validateTaskCenterSnapshot(await this.d.tasks.snapshot(turn.task.taskId, signal), turn.task.taskId);
       this.check(signal);
       if (frame.result.status === 'observed' && frame.result.result.status !== 'unknown') {
         frame.phase = 'result'; this.save({ ...locator, pending: false });
@@ -112,16 +99,63 @@ export class NativeOperatorSession {
     }
     this.publish(chatId, frame, signal); return frame;
   }
-  async nextRound(chatId: string, signal: AbortSignal) {
+  async read(chatId: string, signal: AbortSignal) {
+    this.check(signal);
+    const locator = this.locators().find(row => row.chatId === chatId); if (!locator) throw Error('AI_ORIGINAL_LOCATOR_MISSING');
+    const previous = this.frames.get(chatId);
+    try {
+      if (!locator.conversationId) {
+        const lifecycle = new ConversationLifecycleSession(this.d.api, () => !signal.aborted && this.d.current(), this.d.storage,
+          this.key(`create:${chatId}`), undefined, true);
+        try {
+          const receipt = await lifecycle.reconcile(); this.check(signal);
+          if (receipt.status !== 'observed') throw Error('AI_RESULT_UNKNOWN');
+          locator.conversationId = receipt.conversationId; this.save(locator);
+        } finally { lifecycle.dispose(); }
+      }
+      const observed = await this.metadata(locator, signal), turn = observed.currentTurn;
+      let selectedTurn = turn ?? previous?.turn ?? null;
+      if (!selectedTurn) {
+        const detail = await this.d.api.detail({ draftVersion: version, conversationId: locator.conversationId!, limit: 20 }, locator.scene, signal);
+        this.check(signal);
+        if (JSON.stringify(detail.conversation) !== JSON.stringify(observed)) throw Error('AI_REVISION_CONFLICT');
+        selectedTurn = detail.turns.items[0] ?? null;
+      }
+      const frame: NativeFrame = { conversationId: locator.conversationId!, scene: locator.scene, turn: selectedTurn,
+        result: null, phase: 'unknown', historical: observed.status !== 'active' || turn === null, observation: observed };
+      if (frame.turn?.task) {
+        const selected = frame.turn;
+        frame.result = await this.d.api.currentResult({ draftVersion: version, conversationId: frame.conversationId, admissionKey: selected.admissionKey }, selected, signal);
+        this.check(signal);
+        frame.snapshot = validateTaskCenterSnapshot(await this.d.tasks.snapshot(selected.task!.taskId, signal), selected.task!.taskId);
+        this.check(signal);
+        if (frame.result.status === 'observed' && frame.result.result.status !== 'unknown') frame.phase = 'result';
+      }
+      if (JSON.stringify(await this.metadata(locator, signal)) !== JSON.stringify(observed)) throw Error('AI_REVISION_CONFLICT');
+      const held = this.frames.get(chatId);
+      // A receipt-proven empty revision stays ready across result refreshes.
+      // A different head or a remount has no local permission to start a round.
+      if (held?.readyForNext && held.observation?.revision === observed.revision && observed.status === 'active' && !turn)
+        frame.readyForNext = true;
+      if (frame.phase === 'result') this.save({ ...locator, pending: false });
+      this.publish(chatId, frame, signal); return frame;
+    } catch (error) {
+      if (this.frames.get(chatId) === previous) this.frames.delete(chatId);
+      throw error;
+    }
+  }
+  async nextRound(chatId: string, proof: { expectedRevision: number; turnId: string; originalInputRef: string }, signal: AbortSignal) {
     this.check(signal); const locator = this.locators().find(row => row.chatId === chatId);
     if (!locator?.conversationId) throw Error('AI_RESULT_UNKNOWN');
     const observed = await this.metadata(locator, signal);
-    if (observed.status !== 'active' || observed.currentTurn !== null
+    if (observed.status !== 'active' || observed.currentTurn !== null || observed.revision !== proof.expectedRevision + 1
       || this.d.storage!.getItem(`ai-conversation-admission:${this.d.identity}:${locator.conversationId}`) !== null
       || this.d.storage!.getItem(`ai-conversation-closure:${this.d.identity}:${locator.conversationId}`) !== null) throw Error('AI_RESULT_UNKNOWN');
+    const previous = this.frames.get(chatId);
+    if (!previous || previous.conversationId !== locator.conversationId || previous.turn?.turnId !== proof.turnId
+      || previous.turn.original.inputRef !== proof.originalInputRef) throw Error('AI_RESULT_UNKNOWN');
     this.save({ ...locator, pending: false });
-    const previous = this.frames.get(chatId); if (!previous || previous.historical) throw Error('AI_RESULT_UNKNOWN');
-    this.publish(chatId, { ...previous, observation: observed, readyForNext: true }, signal);
+    this.publish(chatId, { ...previous, historical: true, observation: observed, readyForNext: true }, signal);
   }
   async stop(chatId: string, signal: AbortSignal) {
     this.check(signal); const taskId = this.frames.get(chatId)?.turn?.task?.taskId;
@@ -144,12 +178,15 @@ export class NativeOperatorSession {
       || value.automaticRetry !== false || value.remoteCancellation !== 'not_attested' || value.budgetRelease !== 'not_attempted') throw Error('AI_RESULT_UNKNOWN');
     return value;
   }
-  async send(input: NativeSend, signal: AbortSignal): Promise<NativeFrame> {
+  async send(input: NativeSend, signal: AbortSignal, visible?: LiveVisibleObservationSession | null): Promise<NativeFrame> {
     this.check(signal); if (this.busy) throw Error('AI_BUSY');
     if (!id(input.chatId) || !['quote_clarification', 'order_explanation', 'opening_diagnosis'].includes(input.scene) || !input.text.trim()) throw Error('AI_INVALID_INPUT');
+    if (input.scene === 'quote_clarification' && !validateAiQuoteGoalInputDraft({ kind: 'quote_goal',
+      draftVersion: AI_QUOTE_GOAL_DRAFT_VERSION, goalText: input.text })) throw Error('AI_INVALID_INPUT');
     if (input.scene === 'order_explanation' && !id(input.orderId)) throw Error('请先填写真实订单编号，再发送订单解释请求。');
     if (input.scene === 'order_explanation' && !['status', 'fees', 'payments', 'next_steps'].includes(input.question ?? '')) throw Error('请明确选择本次订单问题。');
-    if (input.scene === 'opening_diagnosis' && (!input.sections?.length || input.sections.length > 9)) throw Error('请明确选择开业检查分区。');
+    if (input.scene === 'opening_diagnosis' && (!input.sections?.length || input.sections.length > 9
+      || input.sections.some(section => !id(section)) || new Set(input.sections).size !== input.sections.length)) throw Error('请明确选择开业检查分区。');
     const existing = this.locators().find(row => row.chatId === input.chatId);
     // Only read()/open() reconcile a prior attempt. A new message is never
     // silently answered with an old result or used to rotate an unknown turn.
@@ -187,16 +224,31 @@ export class NativeOperatorSession {
       if (recovery.task.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');
       const bound = { ...turn, task: { taskId: recovery.task.taskId, runId: recovery.task.runId } };
       frame = { ...frame, turn: bound, phase: 'model' }; this.publish(input.chatId, frame, signal);
+      let measurement: string | null = null;
+      const executionPorts = { ...this.d.api };
+      const method = input.scene === 'order_explanation' ? 'orderStart'
+        : input.scene === 'opening_diagnosis' ? 'openingStart' : 'quoteStart';
+      executionPorts[method] = (original, requestSignal) => {
+        this.check(signal);
+        measurement = visible?.begin({ taskId: bound.task.taskId, runId: bound.task.runId,
+          trigger: 'original_model_start', originKey: bound.original.inputRef,
+          conversationId: locator.conversationId!, turnId: bound.turnId }) ?? null;
+        return this.d.api[method](original, requestSignal);
+      };
       const execution = input.scene === 'order_explanation'
-        ? new ConversationOrderExecutionSession(frame.conversationId, this.d.api, live, this.d.storage,
+        ? new ConversationOrderExecutionSession(frame.conversationId, executionPorts, live, this.d.storage,
           `ai-conversation-order-start:${this.d.identity}:${frame.conversationId}:${turn.admissionKey}`)
-        : new ConversationSceneExecutionSession(frame.conversationId, this.d.api, live, this.d.storage,
+        : new ConversationSceneExecutionSession(frame.conversationId, executionPorts, live, this.d.storage,
           `ai-conversation-${input.scene === 'opening_diagnosis' ? 'opening' : 'quote'}-start:${this.d.identity}:${frame.conversationId}:${turn.admissionKey}`, undefined, input.scene);
       resources.push(execution); await execution.inspect(bound); this.check(signal);
       if (!execution.snapshot().ready) throw Error('AI_RESOURCE_UNAVAILABLE');
-      await execution.start(); this.check(signal);
+      try {
+        await execution.start(); this.check(signal);
+        if (!execution.snapshot().acknowledgement || execution.snapshot().feedback === 'unknown') visible?.cancel(measurement);
+      } catch (error) { visible?.cancel(measurement); throw error; }
       return await this.read(input.chatId, signal);
     } catch (error) {
+      if (frame?.turn?.task) visible?.cancelTask(frame.turn.task.taskId);
       if (frame && live()) this.publish(input.chatId, { ...frame, phase: 'unknown' }, signal);
       throw error;
     } finally { resources.forEach(resource => resource.dispose()); this.busy = false; }

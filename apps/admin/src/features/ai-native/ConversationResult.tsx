@@ -32,10 +32,11 @@ const emptyReview = { busy: false, review: null, parameters: null, unavailable: 
 const noSubscribe = () => () => {};
 const emptyReviewSnapshot = () => emptyReview;
 export function ConversationResult({ identity, conversationId, turn, current, onAccessDenied, onAnswerReceipt,
-  embedded = false, autoRead = false, readOnly = false }: {
+  embedded = false, autoRead = false, readOnly = false, onResultChange }: {
   identity?: string; conversationId: string; turn: AiConversationTurnObservationDraft; current: () => boolean;
   onAccessDenied?: () => void;
   onAnswerReceipt?: (receipt: QuoteAnswerReference | null) => void;
+  onResultChange?: (result: Result | null) => void;
   /** The native console owns the chat text and layout. This only reads its
    * original result and supplies the existing sandbox/review consumers. */
   embedded?: boolean; autoRead?: boolean; readOnly?: boolean;
@@ -54,7 +55,7 @@ export function ConversationResult({ identity, conversationId, turn, current, on
   const liveHost = useRef<ReturnType<typeof createConversationWorkbenchHost> | null>(null);
   const request = useRef<AbortController | null>(null), generation = useRef(0), mounted = useRef(false);
   const renderGeneration = generation.current;
-  const scope = useRef({ owner, current, onAccessDenied }); scope.current = { owner, current, onAccessDenied };
+  const scope = useRef({ owner, current, onAccessDenied, onResultChange }); scope.current = { owner, current, onAccessDenied, onResultChange };
   const permitted = () => {
     const now = useAuthStore.getState();
     return scope.current.owner === owner && currentSessionEpoch() === epoch && !signal.aborted && !document.hidden
@@ -121,10 +122,12 @@ export function ConversationResult({ identity, conversationId, turn, current, on
       const result = value.status === 'observed' && value.result.status === 'available' ? value.result : null;
       publish({ owner, result: value, display: result ? { taskId: result.taskId, runId: result.runId, resultId: result.resultId } : null,
         busy: false, error: false });
+      scope.current.onResultChange?.(value);
       setRequestedProposal(null); if (!result) setReviewSection(null);
       if (result) host?.port.activate();
     } catch (failure) { if (turn.task) visible?.cancelTask(turn.task.taskId);
       if (ownsRead()) { host?.port.suspend(); publish({ ...emptyView(owner), error: true }); setReviewSection(null); setRequestedProposal(null);
+        scope.current.onResultChange?.(null);
         if ([401, 403].includes((failure as { response?: { status?: number } }).response?.status ?? 0)) deny(); }
       throw failure; }
     finally { if (request.current === controller) request.current = null; }

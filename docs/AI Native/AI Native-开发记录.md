@@ -16,7 +16,7 @@ dev1在固定前置 `93293c30530c98b2cbfc88f45bfd19a289a07619` 完成四源并�
 Root另用同一原日志叶做一组并发与丢ACK模拟，同请求只尝试一次，不同请求／客户使用独立观察ID，丢ACK经过Controller边界也不重写，无正文或凭据字段。此组只以可信身份和存储替身核单叶行为，完整Guard链沿上述固定作者证据。命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin `c88c7d6d2c0ca10a97c510413e0486925589a3037e787d19f22cb05fbd4fc490`，exit 0。本片属于ENTRY-17拒绝观察的完整修复阶段，08／17全文仍结合原控制台和剩余生命周期证据核定。编辑保护首次将45处调用预估为44而拒绝，已据原Git对象修正保护计数。自有验证进程均已退出，任务临时目录未创建，无新增测试文件。真实数据库、浏览器、微信和供应商由负责人后续操作。
 
 <a id="ain-native-console-direct-integration-20261115"></a>
-## 原 Agent 控制台与 Copilot 直接接入：公共结果宿主（2026-11-15）
+## 原 Agent 控制台直接接入与原轮次恢复（2026-11-15～16）
 
 负责人指出已完成的原控制台仍运行本地 responder，实际能力另置“服务端对话”面板，不符合直接复用原前端的交付意图。按原需求§21和AIN-12纠正接线，不重做界面。固定前置为 `90f528b6a0981047ace8bf206ca767dc29fd7e39`，已实核本地与GitHub一致。main上的控制台页面及CSS有未提交视觉调整，本树只读差异；原生接入按最小产品增量核接，不覆盖main活动前端或争用其索引。
 
@@ -28,7 +28,28 @@ Root另用同一原日志叶做一组并发与丢ACK模拟，同请求只尝试�
 
 公共接点已在 `336692c8ef20cff773ca4fb6ac36af12dced8920` 提交并普通推送，GitHub回读一致。2026-11-16首次改动前再次核实该分支、索引和远端。Root接手dev1落盘的[原控制台](../../apps/admin/src/features/ai-operator/AiOperatorPage.tsx)、[上下文](../../apps/admin/src/features/ai-operator/OperatorContext.tsx)、[原聊天](../../apps/admin/src/features/ai-operator/archive/ai-chat/AiChat.tsx)、[原工作区](../../apps/admin/src/features/ai-operator/NativeOperatorWorkspace.tsx)及[native session](../../apps/admin/src/features/ai-operator/native-session.ts)，先作未完检查点同步。检查点TypeScript 5.9.3五根／1624源、126份内存shared声明零诊断，stdin SHA-256 `ceea02fb95abdaa03f3741f946629cec900528c4f8d7e2adee0e979884f1d46e`，exit 0，审计为空、任务临时目录未创建。该组验证类型，实际三场景连续操作、main现有页头／开关／抽屉结构、同账号切能力／对话迟到隔离及完整输入链仍待本阶段最后模拟和核接。
 
-Root独占上述控制台源及公共结果宿主，dev1继续只读核AIN-27原全文。dev2继续独占Copilot四源，完成当前订单会话、原控制台转接及末次Auth等待后的完整owner核验，随后核ENTRY-08／17。两助手新回合已实核有工具执行。原演示源码和许可原位保留。阶段完整验证后在本锚点更新结果，真实浏览器、微信、数据库与供应商由负责人后续测试，原任务百分比按全文核定。
+控制台检查点 `93293c30530c98b2cbfc88f45bfd19a289a07619` 已上传。Root随后完成原AiChat发送、最近对话、已有分支、原工作区、当前模型路由及三场景接线。订单按用户选择的原订单／问题调用，开业按原分区调用，报价接原自然语言需求合同和真实待答／核价／选单／批准消费者。结果变更通知原聊天重读准确Task／Run／resultId，错误和撤权撤回旧正文。同账号切能力／对话的迟到响应不能改写新选中对象；重开同一原对话保留已有本地分支，服务端历史沿原20条有界读取。
+
+main已做好页头、工作区开关和抽屉结构，本片按其既有class及CSS接线。WorkspaceHeader两源固定来自 `215b515adcc263aeda0606566e8e1d3e72daa6e1`，本树AppShell仅接原Provider和标题目标。PanelRightOpen／Close沿已核原公开源码 `22a9236ae107328f8564edb7e3299375da3247af`，原hash及许可保留。控制台两份适配CSS逐字节复用核定main前像，SHA-256分别为 `28e1141577a08546ccd5fa5f56b89838d554b95ea0741cf6db62bf0c92678216`、`8712934de2611535be2e28cd227dbca4ac62155b7d255fd53812404af0330d39`，其余三份原聊天／Copilot CSS逐字节未变。main整合应保留其后继BusinessShell／AppShell宿主，核接本片必要登记，不整覆盖公共壳文件。组件只读清单审计badHashes为空，Impeccable定点detect结果为空。
+
+原停止按钮只发送原取消请求或读取同一停止收据。启动丢应答后只核原journal，不换键、再创建Task或调用模型。原关闭控件先核关闭／释放收据，再复验准确空闲修订、清原journal并允许下一轮；原历史保留只读。修复两个接线缺陷，关闭后的历史分类原先卸载了轮换控件，控件刷新原先又丢掉已核验的下一轮状态。现仅在匹配收据和空闲修订的当前页面生命周期保留这份证明，异修订／伪造turn拒绝。原读取结束前重核对话head，丢失权限或版本不回显旧结果。报价4096字合同在首次会话写入前预检，输入原文保留；非法输入没有写入或journal残留。
+
+以下为Root必要内存模拟，复用本树原Prisma离线preload和不可达DB。实际API封装、Controller、原Core／Task／场景组合被调用，运行配置、每Task政策、路由／模型运输、财务生命周期及存储使用原fixture明确装配的替身。钩子和DOM几何为有界宿主替身。此证据按负责人模拟口径维护，真实数据库、浏览器、微信、模型费用和生产操作由负责人后续实测。各组命令均为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，exit 0。
+
+| 必要范围 | 结果与stdin SHA-256 |
+| --- | --- |
+| 原订单发送→受理→Task→两次模型和一次Core读取→原结果 | 创建和启动各一次，重读零新调用／写入。`64349bf8204656f5063c59e9b7643368fdb399b5c4a4e52248fd0136c994f565`。 |
+| 原开业发送和结果 | 创建和启动各一次、模型一次，原分区及结果沿实际服务。`d3b856f9397c903f15932068968e66cbf06ad415e2471dec85796f3c53755385`。 |
+| 原报价需求及待答 | 合法原候选JSON、创建和启动各一次、模型一次。`4769e81171f591b3b1ae47337cb0d172d5bde50ee761dc2133c7514c70399330`。 |
+| 原应答丢失／重开／取消请求／非法输入 | 原键重读相同结果、停止请求只一次、第二次只读原收据、4097字零请求和零journal。`0d36ab4d366cf0a785707f0fedb979c9f81fe30e0c51cc16cb4c26a7b459514c`。 |
+| 实际OperatorContext钩子宿主 | 发送走原API，重开保留节点和choices，迟到历史不改新选择，权限变化撤回引用。`cb9d7ff04345db9e4a641ef3c9bb61b45a54e9d2060778714c684f1219343573`。 |
+| 原ConversationClosure实际控件→下一轮 | 实际释放、原双journal轮换、结果刷新后仍能明确进入下一轮；模型保持两次。`91956eec505b086029c5568f8a4803eb8ef2745f4d79b9b392da760e8a700914`。 |
+| 原Markdown两帧可见边界 | 启动marker读回后开窗，准确原引用，首帧零报告、第二帧一次，重读不再开窗。`06f638b222f86381e0f1378fc0c7c49ad1877ed37290fb1fdbd762353362f49a`。 |
+| 最终完整宿主类型 | TypeScript5.9.3，8根／2352源、126份内存shared声明、0诊断。`ee42fe10987da49d23f32a2a31a7c6f195d6837d90140388179884c7a19303f8`。 |
+
+独立提交的固定依赖另以Git中原TaskClarification及Copilot底稿、Root完整产品源检查，8根／2373源、0诊断，stdin `1b98026f6c5d624fe7ef02f24c220c9a1ab691d1d593cb5846391d5628cc3232`，exit 0。当前工作区已接visibleConversation父参数，待dev2六源首字／补答来源固定后同片提交该最小登记，控制台阶段先不夹带其活动源。dev1拒绝审计四源已在 `97fe87a434cca5d2b6c242ab86dc31f46a67d545` 上传并回读，继续原AIN-27升级恢复屏障；dev2继续原六源收尾及08／17全文。
+
+保留新验证失败，首轮运输替身给报价返回普通句子，原候选JSON解析正确拒绝，修正夹具为原合法合同；首轮HTTP驱动把task-result路径直当Controller方法名，修为原taskResult方法；跨VM数组直接deepStrictEqual曾因原型差异失败，比较原节点／choices时仅作结构化复制。源类型的文本事件字面量丢失已补准确辨识，零诊断。没有删断言或放宽生产边界。所有Root验证进程已退出，原任务临时目录未创建，未新增测试文件、依赖或落盘过程产物。本片修正现有AIN-12消费者，任务百分比仍按原全文和依赖维护。
 
 <a id="ain15-enterprise-personal-authority-gap-20261115"></a>
 ## AIN-15 企业本人路径与后台代客授权依赖定位（2026-11-15）

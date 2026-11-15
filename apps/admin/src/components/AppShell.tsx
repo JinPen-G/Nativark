@@ -18,6 +18,7 @@ import { AnimatedIcon } from "./ui/AnimatedIcon";
 import { rentalDesktopHost } from "@/features/agent-desktop/desktop-host";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 import { WorkspaceNavigationProvider, useWorkspaceNavigation } from "./workspace/WorkspaceNavigation";
+import { WorkspaceHeaderProvider, WorkspaceBreadcrumbCurrent } from "./workspace/WorkspaceHeader";
 import { Sidebar, SidebarProvider, SidebarHeader, SidebarContent, SidebarFooter, SidebarRail, SidebarTrigger, SidebarInset, SidebarInput, useSidebar } from "./animate-sidebar/runtime/sidebar";
 import { TooltipProvider } from "./animate-sidebar/runtime/tooltip";
 import { Separator } from "./animate-sidebar/runtime/separator";
@@ -47,7 +48,7 @@ function AppShellLayout({ children }: { children: ReactNode }) {
   }
   // Route Highlight is controlled separately so focused/hovered items cannot steal its surface.
   return <TooltipProvider><div className="app-frame-stage" data-tenant-console={tenantConsole || undefined}><div className="app-shell native-admin-shell"><SidebarProvider animateOnHover={false} style={{ "--sidebar-width": "var(--rental-sidebar-expanded-width)" } as CSSProperties} className={`rental-animate-scope relative h-full min-h-0${mode === "dark" ? " dark" : ""}`}>
-    <ShellContents>{children}</ShellContents>
+    <WorkspaceHeaderProvider><ShellContents>{children}</ShellContents></WorkspaceHeaderProvider>
   </SidebarProvider></div></div></TooltipProvider>;
 }
 
@@ -99,7 +100,8 @@ function ShellContents({ children }: { children: ReactNode }) {
     ...(current.section ? [{ title: <span className="breadcrumb-section">{t(current.section.label)}</span> }] : []),
     { title: detailRoute && detailRoute.path !== current.route?.path && current.route
       ? <button type="button" className="breadcrumb-link" onClick={() => navigate(current.route!.path)}>{t(current.route.label)}</button>
-      : t(deniedLabel ?? current.route?.label ?? detailRoute?.label ?? "工作台") },
+      : aiMode ? <WorkspaceBreadcrumbCurrent>{t(deniedLabel ?? current.route?.label ?? detailRoute?.label ?? "工作台")}</WorkspaceBreadcrumbCurrent>
+        : t(deniedLabel ?? current.route?.label ?? detailRoute?.label ?? "工作台") },
     ...(detailRoute && current.route && detailRoute.path !== current.route.path ? [{ title: t(detailRoute.label) }] : []),
   ];
 

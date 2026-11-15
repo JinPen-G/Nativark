@@ -4,7 +4,7 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。当前固定检查点 `93293c30530c98b2cbfc88f45bfd19a289a07619` 已普通推送并回读GitHub，索引为空。ENTRY-02／10全文核定见[原阶段](<AI Native-开发记录.md#ain-entry02-10-registered-human-whole-closeout-20261115>)。负责人要求直接接已有 Agent 控制台和 Copilot。Root继续原控制台发送、历史、结果和轮次收据的实际接线，沿main固定页头与图标、原CSS和组件核接。原聊天与侧栏通过最后必要模拟后固定阶段。2026-11-16中断恢复后已重新核Git和两助手。dev1取得原结构化Action和旧客户准入的拒绝审计修复窗口，dev2取得Copilot四源、TaskClarification及task-visible-observation.service.ts的首字／补答来源修复窗口。main由PM按固定成果串行整合。unknown仅核原键，未接能力沿原业务入口办理。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。原拒绝审计阶段 `97fe87a434cca5d2b6c242ab86dc31f46a67d545` 已普通推送并回读GitHub，索引为空。负责人要求直接接已有Agent控制台和Copilot。[原控制台阶段](<AI Native-开发记录.md#ain-native-console-direct-integration-20261115>)已通过三个实际源码场景、原键恢复／停止、原关闭控件和下一轮、历史分支及首字观测的必要模拟，完整宿主及独立提交依赖类型通过。沿main既有页头、图标、分栏／抽屉与核定CSS接线，Root正在固定上传。dev2六源及visibleConversation最小父登记待固定核接，随后核08／17原全文。dev1已转AIN-27升级恢复屏障修复；Root接公共retention可信签名装配。main由PM按固定成果串行整合，保持其后继公共壳，不整覆盖。本轮依然只有模拟／类型／静态证据，真实环境由负责人实测。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
@@ -19,7 +19,7 @@
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared／Guard／AppModule／OpenAPI／provider、registered-entry-action签发和后台原OrderHumanHandoff／Catalog消费者、双端runtime／builder及员工product页。当前导航阶段核接后固定，继续通知公共签发／HTTP／后台同K保存恢复；不覆盖企业窗口或助手活动客户页／通知源。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 原资源、客户及资料页已固定。拒绝审计四源已冻结并交回Root，固定版本和必要模拟见[原修复阶段](<AI Native-开发记录.md#ain-entry17-refusal-observation-fixed-20261116>)。继续AIN-27升级恢复屏障和签名配置只读核定，源码写权已交回，不写四册／索引或企业窗口。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 拒绝审计四源已固定上传。当前独占本树scripts/ops/upgrade-drill.cjs最小恢复修复，复用原ai-retention屏障，迁移／删除标记重放／全部scope证书后才允许模拟授权和API启动，回滚目标单独核验。不运行真实库／迁移／服务，不写公共retention provider／controller、四册／索引或企业窗口。 |
 | AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 通知删除和缓存已固定。当前独占CopilotProvider／CopilotLayout／copilot-order-session／useCopilotOrder，以及TaskClarification.tsx和observability/task-visible-observation.service.ts的首字和原补答来源修复。Root负责native-session／OperatorContext／原AiChat，不重叠写入。必要模拟与类型后冻结交回，再核ENTRY-08／17余项，不写四册／索引。 |
 | 内部/root/opening_core_closeout | 原11／12／18及限定ENTRY-02导航复核已交回；通知最后tenant敏感读权及原K损坏两P2的最小修复再次独立静态核闭。正文删除／缓存及小程序profile不在该结论范围，不递归派审／重复绿色，无写权。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |

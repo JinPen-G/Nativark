@@ -3,11 +3,15 @@ import { currentSessionEpoch } from '@/app/queryClient';
 import { readConversationNavigation } from '@/features/ai-native/conversation-navigation';
 import { useLocation } from 'react-router-dom';
 import { useLocale } from '@/app/locale';
-import { PanelRightClose, PanelRightOpen, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { ArcLocale } from "@/components/ui/ArcLocale";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
+import { WorkspacePageTitle } from "@/components/workspace/WorkspaceHeader";
+import { VisibleObservationHost, useVisibleObservationHost } from '@/features/ai-native/VisibleObservationHost';
+import { VisibleObservationBoundary } from '@/features/ai-native/VisibleObservationBoundary';
+import { AI_QUOTE_GOAL_LIMITS } from '@rental-os/shared';
 import { AiChat } from "./archive/ai-chat/AiChat";
 import { NATIVE_GATEWAY_MODEL } from "./OperatorContext";
 import { NativeOperatorWorkspace } from "./NativeOperatorWorkspace";
@@ -35,20 +39,29 @@ export function AiOperatorPage() {
   const identity = JSON.stringify([tenant?.tenantId, auth.currentWorkspaceId, user?.id]);
   const owner = JSON.stringify([identity, user, currentSessionEpoch()]);
   const incoming = readConversationNavigation(location.state?.aiConversation, identity, currentSessionEpoch());
+  const handledNavigation = useRef<string | null>(null);
   useEffect(() => {
-    if (incoming && ['quote_clarification', 'order_explanation', 'opening_diagnosis'].includes(incoming.capabilityCode)) {
+    const navigation = JSON.stringify([location.key, owner]);
+    if (incoming && handledNavigation.current !== navigation
+      && ['quote_clarification', 'order_explanation', 'opening_diagnosis'].includes(incoming.capabilityCode)) {
+      if (operator.view !== 'chat') { operator.setView('chat'); return; }
+      handledNavigation.current = navigation;
       void operator.openNative(incoming.conversationId, incoming.capabilityCode as 'quote_clarification' | 'order_explanation' | 'opening_diagnosis');
     }
-  }, [location.key, owner]);
+  }, [location.key, owner, operator.view]);
   const title = operator.view === "chat" ? operator.capability.name : operator.view === "plugins" ? "插件" : "自动化任务";
   useEffect(() => { document.title = `${t(title)} · ${t("Agent工作台")} · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user, t]);
   return <ArcLocale><ContentTransition value={operator.view} className="operator-page">
-    {operator.view === "chat" ? <OperatorChat /> : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
+    <WorkspacePageTitle><span className="workspace-page-title">{t(title)}</span></WorkspacePageTitle>
+    {operator.view === "chat" ? <VisibleObservationHost surface="server_conversation"
+      scopeKey={`${owner}:${operator.activeId}`} current={operator.current}><OperatorChat /></VisibleObservationHost>
+      : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
   </ContentTransition></ArcLocale>;
 }
 function OperatorChat() {
   const { t } = useLocale();
   const operator = useOperator(), narrow = useNarrow();
+  const visible = useVisibleObservationHost();
   const configured = useConfiguredChatModels();
   const [workOpen, setWorkOpen] = useState(!narrow), [mobileOpen, setMobileOpen] = useState(false);
   const split = useRef<HTMLDivElement>(null);
@@ -70,14 +83,25 @@ function OperatorChat() {
           <AiChat className="operator-archive-chat"
             store={{ chats: operator.chats, setChats: operator.setChats, activeId: operator.activeId, objectUrls: operator.objectUrls, setActiveId: operator.selectConversation }}
             historyConversationIds={operator.capabilityThreads.map(thread => thread.id)}
-            respond={operator.respond} autoPlay={false} models={configured.models} defaultModel={configured.defaultModel}
+            respond={(messages, options) => operator.respond(messages, options, visible)} autoPlay={false} models={configured.models} defaultModel={configured.defaultModel}
             host={{ scope: '原任务', notice: operator.notice || (operator.enabled ? '发送将使用当前受权模型并记录用量，业务动作仍须另行确认。' : '此能力尚未接入，可在工作区打开原业务页面。'),
-              modelMenu: '服务端当前路由', modelLocked: true, attachments: false, canSend: operator.canSend, onHistory: () => void operator.history(), onRetry: operator.retryOriginal, onReplyStarted: operator.registerReply, onStop: () => void operator.stopTask() }}
+              maxInputLength: operator.capability.nativeScene === 'quote_clarification' ? AI_QUOTE_GOAL_LIMITS.goalCharacters : undefined,
+              preserveInput: operator.capability.nativeScene === 'quote_clarification',
+              modelMenu: '服务端当前路由', modelLocked: true, attachments: false, canSend: operator.canSend, onHistory: () => void operator.history(), onRetry: operator.retryOriginal, onReplyStarted: operator.registerReply, onStop: () => void operator.stopTask(),
+              renderText: (message, body) => {
+                const reference = operator.visibleReference(message);
+                return reference ? <VisibleObservationBoundary reference={reference} kind="text"
+                  ready={operator.current() && message.content.trim().length > 0}>{body}</VisibleObservationBoundary> : body;
+              } }}
             disabled={!operator.enabled} greeting={operator.capability.description} placeholder={`描述${operator.capability.name}相关的工作，或继续补充要求…`}
             suggestions={[{ label: operator.capability.prompt, icon: "activity" }]}
             onNewChat={() => operator.createConversation(operator.capability.id)}
             queuedPrompt={operator.queuedPrompt} onQueuedPromptUsed={() => operator.setQueuedPrompt(null)}
-            headerActions={<Button type="text" aria-label={workOpen && !narrow ? "收起工作区" : "打开工作区"} icon={workOpen && !narrow ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />} aria-expanded={narrow ? mobileOpen : workOpen} aria-controls={narrow ? "operator-mobile-work" : "operator-work"} onClick={toggleWork} />}
+            headerActions={<Button size="small" type="text" className="operator-work-toggle"
+              title={t(workOpen && !narrow ? "收起工作区" : "打开工作区")}
+              aria-label={t(workOpen && !narrow ? "收起工作区" : "打开工作区")}
+              icon={<AnimatedIcon name={workOpen && !narrow ? "panelRightClose" : "panelRightOpen"} style={{ fontSize: 16 }} />}
+              aria-expanded={narrow ? mobileOpen : workOpen} aria-controls={narrow ? "operator-mobile-work" : "operator-work"} onClick={toggleWork} />}
           />
         </ResizablePanel>
         <ResizablePanel id="operator-work" label="Agent工作区" defaultSize={40} minSize={310} maxSize={720} collapsible defaultCollapsed={narrow}>
@@ -85,11 +109,26 @@ function OperatorChat() {
         </ResizablePanel>
       </ResizablePanels>
     </div>
-    <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="Agent 工作区" destroyOnHidden width="min(100vw, 520px)"><div id="operator-mobile-work" className="operator-mobile-work"><WorkArea visible={mobileOpen} /></div></Drawer>
+    {narrow && <WorkArea visible={mobileOpen} drawer onClose={() => setMobileOpen(false)} />}
   </section>;
 }
-function WorkArea({ visible = true }: { visible?: boolean }) {
-  return <section className="operator-work-area" aria-label="Agent工作区"><NativeOperatorWorkspace visible={visible} /></section>;
+function WorkArea({ visible = true, drawer = false, onClose }: { visible?: boolean; drawer?: boolean; onClose?: () => void }) {
+  const operator = useOperator(), { t } = useLocale();
+  const observation = useVisibleObservationHost();
+  const title = <span className="operator-work-title"><AnimatedIcon name="folder" />{t("Agent 工作区")}</span>;
+  const actions = <div className="operator-work-header-actions"><span className="operator-demo-tag">{t("原任务")}</span>
+    <Button size="small" type="text" className="operator-work-toggle" title={t("读取原结果")} aria-label={t("读取原结果")}
+      disabled={!visible || operator.active.running || (!operator.active.native && !operator.active.hasOriginal)}
+      icon={<AnimatedIcon name="messages" style={{ fontSize: 16 }} />} onClick={() => { observation?.invalidate(); void operator.readOriginal(); }} />
+  </div>;
+  const content = <section className="operator-work-area" aria-label={t("Agent工作区")}>
+    {!drawer && <header className="operator-panel-header">{title}{actions}</header>}
+    <NativeOperatorWorkspace visible={visible} />
+  </section>;
+  return drawer ? <Drawer open={visible} onClose={onClose} title={title} extra={actions} destroyOnHidden
+    className="operator-work-drawer" width="min(100vw, 520px)">
+    <div id="operator-mobile-work" className="operator-mobile-work">{content}</div>
+  </Drawer> : content;
 }
 function PluginCatalog() {
   const operator = useOperator(); const [query, setQuery] = useState("");

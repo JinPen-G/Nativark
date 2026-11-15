@@ -22,8 +22,10 @@ export type AiChatProps = {
   headerActions?: ReactNode; disabled?: boolean;
   /** Business hosts supply real transport labels and keep unsupported uploads/model choice closed. */
   host?: { scope: string; notice: string; modelMenu: string; attachments?: boolean; modelLocked?: boolean;
+    maxInputLength?: number; preserveInput?: boolean;
     canSend?(text: string): boolean; onHistory?(): void; onStop?(): void; onRetry?(nodeId: string): void;
-    onReplyStarted?(chatId: string, nodeId: string): void };
+    onReplyStarted?(chatId: string, nodeId: string): void;
+    renderText?(message: AiChatMessage, body: ReactNode): ReactNode };
   historyConversationIds?: readonly string[];
   queuedPrompt?: { id: string; text: string; chatId: string } | null;
   onQueuedPromptUsed?: () => void;
@@ -48,9 +50,10 @@ function Fold({ label, children, busy = false }: { label: string; children: Reac
   const id = useId(); const [open, setOpen] = useState(false);
   return <div className={`chat-fold ${open ? 'is-open' : ''}`}><button type="button" className={`chat-fold-trigger ${busy ? 'chat-shimmer' : ''}`} aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{label}<ChevronRight size={13} /></button><div className="chat-fold-grid" inert={!open}><div id={id}>{children}</div></div></div>;
 }
-const MessageTurn = memo(function MessageTurn({ message, siblings, onVersion, onEdit, onRetry, onCopy, onFeedback, busy }: {
+const MessageTurn = memo(function MessageTurn({ message, siblings, onVersion, onEdit, onRetry, onCopy, onFeedback, busy, hosted = false, renderText }: {
   message: ChatNode; siblings: ChatNode[]; onVersion: (message: ChatNode) => void; onEdit: (message: ChatNode, text: string) => void;
-  onRetry: (message: ChatNode) => void; onCopy: (text: string) => void; onFeedback: (message: ChatNode, value: 'up' | 'down') => void; busy: boolean;
+  onRetry: (message: ChatNode) => void; onCopy: (text: string) => void; onFeedback: (message: ChatNode, value: 'up' | 'down') => void; busy: boolean; hosted?: boolean;
+  renderText?: (message: AiChatMessage, body: ReactNode) => ReactNode;
 }) {
   const [editing, setEditing] = useState(false), [edit, setEdit] = useState(message.content);
   const editButton = useRef<HTMLButtonElement>(null);
@@ -60,6 +63,10 @@ const MessageTurn = memo(function MessageTurn({ message, siblings, onVersion, on
   };
   const index = siblings.findIndex(item => item.id === message.id);
   const streaming = ['thinking', 'streaming'].includes(message.status ?? '');
+  const summaryLabel = message.status === 'thinking' && !message.thoughtFor ? '整理资料中'
+    : hosted && message.thoughtFor === undefined ? '执行摘要' : `执行摘要 · ${message.thoughtFor ?? 1}秒`;
+  const body = <ChatMarkdown content={message.content} sources={message.sources} streaming={message.status === 'streaming'}
+    onCopy={onCopy} visibleText={hosted} />;
   const saveEdit = () => { if (edit.trim()) { onEdit(message, edit.trim()); setEditing(false); } };
   return <article className={`chat-turn is-${message.role}`} aria-label={message.role === 'user' ? '我的消息' : `${message.model?.name ?? '助手'} 回复`} aria-busy={streaming}>
     {editing ? <div className="chat-edit"><textarea aria-label="编辑消息" autoFocus value={edit} onChange={event => setEdit(event.target.value)} onKeyDown={event => {
@@ -69,10 +76,10 @@ const MessageTurn = memo(function MessageTurn({ message, siblings, onVersion, on
       {message.role === 'user' ? <div className="chat-user-body"><div className="chat-bubble"><ChatMarkdown content={message.content} onCopy={onCopy} />
         {!!message.attachments?.length && <div className="chat-attachments">{message.attachments.map(file => <span className="chat-file" key={file.id}>{file.preview ? <img src={file.preview} alt="" /> : <FileText size={15} />}<span>{file.name}</span></span>)}</div>}
       </div></div> : <div className="chat-assistant-body">
-        <div className="chat-reasoning"><ModelMark model={message.model} /><Fold label={message.status === 'thinking' && !message.thoughtFor ? '整理资料中' : `执行摘要 · ${message.thoughtFor ?? 1}秒`} busy={message.status === 'thinking' && !message.thoughtFor}><p>{message.reasoning || '正在整理本地示例…'}</p></Fold></div>
+        <div className="chat-reasoning"><ModelMark model={message.model} /><Fold label={summaryLabel} busy={message.status === 'thinking' && !message.thoughtFor}><p>{message.reasoning || (hosted ? '任务步骤与事实来源见工作区。' : '正在整理本地示例…')}</p></Fold></div>
         {!!message.tools?.length && <div className="chat-tools">{message.tools.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>}
-        <ChatMarkdown content={message.content} sources={message.sources} streaming={message.status === 'streaming'} onCopy={onCopy} />
-        {message.status === 'stopped' && <p className="chat-state-label">已停止</p>}
+        {renderText ? renderText(message, body) : body}
+        {message.status === 'stopped' && <p className="chat-state-label">{hosted ? '已停止接收原回复' : '已停止'}</p>}
         {message.status === 'error' && <div className="chat-error" role="alert"><AlertCircle size={16} /><div><strong>回复失败</strong><p>{message.error}</p><button onClick={() => onRetry(message)}>重试</button></div></div>}
       </div>}
       <div className="chat-turn-actions">
@@ -235,7 +242,8 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
     let target = chat;
     if (!target) { target = fromMessages(uid(), text.trim().slice(0, 42) || 'Attachments', []); setChats(previous => [target!, ...previous]); setActiveId(target.id); }
     const path = visibleMessages(target);
-    const user: ChatNode = { id: uid(), role: 'user', parent: path.at(-1)?.id ?? ROOT, content: text.trim(), attachments };
+    const user: ChatNode = { id: uid(), role: 'user', parent: path.at(-1)?.id ?? ROOT,
+      content: host?.preserveInput ? text : text.trim(), attachments };
     mutate(target.id, value => appendNode(value, user));
     setDraft(''); setAttachments([]);
     void run(target, user.id, [...path, user], model);
@@ -306,13 +314,13 @@ export function AiChat({ respond, initialMessages, history, models = demoModels,
       const element = thread.current!;
       if (!autoScrolling.current) { follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; setAtBottom(follow.current); }
       saveScroll();
-    }}><div className="chat-column" key={activeId ?? 'empty'}>{messages.length ? messages.map(message => <MessageTurn key={message.id} message={message} siblings={chat!.nodes.filter(item => item.parent === message.parent && item.role === message.role)} onVersion={pickVersion} onEdit={editMessage} onRetry={retry} onCopy={copy} onFeedback={feedback} busy={busy} />)
+    }}><div className="chat-column" key={activeId ?? 'empty'}>{messages.length ? messages.map(message => <MessageTurn key={message.id} message={message} siblings={chat!.nodes.filter(item => item.parent === message.parent && item.role === message.role)} onVersion={pickVersion} onEdit={editMessage} onRetry={retry} onCopy={copy} onFeedback={feedback} busy={busy} hosted={Boolean(host)} renderText={host?.renderText} />)
       : <div className="chat-empty"><h2>{greeting}</h2><div className="chat-suggestions">{suggestions.slice(0, 3).map(suggestion => <button key={suggestion.label} onClick={() => send(suggestion.prompt ?? suggestion.label)}>{suggestion.icon === 'database' ? <Database size={17} /> : suggestion.icon === 'search' ? <Search size={17} /> : <Zap size={17} />}<span>{suggestion.label}</span><ArrowUp size={14} /></button>)}</div></div>}</div></div>
       {!atBottom && messages.length > 0 && <button className="chat-jump" aria-label="回到最新消息" onClick={() => { follow.current = true; thread.current?.scrollTo({ top: thread.current.scrollHeight, behavior: reducedMotion ? 'instant' : 'smooth' }); }}><ArrowDown size={16} /></button>}
     </div>
     <div className="chat-composer-wrap"><form className="chat-composer" onSubmit={event => { event.preventDefault(); send(); }}>
       {!!attachments.length && <div className="chat-attachments">{attachments.map(file => <span key={file.id} className="chat-file">{file.preview ? <img src={file.preview} alt="" /> : <FileText size={16} />}<span>{file.name}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments(previous => previous.filter(item => item.id !== file.id))}><X size={13} /></button></span>)}</div>}
-      <div className="chat-input-row"><textarea ref={composer} rows={2} disabled={disabled} aria-label="消息" placeholder={placeholder} value={draft} onChange={event => { playback.current = false; setDraft(event.target.value); }} onKeyDown={event => {
+      <div className="chat-input-row"><textarea ref={composer} rows={2} disabled={disabled} maxLength={host?.maxInputLength} aria-label="消息" placeholder={placeholder} value={draft} onChange={event => { playback.current = false; setDraft(event.target.value); }} onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
       }} /></div><div className="chat-composer-toolbar"><button type="button" className="chat-icon" aria-label="添加附件" title="附件仅保存在本地" disabled={disabled || host?.attachments === false} onClick={() => files.current?.click()}><Plus size={20} /></button><span className="chat-composer-scope">{host?.scope ?? '本地演示'}</span><div className="chat-composer-end"><div className="chat-menu-anchor" data-chat-menu="models"><button type="button" ref={modelsButton} className="chat-model-button" aria-label={`模型：${model.name}`} aria-expanded={menu === 'models'} aria-haspopup="menu" aria-controls={menu === 'models' ? menuId : undefined} onClick={() => setMenu(menu === 'models' ? null : 'models')}><ModelMark model={model} /><span>{model.name}</span><ChevronDown size={12} /></button>
         {menu === 'models' && <div id={menuId} className="chat-menu chat-model-menu" role="menu" aria-label="模型" onKeyDown={menuKeys}><span className="chat-menu-label">{host?.modelMenu ?? '选择模型 · 本地演示'}</span>{availableModels.map(item => <button type="button" key={item.id} role="menuitemradio" disabled={host?.modelLocked} aria-checked={item.id === model.id} onClick={() => { setModel(item); setMenu(null); onModelChange?.(item); setAnnouncement(`${item.name} selected`); modelsButton.current?.focus(); }}><ModelMark model={item} /><span><strong>{item.name}</strong><small>{item.note}</small></span>{item.id === model.id && <Check size={14} />}</button>)}</div>}

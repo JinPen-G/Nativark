@@ -11,6 +11,9 @@
 .app-content.ai-operator-host { padding: 0; overflow: hidden; display: flex; }
 .ai-operator-host > .content-canvas { flex: 1; min-height: 0; height: 100%; }
 .operator-page, .operator-chat-layout { height: 100%; min-height: 0; display: flex; flex-direction: column; color: var(--foreground); }
+.operator-chat-layout[hidden] { display: none; }
+.operator-server-view { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-5); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.operator-conversation-mode { flex: none; }
 .operator-page h1, .operator-page h2, .operator-page h3 { margin: 0; color: var(--foreground); }
 .operator-page p { margin: 0; }
 .operator-split { flex: 1; min-height: 0; }
@@ -18,10 +21,15 @@
 .operator-chat-layout[data-narrow] .operator-split [role="separator"] { visibility: hidden; pointer-events: none; }
 .operator-chat-pane, .operator-work-area { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .operator-work-area { background: var(--surface); }
-.operator-work-area > header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 48px; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border); font-weight: 500; }
-.operator-work-area > header > span:first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
+.operator-panel-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--space-2); height: var(--rental-layout-context-height); min-height: var(--rental-layout-context-height); padding-inline: var(--space-5); border-bottom: 1px solid var(--border); font-size: var(--text-sm); font-weight: 500; }
+.operator-work-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; white-space: nowrap; }
+.operator-work-title > .rental-animated-icon { font-size: 16px; color: var(--text-secondary); }
+.operator-work-header-actions { display: inline-flex; flex: none; align-items: center; gap: var(--space-2); }
+.operator-work-toggle { width: var(--rental-control-height-toolbar); min-width: var(--rental-control-height-toolbar); height: var(--rental-control-height-toolbar); padding: 0; flex: none; color: var(--text-secondary); }
 .operator-demo-tag { display: inline-flex; padding: 2px var(--space-2); border-radius: var(--rental-ui-radius-pill); font-size: var(--text-xs, 12px); background: var(--surface-muted); color: var(--text-secondary); white-space: nowrap; }
 .operator-work-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.operator-record-body { padding: var(--space-5); }
+.operator-record-body > .operator-caption { margin-bottom: var(--space-3); }
 .operator-work-empty { height: 100%; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-6); text-align: center; color: var(--text-muted); }
 .operator-work-empty > .rental-animated-icon { font-size: 28px; }
 .operator-work-empty h2 { font-size: 16px; font-weight: 500; }
@@ -83,6 +91,10 @@
 .operator-task-form [role="alert"] { color: var(--rental-color-error, #b42318); }
 .operator-form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .operator-mobile-work { height: min(75dvh, 800px); min-height: 300px; }
+.operator-work-drawer.rental-arc-drawer > div:first-child:has(.arc-drawer-actions) { height: var(--rental-layout-context-height); min-height: var(--rental-layout-context-height); padding: 0 var(--space-5); column-gap: var(--space-2); }
+.operator-work-drawer.rental-arc-drawer > div:first-child:has(.arc-drawer-actions) > div:first-child { grid-column: 1; grid-row: 1; }
+.operator-work-drawer .arc-drawer-actions { grid-column: 2; grid-row: 1; margin-inline-start: auto; }
+.operator-work-drawer.rental-arc-drawer > div:first-child h2 { font-size: var(--text-sm); }
 @media (max-width: 1050px) { .operator-task-row { flex-wrap: wrap; } .operator-task-actions { width: 100%; justify-content: flex-end; } }
 @media (max-width: 600px) {
   .operator-catalog { padding: var(--space-3); }
