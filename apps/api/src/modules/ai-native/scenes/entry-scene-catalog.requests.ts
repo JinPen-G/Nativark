@@ -149,7 +149,9 @@ export function composeEntrySceneCatalogRequests(d: EntrySceneCatalogDependencie
       const route = await new ProviderRouterService({ profiles: new PrismaProviderProfileRepository(d.db),
         capabilities: createPersistedTextCapabilityEvidence(d.db, clock) }).resolve({
         consumerScope: resolved.consumerScope, configurationScope: resolved.configurationScope, mode,
-        scene: kind === 'image' ? 'vision' : entry.audience === 'platform' ? 'builder' : 'chat', requiredCapabilities: required });
+        // The original inspection host uses the VISION route for both image
+        // and audio; directory observations must select that same profile role.
+        scene: kind === 'image' || kind === 'audio' ? 'vision' : entry.audience === 'platform' ? 'builder' : 'chat', requiredCapabilities: required });
       assertLive(signal);
       const publication = readRuntimePublication(d.publication), configuration = publication.configurations[entry.disable.configurationSections[0]];
       const expectedProfile = entry.audience === 'staff' && configuration ?

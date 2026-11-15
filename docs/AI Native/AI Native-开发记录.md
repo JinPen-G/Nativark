@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry01-original-audio-route-20261115"></a>
+## ENTRY-01 员工语音目录与原识别路由一致性修复（2026-11-15）
+
+前置`08ecbd2064539b584b4249aa6565bdad7723bb46`已普通推送并回读GitHub一致，包含[ENTRY-04／14完整跨端转接](<#ain-entry04-14-cross-surface-whole-closeout-20261115>)；此前ENTRY-16也已固定上传。Root主动读取dev1的只读核定后，独立复现[目录能力来源](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.requests.ts)将员工音频按`chat`选择Profile，而[原识别宿主](../../apps/api/src/modules/ai-native/inspection-assist/inspection-standard.application.ts)的图片／音频均使用`vision`。合法发布配置及同一音频Profile下，目录抛出`PROVIDER_UNAVAILABLE`，原Router选中`VISION`角色；前像源码SHA-256为`d00c4cddeab72de8122baac7f0dbe18d642d733f2e1d526eaa49ff21f4cdb9ec`。
+
+本片只将目录的音频路由与原宿主保持一致，不改能力集合、订阅／当前身份、配置范围或Profile绑定，也不增加任何执行。修后源码SHA-256为`00480e0a72144bc8e75f5244f4ddee1b0c4da81955f477235c4f60fbb54df71c`。原反例stdin SHA-256`dc70815f8ff3053ca65f7b63a47d5be734a47a18072581d5b30eb25f1d1b44ab`退出0；修后原能力函数／scope／model配置仓储／Profile仓储／Router及既有fixture模拟`b32e2f99d08f001aeaeeb5607a42ba7fb8cb21f042c059eb2a36e3c8a25dabd2`退出0，合法音频、缺音频能力拒绝、租户服务停用、原Profile不一致拒绝和恢复原绑定五项通过。TypeScript5.9.3一根／1739源零诊断，stdin SHA-256`ddb761a1d5f9b30abc78aa83b026ff991f47bc9987d487d96eab9273119a12ec`退出0。
+
+本组从实际源码提取未修改的能力函数，使用原Router与内存仓储／能力fixture；不证明完整Auth／Guard／持久能力检测收据或识别执行通过。目录四端的实际消费者仍缺，dev1继续沿用户明确打开AI的原入口接入，普通挂载／show不发AI请求；dev2继续核ENTRY-15默认关闭及合法原读。ENTRY-01未跨整项门槛，任务百分比保持。全部stdin／纯内存、自有进程退出、audit0，`output/.tmp/ain-entry01-audio-route-20261115`未创建，不新增或扩写测试文件。`git diff --check`退出0；`node scripts/validate-docs.cjs`退出1，仍为导航三个历史附件及界面规范一个稀疏示例的四处既有缺链，本片无新增链接或任务算术错误。固定阶段仅一产品源及本记录／接续进入提交，main由PM沿原证据串行整合。
+
 <a id="ain-entry04-14-cross-surface-whole-closeout-20261115"></a>
 ## ENTRY-04／14 双向原预约转接、原收据恢复与状态全文收口（2026-11-15）
 
