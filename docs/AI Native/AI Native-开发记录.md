@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-native-console-direct-integration-20261115"></a>
+## 原 Agent 控制台与 Copilot 直接接入：公共结果宿主（2026-11-15）
+
+负责人指出已完成的原控制台仍运行本地 responder，实际能力另置“服务端对话”面板，不符合直接复用原前端的交付意图。按原需求§21和AIN-12纠正接线，不重做界面。固定前置为 `90f528b6a0981047ace8bf206ca767dc29fd7e39`，已实核本地与GitHub一致。main上的控制台页面及CSS有未提交视觉调整，本树只读差异；原生接入按最小产品增量核接，不覆盖main活动前端或争用其索引。
+
+[原结果宿主](../../apps/admin/src/features/ai-native/ConversationResult.tsx)和[原动态工作区](../../apps/admin/src/features/ai-native/TaskWorkbenchDisplay.tsx)增加可选的嵌入与只读加载方式：聊天正文由原聊天负责，右侧复用原Task/Run/resultId、受权事实摘要、隔离展示、候选核对、原待答、审批及模型控制。默认调用行为保留。原结果首次可用后只读加载一次；失败、重渲染、停用后再启用同一结果或停止展示不自动重试。新结果可以重新读取，打开或重开不创建Task、不启动模型、不提交业务。动态展示不可用时仍明确降级并保留人工入口。
+
+公共接点必要验证均为内存命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，使用原离线preload、不可达DB、受守卫临时路径和内存审计。实际组件＋原WorkbenchDisplaySession的有界钩子宿主模拟七个生命周期分支通过：首次只读、失败／重渲染不循环、相同来源再启用不重试、新结果独立读取、默认手动行为、初始禁用及隐藏／等待撤权；不是真实React DOM或浏览器。最终stdin SHA-256为 `4eac8616de59f3f664efbba3b15d4549a56e4a80123aa18b3fe12d09513c0f8d`，exit 0。TypeScript 5.9.3三根／1538源、126份内存shared声明，零诊断，stdin `5929ff0d7b9c31805b1369233fb840b154285c2474ee1d6947ac9992b457ce41`，exit 0。组件源码只读清单审计无hash异常，五份原控制台／Copilot样式前像已核；未改CSS或vendor。
+
+保留验证失败：首轮内存装载受admin ESM包边界拒绝，修验证器moduleTypes；钩子替身曾把useCallback当作立即调用，修替身语义。首轮类型遗漏原vite-env.d.ts导致环境声明缺失，补原声明；随后类型发现本片JSX缺少闭合花括号，产品已修并复验。没有删除断言或放宽生产权限。所有自有验证进程已退出，output/.tmp/ain-native-console-20261115未创建，无新增测试脚本、依赖或落盘验证产物。
+
+本片只固定公共嵌入接点，不能宣称原聊天已接通或新增任务100%。dev1继续原AiChat／OperatorContext／原右工作区接入，dev2继续原Copilot输入／原订单上下文接入；其固定源码、正向调用链及样式保持证据另在本锚点续实核。原演示源码和许可留作归档，业务宿主不得再调用演示回应。真实浏览器、微信、数据库与供应商由负责人后续测试。
+
 <a id="ain15-enterprise-personal-authority-gap-20261115"></a>
 ## AIN-15 企业本人路径与后台代客授权依赖定位（2026-11-15）
 
@@ -38,7 +51,7 @@ Root按上表核齐原G1～G4，将ENTRY-02／10由75%更新100%。ENTRY18项为
 
 [原通知服务](../../apps/api/src/modules/rental-core/rental-business.service.ts)现在逐份核草稿缓存，缺证据只撤回该份投影并记通用警告。普通通知继续原数组合同及原事实，草稿正文仍走独立受权原读，不把被撤回投影认作保存或删除成功。[纯快照投影叶](../../apps/api/src/modules/rental-core/rental-notification-snapshot.ts)仅保留已知定位字段，移除正文、变量及可能夹带的旧密文；它不给原收据或删除证明。[原快照写入器](../../apps/api/src/modules/rental-core/rental-state.repository.ts)统一消费该投影，使迟到旧内存保存也不能回填正文。
 
-[原通知清理叶](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts)在原维护事务内锁定同租户／空间恢复快照，只读取并替换通知JSON路径。目标由原draftId／原metadata.id定位，行锁及原通知JSON比较保护并发，当前权限在等待后及写前后复验；其他业务集合、普通发送记录及其他空间保留。原正文CAS、删除账本和快照清理共享提交与回滚，已删除同键重放仍清旧副本。[可信恢复源行缺失分支](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)也先清该原定位的快照副本，再完成原删除收据。没有新发送、Task、额度、迁移或后台清理循环。
+[原通知清理叶](../../apps/api/src/modules/ai-native/privacy/retention-notification-draft.ts)在原维护事务内锁定同租户／空间恢复快照，只读取并替换通知JSON路径。目标仅由原draftId定位（普通模板变量不得参与草稿识别或副本定位），行锁及原通知JSON比较保护并发，当前权限在等待后及写前后复验；其他业务集合、普通发送记录及其他空间保留。原正文CAS、删除账本和快照清理共享提交与回滚，已删除同键重放仍清旧副本。[可信恢复源行缺失分支](../../apps/api/src/modules/ai-native/privacy/retention.service.ts)也先清该原定位的快照副本，再完成原删除收据。没有新发送、Task、额度、迁移或后台清理循环。
 
 Root沿原保存、Auth／Guard、Controller列表、业务预热、原快照仓储和维护服务的一组必要模拟通过六项。它覆盖合法草稿与独立正文原读、坏草稿与正常通知并存、30天删除同事务传播、迟到旧快照写防回填、快照写异常／CAS冲突整体回滚，以及已删除原操作重放清除重新出现的快照正文。stdin `ab83fbcb017b40b9d24d84e201d960efbad07eaf486a907897660c27d8cb7e99` 退出0。原SQL委托、数据库及时间为明确内存夹具，跨空间和其他字段逐值保留，不称真实MySQL行锁或外部备份已经删除。TS5.9.3五根／1606源，正式shared出口126份仅内存声明，stdin `fc233ca91fb90b83acfcf3e44047a02f1d47c0a5999f008096556849764fb0a3` 退出0、零诊断。
 
