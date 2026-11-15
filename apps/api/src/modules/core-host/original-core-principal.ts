@@ -43,8 +43,10 @@ export class OriginalCorePrincipalAuthority {
     for (const id of [...new Set([principal.tenantId, tenantId])].sort()) {
       const rows = await transaction.$queryRaw<Array<{ id: string; status: string }>>`
         SELECT id, status FROM Tenant WHERE id = ${id} FOR UPDATE`;
-      if (rows.length !== 1 || !["ACTIVE", "FROZEN", "DISABLED"].includes(rows[0].status)
-        || (id === principal.tenantId || enabling) && rows[0].status !== "ACTIVE")
+      // 原Prisma枚举映射为小写MySQL值，raw SQL不会执行Prisma的枚举转换。
+      const status = rows.length === 1 ? rows[0].status.toLowerCase() : "";
+      if (rows.length !== 1 || !["active", "frozen", "disabled"].includes(status)
+        || (id === principal.tenantId || enabling) && status !== "active")
         throw new ForbiddenException("当前Core管理租户已不可用");
     }
     const targets = [{ tenantId: principal.tenantId, userId: principal.subjectId },

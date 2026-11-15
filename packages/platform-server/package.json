@@ -1,0 +1,170 @@
+{
+  "name": "@rental-os/platform-server",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "独立的SaaS公共身份、会话和设置服务",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./password": {
+      "types": "./dist/common/password.d.ts",
+      "default": "./dist/common/password.js"
+    },
+    "./request-id": {
+      "types": "./dist/common/request-id.interceptor.d.ts",
+      "default": "./dist/common/request-id.interceptor.js"
+    },
+    "./request-identity": {
+      "types": "./dist/common/request-identity.d.ts",
+      "default": "./dist/common/request-identity.js"
+    },
+    "./request-path": {
+      "types": "./dist/common/request-path.d.ts",
+      "default": "./dist/common/request-path.js"
+    },
+    "./auth-session": {
+      "types": "./dist/modules/auth/auth-session.service.d.ts",
+      "default": "./dist/modules/auth/auth-session.service.js"
+    },
+    "./auth-http": {
+      "types": "./dist/modules/auth/auth-session.controller.d.ts",
+      "default": "./dist/modules/auth/auth-session.controller.js"
+    },
+    "./auth-dto": {
+      "types": "./dist/modules/auth/auth-session.dto.d.ts",
+      "default": "./dist/modules/auth/auth-session.dto.js"
+    },
+    "./auth": {
+      "types": "./dist/modules/auth/platform-auth.service.d.ts",
+      "default": "./dist/modules/auth/platform-auth.service.js"
+    },
+    "./identity": {
+      "types": "./dist/modules/platform/platform-identity.repository.d.ts",
+      "default": "./dist/modules/platform/platform-identity.repository.js"
+    },
+    "./authentication": {
+      "types": "./dist/modules/platform/platform-authentication.source.d.ts",
+      "default": "./dist/modules/platform/platform-authentication.source.js"
+    },
+    "./security": {
+      "types": "./dist/modules/platform/platform-security-baseline.d.ts",
+      "default": "./dist/modules/platform/platform-security-baseline.js"
+    },
+    "./auth-store": {
+      "types": "./dist/modules/platform/platform-auth-data-store.d.ts",
+      "default": "./dist/modules/platform/platform-auth-data-store.js"
+    },
+    "./appearance-store": {
+      "types": "./dist/modules/platform/platform-appearance-data-store.d.ts",
+      "default": "./dist/modules/platform/platform-appearance-data-store.js"
+    },
+    "./tenant-appearance": {
+      "types": "./dist/modules/client/tenant-appearance-profile.service.d.ts",
+      "default": "./dist/modules/client/tenant-appearance-profile.service.js"
+    },
+    "./tenant-appearance-http": {
+      "types": "./dist/modules/client/tenant-appearance-profile.controller.d.ts",
+      "default": "./dist/modules/client/tenant-appearance-profile.controller.js"
+    },
+    "./tenant-appearance-dto": {
+      "types": "./dist/modules/client/tenant-appearance-profile.dto.d.ts",
+      "default": "./dist/modules/client/tenant-appearance-profile.dto.js"
+    },
+    "./account-appearance": {
+      "types": "./dist/modules/client/account-appearance.service.d.ts",
+      "default": "./dist/modules/client/account-appearance.service.js"
+    },
+    "./account-appearance-http": {
+      "types": "./dist/modules/client/account-appearance.controller.d.ts",
+      "default": "./dist/modules/client/account-appearance.controller.js"
+    },
+    "./account-appearance-dto": {
+      "types": "./dist/modules/client/account-appearance.dto.d.ts",
+      "default": "./dist/modules/client/account-appearance.dto.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-contracts",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/platform-contracts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^10.4.15",
+    "class-validator": "^0.14.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  },
+  "typesVersions": {
+    "*": {
+      "password": [
+        "dist/common/password.d.ts"
+      ],
+      "request-id": [
+        "dist/common/request-id.interceptor.d.ts"
+      ],
+      "request-identity": [
+        "dist/common/request-identity.d.ts"
+      ],
+      "request-path": [
+        "dist/common/request-path.d.ts"
+      ],
+      "auth-session": [
+        "dist/modules/auth/auth-session.service.d.ts"
+      ],
+      "auth-http": [
+        "dist/modules/auth/auth-session.controller.d.ts"
+      ],
+      "auth-dto": [
+        "dist/modules/auth/auth-session.dto.d.ts"
+      ],
+      "auth": [
+        "dist/modules/auth/platform-auth.service.d.ts"
+      ],
+      "identity": [
+        "dist/modules/platform/platform-identity.repository.d.ts"
+      ],
+      "authentication": [
+        "dist/modules/platform/platform-authentication.source.d.ts"
+      ],
+      "security": [
+        "dist/modules/platform/platform-security-baseline.d.ts"
+      ],
+      "auth-store": [
+        "dist/modules/platform/platform-auth-data-store.d.ts"
+      ],
+      "appearance-store": [
+        "dist/modules/platform/platform-appearance-data-store.d.ts"
+      ],
+      "tenant-appearance": [
+        "dist/modules/client/tenant-appearance-profile.service.d.ts"
+      ],
+      "tenant-appearance-http": [
+        "dist/modules/client/tenant-appearance-profile.controller.d.ts"
+      ],
+      "tenant-appearance-dto": [
+        "dist/modules/client/tenant-appearance-profile.dto.d.ts"
+      ],
+      "account-appearance": [
+        "dist/modules/client/account-appearance.service.d.ts"
+      ],
+      "account-appearance-http": [
+        "dist/modules/client/account-appearance.controller.d.ts"
+      ],
+      "account-appearance-dto": [
+        "dist/modules/client/account-appearance.dto.d.ts"
+      ]
+    }
+  }
+}

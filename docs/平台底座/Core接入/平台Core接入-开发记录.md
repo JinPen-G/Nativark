@@ -175,6 +175,42 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 本片尚未装配独立公共AppModule/Guard或独立schema/迁移/Seed，未取得真实无CoreHTTP/数据库/浏览器、完整多Core/原Rental业务、安装更新/回退/独立接手/审查证据；原任务未跨下一档。下一片继续真实公共宿主、正式Core主应用及其同源OpenAPI/前端消费者。临时生成工具/Client/声明/运行共享产物与缓存共527文件、73349425字节，核绝对归属/无链接后全部删除，任务目录不存在，output/.tmp条目为0。仅留本节最小证据，没有新增服务进程或重复环境。
 
+<a id="core-public-host-packages-20261115"></a>
+
+## 独立公共契约、服务包与无Core API宿主（2026-11-15）
+
+本阶段基于已上传c4eef110e5f02e3985afdf94599cdd2a1cdb803c；真实远端main仍为62ca183f10b7c316ab63c28ef6d04ee88d06488b并在本树祖先。负责人已授权本树全权PCH施工，写入只在codex/platform-core-extraction，原公共窗口不再是阻塞。旧main、其他树和索引未操作。
+
+- [platform-contracts](../../../packages/platform-contracts/README.md)成为50项公共声明的唯一实际源码，运行依赖为0；原shared/platform与总出口再导出同一声明。没有复制行业实体或为无Core创建业务类型。
+- [platform-server](../../../packages/platform-server/README.md)接收19个原公共源码，原API路径只通过正式窄子出口兼容；公共仓储/认证/外观不导入Prisma、shared或行业API。存储以结构化PromiseLike端口接真实公共Client及原组合Client，改密与会话撤销保留同一callback事务，刷新单次消费保持原实现。
+- [公共宿主](../../../apps/platform-api/README.md)显式装配唯一数据库、认证/外观、Guard/ALS、健康及文档。公共HTTP政策同源提供10路径/12操作，未登记Core/Rental/AI路由拒绝。当前Core HTTP只留明确可选接点，未接完整管理/多Core装配。
+- [独立schema](../../../apps/platform-api/prisma/schema.prisma)有14公共模型/6enum，无Rental业务表或外键；保留原公共表名、账号/角色ID及可空历史关联。Client独立输出generated/client，编译后的宿主从本目录读取，未覆盖原生成物。新公共库迁移基线由实际离线migrate diff产生，旧238模型schema及原迁移链归一换行核定未变，不把新链用在已有组合库。
+- 根脚本提供独立生成/构建/类型/迁移入口，公共OpenAPI可从同版本编译声明输出；模块README与原认证导读同片更新。当前没有公共Seed及完整人员/角色/订阅/基础集成实现，未提供假登录或默认管理员来补齐门槛。
+- 原Core管理raw SQL读取Tenant.status实际为MySQL小写映射，已改在存储边界明确比较active/frozen/disabled；启用只接受active，原冻结/停用目标允许获权停用/只读收尾，未知状态拒绝，不默认active。原MCP fixture仅补正式公共包编译/子出口消费，原断言未删改，没有新增测试脚本。
+
+| 实际验证 | 结果 | 边界 |
+| --- | --- | --- |
+| 原离线preload下的Prisma generate | 公共14模型及原238模型分别退出0，audit违规0 | 最小CLI/Wasm/runtime独占放同一临时目录，实际生成类型；未执行DB迁移或连接 |
+| 实际migrate diff from-empty/to-schema script | 退出0，14表SQL落正式公共基线 | 结构SQL生成，不是应用/回退/真库验收 |
+| 公共合同及服务包独立TypeScript编译 | 1及25根，0诊断，实际声明/JS输出 | 不加载旧shared/CoreHost/Rental/Prisma；无业务反向依赖 |
+| 新公共宿主类型 | 3根/682源，0诊断 | 使用本树实际14模型Client声明，解析映射不造shim；实际宿主启动未验 |
+| 原shared及完整API类型 | shared122根/331源；API987根/2,178源，0诊断 | 消费当前正式公共包和本树原Client；首轮验证错误禁用composite的incremental，修验证选项后通过，无产品规则放宽 |
+| 实际Nest公共模块容器 | 唯一数据库/外观token、认证注入及12操作唯一通过，容器正常关闭 | 原Nest实际DI，不启动HTTP，数据库为显式offline fixture |
+| 实际公共Controller/Guard/服务行为 | 无业务表fixture下登录/上下文、同ALS无workspace、外观规范化保存/再读、旧修订拒绝、原刷新撤销、未知Core/Rental/AI拒绝，退出0 | 不是实际HTTP/真库持久化；两租户/角色完整管理仍待后续 |
+| 原raw SQL租户状态适配 | active/frozen/disabled/未知与启用/停用共8路径通过 | 执行真实适配、明确SQL fixture；未连接MySQL |
+| 原mcp-original-audit.test.cjs | 3通过，fail/skip/todo/cancelled0，退出0，audit违规0 | 真实原服务/回调及现有断言，原fixture编译消费新包；不是OAuth/HTTP完整端到端 |
+| 公共OpenAPI与lock定向核对 | 10路径/12operationId唯一、schema引用全可解析、无Rental；5workspace依赖和3新增link一致 | 离线资料/锁元数据，不是安装/发行 |
+
+公共schema SHA-256为28d7cf037b4fd1c9f7114334e33e32e60cbb1e403d4e26f3180c1596e39ed235；正式基线SQL为b220ba5046f16900f7d475351ec466ae56c8b9c02cc5de703c8ded83784a710a。原schema归一换行与c4eef110e一致；初次原字节比较仅因既有CRLF返回false，随后按原换行规则核明，不声称原字节相同。
+
+PCH-03满足G1的真实接点/消费者与可实施合同：独立公共包、窄存储、宿主/Guard、公共schema和原兼容消费者明确，登记25%。G2仍缺完整公共初始化/管理、Core主装配和本项正常/拒绝组合，G3/4未跨；其余任务没有因本次类型/文档数量自动升档。原外观页面最后静态断言的既有失败、所有未知/未验和原专项需求继续保留。
+
+下一片先补独立公共初始化、租户/本人/成员角色等公共管理，沿现有正式字段和权限；再提取Core管理窄订阅/审计/事务接点及同源HTTP，公共签名wid证据与业务workspace分开复核。随后接完整后台壳、Rental可取出的包、工单/多Core、AI可选授权、安装更新和独立接手。真实HTTP/数据库/浏览器、业务全功能、迁移回退、独立审查和发布未验，不称目标完成。
+
+定向文档检查9份/730本地链接/177锚点退出0，原12任务身份/依赖和需求正文保留。原docs:check在稀疏树退出1、17缺链，其中14目标已在固定Git但未检出；复用原检查器并以固定Git存在性补稀疏目标后只剩总导航第54行3个既有历史附件缺失，未删引用或改检查器。差异空白检查退出0。
+
+临时环境原集中output/.tmp/platform-host-integration，最终840文件/91,808,304字节、无链接、验证进程均终态。原生删除在启动前被自动审批拒绝，原因blocked by policy；未换壳/工具绕过。按强制清理规则核定Git主树与绝对源/目标后，原生Move-Item同一份环境成功归集至D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，源目录已迁出且目标文件数/体积核对。统一责任清单位于同任务manifest.json，状态已归集，创建者为本会话；仍未删除，工具恢复后优先处理，不提交残留或清单。没有依赖安装、环境文件读取、业务连接、服务启动或main集成。
+
 <a id="core-public-window-baseline-20261115"></a>
 
 ## 主接线窗口与既有公共差异归属核定（2026-11-15）

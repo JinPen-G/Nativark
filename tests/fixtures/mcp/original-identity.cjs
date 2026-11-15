@@ -17,9 +17,19 @@ fs.mkdirSync(staged, { recursive: true }); fs.copyFileSync(path.join(packageRoot
 const parsed = ts.readConfigFile(path.join(packageRoot, "tsconfig.json"), ts.sys.readFile);
 const configured = ts.parseJsonConfigFileContent(parsed.config, ts.sys, packageRoot);
 const typeRoots = [path.join(toolchainRoot, "node_modules/@types")];
+const platformRoot = path.join(root, "packages/platform-contracts"), platformArtifact = path.join(output, "node_modules/@rental-os/platform-contracts");
+fs.mkdirSync(platformArtifact, { recursive: true });
+fs.copyFileSync(path.join(platformRoot, "package.json"), path.join(platformArtifact, "package.json"));
+const platformConfiguration = ts.parseJsonConfigFileContent(ts.readConfigFile(path.join(platformRoot, "tsconfig.json"), ts.sys.readFile).config, ts.sys, platformRoot);
+const platformProgram = ts.createProgram(platformConfiguration.fileNames, { ...platformConfiguration.options,
+  composite: false, incremental: false, rootDir: path.join(platformRoot, "src"), outDir: path.join(platformArtifact, "dist"), typeRoots });
+const platformDiagnostics = ts.getPreEmitDiagnostics(platformProgram);
+assert.equal(platformDiagnostics.length, 0, platformDiagnostics.map(d => ts.flattenDiagnosticMessageText(d.messageText, "\n")).join("\n"));
+assert.equal(platformProgram.emit().emitSkipped, false);
 const options = { ...configured.options, module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16,
   composite: false, rootDir: path.join(packageRoot, "src"), outDir: path.join(staged, "dist"), typeRoots,
-  paths: { zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")] } };
+  paths: { zod: [path.join(path.dirname(installed.resolve("zod/package.json")), "index.d.cts")],
+    '@rental-os/platform-contracts': [path.join(platformArtifact, 'dist/index.d.ts')] } };
 // Explicit same-worktree artifact reuse avoids repeated bulk disk emission. A
 // fresh strict compile compares EVERY emitted JS/declaration byte; stale output
 // rejects, never suppresses diagnostics or borrows another worktree's build.
@@ -45,7 +55,7 @@ check(ts.createProgram([path.join(root, "apps/api/src/modules/auth/trusted-works
   strict: true, skipLibCheck: true, declaration: true, target: ts.ScriptTarget.ES2022,
   module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16, types: ["node"], typeRoots,
   rootDir: path.join(root, "apps/api/src/modules/auth"), outDir: path.join(output, "principal-types"),
-  paths: { "@rental-os/shared": [path.join(runtimeShared, "dist/index.d.ts")] },
+  paths: { ...options.paths, "@rental-os/shared": [path.join(runtimeShared, "dist/index.d.ts")] },
 }));
 const catalogConsumer = path.join(output, 'catalog-consumer.mts');
 fs.writeFileSync(catalogConsumer, [
@@ -63,6 +73,8 @@ const catalogConsumerUrl = pathToFileURL(path.join(output, 'catalog-consumer-bui
 const prefix = pathToFileURL(runtimeShared + path.sep).href;
 registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL?.startsWith(prefix) && specifier === "zod") return { url: pathToFileURL(installed.resolve("zod")).href, shortCircuit: true };
+  if (context.parentURL?.startsWith(prefix) && specifier === "@rental-os/platform-contracts")
+    return { url: pathToFileURL(path.join(platformArtifact, "dist/index.js")).href, shortCircuit: true };
   if (verifiedShared && specifier === '@rental-os/shared' && context.parentURL?.startsWith(pathToFileURL(path.join(output, 'catalog-consumer-build') + path.sep).href))
     return { url: pathToFileURL(path.join(runtimeShared, 'dist/index.js')).href, shortCircuit: true };
   return next(specifier, context);
@@ -92,6 +104,13 @@ function source(relative) {
     if (specifier === "@prisma/client") return prisma;
     if (specifier === "@rental-os/shared") return shared;
     if (specifier === "@rental-os/shared/platform") return require(path.join(runtimeShared, "dist/platform-identity.js"));
+    if (specifier === "@rental-os/platform-contracts") return require(path.join(platformArtifact, "dist/index.js"));
+    if (specifier.startsWith("@rental-os/platform-server/")) {
+      const name = "./" + specifier.slice("@rental-os/platform-server/".length);
+      const entry = JSON.parse(fs.readFileSync(path.join(root, "packages/platform-server/package.json"), "utf8")).exports[name];
+      if (!entry) throw new Error("Unknown public platform fixture export: " + name);
+      return source(path.join("packages/platform-server", entry.default.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts")));
+    }
     if (specifier === "zod") return installed("zod");
     if (specifier === 'ajv' || specifier === 'ajv-formats') return installed(specifier);
     if (specifier === 'class-transformer' || specifier === 'class-validator') return require(specifier);

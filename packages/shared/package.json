@@ -27,11 +27,14 @@
     }
   },
   "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-contracts",
+    "prelint": "npm run build -w @rental-os/platform-contracts",
     "build": "tsc -p tsconfig.json && npm run build:agent-desktop",
     "build:agent-desktop": "tsc -p tsconfig.agent-desktop.json",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@rental-os/platform-contracts": "0.1.0",
     "zod": "3.25.76"
   },
   "devDependencies": {},

@@ -1,0 +1,317 @@
+// 公共底座的独立模型。新公共库使用本链，旧Rental组合库继续原迁移，不用此schema覆盖其历史。
+// 保留原账号/角色/会话表名及标识；租赁空间和订单仅保留可空关联ID，不建立业务表外键。
+generator client {
+  provider = "prisma-client-js"
+  output = "../generated/client"
+}
+
+datasource db {
+  provider = "mysql"
+  url = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE   @map("active")
+  FROZEN   @map("frozen")
+  DISABLED @map("disabled")
+}
+
+enum OrganizationType {
+  OPERATOR @map("operator")
+  CAR_SHOP @map("car_shop")
+  STORE    @map("store")
+  STATION  @map("station")
+}
+
+enum RoleScope {
+  OPERATOR @map("operator")
+  CAR_SHOP @map("car_shop")
+  STORE    @map("store")
+  STATION  @map("station")
+}
+
+enum SystemDataScope {
+  ALL          @map("all")
+  ORGANIZATION @map("organization")
+  STORE        @map("store")
+  OWN          @map("own")
+}
+
+enum PermissionKind {
+  MENU   @map("menu")
+  ACTION @map("action")
+  BUTTON @map("button")
+}
+
+enum ConfigStatus {
+  DRAFT     @map("draft")
+  EFFECTIVE @map("effective")
+  ARCHIVED  @map("archived")
+}
+
+model Tenant {
+  id                                String                                   @id @default(uuid())
+  code                              String                                   @unique
+  name                              String
+  /// SaaS管理员设置的后台营运商简称；不替代完整公司名称或客户端品牌，旧租户为空。
+  operatorShortName                 String?                                  @db.VarChar(64)
+  status                            TenantStatus                             @default(ACTIVE)
+  statusReason                      String?
+  statusChangedAt                   DateTime?
+  statusChangedBy                   String?
+  organizations                     OrganizationUnit[]
+  users                             User[]
+  roles                             Role[]
+  filterPresets                     FilterPreset[]
+  systemParameterSets               SystemParameterSet[]
+  logs                              OperationLog[]
+  createdAt                         DateTime                                 @default(now())
+  updatedAt                         DateTime                                 @updatedAt
+
+}
+
+model OrganizationUnit {
+  id        String             @id @default(uuid())
+  tenantId  String
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  parentId  String?
+  parent    OrganizationUnit?  @relation("OrgTree", fields: [parentId], references: [id])
+  children  OrganizationUnit[] @relation("OrgTree")
+  type      OrganizationType
+  code      String
+  name      String
+  status    String             @default("enabled")
+  users     User[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, id], map: "organization_units_tenant_id_key")
+  @@index([tenantId, type, status])
+
+}
+
+model User {
+  id                 String            @id @default(uuid())
+  tenantId           String
+  tenant             Tenant            @relation(fields: [tenantId], references: [id])
+  organizationId     String?
+  organization       OrganizationUnit? @relation(fields: [organizationId], references: [id])
+  roleId             String?
+  role               Role?             @relation(fields: [roleId], references: [id])
+  account            String
+  displayName        String
+  phone              String?
+  passwordHash       String
+  isSaasAdmin        Boolean           @default(false)
+  isPlatformAdmin    Boolean           @default(false)
+  isActive           Boolean           @default(true)
+  mustChangePassword Boolean           @default(true)
+  needsTenantOnboarding Boolean        @default(false)
+  tokenVersion       Int               @default(1)
+  passwordChangedAt  DateTime?
+  lastLoginAt        DateTime?
+  roleAssignments    UserRole[]
+  authSessions       AuthSession[]
+  logs               OperationLog[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  appearancePreference UserAppearancePreference?
+
+  @@unique([tenantId, account])
+  /// 保留原租户/账号复合身份键；Core成员或业务关联仍须指向同租户账号。
+  @@unique([tenantId, id], map: "users_tenant_id_key")
+  @@index([tenantId, organizationId])
+
+}
+
+model UserAppearancePreference {
+  id         String   @id @default(uuid())
+  userId     String   @unique(map: "user_appearance_preferences_user_key")
+  /// 该账户的管理后台主题色（#RRGGBB）；未设置时回退平台默认色。与租户品牌色无关。
+  themeColor String?  @db.VarChar(16)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_appearance_preferences")
+
+}
+
+model AuthSession {
+  id                 String             @id @default(uuid())
+  userId             String
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash   String             @unique
+  /// 原会话的兼容关联ID；公共新会话为空。此公共schema不创建Rental空间或业务外键。
+  /// 已保留关联也不授予业务权限，Core仍从原成员/范围验证当前使用权。
+  currentWorkspaceId String?
+  /// AUTH-AUDIENCE-01：运营后台与员工小程序会话不可互换。
+  audience           String             @default("operator") @db.VarChar(16)
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  lastUsedAt         DateTime?
+  createdAt          DateTime           @default(now())
+
+  @@index([userId, expiresAt, revokedAt])
+  @@index([currentWorkspaceId], map: "auth_sessions_workspace_idx")
+  @@map("auth_sessions")
+
+}
+
+model AuthLoginFailure {
+  id           String   @id @default(uuid())
+  loginKeyHash String   @unique(map: "auth_login_failures_login_key_hash_key") @db.Char(64)
+  failureCount Int      @default(0)
+  firstFailedAt DateTime @db.DateTime(3)
+  lockedUntil  DateTime? @db.DateTime(3)
+  expiresAt    DateTime @db.DateTime(3)
+  revision     Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt], map: "auth_login_failures_expires_idx")
+  @@map("auth_login_failures")
+
+}
+
+model Role {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  tenant                Tenant            @relation(fields: [tenantId], references: [id])
+  code                  String
+  name                  String
+  description           String?
+  scope                 RoleScope
+  fixedAllPermissions   Boolean           @default(false)
+  enabledBusinessScopes Json
+  buttonPermissions     Json?
+  dataScope             SystemDataScope   @default(STORE)
+  isActive              Boolean           @default(true)
+  users                 User[]
+  userAssignments       UserRole[]
+  permissions           RolePermission[]
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  /// 保留同租户角色身份键，Core范围分配不能引用另一租户角色。
+  @@unique([tenantId, id], map: "roles_tenant_id_key")
+
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  description String?
+  module      String
+  kind        PermissionKind   @default(ACTION)
+  roles       RolePermission[]
+  createdAt   DateTime         @default(now())
+
+}
+
+model UserRole {
+  userId    String
+  roleId    String
+  user      User     @relation(fields: [userId], references: [id])
+  role      Role     @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
+
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+
+}
+
+model TenantAppearanceProfile {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique(map: "tenant_appearance_profiles_tenant_key")
+  revision             Int      @default(1)
+  brandName            String?  @db.VarChar(120)
+  brandLogoUrl         String?  @db.VarChar(512)
+  faviconUrl           String?  @db.VarChar(512)
+  /// 客户端与管理后台主色（#RRGGBB）。
+  themeColor           String?  @db.VarChar(16)
+  /// 旧的统一圆角（回退基准，8-40px 或 999px）。
+  adminCornerRadius    Int?     @db.UnsignedSmallInt
+  adminContainerRadius Int?     @db.UnsignedSmallInt
+  adminButtonRadius    Int?     @db.UnsignedSmallInt
+  adminInputRadius     Int?     @db.UnsignedSmallInt
+  adminLoginJson       Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("tenant_appearance_profiles")
+
+}
+
+model OperationLog {
+  id            String             @id @default(uuid())
+  tenantId      String
+  tenant        Tenant             @relation(fields: [tenantId], references: [id])
+  userId        String?
+  user          User?              @relation(fields: [userId], references: [id])
+  /// 原租赁审计关联兼容值；公共库不建立租赁订单表，Core读取仍核其当前权限。
+  rentalOrderId String?
+  /// 原业务范围兼容引用；公共审计为空。保留历史值，关联Core不随公共源码移除而删事实。
+  workspaceId   String?
+  action        String
+  detail        Json
+  createdAt     DateTime           @default(now())
+
+  @@index([tenantId, action, createdAt])
+  @@index([tenantId, rentalOrderId, createdAt])
+  @@index([tenantId, workspaceId, createdAt], map: "OperationLog_tenant_workspace_created_idx")
+
+}
+
+model SystemParameterSet {
+  id          String       @id @default(uuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  module      String
+  versionNo   Int          @default(1)
+  status      ConfigStatus @default(EFFECTIVE)
+  content     Json
+  operator    String?
+  effectiveAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([tenantId, module, versionNo])
+  @@index([tenantId, module, status])
+
+}
+
+model FilterPreset {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  scopeKey    String
+  name        String
+  description String?
+  filters     Json
+  isDefault   Boolean  @default(false)
+  isSystem    Boolean  @default(false)
+  operator    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, scopeKey, name])
+  @@index([tenantId, scopeKey, isDefault])
+  @@index([tenantId, scopeKey, updatedAt])
+
+}
