@@ -382,4 +382,3 @@ export interface SetStandardPriceRequest {
   priceVersion?: string;
   note?: string;
 }
-
