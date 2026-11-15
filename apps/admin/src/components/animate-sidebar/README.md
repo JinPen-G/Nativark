@@ -1,6 +1,6 @@
 # Animate UI 原版应用侧栏
 
-来源：[Base UI Sidebar](https://animate-ui.com/docs/primitives/base-ui/sidebar)，固定提交与 SHA-256 见 sources.json；许可见 LICENSE.md（MIT＋Commons Clause）。vendor 保留原始示例与依赖组件。runtime 做导入、可访问文案、portal 主题接入，并提供可选 transition 与触发图标插槽；icon模式传入参考transition时，宽度间隔和固定侧栏使用Motion同帧驱动，未传时继续使用原尺寸与动效。租户侧栏按负责人要求参考 [UIArc Product listing 公开预览](https://uiarc.dev/components/screens/product-listing/frame) 的展开、收起和一级／二级菜单过渡，在 AppShell、NativeNavigation 和 sidebar-adapter.css 集成，不修改 vendor 或声称取得 Pro TSX。
+来源：[Base UI Sidebar](https://animate-ui.com/docs/primitives/base-ui/sidebar)，固定提交与 SHA-256 见[公共来源](../../../../../packages/platform-admin/src/components/animate-sidebar/sources.json)；许可见[公共许可](../../../../../packages/platform-admin/src/components/animate-sidebar/LICENSE.md)（MIT＋Commons Clause）。vendor 保留原始示例与依赖组件。runtime 做导入、可访问文案、portal 主题接入，并提供可选 transition 与触发图标插槽；icon模式传入参考transition时，宽度间隔和固定侧栏使用Motion同帧驱动，未传时继续使用原尺寸与动效。租户侧栏按负责人要求参考 [UIArc Product listing 公开预览](https://uiarc.dev/components/screens/product-listing/frame) 的展开、收起和一级／二级菜单过渡，在 AppShell、NativeNavigation 和 sidebar-adapter.css 集成，不修改 vendor 或声称取得 Pro TSX。
 
 - `BusinessShell`：管理端与企业端共用侧栏、页头插槽、内容边界与路由动效；身份、菜单和受权命令由宿主传入，不导入营运认证、API或Copilot运行时。
 - `NativeNavigation`：宿主给出的路由、短名称、分组与菜单搜索；`flat`沿企业原链接和图标，内联分组继续原动画。

@@ -1,0 +1,27 @@
+/* Single host boundary for input geometry. Values live in app/designTokens.ts,
+   not in page styles or appearance-settings UI. Do not add height/motion here. */
+:root { --radius-field: var(--rental-ui-radius-input, 18px); }
+:is(.arc-form-field, .arc-search-field, .arc-select-field, .arc-date-field,
+    .arc-date-range, .arc-time-fields, .arc-color-field, .arc-rich-field, .arc-otp-field) {
+  --radius-control: var(--radius-field);
+  --radius-panel: var(--radius-field);
+}
+/* Nested actions keep the button contract; fields must not re-theme buttons. */
+[data-rental-arc-button] { --radius-control: var(--rental-ui-radius-button); }
+.arc-select-field [role="option"] { --radius-control: var(--rental-ui-radius-button); }
+[data-radix-popper-content-wrapper] > [role="listbox"]:has(> [data-radix-select-viewport]) {
+  --radius-control: var(--rental-ui-radius-button);
+  border-radius: var(--radius-field);
+}
+/* Inline upstream morph corners are the explicit geometry exception. Preserve
+   source width/height/position transitions; only the corner belongs to tokens. */
+.arc-date-range [class*="surface"],
+.arc-phone-field [data-open] [class*="shape"] { border-radius: var(--radius-field) !important; }
+input.arc-input-control, .arc-seconds input,
+.arc-color-field button[aria-haspopup="dialog"],
+.arc-color-field [class*="field"] { border-radius: var(--radius-field); }
+.arc-rich-field { border-radius: var(--radius-field); }
+.arc-rich-output { border-bottom-right-radius: var(--radius-field); }
+.ant-select-selection-item { border-radius: var(--rental-ui-radius-input-sm); }
+/* Composed fields paint one outer outline, not a second rounded inner input. */
+.arc-password-field input { border-radius: 0; }

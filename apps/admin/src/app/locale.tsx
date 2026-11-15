@@ -1,18 +1,7 @@
-import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { LocaleContext } from "./localeContext";
-
-export type AdminLocale = "zh-CN" | "en-US";
-
-const STORAGE_KEY = "rental_admin_locale";
-
-/**
- * 管理后台双语文案：按租赁工作流维护短标签，不翻译租户录入的业务事实。
- *
- * 路由、权限码和服务端枚举仍然使用原始值；这里只负责把已经存在的界面
- * 文案翻译成英文，避免把展示语言混进业务事实。未登记的动态文案会回落
- * 到中文，保证新增页面在补齐翻译前仍然可用。
- */
-const ENGLISH: Record<string, string> = {
+/** 原 Rental 文案属于业务宿主；公共组件复用同一语言 Context。 */
+import { LocaleProvider as SharedLocaleProvider, translateAdminText as translateSharedText, type AdminLocale } from '@rental-os/platform-admin/locale';
+import type { ReactNode } from 'react';
+const ENGLISH = {
   "休息": "Take a break",
   "本地音频": "Local audio",
   "选择本地音频": "Choose local audio",
@@ -443,7 +432,8 @@ const ENGLISH: Record<string, string> = {
   "核对租赁条件": "Review rental conditions",
   "发送这些租赁条件交原场景受理？不会创建报价、订单或支付。": "Submit these conditions to the original scene? This does not create a quote, order or payment.",
   "须读取活动报价对话并先完成原轮次；不隐式排队或覆盖旧条件。": "Read an active quote conversation and finish its original turn first. New requests are not queued or used to overwrite earlier conditions.",
-  "移除商品": "Remove item", "添加商品": "Add item",
+  "移除商品": "Remove item",
+  "添加商品": "Add item",
   "报价任务": "Quote task",
   "模型用于整理和澄清条件，价格及业务动作仍走原 Core 和确认流程。": "The model organizes and clarifies conditions. Prices and business actions use the original Core and confirmation flow.",
   "核对原报价执行": "Check original quote execution",
@@ -525,7 +515,6 @@ const ENGLISH: Record<string, string> = {
   "权益说明": "Feature description",
   "版本对比": "Compare plans",
   "标准年费": "Annual prices",
-
   "网络连接已断开": "You are offline",
   "AI 服务设置": "AI settings",
   "AI 任务中心": "AI tasks",
@@ -643,17 +632,33 @@ const ENGLISH: Record<string, string> = {
   "上次保存结果尚未确认，请先核对保存结果，不要重复提交。": "The previous save is unconfirmed. Check its result before submitting again.",
   "当前没有管理 AI 设置的权限。": "You do not have permission to manage AI settings.",
   "AI 设置暂不可用，请稍后刷新；保存过的设置不会因此被删除。": "AI settings are unavailable. Refresh later; saved settings have not been deleted.",
-  "搜索菜单": "Search menus", "业务管理": "Business", "没有匹配的菜单": "No matching menus",
-  "界面动效": "Interface motion", "动效偏好": "Motion preference",
-  "完整动效": "Full", "减少动效": "Reduced",
+  "搜索菜单": "Search menus",
+  "业务管理": "Business",
+  "没有匹配的菜单": "No matching menus",
+  "界面动效": "Interface motion",
+  "动效偏好": "Motion preference",
+  "完整动效": "Full",
+  "减少动效": "Reduced",
   "仅保存在当前浏览器，立即生效。": "Applies instantly. Saved in this browser.",
-  "经营能力": "Capabilities", "版本订阅": "Subscription", "外观音效": "Appearance",
-  "客户渠道": "Channels", "定价营销": "Pricing", "会员客户": "Clients",
-  "账号权限": "Access", "服务渠道": "Services", "财务对账": "Finance",
-  "器材库存": "Inventory", "能力目录": "Capabilities", "公共日历": "Calendars",
-  "功能定价": "Plans & pricing", "价格调价": "Rates",
-  "实名核验记录": "Identity reviews", "查看明文": "View unmasked",
-  "男": "Male", "女": "Female", "转介绍": "Referral",
+  "经营能力": "Capabilities",
+  "版本订阅": "Subscription",
+  "外观音效": "Appearance",
+  "客户渠道": "Channels",
+  "定价营销": "Pricing",
+  "会员客户": "Clients",
+  "账号权限": "Access",
+  "服务渠道": "Services",
+  "财务对账": "Finance",
+  "器材库存": "Inventory",
+  "能力目录": "Capabilities",
+  "公共日历": "Calendars",
+  "功能定价": "Plans & pricing",
+  "价格调价": "Rates",
+  "实名核验记录": "Identity reviews",
+  "查看明文": "View unmasked",
+  "男": "Male",
+  "女": "Female",
+  "转介绍": "Referral",
   "预览客户资料": "Preview customer",
   "正在读取当前资料": "Loading current profile…",
   "当前资料暂不可用": "Current profile unavailable",
@@ -759,7 +764,6 @@ const ENGLISH: Record<string, string> = {
   "跳过": "Skipped",
   "行号": "Row",
   "读取失败": "Could not read the file.",
-
   "资源全部锁定后才能办理领取。": "Lock all required resources before pickup.",
   "资源拆分与归还记录": "Resource and return history",
   "押金余额": "Deposit balance",
@@ -1937,8 +1941,6 @@ const ENGLISH: Record<string, string> = {
   "该日期没有官方原值，将按每周模板重算": "No official base value exists; the weekly template will be used",
   "移除不会把该日期变成空白日；原覆盖内容、撤销原因与操作人会进入审计流水。": "Removal does not make the date blank; the original override, removal reason, and operator are recorded in the audit.",
   "例如：误将国庆首日标为停业，恢复官方安排": "Example: the first National Day holiday was incorrectly marked closed; restore the official arrangement",
-
-  // 品类导航术语。它们来自当前经营空间的 terminology，不应从中文字符串中构词。
   "摄影器材": "Camera gear",
   "器材型号": "Models",
   "器材型号目录": "Model catalog",
@@ -1969,8 +1971,6 @@ const ENGLISH: Record<string, string> = {
   "设备仓库": "Warehouses",
   "门店": "Stores",
   "仓库": "Warehouses",
-
-  // 系统预置经营空间名称；租户自定义名称未登记时保留原名称。
   "摄影设备经营空间": "Camera rentals",
   "露营装备经营空间": "Camping rentals",
   "车辆载具经营空间": "Vehicle rentals",
@@ -1979,8 +1979,6 @@ const ENGLISH: Record<string, string> = {
   "露营装备租赁": "Camping rentals",
   "车辆载具租赁": "Vehicle rentals",
   "工程设备租赁": "Equipment rentals",
-
-  // 左侧壳层、主题与语言切换。
   "展开导航": "Expand navigation",
   "收起导航": "Collapse navigation",
   "打开导航": "Open navigation",
@@ -2012,8 +2010,6 @@ const ENGLISH: Record<string, string> = {
   "英文": "English",
   "中文（简体）": "Chinese",
   "English": "English",
-
-  // 常见页面标题与操作，供 PageHeader 和后续页面逐步接入。
   "订单": "Orders",
   "租赁订单": "Orders",
   "当前页排序": "Sort this page",
@@ -2642,13 +2638,9 @@ const ENGLISH: Record<string, string> = {
   "待办理退款": "Refund pending",
   "通知失败": "Notification failed",
   "取消/爽约待退款": "Refund pending",
-
-  // 常见系统提示。
   "当前账号权限或租户经营品类能力不支持此功能；前端菜单隐藏不能替代后端数据权限。": "The current account or workspace capability does not allow this feature. Hiding a menu item cannot replace server-side data permissions.",
   "请联系租户管理员授予业务或会员管理权限。": "Ask the tenant administrator to grant business or membership permissions.",
   "页面操作": "Page actions",
-
-  // 订单详情、验收、资金与续租流程。
   "费用与版本快照": "Charges & snapshots",
   "费用项": "Charge item",
   "类型": "Type",
@@ -3917,8 +3909,8 @@ const ENGLISH: Record<string, string> = {
   "撤销奖励": "Reverse reward",
   "撤销会保留原流水与撤销时间。": "The original transaction and reversal time will be retained.",
   "运营人工撤销": "Manually reversed by operations",
-  "撤销": "Reverse"
-  ,"无权益": "No benefits",
+  "撤销": "Reverse",
+  "无权益": "No benefits",
   "指定空间": "Specific workspaces",
   "已不可用空间": "Unavailable workspace",
   "空间名称未加载": "Workspace name not loaded",
@@ -5723,43 +5715,8 @@ const ENGLISH: Record<string, string> = {
   "批准本条原企业申请并开通首管？不会自动授信或开放租赁范围。": "Approve this original enterprise application and establish its first administrator? Credit and rental scope are not granted automatically.",
   "仅记录本条原企业申请的拒绝或补件结果，原企业、会员与材料保留。": "Record rejection or request additional evidence for this original application? Existing enterprise, membership and evidence records remain."
 };
-
-export type AdminMessageValues = Record<string, string | number>;
-export type AdminTranslate = (value: string, values?: AdminMessageValues) => string;
-
-/** Complete messages let English reorder counts without concatenating Chinese fragments. */
-export function translateAdminText(value: string, locale: AdminLocale, values?: AdminMessageValues) {
-  const text = locale === "en-US" && Object.prototype.hasOwnProperty.call(ENGLISH, value) ? ENGLISH[value] : value;
-  if (!values) return text;
-  return text.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (token, key: string) =>
-    Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : token);
-}
-
-function readInitialLocale(): AdminLocale {
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  return stored === "en-US" ? "en-US" : "zh-CN";
-}
-
-export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<AdminLocale>(readInitialLocale);
-
-  const setLocale = useCallback((next: AdminLocale) => {
-    setLocaleState(next);
-    window.localStorage.setItem(STORAGE_KEY, next);
-  }, []);
-
-  const t = useCallback<AdminTranslate>((value, values) => translateAdminText(value, locale, values), [locale]);
-
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
-
-  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
-  return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
-}
-
-export function useLocale() {
-  const context = useContext(LocaleContext);
-  if (!context) throw new Error("useLocale must be used inside LocaleProvider");
-  return context;
-}
+export { useLocale } from '@rental-os/platform-admin/locale';
+export type { AdminLocale, AdminTranslate } from '@rental-os/platform-admin/locale';
+export type AdminMessageValues = import('@rental-os/platform-admin/locale').AdminMessageValues;
+export function translateAdminText(value: string, locale: AdminLocale, values?: AdminMessageValues) { return translateSharedText(value, locale, values, ENGLISH); }
+export function LocaleProvider({ children }: { children: ReactNode }) { return <SharedLocaleProvider messages={ENGLISH}>{children}</SharedLocaleProvider>; }

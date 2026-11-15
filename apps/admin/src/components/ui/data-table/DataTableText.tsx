@@ -1,10 +1,2 @@
-import type { ReactNode } from "react";
-import styles from "./DataTable.module.css";
-
-/** One primary fact and its supporting text. Long content grows naturally; no fixed row clipping. */
-export function DataTableText({ primary, secondary }: { primary: ReactNode; secondary?: ReactNode }) {
-  return <span className={styles.textStack}>
-    <span className={styles.textPrimary}>{primary}</span>
-    {secondary != null && secondary !== "" && <span className={styles.textSecondary}>{secondary}</span>}
-  </span>;
-}
+/** 原入口兼容转接；公共实现由 platform-admin 单源维护。 */
+export * from "@rental-os/platform-admin/source/components/ui/data-table/DataTableText";

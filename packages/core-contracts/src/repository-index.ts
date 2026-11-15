@@ -110,13 +110,16 @@ export function buildRepositoryCapabilityIndex(directory: string): DevelopmentCa
         : manifest.main || manifest.types ? { ".": { types: manifest.types, default: manifest.main } } : {};
       for (const [subpath, conditions] of Object.entries(exports)) {
         const target = exportTarget(conditions);
+        // 样式和兼容源码通配出口不作为单个 TypeScript 模块解析。
+        if (subpath.includes("*") || target?.endsWith(".css")) continue;
         const file = target && packageSource(root, packageDirectory, target);
         if (!file) {
           addIssue("export_source", `${packageDirectory}/package.json`, `未找到 ${subpath} 对应的当前源码入口`);
           continue;
         }
         info.entries.push({ owner: packageDirectory, version: info.version,
-          module: info.name + (subpath === "." ? "" : subpath.slice(1)), file, visibility: "public" });
+          module: info.name + (subpath === "." ? "" : subpath.slice(1)), file, visibility: "public",
+          ui: info.name === "@rental-os/platform-admin" && subpath === "./ui" });
       }
       packages.push(info);
       const dependencyList = manifest.dependencies && typeof manifest.dependencies === "object"

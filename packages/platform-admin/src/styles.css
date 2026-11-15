@@ -1,0 +1,10 @@
+/* 公共后台样式唯一入口，保持原加载顺序。 */
+@import "antd/dist/reset.css";
+@import "../../ui-arc/vendor/registry/foundation.css";
+@import "./base.css";
+@import "./components/ui/arc-bridge.css";
+@import "./components/ui/input-radius.css";
+@import "./components/ui/input-colors.css";
+@import "./components/ui/control-metrics.css";
+@import "./components/ui/date-picker-layout.css";
+@import "./components/ui/status-colors.css";

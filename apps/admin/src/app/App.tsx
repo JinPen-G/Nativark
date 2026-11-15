@@ -20,6 +20,8 @@ import { FeedbackProvider } from "@/components/ui/Feedback";
 import { MotionPreferenceProvider } from "./MotionPreferenceProvider";
 import { usePrefersReducedMotion } from "@/lib/usePrefersReducedMotion";
 import { isAdminLoginPath } from "@/features/auth/login-entry";
+import { AdminRuntimeProvider } from "@rental-os/platform-admin/runtime";
+import { adminRuntime } from "./adminRuntime";
 
 // Keep existing descendant routes; data router supplies supported SPA blockers.
 const router = createBrowserRouter([{ path: "*", element: <AppRouter />, errorElement: <RouteErrorPage /> }]);
@@ -70,7 +72,7 @@ function ThemedApp() {
           <AntdApp>
             <FeedbackProvider>
               <GlobalInteractionSounds />
-              <AdminBusinessUiScope><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></AdminBusinessUiScope>
+              <AdminRuntimeProvider runtime={adminRuntime}><AdminBusinessUiScope><BrandIconProvider><RouterProvider router={router} /></BrandIconProvider></AdminBusinessUiScope></AdminRuntimeProvider>
             </FeedbackProvider>
           </AntdApp>
         </QueryClientProvider>

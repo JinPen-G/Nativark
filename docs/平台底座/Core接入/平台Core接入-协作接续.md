@@ -35,12 +35,14 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 - 当前独占树为C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支codex/platform-core-extraction。负责人明确本树只有本对话，授权全权负责PCH需要的公共身份/Auth/Guard/ALS、shared正式出口、AppModule/OpenAPI、schema/迁移/Seed及后台壳/路由。原文件窗口阻塞已解除，本树由本对话唯一施工；不写main索引或其他树，不覆盖其他树活动WIP。
 - 最新main62ca183f10b7c316ab63c28ef6d04ee88d06488b已纳入并上传；固定同步与双方记录保全见[同步阶段](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)。后续从最新已提交main及本树差异核对，再整合固定成果。
 - 原简称检查点982043aba913745c6d0e258b2d74ca1efb9a98d4已包含在本树，原省略/null/空字符串、审计和租户投影保留。[原公共基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115)与[后台简称记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)分别定位既有差异及剩余实页/真库验收。
-- 当前Core合同、宿主授权/绑定和工单样例分别在packages/core-contracts、packages/core-host、packages/example-tickets-core；原API适配在apps/api/src/modules/core-host，后台正式页面出口在apps/admin/src/core。独立迁移尚未进入实际部署，主应用/Guard/路由仍需消费。
+- 当前Core合同、宿主授权/绑定和工单样例分别在packages/core-contracts、packages/core-host、packages/example-tickets-core；公共平台适配在packages/platform-core-host，原API保留薄转接。公共后台正式出口为packages/platform-admin，原apps/admin/src/core等路径兼容转接同一实现。独立迁移尚未进入实际部署，原主应用/Guard/业务路由仍需消费。
 - [公共认证片](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)已将公共声明、账号/会话/原角色映射和签名/刷新抽为单源，原Rental兼容路径及外观旧品牌显式适配保持。其他专项正式需求、原任务及未验事项仍归原册；真实业务环境、安装/迁移、合main或发布不因源码写权自动开放。
 - [独立公共包及宿主](../../../apps/platform-api/README.md)消费platform-contracts/platform-server正式出口，原19路径只做窄转接；原组合schema/迁移保持，公共新库基线独立。构建/实际Nest容器与离线平台表行为已核，公共初始化/租户与人员角色管理已接线，真实HTTP/持久化、完整后台与剩余订阅/集成尚未验；Core管理适配已进入独立公共主组合，当前22模型/4份公共SQL含统一期限归公共宿主，物理计划与当前schema生成类型通过；所选Core实际运行/原Rental总装配尚未交付。
 - 原接续全文保存在固定d170a5fa8db1cb56d166fb05246790c0ead29539同路径。本册继续承接全部未完项和证据链接，历史前像与品牌原稿在Git，不重复复制。
 
 ## 3. 下一入口与待交付
+
+公共前端源码和Core呈现已单源移入 [platform-admin](../../../packages/platform-admin/README.md)，原宿主通过验证后的会话/请求/缓存端口消费，类型与公共Vite内存构建已核。先从[本片固定证据与剩余](平台Core接入-开发记录.md#core-public-admin-boundary-20261115)接续，完成独立无Core前端的登录/改密/公共设置及工单页面装配。公共壳和原Rental类型通过不等于浏览器、真实HTTP/保存、干净安装或旧功能全量通过；Rental业务、其他公共服务与原任务下述缺口仍保留。
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[开发能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)和[模块导读/直接消费者](平台Core接入-开发记录.md#core-source-reading-20261115)已有实际入口及覆盖状态，源码用途/文档缺口继续按模块整改。完整行为基线、独立schema/迁移账和最终前后运行对照仍按原门槛交付。
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、8操作Nest与同源OpenAPI/原收据只读、4页面贡献，主Guard/HTTP/后台仍按公共窗口接线。

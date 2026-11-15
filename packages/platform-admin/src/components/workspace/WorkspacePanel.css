@@ -1,0 +1,13 @@
+/* 原340px同级面板、8px间距与460ms停靠/窄屏曲线；业务内容不参与这里的样式。 */
+.workspace-panel-host { display:flex; width:100%; min-width:0; min-height:0; flex:1 1 0; position:relative; overflow:hidden; isolation:isolate; container-type:inline-size; --workspace-panel-gap:var(--rental-workspace-inset,6px); }
+.workspace-panel-content { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; overflow:hidden; container:record-screen / inline-size; }
+.workspace-panel-dock { width:0; flex:none; overflow:hidden; transition:width 460ms cubic-bezier(.22,1,.36,1); }
+.workspace-panel-host.is-open:not(.is-sheet) > .workspace-panel-dock { width:calc(340px + var(--workspace-panel-gap)); }
+.workspace-panel-inner { width:340px; height:100%; margin-inline-start:var(--workspace-panel-gap); display:flex; flex-direction:column; color:var(--foreground); background:var(--rental-shell-panel,var(--surface)); border:1px solid var(--rental-shell-border,var(--border)); border-radius:var(--rental-ui-radius-container); overflow:hidden; }
+.workspace-panel-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); padding:var(--space-3) var(--space-4); font-size:var(--rental-typography-panel-title-size); font-weight:var(--rental-typography-panel-title-weight); }
+.workspace-panel-body { min-height:0; flex:1; overflow:auto; padding:var(--space-4); font-size:var(--rental-typography-meta-size); }
+.workspace-panel-host.is-sheet > .workspace-panel-dock { position:absolute; inset:auto 0 0; z-index:3; width:100%; height:74%; transform:translateY(101%); transition:transform 460ms cubic-bezier(.22,1,.36,1); border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.workspace-panel-host.is-sheet.is-open > .workspace-panel-dock { transform:translateY(0); }
+.workspace-panel-host.is-sheet .workspace-panel-inner { width:100%; margin-inline-start:0; border-width:1px 0 0; border-radius:var(--rental-ui-radius-container) var(--rental-ui-radius-container) 0 0; }
+.workspace-panel-scrim { position:absolute; inset:0; z-index:2; background:rgb(0 0 0 / 20%); }
+html[data-reduced-motion="true"] .workspace-panel-dock { transition:none; }

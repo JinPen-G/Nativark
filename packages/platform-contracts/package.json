@@ -14,6 +14,10 @@
     "./subscription": {
       "types": "./dist/subscription.d.ts",
       "default": "./dist/subscription.js"
+    },
+    "./rich-text": {
+      "types": "./dist/rich-text.d.ts",
+      "default": "./dist/rich-text.js"
     }
   },
   "scripts": {
@@ -24,6 +28,9 @@
     "*": {
       "subscription": [
         "dist/subscription.d.ts"
+      ],
+      "rich-text": [
+        "dist/rich-text.d.ts"
       ]
     }
   }
