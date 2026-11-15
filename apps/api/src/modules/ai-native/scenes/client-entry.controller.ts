@@ -6,6 +6,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION,
   AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
+  aiClientOrderActionSourceSchema, aiClientOrderActionSchema, aiClientOrderActionRevalidationSchema, aiClientHostCapabilitiesSchema,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
@@ -29,7 +30,8 @@ import type { composeClientOriginalBookingHttp } from './client-original-booking
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
-  'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
+  'readHostCapabilities' | 'readOrderTaskHostCapabilities' | 'readOrderAction' | 'revalidateOrderAction'
+  | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'issueBookingTransfer' | 'readBookingTransferIssue' | 'consumeBookingTransfer' | 'readBookingTransferReceipt' |
   'acceptBookingSubmission' | 'readBookingAcceptance' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
@@ -431,6 +433,29 @@ export class AiClientEntryController {
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readHostCapabilities(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readHostCapabilities(request, body));
+  }
+  private orderNavigation(request: ClientModelHttpRequest & { body?: unknown }, value: unknown,
+    method: 'readOrderTaskHostCapabilities' | 'readOrderAction' | 'revalidateOrderAction') {
+    const command = structuredClone(request.body ?? value), current = {
+      headers: { authorization: request?.headers?.authorization }, ip: request.ip };
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const result = method === 'revalidateOrderAction'
+        ? await this.application.revalidateOrderAction(current, aiClientOrderActionRevalidationSchema.parse(command), signal)
+        : await this.application[method](current, aiClientOrderActionSourceSchema.parse(command), signal);
+      return method === 'readOrderTaskHostCapabilities' ? aiClientHostCapabilitiesSchema.parse(result) : aiClientOrderActionSchema.parse(result);
+    }, { maxWaitMs: 15000 }), 'read_original_order_action');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderTaskHostCapabilities) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOrderTaskHostCapabilities(@Req() request: ClientModelHttpRequest, @Body() value: unknown) {
+    return this.orderNavigation(request, value, 'readOrderTaskHostCapabilities');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderAction) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOrderAction(@Req() request: ClientModelHttpRequest, @Body() value: unknown) {
+    return this.orderNavigation(request, value, 'readOrderAction');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.revalidateOrderAction) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  revalidateOrderAction(@Req() request: ClientModelHttpRequest, @Body() value: unknown) {
+    return this.orderNavigation(request, value, 'revalidateOrderAction');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction)
   @HttpCode(200) @Header('Cache-Control', 'no-store')

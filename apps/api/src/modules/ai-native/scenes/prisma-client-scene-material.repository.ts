@@ -2,6 +2,8 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { clientSqlInitialRevisionSchema } from './client-sql-revisions';
 import { decodeAiClientMaterialBodies, encodeAiClientMaterialBodies } from '../privacy/ai-body-storage.codec';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import type { ClientRequestContext } from '../../client/client-auth.service';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -12,6 +14,16 @@ const rowSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: i
   createdAt: z.date(), expiresAt: z.date() }).strict();
 export type AiClientSceneMaterial = z.infer<typeof rowSchema>;
 export type AiClientMaterialScope = Pick<AiClientSceneMaterial, 'tenantId' | 'workspaceId' | 'channel' | 'principalHash' | 'principalKind'>;
+/** Shared original storage key derived from the authenticated client snapshot.
+ * A matching key is a selector; each consumer still uses its current Guard. */
+export function originalClientMaterialScope(identity: Pick<ClientRequestContext,
+  'tenantId' | 'workspaceId' | 'customerId' | 'customerType' | 'sessionId'>,
+  channel: AiClientMaterialScope['channel'], appId?: string): AiClientMaterialScope {
+  const scope = { tenantId: identity.tenantId, workspaceId: identity.workspaceId };
+  return { ...scope, channel, principalKind: identity.customerType,
+    principalHash: requestFingerprint({ ...scope, channel, appId: appId ?? null, customerId: identity.customerId,
+      customerType: identity.customerType, sessionId: identity.sessionId }) };
+}
 export type AiClientMaterialDb = Pick<PrismaClient, '$transaction' | '$queryRaw' | '$executeRaw' | 'tenant' | 'businessWorkspace'>;
 type Reader = Pick<Prisma.TransactionClient, '$queryRaw'>;
 

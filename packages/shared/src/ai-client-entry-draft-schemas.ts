@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
+import { AI_CUSTOMER_ENTRY_SURFACES, aiEntryActionSchema, type AiEntryActionDraft } from './ai-entry-action-draft';
 import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT,
   type AiTaskSnapshotDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft } from './ai-task-draft';
 import { AI_TASK_OBSERVATION_DRAFT_SCHEMAS } from './ai-task-observation-draft-schemas';
@@ -14,6 +14,18 @@ const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const aiClientTaskReadRequestSchema = z.object({ creationKey: id.max(128), materialRef: z.string().uuid() }).strict();
 export const AI_CLIENT_MATERIAL_RECEIPT_VERSION = 'ain-client-material-receipt-1' as const;
 export const aiClientOrderMaterialRequestSchema = z.object({ operationKey: id.max(128), orderId: id }).strict();
+/** Original material and Task creation selectors, never caller-supplied scope,
+ * run, scene or permission. Navigation retains current independent read access. */
+export const aiClientOrderActionSourceSchema = z.object({ material: aiClientOrderMaterialRequestSchema,
+  task: aiClientTaskReadRequestSchema }).strict();
+export const aiClientOrderActionSchema = aiEntryActionSchema.refine(
+  (value): value is AiEntryActionDraft & { actionCode: 'OPEN_ORDER' } => value.actionCode === 'OPEN_ORDER');
+export const aiClientOrderActionRevalidationSchema = aiClientOrderActionSourceSchema.extend({ action: aiClientOrderActionSchema }).strict()
+  .refine(value => value.action.resource.id === value.material.orderId
+    && value.action.associations.materialRef === value.task.materialRef);
+export type AiClientOrderActionSource = z.infer<typeof aiClientOrderActionSourceSchema>;
+export type AiClientOrderAction = z.infer<typeof aiClientOrderActionSchema>;
+export type AiClientOrderActionRevalidation = z.infer<typeof aiClientOrderActionRevalidationSchema>;
 export const aiClientOrderMaterialReceiptSchema = z.object({ contractVersion: z.literal(AI_CLIENT_MATERIAL_RECEIPT_VERSION),
   operationKey: id.max(128), state: z.enum(['observed', 'unknown']), materialRef: z.string().uuid().nullable(),
   materialHash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(), expiresAt: z.string().datetime({ offset: true }).nullable(),
@@ -192,7 +204,8 @@ export const aiClientHostCapabilitiesSchema = z.object({
     || Date.parse(value.expiresAt) <= Date.parse(value.observedAt)
     || new Set(actions).size !== actions.length
     || value.enabled !== (actions.length > 0 || value.capabilities.bookingReceiptRead)
-    || (!value.policy.allowCreate && (actions.length > 0 || value.capabilities.bookingDrafts || value.capabilities.savedDeliveryAddresses))
+    || (!value.policy.allowCreate && (actions.some(action => action !== 'OPEN_ORDER')
+      || value.capabilities.bookingDrafts || value.capabilities.savedDeliveryAddresses))
     || value.capabilities.bookingDrafts !== (actions.includes('CREATE_BOOKING_DRAFT') && actions.includes('OPEN_BOOKING'))
     || (value.capabilities.savedDeliveryAddresses && !value.capabilities.bookingDrafts)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent client host capabilities' });

@@ -88,6 +88,10 @@ const clientSourcePacket = { state: literal('saved'), operationKey: id, inputHas
   model: literal('unavailable_client_execution_contract_missing'), automaticExecution: literal(false) };
 
 export const AI_CLIENT_ENTRY_HTTP_SCHEMAS = {
+  AiClientOrderActionSource: object({ material: ref('AiClientOrderMaterialRequest'), task: ref('AiClientTaskReadRequest') }),
+  AiClientOrderActionDraft: { allOf: [ref('AiEntryActionDraft'), { type: 'object', properties: { actionCode: literal('OPEN_ORDER') } }] },
+  AiClientOrderActionRevalidation: object({ material: ref('AiClientOrderMaterialRequest'), task: ref('AiClientTaskReadRequest'),
+    action: ref('AiClientOrderActionDraft') }),
   // Keep the nested input on the original CLIENT-01 DTO, not an AI quote DSL.
   AiClientQuotePreparationRequest: object({ operationKey: { ...id, maxLength: 128 }, input: ref('ClientQuoteRequest') }),
   AiClientQuoteConfirmationRequest: object({ materialRef: uuid, expectedMaterialHash: hash }),

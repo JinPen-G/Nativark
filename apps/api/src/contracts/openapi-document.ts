@@ -2447,6 +2447,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
     .flatMap((base, surface) => ([
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderTaskHostCapabilities, 'AiClientOrderActionSource', 'AiClientHostCapabilities'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderAction, 'AiClientOrderActionSource', 'AiClientOrderActionDraft'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.revalidateOrderAction, 'AiClientOrderActionRevalidation', 'AiClientOrderActionDraft'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt, 'AiClientOrderMaterialRequest', 'AiClientOrderMaterialReceipt'],
       [AI_CLIENT_ENTRY_HTTP_DRAFT.createTask, 'AiClientTaskReadRequest', 'AiClientTaskCreationReceipt'],

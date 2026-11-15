@@ -29,6 +29,7 @@ const exportsAllowed = Object.freeze([
   'AI_TASK_DRAFT_VERSION', 'AI_TASK_INPUT_DRAFT_VERSION', 'AI_TASK_INPUT_FIELD_IDS_DRAFT',
   'isAiTaskInputContractDraft', 'isAiTaskInputSubmissionDraft',
   'aiClientOrderMaterialRequestSchema', 'aiClientOrderMaterialReceiptSchema',
+  'aiClientOrderActionSourceSchema', 'aiClientOrderActionSchema', 'aiClientOrderActionRevalidationSchema',
   'aiClientTaskReadRequestSchema', 'aiClientTaskCreationReceiptSchema',
   'aiClientTaskEventsReadRequestSchema', 'aiClientTaskSnapshotReadResponseSchema', 'aiClientTaskEventsReadResponseSchema',
   'aiClientTaskModelControlResponseSchema', 'aiClientTaskModelResultReadResponseSchema',

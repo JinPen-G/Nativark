@@ -8,6 +8,10 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
    * publication, persisted scene policy and every original business guard. */
   authenticatedWechatBasePath: 'client/v1/ai-native/wechat-entry',
   readHostCapabilities: 'host-capabilities/read',
+  /** Current read-only navigation of the same original order Task; none of
+   * these observations creates a Task, renews execution or enters a model budget. */
+  readOrderTaskHostCapabilities: 'orders/task-host/read',
+  readOrderAction: 'orders/action/read', revalidateOrderAction: 'orders/action/revalidate',
   /** Owned order facts -> immutable material -> metadata task only. */
   prepareOrderMaterial: 'orders/material/prepare', readOrderMaterialReceipt: 'orders/material/receipt',
   createTask: 'tasks/create', readTaskCreation: 'tasks/creation/read',

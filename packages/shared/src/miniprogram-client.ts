@@ -15,6 +15,7 @@ export { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_FIELD_IDS_DRAFT,
   isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft } from './ai-task-input-draft';
 export { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema,
   aiClientHostCapabilitiesSchema, aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema,
+  aiClientOrderActionSourceSchema, aiClientOrderActionSchema, aiClientOrderActionRevalidationSchema,
   aiClientTaskReadRequestSchema, aiClientTaskCreationReceiptSchema,
   aiClientTaskEventsReadRequestSchema, aiClientTaskSnapshotReadResponseSchema, aiClientTaskEventsReadResponseSchema,
   aiClientTaskModelControlResponseSchema, aiClientTaskModelResultReadResponseSchema,

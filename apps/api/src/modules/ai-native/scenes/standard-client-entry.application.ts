@@ -1,7 +1,7 @@
 import { Controller, Inject } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_CLIENT_ENTRY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiClientEntryError } from './client-entry-action';
@@ -15,6 +15,8 @@ import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.rep
 import { composeClientOriginalBookingHttp } from './client-original-booking-http.composition';
 import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import type { ClientRequestContext } from '../../client/client-auth.service';
+import { originalClientMaterialScope } from './prisma-client-scene-material.repository';
+import { PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 
 export const AI_WEBSITE_ENTRY = Symbol('AI_WEBSITE_ENTRY');
 export const AI_WECHAT_ENTRY = Symbol('AI_WECHAT_ENTRY');
@@ -129,10 +131,24 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
       // An order explanation must not borrow a quote-scene publication. Task
       // controls remain bound to the explicitly assembled original scene.
       const orderScene = name === 'readOrderExplanation' || originalScene === 'order_explanation';
-      const sceneCode = orderScene ? 'order_explanation' : input.tasks!.sceneCode;
-      const sceneVersion = orderScene ? '1' : input.tasks!.sceneVersion;
+      const navigation = name === 'readOrderTaskHostCapabilities' || name === 'readOrderAction' || name === 'revalidateOrderAction';
+      const navigationCommand = !navigation ? undefined : name === 'revalidateOrderAction'
+        ? aiClientOrderActionRevalidationSchema.parse(args[0]) : aiClientOrderActionSourceSchema.parse(args[0]);
+      const navigationSource = navigationCommand && { material: navigationCommand.material, task: navigationCommand.task };
+      let navigationOrigin: { hash: string; sceneCode: string; sceneVersion: string } | undefined;
+      let sceneCode = orderScene ? 'order_explanation' : input.tasks!.sceneCode;
+      let sceneVersion = orderScene ? '1' : input.tasks!.sceneVersion;
       const select = async () => {
         const identity = structuredClone(await session.current());
+        if (navigationSource) {
+          const original = await new PrismaClientTaskInputRepository(input.tasks!.db)
+            .readOrderNavigationSource(originalClientMaterialScope(identity, channel), navigationSource);
+          check();
+          const current = { hash: requestFingerprint(original), sceneCode: original.sceneCode, sceneVersion: original.sceneVersion };
+          if (navigationOrigin && requestFingerprint(current) !== requestFingerprint(navigationOrigin))
+            throw new AiClientEntryError('AI_ACCESS_DENIED', 'order_navigation_original_changed');
+          navigationOrigin = current; sceneCode = current.sceneCode; sceneVersion = current.sceneVersion;
+        }
         const selected = await readStandardClientEntryPublication(input.db, identity, channel, { sceneCode, sceneVersion }, clock(),
           name === 'prepare' || name === 'createTask' || name === 'prepareGoal');
         return { identity, ...selected };
@@ -163,6 +179,8 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
     || !['web', 'wechat_miniprogram'].includes(channel)) return unavailable();
   return {
     readOrderHostCapabilities: bind('readHostCapabilities', 'order_explanation'),
+    readOrderTaskHostCapabilities: bind('readOrderTaskHostCapabilities'),
+    readOrderAction: bind('readOrderAction'), revalidateOrderAction: bind('revalidateOrderAction'),
     readHostCapabilities: bind('readHostCapabilities'), issueAction: bind('issueAction'),
     prepare: bind('prepare'), readOrderMaterialReceipt: bind('readOrderMaterialReceipt'),
     prepareGoal: bind('prepareGoal'), readGoalPreparation: bind('readGoalPreparation'), readGoalCandidates: bind('readGoalCandidates'),

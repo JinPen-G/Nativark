@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
   aiClientOrderMaterialRequestSchema, aiClientOrderMaterialReceiptSchema, AI_CLIENT_MATERIAL_RECEIPT_VERSION,
+  aiClientOrderActionSourceSchema, aiClientOrderActionRevalidationSchema, type AiClientOrderActionSource,
   aiClientTaskAccountingRequestSchema, aiClientTaskAccountingResponseSchema,
   AI_TASK_DRAFT_VERSION, aiClientTaskModelResultReadResponseSchema, AI_BOOKING_ACCEPTANCE_READ_VERSION,
   aiBookingAcceptanceReadRequestSchema } from '@rental-os/shared';
@@ -17,7 +18,7 @@ import { composeAiClientScenes, createAiGuardedClientSession } from '../client-s
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
-import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClientMaterialDb,
+import { PrismaClientSceneMaterialRepository, AiClientMaterialError, originalClientMaterialScope, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { AiClientPolicyAuthority, AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -48,7 +49,7 @@ type PersistedClientModelServerDependencies = Omit<Parameters<typeof composeClie
     gateway: (ClientPersistedCallGatewayDependencies | ClientPersistedGatewayDependencies) & { secrets: SecretBox };
     runtime?: never; priceVersion?: never; financialEvidence?: never;
   };
-import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
+import { AiClientTaskUnknownError, clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation, readClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
 import { PrismaClientBookingRepository } from './prisma-client-booking.repository';
@@ -215,9 +216,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const scopeOf = (bound: Bound): AiClientMaterialScope => {
     const identity = bound.identity;
     if (!identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
-    return { ...bound.published.scope, channel: server.channel, principalKind: identity.customerType,
-      principalHash: requestFingerprint({ ...bound.published.scope, channel: server.channel, appId: server.appId ?? null,
-        customerId: identity.customerId, customerType: identity.customerType, sessionId: identity.sessionId }) };
+    return originalClientMaterialScope(identity, server.channel, server.appId);
   };
   const materialHash = (command: Command, value: unknown) => {
     if (command.kind === 'cancellation_preview' && value && typeof value === 'object' && 'calculatedAt' in value) {
@@ -361,22 +360,22 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     return { policyFingerprint: requestFingerprint({ policyHash: grant.policyHash ?? requestFingerprint(grant.policy),
       release: server.entry }), expiresAt: grant.policy.expiresAt };
   };
-  const verifyEntryMaterial = async (bound: Bound, row: AiClientSceneMaterial) => {
+  const verifyEntryMaterial = async (bound: Bound, row: AiClientSceneMaterial, operation: 'create' | 'read' = 'create') => {
     const key = `entry-invalid:${row.id}`, scope = scopeOf(bound);
-    if (await repository.findOperation(scope, key)) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
+    if (operation !== 'read' && await repository.findOperation(scope, key)) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
     try {
-      const command = await verify(bound, row), grant = await entryGrant(bound, row);
+      const command = await verify(bound, row), grant = await entryGrant(bound, row, operation);
       await verify(bound, row);
-      const latest = await entryGrant(bound, row);
+      const latest = await entryGrant(bound, row, operation);
       if (latest.policyFingerprint !== grant.policyFingerprint) throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
-      if (await repository.findOperation(scope, key)) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
+      if (operation !== 'read' && await repository.findOperation(scope, key)) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
       if (row.expiresAt <= clock() || grant.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_expired', 'reprepare');
       return { command, grant };
     } catch (error) {
       const code = error instanceof Error && 'code' in error ? error.code : null;
       const status = error instanceof Error && 'getStatus' in error && typeof error.getStatus === 'function' ? error.getStatus() : null;
-      if (code === 'AI_PROPOSAL_STALE' || code === 'AI_ACCESS_DENIED' || code === 'AI_RESOURCE_UNAVAILABLE' || [401, 403, 404].includes(status)
-        || (error instanceof Error && ['AI_CLIENT_MATERIAL_STALE', 'AI_CLIENT_CONTEXT_UNAVAILABLE'].includes(error.message))) {
+      if (operation !== 'read' && (code === 'AI_PROPOSAL_STALE' || code === 'AI_ACCESS_DENIED' || code === 'AI_RESOURCE_UNAVAILABLE' || [401, 403, 404].includes(status)
+        || (error instanceof Error && ['AI_CLIENT_MATERIAL_STALE', 'AI_CLIENT_CONTEXT_UNAVAILABLE'].includes(error.message)))) {
         const command = { kind: 'entry_invalid', materialRef: row.id }, material = { reason: 'current_basis_invalid' }, createdAt = clock();
         await repository.save({ ...row, id: randomUUID(), operationKey: key, command, material,
           inputHash: requestFingerprint(command), materialHash: requestFingerprint(material), createdAt,
@@ -388,9 +387,49 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const orderAction = async (bound: Bound, materialRef: string) => {
     const row = await repository.findSource(scopeOf(bound), materialRef);
     if (!row) throw new AiClientEntryError('AI_ACCESS_DENIED', 'material_unavailable');
-    const { command, grant } = await verifyEntryMaterial(bound, row);
+    // OPEN_ORDER is current read-only navigation, independent of create or
+    // model budgets. A failed observation must not write an invalidation marker.
+    const { command, grant } = await verifyEntryMaterial(bound, row, 'read');
     if (command.kind !== 'order') throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'action_not_assembled');
     return materialEntryAction(row, requireEntry(), grant.policyFingerprint, grant.expiresAt, command.orderId, 'OPEN_ORDER');
+  };
+  const withOrderNavigationSource = async <T>(request: AiClientApplicationRequest, value: AiClientOrderActionSource,
+    work: (bound: Bound, row: AiClientSceneMaterial, grant: Awaited<ReturnType<AiClientPolicyAuthority['authorize']>>) => Promise<T>,
+    signal?: AbortSignal) => {
+    const command = aiClientOrderActionSourceSchema.parse(structuredClone(value));
+    if (!taskDependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return withBinding(structuredClone(request), true, 'order', async bound => {
+      if (!bound.identity || bound.identity.customerType !== 'personal') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const scope = scopeOf(bound), inputs = new PrismaClientTaskInputRepository(taskDependencies.db);
+      const before = await inputs.readOrderNavigationSource(scope, command);
+      if (before.sceneCode !== taskDependencies.sceneCode || before.sceneVersion !== taskDependencies.sceneVersion)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const row = await repository.findSource(scope, command.task.materialRef), original = { kind: 'order' as const, orderId: command.material.orderId };
+      if (!row || row.operationKey !== command.material.operationKey || row.inputHash !== requestFingerprint(original)
+        || jsonHash(row.command) !== jsonHash(original)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+      const subject = { ...scope, identity: structuredClone(bound.identity) }, grant = await policy.authorize(subject, 'read');
+      const load = async (ref: string) => {
+        if (ref !== row.id) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await verify(bound, row, true); await bound.assertCurrent();
+        return { row, identity: structuredClone(bound.identity!) };
+      };
+      const tasks = composeClientMaterialTasks(taskDependencies, load, clock), created = await tasks.readCreation(command.task);
+      if (created.state !== 'observed' || !created.task || created.inputRef !== before.id || created.inputHash !== before.inputHash)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // Navigation checks current order facts, not the frozen model text. It
+      // cannot refresh an old Action or be used to approve another request.
+      await verifyEntryMaterial(bound, row, 'read');
+      const result = await work(bound, row, grant);
+      const after = await inputs.readOrderNavigationSource(scopeOf(bound), command);
+      const latestTask = await tasks.readCreation(command.task);
+      if (requestFingerprint(after) !== requestFingerprint(before) || latestTask.state !== 'observed' || !latestTask.task
+        || latestTask.task.taskId !== created.task.taskId || latestTask.task.runId !== created.task.runId
+        || latestTask.inputRef !== created.inputRef || latestTask.inputHash !== created.inputHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      assertReadPolicyUnchanged(grant, await policy.authorize(subject, 'read'));
+      await verifyEntryMaterial(bound, row, 'read'); await bound.assertCurrent();
+      return freezeOriginalInput(result);
+    }, signal);
   };
   const bookingRepository = new PrismaClientBookingRepository(dependencies.db, clock);
   const transferHost = (bound: Bound) => {
@@ -1527,6 +1566,33 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return materialEntryAction(material.row, requireEntry(), material.policyFingerprint, material.policyExpiresAt,
           material.material.selection.quoteId, 'CREATE_BOOKING_DRAFT');
       });
+    },
+    async readOrderTaskHostCapabilities(request: AiClientApplicationRequest, value: AiClientOrderActionSource, signal?: AbortSignal) {
+      return withOrderNavigationSource(request, value, async (bound, row, grant) => {
+        const identity = bound.identity!, observedAt = clock();
+        return aiClientHostCapabilitiesSchema.parse({ contractVersion: AI_CLIENT_HOST_CAPABILITIES_VERSION,
+          enabled: true, audience: 'customer', surface: requireEntry(), channel: server.channel,
+          customerId: identity.customerId, customerType: identity.customerType, tenantCode: server.tenantCode,
+          serviceCode: server.serviceCode, scope: { kind: 'workspace', tenantId: identity.tenantId, workspaceId: identity.workspaceId },
+          // This host offers read navigation only, even if the current policy
+          // separately permits creation. No model/execution claim escapes it.
+          policy: { revision: grant.policy.revision, allowRead: true, allowCreate: false },
+          releaseRevision: server.entry!.releaseRevision, observedAt: observedAt.toISOString(),
+          expiresAt: new Date(Math.min(observedAt.getTime() + lifetimeMs, row.expiresAt.getTime(), grant.policy.expiresAt.getTime())).toISOString(),
+          capabilities: { entryActions: ['OPEN_ORDER'], bookingDrafts: false, savedDeliveryAddresses: false, bookingReceiptRead: false },
+          authorization: 'observation_only_recheck_each_action' });
+      }, signal);
+    },
+    async readOrderAction(request: AiClientApplicationRequest, value: AiClientOrderActionSource, signal?: AbortSignal) {
+      return withOrderNavigationSource(request, value, (bound, row) => orderAction(bound, row.id), signal);
+    },
+    async revalidateOrderAction(request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) {
+      const { action, ...source } = aiClientOrderActionRevalidationSchema.parse(structuredClone(value));
+      return withOrderNavigationSource(request, source, async (bound, row) => {
+        const expected = await orderAction(bound, row.id);
+        assertEntryAction(action, expected, clock());
+        return expected;
+      }, signal);
     },
     async readAction(request: AiClientApplicationRequest, value: unknown) {
       requireEntry();

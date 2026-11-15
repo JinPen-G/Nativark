@@ -13,6 +13,9 @@ export declare const clientGoalSelectedInput: typeof Runtime.clientGoalSelectedI
 export declare const clientGoalTimeOptions: typeof Runtime.clientGoalTimeOptions;
 export declare const clientGoalTextHash: typeof Runtime.clientGoalTextHash;
 export declare const AI_CLIENT_ENTRY_HTTP_DRAFT: typeof Runtime.AI_CLIENT_ENTRY_HTTP_DRAFT;
+export declare const aiClientOrderActionSourceSchema: typeof Runtime.aiClientOrderActionSourceSchema;
+export declare const aiClientOrderActionSchema: typeof Runtime.aiClientOrderActionSchema;
+export declare const aiClientOrderActionRevalidationSchema: typeof Runtime.aiClientOrderActionRevalidationSchema;
 export declare const AI_CLIENT_PUBLIC_HTTP: typeof Runtime.AI_CLIENT_PUBLIC_HTTP;
 export declare const aiClientPublicSessionRequestSchema: typeof Runtime.aiClientPublicSessionRequestSchema;
 export declare const aiClientPublicReadRequestSchema: typeof Runtime.aiClientPublicReadRequestSchema;

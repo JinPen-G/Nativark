@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry02-original-order-navigation-public-stage-20261115"></a>
+## ENTRY-02 本人原订单Task的只读导航公共装配（2026-11-15）
+
+前置`2da71f794d151a4616fe455d33958907204301b8`已提交并与GitHub实际分支回读一致。原`readAction`／`consumeOrderAction`只在私有组合存在，`OPEN_ORDER`又借用新建／模型预算准入，停用创建可能错误拒绝原订单导航并写失效标记。本阶段仅固定十二个公共接点；客户两端消费者由dev1继续完成、员工缓存由dev2继续修复，均不夹进本阶段提交。
+
+公共[HTTP合同](../../packages/shared/src/ai-entry-http-draft.ts)及[闭合schema](../../packages/shared/src/ai-client-entry-draft-schemas.ts)新增`orders/task-host/read`、`orders/action/read`、`orders/action/revalidate`，输入仅接受原`material:{operationKey,orderId}`和`task:{materialRef,creationKey}`，最终核对另带原Action；不接受caller Task／Run／scene／身份／权限。六个客户认证路由由[原Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)／[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)装配，原始body闭合校验、no-store及15000ms有界等待保持。正式shared及客户小程序窄runtime／声明导出同一schema，未新增私有同名协议。
+
+[标准宿主](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)从当前Auth身份和原存储input定位真实`quote_clarification`或`order_explanation`及其版本，贯穿发布前后双读；[原input仓储](../../apps/api/src/modules/ai-native/scenes/prisma-client-task-input.repository.ts)核原创建键、materialRef、order输入hash和全文，scope采用与原[材料仓储](../../apps/api/src/modules/ai-native/scenes/prisma-client-scene-material.repository.ts)相同的身份派生算法。[request-bound组合](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)进一步核材料操作／当前本人订单事实、原Task创建收据、inputRef／hash、当前read政策及前后Task／input／发布绑定。该host仅返回`OPEN_ORDER`、`allowCreate:false`；不装配模型、不创建或续权，不暴露任意导航／支付行为。读取失败不写`entry-invalid`，已存在的新建失效标记不代替当前独立read判定；Booking创建／确认门禁仍走原create路径。Action必须与服务端当次推导结果全文一致，过期、错版本／surface／scope／引用或撤权拒绝，不能读取时重新签旧Action。
+
+Root必要模拟均为`node --no-compilation-cache -`、本树原offline preload、不可达DATABASE_URL、纯内存Prisma／微信宿主替身。实际原`composeClientMaterialTasks.create`产生Task／首Run及原input，再沿正式`AI_NATIVE_CLIENT_ENTRY_PROVIDERS`／停用model配置→ClientAuth／Guard→两端Controller→standard／原仓储／当前政策读回与最终复核：二渠道×两原场景正常路径、关闭create／execute／model预算仍能读，以及伪造Task／scene／创建键／材料操作／订单、撤read／当前owner、原事实变更／到期、错Action surface／版本、await撤权／原input变化、旧create失效标记及闭合host限制共19场景通过；六OpenAPI路由同时登记，共20项必要检查。stdin SHA-256`f917accf97819ef499e4fceb35df23c9adfe953f62e638369626b60e30f5f18c`退出0；导航阶段新增Task／Run／model／ledger／材料写入均0，未证明真实MySQL或供应商行为。
+
+TypeScript5.9.3，API四根／2035源零诊断，stdin`b0faee011d8f1a8dca1e39166c1dd128f6c68264ef6a32d9a9237951dee73e6a`退出0；[原窄runtime构建](../../scripts/miniprogram-ai-runtime.cjs)在内存生成157355字节、79出口，产物SHA-256`d6bd2f4dc2281cc2a2d76fd2c29b8c3bf336acb00f513ae807bbe968507be6eb`，无浏览器／Node全局宿主、三新出口和未知caller scene拒绝通过，命令`086ca36359885db14998f02d8a17f5f6b3dec3c94df2a6935914d9715f416598`退出0。原Guard、当前客户身份和schema为真实源码，数据库／业务数据、clock和宿主为明确合成夹具，不把模拟存储事实作为生产授权。
+
+失败保留：初次原创建receipt组缺夹具`aiTaskExecutionCharge`／`aiTaskRunPlan`关系数组，仓储无法观察原Task而正确拒绝；补齐夹具关系后原断言通过，不放宽生产准入。诊断打印BigInt及边界组在同步assert回调中await分别导致驱动失败，仅修内存驱动后复验。此前初始API类型和真实标准组合／19边界也通过，正式provider组是本阶段最终依据，不用重复绿色组计分。原模拟命令保留在本会话工具日志，源码以本阶段提交及Git blob固定：request-bound`21069d871cde2599bd00a03e241850acfa0c4fae`、standard`c008dd75a7c02494175f9843ccd12165549a6e49`、input仓储`ad22b90079d24f5de40701d5b3f351c4f1ff7118`，不另复制环境或脚本。所有本阶段验证进程退出、audit为空，`output/.tmp/ain-entry02-order-navigation-20261115`未创建，无新增临时文件／依赖／构建副本。
+
+本阶段仅公共原订单导航，ENTRY-02仍75%；两端实际消费者尚未由Root核接，原其他六Action及多audience完整注册也未核闭，不能把这一个Action切片判全文100%。`node scripts/validate-docs.cjs`检查11/11文档，退出1，仅原四处既有缺链：导航54行历史附件三处、界面规范272行稀疏示例一处；无新增链接或任务算术错误，不造附件补绿。当前AIN／ENTRY正式进度不变，后继先独立核接dev1固定双端消费与dev2原键恢复，再按原全文及依赖更新唯一任务册；main按PM的固定来源串行整合。本片由Root自检，未声称独立QA或真实环境验收通过。
+
 <a id="ain-entry15-order-view-original-task-entry-20261115"></a>
 ## ENTRY-15 原订单查看页的明确原Task入口与执行门禁分离（2026-11-15）
 
