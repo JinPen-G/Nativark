@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-original-mcp-audit-20261115"></a>
+
+## 公共指纹抽离后的原MCP审计定向复验（2026-11-15）
+
+固定任务源码 `99267bf4f572e29e14c0924f35cb9132cd0ef868` 已普通推送并真实回读，main仍62ca且在本树祖先；工作区/索引干净，无合并/拣选。上一阶段已补齐当前API类型，本片补 [开工阶段](#core-contract-first-20261114) 曾被自动审批拒绝的原MCP审计定向运行，不修改产品、测试、Auth/Guard或主装配，也不扩展为MCP专项验收。
+
+`node --no-compilation-cache -` 从stdin在本树唯一 `output/.tmp/pch-fingerprint` 准备audit及缓存，子进程实际执行原 `node --no-compilation-cache --test tests/mcp-original-audit.test.cjs`，退出0，3用例通过、fail/cancelled/skipped/todo均0。测试源码SHA-256为 `3d624247d66b391b8549efb84e3bd14b6e7fdea3683005f96ddd69c7ad7948d6`，原断言未改。使用原 [MCP身份夹具](../../../tests/fixtures/mcp/original-identity.cjs) 的工具链/输出目录参数，只读受管依赖；原 [离线preload](../../../tests/fixtures/ai-native/prisma-offline-preload.cjs)、无业务连接DSN及TEMP/TMP/写缓存均限制在本任务目录，守卫违规0。
+
+实际 [OperationLogService](../../../apps/api/src/common/operation-log.service.ts) 与 [原OAuth审计回调](../../../apps/api/src/modules/auth/original-mcp-oauth-audit.ts) 的原scope/事件引用、可变Web ALS隔离、非法字段/accessor拒绝、原生写入失败、缺审计收据以及原grant/consent关联核对均通过。夹具采用明确的Prisma读写和Nest适配替身，不证明真实事务持久化、OAuth端到端、HTTP、业务工具授权或完整MCP可用；公共指纹自身的新旧22例仍沿开工阶段证据引用。
+
+本任务编译、夹具和缓存在finally核绝对路径、归属与无链接后全部删除，核任务目录不存在、临时根为空，父命令退出0。没有新增测试脚本、依赖安装、服务、Prisma生成或真实数据库/模型/供应商调用。原运行拒绝历史保留，本片将这一指定用例的当前离线运行缺口补齐，不由三个用例宣布全功能正常或提升原PCH门槛。
+
+仅维护本记录与接续，4份文档579个链接/154个锚点/49个表格、旧阶段全文及正式需求/任务保全核对退出0，差异格式退出0；中文提交普通推送任务分支并回读远端，记录版本由包含本节的Git提交定位。主公共身份/租户/装配、真实无Core登录/设置、Rental兼容、双Core持久化和独立接手仍按原公共窗口继续交付。
+
 <a id="core-api-types-current-schema-20261115"></a>
 
 ## 当前schema与服务端接入适配的完整类型核对（2026-11-15）
