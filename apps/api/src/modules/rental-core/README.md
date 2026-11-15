@@ -2,7 +2,7 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
-领域合同、品类标识、营业日、计价策略与器材富化已实际移入[独立Rental包](../../../../../packages/rental-core/README.md)，原shared/API路径转接同一实现。本目录继续承接尚未迁出的服务、事务、数据和任务；独立包尚不是完整可安装Core，不能仅移除本目录就运行原租赁业务。
+领域与品类治理合同、营业日、计价与器材、能力执行/条件判定及审计仓储已单源移入 Rental 包。原 shared/API 路径和 Nest provider 继续转接同一实现，本目录承接剩余业务服务、事务、数据和任务。[独立 Rental 包](../../../../../packages/rental-core/README.md)
 
 [RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。[RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)
 
@@ -10,7 +10,7 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 品类解析经[RentalCategoryResolver](rental-category-resolver.service.ts)、[能力Hook](capability-hook.runtime.ts)和[空间能力](workspace-capability.service.ts)。品类内部扩展与注册新的CRM/工单Core各有独立合同；原未完动态采用和业务闭环按其四册继续验收。[Rental当前入口](../../../../../docs/Rental%20Core/Rental%20Core-协作接续.md) · [品类治理](../../../../../docs/Rental%20Core/品类治理/品类治理-协作接续.md)
 
-5个原能力实现已移入Rental包的 `/capabilities/<模块名>` 正式出口，本目录原路径转接。[登记器](capability-hook.registrar.ts)仍是原执行器的唯一组合点，保留当前和历史兼容版本；运行时、实例读取和审计不随工厂迁移被省略。
+能力执行器消费当前空间实例 reader 和审计 writer，原 provider 将原 `WorkspaceCapabilityService`、审计仓储及调用方 Prisma 事务交给 Rental 实现。启动登记器调用 `/capabilities` 的唯一组合，保留当前及历史实现。放行审计随业务事务提交，报价阻止后的拒绝留痕沿原业务调用者执行。[执行器 provider](capability-hook.runtime.ts) · [审计 provider](capability-hook.repository.ts) · [登记器](capability-hook.registrar.ts)
 
 AI/企业/客户端消费者通过原正式业务接口读取事实和执行动作，文件ACL、金额、批准、原收据与恢复仍按原链核对。原到期[调度器](rental-due-job.scheduler.ts)和回调不得因为Core停用而丢弃已提交业务的受权收尾。[原业务接口资料](../../contracts/openapi-document.ts) · [AI组合](../ai-native/ai-native-application.providers.ts)
 

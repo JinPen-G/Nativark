@@ -2,7 +2,7 @@
 
 建立日期：2026-10-31。
 
-> 本册记录阶段成果、缺口和证据。负责人已授权开始拆分，当前为 PCH-01/02 的依赖核定、独立清单合同与兼容抽取阶段；百分比只见[开发任务](平台Core接入-开发任务.md)。最新写入范围和下一入口见[协作接续](平台Core接入-协作接续.md)。
+> 本册记录 PCH-01～12 拆分阶段的成果、缺口和证据。研发进度由原任务门槛核收，当前写入范围和下一入口由协作接续维护。[开发任务](平台Core接入-开发任务.md) · [协作接续](平台Core接入-协作接续.md)
 
 ## 1. 依据与来源
 
@@ -10,6 +10,33 @@
 - [接口与生命周期设计](平台Core接入-开发任务.md#contract-design)、[接入指南](平台Core接入-开发任务.md#integration-guide)：随本次需求澄清更新，仍为实施准备，非已发布SDK/API。
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
+
+<a id="core-rental-capability-runtime-20261116"></a>
+
+## Rental 能力执行、条件依据与审计端口迁移（2026-11-16）
+
+固定父版本 `a540c4d322863fb90c4d2acbb452b6d4a9432964` 已在任务远端。当天实际回读 main 为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，任务分支已包含该基线，工作树及暂存区归属核对完成。本片承接父版尚未提交的执行器工作，源码旧原文由固定 Git 保存。
+
+Rental 包实际承接能力执行器、条件快照、品类治理合同与审计仓储。实例读取和审计写入分别通过窄端口供给，`evaluate` 转交原调用方事务。原 API 的 Nest provider 从原服务和同一数据源提供实例读取及本表读写方法，AppModule 继续只登记一个执行者。内置组合移入 `/capabilities`，显式登记 5 个模块及摄影旧交接版本，共 6 个执行版本。[Rental 导读](../../../packages/rental-core/README.md) · [原业务消费者](../../../apps/api/src/modules/rental-core/README.md)
+
+原请求指纹移入公共正式子出口，API 原路径转接同一函数。指纹、品类治理合同和条件规则除导入外逐项 AST 对照一致，执行器 14 个方法及审计仓储 3 个方法的可执行逻辑与父版一致。审计类原注释将全部写入描述为事务内写入，已按实际 `recordOutcome` 与 `recordRejection` 两条路径修正说明。[公共指纹](../../../packages/platform-contracts/src/request-fingerprint.ts) · [审计源码](../../../packages/rental-core/src/capability-audit.ts)
+
+| 必要验证 | 实际结果 |
+| --- | --- |
+| 正式 tsconfig 与本版 JS/声明的内存编译 | TS 5.9.3 下，公共合同 5 根/199 源/10 输出，Rental 17 根/562 源/34 输出，shared 122 根/339 源/245 输出，均 0 诊断。Core 合同/宿主、公共服务/宿主、工单及 MCP 声明闭包一并通过 |
+| 当前 schema 与完整 API | 锁定 Prisma 5.22 官方 WASM 校验当前 238 个模型，官方 generator 在内存生成声明。完整原 API 988 根/2257 源/1976 输出，0 诊断，全部输出留内存 |
+| 原执行器和条件用例 | `node --no-compilation-cache -` 在内存提供本版实际编译 JS，执行原两份用例原文。能力执行器全部原断言通过，条件套件 10 pass/0 fail/skip/todo/cancelled，覆盖历史版本、缺实例/实现拒绝、条件真/假/缺证据、冻结商品与报价提交点复验 |
+| 审计与内置登记 | 本版实际仓储与父版编译仓储的三种读写行为一致，放行仅使用调用方事务，拒绝追加和历史读取保持原数据源及字段投影。事务 writer 失败向原调用者抛出，6 个内置版本登记通过，重复登记拒绝 |
+
+内存编译首次缺根依赖目录映射和 shared composite 配置，修正验证宿主后完成上述真实配置检查。官方声明首次超出 stdout 缓冲，改为内存压缩传输。原用例装配首次受字符串替换及 Prisma 测试命名空间缺项阻止，修正传输并从当前官方 schema/原 runtime 供给枚举、Decimal 与 SQL 类型后通过，原测试和断言原文保留。最后宿主窄端口复验触及工具时间上限并重置内存会话，改用可观察的 stdin Node 进程后，十项配置及两份原用例均退出0。Prisma 实例化、网络、环境文件读取及磁盘写入由本次行为验证拒绝，存储/事务仍为明确 fixture。
+
+完整 API 检查同时定位 MCP 的 Node10 声明入口缺失，100 处原 API 消费为类型导入。补齐与原 `exports` 对应的 `typesVersions` 和根声明，MCP 59 根/468 源/118 输出及完整 API 通过，原运行时出口沿用同一构建文件。公共/Rental/MCP 模块导读、原业务入口与根 README 同片更新。
+
+9份定向文档的1117个本地链接/243个锚点完成检查，新问题0，正式需求/任务原文与锁文件一致。完整定向检查退出1，MCP原导读仍有5个父版已存在的缺失附件，位于 `output/mcp-isolated-mysql-ypJWY6/receipt.json`、`mcp-isolated-mysql-gOX5jK/receipt.json`、`mcp-isolated-mysql-6eTqCq/receipt.json`、`mcp-isolated-mysql-G1SlwT/receipt.json` 及其 `store-build/scope.json`，材料去向由原MCP记录核明。本树直接运行 `node scripts/validate-docs.cjs` 退出1，17个问题中14个为稀疏未检出目标，按固定Git定位后剩总导航3份既有历史附件缺失。原检查器、引用和失败保持，`git diff --check` 退出0。
+
+2026-11-16 再次核定旧临时环境的绝对路径、归属、840 文件/91,808,304 字节及无链接/任务进程后，用原生 PowerShell 删除仍在启动前被自动审批拒绝，原因 `blocked by policy`。原统一待清理 manifest 更新最近尝试，环境仍在原归集位置。本次其余验证均在 stdin/内存完成。
+
+本片沿原 G1～G4 复核任务，Rental 完整注册/授权映射、持久业务/数据/页面/作业/AI装配与兼容更新仍缺，任务尚未跨下一档。真实标准包安装、HTTP/DB/浏览器、迁移、独立更新/回退、独立接手和审查继续待验。下一入口为 Rental 品类解析/当前实例与持久业务的正式接点，同时补完整公共组织/订阅/集成。旧外观静态用例失败及总导航三份历史附件保持原归属。
 
 <a id="core-rental-capability-modules-20261115"></a>
 

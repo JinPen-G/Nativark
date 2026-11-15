@@ -2,6 +2,8 @@
 
 此包提供受保护的Web-standard `fetch(Request)`入口及受控只读工具注册，不启动监听器、不读取环境，尚未注册到原API HTTP / Nest入口。只有真实资源验证、原权限、持久计量、发布和字段释放全部接入后才能发布业务工具；当前没有生产OAuth AS或实际Rental业务注册。
 
+正式声明与运行时入口从同一份 `exports` 读取。原 API 的 Node10 类型解析通过精确 `typesVersions` 映射取得对应构建声明，ESM 消费者沿原 `import` 出口加载运行时。[包出口](package.json) · [原宿主消费](../../apps/api/src/modules/auth/original-mcp-host.ts)
+
 ## 原宿主统一装配入口
 
 子出口`@rental-os/mcp-server/service`提供[createRentalMcpService](src/service.ts)，把已有AS元数据、授权回调、token / 撤销和受保护MCP装配为一个`fetch / close`服务。原宿主必须提供同一serializable仓储、当前登记 / 元数据、可信已完成同意及签发 / 读取权限作者；缺原依赖，控制面及合法MCP请求保持不可用，不补默认grant或内存仓储。所有issuer / resource / token端点及scope ceiling必须一致，各路由须互异；原宿主负责TLS、代理、原登录 / 同意页面和部署。

@@ -23,6 +23,26 @@
       "types": "./dist/equipment.d.ts",
       "default": "./dist/equipment.js"
     },
+    "./category-governance": {
+      "types": "./dist/category-governance.d.ts",
+      "default": "./dist/category-governance.js"
+    },
+    "./capability-conditions": {
+      "types": "./dist/capability-conditions.d.ts",
+      "default": "./dist/capability-conditions.js"
+    },
+    "./capability-runtime": {
+      "types": "./dist/capability-runtime.d.ts",
+      "default": "./dist/capability-runtime.js"
+    },
+    "./capability-audit": {
+      "types": "./dist/capability-audit.d.ts",
+      "default": "./dist/capability-audit.js"
+    },
+    "./capabilities": {
+      "types": "./dist/capabilities/index.d.ts",
+      "default": "./dist/capabilities/index.js"
+    },
     "./capabilities/camera-compatibility": {
       "types": "./dist/capabilities/camera-compatibility.d.ts",
       "default": "./dist/capabilities/camera-compatibility.js"
@@ -54,6 +74,21 @@
       ],
       "equipment": [
         "dist/equipment.d.ts"
+      ],
+      "category-governance": [
+        "dist/category-governance.d.ts"
+      ],
+      "capability-conditions": [
+        "dist/capability-conditions.d.ts"
+      ],
+      "capability-runtime": [
+        "dist/capability-runtime.d.ts"
+      ],
+      "capability-audit": [
+        "dist/capability-audit.d.ts"
+      ],
+      "capabilities": [
+        "dist/capabilities/index.d.ts"
       ],
       "capabilities/camera-compatibility": [
         "dist/capabilities/camera-compatibility.d.ts"

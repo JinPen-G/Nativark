@@ -18,6 +18,10 @@
     "./rich-text": {
       "types": "./dist/rich-text.d.ts",
       "default": "./dist/rich-text.js"
+    },
+    "./request-fingerprint": {
+      "types": "./dist/request-fingerprint.d.ts",
+      "default": "./dist/request-fingerprint.js"
     }
   },
   "scripts": {
@@ -31,7 +35,13 @@
       ],
       "rich-text": [
         "dist/rich-text.d.ts"
+      ],
+      "request-fingerprint": [
+        "dist/request-fingerprint.d.ts"
       ]
     }
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
   }
 }
