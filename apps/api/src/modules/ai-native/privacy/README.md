@@ -11,6 +11,8 @@
 - 员工草稿到期由[原维护服务](retention.service.ts)调用[草稿清理叶](retention-inspection-draft.ts)：原创建时间30天、草稿期限到期及当前管理权均必需。仅由原识别输入、原保存收据与Task创建键推导关联，未结清效果保持hold；同一事务／codec清除普通候选、识别问题及已结清Task副本，人工值／决定／原候选引用、检查／提交／附件／账务和原操作收据保留。原[读取](../inspection-assist/inspection-draft.service.ts)两次核同草稿与真实删除收据，返回bodyRetention，不能用空候选推定删除或补签来源。已到revision1000仍按原上限锁内CAS清理，可信恢复重放原关联副本。
 - 未发送通知草稿由[原通知清理叶](retention-notification-draft.ts)在同一维护事务内核原密文、绑定哈希、30天期限和原日志行CAS。只擦除收件人密文、变量、生成正文及脱敏预览，保留原ID／幂等K、actor／scope、模板和来源哈希、`draft / not_dispatched`事实；原[通知读取](../../rental-core/rental-business.service.ts)核同真实`aiDataErasure`后返回`bodyRetention=erased`及空正文，不恢复内容或重新保存同K。独立草稿没有Task／Run关联，不受无关任务hold；仅真实failure outbox及其原automation输入关联可触发未决保留，坏关联保持不可用。通知清理必须注入原SecretBox解密／指纹端口，缺失不清理；已发送或可能投递的通知不属于该入口。删除标记进入同一恢复清单，旧库正文与当前删除账本不一致时拒绝读取，须由可信恢复宿主重放。
 
+通知草稿的[缓存投影](../../rental-core/rental-notification-log-cache.ts)只提供核过原行及删除账本的最少收据。单份草稿缺证据时撤回该投影，原草稿读取继续拒绝；普通通知列表、预热及业务快照保存继续消费自己的原事实。正文清理在同一维护事务内锁定原业务恢复快照，只擦除目标草稿在通知集合中的副本，保留其他通知和业务集合。已删除重放及可信恢复的源行缺失分支也清理对应副本；快照写失败或冲突时，原正文和删除账本一并回滚。[原快照写入器](../../rental-core/rental-state.repository.ts)在序列化前统一移除草稿正文，迟到的旧内存快照不能重新持久化预览。外部混合备份仍沿下方原保留及恢复屏障。
+
 ## 平台正文维护
 
 平台范围使用独立`POST /api/ai-native/platform-privacy/cleanup`及`receipt`／`receipts`，不沿workspace权限或伪造租户归属。请求只允许task／request及原分页字段；当前SaaS平台身份、原`system:ai-provider:manage`清理权限或`system:ai-provider:view`收据读取权限分别核验。平台原Scope的tenantId／workspaceId保持null，不能通过这一路读取经营空间。

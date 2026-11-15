@@ -128,6 +128,8 @@ import { SecretBox } from "../../common/secret-box";
 import { createNotificationDraftBodyRetentionReader, notificationDraftRetentionState, notificationDraftRetentionReceiptId,
   type NotificationDraftBodyErasure, type NotificationDraftBodyRetention } from "../ai-native/privacy/retention-notification-draft";
 import { RentalStateRepository } from "./rental-state.repository";
+import { isNotificationDraftCacheLog, isVerifiedNotificationDraftCacheLog,
+  readNotificationDraftCacheLog, stripNotificationDraftCacheBody } from "./rental-notification-log-cache";
 import {
   RentalBusinessConfigRepository,
   readRentalReadinessAccountFacts,
@@ -642,7 +644,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         state.rewardLedger = fact.rewardLedger;
         state.benefitAccounts = fact.benefitAccounts;
         state.referrals = fact.referrals;
-        state.notificationLogs = fact.notificationLogs;
+        state.notificationLogs = await this.notificationLogsForCache({ tenantId, workspaceId }, fact.notificationLogs);
       }
       this.states.set(workspaceId, state);
     }
@@ -677,7 +679,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const row of await this.stateRepository?.loadBusinessStates() ?? []) {
       const state = row.state as unknown as RentalBusinessState;
       // 快照行自带 workspaceId，直接按空间键装载。
-      if (state?.categoryCode) this.states.set(row.workspaceId, state);
+      if (state?.categoryCode) {
+        // Old recovery snapshots are references only; they cannot retain or
+        // republish notification preparation bodies before original readback.
+        state.notificationLogs = (state.notificationLogs ?? []).map(log =>
+          isNotificationDraftCacheLog(log) ? stripNotificationDraftCacheBody(log) : log);
+        this.states.set(row.workspaceId, state);
+      }
     }
   }
 
@@ -705,7 +713,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       await this.persistBusinessConfig(state);
       state.configPersisted = true;
     }
-    await this.stateRepository?.saveBusinessState(tenantId, workspaceId, state);
+    if (this.stateRepository) {
+      const notifications = await this.notificationLogsForCache({ tenantId, workspaceId }, state.notificationLogs);
+      if (this.workspaceOf(tenantId) !== workspaceId) throw new ForbiddenException('通知快照的当前空间已变化');
+      state.notificationLogs = notifications;
+      // Only notification copies are changed. Keep the original writer and
+      // other configuration/financial fields; no new save/cleanup operation.
+      await this.stateRepository.saveBusinessState(tenantId, workspaceId, { ...state, notificationLogs: notifications });
+    }
   }
 
   /** 把整份业务配置落库。仅用于补落懒加载默认值；此后各 save* 方法按条写穿。 */
@@ -4309,7 +4324,32 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return result;
   }
 
-  listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
+  private async notificationLogsForCache(owner: { tenantId: string; workspaceId: string }, logs: RentalNotificationSendLogV1[]) {
+    if (!Array.isArray(logs)) throw new ServiceUnavailableException('通知缓存格式无效');
+    const result: RentalNotificationSendLogV1[] = [];
+    let withheld = false;
+    for (const log of logs) {
+      if (!isNotificationDraftCacheLog(log)) { result.push(log); continue; }
+      try {
+        if (!this.prisma || !this.secretBox) throw new ServiceUnavailableException('通知草稿原缓存读取器不可用');
+        result.push(await readNotificationDraftCacheLog(this.prisma, this.secretBox, owner, log));
+      } catch {
+        // A draft has its own authorized reader. Missing evidence withholds
+        // this optional projection without blocking ordinary sending records.
+        withheld = true;
+      }
+    }
+    if (withheld) this.logger.warn('部分通知草稿未纳入缓存，请从原草稿入口核对');
+    return result;
+  }
+
+  listNotificationLogs(tenantId: string, context: BusinessContext) {
+    const state = this.state(tenantId, context);
+    // Synchronous legacy consumers retain their array contract. Draft rows
+    // contain only immutable verified receipts; previews use the original
+    // independently authorized draft reader, including erasure validation.
+    return state.notificationLogs.filter(log => !isNotificationDraftCacheLog(log) || isVerifiedNotificationDraftCacheLog(log));
+  }
 
   async findNotificationLog(tenantId: string, id: string): Promise<RentalNotificationSendLogV1 | undefined> {
     return (await this.factStore.findNotificationDelivery(tenantId, id))?.log;
@@ -4724,8 +4764,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   applyNotificationLogToCache(tenantId: string, context: BusinessContext, log: RentalNotificationSendLogV1) {
     const state = this.state(tenantId, context);
     const index = state.notificationLogs.findIndex((item) => item.id === log.id);
-    if (index < 0) state.notificationLogs.unshift(log);
-    else state.notificationLogs[index] = log;
+    // This synchronous callback cannot prove a draft's current deletion
+    // journal. Keep it bodyless and unavailable until original readback.
+    const cached = isNotificationDraftCacheLog(log) ? stripNotificationDraftCacheBody(log) : log;
+    if (index < 0) state.notificationLogs.unshift(cached);
+    else state.notificationLogs[index] = cached;
   }
 
   private async deliverNotification(

@@ -12,6 +12,8 @@ import { fingerprint } from '../knowledge/knowledge-validation';
 import { aiTaskHasUnresolvedEffects } from '../task-unresolved-effects';
 import { AI_RETENTION_POLICY } from './retention-policy';
 import { lockRetentionSourceScope } from './retention-model-sources';
+import type { RentalNotificationSendLogV1 } from '@rental-os/shared';
+import { stripNotificationDraftCacheBody } from '../../rental-core/rental-notification-snapshot';
 
 export const NOTIFICATION_DRAFT_RETENTION_KIND = 'notification_draft' as const;
 type Row = Prisma.RentalNotificationLogGetPayload<object>;
@@ -222,6 +224,41 @@ async function relatedEffects(tx: Prisma.TransactionClient, row: Row, input: Ret
   return { state: 'clear', digest: requestFingerprint(evidence) };
 }
 
+/** Remove this draft's old recovery copies under the original snapshot lock.
+ * Only the notification JSON path is replaced. The enclosing retention tx owns
+ * authorization and rollback, including trusted restores with no source row. */
+export async function eraseNotificationDraftSnapshotCopies(tx: Prisma.TransactionClient, owner: Owner,
+  draftId: string, check: () => Promise<void>) {
+  if (!scope.safeParse(owner).success || !/^notification-draft-[a-f0-9]{64}$/u.test(draftId)) throw unavailable();
+  const snapshots = await tx.$queryRaw<Array<{ tenantId: string; workspaceId: string; notifications: Prisma.JsonValue | null }>>(Prisma.sql`
+    SELECT tenantId, workspaceId, JSON_EXTRACT(state, '$.notificationLogs') AS notifications
+    FROM rental_business_state_snapshots
+    WHERE tenantId = ${owner.tenantId} AND workspaceId = ${owner.workspaceId} FOR UPDATE`);
+  if (!Array.isArray(snapshots) || snapshots.length > 1) throw unavailable();
+  await check();
+  if (!snapshots.length) return;
+  const snapshot = snapshots[0];
+  if (snapshot.tenantId !== owner.tenantId || snapshot.workspaceId !== owner.workspaceId) throw denied();
+  if (snapshot.notifications === null) return;
+  if (!Array.isArray(snapshot.notifications)) throw unavailable();
+  const notifications = snapshot.notifications.map(log => {
+    if (!log || typeof log !== 'object' || Array.isArray(log)) throw unavailable();
+    const original = log.variables && typeof log.variables === 'object' && !Array.isArray(log.variables)
+      ? log.variables.notificationDraft : undefined;
+    const sameOriginal = original && typeof original === 'object' && !Array.isArray(original) && original.id === draftId;
+    if (log.id !== draftId && !sameOriginal) return log;
+    return JSON.parse(JSON.stringify(stripNotificationDraftCacheBody(log as unknown as RentalNotificationSendLogV1))) as Prisma.JsonValue;
+  });
+  if (isDeepStrictEqual(notifications, snapshot.notifications)) return;
+  await check();
+  const changed = await tx.$executeRaw(Prisma.sql`UPDATE rental_business_state_snapshots
+    SET state = JSON_SET(state, '$.notificationLogs', CAST(${JSON.stringify(notifications)} AS JSON)), updatedAt = CURRENT_TIMESTAMP(3)
+    WHERE tenantId = ${owner.tenantId} AND workspaceId = ${owner.workspaceId}
+      AND JSON_EXTRACT(state, '$.notificationLogs') = CAST(${JSON.stringify(snapshot.notifications)} AS JSON)`);
+  if (changed !== 1) throw conflict();
+  await check();
+}
+
 /** Same transaction as AiRetentionService's scope lock and journal. The current
  * permission check is repeated after source waits and before each mutation. */
 export async function eraseExpiredNotificationDraftBodies(tx: Prisma.TransactionClient, input: RetentionInput, expectedHash?: string) {
@@ -249,6 +286,7 @@ export async function eraseExpiredNotificationDraftBodies(tx: Prisma.Transaction
   if (related.state !== 'clear') return { id: key, ...related };
   if (erasure && !expectedHash) {
     await createNotificationDraftBodyRetentionReader(tx, () => input.now).readErasure(row);
+    await eraseNotificationDraftSnapshotCopies(tx, input.owner, row.id, input.check);
     await input.check();
     return { id: key, state: 'erased' as const, replayed: true };
   }
@@ -289,6 +327,7 @@ export async function eraseExpiredNotificationDraftBodies(tx: Prisma.Transaction
   const current = await tx.rentalNotificationLog.findFirst({ where: { id: row.id, ...input.owner } });
   if (!current || notificationDraftRetentionTargetHash(current) !== targetHash) throw unavailable();
   await createNotificationDraftBodyRetentionReader(tx, () => input.now).readErasure(current);
+  await eraseNotificationDraftSnapshotCopies(tx, input.owner, row.id, input.check);
   const closing = await relatedEffects(tx, current, input);
   await input.check();
   if (closing.state !== 'clear' || closing.digest !== related.digest) throw unavailable();

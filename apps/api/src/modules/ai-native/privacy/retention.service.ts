@@ -19,7 +19,7 @@ import { inspectRetentionSource } from './retention-model-sources';
 import { eraseExpiredTaskBodies, eraseRetainedSourceTaskBodies } from './retention-task-bodies';
 import { AI_BODY_STORAGE_KINDS, protectAiBodyStorageRows } from './prisma-ai-body-storage';
 import { eraseExpiredInspectionDraftBodies } from './retention-inspection-draft';
-import { eraseExpiredNotificationDraftBodies, type NotificationDraftRetentionCipher } from './retention-notification-draft';
+import { eraseExpiredNotificationDraftBodies, eraseNotificationDraftSnapshotCopies, type NotificationDraftRetentionCipher } from './retention-notification-draft';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -223,6 +223,7 @@ export class AiRetentionService {
               metadata: { path: '$.workspaceId', equals: owner.workspaceId } }, select: { id: true } });
           if (!exists) {
             await this.check(current); attempted = true;
+            if (kind === 'notification_draft') await eraseNotificationDraftSnapshotCopies(tx, owner, resourceId, () => this.check(current));
             await tx.aiDataErasure.upsert({ where: { id: key }, create: { id: key, ...owner, kind, resourceId,
               targetHash: expectedHash, policyVersion: AI_RETENTION_POLICY.version, state: 'erased', erasedAt: now },
               update: { state: 'erased', erasedAt: now, revision: { increment: 1 } } });
