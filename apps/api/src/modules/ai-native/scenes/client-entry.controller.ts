@@ -285,28 +285,35 @@ export class AiClientEntryController {
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readTaskSnapshot(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readTaskSnapshot(request, body));
+  readTaskSnapshot(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, signal => this.application.readTaskSnapshot(current, input, signal),
+      { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskModelResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readTaskModelResult(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readOriginalTaskModelResult(request, body), 'read_original_task');
+  readTaskModelResult(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, signal => this.application.readOriginalTaskModelResult(current, input, undefined, signal),
+      { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readTaskEvents(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readTaskEvents(request, body));
+  readTaskEvents(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, signal => this.application.readTaskEvents(current, input, signal),
+      { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  readTaskInput(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
-      const question = await this.application.readOriginalTaskModelInput(request, body);
+  readTaskInput(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
+    return this.respond(() => withRequestAbort(request, async signal => {
+      const question = await this.application.readOriginalTaskModelInput(current, input, undefined, signal);
       const response = aiClientTaskInputReadResponseSchema.safeParse({ contractVersion: AI_TASK_INPUT_DRAFT_VERSION,
         state: question === null ? 'not_pending' : 'pending', question,
         execution: 'not_authorized_by_observation' });
       if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > 65536)
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return response.data;
-    }, 'read_original_task');
+    }, { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   requestTaskCancellation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {

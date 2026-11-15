@@ -6,6 +6,30 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry15-explicit-original-read-20261115"></a>
+## ENTRY-15 显式公开浏览及停用后原问题／收据读取（2026-11-15）
+
+前置`5fcc17b6abfa6dba0ecc9d43fa032cf24203f48a`已推送GitHub并回读一致。本阶段修复公开浏览普通挂载读取、员工识别关闭连带关闭原问题／准备收据，以及客户Task原读没有HTTP等待上限；仅固定九个后端源、dev2已冻结三源及本记录／接续，不夹dev1的目录消费者和dev2尚在施工的员工只读宿主。任务全文还需该宿主和四端全源核定，ENTRY-15百分比暂保持。
+
+[Web公开浏览](../../apps/tenant-website/src/features/ai-native/ClientPublicBrowse.tsx)及[微信逻辑](../../apps/miniprogram/src/components/ai-native/ai-public-browse/index.ts)／[模板](../../apps/miniprogram/src/components/ai-native/ai-public-browse/index.wxml)在挂载、show、会话通知和scope变化时仅检查最少本地定位、撤回旧内容；用户明确核对后才调用原读取。缓存不启用继续，原准备／继续丢ACK保留原键，本地回执写入失败仍可从已保存pending恢复，不换引用重做。三源最终blob分别`f9fd9275cf669f3184af655852104ec3337bd2e1`、`3b995753b8be85a5e19e8491e396a788a5f7073a`、`1d8c873b13bd699fc245b5c961c27ae6f6b5e975`，Root逐blob核同并读实现；dev2原12必要模拟与两端类型223／214源零诊断的stdin SHA-256为`1c6454004156fb40ee01fc830e88fa0bac480b001fa405d1da30e16c5625dada`／`50b3f8ae77ae5aea03e48c87ed0325b8355a4105f2f55691286fc8c146bacf18`，均退出0。Root独立实际原生组件／shared session明确读取、生命周期0请求和迟到撤回模拟`74fb6eb52be4fc237383d015206ee9d2ccc0f6613200e346e59055589ea5e047`退出0；该组加载当前TS及正式shared运行时，API、存储和session为声明替身，不称微信实测。
+
+[标准员工装配](../../apps/api/src/modules/ai-native/inspection-assist/inspection-standard.application.ts)的原`readInput`复用当前订单／原创建收据、Task/action读政策及唯一PENDING，独立于新识别开关、Gateway、SecretBox、模型Profile和worker。[结果来源](../../apps/api/src/modules/ai-native/inspection-assist/inspection-recognition-result.service.ts)仅在服务端`original_pending`模式按原Run计划和问题期限重构合同，不用今日生成政策、不延长旧问题期限，`validateAnswers`直接拒绝；普通生成／提交仍走`current`分支。[组合](../../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition.ts)转交该内部模式。[准备原收据](../../apps/api/src/modules/ai-native/inspection-assist/inspection-recognition.service.ts)改用当前read及原历史归属，原草稿／模板到期或变动不使已经发生的准备被改写成未发生；[正式Provider](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)在停用下保留`input-receipt`，仍不登记`input-prepare`／`result-save`新执行。
+
+独立复核发现第一版原pending仍经`collect → bind → gatewayMedia`及普通Draft详情的`evidence.fingerprint(write)`，撤掉交付／归还权限会挡住合法历史问题；原完整权限identityHash也误作当前读权。后继在[原Draft reader](../../apps/api/src/modules/ai-native/inspection-assist/inspection-draft.service.ts)只读当前订单／历史地点、唯一冻结input及schema/hash／原模板／evidence，验证原erasure；[原文件metadata reader](../../apps/api/src/modules/ai-native/inspection-assist/prisma-inspection-evidence.authority.ts)核当前owner、active文件／完成上传会话和原绑定版本双读，不取bytes、不重绑。原完整权限hash保留原lineage一致性，当前读权独立核；Input／Step／Run／Invocation／Artifact及原财务收据保持严格关联。仅为已存在的问题重构，不产生新的候选采用、问题、回答、租约或模型调用。独立静态复核确认原P2关闭且未发现本片新增确证P1／P2；四叶blob为Draft`effcb6ba0635e2d856786418b382fb94de4ed434`、Evidence`20318ed10a19f133e8f4506b3c5b90f1833803b1`、Recognition`5a872ec10f6ea750ac44606603acddb247bd66a5`、Result`f4ff08fd75f9e908a0e13f09f2773b5f5247f5d8`，Root核同。
+
+[客户Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)的snapshot／events／model-result／pending-input四读统一使用原`withRequestAbort`的15000ms上限、no-store和请求前快照，[应用](../../apps/api/src/modules/ai-native/scenes/client-request.application.ts)转交取消signal并关闭请求授权生命周期；迟到依赖不能覆盖unknown观察或启用重派。HTTP等待仍不是Task／租约／业务回滚证明。
+
+| 本片必要验证 | 命令／结果与边界 |
+| --- | --- |
+| 原员工Task／Gateway一次识别生成问题 → 标准Controller停用原读 | stdin `a3acbf2e09792c2d9707ed525f616d88e629e637c53750f0e3d5532e4b33eec1`退出0；撤return／operate但保留view，停用＋旧plan到期仍读取同问题，新start／resume拒绝，过期／伪造问题／撤view拒绝，模型保持1、回答receipt0；原准备收据在draft到期／模板移除后仍读。 |
+| 原文件／冻结input／调用owner拒绝补充 | stdin `c98db6163c7522a7f5f4c66b32fd85e3ed7723a44fbb1569e91746cfeca5f016`退出0；active文件撤回、inputFingerprint篡改、Invocation owner篡改拒绝，恢复准确原记录后仍读。 |
+| 客户四原读等待／signal／迟到响应 | stdin `8966f4c323eabd25a73b912aca3e5fbaa86c4730fe6f3c28dce34c12f1bd523b`退出0；实际Controller／withRequestAbort及声明应用／虚拟timer，四个15000ms超时均原unknown、retryable=false、监听清理；合法无pending原合同保持。 |
+| 最终九后端源及传递依赖类型 | TypeScript5.9.3九根／1895源零诊断，stdin `0149fccea555a98b6ec55d59cc40642164936ae338500b773964b2097216394d`退出0；未安装、生成共享Client或改变原编译target。 |
+
+失败及修正均保留原对话：首员工驱动写死expectedRevision=1被原真实prepare修订拒绝；其次以staff身份试图修改计划政策被原管理员权限拒绝；原generic fixture遗漏Task inputHash来源，补实际冻结input哈希；内存事务wrapper委托自身导致递归，固定原delegate引用后通过。最后Provider断言查错recognition数组，修为正式receipt数组；此前失败不当产品P2或放宽生产验证。独立复核另发现并关闭上述真实写权限耦合P2，非靠重跑旧绿消除。全部验证`node --no-compilation-cache -`、原offline preload、不可达DATABASE_URL、内存audit0，`output/.tmp/ain-entry15-original-read-20261115`未创建、自有进程退出，不新增或扩写测试文件。真实MySQL、微信／浏览器、供应商未运行，由负责人后续操作。
+
+本片收尾`git diff --check`退出0；`node scripts/validate-docs.cjs`退出1，仍为导航三个历史附件及界面规范一个稀疏示例的四处既有缺链，无新增本片链接或任务算术错误。正式记录引用源码、固定Git／stdin命令和退出码，不引用已删除的临时环境。
+
 <a id="ain-entry01-original-audio-route-20261115"></a>
 ## ENTRY-01 员工语音目录与原识别路由一致性修复（2026-11-15）
 

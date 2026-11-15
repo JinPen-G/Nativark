@@ -727,7 +727,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const withOriginalTaskInput = async <T>(request: AiClientApplicationRequest, value: unknown,
     source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
-    consume: (reader: Awaited<ReturnType<typeof composeClientOriginalTaskInputReader>>) => Promise<T>) => {
+    consume: (reader: Awaited<ReturnType<typeof composeClientOriginalTaskInputReader>>) => Promise<T>, signal?: AbortSignal) => {
     // Original task observation/convergence does not need a booking navigation
     // surface. The server entry gate, current policy and Guard still apply.
     if (!server.entry || !taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
@@ -751,7 +751,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       const result = await consume(reader);
       await bound.assertCurrent();
       return result;
-    });
+    }, signal);
   };
   const configuredTaskInputSource = dependencies.taskInputs && {
     ...dependencies.taskInputs, gatewayScene: structuredClone(dependencies.taskInputs.gatewayScene) };
@@ -800,7 +800,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     ?? (dependencies.taskInputs && { db: dependencies.taskInputs.db })
     ?? (dependencies.taskModel && { db: dependencies.taskModel.db });
   const readOriginalTaskModelObservation = async (request: AiClientApplicationRequest, value: unknown,
-    source = configuredResultSource, includeHumanClarifications = false) => {
+    source = configuredResultSource, includeHumanClarifications = false, signal?: AbortSignal) => {
     if (!server.entry || !taskDependencies || !source || !Object.is(source.db, dependencies.db))
       throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_result_dependencies_missing');
     const command = parseEntry(clientTaskCommandSchema, structuredClone(value)), db = source.db;
@@ -889,12 +889,12 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > maxBytes)
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return freezeOriginalInput({ model: response.data, humanClarifications: selected.humanClarifications });
-    });
+    }, signal);
   };
   // The public result retains its exact original envelope. Proved human answers
   // stay server-private and are consumed only by the goal selection boundary.
-  const readOriginalTaskModelResult = async (request: AiClientApplicationRequest, value: unknown, source = configuredResultSource) =>
-    (await readOriginalTaskModelObservation(request, value, source)).model;
+  const readOriginalTaskModelResult = async (request: AiClientApplicationRequest, value: unknown, source = configuredResultSource, signal?: AbortSignal) =>
+    (await readOriginalTaskModelObservation(request, value, source, false, signal)).model;
   const withGoalSource = async <T>(request: AiClientApplicationRequest, value: unknown,
     consume: (bound: Bound, row: AiClientSceneMaterial, command: z.infer<typeof aiClientGoalCandidatesRequestSchema>) => Promise<T>, signal?: AbortSignal) => {
     requireEntry();
@@ -1407,9 +1407,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     /** Server-injected source; read-only, no provider/model capability needed. */
     readOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
-      source = configuredTaskInputSource) {
+      source = configuredTaskInputSource, signal?: AbortSignal) {
       if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
-      return withOriginalTaskInput(request, value, source, reader => reader.readPending());
+      return withOriginalTaskInput(request, value, source, reader => reader.readPending(), signal);
     },
     /** Original submit/resume-input policies apply atomically. Persisting an
      * answer/successor does not claim its lease, invoke AI or approve business. */
@@ -1610,8 +1610,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return result;
       });
     },
-    readTaskSnapshot: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readSnapshot'),
-    readTaskEvents: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readEvents'),
+    readTaskSnapshot: (request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) => taskOperation(request, value, 'readSnapshot', signal),
+    readTaskEvents: (request: AiClientApplicationRequest, value: unknown, signal?: AbortSignal) => taskOperation(request, value, 'readEvents', signal),
     async readOrderExplanation(request: AiClientApplicationRequest, value: unknown) {
       const parsed = explanationSchema.safeParse(structuredClone(value));
       if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');

@@ -163,6 +163,35 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
       return PrismaTaskInputRepository.receiptReader(d.db, current.tasks, d.clock).readSubmission(submission);
     });
   };
+  const readInput = (request: { headers: { authorization?: unknown } }, reference: unknown, signal?: AbortSignal) =>
+    withOriginalTask(request, reference, 'read_metadata', signal, async (current, taskId) => {
+      const context = await current.authority.resolve(taskId, 'read_step_terminal');
+      const access = aiTaskAccessFromContext(context, taskId, d.clock?.() ?? new Date());
+      const task = await d.db.aiTask.findFirst({ where: access.where, select: { sceneCode: true, sceneVersion: true } });
+      const kind = task?.sceneCode === STAFF_RECOGNITION_SCENES.image ? 'image'
+        : task?.sceneCode === STAFF_RECOGNITION_SCENES.audio ? 'audio' : null;
+      const authorization = request?.headers?.authorization;
+      if (!kind || task?.sceneVersion !== '1' || typeof authorization !== 'string')
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      let active = true;
+      const requestId = randomUUID(), dependencies = { db: d.db, auth: d.auth, subscriptions: d.subscriptions,
+        clock: d.clock, credentials: { current: async () => {
+          if (!active || signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          return { authorization, requestId, audience: 'staff' as const };
+        } } };
+      // This reader has no Gateway, SecretBox, model profile or worker. It
+      // revalidates original media/result/plan before displaying a stored wait.
+      const reader = new StaffInspectionRequestFactory({ ...inspection, recognitionResults: { ...dependencies,
+        financialEvidence: composePersistedTaskDispatchEvidence(dependencies),
+        policy: { kind, sceneCode: task.sceneCode, maxOutputTokens: 32768 } } }).open({ headers: { authorization }, requestId });
+      const close = () => { active = false; reader.close(); };
+      signal?.addEventListener('abort', close, { once: true });
+      try {
+        if (signal?.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return await PrismaTaskInputRepository.pendingReader(d.db, current.tasks,
+          reader.recognitionResults.inputSource(reference, 'original_pending'), d.clock).readPending(taskId);
+      } finally { signal?.removeEventListener('abort', close); close(); }
+    });
   const readResultReview = async (request: { headers: { authorization?: unknown } }, value: unknown,
     resultValue: unknown, expectedTaskId?: string, signal?: AbortSignal) => {
     const reference = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
@@ -209,7 +238,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
   };
   if (!selected.enabled) return { enabled: false as const, staffRequests: new StaffInspectionRequestFactory(inspection),
     application: { create: absent, readCreation: receipts.readCreation.bind(receipts), start: absent, reconcile: absent,
-      readResultReference, readResultReview, saveResultReview: absent, readInput: absent, resume: absent, readAnswer,
+      readResultReference, readResultReview, saveResultReview: absent, readInput, resume: absent, readAnswer,
       continueAnswer: absent, requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt } satisfies InspectionTaskHttpApplication,
     policies: { read: absent, configure: absent, clear: absent } };
   const select = (kind: 'image' | 'audio', config: z.infer<typeof model>) => ({ db: d.db, auth: d.auth, guard: d.guard,
@@ -230,7 +259,7 @@ export function composeStandardStaffRecognition(d: Dependencies, value?: unknown
         return application.start(request, reference, signal);
       }, reconcile: application.reconcile.bind(application),
       readResultReference, readResultReview, saveResultReview: application.saveResultReview.bind(application),
-      readInput: application.readInput.bind(application), resume: application.resume.bind(application),
+      readInput, resume: application.resume.bind(application),
       readAnswer, continueAnswer: application.continueAnswer.bind(application),
       requestCancel, readCancelReceipt, settleUnstartedCancellation, settleReleasedInputCancellation, readCancellationSettlementReceipt } satisfies InspectionTaskHttpApplication,
     policies: composeStaffInspectionTaskPolicies(dependencies, policyOptions) };

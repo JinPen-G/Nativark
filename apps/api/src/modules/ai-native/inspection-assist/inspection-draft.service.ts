@@ -371,6 +371,38 @@ export class InspectionDraftService {
     return { context: after.context, target, draftId: input.draftId };
   }
 
+  /** Original frozen model material under current order/draft read authority.
+   * This does not reopen editable values, current evidence adoption, a model
+   * gate or an expired draft for execution. A verified erasure remains closed. */
+  async readFrozenRecognitionInput(value: unknown) {
+    const input = parseInspectionInput(targetSchema.extend({ draftId: inspectionId, inputId: inspectionId,
+      expectedRevision: z.number().int().min(1).max(999) }).strict(), value), target = targetOf(input);
+    return this.authority.withAction(target, 'read', async scope => {
+      const before = await this.templates.readHistoryAccess({ orderId: target.orderId, stage: target.stage });
+      this.sameScope(before.context, scope);
+      const row = await this.load(scope, input.draftId, target), state = this.state(row.state);
+      if (state.bodyErasure) {
+        if (!this.bodyRetention || !isDeepStrictEqual(await this.bodyRetention.readErasure(row), state.bodyErasure))
+          throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+      }
+      const originals = state.recognitionInputs?.filter(original => original.inputId === input.inputId) ?? [];
+      if (row.revision < input.expectedRevision || originals.length !== 1) throw new InspectionAssistError('BINDING_CHANGED');
+      const frozen = inspectionRecognitionInputSchema.parse(structuredClone(originals[0]));
+      const { inputFingerprint, ...payload } = frozen;
+      if (requestFingerprint(payload) !== inputFingerprint || frozen.bindingFingerprint !== row.bindingFingerprint
+        || frozen.template.id !== target.templateId || frozen.template.version !== row.templateVersion
+        || !frozen.media.length || new Set(frozen.media.map(media => media.attachmentId)).size !== frozen.media.length
+        || frozen.media.some(media => !state.evidence.some(current => current.attachmentId === media.attachmentId
+          && current.attachmentRevision === media.attachmentRevision))) throw new InspectionAssistError('BINDING_CHANGED');
+      if (!isDeepStrictEqual(await this.load(scope, input.draftId, target), row)) throw new InspectionAssistError('REVISION_CONFLICT');
+      const after = await this.templates.readHistoryAccess({ orderId: target.orderId, stage: target.stage });
+      if (!isDeepStrictEqual(before, after)) throw new InspectionAssistError('ACCESS_DENIED');
+      return { context: scope, target, draftId: row.id, draftRevision: input.expectedRevision,
+        assetId: row.assetId, templateVersion: row.templateVersion, input: frozen };
+    });
+  }
+
   async reconcileOperation(value: unknown) {
     const input = parseInspectionInput(z.object({ kind: z.enum(['create', 'edit', 'candidates', 'evidence']), request: z.unknown() }).strict(), value);
     const request = input.kind === 'create' ? parseInspectionInput(createSchema, input.request)

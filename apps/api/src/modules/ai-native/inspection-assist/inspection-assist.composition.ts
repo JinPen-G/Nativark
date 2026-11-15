@@ -298,12 +298,12 @@ export function composeInspectionAssist(dependencies: Dependencies) {
       const original = await primaryResults.readSavedReceipt(reference);
       return original.status === 'found' ? original : (await selectResults(reference)).reconcileSave(reference);
     },
-    inputSource: (value: unknown): AiTaskInputSource => {
+    inputSource: (value: unknown, mode: 'current' | 'original_pending' = 'current'): AiTaskInputSource => {
       const reference = structuredClone(value);
       return Object.freeze({ resolve: async (...args: Parameters<AiTaskInputSource['resolve']>) =>
-        (await selectResults(reference)).inputSource(reference).resolve(...args),
+        (await selectResults(reference)).inputSource(reference, mode).resolve(...args),
       validateAnswers: async (...args: Parameters<AiTaskInputSource['validateAnswers']>) =>
-        (await selectResults(reference)).inputSource(reference).validateAnswers(...args) });
+        (await selectResults(reference)).inputSource(reference, mode).validateAnswers(...args) });
     }
   };
   /** Persisted result + current human review, not adoption or business facts.
