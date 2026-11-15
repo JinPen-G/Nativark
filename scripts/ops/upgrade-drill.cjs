@@ -4,8 +4,9 @@
  * OPS-01C `upgrade-drill`：在**克隆库**上演练升级与回滚。
  *
  * 一次完整演练：
- *   验证备份 → 恢复到升级克隆库 → migrate deploy → 独立端口起 API → 健康检查
- *   → 从同一份备份恢复出回滚克隆库 → 输出人工切换步骤 → 清理本次成功的资源。
+ *   验证备份 → 恢复配对克隆库 → 升级库 migrate deploy → 可信宿主重放删除标记
+ *   → 分别核全部 scope 的签名证书 → 独立端口起 API → 健康检查 → 输出人工切换步骤。
+ *   AI 恢复首次保留隔离库和最少接续记录；可信重放后沿原备份和记录继续，不重复导入。
  *
  * 三条不可退让的边界：
  *   1. **源库只读**。演练全程不对 `DATABASE_URL` 指向的库做任何写入；
@@ -23,6 +24,7 @@ const net = require("node:net");
 const { spawn } = require("node:child_process");
 const { buildCloneDatabaseName, buildDatabaseUrl, isOwnedCloneDatabase, redact, quoteSqlString, OpsTargetError } = require("./dedicated-env.cjs");
 const { rewriteBackupForTarget, verifyClone, BUSINESS_SAMPLE_TABLES } = require("./restore-core.cjs");
+const { assertRestoreAiBarrier, readRetentionCertificates } = require("./ai-retention.cjs");
 const { ROOT, requireTarget, requireAdminTarget, assertContainerEndpoint, loadDatabaseUrl, log, fail, runPackageCommand, containerRunning, runMysql, sql } = require("./runtime.cjs");
 
 const ARTIFACT_DIR = process.env.OPS_ARTIFACT_DIR || path.join(ROOT, "artifacts", "release");
@@ -35,6 +37,41 @@ const arg = (name) => {
   const index = process.argv.indexOf(`--${name}`);
   return index >= 0 ? process.argv[index + 1] : undefined;
 };
+
+/** 接续只定位本演练的配对克隆库。删除账本和签名权限仍来自可信外部宿主。 */
+function readUpgradeContinuation(value, sourceDatabase, backupSha256) {
+  const file = path.resolve(ROOT, value), relative = path.relative(path.resolve(ARTIFACT_DIR), file);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
+    || path.extname(file) !== ".json") throw new OpsTargetError("升级恢复接续记录不在本工具制品目录");
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 8192) {
+    throw new OpsTargetError("升级恢复接续记录不合法");
+  }
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let journal;
+  try {
+    const opened = fs.fstatSync(fd);
+    if (opened.ino !== stat.ino || opened.dev !== stat.dev || opened.size !== stat.size) throw new OpsTargetError("升级恢复接续记录已变化");
+    const bytes = Buffer.alloc(stat.size + 1), length = fs.readSync(fd, bytes, 0, bytes.length, 0);
+    if (length !== stat.size) throw new OpsTargetError("升级恢复接续记录未完整读取");
+    journal = JSON.parse(bytes.subarray(0, length).toString("utf8"));
+  } finally { fs.closeSync(fd); }
+  const keys = ["version", "sourceDatabase", "backupSha256", "upgradeDatabase", "rollbackDatabase", "preparedMigrationCount"];
+  if (!journal || typeof journal !== "object" || Array.isArray(journal) || Object.keys(journal).some(key => !keys.includes(key))
+    || journal.version !== "ops-ai-upgrade-restore-1" || journal.sourceDatabase !== sourceDatabase || journal.backupSha256 !== backupSha256
+    || !Number.isSafeInteger(journal.preparedMigrationCount) || journal.preparedMigrationCount < 0) {
+    throw new OpsTargetError("升级恢复接续记录与原源库或备份不匹配");
+  }
+  const prefix = kind => buildCloneDatabaseName(sourceDatabase, kind, new Date("2000-01-01T00:00:00Z")).slice(0, -14);
+  if (typeof journal.upgradeDatabase !== "string" || !journal.upgradeDatabase.startsWith(prefix("upgrade"))
+    || !/^[0-9]{14}$/u.test(journal.upgradeDatabase.slice(prefix("upgrade").length))
+    || journal.rollbackDatabase !== `${prefix("rollback")}${journal.upgradeDatabase.slice(-14)}`
+    || !isOwnedCloneDatabase(journal.upgradeDatabase) || !isOwnedCloneDatabase(journal.rollbackDatabase)
+    || path.basename(file) !== `upgrade-drill-ai-${journal.upgradeDatabase}.json`) {
+    throw new OpsTargetError("升级恢复接续记录未绑定原配对克隆库");
+  }
+  return { file, journal };
+}
 
 function latestBackup(database) {
   const dir = process.env.OPS_BACKUP_DIR || path.join(ROOT, "backups");
@@ -137,6 +174,8 @@ void (async () => {
   if (!containerRunning()) fail("MySQL 容器未运行，先跑 ops:preflight");
 
   const secrets = [target.password, admin.password, process.env.AUTH_TOKEN_SECRET].filter(Boolean);
+  const finalizing = arg("finalize-ai");
+  if (finalizing && !arg("file")) { fail("升级恢复接续必须用 --file 指定原备份"); return; }
   const file = arg("file") ? path.resolve(ROOT, arg("file")) : latestBackup(target.database);
   if (!file || !fs.existsSync(file)) {
     fail("未找到备份文件；请先 npm run ops:backup，或用 --file 指定路径");
@@ -146,7 +185,9 @@ void (async () => {
   const steps = [];
   const created = [];
   const granted = [];
+  const dropped = [];
   let apiHandle;
+  let continuationFile;
   const step = (name, ok, detail) => {
     steps.push({ name, ok, detail });
     log(`  ${ok ? "✓" : "✗"} ${name}${detail ? `：${detail}` : ""}`);
@@ -166,25 +207,44 @@ void (async () => {
     if (expected !== actual) throw new OpsTargetError(`备份校验和不匹配：期望 ${expected}，实际 ${actual}`);
     step("备份校验和匹配", true, `${path.relative(ROOT, file)} / ${actual.slice(0, 16)}…`);
 
-    // ---------- 2. 恢复到升级克隆库 ----------
-    const upgradeDb = buildCloneDatabaseName(target.database, "upgrade");
-    if (sql(admin, `SHOW DATABASES LIKE '${upgradeDb}'`)) {
-      throw new OpsTargetError(`克隆库 ${upgradeDb} 已存在，拒绝复用既有库`);
+    // ---------- 2. 创建或接续同一份备份的配对克隆库 ----------
+    const saved = finalizing ? readUpgradeContinuation(finalizing, target.database, actual) : undefined;
+    const cloneStamp = new Date();
+    const upgradeDb = saved?.journal.upgradeDatabase || buildCloneDatabaseName(target.database, "upgrade", cloneStamp);
+    const rollbackDb = saved?.journal.rollbackDatabase || buildCloneDatabaseName(target.database, "rollback", cloneStamp);
+    let restored, rolledBack;
+    if (saved) {
+      for (const database of [upgradeDb, rollbackDb]) {
+        if (!sql(admin, `SHOW DATABASES LIKE '${database}'`)) throw new OpsTargetError(`原接续克隆库 ${database} 不存在`);
+        created.push(database);
+      }
+      rolledBack = verifyClone((statement) => sql(admin, statement), target.database, rollbackDb);
+      restored = rolledBack;
+      continuationFile = saved.file;
+      step("原配对克隆库接续", true, `${upgradeDb} / ${rollbackDb}；不重复导入或迁移`);
+    } else {
+      if (sql(admin, `SHOW DATABASES LIKE '${upgradeDb}'`)) throw new OpsTargetError(`克隆库 ${upgradeDb} 已存在，拒绝复用既有库`);
+      sql(admin, `CREATE DATABASE \`${upgradeDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      created.push(upgradeDb);
+      const script = rewriteBackupForTarget(body.toString("utf8"), target.database, upgradeDb);
+      const load = runMysql("mysql", admin, [upgradeDb], { input: script });
+      if (load.status !== 0) throw new OpsTargetError(`导入失败：${redact(String(load.stderr ?? ""), secrets)}`);
+      restored = verifyClone((statement) => sql(admin, statement), target.database, upgradeDb);
+      step("恢复到升级克隆库", true, `${upgradeDb}｜表 ${restored.targetTables}｜迁移 ${restored.targetMigrations}｜${restored.sampled.join("，")}`);
+      if (rollbackDb === upgradeDb || sql(admin, `SHOW DATABASES LIKE '${rollbackDb}'`)) {
+        throw new OpsTargetError(`回滚克隆库 ${rollbackDb} 与升级库冲突或已存在`);
+      }
+      sql(admin, `CREATE DATABASE \`${rollbackDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+      created.push(rollbackDb);
+      const rollbackScript = rewriteBackupForTarget(body.toString("utf8"), target.database, rollbackDb);
+      const rollbackLoad = runMysql("mysql", admin, [rollbackDb], { input: rollbackScript });
+      if (rollbackLoad.status !== 0) throw new OpsTargetError(`回滚库导入失败：${redact(String(rollbackLoad.stderr ?? ""), secrets)}`);
+      rolledBack = verifyClone((statement) => sql(admin, statement), target.database, rollbackDb);
     }
-    sql(admin, `CREATE DATABASE \`${upgradeDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-    created.push(upgradeDb);
-    const script = rewriteBackupForTarget(body.toString("utf8"), target.database, upgradeDb);
-    const load = runMysql("mysql", admin, [upgradeDb], { input: script });
-    if (load.status !== 0) {
-      throw new OpsTargetError(`导入失败：${redact(String(load.stderr ?? ""), secrets)}`);
-    }
-    const restored = verifyClone((statement) => sql(admin, statement), target.database, upgradeDb);
-    step("恢复到升级克隆库", true, `${upgradeDb}｜表 ${restored.targetTables}｜迁移 ${restored.targetMigrations}｜${restored.sampled.join("，")}`);
 
     // ---------- 3. migrate deploy（只作用于克隆库） ----------
     // 迁移用**管理账号**执行，与真实发布一致：DDL 由特权账号做，应用账号不该持有。
-    // 而 API 仍以应用账号连接，因此要把克隆库的读写权限授给它——新建的库对应用账号
-    // 默认不可见（实测 P1010 Access denied）。授权在清理阶段回收。
+    // 原删除标记重放和全部 scope 证书核验前，应用账号继续保持隔离。
     const cloneUrlFor = (user, password) => buildDatabaseUrl(
       loadDatabaseUrl(),
       { user, password, database: upgradeDb }
@@ -192,22 +252,15 @@ void (async () => {
     const adminUrl = cloneUrlFor(admin.user, admin.password);
     const appUrl = cloneUrlFor(target.user, target.password);
     const appAccount = `${quoteSqlString(target.user)}@'%'`;
-    sql(admin, `GRANT ALL PRIVILEGES ON \`${upgradeDb}\`.* TO ${appAccount}`);
-    granted.push(upgradeDb);
-    sql(admin, "FLUSH PRIVILEGES");
-    const appProbe = sql(target, "SELECT 1", { database: upgradeDb });
-    if (appProbe !== "1") throw new OpsTargetError("应用账号无法读取升级克隆库，拒绝启动健康检查");
-    step("应用账号克隆库连通", true, `${upgradeDb} / SELECT 1`);
-    const deploy = runPackageCommand("npx", ["prisma", "migrate", "deploy"], {
-      cwd: API_DIR,
-      encoding: "utf8",
-      env: { ...process.env, DATABASE_URL: adminUrl }
-    });
-    const deployOut = redact(`${deploy.stdout ?? ""}${deploy.stderr ?? ""}`, secrets);
-    if (deploy.status !== 0) {
-      throw new OpsTargetError(`克隆库 migrate deploy 失败：${deployOut.split(/\r?\n/).slice(-4).join(" ")}`);
+    if (!saved) {
+      const deploy = runPackageCommand("npx", ["prisma", "migrate", "deploy"], {
+        cwd: API_DIR, encoding: "utf8", env: { ...process.env, DATABASE_URL: adminUrl }
+      });
+      const deployOut = redact(`${deploy.stdout ?? ""}${deploy.stderr ?? ""}`, secrets);
+      if (deploy.status !== 0) throw new OpsTargetError(`克隆库 migrate deploy 失败：${deployOut.split(/\r?\n/).slice(-4).join(" ")}`);
     }
     const appliedNow = Number(sql(admin, `SELECT COUNT(*) FROM \`${upgradeDb}\`._prisma_migrations WHERE finished_at IS NOT NULL`));
+    if (saved && appliedNow !== saved.journal.preparedMigrationCount) throw new OpsTargetError("原接续升级库的迁移基线已变化，需重新核验可信重放");
     const newlyApplied = appliedNow - restored.targetMigrations;
     if (newlyApplied < 0) {
       throw new OpsTargetError(`升级后迁移条数从 ${restored.targetMigrations} 降为 ${appliedNow}，拒绝继续`);
@@ -223,7 +276,7 @@ void (async () => {
     );
     // 新增 0 条不是失败——它只说明这份备份已经包含全部迁移。但必须说清楚，
     // 否则「migrate deploy 通过」会被读成「升级路径已验证」，而实际什么都没升。
-    step("克隆库 migrate deploy", true,
+    step(saved ? "原升级迁移基线复核" : "克隆库 migrate deploy", true,
       newlyApplied > 0
         ? `已应用 ${appliedNow} 条（本次新增 ${newlyApplied} 条）；源库未被迁移`
         : `已应用 ${appliedNow} 条，本次新增 0 条——备份时点已含全部迁移，`
@@ -231,8 +284,33 @@ void (async () => {
     step("升级后关键表复核", true,
       `表 ${verifiedAfterDeploy.targetTables}｜迁移 ${verifiedAfterDeploy.targetMigrations}｜${verifiedAfterDeploy.sampled.join("，")}`);
 
+    // 回滚保留备份时点的兼容结构，也必须独立重放并核证；缺结构或证据保持隔离。
+    if (rolledBack.targetMigrations !== restored.targetMigrations) throw new OpsTargetError("回滚库未保持原备份迁移基线");
+    step("回滚演练（恢复到新库，不写 down migration）", true,
+      `${rollbackDb}｜停在备份时点迁移 ${rolledBack.targetMigrations} 条`);
+    if (!saved) {
+      fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+      continuationFile = path.resolve(ARTIFACT_DIR, `upgrade-drill-ai-${upgradeDb}.json`);
+      fs.writeFileSync(continuationFile, `${JSON.stringify({ version: "ops-ai-upgrade-restore-1", sourceDatabase: target.database,
+        backupSha256: actual, upgradeDatabase: upgradeDb, rollbackDatabase: rollbackDb, preparedMigrationCount: appliedNow }, null, 2)}\n`, { flag: "wx" });
+    }
+    // 首次 AI 恢复只准备隔离库。证书来自后续可信宿主重放，不从克隆快照补造账本。
+    const certificates = name => saved && arg(name) ? readRetentionCertificates(path.resolve(ROOT, arg(name))) : undefined;
+    const publicKey = process.env.OPS_AI_RETENTION_PUBLIC_KEY;
+    const upgradePrivacy = assertRestoreAiBarrier(statement => sql(admin, statement), upgradeDb, actual,
+      certificates("ai-retention-certificates"), publicKey);
+    const rollbackPrivacy = assertRestoreAiBarrier(statement => sql(admin, statement), rollbackDb, actual,
+      certificates("rollback-ai-retention-certificates"), publicKey);
+    step("升级与回滚隐私屏障", true, `${upgradeDb} / ${upgradePrivacy.state}；${rollbackDb} / ${rollbackPrivacy.state}`);
+
     // ---------- 4. 独立端口起 API ----------
     await assertPortFree(DRILL_PORT);
+    granted.push(upgradeDb);
+    sql(admin, `GRANT ALL PRIVILEGES ON \`${upgradeDb}\`.* TO ${appAccount}`);
+    sql(admin, "FLUSH PRIVILEGES");
+    const appProbe = sql(target, "SELECT 1", { database: upgradeDb });
+    if (appProbe !== "1") throw new OpsTargetError("应用账号无法读取升级克隆库，拒绝启动健康检查");
+    step("应用账号克隆库连通", true, `${upgradeDb} / SELECT 1`);
     apiHandle = startApi(appUrl, DRILL_PORT, secrets);
     step("独立端口启动 API", true, `127.0.0.1:${DRILL_PORT}（临时进程，不替换任何运行实例）`);
 
@@ -248,29 +326,6 @@ void (async () => {
     }
     step("健康检查", true, `${HEALTH_PATH} → HTTP ${health.status}，status=${health.health}（第 ${health.attempt} 次尝试）`);
 
-    // ---------- 6. 回滚演练：恢复到**另一个**新库 ----------
-    const rollbackDb = buildCloneDatabaseName(target.database, "rollback");
-    if (rollbackDb === upgradeDb) throw new OpsTargetError("回滚库与升级库同名，拒绝执行");
-    if (sql(admin, `SHOW DATABASES LIKE '${rollbackDb}'`)) {
-      throw new OpsTargetError(`回滚库 ${rollbackDb} 已存在，拒绝复用既有库`);
-    }
-    sql(admin, `CREATE DATABASE \`${rollbackDb}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-    created.push(rollbackDb);
-    const rollbackScript = rewriteBackupForTarget(body.toString("utf8"), target.database, rollbackDb);
-    const rollbackLoad = runMysql("mysql", admin, [rollbackDb], { input: rollbackScript });
-    if (rollbackLoad.status !== 0) {
-      throw new OpsTargetError(`回滚库导入失败：${redact(String(rollbackLoad.stderr ?? ""), secrets)}`);
-    }
-    const rolledBack = verifyClone((statement) => sql(admin, statement), target.database, rollbackDb);
-    // 回滚库必须停在**升级前**的迁移条数：如果它也被 deploy 过，就不是回滚点了。
-    if (rolledBack.targetMigrations !== restored.targetMigrations) {
-      throw new OpsTargetError(
-        `回滚库迁移条数 ${rolledBack.targetMigrations} 与备份时点 ${restored.targetMigrations} 不一致，不能作为回滚点`
-      );
-    }
-    step("回滚演练（恢复到新库，不写 down migration）", true,
-      `${rollbackDb}｜停在备份时点迁移 ${rolledBack.targetMigrations} 条`);
-
     // ---------- 7. 结果 ----------
     const keep = flag("keep") || process.env.OPS_KEEP_DRILL === "1";
     const report = {
@@ -279,6 +334,7 @@ void (async () => {
       generatedAt: new Date().toISOString(),
       sourceDatabase: { name: target.database, mutated: false, note: "全程只读，未执行任何写入或迁移" },
       backup: { file: path.relative(ROOT, file), sha256: actual },
+      privacyBarrier: { upgrade: upgradePrivacy, rollback: rollbackPrivacy },
       upgradeClone: {
         database: upgradeDb,
         migrationsAtRestore: restored.targetMigrations,
@@ -301,10 +357,11 @@ void (async () => {
         `0. 这是演练生成的人工切换模板；本次克隆库${keep ? "按 --keep 保留，可供继续核查" : "将在成功后删除，不能直接作为可切换目标"}。`,
         `1. 停止写入：将应用置为维护态（本脚本不做，也不会停止任何运行中的服务）。`,
         `2. 确认目标：升级后使用 ${upgradeDb}；需要回退时使用 ${rollbackDb}。`,
-        `3. 切换连接：把 DATABASE_URL 的库名改为目标库，逐个实例重启（人工执行）。`,
-        `4. 复检：对新连接跑 ops:release-gate 与 ${HEALTH_PATH}，确认迁移状态与健康均正常。`,
-        `5. 留痕：记录切换时间、执行人、目标库与本报告文件名。`,
-        `6. 收尾：确认稳定后再删除不再需要的克隆库；本脚本不会替你删除已保留的库。`
+        `3. 目标仍须保持隔离：以当前快照外删除账本重放，使用服务器 OPS_AI_RETENTION_PUBLIC_KEY 独立核验该目标全部 scope、原 dump 和 60 秒内证书，再授应用访问。`,
+        `4. 切换连接：确认隐私屏障通过后把 DATABASE_URL 的库名改为目标库，逐个实例重启（人工执行）。`,
+        `5. 复检：对新连接跑 ops:release-gate 与 ${HEALTH_PATH}，确认迁移状态与健康均正常。`,
+        `6. 留痕：记录切换时间、执行人、目标库与本报告文件名。`,
+        `7. 收尾：确认稳定后再删除不再需要的克隆库；本脚本不会替你删除已保留的库。`
       ],
       steps: steps.map(({ name, ok }) => ({ name, ok })),
       notCovered: ["生产切流与灰度", "密钥托管", "监控告警", "异地/离线备份", "跨实例一致性恢复"]
@@ -320,40 +377,58 @@ void (async () => {
 
     // ---------- 8. 清理：只删本次创建且已验证成功的资源 ----------
     if (apiHandle) { apiHandle.child.kill(); apiHandle = undefined; }
+    // 临时 API 结束就回收本次授予的权限；--keep 只保留经核验的克隆库。
+    for (const db of [...granted]) {
+      sql(admin, `REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${appAccount}`);
+      granted.splice(granted.indexOf(db), 1);
+    }
+    sql(admin, "FLUSH PRIVILEGES");
     if (keep) {
       log(`\n✓ 演练通过。按要求保留克隆库：${created.join("、")}`);
       for (const db of created) {
-        if (granted.includes(db)) log(`  清理 1：REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${appAccount};`);
-        log(`  清理 ${granted.includes(db) ? "2" : "1"}：DROP DATABASE \`${db}\`;`);
+        log(`  清理：DROP DATABASE \`${db}\`;`);
       }
     } else {
       for (const db of created) {
-        // 双重判定：既要是本次 created 列表里的，也要符合本工具的克隆库形态。
+        // 只处理本次创建或原接续记录确认的配对克隆库，仍须符合专用库形态。
         if (!isOwnedCloneDatabase(db)) throw new OpsTargetError(`拒绝删除：${db} 不符合本工具克隆库形态`);
-        // 先回收授权再删库：DROP DATABASE 不会清 mysql.db 里的库级授权，
-        // 顺序反了会留下一条指向已删库的孤立授权。
-        if (granted.includes(db)) sql(admin, `REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${appAccount}`);
         sql(admin, `DROP DATABASE \`${db}\``);
+        dropped.push(db);
       }
-      if (granted.length) sql(admin, "FLUSH PRIVILEGES");
+      if (continuationFile) fs.unlinkSync(continuationFile);
       log(`\n✓ 演练通过，已删除本次创建的克隆库：${created.join("、")}`);
     }
     log(`  源库未被修改：${target.database}`);
   } catch (error) {
-    if (apiHandle) apiHandle.child.kill();
     const message = error instanceof Error ? error.message : String(error);
     console.error(`\n✗ 升级/回滚演练失败：${redact(message, secrets)}`);
-    if (created.length) {
+    const remaining = created.filter(db => !dropped.includes(db));
+    if (remaining.length) {
       console.error("  以下克隆库按设计**保留**供排查（失败时不自动删除）：");
-      for (const db of created) console.error(`    - ${db}    清理：DROP DATABASE \`${db}\`;`);
-      for (const db of granted) {
-        console.error(`      该库已授权给应用账号，删库前先回收：REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${quoteSqlString(target.user)}@'%';`);
-      }
+      for (const db of remaining) console.error(`    - ${db}    清理：DROP DATABASE \`${db}\`;`);
+      if (continuationFile) console.error(`  可信宿主完成两库删除标记重放后，以同一 --file、--finalize-ai ${path.relative(ROOT, continuationFile)}、--ai-retention-certificates <升级证书数组.json> 和 --rollback-ai-retention-certificates <回滚证书数组.json> 接续。`);
     } else {
-      console.error("  本次未创建任何克隆库，无残留。");
+      console.error("  本次没有未清理的克隆库。");
     }
     console.error(`  源库未被本脚本修改：${target.database}`);
     console.error("  不要用 schema 回滚冒充数据恢复：先确认备份可用，再决定修迁移还是切到回滚库（见 OPS-01A §5）。");
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    if (apiHandle) {
+      try { apiHandle.child.kill(); }
+      catch (error) {
+        console.error(`  临时 API 停止失败：${redact(error instanceof Error ? error.message : String(error), secrets)}`);
+        process.exitCode = 1;
+      }
+    }
+    for (const db of granted) {
+      try {
+        sql(admin, `REVOKE ALL PRIVILEGES ON \`${db}\`.* FROM ${quoteSqlString(target.user)}@'%';`);
+        sql(admin, "FLUSH PRIVILEGES");
+      } catch (error) {
+        console.error(`  临时应用授权回收失败，仍须核对 ${db}：${redact(error instanceof Error ? error.message : String(error), secrets)}`);
+        process.exitCode = 1;
+      }
+    }
   }
 })();

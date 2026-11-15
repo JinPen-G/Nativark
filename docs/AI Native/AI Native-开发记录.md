@@ -6,6 +6,35 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain27-upgrade-restore-barrier-fixed-20261116"></a>
+## AIN-27 原升级恢复屏障和G1～G3核定（2026-11-16）
+
+固定前置 `285622c03b4fb2f64477062ac439415cc6f46630` 已普通推送并回读GitHub。dev1修复并交回[原升级脚本](../../scripts/ops/upgrade-drill.cjs)，blob为 `c253d59ca86ecfd05700635fef5ee77fab2f5377`，源码SHA-256为 `43f0dfe85e11987cde25749ca3585f31210c667de6aa79310ed03e040c318938`。Root核同原字节、实际命名／备份／迁移校验、原签名屏障、授权／启动及清理顺序，再沿原完整脚本独立复验。本片没有改动原验签、恢复内核或数据库身份守卫。
+
+原脚本在原AI删除标记重放和全scope核证之前授予应用访问并启动API。原反例冻结stdin `2e921f5fafacc29fc3a8cb0053c905dc909b68ef54aa93894950a81264a39685`，原源码SHA-256 `8c9fcf4ba8403f254fc450849133e06dbe5a8e03fc6688706cf05534ead1477e`，privacy调用0而GRANT／API启动各1，表示缺陷被复现。
+
+脚本现在先由管理员准备同备份的升级／回滚配对隔离库，升级库采用原兼容迁移，保存只含原源库、备份SHA、配对库及迁移数量的接续定位。可信备份宿主使用快照外当前删除账本完成两目标重放、签发各目标全部scope证书后，再以原 `--file`、`--finalize-ai`、`--ai-retention-certificates` 及 `--rollback-ai-retention-certificates` 接续。原OPS_AI_RETENTION_PUBLIC_KEY用于独立验签，证书须绑定原dump摘要、具体目标及60秒内时点。接续核原库名和迁移基线，复用原库，不重复导入或迁移。两目标屏障均通过后才GRANT、检查应用连接及启动原独立端口API。API和本次授权进入回收路径；失败保留隔离克隆及最少接续，`--keep`只保留经核验的库。原运行入口仍为package中的ops:upgrade-drill。
+
+作者一组必要内存模拟stdin `5ab6ae32e14c034e7ceeeb1d4b3af4ba6db2414ecb5e75d89632066ba9721c89`，命令 `node --no-compilation-cache -`，exit 0；其Node语法及git diff检查也退出0。Root使用原离线preload、不可达DB、内存audit及本树任务临时根，命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin `459e65b663c3e409b0f394d7c51d63b056f92bf44ae6dd34c2c9b8a8c3b4b9fd`，exit 0。原CLI和原纯ops守卫／改写／验签实现实际执行，快照外重放、文件、SQL、网络和进程为有限内存替身，不是数据库迁移或服务启动验收。
+
+| 五个必要情景 | 原CLI观察 |
+| --- | --- |
+| 缺当前可信证书 | 两隔离库准备和原升级迁移后退出1，GRANT／API启动均0，保留原接续。 |
+| 回滚借用升级目标证书 | 原库接续、零新库／导入／迁移；回滚核证拒绝，GRANT／API启动均0。 |
+| 回滚非法签名 | 原库接续后拒绝，GRANT／API启动均0。 |
+| 两目标证书齐全后原接续 | 升级和回滚各核2个scope，零新库／导入／迁移，授权与回收、API启停各1，原两克隆及接续按未keep路径清理。 |
+| 无AI表的旧路径 | 两库正常准备、原兼容迁移、授权／启动及清理通过，明确返回no_ai_task_tables。 |
+
+原源库逐值不变，打开文件句柄0，真实SQL／API进程／模型调用0，audit为空。Root首次复用前置漏EventEmitter别名，原端口替身报ReferenceError后保持零授权；补齐该内存别名后复验通过，产品边界未放宽。作者及Root自有验证进程均退出，两任务临时目录未创建，没有新测试脚本、依赖或落盘过程产物。公共恢复API类型沿 `80c432f5aab39140fea8ed865879f579cbf2c923` 的四根／1907源、0诊断证据，该固定装配在本片未变。
+
+| 原里程碑 | 核定依据 |
+| --- | --- |
+| G1 | 原A30／A31及本轮验收基线、闭合retentionRestore.publicKeyHash配置、原manifest／permit／全scope证书和ops-ai-upgrade-restore-1接续合同已形成。 |
+| G2 | 原两类维护服务实现export／verify／reapply；原升级CLI贯通管理员迁移、可信重放后核证、应用授权、健康检查及回收。 |
+| G3 | [原部署发布](../../apps/api/src/modules/ai-native/runtime-publication.configuration.ts)→[两标准工厂](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)→[AppModule](../../apps/api/src/app.module.ts)已在80c固定装配；原restore-source／restore-drill和本片upgrade-drill为实际CLI消费者。 |
+
+Root据以上固定来源及复验将AIN-27从0%更新75%，原28项研发覆盖率为91.1%，24／28项仍为100%；ENTRY维持97.2%、16／18完成，46项等权参考为93.5%、40／46完成。G4仍需原AIN-26全文组合依赖、AIN-15原企业变体绑定和AIN-27六条部署／两轨／灰度／停用／回退交付资料核齐，不能用这条恢复路径代替全文。真实供应商、试点实流及D01～D05生产决定由负责人后续操作，单列为生产跟进，未倒用作G1～G3门槛或新增研发100%的实测前置。
+
 <a id="ain27-retention-restore-host-config-20261116"></a>
 ## AIN-27 原恢复工厂可信签名配置接通（2026-11-16）
 
@@ -17,7 +46,7 @@
 
 最终TypeScript5.9.3四根／1907源、126份内存shared声明零诊断，stdin `d99fe61f45a9749ad1bc29de53d3dc85877f082bf28dc0677e9db369c178fcc9`，exit 0。初次类型验证读到未生成的根Client声明，产生3923条派生诊断，改为只读main已生成Client；随后新增配置的具体对象类型影响目录共用record索引，出现5条诊断。现闭合配置与共用record类型求交，严格运行时schema仍拒绝额外私钥字段，模拟和类型均复验通过。自有进程全部退出，原任务临时目录未创建，无新增测试文件、依赖或过程产物。
 
-dev1继续原upgrade-drill唯一窗口，将兼容迁移、删除标记重放及每个目标库独立范围证书核验置于应用授权／API启动之前。AIN-26原完整组合及AIN-15企业变体仍按原依赖核定，AIN-27源码装配和模拟阶段没有替代全文G4或生产恢复。G1～G3逐档证据由原任务核定后更新，当前任务册仍保留原值。
+后继原upgrade-drill修复、独立五情景模拟及G1～G3核定见[升级恢复阶段](#ain27-upgrade-restore-barrier-fixed-20261116)。AIN-26原完整组合及AIN-15企业变体仍按原依赖核定，AIN-27源码装配和模拟阶段没有替代全文G4或生产恢复。
 
 <a id="ain15-existing-enterprise-delegation-source-20261116"></a>
 ## AIN-15 企业原委托源的固定成果重新核实（2026-11-16）
@@ -84,7 +113,7 @@ Root按同一离线边界独立完成两组必要模拟及对应类型，所有�
 
 七分支调用真实源码函数、原API／Auth／Guard／Core／模型runner／累计资源及观测服务。数据库执行、嵌套关系投影、运输、DOM几何、时钟及钩子调度为明确夹具，未作真实浏览器、数据库或供应商验收。Root最初运输替身漏原task-center/result路由，补原Controller映射后复验；首次清除断言忽略了拒绝重复发送后需要原只读复核，按实际门禁修正夹具而未放宽产品。作者的模块替身结构、原启动方法及sessionStorage宿主缺口也按原源码修正。Impeccable对四份实际改动TSX定点detect结果为[]；任务临时目录未创建，自有验证进程全部退出，未新增测试文件或依赖。ENTRY-08／17全文及AIN-26～28按原条款继续核定，本控制台／侧栏接线不另计整项100%。
 
-原文档check入口检查11／11份白名单，exit 1，仍是导航54的三份历史附件和后台界面规范272的稀疏示例四项缺链；本阶段15个变更行链接逐一存在，任务算术无新错误。必要内存命令stdin SHA-256 `54c40c9f988602795d24785b0736fadb340696f8240f591a8d51092716f304a1`。首轮只require检查器而未调用main，不能作为检查通过证据，已改调用其原check函数取得上述真实结果。原作者末次及三个前序模拟PID均已不在运行，原结果终态仍未取回；本次Root完整复验独立取得exit 0。
+原文档check入口检查11／11份白名单，exit 1，仍是导航54的三份历史附件和后台界面规范272的稀疏示例四项缺链；本阶段15个变更行链接逐一存在，任务算术无新错误。必要内存命令stdin SHA-256 `54c40c9f988602795d24785b0736fadb340696f8240f591a8d51092716f304a1`。首轮只require检查器而未调用main，不能作为检查通过证据，已改调用其原check函数取得上述真实结果。原作者末次及三个前序模拟PID均已不在运行，本次Root完整复验独立取得exit 0。随后第三次恢复中，Root主动读取原工具输出确认作者七分支完整job为terminal／exit 0、PID30760、stdin `a9cd0ebae64e76a6719ceae33d5410a0cd0b6d224709fc8036920612d2f6f26b`、audit 0及无临时目录。该回合之后再次以同资源错误结束，原ENTRY-08／17只读核定由内部助手接续，六源码写权仍由Root持有。
 
 保留新验证失败，首轮运输替身给报价返回普通句子，原候选JSON解析正确拒绝，修正夹具为原合法合同；首轮HTTP驱动把task-result路径直当Controller方法名，修为原taskResult方法；跨VM数组直接deepStrictEqual曾因原型差异失败，比较原节点／choices时仅作结构化复制。源类型的文本事件字面量丢失已补准确辨识，零诊断。没有删断言或放宽生产边界。所有Root验证进程已退出，原任务临时目录未创建，未新增测试文件、依赖或落盘过程产物。本片修正现有AIN-12消费者，任务百分比仍按原全文和依赖维护。
 

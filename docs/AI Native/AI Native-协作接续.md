@@ -4,7 +4,7 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。原控制台阶段 `4da7ce6d78bbc2123472ad7bd1bfc93212250550` 及可信恢复配置阶段 `80c432f5aab39140fea8ed865879f579cbf2c923` 均已普通推送并回读GitHub。负责人要求直接接已有Agent控制台和Copilot。原控制台三个实际源码场景、原键恢复／停止、关闭控件及下一轮、历史分支和首字观测已通过必要模拟和类型。Root接回dev2六源，原侧栏与补答的七个正反分支及完整后台／API类型通过，visibleConversation父登记随原[控制台阶段记录](<AI Native-开发记录.md#ain-native-console-direct-integration-20261115>)固定。五份CSS与核定前像逐字节一致。dev1升级脚本c253d59ca86ecfd05700635fef5ee77fab2f5377已交回，Root下一步核恢复顺序及必要模拟，按27原G1／G2／G3和全文分别判断。ENTRY-08／17继续原全文核定。main由PM按固定成果串行整合，保持后继公共壳。本轮真实环境由负责人实测。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。原控制台阶段4da、可信恢复配置80c及原侧栏阶段 `285622c03b4fb2f64477062ac439415cc6f46630` 均已普通推送并回读GitHub。负责人要求直接接已有Agent控制台和Copilot，原三场景、原键恢复／停止、关闭控件及下一轮、历史分支和侧栏／补答首字观测已通过必要模拟和类型，原[控制台阶段](<AI Native-开发记录.md#ain-native-console-direct-integration-20261115>)已固定。五份CSS与核定前像逐字节一致。Root核同dev1升级脚本c253d59ca86ecfd05700635fef5ee77fab2f5377，独立五情景模拟通过，原[升级恢复和G1～G3](<AI Native-开发记录.md#ain27-upgrade-restore-barrier-fixed-20261116>)满足，AIN-27已更新75%。继续原15／26组合、27全文部署／灰度／停用资料、28独立交付及ENTRY-08／17。main由PM按固定成果串行整合，保持后继公共壳。本轮真实环境由负责人实测。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
@@ -18,9 +18,10 @@
 
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
-| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、公共契约／Guard／AppModule／OpenAPI／provider及实际原消费者。原控制台、Copilot六源、父登记和升级脚本均已接回写权；先固定侧栏阶段，再核原升级恢复及27门槛，继续15／26～28和ENTRY-08／17。企业原告知、付款及Core窗口沿PM固定归属。 |
+| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、公共契约／Guard／AppModule／OpenAPI／provider及实际原消费者。原控制台、Copilot六源和父登记已固定上传；原升级恢复五情景和27门槛已核定，继续15／26组合、27全文交付、28及ENTRY-08／17。企业原告知、付款及Core窗口沿PM固定归属。 |
 | AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 拒绝审计四源已上传。升级脚本c253d59ca86ecfd05700635fef5ee77fab2f5377冻结并交回Root，当前只读核AIN-27的G1／G2／G3、部署／灰度／停用／回退资料及全文缺口。无活动源码、四册或索引写权。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 六源写权已由Root收回，当前模型服务资源不匹配，两次terminal failed。恢复后只读提取原最终job证据及进程状态，再核ENTRY-08／17全文；不写源码、四册或索引。Root继续自主核接。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 六源写权已由Root收回。三次同资源错误后停止，最后一次已取回原完整七分支job exit 0并读原ENTRY条款。该聊天保留原证据，无活动写权；Root已用内部只读助手接续08／17，不继续重复同一失败重试或改变模型设置。 |
+| 内部/root/entry_closeout_fallback | 接续原ENTRY-08／17三条全文只读核定，核生产者／正式装配／各端消费者及原降级、审计、隐私证据。无源码、四册或索引写权，不跑或新增测试、不递归派审。 |
 | 内部/root/opening_core_closeout | 原11／12／18及限定ENTRY-02导航复核已交回；通知最后tenant敏感读权及原K损坏两P2的最小修复再次独立静态核闭。正文删除／缓存及小程序profile不在该结论范围，不递归派审／重复绿色，无写权。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
 | main／PM | main串行集成、真实数据库／迁移／Client／服务恢复的唯一负责人。每两项原任务新达100%形成main节点；AI不争main索引或夹其他专项WIP，助手不等待集成。 |
