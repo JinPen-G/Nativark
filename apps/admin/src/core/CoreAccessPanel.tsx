@@ -1,8 +1,8 @@
-/** 平台开通和租户成员分配的聚焦管理面；当前事实/原收据分开，未知结果只读核对。 */
+/** 平台开通和租户成员分配的聚焦管理面；原结果与后续读取分开，当前本人Core缓存随授权变更重读。 */
 import { useLayoutEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryFilters } from "@tanstack/react-query";
 import { ChangeMemberCoreAssignmentSchema, ChangeTenantCoreGrantSchema,
-  type ChangeMemberCoreAssignment, type ChangeTenantCoreGrant, type MemberCoreAssignment, type TenantCoreGrant } from "@rental-os/core-contracts";
+  type ChangeMemberCoreAssignment, type ChangeTenantCoreGrant, type CoreSessionContext, type MemberCoreAssignment, type TenantCoreGrant } from "@rental-os/core-contracts";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
 import { currentSessionEpoch } from "@/app/queryClient";
@@ -54,6 +54,7 @@ function CoreAccessEditor(props: Panel) {
   const { locale } = useLocale();
   const text = (zh: string, en: string) => locale === "en-US" ? en : zh;
   const { user, tenant, sessionVerified } = useAuthStore();
+  const client = useQueryClient();
   const epoch = useRef(currentSessionEpoch()).current;
   const target = props.kind === "tenant" ? props.tenant : props.member;
   const permissions = user?.permissions ?? [];
@@ -78,26 +79,68 @@ function CoreAccessEditor(props: Panel) {
   const setOriginal = (value: Original | undefined) => { originalRef.current = value; setOriginalState(value); };
   const [busy, setBusy] = useState(false), [failure, setFailure] = useState<"rejected" | "unknown" | "unavailable">();
   const [receipt, setReceipt] = useState<string>();
-  const inFlight = useRef<Promise<void> | null>(null);
+  const [refreshFailure, setRefreshFailure] = useState(false);
+  const needsRefresh = useRef(false), needsDirectory = useRef(false);
+  const inFlight = useRef<{ action: string; promise: Promise<void> } | null>(null);
   const controller = () => {
     if (!live.current || currentSessionEpoch() !== epoch || !lifetime.current || lifetime.current.signal.aborted)
       throw new DOMException("原Core管理页面已失效", "AbortError");
     return lifetime.current;
   };
-  const readCurrent = () => query.refetch();
-  const run = (work: (signal: AbortSignal) => Promise<void>) => {
-    if (inFlight.current) return inFlight.current;
+  const readDirectory = async () => {
+    controller();
+    const affected: QueryFilters = { predicate: cached => {
+      const key = cached.queryKey;
+      return key[0] === "core" && key[1] === props.core.id
+        || ["platform-core-scope", "platform-core-binding"].includes(String(key[0]))
+          && key[1] === epoch && key[2] === tenant?.tenantId && key[3] === user?.id && key[4] === props.core.id;
+    } };
+    const directory = { queryKey: ["platform-core-session", epoch, tenant?.tenantId, user?.id], exact: true };
+    // 目录没有缓存时invalidate会复用变更前的请求；先中止，禁止其旧授权回填。
+    await client.cancelQueries(directory);
+    controller();
+    // 只撤去目标Core的旧准入，不从变更收据补权限；其余Core保留到真实目录重读。
+    client.setQueryData<CoreSessionContext>(directory.queryKey, context => context && { ...context,
+      cores: context.cores.filter(entry => entry.core.id !== props.core.id),
+      assignable: props.kind === "tenant" ? context.assignable.filter(core => core.id !== props.core.id) : context.assignable });
+    client.removeQueries(affected);
+    await client.invalidateQueries(directory, { throwOnError: true });
+    controller(); needsDirectory.current = false;
+  };
+  const readCurrent = async () => {
+    const boundary = controller();
+    needsRefresh.current = true;
+    const reads = [query.refetch().then(result => { if (result.isError) throw result.error; })];
+    if (needsDirectory.current) reads.push(readDirectory());
+    const outcomes = await Promise.allSettled(reads);
+    if (boundary.signal.aborted || currentSessionEpoch() !== epoch || !live.current) return false;
+    const refreshed = outcomes.every(result => result.status === "fulfilled");
+    needsRefresh.current = !refreshed; setRefreshFailure(!refreshed);
+    return refreshed;
+  };
+  const run = (action: string, work: (signal: AbortSignal) => Promise<void>) => {
+    if (inFlight.current) return inFlight.current.action === action ? inFlight.current.promise
+      : Promise.reject(new Error(text("请等待当前操作完成", "Wait for the current operation to finish")));
     const boundary = controller();
     setBusy(true);
     const pending = work(boundary.signal).finally(() => {
-      inFlight.current = null;
+      if (inFlight.current?.promise === pending) inFlight.current = null;
       if (!boundary.signal.aborted) setBusy(false);
     });
-    inFlight.current = pending;
+    inFlight.current = { action, promise: pending };
     return pending;
   };
-  const change = (enabling: boolean) => run(async signal => {
-    if (originalRef.current || !query.data || query.error || query.isFetching) throw new Error(text("请先读取当前状态", "Read the current state first"));
+  const retryRead = () => run("read", async () => {
+    if (!await readCurrent()) throw new Error(text("最新状态尚不可用，请稍后重新读取", "The latest state is unavailable. Read it again later."));
+  });
+  const recorded = async (command: Original) => {
+    controller(); window.sessionStorage.removeItem(journalKey); setOriginal(undefined); setFailure(undefined); setReceipt(command.input.operationId);
+    needsDirectory.current = props.kind === "tenant" ? props.tenant.id === tenant?.tenantId : props.member.id === user?.id;
+    // 收据已经确认；随后读取失败单独呈现，不把原变更重新判为unknown或重发。
+    await readCurrent();
+  };
+  const change = (enabling: boolean) => run(enabling ? "enable" : "disable", async signal => {
+    if (originalRef.current || needsRefresh.current || !query.data || query.error || query.isFetching) throw new Error(text("请先读取当前状态", "Read the current state first"));
     const fact = query.data.status === "recorded" ? "grant" in query.data ? query.data.grant : query.data.assignment : undefined;
     const command: Original = props.kind === "tenant"
       ? { kind: "tenant", input: { tenantId: props.tenant.id, coreId: props.core.id, state: enabling ? "enabled" : "disabled",
@@ -111,8 +154,7 @@ function CoreAccessEditor(props: Panel) {
       const result = command.kind === "tenant" ? await coreManagementApi.changeTenantGrant(command.input, signal)
         : await coreManagementApi.changeMemberAssignment(command.input, signal);
       verifyReceipt(command, result, tenant?.tenantId);
-      controller(); window.sessionStorage.removeItem(journalKey); setOriginal(undefined); setReceipt(command.input.operationId);
-      await readCurrent();
+      controller();
     } catch (error) {
       if (!signal.aborted && live.current) {
         if (coreManagementRejectedBeforeCommit(error)) {
@@ -124,8 +166,9 @@ function CoreAccessEditor(props: Panel) {
       }
       throw error;
     }
+    await recorded(command);
   });
-  const reconcile = () => run(async signal => {
+  const reconcile = () => run("original", async signal => {
     const pending = originalRef.current;
     if (!pending) throw new Error(text("没有待核对操作", "No operation is awaiting confirmation"));
     const observed = pending.kind === "tenant"
@@ -140,8 +183,7 @@ function CoreAccessEditor(props: Panel) {
     }
     const result = "grant" in observed ? observed.grant : observed.assignment;
     verifyReceipt(pending, result, tenant?.tenantId);
-    window.sessionStorage.removeItem(journalKey); setOriginal(undefined); setFailure(undefined); setReceipt(pending.input.operationId);
-    await readCurrent();
+    await recorded(pending);
   });
   if (!canManage) return <Result status="403" title={text("无权管理此 Core", "Core management is unavailable")} />;
   const fact = query.data?.status === "recorded" ? "grant" in query.data ? query.data.grant : query.data.assignment : undefined;
@@ -149,14 +191,14 @@ function CoreAccessEditor(props: Panel) {
   const state = props.kind === "tenant"
     ? text(enabled ? "已开通" : fact ? "已停用" : "尚未开通", enabled ? "Enabled" : fact ? "Disabled" : "Not enabled")
     : text(enabled ? "已分配" : fact ? "已撤回" : "尚未分配", enabled ? "Assigned" : fact ? "Revoked" : "Not assigned");
-  const disabled = busy || Boolean(original) || query.isFetching || Boolean(query.error);
+  const disabled = busy || Boolean(original) || refreshFailure || query.isFetching || Boolean(query.error);
   const failureMessage = failure === "rejected"
     ? text("本次操作被拒绝，请核对当前状态和管理权限。", "The change was rejected. Check the current state and your management access.")
     : failure === "unavailable"
       ? text("尚未读到原操作收据，请保留核对编号并稍后再次核对。", "The original receipt is unavailable. Keep the reference and read it again later.")
       : failure === "unknown" ? text("未能确认本次操作结果，请核对原操作。", "The result is unconfirmed. Read the original operation.") : undefined;
   return <ListSection title={`${props.core.name} · ${target.name}`}>
-    <QueryState loading={query.isPending} error={query.error} onRetry={readCurrent}>
+    <QueryState loading={query.isPending} error={query.error} onRetry={retryRead}>
       <DataTableStatus tone={enabled ? "success" : "neutral"}>{state}</DataTableStatus>
       {enabled
         ? <ConfirmAction label={text(props.kind === "tenant" ? "停用 Core" : "撤回分配", props.kind === "tenant" ? "Disable Core" : "Revoke assignment")}
@@ -166,6 +208,10 @@ function CoreAccessEditor(props: Panel) {
         : <ActionButton label={text(props.kind === "tenant" ? "开通 Core" : "分配 Core", props.kind === "tenant" ? "Enable Core" : "Assign Core")}
           intent="confirm" disabled={disabled} onAction={() => change(true)} />}
     </QueryState>
+    {refreshFailure && <Alert type="warning" title={receipt
+      ? text("操作已记录，最新状态尚未读到", "The operation is recorded. The latest state is unavailable.")
+      : text("最新状态尚未读到", "The latest state is unavailable.")}
+      action={<ActionButton label={text("重新读取", "Read again")} intent="refresh" pending={busy} onAction={retryRead} />} />}
     {failureMessage && !original && <Alert type="error" title={failureMessage} />}
     {original && <>
       <Alert type="warning" title={failureMessage ?? text("本次操作等待核对", "This operation needs confirmation")}
