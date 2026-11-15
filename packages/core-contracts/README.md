@@ -57,6 +57,8 @@ node packages/core-contracts/dist/check.js <解包后的Core目录> --host <宿�
 
 检查读取不含凭据的来源元数据。清单解析前限制为 256 KiB，迁移和 OpenAPI JSON 单文件上限 32 MiB；其余入口和资源只查文件元信息。检查对象应是本次独占、内容不再变化的解包目录，部署前仍须核对整个发布包摘要。该工具不审核业务代码，也不把清单来源视为代码可信证明。
 
+宿主构建或启动前，可从 `/install` 调用 `requireCorePackagePin(directory, pin, hostVersions)`，核实际标准包的ID、版本、固定来源和全部声明文件摘要。前后端使用同一个部署锁；函数只读核验，不执行包代码、安装或迁移。[工单Web配置](../../apps/example-tickets-admin/vite.config.ts)与[API适配](../../apps/example-tickets-api/src/deployment-package.ts)共同消费这一实现。
+
 ## 命名、版本与权限
 
 - Core ID 使用小写字母、数字和连字符，例如 `rental`、`example-tickets`，不使用租赁品类编码充当 Core 类型。

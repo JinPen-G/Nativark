@@ -12,6 +12,7 @@
     "./shell": "./src/shell.ts",
     "./runtime": "./src/runtime/index.ts",
     "./session-pages": "./src/session-pages.tsx",
+    "./application": "./src/application.tsx",
     "./forms": "./src/forms.ts",
     "./motion": "./src/motion.ts",
     "./locale": "./src/app/locale.tsx",

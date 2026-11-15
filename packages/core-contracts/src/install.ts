@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { CORE_ARCHIVE_LIMITS, createCoreArchive, readCoreArchive } from "./archive";
 import type { CoreHostVersions } from "./compatibility";
 import type { CoreManifest } from "./manifest";
+import { CorePackagePinSchema, type CoreDeploymentLock } from "./update";
 import { corePackageFiles, inspectCorePackageFiles, readCorePackageFiles } from "./package";
 
 const digest = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
@@ -37,6 +38,17 @@ export function packCoreDirectory(directory: string, host?: CoreHostVersions) {
   const inspected = inspectCorePackageFiles(files, host);
   if (!inspected.ok) throw new Error(inspected.issues.map(issue => `${issue.file}:${issue.field ?? ""} [${issue.code}] ${issue.message}`).join("\n"));
   return { ...createCoreArchive(files), manifest: inspected.manifest! };
+}
+
+/** 宿主在构建/运行前核定实际已安装标准包，不接受仅有同版本声明的不同字节。 */
+export function requireCorePackagePin(directory: string, input: CoreDeploymentLock["cores"][number], host: CoreHostVersions) {
+  const pin = CorePackagePinSchema.parse(input), root = ordinaryDirectory(directory);
+  const packed = packCoreDirectory(root, host), manifest = packed.manifest;
+  if (manifest.id !== pin.manifest.id || manifest.version !== pin.manifest.version
+    || manifest.source.repository !== pin.manifest.source.repository || manifest.source.commit !== pin.manifest.source.commit)
+    throw new Error("实际Core包的标识、版本或来源与部署锁不一致");
+  if (packed.sha256 !== pin.sha256) throw new Error("实际Core包字节与锁定摘要不一致，先重新核对待部署组合");
+  return { root, manifest };
 }
 
 function assertExisting(directory: string, files: ReadonlyMap<string, Uint8Array>) {

@@ -4,9 +4,9 @@
 
 ## 阅读入口
 
-- [main](src/main.tsx)加载正式公共样式和动效，挂载[App](src/App.tsx)。后者只登记公共路由，沿验证后的身份过滤菜单与直接地址。
+- [main](src/main.tsx)加载正式公共样式和动效，挂载[App](src/App.tsx)。后者选择空Core组合，公共应用沿验证后的身份过滤菜单与直接地址。
 - [session](src/session.ts)创建唯一浏览器会话，实际逻辑在[公共会话](../../packages/platform-admin/src/runtime/browser-session.ts)及[HTTP客户端](../../packages/platform-admin/src/runtime/browser-http.ts)。登录、刷新、改密、退出和 storage 失效共用原取消/代次边界。
-- [SettingsPage](src/SettingsPage.tsx)调用本人资料、账户主题色、租户名称和品牌名 API。保存等待原 Promise、保留原修订号，后台读取保留草稿，明确重新读取才放弃草稿。菜单隐藏不能替代服务端授权。
+- [公共SettingsPage](../../packages/platform-admin/src/SettingsPage.tsx)调用本人资料、账户主题色、租户名称和品牌名 API。保存等待原 Promise、保留原修订号，后台读取保留草稿，明确重新读取才放弃草稿。菜单隐藏不能替代服务端授权。
 - [Vite配置](vite.config.ts)复用公共适配与原环境白名单。开发端口5176，API代理使用原配置，Core代码不决定代理或读取秘密。
 
 ## 本地使用

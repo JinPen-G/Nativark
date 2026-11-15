@@ -42,7 +42,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 3. 下一入口与待交付
 
-公共前端源码和Core呈现已单源移入 [platform-admin](../../../packages/platform-admin/README.md)，原宿主通过验证后的会话/请求/缓存端口消费。[独立零Core Web](../../../apps/platform-admin/README.md)已有登录/改密/有限公共设置、完整公共壳和同源HTTP客户端，类型与Vite内存构建已核。先从[当前证据与缺口](平台Core接入-开发记录.md#core-zero-admin-host-20261115)接续，接工单正式前端出口/示范宿主及Core管理UI，继续完整公共服务和Rental包。真实登录/保存、浏览器、干净安装和旧功能全量回归仍未验；下述原任务未完项继续有效。
+公共前端源码和Core呈现已单源移入 [platform-admin](../../../packages/platform-admin/README.md)，原宿主通过验证后的会话/请求/缓存端口消费。[零Core Web](../../../apps/platform-admin/README.md)与[工单Web](../../../apps/example-tickets-admin/README.md)现消费同一公共应用工厂；后者只增加四页注册表，类型、内存构建、声明路由和权限过滤已核。前后端共用实际标准包核验；构建验证的清单是明确fixture，真实磁盘安装门禁/运行未验。先从[当前证据与缺口](平台Core接入-开发记录.md#core-tickets-admin-host-20261115)接续，将Core管理面板接实际公共租户/成员目录，再继续完整公共服务和Rental包。真实登录/保存、浏览器、干净安装和旧功能全量回归仍未验；下述原任务未完项继续有效。
 
 1. 01已按固定main核对238个模型的所有者分组、259份迁移的混合依赖、全部API模块/公开入口集合及代表性页面/客户端/作业消费者，具体去向和原失败/未验见[归属基线](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[开发能力查询](../../../packages/core-contracts/README.md#找到平台已有的功能)和[模块导读/直接消费者](平台Core接入-开发记录.md#core-source-reading-20261115)已有实际入口及覆盖状态，源码用途/文档缺口继续按模块整改。完整行为基线、独立schema/迁移账和最终前后运行对照仍按原门槛交付。
 2. 02已有清单/版本/对象命名空间、目录检查、OpenAPI贡献、服务端/生命周期与授权变更schema；[升级预检](平台Core接入-开发记录.md#core-update-preflight-20261114)及[未完成迁移观察](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)已有独立版本锁/实际数据观察和单对象候选。[首次绑定及事务](平台Core接入-开发记录.md#core-binding-runtime-20261115)与[原绑定/工单组合](平台Core接入-开发记录.md#core-original-binding-tickets-20261115)已消费原主体、当前Core/成员使用权、订阅及同事务审计，下一步接真实部署/数据观察和主应用消费者，核对Rental旧身份兼容。[工单样例](../../../packages/example-tickets-core/README.md)包含领域/MySQL、独立迁移、8操作Nest与同源OpenAPI/原收据只读、4页面贡献，主Guard/HTTP/后台仍按公共窗口接线。

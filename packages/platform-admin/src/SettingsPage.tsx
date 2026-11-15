@@ -3,17 +3,18 @@ import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AccountAppearanceProfile, PlatformTenantSummary, SavePlatformSelfProfileRequest,
   SaveTenantAppearanceRequest, SystemUserRow, TenantAppearanceProfile, UpdateTenantRequest } from "@rental-os/platform-contracts";
-import { Alert, ColorPicker, ConfirmAction, Form, Input, SaveButton } from "@rental-os/platform-admin/ui";
-import { PageHeading, QueryState, useServerFormSync } from "@rental-os/platform-admin/shell";
-import { UnsavedChangesGuard } from "@rental-os/platform-admin/core";
-import { useLocale } from "@rental-os/platform-admin/locale";
-import { formSnapshotFingerprint, notifyFormSaved } from "@rental-os/platform-admin/forms";
-import { session } from "./session";
+import { Alert, ColorPicker, ConfirmAction, Form, Input, SaveButton } from "./components/ui";
+import { PageHeading, QueryState, useServerFormSync } from "./shell";
+import { UnsavedChangesGuard } from "./core";
+import { useLocale } from "./app/locale";
+import { formSnapshotFingerprint, notifyFormSaved } from "./forms";
+import { usePlatformApplication } from "./application-context";
 
 function SettingsEditor<Values extends object>({ path, title, fields, project, payload }: {
   path: string; title: string; fields: ReactNode; project: (response: unknown) => Values;
   payload?: (values: Values) => unknown;
 }) {
+  const { session, brandName } = usePlatformApplication();
   const { locale } = useLocale(), english = locale === "en-US";
   const [form] = Form.useForm<Values>();
   const [dirty, setDirty] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(false), [reload, setReload] = useState(0);
@@ -44,7 +45,7 @@ function SettingsEditor<Values extends object>({ path, title, fields, project, p
   return <Form form={form} layout="vertical" requiredMark={false} disabled={busy}
     onValuesChange={() => setDirty(formSnapshotFingerprint(form.getFieldsValue(true)) !== baseline.current)}
     onFinish={values => { void save(values).catch(() => undefined); }}>
-    <PageHeading brandName="Nativark" title={title} extra={<>
+    <PageHeading brandName={brandName} title={title} extra={<>
       <ConfirmAction label={english ? "Reload" : "重新读取"} prompt={english ? "Discard the local draft and load current settings?" : "放弃本地草稿，重新读取当前设置？"}
         disabled={busy} onConfirm={async () => {
           const result = await query.refetch(); if (result.isError) throw result.error;

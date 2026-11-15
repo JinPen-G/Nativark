@@ -8,7 +8,7 @@ import { corePageKey, resolveCorePageLocation, type CoreAdminContribution } from
 import {
   Alert, Button, CoreList, CorePage, DataTableText, Form, Input, ListSection, QueryState, SaveButton, Select, UnsavedChangesGuard,
   useCorePageHost, useCoreRequest, useCoreForm, useCoreBinding, useLocale, type CoreAdminPageAction
-} from "@rental-os/admin/core";
+} from "@rental-os/platform-admin/core";
 import { TICKETS_CORE_ID, TICKETS_CORE_VERSION, TicketSchema, type Ticket } from "@rental-os/example-tickets-core/contracts";
 import { TICKETS_HTTP } from "@rental-os/example-tickets-core/http";
 

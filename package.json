@@ -208,7 +208,9 @@
     "test:access-page-mutations": "node tests/access-page-mutations.test.cjs",
     "dev:platform-admin": "npm run dev -w @rental-os/platform-admin-app",
     "build:platform-admin": "npm run build -w @rental-os/platform-admin-app",
-    "lint:platform-admin": "npm run lint -w @rental-os/platform-admin-app"
+    "lint:platform-admin": "npm run lint -w @rental-os/platform-admin-app",
+    "build:example-tickets-admin": "npm run build -w @rental-os/example-tickets-admin",
+    "dev:example-tickets-admin": "npm run dev -w @rental-os/example-tickets-admin"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

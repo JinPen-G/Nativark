@@ -28,7 +28,7 @@
 
 需要移除检查时，向 `authority.assessRemoval`传入MySQL正式出口 `readTicketsRemoval`的只读绑定。它先核真实结构，再查询未关闭工单、历史工单和原操作收据是否存在；部署移除检查全Core，可选tenantId仅缩小观察范围。未关闭返回in_flight，保留历史/收据返回history，缺结构返回unknown。全部不存在也只表示Core数据没有阻碍，平台仍须确认已停止新准入、没有在途任务/回调和完整历史依赖。停用不要求清空历史，检查不关闭工单、不删数据，也不批准删除代码。[实际检查](src/mysql.ts) · [平台汇合](../core-host/README.md#移除代码前读取依赖)
 
-后台直接调用 `createTicketsAdmin()`取得四页贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，主组合通过[公共路由适配](../../apps/admin/src/core/README.md#宿主只装配一次)挂接，当前主应用实际接线仍待完成。[页面源码](admin/index.tsx)
+后台直接调用 `createTicketsAdmin()`取得四页贡献并按平台标准注册。默认详情从 `useCorePageHost().params.ticketId`读取框架匹配的登记参数；已有宿主仍可提供自己的受控详情组件。Core不需要自己写React Router适配或修改平台导航，[工单Web宿主](../../apps/example-tickets-admin/README.md)已将注册表交给正式公共应用工厂；原Rental主应用仍沿自己的组合。[页面源码](admin/index.tsx)
 
 新建页通过 `useCoreForm`共用原Form、顶部SaveButton和回车提交，框架维护等待、防重、失败及未保存提醒，Core只保留业务输入转换和原操作核对。同步成功后禁止重复创建，unknown未重新渲染也不重发；原收据暂缺继续保留同键，取得可信结果后解除这次草稿。没有另写按钮/表单样式或第二套请求。[简明表单写法](../../apps/admin/src/core/README.md#保存保留原-form)
 
@@ -85,7 +85,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 ## HTTP 与 API 文档
 
-宿主从 `@rental-os/example-tickets-core/nest`导入`TicketsHttpModule.register(service, principalAccessor)`，放入受控组合；`principalAccessor.current()`仅从原Guard/ALS当前身份取值。这里不加公开路由豁免、不替换全局Guard或读取请求体的tenantId。原全局路由政策还没有登记工单接口，当前默认拒绝应保留，待公共窗口按[HTTP合同](src/http.ts)逐项注册。
+宿主从 `@rental-os/example-tickets-core/nest`导入`TicketsHttpModule.register(service, principalAccessor)`，或用 `registerFactory` 消费公共宿主导出的同一服务；`principalAccessor.current()`仅从原Guard/ALS当前身份取值。[独立API组合](../../apps/example-tickets-api/src/assembly.ts)已将八条工单政策登记到公共Guard目录，原Rental宿主是否选择本Core由自身组合决定。[HTTP合同](src/http.ts)同时生成政策与API资料。
 
 | 方法与路径 | 业务权限 | 输入与返回 |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ npm run pack:core -w @rental-os/example-tickets-core -- <Core仓库HTTPS地址> 
 
 ## 后台页面与首次设置
 
-`@rental-os/example-tickets-core/admin`提供[首次设置、列表、新建和详情](admin/index.tsx)，只从`@rental-os/admin/core`取得公共呈现、原组件和请求。`createTicketsAdmin()`返回同一页面注册贡献，默认详情使用框架登记参数；已有宿主可继续提供受控detailComponent，宿主仍须包裹真实`CorePageHostProvider`。
+`@rental-os/example-tickets-core/admin`提供[首次设置、列表、新建和详情](admin/index.tsx)，从`@rental-os/platform-admin/core`取得公共呈现、原组件和请求。`createTicketsAdmin()`返回同一页面注册贡献，默认详情使用框架登记参数；公共应用工厂负责真实`CorePageHostProvider`与路由挂接，已有宿主也可继续提供受控detailComponent。
 
 测试宿主接通后，按“受控注册 → SaaS开通租户 → 租户管理者给成员分配Core → 工单设置 → 创建/分派/处理/关闭”使用。`/cores/example-tickets/setup`是已登记配置页，不要求工单业务先就绪；管理者需已获Core成员分配才能办理首次绑定。工单没有额外初始化配置，设置动作调用平台原绑定服务，已有绑定复用。结果未知只核对原设置收据，刷新或重入保留原键；设置成功后再进入实际工单列表。[平台绑定用法](../../apps/admin/src/core/README.md#core首次设置)
 
