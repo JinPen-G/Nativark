@@ -10,6 +10,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 品类解析经[RentalCategoryResolver](rental-category-resolver.service.ts)、[能力Hook](capability-hook.runtime.ts)和[空间能力](workspace-capability.service.ts)。品类内部扩展与注册新的CRM/工单Core各有独立合同；原未完动态采用和业务闭环按其四册继续验收。[Rental当前入口](../../../../../docs/Rental%20Core/Rental%20Core-协作接续.md) · [品类治理](../../../../../docs/Rental%20Core/品类治理/品类治理-协作接续.md)
 
+5个原能力实现已移入Rental包的 `/capabilities/<模块名>` 正式出口，本目录原路径转接。[登记器](capability-hook.registrar.ts)仍是原执行器的唯一组合点，保留当前和历史兼容版本；运行时、实例读取和审计不随工厂迁移被省略。
+
 AI/企业/客户端消费者通过原正式业务接口读取事实和执行动作，文件ACL、金额、批准、原收据与恢复仍按原链核对。原到期[调度器](rental-due-job.scheduler.ts)和回调不得因为Core停用而丢弃已提交业务的受权收尾。[原业务接口资料](../../contracts/openapi-document.ts) · [AI组合](../ai-native/ai-native-application.providers.ts)
 
 必要验证入口为[原Core](../../../../../tests/rental-core-v01.test.cjs)、[原业务](../../../../../tests/rental-business-v1.test.cjs)、[价格策略](../../../../../tests/rental-pricing-strategy.test.cjs)及对应专项收据/事务用例。旧失败、未验环境和完整迁移回退沿原记录保留，底座抽离按PCH受影响功能取前后对照。[拆分兼容门槛](../../../../../docs/平台底座/Core接入/平台Core接入-开发任务.md#compatibility-slices)

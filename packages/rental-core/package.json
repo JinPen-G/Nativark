@@ -22,6 +22,26 @@
     "./equipment": {
       "types": "./dist/equipment.d.ts",
       "default": "./dist/equipment.js"
+    },
+    "./capabilities/camera-compatibility": {
+      "types": "./dist/capabilities/camera-compatibility.d.ts",
+      "default": "./dist/capabilities/camera-compatibility.js"
+    },
+    "./capabilities/camera-kit-handover": {
+      "types": "./dist/capabilities/camera-kit-handover.d.ts",
+      "default": "./dist/capabilities/camera-kit-handover.js"
+    },
+    "./capabilities/camping-cleaning-turnaround": {
+      "types": "./dist/capabilities/camping-cleaning-turnaround.d.ts",
+      "default": "./dist/capabilities/camping-cleaning-turnaround.js"
+    },
+    "./capabilities/camping-kit-integrity": {
+      "types": "./dist/capabilities/camping-kit-integrity.d.ts",
+      "default": "./dist/capabilities/camping-kit-integrity.js"
+    },
+    "./capabilities/kit-handover": {
+      "types": "./dist/capabilities/kit-handover.d.ts",
+      "default": "./dist/capabilities/kit-handover.js"
     }
   },
   "typesVersions": {
@@ -34,6 +54,21 @@
       ],
       "equipment": [
         "dist/equipment.d.ts"
+      ],
+      "capabilities/camera-compatibility": [
+        "dist/capabilities/camera-compatibility.d.ts"
+      ],
+      "capabilities/camera-kit-handover": [
+        "dist/capabilities/camera-kit-handover.d.ts"
+      ],
+      "capabilities/camping-cleaning-turnaround": [
+        "dist/capabilities/camping-cleaning-turnaround.d.ts"
+      ],
+      "capabilities/camping-kit-integrity": [
+        "dist/capabilities/camping-kit-integrity.d.ts"
+      ],
+      "capabilities/kit-handover": [
+        "dist/capabilities/kit-handover.d.ts"
       ]
     }
   },
