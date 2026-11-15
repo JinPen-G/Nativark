@@ -16,6 +16,8 @@ import { AI_NATIVE_TASK_CALENDAR_DRAFT_PROVIDER } from './modules/ai-native/ai-n
 import { AiMemberNameController } from './modules/ai-native/member-name.application';
 import { AI_NATIVE_MEMBER_NAME_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { Module } from "@nestjs/common";
+import { PLATFORM_APPEARANCE_DATA_STORE, LEGACY_TENANT_APPEARANCE_READER } from "./modules/platform/platform-appearance-data-store";
+import { PrismaService } from "./modules/database/prisma.service";
 import { AiDesktopBusinessModule } from './modules/ai-native/desktop-business/desktop-business.module';
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ApiAuthGuard } from "./common/api-auth.guard";
@@ -301,6 +303,15 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     PlatformDemoRequestController
   ],
   providers: [
+    { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PrismaService },
+    { provide: LEGACY_TENANT_APPEARANCE_READER, inject: [PrismaService], useFactory: (database: PrismaService) =>
+      async (tenantId: string) => {
+        const row = await database.clientChannelProfile.findUnique({ where: { tenantId }, select: {
+          brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminCornerRadius: true,
+          adminContainerRadius: true, adminButtonRadius: true, adminInputRadius: true
+        } });
+        return row;
+      } },
     AI_NATIVE_AUTOMATION_EXPLANATION_PROVIDER,
     AI_NATIVE_TASK_OPENING_PROPOSAL_PROVIDER,
     AiCreditService,

@@ -9,6 +9,7 @@
 export * from "./agent-desktop";
 export * from "./common";
 export * from "./core";
+export * from "./platform-identity";
 export * from "./platform";
 export * from "./infrastructure";
 export * from "./staff-upload-observation";

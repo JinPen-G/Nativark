@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权持续完成PCH-01～12，当前主拆分受阻于公共服务端唯一作者窗口，尚未完成。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，当前工单包命令已在固定 `5deaf63d80eb0fc294af8014efffaf637b6570fe` [实际复验](平台Core接入-开发记录.md#core-package-current-cli-20261115)。恢复入口是核定[公共服务端文件/方法](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)的写入归属，再从含既有简称成果的[当前基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115)接续公共身份、租户投影及主装配。
+> 状态：负责人已明确授权本对话全权负责独占工作树及PCH拆分需要的公共文件，原唯一作者窗口阻塞已解除，持续完成PCH-01～12。最新main62ca已纳入；[公共认证抽取阶段](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)完成公共合同、账号/会话仓储和认证兼容抽取，完整API类型与定向行为已有证据。下一入口是独立公共宿主/构建与Guard，再接标准Core主装配；真实无Core运行、完整公共后台、多Core及Rental全功能验收仍未完成。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -32,16 +32,12 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 
 ## 2. 写入归属与固定来源
 
-- 当前独占树为 `C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS`，分支 `codex/platform-core-extraction`，最新main `62ca183f10b7c316ab63c28ef6d04ee88d06488b` 已纳入并上传。固定合并与双方记录保全见[同步阶段](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)，本树共享源码变化后按本树版本准备运行产物，后续每阶段核最新main及WIP再整合。
-- 本次固定main修复8文件包含4产品文件和4原记录，源码逐项核同。迁移部分失败/恢复物理状态、CHECK witness及bigint修订读取证据沿[主线运行恢复](../../管理后台/管理后台-开发记录.md#main-database-runtime-upgrade-20261114)引用，升级观察增加未完成迁移拒绝及原恢复资料接点。
-- 本片经PM明确的唯一源文件窗口为 `packages/core-contracts`、必要root lock、`common/request-fingerprint.ts`、`operation-log.service.ts`、`integrations/file-content-binding.ts` 与 `rental-idempotency.repository.ts` 的等价指纹再导出。根规则和本册/记录随负责人要求维护，正式需求/任务身份与门槛保持。
-- 原派工同时允许PCH非冲突源继续；已新增 `apps/admin/src/core` 的独占React适配及必要admin依赖/构建前置，原壳/页头/按钮仅消费，不修改main后台作者的顶栏/样式WIP。真实路由/授权/缓存消费仍等待下一公共片，不据此扩大共享窗口。
-- 轻量非租赁实现独占 `packages/example-tickets-core`，独立迁移只在该包内声明，没有加入公共原schema/迁移链；真实宿主authority与主应用装配仍须原公共窗口。
-- 平台Core管理应用层独占 `packages/core-host`，输入/输出复用原core-contracts；独立MySQL表和迁移源码尚未接原schema/部署链，真实原身份/部署管理生产者不在本包伪造。
-- 原Core管理适配独占 `apps/api/src/modules/core-host`，复用原ALS、PlatformRepository账号/角色映射及已获窗口的OperationLog同事务方法；API必要包依赖与构建前置已加入。实际AppModule/Guard/平台公共生产者仍按下条窗口办理。
-- PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。固定 `982043aba913745c6d0e258b2d74ca1efb9a98d4` 已在本树，Auth/Platform/shared平台合同/OpenAPI相对main的5处差异归该检查点，后续抽离须保留。[主接线基线核定](平台Core接入-开发记录.md#core-public-window-baseline-20261115)和[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)分别定位差异及剩余实际宽度/真库验收，不计PCH新任务，不扩为平台抽离公共窗口。
-- shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
-- 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
+- 当前独占树为C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支codex/platform-core-extraction。负责人明确本树只有本对话，授权全权负责PCH需要的公共身份/Auth/Guard/ALS、shared正式出口、AppModule/OpenAPI、schema/迁移/Seed及后台壳/路由。原文件窗口阻塞已解除，本树由本对话唯一施工；不写main索引或其他树，不覆盖其他树活动WIP。
+- 最新main62ca183f10b7c316ab63c28ef6d04ee88d06488b已纳入并上传；固定同步与双方记录保全见[同步阶段](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)。后续从最新已提交main及本树差异核对，再整合固定成果。
+- 原简称检查点982043aba913745c6d0e258b2d74ca1efb9a98d4已包含在本树，原省略/null/空字符串、审计和租户投影保留。[原公共基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115)与[后台简称记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)分别定位既有差异及剩余实页/真库验收。
+- 当前Core合同、宿主授权/绑定和工单样例分别在packages/core-contracts、packages/core-host、packages/example-tickets-core；原API适配在apps/api/src/modules/core-host，后台正式页面出口在apps/admin/src/core。独立迁移尚未进入实际部署，主应用/Guard/路由仍需消费。
+- [公共认证片](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)已将公共声明、账号/会话/原角色映射和签名/刷新抽为单源，原Rental兼容路径及外观旧品牌显式适配保持。其他专项正式需求、原任务及未验事项仍归原册；真实业务环境、安装/迁移、合main或发布不因源码写权自动开放。
+- 原接续全文保存在固定d170a5fa8db1cb56d166fb05246790c0ead29539同路径。本册继续承接全部未完项和证据链接，历史前像与品牌原稿在Git，不重复复制。
 
 ## 3. 下一入口与待交付
 
@@ -50,9 +46,9 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    [原账/工单物理观察](平台Core接入-开发记录.md#core-mysql-data-observation-20261115)已提供正式mysql-deployment子出口及readTicketsPhysicalData。原迁移checksum/顺序与实际3表关键结构共同由目录/升级预检消费，坏Core证据不关闭无关Core；下一步公共平台数据所有者提供自身完整结构检查及已核定原迁移名称映射，受控主组合消费同一Source。真实数据库/原schema拆分仍未验，不从包清单推导就绪。
    [工单原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115)已使清单、server和原业务组合共用可读范围，保留原绑定/初始化版；普通准入仍核当前物理库及完整迁移。三包类型及原工厂/ALS/授权/迁移/收据离线链通过，实际升级与真实数据库未验，当前API类型证据见下条。
    [更新范围兼容](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)已使普通单Core预检拒绝租户/容器转换及容器类型改名，返回scope_changed，避免候选切换后原绑定失效。同范围修复、前进迁移与底座更新保持原规则；改变范围仍须专门迁移，实际更新/部署未验。
-3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。公共片由PM核定唯一作者，具体消费者入口已可定位。
-   当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI尚未取得本对话的新写入窗口，不继续用独占接口数量代替独立宿主。
-   [当前基线/窗口核定](平台Core接入-开发记录.md#core-public-window-baseline-20261115)确认原主装配仍未消费Core接点，5处公共差异来自已获准简称检查点，后续须从当前含该成果的基线施工。主树服务端候选暂时无WIP，但它和PM已结束的turn均不是新增写权；下一PCH主实现等待精确公共服务端窗口，原后台壳活动WIP继续归其作者。
+3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。本树公共片由本对话负责，具体消费者入口已可定位。
+   当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI已获负责人本次明确授权，不继续用独占接口数量代替独立宿主。
+   [当前基线/窗口核定](平台Core接入-开发记录.md#core-public-window-baseline-20261115)确认原主装配仍未消费Core接点，5处公共差异来自已获准简称检查点，后续须从当前含该成果的基线施工。主树服务端候选暂时无WIP，但它和PM已结束的turn均不是新增写权；本树下一PCH主实现继续独立公共宿主和Core主装配；main后台壳活动WIP继续归其作者。
    [原身份SQL模板](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115)已移除模板所需的顶层生成Client运行依赖，15条实际ALS/SQL新旧等价路径通过；原身份仓储及行业投影仍待上述公共窗口。[当前API类型](平台Core接入-开发记录.md#core-api-types-current-schema-20261115)已使用本树实际离线生成Client声明核978根/2,176源零诊断并清理产物；主Guard接线和真实无Core登录未验，不把类型/模板解耦视为主应用拆分完成。
    [当前事实读取](平台Core接入-开发记录.md#core-management-current-reads-20261115)已提供页面变更所需的授权/成员/绑定修订，主应用组合时将 `reads` 与原服务一起供给Controller，页面先读当前事实再提交。
    [原授权结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)增加两条只读收据路径，主Guard/OpenAPI应直接消费现行单源声明。租户资料和成员资料可分别挂载admin/core正式出口的CoreTenantGrantPanel/CoreMemberAssignmentPanel，原操作及当前状态分别读取；面板不自造目录或身份。[授权刷新与缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115)已把确认结果与随后读取失败分开，只读恢复不重发；本人变化先取消旧目录请求，撤去目标Core条目并清理其缓存，其他Core缓存保留。类型/实际查询库离线通过，主壳/服务端和实页仍待接线。
@@ -62,7 +58,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    [标准HTTP政策](平台Core接入-开发记录.md#core-http-policy-registration-20261115)由Core实际声明生成并放入部署目录http，工单已有createTicketsHttpContribution。主Guard在原签名/ALS后统一调用应用authorizeHttp，业务/原收据及订阅停新按声明和所属服务复验，未知政策拒绝；不为每个新Core向Guard加业务分支。staff/client仍待自身正式适配，原Rental路径保持原兼容政策。
    [移除预检](平台Core接入-开发记录.md#core-removal-preflight-20261115)提供平台准入/完整依赖Source与Core检查汇合，当前SaaS身份前后核验，十一管理操作新增removal/read。[工单实际依赖](平台Core接入-开发记录.md#core-tickets-removal-data-20261115)已由原工厂消费真实MySQL未关闭/历史/原收据读取，缺结构unknown；平台Source及其他Core检查器仍须各自所有者提供，缺失不允许移除。预检clear不执行停新/排空/删除，实际部署移除及AI/回调/作业/历史依赖仍待05/06接线。
 4. 沿原03/04→05/06及07固定上下文→08 Rental适配逐片推进，兼容适配先行；每片整理职责与重复逻辑、补准确源码备注和API说明并验证受影响功能，保留必要校验、事务、历史、缓存和唯一执行者。09按原业务出口与AI固定接点处理可选工具及已有任务恢复。
-   07须取得BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的最小窗口；用工单路由/主操作验证只改Core和装配，现有后台源码本片只读。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。
+   07沿已授权本树整理BusinessShell/WorkspaceHeader/PageHeader/按钮正式出口、AppShell/navigation/AppRouter/认证缓存、通知业务来源及休息/右面板公共身份适配的正式消费；用工单路由/主操作验证只改Core和装配。完整外壳、单次表单请求、动态操作清理和默认页面模式沿v1.5核收。
    [独立页面合同](平台Core接入-开发记录.md#core-admin-contract-20261114)已有正式类型/路由注册/目标解析，[React适配](平台Core接入-开发记录.md#core-react-page-adapter-20261114)消费原PageHeading/SaveButton/ConfirmAction，`@rental-os/admin/core`为正式源码包出口；[工单页面和Core请求](平台Core接入-开发记录.md#core-tickets-admin-20261114)已有实际源码消费者。真实注册/授权与主应用路由仍未接，下片消费这些适配，不复制通用壳或改变业务方法。
    [声明路由/导航消费](平台Core接入-开发记录.md#core-declarative-routes-20261115)新增createCoreRouteElements及同源菜单/面包屑生成，主Router展开原Route元素，主壳消费同源名称/链接。工单默认详情读取框架登记参数；配置页声明purpose=configuration，当前获权但未绑定/缺项时可配置。公共总入口仍未改，实际浏览器/Portal/回车及无Core壳待验。
    [首次设置消费](平台Core接入-开发记录.md#core-tickets-first-setup-20261115)新增标准useCoreBinding及工单第四页setup，先读原绑定，当前管理权和成员分配满足后办理，未知只读原操作。双语配置页名称和purpose进入同源能力索引，原Auth/Guard/AppRouter接线仍待公共窗口；当前源码/离线调用不表示实际后台已运行。
@@ -85,7 +81,7 @@ API贡献的空/双Core、命名/路径冲突、缺失/外部引用与包读取�
 
 能力索引、查询分页、SaveButton正式导入、工单4页/8接口、同源清单/OpenAPI及随包指南已有内存编译和离线消费证据，原8组合同通过。[列表阶段](平台Core接入-开发记录.md#core-list-pagination-20261115)记录最近固定源码的索引；直接用途说明、动态元数据和六个未检出应用/客户端的覆盖缺口仍需逐模块处理，不能把索引issues=0当全源码整理完成。复杂动态注册/完整API字段和当前运行工具消费仍未完成，原[首次设置](平台Core接入-开发记录.md#core-tickets-first-setup-20261115)、[范围就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115)和[索引覆盖/部署快照](平台Core接入-开发记录.md#core-index-deployment-snapshot-20261115)保留各自历史验证。
 
-服务端注册的空/双Core、错误贡献、版本与schema拒绝、初始化输入边界已离线核对；授权/绑定MySQL事务源码和原身份适配已提供，实际部署迁移、主Auth/Guard/AppModule仍未接新合同。持续目标已生效，后续仍按原门槛逐片交付，必要公共文件窗口由PM协调。
+服务端注册的空/双Core、错误贡献、版本与schema拒绝、初始化输入边界已离线核对；授权/绑定MySQL事务源码和原身份适配已提供，实际部署迁移、主Auth/Guard/AppModule仍未接新合同。持续目标已生效，后续仍按原门槛在已授权独占树逐片交付。
 
 原MCP审计的隔离执行/清理曾被自动审批在启动前拒绝，原开工阶段保留拒绝历史。[当前定向复验](平台Core接入-开发记录.md#core-original-mcp-audit-20261115)已执行原3个用例，全部通过、skip/todo为0，原断言未改，离线守卫违规0，临时编译/夹具/缓存全部删除。该证据覆盖原OperationLog及OAuth审计回调的离线行为，真实事务/HTTP、OAuth端到端和完整MCP仍按原专项验收，不能由纯指纹或这三个用例替代。
 

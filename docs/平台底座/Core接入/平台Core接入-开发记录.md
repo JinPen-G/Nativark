@@ -155,6 +155,26 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-public-auth-extraction-20261115"></a>
+
+## 公共身份、认证与原Rental兼容抽取（2026-11-15）
+
+负责人明确“你这个工作树只有你，授权你全权负责”，解除本树PCH公共文件唯一作者窗口的阻塞；随后再次确认最终交付为可单独取出的Core包和底座源码，无Core底座可以独立构建、启动、登录和保存公共设置。此结果按原R01/A01与R11交付，不以隐藏菜单或全量构建后缺业务贡献替代。工作树仍为C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支codex/platform-core-extraction，基线d170a5fa8db1cb56d166fb05246790c0ead29539；实际main62ca在祖先且远端核定，未操作main索引或其他树。原阻塞全文保留在固定d170及下节历史记录。
+
+[公共身份声明](../../../packages/shared/src/platform-identity.ts)从原platform唯一声明抽50项身份、人员/角色、设置和运行时常量，新增正式@rental-os/shared/platform子出口，原platform及总index兼容再导出。Rental扩展继续原声明，不复制公共DTO；公共出口没有Core/行业import。
+
+[身份仓储](../../../apps/api/src/modules/platform/platform-identity.repository.ts)从原仓储移出15个账号/会话/角色映射方法，原PlatformRepository继承同一实现；findTenantByCode/findUserForLogin和认证租户读取不include Rental档案/订单。公共身份不据租户存在声明已开通业务，Core使用权继续由授权目录裁定。原账号状态、角色投影、哈希、轮换及撤权保持。[公共认证](../../../apps/api/src/modules/auth/auth-session.service.ts)抽原21个签名/刷新/改密/保护方法及5个状态字段，Rental AuthService继承且保留原空间/品类/可信主体/员工分面；[PlatformAuthService](../../../apps/api/src/modules/auth/platform-auth.service.ts)只签operator公共身份，无Core不造空间或业务授权。
+
+公共[认证控制器/DTO](../../../apps/api/src/modules/auth/auth-session.controller.ts)由原Rental控制器继承，旧LoginDto及请求DTO出口继续兼容。实际Nest测试容器已核原AuthService注入及8条继承/扩展路径均唯一，没有在主应用同时登记两个Controller。原安全默认与合并规则抽到[同一公共实现](../../../apps/api/src/modules/platform/platform-security-baseline.ts)，原平台保存继续原位。[外观存储](../../../apps/api/src/modules/platform/platform-appearance-data-store.ts)使用平台窄端口；原AppModule显式注入唯一数据库及旧客户端品牌读取，公共宿主不依赖旧客户端表。省略/清空/旧修订、首次保存品牌保留沿原服务。源码导读见[认证README](../../../apps/api/src/modules/auth/README.md)。
+
+验证经stdin和本树单一output/.tmp/platform-auth-integration，复用已核锁定TypeScript5.9.3、Prisma5.22和已有Nest工具；无依赖安装或业务连接。最小生成准备曾因缺CLI wasm退出1，补同版本必要Wasm后实际Prisma generate退出0，238模型schema与原基线相同，原离线preload/audit违规0。五包真实声明及完整API核987根/2,186源0诊断；前一类型检查误给API开启声明输出出现非可命名类型，改回原API编译选项后只留下真实兼容诊断并修复，无产品断言放宽。
+
+实际公共认证服务在明确平台表夹具下核登录/上下文、单次并发刷新、改密撤销、当前账号冻结和双租户隔离，退出0；未提供任何业务表。原固定d170仓储与当前角色投影、活跃/停用角色、相同令牌签名字节/验证和登录保护摘要对照通过。原tests/auth-login-lockout.test.cjs实际执行退出0，包含共享计数、阈值、清除、禁用策略、唯一/CAS冲突及内存路径；依赖定位缺项的失败仅修验证路径后复验。
+
+原tests/admin-appearance-settings.test.cjs实际17例，16通过/1失败，cancelled/skipped/todo均0，所有服务/事务例通过。失败为最后页面静态断言禁止外观页name=themeColor，而固定d170页面早已提供账户主题色；基线与当前页面归一换行SHA-256均5f1474b2a254ef3b785d9ae9daa8001335b383bdc6c0e1294fd629161c867ee5。本片未改该页面或断言，保留旧失败，不宣称全绿。定向文档核595链接/155锚点，Harness README在当前稀疏检出中缺失但固定Git可读取，属于已登记未检出来源；正式需求/任务归一换行正文未修改。测试仅为显式legacy读取调整原夹具，MCP夹具只增加正式平台子出口解析，无新增测试脚本。
+
+本片尚未装配独立公共AppModule/Guard或独立schema/迁移/Seed，未取得真实无CoreHTTP/数据库/浏览器、完整多Core/原Rental业务、安装更新/回退/独立接手/审查证据；原任务未跨下一档。下一片继续真实公共宿主、正式Core主应用及其同源OpenAPI/前端消费者。临时生成工具/Client/声明/运行共享产物与缓存共527文件、73349425字节，核绝对归属/无链接后全部删除，任务目录不存在，output/.tmp条目为0。仅留本节最小证据，没有新增服务进程或重复环境。
+
 <a id="core-public-window-baseline-20261115"></a>
 
 ## 主接线窗口与既有公共差异归属核定（2026-11-15）

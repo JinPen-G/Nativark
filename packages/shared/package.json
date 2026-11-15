@@ -19,6 +19,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.js"
+    },
+    "./platform": {
+      "types": "./dist/platform-identity.d.ts",
+      "import": "./dist/platform-identity.js",
+      "require": "./dist/platform-identity.js"
     }
   },
   "scripts": {
@@ -29,5 +34,12 @@
   "dependencies": {
     "zod": "3.25.76"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "typesVersions": {
+    "*": {
+      "platform": [
+        "dist/platform-identity.d.ts"
+      ]
+    }
+  }
 }

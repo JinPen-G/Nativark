@@ -50,7 +50,10 @@ function fixture(appearance = initial) {
       try { return await work(db); } catch (e) { Object.assign(state, before); throw e; }
     }
   };
-  return { db, state, appearance: new TenantAppearanceProfileService(db), channel: new ClientChannelProfileService(db) };
+  return { db, state, appearance: new TenantAppearanceProfileService(db, tenantId => db.clientChannelProfile.findUnique({
+    where: { tenantId }, select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true,
+      adminCornerRadius: true, adminContainerRadius: true, adminButtonRadius: true, adminInputRadius: true }
+  })), channel: new ClientChannelProfileService(db) };
 }
 
 test('radius-only save preserves branding and omitted radius groups', async () => {

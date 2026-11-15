@@ -1,4 +1,4 @@
-import type { SaveAccountAppearanceRequest } from "@rental-os/shared";
+import type { SaveAccountAppearanceRequest } from "@rental-os/shared/platform";
 import { IsOptional, IsString, Matches } from "class-validator";
 
 /**

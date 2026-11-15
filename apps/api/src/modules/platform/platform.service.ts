@@ -77,6 +77,7 @@ import { CustomerCorporateService } from "./customer-corporate.service";
 import { CustomerCorporateSettlementService } from "./customer-corporate-settlement.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
+import { defaultSecurityBaseline, normalizeSecurityBaseline } from "./platform-security-baseline";
 import { assertNoLegacyAiCredentials, closedLegacyAiSettings } from "./legacy-system-ai";
 
 interface StoredUser extends Omit<SaveSystemUserRequest, "tenantId"> {
@@ -668,7 +669,7 @@ export class PlatformService {
         }
       ]
     },
-    security: this.defaultSecurityBaseline(),
+    security: defaultSecurityBaseline(),
     updatedAt: "2026-05-05T10:30:00+08:00",
     updatedBy: "系统初始化"
   };
@@ -764,7 +765,7 @@ export class PlatformService {
   async getSecurityBaseline() {
     // 登录等认证前流程没有租户身份：安全基线显式从平台主体读取，不回退演示租户
     const config = await this.getSystemRules(PLATFORM_SUBJECT_TENANT_ID);
-    return this.normalizeSecurityBaseline(config.security);
+    return normalizeSecurityBaseline(config.security);
   }
 
   async saveSecurityBaseline(
@@ -776,7 +777,7 @@ export class PlatformService {
       throw new ForbiddenException("修改全平台安全基线需要系统参数管理权限");
     }
     const operator = currentUser!.displayName;
-    const security = this.normalizeSecurityBaseline(input);
+    const security = normalizeSecurityBaseline(input);
     // 安全基线是平台级配置：读取、写入和审计都固定使用平台主体，不回退演示租户
     const config = this.useMysqlDataSource()
       ? this.copySystemRulesConfig(await this.platformRepository.getSystemRules(PLATFORM_SUBJECT_TENANT_ID) ?? this.systemRulesConfig)
@@ -1810,7 +1811,6 @@ export class PlatformService {
     return this.requireCustomerOperations().listSensitiveAccess(tenantId, customerId, currentUser);
   }
 
-
   private requireCustomerMerge() {
     if (!this.customerMerge) throw new ConflictException("客户合并服务未就绪");
     return this.customerMerge;
@@ -2233,8 +2233,8 @@ export class PlatformService {
       .map((role) => ({ ...role, tenantId: targetTenantId }));
   }
 
-  findTenantByIdForAuth(id: string) {
-    if (this.useMysqlDataSource()) return this.platformRepository.getTenant(id);
+  findTenantByIdForAuth(id: string): TenantSummary | Promise<TenantSummary> {
+    if (this.useMysqlDataSource()) return this.platformRepository.getTenantIdentity(id);
     const tenant = this.tenants.find((item) => item.tenantId === id);
     if (!tenant) throw new NotFoundException("租户不存在");
     return tenant;
@@ -3215,7 +3215,7 @@ export class PlatformService {
 
   private copySystemRulesConfig(config: SystemRulesConfig = this.systemRulesConfig): SystemRulesConfig {
     const cloned = JSON.parse(JSON.stringify(config)) as SystemRulesConfig;
-    cloned.security = this.normalizeSecurityBaseline(cloned.security);
+    cloned.security = normalizeSecurityBaseline(cloned.security);
     return cloned;
   }
 
@@ -3266,70 +3266,8 @@ export class PlatformService {
     return scope ?? "own";
   }
 
-  private defaultSecurityBaseline(): SystemSecurityBaselineConfig {
-    return {
-      loginRateLimit: {
-        enabled: true,
-        maxFailures: 5,
-        windowMinutes: 10,
-        lockMinutes: 15
-      },
-      passwordPolicy: {
-        minLength: 8,
-        requireLetter: true,
-        requireNumber: true,
-        disallowDefaultPassword: true,
-        expireDays: 90
-      },
-      masking: {
-        phone: true,
-        identityNo: true,
-        driverLicenseNo: true,
-        email: false,
-        apiKey: true
-      },
-      secondConfirmation: {
-        enabled: true,
-        actions: [
-          "system.user.reset-password",
-          "system.role.delete",
-          "rental-os.order.close",
-          "rental-os.fee.waive",
-          "rental-os.vehicle.disable"
-        ]
-      }
-    };
-  }
-
-  private normalizeSecurityBaseline(
-    input?: Partial<SystemSecurityBaselineConfig>
-  ): SystemSecurityBaselineConfig {
-    const defaults = this.defaultSecurityBaseline();
-    return {
-      loginRateLimit: {
-        ...defaults.loginRateLimit,
-        ...(input?.loginRateLimit ?? {})
-      },
-      passwordPolicy: {
-        ...defaults.passwordPolicy,
-        ...(input?.passwordPolicy ?? {})
-      },
-      masking: {
-        ...defaults.masking,
-        ...(input?.masking ?? {})
-      },
-      secondConfirmation: {
-        ...defaults.secondConfirmation,
-        ...(input?.secondConfirmation ?? {}),
-        actions:
-          input?.secondConfirmation?.actions ??
-          defaults.secondConfirmation.actions
-      }
-    };
-  }
-
   private validateSystemRulesConfig(config: SystemRulesConfig) {
-    const security = this.normalizeSecurityBaseline(config.security);
+    const security = normalizeSecurityBaseline(config.security);
     const numbers = [
       config.member.welcomeGift.amount,
       config.member.welcomeGift.validity,

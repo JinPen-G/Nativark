@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Put, Req } from "@nestjs/common";
-import type { SystemUserRow } from "@rental-os/shared";
+import type { SystemUserRow } from "@rental-os/shared/platform";
 import { SaveAccountAppearanceDto } from "./account-appearance.dto";
 import { AccountAppearanceService } from "./account-appearance.service";
 

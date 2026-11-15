@@ -1,5 +1,5 @@
-import type { SaveTenantAppearanceRequest } from "@rental-os/shared";
-import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import type { SaveTenantAppearanceRequest } from "@rental-os/shared/platform";
+import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared/platform";
 import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
 
 /**

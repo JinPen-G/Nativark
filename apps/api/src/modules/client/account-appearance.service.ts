@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
-import type { AccountAppearanceProfile, SaveAccountAppearanceRequest, SystemUserRow } from "@rental-os/shared";
-import { PrismaService } from "../database/prisma.service";
+import { BadRequestException, Inject, Injectable } from "@nestjs/common";
+import type { AccountAppearanceProfile, SaveAccountAppearanceRequest, SystemUserRow } from "@rental-os/shared/platform";
+import { PLATFORM_APPEARANCE_DATA_STORE, type PlatformAppearanceDataStore } from "../platform/platform-appearance-data-store";
 import { requireRequestUserId } from "../../common/request-identity";
 
 /** 主题色归一化：空=null（回退平台默认色）；#RGB 展开为 #RRGGBB 并大写；非法拒绝。 */
@@ -20,7 +20,7 @@ function normalizeThemeColor(value: string | undefined | null): string | null {
  */
 @Injectable()
 export class AccountAppearanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PLATFORM_APPEARANCE_DATA_STORE) private readonly prisma: PlatformAppearanceDataStore) {}
 
   private userIdOf(user?: SystemUserRow): string {
     return user?.id ?? requireRequestUserId();

@@ -1,64 +1,18 @@
-import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
-import type { ChangePasswordRequest, RefreshSessionRequest, SwitchWorkspaceRequest } from "@rental-os/shared";
-import { IsNotEmpty, IsString } from "class-validator";
+import { Body, Controller, Headers, Inject, Post } from "@nestjs/common";
 import { AuthService } from "./auth.service";
-import { ChangePasswordDto, RefreshSessionDto, ResetLocalDemoPasswordDto, SwitchWorkspaceDto } from "./auth-request.dto";
+import { AuthSessionController } from "./auth-session.controller";
+import { ResetLocalDemoPasswordDto, SwitchWorkspaceDto } from "./auth-request.dto";
+export { LoginDto } from "./auth-session.dto";
 
-export class LoginDto {
-  @IsString()
-  @IsNotEmpty()
-  tenantCode!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  account!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  password!: string;
-}
-
+/** Rental组合的认证扩展；公共HTTP方法继承唯一实现，不重复登记两套Controller。 */
 @Controller("auth")
-export class AuthController {
-  constructor(private readonly authService: AuthService) {}
-
-  @Post("login")
-  login(@Body() body: LoginDto) {
-    return this.authService.login(body);
-  }
+export class AuthController extends AuthSessionController {
+  constructor(@Inject(AuthService) protected readonly authService: AuthService) { super(authService); }
 
   /** Explicit development maintenance with current platform authentication. */
   @Post("development/reset-demo-password")
   resetLocalDemoPassword(@Body() body: ResetLocalDemoPasswordDto, @Headers("authorization") authorization?: string) {
     return this.authService.resetLocalDemoPassword(body.password, authorization);
-  }
-
-  @Get("me")
-  me(@Headers("authorization") authorization?: string) {
-    return this.authService.getCurrentUser(authorization);
-  }
-
-  @Get("session-context")
-  sessionContext(@Headers("authorization") authorization?: string) {
-    return this.authService.getSessionContext(authorization);
-  }
-
-  @Post("refresh")
-  refresh(@Body() body: RefreshSessionDto) {
-    return this.authService.refresh(body);
-  }
-
-  @Post("logout")
-  logout(@Body() body: RefreshSessionDto) {
-    return this.authService.logout(body);
-  }
-
-  @Post("change-password")
-  changePassword(
-    @Headers("authorization") authorization: string | undefined,
-    @Body() body: ChangePasswordDto
-  ) {
-    return this.authService.changePassword(authorization, body);
   }
 
   /**

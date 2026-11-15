@@ -1,7 +1,8 @@
-import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
-import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
-import type { SaveTenantAppearanceRequest, SystemUserRow, TenantAppearanceProfile } from "@rental-os/shared";
-import { PrismaService } from "../database/prisma.service";
+import { BadRequestException, ConflictException, Inject, Injectable, Optional } from "@nestjs/common";
+import { ADMIN_UI_CORNER_RADIUS_CONTROL_MAX, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared/platform";
+import type { SaveTenantAppearanceRequest, SystemUserRow, TenantAppearanceProfile } from "@rental-os/shared/platform";
+import { PLATFORM_APPEARANCE_DATA_STORE, LEGACY_TENANT_APPEARANCE_READER,
+  type PlatformAppearanceDataStore, type LegacyTenantAppearanceReader } from "../platform/platform-appearance-data-store";
 import { requireRequestTenantId } from "../../common/request-identity";
 
 type AppearanceRow = {
@@ -55,7 +56,10 @@ function trimText(value: string | undefined | null, max: number, label: string):
  */
 @Injectable()
 export class TenantAppearanceProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PLATFORM_APPEARANCE_DATA_STORE) private readonly prisma: PlatformAppearanceDataStore,
+    @Optional() @Inject(LEGACY_TENANT_APPEARANCE_READER) private readonly readLegacy?: LegacyTenantAppearanceReader
+  ) {}
 
   private tenantOf(user?: SystemUserRow): string {
     return user?.tenantId ?? requireRequestTenantId();
@@ -111,10 +115,7 @@ export class TenantAppearanceProfileService {
         throw new ConflictException("外观配置已变化，请刷新后重试");
       }
       // 首次独立保存圆角时保留旧渠道中的品牌与其他圆角，不创建空品牌覆盖已有显示。
-      const legacy = await this.prisma.clientChannelProfile.findUnique({
-        where: { tenantId },
-        select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminCornerRadius: true, adminContainerRadius: true, adminButtonRadius: true, adminInputRadius: true }
-      });
+      const legacy = this.readLegacy ? await this.readLegacy(tenantId) : null;
       const row = await this.prisma.tenantAppearanceProfile.create({ data: { tenantId, ...legacy, ...data } });
       return this.toSummary(row);
     } catch (error) {

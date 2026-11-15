@@ -1,11 +1,22 @@
-# 认证与当前请求身份
+# 认证与公共会话
 
-[AuthController](auth.controller.ts)提供原营运登录、刷新、退出、密码和当前会话接口，[AuthService](auth.service.ts)校验签名及持久会话，调用原平台账号/角色来源。管理者、员工和客户各有自己的audience，当前业务范围由原服务端映射。
+公共宿主和 Rental 组合共用 [AuthSessionService](auth-session.service.ts) 的签名、登录失败保护、刷新轮换、改密及原会话撤销。业务范围不在公共服务中推断，宿主显式装配对应认证适配。
 
-登录从租户编码/账号及原密码校验开始，登录失败计数沿原持久或明确演示来源。访问令牌绑定user/tenant/session/audience及当时workspace，刷新单次消费旧会话，退出撤销原会话。切换原Rental经营空间时重核成员资格，旧请求保留原目标，不能移到新空间继续执行。[请求DTO](auth-request.dto.ts) · [会话持久来源](../platform/platform.repository.ts)
+| 宿主 | 认证适配 | 身份与范围 |
+| --- | --- | --- |
+| 公共底座 | [PlatformAuthService](platform-auth.service.ts) | 租户、原账号与当前角色；operator 登录不要求业务空间，未装配 Core 不签发业务范围 |
+| Rental 组合 | [AuthService](auth.service.ts) | 使用同一签名和原会话，继续按原成员关系解析 Rental 空间、品类、能力与地点范围；staff 沿原专用分面 |
 
-普通调用沿 Controller → AuthService → PlatformService/Repository → 当前用户角色和AuthSession。可信委托沿原回调内的不可伪造单次票据，票据的事务与寿命在本Auth实例校验。Core管理适配读取原Guard已核身份和会话，再在同一事务锁当前权限，业务动作继续由所属Core裁定。[原Guard](../../common/api-auth.guard.ts) · [ALS上下文](../../common/request-identity.ts) · [Core身份适配](../core-host/original-core-principal.ts)
+[公共 HTTP 控制器](auth-session.controller.ts) 和 [公共 DTO](auth-session.dto.ts) 提供登录、本人资料、会话上下文、刷新、退出和改密。Rental 的 [兼容控制器](auth.controller.ts) 继承这些方法，仅增加原演示维护与空间切换；主宿主只登记一个对应控制器。旧 DTO 与 LoginDto 导入继续再导出同一声明。
 
-当前组合仍包含Rental经营范围和可选能力、外观服务。公共身份与业务范围的拆分接点及消费者沿PCH既有任务维护，新增Core使用独立当前范围，原Rental会话和客户端语义继续自己的兼容链。[Core接入任务](../../../../../docs/平台底座/Core接入/平台Core接入-开发任务.md#contract-design)
+读取路线为 HTTP / Guard → 认证适配 → 公共会话服务 → [平台身份仓储](../platform/platform-identity.repository.ts) → 原账号 / 角色 / auth_sessions。公共身份、设置和运行时常量从 `@rental-os/shared/platform` 的 [唯一出口](../../../../../packages/shared/src/platform-identity.ts) 消费；原 `@rental-os/shared` 继续兼容。
 
-读取接口资料从原[OpenAPI](../../contracts/openapi-document.ts)定位method/path和schema，关键验收入口为[登录锁定](../../../../../tests/auth-login-lockout.test.cjs)、[租户权限](../../../../../tests/tenant-admin-privilege-write.test.cjs)、[租户成员政策](../../../../../tests/tenant-membership-policy.test.cjs)。命令按本次改动和授权环境执行，真实会话/浏览器/数据库分别取证。
+公共认证的 [持久化来源](../platform/platform-authentication.source.ts) 只读公共账号、租户和 [安全配置](../platform/platform-security-baseline.ts)，沿原语义保存认证审计。公共新会话不带业务空间；仍关联旧 Core 空间的有效签名会话仅可作为公共身份读取，刷新后移除旧业务范围，不据此授予业务权限。Core 授权、成员分配及业务就绪由 [Core 宿主](../core-host/README.md) 另行核验。
+
+登录失败保护使用原带密钥摘要、共享持久计数及 CAS；refreshToken 单次消费和新会话在同一事务提交。签名、刷新 token 哈希及角色映射保持原行为，客户端字段不能自授 tenant、audience、角色或 workspace。
+
+可信委托仍沿 [原主体票据](trusted-workspace-principal.ts) 和 [浏览器会话证据](trusted-browser-principal.ts) 在原授权回调的事务和寿命内读取；票据不能转成 Web token，也不能脱离原 AuthService 实例复用。[原 Guard](../../common/api-auth.guard.ts) 与 [ALS](../../common/request-identity.ts) 继续处理 Rental 的当前权限、地点及空间；[员工认证](staff-auth.controller.ts) 和客户认证分面保持各自授权，公共 operator 适配不会将它们合并。
+
+外观来源经 [公共存储端口](../platform/platform-appearance-data-store.ts) 注入。Rental 组合单独提供旧客户端品牌读取，公共底座不为保存外观查询客户端业务表；省略、显式清空、原修订与失败反馈仍沿原外观服务。
+
+原验证入口为 [登录失败保护](../../../../../tests/auth-login-lockout.test.cjs)、[外观设置](../../../../../tests/admin-appearance-settings.test.cjs) 和 [可信主体 / Guard](../../../../../tests/mcp-trusted-principal.test.cjs)。命令先按 [根规则](../../../../../AGENTS.md#修改验证与交付) 核读写和隔离前置，离线服务行为与实际 HTTP / 数据库分别取证。当前公共服务和适配已提供，独立应用构建、完整公共管理界面及标准包运行装配仍按 [PCH 接续](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md) 继续交付。

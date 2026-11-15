@@ -91,6 +91,7 @@ function source(relative) {
     if (specifier === "@nestjs/config") return { ConfigService: class {} };
     if (specifier === "@prisma/client") return prisma;
     if (specifier === "@rental-os/shared") return shared;
+    if (specifier === "@rental-os/shared/platform") return require(path.join(runtimeShared, "dist/platform-identity.js"));
     if (specifier === "zod") return installed("zod");
     if (specifier === 'ajv' || specifier === 'ajv-formats') return installed(specifier);
     if (specifier === 'class-transformer' || specifier === 'class-validator') return require(specifier);
