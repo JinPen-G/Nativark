@@ -5,7 +5,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientOrderActionSourceSchema, aiClientOr
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { createAiGuardedClientSession } from '../client-scene.composition';
 import { AiClientEntryError } from './client-entry-action';
-import { AiClientEntryController, type AiClientEntryApplication } from './client-entry.controller';
+import { AiClientEntryController, clientEntryRefusalCode, type AiClientEntryApplication } from './client-entry.controller';
 import { composeRequestBoundClientApplication, type AiClientApplicationRequest, type AiClientRequestDependencies } from './client-request.application';
 import type { SecretBox } from '../../../common/secret-box';
 import type { ModelAdapter } from '../model-gateway.ports';
@@ -17,6 +17,7 @@ import type { GatewayCapacityPort } from '../gateway-capacity.ports';
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import { originalClientMaterialScope } from './prisma-client-scene-material.repository';
 import { PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
+import { recordClientEntryRefusal, withClientEntryRefusalAudit } from './client-entry.audit';
 
 export const AI_WEBSITE_ENTRY = Symbol('AI_WEBSITE_ENTRY');
 export const AI_WECHAT_ENTRY = Symbol('AI_WECHAT_ENTRY');
@@ -114,83 +115,112 @@ export function composeStandardClientBookingEntry(input: Dependencies, channel: 
 } {
   const clock = input.clock ?? (() => new Date());
   const unavailable = (): never => { throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_entry_not_published'); };
-  const bind = <K extends keyof AiClientEntryApplication>(name: K,
+  const observeEntryRefusal = async (request: AiClientApplicationRequest, error: unknown,
+    observation: { durationMs: number; operation?: string }, originalIdentity?: ClientRequestContext) => {
+    let identity = originalIdentity;
+    if (!identity) {
+      const authorization = request?.headers?.authorization, ip = request?.ip;
+      if (typeof authorization !== 'string') return;
+      const session = createAiGuardedClientSession(input.guard, { current: async () => ({ authorization, ip }) });
+      try { identity = structuredClone(await session.current()); }
+      catch { return; }
+    }
+    await recordClientEntryRefusal(input.db, identity, { channel,
+      operation: observation.operation ?? 'admission', code: clientEntryRefusalCode(error), durationMs: observation.durationMs });
+  };
+  const bind = <K extends Exclude<keyof AiClientEntryApplication, 'observeEntryRefusal'>>(name: K,
     originalScene?: 'order_explanation'): AiClientEntryApplication[K] => {
-    const method = async (request: AiClientApplicationRequest, ...args: unknown[]) => {
-      // Snapshot JSON commands before current-identity/storage awaits. A signal
-      // is deliberately the original cancellation channel, not serialized data.
-      args = args.map(value => value instanceof AbortSignal ? value : structuredClone(value));
-      const signal = args.find((value): value is AbortSignal => value instanceof AbortSignal);
-      const check = () => { if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_request_interrupted'); };
-      check();
-      const authorization = request?.headers?.authorization;
-      if (typeof authorization !== 'string') return unavailable();
-      const ip = request.ip;
-      const boundRequest = { headers: { authorization }, ip };
-      const session = createAiGuardedClientSession(input.guard, { current: async () => { check(); return { authorization, ip }; } });
-      // An order explanation must not borrow a quote-scene publication. Task
-      // controls remain bound to the explicitly assembled original scene.
-      const orderScene = name === 'readOrderExplanation' || originalScene === 'order_explanation';
-      const navigation = name === 'readOrderTaskHostCapabilities' || name === 'readOrderAction' || name === 'revalidateOrderAction';
-      const navigationCommand = !navigation ? undefined : name === 'revalidateOrderAction'
-        ? aiClientOrderActionRevalidationSchema.parse(args[0]) : aiClientOrderActionSourceSchema.parse(args[0]);
-      const navigationSource = navigationCommand && { material: navigationCommand.material, task: navigationCommand.task };
-      let navigationOrigin: { hash: string; sceneCode: string; sceneVersion: string } | undefined;
-      let sceneCode = orderScene ? 'order_explanation' : input.tasks!.sceneCode;
-      let sceneVersion = orderScene ? '1' : input.tasks!.sceneVersion;
-      const select = async () => {
-        const identity = structuredClone(await session.current());
-        if (navigationSource) {
-          const original = await new PrismaClientTaskInputRepository(input.tasks!.db)
-            .readOrderNavigationSource(originalClientMaterialScope(identity, channel), navigationSource);
+    const method = async (request: AiClientApplicationRequest, ...args: unknown[]) => withClientEntryRefusalAudit(async () => {
+      const started = Date.now(), auditRequest = { headers: { authorization: request?.headers?.authorization }, ip: request?.ip };
+      let originalIdentity: ClientRequestContext | undefined;
+      try {
+        // Snapshot JSON commands before current-identity/storage awaits. A signal
+        // is deliberately the original cancellation channel, not serialized data.
+        args = args.map(value => value instanceof AbortSignal ? value : structuredClone(value));
+        const signal = args.find((value): value is AbortSignal => value instanceof AbortSignal);
+        const check = () => { if (signal?.aborted) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_request_interrupted'); };
+        check();
+         const authorization = auditRequest.headers.authorization;
+        if (typeof authorization !== 'string') return unavailable();
+         const ip = auditRequest.ip;
+        const boundRequest = { headers: { authorization }, ip };
+        const session = createAiGuardedClientSession(input.guard, { current: async () => { check(); return { authorization, ip }; } });
+        // An order explanation must not borrow a quote-scene publication. Task
+        // controls remain bound to the explicitly assembled original scene.
+        const orderScene = name === 'readOrderExplanation' || originalScene === 'order_explanation';
+        const navigation = name === 'readOrderTaskHostCapabilities' || name === 'readOrderAction' || name === 'revalidateOrderAction';
+        const navigationCommand = !navigation ? undefined : name === 'revalidateOrderAction'
+          ? aiClientOrderActionRevalidationSchema.parse(args[0]) : aiClientOrderActionSourceSchema.parse(args[0]);
+        const navigationSource = navigationCommand && { material: navigationCommand.material, task: navigationCommand.task };
+        let navigationOrigin: { hash: string; sceneCode: string; sceneVersion: string } | undefined;
+        let sceneCode = orderScene ? 'order_explanation' : input.tasks!.sceneCode;
+        let sceneVersion = orderScene ? '1' : input.tasks!.sceneVersion;
+        const select = async () => {
+          const identity = structuredClone(await session.current());
+          originalIdentity ??= identity;
+          if (navigationSource) {
+            const original = await new PrismaClientTaskInputRepository(input.tasks!.db)
+              .readOrderNavigationSource(originalClientMaterialScope(identity, channel), navigationSource);
+            check();
+            const current = { hash: requestFingerprint(original), sceneCode: original.sceneCode, sceneVersion: original.sceneVersion };
+            if (navigationOrigin && requestFingerprint(current) !== requestFingerprint(navigationOrigin))
+              throw new AiClientEntryError('AI_ACCESS_DENIED', 'order_navigation_original_changed');
+            navigationOrigin = current; sceneCode = current.sceneCode; sceneVersion = current.sceneVersion;
+          }
+          const selected = await readStandardClientEntryPublication(input.db, identity, channel, { sceneCode, sceneVersion }, clock(),
+            name === 'prepare' || name === 'createTask' || name === 'prepareGoal');
+          return { identity, ...selected };
+        };
+        const before = await select();
+        check();
+        const revalidateQuotePublication = async () => {
           check();
-          const current = { hash: requestFingerprint(original), sceneCode: original.sceneCode, sceneVersion: original.sceneVersion };
-          if (navigationOrigin && requestFingerprint(current) !== requestFingerprint(navigationOrigin))
-            throw new AiClientEntryError('AI_ACCESS_DENIED', 'order_navigation_original_changed');
-          navigationOrigin = current; sceneCode = current.sceneCode; sceneVersion = current.sceneVersion;
+          const current = await select();
+          check();
+          // Bootstrap's public service summary is narrower than the standard
+          // channel/profile/website publication. Carry this exact request's full
+          // revision to the original quote INSERT, after Core preparation waits.
+          if (current.releaseRevision !== before.releaseRevision
+            || requestFingerprint(current.identity) !== requestFingerprint(before.identity)) {
+            throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_publication_changed');
+          }
+        };
+        const application = composeRequestBoundClientApplication({ ...input,
+          revalidateQuotePublication,
+          tasks: { db: input.db, subscriptions: input.tasks!.subscriptions, sceneCode, sceneVersion },
+          bookingTransfer: { db: input.db, publication: (identity, originalChannel, create) =>
+            readStandardClientEntryPublication(input.db, identity, originalChannel,
+              { sceneCode: input.tasks!.sceneCode, sceneVersion: input.tasks!.sceneVersion }, clock(), create) },
+          // Explicit server dependencies, when installed, remain subject to the
+          // original persistent Gateway/ledger checks. Never accept them in HTTP.
+        }, { enabled: true, tenantCode: before.identity.tenantCode, serviceCode: before.identity.workspaceCode, channel,
+          entry: { enabled: true, releaseRevision: before.releaseRevision } });
+        const consumer = { ...application, ...composeClientOriginalBookingHttp(application) };
+        const result = await Reflect.apply(consumer[name], consumer, [boundRequest, ...args]);
+        let after;
+        try { after = await select(); } catch { throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_operation_requires_recheck'); }
+        if (after.releaseRevision !== before.releaseRevision || requestFingerprint(after.identity) !== requestFingerprint(before.identity)) {
+          throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_publication_changed');
         }
-        const selected = await readStandardClientEntryPublication(input.db, identity, channel, { sceneCode, sceneVersion }, clock(),
-          name === 'prepare' || name === 'createTask' || name === 'prepareGoal');
-        return { identity, ...selected };
-      };
-      const before = await select();
-      check();
-      const revalidateQuotePublication = async () => {
-        check();
-        const current = await select();
-        check();
-        // Bootstrap's public service summary is narrower than the standard
-        // channel/profile/website publication. Carry this exact request's full
-        // revision to the original quote INSERT, after Core preparation waits.
-        if (current.releaseRevision !== before.releaseRevision
-          || requestFingerprint(current.identity) !== requestFingerprint(before.identity)) {
-          throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_publication_changed');
+        check(); return result;
+      } catch (error) {
+        const failure = error !== null && typeof error === 'object' ? error
+          : new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_entry_refused');
+        try { await observeEntryRefusal(auditRequest, failure, { operation: name, durationMs: Math.max(0, Date.now() - started) }, originalIdentity); }
+        catch {
+          const unavailableAudit = new AiClientEntryError(clientEntryRefusalCode(failure) === 'AI_RESULT_UNKNOWN'
+            ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE', 'client_entry_refusal_audit_unavailable');
+          throw unavailableAudit;
         }
-      };
-      const application = composeRequestBoundClientApplication({ ...input,
-        revalidateQuotePublication,
-        tasks: { db: input.db, subscriptions: input.tasks!.subscriptions, sceneCode, sceneVersion },
-        bookingTransfer: { db: input.db, publication: (identity, originalChannel, create) =>
-          readStandardClientEntryPublication(input.db, identity, originalChannel,
-            { sceneCode: input.tasks!.sceneCode, sceneVersion: input.tasks!.sceneVersion }, clock(), create) },
-        // Explicit server dependencies, when installed, remain subject to the
-        // original persistent Gateway/ledger checks. Never accept them in HTTP.
-      }, { enabled: true, tenantCode: before.identity.tenantCode, serviceCode: before.identity.workspaceCode, channel,
-        entry: { enabled: true, releaseRevision: before.releaseRevision } });
-      const consumer = { ...application, ...composeClientOriginalBookingHttp(application) };
-      const result = await Reflect.apply(consumer[name], consumer, [boundRequest, ...args]);
-      let after;
-      try { after = await select(); } catch { throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_operation_requires_recheck'); }
-      if (after.releaseRevision !== before.releaseRevision || requestFingerprint(after.identity) !== requestFingerprint(before.identity)) {
-        throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_publication_changed');
+        throw failure;
       }
-      check(); return result;
-    };
+    });
     return method as AiClientEntryApplication[K];
   };
   if (!input.tasks?.subscriptions || !input.tasks.sceneCode || !input.tasks.sceneVersion || !input.db
     || !['web', 'wechat_miniprogram'].includes(channel)) return unavailable();
   return {
+    observeEntryRefusal,
     readOrderHostCapabilities: bind('readHostCapabilities', 'order_explanation'),
     readOrderTaskHostCapabilities: bind('readOrderTaskHostCapabilities'),
     readOrderAction: bind('readOrderAction'), revalidateOrderAction: bind('revalidateOrderAction'),

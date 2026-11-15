@@ -27,6 +27,7 @@ import type { AiClientApplicationRequest, composeRequestBoundClientApplication }
 import { AiClientQuoteResultUnknownError } from '../client-quote-original.composition';
 import { AiClientTaskUnknownError } from './prisma-client-task-input.repository';
 import type { composeClientOriginalBookingHttp } from './client-original-booking-http.composition';
+import { withClientEntryRefusalAudit } from './client-entry.audit';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
@@ -42,46 +43,58 @@ export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoun
   'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
   'readQuotePreparationOperation' | 'readPreparedQuoteOriginal' | 'prepare' | 'readOrderMaterialReceipt' | 'createTask' | 'readTaskCreation' |
   'readOriginalTaskAccounting' | 'reconcileOriginalTaskAccounting' | 'prepareGoal' | 'readGoalPreparation'
-  | 'readGoalCandidates' | 'prepareGoalQuote' | 'readGoalQuotePreparation'> & ReturnType<typeof composeClientOriginalBookingHttp>;
+   | 'readGoalCandidates' | 'prepareGoalQuote' | 'readGoalQuotePreparation'> & ReturnType<typeof composeClientOriginalBookingHttp> & {
+     /** Original standard hosts observe refusals without accepting command data. */
+     observeEntryRefusal?(request: AiClientApplicationRequest, error: unknown, observation: { durationMs: number }): Promise<void>;
+   };
 type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
+
+const clientEntryStatuses: Record<string, number> = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403,
+  AI_RESOURCE_UNAVAILABLE: 503, AI_PROPOSAL_STALE: 409, AI_REVISION_CONFLICT: 409, AI_RESULT_UNKNOWN: 409 };
+export function clientEntryRefusalCode(error: unknown): string {
+  const aliases: Record<string, string> = {
+    AI_CLIENT_INVALID_INPUT: 'AI_INVALID_INPUT', AI_CLIENT_CONTEXT_UNAVAILABLE: 'AI_ACCESS_DENIED',
+    AI_CLIENT_CAPABILITY_UNAVAILABLE: 'AI_RESOURCE_UNAVAILABLE', AI_CLIENT_MATERIAL_STALE: 'AI_PROPOSAL_STALE',
+    AI_CLIENT_REVISION_CONFLICT: 'AI_REVISION_CONFLICT', AI_CLIENT_RESULT_UNKNOWN: 'AI_RESULT_UNKNOWN',
+    AI_CLIENT_RESOURCE_ERASED: 'AI_RESOURCE_UNAVAILABLE'
+  };
+  let code = 'AI_RESOURCE_UNAVAILABLE';
+  if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
+  else if (error instanceof AiRequestWaitError) code = error.code;
+  else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError
+    || error instanceof AiClientQuoteResultUnknownError || error instanceof AiClientTaskUnknownError) code = 'AI_RESULT_UNKNOWN';
+  else if (error instanceof AiClientEntryError) code = error.code;
+  else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
+  else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
+  else if (error instanceof HttpException) {
+    if (error.getStatus() === 400) code = 'AI_INVALID_INPUT';
+    else if ([401, 403, 404].includes(error.getStatus())) code = 'AI_ACCESS_DENIED';
+    else if (error.getStatus() === 409) code = 'AI_REVISION_CONFLICT';
+  }
+  return Object.prototype.hasOwnProperty.call(clientEntryStatuses, code) ? code : 'AI_RESOURCE_UNAVAILABLE';
+}
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
   constructor(@Inject(AI_CLIENT_ENTRY_APPLICATION) private readonly application: AiClientEntryApplication) {}
 
-  private async respond<T>(work: () => Promise<T>, unknownAction = 'read_booking_operation'): Promise<T> {
-    try { return await work(); }
-    catch (error) {
-      const aliases: Record<string, string> = {
-        AI_CLIENT_INVALID_INPUT: 'AI_INVALID_INPUT', AI_CLIENT_CONTEXT_UNAVAILABLE: 'AI_ACCESS_DENIED',
-        AI_CLIENT_CAPABILITY_UNAVAILABLE: 'AI_RESOURCE_UNAVAILABLE', AI_CLIENT_MATERIAL_STALE: 'AI_PROPOSAL_STALE',
-        AI_CLIENT_REVISION_CONFLICT: 'AI_REVISION_CONFLICT', AI_CLIENT_RESULT_UNKNOWN: 'AI_RESULT_UNKNOWN',
-        AI_CLIENT_RESOURCE_ERASED: 'AI_RESOURCE_UNAVAILABLE'
-      };
-      const statuses: Record<string, number> = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403,
-        AI_RESOURCE_UNAVAILABLE: 503, AI_PROPOSAL_STALE: 409, AI_REVISION_CONFLICT: 409, AI_RESULT_UNKNOWN: 409 };
-      let code = 'AI_RESOURCE_UNAVAILABLE';
-      if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
-      else if (error instanceof AiRequestWaitError) code = error.code;
-      else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError
-        || error instanceof AiClientQuoteResultUnknownError || error instanceof AiClientTaskUnknownError) code = 'AI_RESULT_UNKNOWN';
-      else if (error instanceof AiClientEntryError) code = error.code;
-      else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
-      else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
-      else if (error instanceof HttpException) {
-        if (error.getStatus() === 400) code = 'AI_INVALID_INPUT';
-        else if ([401, 403, 404].includes(error.getStatus())) code = 'AI_ACCESS_DENIED';
-        else if (error.getStatus() === 409) code = 'AI_REVISION_CONFLICT';
+  private async respond<T>(request: AiClientApplicationRequest, work: () => Promise<T>, unknownAction = 'read_booking_operation'): Promise<T> {
+    return withClientEntryRefusalAudit(async () => {
+      const started = Date.now(), auditRequest = { headers: { authorization: request?.headers?.authorization }, ip: request?.ip };
+      try { return await work(); }
+      catch (error) {
+        let code = clientEntryRefusalCode(error);
+        try { await this.application.observeEntryRefusal?.(auditRequest, error, { durationMs: Math.max(0, Date.now() - started) }); }
+        catch { if (code !== 'AI_RESULT_UNKNOWN') code = 'AI_RESOURCE_UNAVAILABLE'; }
+        throw new HttpException({ code, retryable: false,
+          ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, clientEntryStatuses[code]);
       }
-      if (!Object.prototype.hasOwnProperty.call(statuses, code)) code = 'AI_RESOURCE_UNAVAILABLE';
-      throw new HttpException({ code, retryable: false,
-        ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[code]);
-    }
+    });
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOrderMaterial) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareOrderMaterial(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const command = aiClientOrderMaterialRequestSchema.parse(input);
       const prepared = await this.application.prepare(current, { operationKey: command.operationKey,
         command: { kind: 'order', orderId: command.orderId } }, signal);
@@ -96,12 +109,12 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderMaterialReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOrderMaterialReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, signal => this.application.readOrderMaterialReceipt(current, input, signal),
+    return this.respond(request, () => withRequestAbort(request, signal => this.application.readOrderMaterialReceipt(current, input, signal),
       { maxWaitMs: 15000 }), 'read_original_material_receipt');
   }
   private taskCreation(request: ClientModelHttpRequest, body: unknown, create: boolean) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const command = aiClientTaskReadRequestSchema.parse(input);
       const result = await this.application[create ? 'createTask' : 'readTaskCreation'](current, command, signal);
       if (!('state' in result) || !('task' in result)) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_creation_observation_unknown');
@@ -119,7 +132,7 @@ export class AiClientEntryController {
   readTaskCreation(@Req() request: ClientModelHttpRequest, @Body() value: unknown) { return this.taskCreation(request, value, false); }
   private accounting(request: ClientModelHttpRequest, body: unknown, reconcile: boolean) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const command = aiClientTaskAccountingRequestSchema.parse(input);
       const result = await this.application[reconcile ? 'reconcileOriginalTaskAccounting' : 'readOriginalTaskAccounting'](current, command, signal);
       const response = aiClientTaskAccountingResponseSchema.safeParse(result);
@@ -175,7 +188,7 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareQuoteParameters(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
+    return this.respond(request, async () => {
       const value = await this.application.prepareQuoteParameters(request, aiClientQuotePreparationRequestSchema.parse(body));
       const response = aiClientQuotePreparationResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
       if (!response.success) throw new AiClientQuoteResultUnknownError();
@@ -185,7 +198,7 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoal) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareGoal(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
     const body = structuredClone(request.body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const value = await this.application.prepareGoal(request, aiClientGoalPreparationRequestSchema.parse(body), signal);
       const response = aiClientGoalPreparationResponseSchema.safeParse(value);
       if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_goal_preparation_requires_recheck');
@@ -195,19 +208,19 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalPreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readGoalPreparation(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
     const body = structuredClone(request.body);
-    return this.respond(() => withRequestAbort(request, async signal => aiClientGoalPreparationResponseSchema.parse(
+    return this.respond(request, () => withRequestAbort(request, async signal => aiClientGoalPreparationResponseSchema.parse(
       await this.application.readGoalPreparation(request, aiClientGoalPreparationReadRequestSchema.parse(body), signal)), { maxWaitMs: 15000 }), 'read_original_goal_preparation');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalCandidates) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readGoalCandidates(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
     const body = structuredClone(request.body);
-    return this.respond(() => withRequestAbort(request, async signal => aiClientGoalProjectionSchema.parse(
+    return this.respond(request, () => withRequestAbort(request, async signal => aiClientGoalProjectionSchema.parse(
       await this.application.readGoalCandidates(request, aiClientGoalCandidatesRequestSchema.parse(body), signal)), { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareGoalQuote) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareGoalQuote(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
     const body = structuredClone(request.body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const value = await this.application.prepareGoalQuote(request, aiClientGoalQuoteRequestSchema.parse(body), signal);
       const response = aiClientQuotePreparationResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
       if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'original_quote_preparation_requires_recheck');
@@ -217,13 +230,13 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readGoalQuotePreparation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readGoalQuotePreparation(@Req() request: ClientModelHttpRequest & { body?: unknown }) {
     const body = structuredClone(request.body);
-    return this.respond(() => withRequestAbort(request, async signal => aiClientQuotePreparationReadResponseSchema.parse({
+    return this.respond(request, () => withRequestAbort(request, async signal => aiClientQuotePreparationReadResponseSchema.parse({
       ...await this.application.readGoalQuotePreparation(request, aiClientGoalQuoteRequestSchema.parse(body), signal), contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION }),
     { maxWaitMs: 15000 }), 'read_quote_preparation_operation');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readQuotePreparationOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
+    return this.respond(request, async () => {
       const value = await this.application.readQuotePreparationOperation(request, aiClientQuotePreparationRequestSchema.parse(body));
       const response = aiClientQuotePreparationReadResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
       if (!response.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -232,17 +245,17 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters) @HttpCode(200) @Header('Cache-Control', 'no-store')
   confirmQuoteParameters(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => this.preparedQuoteObservation(await this.application.confirmQuoteParameters(request,
+    return this.respond(request, async () => this.preparedQuoteObservation(await this.application.confirmQuoteParameters(request,
       aiClientQuoteConfirmationRequestSchema.parse(body))), 'read_original_quote');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readPreparedQuoteOriginal(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => this.preparedQuoteObservation(await this.application.readPreparedQuoteOriginal(request,
+    return this.respond(request, async () => this.preparedQuoteObservation(await this.application.readPreparedQuoteOriginal(request,
       aiClientQuoteConfirmationRequestSchema.parse(body))), 'read_original_quote');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareOriginalQuoteBooking) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepareOriginalQuoteBooking(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const command = aiClientQuoteBookingRequestSchema.parse(body);
       const result = await this.application.prepareOriginalQuoteBooking(request, command, signal);
       const checked = aiClientQuoteBookingPreparationResponseSchema.safeParse(result);
@@ -252,7 +265,7 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOriginalQuoteBookingOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOriginalQuoteBookingOperation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const command = aiClientQuoteBookingRequestSchema.parse(body);
       const result = await this.application.readOriginalQuoteBookingOperation(request, command, signal);
       const checked = aiClientQuoteBookingOperationResponseSchema.safeParse(result);
@@ -281,47 +294,47 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.startTaskModel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   startTaskModel(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, async signal =>
+    return this.respond(request, () => withRequestAbort(request, async signal =>
       this.modelObservation(await this.application.startOriginalTaskModel(request, body, undefined, signal))), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.recoverTaskModel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   recoverTaskModel(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, async signal =>
+    return this.respond(request, () => withRequestAbort(request, async signal =>
       this.modelObservation(await this.application.recoverOriginalTaskModel(request, body, undefined, signal))), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskModel) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reconcileTaskModel(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, async signal =>
+    return this.respond(request, () => withRequestAbort(request, async signal =>
       this.modelObservation(await this.application.reconcileOriginalTaskModel(request, body, undefined, signal))), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.continueTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   continueTaskInput(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
-    return this.respond(() => withRequestAbort(request, async signal =>
+    return this.respond(request, () => withRequestAbort(request, async signal =>
       this.modelObservation(await this.application.continueOriginalTaskModelInput(request, body, undefined, signal))), 'read_original_task');
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskSnapshot(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, signal => this.application.readTaskSnapshot(current, input, signal),
+    return this.respond(request, () => withRequestAbort(request, signal => this.application.readTaskSnapshot(current, input, signal),
       { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskModelResult) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskModelResult(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, signal => this.application.readOriginalTaskModelResult(current, input, undefined, signal),
+    return this.respond(request, () => withRequestAbort(request, signal => this.application.readOriginalTaskModelResult(current, input, undefined, signal),
       { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskEvents(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, signal => this.application.readTaskEvents(current, input, signal),
+    return this.respond(request, () => withRequestAbort(request, signal => this.application.readTaskEvents(current, input, signal),
       { maxWaitMs: 15000 }), 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskInput(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization }, ip: request.ip }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const question = await this.application.readOriginalTaskModelInput(current, input, undefined, signal);
       const response = aiClientTaskInputReadResponseSchema.safeParse({ contractVersion: AI_TASK_INPUT_DRAFT_VERSION,
         state: question === null ? 'not_pending' : 'pending', question,
@@ -333,7 +346,7 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   requestTaskCancellation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
+    return this.respond(request, async () => {
       const result = await this.application.requestOriginalTaskCancellation(request, body);
       const event = result.receipt.event;
       // Whitelist the public observation; no lease, holder, run revision,
@@ -350,7 +363,7 @@ export class AiClientEntryController {
   }
   private observeCancellation(request: ClientModelHttpRequest, body: unknown, settled: boolean) {
     const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const result = await (settled ? this.application.readOriginalTaskCancellationSettlementReceipt(current, input, signal)
         : this.application.readOriginalTaskCancellationReceipt(current, input, signal));
       const event = result.event;
@@ -381,7 +394,7 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.settleTaskUnstartedCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   settleTaskUnstartedCancellation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const result = await this.application.settleOriginalTaskUnstartedCancellation(current, input, signal), event = result.receipt.event;
       if (event.data.to !== 'cancelled') throw new AiTaskTransitionResultUnknownError();
       const response = aiClientTaskUnstartedCancellationReceiptSchema.safeParse({ contractVersion: event.contractVersion,
@@ -394,7 +407,7 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
   submitTaskInput(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
+    return this.respond(request, async () => {
       const result = await this.application.submitOriginalTaskModelInput(request, body);
       const receipt = aiClientTaskInputSubmissionReceiptSchema.safeParse({ status: result.status,
         taskId: result.taskId, requestId: result.requestId, receiptId: result.receiptId,
@@ -407,7 +420,7 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInputReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskInputReceipt(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const parsed = aiClientTaskInputSubmissionRequestSchema.parse(input);
       const { submission, ...command } = parsed;
       const result = await this.application.readOriginalTaskModelInputReceipt(current, command, submission, undefined, signal);
@@ -421,12 +434,12 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOrderExplanation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readOrderExplanation(request, body));
+    return this.respond(request, () => this.application.readOrderExplanation(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reconcileTaskInputCancellation(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
     const current = { headers: { authorization: request?.headers?.authorization } }, input = structuredClone(body);
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const result = await this.application.reconcileOriginalTaskInputCancellation(current, input, undefined, signal);
       const event = result.receipt.event;
       if (event.data.to !== 'cancelled') throw new AiTaskTransitionResultUnknownError();
@@ -440,19 +453,19 @@ export class AiClientEntryController {
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSource(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readSource(request, body));
+    return this.respond(request, () => this.application.readSource(request, body));
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readHostCapabilities(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readHostCapabilities(request, body));
+    return this.respond(request, () => this.application.readHostCapabilities(request, body));
   }
   private orderNavigation(request: ClientModelHttpRequest & { body?: unknown }, value: unknown,
     method: 'readOrderTaskHostCapabilities' | 'readOrderAction' | 'revalidateOrderAction') {
     const command = structuredClone(request.body ?? value), current = {
       headers: { authorization: request?.headers?.authorization }, ip: request.ip };
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const result = method === 'revalidateOrderAction'
         ? await this.application.revalidateOrderAction(current, aiClientOrderActionRevalidationSchema.parse(command), signal)
         : await this.application[method](current, aiClientOrderActionSourceSchema.parse(command), signal);
@@ -474,37 +487,37 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   issueAction(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.issueAction(request, body));
+    return this.respond(request, () => this.application.issueAction(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.createBookingDraft)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   createBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.createBookingDraft(request, body));
+    return this.respond(request, () => this.application.createBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.chooseBookingDraft)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   chooseBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.chooseBookingDraft(request, body));
+    return this.respond(request, () => this.application.chooseBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingDraft)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readBookingDraft(request, body));
+    return this.respond(request, () => this.application.readBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.handoffBookingDraft)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   handoffBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.handoffBookingDraft(request, body));
+    return this.respond(request, () => this.application.handoffBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingHandoff)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingHandoff(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readBookingHandoff(request, body));
+    return this.respond(request, () => this.application.readBookingHandoff(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readBookingOperation(request, body));
+    return this.respond(request, () => this.application.readBookingOperation(request, body));
   }
 
   private bookingTransfer(request: ClientModelHttpRequest & { body?: unknown }, value: unknown,
@@ -513,7 +526,7 @@ export class AiClientEntryController {
       headers: { authorization: request?.headers?.authorization }, ip: request.ip };
     const source = method === 'issueBookingTransfer' || method === 'readBookingTransferIssue';
     const read = method === 'readBookingTransferIssue' || method === 'readBookingTransferReceipt';
-    return this.respond(() => withRequestAbort(request, async signal => {
+    return this.respond(request, () => withRequestAbort(request, async signal => {
       const input = source ? aiClientBookingTransferIssueRequestSchema.parse(command) : aiClientBookingTransferRequestSchema.parse(command);
       if (signal.aborted) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const result = await this.application[method](current, input);
@@ -543,7 +556,7 @@ export class AiClientEntryController {
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingAcceptance(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(async () => {
+    return this.respond(request, async () => {
       const value = await this.application.readBookingAcceptance(request, aiBookingAcceptanceReadRequestSchema.parse(body));
       const result = aiBookingAcceptanceReadResponseSchema.safeParse(value);
       if (!result.success || Buffer.byteLength(JSON.stringify(result.data), 'utf8') > 8192) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -554,16 +567,16 @@ export class AiClientEntryController {
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   acceptBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     // Same handoff re-read can recover an acceptance; it does not submit an order.
-    return this.respond(() => this.application.acceptBookingSubmission(request, body), 'read_booking_acceptance');
+    return this.respond(request, () => this.application.acceptBookingSubmission(request, body), 'read_booking_acceptance');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   submitAcceptedBooking(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.submitAcceptedBooking(request, body), 'read_booking_submission');
+    return this.respond(request, () => this.application.submitAcceptedBooking(request, body), 'read_booking_submission');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingSubmission)
   @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
-    return this.respond(() => this.application.readBookingSubmission(request, body), 'read_booking_submission');
+    return this.respond(request, () => this.application.readBookingSubmission(request, body), 'read_booking_submission');
   }
 }

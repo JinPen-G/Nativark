@@ -6,6 +6,15 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry17-refusal-observation-fixed-20261116"></a>
+## ENTRY-17 原Action和客户准入拒绝审计修复（2026-11-16）
+
+dev1在固定前置 `93293c30530c98b2cbfc88f45bfd19a289a07619` 完成四源并交回写权，Root逐文件核对blob一致并审视实际请求、身份和原日志接点。[原Action应用](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.application.ts)在过期拒绝时，独立核验原封印、主体和scope后保留actionId／actionCode／resourceId。正文改写、伪造封印或异主体请求撤下关联。[客户标准应用](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)、[原Controller](../../apps/api/src/modules/ai-native/scenes/client-entry.controller.ts)及[私有观察叶](../../apps/api/src/modules/ai-native/scenes/client-entry.audit.ts)将准入和DTO拒绝接到原OperationLog，同请求共用一次观察尝试，并发请求保持独立。原错误及unknown读取指令保留，观察只留最少关联。
+
+四份固定blob依次为 `01d6b68af8d516152da9b75db0140211de1d4136`、`0174914eb4c829140b1bb6d302d48cbf09772714`、`dcd8153544a5526d5dcd9de12c915d1f7eb485a5`、`cee2bec330ab0538a6b6fbb8d868f45b2917ed41`。作者使用原Controller／Auth／Guard／ALS／SecretBox和标准应用完成必要模拟，存储、导航事实及频率端口为有界内存替身。两端签发／复核、四次过期拒绝、正文改写、异scope、客户发布／无效DTO拒绝、并发身份隔离和审计丢ACK共22条观察，模型调用和业务写入均为0。命令 `node --no-compilation-cache -`，stdin SHA-256 `12b30c72bac00ba9c356e5968ff313a1e52db93a89c6dd01adb59574a3df11e3`，exit 0。最终TypeScript 5.9.3四根／1608源、0诊断，stdin `3ea9b2a12494e734655f1001703d105cc6195b646f13152838951d29703c5f9b`，exit 0。
+
+Root另用同一原日志叶做一组并发与丢ACK模拟，同请求只尝试一次，不同请求／客户使用独立观察ID，丢ACK经过Controller边界也不重写，无正文或凭据字段。此组只以可信身份和存储替身核单叶行为，完整Guard链沿上述固定作者证据。命令 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin `c88c7d6d2c0ca10a97c510413e0486925589a3037e787d19f22cb05fbd4fc490`，exit 0。本片属于ENTRY-17拒绝观察的完整修复阶段，08／17全文仍结合原控制台和剩余生命周期证据核定。编辑保护首次将45处调用预估为44而拒绝，已据原Git对象修正保护计数。自有验证进程均已退出，任务临时目录未创建，无新增测试文件。真实数据库、浏览器、微信和供应商由负责人后续操作。
+
 <a id="ain-native-console-direct-integration-20261115"></a>
 ## 原 Agent 控制台与 Copilot 直接接入：公共结果宿主（2026-11-15）
 

@@ -536,6 +536,23 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
       const event: EntryActionAuditEvent = { requestId, surface, contractVersion: name.includes('Notification')
         ? AI_ENTRY_NOTIFICATION_DRAFT_VERSION : AI_REGISTERED_ENTRY_ACTION_VERSION, operation: name,
         state: 'observed', durationMs: 0 };
+      const originalAction = name === 'revalidate' ? aiRegisteredEntryActionReadSchema.safeParse(frozen)
+        : name === 'saveNotificationDraft' ? aiEntryNotificationDraftSaveSchema.safeParse(frozen) : undefined;
+      if (originalAction?.success) {
+        const { proof, ...body } = originalAction.data.action;
+        try {
+          const sealed = d.secrets.decrypt(proof);
+          const ownerKey = body.actionCode === 'CREATE_NOTIFICATION_DRAFT' ? notificationOwner(actor.context) : actor.ownerKey;
+          // An expired Action can still identify its original refusal. Only its
+          // authenticated seal and the current principal supply that association.
+          if (sealed.purpose === 'rental-os:registered-entry-action:2' && sealed.bodyHash === requestFingerprint(body)
+            && sealed.ownerKey === ownerKey && body.bindingFingerprint === ownerKey
+            && body.surface === surface && body.audience === audience
+            && requestFingerprint(body.scope) === requestFingerprint(actor.context.scope)) {
+            event.actionId = body.actionId; event.actionCode = body.actionCode; event.resourceId = body.resource.id;
+          }
+        } catch { /* An unverifiable submitted Action supplies no audit association. */ }
+      }
       // A lost save response still needs its original locator in the audit.
       // This is scoped request correlation, never evidence of a saved draft or
       // a valid Action; only the original operation/receipt supplies that fact.
