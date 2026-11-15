@@ -155,6 +155,20 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-package-current-cli-20261115"></a>
+
+## 当前工单标准包与随包资料的实际命令复验（2026-11-15）
+
+固定源码 `5deaf63d80eb0fc294af8014efffaf637b6570fe` 已推送并真实回读，main仍 `62ca183f10b7c316ab63c28ef6d04ee88d06488b` 且在本树祖先；工作区/索引干净，无合并/拣选。本片补齐 [随包资料阶段](#core-package-document-links-20261115) 此前因自动审批拒绝而未执行的实际包/CLI验证，沿原离线编译、标准命令及finally清理方法执行，未修改产品或绕过原检查。
+
+`node --no-compilation-cache -` 在本树唯一 `output/.tmp/core-document-links` 中按真实tsconfig编译合同35根/工单11根，0诊断。临时合同包保留原package.json和相对exports，编译产物来自本树固定源码；依赖只读复用受管安装，Prisma仅使用事务类型声明替身，没有生成Client、复制整套依赖或读取环境文件。实际Node子进程执行 [metadata package](../../../packages/example-tickets-core/src/metadata.ts)、[prepare-install](../../../packages/core-contracts/src/prepare-install.ts)、重复prepare-install及 [check --host --json](../../../packages/core-contracts/src/check.ts) 均退出0。重复打包到同一文件退出1/EEXIST，原包摘要保持。
+
+标准包30文件、44,879字节，SHA-256为 `98dc10837615965f073a732032dc4a7d14831aa314f224f4b8da54687a2fc5a1`；Core与底座来源均固定上述5de版本，实现版仍为开发中的0.1.0，未创建公开发行。原包摘要、包检查的package-static/compatibilityChecked、首次prepared与重复already_prepared核同，部署状态均为pending。随包OpenAPI包含8个实际声明操作，CORE_GUIDE直接链接本包API/入口，README源码引用固定到5de提交；本片验证这些实际文件，不借旧b7e包证据推定当前版本通过。
+
+编译、输入JSON、测试包及待部署准备文件均在同一任务临时目录，finally核绝对路径、归属及无链接后删除，命令退出0；随后核目录不存在、任务临时根条目数0。没有启动业务服务、执行迁移或授权Core，没有真实GitHub Release下载、数据库、HTTP、后台或独立接手证据。包准备通过不能替代干净宿主的安装、注册、租户授权、成员分配及持久化业务链。
+
+证据仅补本记录与接续，正式需求/任务及原门槛保持。4份文档569个链接/149个锚点/49个表格、旧阶段原文与正式需求/任务保全核对退出0，差异格式退出0；中文提交普通推送后回读任务分支，记录提交由包含本节的Git对象定位。此前标准包验证的拒绝历史原位保留，当前包/CLI未验缺口由本节证据补齐；完整API离线生成和原MCP验证的拒绝项仍按各自阶段保留，不能由本片关闭。
+
 <a id="core-access-refresh-receipt-20261115"></a>
 
 ## Core授权结果、当前目录刷新与缓存隔离（2026-11-15）
