@@ -6,6 +6,17 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry02-customer-original-links-fixed-20261115"></a>
+## ENTRY-02 客户两端原资源导航及本人资料目标固定阶段（2026-11-15）
+
+本片仅固定dev1冻结的14份客户源：网站API／导航组件／订单挂接／账户资料区／MemberLayout／Auth bridge六源，客户小程序API／组件四源／原订单三源八份。Root已逐blob核同作者固定版本，重叠导航组件使用本人资料修后的`649ffac67718f25ea92905330ee2b6367fc8f510`；未覆盖客户端其他业务页或后端活动成果。
+
+两端原本人订单只在明确点击后读取OPEN_PROFILE／PRODUCT／PAYMENT。当前会话代次、本人、服务／scope／Action／资源版本前后复核；模型URL不导航，Action只内存，隐藏／切身份／过期撤回。网站本人资料已从仅地址簿的/account改为实际/account?section=profile，原GET /profile及账户导航均实际消费，原地址簿保留。支付进入原订单页，明确GET原intent记录，不执行refresh或新支付。
+
+作者完整原消费冒烟`cc72da5436614ee753c6945705f7c4ea605eb46380492d3f3562bd325186d023`、原订单页／支付按钮`cfd906a643687d4ed680d4cf266ac5fffead365a22f0c7e9b8e067a08e69fb96`、原120秒过期／迟到拒绝`717f73db19b1636f98b8568fffdb8b3ab2b6c83b5adc5da2f7d7fd9225912be5`均退出0；两端类型为网站4根／302源、小程序ES2019三根／251源，126份shared声明仅内存，零诊断。本人资料四源实际消费／当前审计补验`abd84f7267d5eebfb3614732811cf5357b2db65255573f22c1e3f409effab151`及类型`891719198ba33bf0bae8fc6b1f48a4c4449d5935aed8bfb21a8abd08283fdb22`退出0；作者原会话协调器補验`262db9c0deef1fe5cf9e8e5b4041cdfce84b501fbcf21b858f7cf1c724385521`退出0。Root独立当前客户六根／305源类型`6a4f4815a61b96b58c8562b1fb36ab2f571dac51682008a6d8d502f126ec15db`、TS5.9.3零诊断／退出0，原行为证据按作者来源明确，不冒称Root重跑。
+
+命令沿原`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`及Root的`node --no-compilation-cache -`，没有新增测试脚本。数据库、传输及React／微信宿主为明确有限夹具；实际原ClientAuth／Guard／Controller／Core／会话和消费者运行，真实浏览器／微信／DB／供应商未测试。已保留最初错误href、漏声明、宿主驱动和HTTP Date秒精度修复证据；不放宽生产权限、时间窗口或字段。所有本片验证进程已退出、audit为空、任务目录未创建；本提交不夹通知三源／正文删除或审计WIP。ENTRY-02／05／10原全文由Root与dev1继续核定，当前阶段不单独加分。
+
 <a id="ain-entry02-registered-navigation-stage-20261115"></a>
 ## ENTRY-02 原资源Action签发、正式装配与员工／后台导航阶段（2026-11-15）
 

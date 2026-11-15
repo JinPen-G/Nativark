@@ -6,7 +6,7 @@ import { Address, Bell, LogOut, Receipt, Ticket, User } from './SiteIcon';
 import { Breadcrumbs, PageHeading } from './PageHeader';
 import { useActiveRail } from '../hooks/useActiveRail';
 
-export type MemberSection = 'orders' | 'addresses' | 'coupons' | 'notifications';
+export type MemberSection = 'orders' | 'profile' | 'addresses' | 'coupons' | 'notifications';
 export function MemberLayout({ active, title, description, children }: { active: MemberSection; title: string; description?: string; children: ReactNode }) {
   const { href, t, isRemote, language } = useSite();
   const { customerName, isAuthenticated, logout } = useAuth();
@@ -21,6 +21,7 @@ export function MemberLayout({ active, title, description, children }: { active:
   }
   const links = [
     { id: 'orders', label: t('orders'), to: '/orders', Icon: Receipt },
+    { id: 'profile', label: language === 'en' ? 'My profile' : '本人资料', to: '/account?section=profile', Icon: User },
     { id: 'addresses', label: t('addressBook'), to: '/account?section=addresses', Icon: Address },
     { id: 'coupons', label: t('coupons'), to: '/account?section=coupons', Icon: Ticket },
     { id: 'notifications', label: t('notifications'), to: '/account?section=notifications', Icon: Bell },

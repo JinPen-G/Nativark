@@ -6,7 +6,7 @@ import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissi
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
   from '@rental-os/shared';
 import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult } from '@rental-os/shared';
-import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
+import { CLIENT_API_VERSION, AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
   aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema,
   type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest } from '@rental-os/shared';
 import { aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationResponseSchema, aiClientQuoteBookingOperationResponseSchema,
@@ -16,7 +16,7 @@ import { aiClientQuoteBookingRequestSchema, aiClientQuoteBookingPreparationRespo
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
 import { customerFetch, customerLogin, customerSessionGeneration, loadCustomerSession, logoutCustomerSession, switchCustomerWorkspace, subscribeCustomerSession, ClientTransportError } from '@rental-os/web-client';
-import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ClientOrderView, ClientMembershipSessionResponse, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
+import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ClientOrderView, ClientProfileView, ClientMembershipSessionResponse, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, CloseEnterpriseExtensionRequest, EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult } from '@rental-os/shared';
 export type ClientSession = ClientMembershipSessionResponse;
 
 export interface WorkspaceRef {
@@ -116,6 +116,31 @@ export function captureEnterpriseHostSession() {
         && latest.customer.customerId === customerId && latest.workspace?.workspaceCode === workspaceCode;
     } };
 }
+
+/** Current personal profile display only. Unlike command recovery, a profile
+ * observation cannot survive token refresh or a changed principal projection.
+ * The closure retains no data in storage and grants no profile edit permission. */
+export function captureOwnProfileReadSession() {
+  const owner = bridge, session = owner?.getSession();
+  if (!owner || !session?.accessToken || session.customer.customerType !== 'personal'
+    || !session.customer.customerId || !session.workspace?.workspaceCode) return null;
+  const generation = customerSessionGeneration(owner.tenantCode);
+  if (generation === 'unavailable') return null;
+  const token = session.accessToken, customerId = session.customer.customerId, workspaceCode = session.workspace.workspaceCode;
+  const principal = JSON.stringify({ customer: session.customer, workspace: session.workspace, workspaces: session.workspaces });
+  return { tenantCode: owner.tenantCode, customerId, workspaceCode, current: () => {
+    const latest = loadSession(owner.tenantCode), active = owner.getSession();
+    return bridge === owner && active === session && active.accessToken === token
+      && JSON.stringify({ customer: active.customer, workspace: active.workspace, workspaces: active.workspaces }) === principal
+      && customerSessionGeneration(owner.tenantCode) === generation && latest?.accessToken === token
+      && JSON.stringify({ customer: latest.customer, workspace: latest.workspace, workspaces: latest.workspaces }) === principal;
+  } };
+}
+
+/** Local field projection of the original ClientProfileView; contacts and
+ * corporate records are not retained by the personal read-only account view. */
+export type OwnProfileReadView = Pick<ClientProfileView, 'apiVersion' | 'customerId' | 'customerType' | 'name' | 'phoneMasked'
+  | 'email' | 'identityVerified' | 'identityNoMasked' | 'accountStatus' | 'workspace'>;
 
 export function configureAuthBridge(next: AuthBridge | null): void {
   bridge = next;
@@ -243,6 +268,34 @@ export const sessionApi = {
   },
   order(id: string) { return authedJson<Record<string, any>>(`/orders/${encodeURIComponent(id)}`); },
   paymentCapabilities() { return authedJson<{ methods?: string[]; [k: string]: unknown }>('/payment/capabilities'); },
+  async profile(signal?: AbortSignal): Promise<OwnProfileReadView> {
+    const owner = captureOwnProfileReadSession();
+    if (!owner?.current() || signal?.aborted) throw new ClientTransportError(401, '本人资料会话已变化');
+    const controller = new AbortController(), stop = () => controller.abort(), timer = setTimeout(stop, 15000);
+    signal?.addEventListener('abort', stop, { once: true });
+    try {
+      // Read this original GET once. Refresh or interruption withdraws the
+      // observation; a new explicit read uses the new current session.
+      const value: unknown = await parse(await authedFetch('/profile', { signal: controller.signal }, false));
+      if (controller.signal.aborted || signal?.aborted || !owner.current()) throw new ClientTransportError(401, '本人资料会话已变化');
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ClientTransportError(502, '本人资料返回内容无法核验');
+      const profile = value as Partial<ClientProfileView>, workspace = profile.workspace;
+      if (profile.apiVersion !== CLIENT_API_VERSION || profile.customerId !== owner.customerId || profile.customerType !== 'personal'
+        || typeof profile.name !== 'string' || !profile.name || typeof profile.phoneMasked !== 'string'
+        || profile.email !== undefined && typeof profile.email !== 'string'
+        || typeof profile.identityVerified !== 'boolean' || profile.identityNoMasked !== undefined && typeof profile.identityNoMasked !== 'string'
+        || !['active', 'suspended', 'closed'].includes(String(profile.accountStatus))
+        || !workspace || workspace.workspaceCode !== owner.workspaceCode || typeof workspace.workspaceName !== 'string'
+        || typeof workspace.categoryCode !== 'string' || typeof workspace.membershipStatus !== 'string'
+        || workspace.isDefault !== undefined && typeof workspace.isDefault !== 'boolean') throw new ClientTransportError(502, '本人资料返回内容无法核验');
+      return { apiVersion: CLIENT_API_VERSION, customerId: profile.customerId, customerType: 'personal', name: profile.name,
+        phoneMasked: profile.phoneMasked, identityVerified: profile.identityVerified, accountStatus: profile.accountStatus as OwnProfileReadView['accountStatus'],
+        ...(profile.email !== undefined ? { email: profile.email } : {}),
+        ...(profile.identityNoMasked !== undefined ? { identityNoMasked: profile.identityNoMasked } : {}),
+        workspace: { workspaceCode: workspace.workspaceCode, workspaceName: workspace.workspaceName, categoryCode: workspace.categoryCode,
+          membershipStatus: workspace.membershipStatus, ...(workspace.isDefault !== undefined ? { isDefault: workspace.isDefault } : {}) } };
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); }
+  },
   addresses() { return authedJson<Record<string, unknown>>('/profile/addresses'); },
   saveAddress(payload: unknown) { return authedJson<Record<string, unknown>>('/profile/addresses', { method: 'PUT', body: JSON.stringify(payload) }); },
   deleteAddress(id: string) { return authedJson<unknown>(`/profile/addresses/${encodeURIComponent(id)}`, { method: 'DELETE' }); },

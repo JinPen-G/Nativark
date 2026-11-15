@@ -14,6 +14,7 @@ import { ClientTaskWorkbench } from '../features/ai-native/ClientTaskWorkbench';
 import { EnterpriseExtensionApproval } from '../components/EnterpriseExtensionApproval';
 import { EnterpriseExchangeProgress } from '../components/EnterpriseExchangeProgress';
 import { EnterpriseExchangeRequest } from '../components/EnterpriseExchangeRequest';
+import { ClientRegisteredEntryActions } from '../features/ai-native/ClientRegisteredEntryActions';
 
 function money(amount: unknown, currency = 'CNY') {
   if (amount == null || amount === '') return '—';
@@ -123,6 +124,8 @@ export function OrderDetailPage() {
         {!remote && <p className="preview-notice">{t('savedDescription')}</p>}
         {remote && orderId && session?.customer.customerType === 'personal' && <ClientTaskWorkbench orderId={orderId}
           scopeKey={JSON.stringify([tenantCode,session.customer.customerId,currentWorkspace?.workspaceCode,orderId,revision])} english={en} />}
+        {remote && orderId && order?.id === orderId && session?.customer.customerType === 'personal' && <ClientRegisteredEntryActions orderId={orderId}
+          scopeKey={JSON.stringify([tenantCode, session.customer.customerId, currentWorkspace?.workspaceCode, orderId, order.updatedAt, revision])} english={en} />}
         <div className="order-detail-layout"><div>
           <section className="order-section"><h2><Receipt />{t('bookingInfo')}</h2>
             {remote ? <div className="order-item-list">{lines.map((line, index) => <div key={line.id ?? index}><span>{line.itemGroupName || line.itemGroupId} × {line.quantity ?? 1}</span><strong>{money(line.amount, currency)}</strong></div>)}</div> : <div className="booking-product"><Img src={product!.cover} alt={product!.name} /><div><strong>{product!.name}</strong><p>{product!.subtitle}</p></div></div>}

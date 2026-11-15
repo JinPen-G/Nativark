@@ -12,13 +12,15 @@
 4. **ENTRY-01原四条已核闭，继续ENTRY-02全文。** 原目录和旧OPEN_ORDER消费者保持；新版ain-entry-action-2已接实际四端签发／当前原资源复核，独立entryActions发布、原Task／order来源及各目标权限／版本完整。员工四导航和Root后台消费者已冻结核接，商品原catalog页不借资产库存权。客户新增fromOrder只从本人原订单发现PROFILE／PRODUCT／本地PAYMENT，当前allowRead和发布独立核，lastUsed为原认证写；支付只读不POST refresh、不新支付。通知status=draft为真实unsent原日志，queued／failed不能冒充；当前原域三源由dev2核完，公共合同／签发／同K保存恢复及后台消费者由Root接。九Action全文仍未核闭，不以registry或unavailable升档。
 5. **ENTRY-09／11／12／18已全文核闭，继续02／05／08／10／17。** 原九后端／四端显式浏览、客户四读15000ms及员工receipt_only／原订单view入口固定；执行停用不授新动作，独立原读仍受权。[Task／媒体严格存储](<AI Native-开发记录.md#ain-entry15-original-storage-recovery-20261115>)及[同账号权限刷新](<AI Native-开发记录.md#ain-entry06-current-permission-whole-closeout-20261115>)的原恢复规则保持。09四端候选、费用名称、动态bootstrap及完整摘要安全投影齐备，原人工值／ID／hash不改、完整摘要不截断，最后P2已独立核定关闭；11／12／18原组合证据和交接门槛另行核定。剩余六Action真实签发／多audience及后台消费仍缺；通知queued／failed会被重试器投递，不能冒充未发送草稿；取消／延期／调度须按原业务效果核唯一风险登记，人工支付导航不能隐式触发供应商刷新。上述余项由Root与两助手沿原条款推进，不重复已过无变化集合或把整体专项未完倒作资料任务的前置。
 
+客户固定成果见[原资源导航与实际目标](<AI Native-开发记录.md#ain-entry02-customer-original-links-fixed-20261115>)；通知后继仍WIP：公共通知合同／正式provider／HTTP／Guard／OpenAPI、后台原客户详情准备／明确保存／原K恢复、最少OperationLog及最后审计等待权限／期限已接，必要模拟与类型通过。本人资料四源和其余十份客户导航已核固定blob；网站资料目标、员工商品state-view接线P2已修。通知删除叶及原收据四字段null兼容由dev2完成固定，shared／后台已接bodyRetention与原SecretBox维护注入；未固定前不暂存其活动文件，ENTRY整项仍按原全文核。
+
 ## 写入归属与协作
 
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送、shared／Guard／AppModule／OpenAPI／provider、registered-entry-action签发和后台原OrderHumanHandoff／Catalog消费者、双端runtime／builder及员工product页。当前导航阶段核接后固定，继续通知公共签发／HTTP／后台同K保存恢复；不覆盖企业窗口或助手活动客户页／通知源。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 原资源两叶、员工九源已冻结交权；独占客户Web新client-entry-actions-api／ClientRegisteredEntryActions及OrderPages仅订单挂接、小程序api/ai-entry-actions／ai-entry-actions组件及order页仅入口挂接。客户原Auth/token/customer/service代次、source／scope／版本和有限只读payment观察；不进入会自动refresh的pay页，不改shared／runtime／后端／四册／索引。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 通知contract／service／RentalBusinessService三源已冻结交权，固定blob c12fb0e／7c8eeea／e5dcd54经Root核同；作者原30场景及3根／1300源类型退出0，公共接线由Root继续。当前只读核剩余ENTRY-08／17的风险、通知草稿留存／删除／hold和原收据恢复，沿AIN-24已过证据定位确证缺口，不重跑AIN-25，不改源码／四册／索引或新增测试脚本。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 原资源／员工／客户十四源已冻结交权；本人资料目标四源blob4d932bc／3c560f8／fd7abb2／649ffac和其余十源经Root核同。当前只读核ENTRY-02／05／10原条款、九Action实际生产者／页面／默认关闭／人工出口，复用已过Booking与导航证据；不新增验证脚本，不写源码／shared／四册／索引。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 原通知三源前置已交回，公共接线归Root；当前独占retention-notification-draft新叶、retention.service／restore通知分支、privacy README及RentalBusinessService的notificationDraftObservation／read／scope窄修。30天核原密文／同事务CAS与aiDataErasure、精确关联hold／恢复重放；完好与删除后草稿均不投递，删除后四正文字段null、最少原K收据保持。Root占shared／provider／HTTP／后台／审计，必要模拟／类型后立即交固定blob，不扩大测试。 |
 | 内部/root/opening_core_closeout | 原11／12／18及限定ENTRY-02导航静态复核已交回；租户会员路由与末次等待跨Action期限两P2已由Root最小修复并复验，固定片类型零诊断。不碰通知／客户活动文件，不递归派审或重复绿色。无写权。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
 | main／PM | main串行集成、真实数据库／迁移／Client／服务恢复的唯一负责人。每两项原任务新达100%形成main节点；AI不争main索引或夹其他专项WIP，助手不等待集成。 |

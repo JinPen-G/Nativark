@@ -20,6 +20,20 @@
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <block wx:elif="{{order}}">
+    <view wx:if="{{aiEntryActionsAvailable}}" class="section"><ai-entry-actions id="ai-entry-actions" order-id="{{order.id}}" context-key="{{aiEntryActionsContext}}" available="{{aiEntryActionsAvailable}}"></ai-entry-actions></view>
+    <view wx:if="{{aiEntryActionsAvailable && aiOriginalPaymentTarget}}" class="section"><view class="card">
+      <view class="subtitle">原支付记录</view>
+      <view class="muted small mt-8">仅核对原本地记录，不查询支付渠道或办理支付。</view>
+      <button class="btn btn--secondary btn--block mt-16" loading="{{aiOriginalPaymentLoading}}" disabled="{{aiOriginalPaymentLoading}}" bindtap="onReadOriginalPayment">核对原支付记录</button>
+      <view wx:if="{{aiOriginalPayment}}">
+        <view class="kv mt-8"><text class="kv__label">支付单</text><text class="kv__value">{{aiOriginalPayment.intentId}}</text></view>
+        <view class="kv"><text class="kv__label">状态</text><text class="kv__value">{{aiOriginalPayment.statusLabel}}</text></view>
+        <view class="kv"><text class="kv__label">用途</text><text class="kv__value">{{aiOriginalPayment.instrumentLabel}}</text></view>
+        <view class="kv"><text class="kv__label">金额</text><text class="kv__value">{{aiOriginalPayment.amountText}}</text></view>
+        <view wx:if="{{aiOriginalPayment.readAt}}" class="muted small mt-8">读取完成时间（服务时钟）：{{aiOriginalPayment.readAt}}</view>
+      </view>
+      <view wx:if="{{aiOriginalPaymentMessage}}" class="small mt-8" role="status">{{aiOriginalPaymentMessage}}</view>
+    </view></view>
     <view wx:if="{{aiNativeOrderProjection}}" class="section">
       <button class="btn btn--block" bindtap="onToggleOrderFacts">{{aiOrderFactsExpanded ? '收起订单事实' : '查看订单事实（非AI回答）'}}</button>
       <ai-order-explanation wx:if="{{aiOrderFactsExpanded}}" order="{{aiNativeOrderProjection}}" available="{{true}}" />
