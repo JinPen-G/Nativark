@@ -30,6 +30,7 @@ function ProtectedLayout() {
   const routes = [
     { path: "/", label: en ? "Overview" : "平台概览", icon: <Blocks size={18} /> },
     { path: "/settings/profile", label: en ? "My profile" : "本人资料", icon: <UserRound size={18} /> },
+    { path: "/settings/security", label: en ? "Account security" : "账号安全" },
     { path: "/settings/appearance", label: en ? "Appearance" : "账户外观", icon: <Settings size={18} /> },
     ...(can("system:tenant:manage") ? [{ path: "/settings/tenant", label: en ? "Tenant details" : "租户资料" }] : []),
     ...(can("system:integration:manage") ? [{ path: "/settings/tenant-appearance", label: en ? "Tenant appearance" : "租户外观" }] : []),
@@ -73,12 +74,19 @@ function TenantSetting({ appearance = false }: { appearance?: boolean }) {
   return allowed ? appearance ? <TenantAppearancePage /> : <TenantProfilePage /> : <Result status="403" title="403" />;
 }
 
+function AccountSecurity() {
+  const { session, brandName } = usePlatformApplication(), { locale } = useLocale();
+  return <><PageHeading brandName={brandName} title={locale === "en-US" ? "Account security" : "账号安全"} />
+    <AdminPasswordPage embedded onChange={session.changePassword} /></>;
+}
+
 export function createPlatformAdminApplication(options: PlatformAdminApplicationOptions) {
   const { session } = options;
   const router = createBrowserRouter([
   { path: "/login", element: <SignIn /> },
   { element: <ProtectedLayout />, children: [
     { path: "/", element: <Home /> }, { path: "/settings/profile", element: <SelfProfilePage /> },
+    { path: "/settings/security", element: <AccountSecurity /> },
     { path: "/settings/appearance", element: <AccountAppearancePage /> },
     { path: "/settings/tenant", element: <TenantSetting /> }, { path: "/settings/tenant-appearance", element: <TenantSetting appearance /> },
     { path: "/platform/core-access", element: <CoreAccessPage audience="saas" /> },
