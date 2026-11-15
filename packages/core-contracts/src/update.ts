@@ -149,6 +149,9 @@ export function planCoreUpdate(
       if (current.cores[index].manifest.version === request.release.manifest.version
         && !sameData(current.cores[index], request.release))
         add(selected, "release_metadata_changed", "release", "同一 Core 发行的锁定资料不能被改写");
+      // 普通更新复用原绑定；范围模型改变须先有独立的绑定/数据迁移方案。
+      if (!sameData(current.cores[index].manifest.scope, request.release.manifest.scope))
+        add(selected, "scope_changed", "release.manifest.scope", "Core业务范围已变化，须先核定原绑定与数据迁移，不能按普通更新切换");
       candidate.cores[index] = structuredClone(request.release);
     }
   }

@@ -194,6 +194,8 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 
 检查依次核对来源与不可变发行、全部选中模块的版本兼容、数据可读性和迁移历史。已发布迁移只追加，不能改原文件、顺序或摘要。若有新迁移，实际数据须先处于当前发行的完整基线，数据版本必须前进；中断或记录矛盾时先核对原迁移，不自动重做。
 
+普通更新保留Core的业务范围声明及原绑定。租户范围与容器范围互换、容器类型更名都返回 `scope_changed`，即使实现和数据版本前进也不能借这一入口转换。需要改变范围时，先核定原绑定、数据和权限的专门迁移方案；兼容的同范围修复继续按原更新路径办理。
+
 新宿主的迁移观察还提供 `execution`。原迁移账和物理结构核同后使用 `state: "ready"`，执行中、失败和未知分别使用 `running`、`failed`、`unknown`，携带原迁移标识/摘要，以及已知的语句进度、物理观察摘要和固定恢复SQL。出现未完成状态时预检返回 `migration_incomplete`，原DDL部分提交必须先根据真实结构与原执行收据处理。恢复SQL来源和摘要须核定后按目标环境授权执行，完成物理回读和原迁移账登记后重新观察。旧调用方的缺省字段沿原完整基线约束兼容，新宿主始终显式提供状态。[迁移观察合同](src/update.ts)
 
 成功结果的 `status` 分为 `unchanged`、`candidate`、`migration_required`。`candidate` 是返回值中的新锁，原输入文件及未选择更新的 Core 保持；`migrations` 指出所属模块和待执行链，不表示已经应用。`owner=platform` 表示底座，`owner=core:<id>` 表示业务 Core，二者即使名称相同也不混用。
@@ -202,6 +204,7 @@ node packages/core-contracts/dist/plan-update.js <当前锁JSON> <升级请求JS
 | --- | --- |
 | `source_conflict` / `release_changed` / `release_metadata_changed` | 核对原来源；同版本提交、包摘要或元数据变造须重新发布新版本 |
 | `core_not_installed` / `core_identity` | 新增 Core 先走安装；更新不能换成另一 Core |
+| `scope_changed` | 业务范围或容器类型改变须先核定原绑定、数据和权限迁移，不能作为普通版本更新 |
 | `platform_version` / `contract_version` / `missing_capability` | 核对整个候选组合的兼容范围与必要公共能力 |
 | `data_unavailable` / `data_observation_conflict` | 从真实迁移账取得完整一致的版本与摘要 |
 | `migration_changed` / `migration_history` / `migration_baseline` | 原迁移链须不可变；先核对历史或未完成迁移 |
