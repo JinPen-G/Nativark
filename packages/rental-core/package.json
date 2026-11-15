@@ -14,12 +14,26 @@
     "./business-day": {
       "types": "./dist/business-day.d.ts",
       "default": "./dist/business-day.js"
+    },
+    "./pricing": {
+      "types": "./dist/pricing.d.ts",
+      "default": "./dist/pricing.js"
+    },
+    "./equipment": {
+      "types": "./dist/equipment.d.ts",
+      "default": "./dist/equipment.js"
     }
   },
   "typesVersions": {
     "*": {
       "business-day": [
         "dist/business-day.d.ts"
+      ],
+      "pricing": [
+        "dist/pricing.d.ts"
+      ],
+      "equipment": [
+        "dist/equipment.d.ts"
       ]
     }
   },
@@ -31,5 +45,13 @@
   },
   "dependencies": {
     "@rental-os/platform-contracts": "0.1.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.4.15"
+  },
+  "peerDependenciesMeta": {
+    "@nestjs/common": {
+      "optional": true
+    }
   }
 }
