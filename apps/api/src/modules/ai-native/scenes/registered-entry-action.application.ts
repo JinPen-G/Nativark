@@ -1,6 +1,7 @@
-/** Fixed original-resource navigation. Server publication, current Guard/ALS,
- * owner and resource versions are checked before issue and again before use.
- * No model, runner, business write or provider refresh is invoked here. */
+/** Fixed original-resource Actions. Navigation only observes original resources;
+ * notification preparation explicitly saves an unsent original-domain draft.
+ * Current Guard/ALS, material and publication are rechecked before every new
+ * effect. No model, business sending or provider refresh is invoked here. */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
@@ -12,6 +13,9 @@ import type { ClientApiService } from '../../client/client-api.service';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AI_CONTRACT_DRAFT_VERSION, AI_REGISTERED_ENTRY_ACTION_VERSION, AI_ENTRY_ACTION_REGISTRY,
+  AI_ENTRY_NOTIFICATION_DRAFT_VERSION, aiEntryNotificationDraftPrepareSchema, aiEntryNotificationDraftSaveSchema,
+  aiEntryNotificationDraftReadSchema, aiEntryNotificationDraftMaterialSchema, aiEntryNotificationDraftResponseSchema,
+  type AiEntryNotificationDraftMaterial, type AiEntryNotificationDraftResponse,
   AI_REGISTERED_ENTRY_SURFACE_AUDIENCE, aiRegisteredEntryActionSchema, aiRegisteredEntryActionIssueSchema,
   aiRegisteredEntryActionReadSchema, aiRegisteredEntryActionOrderSourceSchema,
   aiRegisteredEntryActionObservationSchema, aiRegisteredEntryActionRevalidationSchema,
@@ -28,6 +32,10 @@ import { readRuntimePublication } from '../runtime-publication.configuration';
 import { createEntryActionResourceReader } from './entry-action-resource.reader';
 import { readStandardClientEntryPublication } from './standard-client-entry.application';
 import type { composeRequestBoundTaskOrderHandoff } from '../task-order-handoff.application';
+import { EntryNotificationDraftService, type EntryNotificationDraftDependencies } from './entry-notification-draft.service';
+import { EntryNotificationDraftError } from './entry-notification-draft.contract';
+import { recordEntryActionObservation, recordOriginalNotificationDraftSaved, type EntryActionAuditEvent } from './entry-action.audit';
+import { hasEffectivePermission } from '../../../common/permission-match';
 
 type Request = { headers: { authorization?: unknown }; ip?: string };
 type Observation = { context: AiExecutionContext; ownerKey: string; resource: AiRegisteredEntryAction['resource'];
@@ -46,11 +54,14 @@ export interface RegisteredEntryActionDependencies {
   db: PrismaClient;
   auth: Pick<AuthService, 'resolveAccessContext'>;
   guard: Pick<ApiAuthGuard, 'canActivate'> & Partial<Pick<ApiAuthGuard, 'revalidateClientRead'>>;
-  secrets: Pick<SecretBox, 'encrypt' | 'decrypt'>;
+  secrets: Pick<SecretBox, 'encrypt' | 'decrypt'> & Partial<Pick<SecretBox, 'fingerprint'>>;
   publication: Pick<ConfigService, 'get'>;
   core: Pick<RentalCoreService, 'readOrderFacts' | 'listItemGroupsPage'>;
   client: Pick<ClientApiService, 'getOrder' | 'readOwnProfileNavigation' | 'readClientProductNavigation' | 'readOwnPaymentNavigation' | 'readOwnOrderNavigationSources'>;
   orderHandoff: Pick<ReturnType<typeof composeRequestBoundTaskOrderHandoff>, 'read'>;
+  /** Optional only for compatibility with navigation-only hosts. Missing
+   * original draft ports never produce a save Action or fallback success. */
+  notificationDraft?: Pick<EntryNotificationDraftDependencies, 'customers' | 'core' | 'business'>;
   clock?(): Date;
 }
 export type RegisteredEntryActionFactory = ReturnType<typeof composeRegisteredEntryActionRequests>;
@@ -92,6 +103,98 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
       return { context, ownerKey: originalIdentityHash(context), identity: undefined };
     };
     const credentialsAudience = () => audience === 'staff' ? 'staff' : 'operator';
+    const notificationPrincipal = async (signal?: AbortSignal) => {
+      check(signal);
+      let originalTenant: NonNullable<Awaited<ReturnType<AuthService['resolveAccessContext']>>>['tenantUser'] | undefined;
+      const authority = new AiTaskCurrentIdentityAuthority({ resolveAccessContext: async (...args) => {
+        const current = await d.auth.resolveAccessContext(...args); check(signal);
+        originalTenant = current && structuredClone(current.tenantUser);
+        return current;
+      } }, credentials, clock);
+      const context = await authority.resolve(); check(signal);
+      if (audience !== 'operations' || context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
+        || !originalTenant?.isActive || originalTenant.isSaasAdmin || originalTenant.id !== context.actor.userId
+        || originalTenant.tenantId !== context.scope.tenantId || !Array.isArray(originalTenant.permissions)
+        || !(originalTenant.isPlatformAdmin || originalTenant.dataScope === 'all'
+          && (hasEffectivePermission(originalTenant.permissions, 'rental-os:member:view')
+            || hasEffectivePermission(originalTenant.permissions, 'rental-os:member:manage'))
+          && hasEffectivePermission(originalTenant.permissions, 'rental-os:customer:reveal-sensitive')))
+        throw denied();
+      return { context, ownerKey: originalIdentityHash(context), identity: undefined };
+    };
+    const notificationOwner = (context: AiExecutionContext) => {
+      if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || audience !== 'operations') throw denied();
+      return requestFingerprint({ version: AI_ENTRY_NOTIFICATION_DRAFT_VERSION, actorId: context.actor.userId,
+        tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId });
+    };
+    const notificationResource = (material: AiEntryNotificationDraftMaterial): AiRegisteredEntryAction['resource'] => ({
+      kind: 'notification_draft', id: material.id, resourceVersion: requestFingerprint({ version: material.version,
+        id: material.id, key: material.key, inputHash: material.inputHash, contentHash: material.contentHash,
+        templateHash: material.templateHash, configurationHash: material.configurationHash, customerVersion: material.customerVersion }),
+    });
+    const notificationHost = async (signal?: AbortSignal, expected?: { principal: string; publication: string; expiresAt: string;
+      draftId: string; key: string; commandHash: string }) => {
+      if (audience !== 'operations' || !d.notificationDraft || typeof d.secrets.fingerprint !== 'function') throw unavailable();
+      const initial = await notificationPrincipal(signal), originalPrincipal = originalIdentityHash(initial.context);
+      notificationOwner(initial.context);
+      let publication: ReturnType<typeof configuration> | undefined;
+      const leaf = new EntryNotificationDraftService({ ...d.notificationDraft, guard: d.guard, credentials,
+        secrets: { fingerprint: d.secrets.fingerprint.bind(d.secrets) }, clock,
+        revalidate: async (mode, _signal, tx) => {
+          try {
+            check(signal);
+            const current = await notificationPrincipal(signal);
+            if (originalIdentityHash(current.context) !== originalPrincipal) throw denied();
+            // Receipt reads keep current original read authority and are not new
+            // generation. A stopped/expired save publication cannot erase them.
+            if (mode !== 'read') {
+              const currentPublication = configuration();
+              if (publication && publication.fingerprint !== currentPublication.fingerprint) throw stale();
+              if (expected && (expected.principal !== originalPrincipal || expected.publication !== currentPublication.fingerprint
+                || Date.parse(expected.expiresAt) <= now().getTime())) throw denied();
+              publication = currentPublication;
+              if (mode === 'save' && tx && expected) {
+                const saved = await tx.rentalNotificationLog.findFirst({ where: { id: expected.draftId,
+                  tenantId: current.context.scope.kind === 'workspace' ? current.context.scope.tenantId : '',
+                  workspaceId: current.context.scope.kind === 'workspace' ? current.context.scope.workspaceId : '', idempotencyKey: expected.key } });
+                if (saved) {
+                  const metadata = saved.variables && typeof saved.variables === 'object' && !Array.isArray(saved.variables)
+                    ? saved.variables.notificationDraft : null;
+                  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata) || saved.status !== 'draft'
+                    || saved.provider !== 'not_dispatched' || saved.attempts !== 0 || saved.maxAttempts !== 0
+                    || metadata.actorId !== (current.context.actor.kind === 'user' ? current.context.actor.userId : null)
+                    || metadata.commandHash !== expected.commandHash || typeof metadata.inputHash !== 'string'
+                    || typeof metadata.contentHash !== 'string') throw unavailable();
+                  await recordOriginalNotificationDraftSaved(tx, current.context, { draftId: saved.id, key: expected.key,
+                    commandHash: expected.commandHash, inputHash: metadata.inputHash, contentHash: metadata.contentHash });
+                  const after = await notificationPrincipal(signal);
+                  if (originalIdentityHash(after.context) !== originalPrincipal || configuration().fingerprint !== currentPublication.fingerprint
+                    || Date.parse(expected.expiresAt) <= now().getTime()) throw denied();
+                }
+              }
+            }
+            check(signal);
+          } catch (error) {
+            // Preserve known pre-save refusals. The original domain separately
+            // converts failures after a possible INSERT into unknown.
+            if (error instanceof AiTaskRepositoryError && ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE', 'AI_REVISION_CONFLICT'].includes(error.code))
+              throw new EntryNotificationDraftError(error.code as 'AI_ACCESS_DENIED' | 'AI_RESOURCE_UNAVAILABLE' | 'AI_REVISION_CONFLICT');
+            throw error;
+          }
+        },
+        reviewExpiresAt: observedAt => {
+          const current = configuration();
+          if (!publication || current.fingerprint !== publication.fingerprint) throw stale();
+          return new Date(Math.min(observedAt.getTime() + current.ttlMs, Date.parse(current.expiresAt)));
+        },
+      });
+      return { initial, originalPrincipal, leaf, publication: () => publication };
+    };
+    const publicNotificationResponse = (value: unknown, mayHaveSaved: boolean): AiEntryNotificationDraftResponse => {
+      const parsed = aiEntryNotificationDraftResponseSchema.safeParse(value);
+      if (!parsed.success) throw new EntryNotificationDraftError(mayHaveSaved ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE');
+      return parsed.data;
+    };
     const currentRow = async (id: string, context: AiExecutionContext) => {
       if (context.scope.kind !== 'workspace') throw denied();
       const value = await d.db.rentalPaymentIntent.findFirst({ where: { id, tenantId: context.scope.tenantId,
@@ -102,9 +205,17 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
       check(signal);
       const before = await principal(signal);
       if (!(AI_ENTRY_ACTION_REGISTRY[code].audiences as readonly string[]).includes(audience)
-        || !(NAVIGATION_CODES as readonly string[]).includes(code)) throw unavailable();
+        || !(NAVIGATION_CODES as readonly string[]).includes(code) && code !== 'CREATE_NOTIFICATION_DRAFT') throw unavailable();
       let found: Observation;
-      if (audience === 'customer') {
+      if (code === 'CREATE_NOTIFICATION_DRAFT') {
+        const host = await notificationHost(signal);
+        const draft = aiEntryNotificationDraftMaterialSchema.parse(await host.leaf.readResource({ draftId: targetId }, signal));
+        if (before.context.scope.kind !== 'workspace' || draft.scope.tenantId !== before.context.scope.tenantId
+          || draft.scope.workspaceId !== before.context.scope.workspaceId || before.context.actor.kind !== 'user'
+          || draft.actorId !== before.context.actor.userId || host.originalPrincipal !== originalIdentityHash(before.context)) throw denied();
+        found = { context: before.context, ownerKey: notificationOwner(before.context), resource: notificationResource(draft),
+          label: draft.renderedTitle || draft.templateId, observedAt: now().toISOString() };
+      } else if (audience === 'customer') {
         if (!before.identity) throw denied();
         const channel = surface === 'tenant_website' ? 'web' as const : 'wechat_miniprogram' as const;
         const scene = { sceneCode: code === 'OPEN_ORDER' || code === 'OPEN_PAYMENT' ? 'order_explanation' : 'quote_clarification', sceneVersion: '1' };
@@ -250,11 +361,78 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
         action: aiRegisteredEntryActionSchema.parse({ ...body, proof }), label: latest.label, observedAt: latest.observedAt,
         execution: 'not_attempted', authorization: 'recheck_current_original_resource' });
     };
-    return Object.freeze({
+    const methods = {
       async issue(value: unknown, signal?: AbortSignal) {
         const command = aiRegisteredEntryActionIssueSchema.safeParse(structuredClone(value));
         if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        if (command.data.actionCode === 'CREATE_NOTIFICATION_DRAFT') throw unavailable();
         return sign(command.data.actionCode, command.data.targetId, command.data.source, signal);
+      },
+      async prepareNotificationDraft(value: unknown, signal?: AbortSignal) {
+        const parsed = aiEntryNotificationDraftPrepareSchema.safeParse(structuredClone(value));
+        if (!parsed.success || Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 32768) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const command = parsed.data, host = await notificationHost(signal), result = await host.leaf.prepare(command, signal);
+        if (result.state !== 'prepared') return publicNotificationResponse({ ...result, action: null }, false);
+        const material = aiEntryNotificationDraftMaterialSchema.parse(result.material), config = host.publication();
+        const closing = await notificationPrincipal(signal), time = now();
+        if (!config || config.fingerprint !== configuration().fingerprint || host.originalPrincipal !== originalIdentityHash(closing.context)
+          || closing.context.scope.kind !== 'workspace' || closing.context.actor.kind !== 'user'
+          || material.actorId !== closing.context.actor.userId || material.scope.tenantId !== closing.context.scope.tenantId
+          || material.scope.workspaceId !== closing.context.scope.workspaceId || Date.parse(result.expiresAt) <= time.getTime()) throw denied();
+        const resource = notificationResource(material), ownerKey = notificationOwner(closing.context);
+        const body = { contractVersion: AI_REGISTERED_ENTRY_ACTION_VERSION, actionId: randomUUID(),
+          actionCode: 'CREATE_NOTIFICATION_DRAFT' as const, audience: 'operations' as const, surface: 'tenant_admin' as const,
+          scope: closing.context.scope, resource, requiresConfirmation: true, riskLevel: 'R1' as const,
+          issuedAt: result.observedAt, expiresAt: result.expiresAt, inputFingerprint: material.inputHash, bindingFingerprint: ownerKey,
+          policyFingerprint: requestFingerprint({ principal: host.originalPrincipal, originalAuthority: host.originalPrincipal,
+            clientPublication: null, resource, publication: config.fingerprint }),
+          associations: { materialRef: null, taskId: null, runId: null, proposalId: null, quoteId: null, bookingDraftId: null, orderId: null } };
+        const proof = d.secrets.encrypt({ purpose: 'rental-os:registered-entry-action:2', ownerKey, publication: config.fingerprint,
+          bodyHash: requestFingerprint(body), source: 'null', sourceHash: 'not_linked',
+          notificationPrincipal: host.originalPrincipal, notificationOperationKey: command.operationKey,
+          notificationReviewHash: result.reviewHash, notificationCommandHash: material.commandHash,
+          notificationInputHash: material.inputHash, notificationContentHash: material.contentHash });
+        check(signal);
+        return publicNotificationResponse({ ...result, action: aiRegisteredEntryActionSchema.parse({ ...body, proof }) }, false);
+      },
+      async saveNotificationDraft(value: unknown, signal?: AbortSignal) {
+        const parsed = aiEntryNotificationDraftSaveSchema.safeParse(structuredClone(value));
+        if (!parsed.success || Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 65536) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const { action, command } = parsed.data, { proof, ...body } = action;
+        let sealed: Record<string, string>;
+        try { sealed = d.secrets.decrypt(proof); } catch { throw denied(); }
+        const host = await notificationHost(signal, { principal: sealed.notificationPrincipal,
+          publication: sealed.publication, expiresAt: action.expiresAt, draftId: action.resource.id,
+          key: action.resource.id.slice('notification-draft-'.length), commandHash: sealed.notificationCommandHash });
+        const context = host.initial.context;
+        if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || typeof d.secrets.fingerprint !== 'function') throw denied();
+        const originalKey = requestFingerprint({ version: AI_ENTRY_NOTIFICATION_DRAFT_VERSION, actorId: context.actor.userId,
+          tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, operationKey: command.operationKey });
+        const input = { customerId: command.customerId, templateId: command.templateId,
+          templateVersion: command.templateVersion, variables: command.variables };
+        if (sealed.purpose !== 'rental-os:registered-entry-action:2' || sealed.bodyHash !== requestFingerprint(body)
+          || sealed.ownerKey !== notificationOwner(context) || action.bindingFingerprint !== sealed.ownerKey
+          || sealed.source !== 'null' || sealed.sourceHash !== 'not_linked' || Object.values(action.associations).some(value => value !== null)
+          || action.resource.id !== `notification-draft-${originalKey}` || action.scope.tenantId !== context.scope.tenantId
+          || action.scope.workspaceId !== context.scope.workspaceId || sealed.notificationOperationKey !== command.operationKey
+          || sealed.notificationReviewHash !== command.reviewHash || action.expiresAt !== command.expiresAt
+          || action.inputFingerprint !== sealed.notificationInputHash
+          || sealed.notificationCommandHash !== d.secrets.fingerprint(requestFingerprint({ version: 'rental-notification-draft-1', input }))) throw denied();
+        // The leaf checks an exact original receipt before requesting save
+        // authority. Expired/disabled generation never authorizes a fresh save.
+        try {
+          const result = await host.leaf.save(command, signal);
+          return publicNotificationResponse({ ...result, action: null }, true);
+        } catch (error) {
+          if (error instanceof EntryNotificationDraftError) throw error;
+          throw new EntryNotificationDraftError('AI_RESULT_UNKNOWN');
+        }
+      },
+      async readNotificationDraft(value: unknown, signal?: AbortSignal) {
+        const parsed = aiEntryNotificationDraftReadSchema.safeParse(structuredClone(value));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const host = await notificationHost(signal), result = await host.leaf.read(parsed.data, signal);
+        return publicNotificationResponse({ ...result, action: null }, false);
       },
       async revalidate(value: unknown, signal?: AbortSignal) {
         const command = aiRegisteredEntryActionReadSchema.safeParse(structuredClone(value));
@@ -348,7 +526,68 @@ export function composeRegisteredEntryActionRequests(d: RegisteredEntryActionDep
           source: initial.source, orderId: initial.orderId, scope: initial.scope, observedAt: returnedAt.toISOString(),
           actions, execution: 'not_attempted', businessApproval: 'not_granted' });
       },
-      close() { active = false; },
-    });
+    };
+    const audited = <N extends keyof typeof methods>(name: N) => async (value: unknown, signal?: AbortSignal) => {
+      let frozen: unknown;
+      try { frozen = structuredClone(value); if (Buffer.byteLength(JSON.stringify(frozen) ?? '', 'utf8') > 131072) throw Error(); }
+      catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
+      const started = now().getTime(), actor = await principal(signal);
+      let savedObserved = false;
+      const event: EntryActionAuditEvent = { requestId, surface, contractVersion: name.includes('Notification')
+        ? AI_ENTRY_NOTIFICATION_DRAFT_VERSION : AI_REGISTERED_ENTRY_ACTION_VERSION, operation: name,
+        state: 'observed', durationMs: 0 };
+      try {
+        const result = await methods[name](frozen, signal);
+        savedObserved = name === 'saveNotificationDraft' && 'state' in result && result.state === 'saved';
+        if ('action' in result && result.action) { event.actionId = result.action.actionId;
+          event.actionCode = result.action.actionCode; event.resourceId = result.action.resource.id; }
+        if ('actionId' in result) { event.actionId = result.actionId; event.actionCode = result.actionCode; event.resourceId = result.resource.id; }
+        if ('operationKey' in result && actor.context.actor.kind === 'user' && actor.context.scope.kind === 'workspace')
+          event.operationKeyHash = requestFingerprint({ version: AI_ENTRY_NOTIFICATION_DRAFT_VERSION,
+            actorId: actor.context.actor.userId, tenantId: actor.context.scope.tenantId,
+            workspaceId: actor.context.scope.workspaceId, operationKey: result.operationKey });
+        if ('material' in result) { event.draftId = result.material.id; event.resultState = result.state; }
+        if ('draft' in result && result.draft) { event.draftId = result.draft.id; event.resultState = result.state; }
+        if ('state' in result && result.state === 'unknown') event.state = 'unknown';
+        if ('actions' in result) event.actions = result.actions.map(row => ({ actionId: row.action.actionId,
+          actionCode: row.action.actionCode, resourceId: row.action.resource.id }));
+        if ('source' in result && 'taskId' in result.source) { event.taskId = result.source.taskId; event.runId = result.source.runId; }
+        event.durationMs = Math.max(0, now().getTime() - started);
+        try { await recordEntryActionObservation(d.db, actor.context, event); }
+        catch { throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE'); }
+        // The audit is another awaited dependency. It cannot keep old authority,
+        // resources or an expired Action alive while the response is delivered.
+        if ('actions' in result) for (const row of result.actions) await methods.revalidate({ action: row.action }, signal);
+        else if ('action' in result && result.action && !name.includes('Notification')) await methods.revalidate({ action: result.action }, signal);
+        else if (name === 'revalidate') await methods.revalidate(frozen, signal);
+        if ('material' in result) {
+          const host = await notificationHost(signal), current = await host.leaf.prepare(frozen, signal);
+          if (current.state !== 'prepared' || requestFingerprint(current.material) !== requestFingerprint(result.material)) throw stale();
+        } else if ('draft' in result) {
+          const host = await notificationHost(signal), current = await host.leaf.read({ operationKey: result.operationKey }, signal);
+          if (current.state !== result.state || ('draft' in current && requestFingerprint(current.draft) !== requestFingerprint(result.draft))) throw stale();
+        }
+        const closing = name.includes('Notification') ? await notificationPrincipal(signal) : await principal(signal);
+        if (originalIdentityHash(closing.context) !== originalIdentityHash(actor.context)) throw denied();
+        const deliveredAt = now().getTime();
+        if ('actions' in result && result.actions.some(row => Date.parse(row.action.expiresAt) <= deliveredAt)) throw denied();
+        if ('action' in result && result.action && (Date.parse(result.action.expiresAt) <= deliveredAt
+          || (() => { try { return d.secrets.decrypt(result.action!.proof).publication !== configuration().fingerprint; } catch { return true; } })())) throw denied();
+        check(signal);
+        return result;
+      } catch (error) {
+        const rawCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'AI_RESOURCE_UNAVAILABLE';
+        const code = savedObserved && !['AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED'].includes(rawCode) ? 'AI_RESULT_UNKNOWN' : rawCode;
+        event.state = code === 'AI_RESULT_UNKNOWN' ? 'unknown' : 'refused'; event.refusalCode = code;
+        event.durationMs = Math.max(0, now().getTime() - started);
+        try { await recordEntryActionObservation(d.db, actor.context, event); }
+        catch { throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE'); }
+        if (code !== rawCode) throw new EntryNotificationDraftError('AI_RESULT_UNKNOWN');
+        throw error;
+      }
+    };
+    return Object.freeze({ issue: audited('issue'), revalidate: audited('revalidate'), fromOrder: audited('fromOrder'),
+      prepareNotificationDraft: audited('prepareNotificationDraft'), saveNotificationDraft: audited('saveNotificationDraft'),
+      readNotificationDraft: audited('readNotificationDraft'), close() { active = false; } });
   };
 }

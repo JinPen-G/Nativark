@@ -43,6 +43,7 @@ import type { TrustedWorkspaceAccess } from '../modules/auth/trusted-workspace-p
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
 import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_REGISTERED_ENTRY_ACTION_CONTRACTS } from '@rental-os/shared';
+import { AI_ENTRY_NOTIFICATION_DRAFT_HTTP, AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS } from '@rental-os/shared';
 import { PrismaService } from "../modules/database/prisma.service";
 import { resolveUserBusinessLocationScope } from "./business-location-scope";
 import { isPlatformAiProviderPath, platformAiProviderPermission, platformCapabilityProbePermission, platformRetentionPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
@@ -290,6 +291,12 @@ const originalOrderExecutionRoutes = new Set(([
 ] as const).map(action => `POST /${AI_SCENE_ORDER_READ_HTTP_DRAFT.basePath}/${AI_SCENE_ORDER_READ_HTTP_DRAFT[action]}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && Object.keys(AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS).some(action =>
+    path === `/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP.basePath}/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP[action as keyof typeof AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS]}`)) {
+    // The request-bound leaf additionally checks current original customer
+    // sensitive-field rights, workspace-wide scope and draft/source binding.
+    return ['system:integration:manage'];
+  }
   if (method.toUpperCase() === 'POST' && Object.keys(AI_REGISTERED_ENTRY_ACTION_CONTRACTS).some(action =>
     path === `/${AI_REGISTERED_ENTRY_ACTION_HTTP.operatorBasePath}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`
     || path === `/${AI_REGISTERED_ENTRY_ACTION_HTTP.staffBasePath}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`)) {

@@ -1,7 +1,8 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen screen--flat {{themeClass}}">
   <nav-bar title="商品资料"></nav-bar>
-  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view}}" bind:action="onRetry"></state-view>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}"
+    message="{{view.message}}" action-text="{{view.actionText}}" secondary-text="{{view.secondaryText}}" bind:action="onRetry"></state-view>
   <view wx:else class="section">
     <view class="title">{{name}}</view>
     <view class="muted mt-8">{{code}} · {{status}}</view>

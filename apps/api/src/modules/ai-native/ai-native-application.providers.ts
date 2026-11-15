@@ -64,6 +64,7 @@ import { RentalBusinessService } from '../rental-core/rental-business.service';
 import { RentalFundingService } from '../rental-core/rental-funding.service';
 import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace-report.repository';
 import { MembershipService } from '../platform/membership.service';
+import { PlatformService } from '../platform/platform.service';
 import { PaymentRuntimeService } from '../integrations/payment.runtime.service';
 import { ClientApiService } from '../client/client-api.service';
 import { composeStandardClientBookingEntry, standardClientModelDependencies, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY,
@@ -468,8 +469,8 @@ export const AI_NATIVE_KNOWLEDGE_POLICY_PROVIDER: FactoryProvider = {
 };
 
 export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
-  provide: AI_RETENTION_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, FileStorageRuntimeService],
-  useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService): AiRetentionRequestFactory => request => {
+  provide: AI_RETENTION_REQUESTS, inject: [AI_NATIVE_BODY_DATABASE, AuthService, FileStorageRuntimeService, SecretBox],
+  useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService, secrets: SecretBox): AiRetentionRequestFactory => request => {
     const header = request?.headers?.authorization, requestId = randomUUID();
     if (typeof header !== 'string' || header.length > 8192 || !/^Bearer [A-Za-z0-9._~+/-]+=*$/u.test(header))
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -484,7 +485,7 @@ export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
       await current();
       return result;
     } };
-    const service = new AiRetentionService(db, requestAuth, { current }, files);
+    const service = new AiRetentionService(db, requestAuth, { current }, files, undefined, undefined, secrets);
     return { cleanup: value => service.cleanup(value), receipt: value => service.receipt(value),
       receipts: value => service.receipts(value), protectStoredBodies: value => service.protectStoredBodies(value),
       close: () => { authorization = undefined; } };
@@ -1408,10 +1409,12 @@ export const AI_NATIVE_ENTRY_ACTION_PROVIDERS: FactoryProvider[] = ([
   [AI_WEBSITE_ENTRY_ACTIONS, 'tenant_website'], [AI_WECHAT_ENTRY_ACTIONS, 'client_miniprogram'],
 ] as const).map(([provide, surface]) => ({
   provide, inject: [PrismaService, AuthService, ApiAuthGuard, SecretBox, ConfigService, RentalCoreService, ClientApiService,
-    AI_TASK_ORDER_HANDOFF_REQUESTS],
+    AI_TASK_ORDER_HANDOFF_REQUESTS, PlatformService, RentalBusinessService],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, secrets: SecretBox, publication: ConfigService,
-    core: RentalCoreService, client: ClientApiService, orderHandoff: ReturnType<typeof composeRequestBoundTaskOrderHandoff>) =>
-    composeRegisteredEntryActionRequests({ db, auth, guard, secrets, publication, core, client, orderHandoff }, surface),
+    core: RentalCoreService, client: ClientApiService, orderHandoff: ReturnType<typeof composeRequestBoundTaskOrderHandoff>,
+    customers: PlatformService, business: RentalBusinessService) =>
+    composeRegisteredEntryActionRequests({ db, auth, guard, secrets, publication, core, client, orderHandoff,
+      notificationDraft: { customers, core, business } }, surface),
 }));
 
 /** Existing server host metadata only. No provider, credential, Action or Task

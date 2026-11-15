@@ -3,6 +3,20 @@ import { useLocale } from '@/app/locale';
 import { platformAiEnglish } from './platform-management-locale';
 
 const english: Record<string, string> = {
+  '未发送通知草稿': 'Unsent notification draft',
+  '正文已按保留政策清除': 'Content erased under the retention policy',
+  '原未发送收据仍保留': 'The original unsent receipt is retained',
+  '核对原客户收件人和通知模板，只保存草稿；发送须另行在原通知流程办理。': 'Review the original recipient and template. Save a draft; sending uses the original notification workflow separately.',
+  '原操作定位无法读取，已阻止新草稿。': 'The original operation reference cannot be read. New drafts are blocked.',
+  '草稿保存结果待核对。': 'The draft-save result needs checking.',
+  '只读取原操作；未观察到收据不表示未保存，不重新发送。': 'Read the original operation only. An unobserved receipt does not prove the draft was not saved; do not resend.',
+  '核对原通知草稿': 'Check original notification draft', '读取原通知模板': 'Read original notification templates',
+  '通知模板': 'Notification template', '请选择原模板': 'Choose an original template', '核对通知草稿': 'Review notification draft',
+  '通知草稿不可用，请核对当前权限、原模板和原操作。': 'The draft is unavailable. Check current access, the original template and operation.',
+  '收件人': 'Recipient', '原模板版本': 'Original template version', '草稿已保存，未发送。': 'Draft saved; not sent.',
+  '草稿未保存，未发送。': 'Draft not saved; not sent.', '保存未发送草稿': 'Save unsent draft',
+  '按已核对的原收件人和模板保存草稿？本次不发送通知。': 'Save a draft using the reviewed recipient and template? No notification will be sent.',
+  '准备另一份草稿': 'Prepare another draft',
   '当前允许的下一步': 'Currently available next steps', '读取当前允许的下一步': 'Read current next steps',
   '查看客户': 'View customer', '查看商品': 'View product', '查看配货': 'View allocation', '查看支付记录': 'View payment records',
   '当前入口不可用，可继续原人工页面。': 'This entry is unavailable. Continue through the original manual page.',

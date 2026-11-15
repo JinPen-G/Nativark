@@ -186,7 +186,8 @@ import { OperatorEntrySceneCatalogController, StaffEntrySceneCatalogController,
 import { AI_NATIVE_SCENE_CATALOG_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { AI_NATIVE_ENTRY_ACTION_PROVIDERS } from './modules/ai-native/ai-native-application.providers';
 import { OperatorRegisteredEntryActionController, StaffRegisteredEntryActionController,
-  WebsiteRegisteredEntryActionController, WechatRegisteredEntryActionController } from './modules/ai-native/scenes/registered-entry-action.controller';
+  WebsiteRegisteredEntryActionController, WechatRegisteredEntryActionController,
+  OperatorEntryNotificationDraftController } from './modules/ai-native/scenes/registered-entry-action.controller';
 import { AI_NATIVE_PLATFORM_RETENTION_PROVIDER } from './modules/ai-native/ai-native-application.providers';
 import { AiCategoryDraftController } from './modules/ai-native/category-assist/category-draft.application';
 import { AI_NATIVE_CATEGORY_DRAFT_PROVIDER } from './modules/ai-native/ai-native-application.providers';
@@ -272,6 +273,7 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     StaffRegisteredEntryActionController,
     WebsiteRegisteredEntryActionController,
     WechatRegisteredEntryActionController,
+    OperatorEntryNotificationDraftController,
     AiOriginalSceneObservationController,
     AiOriginalQuoteModelExecutionController,
     AiOriginalOpeningModelExecutionController,

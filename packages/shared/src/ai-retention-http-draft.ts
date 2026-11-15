@@ -3,7 +3,7 @@
  * remain mandatory. Unknown object deletion can only be observed, never resent. */
 import { leafClosed as object, leafEnum as choice, leafId as id, leafInt as integer,
   leafTime as time, leafList as list, leafRef as ref, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
-export const AI_RETENTION_KINDS_DRAFT = ['task', 'request', 'knowledge', 'memory', 'material', 'attachment', 'inspection_draft'] as const;
+export const AI_RETENTION_KINDS_DRAFT = ['task', 'request', 'knowledge', 'memory', 'material', 'attachment', 'inspection_draft', 'notification_draft'] as const;
 export type AiRetentionKindDraft = typeof AI_RETENTION_KINDS_DRAFT[number];
 export interface AiRetentionCleanupDraft { kind: AiRetentionKindDraft; limit?: number; after?: string }
 export interface AiRetentionReceiptReadDraft { id: string }

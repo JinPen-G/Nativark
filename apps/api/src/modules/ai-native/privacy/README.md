@@ -2,13 +2,14 @@
 
 这是原 AI Native 的清理适配，不是另一套业务账本或备份平台。
 
-- `POST /api/ai-native/privacy/cleanup`：`{kind, limit?, after?}`，kind 为 task/request/knowledge/memory/material/attachment/inspection_draft，每批最多10项。按不可变ID排序，宿主用 `nextAfter` 继续有界候选页，避免受保留或已清理的首批对象阻塞后续；不是后台循环，也不表示全空间已完成清理。真实当前 Auth、operator、`system:params:manage`、完整 workspace/data/location 范围全部必需。没有默认后台定时器。
+- `POST /api/ai-native/privacy/cleanup`：`{kind, limit?, after?}`，kind 为 task/request/knowledge/memory/material/attachment/inspection_draft/notification_draft，每批最多10项。按不可变ID排序，宿主用 `nextAfter` 继续有界候选页，避免受保留或已清理的首批对象阻塞后续；不是后台循环，也不表示全空间已完成清理。真实当前 Auth、operator、`system:params:manage`、完整 workspace/data/location 范围全部必需。没有默认后台定时器。
 - `receipt {id}` / `receipts {limit?, before?}`：只观察当前空间收据。批次应答不明先查收据，不能换ID重发业务动作。
 - `AiRetentionService` 的普通到期材料30天，未绑定知识临时附件7天。未知步骤、进行中任务、未结预算或派发待核对会保留；审批/业务执行材料和账务收据不随普通对话清理。清理不改变业务成功、失败或财务状态。
 - 知识删除/撤回和记忆删除在原 CAS 事务中写最少 tombstone。撤回立即停止当前读取；删除清理正文和重复确认正文，保留版本/hash/原操作收据。不得复活删除过的ID。
 - 附件只接受原AI知识命名空间与原空间/对象绑定；检查、订单及共享 storageKey 文件拒绝清理。新上传记录服务器生成的存储位置hash。缺历史位置证据的旧附件保持 unavailable，不能用当前Bucket猜旧位置。
 - 文件 DELETE 之前持久领取；应答不明只 HEAD 原对象。只有404证明不存在，403/超时/仍存在不算删除。模拟存储不算物理删除。
 - 员工草稿到期由[原维护服务](retention.service.ts)调用[草稿清理叶](retention-inspection-draft.ts)：原创建时间30天、草稿期限到期及当前管理权均必需。仅由原识别输入、原保存收据与Task创建键推导关联，未结清效果保持hold；同一事务／codec清除普通候选、识别问题及已结清Task副本，人工值／决定／原候选引用、检查／提交／附件／账务和原操作收据保留。原[读取](../inspection-assist/inspection-draft.service.ts)两次核同草稿与真实删除收据，返回bodyRetention，不能用空候选推定删除或补签来源。已到revision1000仍按原上限锁内CAS清理，可信恢复重放原关联副本。
+- 未发送通知草稿由[原通知清理叶](retention-notification-draft.ts)在同一维护事务内核原密文、绑定哈希、30天期限和原日志行CAS。只擦除收件人密文、变量、生成正文及脱敏预览，保留原ID／幂等K、actor／scope、模板和来源哈希、`draft / not_dispatched`事实；原[通知读取](../../rental-core/rental-business.service.ts)核同真实`aiDataErasure`后返回`bodyRetention=erased`及空正文，不恢复内容或重新保存同K。独立草稿没有Task／Run关联，不受无关任务hold；仅真实failure outbox及其原automation输入关联可触发未决保留，坏关联保持不可用。通知清理必须注入原SecretBox解密／指纹端口，缺失不清理；已发送或可能投递的通知不属于该入口。删除标记进入同一恢复清单，旧库正文与当前删除账本不一致时拒绝读取，须由可信恢复宿主重放。
 
 ## 平台正文维护
 

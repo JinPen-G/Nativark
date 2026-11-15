@@ -22,12 +22,14 @@ import { AI_CLIENT_GOAL_SCHEMAS } from '@rental-os/shared';
 import { AI_CATEGORY_PROPOSAL_SCHEMAS } from '@rental-os/shared';
 import { AI_ENTRY_SCENE_CATALOG_SCHEMAS } from '@rental-os/shared';
 import { AI_REGISTERED_ENTRY_ACTION_SCHEMAS } from '@rental-os/shared';
+import { AI_ENTRY_NOTIFICATION_DRAFT_SCHEMAS } from '@rental-os/shared';
 import { AI_CLIENT_BOOKING_TRANSFER_SCHEMAS } from '@rental-os/shared';
 import { AI_COUNTING_HTTP_SCHEMAS, AI_SCENE_QUOTE_HTTP_SCHEMAS, AI_BUSINESS_MATERIAL_DRAFT_SCHEMAS, AI_SCENE_MODEL_OBSERVATION_SCHEMAS, AI_TASK_SCENE_OBSERVATION_SCHEMAS, AI_ORDER_READ_HTTP_SCHEMAS } from '@rental-os/shared';
 
 /** Draft components only. Publication is not route registration, authorization or activation. */
 export const AI_LEAF_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {};
-for (const [name, schema] of Object.entries({ ...AI_ENTRY_SCENE_CATALOG_SCHEMAS, ...AI_REGISTERED_ENTRY_ACTION_SCHEMAS, ...AI_CLIENT_BOOKING_TRANSFER_SCHEMAS })) {
+for (const [name, schema] of Object.entries({ ...AI_ENTRY_SCENE_CATALOG_SCHEMAS, ...AI_REGISTERED_ENTRY_ACTION_SCHEMAS,
+  ...AI_ENTRY_NOTIFICATION_DRAFT_SCHEMAS, ...AI_CLIENT_BOOKING_TRANSFER_SCHEMAS })) {
   AI_LEAF_COMPONENT_SCHEMAS[name] = aiLeafToOpenApi30(schema, name);
 }
 const countingRefs = (value: unknown): unknown => Array.isArray(value) ? value.map(countingRefs)

@@ -49,6 +49,7 @@ import { AI_RETENTION_HTTP_CONTRACTS, AI_ORIGINAL_POLICY_HTTP_CONTRACTS, AI_CLIE
 import { AI_PLATFORM_RETENTION_HTTP, AI_PLATFORM_RETENTION_HTTP_CONTRACTS } from '@rental-os/shared';
 import { AI_ENTRY_SCENE_CATALOG_HTTP, AI_ENTRY_SCENE_CATALOG_CONTRACTS } from '@rental-os/shared';
 import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_REGISTERED_ENTRY_ACTION_CONTRACTS } from '@rental-os/shared';
+import { AI_ENTRY_NOTIFICATION_DRAFT_HTTP, AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS } from '@rental-os/shared';
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2340,6 +2341,12 @@ const SETTINGS_TASK_CONTRACTS: Record<string, readonly [string, string]> = {
 };
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...Object.entries(AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS).map(([action, contract]) => ({
+    method: 'post' as const, path: `/api/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP.basePath}/${AI_ENTRY_NOTIFICATION_DRAFT_HTTP[action as keyof typeof AI_ENTRY_NOTIFICATION_DRAFT_CONTRACTS]}`,
+    tag: 'AI Native', operationId: `entryNotificationDraft_${action}`, authRequired: true, permissions: ['system:integration:manage'],
+    summary: '明确准备和保存未发送通知草稿，按原操作读取；不发送、不重试或刷新供应商。',
+    requestSchema: contract.request, responseSchema: contract.response,
+  })),
   ...(['operatorBasePath', 'staffBasePath', 'websiteBasePath', 'wechatBasePath'] as const).flatMap(surface =>
     Object.entries(AI_REGISTERED_ENTRY_ACTION_CONTRACTS).map(([action, contract]) => ({
       method: 'post' as const, path: `/api/${AI_REGISTERED_ENTRY_ACTION_HTTP[surface]}/${AI_REGISTERED_ENTRY_ACTION_HTTP[action as keyof typeof AI_REGISTERED_ENTRY_ACTION_CONTRACTS]}`,

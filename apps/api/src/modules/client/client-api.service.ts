@@ -1012,7 +1012,9 @@ export class ClientApiService {
     const orderIds = new Set(customerOrders.map((order) => order.id));
     const logs = this.business
       .listNotificationLogs(context.tenantId, (await this.context(context.tenantId)))
-      .filter((log) => log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
+      // An unsent draft belongs to its author, never to the customer's inbox.
+      .filter((log): log is typeof log & { status: Exclude<typeof log.status, 'draft'> } => log.status !== 'draft'
+        && log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const start = (page - 1) * pageSize;
     return {

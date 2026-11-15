@@ -17,6 +17,49 @@
 
 命令沿原`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`及Root的`node --no-compilation-cache -`，没有新增测试脚本。数据库、传输及React／微信宿主为明确有限夹具；实际原ClientAuth／Guard／Controller／Core／会话和消费者运行，真实浏览器／微信／DB／供应商未测试。已保留最初错误href、漏声明、宿主驱动和HTTP Date秒精度修复证据；不放宽生产权限、时间窗口或字段。所有本片验证进程已退出、audit为空、任务目录未创建；本提交不夹通知三源／正文删除或审计WIP。ENTRY-02／05／10原全文由Root与dev1继续核定，当前阶段不单独加分。
 
+<a id="ain-entry02-notification-customer-consumer-stage-20261115"></a>
+## ENTRY-02 原未发送通知草稿、审计与客户实际目标接入（2026-11-15）
+
+前置导航 `ff613889674a0105da0d550e66ffdb30afbf03ca`、上传回执 `f5202bdd91e9c6ea2505acb770cfa6255f9c7a17` 及客户14源 `c85ef5dd5d15207e6600563adea659bd454001b4` 已在任务分支回读。当前片把原CREATE_NOTIFICATION_DRAFT的准备、明确保存、原K读取接入正式shared／provider／Controller／Guard／OpenAPI和后台客户详情。正文删除五源已冻结核同，正式维护入口及可信原收据恢复必要模拟通过；新发现的原通知列表／快照缓存传播与小程序本人资料迟到回显问题仍须收尾，当前检查点不先计整项100%。
+
+[公共通知合同](../../packages/shared/src/ai-entry-notification-draft.ts)复用原九Action注册表和严格ain-entry-action-2；[请求应用](../../apps/api/src/modules/ai-native/scenes/registered-entry-action.application.ts)从原模板、客户和空间配置生成脱敏材料及封装Action，原key／reviewHash／inputHash／contentHash、scope、actor及发布期限完整绑定。客户端只保存原operationKey，不缓存变量、收件人、正文或proof；写前持久读回，丢ACK后只读取原K，可信保存收据核对后主动清理本地恢复键。原通知域用draft／not_dispatched、attempts和maxAttempts为0保存，不调用发送、provider refresh或SMS rate。关闭新草稿生成和原审阅到期后，当前独立读权仍能查原收据，不转为新保存许可。
+
+[后台实际消费者](../../apps/admin/src/features/ai-native/NotificationDraftFlow.tsx)挂在原个人客户详情的未发送草稿分区，显式读取原模板、填写注册变量、核对脱敏收件人／模板版本／正文，再明确保存。预览到期、隐藏／卸载、客户／身份／空间变化或撤权撤回；模板和资料都沿原页面读取，不安装另一套UI框架。原投递列表补draft标签，不显示重试按钮；未发送草稿不能进入原queued／failed重试器。注册Action审计复用[原OperationLog叶](../../apps/api/src/modules/ai-native/scenes/entry-action.audit.ts)，仅记录actor／audience／surface／版本、原Action／资源／Task／K哈希和结果／拒绝／unknown；没有正文、变量、收件人或proof。原草稿保存事件同原事务、稳定ID只写一次；审计等待后再次复核来源、权限及Action期限，不以日志写入代替授权。
+
+实际授权核对修复通知链把租户会员／敏感读取权和空间通知权混为一套的问题：原客户路由分别使用tenant Guard，通知模板及写入使用workspace Guard。当前账号／空间绑定前后相同，各自原权限与来源必须有效；最后材料等待后重核客户与空间，不能要求合法空间角色也复制tenant会员权限，亦不放宽原Auth／Guard。必要正向使用租户仅member／reveal、空间仅integration的明确夹具，完整保存、撤权拒绝和同K恢复通过。
+
+dev1的客户十一源及本人资料目标四源已逐blob核同，重叠组件使用最终 `649ffac67718f25ea92905330ee2b6367fc8f510`。网站现在实际进入/account?section=profile，复用原GET /profile只读显示本人资料；原地址簿保持。其他原PROFILE／PRODUCT／PAYMENT导航分别沿真实会话代次和原页面，付款只GET原记录，不能隐式refresh供应商。作者原三导航／订单页／到期必要模拟stdin为 `cc72da5436614ee753c6945705f7c4ea605eb46380492d3f3562bd325186d023`、`cfd906a643687d4ed680d4cf266ac5fffead365a22f0c7e9b8e067a08e69fb96`、`717f73db19b1636f98b8568fffdb8b3ab2b6c83b5adc5da2f7d7fd9225912be5`；本人资料真实目标消费修后 `abd84f7267d5eebfb3614732811cf5357b2db65255573f22c1e3f409effab151`退出0，四源+Vite五根／291源类型 `891719198ba33bf0bae8fc6b1f48a4c4449d5935aed8bfb21a8abd08283fdb22`退出0。Root核固定来源与记录，不冒称独立重跑作者命令。员工商品state-view原要求状态字符串，已修WXML绑定原view.status／title／message／actionText／secondaryText，缺权和失败仍有真实原因及人工重读。
+
+| Root定向验证（node --no-compilation-cache -） | stdin SHA-256／实际结果 |
+| --- | --- |
+| 原Guard／Controller／Core准备、唯一未发送保存、丢ACK、停用到期原读、篡改／撤权；同事务保存审计仅一次 | `5683ffa0b8f5b04f42bd0053989723a46c23be4ac629277e2b092e1c98c1a5c8`，最终当前源码退出0；1原草稿，provider／SMS占用0。 |
+| 实际React／API／session→原HTTP／Guard／Controller／Core，明确模板／预览／保存及隐藏撤回 | `fc40c05f578cc03cc98661f145e9dd4edb1152119887acef08beba48f2859382`，最终当前源码退出0；1保存，未进入前自动读取0，原K恢复、核收据后本地键清除。 |
+| 实际session保存应答丢失、卸载后同K重开、坏定位／错客户／迟到拒绝 | `511849b18054855e9c54427c74921197c97bf592fb1530fc261786c5bf288995`，退出0；后继原删除账本依赖与类型另核。 |
+| 公共闭合schema／实际OpenAPI三HTTP登记及最后等待期间停用无INSERT | `0e90ba0bfff64c1f4bb16f2ee45f47372efa92dc70edeb809e0a1d007f02c70d`，退出0；不strip未知字段。 |
+| 五导航实际原Guard／Controller／sealed proof与最少OperationLog | `e1a4f88fb4e079aaf14b6547849263c93e9696c987f365a7748f5a77fe532011`，退出0；原handoff仍明确fixture，模型／业务写0，审计写单列。 |
+| 最后审计等待跨过Action期限 | `28272fe114a7436d386af3cc5a764ab7ed9985780a7bced03c9353bedddc7e47`，退出0；旧Action不交付，原拒绝审计保留。 |
+| 通知最后一次Auth等待撤销tenant敏感读取权 | `c9746f4ac267373f329d686890b47fa74b0a0eed8cfe8af46e801a05b3b27eb4`，退出0；空间integration保持，原prepare／save拒绝，INSERT为0。 |
+| 原收据预读等待中K移除／替换／不可读 | `bd26caea629ae47a2eb3687741384756e58805c994657c0708dd0d2458c5ffa7`，退出0；实际session保留pending／damaged，save POST与INSERT均为0。 |
+| 标准retention provider／Guard／Controller→30天正文清除→原K读取→可信恢复重放 | `fdb39beac0945a02c58fde0ca73b21389167905a67f3d4892c2845711861f4c8`，退出0；未到期跳过，原4字段null，旧正文与删除账本冲突拒读，原签名重放后仍同一草稿／删除收据及唯一保存审计，provider为0。 |
+| 员工商品实际Page状态、隐藏／撤权／迟到及WXML原控件字段绑定 | `9288f8437f6859c90bc65147270f9e5f44ffeb949ef876e3f980af38dc7c35b9`，退出0；仅catalog，asset／库存调用0。 |
+| 最终后端／后台定向类型 | `2b5d9effeab50e31b874a059c559f212363b5a2068acba848ef0432d08a72191`，最终当前稿退出0；TS5.9.3，API两根／2045源、后台五根／1492源零诊断。 |
+
+失败保留：最初public fixture漏正式runtime version／revision被拒；后继停用明确拒绝曾被leaf包装成unknown，生产已映射专用错误，INSERT后故障仍unknown。API引用漏PlatformService和误用AiTaskRepositoryError的unknown类型、审计metadata的JSON类型及ConfirmAction不支持confirmText已按原合同修复。有限UI宿主未传.ts文件名把泛型async当TSX、把整个API模块当api对象，两次驱动失败后修内存解析；已核收据自动清键后旧恢复断言不再适用，改为在未决时卸载重开验证，不删除原unknown拒绝。双权限驱动曾恒给空间integration导致撤权反例失效，修为来自同一当前原权限后通过。源码／正式权限和已有测试断言没有放宽，无新增或扩写测试脚本。
+
+独立静态复核确证的两个P2已关闭：通知专用`notificationPrincipal`从同一次Auth捕获原tenantUser，分别核tenant会员／敏感读取权及workspace身份，prepare／save屏障和最后交付均消费；不把tenant权限复制到空间角色。session在原收据await后、首次save前再次严格核同一持久K，损坏或变更拒绝派发。内部`/root/opening_core_closeout`限定复核两源blob `7e014d07b50c1d3bef24b8991a0928fe8d45b30b`／`8c891b89c90694f456f52fce77c7cdd4c4aa3e20`，未发现这两处新问题；该复核是静态及来源核同，不冒称独立重跑。最后类型发现Auth返回可能undefined，补`NonNullable`声明及缺结果拒绝后，同一API／后台类型命令退出0，不放宽授权。
+
+dev2交回通知生命周期五源，Root逐blob核同：删除叶 `1a08d7ee5c8c6c641b42aa2f9c2479da6da4fd7a`、维护service `66b8f441698092a24ad57093544fc2b6d00a4f8b`、恢复类型 `c3819d8a9d9fe868983c756fa6b35109a9ef2c29`、privacy导读 `9d23e401ade258573b27b5e2e9d725f4a1658dee`、原通知域 `4bec5494ee1c974ceeb5fc469226e84aef69496a`。原30天密文／变量／正文／预览CAS与aiDataErasure同事务；原id／K／actor／scope／来源hash及draft／not_dispatched保留。只有真实关联的未决事件／Task才hold，未知格式保持不可用。恢复快照已有删除标记而缺本地账本时，可信重放保留原删除时间，不换为晚到的恢复时间。作者同一21场景组stdin `6a66782f3456e6a494b3f8f0df2847d0293945453ad9f28dd400ebf951177f0e`、TS5.9.3三根／1604源及128份内存声明 `7d48769a088d9d0ed13ac5b4b1cf269e57016db05f297b4776989d661d9d7e73`均退出0。Root补上表正式维护入口一组，未扩大作者旧保存集合。
+
+原GET /profile在资料DB等待后撤会话仍回显的问题，已由Root追加原ApiAuthGuard末端复核，同一Bearer独立ALS并比较原session／customer／tenant／workspace／category／membership。dev1复用冻结反例的当前4例stdin `eb6f12b0be29619672b0ba4e16a0ac13b9cc0f776f03cfef3a88e0bc09a7744b`退出0：正常返回，等待撤权／空间迁移／服务品类变化均401，业务／模型／provider为0；Controller SHA-256 `a15661c2f42d0b148d0c74d0644c3fa950dab69975ab04dec3ff313e63024416`核同。原反例 `f4731afc481dd0e0f8cce4c15f7d3d1ff3b272e75e617932123f2511e0397c56`保留，作者原认证lastUsed写入与传输配额单列。
+
+本轮追加驱动失败保留：旧原键fixture漏新增aiDataErasure／OperationLog，prepare被正确拒为unavailable，换同一已存在的完整原事务fixture后通过；Root维护组先把准备／读取审计误计为保存审计、误用retention而非正式privacy路由、漏workspace的params管理权，均只修内存驱动后完成上述最终一组，未改生产Guard／日志或放宽断言。未新增测试文件。
+
+固定检查点暂存28份产品／导读源及本记录／接续，未夹带助手后继；两份历史CRLF文件保留原换行，正文与已验证固定blob仅换行等价，避免整文件伪差异。固定index源码再次以API两根／2045源、后台五根／1492源执行必要类型，stdin `37e1029d0ba2a095c1e6a940cdc2f10afd5a2def45d2a871e6d5264b4eb343ec`退出0、零诊断。`node scripts/validate-docs.cjs`仍退出1且仅原4处历史／稀疏缺链；任务算术及当前接续链接无新增错误。检查点明确保留以下未完项，不当作整项完成候选。
+
+剩余确证问题留当前接续：`RentalBusinessService.listNotificationLogs`仍返回启动／恢复预热的通知缓存，正文清理只更新原持久行，缓存及saveBusinessState可能继续带旧预览；需沿原缓存／快照读取接点消除已删除副本。小程序原profile页load尚未隔离登出／切scope／隐藏后的迟到响应，dev1继续原页面反例核定。两个问题不能被以上服务模拟覆盖，ENTRY-02／08／10／17未据此提前加分。
+
+自有验证全部使用本树原offline preload、不可达DATABASE_URL及内存audit；audit为空，`output/.tmp/ain-entry02-registered-actions-20261115`未创建，进程退出，没有新依赖、脚本／dist／Prisma client副本。dev2任务目录同样未创建，原始命令与失败保留各原会话。真实数据库、浏览器、微信和供应商由负责人后续操作；当前固定片只证明原服务和明确内存DB／宿主行为，不宣称外部副本、缓存传播或混合备份已全部删除。
+
 <a id="ain-entry02-registered-navigation-stage-20261115"></a>
 ## ENTRY-02 原资源Action签发、正式装配与员工／后台导航阶段（2026-11-15）
 

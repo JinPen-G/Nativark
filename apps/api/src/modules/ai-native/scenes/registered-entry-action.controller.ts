@@ -2,9 +2,11 @@
  * issue and use only observe current original resources, never execute them. */
 import { Body, Controller, Header, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
-import { AI_REGISTERED_ENTRY_ACTION_HTTP, aiRegisteredEntryActionObservationSchema,
-  aiRegisteredEntryActionRevalidationSchema, aiRegisteredEntryActionOrderResponseSchema } from '@rental-os/shared';
+import { AI_REGISTERED_ENTRY_ACTION_HTTP, AI_ENTRY_NOTIFICATION_DRAFT_HTTP, aiRegisteredEntryActionObservationSchema,
+  aiRegisteredEntryActionRevalidationSchema, aiRegisteredEntryActionOrderResponseSchema,
+  aiEntryNotificationDraftResponseSchema } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { EntryNotificationDraftError } from './entry-notification-draft.contract';
 import { respondAiScene } from './original-scenes.controller';
 import { withRequestAbort } from './request-abort';
 import type { RegisteredEntryActionFactory } from './registered-entry-action.application';
@@ -48,4 +50,29 @@ export class WebsiteRegisteredEntryActionController extends OperatorRegisteredEn
 @Controller(AI_REGISTERED_ENTRY_ACTION_HTTP.wechatBasePath)
 export class WechatRegisteredEntryActionController extends OperatorRegisteredEntryActionController {
   constructor(@Inject(AI_WECHAT_ENTRY_ACTIONS) create: RegisteredEntryActionFactory) { super(create); }
+}
+
+/** An explicit R1 draft save, with original same-key read recovery. This is an
+ * operator-only consumer of the existing notification domain, never a sender. */
+@Controller(AI_ENTRY_NOTIFICATION_DRAFT_HTTP.basePath)
+export class OperatorEntryNotificationDraftController {
+  constructor(@Inject(AI_OPERATOR_ENTRY_ACTIONS) private readonly create: RegisteredEntryActionFactory) {}
+  private call(name: 'prepareNotificationDraft' | 'saveNotificationDraft' | 'readNotificationDraft', request: Request, value: unknown) {
+    return respondAiScene(() => withRequestAbort(request, async signal => {
+      const app = this.create(request), stop = () => app.close();
+      signal.addEventListener('abort', stop, { once: true });
+      try {
+        const result = await app[name](structuredClone(request.body ?? value), signal);
+        if (!aiEntryNotificationDraftResponseSchema.safeParse(result).success)
+          throw new EntryNotificationDraftError(name === 'saveNotificationDraft' ? 'AI_RESULT_UNKNOWN' : 'AI_RESOURCE_UNAVAILABLE');
+        return result;
+      } finally { app.close(); signal.removeEventListener('abort', stop); }
+    }, { maxWaitMs: 15000 }), 'read_original_notification_draft');
+  }
+  @Post(AI_ENTRY_NOTIFICATION_DRAFT_HTTP.prepare) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepare(@Req() request: Request, @Body() value: unknown) { return this.call('prepareNotificationDraft', request, value); }
+  @Post(AI_ENTRY_NOTIFICATION_DRAFT_HTTP.save) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  save(@Req() request: Request, @Body() value: unknown) { return this.call('saveNotificationDraft', request, value); }
+  @Post(AI_ENTRY_NOTIFICATION_DRAFT_HTTP.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  read(@Req() request: Request, @Body() value: unknown) { return this.call('readNotificationDraft', request, value); }
 }

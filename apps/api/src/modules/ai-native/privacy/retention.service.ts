@@ -19,6 +19,7 @@ import { inspectRetentionSource } from './retention-model-sources';
 import { eraseExpiredTaskBodies, eraseRetainedSourceTaskBodies } from './retention-task-bodies';
 import { AI_BODY_STORAGE_KINDS, protectAiBodyStorageRows } from './prisma-ai-body-storage';
 import { eraseExpiredInspectionDraftBodies } from './retention-inspection-draft';
+import { eraseExpiredNotificationDraftBodies, type NotificationDraftRetentionCipher } from './retention-notification-draft';
 
 export const aiRetentionCleanupSchema = z.object({ kind: z.enum(retentionKinds),
   limit: z.number().int().min(1).max(10).default(5),
@@ -45,7 +46,8 @@ export class AiRetentionService {
   private readonly identities: AiTaskCurrentIdentityAuthority;
   constructor(readonly db: PrismaClient, auth: Pick<AuthService, 'resolveAccessContext'>,
     credentials: AiTaskCredentialSource, private readonly files?: Pick<FileStorageRuntimeService, 'eraseAiRetentionObject'>,
-    private readonly clock: () => Date = () => new Date(), private readonly restoreKeyHash?: string) {
+    private readonly clock: () => Date = () => new Date(), private readonly restoreKeyHash?: string,
+    private readonly notificationDraftCipher?: NotificationDraftRetentionCipher) {
     this.identities = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
   }
   async current(): Promise<Session> {
@@ -151,6 +153,12 @@ export class AiRetentionService {
     else if (command.kind === 'inspection_draft') ids = (await this.db.aiInspectionDraft.findMany({ where: { ...where,
       createdAt: { lte: this.cutoff(30) }, expiresAt: { lte: this.now() } }, orderBy: { id: 'asc' },
       take: command.limit, select: { id: true } })).map(row => row.id);
+    else if (command.kind === 'notification_draft') {
+      if (!this.notificationDraftCipher) throw unavailable();
+      ids = (await this.db.rentalNotificationLog.findMany({ where: { ...where, status: 'draft',
+        createdAt: { lte: this.cutoff(30) } }, orderBy: { id: 'asc' }, take: command.limit,
+        select: { id: true } })).map(row => row.id);
+    }
     else ids = (await this.db.fileAsset.findMany({ where: { tenantId: current.tenantId, ...page, businessModule: 'ai-native',
       businessType: 'ai_knowledge_document', metadata: { path: '$.workspaceId', equals: current.workspaceId },
       status: { in: ['active', 'failed', 'ai_erasure_pending'] }, createdAt: { lte: this.cutoff(7) } },
@@ -195,7 +203,7 @@ export class AiRetentionService {
         if (receipt && (receipt.tenantId !== owner.tenantId || receipt.workspaceId !== owner.workspaceId
           || receipt.kind !== kind || receipt.resourceId !== resourceId || receipt.policyVersion !== AI_RETENTION_POLICY.version
           || expectedHash && receipt.targetHash !== expectedHash)) throw refused();
-        if (receipt?.state === 'erased' && !expectedHash && !['task', 'inspection_draft'].includes(kind)) return { id: key, state: 'erased', replayed: true };
+        if (receipt?.state === 'erased' && !expectedHash && !['task', 'inspection_draft', 'notification_draft'].includes(kind)) return { id: key, state: 'erased', replayed: true };
         if (['knowledge', 'memory', 'attachment'].includes(kind)) {
           const source = await inspectRetentionSource(tx, scope.id, kind as 'knowledge' | 'memory' | 'attachment', resourceId, owner);
           if (source !== 'clear') return { id: key, state: source,
@@ -210,6 +218,7 @@ export class AiRetentionService {
             : kind === 'memory' ? await tx.aiStructuredMemory.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
             : kind === 'material' ? await tx.aiClientSceneMaterial.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
             : kind === 'inspection_draft' ? await tx.aiInspectionDraft.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
+            : kind === 'notification_draft' ? await tx.rentalNotificationLog.findFirst({ where: { id: resourceId, ...owner }, select: { id: true } })
             : await tx.fileAsset.findFirst({ where: { id: resourceId, tenantId: owner.tenantId,
               metadata: { path: '$.workspaceId', equals: owner.workspaceId } }, select: { id: true } });
           if (!exists) {
@@ -228,6 +237,12 @@ export class AiRetentionService {
         } else if (kind === 'inspection_draft') {
           await this.check(current); attempted = true;
           return eraseExpiredInspectionDraftBodies(tx, { scopeId: scope.id, owner, draftId: resourceId, now,
+            check: () => this.check(current) }, expectedHash);
+        } else if (kind === 'notification_draft') {
+          if (!this.notificationDraftCipher) throw unavailable();
+          await this.check(current); attempted = true;
+          return eraseExpiredNotificationDraftBodies(tx, { scopeId: scope.id, owner,
+            draftId: resourceId, now, cipher: this.notificationDraftCipher,
             check: () => this.check(current) }, expectedHash);
         } else if (kind === 'request') {
           const row = await tx.aiTaskOriginalRequest.findFirst({ where: { id: resourceId, scopeId: scope.id } });
