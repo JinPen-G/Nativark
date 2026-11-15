@@ -39,7 +39,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 - 轻量非租赁实现独占 `packages/example-tickets-core`，独立迁移只在该包内声明，没有加入公共原schema/迁移链；真实宿主authority与主应用装配仍须原公共窗口。
 - 平台Core管理应用层独占 `packages/core-host`，输入/输出复用原core-contracts；独立MySQL表和迁移源码尚未接原schema/部署链，真实原身份/部署管理生产者不在本包伪造。
 - 原Core管理适配独占 `apps/api/src/modules/core-host`，复用原ALS、PlatformRepository账号/角色映射及已获窗口的OperationLog同事务方法；API必要包依赖与构建前置已加入。实际AppModule/Guard/平台公共生产者仍按下条窗口办理。
-- PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。源码检查点和剩余实际宽度/真库验收唯一见[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)，不计PCH新任务，不扩为平台抽离公共窗口。
+- PM新增UX-TENANT-NAME-01最小窗口，限原platform合同、Tenant/增量迁移、原platform DTO/服务/仓储/Auth租户投影、OpenAPI四个Tenant schema及TenantManagementPage/原请求类型/NativeWorkspaceSwitcher/NativeContextSwitcher简称字段闭包。固定 `982043aba913745c6d0e258b2d74ca1efb9a98d4` 已在本树，Auth/Platform/shared平台合同/OpenAPI相对main的5处差异归该检查点，后续抽离须保留。[主接线基线核定](平台Core接入-开发记录.md#core-public-window-baseline-20261115)和[原后台记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)分别定位差异及剩余实际宽度/真库验收，不计PCH新任务，不扩为平台抽离公共窗口。
 - shared总index、OpenAPI、AuthGuard、AppModule/AI providers及AI任务目录属于AI/PM既有窗口；未调整其源码，AI可继续使用原Rental指纹出口。平台服务/仓储、schema与后台壳的后续修改先取得对应固定窗口，本片不覆盖他人WIP或接管其专项。
 - 已有品牌/文档固定来源和两轮12份前像均在Git。覆盖前接续原文保存在上述main基线同路径，未解决事项在本册及原记录继续有入口，不重复复制历史。
 
@@ -52,6 +52,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    [更新范围兼容](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)已使普通单Core预检拒绝租户/容器转换及容器类型改名，返回scope_changed，避免候选切换后原绑定失效。同范围修复、前进迁移与底座更新保持原规则；改变范围仍须专门迁移，实际更新/部署未验。
 3. 下一公共片的最小候选依次为平台基础投影→独立公共租户创建→Auth/Guard/ALS范围提供者→授权/绑定存储与受限事务→AppModule组合→API/后台消费。精确文件/方法、固定基线、原消费者与退出条件见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)。[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)已有实际消费者。下一步原Guard消费 `coreManagementHttpPolicy`、AppModule登记 `CoreManagementHttpModule`、原OpenAPI组合消费同源生成器，以及真实数据观察/后台；旧API身份与Rental映射继续按自身合同。公共片由PM核定唯一作者，具体消费者入口已可定位。
    当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI尚未取得本对话的新写入窗口，不继续用独占接口数量代替独立宿主。
+   [当前基线/窗口核定](平台Core接入-开发记录.md#core-public-window-baseline-20261115)确认原主装配仍未消费Core接点，5处公共差异来自已获准简称检查点，后续须从当前含该成果的基线施工。主树服务端候选暂时无WIP，但它和PM已结束的turn均不是新增写权；下一PCH主实现等待精确公共服务端窗口，原后台壳活动WIP继续归其作者。
    [原身份SQL模板](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115)已移除模板所需的顶层生成Client运行依赖，15条实际ALS/SQL新旧等价路径通过；原身份仓储及行业投影仍待上述公共窗口。[当前API类型](平台Core接入-开发记录.md#core-api-types-current-schema-20261115)已使用本树实际离线生成Client声明核978根/2,176源零诊断并清理产物；主Guard接线和真实无Core登录未验，不把类型/模板解耦视为主应用拆分完成。
    [当前事实读取](平台Core接入-开发记录.md#core-management-current-reads-20261115)已提供页面变更所需的授权/成员/绑定修订，主应用组合时将 `reads` 与原服务一起供给Controller，页面先读当前事实再提交。
    [原授权结果核对](平台Core接入-开发记录.md#core-access-panels-receipts-20261115)增加两条只读收据路径，主Guard/OpenAPI应直接消费现行单源声明。租户资料和成员资料可分别挂载admin/core正式出口的CoreTenantGrantPanel/CoreMemberAssignmentPanel，原操作及当前状态分别读取；面板不自造目录或身份。[授权刷新与缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115)已把确认结果与随后读取失败分开，只读恢复不重发；本人变化先取消旧目录请求，撤去目标Core条目并清理其缓存，其他Core缓存保留。类型/实际查询库离线通过，主壳/服务端和实页仍待接线。

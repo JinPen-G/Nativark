@@ -155,6 +155,22 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 原单一合同入口含新增完整类型，8组通过/退出0；stdin核对空/双Core、同源名称/菜单、编码参数、未知目标、重复/同形/循环、未知权限及外部/重复参数路径拒绝（退出0），组件调用计数为0。现有测试文件未扩写，临时编译目录由原after清理。模块说明含最小真实schema例子、四类操作语义和当前未接线声明；React自动呈现/主按钮/表单/默认页面及真实租户权限尚未完成，不能将合同通过计为07宿主验收。
 
+<a id="core-public-window-baseline-20261115"></a>
+
+## 主接线窗口与既有公共差异归属核定（2026-11-15）
+
+起点为已上传并回读的 `e56f8ab801ef1e59dee6ba625d1259f0b0036688`，实际远端main仍为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b` 且在本树祖先。工作区/索引干净，无合并/拣选，任务临时根为空；前一目标轮已完成MCP定向验证及提交，属于进展。本轮只读核定剩余主线和既有差异，不重复已通过的包/类型/审计验证或新增外围接入实现。
+
+原公共装配源码中没有CoreHostModule/composeOriginalCoreApplication、Core管理HTTP政策/同源OpenAPI生成器或Core页面注册/路由消费，PlatformRepository的findTenantByCode/findUserForLogin仍include rentalProfile/category并返回rental_core。实际无Core公共登录/保存、当前多Core业务和Rental重新装配仍未完成；类型、独立适配与标准包不能代替这条链路。
+
+精确核对 [公共候选窗口](#core-package-cli-public-entry-20261115) 的10个文件与main，5处已有55新增/5删除均来自固定 `982043aba913745c6d0e258b2d74ca1efb9a98d4` 的UX-TENANT-NAME-01检查点。Auth两处租户简称投影、PlatformService/Repository归一/保存/审计、shared平台简称合同及OpenAPI四个Tenant schema为已授权成果；没有借简称窗口完成Core主接线。后续PCH需从含该检查点的当前任务基线继续，保留省略/null/空字符串、审计和原字段语义，不能误称公共文件相对main完全无差异或按旧main覆盖。
+
+主树当前索引空，上述服务端候选没有未提交WIP，但后台壳/页头/样式/业务页及其他专项仍有他人活动成果。PM现有turn已completed/notLoaded，没有针对本次主接线的新窗口或回复许可；文件暂时干净和对话终态不自动授予共享文件写权。当前Auth/Platform、Guard/RequestIdentity、shared正式平台出口、AppModule/OpenAPI窗口仍待负责人或PM核定，原主schema/迁移/Seed及AppShell/AppRouter/navigation按各自后续窗口办理。
+
+现在需要的可执行入口仍是公共身份/租户投影与Rental兼容转接 → 原Auth/Guard/ALS受控分派 → 原服务单实例装配与同源API/后台消费。完整公共文件/方法及行为条件保留原候选表，不另建第五册、不擅改需求/任务、真实环境或合main授权。当前轮新增证据明确了实际基线和必要写权，后续没有相应窗口时不能用外围检查代替主拆分进展。
+
+本节与接续经4份文档582个链接/157个锚点/49个表格、旧记录全文和正式需求/任务保全核对退出0，差异格式退出0；中文提交普通推送并回读，任务研发门槛不升档。没有新增测试脚本、生成环境、服务或临时残留，未主动跨对话发送消息。
+
 <a id="core-original-mcp-audit-20261115"></a>
 
 ## 公共指纹抽离后的原MCP审计定向复验（2026-11-15）
