@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry08-whole-closeout-20261116"></a>
+## ENTRY-08 原风险、权限及生命周期全文核闭（2026-11-16）
+
+固定产品前置 `285622c03b4fb2f64477062ac439415cc6f46630` 已普通推送并回读GitHub，后继 `8a9a14df3df5760102f94d9b63ad1503a3fbc066` 只改原升级脚本和三册。内部entry_closeout_fallback按需求v1.15、任务v1.19原六条分别独立只读核定08／17，未将AIN-26或企业正向新增为ENTRY前置。Root复核实际原代码、既有模拟与类型范围，确认08原三条齐备，17新增三个实缺仍留原任务。
+
+| 原条款 | 生产者、消费者及固定证据 |
+| --- | --- |
+| 唯一风险分级及渠道收紧 | [九Action注册表](../../packages/shared/src/ai-entry-action-draft.ts)及superRefine核对resource、riskLevel和requiresConfirmation，sign／revalidate按同表核原封印、主体和scope。[原场景目录](../../apps/api/src/modules/ai-native/scenes/entry-scene-catalog.ts)区分R1草稿、R2原提交及人工节点；付款／配货只导航，R3沿原人工审核和业务链，未登记动作不能执行。原ENTRY-01及02／10全文证据覆盖四端固定映射及渠道收紧。 |
+| 故障与生命周期降级 | [原客户标准应用](../../apps/api/src/modules/ai-native/scenes/standard-client-entry.application.ts)和四端session保留当前权限、发布、过期及最后等待检查。原控制台4da、侧栏285的原键读取／停止／重开、profile及通知缓存阶段均有固定复验。NativeOperatorSession.read／stop及CopilotOrderSession.read／newChat保留原定位，unknown禁止换键或新派发；当前用户、空间、权限、隐藏和迟到结果撤回正文并保留原人工入口。 |
+| 真实业务阶段及执行前复核 | [原批准订单组合](../../apps/api/src/modules/ai-native/approval-execution/approved-order.composition.ts)、原route authority及settings／profile authority核当前主体、scope、原输入、版本、政策、预算和审批后进入原Core。通知保存返回draft／not_dispatched，客户submitted_request_not_business_success与原订单收据区分；准备、保存、受理、业务完成及unknown逐阶段呈现，R3导航不执行业务。原批准、员工、Booking、通知及ENTRY-16证据可复用。 |
+
+该核定复用实际已通过的原业务及四端模拟、原控制台／侧栏必要冒烟和类型，不新增或重复整个绿色集合。侧栏七分支stdin `7a3aa0e7b614249eb54be0d4c527cf3d9cf8d7717695b5a1733f1cf8bb5232fa`、后台完整宿主8根／2352源类型 `ee42fe10987da49d23f32a2a31a7c6f195d6837d90140388179884c7a19303f8`、API观测1根／1602源类型 `7f275df161ee352675ecb9a98ca65d0fa49da82ea442da927dd7052fb4680ac4` 均exit 0，明确是模拟／类型；真实数据库、浏览器、微信和供应商由负责人后续测试。
+
+G1原契约及风险基线、G2原服务主路径、G3实际四端及宿主装配、G4原三条全文、必要验证、修复复验、独立技术核定及证据已核齐，Root将ENTRY-08从75%更新100%。ENTRY为98.6%、17／18项100%，原AIN仍91.1%、24／28项100%；46项等权参考94.0%、41／46完成。当前只新增这一项全文收口，后续17闭合后形成原两项main节点，main仍由PM串行整合。
+
+ENTRY-17保持75%。独立核定发现注册Action的观察丢ACK后可能在catch再次写审计、客户unknown观察没有原操作定位、关联终止Booking Draft的30天普通AI材料被无条件hold。Root安排最小源码修复及必要正反例，审计与隐私缺口归17，不移转成08的新验收前置。
+
 <a id="ain27-upgrade-restore-barrier-fixed-20261116"></a>
 ## AIN-27 原升级恢复屏障和G1～G3核定（2026-11-16）
 
