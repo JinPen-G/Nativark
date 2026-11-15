@@ -6,6 +6,19 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-entry15-order-view-original-task-entry-20261115"></a>
+## ENTRY-15 原订单查看页的明确原Task入口与执行门禁分离（2026-11-15）
+
+前置`8f2de8c58c8dfbeff3bf01d667c570f4cae712e9`已推送GitHub并独立回读一致。[原入口P2](<#ain-entry15-staff-receipt-only-consumer-20261115>)为员工只保留订单view时，pickup／return执行页面因stage写权或当前模板挡住合法原Task读取。后继仅改员工[原订单TS](../../apps/staff-miniprogram/src/pages/order/index.ts)／[WXML](../../apps/staff-miniprogram/src/pages/order/index.wxml)／[JSON](../../apps/staff-miniprogram/src/pages/order/index.json)，在当前订单GET／view下建立当前页面绑定，用户明确选pickup／return再走既有`openInspectionTaskPage(...,'read') → receipt_only → Session／Component`。无当前模板也可核原Task，只读不带stage写权、准备／开始／补充提交／继续或自动轮询；pickup／return业务入口仍独立保留原执行权限。原场景目录挂接未移除。
+
+原页面onLoad不预置`page.order`，onShow／load从实际orders API获取当前对象并核页代、身份与view；隐藏／卸载／刷新权限或空间变化推进epoch并撤回旧宿主。明确阶段选择和迟到原GET、receipt、Component渲染不得恢复旧来源；普通挂载／show不发AI请求，缺view仍拒绝。Root逐blob核同三源：TS`cfd4b572e741682d88f1cdde4608d5b66f1aea40`、WXML`ceb7e9b41e69f6169528ed2e18a5c4d35650f348`、JSON`664341839c8b4964caa1a1752e68fcd3a0b5862e`；工作区CRLF与Git LF仅换行差异，内容核同。
+
+作者原页无只读入口的反例stdin SHA-256`72035012d902713991cde1136d767d7118299fbde99c37849280e6ddcd2aeb97`退出1，修后保留同断言`9349021b6ce0668150e210e6592ddd66a6e3ece8d14414e0f56c5ccd7e03641b`退出0。实际页面／API／transport／Session／Component及当前source的19场景`e1ac39623a03b454c6d1d48a3a1d4bed5b9a28975a103685bb0d90949ba1f5d6`退出0；TypeScript5.9.3、原ES2019一根／245源零诊断，125份shared声明仅在内存，stdin`d6dabdc60f8731a8977304440d47a486dae586c044f770c6a2117cc37e8b8627`退出0。Root独立当前原页面onLoad/onShow/load→GET→两个stage选择→receipt_only→Session／Component模拟`c6ffcfdc6279a72dbf53a43f171213f6f3562689f2f2d00a78408b81805f7e0f`退出0，验证无stage写权／无当前模板仍读、挂载和复show零AI请求、明确再读与撤view清除；仅API和微信宿主／存储／clock为夹具，未启真实服务。
+
+独立静态复核确认入口P2关闭，三叶未发现新增确证P1／P2；不代替Root模拟。失败保留：作者初驱动把currentTask.id当taskId、readAnswer未读取nested reference、刷新出现第二个原GET的迟到采样遗漏、cache-key误匹配；各自按实际合同与页周期修fixture，原断言保留。Root第一次同内存prelude重复until声明语法失败，去除重复驱动声明后通过，无生产改动。全部`node --no-compilation-cache -`、原offline preload／不可达DB／audit0、作者及Root进程退出，`output/.tmp/ain-entry15-staff-order-read-20261115`与`output/.tmp/ain-entry15-order-lifecycle-20261115`未创建，无新增测试文件或临时副本。
+
+ENTRY-15全文还保留当前存储故障问题：dev2确证原执行Task和媒体intake用通用readStorage吞异常，可能把已存unknown视为无记录、覆盖引用及另发新上传键；这是新恢复P2，正在窄修，不能沿上述页面绿色判整项100%。本片仅三源和记录／接续固定，存储活动文件不夹入。后继核原stage写权、原键与读／执行分离等四端全文，满足后同步唯一任务册。
+
 <a id="ain-entry01-formal-source-simulated-whole-closeout-20261115"></a>
 ## ENTRY-01 原发布／版本来源修复与四端目录全文研发收口（2026-11-15）
 

@@ -18,6 +18,10 @@ import { staffActionAccess } from "../../core/subscription-access";
 import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessDateTime, formatBusinessRange, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
 import { ROUTES, buildUrl, callPhone, confirmDialog, copyText, navigate, promptDialog, relaunch, toast } from "../../core/ui";
+import { chooseInspectionHistoryItem } from "../../components/ai-native/inspection-page-binding";
+import { captureInspectionPageWork, clearInspectionTaskPage, hideInspectionTaskPage, inspectionPageScopeKey,
+  openInspectionTaskPage, showInspectionTaskPage, subscribeInspectionPageScope,
+  type InspectionPageWorkContext } from "../../components/ai-native/inspection-task-page-binding";
 
 /**
  * 写操作的错误收口：TIMEOUT / NETWORK / SERVER 结果不确定，禁止让用户重复提交（可能已在服务端生效）；
@@ -38,31 +42,78 @@ function fundingChannelLabel(provider: string): string {
 
 Page({
   behaviors: [themeBehavior],
-  data: { aiNativeEntryVisible: false, aiNativeTasks: [], aiNativePreviewTask: null, aiNativeSteps: [], aiNativeFields: [], aiNativeProposal: null, aiNativeSources: [], aiNativeMemories: [], aiNativeInspection: [], aiNativeOrderProjection: null, view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryPhoneCallable: "", deliveryAddressText: "", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, onlineCollections: [] as Array<{ id: string; methodLabel: string; directionLabel: string; amountLabel: string; refund: boolean }>, hasOnlineCollections: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
+  data: { canReadInspectionTasks: false, aiInspectionTaskChoosing: false, aiInspectionTaskVisible: false, aiInspectionTaskLoading: false, aiInspectionTaskMessage: "",
+    aiNativeEntryVisible: false, aiNativeTasks: [], aiNativePreviewTask: null, aiNativeSteps: [], aiNativeFields: [], aiNativeProposal: null, aiNativeSources: [], aiNativeMemories: [], aiNativeInspection: [], aiNativeOrderProjection: null, view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryPhoneCallable: "", deliveryAddressText: "", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, onlineCollections: [] as Array<{ id: string; methodLabel: string; directionLabel: string; amountLabel: string; refund: boolean }>, hasOnlineCollections: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
   order: undefined as RentalOrder | undefined,
   extensions: [] as RentalOrderExtension[],
   inspections: [] as RentalInspectionRecord[],
   timeZone: "Asia/Shanghai",
   extPreview: undefined as RentalOrderExtensionPreview | undefined,
   offSubscription: undefined as (() => void) | undefined,
+  inspectionPageShown: false,
+  inspectionPageEpoch: 0,
+  inspectionLoadedScope: "",
+  inspectionContextUnsubscribe: undefined as (() => void) | undefined,
+  clearInspectionReadContext() {
+    this.inspectionPageEpoch++;
+    this.inspectionLoadedScope = "";
+    this.order = undefined;
+    clearInspectionTaskPage(this);
+    this.setData({ canReadInspectionTasks: false, aiInspectionTaskChoosing: false, view: loadingState() });
+  },
   onLoad(query: Record<string, string>) {
+    this.inspectionPageShown = false;
+    this.clearInspectionReadContext();
     this.setData({ id: query.id ?? "" });
     this.offSubscription = subscriptionEvents.on(() => {
       const allowed = this.order?.status === "renting" && !(this.order.allocations ?? []).some((row) => row.status === "returned") && staffActionAccess("order.extend").allowed;
       this.setData({ canExtend: Boolean(allowed) });
     });
   },
-  onUnload() { this.offSubscription?.(); this.selectComponent?.("#ai-native-workbench")?.hostLogout?.(); },
-  onHide() { this.selectComponent?.("#ai-native-workbench")?.hostHide?.(); },
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void loadSubscription(true).catch(() => undefined); void this.load(); },
+  onUnload() {
+    this.inspectionPageShown = false;
+    this.clearInspectionReadContext();
+    this.inspectionContextUnsubscribe?.(); this.inspectionContextUnsubscribe = undefined;
+    this.offSubscription?.(); this.selectComponent?.("#ai-native-workbench")?.hostLogout?.();
+  },
+  onHide() {
+    this.inspectionPageShown = false; this.inspectionPageEpoch++;
+    this.setData({ aiInspectionTaskChoosing: false });
+    hideInspectionTaskPage(this); this.selectComponent?.("#ai-native-workbench")?.hostHide?.();
+  },
+  onShow() {
+    this.inspectionPageShown = true;
+    if (!isSignedIn()) { this.clearInspectionReadContext(); this.inspectionPageShown = false; relaunch(ROUTES.login); return; }
+    if (!this.inspectionContextUnsubscribe) this.inspectionContextUnsubscribe = subscribeInspectionPageScope(() => {
+      // Refreshed permissions or location scope can change without a new ID.
+      // Withdraw the old page witness before any original source is read again.
+      this.clearInspectionReadContext();
+      this.selectComponent?.("#ai-native-workbench")?.hostLogout?.();
+      if (this.inspectionPageShown && isSignedIn()) void this.load();
+    });
+    if (this.inspectionLoadedScope !== inspectionPageScopeKey()) this.clearInspectionReadContext();
+    void loadSubscription(true).catch(() => undefined); void this.load();
+  },
   onPullDownRefresh() { this.load().finally(() => wx.stopPullDownRefresh()); },
   async load() {
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单列表重新进入") }); return; }
+    let work: InspectionPageWorkContext;
+    this.inspectionPageEpoch++;
+    try { work = captureInspectionPageWork(this, true); } catch { return; }
+    hideInspectionTaskPage(this);
+    this.setData({ canReadInspectionTasks: false, aiInspectionTaskChoosing: false });
+    if (!can("rental-os:order:view")) {
+      this.clearInspectionReadContext();
+      this.setData({ view: blockedState("无订单查看权限", "请联系管理员授权") }); return;
+    }
     if (!this.order) this.setData({ view: loadingState() });
     try {
       const canReadInternalNotes = can("rental-os:order:view");
       const [order, context, groups, internalNotes] = await Promise.all([getOrder(this.data.id), loadContext(), listItemGroups().catch(() => []), canReadInternalNotes ? listInternalOrderNotes(this.data.id).catch(() => []) : Promise.resolve([] as RentalOrderInternalNote[])]);
+      if (!work.current()) return;
+      if (order.id !== work.orderId || !can("rental-os:order:view")) throw Error("原订单或当前查看权限已变化");
       this.order = order;
+      this.inspectionLoadedScope = work.scopeKey;
       const operate = can("rental-os:order:operate");
       const feeReview = can("rental-os:order:fee-review");
       const timeZone = context.locations.find((row) => row.id === order.fulfillmentLocationId)?.timezone ?? "Asia/Shanghai";
@@ -111,7 +162,7 @@ Page({
       const delivery = order.deliveryAddressSnapshot;
       const deliveryPhonePlain = delivery?.phone ?? "";
       this.setData({
-        view: readyState(), orderNo: order.orderNo, status: orderStatusLabel(order.status), tone: orderStatusTone(order.status), createdAt: formatBusinessDateTime(order.createdAt, timeZone), customer: order.customerName, customerCompany: "", customerRegion: "",
+        view: readyState(), canReadInspectionTasks: true, orderNo: order.orderNo, status: orderStatusLabel(order.status), tone: orderStatusTone(order.status), createdAt: formatBusinessDateTime(order.createdAt, timeZone), customer: order.customerName, customerCompany: "", customerRegion: "",
         phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone),
         pickupLocation: order.fulfillmentLocationName, returnLocation: order.returnLocationName ?? order.fulfillmentLocationName, mode: fulfillmentModeLabel(order.fulfillmentMode),
         hasDeliveryAddress: Boolean(delivery),
@@ -153,11 +204,15 @@ Page({
         inspectionExceptions: [],
         hasInspectionExceptions: false
       });
+      // Re-show restores local original references only. Reading the Task still
+      // requires the separate stage/history choice or the component read button.
+      showInspectionTaskPage(this);
       if (canRegisterOffline || canConfirmOffline) {
         const [funding, registrations] = await Promise.all([
           getOrderFunding(order.id).catch(() => undefined),
           listOfflinePaymentRegistrations(order.id).catch(() => [] as StaffOfflinePaymentRegistration[])
         ]);
+        if (!work.current()) return;
         this.applyOfflinePayments(funding, registrations, order);
       }
       // 续租退款审核与检查异常费用复核都属费用复核权限；仅在可能已有相应记录的订单状态下拉取。
@@ -171,18 +226,39 @@ Page({
           needExtensions ? listExtensions(order.id).catch(() => [] as RentalOrderExtension[]) : Promise.resolve([] as RentalOrderExtension[]),
           needInspections ? listInspections(order.id).catch(() => [] as RentalInspectionRecord[]) : Promise.resolve([] as RentalInspectionRecord[])
         ]);
-        if (this.data.id === order.id) this.applyReviews(extensions, inspections, order);
+        if (!work.current()) return;
+        this.applyReviews(extensions, inspections, order);
       }
       if (order.customerId && canTenant("rental-os:member:view", "rental-os:member:manage")) {
         void getCustomer(order.customerId).then((profile) => {
-          if (this.data.id === order.id) this.setData({ customerCompany: profile.corporateName ?? "", customerRegion: profile.region ?? "" });
+          if (work.current()) this.setData({ customerCompany: profile.corporateName ?? "", customerRegion: profile.region ?? "" });
         }).catch(() => undefined);
       }
       order.lines.forEach((line, index) => {
         const source = itemGroupCover(groups.find((group) => group.id === line.itemGroupId));
-        if (source) void resolveImage(source).then((path) => { if (path && this.data.id === order.id && this.data.lines[index]?.id === line.id) this.setData({ [`lines[${index}].imagePath`]: path }); });
+        if (source) void resolveImage(source).then((path) => { if (path && work.current() && this.data.lines[index]?.id === line.id) this.setData({ [`lines[${index}].imagePath`]: path }); });
       });
-    } catch (error) { this.setData({ view: errorState(error) }); }
+    } catch (error) {
+      if (!work.current()) return;
+      this.clearInspectionReadContext(); this.setData({ view: errorState(error) });
+    }
+  },
+  /** This order-view entry never borrows pickup/return execution permission.
+   * The original receipt host rechecks current read access to the chosen source. */
+  async onReadInspectionTask() {
+    if (this.data.aiInspectionTaskChoosing || this.data.aiInspectionTaskLoading
+      || !this.data.canReadInspectionTasks || !can("rental-os:order:view")) return;
+    let work: InspectionPageWorkContext;
+    try { work = captureInspectionPageWork(this); } catch { return; }
+    const current = () => work.current() && can("rental-os:order:view");
+    this.setData({ aiInspectionTaskChoosing: true, aiInspectionTaskMessage: "" });
+    try {
+      const stage = await chooseInspectionHistoryItem([`${this.data.pickupLabel}原任务（只读）`, `${this.data.returnLabel}原任务（只读）`], current);
+      if (stage === null || !current()) return;
+      await openInspectionTaskPage(this, stage === 0 ? "pickup" : "return", "read");
+    } catch {
+      if (current()) this.setData({ aiInspectionTaskMessage: "原任务暂不可核对，请保留原记录并稍后读取。" });
+    } finally { if (current()) this.setData({ aiInspectionTaskChoosing: false }); }
   },
   onCopy() { if (this.order) copyText(this.order.orderNo); },
   onCall() { callPhone(this.order?.contactPhone); },
