@@ -1,6 +1,6 @@
 # 原平台 Core 管理适配
 
-本模块把 `@rental-os/core-host` 的授权/成员分配服务接到当前平台的真实账号、会话、角色与审计。宿主从已冻结的组合注册提供Core部署可用性，原HTTP/后台装配消费此模块。[宿主合同](../../../../../packages/core-host/README.md)
+本模块把 `@rental-os/platform-core-host` 的唯一公共Core应用接到当前组合的真实账号、会话、角色、订阅和审计。原Controller和模块路径是公共包正式出口的兼容转接；具体Rental/工单业务与其数据保持各自适配。宿主从已冻结的组合注册提供Core部署可用性。[公共宿主适配](../../../../../packages/platform-core-host/README.md) · [Core应用合同](../../../../../packages/core-host/README.md)
 
 ## 从一个应用工厂装配
 
@@ -28,7 +28,7 @@ CoreHostModule.register({
 
 管理收据通过 `OperationLogService.recordCoreAccessReceipt` 使用相同事务保存，审计失败抛出并回滚授权/收据。提交前再读同一会话及原账号权限。`deployment`从实际受控部署提供，包目录及源码清单的状态通过宿主组合后再使用。
 
-API的dev/build/lint前置构建本树core-host及其core-contracts依赖。输入/输出及独立SQL迁移归这两个包维护，当前原AppModule/Guard路由、Core管理HTTP/后台、平台独立schema和真实运行验收按PCH公共接线片推进。[PCH当前入口](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
+API的dev/build/lint前置构建本树platform-core-host及公共身份/Core合同依赖。独立SQL原文单份归公共宿主Prisma迁移链，原组合尚未实际应用。原AppModule/Guard和后台消费者继续按PCH接线，独立无Core AppModule已消费公共Core管理模块及其准入/同源OpenAPI。[PCH当前入口](../../../../../docs/平台底座/Core接入/平台Core接入-协作接续.md)
 
 ## 绑定与业务示范
 

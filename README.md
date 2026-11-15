@@ -103,6 +103,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/platform-api` | 默认无 Core 的独立公共 API，初始化 / 认证 / 租户与人员角色 / 外观已提供，完整运行继续交付 | [宿主导读](apps/platform-api/README.md) |
 | `packages/platform-contracts` | 无行业依赖的公共身份、人员与设置合同；原 shared 兼容再导出 | [正式出口](packages/platform-contracts/README.md) |
 | `packages/platform-server` | 原认证、会话、外观及公共 HTTP 的唯一实现，存储由宿主提供 | [源码路线](packages/platform-server/README.md) |
+| `packages/platform-core-host` | 真实公共身份、标准Core授权/绑定、目录/范围与HTTP的单源适配 | [接入路线](packages/platform-core-host/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
 | `packages/shared` | 公共类型、schema、常量和运行时工具 | [正式出口](packages/shared/src/index.ts)、[包配置](packages/shared/package.json) |
 | `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |

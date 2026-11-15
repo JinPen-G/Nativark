@@ -3,7 +3,6 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import type { PlatformPrincipal, SystemUserRow } from "@rental-os/platform-contracts";
 import { getRequestIdentity } from "../../common/request-identity";
-import type { PlatformIdentityRepository } from "./platform-identity.repository";
 import type { PlatformAuthTransaction } from "./platform-auth-data-store";
 
 export interface PlatformPrincipalLease {
@@ -12,8 +11,8 @@ export interface PlatformPrincipalLease {
   revalidate(): Promise<SystemUserRow>;
 }
 
-export class PlatformPrincipalAuthority {
-  constructor(private readonly users: Pick<PlatformIdentityRepository, "findUserById">,
+export class PlatformPrincipalAuthority<Tx extends PlatformAuthTransaction = PlatformAuthTransaction> {
+  constructor(private readonly users: { findUserById(id: string, transaction?: Tx): Promise<SystemUserRow | undefined> },
     private readonly clock: () => number = Date.now) {}
 
   current(): PlatformPrincipal {
@@ -23,7 +22,7 @@ export class PlatformPrincipalAuthority {
     return { tenantId: identity.tenantId, subjectId: identity.userId, audience: identity.audience };
   }
 
-  async lock(transaction: PlatformAuthTransaction, actor: Omit<PlatformPrincipal, "audience"> & { audience: "operator" | "staff" | "client" }, tenantId: string, memberId?: string,
+  async lock(transaction: Tx, actor: Omit<PlatformPrincipal, "audience"> & { audience: "operator" | "staff" | "client" }, tenantId: string, memberId?: string,
     enabling = true): Promise<PlatformPrincipalLease> {
     const principal = this.current(), identity = getRequestIdentity()!;
     if (actor.tenantId !== principal.tenantId || actor.subjectId !== principal.subjectId || actor.audience !== principal.audience)

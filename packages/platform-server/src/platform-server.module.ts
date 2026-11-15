@@ -24,7 +24,11 @@ export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataSto
 export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
     useFactory: (...args: Dependencies) => PlatformDatabase | Promise<PlatformDatabase>;
-    coreHttp?: RegisteredCoreHttpAccess }): DynamicModule {
+    coreHttp?: RegisteredCoreHttpAccess;
+    /** 可选标准Core模块导出的准入provider；不在公共包反向导入具体Core宿主。 */
+    coreHttpProvider?: FactoryProvider<RegisteredCoreHttpAccess>;
+    openApiDocument?: unknown }): DynamicModule {
+    if (options.coreHttp && options.coreHttpProvider) throw new Error("Core HTTP只能登记一个实际准入提供者");
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController],
       providers: [
@@ -33,8 +37,9 @@ export class PlatformServerModule {
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
         TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService,
         { provide: AUTH_HTTP_APPLICATION, useExisting: PlatformAuthService },
-        { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: createPlatformOpenApi() },
+        { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi() },
         ...(options.coreHttp ? [{ provide: REGISTERED_CORE_HTTP_ACCESS, useValue: options.coreHttp }] : []),
+        ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
       ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE] };

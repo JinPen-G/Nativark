@@ -175,6 +175,35 @@ PM 随后明确本片唯一窗口：`packages/core-contracts`、必要根 lock �
 
 本片尚未装配独立公共AppModule/Guard或独立schema/迁移/Seed，未取得真实无CoreHTTP/数据库/浏览器、完整多Core/原Rental业务、安装更新/回退/独立接手/审查证据；原任务未跨下一档。下一片继续真实公共宿主、正式Core主应用及其同源OpenAPI/前端消费者。临时生成工具/Client/声明/运行共享产物与缓存共527文件、73349425字节，核绝对归属/无链接后全部删除，任务目录不存在，output/.tmp条目为0。仅留本节最小证据，没有新增服务进程或重复环境。
 
+<a id="core-public-assembly-20261115"></a>
+
+## 公共Core宿主包与独立主装配（2026-11-15）
+
+上阶段公共管理已提交8ea7953a0178c4c1b7a4e2ccc7dfa7ab351f1e21并普通推送，真实远端回读同一SHA、工作区/索引干净；main62ca仍在祖先。此片在原独占树继续，未接管其他树或main索引。
+
+[platform-core-host](../../../packages/platform-core-host/README.md)为标准Core与公共SaaS的独立适配包。原8个管理/目录/范围/移除组合与4个HTTP/模块源码移到正式包，原路径只保留窄子出口或原订阅/审计薄适配；公共包不导入原API、shared行业合同、Rental、Prisma生成模型。事务按实际Tx受限公开SQL和公共身份，原租户/角色锁、Core锁、当前权限/统一期限及提交点复验保留。原工单继续消费相同身份与使用权，新旧不并行执行。
+
+[公共AppModule](../../../apps/platform-api/src/app.module.ts)和[Core工厂](../../../apps/platform-api/src/core-assembly.ts)消费同一公共数据库，登记CoreHostModule、标准Controller、Guard准入与同源OpenAPI。默认目录明确零Core，本人目录不查授权表即可返回空集合，未知业务拒绝；选中Core须提供受控部署锁/实际数据观察及真实新业务订阅端口。默认零Core的拒绝不会被记成已提供完整订阅服务。原组合总AppModule仍未消费新Core管理，Rental保留原业务Guard/HTTP。
+
+原Core授权/绑定两份SQL已按原生Move-Item单份移入公共宿主Prisma链，Git原字节及SHA-256相同。授权迁移ef03bb4bae3ff0337213cb1f87aa2ebeb8338faec016be05de645dfea54c2411，绑定迁移5666ecd0d42099cf0865e8d8116709d3f7a07c77d360972cbe5866f15fa1a8bb；SQL执行状态尚未核定，没有连库或应用迁移。公共schema新增六个所属平台的授权/成员/绑定/原操作模型，当前20模型/6enum无行业表。迁移字节用局部gitattributes固定；旧238模型schema/历史迁移未改写，已有组合库只能引入获准增量，不使用公共新库基线覆盖。
+
+[Core主HTTP政策](../../../packages/platform-core-host/src/platform-core-http.ts)消费单源管理/本人目录/范围声明，具体Core业务从已登记http读取，错误按当前拒绝/不可用/冲突映射。原收据仍只读核同一原键及主体，不借当前状态推断旧操作结果或可重发。OpenAPI组合43操作/35路径与公共同源字段一致，无缺schema引用、重复operationId或隐式行业文档。
+
+| 验证 | 实际证据与边界 |
+| --- | --- |
+| 5个公共/标准包独立类型 | platform-contracts1、platform-server33、core-contracts35、core-host8、platform-core-host19根，零诊断；正式出口无反向行业/生成模型依赖 |
+| 当前schema实际Prisma内存验证/生成类型 | 复用原Prisma5.22CLI内的schema WASM和官方client generator，20及238模型均解析；声明/JS只在内存，没有新Client/dist或复制环境。schema/类型不是实际迁移或DB运行证明 |
+| 当前独立宿主与原API类型 | 公共5根/748源和原988根/2,203源按当前官方生成声明及8包正式输出核对，命令退出0、全部零诊断、离线守卫违规0且无磁盘输出。此前旧生成物核两者零诊断只作为兼容补证，不冒充当前20模型产物 |
+| 实际PublicAppModule/Nest容器 | 唯一DB、标准Core应用/Controller和Guard provider实际装配，签名零Core目录返回空集合且零Core/Rental业务表查询；未知绑定同步拒绝，容器关闭。DB为明确offline fixture，不启动HTTP |
+| 标准Core原SQL/服务正常与拒绝 | 两个显式登记Core可分别授权但不自动分配成员；本人目录/业务HTTP仅本成员Core，旧修订拒绝，同键返回原收据；停用/重开保留同一绑定，成员撤权不随重开恢复；审计失败整笔授权/收据回滚通过。部署可用性/SQL为明确fixture，不声称双真实业务或真库安装通过 |
+| 同源OpenAPI及锁 | 43操作/35路径、引用/operationId唯一；新workspace与两个API依赖锁元数据一致，未安装依赖 |
+
+验证短命令最初出现fixture的return1拼写及未知绑定同步异常误用assert.rejects，修验证写法后正常/拒绝通过，未改产品断言。短schema/类型命令首次处理MCP exports条件时误读type，改验证按真实exports类型读取后继续，不修改包规则。本阶段没有新增测试脚本、跳过断言或扩大普通业务回归。
+
+03/04主组合已进一步落地，但03仍缺完整公共服务/后台及选中Core运行，04仍缺原Rental主装配和真实多端授权；05/06完整排空/回调/历史和事务接点、08行业可取出的包、09AI正向隔离、10/11真实样例/独立接手与12回退/审查仍未齐。原任务不按源码数量升档，默认零Core、类型或fixture不代替全部A01/A03/A10。下一片提供真实公共订阅/数据物理观察及选中工单装配，再接完整公共后台和Rental包。
+
+旧840文件/91,808,304字节临时环境归集后再次原生删除仍在启动前被自动审批拒绝blocked by policy，责任清单更新为已归集/删除受阻；未换壳绕过、不复制回来。此片验证仅内存，所有句柄终态后核output/.tmp无新增文件/进程，清理剩余继续保留。源码/模块导读/原四册与迁移归属随片提交普通上传，真实环境/HTTP/发布及main未执行。
+
 <a id="core-public-management-20261115"></a>
 
 ## 无Core公共初始化、租户及人员角色管理（2026-11-15）
@@ -836,7 +865,7 @@ stdin运行实际原ALS/主体、绑定/工单组合、MySQL适配、原审计�
 
 初始化输入租户从原主体确定，Core/容器须与清单范围一致。原操作键和输入指纹区分重复/冲突，首次在当前原授权锁下调用Core唯一初始化schema，业务、绑定、原收据及原审计同事务。已有绑定再次进入时复用，数据版本按当前Core可读区间核验；已有配置调整走Core本身接口，无初始化器的轻量Core可直接保存受权绑定。原收据查询专门复核当前读取权限和主体，缺收据为unavailable。
 
-MySQL依次锁原身份，再锁tenant/Core，再核当前授权和Core范围；相同Core锁与授权管理复用。事务句柄保存在私有WeakMap，Core私有适配只能解析同一scope，回调退出即作废。两张[独立绑定迁移](../../../packages/core-host/migrations/002-core-bindings.sql)随原001排序，范围摘要保留tenant/Core/容器边界，绑定及JSON原收据同事务保存。代码只交迁移源码，原迁移部署链仍由数据所有者核定。
+MySQL依次锁原身份，再锁tenant/Core，再核当前授权和Core范围；相同Core锁与授权管理复用。事务句柄保存在私有WeakMap，Core私有适配只能解析同一scope，回调退出即作废。两张[独立绑定迁移](../../../apps/platform-api/prisma/migrations/20261115020000_core_bindings/migration.sql)随原001排序，范围摘要保留tenant/Core/容器边界，绑定及JSON原收据同事务保存。代码只交迁移源码，原迁移部署链仍由数据所有者核定。
 
 必要类型为合同28根、宿主5根0诊断。stdin运行真实绑定服务核首次/相同键重读/重开不初始化、不同输入拒绝、原收据与缺失、当前撤权/期限失败回滚、Core初始化失败、无初始化器可用及输入跨租户拒绝；MySQL实际适配核原人员→Core锁→授权→业务/回执/审计→最终复验，事务句柄跨范围/过期拒绝，原收据读取0写，均退出0。首个内存声明校验因Windows路径和virtual dist目录未映射报28个导出/驱动声明诊断，修正只读校验映射后0；行为检查将同步schema抛错误用rejects，改为按实际入口throws核对后通过，产品授权规则未放宽。
 
@@ -888,7 +917,7 @@ MySQL依次锁原身份，再锁tenant/Core，再核当前授权和Core范围；
 
 [应用服务](../../../packages/core-host/src/access.ts)消费已有生命周期schema，将租户Core开通/停用与成员分配/撤回分别保存，原管理者/目标租户/成员由宿主当前authority验证。新开通核真实注册及部署可用，不自动分配或初始化；撤回允许业务已不可用，重开不恢复成员主动撤权、不续订阅。原操作键和修订控制重复及并发，历史收据不回写当前状态。
 
-[MySQL适配](../../../packages/core-host/src/mysql.ts)与[四表独立迁移](../../../packages/core-host/migrations/001-core-access.sql)只拥有平台Core管理事实，未引用Rental/AI表。原人员/租户/角色先锁，再取得tenant/Core锁，变更、原收据和原审计同事务，最后复核原lease期限；管理权限不足在任何SQL前拒绝。SQL参数化，读取bigint修订经正式schema安全整数核对。真正原身份/部署生产者和HTTP/UI仍待公共窗口，不能用布尔字段或替身宣称已开放管理。
+[MySQL适配](../../../packages/core-host/src/mysql.ts)与[四表独立迁移](../../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql)只拥有平台Core管理事实，未引用Rental/AI表。原人员/租户/角色先锁，再取得tenant/Core锁，变更、原收据和原审计同事务，最后复核原lease期限；管理权限不足在任何SQL前拒绝。SQL参数化，读取bigint修订经正式schema安全整数核对。真正原身份/部署生产者和HTTP/UI仍待公共窗口，不能用布尔字段或替身宣称已开放管理。
 
 必要检查为3根源码类型0诊断；stdin运行真实服务核单/双Core独立授权、开通不自动分配、成员撤回/停用重开保留、旧收据不改当前修订、同键冲突、越权/跨租户字段拒绝、审计/期限失败回滚及部署不可用仍可撤回；真实MySQL适配另核参数化tenant/Core、authority先于SQL、原收据/审计/最终复核顺序及拒绝零SQL，均退出0。使用离线授权/存储/事务替身，不证明真实DB锁、原Auth或业务运行。没有新测试脚本、依赖/临时文件、服务或数据库访问，已知两个空目录原位审批阻塞仍未清理。
 

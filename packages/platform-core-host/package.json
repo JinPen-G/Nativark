@@ -1,0 +1,152 @@
+{
+  "name": "@rental-os/platform-core-host",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "公共SaaS身份与标准Core管理的受控宿主适配",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./access": {
+      "types": "./dist/platform-core-access.d.ts",
+      "default": "./dist/platform-core-access.js"
+    },
+    "./core-management.controller": {
+      "types": "./dist/core-management.controller.d.ts",
+      "default": "./dist/core-management.controller.js"
+    },
+    "./core-session.controller": {
+      "types": "./dist/core-session.controller.d.ts",
+      "default": "./dist/core-session.controller.js"
+    },
+    "./core-scope.controller": {
+      "types": "./dist/core-scope.controller.d.ts",
+      "default": "./dist/core-scope.controller.js"
+    },
+    "./core-host.module": {
+      "types": "./dist/core-host.module.d.ts",
+      "default": "./dist/core-host.module.js"
+    },
+    "./platform-core-access": {
+      "types": "./dist/platform-core-access.d.ts",
+      "default": "./dist/platform-core-access.js"
+    },
+    "./platform-core-application": {
+      "types": "./dist/platform-core-application.d.ts",
+      "default": "./dist/platform-core-application.js"
+    },
+    "./platform-core-bindings": {
+      "types": "./dist/platform-core-bindings.d.ts",
+      "default": "./dist/platform-core-bindings.js"
+    },
+    "./platform-core-catalogue": {
+      "types": "./dist/platform-core-catalogue.d.ts",
+      "default": "./dist/platform-core-catalogue.js"
+    },
+    "./platform-core-http-access": {
+      "types": "./dist/platform-core-http-access.d.ts",
+      "default": "./dist/platform-core-http-access.js"
+    },
+    "./platform-core-http": {
+      "types": "./dist/platform-core-http.d.ts",
+      "default": "./dist/platform-core-http.js"
+    },
+    "./platform-core-management-reads": {
+      "types": "./dist/platform-core-management-reads.d.ts",
+      "default": "./dist/platform-core-management-reads.js"
+    },
+    "./platform-core-management": {
+      "types": "./dist/platform-core-management.d.ts",
+      "default": "./dist/platform-core-management.js"
+    },
+    "./platform-core-removal": {
+      "types": "./dist/platform-core-removal.d.ts",
+      "default": "./dist/platform-core-removal.js"
+    },
+    "./platform-core-scope": {
+      "types": "./dist/platform-core-scope.d.ts",
+      "default": "./dist/platform-core-scope.js"
+    },
+    "./platform-core-session": {
+      "types": "./dist/platform-core-session.d.ts",
+      "default": "./dist/platform-core-session.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "access": [
+        "dist/platform-core-access.d.ts"
+      ],
+      "core-management.controller": [
+        "dist/core-management.controller.d.ts"
+      ],
+      "core-session.controller": [
+        "dist/core-session.controller.d.ts"
+      ],
+      "core-scope.controller": [
+        "dist/core-scope.controller.d.ts"
+      ],
+      "core-host.module": [
+        "dist/core-host.module.d.ts"
+      ],
+      "platform-core-access": [
+        "dist/platform-core-access.d.ts"
+      ],
+      "platform-core-application": [
+        "dist/platform-core-application.d.ts"
+      ],
+      "platform-core-bindings": [
+        "dist/platform-core-bindings.d.ts"
+      ],
+      "platform-core-catalogue": [
+        "dist/platform-core-catalogue.d.ts"
+      ],
+      "platform-core-http-access": [
+        "dist/platform-core-http-access.d.ts"
+      ],
+      "platform-core-http": [
+        "dist/platform-core-http.d.ts"
+      ],
+      "platform-core-management-reads": [
+        "dist/platform-core-management-reads.d.ts"
+      ],
+      "platform-core-management": [
+        "dist/platform-core-management.d.ts"
+      ],
+      "platform-core-removal": [
+        "dist/platform-core-removal.d.ts"
+      ],
+      "platform-core-scope": [
+        "dist/platform-core-scope.d.ts"
+      ],
+      "platform-core-session": [
+        "dist/platform-core-session.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "prebuild": "npm run build -w @rental-os/platform-server && npm run build -w @rental-os/core-host",
+    "build": "tsc -p tsconfig.json",
+    "prelint": "npm run build -w @rental-os/platform-server && npm run build -w @rental-os/core-host",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rental-os/platform-server": "0.1.0",
+    "@rental-os/platform-contracts": "0.1.0",
+    "@rental-os/core-contracts": "0.1.0",
+    "@rental-os/core-host": "0.1.0",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/core": "^10.4.15",
+    "zod": "3.25.76"
+  },
+  "peerDependencies": {
+    "@prisma/client": "^5.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  }
+}

@@ -1,14 +1,11 @@
-/** 原身份/审计/存储与单一部署目录的公共Core应用组合；行业HTTP、AI及作业由选中Core另行装配。 */
+/** 原组合继续提供唯一数据库、原订阅和审计；公共Core组合由独立包单源维护。 */
 import type { CoreDeployedCatalogue, CorePlatformRemovalSource } from "@rental-os/core-host";
+import type { Prisma } from "@prisma/client";
 import type { CoreHostHttpApplication } from "./core-host.module";
-import { composeOriginalCoreManagement } from "./original-core-management";
-import { composeOriginalCoreBindings } from "./original-core-bindings";
-import { composeOriginalCoreManagementReads } from "./original-core-management-reads";
-import { createOriginalCoreCatalogueReader } from "./original-core-catalogue";
-import { composeOriginalCoreSessionReader } from "./original-core-session";
-import { composeOriginalCoreScopeReader } from "./original-core-scope";
-import { composeOriginalCoreHttpAccess } from "./original-core-http-access";
-import { composeOriginalCoreRemovalReader } from "./original-core-removal";
+import { composePlatformCoreApplication } from "@rental-os/platform-core-host";
+import { originalCoreTermPolicy } from "./original-core-term";
+import type { composeOriginalCoreBindings } from "./original-core-bindings";
+import type { composeOriginalCoreManagement } from "./original-core-management";
 
 type BindingsInput = Parameters<typeof composeOriginalCoreBindings>[0];
 export type OriginalCoreApplicationInput = Pick<BindingsInput, "database" | "users" | "subscription" | "authorizeContainer"> & {
@@ -17,22 +14,8 @@ export type OriginalCoreApplicationInput = Pick<BindingsInput, "database" | "use
   platformRemoval?: CorePlatformRemovalSource;
 };
 
-/** 组合期间只创建适配实例，不读环境、连接数据库、启动作业或初始化租户/Core。 */
+
+/** 组合只创建适配，不读数据库、初始化Core或执行作业。 */
 export function composeOriginalCoreApplication(input: OriginalCoreApplicationInput): CoreHostHttpApplication {
-  const shared = { database: input.database, users: input.users, audit: input.audit,
-    subscription: input.subscription, deployment: input.catalogue.availability };
-  return {
-    management: {
-      management: composeOriginalCoreManagement(shared),
-      bindings: composeOriginalCoreBindings({ ...shared, registrations: input.catalogue.registrations,
-        ...(input.authorizeContainer ? { authorizeContainer: input.authorizeContainer } : {}) }),
-      registered: createOriginalCoreCatalogueReader(input),
-      ...(input.platformRemoval ? { removal: composeOriginalCoreRemovalReader({ ...input, platform: input.platformRemoval }) } : {}),
-      reads: composeOriginalCoreManagementReads(shared)
-    },
-    session: composeOriginalCoreSessionReader(input),
-    scope: composeOriginalCoreScopeReader({ ...shared, catalogue: input.catalogue }),
-    http: input.catalogue.http,
-    authorizeHttp: composeOriginalCoreHttpAccess(input)
-  };
+  return composePlatformCoreApplication<Prisma.TransactionClient>({ ...input, term: originalCoreTermPolicy(input.subscription) });
 }

@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已明确授权本对话全权负责独占工作树及PCH拆分需要的公共文件，原唯一作者窗口阻塞已解除，持续完成PCH-01～12。最新main62ca已纳入；[独立公共宿主阶段](平台Core接入-开发记录.md#core-public-host-packages-20261115)提供公共合同/服务包、只含公共表的schema与构建、实际认证/外观模块及精确Guard，原Rental兼容出口继续消费同一实现。[公共初始化与管理](平台Core接入-开发记录.md#core-public-management-20261115)已接真实公共服务/同源HTTP，下一入口为剩余适用公共服务及Core主装配，接同一身份和真实数据观察；完整无Core运行/后台、多Core及Rental全功能验收仍未完成。
+> 状态：负责人已明确授权本对话全权负责独占工作树及PCH拆分需要的公共文件，原唯一作者窗口阻塞已解除，持续完成PCH-01～12。最新main62ca已纳入；[独立公共宿主阶段](平台Core接入-开发记录.md#core-public-host-packages-20261115)提供公共合同/服务包、只含公共表的schema与构建、实际认证/外观模块及精确Guard，原Rental兼容出口继续消费同一实现。[公共初始化与管理](平台Core接入-开发记录.md#core-public-management-20261115)和[标准Core主接点](平台Core接入-开发记录.md#core-public-assembly-20261115)已接独立AppModule/Guard/同源HTTP，下一入口为实际订阅/物理数据观察、所选工单装配与完整后台；完整无Core运行/后台、多Core及Rental全功能验收仍未完成。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
@@ -37,7 +37,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
 - 原简称检查点982043aba913745c6d0e258b2d74ca1efb9a98d4已包含在本树，原省略/null/空字符串、审计和租户投影保留。[原公共基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115)与[后台简称记录](../../管理后台/管理后台-开发记录.md#operator-short-name-foundation-20261114)分别定位既有差异及剩余实页/真库验收。
 - 当前Core合同、宿主授权/绑定和工单样例分别在packages/core-contracts、packages/core-host、packages/example-tickets-core；原API适配在apps/api/src/modules/core-host，后台正式页面出口在apps/admin/src/core。独立迁移尚未进入实际部署，主应用/Guard/路由仍需消费。
 - [公共认证片](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)已将公共声明、账号/会话/原角色映射和签名/刷新抽为单源，原Rental兼容路径及外观旧品牌显式适配保持。其他专项正式需求、原任务及未验事项仍归原册；真实业务环境、安装/迁移、合main或发布不因源码写权自动开放。
-- [独立公共包及宿主](../../../apps/platform-api/README.md)消费platform-contracts/platform-server正式出口，原19路径只做窄转接；原组合schema/迁移保持，公共新库基线独立。构建/实际Nest容器与离线平台表行为已核，公共初始化/租户与人员角色管理已接线，真实HTTP/持久化、完整后台与剩余订阅/集成尚未验；Core管理适配仍需摆脱原行业API类型并进入正式主组合。
+- [独立公共包及宿主](../../../apps/platform-api/README.md)消费platform-contracts/platform-server正式出口，原19路径只做窄转接；原组合schema/迁移保持，公共新库基线独立。构建/实际Nest容器与离线平台表行为已核，公共初始化/租户与人员角色管理已接线，真实HTTP/持久化、完整后台与剩余订阅/集成尚未验；Core管理适配已进入独立公共主组合，当前20模型/两份Core管理SQL归公共宿主；所选Core实际运行/原Rental总装配尚未交付。
 - 原接续全文保存在固定d170a5fa8db1cb56d166fb05246790c0ead29539同路径。本册继续承接全部未完项和证据链接，历史前像与品牌原稿在Git，不重复复制。
 
 ## 3. 下一入口与待交付
@@ -47,7 +47,7 @@ Core各自定义业务分区，Rental经营空间/品类/地点留在Rental内�
    [原账/工单物理观察](平台Core接入-开发记录.md#core-mysql-data-observation-20261115)已提供正式mysql-deployment子出口及readTicketsPhysicalData。原迁移checksum/顺序与实际3表关键结构共同由目录/升级预检消费，坏Core证据不关闭无关Core；下一步公共平台数据所有者提供自身完整结构检查及已核定原迁移名称映射，受控主组合消费同一Source。真实数据库/原schema拆分仍未验，不从包清单推导就绪。
    [工单原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115)已使清单、server和原业务组合共用可读范围，保留原绑定/初始化版；普通准入仍核当前物理库及完整迁移。三包类型及原工厂/ALS/授权/迁移/收据离线链通过，实际升级与真实数据库未验，当前API类型证据见下条。
    [更新范围兼容](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)已使普通单Core预检拒绝租户/容器转换及容器类型改名，返回scope_changed，避免候选切换后原绑定失效。同范围修复、前进迁移与底座更新保持原规则；改变范围仍须专门迁移，实际更新/部署未验。
-3. 公共身份/认证、窄存储端口及无Core API构建已由[公共包阶段](平台Core接入-开发记录.md#core-public-host-packages-20261115)交付。[公共管理片](平台Core接入-开发记录.md#core-public-management-20261115)已有无业务表初始化/租户与人员角色、本人资料及当前身份围栏。下一片抽原Core管理的窄数据/订阅/审计接点，分别接公共Guard/主模块/同源OpenAPI和原Rental组合。原有效会话的wid必须作为签名证据复核，不在公共业务workspace中恢复权限；真实订阅/物理迁移观察不能用清单补成功。精确原候选见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)，[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)供主组合消费。旧API身份与Rental映射继续按自身合同，本树由本对话负责。
+3. 公共身份/认证、窄存储端口及无Core API构建已由[公共包阶段](平台Core接入-开发记录.md#core-public-host-packages-20261115)交付。[公共管理片](平台Core接入-开发记录.md#core-public-management-20261115)已有无业务表初始化/租户与人员角色、本人资料及当前身份围栏。公共Core包已抽有限事务/订阅/审计接点并进独立Guard/主模块/同源OpenAPI，原组合保留薄适配。下一片提供实际订阅/物理数据观察及选中工单业务装配，原Rental总AppModule/Guard与后台另接。原有效会话的wid必须作为签名证据复核，不在公共业务workspace中恢复权限；真实订阅/物理迁移观察不能用清单补成功。精确原候选见[公共候选表](平台Core接入-开发记录.md#core-ownership-baseline-20261114)，[原身份管理](平台Core接入-开发记录.md#core-original-management-20261115)、[部署目录](平台Core接入-开发记录.md#core-deployed-catalogue-20261115)和[管理HTTP/接口资料](平台Core接入-开发记录.md#core-management-http-20261115)供主组合消费。旧API身份与Rental映射继续按自身合同，本树由本对话负责。
    当前服务端公共窗口的精确文件/方法及原反向依赖见[实际主入口核对](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)。先抽平台公共投影/身份及正式合同并保留Rental兼容，再接原Guard/主装配；Auth/PlatformRepository/Service、shared出口、AppModule/OpenAPI已获负责人本次明确授权，不继续用独占接口数量代替独立宿主。
    [当前基线/窗口核定](平台Core接入-开发记录.md#core-public-window-baseline-20261115)确认原主装配仍未消费Core接点，5处公共差异来自已获准简称检查点，后续须从当前含该成果的基线施工。主树服务端候选暂时无WIP，但它和PM已结束的turn均不是新增写权；本树下一PCH主实现继续独立公共宿主和Core主装配；main后台壳活动WIP继续归其作者。
    [原身份SQL模板](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115)已移除模板所需的顶层生成Client运行依赖，15条实际ALS/SQL新旧等价路径通过；原身份仓储及行业投影仍待上述公共窗口。[当前API类型](平台Core接入-开发记录.md#core-api-types-current-schema-20261115)已使用本树实际离线生成Client声明核978根/2,176源零诊断并清理产物；主Guard接线和真实无Core登录未验，不把类型/模板解耦视为主应用拆分完成。

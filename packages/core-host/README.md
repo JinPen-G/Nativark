@@ -51,7 +51,7 @@ MySQL实现从`@rental-os/core-host/mysql`导入`createMysqlCoreManagement(clien
 
 执行顺序是原人员/租户授权锁 → 本tenant/Core锁行 → 检查原操作/当前修订 → 授权或成员事实 → 原收据及审计 → 同一lease期限复核 → 提交。所有SQL参数化并带tenant/Core复合条件。不同Core不共用授权记录，旧原操作返回不覆盖后续停用或撤权。当前实现没有热部署/网络下载/业务初始化或跨库事务。
 
-[迁移](migrations/001-core-access.sql)只创建平台授权/成员/原操作/锁四表，不引用Rental。它尚未加入旧组合部署链或应用到数据库，进入真实宿主时须固定平台数据版本及迁移账；既有组合只做获准的增量迁移，不重放原历史SQL。租户/账号事实继续由原平台维护，本包不复制用户表或建立另一套登录。
+[迁移](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql)只创建平台授权/成员/原操作/锁四表，不引用Rental。原迁移源码已单份移入公共宿主的Prisma迁移链，原字节保留。它尚未应用到数据库，进入真实宿主时须固定平台数据版本及迁移账；既有组合只做获准的增量迁移，不重放原历史SQL。租户/账号事实继续由原平台维护，本包不复制用户表或建立另一套登录。
 
 ## 首次绑定与原结果
 
@@ -63,7 +63,7 @@ MySQL实现从`@rental-os/core-host/mysql`导入`createMysqlCoreManagement(clien
 
 MySQL私有入口 `@rental-os/core-host/mysql-bindings` 导出 `createMysqlCoreBindings(client, authority)`，提供执行器和仅供Core仓储适配使用的事务句柄解析。`authority.lockPrincipal`先锁原身份/成员/会话/角色，返回在tenant/Core锁下复核当前授权和范围的方法。回调中的初始化器可由宿主私有适配将句柄解析为本Core的受限仓储，scope和回调寿命都核验，结束后句柄失效。`authority.audit`将原审计加入相同事务，提交前lease再核同一会话/期限。[MySQL绑定适配](src/mysql-bindings.ts)
 
-迁移按 [001授权锁与事实](migrations/001-core-access.sql) → [002绑定与原操作](migrations/002-core-bindings.sql) 登记，两条独立平台迁移只提供源码。范围键含Core/租户/容器类型与ID，原绑定和收据保存后持续保留。原收据读取只锁已存在的Core锁行并读事实，实际适配验证为零写入。
+迁移按 [001授权锁与事实](../../apps/platform-api/prisma/migrations/20261115010000_core_access/migration.sql) → [002绑定与原操作](../../apps/platform-api/prisma/migrations/20261115020000_core_bindings/migration.sql) 登记，两条独立平台迁移由公共宿主单源维护，当前只提供源码。范围键含Core/租户/容器类型与ID，原绑定和收据保存后持续保留。原收据读取只锁已存在的Core锁行并读事实，实际适配验证为零写入。
 
 ## 移除代码前读取依赖
 

@@ -113,7 +113,7 @@ export function createPlatformOpenApi() {
 export const PLATFORM_OPENAPI_DOCUMENT = Symbol("platform.openapi.document");
 @Controller()
 export class PlatformOpenApiController {
-  constructor(@Inject(PLATFORM_OPENAPI_DOCUMENT) private readonly document: ReturnType<typeof createPlatformOpenApi>) {}
+  constructor(@Inject(PLATFORM_OPENAPI_DOCUMENT) private readonly document: unknown) {}
   @Get("openapi.json")
   documentJson() { return this.document; }
 }

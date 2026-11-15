@@ -315,3 +315,74 @@ model FilterPreset {
   @@index([tenantId, scopeKey, updatedAt])
 
 }
+
+// 平台Core授权/绑定事实单属平台，业务表由所选Core迁移；检查约束在同版本SQL迁移中。
+model PlatformCoreAccessLock {
+  tenantId String @map("tenant_id") @db.VarChar(200)
+  coreId   String @map("core_id") @db.VarChar(64)
+  @@id([tenantId, coreId])
+  @@map("platform_core_access_locks")
+}
+
+model PlatformTenantCoreGrant {
+  tenantId    String @map("tenant_id") @db.VarChar(200)
+  coreId      String @map("core_id") @db.VarChar(64)
+  state       String @db.VarChar(16)
+  revision    BigInt @db.UnsignedBigInt
+  operationId String @map("operation_id") @db.VarChar(200)
+  @@id([tenantId, coreId])
+  @@map("platform_tenant_core_grants")
+}
+
+model PlatformMemberCoreAssignment {
+  tenantId    String @map("tenant_id") @db.VarChar(200)
+  coreId      String @map("core_id") @db.VarChar(64)
+  userId      String @map("user_id") @db.VarChar(200)
+  state       String @db.VarChar(16)
+  revision    BigInt @db.UnsignedBigInt
+  operationId String @map("operation_id") @db.VarChar(200)
+  @@id([tenantId, coreId, userId])
+  @@index([tenantId, userId], map: "platform_member_core_lookup")
+  @@map("platform_member_core_assignments")
+}
+
+model PlatformCoreManagementOperation {
+  tenantId      String @map("tenant_id") @db.VarChar(200)
+  coreId        String @map("core_id") @db.VarChar(64)
+  operationId   String @map("operation_id") @db.VarChar(200)
+  kind          String @db.VarChar(32)
+  actorTenantId String @map("actor_tenant_id") @db.VarChar(200)
+  actorId       String @map("actor_id") @db.VarChar(200)
+  fingerprint   String @db.Char(64)
+  result        Json
+  @@id([tenantId, coreId, operationId])
+  @@map("platform_core_management_operations")
+}
+
+model PlatformCoreBinding {
+  tenantId      String @map("tenant_id") @db.VarChar(200)
+  coreId        String @map("core_id") @db.VarChar(64)
+  scopeHash     String @map("scope_hash") @db.Char(64)
+  containerType String? @map("container_type") @db.VarChar(200)
+  containerId   String? @map("container_id") @db.VarChar(200)
+  bindingId     String @map("binding_id") @db.VarChar(200)
+  revision      BigInt @db.UnsignedBigInt
+  dataVersion   String @map("data_version") @db.VarChar(80)
+  @@id([tenantId, coreId, scopeHash])
+  @@unique([tenantId, coreId, bindingId], map: "platform_core_binding_identity")
+  @@map("platform_core_bindings")
+}
+
+model PlatformCoreBindingOperation {
+  tenantId      String @map("tenant_id") @db.VarChar(200)
+  coreId        String @map("core_id") @db.VarChar(64)
+  scopeHash     String @map("scope_hash") @db.Char(64)
+  operationId   String @map("operation_id") @db.VarChar(200)
+  actorTenantId String @map("actor_tenant_id") @db.VarChar(200)
+  actorId       String @map("actor_id") @db.VarChar(200)
+  fingerprint   String @db.Char(64)
+  operation     Json
+  binding       Json
+  @@id([tenantId, coreId, scopeHash, operationId])
+  @@map("platform_core_binding_operations")
+}
