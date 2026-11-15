@@ -2,7 +2,7 @@
 
 更新时间：2026-11-15。
 
-> 状态：负责人已授权持续完成PCH-01～12。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，当前工单包命令已在固定 `5deaf63d80eb0fc294af8014efffaf637b6570fe` [实际复验](平台Core接入-开发记录.md#core-package-current-cli-20261115)；[公共服务端入口](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)已核，主公共接线与实际无Core/多Core运行仍待唯一作者窗口。
+> 状态：负责人已授权持续完成PCH-01～12，当前主拆分受阻于公共服务端唯一作者窗口，尚未完成。01/02原G1及04/07当前G1的证据见[首次复核](平台Core接入-开发记录.md#pch-first-gate-20261115)和[身份/页面复核](平台Core接入-开发记录.md#pch-identity-page-gate-20261115)，后续门槛尚未跨档。最新main62ca已纳入并上传，当前工单包命令已在固定 `5deaf63d80eb0fc294af8014efffaf637b6570fe` [实际复验](平台Core接入-开发记录.md#core-package-current-cli-20261115)。恢复入口是核定[公共服务端文件/方法](平台Core接入-开发记录.md#core-package-cli-public-entry-20261115)的写入归属，再从含既有简称成果的[当前基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115)接续公共身份、租户投影及主装配。
 
 开源主体为公共底座，Rental Core 是首个业务 Core 示范。现有 Nativark README/MIT 与品牌原稿已在 main，负责人已另开命名对话继续选择名称；本片沿现有技术包 scope，不因命名讨论改运行标识。品牌固定来源见[许可记录](平台Core接入-开发记录.md#nativark-mit-20261114)与[main合并](平台Core接入-开发记录.md#pch-frozen-main-20261114)。
 
