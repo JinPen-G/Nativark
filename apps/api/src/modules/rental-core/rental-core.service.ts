@@ -153,6 +153,7 @@ import { requestFingerprint } from "./rental-idempotency.repository";
 import type { ApprovedSettingsNotifications, NotificationSettingsPreview, VersionedBusinessSettings } from "./approved-settings-change.ports";
 import { settingsNotificationsSchema } from "./approved-settings-change.validation";
 import { RentalCategoryResolver } from "./rental-category-resolver.service";
+import { validateCategoryItemGroupAttributes } from "@rental-os/rental-core/item-group-validation";
 import { normalizedRentalAttributeValue, validateRentalCategoryAttributes, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 import {
   RentalCoreFactRepository,
@@ -1552,18 +1553,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (input.inventoryMode === RentalInventoryMode.Bundle) this.validateBundleComponentRules(components);
     if (input.inventoryMode !== RentalInventoryMode.Bundle) {
       this.validateAttributes(definition.businessModel.assetFields, "item_group", reconciledAttributes.active);
-      if (state.profile.categoryCode === RentalCategoryCode.Camping) {
-        const capacity = reconciledAttributes.active.capacity;
-        if (capacity !== undefined && capacity !== null && capacity !== "" && (!Number.isFinite(Number(capacity)) || Number(capacity) <= 0)) throw new BadRequestException("露营装备容量必须大于0升");
-      }
-      if (state.profile.categoryCode === RentalCategoryCode.Construction) {
-        const ratedLoad = reconciledAttributes.active.ratedLoad;
-        const ratedLoadUnit = reconciledAttributes.active.ratedLoadUnit;
-        if ((ratedLoad === undefined || ratedLoad === null || ratedLoad === "") !== (ratedLoadUnit === undefined || ratedLoadUnit === null || ratedLoadUnit === "")) {
-          throw new BadRequestException("填写额定载荷时必须同时选择 kg 或 t 单位");
-        }
-        if (ratedLoad !== undefined && ratedLoad !== null && Number(ratedLoad) <= 0) throw new BadRequestException("额定载荷必须大于0");
-      }
+      validateCategoryItemGroupAttributes(state.profile.categoryCode, reconciledAttributes.active);
       this.assertUniqueAttributes(
         definition.businessModel.assetFields,
         "item_group",

@@ -110,7 +110,7 @@ void (async () => {
   assert.equal((await resolver.forVersion("camera", "published-v1")).code, "camera", "历史业务可读取原发布版本");
   currentVersionId = "published-v2";
   assert.deepEqual((await capabilityRepository.workspaceScope("tenant", "space")).requiredCodes, ["camera_compatibility"], "能力范围必须随发布版本绑定变化");
-  const core = Object.create(RentalCoreService.prototype);
+  const core = new RentalCoreService({}, {});
   const revised = clone(baseline);
   revised.terminology.pickupLabel = "新版交付";
   revised.businessModel.defaults.inspectionFields = [{ code: "new_check", label: "新版检查", type: "boolean", required: true }];
@@ -153,9 +153,11 @@ void (async () => {
       pricingGroups: baselineState.pricingGroups, couponTemplates: baselineState.couponTemplates,
       inspectionTemplates: baselineState.inspectionTemplates, hasPersistedConfig: true });
   } };
+  const originalInspectionTemplates = clone(baselineState.inspectionTemplates);
   assert.ok((await core.listInspectionTemplates("tenant", "pickup"))[0].fields.some((field) => field.code === "version2_optional_check"), "当前模板补齐项应读取绑定版本而非静态四品类默认值");
   const oldOrderTemplates = await core.listInspectionTemplates("tenant", "pickup", {
-    tenantId: "tenant", categoryCode: "camera", categoryVersionId: "published-v1"
+    tenantId: "tenant", categoryCode: "camera", categoryVersionId: "published-v1",
+    inspectionTemplateSnapshots: originalInspectionTemplates
   });
   assert.equal(oldOrderTemplates[0].fields.some((field) => field.code === "version2_optional_check"), false, "旧单不能被新版默认检查项追改");
   const frozenOrder = {

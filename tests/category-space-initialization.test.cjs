@@ -26,6 +26,10 @@ function repositoryFixture() {
   const versions = new Map(["v1", "v2"].map((id, index) => [id, { id, categoryCode: "stage_tools", status: "published", structureVersion: 1, definition: definition(`${index + 1}.0`) }]));
   const tx = {
     $queryRaw: async query => {
+      if (query.sql.includes("FROM tenant_rental_profiles")) {
+        assert.deepEqual(query.values, [profile.tenantId]);
+        return [{ ...structuredClone(profile), configurationRevision: 1 }];
+      }
       if (query.sql.includes("rental_category_version_policies")) { trace.push("policy"); return [{ createScope: scope, createTenantIds: ["another-tenant"] }]; }
       if (query.sql.includes("rental_category_definitions")) { trace.push("category-lock"); return [{ openingScope: "all", openingTenantIds: [] }]; }
       throw new Error("Unexpected initialization query");
@@ -85,6 +89,10 @@ test("Core uses the selected body and keeps initialization cache private until i
   const config = stores.createAbsorbingConfigStore(), core = new RentalCoreService(config, stores.createAbsorbingFactStore());
   const trace = [], tx = {};
   const selected = definition();
+  config.readDefaultWorkspaceInitialization = async (tenantId, code, client) => {
+    assert.equal(tenantId, "new-tenant"); assert.equal(code, "stage_tools"); assert.equal(client, tx);
+    return undefined; // This fixture's explicit tenant has no persisted default yet.
+  };
   config.upsertProfile = async (value, client, options) => { trace.push([value, client, options]); };
   core.categoryResolver = { forVersion: async (code, version, client) => { assert.equal(code, "stage_tools"); assert.equal(version, "v1"); assert.equal(client, tx); return selected; },
     forNewWorkspace: async () => { throw new Error("Explicit selection cannot read recommendation"); } };

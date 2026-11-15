@@ -8,7 +8,9 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 持久事实经[业务事实仓储](rental-business-fact.repository.ts)、[状态仓储](rental-state.repository.ts)和[原幂等](rental-idempotency.repository.ts)读写。报价、价格、规则、检查和履约依据从原关联快照读取，修订与幂等键保护并发/重复操作，结果未知通过原操作核对。主事务和外部支付/通知执行点分别由原领域实现持有。
 
-品类解析经[RentalCategoryResolver](rental-category-resolver.service.ts)、[能力Hook](capability-hook.runtime.ts)和[空间能力](workspace-capability.service.ts)。品类内部扩展与注册新的CRM/工单Core各有独立合同；原未完动态采用和业务闭环按其四册继续验收。[Rental当前入口](../../../../../docs/Rental%20Core/Rental%20Core-协作接续.md) · [品类治理](../../../../../docs/Rental%20Core/品类治理/品类治理-协作接续.md)
+品类解析和身份解释由 Rental 包持有，原 Nest provider 提供当前绑定、版本和租户ID的窄读取方法。历史动作沿原版本引用，提交点继续传入原事务。空间实例和采用业务仍沿原服务逐片迁移，品类治理和租赁业务按原四册验收。[品类 provider](rental-category-resolver.service.ts) · [能力Hook](capability-hook.runtime.ts) · [空间能力](workspace-capability.service.ts) · [Rental当前入口](../../../../../docs/Rental%20Core/Rental%20Core-协作接续.md) · [品类治理](../../../../../docs/Rental%20Core/品类治理/品类治理-协作接续.md)
+
+商品保存流程调用 Rental 包登记的专业属性校验，露营容量与工程载荷限制沿原规则执行。通用流程只传当前品类及已校验属性，专业规则从本模块的正式出口维护。[专业商品属性](../../../../../packages/rental-core/src/item-group-validation.ts)
 
 能力执行器消费当前空间实例 reader 和审计 writer，原 provider 将原 `WorkspaceCapabilityService`、审计仓储及调用方 Prisma 事务交给 Rental 实现。启动登记器调用 `/capabilities` 的唯一组合，保留当前及历史实现。放行审计随业务事务提交，报价阻止后的拒绝留痕沿原业务调用者执行。[执行器 provider](capability-hook.runtime.ts) · [审计 provider](capability-hook.repository.ts) · [登记器](capability-hook.registrar.ts)
 

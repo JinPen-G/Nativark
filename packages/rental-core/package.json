@@ -23,6 +23,10 @@
       "types": "./dist/equipment.d.ts",
       "default": "./dist/equipment.js"
     },
+    "./item-group-validation": {
+      "types": "./dist/item-group-validation.d.ts",
+      "default": "./dist/item-group-validation.js"
+    },
     "./category-governance": {
       "types": "./dist/category-governance.d.ts",
       "default": "./dist/category-governance.js"
@@ -38,6 +42,18 @@
     "./capability-audit": {
       "types": "./dist/capability-audit.d.ts",
       "default": "./dist/capability-audit.js"
+    },
+    "./category-runtime": {
+      "types": "./dist/category-runtime.d.ts",
+      "default": "./dist/category-runtime.js"
+    },
+    "./category-identity": {
+      "types": "./dist/category-identity.d.ts",
+      "default": "./dist/category-identity.js"
+    },
+    "./extensions": {
+      "types": "./dist/rental-extension-registry.d.ts",
+      "default": "./dist/rental-extension-registry.js"
     },
     "./capabilities": {
       "types": "./dist/capabilities/index.d.ts",
@@ -75,6 +91,9 @@
       "equipment": [
         "dist/equipment.d.ts"
       ],
+      "item-group-validation": [
+        "dist/item-group-validation.d.ts"
+      ],
       "category-governance": [
         "dist/category-governance.d.ts"
       ],
@@ -86,6 +105,15 @@
       ],
       "capability-audit": [
         "dist/capability-audit.d.ts"
+      ],
+      "category-runtime": [
+        "dist/category-runtime.d.ts"
+      ],
+      "category-identity": [
+        "dist/category-identity.d.ts"
+      ],
+      "extensions": [
+        "dist/rental-extension-registry.d.ts"
       ],
       "capabilities": [
         "dist/capabilities/index.d.ts"
