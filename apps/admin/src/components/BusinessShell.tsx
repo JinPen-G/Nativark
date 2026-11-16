@@ -36,6 +36,8 @@ export interface BusinessShellProps {
   headerActions?: ReactNode;
   headerUtilities?: ReactNode;
   headerTime?: ReactNode;
+  /** Independent panel toggle stays at the trailing edge after page actions. */
+  headerPanelControl?: ReactNode;
   headerClassName?: string;
   contentClassName?: string;
   /** Wrap the complete header/content column, so sibling panels retain their own edges. */
@@ -67,7 +69,7 @@ export function BusinessShell(props: BusinessShellProps) {
 }
 
 function BusinessShellContents({ fullWidth, identity, brand, account, selectedKey, navigation: renderNavigation, sidebarExtra,
-  headerContext, headerTitleTarget = true, headerActions, headerUtilities, headerTime, headerClassName, contentClassName, wrapContent, overlay, children }: BusinessShellProps) {
+  headerContext, headerTitleTarget = true, headerActions, headerUtilities, headerTime, headerPanelControl, headerClassName, contentClassName, wrapContent, overlay, children }: BusinessShellProps) {
   const { state, isMobile, openMobile, setOpenMobile } = useSidebar();
   const { pathname } = useLocation(), { t } = useLocale(), headerSlots = useWorkspaceHeader()!;
   const [query, setQuery] = useState("");
@@ -94,7 +96,7 @@ function BusinessShellContents({ fullWidth, identity, brand, account, selectedKe
     "aria-controls": "app-sidebar-navigation", "aria-keyshortcuts": "Control+B Meta+B",
     title: `${navigationLabel} (Ctrl / ⌘ B)`, "data-sound": "press" };
   // The fixed enterprise consumer supplied its clock through the old action slot.
-  // Keep that public call compatible while moving the clock to the shared second row.
+  // Keep that public call compatible while placing time before the utility controls.
   const oldActions = Children.toArray(headerActions);
   const isClock = (node: ReactNode) => isValidElement(node) && node.type === WorkspaceClock;
   const actions = oldActions.filter(node => !isClock(node));
@@ -106,11 +108,14 @@ function BusinessShellContents({ fullWidth, identity, brand, account, selectedKe
         <RightOutlined size={13} className="workspace-breadcrumb-separator" /><WorkspaceBreadcrumbCurrent />
       </span>}</div>
     </div>
-    <div ref={headerSlots.setActions} className="workspace-header-actions" data-admin-content>
-      {!!actions.length && <div className="workspace-page-action-group" data-workspace-page-actions="">{actions}</div>}
+    <div className="workspace-header-commands">
+      {time != null && <div className="workspace-header-time">{time}</div>}
+      {headerUtilities && <div className="workspace-header-utilities">{headerUtilities}</div>}
+      <div ref={headerSlots.setActions} className="workspace-header-actions" data-admin-content>
+        {!!actions.length && <div className="workspace-page-action-group" data-workspace-page-actions="">{actions}</div>}
+      </div>
+      {headerPanelControl && <div className="workspace-header-panel-control">{headerPanelControl}</div>}
     </div>
-    <div className="workspace-header-utilities">{headerUtilities}</div>
-    {time != null && <div className="workspace-header-time">{time}</div>}
   </header>;
   const column = <>{header}<div ref={contentRef} className={`app-content${contentClassName ? ` ${contentClassName}` : ""}`} data-admin-content style={{ flex: "1 1 auto" }}>
     <div className="content-canvas"><WorkspaceNavigationProvider value={navigation.context}>{children}</WorkspaceNavigationProvider></div>

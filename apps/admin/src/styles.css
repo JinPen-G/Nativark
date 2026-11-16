@@ -545,19 +545,20 @@ main.app-workspace { background: transparent; }
 }
 .workspace-context-location { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--space-3); }
 .native-workspace-context { height: var(--rental-layout-context-height); padding-block-start: var(--rental-layout-context-optical-inset); }
-/* One breadcrumb/action row, followed by the owner's temporary clock row. */
-.native-workspace-context.workspace-header { height:auto; min-height:var(--rental-layout-context-height); flex:none; display:grid; grid-template-columns:minmax(0, 1fr) auto auto; grid-template-rows:minmax(var(--rental-layout-context-height), auto); grid-auto-rows:auto; align-items:center; column-gap:var(--space-2); padding:0 var(--rental-layout-context-inline-end) var(--space-2) var(--rental-layout-context-inline-start); }
-.workspace-header-location { grid-column:1; grid-row:1; display:flex; align-items:center; min-width:0; gap:var(--space-2); }
-.workspace-header-actions { grid-column:2; grid-row:1; display:flex; align-items:center; justify-content:flex-end; gap:var(--space-2); min-width:0; }
+/* Time, utilities, the current page's main action and the panel toggle follow one reading order. */
+.native-workspace-context.workspace-header { position:relative; height:auto; min-height:var(--rental-layout-context-height); flex:none; display:grid; grid-template-columns:minmax(0, 1fr) auto; grid-template-rows:minmax(var(--rental-layout-context-height), auto); align-items:center; column-gap:var(--space-2); padding:0 var(--rental-layout-context-inline-end) 0 var(--rental-layout-context-inline-start); }
+.workspace-header-location { display:flex; align-items:center; min-width:0; gap:var(--space-2); }
+.workspace-header-commands { display:flex; align-items:center; justify-content:flex-end; gap:var(--space-2); min-width:0; max-width:100%; }
+.workspace-header-actions { display:flex; align-items:center; justify-content:flex-end; gap:var(--space-2); min-width:0; --control-height-md:var(--rental-control-height-page-action); }
 .workspace-header-actions:not(:has([data-workspace-page-actions]:not([hidden]))) { display:none; }
 .workspace-page-action-group { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:var(--space-2); min-width:0; }
 .workspace-page-action-group[hidden] { display:none; }
 .workspace-page-action-group > .ant-space { display:flex; flex-wrap:wrap; gap:var(--space-2); }
-.workspace-header-utilities { grid-column:3; grid-row:1; display:flex; align-items:center; gap:var(--space-1); }
-.workspace-header-actions, .workspace-header-utilities { --control-height-md:var(--rental-control-height-toolbar); }
-.workspace-header-time { grid-column:1 / -1; grid-row:2; display:flex; justify-content:flex-end; min-width:0; min-height:20px; }
-.workspace-header:has(.workspace-copilot-entry) .workspace-header-time { padding-inline-end:calc(32px + var(--space-1)); }
-.workspace-header-time .workspace-clock { font-size:11px; line-height:20px; }
+.workspace-header-utilities { display:flex; align-items:center; flex:none; gap:var(--space-1); --control-height-md:var(--rental-control-height-toolbar); }
+.workspace-header-utilities:empty { display:none; }
+.workspace-header-panel-control { display:flex; align-items:center; flex:none; }
+.workspace-header-time { display:flex; align-items:center; flex:none; min-width:0; }
+.workspace-header-time .workspace-clock { font-size:12px; line-height:20px; }
 .workspace-breadcrumb-current, .workspace-breadcrumb-title, [data-workspace-page-title]:not([hidden]) { display:inline-flex; align-items:center; gap:var(--space-1); min-width:0; max-width:100%; }
 .workspace-header .ant-breadcrumb ol { align-items:center; }
 .workspace-header .ant-breadcrumb li { display:flex; align-items:center; min-width:0; }
@@ -572,10 +573,19 @@ main.app-workspace { background: transparent; }
 .workspace-header .workspace-copilot-entry[aria-expanded="true"] { background:var(--surface-muted); }
 .page-header-compact { margin-block-end:var(--space-2); }
 .page-context-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+.page-context-navigation { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+.page-context-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:var(--space-2); margin-inline-start:auto; }
+.page-content-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:var(--space-2); min-width:0; }
+.page-content-controls { flex:1 1 auto; min-width:0; }
+@container record-screen (max-width: 960px) {
+  .workspace-header-time .workspace-clock-date { display:none; }
+}
 @container record-screen (max-width: 600px) {
-  .native-workspace-context.workspace-header { grid-template-columns:minmax(0, 1fr) auto; }
-  .workspace-header-actions { grid-column:1 / -1; grid-row:3; }
-  .workspace-header-utilities { grid-column:2; }
+  .native-workspace-context.workspace-header { grid-template-columns:minmax(0, 1fr); }
+  .workspace-header:has(.workspace-header-panel-control) .workspace-header-location { padding-inline-end:calc(var(--rental-control-height-toolbar) + var(--space-2)); }
+  .workspace-header-commands { flex-wrap:wrap; padding-block-end:var(--space-2); }
+  .workspace-header-actions { flex:1 1 auto; }
+  .workspace-header-panel-control { position:absolute; inset-inline-end:var(--rental-layout-context-inline-end); top:calc((var(--rental-layout-context-height) - var(--rental-control-height-toolbar)) / 2); }
 }
 :is(.workspace-context, .native-workspace-context) .ant-breadcrumb { min-width: 0; max-width: 100%; overflow: hidden; }
 :is(.workspace-context, .native-workspace-context) .ant-breadcrumb ol { flex-wrap: nowrap; white-space: nowrap; }
@@ -825,6 +835,7 @@ h5.ant-typography {
 .ant-segmented .ant-segmented-item,
 .ant-segmented .ant-segmented-thumb { border-radius: var(--rental-ui-radius-control); }
 .ant-segmented .ant-segmented-item-label { padding-inline: 18px; }
+.arc-segmented.ant-segmented { border-color:var(--border); }
 .ant-segmented .ant-segmented-item-selected {
   color: var(--rental-color-text);
   background: var(--rental-color-bg-container);

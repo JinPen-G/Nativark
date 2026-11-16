@@ -2,7 +2,7 @@
   "repository": "https://github.com/imskyleen/animate-ui",
   "revision": "7fffde3e56e804bcf5e580e1c13ca5bd565ef588",
   "license": "LICENSE.md",
-  "adaptations": "Existing icons keep their import adapters and original pinned revision; cn uses the installed clsx utility as upstream expects, including conditional classes. Globe, Sun and Moon are unchanged public registry files, each pinned to its own recorded revision, using the installed Animate UI v2 core. Host controls full-button hover/focus, current interaction after a theme swap and shared reduced motion.",
+  "adaptations": "Existing icons keep their import adapters and original pinned revision; cn uses the installed clsx utility as upstream expects, including conditional classes. Globe, Sun and Moon are unchanged public registry files, each pinned to its own recorded revision, using the installed Animate UI v2 core. Host controls full-button hover/focus, current interaction after a theme swap and shared reduced motion. Coffee and PanelRightOpen/PanelRightClose use unchanged fixed public registry sources; buttons keep the existing callbacks, 17/16px artwork and shared 1.75 stroke.",
   "files": [
     {
       "file": "runtime.tsx",
@@ -120,6 +120,33 @@
       "upstreamSha256": "e65404ce95d06ae144ee16ccb59a5913ce4a8b215eef523b5cab7552e3132fb0",
       "adaptedSha256": "e65404ce95d06ae144ee16ccb59a5913ce4a8b215eef523b5cab7552e3132fb0",
       "sourceScope": "Official public icon registry; copied unchanged, same installed Animate UI v2 core."
+    },
+    {
+      "file": "coffee.tsx",
+      "source": "apps/v2/registry/icons/coffee/index.tsx",
+      "revision": "22a9236ae107328f8564edb7e3299375da3247af",
+      "registry": "https://animate-ui.com/r/icons-lucide-coffee.json",
+      "upstreamSha256": "012aadfff8ac06fc5f04a2771af707882a7e763ed2912a519d1821a8656de1c2",
+      "adaptedSha256": "012aadfff8ac06fc5f04a2771af707882a7e763ed2912a519d1821a8656de1c2",
+      "sourceScope": "Official public icon registry; copied unchanged and verified against fixed revision. Existing shared wrapper owns size, stroke, whole-button hover/focus and reduced motion."
+    },
+    {
+      "file": "panel-right-open.tsx",
+      "source": "apps/v2/registry/icons/panel-right-open/index.tsx",
+      "revision": "22a9236ae107328f8564edb7e3299375da3247af",
+      "registry": "https://animate-ui.com/r/icons-lucide-panel-right-open.json",
+      "upstreamSha256": "0c49f2e1bedf44f7220f1ce4deb35667bcb711e18b677c5e922130e5511d0d08",
+      "adaptedSha256": "0c49f2e1bedf44f7220f1ce4deb35667bcb711e18b677c5e922130e5511d0d08",
+      "sourceScope": "Official public icon registry; copied unchanged and verified against fixed revision. Existing shared wrapper owns size, stroke, whole-button hover/focus and reduced motion."
+    },
+    {
+      "file": "panel-right-close.tsx",
+      "source": "apps/v2/registry/icons/panel-right-close/index.tsx",
+      "revision": "22a9236ae107328f8564edb7e3299375da3247af",
+      "registry": "https://animate-ui.com/r/icons-lucide-panel-right-close.json",
+      "upstreamSha256": "cb36d9c4f9a22250ab73c43c27e9b62750a6ff4ba4cae8a95a4d97875a28e4b9",
+      "adaptedSha256": "cb36d9c4f9a22250ab73c43c27e9b62750a6ff4ba4cae8a95a4d97875a28e4b9",
+      "sourceScope": "Official public icon registry; copied unchanged and verified against fixed revision. Existing shared wrapper owns size, stroke, whole-button hover/focus and reduced motion."
     }
   ]
 }

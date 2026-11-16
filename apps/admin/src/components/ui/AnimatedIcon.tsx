@@ -17,6 +17,9 @@ import { Upload } from "./animated-icons/upload";
 import { Globe } from "./animated-icons/globe";
 import { Sun } from "./animated-icons/sun";
 import { Moon } from "./animated-icons/moon";
+import { Coffee } from "./animated-icons/coffee";
+import { PanelRightOpen } from "./animated-icons/panel-right-open";
+import { PanelRightClose } from "./animated-icons/panel-right-close";
 import { LayoutDashboard } from "./animated-icons/hugeicons/layout-dashboard";
 import { ChartColumn as HugeChart } from "./animated-icons/hugeicons/chart-column";
 import { ClipboardList } from "./animated-icons/hugeicons/clipboard-list";
@@ -35,7 +38,8 @@ import { WorkspaceCamera, WorkspaceVehicle, WorkspaceCamping, WorkspaceConstruct
 const icons = { house: House, messages: MessageSquare, blocks: Blocks, chart: ChartColumn,
   file: FileText, tag: Tag, users: Users, settings: Settings,
   shield: ShieldCheck, wallet: Wallet, layers: Layers, refresh: RefreshCw,
-  download: Download, upload: Upload, globe: Globe, sun: Sun, moon: Moon, dashboard: LayoutDashboard, report: HugeChart,
+  download: Download, upload: Upload, globe: Globe, sun: Sun, moon: Moon, coffee: Coffee,
+  panelRightOpen: PanelRightOpen, panelRightClose: PanelRightClose, dashboard: LayoutDashboard, report: HugeChart,
   orders: ClipboardList, pricing: CreditCard, inventory: Layers01, customers: HugeUsers,
   rules: Settings02, access: HugeShield, plugins: PlugZap, finance: HugeWallet,
   folder: FolderOpen, schedule: Clock01, ai: Sparkles,

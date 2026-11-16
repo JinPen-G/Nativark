@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { aiModelSettingsApi } from '@/api/aiModelSettings';
 import { settingsSummary } from '@/features/ai-native/model-settings-session';
 import { currentSessionEpoch } from '@/app/queryClient';
@@ -9,8 +9,8 @@ import { readConversationNavigation } from '@/features/ai-native/conversation-na
 import { useLocation } from 'react-router-dom';
 import { useLocale } from '@/app/locale';
 import type { ChatModel } from './archive/ai-chat/chat-state';
-import { Copy, Download, PanelRightClose, PanelRightOpen, Plus, ShieldCheck, X } from "lucide-react";
-import { Button, Drawer, Input, Modal, Select, Switch } from "@/components/ui";
+import { Copy, Download, Plus, ShieldCheck, X } from "lucide-react";
+import { Button, Drawer, Input, Modal, Segmented, Select, Switch } from "@/components/ui";
 import { AnimatedIcon } from "@/components/ui/AnimatedIcon";
 import { ArcLocale } from "@/components/ui/ArcLocale";
 import { ContentTransition } from "@/components/workspace/ContentTransition";
@@ -33,13 +33,13 @@ const frequencyLabels = { daily: "每天", weekdays: "工作日", weekly: "每�
 /** Only safe configured model labels enter the composer. This page still uses
  * the explicit local demo responder; selection is not a dispatch/config grant.
  * Original messages/runs retain the model snapshot captured when submitted. */
-function useConfiguredChatModels() {
+function useConfiguredChatModels(enabled = true) {
   const auth = useAuthStore(), owner = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user]);
   const [result, setResult] = useState<{ owner: string; models: ChatModel[]; defaultModel: string } | null>(null);
   const permitted = !!auth.token && !auth.user?.isSaasAdmin && auth.hasPermission('system:params:manage');
   useEffect(() => {
     let active = true; const epoch = currentSessionEpoch(), tenantId = auth.tenant?.tenantId;
-    if (permitted && tenantId) void aiModelSettingsApi.read().then(value => {
+    if (enabled && permitted && tenantId) void aiModelSettingsApi.read().then(value => {
       const now = useAuthStore.getState();
       if (!active || epoch !== currentSessionEpoch() || !now.hasPermission('system:params:manage')
         || owner !== JSON.stringify([now.tenant?.tenantId, now.currentWorkspaceId, now.user])) return;
@@ -50,7 +50,7 @@ function useConfiguredChatModels() {
         note: '租户已配置 · 当前聊天仍为本地演示' })), defaultModel: id(summary.model) });
     }).catch(() => { if (active) setResult(null); });
     return () => { active = false; };
-  }, [owner, permitted, auth.token]);
+  }, [owner, permitted, auth.token, enabled]);
   return permitted && result?.owner === owner ? result : { models: OPERATOR_MODELS, defaultModel: 'everyday' };
 }
 function useNarrow() {
@@ -66,28 +66,41 @@ export function AiOperatorPage() {
   const owner = JSON.stringify([identity, user, currentSessionEpoch()]);
   const incoming = readConversationNavigation(location.state?.aiConversation, identity, currentSessionEpoch());
   const [serverOwner, setServerOwner] = useState<string | null>(() => incoming ? owner : null);
+  const chatHost = useRef<HTMLElement>(null);
   const serverOpen = serverOwner === owner;
   useEffect(() => { setServerOwner(incoming ? owner : null); if (incoming) operator.setView('chat'); }, [location.key, owner]);
   const title = operator.view === "chat" ? serverOpen ? '服务端对话' : operator.capability.name : operator.view === "plugins" ? "插件" : "自动化任务";
   useEffect(() => { document.title = `${t(title)} · ${t("Agent工作台")} · ${resolveAdminBrandName(tenant, user)}`; }, [title, tenant, user, t]);
   return <ArcLocale><ContentTransition value={operator.view} className="operator-page">
     {operator.view === "chat" ? <>
-      <div className="operator-result-tools"><Button aria-pressed={serverOpen} onClick={() => {
-        operator.cancel(); setServerOwner(serverOpen ? null : owner);
-      }}>{t(serverOpen ? '返回示例工作区' : '服务端对话')}</Button></div>
-      {serverOpen ? <div className="operator-work-body operator-artifact"><ServerConversationPanel visible initialConversation={incoming ?? undefined} /></div>
-        : <OperatorChat />}
+      <WorkspacePageTitle><span className="workspace-page-title">{t(title)}</span></WorkspacePageTitle>
+      <WorkspacePageActions label={t('对话模式')}><Segmented className="operator-conversation-mode" aria-label={t('对话模式')}
+        value={serverOpen ? 'server' : 'demo'} options={[{ value: 'demo', label: t('本地演示') }, { value: 'server', label: t('服务端对话') }]}
+        onChange={value => {
+          if ((value === 'server') === serverOpen) return;
+          // The archive owns stopping its stream; invoke its existing Stop control
+          // before hiding it so retained draft state does not retain an active reply.
+          if (value === 'server') chatHost.current?.querySelector<HTMLButtonElement>('.chat-send[type="button"]')?.click();
+          operator.cancel(); setServerOwner(value === 'server' ? owner : null);
+        }} /></WorkspacePageActions>
+      {/* Keep the local composer mounted across mode changes; its draft and attachments
+          are local state. Hidden work areas withdraw their original record readers. */}
+      <OperatorChat visible={!serverOpen} hostRef={chatHost} />
+      {serverOpen && <section className="operator-server-view" aria-label={t('服务端对话')}>
+        <ServerConversationPanel visible initialConversation={incoming ?? undefined} />
+      </section>}
     </> : operator.view === "plugins" ? <PluginCatalog /> : <AutomationTasks />}
   </ContentTransition></ArcLocale>;
 }
-function OperatorChat() {
+function OperatorChat({ visible = true, hostRef }: { visible?: boolean; hostRef?: RefObject<HTMLElement | null> }) {
   const { t } = useLocale();
   const operator = useOperator(), narrow = useNarrow();
-  const configured = useConfiguredChatModels();
-  const [workOpen, setWorkOpen] = useState(!narrow), [mobileOpen, setMobileOpen] = useState(false);
+  const configured = useConfiguredChatModels(visible);
+  const [workExpanded, setWorkExpanded] = useState(!narrow), [mobileExpanded, setMobileExpanded] = useState(false);
+  const workOpen = visible && workExpanded, mobileOpen = visible && mobileExpanded;
   const split = useRef<HTMLDivElement>(null);
   function toggleWork() {
-    if (narrow) { setMobileOpen(true); return; }
+    if (narrow) { setMobileExpanded(true); return; }
     // Use the original component's keyboard contract, preserving its spring, restore target and focus handling.
     split.current?.querySelector('[role="separator"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   }
@@ -95,21 +108,26 @@ function OperatorChat() {
     const separator = split.current?.querySelector<HTMLElement>('[role="separator"]');
     const collapsed = separator?.getAttribute("data-collapsed") === "after";
     if (separator && narrow && !collapsed) separator.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    if (!narrow) setMobileOpen(false);
+    if (!narrow) setMobileExpanded(false);
   }, [narrow]);
-  return <section className="operator-chat-layout" data-narrow={narrow || undefined} aria-label={t("Agent工作台对话")}>
+  useEffect(() => { if (!visible) setMobileExpanded(false); }, [visible]);
+  return <section ref={hostRef} className="operator-chat-layout" hidden={!visible} inert={!visible || undefined} aria-hidden={!visible || undefined}
+    data-narrow={narrow || undefined} aria-label={t("Agent工作台对话")}>
     <div className="operator-split" ref={split}>
-      <ResizablePanels label="对话与Agent工作区" onLayoutChange={sizes => setWorkOpen(sizes[1] > 1)}>
+      <ResizablePanels label="对话与Agent工作区" onLayoutChange={sizes => setWorkExpanded(sizes[1] > 1)}>
         <ResizablePanel id="operator-conversation" label="聊天区" defaultSize={60} minSize={340}>
           <AiChat className="operator-archive-chat"
             store={{ chats: operator.chats, setChats: operator.setChats, activeId: operator.activeId, objectUrls: operator.objectUrls, setActiveId: operator.selectConversation }}
             historyConversationIds={operator.capabilityThreads.map(thread => thread.id)}
             respond={operator.respond} autoPlay={false} models={configured.models} defaultModel={configured.defaultModel}
-            disabled={!operator.enabled} greeting={operator.capability.description} placeholder={`描述${operator.capability.name}相关的工作，或继续补充要求…`}
+            disabled={!operator.enabled || !visible} greeting={operator.capability.description} placeholder={`描述${operator.capability.name}相关的工作，或继续补充要求…`}
             suggestions={[{ label: operator.capability.prompt, icon: "activity" }]}
             onNewChat={() => operator.createConversation(operator.capability.id)}
-            queuedPrompt={operator.queuedPrompt} onQueuedPromptUsed={() => operator.setQueuedPrompt(null)}
-            headerActions={<Button type="text" aria-label={workOpen && !narrow ? "收起工作区" : "打开工作区"} icon={workOpen && !narrow ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />} aria-expanded={narrow ? mobileOpen : workOpen} aria-controls={narrow ? "operator-mobile-work" : "operator-work"} onClick={toggleWork} />}
+            queuedPrompt={visible ? operator.queuedPrompt : null} onQueuedPromptUsed={() => operator.setQueuedPrompt(null)}
+            headerActions={<Button size="small" type="text" className="operator-work-toggle" title={t(workOpen && !narrow ? "收起工作区" : "打开工作区")}
+              aria-label={t(workOpen && !narrow ? "收起工作区" : "打开工作区")}
+              icon={<AnimatedIcon name={workOpen && !narrow ? "panelRightClose" : "panelRightOpen"} style={{ fontSize: 16 }} />}
+              aria-expanded={narrow ? mobileOpen : workOpen} aria-controls={narrow ? "operator-mobile-work" : "operator-work"} onClick={toggleWork} />}
           />
         </ResizablePanel>
         <ResizablePanel id="operator-work" label="Agent工作区" defaultSize={40} minSize={310} maxSize={720} collapsible defaultCollapsed={narrow}>
@@ -117,10 +135,10 @@ function OperatorChat() {
         </ResizablePanel>
       </ResizablePanels>
     </div>
-    <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} title="Agent 工作区" destroyOnHidden width="min(100vw, 520px)"><div id="operator-mobile-work" className="operator-mobile-work"><WorkArea visible={mobileOpen} /></div></Drawer>
+    {narrow && <WorkArea visible={mobileOpen} drawer onClose={() => setMobileExpanded(false)} />}
   </section>;
 }
-function WorkArea({ visible = true }: { visible?: boolean }) {
+function WorkArea({ visible = true, drawer = false, onClose }: { visible?: boolean; drawer?: boolean; onClose?: () => void }) {
   const operator = useOperator(), thread = operator.active;
   const auth = useAuthStore(), { locale } = useLocale();
   const journalIdentity = JSON.stringify([auth.tenant?.tenantId, auth.currentWorkspaceId, auth.user?.id]);
@@ -144,7 +162,7 @@ function WorkArea({ visible = true }: { visible?: boolean }) {
   };
   const [confirmOpen, setConfirmOpen] = useState(false), [notice, setNotice] = useState("");
   useEffect(() => { setConfirmOpen(false); setNotice(""); }, [thread.id, thread.artifact]);
-  useEffect(() => { lifetime.current++; setHistoryOwner(null); }, [owner, visible, allowed]);
+  useEffect(() => { lifetime.current++; setHistoryOwner(null); if (!visible) setConfirmOpen(false); }, [owner, visible, allowed]);
   useEffect(() => {
     const hide = () => { if (document.hidden) { lifetime.current++; local.current.open = false; setHistoryOwner(null); } };
     document.addEventListener('visibilitychange', hide);
@@ -155,17 +173,21 @@ function WorkArea({ visible = true }: { visible?: boolean }) {
   const printable = artifact ? [artifact.title, artifact.summary, ...(artifact.metrics ?? []).map(item => `${item.label}：${item.value}`), artifact.columns.join(" | "), ...artifact.rows.map(row => row.join(" | ")), artifact.note].join("\n\n") : "";
   async function copy() { try { await navigator.clipboard.writeText(printable); setNotice("已复制示例结果"); } catch { setNotice("浏览器未允许复制，请使用下载"); } }
   function download() { if (!artifact) return; const url = URL.createObjectURL(new Blob([printable], { type: "text/plain;charset=utf-8" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${artifact.title}-示例.txt`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); setNotice("已下载示例结果"); }
-  return <section className="operator-work-area" aria-label="Agent工作区">
-    <header><span><AnimatedIcon name="folder" /> Agent 工作区</span><span className="operator-demo-tag">{serverOpen ? (locale === 'en-US' ? 'Server records' : '服务端原记录') : '示例'}</span></header>
-    <div className="operator-result-tools">
-      <Button size="small" aria-pressed={serverOpen} disabled={!visible || !allowed} onClick={() => {
+  const workTitle = locale === 'en-US' ? (serverOpen ? 'Server records' : 'Agent workspace') : (serverOpen ? '服务端记录' : 'Agent 工作区');
+  const recordLabel = locale === 'en-US' ? (serverOpen ? 'Back to work results' : 'View server records') : (serverOpen ? '返回工作成果' : '查看服务端记录');
+  const headerActions = <div className="operator-work-header-actions">
+    <span className="operator-demo-tag">{locale === 'en-US' ? (serverOpen ? 'Server' : 'Demo') : (serverOpen ? '服务端' : '示例')}</span>
+    <Button size="small" type="text" className="operator-work-toggle" title={recordLabel} aria-label={recordLabel}
+      aria-pressed={serverOpen} disabled={!visible || !allowed} onClick={() => {
         if (!visible || !allowed || document.hidden) return;
         lifetime.current++; local.current.open = false; setConfirmOpen(false); setHistoryOwner(serverOpen ? null : owner);
       }}>
-        {locale === 'en-US' ? (serverOpen ? 'Back to demo workspace' : 'Server conversations') : (serverOpen ? '返回示例工作区' : '服务端对话')}
-      </Button>
-    </div>
-    <ContentTransition value={`${thread.id}:${serverOpen ? 'server-conversations' : artifact ? "result" : thread.run ? "run" : "empty"}`} className="operator-work-body">
+      <AnimatedIcon name={serverOpen ? 'folder' : 'messages'} style={{ fontSize: 16 }} />
+    </Button>
+  </div>;
+  const content = <section className="operator-work-area" aria-label="Agent工作区">
+    {!drawer && <header className="operator-panel-header"><span className="operator-work-title"><AnimatedIcon name={serverOpen ? 'messages' : 'folder'} />{workTitle}</span>{headerActions}</header>}
+    <ContentTransition value={`${thread.id}:${serverOpen ? 'server-conversations' : artifact ? "result" : thread.run ? "run" : "empty"}`} className={`operator-work-body${serverOpen ? ' operator-record-body' : ''}`}>
       {serverOpen ? <><p className="operator-caption">{locale === 'en-US'
         ? 'Original conversations, requests and task results. The chat on the left remains a local demo; opening or reading records does not start a model or business action.'
         : '这里读取原对话、请求与任务结果。左侧聊天仍为本地示例；打开或读取记录不会启动模型或业务。'}</p>
@@ -178,7 +200,7 @@ function WorkArea({ visible = true }: { visible?: boolean }) {
         {operator.capability.action && <Button type="primary" block disabled={Boolean(thread.receipt || thread.revisionRequest) || !operator.enabled} onClick={() => setConfirmOpen(true)}>{thread.receipt ? "已确认此示例" : operator.capability.action}</Button>}
         <p className="operator-caption" role="status">{thread.receipt || (thread.revisionRequest ? `待补充：${thread.revisionRequest}` : "") || notice || artifact.note}</p></>}
     </footer>
-    <Modal open={!serverOpen && confirmOpen} className="operator-confirmation" title={<span className="operator-confirmation-title"><ShieldCheck size={20} aria-hidden="true" />确认后继续执行</span>}
+    <Modal open={visible && !serverOpen && confirmOpen} className="operator-confirmation" title={<span className="operator-confirmation-title"><ShieldCheck size={20} aria-hidden="true" />确认后继续执行</span>}
       width={520} closable={false} footer={null} onCancel={() => setConfirmOpen(false)}>
       {confirmation && <div className="operator-confirmation-content">
         <p className="operator-confirmation-description">{confirmation.description}</p>
@@ -188,6 +210,8 @@ function WorkArea({ visible = true }: { visible?: boolean }) {
       </div>}
     </Modal>
   </section>;
+  return drawer ? <Drawer open={visible} onClose={onClose} title={workTitle} extra={headerActions} destroyOnHidden
+    className="operator-work-drawer" width="min(100vw, 520px)"><div id="operator-mobile-work" className="operator-mobile-work">{content}</div></Drawer> : content;
 }
 function ArtifactView({ artifact }: { artifact: OperatorArtifact }) {
   const timeline = ["schedule", "tasks", "document"].includes(artifact.kind);
@@ -200,9 +224,9 @@ function ArtifactView({ artifact }: { artifact: OperatorArtifact }) {
   </article>;
 }
 function PluginCatalog() {
-  const operator = useOperator(); const [query, setQuery] = useState("");
+  const operator = useOperator(), { t } = useLocale(); const [query, setQuery] = useState("");
   return <section className="operator-catalog">
-    <WorkspacePageTitle><h1 className="workspace-page-title">插件</h1></WorkspacePageTitle>
+    <WorkspacePageTitle><h1 className="workspace-page-title">{t('插件')}</h1></WorkspacePageTitle>
     <header className="operator-section-header"><p>选择对话可使用的经营能力</p><span className="operator-demo-tag">前端演示</span></header>
     <div className="operator-catalog-search"><Input allowClear aria-label="搜索插件" placeholder="搜索能力" value={query} onChange={event => setQuery(event.target.value)} /></div>
     <div className="operator-plugin-grid">{operator.permitted.filter(item => `${item.name}${item.description}`.includes(query.trim())).map(item => <Card key={item.id} title={item.name} description={item.description} className="operator-plugin-card"
@@ -212,7 +236,7 @@ function PluginCatalog() {
   </section>;
 }
 function AutomationTasks() {
-  const operator = useOperator();
+  const operator = useOperator(), { t } = useLocale();
   const [editing, setEditing] = useState<OperatorTask | null>(null), [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const visible = operator.tasks.filter(task => task.name.includes(query.trim()));
@@ -228,8 +252,8 @@ function AutomationTasks() {
     operator.setTasks(previous => [...previous, ...candidates.filter(candidate => allowed(candidate.capabilityId) && !previous.some(task => task.name === candidate.name)).map(candidate => ({ ...candidate, id: crypto.randomUUID(), enabled: true, prompt: OPERATOR_CAPABILITIES.find(item => item.id === candidate.capabilityId)!.prompt }))]);
   }
   return <section className="operator-catalog">
-    <WorkspacePageTitle><h1 className="workspace-page-title">自动化任务</h1></WorkspacePageTitle>
-    <WorkspacePageActions><Button type="primary" icon={<Plus size={16} />} disabled={!operator.available.length} onClick={create}>新建任务</Button></WorkspacePageActions>
+    <WorkspacePageTitle><h1 className="workspace-page-title">{t('自动化任务')}</h1></WorkspacePageTitle>
+    <WorkspacePageActions><Button type="primary" icon={<Plus size={16} />} disabled={!operator.available.length} onClick={create}>{t('新建自动化任务')}</Button></WorkspacePageActions>
     <header className="operator-section-header"><p>设定时间与目标，让重复待办按计划整理</p></header>
     <div className="operator-automation-note"><AnimatedIcon name="schedule" /><span>前端演示：任务仅保留在当前会话，不会按时自动执行；可手动运行查看效果。</span></div>
     {operator.tasks.length ? <><div className="operator-catalog-search"><Input allowClear aria-label="搜索任务" placeholder="搜索任务" value={query} onChange={event => setQuery(event.target.value)} /></div><div className="operator-task-list">{visible.map(task => <article key={task.id} className="operator-task-row"><AnimatedIcon name="schedule" /><div><h2>{task.name}</h2><p>{frequencyLabels[task.frequency]} {task.time} · {OPERATOR_CAPABILITIES.find(item => item.id === task.capabilityId)?.name}</p></div><div className="operator-task-actions"><Switch aria-label={`${task.name}开关`} checked={task.enabled} disabled={!allowed(task.capabilityId)} onChange={enabled => operator.setTasks(previous => previous.map(item => item.id === task.id ? { ...item, enabled } : item))} /><Button disabled={!task.enabled || !allowed(task.capabilityId)} onClick={() => operator.runTask(task)}>运行演示</Button><Button onClick={() => { setEditing({ ...task }); setError(""); }}>编辑</Button><Button type="text" aria-label={`删除${task.name}`} icon={<X size={16} />} onClick={() => operator.setTasks(previous => previous.filter(item => item.id !== task.id))} /></div></article>)}</div>{!visible.length && <p className="operator-empty">没有匹配的任务</p>}</> : <div className="operator-task-empty"><AnimatedIcon name="schedule" /><h2>把重复待办安排好</h2><p>从晨间简报、归还跟进或每周复盘开始。</p><Button disabled={!operator.available.length} onClick={presets}>添加示例任务</Button></div>}
