@@ -382,6 +382,22 @@
     "./configuration-dto": {
       "types": "./dist/config-request.dto.d.ts",
       "default": "./dist/config-request.dto.js"
+    },
+    "./approved-order-ports": {
+      "types": "./dist/approved-order-transaction.ports.d.ts",
+      "default": "./dist/approved-order-transaction.ports.js"
+    },
+    "./mysql-order-confirmation": {
+      "types": "./dist/mysql-order-confirmation.d.ts",
+      "default": "./dist/mysql-order-confirmation.js"
+    },
+    "./merchant-delegation": {
+      "types": "./dist/merchant-delegation.d.ts",
+      "default": "./dist/merchant-delegation.js"
+    },
+    "./server-quote-access": {
+      "types": "./dist/server-quote-access.d.ts",
+      "default": "./dist/server-quote-access.js"
     }
   },
   "typesVersions": {
@@ -664,6 +680,18 @@
       ],
       "configuration-dto": [
         "dist/config-request.dto.d.ts"
+      ],
+      "approved-order-ports": [
+        "dist/approved-order-transaction.ports.d.ts"
+      ],
+      "mysql-order-confirmation": [
+        "dist/mysql-order-confirmation.d.ts"
+      ],
+      "merchant-delegation": [
+        "dist/merchant-delegation.d.ts"
+      ],
+      "server-quote-access": [
+        "dist/server-quote-access.d.ts"
       ]
     }
   },

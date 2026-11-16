@@ -14,6 +14,10 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [原配置DTO](rental-config-request.dto.ts)再导出Rental唯一运行时类，HTTP ValidationPipe与内部规则候选共用相同字段/嵌套校验。原DTO门禁扫描迁入后的源码，OpenAPI和各端继续使用原字段。短信Provider与业务服务共用公共unknown错误身份，原实际投递与回执服务保持。[运行时DTO](../../../../../packages/rental-core/src/config-request.dto.ts) · [公共短信结果](../../../../../packages/platform-server/src/common/notification-delivery.ts)
 
+[订单确认](rental-order-confirmation.service.ts)是原12项依赖的Nest兼容provider，实际提交与原键恢复由Rental包执行。Controller、AI批准和企业委托仍调用同一入口；报价访问使用公共唯一Auth/ALS，客户/企业政策、库存/容量、报价消费、券和批准在同一事务复验/提交。回放标记交给原调用方处理首次通知，unknown只读取原操作。[确认实现](../../../../../packages/rental-core/src/mysql-order-confirmation.ts) · [实际参加者](../../../../../packages/rental-core/src/order-confirmation-ports.ts) · [原批准事务验证](../../../../../tests/ai-native-fork-execution-approved-core.test.cjs)
+
+[商户委托兼容入口](rental-merchant-delegated-order.authority.ts)再导出同一包内构造器、封存存储及校验函数，仅绑定原Prisma事务类型。企业提交服务供给原私有委托来源所有者；当前身份、原键、请求和回调绑定不从HTTP/JSON重建，已消费或过期委托只核对历史结果。[实际封存入口](../../../../../packages/rental-core/src/merchant-delegation.ts) · [企业直接消费者](../enterprise/enterprise-merchant-order-submission.service.ts) · [批准合同](../../../../../packages/rental-core/src/approved-order-transaction.ports.ts)
+
 报价、券、奖励/权益、推荐及通知事实经[业务事实适配](rental-business-fact.repository.ts)进入Rental包的唯一仓储，当前空间、每次生成的订单可见范围、有界配置reader及原事件由本宿主供给。券预算和余额保留原事务与金额精度，通知流水/投递结果不重复执行外部短信。[事实实现](../../../../../packages/rental-core/src/mysql-business-facts.ts) · [本表接点](../../../../../packages/rental-core/src/business-fact-storage.ts) · [报价能力事实](../../../../../packages/rental-core/src/mysql-quote-capabilities.ts) · [库存依据](../../../../../packages/rental-core/src/quote-inventory-basis.ts)
 
 订单聚合、资产/库存、归还处置、工单、检查及续租/换货事实经[核心事实适配](rental-core-fact.repository.ts)进入Rental包。适配只供给原Auth/ALS、空间/组织范围、检查事件和同一数据库；锁序、金额、原库存流水、历史快照及调用方事务由原仓储实现保留。订单编号、排序、占用、承运期间、用量读数和工单范围的旧入口均再导出正式子出口。[核心事实实现](../../../../../packages/rental-core/src/mysql-core-facts.ts) · [本表与宿主接点](../../../../../packages/rental-core/src/core-fact-storage.ts) · [冻结检查](../../../../../packages/rental-core/src/mysql-order-inspection-basis.ts) · [单件配货依据](../../../../../packages/rental-core/src/mysql-order-allocation-pickup.ts)

@@ -11,6 +11,33 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-order-confirmation-20261116"></a>
+
+## Rental 订单确认、批准参加者与商户委托独立归属（2026-11-16）
+
+固定父版ef08a7628ce476265292e15067702241d70c98b8已普通推送并回读实际远端，main62ca仍在本树祖先。订单确认实际实现、同事务批准合同、商户封存来源及报价Auth/ALS接线单源迁入Rental包；原确认provider供给同一12项依赖，企业与AI批准消费者保持原签名。原委托入口只实例化Prisma事务类型，构造器、校验函数和三个WeakMap仍是包内同一运行时对象。[确认实现](../../../packages/rental-core/src/mysql-order-confirmation.ts) · [实际参加者](../../../packages/rental-core/src/order-confirmation-ports.ts) · [批准合同](../../../packages/rental-core/src/approved-order-transaction.ports.ts) · [商户封存](../../../packages/rental-core/src/merchant-delegation.ts)
+
+新订单继续使用原ReadCommitted事务及父锁→客户/企业→空间/库存锁序，客户资格、责任主体、地点/经营者和企业政策在提交点重读，报价消费、券、服务容量、订单、幂等和批准一起提交。批准的原等待/执行上限保留，原批准历史读取保持RepeatableRead。回放结果交给原调用方抑制重复通知；同键竞争或409只在原指纹与持久订单一致时回放，unknown不重新建单。注释只缩短旧测试/日期流水，保留并发原因及原409分支。[确认Nest接线](../../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts) · [企业直接消费者](../../../apps/api/src/modules/enterprise/enterprise-merchant-order-submission.service.ts)
+
+商户委托仍由原私有来源所有者供给，封存绑定当前营运身份、原D/K、请求指纹和同一回调；复制JSON、换身份或替换参加者不能取得权限。已消费/过期委托核对原关联和原收据，不进入新提交准备，收据不可见时仍只按原批准消费链接读取。新 /approved-order-ports、/mysql-order-confirmation、/merchant-delegation、/server-quote-access 出口与typesVersions逐项一致，根领域出口不加载这些私有适配；公共接入合同不带Prisma类型。[包说明](../../../packages/rental-core/README.md) · [原模块导读](../../../apps/api/src/modules/rental-core/README.md)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版执行正文对照 | 确认12个方法/辅助函数、商户9个、报价接线2个执行单元一致；只规范化原Prisma错误/隔离级别运行时引用和类型擦除。合同字段/品牌标记保留，事务按宿主实例化 |
+| `node --no-compilation-cache - api-order-confirmation-final`＋三份原用例，stdin内存编译/装载 | 最终PID47984退出0、stderr空。TS5.9.3及Prisma5.22官方原238模型声明，十配置零诊断；Rental120根/842源/240输出，原API988根/2362源/1976输出。没有写生成物 |
+| 原确认报价范围、履约准入及批准事务 | 报价定价组不可替换断言通过；原Node测试28/28通过，加两个短stdin探针共30/30，0 fail/skip/todo/cancelled。覆盖当前停用/撤权、历史物理归还、批准同事务、订单/批准失败回滚、失应答、原键及原消费恢复 |
+| 实际Nest与封存探针 | 原12个注入项及6个Optional项、同一继承实例通过；封存正向历史读取、JSON/换身份/换回调拒绝、收据缺失时原消费关联及unknown通过。历史路径新准备/订单事务次数均0；Nest只有显式依赖fixture，未连接数据库 |
+| 原夹具前后核对 | 原58个断言期待值/消息及重复次数完整保留；仅补可信身份、租户父锁、当前创建绑定、事务编号和原两种隔离级别fixture。未删断言或修改生产门禁，新增测试文件0 |
+| 文档/正式出口/格式 | 九份资料1162个本地链接、165个锚点引用及90个表格，0问题；四个出口与typesVersions一致。git diff --check退出0，需求/任务编号、依赖及验收不变 |
+
+失败过程保留。独立类型预检曾发现Hook事务未实例化，已改为同一TTransaction；完整候选PID41040退出1，发现原企业入口仍以非泛型声明委托端口，已在原兼容出口绑定Prisma事务类型。固定ef08仅覆盖原确认/委托/报价三模块的父版运行PID31060退出1，原28项22通过/6失败，原因是旧批准夹具缺可信身份和父锁；当前其他依赖保持同一版本，不能将其称为完整父版全仓回归。补齐后首次候选PID28688仍有两个新探针错误（Optional登记顺序、authority参数下标）及一个新增fixture错误（误把原批准读取RepeatableRead限定为ReadCommitted），已修正验证层并在同一范围复验，生产事务/权限未放宽。[原批准用例](../../../tests/ai-native-fork-execution-approved-core.test.cjs)
+
+本片收口不改变原任务分档。PCH-08仍缺完整Rental标准装配、配货/Controller、schema/迁移/Seed、页面/客户端、作业及AI接点；原05/06/09～12的完整门槛保留。真实HTTP/数据库/浏览器、标准包安装、独立升级回退、接手及独立审查未验。customer-operations与order-close-concurrency需要真实库，本片未执行；企业执行旧脚本的磁盘输出/加载兼容缺口也不据本片探针冒称通过。
+
+所有新验证通过stdin、内存编译及明确SQL/事务/政策fixture完成，无安装、.env读取、真实服务或网络，output/.tmp为空，无新后台业务进程。旧公共临时环境840文件/91,808,304字节及空日志1文件/0字节仍已归集待清理，2026-11-16T14:07:44.776Z核绝对路径、归属、0链接和无使用进程后，同一原生PowerShell删除再次在启动前被自动审批以blocked by policy拒绝，两份原责任manifest已更新；没有换壳/工具绕过或宣称释放空间。原外观静态失败、总导航三附件、MCP五旧隔离附件与DTO十处关联缺口继续按既有阶段保留。
+
+阶段提交仅含本片源码、包出口、必要原夹具和已有导读/记录/接续，中文提交到codex/platform-core-extraction，普通推送后读取实际目标远端；提交由包含本节的Git版本定位。本片不合main，不发布Core。
+
 <a id="core-rental-business-runtime-20261116"></a>
 
 ## Rental 报价、营销聚合及配置 DTO 独立归属（2026-11-16）

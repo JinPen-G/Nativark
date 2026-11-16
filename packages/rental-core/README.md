@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务与配置DTO、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。配货/确认、Controller、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务与配置DTO、订单确认及商户委托、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。配货、Controller、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -8,6 +8,8 @@
 | --- | --- |
 | [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；原Nest入口供给同一13项依赖，Controller/AI/企业及各端继续消费原签名 |
 | [报价/营销聚合](src/mysql-business-runtime.ts)、[宿主接点](src/business-runtime-ports.ts) | `/mysql-business-runtime` 维护价格、日历、规则、报价、券、奖励和通知恢复；原Nest入口供给14项依赖，当前与历史价格分别读取 |
+| [订单确认](src/mysql-order-confirmation.ts)、[确认接点](src/order-confirmation-ports.ts)、[批准合同](src/approved-order-transaction.ports.ts) | `/mysql-order-confirmation` 与 `/approved-order-ports` 保留原报价消费、库存/容量、券、批准和幂等同事务提交，客户/企业参加者由宿主供给 |
+| [商户委托](src/merchant-delegation.ts)、[服务端报价访问](src/server-quote-access.ts) | `/merchant-delegation` 与 `/server-quote-access` 共用公共Auth/ALS及原封存来源；历史结果只核对原键/原消费关系，字段或JSON复制不能取得执行权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
 | [正式出口](src/index.ts)、[合同](src/contracts.ts) | 原商品/资产、报价订单、履约检查、价格资金、日历与客户会员定义和运行时常量；[shared 兼容出口](../shared/src/core.ts)继续服务原 API、各客户端和 AI |
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
@@ -56,6 +58,10 @@
 核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 
 报价/营销服务从 `@rental-os/rental-core/mysql-business-runtime` 导入，配置、事实和核心配置仓储使用同一实例；会员、企业币种核验、密文及短信通过 [实际端口](src/business-runtime-ports.ts) 供给。原14项构造顺序与两个初始化钩子保留，配置/事实按同一刷新队列装载，续租事务上下文沿用模块级ALS。报价来源每次从同一公共可信身份读取，detached配置不发布进程缓存；`delivery_uncertain` 只按原投递记录查询，尝试次数与租约仍分别处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-business.service.ts) · [报价/营销验证](../../tests/rental-business-v1.test.cjs) · [通知恢复验证](../../tests/rental-notification-lease.test.cjs)
+
+订单确认从 `@rental-os/rental-core/mysql-order-confirmation` 导入，供给同一核心、业务、事实、幂等、Hook、客户/会员、服务容量和企业政策实例。新订单在原ReadCommitted事务重查客户/资格、责任主体、地点/经营者、库存和企业政策，再一起提交订单、报价消费、券、容量、原幂等及批准；批准事务保留原等待与执行上限。返回的 `replayed` 供调用方判断是否发送首次下单通知。原键恢复只读取原收据和批准消费关联，失应答不换键重做。[确认Nest接线](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts) · [确认范围验证](../../tests/rental-order-quote-scope.test.cjs) · [原批准事务验证](../../tests/ai-native-fork-execution-approved-core.test.cjs)
+
+商户委托端口把原私有企业来源所有者与同一订单确认实例组合，宿主用真实事务类型实例化 `RentalMerchantDelegatedOrderPort<TTransaction>`。当前营运身份、原D/K、请求指纹和参加者回调在同一模块封存；历史读取和已消费委托不进入新提交准备。企业政策使用原Core证明对象，JSON投影只用于参加者的数据传递。原API兼容入口绑定Prisma事务类型并再导出同一构造器和校验函数。[原委托接线](../../apps/api/src/modules/rental-core/rental-merchant-delegated-order.authority.ts) · [企业直接消费者](../../apps/api/src/modules/enterprise/enterprise-merchant-order-submission.service.ts)
 
 配置DTO从 `@rental-os/rental-core/configuration-dto` 导入，原API路径再导出同一运行时类。宿主按原Nest启动先加载 `reflect-metadata`，此子出口使用兼容的 `class-transformer` 和 `class-validator`；构建保留 `experimentalDecorators` 与 `emitDecoratorMetadata`，数组和嵌套对象沿原显式 `Type` 与 `ValidateNested` 校验。完整字段由 [原DTO门禁](../../scripts/validate-dto-coverage.cjs) 扫描实际源码，HTTP/OpenAPI字段继续引用原声明。[原HTTP入口](../../apps/api/src/modules/rental-core/rental-config-request.dto.ts)
 

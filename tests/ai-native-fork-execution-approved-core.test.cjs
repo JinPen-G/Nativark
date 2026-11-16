@@ -3,23 +3,39 @@ const test = require('node:test'), assert = require('node:assert/strict');
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', target: 'es2022', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { RentalOrderConfirmationService } = require('../apps/api/src/modules/rental-core/rental-order-confirmation.service');
 const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+const { identity } = require('./fixtures/ai-native/authorization-baseline.cjs');
+const inOperator = work => runWithRequestIdentity(identity({ tenantId: 'tenant-1', workspaceId: 'workspace-1',
+  userId: 'user-1', audience: 'operator', permissions: ['rental-os:order:create', 'rental-os:order:view'] }), work);
 
 const input = { quoteId: 'quote-1', customerType: 'personal', customerId: 'customer-1', fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: 'location-1', startAt: '2026-10-05T10:00:00Z', endAt: '2026-10-06T10:00:00Z', lines: [{ itemGroupId: 'item-1', quantity: 1 }] };
 function harness(options = {}) {
   const state = { orders: [], key: null, consumed: false, approval: null, effects: 0, trace: [], deny: false, records: structuredClone(options.records ?? {}) };
-  const quote = { id: 'quote-1', request: input, expiresAt: '2099-01-01T00:00:00.000Z', ruleSnapshot: {} };
+  const quote = { id: 'quote-1', tenantId: 'tenant-1', request: input, expiresAt: '2099-01-01T00:00:00.000Z', ruleSnapshot: {} };
   const order = { id: 'order-1', tenantId: 'tenant-1', workspaceId: 'workspace-1', status: 'reserved', lines: input.lines };
   const service = Object.create(RentalOrderConfirmationService.prototype);
-  service.prisma = { $transaction: async callback => {
-    const tx = { state: structuredClone({ orders: state.orders, key: state.key, consumed: state.consumed, approval: state.approval, records: state.records }) };
+  service.prisma = { $transaction: async (callback, transactionOptions) => {
+    if (transactionOptions) assert.ok(['ReadCommitted', 'RepeatableRead'].includes(transactionOptions.isolationLevel),
+      'Core writes retain ReadCommitted; original approval fact reads retain RepeatableRead');
+    const tx = { state: structuredClone({ orders: state.orders, key: state.key, consumed: state.consumed, approval: state.approval, records: state.records }),
+      $queryRaw: async query => {
+        assert.match(query.sql, /SELECT id FROM Tenant WHERE id=\? LOCK IN SHARE MODE/u);
+        assert.deepEqual(query.values, ['tenant-1']); return [{ id: 'tenant-1' }];
+      } };
     if (options.txFactory) Object.assign(tx, options.txFactory(tx, state));
     state.trace.push('begin');
     try { const result = await callback(tx); Object.assign(state, tx.state); state.trace.push('commit'); if (options.ackLost) throw Error('ack lost'); return result; }
     catch (error) { state.trace.push('error'); throw error; }
   } };
   service.core = { resolveWorkspaceId: () => 'workspace-1', prepareOrder: async () => { state.effects++; return structuredClone(order); }, assertAvailabilityWithLocks: async () => { state.trace.push('availability'); } };
+  // The fixture participates in the current creation fence and transaction-owned numbering.
+  service.core.bindOrderCreationFulfillment = async (tenantId, value, tx) => {
+    assert.equal(tenantId, 'tenant-1'); assert.equal(value.id, 'order-1'); assert.ok(tx.state);
+  };
   service.business = { consumeQuote: () => structuredClone(quote), assertOrderDaysOpenForConfirmation: () => {}, validateCouponForOrder: () => null, applyOrderConfirmationToCache: () => state.trace.push('cache') };
-  service.coreFacts = { findOrder: async (_tenant, id) => state.orders.find(row => row.id === id), saveOrderAggregate: async (value, _lines, tx) => { state.trace.push('order'); tx.state.orders.push(structuredClone(value)); if (options.failOrder) throw Error('order failed'); } };
+  service.coreFacts = { allocateOrderNumber: async (tenantId, _at, _zone, tx) => {
+    assert.equal(tenantId, 'tenant-1'); assert.ok(tx.state); return 'synthetic-order-number';
+  }, findOrder: async (_tenant, id) => state.orders.find(row => row.id === id), saveOrderAggregate: async (value, _lines, tx) => { state.trace.push('order'); tx.state.orders.push(structuredClone(value)); if (options.failOrder) throw Error('order failed'); } };
   service.businessFacts = { findQuote: async () => structuredClone(quote), consumeQuoteIfAvailable: async (_tenant, _quote, _order, _at, tx) => { state.trace.push('quote'); tx.state.consumed = true; return true; } };
   service.idempotency = { find: async (_tenant, _action, _key, tx) => (tx?.state ?? state).key, record: async (value, tx) => { state.trace.push('idempotency'); tx.state.key = structuredClone(value); } };
   const participant = {
@@ -29,7 +45,8 @@ function harness(options = {}) {
     commit: async (tx, binding, orderId) => { state.trace.push('approval.commit'); assert.equal(tx.state.orders[0].id, orderId); assert.equal(tx.state.consumed, true); if (options.failApproval) throw Error('approval commit failed'); tx.state.approval.resultRef = orderId; if (options.revokeAfterCommit) state.deny = true; },
     replay: async (_binding, id) => { state.trace.push('approval.replay'); if (state.deny) throw Error('revoked'); assert.equal(state.approval?.resultRef, id); }
   };
-  return { state, service, participant, run: () => service.createApprovedOrder('tenant-1', structuredClone(input), 'operator', { category: { code: 'camera' } }, 'key-1', participant) };
+  const submit = () => service.createApprovedOrder('tenant-1', structuredClone(input), 'operator', { category: { code: 'camera' } }, 'key-1', participant);
+  return { state, service, participant, run: () => inOperator(submit), runWithoutIdentity: submit };
 }
 
 test('approved create participates in the actual Core transaction and is replayable', async () => {
@@ -63,7 +80,7 @@ test('expired business idempotency record does not permit repeating a consumed a
     assert.equal(tenantId, 'tenant-1'); assert.ok(tx.state.approval);
     return 'synthetic-order-number';
   };
-  await assert.rejects(h.run(), error => error.getStatus?.() === 403);
+  await assert.rejects(h.runWithoutIdentity(), error => error.getStatus?.() === 403);
   assert.equal(h.state.effects, 0, 'missing authenticated quote identity must still refuse creation');
   const run = () => runWithRequestIdentity(identity({ tenantId: 'tenant-1', workspaceId: 'workspace-1',
     userId: 'operator-1', audience: 'operator', permissions: ['rental-os:order:create', 'rental-os:order:view'] }), h.run);
@@ -75,7 +92,7 @@ test('revocation after commit suppresses output without undoing committed facts'
   assert.equal(h.state.orders.length, 1); assert.equal(h.state.approval.resultRef, 'order-1');
 });
 test('manual Core creation still works with no AI participant', async () => {
-  const h = harness(); const result = await h.service.createOrder('tenant-1', structuredClone(input), 'operator', { category: { code: 'camera' } }, 'manual-key');
+  const h = harness(); const result = await inOperator(() => h.service.createOrder('tenant-1', structuredClone(input), 'operator', { category: { code: 'camera' } }, 'manual-key'));
   assert.equal(result.replayed, false); assert.equal(h.state.orders.length, 1); assert.equal(h.state.approval, null);
 });
 
@@ -126,11 +143,11 @@ function persisted(options = {}) {
     return result;
   } });
   const transaction = h.service.prisma.$transaction;
-  h.service.prisma.$transaction = async callback => { assert.equal(nesting, 0, 'no nested independent transaction'); nesting++; try { return await transaction(callback); } finally { nesting--; } };
+  h.service.prisma.$transaction = async (callback, transactionOptions) => { assert.equal(nesting, 0, 'no nested independent transaction'); nesting++; try { return await transaction(callback, transactionOptions); } finally { nesting--; } };
   const authority = { resolve: async () => { if (h.state.deny) throw Error('revoked'); return structuredClone(context); } };
   const repository = new PrismaAiApprovalConsumptionRepository(h.service.prisma, () => new Date(clockTime));
   const participant = repository.createOrderTransaction(bound, authority);
-  return { ...h, bound, context, authority, repository, participant, run: () => h.service.createApprovedOrder('tenant-1', structuredClone(input), 'operator', { category: { code: 'camera' } }, 'key-1', participant) };
+  return { ...h, bound, context, authority, repository, participant, run: () => inOperator(() => h.service.createApprovedOrder('tenant-1', structuredClone(input), 'operator', { category: { code: 'camera' } }, 'key-1', participant)) };
 }
 
 test('real Prisma approval participant and real Core share one write transaction', async () => {
