@@ -18,6 +18,10 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [商户委托兼容入口](rental-merchant-delegated-order.authority.ts)再导出同一包内构造器、封存存储及校验函数，仅绑定原Prisma事务类型。企业提交服务供给原私有委托来源所有者；当前身份、原键、请求和回调绑定不从HTTP/JSON重建，已消费或过期委托只核对历史结果。[实际封存入口](../../../../../packages/rental-core/src/merchant-delegation.ts) · [企业直接消费者](../enterprise/enterprise-merchant-order-submission.service.ts) · [批准合同](../../../../../packages/rental-core/src/approved-order-transaction.ports.ts)
 
+[配货入口](rental-allocation.service.ts)只供给原四项Nest依赖，资源判定、办理锁、异常来源和自动扫描由Rental包单源执行。当前AppModule仍只登记原一个provider，AI通过moduleRef读取同一实例；继承原60秒扫描及销毁钩子，管理员未开启自动变更时仍检查已有分配。失败事件参加原聚合事务，来源读取不触发扫描。Controller、换货候选和AI继续消费原签名。[实际配货实现](../../../../../packages/rental-core/src/mysql-allocation.ts) · [私有接点](../../../../../packages/rental-core/src/allocation-storage.ts) · [交接锁验证](../../../../../tests/staff-operation-lock.test.cjs)
+
+[经营空间兼容出口](workspace-scope.ts)再导出Rental唯一解析和跨空间写入校验，保留原宿主事务类型别名。请求空间核所属租户；原初始化/恢复只读取已存在默认空间，其他Core不复用这套行业模型。业务授权仍沿原Guard，配置/事实仓储和Controller使用同一函数。[实际空间边界](../../../../../packages/rental-core/src/mysql-workspace-scope.ts) · [原空间验证](../../../../../tests/rental-workspace-scope.test.cjs)
+
 报价、券、奖励/权益、推荐及通知事实经[业务事实适配](rental-business-fact.repository.ts)进入Rental包的唯一仓储，当前空间、每次生成的订单可见范围、有界配置reader及原事件由本宿主供给。券预算和余额保留原事务与金额精度，通知流水/投递结果不重复执行外部短信。[事实实现](../../../../../packages/rental-core/src/mysql-business-facts.ts) · [本表接点](../../../../../packages/rental-core/src/business-fact-storage.ts) · [报价能力事实](../../../../../packages/rental-core/src/mysql-quote-capabilities.ts) · [库存依据](../../../../../packages/rental-core/src/quote-inventory-basis.ts)
 
 订单聚合、资产/库存、归还处置、工单、检查及续租/换货事实经[核心事实适配](rental-core-fact.repository.ts)进入Rental包。适配只供给原Auth/ALS、空间/组织范围、检查事件和同一数据库；锁序、金额、原库存流水、历史快照及调用方事务由原仓储实现保留。订单编号、排序、占用、承运期间、用量读数和工单范围的旧入口均再导出正式子出口。[核心事实实现](../../../../../packages/rental-core/src/mysql-core-facts.ts) · [本表与宿主接点](../../../../../packages/rental-core/src/core-fact-storage.ts) · [冻结检查](../../../../../packages/rental-core/src/mysql-order-inspection-basis.ts) · [单件配货依据](../../../../../packages/rental-core/src/mysql-order-allocation-pickup.ts)

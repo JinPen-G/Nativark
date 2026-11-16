@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-allocation-runtime-20261116"></a>
+
+## Rental 配货、办理锁、自动扫描与经营空间边界（2026-11-16）
+
+固定父版322f7228c4e0117d75cd82b8a676ef75985aa198已普通推送并回读实际远端，main62ca在本树祖先，包含原配货/空间源码及接续原文。14个配货方法、原办理锁/记录异常/自动扫描及两个经营空间边界函数实际迁入Rental包，旧API成为四项依赖的Nest接线和空间函数再导出。私有存储复用原事实/配置模型视图，仅补配货本身使用的allocation计数方法；失败事件窄端口只传原事务、范围和订单引用。[配货实现](../../../packages/rental-core/src/mysql-allocation.ts) · [私有接点](../../../packages/rental-core/src/allocation-storage.ts) · [空间边界](../../../packages/rental-core/src/mysql-workspace-scope.ts)
+
+原资产/数量/缓冲判定、固定资源锁序、历史allocated/释放行、预分配/改配/锁定/释放和人工保护保持。办理锁既有事务参与、过期接手和带原因人工解除/双重审计保留。自动扫描仍检查已有分配，实际自动变更只在原配置开启时发生；并发防重、逐单事务、失败修订核对和finally释放running标记未改。原AppModule仍只登记一处配货provider，AI通过原moduleRef读取该实例，未增加第二个作业执行者。[Nest兼容入口](../../../apps/api/src/modules/rental-core/rental-allocation.service.ts) · [当前装配](../../../apps/api/src/app.module.ts) · [AI直接消费者](../../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)
+
+`readRecordedFulfillmentIssue`继续投影原已记录异常及来源修订，不触发扫描、资源锁、模型或新事务，也不以当前可用库存重造历史原因。失败事件仍在原聚合写入后参加同一事务，缺事件适配保持未捕获，不由Rental伪造成功。经营空间解析优先读取公共Auth/ALS并核目标租户，原初始化/恢复只读已有default标记，缺空间拒绝；请求授权仍由原Guard先裁定。跨空间配置写入使用同一断言，不按全局id覆盖其他租户。新增 /mysql-allocation 与 /mysql-workspace-scope 正式出口，旧宿主事务别名原位绑定Prisma，领域根出口不加载私有适配。[原空间入口](../../../apps/api/src/modules/rental-core/workspace-scope.ts) · [模块接入说明](../../../packages/rental-core/README.md)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版执行正文/运行时对照 | 14个配货方法和2个空间函数规范化后完全一致；类型导入整理及缩短注释不改变编译运行时，原锁、状态、金额/数量和错误分支保留 |
+| `node --no-compilation-cache - api-allocation-current`＋四份原用例，stdin内存编译/装载 | PID20684退出0、stderr空；TS5.9.3及Prisma5.22官方原238模型声明，十配置零诊断。Rental123根/845源/246输出，原API988根/2365源/1976输出，没有写生成物 |
+| 原配货、交接锁、空间与履约消费者 | 配货政策16个原断言、经营空间4个原场景通过；原交接锁/履约Node测试11/11，0 fail/skip/todo/cancelled。覆盖跨租户空间、当前停用拒绝、原释放/物理归还及双重审计，四份原脚本均未修改 |
+| 注入和直接注册静态核对 | 原四项依赖顺序、第四项Optional/Inject编译元数据保持；原AppModule一处provider、Controller/换货/AI同一签名。原60秒unref计时与销毁钩子正文一致；本片未启动真实计时作业或宿主 |
+| 文档/出口/格式 | 现有九份资料1186个本地链接、166个锚点引用和91个表格，0问题；两个正式出口与typesVersions一致，git diff --check退出0。原需求/任务、锁文件和其他专项源码不改，新增测试文件0 |
+
+本片没有新的行为失败或测试豁免。源码备注和模块导读随实现更新，复杂分支继续解释锁序、历史依据和事件提交原因。原11项Node测试及短声明/正文核对不是实际配货数据库或多实例作业验收；rental-allocation-persistence要求专用真库，本片未执行。标准Core数据/迁移/Seed、Controller、页面/客户端、其余作业/回调、AI行业适配和正式Rental装配仍未完成，PCH-08及其他原任务未跨下一门槛，不按文件/断言数升档。
+
+验证产物均在内存，SQL、仓储、配置和事务仍是明确fixture，无依赖安装、.env读取、真实服务/HTTP/数据库或供应商调用；output/.tmp无新增残留，PID20684已结束。原840文件/91,808,304字节临时环境与1个空日志继续已集中待清理，本日原生PowerShell删除审批拒绝与责任清单见[确认阶段](#core-rental-order-confirmation-20261116)，没有换壳/工具绕过。旧外观、导航/MCP附件及DTO关联缺口继续保留。
+
+中文阶段提交只含本片源码、包出口和现有导读/记录/接续，普通推送codex/platform-core-extraction并回读实际目标远端；由包含本节的Git版本定位，不合main或发布。下一入口是剩余Rental服务/Controller及标准装配，不再复制已迁入实现。
+
 <a id="core-rental-order-confirmation-20261116"></a>
 
 ## Rental 订单确认、批准参加者与商户委托独立归属（2026-11-16）

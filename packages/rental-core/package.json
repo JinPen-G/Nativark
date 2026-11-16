@@ -398,6 +398,14 @@
     "./server-quote-access": {
       "types": "./dist/server-quote-access.d.ts",
       "default": "./dist/server-quote-access.js"
+    },
+    "./mysql-allocation": {
+      "types": "./dist/mysql-allocation.d.ts",
+      "default": "./dist/mysql-allocation.js"
+    },
+    "./mysql-workspace-scope": {
+      "types": "./dist/mysql-workspace-scope.d.ts",
+      "default": "./dist/mysql-workspace-scope.js"
     }
   },
   "typesVersions": {
@@ -692,6 +700,12 @@
       ],
       "server-quote-access": [
         "dist/server-quote-access.d.ts"
+      ],
+      "mysql-allocation": [
+        "dist/mysql-allocation.d.ts"
+      ],
+      "mysql-workspace-scope": [
+        "dist/mysql-workspace-scope.d.ts"
       ]
     }
   },
