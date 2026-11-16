@@ -11,6 +11,36 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-bound-drafts-settings-20261117"></a>
+
+## Rental 绑定规则/日历草稿与批准设置归属（2026-11-17）
+
+固定父版db9d1716327b2ab9b1b365f9c50ffcb38e0e5b81已提交并真实远端回读，保存原四项实现与原失败检查点。实际迁入[规则草稿](../../../packages/rental-core/src/bound-rule-draft.ts)、[日历草稿](../../../packages/rental-core/src/bound-calendar-draft.ts)、[批准设置](../../../packages/rental-core/src/mysql-approved-settings.ts)及[设置授权桥](../../../packages/rental-core/src/approved-settings-route-authority.ts)，四个旧API路径仅再导出同一类/错误/schema。新[私有存储视图](../../../packages/rental-core/src/bound-draft-storage.ts)只描述本链的表和原事务/业务参加者，原AI/批准应用继续使用原构造和当前Guard，不新建执行者或HTTP路由。[包接入路线](../../../packages/rental-core/README.md#使用与构建) · [原消费者路线](../../../apps/api/src/modules/rental-core/README.md)
+
+保留Tenant父锁→空间/品类锁、完整候选reviewHash、原规则版本链、精确日历revision/规则JSON CAS、业务草稿和原收据同事务及提交后的当前复验/缓存刷新。已发布规则只恢复为新草稿；保存不发布、不创建AI任务或批准。设置保留当前真实Guard/凭据与staff/operator指纹，通知白名单、配置CAS、批准消费和收据同事务；历史材料/原结果不要求重新执行。原非关键缓存刷新失败继续通过cacheRefreshed=false明确返回，不伪造配置回滚。[原AI规则](../../../apps/api/src/modules/ai-native/scenes/opening-rule-draft.composition.ts) · [原AI日历](../../../apps/api/src/modules/ai-native/scenes/opening-calendar-draft.composition.ts) · [原设置应用](../../../apps/api/src/modules/ai-native/approval-execution/approved-settings-application.composition.ts)
+
+包新增四个正式子出口和声明/typesVersions，新增与原API一致的可选Nest core peer并精确同步lock；公共领域根出口不导入这组MySQL/路由服务。该私有适配仍使用Prisma生成模型、原SQL runtime及Nest ExecutionContext，不能称完全去ORM/框架依赖；公共Core接入清单不暴露这些类型。官方日历源是原平台级资源，留待公共资源片处理，不随Rental覆盖/草稿迁移。[原官方资源](../../../apps/api/src/modules/rental-core/official-calendar-source.service.ts)
+
+### 原失败核定与必要验证
+
+在原请求夹具补两张收据表之后，两项已采用样例接同一序列化存储上的真实RentalCategoryResolver，读取原categoryVersionId/adoptionRevision，不给生产校验或权限加兜底。PID47008运行原六项草稿，十配置0诊断，3通过/3失败。两个旧用例仍期待冲突只抛错/零记录；已沿固定main来源75f86be57e772218774080d0d337dde6536b26df及[原拒绝收据阶段](../../AI%20Native/AI%20Native-开发记录.md#ain16-original-draft-rejection-refresh-20261113)核定，当前合同返回rejected_no_commit且必须保留原拒绝账。第三项旧日历预览将AI_REVISION_CONFLICT包装为PROVIDER_UNAVAILABLE，原路径问题继续保留，未改生产包装、断言或记为通过。[原六项用例](../../../tests/ai-native-plan-input-source.test.cjs)
+
+本片必要验证复用原夹具、三项原正常用例及stdin内两项当前拒绝合同探针，断言完整业务/AI行不变、仅一张拒绝收据、同键与原读取返回同一拒绝、不能重做。两项探针没有落成新测试脚本；不把它们说成原六项全绿。原设置冒烟继续覆盖通知限定、当前Guard/品类、版本/CAS、原participant同事务、unknown回读和历史幂等，SQL/认证/批准参加者均是明确fixture。[原设置验证](../../../tests/category-config-write.test.cjs)
+
+| 实际命令/核验 | 结果与证明范围 |
+| --- | --- |
+| node --no-compilation-cache - api-draft-settings-current-contract-baseline + 两份原入口，stdin SHA-256 f1307d2cb72999c2f635f204bc7025aa0aacf3dd7e27e95e995cb3a59b2d63a2 | PID52536退出0；三项原正常链及两项当前拒绝探针5/5，原设置冒烟通过；没有业务网络或真库 |
+| 同一stdin与入口，mode=current-contract-candidate | PID11560退出0；同样5/5及设置冒烟通过。只读主树依赖，所有声明/JS留内存 |
+| 同值隔离级别与原SQL tag规范化后对照固定父版 | 30执行单元正文相等（规则7/日历7/设置15/授权1）；四项草稿schema初始化表达式相等 |
+| 官方Prisma5.22的238模型声明/TypeScript5.9.3与十个正式配置 | 0诊断；Rental153根/877源/306输出，API988根/2396源/1976输出；公共包和正式直接消费者均编译 |
+| 正式出口/声明、lock与领域根依赖核验 | 四个新子出口对应实际源码/声明目标，optional peer与lock相等；根出口无MySQL服务import |
+
+类型和离线行为不代表照片IO、真实HTTP/数据库/浏览器、完整Nest宿主、干净安装、多真实Core、升级/回退、独立接手或审查通过。原旧三项草稿结果及其他已登记失败/未验保留，未放宽原规范或用源码等价代替完整验收。PCH本片仍未跨下一门槛，任务身份/依赖/顺序/百分比保持；剩余Rental服务/Controller、schema/迁移/Seed、页面/客户端/作业/AI及公共组织/订阅/集成继续推进。
+
+定向九份文档1380个本地链接/171个锚点/97个表格0问题，差异格式核验退出0；原需求/任务无差异。
+
+源码头、模块README、根阅读入口与接续同片更新。所有本片worker退出、output/.tmp无新增文件；旧两处残留仍集中待清理，删除审批拒绝与责任manifest沿[检查点](#core-rental-draft-fixture-checkpoint-20261117)保留，不称已删除或释放空间。阶段仅中文提交当前任务分支，普通推送后回读实际远端，未合main或发布。
+
 <a id="core-rental-draft-fixture-checkpoint-20261117"></a>
 
 ## 原草稿回归夹具与底层冲突检查点（2026-11-17）

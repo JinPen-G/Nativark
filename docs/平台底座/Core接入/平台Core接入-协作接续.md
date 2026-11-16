@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-原检查同意/批准执行阶段已提交并真实远端回读5f4e283f7558a45e24f97038f11995bc8d499d09，保存当前原草稿/设置实现及完整接续。当前准备迁移规则/日历绑定草稿与批准设置/路由授权四项应用，五份候选只在内存，生产实现未变；原AI请求夹具补两张明确空收据表，六项原草稿仍1通过/5失败。已定位已采用样例缺真实品类解析器，先补同存储接线并核下层错误，再迁移，不能放宽生产绑定或包装失败为通过。[草稿检查点](平台Core接入-开发记录.md#core-rental-draft-fixture-checkpoint-20261117) · [已提交同意/执行](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117) · [检查阶段](平台Core接入-开发记录.md#core-rental-inspection-runtime-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114)与[品牌原稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)在固定Git保留。
+当前规则/日历绑定草稿、批准设置及原Guard授权桥实际迁入Rental包，四个旧路径仅再导出同一实现；固定父版db9d1716327b2ab9b1b365f9c50ffcb38e0e5b81保存原实现及完整接续。必要当前合同的三项原正常链/两项拒绝探针与原设置冒烟，基线/候选均通过；原六项的3个旧失败按来源和实际错误保留，未改断言或冒称全绿。下一步继续剩余服务/Controller与标准装配，官方日历源按平台资源处理。[当前草稿/设置阶段](平台Core接入-开发记录.md#core-rental-bound-drafts-settings-20261117) · [原失败检查点](平台Core接入-开发记录.md#core-rental-draft-fixture-checkpoint-20261117) · [前一同意/执行](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；MIT及品牌原稿继续按固定Git保留。
 
 ## 2. 已有实际接点
 
@@ -31,7 +31,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 3. 下一实施入口与未完项
 
-1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。下一步迁入剩余服务和Controller，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。会员、企业政策、文件与当前授权仍由原宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
+1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行、规则/日历绑定草稿、批准设置及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。下一步迁入剩余服务和Controller，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。会员、企业政策、文件与当前授权仍由原宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
 2. 公共组织、安全、完整订阅办理和基础集成尚未全部独立；补实际API/UI与数据所有权，不能将已有认证、基本资料或期限reader当作完整公共能力。原有效会话的wid必须作为签名证据核验，不在公共业务workspace恢复Rental权限；原简称省略/null/空字符串及审计兼容保持。[公共兼容基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115) · [原身份SQL](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115) · [公共认证](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)
 3. 完成原Rental主AppModule/Guard与各audience接线。主provider通过明确imports/exports供给同一数据库、人员、订阅、审计和部署目录，总Core模块与单独模块不重复登记Controller。标准HTTP从所选Core贡献生成，未知政策拒绝；staff/client沿各自正式授权，不按operator使用权直接放行。[统一装配](平台Core接入-开发记录.md#core-application-assembly-20261115) · [HTTP政策](平台Core接入-开发记录.md#core-http-policy-registration-20261115)
 4. 生命周期仍须实际核租户授权、成员分配、原绑定/初始化、停新、排空和代码移除。当前授权结果与随后读取错误分开，unknown只读原键；撤权先取消旧请求、清除目标Core缓存。Core绑定/当前范围/实际就绪分别读取，跨事务不逆序持父锁。移除预检clear不执行删除，缺业务/AI/回调/作业/历史依赖证据不得移除。[结果读取/缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115) · [范围/就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115) · [移除预检](平台Core接入-开发记录.md#core-removal-preflight-20261115) · [工单移除依赖](平台Core接入-开发记录.md#core-tickets-removal-data-20261115)
@@ -49,7 +49,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-当前草稿检查点的十配置0诊断，原六项草稿消费者1通过/5失败。已读取包装前的品类绑定错误；下一步接真实解析器并核其余日历冲突，测试和迁移尚未完成。前一检查同意/批准执行19单元、原Nest4/8项注入和修正时钟后的基线/候选3/3证据继续保留。SQL/认证/事务及Core提交为明确fixture，照片正向字节、真实HTTP/数据库/浏览器、完整包安装/更新、独立接手及审查仍未验。所有本片worker已退出，output/.tmp无新增产物。[当前草稿证据](平台Core接入-开发记录.md#core-rental-draft-fixture-checkpoint-20261117) · [同意/执行证据](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117)
+当前草稿/设置30执行单元与固定父版相等，四项草稿schema相等，十配置0诊断；原正常三项加当前拒绝探针两项，基线/候选均5/5及原设置冒烟通过。原六项在修正已采用夹具接线后3过/3失败：两个旧断言与main原拒绝账机制不同，第三个旧日历预览仍包装为PROVIDER_UNAVAILABLE，问题留原记录，未删断言。Prisma生成模型/Nest仅在该私有MySQL/授权适配层使用。SQL/认证/事务及批准参加者是明确fixture；真实HTTP/数据库/浏览器、完整包安装/更新、独立接手及审查仍未验。所有本片worker退出，output/.tmp无新增文件。[当前阶段证据](平台Core接入-开发记录.md#core-rental-bound-drafts-settings-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 

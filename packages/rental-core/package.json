@@ -482,6 +482,22 @@
     "./mysql-approved-exchange-execution": {
       "types": "./dist/mysql-approved-exchange-execution.d.ts",
       "default": "./dist/mysql-approved-exchange-execution.js"
+    },
+    "./bound-rule-draft": {
+      "types": "./dist/bound-rule-draft.d.ts",
+      "default": "./dist/bound-rule-draft.js"
+    },
+    "./bound-calendar-draft": {
+      "types": "./dist/bound-calendar-draft.d.ts",
+      "default": "./dist/bound-calendar-draft.js"
+    },
+    "./mysql-approved-settings": {
+      "types": "./dist/mysql-approved-settings.d.ts",
+      "default": "./dist/mysql-approved-settings.js"
+    },
+    "./approved-settings-route-authority": {
+      "types": "./dist/approved-settings-route-authority.d.ts",
+      "default": "./dist/approved-settings-route-authority.js"
     }
   },
   "typesVersions": {
@@ -839,6 +855,18 @@
       ],
       "mysql-approved-exchange-execution": [
         "dist/mysql-approved-exchange-execution.d.ts"
+      ],
+      "bound-rule-draft": [
+        "dist/bound-rule-draft.d.ts"
+      ],
+      "bound-calendar-draft": [
+        "dist/bound-calendar-draft.d.ts"
+      ],
+      "mysql-approved-settings": [
+        "dist/mysql-approved-settings.d.ts"
+      ],
+      "approved-settings-route-authority": [
+        "dist/approved-settings-route-authority.d.ts"
       ]
     }
   },
@@ -857,7 +885,8 @@
     "@prisma/client": "^5.22.0",
     "@rental-os/platform-server": "0.1.0",
     "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.1"
+    "class-validator": "^0.14.1",
+    "@nestjs/core": "^10.4.15"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -873,6 +902,9 @@
       "optional": true
     },
     "class-validator": {
+      "optional": true
+    },
+    "@nestjs/core": {
       "optional": true
     }
   }

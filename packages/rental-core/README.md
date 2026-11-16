@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行应用，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿与批准设置应用，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -63,9 +63,16 @@
 | [客户检查同意](src/mysql-exchange-inspection-consent.ts)、[身份/文件接点](src/exchange-inspection-ports.ts) | /mysql-exchange-inspection-consent 复用原ClientAuth/ALS与本人订单，材料、照片和确认分别核当前依据；同意与原键同事务，历史只读原收据 |
 | [批准换货执行](src/mysql-approved-exchange-execution.ts)、[窄参加者](src/approved-exchange-execution-ports.ts) | /mysql-approved-exchange-execution 在同一事务提交Core变更、授信、批准消费和原收据，提交后才发布；失应答/到期后的恢复不重新准备、计价或执行 |
 | [原换货批准](src/mysql-approved-exchange.ts)、[企业政策接点](src/approved-exchange-policy.ts)、[参与者合同](src/approved-exchange-ports.ts) | /mysql-approved-exchange 核原费用确认、检查/客户同意和当前企业政策，唯一WeakMap把依据绑定到原事务；调用方不得以JSON或新事务替代 |
-| [设置批准合同](src/approved-settings-ports.ts)、[设置输入校验](src/approved-settings-validation.ts) | /approved-settings-ports 与 /approved-settings-validation 维护原修订、批准/消费、原操作与unknown语义，宿主事务类型按真实组合实例化 |
+| [规则绑定草稿](src/bound-rule-draft.ts)、[日历绑定草稿](src/bound-calendar-draft.ts)、[私有本表/事务视图](src/bound-draft-storage.ts) | /bound-rule-draft 与 /bound-calendar-draft 保留完整候选复核、精确目标版本/CAS与原操作收据；规则历史恢复为新草稿，草稿保存不发布或授予业务权限 |
+| [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+绑定草稿从 `@rental-os/rental-core/bound-rule-draft` 或 `/bound-calendar-draft` 创建，供给同一数据源和原业务服务。调用方先走原规则/日历Guard，再将当前复验函数传给 `review`、`save` 和 `read`。`review` 只返回完整候选及核对摘要，`save` 在原父锁→空间锁内校验摘要与目标版本，业务草稿和原收据同事务；`read` 按原键回读。规则历史恢复产生新草稿，已有草稿使用原CAS，保存不发布、不创建AI任务或批准。[原规则消费者](../../apps/api/src/modules/ai-native/scenes/opening-rule-draft.composition.ts) · [原日历消费者](../../apps/api/src/modules/ai-native/scenes/opening-calendar-draft.composition.ts)
+
+批准通知设置从 `/mysql-approved-settings` 创建，组合 `/approved-settings-route-authority`、原Core和批准参加者。原路由桥每次调用真实Guard及当前凭据，保留staff/operator和权限指纹；配置提交、批准消费与收据使用同一事务。`readAuthorizedChange` 核当前可执行条件，`readHistoricalChange` 只读冻结原材料，`readOperation` 核原批准消费后读原收据；unknown不换键重发。[原设置消费者](../../apps/api/src/modules/ai-native/approval-execution/approved-settings-application.composition.ts) · [原定向验证](../../tests/category-config-write.test.cjs)
+
+这组私有MySQL/路由适配继续使用原Prisma生成模型及Nest ExecutionContext；相关可选peer由实际宿主提供，公共Core清单与领域根出口不加载这些服务。其他业务Core按通用接入合同实现自身领域，不必使用Rental草稿或行业表。
 
 客户同意从 `@rental-os/rental-core/mysql-exchange-inspection-consent` 创建，供给同一存储、幂等、原客户认证和可选冻结照片读取服务。批准执行从 `/mysql-approved-exchange-execution` 创建，供给原Core、试算、业务、检查、幂等、企业政策和授信实例；企业参加者使用 `ApprovedExchangeTransaction<TTransaction>`。普通客户只能对本人的具体检查同意，费用确认与营运执行仍为独立授权。[原客户provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-consent.service.ts) · [原执行provider](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts) · [企业直接消费者](../../apps/api/src/modules/enterprise/enterprise-merchant.controller.ts)
 
