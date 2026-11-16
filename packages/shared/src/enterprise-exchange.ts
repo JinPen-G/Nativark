@@ -121,24 +121,7 @@ export interface CloseEnterpriseExchangeRequest extends EnterpriseChangeRequest 
 export type EnterpriseExchangeRequestOriginalResult = EnterpriseExpenseRequestOriginalResult<EnterpriseExchangeApprovalView>;
 export type EnterpriseExchangeRequestClosureReceipt = EnterpriseExtensionRequestClosureReceipt;
 
-export interface EnterpriseExchangeChoicesQuery {
-  allocationId?: string;
-  replacementItemGroupId?: string;
-}
-/** Current candidates only; availability is not a reservation or expense approval. */
-export interface EnterpriseExchangeChoices {
-  orderId: string;
-  orderNo: string;
-  expectedOrderUpdatedAt: string;
-  workspaceId: string;
-  applicantCustomerId: string;
-  lines: Array<{ orderLineId: string; allocationId: string; itemGroupId: string; itemGroupName: string; quantity: number; assetNo?: string }>;
-  replacements: Array<{ itemGroupId: string; name: string; inventoryMode: "serialized" | "quantity"; pricingGroups: Array<{ id: string; name: string }> }>;
-  assets: Array<{ assetId: string; assetNo: string }>;
-  selectedAllocationId?: string;
-  selectedReplacementItemGroupId?: string;
-  reservation: "not_reserved";
-}
+export type { EnterpriseExchangeChoicesQuery, EnterpriseExchangeChoices } from "@rental-os/rental-core/exchange-choices";
 export interface RequestEnterpriseExchangeApproval extends EnterpriseChangeRequest {
   orderId: string;
   expectedOrderUpdatedAt: string;

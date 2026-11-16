@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-exchange-documents-20261117"></a>
+
+## Rental 换货试算与不可变订单凭证独立归属（2026-11-17）
+
+固定父版c31f0886df45fd2d7a7285920a91609f3c9b86df已普通推送并回读；实际远端main62ca183f10b7c316ab63c28ef6d04ee88d06488b在本树祖先，开工时本树干净、无合并/拣选。原换货候选/试算、客户凭证纯渲染、不可变归档及历史读取实际迁入Rental包，旧API只供给同一Nest依赖或再导出。候选与凭证合同也成为包内单源，原shared及营运/企业/客户/后台消费者继续使用原字段。[试算](../../../packages/rental-core/src/mysql-exchange-preview.ts) · [私有服务与事务](../../../packages/rental-core/src/exchange-preview-ports.ts) · [候选合同](../../../packages/rental-core/src/exchange-choices.ts) · [凭证合同](../../../packages/rental-core/src/document-contracts.ts) · [纯渲染](../../../packages/rental-core/src/document-renderer.ts) · [归档与历史](../../../packages/rental-core/src/mysql-documents.ts) · [快照存储](../../../packages/rental-core/src/document-storage.ts)
+
+试算继续锁原订单、读取同一业务配置组合、校验整行/库存方式/地点/资产候选并按原冻结价格段重价；需容量的新服务缺组件时拒绝，费用批准、换货提交与收付款不在试算执行。凭证逐字段释放客户可读事实并转义HTML，内容hash与四类模板保持；同内容复用原不可变版本，订单事实变化追加版本。竞争只捕获同一Prisma SQL runtime的原P2002错误并重读原赢家，其他错误或未读到赢家继续抛出。历史先读取当前订单核空间，含资金版本仍核当前财务权限，不按当前价格/商品重造历史。[原试算provider](../../../apps/api/src/modules/rental-core/rental-exchange-preview.service.ts) · [原凭证provider](../../../apps/api/src/modules/rental-core/rental-document.service.ts) · [原渲染出口](../../../apps/api/src/modules/rental-core/rental-document-renderer.ts)
+
+新增/exchange-choices、/document-contracts、/document-renderer、/mysql-exchange-preview与/mysql-documents正式出口及对应typesVersions。领域根和纯合同不导入Nest/生成模型/数据库，私有MySQL视图仅供给本表方法和实际服务；纯渲染构造保留原Optional兼容，生产归档仍须实际存储。原Controller路由/Guard、DTO/OpenAPI及各端字段不改，API与模块SDK分别定位；客户和企业audience不因共用实现取得营运权限。[营运文档API](../../../apps/api/src/modules/rental-core/rental-core.controller.ts) · [客户文档API](../../../apps/api/src/modules/client/client-api.controller.ts) · [企业候选API](../../../apps/api/src/modules/enterprise/enterprise-workflows.controller.ts) · [原OpenAPI](../../../apps/api/src/contracts/openapi-document.ts) · [模块接入导读](../../../packages/rental-core/README.md)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版执行正文对照 | 换货4、渲染14、凭证7，共25个执行单元一致；仅统一Prisma错误类的导入别名后对照。构造顺序/Optional另以实际编译元数据核对，没有调整价格、金额、权限或快照算法 |
+| 原三份用例前后对照，stdin内存编译/装载 | node --no-compilation-cache - api-document-exchange-baseline与api-document-exchange-candidate，PID52200/57308均退出0、stderr空。两份凭证脚本全部原断言通过，换货计价Node套件93/93，0 fail/skip/todo/cancelled；原三份脚本未修改 |
+| 兼容入口与快照竞争短探针 | node --no-compilation-cache - api-document-exchange-boundary，PID55268退出0；两个Node用例2/2，0 fail/skip/todo/cancelled。旧试算/凭证/渲染共用相同包内方法，五项试算依赖及第4号Optional、三项凭证依赖及第2号Optional保持；真实应用在显式fixture上读唯一键赢家、无赢家拒绝、非Prisma/其他存储错误原样保留 |
+| 必要类型/内存产物 | TS5.9.3与Prisma5.22官方原238模型声明，最终十配置零诊断；Rental139根/861源/278输出，原API988根/2381源/1976输出。全部JS/声明留内存，不安装或覆盖生成客户端 |
+| 文档/出口/格式 | 根和模块导读、原记录/接续同步；五个正式出口及typesVersions对应源码，package与lock依赖/peer/meta一致，lock和原需求/任务未改。定向链接/锚点/表格与git diff --check通过；新增测试文件0 |
+
+本片没有新的源码或行为失败。PCH-08仍缺完整Controller/标准Core主装配、初始化/数据/迁移/Seed、页面/客户端和作业/AI行业适配；原05/06生命周期及公共服务/异步接点也未覆盖完整范围，故没有跨原下一门槛。公共组织、安全、完整订阅/集成、标准包干净安装、多真实Core、独立更新/回退、接手与独立审查继续按原任务推进，不以迁出文件数或局部绿色计分。
+
+全部验证使用原离线preload和端口1数据库URL，SQL/仓储/事务为明确fixture，没有环境文件、真实HTTP/数据库/供应商/模型、服务或迁移。三个worker均退出，output/.tmp为空。2026-11-17同一原生PowerShell Remove-Item命令在启动前被自动审批以blocked by policy拒绝，命令内路径/进程预检查未执行；随后只读核定原归属与0链接，仍有840文件/91,808,304字节环境及1个0字节日志。两份原责任清单已更新尝试时间为2026-11-16T17:55:15.279Z，继续集中于主树output/.cleanup-pending/pch-preparation下原任务目录，不使用旧环境、不换壳或工具绕过，也未释放空间。旧外观、导航/MCP附件及DTO十处缺口保留。
+
+中文阶段提交只包含本片源码、出口和现有资料，普通推送codex/platform-core-extraction并回读实际远端，由包含本节的Git版本定位；不合main或发布。下一步迁出换货检查准备/媒体参加者及剩余HTTP服务，继续形成可独立取出的完整Rental标准包。真实环境、完整安装/升级和正式验收未完成。
+
 <a id="core-rental-report-jobs-20261117"></a>
 
 ## Rental 工作台、经营报表与到期作业独立归属（2026-11-17）

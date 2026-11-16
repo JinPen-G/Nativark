@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-本次工作台/报表/作业的固定父版为f775a6924cfdb9a6ce46e74b6b8903764490f92a，包含本次修改前的完整接续原文，直接用Git定位，不重复备份。阶段实现、验证及具体源码提交沿[开发记录](平台Core接入-开发记录.md#core-rental-report-jobs-20261117)读取。需求/任务身份、依赖、顺序和正式业务规则保持批准依据；品牌原稿及许可固定来源也在Git。[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114) · [品牌保留稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)
+本次换货试算/凭证的固定父版为c31f0886df45fd2d7a7285920a91609f3c9b86df，包含本次修改前的完整接续原文，直接用Git定位，不重复备份。阶段实现、验证及具体源码提交沿[开发记录](平台Core接入-开发记录.md#core-rental-exchange-documents-20261117)读取。需求/任务身份、依赖、顺序和正式业务规则保持批准依据；品牌原稿及许可固定来源也在Git。[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114) · [品牌保留稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)
 
 ## 2. 已有实际接点
 
@@ -25,7 +25,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 | 期限与实际数据观察 | 公共统一订阅期限reader、固定公共SQL/结构检查、工单实际物理reader及原Prisma账已提供，目录/升级预检消费真实证据接点。当前数据库/迁移尚未实际执行，清单不能补成功。[期限/公共数据](平台Core接入-开发记录.md#core-public-data-term-20261115) · [工单物理与原账](平台Core接入-开发记录.md#core-mysql-data-observation-20261115) |
 | 公共后台 | [platform-admin](../../../packages/platform-admin/README.md)持有原外壳/UIArc、主题/语言/音效、通知/休息/面板、页面/表单/列表和稳定会话/请求/缓存端口；[零Core Web](../../../apps/platform-admin/README.md)与[工单Web](../../../apps/example-tickets-admin/README.md)复用同一应用工厂。Core目录/授权面板、人员角色、租户创建/资料/状态及本人安全已接公共页面。[目录](平台Core接入-开发记录.md#core-access-directory-ui-20261115) · [人员角色](平台Core接入-开发记录.md#core-public-access-pages-20261115) · [租户页面](平台Core接入-开发记录.md#core-public-tenant-pages-20261115) · [恢复口令/角色删除](平台Core接入-开发记录.md#core-public-access-actions-20261115) · [本人安全](平台Core接入-开发记录.md#core-public-self-security-20261115) |
 | 非租赁示范 | [工单Core](../../../packages/example-tickets-core/README.md)有独立领域/MySQL迁移、8条业务HTTP政策、原收据与四页声明。API/Web共用标准包与版本锁核验、公共数据库和权限；所选权限登记只写元数据，不授予角色或Core。[独立宿主](平台Core接入-开发记录.md#core-tickets-independent-host-20261115) · [权限登记](平台Core接入-开发记录.md#core-permission-registration-20261115) |
-| Rental包与兼容入口 | [rental-core](../../../packages/rental-core/README.md)已持有原主核心与报价/营销聚合、订单确认/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业及经营空间边界、配置与业务请求DTO、合同、品类解析/身份、计价/器材、能力/审计/实例、恢复快照/原收据、业务动作事务和核心/业务配置，以及订单/资产/库存/处置/工单/检查/续租换货及报价/券/奖励/通知事实。原shared/API消费同一实现；资金事实/门禁与原事件、企业应收/原回款收据、服务容量、原批准/检查同意、检查/换货/续租及服务规则也成为包内单源，完整服务/数据/页面/作业/AI和标准主装配继续迁移。[原业务导读](../../../apps/api/src/modules/rental-core/README.md) · [核心事实阶段](平台Core接入-开发记录.md#core-rental-core-facts-20261116) |
+| Rental包与兼容入口 | [rental-core](../../../packages/rental-core/README.md)已持有原主核心与报价/营销聚合、订单确认/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、换货试算/不可变凭证及经营空间边界、配置与业务请求DTO、合同、品类解析/身份、计价/器材、能力/审计/实例、恢复快照/原收据、业务动作事务和核心/业务配置，以及订单/资产/库存/处置/工单/检查/续租换货及报价/券/奖励/通知事实。原shared/API消费同一实现；资金事实/门禁与原事件、企业应收/原回款收据、服务容量、原批准/检查同意、检查/换货/续租及服务规则也成为包内单源，完整服务/数据/页面/作业/AI和标准主装配继续迁移。[原业务导读](../../../apps/api/src/modules/rental-core/README.md) · [核心事实阶段](平台Core接入-开发记录.md#core-rental-core-facts-20261116) |
 
 以上已有类型、静态、内存构建、实际Nest容器或离线行为证据，具体层级从各阶段记录读取。它们不代表浏览器、真实HTTP/数据库、完整安装或正式验收通过。
 
@@ -49,11 +49,11 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-工作台/CSV/报表/到期作业的42个执行单元与固定父版一致，最终十配置零诊断；原工作台/作业全部断言和两个Nest/报表短探针通过，查询范围、总数/金额/快照及溢出/本人范围拒绝保持。两份报表脚本要求实际数据库，未执行。前一DTO、配货/空间与确认证据可从原记录读取。所有验证留内存，SQL/仓储和事务为明确fixture，output/.tmp为空，无新环境或后台进程。真实HTTP/数据库/浏览器、完整Core包安装/更新、独立接手和审查未验。[当前证据](平台Core接入-开发记录.md#core-rental-report-jobs-20261117)
+换货试算/纯渲染/凭证应用的25个执行单元与固定父版一致，最终十配置零诊断；三份原凭证/换货用例前后均通过，换货93项无失败/跳过。两个Nest/原快照竞争短探针通过，原注入/Optional顺序、唯一键赢家回读和其他错误保留。工作台/报表/作业、DTO及其他既有阶段证据从原记录读取；两份真库报表脚本未执行。所有验证留内存，SQL/仓储和事务为明确fixture，output/.tmp为空，无新环境或后台进程。真实HTTP/数据库/浏览器、完整Core包安装/更新、独立接手和审查未验。[当前证据](平台Core接入-开发记录.md#core-rental-exchange-documents-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 
-旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。2026-11-17核路径、归属、链接与进程后，同一原生PowerShell删除仍被自动审批在启动前以blocked by policy拒绝；没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
+旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17同一原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；随后只读核定原文件数/体积及0链接，所有本任务worker已退出、不使用旧环境，两份清单尝试时间更新为2026-11-16T17:55:15.279Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
 
 旧外观测试17例16过/1个静态失败、总导航三份历史附件及MCP导读五个原隔离附件缺失继续保留；近期全局文档检查的稀疏未检目标须按固定Git定位，不删除引用或修改检查器掩盖。原授权/生成/MCP检查的审批拒绝历史保留，后来定向补证不能冒称完整宿主验收。[当前MCP审计](平台Core接入-开发记录.md#core-original-mcp-audit-20261115) · [导读缺链](平台Core接入-开发记录.md#core-rental-capability-runtime-20261116)
 

@@ -434,6 +434,26 @@
     "./mysql-due-jobs": {
       "types": "./dist/mysql-due-jobs.d.ts",
       "default": "./dist/mysql-due-jobs.js"
+    },
+    "./exchange-choices": {
+      "types": "./dist/exchange-choices.d.ts",
+      "default": "./dist/exchange-choices.js"
+    },
+    "./document-contracts": {
+      "types": "./dist/document-contracts.d.ts",
+      "default": "./dist/document-contracts.js"
+    },
+    "./document-renderer": {
+      "types": "./dist/document-renderer.d.ts",
+      "default": "./dist/document-renderer.js"
+    },
+    "./mysql-exchange-preview": {
+      "types": "./dist/mysql-exchange-preview.d.ts",
+      "default": "./dist/mysql-exchange-preview.js"
+    },
+    "./mysql-documents": {
+      "types": "./dist/mysql-documents.d.ts",
+      "default": "./dist/mysql-documents.js"
     }
   },
   "typesVersions": {
@@ -755,6 +775,21 @@
       ],
       "mysql-due-jobs": [
         "dist/mysql-due-jobs.d.ts"
+      ],
+      "exchange-choices": [
+        "dist/exchange-choices.d.ts"
+      ],
+      "document-contracts": [
+        "dist/document-contracts.d.ts"
+      ],
+      "document-renderer": [
+        "dist/document-renderer.d.ts"
+      ],
+      "mysql-exchange-preview": [
+        "dist/mysql-exchange-preview.d.ts"
+      ],
+      "mysql-documents": [
+        "dist/mysql-documents.d.ts"
       ]
     }
   },
