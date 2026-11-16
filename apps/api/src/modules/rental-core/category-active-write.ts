@@ -8,7 +8,8 @@ import { readRentalCategoryCode } from "./category-identity";
 import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
 
-export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevision: number }
+import type { CategoryWriteBinding } from "@rental-os/rental-core/configuration-basis";
+export type { CategoryWriteBinding } from "@rental-os/rental-core/configuration-basis";
 
 /** Caller holds the active space lock and owns this transaction. A collision
  * rolls back the entity and its declarations; it must never become a skipped

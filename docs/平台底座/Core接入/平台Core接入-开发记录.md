@@ -11,6 +11,29 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-business-configuration-20261116"></a>
+
+## Rental 业务配置仓储与规则版本链迁移（2026-11-16）
+
+固定父版 `99d6af9bca28dc5030908593830518be0fa4161d` 已普通推送并真实远端回读，当天main仍为62ca并已纳入。原业务配置仓储实际移入Rental包，API原路径成为薄Nest provider，供给当前Auth/ALS身份、真实空间解析、当前品类绑定锁、原配置事件和同一数据库事务。[配置实现](../../../packages/rental-core/src/mysql-business-configuration.ts) · [存储与宿主接点](../../../packages/rental-core/src/business-configuration-storage.ts) · [原provider](../../../apps/api/src/modules/rental-core/rental-business-config.repository.ts)
+
+本片保留原定价/优惠/增值服务、规则/日历版本和通知模板读写，以及开业/报价的有限事实投影。配置事务、审计、旧绑定拒绝、已发布正文不可覆盖及历史来源保持。存储视图仅含实际配置表和SQL读取；经营空间只提供findMany/findFirst，成员只提供原开业账号count，不向Core通用边界开放人员写入。40个方法/函数的编译后正文对照父版一致，仅替换存储、身份/范围/绑定/事件接点及原runtime别名。
+
+绑定修订和读取上限移入 `/configuration-basis` 单源，规则版本链移入 `/rule-version-chain`，原API均再导出。规则链源码除合同导入外与父版一致，9个普通函数正文对照一致；箭头函数、常量、租期时点匹配、未来版本、发布/编辑/作废限制及新版本号规则均保持。[共同依据](../../../packages/rental-core/src/configuration-basis.ts) · [规则链](../../../packages/rental-core/src/rule-version-chain.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 正式配置与当前schema的内存编译 | 公共合同5根/199源/10输出，Rental38根/599源/76输出，shared122根/340源/245输出，完整API988根/2278源/1976输出，均0诊断。共十项配置通过，当前238模型仍由锁定Prisma5.22官方WASM/generator在内存供给；最终收窄公共表读方法后单独复核类型通过 |
+| 原采用上下文 | `category-adoption-context-refresh.test.cjs` 的7例pass/0 fail/skip/todo/cancelled，当前提交后重读、冻结旧上下文、空/缺配置、当前地点投影和AI读取原快照断言保持 |
+| 原配置写入消费者 | `node --no-compilation-cache - api-business-configuration` 执行原calendar/price/rule/marketing四份用例，最终退出0、stderr为空。原锁序、外层事务、旧绑定、服务适用条件、规则历史正文/审计范围、日历编辑/发布/替代及失效空间拒绝断言全部通过，SQL/存储/事务为明确fixture |
+| 原规则版本链 | 短stdin作用于本版实际编译JS，执行原 `rental-rule-version-chain.test.cjs` 原文，11组断言全部通过、退出0。覆盖历史/未来租期、缺版本/同点冲突、展示状态、发布/编辑/作废限制、新号及发布预览 |
+
+首次类型检查定位生成客户端与runtime声明对DbNull使用不同名义类型。运行时保留同一个 `objectEnumValues.instances.DbNull`，私有适配按所选schema的官方空值声明映射，不改空值或日历写入结果。声明期使用的ORM模型仅在此私有MySQL视图；运行时未导入生成客户端，公开Core合同及领域总出口不加载这些模型。zod采用仓库已有锁定3.25.76并登记依赖，无安装/升级。源码构建目前仍需原组合schema的生成声明，完整Rental schema与迁移链尚未独立，README同步核定先generate再构建的实际顺序。
+
+四份原写入夹具首次将Tenant共享父锁和空间锁都记为lock而失败。按真实父锁SQL及租户参数分别处理后，原空间锁/版本/事务/审计断言保持并通过，没有删除断言或关闭父锁。规则纯函数一次性加载检查首次出现递归模块加载，预先取得既有依赖对象后完成原断言。原初始化时钟用例仍含同步getProfile等旧假设，本片没有执行或冒称通过。
+
+源码职责头、正式出口、Rental/原业务导读、根入口及PCH接续同片维护；7份定向文档891个本地链接/199个锚点/77个表格核对通过，0个问题。`git diff --check`首次指出原混合换行文件中新加两条导出行的CR字符，仅修正这两行后复验，最终退出0。原需求/任务正文和进度保持，未用本片文件或方法数升档。本片没有新增测试脚本、依赖环境、临时文件或后台业务服务。真实数据库/HTTP/浏览器、完整Core数据/迁移/Seed与业务/页面/作业/AI装配、独立包安装/更新/回退、接手及独立审查仍待交付。旧统一环境清理审批拒绝、外观静态失败和历史缺失附件继续沿原摘要处理。下一入口为Rental Core配置仓储和业务事实仓储，继续同步简明资料。
+
 <a id="core-rental-action-transactions-20261116"></a>
 
 ## Rental 业务动作事务执行器与共享父锁迁移（2026-11-16）

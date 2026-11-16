@@ -11,7 +11,13 @@ const old = { ...binding, adoptionRevision: 1 };
 const client = {
   $transaction: async (write) => { calls.push("transaction"); return write(client); },
   businessWorkspace: { findFirst: async () => { calls.push("scope"); return { id: "ws" }; } },
-  $queryRaw: async () => { calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }]; },
+  $queryRaw: async query => {
+    if (query.sql === "SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE") {
+      assert.deepEqual(query.values, ["t"]);
+      return [{ id: "t" }];
+    }
+    calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }];
+  },
   rentalCategoryVersion: { findUnique: async () => { calls.push("version"); return { categoryCode: "CAMERA", structureVersion: 1, status: "published", definition }; } },
   rentalPricingPlan: { findUnique: async () => null, upsert: async () => { calls.push("plan"); } },
   rentalPriceVersion: { findFirst: async () => { calls.push("timeline"); return null; }, aggregate: async () => { calls.push("aggregate"); return { _max: { sequence: 0 } }; }, create: async () => { calls.push("price"); return { id: "price" }; } },

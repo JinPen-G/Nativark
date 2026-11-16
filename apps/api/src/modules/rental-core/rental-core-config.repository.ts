@@ -32,6 +32,8 @@ import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.ser
 import { requestFingerprint } from "./rental-idempotency.repository";
 import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 import { readRentalConfigurationRevision, RENTAL_CONFIGURATION_REVISION_MAX, writeRentalCoreConfigurationSnapshot } from "./rental-state.repository";
+import { RENTAL_READINESS_FACT_LIMIT } from "@rental-os/rental-core/configuration-basis";
+export { RENTAL_READINESS_FACT_LIMIT } from "@rental-os/rental-core/configuration-basis";
 
 // Stored terminology can originate from a published definition, whose accepted
 // limit is 100. A narrower action-input limit cannot make that source unreadable.
@@ -122,7 +124,6 @@ export interface RentalReadinessCoreFacts {
   serviceableLocationCount: number;
   pricingGroups: Array<Pick<RentalPricingGroup, 'id' | 'name'>>;
 }
-export const RENTAL_READINESS_FACT_LIMIT = 10000;
 export const RENTAL_OPENING_CONFIGURATION_LIMIT = 100;
 export const RENTAL_OPENING_TERMINOLOGY_FIELDS = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
 export type RentalOpeningTerminology = Pick<TenantRentalProfile['terminology'], typeof RENTAL_OPENING_TERMINOLOGY_FIELDS[number]>;
