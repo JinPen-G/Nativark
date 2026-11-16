@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-category-adoption-20261117"></a>
+
+## Rental 采用准备、最终提交与完整配置闭包（2026-11-17）
+
+固定父版f9fc5bfca84a61202aa6a53803a9e67013d8fd79已普通推送并实际回读，保存前一治理成果和本片原文/完整接续；实际main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍为祖先。[采用准备](../../../packages/rental-core/src/mysql-category-preparation.ts)、[最终采用](../../../packages/rental-core/src/mysql-category-adoption.ts)及20份辅助构成22文件的包内唯一闭包。两个旧服务保留原六项Nest供给，其他旧路径只再导出各自同一实现。实际[Auth/商业/收据接点](../../../packages/rental-core/src/category-adoption-ports.ts)只描述本链需要的方法，公共Core合同不引入这些MySQL私有类型。[源码路线](../../../packages/rental-core/README.md#阅读路线) · [原HTTP入口](../../../apps/api/src/modules/rental-core/category-adoption-preparation.controller.ts)
+
+准备/分页/批次保存只写预备集合和原批次回执，不激活实体、能力或切换绑定。保持完整输入冻结、旧客户端与v2集合边界、来源/准备修订、显式撤回/重建与原批次指纹；重复只读原结果，当前受权操作者才能查原批次。最终采用仍用原ReadCommitted和等待/执行上限，按原身份→商业目录→品类/政策→空间锁顺序，实际候选完整校验后提交实体/唯一声明/能力/绑定/审计/原收据，提交前最终复验会话。成功/失败均保留准备，恢复旧品类不删除新字段，不重写报价/订单历史。原测试开关与生产限制保持。
+
+[共同配置读取](../../../packages/rental-core/src/category-adoption-compatibility-reader.ts)与[最终校验](../../../packages/rental-core/src/category-adoption-final-compatibility.ts)继续覆盖当前/排期价格、规则、正式DTO、检查、条件能力、营销/商品/履约关联、服务容量及库侧行数/JSON大小；不拿先前预览或当前默认配置替代实际事务与历史依据。[唯一字段变化](../../../packages/rental-core/src/category-adoption-entity-writer.ts)只重建受影响声明，交换同事务完成；[批次辅助](../../../packages/rental-core/src/category-preparation-batches.ts)只合并明确准备字段，[商业映射](../../../packages/rental-core/src/category-adoption-commercial.ts)来自代码登记，不新创收费项。缺当前认证、权益或依据继续拒绝。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 原实现基线 | node --no-compilation-cache - api-category-adoption-before + 下列十份原入口，PID49384退出0、stderr空；25项Node测试全过，另外七份原入口的直接断言/异步检查全部执行通过 |
+| 同入口候选 | mode=api-category-adoption-candidate，PID1552退出0、stderr空；同样25/25、0 fail/skip/todo/cancelled及其余原检查通过。没有修改这十份原测试/fixture或新增脚本，stdin SHA-256 b2a243f5251d507c38eed8a1bad5d35182502fb43a2065a2181001a2cc3ded1a |
+| 执行与装配对照 | 22文件55执行单元正文与固定父版相同；两个原六项design:paramtypes、原收据Inject索引1及准备Optional索引4/5的转译元数据一致 |
+| 官方类型/内存产物 | Prisma5.22原238模型、TS5.9.3，十个正式配置0诊断；Rental180根/904源/360输出，原API988根/2423源/1976输出；生成声明/JS均留内存 |
+| 正式接点/资料 | 23个新子出口/typesVersions对应实际源码，包运行依赖未变；API Controller/DTO/OpenAPI及AppModule登记未改，领域根出口不加载上述MySQL服务 |
+
+原验证入口为[采用应用](../../../tests/category-adoption-application.test.cjs)、[当前授权](../../../tests/category-adoption-access.test.cjs)、[批次服务](../../../tests/category-preparation-batch-service.test.cjs)、[批次合并](../../../tests/category-preparation-batches.test.cjs)、[候选](../../../tests/category-adoption-candidates.test.cjs)、[业务兼容](../../../tests/category-adoption-business-compatibility.test.cjs)、[共同读取](../../../tests/category-adoption-compatibility-reader.test.cjs)、[能力写入](../../../tests/category-adoption-capability-writer.test.cjs)、[唯一声明](../../../tests/category-adoption-unique-plan.test.cjs)、[商业依赖](../../../tests/category-adoption-commercial.test.cjs)。覆盖1001实体分批→采用、同键并发与原收据、恢复及历史保持、权限/期限/来源变化、最终失败回滚、当前/未来配置及关联和唯一声明保留，SQL/数据库锁/事务/商业数据是明确fixture，原Auth与服务/仓储运行实际编译实现。
+
+本片有原消费者/自动化/类型证据，但不是完整Nest宿主、真实HTTP/数据库/浏览器、标准包干净安装、多真实Core、独立升级回退、接手或独立审查。Rental剩余Controller/服务、schema/迁移/Seed、页面/客户端/作业/AI及完整标准装配未完成，公共组织/订阅/集成和05/06/07完整范围亦未齐；按原门槛复核仍未跨下一档，需求/任务身份/依赖/顺序/百分比保持。
+
+源码说明、两份模块导读、根入口及当前接续同片更新；定向九份文档1443本地链接/173锚点/99表格0问题，git diff --check退出0；需求/任务和十份原测试均无差异。两个worker均退出，output/.tmp无新增产物；旧两处残留仍集中待清理，原自动审批拒绝/manifest沿前片保留，不冒称空间释放。中文提交普通推送当前任务分支并真实回读，不合main或发布。
+
 <a id="core-rental-category-governance-20261117"></a>
 
 ## Rental 品类治理与配置辅助独立归属（2026-11-17）

@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-当前品类治理、创建模板和定义差异已迁入Rental包，旧服务只供给原四项Nest依赖，辅助旧路径再导出；固定父版c1b802e55e40f1ca41344d57d0b4b64402c6e85d保存原文及完整接续。创建夹具补现行原Auth/账号/版本依据后，原实现和候选均6/6及纯治理断言通过，34执行单元相同；原3个迁移前失败及修正原因留记录。下一步完成采用准备/最终提交闭包与剩余服务/Controller，再形成标准装配；官方日历源按平台资源处理。[当前治理阶段](平台Core接入-开发记录.md#core-rental-category-governance-20261117) · [原草稿/设置阶段](平台Core接入-开发记录.md#core-rental-bound-drafts-settings-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；MIT及品牌原稿继续按固定Git保留。
+当前品类采用准备/最终提交及完整配置辅助22文件已迁入Rental包，两个旧服务只供给原六项Nest依赖，辅助旧路径再导出；固定父版f9fc5bfca84a61202aa6a53803a9e67013d8fd79保存原文和完整接续。十份原验证入口的25项Node测试及其他直接检查，基线/候选均通过，55执行单元相同，无新测试脚本。下一步继续剩余服务/Controller、数据/迁移/Seed与完整标准装配；官方日历源按平台公共资源处理。[当前采用阶段](平台Core接入-开发记录.md#core-rental-category-adoption-20261117) · [治理与原夹具修正](平台Core接入-开发记录.md#core-rental-category-governance-20261117) · [绑定草稿/设置](平台Core接入-开发记录.md#core-rental-bound-drafts-settings-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；MIT与品牌原稿继续按固定Git保留。
 
 ## 2. 已有实际接点
 
@@ -31,7 +31,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 3. 下一实施入口与未完项
 
-1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行、规则/日历绑定草稿、批准设置、品类草稿/发布/开通政策及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。下一步迁入剩余服务和Controller，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。会员、企业政策、文件与当前授权仍由原宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
+1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行、规则/日历绑定草稿、批准设置、品类草稿/发布/开通政策、采用准备/最终提交及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。下一步迁入剩余服务和Controller，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。会员、企业政策、文件与当前授权仍由原宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
 2. 公共组织、安全、完整订阅办理和基础集成尚未全部独立；补实际API/UI与数据所有权，不能将已有认证、基本资料或期限reader当作完整公共能力。原有效会话的wid必须作为签名证据核验，不在公共业务workspace恢复Rental权限；原简称省略/null/空字符串及审计兼容保持。[公共兼容基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115) · [原身份SQL](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115) · [公共认证](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)
 3. 完成原Rental主AppModule/Guard与各audience接线。主provider通过明确imports/exports供给同一数据库、人员、订阅、审计和部署目录，总Core模块与单独模块不重复登记Controller。标准HTTP从所选Core贡献生成，未知政策拒绝；staff/client沿各自正式授权，不按operator使用权直接放行。[统一装配](平台Core接入-开发记录.md#core-application-assembly-20261115) · [HTTP政策](平台Core接入-开发记录.md#core-http-policy-registration-20261115)
 4. 生命周期仍须实际核租户授权、成员分配、原绑定/初始化、停新、排空和代码移除。当前授权结果与随后读取错误分开，unknown只读原键；撤权先取消旧请求、清除目标Core缓存。Core绑定/当前范围/实际就绪分别读取，跨事务不逆序持父锁。移除预检clear不执行删除，缺业务/AI/回调/作业/历史依赖证据不得移除。[结果读取/缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115) · [范围/就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115) · [移除预检](平台Core接入-开发记录.md#core-removal-preflight-20261115) · [工单移除依赖](平台Core接入-开发记录.md#core-tickets-removal-data-20261115)
@@ -49,11 +49,11 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-当前治理/模板/差异34执行单元与固定父版相同，原四项Nest元数据/Optional索引2、3相同，十配置0诊断；修正现行夹具后原实现/候选创建6/6及纯治理断言通过。原创建3处基线失败和修正、草稿原六项3个旧失败、日历PROVIDER_UNAVAILABLE包装及其他已登记问题继续保留。MySQL私有适配仍用Prisma生成模型，原Auth签名实际运行，账号/会话行/SQL/事务为明确fixture；真实HTTP/数据库/浏览器、完整宿主/安装/更新、独立接手及审查未验。所有worker退出，output/.tmp无新增文件。[当前阶段证据](平台Core接入-开发记录.md#core-rental-category-governance-20261117)
+当前采用闭包22文件55执行单元与固定父版相同，两个旧六项Nest元数据/Inject及Optional索引相同，十配置0诊断；十份原入口的25项Node测试及其他直接断言，基线/候选均通过。前片原创建夹具的3个迁移前失败已明确修正并在两版6/6通过；草稿原六项3个旧失败、日历PROVIDER_UNAVAILABLE包装及其他已登记问题继续保留。MySQL私有适配仍用Prisma生成模型，原Auth实际运行，SQL/锁/事务/商业数据为明确fixture；真实HTTP/数据库/浏览器、完整宿主/安装/更新、独立接手及审查未验。全部worker退出，output/.tmp无新增文件。[当前阶段证据](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 
-旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17同一原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；随后只读核定原文件数/体积及0链接，所有本任务worker已退出、不使用旧环境，两份清单尝试时间更新为2026-11-16T20:09:52.447Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
+旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17同一原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；随后只读核定原文件数/体积及0链接，所有本任务worker已退出、不使用旧环境，两份清单最近尝试时间更新为2026-11-16T22:39:57.326Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
 
 旧外观测试17例16过/1个静态失败、总导航三份历史附件及MCP导读五个原隔离附件缺失继续保留；近期全局文档检查的稀疏未检目标须按固定Git定位，不删除引用或修改检查器掩盖。原授权/生成/MCP检查的审批拒绝历史保留，后来定向补证不能冒称完整宿主验收。[当前MCP审计](平台Core接入-开发记录.md#core-original-mcp-audit-20261115) · [导读缺链](平台Core接入-开发记录.md#core-rental-capability-runtime-20261116)
 

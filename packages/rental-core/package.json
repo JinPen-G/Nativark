@@ -510,6 +510,98 @@
     "./category-creation-templates": {
       "types": "./dist/category-creation-templates.d.ts",
       "default": "./dist/category-creation-templates.js"
+    },
+    "./mysql-category-adoption": {
+      "types": "./dist/mysql-category-adoption.d.ts",
+      "default": "./dist/mysql-category-adoption.js"
+    },
+    "./category-adoption-access": {
+      "types": "./dist/category-adoption-access.d.ts",
+      "default": "./dist/category-adoption-access.js"
+    },
+    "./category-adoption-transaction-phase": {
+      "types": "./dist/category-adoption-transaction-phase.d.ts",
+      "default": "./dist/category-adoption-transaction-phase.js"
+    },
+    "./category-adoption-entity-writer": {
+      "types": "./dist/category-adoption-entity-writer.d.ts",
+      "default": "./dist/category-adoption-entity-writer.js"
+    },
+    "./category-adoption-records": {
+      "types": "./dist/category-adoption-records.d.ts",
+      "default": "./dist/category-adoption-records.js"
+    },
+    "./category-adoption-capability-writer": {
+      "types": "./dist/category-adoption-capability-writer.d.ts",
+      "default": "./dist/category-adoption-capability-writer.js"
+    },
+    "./category-adoption-references": {
+      "types": "./dist/category-adoption-references.d.ts",
+      "default": "./dist/category-adoption-references.js"
+    },
+    "./category-adoption-commercial": {
+      "types": "./dist/category-adoption-commercial.d.ts",
+      "default": "./dist/category-adoption-commercial.js"
+    },
+    "./category-adoption-final-compatibility": {
+      "types": "./dist/category-adoption-final-compatibility.d.ts",
+      "default": "./dist/category-adoption-final-compatibility.js"
+    },
+    "./category-adoption-compatibility-reader": {
+      "types": "./dist/category-adoption-compatibility-reader.d.ts",
+      "default": "./dist/category-adoption-compatibility-reader.js"
+    },
+    "./category-adoption-business-compatibility": {
+      "types": "./dist/category-adoption-business-compatibility.d.ts",
+      "default": "./dist/category-adoption-business-compatibility.js"
+    },
+    "./category-adoption-rule-parameters": {
+      "types": "./dist/category-adoption-rule-parameters.d.ts",
+      "default": "./dist/category-adoption-rule-parameters.js"
+    },
+    "./category-adoption-rule-structure": {
+      "types": "./dist/category-adoption-rule-structure.d.ts",
+      "default": "./dist/category-adoption-rule-structure.js"
+    },
+    "./category-adoption-marketing-references": {
+      "types": "./dist/category-adoption-marketing-references.d.ts",
+      "default": "./dist/category-adoption-marketing-references.js"
+    },
+    "./category-adoption-price-references": {
+      "types": "./dist/category-adoption-price-references.d.ts",
+      "default": "./dist/category-adoption-price-references.js"
+    },
+    "./category-adoption-service-capacity": {
+      "types": "./dist/category-adoption-service-capacity.d.ts",
+      "default": "./dist/category-adoption-service-capacity.js"
+    },
+    "./category-adoption-product-graph": {
+      "types": "./dist/category-adoption-product-graph.d.ts",
+      "default": "./dist/category-adoption-product-graph.js"
+    },
+    "./category-adoption-price-structure": {
+      "types": "./dist/category-adoption-price-structure.d.ts",
+      "default": "./dist/category-adoption-price-structure.js"
+    },
+    "./category-adoption-settings-execution": {
+      "types": "./dist/category-adoption-settings-execution.d.ts",
+      "default": "./dist/category-adoption-settings-execution.js"
+    },
+    "./category-adoption-fulfillment-references": {
+      "types": "./dist/category-adoption-fulfillment-references.d.ts",
+      "default": "./dist/category-adoption-fulfillment-references.js"
+    },
+    "./category-preparation-batches": {
+      "types": "./dist/category-preparation-batches.d.ts",
+      "default": "./dist/category-preparation-batches.js"
+    },
+    "./mysql-category-preparation": {
+      "types": "./dist/mysql-category-preparation.d.ts",
+      "default": "./dist/mysql-category-preparation.js"
+    },
+    "./category-adoption-ports": {
+      "types": "./dist/category-adoption-ports.d.ts",
+      "default": "./dist/category-adoption-ports.js"
     }
   },
   "typesVersions": {
@@ -888,6 +980,75 @@
       ],
       "category-creation-templates": [
         "dist/category-creation-templates.d.ts"
+      ],
+      "mysql-category-adoption": [
+        "dist/mysql-category-adoption.d.ts"
+      ],
+      "category-adoption-access": [
+        "dist/category-adoption-access.d.ts"
+      ],
+      "category-adoption-transaction-phase": [
+        "dist/category-adoption-transaction-phase.d.ts"
+      ],
+      "category-adoption-entity-writer": [
+        "dist/category-adoption-entity-writer.d.ts"
+      ],
+      "category-adoption-records": [
+        "dist/category-adoption-records.d.ts"
+      ],
+      "category-adoption-capability-writer": [
+        "dist/category-adoption-capability-writer.d.ts"
+      ],
+      "category-adoption-references": [
+        "dist/category-adoption-references.d.ts"
+      ],
+      "category-adoption-commercial": [
+        "dist/category-adoption-commercial.d.ts"
+      ],
+      "category-adoption-final-compatibility": [
+        "dist/category-adoption-final-compatibility.d.ts"
+      ],
+      "category-adoption-compatibility-reader": [
+        "dist/category-adoption-compatibility-reader.d.ts"
+      ],
+      "category-adoption-business-compatibility": [
+        "dist/category-adoption-business-compatibility.d.ts"
+      ],
+      "category-adoption-rule-parameters": [
+        "dist/category-adoption-rule-parameters.d.ts"
+      ],
+      "category-adoption-rule-structure": [
+        "dist/category-adoption-rule-structure.d.ts"
+      ],
+      "category-adoption-marketing-references": [
+        "dist/category-adoption-marketing-references.d.ts"
+      ],
+      "category-adoption-price-references": [
+        "dist/category-adoption-price-references.d.ts"
+      ],
+      "category-adoption-service-capacity": [
+        "dist/category-adoption-service-capacity.d.ts"
+      ],
+      "category-adoption-product-graph": [
+        "dist/category-adoption-product-graph.d.ts"
+      ],
+      "category-adoption-price-structure": [
+        "dist/category-adoption-price-structure.d.ts"
+      ],
+      "category-adoption-settings-execution": [
+        "dist/category-adoption-settings-execution.d.ts"
+      ],
+      "category-adoption-fulfillment-references": [
+        "dist/category-adoption-fulfillment-references.d.ts"
+      ],
+      "category-preparation-batches": [
+        "dist/category-preparation-batches.d.ts"
+      ],
+      "mysql-category-preparation": [
+        "dist/mysql-category-preparation.d.ts"
+      ],
+      "category-adoption-ports": [
+        "dist/category-adoption-ports.d.ts"
       ]
     }
   },

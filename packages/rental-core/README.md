@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策、采用准备与最终提交链，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -52,6 +52,10 @@
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
 | [审计仓储](src/capability-audit.ts)、[内置能力组合](src/capabilities/index.ts) | `/capability-audit` 通过本表窄端口写放行/拒绝审计和读历史，`/capabilities` 显式登记当前及兼容实现。原 Nest provider 供给同一数据源和调用方事务 |
 | [品类治理服务](src/mysql-category-governance.ts)、[私有存储/身份接点](src/category-governance-storage.ts)、[创建模板](src/category-creation-templates.ts)、[定义差异](src/category-definition-diff.ts) | `/mysql-category-governance` 保留平台草稿/不可变发布、独立开通/采用政策及原收据；当前SaaS身份、角色和原数据源由宿主供给，发布不变更商户绑定 |
+| [采用准备](src/mysql-category-preparation.ts)、[最终采用](src/mysql-category-adoption.ts)、[宿主接点](src/category-adoption-ports.ts) | `/mysql-category-preparation` 保存预备数据和原批次，`/mysql-category-adoption` 持有最终事务及原收据；复用实际Auth/商业读取和同一实例，不重新初始化或改历史 |
+| [采用提交阶段](src/category-adoption-transaction-phase.ts)、[最终配置校验](src/category-adoption-final-compatibility.ts)、[共同读取](src/category-adoption-compatibility-reader.ts) | 当前身份→商业目录→品类/政策→空间锁，实际候选/完整字段/关联/规模复核后，实体/唯一声明/能力/绑定/审计/原收据同提交 |
+| [准备批次](src/category-preparation-batches.ts)、[候选实体](src/category-adoption-records.ts)、[唯一声明](src/category-adoption-entity-writer.ts) | 只合并明确的预备字段，保留旧批次依据；最终采用才变更活动实体，唯一性只重建受影响字段，历史属性和原绑定保持 |
+| [配置兼容](src/category-adoption-business-compatibility.ts)、[价格结构](src/category-adoption-price-structure.ts)、[商业依赖](src/category-adoption-commercial.ts) | 以原当前/排期配置和代码登记的依赖核目标兼容，详细检查沿共同reader查找；不改当前规则或给旧报价补今天的配置 |
 | [品类治理合同](src/category-governance.ts) | `/category-governance` 持有原发布、采用、准备和收据声明，原 shared 出口再导出同一对象 |
 | [品类解析](src/category-runtime.ts)、[只读存储端口](src/category-storage.ts) | `/category-runtime` 提供原发布正文校验、历史引用、推荐版本、当前空间绑定和开通选项。各方法只要求自己使用的事务读取项，绑定与采用权限由原调用者核验 |
 | [品类身份](src/category-identity.ts)、[扩展一致性](src/rental-extension-registry.ts)、[空间展示名称](src/workspace-names.ts) | `/category-identity` 和 `/extensions` 供原订阅/会员及发布/启动消费。根出口保留原默认展示名称，旧 shared 再导出同一常量 |
@@ -68,6 +72,10 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+空间版本准备从 `@rental-os/rental-core/mysql-category-preparation` 创建，供给原数据库、同一能力/Hook实例、当前商业reader、原Auth及采用可用状态。`preview` 只检查，`saveBatch` 保存明确预备字段和原批次回执，`readBatch` 核当前操作者读取自己的原结果。准备不激活实体/能力或切换绑定，陈旧来源不能自动覆盖。[准备HTTP入口](../../apps/api/src/modules/rental-core/category-adoption-preparation.controller.ts) · [原批次验证](../../tests/category-preparation-batch-service.test.cjs)
+
+最终采用从 `/mysql-category-adoption` 创建，供给原六项参加者，当前Auth先核整个空间权限；商业锁先于品类/政策/空间锁。在同一ReadCommitted事务复核准备、当前对象/字段/规则/价格/能力与权益，原绑定CAS、审计和幂等收据一起提交，返回前再核原会话。`readOriginal` 只查原键及原审计，后续采用或政策变化不重做旧操作；采用成功和失败均保留准备，原测试入口开关与生产限制保持。[私有接点](src/category-adoption-ports.ts) · [原采用验证](../../tests/category-adoption-application.test.cjs)
 
 品类治理从 `@rental-os/rental-core/mysql-category-governance` 创建，供给同一数据库、能力实现目录、原Web身份解析器和当前账号reader。读取/草稿/发布继续使用原权限，写入在Serializable内先核会话和角色，再锁品类/版本，返回前复验；创建/发布重复请求只核原审计。版本发布、采用政策与商户实际采用分别办理，服务不改商户绑定或初始化。`/category-creation-templates` 和 `/category-definition-diff` 仅处理配置数据，缺原认证时写入拒绝。[原治理Controller](../../apps/api/src/modules/rental-core/category-governance.controller.ts) · [原创建验证](../../tests/category-creation.test.cjs)
 
