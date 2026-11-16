@@ -6,6 +6,21 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-temporary-rd-takeover-20261116"></a>
+## 临时 AI-RD 接管与原进度核对（2026-11-16）
+
+负责人因原 AI-RD 对话临时报错，授权本对话 01a1e422-8ae5-7383-9e41-c80cb71bcc70 临时接替，继续原全部 AIN 与 ENTRY 的研发目标，并对接原 dev1、dev2。正式范围和验收沿需求 v1.15、任务 v1.19，main 固定节点按当前 PM 归属串行整合。
+
+接手施工树为 D:/工作文件/rental-OS/worktree/ai-native，分支 codex/ai-native。本地及 GitHub 原分支均为 41f458340bfdcaa9134780190ba9efe9a7f42b0e，工作区与暂存区为空，merge／cherry-pick 状态均不存在。使用 git ls-remote origin refs/heads/codex/ai-native 核定当前远端，退出 0；原19份企业依赖与AI准备源码已在该检查点固定。
+
+已读取原 AI-RD 的完整目标、最后检查点及两助手原结果，并分别发送具体接续任务。实际 wait_threads 回读确认两助手回合 active 且已有 completed 工具。dev1继续只读补核 AIN-27 双轨、部署监控、灰度、停用及回退操作资料，前像原执行退出码已补核为0。dev2接续 AIN-26，获准复用既有fixture执行四品类取消、丢ACK、原键恢复及人工／AI同输入报价等价的必要内存模拟。两助手保留原 anyrouter/gpt-6.1-sol／max 设置，源码／四册／索引写权归临时 AI-RD，助手结果留原对话供主动读取。
+
+AIN-15联合事务仍缺实现。当前原D服务提供私有读取、准备与原消费参加者，Core有封存委托端口；AI控制组合仅声明可选依赖，原选单宿主仍阻断 enterpriseContractAndPayer。原批准源仍使用AI业务键，尚缺D引用持久绑定、原快照复核和D／企业审批／AI批准同一Core事务消费。下一入口为原选单输入、approved-order-preparation.service、prisma-approved-order.source、controlled-approved-order.composition与Core封存端口，分别贯通准备、提交及仅原收据恢复。当前核查与助手模拟不能证明企业正向建单成功，原15／26／27／28门槛继续保留。
+
+本次目标创建参数误带负责人未要求的100000 token预算。平台已返回 budgetLimited，tokensUsed为294897，remainingTokens为0；整体目标未完成，源码实现待本对话目标恢复后接续。两助手执行回合与其目标卡预算状态分别记录，回合active不证明dev1旧budget_limited目标已恢复。
+
+本阶段仅维护接管记录和当前归属，产品源码未改，未创建测试文件、依赖、临时环境、截图或后台服务。node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs 实际退出1，11份白名单已检查，仍为导航54三处历史附件及界面规范272一处稀疏示例的原4处缺链；本阶段记录链接错误0，任务算术无新增错误，git diff --check实际退出0。阶段按两份原文档逐文件提交并普通推送AI分支，提交与目标远端以Git回读核定。
+
 <a id="ain15-enterprise-dependency-checkpoint-20261116"></a>
 ## AIN-15 企业委托固定依赖检查点（2026-11-16）
 
