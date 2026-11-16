@@ -474,6 +474,14 @@
     "./exchange-inspection-media-read": {
       "types": "./dist/exchange-inspection-media.read.d.ts",
       "default": "./dist/exchange-inspection-media.read.js"
+    },
+    "./mysql-exchange-inspection-consent": {
+      "types": "./dist/mysql-exchange-inspection-consent.d.ts",
+      "default": "./dist/mysql-exchange-inspection-consent.js"
+    },
+    "./mysql-approved-exchange-execution": {
+      "types": "./dist/mysql-approved-exchange-execution.d.ts",
+      "default": "./dist/mysql-approved-exchange-execution.js"
     }
   },
   "typesVersions": {
@@ -825,6 +833,12 @@
       ],
       "exchange-inspection-media-read": [
         "dist/exchange-inspection-media.read.d.ts"
+      ],
+      "mysql-exchange-inspection-consent": [
+        "dist/mysql-exchange-inspection-consent.d.ts"
+      ],
+      "mysql-approved-exchange-execution": [
+        "dist/mysql-approved-exchange-execution.d.ts"
       ]
     }
   },

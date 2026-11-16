@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行应用，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -60,10 +60,16 @@
 | [服务容量](src/mysql-service-capacity.ts)、[容量存储与身份接点](src/service-capacity-storage.ts) | `/mysql-service-capacity` 管理原服务/地点/时段数量、预留与确认、部分履约和释放收据。报价只读观察不维护账；写入复用原品类锁和调用方事务 |
 | [企业应收核销](src/mysql-order-receivables.ts)、[完整原账](src/mysql-corporate-ledger.ts)、[回款收据](src/corporate-payment-receipts.ts)、[冻结结算依据](src/corporate-settlement-basis.ts) | 对应四个正式子出口；核原付款主体、币种及回款/逐单分配/冲销，完整分页不漏账。资金与债权同事务提交，企业回款分配不再次计为现金 |
 | [检查准备与同意合同](src/exchange-inspection-preparation.ts)、[同意依据](src/exchange-inspection-consent-basis.ts) | 正式 /exchange-inspection-preparation 与 /exchange-inspection-consent-basis；原准备、文件来源、客户同意和执行收据分别保留，材料指纹不授予费用或履约权 |
+| [客户检查同意](src/mysql-exchange-inspection-consent.ts)、[身份/文件接点](src/exchange-inspection-ports.ts) | /mysql-exchange-inspection-consent 复用原ClientAuth/ALS与本人订单，材料、照片和确认分别核当前依据；同意与原键同事务，历史只读原收据 |
+| [批准换货执行](src/mysql-approved-exchange-execution.ts)、[窄参加者](src/approved-exchange-execution-ports.ts) | /mysql-approved-exchange-execution 在同一事务提交Core变更、授信、批准消费和原收据，提交后才发布；失应答/到期后的恢复不重新准备、计价或执行 |
 | [原换货批准](src/mysql-approved-exchange.ts)、[企业政策接点](src/approved-exchange-policy.ts)、[参与者合同](src/approved-exchange-ports.ts) | /mysql-approved-exchange 核原费用确认、检查/客户同意和当前企业政策，唯一WeakMap把依据绑定到原事务；调用方不得以JSON或新事务替代 |
 | [设置批准合同](src/approved-settings-ports.ts)、[设置输入校验](src/approved-settings-validation.ts) | /approved-settings-ports 与 /approved-settings-validation 维护原修订、批准/消费、原操作与unknown语义，宿主事务类型按真实组合实例化 |
 
 ## 使用与构建
+
+客户同意从 `@rental-os/rental-core/mysql-exchange-inspection-consent` 创建，供给同一存储、幂等、原客户认证和可选冻结照片读取服务。批准执行从 `/mysql-approved-exchange-execution` 创建，供给原Core、试算、业务、检查、幂等、企业政策和授信实例；企业参加者使用 `ApprovedExchangeTransaction<TTransaction>`。普通客户只能对本人的具体检查同意，费用确认与营运执行仍为独立授权。[原客户provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-consent.service.ts) · [原执行provider](../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts) · [企业直接消费者](../../apps/api/src/modules/enterprise/enterprise-merchant.controller.ts)
+
+两者保留原同事务写入与ReadCommitted。执行的 `executeInTransaction` 使用调用方事务，外层持有者在提交确认后发布缓存/响应；`original` 只核原执行、批准消费、具体同意、正式变更及幂等收据。未记录或损坏的证据不授权重做，已消费批准的旧到期时间不作为历史读取的新支出许可。API继续由原Controller/OpenAPI声明，SDK不赋予业务Agent访问权。
 
 换货检查准备从 `@rental-os/rental-core/mysql-exchange-inspection-preparation` 创建，供给同一数据源、核心、试算、幂等与当前授权实例。影像从 `/mysql-exchange-inspection-media` 创建，供给同一检查实例和原文件服务；两者的[窄接点](src/exchange-inspection-ports.ts)只描述本链需要的方法。`readForExecution` 使用调用方已有事务，准备、照片消费、批准和原收据不会因迁移另开提交边界。[原检查provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.service.ts) · [原影像provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts)
 

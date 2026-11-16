@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-inspection-applications-20261117"></a>
+
+## Rental 客户检查同意与批准换货执行独立归属（2026-11-17）
+
+固定父版480e1f3f60fb7f375490fd870e8124af4dc97dc1已普通推送并回读，保存本片原服务、完整接续与检查准备/影像成果；真实远端main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在任务祖先。原客户检查同意与最终批准执行实际迁入Rental包，旧路径仅保留原四项/八项Nest参加者的供给及正式再导出。Controller、企业申请/营运执行与原批准服务继续消费同一入口，业务规则、HTTP、schema和已应用迁移没有改变。[客户同意实现](../../../packages/rental-core/src/mysql-exchange-inspection-consent.ts) · [批准执行实现](../../../packages/rental-core/src/mysql-approved-exchange-execution.ts) · [私有身份/文件接点](../../../packages/rental-core/src/exchange-inspection-ports.ts) · [执行参加者](../../../packages/rental-core/src/approved-exchange-execution-ports.ts)
+
+同意保留原ClientAuth/ALS、本人订单/当前会员与会话、Tenant父锁→订单锁、具体检查材料hash、冻结照片读取前后复验、同意与原幂等收据同事务。完整客户上下文按原对象保留，私有类型只声明必要投影，不复制手机号/微信身份或凭据。文件缺失仍拒绝照片读取；原文件服务实际IO未替换。[原客户provider](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-consent.service.ts) · [ClientAuth](../../../apps/api/src/modules/client/client-auth.service.ts)
+
+批准执行保留同一Core/检查/幂等/企业政策和授信实例，原ReadCommitted、maxWait10000、timeout30000，原价格意图先核验再附可信检查/同意。Core变更、授信、批准消费、执行和幂等收据在调用方同一事务提交，事务内失败回滚；只有提交确认后才刷新并发布。executeInTransaction不另开COMMIT，外层持有者负责提交后发布。original只核原K、批准消费、本人具体同意及正式变更；不存在或损坏不重做。批准的旧TTL不阻断已消费历史读取，修改原到期字段则破坏原hash，继续拒绝。[原执行provider](../../../apps/api/src/modules/rental-core/rental-approved-exchange.service.ts) · [企业营运直接消费者](../../../apps/api/src/modules/enterprise/enterprise-merchant.controller.ts) · [唯一批准权威](../../../packages/rental-core/src/mysql-approved-exchange.ts)
+
+企业政策SQL类型从生成Prisma方法签名改为相同参数化Sql/模板和PromiseLike的私有结构端口，解除生成Client依赖；运行时批准代码和WeakMap未改。两个正式MySQL子出口/typesVersions对应实际源码，根/纯合同不加载应用或私有数据库服务。源码头、模块导读和原API路线同片同步，完整HTTP字段继续引用原OpenAPI，不另维护一套DTO或第五册。[正式包](../../../packages/rental-core/package.json) · [企业政策接点](../../../packages/rental-core/src/approved-exchange-policy.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 修改前离线基线 | node --no-compilation-cache - api-exchange-inspection-applications-baseline，PID27604退出1：3项中2通过/1失败。失败来自探针直接改写原expiresAt而触发历史hash拒绝，生产源码未改；将探针改为Node Date时钟推进60001ms，PID43760退出0、stderr空，3/3通过。两个基线结果保留，不修改业务以迁就夹具 |
+| 同探针候选 | node --no-compilation-cache - api-exchange-inspection-applications-candidate，PID57244退出0、stderr空，3/3、0 fail/skip/todo/cancelled。覆盖原同意/同键、暂停后历史、撤权、客户/订单/材料拒绝及收据回滚；批准执行一次、同事务消费/授信/收据、到期后原结果不再prepare/price/apply、政策/授信/收据失败回滚及提交后刷新失败仍读原键 |
+| 固定执行正文 | 客户同意10单元、批准执行9单元共19一致；只将官方原RENTING和ReadCommitted常量规范为同值字符串后对照，SQL、锁、权限、金额、原请求、消费及恢复正文保持 |
+| 类型与内存产物 | TS5.9.3、Prisma5.22官方原238模型声明，十配置零诊断；Rental148根/871源/296输出、原API988根/2391源/1976输出。声明和JS全部内存，未写客户端或dist |
+| 装配与文档 | 原两个provider的4/8项design:paramtypes及Optional索引3一致；包出口/typesVersions/lock、原Controller与HTTP声明、定向文档链接/锚点/表格及git diff --check核定，新增测试文件0 |
+
+SQL/存储、客户认证、Core变更/授信和事务为明确fixture，运行的是实际同意/批准执行应用、原幂等及唯一WeakMap核验。照片正向字节链、完整Nest宿主、真实HTTP/数据库/浏览器、干净标准包安装/升级和独立审查均未执行。19单元相等与离线通过不代替这些验收。PCH-08仍缺剩余服务/Controller、标准装配、数据/迁移/Seed、页面/客户端、作业与AI；05/06/07等完整范围和公共组织/订阅/集成亦未齐，本片未跨原下一门槛。
+
+本片没有新增临时环境或磁盘测试脚本，两个基线和候选worker均已退出，output/.tmp无新产物。两份旧残留清单已更新到2026-11-16T20:09:52.447Z，同一原生删除工具仍在启动前拒绝blocked by policy；840文件/91,808,304字节及1个0字节guard.log仍在集中待清理区、0链接，不声称已释放空间。失败及责任清单位置沿[原清理记录](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)保留，不换壳/工具绕过。
+
+本片中文提交普通推送codex/platform-core-extraction，固定成果由包含本节的Git提交定位并以真实远端回读确认；不合main或发布。源职责、正式出口及简单接入资料随片维护。
+
 <a id="core-rental-inspection-runtime-20261117"></a>
 
 ## Rental 换货检查准备与专用影像独立归属（2026-11-17）

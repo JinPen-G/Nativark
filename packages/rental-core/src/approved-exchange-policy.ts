@@ -1,9 +1,9 @@
 /** 原换货批准的私有MySQL与企业政策接点；同一事务复验当前依据，不接收客户端批准标志。 */
-import type { Prisma } from "@prisma/client";
+import type { Sql } from "@prisma/client/runtime/library";
 import type { EnterpriseBookingBasis, RentalOrder } from "./index";
 
 export interface RentalApprovedExchangeSql {
-  $queryRaw: Prisma.TransactionClient["$queryRaw"];
+  $queryRaw<TResult>(query: Sql | TemplateStringsArray, ...values: unknown[]): PromiseLike<TResult>;
 }
 
 export interface RentalApprovedExchangePolicies<TTransaction extends RentalApprovedExchangeSql> {

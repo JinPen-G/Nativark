@@ -2,6 +2,7 @@
  * 宿主提供原事务及受权依赖；这里只开放本链所需方法，存储凭据留在文件适配内。
  * 原上传计划按TPlan完整传回同一适配，不由Core复制或重建供应商配置。 */
 import type { Sql } from "@prisma/client/runtime/library";
+import type { Buffer } from "node:buffer";
 import type { CreateFileUploadSessionRequest, SystemUserRow } from "@rental-os/platform-contracts";
 import type { OrganizationScopeNode } from "@rental-os/platform-server/organization-location-scope";
 import type { RentalOrder, RentalOrderChangePreview, RentalInspectionTemplate } from "./contracts";
@@ -100,6 +101,38 @@ export interface RentalExchangeInspectionAuthority {
 
 export type RentalExchangeInspectionIdempotent<TTransaction extends RentalBusinessTenantTransaction> =
   Pick<RentalIdempotentActionService<TTransaction>, "executeInTransaction">;
+
+export type RentalExchangeInspectionConsentIdempotent<TTransaction extends RentalBusinessTenantTransaction> =
+  Pick<RentalIdempotentActionService<TTransaction>, "executeInTransaction" | "readReceipt">;
+
+/** 原客户认证给出的必要投影；调用方的完整上下文仍按原对象保留。 */
+export interface RentalExchangeInspectionCustomerContext {
+  tenantId: string;
+  workspaceId: string;
+  workspaceCode: string;
+  customerId: string;
+  customerType: "personal" | "corporate";
+  membershipStatus: string;
+  sessionId: string;
+}
+
+export interface RentalExchangeInspectionCustomerAuthority {
+  authenticate(token: string): PromiseLike<RentalExchangeInspectionCustomerContext>;
+}
+
+export interface RentalExchangeInspectionPhoto {
+  bytes: Buffer;
+  mimeType: "image/png" | "image/jpeg";
+  contentHash: string;
+  sizeBytes: number;
+}
+
+/** 只能读取已接受的原冻结照片，不能读取暂存内容或取得存储凭据。 */
+export interface RentalExchangeInspectionEvidenceFiles {
+  readFrozenExchangeInspectionEvidence(
+    tenantId: string, fileAssetId: string, owner: RentalExchangeInspectionFileOwner, contentHash: string
+  ): PromiseLike<RentalExchangeInspectionPhoto>;
+}
 
 export type RentalExchangeInspectionPreparation<TTransaction extends RentalExchangeInspectionTransaction> =
   Pick<RentalExchangeInspectionPreparationService<TTransaction>, "mediaScope" | "mediaOrder" | "mediaRequirementsInTransaction">;
