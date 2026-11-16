@@ -5,7 +5,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), ts = require('typescript');
 const { createHash } = require('node:crypto'), { Prisma } = require('@prisma/client');
-const root = path.resolve(__dirname, '..'), output = path.join(root, 'output/enterprise-offline/workflows');
+const root = path.resolve(__dirname, '..'), output = path.join(root, 'output/.tmp/enterprise-workflows');
 assert.equal(process.env.DATABASE_URL, 'mysql://offline:offline@127.0.0.1:1/rental_os_offline');
 assert.equal(path.resolve(process.env.AI_OFFLINE_WRITE_ROOT), output);
 assert.ok(require.cache[require.resolve('./fixtures/ai-native/prisma-offline-preload.cjs')]);
@@ -20,6 +20,7 @@ function load(relative) {
     if (name === '@nestjs/common') return common;
     if (name === '@prisma/client') return { Prisma };
     if (name === '@rental-os/shared') return shared;
+    if (name.startsWith('@rental-os/') || name === '@prisma/client/runtime/library') return require(name);
     if (name === 'zod') return require('zod');
     if (name.startsWith('.')) {
       // Injection-only modules are not bootstrapped. Only the five services under
@@ -801,7 +802,7 @@ test('inspection preparation DTO and registered schemas never accept execution, 
 function exchangeImageFixture() {
   const f = inspectionPreparationFixture(), { RentalExchangeInspectionMediaService } = load('apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts');
   f.originalTemplate.fields.push({ code: 'photo', label: 'Original condition', type: 'photo', required: true });
-  let state = { rows: [], assets: [] }, tail = Promise.resolve(); f.filePlans = 0; f.byteReads = 0; f.failFinish = false; f.failInsert = false;
+  let state = { rows: [], assets: [] }, tail = Promise.resolve(); f.filePlans = 0; f.byteReads = 0; f.frozenReads = 0; f.failFinish = false; f.failInsert = false;
   f.failClaim = false; f.loseClaimAck = false; f.loseCompletionAck = false; f.inspectHook = async () => undefined; f.afterClaim = async () => undefined;
   const fileAsset = assets => ({ findFirst: async ({ where }) => copy(assets.find(asset => asset.id === where.id && asset.tenantId === where.tenantId) ?? null) });
   const prisma = { async $transaction(fn) {
@@ -829,18 +830,32 @@ function exchangeImageFixture() {
     } finally { release(); }
   } };
   const files = { async planExchangeInspectionUpload(_tenant, input, owner) { f.filePlans++; const assetId = `image-${f.filePlans}`, sessionId = `session-${f.filePlans}`;
-    return { input, owner, assetId, sessionId, storageKey: `private/${assetId}`, provider: 's3_compatible', expiresAt: new Date(Date.now()+900000), configRowHash: 'config', storageLocationHash: 'location', uploadUrl: 'https://storage.example.invalid/original-put', uploadHeaders: {} }; },
+    return { input, owner, assetId, sessionId, storageKey: `private/t1/${assetId}/blob`, provider: 's3_compatible', expiresAt: new Date(Date.now()+900000), configRowHash: 'config', storageLocationHash: 'location', uploadUrl: 'https://storage.example.invalid/original-put', uploadHeaders: {} }; },
     async persistExchangeInspectionUpload(tx, tenantId, plan) { tx.assets.push({ id: plan.assetId, tenantId, businessModule: 'rental-core', businessType: 'rental_order', businessId: plan.input.businessId, fileName: plan.input.fileName,
-      mimeType: plan.input.mimeType, sizeBytes: plan.input.sizeBytes, storageProvider: plan.provider, storageKey: `private/${plan.assetId}`, uploadScene: shared.RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE, uploadedBy: plan.owner.actorUserId,
+      mimeType: plan.input.mimeType, sizeBytes: plan.input.sizeBytes, storageProvider: plan.provider, storageKey: plan.storageKey, uploadScene: shared.RENTAL_EXCHANGE_INSPECTION_MEDIA_SCENE, uploadedBy: plan.owner.actorUserId,
       metadata: { workspaceId: 'w1', exchangeInspectionSourceId: plan.owner.exchangeInspectionSourceId, storageLocationHash: 'location' }, status: 'pending_upload',
-      uploadSession: { id: plan.sessionId, tenantId, fileAssetId: plan.assetId, provider: plan.provider, storageKey: `private/${plan.assetId}`, status: 'pending_upload', expiresAt: plan.expiresAt, idempotencyKey: plan.input.idempotencyKey } }); },
+      uploadSession: { id: plan.sessionId, tenantId, fileAssetId: plan.assetId, provider: plan.provider, storageKey: plan.storageKey, status: 'pending_upload', expiresAt: plan.expiresAt, idempotencyKey: plan.input.idempotencyKey } }); },
     async inspectExchangeInspectionUpload() {
       f.byteReads++; assert.ok(state.rows[0].completionClaimId, 'claim must commit before any object read');
-      await f.inspectHook(); return { contentHash: 'a'.repeat(64), sizeBytes: 68, mimeType: 'image/png', width: 1, height: 1 };
+      await f.inspectHook();
+      // The original file provider commits its freeze before the Core completion transaction.
+      const asset = state.assets[0], staging = asset.storageKey;
+      const evidence = { sourceId: asset.metadata.exchangeInspectionSourceId, contentHash: 'a'.repeat(64), sizeBytes: 68, mimeType: 'image/png', width: 1, height: 1 };
+      asset.storageKey = staging + '.committed/00000000-0000-4000-8000-000000000000/' + evidence.contentHash;
+      asset.checksum = evidence.contentHash;
+      Object.assign(asset.metadata, { fileUploadVersion: 2, fileContentVersion: 1, contentHash: evidence.contentHash, stagingStorageKey: staging, exchangeInspectionFrozenEvidence: evidence });
+      asset.uploadSession.storageKey = asset.storageKey; asset.uploadSession.status = 'freeze_pending';
+      return { ...evidence, assetHash: requestFingerprint(plain(asset)), sessionHash: requestFingerprint(plain(asset.uploadSession)), configRowHash: 'config', storageLocationHash: 'location' };
+    },
+    async reconcileExchangeInspectionUpload() {
+      const asset = state.assets[0];
+      if (asset.uploadSession.status === 'pending_upload') return undefined;
+      f.frozenReads++;
+      return { ...asset.metadata.exchangeInspectionFrozenEvidence, assetHash: requestFingerprint(plain(asset)), sessionHash: requestFingerprint(plain(asset.uploadSession)), configRowHash: 'config', storageLocationHash: 'location' };
     },
     async completeExchangeInspectionUpload(tx, _tenant, fileId, _owner, proof) { const asset = tx.assets.find(row => row.id === fileId), completedAt = new Date().toISOString();
       asset.status = 'active'; asset.checksum = proof.contentHash; asset.metadata.exchangeInspectionContentHash = proof.contentHash; asset.uploadSession.status = 'completed'; asset.uploadSession.completedAt = new Date(completedAt);
-      return { ...proof, completedAt }; } };
+      return { contentHash: proof.contentHash, sizeBytes: proof.sizeBytes, mimeType: proof.mimeType, width: proof.width, height: proof.height, completedAt }; } };
   f.restartMedia = () => { f.media = new RentalExchangeInspectionMediaService(prisma, f.service, files); };
   f.restartMedia(); f.state = () => state;
   f.mediaRequirements = () => f.within(() => f.media.requirements('operator-token-double', f.user, 'o1', { expectedOrderUpdatedAt: f.order.updatedAt, exchange: { orderLineId:'line', allocationId:'allocation', replacementItemGroupId:'new', replacementAssetId:'asset', priceBasis:'original_order_price', originalDisposition:'return_to_warehouse' } }));
@@ -851,7 +866,7 @@ function exchangeImageFixture() {
   f.finishImage = key => f.within(() => f.media.complete('operator-token-double', f.user, 'o1', key)); return f;
 }
 test('dedicated exchange image binds original photo requirement and permanently observes K without another ticket or preparation acceptance', async () => {
-  const f = exchangeImageFixture(), input = await f.mediaInput(); await assert.rejects(f.requirements(), /影像/u);
+  const f = exchangeImageFixture(), input = await f.mediaInput(); await assert.rejects(f.prepare(await f.input()), /影像/u);
   const first = await f.createImage(input); assert.ok(first.uploadUrl); assert.equal(first.source.preparationUse, 'not_connected');
   const plans = f.filePlans, replay = await f.createImage(input); assert.equal(replay.state,'observed'); assert.equal(replay.uploadUrl, undefined); assert.equal(f.filePlans,plans);
   await assert.rejects(f.createImage({ ...input, fileName:'different.png' }), /不同/u);
@@ -869,9 +884,9 @@ test('dedicated exchange image rejects foreign declarations and atomically appen
   }
   const failed = exchangeImageFixture(), failedInput = await failed.mediaInput(); await failed.createImage(failedInput); failed.failFinish=true;
   await assert.rejects(failed.finishImage(failedInput.operationKey), /核对/u);
-  assert.equal(failed.state().assets[0].status,'pending_upload'); assert.equal(failed.state().assets[0].uploadSession.status,'pending_upload'); assert.equal(failed.state().rows[0].completion,null);
+  assert.equal(failed.state().assets[0].status,'pending_upload'); assert.equal(failed.state().assets[0].uploadSession.status,'freeze_pending'); assert.equal(failed.state().rows[0].completion,null);
   assert.ok(failed.state().rows[0].completionClaimId); failed.failFinish=false;
-  assert.equal((await failed.finishImage(failedInput.operationKey)).source.state,'completion_unknown'); assert.equal(failed.byteReads,1);
+  assert.equal((await failed.finishImage(failedInput.operationKey)).source.state,'completed'); assert.equal(failed.byteReads,1); assert.equal(failed.frozenReads,1, 'the original frozen target is observed, without another staging read');
   const f = exchangeImageFixture(), input = await f.mediaInput(); await f.createImage(input);
   const finished=await f.finishImage(input.operationKey); assert.equal(finished.source.state,'completed'); assert.equal(finished.source.completion.contentHash,'a'.repeat(64));
   const reads=f.byteReads; f.order.updatedAt='changed'; assert.equal((await f.finishImage(input.operationKey)).source.id,finished.source.id); assert.equal(f.byteReads,reads);
@@ -914,9 +929,14 @@ test('exchange image completion failures, expiry and corrupt claims never grant 
     if (stage === 'claim-replaced') f.inspectHook = async () => { f.state().rows[0].completionClaimId = '00000000-0000-4000-8000-000000000000'; };
     if (stage === 'claim-time-changed') f.inspectHook = async () => { f.state().rows[0].completionClaimedAt = new Date(f.state().rows[0].completionClaimedAt.getTime()+1); };
     await assert.rejects(f.finishImage(body.operationKey)); assert.ok(f.state().rows[0].completionClaimId);
-    assert.equal(f.state().assets[0].status,'pending_upload'); assert.equal(f.state().assets[0].uploadSession.status,'pending_upload'); assert.equal(f.state().rows[0].completion,null);
+    const frozen = Boolean(f.state().assets[0].metadata.exchangeInspectionFrozenEvidence);
+    assert.equal(f.state().assets[0].status,'pending_upload'); assert.equal(f.state().assets[0].uploadSession.status,frozen ? 'freeze_pending' : 'pending_upload'); assert.equal(f.state().rows[0].completion,null);
     f.authority = true; f.inspectHook = async () => undefined; f.afterClaim = async () => undefined; f.restartMedia();
-    assert.equal((await f.finishImage(body.operationKey)).source.state,'completion_unknown'); assert.equal(f.byteReads,stage === 'authority-before-read' ? 0 : 1);
+    if (stage === 'revision') {
+      await assert.rejects(f.finishImage(body.operationKey), /修订/u);
+      assert.equal((await f.readImage(body.operationKey)).source.state,'completion_unknown');
+    } else assert.equal((await f.finishImage(body.operationKey)).source.state,frozen ? 'completed' : 'completion_unknown');
+    assert.equal(f.byteReads,stage === 'authority-before-read' ? 0 : 1);
   }
   const expired = exchangeImageFixture(), body = await expired.mediaInput(); await expired.createImage(body);
   const row = expired.state().rows[0], binding = JSON.parse(row.binding); binding.source.expiresAt = new Date(0).toISOString(); row.binding = JSON.stringify(binding); row.bindingHash = requestFingerprint(binding);

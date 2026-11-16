@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-本次换货试算/凭证的固定父版为c31f0886df45fd2d7a7285920a91609f3c9b86df，包含本次修改前的完整接续原文，直接用Git定位，不重复备份。阶段实现、验证及具体源码提交沿[开发记录](平台Core接入-开发记录.md#core-rental-exchange-documents-20261117)读取。需求/任务身份、依赖、顺序和正式业务规则保持批准依据；品牌原稿及许可固定来源也在Git。[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114) · [品牌保留稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)
+本次检查消费者基线的固定生产版本为3c0c09dd0fa32161c3bfd78f0c88ea0c84231016，包含修改前的完整接续原文，直接用Git定位，不重复备份。检查服务尚未迁移，旧夹具已按原文件冻结/恢复语义修正并完成七项原用例对照基线；其余企业用例未执行。[检查基线](平台Core接入-开发记录.md#core-rental-inspection-fixture-20261117) · [前一换货/凭证阶段](平台Core接入-开发记录.md#core-rental-exchange-documents-20261117)。需求/任务身份、依赖、顺序和正式业务规则保持批准依据；品牌原稿及许可固定来源也在Git。[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114) · [品牌保留稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)
 
 ## 2. 已有实际接点
 
@@ -49,7 +49,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-换货试算/纯渲染/凭证应用的25个执行单元与固定父版一致，最终十配置零诊断；三份原凭证/换货用例前后均通过，换货93项无失败/跳过。两个Nest/原快照竞争短探针通过，原注入/Optional顺序、唯一键赢家回读和其他错误保留。工作台/报表/作业、DTO及其他既有阶段证据从原记录读取；两份真库报表脚本未执行。所有验证留内存，SQL/仓储和事务为明确fixture，output/.tmp为空，无新环境或后台进程。真实HTTP/数据库/浏览器、完整Core包安装/更新、独立接手和审查未验。[当前证据](平台Core接入-开发记录.md#core-rental-exchange-documents-20261117)
+本次生产检查服务尚未迁移；原夹具按文件服务的冻结/恢复语义修正后，七项检查准备/影像用例7/7通过，十配置零诊断。旧夹具基线的3通过/4失败及修正原因沿记录保留，整份企业脚本的其他用例未执行。前一换货/凭证的正文、原用例和Nest竞争证据继续有效。SQL/仓储/对象字节和事务为明确fixture，所有新验证留内存，PID51940已退出、output/.tmp无新增产物。真实HTTP/数据库/浏览器、完整Core包安装/更新、独立接手和审查仍未验。[检查基线](平台Core接入-开发记录.md#core-rental-inspection-fixture-20261117) · [换货/凭证证据](平台Core接入-开发记录.md#core-rental-exchange-documents-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 

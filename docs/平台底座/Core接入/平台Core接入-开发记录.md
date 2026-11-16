@@ -11,6 +11,20 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-inspection-fixture-20261117"></a>
+
+## Rental 换货检查与影像原消费者基线修正（2026-11-17）
+
+固定生产源码为3c0c09dd0fa32161c3bfd78f0c88ea0c84231016，检查准备/媒体服务本片没有修改。跨日接续重新核定本树分支、空索引、无合并/拣选和实际远端；main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在祖先，任务分支已同步。先收口归属明确的原测试夹具，再进入生产迁移。[原七项检查用例](../../../tests/enterprise-extension-approval.test.cjs) · [原检查服务](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.service.ts) · [原媒体服务](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts)
+
+原七项检查/影像用例在修改生产源码前出现3通过/4失败，PID4332退出1。旧夹具缺少reconcileExchangeInspectionUpload，未模拟原文件服务已提交的不可变冻结证据；另一个拒绝断言调用只读requirements，实际应检验prepare对未核验必需照片的拒绝。修正遵循原文件服务的暂存→冻结意图提交→原目标核对→同事务完成顺序，保留操作键、权限、绑定、CAS、首响应丢失、到期与损坏占用断言。存储与对象字节仍为显式fixture，没有对真实文件服务或供应商进行验收。[文件冻结/恢复实现](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [原冻结合同](../../../packages/platform-contracts/src/file-content-binding.ts)
+
+夹具现在区分已登记冻结目标可核对、没有冻结证据仍unknown，以及订单修订变化拒绝恢复；恢复只观察原目标，不增加暂存读取、不另申请上传票据。完成结果只模拟原六个公开字段。原VM加载器支持正式包和Prisma SQL runtime，离线写入根改为output/.tmp/enterprise-workflows；未新增脚本或删除测试，没有skip/todo。[严格DTO](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.dto.ts)
+
+必要复验使用node --no-compilation-cache - api-exchange-inspection-baseline，PID51940退出0、stderr空。以TS AST仅选择原七个test注册，保留辅助代码、断言与源码变更检测；其他企业审批用例未执行，不能称整份脚本全绿。七项7/7、0 fail/skip/todo/cancelled；TS5.9.3、Prisma5.22官方原238模型声明，十配置零诊断，Rental139根/861源/278输出、原API988根/2381源/1976输出，全部编译声明/JS留内存。采用原离线preload和端口1 URL，拒绝.env、真实网络、Prisma实例化与磁盘写入。
+
+本片只提交原夹具及记录/接续，中文提交到codex/platform-core-extraction、普通推送后实际回读；固定提交由包含本节的Git版本定位。原需求/任务及百分比不变，没有把用例修正计入研发升档。PID51940已退出，output/.tmp无新增产物；既有两个待清理任务仍按原责任清单处理。下一步把同一检查准备、媒体、DTO与读辅助迁入Rental包，使用相同七项夹具做前后对照，保持原文件和当前授权参加者。
+
 <a id="core-rental-exchange-documents-20261117"></a>
 
 ## Rental 换货试算与不可变订单凭证独立归属（2026-11-17）
