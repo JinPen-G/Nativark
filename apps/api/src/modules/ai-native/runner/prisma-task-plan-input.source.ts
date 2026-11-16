@@ -145,7 +145,9 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     try {
       const body: CreateRentalOrderDto = await this.validation.transform(structuredClone(value), { type: 'body', metatype: CreateRentalOrderDto });
       if (!body || body.capabilityExceptions !== undefined || requestFingerprint(body) !== requestFingerprint(value)) throw denied();
-      return JSON.parse(JSON.stringify(body)) as CreateRentalOrderRequest;
+      // Keep validated original JSON order for Core's historical booking-identity
+      // comparison. DTO instance property order must not replace that snapshot.
+      return JSON.parse(JSON.stringify(value)) as CreateRentalOrderRequest;
     } catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
   }
 

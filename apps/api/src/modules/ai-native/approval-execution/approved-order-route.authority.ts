@@ -44,7 +44,9 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
     const dto = await this.validation.transform(raw, { type: 'body', metatype: CreateRentalOrderDto });
     if (!dto || requestFingerprint(raw) !== requestFingerprint(dto)
       || requestFingerprint({ ...dto, capabilityExceptions: undefined }) !== binding.requestFingerprint) throw denied();
-    return structuredClone(dto);
+    // DTO equivalence is proven above. Keep the stored field order for Core's
+    // historical booking-identity comparison and original request snapshots.
+    return raw;
   }
 
   private async authorized<T>(input: Pick<AiApprovedOrderInput, 'context' | 'businessIdempotencyKey' | 'actionFingerprint'>, binding: ApprovedOrderBinding,

@@ -54,9 +54,9 @@ export class PrismaApprovedOrderOriginalInputSource implements ApprovedOrderOrig
           || requestFingerprint(row.payload) !== row.fingerprint) throw deniedOrder();
         const body: CreateRentalOrderDto = await this.validation.transform(structuredClone(row.payload), { type: 'body', metatype: CreateRentalOrderDto });
         if (body.capabilityExceptions !== undefined || requestFingerprint(body) !== row.fingerprint) throw deniedOrder();
-        // DTO instances materialize absent optional properties as undefined. Return the
-        // same validated JSON bytes, not those transient class-transformer properties.
-        const normalized: CreateRentalOrderDto = JSON.parse(JSON.stringify(approvedOrderSnapshotJson(body)));
+        // DTO equivalence is checked above. Serialize the original JSON to retain
+        // historical field order and omit transient optional instance properties.
+        const normalized: CreateRentalOrderDto = JSON.parse(JSON.stringify(approvedOrderSnapshotJson(row.payload)));
         return { body: normalized, binding: requestFingerprint({ step, row }) };
       };
       const original = await read();

@@ -320,7 +320,7 @@ export class RentalOrderConfirmationService {
     // 报价可锁定权益版本，但提交订单仍须确认“当前员工关系仍有效”。企业主体和
     // 客户姓名都由这里的服务端解析结果覆盖，客户端不能伪造企业付款或历史身份。
     let membershipAtCommit = quote.membershipSnapshot
-      ? await this.resolveMembershipAtCommit(tenantId, workspaceId, quote)
+      ? await this.resolveMembershipAtCommit(tenantId, workspaceId, quote, undefined, approvalBinding)
       : undefined;
     const orderInput: CreateRentalOrderRequest = membershipAtCommit
       ? {
@@ -412,7 +412,7 @@ export class RentalOrderConfirmationService {
         // Acquire personal/corporate customer gates in the relation writer's
         // canonical order, before the individual customer business check below.
         if (quote.membershipSnapshot) {
-          membershipAtCommit = await this.resolveMembershipAtCommit(tenantId, workspaceId, quote, tx);
+          membershipAtCommit = await this.resolveMembershipAtCommit(tenantId, workspaceId, quote, tx, approvalBinding);
           order.membershipSnapshot = membershipAtCommit;
         }
         // 快速预检只改善反馈；这里才是权威判定。它与客户暂停、注销、合并共用
@@ -638,15 +638,20 @@ export class RentalOrderConfirmationService {
     }
   }
 
-  private async resolveMembershipAtCommit(tenantId: string, workspaceId: string, quote: RentalQuoteSnapshotV1, tx?: Prisma.TransactionClient) {
+  private async resolveMembershipAtCommit(tenantId: string, workspaceId: string, quote: RentalQuoteSnapshotV1,
+    tx?: Prisma.TransactionClient, binding?: ApprovedOrderBinding) {
     if (!this.memberships) throw new ConflictException("会员预约服务未就绪");
+    // 原 Core 封存委托已绑定客户告知，只在此重读当前会员事实。
+    // 企业新业务政策仍由提交事务内 assertOrderCreation 核验。
+    if (binding?.merchantDelegation) assertCoreMerchantDelegationProof(binding.merchantDelegation, binding);
     const snapshot = quote.membershipSnapshot!;
     const current = await this.memberships.resolveBookingIdentity(
       tenantId,
       workspaceId,
       snapshot.personalCustomerId,
       quote.request.bookingIdentity,
-      tx
+      tx,
+      binding?.merchantDelegation ? "fulfillment" : "new_business"
     );
     if (
       current.bookingIdentity !== snapshot.bookingIdentity ||
@@ -659,7 +664,8 @@ export class RentalOrderConfirmationService {
     if (tx) {
       if (!this.memberships.assertBookingQualificationForAction) throw new ConflictException("提交事务资格读取未就绪");
       await this.memberships.assertBookingQualificationForAction(tenantId, workspaceId, current, quote.ruleSnapshot.qualification, "submit",
-        { validThroughAt: quote.request.endAt, minimumValidityFromAt: quote.request.startAt }, tx);
+        { validThroughAt: quote.request.endAt, minimumValidityFromAt: quote.request.startAt }, tx,
+        binding?.merchantDelegation ? binding : undefined);
     }
     // 价格权益保持报价快照，资格读取当前事实，不能使用已被撤销的旧审核结果。
     return { ...snapshot, qualifications: current.qualifications };

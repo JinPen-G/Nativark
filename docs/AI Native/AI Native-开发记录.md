@@ -6,6 +6,31 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-26-original-input-stop-continuation-20261117"></a>
+## AIN-15／26 原输入保留、Core 委托重检与停止续办（2026-11-17）
+
+固定前置为 `46194a9729b00c4cf022b25f566d76bd3da5897a`，codex/ai-native 已通过实际 GitHub 分支回读核对。本片九份源码及两份现行文档归临时 AI-RD。暂存区为空，既有 main WIP 已核明归属，本阶段在 AI 工作树完成。
+
+企业 D 准备的公开选单投影只取原 bookingIdentity、企业 ID 和付款选择，完整本人告知继续保留在服务器原请求中。原 DTO 验证、字段等价及 hash 检查通过后，发布、读取及审批路由序列化原 JSON，保留 Core 历史 bookingIdentity 比较需要的字段顺序。原反例在准备入口返回 AI_INVALID_INPUT，修复后实际 Guard／Controller 准备、选单保存及同键读取通过。相关入口见[原选单投影](../../apps/api/src/modules/ai-native/approval-execution/approved-order-merchant-delegation.ts)、[输入发布](../../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source.ts)及[快照读取](../../apps/api/src/modules/ai-native/approval-execution/prisma-approved-order-snapshot.source.ts)。
+
+继续执行原批准时，Core 的两次会员及资格重检再次要求营运用户提供客户本人新声明，实际失败已复现。本片沿已有 Core 封存证明，在原订单提交内重读当前会员事实。资格服务的可选 binding 限制在 submit、原事务及同租户／空间／使用人／企业，并验证原 WeakMap 封存对象。原事务内企业政策、批准、资格、库存与金额仍分别核验。该最小接点扩展到本树 MembershipService，由 Root 实施并纳入当前类型及独立复核范围。相关实现见[订单确认](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)和[会员资格](../../apps/api/src/modules/platform/membership.service.ts)。
+
+公共停止入口先读取同一原请求事件，已观察到的请求复用当前 transition_task 权限续办善后。新请求由原仓储提交 CAS 和审计，同请求并发冲突再次核原事件。原 stopReceipt 只读。后台保留原定位，仅在观察到原收据后提供显式续办，续办失败继续保留原 K。相关入口见[TaskCenter](../../apps/api/src/modules/ai-native/task-center.application.ts)和[停止消费者](../../apps/admin/src/features/ai-native/TaskCancellation.tsx)。原 dev2 中断组合的修复后行为和独立复核待固定版本核验。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| D 准备与原选单 | stdin SHA-256 `e7f1a774db6bede527713cbf539eb1c92f7cb7a1dcf6715f046b196ef68f0583`，退出0。缺权限403，准备只读，选单完整输入等于原 D，重读及重复选择保留同一 selection，模型2次且未创建订单或批准。 |
+| 联合提交及封存拒绝 | stdin SHA-256 `1a320d84378c2ef79270eb4334eb0c54e7944ffb25c161633dc35d2318c2eb95`，退出0。准备、显式选择、原提案审阅、人工批准、继续及原结果读取通过。订单1张、AI消费1条、D消费1份，Core原键为D，模型仍2次。普通营运新声明、同形伪造binding及将委托用于续租均403。 |
+| 普通批准订单回归 | stdin SHA-256 `096b859adb7643b3018ca4638ab4c3c8d74445626592a4cdfd1542407a9e4602`，退出0。正常、Core提交丢ACK后原键恢复及库存事务回滚通过。原有限夹具补 Tenant 原行查询，仅在内存加载时适配。 |
+| API 类型 | stdin SHA-256 `e9c5d2ef87be276c85c9e36ef24c3c76eca68ca75e8a3650106c3bb6c8bb7b0b`，退出0。TypeScript5.9.3，21根／1915源，noEmit零诊断。 |
+| 后台类型 | stdin SHA-256 `71a5045f9d590af9d69f82defd883bd9cff4fe3eb63d89cb97844d05b55df751`，退出0。10根／1610源，包含停止页，零诊断。 |
+
+全部命令采用 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，本树原 offline preload、不可达 DATABASE_URL 和纯内存 audit，audit均为空。原企业 D 存储为从真实 Core 报价及原 hash 构造的有限夹具，客户本人签发服务尚未执行。本次验证未覆盖逐单企业批准、联合回滚／丢ACK／单边收据全文、实际页面会话、真实 MySQL、浏览器、微信或供应商。
+
+AIN-15、26、27、28按原完整门槛继续，任务百分比未跨档。dev1续跑消息含完整目标，实际回读为 active 且已执行工具，目标无 token_budget。dev2原反例再次在前置46194复现，保留原阻塞原因，修复后受影响组合交固定候选复验。Root全部验证子进程已退出，任务临时目录未创建，本次测试文件未修改，新增临时产物为0。
+
+本阶段 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出1，11份白名单仅检出原4处缺链。本片7个文件链接均可解析，当前差异检查退出0。阶段固定后普通推送并回读实际远端，源码及验证按本节保留，独立复核与未验行为继续留原专项记录。
+
 <a id="ain15-26-page-integration-checkpoint-20261117"></a>
 ## AIN-15／26 原企业选单接线与取消善后未完成检查点（2026-11-17）
 

@@ -46,6 +46,8 @@ import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service
 import { EnterpriseCommandService } from "../enterprise/enterprise-command.service";
 import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { assertOtherEnterpriseAdministrator } from "../enterprise/enterprise-administrator-continuity";
+import type { ApprovedOrderBinding } from "../rental-core/approved-order-transaction.ports";
+import { assertCoreMerchantDelegationProof } from "../rental-core/rental-merchant-delegated-order.authority";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -1239,7 +1241,8 @@ export class MembershipService {
     rule: RentalRuleConfig["qualification"],
     action: RentalQualificationAction,
     window: RentalQualificationCheckWindow,
-    tx?: Prisma.TransactionClient
+    tx?: Prisma.TransactionClient,
+    delegatedBinding?: Readonly<ApprovedOrderBinding>
   ) {
     await this.requireWorkspace(tenantId, workspaceId, tx);
     if (!snapshot && !rule.required) return { ok: true as const };
@@ -1247,12 +1250,22 @@ export class MembershipService {
       throw new ConflictException(`${this.qualificationActionLabel(action)}不能继续：订单缺少会员资格快照，请先人工核验`);
     }
 
+    // 原 Core 封存委托保留本人告知，提交资格仍读取当前主档和原规则。
+    // 调用者提供的同形对象不能替代封存证明或扩展到续租等后续支出。
+    if (delegatedBinding) {
+      if (action !== "submit" || !tx || delegatedBinding.tenantId !== tenantId || delegatedBinding.workspaceId !== workspaceId
+        || !delegatedBinding.merchantDelegation || delegatedBinding.merchantDelegation.personalCustomerId !== snapshot.personalCustomerId
+        || delegatedBinding.merchantDelegation.corporateCustomerId !== snapshot.corporateCustomerId) {
+        throw new ForbiddenException("委托资格复查须使用原 Core 提交事务及会员绑定");
+      }
+      assertCoreMerchantDelegationProof(delegatedBinding.merchantDelegation, delegatedBinding);
+    }
     const current = await this.resolveBookingIdentity(tenantId, workspaceId, snapshot.personalCustomerId, {
       bookingIdentity: snapshot.bookingIdentity,
       corporateCustomerId: snapshot.corporateCustomerId,
       enterpriseContractAndPayer: snapshot.enterpriseContractAndPayer,
       enterpriseDisclosure: snapshot.enterpriseBasis ? { noticeVersion: snapshot.enterpriseBasis.noticeVersion, acknowledged: true } : undefined
-    }, tx, action === "pickup" ? "fulfillment" : "new_business");
+    }, tx, action === "pickup" || delegatedBinding ? "fulfillment" : "new_business");
     if (current.corporateMembershipId !== snapshot.corporateMembershipId || current.bookingIdentity !== snapshot.bookingIdentity
       || current.corporateCustomerId !== snapshot.corporateCustomerId || current.enterpriseContractAndPayer !== snapshot.enterpriseContractAndPayer) {
       throw new ConflictException("原企业预约关系已变化，不能将后继新关系当作原订单授权");

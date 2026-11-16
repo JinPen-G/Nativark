@@ -27,9 +27,13 @@ export type ApprovedOrderMerchantDelegationSource = Pick<EnterpriseMerchantDeleg
 /** Keep the public command limited to the explicitly reviewed rental fields.
  * Additional original order fields are resolved and retained on the server. */
 export function approvedOrderSelectionInput(body: CreateRentalOrderRequest): AiQuoteSelectedOrderDraft {
+  const bookingIdentity = body.bookingIdentity?.bookingIdentity === 'enterprise_employee'
+    ? { bookingIdentity: 'enterprise_employee' as const, corporateCustomerId: body.bookingIdentity.corporateCustomerId,
+      enterpriseContractAndPayer: body.bookingIdentity.enterpriseContractAndPayer }
+    : body.bookingIdentity ? { bookingIdentity: 'personal' as const } : undefined;
   return structuredClone({ quoteId: body.quoteId, customerType: body.customerType, customerId: body.customerId,
     customerName: body.customerName, ...(body.contactPhone ? { contactPhone: body.contactPhone } : {}),
-    ...(body.bookingIdentity ? { bookingIdentity: body.bookingIdentity } : {}), fulfillmentMode: body.fulfillmentMode,
+    ...(bookingIdentity ? { bookingIdentity } : {}), fulfillmentMode: body.fulfillmentMode,
     fulfillmentLocationId: body.fulfillmentLocationId, ...(body.returnLocationId ? { returnLocationId: body.returnLocationId } : {}),
     startAt: body.startAt, endAt: body.endAt, lines: body.lines }) as AiQuoteSelectedOrderDraft;
 }

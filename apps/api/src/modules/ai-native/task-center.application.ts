@@ -215,22 +215,34 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           const access = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
           const task = await input.db.aiTask.findFirst({ where: access.where });
           if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          if (action === 'stop') {
-            if (task.revision !== query.expectedRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-            // The original repository owns transition policy, task CAS, audit
-            // event and cancellation state. No lease, remote cancel or refund.
-            await root.cancellation.request(query);
-          }
-          try {
+          const readCancellation = async () => {
             const result = z.object({ taskId: id, expectedRevision: z.number().int(),
               status: z.enum(['observed', 'not_observed']), cancellation: z.literal('request_not_rollback'),
               snapshot: z.object({ revision: z.number().int().min(1), status: z.enum(AI_TASK_STATUSES_DRAFT) }).passthrough(),
               automaticRetry: z.literal(false), remoteCancellation: z.literal('not_attested') }).passthrough()
-              .safeParse(await root.cancellation.read(query));
+              .safeParse(await root.cancellation!.read(query));
             if (!result.success || result.data.taskId !== query.taskId || result.data.expectedRevision !== query.expectedRevision)
               throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-            if (action === 'stop' && result.data.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
-            if (action === 'stop' && result.data.snapshot.status === 'cancel_requested'
+            return result.data;
+          };
+          if (action === 'stop') {
+            const transition = await root.tasks.resolveAccess(query.taskId, 'transition_task');
+            if (transition.bindingKey !== access.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            // 原请求已落库时沿其事件续办，保持原修订定位和当前动作权限。
+            // 新请求的 CAS、审计和取消状态仍由原仓储原子提交。
+            if ((await readCancellation()).status !== 'observed') {
+              try { await root.cancellation.request(query); }
+              catch (error) {
+                if (!(error instanceof AiTaskRepositoryError) || error.code !== 'AI_REVISION_CONFLICT') throw error;
+                // 另一个同请求可能已提交。核对原事件后才能认定冲突发生在提交前。
+                if ((await readCancellation()).status !== 'observed') throw error;
+              }
+            }
+          }
+          try {
+            const result = await readCancellation();
+            if (action === 'stop' && result.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            if (action === 'stop' && result.snapshot.status === 'cancel_requested'
               && task.sceneCode === 'quote_clarification' && task.inputRef && input.selectedOrderCancellation) {
               const cancellation = input.selectedOrderCancellation;
               if (!Object.is(cancellation.db, input.db)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -251,14 +263,14 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
                   await cancellation.settleUnstartedCancellation({ headers: { authorization: header.data } }, {
                     selection: { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: task.inputRef,
                       taskId: task.id, runId: run.id, selectionId: selections[0].id, inputHash: selections[0].inputHash },
-                    expectedRevision: result.data.snapshot.revision
+                    expectedRevision: result.snapshot.revision
                   }, activeSignal);
                 }
               }
             }
             const latest = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
             if (access.bindingKey !== latest.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-            return { ...query, status: result.data.status, cancellation: 'request_not_rollback' as const,
+            return { ...query, status: result.status, cancellation: 'request_not_rollback' as const,
               automaticRetry: false as const, remoteCancellation: 'not_attested' as const, budgetRelease: 'not_attempted' as const };
           } catch (error) {
             if (error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED') throw error;

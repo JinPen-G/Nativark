@@ -71,7 +71,8 @@ export class PrismaApprovedOrderSnapshotSource implements ApprovedOrderSnapshotS
         return row;
       };
       const input = await read('INPUT'), preview = await read('PREVIEW');
-      const body: CreateRentalOrderDto = await this.validation.transform(input.payload, { type: 'body', metatype: CreateRentalOrderDto });
+      const originalBody: CreateRentalOrderDto = JSON.parse(JSON.stringify(input.payload));
+      const body: CreateRentalOrderDto = await this.validation.transform(structuredClone(originalBody), { type: 'body', metatype: CreateRentalOrderDto });
       const quote = approvedOrderPreviewSchema.parse(preview.payload);
       if (body.capabilityExceptions !== undefined || requestFingerprint(body) !== input.contentHash
         || requestFingerprint(quote) !== preview.contentHash || body.quoteId !== quote.id
@@ -89,7 +90,8 @@ export class PrismaApprovedOrderSnapshotSource implements ApprovedOrderSnapshotS
       const current = await this.policy.authorizeRead(request.taskId, tx);
       if (current.scopeId !== first.scopeId || orderContextHash(first.context) !== orderContextHash(current.context)) throw deniedOrder();
       const envelope = { scopeId: base.scopeId, taskId: base.taskId, actionId: base.actionId };
-      return { input: { ...envelope, ...request.action.input, payload: structuredClone(body) },
+      // Original booking-identity order is part of Core's historical comparison.
+      return { input: { ...envelope, ...request.action.input, payload: originalBody },
         preview: { ...envelope, ...request.action.preview, payload: structuredClone(quote) } };
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
