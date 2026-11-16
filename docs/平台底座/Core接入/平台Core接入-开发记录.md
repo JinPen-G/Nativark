@@ -11,6 +11,29 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-request-dto-20261116"></a>
+
+## Rental 业务请求、订单请求与共享企业告知 DTO（2026-11-16）
+
+固定父版606b67b8b8c6e44d04c4aad63a14c97f8a3daff3已普通推送并回读实际远端，main62ca仍在本树祖先。原Core请求14类、订单请求52类与企业告知1类实际迁入Rental包，共67个运行时类，其中63个正式导出、4个内部嵌套类。原API路径再导出同一对象，企业和客户预约继续使用同一个告知类，不新增另一套字段声明或校验。[Core请求](../../../packages/rental-core/src/core-request.dto.ts) · [订单请求](../../../packages/rental-core/src/order-request.dto.ts) · [企业告知](../../../packages/rental-core/src/enterprise-disclosure.dto.ts)
+
+新增/core-dto、/order-dto和/enterprise-disclosure-dto正式出口及typesVersions。请求字段、Type/ValidateNested、条件校验、过滤/分页转换与原装饰器元数据保持；ValidationPipe仍按原transform/whitelist配置运行，非法嵌套输入拒绝，订单终态/金额/免审核字段不会成为受信输入。企业告知仅表达原版本与确认，不授予企业或业务权限。源码备注及模块导读说明reflect-metadata和装饰器构建前置，完整字段来源仍是正式DTO/合同。[原HTTP入口](../../../apps/api/src/modules/rental-core/rental-order-request.dto.ts) · [企业再导出](../../../apps/api/src/modules/enterprise/enterprise-request.dto.ts) · [客户消费者](../../../apps/api/src/modules/client/client-request.dto.ts) · [接入说明](../../../packages/rental-core/README.md)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版运行时对照 | Core与订单DTO的CommonJS正文/装饰器元数据规范化后完全一致；仅移除require行及统一原shared/告知模块别名，原67类及4个内部类均保留 |
+| `node --no-compilation-cache - api-dto-validation`＋四份原用例，stdin内存编译/装载 | 最终PID48344退出0、stderr空；TS5.9.3和Prisma5.22官方原238模型声明，十配置零诊断。Rental126根/848源/252输出，原API988根/2368源/1976输出，无生成物写入 |
+| 原事务顺序/检查证据/资源/读数消费者 | 原事务顺序7场景和三份静态用例通过；55个原断言期待值/消息及重复次数保留。只更新读取实际实现的路径、补必须读到真实DTO的断言和原续租夹具allocations空列表，不删断言或放宽生产逻辑 |
+| 实际DTO/ValidationPipe短探针 | 两个Node用例2/2，0 fail/skip/todo/cancelled；62个Core/订单公开DTO及告知类的新旧对象相同。嵌套行/企业和客户告知转换、非法数量/照片长度/告知类型拒绝、终态及跨租户字段剥离、force-release原因和pendingFeeOnly原转换通过 |
+| 原字段门禁前后对照 | 原validate-dto-coverage代码经stdin/内存CompilerHost运行，固定父版与候选均退出1、同样10个问题；规范化原/新文件路径后完全一致，没有新增字段缺失。八个AI类、企业委托引用及OfflineDepositEvidenceDto的原implements/命名缺口继续保留，不以兼容再导出空文件制造假绿 |
+| 文档/出口/格式 | 九份资料的本地链接、锚点与表格定向核对通过；三个正式出口与本版源码/声明对应，依赖锁不变，git diff --check退出0。原任务编号、依赖、顺序及验收保持，新增测试文件0 |
+
+失败保留。修改DTO前的固定606b检查PID52876退出1，三份检查静态用例读取已迁出的旧服务/事实文件，分别找不到读数生成、资源范围校验和追加修正正文。本片把路径指向真实mysql-core-runtime/mysql-core-facts，原断言完整保留。首次候选PID17500退出1，新探针误把67个总类数当公开导出数，同时原续租夹具漏allocations列表导致some读取错误；已修正数量核对和夹具，在同一范围复验，实际字段/业务服务不改。
+
+本片收口未跨原下一门槛。Rental完整Controller/标准装配、数据/迁移/Seed、页面/客户端、其余作业及AI接点仍缺，公共组织/订阅/集成也未全部独立；原05/06/08～12完整范围保留，不以DTO类型或局部通过升档。真实HTTP/数据库/浏览器、标准包干净安装、独立更新/回退、接手及独立审查仍未验。
+
+所有新验证留在内存，SQL/仓储和事务为明确fixture，无安装、.env、服务或业务网络调用；PID48344已结束，output/.tmp为空。原840文件/91,808,304字节环境和1个空日志仍集中待清理，本日原生PowerShell删除审批拒绝与责任清单沿[确认阶段](#core-rental-order-confirmation-20261116)保留，没有换壳/工具绕过。旧外观和导航/MCP附件缺口继续登记。中文阶段提交只含本片源码、必要旧用例和现有导读/记录/接续，普通推送codex/platform-core-extraction并读取实际远端；由包含本节的Git版本定位，不合main或发布。
+
 <a id="core-rental-allocation-runtime-20261116"></a>
 
 ## Rental 配货、办理锁、自动扫描与经营空间边界（2026-11-16）

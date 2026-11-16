@@ -406,6 +406,18 @@
     "./mysql-workspace-scope": {
       "types": "./dist/mysql-workspace-scope.d.ts",
       "default": "./dist/mysql-workspace-scope.js"
+    },
+    "./core-dto": {
+      "types": "./dist/core-request.dto.d.ts",
+      "default": "./dist/core-request.dto.js"
+    },
+    "./order-dto": {
+      "types": "./dist/order-request.dto.d.ts",
+      "default": "./dist/order-request.dto.js"
+    },
+    "./enterprise-disclosure-dto": {
+      "types": "./dist/enterprise-disclosure.dto.d.ts",
+      "default": "./dist/enterprise-disclosure.dto.js"
     }
   },
   "typesVersions": {
@@ -706,6 +718,15 @@
       ],
       "mysql-workspace-scope": [
         "dist/mysql-workspace-scope.d.ts"
+      ],
+      "core-dto": [
+        "dist/core-request.dto.d.ts"
+      ],
+      "order-dto": [
+        "dist/order-request.dto.d.ts"
+      ],
+      "enterprise-disclosure-dto": [
+        "dist/enterprise-disclosure.dto.d.ts"
       ]
     }
   },

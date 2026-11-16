@@ -6,9 +6,9 @@ const ROOT = path.resolve(__dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), "utf8").replace(/\r\n/g, "\n");
 
 const shared = read("packages/rental-core/src/contracts.ts");
-const dto = read("apps/api/src/modules/rental-core/rental-order-request.dto.ts");
-const repository = read("apps/api/src/modules/rental-core/rental-core-fact.repository.ts");
-const service = read("apps/api/src/modules/rental-core/rental-core.service.ts");
+const dto = read("packages/rental-core/src/order-request.dto.ts");
+const repository = read("packages/rental-core/src/mysql-core-facts.ts");
+const service = read("packages/rental-core/src/mysql-core-runtime.ts");
 const controller = read("apps/api/src/modules/rental-core/rental-core.controller.ts");
 const guard = read("apps/api/src/common/api-auth.guard.ts");
 const openapi = read("apps/api/src/contracts/openapi-document.ts");

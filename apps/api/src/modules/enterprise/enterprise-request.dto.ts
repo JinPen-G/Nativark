@@ -1,7 +1,8 @@
 import { Type } from "class-transformer";
+export { EnterpriseDisclosureDto } from "@rental-os/rental-core/enterprise-disclosure-dto";
 import type { CreateEnterpriseRentalHandoffRequest, ReviewEnterpriseRentalHandoffRequest, WithdrawEnterpriseRentalHandoffRequest } from "@rental-os/shared";
 import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsDefined, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from "class-validator";
-import type { EnterpriseApplicationInput, EnterpriseChangeRequest, SaveEnterpriseApplicationRequest, ReviewEnterpriseApplicationRequest, EnterpriseInvitePolicy, SaveEnterpriseInvitePolicyRequest, CreateEnterpriseInviteRequest, JoinEnterpriseRequest, ReviewEnterpriseJoinRequest, ChangeEnterpriseMemberRequest, TransferEnterpriseAdministratorRequest, DecideEnterpriseTransferRequest, EnterpriseScopePolicy, SaveEnterpriseScopePolicyRequest, EnterpriseDisclosure, RequestEnterpriseBookingApproval, DecideEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking, EnterpriseAuthorityUploadRequest } from "@rental-os/shared";
+import type { EnterpriseApplicationInput, EnterpriseChangeRequest, SaveEnterpriseApplicationRequest, ReviewEnterpriseApplicationRequest, EnterpriseInvitePolicy, SaveEnterpriseInvitePolicyRequest, CreateEnterpriseInviteRequest, JoinEnterpriseRequest, ReviewEnterpriseJoinRequest, ChangeEnterpriseMemberRequest, TransferEnterpriseAdministratorRequest, DecideEnterpriseTransferRequest, EnterpriseScopePolicy, SaveEnterpriseScopePolicyRequest, RequestEnterpriseBookingApproval, DecideEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking, EnterpriseAuthorityUploadRequest } from "@rental-os/shared";
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CURRENCY_CODES, ENTERPRISE_REVIEW_REQUEST_TYPES, ENTERPRISE_PORTAL_ACTIONS, type RentalCategoryCode, type CloseEnterpriseApprovalExecution, type EnterpriseManagementProposal, type SaveEnterpriseManagementRequest, type ReviewEnterpriseManagementRequest, type PreviewEnterpriseInviteRequest, type ChangeEnterpriseAdministratorRequest, type EnterprisePaymentProofUploadRequest } from "@rental-os/shared";
 export class ReviewEnterpriseRentalHandoffRequestDto implements ReviewEnterpriseRentalHandoffRequest {
   @IsString() @Matches(/^[a-zA-Z0-9_-]{1,128}$/u) operationKey!: string;
@@ -93,10 +94,7 @@ export class CloseEnterpriseApprovalExecutionDto implements CloseEnterpriseAppro
   @IsString() @IsNotEmpty() @MaxLength(500) reason!: string;
   @IsIn([true]) confirm!: true;
 }
-export class EnterpriseDisclosureDto implements EnterpriseDisclosure {
-  @IsString() @IsNotEmpty() @MaxLength(191) noticeVersion!: string;
-  @IsBoolean() acknowledged!: boolean;
-}
+
 export class EnterpriseApplicationInputDto implements EnterpriseApplicationInput {
   @IsString() @IsNotEmpty() @MaxLength(191) legalName!: string;
   @IsString() @IsNotEmpty() @MaxLength(80) region!: string;
