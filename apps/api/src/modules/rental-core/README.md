@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+[检查准备](rental-exchange-inspection-preparation.service.ts)和[专用影像](rental-exchange-inspection-media.service.ts)现在只供给原Nest依赖，实际检查、原键、冻结照片接受及完成恢复由Rental包执行。旧读辅助与DTO再导出同一实现；原Controller、企业换货批准及检查同意继续使用原签名和权限。文件服务保留自己的计划、存储配置和单次冻结/原目标核对，Core只接本链必要方法。[检查实现](../../../../../packages/rental-core/src/mysql-exchange-inspection-preparation.ts) · [影像实现](../../../../../packages/rental-core/src/mysql-exchange-inspection-media.ts) · [私有接点](../../../../../packages/rental-core/src/exchange-inspection-ports.ts) · [严格DTO](../../../../../packages/rental-core/src/exchange-inspection-preparation.dto.ts) · [八项API声明](rental-exchange-inspection-preparation.schemas.ts)
+
 [资金服务](rental-funding.service.ts)是原Nest兼容接线，将同一Prisma数据源、Auth/ALS身份、原订单可见范围和企业应收参与者交给Rental包。资金事件、余额和收退款门禁只有一份实现，调用方原事务、幂等回放、演练/实款区分与企业现金核销保持。[实际资金服务](../../../../../packages/rental-core/src/mysql-funding.ts) · [存储与应收接点](../../../../../packages/rental-core/src/funding-storage.ts) · [事件规则](../../../../../packages/rental-core/src/funding-events.ts)
 
 [企业应收仓储](rental-order-receivable.repository.ts)供给同一数据源，原付款主体/结算快照、完整账分页、回款关联和现金核销由Rental包维护。企业业务入口与资金服务仍共用原账及事务，原总回款、逐单核销和冲销不重复计收入；原企业读取、API文档、后台金额展示与结算文档继续消费同一结果。[核销实现](../../../../../packages/rental-core/src/mysql-order-receivables.ts) · [完整原账](../../../../../packages/rental-core/src/mysql-corporate-ledger.ts) · [回款收据](../../../../../packages/rental-core/src/corporate-payment-receipts.ts) · [冻结结算](../../../../../packages/rental-core/src/corporate-settlement-basis.ts) · [原消费者验证](../../../../../tests/rental-order-receivable.test.cjs)

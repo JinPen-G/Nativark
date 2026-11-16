@@ -454,6 +454,26 @@
     "./mysql-documents": {
       "types": "./dist/mysql-documents.d.ts",
       "default": "./dist/mysql-documents.js"
+    },
+    "./mysql-exchange-inspection-preparation": {
+      "types": "./dist/mysql-exchange-inspection-preparation.d.ts",
+      "default": "./dist/mysql-exchange-inspection-preparation.js"
+    },
+    "./mysql-exchange-inspection-media": {
+      "types": "./dist/mysql-exchange-inspection-media.d.ts",
+      "default": "./dist/mysql-exchange-inspection-media.js"
+    },
+    "./exchange-inspection-dto": {
+      "types": "./dist/exchange-inspection-preparation.dto.d.ts",
+      "default": "./dist/exchange-inspection-preparation.dto.js"
+    },
+    "./exchange-inspection-preparation-read": {
+      "types": "./dist/exchange-inspection-preparation.read.d.ts",
+      "default": "./dist/exchange-inspection-preparation.read.js"
+    },
+    "./exchange-inspection-media-read": {
+      "types": "./dist/exchange-inspection-media.read.d.ts",
+      "default": "./dist/exchange-inspection-media.read.js"
     }
   },
   "typesVersions": {
@@ -790,6 +810,21 @@
       ],
       "mysql-documents": [
         "dist/mysql-documents.d.ts"
+      ],
+      "mysql-exchange-inspection-preparation": [
+        "dist/mysql-exchange-inspection-preparation.d.ts"
+      ],
+      "mysql-exchange-inspection-media": [
+        "dist/mysql-exchange-inspection-media.d.ts"
+      ],
+      "exchange-inspection-dto": [
+        "dist/exchange-inspection-preparation.dto.d.ts"
+      ],
+      "exchange-inspection-preparation-read": [
+        "dist/exchange-inspection-preparation.read.d.ts"
+      ],
+      "exchange-inspection-media-read": [
+        "dist/exchange-inspection-media.read.d.ts"
       ]
     }
   },

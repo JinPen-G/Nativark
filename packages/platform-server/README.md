@@ -6,6 +6,7 @@
 | --- | --- |
 | HTTP 与准入 | [模块](src/platform-server.module.ts)、[公共政策](src/platform-http-policy.ts)、[Guard](src/platform-auth.guard.ts)；未知方法/路径拒绝，行业 HTTP 由受控宿主显式供给 |
 | 公共会话 | [公共认证](src/modules/auth/platform-auth.service.ts)、[共享会话算法](src/modules/auth/auth-session.service.ts)；原签名、失败保护、单次刷新和改密 |
+| 当前组织范围 | [组织子树与地点交集](src/common/organization-location-scope.ts) 从 `/organization-location-scope` 提供；调用方先限定租户，缺失/停用组织返回空集合，配置地点只缩小已映射范围 |
 | 身份存储 | [仓储](src/modules/platform/platform-identity.repository.ts)、[认证来源](src/modules/platform/platform-authentication.source.ts)、[窄存储端口](src/modules/platform/platform-auth-data-store.ts)；平台账号、角色和会话，业务表不进入端口 |
 | 公共管理 | [应用服务](src/modules/platform/platform-management.service.ts)、[仓储](src/modules/platform/platform-management.repository.ts)、[存储端口](src/modules/platform/platform-management.store.ts)、[主体围栏](src/modules/platform/platform-principal.authority.ts)；SaaS与租户管理分开，当前原会话 / 角色在同事务复验 |
 | 部署初始化 | [公共初始化](src/modules/platform/platform-initialization.ts)；首次创建SaaS主体，重复执行不重置账号，不运行Core初始化 |

@@ -110,6 +110,10 @@
     "./notification-delivery": {
       "types": "./dist/common/notification-delivery.d.ts",
       "default": "./dist/common/notification-delivery.js"
+    },
+    "./organization-location-scope": {
+      "types": "./dist/common/organization-location-scope.d.ts",
+      "default": "./dist/common/organization-location-scope.js"
     }
   },
   "scripts": {
@@ -206,6 +210,9 @@
       ],
       "notification-delivery": [
         "dist/common/notification-delivery.d.ts"
+      ],
+      "organization-location-scope": [
+        "dist/common/organization-location-scope.d.ts"
       ]
     }
   }

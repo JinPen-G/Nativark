@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -15,6 +15,8 @@
 | [经营报表](src/mysql-reports.ts)、[只读存储](src/report-storage.ts)、[CSV](src/report-csv.ts) | `/mysql-reports` 读取原订单/资产/数量库存；普通报表保持全区间分页，AI入口有5000单上限，超量不返部分总数。`/report-csv` 仅渲染同一已获权结果 |
 | [到期作业](src/mysql-due-jobs.ts)、[实际依赖](src/due-job-ports.ts) | `/mysql-due-jobs` 保留五项任务、同连接命名锁、租户/空间ALS及原操作键；宿主只登记一个执行者，未选择Rental时不加载 |
 | [换货候选与试算](src/mysql-exchange-preview.ts)、[事务与服务视图](src/exchange-preview-ports.ts)、[候选合同](src/exchange-choices.ts) | /mysql-exchange-preview在原订单锁内读取当前候选及冻结价格依据，保留容量、整行和币种限制；试算不批准、不执行、不收款 |
+| [换货检查准备](src/mysql-exchange-inspection-preparation.ts)、[准备与照片消费](src/exchange-inspection-preparation.read.ts)、[严格DTO](src/exchange-inspection-preparation.dto.ts) | /mysql-exchange-inspection-preparation、/exchange-inspection-preparation-read与/exchange-inspection-dto保留原操作者、订单锁、冻结模板、照片消费及原收据同事务；检查事实不授予费用、客户同意或履约权 |
+| [专用检查影像](src/mysql-exchange-inspection-media.ts)、[原影像读取](src/exchange-inspection-media.read.ts)、[当前身份/文件/事务接点](src/exchange-inspection-ports.ts) | /mysql-exchange-inspection-media与/exchange-inspection-media-read核原来源、文件/会话、占用与完成；原文件适配负责私有计划、单次暂存读取和冻结目标核对 |
 | [凭证合同](src/document-contracts.ts)、[纯渲染](src/document-renderer.ts)、[归档与历史](src/mysql-documents.ts)、[本表读写视图](src/document-storage.ts) | /document-contracts与/document-renderer不依赖数据库；/mysql-documents保留逐字段释放、稳定内容摘要、同内容唯一归档和当前订单/空间/财务历史门禁 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
@@ -62,6 +64,10 @@
 | [设置批准合同](src/approved-settings-ports.ts)、[设置输入校验](src/approved-settings-validation.ts) | /approved-settings-ports 与 /approved-settings-validation 维护原修订、批准/消费、原操作与unknown语义，宿主事务类型按真实组合实例化 |
 
 ## 使用与构建
+
+换货检查准备从 `@rental-os/rental-core/mysql-exchange-inspection-preparation` 创建，供给同一数据源、核心、试算、幂等与当前授权实例。影像从 `/mysql-exchange-inspection-media` 创建，供给同一检查实例和原文件服务；两者的[窄接点](src/exchange-inspection-ports.ts)只描述本链需要的方法。`readForExecution` 使用调用方已有事务，准备、照片消费、批准和原收据不会因迁移另开提交边界。[原检查provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.service.ts) · [原影像provider](../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts)
+
+文件适配返回的完整计划通过 `TPlan` 原样交还该适配，私有配置不进入公共清单或HTTP结果。完成占用先提交，只有本次已确认占用可读取暂存并冻结一次；重启或首响应丢失只核对原冻结目标。没有可信冻结证据时保持unknown，订单修订或当前权限变化继续拒绝。严格输入从 `/exchange-inspection-dto` 复用；HTTP八项路由、权限及字段仍由[原接口声明](../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.schemas.ts)提供，SDK方法不是任意业务Agent的调用许可。[原七项检查消费者](../../tests/enterprise-extension-approval.test.cjs)
 
 核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
 

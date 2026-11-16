@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-inspection-runtime-20261117"></a>
+
+## Rental 换货检查准备与专用影像独立归属（2026-11-17）
+
+固定父版7fae0de571664b2edc3782bae06d671f5a838e6c已普通推送并回读，包含已修正的七项原检查夹具和本次修改前完整接续。实际远端main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在本树祖先。原检查准备、影像服务、两个读辅助及严格DTO实际迁入Rental包，旧API保留Nest provider或同一对象再导出；Controller、企业批准、客户检查同意和执行参加者继续消费原签名。[准备实现](../../../packages/rental-core/src/mysql-exchange-inspection-preparation.ts) · [影像实现](../../../packages/rental-core/src/mysql-exchange-inspection-media.ts) · [私有接点](../../../packages/rental-core/src/exchange-inspection-ports.ts) · [准备/照片消费](../../../packages/rental-core/src/exchange-inspection-preparation.read.ts) · [原影像读取](../../../packages/rental-core/src/exchange-inspection-media.read.ts) · [严格DTO](../../../packages/rental-core/src/exchange-inspection-preparation.dto.ts)
+
+准备保留原operator和租户/空间/地点/组织复验、Tenant父锁→原订单锁、同事务准备/照片消费/原幂等收据。原键回放不重新试算，执行前重读原模板、订单修订与照片依据。影像保留原声明/计划、同事务文件和来源绑定、完成占用先提交、单次暂存读取/冻结及原目标reconcile；权限、修订、占用或绑定变化继续拒绝，unknown不换键、不另申请上传票据。文件参加者通过TPlan保留完整原计划对象，供应商私有配置不进入公共合同/清单或HTTP结果。当前文件服务的真实存储和冻结实现没有替换。[原文件参加者](../../../apps/api/src/modules/integrations/file-storage.runtime.service.ts) · [准备provider](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.service.ts) · [影像provider](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-media.service.ts)
+
+公共组织子树与地点交集的原纯算法单源迁入platform-server的/organization-location-scope，旧路径再导出同一函数。调用方先限定租户，缺失/停用组织返回空集合；租户/业务地点映射仍由原所有者读取，显式地点配置只缩小范围。本片新增五个Rental正式出口和一个公共算法出口，typesVersions对应实际源码，根及纯合同不加载这些MySQL服务；私有存储只描述本链SQL和文件关联读方法，不依赖生成模型或携带全库Client。[公共范围实现](../../../packages/platform-server/src/common/organization-location-scope.ts) · [原范围出口](../../../apps/api/src/common/organization-location-scope.ts) · [包接入导读](../../../packages/rental-core/README.md)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版执行正文对照 | 准备15、媒体11、准备读5、媒体读4、公共范围2，共37个执行单元一致；只将原Prisma隔离级别常量规范为相同ReadCommitted字符串后对照，未改锁、SQL、权限、照片消费或恢复分支 |
+| 同七项原检查消费者前后对照 | node --no-compilation-cache - api-exchange-inspection-baseline/candidate，PID51940/56880均退出0、stderr空，前后7/7、0 fail/skip/todo/cancelled；夹具在候选片没有修改。原旧夹具的3通过/4失败沿前一阶段保留，其他企业用例未执行 |
+| 类型与内存产物 | TS5.9.3、Prisma5.22官方原238模型声明；最终十配置零诊断。Rental145根/868源/290输出、公共服务38根/824源/76输出、原API988根/2388源/1976输出，全部声明/JS留内存 |
+| 元数据与原范围断言 | 两个旧provider的五项/三项design:paramtypes转译结果与父版一致；九个DTO类的原文只改变类型导入，ValidationPipe的原嵌套/白名单断言通过。node --no-compilation-cache -纯范围短探针PID46456退出0，复用原范围脚本的4个断言，旧出口等于同一函数；未运行整份范围脚本或实际Nest宿主 |
+| 接口资料与格式 | 原HTTP八项检查/影像路由及DTO/OpenAPI字段保持，SDK正式出口和源码导读同片更新；定向文档链接/锚点/表格、包出口/typesVersions、package/lock依赖一致性及git diff --check通过，新增测试文件0 |
+
+本片没有新增类型或业务失败。PCH-08仍缺检查同意/最终批准执行等剩余Controller/服务、标准Core主装配、schema/迁移/Seed、页面/客户端、作业与AI适配；公共组织管理、安全、完整订阅/集成、实际安装/更新、多真实Core、独立接手和审查也未齐，故未跨原下一门槛。源码职责、私有文件计划和事务/unknown原因同步备注，完整API字段继续引用原接口声明，不另维护同名DTO或第五册。[原八项API](../../../apps/api/src/modules/rental-core/rental-exchange-inspection-preparation.schemas.ts)
+
+验证使用原离线preload和端口1 URL，SQL/仓储/事务及对象字节为明确fixture，没有.env、安装、真实HTTP/数据库/供应商/模型、服务或迁移；所有本片worker已退出，output/.tmp无新增产物。两个旧待清理任务只读复核仍为840文件/91,808,304字节环境和1个0字节日志、0链接，沿原自动审批拒绝及责任清单保留，不改工具绕过删除禁令、不声称释放空间。旧外观、导航/MCP附件及DTO十处缺口继续保留。
+
+中文提交只包含本片源码、正式出口和现有资料，普通推送codex/platform-core-extraction并实际回读；固定版本由包含本节的Git提交定位，不合main或发布。下一步继续检查同意与批准执行等原参加者，再形成完整Rental标准装配和可独立取出的业务包；完整运行/安装/升级及正式验收尚未完成。
+
 <a id="core-rental-inspection-fixture-20261117"></a>
 
 ## Rental 换货检查与影像原消费者基线修正（2026-11-17）
