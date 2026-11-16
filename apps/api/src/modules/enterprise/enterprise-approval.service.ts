@@ -3,7 +3,7 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { CloseEnterpriseApprovalExecution, CreateRentalOrderRequest, DecideEnterpriseBookingApproval, EnterpriseApprovalOriginalResult, EnterpriseBookingApprovalView, EnterpriseBookingBasis, EnterpriseBookingReview, RentalQuoteSnapshotV1, RequestEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking } from "@rental-os/shared";
+import type { CloseEnterpriseApprovalExecution, CreateRentalOrderRequest, DecideEnterpriseBookingApproval, EnterpriseApprovalOriginalResult, EnterpriseBookingApprovalView, EnterpriseBookingBasis, EnterpriseBookingReview, EnterpriseOrderDelegationRequestReference, EnterpriseOrderDelegationSource, RentalQuoteSnapshotV1, RequestEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking } from "@rental-os/shared";
 import { requireRequestWorkspaceId } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
 import { ClientApiService } from "../client/client-api.service";
@@ -12,8 +12,10 @@ import { EnterpriseAccessService } from "../client/enterprise-access.service";
 import { RentalBusinessFactRepository } from "../rental-core/rental-business-fact.repository";
 import { RentalOrderConfirmationService } from "../rental-core/rental-order-confirmation.service";
 import type { ApprovedOrderBinding, ApprovedOrderTransaction } from "../rental-core/approved-order-transaction.ports";
+import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { EnterprisePolicyService } from "./enterprise-policy.service";
+import { readQuoteEnterpriseDelegation } from "./enterprise-order-delegation-source";
 
 type Approval = { id: string; corporateCustomerId: string; applicantCustomerId: string; workspaceId: string; quoteId: string;
   state: EnterpriseBookingApprovalView["state"]; revision: number; expiresAt: Date; purpose: string; orderId: string | null;
@@ -57,6 +59,79 @@ export class EnterpriseApprovalService {
     this.policies.assertSameBasis(before, after);
     await this.policies.assertQuoteAmount(tenantId, row.corporateCustomerId, quote.membershipSnapshot!.corporateMembershipId!, quote, tx);
     if (row.approvedBy) await this.policies.assertReviewer(tenantId, row.corporateCustomerId, row.applicantCustomerId, row.approvedBy, row.reviewerMembershipId, row.reviewerMembershipUpdatedAt, tx);
+  }
+  /** Resolve only the authenticated applicant's original reference. Receipt readers
+   * can locate an expired reference; new delegation material is checked separately. */
+  async delegationQuoteId(context: ClientRequestContext, reference: EnterpriseOrderDelegationRequestReference) {
+    if ("quoteId" in reference) return reference.quoteId;
+    const row = (await this.row(context.tenantId, reference.approvalId))[0];
+    if (!row || row.applicantCustomerId !== context.customerId || row.workspaceId !== context.workspaceId) throw new NotFoundException("本人原批准不存在");
+    return row.quoteId;
+  }
+  async delegationMaterial(context: ClientRequestContext, reference: EnterpriseOrderDelegationRequestReference, expectedRevision: number,
+    tx: Prisma.TransactionClient): Promise<{ quote: RentalQuoteSnapshotV1; request: CreateRentalOrderRequest; basis: EnterpriseBookingBasis; approval?: EnterpriseOrderDelegationSource["approval"]; expiresAt: string }> {
+    let approval: Approval | undefined;
+    if ("approvalId" in reference) {
+      approval = (await this.row(context.tenantId, reference.approvalId, tx))[0];
+      if (!approval || approval.applicantCustomerId !== context.customerId || approval.workspaceId !== context.workspaceId) throw new NotFoundException("本人原批准不存在");
+      if (approval.revision !== expectedRevision) throw this.commands.conflict();
+      if (approval.state !== "approved" || approval.executionKey || approval.orderId) throw new ConflictException("原批准已提交或不可委托");
+      await this.current(approval, context.tenantId, tx);
+    } else if (expectedRevision !== 0) throw this.commands.conflict();
+    const quoteId = approval?.quoteId ?? ("quoteId" in reference ? reference.quoteId : "");
+    const quote = await this.facts.findQuote(context.tenantId, quoteId, tx);
+    const snapshot = quote?.membershipSnapshot;
+    if (!quote || quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId || quote.consumedAt || quote.consumedOrderId
+      || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now() || requireRequestWorkspaceId() !== context.workspaceId
+      || snapshot?.bookingIdentity !== "enterprise_employee" || !snapshot.enterpriseContractAndPayer || !snapshot.enterpriseBasis
+      || snapshot.personalCustomerId !== context.customerId || !snapshot.corporateCustomerId || !snapshot.corporateMembershipId
+      || snapshot.enterpriseBasis.guaranteePayer !== "enterprise") throw new ForbiddenException("本人原企业报价、告知或企业保证金依据不可核对");
+    if (snapshot.enterpriseBasis.approvalMode === "per_order" && !approval) throw new ForbiddenException("本次逐单企业付费须先取得原企业批准");
+    if (!approval && snapshot.enterpriseBasis.approvalMode !== "without_per_order") throw new ForbiddenException("当前报价没有可用的企业付费授权");
+    const basis = await this.policies.revalidateQuote(context.tenantId, context.workspaceId, quote, tx);
+    if (!basis) throw new ForbiddenException("当前企业授权不可用");
+    this.policies.assertSameBasis(snapshot.enterpriseBasis, basis);
+    await this.policies.assertQuoteAmount(context.tenantId, snapshot.corporateCustomerId, snapshot.corporateMembershipId, quote, tx);
+    const request = approval ? enterpriseJson(approval.request) : (await this.clientApi.prepareOrderSubmission(context, { quoteId })).request;
+    this.orders.assertOrderMatchesQuote(request, quote);
+    if (approval && (approval.corporateCustomerId !== snapshot.corporateCustomerId || requestFingerprint(enterpriseJson(approval.quote)) !== requestFingerprint(quote)
+      || approval.requestFingerprint !== this.orders.fingerprintOrderRequest(request))) throw new ConflictException("原批准与持久报价或请求不一致");
+    return { quote, request: structuredClone(request), basis: structuredClone(snapshot.enterpriseBasis),
+      approval: approval ? { id: approval.id, revision: approval.revision, requestHash: approval.requestFingerprint, quoteHash: requestFingerprint(quote) } : undefined,
+      expiresAt: new Date(Math.min(Date.parse(quote.expiresAt), approval?.expiresAt.getTime() ?? Infinity)).toISOString() };
+  }
+  async bindDelegationApproval(source: EnterpriseOrderDelegationSource, tx: Prisma.TransactionClient) {
+    if (!source.approval) return;
+    const count = await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state='executing',executionKey=${source.delegationKey},revision=revision+1
+      WHERE tenantId=${source.tenantId} AND id=${source.approval.id} AND workspaceId=${source.workspaceId} AND applicantCustomerId=${source.personalCustomerId}
+        AND state='approved' AND revision=${source.approval.revision} AND executionKey IS NULL AND orderId IS NULL`;
+    if (count !== 1) throw this.commands.conflict();
+  }
+  async checkDelegatedApproval(source: EnterpriseOrderDelegationSource, tx: Prisma.TransactionClient | undefined, consumedOrderId?: string) {
+    if (!source.approval) return;
+    const row = (await this.row(source.tenantId, source.approval.id, tx))[0];
+    if (!row || row.workspaceId !== source.workspaceId || row.applicantCustomerId !== source.personalCustomerId || row.corporateCustomerId !== source.corporateCustomerId
+      || row.quoteId !== source.quoteId || row.requestFingerprint !== source.requestHash || row.executionKey !== source.delegationKey
+      || requestFingerprint(enterpriseJson(row.quote)) !== source.quoteHash || row.state !== (consumedOrderId ? "consumed" : "executing")
+      || (consumedOrderId ? row.orderId !== consumedOrderId : Boolean(row.orderId))) throw new ConflictException("原委托与企业批准消费关联不一致");
+    if (!consumedOrderId) {
+      if (!tx) throw new ConflictException("新委托提交须持有原业务事务");
+      await this.current(row, source.tenantId, tx);
+    }
+  }
+  async consumeDelegatedApproval(source: EnterpriseOrderDelegationSource, tx: Prisma.TransactionClient, orderId: string) {
+    if (!source.approval) return;
+    await this.checkDelegatedApproval(source, tx);
+    const count = await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state='consumed',orderId=${orderId},revision=revision+1
+      WHERE tenantId=${source.tenantId} AND id=${source.approval.id} AND state='executing' AND executionKey=${source.delegationKey}`;
+    if (count !== 1) throw this.commands.conflict();
+  }
+  async revokeDelegatedApproval(source: EnterpriseOrderDelegationSource, tx: Prisma.TransactionClient) {
+    if (!source.approval) return;
+    const count = await tx.$executeRaw`UPDATE enterprise_booking_approvals SET state='closed',revision=revision+1
+      WHERE tenantId=${source.tenantId} AND id=${source.approval.id} AND workspaceId=${source.workspaceId} AND applicantCustomerId=${source.personalCustomerId}
+        AND state='executing' AND executionKey=${source.delegationKey} AND orderId IS NULL`;
+    if (count !== 1) throw this.commands.conflict();
   }
   async request(context: ClientRequestContext, input: RequestEnterpriseBookingApproval) {
     if (!input.purpose?.trim() || input.purpose.length > 500 || input.expectedRevision !== 0) throw new ConflictException("审批申请用途或初始修订无效");
@@ -166,6 +241,7 @@ export class EnterpriseApprovalService {
     const started = await this.commands.execute(context.tenantId, `customer:${context.customerId}`, "approval.submit", input.approvalId, input, async tx => {
       const row = (await this.row(context.tenantId, input.approvalId, tx))[0];
       if (!row || row.applicantCustomerId !== context.customerId || row.workspaceId !== context.workspaceId) throw new NotFoundException("本人审批不存在");
+      if (await readQuoteEnterpriseDelegation(tx, context.tenantId, row.quoteId)) throw new ConflictException("原批准已绑定商户委托源，请按原D/K核对或撤销");
       if (row.revision !== input.expectedRevision) throw this.commands.conflict();
       if (row.state !== "approved" || row.executionKey) throw new ConflictException("批准不可消费，请核对原结果");
       await this.current(row, context.tenantId, tx);

@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { AiExecutionContext, AiProposalActionDraft, AiProposalSnapshotRefDraft, CreateRentalOrderRequest, RentalQuoteSnapshotV1 } from '@rental-os/shared';
+import type { AiExecutionContext, AiProposalActionDraft, AiProposalSnapshotRefDraft, CreateRentalOrderRequest, EnterpriseOrderDelegationReference, RentalQuoteSnapshotV1 } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import type { RentalOrderConfirmationService } from '../../rental-core/rental-order-confirmation.service';
@@ -31,7 +31,24 @@ export interface ApprovedOrderSnapshot<T> extends AiProposalSnapshotRefDraft {
   payload: T;
 }
 
-export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'pricingPlanVersion' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>;
+/** Immutable comparison data from the original private D reader. Core mints
+ * its own opaque authority when it executes the same request and D key. */
+export interface ApprovedOrderMerchantDelegationSnapshot {
+  version: 'enterprise-order-delegation-1';
+  purpose: 'merchant_operator';
+  reference: Omit<EnterpriseOrderDelegationReference, 'expectedRevision'> & { expectedRevision: 1 };
+  sourceHash: string;
+  basisHash: string;
+  requestHash: string;
+  quoteHash: string;
+  quoteId: string;
+  personalCustomerId: string;
+  corporateCustomerId: string;
+  expiresAt: string;
+}
+
+export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'pricingPlanVersion' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>
+  & { merchantDelegation?: ApprovedOrderMerchantDelegationSnapshot };
 
 export interface ApprovedOrderSnapshotSource {
   read(request: {
@@ -46,6 +63,8 @@ export interface ApprovedOrderSnapshotSource {
 export interface ApprovedOrderOriginalInputSource {
   read(reference: { context: AiExecutionContext; scopeId: string; taskId: string; actionId: string; runId: string },
     tx: Prisma.TransactionClient): Promise<CreateRentalOrderRequest | null>;
+  readDelegation?(reference: Parameters<ApprovedOrderOriginalInputSource['read']>[0],
+    tx: Prisma.TransactionClient): Promise<ApprovedOrderMerchantDelegationSnapshot | null>;
 }
 
 export interface ApprovedOrderExecutionInputSource extends ApprovedOrderOriginalInputSource {

@@ -14,6 +14,8 @@ import { requestFingerprint } from "../rental-core/rental-idempotency.repository
 import type { ClientOrderExtensionRequest, RentalOrderExtension } from "@rental-os/shared";
 import { EnterpriseCommandService, enterpriseJson } from "./enterprise-command.service";
 import { assertPublishedRentalCategoryIdentities, rentalCategoryIdentityOptions, readRentalCategoryCode } from "../rental-core/category-identity";
+import { readQuoteEnterpriseDelegation } from "./enterprise-order-delegation-source";
+import { assertCoreMerchantDelegationProof } from "../rental-core/rental-merchant-delegated-order.authority";
 
 type PolicyRow = { scopeKey: string; revision: number; policy: string | EnterpriseScopePolicy; membershipUpdatedAt?: Date | null };
 type PolicyDb = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw" | "businessWorkspace" | "customerProfile" | "customerCorporateMembership" | "rentalCategoryDefinition">;
@@ -264,6 +266,27 @@ export class EnterprisePolicyService {
     // All ECP policy/member writes take this same tenant lock. The authoritative
     // read belongs before stock locking and persists until the order commits.
     await tx.$queryRaw`SELECT id FROM Tenant WHERE id=${tenantId} AND status='ACTIVE' FOR UPDATE`;
+    const delegation = await readQuoteEnterpriseDelegation(tx, tenantId, quote.id);
+    if (delegation || binding?.merchantDelegation) {
+      if (!delegation || !binding?.merchantDelegation) throw new ForbiddenException("原报价须使用本人委托源与Core封存证明");
+      // Core registers this original binding/proof pair. Verify its provenance
+      // before matching the durable source under the existing tenant lock.
+      const proof = assertCoreMerchantDelegationProof(binding.merchantDelegation, binding);
+      const source = delegation.source, identity = getRequestIdentity();
+      if (delegation.state !== "issued" || Date.parse(source.expiresAt) <= Date.now()
+        || proof.expectedRevision !== 1 || delegation.revision !== proof.expectedRevision
+        || proof.version !== source.version || proof.purpose !== source.purpose
+        || source.tenantId !== tenantId || source.workspaceId !== workspaceId
+        || binding.tenantId !== tenantId || binding.workspaceId !== workspaceId
+        || proof.delegationKey !== source.delegationKey || binding.idempotencyKey !== source.delegationKey
+        || proof.sourceHash !== source.integrityHash || proof.basisHash !== source.basisHash
+        || proof.requestHash !== source.requestHash || binding.requestFingerprint !== source.requestHash
+        || proof.quoteId !== source.quoteId || source.quoteId !== quote.id
+        || proof.personalCustomerId !== source.personalCustomerId || source.personalCustomerId !== snapshot.personalCustomerId
+        || proof.corporateCustomerId !== source.corporateCustomerId || source.corporateCustomerId !== snapshot.corporateCustomerId
+        || !identity || proof.actorUserId !== identity.userId || identity.tenantId !== tenantId || identity.workspaceId !== workspaceId
+        || requestFingerprint(quote) !== source.quoteHash) throw new ForbiddenException("原报价已绑定本人委托源，只能按原D/K受控提交");
+    }
     const current = snapshot.enterpriseBasis ? await this.revalidateQuote(tenantId, workspaceId, quote, tx) : await this.evaluate(tenantId, workspaceId, snapshot.personalCustomerId, quote.request.bookingIdentity!, tx);
     this.assertSameBasis(snapshot.enterpriseBasis, current);
     if (!current) return;
@@ -352,7 +375,8 @@ export class EnterprisePolicyService {
   }
   assertSameBasis(before: EnterpriseBookingBasis | undefined, after: EnterpriseBookingBasis | undefined) {
     const comparable = (basis?: EnterpriseBookingBasis) => basis ? { ...basis, acknowledgedAt: undefined } : undefined;
-    if (JSON.stringify(comparable(before)) !== JSON.stringify(comparable(after))) throw new ConflictException("企业关系、政策或告知已变化，请重新报价并取得批准");
+    // MySQL JSON reorders keys. Compare original fields through Core's canonical fingerprint.
+    if (requestFingerprint(comparable(before)) !== requestFingerprint(comparable(after))) throw new ConflictException("企业关系、政策或告知已变化，请重新报价并取得批准");
   }
   /** Review window is explicitly configured by the same intersected policies. */
   async approvalLifetime(tenantId: string, corporateId: string, membershipId: string, tx: Prisma.TransactionClient) {

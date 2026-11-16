@@ -12,6 +12,7 @@ import { AI_TASK_RULE_SOURCE_ENTRY_HTTP, AI_TASK_RULE_SOURCE_ENTRY_CONTRACTS, AI
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { RENTAL_EXCHANGE_INSPECTION_SCHEMAS, RENTAL_EXCHANGE_INSPECTION_OPERATIONS } from "../modules/rental-core/rental-exchange-inspection-preparation.schemas";
 import { ENTERPRISE_COMPONENT_SCHEMAS } from "./enterprise-schemas";
+import { ENTERPRISE_ORDER_DELEGATION_SCHEMAS } from "../modules/enterprise/enterprise-order-delegation-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 import { CATEGORY_PREPARATION_PREVIEW_SCHEMA, CATEGORY_PREPARATION_BATCH_READ_SCHEMA, CATEGORY_PREPARATION_BATCH_REQUEST_SCHEMA, CATEGORY_PREPARATION_ENTITY_PAGE_SCHEMA, CATEGORY_PREPARATION_REQUEST_SCHEMA, CATEGORY_PREPARATION_SAVE_RESULT_SCHEMA,
@@ -256,6 +257,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...DESKTOP_BUSINESS_SCHEMAS,
   ...AI_CREDIT_COMPONENT_SCHEMAS,
   ...ENTERPRISE_COMPONENT_SCHEMAS,
+  ...ENTERPRISE_ORDER_DELEGATION_SCHEMAS,
   ...RENTAL_EXCHANGE_INSPECTION_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
@@ -4128,6 +4130,9 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
 
 function enterpriseWorkflowOperations(): ContractOperation[] {
   const clientRoutes: Array<[HttpMethod, string, string, string?]> = [
+    ["post", "order-delegations/issue", "issueEnterpriseOrderDelegation", "IssueEnterpriseOrderDelegation"],
+    ["get", "order-delegations/{key}", "readEnterpriseOrderDelegation"],
+    ["post", "order-delegations/{key}/revoke", "revokeEnterpriseOrderDelegation", "RevokeEnterpriseOrderDelegation"],
     ["get", "tasks", "enterpriseOwnTasks"], ["get", "corporates/{corporateId}/tasks", "enterpriseCorporateTasks"], ["get", "my-audit", "enterpriseOwnAudit"], ["get", "my-messages", "enterpriseOwnMessages"], ["get", "my-application-review-messages", "enterpriseOwnApplicationReviewMessages"], ["get", "my-join-review-messages", "enterpriseOwnJoinReviewMessages"], ["get", "my-management-review-messages", "enterpriseOwnManagementReviewMessages"], ["get", "my-retained-merge-messages", "enterpriseOwnRetainedMergeMessages"], ["get", "my-status-messages", "enterpriseOwnStatusMessages"], ["get", "my-corporate-status-messages", "enterpriseOwnCorporateStatusMessages"], ["get", "my-employee-policy-messages", "enterpriseOwnEmployeePolicyMessages"], ["get", "my-transfer-messages", "enterpriseOwnTransferMessages"], ["get", "my-relationship-messages", "enterpriseOwnRelationshipMessages"], ["get", "my-approval-notices", "enterpriseOwnApprovalNotices"], ["get", "corporates/{corporateId}/approval-notices", "enterpriseReviewApprovalNotices"],
     ["get", "corporates/{corporateId}/profile", "enterpriseProfile"], ["get", "management-requests", "enterpriseManagementRequests"],
     ["get", "management-requests/{id}", "readEnterpriseManagementRequestDetail"],
@@ -4194,6 +4199,7 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
     ["post", "authority/upload-sessions", "enterpriseAuthorityUpload", "EnterpriseAuthorityUploadRequest"], ["post", "authority/upload-sessions/{id}/complete", "completeEnterpriseAuthorityUpload", "ClientQualificationUploadCompleteRequest"]
   ];
   const responses: Record<string, string> = {
+    issueEnterpriseOrderDelegation: "EnterpriseOrderDelegationOriginal", readEnterpriseOrderDelegation: "EnterpriseOrderDelegationOriginal", revokeEnterpriseOrderDelegation: "EnterpriseOrderDelegationOriginal",
     enterpriseApplications: "EnterpriseWorkflowList", readEnterpriseApplicationDetail: "EnterpriseWorkflowView", enterpriseOwnRequests: "EnterpriseWorkflowList", enterpriseJoinRequests: "EnterpriseWorkflowList", enterpriseOwnRelations: "EnterpriseOwnRelations", previewEnterpriseInvite: "EnterpriseInvitePreview",
     enterpriseExtensionEligibility: "EnterpriseExtensionEligibility", enterpriseExtensionRequestOriginalResult: "EnterpriseExtensionRequestOriginalResult", closeEnterpriseExtensionRequest: "EnterpriseExtensionRequestOriginalResult",
     enterpriseExchangeRequestOriginalResult: "EnterpriseExchangeRequestOriginalResult", closeEnterpriseExchangeRequest: "EnterpriseExchangeRequestOriginalResult",
@@ -4234,6 +4240,9 @@ function enterpriseWorkflowOperations(): ContractOperation[] {
     ] } : {}) })),
     { method: "get", path: "/api/membership/enterprise-workflows/applications/{id}/files/{fileId}", tag: "Membership", operationId: "readEnterpriseApplicationEvidence", summary: "Read original application evidence under current dual authority; revalidate request and attachment after bytes, no bearer download link", permissions: ["rental-os:corporate:manage", "rental-os:corporate:employee-manage"], authRequired: true, responseSchema: { type: "string", format: "binary" }, rawResponseContentType: "application/octet-stream" },
     backlogOperation("get", "/api/membership/enterprise-workflows/operations/{key}", "Membership", "readMerchantEnterpriseWorkflowOperation", "Read this operator's original workflow result", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"),
+    backlogOperation("get", "/api/membership/enterprise-workflows/order-delegations/{key}", "Membership", "readMerchantEnterpriseOrderDelegation", "Read this currently authorized merchant's original customer delegation source reference and receipt", ["rental-os:corporate:manage"], true, undefined, "EnterpriseOrderDelegationView"),
+    backlogOperation("post", "/api/membership/enterprise-workflows/order-delegations/{key}/execute", "Membership", "executeMerchantEnterpriseOrderDelegation", "Execute this original customer delegation through the sealed Core order port", ["rental-os:corporate:manage"], true, "ExecuteEnterpriseMerchantOrderDelegation", "EnterpriseMerchantOrderDelegationResult"),
+    backlogOperation("get", "/api/membership/enterprise-workflows/order-delegations/{key}/result", "Membership", "readMerchantEnterpriseOrderDelegationResult", "Read this authorized operator's original D and Core order result", ["rental-os:corporate:manage"], true, undefined, "EnterpriseMerchantOrderDelegationResult"),
     backlogOperation("get", "/api/membership/enterprise-workflows/corporates/{corporateId}/policy", "Membership", "readMerchantEnterpriseScopePolicy", "Read explicit enterprise rental upper bounds", ["rental-os:corporate:manage"], true, undefined, "EnterpriseScopePolicyView"),
     backlogOperation("put", "/api/membership/enterprise-workflows/corporates/{corporateId}/policy", "Membership", "saveMerchantEnterpriseScopePolicy", "Set explicit enterprise rental upper bounds", ["rental-os:corporate:manage"], true, "SaveEnterpriseScopePolicyRequest", "EnterpriseScopePolicySaved"),
     { ...backlogOperation("get", "/api/membership/enterprise-workflows/corporates/{corporateId}/policy/save-operations/{key}", "Membership", "readMerchantEnterprisePolicySave", "Read this currently authorized operator's exact original company/key policy-save receipt; no policy body, current limits or new grant", ["rental-os:corporate:manage"], true, undefined, "EnterprisePortalOperationResponse"), parameters: [

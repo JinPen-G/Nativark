@@ -15,6 +15,7 @@ export * from "./staff-upload-observation";
 export * from "./client";
 export * from "./enterprise";
 export * from "./enterprise-workflows";
+export * from './enterprise-order-delegation';
 export * from "./enterprise-transfer-decision";
 export * from "./enterprise-policy";
 export * from "./enterprise-expense";

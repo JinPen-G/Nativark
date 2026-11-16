@@ -6,6 +6,27 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-enterprise-dependency-checkpoint-20261116"></a>
+## AIN-15 企业委托固定依赖检查点（2026-11-16）
+
+按负责人“先收口”要求固定当前未完成果。前置为已上传的 a505359591af5966065ad59a7252f6688f11f3dd。企业依赖来自 main 固定对象 62ca183f10b7c316ab63c28ef6d04ee88d06488b，其中 beca3cb1941769b72d0e23d2d2f20f441621c8c4 为其祖先。仅在 AI 工作树核接必要文件，共19份源码，Root拥有写权和索引。
+
+| 固定范围 | 当前内容与边界 |
+| --- | --- |
+| 企业生产者与公开合同 | [委托服务](../../apps/api/src/modules/enterprise/enterprise-merchant-delegation.service.ts)、[商户提交服务](../../apps/api/src/modules/enterprise/enterprise-merchant-order-submission.service.ts)、原source／schema／DTO及[shared合同](../../packages/shared/src/enterprise-order-delegation.ts)核入。本人签发／撤销、营运读取／执行／原结果分别沿原Controller、Auth和空间身份。 |
+| Core及原批准 | [封存委托端口](../../apps/api/src/modules/rental-core/rental-merchant-delegated-order.authority.ts)、[订单确认](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)、原transaction binding、企业批准与政策核接原D/K及来源证明。AppModule、Guard、OpenAPI和shared出口按AI当前内容最小增量合并。 |
+| AI准备接点 | [快照契约](../../apps/api/src/modules/ai-native/approval-execution/approved-order-composition.ports.ts)保留D引用及来源hash，[受控组合](../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition.ts)保留可选原委托reader依赖。收口移除未实现merchant-delegated-order.bridge的悬空类型引用。尚无联合提交实现。 |
+
+核对19份源码，其中10份与62ca固定blob相同，包含7份新增叶、企业批准、Core binding及订单确认。另7份为现有公开入口的最小增量，AI两份为准备接点。完整文件集合随本检查点Git提交固定，MembershipService及main工作区未写入。
+
+必要类型命令为 node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -，stdin SHA-256为942f26c2f7a95b6b2867e144fc9a81497c86715fbdba1d28bac6504b16c98aaf，PID48120已退出0。TypeScript5.9.3、15根／1600源、noEmit零诊断，使用本树源码和主仓库既有受管类型依赖。沿本树原offline preload、固定不可达DATABASE_URL和纯内存audit，audit为空，任务临时目录未创建。该检查覆盖依赖及AI组合类型，企业正向联合事务和真实环境尚未验证。
+
+下一入口为原D引用进入选单／提案、原服务器request与PREVIEW绑定，以及AI批准、原企业批准和D收据在同一Core事务中的消费。原PrismaApprovedOrderSource仍生成ai-order键，需在受控企业路径绑定K=D。需补同键恢复、单边收据、撤权、过期与报价变化，再接实际provider、公共合同和原控制台。AIN-15保持75%，26／27／28按原任务继续，ENTRY已核闭事实沿a505。
+
+dev1已派AIN-27六条资料及缺口只读核定，并按负责人要求自行建立active目标；作者误加20000 token预算已在原对话披露，预算状态待工具／负责人处理。dev2已派AIN-26取消、并发、接管、unknown、多端和品类矩阵只读核定。两人无源码／四册／索引写权，结果留各原对话供Root读取，资源失败保留原因。Root此处固定检查点后结束本次收口，后续实现从本节未完入口继续。
+
+补充静态／文档核对沿同一stdin命令，SHA-256为c7bb88b55acbbbd8b0f0202300bceabd408f69157191fc86b1b14024bc84824e，PID47700已退出1。19份源码语法诊断0、新记录链接错误0、任务算术错误0；退出1仅来自原导航3处历史附件和界面规范1处稀疏示例缺链。audit为空、临时目录未创建。原CRLF文件被默认diff --check报行尾空白，保留原换行后用git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check核对。
+
 <a id="ain-entry17-material-retention-whole-closeout-20261116"></a>
 ## ENTRY-17 原材料保留、取消预览兼容及全文核定（2026-11-16）
 

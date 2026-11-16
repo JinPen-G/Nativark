@@ -31,6 +31,7 @@ import { MembershipService } from "../platform/membership.service";
 import { EnterprisePolicyService } from "../enterprise/enterprise-policy.service";
 import type { ApprovedOrderBinding, ApprovedOrderTransaction } from "./approved-order-transaction.ports";
 import { lockRentalBusinessTenant } from "./rental-business-fence";
+import { assertCoreMerchantDelegationProof, assertMerchantDelegatedOrderAuthority, bindCoreMerchantDelegationProof, type MerchantDelegatedOrderAuthority } from "./rental-merchant-delegated-order.authority";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -158,14 +159,33 @@ export class RentalOrderConfirmationService {
    * Caller must bind current identity/scope and supply the persisted accepted
    * request, not a caller-provided hash or a guessed/latest order. A committedOrderId
    * is accepted only from the server's same-transaction approval consumption link. */
-  async readOrderCreation(tenantId: string, input: CreateRentalOrderRequest, idempotencyKey: string, committedOrderId?: string) {
+  async readOrderCreation(tenantId: string, input: CreateRentalOrderRequest, idempotencyKey: string, committedOrderId?: string,
+    merchantAuthority?: MerchantDelegatedOrderAuthority) {
     if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 191) {
       throw new BadRequestException("缺少原下单操作键");
     }
     const request = this.normalizeOrderInput(structuredClone(input));
     const fingerprint = orderRequestFingerprint(request);
+    const workspaceId = this.core.resolveWorkspaceId(tenantId);
+    const merchant = merchantAuthority ? assertMerchantDelegatedOrderAuthority(merchantAuthority, tenantId, workspaceId,
+      idempotencyKey.trim(), fingerprint) : undefined;
+    const merchantBinding: ApprovedOrderBinding | undefined = merchant ? { tenantId, workspaceId,
+      idempotencyKey: idempotencyKey.trim(), requestFingerprint: fingerprint, request: structuredClone(request),
+      merchantDelegation: merchant.source.proof } : undefined;
+    if (merchant && merchantBinding) {
+      bindCoreMerchantDelegationProof(merchantAuthority!, merchantBinding);
+      assertCoreMerchantDelegationProof(merchant.source.proof, merchantBinding);
+      // This read deliberately bypasses new-submission authorization/TTL. The
+      // original participant rechecks current merchant access and durable links.
+      const originalId = await merchant.participant.recover(structuredClone(merchantBinding));
+      if (merchant.source.state === "consumed" && !originalId || merchant.source.state !== "consumed" && originalId
+        || committedOrderId && committedOrderId !== originalId) throw new ConflictException("原委托源与消费结果关联待核对");
+      committedOrderId = originalId ?? undefined;
+      assertMerchantDelegatedOrderAuthority(merchantAuthority!, tenantId, workspaceId, idempotencyKey.trim(), fingerprint);
+    }
     const hit = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, idempotencyKey.trim());
-    if (!hit && !committedOrderId) return { state: 'not_observed' as const, retryable: false as const, orderId: null };
+    if (merchant && hit && merchant.source.state !== "consumed") throw new ConflictException("原委托状态与Core收据关联待核对");
+    if (!hit && !committedOrderId) return { state: merchant ? 'unknown' as const : 'not_observed' as const, retryable: false as const, orderId: null };
     if (hit && hit.requestHash !== fingerprint) throw new ConflictException("原下单操作载荷不一致");
     // Only the server's atomic approval-consumption link may survive receipt TTL.
     // Never select a latest order, infer a commit from absence, or retry creation.
@@ -178,6 +198,10 @@ export class RentalOrderConfirmationService {
     if (order.id !== orderId || order.tenantId !== tenantId
       || order.quoteId !== request.quoteId || order.customerId !== request.customerId) {
       throw new ConflictException("原下单结果绑定不一致");
+    }
+    if (merchant && merchantBinding) {
+      await merchant.participant.replay(structuredClone(merchantBinding), order.id);
+      assertMerchantDelegatedOrderAuthority(merchantAuthority!, tenantId, workspaceId, idempotencyKey.trim(), fingerprint);
     }
     return { state: 'observed' as const, retryable: false as const, orderId: order.id };
   }
@@ -198,12 +222,14 @@ export class RentalOrderConfirmationService {
   }
 
   createApprovedOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext,
-    idempotencyKey: string, approval: ApprovedOrderTransaction) {
+    idempotencyKey: string, approval: ApprovedOrderTransaction, merchantAuthority?: MerchantDelegatedOrderAuthority) {
     if (!idempotencyKey || !approval || [approval.authorize, approval.recover, approval.prepare, approval.commit, approval.replay]
       .some(method => typeof method !== "function")) throw new BadRequestException("审批执行依赖未就绪");
+    if (merchantAuthority) assertMerchantDelegatedOrderAuthority(merchantAuthority, tenantId, this.core.resolveWorkspaceId(tenantId),
+      idempotencyKey.trim(), this.fingerprintOrderRequest(input), approval);
     const participant: ApprovedOrderTransaction = { authorize: approval.authorize.bind(approval), recover: approval.recover.bind(approval),
       prepare: approval.prepare.bind(approval), commit: approval.commit.bind(approval), replay: approval.replay.bind(approval) };
-    return this.create(tenantId, structuredClone(input), userName, structuredClone(context), idempotencyKey, participant);
+    return this.create(tenantId, structuredClone(input), userName, structuredClone(context), idempotencyKey, participant, merchantAuthority);
   }
 
   private async create(
@@ -212,23 +238,44 @@ export class RentalOrderConfirmationService {
     userName: string,
     context: BusinessContext,
     idempotencyKey?: string,
-    approval?: ApprovedOrderTransaction
+    approval?: ApprovedOrderTransaction,
+    merchantAuthority?: MerchantDelegatedOrderAuthority
   ) {
     // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
     input = this.normalizeOrderInput(input);
     const key = idempotencyKey?.trim() || `quote:${input.quoteId}`;
     const fingerprint = orderRequestFingerprint(input);
+    const merchant = merchantAuthority ? assertMerchantDelegatedOrderAuthority(merchantAuthority, tenantId,
+      this.core.resolveWorkspaceId(tenantId), key, fingerprint) : undefined;
     const approvalBinding: ApprovedOrderBinding | undefined = approval ? {
       tenantId, workspaceId: this.core.resolveWorkspaceId(tenantId), idempotencyKey: key,
-      requestFingerprint: fingerprint, request: structuredClone(input)
+      requestFingerprint: fingerprint, request: structuredClone(input),
+      ...(merchant ? { merchantDelegation: merchant.source.proof } : {})
     } : undefined;
+    if (merchant && approvalBinding) {
+      bindCoreMerchantDelegationProof(merchantAuthority!, approvalBinding);
+      assertCoreMerchantDelegationProof(merchant.source.proof, approvalBinding);
+    }
     const verifyReplay = async (order: { id: string; tenantId: string }) => {
       if (!approval || !approvalBinding) return;
       // findOrder scopes the row by workspace; its domain projection has no workspaceId.
       if (order.tenantId !== tenantId || this.core.resolveWorkspaceId(tenantId) !== approvalBinding.workspaceId) throw new ConflictException("审批结果范围不匹配");
+      if (merchant && ((order as { quoteId?: string }).quoteId !== input.quoteId
+        || (order as { customerId?: string }).customerId !== merchant.source.proof.personalCustomerId)) throw new ConflictException("原委托订单与使用人关联待核对");
       await approval.replay(structuredClone(approvalBinding), order.id);
-      await approval.authorize(structuredClone(approvalBinding));
+      if (!merchant || merchant.mode === "execute") await approval.authorize(structuredClone(approvalBinding));
+      if (merchantAuthority) assertMerchantDelegatedOrderAuthority(merchantAuthority, tenantId, approvalBinding.workspaceId, key, fingerprint);
     };
+    if (merchant?.mode === "original" && approval && approvalBinding) {
+      // Historical consumed/expired recovery cannot fall through to a new write.
+      // Current access comes from the private source and participant recovery.
+      const originalId = await approval.recover(structuredClone(approvalBinding));
+      if (merchant.source.state !== "consumed" || !originalId) throw new ConflictException("原商户委托结果待核对，不能重新提交");
+      const originalOrder = await this.coreFacts.findOrder(tenantId, originalId);
+      if (!originalOrder) throw new ConflictException("原商户委托订单待核对");
+      await verifyReplay(originalOrder);
+      return { order: originalOrder, replayed: true };
+    }
     if (approval && approvalBinding) {
       await approval.authorize(structuredClone(approvalBinding));
       const committedId = await approval.recover(structuredClone(approvalBinding));
@@ -264,6 +311,12 @@ export class RentalOrderConfirmationService {
       throw new ConflictException("报价已过期或被使用，请核对原报价");
     }
     this.assertOrderMatchesQuote(input, quote);
+    if (merchant && (quote.membershipSnapshot?.bookingIdentity !== "enterprise_employee"
+      || quote.membershipSnapshot.enterpriseContractAndPayer !== true
+      || quote.membershipSnapshot.personalCustomerId !== merchant.source.proof.personalCustomerId
+      || quote.membershipSnapshot.corporateCustomerId !== merchant.source.proof.corporateCustomerId)) {
+      throw new ConflictException("原商户委托报价与企业付款或使用人不一致");
+    }
     // 报价可锁定权益版本，但提交订单仍须确认“当前员工关系仍有效”。企业主体和
     // 客户姓名都由这里的服务端解析结果覆盖，客户端不能伪造企业付款或历史身份。
     let membershipAtCommit = quote.membershipSnapshot
@@ -561,6 +614,7 @@ export class RentalOrderConfirmationService {
 
     this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt, context);
     if (approval && approvalBinding) await approval.authorize(structuredClone(approvalBinding));
+    if (merchantAuthority) assertMerchantDelegatedOrderAuthority(merchantAuthority, tenantId, this.core.resolveWorkspaceId(tenantId), key, fingerprint);
     return { order, replayed: false };
   }
 

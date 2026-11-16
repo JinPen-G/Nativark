@@ -4,7 +4,7 @@
 
 ## 当前目标与工作现场
 
-施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。固定前置 `736c0787528c6777d91b7952e6d30588f2b2e3fa` 与GitHub一致。[控制台与侧栏](<AI Native-开发记录.md#ain-native-console-direct-integration-20261115>)直接接原Agent，原页头／工作区开关／动效和五份CSS前像已核。[ENTRY-08](<AI Native-开发记录.md#ain-entry08-whole-closeout-20261116>)及[ENTRY-17全文](<AI Native-开发记录.md#ain-entry17-material-retention-whole-closeout-20261116>)已按原条款、固定源码、必要模拟、类型及独立复核核闭，形成两项固定main节点；先完成本片中文提交／普通推送及回读，再继续AIN-15原企业D输入与联合Core事务、26全文组合、27资料／原依赖及28交付。main由PM按固定成果串行整合，真实环境由负责人实测。
+施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。固定前置 `a505359591af5966065ad59a7252f6688f11f3dd` 已与GitHub核对一致。当前[企业依赖检查点](<AI Native-开发记录.md#ain15-enterprise-dependency-checkpoint-20261116>)按负责人要求收口，19份源码归Root，D依赖及AI准备类型已核，联合Core事务仍未实现。[控制台与侧栏](<AI Native-开发记录.md#ain-native-console-direct-integration-20261115>)直接接原Agent，原页头／工作区开关／动效和五份CSS前像已核。[ENTRY-08](<AI Native-开发记录.md#ain-entry08-whole-closeout-20261116>)及[ENTRY-17全文](<AI Native-开发记录.md#ain-entry17-material-retention-whole-closeout-20261116>)已按原条款、固定源码、必要模拟、类型及独立复核核闭，形成两项固定main节点；先固定当前企业依赖检查点并普通推送回读，后续从AIN-15原D输入与联合Core事务、26全文组合、27资料／原依赖及28交付继续。main由PM按固定成果串行整合，真实环境由负责人实测。
 
 1. **AIN-24已核闭，继续剩余核心及ENTRY。** [平台／员工到期删除与恢复](<AI Native-开发记录.md#ain24-platform-inspection-expiry-whole-closeout-20261115>)完成两个删除P2及独立复核新增恢复P2；原七条、02依赖和本轮模拟G1～G4已核闭，任务册已同步。普通来源清除、人工／业务／账保留，unknown hold；平台SaaS管理与view原读分离、PLATFORM／null归属、原journal和独立签名恢复屏障完整。仅本片25源＋固定前置API13根／2026源、员工正式ES2019四根／212源零诊断；原始请求闭合校验与可信恢复行为通过。新正文保护／清理未真实运行，不宣称真实库／外部对象／供应商／混合备份已完成加密或删除。阶段提交／远端回读按原记录办理，不继续堆积完成WIP。
 2. **AIN-15企业正向与选单建单接管。** 原目标受理、参数／日期地点重答、Core候选、选单／新提案／新批准及[原订单办理消费者](<AI Native-开发记录.md#ain15-original-order-link-consumers-20261114>)已固定。Core明确拒绝operator代本人声明企业告知／付款；企业选择／准备不能当企业正向报价，跨专项授权依赖留原记录供PM读取，不改本人／经营权限或自造告知。[选单TaskCenter恢复／接管](<AI Native-开发记录.md#ain26-selected-task-center-recovery-20261115>)8源已接正式公共provider／Guard／Controller／session，原合同、最后两端类型及实际recover／接管正常ACK／丢ACK分支通过；原selected宿主由服务端原selection／计划定位，Nest晚注册懒解析，停用保留原读。原selection／Task／Run／planHash／inputHash／fencing和独立takeover／claim_recovery权限保持，旧worker拒绝，丢ACK只读原收据，不换键或新增模型／Core动作。其余取消／并发／多端全文沿原矩阵继续，不能把此片当AIN-26整项完成。
@@ -18,9 +18,9 @@
 
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
-| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送及公共生产者／消费者。材料f6a已交回，共用取消预览hash及三源归Root，ENTRY-17全文已核定；立即固定后继续AIN-15企业D、26组合和27／28。原企业固定成果只在AI树按必要接点核接，不写main活动窗口。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 材料f6a、16组及类型已冻结交回，无源码／四册／索引写权。继续只读核AIN-27六条部署／两轨／灰度／停用／升级回退及可操作资料，并从已执行证据补前像反例退出码。本次派工已有实际工具执行。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 六源写权已由Root收回。三次同资源错误后停止，最后一次已取回原完整七分支job exit 0并读原ENTRY条款。该聊天保留原证据，无活动写权；Root已用内部只读助手接续08／17，不继续重复同一失败重试或改变模型设置。 |
+| AI-RD／01a1be68-da55-7f13-9536-79be07cb2093 | AI索引／四册／提交推送及公共生产者／消费者。ENTRY-17已由a505固定。当前独占19份企业依赖／AI准备源码及检查点收口，已移除未实现桥的悬空类型引用，联合Core事务仍待实现。原企业固定成果只在AI树按必要接点核接，不写main活动窗口。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 材料f6a、16组及类型已冻结交回，无源码／四册／索引写权。继续只读核AIN-27六条部署／两轨／灰度／停用／升级回退及可操作资料，并从已执行证据补前像反例退出码。本次派工已有实际工具执行，目标已由其建立为active；作者误加20000 token预算并已在原对话披露，后续按原范围核定，预算状态单独保留。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 六源写权已由Root收回。三次同资源错误后停止，最后一次已取回原完整七分支job exit 0并读原ENTRY条款。负责人要求重新派工，现只读核AIN-26全文矩阵，已有实际工具执行，无活动写权；若同资源错误复现保留原因并停止同类重试，不改变模型设置。 |
 | 内部/root/entry_closeout_fallback | 原08／17、736客户与f6a材料核定已交回，dd967／4a639／33cc共用取消预览hashP2也已独立只读核闭，无新增P1／P2。无源码、四册或索引写权，不新增测试／递归派审。原企业D固定源核定已交回，Root继续实现。 |
 | 内部/root/opening_core_closeout | 原11／12／18及限定ENTRY-02导航复核已交回；通知最后tenant敏感读权及原K损坏两P2的最小修复再次独立静态核闭。正文删除／缓存及小程序profile不在该结论范围，不递归派审／重复绿色，无写权。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
