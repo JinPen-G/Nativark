@@ -1,4 +1,4 @@
-/** 公共SaaS身份、人员及设置契约。
+/** 公共SaaS身份、人员、设置与文件生命周期契约。
  * 正式出口为@rental-os/platform-contracts，不依赖业务Core、行业实体或框架。
  * 原@rental-os/shared及其platform子出口兼容再导出同一声明，不维护第二份字段。
  * Rental会话的空间/品类字段由原兼容契约扩展，本文件只维护唯一公共声明。 */
@@ -529,3 +529,4 @@ export interface PlatformPrincipal {
 
 export * from "./subscription";
 export * from "./common";
+export * from "./files";

@@ -109,7 +109,7 @@ Rental Core 是首个业务示范，提供商品、资产、库存、报价、�
 | `apps/platform-admin` | 默认无Core的公共Web宿主，登录/改密/本人资料和基本设置，真实运行继续验收 | [公共后台导读](apps/platform-admin/README.md) |
 | `apps/example-tickets-admin` | 复用同一公共应用的工单Web宿主，四页声明接线与标准包构建核验 | [工单后台导读](apps/example-tickets-admin/README.md) |
 | `apps/admin` | SaaS 管理、租户公共后台与现有业务页面 | [入口](apps/admin/src/main.tsx)、[本端规则](apps/admin/AGENTS.md) |
-| `packages/rental-core` | Rental合同、品类解析、营业日/计价、能力、恢复快照、原事务/收据、配置与业务事实、资金门禁、企业应收核销、服务容量、批准/检查同意和业务规则；完整业务包继续拆分 | [Rental包导读](packages/rental-core/README.md) |
+| `packages/rental-core` | Rental核心聚合、合同、品类解析、营业日/计价、能力、恢复快照、原事务/收据、配置与业务事实、资金门禁、企业应收核销、服务容量、批准/检查同意和业务规则；完整业务包继续拆分 | [Rental包导读](packages/rental-core/README.md) |
 | `packages/shared` | 既有各端合同兼容总出口，公共和Rental单源分别来自各自包 | [正式出口](packages/shared/src/index.ts)、[包配置](packages/shared/package.json) |
 | `packages/ui-arc` | 组件源码、来源与许可 | [组件说明](packages/ui-arc/README.md) |
 | `packages/mcp-server` | 受控 MCP 传输和工具适配 | [包说明](packages/mcp-server/README.md) |

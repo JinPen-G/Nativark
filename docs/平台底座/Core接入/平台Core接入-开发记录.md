@@ -11,6 +11,39 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-main-runtime-20261116"></a>
+
+## Rental 主核心聚合与原Nest兼容入口（2026-11-16）
+
+固定父版 `a3e4df454bdf4f6e07dd74f6fe95bdd414da90d9` 已普通推送并实际远端回读，包含本片修改前的源码、夹具与接续原文，main62ca在本树祖先。原6606行主核心服务的实际实现迁入Rental包，旧API只保留43行Nest接线，原203个方法、10个辅助函数及超时原因常量保持同一实现。核心/事实仓储、恢复、Hook、资金、容量与品类解析来自包内单源，会员、企业政策/授信、文件及企业续租报价通过实际窄端口供给。[核心聚合](../../../packages/rental-core/src/mysql-core-runtime.ts) · [宿主接点](../../../packages/rental-core/src/core-runtime-ports.ts) · [原Nest入口](../../../apps/api/src/modules/rental-core/rental-core.service.ts)
+
+新私有出口 `@rental-os/rental-core/mysql-core-runtime` 使用调用方真实事务类型，与原Auth/Guard共用正式公共ALS；公共Core清单与领域根出口不携带这些MySQL视图。原13项构造依赖、Inject/Optional元数据和两阶段初始化继承，配置预热仍在全部回填之后。当前配置读取保留作用域、绑定与修订；事务内读取只返回分离视图，不发布未提交缓存。没有重复注册provider、重建租户或另造身份上下文。
+
+公共上传/完成/下载的八项文件声明从原shared/infrastructure移入 `@rental-os/platform-contracts/files`，原路径和总出口再导出同一声明，DTO/OpenAPI与客户端字段不变。Core文件端口只返回使用到的ID/下载地址，原文件服务仍裁定对象归属、ACL、冻结和实际IO。生产图片仍要求真实文件服务；开发本地路径、上传失败补偿和删除pending沿原算法。[公共文件合同](../../../packages/platform-contracts/src/files.ts) · [原共享出口](../../../packages/shared/src/infrastructure.ts)
+
+同片修正三处说明。旧订单无能力快照实际返回空执行名单，不回退执行当前新增能力；factContext已先核当前持久档案和经营设置，只有明确演示/内存宿主才补落原配置与样本；同步状态说明移除易过期的调用数量。未借注释整理改报价、资金、状态、锁、幂等或历史算法。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版正文与文件字段 | 规范化CRLF及原Prisma.sql/join别名后，203个方法与10个辅助函数的可执行正文完全一致；八项文件声明正文一致，原金额、SQL、历史与状态条件未改 |
+| 独立包与完整API类型 | TS5.9.3、锁定Prisma5.22官方内存声明覆盖原238模型；十配置零诊断。Rental112根/676源/224输出，API988根/2353源/1976输出，JS/声明全部内存 |
+| 原Core及配置采用 | `node --no-compilation-cache - api-core-main-compatibility tests/rental-core-v01.test.cjs tests/rental-exchange-segment-pricing.test.cjs tests/category-adoption-context-refresh.test.cjs`，28968的原Core达到完整成功标记，七项配置采用用例通过；合并Node用例100项87过/13失败，退出1，失败全部来自旧换货夹具。原Core标记中提及的真库链并未在本片执行 |
+| 固定父版换货对照 | `api-core-main-baseline`，11192退出1；仅内存恢复父版主服务原实现，93项80过/13失败，与迁后13个失败名称完全一致。其他包使用本版实际编译字节，不冒称整仓旧版或真库对照 |
+| 原换货最终复验 | `node --no-compilation-cache - api-core-main-final-tests tests/rental-exchange-segment-pricing.test.cjs`，31460退出0、stderr为空；93项全部通过，0fail/cancelled/skip/todo。覆盖原价格段/稳定行、重复换货、独立/整期续租、分批归还、费用审核、当前会员与履约拒绝及命名公开schema |
+| 真实Nest继承与生命周期 | 49088中实际Nest容器核原13项Inject依赖为同一实例，核心方法继承包内函数；trace为restore→backfill-start→profiles→backfilled→preheat，各关键钩子一次且预热晚于回填。该进程整体退出1来自当时四个旧夹具缺项，Nest核对本身通过；数据源为明确空fixture，没有HTTP/数据库/文件IO |
+| 正式出口与依赖 | Rental92正式出口/91子路径typesVersions、公共合同6出口/5子路径均对应实际源与JS/声明；依赖锁全文与父版相同。领域根入口不加载MySQL或服务端身份适配 |
+| 源码与接入资料 | 根入口、Rental包导读、公共合同导读和原API模块说明随片更新，实际接口来源与构造路线可定位；正式需求/任务身份及百分比按原门槛保留 |
+
+原换货758个断言逐个正文保留，新添12个范围/事务断言，仍是原93个用例，没有新增测试文件、skip或生产fallback。只补明确的当前空间品类/原SQL active状态、服务目录空集合、型号库存字段及标准库存依据，并让原Controller实际消费RentalExchangePreviewService；配置读取与数据库仍是明确fixture。中间复验47500的82过/11失败及49088的89过/4失败保留：均继续暴露部分续租夹具缺必需services集合，补明确空集合后最终93项通过。首轮2640类型检查的六个合同/事务reader遗漏错误也保留；补原检查常量/品类目录出口、推荐版本reader和当前能力读取后9604三配置及最终十配置通过，没有放宽接口或强转为全库类型。
+
+本片复核PCH原G1～G4门槛未跨下一档。报价/营销主业务服务、配货/确认、Controller、独立schema/迁移/Seed、页面/客户端、作业/AI与标准Core装配仍须迁移；公共组织/安全/订阅办理/基础集成及真实无Core/多Core运行、安装、分别更新/回退和独立接手/审查仍未齐备，不能用正文一致或93项局部通过判完整拆分完成。[接入路线](../../../packages/rental-core/README.md#使用与构建)
+
+全部新验证通过既有worker的stdin与内存模块执行；原离线preload、固定offline地址和本树单一output/.tmp写界保留，没有安装、落地client、共享dist写入、新临时环境或后台业务进程。原Core图片IO为明确内存fixture，退出剩余0、磁盘写入0；当前目录为空。SQL/事务/会员/配置是明确fixture，真实HTTP/数据库/浏览器/供应商、完整Core安装/独立更新及接手/审查未验。
+
+本日再次核定旧840文件/91,808,304字节环境与1个0字节日志的绝对路径、归属、无链接及无使用进程，原生PowerShell删除仍被自动审批在启动前以blocked by policy拒绝；两个原责任manifest已补最近尝试，残留仍在统一待清理根，没有换壳/工具绕过或称已释放空间。[原清理证据](#core-rental-recovery-receipts-20261116)
+
+阶段源码由包含本节的Git提交定位，中文提交并普通推送codex/platform-core-extraction后读取实际远端；main及其他工作树未写。
+
 <a id="core-rental-approval-file-basis-20261116"></a>
 
 ## Rental 原批准、检查同意与公共文件冻结边界（2026-11-16）

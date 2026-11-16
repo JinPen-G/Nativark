@@ -10,7 +10,7 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 领域与品类治理合同、营业日、计价与器材、能力执行/条件判定及审计仓储已单源移入 Rental 包。原 shared/API 路径和 Nest provider 继续转接同一实现，本目录承接剩余业务服务、事务、数据和任务。[独立 Rental 包](../../../../../packages/rental-core/README.md)
 
-[RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。[RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)
+[RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。主核心服务已是43行的Nest兼容provider，原203个方法及配置/库存/交接/结算实际位于Rental包，13项依赖和两阶段启动顺序保持；原HTTP/AI/企业消费者继续调用同一签名。[实际核心聚合](../../../../../packages/rental-core/src/mysql-core-runtime.ts) · [会员/企业/文件接点](../../../../../packages/rental-core/src/core-runtime-ports.ts) [RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)
 
 报价、券、奖励/权益、推荐及通知事实经[业务事实适配](rental-business-fact.repository.ts)进入Rental包的唯一仓储，当前空间、每次生成的订单可见范围、有界配置reader及原事件由本宿主供给。券预算和余额保留原事务与金额精度，通知流水/投递结果不重复执行外部短信。[事实实现](../../../../../packages/rental-core/src/mysql-business-facts.ts) · [本表接点](../../../../../packages/rental-core/src/business-fact-storage.ts) · [报价能力事实](../../../../../packages/rental-core/src/mysql-quote-capabilities.ts) · [库存依据](../../../../../packages/rental-core/src/quote-inventory-basis.ts)
 

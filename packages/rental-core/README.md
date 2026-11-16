@@ -1,11 +1,12 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合服务、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。报价/营销业务服务、Controller、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
 | 入口 | 职责与直接消费者 |
 | --- | --- |
+| [核心聚合](src/mysql-core-runtime.ts)、[宿主接点](src/core-runtime-ports.ts) | `/mysql-core-runtime` 持有原配置、库存、订单、交接及结算裁定；原Nest入口供给同一13项依赖，Controller/AI/企业及各端继续消费原签名 |
 | [正式出口](src/index.ts)、[合同](src/contracts.ts) | 原商品/资产、报价订单、履约检查、价格资金、日历与客户会员定义和运行时常量；[shared 兼容出口](../shared/src/core.ts)继续服务原 API、各客户端和 AI |
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
 | [企业预约依据](src/enterprise-booking.ts) | 原告知确认和冻结企业依据；[企业政策合同](../shared/src/enterprise-policy.ts)单源引用，不重算资金或授予权限 |
@@ -50,6 +51,8 @@
 
 ## 使用与构建
 
+核心聚合从 `@rental-os/rental-core/mysql-core-runtime` 导入。核心/事实仓储、恢复、Hook、资金与服务容量使用本包的同一实例，会员、企业支出/授信、文件生命周期与企业续租报价按 [实际端口](src/core-runtime-ports.ts) 供给。原Nest provider保留原构造顺序和初始化钩子；恢复在模块初始化读取，配置预热在全部回填之后运行，事务内配置读取不发布进程缓存。历史订单没有能力快照时保留空执行名单，当前新能力不反向影响旧订单。HTTP权限仍由原Guard裁定，业务方法继续接收调用方已有事务。[原Nest接线](../../apps/api/src/modules/rental-core/rental-core.service.ts) · [核心验证](../../tests/rental-core-v01.test.cjs) · [换货/续租历史验证](../../tests/rental-exchange-segment-pricing.test.cjs)
+
 资金服务从 `@rental-os/rental-core/mysql-funding` 接入，宿主提供同一数据源、每次请求的原身份/订单可见范围，以及已启用企业业务的原应收参与者。已有事务原样传入；服务自开事务时保持原ReadCommitted，资金解释保持原RepeatableRead有界快照。实款、演练、企业回款分配和预授权各按原依据读取，缺供应商核验不显示真实可用余额。[原Nest接线](../../apps/api/src/modules/rental-core/rental-funding.service.ts) · [资金门禁验证](../../tests/rental-funding-gates.test.cjs) · [事件算法验证](../../tests/rental-funding-events.test.cjs)
 
 服务容量从 `@rental-os/rental-core/mysql-service-capacity` 接入，宿主供给本表数据源、原Auth/ALS身份和空间解析。订单预留、确认、取消及履约方法传入调用方已有事务；容量编辑直接复用包内原品类绑定锁。`readAvailabilityForQuote` 只观察原服务发生项，返回指纹与是否可用，不释放超时预留或新占容量；原写入/维护入口才处理过期账。换货和部分履约沿原收据处理，不按服务ID合并历史。[原Nest接线](../../apps/api/src/modules/rental-core/rental-service-capacity.service.ts) · [容量写入验证](../../tests/category-service-capacity-write.test.cjs) · [原预留/换货验证](../../tests/category-service-capacity-reserve.test.cjs) · [发生项验证](../../tests/rental-service-occurrence.test.cjs)
@@ -67,7 +70,7 @@ npm run build -w @rental-os/rental-core
 npm run lint -w @rental-os/rental-core
 ```
 
-构建先生成公共合同与公共服务，再生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
+构建先生成公共合同与公共服务，再生成本包 JS/声明。根出口提供领域合同与常量，营业日和品类治理按子出口加载。服务端计价、器材及能力执行/条件子出口使用可选 peer `@nestjs/common`，沿用原 HTTP 异常类型，调用宿主和源码构建须提供兼容版本。核心聚合与换货批准子出口使用可选 peer @rental-os/platform-server 的正式 /request-identity，原Guard/API与Rental共用同一ALS实例；领域根出口不加载它。公共请求指纹从 `@rental-os/platform-contracts/request-fingerprint` 复用，已保存的条件 hash 沿用原算法。
 
 品类解析和身份子出口同样使用服务端 peer。宿主供给本表只读方法后创建 `RentalCategoryResolver`，普通读取使用同一数据源，业务提交点传入自己的事务视图。`forVersion` 定位原发布引用，`forWorkspace` 每次重读当前绑定，`openingOptions` 返回最多100项及明确截断状态。旧 API 的 Nest provider 继续承担这条装配。[原 provider](../../apps/api/src/modules/rental-core/rental-category-resolver.service.ts)
 

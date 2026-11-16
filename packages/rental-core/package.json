@@ -370,6 +370,10 @@
     "./exchange-inspection-preparation": {
       "types": "./dist/exchange-inspection-preparation.d.ts",
       "default": "./dist/exchange-inspection-preparation.js"
+    },
+    "./mysql-core-runtime": {
+      "types": "./dist/mysql-core-runtime.d.ts",
+      "default": "./dist/mysql-core-runtime.js"
     }
   },
   "typesVersions": {
@@ -643,6 +647,9 @@
       ],
       "exchange-inspection-preparation": [
         "dist/exchange-inspection-preparation.d.ts"
+      ],
+      "mysql-core-runtime": [
+        "dist/mysql-core-runtime.d.ts"
       ]
     }
   },

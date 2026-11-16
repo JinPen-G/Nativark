@@ -26,6 +26,10 @@
     "./file-content-binding": {
       "types": "./dist/file-content-binding.d.ts",
       "default": "./dist/file-content-binding.js"
+    },
+    "./files": {
+      "types": "./dist/files.d.ts",
+      "default": "./dist/files.js"
     }
   },
   "scripts": {
@@ -45,6 +49,9 @@
       ],
       "file-content-binding": [
         "dist/file-content-binding.d.ts"
+      ],
+      "files": [
+        "dist/files.d.ts"
       ]
     }
   },
