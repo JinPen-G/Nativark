@@ -15,7 +15,7 @@
 
 继续执行原批准时，Core 的两次会员及资格重检再次要求营运用户提供客户本人新声明，实际失败已复现。本片沿已有 Core 封存证明，在原订单提交内重读当前会员事实。资格服务的可选 binding 限制在 submit、原事务及同租户／空间／使用人／企业，并验证原 WeakMap 封存对象。原事务内企业政策、批准、资格、库存与金额仍分别核验。该最小接点扩展到本树 MembershipService，由 Root 实施并纳入当前类型及独立复核范围。相关实现见[订单确认](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)和[会员资格](../../apps/api/src/modules/platform/membership.service.ts)。
 
-公共停止入口先读取同一原请求事件，已观察到的请求复用当前 transition_task 权限续办善后。新请求由原仓储提交 CAS 和审计，同请求并发冲突再次核原事件。原 stopReceipt 只读。后台保留原定位，仅在观察到原收据后提供显式续办，续办失败继续保留原 K。相关入口见[TaskCenter](../../apps/api/src/modules/ai-native/task-center.application.ts)和[停止消费者](../../apps/admin/src/features/ai-native/TaskCancellation.tsx)。原 dev2 中断组合的修复后行为和独立复核待固定版本核验。
+公共停止入口先读取同一原请求事件，已观察到的请求复用当前 transition_task 权限续办善后。新请求由原仓储提交 CAS 和审计，同请求并发冲突再次核原事件。原 stopReceipt 只读。后台保留原定位，仅在观察到原收据后提供显式续办，续办失败继续保留原 K。相关入口见[TaskCenter](../../apps/api/src/modules/ai-native/task-center.application.ts)和[停止消费者](../../apps/admin/src/features/ai-native/TaskCancellation.tsx)。固定版本的七项独立复验见下方补证。
 
 | 必要验证 | 实际结果与边界 |
 | --- | --- |
@@ -25,11 +25,31 @@
 | API 类型 | stdin SHA-256 `e9c5d2ef87be276c85c9e36ef24c3c76eca68ca75e8a3650106c3bb6c8bb7b0b`，退出0。TypeScript5.9.3，21根／1915源，noEmit零诊断。 |
 | 后台类型 | stdin SHA-256 `71a5045f9d590af9d69f82defd883bd9cff4fe3eb63d89cb97844d05b55df751`，退出0。10根／1610源，包含停止页，零诊断。 |
 
-全部命令采用 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，本树原 offline preload、不可达 DATABASE_URL 和纯内存 audit，audit均为空。原企业 D 存储为从真实 Core 报价及原 hash 构造的有限夹具，客户本人签发服务尚未执行。本次验证未覆盖逐单企业批准、联合回滚／丢ACK／单边收据全文、实际页面会话、真实 MySQL、浏览器、微信或供应商。
+上述初始命令采用 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，本树原 offline preload、不可达 DATABASE_URL 和纯内存 audit，audit均为空。初始 D 存储由原 Core 报价及原 hash 构造有限夹具，后续客户本人签发、逐单批准和故障组合见下方补证。真实 MySQL、浏览器、微信和供应商仍交负责人实测。
 
 AIN-15、26、27、28按原完整门槛继续，任务百分比未跨档。dev1续跑消息含完整目标，实际回读为 active 且已执行工具，目标无 token_budget。dev2原反例再次在前置46194复现，保留原阻塞原因，修复后受影响组合交固定候选复验。Root全部验证子进程已退出，任务临时目录未创建，本次测试文件未修改，新增临时产物为0。
 
 本阶段 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出1，11份白名单仅检出原4处缺链。本片7个文件链接均可解析，当前差异检查退出0。阶段固定后普通推送并回读实际远端，源码及验证按本节保留，独立复核与未验行为继续留原专项记录。
+
+### 固定候选补证与独立复核
+
+本片九源及两册已于 `cfa6ba7addbc5561eff3b9f21216d2f6efc419b6` 中文提交并普通推送，实际远端 codex/ai-native 回读一致。以下组合使用该候选源码，Root复用既有fixture并通过stdin执行，测试文件未改。客户会话、业务存储、运输、模型结果和故障为明确的有限夹具，实际原服务方法、Controller、Guard、授权、Core及恢复实现执行。
+
+| 补证 | 命令 stdin SHA-256、退出码与结论 |
+| --- | --- |
+| 客户本人原 D 签发 | `3b2b89b4739626df38d21e520ce178046d4030e1db5e2c740c796cd110555eb6`，退出0。执行 ClientAuthService.listPublicWorkspaces、ClientApiService.prepareOrderSubmission、EnterpriseMerchantDelegationService.issue 及原命令／政策。非本人拒绝，同签发键重放仅一源，后续人工批准至一张 Core 订单及 D／AI 各一消费通过。 |
+| 原逐单企业审批及 D 签发 | `33331b7d8b70b2da3c2f0716099badd8e8f9523d61de3254ebf7230a6e2397a3`，退出0。原申请、自审拒绝、另一企业管理员审核、批准绑定签发、原 AI 审阅批准及 Core 提交通过。审核会话、关系、显式 grant 和30分钟批准窗口由有限夹具提供。 |
+| 逐单消费、联合回滚与丢 ACK 终态恢复 | `7ea94d0ee6f0f6321c534314623ebf9b6f5bd49a122a1aa5d7b6b658a95be96e`，退出0。核原批准 ID／使用人／企业／空间／报价／指纹／审核人／修订及 executionKey=D。正常批准 consumed、D／AI／Core 同一 orderId；D消费后注入事务失败，订单及 AI 消费为0，D issued，企业批准保持原 executing／revision3。提交丢应答后只读原结果，再沿原任务恢复到 SUCCEEDED，终态重放只读，Core始终一次、模型两次。 |
+| D／AI 单侧收据与绑定变化 | `19ea5993d964ad1e1c612e541dcc5779c9510f27af1998c85f45d46ebc222273`，退出0。缺 D 消费收据返回 AI_ACCESS_DENIED，缺 AI 消费或其订单 ID 不一致返回 unknown；均保持原单次 Core 和两次模型调用。 |
+| 当前企业审核权撤回及企业消费关联 | `98e1456a98125a07e18eef1cf99b3785200e5d711529076e5ac62a8f853337bb`，退出1。首个撤审核 grant 场景完成全部断言，订单／AI／Core幂等记录为0，D issued、企业批准 executing，原读 unknown 且只读。后续缺企业批准行被原 AI_ACCESS_DENIED 拒绝，驱动错误期待 unknown 而停止。只复验两项受影响收据场景的 `6a3fc871964f71e85d5a0b452580d3322ec91a878e06527f1c82be1a13bc0179` 退出0，缺企业批准行及其 orderId 不一致均按原拒绝契约核定，原订单一张、Core一次、模型两次保持。 |
+| dev1 固定候选独立复核及 D 前端恢复 | `46f61cc3461e6e40f386f0cee504bdccddece3e591adcb0eb1859a842fa57123`，退出0。实际原 API／session、Controller／Auth／Guard／Core源码在有限运输中执行，选单只提交一次，重开后读取同一原收据，本地仅保存定位。完整原字段、共同事务回滚及 MembershipService 的 submit／原事务／精确绑定／封存证明和当前资格核同，本片无新增 P1／P2。输出版本标签沿旧46194a9，作者另核1274项来源逐blob等于cfa6ba7，零差异，该标签更正与原失败保留。 |
+| dev2 原停止中断及六项边界 | 基本中断组 `72a24ecec54fa7102b7cdb265ec4e9c28fe1f32c32b0ed77265b07c9df449668` 退出0。边界首组 `febd386e9a1b4aa6160c212228b094ff345dc097f8b45bf092acf5cc61f11fdd` 退出1，三项修订／提交后冲突场景通过，另三项夹具的void回调断言和旧表引用错误保留。仅复验受影响并发／撤权的 `9c86eb4f1a36012531d8ade4db847737411b886be0a6f19337e722c4e29155dd` 退出0。七项最终核定如下文，656项来源总hash为 `bf42e2d36716332a867e0657eea66e35cedd64793667a7647f03e716352926fd`。 |
+
+dev2七项涵盖取消提交后中断、重开两次只读收据和显式同 K 续办，同 K 首次／续办两种并发，等待中撤回当前授权，Task修订变化，取消请求提交后CAS冲突，以及善后提交后冲突和终态重放。Task及未启动后继Run可关闭为CANCELLED；冲突或撤权保留原K，竞争方unknown，仅一份原取消事件。各项模型两次、Core零次、原14笔RECORDED资源账及零占用保持，已完成模型和答案前缀保持。独立停止命令采用 `node --no-compilation-cache -`，原收据按钮始终只读。
+
+Root边界驱动首版 `51cb1ced9ccfcd384b5a1ba0b24e7fadd8c96c74f1f042815646dff3235c3d7b` 因重复声明既有original变量在解析阶段退出1，业务未执行。更正stdin变量后沿上述98e145及受影响6a3fc复验，生产源码和拒绝断言未放宽。此前客户签发夹具缺factStore.findQuote、D单侧收据组使用旧事务行引用或期待错误状态的失败沿原会话保留，最终定向结果以表中固定命令为准。
+
+AIN-27六条操作资料由dev1核到原设置页、发布配置、容量／轮换／留存、灰度／停用及签名恢复入口，继续在原册收口。AIN-15仍须完整身份／付款变体、普通回答后继与实际前端会话逐项核定，AIN-26全矩阵由dev2继续，AIN-27／28按原全文依赖处理。本阶段未改变任务百分比。Root及两助手自有验证进程已退出，audit均为空，任务临时目录未创建。后续两助手实际active回合已回读，dev1目标沿原active且无预算，dev2目标卡仍为blocked但已按明确派单执行全矩阵，状态区别保留。
 
 <a id="ain15-26-page-integration-checkpoint-20261117"></a>
 ## AIN-15／26 原企业选单接线与取消善后未完成检查点（2026-11-17）
