@@ -1,5 +1,7 @@
 /** One post-pickup exchange spending request, not physical exchange authority.
  * Fulfillment, inspection, credit and original Core execution stay separate. */
+import type { EnterpriseExchangeIntent } from "@rental-os/rental-core/exchange-inspection-preparation";
+export type { EnterpriseExchangeIntent } from "@rental-os/rental-core/exchange-inspection-preparation";
 import type { EnterpriseChangeRequest } from "./enterprise-workflows";
 import type { RentalOrderExchangePriceBasis } from "./core";
 import type { EnterpriseExpenseRequestOriginalResult, EnterpriseExtensionRequestClosureReceipt } from "./enterprise-expense";
@@ -118,14 +120,7 @@ export function enterpriseExchangeInspectionConsentSnapshot(value: unknown,
 export interface CloseEnterpriseExchangeRequest extends EnterpriseChangeRequest { expectedRevision: 0; confirm: true }
 export type EnterpriseExchangeRequestOriginalResult = EnterpriseExpenseRequestOriginalResult<EnterpriseExchangeApprovalView>;
 export type EnterpriseExchangeRequestClosureReceipt = EnterpriseExtensionRequestClosureReceipt;
-export interface EnterpriseExchangeIntent {
-  orderLineId: string;
-  allocationId: string;
-  replacementItemGroupId: string;
-  replacementAssetId?: string;
-  replacementPricingGroupId?: string;
-  priceBasis: RentalOrderExchangePriceBasis;
-}
+
 export interface EnterpriseExchangeChoicesQuery {
   allocationId?: string;
   replacementItemGroupId?: string;

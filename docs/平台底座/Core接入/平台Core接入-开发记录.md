@@ -11,6 +11,33 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-approval-file-basis-20261116"></a>
+
+## Rental 原批准、检查同意与公共文件冻结边界（2026-11-16）
+
+固定父版 `af8258a656ebcae9eee521d170ed796ae3088a8c` 已普通推送并实际远端回读，main62ca在本树祖先。原换货批准核验、检查材料/同意读取、设置批准合同与输入schema实际移入Rental包，shared/API旧路径再导出同一声明。文件冻结与稳定存储位置校验归公共合同包，原文件服务继续裁定当前业务ACL和实际IO。[原批准](../../../packages/rental-core/src/mysql-approved-exchange.ts) · [政策接点](../../../packages/rental-core/src/approved-exchange-policy.ts) · [检查合同](../../../packages/rental-core/src/exchange-inspection-preparation.ts) · [同意依据](../../../packages/rental-core/src/exchange-inspection-consent-basis.ts) · [设置合同](../../../packages/rental-core/src/approved-settings-ports.ts) · [输入校验](../../../packages/rental-core/src/approved-settings-validation.ts) · [文件冻结](../../../packages/platform-contracts/src/file-content-binding.ts)
+
+费用确认、客户对具体检查/交付的同意与正式执行分别核验。唯一WeakMap只保存原事务内验证出的依据，换事务、换操作者、改输入或伪造JSON不能消费；执行前后核原费用、当前企业政策及客户同意关联。已消费批准的恢复只读原关联和费用收据，不重新报价或按今日TTL重授新支出。设置参与者以泛型表达调用方事务，原API别名实例化为本宿主Prisma事务；公共声明不泄漏生成类型。换货私有SQL与企业政策只声明实际使用的接点。
+
+Rental换货批准使用正式 `@rental-os/platform-server/request-identity`，与原Guard/API共用唯一ALS；这项可选服务端peer只在该子出口加载，领域根合同仍可由浏览器消费。本包prebuild/prelint沿公共服务→Rental顺序，公共服务自身先构建公共合同，无反向依赖或新增存储。文件位置引用只含稳定ID/provider/settings，不含凭据或供应商客户端，文件存在和旧active状态不被升级成冻结证据。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 拆前/拆后正文 | 文件冻结2函数、换货批准8函数及检查同意原12方法/函数在规范化换行和正式导入后正文一致；原schema、检查准备比较与企业意图声明单源迁移，未改SQL、原指纹、金额、状态或TTL语义 |
+| 独立包及完整API类型 | TS5.9.3、Prisma5.22官方内存声明覆盖原238模型；十项配置零诊断。Rental110根/672源/220输出，API988根/2351源/1976输出；原Controller/DTO/企业与AI消费者编译通过，输出均内存 |
+| 原批准/文件行为 | `node --no-compilation-cache - api-approval-behavior`，9840退出0、stderr为空；实际编译模块验证冻结摘要/路径/位置、严格设置schema、同意材料/收据、事务/操作者/输入与原消费恢复。SQL/企业政策为明确fixture，不代表真实授权库或对象存储 |
+| 原Core消费者 | 16620中原Core完整IIFE达到原成功标记，品类/配置隔离、动态字段和型号图片断言通过；该合并进程退出1来自旧换货夹具缺库存reader，未把整个合并运行写成通过。图片IO为明确内存fixture，退出清理剩余0、磁盘写入0 |
+| 原换货消费者 | 38036仅复验 `tests/rental-order-exchange.test.cjs`，退出0、stderr为空，原替换目标/原目标/冻结价格与金额断言通过。只补等待原异步读取及当前库存/服务和同一调用方事务fixture，移除原Core用例未被引用的cameraContext准备对象，原断言保留，没有生产fallback |
+| 正式出口/依赖/资料 | 6个Rental子出口及1个公共文件子出口对应实际JS/声明；唯一契约与原共享总出口兼容。源码说明、根入口、两包README和原API导读随片更新；HTTP/DTO/OpenAPI的业务路径与字段保持 |
+
+保留拆前失败。35884在主服务尚未移动前退出1，旧Core配置读取把Promise当对象，旧换货把Promise放入报价快照触发DataCloneError。补await后16620的Core达到完整成功标记，换货继续暴露缺当前库存reader；19228补库存后退出1，指出缺当前服务权威和原事务。现只给旧换货用例补明确受限的配置来源与同一fixture事务，无服务时返回该fixture的真实空集合，未知/越界不放行；最终原换货单次复验通过。类型首轮33项缺原换货/企业协议来源的错误也保留，补齐其原单源归属后十配置通过，不新造同名DTO。
+
+PCH原门槛未跨下一档，原任务百分比/依赖不改。完整主领域服务、Controller、独立schema/迁移/Seed、页面/作业/AI及标准装配，公共生命周期/事务和真实安装/更新/接手仍缺；下一入口为主核心服务13项真实依赖及兼容Nest接线。[接入路线](../../../packages/rental-core/README.md#使用与构建)
+
+本片没有新增测试文件或运行器；复用已有内存worker经stdin编译并执行必要原消费者/短检查。原离线preload、固定offline地址与本树output/.tmp边界保留，JS/声明/图片fixture均内存，目录为空，验证进程退出；没有安装、落地client或新临时环境。SQL/政策/事务/图片IO是明确fixture，真实HTTP/数据库/浏览器/供应商、完整Core安装/独立更新及接手/审查未验。原待清理环境和0字节日志、删除审批拒绝与责任manifest沿[前片](#core-rental-service-capacity-20261116)保留，不换工具绕过。
+
+阶段源码由包含本节的Git提交定位，中文提交并普通推送codex/platform-core-extraction后实际远端回读；main及其他工作树未写。
+
 <a id="core-rental-corporate-receivables-20261116"></a>
 
 ## Rental 企业应收、现金核销与原回款收据迁移（2026-11-16）

@@ -20,6 +20,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [状态仓储](rental-state.repository.ts)和[原幂等](rental-idempotency.repository.ts)已是 Rental 包的窄 Nest 适配，供给原配置、范围、品类锁、事件和同一数据库事务。快照保留原行修订与已持久档案，收据按当前空间读取原键；恢复副本不重建业务事实，同键重试不重做已提交动作。[快照实现](../../../../../packages/rental-core/src/mysql-state.ts) · [收据实现](../../../../../packages/rental-core/src/mysql-idempotency.ts)
 
+原[换货批准核验](rental-approved-exchange-authorization.ts)、[设置批准合同](approved-settings-change.ports.ts)与校验均已转接Rental包；费用批准、客户检查同意、执行和原收据分开，唯一事务依据不能由JSON重建。客户同意服务继续保留原ClientAuth/ALS与本人的对象/文件权限，材料与收据规则从正式单源读取。文件冻结由公共合同核原摘要与存储位置，业务ACL仍由原文件服务裁定。[实际批准核验](../../../../../packages/rental-core/src/mysql-approved-exchange.ts) · [检查同意依据](../../../../../packages/rental-core/src/exchange-inspection-consent-basis.ts) · [设置输入](../../../../../packages/rental-core/src/approved-settings-validation.ts) · [文件冻结](../../../../../packages/platform-contracts/src/file-content-binding.ts)
+
 报价、价格、规则、检查和履约依据从原关联快照读取，修订与幂等键保护并发/重复操作，结果未知通过原操作核对。主事务和外部支付/通知执行点分别由原领域实现持有。
 
 [原动作执行器](rental-idempotent-action.service.ts)供给同一Prisma事务与幂等仓储，实际执行逻辑在Rental包。原 [Tenant共享父锁](rental-business-fence.ts)也转接同一实现；普通业务、企业及在途收尾继续沿当前授权与原业务入口调用。原收据只读、同键竞争、已证实写冲突重试和外部副作用边界保持。[动作实现](../../../../../packages/rental-core/src/mysql-idempotent-actions.ts) · [共享父锁实现](../../../../../packages/rental-core/src/mysql-business-fence.ts)

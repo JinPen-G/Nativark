@@ -346,6 +346,30 @@
     "./corporate-payment-receipts": {
       "types": "./dist/corporate-payment-receipts.d.ts",
       "default": "./dist/corporate-payment-receipts.js"
+    },
+    "./approved-settings-ports": {
+      "types": "./dist/approved-settings-ports.d.ts",
+      "default": "./dist/approved-settings-ports.js"
+    },
+    "./approved-settings-validation": {
+      "types": "./dist/approved-settings-validation.d.ts",
+      "default": "./dist/approved-settings-validation.js"
+    },
+    "./approved-exchange-ports": {
+      "types": "./dist/approved-exchange-ports.d.ts",
+      "default": "./dist/approved-exchange-ports.js"
+    },
+    "./exchange-inspection-consent-basis": {
+      "types": "./dist/exchange-inspection-consent-basis.d.ts",
+      "default": "./dist/exchange-inspection-consent-basis.js"
+    },
+    "./mysql-approved-exchange": {
+      "types": "./dist/mysql-approved-exchange.d.ts",
+      "default": "./dist/mysql-approved-exchange.js"
+    },
+    "./exchange-inspection-preparation": {
+      "types": "./dist/exchange-inspection-preparation.d.ts",
+      "default": "./dist/exchange-inspection-preparation.js"
     }
   },
   "typesVersions": {
@@ -601,13 +625,31 @@
       ],
       "corporate-payment-receipts": [
         "dist/corporate-payment-receipts.d.ts"
+      ],
+      "approved-settings-ports": [
+        "dist/approved-settings-ports.d.ts"
+      ],
+      "approved-settings-validation": [
+        "dist/approved-settings-validation.d.ts"
+      ],
+      "approved-exchange-ports": [
+        "dist/approved-exchange-ports.d.ts"
+      ],
+      "exchange-inspection-consent-basis": [
+        "dist/exchange-inspection-consent-basis.d.ts"
+      ],
+      "mysql-approved-exchange": [
+        "dist/mysql-approved-exchange.d.ts"
+      ],
+      "exchange-inspection-preparation": [
+        "dist/exchange-inspection-preparation.d.ts"
       ]
     }
   },
   "scripts": {
-    "prebuild": "npm run build -w @rental-os/platform-contracts",
+    "prebuild": "npm run build -w @rental-os/platform-server",
     "build": "tsc -p tsconfig.json",
-    "prelint": "npm run build -w @rental-os/platform-contracts",
+    "prelint": "npm run build -w @rental-os/platform-server",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -616,13 +658,17 @@
   },
   "peerDependencies": {
     "@nestjs/common": "^10.4.15",
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "^5.22.0",
+    "@rental-os/platform-server": "0.1.0"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
       "optional": true
     },
     "@prisma/client": {
+      "optional": true
+    },
+    "@rental-os/platform-server": {
       "optional": true
     }
   }

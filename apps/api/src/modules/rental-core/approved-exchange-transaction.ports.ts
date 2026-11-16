@@ -1,19 +1,5 @@
-/** The enterprise owner participates in the original Core transaction. It may
- * recheck and consume its approval; it cannot supply price/inspection authority. */
+/** 原企业参与者继续使用调用方Prisma事务，合同来自Rental正式出口。 */
 import type { Prisma } from "@prisma/client";
-import type { ExecuteApprovedRentalExchangeRequest, RentalApprovedExchangeReceipt } from "@rental-os/shared";
-
-export interface ApprovedExchangeBinding {
-  tenantId: string;
-  workspaceId: string;
-  orderId: string;
-  actorUserId: string;
-  coreIdempotencyKey: string;
-  requestHash: string;
-  request: ExecuteApprovedRentalExchangeRequest;
-}
-export interface ApprovedExchangeTransaction {
-  prepare(tx: Prisma.TransactionClient, binding: Readonly<ApprovedExchangeBinding>): Promise<void>;
-  commit(tx: Prisma.TransactionClient, binding: Readonly<ApprovedExchangeBinding>, receipt: Readonly<RentalApprovedExchangeReceipt>): Promise<void>;
-  replay(tx: Prisma.TransactionClient, binding: Readonly<ApprovedExchangeBinding>, receipt: Readonly<RentalApprovedExchangeReceipt>): Promise<void>;
-}
+import type { ApprovedExchangeTransaction as CoreApprovedExchangeTransaction } from "@rental-os/rental-core/approved-exchange-ports";
+export type { ApprovedExchangeBinding } from "@rental-os/rental-core/approved-exchange-ports";
+export type ApprovedExchangeTransaction = CoreApprovedExchangeTransaction<Prisma.TransactionClient>;
