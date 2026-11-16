@@ -194,6 +194,130 @@
     "./fact-request-context": {
       "types": "./dist/fact-request-context.d.ts",
       "default": "./dist/fact-request-context.js"
+    },
+    "./inspection-result-validation": {
+      "types": "./dist/inspection-result-validation.d.ts",
+      "default": "./dist/inspection-result-validation.js"
+    },
+    "./early-return": {
+      "types": "./dist/early-return.d.ts",
+      "default": "./dist/early-return.js"
+    },
+    "./quote-line-source": {
+      "types": "./dist/quote-line-source.d.ts",
+      "default": "./dist/quote-line-source.js"
+    },
+    "./damage-waiver": {
+      "types": "./dist/damage-waiver.d.ts",
+      "default": "./dist/damage-waiver.js"
+    },
+    "./inspection-customer-response": {
+      "types": "./dist/inspection-customer-response.d.ts",
+      "default": "./dist/inspection-customer-response.js"
+    },
+    "./inspection-template-snapshot": {
+      "types": "./dist/inspection-template-snapshot.d.ts",
+      "default": "./dist/inspection-template-snapshot.js"
+    },
+    "./exchange-inspection": {
+      "types": "./dist/exchange-inspection.d.ts",
+      "default": "./dist/exchange-inspection.js"
+    },
+    "./inspection-observation": {
+      "types": "./dist/inspection-observation.d.ts",
+      "default": "./dist/inspection-observation.js"
+    },
+    "./inspection-evidence": {
+      "types": "./dist/inspection-evidence.d.ts",
+      "default": "./dist/inspection-evidence.js"
+    },
+    "./allocation-policy": {
+      "types": "./dist/allocation-policy.d.ts",
+      "default": "./dist/allocation-policy.js"
+    },
+    "./exchange-pricing-source": {
+      "types": "./dist/exchange-pricing-source.d.ts",
+      "default": "./dist/exchange-pricing-source.js"
+    },
+    "./exchange-membership": {
+      "types": "./dist/exchange-membership.d.ts",
+      "default": "./dist/exchange-membership.js"
+    },
+    "./exchange-coupon": {
+      "types": "./dist/exchange-coupon.d.ts",
+      "default": "./dist/exchange-coupon.js"
+    },
+    "./exchange-discount": {
+      "types": "./dist/exchange-discount.d.ts",
+      "default": "./dist/exchange-discount.js"
+    },
+    "./extension-lifecycle": {
+      "types": "./dist/extension-lifecycle.d.ts",
+      "default": "./dist/extension-lifecycle.js"
+    },
+    "./repricing-context": {
+      "types": "./dist/repricing-context.d.ts",
+      "default": "./dist/repricing-context.js"
+    },
+    "./delivery-address-privacy": {
+      "types": "./dist/delivery-address-privacy.d.ts",
+      "default": "./dist/delivery-address-privacy.js"
+    },
+    "./mysql-offline-payment-method": {
+      "types": "./dist/mysql-offline-payment-method.d.ts",
+      "default": "./dist/mysql-offline-payment-method.js"
+    },
+    "./service-occurrence": {
+      "types": "./dist/service-occurrence.d.ts",
+      "default": "./dist/service-occurrence.js"
+    },
+    "./service-cancellation": {
+      "types": "./dist/service-cancellation.d.ts",
+      "default": "./dist/service-cancellation.js"
+    },
+    "./category-samples": {
+      "types": "./dist/category-samples.d.ts",
+      "default": "./dist/category-samples.js"
+    },
+    "./qualification": {
+      "types": "./dist/qualification.d.ts",
+      "default": "./dist/qualification.js"
+    },
+    "./service-catalog": {
+      "types": "./dist/service-catalog.d.ts",
+      "default": "./dist/service-catalog.js"
+    },
+    "./asset-validity": {
+      "types": "./dist/asset-validity.d.ts",
+      "default": "./dist/asset-validity.js"
+    },
+    "./approved-extension-ports": {
+      "types": "./dist/approved-extension-ports.d.ts",
+      "default": "./dist/approved-extension-ports.js"
+    },
+    "./quote-access": {
+      "types": "./dist/quote-access.d.ts",
+      "default": "./dist/quote-access.js"
+    },
+    "./calendar-range": {
+      "types": "./dist/calendar-range.d.ts",
+      "default": "./dist/calendar-range.js"
+    },
+    "./price-adjustments": {
+      "types": "./dist/price-adjustments.d.ts",
+      "default": "./dist/price-adjustments.js"
+    },
+    "./category-pricing-rule-compatibility": {
+      "types": "./dist/category-pricing-rule-compatibility.d.ts",
+      "default": "./dist/category-pricing-rule-compatibility.js"
+    },
+    "./discount-selection": {
+      "types": "./dist/discount-selection.d.ts",
+      "default": "./dist/discount-selection.js"
+    },
+    "./security-deposit": {
+      "types": "./dist/security-deposit.d.ts",
+      "default": "./dist/security-deposit.js"
     }
   },
   "typesVersions": {
@@ -335,6 +459,99 @@
       ],
       "fact-request-context": [
         "dist/fact-request-context.d.ts"
+      ],
+      "inspection-result-validation": [
+        "dist/inspection-result-validation.d.ts"
+      ],
+      "early-return": [
+        "dist/early-return.d.ts"
+      ],
+      "quote-line-source": [
+        "dist/quote-line-source.d.ts"
+      ],
+      "damage-waiver": [
+        "dist/damage-waiver.d.ts"
+      ],
+      "inspection-customer-response": [
+        "dist/inspection-customer-response.d.ts"
+      ],
+      "inspection-template-snapshot": [
+        "dist/inspection-template-snapshot.d.ts"
+      ],
+      "exchange-inspection": [
+        "dist/exchange-inspection.d.ts"
+      ],
+      "inspection-observation": [
+        "dist/inspection-observation.d.ts"
+      ],
+      "inspection-evidence": [
+        "dist/inspection-evidence.d.ts"
+      ],
+      "allocation-policy": [
+        "dist/allocation-policy.d.ts"
+      ],
+      "exchange-pricing-source": [
+        "dist/exchange-pricing-source.d.ts"
+      ],
+      "exchange-membership": [
+        "dist/exchange-membership.d.ts"
+      ],
+      "exchange-coupon": [
+        "dist/exchange-coupon.d.ts"
+      ],
+      "exchange-discount": [
+        "dist/exchange-discount.d.ts"
+      ],
+      "extension-lifecycle": [
+        "dist/extension-lifecycle.d.ts"
+      ],
+      "repricing-context": [
+        "dist/repricing-context.d.ts"
+      ],
+      "delivery-address-privacy": [
+        "dist/delivery-address-privacy.d.ts"
+      ],
+      "mysql-offline-payment-method": [
+        "dist/mysql-offline-payment-method.d.ts"
+      ],
+      "service-occurrence": [
+        "dist/service-occurrence.d.ts"
+      ],
+      "service-cancellation": [
+        "dist/service-cancellation.d.ts"
+      ],
+      "category-samples": [
+        "dist/category-samples.d.ts"
+      ],
+      "qualification": [
+        "dist/qualification.d.ts"
+      ],
+      "service-catalog": [
+        "dist/service-catalog.d.ts"
+      ],
+      "asset-validity": [
+        "dist/asset-validity.d.ts"
+      ],
+      "approved-extension-ports": [
+        "dist/approved-extension-ports.d.ts"
+      ],
+      "quote-access": [
+        "dist/quote-access.d.ts"
+      ],
+      "calendar-range": [
+        "dist/calendar-range.d.ts"
+      ],
+      "price-adjustments": [
+        "dist/price-adjustments.d.ts"
+      ],
+      "category-pricing-rule-compatibility": [
+        "dist/category-pricing-rule-compatibility.d.ts"
+      ],
+      "discount-selection": [
+        "dist/discount-selection.d.ts"
+      ],
+      "security-deposit": [
+        "dist/security-deposit.d.ts"
       ]
     }
   },

@@ -11,6 +11,35 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-domain-rules-20261116"></a>
+
+## Rental 检查、换货、续租与资金规则归属（2026-11-16）
+
+固定父版 `4973f8c2d27a474bec125ff9fdeeb299bf91159b` 已普通推送并真实远端回读，main仍为62ca且在本树祖先。31份实际业务规则移入Rental包，旧API路径再导出同一实现；检查必填/观察/证据与冻结模板、换货价格/会员/券/优惠、续租与重定价、服务目录/发生项/取消、资格/资产有效期、日历/调价/资金规则及示范数据按自身正式子出口读取。[包导读](../../../packages/rental-core/README.md#阅读路线) · [服务目录](../../../packages/rental-core/src/service-catalog.ts) · [换货检查](../../../packages/rental-core/src/exchange-inspection.ts) · [资金规则](../../../packages/rental-core/src/security-deposit.ts)
+
+报价访问明确接收原宿主每次请求的已验证身份与地点范围，原API保留函数签名；来源快照不是使用权，客户本人、成员/组织/地点范围仍按原规则裁定。线下收款方式只接调用方原资金事务的锁定读取，使用同一Prisma SQL runtime，保留当前空间设置共享锁、旧缺省、配置异常和禁止方式的原结果。公共请求指纹使用正式公共子出口，纯规则不反向依赖shared或API源码。[报价规则](../../../packages/rental-core/src/quote-access.ts) · [报价兼容入口](../../../apps/api/src/modules/rental-core/rental-quote-access.ts) · [收款方式](../../../packages/rental-core/src/mysql-offline-payment-method.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版可执行正文对照 | 31模块、114个函数/方法，以及箭头与常量的全部可执行语句一致；仅规范化正式导入、SQL runtime别名、换行及两份明确接点的注入。原金额、时段、资格、冻结依据和异常正文保持 |
+| 独立包及完整API类型 | 锁定Prisma5.22官方WASM/generator为当前238模型生成内存声明，TS5.9.3；十项配置零诊断。Rental93根/654源/186输出、shared122根/340源/245输出、API988根/2333源/1976输出；输出全部内存 |
+| 七份原直接消费者 | 服务目录、优惠取舍、押金/预授权、订单报价范围、资产有效期、检查证据及换货检查最终通过。最初同跑七份，实际失败后只复验换货；最后进程37036退出0、stderr为空，换货原6项Node用例及原IIFE通过，无skip/todo/cancelled |
+| 两份新正式接点 | 进程18888退出0，31个身份/报价范围及收款准入正常/拒绝边界通过；10次锁定读取核原表、共享锁和租户/空间参数。SQL结果是明确fixture，无网络 |
+| 正式出口及依赖 | 78个正式出口与77个子路径typesVersions对应，原依赖/可选peer不变，lock无差异；领域根出口不加载MySQL适配。本片没有HTTP/DTO业务合同变化，原Controller、Guard及OpenAPI继续消费同一规则 |
+| 定向文档及差异格式 | 七份现行资料959本地链接、153锚点和82表格无问题；默认git diff --check退出0。正式需求/任务没有差异，全局旧缺链继续保留 |
+
+原消费者入口为[服务目录](../../../tests/rental-service-catalog.test.cjs)、[优惠取舍](../../../tests/rental-discount-selection.test.cjs)、[资金规则](../../../tests/rental-security-deposit.test.cjs)、[报价范围](../../../tests/rental-order-quote-scope.test.cjs)、[资产有效期](../../../tests/rental-asset-validity.test.cjs)、[检查证据](../../../tests/rental-inspection-evidence.test.cjs)及[换货检查](../../../tests/rental-exchange-inspection.test.cjs)。验证使用已有内存worker，经标准输入运行`node --no-compilation-cache - api-rules <七份原用例>`，失败后运行`api-rule-current tests/rental-exchange-inspection.test.cjs`；两接点以同一worker的独立包范围`api-rule-contacts`核验，不新增测试文件或运行器。
+
+保留失败过程。首轮原换货夹具未模拟订单缺副本时读取关联原报价的既有分支，另一个消费者要求实体shared/Prisma产物；固定父版497的31份原规则覆盖回同一内存组合后，缺报价夹具失败复现。只在原用例补关联报价的租户/空间、品类版本和原订单修订断言及无原报价返回，保留原缺历史拒绝断言。内存验证对实际编译shared字节提供明确虚拟路径，并将原API本地Prisma路径映射到同一离线SQL/Decimal/enum fixture；修正解析器自身缺模块递归后复验，不复制依赖、生成客户端或放宽生产读取。
+
+本片源码与模块导读同步说明职责和关键限制，原函数/状态机/计价逻辑复用。PCH原门槛未跨下一档：完整Rental领域服务/Controller/数据/作业/AI与标准装配、公共事务/生命周期及全链消费者仍缺，原任务身份/依赖/百分比保持。当前接入入口继续沿[五步指南](平台Core接入-开发任务.md#core-quick-start)与正式包说明读取。
+
+没有浏览器、真实HTTP/数据库/供应商、完整包安装/更新或独立审查证据。原离线preload在编译前加载，固定offline地址；审计/TEMP/TMP/cache指向本树独占output/.tmp，未产生审计文件，目录仍为空；JS/声明全部内存，SQL/锁/事务与回滚是明确fixture。
+
+原待清理环境840文件/91,808,304字节和唯一空guard.log的1文件/0字节仍在统一待清理区。再次核定绝对路径、归属、文件/体积、无链接及无使用进程后，同一原生PowerShell删除在启动前被自动审批以blocked by policy拒绝；两份责任manifest已更新，没有换壳/工具绕过。位置分别为D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/manifest.json及rental-business-facts/manifest.json。既有外观静态失败、总导航三份历史附件和MCP五份隔离附件缺失继续保留，本片不据局部结果宣称全绿。
+
+阶段提交由包含本节的Git版本定位，普通推送codex/platform-core-extraction后实际回读；main及其他树未写入。后续先迁移资金服务的原事实/应收接点，再推进主领域服务与标准Core装配。
+
 <a id="core-rental-core-facts-20261116"></a>
 
 ## Rental 订单、库存与检查事实仓储迁移（2026-11-16）

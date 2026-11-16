@@ -10,6 +10,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 订单聚合、资产/库存、归还处置、工单、检查及续租/换货事实经[核心事实适配](rental-core-fact.repository.ts)进入Rental包。适配只供给原Auth/ALS、空间/组织范围、检查事件和同一数据库；锁序、金额、原库存流水、历史快照及调用方事务由原仓储实现保留。订单编号、排序、占用、承运期间、用量读数和工单范围的旧入口均再导出正式子出口。[核心事实实现](../../../../../packages/rental-core/src/mysql-core-facts.ts) · [本表与宿主接点](../../../../../packages/rental-core/src/core-fact-storage.ts) · [冻结检查](../../../../../packages/rental-core/src/mysql-order-inspection-basis.ts) · [单件配货依据](../../../../../packages/rental-core/src/mysql-order-allocation-pickup.ts)
 
+检查、换货、续租、优惠、服务和保证金规则也归Rental包单源维护，旧路径只再导出。报价访问的兼容函数供给每次原Auth/ALS身份与地点范围；线下收款方式在原资金事务内锁定读取当前设置，不接收客户端自授权范围。[规则导读](../../../../../packages/rental-core/README.md#阅读路线) · [报价访问](rental-quote-access.ts) · [收款方式](rental-offline-payment-method.ts) · [换货检查](../../../../../packages/rental-core/src/exchange-inspection.ts) · [服务目录](../../../../../packages/rental-core/src/service-catalog.ts)
+
 [状态仓储](rental-state.repository.ts)和[原幂等](rental-idempotency.repository.ts)已是 Rental 包的窄 Nest 适配，供给原配置、范围、品类锁、事件和同一数据库事务。快照保留原行修订与已持久档案，收据按当前空间读取原键；恢复副本不重建业务事实，同键重试不重做已提交动作。[快照实现](../../../../../packages/rental-core/src/mysql-state.ts) · [收据实现](../../../../../packages/rental-core/src/mysql-idempotency.ts)
 
 报价、价格、规则、检查和履约依据从原关联快照读取，修订与幂等键保护并发/重复操作，结果未知通过原操作核对。主事务和外部支付/通知执行点分别由原领域实现持有。

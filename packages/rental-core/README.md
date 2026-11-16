@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及完整订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -26,6 +26,12 @@
 | [冻结检查依据](src/mysql-order-inspection-basis.ts)、[单件配货依据](src/mysql-order-allocation-pickup.ts) | MySQL子出口只读原订单关联的冻结来源，在库侧限制JSON与结果范围，并复验原完整身份和对象修订；缺历史不改用当前模板或属性 |
 | [读数](src/usage-reading.ts)、[占用](src/occupancy.ts)、[承运期间](src/carrier-shipment.ts) | 纯规则子出口保留原数值校验、占用期间及承运起讫算法，原API再导出同一实现 |
 | [订单排序](src/mysql-order-list-sort.ts)、[编号](src/mysql-order-number.ts)、[规则缺省](src/rule-defaults.ts)、[金额](src/money.ts)、[工单范围](src/work-order-assignee-scope.ts) | 原库侧排序/编号、规则缺省、金额精度和处理人范围继承，不新增业务状态或授权；编号继续在订单原事务中分配 |
+| [冻结检查模板](src/inspection-template-snapshot.ts)、[检查结果](src/inspection-result-validation.ts)、[换货检查](src/exchange-inspection.ts)、[检查证据](src/inspection-evidence.ts) | 原必填/观察/读数及原商品、替换商品的检查依据；证据ID整理不授予文件访问权，文件ACL和履约提交由调用方核验 |
+| [续租生命周期](src/extension-lifecycle.ts)、[重定价依据](src/repricing-context.ts)、[换货价格段](src/exchange-pricing-source.ts)、[原报价行](src/quote-line-source.ts) | 原有效期间、冻结价格/规则和剩余段裁定；当前配置不冒充历史依据，原Core服务继续调用同一规则 |
+| [优惠取舍](src/discount-selection.ts)、[换货优惠](src/exchange-discount.ts)、[押金与预授权](src/security-deposit.ts)、[免赔](src/damage-waiver.ts) | 原资格、互斥/叠加、行分摊与资金计算；会员/券的原依据及历史减免保留，计算规则不执行收退款 |
+| [服务目录](src/service-catalog.ts)、[服务发生项](src/service-occurrence.ts)、[服务取消](src/service-cancellation.ts)、[客户资格](src/qualification.ts)、[资产有效期](src/asset-validity.ts) | 原服务适用性、计费单位、条件强制和条款快照；容量、人员、支付及真实Provider仍由所属服务执行 |
+| [报价访问](src/quote-access.ts)、[线下收款方式](src/mysql-offline-payment-method.ts) | 正式子出口接收原服务端身份/地点范围和原资金事务；报价来源不是授权，收款设置锁定读取不重开事务 |
+| [分配政策](src/allocation-policy.ts)、[日历范围](src/calendar-range.ts)、[调价](src/price-adjustments.ts)、[示范数据](src/category-samples.ts)、[已批准续租端口](src/approved-extension-ports.ts) | 原纯规则、品类样例及批准后执行声明；分配作业、当前授权、批准核验和持久化仍由正式调用方负责 |
 | [当前绑定写入](src/mysql-category-write.ts)、[采用政策](src/mysql-category-policy.ts)、[履约准入](src/mysql-fulfillment-admission.ts) | 正式 MySQL 子出口持有原父锁→空间锁、发布版本/采用范围和当前地点/主体读取；原宿主提供身份和事务，历史快照及实物归还使用各自原依据 |
 | [品类属性](src/category-attributes.ts) | `/category-attributes` 校验当前属性、保留不可改写的历史值并准备唯一声明；实体与唯一值仍由原写入事务一起提交 |
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
@@ -66,5 +72,9 @@ MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON
 业务事实仓储由宿主供给本表方法、当前空间、每次生成的订单可见范围、库存配置 reader 和原通知事件。报价保存锁住原经营空间，只有首次创建分支复核当前履约/能力/库存，已保存报价保留来源、金额与历史快照；券预算、奖励和余额写入继续使用调用方事务及原 Decimal 精度。通知流水先持久化，认领只占租约，原投递结果才累计尝试次数；租约过期不证明可以重新发送。外部短信执行和批准仍由原业务服务处理。[原事实接线](../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts) · [报价恢复验证](../../tests/rental-quote-recovery-review.test.cjs) · [短信限流验证](../../tests/sms-rate-limit.test.cjs)
 
 核心事实仓储接收本表方法与明确的宿主接点。宿主返回原服务端完整身份，范围读取与冻结指纹使用原对象；订单/资产/处置的锁序、聚合与库存流水、检查事件继续在原事务提交。手工资料维护不能释放独立隔离，检查更正保留原读数和更正历史，续租保持原约定期间与冻结价格。库存作业、处置恢复和工单处理由原领域入口核当前权限。[原核心事实接线](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts) · [订单编号](../../tests/rental-order-number.test.cjs) · [资产历史](../../tests/rental-asset-status-history.test.cjs) · [库存作业](../../tests/rental-stock-operations.test.cjs) · [处置恢复](../../tests/rental-stock-disposition.test.cjs) · [工单](../../tests/rental-work-order.test.cjs) · [检查读数](../../tests/rental-usage-reading-validation.test.cjs)
+
+业务规则使用各自正式子出口，例如 `@rental-os/rental-core/service-catalog`、`/discount-selection` 和 `/security-deposit`。报价访问接收 `RentalQuoteAccessContext`，宿主供给每次请求的原已验证身份与地点范围，旧API函数保持原签名。线下收款方式只接原资金事务的 `$queryRaw`，使用原SQL runtime；设置共享锁保留到原资金提交，缺设置或配置无效明确拒绝。[报价兼容接线](../../apps/api/src/modules/rental-core/rental-quote-access.ts) · [收款兼容接线](../../apps/api/src/modules/rental-core/rental-offline-payment-method.ts)
+
+规则验证沿原消费者复用，覆盖服务计费/条款、优惠取舍、押金/预授权、换货冻结检查及资产和证据边界。[服务目录](../../tests/rental-service-catalog.test.cjs) · [优惠取舍](../../tests/rental-discount-selection.test.cjs) · [资金规则](../../tests/rental-security-deposit.test.cjs) · [换货检查](../../tests/rental-exchange-inspection.test.cjs) · [资产有效期](../../tests/rental-asset-validity.test.cjs) · [检查证据](../../tests/rental-inspection-evidence.test.cjs)
 
 必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。拆前合同与运行时导出按固定 Git 对照，实际证据和剩余边界沿 PCH 记录维护。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs) · [PCH 记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-rental-domain-package-20261115)
