@@ -3,6 +3,7 @@ import addFormats from 'ajv-formats';
 import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReadDraft,
   type AiClarifiedQuoteSelectionRequestDraft, type AiClarifiedQuoteSelectionPreparationDraft, type AiQuoteSelectionProofDraft,
   type AiQuoteSelectionSelectResponseDraft, type AiQuoteSelectionReconcileResponseDraft, type AiQuoteSelectionReceiptDraft,
+  type AiMerchantDelegatedQuoteSelectionPreparationDraft,
   type AiHumanQuoteOrderRepreparePreparationDraft, type AiQuoteRequestReissuePreparationDraft, type AiQuoteRequestReissueOperationDraft,
   type AiQuoteRequestReissueSelectionPreparationDraft, type AiQuoteRequestReissueSelectionOperationDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -32,6 +33,7 @@ type QuoteSelectionResponses = { AiQuoteSelectionSelectResponseDraft: AiQuoteSel
   AiQuoteRequestReissueSelectionOperationDraft: AiQuoteRequestReissueSelectionOperationDraft;
   AiHumanQuoteOrderRepreparePreparationDraft: AiHumanQuoteOrderRepreparePreparationDraft;
   AiClarifiedQuoteSelectionPreparationDraft: AiClarifiedQuoteSelectionPreparationDraft;
+  AiMerchantDelegatedQuoteSelectionPreparationDraft: AiMerchantDelegatedQuoteSelectionPreparationDraft;
   AiQuoteSelectionReconcileResponseDraft: AiQuoteSelectionReconcileResponseDraft;
   AiQuoteSelectionReceiptDraft: AiQuoteSelectionReceiptDraft;
   AiSelectedQuoteTaskRunDraft: AiSelectedQuoteTaskRunDraft;
@@ -50,6 +52,7 @@ const responseNames = ['AiQuoteSelectionSelectResponseDraft', 'AiQuoteSelectionR
   'AiQuoteRequestReissuePreparationDraft', 'AiQuoteRequestReissueOperationDraft', 'AiQuoteRequestReissueSelectionPreparationDraft', 'AiQuoteRequestReissueSelectionOperationDraft',
   'AiHumanQuoteOrderRepreparePreparationDraft',
   'AiClarifiedQuoteSelectionPreparationDraft',
+  'AiMerchantDelegatedQuoteSelectionPreparationDraft',
   'AiSelectedQuoteTaskRunDraft', 'AiSelectedQuoteTaskConfirmationDraft', 'AiSelectedQuoteTaskRecoveryDraft', 'AiSelectedQuoteTaskResultDraft',
   'AiSelectedQuoteTaskCancelResponseDraft', 'AiHumanQuoteOrderDecisionResponseDraft', 'AiHumanQuoteOrderReprepareResponseDraft',
   'AiApprovalApplicationReviewDraft', 'AiApprovalApplicationReceiptDraft', 'AiApprovalReprepareEligibilityDraft',

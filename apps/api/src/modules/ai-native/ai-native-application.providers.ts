@@ -52,6 +52,7 @@ import { RentalCoreService } from '../rental-core/rental-core.service';
 import { WorkspaceCapabilityService } from '../rental-core/workspace-capability.service';
 import { RentalCoreController } from '../rental-core/rental-core.controller';
 import { RentalOrderConfirmationService } from '../rental-core/rental-order-confirmation.service';
+import { EnterpriseMerchantDelegationService } from '../enterprise/enterprise-merchant-delegation.service';
 import { RentalBusinessFactRepository } from '../rental-core/rental-business-fact.repository';
 import { RentalCoreFactRepository } from '../rental-core/rental-core-fact.repository';
 import { RentalAllocationService } from '../rental-core/rental-allocation.service';
@@ -337,13 +338,15 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
     { token: AI_SELECTED_QUOTE_TASK_REQUESTS, optional: true },
     { token: AI_SETTINGS_TASK_HTTP_REQUESTS, optional: true }, { token: ModuleRef, optional: true },
-    { token: AI_HUMAN_QUOTE_ORDER_REQUESTS, optional: true }, ConfigService],
+    { token: AI_HUMAN_QUOTE_ORDER_REQUESTS, optional: true }, ConfigService,
+    { token: EnterpriseMerchantDelegationService, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService,
     originalResults: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>, guard: ApiAuthGuard,
     subscriptions: SubscriptionService, core: RentalCoreService, confirmation: RentalOrderConfirmationService,
     quoteFacts: RentalBusinessFactRepository, settingsValue?: unknown, orderValue?: unknown,
     selectedOrderResult?: { readResult(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
-      continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
+      continueConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown>;
+      settleUnstartedCancellation?(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown> },
     settingsTask?: { continueSettingsConfirmation(request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal): Promise<unknown>;
       prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
         intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> },
@@ -351,7 +354,7 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
     selectedOrderDecision?: { decideSelectedProposal(request: { headers: { authorization?: unknown } }, value: unknown): Promise<unknown>;
       prepareTaskCenterApproval?(request: { headers: { authorization?: unknown } }, value: unknown,
         intent: 'explicit_decide' | 'explicit_continue', signal?: AbortSignal): Promise<void> },
-    configurationSource?: Pick<ConfigService, 'get'>) => {
+    configurationSource?: Pick<ConfigService, 'get'>, merchantDelegations?: EnterpriseMerchantDelegationService) => {
     const settings = readSettingsExecutionConfiguration(settingsValue), order = readQuoteOrderConfiguration(orderValue);
     const clarification = () => {
       type Call = (request: { headers: { authorization?: unknown } }, value: unknown, signal?: AbortSignal) => Promise<unknown>;
@@ -383,17 +386,19 @@ export const AI_NATIVE_TASK_CENTER_PROVIDER: FactoryProvider = {
         return controls.consume(request, 'model-control-read', value, signal);
       } },
       business: { db, selectedOrderResult, originalOrder: { db, auth, guard, subscriptions, core } },
+      ...(typeof selectedOrderResult?.settleUnstartedCancellation === 'function' ? { selectedOrderCancellation: { db,
+        settleUnstartedCancellation: selectedOrderResult.settleUnstartedCancellation.bind(selectedOrderResult) } } : {}),
       originalInputs: { readInput: originalResults.readInput.bind(originalResults),
         readAnswer: originalResults.readAnswer.bind(originalResults),
         resolveAnswerContinuation: originalResults.resolveAnswerContinuation.bind(originalResults),
         execution: clarification },
       continuation: { db, order: selectedOrderResult, settings: settingsTask,
         originalOrder: order.enabled ? { continueConfirmation: (credentials, value, signal) =>
-          composePublishedOrderTaskContinuation({ db, auth, guard, subscriptions, core, confirmation, quoteFacts, credentials,
+          composePublishedOrderTaskContinuation({ db, auth, guard, subscriptions, core, confirmation, quoteFacts, merchantDelegations, credentials,
             scene: { code: 'quote_clarification', version: '1' } }, { host: order.host, limits: order.limits })
             .continueConfirmation(value, signal) } : undefined },
       humanApprovals: {
-        order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } },
+        order: { db, auth, guard, subscriptions, core, confirmation, quoteFacts, merchantDelegations, scene: { code: 'quote_clarification', version: '1' } },
         settings: { db, auth, guard, subscriptions, core, holderId: 'ai-native-human-review', scene: { code: 'opening_diagnosis', version: '1' } },
         decisions: { order: order.enabled, settings: settings.enabled }, selectedOrderDecision, settingsAdmission: settingsTask
       } });
@@ -1202,14 +1207,15 @@ function readQuoteOrderConfiguration(value: unknown) {
 export const AI_NATIVE_QUOTE_ORDER_PROVIDERS: FactoryProvider[] = [AI_HUMAN_QUOTE_SELECTION_REQUESTS, AI_HUMAN_QUOTE_ORDER_REQUESTS,
   AI_SELECTED_QUOTE_TASK_REQUESTS].map(provide => ({ provide,
   inject: [...originalSceneInjection, RentalOrderConfirmationService, RentalBusinessFactRepository,
-    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: EnterpriseMerchantDelegationService, optional: true }],
   useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
     memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService, confirmation: RentalOrderConfirmationService,
-    quoteFacts: RentalBusinessFactRepository, value?: unknown) => {
+    quoteFacts: RentalBusinessFactRepository, value?: unknown, merchantDelegations?: EnterpriseMerchantDelegationService) => {
     const configuration = readQuoteOrderConfiguration(value);
     const dependencies = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
-      core, confirmation, quoteFacts, holderId: configuration.enabled ? configuration.host.holderId : 'ai-native-quote-observer',
+      core, confirmation, quoteFacts, merchantDelegations, holderId: configuration.enabled ? configuration.host.holderId : 'ai-native-quote-observer',
       scene: { code: 'quote_clarification', version: '1' } };
     dependencies.creationRules = dependencies.creationRules.filter(rule => rule.sceneCode === 'quote_clarification');
     const options = { enabled: true, audience: 'operator' } as const;
@@ -1242,13 +1248,15 @@ export const AI_NATIVE_CLARIFIED_QUOTE_SELECTION_PROVIDER: FactoryProvider<Retur
   provide: AI_CLARIFIED_QUOTE_SELECTION_HTTP_REQUESTS,
   inject: [AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS, AI_HUMAN_QUOTE_SELECTION_REQUESTS,
     ...originalSceneInjection, RentalOrderConfirmationService, RentalBusinessFactRepository,
-    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true }],
+    { token: AI_NATIVE_QUOTE_ORDER_EXECUTION_CONFIGURATION, optional: true },
+    { token: EnterpriseMerchantDelegationService, optional: true }],
   useFactory: (model: QuoteModelRequests, selections: Parameters<typeof composeClarifiedQuoteSelectionRequests>[1], db: PrismaService,
     auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService, core: RentalCoreService, business: RentalBusinessService,
     reports: RentalWorkspaceReportRepository, memberships: MembershipService, payments: PaymentRuntimeService, funding: RentalFundingService,
-    confirmation: RentalOrderConfirmationService, quoteFacts: RentalBusinessFactRepository, value?: unknown) => {
+    confirmation: RentalOrderConfirmationService, quoteFacts: RentalBusinessFactRepository, value?: unknown,
+    merchantDelegations?: EnterpriseMerchantDelegationService) => {
     const dependencies = { ...originalSceneDependencies(db, auth, guard, subscriptions, core, business, reports, memberships, payments, funding),
-      core, confirmation, quoteFacts, scene: { code: 'quote_clarification', version: '1' } };
+      core, confirmation, quoteFacts, merchantDelegations, scene: { code: 'quote_clarification', version: '1' } };
     const preparation = composeRequestBoundClarifiedQuoteSelectionPreparation(model, dependencies, { enabled: true, audience: 'operator' });
     const requests = composeClarifiedQuoteSelectionRequests(model, selections, preparation);
     if (readQuoteOrderConfiguration(value).enabled) return requests;

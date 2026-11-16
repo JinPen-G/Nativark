@@ -6,6 +6,33 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-26-page-integration-checkpoint-20261117"></a>
+## AIN-15／26 原企业选单接线与取消善后未完成检查点（2026-11-17）
+
+施工树为 D:/工作文件/rental-OS/worktree/ai-native，分支 codex/ai-native。跨日核对工作区、暂存区、上游及 GitHub 实际分支，固定前置均为 `9c3dd354d4d8128c8fe6f49c5ce9bc209e370646`；暂存区为空，MERGE_HEAD／CHERRY_PICK_HEAD不存在。main为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，其其他专项WIP留原归属。本片为已核明归属的未完成源码检查点，任务门槛尚未跨档。
+
+原企业D引用进入原选单、AI提案与批准快照，服务端读取并保存D的完整原订单输入。公开选单只投影原租赁字段，主体、资格及operator等原字段由服务器保留。批准组合复用原RentalMerchantDelegatedOrderPort，企业D／原企业批准和AI批准参加者进入Core提供的同一事务，恢复比较原D与AI收据的订单ID。原企业reader及Core的来源封存、当前权限、库存、幂等和正式金额继续作为生产依赖。
+
+实际后台[选单API](../../apps/admin/src/api/aiQuoteSelections.ts)、[原选单会话](../../apps/admin/src/features/ai-native/conversation-quote-selection-session.ts)及三个原消费者接入D准备、显式选择、开始与原键结果读取。普通澄清保留原精确报价路径；已保存答案携带真实后继runId，历史两字段引用继续支持。D修改、原答案／来源改变、隐藏或owner变化撤回准备材料，unknown和重开保留原派发锁。临时负责人采用在原选单中读取客户已确认D的入口设计，其行为及独立复核仍待完成。
+
+dev2已交回[原选单未启动取消见证](../../apps/api/src/modules/ai-native/scenes/human-quote-order.composition.ts)和[已批准未执行取消见证](../../apps/api/src/modules/ai-native/approval-execution/approved-order-waiting.executor.ts)。其原组合反例证明取消请求落库后、善后开始前中断会保留CANCEL_REQUESTED和RUNNING后继。公共[TaskCenter停止入口](../../apps/api/src/modules/ai-native/task-center.application.ts)现按当前原Task／Run／selection定位调用原见证；收据读取保持只读，修复后中断分支尚待原组合复验。
+
+| 必要验证 | 实际结果及边界 |
+| --- | --- |
+| API当前源码图类型 | `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，stdin SHA-256 `e9c5d2ef87be276c85c9e36ef24c3c76eca68ca75e8a3650106c3bb6c8bb7b0b`，退出0。TypeScript5.9.3，21根／1915源，noEmit零诊断，audit为空。 |
+| 后台实际消费者类型 | 同命令，stdin SHA-256 `0e49cd8924cf25d24e607430b5ff6a5f14fa72d09542c3465b52cd4ed72ad666`，退出0。9根／1610源，零诊断，audit为空。 |
+| 原普通批准订单组合 | stdin SHA-256 `2111c053f8b83f046b3b9605a48e3b96c9b5b7d74f06fda3a86072cd0c46f391`，退出0。正常、提交丢ACK后原键恢复及库存事务回滚通过。首次AI_RESULT_UNKNOWN来自原夹具未提供Core新增商户锁查询，补齐内存原行查询后复验，产品权限及Core未放宽。 |
+| 企业D准备驱动 | stdin SHA-256 `26f253930304cc377670ec9853e76603c0c51193fe25be2874d61442f7454454`，退出1。原Core拒绝缺少可信创建来源的客户报价，尚未进入D准备／联合订单事务；继续沿原来源签发构造有界夹具，不以该失败证明企业正向通过。 |
+| dev2取消中断反例 | 原对话stdin SHA-256 `aab256b0ad28ab03e83576f736f23d2dfda5a8968ba7bdc63fda5bbd86a6fe65`，退出0。原停止收据observed、Task仍CANCEL_REQUESTED、后继RUNNING、恢复plan_unavailable；直接原见证关闭Task／Run，模型2次、Core0次及14笔原账保持。该证据属于公共接线修复前。 |
+
+本对话及dev1工具已分别核到active目标，remainingTokens均为null，创建时未设置token_budget。旧误设预算及资源错误保留在原历史阶段。dev1只读继续AIN-27六条资料和当前接线独立核定，已有实际工具执行；dev2两叶成果已交回，继续只读核剩余26组合，结果留原对话供负责人读取。
+
+AIN-15／26／27／28原范围、依赖及分数沿正式任务册。下一入口为可信客户报价来源、D原准备／完整输入／联合事务正反例，原选单与公共停止中断复验，实际前端会话和Controller／provider装配，以及AIN-26全文矩阵、27操作资料、28独立复核与交付。真实数据库、浏览器、微信、供应商和生产执行由负责人后续操作。
+
+文档核对命令为 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs`，退出1，11份白名单已检查；仅原导航54三处历史附件和界面规范272稀疏示例共4处缺链，任务算术及本片接续链接无新增错误。新增记录段定向核链stdin `4bb704f80aa8c79002033193468659b185cf64375f5f6bc3a1c18e0ce1736b80`退出0。另对开发记录全篇只读核链的stdin `453947181df87338473f2da4192491ec71c1100fbad6cb07e7c1e5e8fa144556`退出1，检出1961处历史output链接在本树不可解析，实际原证据位置留AIN-28核对。`git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check`退出0。
+
+全部Root验证子进程已退出，沿本树原offline preload、不可达DATABASE_URL和纯内存audit；任务临时目录未创建，未安装依赖、生成client／dist、新增测试文件或启服务。检查点普通推送及实际远端回读按本专项原规则执行。
+
 <a id="ain-temporary-rd-takeover-20261116"></a>
 ## 临时 AI-RD 接管与原进度核对（2026-11-16）
 

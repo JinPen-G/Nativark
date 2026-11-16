@@ -65,7 +65,7 @@ export function validateTaskClarificationProgress(value: AiTaskClarificationProg
 export function TaskClarification({ taskId, identity, current, onAccessDenied, onReceiptChange, candidateReview, onCandidateReviewed,
   visibleConversation }: {
   taskId: string; identity: string; current: () => boolean; onAccessDenied: () => void;
-  onReceiptChange?: (value: { reference: ReceiptReference; receiptId: string } | null) => void;
+  onReceiptChange?: (value: { reference: ReceiptReference; receiptId: string; runId?: string } | null) => void;
   candidateReview?: WorkbenchInputCandidateReview | null;
   onCandidateReviewed?: (status: 'adopted' | 'conflict') => void;
   visibleConversation?: Readonly<{ conversationId: string; turnId: string }>;
@@ -200,7 +200,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         setReceipt(result);
         if (result.receipt.state === 'observed' && result.receipt.runId) active.current.onReceiptChange?.({
           reference: { taskId, requestId: reference.requestId, expectedRevision: reference.expectedRevision, submissionKey: reference.submissionKey },
-          receiptId: result.receipt.receiptId,
+          receiptId: result.receipt.receiptId, runId: result.receipt.runId,
         });
       }
       if (operation === 'submit' && result.receipt.state !== 'observed') throw Error('AI_RESULT_UNKNOWN');

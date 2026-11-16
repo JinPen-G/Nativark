@@ -7,6 +7,7 @@ import type { RentalBusinessFactStore } from '../../rental-core/rental-business-
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import type { AiApprovedOrderInput } from './approved-order.ports';
 import type { PersistedApprovedOrderPolicyDependencies } from './persisted-approved-order-policy.authority';
+import type { ApprovedOrderMerchantDelegationSource } from './approved-order-merchant-delegation';
 
 export interface ApprovedOrderCommand {
   taskId: string;
@@ -71,13 +72,15 @@ export interface ApprovedOrderExecutionInputSource extends ApprovedOrderOriginal
   readAuthorized(reference: Parameters<ApprovedOrderOriginalInputSource['read']>[0], tx: Prisma.TransactionClient): Promise<{
     body: CreateRentalOrderRequest;
     bindingHash: string;
+    merchantDelegation?: ApprovedOrderMerchantDelegationSnapshot;
   }>;
 }
 
 export interface PersistedApprovedOrderDependencies extends Omit<ApprovedOrderCompositionDependencies, 'db' | 'policy' | 'snapshots'>,
   PersistedApprovedOrderPolicyDependencies {
   inputSource: ApprovedOrderOriginalInputSource;
-  confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder' | 'assertOrderMatchesQuote'>;
+  confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder' | 'assertOrderMatchesQuote'>
+    & Partial<Pick<RentalOrderConfirmationService, 'fingerprintOrderRequest' | 'readOrderCreation'>>;
 }
 
 export type ApprovedOrderDb = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiProposal' | 'aiProposalVersion' | 'aiProposalAction' | 'aiApproval' | 'aiApprovalConsumption'>;
@@ -90,7 +93,9 @@ export interface ApprovedOrderCompositionDependencies {
   // Generic low-level compositions may supply their own source. The controlled
   // persisted entry point always injects the formal input/closed-plan proof.
   executionInput?: ApprovedOrderExecutionInputSource;
-  confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder'>;
+  confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder'>
+    & Partial<Pick<RentalOrderConfirmationService, 'fingerprintOrderRequest' | 'readOrderCreation'>>;
+  merchantDelegations?: ApprovedOrderMerchantDelegationSource;
   core: Pick<RentalCoreService, 'resolveWorkspaceId' | 'readBusinessContext' | 'getProfile' | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listItemGroups' | 'listPricingGroups' | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'getOrder'>
     & Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'readQuoteConfiguration' | 'resolvePricingGroupQuoteRequest'>>;
   quoteFacts: Pick<RentalBusinessFactStore, 'findQuote'>;

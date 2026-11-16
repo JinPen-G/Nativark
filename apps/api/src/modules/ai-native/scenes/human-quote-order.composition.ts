@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { isDeepStrictEqual } from 'node:util';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT,
   AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION, AI_APPROVAL_APPLICATION_DRAFT_VERSION, AI_TASK_RECOVERY_READ_VERSION,
@@ -10,8 +11,9 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeControlledApprovedOrder, type ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
 import { approvedOrderCommandSchema, orderContextHash } from '../approval-execution/prisma-approved-order.source';
+import type { ApprovedOrderMerchantDelegationSnapshot } from '../approval-execution/approved-order-composition.ports';
 import { approvalApplicationContract } from '../approval-execution/approval-application-contracts';
-import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
+import { PrismaQuoteSelectionRepository, fingerprintAiQuoteSelection, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { parseQuoteSelectionProof, validateQuoteSelectionHttpRequest } from '../task-request/quote-selection.validation';
 import { PersistedApprovedOrderPolicyAuthority } from '../approval-execution/persisted-approved-order-policy.authority';
 import { PrismaTaskApplication } from '../runner/prisma-task-application';
@@ -54,10 +56,13 @@ const decisionCommand = z.object({ selection: z.unknown(), proposal: reviewRefer
   reviewVersion: z.literal(AI_APPROVAL_ORDER_REVIEW_DRAFT_VERSION).optional() }) }).strict();
 const executionCommand = z.object({ selection: z.unknown(), command: approvedOrderCommandSchema }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
-// New effects need a current independent payer authority, which this host does
-// not have. Historical selected receipts and original-order recovery stay readable.
-const assertPayerSupported = (body: { bookingIdentity?: { enterpriseContractAndPayer?: boolean } }) => {
-  if (body.bookingIdentity?.enterpriseContractAndPayer === true) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+// The selection repository re-reads the original D under current Guard/Auth.
+// Core independently seals that source for the joint approval transaction.
+const assertPayerSupported = (selection: { body: { bookingIdentity?: { enterpriseContractAndPayer?: boolean } };
+  merchantDelegation?: ApprovedOrderMerchantDelegationSnapshot }) => {
+  if (selection.body.bookingIdentity?.enterpriseContractAndPayer === true && !selection.merchantDelegation) {
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  }
 };
 
 // Publication and preparation are separate transactions; only explicit submit can create an order.
@@ -67,7 +72,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
   const registrationRef = (selectionId: string) => `quote-selection:${selectionId}`;
   const fresh = async (reference: unknown, bindingHash: string) => {
     const current = await selections.readAuthorized(reference);
-    assertPayerSupported(current.body);
+    assertPayerSupported(current);
     if (current.bindingHash !== bindingHash) throw denied();
     return current;
   };
@@ -98,7 +103,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     const { ref, review } = await selectedReview(selection, { contractVersion: AI_PROPOSAL_DRAFT_VERSION,
       proposalId: command.proposalId, proposalRevision: command.proposalRevision, reviewedPayloadHash: command.reviewedPayloadHash });
     if (command.taskId !== ref.taskId || command.lease.runId !== ref.runId || command.actionId !== review.proposal.payload.actions[0].actionId) throw denied();
-    if (operation === 'submit') assertPayerSupported((await selections.readAuthorized(ref)).body);
+    if (operation === 'submit') assertPayerSupported(await selections.readAuthorized(ref));
     return controlled[operation](command);
   };
   const reprepareOperation = async (value: unknown, operation: 'reprepare' | 'readReprepareReceipt') => {
@@ -111,7 +116,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     const replacementSelection = parseQuoteSelectionProof({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
       originalInputRef: command.replacement.originalInputRef, selectionId: command.replacement.quoteSelectionRef,
       taskId: command.replacement.taskId, runId: command.replacement.runId, inputHash: command.replacement.fingerprint });
-    if (operation === 'reprepare') assertPayerSupported((await selections.readAuthorized(replacementSelection)).body);
+    if (operation === 'reprepare') assertPayerSupported(await selections.readAuthorized(replacementSelection));
     const receipt = await controlled.application[operation](ref.taskId, command);
     let replacement: { selection: ReturnType<typeof parseQuoteSelectionProof>;
       review: Awaited<ReturnType<typeof controlled.application.readProposal>> } | null = null;
@@ -192,7 +197,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       const eligibility = await eligible();
       if (!eligibility.canRequestReprepare || !['rejected', 'expired', 'change_requested'].includes(eligibility.state))
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const selection = await selections.readAuthorized(next); assertPayerSupported(selection.body);
+      const selection = await selections.readAuthorized(next); assertPayerSupported(selection);
       if (selection.scopeId !== identity.scopeId || orderContextHash(selection.context) !== identity.identity) throw denied();
       const readRows = async () => {
         const key = { scopeId: identity.scopeId, taskId: next.taskId, runId: next.runId };
@@ -252,7 +257,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       const { decision, reviewVersion, ...reference } = parsed.data.proposal;
       const { ref } = await selectedReview(parsed.data.selection, reference);
       const selected = await selections.readAuthorized(ref);
-      if (decision === 'approve') assertPayerSupported(selected.body);
+      if (decision === 'approve') assertPayerSupported(selected);
       const receipt = await controlled.application.decide(ref.taskId, { ...reference, decision, ...(reviewVersion ? { reviewVersion } : {}) });
       if (receipt.kind !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return freezeOriginalInput({ approval: receipt.record, order: 'not_created_by_decision' as const });
@@ -299,7 +304,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const command = parsed.data, ref = parseQuoteSelectionProof(command.selection);
       const proof = await selections.readAuthorized(ref);
-      assertPayerSupported(proof.body);
+      assertPayerSupported(proof);
       if (command.lease.taskId !== proof.taskId || command.lease.runId !== proof.runId) throw denied();
       const input = await controlled.source.publishOrderInput({ taskId: proof.taskId,
         registrationRef: registrationRef(proof.selectionId), expectedTaskRevision: command.expectedTaskRevision,
@@ -320,7 +325,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         runId: proof.runId,
         read: async () => {
           const current = await selections.readAuthorized(proof);
-          assertPayerSupported(current.body);
+          assertPayerSupported(current);
           return structuredClone(current.body);
         }
       });
@@ -385,7 +390,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     const read = () => selections.read({ draftVersion: proof.draftVersion, originalInputRef: proof.originalInputRef, selectionId: proof.selectionId });
     const selected = await read();
     if (selected.taskId !== proof.taskId || selected.runId !== proof.runId || selected.inputHash !== proof.inputHash) throw denied();
-    if (active) assertPayerSupported((await selections.readAuthorized(proof)).body);
+    if (active) assertPayerSupported(await selections.readAuthorized(proof));
     const root = composeSelectedQuoteTaskHost({ ...dependencies, host, monotonic: configuration.monotonic, runnerClock: configuration.runnerClock,
       task: { taskId: proof.taskId, runId: proof.runId, selection: proof, limits } });
     const before = await root.authorization.tasks.resolveAccess(proof.taskId, 'read_metadata');
@@ -416,7 +421,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     return parsed.data;
   };
-  const recoveryTarget = async (query: AiTaskRecoveryRunQueryDraft, signal?: AbortSignal) => {
+  const recoveryTarget = async (query: AiTaskRecoveryRunQueryDraft, signal?: AbortSignal, requirePlan = true) => {
     const access = await observe(() => recoveryTasks.resolveAccess(query.taskId, 'read_step_terminal'), signal);
     if (access.actorKind !== 'USER' || access.audience !== 'OPERATOR' || access.scope.kind !== 'WORKSPACE') throw denied();
     const task = await observe(() => dependencies.db.aiTask.findFirst({ where: access.where }), signal);
@@ -435,10 +440,10 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     const proof = parseQuoteSelectionProof({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
       originalInputRef, selectionId: selected[0].id, taskId: task.id,
       runId: query.runId, inputHash: selected[0].inputHash });
-    const resolved = await observe(() => resolve(proof, false, true), signal);
+    const resolved = await observe(() => resolve(proof, false, requirePlan), signal);
     const verify = async () => {
       const current = await recoveryTasks.resolveAccess(query.taskId, 'read_step_terminal');
-      const latest = await resolve(proof, false, true);
+      const latest = await resolve(proof, false, requirePlan);
       if (current.bindingKey !== access.bindingKey || latest.key.scopeId !== resolved.key.scopeId
         || latest.planHash !== resolved.planHash) throw denied();
     };
@@ -598,11 +603,116 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
       await observe(verify);
       return result;
   };
+  const selectedSuffixCancellation = async (found: Awaited<ReturnType<typeof resolve>>, expectedRevision: number) => {
+    const { proof, root, key } = found;
+    const original = await dependencies.originals.readTaskReceipt(proof.originalInputRef);
+    if (original.state !== 'observed' || original.taskId !== proof.taskId) throw denied();
+    // Keep the whole-task never-started predicate intact. Only a consumed
+    // original answer can give the selected host an unplanned successor.
+    if (original.runId === proof.runId) return root.taskTransitions.settleUnstartedCancellation({
+      taskId: proof.taskId, expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, proof.runId);
+    const selectionKey = { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId, id: proof.selectionId };
+    const selected = await dependencies.db.aiTaskQuoteSelection.findFirst({ where: selectionKey });
+    if (!selected || selected.originalRequestId !== proof.originalInputRef || selected.inputHash !== proof.inputHash
+      || selected.selectionFingerprint !== fingerprintAiQuoteSelection(selected)) throw denied();
+    return root.taskTransitions.settleInputCancellation({ taskId: proof.taskId, expectedRevision,
+      to: 'cancelled', reason: 'cancel_settled' }, async (tx, lockedTask) => {
+      const access = await root.authorization.tasks.resolveAccess(proof.taskId, 'transition_task');
+      if (lockedTask.id !== key.taskId || lockedTask.scopeId !== key.scopeId || access.actorKind !== 'USER'
+        || access.audience !== 'OPERATOR' || access.scope.kind !== 'WORKSPACE') throw denied();
+      const task = await tx.aiTask.findFirst({ where: { ...access.where, scopeId: key.scopeId, status: 'CANCEL_REQUESTED',
+        cancelRequestedAt: { not: null }, revision: lockedTask.revision + 1 } });
+      const row = await tx.aiTaskQuoteSelection.findFirst({ where: selectionKey });
+      if (!task || task.inputRef !== proof.originalInputRef || !row || !isDeepStrictEqual(row, selected)
+        || row.ownerKind !== access.actorKind || row.ownerId !== access.actorId || row.audience !== access.audience) throw denied();
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${key.scopeId} AND taskId = ${key.taskId} AND id = ${key.runId} FOR UPDATE`);
+      const runs = await tx.aiRun.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, orderBy: { sequence: 'asc' }, take: 1001 });
+      const run = runs.find(value => value.id === key.runId), origin = runs[0];
+      if (!run || !origin || runs.length > 1000 || runs.length !== run.sequence || run.sequence < 2
+        || origin.id !== original.runId || origin.sequence !== 1 || origin.inputReceiptId !== null || origin.resourceOriginRunId !== null
+        || run.status !== 'RUNNING' || run.endedAt !== null || run.leaseOwnerId !== null || run.leaseExpiresAt !== null
+        || run.resourceOriginRunId !== origin.id || !run.inputReceiptId || !revision.safeParse(run.revision).success
+        || runs.some((value, index) => value.sequence !== index + 1 || value.scopeId !== key.scopeId || value.taskId !== key.taskId
+          || value.actorKind !== access.actorKind || value.actorId !== access.actorId
+          || value.id !== run.id && (value.status !== 'SUCCEEDED' || value.leaseOwnerId !== null || value.leaseExpiresAt !== null)))
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const fence = run.fencingToken.toFixed(0);
+      if (!/^(0|[1-9][0-9]{0,19})$/u.test(fence) || !run.fencingToken.equals(fence)
+        || BigInt(fence) >= 99999999999999999999n) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      // The Task lock fences plan publication and dispatch. Neither a logical
+      // startedAt nor an expired lease proves this suffix was never dispatched.
+      const evidence = await Promise.all([
+        tx.aiTaskRunPlan.findFirst({ where: key }), tx.aiStep.findFirst({ where: key }),
+        tx.aiTaskActionInput.findFirst({ where: key }), tx.aiTaskResultArtifact.findFirst({ where: key }),
+        tx.aiGatewayInvocation.findFirst({ where: key }), tx.aiTaskExecutionCharge.findFirst({ where: key }),
+        tx.aiTaskExecutionPhaseStart.findFirst({ where: key }), tx.aiTaskExecutionPhaseReceipt.findFirst({ where: key }),
+        tx.aiTaskRunPreparation.findFirst({ where: key }), tx.aiTaskRunOverhead.findFirst({ where: key }),
+        tx.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: key.runId } })
+      ]);
+      if (evidence.some(Boolean)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const locator = await dependencies.originals.readTaskLocator({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: proof.originalInputRef }, tx);
+      const originalTask = await dependencies.originals.readTaskReceipt(proof.originalInputRef, tx);
+      if (originalTask.state !== 'observed' || originalTask.taskId !== key.taskId || originalTask.runId !== origin.id
+        || locator.receipt.contentHash !== row.originalInputHash) throw denied();
+      if (!('material' in locator) || locator.material !== 'erased') {
+        await readTaskModelRunOrigin(tx, access, { ...key, originRunId: origin.id, registrationRef: `scene-model:${proof.originalInputRef}` });
+      }
+      // Retained business selection lineage survives erased answer/model bodies.
+      // Require every original consumed receipt and completed model parent; do
+      // not reinterpret a PENDING question as an already-consumed answer.
+      const steps = await tx.aiStep.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 1001 });
+      let cursor = run;
+      for (let count = 0; cursor.id !== origin.id; count++) {
+        if (count >= runs.length || !cursor.inputReceiptId || cursor.resourceOriginRunId !== origin.id) throw denied();
+        const answer = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: {
+          scopeId: key.scopeId, taskId: key.taskId, id: cursor.inputReceiptId } } });
+        const question = answer && await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+          scopeId: key.scopeId, taskId: key.taskId, id: answer.requestId } } });
+        const parent = question && runs.find(value => value.id === question.runId);
+        const saved = parent && await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+          scopeId: key.scopeId, taskId: key.taskId, runId: parent.id } } });
+        if (!answer || answer.id !== cursor.inputReceiptId || answer.scopeId !== key.scopeId || answer.taskId !== key.taskId
+          || answer.actorKind !== access.actorKind || answer.actorId !== access.actorId || answer.audience !== access.audience
+          || !question || question.id !== answer.requestId || question.scopeId !== key.scopeId || question.taskId !== key.taskId
+          || question.createdBy !== access.actorId || question.status !== 'CONSUMED' || question.revision < 2
+          || !answer.consumedAt || answer.consumedAt > question.expiresAt || answer.planHash !== question.planHash
+          || answer.consumedTaskRevision !== question.waitingTaskRevision + 1 || !parent || parent.status !== 'SUCCEEDED'
+          || parent.sequence + 1 !== cursor.sequence || !saved || saved.planHash !== question.planHash
+          || requestFingerprint(saved.payload) !== saved.planHash) throw denied();
+        const plan = aiTaskRunPlanSchema.parse(saved.payload), step = steps.find(value => value.id === question.stepId);
+        if (plan.taskId !== key.taskId || plan.runId !== parent.id || plan.taskRevision !== question.planRevision
+          || plan.steps.length !== 1 || plan.steps[0].toolCode !== 'ai.model.text' || plan.steps[0].operation !== 'external_unknown'
+          || !step || step.runId !== parent.id || step.status !== 'SUCCEEDED' || step.effect !== 'NONE'
+          || step.toolCode !== plan.steps[0].toolCode || step.toolVersion !== plan.steps[0].toolVersion
+          || step.inputRef !== question.inputRef || step.requestFingerprint !== question.inputHash || step.resultRef !== question.basisResultRef) throw denied();
+        cursor = parent;
+      }
+      if (steps.length !== runs.length - 1 || steps.some(value => value.status !== 'SUCCEEDED' || value.effect !== 'NONE')) throw denied();
+      const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 10001 });
+      const budget = await tx.aiTaskExecutionBudget.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } });
+      if (!budget || charges.length > 10000 || charges.some(value => value.status !== 'RECORDED' || value.actualAmount === null)
+        || budget.reservedSteps !== 0n || budget.reservedCalls !== 0n || budget.reservedActiveMs !== 0n || budget.reservedOutputBytes !== 0n
+        || ([['STEPS', budget.consumedSteps], ['CALLS', budget.consumedCalls], ['ACTIVE_MS', budget.consumedActiveMs],
+          ['OUTPUT_BYTES', budget.consumedOutputBytes]] as const).some(([resource, consumed]) =>
+          charges.filter(value => value.resource === resource).reduce((total, value) => total + value.actualAmount!, 0n) !== consumed))
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (!isDeepStrictEqual(await tx.aiTaskQuoteSelection.findFirst({ where: selectionKey }), row)) throw denied();
+      const current = await root.authorization.tasks.resolveAccess(proof.taskId, 'transition_task');
+      if (current.bindingKey !== access.bindingKey) throw denied();
+      const changed = await tx.aiRun.updateMany({ where: { id: run.id, scopeId: key.scopeId, taskId: key.taskId,
+        status: 'RUNNING', revision: run.revision, fencingToken: run.fencingToken, inputReceiptId: run.inputReceiptId,
+        resourceOriginRunId: origin.id, actorKind: access.actorKind, actorId: access.actorId,
+        leaseOwnerId: null, leaseExpiresAt: null, endedAt: null }, data: { status: 'CANCELLED', revision: { increment: 1 },
+          fencingToken: { increment: 1 }, endedAt: current.now } });
+      if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    });
+  };
   const cancellationReceipt = async (value: unknown, mode: 'settle_unstarted' | 'read_request' | 'read_settlement') => {
     const command = parse(selectedTaskCancel, value);
     // Cleanup locates the retained human selection, not today's executable
     // quote or plan. The original repository alone proves unstarted work.
-    const { proof, root, verify } = await observe(() => resolve(command.selection, false, false));
+    const found = await observe(() => resolve(command.selection, false, false));
+    const { proof, root, verify } = found;
     const reference = { taskId: proof.taskId, expectedRevision: command.expectedRevision };
     const mutating = mode === 'settle_unstarted';
     if (mutating) {
@@ -612,8 +722,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     let receipt;
     try {
       receipt = mode === 'settle_unstarted'
-        ? await observe(() => root.taskTransitions.settleUnstartedCancellation({ ...reference,
-            to: 'cancelled', reason: 'cancel_settled' }, proof.runId), undefined, true)
+        ? await observe(() => selectedSuffixCancellation(found, command.expectedRevision), undefined, true)
         : mode === 'read_request'
           ? await observe(() => root.taskTransitions.readCancellationReceipt(reference))
           : await observe(() => root.taskTransitions.readCancellationSettlementReceipt(reference));
@@ -636,7 +745,9 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
       const query = structuredClone(value);
       if (!validateAiTaskCenterRecoveryValue('AiTaskRecoveryRunQueryDraft', query))
         throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const target = await recoveryTarget(query, signal);
+      // Pure current snapshots also observe a safely closed, unplanned suffix.
+      // This does not offer an execution target or mint a replacement plan.
+      const target = await recoveryTarget(query, signal, false);
       const snapshot = await observe(() => target.root.application.inspect(query), signal);
       await observe(target.verify, signal);
       const latest = await observe(() => target.root.application.inspect(query), signal);

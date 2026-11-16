@@ -1,12 +1,12 @@
 /** Human-selected original Core quotation. Separate original host start,
  * frozen approval and business-result reads retain their server boundaries. */
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { validateAiQuoteSelectionHttpValue, type AiConversationTurnObservationDraft } from '@rental-os/shared';
 import { aiConversationsApi } from '@/api/aiConversations';
 import { aiQuoteSelectionsApi } from '@/api/aiQuoteSelections';
-import { ActionButton, Alert, ConfirmAction } from '@/components/ui';
+import { ActionButton, Alert, ConfirmAction, Input } from '@/components/ui';
 import { ConversationQuoteSelectionSession } from './conversation-quote-selection-session';
-import type { ConfirmedQuoteSource } from './conversation-quote-confirmation-session';
+import type { ConfirmedQuoteSource, QuoteAnswerReference } from './conversation-quote-confirmation-session';
 import { TaskOrderMaterialDetails } from './TaskHumanApproval';
 import { QuoteReprepare } from './QuoteReprepare';
 import { OriginalOrderReceiptLink } from './OriginalOrderReceiptLink';
@@ -14,22 +14,28 @@ import { useAiManagementLocale } from './management-locale';
 import { safeDisplayText } from './safe-display';
 import { formatTimestamp } from './formatters';
 
-export function ConversationQuoteSelection({ identity, conversationId, turn, source, current, onAccessDenied }: {
+export function ConversationQuoteSelection({ identity, conversationId, turn, source, answer, current, onAccessDenied }: {
   identity: string; conversationId: string; turn: AiConversationTurnObservationDraft; source: ConfirmedQuoteSource | null;
+  answer?: QuoteAnswerReference | null;
   current: () => boolean; onAccessDenied: () => void;
 }) {
-  const { t } = useAiManagementLocale(), owner = JSON.stringify([identity, conversationId, turn]);
-  const scope = useRef({ owner, source, current }); scope.current = { owner, source, current };
+  const { t, locale } = useAiManagementLocale(), owner = JSON.stringify([identity, conversationId, turn]);
+  const [delegationKey, setDelegationKey] = useState('');
+  const delegation = delegationKey ? { delegationKey, expectedRevision: 1 } : null;
+  const validDelegation = /^[A-Za-z0-9_-]{1,128}$/u.test(delegationKey);
+  const scope = useRef({ owner, source, answer, delegation, current }); scope.current = { owner, source, answer, delegation, current };
   const active = () => scope.current.owner === owner && !document.hidden && scope.current.current();
   const session = useMemo(() => {
     let storage: Storage | undefined; try { storage = window.sessionStorage; } catch { /* original locator must survive dispatch */ }
     return new ConversationQuoteSelectionSession(conversationId, turn,
       { ...aiQuoteSelectionsApi, admission: aiConversationsApi.admission }, active, () => scope.current.source, storage,
-      `ai-conversation-quote-selection:${identity}:${conversationId}:${turn.admissionKey}`);
+      `ai-conversation-quote-selection:${identity}:${conversationId}:${turn.admissionKey}`,
+      () => scope.current.delegation, () => scope.current.answer?.runId);
   }, [owner]);
   const state = useSyncExternalStore(session.subscribe, session.snapshot, session.snapshot);
+  useEffect(() => { setDelegationKey(''); }, [owner]);
   useEffect(() => { session.activate(); return () => session.dispose(); }, [session]);
-  useEffect(() => { session.retract(); }, [session, JSON.stringify(source)]);
+  useEffect(() => { session.retract(); }, [session, JSON.stringify(source), JSON.stringify(answer), delegationKey]);
   useEffect(() => { const retract = () => session.retract(); document.addEventListener('visibilitychange', retract);
     return () => { document.removeEventListener('visibilitychange', retract); session.retract(); }; }, [session]);
   const run = async <T,>(action: () => Promise<T>): Promise<T> => {
@@ -41,14 +47,26 @@ export function ConversationQuoteSelection({ identity, conversationId, turn, sou
   const receipt = state.receipt, result = state.result;
   const stateLabels = { selected_not_approved: '已保存，待审核', expired: '已过期', superseded: '已被后续选单替代' } as const;
   return <section aria-label={t('原报价选单与开单')} aria-busy={state.busy}>
+    {!state.locked && <label>
+      {locale === 'en-US' ? 'Original company delegation' : '原企业委托编号'}
+      <Input value={delegationKey} maxLength={128} disabled={state.busy}
+        onChange={event => setDelegationKey(event.currentTarget.value.trim())} />
+    </label>}
+    {delegationKey && !state.locked && <p className="muted">{locale === 'en-US'
+      ? 'Use the delegation already confirmed by the employee. The server reads its original quote and approval basis.'
+      : '填写使用人已确认的原委托编号，服务端读取对应原报价及企业审批依据。'}</p>}
     <div className="panel-toolbar">
-      <ActionButton label={t(state.locked ? '核对原选单收据' : '读取当前选单材料')} disabled={state.busy || !state.locked && !source}
+      <ActionButton label={delegationKey && !state.locked
+        ? locale === 'en-US' ? 'Read original delegated quote' : '读取原企业委托报价'
+        : t(state.locked ? '核对原选单收据' : '读取当前选单材料')}
+        disabled={state.busy || !state.locked && (delegationKey ? !validDelegation : !source)}
         onAction={() => run(state.locked ? session.reconcile : session.inspect)} />
       {state.ready && <ConfirmAction label={t('选择这张原报价')} disabled={state.busy}
         prompt={t('确认下面的客户、租赁对象、租期、履约和服务，保存这张原报价的选单？此步不批准或创建订单。')}
         onConfirm={() => run(session.select)} />}
     </div>
-    {!source && !state.locked && <p className="muted">{t('请先核对原 Core 报价收据，再读取选单材料。')}</p>}
+    {!source && !delegationKey && !state.locked && <p className="muted">{t('请先核对原 Core 报价收据，再读取选单材料。')}</p>}
+    {state.preparation && 'merchantDelegation' in state.preparation && <p>{locale === 'en-US' ? 'Delegation expires' : '原委托有效期'} · {formatTimestamp(state.preparation.merchantDelegation.expiresAt).value}</p>}
     {state.preparation && <TaskOrderMaterialDetails order={state.preparation.material} />}
     {receipt && <>
       <p>{t('原选单状态')}: {t(stateLabels[receipt.state])} · {t('报价单号')}: {safeDisplayText(receipt.quoteId, 191)}</p>

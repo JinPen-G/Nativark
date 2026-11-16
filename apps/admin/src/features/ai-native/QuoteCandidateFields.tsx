@@ -115,9 +115,8 @@ export function QuoteCandidateFields({ value, onChange, disabled = false, prepar
   </div>;
 }
 
-/** The original operator Core refuses delegated employee notice/payer claims.
- * This entry only opens the registered manual form under its own route gate;
- * that form retains the same Core restriction and cannot replace self consent. */
+/** Company payment uses the customer's original confirmed delegation. The
+ * manual route keeps its own gate and the same current Core checks. */
 function QuoteEmployeeBoundary({ disabled }: { disabled: boolean }) {
   useAuthStore();
   const { t, locale } = useAiManagementLocale(), navigate = useNavigate();
@@ -132,10 +131,10 @@ function QuoteEmployeeBoundary({ disabled }: { disabled: boolean }) {
         auth.tenant.categoryCode, Boolean(auth.user.isSaasAdmin), auth.hasTenantMembershipPermission);
   };
   return <>
-    <Alert type="warning" title={locale === 'en-US' ? 'Employee quotation is blocked by the original authorization gate.' : '企业员工报价受原授权限制。'}
+    <Alert type="warning" title={locale === 'en-US' ? 'Employee booking requires the original customer confirmation.' : '企业预约需使用人完成原确认。'}
       description={locale === 'en-US'
-        ? 'Merchant delegation is not verified. The operator cannot confirm notice or payment authority for the employee. Company payment and credit remain unavailable. The original manual form keeps the same restriction; you may explicitly switch to personal booking.'
-        : '商户代客企业委托接点尚未核验，不能代使用人声明告知或企业付费授权。企业签约付款及授信未开放。原人工建单仍受相同限制；也可明确切回个人身份。'} />
+        ? 'For company payment, read the original quote using the confirmed delegation in this conversation. Customer confirmation and company approval follow the original workflow. Changed rental conditions require a newly confirmed delegation.'
+        : '企业签约付款通过本对话的原企业委托编号读取原报价，使用人确认和企业审批沿原流程处理。租赁条件变化后，由使用人重新准备并确认委托。'} />
     {permitted() && <Button onClick={() => { if (permitted()) navigate(APP_ROUTES.orderCreate.path); }}>
       {t('新建订单')}
     </Button>}

@@ -1,7 +1,8 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { Prisma } from '@prisma/client';
-import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type CreateRentalOrderRequest } from '@rental-os/shared';
+import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type CreateRentalOrderRequest, type SystemUserRow } from '@rental-os/shared';
+import type { EnterpriseMerchantDelegationActorAuth } from '../../enterprise/enterprise-merchant-delegation.service';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
 import { CreateRentalOrderDto } from '../../rental-core/rental-order-request.dto';
@@ -47,7 +48,8 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
   }
 
   private async authorized<T>(input: Pick<AiApprovedOrderInput, 'context' | 'businessIdempotencyKey' | 'actionFingerprint'>, binding: ApprovedOrderBinding,
-    action: 'execute' | 'replay', consume: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string) => Promise<T>, readOnly = false) {
+    action: 'execute' | 'replay', consume: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string,
+      actorAuth: EnterpriseMerchantDelegationActorAuth) => Promise<T>, readOnly = false) {
     input = structuredClone(input); binding = structuredClone(binding);
     if (!['execute', 'replay'].includes(action) || !isAiStepExecutionContext(input.context)
       || input.context.actor.kind !== 'user' || input.context.scope.kind !== 'workspace'
@@ -63,7 +65,7 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
       if (readOnly && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(body.quoteId)) throw denied();
       const path = readOnly ? `/quotes/${body.quoteId}` : '/orders';
       const req: { url: string; originalUrl: string; method: string; headers: object; query: object; body: unknown; staffApiRequest: boolean;
-        user?: { id: string; tenantId: string; isActive: boolean; isSaasAdmin?: boolean; displayName: string; permissions: string[] } } = {
+        user?: SystemUserRow } = {
         url: `/api/rental/v1${path}`, originalUrl: staff ? `/api/staff/v1${path}` : `/api/rental/v1${path}`, method: readOnly ? 'GET' : 'POST',
         headers: { authorization: credential.authorization }, query: {}, body: structuredClone(body), staffApiRequest: staff
       };
@@ -78,20 +80,23 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
         access: { permissions: user.permissions, dataScope: identity.dataScope, locationScope: identity.locationScope,
           ...(identity.organizationId ? { organizationId: identity.organizationId } : {}) } };
       if (!isAiStepExecutionContext(context) || identityHash(context) !== identityHash(input.context)) throw denied();
-      return consume(structuredClone(context), body, user.displayName);
+      // The actor is the actual Auth result installed by the original Guard.
+      // Credentials stay inside server-owned callbacks and never enter snapshots.
+      return consume(structuredClone(context), body, user.displayName,
+        { authorization: credential.authorization, user: structuredClone(user) });
     });
   }
 
   async withOrderPreparation<T>(context: AiExecutionContext, request: CreateRentalOrderRequest,
-    prepare: (context: AiExecutionContext, body: CreateRentalOrderRequest) => Promise<T>) {
+    prepare: (context: AiExecutionContext, body: CreateRentalOrderRequest, actorAuth: EnterpriseMerchantDelegationActorAuth) => Promise<T>) {
     try {
       if (context.scope.kind !== 'workspace' || typeof prepare !== 'function') throw denied();
       const fingerprint = requestFingerprint(request), key = `ai-order-prepare:${fingerprint}`;
       const binding = { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
         idempotencyKey: key, requestFingerprint: fingerprint, request: structuredClone(request) };
       const input = { context: structuredClone(context), businessIdempotencyKey: key, actionFingerprint: fingerprint };
-      return await this.authorized(input, binding, 'execute', async (current, body) => {
-        const result = await prepare(current, body);
+      return await this.authorized(input, binding, 'execute', async (current, body, _userName, actorAuth) => {
+        const result = await prepare(current, body, actorAuth);
         await this.authorized(input, binding, 'execute', async () => undefined);
         return result;
       });
@@ -105,15 +110,15 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
   }
 
   async withOrderReview<T>(context: AiExecutionContext, request: CreateRentalOrderRequest,
-    read: (context: AiExecutionContext) => Promise<T>) {
+    read: (context: AiExecutionContext, actorAuth: EnterpriseMerchantDelegationActorAuth) => Promise<T>) {
     if (context.scope.kind !== 'workspace') throw denied();
     const fingerprint = requestFingerprint(request), key = `ai-order-review:${fingerprint}`;
     const binding = { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
       idempotencyKey: key, requestFingerprint: fingerprint, request: structuredClone(request) };
     const input = { context: structuredClone(context), businessIdempotencyKey: key, actionFingerprint: fingerprint };
     try {
-      return await this.authorized(input, binding, 'replay', async current => {
-        const result = await read(current);
+      return await this.authorized(input, binding, 'replay', async (current, _body, _userName, actorAuth) => {
+        const result = await read(current, actorAuth);
         await this.authorized(input, binding, 'replay', async () => undefined, true);
         return result;
       }, true);
@@ -132,13 +137,14 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
    * createApprovedOrder in one transaction. This does not create approvals,
    * bypass DTO/Guard checks, or claim external authorization is DB-atomic. */
   async withOrderWrite<T>(input: AiApprovedOrderInput, binding: ApprovedOrderBinding,
-    write: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string) => Promise<T>) {
+    write: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string,
+      actorAuth: EnterpriseMerchantDelegationActorAuth) => Promise<T>) {
     input = structuredClone(input); binding = structuredClone(binding);
     if (typeof write !== 'function') throw denied();
     try {
-      return await this.authorized(input, binding, 'execute', async (context, body, userName) => {
+      return await this.authorized(input, binding, 'execute', async (context, body, userName, actorAuth) => {
         let value: T;
-        try { value = await write(context, body, userName); }
+        try { value = await write(context, body, userName, actorAuth); }
         catch (error) { throw new OrderWriteFailure(error); }
         const current = await this.resolve(input, binding, 'replay');
         if (identityHash(current) !== identityHash(context)) throw denied();

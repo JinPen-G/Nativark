@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import type { AiExecutionContext, CreateRentalOrderRequest, RentalQuoteSnapshotV1 } from '@rental-os/shared';
+import type { AiExecutionContext, AiMerchantDelegatedQuoteSelectionPreparationInputDraft, AiMerchantDelegatedQuoteSelectionPreparationDraft,
+  CreateRentalOrderRequest, RentalQuoteSnapshotV1 } from '@rental-os/shared';
 import { AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReceiptDraft,
   type AiQuoteSelectionSelectResponseDraft, type AiQuoteSelectionReconcileResponseDraft, type AiQuoteSelectionOperationLocatorDraft } from '@rental-os/shared';
 import type { ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
@@ -13,13 +14,29 @@ import { originalIdentityHash } from './original-request.authority';
 import { freezeOriginalInput } from './original-request.validation';
 import { parseQuoteSelection, parseQuoteSelectionRead, parseQuoteSelectionProof, validateQuoteSelectionHttpRequest } from './quote-selection.validation';
 import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import { approvedOrderMerchantDelegationSnapshotSchema, approvedOrderSelectionInput,
+  readOriginalMerchantDelegationSubmission, readApprovedOrderMerchantDelegation } from '../approval-execution/approved-order-merchant-delegation';
+import type { EnterpriseMerchantDelegationActorAuth } from '../../enterprise/enterprise-merchant-delegation.service';
+import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
+import { approvedOrderReviewMaterial } from '../approval-execution/approved-order-review-material';
+import { checkedAiAvailabilityResult } from '../availability-read-facts.service';
+import type { RentalCoreService } from '../../rental-core/rental-core.service';
 
 type Row = Prisma.AiTaskQuoteSelectionGetPayload<{}>;
 export type HumanQuoteSelectionDependencies = Pick<ControlledApprovedOrderDependencies,
-  'db' | 'auth' | 'credentials' | 'guard' | 'confirmation' | 'quoteFacts' | 'core' | 'clock'> & { originals: PrismaOriginalRequestRepository };
+  'db' | 'auth' | 'credentials' | 'guard' | 'confirmation' | 'quoteFacts' | 'core' | 'clock' | 'merchantDelegations'> & {
+    originals: PrismaOriginalRequestRepository;
+    core: ControlledApprovedOrderDependencies['core'] & Partial<Pick<RentalCoreService, 'readAvailability'>>;
+  };
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+
+export function fingerprintAiQuoteSelection(row: Pick<Row, 'scopeId' | 'audience' | 'ownerKind' | 'ownerId' | 'taskId' | 'runId' | 'originalRequestId' | 'originalInputHash' | 'selectionKey' | 'revision' | 'quoteId' | 'quoteHash' | 'inputHash'> & { quoteBasis: unknown }) {
+  return requestFingerprint({ version: AI_QUOTE_SELECTION_DRAFT_VERSION, scopeId: row.scopeId, audience: row.audience, ownerKind: row.ownerKind,
+    ownerId: row.ownerId, taskId: row.taskId, runId: row.runId, originalRequestId: row.originalRequestId, originalInputHash: row.originalInputHash,
+    selectionKey: row.selectionKey, revision: row.revision, quoteId: row.quoteId, quoteHash: row.quoteHash, inputHash: row.inputHash, quoteBasis: row.quoteBasis });
+}
 
 /** Internal failure signals only: never retain SQL, payloads, credentials or
  * Prisma meta. The non-enumerable cause is not part of the HTTP error contract. */
@@ -121,35 +138,47 @@ export class PrismaQuoteSelectionRepository {
   }
   private async authorized(command: AiQuoteSelectionCreateDraft, active: boolean, tx?: Prisma.TransactionClient) {
     const before = await this.original(command.originalInputRef, command.taskId, command.runId, active, tx);
-    const normalized = JSON.parse(JSON.stringify(this.d.confirmation.normalizeOrderInput(structuredClone(command.order)))) as CreateRentalOrderRequest;
-    const inputHash = requestFingerprint(normalized);
-    const observe = async (context: AiExecutionContext) => {
+    const presented = JSON.parse(JSON.stringify(this.d.confirmation.normalizeOrderInput(structuredClone(command.order)))) as CreateRentalOrderRequest;
+    const observe = async (context: AiExecutionContext, actorAuth: EnterpriseMerchantDelegationActorAuth) => {
       if (context.scope.kind !== 'workspace' || this.d.core.resolveWorkspaceId(context.scope.tenantId) !== context.scope.workspaceId) throw denied();
+      const delegated = command.merchantDelegation ? await readOriginalMerchantDelegationSubmission(this.d.merchantDelegations,
+        actorAuth, command.merchantDelegation, active ? 'prepare' : 'read') : null;
+      const normalized = delegated
+        ? JSON.parse(JSON.stringify(this.d.confirmation.normalizeOrderInput(structuredClone(delegated.request)))) as CreateRentalOrderRequest : presented;
+      // The human command cannot replace fields in the original D. Persist the
+      // complete private request, including original subject/qualification fields.
+      if (delegated && (requestFingerprint(approvedOrderSelectionInput(normalized)) !== requestFingerprint(approvedOrderSelectionInput(presented))
+        || typeof this.d.confirmation.fingerprintOrderRequest !== 'function'
+        || this.d.confirmation.fingerprintOrderRequest(normalized) !== delegated.requestHash)) throw conflict();
+      const inputHash = requestFingerprint(normalized);
       const quote = await this.d.quoteFacts.findQuote(context.scope.tenantId, normalized.quoteId, tx);
       if (!quote || quote.id !== normalized.quoteId || quote.tenantId !== context.scope.tenantId) throw unavailable();
       this.d.confirmation.assertOrderMatchesQuote(normalized, quote);
       const quoteHash = this.quoteHash(quote), expiry = Date.parse(quote.expiresAt);
       if (!Number.isFinite(expiry) || (active && (expiry <= this.clock().getTime() || quote.consumedAt || quote.consumedOrderId))) throw unavailable();
+      if (active && normalized.bookingIdentity?.enterpriseContractAndPayer === true && !command.merchantDelegation) throw unavailable();
+      const merchantDelegation = command.merchantDelegation ? await readApprovedOrderMerchantDelegation(this.d.merchantDelegations,
+        actorAuth, command.merchantDelegation, normalized, quoteHash, active ? 'prepare' : 'read') : undefined;
       const again = await this.d.quoteFacts.findQuote(context.scope.tenantId, normalized.quoteId, tx);
       if (!again || this.quoteHash(again) !== quoteHash || (active && (again.consumedAt || again.consumedOrderId))) throw conflict();
       const current = await this.original(command.originalInputRef, command.taskId, command.runId, active, tx);
       if (requestFingerprint(current.owner) !== requestFingerprint(before.owner) || originalIdentityHash(current.context) !== originalIdentityHash(context)
         || current.original.contentHash !== before.original.contentHash || current.task.revision !== before.task.revision) throw denied();
       const quoteBasis: Prisma.InputJsonObject = { quoteId: quote.id, ruleVersion: quote.ruleVersion, pricingPlanVersion: quote.pricingPlanVersion,
-        ...(quote.priceVersion ? { priceVersion: quote.priceVersion } : {}), createdAt: quote.createdAt, expiresAt: quote.expiresAt };
-      return { ...current, body: freezeOriginalInput(normalized), inputHash, quoteHash, quoteBasis,
-        expiresAt: new Date(Math.min(expiry, Date.parse(current.original.expiresAt))) };
+        ...(quote.priceVersion ? { priceVersion: quote.priceVersion } : {}), createdAt: quote.createdAt, expiresAt: quote.expiresAt,
+        ...(merchantDelegation ? { merchantDelegation: JSON.parse(JSON.stringify(merchantDelegation)) } : {}) };
+      return { ...current, body: freezeOriginalInput(normalized), quote: freezeOriginalInput(structuredClone(quote)), inputHash, quoteHash, quoteBasis,
+        ...(merchantDelegation ? { merchantDelegation } : {}),
+        expiresAt: new Date(Math.min(expiry, Date.parse(current.original.expiresAt), merchantDelegation ? Date.parse(merchantDelegation.expiresAt) : Infinity)) };
     };
     // Historical selection/operation receipts need the original GET quote
     // Guard, not today's order-create capability. Current scope/owner, DTO,
     // original quote hash and closing reads still apply; this grants no write.
-    return active ? this.route.withOrderPreparation(before.context, normalized, observe)
-      : this.route.withOrderReview(before.context, normalized, observe);
+    return active ? this.route.withOrderPreparation(before.context, presented, (context, _body, actorAuth) => observe(context, actorAuth))
+      : this.route.withOrderReview(before.context, presented, observe);
   }
   private fingerprint(row: Pick<Row, 'scopeId' | 'audience' | 'ownerKind' | 'ownerId' | 'taskId' | 'runId' | 'originalRequestId' | 'originalInputHash' | 'selectionKey' | 'revision' | 'quoteId' | 'quoteHash' | 'inputHash'> & { quoteBasis: unknown }) {
-    return requestFingerprint({ version: AI_QUOTE_SELECTION_DRAFT_VERSION, scopeId: row.scopeId, audience: row.audience, ownerKind: row.ownerKind,
-      ownerId: row.ownerId, taskId: row.taskId, runId: row.runId, originalRequestId: row.originalRequestId, originalInputHash: row.originalInputHash,
-      selectionKey: row.selectionKey, revision: row.revision, quoteId: row.quoteId, quoteHash: row.quoteHash, inputHash: row.inputHash, quoteBasis: row.quoteBasis });
+    return fingerprintAiQuoteSelection(row);
   }
   private receipt(row: Row): AiQuoteSelectionReceiptDraft {
     return freezeOriginalInput({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, selectionId: row.id, selectionKey: row.selectionKey, revision: row.revision,
@@ -158,8 +187,13 @@ export class PrismaQuoteSelectionRepository {
       approval: 'not_granted', order: 'not_created_by_selection' });
   }
   private rowCommand(row: Row) {
+    const basis = row.quoteBasis;
+    const merchantDelegation = basis && typeof basis === 'object' && !Array.isArray(basis) && basis.merchantDelegation
+      ? approvedOrderMerchantDelegationSnapshotSchema.parse(basis.merchantDelegation).reference : undefined;
     return parseQuoteSelection({ draftVersion: row.contractVersion, originalInputRef: row.originalRequestId, taskId: row.taskId, runId: row.runId,
-      selectionKey: row.selectionKey, expectedSelectionRevision: row.revision - 1, order: row.payload });
+      selectionKey: row.selectionKey, expectedSelectionRevision: row.revision - 1,
+      order: merchantDelegation ? approvedOrderSelectionInput(row.payload as unknown as CreateRentalOrderRequest) : row.payload,
+      ...(merchantDelegation ? { merchantDelegation } : {}) });
   }
   private async verify(row: Row, active: boolean, tx?: Prisma.TransactionClient) {
     if (row.contractVersion !== AI_QUOTE_SELECTION_DRAFT_VERSION || row.selectionFingerprint !== this.fingerprint(row)
@@ -170,6 +204,44 @@ export class PrismaQuoteSelectionRepository {
     if (active && (row.supersededAt !== null || row.expiresAt.getTime() <= this.clock().getTime()
       || row.authorizationBindingHash !== originalIdentityHash(current.context))) throw denied();
     return current;
+  }
+  /** Explicit read of a customer-confirmed D for the same owned quote task.
+   * Its original Core quote is reused without creating a new quote or D. */
+  async prepareMerchantDelegation(value: unknown): Promise<AiMerchantDelegatedQuoteSelectionPreparationDraft> {
+    const input = validateQuoteSelectionHttpRequest('AiMerchantDelegatedQuoteSelectionPreparationInputDraft', value) as AiMerchantDelegatedQuoteSelectionPreparationInputDraft;
+    const before = await this.original(input.originalInputRef, input.taskId, input.runId, true);
+    if (!['queued', 'running', 'waiting_input'].includes(before.task.status)
+      || typeof this.d.core.readAvailability !== 'function') throw unavailable();
+    const routes = new AiBusinessReadRouteAuthority(this.d.guard, this.d.credentials, this.clock);
+    const body = await routes.withMerchantDelegationRead(input.merchantDelegation.delegationKey, async (context, actor) => {
+      if (originalIdentityHash(context) !== originalIdentityHash(before.context)) throw denied();
+      const source = await readOriginalMerchantDelegationSubmission(this.d.merchantDelegations, actor, input.merchantDelegation, 'prepare');
+      return JSON.parse(JSON.stringify(this.d.confirmation.normalizeOrderInput(source.request))) as CreateRentalOrderRequest;
+    });
+    const command = parseQuoteSelection({ ...input, order: approvedOrderSelectionInput(body) });
+    const current = await this.authorized(command, true);
+    const runKey = { scopeId: current.owner.scopeId, taskId: input.taskId, runId: input.runId };
+    if (await this.d.db.aiTaskRunPlan.findFirst({ where: runKey })
+      || await this.d.db.aiTaskActionInput.findFirst({ where: runKey })) throw conflict();
+    const stockInput = { locationId: body.fulfillmentLocationId, startAt: body.startAt, endAt: body.endAt,
+      lines: body.lines.map(line => ({ itemGroupId: line.itemGroupId, quantity: line.quantity })) };
+    const readStock = () => routes.withRead('availability', stockInput, async context => {
+      if (context.scope.kind !== 'workspace' || originalIdentityHash(context) !== originalIdentityHash(current.context)) throw denied();
+      const stock = await this.d.core.readAvailability!(context.scope.tenantId, structuredClone(stockInput));
+      if (checkedAiAvailabilityResult(stockInput, stock).available !== true) throw conflict();
+    });
+    await readStock();
+    const closing = await this.authorized(command, true);
+    if (closing.inputHash !== current.inputHash || closing.quoteHash !== current.quoteHash
+      || requestFingerprint(closing.quoteBasis) !== requestFingerprint(current.quoteBasis)
+      || originalIdentityHash(closing.context) !== originalIdentityHash(current.context)) throw conflict();
+    await readStock();
+    if (!closing.merchantDelegation || requestFingerprint(closing.body) !== requestFingerprint(body)) throw conflict();
+    return freezeOriginalInput({ selection: command, material: approvedOrderReviewMaterial(closing.body, closing.quote),
+      merchantDelegation: { reference: closing.merchantDelegation.reference, expiresAt: closing.merchantDelegation.expiresAt },
+      quote: { id: closing.quote.id, originalOperation: 'read_only' as const }, selectionState: 'not_saved' as const,
+      quotation: 'original_unchanged' as const, approval: 'not_granted' as const, order: 'not_created' as const,
+      nextAction: 'explicit_human_selection_then_original_approval' as const });
   }
   async select(value: unknown): Promise<AiQuoteSelectionSelectResponseDraft> {
     const command = parseQuoteSelection(value), initial = await this.authorized(command, true);
@@ -293,6 +365,7 @@ export class PrismaQuoteSelectionRepository {
     return freezeOriginalInput({ context: current.context, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId,
       originalInputRef: row.originalRequestId, originalInputHash: row.originalInputHash, selectionId: row.id, selectionRevision: row.revision,
       quoteId: row.quoteId, quoteHash: row.quoteHash, inputHash: row.inputHash, body: current.body,
+      ...(current.merchantDelegation ? { merchantDelegation: current.merchantDelegation } : {}),
       expiresAt: row.expiresAt.toISOString(), bindingHash: requestFingerprint({ selection: row.selectionFingerprint, identity: row.authorizationBindingHash }) });
   }
 }

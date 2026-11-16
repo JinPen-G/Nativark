@@ -58,7 +58,7 @@ export function NativeOperatorWorkspace({ visible }: { visible: boolean }) {
           {frame.scene === 'quote_clarification' && !frame.historical && <>
             <ConversationQuoteConfirmation identity={operator.identity} conversationId={frame.conversationId} turn={frame.turn}
               answer={answer} current={current} onAccessDenied={deny} onQuoteSource={setQuote} />
-            <ConversationQuoteSelection identity={operator.identity} conversationId={frame.conversationId} turn={frame.turn} source={quote} current={current} onAccessDenied={deny} />
+            <ConversationQuoteSelection identity={operator.identity} conversationId={frame.conversationId} turn={frame.turn} source={quote} answer={answer} current={current} onAccessDenied={deny} />
           </>}
           {frame.scene === 'order_explanation' && !frame.historical && <ConversationOrderHandoff identity={operator.identity} conversationId={frame.conversationId}
             turn={frame.turn} current={current} />}

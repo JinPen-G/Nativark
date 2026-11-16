@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { AI_TASK_CENTER_HTTP_DRAFT, AI_TASK_CENTER_ENTRY_PERMISSIONS, AI_TASK_STATUSES_DRAFT,
-  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft,
+  AI_TASK_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION,
+  type AiTaskModelObservationDraft, type AiTaskClientVisibleReportDraft,
   type AiWorkbenchModelControlObservation, type AiSceneRequestReadDraft } from '@rental-os/shared';
 import type { PrismaClient } from '@prisma/client';
 import { runWithRequestIdentity } from '../../common/request-identity';
@@ -51,6 +52,8 @@ type Dependencies = Omit<Parameters<typeof composePersistedTaskCenter>[0], 'cred
   business?: TaskCenterBusinessDependencies;
   continuation?: TaskCenterContinuationDependencies;
   originalInputs?: TaskCenterInputDependencies;
+  selectedOrderCancellation?: { db: PrismaClient;
+    settleUnstartedCancellation(request: Request, value: unknown, signal?: AbortSignal): Promise<unknown> };
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const schemas = {
@@ -221,11 +224,38 @@ export function composeRequestBoundTaskCenter(input: Dependencies) {
           try {
             const result = z.object({ taskId: id, expectedRevision: z.number().int(),
               status: z.enum(['observed', 'not_observed']), cancellation: z.literal('request_not_rollback'),
+              snapshot: z.object({ revision: z.number().int().min(1), status: z.enum(AI_TASK_STATUSES_DRAFT) }).passthrough(),
               automaticRetry: z.literal(false), remoteCancellation: z.literal('not_attested') }).passthrough()
               .safeParse(await root.cancellation.read(query));
             if (!result.success || result.data.taskId !== query.taskId || result.data.expectedRevision !== query.expectedRevision)
               throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
             if (action === 'stop' && result.data.status !== 'observed') throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            if (action === 'stop' && result.data.snapshot.status === 'cancel_requested'
+              && task.sceneCode === 'quote_clarification' && task.inputRef && input.selectedOrderCancellation) {
+              const cancellation = input.selectedOrderCancellation;
+              if (!Object.is(cancellation.db, input.db)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+              const runs = await cancellation.db.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+                actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
+              const run = runs[0];
+              if (run && runs[1]?.sequence === run.sequence) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+              if (run) {
+                const key = { scopeId: task.scopeId, taskId: task.id, runId: run.id };
+                const selections = await cancellation.db.aiTaskQuoteSelection.findMany({ where: { ...key,
+                  originalRequestId: task.inputRef, ownerKind: access.actorKind, ownerId: access.actorId,
+                  audience: access.audience }, take: 2 });
+                if (selections.length > 1) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+                if (selections[0] && !await cancellation.db.aiTaskRunPlan.findFirst({ where: key })) {
+                  // The original selected host checks absence and consumed-answer
+                  // lineage under the Task lock. The completed model prefix and
+                  // original charges stay intact, with no plan or lease minted here.
+                  await cancellation.settleUnstartedCancellation({ headers: { authorization: header.data } }, {
+                    selection: { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: task.inputRef,
+                      taskId: task.id, runId: run.id, selectionId: selections[0].id, inputHash: selections[0].inputHash },
+                    expectedRevision: result.data.snapshot.revision
+                  }, activeSignal);
+                }
+              }
+            }
             const latest = await root.tasks.resolveAccess(query.taskId, 'read_metadata');
             if (access.bindingKey !== latest.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             return { ...query, status: result.data.status, cancellation: 'request_not_rollback' as const,

@@ -1,4 +1,5 @@
 import type { CreateRentalOrderRequest } from './core';
+import type { EnterpriseOrderDelegationReference } from './enterprise-order-delegation';
 import type { AiSceneModelAnswerQueryDraft } from './ai-scene-request-draft';
 import type { AiSceneQuoteCandidate, AiSceneRequestReadDraft, AiSceneTaskReceiptDraft } from './ai-scene-request-draft';
 import type { AiSceneQuotePreparationDraft } from './ai-scene-quote-http-draft';
@@ -13,7 +14,8 @@ import type { AiApprovalApplicationReviewDraft, AiApprovalOrderMaterialDraft, Ai
 export const AI_QUOTE_SELECTION_DRAFT_VERSION = 'ain-quote-selection-draft-1' as const;
 /** Opt-in only; registration does not grant identity, approval or execution. */
 export const AI_QUOTE_SELECTION_HTTP_DRAFT = Object.freeze({
-  basePath: 'ai-native/quote-selections', select: '', read: 'read', reconcile: 'reconcile'
+  basePath: 'ai-native/quote-selections', select: '', read: 'read', reconcile: 'reconcile',
+  prepareMerchantDelegation: 'merchant-delegation/prepare', readOperation: 'operation'
 } as const);
 /** Explicit handoff of the exact clarified quote to its unplanned successor.
  * Selection still does not start the order runner or grant human approval. */
@@ -28,11 +30,20 @@ export interface AiClarifiedQuoteSelectionRequestDraft {
  * reopen a saved human answer; neither form submits answers or grants approval. */
 export interface AiClarifiedQuoteSelectionPreparationInputDraft {
   clarification: AiSceneModelAnswerQueryDraft; selectionKey: string; expectedSelectionRevision: number;
+  merchantDelegation?: EnterpriseOrderDelegationReference;
 }
 export interface AiClarifiedQuoteSelectionPreparationDraft {
   selection: AiQuoteSelectionCreateDraft; clarification: AiSceneModelAnswerQueryDraft; material: AiApprovalOrderMaterialDraft;
   quote: { id: string; originalOperation: 'read_only' }; selectionState: 'not_saved'; quotation: 'original_unchanged';
   approval: 'not_granted'; order: 'not_created'; nextAction: 'explicit_human_selection_then_original_approval';
+}
+/** Import the customer's original confirmed D into an owned, unplanned quote
+ * task. The server reads its full request and Core quote before human selection. */
+export interface AiMerchantDelegatedQuoteSelectionPreparationInputDraft extends Omit<AiQuoteSelectionCreateDraft, 'order' | 'merchantDelegation'> {
+  merchantDelegation: EnterpriseOrderDelegationReference;
+}
+export interface AiMerchantDelegatedQuoteSelectionPreparationDraft extends Omit<AiClarifiedQuoteSelectionPreparationDraft, 'clarification'> {
+  merchantDelegation: { reference: EnterpriseOrderDelegationReference; expiresAt: string };
 }
 /** Exact original key only. The server reconstructs its own frozen selection;
  * this locator supplies no customer/address/order payload or execution grant. */
@@ -139,6 +150,9 @@ export interface AiQuoteSelectionCreateDraft {
   selectionKey: string;
   expectedSelectionRevision: number;
   order: AiQuoteSelectedOrderDraft;
+  /** Original customer-confirmed D reference, re-read under current server
+   * authority. It is a locator, never a caller-supplied payer grant. */
+  merchantDelegation?: EnterpriseOrderDelegationReference;
 }
 export interface AiQuoteSelectionReadDraft {
   draftVersion: typeof AI_QUOTE_SELECTION_DRAFT_VERSION;
@@ -160,7 +174,9 @@ export type AiQuoteSelectionReconcileResponseDraft =
 export const AI_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
   select: { request: 'AiQuoteSelectionCreateDraft', response: 'AiQuoteSelectionSelectResponseDraft' },
   read: { request: 'AiQuoteSelectionReadDraft', response: 'AiQuoteSelectionReceiptDraft' },
-  reconcile: { request: 'AiQuoteSelectionCreateDraft', response: 'AiQuoteSelectionReconcileResponseDraft' }
+  reconcile: { request: 'AiQuoteSelectionCreateDraft', response: 'AiQuoteSelectionReconcileResponseDraft' },
+  prepareMerchantDelegation: { request: 'AiMerchantDelegatedQuoteSelectionPreparationInputDraft', response: 'AiMerchantDelegatedQuoteSelectionPreparationDraft' },
+  readOperation: { request: 'AiQuoteSelectionOperationLocatorDraft', response: 'AiQuoteSelectionReconcileResponseDraft' }
 } as const);
 export const AI_CLARIFIED_QUOTE_SELECTION_HTTP_CONTRACTS = Object.freeze({
   readOriginalOperation: { request: 'AiClarifiedQuoteSelectionOriginalOperationReadDraft', response: 'AiQuoteSelectionReconcileResponseDraft' },

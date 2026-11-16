@@ -1969,6 +1969,8 @@ export function composeRequestBoundQuoteSelections(dependencies: RequestBoundQuo
     originals: composeAiOriginalScenes(input).requests }));
   return Object.freeze({
     select: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.select(command), { write: true }),
+    prepareMerchantDelegation: (request: AiSceneHttpRequest, value: unknown) => call(request, value,
+      (app, command) => app.prepareMerchantDelegation(command), { write: false }),
     read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command), { write: false }),
     reconcile: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command), { write: false }),
     readOperationLocator: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOperationLocator(command), { write: false })
@@ -2154,8 +2156,8 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     readResult: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.readResult(command), { write: false }),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value, (app, command) => app.requestCancel(command), { write: true }),
     // Internal consumers only; no new Controller/OpenAPI action is registered.
-    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
-      (app, command) => app.settleUnstartedCancellation(command), { write: true }),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => retainedCall(request, value,
+      (app, command) => app.settleUnstartedCancellation(command), { write: true, signal }),
     readCancellation: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
       (app, command) => app.readCancellation(command), { write: false }),
     readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown) => retainedCall(request, value,
