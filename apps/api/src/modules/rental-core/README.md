@@ -4,6 +4,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [资金服务](rental-funding.service.ts)是原Nest兼容接线，将同一Prisma数据源、Auth/ALS身份、原订单可见范围和企业应收参与者交给Rental包。资金事件、余额和收退款门禁只有一份实现，调用方原事务、幂等回放、演练/实款区分与企业现金核销保持。[实际资金服务](../../../../../packages/rental-core/src/mysql-funding.ts) · [存储与应收接点](../../../../../packages/rental-core/src/funding-storage.ts) · [事件规则](../../../../../packages/rental-core/src/funding-events.ts)
 
+[服务容量](rental-service-capacity.service.ts)也只供给原Nest数据源和Auth/ALS空间，容量算法及原品类锁在Rental包内。Controller、报价/确认、换货、客户端观察及到期维护共用同一实例。订单写入传入原事务，报价只读不释放预留；部分履约和归还按原发生项收据结算，不改历史价格或服务结果。[实际容量实现](../../../../../packages/rental-core/src/mysql-service-capacity.ts) · [容量存储接点](../../../../../packages/rental-core/src/service-capacity-storage.ts) · [履约消费者验证](../../../../../tests/rental-service-execution.test.cjs)
+
 领域与品类治理合同、营业日、计价与器材、能力执行/条件判定及审计仓储已单源移入 Rental 包。原 shared/API 路径和 Nest provider 继续转接同一实现，本目录承接剩余业务服务、事务、数据和任务。[独立 Rental 包](../../../../../packages/rental-core/README.md)
 
 [RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。[RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)

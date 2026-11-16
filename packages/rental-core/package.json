@@ -326,6 +326,10 @@
     "./funding-events": {
       "types": "./dist/funding-events.d.ts",
       "default": "./dist/funding-events.js"
+    },
+    "./mysql-service-capacity": {
+      "types": "./dist/mysql-service-capacity.d.ts",
+      "default": "./dist/mysql-service-capacity.js"
     }
   },
   "typesVersions": {
@@ -566,6 +570,9 @@
       ],
       "funding-events": [
         "dist/funding-events.d.ts"
+      ],
+      "mysql-service-capacity": [
+        "dist/mysql-service-capacity.d.ts"
       ]
     }
   },

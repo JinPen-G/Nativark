@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-service-capacity-20261116"></a>
+
+## Rental 服务容量与原发生项收据迁移（2026-11-16）
+
+固定父版 `e70b4306223491d79a9635d4761e18db8943262e` 已普通推送并实际远端回读，main62ca在本树祖先。服务容量实际移入Rental包，旧API保留原一参数Nest构造，供给同一Prisma数据源及每次请求的原Auth/ALS身份与空间解析。品类绑定锁直接复用包内原实现；没有新增锁算法或将整库写权放入公共Core合同。[容量实现](../../../packages/rental-core/src/mysql-service-capacity.ts) · [私有存储/身份接点](../../../packages/rental-core/src/service-capacity-storage.ts) · [原Nest接线](../../../apps/api/src/modules/rental-core/rental-service-capacity.service.ts)
+
+报价只读观察保留原RepeatableRead、服务/地点/窗口校验、同窗口数量汇总和指纹，明确不新预留、不锁写、不维护超时账。原编辑与维护路径继续使用ReadCommitted；预留/确认/取消、换货锁后读取、部分履约/部分释放及归还结算继续参与调用方原事务。原容量CAS、桶计数、收据键和历史匹配保持，窗口停用不阻止释放本单原占用；服务计划时点不冒充实际完成。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版正文 | 22个方法的编译后正文一致，规范化两份宿主接点、原SQL runtime别名、隔离级别常量及换行；原条件、数量、状态与SQL锁顺序保持 |
+| 独立包及完整API类型 | Prisma5.22官方内存声明覆盖原238模型，TS5.9.3；十项配置零诊断。Rental98根/659源/196输出，API988根/2338源/1976输出；JS/声明全部内存 |
+| 原直接消费者 | 首轮24764中原预留/换货用例、发生项9组和履约17组通过；写入用例因旧父锁夹具失败，保留退出1。只复验写入和必要接点，最终37744退出0、stderr为空；不是将首轮全体写成通过 |
+| 固定版本失败定位 | 42656以父版实际容量源码覆盖同一内存组合，仅运行旧写入用例，同样退出1并复现两个space-lock；旧夹具未区分Tenant共享父锁和空间锁。现补原父锁SQL/租户参数及先后断言，原空间/容量行锁、当前地点、停用与历史断言全部保留 |
+| 原身份/空间与只读观察 | 同一最终进程7个接点边界通过，4次原RR事务；容量够/不足、无身份/跨租户、无效发生项、事务末空间变化及坏原账分别处理。实际编译服务只接显式fixture，任何写锁/预留/维护都会抛错，原数据源/事务传递已核 |
+| 出口与文档 | 新/mysql-service-capacity与真实声明对应，81正式出口/80子路径typesVersions，依赖/peer/lock没有差异。源码头、根入口、模块导读和本记录随片维护，原HTTP/DTO/OpenAPI语义保持 |
+| 资料与差异格式 | 七份现行资料997本地链接、155锚点和84表格无问题，稀疏目标按固定父版定位；git diff --check退出0，正式需求/任务及lock没有差异 |
+
+验证复用[原容量写入](../../../tests/category-service-capacity-write.test.cjs)、[预留/换货](../../../tests/category-service-capacity-reserve.test.cjs)、[发生项](../../../tests/rental-service-occurrence.test.cjs)和[履约](../../../tests/rental-service-execution.test.cjs)。已有worker经stdin运行`node --no-compilation-cache - api-capacity <四份原用例>`，失败后只运行写入和容量接点；固定父版以`api-capacity-baseline`定位夹具。没有新增测试文件或运行器。[原真库容量测试](../../../tests/rental-service-capacity.test.cjs)先读.env，[容量争抢](../../../tests/rental-service-capacity-contention.test.cjs)需专用克隆库，只读源码、没有执行。
+
+原离线preload在编译前加载，固定offline地址与本树单一output/.tmp，审计文件未产生且目录为空；没有安装、落地client、复制依赖或新增临时环境。SQL、锁、事务和回滚都是明确fixture，不能替代真实并发/持久化。HTTP/数据库/浏览器/供应商、标准包安装/独立更新/接手及审查仍未验。
+
+本次重核原840文件/91,808,304字节环境和1个0字节日志的绝对路径、归属、链接及使用进程后，同一原生PowerShell删除仍在启动前被自动审批以blocked by policy拒绝，两个责任manifest已更新；没有换工具绕过。残留仍在统一待清理区，前片失败记录与旧外观/历史缺链保留。
+
+PCH原门槛未跨下一档：完整主领域服务/Controller、数据/页面/作业/AI与标准装配、公共事务/生命周期及真实消费者仍缺，原任务身份/依赖/百分比保持。下一入口沿企业应收和原回款收据再推进主服务，不丢调用方事务。阶段源码由包含本节的Git提交定位，普通推送codex/platform-core-extraction后实际回读；main和其他树未写。
+
 <a id="core-rental-funding-runtime-20261116"></a>
 
 ## Rental 资金事实与门禁服务迁移（2026-11-16）
