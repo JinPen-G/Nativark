@@ -11,6 +11,33 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-funding-runtime-20261116"></a>
+
+## Rental 资金事实与门禁服务迁移（2026-11-16）
+
+固定父版 `9ddc6e3ac91a762987f860409649d6a2119fc7f7` 已普通推送并实际回读，main62ca在本树祖先。原资金服务和事件算法实际移入Rental包，API只保留原Nest构造接线，供给同一数据库、每次请求的Auth/ALS完整身份、原订单可见范围及企业应收参与者。原DI可选应收、方法签名与调用方事务保持。[资金服务](../../../packages/rental-core/src/mysql-funding.ts) · [事件规则](../../../packages/rental-core/src/funding-events.ts) · [本表与宿主接点](../../../packages/rental-core/src/funding-storage.ts) · [原Nest接线](../../../apps/api/src/modules/rental-core/rental-funding.service.ts)
+
+资金服务保留订单共享父锁/行锁、余额与收退款/保证金门禁、续租增额、实款与演练分账、线下原登记/凭证、同键回放、企业回款分配和现金核销。调用方已有事务原样参与；自开事务保持原ReadCommitted，解释读取保持原RepeatableRead与有界结果。SQL和Decimal使用同一原runtime，领域总出口不加载数据库适配；外部支付仍由原核验运行器执行，缺原供应商证据或应收接点不补零、不重做。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版方法/规则正文 | 资金服务19方法及资金事件7函数/完整可执行语句一致；规范化SQL/Decimal和隔离级别常量、正式导入与两个身份/范围接点，未改余额、金额、原键或状态规则 |
+| 独立包及完整API类型 | Prisma5.22官方内存声明覆盖原238模型，TS5.9.3；十项配置零诊断。Rental96根/657源/192输出，API988根/2336源/1976输出；编译、JS和声明全部内存 |
+| 原资金事件与门禁消费者 | 原事件8组通过；门禁复验进程51684退出0、stderr为空，原9组全部通过，含线下押金凭证与审计失败回滚、领取/关闭/确认、实款/演练、旧确认关联、员工部分实收及原外部退款幂等。外部退款结果和事务是明确fixture，无网络 |
+| 完整身份与有界资金解释 | 同一复验进程5个必要边界通过，核原可见where、take201及RepeatableRead/maxWait/timeout；无财务权、跨租户、原金额缺失和读取后额外身份字段变化均拒绝。原完整对象供给没有字段投影，预授权保持unavailable，不制造结算结果 |
+| 正式出口/依赖 | 新增/mysql-funding与/funding-events，80正式出口及79子路径typesVersions一致；依赖/peer和lock不变，原API/DTO/OpenAPI的HTTP行为未改 |
+| 定向文档及差异格式 | 七份现行资料978本地链接、155锚点和83表格无问题，稀疏目标按固定Git定位；git diff --check退出0，正式需求/任务及lock没有差异 |
+
+原消费者为[资金事件](../../../tests/rental-funding-events.test.cjs)和[资金门禁](../../../tests/rental-funding-gates.test.cjs)。复用既有内存worker经stdin运行`node --no-compilation-cache - api-funding <两份原用例>`，失败后只复验门禁及新接点；没有新增测试文件或运行器。原[真库资金测试](../../../tests/rental-funding-service.test.cjs)会先读.env、连专用库，本片只读脚本源码，没有执行，不能用离线结果替代其持久化/并发验收。
+
+保留首轮失败：门禁夹具把收款设置锁定读取返回成资金事件，原收款准入明确报“经营空间收款设置尚不可用”。已核19方法及原接点正文一致，只在原夹具补当前收款设置行和原表/共享锁/租户空间参数断言；全部资金、回放、拒绝及回滚断言保留，生产方法没有fallback或放宽。
+
+模块导读和源码接点随片维护，Core作者从正式子出口与[包导读](../../../packages/rental-core/README.md#使用与构建)定位。PCH原门槛未跨下一档：完整领域服务/Controller、数据/页面/作业/AI与标准装配、公共事务/生命周期和真实消费者仍未完整。原任务身份、依赖和百分比保持。接续下一入口为服务容量、主领域服务和标准Core装配。
+
+原preload在编译前加载，offline地址固定，审计/TEMP/TMP/cache指向本树独占output/.tmp，目录为空且未产生审计文件；没有生成落地client、安装、复制依赖或新临时产物。真实HTTP/数据库/浏览器/供应商、完整包安装/更新和独立审查未验。原840文件/91,808,304字节环境及1个0字节日志仍集中待清理，原生删除审批拒绝与责任manifest沿[前片](#core-rental-domain-rules-20261116)读取，没有换工具绕过或新建同类环境。旧外观失败与历史缺链保留。
+
+阶段源码由包含本节的Git提交定位，普通推送codex/platform-core-extraction后读取真实远端。main及其他工作树未写入。
+
 <a id="core-rental-domain-rules-20261116"></a>
 
 ## Rental 检查、换货、续租与资金规则归属（2026-11-16）

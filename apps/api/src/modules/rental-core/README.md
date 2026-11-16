@@ -2,6 +2,8 @@
 
 Rental Core维护租赁领域事实，包括经营空间/品类、商品和资产、报价库存、订单履约、检查及金额。它是首个业务Core示范，平台身份、公共后台和原AI机制通过受控适配消费，具体报价、金额与状态仍在原Core裁定。
 
+[资金服务](rental-funding.service.ts)是原Nest兼容接线，将同一Prisma数据源、Auth/ALS身份、原订单可见范围和企业应收参与者交给Rental包。资金事件、余额和收退款门禁只有一份实现，调用方原事务、幂等回放、演练/实款区分与企业现金核销保持。[实际资金服务](../../../../../packages/rental-core/src/mysql-funding.ts) · [存储与应收接点](../../../../../packages/rental-core/src/funding-storage.ts) · [事件规则](../../../../../packages/rental-core/src/funding-events.ts)
+
 领域与品类治理合同、营业日、计价与器材、能力执行/条件判定及审计仓储已单源移入 Rental 包。原 shared/API 路径和 Nest provider 继续转接同一实现，本目录承接剩余业务服务、事务、数据和任务。[独立 Rental 包](../../../../../packages/rental-core/README.md)
 
 [RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。[RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)

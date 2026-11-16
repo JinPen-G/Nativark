@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -41,8 +41,11 @@
 | [品类身份](src/category-identity.ts)、[扩展一致性](src/rental-extension-registry.ts)、[空间展示名称](src/workspace-names.ts) | `/category-identity` 和 `/extensions` 供原订阅/会员及发布/启动消费。根出口保留原默认展示名称，旧 shared 再导出同一常量 |
 | [专业商品属性规则](src/item-group-validation.ts) | `/item-group-validation` 登记原露营容量与工程额定载荷限制。原商品保存流程在通用字段校验后调用，品类规则随 Rental 模块维护 |
 | [原业务服务入口](../../apps/api/src/modules/rental-core/README.md) | 当前持久化、事务、Controller、能力和作业，继续逐片移入本包 |
+| [资金事实服务](src/mysql-funding.ts)、[资金事件规则](src/funding-events.ts)、[存储与应收接点](src/funding-storage.ts) | `/mysql-funding` 保留原余额、收退款/保证金门禁、原收据与企业现金核销；`/funding-events` 保留独立账和金额算法。外部支付、原身份/可见范围与企业应收由正式接点供给 |
 
 ## 使用与构建
+
+资金服务从 `@rental-os/rental-core/mysql-funding` 接入，宿主提供同一数据源、每次请求的原身份/订单可见范围，以及已启用企业业务的原应收参与者。已有事务原样传入；服务自开事务时保持原ReadCommitted，资金解释保持原RepeatableRead有界快照。实款、演练、企业回款分配和预授权各按原依据读取，缺供应商核验不显示真实可用余额。[原Nest接线](../../apps/api/src/modules/rental-core/rental-funding.service.ts) · [资金门禁验证](../../tests/rental-funding-gates.test.cjs) · [事件算法验证](../../tests/rental-funding-events.test.cjs)
 
 原客户端继续从 `@rental-os/shared` 读取租赁合同。Rental 自身实现可从本包根出口取合同，从 `@rental-os/rental-core/business-day` 取营业日函数。新业务 Core 使用公共平台和 Core 合同，不必依赖 Rental。
 

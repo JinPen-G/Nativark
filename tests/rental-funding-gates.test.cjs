@@ -19,10 +19,19 @@ const order = { depositAmount: 200, preAuthAmount: 300, payable: 1000, status: "
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
 
+function paymentSettings(query) {
+  assert.match(query.sql, /FROM rental_tenant_business_settings/u);
+  assert.match(query.sql, /LOCK IN SHARE MODE/u);
+  assert.deepEqual(query.values.slice(-2), ["tenant", "workspace"]);
+  return [{ tenantId: "tenant", workspaceId: "workspace", paymentType: "OBJECT", methodsType: "ARRAY",
+    methods: ["offline_cash", "offline_transfer"] }];
+}
+
 function serviceWith(events, snapshot = order, options = {}) {
   const registrations = options.registrations ?? [];
   const db = {
-    $queryRaw: async () => [{ runMode: options.runMode ?? "production" }],
+    $queryRaw: async query => /FROM rental_tenant_business_settings/u.test(query.sql ?? "")
+      ? paymentSettings(query) : [{ runMode: options.runMode ?? "production" }],
     businessWorkspace: { findFirst: async () => ({ runMode: options.runMode ?? "production" }) },
     rentalOrder: {
       findFirst: async () => ({ ...snapshot, id: "order", workspaceId: "workspace", finalPayableAmount: snapshot.payable }),
@@ -61,7 +70,8 @@ void (async () => {
     const original = event("deposit", "initiate", 200, "offline"); original.paymentMethod = "offline_transfer";
     const events = [original], logs = [];
     const service = serviceWith(events, { ...order, preAuthAmount: 0, payable: 80, status: "settling" });
-    service.testDb.$queryRaw = async () => events;
+    service.testDb.$queryRaw = async query => /FROM rental_tenant_business_settings/u.test(query.sql ?? "")
+      ? paymentSettings(query) : events;
     service.testDb.operationLog = {
       findFirst: async ({ where }) => logs.find(row => row.action === where.action && row.detail.idempotencyKey === where.detail.equals) ?? null,
       findMany: async () => logs,
