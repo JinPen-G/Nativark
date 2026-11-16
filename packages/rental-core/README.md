@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、核心配置与业务配置仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及报价/券/奖励/通知事实仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -20,6 +20,8 @@
 | [业务动作执行器](src/mysql-idempotent-actions.ts)、[事务端口](src/idempotent-action-storage.ts)、[共享父锁](src/mysql-business-fence.ts) | `/mysql-idempotent-actions` 协调原事务外预检/事务内重查与回放；`/mysql-business-fence` 保留Tenant共享锁，业务当前授权及副作用仍由原调用方处理 |
 | [业务配置仓储](src/mysql-business-configuration.ts)、[存储与宿主接点](src/business-configuration-storage.ts) | `/mysql-business-configuration` 持有原定价/优惠/服务、日历/规则版本及通知模板读写，原身份、范围、品类锁和配置事件由宿主供给；原事务、发布审计和历史正文保护保持 |
 | [核心配置仓储](src/mysql-core-configuration.ts)、[存储与宿主接点](src/core-configuration-storage.ts) | `/mysql-core-configuration` 维护档案、经营空间、商品/套装、定价组、地点/主体、券与检查模板及有界配置读取；同一事务复核当前品类，保留配置修订和首次初始化限制 |
+| [业务事实仓储](src/mysql-business-facts.ts)、[本表视图与宿主接点](src/business-fact-storage.ts) | `/mysql-business-facts` 保存报价原依据、券占用/核销及预算、奖励/权益余额、推荐和通知原流水；当前空间/订单可见性、配置读取和原事件由宿主提供，保留调用方事务 |
+| [报价能力事实](src/mysql-quote-capabilities.ts)、[库存对象依据](src/quote-inventory-basis.ts) | `/mysql-quote-capabilities` 在原事务复核启用实例及冻结条件，`/quote-inventory-basis` 使用有界配置读取核对商品/套装；新报价与历史动作各用原依据，不给旧报价补当前事实 |
 | [当前绑定写入](src/mysql-category-write.ts)、[采用政策](src/mysql-category-policy.ts)、[履约准入](src/mysql-fulfillment-admission.ts) | 正式 MySQL 子出口持有原父锁→空间锁、发布版本/采用范围和当前地点/主体读取；原宿主提供身份和事务，历史快照及实物归还使用各自原依据 |
 | [品类属性](src/category-attributes.ts) | `/category-attributes` 校验当前属性、保留不可改写的历史值并准备唯一声明；实体与唯一值仍由原写入事务一起提交 |
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
@@ -56,5 +58,7 @@ MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON
 业务配置仓储只通过自身存储视图读写原配置。现有事务传给写入方法后，配置、规则/日历版本及审计由同一调用者提交；没有现有事务时保留原方法自己的事务方式。范围、当前品类绑定和事件捕获从原宿主提供，公开成员视图只读取原开业账号计数。规则版本链按原租期时点及冻结引用匹配，历史规则不被当前默认值改写。[原配置接线](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts) · [原配置写入验证](../../tests/category-rule-write.test.cjs) · [规则链验证](../../tests/rental-rule-version-chain.test.cjs)
 
 核心配置仓储接收本表存储视图、当前身份/范围和原配置事件。默认空间只在首次创建时初始化当时的成员，重读档案不补回撤销成员或更换旧绑定；配置保存保留原CAS与调用方事务。地点/主体状态在原锁中重读，普通编辑不恢复被停用的状态；商品唯一属性和套装组成与实体一起写入。报价、开业和报表读取沿有界接口取得实际配置，恢复快照不代替当前事实。[原核心配置接线](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts) · [初始化验证](../../tests/category-space-initialization.test.cjs) · [配置范围验证](../../tests/config-workspace-scope.test.cjs) · [履约准入验证](../../tests/rental-fulfillment-admission.test.cjs)
+
+业务事实仓储由宿主供给本表方法、当前空间、每次生成的订单可见范围、库存配置 reader 和原通知事件。报价保存锁住原经营空间，只有首次创建分支复核当前履约/能力/库存，已保存报价保留来源、金额与历史快照；券预算、奖励和余额写入继续使用调用方事务及原 Decimal 精度。通知流水先持久化，认领只占租约，原投递结果才累计尝试次数；租约过期不证明可以重新发送。外部短信执行和批准仍由原业务服务处理。[原事实接线](../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts) · [报价恢复验证](../../tests/rental-quote-recovery-review.test.cjs) · [短信限流验证](../../tests/sms-rate-limit.test.cjs)
 
 必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。拆前合同与运行时导出按固定 Git 对照，实际证据和剩余边界沿 PCH 记录维护。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs) · [PCH 记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-rental-domain-package-20261115)

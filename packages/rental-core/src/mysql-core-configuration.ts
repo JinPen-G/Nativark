@@ -26,7 +26,9 @@ import type {
 } from "./contracts";
 import type { RentalCategoryDefinition } from "./contracts";
 import { RentalInventoryMode, isRentalCategoryCode, RENTAL_CURRENCY_CODES, RENTAL_CAPABILITY_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_FULFILLMENT_MODES, RENTAL_PAYMENT_METHOD_CODES } from "./contracts";
-import type { RentalBusinessContext as BusinessContext, RentalUniqueAttributeClaim, VersionedBusinessSettings } from "./configuration-basis";
+import type { RentalBusinessContext as BusinessContext, RentalUniqueAttributeClaim, VersionedBusinessSettings,
+  RentalItemGroupPageQuery, RentalItemGroupReadFacts, RentalItemGroupPage } from "./configuration-basis";
+export type { RentalItemGroupPageQuery, RentalItemGroupReadFacts, RentalItemGroupPage } from "./configuration-basis";
 import { readRentalFulfillmentAdmission, type RentalFulfillmentRequirement } from './mysql-fulfillment-admission';
 import { resolveRentalCategoryVersionBody } from "./category-runtime";
 import { requestFingerprint } from "@rental-os/platform-contracts/request-fingerprint";
@@ -83,14 +85,6 @@ export interface RentalDefaultWorkspaceInitialization { categoryVersionId?: stri
 export interface RentalDefaultWorkspaceInitializationState {
   profile: TenantRentalProfile;
   binding: CategoryWriteBinding;
-}
-/** Bounded configuration read, not pricing or inventory reservation. */
-export interface RentalItemGroupPageQuery { limit: number; cursor?: string; itemGroupId?: string; name?: string; }
-export type RentalItemGroupReadFacts = Pick<RentalItemGroup, 'id' | 'tenantId' | 'categoryCode' | 'code' | 'name'
-  | 'inventoryMode' | 'unit' | 'status' | 'bundleComponents' | 'createdAt' | 'updatedAt'>;
-export interface RentalItemGroupPage {
-  rows: RentalItemGroupReadFacts[]; nextCursor: string | null; truncated: boolean;
-  configurationVersion: string; source: 'persisted_workspace_configuration';
 }
 export function parseRentalItemGroupPageQuery(value: RentalItemGroupPageQuery): RentalItemGroupPageQuery {
   const input = structuredClone(value), id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;

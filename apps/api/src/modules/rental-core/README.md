@@ -6,7 +6,9 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [RentalCoreController](rental-core.controller.ts) → [RentalCoreService](rental-core.service.ts)连接商品/资产/订单及履约入口。[RentalBusinessController](rental-business.controller.ts) → [RentalBusinessService](rental-business.service.ts)承接报价、规则、日历及价值服务。调用方从原Guard/ALS取得租户、空间、角色和地点范围，领域服务按当前对象/历史依据核权限与提交条件。[Guard](../../common/api-auth.guard.ts) · [ALS](../../common/request-identity.ts)
 
-持久事实经[业务事实仓储](rental-business-fact.repository.ts)读写。[状态仓储](rental-state.repository.ts)和[原幂等](rental-idempotency.repository.ts)已是 Rental 包的窄 Nest 适配，供给原配置、范围、品类锁、事件和同一数据库事务。快照保留原行修订与已持久档案，收据按当前空间读取原键；恢复副本不重建业务事实，同键重试不重做已提交动作。[快照实现](../../../../../packages/rental-core/src/mysql-state.ts) · [收据实现](../../../../../packages/rental-core/src/mysql-idempotency.ts)
+报价、券、奖励/权益、推荐及通知事实经[业务事实适配](rental-business-fact.repository.ts)进入Rental包的唯一仓储，当前空间、每次生成的订单可见范围、有界配置reader及原事件由本宿主供给。券预算和余额保留原事务与金额精度，通知流水/投递结果不重复执行外部短信。[事实实现](../../../../../packages/rental-core/src/mysql-business-facts.ts) · [本表接点](../../../../../packages/rental-core/src/business-fact-storage.ts) · [报价能力事实](../../../../../packages/rental-core/src/mysql-quote-capabilities.ts) · [库存依据](../../../../../packages/rental-core/src/quote-inventory-basis.ts)
+
+[状态仓储](rental-state.repository.ts)和[原幂等](rental-idempotency.repository.ts)已是 Rental 包的窄 Nest 适配，供给原配置、范围、品类锁、事件和同一数据库事务。快照保留原行修订与已持久档案，收据按当前空间读取原键；恢复副本不重建业务事实，同键重试不重做已提交动作。[快照实现](../../../../../packages/rental-core/src/mysql-state.ts) · [收据实现](../../../../../packages/rental-core/src/mysql-idempotency.ts)
 
 报价、价格、规则、检查和履约依据从原关联快照读取，修订与幂等键保护并发/重复操作，结果未知通过原操作核对。主事务和外部支付/通知执行点分别由原领域实现持有。
 

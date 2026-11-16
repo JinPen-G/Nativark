@@ -134,6 +134,18 @@
     "./mysql-core-configuration": {
       "types": "./dist/mysql-core-configuration.d.ts",
       "default": "./dist/mysql-core-configuration.js"
+    },
+    "./mysql-business-facts": {
+      "types": "./dist/mysql-business-facts.d.ts",
+      "default": "./dist/mysql-business-facts.js"
+    },
+    "./mysql-quote-capabilities": {
+      "types": "./dist/mysql-quote-capabilities.d.ts",
+      "default": "./dist/mysql-quote-capabilities.js"
+    },
+    "./quote-inventory-basis": {
+      "types": "./dist/quote-inventory-basis.d.ts",
+      "default": "./dist/quote-inventory-basis.js"
     }
   },
   "typesVersions": {
@@ -230,6 +242,15 @@
       ],
       "mysql-core-configuration": [
         "dist/mysql-core-configuration.d.ts"
+      ],
+      "mysql-business-facts": [
+        "dist/mysql-business-facts.d.ts"
+      ],
+      "mysql-quote-capabilities": [
+        "dist/mysql-quote-capabilities.d.ts"
+      ],
+      "quote-inventory-basis": [
+        "dist/quote-inventory-basis.d.ts"
       ]
     }
   },

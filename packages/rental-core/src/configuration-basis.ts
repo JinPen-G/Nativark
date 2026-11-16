@@ -32,3 +32,15 @@ export interface VersionedBusinessSettings {
   settings: TenantRentalBusinessSettings;
   settingsRevision: number;
 }
+
+/** 当前商品配置的有界投影，供报价库存依据读取；不包含资产库存或预占。 */
+export interface RentalItemGroupPageQuery { limit: number; cursor?: string; itemGroupId?: string; name?: string; }
+export type RentalItemGroupReadFacts = Pick<RentalItemGroup, "id" | "tenantId" | "categoryCode" | "code" | "name"
+  | "inventoryMode" | "unit" | "status" | "bundleComponents" | "createdAt" | "updatedAt">;
+export interface RentalItemGroupPage {
+  rows: RentalItemGroupReadFacts[];
+  nextCursor: string | null;
+  truncated: boolean;
+  configurationVersion: string;
+  source: "persisted_workspace_configuration";
+}

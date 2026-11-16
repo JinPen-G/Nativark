@@ -11,6 +11,34 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-business-facts-20261116"></a>
+
+## Rental 报价、券、奖励与通知事实迁移（2026-11-16）
+
+固定父版 `9c433ce9bc4bc1df4b0cf2998a5d5047a17b3bea` 已普通推送并从真实远端回读，main仍为62ca并在本树祖先。原业务事实仓储实际迁入Rental包，旧API保留薄Nest provider，供给原当前空间、每次生成的订单可见范围、有界库存配置reader、原通知事件及同一数据源和事务。[事实实现](../../../packages/rental-core/src/mysql-business-facts.ts) · [本表视图与宿主接点](../../../packages/rental-core/src/business-fact-storage.ts) · [原provider](../../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts)
+
+报价、券占用/核销与模板预算、奖励/权益余额、推荐及租赁通知保持Rental归属。首次报价提交继续锁原经营空间并核当前履约、能力和库存对象，已保存报价读取原来源、金额、消费依据和历史快照，不补入当前配置。券与余额写入使用原调用方事务和Decimal精度；通知流水先持久化，原事件与事实在同一事务提交，投递认领只占租约，原结果更新才递增尝试次数。租约过期只是调度候选，不证明可以重新发送，外部短信和批准仍由原业务服务处理。
+
+报价能力事实和库存依据移入正式 `/mysql-quote-capabilities` 与 `/quote-inventory-basis`。原商品有界查询/投影三类型进入既有 `/configuration-basis` 单源，核心配置仓储保留兼容类型再导出。私有MySQL声明只包含本仓储实际表方法，当前仍使用原组合schema的生成类型；公共Core合同与Rental根出口不加载生成模型或数据库客户端。[能力事实](../../../packages/rental-core/src/mysql-quote-capabilities.ts) · [库存依据](../../../packages/rental-core/src/quote-inventory-basis.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版逻辑对照 | 事实仓储44项、报价能力2项、库存4项，共50个方法/函数正文一致；仅规范化正式合同/runtime别名及存储、范围/可见性、配置reader和原事件接点。未改报价、金额、券或通知算法 |
+| 正式配置与当前schema的内存编译 | 公共合同5根/199源/10输出，Rental48根/609源/96输出，shared122根/340源/245输出，完整API988根/2288源/1976输出，均0诊断；共十项配置通过。当前238模型由锁定Prisma5.22官方WASM/generator在内存供给，TS5.9.3，主树依赖只读复用，JS/声明未写磁盘 |
+| 原直接消费者 | `node --no-compilation-cache - api-business-facts` 执行原sms-rate-limit、category-capability-conditions、rental-quote-recovery-review和rental-fulfillment-admission四份用例。退出0、stderr为空；24个原Node用例和3个必要边界用例，共27 pass/0 fail/skip/todo/cancelled，原短信限流IIFE通过 |
+| 本片必要边界 | 本版实际仓储核券预算条件更新、原空间/事务、Decimal、次数上限及竞争失败；通知核同事务事件、重复键与其他错误区别、事件失败传播和fixture回滚；认领核租约/尝试CAS，原结果更新累计attempts并释放租约，公开日志不含收件人密文。SQL、存储、事务及回滚均为明确fixture，不替代真实数据库验收 |
+| 原离线守卫 | 使用本树原prisma-offline-preload，固定offline数据库地址，审计/TEMP/TMP/缓存指向单一临时目录，守卫违规0；未读取环境文件、实例化数据库客户端或访问网络 |
+
+初次类型检查定位runtime DbNull与生成客户端私有类型标记不同，直接类型转换仍有TS2352。锁定官方generator明确将 `Prisma.DbNull` 赋为同一 `objectEnumValues.instances.DbNull`，私有适配仅对齐该单例的名义类型，不创建空值替身、不加载生成Client。最终完整类型通过，原空值语义保持。
+
+旧报价恢复夹具没有提供原新报价必需的库存依据和有界SQL读取；核对固定父版已有同一提交检查后补齐，仅对JSON空值使用原DbNull投影，Decimal保留真实类。全部来源/地址/租金不可改写断言保持。原integration-security两条attempts静态断言改读迁移后的唯一源码并定向核验，不将此静态段当作完整供应商测试通过。
+
+源码职责头、Rental模块README、原业务导读与根入口同片更新，未新增测试脚本或第五册。本片仍缺完整Rental业务/数据/页面/作业/AI与标准主装配，以及完整公共组织/订阅/集成、真实HTTP/数据库/浏览器、干净包安装/独立更新回退、接手与审查。按原门槛复核未跨下一档，正式需求和任务进度保持；旧外观静态失败、历史附件和统一待清理环境保留原归属。下一入口为完整订单/资产/库存事实仓储及原服务链。源码固定版本由包含本节的提交定位，普通推送至原任务分支并以实际远端回读核定。
+
+最终定向文档检查7份、875个本地链接、150个锚点引用及80个表格，问题0；未检目标按固定Git定位。锁文件与包依赖/peer一致，默认diff检查退出0，原两条attempts静态断言保留并通过。接续按当前实际边界精简，完整前像保存在固定9c同路径，未解决事项均保留当前入口或原阶段证据。
+
+本片Node进程53004已退出，编译/声明/业务夹具全部内存。唯一空审计日志的原生PowerShell删除在启动前被自动审批以 `blocked by policy` 拒绝；按已授权原生Move-Item归集到统一待清理区，原临时目录已移除。责任清单为 `D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/rental-business-facts/manifest.json`，残留1个文件/0字节，状态已归集、未删除；没有换壳/工具绕过。旧公共宿主环境继续沿原责任清单处理，没有新增依赖副本或后台业务服务。
+
 <a id="core-rental-core-configuration-20261116"></a>
 
 ## Rental 核心配置、品类写入与履约准入迁移（2026-11-16）
