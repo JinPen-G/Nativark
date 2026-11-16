@@ -10,11 +10,12 @@ export interface SoundPreferences {
   volume: number;
 }
 export const DEFAULT_SOUND_PREFERENCES: Readonly<SoundPreferences> = Object.freeze({
-  version: 1, pack: DEFAULT_SOUND_PACK, interactionEnabled: false, notificationEnabled: false, volume: 0.32
+  version: 1, pack: DEFAULT_SOUND_PACK, interactionEnabled: true, notificationEnabled: false, volume: 0.32
 });
 
 export function parseSoundPreferences(raw: string | null, legacy: string | null): SoundPreferences {
-  const fallback = { ...DEFAULT_SOUND_PREFERENCES, interactionEnabled: legacy === "on" };
+  const fallback = { ...DEFAULT_SOUND_PREFERENCES,
+    interactionEnabled: legacy === "on" ? true : legacy === "off" ? false : DEFAULT_SOUND_PREFERENCES.interactionEnabled };
   if (!raw) return fallback;
   try {
     const data = JSON.parse(raw);
@@ -22,7 +23,7 @@ export function parseSoundPreferences(raw: string | null, legacy: string | null)
     return {
       version: 1,
       pack: resolveSoundPack(typeof data.pack === "string" ? data.pack : DEFAULT_SOUND_PACK).id,
-      interactionEnabled: typeof data.interactionEnabled === "boolean" ? data.interactionEnabled : false,
+      interactionEnabled: typeof data.interactionEnabled === "boolean" ? data.interactionEnabled : fallback.interactionEnabled,
       notificationEnabled: typeof data.notificationEnabled === "boolean" ? data.notificationEnabled : false,
       volume: typeof data.volume === "number" && Number.isFinite(data.volume) ? Math.min(1, Math.max(0, data.volume)) : 0.32
     };
