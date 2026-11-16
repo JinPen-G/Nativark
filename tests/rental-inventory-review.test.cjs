@@ -8,9 +8,23 @@ const { RentalIdempotentActionService } = require('../apps/api/src/modules/renta
 const { StaffOfflinePaymentService } = require('../apps/api/src/modules/rental-core/staff-offline-payment.service');
 const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
 const inScope = work => runWithRequestIdentity({ tenantId: 't', workspaceId: 'w', userId: 'operator', dataScope: 'all' }, work);
-const template = { id: 'tpl', code: 'RETURN', version: '1', stage: 'return', enabled: true, fields: [] };
+const template = { id: 'tpl', tenantId: 't', categoryCode: 'camera', name: 'Return inspection', code: 'RETURN', version: '1', stage: 'return', enabled: true, fields: [] };
 const groups = [{ id: 'old', code: 'OLD', name: 'Old', inventoryMode: 'quantity' },
   { id: 'new', code: 'NEW', name: 'New', inventoryMode: 'quantity' }];
+
+/** 原Tenant共享父锁的明确fixture；只接受本用例租户，保留原订单/资产SQL和锁顺序断言。 */
+function withTenantFence(transaction) {
+  const original = transaction.$queryRaw;
+  transaction.$queryRaw = async function(query, ...values) {
+    if (query.sql === 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE') {
+      assert.deepEqual(query.values, ['t']);
+      return [{ id: 't' }];
+    }
+    return original.call(this, query, ...values);
+  };
+  return transaction;
+}
+
 function orderFixture() {
   return { id: 'o', tenantId: 't', currency: 'CNY', orderNo: 'ORDER', status: 'renting', categoryCode: 'camera',
     startAt: '2026-10-01T00:00:00Z', endAt: '2099-10-10T00:00:00Z', updatedAt: 'revision',
@@ -140,9 +154,9 @@ test('physical quarantine accepts serial future reservations and records their p
     { itemGroupId: 'g', locationId: 'loc', quantity: 1, startAt: '2099-01-03T00:00:00Z', endAt: '2099-01-04T00:00:00Z' }
   ];
   let ledger;
-  const tx = { $queryRaw: async () => [{ id: 'b', onHandQuantity: 2, maintenanceQuantity: 0 }],
+  const tx = withTenantFence({ $queryRaw: async () => [{ id: 'b', onHandQuantity: 2, maintenanceQuantity: 0 }],
     rentalStockBalance: { updateMany: async () => ({ count: 1 }) },
-    rentalStockLedgerEntry: { findFirst: async () => null, create: async ({ data }) => { ledger = data; } } };
+    rentalStockLedgerEntry: { findFirst: async () => null, create: async ({ data }) => { ledger = data; } } });
   await repo.applyStockMaintenanceDelta(tx, 't', 'w', { itemGroupId: 'g', locationId: 'loc', quantity: 1,
     sourceOrderId: 'o', sourceOrderNo: 'O', batchNo: 'return', idempotencyKey: 'k', reason: 'actual damage' }, 1, 'maintenance_quarantine');
   assert.equal(ledger.maintenanceQuantity, 1); assert.equal(ledger.reservedQuantity, 1);
@@ -153,7 +167,7 @@ test('disposition restore never overrides independent disabled or manually-maint
     const disposition = { id: 'd', tenantId: 't', workspaceId: 'w', orderId: 'o', assetId: 'a', quantity: 1,
       restoredQuantity: 0, status: 'buffered', receivedAt: new Date(0), bufferUntil: new Date(0), createdAt: new Date(0), updatedAt: new Date(0) };
     let updated = false;
-    const tx = { $queryRaw: async query => {
+    const tx = withTenantFence({ $queryRaw: async query => {
         if (/rental_allocations/.test(query.sql)) return [];
         if (/rental_orders/.test(query.sql)) return [{ id: 'o', workspaceId: 'w' }];
         if (/SELECT \* FROM rental_stock_dispositions/.test(query.sql)) return [{ ...disposition }];
@@ -168,7 +182,7 @@ test('disposition restore never overrides independent disabled or manually-maint
       rentalAsset: { findFirst: async () => { throw Error('restore must read locked current asset state'); }, updateMany: async ({ where }) => {
         assert.equal(where.status, 'MAINTENANCE'); updated = true; return { count: 1 }; } },
       rentalAssetStatusHistory: { findFirst: async () => { throw Error('restore must read current hold source'); }, create: async () => undefined }
-    };
+    });
     await new RentalCoreFactRepository({}).restoreStockDispositionInClient(tx, 't', 'd', 'Operator');
     assert.equal(updated, shouldRestore);
     assert.equal(disposition.status, 'restored');
@@ -183,7 +197,7 @@ test('the last disposition can release an earlier same-asset order hold only aft
     const disposition = { id: 'last', tenantId: 't', workspaceId: 'w', orderId: 'later-order', assetId: 'a', quantity: 1,
       restoredQuantity: 0, status: 'buffered', bufferUntil: new Date(0), receivedAt: new Date(0), createdAt: new Date(0), updatedAt: new Date(0) };
     let restored = false;
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w', tenantId: 't' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w', tenantId: 't' }) },
       rentalStockDisposition: { findFirst: async () => disposition, count: async ({ where }) => where.status === 'restored' ? restoredSource : otherBlocks,
         updateMany: async ({ data }) => { Object.assign(disposition, data); return { count: 1 }; } },
       rentalWorkOrder: { count: async ({ where }) => where.dispositionId ? 0 : otherWork },
@@ -197,7 +211,7 @@ test('the last disposition can release an earlier same-asset order hold only aft
         return [{ assetNo: 'A', status: 'maintenance' }];
       },
       rentalAsset: { updateMany: async () => { restored = true; return { count: 1 }; } },
-      rentalAssetStatusHistory: { create: async () => {} } };
+      rentalAssetStatusHistory: { create: async () => {} } });
     const restore = () => new RentalCoreFactRepository({}).restoreStockDispositionInClient(tx, 't', 'last', 'Operator');
     if (otherWork) {
       await assert.rejects(restore(), /独立养护工单/); assert.equal(disposition.status, 'buffered');
@@ -214,7 +228,7 @@ test('later order return cannot erase an independent manual asset hold', async (
         preAuthAmount: 0, totalAmount: 100, createdBy: 'operator' };
       const asset = { id: 'a', assetNo: 'A', status, locationId: 'loc' };
       let latest = { source: 'manual', sourceId: null, toStatus: status };
-      const tx = {
+      const tx = withTenantFence({
         businessWorkspace: { findFirst: async () => ({ id: 'w', tenantId: 't' }) },
         rentalOrder: { findUnique: async () => ({ tenantId: 't', workspaceId: 'w', inspectionTemplateSnapshots: order.inspectionTemplateSnapshots }), update: async () => {} },
         rentalAllocation: { deleteMany: async () => {} },
@@ -225,7 +239,7 @@ test('later order return cannot erase an independent manual asset hold', async (
             assert.equal(where.status, status.toUpperCase()); Object.assign(asset, { ...data, status: data.status.toLowerCase() }); return { count: 1 }; } },
         rentalStockDisposition: { count: async () => 0 },
         rentalAssetStatusHistory: { findFirst: async () => ({ ...latest }), create: async ({ data }) => { latest = data; } }
-      };
+      });
       await new RentalCoreFactRepository({}).saveOrderAggregate(order, [{ assetId: 'a', status: next }], tx);
       assert.equal(asset.status, status, '归还只释放本单占用，不能覆盖独立停用/维护');
       assert.equal(latest.source, 'manual', '不能把人工维护改记成本单归还来源后自动恢复');
@@ -239,7 +253,7 @@ test('order asset updates use locked current state and retain remaining disposit
       discountAmount: 0, couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 0,
       preAuthAmount: 0, totalAmount: 100, createdBy: 'operator' };
     const asset = { id: 'a', assetNo: 'A', status: 'rented', locationId: 'loc' }; let locked = false, history;
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w', tenantId: 't' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w', tenantId: 't' }) },
       rentalOrder: { findUnique: async () => ({ tenantId: 't', workspaceId: 'w', inspectionTemplateSnapshots: order.inspectionTemplateSnapshots }), update: async () => {} },
       rentalAllocation: { deleteMany: async () => {} },
       $queryRaw: async query => {
@@ -252,7 +266,7 @@ test('order asset updates use locked current state and retain remaining disposit
       rentalAsset: { findMany: async () => { throw Error('must not use stale snapshot state'); },
         updateMany: async ({ where, data }) => { assert.equal(locked, true); assert.equal(where.status, 'RENTED'); Object.assign(asset, data); return { count: 1 }; } },
       rentalStockDisposition: { count: async () => dispositions }, rentalWorkOrder: { count: async () => workOrders },
-      rentalAssetStatusHistory: { create: async ({ data }) => { history = data; } } };
+      rentalAssetStatusHistory: { create: async ({ data }) => { history = data; } } });
     await new RentalCoreFactRepository({}).saveOrderAggregate(order, [{ assetId: 'a', status: 'available', locationId: 'returned-loc' }], tx);
     assert.equal(asset.status, expected); assert.equal(asset.locationId, 'returned-loc'); assert.equal(history.toStatus, expected);
   }
@@ -265,7 +279,7 @@ test('work-order creation rechecks the original disposition under the same order
     reason: '原归还养护', attachments: [], createdBy: 'operator', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   for (const status of ['restored', 'written_off', 'buffered', 'blocked']) {
     const trace = []; let writes = 0, assetStatus = 'available';
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
       $queryRaw: async query => {
         if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
         if (/rental_orders/.test(query.sql)) { trace.push('order'); return [{ id: 'o', workspaceId: 'w' }]; }
@@ -276,7 +290,7 @@ test('work-order creation rechecks the original disposition under the same order
       },
       rentalWorkOrder: { findUnique: async () => null, create: async ({ data }) => { trace.push('work'); writes++; return data; } },
       rentalAsset: { updateMany: async ({ where, data }) => { assert.equal(where.status, 'AVAILABLE'); assetStatus = data.status.toLowerCase(); return { count: 1 }; } },
-      rentalAssetStatusHistory: { create: async () => {} } };
+      rentalAssetStatusHistory: { create: async () => {} } });
     if (['restored', 'written_off'].includes(status)) {
       await assert.rejects(repo.upsertWorkOrder(work, tx), /已结束的库存处置/); assert.equal(writes, 0); assert.equal(assetStatus, 'available');
     } else {
@@ -300,7 +314,7 @@ test('disposition upsert replays the locked terminal fact and rejects a changed 
     { locationId: 'other' }, { inspectionId: 'other' }, { returnBatchKey: 'other' }, { quantity: 2 }]) {
     let writes = 0; const trace = [];
     const locked = { ...original, ...patch };
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
       $queryRaw: async query => {
         if (/rental_orders/.test(query.sql)) { trace.push('order'); return [{ id: 'o', workspaceId: 'w' }]; }
         if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
@@ -308,7 +322,7 @@ test('disposition upsert replays the locked terminal fact and rejects a changed 
         assert.match(query.sql, /rental_stock_dispositions[\s\S]*dedupeKey = \?[\s\S]*FOR UPDATE/);
         trace.push('disposition'); return [locked];
       }, rentalStockDisposition: { findUnique: async () => { throw Error('must not use a pre-lock snapshot'); },
-        upsert: async () => { writes++; throw Error('must not rewrite a terminal original'); } } };
+        upsert: async () => { writes++; throw Error('must not rewrite a terminal original'); } } });
     const call = () => new RentalCoreFactRepository({}).upsertStockDisposition(input, tx);
     if (Object.keys(patch).length) await assert.rejects(call(), /幂等来源/);
     else { const result = await call(); assert.equal(result.id, 'd'); assert.equal(result.status, 'restored'); assert.equal(result.restoredQuantity, 1); }
@@ -326,7 +340,7 @@ test('work upsert replays the locked completed fact without adopting changed res
   for (const patch of [{}, { tenantId: 'other' }, { orderId: 'other' }, { assetId: 'other' }, { itemGroupId: 'other' },
     { locationId: 'other' }, { inspectionId: 'other' }, { quantity: 2 }]) {
     let writes = 0;
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
       $queryRaw: async query => {
         if (/rental_orders/.test(query.sql)) return [{ id: 'o', workspaceId: 'w' }];
         if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
@@ -335,7 +349,7 @@ test('work upsert replays the locked completed fact without adopting changed res
         assert.match(query.sql, /SELECT \* FROM rental_work_orders[\s\S]*FOR UPDATE/); return [{ ...original, ...patch }];
       }, rentalWorkOrder: { findUnique: async () => { throw Error('must not use a pre-lock snapshot'); },
         create: async () => { writes++; throw Error('must not create a second work order'); } },
-      rentalAsset: { updateMany: async () => { writes++; throw Error('replay must not change asset state'); } } };
+      rentalAsset: { updateMany: async () => { writes++; throw Error('replay must not change asset state'); } } });
     const call = () => new RentalCoreFactRepository({}).upsertWorkOrder(input, tx);
     if (Object.keys(patch).length) await assert.rejects(call(), /幂等来源/);
     else { const result = await call(); assert.equal(result.id, 'work'); assert.equal(result.status, 'completed'); assert.equal(result.result, '已完成'); }
@@ -348,7 +362,7 @@ test('restoration rechecks current disposition and its active work before any te
     const visible = { id: 'd', tenantId: 't', workspaceId: 'w', orderId: 'o', assetId: 'a', itemGroupId: 'g', locationId: 'loc',
       quantity: 1, restoredQuantity: 0, status: 'buffered', bufferUntil: new Date(0) };
     let writes = 0; const trace = [];
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
       rentalStockDisposition: { findFirst: async () => ({ ...visible }), updateMany: async () => { writes++; return { count: 1 }; } },
       $queryRaw: async query => {
         if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
@@ -358,7 +372,7 @@ test('restoration rechecks current disposition and its active work before any te
           ...(newer === 'blocked' ? { status: 'blocked' } : newer === 'restored' ? { status: 'restored', restoredQuantity: 1 } : {}) }]; }
         if (/rental_work_orders/.test(query.sql)) { trace.push('work'); return newer === 'active-work' ? [{ id: 'new-work' }] : []; }
         throw Error(`Unexpected SQL: ${query.sql}`);
-      } };
+      } });
     await assert.rejects(new RentalCoreFactRepository({}).restoreStockDispositionInClient(tx, 't', 'd', 'operator'), /阻断|已经恢复|尚未完成/);
     assert.equal(writes, 0); assert.ok(trace.indexOf('order') < trace.indexOf('asset'));
     assert.ok(trace.indexOf('asset') < trace.indexOf('disposition'));
@@ -374,7 +388,7 @@ test('create-versus-restore commit order retains the original restoration entry 
     const staleInput = { id: 'work', tenantId: 't', workspaceId: 'w', orderId: 'o', dispositionId: 'd', assetId: 'a',
       itemGroupId: 'g', locationId: 'loc', type: 'repair', quantity: 1, status: 'pending', workNo: 'WO', reason: '养护',
       attachments: [], createdBy: 'operator', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    const tx = { businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
+    const tx = withTenantFence({ businessWorkspace: { findFirst: async () => ({ id: 'w' }) },
       $queryRaw: async query => {
         if (/rental_allocations/.test(query.sql)) return [{ assetId: 'a' }];
         if (/rental_orders/.test(query.sql)) return [{ id: 'o', workspaceId: 'w' }];
@@ -389,7 +403,7 @@ test('create-versus-restore commit order retains the original restoration entry 
       rentalWorkOrder: { findUnique: async () => state.work ?? null, findFirst: async () => state.work ? { ...state.work } : null,
         create: async ({ data }) => { state.work = { ...data }; return data; }, updateMany: async ({ data }) => { Object.assign(state.work, data); return { count: 1 }; } },
       rentalAsset: { updateMany: async ({ where, data }) => { assert.equal(where.status, state.asset.status.toUpperCase()); state.asset.status = data.status.toLowerCase(); return { count: 1 }; } },
-      rentalAssetStatusHistory: { create: async () => {} }, operationLog: { create: async () => {} } };
+      rentalAssetStatusHistory: { create: async () => {} }, operationLog: { create: async () => {} } });
     const repo = new RentalCoreFactRepository({});
     const restore = () => repo.restoreStockDispositionInClient(tx, 't', 'd', 'operator');
     if (createFirst) {
@@ -412,12 +426,12 @@ test('create-versus-restore commit order retains the original restoration entry 
 
 test('order lock includes historical exchange assets before any return disposition or allocation rewrite', async () => inScope(async () => {
   const trace = [];
-  const tx = { $queryRaw: async query => {
+  const tx = withTenantFence({ $queryRaw: async query => {
     if (/rental_orders/.test(query.sql)) { trace.push('order'); return [{ id: 'o', workspaceId: 'w' }]; }
     if (/rental_allocations/.test(query.sql)) { trace.push('allocation-read'); return [{ assetId: 'b' }, { assetId: 'a' }, { assetId: 'b' }]; }
     assert.match(query.sql, /WHERE id = \?/); trace.push(query.values[0]);
     return [{ id: query.values[0], assetNo: query.values[0], status: 'rented', locationId: 'loc' }];
-  } };
+  } });
   await new RentalCoreFactRepository({}).lockOrder('t', 'o', tx);
   assert.deepEqual(trace, ['order', 'allocation-read', 'a', 'b'], '含已归还的历史换货资产，逐主键按稳定ID取锁');
 }));
@@ -434,8 +448,8 @@ test('confirmed offline receipt can be recovered after completion without a seco
   const registration = { id: 'reg', tenantId: 't', workspaceId: 'w', orderId: 'o', status: 'confirmed', fundingEventId: 'event',
     instrument: 'rental', amount: 10, registeredAt: new Date(), confirmedAt: new Date(), paymentMethod: 'offline_cash' };
   const event = { id: 'event', amount: 10, instrument: 'rental', provider: 'offline', idempotencyKey: 'staff-offline:reg' };
-  const tx = { $queryRaw: async () => [], rentalOfflinePaymentRegistration: { findFirst: async () => registration },
-    rentalOrder: { findFirst: async () => ({ id: 'o', status: 'COMPLETED' }) } };
+  const tx = withTenantFence({ $queryRaw: async () => [], rentalOfflinePaymentRegistration: { findFirst: async () => registration },
+    rentalOrder: { findFirst: async () => ({ id: 'o', status: 'COMPLETED' }) } });
   const service = new StaffOfflinePaymentService({ $transaction: work => work(tx) }, {
     listEvents: async () => ({ events: [event] }), recordEvent: async () => { throw Error('must not collect again'); }
   }, {});
@@ -451,10 +465,10 @@ test('unpaid expiry rejects collected money and original pending payments before
     const { service } = coreFixture(order);
     service.funding = { listEvents: async () => ({ rental: { collected }, deposit: { collected: 0 }, preauthorization: { frozen: 0 } }) };
     let cancelled = false; service.cancelOrder = async () => { cancelled = true; return order; };
-    const tx = { $queryRaw: async query => {
+    const tx = withTenantFence({ $queryRaw: async query => {
       assert.match(query.sql, /LOCK IN SHARE MODE/);
       return query.sql.includes('rental_payment_intents') && pending ? [pending] : [];
-    } };
+    } });
     const run = () => service.expirePendingOrder('t', 'o', tx, 'system', '2026-10-30T00:00:00Z');
     if (collected || pending) await assert.rejects(run(), /已有收款或待核对资金/); else await run();
     assert.equal(cancelled, !collected && !pending);

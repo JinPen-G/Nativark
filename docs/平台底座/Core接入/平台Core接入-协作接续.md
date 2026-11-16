@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-当前品类采用准备/最终提交及完整配置辅助22文件已迁入Rental包，两个旧服务只供给原六项Nest依赖，辅助旧路径再导出；固定父版f9fc5bfca84a61202aa6a53803a9e67013d8fd79保存原文和完整接续。十份原验证入口的25项Node测试及其他直接检查，基线/候选均通过，55执行单元相同，无新测试脚本。下一步继续剩余服务/Controller、数据/迁移/Seed与完整标准装配；官方日历源按平台公共资源处理。[当前采用阶段](平台Core接入-开发记录.md#core-rental-category-adoption-20261117) · [治理与原夹具修正](平台Core接入-开发记录.md#core-rental-category-governance-20261117) · [绑定草稿/设置](平台Core接入-开发记录.md#core-rental-bound-drafts-settings-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；MIT与品牌原稿继续按固定Git保留。
+当前历史快照回填、员工线下收款、原请求DTO、归还价格来源及债权核定收据五文件已单源迁入Rental包；两个旧服务保留原Nest构造供给，其他旧入口再导出。固定父版8f284b668f9f5b758e499abe732fee81883a31b1保存原文/接续，原库存夹具的8项父锁和2项冻结模板缺项补齐后原18/18通过；候选143项原Node用例及5项必要静态/恢复核验共148/148通过。下一步完成企业读取/剩余Controller、数据/迁移/Seed与标准装配，官方日历源按公共能力处理。[当前恢复收款阶段](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117) · [采用闭包](平台Core接入-开发记录.md#core-rental-category-adoption-20261117) · [治理与夹具](平台Core接入-开发记录.md#core-rental-category-governance-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据，MIT与品牌原稿引用固定Git。
 
 ## 2. 已有实际接点
 
@@ -49,7 +49,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-当前采用闭包22文件55执行单元与固定父版相同，两个旧六项Nest元数据/Inject及Optional索引相同，十配置0诊断；十份原入口的25项Node测试及其他直接断言，基线/候选均通过。前片原创建夹具的3个迁移前失败已明确修正并在两版6/6通过；草稿原六项3个旧失败、日历PROVIDER_UNAVAILABLE包装及其他已登记问题继续保留。MySQL私有适配仍用Prisma生成模型，原Auth实际运行，SQL/锁/事务/商业数据为明确fixture；真实HTTP/数据库/浏览器、完整宿主/安装/更新、独立接手及审查未验。全部worker退出，output/.tmp无新增文件。[当前阶段证据](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)
+当前恢复收款五文件23执行单元与固定父版相同，两个原Nest构造供给及DTO字段/装饰器保持，十配置0诊断；原库存18项修正后在基线/候选通过，五份原入口143项及4项最小stdin/1项原员工静态片共148/148通过。原资金门禁另9项直接断言通过。SQL/锁/事务/存储仍为明确fixture，员工四份页面源码从固定Git读取，真实HTTP/数据库/浏览器/微信、完整宿主/安装/更新、独立接手及审查未验。原创建夹具已修6/6；草稿旧失败、日历PROVIDER_UNAVAILABLE包装及其他问题继续保留。所有worker已退出，output/.tmp无新增产物。[当前阶段证据](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 

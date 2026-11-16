@@ -11,6 +11,31 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-recovery-payments-20261117"></a>
+
+## Rental 历史回填、员工收款与归还计价归属（2026-11-17）
+
+固定父版8f284b668f9f5b758e499abe732fee81883a31b1已提交、普通推送并实际回读，保存本片五份原实现及完整接续；实际main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在任务祖先。[快照回填](../../../packages/rental-core/src/mysql-snapshot-backfill.ts)、[员工收款](../../../packages/rental-core/src/mysql-staff-payments.ts)、[请求DTO](../../../packages/rental-core/src/http-staff-payment.dto.ts)、[归还价格来源](../../../packages/rental-core/src/return-pricing.ts)和[原债权核定收据](../../../packages/rental-core/src/corporate-maturity-receipt.ts)成为包内唯一实现；旧两个服务供给原二项/三项Nest依赖，其余旧入口仅再导出同一类/规则。[私有回填存储](../../../packages/rental-core/src/snapshot-backfill-storage.ts)与[员工收款接点](../../../packages/rental-core/src/staff-payment-storage.ts)复用原数据源和调用方事务，领域根出口不加载这些MySQL服务。
+
+回填保留原完整主键/复合键比较、父记录业务键映射、只插缺项/不覆盖已有事实、原品类来源/采用修订与配置行修订；原ReadCommitted、60秒上限和启动登记顺序保持。单空间错误可见并隔离，回填不调用报价、履约、支付或重放业务。原历史字段缺省映射保持，不能据此声称旧快照必然完整或成为新的历史/金额推断规则。员工登记只占待确认金额，确认复用同一资金事务及原staff-offline键；租户父锁→登记/订单锁、当前地点、原凭证/余额和当前收款方式保持，已确认结果须核原资金收据，配置变化或订单完成不重收。归还继续绑定实际分配与不可变换货/续租段，缺历史/币种/金额不以现价或零额替代；到期核定保留原哈希命名空间、新版审计时间绑定和旧版独立时钟。
+
+### 原夹具失败与修正
+
+node --no-compilation-cache - api-recovery-payments-baseline + 下列五份原入口，PID46340退出1、stderr空：143项Node测试133通过/10失败，资金门禁另9项直接异步断言通过。失败均在原库存用例：8项未识别现行Tenant共享父锁，2项冻结检查模板缺tenantId/categoryCode/name。仅补[原库存夹具](../../../tests/rental-inventory-review.test.cjs)：一个13行的明确父锁包装只接受本用例租户并断言SQL参数，原订单/资产/处置锁序及全部断言保留；冻结模板补其原所属元数据，不改生产规则。原18项数量保持，96处原assert均保留并增加1处租户参数断言。只复验该失败入口，PID3632退出0、18/18、0 fail/skip/todo/cancelled。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 迁移候选与原消费者 | mode=api-recovery-payments-candidate，PID31076退出0、stderr空；五份原入口143项全过，另4项最小stdin恢复/到期收据检查与1项原员工静态断言通过，合计148/148、0 fail/skip/todo/cancelled；原资金门禁9项也通过，stdin SHA-256 0021f8fe43f16f6428960fbd5785c1c472576e038ed6891cebe4f5b8c8b24fa8 |
+| 恢复最小行为 | 完整键区别同数量外来行、空快照不称完整、memory不登记回填、原日历投影/重复无写、fixture失败回滚、缺租户/空间、异品类及已采用来源拒绝；原到期收据版本/原主体/时间绑定和历史独立时钟通过。SQL/事务/物理存储均为明确fixture |
+| 原员工静态片 | 只将[既有脚本](../../../tests/staff-miniprogram-static.test.cjs)的收款源码定位改为实际包内实现，保留原全部断言；该1项经同一worker运行。未检出的员工页面从固定Git8f284b668读取原四份源码，不代表微信宿主验收；首次REPL字符串求值受运行上下文限制后改走已有离线worker，没有新增运行器/文件 |
+| 单源正文与元数据 | 五文件23执行单元与父版相同，DTO字段/装饰器保持，两个旧Nest构造依赖与原登记次序保持；原Controller/OpenAPI/AppModule/schema/迁移/Seed无差异 |
+| 类型及内存产物 | 官方Prisma5.22原238模型、TS5.9.3，十个正式配置0诊断；Rental187根/911源/374输出，原API988根/2430源/1976输出。声明/JS均留内存，未写共享client/dist |
+| 正式出口/包配置 | 五个新增正式子出口/typesVersions有实际源码，原依赖和lock未变；MySQL私有视图继续使用Prisma模型/runtime，不向公共Core清单泄漏这些类型 |
+
+五份原入口为[资金门禁](../../../tests/rental-funding-gates.test.cjs)、[企业应收](../../../tests/rental-order-receivable.test.cjs)、[库存恢复](../../../tests/rental-inventory-review.test.cjs)、[分段换货价格](../../../tests/rental-exchange-segment-pricing.test.cjs)和[换货归还计价](../../../tests/rental-exchange-return-pricing.test.cjs)。只修现有fixture和实际源码定位，没有新增测试脚本或扩大到真实资金/数据库。原Auth/核心/资金及仓储使用实际编译实现；上述类型、静态与离线行为不代表完整Nest宿主、真实HTTP/数据库/浏览器/微信、标准包安装/升级回退、独立接手或审查。
+
+Rental仍缺企业读取/剩余Controller、数据/迁移/Seed、页面/其余客户端和标准装配，完整公共组织/订阅/集成及05/06/07门槛未齐；按原G1～G4核定未跨下一档，需求/任务编号/依赖/顺序/百分比保持。源码短头、两份模块导读、根入口与接续同片更新，定向九份文档1471链接/173锚点/100表格0问题；git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check退出0。默认检查曾将原cjs的CRLF判作行尾空白，按原换行保持并仍检查实际尾空格，不修改仓库配置。所有worker退出，output/.tmp空，无新脚本/环境/后台服务；原两处残留仍集中待清理，原生PowerShell删除再次被自动审批在启动前以blocked by policy拒绝，责任清单已更新，不换壳/工具绕过。中文提交到既有任务分支、普通推送并读取实际远端，不合main或发布。
+
 <a id="core-rental-category-adoption-20261117"></a>
 
 ## Rental 采用准备、最终提交与完整配置闭包（2026-11-17）

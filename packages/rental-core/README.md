@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策、采用准备与最终提交链，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照/历史回填、员工线下收款与归还计价、原债权核定收据、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策、采用准备与最终提交链，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -31,6 +31,9 @@
 | [空间能力服务](src/workspace-capabilities.ts)、[仓储端口](src/workspace-capability-port.ts) | `/workspace-capabilities` 管理原能力状态、配置、版本、就绪总览及初始化。声明、实现、启用分别判定，存储和当前范围经窄端口供给 |
 | [空间能力仓储](src/workspace-capability-repository.ts)、[存储视图](src/workspace-capability-storage.ts) | `/workspace-capability-repository` 持有实例与生命周期审计读写，保留修订冲突、同事务初始化及原重试分类。宿主供给原空间解析、品类锁和同一数据源 |
 | [恢复快照](src/mysql-state.ts)、[快照存储视图](src/state-storage.ts) | `/mysql-state` 保存原空间恢复副本及行修订，保留参数化 SQL、当前品类绑定锁和调用方事务；恢复副本不替代正式业务事实或授权 |
+| [历史快照回填](src/mysql-snapshot-backfill.ts)、[本表事务视图](src/snapshot-backfill-storage.ts) | `/mysql-snapshot-backfill` 保留原完整键、主档映射、品类来源/修订及单空间原事务；宿主只按原顺序登记一次，错误可见，恢复不重做业务 |
+| [员工线下收款](src/mysql-staff-payments.ts)、[原事务接点](src/staff-payment-storage.ts)、[请求DTO](src/http-staff-payment.dto.ts) | `/mysql-staff-payments`、`/http-staff-payment.dto` 保留原地点/凭证/余额、待确认额度、当前收款方式及原资金收据；登记与确认分开，同键不重复收款 |
+| [归还价格来源](src/return-pricing.ts)、[到期核定收据](src/corporate-maturity-receipt.ts) | `/return-pricing` 只投影原分配的冻结价格段，`/corporate-maturity-receipt` 核原债权与审计，不重新计价、核定或修改原账 |
 | [原操作收据](src/mysql-idempotency.ts)、[收据存储视图](src/idempotency-storage.ts) | `/mysql-idempotency` 按租户/空间/动作/原键读取结果，收据写入参与原业务事务；同键异输入冲突，未获安全保留依据时拒绝按年龄删除 |
 | [业务动作执行器](src/mysql-idempotent-actions.ts)、[事务端口](src/idempotent-action-storage.ts)、[共享父锁](src/mysql-business-fence.ts) | `/mysql-idempotent-actions` 协调原事务外预检/事务内重查与回放；`/mysql-business-fence` 保留Tenant共享锁，业务当前授权及副作用仍由原调用方处理 |
 | [业务配置仓储](src/mysql-business-configuration.ts)、[存储与宿主接点](src/business-configuration-storage.ts) | `/mysql-business-configuration` 持有原定价/优惠/服务、日历/规则版本及通知模板读写，原身份、范围、品类锁和配置事件由宿主供给；原事务、发布审计和历史正文保护保持 |

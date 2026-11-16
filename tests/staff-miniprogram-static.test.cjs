@@ -432,7 +432,7 @@ test("员工交接照片、现场签字与线下收款均有服务端闭环和�
   const uploads = readApi("modules/files/staff-uploads.controller.ts");
   const fileStorage = readApi("modules/integrations/file-storage.runtime.service.ts");
   const orderController = readApi("modules/rental-core/rental-core.controller.ts");
-  const offlinePayments = readApi("modules/rental-core/staff-offline-payment.service.ts");
+  const offlinePayments = fs.readFileSync(path.resolve(__dirname, "../packages/rental-core/src/mysql-staff-payments.ts"), "utf8");
   assert.match(fileStorage, /uploadedByUserId/);
   assert.match(uploads, /handoverBatchId/);
   assert.match(uploads, /handoverLocationId/);
