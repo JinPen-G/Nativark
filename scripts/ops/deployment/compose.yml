@@ -54,7 +54,7 @@ services:
 
   web:
     profiles: [app]
-    image: nativark-web:${RENTAL_RELEASE:?Set RENTAL_RELEASE to the pinned product commit}
+    image: nativark-web:${NATIVARK_WEB_RELEASE:-${RENTAL_RELEASE:?Set RENTAL_RELEASE to the pinned product commit}}
     restart: unless-stopped
     ports:
       - "8080:8080"

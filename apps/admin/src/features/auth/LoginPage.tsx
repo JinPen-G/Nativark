@@ -25,6 +25,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { api } from "@/api/platform";
 import { useAuthStore } from "./authStore";
 import { resolveLoginTenantCode } from "./login-entry";
+import attributionStyles from "./LoginAttribution.module.css";
 
 type LoginValues = { tenantCode: string; account: string; password: string };
 type DemoPasswordValues = { password: string; confirmPassword: string };
@@ -264,6 +265,13 @@ export function LoginPage() {
                 ) : null}
               <Typography.Text className="login-support" type="secondary">{t("登录即表示你正在访问获授权的租户数据范围。")}</Typography.Text>
               </div>
+              <footer className={attributionStyles.footer}>
+                {locale === "en-US" ? "Made by " : "由 "}
+                <a href="https://github.com/JinPen-G" target="_blank" rel="noopener noreferrer">JinPen-G</a>
+                {locale === "en-US" ? ". Source code on " : " 制作。源码发布在 "}
+                <a href="https://github.com/JinPen-G/Nativark" target="_blank" rel="noopener noreferrer">GitHub</a>
+                {locale === "en-US" ? "." : "。"}
+              </footer>
             </div>
           </div>
         </main>
