@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-category-governance-20261117"></a>
+
+## Rental 品类治理与配置辅助独立归属（2026-11-17）
+
+固定父版c1b802e55e40f1ca41344d57d0b4b64402c6e85d已提交、普通推送并实际回读；main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在任务祖先。原[治理服务](../../../packages/rental-core/src/mysql-category-governance.ts)、[创建模板](../../../packages/rental-core/src/category-creation-templates.ts)及[定义差异](../../../packages/rental-core/src/category-definition-diff.ts)成为Rental包内唯一实现；旧服务保留原四项Nest依赖和Optional身份接点，两份旧辅助路径只再导出正式子出口。Controller、DTO、HTTP/OpenAPI和主provider登记未改。[实际私有接点](../../../packages/rental-core/src/category-governance-storage.ts) · [包接入路线](../../../packages/rental-core/README.md#使用与构建) · [原治理Controller](../../../apps/api/src/modules/rental-core/category-governance.controller.ts)
+
+保留Serializable、maxWait10000/timeout30000、原Web签名/会话与当前SaaS账号前后复验，身份/角色读取先于品类/版本锁。草稿按修订CAS，发布正文和原审计不可变，发布后独立维护采用政策；原创建/发布重复请求只读原收据，不重新发布、采用或初始化。模板/差异只操作配置副本，不读商户事实或添加算法。私有存储和身份接口只描述本链方法；该MySQL服务仍使用原Prisma生成模型与Nest异常，公共Core清单及Rental领域根出口不加载它。
+
+### 基线失败与夹具修正
+
+node --no-compilation-cache - api-category-governance-before + tests/category-governance.test.cjs、tests/category-creation.test.cjs，PID41396退出1：纯治理断言通过，创建六项3通过/3失败。两项缺原认证/当前账号接点，另一项复制发布版本缺structureVersion；与固定主线8b64f8efa的原身份事务及b6aa09ad3的版本解码要求核定，不降低生产校验。[原创建用例](../../../tests/category-creation.test.cjs)
+
+仅补原夹具：账号含tenantId，签名/可信Web会话用实际Auth方法，账号/会话行及商业数据库是明确替身；事务断言完整Serializable参数，复制来源补实际structureVersion=1。原最后调用断言改为现行合同的五次认证事务，同时继续断言只有一次identity/draft/audit；没有删断言或skip/todo。其他三项仍保持原输入/算法/DTO断言，拒绝分支现在在真实签名验证后运行，不能用缺认证先失败冒充业务拒绝。生产权限、锁、SQL、字段、保存与恢复正文未改。
+
+| 必要核验 | 实际结果与边界 |
+| --- | --- |
+| 修正夹具后的原实现基线 | mode=api-category-governance-fixture-baseline，PID42720退出0；创建6/6、0 fail/skip/todo/cancelled，纯治理输入/权限/开通范围断言通过 |
+| 同夹具迁移候选 | mode=api-category-governance-candidate，PID52672退出0、stderr空；同样6/6及纯治理断言通过。stdin SHA-256 b2a243f5251d507c38eed8a1bad5d35182502fb43a2065a2181001a2cc3ded1a，声明/JS全内存 |
+| 固定执行正文 | 治理30、定义差异1、模板/组合3共34执行单元与父版相同，配置常量/schema保持；只变正式导入、私有类型和Nest接线位置 |
+| 实际类型与产物 | 官方Prisma5.22原238模型、TypeScript5.9.3，十个正式配置0诊断；Rental157根/881源/314输出，原API988根/2400源/1976输出 |
+| 装配/出口 | 原四项design:paramtypes及Optional索引2/3的转译元数据相同，三个新增正式子出口/typesVersions有实际源码；原AppModule/Controller/OpenAPI无差异，包依赖未变 |
+
+本片不增加测试脚本。SQL、账号/会话行、事务和发布/创建存储均为明确fixture；类型/离线行为及元数据不是完整Nest宿主、真实HTTP/数据库/浏览器、实际安装、独立更新或审查证明。PCH-08仍缺剩余采用/服务/Controller、标准装配、数据/迁移/Seed、页面/客户端及AI/作业，05/06/07与公共组织/订阅/集成亦未满足完整下一档，因此不改正式需求、任务身份/依赖/百分比。
+
+源码头、Rental/原API模块导读、根入口及接续同片更新。定向九份文档1398本地链接/171锚点/98表格0问题，git diff --check退出0；正式需求/任务无差异。worker全部退出，output/.tmp无新增产物；两处旧残留继续集中待清理，原自动审批拒绝和责任manifest沿前一阶段保留，不声称已删除或释放空间。中文提交当前任务分支、普通推送后实际回读，不合main或发布。
+
 <a id="core-rental-bound-drafts-settings-20261117"></a>
 
 ## Rental 绑定规则/日历草稿与批准设置归属（2026-11-17）

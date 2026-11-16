@@ -498,6 +498,18 @@
     "./approved-settings-route-authority": {
       "types": "./dist/approved-settings-route-authority.d.ts",
       "default": "./dist/approved-settings-route-authority.js"
+    },
+    "./mysql-category-governance": {
+      "types": "./dist/mysql-category-governance.d.ts",
+      "default": "./dist/mysql-category-governance.js"
+    },
+    "./category-definition-diff": {
+      "types": "./dist/category-definition-diff.d.ts",
+      "default": "./dist/category-definition-diff.js"
+    },
+    "./category-creation-templates": {
+      "types": "./dist/category-creation-templates.d.ts",
+      "default": "./dist/category-creation-templates.js"
     }
   },
   "typesVersions": {
@@ -867,6 +879,15 @@
       ],
       "approved-settings-route-authority": [
         "dist/approved-settings-route-authority.d.ts"
+      ],
+      "mysql-category-governance": [
+        "dist/mysql-category-governance.d.ts"
+      ],
+      "category-definition-diff": [
+        "dist/category-definition-diff.d.ts"
+      ],
+      "category-creation-templates": [
+        "dist/category-creation-templates.d.ts"
       ]
     }
   },

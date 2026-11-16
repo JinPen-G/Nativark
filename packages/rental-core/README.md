@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿与批准设置应用，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -51,6 +51,7 @@
 | [品类属性](src/category-attributes.ts) | `/category-attributes` 校验当前属性、保留不可改写的历史值并准备唯一声明；实体与唯一值仍由原写入事务一起提交 |
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
 | [审计仓储](src/capability-audit.ts)、[内置能力组合](src/capabilities/index.ts) | `/capability-audit` 通过本表窄端口写放行/拒绝审计和读历史，`/capabilities` 显式登记当前及兼容实现。原 Nest provider 供给同一数据源和调用方事务 |
+| [品类治理服务](src/mysql-category-governance.ts)、[私有存储/身份接点](src/category-governance-storage.ts)、[创建模板](src/category-creation-templates.ts)、[定义差异](src/category-definition-diff.ts) | `/mysql-category-governance` 保留平台草稿/不可变发布、独立开通/采用政策及原收据；当前SaaS身份、角色和原数据源由宿主供给，发布不变更商户绑定 |
 | [品类治理合同](src/category-governance.ts) | `/category-governance` 持有原发布、采用、准备和收据声明，原 shared 出口再导出同一对象 |
 | [品类解析](src/category-runtime.ts)、[只读存储端口](src/category-storage.ts) | `/category-runtime` 提供原发布正文校验、历史引用、推荐版本、当前空间绑定和开通选项。各方法只要求自己使用的事务读取项，绑定与采用权限由原调用者核验 |
 | [品类身份](src/category-identity.ts)、[扩展一致性](src/rental-extension-registry.ts)、[空间展示名称](src/workspace-names.ts) | `/category-identity` 和 `/extensions` 供原订阅/会员及发布/启动消费。根出口保留原默认展示名称，旧 shared 再导出同一常量 |
@@ -67,6 +68,8 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+品类治理从 `@rental-os/rental-core/mysql-category-governance` 创建，供给同一数据库、能力实现目录、原Web身份解析器和当前账号reader。读取/草稿/发布继续使用原权限，写入在Serializable内先核会话和角色，再锁品类/版本，返回前复验；创建/发布重复请求只核原审计。版本发布、采用政策与商户实际采用分别办理，服务不改商户绑定或初始化。`/category-creation-templates` 和 `/category-definition-diff` 仅处理配置数据，缺原认证时写入拒绝。[原治理Controller](../../apps/api/src/modules/rental-core/category-governance.controller.ts) · [原创建验证](../../tests/category-creation.test.cjs)
 
 绑定草稿从 `@rental-os/rental-core/bound-rule-draft` 或 `/bound-calendar-draft` 创建，供给同一数据源和原业务服务。调用方先走原规则/日历Guard，再将当前复验函数传给 `review`、`save` 和 `read`。`review` 只返回完整候选及核对摘要，`save` 在原父锁→空间锁内校验摘要与目标版本，业务草稿和原收据同事务；`read` 按原键回读。规则历史恢复产生新草稿，已有草稿使用原CAS，保存不发布、不创建AI任务或批准。[原规则消费者](../../apps/api/src/modules/ai-native/scenes/opening-rule-draft.composition.ts) · [原日历消费者](../../apps/api/src/modules/ai-native/scenes/opening-calendar-draft.composition.ts)
 
