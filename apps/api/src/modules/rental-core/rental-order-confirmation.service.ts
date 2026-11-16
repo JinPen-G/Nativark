@@ -312,10 +312,10 @@ export class RentalOrderConfirmationService {
     }
     this.assertOrderMatchesQuote(input, quote);
     if (merchant && (quote.membershipSnapshot?.bookingIdentity !== "enterprise_employee"
-      || quote.membershipSnapshot.enterpriseContractAndPayer !== true
+      || Boolean(quote.membershipSnapshot.enterpriseContractAndPayer) !== Boolean(input.bookingIdentity?.enterpriseContractAndPayer)
       || quote.membershipSnapshot.personalCustomerId !== merchant.source.proof.personalCustomerId
       || quote.membershipSnapshot.corporateCustomerId !== merchant.source.proof.corporateCustomerId)) {
-      throw new ConflictException("原商户委托报价与企业付款或使用人不一致");
+      throw new ConflictException("原商户委托报价与原付款选择或使用人不一致");
     }
     // 报价可锁定权益版本，但提交订单仍须确认“当前员工关系仍有效”。企业主体和
     // 客户姓名都由这里的服务端解析结果覆盖，客户端不能伪造企业付款或历史身份。

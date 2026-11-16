@@ -124,9 +124,9 @@ export class ApprovedOrderPreparationService {
         return this.route.withOrderPreparation(current.context, input, async (context, body, actorAuth) => {
           const quote = await this.quote(context, body, tx);
           if (Date.parse(command.expiresAt) > Date.parse(quote.expiresAt)) throw deniedOrder();
-          const delegation = body.bookingIdentity?.enterpriseContractAndPayer === true && this.d.inputSource.readDelegation
+          const delegation = body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && this.d.inputSource.readDelegation
             ? await this.d.inputSource.readDelegation(reference, tx) : null;
-          if (body.bookingIdentity?.enterpriseContractAndPayer === true && !delegation) {
+          if (body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && !delegation) {
             throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           }
           const readDelegation = () => delegation ? readApprovedOrderMerchantDelegation(this.d.merchantDelegations,

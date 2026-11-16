@@ -83,7 +83,6 @@ export class PrismaApprovedOrderSnapshotSource implements ApprovedOrderSnapshotS
         if (merchantDelegation.quoteHash !== requestFingerprint(originalQuote) || merchantDelegation.requestHash !== input.contentHash
           || merchantDelegation.quoteId !== quote.id || merchantDelegation.personalCustomerId !== body.customerId
           || body.customerType !== 'personal' || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
-          || body.bookingIdentity.enterpriseContractAndPayer !== true
           || body.bookingIdentity.corporateCustomerId !== merchantDelegation.corporateCustomerId
           || Date.parse(merchantDelegation.expiresAt) > Date.parse(quote.expiresAt)) throw deniedOrder();
       }

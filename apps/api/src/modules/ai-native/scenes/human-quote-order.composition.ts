@@ -58,9 +58,9 @@ const executionCommand = z.object({ selection: z.unknown(), command: approvedOrd
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 // The selection repository re-reads the original D under current Guard/Auth.
 // Core independently seals that source for the joint approval transaction.
-const assertPayerSupported = (selection: { body: { bookingIdentity?: { enterpriseContractAndPayer?: boolean } };
+const assertPayerSupported = (selection: { body: { bookingIdentity?: { bookingIdentity?: 'personal' | 'enterprise_employee' } };
   merchantDelegation?: ApprovedOrderMerchantDelegationSnapshot }) => {
-  if (selection.body.bookingIdentity?.enterpriseContractAndPayer === true && !selection.merchantDelegation) {
+  if (selection.body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && !selection.merchantDelegation) {
     throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   }
 };

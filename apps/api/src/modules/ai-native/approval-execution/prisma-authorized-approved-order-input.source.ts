@@ -49,7 +49,7 @@ export class PrismaAuthorizedApprovedOrderInputSource implements ApprovedOrderEx
       const original = await read();
       const readMaterial = async () => {
         const body = await this.reader.read(input, tx);
-        const merchantDelegation = body?.bookingIdentity?.enterpriseContractAndPayer === true && this.reader.readDelegation
+        const merchantDelegation = body?.bookingIdentity?.bookingIdentity === 'enterprise_employee' && this.reader.readDelegation
           ? await this.reader.readDelegation(input, tx) : null;
         if (!body || merchantDelegation && merchantDelegation.requestHash !== requestFingerprint(body)) throw deniedOrder();
         return { body: structuredClone(body), ...(merchantDelegation ? { merchantDelegation: structuredClone(merchantDelegation) } : {}) };

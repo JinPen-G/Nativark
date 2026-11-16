@@ -16,6 +16,7 @@ const hash = (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/u.
 
 export function readEnterpriseDelegationSource(row: EnterpriseDelegationRow, tenantId: string, key: string): EnterpriseDelegationStored {
   const record = enterpriseJson(row.result), source = record?.source, reference = source?.requestReference;
+  const enterprisePayment = source?.request?.bookingIdentity?.enterpriseContractAndPayer === true;
   if (!record || !source || source.version !== ENTERPRISE_ORDER_DELEGATION_SOURCE_VERSION || source.purpose !== "merchant_operator"
     || source.tenantId !== tenantId || source.delegationKey !== key || row.operationKey !== key || row.actorUserId !== `customer:${source.personalCustomerId}`
     || row.target !== enterpriseDelegationTarget(source.quoteId) || ![source.workspaceId, source.personalCustomerId, source.corporateCustomerId, source.corporateMembershipId, source.quoteId].every(id)
@@ -23,14 +24,16 @@ export function readEnterpriseDelegationSource(row: EnterpriseDelegationRow, ten
     || !reference || typeof reference !== "object" || Array.isArray(reference) || Object.keys(reference).length !== 1
     || !("approvalId" in reference && id(reference.approvalId) || "quoteId" in reference && reference.quoteId === source.quoteId)
     || !source.request || source.request.customerId !== source.personalCustomerId || source.request.quoteId !== source.quoteId || source.request.customerType !== "personal"
-    || !source.basis || source.basis.guaranteePayer !== "enterprise" || !["per_order", "without_per_order"].includes(source.basis.approvalMode)
+    || source.request.bookingIdentity?.bookingIdentity !== "enterprise_employee" || source.request.bookingIdentity.corporateCustomerId !== source.corporateCustomerId
+    || !source.basis || source.basis.guaranteePayer !== "enterprise" || !["per_order", "without_per_order", "unconfigured"].includes(source.basis.approvalMode)
+    || enterprisePayment && source.basis.approvalMode === "unconfigured"
     || !source.confirmation || source.confirmation.operationKey !== key || source.confirmation.customerId !== source.personalCustomerId
     || source.confirmation.noticeVersion !== source.basis.noticeVersion || source.confirmation.acknowledgedAt !== source.basis.acknowledgedAt
     || !Number.isFinite(Date.parse(source.confirmation.confirmedAt)) || !Number.isFinite(Date.parse(source.expiresAt))
     || !Number.isSafeInteger(record.revision) || record.revision < 1 || !["issued", "revoked", "consumed"].includes(record.state)
     || requestFingerprint({ ...source, integrityHash: undefined }) !== source.integrityHash || requestFingerprint(source.request) !== source.requestContentHash
     || requestFingerprint(source.basis) !== source.basisHash) throw new ConflictException("原委托源版本、完整性或原请求关联不可核对");
-  if ((source.basis.approvalMode === "per_order") !== Boolean(source.approval) || source.approval && (source.approval.id !== ("approvalId" in reference ? reference.approvalId : undefined)
+  if ((enterprisePayment && source.basis.approvalMode === "per_order") !== Boolean(source.approval) || source.approval && (source.approval.id !== ("approvalId" in reference ? reference.approvalId : undefined)
     || source.approval.requestHash !== source.requestHash || source.approval.quoteHash !== source.quoteHash || !Number.isSafeInteger(source.approval.revision))) throw new ConflictException("原委托批准引用不一致");
   if (record.state === "consumed") {
     const receipt = record.receipt;

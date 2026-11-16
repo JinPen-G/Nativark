@@ -75,7 +75,7 @@ export class PrismaApprovedOrderOriginalInputSource implements ApprovedOrderOrig
   async readDelegation(presented: Parameters<ApprovedOrderOriginalInputSource['read']>[0], tx: Prisma.TransactionClient) {
     try {
       const input = structuredClone(presented), body = await this.read(input, tx);
-      if (body.bookingIdentity?.enterpriseContractAndPayer !== true) return null;
+      if (body.bookingIdentity?.bookingIdentity !== 'enterprise_employee') return null;
       const key = { scopeId: input.scopeId, taskId: input.taskId, runId: input.runId, actionId: input.actionId };
       const step = await tx.aiStep.findFirst({ where: key });
       const row = step?.inputRef ? await tx.aiTaskActionInput.findFirst({ where: {

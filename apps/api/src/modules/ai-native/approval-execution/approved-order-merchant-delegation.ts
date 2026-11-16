@@ -66,7 +66,7 @@ export async function readApprovedOrderMerchantDelegation(source: ApprovedOrderM
   const ref = approvedOrderMerchantDelegationReferenceSchema.parse(structuredClone(reference));
   const row = await readOriginalMerchantDelegationSubmission(source, actor, ref, operation);
   if (row.quoteId !== body.quoteId || row.personalCustomerId !== body.customerId || body.customerType !== 'personal'
-    || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee' || body.bookingIdentity.enterpriseContractAndPayer !== true
+    || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
     || body.bookingIdentity.corporateCustomerId !== row.corporateCustomerId
     || row.requestHash !== requestFingerprint(body) || requestFingerprint(row.request) !== requestFingerprint(body)) {
     throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');

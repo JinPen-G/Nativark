@@ -117,7 +117,10 @@ export class ConversationQuoteSelectionSession {
         || value.merchantDelegation.reference.expectedRevision !== delegation.expectedRevision
         || delegation.approvalId !== undefined && value.merchantDelegation.reference.approvalId !== delegation.approvalId
         || !same(value.selection.merchantDelegation, value.merchantDelegation.reference)
-        || value.material.customer.id !== value.selection.order.customerId || value.material.booking.enterpriseContractAndPayer !== true
+        || value.material.customer.id !== value.selection.order.customerId
+        || value.material.booking.identity !== 'enterprise_employee' || value.selection.order.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
+        || value.material.booking.enterpriseContractAndPayer !== value.selection.order.bookingIdentity.enterpriseContractAndPayer
+        || value.material.booking.corporateCustomerId !== value.selection.order.bookingIdentity.corporateCustomerId
         || value.material.period.startAt !== value.selection.order.startAt || value.material.period.endAt !== value.selection.order.endAt)
         throw Error('AI_RESULT_UNKNOWN');
       return { value: structuredClone(value), signature: await commandHash(value), source: structuredClone(source), delegation: structuredClone(delegation) };

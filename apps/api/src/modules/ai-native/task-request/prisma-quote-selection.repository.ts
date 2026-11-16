@@ -156,7 +156,7 @@ export class PrismaQuoteSelectionRepository {
       this.d.confirmation.assertOrderMatchesQuote(normalized, quote);
       const quoteHash = this.quoteHash(quote), expiry = Date.parse(quote.expiresAt);
       if (!Number.isFinite(expiry) || (active && (expiry <= this.clock().getTime() || quote.consumedAt || quote.consumedOrderId))) throw unavailable();
-      if (active && normalized.bookingIdentity?.enterpriseContractAndPayer === true && !command.merchantDelegation) throw unavailable();
+      if (active && normalized.bookingIdentity?.bookingIdentity === 'enterprise_employee' && !command.merchantDelegation) throw unavailable();
       const merchantDelegation = command.merchantDelegation ? await readApprovedOrderMerchantDelegation(this.d.merchantDelegations,
         actorAuth, command.merchantDelegation, normalized, quoteHash, active ? 'prepare' : 'read') : undefined;
       const again = await this.d.quoteFacts.findQuote(context.scope.tenantId, normalized.quoteId, tx);

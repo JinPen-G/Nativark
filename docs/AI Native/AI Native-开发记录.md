@@ -6,6 +6,33 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-personal-enterprise-delegation-20261117"></a>
+## AIN-15 企业优惠个人付款的原委托链（2026-11-17）
+
+固定前置为 `1d4bb41a2bd5f4ede8d49f3207e3a415360e579b`，源码与 cfa6ba7 相同。临时 AI-RD 在 codex/ai-native 核明13份既有源码差异归属，跨日再次回读 GitHub，前置与实际远端一致，暂存区为空。main 的其他专项成果保留原归属。
+
+dev2逐项核对 AIN-A01～A29，发现企业优惠、个人付款和商户代办的原 D 签发被403拒绝，影响A06～A11及A29。Root通过原 ClientApiService、客户本人会话及 EnterpriseApprovalService 复现，stdin SHA-256 `bc17f32b91f45dad76f95a14fff0c12aff6a740b4e9567a1bdcd388d31d74364`，退出0，原反例标记 personal_enterprise_delegation_gap_reproduced。原政策允许个人付款，企业使用资格、本人告知和保证金依据继续分别核验。
+
+[原本人委托依据](../../apps/api/src/modules/enterprise/enterprise-approval.service.ts)仅在企业付费时要求逐单批准或免逐单政策。个人付费沿原企业使用政策重检，D仍由本人原报价和确认签发。[原存储源校验](../../apps/api/src/modules/enterprise/enterprise-order-delegation-source.ts)核实际付款选择、完整请求、原企业和source hash，个人付款允许原unconfigured政策，企业付款继续要求正式付款授权。
+
+AI的[准备及原输入](../../apps/api/src/modules/ai-native/approval-execution/approved-order-preparation.service.ts)、[原选单仓储](../../apps/api/src/modules/ai-native/task-request/prisma-quote-selection.repository.ts)、[批准消费](../../apps/api/src/modules/ai-native/approval-execution/prisma-approved-order.source.ts)及[选单宿主](../../apps/api/src/modules/ai-native/scenes/human-quote-order.composition.ts)绑定原企业身份和D，对两个付款选择使用同一原链。完整原请求、当前Auth／Guard、AI批准、企业政策及D／Core幂等键保持。个人付款不消费企业付费批准，订单和AI／D仍在原Core事务关联。
+
+[后台原会话](../../apps/admin/src/features/ai-native/conversation-quote-selection-session.ts)核原企业身份、企业ID和精确付款选择，与原公开选单逐字段匹配。[Core订单确认](../../apps/api/src/modules/rental-core/rental-order-confirmation.service.ts)比较原报价和请求的实际付款选择，继续从当前会员事实解析签约、付款及使用主体。有限夹具未装配CustomerSubjectService时，原订单的可空主体字段按正式历史读取规则回落到customerId，验证分别记录原请求和Core会员快照，没有补造主体输入。
+
+| 必要验证 | stdin SHA-256、实际结果和边界 |
+| --- | --- |
+| 个人付款免逐单政策 | `cd3063f9deb2dd42eb31cc68df42822cf85d314aea4c62be428062f006a74425`，退出0。原本人D签发、Guard／Controller准备与选单、人工提案批准、一次Core建单及原结果读取通过。原请求不含额外subjects，Core会员快照保持个人付款，原有效主体为customer-a，企业付费批准为0，AI及D消费各1，Core1次、模型2次。 |
+| 个人付款原政策与恢复 | `de243275784d5473f46f363b5d51bd64aabd506df45fd056e246c98d4b18ccb2`，退出0。per_order与unconfigured两种原政策的个人付款正向通过。D消费后事务失败回滚订单、AI／D与Core收据，原读unknown且不写；提交丢ACK后原结果可查，沿原任务reconcile达到SUCCEEDED，终态重放只读，Core始终1次、模型2次。 |
+| 企业付款逐单路径回归 | `33331b7d8b70b2da3c2f0716099badd8e8f9523d61de3254ebf7230a6e2397a3`，退出0。原企业申请、自审拒绝、另一管理员审核、D签发与AI人工批准、原Core联合提交及原收据读取通过。 |
+| API类型 | `e9c5d2ef87be276c85c9e36ef24c3c76eca68ca75e8a3650106c3bb6c8bb7b0b`，退出0。TypeScript5.9.3、21根／1915源、noEmit零诊断。 |
+| 后台类型 | `0e49cd8924cf25d24e607430b5ff6a5f14fa72d09542c3465b52cd4ed72ad666`，退出0。9根／1610源、noEmit零诊断。 |
+
+中间驱动重复声明fs、未对应私有读入口、误将可空原subjects当必有字段及未先收窄bookingIdentity联合类型的失败保留在原对话。已修实际类型和入口问题，其余仅校正内存驱动与原schema的断言，原业务权限和拒绝门槛保持。命令使用 node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -，原fixture在内存加载，测试文件未新增或修改。本树原offline preload、不可达DATABASE_URL及纯内存audit继续生效，audit均为空，所有自有子进程已退出，任务临时目录未创建。
+
+dev1另复现旧澄清成功收据误删新未知回答定位的P2，原stdin `a8423d7c527a8b49a7b623ab13ef8387b32dc2eb77df2c3b58317f60dfc5bbc7` 退出0。该问题归[原澄清消费者](../../apps/admin/src/features/ai-native/TaskClarification.tsx)，本阶段未将其算作已修复，下一入口为原收据与当前完整定位绑定、删除前原值核对和删除后回读。AIN-15及26原整体门槛保持，个人付款后继候选交助手定向复核。dev1已再次收到完整持续目标，其get_goal实证为active、remainingTokens=null，原模型设置保持。
+
+真实数据库、浏览器、微信、供应商、企业债权与实际主体存储交负责人实测。原四品类和两轨绿色证据按各自固定范围继承，不以本片模拟代替整项交付。本阶段 node scripts/validate-docs.cjs 退出1，仅原4处缺链；git diff --check 退出0，新增文件链接可解析。阶段13源和原两册固定后普通推送并回读GitHub，后续澄清P2另按原任务继续。
+
 <a id="ain15-26-original-input-stop-continuation-20261117"></a>
 ## AIN-15／26 原输入保留、Core 委托重检与停止续办（2026-11-17）
 

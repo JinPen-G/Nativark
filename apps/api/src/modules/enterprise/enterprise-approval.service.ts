@@ -83,11 +83,12 @@ export class EnterpriseApprovalService {
     const snapshot = quote?.membershipSnapshot;
     if (!quote || quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId || quote.consumedAt || quote.consumedOrderId
       || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= Date.now() || requireRequestWorkspaceId() !== context.workspaceId
-      || snapshot?.bookingIdentity !== "enterprise_employee" || !snapshot.enterpriseContractAndPayer || !snapshot.enterpriseBasis
+      || snapshot?.bookingIdentity !== "enterprise_employee" || !snapshot.enterpriseBasis
       || snapshot.personalCustomerId !== context.customerId || !snapshot.corporateCustomerId || !snapshot.corporateMembershipId
-      || snapshot.enterpriseBasis.guaranteePayer !== "enterprise") throw new ForbiddenException("本人原企业报价、告知或企业保证金依据不可核对");
-    if (snapshot.enterpriseBasis.approvalMode === "per_order" && !approval) throw new ForbiddenException("本次逐单企业付费须先取得原企业批准");
-    if (!approval && snapshot.enterpriseBasis.approvalMode !== "without_per_order") throw new ForbiddenException("当前报价没有可用的企业付费授权");
+      || snapshot.enterpriseBasis.guaranteePayer !== "enterprise" || approval && !snapshot.enterpriseContractAndPayer) throw new ForbiddenException("本人原企业报价、告知或企业保证金依据不可核对");
+    // 个人付款仍绑定本人告知和使用政策，逐单批准仅消费企业付费请求。
+    if (snapshot.enterpriseContractAndPayer && snapshot.enterpriseBasis.approvalMode === "per_order" && !approval) throw new ForbiddenException("本次逐单企业付费须先取得原企业批准");
+    if (!approval && snapshot.enterpriseContractAndPayer && snapshot.enterpriseBasis.approvalMode !== "without_per_order") throw new ForbiddenException("当前报价没有可用的企业付费授权");
     const basis = await this.policies.revalidateQuote(context.tenantId, context.workspaceId, quote, tx);
     if (!basis) throw new ForbiddenException("当前企业授权不可用");
     this.policies.assertSameBasis(snapshot.enterpriseBasis, basis);

@@ -126,7 +126,7 @@ export class PrismaApprovedOrderSource {
       const { merchantDelegation: _delegation, ...originalQuote } = preview;
       if (merchantDelegation.quoteHash !== requestFingerprint(originalQuote) || merchantDelegation.requestHash !== action.input.contentHash
         || merchantDelegation.quoteId !== body.quoteId || merchantDelegation.personalCustomerId !== body.customerId
-        || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee' || body.bookingIdentity.enterpriseContractAndPayer !== true
+        || body.bookingIdentity?.bookingIdentity !== 'enterprise_employee'
         || merchantDelegation.corporateCustomerId !== body.bookingIdentity.corporateCustomerId) throw deniedOrder();
     }
     // D is already the original Core key. A task-specific replacement key would
@@ -154,7 +154,7 @@ export class PrismaApprovedOrderSource {
     const bindingTime = operation === 'replay' ? approval.issuedAt.toISOString() : now().toISOString();
     if (!checkAiApprovalBindingDraft({ payload, payloadHash: version.payloadHash, status: 'confirmed' }, approvalRecord, context, action.actionId, bindingTime).valid) throw deniedOrder();
     if (body.capabilityExceptions !== undefined) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-    if (operation === 'execute' && body.bookingIdentity?.enterpriseContractAndPayer === true && !merchantDelegation) {
+    if (operation === 'execute' && body.bookingIdentity?.bookingIdentity === 'enterprise_employee' && !merchantDelegation) {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
     if (operation === 'execute' && tx) {
