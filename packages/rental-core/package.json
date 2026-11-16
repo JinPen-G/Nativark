@@ -114,6 +114,26 @@
     "./capabilities/kit-handover": {
       "types": "./dist/capabilities/kit-handover.d.ts",
       "default": "./dist/capabilities/kit-handover.js"
+    },
+    "./category-attributes": {
+      "types": "./dist/category-attributes.d.ts",
+      "default": "./dist/category-attributes.js"
+    },
+    "./mysql-category-write": {
+      "types": "./dist/mysql-category-write.d.ts",
+      "default": "./dist/mysql-category-write.js"
+    },
+    "./mysql-category-policy": {
+      "types": "./dist/mysql-category-policy.d.ts",
+      "default": "./dist/mysql-category-policy.js"
+    },
+    "./mysql-fulfillment-admission": {
+      "types": "./dist/mysql-fulfillment-admission.d.ts",
+      "default": "./dist/mysql-fulfillment-admission.js"
+    },
+    "./mysql-core-configuration": {
+      "types": "./dist/mysql-core-configuration.d.ts",
+      "default": "./dist/mysql-core-configuration.js"
     }
   },
   "typesVersions": {
@@ -195,6 +215,21 @@
       ],
       "capabilities/kit-handover": [
         "dist/capabilities/kit-handover.d.ts"
+      ],
+      "category-attributes": [
+        "dist/category-attributes.d.ts"
+      ],
+      "mysql-category-write": [
+        "dist/mysql-category-write.d.ts"
+      ],
+      "mysql-category-policy": [
+        "dist/mysql-category-policy.d.ts"
+      ],
+      "mysql-fulfillment-admission": [
+        "dist/mysql-fulfillment-admission.d.ts"
+      ],
+      "mysql-core-configuration": [
+        "dist/mysql-core-configuration.d.ts"
       ]
     }
   },

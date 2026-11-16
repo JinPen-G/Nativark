@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import type { RentalBusinessContext as BusinessContext } from "@rental-os/rental-core/configuration-basis";
 import { randomUUID } from "node:crypto";
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
@@ -242,18 +243,6 @@ const extensionPricingContext = new AsyncLocalStorage<{ tenantId: string; worksp
  * supplied here; every persisted fact and commit gate keeps its original owner. */
 const quoteConfigurationContext = new AsyncLocalStorage<{ owner: RentalBusinessService; tenantId: string; workspaceId: string; state: RentalBusinessState }>();
 
-interface BusinessContext {
-  categoryVersionId?: string;
-  categoryAdoptionRevision?: number;
-  profile: TenantRentalProfile;
-  category: RentalCategoryDefinition;
-  settings: TenantRentalBusinessSettings;
-  groups: RentalItemGroup[];
-  pricingGroups?: RentalPricingGroup[];
-  couponTemplates: RentalCouponTemplate[];
-  locations: RentalFulfillmentLocation[];
-  operators: RentalFulfillmentOperator[];
-}
 
 /**
  * 营业状态的读取口径：优先用四态字段，缺省时由遗留的 `closed` 推导。

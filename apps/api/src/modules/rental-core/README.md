@@ -14,6 +14,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [业务配置仓储](rental-business-config.repository.ts)已是薄Nest provider，定价/优惠/服务、日历、规则与通知模板读写实际由Rental包维护。原请求身份、范围解析、品类绑定锁及配置事件仍从本宿主供给，生成模型仅进入私有适配类型。原[规则版本链](rental-rule-version-chain.ts)和配置共同依据也转接单源。[配置实现](../../../../../packages/rental-core/src/mysql-business-configuration.ts) · [存储接点](../../../../../packages/rental-core/src/business-configuration-storage.ts)
 
+[核心配置仓储](rental-core-config.repository.ts)同样只提供Nest接线，档案/空间、商品与定价组、地点/主体、券和检查模板读写实际位于Rental包。当前绑定写入、采用政策、属性与履约准入的旧路径再导出同一实现，服务及事务调用者保持原入口。初次成员初始化、旧绑定保护、修订CAS、唯一属性及当前停用状态均在原提交点核验。[核心配置实现](../../../../../packages/rental-core/src/mysql-core-configuration.ts) · [本表视图](../../../../../packages/rental-core/src/core-configuration-storage.ts) · [绑定写入](../../../../../packages/rental-core/src/mysql-category-write.ts) · [履约准入](../../../../../packages/rental-core/src/mysql-fulfillment-admission.ts)
+
 品类解析、身份、空间能力服务及实例/审计仓储由 Rental 包持有。原 Nest provider 提供当前绑定、版本、范围和同一数据源接线，历史动作沿原版本引用，提交点继续传入原事务。采用业务和租赁领域链继续按原四册迁移及验收。[品类 provider](rental-category-resolver.service.ts) · [能力Hook](capability-hook.runtime.ts) · [空间能力](workspace-capability.service.ts) · [实例仓储](workspace-capability.repository.ts) · [Rental当前入口](../../../../../docs/Rental%20Core/Rental%20Core-协作接续.md) · [品类治理](../../../../../docs/Rental%20Core/品类治理/品类治理-协作接续.md)
 
 商品保存流程调用 Rental 包登记的专业属性校验，露营容量与工程载荷限制沿原规则执行。通用流程只传当前品类及已校验属性，专业规则从本模块的正式出口维护。[专业商品属性](../../../../../packages/rental-core/src/item-group-validation.ts)

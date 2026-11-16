@@ -11,6 +11,31 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-core-configuration-20261116"></a>
+
+## Rental 核心配置、品类写入与履约准入迁移（2026-11-16）
+
+固定父版 `70139e810f92a1942b2cf41b3670dcfe04e3618b` 已普通推送并从真实远端回读，main仍为62ca且在本树祖先。原核心配置仓储实际移入Rental包，原API路径成为薄Nest provider，供给原Auth/ALS身份、空间/地点范围、原配置事件及同一事务。当前品类绑定/唯一属性写入、采用政策、属性校验和履约准入也移入同一包，旧路径再导出正式实现。[核心配置](../../../packages/rental-core/src/mysql-core-configuration.ts) · [私有存储与宿主接点](../../../packages/rental-core/src/core-configuration-storage.ts) · [原provider](../../../apps/api/src/modules/rental-core/rental-core-config.repository.ts)
+
+本片保留档案与默认经营空间、业务设置、地点/主体、商品/套装、定价组、券模板和检查模板的原读写，以及报价/开业/报表的有界当前配置读取。默认空间只在首次创建时初始化当时成员，既有空间不补回撤销成员、不切换旧品类/绑定；档案/快照和设置修订CAS、配额/预算、唯一属性、状态复验和外层事务保持。当前父锁→空间锁、发布版本/采用范围及原初始化审计继续由实际Rental实现执行。[绑定写入](../../../packages/rental-core/src/mysql-category-write.ts) · [采用政策](../../../packages/rental-core/src/mysql-category-policy.ts) · [属性](../../../packages/rental-core/src/category-attributes.ts) · [履约准入](../../../packages/rental-core/src/mysql-fulfillment-admission.ts)
+
+`RentalBusinessContext`、`RentalUniqueAttributeClaim` 和 `VersionedBusinessSettings` 从原私有同名定义移入既有 `/configuration-basis`，原消费者保留类型别名/兼容出口。私有MySQL视图只包含本仓储实际使用的方法；公共账号只读取findMany、组织只读取findFirst，成员初始化只提供原workspaceMember写入。生成模型仍仅进入私有适配声明，SQL/Decimal/异常沿原Prisma runtime；领域根出口和公共Core合同不加载这些适配。当前声明仍依赖原组合schema，完整Rental schema/迁移和标准装配尚未交付。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 原逻辑正文对照 | 核心配置45项、品类写入4项、采用政策2项、履约1项、属性5项，共57个方法/函数正文对照父版一致；仅规范化正式合同/runtime导入别名及存储、身份/范围/事件接点。第一次比较的6项差异来自shared→Rental正式合同别名，核对同一声明后通过，没有改业务算法 |
+| 正式配置及当前schema的内存编译 | 公共合同5根/199源/10输出，Rental44根/605源/88输出，shared122根/340源/245输出，完整API988根/2284源/1976输出，均0诊断；共十项配置通过。当前238模型由锁定Prisma5.22官方WASM/generator内存供给，TS5.9.3，主树依赖只读复用，JS/声明均未写磁盘 |
+| 当前六份原消费者 | `node --no-compilation-cache - api-core-configuration-current` 执行原config-write、space-initialization、pricing-group-lock、fulfillment-admission、config-workspace-scope和adoption-access用例。最终退出0、stderr为空；Node test 32 pass/0 fail/skip/todo/cancelled，范围脚本3项和配置/批准设置IIFE全部通过。SQL/存储/事务/批准参与者均为明确fixture |
+| 固定父版失败对照 | 替换五份原API实现为固定70139正文，运行最初四份用例，仍为21例12 pass/9 fail，另有config-write锁序IIFE失败；初次当前版复现相同失败。修夹具前保留证据，没有把未执行的后续批准设置算通过 |
+| 夹具修正与后续失败 | 明确Tenant共享锁及租户参数，保留原空间/身份锁和拒绝断言；将异步配置读取改为await，补当前主体状态、正式库存依据/有界读取及完整原批次回执。批准设置夹具允许原RepeatableRead历史回读，并断言不修改设置/批准。中间复验32例28 pass/4 fail且批准设置未过，定位缺项后定向复验；未删除断言、跳过用例或修改生产权限/异常 |
+| 原批准/unknown与离线隔离 | 实际Core/配置仓储/Guard的限定通知修改、版本/CAS、同事务参与者、失应答回读与历史幂等通过；未注册工具拒绝分支按当前真实登记状态执行，不伪造登记或宣称完整AI执行验收。使用原prisma-offline-preload，固定offline数据库地址、审计/TEMP/TMP/缓存指向本树单一临时目录，守卫违规0 |
+
+源码头和默认空间说明修正为实际职责，去掉过期阶段/测试派生说明，保留并发和历史兼容原因。模块README、原业务导读和根入口同片更新；未新增测试脚本或第五册。配置验证的唯一临时目录已核定范围、无链接及空目录后删除，Node验证进程已退出，没有新增依赖副本、生成物或业务服务。旧公共宿主环境840文件/91,808,304字节仍在统一待清理区，本日原生删除被自动审批以 `blocked by policy` 拒绝，责任清单与原阶段证据保留，未换工具绕过。
+
+按原门槛复核，本片增加真实Rental包消费者与配置兼容证据，但Rental标准主装配、全部业务/数据/页面/作业/AI、完整公共组织/订阅/集成、真实HTTP/数据库/浏览器、独立安装/升级回退/接手及审查仍缺。PCH各项未跨下一档，正式需求和任务百分比保持原值；旧外观静态失败、总导航历史附件和其他未验项不由本片关闭。下一入口是报价、券、奖励、推荐和通知投递的业务事实仓储及其原当前/历史依据。源码固定版本由包含本节的提交定位，普通推送至原任务分支并以实际远端回读核定。
+
+最终定向文档检查7份、905个本地链接、200个锚点引用和78个表格，问题0；稀疏未检目标按固定Git树/原文定位。正式需求/任务无差异，原编号/依赖/计分未改，锁文件的依赖与peer声明一致。默认格式检查最初将两条混合CRLF新增行报告为尾空白；仅整理本片类型导入与换行后复核，未改仓库Git配置。
+
 <a id="core-rental-business-configuration-20261116"></a>
 
 ## Rental 业务配置仓储与规则版本链迁移（2026-11-16）

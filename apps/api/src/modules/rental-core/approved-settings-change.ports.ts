@@ -3,10 +3,8 @@ import type { TenantRentalBusinessSettings } from '@rental-os/shared';
 import type { CategoryWriteBinding } from './category-active-write';
 
 export type ApprovedSettingsNotifications = TenantRentalBusinessSettings['notifications'];
-export interface VersionedBusinessSettings {
-  settings: TenantRentalBusinessSettings;
-  settingsRevision: number;
-}
+import type { VersionedBusinessSettings } from "@rental-os/rental-core/configuration-basis";
+export type { VersionedBusinessSettings } from "@rental-os/rental-core/configuration-basis";
 export interface NotificationSettingsPreview extends VersionedBusinessSettings {
   baseSettingsHash: string;
   before: ApprovedSettingsNotifications;

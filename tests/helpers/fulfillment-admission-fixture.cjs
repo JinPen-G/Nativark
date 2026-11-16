@@ -1,4 +1,5 @@
 'use strict';
+const assert = require('node:assert/strict');
 const { RentalCoreConfigRepository } = require('../../apps/api/src/modules/rental-core/rental-core-config.repository');
 
 /** Explicit configuration facts for offline tests, not a MySQL emulator. The
@@ -10,6 +11,10 @@ function fulfillmentAdmissionFixture(tenantId, workspaceId, source, beforeQuery)
     $queryRaw: async query => {
       trace.push(query.sql);
       if (beforeQuery) await beforeQuery(query);
+      if (query.sql === 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE') {
+        assert.deepEqual(query.values, [tenantId]);
+        return [{ id: tenantId }];
+      }
       if (query.sql.includes('rental_fulfillment_locations')) {
         return structuredClone(source.locations).filter(row => query.values.includes(row.id)).map(row => ({ ...row,
           tenantId: row.tenantId ?? tenantId, workspaceId: row.workspaceId ?? workspaceId,

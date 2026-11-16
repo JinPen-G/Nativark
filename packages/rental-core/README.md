@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据与业务配置仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、核心配置与业务配置仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -19,6 +19,9 @@
 | [原操作收据](src/mysql-idempotency.ts)、[收据存储视图](src/idempotency-storage.ts) | `/mysql-idempotency` 按租户/空间/动作/原键读取结果，收据写入参与原业务事务；同键异输入冲突，未获安全保留依据时拒绝按年龄删除 |
 | [业务动作执行器](src/mysql-idempotent-actions.ts)、[事务端口](src/idempotent-action-storage.ts)、[共享父锁](src/mysql-business-fence.ts) | `/mysql-idempotent-actions` 协调原事务外预检/事务内重查与回放；`/mysql-business-fence` 保留Tenant共享锁，业务当前授权及副作用仍由原调用方处理 |
 | [业务配置仓储](src/mysql-business-configuration.ts)、[存储与宿主接点](src/business-configuration-storage.ts) | `/mysql-business-configuration` 持有原定价/优惠/服务、日历/规则版本及通知模板读写，原身份、范围、品类锁和配置事件由宿主供给；原事务、发布审计和历史正文保护保持 |
+| [核心配置仓储](src/mysql-core-configuration.ts)、[存储与宿主接点](src/core-configuration-storage.ts) | `/mysql-core-configuration` 维护档案、经营空间、商品/套装、定价组、地点/主体、券与检查模板及有界配置读取；同一事务复核当前品类，保留配置修订和首次初始化限制 |
+| [当前绑定写入](src/mysql-category-write.ts)、[采用政策](src/mysql-category-policy.ts)、[履约准入](src/mysql-fulfillment-admission.ts) | 正式 MySQL 子出口持有原父锁→空间锁、发布版本/采用范围和当前地点/主体读取；原宿主提供身份和事务，历史快照及实物归还使用各自原依据 |
+| [品类属性](src/category-attributes.ts) | `/category-attributes` 校验当前属性、保留不可改写的历史值并准备唯一声明；实体与唯一值仍由原写入事务一起提交 |
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
 | [审计仓储](src/capability-audit.ts)、[内置能力组合](src/capabilities/index.ts) | `/capability-audit` 通过本表窄端口写放行/拒绝审计和读历史，`/capabilities` 显式登记当前及兼容实现。原 Nest provider 供给同一数据源和调用方事务 |
 | [品类治理合同](src/category-governance.ts) | `/category-governance` 持有原发布、采用、准备和收据声明，原 shared 出口再导出同一对象 |
@@ -31,7 +34,7 @@
 
 原客户端继续从 `@rental-os/shared` 读取租赁合同。Rental 自身实现可从本包根出口取合同，从 `@rental-os/rental-core/business-day` 取营业日函数。新业务 Core 使用公共平台和 Core 合同，不必依赖 Rental。
 
-业务配置的私有MySQL声明使用所选宿主schema的生成类型，当前仍对应原API组合schema。准备已配置的独立开发环境后，先沿原宿主执行 `npm run db:generate`，再构建本包；它只生成声明/客户端，不执行迁移。完整Core schema与迁移链继续拆分。领域根出口及公共底座构建不加载这些MySQL适配。[当前schema](../../apps/api/prisma/schema.prisma) · [生成命令](../../apps/api/package.json)
+核心/业务配置的私有MySQL声明使用所选宿主schema的生成类型，当前仍对应原API组合schema。准备已配置的独立开发环境后，先沿原宿主执行 `npm run db:generate`，再构建本包；它只生成声明/客户端，不执行迁移。完整Core schema与迁移链继续拆分。领域根出口及公共底座构建不加载这些MySQL适配。[当前schema](../../apps/api/prisma/schema.prisma) · [生成命令](../../apps/api/package.json)
 
 ```sh
 npm run build -w @rental-os/rental-core
@@ -51,5 +54,7 @@ MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON
 业务动作执行器接收原事务端口和幂等仓储。`executeInTransaction` 参与调用方已有事务，`readReceipt` 只读原操作；`executeWithReplayFlag` 区分首次提交与回放，通知等外部副作用由原调用者处理。唯一约束竞争读原赢家，已证实写冲突按原键有限重试，未分类错误原样抛出。Tenant共享锁保留原企业政策的并发围栏，不替代当前角色、Core准入或业务对象授权。[原动作接线](../../apps/api/src/modules/rental-core/rental-idempotent-action.service.ts)
 
 业务配置仓储只通过自身存储视图读写原配置。现有事务传给写入方法后，配置、规则/日历版本及审计由同一调用者提交；没有现有事务时保留原方法自己的事务方式。范围、当前品类绑定和事件捕获从原宿主提供，公开成员视图只读取原开业账号计数。规则版本链按原租期时点及冻结引用匹配，历史规则不被当前默认值改写。[原配置接线](../../apps/api/src/modules/rental-core/rental-business-config.repository.ts) · [原配置写入验证](../../tests/category-rule-write.test.cjs) · [规则链验证](../../tests/rental-rule-version-chain.test.cjs)
+
+核心配置仓储接收本表存储视图、当前身份/范围和原配置事件。默认空间只在首次创建时初始化当时的成员，重读档案不补回撤销成员或更换旧绑定；配置保存保留原CAS与调用方事务。地点/主体状态在原锁中重读，普通编辑不恢复被停用的状态；商品唯一属性和套装组成与实体一起写入。报价、开业和报表读取沿有界接口取得实际配置，恢复快照不代替当前事实。[原核心配置接线](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts) · [初始化验证](../../tests/category-space-initialization.test.cjs) · [配置范围验证](../../tests/config-workspace-scope.test.cjs) · [履约准入验证](../../tests/rental-fulfillment-admission.test.cjs)
 
 必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。拆前合同与运行时导出按固定 Git 对照，实际证据和剩余边界沿 PCH 记录维护。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs) · [PCH 记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-rental-domain-package-20261115)

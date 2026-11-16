@@ -5,6 +5,7 @@ import { lockRentalBusinessTenant } from "./rental-business-fence";
 import { usageDelta } from "./rental-usage-reading";
 import { isDeepStrictEqual } from "node:util";
 import { Prisma, type $Enums } from "@prisma/client";
+import type { RentalUniqueAttributeClaim } from "@rental-os/rental-core/configuration-basis";
 import {
   RentalAssetStatus,
   RentalCoreOrderStatus,
@@ -247,11 +248,7 @@ export interface InventoryLockTarget {
   inventoryMode: RentalInventoryMode;
 }
 
-export interface RentalUniqueAttributeClaim {
-  fieldCode: string;
-  label: string;
-  normalizedValue: string;
-}
+export type { RentalUniqueAttributeClaim } from "@rental-os/rental-core/configuration-basis";
 
 export interface AssetStatusHistoryMetadata {
   reason?: string;
