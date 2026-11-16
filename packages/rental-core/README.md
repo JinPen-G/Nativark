@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、服务容量，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -43,12 +43,15 @@
 | [原业务服务入口](../../apps/api/src/modules/rental-core/README.md) | 当前持久化、事务、Controller、能力和作业，继续逐片移入本包 |
 | [资金事实服务](src/mysql-funding.ts)、[资金事件规则](src/funding-events.ts)、[存储与应收接点](src/funding-storage.ts) | `/mysql-funding` 保留原余额、收退款/保证金门禁、原收据与企业现金核销；`/funding-events` 保留独立账和金额算法。外部支付、原身份/可见范围与企业应收由正式接点供给 |
 | [服务容量](src/mysql-service-capacity.ts)、[容量存储与身份接点](src/service-capacity-storage.ts) | `/mysql-service-capacity` 管理原服务/地点/时段数量、预留与确认、部分履约和释放收据。报价只读观察不维护账；写入复用原品类锁和调用方事务 |
+| [企业应收核销](src/mysql-order-receivables.ts)、[完整原账](src/mysql-corporate-ledger.ts)、[回款收据](src/corporate-payment-receipts.ts)、[冻结结算依据](src/corporate-settlement-basis.ts) | 对应四个正式子出口；核原付款主体、币种及回款/逐单分配/冲销，完整分页不漏账。资金与债权同事务提交，企业回款分配不再次计为现金 |
 
 ## 使用与构建
 
 资金服务从 `@rental-os/rental-core/mysql-funding` 接入，宿主提供同一数据源、每次请求的原身份/订单可见范围，以及已启用企业业务的原应收参与者。已有事务原样传入；服务自开事务时保持原ReadCommitted，资金解释保持原RepeatableRead有界快照。实款、演练、企业回款分配和预授权各按原依据读取，缺供应商核验不显示真实可用余额。[原Nest接线](../../apps/api/src/modules/rental-core/rental-funding.service.ts) · [资金门禁验证](../../tests/rental-funding-gates.test.cjs) · [事件算法验证](../../tests/rental-funding-events.test.cjs)
 
 服务容量从 `@rental-os/rental-core/mysql-service-capacity` 接入，宿主供给本表数据源、原Auth/ALS身份和空间解析。订单预留、确认、取消及履约方法传入调用方已有事务；容量编辑直接复用包内原品类绑定锁。`readAvailabilityForQuote` 只观察原服务发生项，返回指纹与是否可用，不释放超时预留或新占容量；原写入/维护入口才处理过期账。换货和部分履约沿原收据处理，不按服务ID合并历史。[原Nest接线](../../apps/api/src/modules/rental-core/rental-service-capacity.service.ts) · [容量写入验证](../../tests/category-service-capacity-write.test.cjs) · [原预留/换货验证](../../tests/category-service-capacity-reserve.test.cjs) · [发生项验证](../../tests/rental-service-occurrence.test.cjs)
+
+已启用企业业务的宿主从 `@rental-os/rental-core/mysql-order-receivables` 创建原应收仓储，并把同一实例交给资金服务。`corporatePaid` 读取原总回款关联的有效逐单核销，`reconcileCash` 只随本次已持久实款在原订单事务调整债权；原差异或缺收据须核对，不扫描补账。企业账通过 `/mysql-corporate-ledger` 在原授信锁内按500行完整分页，回款与冲销规则从 `/corporate-payment-receipts` 复用。公共人员、权限、企业授信业务入口及外部付款仍由正式调用方处理。[原Nest接线](../../apps/api/src/modules/rental-core/rental-order-receivable.repository.ts) · [私有存储](src/corporate-receivable-storage.ts) · [原资金/企业/文档消费者](../../tests/rental-order-receivable.test.cjs)
 
 原客户端继续从 `@rental-os/shared` 读取租赁合同。Rental 自身实现可从本包根出口取合同，从 `@rental-os/rental-core/business-day` 取营业日函数。新业务 Core 使用公共平台和 Core 合同，不必依赖 Rental。
 

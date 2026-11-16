@@ -1,4 +1,5 @@
 'use strict';
+const assert = require('node:assert/strict');
 const { Prisma } = require('@prisma/client');
 const { RentalFundingService } = require('../../apps/api/src/modules/rental-core/rental-funding.service');
 const { RentalOrderReceivableRepository } = require('../../apps/api/src/modules/rental-core/rental-order-receivable.repository');
@@ -76,6 +77,11 @@ function receivableFixture() {
   db.$queryRaw = async query => {
     db.trace.push({ sql: query.sql, values: query.values });
     if (db.beforeQuery) await db.beforeQuery(query);
+    if (/FROM Tenant /u.test(query.sql)) {
+      assert.equal(query.sql, 'SELECT id FROM Tenant WHERE id=? LOCK IN SHARE MODE');
+      assert.deepEqual(query.values, [tenantId]);
+      return [{ id: tenantId }];
+    }
     if (query.sql.includes('FROM rental_orders')) {
       const row = [...db.orders.values()].find(row => [row.id, row.tenantId, row.workspaceId].every(value => query.values.includes(value)));
       return row ? [{ ...row }] : [];

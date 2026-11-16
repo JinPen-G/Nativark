@@ -330,6 +330,22 @@
     "./mysql-service-capacity": {
       "types": "./dist/mysql-service-capacity.d.ts",
       "default": "./dist/mysql-service-capacity.js"
+    },
+    "./mysql-order-receivables": {
+      "types": "./dist/mysql-order-receivables.d.ts",
+      "default": "./dist/mysql-order-receivables.js"
+    },
+    "./corporate-settlement-basis": {
+      "types": "./dist/corporate-settlement-basis.d.ts",
+      "default": "./dist/corporate-settlement-basis.js"
+    },
+    "./mysql-corporate-ledger": {
+      "types": "./dist/mysql-corporate-ledger.d.ts",
+      "default": "./dist/mysql-corporate-ledger.js"
+    },
+    "./corporate-payment-receipts": {
+      "types": "./dist/corporate-payment-receipts.d.ts",
+      "default": "./dist/corporate-payment-receipts.js"
     }
   },
   "typesVersions": {
@@ -573,6 +589,18 @@
       ],
       "mysql-service-capacity": [
         "dist/mysql-service-capacity.d.ts"
+      ],
+      "mysql-order-receivables": [
+        "dist/mysql-order-receivables.d.ts"
+      ],
+      "corporate-settlement-basis": [
+        "dist/corporate-settlement-basis.d.ts"
+      ],
+      "mysql-corporate-ledger": [
+        "dist/mysql-corporate-ledger.d.ts"
+      ],
+      "corporate-payment-receipts": [
+        "dist/corporate-payment-receipts.d.ts"
       ]
     }
   },

@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-corporate-receivables-20261116"></a>
+
+## Rental 企业应收、现金核销与原回款收据迁移（2026-11-16）
+
+固定父版 `8fcb5344481c2efd9a604d907c806bdf983d5f9c` 已普通推送并实际远端回读，main62ca在本树祖先。原企业应收仓储、完整账读取、总回款/逐单核销/冲销规则与原结算快照校验实际移入Rental包，旧API只保留原Nest一参数构造或窄正式再导出。资金服务与企业业务沿同一数据源和原事务消费，平台人员与权限仍由原正式入口核验。[应收实现](../../../packages/rental-core/src/mysql-order-receivables.ts) · [完整原账](../../../packages/rental-core/src/mysql-corporate-ledger.ts) · [回款收据](../../../packages/rental-core/src/corporate-payment-receipts.ts) · [冻结结算](../../../packages/rental-core/src/corporate-settlement-basis.ts) · [私有存储](../../../packages/rental-core/src/corporate-receivable-storage.ts)
+
+企业回款分配不再次计为现金收入，原按单/账期、付款主体、空间和币种沿冻结依据读取。原授信账户锁内按500行读取完整账，页大小不是账户上限；校验全部回款与逐单分配及冲销来源，不能以孤立delta证明已付款。新实款核销只随同一资金/订单事务调整债权，旧差异拒绝核销、不扫描补账；退款和晚到实款保留原资金来源与收据。
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版正文 | 四模块10个方法/函数正文一致；回款模块全部可执行语句（含两个冲销键箭头）及冻结结算模块也一致。只规范化原SQL/Decimal/隔离常量、正式导入和换行，未改金额/来源/状态规则 |
+| 独立包及完整API类型 | TS5.9.3、锁定Prisma5.22官方内存声明覆盖原238模型；十项配置零诊断。Rental103根/664源/206输出，API988根/2343源/1976输出，编译与声明全部内存 |
+| 原直接消费者 | `node --no-compilation-cache - api-receivable tests/rental-order-receivable.test.cjs`，37856退出0、stderr为空；原27项Node用例全部通过，0fail/cancelled/skip/todo，没有新增脚本或另造运行器 |
+| 资金/企业原链 | 覆盖最后一分钱及超额拒绝、多单稳定锁/原分配、账超过500行仍完整、冲销保留债权原日期、晚到实款/退款、实款与企业回款不同到达顺序、原键回放及资金/债权失败回滚；原供应商结果和事务是明确fixture，没有付款网络调用 |
+| 原接口与展示 | 原财务权限码、命名OpenAPI、可选企业回款金额、后台现金/企业核销区分和服务端结算文档通过。后台组件只做实际源码的静态HTML渲染，不代表浏览器交互或部署通过 |
+| 出口/依赖 | 新四个正式子出口分别对应JS/声明，85正式出口/84子路径typesVersions一致；私有账读取只要求原SQL事务，应收存储只列原本表方法。依赖/peer/lock及HTTP/DTO业务语义未改 |
+| 资料与差异格式 | 七份现行资料1019本地链接、157锚点和85表格无问题，稀疏目标按固定父版定位；git diff --check退出0，正式需求/任务及lock没有差异 |
+
+保留拆分前失败。四模块尚未迁移时先运行同一原[应收用例](../../../tests/rental-order-receivable.test.cjs)，50112退出1，27项中1通过/26失败，均被旧[夹具](../../../tests/helpers/order-receivable-fixture.cjs)缺原Tenant共享父锁阻止。现只补原父锁SQL、租户参数和明确原行返回，未知SQL仍报错；全部金额、权限、历史、回放和回滚断言保留。最终单次运行全部27项通过，没有用生产fallback、删断言或skip处理。
+
+源码头、根入口、模块导读及接入方式随片维护。已启用企业业务的宿主将同一原应收仓储交给资金服务，原企业授信/人员授权/财务入口和外部付款仍按所属域处理；公共Core合同不泄漏本私有MySQL类型。PCH原门槛未跨下一档，完整主领域服务/Controller、数据/页面/作业/AI及标准装配、公共事务/生命周期和真实消费者仍缺。下一入口为主核心/业务服务与配货/确认实际接点。[包阅读入口](../../../packages/rental-core/README.md#使用与构建)
+
+原离线preload在编译前加载，固定offline地址，审计/TEMP/TMP/cache限定本树单一output/.tmp，未产生审计文件、目录为空；进程已退出，JS/声明均内存，没有安装、生成落地client、复制依赖或新残留。SQL/锁/事务/回滚为明确fixture，不证明真实数据库/并发。真实HTTP/数据库/浏览器/供应商、标准包安装/更新回退、独立接手/审查仍未验。
+
+原环境840文件/91,808,304字节及1个0字节日志仍集中待清理；本次同一原生删除自动审批拒绝和责任manifest沿[容量阶段](#core-rental-service-capacity-20261116)保留，没有换工具绕过。旧外观失败和历史缺链继续保留。阶段源码由包含本节的Git提交定位，普通推送codex/platform-core-extraction后实际远端回读；main与其他工作树未写。
+
 <a id="core-rental-service-capacity-20261116"></a>
 
 ## Rental 服务容量与原发生项收据迁移（2026-11-16）

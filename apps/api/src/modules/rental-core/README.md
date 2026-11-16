@@ -4,6 +4,8 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [资金服务](rental-funding.service.ts)是原Nest兼容接线，将同一Prisma数据源、Auth/ALS身份、原订单可见范围和企业应收参与者交给Rental包。资金事件、余额和收退款门禁只有一份实现，调用方原事务、幂等回放、演练/实款区分与企业现金核销保持。[实际资金服务](../../../../../packages/rental-core/src/mysql-funding.ts) · [存储与应收接点](../../../../../packages/rental-core/src/funding-storage.ts) · [事件规则](../../../../../packages/rental-core/src/funding-events.ts)
 
+[企业应收仓储](rental-order-receivable.repository.ts)供给同一数据源，原付款主体/结算快照、完整账分页、回款关联和现金核销由Rental包维护。企业业务入口与资金服务仍共用原账及事务，原总回款、逐单核销和冲销不重复计收入；原企业读取、API文档、后台金额展示与结算文档继续消费同一结果。[核销实现](../../../../../packages/rental-core/src/mysql-order-receivables.ts) · [完整原账](../../../../../packages/rental-core/src/mysql-corporate-ledger.ts) · [回款收据](../../../../../packages/rental-core/src/corporate-payment-receipts.ts) · [冻结结算](../../../../../packages/rental-core/src/corporate-settlement-basis.ts) · [原消费者验证](../../../../../tests/rental-order-receivable.test.cjs)
+
 [服务容量](rental-service-capacity.service.ts)也只供给原Nest数据源和Auth/ALS空间，容量算法及原品类锁在Rental包内。Controller、报价/确认、换货、客户端观察及到期维护共用同一实例。订单写入传入原事务，报价只读不释放预留；部分履约和归还按原发生项收据结算，不改历史价格或服务结果。[实际容量实现](../../../../../packages/rental-core/src/mysql-service-capacity.ts) · [容量存储接点](../../../../../packages/rental-core/src/service-capacity-storage.ts) · [履约消费者验证](../../../../../tests/rental-service-execution.test.cjs)
 
 领域与品类治理合同、营业日、计价与器材、能力执行/条件判定及审计仓储已单源移入 Rental 包。原 shared/API 路径和 Nest provider 继续转接同一实现，本目录承接剩余业务服务、事务、数据和任务。[独立 Rental 包](../../../../../packages/rental-core/README.md)
