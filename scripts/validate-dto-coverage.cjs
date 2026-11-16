@@ -14,7 +14,7 @@ const path = require("node:path");
  * 可选成员（`note?: string`）漏了照样编译通过。
  *
  * 所以这里用编译器 API 静态比对：凡 `class X implements Y`，
- * Y 的每个成员都必须在 X 上声明且带至少一个校验装饰器。
+ * Y 的每个成员都必须在 X 或其父类上声明且带至少一个校验装饰器。
  * 少一个就让门禁失败，把「静默丢字段」变成构建期错误。
  */
 
@@ -26,7 +26,9 @@ require("ts-node").register({
 const ts = require("typescript");
 
 const repoRoot = path.resolve(__dirname, "..");
-const dtoRoot = path.join(repoRoot, "apps", "api", "src");
+// 扫描实际DTO所有者；原API再导出不携带装饰器，不能让迁出的类从字段门禁消失。
+const dtoRoots = ["apps/api/src", "packages/platform-server/src", "packages/rental-core/src"]
+  .map((relative) => path.join(repoRoot, relative));
 const sharedEntry = path.join(repoRoot, "packages", "shared", "src", "index.ts");
 
 function collectFiles(dir, suffix, acc = []) {
@@ -38,7 +40,7 @@ function collectFiles(dir, suffix, acc = []) {
   return acc;
 }
 
-const dtoFiles = collectFiles(dtoRoot, ".dto.ts");
+const dtoFiles = dtoRoots.flatMap((root) => collectFiles(root, ".dto.ts"));
 if (!dtoFiles.length) {
   console.log("DTO coverage check skipped: no *.dto.ts files found.");
   process.exit(0);
@@ -59,18 +61,43 @@ function interfaceMembers(type) {
   return checker.getPropertiesOfType(type).map((symbol) => symbol.getName());
 }
 
-/** 类上带校验装饰器的属性名。只认真正声明的属性，不认继承的方法。 */
+/** 只计入class-validator装饰器；Type/Swagger元数据不能使whitelist保留字段。 */
+function hasValidationDecorator(member) {
+  return (ts.getDecorators(member) ?? []).some((decorator) => {
+    const expression = ts.isCallExpression(decorator.expression)
+      ? decorator.expression.expression : decorator.expression;
+    const symbol = checker.getSymbolAtLocation(
+      ts.isPropertyAccessExpression(expression) ? expression.expression : expression
+    );
+    return (symbol?.declarations ?? []).some((declaration) => {
+      let parent = declaration;
+      while (parent && !ts.isImportDeclaration(parent)) parent = parent.parent;
+      return parent && ts.isStringLiteral(parent.moduleSpecifier)
+        && parent.moduleSpecifier.text === "class-validator";
+    });
+  });
+}
+
+/** class-validator继承父类的字段元数据；子类无装饰器的重声明不会删除它。 */
 function decoratedClassMembers(node) {
   const named = new Map();
+  for (const clause of node.heritageClauses ?? []) {
+    if (clause.token !== ts.SyntaxKind.ExtendsKeyword) continue;
+    for (const expression of clause.types) {
+      const declarations = checker.getTypeAtLocation(expression).getSymbol()?.declarations ?? [];
+      for (const parent of declarations.filter(ts.isClassDeclaration)) {
+        for (const [name, validated] of decoratedClassMembers(parent)) named.set(name, validated);
+      }
+    }
+  }
   for (const member of node.members) {
     if (!ts.isPropertyDeclaration(member) || !member.name) continue;
-    const name = member.name.getText();
-    const decorators = ts.getDecorators ? ts.getDecorators(member) ?? [] : [];
-    named.set(name, decorators.length > 0);
+    const name = ts.isIdentifier(member.name) || ts.isStringLiteral(member.name)
+      ? member.name.text : member.name.getText();
+    named.set(name, Boolean(named.get(name)) || hasValidationDecorator(member));
   }
   return named;
 }
-
 const failures = [];
 let checkedClasses = 0;
 let checkedMembers = 0;

@@ -18,16 +18,16 @@ const now = Date.now();
 const startAt = new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString();
 const endAt = new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString();
 
-function context() {
-  const profile = core.getProfile(tenantId);
+async function context(id = tenantId) {
+  const profile = (await core.getProfile(id));
   return {
     profile,
     category: core.listCategories().find((item) => item.code === profile.categoryCode),
-    settings: core.getBusinessSettings(tenantId),
-    groups: core.listItemGroups(tenantId),
-    couponTemplates: core.listCouponTemplates(tenantId),
-    locations: core.listLocations(tenantId),
-    operators: core.listOperators(tenantId)
+    settings: (await core.getBusinessSettings(id)),
+    groups: core.listItemGroups(id),
+    couponTemplates: core.listCouponTemplates(id),
+    locations: core.listLocations(id),
+    operators: core.listOperators(id)
   };
 }
 
@@ -39,14 +39,23 @@ const ok2 = (message) => console.log(`  PASS  ${message}`);
 // SPACE-03：状态按经营空间取，先跑启动预热建立查找表（夹具提供演示空间）。
 await core.onApplicationBootstrap();
 await business.onApplicationBootstrap();
-require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', context());
+require('./helpers/fulfillment-admission-fixture.cjs').bindFulfillmentAdmission([core, business], tenantId, 'ws_tenant_002', (await context()));
+// 明确内存配置fixture；实际库存依据算法读取当前Core商品，不模拟数据库或事务原子性。
+business.coreConfigStore.listItemGroupsPage = async (tenant, workspace, query) => {
+  assert.equal(tenant, tenantId);
+  assert.equal(workspace, `ws_${tenant}`);
+  assert.equal(query.limit, 1);
+  const rows = core.listItemGroups(tenant).filter(row => row.id === query.itemGroupId);
+  return { source: "persisted_workspace_configuration", rows: structuredClone(rows), truncated: false, limit: query.limit };
+};
 
-const pricing = business.listPricingPlans(tenantId, context());
+
+const pricing = business.listPricingPlans(tenantId, (await context()));
 assert.equal(pricing[0].categoryCode, "camping");
 assert.ok(pricing[0].rates.every((rate) => rate.unit === "calendar_day"));
 assert.ok(pricing[0].rates.every((rate) => rate.itemGroupCode.startsWith("CAMP-")));
 
-const savedPricing = await business.savePricingPlan(tenantId, context(), {
+const savedPricing = await business.savePricingPlan(tenantId, (await context()), {
   id: pricing[0].id,
   code: pricing[0].code,
   name: pricing[0].name,
@@ -57,7 +66,7 @@ const savedPricing = await business.savePricingPlan(tenantId, context(), {
 });
 assert.equal(savedPricing.version, "1.1");
 
-const calendar = await business.importOfficialCalendar(tenantId, context(), {
+const calendar = await business.importOfficialCalendar(tenantId, (await context()), {
   year: new Date(startAt).getUTCFullYear(),
   region: "CN",
   sourceName: "测试用国务院办公厅年度通知",
@@ -66,7 +75,7 @@ const calendar = await business.importOfficialCalendar(tenantId, context(), {
   days: [{ date: startAt.slice(0, 10), dayType: "statutory_holiday", name: "测试法定假日" }]
 });
 assert.equal(calendar.status, "draft");
-const publishedCalendar = await business.publishCalendar(tenantId, context(), calendar.year, {
+const publishedCalendar = await business.publishCalendar(tenantId, (await context()), calendar.year, {
   changeReason: "测试年度日历首发"
 });
 assert.equal(publishedCalendar.status, "published");
@@ -77,14 +86,14 @@ assert.equal(publishedCalendar.changeReason, "测试年度日历首发", "发布
 // SPACE-03：states 现在按经营空间键，演示租户的默认空间是 ws_<tenantId>。
 const workspaceKey = `ws_${tenantId}`;
 const cachedCalendarCount = business.states.get(workspaceKey).calendars.length;
-business.getCalendar(tenantId, context(), calendar.year + 10);
+business.getCalendar(tenantId, (await context()), calendar.year + 10);
 assert.equal(business.states.get(workspaceKey).calendars.length, cachedCalendarCount, "calendar GET must be side-effect free");
 
 // 写库失败时必须保留最后一次成功提交的缓存，而不是留下幽灵日历配置。
-const calendarBeforeRejectedWrite = structuredClone(business.getCalendar(tenantId, context(), calendar.year));
+const calendarBeforeRejectedWrite = structuredClone(business.getCalendar(tenantId, (await context()), calendar.year));
 businessConfigStore.failCalendar = true;
 await assert.rejects(
-  business.saveCalendarDay(tenantId, context(), calendar.year, {
+  business.saveCalendarDay(tenantId, (await context()), calendar.year, {
     date: `${calendar.year}-12-31`,
     dayType: "tenant_special",
     name: "不得进入缓存",
@@ -95,29 +104,29 @@ await assert.rejects(
   /calendar write rejected/
 );
 assert.deepEqual(
-  business.getCalendar(tenantId, context(), calendar.year),
+  business.getCalendar(tenantId, (await context()), calendar.year),
   calendarBeforeRejectedWrite,
   "failed calendar write must leave cache unchanged"
 );
 businessConfigStore.failCalendar = false;
 
-const currentRule = business.currentRule(tenantId, context());
+const currentRule = business.currentRule(tenantId, (await context()));
 // RULE-01A：保存草稿与发布是两步。saveRuleVersion 只产出草稿，publishRuleVersion 才生效。
 await assert.rejects(
-  () => business.saveRuleVersion(tenantId, context(), {
+  async () => business.saveRuleVersion(tenantId, (await context()), {
     config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: true } },
     changeReason: "天气自动免取消费在首期必须 fail closed"
   }, "test"),
   /天气免取消费暂未支持/u
 );
-const savedRule = await business.saveRuleVersion(tenantId, context(), {
+const savedRule = await business.saveRuleVersion(tenantId, (await context()), {
   config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: false } },
   changeReason: "测试露营取消规则"
 }, "test");
 assert.equal(savedRule.status, "draft", "保存只产出草稿，不直接生效");
-const publishedRule = await business.publishRuleVersion(tenantId, context(), savedRule.version, { reason: "发布天气取消规则" }, "test");
+const publishedRule = await business.publishRuleVersion(tenantId, (await context()), savedRule.version, { reason: "发布天气取消规则" }, "test");
 assert.equal(publishedRule.status, "published", "立即发布即已生效");
-assert.equal(business.currentRule(tenantId, context()).version, "1.1", "按当前时间匹配到新发布的 1.1");
+assert.equal(business.currentRule(tenantId, (await context())).version, "1.1", "按当前时间匹配到新发布的 1.1");
 
 const couponTemplate = await core.saveCouponTemplate(tenantId, {
   code: "CAMP-WELCOME",
@@ -140,16 +149,16 @@ const notYetClaimable = await core.saveCouponTemplate(tenantId, {
   effectiveFrom: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
   effectiveTo: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(), status: "active"
 });
-await assert.rejects(() => business.claimCoupon(tenantId, context(), notYetClaimable.id, "member_future_claim"), /可领取时间范围/u);
+await assert.rejects(async () => business.claimCoupon(tenantId, (await context()), notYetClaimable.id, "member_future_claim"), /可领取时间范围/u);
 ok2("优惠券领取时段与券使用时段分别判定");
 // claimCoupon 现在返回 { coupon, template }：模板的 claimedQuantity 也是本次写入的一部分，
 // 调用方需要它才能在事务提交后正确更新缓存。
-const claimResult = await business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001");
+const claimResult = await business.claimCoupon(tenantId, (await context()), couponTemplate.id, "member_001");
 const customerCoupon = claimResult.coupon;
 assert.equal(customerCoupon.status, "claimed");
 assert.equal(customerCoupon.claimedAt >= couponTemplate.claimFrom && customerCoupon.claimedAt <= couponTemplate.claimTo, true);
 assert.equal(claimResult.template.claimedQuantity, 1, "领取应使模板已领数量加一");
-await assert.rejects(async () => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
+await assert.rejects(async () => business.claimCoupon(tenantId, (await context()), couponTemplate.id, "member_001"), /限领/);
 await core.saveCouponTemplate(tenantId, {
   id: couponTemplate.id,
   code: couponTemplate.code,
@@ -170,12 +179,12 @@ await core.saveCouponTemplate(tenantId, {
   status: "active"
 });
 
-const group = context().groups.find((item) => item.code === "CAMP-TENT");
+const group = (await context()).groups.find((item) => item.code === "CAMP-TENT");
 const location = core.listLocations(tenantId)[0];
-const selectedService = business.listServices(tenantId, context())[0];
+const selectedService = business.listServices(tenantId, (await context()))[0];
 
 // 使用量阶梯必须按超额段累进；验证计划保存门禁与报价行使用的是同一套纯计费策略。
-const usageContext = context();
+const usageContext = (await context());
 usageContext.settings = structuredClone(usageContext.settings);
 usageContext.settings.pricing.enabledUnits = [...new Set([...usageContext.settings.pricing.enabledUnits, "usage"])];
 const usagePlanBase = {
@@ -252,7 +261,7 @@ customerCoupon.effectiveTo = new Date(now + 60 * 60_000).toISOString();
 const quoteUseWindowEnd = customerCoupon.effectiveTo;
 let quote;
 try {
-  quote = await business.createQuote(tenantId, context(), {
+  quote = await business.createQuote(tenantId, (await context()), {
     customerType: "personal",
     customerId: "member_001",
     fulfillmentMode: "store_pickup_return",
@@ -277,7 +286,7 @@ assert.ok(Date.parse(quote.couponEvaluation.rentalStartAt) > Date.parse(quoteUse
 const originalApplicableRentalFrom = customerCoupon.applicableRentalFrom;
 try {
   customerCoupon.applicableRentalFrom = new Date(Date.parse(startAt) + 60_000).toISOString();
-  await assert.rejects(() => business.createQuote(tenantId, context(), {
+  await assert.rejects(async () => business.createQuote(tenantId, (await context()), {
     customerType: "personal", customerId: "member_001", fulfillmentMode: "store_pickup_return",
     fulfillmentLocationId: location.id, startAt, endAt, customerCouponId: customerCoupon.id,
     lines: [{ itemGroupId: group.id, quantity: 1 }]
@@ -312,63 +321,58 @@ let storedQuote = structuredClone(quote);
 business.factStore.findQuote = async (tenant, id) => tenant === tenantId && id === storedQuote.id ? structuredClone(storedQuote) : undefined;
 const originalQuoteWrite = business.factStore.upsertQuote;
 business.factStore.upsertQuote = async value => { await originalQuoteWrite(value); storedQuote = structuredClone(value); };
-const consumed = business.consumeQuote(tenantId, context(), quote.id);
+const consumed = business.consumeQuote(tenantId, (await context()), quote.id);
 assert.equal(consumed.id, quote.id);
-await business.markQuoteConsumed(tenantId, context(), quote.id, orderId);
-await business.loadQuote(tenantId, context(), quote.id);
-assert.throws(() => business.consumeQuote(tenantId, context(), quote.id), /已用于订单/, "quote snapshots must be single-use");
-await business.lockCoupon(tenantId, context(), quote.customerCouponId, orderId);
-assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "locked");
-await business.redeemCoupon(tenantId, context(), orderId);
-assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "redeemed");
-await business.releaseCoupon(tenantId, context(), orderId);
-assert.equal(business.listCustomerCoupons(tenantId, context(), "member_001")[0].status, "claimed");
+await business.markQuoteConsumed(tenantId, (await context()), quote.id, orderId);
+await business.loadQuote(tenantId, (await context()), quote.id);
+const consumedQuoteContext = await context();
+assert.throws(() => business.consumeQuote(tenantId, consumedQuoteContext, quote.id), /已用于订单/, "quote snapshots must be single-use");
+await business.lockCoupon(tenantId, (await context()), quote.customerCouponId, orderId);
+assert.equal(business.listCustomerCoupons(tenantId, (await context()), "member_001")[0].status, "locked");
+await business.redeemCoupon(tenantId, (await context()), orderId);
+assert.equal(business.listCustomerCoupons(tenantId, (await context()), "member_001")[0].status, "redeemed");
+await business.releaseCoupon(tenantId, (await context()), orderId);
+assert.equal(business.listCustomerCoupons(tenantId, (await context()), "member_001")[0].status, "claimed");
 
-const settings = core.getBusinessSettings(tenantId);
+const settings = (await core.getBusinessSettings(tenantId));
 await core.saveBusinessSettings(tenantId, {
   ...settings,
   membership: { ...settings.membership, signupRewardEnabled: true, signupRewardType: "points", signupRewardAmount: 100, referralRewardEnabled: true, referralRewardType: "points", referrerRewardAmount: 50, inviteeRewardAmount: 20 }
 }, "test");
-const reward = await business.grantReward(tenantId, context(), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" });
+const reward = await business.grantReward(tenantId, (await context()), { customerId: "member_001", triggerType: "registration", idempotencyKey: "register:member_001" });
 assert.equal(reward[0].amount, 100);
-assert.equal(business.listBenefitAccounts(tenantId, context(), "member_001")[0].pointsBalance, 100, "points rewards must be applied to the tenant benefit account");
+assert.equal(business.listBenefitAccounts(tenantId, (await context()), "member_001")[0].pointsBalance, 100, "points rewards must be applied to the tenant benefit account");
 // 奖励幂等已改为以数据库为准（RC-04）：判重查 rental_reward_ledger_entries 的
 // (tenantId, idempotencyKey) 唯一约束与派生子键前缀，而这里注入的是吸收式 stub（读返回空）。
 // 在 stub 上断言幂等只会测到"重写了一遍查询逻辑的假实现"，因此该断言迁至
 // tests/mysql-e2e.test.cjs 第 42 节，用"重启清空内存后同键再发"证伪内存判重。
-await business.reverseReward(tenantId, context(), reward[0].id, "测试撤销");
-assert.equal(business.listRewards(tenantId, context())[0].status, "reversed");
-assert.equal(business.listBenefitAccounts(tenantId, context(), "member_001")[0].pointsBalance, 0, "reversing a reward must reverse the applied benefit");
-const referralReward = await business.grantReward(tenantId, context(), { customerId: "member_referrer", relatedCustomerId: "member_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:first-order:member_invitee" });
+await business.reverseReward(tenantId, (await context()), reward[0].id, "测试撤销");
+assert.equal(business.listRewards(tenantId, (await context()))[0].status, "reversed");
+assert.equal(business.listBenefitAccounts(tenantId, (await context()), "member_001")[0].pointsBalance, 0, "reversing a reward must reverse the applied benefit");
+const referralReward = await business.grantReward(tenantId, (await context()), { customerId: "member_referrer", relatedCustomerId: "member_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:first-order:member_invitee" });
 assert.equal(referralReward.length, 2, "configured referral trigger must grant both referrer and invitee rewards");
-await business.registerReferral(tenantId, context(), "member_event_invitee", "member_event_referrer");
-const eventRewards = await business.handleCustomerEvent(tenantId, context(), "member_event_invitee", "first_order_completed");
+await business.registerReferral(tenantId, (await context()), "member_event_invitee", "member_event_referrer");
+const eventRewards = await business.handleCustomerEvent(tenantId, (await context()), "member_event_invitee", "first_order_completed");
 assert.equal(eventRewards.length, 2, "first completed order must execute the configured referral trigger");
-assert.equal((await business.handleCustomerEvent(tenantId, context(), "member_event_invitee", "first_order_completed")).length, 2, "business event rewards must be idempotent");
-const pointsBeforeOtherTenantRead = business.listBenefitAccounts(tenantId, context()).length;
-const cameraContext = {
-  profile: core.getProfile("tenant_001"),
-  category: core.listCategories().find((item) => item.code === core.getProfile("tenant_001").categoryCode),
-  settings: core.getBusinessSettings("tenant_001"),
-  groups: core.listItemGroups("tenant_001"),
-  couponTemplates: core.listCouponTemplates("tenant_001")
-};
+assert.equal((await business.handleCustomerEvent(tenantId, (await context()), "member_event_invitee", "first_order_completed")).length, 2, "business event rewards must be idempotent");
+const pointsBeforeOtherTenantRead = business.listBenefitAccounts(tenantId, (await context())).length;
+const cameraContext = await context("tenant_001");
 assert.equal(business.listBenefitAccounts("tenant_001", cameraContext).length, 0, "benefit accounts must remain isolated by SaaS tenant");
 
-const couponRewardSettings = core.getBusinessSettings(tenantId);
+const couponRewardSettings = (await core.getBusinessSettings(tenantId));
 await core.saveBusinessSettings(tenantId, {
   ...couponRewardSettings,
   membership: { ...couponRewardSettings.membership, referralRewardEnabled: true, referralRewardType: "coupon", referrerRewardAmount: 1, inviteeRewardAmount: 1, referralRewardCouponTemplateId: couponTemplate.id }
 }, "test");
-const couponRewards = await business.grantReward(tenantId, context(), { customerId: "coupon_referrer", relatedCustomerId: "coupon_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:coupon:test" });
+const couponRewards = await business.grantReward(tenantId, (await context()), { customerId: "coupon_referrer", relatedCustomerId: "coupon_invitee", triggerType: "first_order_completed", idempotencyKey: "referral:coupon:test" });
 assert.equal(couponRewards.length, 2);
-assert.equal(business.listCustomerCoupons(tenantId, context(), "coupon_referrer").length, 1, "coupon rewards must create an actual customer coupon");
-assert.equal(business.listBenefitAccounts(tenantId, context(), "coupon_invitee")[0].availableRewardCouponCount, 1);
-await business.reverseReward(tenantId, context(), couponRewards[0].id, "撤销测试券奖励");
-assert.equal(business.listBenefitAccounts(tenantId, context(), "coupon_referrer")[0].availableRewardCouponCount, 0);
-assert.equal(business.listBenefitAccounts(tenantId, context()).length >= pointsBeforeOtherTenantRead, true);
+assert.equal(business.listCustomerCoupons(tenantId, (await context()), "coupon_referrer").length, 1, "coupon rewards must create an actual customer coupon");
+assert.equal(business.listBenefitAccounts(tenantId, (await context()), "coupon_invitee")[0].availableRewardCouponCount, 1);
+await business.reverseReward(tenantId, (await context()), couponRewards[0].id, "撤销测试券奖励");
+assert.equal(business.listBenefitAccounts(tenantId, (await context()), "coupon_referrer")[0].availableRewardCouponCount, 0);
+assert.equal(business.listBenefitAccounts(tenantId, (await context())).length >= pointsBeforeOtherTenantRead, true);
 
-const damageWaiver = await business.saveService(tenantId, context(), {
+const damageWaiver = await business.saveService(tenantId, (await context()), {
   code: "DAMAGE-WAIVER",
   name: "露营设备损坏免赔",
   serviceType: "damage_waiver",
@@ -389,16 +393,16 @@ const damageWaiver = await business.saveService(tenantId, context(), {
   status: "enabled"
 });
 const damageQuote = { ...quote, request: { ...quote.request, services: [{ serviceId: damageWaiver.id, quantity: 1 }] } };
-assert.ok(business.calculateDamageCharge(tenantId, context(), damageQuote, [{ chargeAmount: 1000 }]) < 1000, "damage waiver must reduce the customer charge according to its saved terms");
+assert.ok(business.calculateDamageCharge(tenantId, (await context()), damageQuote, [{ chargeAmount: 1000 }]) < 1000, "damage waiver must reduce the customer charge according to its saved terms");
 
 // ============ 兼容开关只关旧倍率：dayTypePrices 与时间窗规则照常生效 ============
 // 需求 4.4.5 的第 3 层有两个来源：逐商品配置的 dayTypePrices（价格版本里的显式配置）
 // 与 PRICE-03 之前的空间级 weekendMultiplier/holidayMultiplier。
 // `pricing.holidayPricingEnabled` 只管后者：关掉它，配好的日期类型价格仍要按配置收钱。
 // 早前 resolveUnitPrice 的每个分支都返回「属于价格模块」，于是这个开关无论开关都不生效。
-const layerGroup = context().groups.find((item) => item.code !== "CAMP-TENT") ?? context().groups[0];
+const layerGroup = (await context()).groups.find((item) => item.code !== "CAMP-TENT") ?? (await context()).groups[0];
 const layerYear = new Date(now).getUTCFullYear();
-const layerCalendar = business.getCalendar(tenantId, context(), layerYear);
+const layerCalendar = business.getCalendar(tenantId, (await context()), layerYear);
 // 从日历里挑一个真正的周末且可营业的日期，而不是自己推算星期：
 // 周末口径由 settings.calendar.weekendDays 决定，硬编码会在改配置后静默失效。
 const weekendDay = layerCalendar.days.find(
@@ -418,7 +422,7 @@ const layerRate = {
   minimumUnits: 1,
   preAuthAmount: 0
 };
-const layerPlan = await business.savePricingPlan(tenantId, context(), {
+const layerPlan = await business.savePricingPlan(tenantId, (await context()), {
   code: "LAYER-COMPAT",
   name: "兼容开关专项计划",
   status: "enabled",
@@ -429,12 +433,12 @@ const layerPlan = await business.savePricingPlan(tenantId, context(), {
   rates: [layerRate]
 }, "test");
 
-const layerSettingsBefore = core.getBusinessSettings(tenantId);
+const layerSettingsBefore = (await core.getBusinessSettings(tenantId));
 const setLegacySwitch = async (enabled) => {
-  const current = core.getBusinessSettings(tenantId);
+  const current = (await core.getBusinessSettings(tenantId));
   await core.saveBusinessSettings(tenantId, { ...current, pricing: { ...current.pricing, holidayPricingEnabled: enabled } }, "test");
 };
-const layerQuote = async () => business.createQuote(tenantId, context(), {
+const layerQuote = async () => business.createQuote(tenantId, (await context()), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: location.id,
@@ -477,7 +481,7 @@ assert.equal(
 //    这是本轮口径的核心——兼容开关不得连带关掉 PRICE-03 的显式配置。
 //    用一个生效更晚的计划来承载它，走的是与生产相同的「同键取生效最晚者」路径，
 //    而不是就地改写一个已启用计划（那条路在数据库模式下要求走调价计划）。
-await business.savePricingPlan(tenantId, context(), {
+await business.savePricingPlan(tenantId, (await context()), {
   code: "LAYER-COMPAT-DT",
   name: "兼容开关专项计划（日期类型价）",
   status: "enabled",
@@ -505,13 +509,13 @@ const hoursDay = layerCalendar.days.find(
 );
 assert.ok(hoursDay, "夹具日历里必须存在一个可营业的工作日");
 const publishHours = async (hours, reason) => {
-  const day = business.getCalendar(tenantId, context(), layerYear).days.find((item) => item.date === hoursDay.date);
+  const day = business.getCalendar(tenantId, (await context()), layerYear).days.find((item) => item.date === hoursDay.date);
   const { source: _s, overrideBy: _b, overrideAt: _a, overriddenFrom: _o, overrideScope: _c, ...rest } = day;
-  await business.saveCalendarDay(tenantId, context(), layerYear, { ...rest, hours, overrideReason: reason }, "test");
-  await business.publishCalendar(tenantId, context(), layerYear, { changeReason: reason }, "test");
+  await business.saveCalendarDay(tenantId, (await context()), layerYear, { ...rest, hours, overrideReason: reason }, "test");
+  await business.publishCalendar(tenantId, (await context()), layerYear, { changeReason: reason }, "test");
 };
 // 12:00 领取、14:00 归还（Asia/Shanghai）。
-const hoursQuote = async () => business.createQuote(tenantId, context(), {
+const hoursQuote = async () => business.createQuote(tenantId, (await context()), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: location.id,
@@ -549,10 +553,11 @@ await publishHours(
   { windows: [{ start: "09:00", end: "18:00" }], pickup: [{ start: "11:00", end: "13:00" }], return: [] },
   "时段三态：领取动作独立复查"
 );
+const pickupContext = await context();
 assert.doesNotThrow(
   () => business.assertPickupOpenAt(
     tenantId,
-    context(),
+    pickupContext,
     location.id,
     `${hoursDay.date}T04:00:00.000Z`,
     "store_pickup_return"
@@ -565,25 +570,25 @@ await publishHours({ windows: [{ start: "09:00", end: "18:00" }] }, "时段三�
 // ============ MKT-01A：报价必须保存逐方案评估，且优惠不得触碰押金与预授权 ============
 // 需求 4.4.10：报价保存已应用与未应用方案、原因、计算基数、公式、版本和空间范围；
 // 标准租金优惠不得含糊地减免押金、预授权或异常费用。
-const mktGroup = context().groups.find((item) => item.code !== "CAMP-TENT") ?? context().groups[0];
+const mktGroup = (await context()).groups.find((item) => item.code !== "CAMP-TENT") ?? (await context()).groups[0];
 const mktStartAt = new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString();
 const mktEndAt = new Date(now + 12 * 24 * 60 * 60 * 1000).toISOString();
 // 两个同互斥组的方案：减免小者优先级更高，用来验证「按实际减免最大择一」在报价链路上成立。
-await business.saveDiscountPlan(tenantId, context(), {
+await business.saveDiscountPlan(tenantId, (await context()), {
   code: "MKT-SMALL", name: "小额优惠", status: "enabled",
   discountType: "fixed_amount", discountValue: 10, minimumSpend: 0,
   appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [],
   priority: 1, exclusiveGroup: "MKT-G", stackableWithOtherPlans: false, stackableWithCoupon: true,
   effectiveFrom: new Date(now - 86_400_000).toISOString(), changeReason: "MKT-01A 专项"
 });
-await business.saveDiscountPlan(tenantId, context(), {
+await business.saveDiscountPlan(tenantId, (await context()), {
   code: "MKT-BIG", name: "大额优惠", status: "enabled",
   discountType: "fixed_amount", discountValue: 60, minimumSpend: 0,
   appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [],
   priority: 90, exclusiveGroup: "MKT-G", stackableWithOtherPlans: false, stackableWithCoupon: true,
   effectiveFrom: new Date(now - 86_400_000).toISOString(), changeReason: "MKT-01A 专项"
 });
-const mktQuote = await business.createQuote(tenantId, context(), {
+const mktQuote = await business.createQuote(tenantId, (await context()), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: location.id,
@@ -603,7 +608,7 @@ assert.equal(mktBig.planVersion, "1.0", "评估必须带方案版本");
 assert.ok(mktBig.workspaceId, "评估必须带经营空间范围");
 assert.equal(mktQuote.appliedDiscountPlanIds.length, 1, "只应用一个互斥方案");
 // 优惠只作用于租金：押金与预授权必须与「无优惠」时完全一致。
-const mktDepositProbe = await business.createQuote(tenantId, context(), {
+const mktDepositProbe = await business.createQuote(tenantId, (await context()), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: location.id,
@@ -625,7 +630,7 @@ ok2("MKT-01A：报价保存逐方案评估与落选原因，优惠不触碰押�
 const memberPlanState = business.states.get(workspaceKey);
 const originalDiscountPlans = memberPlanState.discountPlans;
 memberPlanState.discountPlans = [...originalDiscountPlans, {
-  id: "member-only-plan", tenantId, categoryCode: context().profile.categoryCode, code: "MEMBER-ONLY",
+  id: "member-only-plan", tenantId, categoryCode: (await context()).profile.categoryCode, code: "MEMBER-ONLY",
   name: "会员专享测试", status: "enabled", discountType: "fixed_amount", discountValue: 20,
   minimumSpend: 0, appliesTo: "rental", customerScope: "member", applicableItemGroupIds: [],
   applicableDayTypes: [], priority: 1, stackableWithOtherPlans: false, stackableWithCoupon: true,
@@ -633,7 +638,7 @@ memberPlanState.discountPlans = [...originalDiscountPlans, {
   createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString()
 }];
 try {
-  const profileOnlyQuote = await business.createQuote(tenantId, context(), {
+  const profileOnlyQuote = await business.createQuote(tenantId, (await context()), {
     customerType: "personal", customerId: "profile_without_membership", fulfillmentMode: "store_pickup_return",
     fulfillmentLocationId: location.id, startAt: mktStartAt, endAt: mktEndAt,
     lines: [{ itemGroupId: mktGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
@@ -652,7 +657,7 @@ const membershipProbeInput = {
   customerType: "personal", customerId: "member_001", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: location.id,
   startAt: mktStartAt, endAt: mktEndAt, lines: [{ itemGroupId: mktGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
 };
-const noMembershipBenefitQuote = await business.createQuote(tenantId, context(), membershipProbeInput);
+const noMembershipBenefitQuote = await business.createQuote(tenantId, (await context()), membershipProbeInput);
 business.memberships = {
   resolveBookingIdentity: async () => ({
     bookingIdentity: "enterprise_employee", personalCustomerId: "member_001", personalCustomerName: "个人会员",
@@ -662,7 +667,7 @@ business.memberships = {
     corporatePlan: { id: "assignment_corporate", customerId: "corp_001", planId: "plan_corporate", planVersionId: "version_corporate", source: "corporate_contract", status: "active", effectiveFrom: startAt, snapshot: { planName: "企业方案", targetType: "corporate", benefits: [{ type: "rental_discount", calculation: "amount", value: 25 }] }, createdAt: startAt }
   })
 };
-const membershipBenefitQuote = await business.createQuote(tenantId, context(), {
+const membershipBenefitQuote = await business.createQuote(tenantId, (await context()), {
   ...membershipProbeInput,
   bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" }
 });
@@ -673,7 +678,7 @@ assert.equal(membershipBenefitQuote.discountAmount, noMembershipBenefitQuote.dis
 assert.ok(membershipBenefitQuote.chargeLines.some((line) => line.code === "membership:rental_discount:corporate" && line.amount === -25), "会员减免必须有独立可解释费用行");
 ok2("会员权益：企业员工仅用企业方案，金额、来源与费用行均随报价固化");
 const scopedMembership = await business.memberships.resolveBookingIdentity();
-const quoteCategory = context().category.code;
+const quoteCategory = (await context()).category.code;
 scopedMembership.corporatePlan.snapshot.benefits = [
   { type: "rental_discount", calculation: "amount", value: 10, scope: { type: "tenant" } },
   { type: "rental_discount", calculation: "amount", value: 80, scope: { type: "workspaces", workspaceIds: ["another-workspace"] } },
@@ -681,7 +686,7 @@ scopedMembership.corporatePlan.snapshot.benefits = [
   { type: "rental_discount", calculation: "amount", value: 90, scope: { type: "categories", categoryCodes: [quoteCategory === "camera" ? "camping" : "camera"] } }
 ];
 business.memberships.resolveBookingIdentity = async () => structuredClone(scopedMembership);
-const scopedQuote = await business.createQuote(tenantId, context(), { ...membershipProbeInput, bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" } });
+const scopedQuote = await business.createQuote(tenantId, (await context()), { ...membershipProbeInput, bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" } });
 assert.equal(scopedQuote.discountAmount, noMembershipBenefitQuote.discountAmount + 20, "只在适用权益中取最大减免，不叠加，也不命中其他空间/品类");
 assert.equal(scopedQuote.membershipBenefitEvaluations.filter(row => row.scopeMatched === false).length, 2);
 assert.ok(scopedQuote.membershipBenefitEvaluations.filter(row => row.scopeMatched === false).every(row => row.appliedAmount === 0 && /不适用/.test(row.skippedReason)));
@@ -691,7 +696,7 @@ ok2("统一会员：报价按范围择优、说明未命中原因并冻结权益
 
 // MEMBER-BENEFIT-RISK-01：押金减免必须同时满足空间规则、商品等级、会员状态与当前风险查询。
 // 配置使用不可拆分的每单固定押金，确保任一未获准商品都不会把整笔押金错误免掉。
-const securityGroup = context().groups.find((item) => item.id === mktGroup.id);
+const securityGroup = (await context()).groups.find((item) => item.id === mktGroup.id);
 const originalSecurityAttributes = structuredClone(securityGroup.attributes);
 const saveSecurityGroup = async (attributes) => core.saveItemGroup(tenantId, {
   id: securityGroup.id,
@@ -708,9 +713,9 @@ assert.equal(quote.couponEvaluation.checkedAt <= quote.couponEvaluation.rentalSt
 assert.equal(quote.couponEvaluation.rentalStartAt, startAt);
 assert.equal(quote.couponEvaluation.applicableRentalFrom, undefined);
 await saveSecurityGroup({ ...originalSecurityAttributes, securityRiskLevel: "low" });
-const savedConfigBeforeSecurityPolicy = structuredClone(business.currentRule(tenantId, context()).config);
+const savedConfigBeforeSecurityPolicy = structuredClone(business.currentRule(tenantId, (await context())).config);
 const saveSecurityPolicy = async (policy) => {
-  const draft = await business.saveRuleVersion(tenantId, context(), {
+  const draft = await business.saveRuleVersion(tenantId, (await context()), {
     config: {
       ...savedConfigBeforeSecurityPolicy,
       deposit: { mode: "order_fixed", fixedAmount: 100 },
@@ -718,7 +723,7 @@ const saveSecurityPolicy = async (policy) => {
     },
     changeReason: "MEMBER-BENEFIT-RISK-01 报价门禁专项"
   }, "test");
-  await business.publishRuleVersion(tenantId, context(), draft.version, { reason: "MEMBER-BENEFIT-RISK-01 报价门禁专项" }, "test");
+  await business.publishRuleVersion(tenantId, (await context()), draft.version, { reason: "MEMBER-BENEFIT-RISK-01 报价门禁专项" }, "test");
 };
 scopedMembership.corporatePlan.snapshot.benefits = [
   { type: "deposit_reduction", calculation: "percentage", value: 100 }
@@ -734,12 +739,12 @@ const securityQuoteInput = {
   bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" }
 };
 await saveSecurityPolicy({ enabled: false });
-const disabledSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+const disabledSecurityQuote = await business.createQuote(tenantId, (await context()), securityQuoteInput);
 assert.equal(disabledSecurityQuote.depositAmount, 100, "空间未启用风控规则时不得减免押金");
 assert.equal(disabledSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction").securityRiskCheck, "not_enabled");
 
 await saveSecurityPolicy({ enabled: true, allowedRiskLevels: ["low"], maxReductionPercent: 50, maxReductionAmount: 30 });
-const allowedSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+const allowedSecurityQuote = await business.createQuote(tenantId, (await context()), securityQuoteInput);
 const allowedSecurityBenefit = allowedSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction");
 assert.equal(allowedSecurityQuote.depositAmount, 70, "清洁会员按比例及绝对金额双上限取更小值");
 assert.equal(allowedSecurityBenefit.appliedAmount, 30);
@@ -752,18 +757,18 @@ assert.deepEqual(allowedSecurityBenefit.securityRiskAssessments, [{
 }], "报价按商品型号固化当时等级及是否获许可，后续改等级不改历史判断");
 
 securityRiskState = "open";
-const openRiskSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+const openRiskSecurityQuote = await business.createQuote(tenantId, (await context()), securityQuoteInput);
 assert.equal(openRiskSecurityQuote.depositAmount, 100, "存在未关闭风险时不可免押");
 assert.equal(openRiskSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction").securityRiskCheck, "open_risk");
 
 securityRiskState = "unavailable";
-const unavailableRiskSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+const unavailableRiskSecurityQuote = await business.createQuote(tenantId, (await context()), securityQuoteInput);
 assert.equal(unavailableRiskSecurityQuote.depositAmount, 100, "风控查询失败时按原押金额报价，不得放行减免");
 assert.equal(unavailableRiskSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction").securityRiskCheck, "unavailable");
 
 securityRiskState = "clear";
 await saveSecurityGroup({ ...originalSecurityAttributes, securityRiskLevel: "high" });
-const disallowedLevelQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+const disallowedLevelQuote = await business.createQuote(tenantId, (await context()), securityQuoteInput);
 assert.equal(disallowedLevelQuote.depositAmount, 100, "空间只允许低风险时，高风险商品不参与每单固定押金减免");
 const disallowedLevelBenefit = disallowedLevelQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction");
 assert.equal(disallowedLevelBenefit.securityEligibleBase, 0);
@@ -774,7 +779,7 @@ ok2("会员押金风控：空间许可、商品风险、当前风险查询、双
 // 这个专项只注入一次性会员解析 stub；后续历史报价测试没有客户主档，不能误走新会员门禁。
 business.memberships = undefined;
 
-const crossYearQuote = await business.createQuote(tenantId, context(), {
+const crossYearQuote = await business.createQuote(tenantId, (await context()), {
   customerType: "personal",
   fulfillmentMode: "store_pickup_return",
   fulfillmentLocationId: location.id,
@@ -784,9 +789,9 @@ const crossYearQuote = await business.createQuote(tenantId, context(), {
 });
 assert.match(crossYearQuote.calendarVersion, /\|/, "cross-year quotes must snapshot every calendar year");
 
-const template = business.listNotificationTemplates(tenantId, context()).find((item) => item.eventCode === "order.created");
+const template = business.listNotificationTemplates(tenantId, (await context())).find((item) => item.eventCode === "order.created");
 assert.ok(template, "必须存在订单创建通知模板");
-const sendLog = await business.sendNotification(tenantId, context(), {
+const sendLog = await business.sendNotification(tenantId, (await context()), {
   templateId: template.id,
   recipient: "member_001",
   variables: { customerName: "露营测试会员", orderNo: "RC-NOTIFY-TEST-001" }
@@ -794,7 +799,7 @@ const sendLog = await business.sendNotification(tenantId, context(), {
 assert.equal(sendLog.status, "simulated");
 assert.equal(sendLog.provider, "simulation");
 assert.equal(sendLog.templateVersion, template.version);
-await assert.rejects(async () => business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "member_001", variables: {} }), /缺少通知变量/);
+await assert.rejects(async () => business.sendNotification(tenantId, (await context()), { templateId: template.id, recipient: "member_001", variables: {} }), /缺少通知变量/);
 
 // NOTICE-01：业务事件通知失败不能被 emitNotificationEvent 静默吞掉，
 // 必须写入 simulation_failed 事实，后续由工作台按订单生成待办。
@@ -802,27 +807,21 @@ const originalSchema = template.variableSchema;
 template.variableSchema = { ...originalSchema, failureReason: { label: "失败原因", required: true } };
 const failedLogs = await business.emitNotificationEvent(
   tenantId,
-  context(),
+  (await context()),
   "order.created",
   "member_001",
   { customerName: "露营测试会员", orderNo: "RC-NOTIFY-FAIL-001" },
   { type: "order", id: "order_notify_failure" }
 );
 assert.equal(failedLogs.length, 0, "失败通知不能被调用方当成已发送成功");
-const failedLog = business.listNotificationLogs(tenantId, context()).find((row) => row.businessObjectId === "order_notify_failure");
+const failedLog = business.listNotificationLogs(tenantId, (await context())).find((row) => row.businessObjectId === "order_notify_failure");
 assert.ok(failedLog, "通知失败必须保留一条失败发送事实");
 assert.equal(failedLog.status, "simulation_failed");
 assert.equal(failedLog.businessObjectType, "order");
 assert.match(failedLog.errorMessage, /缺少通知变量/);
 template.variableSchema = originalSchema;
 
-assert.equal(business.listPricingPlans("tenant_001", {
-  profile: core.getProfile("tenant_001"),
-  category: core.listCategories().find((item) => item.code === core.getProfile("tenant_001").categoryCode),
-  settings: core.getBusinessSettings("tenant_001"),
-  groups: core.listItemGroups("tenant_001"),
-  couponTemplates: core.listCouponTemplates("tenant_001")
-})[0].categoryCode, "camera");
+assert.equal(business.listPricingPlans("tenant_001", await context("tenant_001"))[0].categoryCode, "camera");
 
 // TENANT-READY-01：空白租户开业判定——履约网络是必做项，会员方案是可暂缓项。
 // 用非演示租户（R1 决策：普通租户不自带经营主体/地点）验证 readiness 的口径。
@@ -835,17 +834,10 @@ const { runWithRequestIdentity } = require("../apps/api/src/common/request-ident
 const readyWorkspaceId = `ws_${readyTenant}`;
 const readReady = () => runWithRequestIdentity(
   { tenantId: readyTenant, userId: "test-ready", workspaceId: readyWorkspaceId, isSaasAdmin: false },
-  () => business.tenantReadiness(readyTenant, readyContext())
+  async () => business.tenantReadiness(readyTenant, (await readyContext()))
 );
-const readyContext = () => ({
-  profile: core.getProfile(readyTenant),
-  category: core.listCategories().find((item) => item.code === core.getProfile(readyTenant).categoryCode),
-  settings: core.getBusinessSettings(readyTenant),
-  groups: core.listItemGroups(readyTenant),
-  couponTemplates: core.listCouponTemplates(readyTenant),
-  locations: core.listLocations(readyTenant),
-  operators: core.listOperators(readyTenant),
-  pricingGroups: core.listPricingGroups(readyTenant)
+const readyContext = async () => ({
+  ...(await context(readyTenant)), pricingGroups: core.listPricingGroups(readyTenant)
 });
 const blankReadiness = await readReady();
 const fulfillmentItem = blankReadiness.items.find((item) => item.key === "fulfillment_network");

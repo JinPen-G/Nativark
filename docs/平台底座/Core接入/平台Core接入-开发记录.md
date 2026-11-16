@@ -11,6 +11,41 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-business-runtime-20261116"></a>
+
+## Rental 报价、营销聚合及配置 DTO 独立归属（2026-11-16）
+
+固定父版3c00f3a1c36d64cef1a3fb985f2b676b99adf671已普通推送并实际远端回读，main62ca在本树祖先，包含本片修改前的源码、夹具和接续原文。原报价/营销服务的218个方法及14个命名辅助函数实际迁入Rental包；旧API保留44行Nest接线，供给原14项依赖和两个继承初始化钩子。配置、事实、恢复、能力和容量继续使用包内单源，会员、企业币种、密文及短信经实际窄端口供给。[报价/营销实现](../../../packages/rental-core/src/mysql-business-runtime.ts) · [宿主端口](../../../packages/rental-core/src/business-runtime-ports.ts) · [原Nest入口](../../../apps/api/src/modules/rental-core/rental-business.service.ts)
+
+私有出口 @rental-os/rental-core/mysql-business-runtime 保留调用方真实事务类型及模块级续租ALS，当前身份仍从唯一公共ALS读取。detached报价配置视图只做原身份比较，不发布未提交缓存；原SQL、金额、锁、指纹、历史价格及营销来源不变。通知attempts、认领租约和最终回执分别记录，unknown只查询原投递，不重发。供应商算法、nonce、凭据与HTTP仍在原集成服务。[公共通知结果](../../../packages/platform-server/src/common/notification-delivery.ts) · [Provider标识](../../../packages/platform-contracts/src/integration-provider.ts)
+
+五项通知结果声明及错误类成为公共服务单源，八种Provider标识成为公共合同单源，原IntegrationRuntime/shared再导出同一声明。配置DTO从正式 /configuration-dto 导入，旧API再导出同一61个运行时类；原字段、嵌套Type/ValidateNested和装饰器元数据保留，Rental构建明确启用原两项装饰器编译选项。宿主先按原Nest启动加载reflect-metadata。源码说明移除关于自动推断嵌套类的过期说法，权限、批准、业务规则和保存仍由原服务执行。[DTO源码](../../../packages/rental-core/src/config-request.dto.ts) · [原HTTP入口](../../../apps/api/src/modules/rental-core/rental-config-request.dto.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版正文/DTO | 232个可执行单元在规范化正式导入、原Prisma常量、装饰器自引用别名和透明括号后一致；DTO使用相同编译选项并规范化唯一合同导入后，82,999字符的JS及装饰器元数据完全一致；五项通知声明正文一致 |
+| 独立包与完整API类型 | TS5.9.3、Prisma5.22官方内存声明覆盖原238模型；最终42280的十配置零诊断。Rental115根/837源/230输出，API988根/2358源/1976输出，JS/声明全部内存 |
+| 原报价/营销消费者 | node --no-compilation-cache - api-business-v1-consumer tests/rental-business-v1.test.cjs，43564退出0、stderr为空，达到原完整成功标记；149个原断言的期待值与消息保留，新增3个明确库存分页fixture的租户/空间/limit断言，未增加测试文件或用例 |
+| 原初始化、通知及换货/续租 | node --no-compilation-cache - api-business-runtime-final tests/rental-business-initialization-refresh.test.cjs tests/rental-notification-lease.test.cjs tests/rental-exchange-segment-pricing.test.cjs，42280退出0、stderr为空；初始化/刷新交错成功，通知租约/回执4组及34个原断言保留，换货/续租93项全过，0fail/cancelled/skip/todo |
+| 实际Nest与运行时类 | 同一42280核原14项Inject依赖为同一实例，两个初始化钩子继承包内函数，trace为restore→config→facts→core→workspaces；61个DTO原路径与正式出口对象相同，嵌套坏输入拒绝，通知unknown错误类身份相同；实际Nest容器只接明确空fixture |
+| 门禁继承与白名单 | 现有DTO检查器扫描API/公共服务/Rental实际所有者，递归检查继承字段，只认可class-validator装饰器；缺可选字段、仅Type装饰器分别拒绝，字符串属性名正确识别。实际AiTaskCalendarDraftSaveDto的继承字段经whitelist全部保留，坏taskId拒绝，没有放宽字段规则 |
+| DTO全局门禁 | 27992用固定3c检查器和原配置DTO复现73处，扩实际所有者后原规则74处，修继承误判后11处；公共PlatformUserStatusDto关联正式SaveSystemUserRequest的isActive字段后，42280中仍退出1、10处原未关联契约问题。消费者退出0和门禁退出1分别保留，不能称contract:validate全绿 |
+| 原通知安全与MCP来源 | 7个实际通知源安全断言通过。完整安全用例95个原断言与MCP身份fixture27个原断言保留，仅调整迁后实际源及泛型片段；未执行会落地产物的完整MCPfixture构建/审计 |
+| 出口/依赖与资料 | Rental94出口/93子路径typesVersions、公共合同7/6、公共服务26/25逐一对应正式源码和声明；两个可选校验peer取原API版本，锁文件匹配。根入口、三包README和原API导读同步，接入者按正式出口与宿主端口阅读 |
+| 定向文档与格式 | 九份资料1135本地链接、165锚点及89表格，0问题；稀疏目标以固定Git定位，git diff --check退出0。正式需求/任务全文、原编号/依赖/百分比无差异 |
+
+保留原失败及修复范围。41684有12个类型错误，来自计价出口、通知hasEnabledProvider和报价contacts端口缺项；49980有2个原helper alias遗漏，补实际接点后31340及最终十配置通过。原业务和通知fixture把已经异步的档案/设置当同步值，现等待真实读取并保留原期待值/消息及throws/rejects语义；50360随后因缺listItemGroupsPage失败，52096仅恢复3c原业务服务仍在同位置复现，其他模块使用本版字节，不冒称整仓旧版。只补明确有界的当前商品fixture后43564通过，生产缺库存门禁未改。
+
+31988在原DTO检查处退出1，后续消费者尚未执行；修继承检查后27992继续暴露验证夹具未加载reflect-metadata，补原宿主初始化前置再完成42280。一次验证输出句柄丢失时，先只读确认原进程退出再重试，没有并行重复环境、额外IO或假称那次通过。
+
+剩余10个DTO门禁项集中在[member-name六个类](../../../apps/api/src/modules/ai-native/member-name.dto.ts)、[task-rule-draft两个类](../../../apps/api/src/modules/ai-native/task-rule-draft.dto.ts)、[企业订单委托引用类](../../../apps/api/src/modules/enterprise/enterprise-order-delegation.dto.ts)和[OfflineDepositEvidenceDto](../../../apps/api/src/modules/rental-core/rental-order-request.dto.ts)。它们是原契约关联/嵌套命名缺口；继承字段不丢失已有实际验证，不把门禁问题当作业务字段已经被剥离。按所属源码切片补正式关联，不能豁免类、吞错误或修改需求来变绿。
+
+PCH原G1～G4未跨下一档，百分比/依赖/顺序不改。下一入口为配货、订单确认及其真实企业授权/原批准事务，再到Controller与标准Core装配；完整Rental数据/迁移/Seed、页面/客户端、作业/AI及公共组织/订阅/基础集成、真实无Core/多Core运行、干净安装、分别更新/回退和独立接手/审查仍缺。[接入路线](../../../packages/rental-core/README.md#使用与构建)
+
+全部新验证复用既有worker经stdin编译/加载，原离线preload、固定offline地址及本树单一output/.tmp边界保留，输出均内存；没有安装、落地client、共享dist写入、新环境或后台业务进程。SQL/事务/库存/会员、Nest空数据及Provider结果均为明确fixture，不证明真实HTTP/数据库/浏览器/供应商、完整安装或正式验收。收尾再次核定原待清理840文件/91,808,304字节环境和0字节日志，无链接与使用进程；原生PowerShell Remove-Item仍在启动前被自动审批以blocked by policy拒绝，两个原责任manifest更新最近尝试，残留仍集中待清理，没有换壳/工具绕过。[原清理证据](#core-rental-recovery-receipts-20261116)
+
+阶段源码由包含本节的Git提交定位，中文提交并普通推送codex/platform-core-extraction后实际远端回读；main及其他工作树未写。
+
 <a id="core-rental-main-runtime-20261116"></a>
 
 ## Rental 主核心聚合与原Nest兼容入口（2026-11-16）

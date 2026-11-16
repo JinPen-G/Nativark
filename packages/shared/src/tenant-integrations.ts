@@ -8,15 +8,8 @@ import type { RentalCurrency } from "./core";
 
 export type TenantIntegrationCapability = "sms" | "payment" | "file";
 
-export type TenantIntegrationProvider =
-  | "aliyun_sms"
-  | "tencent_sms"
-  | "alipay"
-  | "wechat_pay"
-  | "stripe"
-  | "aliyun_oss"
-  | "tencent_cos"
-  | "s3_compatible";
+import type { TenantIntegrationProvider } from "@rental-os/platform-contracts/integration-provider";
+export type { TenantIntegrationProvider } from "@rental-os/platform-contracts/integration-provider";
 
 export type TenantIntegrationTestStatus = "not_tested" | "passed" | "failed";
 export type TenantIntegrationTestMode = "none" | "configuration" | "live";

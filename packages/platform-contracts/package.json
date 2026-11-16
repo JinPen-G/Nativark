@@ -30,6 +30,10 @@
     "./files": {
       "types": "./dist/files.d.ts",
       "default": "./dist/files.js"
+    },
+    "./integration-provider": {
+      "types": "./dist/integration-provider.d.ts",
+      "default": "./dist/integration-provider.js"
     }
   },
   "scripts": {
@@ -52,6 +56,9 @@
       ],
       "files": [
         "dist/files.d.ts"
+      ],
+      "integration-provider": [
+        "dist/integration-provider.d.ts"
       ]
     }
   },

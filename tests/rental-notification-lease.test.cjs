@@ -90,12 +90,12 @@ const secretBox = {
   fingerprint: (value) => `fp:${value}`
 };
 
-function context() {
-  const profile = core.getProfile(tenantId);
+async function context() {
+  const profile = (await core.getProfile(tenantId));
   return {
     profile,
     category: core.listCategories().find((item) => item.code === profile.categoryCode),
-    settings: core.getBusinessSettings(tenantId),
+    settings: (await core.getBusinessSettings(tenantId)),
     groups: core.listItemGroups(tenantId),
     couponTemplates: core.listCouponTemplates(tenantId),
     locations: core.listLocations(tenantId),
@@ -114,8 +114,8 @@ void (async () => {
   await business.onApplicationBootstrap();
   const workspaceId = business.workspaceOf(tenantId);
 
-  const template = business.listNotificationTemplates(tenantId, context()).find((item) => item.eventCode === "order.created" && item.channel === "sms")
-    ?? business.listNotificationTemplates(tenantId, context()).find((item) => item.eventCode === "order.created");
+  const template = business.listNotificationTemplates(tenantId, (await context())).find((item) => item.eventCode === "order.created" && item.channel === "sms")
+    ?? business.listNotificationTemplates(tenantId, (await context())).find((item) => item.eventCode === "order.created");
   assert.ok(template, "必须存在订单创建通知模板");
   template.channel = "sms";
   template.providerTemplateCode = "SMS_TEST_001";
@@ -123,7 +123,7 @@ void (async () => {
 
   // 1. 首次投递失败：attempts 只在记录结果时 +1，租约随之释放，安排下一次重试。
   runtime.mode = "fail";
-  const first = await business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "13800001111", variables });
+  const first = await business.sendNotification(tenantId, (await context()), { templateId: template.id, recipient: "13800001111", variables });
   assert.equal(first.status, "failed");
   assert.equal(first.attempts, 1, "记录失败结果时 attempts 递增一次");
   assert.ok(first.nextAttemptAt, "未达上限时必须安排下一次重试");
@@ -147,23 +147,23 @@ void (async () => {
 
   // 3. 达到 maxAttempts：状态 failed + 原因注明耗尽，nextAttemptAt 清空，不再停留在 queued。
   row.leaseUntil = null;
-  await business.retryNotification(tenantId, context(), first.id);
+  await business.retryNotification(tenantId, (await context()), first.id);
   assert.equal(factStore.rows.get(first.id).log.attempts, 2);
-  const last = await business.retryNotification(tenantId, context(), first.id);
+  const last = await business.retryNotification(tenantId, (await context()), first.id);
   assert.equal(last.attempts, 3);
   assert.equal(last.status, "failed");
   assert.match(last.errorMessage, /已达最大重试次数\(3\)/u);
   assert.equal(last.nextAttemptAt, undefined, "耗尽后不再安排自动重试");
   assert.equal((await factStore.listDueNotificationDeliveries(tenantId, afterLease, 10)).length, 0);
-  await assert.rejects(() => business.retryNotification(tenantId, context(), first.id), /最大重试次数/u);
+  await assert.rejects(async () => business.retryNotification(tenantId, (await context()), first.id), /最大重试次数/u);
   ok("达到上限后明确落为 failed 并说明原因，不会静默卡在队列里");
 
   // 4. 回执轮询：sent 行按服务商回执落成 delivered / delivery_failed；查询未知记 delivery_uncertain。
   runtime.mode = "ok";
-  const sentA = await business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "13800002222", variables });
-  const sentB = await business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "13800003333", variables });
-  const sentC = await business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "13800004444", variables });
-  const sentD = await business.sendNotification(tenantId, context(), { templateId: template.id, recipient: "13800005555", variables });
+  const sentA = await business.sendNotification(tenantId, (await context()), { templateId: template.id, recipient: "13800002222", variables });
+  const sentB = await business.sendNotification(tenantId, (await context()), { templateId: template.id, recipient: "13800003333", variables });
+  const sentC = await business.sendNotification(tenantId, (await context()), { templateId: template.id, recipient: "13800004444", variables });
+  const sentD = await business.sendNotification(tenantId, (await context()), { templateId: template.id, recipient: "13800005555", variables });
   for (const item of [sentA, sentB, sentC, sentD]) {
     assert.equal(item.status, "sent");
     assert.equal(item.attempts, 1);

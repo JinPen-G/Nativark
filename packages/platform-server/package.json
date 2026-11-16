@@ -106,6 +106,10 @@
     "./subscription-reader": {
       "types": "./dist/modules/subscription/subscription-reader.d.ts",
       "default": "./dist/modules/subscription/subscription-reader.js"
+    },
+    "./notification-delivery": {
+      "types": "./dist/common/notification-delivery.d.ts",
+      "default": "./dist/common/notification-delivery.js"
     }
   },
   "scripts": {
@@ -199,6 +203,9 @@
       ],
       "subscription-reader": [
         "dist/modules/subscription/subscription-reader.d.ts"
+      ],
+      "notification-delivery": [
+        "dist/common/notification-delivery.d.ts"
       ]
     }
   }

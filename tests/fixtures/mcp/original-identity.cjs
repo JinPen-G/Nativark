@@ -329,21 +329,21 @@ function checkNativeOrderStatusTypes() {
   write('modules/ai-native/tools/order-explanation-preparation.service.d.ts', 'export declare class AiOrderExplanationPreparationService { constructor(authority: unknown, facts: unknown, next: unknown); prepare(value: unknown): Promise<unknown> }');
   // Strict-check the exact new Core method, not its 5k-line class or Prisma
   // generated types. Its runtime still executes the original complete class.
-  const coreSource = fs.readFileSync(path.join(root, 'apps/api/src/modules/rental-core/rental-core.service.ts'), 'utf8');
+  const coreSource = fs.readFileSync(path.join(root, 'packages/rental-core/src/mysql-core-runtime.ts'), 'utf8');
   const start = coreSource.indexOf('  async getOrderInTransaction('), end = coreSource.indexOf('\n  /**', start);
   assert.ok(start > 0 && end > start);
   const method = coreSource.slice(start, end);
   const pageStart = coreSource.indexOf('  async listInspectionsPageInTransaction('), pageEnd = coreSource.indexOf('\n  async correctInspectionUsage(', pageStart);
   assert.ok(pageStart > 0 && pageEnd > pageStart);
   const pageMethod = coreSource.slice(pageStart, pageEnd);
-  const repositorySource = fs.readFileSync(path.join(root, 'apps/api/src/modules/rental-core/rental-core-fact.repository.ts'), 'utf8');
+  const repositorySource = fs.readFileSync(path.join(root, 'packages/rental-core/src/mysql-core-facts.ts'), 'utf8');
   const parserStart = repositorySource.indexOf('export interface RentalInspectionPageQuery '), parserEnd = repositorySource.indexOf('\nexport interface InventoryLockTarget ', parserStart);
   assert.ok(parserStart > 0 && parserEnd > parserStart);
   write('modules/rental-core/rental-core-fact.repository.ts', 'import type { RentalInspectionRecord } from "@rental-os/shared"; import { BadRequestException } from "@nestjs/common";\n' + repositorySource.slice(parserStart, parserEnd));
   write('modules/rental-core/rental-core.service.ts', [
     'import type { Prisma } from "@prisma/client"; import type { RentalOrder, RentalOrderInspectionBasisFacts } from "@rental-os/shared";',
     'import { getRequestIdentity } from "../../common/request-identity"; import { ForbiddenException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";',
-    'import { requestFingerprint } from "./rental-idempotency.repository"; type RentalFactTx = Prisma.TransactionClient;',
+    'import { requestFingerprint } from "./rental-idempotency.repository"; type RentalFactTx = Prisma.TransactionClient; type TTransaction = Prisma.TransactionClient;',
     'import { parseRentalInspectionPageQuery, type RentalInspectionPageQuery, type RentalInspectionPage } from "./rental-core-fact.repository";',
     'export class RentalCoreService { constructor(private readonly factStore: { findOrder(tenant: string, id: string, tx: Prisma.TransactionClient): Promise<RentalOrder | undefined>; listInspectionsPage?(tenant: string, id: string, query: RentalInspectionPageQuery, tx?: Prisma.TransactionClient): Promise<RentalInspectionPage> }) {} private publicOrder(row: RentalOrder): RentalOrder { return row; } getOrder(tenant: string, id: string): Promise<RentalOrder> { throw new Error("Type facade only, never a runtime Core"); } listInspectionsPage(tenant: string, id: string, query: RentalInspectionPageQuery): Promise<RentalInspectionPage> { throw new Error("Type facade only"); }',
     'readOrderFacts(tenant: string, id: string): Promise<RentalOrder & { workspaceId: string }> { throw new Error("Type facade only"); } readInspectionFactsPage(tenant: string, id: string, query: RentalInspectionPageQuery): Promise<RentalInspectionPage> { throw new Error("Type facade only"); } readOrderInspectionBasis(tenant: string, id: string): Promise<RentalOrderInspectionBasisFacts> { throw new Error("Type facade only"); }',
@@ -353,7 +353,7 @@ function checkNativeOrderStatusTypes() {
   write('node_modules/@nestjs/common/index.d.ts', 'export declare class ForbiddenException extends Error { constructor(message?: string) } export declare class NotFoundException extends Error { constructor(message?: string) }');
   write('modules/ai-native/quote-preview.service.d.ts', 'import type { AiWorkspaceScope } from "@rental-os/shared"; export interface AiQuoteCoreContextSource { current(scope: AiWorkspaceScope): Promise<unknown> }');
   write('modules/ai-native/model-gateway.ports.d.ts', 'export declare class ModelGatewayError extends Error { constructor(code: string) }');
-  const businessSource = fs.readFileSync(path.join(root, 'apps/api/src/modules/rental-core/rental-business.service.ts'), 'utf8');
+  const businessSource = fs.readFileSync(path.join(root, 'packages/rental-core/src/mysql-business-runtime.ts'), 'utf8');
   const factStart = businessSource.indexOf('  private async loadQuoteFact('), factEnd = businessSource.indexOf('\n  /**', factStart);
   const quoteStart = businessSource.indexOf('  async readQuoteInTransaction('), quoteEnd = businessSource.indexOf('\n  /**', quoteStart);
   assert.ok(factStart > 0 && factEnd > factStart && quoteStart > factEnd && quoteEnd > quoteStart);
@@ -361,7 +361,7 @@ function checkNativeOrderStatusTypes() {
   write('modules/rental-core/rental-business.service.ts', [
     'import type { Prisma } from "@prisma/client"; import type { RentalQuoteSnapshotV1 } from "@rental-os/shared";',
     'import { getRequestIdentity } from "../../common/request-identity"; import { ServiceUnavailableException, NotFoundException, ConflictException } from "@nestjs/common";',
-    'import { requestFingerprint } from "./rental-idempotency.repository"; type RentalBusinessFactTx = Prisma.TransactionClient;',
+    'import { requestFingerprint } from "./rental-idempotency.repository"; type RentalBusinessFactTx = Prisma.TransactionClient; type TTransaction = Prisma.TransactionClient;',
     'export class RentalBusinessService { constructor(private readonly factStore: { findQuote(tenant: string, id: string, tx?: Prisma.TransactionClient): Promise<RentalQuoteSnapshotV1 | undefined> }) {} loadQuote(tenant: string, context: unknown, id: string, tx?: Prisma.TransactionClient): Promise<RentalQuoteSnapshotV1> { throw new Error("Type facade only"); }',
     'readOrderLinkedQuoteFacts(tenant: string, order: string, quote: string): Promise<RentalQuoteSnapshotV1 | undefined> { throw new Error("Type facade only"); }',
     quoteMethods, '}',

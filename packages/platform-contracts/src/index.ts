@@ -530,3 +530,4 @@ export interface PlatformPrincipal {
 export * from "./subscription";
 export * from "./common";
 export * from "./files";
+export * from "./integration-provider";

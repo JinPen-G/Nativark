@@ -49,7 +49,7 @@ export class SavePlatformUserDto implements SaveSystemUserRequest {
   @IsBoolean() isActive!: boolean;
 }
 
-export class PlatformUserStatusDto {
+export class PlatformUserStatusDto implements Pick<SaveSystemUserRequest, "isActive"> {
   @IsBoolean() isActive!: boolean;
 }
 
