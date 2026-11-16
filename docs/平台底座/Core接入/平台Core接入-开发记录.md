@@ -11,6 +11,24 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-draft-fixture-checkpoint-20261117"></a>
+
+## 原草稿回归夹具与底层冲突检查点（2026-11-17）
+
+固定父版5f4e283f7558a45e24f97038f11995bc8d499d09保存原规则/日历绑定草稿、批准设置和路由授权四份实现；本检查点只补原AI请求夹具的两张收据表及失败证据，生产源码尚未迁移。本树/目标任务分支与实际远端相同，main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍为祖先。原接续直接引用固定Git，不另存副本。
+
+[原请求夹具](../../../tests/fixtures/ai-native/lane-a-original-request.cjs)的序列化存储初始集合补operationLog、rentalCalendarOverrideAuditEntry两张明确空表，供原[草稿拒绝收据](../../../apps/api/src/modules/ai-native/original-draft-rejection.store.ts)读取。未改测试断言、权限、服务或错误映射；空表只代表该样例未记录原操作，不代表授权、提交或真实数据库。
+
+继续沿已有内存stdin worker运行十配置及[原六项草稿消费者](../../../tests/ai-native-plan-input-source.test.cjs)，Prisma5.22官方238模型/TS5.9.3、产物均留内存。PID45112退出1，十配置0诊断，六项1通过/5失败。随后PID34688仅在内存编译的[路由授权](../../../apps/api/src/modules/ai-native/business-read-route.authority.ts)错误映射前打印错误名称/短消息/码/状态，退出1，仍1通过/5失败；没有改磁盘生产实现、凭据或断言。下层409为“Core品类上下文缺少当前绑定来源”，另外两项日历旧路径将AI_REVISION_CONFLICT包装为PROVIDER_UNAVAILABLE；不能把所有失败直接称为旧问题或通过。
+
+已沿[当前绑定锁](../../../packages/rental-core/src/mysql-category-write.ts)、[真实Core报价配置](../../../packages/rental-core/src/mysql-core-runtime.ts)和[品类解析器](../../../packages/rental-core/src/category-runtime.ts)核查：草稿样例写入adoptionRevision=1的已采用绑定，但Core创建时没有categoryResolver，故读取配置仍缺当前categoryVersionId/adoptionRevision。下一步给这两个明确样例接入同一序列化存储上的真实RentalCategoryResolver，保留生产提交前的绑定复验，再判断日历其他失败。候选五份包源码只在内存准备，30执行单元与原文相等，未据此称迁移或消费者通过。
+
+原设置保存用例category-config-write前阶段通过，仅作为原设置行为证据。当前检查点未跨PCH下一门槛；完整Rental装配/数据/页面/AI、公共组织/订阅/集成、真实HTTP/数据库/浏览器、干净包安装、升级回退及独立接手/审查仍未验。所有本片worker退出，output/.tmp无新增文件；没有安装、生成落盘、环境读取或网络业务请求。
+
+定向九份文档1350个本地链接/171个锚点/96个表格0问题，git diff --check退出0；它们只证明文档与本片差异格式，不替代业务通过。
+
+两份旧残留原生PowerShell删除再次在启动前被自动审批以blocked by policy拒绝，命令内预检查未执行。保留主仓库output/.cleanup-pending/pch-preparation下原platform-host-integration与rental-business-facts责任manifest；随后只读核定文件数/体积及链接，再更新最近尝试时间。未换壳或工具绕过，归集不代表删除或空间释放。
+
 <a id="core-rental-inspection-applications-20261117"></a>
 
 ## Rental 客户检查同意与批准换货执行独立归属（2026-11-17）

@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-本次客户检查同意/批准执行的固定父版为480e1f3f60fb7f375490fd870e8124af4dc97dc1，保存原服务与完整接续，直接用Git定位。两个实际应用及SQL已成为Rental包单源，旧入口只供给原四项/八项Nest参加者；检查准备/影像、读辅助、严格DTO和公共组织范围的前一阶段成果继续保留。[当前同意/执行阶段](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117) · [检查阶段](平台Core接入-开发记录.md#core-rental-inspection-runtime-20261117) · [夹具基线](平台Core接入-开发记录.md#core-rental-inspection-fixture-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114)与[品牌原稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)在固定Git保留。
+原检查同意/批准执行阶段已提交并真实远端回读5f4e283f7558a45e24f97038f11995bc8d499d09，保存当前原草稿/设置实现及完整接续。当前准备迁移规则/日历绑定草稿与批准设置/路由授权四项应用，五份候选只在内存，生产实现未变；原AI请求夹具补两张明确空收据表，六项原草稿仍1通过/5失败。已定位已采用样例缺真实品类解析器，先补同存储接线并核下层错误，再迁移，不能放宽生产绑定或包装失败为通过。[草稿检查点](平台Core接入-开发记录.md#core-rental-draft-fixture-checkpoint-20261117) · [已提交同意/执行](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117) · [检查阶段](平台Core接入-开发记录.md#core-rental-inspection-runtime-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据；[MIT来源](平台Core接入-开发记录.md#nativark-mit-20261114)与[品牌原稿](平台Core接入-开发记录.md#nativark-logo-core-options-20261114)在固定Git保留。
 
 ## 2. 已有实际接点
 
@@ -49,7 +49,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-客户检查同意/批准执行的19个执行单元与固定父版一致，原4/8项Nest注入与Optional索引3保持，十配置零诊断。必要内存探针先2通过/1失败，定位为直接改写原到期字段破坏hash；改为推进Date时钟后基线/候选均3/3通过。原SQL/认证、Core提交/授信与事务为明确fixture，照片正向字节链未验；所有worker退出，output/.tmp无新增产物。前一检查准备/影像37单元与七项原消费者证据继续保留。真实HTTP/数据库/浏览器、完整Core安装/更新、独立接手及审查仍未验。[当前执行证据](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117) · [检查证据](平台Core接入-开发记录.md#core-rental-inspection-runtime-20261117)
+当前草稿检查点的十配置0诊断，原六项草稿消费者1通过/5失败。已读取包装前的品类绑定错误；下一步接真实解析器并核其余日历冲突，测试和迁移尚未完成。前一检查同意/批准执行19单元、原Nest4/8项注入和修正时钟后的基线/候选3/3证据继续保留。SQL/认证/事务及Core提交为明确fixture，照片正向字节、真实HTTP/数据库/浏览器、完整包安装/更新、独立接手及审查仍未验。所有本片worker已退出，output/.tmp无新增产物。[当前草稿证据](平台Core接入-开发记录.md#core-rental-draft-fixture-checkpoint-20261117) · [同意/执行证据](平台Core接入-开发记录.md#core-rental-inspection-applications-20261117)
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 
