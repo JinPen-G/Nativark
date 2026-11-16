@@ -1,0 +1,7 @@
+FROM node:24.13.0-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /tools
+RUN npm install --ignore-scripts --no-audit --no-fund prisma@5.22.0 \
+    && node node_modules/@prisma/engines/scripts/postinstall.js
+ENTRYPOINT ["node", "/tools/node_modules/prisma/build/index.js"]
