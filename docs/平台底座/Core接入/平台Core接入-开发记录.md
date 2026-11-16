@@ -11,6 +11,32 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-core-facts-20261116"></a>
+
+## Rental 订单、库存与检查事实仓储迁移（2026-11-16）
+
+固定父版 `7447555e21c951b1b71aa1b14497d5d179722f09` 已普通推送并真实远端回读，main仍为62ca且在本树祖先。完整核心事实仓储实际移入Rental包；原API保留薄Nest provider，供给原Auth/ALS完整身份、空间/地点范围、原组织算法、检查事件和同一数据库事务。[实际仓储](../../../packages/rental-core/src/mysql-core-facts.ts) · [本表视图与宿主接点](../../../packages/rental-core/src/core-fact-storage.ts) · [原provider](../../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts)
+
+本片包含订单聚合/列表及有界历史读取、预占/分配、资产与状态历史、库存作业与来源流水、归还处置/恢复/核销、工单、检查与更正、续租及换货事实。原Tenant共享锁→订单/资产→处置/工单的锁序、调用方事务、Decimal/JSON空值、订单与库存一起提交、原幂等和历史快照保持。手工维护不释放独立维护/停用限制，工单取消不恢复异常库存；读数更正追加历史，不改写原检查事实或已有归还引用的基线。
+
+冻结检查与单件配货依据也移入Rental MySQL子出口；业务规则中的读数、占用、承运期间、排序/编号、规则缺省、工单处理人范围和金额函数成为单源，旧API路径再导出。`defaultRentalNoShowRule` 从原shared文件迁入Rental合同，shared兼容再导出原函数。当前身份接点返回原完整对象，没有字段投影，冻结指纹与前后范围复验仍涵盖原全部字段。私有MySQL适配继续使用所选宿主schema的生成类型和原SQL runtime，公共Core合同与领域根出口不加载数据库客户端。[身份接点](../../../packages/rental-core/src/fact-request-context.ts) · [冻结检查](../../../packages/rental-core/src/mysql-order-inspection-basis.ts) · [配货依据](../../../packages/rental-core/src/mysql-order-allocation-pickup.ts) · [规则入口](../../../packages/rental-core/README.md)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版正文对照 | 核心事实83项、十份规则/冻结读取33项及原缺省函数1项，共117个方法/函数的编译后正文一致；仅规范化正式导入/runtime别名及存储、身份/范围、组织算法、事件和两处冻结读取接点。五项行投影由any改为真实数据库payload，编译后正文仍一致，未改变业务算法 |
+| 正式配置与当前schema内存编译 | 公共合同5根/199源/10输出，Rental62根/623源/124输出，shared122根/340源/245输出，完整API988根/2302源/1976输出，均0诊断；共十项配置通过。当前238模型由锁定Prisma5.22官方WASM/generator内存供给，TS5.9.3，主树依赖只读复用，JS/声明未写磁盘 |
+| 六份原直接消费者 | `node --no-compilation-cache - api-core-facts` 执行原rental-order-number、rental-asset-status-history、rental-stock-operations、rental-stock-disposition、rental-work-order和rental-usage-reading-validation。最终进程43976退出0、stderr为空；资产5项、库存作业6项、处置5项、工单8项及编号/检查读数IIFE通过，保留全部原断言 |
+| 受影响行为 | 核原日期/空间/租户与编号上限、资产初建/状态/独立待检来源、库存同键与调拨守恒/隔离底线、处置恢复与唯一核销流水、工单状态/锁后事实及检查不可改写/更正历史。SQL、存储、锁、事务及回滚均为明确fixture，不替代真实数据库验收 |
+| 原离线守卫与收尾 | 原prisma-offline-preload在内存编译前加载；固定offline数据库地址，审计/TEMP/TMP/缓存限定本树独占output/.tmp。未预建空日志；最终审计文件不存在且临时目录为空，进程已退出，无新增临时目录、依赖副本、生成物或后台业务服务 |
+
+初次快速类型检查漏掉括号接收者上的inspectionRecord.create，且Rental本地合同尚无原缺省函数；补真实表方法与单源函数后通过。首轮完整类型通过，但两个旧用例用Object.create绕过构造而缺少宿主接点。改为真实构造后定位两处夹具漏掉原Tenant共享锁；固定744仓储本来就执行该锁，83项正文对照一致。只补真实构造、父锁语义及租户参数断言，再执行最终六份用例；没有添加生产fallback、删除断言或放宽权限。
+
+源码职责、五项行投影类型、模块README、原业务导读及根入口同片维护。HTTP路由、DTO/OpenAPI、历史迁移和客户端协议未变，本片没有重写API文档字段或新增测试脚本/第五册。完整Rental业务服务/Controller、独立schema/迁移/Seed、页面/客户端、作业/AI及正式标准Core装配仍缺；公共组织/完整订阅/集成、无Core真实运行、多Core真实并存、独立安装/更新回退/接手和审查继续沿原门槛。PCH各项未跨下一档，需求和任务身份/依赖/计分保持；旧外观与历史缺链不由本片关闭。
+
+固定源码与资料由包含本节的Git提交定位，提交只含本任务源码、两份原夹具及必要导读/记录/接续，普通推送到codex/platform-core-extraction后真实回读。旧环境840文件/91,808,304字节和旧0字节日志仍在统一待清理区，责任清单沿当前接续保留；原生删除受阻的历史不被本片覆盖，没有换工具绕过。
+
+最终定向文档核对7份、907个本地链接、150个锚点引用和81个表格，问题0；稀疏目标用固定744 Git树定位。47个正式包出口及typesVersions对应真实源码，依赖/peer与锁文件一致；正式需求/任务无差异，默认差异格式检查退出0。冻结读取首轮正文核对的两项差异来自检查脚本对范围接点重复加this，修正内存规范化后117项一致，没有据检查脚本改动业务源码。
+
 <a id="core-rental-business-facts-20261116"></a>
 
 ## Rental 报价、券、奖励与通知事实迁移（2026-11-16）

@@ -146,6 +146,54 @@
     "./quote-inventory-basis": {
       "types": "./dist/quote-inventory-basis.d.ts",
       "default": "./dist/quote-inventory-basis.js"
+    },
+    "./usage-reading": {
+      "types": "./dist/usage-reading.d.ts",
+      "default": "./dist/usage-reading.js"
+    },
+    "./occupancy": {
+      "types": "./dist/occupancy.d.ts",
+      "default": "./dist/occupancy.js"
+    },
+    "./carrier-shipment": {
+      "types": "./dist/carrier-shipment.d.ts",
+      "default": "./dist/carrier-shipment.js"
+    },
+    "./mysql-order-list-sort": {
+      "types": "./dist/mysql-order-list-sort.d.ts",
+      "default": "./dist/mysql-order-list-sort.js"
+    },
+    "./mysql-order-number": {
+      "types": "./dist/mysql-order-number.d.ts",
+      "default": "./dist/mysql-order-number.js"
+    },
+    "./rule-defaults": {
+      "types": "./dist/rule-defaults.d.ts",
+      "default": "./dist/rule-defaults.js"
+    },
+    "./work-order-assignee-scope": {
+      "types": "./dist/work-order-assignee-scope.d.ts",
+      "default": "./dist/work-order-assignee-scope.js"
+    },
+    "./money": {
+      "types": "./dist/money.d.ts",
+      "default": "./dist/money.js"
+    },
+    "./mysql-order-inspection-basis": {
+      "types": "./dist/mysql-order-inspection-basis.d.ts",
+      "default": "./dist/mysql-order-inspection-basis.js"
+    },
+    "./mysql-order-allocation-pickup": {
+      "types": "./dist/mysql-order-allocation-pickup.d.ts",
+      "default": "./dist/mysql-order-allocation-pickup.js"
+    },
+    "./mysql-core-facts": {
+      "types": "./dist/mysql-core-facts.d.ts",
+      "default": "./dist/mysql-core-facts.js"
+    },
+    "./fact-request-context": {
+      "types": "./dist/fact-request-context.d.ts",
+      "default": "./dist/fact-request-context.js"
     }
   },
   "typesVersions": {
@@ -251,6 +299,42 @@
       ],
       "quote-inventory-basis": [
         "dist/quote-inventory-basis.d.ts"
+      ],
+      "usage-reading": [
+        "dist/usage-reading.d.ts"
+      ],
+      "occupancy": [
+        "dist/occupancy.d.ts"
+      ],
+      "carrier-shipment": [
+        "dist/carrier-shipment.d.ts"
+      ],
+      "mysql-order-list-sort": [
+        "dist/mysql-order-list-sort.d.ts"
+      ],
+      "mysql-order-number": [
+        "dist/mysql-order-number.d.ts"
+      ],
+      "rule-defaults": [
+        "dist/rule-defaults.d.ts"
+      ],
+      "work-order-assignee-scope": [
+        "dist/work-order-assignee-scope.d.ts"
+      ],
+      "money": [
+        "dist/money.d.ts"
+      ],
+      "mysql-order-inspection-basis": [
+        "dist/mysql-order-inspection-basis.d.ts"
+      ],
+      "mysql-order-allocation-pickup": [
+        "dist/mysql-order-allocation-pickup.d.ts"
+      ],
+      "mysql-core-facts": [
+        "dist/mysql-core-facts.d.ts"
+      ],
+      "fact-request-context": [
+        "dist/fact-request-context.d.ts"
       ]
     }
   },

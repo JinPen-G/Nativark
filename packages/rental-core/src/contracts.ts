@@ -7052,3 +7052,14 @@ export interface RecordRentalInspectionExceptionCustomerResponseRequest {
   decision: "confirmed" | "disputed";
   reason: string;
 }
+
+/** 爽约收费不因缺配置而启用；每次返回新对象，避免污染其他规则版本。 */
+export function defaultRentalNoShowRule(): RentalNoShowRule {
+  return {
+    enabled: false,
+    pickupGraceMinutes: 0,
+    finalizationMinutes: 60,
+    feeType: "none",
+    feeValue: 0
+  };
+}

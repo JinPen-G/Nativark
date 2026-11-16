@@ -32,6 +32,11 @@ function fakeTx() {
     logs,
     businessWorkspace: { findFirst: async () => ({ id: "workspace_1" }) },
     $queryRaw: async query => {
+      if (/FROM Tenant/.test(query.sql)) {
+        assert.match(query.sql, /LOCK IN SHARE MODE/);
+        assert.deepEqual(query.values, ["tenant_1"]);
+        return [{ id: "tenant_1" }];
+      }
       if (/rental_allocations/.test(query.sql)) return [];
       if (/rental_orders/.test(query.sql)) return [{ id: 'order_1', workspaceId: 'workspace_1' }];
       if (/rental_stock_dispositions/.test(query.sql)) return [{ id: 'disp_1', status: 'blocked' }];
@@ -50,7 +55,7 @@ function fakeTx() {
 }
 
 void (async () => {
-  const repo = Object.create(RentalCoreFactRepository.prototype);
+  const repo = new RentalCoreFactRepository({});
   const tx = fakeTx();
 
   const started = await repo.transitionWorkOrder("tenant_1", "work_1", "start", "张三", {}, tx);

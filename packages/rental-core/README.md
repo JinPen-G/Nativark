@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及报价/券/奖励/通知事实仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及完整订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储。原共享包和 API 通过兼容出口消费同一实现。完整业务服务、数据、页面、作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -22,6 +22,10 @@
 | [核心配置仓储](src/mysql-core-configuration.ts)、[存储与宿主接点](src/core-configuration-storage.ts) | `/mysql-core-configuration` 维护档案、经营空间、商品/套装、定价组、地点/主体、券与检查模板及有界配置读取；同一事务复核当前品类，保留配置修订和首次初始化限制 |
 | [业务事实仓储](src/mysql-business-facts.ts)、[本表视图与宿主接点](src/business-fact-storage.ts) | `/mysql-business-facts` 保存报价原依据、券占用/核销及预算、奖励/权益余额、推荐和通知原流水；当前空间/订单可见性、配置读取和原事件由宿主提供，保留调用方事务 |
 | [报价能力事实](src/mysql-quote-capabilities.ts)、[库存对象依据](src/quote-inventory-basis.ts) | `/mysql-quote-capabilities` 在原事务复核启用实例及冻结条件，`/quote-inventory-basis` 使用有界配置读取核对商品/套装；新报价与历史动作各用原依据，不给旧报价补当前事实 |
+| [核心事实仓储](src/mysql-core-facts.ts)、[本表视图](src/core-fact-storage.ts)、[当前身份接点](src/fact-request-context.ts) | `/mysql-core-facts` 读写订单聚合、资产/库存、归还处置、工单、检查和续租/换货事实；宿主提供原当前身份/范围、组织算法、检查事件及调用方事务 |
+| [冻结检查依据](src/mysql-order-inspection-basis.ts)、[单件配货依据](src/mysql-order-allocation-pickup.ts) | MySQL子出口只读原订单关联的冻结来源，在库侧限制JSON与结果范围，并复验原完整身份和对象修订；缺历史不改用当前模板或属性 |
+| [读数](src/usage-reading.ts)、[占用](src/occupancy.ts)、[承运期间](src/carrier-shipment.ts) | 纯规则子出口保留原数值校验、占用期间及承运起讫算法，原API再导出同一实现 |
+| [订单排序](src/mysql-order-list-sort.ts)、[编号](src/mysql-order-number.ts)、[规则缺省](src/rule-defaults.ts)、[金额](src/money.ts)、[工单范围](src/work-order-assignee-scope.ts) | 原库侧排序/编号、规则缺省、金额精度和处理人范围继承，不新增业务状态或授权；编号继续在订单原事务中分配 |
 | [当前绑定写入](src/mysql-category-write.ts)、[采用政策](src/mysql-category-policy.ts)、[履约准入](src/mysql-fulfillment-admission.ts) | 正式 MySQL 子出口持有原父锁→空间锁、发布版本/采用范围和当前地点/主体读取；原宿主提供身份和事务，历史快照及实物归还使用各自原依据 |
 | [品类属性](src/category-attributes.ts) | `/category-attributes` 校验当前属性、保留不可改写的历史值并准备唯一声明；实体与唯一值仍由原写入事务一起提交 |
 | [配置共同依据](src/configuration-basis.ts)、[规则版本链](src/rule-version-chain.ts) | `/configuration-basis` 维护原绑定修订及读取上限，`/rule-version-chain` 保留租期时点匹配、展示状态、发布/编辑/作废边界及追加版本号；原API转接同一实现 |
@@ -60,5 +64,7 @@ MySQL 快照与收据子出口使用可选 peer `@prisma/client` 的原 SQL/JSON
 核心配置仓储接收本表存储视图、当前身份/范围和原配置事件。默认空间只在首次创建时初始化当时的成员，重读档案不补回撤销成员或更换旧绑定；配置保存保留原CAS与调用方事务。地点/主体状态在原锁中重读，普通编辑不恢复被停用的状态；商品唯一属性和套装组成与实体一起写入。报价、开业和报表读取沿有界接口取得实际配置，恢复快照不代替当前事实。[原核心配置接线](../../apps/api/src/modules/rental-core/rental-core-config.repository.ts) · [初始化验证](../../tests/category-space-initialization.test.cjs) · [配置范围验证](../../tests/config-workspace-scope.test.cjs) · [履约准入验证](../../tests/rental-fulfillment-admission.test.cjs)
 
 业务事实仓储由宿主供给本表方法、当前空间、每次生成的订单可见范围、库存配置 reader 和原通知事件。报价保存锁住原经营空间，只有首次创建分支复核当前履约/能力/库存，已保存报价保留来源、金额与历史快照；券预算、奖励和余额写入继续使用调用方事务及原 Decimal 精度。通知流水先持久化，认领只占租约，原投递结果才累计尝试次数；租约过期不证明可以重新发送。外部短信执行和批准仍由原业务服务处理。[原事实接线](../../apps/api/src/modules/rental-core/rental-business-fact.repository.ts) · [报价恢复验证](../../tests/rental-quote-recovery-review.test.cjs) · [短信限流验证](../../tests/sms-rate-limit.test.cjs)
+
+核心事实仓储接收本表方法与明确的宿主接点。宿主返回原服务端完整身份，范围读取与冻结指纹使用原对象；订单/资产/处置的锁序、聚合与库存流水、检查事件继续在原事务提交。手工资料维护不能释放独立隔离，检查更正保留原读数和更正历史，续租保持原约定期间与冻结价格。库存作业、处置恢复和工单处理由原领域入口核当前权限。[原核心事实接线](../../apps/api/src/modules/rental-core/rental-core-fact.repository.ts) · [订单编号](../../tests/rental-order-number.test.cjs) · [资产历史](../../tests/rental-asset-status-history.test.cjs) · [库存作业](../../tests/rental-stock-operations.test.cjs) · [处置恢复](../../tests/rental-stock-disposition.test.cjs) · [工单](../../tests/rental-work-order.test.cjs) · [检查读数](../../tests/rental-usage-reading-validation.test.cjs)
 
 必要兼容验证覆盖能力执行、条件与历史依据、计价、器材及检查。源码测试优先 `.ts`，正式消费者使用本版构建产物。拆前合同与运行时导出按固定 Git 对照，实际证据和剩余边界沿 PCH 记录维护。[原能力执行器](../../tests/capability-hook-runtime.test.cjs) · [条件与历史依据](../../tests/category-capability-conditions.test.cjs) · [原计价测试](../../tests/rental-pricing-strategy.test.cjs) · [原器材测试](../../tests/capability-equipment.test.cjs) · [检查资源](../../tests/rental-inspection-resource.test.cjs) · [用量纠正](../../tests/rental-inspection-usage-correction.test.cjs) · [PCH 记录](../../docs/平台底座/Core接入/平台Core接入-开发记录.md#core-rental-domain-package-20261115)
