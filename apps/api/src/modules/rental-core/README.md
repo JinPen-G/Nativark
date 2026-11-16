@@ -20,6 +20,10 @@ Rental Core维护租赁领域事实，包括经营空间/品类、商品和资�
 
 [配货入口](rental-allocation.service.ts)只供给原四项Nest依赖，资源判定、办理锁、异常来源和自动扫描由Rental包单源执行。当前AppModule仍只登记原一个provider，AI通过moduleRef读取同一实例；继承原60秒扫描及销毁钩子，管理员未开启自动变更时仍检查已有分配。失败事件参加原聚合事务，来源读取不触发扫描。Controller、换货候选和AI继续消费原签名。[实际配货实现](../../../../../packages/rental-core/src/mysql-allocation.ts) · [私有接点](../../../../../packages/rental-core/src/allocation-storage.ts) · [交接锁验证](../../../../../tests/staff-operation-lock.test.cjs)
 
+[工作台规则](rental-workbench-todos.ts)和[CSV导出](rental-workspace-report.csv.ts)再导出Rental同一纯聚合。报表provider仅供给原数据库只读方法，当前Auth/ALS、草稿排除、全区间分页与AI总扫描上限由原实现保持；超量不返回部分统计，CSV与页面用同一报表事实。[实际工作台](../../../../../packages/rental-core/src/workbench.ts) · [报表实现](../../../../../packages/rental-core/src/mysql-reports.ts) · [只读视图](../../../../../packages/rental-core/src/report-storage.ts) · [CSV](../../../../../packages/rental-core/src/report-csv.ts)
+
+[到期作业](rental-due-job.scheduler.ts)仅供给原七项Nest依赖，完整任务和锁链由Rental包维护。当前AppModule仍只登记一次，原60秒计时/销毁、同连接命名锁、空间ALS和原幂等键保持；自动过期不重放未知付款，企业/支付使用原实际参加者。公共无Core宿主不导入这一行业作业。[实际作业](../../../../../packages/rental-core/src/mysql-due-jobs.ts) · [依赖视图](../../../../../packages/rental-core/src/due-job-ports.ts) · [原离线验证](../../../../../tests/rental-due-job-scheduler.test.cjs)
+
 [经营空间兼容出口](workspace-scope.ts)再导出Rental唯一解析和跨空间写入校验，保留原宿主事务类型别名。请求空间核所属租户；原初始化/恢复只读取已存在默认空间，其他Core不复用这套行业模型。业务授权仍沿原Guard，配置/事实仓储和Controller使用同一函数。[实际空间边界](../../../../../packages/rental-core/src/mysql-workspace-scope.ts) · [原空间验证](../../../../../tests/rental-workspace-scope.test.cjs)
 
 报价、券、奖励/权益、推荐及通知事实经[业务事实适配](rental-business-fact.repository.ts)进入Rental包的唯一仓储，当前空间、每次生成的订单可见范围、有界配置reader及原事件由本宿主供给。券预算和余额保留原事务与金额精度，通知流水/投递结果不重复执行外部短信。[事实实现](../../../../../packages/rental-core/src/mysql-business-facts.ts) · [本表接点](../../../../../packages/rental-core/src/business-fact-storage.ts) · [报价能力事实](../../../../../packages/rental-core/src/mysql-quote-capabilities.ts) · [库存依据](../../../../../packages/rental-core/src/quote-inventory-basis.ts)

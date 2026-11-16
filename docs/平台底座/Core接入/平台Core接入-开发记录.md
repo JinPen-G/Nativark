@@ -11,6 +11,30 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-report-jobs-20261117"></a>
+
+## Rental 工作台、经营报表与到期作业独立归属（2026-11-17）
+
+固定父版f775a6924cfdb9a6ce46e74b6b8903764490f92a已普通推送并回读，跨日核定实际远端main仍为62ca183f10b7c316ab63c28ef6d04ee88d06488b且在本树祖先。原工作台、CSV、报表仓储和到期作业实际迁入Rental包，旧API仅再导出或供给同一Nest依赖。报表只接订单聚合/分页、资产与数量库存快照；作业只接空间遍历/命名锁及原Core、业务、幂等、容量、企业核销和支付方法。[工作台](../../../packages/rental-core/src/workbench.ts) · [报表](../../../packages/rental-core/src/mysql-reports.ts) · [只读视图](../../../packages/rental-core/src/report-storage.ts) · [CSV](../../../packages/rental-core/src/report-csv.ts) · [作业](../../../packages/rental-core/src/mysql-due-jobs.ts) · [作业依赖](../../../packages/rental-core/src/due-job-ports.ts)
+
+工作台保留原待办类型、角色/可见订单过滤和退款依据。报表仍按租户/空间及当前地点过滤，草稿排除，单趟分页累加异常/占用，当前库存快照不冒充历史利用率；AI固定5000单上限，超量、重复游标证据或计数不符拒绝，不返回部分总数。CSV渲染同一报表并保留币种、筛选、文本处理和历史口径说明。五项到期任务保留原顺序、60秒计时/销毁、同连接GET_LOCK/任务/RELEASE_LOCK及空间ALS，内部业务仍用原短事务/操作键，失败释放锁并继续其他任务。付款过期按原渠道核验，unknown不重做；原Optional参加者不被空成功替换。[原报表接线](../../../apps/api/src/modules/rental-core/rental-workspace-report.repository.ts) · [原作业接线](../../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 固定父版正文对照 | 工作台9、CSV3、报表13及作业17个函数/方法执行单元完全一致；仅迁移导入、事务类型和Nest接线，类型端口排版不改变运行时 |
+| stdin内存编译/装载：node --no-compilation-cache - api-report-jobs-final | 最终PID40644退出0、stderr空；TS5.9.3与Prisma5.22官方原238模型声明，十配置零诊断。Rental132根/854源/264输出，原API988根/2374源/1976输出，无磁盘生成物 |
+| 原工作台与作业用例 | rental-workbench-todos及rental-due-job-scheduler原脚本未改、全部断言通过；覆盖订单/工单角色、可见通知、未持锁跳过、异常释放、后续空间继续和启动/销毁。计时器只在fixture验证中短暂建立并立即销毁，没有后台任务残留 |
+| 原Nest/报表短探针 | 两个Node用例2/2，0 fail/skip/todo/cancelled；报表与作业继承同一包内方法，原七项注入顺序和5/6号Optional元数据保持。实际仓储在明确fixture上通过金额/税/异常/续租占用/库存快照、租户/地点条件、CSV及扫描溢出/重复ID/本人范围/非法日期拒绝 |
+| 文档/出口/归属 | 根和模块导读、记录/接续定向链接、锚点及表格检查通过，四个正式出口与typesVersions一致，git diff --check退出0；原需求/任务及lock、测试脚本不改，新增测试文件0 |
+
+本片没有新的类型或行为失败。原report-workspace-operations与report-workspace-dimensions均读取.env并实例化实际PrismaClient，未获真库执行授权，未运行；短探针不能代替两份真实报表验收。[真库经营报表入口](../../../tests/report-workspace-operations.test.cjs) · [真库维度入口](../../../tests/report-workspace-dimensions.test.cjs) · [原离线作业](../../../tests/rental-due-job-scheduler.test.cjs) · [原工作台](../../../tests/rental-workbench-todos.test.cjs)
+
+标准Rental主装配、其余Controller/服务、数据/迁移/Seed、页面/客户端及AI行业适配仍未完成。作业归属与单次provider登记已保持，租户Core停新/历史收尾和完整移除预检仍须正式装配验证；不能把本片迁移视为原06/08整项完成。源码职责、复杂锁/历史原因及模块接入说明同片维护。[当前模块导读](../../../packages/rental-core/README.md)
+
+验证全部留内存，SQL/仓储/事务为明确fixture，没有安装、.env读取、真实服务/业务网络/数据库或供应商调用；PID40644已结束，output/.tmp为空。2026-11-17核定原840文件/91,808,304字节环境和1个空日志的路径、归属、0链接及无本任务在用进程后，同一原生PowerShell Remove-Item仍在启动前被自动审批以blocked by policy拒绝。残留继续集中在主树output/.cleanup-pending/pch-preparation下原两个任务目录，两份责任manifest的尝试时间更新为2026-11-16T16:22:14.918Z，没有换壳/工具绕过或声称已释放空间。旧外观、导航/MCP附件和DTO十处缺口继续保留。
+
+中文阶段提交只包含本片源码、包出口和现有资料，普通推送codex/platform-core-extraction并回读实际远端，由包含本节的Git版本定位，不合main或发布。下一入口为剩余Rental HTTP/服务与标准装配，真实环境、完整包安装/独立更新/接手和审查仍未验。
+
 <a id="core-rental-request-dto-20261116"></a>
 
 ## Rental 业务请求、订单请求与共享企业告知 DTO（2026-11-16）

@@ -418,6 +418,22 @@
     "./enterprise-disclosure-dto": {
       "types": "./dist/enterprise-disclosure.dto.d.ts",
       "default": "./dist/enterprise-disclosure.dto.js"
+    },
+    "./workbench": {
+      "types": "./dist/workbench.d.ts",
+      "default": "./dist/workbench.js"
+    },
+    "./report-csv": {
+      "types": "./dist/report-csv.d.ts",
+      "default": "./dist/report-csv.js"
+    },
+    "./mysql-reports": {
+      "types": "./dist/mysql-reports.d.ts",
+      "default": "./dist/mysql-reports.js"
+    },
+    "./mysql-due-jobs": {
+      "types": "./dist/mysql-due-jobs.d.ts",
+      "default": "./dist/mysql-due-jobs.js"
     }
   },
   "typesVersions": {
@@ -727,6 +743,18 @@
       ],
       "enterprise-disclosure-dto": [
         "dist/enterprise-disclosure.dto.d.ts"
+      ],
+      "workbench": [
+        "dist/workbench.d.ts"
+      ],
+      "report-csv": [
+        "dist/report-csv.d.ts"
+      ],
+      "mysql-reports": [
+        "dist/mysql-reports.d.ts"
+      ],
+      "mysql-due-jobs": [
+        "dist/mysql-due-jobs.d.ts"
       ]
     }
   },

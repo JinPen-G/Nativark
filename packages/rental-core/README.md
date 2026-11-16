@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准与检查同意，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -11,6 +11,9 @@
 | [订单确认](src/mysql-order-confirmation.ts)、[确认接点](src/order-confirmation-ports.ts)、[批准合同](src/approved-order-transaction.ports.ts) | `/mysql-order-confirmation` 与 `/approved-order-ports` 保留原报价消费、库存/容量、券、批准和幂等同事务提交，客户/企业参加者由宿主供给 |
 | [商户委托](src/merchant-delegation.ts)、[服务端报价访问](src/server-quote-access.ts) | `/merchant-delegation` 与 `/server-quote-access` 共用公共Auth/ALS及原封存来源；历史结果只核对原键/原消费关系，字段或JSON复制不能取得执行权 |
 | [配货与扫描](src/mysql-allocation.ts)、[私有存储/事件](src/allocation-storage.ts) | `/mysql-allocation` 保留原候选、预分配/改配/锁定/释放、办理锁、已记录异常及自动扫描；宿主只登记一个执行者，失败事件参加同一事务 |
+| [工作台规则](src/workbench.ts) | `/workbench` 聚合原订单/工单/退款/通知待办并保留角色范围判断；调用方先过滤真实订单/资金，规则不读库或授予权限 |
+| [经营报表](src/mysql-reports.ts)、[只读存储](src/report-storage.ts)、[CSV](src/report-csv.ts) | `/mysql-reports` 读取原订单/资产/数量库存；普通报表保持全区间分页，AI入口有5000单上限，超量不返部分总数。`/report-csv` 仅渲染同一已获权结果 |
+| [到期作业](src/mysql-due-jobs.ts)、[实际依赖](src/due-job-ports.ts) | `/mysql-due-jobs` 保留五项任务、同连接命名锁、租户/空间ALS及原操作键；宿主只登记一个执行者，未选择Rental时不加载 |
 | [经营空间边界](src/mysql-workspace-scope.ts) | `/mysql-workspace-scope` 核请求空间所属租户及跨空间写入；原初始化/恢复只读取默认空间，原Guard先裁定请求授权 |
 | [配置运行时DTO](src/config-request.dto.ts) | `/configuration-dto` 与原API共用字段、嵌套校验和装饰器元数据；规则候选采用同一类，审批、业务规则及保存仍由所属服务处理 |
 | [业务请求DTO](src/core-request.dto.ts)、[订单请求DTO](src/order-request.dto.ts)、[企业告知DTO](src/enterprise-disclosure.dto.ts) | `/core-dto`、`/order-dto` 与 `/enterprise-disclosure-dto` 提供原商品/工单、订单/检查/资金请求的同一运行时类；API、客户与企业嵌套告知共用同一元数据，字段校验不替代当前业务授权 |
@@ -67,6 +70,12 @@
 商户委托端口把原私有企业来源所有者与同一订单确认实例组合，宿主用真实事务类型实例化 `RentalMerchantDelegatedOrderPort<TTransaction>`。当前营运身份、原D/K、请求指纹和参加者回调在同一模块封存；历史读取和已消费委托不进入新提交准备。企业政策使用原Core证明对象，JSON投影只用于参加者的数据传递。原API兼容入口绑定Prisma事务类型并再导出同一构造器和校验函数。[原委托接线](../../apps/api/src/modules/rental-core/rental-merchant-delegated-order.authority.ts) · [企业直接消费者](../../apps/api/src/modules/enterprise/enterprise-merchant-order-submission.service.ts)
 
 配货从 `@rental-os/rental-core/mysql-allocation` 接入，同一数据库、事实仓储和核心实例负责原资源与数量判定。`manage` 使用调用方原事务；办理锁可参加已有事务，释放/解锁仍沿原善后权限。宿主只登记一个配货provider，继承原初始化/销毁钩子，扫描每60秒运行并保留原防重；实际自动变更只在管理员开启时执行。可选失败事件在原聚合写入后参加同一事务；`readRecordedFulfillmentIssue` 只投影原已记录来源，不重新扫描或提供新执行权。[原Nest接线](../../apps/api/src/modules/rental-core/rental-allocation.service.ts) · [原配货验证](../../tests/rental-allocation.test.cjs) · [交接锁验证](../../tests/staff-operation-lock.test.cjs)
+
+工作台规则从 `@rental-os/rental-core/workbench` 复用，输入由原Controller按当前租户/空间、订单/工单权限和可见订单过滤。退款待办使用原资金依据，通知失败只关联可见父订单，不从消息文本或待办链接扩展读权。[原工作台接点](../../apps/api/src/modules/rental-core/rental-core.controller.ts) · [原工作台验证](../../tests/rental-workbench-todos.test.cjs)
+
+报表从 `@rental-os/rental-core/mysql-reports` 创建，宿主仅提供本表的只读方法，原Auth/ALS供给当前地点及数据范围。每次查询保留租户/空间、草稿排除、订单归属和地点过滤；仅本人范围不能读取混合空间库存快照的整份报表。AI使用固定 `getBoundedOperationReport`，数量或分页证据冲突明确拒绝，不能把部分统计当总数。CSV从 `/report-csv` 复用，币种、筛选和历史口径说明跟随同一结果，导出不重新查询。[原报表Nest接点](../../apps/api/src/modules/rental-core/rental-workspace-report.repository.ts) · [原导出接点](../../apps/api/src/modules/rental-core/rental-workspace-report.csv.ts)
+
+到期作业从 `@rental-os/rental-core/mysql-due-jobs` 接入，原Nest provider供给同一数据库、Core、业务、动作幂等、容量、企业核销及支付实例。GET_LOCK、任务与RELEASE_LOCK仍在同一交互式事务连接，内部业务沿原短事务和操作键；失败释放锁并继续其他任务/空间，不以本地支付过期代替原渠道核验。宿主只登记一个provider并继承原启动/销毁钩子；企业/支付保持原Optional接线，启用相应生产任务须提供原参加者，不能用空成功替代。完整标准Core作业贡献仍随正式装配交付。[原作业接点](../../apps/api/src/modules/rental-core/rental-due-job.scheduler.ts) · [原离线作业验证](../../tests/rental-due-job-scheduler.test.cjs)
 
 经营空间解析从 `@rental-os/rental-core/mysql-workspace-scope` 复用。有请求空间时重查它属于目标租户，原初始化/恢复只读原default标记，找不到则拒绝；HTTP缺少范围由原Guard先拒绝，解析结果不授予权限。配置写入通过同一 `assertScopedWrite` 核旧对象的租户/空间，避免全局id命中后覆盖他人资料。该空间模型只属于Rental，其他Core使用自己的业务分区。[原空间兼容出口](../../apps/api/src/modules/rental-core/workspace-scope.ts) · [空间范围验证](../../tests/rental-workspace-scope.test.cjs)
 
