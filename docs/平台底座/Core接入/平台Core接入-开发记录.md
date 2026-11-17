@@ -11,6 +11,31 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-enterprise-approval-runtime-20261117"></a>
+
+## Rental企业批准、明确委托与续租事务收口（2026-11-17）
+
+固定父版6d142a6bd96b829c0f124308d8f0dd9d1cd8e6d2保全原服务与完整接续，开工回读任务远端为同一SHA；实际main为1d53ada2bb79a220e4d99f75f27508bfac5360a5，已在本树祖先。副手继续在自己的树处理公共订阅/基础集成，本片只修改本对话Rental切片及原资料。
+
+[预约批准](../../../packages/rental-core/src/mysql-enterprise-approval.ts)、[续租费用批准](../../../packages/rental-core/src/mysql-enterprise-extension-approval.ts)、[换货费用批准](../../../packages/rental-core/src/mysql-enterprise-exchange-approval.ts)、[企业商户委托](../../../packages/rental-core/src/mysql-enterprise-merchant-delegation.ts)及[明确委托提交](../../../packages/rental-core/src/mysql-enterprise-merchant-order-submission.ts)实际迁入Rental包，旧Nest路径只供给原七/七/十/七/四项依赖。原申请/审核、费用确认、本人具体检查同意、商户履约和资金分别裁定；原D/K、订单锁、批准消费和收据保留同一事务，unknown不换键重发。五服务共78个方法正文与固定父版一致，没有删除方法或新增另一份执行者。
+
+[私有参加者](../../../packages/rental-core/src/enterprise-approval-ports.ts)只描述本链需要的存储、客户API、Core与原幂等方法。事务绑定明确为原Prisma.TransactionClient，MySQL子出口由宿主生成模型和Nest依赖供给；领域根出口及公共Core清单不加载此链。原Controller/DTO/OpenAPI仍使用原路径、权限及字段，本片未改HTTP合同；源码职责和接入说明随[Rental包导读](../../../packages/rental-core/README.md)及[原业务导读](../../../apps/api/src/modules/rental-core/README.md)同步。
+
+必要冒烟核定两处真实调用问题，固定父版和main3e0b2c72865fa0a21053f26608bda878861c9f90均有原调用：续租报价上下文未把已有事务传给持久原报价读取；客户层在Core生效已经占用授信后又调用同一占用。现[报价服务](../../../packages/rental-core/src/mysql-business-runtime.ts)显式传入tx，原报价/价格读取及配置仍在调用方事务；[客户API](../../../apps/api/src/modules/client/client-api.service.ts)保留Core生效结果，只办理自己的服务容量，不重复调用授信。计价算法、金额、原批准和资金门禁没有改写。原测试保持所有有效断言，其中同事务读取断言和四个业务事件的精确计数证明这两处调用已修正。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 迁移正文/注入 | 17/16/26/17/2个方法，共78个正文与固定父版一致；五个原构造的依赖顺序保留，包内同事务端口只映射实际类型 |
+| 早期类型失败 | 首次独立包31诊断，原泛型事务缺实际类型、检查原收据端口缺readReceipt；补真实参加者后0诊断，没有放宽类型 |
+| 原冒烟失败保留 | 原两文件共42例，首轮15通过/27失败；夹具缺原币种、普通报价委托查询、当前订单/完整配置来源、Core资金/授信和客户getOrder等实际接点。第二轮37/5、第三轮39/3；后两轮还核定漏传事务与重复授信实际问题，未将其冒充夹具问题。定向修夹具、原目标文件位置及这两处生产调用，原有效断言保留 |
+| 完整API类型及冒烟 | `node --no-compilation-cache - api-approval-final tests/enterprise-approval.test.cjs tests/enterprise-extension-approval.test.cjs`，stdin复用既有内存验证入口，退出0。十配置均0诊断，Rental227根/953源/454输出，API1030根/2521源/2060输出；原42/42、fail/skip/todo/cancelled均0 |
+| 数据与环境 | 原238模型由Prisma5.22官方WASM/generator内存生成，TS5.9.3；SQL/锁/资金/授信来源仍为明确fixture，产物留内存，无安装、真实HTTP/数据库、迁移或服务启动 |
+| 资料/包/退出 | 六份阶段及模块文档1519个本地链接、169个锚点引用，0问题；包194个出口及五项新增服务的JS/类型对应核实，peer与lock一致，需求/任务无差异，`git diff --check`退出0。worker已退出，output/.tmp为空 |
+
+未新增永久测试脚本，只调整两份现有定向验证的真实源码定位与必要夹具。42项证明本片离线正常/拒绝、原键/失应答、回滚、当前授权、费用确认和代表性客户端行为，不能证明完整Core装配、真实存储或所有客户端正常。PCH-08的完整服务/Controller、schema/迁移/Seed、页面/客户端及AI/作业还需收口，原任务本片未跨下一档；需求/任务v1.5、编号、依赖、顺序及计分保持。
+
+两份旧临时残留仍沿[责任与处理记录](#core-main-notification-sync-20261117)承接。2026-11-17T15:47:41.734Z原生PowerShell安全删除命令仍在启动前被自动审批以blocked by policy拒绝，命令内预检查没有执行；另行只读核实840文件/91,808,304字节与1个0字节guard.log，均0链接，责任清单已更新。没有换壳/工具删除，不能称已释放空间。完整无Core运行、干净安装、更新恢复、多真实Core、浏览器及独立接手/审查仍未验。固定交付由包含本节的提交定位，普通推送后再读取实际任务远端。
+
 <a id="core-main-notification-sync-20261117"></a>
 
 ## 固定主线通知草稿、委托与后台兼容接续（2026-11-17）

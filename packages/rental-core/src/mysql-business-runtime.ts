@@ -8507,7 +8507,8 @@ export class RentalBusinessService<TTransaction extends RentalBusinessRuntimeTra
     const state: RentalBusinessState = { categoryCode: core.workspaceCategoryCode, pricingPlans: config.pricingPlans, discountPlans: config.discountPlans, services: config.services,
       calendars: config.calendars, ruleVersions: config.ruleVersions, quotes: [quote], customerCoupons: [], rewardLedger: [], benefitAccounts: [], referrals: [], notificationTemplates: [], notificationLogs: [], configPersisted: true };
     return extensionPricingContext.run({ tenantId, workspaceId, tx, state }, () => this.quoteOrderExtension(tenantId, context, {
-      order, previousExtensions, lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode,
+      // 原报价和现行价格仍在调用方事务读取，不因历史读取改为持久来源而脱离原锁。
+      order, previousExtensions, tx, lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode,
       fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType,
     }));
   }

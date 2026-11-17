@@ -1854,8 +1854,7 @@ export class ClientApiService {
         const result = await this.core.requestOrderExtension(context.tenantId, orderId, priced, { idempotencyKey: binding.idempotencyKey, memo: input.memo, operator: `client:${context.customerId}`, approval: binding }, tx);
         await this.business.synchronizeExtensionCoupon(context.tenantId, result.extension, tx);
         if (result.extension.status === "effective") {
-          if (!this.corporateSettlement) throw new ConflictException("企业结算服务未就绪");
-          await this.corporateSettlement.reserveExtensionCredit(context.tenantId, orderId, result.extension.id, result.extension.payableAmount, tx, `client:${context.customerId}`);
+          // Core已在生效的同一事务核验并占用授信；此处只追加客户端服务容量。
           await this.occupyExtensionServices(context, orderId, result.extension, tx);
         }
         return result;

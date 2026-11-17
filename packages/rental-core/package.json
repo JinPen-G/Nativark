@@ -758,6 +758,30 @@
     "./notification-snapshot": {
       "types": "./dist/notification-snapshot.d.ts",
       "default": "./dist/notification-snapshot.js"
+    },
+    "./mysql-enterprise-approval": {
+      "types": "./dist/mysql-enterprise-approval.d.ts",
+      "default": "./dist/mysql-enterprise-approval.js"
+    },
+    "./mysql-enterprise-extension-approval": {
+      "types": "./dist/mysql-enterprise-extension-approval.d.ts",
+      "default": "./dist/mysql-enterprise-extension-approval.js"
+    },
+    "./mysql-enterprise-exchange-approval": {
+      "types": "./dist/mysql-enterprise-exchange-approval.d.ts",
+      "default": "./dist/mysql-enterprise-exchange-approval.js"
+    },
+    "./mysql-enterprise-merchant-delegation": {
+      "types": "./dist/mysql-enterprise-merchant-delegation.d.ts",
+      "default": "./dist/mysql-enterprise-merchant-delegation.js"
+    },
+    "./mysql-enterprise-merchant-order-submission": {
+      "types": "./dist/mysql-enterprise-merchant-order-submission.d.ts",
+      "default": "./dist/mysql-enterprise-merchant-order-submission.js"
+    },
+    "./enterprise-approval-ports": {
+      "types": "./dist/enterprise-approval-ports.d.ts",
+      "default": "./dist/enterprise-approval-ports.js"
     }
   },
   "typesVersions": {
@@ -1322,6 +1346,24 @@
       ],
       "notification-snapshot": [
         "dist/notification-snapshot.d.ts"
+      ],
+      "mysql-enterprise-approval": [
+        "dist/mysql-enterprise-approval.d.ts"
+      ],
+      "mysql-enterprise-extension-approval": [
+        "dist/mysql-enterprise-extension-approval.d.ts"
+      ],
+      "mysql-enterprise-exchange-approval": [
+        "dist/mysql-enterprise-exchange-approval.d.ts"
+      ],
+      "mysql-enterprise-merchant-delegation": [
+        "dist/mysql-enterprise-merchant-delegation.d.ts"
+      ],
+      "mysql-enterprise-merchant-order-submission": [
+        "dist/mysql-enterprise-merchant-order-submission.d.ts"
+      ],
+      "enterprise-approval-ports": [
+        "dist/enterprise-approval-ports.d.ts"
       ]
     }
   },
