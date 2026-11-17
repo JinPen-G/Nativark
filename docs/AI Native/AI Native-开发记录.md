@@ -6,6 +6,47 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain-main-fixed-native-integration-20261117"></a>
+## main 固定候选与完整装配复验（2026-11-17）
+
+本片按负责人本轮目标处理此前已完成原任务的 main 整合。固定 main 为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，AI 来源为 `38255c70a07f7752957128b57a8b0ffc173e6a07`，共同前置为 `86d05a78733ce82336ec2138c1a919eabecd1540`。23份冲突沿原固定预检逐项处理，最终产品候选树为 `83e943bde07af41985646d2f579a3dc7c9481258`。本节记录候选与验证，实际 main 提交和 GitHub 回读继续按执行结果登记。[原固定预检](#ain-main-fixed-merge-precheck-20261117)
+
+### 合并边界与实际修复
+
+- 后台沿 main 的共享外框、页头和独立 Copilot 接入原生对话与可见观测。图标清单合入原固定 PanelRightOpen／PanelRightClose，20份正式图标的 Git 字节均与原 adaptedSha256 匹配。
+- API 鉴权与 OpenAPI 合并原开业提案、本人换货／费用回款入口、通知草稿及四端登记 Action。原支付凭据专用收据、检查同意与权限投影继续沿各自生产者。
+- Core 报价在首个异步等待前复制输入、上下文、地址及原操作，再刷新当前空间。原 AI `beforePersist` 校验回调经新的配置计算方法完整转交原持久化事务。原商户委托按报价中的实际付款选择核定。
+- 客户预约合并原履约方式、取还地点、地址条件、选择变更后的旧报价隔离，以及目录时区、原操作恢复与可见状态门禁。本人资料与订单页接入原消费者。第一次完整类型检查定位到本人资料 User 图标漏导入，以及派生报价声明前创建引用，两处均已修正并通过完整 Web 复验。
+- 员工构建入口等待原异步 runtime 构建完成，再登记 buildCompleted，并沿原声明释放和失败输出清理。两个文档冲突保留双方历史阶段，当前现场按临时负责人归属汇总。
+
+### 固定候选的必要验证
+
+Node 入口为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=4096 -`。stdin 先设置不可达 `DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline`、本树绝对审计／写根及 TEMP／TMP，再加载原 `tests/fixtures/ai-native/prisma-offline-preload.cjs`。Git 固定源码、正式声明和编译产物均在内存读取及生成。MCP 声明使用本树受管 TypeScript6.0.3，其余使用5.9.3，各包沿原配置及公共出口解析。[原离线守卫](../../tests/fixtures/ai-native/prisma-offline-preload.cjs)
+
+| 范围 | stdin SHA-256与实际结果 |
+| --- | --- |
+| shared与四端完整类型 | `73ad53d7968b4f746a33cafa6d00d406edfee5ef7c96092df0151eaef1269cff`，退出0。shared129根／337源／129份内存声明；后台665根／4002源；Web77根／304源；客户小程序122根／328源；员工小程序115根／320源，均零诊断。小程序声明映射沿原 prepareMiniprogramSharedTypes 的正式出口。 |
+| API与正式MCP声明 | `06aaf0d58b9ea68ed4597d4e5fce233a5a5d95284b3eb201f516091e9a8df53b`，退出0。MCP59根／466源、API按原 tsconfig.build.json 的1003根／2174源，均零诊断。 |
+| 实际OpenAPI与AppModule求值 | `9f8318a2853c19bf6828c96587de85dab134ce50505ec370aa536acef586077c`，退出0。加载1028份固定源码模块、1317个schema、1283个操作、103个controller和190个provider。operationId及方法／路径唯一，四个开业操作各一份，四端登记Action共12个操作。 |
+| Git差异与来源 | 固定候选无冲突标记；按原CRLF行尾执行 `git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check`，退出0。 |
+
+最初诊断准备因 REPL 无 process 绑定未启动子进程，临时目录已删除。随后虚拟目录遗漏 node_modules 根和环境声明后缀，使依赖未解析；修正诊断入口后四端通过。API一次接续使用了旧诊断正文，`b8f48242d200530454e250f13202733b3ca463137cd5a0c0e46b189a02e92fe4`退出1并保留213条原输出；改为显式传递当前正文、先生成固定MCP公共声明，再执行上述最终API复验。原失败未删，未更改业务授权或断言。
+
+上述进程均已退出，审计为空，每次任务临时目录 `output/.tmp/ain-fixed-main-20261117` 均已删除。原生模块求值在原 `ignoreEnvFile=true` 下进行，证据层为固定源码编译与离线模块装配。真实启动、数据库、浏览器、微信、供应商和生产测试沿负责人实测清单执行。[负责人实测清单](#ain28-user-operation-real-test-handoff-20261117)
+
+### main 未提交界面的差异保全
+
+main 有65份已跟踪未提交文件及31项未跟踪入口。本片涉及13个重叠路径，其中两个 panel 图标与 AI 固定源码字节完全一致。Coffee 图标及其引用、邮件／邀请等原成果按原写入归属保全。原 AiOperatorPage 与模块说明的未提交本地演示模式同当前原生接线冲突，实施原生接线前只保全这两份差异。
+
+最小补丁保存在本地 Git 引用 `refs/codex/ai-native/main-wip-preservation-20261117`，blob为 `d47e4c9d3214b53e1dae585d41faae008ba97da7`，补丁SHA-256为 `af5fc3f0e6486f971fb7118d89aafd2e5ae0dc819d05048bc5997da16cb67c38`。原作者可通过 `git cat-file blob refs/codex/ai-native/main-wip-preservation-20261117` 读取，以固定main前置定位原未完成成果。该引用承担唯一原稿保全，留存范围为源码差异。
+
+| 原工作区文件 | 保全前原始SHA-256 |
+| --- | --- |
+| AiOperatorPage.tsx | `ae6dda9db48e637083bc78c03a49cb4b3c4100136ff383605459e47aec89c09d` |
+| ai-operator/README.md | `f95116d9ee786272bd9b0e65077e65acfdd7f5b3683a99f7a98340dec3498da6` |
+
+主线写入前后核固定HEAD、索引、merge／cherry-pick状态及全部受影响字节，按三方差异整合其余WIP。AIN-15的第5条最终订单等价由dev1继续补必要模拟，AIN-26～28全文由dev2继续核定，任务分数沿原门槛汇总。
+
 <a id="ain15-client-result-visible-delivery-20261117"></a>
 ## AIN-15 客户原结果的可见交付与原键恢复（2026-11-17）
 

@@ -4,6 +4,8 @@
 
 ## 当前目标与工作现场
 
+main 固定整合候选已完成23份冲突处理、shared／四端及API完整类型复验，实际OpenAPI／AppModule加载与操作唯一检查通过。固定产品树为83e943bde07af41985646d2f579a3dc7c9481258，main前置62ca183f10b7c316ab63c28ef6d04ee88d06488b，AI来源38255c70a07f7752957128b57a8b0ffc173e6a07。旧未提交本地演示界面的两份差异已按最小本地Git引用保全，当前继续核字节及索引后落入main并普通推送。完整验证、初次失败、WIP去向与实际整合结果见[固定整合阶段](<AI Native-开发记录.md#ain-main-fixed-native-integration-20261117>)。
+
 当前临时负责人为01a1e422-8ae5-7383-9e41-c80cb71bcc70，按负责人本轮授权接替原AI-RD。本轮持续目标无token_budget。Root目标卡当前回读为active、remainingTokens=null，按负责人“继续”指令持续推进。dev1／dev2当前派单回合均active且已有工具执行，目标卡与实际回合分别核定。历史误设预算及资源失败保留在[临时接管阶段](<AI Native-开发记录.md#ain-temporary-rd-takeover-20261116>)，当前原输入、委托重检及停止续办见[阶段记录](<AI Native-开发记录.md#ain15-26-original-input-stop-continuation-20261117>)。
 
 施工树为D:/工作文件/rental-OS/worktree/ai-native、codex/ai-native。[个人付款原D](<AI Native-开发记录.md#ain15-personal-enterprise-delegation-20261117>)固定a4ce86已普通推送并回读GitHub，dev2已独立核闭原403、三种政策、联合回滚和丢ACK恢复。本片[原澄清定位P2](<AI Native-开发记录.md#ain15-26-clarification-locator-binding-20261117>)已由Root修复，原反例、精确原键／继续门禁／删除前后变化的必要模拟及最终后台类型通过；固定6a107ec后dev1独立复验通过，原四组精确定位／继续门禁／删除前后变化及合法同引用解锁沿固定证据。dev1定位的客户Web／小程序原D签发消费者已由Root接入原本人预约页，三种付款、原编号恢复、撤销、重登及正式小程序运行时模拟／类型通过，见[原客户委托消费者](<AI Native-开发记录.md#ain15-client-delegation-original-consumers-20261117>)。dev1复现的原定位与索引两个P2，以及dev2定位的Web隐藏撤销边界，已由Root在[原消费者恢复修复](<AI Native-开发记录.md#ain15-client-delegation-recovery-guard-20261117>)完成必要模拟和最终两端类型；Web原D／撤销／订单结果在observe内先交付的问题也已由Root完成[可见交付修复](<AI Native-开发记录.md#ain15-client-result-visible-delivery-20261117>)，固定旧源码反例退出1，修补及最终Web类型退出0。小程序原两个P2独立复验已通过，dev2也已按最终Web源码独立复验隐藏期间原键保留及可见后单次交付，15／26全文核定继续按最终候选推进。[27双轨、运行、灰度与回退操作资料](<AI Native-开发记录.md#ain27-operational-delivery-20261117>)已由Root在原册交付，原六条固定核定及28交付继续按原门槛完成。原ENTRY全部核闭，main固定节点按本轮负责人目标由临时AI-RD核在写归属及冲突后整合，真实环境由负责人实测。
@@ -21,8 +23,8 @@
 | 负责人 | 当前独占范围与下一入口 |
 | --- | --- |
 | 临时AI-RD／01a1e422-8ae5-7383-9e41-c80cb71bcc70 | 负责人授权临时接替原01a1be68对话。AI四册／索引／提交推送及公共接线、原19企业依赖、MembershipService必要封存资格接点、本片D输入、联合Core事务、后台消费者和取消两叶归本对话。持续目标无token_budget，按负责人继续指令推进原15／26～28，核完整身份付款变体、普通前端链路及全文依赖，处理独立发现并维护原册。 |
-| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 无源码／四册／索引写权。cfa6ba7的完整D输入、共同事务、前端原键恢复与封存边界独立复核已交。继续AIN-27六条操作资料及普通订单实际API／session、回答后继、刷新／范围变化与unknown锁定，复用既有绿色证据。接续目标active、无token_budget，实际回合active且已执行只读工具。 |
-| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 原源码已交Root，无源码／四册／索引写权。cfa6ba7的公共停止中断及六项边界已独立复验。AIN-A01～A29全矩阵及个人付款D后继已交回，继续只读核AIN-28原四条、操作资料、证据去向、缺陷及资源交付，结果留原对话供读取。原目标卡仍blocked、工具无active/resume接口，当前明确派单回合active且已有实际工具执行。 |
+| AI-dev1／01a1bf34-f061-74c2-b588-3e21385c4b49 | 无源码／四册／索引写权。38255c70a的AIN-15六条核定已交，G1～G3成立，第5条缺四品类人工／AI最终订单逐字段等价。当前沿两个独立Core／Business实例和既有fixture补必要内存模拟，覆盖主体、租期、数量、履约地点、金额／币种／单位、规则、资格快照及订单状态，固定原源码与原收据。实际回合active且已有只读工具执行。 |
+| AI-dev2／01a1bf35-1ee5-7400-a97d-c0ebf5f9482c | 原源码已交Root，无源码／四册／索引写权。原公共停止和个人付款D后继已复验，Web隐藏撤销及结果交付已固定核闭。继续AIN-A01～A29与26五条、27六条、28四条的证据范围和操作交付核定，复用既有绿色，结果留原对话供读取。当前回合active且已有实际工具执行。 |
 | 内部/root/entry_closeout_fallback | 原08／17、736客户与f6a材料核定已交回，dd967／4a639／33cc共用取消预览hashP2也已独立只读核闭，无新增P1／P2。无源码、四册或索引写权，不新增测试／递归派审。原企业D固定源核定已交回，Root继续实现。 |
 | 内部/root/opening_core_closeout | 原11／12／18及限定ENTRY-02导航复核已交回；通知最后tenant敏感读权及原K损坏两P2的最小修复再次独立静态核闭。正文删除／缓存及小程序profile不在该结论范围，不递归派审／重复绿色，无写权。 |
 | 内部日历／对话助手 | 原报价待确认reader、确定性摘要、历史及计时修复均已交权；无活动源码写权，不重复绿色模拟。 |
