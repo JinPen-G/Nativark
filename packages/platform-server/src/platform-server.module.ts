@@ -18,8 +18,13 @@ import { PlatformOpenApiController, PLATFORM_OPENAPI_DOCUMENT, createPlatformOpe
 import type { PlatformManagementDatabase } from "./modules/platform/platform-management.store";
 import { PlatformManagementService } from "./modules/platform/platform-management.service";
 import { PlatformManagementController } from "./modules/platform/platform-management.controller";
+import { SubscriptionService } from "./modules/subscription/subscription.service";
+import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";
+import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
+import { PLATFORM_SUBSCRIPTION_DATA_STORE, SUBSCRIPTION_APPLICATION, SUBSCRIPTION_CATEGORY_PARTICIPANT,
+  type SubscriptionDataStore, type SubscriptionCategoryParticipant } from "./modules/subscription/subscription-store";
 
-export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase;
+export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & SubscriptionDataStore;
 @Module({})
 export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
@@ -27,21 +32,28 @@ export class PlatformServerModule {
     coreHttp?: RegisteredCoreHttpAccess;
     /** 可选标准Core模块导出的准入provider；不在公共包反向导入具体Core宿主。 */
     coreHttpProvider?: FactoryProvider<RegisteredCoreHttpAccess>;
+    /** 宿主的真实行业目录参加者，空Core组合只接受公共无品类范围。 */
+    subscriptionCategories?: SubscriptionCategoryParticipant;
     openApiDocument?: unknown }): DynamicModule {
     if (options.coreHttp && options.coreHttpProvider) throw new Error("Core HTTP只能登记一个实际准入提供者");
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
-      controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController],
+      controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
+        TenantSubscriptionController, PlatformSubscriptionController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
+        { provide: PLATFORM_SUBSCRIPTION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
-        TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService,
+        TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, SubscriptionService,
+        { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
+        ...(options.subscriptionCategories ? [{ provide: SUBSCRIPTION_CATEGORY_PARTICIPANT, useValue: options.subscriptionCategories }] : []),
         { provide: AUTH_HTTP_APPLICATION, useExisting: PlatformAuthService },
         { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi() },
         ...(options.coreHttp ? [{ provide: REGISTERED_CORE_HTTP_ACCESS, useValue: options.coreHttp }] : []),
         ...(options.coreHttpProvider ? [{ ...options.coreHttpProvider, provide: REGISTERED_CORE_HTTP_ACCESS }] : []),
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
-      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE] };
+      ], exports: [PlatformAuthService, PlatformAuthenticationRepository, SubscriptionService, SUBSCRIPTION_APPLICATION,
+        PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE] };
   }
 }

@@ -118,6 +118,34 @@
     "./operation-log": {
       "types": "./dist/common/operation-log.service.d.ts",
       "default": "./dist/common/operation-log.service.js"
+    },
+    "./subscription": {
+      "types": "./dist/modules/subscription/subscription.service.d.ts",
+      "default": "./dist/modules/subscription/subscription.service.js"
+    },
+    "./subscription-store": {
+      "types": "./dist/modules/subscription/subscription-store.d.ts",
+      "default": "./dist/modules/subscription/subscription-store.js"
+    },
+    "./subscription-dto": {
+      "types": "./dist/modules/subscription/subscription-request.dto.d.ts",
+      "default": "./dist/modules/subscription/subscription-request.dto.js"
+    },
+    "./subscription-http": {
+      "types": "./dist/modules/subscription/subscription.controller.d.ts",
+      "default": "./dist/modules/subscription/subscription.controller.js"
+    },
+    "./subscription-platform-http": {
+      "types": "./dist/modules/subscription/subscription-platform.controller.d.ts",
+      "default": "./dist/modules/subscription/subscription-platform.controller.js"
+    },
+    "./subscription-http-policy": {
+      "types": "./dist/modules/subscription/subscription-http-policy.d.ts",
+      "default": "./dist/modules/subscription/subscription-http-policy.js"
+    },
+    "./subscription-openapi": {
+      "types": "./dist/modules/subscription/subscription-openapi.d.ts",
+      "default": "./dist/modules/subscription/subscription-openapi.js"
     }
   },
   "scripts": {
@@ -133,7 +161,8 @@
     "@nestjs/core": "^10.4.15",
     "class-validator": "^0.14.1",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.9.0"
@@ -220,6 +249,27 @@
       ],
       "operation-log": [
         "dist/common/operation-log.service.d.ts"
+      ],
+      "subscription": [
+        "dist/modules/subscription/subscription.service.d.ts"
+      ],
+      "subscription-store": [
+        "dist/modules/subscription/subscription-store.d.ts"
+      ],
+      "subscription-dto": [
+        "dist/modules/subscription/subscription-request.dto.d.ts"
+      ],
+      "subscription-http": [
+        "dist/modules/subscription/subscription.controller.d.ts"
+      ],
+      "subscription-platform-http": [
+        "dist/modules/subscription/subscription-platform.controller.d.ts"
+      ],
+      "subscription-http-policy": [
+        "dist/modules/subscription/subscription-http-policy.d.ts"
+      ],
+      "subscription-openapi": [
+        "dist/modules/subscription/subscription-openapi.d.ts"
       ]
     }
   }

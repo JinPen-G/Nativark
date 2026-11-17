@@ -5,13 +5,8 @@ import { PageHeader } from "./PageHeader";
 import { Button } from "./ui";
 import styles from "./RecordDetailLayout.module.css";
 
-export type RecordFact = { key: string; label: string; value: ReactNode; wide?: boolean };
-
-/** Read-only detail geometry. Permissions, queries and commands stay with each domain. */
-export function RecordFacts({ items }: { items: RecordFact[] }) {
-  const { t } = useLocale();
-  return <div className={styles.factsContainer}><dl className={styles.facts}>{items.map(item => <div key={item.key} className={item.wide ? styles.wide : undefined}><dt>{t(item.label)}</dt><dd data-copilot-field={item.key} data-copilot-label={t(item.label)}>{item.value ?? "—"}</dd></div>)}</dl></div>;
-}
+import { RecordFacts, type RecordFact } from "@rental-os/platform-admin/source/components/RecordFacts.tsx";
+export { RecordFacts, type RecordFact } from "@rental-os/platform-admin/source/components/RecordFacts.tsx";
 
 export function RecordDetailLayout({ title, status, facts, actions, onBack, children }: {
   title: string; status?: ReactNode; facts?: RecordFact[]; actions?: ReactNode; onBack: () => void; children: ReactNode;

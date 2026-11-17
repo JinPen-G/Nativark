@@ -11,6 +11,9 @@ export async function initializePublicPlatform(database: PlatformManagementDatab
   const repository = new PlatformManagementRepository(database);
   return database.$transaction(async tx => {
     const existing = await tx.tenant.findUnique({ where: { code: "platform" } });
+    // 已有公共库也补录当前权限目录；后续主体核验失败时，元数据随同一事务回滚。
+    for (const permission of PLATFORM_PERMISSIONS) await tx.permission.upsert({ where: { code: permission.code },
+      create: { id: randomUUID(), ...permission, kind: "ACTION" }, update: { name: permission.name, module: permission.module } });
     if (existing) {
       const admin = await repository.findUserById("user_saas_admin", tx);
       if (!admin?.isSaasAdmin || admin.tenantId !== existing.id || !admin.permissions.includes("system:tenant:manage")
@@ -21,8 +24,6 @@ export async function initializePublicPlatform(database: PlatformManagementDatab
     const tenantId = "tenant_platform";
     await tx.tenant.create({ data: { id: tenantId, code: "platform", name: "Nativark SaaS平台", status: "ACTIVE" } });
     await tx.organizationUnit.create({ data: { id: "org_saas_platform", tenantId, type: "OPERATOR", code: "SAAS", name: "SaaS平台管理" } });
-    for (const permission of PLATFORM_PERMISSIONS) await tx.permission.upsert({ where: { code: permission.code },
-      create: { id: randomUUID(), ...permission, kind: "ACTION" }, update: { name: permission.name, module: permission.module } });
     const roleId = "role_saas_admin", allowed = ["system:tenant:manage", "system:tenant:bootstrap", "system:params:manage"];
     await tx.role.create({ data: { id: roleId, tenantId, code: "SAAS_ADMIN", name: "SaaS平台管理员",
       description: "公共租户和底座管理，不授予租户业务访问权", scope: "OPERATOR", fixedAllPermissions: false,

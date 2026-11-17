@@ -20,7 +20,18 @@
     "./theme": "./src/app/theme.tsx",
     "./styles": "./src/styles.css",
     "./vite": "./config/vite.ts",
-    "./source/*": "./src/*"
+    "./source/*": "./src/*",
+    "./subscription": "./src/features/subscription/index.ts",
+    "./subscription/*": "./src/features/subscription/*.tsx",
+    "./subscription/client": "./src/features/subscription/client.ts",
+    "./subscription/subscriptionDateField": "./src/features/subscription/subscriptionDateField.ts",
+    "./subscription/subscriptionLabels": "./src/features/subscription/subscriptionLabels.ts",
+    "./subscription/subscriptionOperations": "./src/features/subscription/subscriptionOperations.ts",
+    "./subscription/subscriptionReminder": "./src/features/subscription/subscriptionReminder.ts",
+    "./subscription/useSubscriptionCategoryLabels": "./src/features/subscription/useSubscriptionCategoryLabels.ts",
+    "./subscription/index": "./src/features/subscription/index.ts",
+    "./subscription/subscription-access": "./src/features/subscription/subscription-access.ts",
+    "./subscription/subscriptionRoutes": "./src/features/subscription/subscriptionRoutes.ts"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",
