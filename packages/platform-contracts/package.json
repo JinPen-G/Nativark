@@ -34,6 +34,10 @@
     "./integration-provider": {
       "types": "./dist/integration-provider.d.ts",
       "default": "./dist/integration-provider.js"
+    },
+    "./tenant-integrations": {
+      "types": "./dist/tenant-integrations.d.ts",
+      "default": "./dist/tenant-integrations.js"
     }
   },
   "scripts": {
@@ -59,6 +63,9 @@
       ],
       "integration-provider": [
         "dist/integration-provider.d.ts"
+      ],
+      "tenant-integrations": [
+        "dist/tenant-integrations.d.ts"
       ]
     }
   },

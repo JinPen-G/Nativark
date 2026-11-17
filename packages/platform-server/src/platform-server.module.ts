@@ -23,8 +23,20 @@ import { TenantSubscriptionController } from "./modules/subscription/subscriptio
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
 import { PLATFORM_SUBSCRIPTION_DATA_STORE, SUBSCRIPTION_APPLICATION, SUBSCRIPTION_CATEGORY_PARTICIPANT,
   type SubscriptionDataStore, type SubscriptionCategoryParticipant } from "./modules/subscription/subscription-store";
+import { PlatformOperationLogService, type PlatformOperationLogStorage } from "./common/operation-log.service";
+import { SecretBox } from "./common/secret-box";
+import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
+import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
+import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
+import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
+import { ObjectStorageProviderService } from "./modules/integrations/object-storage.provider.service";
+import { INTEGRATION_PAYMENT_PROBE, type PaymentIntegrationProbe } from "./modules/integrations/integration-probe";
+import { INTEGRATION_DATA_STORE, INTEGRATION_BUSINESS_PARTICIPANT, INTEGRATION_RUNTIME_PROVIDERS,
+  PUBLIC_INTEGRATION_RUNTIME_PROVIDERS, TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY,
+  type TenantIntegrationDataStore, type TenantIntegrationBusinessParticipant, type IntegrationRuntimeProviders } from "./modules/integrations/integration-store";
 
-export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & SubscriptionDataStore;
+export type PlatformDatabase = PlatformAuthDataStore & PlatformAppearanceDataStore & PlatformManagementDatabase & SubscriptionDataStore
+  & TenantIntegrationDataStore & PlatformOperationLogStorage;
 @Module({})
 export class PlatformServerModule {
   static register<Dependencies extends unknown[]>(options: { imports?: ModuleMetadata["imports"]; inject?: FactoryProvider["inject"];
@@ -34,18 +46,33 @@ export class PlatformServerModule {
     coreHttpProvider?: FactoryProvider<RegisteredCoreHttpAccess>;
     /** 宿主的真实行业目录参加者，空Core组合只接受公共无品类范围。 */
     subscriptionCategories?: SubscriptionCategoryParticipant;
+    /** 结算币种与原支付/通知/文件依赖，按实际受控宿主供给。 */
+    integrationBusiness?: TenantIntegrationBusinessParticipant;
+    integrationBusinessProvider?: FactoryProvider<TenantIntegrationBusinessParticipant>;
+    integrationPaymentProbe?: PaymentIntegrationProbe;
+    integrationRuntimeProviders?: IntegrationRuntimeProviders;
     openApiDocument?: unknown }): DynamicModule {
     if (options.coreHttp && options.coreHttpProvider) throw new Error("Core HTTP只能登记一个实际准入提供者");
+    if (options.integrationBusiness && options.integrationBusinessProvider) throw new Error("集成业务依赖只能登记一个实际参加者");
     return { module: PlatformServerModule, imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ...(options.imports ?? [])],
       controllers: [AuthSessionController, TenantAppearanceProfileController, AccountAppearanceController, PlatformHealthController, PlatformOpenApiController, PlatformManagementController,
-        TenantSubscriptionController, PlatformSubscriptionController],
+        TenantSubscriptionController, PlatformSubscriptionController, TenantIntegrationController],
       providers: [
         { provide: PLATFORM_AUTH_DATA_STORE, inject: options.inject ?? [], useFactory: options.useFactory },
         { provide: PLATFORM_APPEARANCE_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
         { provide: PLATFORM_SUBSCRIPTION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
+        { provide: INTEGRATION_DATA_STORE, useExisting: PLATFORM_AUTH_DATA_STORE },
+        { provide: PlatformOperationLogService, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformOperationLogService(database) },
         { provide: PlatformAuthenticationRepository, inject: [PLATFORM_AUTH_DATA_STORE], useFactory: (database: PlatformDatabase) => new PlatformAuthenticationRepository(database) },
         TenantAppearanceProfileService, AccountAppearanceService, PlatformAuthService, PlatformAuthGuard, PlatformManagementService, SubscriptionService,
         { provide: SUBSCRIPTION_APPLICATION, useExisting: SubscriptionService },
+        SecretBox, TenantIntegrationService, TenantIntegrationRuntimeService, TenantIntegrationConnectivityService, ObjectStorageProviderService,
+        { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
+        { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
+        { provide: INTEGRATION_RUNTIME_PROVIDERS, useValue: options.integrationRuntimeProviders ?? PUBLIC_INTEGRATION_RUNTIME_PROVIDERS },
+        ...(options.integrationBusiness ? [{ provide: INTEGRATION_BUSINESS_PARTICIPANT, useValue: options.integrationBusiness }] : []),
+        ...(options.integrationBusinessProvider ? [{ ...options.integrationBusinessProvider, provide: INTEGRATION_BUSINESS_PARTICIPANT }] : []),
+        ...(options.integrationPaymentProbe ? [{ provide: INTEGRATION_PAYMENT_PROBE, useValue: options.integrationPaymentProbe }] : []),
         ...(options.subscriptionCategories ? [{ provide: SUBSCRIPTION_CATEGORY_PARTICIPANT, useValue: options.subscriptionCategories }] : []),
         { provide: AUTH_HTTP_APPLICATION, useExisting: PlatformAuthService },
         { provide: PLATFORM_OPENAPI_DOCUMENT, useValue: options.openApiDocument ?? createPlatformOpenApi() },
@@ -54,6 +81,7 @@ export class PlatformServerModule {
         { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         { provide: APP_INTERCEPTOR, useClass: RequestIdInterceptor }
       ], exports: [PlatformAuthService, PlatformAuthenticationRepository, SubscriptionService, SUBSCRIPTION_APPLICATION,
-        PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE] };
+        TenantIntegrationService, TenantIntegrationRuntimeService, ObjectStorageProviderService, SecretBox, TENANT_INTEGRATION_APPLICATION,
+        PLATFORM_AUTH_DATA_STORE, PLATFORM_APPEARANCE_DATA_STORE, PLATFORM_SUBSCRIPTION_DATA_STORE, INTEGRATION_DATA_STORE] };
   }
 }

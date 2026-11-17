@@ -40,6 +40,7 @@ import { IntegrationsService } from "./modules/integrations/integrations.service
 import { TenantIntegrationController } from "./modules/integrations/tenant-integration.controller";
 import { TenantIntegrationConnectivityService } from "./modules/integrations/tenant-integration.connectivity.service";
 import { TenantIntegrationService } from "./modules/integrations/tenant-integration.service";
+import { TENANT_INTEGRATION_APPLICATION, TENANT_INTEGRATION_CONNECTIVITY } from "@rental-os/platform-server/integration-store";
 import { TenantIntegrationRuntimeService } from "./modules/integrations/tenant-integration.runtime.service";
 import { FileStorageRuntimeService } from "./modules/integrations/file-storage.runtime.service";
 import { FileBusinessAccessService } from "./modules/files/file-business-access.service";
@@ -469,6 +470,8 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     IntegrationsRepository,
     TenantIntegrationService,
     TenantIntegrationConnectivityService,
+    { provide: TENANT_INTEGRATION_APPLICATION, useExisting: TenantIntegrationService },
+    { provide: TENANT_INTEGRATION_CONNECTIVITY, useExisting: TenantIntegrationConnectivityService },
     TenantIntegrationRuntimeService,
     FileStorageRuntimeService,
     FileBusinessAccessService,

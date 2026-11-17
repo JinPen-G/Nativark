@@ -69,6 +69,8 @@ model Tenant {
   featureGrants                     TenantFeatureGrant[]
   subscriptionRequests              SubscriptionRequest[]
   subscriptionEvents                SubscriptionEvent[]
+  adapterLogs                       ExternalAdapterLog[]
+  integrationConfigs                TenantIntegrationConfig[]
   logs                              OperationLog[]
   createdAt                         DateTime                                 @default(now())
   updatedAt                         DateTime                                 @updatedAt
@@ -599,4 +601,48 @@ model SubscriptionStandardPrice {
   updatedAt    DateTime         @updatedAt
 
   @@map("subscription_standard_prices")
+}
+
+model TenantIntegrationConfig {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  capability           String    @db.VarChar(20)
+  provider             String    @db.VarChar(40)
+  enabled              Boolean   @default(false)
+  isDefault            Boolean   @default(false)
+  settings             Json
+  credentialsEncrypted String?   @db.Text
+  secretFields         Json
+  lastTestStatus       String    @default("not_tested") @db.VarChar(20)
+  lastTestMode         String    @default("none") @db.VarChar(20)
+  lastTestAt           DateTime?
+  lastTestError        String?   @db.VarChar(500)
+  updatedBy            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([tenantId, capability, provider], map: "tenant_integration_configs_scope_provider_key")
+  @@index([tenantId, capability, enabled], map: "tenant_integration_configs_scope_capability_idx")
+  @@map("tenant_integration_configs")
+}
+
+model ExternalAdapterLog {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  provider     String
+  capability   String
+  operation    String
+  businessType String?
+  businessId   String?
+  status       String
+  requestJson  Json
+  responseJson Json?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, provider, capability, createdAt])
+  @@index([tenantId, businessType, businessId])
+  @@index([tenantId, status, createdAt])
 }

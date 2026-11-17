@@ -24,6 +24,8 @@ import { DESKTOP_BUSINESS_SCHEMAS, DESKTOP_BUSINESS_OPERATIONS } from './ai-desk
 import { AI_AUTOMATION_EVENT_TASK_HTTP_DRAFT } from '@rental-os/shared';
 import { RENTAL_CATEGORY_CODE_PATTERN, RENTAL_CATEGORY_ICON_CODES } from '@rental-os/shared';
 import { SUBSCRIPTION_HTTP_OPERATIONS } from '@rental-os/platform-server/subscription-http-policy';
+import { INTEGRATION_HTTP_OPERATIONS } from '@rental-os/platform-server/integration-http-policy';
+import { INTEGRATION_OPENAPI_SCHEMAS } from '@rental-os/platform-server/integration-openapi';
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from '@rental-os/platform-server/subscription-openapi';
 import { AI_AUTOMATION_REVIEW_HTTP_CONTRACTS, AI_AUTOMATION_REVIEW_GRANT_HTTP_DRAFT } from '@rental-os/shared';
 import { AI_AUTOMATION_EXPLANATION_HTTP, AI_AUTOMATION_EXPLANATION_CONTRACTS } from '@rental-os/shared';
@@ -251,6 +253,7 @@ function buildPaths(operations: ContractOperation[]) {
 
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
+  ...INTEGRATION_OPENAPI_SCHEMAS,
   ...STAFF_UPLOAD_OBSERVATION_SCHEMAS,
   ...AI_MEMBER_NAME_SCHEMAS,
   ...AI_TASK_RULE_DRAFT_SCHEMAS,
@@ -712,26 +715,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     },
     ["enabled", "showPoweredBy"]
   ),
-  TenantIntegrationCatalogResponse: objectOf(
-    { providers: arrayOf(objectSchema), configs: arrayOf(objectSchema) },
-    ["providers", "configs"]
-  ),
-  SaveTenantIntegrationRequest: objectOf(
-    { enabled: booleanSchema, isDefault: booleanSchema, settings: objectSchema, credentials: objectSchema },
-    ["enabled", "isDefault", "settings"]
-  ),
-  TenantIntegrationTestResult: objectOf(
-    {
-      capability: stringSchema,
-      provider: stringSchema,
-      ok: booleanSchema,
-      mode: stringSchema,
-      message: stringSchema,
-      checkedAt: { type: "string", format: "date-time" },
-      missingFields: arrayOf(stringSchema)
-    },
-    ["capability", "provider", "ok", "mode", "message", "checkedAt", "missingFields"]
-  ),
+  TenantIntegrationCatalogResponse: INTEGRATION_OPENAPI_SCHEMAS["Integration.Catalog"],
+  SaveTenantIntegrationRequest: INTEGRATION_OPENAPI_SCHEMAS["Integration.SaveConfig"],
+  TenantIntegrationTestResult: INTEGRATION_OPENAPI_SCHEMAS["Integration.TestResult"],
   CreatePaymentRefundRequest: objectOf(
     { amount: numberSchema, reason: stringSchema, idempotencyKey: stringSchema },
     ["amount", "reason", "idempotencyKey"]
@@ -2162,36 +2148,13 @@ function clientOperation(
   };
 }
 
-const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = [
-  {
-    method: "get",
-    path: "/api/platform/integrations",
-    tag: "Platform",
-    operationId: "listTenantIntegrationConfigs",
-    summary: "List tenant SMS, payment and file provider configurations",
-    permissions: ["system:integration:manage"],
-    responseSchema: "TenantIntegrationCatalogResponse"
-  },
-  {
-    method: "put",
-    path: "/api/platform/integrations/{capability}/{provider}",
-    tag: "Platform",
-    operationId: "saveTenantIntegrationConfig",
-    summary: "Save one tenant provider configuration",
-    permissions: ["system:integration:manage"],
-    requestSchema: "SaveTenantIntegrationRequest",
-    responseSchema: "GenericObject"
-  },
-  {
-    method: "post",
-    path: "/api/platform/integrations/{capability}/{provider}/test",
-    tag: "Platform",
-    operationId: "testTenantIntegrationConfig",
-    summary: "Validate one tenant provider configuration",
-    permissions: ["system:integration:manage"],
-    responseSchema: "TenantIntegrationTestResult"
-  }
-];
+const TENANT_INTEGRATION_OPERATIONS: ContractOperation[] = INTEGRATION_HTTP_OPERATIONS.map((item): ContractOperation => ({
+  method: item.method.toLowerCase() as HttpMethod,
+  path: `/api${item.path.replace(/:([a-zA-Z]+)/g, "{$1}")}`,
+  tag: "Platform", operationId: item.id, summary: item.summary,
+  permissions: [item.permission], responseSchema: item.response,
+  ...("request" in item ? { requestSchema: item.request } : {})
+}));
 
 const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/files", "Files", "listFileAssets", "List files authorized by their original business objects; credential and knowledge metadata are excluded", ["system:integration:manage"]),
