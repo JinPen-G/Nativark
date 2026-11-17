@@ -5,6 +5,7 @@ import type { AuthUser, TenantIdentity, TenantAppearanceProfile, SaveTenantAppea
 import { PLATFORM_HTTP_OPERATIONS } from "./platform-http-policy";
 import { RAW_HTTP_RESPONSE } from "./common/request-id.interceptor";
 import { SUBSCRIPTION_OPENAPI_SCHEMAS, SUBSCRIPTION_OPENAPI_QUERY_SCHEMAS } from "./modules/subscription/subscription-openapi";
+import { INTEGRATION_OPENAPI_SCHEMAS } from "./modules/integrations/integration-openapi";
 
 type Schema = { [field: string]: unknown };
 const string: Schema = { type: "string" }, boolean: Schema = { type: "boolean" };
@@ -21,6 +22,7 @@ const array = (name: string): Schema => ({ type: "array", items: ref(name) });
 
 export const PLATFORM_OPENAPI_SCHEMAS = {
   ...SUBSCRIPTION_OPENAPI_SCHEMAS,
+  ...INTEGRATION_OPENAPI_SCHEMAS,
   "Platform.Health": object({ service: string, status: string, time: date }, ["service", "status", "time"]),
   "Platform.OpenApi": { type: "object", additionalProperties: true },
   "Platform.LoginRequest": object({ tenantCode: string, account: string, password }, ["tenantCode", "account", "password"]),

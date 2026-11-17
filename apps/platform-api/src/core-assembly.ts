@@ -1,14 +1,28 @@
 /** 公共宿主的单一Core应用工厂。默认零Core，选中实现/数据观察须在受控装配显式提供。 */
-import { Module } from "@nestjs/common";
+import { Module, ServiceUnavailableException } from "@nestjs/common";
+import type { TenantIntegrationBusinessParticipant } from "@rental-os/platform-server/integration-store";
 import type { Prisma } from "../generated/client";
 import { CoreHostModule, CORE_HOST_APPLICATION, composePlatformCoreApplication, createEmptyCoreCatalogue,
   type CoreHostHttpApplication } from "@rental-os/platform-core-host";
 import { PlatformDatabaseClient, PlatformDatabaseModule } from "./database";
 import { createPublicCoreDependencies } from "./core-dependencies";
 
+const publicCoreCatalogue = createEmptyCoreCatalogue();
+
+/** 与默认公共Core应用共用实际空目录，依赖核验只适用于该零Core装配。 */
+function requireNoCoreIntegrationDependencies() {
+  if (publicCoreCatalogue.registrations.size !== 0) throw new ServiceUnavailableException("已装配Core须提供其原外部事实依赖核验");
+}
+
+export const publicIntegrationBusiness: TenantIntegrationBusinessParticipant = {
+  async settlementCurrency() { requireNoCoreIntegrationDependencies(); return undefined; },
+  async assertCanDisableProvider() { requireNoCoreIntegrationDependencies(); },
+  async assertProviderIdentityChange() { requireNoCoreIntegrationDependencies(); }
+};
+
 /** 只有目录选择零Core时可走此默认组合，任何未知Core/业务HTTP仍明确拒绝。 */
 export function composePublicCoreApplication(database: PlatformDatabaseClient): CoreHostHttpApplication {
-  return composePlatformCoreApplication<Prisma.TransactionClient>({ ...createPublicCoreDependencies(database), catalogue: createEmptyCoreCatalogue() });
+  return composePlatformCoreApplication<Prisma.TransactionClient>({ ...createPublicCoreDependencies(database), catalogue: publicCoreCatalogue });
 }
 
 export const PUBLIC_CORE_APPLICATION = Symbol("public.core-application");

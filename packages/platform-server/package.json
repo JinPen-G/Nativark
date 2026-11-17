@@ -146,6 +146,62 @@
     "./subscription-openapi": {
       "types": "./dist/modules/subscription/subscription-openapi.d.ts",
       "default": "./dist/modules/subscription/subscription-openapi.js"
+    },
+    "./secret-box": {
+      "types": "./dist/common/secret-box.d.ts",
+      "default": "./dist/common/secret-box.js"
+    },
+    "./outbound-url": {
+      "types": "./dist/common/outbound-url.d.ts",
+      "default": "./dist/common/outbound-url.js"
+    },
+    "./permission-match": {
+      "types": "./dist/common/permission-match.d.ts",
+      "default": "./dist/common/permission-match.js"
+    },
+    "./tenant-integration": {
+      "types": "./dist/modules/integrations/tenant-integration.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.service.js"
+    },
+    "./integration-store": {
+      "types": "./dist/modules/integrations/integration-store.d.ts",
+      "default": "./dist/modules/integrations/integration-store.js"
+    },
+    "./integration-dto": {
+      "types": "./dist/modules/integrations/tenant-integration-request.dto.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration-request.dto.js"
+    },
+    "./integration-http": {
+      "types": "./dist/modules/integrations/tenant-integration.controller.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.controller.js"
+    },
+    "./integration-connectivity": {
+      "types": "./dist/modules/integrations/tenant-integration.connectivity.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.connectivity.service.js"
+    },
+    "./integration-probe": {
+      "types": "./dist/modules/integrations/integration-probe.d.ts",
+      "default": "./dist/modules/integrations/integration-probe.js"
+    },
+    "./integration-sms": {
+      "types": "./dist/modules/integrations/tenant-integration.runtime.service.d.ts",
+      "default": "./dist/modules/integrations/tenant-integration.runtime.service.js"
+    },
+    "./object-storage": {
+      "types": "./dist/modules/integrations/object-storage.provider.service.d.ts",
+      "default": "./dist/modules/integrations/object-storage.provider.service.js"
+    },
+    "./aliyun-oss-v4": {
+      "types": "./dist/modules/integrations/aliyun-oss-v4.d.ts",
+      "default": "./dist/modules/integrations/aliyun-oss-v4.js"
+    },
+    "./integration-http-policy": {
+      "types": "./dist/modules/integrations/integration-http-policy.d.ts",
+      "default": "./dist/modules/integrations/integration-http-policy.js"
+    },
+    "./integration-openapi": {
+      "types": "./dist/modules/integrations/integration-openapi.d.ts",
+      "default": "./dist/modules/integrations/integration-openapi.js"
     }
   },
   "scripts": {
@@ -270,6 +326,48 @@
       ],
       "subscription-openapi": [
         "dist/modules/subscription/subscription-openapi.d.ts"
+      ],
+      "secret-box": [
+        "dist/common/secret-box.d.ts"
+      ],
+      "outbound-url": [
+        "dist/common/outbound-url.d.ts"
+      ],
+      "permission-match": [
+        "dist/common/permission-match.d.ts"
+      ],
+      "tenant-integration": [
+        "dist/modules/integrations/tenant-integration.service.d.ts"
+      ],
+      "integration-store": [
+        "dist/modules/integrations/integration-store.d.ts"
+      ],
+      "integration-dto": [
+        "dist/modules/integrations/tenant-integration-request.dto.d.ts"
+      ],
+      "integration-http": [
+        "dist/modules/integrations/tenant-integration.controller.d.ts"
+      ],
+      "integration-connectivity": [
+        "dist/modules/integrations/tenant-integration.connectivity.service.d.ts"
+      ],
+      "integration-probe": [
+        "dist/modules/integrations/integration-probe.d.ts"
+      ],
+      "integration-sms": [
+        "dist/modules/integrations/tenant-integration.runtime.service.d.ts"
+      ],
+      "object-storage": [
+        "dist/modules/integrations/object-storage.provider.service.d.ts"
+      ],
+      "aliyun-oss-v4": [
+        "dist/modules/integrations/aliyun-oss-v4.d.ts"
+      ],
+      "integration-http-policy": [
+        "dist/modules/integrations/integration-http-policy.d.ts"
+      ],
+      "integration-openapi": [
+        "dist/modules/integrations/integration-openapi.d.ts"
       ]
     }
   }

@@ -1,5 +1,6 @@
 /** 公共HTTP方法、鉴权及接口资料的同源声明；业务Core另按其注册目录和当前授权接入。 */
 import { SUBSCRIPTION_HTTP_OPERATIONS } from "./modules/subscription/subscription-http-policy";
+import { INTEGRATION_HTTP_OPERATIONS } from "./modules/integrations/integration-http-policy";
 export const PLATFORM_HTTP_OPERATIONS = [
   { method: "GET", path: "/health", id: "health", summary: "读取公共宿主健康状态", access: "anonymous", response: "Health" },
   { method: "GET", path: "/openapi.json", id: "openApi", summary: "读取当前宿主接口资料", access: "anonymous", response: "OpenApi" },
@@ -32,6 +33,7 @@ export const PLATFORM_HTTP_OPERATIONS = [
   { method: "DELETE", path: "/platform/roles/:id", id: "deleteRole", summary: "删除未分配的普通角色", access: "tenant", permission: "system:role:manage", response: "Deleted" },
   { method: "GET", path: "/platform/permission-tree", id: "permissionTree", summary: "读取实际登记的公共与Core权限", access: "tenant", permission: "system:role:manage", response: "PermissionTree" },
   ...SUBSCRIPTION_HTTP_OPERATIONS,
+  ...INTEGRATION_HTTP_OPERATIONS,
 ] as const;
 
 export function platformHttpPolicy(method: string, path: string) {
