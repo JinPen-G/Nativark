@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Synt
 import { ContextMenu } from '@animate-ui/react/primitives/base-ui/context-menu';
 import { ArrowUp, FileText, PanelRightClose, Plus, RotateCcw, ShieldCheck, Square, X } from 'lucide-react';
 import Markdown from 'react-markdown';
-import { formatRentalMoney } from '@rental-os/shared';
+import { AI_CONVERSATION_DRAFT_VERSION, formatRentalMoney } from '@rental-os/shared';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useLocale } from '@/app/locale';
 import { currentSessionEpoch } from '@/app/queryClient';
@@ -132,7 +132,7 @@ function CopilotPanel({ narrow, open, background }: { narrow: boolean; open: boo
     if (!open || !conversationId || !now.sessionVerified || !now.token || copilot.identity !== JSON.stringify([now.tenant?.tenantId, now.currentWorkspaceId, now.user?.id])
       || !canAccessRoute(APP_ROUTES.aiOperator, now.hasPermission, now.hasCapability, now.tenant?.categoryCode,
         Boolean(now.user?.isSaasAdmin), now.hasTenantMembershipPermission)) return;
-    navigate(APP_ROUTES.aiOperator.path, { state: { aiConversation: { conversationId, capabilityCode: 'order_explanation',
+    navigate(APP_ROUTES.aiOperator.path, { state: { aiConversation: { draftVersion: AI_CONVERSATION_DRAFT_VERSION, conversationId, capabilityCode: 'order_explanation',
       identity: copilot.identity, sessionEpoch: currentSessionEpoch() } } });
     copilot.close();
   };

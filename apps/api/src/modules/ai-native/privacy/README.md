@@ -31,7 +31,7 @@
 
 原 `scripts/ops/restore-source.cjs` 在GRANT之前校验全部恢复空间的证书、原dump摘要和准确目标库。首次导入后未满足隐私门会保留隔离库与output接续记录；重放完成后使用同一 `--file`、`--finalize-ai <接续记录>`、`--ai-retention-certificates <证书数组JSON>` 接续，**不重复导入、不覆盖旧库**。公钥来自服务器 `OPS_AI_RETENTION_PUBLIC_KEY`，不接受证书自带公钥。恢复演练同样不将缺证据当作验收通过。
 
-平台使用[独立恢复凭证](platform-retention-restore.ts)。`AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH`由可信服务端固定；私钥和快照身份仅由备份宿主传给原request factory的exportRestoreManifest／reapplyRestore，不接受HTTP密钥或恢复请求。源库在恢复快照之外导出至多500项完整平台删除标记，签名绑定原scopeId、PLATFORM／null、dump SHA、期限；目标隔离库重放后生成ai-restored-platform-scope-1证书。原[恢复屏障](../../../../../scripts/ops/ai-retention.cjs)同时核全部workspace和真实平台Scope证书，少平台证书、错快照、过期或unknown均不放行。恢复仍不能启动模型、Worker或业务服务。
+平台使用[独立恢复凭证](platform-retention-restore.ts)。`AI_NATIVE_PLATFORM_RETENTION_RESTORE_KEY_HASH`由可信服务端固定；私钥和快照身份仅由备份宿主传给原request factory的exportRestoreManifest／reapplyRestore，不接受HTTP密钥或恢复请求。源库在恢复快照之外导出至多500项完整平台删除标记，签名绑定原scopeId、PLATFORM／null、dump SHA、期限；目标隔离库重放后生成ai-restored-platform-scope-1证书。原[恢复屏障](../../../../../../scripts/ops/ai-retention.cjs)同时核全部workspace和真实平台Scope证书，少平台证书、错快照、过期或unknown均不放行。恢复仍不能启动模型、Worker或业务服务。
 
 `scripts/ops/ai-retention.cjs` 的 `AiOnlyBackupRetentionStore` 是可选本地AI专用副本适配：显式服务器目录/当前权限/固定公钥，AES-256-GCM加密保存，签名绑定内容hash，指定最多10个原ID清理30天到期副本。不得清理混合业务SQL备份、业务原件、外部tombstone档案、目录、链接或数据卷。混合业务备份仍需原运维保留策略，不能把AI专用适配当作所有备份已完成清理。
 

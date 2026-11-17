@@ -168,7 +168,8 @@ function useOperatorState() {
       setNotice('请填写不超过4096字的租赁需求，消息仍保留在输入框。'); return false;
     }
     try {
-      if (!active.native?.readyForNext && (active.native || active.hasOriginal || native.hasOriginal(activeId)) || native.locatorsSnapshot().some(row => row.pending)) {
+      const readyForNext = active.native?.readyForNext && native.frame(activeId)?.readyForNext;
+      if (!readyForNext && (active.native || active.hasOriginal || native.hasOriginal(activeId)) || native.locatorsSnapshot().some(row => row.pending)) {
         setNotice('当前轮次已受理或原结果待核对。新输入仍保留在输入框，请先核对原结果，并在工作区补充条件或确认。'); return false;
       }
     } catch { setNotice('原操作定位不可读取，消息仍保留在输入框。'); return false; }
@@ -187,7 +188,8 @@ function useOperatorState() {
     try { const original = target?.native;
       // A composer message always means new input. Original reads have their
       // own action and may never masquerade as the answer to this message.
-      if (!original?.readyForNext && (original || target?.hasOriginal || native.hasOriginal(targetId))) throw Error('新输入未发送，请读取原结果。');
+      const readyForNext = original?.readyForNext && native.frame(targetId)?.readyForNext;
+      if (!readyForNext && (original || target?.hasOriginal || native.hasOriginal(targetId))) throw Error('新输入未发送，请读取原结果。');
       const frame = await native.send({ chatId: targetId, scene, text: latest?.content ?? '', orderId: orderId.trim(), question: orderQuestion || undefined, sections: openingSections }, abort.signal, visible);
       if (!current() || abort.signal.aborted) throw Error('AI_SCOPE_CHANGED');
       setChats(previous => previous.map(chat => chat.id === targetId && chat.title === '新对话' ? { ...chat, title: latest?.content.slice(0, 26) ?? capability.name } : chat));

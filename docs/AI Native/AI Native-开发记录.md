@@ -1,10 +1,173 @@
 # AI Native：开发情况与近期记录
 
 > 文档用途：为 Codex、Claude 和人工开发者说明各任务已做什么、还缺什么、从哪里核验。不是需求基线，也不是第二套百分比台账。
-> 归纳日期：2026-11-11。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围只见[当前接续](<AI Native-协作接续.md>)；本文件不续派旧指令。现行依据为需求v1.15/任务v1.19；2026-11-11经负责人明确变更为本轮模拟研发验收、负责人另做真实测试，功能范围不变。旧阶段按当时门槛留下的分数与未验事实保留，不能沿用旧实测前置卡住新口径的研发收口。
+> 归纳日期为2026-11-18。先读下方原28项与ENTRY当前摘要，再按任务查近期功能阶段。活动现场与写入范围见[当前接续](<AI Native-协作接续.md>)。现行依据为需求v1.15／任务v1.19，2026-11-11负责人批准本轮模拟研发验收，真实测试由负责人另行执行。原28项及ENTRY全文已逐项核定，历史分数、失败、未验事实和unknown关联保留原阶段语境。
 > 原28项及 ENTRY 的百分比唯一维护在[正式开发任务](<AI Native-开发任务.md>)。条款通过不等于整项完成，不改验收标准来提高比例。
-> 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、15、16、17、18及19／20／21／22／23／24／25／26已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
+> 全表门槛复核已按2026-11-18最终交付核闭，原28项及ENTRY各阶段的G1～G4、固定消费者、必要模拟／类型和独立复验见[原28最终收口](#ain28-four-clause-final-closeout-20261118)及下方实施摘要。原2026-11-09[合并后复核](#ain-post-consolidation-review-20261109)保留当时依据。当前分数唯一维护在正式开发任务。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
+
+<a id="ain27-28-main-final-delivery-20261118"></a>
+## AIN-27／28最终main交付与远端回执（2026-11-18）
+
+原28最终研发登记提交`748f761535343ca224532ee252fe93ba60dbbee9`已普通推送AI分支并回读GitHub。Root按本轮负责人“每两项原任务整合main”的持续目标，以main固定`7d49c26c9423f2400a233275e84cca5cb4127fa3`及该AI提交生成最终候选树`32e2051e869a9c39b4609c55e6a602793202c1db`。相对已做完整后台类型、实际入口模拟及两侧非作者核定的`74c62684132f7e2452d755f6329d012291993630`，后继仅含三份AI文档差异。
+
+### 实际合并及上传
+
+- 开始前main分支、HEAD、暂存区、MERGE_HEAD／CHERRY_PICK_HEAD及八条入站路径已核。各入站工作区文件的规范化Git blob与固定main父版本一致。实际远端main与该本地父版本同SHA，AI最终登记已在目标远端。
+- 实际命令`git merge --no-ff --no-commit 748f761535343ca224532ee252fe93ba60dbbee9`退出0，自动合并Copilot和原记录。暂存范围恰为三份入口源码及五份已有文档，`git write-tree`与固定候选树相同。原文档检查器核11/11、0错误，暂存差异检查退出0。
+- 中文合并提交为`914c29bec94fc5dc33054a7a198f052f02d642bf`，父版本分别为上述main和AI，提交树为`32e2051e869a9c39b4609c55e6a602793202c1db`。`git merge-base --is-ancestor`核AI最终登记在该main提交中，退出0。
+- `git push origin HEAD:refs/heads/main`退出0，随后`git ls-remote --heads origin refs/heads/main`退出0并回读`914c29bec94fc5dc33054a7a198f052f02d642bf`。原27／28固定main节点已完成实际交付，产品基线使用该提交。[原28全文与验证](#ain28-four-clause-final-closeout-20261118)、[角色操作及实测](#ain28-user-operation-real-test-handoff-20261117)
+
+### WIP、原文及资源核对
+
+主线65份已跟踪WIP的原二进制差异及61份未跟踪成果的原字节，在实际合并和提交后均核同。跟踪差异SHA-256为`192ce2ef32fb32452edf90661429dfb246ec6178ca661906722d506eef20bc0b`，未跟踪文件Git哈希序列SHA-256为`6a56989b16b9659babeb6c86e77edc9d883dfbfaba1013ce163ddfc7b1b15175`。旧本地演示界面两份原稿仍由唯一的本地Git补丁保全，引用`refs/codex/ai-native/main-wip-preservation-20261117`，blob为`d47e4c9d3214b53e1dae585d41faae008ba97da7`，27982字节，SHA-256为`af5fc3f0e6486f971fb7118d89aafd2e5ae0dc819d05048bc5997da16cb67c38`。[原整合及原稿去向](#ain-main-fixed-native-integration-20261117)
+
+最终候选375个显式阶段锚点全部逐一匹配固定父版本，无丢失、重复或拼接正文。main保留原Copilot的header／dock结构，三份入口源码与已核定版本同字节。API、shared、网站和两类小程序沿固定主线产品基线继承已验结果，后继入口代码已有必要模拟、完整后台类型及非作者复验。原失败、历史scope附件缺字节和unknown关联继续沿原阶段读取。
+
+Root验证子进程均已退出，两处本轮任务临时目录已删除并核实，本树`output/.tmp`为空。main的`admin-header-actions`、`admin-nativark-brand`和`admin-shell-ui`归原创建者保留，本片服务、端口、数据库、依赖及文件测试脚本创建数均为0。真实环境由负责人沿原实测清单执行。此后交付回执和最终接续使用文档后继提交同步，产品源码基线为上述已上传main提交。
+
+交付回执及最终接续的原文档命令`node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs`退出0，11/11文档零错误，两份新增／更新现场的本地文件与锚点定向核查均通过，`git diff --check`退出0。
+
+<a id="ain28-four-clause-final-closeout-20261118"></a>
+## AIN-28 四条、A32与全范围最终研发收口（2026-11-18）
+
+固定AI源码提交为已上传并回读GitHub的`0e4e6367a27b36f2bde58639a0f2bdd1b00e2476`，main父版本为`7d49c26c9423f2400a233275e84cca5cb4127fa3`。原27六条及A30／A31已核闭。dev1在2026-11-18 03:14:06交回两个入口四项非作者结论，dev2在03:31:01交回原28四条及A32技术核定，Root读取原终态、任务条款、源码和实际回执后完成全范围登记。验收沿负责人2026-11-11批准的必要模拟／类型及独立复核口径。[原27全文](#ain27-six-clause-whole-closeout-20261118)、[正式原任务](<AI Native-开发任务.md#ain-28-独立复核缺陷清零文档归档与交付>)
+
+| 原条款 | 全文核定与唯一交付依据 |
+| --- | --- |
+| 1，需求、跨模块契约、授权、恢复、成本、数据及用户操作复核 | 原28项按各阶段全文和固定消费者核定。原契约、Auth／Guard／ALS、lease／fencing／CAS、单账与Task资源、Core幂等、来源ACL和四端操作有原阶段独立证据。Root实现的两处入口修复由dev1完成非作者复验，dev2结合该结论核定四条及A32，原作者自复查分列。[原契约](#ain02-contract-freeze-confirmed-20261104)、[当前授权](#ain04-whole-task-closeout-20261105)、[运行器](#ain06-simulated-whole-closeout-20261111)、[原确认](#ain07-simulated-whole-closeout-20261111)、[计量](#ain11-simulated-whole-closeout-20261111)、[安全隐私](#ain24-platform-inspection-expiry-whole-closeout-20261115)、[性能成本](#ain25-measurement-cost-rollback-whole-20261114) |
+| 2，阻断／高风险缺陷处置及Reserved | 本轮确证入口P2已分别修复并关联原12／28，实际页面／会话及转接读取器复验退出0，原失败完整保留。历史scope附件缺字节、旧audit和unknown关联沿原记录保留证据边界。Reserved沿正式原四项，高级路由／自动故障转移、外部MCP／Agent市场、独立APP及跨空间经营合并。基础BYOK在本期范围内。[控制台修复](#ain28-console-next-round-recovery-20261118)、[Copilot转接修复](#ain28-copilot-versioned-transfer-20261118)、[原储备](<AI Native-开发任务.md#6-待决和外部依赖>) |
+| 3，部署／运行／停用／接管、角色说明、合同、决定及归档 | 原四册和开发记录为唯一现行入口。平台／BYOK、部署／轮换／监控／留存、灰度／停用／回退、管理员／员工／客户操作、工具／API／恢复合同、D01～D05及负责人实测清单齐备。三份历史导航按原Git字节和固定版本修复，阶段原文及失败保留。[部署运行资料](#ain27-operational-delivery-20261117)、[角色操作及实测](#ain28-user-operation-real-test-handoff-20261117)、[历史导航修复](#ain28-historical-navigation-operation-fixes-20261118) |
+| 4，原28项范围、工作树／资源及真实证据边界 | AIN-01～27全文已核闭，原28本片满足四条及A32。ENTRY原18项另设分母。固定main完整产品证据、最终入口必要模拟／类型和候选原文保全已核，Root及助手的本次验证目录和进程已清理。各专项main WIP及原稿按原归属保全，真实测试由负责人沿原清单执行。[原26全文](#ain26-combined-whole-closeout-20261118)、[主线固定整合](#ain-main-fixed-native-integration-20261117)、[本轮角色及实测](#ain28-user-operation-real-test-handoff-20261117) |
+
+### 历史回读与后续输入的原边界
+
+dev2按正常页面入口排除两项早期静态疑点。重新挂载的历史会话保持只读，无原待核操作时使用独立“新对话”承接新输入，同页原关闭证明丢失的实际P2已修复。Copilot空轮次撤回旧展示后保留原定位和journal，修后的“在 Agent 控制台继续”仍可转接同一原会话。下一轮沿当前关闭收据和空闲修订，历史页的旧证明由当前宿主重新核定。[新对话及原核对](../../apps/admin/src/features/ai-operator/OperatorContext.tsx)、[原历史控件](../../apps/admin/src/features/ai-operator/NativeOperatorWorkspace.tsx)、[Copilot继续入口](../../apps/admin/src/features/copilot/CopilotLayout.tsx)
+
+### 固定main候选与完成验证
+
+原main与固定AI源码生成候选树`74c62684132f7e2452d755f6329d012291993630`，`merge-tree --write-tree`退出0，相对main仅三份入口源码及五份已有文档。main原Copilot的header／dock结构沿固定父版本合入，完整合并blob为`6d99a0c0be526084bb1bb4069ba4bd8771c9599d`。该文件相对main仅版本import及转接定位两行，完整`CopilotPanel`与已非作者复验的AI源一致，12166字节，SHA-256为`35a0103ca589e35d35445943076c02a9163c9d6ec59df9e257476f4650e77d8e`。控制台两源沿已复验的`fc66db97e`和`dd0e66b7f`。
+
+Root对该实际合并候选再做完整后台TypeScript5.9.3验证，shared为129根／337源／129份内存声明，admin为665根／4002源，零诊断、退出0，audit为空。命令沿`node --no-node-snapshot --no-compilation-cache --max-old-space-size=4096 -`，stdin SHA-256为`af1b46e54cb4bff62d94f962e5e2f1b525383f00458364809dc79845203ce257`。进程54176已退出，finally删除本树`output/.tmp/ain28-copilot-transfer`并核实消失。API、shared及其他三端的完整类型和实际OpenAPI／AppModule装配沿固定主线基线同字节继承。后继最终归档候选按产品字节和阶段正文再次核定。
+
+该候选main有370个、AI有360个显式阶段锚点，候选374个全部逐一匹配某一固定父版本，无丢失或重复。原文档检查器核11/11白名单文档、0错误。本片最终正文和百分比将进入后继固定AI及main提交，实际提交／远端结果在本原记录续证。
+
+dev1在2026-11-18 03:35:15另交固定候选继承终态，确认三份完整源码和整个Panel的上述字节哈希，四项非作者结论绑定该树。必要类型stdin／实际输出、两侧终态、元数据及文档结果保留在唯一的本地Git引用`refs/codex/ai-native/ain28-main-candidate-20261118`，树为`790f2612c1929bd8e3c5d043925259e7398ce3c2`，可用`git show refs/codex/ai-native/ain28-main-candidate-20261118:metadata.json`读取。本次原文档CLI命令`node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs`退出0，11/11文档零错误，新增阶段、现行摘要和接续本地锚点定向核查均通过，`git diff --check`退出0。
+
+更新前接续和当前实施摘要保留在`0e4e6367a27b36f2bde58639a0f2bdd1b00e2476`，LF SHA-256分别为`01deec774f9bf4dd43f771e748026146a4eed36a72bbfb67949ff217dcb9f8d1`与`6d6e15b7cb9a458df97e38aa886106f757bc4d825b2b2659273ea7db30211462`。原2026-11-09报价阶段正文保持原字节，更新范围为现行摘要、记录头和接续现场。
+
+原28项完整范围、消费者、必要模拟／类型、发现缺陷修复／独立复验、操作交付和本轮资源收尾已核，本片将AIN-28按原G1～G4登记研发100%，原28项28/28，ENTRY原18项单独核定。最后main整合按本轮负责人持续目标办理，真实环境、D01～D05采用及生产开放由负责人按原操作资料执行。
+
+<a id="ain28-copilot-versioned-transfer-20261118"></a>
+## AIN-28 Copilot原会话转接版本修复与非作者复验（2026-11-18）
+
+控制台修复已普通推送并回读GitHub，固定AI提交为`0f09a14708b44ffac84fd1b46ba738039c0eefa4`。dev1继续复现业务页Copilot的转接P2，实际点击函数仅传四字段，原控制台读取器要求含`draftVersion`的五字段定位，页面跳转后因此未接收原会话。原反例进程58888退出0，stdin SHA-256为`482df12ae6f0aec4fa5506e5ce5841d800e48d34760d4ad05bad23f94e2f3bfb`。
+
+Root在原`CopilotLayout`消费shared正式出口的`AI_CONVERSATION_DRAFT_VERSION`，转接携带同一原会话的完整定位。固定源码blob为`f3ac8de0653ec10bd8f8ec3bdfccec8fe5a272a7`，严格读取器blob为`091a5b4b9ba9939569759f25e4a909b60700875b`。实际接收页面经该读取器调用原`openNative`。[Copilot点击入口](../../apps/admin/src/features/copilot/CopilotLayout.tsx)、[严格读取器](../../apps/admin/src/features/ai-native/conversation-navigation.ts)、[控制台接收页](../../apps/admin/src/features/ai-operator/AiOperatorPage.tsx)
+
+### 原反例及最终验证
+
+- Root沿实际点击函数AST及真实导航读取器运行原正向断言，旧源码退出1，修后退出0。同一会话和场景转接成功，错版本、身份、epoch、额外字段、当前路由撤权及切workspace均拒绝。原关闭调用1次，模型、Task、服务端业务写入及服务读取均为0，audit为空，行为目录未创建。
+- 旧源码和修后stdin SHA-256分别为`e7d421767881e2fb1368a7b8401cb0ddca8889dc526654d12e0bbe2a738ddc57`与`9b21f012c10fdf5cb4c9fd189c2848d150bbb86c1f7329aef2dbb9cf1a90b014`。命令沿`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，使用本树原离线preload和不可达DATABASE_URL。
+- 完整后台TypeScript5.9.3最终候选树为`b44e38d58c33340f4caa86bc423fa32ba2af7b49`，相比控制台已验树仅替换本片Copilot源。shared为129根／337源／129份内存声明，admin为665根／4002源，诊断均为0，退出0。类型命令将内存上限设为4096，stdin SHA-256为`af1b46e54cb4bff62d94f962e5e2f1b525383f00458364809dc79845203ce257`，audit为空。
+- dev1从实际`transfer`点击和严格读取器独立复验，进程29308退出0，stdin SHA-256为`071a7b529a851b1f221851d38d9e88e21f797f95541cf76e722d41a496610ec2`。合法五字段恢复同一会话，错版本、身份和epoch均拒绝，模型、Task及服务端业务写入均为0，audit为空。最终原对话终态时间为2026-11-18 03:14:06（Asia/Shanghai），四份源码blob与本片及控制台已上传提交核同。
+
+dev1完成原键恢复、可见观测、固定确认及权限／对象隔离四项非作者核定。可见观测沿原启动标记回读、准确来源和连续两帧可见，原结果重开保持原窗口。确认分别消费原人工复核、批准、继续及Core收据，历史回读沿只读状态。当前身份、scope、epoch和隐藏撤回均沿原实际边界。本片两P2均完成非作者复验。[控制台修复](#ain28-console-next-round-recovery-20261118)、[原入口及操作资料](#ain28-user-operation-real-test-handoff-20261117)
+
+dev1首轮连续读取夹具因空`updateNode`返回`undefined`而退出1，改用原`chat-state`后退出0，失败stdin SHA-256为`4c52b0fb751dc03b944e69afd070fc20bb57cc8e5b7c9611306d1aecf2b29c42`。原失败输出和两个旧反例保留在原对话。Root前一阶段的提示断言失败也沿原证据保留。
+
+Root最小证据树为`bc100ef2cb96decd15d349b0e2922f388fe749b3`，唯一保留于本地引用`refs/codex/ai-native/ain28-copilot-transfer-20261118`，包含旧失败、最终stdin／实际输出、类型和dev1终态，可用`git show refs/codex/ai-native/ain28-copilot-transfer-20261118:metadata.json`读取。分支提交和该本地引用的可用范围分别按实际结果核定。
+
+Root类型进程61608已退出，finally删除本树`output/.tmp/ain28-copilot-transfer`及其唯一audit文件并核实消失。dev1五个进程均退出，原任务目录从未创建。本片服务、端口、数据库、依赖、构建产物及文件测试脚本创建数均为0。真实浏览器、Controller与外部环境沿负责人实测清单执行。原28继续核完整四条、最终归档及main交付，任务百分比保持原表。
+
+原文档检查器核11/11白名单文档、0错误，新增阶段及接续本地锚点均通过，`git diff --check`退出0。
+
+<a id="ain28-console-next-round-recovery-20261118"></a>
+## AIN-28 控制台原结果核对后下一轮恢复修复（2026-11-18）
+
+前置AI提交为`55e74054e1ed3c53a5bed823560373c751bff218`，main为`7d49c26c9423f2400a233275e84cca5cb4127fa3`。dev1从候选树`bfcc7e0fdff0f704280272abbc1d3df9a313041a`复现AIN-12／28的P2。关闭当前轮后，原页面`readOriginal`对历史帧调用`native.open`，清除了同一空闲修订的下一轮证明，发送门禁因此拒绝合法输入。直接`native.read`保留证明。原反例退出0，原定位字节保持，模型、Task及服务端写入均为0。
+
+Root修复原两个消费者。在同一会话、场景、活跃状态且无当前轮时，重开复核原空闲修订和最终元数据，再保留已由关闭收据建立的证明。`read`也绑定原会话及场景。实际发送预检和`canSend`同时核页面帧及当前会话帧，迟到页面状态失去当前证明后保留输入并拒绝发送。[原会话实现](../../apps/admin/src/features/ai-operator/native-session.ts)、[原页面调用](../../apps/admin/src/features/ai-operator/OperatorContext.tsx)
+
+| 固定源码 | Git LF blob | dev1读取的工作区CRLF blob |
+| --- | --- | --- |
+| `native-session.ts` | `fc66db97e360943c1b2a61f7d77404c527bc9578` | `43487e23fb22cfc26dd2220d410056e44e388f8a` |
+| `OperatorContext.tsx` | `dd0e66b7fa493db13a2b9c6b54884a9f7fbcd398` | `180920f6e9066a0f8f57699c1ddd1796394bc84c` |
+
+### 必要验证与独立复验
+
+- Root从实际页面AST提取`readOriginal`和发送门禁，执行真实会话实现及shared校验。旧固定源码的正向断言退出1。修后10/10、退出0，覆盖同修订原页面核对、重复刷新、不同修订、新当前轮、终读期间修订变化、撤权失败、同页撤回、重挂载、scope变化及定位改变。所有夹具模型、Task及服务端写入均为0，audit为空。
+- 首轮修后夹具退出1，原因是断言将原始错误码当作面向用户的提示。夹具改为分别核可读提示和实际抛出的`AI_REVISION_CONFLICT`／`AI_ACCESS_DENIED`，原失败保留。产品错误门禁沿原实现。
+- dev1独立用实际页面调用和原聊天状态复验，同修订恢复发送、不同修订拒绝和重挂载拒绝均通过。进程40268已退出，退出码0，stdin SHA-256为`b6e10c3bf6ee44a9484af7d374971af2c8f0584b0fe26b7f831953d4f5d0b71c`。原定位保持，模型、Task和服务端写入均为0，audit为空，任务目录未创建。Root核其CRLF blob与当前源码相同。
+- 完整后台TypeScript5.9.3验证候选树`1ba0e58c4f7a1d3f7082d809b94c337d6d5535c3`，shared为129根／337源／129份内存声明，admin为665根／4002源，诊断均为0，退出0。复用受管依赖和Git固定来源，声明只在内存产生。
+
+Root行为命令为`node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -`，类型命令将内存上限设为4096。均使用本树原离线preload、不可达DATABASE_URL及本树`output/.tmp/ain28-next-round-recovery`的audit／写根／TEMP／TMP。旧源码、首轮夹具失败、最终10项及类型stdin SHA-256分别为`23e996a11d0633202b091cc296f0e316201f5a87f7148593aa60fa28f8b11440`、`1fb1158613924c710c670bc5b6daeede00635f015f4fbbced1d55c7dc7a24325`、`b9c1a6173ea5effab27a769049b9d366ded082b8dc494cf81b06673c68f93aba`、`af1b46e54cb4bff62d94f962e5e2f1b525383f00458364809dc79845203ce257`。
+
+必要stdin、实际输出和元数据保留在唯一的本地Git证据引用`refs/codex/ai-native/ain28-next-round-recovery-20261118`，树为`05a3bd7384aef2cc524e78d7f1d7f7e4d6fcda21`，可用`git show refs/codex/ai-native/ain28-next-round-recovery-20261118:metadata.json`读取。该引用保留在本机Git对象库，分支普通推送的覆盖范围沿实际远端回读核定。
+
+类型子进程42044已退出，finally删除本任务目录并核实消失。行为验证未创建该目录，本片服务、端口、数据库和依赖创建数均为0。真实浏览器与外部环境沿[负责人实测清单](#ain28-user-operation-real-test-handoff-20261117)执行。
+
+原控制台P2已完成修复及独立复验。dev1另复现Copilot转接缺`draftVersion`，沿原28继续修复、复验及最终交付，任务百分比保持原表。
+
+原文档检查器核11/11白名单文档、0错误，新增阶段及接续本地锚点均通过，`git diff --check`退出0。
+
+<a id="ain27-six-clause-whole-closeout-20261118"></a>
+## AIN-27 双轨、部署灰度与回退全文研发收口（2026-11-18）
+
+固定产品为main `7d49c26c9423f2400a233275e84cca5cb4127fa3`，文档补正为已上传`43db884b2a7c7660e004570aab0aed982b4f04a0`。dev1实际回合`01a1ea7a-df26-7120-9234-335ae8340bc0`完成原六条最终独立核定，Root读取原终态、原任务和固定Git对象后收口。原15／26全文及本轮研发口径已核闭。[原26全文](#ain26-combined-whole-closeout-20261118)、[原部署操作资料](#ain27-operational-delivery-20261117)
+
+| 原条款 | 全文核定与交付依据 |
+| --- | --- |
+| 1，供应商、工具调用、用量和错误 | 原协议、唯一Gateway、受控出站、结构化工具往返、可信usage及认证失败／超时／限流都有实现与固定模拟，能力缺席派发前拒绝。A30真实调用及适用媒体按负责人实测清单执行。[原Gateway全文](#ain05-simulated-whole-closeout-20261111)、[供应商实测入口](#ain28-user-operation-real-test-handoff-20261117) |
+| 2，平台AI／BYOK及兼容 | 新租户默认平台，完整旧BYOK保留原配置／密钥／enabled，原CAS处理模式切换，损坏来源保持不可用。原六C02及标准额度／收据链支持A31，两轨权限、能力、审计和Task资源分别复验。[双轨与额度全文](#ain11-simulated-whole-closeout-20261111)、[双轨操作](#ain27-operational-delivery-20261117) |
+| 3，部署、轮换、监控及留存 | 原发布配置、固定指纹后轮换／旧密钥环、域名／回调责任、进程容量与告警、Task／账务观测、四类留存及可信恢复可操作。4／32／4／15000ms按候选参数交付，生产采用由D05核定。[部署及留存操作](#ain27-operational-delivery-20261117)、[保留接口](../../apps/api/src/modules/ai-native/privacy/README.md) |
+| 4，灰度、停用及人工路线 | 只读／草稿、明确确认写入、额外批准的有限自动化分别登记放量／停止条件与责任。租户配置、平台逐scene政策门和原宿主发布控制可操作，BYOK同样受当前政策门约束，R3保留人工审核。[灰度及停用操作](#ain27-operational-delivery-20261117) |
+| 5，模型／prompt／tool政策及数据库回退 | 三类版本回退保留原调用、输入、计划、业务与账务关联，unknown沿原操作核对。升级CLI按原dump、准确升级／回滚目标、全scope证书和期限先核屏障，再授应用访问，原五情景模拟与清理已固定。[版本回退](#ain25-measurement-cost-rollback-whole-20261114)、[升级双目标屏障](#ain27-upgrade-restore-barrier-fixed-20261116) |
+| 6，研发验收和真实交付 | A30／A31实现、必要模拟／类型、升级回退、部署／灰度／停用资料和本次独立核定齐备。D01～D05适用决定、真实供应商、数据库／备份／对象存储、宿主设备及生产放行由负责人沿原清单执行。[操作及实测交付](#ain28-user-operation-real-test-handoff-20261117) |
+
+原Gate／运行器／配置／维护／页面／Controller／provider／AppModule／CLI的G1～G3及本轮全文、必要模拟／类型、缺陷复验和独立核定G4成立，本片将原27登记本轮研发100%。原28继续按原四条核最终需求／缺陷／交付和新的main节点。
+
+### 固定证据与版本同步
+
+- 主线从已验证`01bcfda15cb26c10899761906ac8648c03357f02`到`7d49c26c9`只含三份AI文档差异。完整shared／API／四端类型和实际OpenAPI／AppModule装配沿同一固定产品。[主线验证](#ain-main-fixed-native-integration-20261117)
+- 回退原报告blob为`7ae50a2164b1bc007638d1b606be9a21b00b14f0`，6242字节，Git字节SHA-256为`ad077f3d13f2a372e4c7edd98f7a825d723d3f3c642d918ab609b650ecd86619`。独立复核重读三组原exit0及输出，原调用均为1次，未知及原账保留。[原回退阶段](#ain25-measurement-cost-rollback-whole-20261114)
+- 升级脚本blob为`c253d59ca86ecfd05700635fef5ee77fab2f5377`，Git LF SHA-256为`a52a4ca343265c18f1d7cecc7056cb3581568edfc99c9ecc85d5d5ffa5fee9c9`，原CRLF清单为`43f0dfe85e11987cde25749ca3585f31210c667de6aa79310ed03e040c318938`。Root独立五情景stdin`459e65b663c3e409b0f394d7c51d63b056f92bf44ae6dd34c2c9b8a8c3b4b9fd`的原结果exit0，按原版本继承。[升级屏障及原命令](#ain27-upgrade-restore-barrier-fixed-20261116)
+- 恢复README补正已在`43db884b2`上传，blob为`e99168700acc70080ab296fec0d388ff53a0dac1`，Git字节SHA-256为`218fa5a564538e9a2c94463154e84f799d2dfe14f85e06b9dee9eee6883166d8`，独立复核已确认原屏障链接。该固定补正随原27／28新main节点合入。[原28文档修复](#ain28-historical-navigation-operation-fixes-20261118)
+
+当前28项和ENTRY实施摘要同步各原完整阶段。精简前原摘要保留在`43db884b2a7c7660e004570aab0aed982b4f04a0`的本文件Git对象，原摘要LF SHA-256为`7ab501db8ec7225fb391ad7c20f4a79ff95b070ea2d97becfe306b8f2471fb93`。357个原显式阶段锚点全部保留，原命令、失败和历史正文留在对应阶段。任务册只更新原27及算术汇总。
+
+本片复用固定源码与原验证结果，新增工作为六条全文／依赖／版本核定和原册同步。Root与dev1均未创建本片测试目录、依赖、构建产物、后台服务、端口或数据库，相关验证进程沿原终态已退出。
+
+文档命令 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出0，11/11白名单文档零错误。本片16处、现行摘要53处及接续41处文件／锚点定向核查通过，`git diff --check` 退出0。
+
+<a id="ain28-historical-navigation-operation-fixes-20261118"></a>
+## AIN-28 历史导航与操作交付缺口修复（2026-11-18）
+
+固定main为`7d49c26c9423f2400a233275e84cca5cb4127fa3`，AI四册前置为`0b2bceac85727de00e70dd1609dd4e4800159b7d`。本片回读dev1三份历史原稿的最终核定，以及dev2两个入口、四端操作和恢复合同的固定源码结论。修改归原28交付资料与导航范围，原正式需求和任务门槛沿原册。
+
+### 三份历史导航原稿
+
+三份原稿在整理提交`b25d5538659bf250754eb5971452309f5576a846`与删除前提交`116b581829ff72b4f1743f51df70ae0eed5db0c0`中均为同一Git对象。后者已核为固定main祖先。本片重新读取原blob核对字节数和SHA-256，3/3一致，导航使用该固定Git版本。
+
+| 原Git路径 | blob | 原字节SHA-256 | 字节数 | 固定入口 |
+| --- | --- | --- | --- | --- |
+| `docs/历史归档/整理前快照-20261016/README.md` | `4005af04362c75d078a408a0b9ccd98955e26786` | `dac3934b32b25544612a22d5b6768c9fa192d24f8acb0c91a247923ba4e40649` | 1903 | [原稿1](https://github.com/Xiao0ozZ/rental-OS/blob/116b581829ff72b4f1743f51df70ae0eed5db0c0/docs/%E5%8E%86%E5%8F%B2%E5%BD%92%E6%A1%A3/%E6%95%B4%E7%90%86%E5%89%8D%E5%BF%AB%E7%85%A7-20261016/README.md) |
+| `docs/历史归档/租赁平台/20261016-整合前/管理后台-开发任务.md` | `23c36ebb9d278a416baaafe73f7658df12154d91` | `ac0858f829ee52937550ac241bf7c8eb81ab202c789c7350f733822e014a90fa` | 17227 | [原稿2](https://github.com/Xiao0ozZ/rental-OS/blob/116b581829ff72b4f1743f51df70ae0eed5db0c0/docs/%E5%8E%86%E5%8F%B2%E5%BD%92%E6%A1%A3/%E7%A7%9F%E8%B5%81%E5%B9%B3%E5%8F%B0/20261016-%E6%95%B4%E5%90%88%E5%89%8D/%E7%AE%A1%E7%90%86%E5%90%8E%E5%8F%B0-%E5%BC%80%E5%8F%91%E4%BB%BB%E5%8A%A1.md) |
+| `docs/历史归档/租赁平台/20261016-整合前/租赁平台-开发任务.md` | `cea95a134e027496b59e666255d19440af1f3ac0` | `b935b4fa1a7dc5a3b92a50940854af8672180a83980a919298bb920a4c9a01ab` | 10825 | [原稿3](https://github.com/Xiao0ozZ/rental-OS/blob/116b581829ff72b4f1743f51df70ae0eed5db0c0/docs/%E5%8E%86%E5%8F%B2%E5%BD%92%E6%A1%A3/%E7%A7%9F%E8%B5%81%E5%B9%B3%E5%8F%B0/20261016-%E6%95%B4%E5%90%88%E5%89%8D/%E7%A7%9F%E8%B5%81%E5%B9%B3%E5%8F%B0-%E5%BC%80%E5%8F%91%E4%BB%BB%E5%8A%A1.md) |
+
+快照索引记录原整理前提交`7477af7818ead66751bdc14acdc3122ad45f139c`。管理后台原稿v1.16保留原17项任务身份，租赁平台原稿v5.3是跨端任务索引。两稿整理前LF字节与清单CRLF字节的关系已由dev1核定，现导航目标使用上表实际Git对象。原稿内部相对链接按固定提交所在路径解释。
+
+### 操作与恢复说明
+
+- 平台品类操作补齐开发预览模式、`VITE_RENTAL_CATEGORY_GOVERNANCE_PREVIEW=true`及当前SaaS／`system:rental-category:view`前置，校验、发布和采用继续核各自正式治理权限与人工确认。[实际开关](../../apps/admin/src/app/categoryGovernancePreview.ts)、[路由权限](../../apps/admin/src/app/navigation.tsx)、[角色操作](#ain28-user-operation-real-test-handoff-20261117)
+- 原保留接口README的恢复屏障相对链接补齐一级父目录，实际指向本仓库`scripts/ops/ai-retention.cjs`。[保留与恢复接口](../../apps/api/src/modules/ai-native/privacy/README.md)
+- 工具、API及恢复入口归入原操作章节，核原OpenAPI、TaskCenter、conversations和recovery Controller。读取、回答、批准、停止、恢复和接管分别走原合同，实际效果由原材料／Task／调用／业务账与收据观察。[合同与操作入口](#工具api契约与恢复入口)
+
+本阶段证据层为Git字节、固定源码及文档链接核查。原两份历史scope附件缺原字节、旧非零audit、旧断言失败及unknown关联继续沿原记录留明边界。原27全文独立核定与原28最终范围、缺陷和资源交付继续从当前接续处理。[当前接续](<AI Native-协作接续.md>)
+
+本片只修改原导航、记录、接续和已有恢复接口说明。任务临时目录、构建产物、依赖安装、后台进程、端口及数据库创建数均为0。
+
+文档检查命令 `node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs` 退出0，11/11白名单文档、0错误。新增历史核定9处、角色操作和合同34处、保留接口11处本地文件／锚点定向核查通过，`git diff --check` 退出0。固定Git历史链接另按上表原对象及当前远端main祖先关系核定。
 
 <a id="ain26-combined-whole-closeout-20261118"></a>
 ## AIN-26 四品类与多端组合全文收口（2026-11-18）
@@ -355,12 +518,24 @@ dev1继续对本片固定候选复验原两个反例及客户消费者，dev2核
 | 员工，原订单／交付／归还检查页 | 在受权订单明确展开AI，选图或录制WAV并上传，明确保存检查草稿后启动识别。PNG／JPEG最多512KiB，WAV最多12秒且512KiB，同次使用一种来源。审阅原识别Task及候选，人工逐字段确认或更正，再填入原履约表、客户签名并另行正式提交。弱网保留原草稿／上传／操作引用，迟到结果与切空间重核原对象。[交付页](../../apps/staff-miniprogram/src/pages/pickup/index.wxml)、[归还页](../../apps/staff-miniprogram/src/pages/return/index.wxml)、[原员工验收](#ain20-signature-reopen-simulated-whole-closeout-20261114) |
 | 客户，网站商品／预约页 | 在当前服务点击“按使用目标选品”，必要时先切换服务。输入目标、回答原问题并明确选择候选，核Core金额、绝对时间、数量和身份，创建原Booking Draft后明确继续到`/booking/{productId}`原预约。登录、企业身份和跨端变化重核当前受权引用，普通浏览、预约和支付沿原页面。[商品页](../../apps/tenant-website/src/pages/ProductsPage.tsx)、[预约页](../../apps/tenant-website/src/pages/BookingPage.tsx)、[原两端后继](#ain22-goal-booking-original-consumers-20261114) |
 | 客户，微信商品／帮助／本人订单页 | 在当前发布空间显式使用公开浏览、目标选品或本人订单助手，按原问题选商品和时间，核报价／草稿后进入原预约和收银台。网站／微信转接使用短期原引用及服务端当前身份／scope，付款状态取正式记录／回调。[微信商品页](../../apps/miniprogram/src/pages/catalog/index.wxml)、[客户安全边界](#ain21-simulated-whole-closeout-20261114)、[双向转接](#ain-entry04-14-cross-surface-whole-closeout-20261115) |
-| SaaS和空间治理管理员 | 在`/platform/rental-categories`及原空间品类／规则页读正式策略和能力，审草稿、差异和历史影响，分别办理校验、发布和空间采用。普通资料、规则／日历及通知受控修改沿原字段差异、当前修订、人工批准和保存收据，敏感验证走原专用流程。[原品类消费者](#ain23-category-human-model-consumers-20261114)、[原资料与配置](#ain16-simulated-whole-closeout-20261114) |
+| SaaS和空间治理管理员 | 平台品类页`/platform/rental-categories`的路由注册要求开发预览模式及`VITE_RENTAL_CATEGORY_GOVERNANCE_PREVIEW=true`，读取还须当前SaaS身份和`system:rental-category:view`。在该入口及原空间品类／规则页读正式策略和能力，审草稿、差异和历史影响，校验、发布和空间采用分别核服务端当前治理权限及人工确认。普通资料、规则／日历及通知受控修改沿原字段差异、当前修订、人工批准和保存收据，敏感验证走原专用流程。[预览开关](../../apps/admin/src/app/categoryGovernancePreview.ts)、[路由权限](../../apps/admin/src/app/navigation.tsx)、[原品类消费者](#ain23-category-human-model-consumers-20261114)、[原资料与配置](#ain16-simulated-whole-closeout-20261114) |
 
 模型解释、候选、报价、草稿、审批请求、批准、业务提交和原收据分别显示原状态。当前AI能力／政策不足时，用户从原订单、预约、履约、支付、客户或配置页接续。历史、来源、下载和收据重核当前身份／scope，unknown保留原操作关联。
 
 
 本地恢复引用及服务端原读取分别核定。部分读取接口使用POST，实测以材料／Task／模型调用／Core业务写入的新增数和原账、原收据判定恢复效果。引用缺失、unknown或未决副作用按原操作处理，操作员保留原Task、run、request／submission／operationKey和scope。
+
+### 工具、API契约与恢复入口
+
+公共契约从`@rental-os/shared`正式出口消费，部署时核API、shared运行时及端构建的固定版本。具体字段、错误及授权要求沿现有合同和Controller读取。[公共出口](../../packages/shared/src/index.ts)、[OpenAPI注册](../../apps/api/src/contracts/openapi-document.ts)
+
+| 用途 | 已注册入口及操作边界 |
+| --- | --- |
+| OpenAPI合同 | `GET /api/openapi.json`提供目标部署实际合同，核对方法、路径和公开schema版本。[实际注册](../../apps/api/src/contracts/openapi-document.ts) |
+| 原任务、结果、批准及观测 | `POST /api/ai-native/task-center/*`。快照、事件、来源、结果和原收据分别读取，回答、继续、批准及停止分别走对应原命令。[原任务Controller](../../apps/api/src/modules/ai-native/task-center.application.ts) |
+| 原会话、轮次及结果 | `POST /api/ai-native/conversations/*`。重开和读回保留原会话、Task及输入关联，明确新轮次使用原受控启动入口。[原会话Controller](../../apps/api/src/modules/ai-native/conversation.application.ts) |
+| 恢复与接管 | `POST /api/ai-native/task-center/recovery/*`。先读原target／snapshot和收据，再按当前权明确recover／takeover，绑定原Task／Run、计划哈希、修订和fencing。原unknown按同一操作核对。[原恢复Controller](../../apps/api/src/modules/ai-native/task-center-recovery.application.ts) |
+| 正文维护与可信备份恢复 | 空间及平台分别使用原`privacy`／`platform-privacy`管理入口，备份导出、删除账本重放和签名证书由可信宿主接原工厂。[保留与恢复接口](../../apps/api/src/modules/ai-native/privacy/README.md) |
 
 ### 负责人实测清单
 
@@ -4398,61 +4573,63 @@ c04外部超时失败已由AI-dev2对照当前及原 `859ad9abd` 的同一服务
 
 ## 原28项当前实施摘要
 
-| 任务 | 已有实现/消费依据 | 仍需完成或验证 |
+本表按已归档的原任务全文和固定main产品`914c29bec94fc5dc33054a7a198f052f02d642bf`同步当前实现。研发分档及总进度只查正式任务册。历史命令、失败、未知关联和真实环境证据分别沿对应原阶段读取。[正式任务](<AI Native-开发任务.md>)、[最终主线交付](#ain27-28-main-final-delivery-20261118)
+
+| 任务 | 当前实现与完整阶段依据 | 验证及运行边界 |
 | --- | --- | --- |
-| AIN-01 基线盘点 | 15项工具/权限/副作用盘点、四品类参考流程；38/38基线测试、16组参考断言、已复核八条真实API/重启/A27-A28及迁移证据；测试验收已归档 | 100%；不要求真人样本/签字。原Core缺口及旧B02完整升级仍归原实现任务，不代表目录中全部能力上线 |
-| AIN-02 公共契约 | 原身份/工具/Task/Step/提案批准/材料模型/用量知识事件、展示字段桥及各域命名叶子经shared/OpenAPI正式出口发布；固定`1bca2603`含客户完整39方法×2、取消上界及收据状态证据一致性；同一真实本地包运行/声明消费者、四端合同矩阵和跨AI全文确认见[冻结阶段](<#ain02-contract-freeze-confirmed-20261104>) | G1～G4已满足，Completed/100%。原28版本/46schema族冻结，不授当前权限或业务执行；完整聊天/隔离运行、MySQL/浏览器/微信/供应商与部署验收仍属原后继任务，不因本项完成判其通过 |
-| AIN-03 持久化 | [整项收口](<#ain03-whole-task-closeout-20261104>)覆盖原对象/受限仓储、约束/精度、配置兼容、原账/未知状态、对话保留及真实新库/支持升级/失败恢复；正式B02原文加177前缀的149张原表/178份收据保留，235条桥接/重复/空diff及自身清理完成 | G1～G4已满足，Completed/100%；实际4de原B021824失败仍保留历史，不伪造成功。真实Auth/费用/Core业务/供应商/隐私生产验收继续属原后继任务，不据存储收口授权执行或发布 |
-| AIN-04 当前授权 | [集中收口](<#ain04-whole-task-closeout-20261105>)已满足原G1～G4、Completed/100%：Auth/Guard/ALS/组织地点、当前Task binding与原创建指纹、客户原材料/input/Task/Event恢复、平台独立历史、来源/文件精确ACL及三类自动事件当前授权均有分层证据；原失败/原键/新来源修订保留 | 本轮真库221表/235收据已完整备份且仅自身资源清理，未提交/发布。不同证据集合不相加；supplier/上传默认prefix容量、浏览器/微信、全部业务和其他任务不据此完成，requestId仍不是授权修订 |
-| AIN-05 Gateway | 平台/BYOK、三协议、八类能力选择、Vault及唯一Gateway/dispatch/单账、原生工具往返与计数、标准发布和实际管理消费者齐备；[本轮整项收口](<#ain05-simulated-whole-closeout-20261111>)包含独立全文复核、页面整链和总开关停用后的原历史/账务复验 | G1～G4满足。未实现的协议/能力变体明确unavailable；真实供应商、数据库和浏览器测试由负责人自行操作，模拟不作为真实能力或费用。原九阶段及各能力/故障记录全文保留，不重开已解决源码缺口 |
-| AIN-06 运行器 | 持久lease/fencing/CAS、原action恢复、澄清/确认/接管、累计资源、事件游标及有限三步宿主已接；[本轮整项收口](<#ain06-simulated-whole-closeout-20261111>)独立核三Run/原故障与当前模型→Core只读→模型完整正常链 | G1～G4满足，03/04/05完整前置已齐；原两财务收据、Task累计账及终态读取不重派均有模拟证据。旧有界停止/unknown原文保留，真实环境由负责人自行测试，未启生产 |
-| AIN-07 确认与Core幂等 | 原订单/通知/姓名不可变提案、当前确认人/scope/期限、提交点重验、原Core事务内消费/收据及有限多动作边界齐备；[本轮整项收口](<#ain07-simulated-whole-closeout-20261111>)独立核6订单+2通知必要组 | G1～G4满足，03/04/06完整前置已齐；unknown原键恢复、原Step账与开销保持。旧非法重复领取租约的夹具分支未计绿，真实环境由负责人实测，不授自动批准或生产开放 |
-| AIN-08 业务事实 | [整项收口](<#ain08-whole-task-closeout-20261105>)覆盖原最少只读工具/schema/原授权/成熟度/限量/投影/时点，四批固定成果与剩余目录/检查/支付/退款及profile源接普通和持久消费者；真实当前四品类与原历史/缺依据/同名/无结果分层验证通过，原失败/同一对象保留 | G1～G4已满足，Completed/100%；本轮235迁移及完整备份、仅自身schema/四资源清理完成。此100%仅原只读范围，不代表完整R1报价/建单、模型/宿主/供应商或生产发布；全局预热与原Core算法保留，其他任务不继承完成 |
-| AIN-09 Core 报价 | [完整收口](<#ain09-whole-task-closeout-20261105>)保留原请求/政策/人类review-confirm/Core保存及原收据，企业员工两种付款意向接原会员与报价账期检查；四品类16组真库与人工Core金额/分项/版本/币种/单位一致，时间/数量/歧义/拒绝及原unknown分层验证 | G1～G4满足，Completed/100%；本轮既有235迁移、自身完整备份及四资源清理完成。不支持直接企业使用人，不授独立签约/付款/授信或建单，其他任务和ENTRY不继承100%；无独立审查/浏览器/供应商/发布声明 |
-| AIN-10 知识与记忆 | 批准文档的上传绑定/冻结/解析/版本/索引/发布/撤回、召回及正文ACL、缓存/来源失效和确认偏好齐备；[本轮整项收口](<#ain10-simulated-whole-closeout-20261111>)核9个必要callback和独立正式首文档链 | G1～G4满足，03/04/05完整前置已齐；明确文本格式/大小限制，无证据/越权/注入拒绝。真实对象存储/数据库/浏览器及外部物理清除由负责人实测，不据模拟开放生产 |
-| AIN-11 设置与计量 | 原平台/BYOK设置、额度申请/SaaS批准/空间分配、权益/能力、单账与有界调用记录齐备；[本轮整项收口](<#ain11-simulated-whole-closeout-20261111>)核独立C02/标准API链并修同身份新epoch的租户会话恢复 | G1～G4满足，03/04/05前置已齐；平台金额仅原结算、BYOK仅原用量，未知与旧占用保持。真实供应商/数据库/浏览器及费用由负责人实测，不据研发收口开放生产 |
-| AIN-12 后台任务中心 | 原任务列表/事件与会话生命周期、受权历史、未发送草稿、取消/恢复/接管、可信字段/审批及隔离动态展示已接实际后台和聊天；[最终订单/报价阶段](#ain12-order-chat-current-result-20261113)固定 `ade6dd10b` 并上传，三步答复、后继、可信摘要和首次参数/待确认修复已独立核接 | [原全文核定](#ain12-13-simulated-whole-closeout-20261113)满足本轮 G1～G4，必要模拟与类型通过、发现问题已修复复验。真实浏览器及外部环境由负责人后测；原 UNKNOWN 不补成功，AIN-25 完整性能责任保留 |
-| AIN-13 订单解释 | [原五条证据](#ain13-simulated-whole-closeout-20261112)覆盖授权订单/历史、确定性金额与退款状态、实际下一步及支持状态；[最终独立 reader/连续组合](#ain12-order-chat-current-result-20261113)接订单三步模型、同任务重解释/排版、停用原读和撤权。历史资金、检查、租期及公开 v2 固定证据保留在对应阶段 | [本次复核](#ain12-13-simulated-whole-closeout-20261113)已满足 AIN-12 全文前置并恢复 G4 结论。预授权或实时渠道缺证据仍明确 unavailable，不补零或成功，不执行资金动作；真实环境由负责人后测 |
-| AIN-14 开业诊断 | 原分区检查、四分区差异/持久R1提案、确定性正文、规则摘要与日历采用来源已接实际模型/原操作和后台；[本次品类/能力完整材料](#ain14-category-capability-whole-closeout-20261113)补齐真实版本、启停/实现与配置修订，换版/撤权使旧结果失效，旧材料不补签 | 原五条及06/08/10/12前置按本轮G1～G4已核闭，必要模拟/类型与独立复核通过。配置业务保存、发布和采用仍由AIN-16/原服务承接，不把诊断或AI提案当活动配置完成；真实环境由负责人后测 |
-| AIN-15 报价建单 | 084c2b86将原人类选择、场景专用政策、selected quote任务/原批准及Core建单接回标准应用，关闭新执行仍可只读原结果；[十四路径完整固定链](<#ain13-15-source-binding-whole-intake-20261107>)已接原请求主体、过期租期明确重输和原用量差异比较，不重算Core金额；[九路径完整链](<#ain13-16-whole-fixed-chain-20261107>)补当前显式行替代、其他行保留与库存/目录等待后原租期澄清，不自动换商品或保存报价；[准备叶主体/历史币种证据六路径](<#ain15-bound-currency-fixed-chain-20261107>)已补固定前继并保留主线最少父订单用例后核接，主线4/4、五根类型零诊断，缺币种保留原收据但不生成比较；[正式多行Q、答案保存、重审/明确确认至Core原收据完整链](<#ain15-multiline-answers-whole-chain-20261107>)已接两份shared合同、原Q生成/历史消费和宿主逐行分轮；完整相关组1/1、六根strict/noEmit零诊断，原合同15/15与单行消费者1/1分别保留，不相加为全套复跑 | 新target绑定应用该轮答案前的规范候选fingerprint与实际rowIndex；同一fieldId跨行分轮、8答案/31轮及任务caps不增。[四品类原澄清/批准/Core/同单收据固定链](<#ain15-four-category-main-intake-20261108>)已核接，主线摄影完整消费者1/1及原准备/聚合收据接点验证通过；来源车辆/工程明确使用静态已审核资格夹具，不称真实证件或一次同像四品类全绿。产物未构建；原477独立真库、人工等价/完整宿主及07/12完整前置仍未齐，不称全部多行变体或原15整项通过；本次[主树8个原客户链用例](<#ain-three-tree-consolidation-20261109>)核到服务容量、资格、一次性地址与历史；身份/存储为明确离线夹具，未替代原477真库及全品类验收。 |
-| AIN-16 资料/配置 | 普通姓名与通知原Task／提案／批准／Core／收据、规则／日历原草稿及公开消费者已固定；[最终重新确认](#ain16-name-notification-reconfirmation-consumer-20261114)沿当前差异、新不可变变更、明确新审核／批准和原键恢复，敏感字段仍走原验证 | [原五条全文核定](#ain16-simulated-whole-closeout-20261114)和07/14依赖齐备，必要模拟／类型及独立复核支持本轮G4；共享会员不开放空间业务，保存不表示发布，unknown不换键。真实SQL／浏览器由负责人后续实测，不据本项推断其他专项已发布或完成。 |
-| AIN-17 可靠事件 | 364eca2a将原事务Outbox参与者及受权事件/候选消费者接回标准根，服务器显式开启前不记录事件，不启动worker；按G3登记75% | 限定事件全覆盖、死信/乱序/故障重建与真实事务验收；旧21例20过/1失败证据保留，原fork3仅修失败组合的Auth/tenant/Outbox夹具并定向通过，主线核接后该例1/1，不称整套21例复跑或新增事件生产已验收 |
-| AIN-18 主动经营 | 364eca2a将独立automation政策、影子输入/任务、人工review/close/feedback和原键核对接回标准根；按G3登记75% | 全来源/冷却/方案与办理复查及限定获准自动化仍缺；管理grant、原主体/预算/政策必须真实存在，关闭待办不证明异常已解决 |
-| AIN-19 媒体草稿 | PNG/JPEG/PCM、原附件/冻结输入及ObjectReader；标准创建/原runner/Gateway至持久calls单账、结果已有PNG/WAV离线消费，停新识别仍可受权复查原结果 | G3登记75%；真实HTTP路由/媒体能力/存储、其他格式、草稿失效后的历史载荷及数据处理/G4未验，未自动应用识别或提交检查 |
-| AIN-20 员工宿主 | 原pickup/return、manual gate与原检查提交；独立原账、失效草稿元数据及回答收据、取消请求/收敛/原修订观察接标准根，原G1/G2/G3合计75% | 原fork4同页重挂/切原收据/清除后旧引用不可复活增量已核接，pickup/return既有相关1/1及限定根strict/noEmit零诊断；标准传输/冷启动、相机录音上传、微信设备/弱网、完整履约与其他失效/历史载荷窗口仍缺，不称全部履约验收 |
-| AIN-21 客户安全场景 | 原客户身份／政策／Booking／任务／单账／独立历史原读，公开续接及Goal材料／人类回答来源／Core参数准备；`ff7bb06a`补本人保存地址双标准provider，[原五条核定](<#ain21-simulated-whole-closeout-20261114>)已完成 | 本轮模拟研发已收口，复用原匿名／本人／企业授权、Guard、费用与取消收据；历史读取不授重派，模型文本不批准预订。真实环境与生产开放另由负责人执行 |
-| AIN-22 客户两端入口 | 原公开续接／报价／本人订单与两端Goal共用场景合同，完整商品／单位／用量／身份投影到原Booking页面；[两端目标及收据恢复](<#ain22-goal-booking-original-consumers-20261114>)修旧cart自动报价、迟到写回、受理丢应答及成功Goal过期后明确新目标，五条与依赖已核齐 | 本轮模拟研发已收口；ENTRY跨端transfer等增量另核，支付成功仍只认原回调，真实浏览器／微信／数据库／供应商和生产开放由负责人执行 |
-| AIN-23 品类助手 | 原动态草稿合同／Core条件能力、平台Guard／审计及原Task／Gateway／PLATFORM calls预算已固定；[原两页消费者全文](#ain23-category-human-model-consumers-20261114)完成候选本地采用、人工保存／发布／资格／开通／空间采用及原key恢复，最后原影响报告确认已修复复验 | 原五条、07／10／16依赖及G1～G4已按模拟口径核闭，登记本轮研发100%；平台仅支持calls限额，真实供应商费用和原Core生产开放仍单列，由负责人实测／决定，不借本项重建内核或开放经营 |
-| AIN-24 安全/隐私 | 原正文加密／敏感访问审计／知识及memory传播、原威胁与两轨负例、独立语言和六类展示攻击固定证据齐备；[平台／员工到期删除与恢复](<#ain24-platform-inspection-expiry-whole-closeout-20261115>)补两个删除P2及受权恢复缺／旧收据P2，接标准provider／Guard／Controller／员工runtime | 原七条、02依赖及本轮G1～G4已核闭；必要模拟／类型和独立静态复核支持本轮研发100%。unknown不核销，人工／业务／账与原收据保留；真实DB锁／浏览器／微信／供应商副本／混合备份及生产隐私放行仍由负责人后续操作，模拟不冒称真实完成 |
-| AIN-25 性能/SLO | `40b29e8a`原Controller/标准provider/请求组合→TaskPerformanceReader已接；`0392aa01`消费原Gateway计时审计，时长/资源/单账有界观察；2026-10-28纠正漏记G3，75% | 首卡/工具完整采样、成功/接管率、获批SLO/容量/成本参数及真实环境、限流/背压/公平性/告警和降级演练仍为G4；不把观测装配当指标已达标；本次[原计数成本消费者核验](<#ain-three-tree-consolidation-20261109>)已覆盖原page/计数receipt/summary关闭重验；旧总数断言已在[合并后复核](<#ain-post-consolidation-review-20261109>)按原Step/Run计量分开校正；平台计数和BYOK直接用量按正式两轨验证，不称真实SLO通过。 |
-| AIN-26 组合验收 | 各片离线证据保留，未当作本项整体通过 | 冻结构建/迁移/政策/素材，另授权真库、四品类及多端实际组合验收 |
-| AIN-27 真实供应商/试点 | 当前不宣称真实供应商或生产试点验收 | 供应商/地区/凭据/额度及试点授权、两轨真实能力/用量、部署和回退 |
-| AIN-28 最终交付 | 本文只是当前实施索引，不是最终验收报告 | 全范围缺陷收口、独立复核、可操作运行/停用/接管交付与负责人验收 |
+| AIN-01 基线盘点 | 原15项工具／权限／副作用盘点、四品类参考流程、38项基线及16组参考断言已归档。[唯一验收](历史归档/验收/AIN-01-测试验收.json) | 盘点按实际实现登记成熟度，已识别缺口按原专项归属。原Core实测仅在当时固定版本及记录范围内使用。 |
+| AIN-02 公共契约 | 身份、工具、Task／Step、提案批准、材料／模型、事件、用量／知识及多端合同从shared与OpenAPI正式出口消费。[全文冻结](#ain02-contract-freeze-confirmed-20261104) | 当前授权、历史读取、执行与善后分别复验，旧协议按正式兼容入口处理。 |
+| AIN-03 持久化 | 原对象、受限仓储、约束／精度、配置兼容、原账和未知状态、对话保留及支持升级／恢复已核。[原整项收口](#ain03-whole-task-closeout-20261104) | 历史B02原文失败、桥接及后继成功保留当时版本和实际收据。部署迁移由负责人按目标环境办理。 |
+| AIN-04 当前授权 | Auth／Guard／ALS、scope／地点／own、当前Task绑定、客户和平台独立历史、来源／文件ACL与自动事件授权齐备。[原整项收口](#ain04-whole-task-closeout-20261105) | 原请求、缓存、URL、模型和旧引用均受当前授权及字段范围约束。 |
+| AIN-05 Gateway | 平台／BYOK、原协议／能力、Vault、唯一Gateway、工具往返、dispatch／原单账、标准发布及管理消费者已核。[本轮全文](#ain05-simulated-whole-closeout-20261111) | 真实能力、费率、配置和权限缺席时拒绝新调用，原usage与unknown按同一调用核对。 |
+| AIN-06 运行器 | 持久lease／fencing／CAS、原动作恢复、澄清／确认／接管、累计资源、事件游标和模型→Core→模型主链已核。[本轮全文](#ain06-simulated-whole-closeout-20261111) | 财务原账与Task累计资源分别保留，已执行或unknown动作沿原键恢复。 |
+| AIN-07 确认与Core幂等 | 不可变提案、当前确认人／scope／期限、提交点重验、Core事务内消费／收据及有限多动作边界齐备。[本轮全文](#ain07-simulated-whole-closeout-20261111) | 准备、保存、审批请求、批准、Core执行和原收据分别显示。 |
+| AIN-08 业务事实 | 最少只读工具、真实权限／成熟度、限量／投影／时点、四品类历史及缺依据／同名／无结果有完整依据。[原整项收口](#ain08-whole-task-closeout-20261105) | 业务金额、库存、资格、付款和历史快照继续由原正式业务域决定。 |
+| AIN-09 Core报价 | 原人类选择、正式Core报价、单位／金额／币种／资格、歧义澄清和失败／unknown核定齐备。[原整项收口](#ain09-whole-task-closeout-20261105) | 原09的独立报价范围与原15最终订单范围分别验收，历史分类附件缺字节沿原索引登记。 |
+| AIN-10 知识与记忆 | 批准上传／解析／版本／索引／发布／撤回、召回及正文ACL、来源／缓存失效与确认偏好齐备。[本轮全文](#ain10-simulated-whole-closeout-20261111) | 用途、来源、权限和最短留存期限贯穿索引、摘要与当前读取。 |
+| AIN-11 设置与计量 | 双轨设置、额度申请／SaaS批准／空间分配、能力／权益、单账和有界调用记录已核。[本轮全文](#ain11-simulated-whole-closeout-20261111) | 平台财务金额、BYOK调用用量与Task资源沿各自正式职责计量。 |
+| AIN-12 后台任务中心 | 任务／事件、会话生命周期、待答／批准／取消／恢复、可信字段及隔离展示已接后台控制台和业务页。[原全文](#ain12-13-simulated-whole-closeout-20261113)、[实际控制台接线](#ain-native-console-direct-integration-20261115) | 当前对象、scope、能力及原Task／Run／result绑定在切页、隐藏和迟到响应时重新核验。 |
+| AIN-13 订单解释 | 原五条、权威历史／金额／退款状态、下一步、最终reader／三步组合及停用原读齐备。[原全文](#ain12-13-simulated-whole-closeout-20261113) | 无原事实的金额、状态和支付结果明确缺席，人工办理沿所属业务入口。 |
+| AIN-14 开业诊断 | 正式分区检查、品类／能力、规则／日历／第三方来源、确定性正文和持久差异提案已核。[原全文](#ain14-category-capability-whole-closeout-20261113) | 各分区保存、发布和采用保留独立结果及原人工确认。 |
+| AIN-15 报价建单 | 澄清／人类选择、三类付款、本人委托、Core报价／新批准／建单、四端结果、取消／恢复与四品类独立对照齐备。[原六条全文](#ain15-six-clause-capacity-whole-closeout-20261117) | 两路独立报价及各自最终订单4/4，容量竞争及原键重放4/4。真实MySQL、渠道付款与宿主由负责人按原清单实测。 |
+| AIN-16 资料／配置 | 原姓名／通知Task、提案／批准／Core／收据、规则／日历草稿及重新确认消费者已核。[原五条全文](#ain16-simulated-whole-closeout-20261114) | 敏感字段走原验证，保存、发布及空间采用分别核对，unknown保留原键。 |
+| AIN-17 可靠事件 | 事务Outbox、限定事件、有界消费、乱序／重复／故障重建、实际后台批次操作与原授权齐备。[原五条全文](#ain17-simulated-whole-closeout-20261114) | 事件新生产由服务器显式配置控制，旧失败与后继定向修复分别留证。 |
+| AIN-18 主动经营 | 原限定事实、独立automation主体／政策、影子任务、人工review／close／feedback及当前结果复查已核。[原七条全文](#ain18-simulated-whole-closeout-20261114) | disabled／shadow／manual_confirmation与额外批准的生产自动化范围分别登记，业务处理取原结果。 |
+| AIN-19 媒体草稿 | PNG／JPEG／WAV原附件、冻结输入、识别Task／Gateway、原文／置信候选、人工确认及受权历史已核。[原五条全文](#ain19-source-text-simulated-whole-closeout-20261114) | 格式／大小／时长限额和一种来源约束由当前入口落实，真实识别质量及设备沿实测清单。 |
+| AIN-20 员工宿主 | 交付／归还原页、检查草稿、识别、人工更正、签名／正式提交及重开恢复已核。[原五条全文](#ain20-signature-reopen-simulated-whole-closeout-20261114) | 原上传、检查、签名和订单提交分别有独立操作及收据，切页和迟到结果复核原对象。 |
+| AIN-21 客户安全场景 | 匿名／本人／企业、独立工具／政策／Task／账、本人地址、原Goal／Draft及历史读取已核。[原五条全文](#ain21-simulated-whole-closeout-20261114) | 公开、本人与企业受权范围独立，身份和空间变化重新绑定当前引用。 |
+| AIN-22 客户两端入口 | 网站和微信的公开浏览、目标选品、澄清／报价／Draft、原预约／收银台及同键结果恢复已核。[原五条全文](#ain22-goal-booking-original-consumers-20261114) | 预约明确提交，付款成功取原渠道事实，跨端后继按ENTRY原受控引用办理。 |
+| AIN-23 品类助手 | 平台／空间原草稿、条件能力、Task／Gateway、影响报告、人工校验／发布／资格／采用及原键恢复齐备。[原五条全文](#ain23-category-human-model-consumers-20261114) | 平台品类页面受开发预览开关及当前SaaS治理权限控制，原Core生产启用按负责人决定。[操作前置](#ain28-user-operation-real-test-handoff-20261117) |
+| AIN-24 安全／隐私 | 原攻击／越权、正文保护／访问审计、知识与记忆传播、平台／员工／通知清理、删除账本及可信恢复齐备。[原七条全文](#ain24-platform-inspection-expiry-whole-closeout-20261115) | 人工／业务／账和原收据按所属留存政策保留，未决效果保持hold，外部副本和混合备份有实测责任。 |
+| AIN-25 性能／SLO | 原采样／成本包络、容量／背压／公平性／告警、故障恢复／人工降级与模型／prompt／policy回退已核。[原五条全文](#ain25-measurement-cost-rollback-whole-20261114) | 候选SLO及成本使用明确模拟样本，D05生产参数和真实供应商成本由负责人核定。 |
+| AIN-26 组合验收 | 固定构建／迁移／政策／输入、四品类独立报价和订单、多端／平台／事件、A01～A29与缺陷复验已核。[原五条全文](#ain26-combined-whole-closeout-20261118) | 固定main完整类型与实际OpenAPI／AppModule装配已验证，历史附件与当次失败继续保留实际边界。 |
+| AIN-27 部署与回退 | 双轨、部署／轮换／容量／监控／留存、三阶段灰度／停用、版本回退和升级双目标屏障已有实现及操作资料。[原操作交付](#ain27-operational-delivery-20261117) | 原六条及依赖已完成本轮研发核定，真实供应商、试点及生产放行沿负责人实测。[最终独立核定](#ain27-six-clause-whole-closeout-20261118) |
+| AIN-28 最终交付 | 原四条、A32、两个入口非作者复验、四端操作、工具／API／恢复合同、历史导航及资源交付已核闭。[原28全文](#ain28-four-clause-final-closeout-20261118)、[操作及实测交付](#ain28-user-operation-real-test-handoff-20261117) | 固定main产品已交付并回读GitHub，完整阶段原文和原失败保留，真实环境沿负责人实测清单执行。[最终交付](#ain27-28-main-final-delivery-20261118) |
 
 ## ENTRY 增量实施摘要
 
-增量编号保留原任务定义，不据此重排或缩减28项范围。以下是现有材料的摘要，不是新增验收结论。
+18项按原编号保留完整研发阶段，增量进度只维护正式任务册。真实环境各端分别测试，生产者、消费者、失败及恢复沿下表固定证据读取。[增量任务](<AI Native-开发任务.md#0a-多端入口与业务助手增量施工队列不计入原28项分母>)
 
-| 任务 | 已有消费/准备 | 余项 |
+| 任务 | 当前完整消费及阶段依据 | 运行边界 |
 | --- | --- | --- |
-| ENTRY-01 | 客户两端host-capabilities-2由当前发布、政策和实际依赖生产，原booking-host.factory消费；[合并后复核](<#ain-post-consolidation-review-20261109>)补核G3 | 完整多audience目录/场景元数据仍缺；没有从四audience词汇或九常量推定执行开放 |
-| ENTRY-02 | customer v1三Action、选中草稿OPEN_BOOKING及原预约页固定消费已核G3，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 六unavailable与其他audience完整签发/失效/执行仍缺；不硬套customer载荷或强开九Code |
-| ENTRY-03 | 原材料/选择/Draft/handoff/原页面受理及独立Core收据已接两端主消费者，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全部渠道、匿名/企业及真实办理验收；草稿/受理不等于订单或支付已完成 |
-| ENTRY-04 | 网站session/key/generation与微信contextVersion、hide/unload的原实例销毁和迟到隔离已实际消费，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 已核身份切换隔离主路径；crossSurfaceHandoff仍unavailable，匿名/企业及服务端跨端重绑定全链未齐 |
-| ENTRY-05 | 原事实、下一步、报价/配置及标准任务中心结果、审阅/决定、原Core收据与明确继续已接后台，G3为75% | 全经营场景/动作及真实浏览器验收，不把代表性链路当全部能力已齐 |
-| ENTRY-06 | `1f84417b`交付/归还页按钮→当前员工历史选择→正式HTTP transport→原收据组件已接，显式检查宿主保留；2026-10-28补记G3，75% | 全媒体、弱网、完整传输实测与微信/设备；历史只读不等于识别执行或检查提交 |
-| ENTRY-07 | Core 报价、review/confirm/原操作核对；[AIN-09](<#ain09-whole-task-closeout-20261105>)已具四品类人工Core真库等价；[十四路径交付依据核接](<#ain13-15-source-binding-whole-intake-20261107>)在客户材料保存前重读同一地址/原报价快照，变化拒绝，不推定跨域原子快照 | 全部Core事实与正式下一步/增量消费者门槛仍须按原全文核对，不因AIN-09完成自动改ENTRY百分比 |
-| ENTRY-08 | 标准当前owner取消/原收据、执行停用下观察、明确原回答继续及累计资源复用接回主消费者，G3为75% | 全端撤权/停用/中断窗口及取消收敛验收，unknown不授重派 |
-| ENTRY-09 | 受权来源/版本与脱敏投影、后台安全正文/固定来源重开和有界状态跟随已消费，G3为75% | 全端安全呈现/刷新/隐私统一复验及浏览器，不称原数据已公开或全量可见 |
-| ENTRY-10 | 标准AppModule/provider及原网站/微信预约页已接；默认零自动AI读取、人工能力核对后创建宿主，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 完整场景/端别及传统流程真实兼容验证；源码装配不代表生产启用 |
-| ENTRY-11 | 定向冒烟和证据分层已有记录 | 所有开放端别的正式组合证据 |
-| ENTRY-12 | 本次统一接续与独立未来方案 | 随接口实际演进维护映射，不把设计当实现 |
-| ENTRY-13 | shared/叶子及受控业务事实优先级 | 各端契约/确定性事实全范围验收 |
-| ENTRY-14 | 原Draft/Action、页面受理/提交与操作receipt、当前Draft元数据观察已实际主线核接并复核，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 完整跨端一次性引用、所有原键/原生竞态及unknown恢复变体仍缺；submitted不推定业务成功 |
-| ENTRY-15 | 当前渠道发布/政策、releaseRevision、独立读能力及两端显式宿主已实现和消费，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全端/租户/场景停用与真实回退验收；普通关闭入口不自动读取历史 |
-| ENTRY-16 | 原订单事实投影/页面hook、原预约金额及绝对时间/时区呈现已有实际消费者，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全部时区、键盘、读屏、系统字号及真实设备验证；金额/未知仍以原事实为准 |
-| ENTRY-17 | 原请求/Task/Action/Draft/操作关联，保留/删除账本与标准Controller、会话历史消费已核，见[合并后复核](<#ain-post-consolidation-review-20261109>) | 全入口指标、外部存储/副本/备份/导出及真实删除传播未完成 |
-| ENTRY-18 | 固定交付、依赖与未验边界分层 | 完整增量组合/独立交接 |
+| ENTRY-01 | 四audience正式目录、当前发布／政策／版本及四端消费已核。[原全文](#ain-entry01-formal-source-simulated-whole-closeout-20261115) | 能力由服务端当前权限与实际依赖决定。 |
+| ENTRY-02 | 九Action正式签发、当前原资源核验、固定页面／人工入口及拒绝恢复已核。[原全文](#ain-entry02-10-registered-human-whole-closeout-20261115) | 模型载荷仅消费已注册行为，批准和原业务提交各有正式入口。 |
+| ENTRY-03 | 原目标／人类选择、Core报价、持久Draft及明确后继已核。[原全文](#ain-entry03-07-quote-publication-whole-closeout-20261115) | 草稿绑定原输入、身份、规则和可用性版本。 |
+| ENTRY-04 | 网站／微信受控引用、双向交接及身份／空间／页面变化隔离已核。[原全文](#ain-entry04-14-cross-surface-whole-closeout-20261115) | 原会话、任务、缓存及授权按当前主体重新绑定。 |
+| ENTRY-05 | 后台来源／材料／状态／下一步、人工审阅／确认／执行及原收据齐备。[原三条全文](#ain-entry05-operations-human-whole-closeout-20261115) | candidates_only和正式执行结果分别展示。 |
+| ENTRY-06 | 员工当前权限、显式识别／履约入口、同账号权限刷新与恢复已核。[原全文](#ain-entry06-current-permission-whole-closeout-20261115) | 识别候选经人工确认再进入原履约表和正式提交。 |
+| ENTRY-07 | 原商品／地点／资格／金额／单位／币种／规则及保存前发布复核已核。[原全文](#ain-entry03-07-quote-publication-whole-closeout-20261115) | 正式Core和历史快照保持权威来源。 |
+| ENTRY-08 | 原风险、权限、批准、取消／中断、当前政策及累计资源全文核闭。[原全文](#ain-entry08-whole-closeout-20261116) | unknown沿同一原操作核对，停止和善后按当前独立权限处理。 |
+| ENTRY-09 | 四端候选／原报价／动态呈现、当前来源／版本／范围和安全展示已核。[原全文](#ain-entry09-safe-display-whole-closeout-20261115) | 可见性、迟到响应、原事实和固定确认控件分别复核。 |
+| ENTRY-10 | 标准provider／Controller及四端显式宿主、原传统办理及九Action人工入口已核。[原全文](#ain-entry02-10-registered-human-whole-closeout-20261115) | 正式业务授权与端侧入口独立。 |
+| ENTRY-11 | 多audience实际服务组合、正常／拒绝／恢复和证据分层已核。[原全文](#ain-entry11-12-18-evidence-handoff-whole-closeout-20261115) | 各完整阶段的测试环境、固定源和失败复验分别留证。 |
+| ENTRY-12 | 稳定合同、生产者／消费者、状态及Runtime／SDK边界已有可追溯交接。[原全文](#ain-entry11-12-18-evidence-handoff-whole-closeout-20261115) | 后续Runtime／SDK替换沿原设计和迁移／回退条件办理。 |
+| ENTRY-13 | 原默认单位、明确参数确认与事实来源优先级已核。[原全文](#ain-entry13-unit-provenance-simulated-whole-closeout-20261115) | 当前配置、历史事实、人类选择和模型建议按原规则区分。 |
+| ENTRY-14 | Draft／Action状态、原受理／订单收据、双向转接及unknown同键恢复已核。[原全文](#ain-entry04-14-cross-surface-whole-closeout-20261115) | 受理、提交和正式业务结果各自读取原收据。 |
+| ENTRY-15 | 当前发布／政策、精确scope存储、独立读能力与正式两端恢复已核。[原存储与恢复](#ain-entry15-original-storage-recovery-20261115) | 旧引用及读取能力按当前权限、版本和存储事实复验。 |
+| ENTRY-16 | 原状态／金额／单位／绝对时间／时区与多端可访问性已核。[原全文](#ain-entry16-simulated-whole-closeout-20261115) | 真实浏览器、字号／读屏和设备表现沿负责人实测清单。 |
+| ENTRY-17 | 原Task／Action／Draft／业务引用、拒绝／unknown审计、留存／删除及可信恢复全文核闭。[原全文](#ain-entry17-material-retention-whole-closeout-20261116) | 普通来源删除、业务／人工／账保留、外部副本及备份责任分别执行。 |
+| ENTRY-18 | 每阶段必要验证、失败定向复验、固定交接及维护入口已核。[原全文](#ain-entry11-12-18-evidence-handoff-whole-closeout-20261115) | 真实环境与生产放行按原专项责任执行。 |
 
 <a id="ain-post-consolidation-review-20261109"></a>
 ## 合并后 AI Native 需求、代码与进度复核（2026-11-09）
