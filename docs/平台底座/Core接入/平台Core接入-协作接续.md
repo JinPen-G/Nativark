@@ -12,7 +12,7 @@
 
 Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该Core。未来跨Core协作通过明确对象引用/接口/事件实现，本期不开放共享业务表或隐含读权。先交标准本地包，再接固定GitHub Release获取及Topic发现；底座与Core分别更新，保留下游业务、配置、数据和授权。[包标准](平台Core接入-开发任务.md#core-package-standard) · [独立更新](平台Core接入-开发任务.md#independent-upgrades)
 
-唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD与dev1按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接住当天固定main7d49c26c9423f2400a233275e84cca5cb4127fa3；相对已接1d53ada2bb79a220e4d99f75f27508bfac5360a5只改AI Native三册，三份blob逐一与上游相等。HTTP源码切片2290a1f11e113b6a1c04bac2dd9706b2caf35e88已普通推送并实际远端回读，随后合并d32dd1938278fb10136997b8ad4013c222777a3a保留dev1全部公共集成WIP；未追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-acceptance-docs-20261118)
+唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由RD与dev1按文件分工写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。已接当天固定main ba1de9f91860c4e73503eded4e1d05d2307b0e28，合并b973a983fc8dde6011bea8ca5acf19cd7fe26be8；八文件无dev1 WIP交叉，固定blob与受影响原后台类型已核。此前公共集成页面a3b9215a6e87caa57e9eee18592140660d94abbf已实际远端回读。后续只接核定固定main，不追其他专项活动HEAD。[当前固定主线](平台Core接入-开发记录.md#core-main-ai-delivery-20261118)
 
 通知草稿/原删除收据、报价提交前回调、个人付款委托与恢复正文剥离已接到Rental包，公共权限匹配、面板图标及193个精确兼容出口保留。原维护读取器由宿主真实供给，缓存只有核验过的不可变无正文引用。费用批准与商户委托的五个服务现也归Rental单源，旧Nest构造顺序保持，78个方法正文与固定父版一致；续租持久报价明确参加已有事务，客户层不重复调用Core授信占用。原42项批准/续租/换货冒烟及十配置类型通过，下一步迁入Controller与客户端；当前切片固定父版6d142a6bd96b829c0f124308d8f0dd9d1cd8e6d2保存原文和完整旧接续。[当前批准链](平台Core接入-开发记录.md#core-rental-enterprise-approval-runtime-20261117) · [原主线兼容](平台Core接入-开发记录.md#core-main-notification-sync-20261117)
 
@@ -22,7 +22,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 主/业务、空间能力和员工收款HTTP已单源迁入Rental包，原API只再导出同一Controller。主/业务原214方法中212正文一致、2处context改用同一快照/刷新接点，原装饰器、17项/6项构造依赖、默认键及原事务保持；统一接线复用原实例，可选检查事件只投影方法，避免重复生命周期。十配置类型和一次实际Nest冒烟通过，固定提交e1104f4b4f5677bfac8fd1370b53c4c58db6c612已普通推送并实际回读；下一入口为其余企业/客户Controller及客户端。整体API合同检查仍有614项未配对/未识别路径，接口规范化须处理，元数据/类型不证明API齐全。dev1稳定JSON存储修复组已停写并确认四份原冒烟退出0，RD完成八文件核对并按独立阶段固化，完整类型依赖明确。[主/业务HTTP](平台Core接入-开发记录.md#core-rental-main-http-20261118) · [JSON存储](平台Core接入-开发记录.md#core-public-integration-json-20261118) · [原HTTP检查失败](平台Core接入-开发记录.md#core-rental-http-entry-20261118)
 
-当前公共日历固定提交为8a2e5db74d425b19da0e0649101efa9a9f73c44c，已实际远端回读。公共和原组合共用来源实例、五操作/三路径及year查询，31模型/七迁移、数据版本0.1.3；仅核计划，没有执行DDL。公共集成页面组现由RD核定22路径并接公共应用路由/菜单、同一请求和双语，公共包/零Core/原后台最终类型均0诊断；原两个呈现导入缺出口已修。dev1组织/安全仍独占施工，RD维护索引、原AppModule同一管理实例与PlatformService委托，随后继续Rental剩余HTTP/数据及标准装配。当前完整旧接续在固定8a2e5db保全，不另留副本。当天核定真实main为ba1de9f91860c4e73503eded4e1d05d2307b0e28，待本片上传后按固定差异接入。[公共集成前端](平台Core接入-开发记录.md#core-public-integration-ui-20261118) · [日历与数据计划](平台Core接入-开发记录.md#core-public-official-calendars-20261118)
+公共和原组合共用来源实例、五操作/三路径及year查询，31模型/七迁移、数据版本0.1.3；仅核计划，没有执行DDL。公共集成页面已固定上传，公共应用路由/菜单、同一请求和双语已接，公共包/零Core/原后台类型均0诊断；原两个呈现导入缺出口已修。dev1组织/安全仍独占施工，RD维护索引、原AppModule同一管理实例与PlatformService委托，随后继续Rental剩余HTTP/数据及标准装配。当前完整旧接续在固定a3b9215保全，不另留副本。[公共集成前端](平台Core接入-开发记录.md#core-public-integration-ui-20261118) · [日历与数据计划](平台Core接入-开发记录.md#core-public-official-calendars-20261118)
 
 ## 2. 已有实际接点
 
