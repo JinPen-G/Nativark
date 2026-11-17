@@ -79,7 +79,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
   const [original, setOriginal] = useState<AiTaskInputSubmissionDraft | null>(null);
   const [saved, setSaved] = useState(() => savedReference(key, taskId));
   const [locked, setLocked] = useState(() => { try { return sessionStorage.getItem(key) !== null; } catch { return true; } });
-  const [receipt, setReceipt] = useState<AiTaskClarificationProgressDraft | null>(null);
+  const [receipt, setReceipt] = useState<(AiTaskClarificationProgressDraft & { reference: ReceiptReference }) | null>(null);
   const [error, setError] = useState(false), [busy, setBusy] = useState(false);
   const flight = useRef<AbortController | null>(null), mounted = useRef(true), owner = useRef({ taskId, identity });
   const draftBasis = useRef<Question | null>(null);
@@ -127,14 +127,23 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         if (!same(controller.signal)) return;
         // A new persisted request can be answered. Missing/consumed questions
         // never clear an uncertain submission or grant retry of its old key.
+        const storedMarker = sessionStorage.getItem(key);
         const stored = savedReference(key, taskId);
+        setSaved(stored); setLocked(stored !== null);
         // A damaged locator or an unobserved old submission stays closed even
         // when another question appears. Observe the original receipt first.
-        if (stored === 'invalid') { setSaved('invalid'); setLocked(true); }
-        else if (!stored) { setLocked(false); }
+        if (!stored || stored === 'invalid') { setOriginal(null); setReceipt(null); }
         else if (value && stored.requestId !== value.requestId && receipt?.receipt.state === 'observed'
+          && displaySame(receipt.reference, stored)
           && !(receipt.continuation.kind === 'run_outcome' && receipt.continuation.status === 'unknown')) {
-          sessionStorage.removeItem(key); setOriginal(null); setSaved(null); setReceipt(null); setLocked(false);
+          // Another mounted consumer can replace the locator while this view
+          // retains an earlier receipt. Only retire the exact observed value.
+          if (sessionStorage.getItem(key) !== storedMarker) throw Error('AI_RESULT_UNKNOWN');
+          sessionStorage.removeItem(key);
+          const remaining = savedReference(key, taskId);
+          setOriginal(null); setSaved(remaining); setReceipt(null); setLocked(remaining !== null);
+        } else if (receipt && !displaySame(receipt.reference, stored)) {
+          setOriginal(null); setReceipt(null);
         }
         if (operation === 'candidate') {
           const review = active.current.candidateReview;
@@ -154,6 +163,17 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         return;
       }
       let submission = original;
+      const currentReference = operation === 'submit' ? null : savedReference(key, taskId);
+      if (operation !== 'submit') {
+        setSaved(currentReference); setLocked(currentReference !== null);
+        if (!currentReference || currentReference === 'invalid') throw Error('AI_RESOURCE_UNAVAILABLE');
+        if (operation === 'continue' && (receipt?.receipt.state !== 'observed'
+          || !displaySame(receipt.reference, currentReference))) throw Error('AI_RESULT_UNKNOWN');
+        if (submission && !displaySame(currentReference, { taskId, requestId: submission.requestId,
+          expectedRevision: submission.expectedRevision, submissionKey: submission.submissionKey })) {
+          submission = null; setOriginal(null);
+        }
+      }
       if (operation === 'submit') {
         if (locked || !input || sessionStorage.getItem(key)) throw Error('AI_RESULT_UNKNOWN');
         const latest = question(await aiTaskCenterApi.input(taskId, controller.signal), taskId);
@@ -167,7 +187,7 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         setOriginal(submission); setSaved({ taskId, requestId: submission.requestId, expectedRevision: submission.expectedRevision,
           submissionKey: submission.submissionKey }); setLocked(true); setDraft({}); setInput(null);
       }
-      const reference = submission ?? (saved !== 'invalid' ? saved : null);
+      const reference = submission ?? (currentReference !== 'invalid' ? currentReference : null);
       if (!reference || operation === 'submit' && !submission) throw Error('AI_RESOURCE_UNAVAILABLE');
       if (operation === 'submit' && submission) visibleKey = visible?.begin({ taskId, trigger: 'original_input_resume',
         originKey: submission.requestId, ...visibleConversation }) ?? null;
@@ -197,7 +217,8 @@ export function TaskClarification({ taskId, identity, current, onAccessDenied, o
         visible?.bindRun(visibleKey, result.receipt.runId);
       else visible?.cancel(visibleKey);
       if (same(controller.signal)) {
-        setReceipt(result);
+        setReceipt({ ...result, reference: { taskId, requestId: reference.requestId,
+          expectedRevision: reference.expectedRevision, submissionKey: reference.submissionKey } });
         if (result.receipt.state === 'observed' && result.receipt.runId) active.current.onReceiptChange?.({
           reference: { taskId, requestId: reference.requestId, expectedRevision: reference.expectedRevision, submissionKey: reference.submissionKey },
           receiptId: result.receipt.receiptId, runId: result.receipt.runId,

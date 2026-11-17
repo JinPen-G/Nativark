@@ -6,6 +6,27 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-26-clarification-locator-binding-20261117"></a>
+## AIN-15／26 原澄清收据定位与并发保留（2026-11-17）
+
+固定前置 `a4ce86c5631b3aea3cfd85d46b69e166ebd00b84` 已普通推送并回读GitHub，本片一份源码归Root。dev2独立复核个人付款13源的stdin `9e136d3d96349da5b4beead29bcb41c65323c96fab66fc2297170888ff95ecbb` 退出0，原始字节清单SHA-256为 `76b490c0f42df40fd17bc100757744ef2b8d7cb1ce21dc07af2c64fc57fd7754`。三种政策、共同回滚、丢ACK终态恢复及请求／付款／企业篡改拒绝通过，个人使用政策撤回后拒绝新材料，企业付款继续拒绝unconfigured且逐单批准仍必需。D403缺口已独立核闭，原26矩阵的最后已知实现缺口为下述澄清P2。
+
+dev1原反例在cfa6ba7固定源码复现。B实例提交新回答后应答丢失，A实例仍持有旧成功收据，读取下一问题时删除了B的未知定位并解锁。原stdin `a8423d7c527a8b49a7b623ab13ef8387b32dc2eb77df2c3b58317f60dfc5bbc7` 退出0，反例保留。
+
+[TaskClarification](../../apps/admin/src/features/ai-native/TaskClarification.tsx)将本地收据绑定原taskId、requestId、expectedRevision及submissionKey。读取当前问题后，成功收据只有与当前完整定位相同才可清除。清除前再次核对原存储字节，清除后回读剩余定位；另一实例的新定位仍被保存并保持锁定。核对或明确继续时重新读取当前定位，旧收据无法继续另一未知回答。本地旧submission与当前定位不同则改用已保存原引用，正式权限、原回答和继续结果仍由[原API](../../apps/admin/src/api/aiTaskCenter.ts)及服务端核验。
+
+| 必要验证 | stdin SHA-256、实际结果和边界 |
+| --- | --- |
+| 原跨实例反例修后 | `c8ddb73f5daa751bd3ae4f1d5187d35c3ae02131f71c87784ee21990b469e08b`，退出0。原组件和原API在有限问题／收据／存储夹具执行，B的未知定位保留，A读取新问题仍锁定提交。该行对应新增继续门禁前的中间源码，最终源码以下行为准。 |
+| 最终定位与删除并发 | `0677cde9f129116f5f56c295f3bf6ad60e70dc3f63d5e764da8cee266d8591a2`，退出0。旧成功收据既不能清除新未知定位，也不能提交其continueInput。重新核对读取当前B原键，not_observed与原继续unknown保持锁。清除前换键时拒绝删除，清除后出现的新键回读并保持锁。原本持有B完整submission的另一实例随后读取D原引用；原D完成后出现新问题时，合法清除并恢复回答。HTTP回答仅1次，continueInput为0，业务／模型执行为0，定位仅含原引用。 |
+| 最终后台类型 | `0e49cd8924cf25d24e607430b5ff6a5f14fa72d09542c3465b52cd4ed72ad666`，退出0。TypeScript5.9.3、9根／1610源、noEmit零诊断。 |
+
+最终运行读取134份原始源码字节，清单SHA-256 `44d9a9faa5cf9b840417752161ff06eccafd125213753de73d38a68efff393f9`。TaskClarification实际字节SHA-256为 `9a4da24791b742df640f7a5b88edda34bb8fb2fad10c356de13246d8338585ea`，固定Git内容由本阶段提交保全。原字段、候选、人工确认、当前身份和可见窗口继续沿原组件；使用原API的受控HTTP运输，未执行真实服务器、浏览器或Core业务。原反例脚本在内存复用，测试文件未新增或修改。
+
+最终命令使用 node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -，本树原offline preload、不可达DATABASE_URL、纯内存audit及统一任务写根。audit为空，自有验证子进程均退出，两任务临时目录未创建。中间边界输出曾沿用前像的固定读取计数，最终0677报告已改为实际HTTP计数，产品断言及源码一致。
+
+本片 node scripts/validate-docs.cjs 退出1，仅原4处缺链；git diff --check 退出0。定稿后交dev1独立复验，原AIN-15／26整体门槛暂保持。AIN-27六条和AIN-28原四条交付沿原范围继续，真实数据库、浏览器、微信、供应商和生产放行仍交负责人实测。个人付款和本片形成固定后继，main仍由PM按原两项节点归属串行整合。
+
 <a id="ain15-personal-enterprise-delegation-20261117"></a>
 ## AIN-15 企业优惠个人付款的原委托链（2026-11-17）
 
