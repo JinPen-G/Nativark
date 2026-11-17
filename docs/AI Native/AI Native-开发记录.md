@@ -17,7 +17,8 @@
 | --- | --- |
 | SaaS管理员，`/platform/ai` | 用当前 `system:ai-provider:view` 读取已有目录，选择正式Profile后读取当前配置。首次配置明确选择修订零，按 `system:ai-provider:manage` 保存停用配置，再分别审阅费率、当前配置修订的能力证据和平台预算。目录、保存、能力证据与调用准入各有独立结果。[原页面](../../apps/admin/src/features/ai-native/PlatformModelSettingsPage.tsx) |
 | 租户管理员，`/settings/ai` | 在当前经营空间持 `system:params:manage` 读取设置，明确选择平台AI或自带供应商并通过原CAS保存，再重新读取。新租户默认平台模式。平台额度经申请、SaaS审批和租户空间分配。BYOK由供应商计费，平台记录原调用／Token。两轨继续核原权限、政策、能力、Task累计资源及原用量关联。[原页面](../../apps/admin/src/features/ai-native/AiModelSettingsPage.tsx) |
-| 旧自定义配置的管理员 | 先读取原来源版本和受控协议，审阅旧配置后输入新密钥，按原source revision准备停用替换。原加密配置保留，切平台与回到BYOK均按新合法修订保存。损坏或不支持的旧协议由原服务返回不可用。[兼容服务](../../apps/api/src/modules/ai-native/tenant-model-config.service.ts) |
+| 已有完整BYOK配置的管理员 | 未保存mode的完整旧记录按tenant_managed读取，保留原加密配置和已保存的enabled。切平台或回到BYOK通过原CAS保存新合法修订。结构损坏返回不可用。[模式兼容](../../apps/api/src/modules/ai-native/model-config-compatibility.ts)、[兼容服务](../../apps/api/src/modules/ai-native/tenant-model-config.service.ts) |
+| 当前配置缺席、仅有旧参数来源的管理员 | 页面读取currentConfiguration=absent的原来源版本及受控协议，明确审阅后输入新密钥，以legacySource和expectedRevision=0准备停用替换。原服务重读来源并校验指纹与版本，不支持的旧协议返回不可用。[原页面](../../apps/admin/src/features/ai-native/AiModelSettingsPage.tsx)、[兼容服务](../../apps/api/src/modules/ai-native/tenant-model-config.service.ts) |
 | 保存冲突或应答丢失的操作者 | 冲突后读取当前修订再审阅差异。unknown保留原operationKey，使用页面“核对原保存收据”，观察原提交后重新读取当前配置。存储引用不可用时先恢复原引用读取条件。原收据、当前配置、能力与执行批准分别核验。[租户保存会话](../../apps/admin/src/features/ai-native/model-settings-session.ts)、[平台保存会话](../../apps/admin/src/features/ai-native/platform-model-settings-session.ts) |
 
 AIN-D01由负责人确定真实供应商、模型、处理地区、数据用途、额度及试点。当前已实现协议和能力声明由原配置／适配器提供。负责人实测时分别记录平台与BYOK的真实调用、结构化工具往返、usage、认证失败、超时、限流及适用图片／语音，核原callId和配置修订。供应商连接、必需能力证据、费率与预算就绪后，再执行获准场景。原Gateway及单账入口见[标准装配](../../apps/api/src/modules/ai-native/ai-native-application.providers.ts)。
@@ -60,7 +61,7 @@ AIN-D01由负责人确定真实供应商、模型、处理地区、数据用途�
 
 数据库回退沿原备份和兼容迁移。原 `ops:upgrade-drill` 先准备同dump的升级／回滚配对隔离库，升级库应用原追加迁移，可信宿主在两目标重放当前删除标记后签发各自全scope证书。再使用同一备份和原接续文件执行以下入口，两个屏障通过后原CLI才授应用访问并启动独立测试API。
 
-`npm run ops:upgrade-drill -- --file <原备份.sql> --finalize-ai <原接续.json> --ai-retention-certificates <升级证书数组.json> --rollback-ai-retention-certificates <回滚证书数组.json>`
+`npm run ops:upgrade-drill -- --file "<原备份.sql>" --finalize-ai "<原接续.json>" --ai-retention-certificates "<升级证书数组.json>" --rollback-ai-retention-certificates "<回滚证书数组.json>"`
 
 原 `ops:restore-source` 同样使用原 `--file`、`--finalize-ai` 和 `--ai-retention-certificates` 接续隔离目标。原CLI核库名、备份SHA、迁移基线、签名及目标，接续复用原库。失败保留隔离克隆及最少定位，成功按原清理路径回收本次API、授权与克隆，`--keep` 的库交具体创建者管理。生产数据库恢复前由运维负责人完成备份、兼容及访问恢复检查。[原升级CLI](../../scripts/ops/upgrade-drill.cjs)、[原恢复CLI](../../scripts/ops/restore-source.cjs)
 
@@ -71,7 +72,7 @@ AIN-D01由负责人确定真实供应商、模型、处理地区、数据用途�
 | 原条款 | 本节交付及验证边界 |
 | --- | --- |
 | 1，批准范围与供应商验证 | 双轨原设置、唯一Gateway、能力／错误／usage及实测顺序已定位。真实供应商与适用多模态由负责人实测并记录实际callId。 |
-| 2，双轨与升级兼容 | 新租户平台默认、旧BYOK审阅／停用替换、模式切换原配置保留和同键unknown恢复沿原页面／服务与既有模拟证据。两轨财务及Task资源职责分开。 |
+| 2，双轨与升级兼容 | 新租户平台默认，已有完整无mode的BYOK保留原模式和enabled，当前配置缺席的旧参数来源另走审阅／停用替换。模式切换、原配置保留和同键unknown恢复沿原页面／服务与既有模拟证据。两轨财务及Task资源职责分开。 |
 | 3，部署与运营 | 发布配置、凭据轮换、出站／回调／域名、容量告警、原任务观测、四类留存责任和可信恢复入口齐备，生产责任人、真实配置及实测由负责人确定。 |
 | 4，灰度与停用 | 只读／草稿、人工确认写入及额外批准的有限自动化分阶段交付，各阶段具备放量、停止和原人工路线。当前政策模式、全scene停用与BYOK控制沿原接口操作。 |
 | 5，回退 | 原三版本回退模拟和配对隔离库／双scope屏障／清理五情景已固定，原业务结果和删除账本可继续受权核对。 |
