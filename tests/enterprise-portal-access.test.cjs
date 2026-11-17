@@ -13,7 +13,7 @@ function load(file, deps = {}) {
   return exports;
 }
 const shared = require('../packages/shared/dist');
-const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/shared': shared });
+const { EnterpriseAccessService } = load('apps/api/src/modules/client/enterprise-access.service.ts', { '@rental-os/shared': shared, '@prisma/client': { Prisma: require('@prisma/client').Prisma } });
 const context = { tenantId: 't1', tenantCode: 'demo', customerId: 'p1', customerType: 'personal', sessionId: 'session', displayName: 'Admin', membershipStatus: 'active' };
 function rows(action = ['portal:enter', 'members:read']) {
   return action.map(action => ({ corporateCustomerId: 'c1', corporateName: 'Company', membershipId: 'r1', role: 'admin', action, tenantRevision: 1, corporateRevision: 1, tenantEnabled: true, corporateEnabled: true }));
@@ -96,9 +96,10 @@ test('all seven portal operations retain matching Controller methods and OpenAPI
   const api = fs.readFileSync('apps/api/src/contracts/openapi-document.ts', 'utf8');
   const client = fs.readFileSync('apps/api/src/modules/client/client-api.controller.ts', 'utf8');
   const membership = fs.readFileSync('apps/api/src/modules/platform/membership.controller.ts', 'utf8');
-  const workflow = load('apps/api/src/modules/enterprise/enterprise-workflow-schemas.ts');
-  const extension = load('apps/api/src/modules/enterprise/enterprise-extension-schemas.ts');
-  const { ENTERPRISE_COMPONENT_SCHEMAS: schemas } = load('apps/api/src/contracts/enterprise-schemas.ts', { '@rental-os/shared': shared, '../modules/enterprise/enterprise-workflow-schemas': workflow, '../modules/enterprise/enterprise-extension-schemas': extension });
+  // 复用原合同检查器的源码加载方式，跨领域引用在实际OpenAPI组合中核对。
+  require('ts-node').register({ transpileOnly: true, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+  const { ENTERPRISE_COMPONENT_SCHEMAS: enterpriseSchemas } = require('../apps/api/src/contracts/enterprise-schemas');
+  const { OPENAPI_COMPONENT_SCHEMAS: schemas } = require('../apps/api/src/contracts/openapi-document');
   for (const [method, prefix, route, file] of [
     ['get', '/api/client/v1/', 'enterprise/entry', client],
     ['get', '/api/client/v1/', 'enterprise/corporates/:corporateCustomerId/members', client],
@@ -115,10 +116,10 @@ test('all seven portal operations retain matching Controller methods and OpenAPI
   }
   const check = value => {
     if (!value || typeof value !== 'object') return;
-    if (value.$ref) assert.ok(schemas[value.$ref.slice('#/components/schemas/'.length)]);
+    if (value.$ref) assert.ok(schemas[value.$ref.slice('#/components/schemas/'.length)], value.$ref);
     Object.values(value).forEach(check);
   };
-  Object.values(schemas).forEach(check);
+  Object.values(enterpriseSchemas).forEach(check);
 });
 test('SQL source guards current session, active memberships and grant relationship revision', () => {
   const code = fs.readFileSync('apps/api/src/modules/client/enterprise-access.service.ts', 'utf8');

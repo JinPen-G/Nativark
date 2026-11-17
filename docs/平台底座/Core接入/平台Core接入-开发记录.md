@@ -11,6 +11,16 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-enterprise-access-fixture-20261117"></a>
+
+## 原企业入口验证夹具与跨领域schema组合（2026-11-17）
+
+固定源码为3df9fa9b2fde646e18193b90fc91ab785016f34d，任务分支与GitHub实际远端相同，main62ca183f10b7c316ab63c28ef6d04ee88d06488b已在祖先；本片仅修[原企业入口用例](../../../tests/enterprise-portal-access.test.cjs)并登记验证。原服务的Prisma SQL runtime显式提供到VM夹具；OpenAPI验证复用原合同检查器的ts-node加载方式，企业schema的跨领域引用在实际OPENAPI_COMPONENT_SCHEMAS中核对，继续遍历全部企业投影并保留原路由/权限/撤权/原收据断言。没有改生产代码、HTTP资料或新增测试脚本。
+
+补证过程中先后定位到VM漏shared/schema依赖，以及只在企业子集核对Rental换货检查材料引用的问题，原失败保留（PID53360、5400、49588、41760均退出1，七项6过/1失败）。最后node --no-compilation-cache - api-enterprise-source-before tests/enterprise-portal-access.test.cjs，PID34260退出0、stderr空，7/7、0 fail/skip/todo/cancelled；与原固定服务配合，覆盖显式入口动作、跨商户/企业拒绝、成员最小投影、IO撤权、原配置修订与原收据、七项HTTP及当前会话/关系SQL门禁。四个正式配置0诊断，Prisma5.22原238模型声明、TS5.9.3及JS均留内存；SQL/成员/会话/事务仍为明确fixture，无真实HTTP/数据库/浏览器或完整宿主证明。
+
+本片为进入企业读取拆分前的必要夹具保全，PCH正式任务仍未跨下一门槛；完整Rental包、公共能力、多Core和安装/更新验收沿当前接续继续。定向九份文档1473本地链接/174锚点/100表格0问题，git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check退出0，正式需求/任务无差异；所有worker退出，output/.tmp无新增产物；两处旧残留再次被原生删除的自动审批在启动前拒绝，原manifest更新为2026-11-17T00:32:31.651Z，只读核840文件/91,808,304字节和1个0字节文件、均无链接，不声称删除。
+
 <a id="core-rental-recovery-payments-20261117"></a>
 
 ## Rental 历史回填、员工收款与归还计价归属（2026-11-17）
