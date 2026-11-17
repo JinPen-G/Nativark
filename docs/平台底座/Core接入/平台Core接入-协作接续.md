@@ -16,7 +16,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 企业资格、订单/财务读取、原命令/审计、客户主档/会员、政策及成员交接已单源迁入Rental包，公共日志基础写入/脱敏在platform-server。企业申请、管理请求、任务中心、行政交接、付款证明和成员审计现也迁入Rental，原API只供给同一实例；客户各端、续租/换货费用合同由纯业务出口维护。本片97个方法/函数正文及138个合同声明正文一致，原101项工作流冒烟和十配置类型通过。下一步继续费用批准/委托及剩余Controller，再处理数据/迁移/Seed和标准装配。父版48a5ecac5a1a1c6d974e183260a7895e5fe10c56保全本片原文/完整接续。[当前申请/任务阶段](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117)[当前政策/成员阶段](平台Core接入-开发记录.md#core-rental-enterprise-policy-members-20261117) · [客户主档](平台Core接入-开发记录.md#core-rental-customer-master-20261117) · [企业读取](平台Core接入-开发记录.md#core-rental-enterprise-reads-20261117) · [原工作流基线](平台Core接入-开发记录.md#core-enterprise-workflow-fixture-20261117)。官方日历源按公共能力处理，原恢复/收款与采用未完项沿阶段证据承接。[恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117) · [采用闭包](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据，MIT与品牌原稿引用固定Git。
 
-负责人明确指定 `[Saas 底座]-dev1` 为副手，已成功下发固定48a5基线、独立工作树和公共订阅→基础集成范围，任务已开始，实际工作树/首个固定交付尚待回读。副手负责对应公共模块、合同、API/UI及必要包/锁/schema装配最小差异；本对话继续Rental并统一维护PCH四册，固定成果按差异整合。本树仍由本对话唯一写入，副手不操作main或本树。[分工证据](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117)
+负责人明确指定 `[Saas 底座]-dev1` 为副手，已成功下发固定48a5基线及公共订阅→基础集成范围；实际独立树为 C:/Users/Penn/.codex/worktrees/saas-platform-dev1/rental-OS、分支 codex/saas-platform-dev1，起点48a5已核实，首个固定交付尚待回读。副手负责对应公共模块、合同、API/UI及必要包/锁/schema装配最小差异；本对话继续Rental并统一维护PCH四册，固定成果按差异整合。本树仍由本对话唯一写入，副手不操作main或本树。[分工证据](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117)
 
 ## 2. 已有实际接点
 
