@@ -9,6 +9,7 @@
 | [公共应用工厂](src/application.tsx)、[组合参数](src/application-context.ts) | `/application` 为零Core及工单宿主提供同一登录/设置/受保护路由，宿主只传品牌、唯一会话和已登记页面 |
 | [Core授权目录](src/CoreAccessPage.tsx)、[可见性口径](src/application-access.ts) | SaaS选择真实租户和已登记Core；租户选择真实成员和服务端可分配Core，复用同一授权面板与原操作核对 |
 | [公共订阅](src/features/subscription/README.md) | 六条原路由、版本对比、申请与办理、目录与年费、无金额到期浮窗，复用同一宿主会话和请求 |
+| [公共第三方服务](src/features/integrations/README.md) | 原目录、配置抽屉和测试反馈；零Core与工单宿主共用同一路由、权限、请求及双语文案 |
 | [公共租户/人员/角色](src/features/access/PublicManagementPages.tsx)、[权限编辑器](src/features/access/PermissionMatrix.tsx) | SaaS租户创建/资料/状态与本租户人员角色管理；共用原目录、保存、草稿与权限组件，旧Rental入口转接 |
 | [正式出口](src/index.ts)、[壳组合](src/PlatformShell.tsx) | Provider、完整侧栏、面包屑/页名、通知、休息和面板，导航由获权 Core 页面声明生成 |
 | [运行时端口](src/runtime/index.ts)、[查询边界](src/runtime/session-queries.ts) | 宿主提供当前服务端会话、请求、订阅及代次；切身份先中止旧请求再清缓存，不推断业务回滚 |
@@ -50,3 +51,7 @@ SaaS“租户管理”读取公共租户目录；创建还须有 `system:tenant:
 人员目录可重置其他成员口令，管理员账号另须租户管理员权限；本人走修改密码入口。重置明确确认后调用原接口，撤销旧会话并返回临时密码。普通角色可明确删除，固定/已分配角色由服务端拒绝。失败不自动重发，先读当前目录；再次重置属于新操作，会替换此前口令。已确认结果单独显示，不被后续目录失败遮住；临时密码仅留当前页并可复制。组织及完整安全管理继续按原任务交付，订阅接入见上方公共模块。
 
 “账号安全”让所有已验证账号用当前密码修改本人密码，复用 `/session-pages` 的同一表单和会话端口。首次强制改密仍使用完整面板，公共设置使用嵌入形式；确认输入只参与前端校验，HTTP只发送当前/新密码。草稿和提交中有离开保护，成功清空输入并由原会话轮换更新当前身份，失败保留输入。不在本地存储密码。
+
+“第三方服务”沿原 `/tenant/integrations` 进入。公共应用与原Rental后台共用同一页面；租户平台管理员、明确集成权限或通配权限可见，SaaS账号沿原规则不进入租户配置页。目录、保存及连接测试使用宿主唯一请求入口，供应商可用性与历史配置由服务端裁定。集成双语在公共模块维护，Core无需再复制词条。[页面与请求](src/features/integrations/index.ts) · [公共文案](src/features/integrations/messages.ts)
+
+记录事实和浮层退出可从正式 `/shell` 的 `RecordFacts`、`RecordFact` 及 `/ui` 的 `useModalDismissal` 使用。旧Rental路径已转接这些实际出口，Core作者无需导入兼容源码路径。

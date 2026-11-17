@@ -67,3 +67,4 @@ export type { FileUploadItem, FileUploadProps } from "./FileUpload";
 export { AnimatedNumber } from "./AnimatedNumber";
 export { LiveRefresh, useLiveRefresh } from "./LiveRefresh";
 export { Statistic } from "./Statistic";
+export { useModalDismissal } from "./useModalDismissal";

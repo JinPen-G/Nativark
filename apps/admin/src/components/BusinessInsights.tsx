@@ -1,12 +1,9 @@
 import type { ReactNode } from "react";
-import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { BarChart } from "@/registry/components/bar-chart/bar-chart";
 import { useLocale } from "@/app/locale";
 import styles from "./BusinessInsights.module.css";
 
-export function InsightMetrics({ items }: { items: { label: string; value?: number; suffix?: string }[] }) {
-  return <dl className={styles.metrics}>{items.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.value === undefined ? "—" : <AnimatedNumber value={item.value} suffix={item.suffix} />}</dd></div>)}</dl>;
-}
+export { InsightMetrics } from "@rental-os/platform-admin/insight-metrics";
 
 export function InsightColumns({ children }: { children: ReactNode }) { return <div className={styles.columns}>{children}</div>; }
 

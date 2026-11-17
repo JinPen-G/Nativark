@@ -223,7 +223,11 @@
     "./subscription/useSubscriptionCategoryLabels": "./src/features/subscription/useSubscriptionCategoryLabels.ts",
     "./subscription/index": "./src/features/subscription/index.ts",
     "./subscription/subscription-access": "./src/features/subscription/subscription-access.ts",
-    "./subscription/subscriptionRoutes": "./src/features/subscription/subscriptionRoutes.ts"
+    "./subscription/subscriptionRoutes": "./src/features/subscription/subscriptionRoutes.ts",
+    "./integrations": "./src/features/integrations/index.ts",
+    "./integration-client": "./src/features/integrations/client.ts",
+    "./insight-metrics": "./src/components/InsightMetrics.tsx",
+    "./source/features/settings/TenantIntegrationsPage": "./src/features/integrations/TenantIntegrationsPage.tsx"
   },
   "scripts": {
     "lint": "tsc -p tsconfig.json",

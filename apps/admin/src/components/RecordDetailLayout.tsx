@@ -5,8 +5,8 @@ import { PageHeader } from "./PageHeader";
 import { Button } from "./ui";
 import styles from "./RecordDetailLayout.module.css";
 
-import { RecordFacts, type RecordFact } from "@rental-os/platform-admin/source/components/RecordFacts.tsx";
-export { RecordFacts, type RecordFact } from "@rental-os/platform-admin/source/components/RecordFacts.tsx";
+import { RecordFacts, type RecordFact } from "@rental-os/platform-admin/shell";
+export { RecordFacts, type RecordFact } from "@rental-os/platform-admin/shell";
 
 export function RecordDetailLayout({ title, status, facts, actions, onBack, children }: {
   title: string; status?: ReactNode; facts?: RecordFact[]; actions?: ReactNode; onBack: () => void; children: ReactNode;

@@ -11,6 +11,27 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-integration-ui-20261118"></a>
+
+## 公共第三方设置页与同源后台接入（2026-11-18）
+
+固定父版8a2e5db74d425b19da0e0649101efa9a9f73c44c保全原文、资源和完整旧接续，开工时与真实任务远端相同。dev1交出22路径页面组并停写，RD核源组、接公共应用路由、补公共双语和正式呈现出口；dev1组织/安全未完组仍在共享树，不进入本片提交。当天另核真实main为ba1de9f91860c4e73503eded4e1d05d2307b0e28，其固定变化待本片上传后接续。
+
+[公共集成页](../../../packages/platform-admin/src/features/integrations/README.md)持有原目录、分类/搜索、卡片/目录切换、配置抽屉、默认选择、草稿同步及保存/测试反馈。[请求工厂](../../../packages/platform-admin/src/features/integrations/client.ts)只消费宿主唯一请求，原Rental API/页面转接同一实现。[公共应用](../../../packages/platform-admin/src/application.tsx)实际登记原/tenant/integrations的菜单和受保护路由；沿原租户平台管理员、明确system:integration:manage或*判定，SaaS身份不进入租户配置。页面可见性不替代服务端Guard、当前租户、修订与历史依赖核验。
+
+[集成文案](../../../packages/platform-admin/src/features/integrations/messages.ts)从原Rental字典迁入86项英文映射，另补18项供应商提示，由公共语言Provider单份加载；原5712键与当前Rental5626键加迁出86项逐项比较，原键值差异0。记录事实与浮层退出的实际实现补到正式/shell和/ui出口，原两个缺失源码出口的消费者改用这些正式入口，正文和样式未变。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 作者定向验证 | node --no-compilation-cache - dev1-integration-ui-types，6入口/1503源/0诊断；dev1-integration-ui-smoke核原三个接口、payload、失败Promise与租户权限，均退出0；42本地链接及差异格式通过。复用作者已完成冒烟，不重复添加测试脚本 |
+| 同版本最终类型 | node --no-compilation-cache - pch-integration-final-types，TS5.9.3，公共包272根/2537源、零CoreWeb5根/2538源、原后台661根/4296源均0诊断、退出0、stderr空；公共两配置行业源码0、写入0，包解析消费本树正式出口 |
+| 原资源与语言 | 三份原目录CSS/类名与固定Git原文CRLF规范化后相同；作者22路径交付组核现存19/删除3。全部原英文键值一致；语言核验首次因重复解析字典导致REPL超时，已改为各文件只解析一次后完成，没有重复写入或篡改旧映射 |
+| 首轮类型与修复 | 原后台3诊断定位RecordFacts和useModalDismissal旧转接缺正式出口，改为真实/shell与/ui后消除。验证器另4诊断来自虚拟workspace相对解析，按本树真实包位置修验证器，未改源码迁就检查 |
+| 资料和交付 | 公共包、零Core、集成模块README及根组成表同步，PCH记录/接续仍按四册；精确暂存作者页面组与RD本片，排除组织/安全WIP。链接/格式与真实远端结果由包含本节的固定提交定位 |
+| 环境 | 类型及核对全在内存或只读Git，未安装、读.env、生成共享client/dist或启动服务；接口/权限冒烟使用明确fixture，没有浏览器、真实HTTP/数据库或供应商证据 |
+
+复核PCH-01/02/03/04/07/08原门槛，本片未跨下一档：完整发现/安装界面、Rental标准包/全端、异步/AI及正式宿主尚未完成。现有源文件说明、请求和模块阅读入口随实现同步；dev1继续组织/安全，RD接其原主装配与继续Rental剩余HTTP/数据。旧外观失败、合同614项问题、历史缺链及两项集中待清理残留沿接续承接。没有新增临时环境或业务进程，中文提交普通推送后实际回读任务远端。
+
 <a id="core-public-official-calendars-20261118"></a>
 
 ## 公共官方日历来源与实际数据计划接线（2026-11-18）
