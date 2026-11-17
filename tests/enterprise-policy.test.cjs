@@ -14,13 +14,18 @@ function load(file, deps = {}) {
   vm.runInNewContext(source, { exports, require: name => deps[name] ?? (name === '@nestjs/common' ? common : name === '@prisma/client' ? { Prisma } : name === '@rental-os/shared' ? shared : (() => { throw new Error(name); })()), Date, Map, Set, JSON }, { filename: file });
   return exports;
 }
-const idempotencyModule = load('apps/api/src/modules/rental-core/rental-idempotency.repository.ts', { 'node:crypto': require('node:crypto'), './workspace-scope': {} });
-const { EnterprisePolicyService } = load('apps/api/src/modules/enterprise/enterprise-policy.service.ts', { '../rental-core/rental-idempotency.repository': idempotencyModule, './enterprise-command.service': { enterpriseJson: value => typeof value === 'string' ? JSON.parse(value) : value }, '../../common/request-identity': { getRequestIdentity: () => ({ tenantId: 't1', userId: 'p1', isSaasAdmin: false }) } });
+const idempotencyModule = require('@rental-os/platform-contracts/request-fingerprint');
+const enterpriseReceipt = load('packages/rental-core/src/enterprise-receipt.ts', { 'node:crypto': require('node:crypto') });
+const { EnterprisePolicyService } = load('apps/api/src/modules/enterprise/enterprise-policy.service.ts', { '../rental-core/rental-idempotency.repository': idempotencyModule, '../rental-core/category-identity': require('@rental-os/rental-core/category-identity'), '../rental-core/rental-merchant-delegated-order.authority': require('@rental-os/rental-core/merchant-delegation'), './enterprise-order-delegation-source': load('apps/api/src/modules/enterprise/enterprise-order-delegation-source.ts', { '../rental-core/rental-idempotency.repository': idempotencyModule, './enterprise-command.service': { enterpriseJson: value => typeof value === 'string' ? JSON.parse(value) : value } }), './enterprise-command.service': { enterpriseJson: value => typeof value === 'string' ? JSON.parse(value) : value }, '../../common/request-identity': { getRequestIdentity: () => ({ tenantId: 't1', userId: 'p1', isSaasAdmin: false }) } });
 const input = { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'company', enterpriseContractAndPayer: false, enterpriseDisclosure: { noticeVersion: 'v1', acknowledged: true } };
 function fixture() {
   const policy = { workspaceIds: ['w1'], categoryCodes: ['vehicle'], personalPaymentAllowed: true, enterprisePaymentAllowed: true, approvalMode: 'without_per_order', noticeVersion: 'v1', noticeText: 'Enterprise identity orders are visible to the company.' };
-  const state = { portal: [{ enabled: true }], tenant: [{ enabled: true }], policies: [{ scopeKey: 'merchant', revision: 1, policy: { ...policy } }, { scopeKey: 'company', revision: 1, policy: { ...policy } }], person: true, relation: true, memberPerson: { tenantId: 't1', customerType: 'personal', status: 'active', mergedIntoCustomerId: null, accountStatus: 'active', membershipStatus: 'active' }, memberUpdatedAt: new Date('2026-10-31T00:00:00.000Z'), category: 'VEHICLE', writes: 0 };
+  const state = { portal: [{ enabled: true }], tenant: [{ enabled: true }], policies: [{ scopeKey: 'merchant', revision: 1, policy: { ...policy } }, { scopeKey: 'company', revision: 1, policy: { ...policy } }], person: true, relation: true, memberPerson: { tenantId: 't1', customerType: 'personal', status: 'active', mergedIntoCustomerId: null, accountStatus: 'active', membershipStatus: 'active' }, memberUpdatedAt: new Date('2026-10-31T00:00:00.000Z'), category: 'VEHICLE', definitions: [{ code: 'vehicle', name: 'Vehicles', statuses: ['published'] }, { code: 'camera', name: 'Cameras', statuses: ['legacy_baseline'] }], writes: 0 };
   const db = {
+    rentalCategoryDefinition: { count: async ({ where }) => {
+      assert.equal(JSON.stringify(where.versions.some.status.in), JSON.stringify(["published", "legacy_baseline"]));
+      return state.definitions.filter(row => where.code.in.includes(row.code) && row.statuses.some(status => where.versions.some.status.in.includes(status))).length;
+    } },
     $queryRaw: async strings => { const sql = Array.isArray(strings) ? strings.join('?') : strings.sql; if (sql.includes('customer_corporate_memberships')) return state.person && state.relation ? [{ id: 'member', updatedAt: new Date('2026-10-31T00:00:00Z') }] : []; if (sql.includes('FROM business_workspaces')) return [{ categoryCode: state.category }]; if (sql.includes('FROM Tenant')) return [{ id: 't1' }]; if (sql.includes('enterprise_corporate_portals')) return state.portal; if (sql.includes('enterprise_portal_tenant_settings')) return state.tenant; if (sql.includes('enterprise_scope_policies')) return state.policies; throw new Error(sql); },
     $executeRaw: async () => { state.writes++; },
     customerProfile: { findFirst: async args => args.where.id === 'company' || state.person ? { id: args.where.id } : null },
@@ -88,7 +93,7 @@ test('merchant visibility notice changes require a new version before persistenc
 test('policy save original smoke: own company/member receipt survives lost grants and current policy changes without exposing limits or rewriting', async () => {
   const f = fixture(), receipts = new Map(), policies = new Map(f.state.policies.map(row => [row.scopeKey, row])); let currentActor = 'p1', permitted = true;
   const identity = { requireRequestTenantId: () => 't1', requireRequestUserId: () => currentActor };
-  const { EnterpriseCommandService } = load('apps/api/src/modules/enterprise/enterprise-command.service.ts', { '../../common/request-identity': identity, 'node:crypto': require('node:crypto') });
+  const { EnterpriseCommandService } = load('packages/rental-core/src/mysql-enterprise-command.ts', { '@rental-os/platform-server/request-identity': identity, './enterprise-receipt': enterpriseReceipt });
   f.db.$transaction = callback => callback(f.db);
   f.db.$queryRaw = async (strings, ...values) => {
     const sql = Array.isArray(strings) ? strings.join('?') : strings.sql, parameters = Array.isArray(strings) ? values : strings.values;
@@ -182,8 +187,8 @@ test('policy target person smoke: current same-tenant active personal account/me
 
 test('merchant policy original smoke: exact operator/company/key receipt excludes current limits and never reapplies a saved policy', async () => {
   const f = fixture(), receipts = new Map(); let currentActor = 'u1', currentTenant = 't1';
-  const { EnterpriseCommandService } = load('apps/api/src/modules/enterprise/enterprise-command.service.ts', { 'node:crypto': require('node:crypto'),
-    '../../common/request-identity': { requireRequestTenantId: () => currentTenant, requireRequestUserId: () => currentActor } });
+  const { EnterpriseCommandService } = load('packages/rental-core/src/mysql-enterprise-command.ts', { './enterprise-receipt': enterpriseReceipt,
+    '@rental-os/platform-server/request-identity': { requireRequestTenantId: () => currentTenant, requireRequestUserId: () => currentActor } });
   f.db.$transaction = callback => callback(f.db);
   f.db.$queryRaw = async (strings, ...values) => {
     const sql = Array.isArray(strings) ? strings.join('?') : strings.sql, parameters = Array.isArray(strings) ? values : strings.values;
