@@ -5,9 +5,9 @@
  * 客户模型曾同时被多个文件直接 create / update / upsert，每处都各自复制一遍脱敏、
  * 状态与幂等规则——同一条不变量（会员状态不能被注册重试改写、证件号只存掩码）
  * 要在多处各守一次，漏一处就是静默偏差。现在写入口只有
- * `apps/api/src/modules/platform/shared-customer.repository.ts` 一个；其余文件只能经它的方法写。
+ * `packages/rental-core/src/mysql-customer-master.ts` 一个；其余文件只能经它的方法写。
  *
- * 本脚本静态扫描 apps/api/src 下所有 .ts，匹配
+ * 本脚本静态扫描 apps/api/src 和 packages/rental-core/src 下所有 .ts，匹配
  * `.<model>.(create|update|upsert|delete|createMany|updateMany|deleteMany)(`，
  * 任何出现在仓储之外的写调用都让脚本失败。读取（findFirst、findMany、count 等）不受限。
  */
@@ -16,8 +16,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
-const SCAN_ROOT = path.join(ROOT, "apps", "api", "src");
-const OWNER = path.join(ROOT, "apps", "api", "src", "modules", "platform", "shared-customer.repository.ts");
+const SCAN_ROOTS = [path.join(ROOT, "apps", "api", "src"), path.join(ROOT, "packages", "rental-core", "src")];
+const OWNER = path.join(ROOT, "packages", "rental-core", "src", "mysql-customer-master.ts");
 
 const MODELS = ["customerProfile", "customerAccount", "customerMembership", "customerMembershipReview", "customerCorporateProfile"];
 const WRITES = ["create", "update", "upsert", "delete", "createMany", "updateMany", "deleteMany"];
@@ -36,7 +36,7 @@ const violations = [];
 let ownerWrites = 0;
 let scanned = 0;
 
-for (const file of walk(SCAN_ROOT)) {
+for (const file of SCAN_ROOTS.flatMap(root => walk(root))) {
   scanned += 1;
   const source = fs.readFileSync(file, "utf8");
   const lines = source.split(/\r?\n/u);
@@ -63,7 +63,7 @@ if (!fs.existsSync(OWNER)) {
 }
 
 if (violations.length > 0) {
-  console.error("[customer-write-ownership] 以下客户模型写调用不在 shared-customer.repository.ts 内：");
+  console.error("[customer-write-ownership] 以下客户模型写调用不在 mysql-customer-master.ts 内：");
   for (const item of violations) {
     console.error(`  ${item.file}:${item.line}  ${item.call}`);
   }
@@ -72,5 +72,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `[customer-write-ownership] 扫描 ${scanned} 个文件，${MODELS.length} 个客户模型的 ${ownerWrites} 处写调用全部位于 shared-customer.repository.ts。`
+  `[customer-write-ownership] 扫描 ${scanned} 个文件，${MODELS.length} 个客户模型的 ${ownerWrites} 处写调用全部位于 mysql-customer-master.ts。`
 );

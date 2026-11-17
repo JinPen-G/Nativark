@@ -11,6 +11,27 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-customer-master-20261117"></a>
+
+## Rental 客户主档、会员及唯一写入归属（2026-11-17）
+
+固定父版0629bdfe89e48f83beae105a0e09bd51f48933d8已提交、普通推送并实际远端回读，保存本片原仓储和完整接续；main62ca183f10b7c316ab63c28ef6d04ee88d06488b仍在任务祖先。原[客户仓储](../../../packages/rental-core/src/mysql-customer-master.ts)实际迁入Rental包，[MySQL视图](../../../packages/rental-core/src/customer-master-storage.ts)只消费五个客户模型、企业关系表及其原调用方事务；原API类只供给同一PrismaService，并保留原完整事务类型别名。客户合同已由Rental维护，本片不新增跨Core共享客户模型或通用客户权限。
+
+30个执行单元与固定父版正文相同，保留租户共享主档/唯一会员、手机号复用、当前ALS创建归属、掩码及三态账号摘要、原普通资料单调修订/姓名CAS、合并CAS、实名事实专用入口和账号/会员预期状态。注册重试不激活已受限会员，后台口令重置不解除暂停；原Prisma唯一键冲突只读取赢家，其他错误继续抛出。企业关系同毫秒/时钟回退仍推进原修订，个人/企业状态和合并在原事务失效迁移企业授权，不重绑旧政策/批准，不改订单或资金历史。[原注册链](../../../apps/api/src/modules/platform/customer-registration.service.ts) · [原客户/会员消费](../../../apps/api/src/modules/platform/membership.service.ts) · [企业成员消费](../../../apps/api/src/modules/enterprise/enterprise-members.service.ts)
+
+| 必要验证 | 实际结果与边界 |
+| --- | --- |
+| 原注册基线 | node --no-compilation-cache - api-customer-master-baseline tests/customer-registration-unified.test.cjs，PID38860退出0、stderr空，九组原直接断言均通过 |
+| 同入口候选 | api-customer-master-candidate，PID34172退出0、stderr空，同样九组全部通过；原脚本无修改，覆盖后台/客户端注册、账号/会员与审核复用、锁后状态、只新增导入和普通资料CAS |
+| 正式类型与产物 | 官方Prisma5.22原238模型、TS5.9.3，十个正式配置0诊断；Rental199根/924源/398输出，API988根/2443源/1976输出；声明/JS留内存，未写共享client/dist |
+| 写入口归属检查 | node scripts/validate-customer-write-ownership.cjs退出0；扫描1187个文件，五模型16处写调用全部在新唯一仓储。原规则同步扫描API和Rental包，模型/写方法正则保持 |
+| 检查负例 | 对旧API provider和Rental合同文件分别注入一处旁路客户写入的内存fixture，原检查器均退出1并定位对应文件；未改磁盘源码或新增测试脚本 |
+| 源码/兼容出口 | 30单元正文相同，原单参数Nest注入及旧方法签名/导出保持；两个正式子出口/typesVersions有实际源码，原依赖和lock无差异。Controller/DTO/OpenAPI/AppModule/schema/迁移/Seed未改 |
+
+注册数据库、锁、事务及行行为仍为明确fixture；同一源码、真实密码/ALS和服务执行不等于真实MySQL并发/约束、HTTP、完整Nest宿主或浏览器验收。本片未运行读取.env的客户主档/管理端真库脚本，未做标准包安装、多真实Core、升级/回退、独立接手或审查。继续企业政策/成员/工作流服务及剩余Controller、数据/迁移/Seed、客户端/作业/AI和标准Rental装配；完整公共组织/订阅/集成及05/06/07范围仍未齐，按原G1～G4复核未跨下一档，正式需求/任务保持。
+
+源码短头、原不变逻辑说明和两个模块导读与当前接续同片更新；包MySQL私有适配仍使用原Prisma类型/runtime，不从领域根出口加载或泄漏到公共Core清单。所有worker已退出，output/.tmp无新增产物；旧两处残留和原责任清单沿前片保留，原生删除的自动审批拒绝不冒称已清理。定向九份文档1521本地链接/176锚点/102表格0问题，原换行约束下diff --check退出0。中文提交普通推送当前任务分支，上传后读取实际远端，不合main或发布。
+
 <a id="core-enterprise-policy-fixture-20261117"></a>
 
 ## 原企业政策验证夹具与发布品类依据（2026-11-17）

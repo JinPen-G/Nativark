@@ -662,6 +662,14 @@
     "./mysql-enterprise-finance": {
       "types": "./dist/mysql-enterprise-finance.d.ts",
       "default": "./dist/mysql-enterprise-finance.js"
+    },
+    "./mysql-customer-master": {
+      "types": "./dist/mysql-customer-master.d.ts",
+      "default": "./dist/mysql-customer-master.js"
+    },
+    "./customer-master-storage": {
+      "types": "./dist/customer-master-storage.d.ts",
+      "default": "./dist/customer-master-storage.js"
     }
   },
   "typesVersions": {
@@ -1154,6 +1162,12 @@
       ],
       "mysql-enterprise-finance": [
         "dist/mysql-enterprise-finance.d.ts"
+      ],
+      "mysql-customer-master": [
+        "dist/mysql-customer-master.d.ts"
+      ],
+      "customer-master-storage": [
+        "dist/customer-master-storage.d.ts"
       ]
     }
   },

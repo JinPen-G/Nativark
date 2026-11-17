@@ -1,6 +1,6 @@
 # Rental Core
 
-`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照/历史回填、员工线下收款与归还计价、企业客户资格/订单/财务投影及读取审计、原债权核定收据、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策、采用准备与最终提交链，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
+`@rental-os/rental-core` 是原租赁业务源码的独立归属。当前已迁入原核心聚合、报价/营销服务、配置与业务请求DTO、订单确认及商户委托、配货/办理锁及自动扫描、工作台/报表与到期作业、换货试算、检查准备/专用影像与不可变凭证、经营空间边界、合同、品类身份与发布/历史解析、营业日、计价、器材、能力执行/条件判定、恢复快照/历史回填、员工线下收款与归还计价、客户主档/账号/会员与企业客户资格/订单/财务投影及读取审计、原债权核定收据、原操作收据、配置及订单/资产/库存/检查/工单、报价/券/奖励/通知事实仓储、资金事实门禁、企业应收核销、服务容量、原换货批准、客户检查同意及批准执行、绑定规则/日历草稿、批准设置应用及品类草稿/发布/开通政策、采用准备与最终提交链，以及检查、换货、续租、优惠和资金规则。原共享包和 API 通过兼容出口消费同一实现。Controller、数据、页面、其余作业和标准 Core 装配继续逐片迁移。
 
 ## 阅读路线
 
@@ -23,6 +23,7 @@
 | [业务请求DTO](src/core-request.dto.ts)、[订单请求DTO](src/order-request.dto.ts)、[企业告知DTO](src/enterprise-disclosure.dto.ts) | `/core-dto`、`/order-dto` 与 `/enterprise-disclosure-dto` 提供原商品/工单、订单/检查/资金请求的同一运行时类；API、客户与企业嵌套告知共用同一元数据，字段校验不替代当前业务授权 |
 | [正式出口](src/index.ts)、[合同](src/contracts.ts) | 原商品/资产、报价订单、履约检查、价格资金、日历与客户会员定义和运行时常量；[shared 兼容出口](../shared/src/core.ts)继续服务原 API、各客户端和 AI |
 | [品类标识](src/rental-category-code.ts) | 原稳定格式及内置常量，格式合法不代表注册、发布或采用权限 |
+| [客户主档与会员](src/mysql-customer-master.ts)、[本表事务视图](src/customer-master-storage.ts) | `/mysql-customer-master` 是五个客户模型的唯一写入口，保留原租户共享、创建归属、普通资料CAS与企业关系修订；同一事务供给注册/合并/状态/企业链，客户共享不开放跨空间订单或其他Core读权 |
 | [企业客户资格](src/mysql-enterprise-access.ts)、[客户上下文](src/client-context.ts) | `/mysql-enterprise-access` 从原客户会话、企业成员关系和明确动作读取资格；原客户Auth供给可信上下文，角色名称不自动取得入口或营运权限 |
 | [企业订单读取](src/mysql-enterprise-orders.ts)、[财务投影](src/mysql-enterprise-finance.ts)、[私有存储](src/enterprise-read-storage.ts) | `/mysql-enterprise-orders` 与 `/mysql-enterprise-finance` 保留原告知字段、本人/企业和当前空间范围，读取前后复验；资金和授信来源由宿主供给，缺原依据返回不可用 |
 | [企业原命令](src/mysql-enterprise-command.ts)、[收据解释](src/enterprise-receipt.ts)、[读取审计](src/mysql-enterprise-reader-audit.ts) | `/mysql-enterprise-command` 保持租户父锁、同事务原操作键及结果回读；`/mysql-enterprise-reader-audit` 通过公共日志持久化授权投影，写入失败或最终撤权不释放敏感数据 |
@@ -78,6 +79,10 @@
 | [批准设置应用](src/mysql-approved-settings.ts)、[真实路由授权桥](src/approved-settings-route-authority.ts)、[参加者合同](src/approved-settings-ports.ts)、[严格输入](src/approved-settings-validation.ts) | /mysql-approved-settings 与 /approved-settings-route-authority 复用原Guard/ALS，通知配置CAS、批准消费与原操作同事务，历史读取不以当前配置或过期重做 |
 
 ## 使用与构建
+
+租赁客户仓储从 `@rental-os/rental-core/mysql-customer-master` 创建，传入同一数据源。注册、合并、会员/账号状态和企业流程持有原锁及事务，再把同一事务传给仓储方法；普通姓名变更使用原修订CAS，企业关系变化不恢复旧授权。后台重置口令和客户端自助注册分别沿原规则，不能借重试解除暂停。[原注册入口](../../apps/api/src/modules/platform/customer-registration.service.ts) · [原注册验证](../../tests/customer-registration-unified.test.cjs) · [写入口检查](../../scripts/validate-customer-write-ownership.cjs)
+
+该仓储只属于Rental示范；其他Core维护自己的领域客户或成员模型，不通过相同ID取得这些表的读写权。原API的 `SharedCustomerRepository` 只注入同一数据库，原完整事务类型别名保持；包内存储只消费本表窄视图。
 
 空间版本准备从 `@rental-os/rental-core/mysql-category-preparation` 创建，供给原数据库、同一能力/Hook实例、当前商业reader、原Auth及采用可用状态。`preview` 只检查，`saveBatch` 保存明确预备字段和原批次回执，`readBatch` 核当前操作者读取自己的原结果。准备不激活实体/能力或切换绑定，陈旧来源不能自动覆盖。[准备HTTP入口](../../apps/api/src/modules/rental-core/category-adoption-preparation.controller.ts) · [原批次验证](../../tests/category-preparation-batch-service.test.cjs)
 
