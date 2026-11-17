@@ -7,9 +7,9 @@
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
 <a id="ain-main-fixed-native-integration-20261117"></a>
-## main 固定候选与完整装配复验（2026-11-17）
+## main 固定整合与完整装配复验（2026-11-17）
 
-本片按负责人本轮目标处理此前已完成原任务的 main 整合。固定 main 为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，AI 来源为 `38255c70a07f7752957128b57a8b0ffc173e6a07`，共同前置为 `86d05a78733ce82336ec2138c1a919eabecd1540`。23份冲突沿原固定预检逐项处理，最终产品候选树为 `83e943bde07af41985646d2f579a3dc7c9481258`。本节记录候选与验证，实际 main 提交和 GitHub 回读继续按执行结果登记。[原固定预检](#ain-main-fixed-merge-precheck-20261117)
+本片按负责人本轮目标处理此前已完成原任务的 main 整合。固定 main 为 `62ca183f10b7c316ab63c28ef6d04ee88d06488b`，AI 来源为 `38255c70a07f7752957128b57a8b0ffc173e6a07`，共同前置为 `86d05a78733ce82336ec2138c1a919eabecd1540`。23份冲突沿原固定预检逐项处理，最终产品候选树为 `83e943bde07af41985646d2f579a3dc7c9481258`。本片已完成 main 固定整合和普通推送，实际提交、索引及远端回读见下文。[原固定预检](#ain-main-fixed-merge-precheck-20261117)
 
 ### 合并边界与实际修复
 
@@ -45,7 +45,28 @@ main 有65份已跟踪未提交文件及31项未跟踪入口。本片涉及13个
 | AiOperatorPage.tsx | `ae6dda9db48e637083bc78c03a49cb4b3c4100136ff383605459e47aec89c09d` |
 | ai-operator/README.md | `f95116d9ee786272bd9b0e65077e65acfdd7f5b3683a99f7a98340dec3498da6` |
 
-主线写入前后核固定HEAD、索引、merge／cherry-pick状态及全部受影响字节，按三方差异整合其余WIP。AIN-15的第5条最终订单等价由dev1继续补必要模拟，AIN-26～28全文由dev2继续核定，任务分数沿原门槛汇总。
+### 实际 main 落入与 GitHub 同步
+
+main 产品提交为 `01bcfda15cb26c10899761906ac8648c03357f02`，双亲为原 main `62ca183f10b7c316ab63c28ef6d04ee88d06488b` 和 AI 文档准备提交 `dd9167498ed4256897afab50fefe5554c6f8fde9`。实际提交树为 `d842d4ae090f1210a6330cf4dd81796f7850ffa2`，与上述已验证产品树仅有本记录和协作接续两册的差异，产品字节全部复用原验证。
+
+本树任务临时索引沿 `git read-tree --index-output=<任务目录>/index <固定树>` 创建，通过临时索引的 `git write-tree` 核对目标树，再以双亲 `git commit-tree` 固化固定成果。main 引用以旧 HEAD 为前置通过 `git update-ref` 更新，原索引用独占锁原子替换。主线当前索引有21828份普通H入口，HEAD和索引树均回读为上述实际树，暂存差异为空。
+
+写入前核定65份已跟踪差异、31项未跟踪入口，后者展开为63个文件。本片392份A/M入口中386份需要原子写入，6份已有同字节内容直接复用。13个重叠路径按原差异处理，两份旧AI界面原稿继续由本地Git引用保全，其他重叠内容沿三方差异及Coffee引用保留。写入完成、更新main引用之前，392份目标字节与115份非重叠既有WIP的SHA-256比较全部通过。
+
+刷新索引后的main工作区保留65份已跟踪差异和61份未跟踪文件，其中企业历史目录的四份 .gitattributes／manifest 差异于刷新后检出，均位于本片写入列表之外，按原稿留存。既有WIP与AI固定提交分层保留。两份同字节panel图标随固定成果纳入Git。
+
+| 实际操作 | 命令与结果 |
+| --- | --- |
+| 固定提交核对 | `git rev-parse HEAD`、`git rev-parse HEAD^{tree}`、`git write-tree`及双亲读取均退出0，HEAD为01bcfda15，树为d842d4ae；暂存区为空。 |
+| 本片空白检查 | `git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol diff --check 62ca183f 01bcfda15`，退出0。 |
+| 文档同步核对 | `node scripts/validate-docs.cjs`，退出1，11/11入口与任务算术核对，仍为导航历史三处及稀疏示例一处既有缺链。新增main阶段锚点和接续引用已定向核对；本片Git空白检查退出0。 |
+| 普通主线推送 | `git -C <main> push origin main`，退出0。 |
+| GitHub实际回读 | `git ls-remote --heads origin refs/heads/main`，退出0，实际为01bcfda15cb26c10899761906ac8648c03357f02。 |
+| 原稿引用 | `git cat-file blob refs/codex/ai-native/main-wip-preservation-20261117`的SHA-256仍为af5fc3f0e6486f971fb7118d89aafd2e5ae0dc819d05048bc5997da16cb67c38。 |
+
+只读准备和落入后的核查各发生一次30秒工具超时，REPL均重置。第一次超时后HEAD、索引及任务目录核对保持原现场，改为一次批量读取Git对象继续准备。第二次发生在main产品提交落入后的只读核查，后续HEAD、索引、空白检查及远端均已重新读取通过。落入操作5.342秒成功退出，回退错误为0。任务临时目录 `output/.tmp/ain-fixed-main-20261117` 与本片索引锁均已删除，最终复核无新增任务临时入口。
+
+AIN-15的第5条最终订单等价由dev1按已合入的01bcfda15产品补必要模拟，AIN-26～28全文由dev2继续核定。旧38255c70a及历史证据分别标明实际运行版本，合并后受影响的Core报价／原批准消费／持久化证据继续按原任务补齐，任务分数沿原门槛汇总。
 
 <a id="ain15-client-result-visible-delivery-20261117"></a>
 ## AIN-15 客户原结果的可见交付与原键恢复（2026-11-17）
