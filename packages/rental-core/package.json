@@ -814,6 +814,54 @@
     "./http-context": {
       "types": "./dist/http-context.d.ts",
       "default": "./dist/http-context.js"
+    },
+    "./http-enterprise-applications": {
+      "types": "./dist/http-enterprise-applications.d.ts",
+      "default": "./dist/http-enterprise-applications.js"
+    },
+    "./http-enterprise-request.dto": {
+      "types": "./dist/http-enterprise-request.dto.d.ts",
+      "default": "./dist/http-enterprise-request.dto.js"
+    },
+    "./http-enterprise-order-query.dto": {
+      "types": "./dist/http-enterprise-order-query.dto.d.ts",
+      "default": "./dist/http-enterprise-order-query.dto.js"
+    },
+    "./http-enterprise-order-delegation.dto": {
+      "types": "./dist/http-enterprise-order-delegation.dto.d.ts",
+      "default": "./dist/http-enterprise-order-delegation.dto.js"
+    },
+    "./http-enterprise-exchange-request.dto": {
+      "types": "./dist/http-enterprise-exchange-request.dto.d.ts",
+      "default": "./dist/http-enterprise-exchange-request.dto.js"
+    },
+    "./http-enterprise-extension-request.dto": {
+      "types": "./dist/http-enterprise-extension-request.dto.d.ts",
+      "default": "./dist/http-enterprise-extension-request.dto.js"
+    },
+    "./http-enterprise-transfer-decision.dto": {
+      "types": "./dist/http-enterprise-transfer-decision.dto.d.ts",
+      "default": "./dist/http-enterprise-transfer-decision.dto.js"
+    },
+    "./http-client-request.dto": {
+      "types": "./dist/http-client-request.dto.d.ts",
+      "default": "./dist/http-client-request.dto.js"
+    },
+    "./http-enterprise-read": {
+      "types": "./dist/http-enterprise-read.controller.d.ts",
+      "default": "./dist/http-enterprise-read.controller.js"
+    },
+    "./http-enterprise-merchant": {
+      "types": "./dist/http-enterprise-merchant.controller.d.ts",
+      "default": "./dist/http-enterprise-merchant.controller.js"
+    },
+    "./http-enterprise-handoff-merchant": {
+      "types": "./dist/http-enterprise-handoff-merchant.controller.d.ts",
+      "default": "./dist/http-enterprise-handoff-merchant.controller.js"
+    },
+    "./http-enterprise-workflows": {
+      "types": "./dist/http-enterprise-workflows.controller.d.ts",
+      "default": "./dist/http-enterprise-workflows.controller.js"
     }
   },
   "typesVersions": {
@@ -1420,6 +1468,42 @@
       ],
       "http-context": [
         "dist/http-context.d.ts"
+      ],
+      "http-enterprise-applications": [
+        "dist/http-enterprise-applications.d.ts"
+      ],
+      "http-enterprise-request.dto": [
+        "dist/http-enterprise-request.dto.d.ts"
+      ],
+      "http-enterprise-order-query.dto": [
+        "dist/http-enterprise-order-query.dto.d.ts"
+      ],
+      "http-enterprise-order-delegation.dto": [
+        "dist/http-enterprise-order-delegation.dto.d.ts"
+      ],
+      "http-enterprise-exchange-request.dto": [
+        "dist/http-enterprise-exchange-request.dto.d.ts"
+      ],
+      "http-enterprise-extension-request.dto": [
+        "dist/http-enterprise-extension-request.dto.d.ts"
+      ],
+      "http-enterprise-transfer-decision.dto": [
+        "dist/http-enterprise-transfer-decision.dto.d.ts"
+      ],
+      "http-client-request.dto": [
+        "dist/http-client-request.dto.d.ts"
+      ],
+      "http-enterprise-read": [
+        "dist/http-enterprise-read.controller.d.ts"
+      ],
+      "http-enterprise-merchant": [
+        "dist/http-enterprise-merchant.controller.d.ts"
+      ],
+      "http-enterprise-handoff-merchant": [
+        "dist/http-enterprise-handoff-merchant.controller.d.ts"
+      ],
+      "http-enterprise-workflows": [
+        "dist/http-enterprise-workflows.controller.d.ts"
       ]
     }
   },
