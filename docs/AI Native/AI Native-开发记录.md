@@ -6,6 +6,23 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-client-result-visible-delivery-20261117"></a>
+## AIN-15 客户原结果的可见交付与原键恢复（2026-11-17）
+
+固定前置为f2701a753d0ce7e7a479889ca412f33c98c119ce。Root继续核原客户结果消费时确认，Web的原D读取在observe内可先清理定位并跳转，再进入撤销调用方的可见检查。当前[原预约页](../../apps/tenant-website/src/components/RemoteBooking.tsx)的订单回调直接导航，因此结果交付自身需要在原await返回后核当前可见状态。
+
+[原Web提交锁](../../apps/tenant-website/src/components/useEnterpriseOrderSubmission.ts)的原撤销收据、D收据和普通订单收据返回后，现在先核当前主体和可见状态，再比较原定位及交付结果。普通提交应答、明确恢复启动及委托应答也沿原可见检查。页面隐藏时原键和索引保留，回到可见页面后显式读取原收据，原提交总数保持一次。
+
+| 验证 | 原命令字节与实际结果 |
+| --- | --- |
+| 固定旧源码反例 | stdin SHA-256为26c3b4ad005c72de8381c9bb4cfba86c22b4e894ae34ebb84876caeb80dc374a，退出1。仅从固定f270读取该hook的Git字节，blob为128808536864ff13929dd2609e13e8a8f99ffb62。隐藏期间原D终态返回后，旧源码的pending=null、orders=1、indexExists=false，保留定位断言失败。 |
+| 原结果交付与恢复 | stdin SHA-256为66ebecee48be774ea8728c24313492c185d151af7104ec27fe51bf4ee36e2e33，退出0。原D／hash／撤销派发边界三组仍通过。补核隐藏时撤销读取D终态、D恢复终态、普通提交应答、普通订单恢复及原撤销收据五组。隐藏时原键／索引保留、订单导航为0、后继读取和新提交被阻止，可见后原键读取与合法交付通过。 |
+| 最终Web类型 | stdin SHA-256为469912505c3d23f0154cf77188e15e5a026b37a46b831ef8c0fbbe178db4237c，退出0。TypeScript5.9.3，4根／296源零诊断。 |
+
+测试沿[原消费者夹具](../../tests/enterprise-consumers.test.cjs)，完整stdin及原失败／成功回执留本对话。Node入口、不可达DATABASE_URL、原preload、本树写根及内存审计沿[前置恢复阶段](#ain15-client-delegation-recovery-guard-20261117)。本片行为审计为空，验证进程已退出，任务临时目录与磁盘测试产物新增为0。
+
+本片唯一源码的Git blob为f7701019e697f71dad6c4331200d4952ff2c4f7b，工作树SHA-256为aa91cdd1f43b7ec94ec9da1c47acd84810924230d61e1324d23cb58b114217ab。小程序前置e1b7c4f19bffba0183f8b1365cf66d5c55af8ed4的两个原P2已由dev1复验退出0。dev2已按上述Web源码字节独立复验隐藏期间原指针／D索引保留、订单导航为0，以及重新可见后明确读取原D、原订单交付1次、撤销与hash增量为0；实际回合01a1e8c3-6e47-7fd0-9bcf-3b9ea2f01b6b的工具执行及结论已由Root回读。该结论覆盖本片结果可见交付，原15／26全文收口继续按最终候选核对。
+
 <a id="ain15-client-delegation-recovery-guard-20261117"></a>
 ## AIN-15 客户原委托定位、索引与隐藏撤销修复（2026-11-17）
 

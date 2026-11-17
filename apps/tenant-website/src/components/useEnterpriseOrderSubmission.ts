@@ -103,35 +103,35 @@ export function useEnterpriseOrderSubmission(onOrder: (id: string) => void) {
   const observe = async (original: Original) => {
     if (original.kind === 'delegation') {
       if (original.revocationKey) {
-        const receipt = await sessionApi.enterpriseOperation(original.revocationKey); assertOriginal(original);
+        const receipt = await sessionApi.enterpriseOperation(original.revocationKey); current(true); assertOriginal(original);
         if (receipt.state !== 'committed' || receipt.result?.delegationKey !== original.key
           || !['revoked', 'consumed'].includes(receipt.result.state as string)) throw new Error('原委托撤销结果待核对，不能重新派发');
       }
-      const result = await sessionApi.enterpriseOrderDelegation(original.key); assertOriginal(original);
+      const result = await sessionApi.enterpriseOrderDelegation(original.key); current(true); assertOriginal(original);
       if (!enterpriseOrderDelegationMatches(result, { ...original, delegationKey: original.key, personalCustomerId: host!.customerId })) throw new Error('原委托结果尚未精确核对，保留原编号');
       currentDelegation.current = result; setDelegation(result);
       if (result.state === 'consumed' && result.original.state === 'consumed') { clear(original); onOrder(result.original.orderId); }
       else if (result.state === 'revoked') clear(original);
       return result;
     }
-    const result = await sessionApi.enterpriseOrderOriginal(original.quoteId, original.key); current();
+    const result = await sessionApi.enterpriseOrderOriginal(original.quoteId, original.key); current(true);
     if (result.state !== 'observed' || !result.orderId) throw new Error('原提交结果尚未证实；没有订单不代表可以重发');
     clear(original); onOrder(result.orderId);
   };
   const recover = async () => {
-    current(); if (busy.current || !ready) return; busy.current = true; render(n => n + 1);
+    current(true); if (busy.current || !ready) return; busy.current = true; render(n => n + 1);
     try { const original = read(); if (original) await observe(original); setError(''); }
     catch (e) { if (mounted.current && latest.current === identity && host?.current()) setError(e instanceof Error ? e.message : '原结果待核对'); }
     finally { busy.current = false; if (mounted.current && latest.current === identity && host?.current()) render(n => n + 1); }
   };
   const submit = async (quoteId: string) => {
-    current(); if (!ready || busy.current || read()) throw new Error('须先核对原企业提交，不能重新派发');
+    current(true); if (!ready || busy.current || read()) throw new Error('须先核对原企业提交，不能重新派发');
     if (currentDelegation.current?.quoteId === quoteId && currentDelegation.current.state === 'revoked') throw new Error('原委托已撤销，请重新获取报价及适用批准');
     busy.current = true; render(n => n + 1); setError('');
     try {
       const original: Original = { quoteId, key: crypto.randomUUID() };
-      remember(original); current();
-      await sessionApi.createOrder({ quoteId }, original.key); current();
+      remember(original); current(true);
+      await sessionApi.createOrder({ quoteId }, original.key); current(true);
       // Even a successful HTTP response is checked through the original Core receipt.
       await observe(original);
     } catch (e) { if (mounted.current && latest.current === identity && host?.current()) setError(e instanceof Error ? e.message : '原企业结果待核对'); throw e; }
@@ -156,7 +156,7 @@ export function useEnterpriseOrderSubmission(onOrder: (id: string) => void) {
       remember(original); current(); assertView();
       await sessionApi.issueEnterpriseOrderDelegation({ operationKey: key, requestReference: original.requestReference,
         expectedRevision: original.expectedRevision, reason: '本人确认商户代办本次原企业身份预约', confirm: true });
-      current(); await observe(original);
+      current(true); await observe(original);
     } catch (e) { if (mounted.current && latest.current === identity && host?.current()) setError(e instanceof Error ? e.message : '原委托结果待核对'); throw e; }
     finally { busy.current = false; if (mounted.current && latest.current === identity && host?.current()) render(n => n + 1); }
   };
