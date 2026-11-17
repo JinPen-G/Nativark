@@ -1,6 +1,6 @@
 /** 公共第三方配置、配置CAS、测试占用与只读观察。供应商凭据只在服务端使用，业务结算和原事实由宿主参加者裁定。 */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Optional, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { sqltag, join, empty, objectEnumValues } from "@prisma/client/runtime/library";
+import { sqltag, join, empty } from "@prisma/client/runtime/library";
 import { isDeepStrictEqual } from "node:util";
 import {
   findTenantIntegrationProvider,
@@ -21,10 +21,10 @@ import { hasEffectivePermission } from "../../common/permission-match";
 import { SecretBox } from "../../common/secret-box";
 import { INTEGRATION_DATA_STORE, INTEGRATION_BUSINESS_PARTICIPANT, INTEGRATION_RUNTIME_PROVIDERS, PUBLIC_INTEGRATION_RUNTIME_PROVIDERS,
   type StoredTenantIntegration, type TenantIntegrationDataStore, type TenantIntegrationTransaction,
-  type TenantIntegrationBusinessParticipant, type TenantIntegrationWhere, type IntegrationRuntimeProviders } from "./integration-store";
+  type TenantIntegrationBusinessParticipant, type IntegrationTestUpdate, type IntegrationRuntimeProviders } from "./integration-store";
 import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
 
-const Prisma = { sql: sqltag, join, empty, JsonNull: objectEnumValues.instances.JsonNull,
+const Prisma = { sql: sqltag, join, empty,
   TransactionIsolationLevel: { ReadCommitted: "ReadCommitted" } } as const;
 type IntegrationRow = StoredTenantIntegration;
 
@@ -651,14 +651,14 @@ export class TenantIntegrationService {
     await this.requireBusinessParticipant().assertProviderIdentityChange(tx, row.tenantId, capability, provider);
   }
 
-  private testRevisionWhere(revision: TenantIntegrationTestRevision): TenantIntegrationWhere {
+  private testRevisionWhere(revision: TenantIntegrationTestRevision): Pick<IntegrationTestUpdate["where"], keyof TenantIntegrationTestRevision> {
     if (!revision || !(revision.updatedAt instanceof Date) || !Number.isFinite(revision.updatedAt.getTime())
       || typeof revision.enabled !== 'boolean' || typeof revision.isDefault !== 'boolean') {
       throw new ConflictException("连接测试缺少原配置版本");
     }
     return { updatedAt: revision.updatedAt, enabled: revision.enabled, isDefault: revision.isDefault,
-      settings: { equals: revision.settings ?? Prisma.JsonNull }, credentialsEncrypted: revision.credentialsEncrypted,
-      secretFields: { equals: revision.secretFields ?? Prisma.JsonNull } };
+      settings: { equals: revision.settings ?? null }, credentialsEncrypted: revision.credentialsEncrypted,
+      secretFields: { equals: revision.secretFields ?? null } };
   }
 
   async recordTestResult(input: {
@@ -671,7 +671,7 @@ export class TenantIntegrationService {
     error?: string;
     startedAt?: Date;
   }) {
-    const result = await this.prisma.tenantIntegrationConfig.updateMany({
+    const result = await this.prisma.updateTestConfiguration({
       where: {
         id: input.configId,
         tenantId: input.tenantId,
@@ -696,7 +696,7 @@ export class TenantIntegrationService {
   async claimLiveTest(input: { tenantId: string; configId: string; startedAt: Date; cooldownMs: number;
     revision: TenantIntegrationTestRevision }) {
     const cutoff = new Date(input.startedAt.getTime() - input.cooldownMs);
-    const result = await this.prisma.tenantIntegrationConfig.updateMany({
+    const result = await this.prisma.updateTestConfiguration({
       where: {
         id: input.configId,
         tenantId: input.tenantId,

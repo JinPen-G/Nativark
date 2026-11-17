@@ -29,6 +29,8 @@
 
 测试区分 `configuration` 和 `live`。占用、探针和结果均关联原配置内容与修订，迟到结果继续拒绝。短信探针查询模板，存储探针 HEAD 随机对象，支付探针由原宿主读取供应商接口。新业务默认要求当前配置通过 live 测试，原事实恢复可沿原调用使用 `requireLiveTest: false`，并保留业务权限和配置关联。
 
+测试账通过窄存储的 `updateTestConfiguration` 核对租户、配置 ID、修订时间、启用与默认标志、设置、凭据密文和秘密字段。`integrationTestWhere` 将 JSON `null` 映射为当前宿主生成客户端的 `Prisma.JsonNull`，其余条件按原值传递。[公共数据库](../../../../../apps/platform-api/src/database.ts)与[Rental 兼容入口](../../../../../apps/api/src/modules/integrations/tenant-integration.service.ts)分别使用自身客户端，空对象与空数组仍按原值比较。
+
 凭据使用原 `INTEGRATION_ENCRYPTION_KEY`、密钥 ID／历史环及稳定指纹设置。公共宿主只消费进程配置，密钥由部署人员维护。历史信封、存储前缀和 nonce 前缀沿原格式。
 
 ## 验证入口

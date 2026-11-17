@@ -2,7 +2,6 @@
 import type { TenantIntegrationCapability, TenantIntegrationProvider } from "@rental-os/platform-contracts/tenant-integrations";
 import type { PlatformJsonValue } from "../platform/platform-auth-data-store";
 import type { SubscriptionSqlQuery } from "../subscription/subscription-store";
-import type { objectEnumValues } from "@prisma/client/runtime/library";
 
 export interface StoredTenantIntegration {
   id: string;
@@ -23,7 +22,6 @@ export interface StoredTenantIntegration {
   updatedAt: Date;
 }
 
-type JsonFilter = { equals: Exclude<PlatformJsonValue, null> | typeof objectEnumValues.instances.JsonNull };
 export interface TenantIntegrationWhere {
   id?: string | { not: string };
   tenantId?: string;
@@ -32,9 +30,7 @@ export interface TenantIntegrationWhere {
   enabled?: boolean;
   isDefault?: boolean;
   updatedAt?: Date;
-  settings?: JsonFilter;
   credentialsEncrypted?: string | null;
-  secretFields?: JsonFilter;
   lastTestStatus?: string;
   lastTestMode?: string;
   lastTestAt?: Date | null | { lt: Date };
@@ -61,6 +57,30 @@ type IntegrationWrite = {
   updatedAt?: Date;
 };
 
+/** 测试账必须匹配原配置的全部CAS字段。JSON null由生成客户端所属宿主映射，不能携带其他schema的空值类型。 */
+export interface IntegrationTestUpdate {
+  where: TenantIntegrationWhere & {
+    id: string;
+    tenantId: string;
+    updatedAt: Date;
+    enabled: boolean;
+    isDefault: boolean;
+    settings: { equals: PlatformJsonValue };
+    credentialsEncrypted: string | null;
+    secretFields: { equals: PlatformJsonValue };
+  };
+  data: Pick<IntegrationWrite, "updatedAt" | "lastTestStatus" | "lastTestMode" | "lastTestAt" | "lastTestError">;
+}
+
+/** 原JSON等值条件逐字段保留，只把JSON null映射为调用方客户端的空值单例。 */
+export function integrationTestWhere<JsonNull extends object>(where: IntegrationTestUpdate["where"], jsonNull: JsonNull) {
+  return {
+    ...where,
+    settings: { equals: where.settings.equals ?? jsonNull },
+    secretFields: { equals: where.secretFields.equals ?? jsonNull }
+  };
+}
+
 export interface TenantIntegrationTransaction {
   tenantIntegrationConfig: {
     findUnique(query: { where: IntegrationUnique }): PromiseLike<StoredTenantIntegration | null>;
@@ -82,6 +102,7 @@ export interface TenantIntegrationDataStore extends Omit<TenantIntegrationTransa
     create(query: { data: { tenantId: string; provider: string; capability: string; operation: string; status: string;
       requestJson: Exclude<PlatformJsonValue, null>; responseJson?: Exclude<PlatformJsonValue, null>; errorMessage?: string } }): PromiseLike<unknown>;
   };
+  updateTestConfiguration(input: IntegrationTestUpdate): PromiseLike<{ count: number }>;
   $transaction<T>(work: (transaction: TenantIntegrationTransaction) => Promise<T>,
     options?: { isolationLevel: "ReadCommitted" }): Promise<T>;
 }

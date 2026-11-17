@@ -15,15 +15,19 @@ assert.throws(() => outbound.parseOutboundUrl("https://custom.example/gateway", 
 assert.doesNotThrow(() => outbound.parseOutboundUrl("https://openapi.alipay.com/gateway.do", "支付宝网关", { productionHosts: ["openapi.alipay.com"] }));
 
 const paymentSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "payment.runtime.service.ts"), "utf8");
-const fileSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "file-storage.runtime.service.ts"), "utf8");
-const smsSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "tenant-integration.runtime.service.ts"), "utf8");
+const fileSource = [
+  fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "file-storage.runtime.service.ts"), "utf8"),
+  fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "object-storage.provider.service.ts"), "utf8")
+].join("\n");
+const smsSource = fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "tenant-integration.runtime.service.ts"), "utf8");
 const notificationSource = fs.readFileSync(path.join(repo, "packages", "rental-core", "src", "mysql-business-runtime.ts"), "utf8");
 const notificationFactSource = fs.readFileSync(path.join(repo, "packages", "rental-core", "src", "mysql-business-facts.ts"), "utf8");
 const notificationSchema = fs.readFileSync(path.join(repo, "apps", "api", "prisma", "schema.prisma"), "utf8");
 const authSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "client", "client-auth.service.ts"), "utf8");
 const guardSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "common", "api-auth.guard.ts"), "utf8");
+const filePermissionSource = guardSource.match(/if \(path\.startsWith\("\/files"\)\) \{[\s\S]*?\n  \}/u)?.[0] ?? "";
 const openapiSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "contracts", "openapi-document.ts"), "utf8");
-const integrationSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
+const integrationSource = fs.readFileSync(path.join(repo, "packages", "platform-server", "src", "modules", "integrations", "tenant-integration.service.ts"), "utf8");
 const integrationsServiceSource = fs.readFileSync(path.join(repo, "apps", "api", "src", "modules", "integrations", "integrations.service.ts"), "utf8");
 
 assert.match(paymentSource, /decrypted\.mchid/);
@@ -32,7 +36,7 @@ assert.match(paymentSource, /provider_eventId/);
 assert.match(paymentSource, /FOR UPDATE/);
 assert.match(paymentSource, /TransactionIsolationLevel\.Serializable/);
 assert.match(paymentSource, /redirect: "error"/);
-assert.match(paymentSource, /status: \{ in: \["pending", "verified_pending_funding"\] \}/);
+assert.match(paymentSource, /status: \{ in: \["pending", "verified_pending_funding", "funding_failed"\] \}/);
 assert.match(paymentSource, /微信支付回调格式无效/);
 assert.match(paymentSource, /rental_orders[\s\S]{0,260}FOR UPDATE/);
 assert.match(paymentSource, /相同退款幂等键已用于不同金额或原因/);
@@ -78,8 +82,10 @@ assert.match(authSource, /FOR UPDATE/);
 assert.match(guardSource, /path\.startsWith\("\/platform\/integrations"\)/);
 assert.match(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}return \["system:integration:manage"\]/u);
 assert.doesNotMatch(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}system:params:manage/u);
-assert.match(guardSource, /path\.startsWith\("\/files"\)[\s\S]{0,220}return \["system:integration:manage"\]/u);
-assert.doesNotMatch(guardSource, /path\.startsWith\("\/files"\)[\s\S]{0,220}system:params:manage/u);
+assert.match(filePermissionSource, /return \["system:integration:manage"\];\s*\}$/u);
+assert.doesNotMatch(filePermissionSource, /system:params:manage/u);
+assert.match(filePermissionSource, /carrier-evidence[\s\S]*return method === "GET" \? \["rental-os:order:view"\] : \["rental-os:order:operate"\]/u);
+assert.match(filePermissionSource, /customer-identity[\s\S]*"rental-os:customer:reveal-sensitive"[\s\S]*"rental-os:member:manage"/u);
 assert.match(openapiSource, /notification-templates[\s\S]{0,220}system:integration:manage/u);
 assert.doesNotMatch(openapiSource, /notification-templates[\s\S]{0,220}system:params:manage/u);
 assert.match(openapiSource, /backlogOperation\("get", "\/api\/files"[\s\S]{0,150}system:integration:manage/u);
@@ -93,7 +99,7 @@ assert.match(integrationSource, /requireLiveTest !== false/u);
 assert.match(fileSource, /requireLiveTest: false/u);
 assert.match(paymentSource, /requireLiveTest: false/u);
 assert.match(paymentSource, /runtimeConfig\("payment", tenantId, input\.method, \{ requireDefault: true \}\)/u);
-assert.match(paymentSource, /assertEnabledInTransaction\(tx, tenantId, "payment", config\.provider, \{ requireDefault: true \}\)/u);
+assert.match(paymentSource, /assertEnabledInTransaction\(tx, tenantId, "payment", config\.provider, \{ requireDefault: true, configRevision: config\.revision \}\)/u);
 assert.match(smsSource, /requireLiveTest: false/u);
 assert.match(smsSource, /hasEnabledProvider/u);
 assert.match(notificationSource, /生产环境尚未配置默认短信平台/u);

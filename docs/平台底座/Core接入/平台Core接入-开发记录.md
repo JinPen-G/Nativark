@@ -11,6 +11,25 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-public-integration-json-20261118"></a>
+
+## 公共集成测试账与宿主JSON空值适配（2026-11-18）
+
+固定父版e1104f4b4f5677bfac8fd1370b53c4c58db6c612已普通推送并实际远端回读。dev1在共享树完成并停写八文件JSON修复组，RD逐项核对源码差异后统一固化；公共集成页面和官方日历在各自文件继续施工，本片不夹带其未完内容。原文及旧接续由固定父版保全，不新增副本。
+
+[公共集成存储](../../../packages/platform-server/src/modules/integrations/integration-store.ts)以updateTestConfiguration表达原连接测试账CAS，[公共应用](../../../packages/platform-server/src/modules/integrations/tenant-integration.service.ts)保留租户、配置ID、修订时间、启用/默认、设置、凭据密文、秘密字段及原测试占用条件。[原组合适配](../../../apps/api/src/modules/integrations/tenant-integration.service.ts)和[公共数据库](../../../apps/platform-api/src/database.ts)分别用本宿主生成客户端的JsonNull映射逻辑JSON null；空对象/空数组仍按原值比较。其余存储方法和调用方事务由同一Prisma实例供给，公共服务不再携带另一生成客户端的空值单例类型。
+
+修改范围为上述四份源码、两份集成模块README及原[安全检查](../../../tests/integrations-security.test.cjs)/[连接与修订](../../../tests/tenant-integration-connectivity.test.cjs)。原安全断言改为读取实际迁入实现，支付/文件的断言补齐固定主线已存在的funding_failed、配置修订与专用文件权限分支；原有效断言保留，未删除或skip/todo变绿。连接夹具核原JsonNull比较，并补null与空对象/空数组不同的最小反例，没有新增脚本。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 作者固定冒烟 | dev1确认原安全、内存租户隔离、连接与修订、默认选择/历史依赖四份入口均退出0，八文件已停写；完整命令和初次失败待其当前阶段报告补齐，RD未把源码核对称作独立审查 |
+| 同版本类型 | RD的[主/业务HTTP十配置类型](#core-rental-main-http-20261118)已使用本组稳定实现，均0诊断；公共日历合同三配置检查再次消费同一JSON存储，公共服务68根/884源/136输出、Rental235根/984源/470输出均0诊断，产物留内存 |
+| 源码与退出 | RD逐项核八文件差异并保存内存SHA-256核对集合，提交前确认未变；模块导读同步原CAS和两宿主映射。具体链接/格式及上传结果由包含本节的固定提交定位 |
+| 未验 | SQL/事务/配置/探针为明确fixture，未运行真实供应商、HTTP、数据库并发或公共迁移；公共集成页面及完整宿主接线沿后续阶段核收 |
+
+本片移除已定位的生成客户端耦合，不放宽停用、凭据修改、历史依赖或当前授权。剩余公共页面/日历/组织/安全、Rental标准装配、真实无Core运行及独立安装/升级/接手仍未完成，原PCH本片未跨下一档。没有新增临时环境或业务服务；旧清理、外观失败及历史缺链沿现行接续承接。索引和中文提交/普通推送由RD执行，随后读取真实任务远端。
+
 <a id="core-rental-main-http-20261118"></a>
 
 ## Rental核心履约与业务HTTP单源接入（2026-11-18）
