@@ -798,6 +798,22 @@
     "./http-workspace-capability.dto": {
       "types": "./dist/http-workspace-capability.dto.d.ts",
       "default": "./dist/http-workspace-capability.dto.js"
+    },
+    "./http-core": {
+      "types": "./dist/http-core.controller.d.ts",
+      "default": "./dist/http-core.controller.js"
+    },
+    "./http-business": {
+      "types": "./dist/http-business.controller.d.ts",
+      "default": "./dist/http-business.controller.js"
+    },
+    "./http-applications": {
+      "types": "./dist/http-applications.d.ts",
+      "default": "./dist/http-applications.js"
+    },
+    "./http-context": {
+      "types": "./dist/http-context.d.ts",
+      "default": "./dist/http-context.js"
     }
   },
   "typesVersions": {
@@ -1392,6 +1408,18 @@
       ],
       "http-workspace-capability.dto": [
         "dist/http-workspace-capability.dto.d.ts"
+      ],
+      "http-core": [
+        "dist/http-core.controller.d.ts"
+      ],
+      "http-business": [
+        "dist/http-business.controller.d.ts"
+      ],
+      "http-applications": [
+        "dist/http-applications.d.ts"
+      ],
+      "http-context": [
+        "dist/http-context.d.ts"
       ]
     }
   },
@@ -1411,7 +1439,8 @@
     "@rental-os/platform-server": "0.1.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
-    "@nestjs/core": "^10.4.15"
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15"
   },
   "peerDependenciesMeta": {
     "@nestjs/common": {
@@ -1430,6 +1459,9 @@
       "optional": true
     },
     "@nestjs/core": {
+      "optional": true
+    },
+    "@nestjs/platform-express": {
       "optional": true
     }
   }

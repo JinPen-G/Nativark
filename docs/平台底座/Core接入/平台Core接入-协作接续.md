@@ -20,7 +20,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 负责人已将 `[Saas 底座]-dev1` 迁入共享施工。原订阅ee3295及基础集成未完检查点719cb92e919b140027cc56e10434e9ec77db5a09均已保全并迁入；旧树目录及Git登记已移除，源分支留存。dev1持续完成公共订阅/基础集成API/UI/数据和模块导读，随后补公共组织/其余安全；RD继续Rental并统一索引、提交/推送及PCH四册。共同文件先约具体窗口，双方直接处理真实冲突。attach_worktree因归属校验未完成UI关联，但共享目录/分支已通过显式workdir核实；今后所有命令固定到本节唯一施工路径。[迁入与共享证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118)
 
-空间能力和员工收款HTTP已单源迁入Rental包，原8条路径/10个方法正文、DTO和旧类对象保持，AppModule通过正式令牌供给原同一实例。十配置类型及原空间能力用例通过，下一入口为主/业务Controller及客户端。原API检查现沿正式转接发现实际源码，整体API合同检查仍有614项未配对/未识别路径，后续接口规范化须处理，不能只以本片8条覆盖判断API齐全。完整类型依赖dev1当前稳定的JSON存储修复组，该组由其交付后统一提交。[HTTP阶段与失败边界](平台Core接入-开发记录.md#core-rental-http-entry-20261118)
+主/业务、空间能力和员工收款HTTP已单源迁入Rental包，原API只再导出同一Controller。主/业务原214方法中212正文一致、2处context改用同一快照/刷新接点，原装饰器、17项/6项构造依赖、默认键及原事务保持；统一接线复用原实例，可选检查事件只投影方法，避免重复生命周期。十配置类型和一次实际Nest冒烟通过，下一入口为其余企业/客户Controller及客户端。整体API合同检查仍有614项未配对/未识别路径，接口规范化须处理；元数据/类型不证明API齐全。完整类型依赖dev1已稳定的JSON存储修复组，待其交明确文件组后统一提交。[主/业务HTTP](平台Core接入-开发记录.md#core-rental-main-http-20261118) · [原HTTP检查失败](平台Core接入-开发记录.md#core-rental-http-entry-20261118)
 
 ## 2. 已有实际接点
 
@@ -38,7 +38,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 ## 3. 下一实施入口与未完项
 
 1. 继续完成Rental独立包。核心/报价营销、配置与业务请求DTO、订单确认/批准/商户委托、配货/办理锁/自动扫描、工作台/经营报表/到期作业、具体检查同意/批准执行、规则/日历绑定草稿、批准设置、品类草稿/发布/开通政策、采用准备/最终提交及经营空间边界已单源迁入；事实/配置/恢复/收据、资金/容量/企业核销及原冻结规则也有正式出口。企业政策、邀请/成员及管理员交接、申请/管理请求/任务中心、行政交接及成员审计已完成单源迁移，费用批准/委托已完成单源迁移，下一步迁入Controller和客户端，再形成标准Core装配、schema/迁移/Seed、页面/客户端、其余作业/回调及AI接点。客户主档/会员唯一写入、企业政策与资格由Rental包提供，会员业务服务、文件与原Auth仍由宿主供给实际参加者，不能以空适配替代；保留原权限码、标识、金额、锁、事务、幂等和历史依据，事件/作业只有一个执行者。[完整兼容清单](平台Core接入-开发记录.md#core-ownership-baseline-20261114) · [原主核心](平台Core接入-开发记录.md#core-rental-core-facts-20261116) · [确认/委托](平台Core接入-开发记录.md#core-rental-order-confirmation-20261116) · [配货/扫描](平台Core接入-开发记录.md#core-rental-allocation-runtime-20261116)
-2. 公共组织、安全、完整订阅办理和基础集成尚未全部独立；订阅办理/API/UI已迁入，基础集成服务/合同/schema已保全为未完检查点；dev1在共享树继续补实际API/UI、示范宿主和数据所有权，公共组织/其余安全随后继续。不能将已有认证、基本资料或期限reader当作完整公共能力。原有效会话的wid必须作为签名证据核验，不在公共业务workspace恢复Rental权限；原简称省略/null/空字符串及审计兼容保持。[公共兼容基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115) · [原身份SQL](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115) · [公共认证](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)
+2. 公共组织、安全、完整订阅办理和基础集成尚未全部独立；订阅办理/API/UI已迁入，基础集成服务/合同/schema已保全为未完检查点。dev1的JSON存储修复和公共集成页已完成定向类型，正在形成可提交文件组；其随后抽取公共官方日历服务/HTTP/数据，RD负责公共日历合同及旧Rental/shared兼容出口，再由dev1继续组织/其余安全。公共页面、示范宿主和数据必须实际接线，不能把类型或期限reader当作完整公共能力。原有效会话的wid必须作为签名证据核验，不在公共业务workspace恢复Rental权限；原简称省略/null/空字符串及审计兼容保持。[公共兼容基线](平台Core接入-开发记录.md#core-public-window-baseline-20261115) · [原身份SQL](平台Core接入-开发记录.md#core-principal-sql-runtime-20261115) · [公共认证](平台Core接入-开发记录.md#core-public-auth-extraction-20261115)
 3. 完成原Rental主AppModule/Guard与各audience接线。主provider通过明确imports/exports供给同一数据库、人员、订阅、审计和部署目录，总Core模块与单独模块不重复登记Controller。标准HTTP从所选Core贡献生成，未知政策拒绝；staff/client沿各自正式授权，不按operator使用权直接放行。[统一装配](平台Core接入-开发记录.md#core-application-assembly-20261115) · [HTTP政策](平台Core接入-开发记录.md#core-http-policy-registration-20261115)
 4. 生命周期仍须实际核租户授权、成员分配、原绑定/初始化、停新、排空和代码移除。当前授权结果与随后读取错误分开，unknown只读原键；撤权先取消旧请求、清除目标Core缓存。Core绑定/当前范围/实际就绪分别读取，跨事务不逆序持父锁。移除预检clear不执行删除，缺业务/AI/回调/作业/历史依赖证据不得移除。[结果读取/缓存](平台Core接入-开发记录.md#core-access-refresh-receipt-20261115) · [范围/就绪](平台Core接入-开发记录.md#core-scope-readiness-20261115) · [移除预检](平台Core接入-开发记录.md#core-removal-preflight-20261115) · [工单移除依赖](平台Core接入-开发记录.md#core-tickets-removal-data-20261115)
 5. 实际安装/部署消费同一固定标准包和版本锁；源码目录缺标准清单须拒绝。迁移prepare仍pending，不写成功账或执行DDL。工单旧绑定/初始化版保持可读，普通准入核完整迁移/物理库；普通更新拒绝租户/容器范围转换及容器类型改名，改变范围须专门迁移。[包与命令](平台Core接入-开发记录.md#core-package-current-cli-20261115) · [原绑定兼容](平台Core接入-开发记录.md#core-tickets-binding-readability-20261115) · [更新范围](平台Core接入-开发记录.md#core-update-scope-compatibility-20261115)
@@ -55,7 +55,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 ## 5. 验证边界与保留问题
 
-当前共享迁入核129个路径、无缺失；两条Rental HTTP的包级Nest/委托/身份冒烟、十配置类型与原空间能力用例通过，整体API合同614项问题及未执行的链式后续检查保留。dev1的完整公共集成/UI、独立宿主/前端及真实环境继续验证；当前稳定JSON修复由其负责交付。迁入原文由c6351b288a08ae80a17cf36f7cb1c4cc715bef00保全，HTTP前像由d08dc345983672850a8c13728b0f9add987ad287保全。[迁入证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118) · [HTTP证据](平台Core接入-开发记录.md#core-rental-http-entry-20261118)
+当前主/业务HTTP的十配置类型与一次实际Nest冒烟均退出0，原实例/可选事件/同事务/操作键边界通过，声明/JS留内存，worker已退出。首轮5诊断已按实际出口和类型修复；原HTTP整体合同614项问题及未执行的链式后续检查保留。dev1的完整公共集成/UI、独立宿主/前端及真实环境继续验证，当前稳定JSON修复由其交付后统一固化。共享迁入核129个路径无缺失，旧树已移除；本片原文和完整接续由77166afdec23889e534fd3271d3fb2465183d346保全。[主/业务HTTP证据](平台Core接入-开发记录.md#core-rental-main-http-20261118) · [迁入证据](平台Core接入-开发记录.md#core-shared-dev1-migration-20261118) · [原HTTP证据](平台Core接入-开发记录.md#core-rental-http-entry-20261118)
 
 当前批准链78个方法正文保留，原42/42批准、续租和换货冒烟及十配置类型通过，未新增永久测试脚本。首轮31个端口类型诊断、42例的15/27、37/5和39/3失败及两处实际调用问题保留在当前记录；未放宽原有效断言。原主线片19个方法、101/101工作流、通知/委托原读取writes=0及七配置前端0诊断沿固定证据保留，后台兼容出口及此前3679诊断也可追溯。SQL/锁/事务/身份/资金/存储仍为明确fixture，真实HTTP/数据库/浏览器/微信、完整Nest宿主/安装/更新、独立接手及审查未验。申请/任务、恢复/资金、原创建/草稿及日历PROVIDER_UNAVAILABLE旧问题均沿原记录承接。当前worker已退出，本片输出留内存，没有新增临时环境或业务服务。[当前批准证据](平台Core接入-开发记录.md#core-rental-enterprise-approval-runtime-20261117) · [原主线证据](平台Core接入-开发记录.md#core-main-notification-sync-20261117) · [申请/任务](平台Core接入-开发记录.md#core-rental-enterprise-workflow-runtime-20261117) · [恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117)
 

@@ -11,6 +11,27 @@
 - 历史版本与原始接入设计见[初次修订前像](历史归档/需求澄清/2026-11-09/manifest.json)，现行依据使用上述v1.5正文。各次修订前像沿对应阶段固定Git引用。
 - 原[AI Native通用SaaS未来方案](../未来规划/平台底座-通用化与开源方案.md)继续保留，承接关系已标注；原文与入口修订前像见[方案基线](历史归档/方案基线/2026-10-31/README.md)。
 
+<a id="core-rental-main-http-20261118"></a>
+
+## Rental核心履约与业务HTTP单源接入（2026-11-18）
+
+固定父版77166afdec23889e534fd3271d3fb2465183d346保全原Controller、接线及完整接续，开工时与实际任务远端相同；当前已包含当天真实main7d49c26c9423f2400a233275e84cca5cb4127fa3。RD与dev1共用原施工树，本片由RD维护Rental HTTP及PCH四册，dev1在非交叉文件推进公共集成与日历；索引由RD统一负责，未夹带其未完页面。
+
+[核心Controller](../../../packages/rental-core/src/http-core.controller.ts)与[业务Controller](../../../packages/rental-core/src/http-business.controller.ts)实际迁入Rental包，旧API两路径仅正式再导出同一类。[应用接点](../../../packages/rental-core/src/http-applications.ts)限定本链实际服务、MySQL视图和明确令牌，[原宿主接线](../../../apps/api/src/modules/rental-core/rental-http.providers.ts)通过19项useExisting及一个可选检查事件方法投影绑定原参加者。原17项/6项构造位置、可选性与HTTP装饰器保持；没有创建第二个业务服务、数据源或原出箱生命周期执行者。公共日志复用platform-server单源，会员/企业结算及官方来源日历仍由实际所有者提供。
+
+原两个Controller共214个方法，其中212个正文与固定父版一致；两处context调用改为[同一快照接点](../../../packages/rental-core/src/http-context.ts)，使用必需的原readBusinessContext与refreshWorkspaceContext，不再重复拼配置或为缺必需服务制造fallback。两份显式操作键解析合为一份，保持原191字符边界；每个动作的默认键、无键、回放和unknown处理仍由原正文决定。原Guard/ALS、当前权限、资金、冻结依据、事务与原收据未改写。
+
+| 必要核对 | 实际结果与边界 |
+| --- | --- |
+| 正文与元数据 | 核心133方法、业务81方法，212正文一致、2处context共用；全部HTTP装饰器一致，实际Nest读取110/74条路由元数据 |
+| 首轮类型 | 首次完整类型5诊断，定位公共日志类名、三处ReturnType服务类型引用及freezeOrderSettlement实际boolean返回；改为同源出口和本链精确类型后消除，没有放宽契约 |
+| 完整类型与一次冒烟 | `node --no-compilation-cache -`，stdin复用现有内存编译入口并追加本片短冒烟，退出0；十配置均0诊断，Rental235根/982源/470输出、API1032根/2552源/2064输出 |
+| 实际Nest组合 | 两个明确fixture容器覆盖原有/缺少可选事件、20接点、旧新Controller对象同一、构造Inject、原实例生命周期只一次、同事务/ALS与业务快照、资产读取委托以及191/192操作键；退出0，无数据库查询和网络 |
+| 资料与出口 | 四份本片资料1477本地链接/138锚点无问题；四项新增正式出口的JS/声明与typesVersions对应，peer/meta与lock一致，正式需求/任务无差异，精确暂存后差异格式检查退出0 |
+| 环境 | TS5.9.3、原238模型由Prisma5.22官方WASM/generator在内存生成；声明/JS和短核对均留内存，无新增永久测试脚本或临时环境，没有安装/生成共享client/dist、真实HTTP/数据库、浏览器或服务启动 |
+
+源码职责、正式HTTP子出口和原宿主接线已随[Rental包导读](../../../packages/rental-core/README.md)及[原业务导读](../../../apps/api/src/modules/rental-core/README.md)更新。包新增四个正式出口，文件上传适配沿原可选peer与lock版本。此前整体API检查614项问题及未执行的链式后续检查沿[前片](#core-rental-http-entry-20261118)保留，本片元数据及类型不证明OpenAPI全部配对。剩余企业/客户等Controller、业务会员/结算服务、数据/迁移/Seed、页面客户端、AI/作业和完整标准Core装配继续处理，PCH本片未跨下一档。固定交付由包含本节的Git提交定位，中文提交普通推送后实际远端回读；旧清理、外观失败与历史缺链沿当前接续承接。
+
 <a id="core-main-acceptance-docs-20261118"></a>
 
 ## 固定最新main验收资料接续（2026-11-18）

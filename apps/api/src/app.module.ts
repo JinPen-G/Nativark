@@ -123,7 +123,7 @@ import { StaffOfflinePaymentService } from "./modules/rental-core/staff-offline-
 import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
 import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-capability.controller";
-import { RENTAL_WORKSPACE_CAPABILITIES_APPLICATION, RENTAL_STAFF_PAYMENTS_APPLICATION } from "@rental-os/rental-core/http-service-ports";
+import { RENTAL_HTTP_PROVIDERS } from "./modules/rental-core/rental-http.providers";
 import { WorkspaceCapabilityRepository } from "./modules/rental-core/workspace-capability.repository";
 import { WorkspaceCapabilityService } from "./modules/rental-core/workspace-capability.service";
 import { CapabilityHookRuntime } from "./modules/rental-core/capability-hook.runtime";
@@ -443,13 +443,12 @@ import { AiCreditService } from './modules/ai-native/budget/ai-credit.service';
     RentalFundingService,
     RentalOrderReceivableRepository,
     StaffOfflinePaymentService,
-    { provide: RENTAL_STAFF_PAYMENTS_APPLICATION, useExisting: StaffOfflinePaymentService },
+    ...RENTAL_HTTP_PROVIDERS,
     RentalDocumentService,
     RentalOrderConfirmationService,
     RentalServiceCapacityService,
     WorkspaceCapabilityRepository,
     WorkspaceCapabilityService,
-    { provide: RENTAL_WORKSPACE_CAPABILITIES_APPLICATION, useExisting: WorkspaceCapabilityService },
     CapabilityHookRuntime,
     CapabilityHookRegistrar,
     CapabilityHookRepository,
