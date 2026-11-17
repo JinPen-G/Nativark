@@ -14,7 +14,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 唯一施工树为 C:/Users/Penn/.codex/worktrees/pch-preparation/rental-OS，分支 codex/platform-core-extraction。本树由本对话唯一写入；允许修改PCH所需Auth/Guard/ALS、正式包出口、主装配/OpenAPI、schema/迁移/Seed与后台外壳。main索引和其他树仍归其作者。最近实际远端main为62ca183f10b7c316ab63c28ef6d04ee88d06488b，已在本树祖先；新增固定main按差异核对后整合，不追其他专项活动HEAD。[固定主线与记录保全](平台Core接入-开发记录.md#core-main-runtime-sync-20261115)
 
-企业资格、订单/财务读取、原命令和读取审计已单源迁入Rental包，原shared合同/工作流及客户Auth上下文保持兼容；公共日志基础写入/脱敏迁入platform-server，原OAuth/MCP/Core严格审计仍原位。原实现与候选14/14必要离线检查、十配置类型零诊断，当前空间/动作及读取前后撤权、缺原金额/保证金、跨空间账户历史、强制审计和原收据保持。父版89a840a4c28116d26b060c3b025ff34fc102eb0a保全原文/完整接续；原企业政策夹具修正后11/11检查通过，生产规则未改；Rental客户/会员唯一仓储及原写入检查也已迁入新位置，原注册九组断言前后通过；下一步继续企业政策、成员及剩余业务服务/Controller，再处理数据/迁移/Seed和标准装配。[客户主档](平台Core接入-开发记录.md#core-rental-customer-master-20261117)[政策夹具](平台Core接入-开发记录.md#core-enterprise-policy-fixture-20261117)官方日历源按公共能力处理。[当前企业读取阶段](平台Core接入-开发记录.md#core-rental-enterprise-reads-20261117) · [入口夹具](平台Core接入-开发记录.md#core-enterprise-access-fixture-20261117) · [恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117) · [采用闭包](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据，MIT与品牌原稿引用固定Git。
+企业资格、订单/财务读取、原命令和读取审计已单源迁入Rental包，原shared合同/工作流及客户Auth上下文保持兼容；公共日志基础写入/脱敏迁入platform-server，原OAuth/MCP/Core严格审计仍原位。原实现与候选14/14必要离线检查、十配置类型零诊断，当前空间/动作及读取前后撤权、缺原金额/保证金、跨空间账户历史、强制审计和原收据保持。父版89a840a4c28116d26b060c3b025ff34fc102eb0a保全原文/完整接续；原企业政策夹具修正后11/11检查通过，生产规则未改；Rental客户/会员唯一仓储及原写入检查也已迁入新位置，原注册九组断言前后通过；[原工作流101项基线](平台Core接入-开发记录.md#core-enterprise-workflow-fixture-20261117)的SQL绑定、审计及发布品类夹具已修正并全部通过。下一步继续企业政策、成员及剩余业务服务/Controller，再处理数据/迁移/Seed和标准装配。[客户主档](平台Core接入-开发记录.md#core-rental-customer-master-20261117)[政策夹具](平台Core接入-开发记录.md#core-enterprise-policy-fixture-20261117)官方日历源按公共能力处理。[当前企业读取阶段](平台Core接入-开发记录.md#core-rental-enterprise-reads-20261117) · [入口夹具](平台Core接入-开发记录.md#core-enterprise-access-fixture-20261117) · [恢复/收款](平台Core接入-开发记录.md#core-rental-recovery-payments-20261117) · [采用闭包](平台Core接入-开发记录.md#core-rental-category-adoption-20261117)。正式需求/任务身份、依赖、顺序和业务规则沿批准依据，MIT与品牌原稿引用固定Git。
 
 ## 2. 已有实际接点
 
@@ -53,7 +53,7 @@ Core的AI工具可选，缺工具时普通后台仍可用，Agent不能访问该
 
 未经进一步授权，不安装依赖、读.env、启真实服务、访问业务HTTP/DB/模型/供应商、执行迁移、合main或发布。中文提交到当前任务分支、普通推送后读取实际远端。正式需求/任务与已应用历史迁移保持，旧原文优先引用固定Git。
 
-旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17同一原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；随后只读核定原文件数/体积及0链接，所有本任务worker已退出、不使用旧环境，两份清单最近尝试时间更新为2026-11-17T05:11:14.566Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
+旧公共宿主临时环境已归集到 D:/工作文件/rental-OS/output/.cleanup-pending/pch-preparation/platform-host-integration/environment，840文件/91,808,304字节，责任清单为同任务manifest.json。另一个原任务目录rental-business-facts/residual仍有1个0字节guard.log及原责任清单。2026-11-17同一原生PowerShell删除命令仍被自动审批在启动前以blocked by policy拒绝，命令内预检查也未执行；原文件数/体积及0链接已有只读证据，当前没有使用旧环境的任务进程，两份清单最近尝试时间为2026-11-17T08:47:09.724Z。没有换壳/工具绕过，工具恢复后由本会话优先处理，不能称已释放空间。[清理证据](平台Core接入-开发记录.md#core-rental-recovery-receipts-20261116)
 
 旧外观测试17例16过/1个静态失败、总导航三份历史附件及MCP导读五个原隔离附件缺失继续保留；近期全局文档检查的稀疏未检目标须按固定Git定位，不删除引用或修改检查器掩盖。原授权/生成/MCP检查的审批拒绝历史保留，后来定向补证不能冒称完整宿主验收。[当前MCP审计](平台Core接入-开发记录.md#core-original-mcp-audit-20261115) · [导读缺链](平台Core接入-开发记录.md#core-rental-capability-runtime-20261116)
 
