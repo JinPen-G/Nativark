@@ -68,6 +68,69 @@ main 产品提交为 `01bcfda15cb26c10899761906ac8648c03357f02`，双亲为原 m
 
 AIN-15的第5条最终订单等价由dev1按已合入的01bcfda15产品补必要模拟，AIN-26～28全文由dev2继续核定。旧38255c70a及历史证据分别标明实际运行版本，合并后受影响的Core报价／原批准消费／持久化证据继续按原任务补齐，任务分数沿原门槛汇总。
 
+
+<a id="ain26-main-fixed-baseline-20261117"></a>
+## AIN-26 固定主线基线与原G1～G3核定（2026-11-17）
+
+本片按原26五条及原G1～G4分档核对。验收输入固定到已合入main的产品提交 `01bcfda15cb26c10899761906ac8648c03357f02`，完整产品树 `83e943bde07af41985646d2f579a3dc7c9481258`。main的3e0b2c728与产品提交之间仅为两册记录同步，产品字节一致。原A01～A29矩阵沿正式需求，各组实际源码版本分别保留。
+
+### 固定构建输入与现用Client
+
+| 原输入范围 | 固定Git树 |
+| --- | --- |
+| 公共契约（`packages/shared`） | `84d32f0ce86aaea415686104a936796b2559ac05` |
+| MCP（`packages/mcp-server`） | `d8008a2ab86c4df7d1994a2626d2368c06aa5e6a` |
+| API及迁移（`apps/api`） | `156f7df7cd6880c135d605435a19bbc2b07e6845` |
+| 管理后台（`apps/admin`） | `2457f42b540cdb45ec1338c55f54bb601b570dae` |
+| 客户Web（`apps/tenant-website`） | `9846c2bd1b83b2d5b874632947269aac613f0615` |
+| 客户小程序（`apps/miniprogram`） | `393fa52f46561508b641fe289ae904424c9a1e9b` |
+| 员工小程序（`apps/staff-miniprogram`） | `71f062d570f3e2f78630df893885d78055867f57` |
+
+| 固定文件 | Git blob | 原字节SHA-256 |
+| --- | --- | --- |
+| `package.json` | `123e97ebdf8cc0702c863b4666976706a9fdbc90` | `f13f8f11a57d7d5753e64cf711ebced64cffe5ae263f81a9bafa03547e77ad26` |
+| `package-lock.json` | `e472afffa3e54044b9ef84e911d0c764d6aaa139` | `e03ec60ac3bc6654685d969fcf6f46cb023b8649581830238308a531f4022314` |
+| `apps/api/prisma/schema.prisma` | `cd96f441281263ec9095423e4b1420e870fbf444` | `2af37c8694bfbb58f9716544e12f6bdb82a22566aa206937e475baccb142b646` |
+| `tests/fixtures/ai-native/prisma-offline-preload.cjs` | `ad718a7e3f3f9106f7ed1a5f99a1d14bff9922a1` | `8da2066a4c9a721be06c7c882d5b5bd9c60751c15677005fa0ce911550058238` |
+
+API、客户端、迁移以及模型／提示词／工具／政策的构建输入由上述固定树锁定。完整类型和实际OpenAPI／AppModule离线装配沿[主线整合验证](#ain-main-fixed-native-integration-20261117)的原stdin、配置及结果复用。本片核的是输入版本和现用生成物，构建／宿主／数据库及供应商实测层沿原交付清单分别记录。
+
+本轮API类型与离线加载所用受管Prisma Client为5.22.0，位置为main的 `apps/api/node_modules/@prisma/client`。其schema原字节SHA-256为 `36e488402d9969248fbcc8c1383a471314b10b5865a4b48eeccfe7f19ed990df`，固定schema为上表2af37c86。完整273份model／enum声明核对时，EnterpriseExtensionApproval与AiRun只有字段行次序差异，所有字段、类型、默认、约束及全部enum一致。逐块排序的声明形状SHA-256为 `36ee47c400f8fe66b86f33d64323147539a1248f3fbe6d24fa501f50d5d058d1`。两份生成器均为prisma-client-js、MySQL、空previewFeatures和环境变量URL；现用生成物另声明了自定义输出位置。此项为只读模型与配置核对，原Client沿main归属使用。
+
+| 现用生成物 | 原字节SHA-256 |
+| --- | --- |
+| `schema.prisma` | `36e488402d9969248fbcc8c1383a471314b10b5865a4b48eeccfe7f19ed990df` |
+| `index.d.ts` | `8d02b6bf0629d8231b8e787e696eefdf9d1dbe8b7aa4384d3ac9a883968b6412` |
+| `index.js` | `b4236886b1d8ad7ccfc602846b4b3df392fd977413aa8b685e51514944c7a544` |
+
+### 合并后最终订单样本及验证边界
+
+dev1在独立Node进程读取固定01bcfda15源码，人工分支经过原AuthService、ApiAuthGuard、ALS、ValidationPipe及RentalCoreController，AI分支经过原提案、明确批准、continueConfirmation及原批准Core事务。两侧使用独立Core／内存仓储，按同一份可信报价副本比较实际持久订单，必需字段先核存在，再逐字段核对，生成ID只按原关联映射。
+
+| 品类 | 核对持久字段 | 租赁应付CNY | 保存后状态 |
+| --- | --- | --- | --- |
+| 摄影camera | 217 | 665 | draft |
+| 露营camping | 247 | 532 | draft |
+| 车辆vehicle | 230 | 1273 | draft |
+| 工程construction | 260 | 6840 | draft |
+
+原命令为 `node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 --input-type=commonjs -`，退出0，4/4通过。stdin SHA-256为 `af730e083d3d561846ca66c34127e93e57bd2492688c4f6f28b515f2f89a0016`，stdout为 `a2278c3cb558281a09b1ad5ed69cf9108e33f599f7082aef31427d4e569ebf0a`，712项固定源读取清单为 `12af2855a363d838597712d5ba525b77e4a79b30837903d50c0f78f6799c3a65`。完整代码／输出留dev1原对话实际回合01a1e919-c706-7522-8c08-88a402dfcc2f。
+
+两边准备与保存各一次，AI批准消费一次。人工原键重放及AI两次原结果读取保持订单、幂等及批准消费计数，模型与累计calls为2。新main三个报价方法在AI分支各调用一次。TypeScript5.9.3、ts-node transpileOnly=false无诊断，本组采用模拟Date与递增tick。PID37528已退出，任务临时目录新增为0，离线审计与文件写入为0，工作区／暂存／merge／cherry-pick核定干净。
+
+本组人工报价取AI原报价副本，CustomerOperations、service capacities与capability hooks未装配，空priceVersion保持原缺失状态。该组覆盖个人双商品的最终订单变换与原键幂等。Root已按原15第5条派dev1继续从原Controller独立报价，按同版本分别比较报价及各自最终订单，并核原组件及既有变体证据。dev2本次原存储夹具在异步配置读取处先失败，原断言保留，内存补齐两处等待后已核事务等待撤权零报价写入及保留读权的原键恢复；完整命令与全文结论继续由原对话固化。
+
+### 原26分档及剩余门槛
+
+| 原门槛 | 本片依据与状态 |
+| --- | --- |
+| G1正式验收基线 | 固定main产品、七包构建输入、锁文件、schema／现用Client及原矩阵已形成；当前样本stdin／数据配方与读取清单均有固定哈希。 |
+| G2原服务主要路径 | 合并后四品类按实际Auth／Controller／Core／批准事务准备与保存原订单各一次，重放与原结果读取保持单次；原实现与拒绝／恢复证据继续按各自版本复用。 |
+| G3实际消费者及发布装配 | main已普通推送，shared／后台／客户Web／客户及员工小程序／API／MCP完整类型、实际OpenAPI与AppModule装配及四端登记Action通过，源码及消费者接回固定产品。 |
+| G4全文功能与复核 | 继续补人工／AI独立报价，按完整A01～A29及原26五条汇总实际版本、缺陷／漂移与复验；本片尚未核闭。 |
+
+原26已核G1～G3，本片将原26由0%更新为75%，原28项均按同一分档算术汇总，正式已验收数保持24。原15和27／28全文继续按其原门槛处理。此阶段保留当前核定与边界，源码实现、需求及原任务安排沿原归属维护。
+
 <a id="ain15-client-result-visible-delivery-20261117"></a>
 ## AIN-15 客户原结果的可见交付与原键恢复（2026-11-17）
 
