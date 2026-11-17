@@ -1,6 +1,8 @@
 import type { AiBookingSubmissionAcceptance, ClientCatalogLocation, ClientCatalogResponse, ClientCreateQuoteRequest, ClientDeliveryAddressView, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, RentalCustomerCoupon, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import type { EnterpriseOrderDelegationRequestReference, EnterpriseOrderDelegationView } from "@rental-os/shared";
 import { listAddresses } from "../../api/addresses";
 import { fetchEnterpriseRentalPolicies, fetchEnterpriseApprovals, requestEnterpriseApproval, submitEnterpriseApproval, readEnterpriseOperation, readEnterpriseApprovalResult, createEnterpriseOrder, readEnterpriseOrderOriginal } from "../../api/enterprise";
+import { issueEnterpriseOrderDelegation, readEnterpriseOrderDelegation, revokeEnterpriseOrderDelegation } from "../../api/enterprise";
 import { newKey } from "../../core/keys";
 import { STORAGE_KEYS, readStorage, writeRequiredStorage, removeStorage } from "../../core/storage";
 import { createQuote, fetchCoupons, fetchQuote } from "../../api/catalog";
@@ -25,7 +27,7 @@ import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, navigate, redirect, requireSignIn, toast } from "../../core/ui";
 import { rememberZone, zoneOf } from "../../core/zones";
 import { clientQuoteBookingStoredRequest, clientQuoteOwner, clientQuoteSelectedInput, clientQuoteStorageKey } from "../../components/ai-native/client-quote-session";
-import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema } from "../../vendor/shared-ai-client";
+import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema, clientGoalTextHash, enterpriseOrderDelegationMatches } from "../../vendor/shared-ai-client";
 import { clientBookingTransferOwner, clientBookingTransferStorageKey } from "../../components/ai-native/client-booking-transfer-session";
 
 /** Inspect original local phases only. Retaining parameters never enables AI
@@ -117,6 +119,9 @@ interface CheckoutData {
   enterpriseApproval?: EnterpriseBookingApprovalView;
   enterprisePending: boolean;
   enterpriseBusy: boolean;
+  enterpriseDelegation?: EnterpriseOrderDelegationView;
+  enterpriseDelegationKey: string;
+  enterpriseDelegationRevoking: boolean;
   aiHandoffInput: string;
   aiHandoffOffered: boolean;
   aiHandoffOpening: boolean;
@@ -211,6 +216,14 @@ interface CheckoutData {
 }
 
 const DEFAULT_ZONE = "Asia/Shanghai";
+interface EnterpriseCheckoutOperation {
+  key: string; version: number; quoteId: string; approvalId?: string;
+  kind?: "request" | "submit" | "order" | "delegation";
+  viewEpoch?: number; customerId: string; serviceCode: string;
+  tenantId?: string; corporateCustomerId?: string;
+  requestReference?: EnterpriseOrderDelegationRequestReference; requestRevision?: number;
+  revocationKey?: string; revocationRevision?: number;
+}
 
 Page({
   behaviors: [themeBehavior],
@@ -220,6 +233,7 @@ Page({
     aiOriginalLines: [], aiIdentityLabel: '', aiFulfillmentLabel: '', aiEnterpriseNotice: '', aiEnterpriseApprovalRequired: false,
     enterprisePolicies: [], enterpriseIndex: -1, enterpriseLabel: "个人签约付款", enterprisePayer: false,
     enterpriseNotice: "", enterpriseAccepted: false, enterpriseError: "", enterprisePurpose: "", enterprisePending: false, enterpriseBusy: false,
+    enterpriseDelegationKey: "", enterpriseDelegationRevoking: false,
     aiHandoffInput: "",
     aiHandoffOffered: false,
     aiHandoffOpening: false,
@@ -310,10 +324,27 @@ Page({
   allLocations: [] as ClientCatalogLocation[],
   ticker: undefined as number | undefined,
   requestVersion: 0,
-  enterpriseOperation: undefined as { key: string; version: number; quoteId: string; approvalId?: string; kind?: "request" | "submit" | "order"; viewEpoch?: number; customerId: string; serviceCode: string } | undefined,
+  enterpriseOperation: undefined as EnterpriseCheckoutOperation | undefined,
   enterpriseReading: false,
   enterpriseViewEpoch: 0,
   enterpriseStorageKey() { return `${STORAGE_KEYS.enterpriseOperations}:${PUBLIC_CONFIG.tenantCode}:${currentSession()?.customer.customerId ?? ""}:${currentServiceCode()}`; },
+  readEnterpriseOriginal(): EnterpriseCheckoutOperation | undefined {
+    const ownerKey = this.enterpriseStorageKey();
+    const current = readStorage<EnterpriseCheckoutOperation>(ownerKey);
+    if (current) return current;
+    if (!this.aiMode) {
+      const legacy = readStorage<EnterpriseCheckoutOperation>(STORAGE_KEYS.enterpriseOperations);
+      if (legacy && legacy.customerId === currentSession()?.customer.customerId && legacy.serviceCode === currentServiceCode()) return legacy;
+    }
+    const prefix = `${ownerKey}:delegation:`;
+    const key = wx.getStorageInfoSync().keys.find(value => value.startsWith(prefix));
+    if (!key) return;
+    const original = readStorage<EnterpriseCheckoutOperation>(key);
+    if (!original || original.kind !== "delegation" || key !== `${prefix}${original.key}`
+      || original.customerId !== currentSession()?.customer.customerId || original.serviceCode !== currentServiceCode()) throw new Error("原委托索引不可读，不能重新派发");
+    writeRequiredStorage(ownerKey, original);
+    return original;
+  },
   enterpriseCurrent(operation: { version: number; viewEpoch?: number; customerId: string; serviceCode: string }) {
     return this.aiVisible && !this.aiDisposed && (operation.viewEpoch === undefined || operation.viewEpoch === this.enterpriseViewEpoch) && operation.version === contextVersion()
       && operation.customerId === currentSession()?.customer.customerId && operation.serviceCode === currentServiceCode();
@@ -708,7 +739,8 @@ Page({
       if (!this.aiMode) {
         this.requestVersion++; this.enterpriseOperation = undefined;
         this.setData({ enterprisePolicies: [], enterpriseIndex: -1, enterpriseLabel: "个人签约付款", enterpriseAccepted: false, enterpriseApproval: undefined,
-          enterprisePending: false, enterpriseBusy: false, enterpriseError: "客户身份已变化，请重新读取企业授权", quote: undefined });
+          enterprisePending: false, enterpriseBusy: false, enterpriseDelegation: undefined, enterpriseDelegationKey: "", enterpriseDelegationRevoking: false,
+          enterpriseError: "客户身份已变化，请重新读取企业授权", quote: undefined });
         return;
       }
       this.aiMode = false;
@@ -727,27 +759,37 @@ Page({
     this.syncTransferLocators();
     if (!this.aiMode && this.aiTransferIntent && this.aiTransferIntentScope === this.data.aiTransferScopeKey) this.setData({ aiHandoffPending: true });
     this.syncQuotePreparation(getCart());
+    let original: EnterpriseCheckoutOperation | undefined;
+    try { original = this.readEnterpriseOriginal(); }
+    catch (error) {
+      this.enterpriseOperation = undefined;
+      this.setData({ enterprisePending: true, enterpriseBusy: false, enterpriseError: describeError(error).message });
+      return;
+    }
     if (this.aiMode) {
       this.clearBookingHandoff(); this.bindBookingHandoff();
-      const original = readStorage<typeof this.enterpriseOperation>(this.enterpriseStorageKey());
       this.enterpriseOperation = original && original.customerId === currentSession()?.customer.customerId && original.serviceCode === currentServiceCode()
         ? { ...original, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch } : undefined;
-      this.setData({ enterprisePending: Boolean(this.enterpriseOperation), enterpriseBusy: false });
+      this.setData({ enterprisePending: Boolean(this.enterpriseOperation), enterpriseBusy: false, enterpriseDelegation: undefined,
+        enterpriseDelegationKey: this.enterpriseOperation?.kind === "delegation" ? this.enterpriseOperation.key : "",
+        enterpriseDelegationRevoking: Boolean(this.enterpriseOperation?.revocationKey) });
       return;
     }
     if (this.data.aiHandoffPending || this.aiPendingHandoffRef) {
       this.requestVersion++; this.stopTicker(); this.setData({ view: readyState(), quoteLoading: false });
       return;
     }
-    const original = readStorage<typeof this.enterpriseOperation>(this.enterpriseStorageKey()) ?? readStorage<typeof this.enterpriseOperation>(STORAGE_KEYS.enterpriseOperations);
     this.enterpriseOperation = original && original.customerId === currentSession()?.customer.customerId && original.serviceCode === currentServiceCode() ? { ...original, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch } : undefined;
-    this.setData({ enterprisePending: Boolean(this.enterpriseOperation), enterpriseBusy: false });
+    this.setData({ enterprisePending: Boolean(this.enterpriseOperation), enterpriseBusy: false, enterpriseDelegation: undefined,
+      enterpriseDelegationKey: this.enterpriseOperation?.kind === "delegation" ? this.enterpriseOperation.key : "",
+      enterpriseDelegationRevoking: Boolean(this.enterpriseOperation?.revocationKey) });
     void this.prepare();
     void this.loadEnterprisePolicies();
     this.startTicker();
   },
 
   onHide() {
+    this.setData({ enterpriseDelegation: undefined });
     this.selectComponent('#client-quote-preparation')?.invalidateQuote?.();
     this.aiQuoteIntent = false; this.aiQuotePending = false; this.aiQuoteObservedReference = null;
     this.enterpriseViewEpoch++;
@@ -1277,9 +1319,48 @@ Page({
   clearEnterpriseOperation() {
     const operation = this.enterpriseOperation;
     if (!operation || !this.enterpriseCurrent(operation)) throw new Error("原企业操作身份已变化");
+    if (operation.kind === "delegation") {
+      this.assertEnterpriseDelegationOriginal(operation);
+      removeStorage(`${this.enterpriseStorageKey()}:delegation:${operation.key}`);
+      this.assertEnterpriseDelegationOriginal(operation);
+    }
     removeStorage(this.enterpriseStorageKey());
     if (readStorage<typeof operation>(STORAGE_KEYS.enterpriseOperations)?.key === operation.key) removeStorage(STORAGE_KEYS.enterpriseOperations);
-    this.enterpriseOperation = undefined; this.setData({ enterprisePending: false });
+    const replacement = this.readEnterpriseOriginal();
+    this.enterpriseOperation = replacement && { ...replacement, version: contextVersion(), viewEpoch: this.enterpriseViewEpoch };
+    this.setData({ enterprisePending: Boolean(replacement), enterpriseDelegation: undefined, enterpriseDelegationKey: replacement?.kind === "delegation" ? replacement.key : "",
+      enterpriseDelegationRevoking: Boolean(replacement?.revocationKey) });
+    if (replacement) throw new Error("原企业操作引用已变化，保留当前引用并继续锁定");
+  },
+  assertEnterpriseDelegationOriginal(operation: EnterpriseCheckoutOperation) {
+    const saved = readStorage<EnterpriseCheckoutOperation>(this.enterpriseStorageKey());
+    const locator = (value: EnterpriseCheckoutOperation | undefined) => value && { key: value.key, quoteId: value.quoteId, kind: value.kind,
+      customerId: value.customerId, serviceCode: value.serviceCode, tenantId: value.tenantId, corporateCustomerId: value.corporateCustomerId,
+      requestReference: value.requestReference, requestRevision: value.requestRevision,
+      revocationKey: value.revocationKey, revocationRevision: value.revocationRevision };
+    if (!this.enterpriseCurrent(operation) || JSON.stringify(locator(saved)) !== JSON.stringify(locator(operation))) throw new Error("原委托定位或客户页面已变化，保留当前原操作");
+  },
+  async resolveEnterpriseDelegation(operation: EnterpriseCheckoutOperation) {
+    if (!operation.tenantId || !operation.corporateCustomerId || !operation.requestReference) throw new Error("原委托定位缺失，不能重新派发");
+    this.assertEnterpriseDelegationOriginal(operation);
+    if (operation.revocationKey) {
+      const receipt = await readEnterpriseOperation(operation.revocationKey); this.assertEnterpriseDelegationOriginal(operation);
+      if (receipt.state !== "committed" || receipt.result?.delegationKey !== operation.key
+        || !["revoked", "consumed"].includes(receipt.result.state as string)) throw new Error("原撤销结果待核对，不能重新派发");
+    }
+    const result = await readEnterpriseOrderDelegation(operation.key); this.assertEnterpriseDelegationOriginal(operation);
+    if (!enterpriseOrderDelegationMatches(result, { delegationKey: operation.key, requestReference: operation.requestReference,
+      tenantId: operation.tenantId, personalCustomerId: operation.customerId, corporateCustomerId: operation.corporateCustomerId,
+      quoteId: operation.quoteId })) throw new Error("原委托结果尚未精确核对，保留原编号");
+    this.setData({ enterpriseDelegation: result, enterpriseError: "" });
+    if (result.state === "consumed" && result.original.state === "consumed") {
+      this.clearEnterpriseOperation(); if (!this.aiMode) completeSubmission(); redirect(buildUrl(ROUTES.order, { id: result.original.orderId }));
+    } else if (result.state === "revoked") {
+      this.clearEnterpriseOperation();
+      this.requestVersion++;
+      this.mutate(draft => { draft.quote = undefined; });
+      this.setData({ quote: undefined, quoteExpired: true, agreed: false, enterpriseError: "原委托已撤销。后续预约须重新获取报价并取得适用批准。" });
+    }
   },
   acceptEnterpriseResult(result: EnterpriseApprovalOriginalResult, quoteId: string, approvalId: string) {
     if (result.approval.id !== approvalId || result.approval.quoteId !== quoteId) throw new Error("原批准与执行结果引用不匹配，保留原操作");
@@ -1298,6 +1379,7 @@ Page({
     const operation = this.enterpriseOperation;
     const owner = operation ?? { version: contextVersion(), viewEpoch: this.enterpriseViewEpoch, customerId: currentSession()?.customer.customerId ?? "", serviceCode: currentServiceCode() };
     const current = () => { if (!this.enterpriseCurrent(owner)) throw new Error("客户身份、空间或页面已变化，原请求已隔离"); };
+    if (operation?.kind === "delegation") { await this.resolveEnterpriseDelegation(operation); return; }
     if (operation?.kind === "order") {
       const result = await readEnterpriseOrderOriginal(operation.quoteId, operation.key); current();
       if (result.state !== "observed" || !result.orderId) throw new Error("原下单结果待核对，没有订单不代表可重发");
@@ -1372,6 +1454,65 @@ Page({
       if (this.enterpriseCurrent(operation)) await this.resolveEnterpriseOperation();
     } catch (error) { if (this.enterpriseCurrent(operation)) this.setData({ enterpriseError: `原企业下单待核对，不能再次派发：${describeError(error).message}` }); }
     finally { if (this.enterpriseCurrent(operation)) this.setData({ enterpriseBusy: false }); }
+  },
+  async onDelegateEnterpriseOrder() {
+    const quote = this.data.quote, session = currentSession(), membership = quote?.membershipSnapshot;
+    if (this.aiMode || !quote || !session || !this.data.agreed || this.data.quoteExpired || this.data.enterpriseBusy
+      || this.data.enterprisePending || this.enterpriseReading || this.enterpriseOperation || this.data.submitting) return;
+    if (membership?.bookingIdentity !== "enterprise_employee" || quote.request.customerId !== session.customer.customerId
+      || membership.personalCustomerId !== session.customer.customerId || !membership.corporateCustomerId) return;
+    const approvalRequired = membership.enterpriseContractAndPayer && membership.enterpriseBasis?.approvalMode === "per_order";
+    const approval = approvalRequired ? this.data.enterpriseApproval : undefined;
+    if (approvalRequired && (!approval || approval.state !== "approved" || approval.quoteId !== quote.id)) { toast("须先取得本人的原企业批准"); return; }
+    const owner = { version: contextVersion(), viewEpoch: this.enterpriseViewEpoch, customerId: session.customer.customerId, serviceCode: currentServiceCode() };
+    const current = () => {
+      if (!this.enterpriseCurrent(owner) || this.data.quote !== quote || this.enterpriseOperation || readStorage<EnterpriseCheckoutOperation>(this.enterpriseStorageKey())
+        || approvalRequired && this.data.enterpriseApproval !== approval) throw new Error("原报价、批准或客户页面已变化，请重新核对");
+    };
+    this.enterpriseReading = true; this.setData({ enterpriseBusy: true });
+    try {
+      const confirmed = (await wx.showModal({ title: "确认商户代办预约", content: "我已核对本次原报价、签约付款责任及保证金安排，授权商户代办这次预约。", confirmText: "确认委托" })).confirm;
+      if (!confirmed) return; current();
+      // Both customer surfaces use the same original quote key. The original
+      // service owns source validation and the one-quote/one-D constraint.
+      const key = `delegate-${await clientGoalTextHash(JSON.stringify(["enterprise-order-delegation-1", PUBLIC_CONFIG.tenantCode, owner.serviceCode, owner.customerId, quote.id]))}`;
+      current();
+      const operation: EnterpriseCheckoutOperation = { ...owner, key, kind: "delegation", quoteId: quote.id, tenantId: quote.tenantId,
+        corporateCustomerId: membership.corporateCustomerId, requestReference: approval ? { approvalId: approval.id } : { quoteId: quote.id },
+        requestRevision: approval?.revision ?? 0 };
+      writeRequiredStorage(`${this.enterpriseStorageKey()}:delegation:${key}`, operation);
+      writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation;
+      this.setData({ enterprisePending: true, enterpriseDelegationKey: key, enterpriseDelegation: undefined, enterpriseDelegationRevoking: false });
+      this.assertEnterpriseDelegationOriginal(operation);
+      await issueEnterpriseOrderDelegation({ operationKey: key, requestReference: operation.requestReference!, expectedRevision: operation.requestRevision!,
+        reason: "本人确认商户代办本次原企业身份预约", confirm: true });
+      if (this.enterpriseCurrent(operation)) await this.resolveEnterpriseDelegation(operation);
+    } catch (error) { if (this.enterpriseCurrent(owner)) this.setData({ enterpriseError: `原委托结果待核对，保留原编号：${describeError(error).message}` }); }
+    finally { this.enterpriseReading = false; if (this.enterpriseCurrent(owner)) this.setData({ enterpriseBusy: false }); }
+  },
+  async onRevokeEnterpriseDelegation() {
+    const original = this.enterpriseOperation;
+    if (original?.kind !== "delegation" || original.revocationKey || this.data.enterpriseBusy || this.enterpriseReading) return;
+    this.enterpriseReading = true; this.setData({ enterpriseBusy: true });
+    try {
+      await this.resolveEnterpriseDelegation(original);
+      const result = this.data.enterpriseDelegation;
+      if (!result || !["issued", "expired"].includes(result.state)) return;
+      this.assertEnterpriseDelegationOriginal(original);
+      const confirmed = (await wx.showModal({ title: "撤销这份商户委托", content: "明确撤销本次原委托。已消费或结果未决的业务由原服务核对。", confirmText: "明确撤销" })).confirm;
+      if (!confirmed) return; this.assertEnterpriseDelegationOriginal(original);
+      const revocationKey = `revoke-${await clientGoalTextHash(JSON.stringify(["enterprise-order-delegation-1", "revoke",
+        PUBLIC_CONFIG.tenantCode, original.serviceCode, original.customerId, original.key, result.revision]))}`;
+      this.assertEnterpriseDelegationOriginal(original);
+      const operation: EnterpriseCheckoutOperation = { ...original, revocationKey, revocationRevision: result.revision };
+      writeRequiredStorage(`${this.enterpriseStorageKey()}:delegation:${operation.key}`, operation);
+      writeRequiredStorage(this.enterpriseStorageKey(), operation); this.enterpriseOperation = operation;
+      this.setData({ enterpriseDelegationRevoking: true });
+      await revokeEnterpriseOrderDelegation({ operationKey: operation.revocationKey!, delegationKey: operation.key, expectedRevision: result.revision,
+        reason: "本人明确撤销本次原商户委托", confirm: true });
+      if (this.enterpriseCurrent(operation)) await this.resolveEnterpriseDelegation(operation);
+    } catch (error) { if (this.enterpriseCurrent(original)) this.setData({ enterpriseError: `原撤销结果待核对：${describeError(error).message}` }); }
+    finally { this.enterpriseReading = false; if (this.enterpriseCurrent(original)) this.setData({ enterpriseBusy: false }); }
   },
 
   buildRequest(cart: CartState): ClientCreateQuoteRequest {

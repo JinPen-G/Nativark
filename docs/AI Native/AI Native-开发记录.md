@@ -6,6 +6,66 @@
 > 最近全表门槛复核：2026-11-09，见[合并后复核](<#ain-post-consolidation-review-20261109>)及其逐项G1～G4依据；后续核心阶段各自复核受影响原任务。AIN-05、06、07、10、11、12、13、14、16、17、18及19／20／21／22／23／24／25已完成本轮模拟研发收口，各阶段见下文；其余任务继续按完整依赖核定。当前分数唯一见正式开发任务；旧阶段的分数、失败和资源记录作为当时证据保留。
 > 下表结合既有门槛证据与本轮源码/消费者复核更新。历史真实环境证据没有在本轮全量重跑；离线服务、宿主模拟、类型、真实环境与正式验收分别判断。
 
+<a id="ain15-client-delegation-original-consumers-20261117"></a>
+## AIN-15 客户预约的原委托签发、恢复与撤销（2026-11-17）
+
+固定前置为4e323466efa51be0ef15eb7ba0d68fb3d36219e6，实施范围为下方12份客户与公共运行时源码。依据为[需求v1.15](<AI Native-需求.md>)和[任务v1.19](<AI Native-开发任务.md>)，本片对应AIN-15／26。dev1在原全文核定中定位客户Web／小程序缺普通用户D签发入口，Root在原预约页和原企业提交通道接入完整消费者。
+
+### 原身份、付款与本人确认
+
+| 客户原报价 | 签发输入和办理入口 |
+| --- | --- |
+| 企业签约付款，逐单审批 | 读取本人的原批准，核报价及当前批准revision，明确确认商户代办，以approvalId和该revision签发。Web使用[原批准控件](../../apps/tenant-website/src/components/EnterpriseBookingApproval.tsx)，小程序使用[原预约页](../../apps/miniprogram/src/pages/checkout/index.ts)及确认弹窗。 |
+| 企业签约付款，waived | 明确核对本人的原报价、付款和保证金安排，以quoteId、expectedRevision=0签发。 |
+| 企业优惠个人付款 | 沿原本人企业身份报价及告知，以quoteId、expectedRevision=0签发，商户代办消费由原服务重检个人使用资格和原封存依据。 |
+
+Web与小程序复用[原本人API](../../apps/tenant-website/src/data/authClient.ts)和[原小程序API](../../apps/miniprogram/src/api/enterprise.ts)，签发、原读取和撤销分别进入order-delegations的issue、原delegationKey及revoke入口，当前[本人Controller](../../apps/api/src/modules/enterprise/enterprise-workflows.controller.ts)与[OpenAPI](../../apps/api/src/contracts/openapi-document.ts)各有登记。Web的authedFetch仅为GET启用认证刷新重试，小程序命令使用replayAfterRefresh=false。服务端持原Tenant锁，原D、报价及企业批准的互斥、Core消费与原收据继续沿[固定D输入与共同事务](#ain15-26-original-input-stop-continuation-20261117)和[个人付款后继](#ain15-personal-enterprise-delegation-20261117)。
+
+### 单次派发、原编号与后继
+
+1. 两端以原租户、空间code、本人、quoteId生成同一delegate-SHA256编号。原quote／approval引用及修订先持久化并回读，再单次派发本人确认。hash输入采用现有clientGoalTextHash。当前身份、原报价、批准、宿主可见状态和当前存储引用在异步边界重新核对。
+2. 委托签发后显示原编号，供商户用原后台D输入办理。原提交控件保持锁定，客户明确核对时读取原D。not_recorded、读取失败和unknown保留原编号。正式consumed收据须匹配D、quote、本人、企业、scope、Core原键及原订单，才进入原订单页。
+3. 原编号另外按D留一份最少引用。当前指针被另一页面替换时，该引用可在本人同空间重登或下一次恢复时重新选择。小程序登出保留该D引用；正文、会话及普通缓存沿原清理。consumed／revoked原终态核实后清理对应索引和指针，另一个原操作继续被保留并锁定。此处为有限存储值与回读保护，浏览器原子CAS由负责人实测核定。
+4. 本人明确撤销时，按原D和当前revision生成同一revoke-SHA256编号，先保存原撤销引用，再单次派发，丢应答后核原操作收据及原D。原revoked终态后，Web给出新报价控件并拒绝旧报价的迟到提交／委托回调，小程序清原购物车报价、增加requestVersion并进入原重新报价按钮。新的报价及适用批准由原入口产生。
+5. [公共精确收据读取](../../packages/shared/src/enterprise-order-delegation.ts)校验原引用、本人、企业和已消费Core收据。该运行时函数从原shared及[小程序正式出口](../../packages/shared/src/miniprogram-client.ts)发布，由[原内存打包器](../../scripts/miniprogram-ai-runtime.cjs)和[本端声明](../../apps/miniprogram/src/vendor/shared-ai-client/index.d.ts)消费。
+
+### 必要模拟与类型
+
+全部Node命令使用node --no-node-snapshot --no-compilation-cache --max-old-space-size=3072 -，stdin经本树原prisma-offline-preload.cjs设置不可达DATABASE_URL；AI_OFFLINE_AUDIT、写根、TEMP／TMP指本树任务目录，审计仅在内存记录。测试沿[原消费者夹具](../../tests/enterprise-consumers.test.cjs)的调度、存储、deferred和页面事件入口，保留原断言，映射当前公开合同及组件依赖。
+
+| 验证 | stdin SHA-256、实际结果和范围 |
+| --- | --- |
+| 原普通下单及两端三种付款 | bd21ae2265c1b955a437920605b15a7d5b22b97ef8225662c4abeb75913e008d，退出0。原Web普通企业提交三组、小程序原方法／存储失败／免逐单原恢复／旧购物车两组共8组通过。两端分别执行per_order企业付款、waived企业付款、per_order政策下个人付款，签发各1次，均消费模拟的原consumed收据并进入注册订单页；请求引用和revision一致。 |
+| 原索引、撤销及身份 | 同一stdin退出0。Web索引单独保留后重载可恢复，另一个原引用保留并继续锁定；撤销后旧闭包提交和委托均在派发前拒绝。小程序登出／重登可从D索引恢复，撤销丢ACK保持原revoke编号并只读核对，原报价清理且重新报价出口存在。两端revoke编号相同，身份变化的迟到结果被隔离，错误类型的收据时间拒绝。 |
+| Web定向类型 | 469912505c3d23f0154cf77188e15e5a026b37a46b831ef8c0fbbe178db4237c，退出0。TypeScript5.9.3，4根／296源，noEmit零诊断。 |
+| 原shared声明及小程序类型 | b7193db0a9df3782899c39d777f0c11622fac703fe4bbf7f2713857916257def，退出0。shared336源、128份声明仅写内存；小程序沿正式ES2020及lib.es2020.d.ts，3根／245源零诊断。 |
+| 小程序正式运行时 | 767cb4813fc9c9d5411dbaf12ffd06b19a01da577aae96b57a41453e05a91f0f，退出0。原打包器在内存产生160053字节、80个白名单出口、36份来源；受控宿主中原hash及D读取函数可执行，同一输入hash一致，跨本人和错误时间拒绝。bundle SHA-256为1443bb8b714071ec644d84b4516b3862c5793efd484f5ca3cc40cecf9ade026b，来源清单为1e6052aa025778bddca463aa8da77ec846b6c152b367dd49603dce56abf22537。 |
+
+夹具准备期间补齐当前纯函数依赖、宿主selectComponent和跨realm JSON比较；初次类型检查定位两个联合／可空对象收窄，已修后定向复验零诊断。原断言及正式业务规则沿原来源保留。最终模拟的审计均为0，业务服务、模型和真实资金访问由负责人后续实测。客户端夹具提供原Customer ID，真实subjectId与当前账户绑定由负责人实测核定；服务端原D模拟的subjectId=null边界沿个人付款后继记录。
+
+本阶段文档检查node --no-node-snapshot --no-compilation-cache scripts/validate-docs.cjs退出1，定位原导航三处历史附件及界面规范一处稀疏示例，共4处既有缺链。新增文件链接与任务算术通过，阶段锚点由Root定向核对。git diff --check退出0。
+
+### 固定源码
+
+原始工作树字节和Git过滤后的blob分别登记，12份清单SHA-256为9c9673daa15c6e7a2aaeecd55bdfa19b1d168628aa65bb9e26b96568e71696e9。类型和运行时均读取本树源码，受管依赖只读复用主仓库。
+
+| 本片源码 | Git blob | 工作树SHA-256 |
+| --- | --- | --- |
+| [apps/miniprogram/src/api/enterprise.ts](../../apps/miniprogram/src/api/enterprise.ts) | cf71436e62f952b4c05230dd22787702441b749f | a95037ebc58da723cfbf66b254aa5f5818dec4987a0910a5c96f65e2887b3687 |
+| [apps/miniprogram/src/core/storage.ts](../../apps/miniprogram/src/core/storage.ts) | 4d98d14e054f97576b40bd6e1bea767cadd91670 | 4d5e145e186b658ad2d10bc61512c740beeafc8233ee818637d8d00d7a61b61b |
+| [apps/miniprogram/src/pages/checkout/index.ts](../../apps/miniprogram/src/pages/checkout/index.ts) | ea63a5ee72b1cdb4a3f0bd49e0059a9ded23fabf | 799e15bad4111e79f797b61f4d52a7917e962c700351b292ac9ae72971ba6755 |
+| [apps/miniprogram/src/pages/checkout/index.wxml](../../apps/miniprogram/src/pages/checkout/index.wxml) | 538d8b00e2440802d18a1562e5796a75837607b3 | 85dd54360b57d8cabb460ccd1c61ca7adf8fcdedb12528efbf7a03bf09cabc53 |
+| [apps/miniprogram/src/vendor/shared-ai-client/index.d.ts](../../apps/miniprogram/src/vendor/shared-ai-client/index.d.ts) | 2bb14c0c071a5884b7301508a8a33d31a4a6238e | 1cba84c61fa35b0e24db7cff19561d83028102a06b096dd7203f134a1662e8b8 |
+| [apps/tenant-website/src/components/EnterpriseBookingApproval.tsx](../../apps/tenant-website/src/components/EnterpriseBookingApproval.tsx) | aa9a0cc06d47af860799fe71344be14113450749 | 87700cad8485f0413a5c841d8c7b6b148d142545e3f24ec476a28b139a072cea |
+| [apps/tenant-website/src/components/RemoteBooking.tsx](../../apps/tenant-website/src/components/RemoteBooking.tsx) | c76b8864c438804402983c81443a6f3b7a9a033f | 221172fb6c6bbc6bad1d9705206b1a41ae185fe2bd3c98eb5ec42b0ab8fc931f |
+| [apps/tenant-website/src/components/useEnterpriseOrderSubmission.ts](../../apps/tenant-website/src/components/useEnterpriseOrderSubmission.ts) | 5136da34e025eefa5db2cd84d30200b19c946c4b | fa2a2adf8b0ba860f4ca59b5e04d82b769ae56bc899151f053096d98b3ea0716 |
+| [apps/tenant-website/src/data/authClient.ts](../../apps/tenant-website/src/data/authClient.ts) | 9d36be814bcab9c3f9cb0d15b60e17d62d479250 | fa530939ea44c1a849318fe701cfb1e16bfb9c5644db5513be0990390914522a |
+| [packages/shared/src/enterprise-order-delegation.ts](../../packages/shared/src/enterprise-order-delegation.ts) | 8b0996cf02ce1a090432717b449e65fb228614d1 | 36f54971fe3a52b300e6fc99e91d3d6e85116c4dabf66201ede5c9cf9b38f111 |
+| [packages/shared/src/miniprogram-client.ts](../../packages/shared/src/miniprogram-client.ts) | 43a44b105fa28390425e2f25170e46e0551bdda1 | 8ef7f1fb909137066669846e8c1b6795a3de146ce1880abe5dfa0975c3387a75 |
+| [scripts/miniprogram-ai-runtime.cjs](../../scripts/miniprogram-ai-runtime.cjs) | 8a2b656f442852663923762e10414cedf6b29720 | f831f26ae0fae5b147509d4cd91b59ef2d0a590228af324047c2df14ac50d3c4 |
+
+当前成果进入原15／26完整条款和独立核定，G4待固定消费者独立复核及原全文证据核闭。真实浏览器、微信宿主、当前账户、数据库、支付及供应商测试交负责人。进程均正常退出，compiler.close完成；测试脚本、依赖安装、磁盘声明／运行时产物、临时目录和后台进程的新增数均为0。
+
 <a id="ain27-operational-delivery-20261117"></a>
 ## AIN-27 双轨、运行、灰度与回退操作交付（2026-11-17）
 

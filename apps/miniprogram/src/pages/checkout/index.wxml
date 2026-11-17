@@ -114,6 +114,13 @@
       </block>
       <view wx:if="{{enterpriseError}}" class="notice notice--warning mt-8">{{enterpriseError}}</view>
       <button wx:if="{{enterprisePending}}" class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onReadEnterpriseApproval">只查原企业操作结果，不重发</button>
+      <block wx:if="{{enterpriseDelegationKey}}">
+        <view class="small mt-8">原商户委托编号 {{enterpriseDelegationKey}}</view>
+        <view class="muted small mt-8">商户可用此编号读取原报价及所需批准，再办理本次预约。</view>
+        <view wx:if="{{enterpriseDelegation}}" class="small mt-8">{{enterpriseDelegation.state}} / {{enterpriseDelegation.expiresAt}}</view>
+        <button wx:if="{{enterpriseDelegation && (enterpriseDelegation.state === 'issued' || enterpriseDelegation.state === 'expired') && !enterpriseDelegationRevoking}}"
+          class="btn mt-8" disabled="{{enterpriseBusy}}" bindtap="onRevokeEnterpriseDelegation">明确撤销这份委托</button>
+      </block>
       <block wx:if="{{enterprisePayer && quote.membershipSnapshot.enterpriseBasis.approvalMode === 'per_order'}}">
         <input placeholder="本次租赁用途" value="{{enterprisePurpose}}" disabled="{{enterprisePending}}" bindinput="onEnterprisePurpose" maxlength="500" />
         <button class="btn mt-8" disabled="{{enterpriseBusy || enterprisePending || !quote || !enterprisePurpose || enterpriseApproval.state === 'closed'}}" bindtap="onEnterpriseApproval">申请企业批准（不自动下单）</button>
@@ -288,6 +295,9 @@
           </checkbox-group>
         </view>
         <view wx:if="{{formError}}" class="notice notice--danger mt-8">{{formError}}</view>
+        <button wx:if="{{quote.membershipSnapshot.bookingIdentity === 'enterprise_employee'}}" class="btn btn--secondary mt-12"
+          disabled="{{enterprisePending || enterpriseBusy || submitting || !agreed || quoteExpired || (quote.membershipSnapshot.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis.approvalMode === 'per_order' && enterpriseApproval.state !== 'approved')}}"
+          bindtap="onDelegateEnterpriseOrder">确认并委托商户代办</button>
       </view>
     </view>
 

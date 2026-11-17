@@ -12,6 +12,7 @@ export declare const clientGoalStorageKey: typeof Runtime.clientGoalStorageKey;
 export declare const clientGoalSelectedInput: typeof Runtime.clientGoalSelectedInput;
 export declare const clientGoalTimeOptions: typeof Runtime.clientGoalTimeOptions;
 export declare const clientGoalTextHash: typeof Runtime.clientGoalTextHash;
+export declare const enterpriseOrderDelegationMatches: typeof Runtime.enterpriseOrderDelegationMatches;
 export declare const AI_CLIENT_ENTRY_HTTP_DRAFT: typeof Runtime.AI_CLIENT_ENTRY_HTTP_DRAFT;
 export declare const aiClientOrderActionSourceSchema: typeof Runtime.aiClientOrderActionSourceSchema;
 export declare const aiClientOrderActionSchema: typeof Runtime.aiClientOrderActionSchema;

@@ -10,6 +10,7 @@ export { aiClientGoalPreparationRequestSchema, aiClientGoalPreparationReadReques
   aiClientGoalCandidatesRequestSchema, aiClientGoalProjectionSchema, aiClientGoalQuoteRequestSchema } from './ai-client-goal-draft';
 export { createClientGoalSession, clientGoalStorageKey, clientGoalSelectedInput, clientGoalTimeOptions } from './ai-client-goal-session';
 export { clientGoalTextHash } from './ai-client-goal-fingerprint';
+export { enterpriseOrderDelegationMatches } from './enterprise-order-delegation';
 export { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 export { AI_TASK_INPUT_DRAFT_VERSION, AI_TASK_INPUT_FIELD_IDS_DRAFT,
   isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft } from './ai-task-input-draft';

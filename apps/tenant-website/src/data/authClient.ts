@@ -6,6 +6,7 @@ import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissi
   AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
   from '@rental-os/shared';
 import type { AiClientHostCapabilities, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult } from '@rental-os/shared';
+import type { IssueEnterpriseOrderDelegation, RevokeEnterpriseOrderDelegation, EnterpriseOrderDelegationOriginal } from '@rental-os/shared';
 import { CLIENT_API_VERSION, AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema,
   aiClientQuotePreparationReadResponseSchema, aiClientQuoteConfirmationRequestSchema, aiClientQuoteResultReadResponseSchema,
   type AiClientQuotePreparationRequest, type AiClientQuoteConfirmationRequest } from '@rental-os/shared';
@@ -226,6 +227,9 @@ export const sessionApi = {
   enterpriseRentalPolicies() { return authedJson<EnterpriseOwnRentalPolicy[]>('/enterprise/my-rental-policies'); },
   enterpriseApprovals() { return authedJson<EnterpriseBookingApprovalView[]>('/enterprise/my-approvals'); },
   enterpriseCommand<T>(path: string, payload: unknown) { return authedJson<T>(`/enterprise/${path}`, { method: 'POST', body: JSON.stringify(payload) }); },
+  issueEnterpriseOrderDelegation(input: IssueEnterpriseOrderDelegation) { return authedJson<EnterpriseOrderDelegationOriginal>('/enterprise/order-delegations/issue', { method: 'POST', body: JSON.stringify(input) }); },
+  enterpriseOrderDelegation(key: string) { return authedJson<EnterpriseOrderDelegationOriginal>(`/enterprise/order-delegations/${encodeURIComponent(key)}`, { cache: 'no-store' }); },
+  revokeEnterpriseOrderDelegation(input: RevokeEnterpriseOrderDelegation) { return authedJson<EnterpriseOrderDelegationOriginal>(`/enterprise/order-delegations/${encodeURIComponent(input.delegationKey)}/revoke`, { method: 'POST', body: JSON.stringify(input) }); },
   enterpriseOperation(key: string) { return authedJson<{ state: string; result?: Record<string, unknown> }>(`/enterprise/operations/${encodeURIComponent(key)}`); },
   enterpriseExchangeChoices(orderId: string, query: EnterpriseExchangeChoicesQuery = {}) { const search = new URLSearchParams(Object.entries(query).filter(([, value]) => value !== undefined) as [string, string][]); return authedJson<EnterpriseExchangeChoices>(`/enterprise/orders/${encodeURIComponent(orderId)}/exchange-choices?${search}`); },
   requestEnterpriseExchangeApproval(input: RequestEnterpriseExchangeApproval) { return authedJson(`/enterprise/exchange-approvals`, { method: 'POST', body: JSON.stringify(input) }); },

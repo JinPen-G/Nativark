@@ -9,7 +9,7 @@ import { useEnterpriseOrderSubmission } from './useEnterpriseOrderSubmission';
 import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
-import type { AiBookingHandoff, AiBookingSelection, AiClientQuoteFacts, ClientCreateQuoteRequest, EnterpriseOwnRentalPolicy, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import type { AiBookingHandoff, AiBookingSelection, AiClientQuoteFacts, ClientCreateQuoteRequest, EnterpriseBookingApprovalView, EnterpriseOwnRentalPolicy, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { aiClientQuotePreparationRequestSchema, aiClientQuotePreparationResponseSchema, formatRentalMoney } from "@rental-os/shared";
 import { EnterpriseBookingApproval } from "./EnterpriseBookingApproval";
 import { readOriginalBookingQuote, originalBookingUnitLabel, type OriginalBookingQuoteFacts, type BookingHandoffState } from '../features/ai-native/booking-handoff';
@@ -148,6 +148,8 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
   quoteIntentRef.current = quoteIntent;
   const identity = JSON.stringify([hostIdentity, enterprise, paymentMode]);
   const enterpriseOrder = useEnterpriseOrderSubmission(id => navigate(href(`/orders/${encodeURIComponent(id)}`)));
+  const [delegationConsent, setDelegationConsent] = useState<{ quoteId: string; checked: boolean } | null>(null);
+  const currentQuote = useRef(quote); currentQuote.current = quote;
   useEffect(() => { let cancelled = false; setPolicies([]); setPolicyError(''); setEnterprise(''); setPaymentMode('personal'); setNoticeAccepted(false); setQuote(null); quoteVersion.current++;
     void sessionApi.enterpriseRentalPolicies().then(rows => { if (!cancelled) setPolicies(rows); }).catch(e => { if (!cancelled) setPolicyError(e instanceof Error ? e.message : '企业身份不可用'); });
     return () => { cancelled = true; quoteVersion.current++; };
@@ -329,11 +331,21 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     } catch (e: any) { const msg = e?.message || t('orderFailed'); setError(msg); toast.error(msg); }
     finally { setBusy(false); }
   }, [quote, href, enterpriseOrder, enterprise, hostIdentity, quoteScope]);
+  const delegateOrder = async (approval?: EnterpriseBookingApprovalView) => {
+    const original = quote;
+    const assertView = () => {
+      if (document.hidden || !host?.current() || quoteScopeRef.current !== quoteScope || currentQuote.current !== original) throw Error('原报价或客户页面已变化，请重新核对');
+    };
+    assertView();
+    if (!original || !approval && (!delegationConsent?.checked || delegationConsent.quoteId !== original.id)) throw Error('请明确核对并确认原报价的商户委托');
+    await enterpriseOrder.delegate(original, approval, assertView);
+  };
 
   if (!ready) {
     return <div className="booking-card"><p className="mock-note">{error ? error : <><LoadingOutlined /> {t('loading')}</>}</p></div>;
   }
 
+  const delegationClosed = enterpriseOrder.delegation?.state === 'revoked' && enterpriseOrder.delegation.quoteId === quote?.id;
   const money = (amount: unknown, deduction = false) => {
     const currency = quote?.currency;
     if (typeof amount !== 'number' || !Number.isFinite(amount) || typeof currency !== 'string' || !/^[A-Z]{3}$/u.test(currency)) {
@@ -372,7 +384,28 @@ function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillmen
     {error && <p className="form-error" role="alert">{error}</p>}
     {enterpriseOrder.error && <p className="form-error" role="alert">{enterpriseOrder.error}</p>}
     {enterpriseOrder.pending && <button type="button" className="button button-outline" disabled={enterpriseOrder.busy} onClick={() => void enterpriseOrder.recover()}>{language === 'en' ? 'Read original enterprise order' : '核对原企业订单结果'}</button>}
-    {(!quoteMode || enterprise) && (quote?.membershipSnapshot?.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis?.approvalMode === 'per_order' ? <EnterpriseBookingApproval key={JSON.stringify([identity, quote.id])} quoteId={quote.id} identity={identity} english={language === 'en'} onOrder={id => navigate(href(`/orders/${encodeURIComponent(id)}`))} onNewQuote={() => { setQuote(null); void getQuote(); }} /> : <button type="button" className="button button-dark button-block" disabled={busy || !quote || enterpriseOrder.blocked || Boolean(enterprise && !enterpriseOrder.ready)} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>)}
+    {quote?.membershipSnapshot?.bookingIdentity === 'enterprise_employee'
+      && !(quote.membershipSnapshot.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis?.approvalMode === 'per_order') && <>
+      <label><input type="checkbox" checked={delegationConsent?.quoteId === quote.id && delegationConsent.checked}
+        disabled={busy || enterpriseOrder.blocked || delegationClosed} onChange={event => setDelegationConsent({ quoteId: quote.id, checked: event.target.checked })} />
+        {language === 'en' ? 'I reviewed this original quote, payment responsibility and deposit arrangements, and authorize the merchant to submit this reservation.' : '我已核对本次原报价、签约付款责任及保证金安排，授权商户代办这次预约。'}</label>
+      <button type="button" className="button button-outline button-block" disabled={busy || enterpriseOrder.blocked || delegationClosed || !enterpriseOrder.ready
+        || delegationConsent?.quoteId !== quote.id || !delegationConsent.checked} onClick={() => void delegateOrder().catch(() => undefined)}>
+        {language === 'en' ? 'Confirm merchant delegation' : '确认并委托商户'}</button>
+    </>}
+    {(enterpriseOrder.pending?.kind === 'delegation' || delegationClosed) && <section aria-live="polite">
+      <p>{language === 'en' ? 'Original merchant delegation' : '原商户委托编号'} <code>{enterpriseOrder.pending?.key ?? enterpriseOrder.delegation?.delegationKey}</code></p>
+      <p>{delegationClosed ? language === 'en' ? 'This original delegation was revoked. A new reservation needs a new quote and any required approval.' : '原委托已撤销。后续预约须重新获取报价并取得适用批准。'
+        : language === 'en' ? 'The merchant can use this reference with the original quote and required approval. Check the original result before another submission.' : '商户可使用此编号读取原报价及所需批准。请先核对原委托结果，再办理后续提交。'}</p>
+      {enterpriseOrder.delegation && <p>{enterpriseOrder.delegation.state} · {enterpriseOrder.delegation.expiresAt}</p>}
+      {enterpriseOrder.delegation && ['issued', 'expired'].includes(enterpriseOrder.delegation.state) && enterpriseOrder.pending?.kind === 'delegation' && !enterpriseOrder.pending.revocationKey
+        && <button type="button" className="button button-outline" disabled={enterpriseOrder.busy} onClick={() => void enterpriseOrder.revokeDelegation().catch(() => undefined)}>
+          {language === 'en' ? 'Explicitly revoke this delegation' : '明确撤销这份委托'}</button>}
+      {delegationClosed && <button type="button" className="button button-outline" disabled={busy || enterpriseOrder.blocked}
+        onClick={() => { setDelegationConsent(null); setQuote(null); void getQuote(); }}>{language === 'en' ? 'Obtain a new quote' : '重新获取报价'}</button>}
+    </section>}
+    {(!quoteMode || enterprise) && (quote?.membershipSnapshot?.enterpriseContractAndPayer && quote.membershipSnapshot.enterpriseBasis?.approvalMode === 'per_order' ? <EnterpriseBookingApproval key={JSON.stringify([identity, quote.id])} quoteId={quote.id} identity={identity} english={language === 'en'} externalBlocked={enterpriseOrder.blocked || delegationClosed}
+      onDelegate={delegateOrder} onOrder={id => navigate(href(`/orders/${encodeURIComponent(id)}`))} onNewQuote={() => { setQuote(null); void getQuote(); }} /> : <button type="button" className="button button-dark button-block" disabled={busy || !quote || enterpriseOrder.blocked || delegationClosed || Boolean(enterprise && !enterpriseOrder.ready)} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>)}
     <p className="mock-note">{language === 'en' ? 'Rental term' : '租期'}: {days} {language === 'en' ? 'day(s)' : '天'}</p>
   </div>;
 }

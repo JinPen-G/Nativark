@@ -1,6 +1,7 @@
 /** Enterprise eligibility and original approval reads. Writes never refresh/replay automatically. */
 import type { EnterpriseExchangeChoices, EnterpriseExchangeChoicesQuery, EnterpriseExchangeRequestOriginalResult, RequestEnterpriseExchangeApproval, CloseEnterpriseExchangeRequest, ConfirmEnterpriseExchangeExpense, EnterpriseExchangeConfirmationResult, EnterpriseExchangeApprovalView, EnterpriseOwnRentalPolicy, EnterpriseBookingApprovalView, EnterpriseOperationResult, EnterpriseApprovalOriginalResult, EnterpriseOrderOriginalResult, RequestEnterpriseBookingApproval, SubmitEnterpriseApprovedBooking } from "@rental-os/shared";
 import type { EnterpriseExtensionRequestOriginalResult, EnterpriseExtensionEligibility, EnterpriseExtensionApprovalView, EnterpriseExtensionOriginalResult, RequestEnterpriseExtensionApproval, SubmitEnterpriseExtensionApproval, CloseEnterpriseExtensionExecution, CloseEnterpriseExtensionRequest } from "@rental-os/shared";
+import type { IssueEnterpriseOrderDelegation, RevokeEnterpriseOrderDelegation, EnterpriseOrderDelegationOriginal } from "@rental-os/shared";
 import { request } from "../core/http";
 export const fetchEnterpriseExchangeChoices = (orderId: string, query: EnterpriseExchangeChoicesQuery = {}) => {
   const search = Object.entries(query).filter(([, value]) => value !== undefined).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value!)}`).join("&");
@@ -28,3 +29,6 @@ export const readEnterpriseOperation = (key: string) => request<EnterpriseOperat
 export const readEnterpriseApprovalResult = (id: string) => request<EnterpriseApprovalOriginalResult>(`/enterprise/approvals/${encodeURIComponent(id)}/result`);
 export const createEnterpriseOrder = (quoteId: string, key: string) => request("/orders", { method: "POST", data: { quoteId }, idempotencyKey: key, replayAfterRefresh: false });
 export const readEnterpriseOrderOriginal = (quoteId: string, key: string) => request<EnterpriseOrderOriginalResult>(`/enterprise/quotes/${encodeURIComponent(quoteId)}/order-operations/${encodeURIComponent(key)}`);
+export const issueEnterpriseOrderDelegation = (input: IssueEnterpriseOrderDelegation) => request<EnterpriseOrderDelegationOriginal>("/enterprise/order-delegations/issue", { method: "POST", data: input, replayAfterRefresh: false });
+export const readEnterpriseOrderDelegation = (key: string) => request<EnterpriseOrderDelegationOriginal>(`/enterprise/order-delegations/${encodeURIComponent(key)}`);
+export const revokeEnterpriseOrderDelegation = (input: RevokeEnterpriseOrderDelegation) => request<EnterpriseOrderDelegationOriginal>(`/enterprise/order-delegations/${encodeURIComponent(input.delegationKey)}/revoke`, { method: "POST", data: input, replayAfterRefresh: false });
